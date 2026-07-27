@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.6] - 2026-07-27
+
+### Added
+
+- `plugins/examples/notes/`: example notes plugin using official MCP SDK
+  - `manifest.json` with `command: "node", args: ["mcp/server.js"]`
+  - `mcp/server.js`: MCP server with `createNote` and `listNotes` tools (in-memory)
+  - `ui/index.html`: placeholder UI
+- `apps/backend/tests/e2e.test.ts`: 6 end-to-end integration tests
+  - Connect NusaClient → list plugins → start plugin → receive `plugin.started` event → call `createNote` → call `listNotes` → stop plugin
+  - Uses real `FilesystemPluginRegistry`, real MCP server process, real WebSocket transport
+
+### Changed
+
+- `PluginManifest`: added `mcp.args?: readonly string[]` for command arguments
+- `PluginRuntimeManager`: passes `manifest.mcp.args` and `plugin.installPath` (as `cwd`) to MCP client factory
+- `PluginRuntimeManager`: removed double-spawn for stdio (MCP client owns the process via `StdioClientTransport`)
+- `PluginRuntimeManager`: crash detection for stdio via `McpClientPort.onClose` callback instead of `ProcessHandle.exited`
+- `McpClientPort`: added optional `onClose` callback and `pid` getter
+- `StdioMcpClient`: implements `onClose` (via `StdioClientTransport.onclose`) and `pid` getter; accepts `cwd` parameter
+- `PluginView`: enriched with `name`, `version`, `enabled` from manifest
+- `ListPluginsHandler`: returns actual plugin name/version/enabled from manifest instead of placeholder values
+- `pnpm-workspace.yaml`: includes `plugins/examples/*`
+
+### Notes
+
+- 140 tests pass across 8 packages (22 test files).
+- MVP is now runnable end-to-end: backend → WebSocket → plugin lifecycle → MCP tool calls.
+
 ## [0.0.5] - 2026-07-27
 
 ### Added

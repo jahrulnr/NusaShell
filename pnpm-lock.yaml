@@ -30,6 +30,9 @@ importers:
         specifier: workspace:*
         version: link:../../packages/transport-ws
     devDependencies:
+      '@nusashell/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
       '@types/node':
         specifier: ^22.10.0
         version: 22.20.1
@@ -170,6 +173,12 @@ importers:
       vitest:
         specifier: ^3.2.4
         version: 3.2.7(@types/node@22.20.1)(tsx@4.23.1)
+
+  plugins/examples/notes:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.12.1
+        version: 1.29.0(zod@4.4.3)
 
 packages:
 

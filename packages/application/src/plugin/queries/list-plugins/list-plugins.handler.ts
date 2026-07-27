@@ -15,10 +15,10 @@ export class ListPluginsHandler
     const views = await this.runtimeManager.listPlugins();
     const items: PluginListItem[] = views.map((view) => ({
       pluginId: view.pluginId,
-      name: view.pluginId,
-      version: "0.0.0",
+      name: view.name,
+      version: view.version,
       state: view.state,
-      enabled: true,
+      enabled: view.enabled,
     }));
     return { plugins: items };
   }

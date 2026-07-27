@@ -1,0 +1,17 @@
+{
+  "id": "com.example.notes",
+  "name": "Notes",
+  "version": "1.0.0",
+  "icon": "📝",
+  "ui": {
+    "entry": "ui/index.html",
+    "window": { "mode": "panel", "defaultSize": { "width": 480, "height": 560 } }
+  },
+  "mcp": {
+    "transport": "stdio",
+    "command": "node",
+    "args": ["mcp/server.js"],
+    "autostart": false,
+    "keepAliveOnClose": false
+  }
+}

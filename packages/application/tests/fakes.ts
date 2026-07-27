@@ -34,6 +34,7 @@ export class FakeClock implements ClockPort {
 export class FakeMcpClient implements McpClientPort {
   readonly tools: ToolDescriptor[] = [];
   private connected = false;
+  private closeCallback: (() => void) | null = null;
   readonly callLog: Array<{
     name: string;
     args: Readonly<Record<string, unknown>>;
@@ -41,6 +42,10 @@ export class FakeMcpClient implements McpClientPort {
   private readonly callResults = new Map<string, unknown>();
   private readonly callDelays = new Map<string, number>();
   private callShouldThrow = false;
+
+  get pid(): number | null {
+    return this.connected ? 1234 : null;
+  }
 
   setToolResult(name: string, result: unknown): void {
     this.callResults.set(name, result);
@@ -52,6 +57,16 @@ export class FakeMcpClient implements McpClientPort {
 
   setThrowOnCall(should: boolean): void {
     this.callShouldThrow = should;
+  }
+
+  onClose(callback: () => void): void {
+    this.closeCallback = callback;
+  }
+
+  emitClose(): void {
+    if (this.closeCallback) {
+      this.closeCallback();
+    }
   }
 
   async connect(): Promise<void> {
@@ -93,6 +108,7 @@ export class FakeMcpClientFactory implements McpClientFactoryPort {
     _command: string,
     _args: readonly string[],
     _env: Readonly<Record<string, string>>,
+    _cwd?: string,
   ): McpClientPort {
     const client = new FakeMcpClient();
     this.created.push(client);

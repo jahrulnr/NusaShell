@@ -230,7 +230,7 @@ describe("PluginRuntimeManager", () => {
 
   describe("process crash", () => {
     it("transitions to crashed on unexpected process exit and publishes event", async () => {
-      const { pluginRepository, manager, eventDispatcher, processAdapter } = setup();
+      const { pluginRepository, manager, eventDispatcher, mcpClientFactory } = setup();
       const plugin = makePlugin("com.example.notes");
       pluginRepository.add(plugin);
 
@@ -243,8 +243,7 @@ describe("PluginRuntimeManager", () => {
         },
       });
 
-      const handle = processAdapter.handles[0]!;
-      handle.emitExit(1);
+      mcpClientFactory.created[0]!.emitClose();
 
       // Wait for async crash handling
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -255,7 +254,7 @@ describe("PluginRuntimeManager", () => {
     });
 
     it("cancels pending tool calls on crash", async () => {
-      const { pluginRepository, manager, mcpClientFactory, processAdapter } = setup();
+      const { pluginRepository, manager, mcpClientFactory } = setup();
       const plugin = makePlugin("com.example.notes");
       pluginRepository.add(plugin);
 
@@ -271,7 +270,7 @@ describe("PluginRuntimeManager", () => {
 
       // Let the tool call start executing before crashing
       await new Promise((resolve) => setTimeout(resolve, 10));
-      processAdapter.handles[0]!.emitExit(1);
+      mcpClientFactory.created[0]!.emitClose();
 
       await expect(callPromise).rejects.toMatchObject({
         code: "PLUGIN_CRASHED",

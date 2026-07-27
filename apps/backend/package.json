@@ -19,6 +19,7 @@
     "@nusashell/transport-ws": "workspace:*"
   },
   "devDependencies": {
+    "@nusashell/plugin-sdk": "workspace:*",
     "@types/node": "^22.10.0",
     "@types/ws": "^8.5.12",
     "tsx": "^4.19.0",

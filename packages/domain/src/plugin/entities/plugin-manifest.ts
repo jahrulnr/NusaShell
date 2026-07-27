@@ -26,6 +26,7 @@ export interface PluginManifestInput {
   readonly mcp: {
     readonly transport: TransportType;
     readonly command?: string;
+    readonly args?: readonly string[];
     readonly url?: string;
     readonly env?: Readonly<Record<string, string>>;
     readonly autostart?: boolean;
@@ -54,6 +55,7 @@ export class PluginManifest {
     readonly mcp: {
       readonly transport: TransportType;
       readonly command?: string;
+      readonly args: readonly string[];
       readonly url?: string;
       readonly env: Readonly<Record<string, string>>;
       readonly autostart: boolean;
@@ -128,6 +130,7 @@ export class PluginManifest {
 
     const mcp: PluginManifest["mcp"] = {
       transport: raw.mcp.transport,
+      args: raw.mcp.args ?? [],
       env: raw.mcp.env ?? {},
       autostart: raw.mcp.autostart ?? false,
       keepAliveOnClose: raw.mcp.keepAliveOnClose ?? false,

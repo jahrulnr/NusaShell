@@ -32,6 +32,9 @@ interface PendingToolCall {
 
 interface RuntimeEntry {
   readonly pluginId: PluginId;
+  name: string;
+  version: string;
+  enabled: boolean;
   runtime: PluginRuntime;
   startPromise: Promise<void> | null;
   readonly queue: PluginOperationQueue;
@@ -65,7 +68,10 @@ export interface CallToolOptions {
 
 export interface PluginView {
   readonly pluginId: string;
+  readonly name: string;
+  readonly version: string;
   readonly state: PluginRuntimeState;
+  readonly enabled: boolean;
 }
 
 export class PluginRuntimeManager {
@@ -82,7 +88,10 @@ export class PluginRuntimeManager {
       const entry = this.runtimes.get(PluginId.toString(plugin.id));
       return {
         pluginId: PluginId.toString(plugin.id),
+        name: plugin.manifest.name,
+        version: plugin.manifest.version.toString(),
         state: entry?.runtime.state ?? "idle",
+        enabled: plugin.enabled,
       };
     });
   }
@@ -127,6 +136,9 @@ export class PluginRuntimeManager {
     }
     const entry: RuntimeEntry = {
       pluginId,
+      name: "",
+      version: "",
+      enabled: true,
       runtime: PluginRuntime.createIdle(pluginId),
       startPromise: null,
       queue: new PluginOperationQueue(),
@@ -148,6 +160,9 @@ export class PluginRuntimeManager {
     }
 
     const plugin = await this.loadPlugin(entry.pluginId);
+    entry.name = plugin.manifest.name;
+    entry.version = plugin.manifest.version.toString();
+    entry.enabled = plugin.enabled;
     const canStart = PluginLifecyclePolicy.canStart(plugin, entry.runtime);
     if (!canStart.ok) {
       throw this.mapDomainError(canStart.error, entry.pluginId);
@@ -180,17 +195,12 @@ export class PluginRuntimeManager {
             `Plugin ${PluginId.toString(entry.pluginId)} stdio transport missing command`,
           );
         }
-        const handle = await this.deps.processAdapter.spawn(
-          command,
-          [],
-          manifest.mcp.env,
-        );
-        entry.process = handle;
 
         const mcpClient = this.deps.mcpClientFactory.createForStdio(
           command,
-          [],
+          manifest.mcp.args,
           manifest.mcp.env,
+          plugin.installPath,
         );
         await mcpClient.connect();
         entry.mcpClient = mcpClient;
@@ -242,6 +252,12 @@ export class PluginRuntimeManager {
           .catch(() => {
             void this.handleProcessExit(entry, -1);
           });
+      } else if (entry.mcpClient && entry.mcpClient.onClose) {
+        entry.mcpClient.onClose(() => {
+          if (entry.runtime.state === "running") {
+            void this.handleProcessExit(entry, -1);
+          }
+        });
       }
     } catch (error) {
       await this.crash(entry, this.describeError(error));
@@ -495,7 +511,10 @@ export class PluginRuntimeManager {
   private view(entry: RuntimeEntry): PluginView {
     return {
       pluginId: PluginId.toString(entry.pluginId),
+      name: entry.name,
+      version: entry.version,
       state: entry.runtime.state,
+      enabled: entry.enabled,
     };
   }
 

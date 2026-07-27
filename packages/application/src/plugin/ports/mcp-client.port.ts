@@ -12,6 +12,8 @@ export interface McpClientPort {
     name: string,
     args: Readonly<Record<string, unknown>>,
   ): Promise<unknown>;
+  onClose?: (callback: () => void) => void;
+  readonly pid?: number | null;
 }
 
 export interface McpClientFactoryPort {
@@ -19,6 +21,7 @@ export interface McpClientFactoryPort {
     command: string,
     args: readonly string[],
     env: Readonly<Record<string, string>>,
+    cwd?: string,
   ): McpClientPort;
 
   createForHttp(url: string): McpClientPort;

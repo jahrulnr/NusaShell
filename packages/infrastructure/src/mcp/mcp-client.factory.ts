@@ -6,8 +6,9 @@ export class McpClientFactory implements McpClientFactoryPort {
     command: string,
     args: readonly string[],
     env: Readonly<Record<string, string>>,
+    cwd?: string,
   ): McpClientPort {
-    return new StdioMcpClient(command, args, env);
+    return new StdioMcpClient(command, args, env, cwd);
   }
 
   createForHttp(_url: string): McpClientPort {

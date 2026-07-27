@@ -5,19 +5,36 @@ import type { McpClientPort, ToolDescriptor } from "@nusashell/application";
 export class StdioMcpClient implements McpClientPort {
   private client: Client | null = null;
   private transport: StdioClientTransport | null = null;
+  private closeCallback: (() => void) | null = null;
 
   constructor(
     private readonly command: string,
     private readonly args: readonly string[],
     private readonly env: Readonly<Record<string, string>>,
+    private readonly cwd?: string,
   ) {}
+
+  get pid(): number | null {
+    return this.transport?.pid ?? null;
+  }
+
+  onClose(callback: () => void): void {
+    this.closeCallback = callback;
+  }
 
   async connect(): Promise<void> {
     this.transport = new StdioClientTransport({
       command: this.command,
       args: [...this.args],
       env: { ...process.env, ...this.env } as Record<string, string>,
+      ...(this.cwd !== undefined ? { cwd: this.cwd } : {}),
     });
+
+    this.transport.onclose = () => {
+      if (this.closeCallback) {
+        this.closeCallback();
+      }
+    };
 
     this.client = new Client(
       { name: "nusashell-backend", version: "0.0.2" },
@@ -28,6 +45,7 @@ export class StdioMcpClient implements McpClientPort {
   }
 
   async close(): Promise<void> {
+    this.closeCallback = null;
     if (this.client) {
       await this.client.close();
       this.client = null;
