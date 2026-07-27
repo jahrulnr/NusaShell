@@ -6,6 +6,8 @@ import {
   FilesystemPluginRegistry,
   SqliteDatabase,
   SqlitePluginRepository,
+  createLogger,
+  type Logger,
 } from "@nusashell/infrastructure";
 import type { PluginRepositoryPort } from "@nusashell/application";
 import {
@@ -22,6 +24,8 @@ import {
   CallToolHandler,
   CancelToolCallHandler,
   ListToolsHandler,
+  SystemPingHandler,
+  SystemVersionHandler,
 } from "@nusashell/application";
 import {
   MessageRouter,
@@ -34,6 +38,7 @@ export interface ContainerOptions {
   readonly host?: string;
   readonly pluginsRoot?: string;
   readonly dbPath?: string;
+  readonly logLevel?: string;
 }
 
 export interface Container {
@@ -46,10 +51,12 @@ export interface Container {
   readonly eventPublisher: WebSocketEventPublisher;
   readonly pluginRepository: PluginRepositoryPort;
   readonly db?: SqliteDatabase | undefined;
+  readonly logger: Logger;
 }
 
 export function createContainer(options: ContainerOptions): Container {
   const clock = new SystemClock();
+  const logger = createLogger(options.logLevel ?? "info");
 
   let pluginRepository: PluginRepositoryPort;
   let db: SqliteDatabase | undefined;
@@ -88,6 +95,8 @@ export function createContainer(options: ContainerOptions): Container {
   queryBus.register("get-plugin", new GetPluginHandler(runtimeManager));
   queryBus.register("get-plugin-state", new GetPluginStateHandler(runtimeManager));
   queryBus.register("list-tools", new ListToolsHandler(runtimeManager));
+  queryBus.register("system-ping", new SystemPingHandler());
+  queryBus.register("system-version", new SystemVersionHandler());
 
   const router = new MessageRouter({ commandBus, queryBus });
 
@@ -109,5 +118,6 @@ export function createContainer(options: ContainerOptions): Container {
     eventPublisher,
     pluginRepository,
     db,
+    logger,
   };
 }

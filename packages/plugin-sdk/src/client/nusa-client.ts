@@ -9,6 +9,7 @@ import { RequestManager } from "./request-manager.js";
 import { EventSubscriber } from "./event-subscriber.js";
 import { ReconnectPolicy, type ReconnectOptions, DEFAULT_RECONNECT_OPTIONS } from "./reconnect-policy.js";
 import { PluginsApi, ToolsApi } from "../api/plugins-api.js";
+import { SystemApi } from "../api/system-api.js";
 import { ConnectionClosedError } from "../errors/connection-closed.error.js";
 import { NusaClientError } from "../errors/nusa-client.error.js";
 
@@ -23,6 +24,7 @@ export type ReconnectStatusCallback = () => void;
 export class NusaClient {
   readonly plugins: PluginsApi;
   readonly tools: ToolsApi;
+  readonly system: SystemApi;
   readonly events: EventSubscriber;
 
   private readonly connection: WebSocketConnection;
@@ -58,6 +60,7 @@ export class NusaClient {
 
     this.plugins = new PluginsApi(this);
     this.tools = new ToolsApi(this);
+    this.system = new SystemApi(this);
   }
 
   connect(): Promise<void> {

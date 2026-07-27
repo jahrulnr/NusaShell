@@ -17,7 +17,20 @@ export interface MessageRouterDeps {
 }
 
 export class MessageRouter {
-  constructor(private readonly deps: MessageRouterDeps) {}
+  private closed = false;
+  private readonly deps: MessageRouterDeps;
+
+  constructor(deps: MessageRouterDeps) {
+    this.deps = deps;
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+
+  get isClosed(): boolean {
+    return this.closed;
+  }
 
   async handle(raw: unknown): Promise<ResponseEnvelope> {
     const validation = validateIncomingMessage(raw);
@@ -27,6 +40,13 @@ export class MessageRouter {
     }
 
     const request = validation.request;
+
+    if (this.closed) {
+      return mapErrorResponse(
+        request.id,
+        new ProtocolError("UNAVAILABLE", "Server is shutting down", request.id),
+      );
+    }
 
     try {
       const mapped = mapToCommand(request);

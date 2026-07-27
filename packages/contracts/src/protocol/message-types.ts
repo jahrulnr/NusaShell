@@ -9,7 +9,9 @@ export type RequestMethod =
   | "plugin.state"
   | "tool.call"
   | "tool.cancel"
-  | "tool.list";
+  | "tool.list"
+  | "system.ping"
+  | "system.version";
 
 export interface RequestEnvelope<TPayload = unknown> {
   readonly kind: "request";

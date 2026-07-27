@@ -7,6 +7,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "build": "tsup",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
@@ -19,6 +20,7 @@
     "@nusashell/transport-ws": "workspace:*",
     "@types/node": "^22.10.0",
     "@types/ws": "^8.5.12",
+    "tsup": "^8.3.5",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
   }

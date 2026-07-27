@@ -67,3 +67,10 @@ export {
 // Tool use cases
 export type { CallToolCommand, CallToolResult, CancelToolCallCommand, CancelToolCallResult, ListToolsQuery, ListToolsResult, ToolItem } from "./tool/index.js";
 export { CallToolHandler, CancelToolCallHandler, ListToolsHandler } from "./tool/index.js";
+
+// Config
+export { type AppConfig, loadConfig } from "./config/index.js";
+
+// System queries
+export type { SystemPingQuery, SystemPingResult, SystemVersionQuery, SystemVersionResult } from "./system/index.js";
+export { SystemPingHandler, SystemVersionHandler } from "./system/index.js";

@@ -84,6 +84,20 @@ export const ToolListRequestSchema = z.object({
   }),
 });
 
+export const SystemPingRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("system.ping"),
+  payload: z.object({}).optional().default({}),
+});
+
+export const SystemVersionRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("system.version"),
+  payload: z.object({}).optional().default({}),
+});
+
 export const RequestSchema = z.discriminatedUnion("method", [
   PluginStartRequestSchema,
   PluginStopRequestSchema,
@@ -94,6 +108,8 @@ export const RequestSchema = z.discriminatedUnion("method", [
   ToolCallRequestSchema,
   ToolCancelRequestSchema,
   ToolListRequestSchema,
+  SystemPingRequestSchema,
+  SystemVersionRequestSchema,
 ]);
 
 export type PluginStartRequest = z.infer<typeof PluginStartRequestSchema>;

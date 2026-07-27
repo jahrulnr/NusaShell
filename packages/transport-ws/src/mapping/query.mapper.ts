@@ -1,9 +1,9 @@
 import type { ParsedRequest } from "@nusashell/contracts";
-import type { ListPluginsQuery, GetPluginQuery, GetPluginStateQuery, ListToolsQuery } from "@nusashell/application";
+import type { ListPluginsQuery, GetPluginQuery, GetPluginStateQuery, ListToolsQuery, SystemPingQuery, SystemVersionQuery } from "@nusashell/application";
 
 export function mapToQuery(
   request: ParsedRequest,
-): ListPluginsQuery | GetPluginQuery | GetPluginStateQuery | ListToolsQuery | null {
+): ListPluginsQuery | GetPluginQuery | GetPluginStateQuery | ListToolsQuery | SystemPingQuery | SystemVersionQuery | null {
   switch (request.method) {
     case "plugin.list":
       return { kind: "list-plugins" } as ListPluginsQuery;
@@ -22,6 +22,10 @@ export function mapToQuery(
         kind: "list-tools",
         pluginId: request.payload.pluginId,
       } as ListToolsQuery;
+    case "system.ping":
+      return { kind: "system-ping" } as SystemPingQuery;
+    case "system.version":
+      return { kind: "system-version" } as SystemVersionQuery;
     default:
       return null;
   }

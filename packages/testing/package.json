@@ -5,5 +5,18 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@nusashell/application": "workspace:*",
+    "@nusashell/contracts": "workspace:*",
+    "@nusashell/domain": "workspace:*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.9.2"
   }
 }

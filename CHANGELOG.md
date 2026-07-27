@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.10] - 2026-07-27
+
+### Added
+- `@nusashell/testing` shared test infra package with fakes (FakeClock, FakeMcpClient, FakeProcessAdapter, FakePluginRepository) and helpers (WebSocketTestClient, eventually)
+- Client disconnect during active request race-condition test (§15)
+- Shutdown coordinator completion: reject new commands via `MessageRouter.close()`, close active sessions, close DB
+- Config loading from env vars (`NUSASHELL_PORT`, `NUSASHELL_HOST`, `NUSASHELL_PLUGINS_ROOT`, `NUSASHELL_DB_PATH`, `NUSASHELL_LOG_LEVEL`)
+- Pino logging infrastructure (`createLogger` in `@nusashell/infrastructure`)
+- `system.ping` and `system.version` query handlers + `SystemApi` in plugin-sdk
+- `system.ping` / `system.version` request schemas in contracts
+- Build step with tsup for all publishable packages (domain, contracts, application, infrastructure, transport-ws, plugin-sdk)
+- `tsconfig.build.json` per package for DTS generation
+
+### Changed
+- `MessageRouter` now has `close()` method and `isClosed` flag to reject requests during shutdown
+- `ShutdownCoordinator` follows full §14 sequence: stop WS → reject commands → close sessions → stop runtimes → close DB
+- `bootstrap()` now loads config from env vars via `loadConfig()` and accepts partial overrides
+- `createContainer` accepts `logLevel` option and exposes `logger` on the container
+- Application `tests/fakes.ts` now re-exports from `@nusashell/testing`
+
 ## [0.0.9] - 2026-07-27
 
 ### Added

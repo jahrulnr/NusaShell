@@ -3,3 +3,4 @@ export { InMemoryPluginRepository, FilesystemPluginRegistry, SqliteDatabase, Sql
 export { NodeChildProcessAdapter } from "./process/index.js";
 export { StdioMcpClient, McpClientFactory } from "./mcp/index.js";
 export { scanPluginDirectories, resolveManifestPath, resolvePluginRoot } from "./plugins/index.js";
+export { createLogger, type Logger } from "./logging/index.js";

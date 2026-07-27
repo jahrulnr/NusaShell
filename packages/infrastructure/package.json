@@ -7,6 +7,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "build": "tsup",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "validate-manifest": "tsx src/scripts/validate-manifest.ts"
@@ -16,12 +17,14 @@
     "@nusashell/application": "workspace:*",
     "@nusashell/contracts": "workspace:*",
     "@nusashell/domain": "workspace:*",
-    "better-sqlite3": "^13.0.1"
+    "better-sqlite3": "^13.0.1",
+    "pino": "^9.5.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
     "tsx": "^4.19.0",
+    "tsup": "^8.3.5",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
   }
