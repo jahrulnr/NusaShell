@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.11] - 2026-07-28
+
+### Added
+- `UNAVAILABLE` and `UNAUTHORIZED` error codes in `ApplicationErrorCode` + `ERROR_CODE_MAP`
+- `LoggerPort` interface in `@nusashell/application` for infra-agnostic logging
+- `HttpMcpClient` adapter using `StreamableHTTPClientTransport` from MCP SDK
+- `SseMcpClient` adapter using `SSEClientTransport` from MCP SDK
+- Testing fixtures: `manifestFixture()`, `manifestFixtureWith()`, `pluginFixture()`, `runningPluginFixture()` in `@nusashell/testing`
+
+### Changed
+- `NodeChildProcessAdapter` accepts optional `Logger` — logs spawn/debug/error
+- `McpClientFactory` accepts optional `Logger` — passes to all transport adapters
+- `StdioMcpClient` accepts optional `Logger` — logs connect/close/onClose, catches close errors
+- `FilesystemPluginRegistry` accepts optional `Logger` — replaces silent `catch {}` with `logger.warn`
+- `PluginRuntimeManagerDeps` accepts optional `logger?: LoggerPort` — replaces silent `catch {}` on MCP client close with `logger.warn`
+- `ShutdownCoordinator` replaces `catch {}` with `container.logger.warn`
+- Container wires `logger` to `NodeChildProcessAdapter`, `McpClientFactory`, `FilesystemPluginRegistry`, `PluginRuntimeManager`
+- `McpClientFactory.createForHttp` / `createForSse` no longer throw — return real adapter instances
+- Error mapper test covers `UNAUTHORIZED` and `UNAVAILABLE` codes
+- 204 tests pass across 32 test files
+
 ## [0.0.10] - 2026-07-27
 
 ### Added

@@ -8,13 +8,17 @@ import {
   type PluginManifestInput,
 } from "@nusashell/domain";
 import { ManifestSchema } from "@nusashell/contracts";
+import type { Logger } from "pino";
 import { scanPluginDirectories, resolveManifestPath } from "../../plugins/plugin-directory-layout.js";
 
 export class FilesystemPluginRegistry implements PluginRepositoryPort {
   private cache = new Map<string, Plugin>();
   private loaded = false;
 
-  constructor(private readonly rootDir: string) {}
+  constructor(
+    private readonly rootDir: string,
+    private readonly logger?: Logger,
+  ) {}
 
   private async ensureLoaded(): Promise<void> {
     if (this.loaded) return;
@@ -35,14 +39,16 @@ export class FilesystemPluginRegistry implements PluginRepositoryPort {
     let raw: string;
     try {
       raw = await readFile(manifestPath, "utf-8");
-    } catch {
+    } catch (err) {
+      this.logger?.warn({ err, manifestPath }, "Failed to read manifest file");
       return null;
     }
 
     let parsedJson: unknown;
     try {
       parsedJson = JSON.parse(raw);
-    } catch {
+    } catch (err) {
+      this.logger?.warn({ err, manifestPath }, "Failed to parse manifest JSON");
       return null;
     }
 

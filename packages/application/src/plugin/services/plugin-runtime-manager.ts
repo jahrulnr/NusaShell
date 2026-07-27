@@ -17,6 +17,7 @@ import {
 } from "@nusashell/domain";
 import { ApplicationError } from "../../errors/application-error.js";
 import type { ClockPort } from "../ports/clock.port.js";
+import type { LoggerPort } from "../ports/logger.port.js";
 import type { McpClientFactoryPort, McpClientPort, ToolDescriptor } from "../ports/mcp-client.port.js";
 import type { PluginProcessPort, ProcessHandle } from "../ports/plugin-process.port.js";
 import type { PluginRepositoryPort } from "../ports/plugin-repository.port.js";
@@ -50,6 +51,7 @@ export interface PluginRuntimeManagerDeps {
   readonly mcpClientFactory: McpClientFactoryPort;
   readonly eventDispatcher: EventDispatcher;
   readonly clock: ClockPort;
+  readonly logger?: LoggerPort;
   readonly startTimeoutMs?: number;
   readonly stopTimeoutMs?: number;
   readonly toolCallTimeoutMs?: number;
@@ -476,8 +478,8 @@ export class PluginRuntimeManager {
     if (entry.mcpClient) {
       try {
         await entry.mcpClient.close();
-      } catch {
-        // best effort
+      } catch (err) {
+        this.deps.logger?.warn("Failed to close MCP client on crash: %s", err);
       }
       entry.mcpClient = null;
     }

@@ -11,3 +11,10 @@ export {
 
 export { eventually, WebSocketTestClient } from "./helpers/index.js";
 
+export {
+  manifestFixture,
+  manifestFixtureWith,
+  pluginFixture,
+  runningPluginFixture,
+} from "./fixtures/index.js";
+

@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import type { PluginProcessPort, ProcessHandle } from "@nusashell/application";
+import type { Logger } from "pino";
 
 class NodeProcessHandle implements ProcessHandle {
   readonly pid: number;
@@ -23,14 +24,21 @@ class NodeProcessHandle implements ProcessHandle {
 }
 
 export class NodeChildProcessAdapter implements PluginProcessPort {
+  constructor(private readonly logger?: Logger) {}
+
   spawn(
     command: string,
     args: readonly string[],
     env: Readonly<Record<string, string>>,
   ): Promise<ProcessHandle> {
+    this.logger?.debug({ command, args: [...args] }, "Spawning child process");
     const child = spawn(command, [...args], {
       env: { ...process.env, ...env },
       stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    child.on("error", (err) => {
+      this.logger?.error({ err, command }, "Child process error");
     });
 
     return Promise.resolve(new NodeProcessHandle(child));

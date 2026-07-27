@@ -32,6 +32,8 @@ describe("mapApplicationError", () => {
       "MCP_CONNECTION_FAILED",
       "OPERATION_CONFLICT",
       "OPERATION_TIMEOUT",
+      "UNAUTHORIZED",
+      "UNAVAILABLE",
       "INTERNAL_ERROR",
     ] as const;
 

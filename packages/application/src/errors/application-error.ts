@@ -12,6 +12,8 @@ export type ApplicationErrorCode =
   | "MCP_CONNECTION_FAILED"
   | "OPERATION_CONFLICT"
   | "OPERATION_TIMEOUT"
+  | "UNAUTHORIZED"
+  | "UNAVAILABLE"
   | "INTERNAL_ERROR";
 
 export class ApplicationError extends Error {

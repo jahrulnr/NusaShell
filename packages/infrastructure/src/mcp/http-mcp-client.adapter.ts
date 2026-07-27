@@ -1,23 +1,20 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { McpClientPort, ToolDescriptor } from "@nusashell/application";
 import type { Logger } from "pino";
 
-export class StdioMcpClient implements McpClientPort {
+export class HttpMcpClient implements McpClientPort {
   private client: Client | null = null;
-  private transport: StdioClientTransport | null = null;
+  private transport: StreamableHTTPClientTransport | null = null;
   private closeCallback: (() => void) | null = null;
 
   constructor(
-    private readonly command: string,
-    private readonly args: readonly string[],
-    private readonly env: Readonly<Record<string, string>>,
-    private readonly cwd?: string,
+    private readonly url: string,
     private readonly logger?: Logger,
   ) {}
 
   get pid(): number | null {
-    return this.transport?.pid ?? null;
+    return null;
   }
 
   onClose(callback: () => void): void {
@@ -25,16 +22,11 @@ export class StdioMcpClient implements McpClientPort {
   }
 
   async connect(): Promise<void> {
-    this.logger?.debug({ command: this.command }, "Connecting stdio MCP client");
-    this.transport = new StdioClientTransport({
-      command: this.command,
-      args: [...this.args],
-      env: { ...process.env, ...this.env } as Record<string, string>,
-      ...(this.cwd !== undefined ? { cwd: this.cwd } : {}),
-    });
+    this.logger?.debug({ url: this.url }, "Connecting HTTP MCP client");
+    this.transport = new StreamableHTTPClientTransport(new URL(this.url));
 
     this.transport.onclose = () => {
-      this.logger?.debug({ command: this.command }, "Stdio MCP transport closed");
+      this.logger?.debug({ url: this.url }, "HTTP MCP transport closed");
       if (this.closeCallback) {
         this.closeCallback();
       }
@@ -45,7 +37,7 @@ export class StdioMcpClient implements McpClientPort {
       { capabilities: {} },
     );
 
-    await this.client.connect(this.transport);
+    await this.client.connect(this.transport as never);
   }
 
   async close(): Promise<void> {
@@ -54,11 +46,15 @@ export class StdioMcpClient implements McpClientPort {
       try {
         await this.client.close();
       } catch (err) {
-        this.logger?.warn({ err }, "Error closing stdio MCP client");
+        this.logger?.warn({ err }, "Error closing HTTP MCP client");
       }
       this.client = null;
     }
     this.transport = null;
+  }
+
+  isConnected(): boolean {
+    return this.client !== null;
   }
 
   async listTools(): Promise<readonly ToolDescriptor[]> {

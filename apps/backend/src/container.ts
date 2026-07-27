@@ -65,13 +65,13 @@ export function createContainer(options: ContainerOptions): Container {
     db = new SqliteDatabase(options.dbPath);
     pluginRepository = new SqlitePluginRepository(db);
   } else if (options.pluginsRoot) {
-    pluginRepository = new FilesystemPluginRegistry(options.pluginsRoot);
+    pluginRepository = new FilesystemPluginRegistry(options.pluginsRoot, logger);
   } else {
     pluginRepository = new InMemoryPluginRepository();
   }
 
-  const processAdapter = new NodeChildProcessAdapter();
-  const mcpClientFactory = new McpClientFactory();
+  const processAdapter = new NodeChildProcessAdapter(logger);
+  const mcpClientFactory = new McpClientFactory(logger);
 
   const eventDispatcher = new EventDispatcher();
 
@@ -81,6 +81,7 @@ export function createContainer(options: ContainerOptions): Container {
     mcpClientFactory,
     eventDispatcher,
     clock,
+    logger,
   });
 
   const commandBus = new CommandBus();

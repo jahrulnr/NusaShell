@@ -35,6 +35,7 @@ export type {
   McpClientFactoryPort,
   ToolDescriptor,
   ClockPort,
+  LoggerPort,
 } from "./plugin/index.js";
 export {
   PluginOperationQueue,

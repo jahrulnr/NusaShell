@@ -21,15 +21,15 @@ export class ShutdownCoordinator {
     // 4. Cancel pending tool calls + gracefully stop plugin runtimes
     try {
       await this.container.runtimeManager.stopAll();
-    } catch {
-      // best effort
+    } catch (err) {
+      this.container.logger.warn({ err }, "Error during runtime shutdown");
     }
 
     // 5. Close database
     try {
       this.container.db?.close();
-    } catch {
-      // best effort
+    } catch (err) {
+      this.container.logger.warn({ err }, "Error closing database");
     }
 
     process.exit(0);
