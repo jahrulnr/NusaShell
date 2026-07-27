@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.5] - 2026-07-27
+
+### Added
+
+- `packages/plugin-sdk`: `NusaClient` WebSocket client for renderers and hosts
+  - `RequestManager` — request/response correlation by `id` with timeout and connection-closed rejection
+  - `EventSubscriber` — typed event subscriptions (`plugin.started`, `plugin.stopped`, etc.)
+  - `WebSocketConnection` — thin `ws` wrapper with connect/disconnect/status
+  - `NusaClient` — main client: `connect()`, `disconnect()`, `plugins.start/stop/list()`, `tools.call/cancel()`, `events.on()`
+  - `PluginsApi` + `ToolsApi` facades
+  - Error classes: `NusaClientError`, `RequestTimeoutError`, `ConnectionClosedError`
+  - 11 plugin-sdk tests (request manager unit + NusaClient integration with live WS server)
+- `apps/backend`: composition root wiring all layers
+  - `createContainer()` — manual DI: SystemClock, FilesystemPluginRegistry/InMemoryPluginRepository, NodeChildProcessAdapter, McpClientFactory, EventDispatcher, PluginRuntimeManager, CommandBus, QueryBus, MessageRouter, WebSocketServer, WebSocketEventPublisher
+  - `bootstrap()` — starts WS server, wires SIGTERM/SIGINT to shutdown
+  - `ShutdownCoordinator` — stops WS server, stops all plugin runtimes, exits
+  - 3 backend tests (container wiring, WS connection, plugin.list query)
+- `tsx` dev dependency for running backend directly from TypeScript
+- Plugin-sdk + backend added to `vitest.workspace.ts`
+
+### Notes
+
+- No SQLite for MVP — `FilesystemPluginRegistry` used (per backend-structure.md §18).
+- No Pino logger yet — console-based (swap later).
+- No auth — `websocket-authenticator` deferred.
+- 134 tests pass across 7 packages (domain, application, infrastructure, contracts, transport-ws, plugin-sdk, backend).
+
 ## [0.0.4] - 2026-07-27
 
 ### Added

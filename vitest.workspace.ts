@@ -6,4 +6,6 @@ export default defineWorkspace([
   "packages/infrastructure",
   "packages/contracts",
   "packages/transport-ws",
+  "packages/plugin-sdk",
+  "apps/backend",
 ]);

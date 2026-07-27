@@ -5,5 +5,25 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "node --import tsx src/bootstrap.ts",
+    "dev": "node --import tsx --watch src/bootstrap.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@nusashell/application": "workspace:*",
+    "@nusashell/domain": "workspace:*",
+    "@nusashell/infrastructure": "workspace:*",
+    "@nusashell/transport-ws": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.12",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4",
+    "ws": "^8.18.0"
   }
 }
