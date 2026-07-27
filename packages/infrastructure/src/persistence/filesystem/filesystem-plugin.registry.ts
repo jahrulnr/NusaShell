@@ -7,17 +7,8 @@ import {
   PluginVersion,
   type PluginManifestInput,
 } from "@nusashell/domain";
+import { ManifestSchema } from "@nusashell/contracts";
 import { scanPluginDirectories, resolveManifestPath } from "../../plugins/plugin-directory-layout.js";
-
-interface RawManifest {
-  id: string;
-  name: string;
-  version: string;
-  icon: string;
-  ui: PluginManifestInput["ui"];
-  mcp: PluginManifestInput["mcp"];
-  dependencies?: PluginManifestInput["dependencies"];
-}
 
 export class FilesystemPluginRegistry implements PluginRepositoryPort {
   private cache = new Map<string, Plugin>();
@@ -48,7 +39,19 @@ export class FilesystemPluginRegistry implements PluginRepositoryPort {
       return null;
     }
 
-    const parsed = JSON.parse(raw) as RawManifest;
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+
+    const schemaResult = ManifestSchema.safeParse(parsedJson);
+    if (!schemaResult.success) {
+      return null;
+    }
+
+    const parsed = schemaResult.data;
 
     const manifestInput = {
       id: parsed.id,

@@ -4,7 +4,10 @@ import {
   NodeChildProcessAdapter,
   McpClientFactory,
   FilesystemPluginRegistry,
+  SqliteDatabase,
+  SqlitePluginRepository,
 } from "@nusashell/infrastructure";
+import type { PluginRepositoryPort } from "@nusashell/application";
 import {
   CommandBus,
   QueryBus,
@@ -30,6 +33,7 @@ export interface ContainerOptions {
   readonly port: number;
   readonly host?: string;
   readonly pluginsRoot?: string;
+  readonly dbPath?: string;
 }
 
 export interface Container {
@@ -40,15 +44,24 @@ export interface Container {
   readonly router: MessageRouter;
   readonly wsServer: WebSocketServer;
   readonly eventPublisher: WebSocketEventPublisher;
-  readonly pluginRepository: FilesystemPluginRegistry | InMemoryPluginRepository;
+  readonly pluginRepository: PluginRepositoryPort;
+  readonly db?: SqliteDatabase | undefined;
 }
 
 export function createContainer(options: ContainerOptions): Container {
   const clock = new SystemClock();
 
-  const pluginRepository = options.pluginsRoot
-    ? new FilesystemPluginRegistry(options.pluginsRoot)
-    : new InMemoryPluginRepository();
+  let pluginRepository: PluginRepositoryPort;
+  let db: SqliteDatabase | undefined;
+
+  if (options.dbPath) {
+    db = new SqliteDatabase(options.dbPath);
+    pluginRepository = new SqlitePluginRepository(db);
+  } else if (options.pluginsRoot) {
+    pluginRepository = new FilesystemPluginRegistry(options.pluginsRoot);
+  } else {
+    pluginRepository = new InMemoryPluginRepository();
+  }
 
   const processAdapter = new NodeChildProcessAdapter();
   const mcpClientFactory = new McpClientFactory();
@@ -95,5 +108,6 @@ export function createContainer(options: ContainerOptions): Container {
     wsServer,
     eventPublisher,
     pluginRepository,
+    db,
   };
 }

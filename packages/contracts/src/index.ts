@@ -77,3 +77,5 @@ export type {
   ToolCallResultDto,
   ToolListResultDto,
 } from "./dto/tool-dto.js";
+
+export { ManifestSchema, type ManifestJson } from "./manifest/index.js";

@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.8] - 2026-07-27
+
+### Added
+
+- **Manifest schema validation (Zod)**: `ManifestSchema` in `@nusashell/contracts` validates manifest.json shape (id, name, version, icon, ui, mcp, dependencies) with Zod
+- **`validate-manifest` CLI script**: `pnpm --filter @nusashell/infrastructure validate-manifest <path>` — validates a single manifest.json or scans a plugins root directory
+- **SQLite persistence**: `SqliteDatabase` + `SqlitePluginRepository` implementing `PluginRepositoryPort` with `better-sqlite3`
+  - Migration system (`001-init.sql`) with `schema_migrations` tracking table
+  - WAL journal mode, UPSERT on save, full manifest serialization/deserialization
+  - Container wiring: `dbPath` option in `ContainerOptions` selects SQLite; falls back to filesystem or in-memory
+- **Race-condition tests (§15)**: 8 new tests in `plugin-runtime-manager.race.test.ts`
+  - Concurrent start + stop (both orderings)
+  - callTool while starting
+  - Timeout followed by late response
+  - Backend shutdown while plugins active (stopAll + pending call cancellation)
+  - Duplicate request ID (no deadlock)
+  - Concurrent restart + stop
+- 11 manifest schema tests, 7 SQLite repository tests
+
+### Changed
+
+- `FilesystemPluginRegistry` now uses `ManifestSchema.safeParse()` instead of raw `JSON.parse` + `as RawManifest`
+- `@nusashell/infrastructure` depends on `@nusashell/contracts`
+- `pnpm-workspace.yaml`: `allowBuilds` for `better-sqlite3` and `esbuild` set to `true`
+- Container `pluginRepository` type changed from union to `PluginRepositoryPort`
+- 171 tests pass across 25 test files
+
 ## [0.0.7] - 2026-07-27
 
 ### Added
