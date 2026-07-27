@@ -4,4 +4,6 @@ export default defineWorkspace([
   "packages/domain",
   "packages/application",
   "packages/infrastructure",
+  "packages/contracts",
+  "packages/transport-ws",
 ]);

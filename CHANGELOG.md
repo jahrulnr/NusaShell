@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.4] - 2026-07-27
+
+### Added
+
+- `packages/contracts`: WebSocket protocol DTOs + Zod schemas
+  - Request/response/event message types with discriminated unions
+  - Zod schemas for `plugin.start`, `plugin.stop`, `plugin.list`, `tool.call`, `tool.cancel`
+  - Event schemas for `plugin.started`, `plugin.stopped`, `plugin.crashed`, `plugin.state_changed`, `tool.call_completed`
+  - Plugin and tool DTOs
+  - 25 contract tests
+- `packages/transport-ws`: WebSocket transport layer
+  - `ProtocolError` + `validateIncomingMessage` — Zod-based request validation
+  - Mappers: command, query, response, error, client-event
+  - `MessageRouter` — routes validated requests to command/query bus
+  - `WebSocketSession` + `SessionRegistry` — connection lifecycle
+  - `WebSocketServer` — `ws`-based server accepting connections and dispatching messages
+  - `WebSocketEventPublisher` — broadcasts domain events to all sessions
+  - 26 transport tests (validator, mappers, router, server integration)
+- `zod` and `ws` dependencies
+- Contracts + transport-ws added to `vitest.workspace.ts`
+
+### Notes
+
+- Auth deferred for MVP — no `websocket-authenticator` in this phase.
+- Bootstrap (apps/backend composition root) deferred to next phase.
+
 ## [0.0.3] - 2026-07-27
 
 ### Added
