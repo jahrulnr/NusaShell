@@ -8,12 +8,14 @@ NusaShell is a desktop-like **shell for AI tools**: each plugin bundles a **UI +
 MCP server**; the shell brokers lifecycle and tool calls so plugins get a real
 visual surface (not chat-only MCP).
 
-**Current stage:** concept + PoC. There is no `apps/` / `packages/` tree yet.
-Authoritative intent lives in docs; the only runnable demo is `docs/PoC/`.
+**Current stage:** early scaffold. `packages/domain` is implemented; `apps/` and
+other `packages/` are stubs. Authoritative intent lives in docs; the runnable
+demo is `docs/PoC/`.
 
 | Path | Role |
 | --- | --- |
 | `README.md` | Product intent, docs map, PoC quickstart |
+| `packages/domain/` | Pure domain layer (plugin runtime, policies, events) |
 | `docs/blueprint.md` | Product / plugin architecture, launcher UX, MCP transports |
 | `docs/backend-structure.md` | Target Clean Architecture monorepo + WebSocket protocol |
 | `docs/PoC/` | Behavioral bridge demo (not the target layout) |
@@ -109,13 +111,13 @@ When changing launcher or plugin UI:
 
 ## Testing
 
-Until the monorepo exists:
+Until the monorepo is fully wired:
 
 - PoC smoke: run `docs/PoC` and exercise Notes → Create Note; confirm bridge log
   and running badge.
-- There is no `make test` / workspace Vitest yet - do not invent CI commands that
-  are not in the repo. After scaffolding, follow `docs/backend-structure.md` §15
-  and wire Vitest via the workspace.
+- Domain unit tests: `cd packages/domain && npx vitest run` (or `pnpm test` from root
+  once workspace install scripts are approved).
+- There is no full workspace CI yet — do not invent CI commands that are not in the repo.
 
 ## Pull requests
 

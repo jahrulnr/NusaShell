@@ -118,19 +118,25 @@ matching the response back to the right request.
 
 ## Project status
 
-This repo is **concept-stage**: architecture and a small PoC live under `docs/`.
-There is no `apps/` / `packages/` monorepo yet - that is the next build target
-described in [`docs/backend-structure.md`](./docs/backend-structure.md).
+This repo is **early scaffold**: a pnpm monorepo exists with a fully implemented
+`packages/domain` layer; apps and other packages are stubs. Architecture docs and
+the PoC under `docs/` remain authoritative for product intent.
 
-**What the PoC demonstrates today** (`docs/PoC/`):
+**Monorepo today:**
+- `packages/domain` — plugin identity, manifest, runtime state, lifecycle policies, tool-call model (Vitest-covered)
+- `packages/{application,infrastructure,transport-ws,contracts,plugin-sdk,shared,testing}` — stubs
+- `apps/{backend,desktop}` — stubs
+
+**What the PoC demonstrates** (`docs/PoC/`):
 - Plugin discovery (folder scan), manifest parsing
 - Lazy MCP process spawning, one process per plugin, reused across calls
 - UI ↔ shell ↔ MCP bridge over a simple request/response protocol
 - Launcher UI with running-state indicators
 
-**Target stack** (not scaffolded yet): Electron + TypeScript monorepo (pnpm),
+**Target stack** (partially scaffolded): Electron + TypeScript monorepo (pnpm),
 Clean Architecture packages, WebSocket client transport, official MCP TypeScript
-SDK, SQLite for installed-plugin metadata.
+SDK, SQLite for installed-plugin metadata. Domain layer is in place; application
+and infrastructure are next.
 
 **Deliberately deferred** (by design, to avoid premature complexity):
 - Security: iframe sandboxing, install-time permission prompts, process
@@ -148,6 +154,21 @@ SDK, SQLite for installed-plugin metadata.
 ├── README.md
 ├── VERSION
 ├── CHANGELOG.md
+├── package.json
+├── pnpm-workspace.yaml
+├── tsconfig.base.json
+├── apps/
+│   ├── backend/               # stub
+│   └── desktop/               # stub
+├── packages/
+│   ├── domain/                # implemented (plugin runtime, policies, events)
+│   ├── application/           # stub
+│   ├── infrastructure/        # stub
+│   ├── transport-ws/          # stub
+│   ├── contracts/             # stub
+│   ├── plugin-sdk/            # stub
+│   ├── shared/                # stub
+│   └── testing/               # stub
 └── docs/
     ├── blueprint.md           # product / plugin architecture
     ├── backend-structure.md   # target backend monorepo + WS protocol
@@ -155,9 +176,8 @@ SDK, SQLite for installed-plugin metadata.
     └── ui-design/             # launcher visual sketch
 ```
 
-Target monorepo layout (`apps/`, `packages/`, `plugins/examples/`, …) is specified
-in [`docs/backend-structure.md`](./docs/backend-structure.md) §2 - it is not created
-in the tree yet.
+Further monorepo pieces (`plugins/examples/`, full apps) are specified in
+[`docs/backend-structure.md`](./docs/backend-structure.md) §2 and land in later milestones.
 
 ## License
 

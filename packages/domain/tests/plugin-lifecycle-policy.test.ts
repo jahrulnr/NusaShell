@@ -1,0 +1,105 @@
+import { describe, expect, it } from "vitest";
+import {
+  Plugin,
+  PluginId,
+  PluginLifecyclePolicy,
+  PluginManifest,
+  PluginRuntime,
+  PluginVersion,
+} from "../src/index.js";
+
+const manifestInput = {
+  id: "com.example.notes",
+  name: "Notes",
+  version: "1.0.0",
+  icon: "notes.png",
+  ui: {
+    entry: "ui/index.html",
+    window: { mode: "panel" as const },
+  },
+  mcp: {
+    transport: "stdio" as const,
+    command: "node mcp/server.js",
+  },
+};
+
+function createPlugin(enabled = true): Plugin {
+  const manifest = PluginManifest.create(manifestInput);
+  if (!manifest.ok) {
+    throw new Error("manifest setup failed");
+  }
+  const id = PluginId.create("com.example.notes");
+  const version = PluginVersion.create("1.0.0");
+  if (!id.ok || !version.ok) {
+    throw new Error("value object setup failed");
+  }
+  return Plugin.create({
+    id: id.value,
+    version: version.value,
+    manifest: manifest.value,
+    enabled,
+    installPath: "/plugins/notes",
+    installedAt: new Date("2026-07-27T00:00:00Z"),
+  });
+}
+
+describe("PluginLifecyclePolicy", () => {
+  it("rejects start when plugin is disabled", () => {
+    const plugin = createPlugin(false);
+    const idResult = PluginId.create("com.example.notes");
+    expect(idResult.ok).toBe(true);
+    if (!idResult.ok) return;
+    const runtime = PluginRuntime.createIdle(idResult.value);
+    const result = PluginLifecyclePolicy.canStart(plugin, runtime);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("PLUGIN_DISABLED");
+    }
+  });
+
+  it("allows start from idle when enabled", () => {
+    const plugin = createPlugin(true);
+    const idResult = PluginId.create("com.example.notes");
+    if (!idResult.ok) throw new Error("id setup failed");
+    const runtime = PluginRuntime.createIdle(idResult.value);
+    const result = PluginLifecyclePolicy.canStart(plugin, runtime);
+    expect(result.ok).toBe(true);
+  });
+
+  it("allows stop from running", () => {
+    const plugin = createPlugin(true);
+    const idResult = PluginId.create("com.example.notes");
+    if (!idResult.ok) throw new Error("id setup failed");
+    const runtime = PluginRuntime.create(idResult.value, "running");
+    const result = PluginLifecyclePolicy.canStop(plugin, runtime);
+    expect(result.ok).toBe(true);
+  });
+
+  it("allows callTool only when running", () => {
+    const plugin = createPlugin(true);
+    const idResult = PluginId.create("com.example.notes");
+    if (!idResult.ok) throw new Error("id setup failed");
+    const running = PluginRuntime.create(idResult.value, "running");
+    const idle = PluginRuntime.create(idResult.value, "idle");
+    expect(PluginLifecyclePolicy.canCallTool(plugin, running).ok).toBe(true);
+    expect(PluginLifecyclePolicy.canCallTool(plugin, idle).ok).toBe(false);
+  });
+});
+
+describe("PluginManifest", () => {
+  it("requires mcp.command for stdio transport", () => {
+    const result = PluginManifest.create({
+      ...manifestInput,
+      mcp: { transport: "stdio" },
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it("requires mcp.url for sse transport", () => {
+    const result = PluginManifest.create({
+      ...manifestInput,
+      mcp: { transport: "sse" },
+    });
+    expect(result.ok).toBe(false);
+  });
+});
