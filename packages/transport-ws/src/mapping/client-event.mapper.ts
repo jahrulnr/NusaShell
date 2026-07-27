@@ -8,7 +8,7 @@ import {
 } from "@nusashell/domain";
 import type { EventEnvelope } from "@nusashell/contracts";
 
-export function mapDomainEvent(event: DomainEvent): EventEnvelope | null {
+export function mapDomainEvent(event: DomainEvent, sequence: number): EventEnvelope | null {
   const timestamp = event.occurredAt.toISOString();
 
   switch (event.type) {
@@ -17,6 +17,7 @@ export function mapDomainEvent(event: DomainEvent): EventEnvelope | null {
       return {
         kind: "event",
         event: "plugin.started",
+        sequence,
         payload: {
           pluginId: e.aggregateId,
           state: "running",
@@ -31,6 +32,7 @@ export function mapDomainEvent(event: DomainEvent): EventEnvelope | null {
       return {
         kind: "event",
         event: "plugin.stopped",
+        sequence,
         payload: {
           pluginId: e.aggregateId,
           state: "idle",
@@ -44,6 +46,7 @@ export function mapDomainEvent(event: DomainEvent): EventEnvelope | null {
       return {
         kind: "event",
         event: "plugin.crashed",
+        sequence,
         payload: {
           pluginId: e.aggregateId,
           state: "crashed",
@@ -58,6 +61,7 @@ export function mapDomainEvent(event: DomainEvent): EventEnvelope | null {
       return {
         kind: "event",
         event: "plugin.state_changed",
+        sequence,
         payload: {
           pluginId: e.aggregateId,
           oldState: e.from,
@@ -72,6 +76,7 @@ export function mapDomainEvent(event: DomainEvent): EventEnvelope | null {
       return {
         kind: "event",
         event: "tool.call_completed",
+        sequence,
         payload: {
           pluginId: e.aggregateId,
           requestId: e.requestId,

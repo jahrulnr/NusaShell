@@ -1,9 +1,0 @@
-{
-  "name": "@nusashell/shared",
-  "private": true,
-  "version": "0.0.2",
-  "type": "module",
-  "exports": {
-    ".": "./src/index.ts"
-  }
-}

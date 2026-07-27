@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.12] - 2026-07-28
+
+### Added
+- Event `sequence` field: monotonic counter in `WebSocketEventPublisher`, `sequence` on `EventEnvelope` and all Zod event schemas, `lastSequence` tracking in `EventSubscriber`
+- Client subscription registry: per-session event filtering via `ClientSubscriptionRegistry`, `subscribe`/`unsubscribe` request methods and schemas, opt-in model (sessions receive no events until subscribed)
+- Protocol version negotiation: `PROTOCOL_VERSION` constant, `protocolVersion` optional field on `RequestEnvelope` and all request schemas, server-side `UNSUPPORTED_VERSION` rejection, `NusaClient` sends `protocolVersion: "1.0"` on all requests
+- Unit tests for `ClientSubscriptionRegistry` (9 tests)
+- WebSocket server tests for unsupported and supported protocol version negotiation
+
+### Changed
+- `WebSocketEventPublisher` constructor accepts optional `ClientSubscriptionRegistry` for filtering
+- `WebSocketServer` intercepts `subscribe`/`unsubscribe` messages before routing, clears subscriptions on disconnect
+- E2E test subscribes to all events before expecting event delivery
+
+### Removed
+- `packages/shared` stub package (unused `@nusashell/shared`)
+
 ## [0.0.11] - 2026-07-28
 
 ### Added

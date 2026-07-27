@@ -98,6 +98,7 @@ describe("NusaClient reconnect integration", () => {
     session.sendEvent({
       kind: "event",
       event: "plugin.started",
+      sequence: 1,
       payload: {
         pluginId: "com.example.notes",
         state: "running",

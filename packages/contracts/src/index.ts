@@ -21,6 +21,8 @@ export {
   ToolCallRequestSchema,
   ToolCancelRequestSchema,
   ToolListRequestSchema,
+  SubscribeRequestSchema,
+  UnsubscribeRequestSchema,
   type PluginStartRequest,
   type PluginStopRequest,
   type PluginListRequest,
@@ -79,3 +81,5 @@ export type {
 } from "./dto/tool-dto.js";
 
 export { ManifestSchema, type ManifestJson } from "./manifest/index.js";
+
+export { PROTOCOL_VERSION, SUPPORTED_VERSIONS, isSupportedVersion } from "./protocol/protocol-version.js";

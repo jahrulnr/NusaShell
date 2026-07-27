@@ -81,4 +81,60 @@ describe("WebSocketServer", () => {
       setTimeout(() => reject(new Error("timeout")), 5000);
     });
   });
+
+  it("rejects unsupported protocol version", async () => {
+    await new Promise<void>((resolve, reject) => {
+      const client = new WebSocket(`ws://127.0.0.1:${port}`);
+      client.on("open", () => {
+        client.send(JSON.stringify({
+          kind: "request",
+          id: "req_ver",
+          method: "plugin.list",
+          protocolVersion: "99.0",
+          payload: {},
+        }));
+      });
+      client.on("message", (data: Buffer) => {
+        try {
+          const response = JSON.parse(data.toString("utf-8"));
+          expect(response.ok).toBe(false);
+          expect(response.error.code).toBe("UNSUPPORTED_VERSION");
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      });
+      client.on("error", reject);
+      setTimeout(() => reject(new Error("timeout")), 5000);
+    });
+  });
+
+  it("accepts supported protocol version", async () => {
+    await new Promise<void>((resolve, reject) => {
+      const client = new WebSocket(`ws://127.0.0.1:${port}`);
+      client.on("open", () => {
+        client.send(JSON.stringify({
+          kind: "request",
+          id: "req_ver_ok",
+          method: "plugin.list",
+          protocolVersion: "1.0",
+          payload: {},
+        }));
+      });
+      client.on("message", (data: Buffer) => {
+        try {
+          const response = JSON.parse(data.toString("utf-8"));
+          expect(response.ok).toBe(true);
+          expect(response.result.plugins).toHaveLength(1);
+          resolve();
+        } catch (err) {
+          reject(err);
+        } finally {
+          client.close();
+        }
+      });
+      client.on("error", reject);
+      setTimeout(() => reject(new Error("timeout")), 5000);
+    });
+  });
 });

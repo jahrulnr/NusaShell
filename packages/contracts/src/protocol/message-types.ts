@@ -11,12 +11,15 @@ export type RequestMethod =
   | "tool.cancel"
   | "tool.list"
   | "system.ping"
-  | "system.version";
+  | "system.version"
+  | "subscribe"
+  | "unsubscribe";
 
 export interface RequestEnvelope<TPayload = unknown> {
   readonly kind: "request";
   readonly id: string;
   readonly method: RequestMethod;
+  readonly protocolVersion?: string;
   readonly payload: TPayload;
 }
 
@@ -52,6 +55,7 @@ export type EventType =
 export interface EventEnvelope<TPayload = unknown> {
   readonly kind: "event";
   readonly event: EventType;
+  readonly sequence: number;
   readonly payload: TPayload;
 }
 

@@ -13,6 +13,7 @@ describe("Event schemas", () => {
     const result = PluginStartedEventSchema.safeParse({
       kind: "event",
       event: "plugin.started",
+      sequence: 1,
       payload: {
         pluginId: "com.example.notes",
         state: "running",
@@ -27,6 +28,7 @@ describe("Event schemas", () => {
     const result = PluginStoppedEventSchema.safeParse({
       kind: "event",
       event: "plugin.stopped",
+      sequence: 1,
       payload: {
         pluginId: "com.example.notes",
         state: "idle",
@@ -40,6 +42,7 @@ describe("Event schemas", () => {
     const result = PluginCrashedEventSchema.safeParse({
       kind: "event",
       event: "plugin.crashed",
+      sequence: 1,
       payload: {
         pluginId: "com.example.notes",
         state: "crashed",
@@ -54,6 +57,7 @@ describe("Event schemas", () => {
     const result = PluginStateChangedEventSchema.safeParse({
       kind: "event",
       event: "plugin.state_changed",
+      sequence: 1,
       payload: {
         pluginId: "com.example.notes",
         oldState: "starting",
@@ -68,6 +72,7 @@ describe("Event schemas", () => {
     const result = ToolCallCompletedEventSchema.safeParse({
       kind: "event",
       event: "tool.call_completed",
+      sequence: 1,
       payload: {
         pluginId: "com.example.notes",
         requestId: "req-uuid-001",
@@ -83,6 +88,7 @@ describe("Event schemas", () => {
     const result = EventSchema.safeParse({
       kind: "event",
       event: "plugin.started",
+      sequence: 1,
       payload: {
         pluginId: "com.example.notes",
         state: "running",

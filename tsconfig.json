@@ -7,7 +7,6 @@
     { "path": "./packages/transport-ws" },
     { "path": "./packages/contracts" },
     { "path": "./packages/plugin-sdk" },
-    { "path": "./packages/shared" },
     { "path": "./packages/testing" },
     { "path": "./apps/backend" },
     { "path": "./apps/desktop" }

@@ -4,6 +4,7 @@ import type {
   EventEnvelope,
   EventType,
 } from "@nusashell/contracts";
+import { PROTOCOL_VERSION } from "@nusashell/contracts";
 import { WebSocketConnection } from "./websocket-connection.js";
 import { RequestManager } from "./request-manager.js";
 import { EventSubscriber } from "./event-subscriber.js";
@@ -109,6 +110,7 @@ export class NusaClient {
       kind: "request",
       id,
       method,
+      protocolVersion: PROTOCOL_VERSION,
       payload,
     });
 

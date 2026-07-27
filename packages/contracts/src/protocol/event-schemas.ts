@@ -11,6 +11,7 @@ const PluginStateSchema = z.enum([
 export const PluginStartedEventSchema = z.object({
   kind: z.literal("event"),
   event: z.literal("plugin.started"),
+  sequence: z.number().int().nonnegative(),
   payload: z.object({
     pluginId: z.string(),
     state: PluginStateSchema,
@@ -22,6 +23,7 @@ export const PluginStartedEventSchema = z.object({
 export const PluginStoppedEventSchema = z.object({
   kind: z.literal("event"),
   event: z.literal("plugin.stopped"),
+  sequence: z.number().int().nonnegative(),
   payload: z.object({
     pluginId: z.string(),
     state: PluginStateSchema,
@@ -32,6 +34,7 @@ export const PluginStoppedEventSchema = z.object({
 export const PluginCrashedEventSchema = z.object({
   kind: z.literal("event"),
   event: z.literal("plugin.crashed"),
+  sequence: z.number().int().nonnegative(),
   payload: z.object({
     pluginId: z.string(),
     state: PluginStateSchema,
@@ -43,6 +46,7 @@ export const PluginCrashedEventSchema = z.object({
 export const PluginStateChangedEventSchema = z.object({
   kind: z.literal("event"),
   event: z.literal("plugin.state_changed"),
+  sequence: z.number().int().nonnegative(),
   payload: z.object({
     pluginId: z.string(),
     oldState: PluginStateSchema,
@@ -54,6 +58,7 @@ export const PluginStateChangedEventSchema = z.object({
 export const ToolCallCompletedEventSchema = z.object({
   kind: z.literal("event"),
   event: z.literal("tool.call_completed"),
+  sequence: z.number().int().nonnegative(),
   payload: z.object({
     pluginId: z.string(),
     requestId: z.string(),

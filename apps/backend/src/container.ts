@@ -106,7 +106,7 @@ export function createContainer(options: ContainerOptions): Container {
     host: options.host ?? "0.0.0.0",
   });
 
-  const eventPublisher = new WebSocketEventPublisher(wsServer.sessionRegistry);
+  const eventPublisher = new WebSocketEventPublisher(wsServer.sessionRegistry, wsServer.subscriptionRegistry);
   eventDispatcher.onAny(eventPublisher);
 
   return {
