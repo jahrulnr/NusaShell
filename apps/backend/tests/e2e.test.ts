@@ -18,7 +18,7 @@ describe("E2E: notes plugin", () => {
 
     client = new NusaClient({ url: `ws://127.0.0.1:${PORT}`, defaultTimeoutMs: 15000 });
     await client.connect();
-    await client.request("subscribe", { eventTypes: ["*"] });
+    await client.subscribe();
   });
 
   afterAll(async () => {

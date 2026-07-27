@@ -78,7 +78,8 @@ describe("NusaClient reconnect integration", () => {
     });
     await client.connect();
 
-    // Register an event handler
+    // Subscribe and register an event handler
+    await client.subscribe(["plugin.started"]);
     let receivedPayload: unknown = null;
     client.on("plugin.started", (payload: unknown) => {
       receivedPayload = payload;
@@ -93,8 +94,11 @@ describe("NusaClient reconnect integration", () => {
 
     await waitFor(() => client.isConnected, 5000);
 
-    // Send an event from the server — handler should still work
+    // Server-side subscription should be restored after auto-resubscribe
     const session = server.sessionRegistry.all[0]!;
+    expect(server.subscriptionRegistry.isSubscribed(session.id, "plugin.started")).toBe(true);
+
+    // Send an event from the server — handler should still work
     session.sendEvent({
       kind: "event",
       event: "plugin.started",
@@ -109,6 +113,40 @@ describe("NusaClient reconnect integration", () => {
 
     await waitFor(() => receivedPayload !== null, 2000);
     expect(receivedPayload).toMatchObject({ pluginId: "com.example.notes", state: "running" });
+  });
+
+  it("auto-resubscribe restores server-side subscriptions after reconnect", async () => {
+    server = makeServer(basePort + 6);
+    await server.start();
+
+    client = new NusaClient({
+      url: `ws://127.0.0.1:${basePort + 6}`,
+      reconnect: { enabled: true, initialDelayMs: 50, maxDelayMs: 200, jitterMs: 0 },
+    });
+    await client.connect();
+
+    // Subscribe to specific event types
+    await client.subscribe(["plugin.started", "plugin.stopped"]);
+
+    // Verify server-side registry has the subscriptions
+    const sessionBefore = server.sessionRegistry.all[0]!;
+    expect(server.subscriptionRegistry.isSubscribed(sessionBefore.id, "plugin.started")).toBe(true);
+    expect(server.subscriptionRegistry.isSubscribed(sessionBefore.id, "plugin.stopped")).toBe(true);
+
+    // Kill and restart server
+    await server.stop();
+    await waitFor(() => client.isReconnecting, 1000);
+
+    server = makeServer(basePort + 6);
+    await server.start();
+
+    await waitFor(() => client.isConnected, 5000);
+
+    // After reconnect, new session should have subscriptions restored
+    const sessionAfter = server.sessionRegistry.all[0]!;
+    expect(sessionAfter.id).not.toBe(sessionBefore.id);
+    expect(server.subscriptionRegistry.isSubscribed(sessionAfter.id, "plugin.started")).toBe(true);
+    expect(server.subscriptionRegistry.isSubscribed(sessionAfter.id, "plugin.stopped")).toBe(true);
   });
 
   it("fires onReconnect callback after successful reconnect", async () => {

@@ -32,6 +32,7 @@ export class NusaClient {
   private readonly requestManager: RequestManager;
   private readonly reconnectPolicy: ReconnectPolicy;
   private readonly reconnectOptions: ReconnectOptions;
+  private readonly activeSubscriptions = new Set<string>();
 
   private intentionalDisconnect = false;
   private reconnecting = false;
@@ -52,6 +53,7 @@ export class NusaClient {
         if (this.reconnecting) {
           this.reconnecting = false;
           this.reconnectPolicy.reset();
+          void this.resubscribe();
           this.onReconnectCallback?.();
         }
       },
@@ -75,6 +77,7 @@ export class NusaClient {
     this.reconnecting = false;
     this.requestManager.close();
     this.events.clear();
+    this.activeSubscriptions.clear();
     await this.connection.disconnect();
   }
 
@@ -118,6 +121,26 @@ export class NusaClient {
     return promise;
   }
 
+  async subscribe(eventTypes?: EventType[]): Promise<void> {
+    const types = eventTypes ?? ["*"];
+    const result = await this.request<{ subscribed: string[] }>("subscribe", { eventTypes: types });
+    for (const t of result.subscribed) {
+      this.activeSubscriptions.add(t);
+    }
+  }
+
+  async unsubscribe(eventTypes?: EventType[]): Promise<void> {
+    const types = eventTypes ?? [];
+    await this.request("unsubscribe", { eventTypes: types });
+    if (types.length === 0) {
+      this.activeSubscriptions.clear();
+    } else {
+      for (const t of types) {
+        this.activeSubscriptions.delete(t);
+      }
+    }
+  }
+
   on<TPayload>(
     eventType: EventType,
     handler: (payload: TPayload) => void,
@@ -125,11 +148,22 @@ export class NusaClient {
     return this.events.on(eventType, handler);
   }
 
+  private async resubscribe(): Promise<void> {
+    if (this.activeSubscriptions.size === 0) return;
+    const types = [...this.activeSubscriptions];
+    try {
+      await this.request("subscribe", { eventTypes: types });
+    } catch {
+      // Best-effort; events may be missed until next manual subscribe
+    }
+  }
+
   private handleClose(): void {
     this.requestManager.close();
 
     if (this.intentionalDisconnect) {
       this.events.clear();
+      this.activeSubscriptions.clear();
       return;
     }
 
@@ -137,6 +171,7 @@ export class NusaClient {
       this.scheduleReconnect();
     } else {
       this.events.clear();
+      this.activeSubscriptions.clear();
     }
   }
 
@@ -165,6 +200,7 @@ export class NusaClient {
       } else {
         this.reconnecting = false;
         this.events.clear();
+        this.activeSubscriptions.clear();
         this.onReconnectFailedCallback?.();
       }
     }
