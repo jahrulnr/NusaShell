@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.9] - 2026-07-27
+
+### Added
+
+- **Reconnect policy in plugin-sdk**: `ReconnectPolicy` class with exponential backoff + jitter
+  - Configurable: `enabled`, `maxAttempts`, `initialDelayMs`, `maxDelayMs`, `backoffFactor`, `jitterMs`
+  - `shouldRetry()`, `getDelay()`, `recordAttempt()`, `reset()`, `isExhausted`, `state` getter
+- **`NusaClient` auto-reconnect**: on unexpected WebSocket close, client schedules reconnect with backoff
+  - Event handlers preserved across reconnect (implicit resubscribe)
+  - Pending requests rejected on disconnect (stale); new requests work after reconnect
+  - `onReconnect(callback)` and `onReconnectFailed(callback)` hooks for UI status indicators
+  - `isReconnecting` getter
+  - Explicit `disconnect()` skips reconnect entirely
+- 11 `ReconnectPolicy` unit tests + 6 reconnect integration tests (server kill/restart, handler preservation, callback firing, maxAttempts exhaustion, explicit disconnect, pending request rejection + recovery)
+
+### Changed
+
+- `NusaClientOptions` now accepts `reconnect?: Partial<ReconnectOptions>`
+- `NusaClient.onClose` no longer clears event handlers on auto-reconnect (only on explicit disconnect or exhaustion)
+- Exported `ReconnectPolicy`, `ReconnectOptions`, `ReconnectState`, `DEFAULT_RECONNECT_OPTIONS`, `ReconnectStatusCallback` from `@nusashell/plugin-sdk`
+- 188 tests pass across 27 test files
+
 ## [0.0.8] - 2026-07-27
 
 ### Added
