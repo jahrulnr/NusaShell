@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<title>NusaShell - PoC</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, "Segoe UI", sans-serif;
+    background: #0d1117; color: #e6e9ef; height: 100vh; overflow: hidden;
+  }
+  header {
+    padding: 16px 24px; border-bottom: 1px solid #1f2733;
+    display: flex; align-items: center; gap: 12px;
+  }
+  header h1 { font-size: 15px; margin: 0; color: #9fb3ff; font-weight: 600; }
+  header .sub { font-size: 12px; color: #6b7686; }
+  #grid {
+    display: grid; grid-template-columns: repeat(auto-fill, 96px);
+    gap: 20px; padding: 28px; align-content: start;
+  }
+  .icon-cell { display: flex; flex-direction: column; align-items: center; cursor: pointer; user-select: none; }
+  .icon-box {
+    width: 64px; height: 64px; border-radius: 18px; background: #1a2130;
+    border: 1px solid #262f42; display: flex; align-items: center; justify-content: center;
+    font-size: 30px; position: relative; transition: transform .1s;
+  }
+  .icon-cell:hover .icon-box { transform: scale(1.06); background: #212a3d; }
+  .icon-label { font-size: 11.5px; margin-top: 6px; text-align: center; color: #c7cede; }
+  .badge {
+    position: absolute; bottom: -3px; right: -3px; width: 12px; height: 12px;
+    border-radius: 50%; background: #3ecf7f; border: 2px solid #0d1117;
+  }
+  .badge.idle { display: none; }
+
+  /* plugin window/modal */
+  .plugin-window {
+    position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
+    width: 480px; background: #14181f; border: 1px solid #2c3550; border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.5); overflow: hidden; display: none;
+  }
+  .plugin-window.open { display: block; }
+  .plugin-window-titlebar {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 12px; background: #1a2130; font-size: 12px; color: #9fb3ff;
+  }
+  .plugin-window-titlebar button {
+    background: none; border: none; color: #7d8aa8; cursor: pointer; font-size: 14px;
+  }
+  .plugin-window iframe { width: 100%; height: 560px; border: none; display: block; }
+  #log {
+    position: fixed; bottom: 0; left: 0; right: 0; max-height: 140px; overflow-y: auto;
+    background: #05070a; border-top: 1px solid #1f2733; font-family: monospace;
+    font-size: 11px; padding: 8px 14px; color: #7d8aa8;
+  }
+  #log .line { padding: 1px 0; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>🐚 NusaShell</h1>
+    <span class="sub">PoC - Grid launcher, tiap icon = UI + MCP process</span>
+  </header>
+  <div id="grid"></div>
+
+  <div class="plugin-window" id="pluginWindow">
+    <div class="plugin-window-titlebar">
+      <span id="pluginWindowTitle"></span>
+      <button onclick="closePluginWindow()">✕</button>
+    </div>
+    <iframe id="pluginFrame"></iframe>
+  </div>
+
+  <div id="log"></div>
+
+<script src="/launcher.js"></script>
+</body>
+</html>
