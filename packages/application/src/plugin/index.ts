@@ -20,11 +20,17 @@ export type {
   StartPluginResult,
   StopPluginCommand,
   StopPluginResult,
+  RestartPluginCommand,
+  RestartPluginResult,
 } from "./commands/index.js";
-export { StartPluginHandler, StopPluginHandler } from "./commands/index.js";
+export { StartPluginHandler, StopPluginHandler, RestartPluginHandler } from "./commands/index.js";
 export type {
   ListPluginsQuery,
   ListPluginsResult,
   PluginListItem,
+  GetPluginQuery,
+  GetPluginResult,
+  GetPluginStateQuery,
+  GetPluginStateResult,
 } from "./queries/index.js";
-export { ListPluginsHandler } from "./queries/index.js";
+export { ListPluginsHandler, GetPluginHandler, GetPluginStateHandler } from "./queries/index.js";

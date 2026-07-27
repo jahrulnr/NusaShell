@@ -17,7 +17,7 @@ import {
 } from "@nusashell/domain";
 import { ApplicationError } from "../../errors/application-error.js";
 import type { ClockPort } from "../ports/clock.port.js";
-import type { McpClientFactoryPort, McpClientPort } from "../ports/mcp-client.port.js";
+import type { McpClientFactoryPort, McpClientPort, ToolDescriptor } from "../ports/mcp-client.port.js";
 import type { PluginProcessPort, ProcessHandle } from "../ports/plugin-process.port.js";
 import type { PluginRepositoryPort } from "../ports/plugin-repository.port.js";
 import { EventDispatcher } from "../../events/event-dispatcher.js";
@@ -117,6 +117,60 @@ export class PluginRuntimeManager {
   ): Promise<unknown> {
     const entry = await this.ensureEntry(pluginId);
     return entry.queue.enqueue(async () => this.callToolLocked(entry, options));
+  }
+
+  async cancelTool(pluginId: PluginId, requestId: string): Promise<void> {
+    const entry = await this.ensureEntry(pluginId);
+    return entry.queue.enqueue(async () => {
+      this.cancelPendingCall(entry, requestId, "TOOL_CALL_CANCELLED", "Cancelled by client");
+    });
+  }
+
+  async listTools(pluginId: PluginId): Promise<readonly ToolDescriptor[]> {
+    const entry = await this.ensureEntry(pluginId);
+    return entry.queue.enqueue(async () => {
+      if (!entry.mcpClient || entry.runtime.state !== "running") {
+        throw new ApplicationError(
+          "PLUGIN_NOT_RUNNING",
+          `Plugin ${PluginId.toString(pluginId)} is not running`,
+          { pluginId: PluginId.toString(pluginId) },
+        );
+      }
+      return entry.mcpClient.listTools();
+    });
+  }
+
+  async restartPlugin(pluginId: PluginId): Promise<PluginView> {
+    const entry = await this.ensureEntry(pluginId);
+    return entry.queue.enqueue(async () => {
+      if (entry.runtime.state === "running" || entry.runtime.state === "starting") {
+        await this.stopLocked(entry);
+      }
+      return this.startLocked(entry);
+    });
+  }
+
+  async getPlugin(pluginId: PluginId): Promise<PluginView | null> {
+    const key = PluginId.toString(pluginId);
+    const entry = this.runtimes.get(key);
+    if (entry) {
+      if (!entry.name) {
+        const plugin = await this.loadPlugin(pluginId);
+        entry.name = plugin.manifest.name;
+        entry.version = plugin.manifest.version.toString();
+        entry.enabled = plugin.enabled;
+      }
+      return this.view(entry);
+    }
+    const plugin = await this.deps.pluginRepository.findById(pluginId);
+    if (!plugin) return null;
+    return {
+      pluginId: key,
+      name: plugin.manifest.name,
+      version: plugin.manifest.version.toString(),
+      state: "idle",
+      enabled: plugin.enabled,
+    };
   }
 
   async stopAll(): Promise<void> {

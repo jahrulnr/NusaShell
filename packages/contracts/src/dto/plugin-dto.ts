@@ -17,3 +17,5 @@ export interface PluginStateResultDto {
   readonly pluginId: string;
   readonly state: PluginStateDto;
 }
+
+export type PluginGetResultDto = PluginDto;

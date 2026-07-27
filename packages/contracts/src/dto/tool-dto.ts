@@ -8,3 +8,7 @@ export interface ToolCallResultDto {
   readonly requestId: string;
   readonly result: unknown;
 }
+
+export interface ToolListResultDto {
+  readonly tools: readonly ToolDescriptorDto[];
+}

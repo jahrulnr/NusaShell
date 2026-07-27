@@ -12,8 +12,13 @@ import {
   PluginRuntimeManager,
   StartPluginHandler,
   StopPluginHandler,
+  RestartPluginHandler,
   ListPluginsHandler,
+  GetPluginHandler,
+  GetPluginStateHandler,
   CallToolHandler,
+  CancelToolCallHandler,
+  ListToolsHandler,
 } from "@nusashell/application";
 import {
   MessageRouter,
@@ -61,10 +66,15 @@ export function createContainer(options: ContainerOptions): Container {
   const commandBus = new CommandBus();
   commandBus.register("start-plugin", new StartPluginHandler(runtimeManager));
   commandBus.register("stop-plugin", new StopPluginHandler(runtimeManager));
+  commandBus.register("restart-plugin", new RestartPluginHandler(runtimeManager));
   commandBus.register("call-tool", new CallToolHandler(runtimeManager));
+  commandBus.register("cancel-tool-call", new CancelToolCallHandler(runtimeManager));
 
   const queryBus = new QueryBus();
   queryBus.register("list-plugins", new ListPluginsHandler(runtimeManager));
+  queryBus.register("get-plugin", new GetPluginHandler(runtimeManager));
+  queryBus.register("get-plugin-state", new GetPluginStateHandler(runtimeManager));
+  queryBus.register("list-tools", new ListToolsHandler(runtimeManager));
 
   const router = new MessageRouter({ commandBus, queryBus });
 

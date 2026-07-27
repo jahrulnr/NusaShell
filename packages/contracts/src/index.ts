@@ -15,13 +15,21 @@ export {
   PluginStartRequestSchema,
   PluginStopRequestSchema,
   PluginListRequestSchema,
+  PluginRestartRequestSchema,
+  PluginGetRequestSchema,
+  PluginStateRequestSchema,
   ToolCallRequestSchema,
   ToolCancelRequestSchema,
+  ToolListRequestSchema,
   type PluginStartRequest,
   type PluginStopRequest,
   type PluginListRequest,
+  type PluginRestartRequest,
+  type PluginGetRequest,
+  type PluginStateRequest,
   type ToolCallRequest,
   type ToolCancelRequest,
+  type ToolListRequest,
   type ParsedRequest,
 } from "./protocol/request-schemas.js";
 
@@ -61,9 +69,11 @@ export type {
   PluginStateDto,
   PluginDto,
   PluginStateResultDto,
+  PluginGetResultDto,
 } from "./dto/plugin-dto.js";
 
 export type {
   ToolDescriptorDto,
   ToolCallResultDto,
+  ToolListResultDto,
 } from "./dto/tool-dto.js";

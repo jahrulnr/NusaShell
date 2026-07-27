@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.7] - 2026-07-27
+
+### Added
+
+- `tool.cancel` command — cancel a pending tool call by `requestId` (`CancelToolCallHandler`)
+- `tool.list` query — list MCP tools from a running plugin (`ListToolsHandler`)
+- `plugin.restart` command — stop then start a plugin in one operation (`RestartPluginHandler`)
+- `plugin.get` query — get single plugin details by ID (`GetPluginHandler`)
+- `plugin.state` query — get just the runtime state of a plugin (`GetPluginStateHandler`)
+- `PluginRuntimeManager.cancelTool()`, `.listTools()`, `.restartPlugin()`, `.getPlugin()` public methods
+- `PLUGIN_NOT_RUNNING` error code for tool operations on non-running plugins
+- `PluginGetResultDto`, `ToolListResultDto` contract types
+- `PluginsApi.restart()`, `.get()`, `.getState()` and `ToolsApi.list()` in plugin-sdk
+- 5 new E2E tests: get-plugin, get-plugin-state, restart, list-tools, tool.list-when-not-running
+
+### Changed
+
+- `RequestMethod` type extended with `plugin.restart`, `plugin.get`, `plugin.state`, `tool.list`
+- Request schemas: added `PluginRestartRequestSchema`, `PluginGetRequestSchema`, `PluginStateRequestSchema`, `ToolListRequestSchema`
+- `command.mapper.ts`: handles `plugin.restart` and `tool.cancel`
+- `query.mapper.ts`: handles `plugin.get`, `plugin.state`, `tool.list`
+- `error.mapper.ts`: maps `PLUGIN_NOT_RUNNING` error code
+- Container registers all new handlers in command/query buses
+- 145 tests pass across 22 test files (11 E2E)
+
 ## [0.0.6] - 2026-07-27
 
 ### Added

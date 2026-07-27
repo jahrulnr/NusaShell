@@ -45,16 +45,25 @@ export {
   type CallToolOptions,
   StartPluginHandler,
   StopPluginHandler,
+  RestartPluginHandler,
   ListPluginsHandler,
+  GetPluginHandler,
+  GetPluginStateHandler,
   type StartPluginCommand,
   type StartPluginResult,
   type StopPluginCommand,
   type StopPluginResult,
+  type RestartPluginCommand,
+  type RestartPluginResult,
   type ListPluginsQuery,
   type ListPluginsResult,
   type PluginListItem,
+  type GetPluginQuery,
+  type GetPluginResult,
+  type GetPluginStateQuery,
+  type GetPluginStateResult,
 } from "./plugin/index.js";
 
 // Tool use cases
-export type { CallToolCommand, CallToolResult } from "./tool/index.js";
-export { CallToolHandler } from "./tool/index.js";
+export type { CallToolCommand, CallToolResult, CancelToolCallCommand, CancelToolCallResult, ListToolsQuery, ListToolsResult, ToolItem } from "./tool/index.js";
+export { CallToolHandler, CancelToolCallHandler, ListToolsHandler } from "./tool/index.js";

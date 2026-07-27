@@ -1,4 +1,4 @@
-import type { ParsedEvent, EventType, PluginListItem, PluginStateResultDto, ToolCallResultDto } from "@nusashell/contracts";
+import type { ParsedEvent, EventType, PluginListItem, PluginStateResultDto, PluginGetResultDto, ToolCallResultDto, ToolListResultDto } from "@nusashell/contracts";
 import { NusaClient } from "../client/nusa-client.js";
 
 export class PluginsApi {
@@ -14,6 +14,18 @@ export class PluginsApi {
 
   list(timeoutMs?: number): Promise<{ plugins: readonly PluginListItem[] }> {
     return this.client.request("plugin.list", {}, timeoutMs);
+  }
+
+  restart(pluginId: string, timeoutMs?: number): Promise<PluginStateResultDto> {
+    return this.client.request("plugin.restart", { pluginId }, timeoutMs);
+  }
+
+  get(pluginId: string, timeoutMs?: number): Promise<PluginGetResultDto> {
+    return this.client.request("plugin.get", { pluginId }, timeoutMs);
+  }
+
+  getState(pluginId: string, timeoutMs?: number): Promise<PluginStateResultDto> {
+    return this.client.request("plugin.state", { pluginId }, timeoutMs);
   }
 }
 
@@ -36,6 +48,10 @@ export class ToolsApi {
 
   cancel(pluginId: string, requestId: string): Promise<unknown> {
     return this.client.request("tool.cancel", { pluginId, requestId });
+  }
+
+  list(pluginId: string, timeoutMs?: number): Promise<ToolListResultDto> {
+    return this.client.request("tool.list", { pluginId }, timeoutMs);
   }
 }
 

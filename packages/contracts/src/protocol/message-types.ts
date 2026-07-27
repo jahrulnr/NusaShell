@@ -3,9 +3,13 @@ export type MessageKind = "request" | "response" | "event";
 export type RequestMethod =
   | "plugin.start"
   | "plugin.stop"
+  | "plugin.restart"
   | "plugin.list"
+  | "plugin.get"
+  | "plugin.state"
   | "tool.call"
-  | "tool.cancel";
+  | "tool.cancel"
+  | "tool.list";
 
 export interface RequestEnvelope<TPayload = unknown> {
   readonly kind: "request";

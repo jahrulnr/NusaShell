@@ -97,4 +97,37 @@ describe("E2E: notes plugin", () => {
     expect(result.pluginId).toBe("com.example.notes");
     expect(result.state).toBe("idle");
   });
+
+  it("gets single plugin details", async () => {
+    const result = await client.plugins.get("com.example.notes");
+    expect(result.pluginId).toBe("com.example.notes");
+    expect(result.name).toBe("Notes");
+    expect(result.version).toBe("1.0.0");
+    expect(result.state).toBe("idle");
+    expect(result.enabled).toBe(true);
+  });
+
+  it("gets plugin state", async () => {
+    const result = await client.plugins.getState("com.example.notes");
+    expect(result.pluginId).toBe("com.example.notes");
+    expect(result.state).toBe("idle");
+  });
+
+  it("restarts the notes plugin", async () => {
+    const result = await client.plugins.restart("com.example.notes");
+    expect(result.pluginId).toBe("com.example.notes");
+    expect(result.state).toBe("running");
+  });
+
+  it("lists tools from running plugin", async () => {
+    const result = await client.tools.list("com.example.notes");
+    expect(result.tools).toHaveLength(2);
+    const names = result.tools.map((t) => t.name).sort();
+    expect(names).toEqual(["createNote", "listNotes"]);
+  });
+
+  it("rejects tool.list when plugin is not running", async () => {
+    await client.plugins.stop("com.example.notes");
+    await expect(client.tools.list("com.example.notes")).rejects.toThrow();
+  });
 });
