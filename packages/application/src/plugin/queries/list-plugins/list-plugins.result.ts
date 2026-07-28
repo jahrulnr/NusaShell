@@ -4,6 +4,7 @@ export interface PluginListItem {
   readonly pluginId: string;
   readonly name: string;
   readonly version: string;
+  readonly icon: string;
   readonly state: PluginRuntimeState;
   readonly enabled: boolean;
 }

@@ -22,6 +22,7 @@ export const PluginListItemSchema = z.object({
   pluginId: z.string(),
   name: z.string(),
   version: z.string(),
+  icon: z.string(),
   state: PluginStateSchema,
   enabled: z.boolean(),
 });

@@ -9,6 +9,7 @@ export interface PluginDto {
   readonly pluginId: string;
   readonly name: string;
   readonly version: string;
+  readonly icon: string;
   readonly state: PluginStateDto;
   readonly enabled: boolean;
 }

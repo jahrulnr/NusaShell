@@ -23,6 +23,7 @@ import type { PluginProcessPort, ProcessHandle } from "../ports/plugin-process.p
 import type { PluginRepositoryPort } from "../ports/plugin-repository.port.js";
 import { EventDispatcher } from "../../events/event-dispatcher.js";
 import { PluginOperationQueue } from "./plugin-operation-queue.js";
+import { resolveIcon } from "./icon-resolver.js";
 
 interface PendingToolCall {
   readonly toolCall: ToolCall;
@@ -35,6 +36,7 @@ interface RuntimeEntry {
   readonly pluginId: PluginId;
   name: string;
   version: string;
+  icon: string;
   enabled: boolean;
   runtime: PluginRuntime;
   startPromise: Promise<void> | null;
@@ -72,6 +74,7 @@ export interface PluginView {
   readonly pluginId: string;
   readonly name: string;
   readonly version: string;
+  readonly icon: string;
   readonly state: PluginRuntimeState;
   readonly enabled: boolean;
 }
@@ -92,6 +95,7 @@ export class PluginRuntimeManager {
         pluginId: PluginId.toString(plugin.id),
         name: plugin.manifest.name,
         version: plugin.manifest.version.toString(),
+        icon: resolveIcon(plugin.manifest.icon, plugin.installPath),
         state: entry?.runtime.state ?? "idle",
         enabled: plugin.enabled,
       };
@@ -160,6 +164,7 @@ export class PluginRuntimeManager {
         const plugin = await this.loadPlugin(pluginId);
         entry.name = plugin.manifest.name;
         entry.version = plugin.manifest.version.toString();
+        entry.icon = resolveIcon(plugin.manifest.icon, plugin.installPath);
         entry.enabled = plugin.enabled;
       }
       return this.view(entry);
@@ -170,6 +175,7 @@ export class PluginRuntimeManager {
       pluginId: key,
       name: plugin.manifest.name,
       version: plugin.manifest.version.toString(),
+      icon: resolveIcon(plugin.manifest.icon, plugin.installPath),
       state: "idle",
       enabled: plugin.enabled,
     };
@@ -194,6 +200,7 @@ export class PluginRuntimeManager {
       pluginId,
       name: "",
       version: "",
+      icon: "",
       enabled: true,
       runtime: PluginRuntime.createIdle(pluginId),
       startPromise: null,
@@ -218,6 +225,7 @@ export class PluginRuntimeManager {
     const plugin = await this.loadPlugin(entry.pluginId);
     entry.name = plugin.manifest.name;
     entry.version = plugin.manifest.version.toString();
+    entry.icon = resolveIcon(plugin.manifest.icon, plugin.installPath);
     entry.enabled = plugin.enabled;
     const canStart = PluginLifecyclePolicy.canStart(plugin, entry.runtime);
     if (!canStart.ok) {
@@ -569,6 +577,7 @@ export class PluginRuntimeManager {
       pluginId: PluginId.toString(entry.pluginId),
       name: entry.name,
       version: entry.version,
+      icon: entry.icon,
       state: entry.runtime.state,
       enabled: entry.enabled,
     };

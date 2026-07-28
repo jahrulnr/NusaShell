@@ -49,6 +49,21 @@ describe("ManifestSchema", () => {
     expect(result.success).toBe(false);
   });
 
+  it("accepts file path icon", () => {
+    const result = ManifestSchema.safeParse({ ...VALID, icon: "file://icon.png" });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts URL icon", () => {
+    const result = ManifestSchema.safeParse({ ...VALID, icon: "https://example.com/icon.png" });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts relative file path icon", () => {
+    const result = ManifestSchema.safeParse({ ...VALID, icon: "./assets/icon.png" });
+    expect(result.success).toBe(true);
+  });
+
   it("rejects missing ui.entry", () => {
     const result = ManifestSchema.safeParse({ ...VALID, ui: { entry: "" } });
     expect(result.success).toBe(false);

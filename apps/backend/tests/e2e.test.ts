@@ -104,6 +104,7 @@ describe("E2E: notes plugin", () => {
     expect(result.pluginId).toBe("com.example.notes");
     expect(result.name).toBe("Notes");
     expect(result.version).toBe("1.0.0");
+    expect(result.icon).toBe("📝");
     expect(result.state).toBe("idle");
     expect(result.enabled).toBe(true);
   });

@@ -17,6 +17,7 @@ export class ListPluginsHandler
       pluginId: view.pluginId,
       name: view.name,
       version: view.version,
+      icon: view.icon,
       state: view.state,
       enabled: view.enabled,
     }));

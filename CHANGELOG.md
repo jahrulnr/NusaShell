@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.14] - 2026-07-28
+
+### Added
+- `icon` field on `PluginDto`, `PluginListItemSchema`, `PluginView`, `PluginListItem`, and `GetPluginResult` — plugin icons now flow from manifest through the application layer to the wire protocol and frontend
+- `resolveIcon()` helper in application layer — resolves `file://icon.png` (relative to plugin dir) and `./icon.png` to absolute `file:///` URLs using `plugin.installPath`; passes through `http(s)://` URLs, absolute `file:///` paths, and text/emoji as-is
+- Manifest schema doc comment documenting three accepted icon formats: text/emoji, file path (`file://relative.png` or `file:///abs/path`), and URL (`http(s)://`)
+- Manifest schema tests for file path, URL, and relative path icon formats
+- Unit tests for `resolveIcon()` (9 tests covering all format types)
+- E2E test assertions verifying `icon` is present in `plugin.list` and `plugin.get` responses
+- UI mockup `renderIconHtml()` helper that renders `<img>` for URL/file icons and text for emoji/letter icons, with `onerror` fallback for broken file paths
+- Mock "Tasks" plugin with URL icon and "Timer" plugin with `file://` relative icon to demonstrate all three icon formats in the UI
+
+### Changed
+- `PluginRuntimeManager` resolves `icon` via `resolveIcon(plugin.manifest.icon, plugin.installPath)` in `listPlugins`, `getPlugin`, and `startLocked`
+- `ListPluginsHandler` maps `icon` from `PluginView` to `PluginListItem`
+- All test mocks for plugin list items updated with `icon` field
+- UI mockup rendering functions (app grid, installed table, running list, drawer, plugin window) use `renderIconHtml()` instead of hardcoded emoji spans
+
 ## [0.0.13] - 2026-07-28
 
 ### Added

@@ -8,7 +8,7 @@ function makeServer(port: number): WebSocketServer {
   queryBus.register("list-plugins", {
     handle: async () => ({
       plugins: [
-        { pluginId: "com.example.notes", name: "Notes", version: "1.0.0", state: "idle", enabled: true },
+        { pluginId: "com.example.notes", name: "Notes", version: "1.0.0", icon: "📝", state: "idle", enabled: true },
       ],
     }),
   } as never);

@@ -4,6 +4,12 @@ export const ManifestSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   version: z.string().min(1),
+  /**
+   * Plugin icon. Accepts three formats:
+   * 1. Text / emoji — e.g. "📝" or "N"
+   * 2. File path — e.g. "file://icon.png" (relative to plugin dir) or "file:///abs/path/icon.png"
+   * 3. URL — e.g. "https://example.com/icon.png"
+   */
   icon: z.string().min(1),
   ui: z.object({
     entry: z.string().min(1),
