@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.27] - 2026-07-29
+
+### Changed
+
+- `AgentTurnRunner` repeated identical tool call threshold raised from `3` to `50` (`MAX_REPEATED_TOOL_CALLS`).
+- `maxToolRounds` default raised to `50` and validated maximum raised to `100` across `app-config`, `container.ts`, and the WebSocket request schema so the new repeat threshold can actually be reached.
+- `AgentTurnRunnerDeps` exposes an optional `defaultMaxRepeatedToolCalls` override for tests and advanced callers.
+- Desktop preload now exposes `window.shell.callTool` and `window.shell.listTools`, routing plugin iframe tool calls through the existing `tool:call` / `tool:list` IPC handlers.
+
 ## [0.0.26] - 2026-07-29
 
 ### Added

@@ -11,6 +11,9 @@ import type {
 } from "../ports/agent-provider.port.js";
 import type { AgentToolGateway } from "../ports/agent-tool-gateway.port.js";
 
+const MAX_REPEATED_TOOL_CALLS = 50;
+const DEFAULT_MAX_TOOL_ROUNDS = 50;
+
 export interface RunAgentTurnInput {
   readonly messages: readonly AgentMessage[];
   readonly pluginIds: readonly string[];
@@ -64,11 +67,10 @@ export interface AgentTurnRunnerDeps {
   readonly toolGateway: AgentToolGateway;
   readonly logger?: LoggerPort;
   readonly defaultMaxToolRounds?: number;
+  readonly defaultMaxRepeatedToolCalls?: number;
   readonly context?: AgentContextOptions;
   readonly compactPrompt?: string;
 }
-
-const DEFAULT_MAX_TOOL_ROUNDS = 8;
 
 /**
  * Provider-agnostic, bounded agent loop. The MCP gateway is the only path for
@@ -76,9 +78,11 @@ const DEFAULT_MAX_TOOL_ROUNDS = 8;
  */
 export class AgentTurnRunner {
   private readonly defaultMaxToolRounds: number;
+  private readonly defaultMaxRepeatedToolCalls: number;
 
   constructor(private readonly deps: AgentTurnRunnerDeps) {
     this.defaultMaxToolRounds = normalizeMaxRounds(deps.defaultMaxToolRounds);
+    this.defaultMaxRepeatedToolCalls = deps.defaultMaxRepeatedToolCalls ?? MAX_REPEATED_TOOL_CALLS;
   }
 
   async run(input: RunAgentTurnInput): Promise<AgentTurnResult> {
@@ -189,11 +193,11 @@ export class AgentTurnRunner {
       }
 
       validateRequestedTools(requestedCalls, toolsByName, traceId);
-      const duplicate = repeatedToolDecision(requestedCalls, repeatedCalls);
+      const duplicate = repeatedToolDecision(requestedCalls, repeatedCalls, this.defaultMaxRepeatedToolCalls);
       if (duplicate === "stop") {
         return {
           traceId,
-          text: "The agent stopped because the model repeated the same tool call three times.",
+          text: `The agent stopped because the model repeated the same tool call ${this.defaultMaxRepeatedToolCalls} times.`,
           rounds: round,
           toolCalls,
           ...(model ? { model } : {}),
@@ -246,8 +250,11 @@ export class AgentTurnRunner {
 
   private async executeTool(call: AgentToolCall, traceId: string, round: number): Promise<AgentToolExecution> {
     this.deps.logger?.info("Agent MCP tool started traceId=%s tool=%s round=%d", traceId, call.name, round);
+    // The provider's tool call id is kept for the conversation turn; the internal
+    // request id used for tracking/cancellation must be a valid UUID.
+    const requestId = randomUUID();
     try {
-      const result = await this.deps.toolGateway.execute(call.name, call.args, call.id, traceId);
+      const result = await this.deps.toolGateway.execute(call.name, call.args, requestId, traceId);
       this.deps.logger?.info("Agent MCP tool completed traceId=%s tool=%s round=%d", traceId, call.name, round);
       return { id: call.id, name: call.name, ok: true, result };
     } catch (error) {
@@ -331,13 +338,14 @@ function assertTurnActive(signal: AbortSignal | undefined, traceId: string): voi
 function repeatedToolDecision(
   calls: readonly AgentToolCall[],
   counts: Map<string, number>,
+  maxRepeated: number,
 ): "execute" | "nudge" | "stop" {
   let decision: "execute" | "nudge" | "stop" = "execute";
   for (const call of calls) {
     const fingerprint = `${call.name}:${stableJson(call.args)}`;
     const count = (counts.get(fingerprint) ?? 0) + 1;
     counts.set(fingerprint, count);
-    if (count >= 3) return "stop";
+    if (count >= maxRepeated) return "stop";
     if (count === 2) decision = "nudge";
   }
   return decision;
@@ -394,8 +402,8 @@ function serializeToolResult(execution: AgentToolExecution): string {
 
 function normalizeMaxRounds(value: number | undefined): number {
   if (value === undefined) return DEFAULT_MAX_TOOL_ROUNDS;
-  if (!Number.isInteger(value) || value < 1 || value > 32) {
-    throw new ApplicationError("AGENT_INVALID_INPUT", "maxToolRounds must be an integer between 1 and 32");
+  if (!Number.isInteger(value) || value < 1 || value > 100) {
+    throw new ApplicationError("AGENT_INVALID_INPUT", "maxToolRounds must be an integer between 1 and 100");
   }
   return value;
 }

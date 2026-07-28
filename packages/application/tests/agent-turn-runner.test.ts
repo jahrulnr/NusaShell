@@ -300,7 +300,7 @@ describe("AgentTurnRunner", () => {
     });
     const provider = new ScriptedProvider([repeated("call-1"), repeated("call-2"), repeated("call-3")]);
     const tools = new FakeToolGateway();
-    const runner = new AgentTurnRunner({ provider, toolGateway: tools, defaultMaxToolRounds: 4 });
+    const runner = new AgentTurnRunner({ provider, toolGateway: tools, defaultMaxToolRounds: 4, defaultMaxRepeatedToolCalls: 3 });
 
     const result = await runner.run({
       messages: [{ role: "user", content: "Create one note" }],

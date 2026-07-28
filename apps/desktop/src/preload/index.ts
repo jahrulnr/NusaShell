@@ -9,6 +9,8 @@ import type {
 
 export interface ShellApi {
   readonly wsUrl: string;
+  callTool(pluginId: string, toolName: string, args: Record<string, unknown>): Promise<unknown>;
+  listTools(pluginId: string): Promise<unknown>;
   openPlugin(pluginId: string, name: string, icon: string, installPath: string, windowMode?: string): Promise<void>;
   closePlugin(pluginId: string): Promise<void>;
   readonly windowControls: {
@@ -54,6 +56,12 @@ const wsUrl = `ws://127.0.0.1:${process.env.NUSASHELL_PORT ?? "9130"}`;
 
 const api: ShellApi = {
   wsUrl,
+  callTool(pluginId, toolName, args) {
+    return ipcRenderer.invoke("tool:call", pluginId, toolName, args);
+  },
+  listTools(pluginId) {
+    return ipcRenderer.invoke("tool:list", pluginId);
+  },
   openPlugin(pluginId, name, icon, installPath, windowMode) {
     return ipcRenderer.invoke("window:open-plugin", pluginId, name, icon, installPath, windowMode);
   },

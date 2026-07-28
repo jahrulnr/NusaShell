@@ -16,7 +16,7 @@ describe("loadConfig", () => {
       model: undefined,
       baseUrl: undefined,
       apiKey: undefined,
-      maxToolRounds: 8,
+      maxToolRounds: 50,
       strategy: "failover",
       totalAttemptBudget: 4,
       stream: true,

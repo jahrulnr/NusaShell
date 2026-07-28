@@ -208,7 +208,7 @@ export function createContainer(options: ContainerOptions): Container {
     agentProviderRegistry,
     agentToolGateway,
     options.ai?.providerId || (options.ai?.stubEnabled ? "stub" : ""),
-    options.ai?.maxToolRounds ?? 8,
+    options.ai?.maxToolRounds ?? 50,
     logger,
     options.ai?.context,
     aiRuntime,

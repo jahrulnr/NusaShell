@@ -41,8 +41,10 @@ export function formatTokenCount(value) {
 
 export function formatContextUsage(usedTokens, contextWindow) {
   const used = Number.isFinite(usedTokens) && usedTokens > 0 ? usedTokens : 0;
-  const limit = formatTokenCount(contextWindow);
-  return limit ? `${formatTokenCount(used)}/${limit} context` : `${used} ctx`;
+  if (Number.isFinite(contextWindow) && contextWindow > 0) {
+    return `${formatTokenCount(used)}/${formatTokenCount(contextWindow)} context`;
+  }
+  return `${used} ctx`;
 }
 
 export function estimateContextTokens(messages = []) {

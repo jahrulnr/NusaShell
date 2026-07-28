@@ -85,7 +85,7 @@ function parseAiApi(value: string | undefined): AiConfig["api"] {
 }
 
 function parseMaxToolRounds(value: string | undefined): number {
-  return integerInRange(value, 1, 32, 8);
+  return integerInRange(value, 1, 100, 50);
 }
 
 function integerInRange(value: string | undefined, min: number, max: number, fallback: number): number {
