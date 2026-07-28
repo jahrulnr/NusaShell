@@ -6,6 +6,9 @@ import type { LogObserver } from "@nusashell/infrastructure";
 export interface BootstrapOptions {
   readonly config?: Partial<AppConfig>;
   readonly loggerObserver?: LogObserver;
+  readonly promptsRoot?: string;
+  readonly docsRoot?: string;
+  readonly docsIndexStorageRoot?: string;
 }
 
 export interface BootstrapResult {
@@ -23,6 +26,9 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     host: config.host,
     ...(config.pluginsRoot !== undefined ? { pluginsRoot: config.pluginsRoot } : {}),
     ...(config.dbPath !== undefined ? { dbPath: config.dbPath } : {}),
+    ...(options.promptsRoot !== undefined ? { promptsRoot: options.promptsRoot } : {}),
+    ...(options.docsRoot !== undefined ? { docsRoot: options.docsRoot } : {}),
+    ...(options.docsIndexStorageRoot !== undefined ? { docsIndexStorageRoot: options.docsIndexStorageRoot } : {}),
     logLevel: config.logLevel,
     ai: {
       providerId: config.ai.providerId,

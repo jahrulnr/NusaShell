@@ -178,7 +178,7 @@ export function createContainer(options: ContainerOptions): Container {
 
   const agentToolGateway = new McpAgentToolGateway(runtimeManager, docsIndex);
   const promptLoader = new FilesystemPromptLoader(
-    options.promptsRoot ?? new URL("../../resources/agent/prompts", import.meta.url).pathname,
+    options.promptsRoot ?? new URL("../../../resources/agent/prompts", import.meta.url).pathname,
   );
   const agentProviders: AgentProvider[] = options.ai?.stubEnabled ? [new StaticAgentProvider()] : [];
   if (options.ai?.baseUrl) {

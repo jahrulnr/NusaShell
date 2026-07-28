@@ -33,7 +33,7 @@ export function clampModelEffort(model, effort) {
 }
 
 export function formatTokenCount(value) {
-  if (!Number.isFinite(value) || value <= 0) return "";
+  if (!Number.isFinite(value) || value <= 0) return "0";
   if (value >= 1_000_000) return `${Number((value / 1_000_000).toFixed(1))}M`;
   if (value >= 1_000) return `${Math.round(value / 1_000)}K`;
   return String(value);
@@ -43,6 +43,10 @@ export function formatContextUsage(usedTokens, contextWindow) {
   const used = Number.isFinite(usedTokens) && usedTokens > 0 ? usedTokens : 0;
   const limit = formatTokenCount(contextWindow);
   return limit ? `${formatTokenCount(used)}/${limit} context` : `${used} ctx`;
+}
+
+export function estimateContextTokens(messages = []) {
+  return Math.ceil(messages.reduce((total, message) => total + (typeof message.content === "string" ? message.content.length : JSON.stringify(message.content || "").length), 0) / 4);
 }
 
 function normalize(value) {

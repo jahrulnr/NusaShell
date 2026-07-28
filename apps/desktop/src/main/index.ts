@@ -71,10 +71,23 @@ if (isDev) {
   app.commandLine.appendSwitch("no-sandbox");
 }
 
+function getRuntimeRoot(): string {
+  return app.isPackaged ? process.resourcesPath : resolve(__dirname, "..", "..", "..", "..");
+}
+
+function getDataRoot(): string {
+  return app.isPackaged ? app.getPath("userData") : resolve(__dirname, "..", "..", "..", "..");
+}
+
 async function startBackend(): Promise<BootstrapResult> {
+  const runtimeRoot = getRuntimeRoot();
+  const dataRoot = getDataRoot();
   const pluginsRoot = app.isPackaged
     ? resolve(process.resourcesPath, "plugins", "examples")
     : resolve(__dirname, "..", "..", "..", "..", "plugins", "examples");
+  const promptsRoot = resolve(runtimeRoot, "resources", "agent", "prompts");
+  const docsRoot = resolve(runtimeRoot, "resources", "agent", "docs");
+  const docsIndexStorageRoot = resolve(dataRoot, ".nusashell", "agent", "docs-index");
 
   // SQLite requires better-sqlite3 native module rebuilt for Electron's ABI.
   // Until that's set up, default to filesystem registry. Set NUSASHELL_DB_PATH to opt in.
@@ -84,6 +97,9 @@ async function startBackend(): Promise<BootstrapResult> {
   const activeProvider = aiSettings.providers.find((provider) => provider.id === aiSettings?.activeProviderId);
   const activeModel = flattenModelCatalog(aiSettings.providers).find((model) => model.key === aiSettings?.activeModelKey);
   const result = await bootstrap({
+    promptsRoot,
+    docsRoot,
+    docsIndexStorageRoot,
     config: { port: 9130, host: "127.0.0.1", pluginsRoot, dbPath, logLevel: isDev ? "debug" : "info", ai: {
       providerId: activeProvider?.id ?? (aiStubEnabled ? "stub" : ""),
       stubEnabled: aiStubEnabled,

@@ -1,5 +1,5 @@
 import { buildAgentContext, mergeCompactionCheckpoint, renderAssistantMarkdown, searchConversations } from "./agent-conversation-ui.js";
-import { formatContextUsage } from "./ai-model-ui.js";
+import { estimateContextTokens, formatContextUsage } from "./ai-model-ui.js";
 
 export class AgentConversationController {
   constructor({ shell, runTurn, cancelTurn, getActiveModel, notify, log }) {
@@ -407,10 +407,6 @@ function element(tagName, className, content) {
 
 function tag(content, extraClass = "") {
   return element("span", `agent-turn-tag${extraClass ? ` ${extraClass}` : ""}`, content);
-}
-
-function estimateContextTokens(messages = []) {
-  return Math.ceil(messages.reduce((total, message) => total + (typeof message.content === "string" ? message.content.length : JSON.stringify(message.content || "").length), 0) / 4);
 }
 
 function formatTime(timestamp) {

@@ -1,7 +1,7 @@
 // NusaShell launcher renderer — connects to backend via WebSocket,
 // renders plugin grid, and handles plugin lifecycle actions.
 // Uses the native browser WebSocket (not the `ws` npm package).
-import { clampModelEffort, formatContextUsage, formatTokenCount, modelCompatibility, searchModels } from "./ai-model-ui.js";
+import { clampModelEffort, estimateContextTokens, formatContextUsage, formatTokenCount, modelCompatibility, searchModels } from "./ai-model-ui.js";
 import { AgentConversationController } from "./agent-conversation-controller.js";
 import { filterLauncherPlugins, positionContextMenu } from "./launcher-ui.js";
 
