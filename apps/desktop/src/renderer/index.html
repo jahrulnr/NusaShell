@@ -224,27 +224,6 @@
           <article class="provider-registry-card accent-oa" data-provider-preset="openai"><div class="provider-card-head"><span class="provider-mark">OA</span><div><h2>OpenAI</h2><p>API KEY · RESPONSES</p></div><button type="button" class="provider-toggle" aria-label="Enable OpenAI" disabled>●</button></div><p>Official OpenAI Responses API with native tool-call mapping.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
           <article class="provider-registry-card accent-ai" data-provider-preset="claude"><div class="provider-card-head"><span class="provider-mark">AI</span><div><h2>Claude API</h2><p>API KEY · MESSAGES</p></div><button type="button" class="provider-toggle" aria-label="Enable Claude API" disabled>●</button></div><p>Official Anthropic Messages API with native tool-use mapping.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
         </div>
-        <div class="provider-modal-overlay" id="provider-modal-overlay" hidden></div>
-        <form class="settings-card provider-settings-card" id="ai-settings-form" hidden>
-          <div class="provider-modal-head"><div><div class="settings-card-title" id="ai-settings-title">Configure provider</div><p class="provider-modal-subtitle" id="ai-settings-subtitle"></p></div><button class="provider-modal-close" id="ai-settings-close" type="button" aria-label="Close provider details">×</button></div>
-          <input id="settings-ai-provider-type" type="hidden" value="openai-compatible">
-          <div class="provider-custom-fields" id="provider-custom-fields" hidden>
-            <label class="settings-field">Name<input id="settings-ai-name" autocomplete="off" placeholder="My gateway"></label>
-            <label class="settings-field">ID / prefix<input id="settings-ai-id" autocomplete="off" placeholder="my-gateway"></label>
-            <label class="settings-field">API type<select id="settings-ai-api"><option value="chat">Chat completions</option><option value="responses">Responses</option><option value="messages">Messages</option></select></label>
-          </div>
-          <input id="settings-ai-preset-id" type="hidden">
-          <label class="settings-field">Base URL<input id="settings-ai-base-url" type="url" autocomplete="url" placeholder="https://api.openai.com/v1"></label>
-          <label class="settings-field">API key<input id="settings-ai-api-key" type="password" autocomplete="off" placeholder="Leave blank to keep saved key"></label>
-          <label class="settings-field">Default model <span class="field-optional">Optional</span><input id="settings-ai-model" autocomplete="off" placeholder="Leave blank and choose after importing"></label>
-          <div class="provider-runtime-fields">
-            <label class="settings-field">Timeout (seconds)<input id="settings-ai-timeout" type="number" min="1" max="600" value="60"></label>
-            <label class="settings-field">Attempts<input id="settings-ai-attempts" type="number" min="1" max="10" value="1"></label>
-            <label class="settings-field">Weight<input id="settings-ai-weight" type="number" min="1" max="100" value="1"></label>
-          </div>
-          <label class="provider-enabled-field"><input id="settings-ai-enabled" type="checkbox" checked> Enabled</label>
-          <div class="settings-row"><span id="settings-ai-key-state">No API key saved</span><button class="mini-btn" type="submit">Save provider</button></div>
-        </form>
       </section>
 
       <section class="view" data-view="provider-details">
@@ -412,6 +391,29 @@
       </div>
     </div>
   </div>
+
+  <!-- ===== Provider editor modal ===== -->
+  <div class="provider-modal-overlay" id="provider-modal-overlay" hidden></div>
+  <form class="settings-card provider-settings-card" id="ai-settings-form" hidden>
+    <div class="provider-modal-head"><div><div class="settings-card-title" id="ai-settings-title">Configure provider</div><p class="provider-modal-subtitle" id="ai-settings-subtitle"></p></div><button class="provider-modal-close" id="ai-settings-close" type="button" aria-label="Close provider details">×</button></div>
+    <input id="settings-ai-provider-type" type="hidden" value="openai-compatible">
+    <div class="provider-custom-fields" id="provider-custom-fields" hidden>
+      <label class="settings-field">Name<input id="settings-ai-name" autocomplete="off" placeholder="My gateway"></label>
+      <label class="settings-field">ID / prefix<input id="settings-ai-id" autocomplete="off" placeholder="my-gateway"></label>
+      <label class="settings-field">API type<select id="settings-ai-api"><option value="chat">Chat completions</option><option value="responses">Responses</option><option value="messages">Messages</option></select></label>
+    </div>
+    <input id="settings-ai-preset-id" type="hidden">
+    <label class="settings-field">Base URL<input id="settings-ai-base-url" type="url" autocomplete="url" placeholder="https://api.openai.com/v1"></label>
+    <label class="settings-field">API key<input id="settings-ai-api-key" type="password" autocomplete="off" placeholder="Leave blank to keep saved key"></label>
+    <label class="settings-field">Default model <span class="field-optional">Optional</span><input id="settings-ai-model" autocomplete="off" placeholder="Leave blank and choose after importing"></label>
+    <div class="provider-runtime-fields">
+      <label class="settings-field">Timeout (seconds)<input id="settings-ai-timeout" type="number" min="1" max="600" value="60"></label>
+      <label class="settings-field">Attempts<input id="settings-ai-attempts" type="number" min="1" max="10" value="1"></label>
+      <label class="settings-field">Weight<input id="settings-ai-weight" type="number" min="1" max="100" value="1"></label>
+    </div>
+    <label class="provider-enabled-field"><input id="settings-ai-enabled" type="checkbox" checked> Enabled</label>
+    <div class="settings-row"><span id="settings-ai-key-state">No API key saved</span><button class="mini-btn" type="submit">Save provider</button></div>
+  </form>
 
   <!-- ===== Toast container ===== -->
   <div class="provider-delete-overlay" id="provider-delete-overlay" hidden></div>
