@@ -1,4 +1,6 @@
 import type {
+  CompletionReference,
+  CompletionResult,
   McpClientFactoryPort,
   McpClientPort,
   PromptDescriptor,
@@ -97,6 +99,14 @@ export class FakeMcpClient implements McpClientPort {
 
   async readResource(uri: string): Promise<ResourceReadResult> {
     return this.resourceResults.get(uri) ?? { contents: [] };
+  }
+
+  async complete(
+    _reference: CompletionReference,
+    _argument: { readonly name: string; readonly value: string },
+    _context?: { readonly arguments?: Readonly<Record<string, string>> },
+  ): Promise<CompletionResult> {
+    return { values: [] };
   }
 
   async callTool(

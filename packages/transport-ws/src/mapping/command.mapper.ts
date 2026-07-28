@@ -9,10 +9,11 @@ import type {
   CancelToolCallCommand,
   SetPluginAutostartCommand,
   RunAgentTurnCommand,
+  CancelAgentTurnCommand,
 } from "@nusashell/application";
 
 export function mapToCommand(request: ParsedRequest):
-  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | SetPluginAutostartCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand }
+  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | SetPluginAutostartCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand | CancelAgentTurnCommand }
   | { kind: "query" } {
   switch (request.method) {
     case "plugin.start":
@@ -89,8 +90,20 @@ export function mapToCommand(request: ParsedRequest):
           messages: request.payload.messages,
           pluginIds: request.payload.pluginIds,
           ...(request.payload.providerId !== undefined ? { providerId: request.payload.providerId } : {}),
+          ...(request.payload.model !== undefined ? { model: request.payload.model } : {}),
+          ...(request.payload.effort !== undefined ? { effort: request.payload.effort } : {}),
+          ...(request.payload.modelCapabilities !== undefined ? { modelCapabilities: request.payload.modelCapabilities } : {}),
+          ...(request.payload.traceId !== undefined ? { traceId: request.payload.traceId } : {}),
           ...(request.payload.maxToolRounds !== undefined ? { maxToolRounds: request.payload.maxToolRounds } : {}),
         } as RunAgentTurnCommand,
+      };
+    case "agent.cancel":
+      return {
+        kind: "command",
+        command: {
+          kind: "cancel-agent-turn",
+          traceId: request.payload.traceId,
+        } as CancelAgentTurnCommand,
       };
     default:
       return { kind: "query" };

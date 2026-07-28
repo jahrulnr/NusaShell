@@ -28,6 +28,8 @@ export {
   ResourceListRequestSchema,
   ResourceTemplateListRequestSchema,
   ResourceReadRequestSchema,
+  AgentRunRequestSchema,
+  AgentCancelRequestSchema,
   SubscribeRequestSchema,
   UnsubscribeRequestSchema,
   type PluginStartRequest,
@@ -46,6 +48,8 @@ export {
   type ResourceListRequest,
   type ResourceTemplateListRequest,
   type ResourceReadRequest,
+  type AgentRunRequest,
+  type AgentCancelRequest,
   type ParsedRequest,
 } from "./protocol/request-schemas.js";
 
@@ -79,6 +83,7 @@ export {
   PluginCrashedEventSchema,
   PluginStateChangedEventSchema,
   ToolCallCompletedEventSchema,
+  AgentTextDeltaEventSchema,
   type PluginInstalledEvent,
   type PluginUninstalledEvent,
   type PluginStartedEvent,
@@ -86,6 +91,7 @@ export {
   type PluginCrashedEvent,
   type PluginStateChangedEvent,
   type ToolCallCompletedEvent,
+  type AgentTextDeltaEvent,
   type ParsedEvent,
 } from "./protocol/event-schemas.js";
 

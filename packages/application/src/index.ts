@@ -9,7 +9,9 @@ export {
 // Events
 export {
   EventDispatcher,
+  createAgentTextDeltaEvent,
   type ApplicationEvent,
+  type AgentTextDeltaEvent,
   type EventHandler,
   type EventHandlerFn,
 } from "./events/index.js";
@@ -41,6 +43,8 @@ export type {
   ResourceDescriptor,
   ResourceReadResult,
   ResourceTemplateDescriptor,
+  CompletionReference,
+  CompletionResult,
   ClockPort,
   LoggerPort,
 } from "./plugin/index.js";
@@ -87,21 +91,37 @@ export { CallToolHandler, CancelToolCallHandler, ListToolsHandler } from "./tool
 // Agent runtime
 export type {
   AgentMessage,
+  AgentContentPart,
+  AgentModelCapabilities,
+  AgentTokenUsage,
   AgentToolCall,
   AgentToolDefinition,
   AgentProviderRequest,
   AgentProviderResult,
   AgentProvider,
   AgentProviderRegistryPort,
+  ReasoningEffort,
   AgentToolGateway,
   AgentTurnRunnerDeps,
   RunAgentTurnInput,
   AgentTurnResult,
   AgentToolExecution,
   AgentTurnWorker,
+  AgentProviderStrategy,
+  RoutedAgentProviderOptions,
   RunAgentTurnCommand,
+  CancelAgentTurnCommand,
+  CancelAgentTurnResult,
 } from "./agent/index.js";
-export { AgentTurnRunner, McpAgentToolGateway, InProcessAgentTurnWorker, RunAgentTurnHandler } from "./agent/index.js";
+export {
+  AgentTurnRunner,
+  McpAgentToolGateway,
+  InProcessAgentTurnWorker,
+  RoutedAgentProvider,
+  AgentTurnCoordinator,
+  RunAgentTurnHandler,
+  CancelAgentTurnHandler,
+} from "./agent/index.js";
 
 // Config
 export { type AppConfig, loadConfig } from "./config/index.js";

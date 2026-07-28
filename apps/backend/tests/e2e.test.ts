@@ -13,7 +13,12 @@ describe("E2E: notes plugin", () => {
   let client: NusaClient;
 
   beforeAll(async () => {
-    container = createContainer({ port: PORT, host: "127.0.0.1", pluginsRoot: PLUGINS_ROOT });
+    container = createContainer({
+      port: PORT,
+      host: "127.0.0.1",
+      pluginsRoot: PLUGINS_ROOT,
+      ai: { providerId: "stub", stubEnabled: true, maxToolRounds: 8 },
+    });
     await container.wsServer.start();
 
     client = new NusaClient({ url: `ws://127.0.0.1:${PORT}`, defaultTimeoutMs: 15000 });

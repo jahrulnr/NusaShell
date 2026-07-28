@@ -12,6 +12,8 @@ export type {
   ResourceDescriptor,
   ResourceReadResult,
   ResourceTemplateDescriptor,
+  CompletionReference,
+  CompletionResult,
   ClockPort,
   LoggerPort,
 } from "./ports/index.js";

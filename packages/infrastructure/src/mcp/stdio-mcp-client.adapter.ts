@@ -1,6 +1,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type {
+  CompletionReference,
+  CompletionResult,
   McpClientPort,
   PromptDescriptor,
   PromptResult,
@@ -10,12 +12,7 @@ import type {
   ToolDescriptor,
 } from "@nusashell/application";
 import type { Logger } from "pino";
-
-function redactMcpLog(message: string): string {
-  return message
-    .replace(/([?&](?:token|password|secret|api[_-]?key|authorization)=)[^&\s]+/gi, "$1[REDACTED]")
-    .replace(/((?:token|password|secret|api[_-]?key|authorization)["']?\s*[:=]\s*["']?)[^,\s}"']+/gi, "$1[REDACTED]");
-}
+import { redactMcpText, registerMcpLogging } from "./mcp-logging.js";
 
 export class StdioMcpClient implements McpClientPort {
   private client: Client | null = null;
@@ -50,7 +47,7 @@ export class StdioMcpClient implements McpClientPort {
 
     this.transport.stderr?.on("data", (chunk: Buffer | string) => {
       const message = String(chunk).trim();
-      if (message) this.logger?.warn({ command: this.command, message: redactMcpLog(message) }, "MCP stderr");
+      if (message) this.logger?.warn({ command: this.command, message: redactMcpText(message) }, "MCP stderr");
     });
 
     let closed = false;
@@ -66,6 +63,7 @@ export class StdioMcpClient implements McpClientPort {
       { name: "nusashell-backend", version: "0.0.2" },
       { capabilities: {} },
     );
+    registerMcpLogging(this.client, this.logger, this.command);
 
     // Race connect against transport close + timeout to avoid hanging
     // when the MCP process exits immediately (e.g. broken deps)
@@ -184,6 +182,23 @@ export class StdioMcpClient implements McpClientPort {
         ...(content.mimeType !== undefined ? { mimeType: content.mimeType } : {}),
         ...("text" in content ? { text: content.text } : { blob: content.blob }),
       })),
+    };
+  }
+
+  async complete(
+    reference: CompletionReference,
+    argument: { readonly name: string; readonly value: string },
+    context?: { readonly arguments?: Readonly<Record<string, string>> },
+  ): Promise<CompletionResult> {
+    const result = await this.requireClient().complete({
+      ref: reference,
+      argument,
+      ...(context ? { context: { arguments: { ...context.arguments } } } : {}),
+    });
+    return {
+      values: result.completion.values,
+      ...(typeof result.completion.total === "number" ? { total: result.completion.total } : {}),
+      ...(typeof result.completion.hasMore === "boolean" ? { hasMore: result.completion.hasMore } : {}),
     };
   }
 

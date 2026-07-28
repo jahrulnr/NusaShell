@@ -109,6 +109,9 @@ importers:
       vite:
         specifier: ^5.4.0
         version: 5.4.21(@types/node@22.20.1)(terser@5.49.0)
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@22.20.1)(jiti@2.7.0)(supports-color@8.1.1)(terser@5.49.0)(tsx@4.23.1)
 
   packages/application:
     dependencies:

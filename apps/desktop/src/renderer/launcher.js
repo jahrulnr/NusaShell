@@ -1,6 +1,8 @@
 // NusaShell launcher renderer — connects to backend via WebSocket,
 // renders plugin grid, and handles plugin lifecycle actions.
 // Uses the native browser WebSocket (not the `ws` npm package).
+import { clampModelEffort, formatTokenCount, modelCompatibility, searchModels } from "./ai-model-ui.js";
+import { AgentConversationController } from "./agent-conversation-controller.js";
 
 const WS_URL = window.shell?.wsUrl ?? "ws://127.0.0.1:9130";
 const PROTOCOL_VERSION = "1.0";
@@ -52,7 +54,10 @@ function connectWs() {
           ctrl.resolve(msg.result);
         } else {
           writeRendererLog("warn", `WebSocket request failed: ${msg.error?.message ?? "Unknown error"}`);
-          ctrl.reject(new Error(msg.error?.message ?? "Unknown error"));
+          const error = new Error(msg.error?.message ?? "Unknown error");
+          error.code = msg.error?.code;
+          error.details = msg.error?.details;
+          ctrl.reject(error);
         }
       }
     } else if (msg.kind === "event") {
@@ -121,10 +126,10 @@ let currentPlugin = null;
 let logSourceFilter = "all";
 const logEntries = [];
 const STATES = ["idle", "starting", "running", "stopping", "crashed"];
-const agentMessages = [];
-const agentPluginScope = new Set();
-let agentTurnPending = false;
-let agentContextPluginId = "";
+let agentConversationController = null;
+let aiSettings = { activeProviderId: "", activeModelKey: "", effort: "auto", providers: [], models: [] };
+let currentProviderDetailId = "";
+let pendingProviderDeleteId = "";
 
 // ============ Helpers ============
 
@@ -273,22 +278,6 @@ async function listTools(pluginId) {
   try { return await sendRequest("tool.list", { pluginId }); } catch (e) { return { tools: [] }; }
 }
 
-async function listPrompts(pluginId) {
-  try { return await sendRequest("prompt.list", { pluginId }); } catch (e) { return { prompts: [] }; }
-}
-
-async function getPrompt(pluginId, name, args) {
-  return sendRequest("prompt.get", { pluginId, name, args });
-}
-
-async function listResources(pluginId) {
-  try { return await sendRequest("resource.list", { pluginId }); } catch (e) { return { resources: [] }; }
-}
-
-async function readResource(pluginId, uri) {
-  return sendRequest("resource.read", { pluginId, uri });
-}
-
 async function callTool(pluginId, toolName, args) {
   const requestId = `req_${crypto.randomUUID()}`;
   try { return await sendRequest("tool.call", { pluginId, requestId, toolName, args }); }
@@ -318,8 +307,42 @@ async function setPluginAutostart(pluginId, autostart) {
   catch (e) { return { error: e.message }; }
 }
 
-async function runAgentTurn(messages, pluginIds) {
-  return sendRequest("agent.run", { messages, pluginIds }, 120000);
+async function runAgentTurn(messages, options = {}) {
+  const selected = aiSettings.models.find((model) => model.key === aiSettings.activeModelKey);
+  if (!selected) throw new Error("Choose an imported AI model before sending a turn.");
+  const dispose = options.onDelta
+    ? onEvent("agent.text_delta", (payload) => {
+      if (payload?.traceId === options.traceId && payload.delta) options.onDelta(payload.delta);
+    })
+    : () => {};
+  try {
+    return await sendRequest("agent.run", {
+      messages,
+      pluginIds: [],
+      providerId: selected.providerId,
+      model: selected.id,
+      effort: aiSettings.effort,
+      modelCapabilities: {
+        contextWindow: selected.contextWindow,
+        maxOutput: selected.maxOutput,
+        inputModes: selected.inputModes,
+        outputModes: selected.outputModes,
+        supportedEfforts: selected.supportedEfforts,
+        defaultEffort: selected.defaultEffort,
+        reasoningSupported: selected.reasoningSupported,
+        reasoningMandatory: selected.reasoningMandatory,
+        reasoningSupportsMaxTokens: selected.reasoningSupportsMaxTokens,
+        supportsTools: selected.supportsTools,
+      },
+      ...(options.traceId ? { traceId: options.traceId } : {}),
+    }, 300000);
+  } finally {
+    dispose();
+  }
+}
+
+async function cancelAgentTurn(traceId) {
+  return sendRequest("agent.cancel", { traceId });
 }
 
 // ============ View Switching ============
@@ -331,7 +354,7 @@ function switchView(viewName) {
   $$("[data-nav]").forEach(n => n.classList.toggle("active", n.dataset.view === viewName));
   closeDrawer();
   hideContextMenu();
-  if (viewName === "agent") renderAgentScope();
+  if (viewName === "agent") agentConversationController?.renderList();
   if (viewName === "autostart") renderAutostartList();
 }
 
@@ -371,213 +394,6 @@ function renderAutostartList() {
 }
 
 // ============ Agent workspace ============
-
-function renderAgentScope() {
-  const list = $("#agent-scope-list");
-  const count = $("#agent-scope-count");
-  if (!list || !count) return;
-
-  const running = plugins.filter((plugin) => plugin.state === "running");
-  for (const pluginId of [...agentPluginScope]) {
-    if (!running.some((plugin) => plugin.pluginId === pluginId)) agentPluginScope.delete(pluginId);
-  }
-  count.textContent = `${agentPluginScope.size} selected`;
-  list.textContent = "";
-  if (running.length === 0) {
-    list.appendChild(el("div", "agent-scope-empty", "No MCP is running. The agent can use mcp_enable when a turn needs one."));
-    return;
-  }
-  running.forEach((plugin) => {
-    const label = el("label", "agent-scope-item");
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = agentPluginScope.has(plugin.pluginId);
-    checkbox.addEventListener("change", () => {
-      if (checkbox.checked) agentPluginScope.add(plugin.pluginId);
-      else agentPluginScope.delete(plugin.pluginId);
-      renderAgentScope();
-    });
-    const icon = el("span", "agent-scope-icon");
-    icon.textContent = isUrlIcon(plugin.icon) || isFileIcon(plugin.icon) ? "◈" : (plugin.icon || "🧩");
-    const name = el("span", "agent-scope-name");
-    name.textContent = plugin.name;
-    label.append(checkbox, icon, name);
-    list.appendChild(label);
-  });
-  renderAgentContext();
-}
-
-async function renderAgentContext() {
-  const select = $("#agent-context-plugin");
-  const groups = $("#agent-context-groups");
-  if (!select || !groups) return;
-  const running = plugins.filter((plugin) => plugin.state === "running");
-  select.textContent = "";
-  if (running.length === 0) {
-    const option = document.createElement("option");
-    option.textContent = "Start an MCP server to browse context";
-    option.value = "";
-    select.appendChild(option);
-    select.disabled = true;
-    groups.textContent = "";
-    return;
-  }
-  select.disabled = false;
-  if (!running.some((plugin) => plugin.pluginId === agentContextPluginId)) agentContextPluginId = running[0].pluginId;
-  running.forEach((plugin) => {
-    const option = document.createElement("option");
-    option.value = plugin.pluginId;
-    option.textContent = plugin.name;
-    option.selected = plugin.pluginId === agentContextPluginId;
-    select.appendChild(option);
-  });
-  select.onchange = () => { agentContextPluginId = select.value; void renderAgentContext(); };
-  groups.textContent = "";
-  const [promptResult, resourceResult] = await Promise.all([listPrompts(agentContextPluginId), listResources(agentContextPluginId)]);
-  if (select.value !== agentContextPluginId) return;
-  renderAgentContextGroup(groups, "Prompts", promptResult.prompts, "prompt");
-  renderAgentContextGroup(groups, "Resources", resourceResult.resources, "resource");
-}
-
-function renderAgentContextGroup(container, title, items, type) {
-  const group = el("section", "agent-context-group");
-  const heading = el("div", "agent-context-group-title", `${title} <span>${items.length}</span>`);
-  group.appendChild(heading);
-  if (items.length === 0) {
-    group.appendChild(el("div", "agent-context-empty", `No ${title.toLowerCase()} exposed by this MCP.`));
-  } else {
-    items.forEach((item) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "agent-context-item";
-      button.textContent = item.name;
-      button.title = item.description || item.uri || item.name;
-      button.addEventListener("click", () => {
-        if (type === "prompt") void insertMcpPrompt(item);
-        else void attachMcpResource(item);
-      });
-      group.appendChild(button);
-    });
-  }
-  container.appendChild(group);
-}
-
-async function insertMcpPrompt(prompt) {
-  try {
-    const args = {};
-    for (const argument of prompt.arguments || []) {
-      const value = window.prompt(argument.required ? `Value for ${argument.name} (required)` : `Value for ${argument.name} (optional)`);
-      if (value === null && argument.required) return;
-      if (value) args[argument.name] = value;
-    }
-    const result = await getPrompt(agentContextPluginId, prompt.name, args);
-    const text = result.messages.map((message) => message.content?.text || `[${message.content?.type || "content"} prompt content]`).join("\n\n");
-    if (!text) { showToast("This MCP prompt returned no text messages.", "error"); return; }
-    agentMessages.push(...result.messages.filter((message) => message.content?.type === "text").map((message) => ({ role: message.role, content: message.content.text })));
-    appendAgentMessage("user", `Inserted MCP prompt: ${prompt.name}`);
-    showToast(`Prompt ${prompt.name} inserted into this conversation.`, "success");
-  } catch (error) {
-    showToast(`Could not load prompt: ${error.message || error}`, "error");
-  }
-}
-
-async function attachMcpResource(resource) {
-  try {
-    const result = await readResource(agentContextPluginId, resource.uri);
-    const text = result.contents.filter((content) => typeof content.text === "string").map((content) => content.text).join("\n\n");
-    if (!text) { showToast("This resource is binary and cannot be attached as text.", "error"); return; }
-    const selectedPlugin = plugins.find((plugin) => plugin.pluginId === agentContextPluginId);
-    const content = `MCP resource from ${selectedPlugin?.name || agentContextPluginId} (${resource.uri}):\n${text}`;
-    agentMessages.push({ role: "user", content });
-    appendAgentMessage("user", `Attached MCP resource: ${resource.name}`);
-    showToast(`Resource ${resource.name} attached to this conversation.`, "success");
-  } catch (error) {
-    showToast(`Could not read resource: ${error.message || error}`, "error");
-  }
-}
-
-function appendAgentMessage(role, content, meta = {}) {
-  const thread = $("#agent-thread");
-  const empty = $("#agent-empty");
-  if (!thread) return null;
-  empty?.remove();
-  const message = el("article", `agent-message ${role}${meta.pending ? " agent-pending" : ""}`);
-  const label = el("div", "agent-message-meta");
-  label.textContent = role === "user" ? "YOU" : (meta.pending ? "AGENT · WORKING" : "NUSASHELL AGENT");
-  const bubble = el("div", "agent-bubble");
-  bubble.textContent = content;
-  message.append(label, bubble);
-
-  if (meta.traceId || meta.model || meta.toolCalls?.length) {
-    const details = el("div", "agent-turn-meta");
-    if (meta.model) {
-      const tag = el("span", "agent-turn-tag");
-      tag.textContent = meta.model;
-      details.appendChild(tag);
-    }
-    if (meta.traceId) {
-      const tag = el("span", "agent-turn-tag");
-      tag.textContent = `trace ${meta.traceId.slice(0, 8)}`;
-      details.appendChild(tag);
-    }
-    for (const toolCall of meta.toolCalls ?? []) {
-      const tag = el("span", "agent-turn-tag agent-tool-result");
-      tag.textContent = `${toolCall.ok ? "✓" : "!"} ${toolCall.name}`;
-      details.appendChild(tag);
-    }
-    message.appendChild(details);
-  }
-  thread.appendChild(message);
-  thread.scrollTop = thread.scrollHeight;
-  return message;
-}
-
-function resetAgentConversation() {
-  agentMessages.length = 0;
-  const thread = $("#agent-thread");
-  if (!thread) return;
-  thread.textContent = "";
-  const empty = el("div", "agent-empty");
-  empty.id = "agent-empty";
-  empty.innerHTML = "<div class=\"agent-empty-mark\">✦</div><h2>Start a bounded turn</h2><p>The local stub is ready. Start a plugin first if this turn needs MCP tools.</p>";
-  thread.appendChild(empty);
-}
-
-async function submitAgentTurn() {
-  const input = $("#agent-input");
-  const sendButton = $("#agent-send-btn");
-  const status = $("#agent-provider-status");
-  const text = input?.value.trim();
-  if (!text || agentTurnPending) return;
-
-  agentTurnPending = true;
-  input.disabled = true;
-  sendButton.disabled = true;
-  appendAgentMessage("user", text);
-  agentMessages.push({ role: "user", content: text });
-  input.value = "";
-  const pending = appendAgentMessage("assistant", "Running provider and scoped MCP tools…", { pending: true });
-  status.textContent = `Provider: stub · ${agentPluginScope.size} MCP scope`;
-
-  try {
-    const result = await runAgentTurn(agentMessages, [...agentPluginScope]);
-    pending?.remove();
-    appendAgentMessage("assistant", result.text, result);
-    agentMessages.push({ role: "assistant", content: result.text });
-    status.textContent = `Provider: ${result.model || "stub"} · ${result.rounds} round${result.rounds === 1 ? "" : "s"}`;
-    writeRendererLog("info", `Agent turn completed trace=${result.traceId} rounds=${result.rounds}`);
-  } catch (error) {
-    pending?.remove();
-    appendAgentMessage("assistant", `Turn failed: ${error.message || "Unknown error"}`);
-    status.textContent = "Provider: unavailable";
-    writeRendererLog("error", `Agent turn failed: ${error.message || String(error)}`);
-  } finally {
-    agentTurnPending = false;
-    input.disabled = false;
-    sendButton.disabled = false;
-    input.focus();
-  }
-}
 
 // ============ Render: App Grid (Home) ============
 
@@ -704,7 +520,6 @@ function handlePluginEvent(payload, eventType) {
   }
   renderAppGrid();
   renderInstalledTable();
-  renderAgentScope();
   renderAutostartList();
   if (currentPlugin?.pluginId === payload.pluginId) {
     openDrawer(plugins[idx] ?? currentPlugin);
@@ -829,7 +644,6 @@ async function refreshAll() {
   await fetchPlugins();
   renderAppGrid();
   renderInstalledTable();
-  renderAgentScope();
   renderAutostartList();
 }
 
@@ -852,17 +666,408 @@ document.addEventListener("DOMContentLoaded", () => {
   $$("[data-nav]").forEach(item => item.addEventListener("click", () => switchView(item.dataset.view)));
   $("#nav-settings-btn").addEventListener("click", () => switchView("settings"));
 
-  $("#agent-form").addEventListener("submit", (event) => {
-    event.preventDefault();
-    void submitAgentTurn();
+  const providerPresets = {
+    openrouter: { id: "openrouter", type: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", api: "chat", detail: "API key · OpenAI-compatible chat", apiKeyOptional: false },
+    omniroute: { id: "omniroute", type: "omniroute", label: "OmniRoute", baseUrl: "http://127.0.0.1:20128/v1", api: "responses", detail: "Local OpenAI-compatible Responses gateway", apiKeyOptional: true },
+    "9router": { id: "9router", type: "9router", label: "9Router", baseUrl: "http://127.0.0.1:20128/v1", api: "chat", detail: "Local OpenAI-compatible gateway", apiKeyOptional: true },
+    openai: { id: "openai", type: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", api: "responses", detail: "Official OpenAI Responses endpoint", apiKeyOptional: false },
+    claude: { id: "claude", type: "claude", label: "Claude API", baseUrl: "https://api.anthropic.com/v1", api: "messages", detail: "Anthropic model catalog · Messages compatibility", apiKeyOptional: false },
+    custom: { id: "", type: "openai-compatible", label: "Custom provider", baseUrl: "", api: "chat", detail: "OpenAI-compatible endpoint", apiKeyOptional: false },
+  };
+  const builtInProviderIds = new Set(Object.values(providerPresets).map((preset) => preset.id).filter(Boolean));
+
+  const configuredProvider = (providerId) => aiSettings.providers.find((provider) => provider.id === providerId);
+  const activeModel = () => aiSettings.models.find((model) => model.key === aiSettings.activeModelKey);
+  const setProviderEnabled = async (provider, enabled) => {
+    try {
+      aiSettings = await window.shell.aiProviders.save({
+        id: provider.id,
+        name: provider.name,
+        type: provider.type,
+        api: provider.api,
+        baseUrl: provider.baseUrl,
+        apiKey: "",
+        apiKeyOptional: provider.apiKeyOptional,
+        enabled,
+        defaultModel: provider.defaultModel,
+        timeoutMs: provider.timeoutMs,
+        maxAttempts: provider.maxAttempts,
+        weight: provider.weight,
+      });
+      syncAiControls();
+      showToast(`${provider.name} ${enabled ? "enabled" : "disabled"}.`, "success");
+    } catch (error) {
+      showToast(`Could not ${enabled ? "enable" : "disable"} ${provider.name}: ${error.message || error}`, "error");
+    }
+  };
+  const closeProviderEditor = () => { $("#ai-settings-form").hidden = true; $("#provider-modal-overlay").hidden = true; };
+  const closeProviderDeleteDialog = () => {
+    pendingProviderDeleteId = "";
+    $("#provider-delete-dialog").hidden = true;
+    $("#provider-delete-overlay").hidden = true;
+    $("#provider-delete-confirm").disabled = false;
+    $("#provider-delete-confirm").textContent = "Delete";
+  };
+  const openProviderDeleteDialog = (providerId) => {
+    const provider = configuredProvider(providerId);
+    if (!provider) return;
+    pendingProviderDeleteId = provider.id;
+    $("#provider-delete-title").textContent = `Delete ${provider.name}?`;
+    $("#provider-delete-copy").textContent = "This removes its saved credential, imported models, and connection settings from this device.";
+    $("#provider-delete-dialog").hidden = false;
+    $("#provider-delete-overlay").hidden = false;
+    $("#provider-delete-cancel").focus();
+  };
+  agentConversationController = new AgentConversationController({
+    shell: window.shell,
+    runTurn: runAgentTurn,
+    cancelTurn: cancelAgentTurn,
+    getActiveModel: activeModel,
+    notify: showToast,
+    log: writeRendererLog,
   });
-  $("#agent-input").addEventListener("keydown", (event) => {
-    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-      event.preventDefault();
-      void submitAgentTurn();
+
+  const renderProviderCards = () => {
+    $$("[data-custom-provider-card]").forEach((card) => card.remove());
+    $$("[data-provider-preset]").forEach((card) => {
+      const preset = providerPresets[card.dataset.providerPreset];
+      const provider = preset && configuredProvider(preset.id);
+      const configured = provider && (provider.hasApiKey || provider.apiKeyOptional);
+      const status = card.querySelector(".provider-status");
+      const dot = card.querySelector(".provider-toggle");
+      const action = card.querySelector(".provider-card-action");
+      const footer = card.querySelector(".provider-card-footer");
+      let actions = footer?.querySelector(".provider-card-actions");
+      if (footer && action && !actions) {
+        actions = el("div", "provider-card-actions");
+        action.replaceWith(actions);
+        actions.appendChild(action);
+      }
+      actions?.querySelector(".provider-card-delete")?.remove();
+      status.textContent = provider ? (configured ? `● Configured · ${provider.models.length} models` : "● Needs API key") : "● Not configured";
+      status.classList.toggle("configured", Boolean(configured));
+      dot?.classList.toggle("is-active", Boolean(configured && provider.enabled));
+      if (dot) {
+        dot.disabled = !provider;
+        dot.setAttribute("aria-pressed", String(Boolean(provider?.enabled)));
+        dot.setAttribute("aria-label", provider
+          ? `${provider.enabled ? "Disable" : "Enable"} ${provider.name}`
+          : `Configure ${preset.label}`);
+        dot.onclick = provider ? () => void setProviderEnabled(provider, !provider.enabled) : null;
+      }
+      card.classList.toggle("is-active", aiSettings.activeProviderId === preset?.id);
+      if (action) action.textContent = provider ? "Details" : "Configure";
+      if (provider && actions) {
+        const remove = el("button", "mini-btn danger provider-card-delete", "Delete");
+        remove.type = "button";
+        remove.addEventListener("click", () => openProviderDeleteDialog(provider.id));
+        actions.appendChild(remove);
+      }
+    });
+    aiSettings.providers.filter((provider) => !builtInProviderIds.has(provider.id)).forEach((provider) => {
+      const card = el("article", "provider-registry-card accent-custom");
+      card.dataset.customProviderCard = provider.id;
+      const head = el("div", "provider-card-head");
+      const mark = el("span", "provider-mark", "OC");
+      const identity = el("div");
+      const title = document.createElement("h2"); title.textContent = provider.name;
+      const kind = document.createElement("p"); kind.textContent = `${provider.api.toUpperCase()} · CUSTOM`;
+      identity.append(title, kind);
+      const configured = provider.hasApiKey || provider.apiKeyOptional;
+      const dot = el("button", `provider-toggle${configured && provider.enabled ? " is-active" : ""}`, "●");
+      dot.type = "button";
+      dot.setAttribute("aria-pressed", String(provider.enabled));
+      dot.setAttribute("aria-label", `${provider.enabled ? "Disable" : "Enable"} ${provider.name}`);
+      dot.addEventListener("click", () => void setProviderEnabled(provider, !provider.enabled));
+      head.append(mark, identity, dot);
+      const description = document.createElement("p"); description.textContent = provider.baseUrl;
+      const footer = el("div", "provider-card-footer");
+      const status = el("span", `provider-status${configured ? " configured" : ""}`, configured ? `● Configured · ${provider.models.length} models` : "● Needs API key");
+      const actions = el("div", "provider-card-actions");
+      const action = el("button", "mini-btn", "Details"); action.type = "button";
+      action.addEventListener("click", () => showProviderDetail(provider.id));
+      const remove = el("button", "mini-btn danger", "Delete"); remove.type = "button";
+      remove.addEventListener("click", () => openProviderDeleteDialog(provider.id));
+      actions.append(action, remove);
+      footer.append(status, actions);
+      card.append(head, description, footer);
+      $("#provider-registry").appendChild(card);
+    });
+  };
+
+  const renderAgentModelPicker = () => {
+    const selected = activeModel();
+    $("#agent-model-trigger-label").textContent = `${selected?.id || "Choose model"} · ${aiSettings.effort || "auto"}`;
+    $("#agent-provider-status").textContent = selected ? `${selected.providerName} · ${selected.id}` : "Choose a model";
+    const list = $("#agent-model-list");
+    list.textContent = "";
+    const models = searchModels(aiSettings.models, $("#agent-model-search").value);
+    if (models.length === 0) {
+      list.appendChild(el("div", "agent-model-empty", aiSettings.models.length ? "No models match this search." : "No imported models. Open a provider and import its catalog."));
+      return;
+    }
+    models.forEach((model) => {
+      const row = el("div", `agent-model-row${model.key === aiSettings.activeModelKey ? " is-selected" : ""}`);
+      const choose = el("button", "agent-model-choice"); choose.type = "button"; choose.setAttribute("role", "option");
+      const name = el("span", "agent-model-name"); name.textContent = model.label || model.id;
+      const meta = el("span", "agent-model-meta");
+      const provider = el("span", "agent-model-provider"); provider.textContent = model.providerName;
+      meta.appendChild(provider);
+      modelCompatibility(model).forEach((capability) => { const badge = el("span", "agent-model-capability"); badge.textContent = capability; meta.appendChild(badge); });
+      choose.append(name, meta);
+      choose.addEventListener("click", () => void selectAgentModel(model.key, clampModelEffort(model, aiSettings.effort)));
+      row.appendChild(choose);
+      if (model.supportedEfforts.length > 0) {
+        const effortRow = el("div", "agent-model-efforts");
+        ["auto", ...model.supportedEfforts.filter((effort) => effort !== "auto")].forEach((effort) => {
+          const button = el("button", `agent-effort-option${model.key === aiSettings.activeModelKey && effort === aiSettings.effort ? " is-selected" : ""}`, effort);
+          button.type = "button";
+          button.addEventListener("click", () => void selectAgentModel(model.key, effort));
+          effortRow.appendChild(button);
+        });
+        row.appendChild(effortRow);
+      }
+      list.appendChild(row);
+    });
+  };
+
+  const syncAiControls = () => {
+    renderProviderCards();
+    renderAgentModelPicker();
+    if (currentProviderDetailId) renderProviderDetail();
+    $("#settings-ai-strategy").value = aiSettings.strategy || "failover";
+    $("#settings-ai-budget").value = aiSettings.totalAttemptBudget || 4;
+    $("#settings-ai-stream").checked = aiSettings.stream !== false;
+    $("#settings-ai-vision").value = aiSettings.vision || "auto";
+  };
+
+  const selectAgentModel = async (modelKey, effort) => {
+    try {
+      aiSettings = await window.shell.aiProviders.select({ modelKey, effort });
+      syncAiControls();
+      $("#agent-model-menu").hidden = true;
+      $("#agent-model-trigger").setAttribute("aria-expanded", "false");
+    } catch (error) {
+      showToast(`Could not select model: ${error.message || error}`, "error");
+    }
+  };
+
+  const openProviderEditor = (presetId, existingId = "") => {
+    const preset = providerPresets[presetId] || providerPresets.custom;
+    const existing = configuredProvider(existingId || preset.id);
+    const custom = presetId === "custom" || (!preset && existing);
+    $("#provider-modal-overlay").hidden = false;
+    $("#ai-settings-form").hidden = false;
+    $("#ai-settings-title").textContent = `${existing ? "Edit" : "Configure"} ${existing?.name || preset.label}`;
+    $("#ai-settings-subtitle").textContent = preset.detail;
+    $("#provider-custom-fields").hidden = !custom;
+    $("#settings-ai-preset-id").value = presetId;
+    $("#settings-ai-provider-type").value = existing?.type || preset.type || "openai-compatible";
+    $("#settings-ai-name").value = existing?.name || (custom ? "" : preset.label);
+    $("#settings-ai-id").value = existing?.id || preset.id;
+    $("#settings-ai-id").readOnly = Boolean(existing);
+    $("#settings-ai-api").value = existing?.api || preset.api;
+    $("#settings-ai-base-url").value = existing?.baseUrl || preset.baseUrl;
+    $("#settings-ai-model").value = existing?.defaultModel || "";
+    $("#settings-ai-api-key").value = "";
+    $("#settings-ai-api-key").placeholder = existing?.hasApiKey ? "Leave blank to keep saved key" : (preset.apiKeyOptional ? "Optional for this local gateway" : "Required");
+    $("#settings-ai-enabled").checked = existing?.enabled ?? true;
+    $("#settings-ai-timeout").value = Math.round((existing?.timeoutMs ?? 60000) / 1000);
+    $("#settings-ai-attempts").value = existing?.maxAttempts ?? 1;
+    $("#settings-ai-weight").value = existing?.weight ?? 1;
+    $("#settings-ai-key-state").textContent = existing?.hasApiKey ? "Secure API key saved" : (preset.apiKeyOptional ? "API key optional" : "No API key saved");
+    (custom ? $("#settings-ai-name") : $("#settings-ai-base-url")).focus();
+  };
+
+  const showProviderDetail = (providerId) => {
+    currentProviderDetailId = providerId;
+    renderProviderDetail();
+    switchView("provider-details");
+  };
+
+  const renderProviderDetail = () => {
+    const provider = configuredProvider(currentProviderDetailId);
+    if (!provider) { switchView("ai-providers"); return; }
+    $("#provider-detail-title").textContent = provider.name;
+    $("#provider-detail-subtitle").textContent = `${provider.id} · ${provider.api}`;
+    $("#provider-detail-base-url").textContent = provider.baseUrl || "Local";
+    $("#provider-detail-key").textContent = provider.hasApiKey ? "•••••••• saved securely" : (provider.apiKeyOptional ? "Optional" : "Not configured");
+    $("#provider-detail-default-model").textContent = provider.defaultModel || "Not set — choose per turn";
+    $("#provider-detail-status").textContent = provider.enabled ? "Enabled" : "Disabled";
+    $("#provider-import-models").disabled = false;
+    $("#provider-detail-edit").disabled = false;
+    $("#provider-detail-delete").disabled = false;
+    $("#provider-add-model").disabled = false;
+    const query = $("#provider-model-search").value.trim().toLowerCase();
+    const models = provider.models.filter((model) => !query || `${model.id} ${model.label} ${model.description || ""}`.toLowerCase().includes(query));
+    $("#provider-model-count").textContent = `${provider.models.length} model${provider.models.length === 1 ? "" : "s"}`;
+    const list = $("#provider-model-list");
+    list.textContent = "";
+    if (models.length === 0) {
+      list.appendChild(el("div", "provider-model-empty", provider.models.length ? "No models match this search." : "No models yet. Import the provider catalog or add an ID manually."));
+      return;
+    }
+    models.forEach((model) => {
+      const row = el("div", "provider-model-item");
+      const top = el("div", "provider-model-item-head");
+      const identity = el("div");
+      const id = el("code", "provider-model-id"); id.textContent = model.id;
+      const label = el("span", "provider-model-label"); label.textContent = model.label !== model.id ? model.label : "";
+      identity.append(id, label);
+      const badges = el("div", "provider-model-badges");
+      if (model.contextWindow) { const badge = el("span", "model-badge model-badge-context"); badge.textContent = `${formatTokenCount(model.contextWindow)} ctx`; badges.appendChild(badge); }
+      model.inputModes.forEach((mode) => { const badge = el("span", "model-badge model-badge-input"); badge.textContent = mode; badges.appendChild(badge); });
+      modelCompatibility(model).filter((capability) => !model.inputModes.includes(capability)).forEach((capability) => { const badge = el("span", "model-badge"); badge.textContent = capability; badges.appendChild(badge); });
+      top.append(identity, badges);
+      row.appendChild(top);
+      if (model.description) { const description = el("p", "provider-model-description"); description.textContent = model.description; row.appendChild(description); }
+      list.appendChild(row);
+    });
+  };
+
+  if (!window.shell?.aiProviders) {
+    showToast("AI provider bridge is unavailable. Restart NusaShell after rebuilding the preload.", "error");
+  } else {
+    window.shell.aiProviders.list().then((settings) => { aiSettings = settings; syncAiControls(); }).catch((error) => showToast(`Could not load AI providers: ${error.message || error}`, "error"));
+  }
+
+  $("#ai-settings-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const preset = providerPresets[$("#settings-ai-preset-id").value] || providerPresets.custom;
+    const input = {
+      id: $("#settings-ai-id").value.trim() || preset.id,
+      name: $("#settings-ai-name").value.trim() || preset.label,
+      type: $("#settings-ai-provider-type").value,
+      api: $("#settings-ai-api").value || preset.api,
+      baseUrl: $("#settings-ai-base-url").value.trim(),
+      apiKey: $("#settings-ai-api-key").value,
+      apiKeyOptional: preset.apiKeyOptional,
+      enabled: $("#settings-ai-enabled").checked,
+      defaultModel: $("#settings-ai-model").value.trim(),
+      timeoutMs: Number($("#settings-ai-timeout").value) * 1000,
+      maxAttempts: Number($("#settings-ai-attempts").value),
+      weight: Number($("#settings-ai-weight").value),
+    };
+    try {
+      aiSettings = await window.shell.aiProviders.save(input);
+      const savedProvider = configuredProvider(
+        input.id.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, ""),
+      );
+      $("#settings-ai-api-key").value = "";
+      closeProviderEditor();
+      syncAiControls();
+      showProviderDetail(savedProvider?.id || aiSettings.activeProviderId);
+      showToast("AI provider saved.", "success");
+    } catch (error) {
+      showToast(`Could not save provider: ${error.message || error}`, "error");
     }
   });
-  $("#agent-clear-btn").addEventListener("click", resetAgentConversation);
+  $("#ai-runtime-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      aiSettings = await window.shell.aiProviders.updateRuntime({
+        strategy: $("#settings-ai-strategy").value,
+        totalAttemptBudget: Number($("#settings-ai-budget").value),
+        stream: $("#settings-ai-stream").checked,
+        vision: $("#settings-ai-vision").value,
+      });
+      syncAiControls();
+      showToast("Agent runtime saved.", "success");
+    } catch (error) {
+      showToast(`Could not save agent runtime: ${error.message || error}`, "error");
+    }
+  });
+  $("#ai-settings-close").addEventListener("click", closeProviderEditor);
+  $("#provider-modal-overlay").addEventListener("click", closeProviderEditor);
+  $$("[data-provider-preset]").forEach((card) => card.querySelector(".provider-card-action")?.addEventListener("click", () => {
+    const presetId = card.dataset.providerPreset;
+    const provider = configuredProvider(providerPresets[presetId]?.id);
+    if (provider) showProviderDetail(provider.id);
+    else openProviderEditor(presetId);
+  }));
+  $("#add-custom-provider").addEventListener("click", () => openProviderEditor("custom"));
+  $("#provider-details-back").addEventListener("click", () => switchView("ai-providers"));
+  $("#provider-detail-edit").addEventListener("click", () => {
+    const provider = configuredProvider(currentProviderDetailId);
+    if (provider) openProviderEditor(builtInProviderIds.has(provider.id) ? provider.id : "custom", provider.id);
+  });
+  $("#provider-detail-delete").addEventListener("click", () => openProviderDeleteDialog(currentProviderDetailId));
+  $("#provider-delete-close").addEventListener("click", closeProviderDeleteDialog);
+  $("#provider-delete-cancel").addEventListener("click", closeProviderDeleteDialog);
+  $("#provider-delete-overlay").addEventListener("click", closeProviderDeleteDialog);
+  $("#provider-delete-confirm").addEventListener("click", async () => {
+    const provider = configuredProvider(pendingProviderDeleteId);
+    if (!provider) { closeProviderDeleteDialog(); return; }
+    const button = $("#provider-delete-confirm");
+    button.disabled = true;
+    button.textContent = "Deleting…";
+    try {
+      aiSettings = await window.shell.aiProviders.delete(provider.id);
+      const deletedDetail = currentProviderDetailId === provider.id;
+      if (deletedDetail) currentProviderDetailId = "";
+      closeProviderDeleteDialog();
+      syncAiControls();
+      if (deletedDetail) switchView("ai-providers");
+      showToast(`${provider.name} deleted.`, "success");
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = "Delete";
+      showToast(`Could not delete provider: ${error.message || error}`, "error");
+    }
+  });
+  $("#provider-import-models").addEventListener("click", async () => {
+    const button = $("#provider-import-models");
+    const errorBox = $("#provider-import-error");
+    errorBox.hidden = true;
+    button.disabled = true;
+    button.textContent = "Importing…";
+    try {
+      aiSettings = await window.shell.aiProviders.importModels(currentProviderDetailId);
+      syncAiControls();
+      showToast(`Imported ${configuredProvider(currentProviderDetailId)?.models.length || 0} models.`, "success");
+    } catch (error) {
+      errorBox.textContent = error.message || String(error);
+      errorBox.hidden = false;
+      showToast(`Could not import models: ${error.message || error}`, "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = "Import models";
+    }
+  });
+  $("#provider-add-model").addEventListener("click", async () => {
+    const modelId = window.prompt("Model ID");
+    if (!modelId?.trim()) return;
+    const label = window.prompt("Display label (optional)") || "";
+    try {
+      aiSettings = await window.shell.aiProviders.addModel(currentProviderDetailId, { id: modelId.trim(), label: label.trim() });
+      syncAiControls();
+      showToast("Model added.", "success");
+    } catch (error) {
+      showToast(`Could not add model: ${error.message || error}`, "error");
+    }
+  });
+  $("#provider-model-search").addEventListener("input", renderProviderDetail);
+  $("#agent-model-trigger").addEventListener("click", () => {
+    const menu = $("#agent-model-menu");
+    menu.hidden = !menu.hidden;
+    $("#agent-model-trigger").setAttribute("aria-expanded", String(!menu.hidden));
+    if (!menu.hidden) { renderAgentModelPicker(); $("#agent-model-search").focus(); }
+  });
+  $("#agent-model-search").addEventListener("input", renderAgentModelPicker);
+  document.addEventListener("pointerdown", (event) => {
+    if (!event.target.closest(".agent-model-control")) {
+      $("#agent-model-menu").hidden = true;
+      $("#agent-model-trigger").setAttribute("aria-expanded", "false");
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (!$("#ai-settings-form").hidden) closeProviderEditor();
+    if (!$("#provider-delete-dialog").hidden) closeProviderDeleteDialog();
+    if (!$("#agent-delete-dialog").hidden) agentConversationController?.closeDeleteDialog();
+    $("#agent-model-menu").hidden = true;
+    $("#agent-model-trigger").setAttribute("aria-expanded", "false");
+  });
 
   // Log source filters
   $$("[data-log-source]").forEach(chip => chip.addEventListener("click", () => {
@@ -960,6 +1165,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Auto-update
   initUpdater();
+
+  void agentConversationController.initialize().catch((error) => {
+    showToast(`Could not load conversations: ${error.message || error}`, "error");
+  });
 
   // Connect and subscribe
   connectWs();

@@ -89,6 +89,17 @@ export const ToolCallCompletedEventSchema = z.object({
   }),
 });
 
+export const AgentTextDeltaEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("agent.text_delta"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    traceId: z.string().min(1),
+    delta: z.string(),
+    timestamp: z.string(),
+  }),
+});
+
 export const EventSchema = z.discriminatedUnion("event", [
   PluginInstalledEventSchema,
   PluginUninstalledEventSchema,
@@ -97,6 +108,7 @@ export const EventSchema = z.discriminatedUnion("event", [
   PluginCrashedEventSchema,
   PluginStateChangedEventSchema,
   ToolCallCompletedEventSchema,
+  AgentTextDeltaEventSchema,
 ]);
 
 export type PluginInstalledEvent = z.infer<typeof PluginInstalledEventSchema>;
@@ -106,4 +118,5 @@ export type PluginStoppedEvent = z.infer<typeof PluginStoppedEventSchema>;
 export type PluginCrashedEvent = z.infer<typeof PluginCrashedEventSchema>;
 export type PluginStateChangedEvent = z.infer<typeof PluginStateChangedEventSchema>;
 export type ToolCallCompletedEvent = z.infer<typeof ToolCallCompletedEventSchema>;
+export type AgentTextDeltaEvent = z.infer<typeof AgentTextDeltaEventSchema>;
 export type ParsedEvent = z.infer<typeof EventSchema>;

@@ -6,6 +6,7 @@ import {
   PluginListRequestSchema,
   ToolCallRequestSchema,
   ToolCancelRequestSchema,
+  AgentCancelRequestSchema,
 } from "../src/index.js";
 
 describe("Request schemas", () => {
@@ -123,6 +124,23 @@ describe("Request schemas", () => {
         },
       });
       expect(result.success).toBe(true);
+    });
+  });
+
+  describe("agent.cancel", () => {
+    it("requires the active turn trace ID", () => {
+      expect(AgentCancelRequestSchema.safeParse({
+        kind: "request",
+        id: "req_agent_cancel",
+        method: "agent.cancel",
+        payload: { traceId: "trace-1" },
+      }).success).toBe(true);
+      expect(AgentCancelRequestSchema.safeParse({
+        kind: "request",
+        id: "req_agent_cancel",
+        method: "agent.cancel",
+        payload: {},
+      }).success).toBe(false);
     });
   });
 

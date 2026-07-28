@@ -121,8 +121,28 @@ export const ResourceListRequestSchema = z.object({ kind: z.literal("request"), 
 export const ResourceTemplateListRequestSchema = z.object({ kind: z.literal("request"), id: z.string().min(1), method: z.literal("resource.template.list"), protocolVersion: z.string().optional(), payload: z.object({ pluginId: z.string().min(1) }) });
 export const ResourceReadRequestSchema = z.object({ kind: z.literal("request"), id: z.string().min(1), method: z.literal("resource.read"), protocolVersion: z.string().optional(), payload: z.object({ pluginId: z.string().min(1), uri: z.string().min(1) }) });
 
+const AgentContentPartSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("text"), text: z.string() }),
+  z.object({
+    type: z.literal("image"),
+    dataUrl: z.string().max(6_000_000).regex(/^data:image\/[^;,]+;base64,/i),
+    name: z.string().max(255).optional(),
+    detail: z.enum(["auto", "low", "high"]).optional(),
+  }),
+  z.object({
+    type: z.literal("file"),
+    dataUrl: z.string().max(6_000_000).regex(/^data:[^;,]+;base64,/i),
+    mediaType: z.string().min(1).max(100),
+    name: z.string().min(1).max(255),
+  }),
+]);
+
 const AgentMessageSchema = z.union([
-  z.object({ role: z.enum(["system", "user"]), content: z.string().min(1) }),
+  z.object({ role: z.literal("system"), content: z.string().min(1) }),
+  z.object({
+    role: z.literal("user"),
+    content: z.union([z.string().min(1), z.array(AgentContentPartSchema).min(1).max(12)]),
+  }),
   z.object({
     role: z.literal("assistant"),
     content: z.string().optional(),
@@ -140,6 +160,19 @@ const AgentMessageSchema = z.union([
   }),
 ]);
 
+const AgentModelCapabilitiesSchema = z.object({
+  contextWindow: z.number().int().positive().max(2_000_000).optional(),
+  maxOutput: z.number().int().positive().max(2_000_000).optional(),
+  inputModes: z.array(z.string().min(1).max(50)).max(20).optional(),
+  outputModes: z.array(z.string().min(1).max(50)).max(20).optional(),
+  supportedEfforts: z.array(z.enum(["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"])).max(8).optional(),
+  defaultEffort: z.enum(["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
+  reasoningSupported: z.boolean().optional(),
+  reasoningMandatory: z.boolean().optional(),
+  reasoningSupportsMaxTokens: z.boolean().optional(),
+  supportsTools: z.boolean().optional(),
+});
+
 export const AgentRunRequestSchema = z.object({
   kind: z.literal("request"),
   id: z.string().min(1),
@@ -149,7 +182,21 @@ export const AgentRunRequestSchema = z.object({
     messages: z.array(AgentMessageSchema).min(1),
     pluginIds: z.array(z.string().min(1)).default([]),
     providerId: z.string().min(1).optional(),
+    model: z.string().min(1).max(200).optional(),
+    effort: z.enum(["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
+    modelCapabilities: AgentModelCapabilitiesSchema.optional(),
+    traceId: z.string().min(1).max(128).optional(),
     maxToolRounds: z.number().int().min(1).max(32).optional(),
+  }),
+});
+
+export const AgentCancelRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("agent.cancel"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    traceId: z.string().min(1).max(128),
   }),
 });
 
@@ -208,6 +255,7 @@ export const RequestSchema = z.discriminatedUnion("method", [
   ResourceTemplateListRequestSchema,
   ResourceReadRequestSchema,
   AgentRunRequestSchema,
+  AgentCancelRequestSchema,
   SystemPingRequestSchema,
   SystemVersionRequestSchema,
   SubscribeRequestSchema,
@@ -232,4 +280,5 @@ export type ResourceListRequest = z.infer<typeof ResourceListRequestSchema>;
 export type ResourceTemplateListRequest = z.infer<typeof ResourceTemplateListRequestSchema>;
 export type ResourceReadRequest = z.infer<typeof ResourceReadRequestSchema>;
 export type AgentRunRequest = z.infer<typeof AgentRunRequestSchema>;
+export type AgentCancelRequest = z.infer<typeof AgentCancelRequestSchema>;
 export type ParsedRequest = z.infer<typeof RequestSchema>;

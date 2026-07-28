@@ -20,7 +20,7 @@
       "mcp/server.js"
     ],
     "env": {},
-    "autostart": false,
+    "autostart": true,
     "keepAliveOnClose": false
   }
 }

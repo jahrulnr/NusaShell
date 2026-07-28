@@ -5,23 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.0.21] - 2026-07-28
+## [0.0.23] - 2026-07-29
+
+### Added
+- Provider-family registry for OpenRouter, OmniRoute, 9Router, OpenAI, Claude, and hidden custom OpenAI-compatible connections, including legacy ID/host inference and provider-specific defaults.
+- Model-aware runtime policy for context/output limits, tools, vision, and model-specific reasoning effort from imported `/models` metadata with conservative family heuristics.
+- Bounded SSE streaming with durable final responses, centralized text-delta events, active-turn cancellation, and cancellation of in-flight MCP tool calls.
+- Images and PDF attachments in durable Agent conversations with model compatibility checks and strict count, size, media-type, and data-URL limits.
+- Hot-reloadable agent runtime settings for failover strategy, total attempt budget, streaming, vision, provider timeout, retry attempts, and weight.
+- Provider failover with transient-only routing, global attempt budgets, successful-provider pinning, and fallback when a pinned provider becomes unavailable.
+- Recovery for XML/Kimi-style textual tool calls, reasoning-only responses, malformed/empty streams, duplicate tool calls, and bounded tool-round exhaustion.
+- Progressive MCP resource-template discovery and completion, plus sanitized protocol log notifications in the centralized log tail.
+
+### Changed
+- Chat requests omit empty tool fields for stricter OpenAI-compatible gateways.
+- Model catalog imports now have bounded pagination, origin checks, a 30-second timeout, a 16 MiB response limit, and non-model filtering.
+- Agent model selection now uses imported compatibility metadata for searchable provider, modality, context, tools, and effort badges.
+- Provider cards now expose live enable/disable controls while preserving configured credentials and clearing stale selections safely.
+
+### Fixed
+- Disabled or deleted provider connections are removed from the live provider registry immediately.
+- Cancelled turns are reported separately from provider failures and never persist a partial assistant response.
+- Missing `/models` tool metadata is treated as unknown rather than incorrectly disabling MCP tools.
+
+## [0.0.22] - 2026-07-28
 
 ### Added
 - Agent runtime with a bounded, traceable provider → MCP tool → provider turn loop.
 - MCP-only agent tool gateway: it exposes only tools from running plugins and rejects model calls outside the current allowlist.
-- Provider registry with offline `stub` mode and an OpenAI-compatible Chat Completions adapter for configured OpenAI-compatible gateways.
+- Provider registry and a shared adapter for OpenAI-compatible Chat Completions, Responses, and Anthropic Messages gateways.
 - `agent.run` WebSocket command and `NusaClient.agent.run()` SDK API.
-- Desktop Agent workspace with explicit running-plugin MCP scope, conversation turn metadata, stub status, and centralized trace logging.
+- Desktop Agent workspace with a durable searchable conversation rail, confirmed deletion, failed-turn retry, turn metadata, and centralized trace logging.
 - MCP capability policy documenting the stable implementation track and deferred experimental/evolving capabilities for operator and agent knowledge.
 - Per-plugin MCP autostart preference, persisted in installed metadata and applied best-effort during backend startup; launcher drawer toggle included.
 - Progressive agent MCP discovery: bounded `mcp_list`, `mcp_enable`, `mcp_disable`, `tool_search`, and `tool_schema` catalog, with one tool schema granted per subsequent round.
 - Brokered MCP prompts and resources over stdio, HTTP, and SSE transports: `prompt.list`, `prompt.get`, `resource.list`, `resource.template.list`, and `resource.read`.
-- Agent MCP context panel for explicit prompt insertion and text-resource attachments; agent resource discovery is bounded to 20 results and 50 KB per read.
+- `mcp_context` progressive meta-tool for prompt listing/retrieval and bounded resource search/read without exposing MCP context controls in the UI.
+- Agent provider, model, and effort pickers, plus persisted OpenAI-compatible provider settings. API keys are encrypted through Electron `safeStorage` and are never returned to the renderer.
+- Multi-provider AI registry with optional default models, provider detail pages, `/models` catalog import, manual model entry, and migration from the original single-provider settings.
+- Searchable Agent model picker combining every enabled provider and showing provider identity, context size, modalities, tools, and model-specific reasoning effort levels.
+- Provider-specific runtime adapters for Chat Completions, OpenAI Responses, and Anthropic Messages, including native tool-call round trips.
 - Focused tests for text turns, MCP tool calls, allowlist rejection, round limits, and OpenAI-compatible function-call parsing.
+- Durable context compaction with recent-turn preservation and extractive fallback, plus bounded transient-provider retries with exponential jitter and `Retry-After` support.
+- Environment-only `NUSASHELL_AI_STUB` test provider; stub providers and labels are excluded from the persisted production registry and every frontend surface.
 
 ### Changed
 - Backend and package type checks now pass after correcting existing event dispatch and strict TypeScript issues.
+- Electron Forge now builds the typed preload as the single bridge source of truth; the stale duplicate preload was removed.
+
+### Fixed
+- Configured AI provider cards and detail pages now expose confirmed deletion, removing the provider's credential, imported models, active selection, and live runtime adapter.
 
 ## [0.0.19] - 2026-07-29
 

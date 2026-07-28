@@ -88,6 +88,14 @@ describe("mapToCommand", () => {
     const result = mapToCommand(makeRequest("plugin.list", {}));
     expect(result.kind).toBe("query");
   });
+
+  it("maps agent.cancel to the active-turn cancellation command", () => {
+    const result = mapToCommand(makeRequest("agent.cancel", { traceId: "trace-1" }));
+    expect(result).toEqual({
+      kind: "command",
+      command: { kind: "cancel-agent-turn", traceId: "trace-1" },
+    });
+  });
 });
 
 describe("mapToQuery", () => {

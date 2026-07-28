@@ -1,7 +1,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { McpClientPort, PromptDescriptor, PromptResult, ResourceDescriptor, ResourceReadResult, ResourceTemplateDescriptor, ToolDescriptor } from "@nusashell/application";
+import type { CompletionReference, CompletionResult, McpClientPort, PromptDescriptor, PromptResult, ResourceDescriptor, ResourceReadResult, ResourceTemplateDescriptor, ToolDescriptor } from "@nusashell/application";
 import type { Logger } from "pino";
+import { registerMcpLogging } from "./mcp-logging.js";
 
 export class HttpMcpClient implements McpClientPort {
   private client: Client | null = null;
@@ -36,6 +37,7 @@ export class HttpMcpClient implements McpClientPort {
       { name: "nusashell-backend", version: "0.0.2" },
       { capabilities: {} },
     );
+    registerMcpLogging(this.client, this.logger, this.url);
 
     await this.client.connect(this.transport as never);
   }
@@ -109,6 +111,15 @@ export class HttpMcpClient implements McpClientPort {
   async readResource(uri: string): Promise<ResourceReadResult> {
     const result = await this.requireClient().readResource({ uri });
     return { contents: result.contents.map((content) => ({ uri: content.uri, ...(content.mimeType !== undefined ? { mimeType: content.mimeType } : {}), ...("text" in content ? { text: content.text } : { blob: content.blob }) })) };
+  }
+
+  async complete(reference: CompletionReference, argument: { readonly name: string; readonly value: string }, context?: { readonly arguments?: Readonly<Record<string, string>> }): Promise<CompletionResult> {
+    const result = await this.requireClient().complete({ ref: reference, argument, ...(context ? { context: { arguments: { ...context.arguments } } } : {}) });
+    return {
+      values: result.completion.values,
+      ...(typeof result.completion.total === "number" ? { total: result.completion.total } : {}),
+      ...(typeof result.completion.hasMore === "boolean" ? { hasMore: result.completion.hasMore } : {}),
+    };
   }
 
   private requireClient(): Client {

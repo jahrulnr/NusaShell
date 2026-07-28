@@ -1,5 +1,21 @@
+export type AgentContentPart =
+  | { readonly type: "text"; readonly text: string }
+  | {
+      readonly type: "image";
+      readonly dataUrl: string;
+      readonly name?: string;
+      readonly detail?: "auto" | "low" | "high";
+    }
+  | {
+      readonly type: "file";
+      readonly dataUrl: string;
+      readonly mediaType: string;
+      readonly name: string;
+    };
+
 export type AgentMessage =
-  | { readonly role: "system" | "user"; readonly content: string }
+  | { readonly role: "system"; readonly content: string }
+  | { readonly role: "user"; readonly content: string | readonly AgentContentPart[] }
   | {
       readonly role: "assistant";
       readonly content?: string;
@@ -11,6 +27,8 @@ export type AgentMessage =
       readonly name: string;
       readonly content: string;
     };
+
+export type ReasoningEffort = "auto" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface AgentToolCall {
   readonly id: string;
@@ -29,19 +47,54 @@ export interface AgentProviderRequest {
   readonly round: number;
   readonly messages: readonly AgentMessage[];
   readonly tools: readonly AgentToolDefinition[];
+  readonly model?: string;
+  readonly effort?: ReasoningEffort;
+  readonly modelCapabilities?: AgentModelCapabilities;
+  readonly signal?: AbortSignal;
+  readonly onTextDelta?: (delta: string) => void;
+  /** Router-owned global HTTP-attempt budget. Providers consume before I/O. */
+  readonly consumeAttempt?: () => boolean;
+}
+
+export interface AgentModelCapabilities {
+  readonly contextWindow?: number;
+  readonly maxOutput?: number;
+  readonly inputModes?: readonly string[];
+  readonly outputModes?: readonly string[];
+  readonly supportedEfforts?: readonly ReasoningEffort[];
+  readonly defaultEffort?: ReasoningEffort;
+  readonly reasoningSupported?: boolean;
+  readonly reasoningMandatory?: boolean;
+  readonly reasoningSupportsMaxTokens?: boolean;
+  readonly supportsTools?: boolean;
+}
+
+export interface AgentTokenUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cachedInputTokens: number;
+  readonly cacheWriteTokens: number;
+  readonly reasoningOutputTokens: number;
 }
 
 export interface AgentProviderResult {
   readonly text?: string;
   readonly toolCalls?: readonly AgentToolCall[];
+  readonly reasoning?: string;
   readonly model?: string;
+  readonly providerId?: string;
+  readonly api?: "chat" | "responses" | "messages";
+  readonly status?: string;
+  readonly usage?: AgentTokenUsage;
 }
 
 export interface AgentProvider {
   readonly id: string;
+  readonly managesAttemptBudget?: boolean;
   complete(request: AgentProviderRequest): Promise<AgentProviderResult>;
 }
 
 export interface AgentProviderRegistryPort {
   get(providerId: string): AgentProvider | undefined;
+  list(): readonly AgentProvider[];
 }

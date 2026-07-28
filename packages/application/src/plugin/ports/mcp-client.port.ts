@@ -48,6 +48,16 @@ export interface ResourceReadResult {
   }[];
 }
 
+export type CompletionReference =
+  | { readonly type: "ref/prompt"; readonly name: string }
+  | { readonly type: "ref/resource"; readonly uri: string };
+
+export interface CompletionResult {
+  readonly values: readonly string[];
+  readonly total?: number;
+  readonly hasMore?: boolean;
+}
+
 export interface McpClientPort {
   connect(): Promise<void>;
   close(): Promise<void>;
@@ -60,6 +70,11 @@ export interface McpClientPort {
   listResources(): Promise<readonly ResourceDescriptor[]>;
   listResourceTemplates(): Promise<readonly ResourceTemplateDescriptor[]>;
   readResource(uri: string): Promise<ResourceReadResult>;
+  complete(
+    reference: CompletionReference,
+    argument: { readonly name: string; readonly value: string },
+    context?: { readonly arguments?: Readonly<Record<string, string>> },
+  ): Promise<CompletionResult>;
   callTool(
     name: string,
     args: Readonly<Record<string, unknown>>,

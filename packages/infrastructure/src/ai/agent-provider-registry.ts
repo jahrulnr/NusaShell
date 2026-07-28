@@ -1,6 +1,6 @@
 import type { AgentProvider, AgentProviderRegistryPort } from "@nusashell/application";
 
-/** Immutable startup registry; provider credentials remain inside adapters. */
+/** Runtime registry; provider credentials remain inside adapters. */
 export class AgentProviderRegistry implements AgentProviderRegistryPort {
   private readonly providers = new Map<string, AgentProvider>();
 
@@ -15,5 +15,17 @@ export class AgentProviderRegistry implements AgentProviderRegistryPort {
 
   get(providerId: string): AgentProvider | undefined {
     return this.providers.get(providerId);
+  }
+
+  list(): readonly AgentProvider[] {
+    return [...this.providers.values()];
+  }
+
+  set(provider: AgentProvider): void {
+    this.providers.set(provider.id, provider);
+  }
+
+  delete(providerId: string): boolean {
+    return this.providers.delete(providerId);
   }
 }

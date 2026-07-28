@@ -9,9 +9,9 @@ operators and agents a single capability vocabulary.
 | Capability | MCP operations | NusaShell direction |
 | --- | --- | --- |
 | Tools | `tools/list`, `tools/call` | Brokered only through `PluginRuntimeManager`. Agent uses progressive discovery to stay below provider tool limits. |
-| Prompts | `prompts/list`, `prompts/get` | Expose as user-invoked Agent command templates; never auto-run a prompt. |
-| Resources | `resources/list`, `resources/templates/list`, `resources/read` | Present as shell-managed context, with explicit selection and a bounded context budget. |
-| Completion | `completion/complete` | Use only to assist prompt/resource-template form fields. |
+| Prompts | `prompts/list`, `prompts/get` | Expose progressively through `mcp_context`; retrieving a prompt provides context and never executes it as a tool. |
+| Resources | `resources/list`, `resources/templates/list`, `resources/read` | Expose as bounded shell-managed context through `mcp_context`; binary content is not injected into the model. |
+| Completion | `completion/complete` | Expose only after a prompt or resource template is discovered, with bounded completion results. |
 | Logging / progress | protocol notifications | Forward sanitized diagnostics to the shell log UI; progress is presentation only until task support is adopted. |
 
 The control model is intentional: prompts are user-controlled, resources are

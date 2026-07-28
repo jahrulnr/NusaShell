@@ -9,7 +9,22 @@ describe("loadConfig", () => {
     expect(config.pluginsRoot).toBeUndefined();
     expect(config.dbPath).toBeUndefined();
     expect(config.logLevel).toBe("info");
-    expect(config.ai).toEqual({ providerId: "stub", model: undefined, baseUrl: undefined, apiKey: undefined, maxToolRounds: 8 });
+    expect(config.ai).toEqual({
+      providerId: "",
+      stubEnabled: false,
+      api: undefined,
+      model: undefined,
+      baseUrl: undefined,
+      apiKey: undefined,
+      maxToolRounds: 8,
+      strategy: "failover",
+      totalAttemptBudget: 4,
+      stream: true,
+      vision: "auto",
+      timeoutMs: 60000,
+      retry: { attemptBudget: 4, baseDelayMs: 250, maxDelayMs: 5000, jitter: 0.2 },
+      context: { compactionEnabled: true, maxInputTokens: 12000, reserveTokens: 3000, recentTurns: 4, summaryMaxChars: 12000 },
+    });
   });
 
   it("reads port from NUSASHELL_PORT", () => {
@@ -45,10 +60,21 @@ describe("loadConfig", () => {
       NUSASHELL_DB_PATH: "/app/data.db",
       NUSASHELL_LOG_LEVEL: "warn",
       NUSASHELL_AI_PROVIDER: "openai-compatible",
+      NUSASHELL_AI_STUB: "true",
+      NUSASHELL_AI_API: "responses",
       NUSASHELL_AI_MODEL: "gpt-test",
       NUSASHELL_AI_BASE_URL: "https://example.test/v1",
       NUSASHELL_AI_API_KEY: "not-a-real-key",
       NUSASHELL_AI_MAX_TOOL_ROUNDS: "4",
+      NUSASHELL_AI_RETRY_ATTEMPTS: "3",
+      NUSASHELL_AI_RETRY_BASE_DELAY_MS: "100",
+      NUSASHELL_AI_RETRY_MAX_DELAY_MS: "900",
+      NUSASHELL_AI_RETRY_JITTER: "0.1",
+      NUSASHELL_AI_CONTEXT_COMPACTION: "false",
+      NUSASHELL_AI_CONTEXT_MAX_INPUT_TOKENS: "8000",
+      NUSASHELL_AI_CONTEXT_RESERVE_TOKENS: "2000",
+      NUSASHELL_AI_CONTEXT_RECENT_TURNS: "2",
+      NUSASHELL_AI_CONTEXT_SUMMARY_MAX_CHARS: "6000",
     });
     expect(config).toEqual({
       port: 3000,
@@ -58,10 +84,19 @@ describe("loadConfig", () => {
       logLevel: "warn",
       ai: {
         providerId: "openai-compatible",
+        stubEnabled: true,
+        api: "responses",
         model: "gpt-test",
         baseUrl: "https://example.test/v1",
         apiKey: "not-a-real-key",
         maxToolRounds: 4,
+        strategy: "failover",
+        totalAttemptBudget: 4,
+        stream: true,
+        vision: "auto",
+        timeoutMs: 60000,
+        retry: { attemptBudget: 3, baseDelayMs: 100, maxDelayMs: 900, jitter: 0.1 },
+        context: { compactionEnabled: false, maxInputTokens: 8000, reserveTokens: 2000, recentTurns: 2, summaryMaxChars: 6000 },
       },
     });
   });

@@ -21,6 +21,8 @@ import type { LoggerPort } from "../ports/logger.port.js";
 import type {
   McpClientFactoryPort,
   McpClientPort,
+  CompletionReference,
+  CompletionResult,
   PromptDescriptor,
   PromptResult,
   ResourceDescriptor,
@@ -179,6 +181,17 @@ export class PluginRuntimeManager {
   async readResource(pluginId: PluginId, uri: string): Promise<ResourceReadResult> {
     const entry = await this.ensureEntry(pluginId);
     return entry.queue.enqueue(async () => this.requireRunningClient(entry).readResource(uri));
+  }
+
+  async complete(
+    pluginId: PluginId,
+    reference: CompletionReference,
+    argument: { readonly name: string; readonly value: string },
+    context?: { readonly arguments?: Readonly<Record<string, string>> },
+  ): Promise<CompletionResult> {
+    const entry = await this.ensureEntry(pluginId);
+    return entry.queue.enqueue(async () =>
+      this.requireRunningClient(entry).complete(reference, argument, context));
   }
 
   async restartPlugin(pluginId: PluginId): Promise<PluginView> {

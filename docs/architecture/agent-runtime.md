@@ -2,82 +2,118 @@
 
 ## Objective
 
-NusaShell can run a bounded AI turn that uses only MCP tools exposed by
-currently running plugins. The shell remains the broker: the model never gets
-an MCP transport, process handle, or plugin UI channel.
+NusaShell runs durable, bounded AI conversations whose only executable
+capabilities come from MCP. The shell remains the broker: providers never
+receive an MCP transport, process handle, credential, or plugin UI channel.
 
-## Scope
-
-- A provider registry normalizes named provider slots without leaking API keys.
-- A deterministic turn loop asks a provider for text or tool calls, invokes
-  namespaced MCP tools through `PluginRuntimeManager`, and feeds results back
-  into the next round.
-- A turn has a generated trace ID and structured lifecycle logs.
-- The first real adapter uses the OpenAI-compatible Chat Completions dialect;
-  a static provider supports repeatable local tests and offline development.
-
-## Non-goals
-
-- Conversation persistence, streaming, cancellation, retries, model picker,
-  and provider settings UI are intentionally deferred.
-- The agent does not receive CRUD, filesystem, shell, document, or hidden
-  shell tools. Future `docs_*` tools must be MCP tools like every other tool.
-- No direct plugin-to-provider or plugin-to-plugin connection is added.
-
-## Flow
+## Runtime flow
 
 ```text
-agent.run (WebSocket command)
+conversation JSON (Electron main)
+  -> Agent composer rebuilds context from the durable checkpoint
+  -> agent.run (WebSocket command)
   -> RunAgentTurnHandler -> InProcessAgentTurnWorker
   -> AgentTurnRunner
-     -> ProviderRegistry -> selected AI provider
-     -> McpToolGateway -> PluginRuntimeManager -> MCP client
-  -> response + structured trace logs
+     -> compact older context when the configured threshold is exceeded
+     -> RoutedAgentProvider -> selected/pinned provider adapter
+     -> McpAgentToolGateway -> PluginRuntimeManager -> MCP client
+  -> agent.text_delta events + response/checkpoint/trace metadata
+  -> Electron main persists the assistant message/checkpoint
 ```
 
-Tool names are stable and collision-safe: `<pluginId>.<toolName>`. The gateway
-builds this allowlist from `PluginRuntimeManager.listTools` and rejects a model
-call that is not in it. Tool failures become a bounded result for the next
-model round; they do not crash the process or bypass the broker.
+The turn loop is provider-agnostic. Provider-family definitions normalize
+OpenRouter, OmniRoute, 9Router, OpenAI, Claude, and custom connections; the
+infrastructure adapter maps their selected dialect (`chat`, `responses`, or
+`messages`) to its wire format. Model catalog metadata drives context/output
+limits, tool availability, image support, and reasoning effort. Tool calls are validated against the schemas
+advertised for that exact round and execute only through
+`PluginRuntimeManager`. A reasoning-only/empty provider response receives one
+semantic nudge on the next bounded round; a second empty result becomes an
+explicit runtime response instead of an opaque failed turn.
+
+Native JSON tool calls are preferred. A bounded parser also recovers fenced
+function XML, Anthropic-style `<invoke>` blocks, and Kimi tool-use text when a
+compatible gateway serializes a call as content. An identical tool request is
+executed once, nudged on its second appearance, and stops the loop on its third.
+
+## Conversations and failure recovery
+
+- Conversations are stored in Electron `userData/agent-conversations.json`
+  using serialized mutations and atomic rename.
+- The first user message creates a short deterministic title; the conversation
+  list is newest-first and deletions require explicit confirmation.
+- A failed provider turn does not persist a fake assistant message. The
+  unanswered user message remains durable and the UI exposes **Retry turn**.
+- Renderer-only working/error bubbles disappear after reload; durable user and
+  assistant messages remain the source of truth.
+- SSE text deltas update the current working bubble only. `agent.cancel`
+  aborts provider HTTP, retry waits, and active MCP calls by trace ID. Partial
+  text from a cancelled turn is not persisted.
+- User messages may persist up to four images/PDFs, each at most 4 MiB. The
+  wire contract accepts bounded data URLs only; remote attachment URLs and
+  arbitrary filesystem paths are rejected.
+
+## Context compaction
+
+Before a provider round, the runner estimates input size as `chars / 4`. When
+it exceeds `max input tokens - reserve tokens` (with a 1,000-token floor), it:
+
+1. preserves the configured number of recent user turns, including the latest;
+2. asks the selected provider for a concise checkpoint of older messages;
+3. falls back to a bounded extractive checkpoint if that request fails;
+4. returns the checkpoint so Electron can persist its absolute message offset.
+
+Opening the conversation later sends the saved summary plus only messages
+after that offset. Recompaction replaces the previous summary and advances the
+absolute checkpoint without duplicating already-compacted messages.
+
+## Provider retry
+
+All supported provider dialects use one bounded retry policy in the shared
+HTTP adapter. Connection failures and HTTP `408`, `409`, `413`, `425`, `429`,
+and `500`–`504` are transient. Other 4xx responses fail immediately.
+
+Backoff is exponential with bounded jitter. `Retry-After` delta-seconds or
+HTTP-date overrides the calculated delay but is still capped. One router-owned
+attempt budget spans retries and failover candidates. Successful providers are
+pinned for later tool rounds, but a transient failure can still move the turn
+to the next enabled provider. Auth and validation failures never fail over.
 
 ## Configuration
 
-Environment is the initial configuration boundary:
+Environment is currently the process-level runtime boundary:
 
-| Variable | Purpose |
-| --- | --- |
-| `NUSASHELL_AI_PROVIDER` | Provider slot ID, default `stub` |
-| `NUSASHELL_AI_MODEL` | Model for the OpenAI-compatible provider |
-| `NUSASHELL_AI_BASE_URL` | API base URL, without a trailing slash |
-| `NUSASHELL_AI_API_KEY` | API key; never returned or logged |
-| `NUSASHELL_AI_MAX_TOOL_ROUNDS` | Maximum model/tool rounds, default `8` |
+| Variable | Default | Purpose |
+| --- | ---: | --- |
+| `NUSASHELL_AI_STUB` | `false` | Enable the deterministic test provider. It is never listed in production UI. |
+| `NUSASHELL_AI_PROVIDER` | empty | Initial provider slot ID |
+| `NUSASHELL_AI_MODEL` | empty | Initial model ID |
+| `NUSASHELL_AI_BASE_URL` | empty | Initial provider base URL |
+| `NUSASHELL_AI_API_KEY` | empty | Initial API key; never returned or logged |
+| `NUSASHELL_AI_MAX_TOOL_ROUNDS` | `8` | Maximum provider/tool rounds |
+| `NUSASHELL_AI_STRATEGY` | `failover` | `failover`, `round-robin`, or selected-provider `switch` |
+| `NUSASHELL_AI_TOTAL_ATTEMPT_BUDGET` | `4` | Shared retry/failover attempt ceiling per provider round |
+| `NUSASHELL_AI_STREAM` | `true` | Request SSE where the provider dialect supports it |
+| `NUSASHELL_AI_VISION` | `auto` | `auto`, `on`, or `off` image-pixel gate |
+| `NUSASHELL_AI_TIMEOUT_MS` | `60000` | Provider request deadline |
+| `NUSASHELL_AI_RETRY_ATTEMPTS` | `4` | Total HTTP attempt budget |
+| `NUSASHELL_AI_RETRY_BASE_DELAY_MS` | `250` | First exponential backoff step |
+| `NUSASHELL_AI_RETRY_MAX_DELAY_MS` | `5000` | Backoff and Retry-After ceiling |
+| `NUSASHELL_AI_RETRY_JITTER` | `0.2` | Backoff jitter fraction |
+| `NUSASHELL_AI_CONTEXT_COMPACTION` | `true` | Enable context compaction |
+| `NUSASHELL_AI_CONTEXT_MAX_INPUT_TOKENS` | `12000` | Estimated input ceiling |
+| `NUSASHELL_AI_CONTEXT_RESERVE_TOKENS` | `3000` | Output/tool reserve |
+| `NUSASHELL_AI_CONTEXT_RECENT_TURNS` | `4` | Raw user turns retained |
+| `NUSASHELL_AI_CONTEXT_SUMMARY_MAX_CHARS` | `12000` | Checkpoint character bound |
 
-When the required real-provider values are absent, `stub` remains usable. A
-provider slot must be selected explicitly before any network request is made.
+Provider connections, imported models, selected model, and effort are persisted
+through the dedicated Electron provider registry. API keys use Electron
+`safeStorage`; the renderer receives only masked availability.
 
-## Acceptance criteria
+## Stability boundary
 
-1. A text-only provider result completes in one round.
-2. A requested allowlisted MCP tool executes through the runtime manager and
-   its result is included in the next model request.
-3. Unknown, malformed, or non-running tools are rejected without execution.
-4. The loop stops at the configured round limit.
-5. Trace logs identify each turn, provider request, tool execution, and result
-   without logging API keys or raw prompt/tool arguments.
-
-## Verification
-
-Run focused application tests during implementation:
-
-```bash
-pnpm --filter @nusashell/application test -- agent-turn
-```
-
-Then run all application tests and the workspace build/type checks that are
-not already failing outside this slice:
-
-```bash
-pnpm --filter @nusashell/application test
-pnpm build
-pnpm typecheck
-```
+Tools, prompts, resources, resource templates, completion, and logging are the
+stable MCP surface used by this phase. Elicitation and other evolving MCP
+capabilities remain documented in `progressive-mcp-tools.md` but are not
+silently exposed to the model until their protocol and consent semantics are
+stable.

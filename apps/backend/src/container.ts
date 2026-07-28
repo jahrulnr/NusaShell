@@ -40,6 +40,9 @@ import {
   ReadResourceHandler,
   McpAgentToolGateway,
   RunAgentTurnHandler,
+  CancelAgentTurnHandler,
+  AgentTurnCoordinator,
+  createAgentTextDeltaEvent,
   type AgentProvider,
   SystemPingHandler,
   SystemVersionHandler,
@@ -59,10 +62,30 @@ export interface ContainerOptions {
   readonly loggerObserver?: LogObserver;
   readonly ai?: {
     readonly providerId: string;
+    readonly stubEnabled?: boolean;
+    readonly api?: "chat" | "responses" | "messages";
     readonly model?: string;
     readonly baseUrl?: string;
     readonly apiKey?: string;
     readonly maxToolRounds: number;
+    readonly strategy?: "failover" | "round-robin" | "switch";
+    readonly totalAttemptBudget?: number;
+    readonly stream?: boolean;
+    readonly vision?: "auto" | "on" | "off";
+    readonly timeoutMs?: number;
+    readonly retry?: {
+      readonly attemptBudget: number;
+      readonly baseDelayMs: number;
+      readonly maxDelayMs: number;
+      readonly jitter: number;
+    };
+    readonly context?: {
+      readonly compactionEnabled: boolean;
+      readonly maxInputTokens: number;
+      readonly reserveTokens: number;
+      readonly recentTurns: number;
+      readonly summaryMaxChars: number;
+    };
   };
 }
 
@@ -77,6 +100,22 @@ export interface Container {
   readonly pluginRepository: PluginRepositoryPort;
   readonly db?: SqliteDatabase | undefined;
   readonly logger: Logger;
+  configureAi(settings: {
+    providerId: string;
+    api?: "chat" | "responses" | "messages";
+    model?: string;
+    baseUrl?: string;
+    apiKey?: string;
+    timeoutMs?: number;
+    maxAttempts?: number;
+  }): void;
+  configureAiRuntime(settings: {
+    strategy: "failover" | "round-robin" | "switch";
+    totalAttemptBudget: number;
+    stream: boolean;
+    vision: "auto" | "on" | "off";
+  }): void;
+  removeAi(providerId: string): void;
 }
 
 export function createContainer(options: ContainerOptions): Container {
@@ -106,6 +145,12 @@ export function createContainer(options: ContainerOptions): Container {
   const mcpClientFactory = new McpClientFactory(logger);
 
   const eventDispatcher = new EventDispatcher();
+  const aiRuntime = {
+    strategy: options.ai?.strategy ?? "failover" as "failover" | "round-robin" | "switch",
+    totalAttemptBudget: options.ai?.totalAttemptBudget ?? 4,
+    stream: options.ai?.stream ?? true,
+    vision: options.ai?.vision ?? "auto" as "auto" | "on" | "off",
+  };
 
   const pluginInstaller = options.pluginsRoot
     ? new PluginInstaller(options.pluginsRoot, logger)
@@ -120,15 +165,22 @@ export function createContainer(options: ContainerOptions): Container {
     logger,
   });
   const agentToolGateway = new McpAgentToolGateway(runtimeManager);
-  const agentProviders: AgentProvider[] = [new StaticAgentProvider()];
-  if (options.ai?.baseUrl && options.ai.apiKey && options.ai.model) {
+  const agentProviders: AgentProvider[] = options.ai?.stubEnabled ? [new StaticAgentProvider()] : [];
+  if (options.ai?.baseUrl) {
     agentProviders.push(new OpenAiCompatibleAgentProvider({
+      id: options.ai.providerId,
+      ...(options.ai.api ? { api: options.ai.api } : {}),
       baseUrl: options.ai.baseUrl,
-      apiKey: options.ai.apiKey,
-      model: options.ai.model,
+      ...(options.ai.apiKey ? { apiKey: options.ai.apiKey } : {}),
+      ...(options.ai.model ? { model: options.ai.model } : {}),
+      ...(options.ai.retry ? { retry: options.ai.retry } : {}),
+      stream: aiRuntime.stream,
+      vision: aiRuntime.vision,
+      ...(options.ai.timeoutMs !== undefined ? { timeoutMs: options.ai.timeoutMs } : {}),
     }));
   }
   const agentProviderRegistry = new AgentProviderRegistry(agentProviders);
+  const agentTurnCoordinator = new AgentTurnCoordinator();
 
   const commandBus = new CommandBus();
   commandBus.register("start-plugin", new StartPluginHandler(runtimeManager));
@@ -140,10 +192,17 @@ export function createContainer(options: ContainerOptions): Container {
   commandBus.register("run-agent-turn", new RunAgentTurnHandler(
     agentProviderRegistry,
     agentToolGateway,
-    options.ai?.providerId ?? "stub",
+    options.ai?.providerId || (options.ai?.stubEnabled ? "stub" : ""),
     options.ai?.maxToolRounds ?? 8,
     logger,
+    options.ai?.context,
+    aiRuntime,
+    agentTurnCoordinator,
+    (traceId, delta) => {
+      void eventDispatcher.publish(createAgentTextDeltaEvent(traceId, delta));
+    },
   ));
+  commandBus.register("cancel-agent-turn", new CancelAgentTurnHandler(agentTurnCoordinator));
   if (pluginInstaller) {
     commandBus.register("install-plugin", new InstallPluginHandler(pluginInstaller, eventDispatcher, clock));
     commandBus.register("uninstall-plugin", new UninstallPluginHandler(pluginInstaller, eventDispatcher, clock));
@@ -183,5 +242,37 @@ export function createContainer(options: ContainerOptions): Container {
     pluginRepository,
     db,
     logger,
+    configureAi(settings) {
+      if (!settings.baseUrl) throw new Error("OpenAI-compatible provider requires a base URL");
+      agentProviderRegistry.set(new OpenAiCompatibleAgentProvider({
+        id: settings.providerId,
+        ...(settings.api ? { api: settings.api } : {}),
+        baseUrl: settings.baseUrl,
+        ...(settings.apiKey ? { apiKey: settings.apiKey } : {}),
+        ...(settings.model ? { model: settings.model } : {}),
+        ...(options.ai?.retry ? {
+          retry: {
+            ...options.ai.retry,
+            attemptBudget: settings.maxAttempts ?? options.ai.retry.attemptBudget,
+          },
+        } : {}),
+        stream: aiRuntime.stream,
+        vision: aiRuntime.vision,
+        ...(settings.timeoutMs !== undefined
+          ? { timeoutMs: settings.timeoutMs }
+          : options.ai?.timeoutMs !== undefined
+            ? { timeoutMs: options.ai.timeoutMs }
+            : {}),
+      }));
+    },
+    removeAi(providerId) {
+      agentProviderRegistry.delete(providerId);
+    },
+    configureAiRuntime(settings) {
+      aiRuntime.strategy = settings.strategy;
+      aiRuntime.totalAttemptBudget = settings.totalAttemptBudget;
+      aiRuntime.stream = settings.stream;
+      aiRuntime.vision = settings.vision;
+    },
   };
 }

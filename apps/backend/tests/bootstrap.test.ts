@@ -21,6 +21,43 @@ describe("createContainer", () => {
     expect(container.eventPublisher).toBeDefined();
   });
 
+  it("configures an OpenAI-compatible provider without requiring a default model", () => {
+    container = createContainer({ port: 9137 });
+
+    expect(() => container.configureAi({
+      providerId: "openai-compatible",
+      baseUrl: "https://provider.example/v1",
+      apiKey: "secret-key",
+    })).not.toThrow();
+  });
+
+  it("removes a configured provider from the live agent registry", async () => {
+    container = createContainer({ port: 9139 });
+    container.configureAi({
+      providerId: "temporary-provider",
+      baseUrl: "https://provider.example/v1",
+      apiKey: "secret-key",
+    });
+
+    container.removeAi("temporary-provider");
+
+    await expect(container.commandBus.execute({
+      kind: "run-agent-turn",
+      providerId: "temporary-provider",
+      messages: [{ role: "user", content: "hello" }],
+      pluginIds: [],
+    })).rejects.toMatchObject({ code: "AGENT_PROVIDER_NOT_FOUND" });
+  });
+
+  it("does not expose the deterministic stub unless the environment configuration enables it", async () => {
+    container = createContainer({ port: 9138 });
+    await expect(container.commandBus.execute({
+      kind: "run-agent-turn",
+      messages: [{ role: "user", content: "hello" }],
+      pluginIds: [],
+    })).rejects.toMatchObject({ code: "AGENT_PROVIDER_NOT_FOUND" });
+  });
+
   it("starts the WebSocket server and accepts connections", async () => {
     container = createContainer({ port: 9135 });
     await container.wsServer.start();

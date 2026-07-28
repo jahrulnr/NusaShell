@@ -19,6 +19,7 @@ export type RequestMethod =
   | "resource.template.list"
   | "resource.read"
   | "agent.run"
+  | "agent.cancel"
   | "system.ping"
   | "system.version"
   | "subscribe"
@@ -61,7 +62,8 @@ export type EventType =
   | "plugin.stopped"
   | "plugin.crashed"
   | "plugin.state_changed"
-  | "tool.call_completed";
+  | "tool.call_completed"
+  | "agent.text_delta";
 
 export interface EventEnvelope<TPayload = unknown> {
   readonly kind: "event";

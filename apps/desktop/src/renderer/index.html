@@ -74,6 +74,10 @@
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 3v3M12 18v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M3 12h3M18 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="12" r="4.5" stroke="currentColor" stroke-width="1.7"/></svg>
           Agent
         </a>
+        <a class="nav-item" data-view="ai-providers" data-nav>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM4.5 21a7.5 7.5 0 0 1 15 0M19 5v4M21 7h-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          AI Providers
+        </a>
         <a class="nav-item" data-view="autostart" data-nav>
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 3v4M6.34 6.34l2.83 2.83M3 12h4M6.34 17.66l2.83-2.83M12 17v4M17.66 17.66l-2.83-2.83M17 12h4M17.66 6.34l-2.83 2.83" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.6"/></svg>
           Autostart
@@ -141,42 +145,47 @@
             <h1 class="page-title">Agent</h1>
             <p class="subtitle">The agent discovers MCP servers and tool schemas progressively before it acts.</p>
           </div>
-          <button class="mini-btn" id="agent-clear-btn" type="button">Clear conversation</button>
         </div>
 
         <div class="agent-shell">
-          <aside class="agent-scope" aria-labelledby="agent-scope-title">
-            <div class="agent-scope-heading">
+          <aside class="agent-conversations" aria-labelledby="agent-conversations-title">
+            <div class="agent-conversations-head">
               <div>
-                <div class="agent-panel-label" id="agent-scope-title">MCP catalog</div>
-                <p>The agent can discover and start MCP servers when a turn needs them.</p>
+                <div class="agent-panel-label" id="agent-conversations-title">Conversations</div>
+                <span class="agent-conversation-count" id="agent-conversation-count">0 threads</span>
               </div>
-              <span class="agent-scope-count" id="agent-scope-count">0 selected</span>
+              <button class="agent-new-conversation" id="agent-new-conversation" type="button" aria-label="New conversation">+</button>
             </div>
-            <div class="agent-scope-list" id="agent-scope-list" role="group" aria-label="Plugins available to the agent"></div>
-            <div class="agent-context" aria-labelledby="agent-context-title">
-              <div class="agent-panel-label" id="agent-context-title">MCP context</div>
-              <p class="agent-context-copy">Prompts are inserted only when you choose them. Resources can be attached to the next turn.</p>
-              <select id="agent-context-plugin" class="agent-context-select" aria-label="Running MCP server for prompts and resources"></select>
-              <div class="agent-context-groups" id="agent-context-groups"></div>
-            </div>
-            <p class="agent-scope-note">The provider sees only five meta-tools first. NusaShell remains the broker.</p>
+            <label class="agent-conversation-search"><span aria-hidden="true">⌕</span><input id="agent-conversation-search" type="search" placeholder="Search conversations…" autocomplete="off"></label>
+            <div class="agent-conversation-list" id="agent-conversation-list" role="list"></div>
+            <p class="agent-conversation-note">Stored locally. MCP servers and context stay discoverable through agent tools.</p>
           </aside>
 
           <div class="agent-conversation">
             <div class="agent-thread" id="agent-thread" role="log" aria-live="polite" aria-label="Agent conversation">
               <div class="agent-empty" id="agent-empty">
                 <div class="agent-empty-mark">✦</div>
-                <h2>Start a bounded turn</h2>
-                <p>The local stub is ready. Start a plugin first if this turn needs MCP tools.</p>
+                <h2>Start a conversation</h2>
+                <p>Choose a configured model. The agent can discover and start MCP servers when the task needs them.</p>
               </div>
             </div>
             <form class="agent-composer" id="agent-form">
               <label class="sr-only" for="agent-input">Message to the agent</label>
-              <textarea id="agent-input" rows="3" placeholder="Describe what you want the shell to do…" required></textarea>
+              <textarea id="agent-input" rows="3" placeholder="Describe what you want the shell to do…"></textarea>
+              <div class="agent-attachments" id="agent-attachments" aria-live="polite"></div>
+              <input class="sr-only" id="agent-file-input" type="file" accept="image/*,application/pdf" multiple>
               <div class="agent-composer-footer">
-                <span class="agent-provider-status" id="agent-provider-status">Provider: stub</span>
+                <button class="agent-attach-btn" id="agent-attach-btn" type="button" aria-label="Attach images or PDF">＋ Attach</button>
+                <div class="agent-model-control">
+                  <button class="agent-model-trigger" id="agent-model-trigger" type="button" aria-haspopup="dialog" aria-expanded="false"><span id="agent-model-trigger-label">Model · auto</span><span aria-hidden="true">⌄</span></button>
+                  <div class="agent-model-menu" id="agent-model-menu" role="dialog" aria-label="Choose model and effort" hidden>
+                    <label class="agent-model-search"><span aria-hidden="true">⌕</span><input id="agent-model-search" type="search" placeholder="Search models or providers…" autocomplete="off"></label>
+                    <div class="agent-model-list" id="agent-model-list" role="listbox" aria-label="Available models"></div>
+                  </div>
+                </div>
+                <span class="agent-provider-status" id="agent-provider-status">Choose a model</span>
                 <span class="agent-key-hint">Ctrl + Enter to send</span>
+                <button class="agent-stop-btn" id="agent-stop-btn" type="button" hidden>Stop</button>
                 <button class="agent-send-btn" id="agent-send-btn" type="submit">
                   Send turn
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -184,6 +193,14 @@
               </div>
             </form>
           </div>
+        </div>
+        <div class="agent-delete-overlay" id="agent-delete-overlay" hidden></div>
+        <div class="agent-delete-dialog" id="agent-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="agent-delete-title" hidden>
+          <div class="provider-modal-head">
+            <div><div class="settings-card-title" id="agent-delete-title">Delete conversation?</div><p class="provider-modal-subtitle" id="agent-delete-copy">This permanently removes the local conversation.</p></div>
+            <button class="provider-modal-close" id="agent-delete-close" type="button" aria-label="Close delete confirmation">×</button>
+          </div>
+          <div class="agent-delete-actions"><button class="mini-btn" id="agent-delete-cancel" type="button">Cancel</button><button class="mini-btn danger" id="agent-delete-confirm" type="button">Delete</button></div>
         </div>
       </section>
 
@@ -196,6 +213,57 @@
           <span class="autostart-count" id="autostart-count">0 enabled</span>
         </div>
         <div class="autostart-list" id="autostart-list" aria-live="polite"></div>
+      </section>
+
+      <section class="view" data-view="ai-providers">
+        <div class="agent-header"><div><div class="agent-kicker"><span class="agent-kicker-dot"></span> Provider registry</div><h1 class="page-title">AI Providers</h1><p class="subtitle">Manage direct APIs and local AI gateways. Credentials stay masked in the Electron main process.</p></div><button class="mini-btn provider-add-btn" id="add-custom-provider" type="button">+ Custom provider</button></div>
+        <div class="provider-registry" id="provider-registry" role="list">
+          <article class="provider-registry-card accent-or" data-provider-preset="openrouter"><div class="provider-card-head"><span class="provider-mark">OR</span><div><h2>OpenRouter</h2><p>API KEY · CHAT</p></div><button type="button" class="provider-toggle" aria-label="Enable OpenRouter" disabled>●</button></div><p>One API for models from many upstream providers.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
+          <article class="provider-registry-card accent-om" data-provider-preset="omniroute"><div class="provider-card-head"><span class="provider-mark">OM</span><div><h2>OmniRoute</h2><p>LOCAL · RESPONSES</p></div><button type="button" class="provider-toggle" aria-label="Enable OmniRoute" disabled>●</button></div><p>Local multi-provider gateway with OpenAI-compatible endpoints.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
+          <article class="provider-registry-card accent-9r" data-provider-preset="9router"><div class="provider-card-head"><span class="provider-mark">9R</span><div><h2>9Router</h2><p>LOCAL · CHAT</p></div><button type="button" class="provider-toggle" aria-label="Enable 9Router" disabled>●</button></div><p>Local 9Router gateway using its OpenAI-compatible endpoint.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
+          <article class="provider-registry-card accent-oa" data-provider-preset="openai"><div class="provider-card-head"><span class="provider-mark">OA</span><div><h2>OpenAI</h2><p>API KEY · RESPONSES</p></div><button type="button" class="provider-toggle" aria-label="Enable OpenAI" disabled>●</button></div><p>Official OpenAI Responses API with native tool-call mapping.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
+          <article class="provider-registry-card accent-ai" data-provider-preset="claude"><div class="provider-card-head"><span class="provider-mark">AI</span><div><h2>Claude API</h2><p>API KEY · MESSAGES</p></div><button type="button" class="provider-toggle" aria-label="Enable Claude API" disabled>●</button></div><p>Official Anthropic Messages API with native tool-use mapping.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
+        </div>
+        <div class="provider-modal-overlay" id="provider-modal-overlay" hidden></div>
+        <form class="settings-card provider-settings-card" id="ai-settings-form" hidden>
+          <div class="provider-modal-head"><div><div class="settings-card-title" id="ai-settings-title">Configure provider</div><p class="provider-modal-subtitle" id="ai-settings-subtitle"></p></div><button class="provider-modal-close" id="ai-settings-close" type="button" aria-label="Close provider details">×</button></div>
+          <input id="settings-ai-provider-type" type="hidden" value="openai-compatible">
+          <div class="provider-custom-fields" id="provider-custom-fields" hidden>
+            <label class="settings-field">Name<input id="settings-ai-name" autocomplete="off" placeholder="My gateway"></label>
+            <label class="settings-field">ID / prefix<input id="settings-ai-id" autocomplete="off" placeholder="my-gateway"></label>
+            <label class="settings-field">API type<select id="settings-ai-api"><option value="chat">Chat completions</option><option value="responses">Responses</option><option value="messages">Messages</option></select></label>
+          </div>
+          <input id="settings-ai-preset-id" type="hidden">
+          <label class="settings-field">Base URL<input id="settings-ai-base-url" type="url" autocomplete="url" placeholder="https://api.openai.com/v1"></label>
+          <label class="settings-field">API key<input id="settings-ai-api-key" type="password" autocomplete="off" placeholder="Leave blank to keep saved key"></label>
+          <label class="settings-field">Default model <span class="field-optional">Optional</span><input id="settings-ai-model" autocomplete="off" placeholder="Leave blank and choose after importing"></label>
+          <div class="provider-runtime-fields">
+            <label class="settings-field">Timeout (seconds)<input id="settings-ai-timeout" type="number" min="1" max="600" value="60"></label>
+            <label class="settings-field">Attempts<input id="settings-ai-attempts" type="number" min="1" max="10" value="1"></label>
+            <label class="settings-field">Weight<input id="settings-ai-weight" type="number" min="1" max="100" value="1"></label>
+          </div>
+          <label class="provider-enabled-field"><input id="settings-ai-enabled" type="checkbox" checked> Enabled</label>
+          <div class="settings-row"><span id="settings-ai-key-state">No API key saved</span><button class="mini-btn" type="submit">Save provider</button></div>
+        </form>
+      </section>
+
+      <section class="view" data-view="provider-details">
+        <button class="provider-back" id="provider-details-back" type="button">← AI Providers</button>
+        <div class="provider-detail-head"><div><h1 class="page-title" id="provider-detail-title">Provider</h1><p class="subtitle" id="provider-detail-subtitle"></p></div></div>
+        <div class="provider-detail-card">
+          <dl class="provider-detail-grid">
+            <div><dt>Base URL</dt><dd id="provider-detail-base-url">—</dd></div>
+            <div><dt>API key</dt><dd id="provider-detail-key">—</dd></div>
+            <div><dt>Default model</dt><dd id="provider-detail-default-model">Automatic</dd></div>
+            <div><dt>Status</dt><dd id="provider-detail-status">Available</dd></div>
+          </dl>
+          <div class="provider-detail-actions"><button class="mini-btn" id="provider-detail-edit" type="button">Edit</button><button class="mini-btn" id="provider-import-models" type="button">Import models</button><button class="mini-btn danger" id="provider-detail-delete" type="button">Delete</button></div>
+          <p class="provider-detail-error" id="provider-import-error" role="alert" hidden></p>
+        </div>
+        <div class="provider-models-card">
+          <div class="provider-models-head"><div><h2>Available models</h2><p id="provider-model-count">0 models</p></div><div class="provider-model-tools"><input id="provider-model-search" type="search" placeholder="Search imported models…"><button class="mini-btn" id="provider-add-model" type="button">Add</button></div></div>
+          <div class="provider-model-list" id="provider-model-list"></div>
+        </div>
       </section>
 
       <!-- ===== View: Central log tail ===== -->
@@ -238,6 +306,16 @@
             <div class="settings-row"><span>Auto-reconnect</span><label class="toggle"><input type="checkbox" checked><span class="toggle-slider"></span></label></div>
             <div class="settings-row"><span>Auto-resubscribe</span><label class="toggle"><input type="checkbox" checked><span class="toggle-slider"></span></label></div>
           </div>
+
+          <form class="settings-card" id="ai-runtime-form">
+            <div class="settings-card-title">Agent runtime</div>
+            <label class="settings-field">Provider strategy<select id="settings-ai-strategy"><option value="failover">Failover</option><option value="round-robin">Round robin</option><option value="switch">Selected provider only</option></select></label>
+            <label class="settings-field">Total attempt budget<input id="settings-ai-budget" type="number" min="1" max="32" value="4"></label>
+            <label class="settings-field">Vision<select id="settings-ai-vision"><option value="auto">Automatic from model catalog</option><option value="on">Always allow image pixels</option><option value="off">Disable image pixels</option></select></label>
+            <div class="settings-row"><span>Stream responses</span><label class="toggle"><input id="settings-ai-stream" type="checkbox" checked><span class="toggle-slider"></span></label></div>
+            <div class="settings-row"><span>Applies without restart</span><button class="mini-btn" type="submit">Save runtime</button></div>
+          </form>
+
 
           <div class="settings-card">
             <div class="settings-card-title">About</div>
@@ -333,6 +411,16 @@
         <div class="modal-status" id="install-status" style="display:none"></div>
       </div>
     </div>
+  </div>
+
+  <!-- ===== Toast container ===== -->
+  <div class="provider-delete-overlay" id="provider-delete-overlay" hidden></div>
+  <div class="provider-delete-dialog" id="provider-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="provider-delete-title" aria-describedby="provider-delete-copy" hidden>
+    <div class="provider-modal-head">
+      <div><div class="settings-card-title" id="provider-delete-title">Delete provider?</div><p class="provider-modal-subtitle" id="provider-delete-copy">This removes the saved connection from this device.</p></div>
+      <button class="provider-modal-close" id="provider-delete-close" type="button" aria-label="Close delete confirmation">×</button>
+    </div>
+    <div class="agent-delete-actions"><button class="mini-btn" id="provider-delete-cancel" type="button">Cancel</button><button class="mini-btn danger" id="provider-delete-confirm" type="button">Delete</button></div>
   </div>
 
   <!-- ===== Toast container ===== -->

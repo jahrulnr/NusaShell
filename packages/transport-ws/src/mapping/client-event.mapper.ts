@@ -1,4 +1,4 @@
-import type { DomainEvent } from "@nusashell/domain";
+import type { AgentTextDeltaEvent, ApplicationEvent } from "@nusashell/application";
 import {
   PluginInstalledEvent,
   PluginUninstalledEvent,
@@ -10,7 +10,7 @@ import {
 } from "@nusashell/domain";
 import type { EventEnvelope } from "@nusashell/contracts";
 
-export function mapDomainEvent(event: DomainEvent, sequence: number): EventEnvelope | null {
+export function mapDomainEvent(event: ApplicationEvent, sequence: number): EventEnvelope | null {
   const timestamp = event.occurredAt.toISOString();
 
   switch (event.type) {
@@ -111,6 +111,20 @@ export function mapDomainEvent(event: DomainEvent, sequence: number): EventEnvel
           requestId: e.requestId,
           toolName: e.toolName,
           success: true,
+          timestamp,
+        },
+      };
+    }
+
+    case "agent.text_delta": {
+      const e = event as AgentTextDeltaEvent;
+      return {
+        kind: "event",
+        event: "agent.text_delta",
+        sequence,
+        payload: {
+          traceId: e.aggregateId,
+          delta: e.delta,
           timestamp,
         },
       };

@@ -8,4 +8,5 @@ export default defineWorkspace([
   "packages/transport-ws",
   "packages/plugin-sdk",
   "apps/backend",
+  "apps/desktop",
 ]);

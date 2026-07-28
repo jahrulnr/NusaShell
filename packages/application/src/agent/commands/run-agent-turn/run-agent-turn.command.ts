@@ -1,5 +1,9 @@
 import type { Command } from "../../../messaging/command.js";
-import type { AgentMessage } from "../../ports/agent-provider.port.js";
+import type {
+  AgentMessage,
+  AgentModelCapabilities,
+  ReasoningEffort,
+} from "../../ports/agent-provider.port.js";
 
 export interface RunAgentTurnCommand extends Command {
   readonly kind: "run-agent-turn";
@@ -7,4 +11,8 @@ export interface RunAgentTurnCommand extends Command {
   readonly messages: readonly AgentMessage[];
   readonly pluginIds: readonly string[];
   readonly maxToolRounds?: number;
+  readonly model?: string;
+  readonly effort?: ReasoningEffort;
+  readonly modelCapabilities?: AgentModelCapabilities;
+  readonly traceId?: string;
 }

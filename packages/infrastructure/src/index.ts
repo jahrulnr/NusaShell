@@ -4,4 +4,17 @@ export { NodeChildProcessAdapter } from "./process/index.js";
 export { StdioMcpClient, HttpMcpClient, SseMcpClient, McpClientFactory } from "./mcp/index.js";
 export { scanPluginDirectories, resolveManifestPath, resolvePluginRoot, PluginInstaller, PluginSyncService } from "./plugins/index.js";
 export { createLogger, type Logger, type LogObserver, type LogRecord } from "./logging/index.js";
-export { AgentProviderRegistry, StaticAgentProvider, OpenAiCompatibleAgentProvider, type OpenAiCompatibleAgentProviderOptions } from "./ai/index.js";
+export {
+  AgentProviderRegistry,
+  StaticAgentProvider,
+  OpenAiCompatibleAgentProvider,
+  heuristicModelSupportsEffort,
+  heuristicModelSupportsVision,
+  resolveModelRuntimePolicy,
+  extractTextToolCalls,
+  mergeTextToolCalls,
+  type OpenAiCompatibleAgentProviderOptions,
+  type ModelCapabilities,
+  type ModelRuntimePolicy,
+  type TextToolCallParseResult,
+} from "./ai/index.js";
