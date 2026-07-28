@@ -13,3 +13,5 @@ export { InstallPluginHandler } from "./install-plugin/install-plugin.handler.js
 export type { UninstallPluginCommand } from "./uninstall-plugin/uninstall-plugin.command.js";
 export type { UninstallPluginResult } from "./uninstall-plugin/uninstall-plugin.result.js";
 export { UninstallPluginHandler } from "./uninstall-plugin/uninstall-plugin.handler.js";
+export type { SetPluginAutostartCommand } from "./set-plugin-autostart/set-plugin-autostart.command.js";
+export { SetPluginAutostartHandler } from "./set-plugin-autostart/set-plugin-autostart.handler.js";

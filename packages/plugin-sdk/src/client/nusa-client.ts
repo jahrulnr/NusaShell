@@ -9,7 +9,7 @@ import { WebSocketConnection } from "./websocket-connection.js";
 import { RequestManager } from "./request-manager.js";
 import { EventSubscriber } from "./event-subscriber.js";
 import { ReconnectPolicy, type ReconnectOptions, DEFAULT_RECONNECT_OPTIONS } from "./reconnect-policy.js";
-import { PluginsApi, ToolsApi } from "../api/plugins-api.js";
+import { McpContextApi, PluginsApi, ToolsApi } from "../api/plugins-api.js";
 import { SystemApi } from "../api/system-api.js";
 import { AgentApi } from "../api/agent-api.js";
 import { ConnectionClosedError } from "../errors/connection-closed.error.js";
@@ -26,6 +26,7 @@ export type ReconnectStatusCallback = () => void;
 export class NusaClient {
   readonly plugins: PluginsApi;
   readonly tools: ToolsApi;
+  readonly mcp: McpContextApi;
   readonly system: SystemApi;
   readonly agent: AgentApi;
   readonly events: EventSubscriber;
@@ -65,6 +66,7 @@ export class NusaClient {
 
     this.plugins = new PluginsApi(this);
     this.tools = new ToolsApi(this);
+    this.mcp = new McpContextApi(this);
     this.system = new SystemApi(this);
     this.agent = new AgentApi(this);
   }

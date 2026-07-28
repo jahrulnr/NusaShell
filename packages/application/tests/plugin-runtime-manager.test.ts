@@ -30,6 +30,20 @@ function setup() {
 }
 
 describe("PluginRuntimeManager", () => {
+  it("persists autostart and starts only opted-in plugins", async () => {
+    const { manager, pluginRepository } = setup();
+    const optedIn = makePlugin("com.example.autostart");
+    const onDemand = makePlugin("com.example.on-demand");
+    pluginRepository.add(optedIn);
+    pluginRepository.add(onDemand);
+
+    const updated = await manager.setAutostart(optedIn.id, true);
+    expect(updated.autostart).toBe(true);
+    await manager.startAutostartPlugins();
+
+    expect(await manager.getPluginState(optedIn.id)).toBe("running");
+    expect(await manager.getPluginState(onDemand.id)).toBe("idle");
+  });
   describe("listPlugins", () => {
     it("returns idle state for plugins without runtime entries", async () => {
       const { pluginRepository, manager } = setup();
@@ -224,6 +238,52 @@ describe("PluginRuntimeManager", () => {
         }),
       ).rejects.toMatchObject({
         code: "TOOL_CALL_TIMEOUT",
+      });
+    });
+  });
+
+  describe("MCP prompts and resources", () => {
+    it("brokers prompt and resource capability calls for a running plugin", async () => {
+      const { pluginRepository, manager, mcpClientFactory } = setup();
+      const plugin = makePlugin("com.example.context");
+      pluginRepository.add(plugin);
+
+      await manager.startPlugin(plugin.id);
+      const client = mcpClientFactory.created[0]!;
+      client.prompts.push({
+        name: "summarize_note",
+        description: "Summarize a note",
+        arguments: [{ name: "note", required: true }],
+      });
+      client.setPromptResult("summarize_note", {
+        description: "A note summary prompt",
+        messages: [{ role: "user", content: { type: "text", text: "Summarize this note" } }],
+      });
+      client.resources.push({ uri: "notes://daily", name: "Daily notes", mimeType: "text/markdown" });
+      client.resourceTemplates.push({ uriTemplate: "notes://{date}", name: "Note by date" });
+      client.setResourceResult("notes://daily", {
+        contents: [{ uri: "notes://daily", mimeType: "text/markdown", text: "# Today" }],
+      });
+
+      await expect(manager.listPrompts(plugin.id)).resolves.toEqual(client.prompts);
+      await expect(manager.getPrompt(plugin.id, "summarize_note", { note: "Today" })).resolves.toEqual({
+        description: "A note summary prompt",
+        messages: [{ role: "user", content: { type: "text", text: "Summarize this note" } }],
+      });
+      await expect(manager.listResources(plugin.id)).resolves.toEqual(client.resources);
+      await expect(manager.listResourceTemplates(plugin.id)).resolves.toEqual(client.resourceTemplates);
+      await expect(manager.readResource(plugin.id, "notes://daily")).resolves.toEqual({
+        contents: [{ uri: "notes://daily", mimeType: "text/markdown", text: "# Today" }],
+      });
+    });
+
+    it("rejects prompt discovery when the plugin is not running", async () => {
+      const { pluginRepository, manager } = setup();
+      const plugin = makePlugin("com.example.context");
+      pluginRepository.add(plugin);
+
+      await expect(manager.listPrompts(plugin.id)).rejects.toMatchObject({
+        code: "PLUGIN_NOT_RUNNING",
       });
     });
   });

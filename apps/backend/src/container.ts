@@ -26,12 +26,18 @@ import {
   RestartPluginHandler,
   InstallPluginHandler,
   UninstallPluginHandler,
+  SetPluginAutostartHandler,
   ListPluginsHandler,
   GetPluginHandler,
   GetPluginStateHandler,
   CallToolHandler,
   CancelToolCallHandler,
   ListToolsHandler,
+  ListPromptsHandler,
+  GetPromptHandler,
+  ListResourcesHandler,
+  ListResourceTemplatesHandler,
+  ReadResourceHandler,
   McpAgentToolGateway,
   RunAgentTurnHandler,
   type AgentProvider,
@@ -130,6 +136,7 @@ export function createContainer(options: ContainerOptions): Container {
   commandBus.register("restart-plugin", new RestartPluginHandler(runtimeManager));
   commandBus.register("call-tool", new CallToolHandler(runtimeManager));
   commandBus.register("cancel-tool-call", new CancelToolCallHandler(runtimeManager));
+  commandBus.register("set-plugin-autostart", new SetPluginAutostartHandler(runtimeManager));
   commandBus.register("run-agent-turn", new RunAgentTurnHandler(
     agentProviderRegistry,
     agentToolGateway,
@@ -147,6 +154,11 @@ export function createContainer(options: ContainerOptions): Container {
   queryBus.register("get-plugin", new GetPluginHandler(runtimeManager));
   queryBus.register("get-plugin-state", new GetPluginStateHandler(runtimeManager));
   queryBus.register("list-tools", new ListToolsHandler(runtimeManager));
+  queryBus.register("list-prompts", new ListPromptsHandler(runtimeManager));
+  queryBus.register("get-prompt", new GetPromptHandler(runtimeManager));
+  queryBus.register("list-resources", new ListResourcesHandler(runtimeManager));
+  queryBus.register("list-resource-templates", new ListResourceTemplatesHandler(runtimeManager));
+  queryBus.register("read-resource", new ReadResourceHandler(runtimeManager));
   queryBus.register("system-ping", new SystemPingHandler());
   queryBus.register("system-version", new SystemVersionHandler());
 

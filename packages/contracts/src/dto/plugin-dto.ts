@@ -13,6 +13,7 @@ export interface PluginDto {
   readonly installPath: string;
   readonly state: PluginStateDto;
   readonly enabled: boolean;
+  readonly autostart: boolean;
 }
 
 export interface PluginStateResultDto {

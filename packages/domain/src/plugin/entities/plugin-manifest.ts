@@ -155,4 +155,18 @@ export class PluginManifest {
       ),
     );
   }
+
+  withMcpAutostart(autostart: boolean): PluginManifest {
+    const result = PluginManifest.create({ ...this.toInput(), mcp: { ...this.toInput().mcp, autostart } });
+    if (!result.ok) throw new Error(result.error.message);
+    return result.value;
+  }
+
+  toInput(): PluginManifestInput {
+    return {
+      id: PluginIdFactory.toString(this.id), name: this.name, version: this.version.toString(), icon: this.icon, ui: this.ui,
+      mcp: { transport: this.mcp.transport, ...(this.mcp.command !== undefined ? { command: this.mcp.command } : {}), args: this.mcp.args, ...(this.mcp.url !== undefined ? { url: this.mcp.url } : {}), env: this.mcp.env, autostart: this.mcp.autostart, keepAliveOnClose: this.mcp.keepAliveOnClose },
+      ...(this.dependencies.shell !== undefined ? { dependencies: this.dependencies } : {}),
+    };
+  }
 }

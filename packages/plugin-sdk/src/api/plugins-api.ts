@@ -63,4 +63,49 @@ export class ToolsApi {
   }
 }
 
+export interface PromptDescriptorDto {
+  readonly name: string;
+  readonly description?: string;
+  readonly arguments?: readonly { readonly name: string; readonly description?: string; readonly required?: boolean }[];
+}
+
+export interface ResourceDescriptorDto {
+  readonly uri: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly mimeType?: string;
+  readonly size?: number;
+}
+
+export interface ResourceTemplateDescriptorDto {
+  readonly uriTemplate: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly mimeType?: string;
+}
+
+export class McpContextApi {
+  constructor(private readonly client: NusaClient) {}
+
+  listPrompts(pluginId: string, timeoutMs?: number): Promise<{ prompts: readonly PromptDescriptorDto[] }> {
+    return this.client.request("prompt.list", { pluginId }, timeoutMs);
+  }
+
+  getPrompt(pluginId: string, name: string, args: Record<string, string> = {}, timeoutMs?: number): Promise<unknown> {
+    return this.client.request("prompt.get", { pluginId, name, args }, timeoutMs);
+  }
+
+  listResources(pluginId: string, timeoutMs?: number): Promise<{ resources: readonly ResourceDescriptorDto[] }> {
+    return this.client.request("resource.list", { pluginId }, timeoutMs);
+  }
+
+  listResourceTemplates(pluginId: string, timeoutMs?: number): Promise<{ resourceTemplates: readonly ResourceTemplateDescriptorDto[] }> {
+    return this.client.request("resource.template.list", { pluginId }, timeoutMs);
+  }
+
+  readResource(pluginId: string, uri: string, timeoutMs?: number): Promise<unknown> {
+    return this.client.request("resource.read", { pluginId, uri }, timeoutMs);
+  }
+}
+
 export type { ParsedEvent, EventType };

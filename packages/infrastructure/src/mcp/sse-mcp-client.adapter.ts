@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import type { McpClientPort, ToolDescriptor } from "@nusashell/application";
+import type { McpClientPort, PromptDescriptor, PromptResult, ResourceDescriptor, ResourceReadResult, ResourceTemplateDescriptor, ToolDescriptor } from "@nusashell/application";
 import type { Logger } from "pino";
 
 export class SseMcpClient implements McpClientPort {
@@ -84,5 +84,35 @@ export class SseMcpClient implements McpClientPort {
     });
 
     return result.content;
+  }
+
+  async listPrompts(): Promise<readonly PromptDescriptor[]> {
+    const result = await this.requireClient().listPrompts();
+    return result.prompts.map((prompt) => ({ name: prompt.name, ...(prompt.description !== undefined ? { description: prompt.description } : {}), ...(prompt.arguments !== undefined ? { arguments: prompt.arguments.map((argument) => ({ name: argument.name, ...(argument.description !== undefined ? { description: argument.description } : {}), ...(argument.required !== undefined ? { required: argument.required } : {}) })) } : {}) }));
+  }
+
+  async getPrompt(name: string, args: Readonly<Record<string, string>>): Promise<PromptResult> {
+    const result = await this.requireClient().getPrompt({ name, arguments: { ...args } });
+    return { ...(result.description !== undefined ? { description: result.description } : {}), messages: result.messages.map((message) => ({ role: message.role, content: message.content })) };
+  }
+
+  async listResources(): Promise<readonly ResourceDescriptor[]> {
+    const result = await this.requireClient().listResources();
+    return result.resources.map((resource) => ({ uri: resource.uri, name: resource.name, ...(resource.description !== undefined ? { description: resource.description } : {}), ...(resource.mimeType !== undefined ? { mimeType: resource.mimeType } : {}), ...(resource.size !== undefined ? { size: resource.size } : {}) }));
+  }
+
+  async listResourceTemplates(): Promise<readonly ResourceTemplateDescriptor[]> {
+    const result = await this.requireClient().listResourceTemplates();
+    return result.resourceTemplates.map((template) => ({ uriTemplate: template.uriTemplate, name: template.name, ...(template.description !== undefined ? { description: template.description } : {}), ...(template.mimeType !== undefined ? { mimeType: template.mimeType } : {}) }));
+  }
+
+  async readResource(uri: string): Promise<ResourceReadResult> {
+    const result = await this.requireClient().readResource({ uri });
+    return { contents: result.contents.map((content) => ({ uri: content.uri, ...(content.mimeType !== undefined ? { mimeType: content.mimeType } : {}), ...("text" in content ? { text: content.text } : { blob: content.blob }) })) };
+  }
+
+  private requireClient(): Client {
+    if (!this.client) throw new Error("MCP client not connected");
+    return this.client;
   }
 }

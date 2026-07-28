@@ -36,6 +36,7 @@ export const PluginListItemSchema = z.object({
   installPath: z.string(),
   state: PluginStateSchema,
   enabled: z.boolean(),
+  autostart: z.boolean(),
 });
 
 export const PluginListResultSchema = z.object({

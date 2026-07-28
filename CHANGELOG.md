@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.0.20] - 2026-07-28
+## [0.0.21] - 2026-07-28
 
 ### Added
 - Agent runtime with a bounded, traceable provider → MCP tool → provider turn loop.
@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `agent.run` WebSocket command and `NusaClient.agent.run()` SDK API.
 - Desktop Agent workspace with explicit running-plugin MCP scope, conversation turn metadata, stub status, and centralized trace logging.
 - MCP capability policy documenting the stable implementation track and deferred experimental/evolving capabilities for operator and agent knowledge.
+- Per-plugin MCP autostart preference, persisted in installed metadata and applied best-effort during backend startup; launcher drawer toggle included.
+- Progressive agent MCP discovery: bounded `mcp_list`, `mcp_enable`, `mcp_disable`, `tool_search`, and `tool_schema` catalog, with one tool schema granted per subsequent round.
+- Brokered MCP prompts and resources over stdio, HTTP, and SSE transports: `prompt.list`, `prompt.get`, `resource.list`, `resource.template.list`, and `resource.read`.
+- Agent MCP context panel for explicit prompt insertion and text-resource attachments; agent resource discovery is bounded to 20 results and 50 KB per read.
 - Focused tests for text turns, MCP tool calls, allowlist rejection, round limits, and OpenAI-compatible function-call parsing.
 
 ### Changed

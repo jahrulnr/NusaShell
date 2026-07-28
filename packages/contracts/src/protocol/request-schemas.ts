@@ -83,6 +83,7 @@ export const PluginUninstallRequestSchema = z.object({
     pluginId: z.string().min(1),
   }),
 });
+export const PluginAutostartRequestSchema = z.object({ kind: z.literal("request"), id: z.string().min(1), method: z.literal("plugin.autostart"), protocolVersion: z.string().optional(), payload: z.object({ pluginId: z.string().min(1), autostart: z.boolean() }) });
 
 export const PluginGetRequestSchema = z.object({
   kind: z.literal("request"),
@@ -113,6 +114,12 @@ export const ToolListRequestSchema = z.object({
     pluginId: z.string().min(1),
   }),
 });
+
+export const PromptListRequestSchema = z.object({ kind: z.literal("request"), id: z.string().min(1), method: z.literal("prompt.list"), protocolVersion: z.string().optional(), payload: z.object({ pluginId: z.string().min(1) }) });
+export const PromptGetRequestSchema = z.object({ kind: z.literal("request"), id: z.string().min(1), method: z.literal("prompt.get"), protocolVersion: z.string().optional(), payload: z.object({ pluginId: z.string().min(1), name: z.string().min(1), args: z.record(z.string(), z.string()).default({}) }) });
+export const ResourceListRequestSchema = z.object({ kind: z.literal("request"), id: z.string().min(1), method: z.literal("resource.list"), protocolVersion: z.string().optional(), payload: z.object({ pluginId: z.string().min(1) }) });
+export const ResourceTemplateListRequestSchema = z.object({ kind: z.literal("request"), id: z.string().min(1), method: z.literal("resource.template.list"), protocolVersion: z.string().optional(), payload: z.object({ pluginId: z.string().min(1) }) });
+export const ResourceReadRequestSchema = z.object({ kind: z.literal("request"), id: z.string().min(1), method: z.literal("resource.read"), protocolVersion: z.string().optional(), payload: z.object({ pluginId: z.string().min(1), uri: z.string().min(1) }) });
 
 const AgentMessageSchema = z.union([
   z.object({ role: z.enum(["system", "user"]), content: z.string().min(1) }),
@@ -189,11 +196,17 @@ export const RequestSchema = z.discriminatedUnion("method", [
   PluginRestartRequestSchema,
   PluginInstallRequestSchema,
   PluginUninstallRequestSchema,
+  PluginAutostartRequestSchema,
   PluginGetRequestSchema,
   PluginStateRequestSchema,
   ToolCallRequestSchema,
   ToolCancelRequestSchema,
   ToolListRequestSchema,
+  PromptListRequestSchema,
+  PromptGetRequestSchema,
+  ResourceListRequestSchema,
+  ResourceTemplateListRequestSchema,
+  ResourceReadRequestSchema,
   AgentRunRequestSchema,
   SystemPingRequestSchema,
   SystemVersionRequestSchema,
@@ -207,10 +220,16 @@ export type PluginListRequest = z.infer<typeof PluginListRequestSchema>;
 export type PluginRestartRequest = z.infer<typeof PluginRestartRequestSchema>;
 export type PluginInstallRequest = z.infer<typeof PluginInstallRequestSchema>;
 export type PluginUninstallRequest = z.infer<typeof PluginUninstallRequestSchema>;
+export type PluginAutostartRequest = z.infer<typeof PluginAutostartRequestSchema>;
 export type PluginGetRequest = z.infer<typeof PluginGetRequestSchema>;
 export type PluginStateRequest = z.infer<typeof PluginStateRequestSchema>;
 export type ToolCallRequest = z.infer<typeof ToolCallRequestSchema>;
 export type ToolCancelRequest = z.infer<typeof ToolCancelRequestSchema>;
 export type ToolListRequest = z.infer<typeof ToolListRequestSchema>;
+export type PromptListRequest = z.infer<typeof PromptListRequestSchema>;
+export type PromptGetRequest = z.infer<typeof PromptGetRequestSchema>;
+export type ResourceListRequest = z.infer<typeof ResourceListRequestSchema>;
+export type ResourceTemplateListRequest = z.infer<typeof ResourceTemplateListRequestSchema>;
+export type ResourceReadRequest = z.infer<typeof ResourceReadRequestSchema>;
 export type AgentRunRequest = z.infer<typeof AgentRunRequestSchema>;
 export type ParsedRequest = z.infer<typeof RequestSchema>;

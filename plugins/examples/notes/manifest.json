@@ -5,12 +5,21 @@
   "icon": "📝",
   "ui": {
     "entry": "ui/index.html",
-    "window": { "mode": "panel", "defaultSize": { "width": 480, "height": 560 } }
+    "window": {
+      "mode": "panel",
+      "defaultSize": {
+        "width": 480,
+        "height": 560
+      }
+    }
   },
   "mcp": {
     "transport": "stdio",
     "command": "node",
-    "args": ["mcp/server.js"],
+    "args": [
+      "mcp/server.js"
+    ],
+    "env": {},
     "autostart": false,
     "keepAliveOnClose": false
   }

@@ -6,6 +6,12 @@ export type {
   McpClientPort,
   McpClientFactoryPort,
   ToolDescriptor,
+  PromptArgumentDescriptor,
+  PromptDescriptor,
+  PromptResult,
+  ResourceDescriptor,
+  ResourceReadResult,
+  ResourceTemplateDescriptor,
   ClockPort,
   LoggerPort,
 } from "./ports/index.js";
@@ -28,6 +34,7 @@ export type {
   InstallPluginResult,
   UninstallPluginCommand,
   UninstallPluginResult,
+  SetPluginAutostartCommand,
 } from "./commands/index.js";
 export {
   StartPluginHandler,
@@ -35,6 +42,7 @@ export {
   RestartPluginHandler,
   InstallPluginHandler,
   UninstallPluginHandler,
+  SetPluginAutostartHandler,
 } from "./commands/index.js";
 export type {
   ListPluginsQuery,

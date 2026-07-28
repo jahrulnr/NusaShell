@@ -58,15 +58,15 @@ export class AgentTurnRunner {
 
     const traceId = input.traceId ?? randomUUID();
     const maxToolRounds = normalizeMaxRounds(input.maxToolRounds ?? this.defaultMaxToolRounds);
-    const tools = await this.deps.toolGateway.listTools(input.pluginIds);
-    const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
     const messages: AgentMessage[] = [...input.messages];
     const toolCalls: AgentToolExecution[] = [];
     let model: string | undefined;
 
-    this.deps.logger?.info("Agent turn started traceId=%s provider=%s tools=%d", traceId, this.deps.provider.id, tools.length);
+    this.deps.logger?.info("Agent turn started traceId=%s provider=%s", traceId, this.deps.provider.id);
 
     for (let round = 1; round <= maxToolRounds; round += 1) {
+      const tools = await this.deps.toolGateway.listTools(input.pluginIds);
+      const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
       let response;
       try {
         response = await this.deps.provider.complete({ traceId, round, messages, tools });

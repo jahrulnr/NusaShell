@@ -45,4 +45,15 @@ export class Plugin extends Entity<PluginId> {
       this.installedAt,
     );
   }
+
+  withMcpAutostart(autostart: boolean): Plugin {
+    return new Plugin(
+      this.id,
+      this.version,
+      this.manifest.withMcpAutostart(autostart),
+      this.enabled,
+      this.installPath,
+      this.installedAt,
+    );
+  }
 }

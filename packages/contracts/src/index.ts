@@ -23,6 +23,11 @@ export {
   ToolCallRequestSchema,
   ToolCancelRequestSchema,
   ToolListRequestSchema,
+  PromptListRequestSchema,
+  PromptGetRequestSchema,
+  ResourceListRequestSchema,
+  ResourceTemplateListRequestSchema,
+  ResourceReadRequestSchema,
   SubscribeRequestSchema,
   UnsubscribeRequestSchema,
   type PluginStartRequest,
@@ -36,6 +41,11 @@ export {
   type ToolCallRequest,
   type ToolCancelRequest,
   type ToolListRequest,
+  type PromptListRequest,
+  type PromptGetRequest,
+  type ResourceListRequest,
+  type ResourceTemplateListRequest,
+  type ResourceReadRequest,
   type ParsedRequest,
 } from "./protocol/request-schemas.js";
 

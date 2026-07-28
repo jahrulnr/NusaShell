@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import type { PluginRepositoryPort } from "@nusashell/application";
 import {
   Plugin,
@@ -100,6 +100,7 @@ export class FilesystemPluginRegistry implements PluginRepositoryPort {
   async save(plugin: Plugin): Promise<void> {
     await this.ensureLoaded();
     this.cache.set(PluginId.toString(plugin.id), plugin);
+    await writeFile(resolveManifestPath(plugin.installPath), `${JSON.stringify(plugin.manifest.toInput(), null, 2)}\n`, "utf-8");
   }
 
   async remove(id: PluginId): Promise<void> {

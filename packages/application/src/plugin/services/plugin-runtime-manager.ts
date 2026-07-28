@@ -18,7 +18,16 @@ import {
 import { ApplicationError } from "../../errors/application-error.js";
 import type { ClockPort } from "../ports/clock.port.js";
 import type { LoggerPort } from "../ports/logger.port.js";
-import type { McpClientFactoryPort, McpClientPort, ToolDescriptor } from "../ports/mcp-client.port.js";
+import type {
+  McpClientFactoryPort,
+  McpClientPort,
+  PromptDescriptor,
+  PromptResult,
+  ResourceDescriptor,
+  ResourceReadResult,
+  ResourceTemplateDescriptor,
+  ToolDescriptor,
+} from "../ports/mcp-client.port.js";
 import type { PluginProcessPort, ProcessHandle } from "../ports/plugin-process.port.js";
 import type { PluginRepositoryPort } from "../ports/plugin-repository.port.js";
 import { EventDispatcher } from "../../events/event-dispatcher.js";
@@ -39,6 +48,7 @@ interface RuntimeEntry {
   icon: string;
   installPath: string;
   enabled: boolean;
+  autostart: boolean;
   runtime: PluginRuntime;
   startPromise: Promise<void> | null;
   readonly queue: PluginOperationQueue;
@@ -79,6 +89,7 @@ export interface PluginView {
   readonly installPath: string;
   readonly state: PluginRuntimeState;
   readonly enabled: boolean;
+  readonly autostart: boolean;
 }
 
 export class PluginRuntimeManager {
@@ -101,6 +112,7 @@ export class PluginRuntimeManager {
         installPath: plugin.installPath,
         state: entry?.runtime.state ?? "idle",
         enabled: plugin.enabled,
+        autostart: plugin.manifest.mcp.autostart,
       };
     });
   }
@@ -137,16 +149,36 @@ export class PluginRuntimeManager {
 
   async listTools(pluginId: PluginId): Promise<readonly ToolDescriptor[]> {
     const entry = await this.ensureEntry(pluginId);
-    return entry.queue.enqueue(async () => {
-      if (!entry.mcpClient || entry.runtime.state !== "running") {
-        throw new ApplicationError(
-          "PLUGIN_NOT_RUNNING",
-          `Plugin ${PluginId.toString(pluginId)} is not running`,
-          { pluginId: PluginId.toString(pluginId) },
-        );
-      }
-      return entry.mcpClient.listTools();
-    });
+    return entry.queue.enqueue(async () => this.requireRunningClient(entry).listTools());
+  }
+
+  async listPrompts(pluginId: PluginId): Promise<readonly PromptDescriptor[]> {
+    const entry = await this.ensureEntry(pluginId);
+    return entry.queue.enqueue(async () => this.requireRunningClient(entry).listPrompts());
+  }
+
+  async getPrompt(
+    pluginId: PluginId,
+    name: string,
+    args: Readonly<Record<string, string>>,
+  ): Promise<PromptResult> {
+    const entry = await this.ensureEntry(pluginId);
+    return entry.queue.enqueue(async () => this.requireRunningClient(entry).getPrompt(name, args));
+  }
+
+  async listResources(pluginId: PluginId): Promise<readonly ResourceDescriptor[]> {
+    const entry = await this.ensureEntry(pluginId);
+    return entry.queue.enqueue(async () => this.requireRunningClient(entry).listResources());
+  }
+
+  async listResourceTemplates(pluginId: PluginId): Promise<readonly ResourceTemplateDescriptor[]> {
+    const entry = await this.ensureEntry(pluginId);
+    return entry.queue.enqueue(async () => this.requireRunningClient(entry).listResourceTemplates());
+  }
+
+  async readResource(pluginId: PluginId, uri: string): Promise<ResourceReadResult> {
+    const entry = await this.ensureEntry(pluginId);
+    return entry.queue.enqueue(async () => this.requireRunningClient(entry).readResource(uri));
   }
 
   async restartPlugin(pluginId: PluginId): Promise<PluginView> {
@@ -170,6 +202,7 @@ export class PluginRuntimeManager {
         entry.icon = resolveIcon(plugin.manifest.icon, plugin.installPath);
         entry.installPath = plugin.installPath;
         entry.enabled = plugin.enabled;
+        entry.autostart = plugin.manifest.mcp.autostart;
       }
       return this.view(entry);
     }
@@ -183,6 +216,7 @@ export class PluginRuntimeManager {
       installPath: plugin.installPath,
       state: "idle",
       enabled: plugin.enabled,
+      autostart: plugin.manifest.mcp.autostart,
     };
   }
 
@@ -193,6 +227,19 @@ export class PluginRuntimeManager {
         entry.queue.enqueue(async () => this.stopLocked(entry)),
       ),
     );
+  }
+
+  async setAutostart(pluginId: PluginId, autostart: boolean): Promise<PluginView> {
+    const plugin = await this.loadPlugin(pluginId);
+    await this.deps.pluginRepository.save(plugin.withMcpAutostart(autostart));
+    const entry = this.runtimes.get(PluginId.toString(pluginId));
+    if (entry) entry.autostart = autostart;
+    return (await this.getPlugin(pluginId))!;
+  }
+
+  async startAutostartPlugins(): Promise<void> {
+    const plugins = await this.deps.pluginRepository.list();
+    await Promise.allSettled(plugins.filter((plugin) => plugin.enabled && plugin.manifest.mcp.autostart).map((plugin) => this.startPlugin(plugin.id)));
   }
 
   private async ensureEntry(pluginId: PluginId): Promise<RuntimeEntry> {
@@ -208,6 +255,7 @@ export class PluginRuntimeManager {
       icon: "",
       installPath: "",
       enabled: true,
+      autostart: false,
       runtime: PluginRuntime.createIdle(pluginId),
       startPromise: null,
       queue: new PluginOperationQueue(),
@@ -234,6 +282,7 @@ export class PluginRuntimeManager {
     entry.icon = resolveIcon(plugin.manifest.icon, plugin.installPath);
     entry.installPath = plugin.installPath;
     entry.enabled = plugin.enabled;
+    entry.autostart = plugin.manifest.mcp.autostart;
     const canStart = PluginLifecyclePolicy.canStart(plugin, entry.runtime);
     if (!canStart.ok) {
       throw this.mapDomainError(canStart.error, entry.pluginId);
@@ -564,6 +613,17 @@ export class PluginRuntimeManager {
     return plugin;
   }
 
+  private requireRunningClient(entry: RuntimeEntry): McpClientPort {
+    if (!entry.mcpClient || entry.runtime.state !== "running") {
+      throw new ApplicationError(
+        "PLUGIN_NOT_RUNNING",
+        `Plugin ${PluginId.toString(entry.pluginId)} is not running`,
+        { pluginId: PluginId.toString(entry.pluginId) },
+      );
+    }
+    return entry.mcpClient;
+  }
+
   private async publishPulled(runtime: PluginRuntime): Promise<void> {
     const events = runtime.pullEvents() as readonly DomainEvent[];
     await this.deps.eventDispatcher.publishAll(events);
@@ -591,6 +651,7 @@ export class PluginRuntimeManager {
       installPath: entry.installPath,
       state: entry.runtime.state,
       enabled: entry.enabled,
+      autostart: entry.autostart,
     };
   }
 
@@ -635,4 +696,3 @@ export class PluginRuntimeManager {
     return String(error);
   }
 }
-

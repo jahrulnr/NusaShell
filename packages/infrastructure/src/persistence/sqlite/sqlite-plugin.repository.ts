@@ -36,7 +36,7 @@ export class SqlitePluginRepository implements PluginRepositoryPort {
   }
 
   async save(plugin: Plugin): Promise<void> {
-    const manifestJson = JSON.stringify(this.manifestToInput(plugin.manifest));
+    const manifestJson = JSON.stringify(plugin.manifest.toInput());
     this.database.raw
       .prepare(
         `INSERT OR REPLACE INTO plugins (id, version, manifest_json, enabled, install_path, installed_at)
@@ -83,27 +83,5 @@ export class SqlitePluginRepository implements PluginRepositoryPort {
       installPath: row.install_path,
       installedAt: new Date(row.installed_at),
     });
-  }
-
-  private manifestToInput(manifest: PluginManifest): PluginManifestInput {
-    return {
-      id: PluginId.toString(manifest.id),
-      name: manifest.name,
-      version: manifest.version.toString(),
-      icon: manifest.icon,
-      ui: manifest.ui,
-      mcp: {
-        transport: manifest.mcp.transport,
-        ...(manifest.mcp.command !== undefined ? { command: manifest.mcp.command } : {}),
-        args: manifest.mcp.args,
-        ...(manifest.mcp.url !== undefined ? { url: manifest.mcp.url } : {}),
-        env: manifest.mcp.env,
-        autostart: manifest.mcp.autostart,
-        keepAliveOnClose: manifest.mcp.keepAliveOnClose,
-      },
-      ...(manifest.dependencies.shell !== undefined
-        ? { dependencies: { shell: manifest.dependencies.shell } }
-        : {}),
-    };
   }
 }

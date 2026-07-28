@@ -35,6 +35,12 @@ export type {
   McpClientPort,
   McpClientFactoryPort,
   ToolDescriptor,
+  PromptArgumentDescriptor,
+  PromptDescriptor,
+  PromptResult,
+  ResourceDescriptor,
+  ResourceReadResult,
+  ResourceTemplateDescriptor,
   ClockPort,
   LoggerPort,
 } from "./plugin/index.js";
@@ -50,6 +56,7 @@ export {
   RestartPluginHandler,
   InstallPluginHandler,
   UninstallPluginHandler,
+  SetPluginAutostartHandler,
   ListPluginsHandler,
   GetPluginHandler,
   GetPluginStateHandler,
@@ -63,6 +70,7 @@ export {
   type InstallPluginResult,
   type UninstallPluginCommand,
   type UninstallPluginResult,
+  type SetPluginAutostartCommand,
   type ListPluginsQuery,
   type ListPluginsResult,
   type PluginListItem,
@@ -101,3 +109,7 @@ export { type AppConfig, loadConfig } from "./config/index.js";
 // System queries
 export type { SystemPingQuery, SystemPingResult, SystemVersionQuery, SystemVersionResult } from "./system/index.js";
 export { SystemPingHandler, SystemVersionHandler } from "./system/index.js";
+
+// MCP capability queries
+export type { GetPromptQuery, ListPromptsQuery, ListResourcesQuery, ListResourceTemplatesQuery, ReadResourceQuery } from "./mcp/index.js";
+export { GetPromptHandler, ListPromptsHandler, ListResourcesHandler, ListResourceTemplatesHandler, ReadResourceHandler } from "./mcp/index.js";

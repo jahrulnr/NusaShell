@@ -124,6 +124,7 @@ const STATES = ["idle", "starting", "running", "stopping", "crashed"];
 const agentMessages = [];
 const agentPluginScope = new Set();
 let agentTurnPending = false;
+let agentContextPluginId = "";
 
 // ============ Helpers ============
 
@@ -272,6 +273,22 @@ async function listTools(pluginId) {
   try { return await sendRequest("tool.list", { pluginId }); } catch (e) { return { tools: [] }; }
 }
 
+async function listPrompts(pluginId) {
+  try { return await sendRequest("prompt.list", { pluginId }); } catch (e) { return { prompts: [] }; }
+}
+
+async function getPrompt(pluginId, name, args) {
+  return sendRequest("prompt.get", { pluginId, name, args });
+}
+
+async function listResources(pluginId) {
+  try { return await sendRequest("resource.list", { pluginId }); } catch (e) { return { resources: [] }; }
+}
+
+async function readResource(pluginId, uri) {
+  return sendRequest("resource.read", { pluginId, uri });
+}
+
 async function callTool(pluginId, toolName, args) {
   const requestId = `req_${crypto.randomUUID()}`;
   try { return await sendRequest("tool.call", { pluginId, requestId, toolName, args }); }
@@ -296,6 +313,11 @@ async function uninstallPlugin(pluginId) {
   catch (e) { return { error: e.message }; }
 }
 
+async function setPluginAutostart(pluginId, autostart) {
+  try { return await sendRequest("plugin.autostart", { pluginId, autostart }); }
+  catch (e) { return { error: e.message }; }
+}
+
 async function runAgentTurn(messages, pluginIds) {
   return sendRequest("agent.run", { messages, pluginIds }, 120000);
 }
@@ -310,6 +332,42 @@ function switchView(viewName) {
   closeDrawer();
   hideContextMenu();
   if (viewName === "agent") renderAgentScope();
+  if (viewName === "autostart") renderAutostartList();
+}
+
+function renderAutostartList() {
+  const list = $("#autostart-list");
+  const count = $("#autostart-count");
+  if (!list || !count) return;
+  count.textContent = `${plugins.filter((plugin) => plugin.autostart).length} enabled`;
+  list.textContent = "";
+  if (plugins.length === 0) {
+    list.appendChild(el("div", "agent-scope-empty", "No MCP plugins are installed yet."));
+    return;
+  }
+  plugins.forEach((plugin) => {
+    const row = el("div", "autostart-row");
+    const icon = el("div", "autostart-icon");
+    icon.textContent = isUrlIcon(plugin.icon) || isFileIcon(plugin.icon) ? "◈" : (plugin.icon || "🧩");
+    const info = el("div", "autostart-info");
+    const name = el("div", "autostart-name"); name.textContent = plugin.name;
+    const meta = el("div", "autostart-meta"); meta.textContent = `${plugin.pluginId} · ${plugin.state}`;
+    info.append(name, meta);
+    const toggle = document.createElement("input");
+    toggle.className = "autostart-toggle";
+    toggle.type = "checkbox";
+    toggle.checked = Boolean(plugin.autostart);
+    toggle.setAttribute("aria-label", `Start ${plugin.name} when NusaShell opens`);
+    toggle.addEventListener("change", async () => {
+      toggle.disabled = true;
+      const result = await setPluginAutostart(plugin.pluginId, toggle.checked);
+      if (result.error) { toggle.checked = !toggle.checked; showToast(`Autostart update failed: ${result.error}`, "error"); }
+      else { plugin.autostart = toggle.checked; renderAutostartList(); }
+      toggle.disabled = false;
+    });
+    row.append(icon, info, toggle);
+    list.appendChild(row);
+  });
 }
 
 // ============ Agent workspace ============
@@ -326,7 +384,7 @@ function renderAgentScope() {
   count.textContent = `${agentPluginScope.size} selected`;
   list.textContent = "";
   if (running.length === 0) {
-    list.appendChild(el("div", "agent-scope-empty", "No running plugins. You can still test the stub without MCP tools."));
+    list.appendChild(el("div", "agent-scope-empty", "No MCP is running. The agent can use mcp_enable when a turn needs one."));
     return;
   }
   running.forEach((plugin) => {
@@ -346,6 +404,96 @@ function renderAgentScope() {
     label.append(checkbox, icon, name);
     list.appendChild(label);
   });
+  renderAgentContext();
+}
+
+async function renderAgentContext() {
+  const select = $("#agent-context-plugin");
+  const groups = $("#agent-context-groups");
+  if (!select || !groups) return;
+  const running = plugins.filter((plugin) => plugin.state === "running");
+  select.textContent = "";
+  if (running.length === 0) {
+    const option = document.createElement("option");
+    option.textContent = "Start an MCP server to browse context";
+    option.value = "";
+    select.appendChild(option);
+    select.disabled = true;
+    groups.textContent = "";
+    return;
+  }
+  select.disabled = false;
+  if (!running.some((plugin) => plugin.pluginId === agentContextPluginId)) agentContextPluginId = running[0].pluginId;
+  running.forEach((plugin) => {
+    const option = document.createElement("option");
+    option.value = plugin.pluginId;
+    option.textContent = plugin.name;
+    option.selected = plugin.pluginId === agentContextPluginId;
+    select.appendChild(option);
+  });
+  select.onchange = () => { agentContextPluginId = select.value; void renderAgentContext(); };
+  groups.textContent = "";
+  const [promptResult, resourceResult] = await Promise.all([listPrompts(agentContextPluginId), listResources(agentContextPluginId)]);
+  if (select.value !== agentContextPluginId) return;
+  renderAgentContextGroup(groups, "Prompts", promptResult.prompts, "prompt");
+  renderAgentContextGroup(groups, "Resources", resourceResult.resources, "resource");
+}
+
+function renderAgentContextGroup(container, title, items, type) {
+  const group = el("section", "agent-context-group");
+  const heading = el("div", "agent-context-group-title", `${title} <span>${items.length}</span>`);
+  group.appendChild(heading);
+  if (items.length === 0) {
+    group.appendChild(el("div", "agent-context-empty", `No ${title.toLowerCase()} exposed by this MCP.`));
+  } else {
+    items.forEach((item) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "agent-context-item";
+      button.textContent = item.name;
+      button.title = item.description || item.uri || item.name;
+      button.addEventListener("click", () => {
+        if (type === "prompt") void insertMcpPrompt(item);
+        else void attachMcpResource(item);
+      });
+      group.appendChild(button);
+    });
+  }
+  container.appendChild(group);
+}
+
+async function insertMcpPrompt(prompt) {
+  try {
+    const args = {};
+    for (const argument of prompt.arguments || []) {
+      const value = window.prompt(argument.required ? `Value for ${argument.name} (required)` : `Value for ${argument.name} (optional)`);
+      if (value === null && argument.required) return;
+      if (value) args[argument.name] = value;
+    }
+    const result = await getPrompt(agentContextPluginId, prompt.name, args);
+    const text = result.messages.map((message) => message.content?.text || `[${message.content?.type || "content"} prompt content]`).join("\n\n");
+    if (!text) { showToast("This MCP prompt returned no text messages.", "error"); return; }
+    agentMessages.push(...result.messages.filter((message) => message.content?.type === "text").map((message) => ({ role: message.role, content: message.content.text })));
+    appendAgentMessage("user", `Inserted MCP prompt: ${prompt.name}`);
+    showToast(`Prompt ${prompt.name} inserted into this conversation.`, "success");
+  } catch (error) {
+    showToast(`Could not load prompt: ${error.message || error}`, "error");
+  }
+}
+
+async function attachMcpResource(resource) {
+  try {
+    const result = await readResource(agentContextPluginId, resource.uri);
+    const text = result.contents.filter((content) => typeof content.text === "string").map((content) => content.text).join("\n\n");
+    if (!text) { showToast("This resource is binary and cannot be attached as text.", "error"); return; }
+    const selectedPlugin = plugins.find((plugin) => plugin.pluginId === agentContextPluginId);
+    const content = `MCP resource from ${selectedPlugin?.name || agentContextPluginId} (${resource.uri}):\n${text}`;
+    agentMessages.push({ role: "user", content });
+    appendAgentMessage("user", `Attached MCP resource: ${resource.name}`);
+    showToast(`Resource ${resource.name} attached to this conversation.`, "success");
+  } catch (error) {
+    showToast(`Could not read resource: ${error.message || error}`, "error");
+  }
 }
 
 function appendAgentMessage(role, content, meta = {}) {
@@ -557,6 +705,7 @@ function handlePluginEvent(payload, eventType) {
   renderAppGrid();
   renderInstalledTable();
   renderAgentScope();
+  renderAutostartList();
   if (currentPlugin?.pluginId === payload.pluginId) {
     openDrawer(plugins[idx] ?? currentPlugin);
   }
@@ -681,6 +830,7 @@ async function refreshAll() {
   renderAppGrid();
   renderInstalledTable();
   renderAgentScope();
+  renderAutostartList();
 }
 
 // ============ Init ============

@@ -1,11 +1,19 @@
 import type {
   McpClientFactoryPort,
   McpClientPort,
+  PromptDescriptor,
+  PromptResult,
+  ResourceDescriptor,
+  ResourceReadResult,
+  ResourceTemplateDescriptor,
   ToolDescriptor,
 } from "@nusashell/application";
 
 export class FakeMcpClient implements McpClientPort {
   readonly tools: ToolDescriptor[] = [];
+  readonly prompts: PromptDescriptor[] = [];
+  readonly resources: ResourceDescriptor[] = [];
+  readonly resourceTemplates: ResourceTemplateDescriptor[] = [];
   private connected = false;
   private closeCallback: (() => void) | null = null;
   readonly callLog: Array<{
@@ -14,6 +22,8 @@ export class FakeMcpClient implements McpClientPort {
   }> = [];
   private readonly callResults = new Map<string, unknown>();
   private readonly callDelays = new Map<string, number>();
+  private readonly promptResults = new Map<string, PromptResult>();
+  private readonly resourceResults = new Map<string, ResourceReadResult>();
   private callShouldThrow = false;
 
   get pid(): number | null {
@@ -26,6 +36,14 @@ export class FakeMcpClient implements McpClientPort {
 
   setToolDelay(name: string, ms: number): void {
     this.callDelays.set(name, ms);
+  }
+
+  setPromptResult(name: string, result: PromptResult): void {
+    this.promptResults.set(name, result);
+  }
+
+  setResourceResult(uri: string, result: ResourceReadResult): void {
+    this.resourceResults.set(uri, result);
   }
 
   setThrowOnCall(should: boolean): void {
@@ -56,6 +74,29 @@ export class FakeMcpClient implements McpClientPort {
 
   async listTools(): Promise<readonly ToolDescriptor[]> {
     return this.tools;
+  }
+
+  async listPrompts(): Promise<readonly PromptDescriptor[]> {
+    return this.prompts;
+  }
+
+  async getPrompt(
+    name: string,
+    _args: Readonly<Record<string, string>>,
+  ): Promise<PromptResult> {
+    return this.promptResults.get(name) ?? { messages: [] };
+  }
+
+  async listResources(): Promise<readonly ResourceDescriptor[]> {
+    return this.resources;
+  }
+
+  async listResourceTemplates(): Promise<readonly ResourceTemplateDescriptor[]> {
+    return this.resourceTemplates;
+  }
+
+  async readResource(uri: string): Promise<ResourceReadResult> {
+    return this.resourceResults.get(uri) ?? { contents: [] };
   }
 
   async callTool(

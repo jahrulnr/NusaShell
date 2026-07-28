@@ -35,6 +35,8 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
   });
   const shutdown = new ShutdownCoordinator(container);
 
+  await container.runtimeManager.startAutostartPlugins();
+
   await container.wsServer.start();
 
   process.on("SIGTERM", () => void shutdown.shutdown());

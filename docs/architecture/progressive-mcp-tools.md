@@ -15,11 +15,22 @@ Every turn starts with only these shell-owned tools:
   a bounded result set.
 - `tool_schema` — returns the schema for one search result and grants that
   single tool to the following round.
+- `resource_search` — searches the concrete text resources exposed by a running
+  MCP plugin.
+- `resource_read` — reads a discovered resource through the broker. Text is
+  capped at 50 KB per read; binary content and resource templates are not
+  passed to a provider automatically.
 
 `tool_schema` is the deliberate bridge to execution: once selected, the actual
 MCP tool is added to the next provider request. The agent then calls that typed
 tool directly through the normal broker path. This keeps validation at the
 schema boundary and avoids an untyped catch-all `tool_call` function.
+
+Prompts deliberately stay outside the agent tool catalog. The Agent UI lists
+them for a user-selected, running MCP server and inserts the returned messages
+only after the user invokes a prompt. Resources are also available in that UI
+as explicit attachments to a conversation, in addition to the bounded agent
+resource discovery operations above.
 
 ## Autostart
 

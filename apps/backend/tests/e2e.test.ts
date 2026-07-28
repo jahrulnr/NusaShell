@@ -147,6 +147,20 @@ describe("E2E: notes plugin", () => {
     expect(names).toEqual(["createNote", "listNotes"]);
   });
 
+  it("brokers Notes prompts and resources through the SDK", async () => {
+    const prompts = await client.mcp.listPrompts("com.example.notes");
+    expect(prompts.prompts.map((prompt) => prompt.name)).toEqual(["summarize_notes"]);
+
+    const prompt = await client.mcp.getPrompt("com.example.notes", "summarize_notes") as { messages: Array<{ content: { text: string } }> };
+    expect(prompt.messages[0]!.content.text).toContain("attached Notes MCP resource");
+
+    const resources = await client.mcp.listResources("com.example.notes");
+    expect(resources.resources.map((resource) => resource.uri)).toEqual(["notes://all"]);
+
+    const read = await client.mcp.readResource("com.example.notes", "notes://all") as { contents: Array<{ text: string }> };
+    expect(JSON.parse(read.contents[0]!.text).notes).toBeInstanceOf(Array);
+  });
+
   it("rejects tool.list when plugin is not running", async () => {
     await client.plugins.stop("com.example.notes");
     await expect(client.tools.list("com.example.notes")).rejects.toThrow();

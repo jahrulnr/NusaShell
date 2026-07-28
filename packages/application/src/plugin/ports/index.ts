@@ -8,6 +8,12 @@ export type {
   McpClientPort,
   McpClientFactoryPort,
   ToolDescriptor,
+  PromptArgumentDescriptor,
+  PromptDescriptor,
+  PromptResult,
+  ResourceDescriptor,
+  ResourceReadResult,
+  ResourceTemplateDescriptor,
 } from "./mcp-client.port.js";
 export type { ClockPort } from "./clock.port.js";
 export type { LoggerPort } from "./logger.port.js";

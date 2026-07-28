@@ -74,6 +74,10 @@
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 3v3M12 18v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M3 12h3M18 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="12" r="4.5" stroke="currentColor" stroke-width="1.7"/></svg>
           Agent
         </a>
+        <a class="nav-item" data-view="autostart" data-nav>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 3v4M6.34 6.34l2.83 2.83M3 12h4M6.34 17.66l2.83-2.83M12 17v4M17.66 17.66l-2.83-2.83M17 12h4M17.66 6.34l-2.83 2.83" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.6"/></svg>
+          Autostart
+        </a>
         <a class="nav-item" data-view="logs" data-nav>
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M4 5h16M4 12h10M4 19h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="17" cy="12" r="1.5" fill="currentColor"/></svg>
           Logs
@@ -135,7 +139,7 @@
           <div>
             <div class="agent-kicker"><span class="agent-kicker-dot"></span> Turn workspace</div>
             <h1 class="page-title">Agent</h1>
-            <p class="subtitle">Ask the shell to work through the MCP tools you explicitly scope below.</p>
+            <p class="subtitle">The agent discovers MCP servers and tool schemas progressively before it acts.</p>
           </div>
           <button class="mini-btn" id="agent-clear-btn" type="button">Clear conversation</button>
         </div>
@@ -144,13 +148,19 @@
           <aside class="agent-scope" aria-labelledby="agent-scope-title">
             <div class="agent-scope-heading">
               <div>
-                <div class="agent-panel-label" id="agent-scope-title">MCP scope</div>
-                <p>Only running plugins can be offered to the agent.</p>
+                <div class="agent-panel-label" id="agent-scope-title">MCP catalog</div>
+                <p>The agent can discover and start MCP servers when a turn needs them.</p>
               </div>
               <span class="agent-scope-count" id="agent-scope-count">0 selected</span>
             </div>
             <div class="agent-scope-list" id="agent-scope-list" role="group" aria-label="Plugins available to the agent"></div>
-            <p class="agent-scope-note">The provider never connects directly to a plugin. NusaShell remains the broker.</p>
+            <div class="agent-context" aria-labelledby="agent-context-title">
+              <div class="agent-panel-label" id="agent-context-title">MCP context</div>
+              <p class="agent-context-copy">Prompts are inserted only when you choose them. Resources can be attached to the next turn.</p>
+              <select id="agent-context-plugin" class="agent-context-select" aria-label="Running MCP server for prompts and resources"></select>
+              <div class="agent-context-groups" id="agent-context-groups"></div>
+            </div>
+            <p class="agent-scope-note">The provider sees only five meta-tools first. NusaShell remains the broker.</p>
           </aside>
 
           <div class="agent-conversation">
@@ -175,6 +185,17 @@
             </form>
           </div>
         </div>
+      </section>
+
+      <section class="view" data-view="autostart">
+        <div class="autostart-header">
+          <div>
+            <h1 class="page-title">Autostart</h1>
+            <p class="subtitle">Choose which MCP servers start when NusaShell opens.</p>
+          </div>
+          <span class="autostart-count" id="autostart-count">0 enabled</span>
+        </div>
+        <div class="autostart-list" id="autostart-list" aria-live="polite"></div>
       </section>
 
       <!-- ===== View: Central log tail ===== -->

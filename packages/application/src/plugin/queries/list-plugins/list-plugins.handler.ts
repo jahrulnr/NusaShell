@@ -21,6 +21,7 @@ export class ListPluginsHandler
       installPath: view.installPath,
       state: view.state,
       enabled: view.enabled,
+      autostart: view.autostart,
     }));
     return { plugins: items };
   }

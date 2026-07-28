@@ -8,6 +8,7 @@ export interface PluginListItem {
   readonly installPath: string;
   readonly state: PluginRuntimeState;
   readonly enabled: boolean;
+  readonly autostart: boolean;
 }
 
 export interface ListPluginsResult {
