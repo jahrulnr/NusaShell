@@ -7,6 +7,7 @@ import {
   SqliteDatabase,
   SqlitePluginRepository,
   PluginInstaller,
+  PluginSyncService,
   createLogger,
   type Logger,
 } from "@nusashell/infrastructure";
@@ -67,6 +68,13 @@ export function createContainer(options: ContainerOptions): Container {
   if (options.dbPath) {
     db = new SqliteDatabase(options.dbPath);
     pluginRepository = new SqlitePluginRepository(db);
+    // Sync filesystem plugins into SQLite so bundled plugins are registered
+    if (options.pluginsRoot) {
+      const syncService = new PluginSyncService(options.pluginsRoot, pluginRepository, logger);
+      syncService.sync().catch((err) => {
+        logger.warn({ err }, "Plugin sync failed during startup");
+      });
+    }
   } else if (options.pluginsRoot) {
     pluginRepository = new FilesystemPluginRegistry(options.pluginsRoot, logger);
   } else {

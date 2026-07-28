@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.19] - 2026-07-29
+
+### Added
+- Plugin UI bridge: `window.shell.callTool(pluginId, toolName, args)` and `window.shell.listTools(pluginId)` exposed in preload for plugin UIs to call MCP tools via IPC
+- IPC handlers `tool:call` and `tool:list` in main process — call backend command/query bus directly (in-process, no WS roundtrip)
+- Plugin window receives `pluginId` via URL query param so plugin UI knows its own identity
+- Notes plugin UI is now functional: textarea + create button calls `createNote` MCP tool, lists notes on load via `listNotes` tool, dark theme matching PoC style
+- SQLite persistence wired in desktop app: set `NUSASHELL_DB_PATH` env var to activate `SqlitePluginRepository` (requires `better-sqlite3` rebuilt for Electron ABI)
+- `PluginSyncService` — syncs filesystem plugins into SQLite on startup (upsert found plugins, remove stale entries)
+- `@nusashell/application` added as desktop dependency for command/query type imports
+- Updater IPC handlers registered in dev mode as no-ops to prevent renderer errors
+
+### Changed
+- Desktop main process defaults to filesystem plugin registry; SQLite activates when `NUSASHELL_DB_PATH` is set
+- `SqliteDatabase` lazy-loads `better-sqlite3` only when instantiated, preventing SIGSEGV when the native module isn't Electron-compatible
+- Container syncs filesystem plugins to SQLite when both `dbPath` and `pluginsRoot` are set
+
 ## [0.0.18] - 2026-07-29
 
 ### Fixed

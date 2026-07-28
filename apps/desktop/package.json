@@ -16,6 +16,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@nusashell/application": "workspace:*",
     "@nusashell/backend": "workspace:*",
     "@nusashell/plugin-sdk": "workspace:*",
     "@nusashell/contracts": "workspace:*",

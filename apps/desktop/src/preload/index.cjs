@@ -12,6 +12,23 @@ contextBridge.exposeInMainWorld("shell", {
   closePlugin(pluginId) {
     return ipcRenderer.invoke("window:close-plugin", pluginId);
   },
+  windowControls: {
+    minimize() {
+      return ipcRenderer.invoke("window:minimize");
+    },
+    toggleMaximize() {
+      return ipcRenderer.invoke("window:toggle-maximize");
+    },
+    close() {
+      return ipcRenderer.invoke("window:close");
+    },
+  },
+  callTool(pluginId, toolName, args) {
+    return ipcRenderer.invoke("tool:call", pluginId, toolName, args);
+  },
+  listTools(pluginId) {
+    return ipcRenderer.invoke("tool:list", pluginId);
+  },
   updater: {
     checkForUpdates() {
       return ipcRenderer.invoke("updater:check");

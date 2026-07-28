@@ -17,6 +17,7 @@ export function createLauncherWindow(): BrowserWindow {
     minHeight: 600,
     show: false,
     title: "NusaShell",
+    frame: false,
     webPreferences: {
       preload: PRELOAD_PATH,
       contextIsolation: true,
@@ -78,7 +79,7 @@ export async function openPluginWindow(
 
   const uiPath = resolve(installPath, "ui", "index.html");
   try {
-    await win.loadURL(`file://${uiPath}`);
+    await win.loadURL(`file://${uiPath}?pluginId=${encodeURIComponent(pluginId)}`);
   } catch (err) {
     console.error("[openPluginWindow] loadURL failed:", err);
   }
@@ -120,6 +121,27 @@ export function closeAllPluginWindows(): void {
 }
 
 export function registerWindowIpc(): void {
+  ipcMain.handle("window:minimize", (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.minimize();
+  });
+
+  ipcMain.handle("window:toggle-maximize", (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window) return false;
+
+    if (window.isMaximized()) {
+      window.unmaximize();
+      return false;
+    }
+
+    window.maximize();
+    return true;
+  });
+
+  ipcMain.handle("window:close", (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.close();
+  });
+
   ipcMain.handle("window:open-plugin", async (_event, pluginId: string, name: string, icon: string, installPath: string, windowMode?: string) => {
     await openPluginWindow(pluginId, name, icon, installPath, windowMode);
   });

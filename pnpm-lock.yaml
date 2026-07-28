@@ -57,6 +57,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@nusashell/application':
+        specifier: workspace:*
+        version: link:../../packages/application
       '@nusashell/backend':
         specifier: workspace:*
         version: link:../backend

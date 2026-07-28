@@ -1,20 +1,27 @@
-import Database from "better-sqlite3";
+import type DatabaseType from "better-sqlite3";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// Lazy-load better-sqlite3 only when a database is actually created.
+// This prevents a SIGSEGV when Electron loads the bundle but SQLite is not used.
+function loadBetterSqlite3(): typeof import("better-sqlite3") {
+  return require("better-sqlite3");
+}
+
 export class SqliteDatabase {
-  private readonly db: Database.Database;
+  private readonly db: DatabaseType.Database;
 
   constructor(dbPath: string) {
+    const Database = loadBetterSqlite3();
     this.db = new Database(dbPath);
     this.db.pragma("journal_mode = WAL");
     this.runMigrations();
   }
 
-  get raw(): Database.Database {
+  get raw(): DatabaseType.Database {
     return this.db;
   }
 

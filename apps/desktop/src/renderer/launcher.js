@@ -557,6 +557,13 @@ async function refreshAll() {
 // ============ Init ============
 
 document.addEventListener("DOMContentLoaded", () => {
+  const windowControls = window.shell?.windowControls;
+  if (windowControls) {
+    $("#window-minimize").addEventListener("click", () => windowControls.minimize());
+    $("#window-maximize").addEventListener("click", () => windowControls.toggleMaximize());
+    $("#window-close").addEventListener("click", () => windowControls.close());
+  }
+
   // Display WS URL in settings
   $("#settings-ws-url").textContent = WS_URL;
 
