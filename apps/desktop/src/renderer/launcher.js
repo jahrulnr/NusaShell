@@ -385,20 +385,15 @@ function closeDrawer() {
 
 async function openPluginWindow(plugin) {
   try {
-    // Start MCP server in background — don't block UI on it
     if (plugin.state === "idle") {
       startPlugin(plugin.pluginId).catch((e) => console.error("[openPluginWindow] startPlugin error:", e));
     }
+    // Use installPath from list response as primary — plugin.get may race with startLocked
     const detail = await getPluginDetail(plugin.pluginId);
-    console.log("[openPluginWindow] detail:", detail);
-    const installPath = detail?.installPath ?? plugin.installPath ?? "";
-    const windowMode = detail?.manifest?.windowMode ?? "panel";
-    console.log("[openPluginWindow] installPath:", installPath, "windowMode:", windowMode);
+    const installPath = plugin.installPath || detail?.installPath || "";
+    const windowMode = "panel";
     if (window.shell?.openPlugin) {
-      const result = await window.shell.openPlugin(plugin.pluginId, plugin.name, plugin.icon || "🧩", installPath, windowMode);
-      console.log("[openPluginWindow] openPlugin result:", result);
-    } else {
-      console.error("[openPluginWindow] window.shell.openPlugin not available");
+      await window.shell.openPlugin(plugin.pluginId, plugin.name, plugin.icon || "🧩", installPath, windowMode);
     }
   } catch (err) {
     console.error("[openPluginWindow] error:", err);
@@ -421,8 +416,11 @@ function hideContextMenu() { $("#context-menu").style.display = "none"; }
 
 function handlePluginEvent(payload, eventType) {
   const idx = plugins.findIndex(p => p.pluginId === payload.pluginId);
-  if (idx >= 0 && payload.state) {
-    plugins[idx] = { ...plugins[idx], state: payload.state };
+  if (idx >= 0) {
+    const newState = payload.state ?? payload.newState;
+    if (newState) {
+      plugins[idx] = { ...plugins[idx], state: newState };
+    }
   }
   if (eventType === "plugin.installed" || eventType === "plugin.uninstalled") {
     refreshAll();

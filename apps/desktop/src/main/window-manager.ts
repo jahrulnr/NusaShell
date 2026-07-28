@@ -1,10 +1,14 @@
 import { BrowserWindow, ipcMain } from "electron";
 import { join, resolve } from "node:path";
+import { existsSync } from "node:fs";
 
 const isDev = process.argv.includes("--dev");
 
 const RENDERER_DIST = join(__dirname, "..", "renderer");
-const PRELOAD_PATH = join(__dirname, "preload.cjs");
+// Vite may output preload as preload.cjs or index.js depending on config/plugin behavior
+const PRELOAD_PATH = existsSync(join(__dirname, "preload.cjs"))
+  ? join(__dirname, "preload.cjs")
+  : join(__dirname, "index.js");
 
 let launcherWindow: BrowserWindow | null = null;
 const pluginWindows = new Map<string, BrowserWindow>();
@@ -77,21 +81,33 @@ export async function openPluginWindow(
   });
 
   const uiPath = resolve(installPath, "ui", "index.html");
-  console.log("[openPluginWindow] uiPath:", uiPath, "exists:", require("fs").existsSync(uiPath));
-  if (!installPath) {
-    console.error("[openPluginWindow] installPath is empty — cannot load UI");
-  }
+  console.log("[openPluginWindow] uiPath:", uiPath, "exists:", existsSync(uiPath));
   try {
     await win.loadURL(`file://${uiPath}`);
+    console.log("[openPluginWindow] loadURL succeeded");
   } catch (err) {
     console.error("[openPluginWindow] loadURL failed:", err);
   }
-  win.once("ready-to-show", () => win.show());
-  // Fallback: show window after 3s even if ready-to-show didn't fire
-  setTimeout(() => { if (!win.isDestroyed() && !win.isVisible()) win.show(); }, 3000);
+  win.once("ready-to-show", () => {
+    console.log("[openPluginWindow] ready-to-show, showing window");
+    win.show();
+  });
 
   win.on("closed", () => {
     pluginWindows.delete(pluginId);
+    // Stop the plugin's MCP server when its window closes (keepAliveOnClose: false)
+    const ws = new (require("ws"))("ws://127.0.0.1:9130");
+    ws.on("open", () => {
+      ws.send(JSON.stringify({
+        kind: "request",
+        id: `cleanup_${pluginId}`,
+        method: "plugin.stop",
+        protocolVersion: "1.0.0",
+        payload: { pluginId },
+      }));
+      ws.close();
+    });
+    ws.on("error", () => { /* best-effort */ });
   });
 
   pluginWindows.set(pluginId, win);
@@ -114,6 +130,7 @@ export function closeAllPluginWindows(): void {
 
 export function registerWindowIpc(): void {
   ipcMain.handle("window:open-plugin", async (_event, pluginId: string, name: string, icon: string, installPath: string, windowMode?: string) => {
+    console.log("[IPC] window:open-plugin", pluginId, "installPath:", installPath);
     await openPluginWindow(pluginId, name, icon, installPath, windowMode);
   });
 

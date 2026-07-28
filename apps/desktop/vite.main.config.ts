@@ -11,7 +11,7 @@ export default defineConfig({
     rollupOptions: {
       external: ["electron", "better-sqlite3", "ws", "bufferutil", "utf-8-validate", "electron-updater"],
     },
-    emptyOutDir: true,
+    emptyOutDir: false,
   },
   resolve: {
     // Bundle workspace packages — they're ESM and Vite handles them

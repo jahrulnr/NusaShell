@@ -273,7 +273,9 @@ export class PluginRuntimeManager {
           manifest.mcp.env,
           plugin.installPath,
         );
+        this.deps.logger?.debug("Starting MCP stdio process: command=%s args=%j cwd=%s", command, manifest.mcp.args, plugin.installPath);
         await mcpClient.connect();
+        this.deps.logger?.info("MCP client connected (stdio) for plugin %s", PluginId.toString(entry.pluginId));
         entry.mcpClient = mcpClient;
       } else if (manifest.mcp.transport === "http") {
         const url = manifest.mcp.url;
@@ -331,6 +333,7 @@ export class PluginRuntimeManager {
         });
       }
     } catch (error) {
+      this.deps.logger?.error("doStart failed for plugin %s: %s", PluginId.toString(entry.pluginId), String(error));
       await this.crash(entry, this.describeError(error));
       throw this.toApplicationError(error, "PLUGIN_START_FAILED", entry.pluginId);
     }
