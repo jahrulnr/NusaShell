@@ -33,7 +33,9 @@ export class StdioMcpClient implements McpClientPort {
       ...(this.cwd !== undefined ? { cwd: this.cwd } : {}),
     });
 
+    let closed = false;
     this.transport.onclose = () => {
+      closed = true;
       this.logger?.debug({ command: this.command }, "Stdio MCP transport closed");
       if (this.closeCallback) {
         this.closeCallback();
@@ -45,7 +47,28 @@ export class StdioMcpClient implements McpClientPort {
       { capabilities: {} },
     );
 
-    await this.client.connect(this.transport);
+    // Race connect against transport close + timeout to avoid hanging
+    // when the MCP process exits immediately (e.g. broken deps)
+    const CONNECT_TIMEOUT_MS = 10_000;
+    await Promise.race([
+      this.client.connect(this.transport),
+      new Promise<never>((_, reject) => {
+        const timer = setTimeout(() => {
+          reject(new Error(`MCP connect timed out after ${CONNECT_TIMEOUT_MS}ms`));
+        }, CONNECT_TIMEOUT_MS);
+        // If transport closes before connect completes, reject immediately
+        const checkClose = setInterval(() => {
+          if (closed) {
+            clearInterval(checkClose);
+            clearTimeout(timer);
+            reject(new Error("MCP process exited before handshake completed"));
+          }
+        }, 100);
+        // Clean up interval when connect succeeds or times out
+        const origClear = clearInterval;
+        setTimeout(() => origClear(checkClose), CONNECT_TIMEOUT_MS + 100);
+      }),
+    ]);
   }
 
   async close(): Promise<void> {

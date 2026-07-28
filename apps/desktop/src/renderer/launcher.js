@@ -385,12 +385,13 @@ function closeDrawer() {
 
 async function openPluginWindow(plugin) {
   try {
+    // Start MCP server in background — don't block UI on it
     if (plugin.state === "idle") {
-      await startPlugin(plugin.pluginId);
+      startPlugin(plugin.pluginId).catch((e) => console.error("[openPluginWindow] startPlugin error:", e));
     }
     const detail = await getPluginDetail(plugin.pluginId);
     console.log("[openPluginWindow] detail:", detail);
-    const installPath = detail?.installPath ?? "";
+    const installPath = detail?.installPath ?? plugin.installPath ?? "";
     const windowMode = detail?.manifest?.windowMode ?? "panel";
     console.log("[openPluginWindow] installPath:", installPath, "windowMode:", windowMode);
     if (window.shell?.openPlugin) {

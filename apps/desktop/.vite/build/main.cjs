@@ -20496,7 +20496,9 @@ class StdioMcpClient {
       env: { ...process.env, ...this.env },
       ...this.cwd !== void 0 ? { cwd: this.cwd } : {}
     });
+    let closed = false;
     this.transport.onclose = () => {
+      closed = true;
       this.logger?.debug({ command: this.command }, "Stdio MCP transport closed");
       if (this.closeCallback) {
         this.closeCallback();
@@ -20506,7 +20508,24 @@ class StdioMcpClient {
       { name: "nusashell-backend", version: "0.0.2" },
       { capabilities: {} }
     );
-    await this.client.connect(this.transport);
+    const CONNECT_TIMEOUT_MS = 1e4;
+    await Promise.race([
+      this.client.connect(this.transport),
+      new Promise((_2, reject) => {
+        const timer = setTimeout(() => {
+          reject(new Error(`MCP connect timed out after ${CONNECT_TIMEOUT_MS}ms`));
+        }, CONNECT_TIMEOUT_MS);
+        const checkClose = setInterval(() => {
+          if (closed) {
+            clearInterval(checkClose);
+            clearTimeout(timer);
+            reject(new Error("MCP process exited before handshake completed"));
+          }
+        }, 100);
+        const origClear = clearInterval;
+        setTimeout(() => origClear(checkClose), CONNECT_TIMEOUT_MS + 100);
+      })
+    ]);
   }
   async close() {
     this.closeCallback = null;

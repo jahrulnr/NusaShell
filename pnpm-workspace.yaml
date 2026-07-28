@@ -6,4 +6,6 @@ allowBuilds:
   better-sqlite3: true
   electron: true
   esbuild: true
+minimumReleaseAgeExclude:
+  - '@modelcontextprotocol/sdk@1.30.0'
 nodeLinker: hoisted
