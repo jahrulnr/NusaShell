@@ -73,8 +73,11 @@ export class WebSocketServer {
             return;
           }
 
-          const response = await this.router.handle(raw);
-          session.sendResponse(response);
+          // Handle concurrently — don't let a slow command (e.g. plugin.start)
+          // block subsequent queries (e.g. plugin.get) on the same session
+          void this.router.handle(raw).then((response) => {
+            session.sendResponse(response);
+          });
         });
 
         ws.on("close", () => {
