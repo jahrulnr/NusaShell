@@ -14,7 +14,7 @@ function makeServer(port: number): WebSocketServer {
       await new Promise((resolve) => setTimeout(resolve, 300));
       return {
         plugins: [
-          { pluginId: "com.example.notes", name: "Notes", version: "1.0.0", icon: "📝", state: "idle", enabled: true },
+          { pluginId: "com.example.notes", name: "Notes", version: "1.0.0", icon: "📝", installPath: "/plugins/notes", state: "idle", enabled: true },
         ],
       };
     },

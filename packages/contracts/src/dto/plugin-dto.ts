@@ -10,6 +10,7 @@ export interface PluginDto {
   readonly name: string;
   readonly version: string;
   readonly icon: string;
+  readonly installPath: string;
   readonly state: PluginStateDto;
   readonly enabled: boolean;
 }

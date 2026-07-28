@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.15] - 2026-07-29
+
+### Added
+- Electron desktop shell scaffold in `apps/desktop`:
+  - Main process (`src/main/index.ts`) embeds backend in-process via `bootstrap()`
+  - Window manager creates launcher + plugin BrowserWindows
+  - Preload script (`src/preload/index.cjs`) exposes `window.shell` API via contextBridge
+  - Renderer (`src/renderer/`) adapted from `docs/ui-design/` with live WebSocket client
+  - Dev scripts: `pnpm --filter @nusashell/desktop run dev`
+- `installPath` field added to `PluginView`, `PluginListItem`, `PluginDto`, and `PluginGetResultDto` so the renderer can locate plugin UI files
+
+### Changed
+- `PluginListItemSchema` now includes `installPath` (Zod schema updated)
+- All test fixtures updated to include `installPath` in mock plugin data
+
 ## [0.0.14] - 2026-07-28
 
 ### Added

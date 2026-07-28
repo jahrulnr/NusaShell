@@ -3,7 +3,24 @@
   "private": true,
   "version": "0.0.2",
   "type": "module",
+  "main": "electron-entry.mjs",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@nusashell/backend": "workspace:*",
+    "@nusashell/plugin-sdk": "workspace:*",
+    "@nusashell/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "electron": "^33.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.2"
   }
 }

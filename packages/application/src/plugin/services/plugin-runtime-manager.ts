@@ -37,6 +37,7 @@ interface RuntimeEntry {
   name: string;
   version: string;
   icon: string;
+  installPath: string;
   enabled: boolean;
   runtime: PluginRuntime;
   startPromise: Promise<void> | null;
@@ -75,6 +76,7 @@ export interface PluginView {
   readonly name: string;
   readonly version: string;
   readonly icon: string;
+  readonly installPath: string;
   readonly state: PluginRuntimeState;
   readonly enabled: boolean;
 }
@@ -96,6 +98,7 @@ export class PluginRuntimeManager {
         name: plugin.manifest.name,
         version: plugin.manifest.version.toString(),
         icon: resolveIcon(plugin.manifest.icon, plugin.installPath),
+        installPath: plugin.installPath,
         state: entry?.runtime.state ?? "idle",
         enabled: plugin.enabled,
       };
@@ -165,6 +168,7 @@ export class PluginRuntimeManager {
         entry.name = plugin.manifest.name;
         entry.version = plugin.manifest.version.toString();
         entry.icon = resolveIcon(plugin.manifest.icon, plugin.installPath);
+        entry.installPath = plugin.installPath;
         entry.enabled = plugin.enabled;
       }
       return this.view(entry);
@@ -176,6 +180,7 @@ export class PluginRuntimeManager {
       name: plugin.manifest.name,
       version: plugin.manifest.version.toString(),
       icon: resolveIcon(plugin.manifest.icon, plugin.installPath),
+      installPath: plugin.installPath,
       state: "idle",
       enabled: plugin.enabled,
     };
@@ -201,6 +206,7 @@ export class PluginRuntimeManager {
       name: "",
       version: "",
       icon: "",
+      installPath: "",
       enabled: true,
       runtime: PluginRuntime.createIdle(pluginId),
       startPromise: null,
@@ -226,6 +232,7 @@ export class PluginRuntimeManager {
     entry.name = plugin.manifest.name;
     entry.version = plugin.manifest.version.toString();
     entry.icon = resolveIcon(plugin.manifest.icon, plugin.installPath);
+    entry.installPath = plugin.installPath;
     entry.enabled = plugin.enabled;
     const canStart = PluginLifecyclePolicy.canStart(plugin, entry.runtime);
     if (!canStart.ok) {
@@ -578,6 +585,7 @@ export class PluginRuntimeManager {
       name: entry.name,
       version: entry.version,
       icon: entry.icon,
+      installPath: entry.installPath,
       state: entry.runtime.state,
       enabled: entry.enabled,
     };

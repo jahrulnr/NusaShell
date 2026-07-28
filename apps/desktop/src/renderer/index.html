@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NusaShell</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="window">
+
+  <!-- ===== Title bar ===== -->
+  <div class="titlebar">
+    <div class="brand">
+      <span class="brand-logo">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none">
+          <rect width="24" height="24" rx="6" fill="#3b6ef0"/>
+          <path d="M8 8L16 16M16 8L8 16" stroke="white" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </span>
+      NusaShell
+    </div>
+
+    <div class="search">
+      <svg class="search-icon" viewBox="0 0 24 24" width="15" height="15" fill="none">
+        <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
+        <path d="M20 20L16.65 16.65" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <input type="text" placeholder="Search apps..." id="search-input" />
+    </div>
+
+    <div class="titlebar-spacer"></div>
+
+    <div class="top-actions">
+      <button class="icon-btn" aria-label="Settings" id="nav-settings-btn">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><path d="M19.4 13a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V19.4a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 17.76a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.64 13a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.64 7a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 3.13 1.7 1.7 0 0 0 10 1.6V1.51a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 3.13a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.36 7a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z" stroke="currentColor" stroke-width="1.2"/></svg>
+      </button>
+      <div class="avatar">JR</div>
+    </div>
+  </div>
+
+  <!-- ===== Body: sidebar + content ===== -->
+  <div class="body">
+
+    <aside class="sidebar">
+      <nav class="nav-main">
+        <a class="nav-item active" data-view="home" data-nav>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M3 11l9-8 9 8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 10v10h14V10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Home
+        </a>
+        <a class="nav-item" data-view="installed" data-nav>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/></svg>
+          Installed
+        </a>
+        <a class="nav-item" data-view="running" data-nav>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/><path d="M12 7v5l3.5 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          Running
+        </a>
+        <a class="nav-item" data-view="activity" data-nav>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M3 12h4l3 8 4-16 3 8h4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Activity
+          <span class="nav-badge" id="activity-badge">0</span>
+        </a>
+        <a class="nav-item" data-view="settings" data-nav>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/><path d="M19.4 13a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V19.4a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 17.76a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.64 13a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.64 7a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 3.13 1.7 1.7 0 0 0 10 1.6V1.51a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 3.13a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.36 7a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z" stroke="currentColor" stroke-width="1.2"/></svg>
+          Settings
+        </a>
+      </nav>
+
+      <button class="add-plugin-btn" id="open-add-plugin">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        Add Plugin
+      </button>
+
+      <div class="storage">
+        <div class="storage-row">
+          <span>Connection</span>
+          <span class="storage-text" id="conn-status">Connecting...</span>
+        </div>
+        <div class="storage-bar"><div class="storage-fill" id="conn-fill" style="width:0%"></div></div>
+      </div>
+    </aside>
+
+    <main class="content">
+
+      <!-- ===== View: Home (launcher) ===== -->
+      <section class="view active" data-view="home">
+        <div class="greeting-row">
+          <div>
+            <h1 class="greeting">NusaShell <span class="wave">🚀</span></h1>
+            <p class="subtitle">Your AI tool shell — plugins with real UIs.</p>
+          </div>
+        </div>
+
+        <div class="filter-row">
+          <div class="tabs">
+            <button class="tab active" data-tab>All</button>
+          </div>
+        </div>
+
+        <div class="app-grid" id="app-grid">
+          <div class="app-cell" style="cursor:default;opacity:0.5">
+            <div class="app-icon bg-dashed">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 6v4l3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </div>
+            <div class="app-name">Loading...</div>
+            <div class="app-status"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== View: Installed ===== -->
+      <section class="view" data-view="installed">
+        <h1 class="page-title">Installed Plugins</h1>
+        <p class="subtitle">Manage all installed plugins on this system.</p>
+        <div class="plugin-table" id="plugin-table"></div>
+      </section>
+
+      <!-- ===== View: Running ===== -->
+      <section class="view" data-view="running">
+        <h1 class="page-title">Running Processes</h1>
+        <p class="subtitle">Plugins with active MCP processes.</p>
+        <div class="running-list" id="running-list"></div>
+      </section>
+
+      <!-- ===== View: Activity (event log) ===== -->
+      <section class="view" data-view="activity">
+        <div class="activity-header">
+          <div>
+            <h1 class="page-title">Activity Feed</h1>
+            <p class="subtitle">Live events from the backend.</p>
+          </div>
+          <div class="subscribe-indicator">
+            <span class="status-dot" id="sub-dot" style="background:var(--text-faint);box-shadow:none"></span>
+            <span id="sub-label">Not subscribed</span>
+          </div>
+        </div>
+        <div class="event-filters">
+          <button class="chip active" data-event-filter="all">All</button>
+          <button class="chip" data-event-filter="plugin.started">Started</button>
+          <button class="chip" data-event-filter="plugin.stopped">Stopped</button>
+          <button class="chip" data-event-filter="plugin.crashed">Crashed</button>
+          <button class="chip" data-event-filter="plugin.state_changed">State Changed</button>
+          <button class="chip" data-event-filter="tool.call_completed">Tool Calls</button>
+        </div>
+        <div class="event-timeline" id="event-timeline"></div>
+      </section>
+
+      <!-- ===== View: Settings ===== -->
+      <section class="view" data-view="settings">
+        <h1 class="page-title">Settings</h1>
+        <p class="subtitle">System configuration and preferences.</p>
+
+        <div class="settings-grid">
+          <div class="settings-card">
+            <div class="settings-card-title">System</div>
+            <div class="settings-row"><span>NusaShell Version</span><span class="settings-value" id="settings-version">—</span></div>
+            <div class="settings-row"><span>Backend Status</span><span class="settings-value"><span class="status-dot" id="settings-conn-dot" style="background:var(--text-faint);box-shadow:none"></span><span id="settings-conn-label">Disconnected</span></span></div>
+            <div class="settings-row"><span>WebSocket URL</span><span class="settings-value"><code id="settings-ws-url">—</code></span></div>
+            <div class="settings-row"><span>Ping</span><button class="mini-btn" id="ping-btn">Ping</button></div>
+            <div class="settings-row ping-result" id="ping-result" style="display:none"><span></span><span class="settings-value"></span></div>
+          </div>
+
+          <div class="settings-card">
+            <div class="settings-card-title">Connection</div>
+            <div class="settings-row"><span>Auto-reconnect</span><label class="toggle"><input type="checkbox" checked><span class="toggle-slider"></span></label></div>
+            <div class="settings-row"><span>Auto-resubscribe</span><label class="toggle"><input type="checkbox" checked><span class="toggle-slider"></span></label></div>
+          </div>
+
+          <div class="settings-card">
+            <div class="settings-card-title">About</div>
+            <div class="settings-row"><span>Product</span><span class="settings-value">NusaShell</span></div>
+            <div class="settings-row"><span>Build</span><span class="settings-value">dev</span></div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- ===== Plugin Detail Drawer ===== -->
+    <div class="drawer-overlay" id="drawer-overlay"></div>
+    <aside class="plugin-drawer" id="plugin-drawer">
+      <div class="drawer-header">
+        <div class="drawer-title-row">
+          <div class="drawer-icon" id="drawer-icon"></div>
+          <div>
+            <div class="drawer-title" id="drawer-title">Plugin</div>
+            <div class="drawer-subtitle" id="drawer-subtitle"></div>
+          </div>
+        </div>
+        <button class="icon-btn" id="drawer-close">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+
+      <div class="drawer-body">
+        <div class="drawer-section">
+          <div class="drawer-label">State</div>
+          <div class="state-machine" id="state-machine"></div>
+        </div>
+
+        <div class="drawer-section">
+          <div class="drawer-label">Actions</div>
+          <div class="drawer-actions">
+            <button class="action-btn action-start" id="btn-start">Start</button>
+            <button class="action-btn action-stop" id="btn-stop">Stop</button>
+            <button class="action-btn action-restart" id="btn-restart">Restart</button>
+          </div>
+        </div>
+
+        <div class="drawer-section">
+          <div class="drawer-label">Tools <span class="tool-count" id="tool-count">0</span></div>
+          <div class="tools-list" id="tools-list"></div>
+        </div>
+
+        <div class="drawer-section">
+          <div class="drawer-label">Manifest</div>
+          <div class="manifest-info" id="manifest-info"></div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ===== Context Menu ===== -->
+    <div class="context-menu" id="context-menu" style="display:none">
+      <button class="ctx-item" data-action="open">Open</button>
+      <button class="ctx-item" data-action="start">Start</button>
+      <button class="ctx-item" data-action="stop">Force Stop</button>
+      <button class="ctx-item" data-action="restart">Restart</button>
+      <div class="ctx-divider"></div>
+      <button class="ctx-item" data-action="detail">Details</button>
+    </div>
+  </div>
+</div>
+
+<script src="launcher.js"></script>
+</body>
+</html>

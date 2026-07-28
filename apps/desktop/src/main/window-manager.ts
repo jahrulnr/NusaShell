@@ -1,0 +1,106 @@
+import { BrowserWindow, ipcMain } from "electron";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+
+const RENDERER_DIR = join(__dirname, "..", "renderer");
+
+let launcherWindow: BrowserWindow | null = null;
+const pluginWindows = new Map<string, BrowserWindow>();
+
+export function createLauncherWindow(): BrowserWindow {
+  launcherWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    minWidth: 900,
+    minHeight: 600,
+    show: false,
+    title: "NusaShell",
+    webPreferences: {
+      preload: join(__dirname, "..", "preload", "index.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+
+  launcherWindow.loadFile(join(RENDERER_DIR, "index.html"));
+  launcherWindow.once("ready-to-show", () => launcherWindow?.show());
+
+  launcherWindow.on("closed", () => {
+    launcherWindow = null;
+  });
+
+  return launcherWindow;
+}
+
+export function getLauncherWindow(): BrowserWindow | null {
+  return launcherWindow;
+}
+
+export async function openPluginWindow(
+  pluginId: string,
+  name: string,
+  icon: string,
+  installPath: string,
+  windowMode?: string,
+): Promise<void> {
+  const existing = pluginWindows.get(pluginId);
+  if (existing) {
+    existing.focus();
+    return;
+  }
+
+  const width = windowMode === "fullscreen" ? 1200 : 720;
+  const height = windowMode === "fullscreen" ? 800 : 480;
+
+  const win = new BrowserWindow({
+    width,
+    height,
+    minWidth: 400,
+    minHeight: 300,
+    title: `${icon} ${name}`,
+    show: false,
+    ...(launcherWindow ? { parent: launcherWindow } : {}),
+    webPreferences: {
+      preload: join(__dirname, "..", "preload", "index.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+
+  const uiPath = resolve(installPath, "ui", "index.html");
+  await win.loadURL(pathToFileURL(uiPath).href);
+  win.once("ready-to-show", () => win.show());
+
+  win.on("closed", () => {
+    pluginWindows.delete(pluginId);
+  });
+
+  pluginWindows.set(pluginId, win);
+}
+
+export function closePluginWindow(pluginId: string): void {
+  const win = pluginWindows.get(pluginId);
+  if (win) {
+    win.close();
+    pluginWindows.delete(pluginId);
+  }
+}
+
+export function closeAllPluginWindows(): void {
+  for (const win of pluginWindows.values()) {
+    win.close();
+  }
+  pluginWindows.clear();
+}
+
+export function registerWindowIpc(): void {
+  ipcMain.handle("window:open-plugin", async (_event, pluginId: string, name: string, icon: string, installPath: string, windowMode?: string) => {
+    await openPluginWindow(pluginId, name, icon, installPath, windowMode);
+  });
+
+  ipcMain.handle("window:close-plugin", (_event, pluginId: string) => {
+    closePluginWindow(pluginId);
+  });
+}

@@ -18,6 +18,7 @@ export class ListPluginsHandler
       name: view.name,
       version: view.version,
       icon: view.icon,
+      installPath: view.installPath,
       state: view.state,
       enabled: view.enabled,
     }));

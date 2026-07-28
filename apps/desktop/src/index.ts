@@ -1,1 +1,1 @@
-export const DESKTOP_STUB = true;
+export { createLauncherWindow, closeAllPluginWindows } from "./main/window-manager.js";
