@@ -12,6 +12,16 @@
 
 <div class="window">
 
+  <!-- ===== Update banner ===== -->
+  <div class="update-banner" id="update-banner" style="display:none">
+    <span class="update-banner-icon">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 6v4l3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+    </span>
+    <span class="update-banner-text" id="update-banner-text">Update available</span>
+    <button class="update-banner-btn" id="update-banner-btn" style="display:none">Restart to update</button>
+    <button class="update-banner-close" id="update-banner-close">&times;</button>
+  </div>
+
   <!-- ===== Title bar ===== -->
   <div class="titlebar">
     <div class="brand">
@@ -145,6 +155,8 @@
           <button class="chip" data-event-filter="plugin.crashed">Crashed</button>
           <button class="chip" data-event-filter="plugin.state_changed">State Changed</button>
           <button class="chip" data-event-filter="tool.call_completed">Tool Calls</button>
+          <button class="chip" data-event-filter="plugin.installed">Installed</button>
+          <button class="chip" data-event-filter="plugin.uninstalled">Uninstalled</button>
         </div>
         <div class="event-timeline" id="event-timeline"></div>
       </section>
@@ -208,6 +220,7 @@
             <button class="action-btn action-start" id="btn-start">Start</button>
             <button class="action-btn action-stop" id="btn-stop">Stop</button>
             <button class="action-btn action-restart" id="btn-restart">Restart</button>
+            <button class="action-btn action-uninstall" id="btn-uninstall">Uninstall</button>
           </div>
         </div>
 
@@ -231,8 +244,43 @@
       <button class="ctx-item" data-action="restart">Restart</button>
       <div class="ctx-divider"></div>
       <button class="ctx-item" data-action="detail">Details</button>
+      <div class="ctx-divider"></div>
+      <button class="ctx-item ctx-danger" data-action="uninstall">Uninstall</button>
     </div>
   </div>
+  <!-- ===== Add Plugin Modal ===== -->
+  <div class="modal-overlay" id="add-plugin-modal" style="display:none">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Add Plugin</h2>
+        <button class="icon-btn" id="modal-close">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-section">
+          <div class="modal-label">Install from URL</div>
+          <div class="modal-input-row">
+            <input type="text" class="modal-input" id="install-url-input" placeholder="https://example.com/plugin.zip" />
+            <button class="action-btn action-start" id="install-url-btn">Install</button>
+          </div>
+        </div>
+        <div class="modal-divider">or</div>
+        <div class="modal-section">
+          <div class="modal-label">Install from Local Path</div>
+          <div class="modal-input-row">
+            <input type="text" class="modal-input" id="install-local-input" placeholder="/path/to/plugin.zip or /path/to/plugin-dir" />
+            <button class="action-btn action-start" id="install-local-btn">Install</button>
+          </div>
+        </div>
+        <div class="modal-status" id="install-status" style="display:none"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Toast container ===== -->
+  <div class="toast-container" id="toast-container"></div>
+
 </div>
 
 <script src="launcher.js"></script>

@@ -216,6 +216,16 @@ async function getVersion() {
   try { return await sendRequest("system.version", {}); } catch (e) { return { error: e.message }; }
 }
 
+async function installPlugin(source, path) {
+  try { return await sendRequest("plugin.install", { source, path }, 30000); }
+  catch (e) { return { error: e.message }; }
+}
+
+async function uninstallPlugin(pluginId) {
+  try { return await sendRequest("plugin.uninstall", { pluginId }); }
+  catch (e) { return { error: e.message }; }
+}
+
 // ============ View Switching ============
 
 function switchView(viewName) {
@@ -295,6 +305,8 @@ function renderRunningList() {
 function eventDescription(e) {
   const p = e.payload;
   switch (e.event) {
+    case "plugin.installed": return `${p.pluginId} v${p.version} installed`;
+    case "plugin.uninstalled": return `${p.pluginId} uninstalled`;
     case "plugin.started": return `${p.pluginId} → running`;
     case "plugin.stopped": return `${p.pluginId} → ${p.state}`;
     case "plugin.crashed": return `${p.pluginId} crashed (exit code ${p.exitCode})`;
@@ -312,7 +324,7 @@ function renderEventTimeline() {
     timeline.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:20px 0">No events yet.</div>';
     return;
   }
-  const iconMap = { started: "▶", stopped: "■", crashed: "✕", state_changed: "↻", tool_call_completed: "⚡" };
+  const iconMap = { installed: "⬆", uninstalled: "⬇", started: "▶", stopped: "■", crashed: "✕", state_changed: "↻", tool_call_completed: "⚡" };
   const recent = [...filtered].reverse().slice(0, 50);
   recent.forEach(e => {
     const iconKey = e.event.replace("plugin.", "").replace("tool.", "tool_call_");
@@ -402,6 +414,9 @@ function handlePluginEvent(payload, eventType) {
   if (idx >= 0 && payload.state) {
     plugins[idx] = { ...plugins[idx], state: payload.state };
   }
+  if (eventType === "plugin.installed" || eventType === "plugin.uninstalled") {
+    refreshAll();
+  }
   events.push({ event: eventType, payload, sequence: events.length + 1 });
   $("#activity-badge").textContent = events.length;
   renderAppGrid();
@@ -411,6 +426,118 @@ function handlePluginEvent(payload, eventType) {
   if (currentPlugin?.pluginId === payload.pluginId) {
     openDrawer(plugins[idx] ?? currentPlugin);
   }
+}
+
+// ============ Toast ============
+
+function showToast(message, type = "info") {
+  const container = $("#toast-container");
+  const toast = el("div", `toast toast-${type}`);
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => { toast.classList.add("toast-show"); }, 10);
+  setTimeout(() => {
+    toast.classList.remove("toast-show");
+    setTimeout(() => toast.remove(), 300);
+  }, 4000);
+}
+
+// ============ Add Plugin Modal ============
+
+function openAddPluginModal() {
+  $("#add-plugin-modal").style.display = "flex";
+  $("#install-url-input").value = "";
+  $("#install-local-input").value = "";
+  $("#install-status").style.display = "none";
+  $("#install-url-input").focus();
+}
+
+function closeAddPluginModal() {
+  $("#add-plugin-modal").style.display = "none";
+}
+
+function showInstallStatus(message, isError) {
+  const status = $("#install-status");
+  status.style.display = "block";
+  status.className = `modal-status${isError ? " modal-status-error" : " modal-status-info"}`;
+  status.textContent = message;
+}
+
+async function doInstall(source, path) {
+  if (!path || !path.trim()) {
+    showInstallStatus("Please enter a path.", true);
+    return;
+  }
+  showInstallStatus("Installing...", false);
+  const result = await installPlugin(source, path.trim());
+  if (result.error) {
+    showInstallStatus(`Error: ${result.error}`, true);
+    showToast(`Install failed: ${result.error}`, "error");
+  } else {
+    showInstallStatus(`Installed ${result.pluginId} v${result.version}`, false);
+    showToast(`Plugin ${result.pluginId} installed`, "success");
+    setTimeout(() => closeAddPluginModal(), 1000);
+    await refreshAll();
+  }
+}
+
+// ============ Uninstall ============
+
+async function doUninstall(pluginId, pluginName) {
+  if (!confirm(`Uninstall "${pluginName || pluginId}"? This cannot be undone.`)) return;
+  const result = await uninstallPlugin(pluginId);
+  if (result.error) {
+    showToast(`Uninstall failed: ${result.error}`, "error");
+  } else {
+    showToast(`Plugin ${pluginId} uninstalled`, "success");
+    closeDrawer();
+    await refreshAll();
+  }
+}
+
+// ============ Auto-update banner ============
+
+function initUpdater() {
+  if (!window.shell?.updater) return;
+
+  const banner = $("#update-banner");
+  const bannerText = $("#update-banner-text");
+  const bannerBtn = $("#update-banner-btn");
+  const bannerClose = $("#update-banner-close");
+
+  bannerClose.addEventListener("click", () => { banner.style.display = "none"; });
+  bannerBtn.addEventListener("click", () => {
+    if (confirm("Restart now to apply the update?")) {
+      window.shell.updater.quitAndInstall();
+    }
+  });
+
+  window.shell.updater.on("update-available", (info) => {
+    banner.style.display = "flex";
+    bannerText.textContent = `Update available: v${info.version}`;
+    bannerBtn.style.display = "none";
+  });
+
+  window.shell.updater.on("update-not-available", () => {
+    banner.style.display = "none";
+  });
+
+  window.shell.updater.on("download-progress", (progress) => {
+    const pct = Math.round(progress.percent || 0);
+    bannerText.textContent = `Downloading update... ${pct}%`;
+  });
+
+  window.shell.updater.on("update-downloaded", (info) => {
+    banner.style.display = "flex";
+    bannerText.textContent = `Update ready: v${info.version}`;
+    bannerBtn.style.display = "inline-block";
+  });
+
+  window.shell.updater.on("update-error", (data) => {
+    showToast(`Update error: ${data?.message || "unknown"}`, "error");
+  });
+
+  window.shell.updater.checkForUpdates().catch(() => {});
 }
 
 // ============ Refresh all views ============
@@ -455,16 +582,41 @@ document.addEventListener("DOMContentLoaded", () => {
     const action = item.dataset.action;
     const id = $("#context-menu").dataset.pluginId;
     const p = plugins.find(pp => pp.pluginId === id);
-    if (!p) return;
+    if (!p && action !== "uninstall") return;
     switch (action) {
       case "open": openPluginWindow(p); break;
       case "start": startPlugin(id); break;
       case "stop": stopPlugin(id); break;
       case "restart": restartPlugin(id); break;
       case "detail": openDrawer(p); break;
+      case "uninstall": doUninstall(id, p?.name); break;
     }
     hideContextMenu();
   }));
+
+  // Add Plugin modal
+  $("#open-add-plugin").addEventListener("click", openAddPluginModal);
+  $("#modal-close").addEventListener("click", closeAddPluginModal);
+  $("#add-plugin-modal").addEventListener("click", (e) => {
+    if (e.target === $("#add-plugin-modal")) closeAddPluginModal();
+  });
+  $("#install-url-btn").addEventListener("click", () => {
+    doInstall("url", $("#install-url-input").value);
+  });
+  $("#install-local-btn").addEventListener("click", () => {
+    doInstall("local", $("#install-local-input").value);
+  });
+  $("#install-url-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") doInstall("url", e.target.value);
+  });
+  $("#install-local-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") doInstall("local", e.target.value);
+  });
+
+  // Uninstall button in drawer
+  $("#btn-uninstall").addEventListener("click", () => {
+    if (currentPlugin) doUninstall(currentPlugin.pluginId, currentPlugin.name);
+  });
 
   // Ping button
   $("#ping-btn").addEventListener("click", async () => {
@@ -492,11 +644,16 @@ document.addEventListener("DOMContentLoaded", () => {
   }).catch(() => {});
 
   // Event subscriptions
+  onEvent("plugin.installed", (payload) => handlePluginEvent(payload, "plugin.installed"));
+  onEvent("plugin.uninstalled", (payload) => handlePluginEvent(payload, "plugin.uninstalled"));
   onEvent("plugin.started", (payload) => handlePluginEvent(payload, "plugin.started"));
   onEvent("plugin.stopped", (payload) => handlePluginEvent(payload, "plugin.stopped"));
   onEvent("plugin.crashed", (payload) => handlePluginEvent(payload, "plugin.crashed"));
   onEvent("plugin.state_changed", (payload) => handlePluginEvent(payload, "plugin.state_changed"));
   onEvent("tool.call_completed", (payload) => handlePluginEvent(payload, "tool.call_completed"));
+
+  // Auto-update
+  initUpdater();
 
   // Connect and subscribe
   connectWs();
