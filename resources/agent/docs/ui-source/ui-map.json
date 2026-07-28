@@ -1,0 +1,1598 @@
+{
+  "views": {
+    "navigation": {
+      "title": "Navigation and Shell Chrome",
+      "purpose": "Global chrome surrounding every NusaShell view: title bar, window controls, update banner, sidebar, and connection status.",
+      "howToOpen": "Always visible when the NusaShell main window is open.",
+      "sections": [
+        {
+          "heading": "Update banner",
+          "paragraphs": [
+            "A status banner at the top of the window that reports update availability, download progress, and a restart prompt."
+          ],
+          "controls": [
+            "update-banner",
+            "update-banner-text",
+            "update-banner-btn",
+            "update-banner-close"
+          ]
+        },
+        {
+          "heading": "Title bar",
+          "paragraphs": [
+            "The top bar contains the NusaShell brand, the global app search, a settings shortcut, and native window controls."
+          ],
+          "controls": [
+            "search-input",
+            "search-clear",
+            "nav-settings-btn",
+            "window-minimize",
+            "window-maximize",
+            "window-close"
+          ]
+        },
+        {
+          "heading": "Sidebar",
+          "paragraphs": [
+            "Vertical navigation on the left. Each item switches to a top-level view. The connection meter sits at the bottom."
+          ],
+          "controls": [
+            "nav-home",
+            "nav-plugins",
+            "nav-agent",
+            "nav-ai-providers",
+            "nav-autostart",
+            "nav-logs",
+            "open-add-plugin",
+            "conn-status",
+            "conn-fill"
+          ]
+        }
+      ]
+    },
+    "home": {
+      "title": "Home (Launcher)",
+      "purpose": "The default view and app launcher. Shows installed plugins as a searchable grid of app tiles.",
+      "howToOpen": "Open NusaShell, or click the Home item in the left sidebar.",
+      "sections": [
+        {
+          "heading": "Greeting",
+          "paragraphs": [
+            "Displays the product name, greeting, and the tagline 'Your AI tool shell — plugins with real UIs.'"
+          ],
+          "controls": []
+        },
+        {
+          "heading": "Search and filters",
+          "paragraphs": [
+            "The title bar search filters the grid in real time. Filter tabs below the greeting let you scope the list."
+          ],
+          "controls": [
+            "search-input",
+            "search-clear",
+            "home-filter-tabs"
+          ]
+        },
+        {
+          "heading": "App grid",
+          "paragraphs": [
+            "A grid of installed plugins. Each tile shows the plugin icon, name, and a state badge (idle, starting, running, stopping, crashed)."
+          ],
+          "controls": [
+            "app-grid",
+            "app-grid-cell"
+          ]
+        },
+        {
+          "heading": "Empty state",
+          "paragraphs": [
+            "When no plugins are installed, the grid shows a message pointing to the example plugin folder."
+          ],
+          "controls": []
+        }
+      ]
+    },
+    "plugins": {
+      "title": "Plugins",
+      "purpose": "List of installed plugins with their live MCP process state in a compact table.",
+      "howToOpen": "Click the Plugins item in the left sidebar.",
+      "sections": [
+        {
+          "heading": "Plugin table",
+          "paragraphs": [
+            "Shows plugin icon, name, plugin id, version, and current state. Click any row to open the plugin detail drawer."
+          ],
+          "controls": [
+            "plugin-table",
+            "plugin-row"
+          ]
+        }
+      ]
+    },
+    "plugin-detail": {
+      "title": "Plugin Detail Drawer",
+      "purpose": "A right-side drawer that shows details for the selected plugin and lets you start, stop, restart, or uninstall it.",
+      "howToOpen": "Click a plugin tile on the Home view or a row on the Plugins view, or choose Details from the context menu.",
+      "sections": [
+        {
+          "heading": "Header",
+          "paragraphs": [
+            "Shows the plugin icon, name, and plugin id with version. The close button dismisses the drawer."
+          ],
+          "controls": [
+            "drawer-icon",
+            "drawer-title",
+            "drawer-subtitle",
+            "drawer-close",
+            "drawer-overlay"
+          ]
+        },
+        {
+          "heading": "State",
+          "paragraphs": [
+            "Visual state machine that highlights idle, starting, running, stopping, and crashed states."
+          ],
+          "controls": [
+            "state-machine"
+          ]
+        },
+        {
+          "heading": "Actions",
+          "paragraphs": [
+            "Primary lifecycle actions for the selected plugin."
+          ],
+          "controls": [
+            "btn-start",
+            "btn-stop",
+            "btn-restart",
+            "btn-uninstall"
+          ]
+        },
+        {
+          "heading": "Tools",
+          "paragraphs": [
+            "Lists the tools reported by the plugin's MCP server when running. If the plugin is idle, it prompts to start it so tools can be discovered."
+          ],
+          "controls": [
+            "tool-count",
+            "tools-list"
+          ]
+        },
+        {
+          "heading": "Manifest",
+          "paragraphs": [
+            "Displays the plugin manifest (name, version, description, permissions, etc.)."
+          ],
+          "controls": [
+            "manifest-info"
+          ]
+        }
+      ]
+    },
+    "agent": {
+      "title": "Agent",
+      "purpose": "The agent conversation workspace. Chat with the NusaShell agent, attach files, pick models, and manage conversation threads.",
+      "howToOpen": "Click the Agent item in the left sidebar.",
+      "sections": [
+        {
+          "heading": "Conversation list",
+          "paragraphs": [
+            "Left panel listing local conversation threads. Click a thread to open it; use the × button to delete."
+          ],
+          "controls": [
+            "agent-conversations-title",
+            "agent-conversation-count",
+            "agent-new-conversation",
+            "agent-conversation-search",
+            "agent-conversation-list",
+            "agent-conversation-item"
+          ]
+        },
+        {
+          "heading": "Conversation thread",
+          "paragraphs": [
+            "Main message area showing user and assistant messages, tool-call result tags, attachments, and retry buttons."
+          ],
+          "controls": [
+            "agent-thread",
+            "agent-empty",
+            "agent-message",
+            "agent-bubble",
+            "agent-retry-btn"
+          ]
+        },
+        {
+          "heading": "Composer",
+          "paragraphs": [
+            "Input area at the bottom of the thread. Write a prompt, attach images or PDFs, choose a model, and send the turn."
+          ],
+          "controls": [
+            "agent-form",
+            "agent-input",
+            "agent-attachments",
+            "agent-file-input",
+            "agent-attach-btn",
+            "agent-model-trigger",
+            "agent-model-trigger-label",
+            "agent-model-menu",
+            "agent-model-search",
+            "agent-model-list",
+            "agent-provider-status",
+            "agent-stop-btn",
+            "agent-send-btn"
+          ]
+        },
+        {
+          "heading": "Delete conversation dialog",
+          "paragraphs": [
+            "Confirmation dialog shown before permanently removing a conversation thread."
+          ],
+          "controls": [
+            "agent-delete-overlay",
+            "agent-delete-dialog",
+            "agent-delete-title",
+            "agent-delete-copy",
+            "agent-delete-close",
+            "agent-delete-cancel",
+            "agent-delete-confirm"
+          ]
+        }
+      ]
+    },
+    "ai-providers": {
+      "title": "AI Providers",
+      "purpose": "Registry of built-in and custom AI provider connections. Enable, disable, and configure providers here.",
+      "howToOpen": "Click the AI Providers item in the left sidebar.",
+      "sections": [
+        {
+          "heading": "Provider registry",
+          "paragraphs": [
+            "Cards for OpenRouter, OmniRoute, 9Router, OpenAI, Claude API, and any custom providers. Each card shows status, model count, and primary action."
+          ],
+          "controls": [
+            "provider-registry",
+            "provider-preset-card",
+            "provider-card-action",
+            "provider-toggle",
+            "provider-status"
+          ]
+        },
+        {
+          "heading": "Add custom provider",
+          "paragraphs": [
+            "Button to create a new custom OpenAI-compatible provider."
+          ],
+          "controls": [
+            "add-custom-provider"
+          ]
+        }
+      ]
+    },
+    "provider-details": {
+      "title": "Provider Details",
+      "purpose": "Deep view for one provider: connection info, imported models, import catalog, add model, edit, and delete.",
+      "howToOpen": "Click Details or Configure on an AI Providers card.",
+      "sections": [
+        {
+          "heading": "Provider summary",
+          "paragraphs": [
+            "Back link, provider name, API type, base URL, masked API key state, default model, and enabled status."
+          ],
+          "controls": [
+            "provider-details-back",
+            "provider-detail-title",
+            "provider-detail-subtitle",
+            "provider-detail-base-url",
+            "provider-detail-key",
+            "provider-detail-default-model",
+            "provider-detail-status"
+          ]
+        },
+        {
+          "heading": "Provider actions",
+          "paragraphs": [
+            "Edit the connection, import the provider's model catalog, or delete the provider."
+          ],
+          "controls": [
+            "provider-detail-edit",
+            "provider-import-models",
+            "provider-detail-delete",
+            "provider-import-error"
+          ]
+        },
+        {
+          "heading": "Available models",
+          "paragraphs": [
+            "Searchable list of imported models. Each row shows model id, label, context window, input modes, and capability badges."
+          ],
+          "controls": [
+            "provider-model-count",
+            "provider-model-search",
+            "provider-add-model",
+            "provider-model-list",
+            "provider-model-item"
+          ]
+        }
+      ]
+    },
+    "autostart": {
+      "title": "Autostart",
+      "purpose": "Choose which MCP server plugins start automatically when NusaShell launches.",
+      "howToOpen": "Click the Autostart item in the left sidebar.",
+      "sections": [
+        {
+          "heading": "Autostart list",
+          "paragraphs": [
+            "One row per installed plugin with a toggle. The header shows how many plugins are enabled."
+          ],
+          "controls": [
+            "autostart-count",
+            "autostart-list",
+            "autostart-toggle"
+          ]
+        }
+      ]
+    },
+    "logs": {
+      "title": "Logs",
+      "purpose": "Live tail of renderer, Electron, IPC, backend, and MCP process log messages.",
+      "howToOpen": "Click the Logs item in the left sidebar.",
+      "sections": [
+        {
+          "heading": "Log filters",
+          "paragraphs": [
+            "Chips filter the tail by source: All, Frontend, Electron, IPC, Backend, and MCP."
+          ],
+          "controls": [
+            "log-count",
+            "log-filter-all",
+            "log-filter-renderer",
+            "log-filter-main",
+            "log-filter-ipc",
+            "log-filter-backend",
+            "log-filter-mcp"
+          ]
+        },
+        {
+          "heading": "Log tail",
+          "paragraphs": [
+            "Scrollable list of log entries with auto-stick to the bottom. Shows count of visible / total entries."
+          ],
+          "controls": [
+            "log-tail"
+          ]
+        }
+      ]
+    },
+    "settings": {
+      "title": "Settings",
+      "purpose": "System configuration, connection status, agent runtime preferences, and app info.",
+      "howToOpen": "Click the settings gear icon in the title bar, or use the Settings navigation if added.",
+      "sections": [
+        {
+          "heading": "System",
+          "paragraphs": [
+            "Shows the running NusaShell version, backend connection state, WebSocket URL, and a manual ping button."
+          ],
+          "controls": [
+            "settings-version",
+            "settings-conn-dot",
+            "settings-conn-label",
+            "settings-ws-url",
+            "ping-btn",
+            "ping-result"
+          ]
+        },
+        {
+          "heading": "Connection",
+          "paragraphs": [
+            "Toggles for WebSocket auto-reconnect and auto-resubscribe."
+          ],
+          "controls": [
+            "connection-auto-reconnect",
+            "connection-auto-resubscribe"
+          ]
+        },
+        {
+          "heading": "Agent runtime",
+          "paragraphs": [
+            "Configures how the agent picks and retries models: provider strategy, attempt budget, vision mode, and streaming."
+          ],
+          "controls": [
+            "ai-runtime-form",
+            "settings-ai-strategy",
+            "settings-ai-budget",
+            "settings-ai-vision",
+            "settings-ai-stream"
+          ]
+        },
+        {
+          "heading": "About",
+          "paragraphs": [
+            "Product name and build label."
+          ],
+          "controls": []
+        }
+      ]
+    },
+    "add-plugin-modal": {
+      "title": "Add Plugin Modal",
+      "purpose": "Install a plugin from a remote URL or a local path/zip.",
+      "howToOpen": "Click the Add Plugin button in the sidebar or the Home empty-state prompt.",
+      "sections": [
+        {
+          "heading": "Install options",
+          "paragraphs": [
+            "Two input groups: install from a URL, or install from a local directory/zip path."
+          ],
+          "controls": [
+            "add-plugin-modal",
+            "modal-close",
+            "install-url-input",
+            "install-url-btn",
+            "install-local-input",
+            "install-local-btn"
+          ]
+        },
+        {
+          "heading": "Install status",
+          "paragraphs": [
+            "Displays progress, success, or error text after an install attempt. The modal closes automatically on success."
+          ],
+          "controls": [
+            "install-status"
+          ]
+        }
+      ]
+    },
+    "provider-editor": {
+      "title": "Provider Editor",
+      "purpose": "Form to configure or edit an AI provider connection and its runtime defaults.",
+      "howToOpen": "Click Configure on a provider card, or Edit on the Provider Details view.",
+      "sections": [
+        {
+          "heading": "Identity",
+          "paragraphs": [
+            "For custom providers: name and id/prefix. Built-in providers hide the custom fields and use their preset id."
+          ],
+          "controls": [
+            "ai-settings-form",
+            "ai-settings-title",
+            "ai-settings-subtitle",
+            "ai-settings-close",
+            "settings-ai-preset-id",
+            "settings-ai-provider-type",
+            "provider-custom-fields",
+            "settings-ai-name",
+            "settings-ai-id",
+            "settings-ai-api"
+          ]
+        },
+        {
+          "heading": "Connection",
+          "paragraphs": [
+            "Base URL, API key, and default model for the provider."
+          ],
+          "controls": [
+            "settings-ai-base-url",
+            "settings-ai-api-key",
+            "settings-ai-model"
+          ]
+        },
+        {
+          "heading": "Runtime",
+          "paragraphs": [
+            "Timeout in seconds, retry attempts, routing weight, and enabled toggle."
+          ],
+          "controls": [
+            "settings-ai-timeout",
+            "settings-ai-attempts",
+            "settings-ai-weight",
+            "settings-ai-enabled",
+            "settings-ai-key-state"
+          ]
+        }
+      ]
+    },
+    "provider-delete-dialog": {
+      "title": "Delete Provider Dialog",
+      "purpose": "Confirmation before removing a provider and its saved credentials.",
+      "howToOpen": "Click Delete on an AI Providers card or on the Provider Details view.",
+      "sections": [
+        {
+          "heading": "Confirmation",
+          "paragraphs": [
+            "Warns that the saved credential, imported models, and connection settings will be removed from this device."
+          ],
+          "controls": [
+            "provider-delete-overlay",
+            "provider-delete-dialog",
+            "provider-delete-title",
+            "provider-delete-copy",
+            "provider-delete-close",
+            "provider-delete-cancel",
+            "provider-delete-confirm"
+          ]
+        }
+      ]
+    },
+    "context-menu": {
+      "title": "Context Menu",
+      "purpose": "Floating menu with context-specific actions. Plugin tiles/rows show plugin actions; inputs show edit actions.",
+      "howToOpen": "Right-click a plugin tile/row, or right-click an input/textarea for edit actions.",
+      "sections": [
+        {
+          "heading": "Edit actions",
+          "paragraphs": [
+            "Available when right-clicking inside an input or textarea."
+          ],
+          "controls": [
+            "ctx-cut",
+            "ctx-copy",
+            "ctx-paste"
+          ]
+        },
+        {
+          "heading": "Plugin actions",
+          "paragraphs": [
+            "Available when right-clicking a plugin tile or row."
+          ],
+          "controls": [
+            "ctx-open",
+            "ctx-start",
+            "ctx-stop",
+            "ctx-restart",
+            "ctx-detail",
+            "ctx-uninstall"
+          ]
+        }
+      ]
+    }
+  },
+  "controls": {
+    "update-banner": {
+      "section": "Update banner",
+      "label": "Update banner",
+      "type": "banner",
+      "action": "Displays update availability and download progress. Hidden when no update is pending.",
+      "related": ["update-banner-text", "update-banner-btn", "update-banner-close"]
+    },
+    "update-banner-text": {
+      "section": "Update banner",
+      "label": "Update banner text",
+      "type": "status text",
+      "action": "Shows the current update message, e.g. 'Update available: vX.Y.Z' or download percentage."
+    },
+    "update-banner-btn": {
+      "section": "Update banner",
+      "label": "Restart to update",
+      "type": "button",
+      "action": "Quits and installs the downloaded update after confirmation. Only shown when an update is ready."
+    },
+    "update-banner-close": {
+      "section": "Update banner",
+      "label": "Close update banner",
+      "type": "button",
+      "action": "Dismisses the update banner until the next update event."
+    },
+    "search-input": {
+      "section": "Title bar",
+      "label": "Global app search",
+      "type": "search input",
+      "action": "Filters the Home app grid by plugin name, plugin id, or description as the user types. Also updates Plugins and other views that honor the query.",
+      "shortcut": "Escape clears the current query when the input is focused.",
+      "related": ["search-clear", "app-grid"]
+    },
+    "search-clear": {
+      "section": "Title bar",
+      "label": "Clear search",
+      "type": "button",
+      "action": "Clears the global app search field and refocuses it.",
+      "related": ["search-input"]
+    },
+    "nav-settings-btn": {
+      "section": "Title bar",
+      "label": "Settings",
+      "type": "icon button",
+      "action": "Switches to the Settings view from anywhere in the app.",
+      "related": ["settings"]
+    },
+    "window-minimize": {
+      "section": "Title bar",
+      "label": "Minimize window",
+      "type": "window button",
+      "action": "Minimizes the NusaShell window."
+    },
+    "window-maximize": {
+      "section": "Title bar",
+      "label": "Maximize / restore window",
+      "type": "window button",
+      "action": "Toggles the NusaShell window between normal and maximized state."
+    },
+    "window-close": {
+      "section": "Title bar",
+      "label": "Close window",
+      "type": "window button",
+      "action": "Closes the NusaShell window. The backend may continue running in the tray."
+    },
+    "nav-home": {
+      "section": "Sidebar",
+      "label": "Home navigation",
+      "type": "nav item",
+      "selector": "[data-view=\"home\"].nav-item",
+      "generated": true,
+      "action": "Switches the main content to the Home (launcher) view.",
+      "related": ["app-grid", "search-input"]
+    },
+    "nav-plugins": {
+      "section": "Sidebar",
+      "label": "Plugins navigation",
+      "type": "nav item",
+      "selector": "[data-view=\"plugins\"].nav-item",
+      "generated": true,
+      "action": "Switches the main content to the Plugins list view.",
+      "related": ["plugin-table"]
+    },
+    "nav-agent": {
+      "section": "Sidebar",
+      "label": "Agent navigation",
+      "type": "nav item",
+      "selector": "[data-view=\"agent\"].nav-item",
+      "generated": true,
+      "action": "Switches the main content to the Agent conversation view.",
+      "related": ["agent-thread", "agent-input"]
+    },
+    "nav-ai-providers": {
+      "section": "Sidebar",
+      "label": "AI Providers navigation",
+      "type": "nav item",
+      "selector": "[data-view=\"ai-providers\"].nav-item",
+      "generated": true,
+      "action": "Switches the main content to the AI Providers registry view.",
+      "related": ["provider-registry"]
+    },
+    "nav-autostart": {
+      "section": "Sidebar",
+      "label": "Autostart navigation",
+      "type": "nav item",
+      "selector": "[data-view=\"autostart\"].nav-item",
+      "generated": true,
+      "action": "Switches the main content to the Autostart view.",
+      "related": ["autostart-list"]
+    },
+    "nav-logs": {
+      "section": "Sidebar",
+      "label": "Logs navigation",
+      "type": "nav item",
+      "selector": "[data-view=\"logs\"].nav-item",
+      "generated": true,
+      "action": "Switches the main content to the Logs tail view.",
+      "related": ["log-tail"]
+    },
+    "open-add-plugin": {
+      "section": "Sidebar",
+      "label": "Add Plugin",
+      "type": "button",
+      "action": "Opens the Add Plugin modal to install a plugin from a URL or local path.",
+      "related": ["add-plugin-modal", "install-url-input"]
+    },
+    "conn-status": {
+      "section": "Sidebar",
+      "label": "Connection status text",
+      "type": "status text",
+      "action": "Displays 'Connecting...' or 'Connected' depending on the WebSocket state."
+    },
+    "conn-fill": {
+      "section": "Sidebar",
+      "label": "Connection status bar",
+      "type": "progress bar",
+      "action": "Visual fill showing WebSocket connection progress."
+    },
+    "home-filter-tabs": {
+      "section": "Search and filters",
+      "label": "Filter tabs",
+      "type": "tab group",
+      "selector": ".tabs .tab",
+      "generated": true,
+      "action": "Tabs above the app grid that scope the list of plugins. Defaults to All."
+    },
+    "app-grid": {
+      "section": "App grid",
+      "label": "Installed plugin grid",
+      "type": "grid",
+      "action": "Container for plugin tiles. Renders an empty message when no plugins match or are installed.",
+      "related": ["app-grid-cell"]
+    },
+    "app-grid-cell": {
+      "section": "App grid",
+      "label": "Plugin tile",
+      "type": "button",
+      "selector": ".app-cell",
+      "generated": true,
+      "action": "Click to open the plugin window. Right-click to open the plugin context menu. Shows icon, name, and state badge.",
+      "related": ["context-menu"]
+    },
+    "plugin-table": {
+      "section": "Plugin table",
+      "label": "Installed plugin table",
+      "type": "list/table",
+      "action": "Container for plugin rows. Renders an empty message when no plugins are installed.",
+      "related": ["plugin-row"]
+    },
+    "plugin-row": {
+      "section": "Plugin table",
+      "label": "Plugin row",
+      "type": "button",
+      "selector": ".plugin-row",
+      "generated": true,
+      "action": "Click to open the plugin detail drawer. Shows icon, name, plugin id, version, and state.",
+      "related": ["plugin-detail"]
+    },
+    "drawer-overlay": {
+      "section": "Header",
+      "label": "Drawer overlay",
+      "type": "overlay",
+      "action": "Clicking the dark backdrop closes the plugin detail drawer."
+    },
+    "plugin-drawer": {
+      "section": "Header",
+      "label": "Plugin detail drawer",
+      "type": "drawer",
+      "action": "Right-side panel that opens when a plugin tile or row is selected."
+    },
+    "drawer-icon": {
+      "section": "Header",
+      "label": "Plugin icon",
+      "type": "icon",
+      "action": "Shows the plugin icon in the detail drawer."
+    },
+    "drawer-title": {
+      "section": "Header",
+      "label": "Plugin name",
+      "type": "text",
+      "action": "Displays the selected plugin name."
+    },
+    "drawer-subtitle": {
+      "section": "Header",
+      "label": "Plugin id and version",
+      "type": "text",
+      "action": "Displays the selected plugin id and version."
+    },
+    "drawer-close": {
+      "section": "Header",
+      "label": "Close drawer",
+      "type": "icon button",
+      "action": "Closes the plugin detail drawer."
+    },
+    "state-machine": {
+      "section": "State",
+      "label": "State machine",
+      "type": "visual indicator",
+      "action": "Highlights the plugin's lifecycle state: idle, starting, running, stopping, or crashed."
+    },
+    "btn-start": {
+      "section": "Actions",
+      "label": "Start",
+      "type": "button",
+      "action": "Starts the selected plugin's MCP process."
+    },
+    "btn-stop": {
+      "section": "Actions",
+      "label": "Stop",
+      "type": "button",
+      "action": "Stops the selected plugin's MCP process."
+    },
+    "btn-restart": {
+      "section": "Actions",
+      "label": "Restart",
+      "type": "button",
+      "action": "Restarts the selected plugin's MCP process."
+    },
+    "btn-uninstall": {
+      "section": "Actions",
+      "label": "Uninstall",
+      "type": "button",
+      "action": "Removes the selected plugin after a confirmation prompt.",
+      "related": ["plugin-table", "app-grid"]
+    },
+    "tool-count": {
+      "section": "Tools",
+      "label": "Tool count",
+      "type": "text",
+      "action": "Shows the number of tools discovered from the plugin's MCP server."
+    },
+    "tools-list": {
+      "section": "Tools",
+      "label": "Tools list",
+      "type": "list",
+      "action": "Lists tool names reported by the running plugin. Empty when the plugin is idle."
+    },
+    "manifest-info": {
+      "section": "Manifest",
+      "label": "Plugin manifest",
+      "type": "list/description",
+      "action": "Displays the plugin manifest including name, version, description, and permissions."
+    },
+    "agent-conversations-title": {
+      "section": "Conversation list",
+      "label": "Conversations heading",
+      "type": "heading",
+      "action": "Labels the left conversation panel."
+    },
+    "agent-conversation-count": {
+      "section": "Conversation list",
+      "label": "Conversation count",
+      "type": "status text",
+      "action": "Displays the number of conversation threads."
+    },
+    "agent-new-conversation": {
+      "section": "Conversation list",
+      "label": "New conversation",
+      "type": "icon button",
+      "action": "Creates a new empty conversation thread and focuses the composer.",
+      "related": ["agent-input"]
+    },
+    "agent-conversation-search": {
+      "section": "Conversation list",
+      "label": "Search conversations",
+      "type": "search input",
+      "action": "Filters the conversation list by thread title as you type."
+    },
+    "agent-conversation-list": {
+      "section": "Conversation list",
+      "label": "Conversation list",
+      "type": "list",
+      "action": "Container for conversation rows. Shows the active thread highlighted."
+    },
+    "agent-conversation-item": {
+      "section": "Conversation list",
+      "label": "Conversation row",
+      "type": "listitem",
+      "selector": ".agent-conversation-item",
+      "generated": true,
+      "action": "Click the row to open the conversation; click the × button to delete it."
+    },
+    "agent-thread": {
+      "section": "Conversation thread",
+      "label": "Conversation thread",
+      "type": "log region",
+      "action": "Main scrollable message area for the current conversation. Auto-scrolls as new content arrives."
+    },
+    "agent-empty": {
+      "section": "Conversation thread",
+      "label": "Empty thread state",
+      "type": "placeholder",
+      "action": "Shown when no conversation is selected or when a new conversation has no messages yet. Prompts to choose a model."
+    },
+    "agent-message": {
+      "section": "Conversation thread",
+      "label": "Message row",
+      "type": "article",
+      "selector": ".agent-message",
+      "generated": true,
+      "action": "Displays a user or assistant message bubble, plus metadata like model, trace id, and tool-call badges."
+    },
+    "agent-bubble": {
+      "section": "Conversation thread",
+      "label": "Message bubble",
+      "type": "div",
+      "selector": ".agent-bubble",
+      "generated": true,
+      "action": "Contains the rendered message text. Assistant messages are rendered as Markdown."
+    },
+    "agent-retry-btn": {
+      "section": "Conversation thread",
+      "label": "Retry turn",
+      "type": "button",
+      "selector": ".agent-retry-btn",
+      "generated": true,
+      "action": "Appears on a failed assistant turn. Click to re-run the same turn."
+    },
+    "agent-form": {
+      "section": "Composer",
+      "label": "Composer form",
+      "type": "form",
+      "action": "Wraps the message textarea, attachments, and send controls. Submit triggers the agent turn."
+    },
+    "agent-input": {
+      "section": "Composer",
+      "label": "Message input",
+      "type": "textarea",
+      "action": "Primary text area for typing a prompt to the agent.",
+      "shortcut": "Ctrl+Enter or Cmd+Enter submits the turn."
+    },
+    "agent-attachments": {
+      "section": "Composer",
+      "label": "Attachment chips",
+      "type": "list",
+      "action": "Shows files attached to the current turn. Each chip can be removed."
+    },
+    "agent-file-input": {
+      "section": "Composer",
+      "label": "File attachment input",
+      "type": "file input",
+      "action": "Hidden file picker triggered by the attach button. Accepts images and PDFs."
+    },
+    "agent-attach-btn": {
+      "section": "Composer",
+      "label": "Attach files",
+      "type": "icon button",
+      "action": "Opens the file picker to attach images or PDFs to the current turn. Up to 4 files, each under 4 MiB.",
+      "related": ["agent-file-input", "agent-attachments"]
+    },
+    "agent-model-trigger": {
+      "section": "Composer",
+      "label": "Model and effort trigger",
+      "type": "button",
+      "action": "Opens the model/effort picker dropdown. Label shows the selected model and effort, e.g. 'Model · auto'."
+    },
+    "agent-model-trigger-label": {
+      "section": "Composer",
+      "label": "Model trigger label",
+      "type": "text",
+      "action": "Text inside the model trigger showing the selected model id and effort value."
+    },
+    "agent-model-menu": {
+      "section": "Composer",
+      "label": "Model picker dropdown",
+      "type": "dialog",
+      "action": "Searchable list of imported models. Choose a model and, if supported, a reasoning effort level."
+    },
+    "agent-model-search": {
+      "section": "Composer",
+      "label": "Search models",
+      "type": "search input",
+      "action": "Filters the model picker list by model id, label, provider, or capability."
+    },
+    "agent-model-list": {
+      "section": "Composer",
+      "label": "Model list",
+      "type": "listbox",
+      "action": "Container for model rows in the picker."
+    },
+    "agent-provider-status": {
+      "section": "Composer",
+      "label": "Context usage status",
+      "type": "status text",
+      "action": "Shows used / total context tokens for the selected model, or 'Choose a model' when none is selected."
+    },
+    "agent-stop-btn": {
+      "section": "Composer",
+      "label": "Stop turn",
+      "type": "icon button",
+      "action": "Cancels the currently running agent turn. Visible only while a turn is in progress."
+    },
+    "agent-send-btn": {
+      "section": "Composer",
+      "label": "Send turn",
+      "type": "submit button",
+      "action": "Submits the composer form and starts the agent turn."
+    },
+    "agent-delete-overlay": {
+      "section": "Delete conversation dialog",
+      "label": "Delete overlay",
+      "type": "overlay",
+      "action": "Clicking outside the dialog closes it without deleting."
+    },
+    "agent-delete-dialog": {
+      "section": "Delete conversation dialog",
+      "label": "Delete conversation confirmation",
+      "type": "dialog",
+      "action": "Confirms permanent removal of the selected conversation thread."
+    },
+    "agent-delete-title": {
+      "section": "Delete conversation dialog",
+      "label": "Dialog title",
+      "type": "heading",
+      "action": "Shows 'Delete conversation?'."
+    },
+    "agent-delete-copy": {
+      "section": "Delete conversation dialog",
+      "label": "Dialog description",
+      "type": "text",
+      "action": "Explains that the local conversation will be permanently removed."
+    },
+    "agent-delete-close": {
+      "section": "Delete conversation dialog",
+      "label": "Close dialog",
+      "type": "icon button",
+      "action": "Closes the delete conversation dialog."
+    },
+    "agent-delete-cancel": {
+      "section": "Delete conversation dialog",
+      "label": "Cancel",
+      "type": "button",
+      "action": "Closes the dialog without deleting."
+    },
+    "agent-delete-confirm": {
+      "section": "Delete conversation dialog",
+      "label": "Delete",
+      "type": "button",
+      "action": "Permanently deletes the selected conversation thread."
+    },
+    "provider-registry": {
+      "section": "Provider registry",
+      "label": "Provider registry",
+      "type": "list",
+      "action": "Container for provider cards."
+    },
+    "provider-preset-card": {
+      "section": "Provider registry",
+      "label": "Provider preset card",
+      "type": "article",
+      "selector": "[data-provider-preset]",
+      "generated": true,
+      "action": "Built-in provider card. Shows provider name, kind, status, enable toggle, and Configure/Details action."
+    },
+    "provider-card-action": {
+      "section": "Provider registry",
+      "label": "Provider card action",
+      "type": "button",
+      "selector": ".provider-card-action",
+      "generated": true,
+      "action": "Label changes between Configure (not set up) and Details (configured). Opens the provider editor or provider details."
+    },
+    "provider-toggle": {
+      "section": "Provider registry",
+      "label": "Enable provider",
+      "type": "toggle button",
+      "selector": ".provider-toggle",
+      "generated": true,
+      "action": "Enables or disables the provider for agent turns. Disabled until the provider is configured."
+    },
+    "provider-status": {
+      "section": "Provider registry",
+      "label": "Provider status",
+      "type": "status text",
+      "selector": ".provider-status",
+      "generated": true,
+      "action": "Shows 'Not configured', 'Needs API key', or 'Configured · N models'."
+    },
+    "add-custom-provider": {
+      "section": "Add custom provider",
+      "label": "Add custom provider",
+      "type": "button",
+      "action": "Opens the provider editor for a new custom OpenAI-compatible provider."
+    },
+    "provider-details-back": {
+      "section": "Provider summary",
+      "label": "Back to AI Providers",
+      "type": "button",
+      "action": "Returns to the AI Providers registry list."
+    },
+    "provider-detail-title": {
+      "section": "Provider summary",
+      "label": "Provider name",
+      "type": "heading",
+      "action": "Displays the provider name."
+    },
+    "provider-detail-subtitle": {
+      "section": "Provider summary",
+      "label": "Provider id and API type",
+      "type": "text",
+      "action": "Displays the provider id and API type (chat/responses/messages)."
+    },
+    "provider-detail-base-url": {
+      "section": "Provider summary",
+      "label": "Base URL",
+      "type": "text",
+      "action": "Displays the configured API base URL or 'Local'."
+    },
+    "provider-detail-key": {
+      "section": "Provider summary",
+      "label": "API key state",
+      "type": "text",
+      "action": "Shows whether an API key is saved, optional, or missing."
+    },
+    "provider-detail-default-model": {
+      "section": "Provider summary",
+      "label": "Default model",
+      "type": "text",
+      "action": "Displays the provider's default model or 'Not set — choose per turn'."
+    },
+    "provider-detail-status": {
+      "section": "Provider summary",
+      "label": "Enabled status",
+      "type": "text",
+      "action": "Shows whether the provider is Enabled or Disabled."
+    },
+    "provider-detail-edit": {
+      "section": "Provider actions",
+      "label": "Edit",
+      "type": "button",
+      "action": "Opens the provider editor for this provider."
+    },
+    "provider-import-models": {
+      "section": "Provider actions",
+      "label": "Import models",
+      "type": "button",
+      "action": "Fetches the provider's model catalog and imports it. Errors appear in the provider import error box."
+    },
+    "provider-detail-delete": {
+      "section": "Provider actions",
+      "label": "Delete",
+      "type": "button",
+      "action": "Opens the delete provider confirmation dialog."
+    },
+    "provider-import-error": {
+      "section": "Provider actions",
+      "label": "Import error message",
+      "type": "alert",
+      "action": "Displays an error when model import fails."
+    },
+    "provider-model-count": {
+      "section": "Available models",
+      "label": "Model count",
+      "type": "text",
+      "action": "Shows the number of imported models for this provider."
+    },
+    "provider-model-search": {
+      "section": "Available models",
+      "label": "Search imported models",
+      "type": "search input",
+      "action": "Filters the imported model list by id, label, or description."
+    },
+    "provider-add-model": {
+      "section": "Available models",
+      "label": "Add model",
+      "type": "button",
+      "action": "Prompts for a model id and optional display label, then adds it manually to the provider."
+    },
+    "provider-model-list": {
+      "section": "Available models",
+      "label": "Model list",
+      "type": "list",
+      "action": "Container for imported model rows."
+    },
+    "provider-model-item": {
+      "section": "Available models",
+      "label": "Model row",
+      "type": "listitem",
+      "selector": ".provider-model-item",
+      "generated": true,
+      "action": "Displays model id, label, context window, input modes, and capability badges."
+    },
+    "autostart-count": {
+      "section": "Autostart list",
+      "label": "Enabled count",
+      "type": "status text",
+      "action": "Shows how many plugins are set to autostart."
+    },
+    "autostart-list": {
+      "section": "Autostart list",
+      "label": "Autostart list",
+      "type": "list",
+      "action": "Container for plugin rows, each with a toggle for starting on launch."
+    },
+    "autostart-toggle": {
+      "section": "Autostart list",
+      "label": "Autostart toggle",
+      "type": "checkbox",
+      "selector": "input[type=\"checkbox\"]",
+      "generated": true,
+      "action": "Enables or disables autostart for the adjacent plugin."
+    },
+    "log-count": {
+      "section": "Log filters",
+      "label": "Log count",
+      "type": "status text",
+      "action": "Shows the number of visible log entries out of the total stored."
+    },
+    "log-filter-all": {
+      "section": "Log filters",
+      "label": "All logs",
+      "type": "chip",
+      "selector": "[data-log-source=\"all\"]",
+      "generated": true,
+      "action": "Shows log entries from all sources."
+    },
+    "log-filter-renderer": {
+      "section": "Log filters",
+      "label": "Frontend logs",
+      "type": "chip",
+      "selector": "[data-log-source=\"renderer\"]",
+      "generated": true,
+      "action": "Shows only renderer/frontend log entries."
+    },
+    "log-filter-main": {
+      "section": "Log filters",
+      "label": "Electron logs",
+      "type": "chip",
+      "selector": "[data-log-source=\"main\"]",
+      "generated": true,
+      "action": "Shows only Electron main process log entries."
+    },
+    "log-filter-ipc": {
+      "section": "Log filters",
+      "label": "IPC logs",
+      "type": "chip",
+      "selector": "[data-log-source=\"ipc\"]",
+      "generated": true,
+      "action": "Shows only IPC log entries."
+    },
+    "log-filter-backend": {
+      "section": "Log filters",
+      "label": "Backend logs",
+      "type": "chip",
+      "selector": "[data-log-source=\"backend\"]",
+      "generated": true,
+      "action": "Shows only backend log entries."
+    },
+    "log-filter-mcp": {
+      "section": "Log filters",
+      "label": "MCP logs",
+      "type": "chip",
+      "selector": "[data-log-source=\"mcp\"]",
+      "generated": true,
+      "action": "Shows only MCP process log entries."
+    },
+    "log-tail": {
+      "section": "Log tail",
+      "label": "Log tail",
+      "type": "log region",
+      "action": "Scrollable live tail of log messages. Auto-sticks to the bottom."
+    },
+    "settings-version": {
+      "section": "System",
+      "label": "NusaShell version",
+      "type": "text",
+      "action": "Displays the running NusaShell version."
+    },
+    "settings-conn-dot": {
+      "section": "System",
+      "label": "Backend status dot",
+      "type": "status indicator",
+      "action": "Visual dot showing whether the backend WebSocket is connected."
+    },
+    "settings-conn-label": {
+      "section": "System",
+      "label": "Backend status label",
+      "type": "status text",
+      "action": "Text label showing 'Connected' or 'Disconnected'."
+    },
+    "settings-ws-url": {
+      "section": "System",
+      "label": "WebSocket URL",
+      "type": "code",
+      "action": "Displays the WebSocket URL the app is connected to."
+    },
+    "ping-btn": {
+      "section": "System",
+      "label": "Ping",
+      "type": "button",
+      "action": "Sends a ping to the backend and shows 'pong: true' or an error."
+    },
+    "ping-result": {
+      "section": "System",
+      "label": "Ping result",
+      "type": "status text",
+      "action": "Displays the ping response or error after clicking Ping."
+    },
+    "connection-auto-reconnect": {
+      "section": "Connection",
+      "label": "Auto-reconnect",
+      "type": "toggle",
+      "selector": ".settings-card input[type=\"checkbox\"]",
+      "generated": true,
+      "action": "When enabled, the renderer reconnects to the backend automatically if the WebSocket drops."
+    },
+    "connection-auto-resubscribe": {
+      "section": "Connection",
+      "label": "Auto-resubscribe",
+      "type": "toggle",
+      "selector": ".settings-card input[type=\"checkbox\"]",
+      "generated": true,
+      "action": "When enabled, the renderer re-subscribes to backend events after reconnecting."
+    },
+    "ai-runtime-form": {
+      "section": "Agent runtime",
+      "label": "Agent runtime form",
+      "type": "form",
+      "action": "Contains the provider strategy, attempt budget, vision, and stream settings. Submit saves the runtime."
+    },
+    "settings-ai-strategy": {
+      "section": "Agent runtime",
+      "label": "Provider strategy",
+      "type": "select",
+      "action": "Controls model selection: Failover, Round robin, or Selected provider only."
+    },
+    "settings-ai-budget": {
+      "section": "Agent runtime",
+      "label": "Total attempt budget",
+      "type": "number input",
+      "action": "Maximum number of agent tool-call attempts per turn (1–32)."
+    },
+    "settings-ai-vision": {
+      "section": "Agent runtime",
+      "label": "Vision",
+      "type": "select",
+      "action": "Gates multimodal image input: Automatic from catalog, Always allow, or Disable."
+    },
+    "settings-ai-stream": {
+      "section": "Agent runtime",
+      "label": "Stream responses",
+      "type": "checkbox",
+      "action": "Enables streaming assistant responses when the provider supports it."
+    },
+    "add-plugin-modal": {
+      "section": "Install options",
+      "label": "Add Plugin modal",
+      "type": "modal",
+      "action": "Modal overlay containing URL and local install options. Click the backdrop to close."
+    },
+    "modal-close": {
+      "section": "Install options",
+      "label": "Close modal",
+      "type": "icon button",
+      "action": "Closes the Add Plugin modal."
+    },
+    "install-url-input": {
+      "section": "Install options",
+      "label": "Install from URL",
+      "type": "text input",
+      "action": "Accepts a URL to a plugin zip/archive. Press Enter or click Install to submit.",
+      "related": ["install-url-btn"]
+    },
+    "install-url-btn": {
+      "section": "Install options",
+      "label": "Install (URL)",
+      "type": "button",
+      "action": "Installs the plugin from the URL in the adjacent input.",
+      "related": ["install-url-input"]
+    },
+    "install-local-input": {
+      "section": "Install options",
+      "label": "Install from local path",
+      "type": "text input",
+      "action": "Accepts a local directory or zip path. Press Enter or click Install to submit.",
+      "related": ["install-local-btn"]
+    },
+    "install-local-btn": {
+      "section": "Install options",
+      "label": "Install (local)",
+      "type": "button",
+      "action": "Installs the plugin from the local path in the adjacent input.",
+      "related": ["install-local-input"]
+    },
+    "install-status": {
+      "section": "Install status",
+      "label": "Install status",
+      "type": "status text",
+      "action": "Shows installing, success, or error messages. The modal closes automatically after a successful install."
+    },
+    "ai-settings-form": {
+      "section": "Identity",
+      "label": "Provider editor form",
+      "type": "form",
+      "action": "Contains all provider fields. Submit saves the provider configuration."
+    },
+    "ai-settings-title": {
+      "section": "Identity",
+      "label": "Editor title",
+      "type": "heading",
+      "action": "Shows 'Configure provider' or 'Edit {Provider}'."
+    },
+    "ai-settings-subtitle": {
+      "section": "Identity",
+      "label": "Editor subtitle",
+      "type": "text",
+      "action": "Short description of the provider kind."
+    },
+    "ai-settings-close": {
+      "section": "Identity",
+      "label": "Close editor",
+      "type": "icon button",
+      "action": "Closes the provider editor without saving."
+    },
+    "settings-ai-preset-id": {
+      "section": "Identity",
+      "label": "Preset id (hidden)",
+      "type": "hidden input",
+      "action": "Stores the selected preset id used to pre-fill built-in provider fields."
+    },
+    "settings-ai-provider-type": {
+      "section": "Identity",
+      "label": "Provider type (hidden)",
+      "type": "hidden input",
+      "action": "Stores the internal provider type, e.g. 'openai-compatible'."
+    },
+    "provider-custom-fields": {
+      "section": "Identity",
+      "label": "Custom provider fields",
+      "type": "fieldset",
+      "action": "Shown only for custom providers. Contains name, id, and API type."
+    },
+    "settings-ai-name": {
+      "section": "Identity",
+      "label": "Provider name",
+      "type": "text input",
+      "action": "Display name for a custom provider."
+    },
+    "settings-ai-id": {
+      "section": "Identity",
+      "label": "Provider id / prefix",
+      "type": "text input",
+      "action": "Machine-friendly id for a custom provider. Read-only when editing."
+    },
+    "settings-ai-api": {
+      "section": "Identity",
+      "label": "API type",
+      "type": "select",
+      "action": "Protocol used by the provider: Chat completions, Responses, or Messages."
+    },
+    "settings-ai-base-url": {
+      "section": "Connection",
+      "label": "Base URL",
+      "type": "url input",
+      "action": "The provider's OpenAI-compatible or native base URL."
+    },
+    "settings-ai-api-key": {
+      "section": "Connection",
+      "label": "API key",
+      "type": "password input",
+      "action": "API key for the provider. Leave blank to keep a saved key. Placeholder indicates whether a key exists."
+    },
+    "settings-ai-model": {
+      "section": "Connection",
+      "label": "Default model",
+      "type": "text input",
+      "action": "Optional default model id. Can be left blank and chosen per turn."
+    },
+    "settings-ai-timeout": {
+      "section": "Runtime",
+      "label": "Timeout (seconds)",
+      "type": "number input",
+      "action": "Request timeout in seconds (1–600)."
+    },
+    "settings-ai-attempts": {
+      "section": "Runtime",
+      "label": "Attempts",
+      "type": "number input",
+      "action": "Maximum retry attempts for a single request (1–10)."
+    },
+    "settings-ai-weight": {
+      "section": "Runtime",
+      "label": "Weight",
+      "type": "number input",
+      "action": "Routing weight used when provider strategy is round-robin."
+    },
+    "settings-ai-enabled": {
+      "section": "Runtime",
+      "label": "Enabled",
+      "type": "checkbox",
+      "action": "Whether the provider is available for agent turns."
+    },
+    "settings-ai-key-state": {
+      "section": "Runtime",
+      "label": "Key state",
+      "type": "status text",
+      "action": "Indicates whether an API key is saved, optional, or missing."
+    },
+    "provider-modal-overlay": {
+      "section": "Identity",
+      "label": "Provider editor overlay",
+      "type": "overlay",
+      "action": "Clicking outside the provider editor closes it without saving."
+    },
+    "provider-delete-overlay": {
+      "section": "Confirmation",
+      "label": "Delete overlay",
+      "type": "overlay",
+      "action": "Clicking outside the delete provider dialog closes it."
+    },
+    "provider-delete-dialog": {
+      "section": "Confirmation",
+      "label": "Delete provider confirmation",
+      "type": "dialog",
+      "action": "Confirms removal of the provider and its saved credentials."
+    },
+    "provider-delete-title": {
+      "section": "Confirmation",
+      "label": "Dialog title",
+      "type": "heading",
+      "action": "Shows 'Delete {provider name}?' or 'Delete provider?'."
+    },
+    "provider-delete-copy": {
+      "section": "Confirmation",
+      "label": "Dialog description",
+      "type": "text",
+      "action": "Explains that the credential, imported models, and settings will be removed."
+    },
+    "provider-delete-close": {
+      "section": "Confirmation",
+      "label": "Close dialog",
+      "type": "icon button",
+      "action": "Closes the delete provider dialog."
+    },
+    "provider-delete-cancel": {
+      "section": "Confirmation",
+      "label": "Cancel",
+      "type": "button",
+      "action": "Closes the dialog without deleting."
+    },
+    "provider-delete-confirm": {
+      "section": "Confirmation",
+      "label": "Delete",
+      "type": "button",
+      "action": "Permanently deletes the provider after disabling the button and showing 'Deleting…'."
+    },
+    "context-menu": {
+      "section": "Plugin actions",
+      "label": "Context menu",
+      "type": "menu",
+      "action": "Floating menu with actions depending on what was right-clicked."
+    },
+    "ctx-cut": {
+      "section": "Edit actions",
+      "label": "Cut",
+      "type": "menu item",
+      "selector": "[data-action=\"cut\"].ctx-item",
+      "generated": true,
+      "action": "Cuts selected text in an input/textarea."
+    },
+    "ctx-copy": {
+      "section": "Edit actions",
+      "label": "Copy",
+      "type": "menu item",
+      "selector": "[data-action=\"copy\"].ctx-item",
+      "generated": true,
+      "action": "Copies selected text in an input/textarea."
+    },
+    "ctx-paste": {
+      "section": "Edit actions",
+      "label": "Paste",
+      "type": "menu item",
+      "selector": "[data-action=\"paste\"].ctx-item",
+      "generated": true,
+      "action": "Pastes clipboard text into an input/textarea."
+    },
+    "ctx-open": {
+      "section": "Plugin actions",
+      "label": "Open",
+      "type": "menu item",
+      "selector": "[data-action=\"open\"].ctx-item",
+      "generated": true,
+      "action": "Opens the plugin window for the selected plugin."
+    },
+    "ctx-start": {
+      "section": "Plugin actions",
+      "label": "Start",
+      "type": "menu item",
+      "selector": "[data-action=\"start\"].ctx-item",
+      "generated": true,
+      "action": "Starts the selected plugin's MCP process."
+    },
+    "ctx-stop": {
+      "section": "Plugin actions",
+      "label": "Force Stop",
+      "type": "menu item",
+      "selector": "[data-action=\"stop\"].ctx-item",
+      "generated": true,
+      "action": "Stops the selected plugin's MCP process."
+    },
+    "ctx-restart": {
+      "section": "Plugin actions",
+      "label": "Restart",
+      "type": "menu item",
+      "selector": "[data-action=\"restart\"].ctx-item",
+      "generated": true,
+      "action": "Restarts the selected plugin's MCP process."
+    },
+    "ctx-detail": {
+      "section": "Plugin actions",
+      "label": "Details",
+      "type": "menu item",
+      "selector": "[data-action=\"detail\"].ctx-item",
+      "generated": true,
+      "action": "Opens the plugin detail drawer for the selected plugin."
+    },
+    "ctx-uninstall": {
+      "section": "Plugin actions",
+      "label": "Uninstall",
+      "type": "menu item",
+      "selector": "[data-action=\"uninstall\"].ctx-item",
+      "generated": true,
+      "action": "Removes the selected plugin after a confirmation prompt."
+    }
+  }
+}

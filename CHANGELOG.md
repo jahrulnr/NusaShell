@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.26] - 2026-07-29
+
+### Added
+
+- Build-time UI docs scanner (`scripts/scan-ui-docs.mjs`) that parses `apps/desktop/src/renderer/index.html` and JS source files, validates them against `resources/agent/docs/ui-source/ui-map.json`, and generates `resources/agent/docs/ui/*.md`.
+- `resources/agent/docs/ui-source/ui-map.json` — human-maintained UI map describing all NusaShell launcher views, controls, interactions, and keyboard shortcuts.
+- `pnpm scan:ui-docs` script and `prebuild` hook to regenerate UI docs before every build.
+- `scripts/scan-ui-docs.test.mjs` unit tests and `MarkdownDocsIndex` integration test covering view/control extraction, validation, markdown rendering, and indexing under the `ui/` domain.
+
+### Changed
+
+- `AGENTS.md` now requires updating `resources/agent/docs/ui/*.md` whenever renderer source changes.
+- `docs/architecture/agent-runtime.md` and `resources/agent/prompts/mcp-tools.md` mention the generated UI docs corpus and guide agents to use `docs_search` for UI questions.
+- Refined agent prompts based on review: reduced `system.md` / `mcp-tools.md` redundancy, fixed `developer.md` cross-reference to `mcp-tools.md`, clarified meta-tools are always present while granted plugin tools expire at turn end, added over-discovery and ambiguous-plugin guardrails to `mcp-tools.md`, and added NusaShell runtime state guidance to `compact.md`.
+
+## [0.0.25] - 2026-07-29
+
+### Added
+- `DocsIndexPort` interface in `@nusashell/application` — `docs_search`, `docs_list`, and `docs_read` types and contract for agent-facing documentation tools.
+- `MarkdownDocsIndex` adapter in `@nusashell/infrastructure` — walks `docsRoot` for `*.md` files, chunks by second-level headings, builds a lexical keyword index, persists it to `docsIndexStorageRoot`, and exposes `search`, `listDocs`, and `readDoc`.
+- `docs_search`, `docs_list`, and `docs_read` shell-owned meta-tools in `McpAgentToolGateway` — returns structured envelopes with `ok`, `data`, and `meta` (`index_ready`, `data_is_untrusted`, `truncated`, pagination `next_offset`).
+- Documentation corpus seeded under `resources/agent/docs/` with `getting-started.md`, `plugins.md`, `agent.md`, `mcp-tools.md`, and `settings.md`.
+- `mcp-tools.md` prompt section explaining when and how to use `docs_search`, `docs_list`, and `docs_read`.
+- Unit tests for `MarkdownDocsIndex` covering index building, search ranking, list/read, chunk reads, not-found, rebuild, and missing root handling; plus `McpAgentToolGateway` tests for docs tool execution and not-configured behavior.
+
+### Changed
+- `McpAgentToolGateway` constructor accepts an optional `DocsIndexPort` dependency.
+- `container.ts` wires `MarkdownDocsIndex` with `docsRoot` and `docsIndexStorageRoot` options, passes it to `McpAgentToolGateway`, and triggers a lazy background index build.
+- `docs/architecture/progressive-mcp-tools.md` and `docs/architecture/agent-runtime.md` updated to document the documentation tool set and index behavior.
+
 ## [0.0.24] - 2026-07-29
 
 ### Added

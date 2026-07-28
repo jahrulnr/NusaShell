@@ -38,7 +38,7 @@ export function injectPrompts(
   }
 
   for (const message of messages) {
-    if (message.role === "system" || message.role === "developer") {
+    if (message.role === "system") {
       if (typeof message.content === "string" && message.content.startsWith("Conversation summary:")) {
         out.push(message);
       }

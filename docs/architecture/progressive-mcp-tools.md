@@ -6,7 +6,7 @@ and prompt-size limits.
 
 ## Initial tool set
 
-Every turn starts with seven shell-owned meta-tools:
+Every turn starts with ten shell-owned meta-tools:
 
 - `mcp_list` — list installed MCP plugins with runtime state and autostart.
 - `mcp_enable` — start one plugin MCP through `PluginRuntimeManager`.
@@ -21,6 +21,11 @@ Every turn starts with seven shell-owned meta-tools:
 - `mcp_context` — access non-tool MCP context through an explicit action:
   `list_prompts`, `get_prompt`, `search_resources`,
   `list_resource_templates`, `complete`, or `read_resource`.
+- `docs_search` — search the internal Markdown documentation corpus for
+  keyword-scored chunks.
+- `docs_list` — list all documents in the internal documentation corpus.
+- `docs_read` — read a full document, or a single chunk by `chunk_id`, with
+  optional `max_chars`/`offset` pagination.
 
 `tool_schema` is the bridge to execution: after discovery, the actual MCP tool
 is added to the next provider request and called through the normal typed

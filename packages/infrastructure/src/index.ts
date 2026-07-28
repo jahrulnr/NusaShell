@@ -18,4 +18,4 @@ export {
   type ModelRuntimePolicy,
   type TextToolCallParseResult,
 } from "./ai/index.js";
-export { FilesystemPromptLoader } from "./agent/index.js";
+export { FilesystemPromptLoader, MarkdownDocsIndex } from "./agent/index.js";

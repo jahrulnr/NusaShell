@@ -9,6 +9,7 @@ import {
   PluginInstaller,
   PluginSyncService,
   FilesystemPromptLoader,
+  MarkdownDocsIndex,
   createLogger,
   AgentProviderRegistry,
   StaticAgentProvider,
@@ -59,6 +60,8 @@ export interface ContainerOptions {
   readonly host?: string;
   readonly pluginsRoot?: string;
   readonly promptsRoot?: string;
+  readonly docsRoot?: string;
+  readonly docsIndexStorageRoot?: string;
   readonly dbPath?: string;
   readonly logLevel?: string;
   readonly loggerObserver?: LogObserver;
@@ -166,7 +169,14 @@ export function createContainer(options: ContainerOptions): Container {
     clock,
     logger,
   });
-  const agentToolGateway = new McpAgentToolGateway(runtimeManager);
+  const docsRoot = options.docsRoot ?? new URL("../../../resources/agent/docs", import.meta.url).pathname;
+  const docsIndexStorageRoot = options.docsIndexStorageRoot ?? new URL("../../../.nusashell/agent/docs-index", import.meta.url).pathname;
+  const docsIndex = new MarkdownDocsIndex(docsRoot, docsIndexStorageRoot);
+  void docsIndex.reindex().catch((err) => {
+    logger.warn({ err }, "Docs index initial build failed; will retry on demand");
+  });
+
+  const agentToolGateway = new McpAgentToolGateway(runtimeManager, docsIndex);
   const promptLoader = new FilesystemPromptLoader(
     options.promptsRoot ?? new URL("../../resources/agent/prompts", import.meta.url).pathname,
   );

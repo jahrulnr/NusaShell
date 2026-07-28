@@ -136,6 +136,29 @@ The compaction prompt (`compact.md`) replaces the previously hardcoded
 compaction instruction string in `AgentTurnRunner`. If the file is absent, the
 runner falls back to the built-in default.
 
+## Documentation tools
+
+The agent can search and read an internal Markdown corpus located in
+`resources/agent/docs/` through shell-owned meta-tools:
+
+- `docs_search` — lexical keyword search returning scored chunks.
+- `docs_list` — lightweight catalog of all indexed documents.
+- `docs_read` — full document or single chunk read, with `max_chars` and
+  `offset` pagination.
+
+`MarkdownDocsIndex` in the infrastructure layer walks `docsRoot`, builds an
+index JSON in `docsIndexStorageRoot`, and caches it in memory. The index is built
+lazily on first query if it is not already ready. The gateway returns structured
+envelopes (`{ ok, data, meta }`) with `meta.data_is_untrusted: true` so the model
+treats the returned text as reference material, not privileged instructions.
+
+The `ui/` subdirectory is generated from `resources/agent/docs/ui-source/ui-map.json`
+at build time by `pnpm scan:ui-docs` (also run as a `prebuild` hook). It
+contains one Markdown file per NusaShell view and describes the purpose of each
+view, how to open it, and every control or interaction within it. Agents should
+search this corpus first when the user asks how to navigate NusaShell or use a
+specific UI element.
+
 ## Stability boundary
 
 Tools, prompts, resources, resource templates, completion, and logging are the

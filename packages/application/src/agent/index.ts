@@ -13,6 +13,10 @@ export type {
   AgentToolGateway,
   AgentPrompt,
   PromptLoaderPort,
+  DocsHit,
+  DocSummary,
+  DocContent,
+  DocsIndexPort,
 } from "./ports/index.js";
 export {
   AgentTurnRunner,

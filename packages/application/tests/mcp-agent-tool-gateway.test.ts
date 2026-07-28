@@ -1,26 +1,29 @@
 import { describe, expect, it } from "vitest";
 import { McpAgentToolGateway } from "../src/index.js";
+import type { DocContent, DocsIndexPort, DocsHit, DocSummary } from "../src/index.js";
+
+const fakeRuntime = {
+  listPlugins: async () => [],
+  listTools: async () => [{ name: "createNote", description: "Create a note", inputSchema: { type: "object", properties: { text: { type: "string" } } } }],
+  startPlugin: async () => ({ pluginId: "com.example.notes", state: "running" }),
+  stopPlugin: async () => ({ pluginId: "com.example.notes", state: "idle" }),
+  callTool: async () => ({ ok: true }),
+  listPrompts: async () => [{ name: "daily", description: "Daily prompt" }],
+  getPrompt: async () => ({ messages: [{ role: "user", content: { type: "text", text: "Review today" } }] }),
+  listResources: async () => [{ uri: "notes://daily", name: "Daily notes", mimeType: "text/markdown" }],
+  listResourceTemplates: async () => [{ uriTemplate: "notes://{date}", name: "Notes by date", mimeType: "text/markdown" }],
+  complete: async () => ({ values: ["2026-07-29"], total: 1, hasMore: false }),
+  readResource: async () => ({ contents: [{ uri: "notes://daily", mimeType: "text/markdown", text: "# Today" }] }),
+};
 
 describe("McpAgentToolGateway", () => {
   it("exposes bounded MCP discovery and one prompt/resource context meta-tool", async () => {
-    const runtime = {
-      listPlugins: async () => [],
-      listTools: async () => [{ name: "createNote", description: "Create a note", inputSchema: { type: "object", properties: { text: { type: "string" } } } }],
-      startPlugin: async () => ({ pluginId: "com.example.notes", state: "running" }),
-      stopPlugin: async () => ({ pluginId: "com.example.notes", state: "idle" }),
-      callTool: async () => ({ ok: true }),
-      listPrompts: async () => [{ name: "daily", description: "Daily prompt" }],
-      getPrompt: async () => ({ messages: [{ role: "user", content: { type: "text", text: "Review today" } }] }),
-      listResources: async () => [{ uri: "notes://daily", name: "Daily notes", mimeType: "text/markdown" }],
-      listResourceTemplates: async () => [{ uriTemplate: "notes://{date}", name: "Notes by date", mimeType: "text/markdown" }],
-      complete: async () => ({ values: ["2026-07-29"], total: 1, hasMore: false }),
-      readResource: async () => ({ contents: [{ uri: "notes://daily", mimeType: "text/markdown", text: "# Today" }] }),
-    };
-    const gateway = new McpAgentToolGateway(runtime as never);
+    const gateway = new McpAgentToolGateway(fakeRuntime as never);
     gateway.beginTurn("turn-1");
 
     expect((await gateway.listTools([], "turn-1")).map((tool) => tool.name)).toEqual([
       "mcp_list", "mcp_enable", "mcp_disable", "tool_search", "tool_list", "tool_schema", "mcp_context",
+      "docs_search", "docs_list", "docs_read",
     ]);
     await expect(gateway.execute("tool_list", { pluginId: "com.example.notes" }, "call-tool-list", "turn-1")).resolves.toEqual([
       { name: "createNote", description: "Create a note" },
@@ -60,5 +63,78 @@ describe("McpAgentToolGateway", () => {
     await expect(gateway.execute(grant.name, { text: "hello" }, "call-3", "turn-2")).rejects.toThrow("outside the MCP allowlist");
     gateway.endTurn("turn-1");
     expect((await gateway.listTools([], "turn-1")).map((tool) => tool.name)).not.toContain(grant.name);
+  });
+
+  it("exposes docs_* meta-tools and returns envelope results", async () => {
+    const hits: DocsHit[] = [
+      { path: "getting-started.md", title: "Getting Started", heading: "Launcher", chunkId: "launcher", excerpt: "...launcher...", score: 2 },
+    ];
+    const summaries: DocSummary[] = [
+      { path: "getting-started.md", title: "Getting Started", headings: ["Launcher"], domain: "root" },
+    ];
+    const content: DocContent = {
+      path: "getting-started.md",
+      title: "Getting Started",
+      headings: ["Launcher"],
+      domain: "root",
+      text: "The launcher is a grid of icons.",
+      chunkId: "launcher",
+      chunk: "The launcher is a grid of icons.",
+    };
+    const fakeDocs: DocsIndexPort = {
+      usable: () => true,
+      reindex: async () => {},
+      search: async (_query: string, _topK: number) => hits,
+      listDocs: async () => summaries,
+      readDoc: async (path: string, _chunkId?: string) => (path === "getting-started.md" ? content : undefined),
+    };
+    const gateway = new McpAgentToolGateway(fakeRuntime as never, fakeDocs);
+    gateway.beginTurn("turn-docs");
+
+    expect((await gateway.listTools([], "turn-docs")).map((tool) => tool.name)).toContain("docs_search");
+
+    await expect(gateway.execute("docs_search", { query: "launcher" }, "call-search", "turn-docs")).resolves.toEqual({
+      ok: true,
+      data: { chunks: hits },
+      meta: { count: hits.length, truncated: false, index_ready: true, data_is_untrusted: true },
+    });
+
+    await expect(gateway.execute("docs_list", {}, "call-list", "turn-docs")).resolves.toEqual({
+      ok: true,
+      data: { documents: summaries },
+      meta: { count: summaries.length, truncated: false, index_ready: true, data_is_untrusted: true },
+    });
+
+    await expect(gateway.execute("docs_read", { path: "getting-started.md" }, "call-read", "turn-docs")).resolves.toEqual({
+      ok: true,
+      data: {
+        path: content.path,
+        title: content.title,
+        headings: content.headings,
+        domain: content.domain,
+        text: content.text,
+        chunk_id: content.chunkId,
+        has_more: false,
+        next_offset: undefined,
+      },
+      meta: { index_ready: true, data_is_untrusted: true },
+    });
+
+    await expect(gateway.execute("docs_read", { path: "missing.md" }, "call-read-missing", "turn-docs")).resolves.toEqual({
+      ok: false,
+      error: { code: "not_found", message: "Document not found in docs corpus" },
+      meta: { index_ready: true, data_is_untrusted: true },
+    });
+  });
+
+  it("returns docs_not_configured when no docs index is wired", async () => {
+    const gateway = new McpAgentToolGateway(fakeRuntime as never);
+    gateway.beginTurn("turn-1");
+
+    await expect(gateway.execute("docs_search", { query: "launcher" }, "call-search", "turn-1")).resolves.toEqual({
+      ok: false,
+      error: { code: "docs_not_configured", message: "Documentation index is not configured" },
+      meta: { index_ready: false },
+    });
   });
 });

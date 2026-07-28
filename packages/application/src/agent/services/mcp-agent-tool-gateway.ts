@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { PluginId } from "@nusashell/domain";
 import { ApplicationError } from "../../errors/application-error.js";
 import type { PluginRuntimeManager } from "../../plugin/services/plugin-runtime-manager.js";
+import type { DocsIndexPort } from "../ports/docs-index.port.js";
 import type { AgentToolDefinition } from "../ports/agent-provider.port.js";
 import type { AgentToolGateway } from "../ports/agent-tool-gateway.port.js";
 
@@ -22,7 +23,10 @@ export class McpAgentToolGateway implements AgentToolGateway {
   private readonly turnRoutes = new Map<string, Map<string, McpToolRoute>>();
   private readonly activeCalls = new Map<string, Map<string, string>>();
 
-  constructor(private readonly runtimeManager: PluginRuntimeManager) {}
+  constructor(
+    private readonly runtimeManager: PluginRuntimeManager,
+    private readonly docsIndex?: DocsIndexPort,
+  ) {}
 
   beginTurn(turnId: string): void {
     this.turnRoutes.set(turnId, new Map());
@@ -61,6 +65,19 @@ export class McpAgentToolGateway implements AgentToolGateway {
         argumentValue: stringSchema(),
         arguments: { type: "object", additionalProperties: { type: "string" } },
       }, ["pluginId", "action"]),
+      definition("docs_search", "Search the internal NusaShell documentation corpus (how-to, feature, and UI guidance)", {
+        query: stringSchema(),
+        top_k: { type: "integer", minimum: 1, maximum: 10, description: "Maximum number of chunks to return" },
+      }, ["query"]),
+      definition("docs_list", "List all documents in the internal NusaShell docs corpus", {
+        limit: { type: "integer", minimum: 1, maximum: 100, description: "Maximum number of documents" },
+      }),
+      definition("docs_read", "Read the full content of one internal NusaShell documentation document by path", {
+        path: stringSchema(),
+        chunk_id: { type: "string", description: "Chunk ID from a docs_search hit" },
+        max_chars: { type: "integer", minimum: 0, maximum: 20000, description: "Maximum characters to return; 0 means no limit" },
+        offset: { type: "integer", minimum: 0, description: "Character offset for pagination" },
+      }, ["path"]),
       ...[...routes.entries()].map(([name, route]) => ({
         name,
         ...(route.description ? { description: route.description } : {}),
@@ -78,6 +95,9 @@ export class McpAgentToolGateway implements AgentToolGateway {
       case "tool_search": return this.searchTools(args);
       case "tool_schema": return this.grantTool(args, turnId);
       case "mcp_context": return this.context(args);
+      case "docs_search": return this.execDocsSearch(args);
+      case "docs_list": return this.execDocsList(args);
+      case "docs_read": return this.execDocsRead(args);
       default: return this.callGrantedTool(name, args, requestId, turnId);
     }
   }
@@ -213,6 +233,80 @@ export class McpAgentToolGateway implements AgentToolGateway {
     }
     return routes;
   }
+
+  private async execDocsSearch(args: Readonly<Record<string, unknown>>): Promise<unknown> {
+    const index = this.docsIndex;
+    if (!index) return docsNotConfigured();
+    if (!index.usable()) return docsNotReady();
+    const query = requireString(args.query, "query");
+    const topK = clampInt(args.top_k, 5, 1, 10);
+    const hits = await index.search(query, topK);
+    return {
+      ok: true,
+      data: { chunks: hits },
+      meta: {
+        count: hits.length,
+        truncated: hits.length >= topK,
+        index_ready: true,
+        data_is_untrusted: true,
+      },
+    };
+  }
+
+  private async execDocsList(args: Readonly<Record<string, unknown>>): Promise<unknown> {
+    const index = this.docsIndex;
+    if (!index) return docsNotConfigured();
+    if (!index.usable()) return docsNotReady();
+    const limit = clampInt(args.limit, 50, 1, 100);
+    const documents = await index.listDocs();
+    const truncated = documents.length > limit;
+    const limited = documents.slice(0, limit);
+    return {
+      ok: true,
+      data: { documents: limited },
+      meta: {
+        count: limited.length,
+        truncated,
+        index_ready: true,
+        data_is_untrusted: true,
+      },
+    };
+  }
+
+  private async execDocsRead(args: Readonly<Record<string, unknown>>): Promise<unknown> {
+    const index = this.docsIndex;
+    if (!index) return docsNotConfigured();
+    if (!index.usable()) return docsNotReady();
+    const path = requireString(args.path, "path");
+    const chunkId = optionalString(args.chunk_id) || undefined;
+    const doc = await index.readDoc(path, chunkId);
+    if (!doc) {
+      return {
+        ok: false,
+        error: { code: "not_found", message: "Document not found in docs corpus" },
+        meta: { index_ready: true, data_is_untrusted: true },
+      };
+    }
+    const offset = clampInt(args.offset, 0, 0, 1_000_000);
+    const maxChars = clampInt(args.max_chars, 0, 0, 20_000);
+    const text = maxChars > 0 ? doc.text.slice(offset, offset + maxChars) : doc.text.slice(offset);
+    const fullEnd = offset + (maxChars > 0 ? maxChars : doc.text.length);
+    const hasMore = fullEnd < doc.text.length;
+    return {
+      ok: true,
+      data: {
+        path: doc.path,
+        title: doc.title,
+        headings: doc.headings,
+        domain: doc.domain,
+        text,
+        chunk_id: doc.chunkId,
+        has_more: hasMore,
+        next_offset: hasMore ? fullEnd : undefined,
+      },
+      meta: { index_ready: true, data_is_untrusted: true },
+    };
+  }
 }
 
 function definition(
@@ -251,4 +345,26 @@ function toProviderToolName(pluginId: string, toolName: string): string {
   const readableTool = toolName.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 20);
   const fingerprint = createHash("sha256").update(`${pluginId}\u0000${toolName}`).digest("hex").slice(0, 12);
   return `mcp_${readablePlugin}_${readableTool}_${fingerprint}`;
+}
+function docsNotConfigured(): unknown {
+  return {
+    ok: false,
+    error: { code: "docs_not_configured", message: "Documentation index is not configured" },
+    meta: { index_ready: false },
+  };
+}
+function docsNotReady(): unknown {
+  return {
+    ok: false,
+    error: { code: "docs_index_not_ready", message: "Documentation index is not ready" },
+    meta: { index_ready: false },
+  };
+}
+function clampInt(value: unknown, fallback: number, min: number, max: number): number {
+  let parsed: number;
+  if (typeof value === "number") parsed = value;
+  else if (typeof value === "string") parsed = Number.parseInt(value, 10);
+  else parsed = NaN;
+  if (!Number.isFinite(parsed) || Number.isNaN(parsed)) parsed = fallback;
+  return Math.max(min, Math.min(max, parsed));
 }

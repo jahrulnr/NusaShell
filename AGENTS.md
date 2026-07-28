@@ -94,6 +94,14 @@ When changing launcher or plugin UI:
   if behavior/visual contracts changed.
 - Keep product UX notes in `docs/blueprint.md` §4 when window modes or launcher
   interactions change.
+- Update `resources/agent/docs/ui-source/ui-map.json` and regenerate
+  `resources/agent/docs/ui/*.md` by running `pnpm scan:ui-docs` whenever a
+  `data-view`, view control, button, modal, or interaction in
+  `apps/desktop/src/renderer/` is added, renamed, removed, or changed.
+  The `prebuild` hook runs the scanner and fails if any view is undocumented
+  or a mapped control ID is missing from source.
+- Do **not** edit `resources/agent/docs/ui/*.md` files manually; they are
+  generated from the UI map.
 - Do **not** invent a parallel `resources/webchat/docs/` tree - that path is not
   part of this project.
 

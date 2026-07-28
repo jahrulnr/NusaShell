@@ -1,0 +1,21 @@
+# Plugins
+
+List of installed plugins with their live MCP process state in a compact table.
+
+**How to open:** Click the Plugins item in the left sidebar.
+
+## Plugin table
+
+Shows plugin icon, name, plugin id, version, and current state. Click any row to open the plugin detail drawer.
+
+- **Installed plugin table** (`#plugin-table`):
+  - Section: Plugin table
+  - Type: list/table
+  - Action: Container for plugin rows. Renders an empty message when no plugins are installed.
+  - Related: Plugin row (`.plugin-row`)
+
+- **Plugin row** (`.plugin-row`):
+  - Section: Plugin table
+  - Type: button
+  - Action: Click to open the plugin detail drawer. Shows icon, name, plugin id, version, and state.
+  - Related: plugin-detail (`#plugin-detail`)

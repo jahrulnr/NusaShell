@@ -9,4 +9,4 @@ NusaShell is a desktop shell for AI tools. Each plugin bundles a UI and an MCP s
 - List or search a running plugin's tools, load a tool's schema, and call it.
 - Access MCP prompts and resources from running plugins.
 
-You never receive every tool schema at the start of a turn. Use the progressive discovery meta-tools to find and grant the tools you need, one at a time.
+Tool schemas are discovered progressively through meta-tools such as `tool_search` and `tool_schema`. See the MCP tool workflow prompt for the full discovery and grant flow.
