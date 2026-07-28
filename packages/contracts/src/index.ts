@@ -62,11 +62,15 @@ export {
 
 export {
   EventSchema,
+  PluginInstalledEventSchema,
+  PluginUninstalledEventSchema,
   PluginStartedEventSchema,
   PluginStoppedEventSchema,
   PluginCrashedEventSchema,
   PluginStateChangedEventSchema,
   ToolCallCompletedEventSchema,
+  type PluginInstalledEvent,
+  type PluginUninstalledEvent,
   type PluginStartedEvent,
   type PluginStoppedEvent,
   type PluginCrashedEvent,

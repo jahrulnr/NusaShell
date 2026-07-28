@@ -8,6 +8,27 @@ const PluginStateSchema = z.enum([
   "crashed",
 ]);
 
+export const PluginInstalledEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("plugin.installed"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    pluginId: z.string(),
+    version: z.string(),
+    timestamp: z.string(),
+  }),
+});
+
+export const PluginUninstalledEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("plugin.uninstalled"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    pluginId: z.string(),
+    timestamp: z.string(),
+  }),
+});
+
 export const PluginStartedEventSchema = z.object({
   kind: z.literal("event"),
   event: z.literal("plugin.started"),
@@ -69,6 +90,8 @@ export const ToolCallCompletedEventSchema = z.object({
 });
 
 export const EventSchema = z.discriminatedUnion("event", [
+  PluginInstalledEventSchema,
+  PluginUninstalledEventSchema,
   PluginStartedEventSchema,
   PluginStoppedEventSchema,
   PluginCrashedEventSchema,
@@ -76,6 +99,8 @@ export const EventSchema = z.discriminatedUnion("event", [
   ToolCallCompletedEventSchema,
 ]);
 
+export type PluginInstalledEvent = z.infer<typeof PluginInstalledEventSchema>;
+export type PluginUninstalledEvent = z.infer<typeof PluginUninstalledEventSchema>;
 export type PluginStartedEvent = z.infer<typeof PluginStartedEventSchema>;
 export type PluginStoppedEvent = z.infer<typeof PluginStoppedEventSchema>;
 export type PluginCrashedEvent = z.infer<typeof PluginCrashedEventSchema>;

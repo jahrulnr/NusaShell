@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   EventSchema,
+  PluginInstalledEventSchema,
+  PluginUninstalledEventSchema,
   PluginStartedEventSchema,
   PluginStoppedEventSchema,
   PluginCrashedEventSchema,
@@ -9,6 +11,66 @@ import {
 } from "../src/index.js";
 
 describe("Event schemas", () => {
+  it("parses plugin.installed event", () => {
+    const result = PluginInstalledEventSchema.safeParse({
+      kind: "event",
+      event: "plugin.installed",
+      sequence: 1,
+      payload: {
+        pluginId: "com.example.notes",
+        version: "1.0.0",
+        timestamp: "2026-01-01T00:00:00Z",
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("parses plugin.uninstalled event", () => {
+    const result = PluginUninstalledEventSchema.safeParse({
+      kind: "event",
+      event: "plugin.uninstalled",
+      sequence: 1,
+      payload: {
+        pluginId: "com.example.notes",
+        timestamp: "2026-01-01T00:00:00Z",
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("parses plugin.installed via EventSchema discriminated union", () => {
+    const result = EventSchema.safeParse({
+      kind: "event",
+      event: "plugin.installed",
+      sequence: 1,
+      payload: {
+        pluginId: "com.example.notes",
+        version: "1.0.0",
+        timestamp: "2026-01-01T00:00:00Z",
+      },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.event).toBe("plugin.installed");
+    }
+  });
+
+  it("parses plugin.uninstalled via EventSchema discriminated union", () => {
+    const result = EventSchema.safeParse({
+      kind: "event",
+      event: "plugin.uninstalled",
+      sequence: 1,
+      payload: {
+        pluginId: "com.example.notes",
+        timestamp: "2026-01-01T00:00:00Z",
+      },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.event).toBe("plugin.uninstalled");
+    }
+  });
+
   it("parses plugin.started event", () => {
     const result = PluginStartedEventSchema.safeParse({
       kind: "event",

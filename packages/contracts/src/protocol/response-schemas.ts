@@ -21,6 +21,7 @@ export const PluginStopResultSchema = z.object({
 export const PluginInstallResultSchema = z.object({
   pluginId: z.string(),
   installPath: z.string(),
+  version: z.string(),
 });
 
 export const PluginUninstallResultSchema = z.object({

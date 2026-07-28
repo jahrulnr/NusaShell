@@ -48,6 +48,8 @@ export type ResponseEnvelope<TResult = unknown> =
   | ErrorResponseEnvelope;
 
 export type EventType =
+  | "plugin.installed"
+  | "plugin.uninstalled"
   | "plugin.started"
   | "plugin.stopped"
   | "plugin.crashed"

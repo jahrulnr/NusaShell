@@ -4,8 +4,7 @@ import type { EventDispatcher } from "../../../events/event-dispatcher.js";
 import type { ClockPort } from "../../../plugin/ports/clock.port.js";
 import type { InstallPluginCommand } from "./install-plugin.command.js";
 import type { InstallPluginResult } from "./install-plugin.result.js";
-import { ApplicationError } from "../../../errors/application-error.js";
-import { PluginId, PluginInstalledEvent } from "@nusashell/domain";
+import { PluginId, PluginVersion, PluginInstalledEvent } from "@nusashell/domain";
 
 export class InstallPluginHandler
   implements CommandHandler<InstallPluginCommand, InstallPluginResult>
@@ -24,11 +23,14 @@ export class InstallPluginHandler
 
     const idResult = PluginId.create(result.pluginId);
     if (idResult.ok) {
-      this.eventDispatcher.dispatch(
-        PluginInstalledEvent.create(idResult.value, this.clock.now()),
-      );
+      const versionResult = PluginVersion.create(result.version);
+      if (versionResult.ok) {
+        this.eventDispatcher.dispatch(
+          PluginInstalledEvent.create(idResult.value, versionResult.value, this.clock.now()),
+        );
+      }
     }
 
-    return { pluginId: result.pluginId, installPath: result.installPath };
+    return { pluginId: result.pluginId, installPath: result.installPath, version: result.version };
   }
 }

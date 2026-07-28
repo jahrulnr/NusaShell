@@ -17,7 +17,7 @@ export class PluginInstaller implements PluginInstallerPort {
     private readonly logger?: Logger,
   ) {}
 
-  async installFromUrl(url: string): Promise<{ installPath: string; pluginId: string }> {
+  async installFromUrl(url: string): Promise<{ installPath: string; pluginId: string; version: string }> {
     const tmpDir = join(tmpdir(), `nusashell-plugin-${randomBytes(8).toString("hex")}`);
     await mkdir(tmpDir, { recursive: true });
 
@@ -38,7 +38,7 @@ export class PluginInstaller implements PluginInstallerPort {
     }
   }
 
-  async installFromPath(localPath: string): Promise<{ installPath: string; pluginId: string }> {
+  async installFromPath(localPath: string): Promise<{ installPath: string; pluginId: string; version: string }> {
     const info = await stat(localPath).catch(() => null);
     if (!info) {
       throw new Error(`Path not found: ${localPath}`);
@@ -67,7 +67,7 @@ export class PluginInstaller implements PluginInstallerPort {
     await rm(pluginDir, { recursive: true, force: true });
   }
 
-  private async installFromArchive(archivePath: string, workDir: string): Promise<{ installPath: string; pluginId: string }> {
+  private async installFromArchive(archivePath: string, workDir: string): Promise<{ installPath: string; pluginId: string; version: string }> {
     const ext = extname(archivePath).toLowerCase();
     const isTar = ext === ".gz" || ext === ".tgz" || archivePath.endsWith(".tar.gz");
     const isZip = ext === ".zip";
@@ -90,7 +90,7 @@ export class PluginInstaller implements PluginInstallerPort {
     return await this.installFromDirectory(pluginDir);
   }
 
-  private async installFromDirectory(dir: string): Promise<{ installPath: string; pluginId: string }> {
+  private async installFromDirectory(dir: string): Promise<{ installPath: string; pluginId: string; version: string }> {
     const manifestPath = join(dir, "manifest.json");
     const raw = await readFile(manifestPath, "utf-8");
     const parsedJson: unknown = JSON.parse(raw);
@@ -100,6 +100,7 @@ export class PluginInstaller implements PluginInstallerPort {
     }
     const manifest = schemaResult.data;
     const pluginId = manifest.id;
+    const version = manifest.version;
 
     const destDir = join(this.pluginsRoot, pluginId);
     const exists = await access(destDir).then(() => true).catch(() => false);
@@ -111,8 +112,8 @@ export class PluginInstaller implements PluginInstallerPort {
     await mkdir(join(this.pluginsRoot), { recursive: true });
     await this.copyDir(dir, destDir);
 
-    this.logger?.info({ pluginId, destDir }, "Plugin installed successfully");
-    return { installPath: destDir, pluginId };
+    this.logger?.info({ pluginId, destDir, version }, "Plugin installed successfully");
+    return { installPath: destDir, pluginId, version };
   }
 
   private async findPluginDir(root: string): Promise<string> {

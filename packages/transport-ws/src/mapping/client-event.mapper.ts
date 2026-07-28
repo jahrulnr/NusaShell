@@ -1,5 +1,7 @@
 import type { DomainEvent } from "@nusashell/domain";
 import {
+  PluginInstalledEvent,
+  PluginUninstalledEvent,
   PluginStartedEvent,
   PluginStoppedEvent,
   PluginCrashedEvent,
@@ -12,6 +14,33 @@ export function mapDomainEvent(event: DomainEvent, sequence: number): EventEnvel
   const timestamp = event.occurredAt.toISOString();
 
   switch (event.type) {
+    case "plugin.installed": {
+      const e = event as PluginInstalledEvent;
+      return {
+        kind: "event",
+        event: "plugin.installed",
+        sequence,
+        payload: {
+          pluginId: e.aggregateId,
+          version: e.version,
+          timestamp,
+        },
+      };
+    }
+
+    case "plugin.uninstalled": {
+      const e = event as PluginUninstalledEvent;
+      return {
+        kind: "event",
+        event: "plugin.uninstalled",
+        sequence,
+        payload: {
+          pluginId: e.aggregateId,
+          timestamp,
+        },
+      };
+    }
+
     case "plugin.started": {
       const e = event as PluginStartedEvent;
       return {

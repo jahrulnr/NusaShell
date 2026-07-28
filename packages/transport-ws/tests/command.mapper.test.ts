@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { mapToCommand } from "../src/mapping/command.mapper.js";
 import { mapToQuery } from "../src/mapping/query.mapper.js";
 import type { ParsedRequest } from "@nusashell/contracts";
+import type { InstallPluginCommand } from "@nusashell/application";
+import type { UninstallPluginCommand } from "@nusashell/application";
 
 function makeRequest(method: string, payload: Record<string, unknown>): ParsedRequest {
   return {
@@ -41,6 +43,44 @@ describe("mapToCommand", () => {
     expect(result.kind).toBe("command");
     if (result.kind === "command") {
       expect(result.command.kind).toBe("call-tool");
+    }
+  });
+
+  it("maps plugin.install (url) to InstallPluginCommand", () => {
+    const result = mapToCommand(
+      makeRequest("plugin.install", { source: "url", path: "https://example.com/plugin.zip" }),
+    );
+    expect(result.kind).toBe("command");
+    if (result.kind === "command") {
+      expect(result.command.kind).toBe("install-plugin");
+      const cmd = result.command as InstallPluginCommand;
+      expect(cmd.source).toBe("url");
+      expect(cmd.path).toBe("https://example.com/plugin.zip");
+    }
+  });
+
+  it("maps plugin.install (local) to InstallPluginCommand", () => {
+    const result = mapToCommand(
+      makeRequest("plugin.install", { source: "local", path: "/home/user/plugin.zip" }),
+    );
+    expect(result.kind).toBe("command");
+    if (result.kind === "command") {
+      expect(result.command.kind).toBe("install-plugin");
+      const cmd = result.command as InstallPluginCommand;
+      expect(cmd.source).toBe("local");
+      expect(cmd.path).toBe("/home/user/plugin.zip");
+    }
+  });
+
+  it("maps plugin.uninstall to UninstallPluginCommand", () => {
+    const result = mapToCommand(
+      makeRequest("plugin.uninstall", { pluginId: "com.example.notes" }),
+    );
+    expect(result.kind).toBe("command");
+    if (result.kind === "command") {
+      expect(result.command.kind).toBe("uninstall-plugin");
+      const cmd = result.command as UninstallPluginCommand;
+      expect(cmd.pluginId).toBe("com.example.notes");
     }
   });
 
