@@ -42,19 +42,18 @@
       <input type="text" placeholder="Search apps..." id="search-input" />
     </div>
 
-    <div class="titlebar-spacer"></div>
+    <div class="titlebar-actions">
+      <div class="top-actions">
+        <button class="icon-btn" aria-label="Settings" id="nav-settings-btn">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><path d="M19.4 13a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V19.4a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 17.76a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.64 13a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.64 7a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 3.13 1.7 1.7 0 0 0 10 1.6V1.51a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 3.13a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.36 7a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z" stroke="currentColor" stroke-width="1.2"/></svg>
+        </button>
+      </div>
 
-    <div class="top-actions">
-      <button class="icon-btn" aria-label="Settings" id="nav-settings-btn">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><path d="M19.4 13a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V19.4a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 17.76a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.64 13a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.64 7a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 3.13 1.7 1.7 0 0 0 10 1.6V1.51a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 3.13a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.36 7a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z" stroke="currentColor" stroke-width="1.2"/></svg>
-      </button>
-      <div class="avatar">JR</div>
-    </div>
-
-    <div class="window-controls">
-      <button class="wc" id="window-minimize" aria-label="Minimize"><svg viewBox="0 0 12 12" width="11" height="11"><rect x="1" y="5.5" width="10" height="1.4" fill="currentColor"/></svg></button>
-      <button class="wc" id="window-maximize" aria-label="Maximize"><svg viewBox="0 0 12 12" width="10" height="10"><rect x="1.2" y="1.2" width="9.6" height="9.6" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button>
-      <button class="wc wc-close" id="window-close" aria-label="Close"><svg viewBox="0 0 12 12" width="11" height="11"><path d="M1.5 1.5L10.5 10.5M10.5 1.5L1.5 10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
+      <div class="window-controls">
+        <button class="wc" id="window-minimize" aria-label="Minimize"><svg viewBox="0 0 12 12" width="11" height="11"><rect x="1" y="5.5" width="10" height="1.4" fill="currentColor"/></svg></button>
+        <button class="wc" id="window-maximize" aria-label="Maximize"><svg viewBox="0 0 12 12" width="10" height="10"><rect x="1.2" y="1.2" width="9.6" height="9.6" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button>
+        <button class="wc wc-close" id="window-close" aria-label="Close"><svg viewBox="0 0 12 12" width="11" height="11"><path d="M1.5 1.5L10.5 10.5M10.5 1.5L1.5 10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
+      </div>
     </div>
   </div>
 
@@ -67,22 +66,13 @@
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M3 11l9-8 9 8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 10v10h14V10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
           Home
         </a>
-        <a class="nav-item" data-view="installed" data-nav>
+        <a class="nav-item" data-view="plugins" data-nav>
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/></svg>
-          Installed
+          Plugins
         </a>
-        <a class="nav-item" data-view="running" data-nav>
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/><path d="M12 7v5l3.5 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
-          Running
-        </a>
-        <a class="nav-item" data-view="activity" data-nav>
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M3 12h4l3 8 4-16 3 8h4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          Activity
-          <span class="nav-badge" id="activity-badge">0</span>
-        </a>
-        <a class="nav-item" data-view="settings" data-nav>
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/><path d="M19.4 13a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V19.4a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 17.76a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.64 13a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.64 7a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 3.13 1.7 1.7 0 0 0 10 1.6V1.51a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 3.13a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.36 7a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z" stroke="currentColor" stroke-width="1.2"/></svg>
-          Settings
+        <a class="nav-item" data-view="logs" data-nav>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M4 5h16M4 12h10M4 19h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="17" cy="12" r="1.5" fill="currentColor"/></svg>
+          Logs
         </a>
       </nav>
 
@@ -128,43 +118,31 @@
         </div>
       </section>
 
-      <!-- ===== View: Installed ===== -->
-      <section class="view" data-view="installed">
-        <h1 class="page-title">Installed Plugins</h1>
-        <p class="subtitle">Manage all installed plugins on this system.</p>
+      <!-- ===== View: Plugins ===== -->
+      <section class="view" data-view="plugins">
+        <h1 class="page-title">Plugins</h1>
+        <p class="subtitle">Installed plugins and their live MCP process state.</p>
         <div class="plugin-table" id="plugin-table"></div>
       </section>
 
-      <!-- ===== View: Running ===== -->
-      <section class="view" data-view="running">
-        <h1 class="page-title">Running Processes</h1>
-        <p class="subtitle">Plugins with active MCP processes.</p>
-        <div class="running-list" id="running-list"></div>
-      </section>
-
-      <!-- ===== View: Activity (event log) ===== -->
-      <section class="view" data-view="activity">
-        <div class="activity-header">
+      <!-- ===== View: Central log tail ===== -->
+      <section class="view" data-view="logs">
+        <div class="log-header">
           <div>
-            <h1 class="page-title">Activity Feed</h1>
-            <p class="subtitle">Live events from the backend.</p>
+            <h1 class="page-title">Logs</h1>
+            <p class="subtitle">Live tail from the renderer, Electron, IPC, backend, and MCP processes.</p>
           </div>
-          <div class="subscribe-indicator">
-            <span class="status-dot" id="sub-dot" style="background:var(--text-faint);box-shadow:none"></span>
-            <span id="sub-label">Not subscribed</span>
-          </div>
+          <span class="log-count" id="log-count">0 / 1000</span>
         </div>
-        <div class="event-filters">
-          <button class="chip active" data-event-filter="all">All</button>
-          <button class="chip" data-event-filter="plugin.started">Started</button>
-          <button class="chip" data-event-filter="plugin.stopped">Stopped</button>
-          <button class="chip" data-event-filter="plugin.crashed">Crashed</button>
-          <button class="chip" data-event-filter="plugin.state_changed">State Changed</button>
-          <button class="chip" data-event-filter="tool.call_completed">Tool Calls</button>
-          <button class="chip" data-event-filter="plugin.installed">Installed</button>
-          <button class="chip" data-event-filter="plugin.uninstalled">Uninstalled</button>
+        <div class="log-filters" aria-label="Filter logs by source">
+          <button class="chip active" data-log-source="all">All</button>
+          <button class="chip" data-log-source="renderer">Frontend</button>
+          <button class="chip" data-log-source="main">Electron</button>
+          <button class="chip" data-log-source="ipc">IPC</button>
+          <button class="chip" data-log-source="backend">Backend</button>
+          <button class="chip" data-log-source="mcp">MCP</button>
         </div>
-        <div class="event-timeline" id="event-timeline"></div>
+        <div class="log-tail" id="log-tail" role="log" aria-live="polite"></div>
       </section>
 
       <!-- ===== View: Settings ===== -->

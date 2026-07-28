@@ -345,6 +345,8 @@ live state stays in `PluginRuntimeManager` (backend).
 - Long-press / right-click → context menu: **Open, Force Stop, Uninstall, Settings**
 - Search bar to filter when many plugins are installed
 - `➕ Install New` → file picker (later: marketplace browser)
+- Launcher navigation is **Home**, **Plugins**, and **Logs**. The Plugins view combines installed metadata with each plugin's live MCP state; Settings opens only from the top-bar gear.
+- Logs is a shell-owned live tail for renderer, Electron, IPC, backend, and MCP output. It retains at most 1,000 entries and must redact credential-like values before rendering.
 
 ### 4.2 Window Management
 

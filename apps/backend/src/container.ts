@@ -10,6 +10,7 @@ import {
   PluginSyncService,
   createLogger,
   type Logger,
+  type LogObserver,
 } from "@nusashell/infrastructure";
 import type { PluginRepositoryPort } from "@nusashell/application";
 import {
@@ -43,6 +44,7 @@ export interface ContainerOptions {
   readonly pluginsRoot?: string;
   readonly dbPath?: string;
   readonly logLevel?: string;
+  readonly loggerObserver?: LogObserver;
 }
 
 export interface Container {
@@ -60,7 +62,7 @@ export interface Container {
 
 export function createContainer(options: ContainerOptions): Container {
   const clock = new SystemClock();
-  const logger = createLogger(options.logLevel ?? "info");
+  const logger = createLogger(options.logLevel ?? "info", options.loggerObserver);
 
   let pluginRepository: PluginRepositoryPort;
   let db: SqliteDatabase | undefined;

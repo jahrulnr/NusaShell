@@ -6,6 +6,8 @@ const isDev = process.argv.includes("--dev");
 const RENDERER_DIST = join(__dirname, "..", "renderer");
 const PRELOAD_PATH = join(__dirname, "preload.cjs");
 
+type WindowLog = (level: "debug" | "info", message: string) => void;
+
 let launcherWindow: BrowserWindow | null = null;
 const pluginWindows = new Map<string, BrowserWindow>();
 
@@ -120,12 +122,14 @@ export function closeAllPluginWindows(): void {
   pluginWindows.clear();
 }
 
-export function registerWindowIpc(): void {
+export function registerWindowIpc(log?: WindowLog): void {
   ipcMain.handle("window:minimize", (event) => {
+    log?.("debug", "window.minimize");
     BrowserWindow.fromWebContents(event.sender)?.minimize();
   });
 
   ipcMain.handle("window:toggle-maximize", (event) => {
+    log?.("debug", "window.toggle-maximize");
     const window = BrowserWindow.fromWebContents(event.sender);
     if (!window) return false;
 
@@ -139,14 +143,17 @@ export function registerWindowIpc(): void {
   });
 
   ipcMain.handle("window:close", (event) => {
+    log?.("debug", "window.close");
     BrowserWindow.fromWebContents(event.sender)?.close();
   });
 
   ipcMain.handle("window:open-plugin", async (_event, pluginId: string, name: string, icon: string, installPath: string, windowMode?: string) => {
+    log?.("info", `window.open-plugin ${pluginId}`);
     await openPluginWindow(pluginId, name, icon, installPath, windowMode);
   });
 
   ipcMain.handle("window:close-plugin", (_event, pluginId: string) => {
+    log?.("info", `window.close-plugin ${pluginId}`);
     closePluginWindow(pluginId);
   });
 }

@@ -1,1 +1,1 @@
-export { createLogger, type Logger } from "./logger.js";
+export { createLogger, type Logger, type LogObserver, type LogRecord } from "./logger.js";

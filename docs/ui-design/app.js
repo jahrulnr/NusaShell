@@ -368,6 +368,7 @@ document.addEventListener("DOMContentLoaded", () => {
   renderAppGrid(); renderInstalledTable(); renderRunningList(); renderEventTimeline(); updateActivityBadge();
 
   $$("[data-nav]").forEach(item => item.addEventListener("click", () => switchView(item.dataset.view)));
+  $("#nav-settings-btn").addEventListener("click", () => switchView("settings"));
 
   $$("[data-tab]").forEach(tab => tab.addEventListener("click", () => {
     $$("[data-tab]").forEach(t => t.classList.remove("active"));

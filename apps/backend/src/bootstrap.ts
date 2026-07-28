@@ -1,9 +1,11 @@
 import { createContainer, type Container } from "./container.js";
 import { ShutdownCoordinator } from "./shutdown.js";
 import { loadConfig, type AppConfig } from "@nusashell/application";
+import type { LogObserver } from "@nusashell/infrastructure";
 
 export interface BootstrapOptions {
   readonly config?: Partial<AppConfig>;
+  readonly loggerObserver?: LogObserver;
 }
 
 export interface BootstrapResult {
@@ -22,6 +24,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     pluginsRoot: config.pluginsRoot,
     dbPath: config.dbPath,
     logLevel: config.logLevel,
+    ...(options.loggerObserver ? { loggerObserver: options.loggerObserver } : {}),
   });
   const shutdown = new ShutdownCoordinator(container);
 

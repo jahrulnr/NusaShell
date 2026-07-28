@@ -42,8 +42,6 @@
       <input type="text" placeholder="Search apps..." />
     </div>
 
-    <div class="titlebar-spacer"></div>
-
     <div class="top-actions">
       <button class="icon-btn" aria-label="Mail">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M3 7l9 6 9-6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -53,7 +51,7 @@
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
         <span class="dot dot-green">1</span>
       </button>
-      <button class="icon-btn" aria-label="Settings">
+      <button class="icon-btn" id="nav-settings-btn" aria-label="Settings">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><path d="M19.4 13a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V19.4a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 17.76a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.64 13a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.64 7a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 3.13 1.7 1.7 0 0 0 10 1.6V1.51a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 3.13a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.36 7a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z" stroke="currentColor" stroke-width="1.2"/></svg>
       </button>
       <div class="avatar">JR</div>
@@ -75,22 +73,22 @@
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M3 11l9-8 9 8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 10v10h14V10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
           Home
         </a>
-        <a class="nav-item" data-view="installed" data-nav>
+        <a class="nav-item" data-view="plugins" data-nav>
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/></svg>
-          Installed
+          Plugins
         </a>
-        <a class="nav-item" data-view="running" data-nav>
+        <a class="nav-item" data-view="settings" data-nav hidden>
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/><path d="M12 7v5l3.5 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
-          Running
+          Settings
         </a>
-        <a class="nav-item" data-view="activity" data-nav>
+        <a class="nav-item" data-view="logs" data-nav>
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M3 12h4l3 8 4-16 3 8h4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          Activity
+          Logs
           <span class="nav-badge" id="activity-badge">3</span>
         </a>
-        <a class="nav-item" data-view="settings" data-nav>
+        <a class="nav-item" data-view="plugins" data-nav hidden>
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/><path d="M19.4 13a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V19.4a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 17.76a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.64 13a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.64 7a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 3.13 1.7 1.7 0 0 0 10 1.6V1.51a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 3.13a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.36 7a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z" stroke="currentColor" stroke-width="1.2"/></svg>
-          Settings
+          Plugins
         </a>
       </nav>
 
@@ -133,26 +131,26 @@
         <div class="app-grid" id="app-grid"></div>
       </section>
 
-      <!-- ===== View: Installed ===== -->
-      <section class="view" data-view="installed">
-        <h1 class="page-title">Installed Plugins</h1>
-        <p class="subtitle">Manage all installed plugins on this system.</p>
+      <!-- ===== View: Plugins ===== -->
+      <section class="view" data-view="plugins">
+        <h1 class="page-title">Plugins</h1>
+        <p class="subtitle">Installed plugins and their live MCP process state.</p>
         <div class="plugin-table" id="plugin-table"></div>
       </section>
 
-      <!-- ===== View: Running ===== -->
-      <section class="view" data-view="running">
-        <h1 class="page-title">Running Processes</h1>
+      <!-- ===== Running section within Plugins ===== -->
+      <section class="view" data-view="plugins">
+        <h2 class="page-title" style="font-size:16px">Running now</h2>
         <p class="subtitle">Plugins with active MCP processes.</p>
         <div class="running-list" id="running-list"></div>
       </section>
 
-      <!-- ===== View: Activity (event log) ===== -->
-      <section class="view" data-view="activity">
+      <!-- ===== View: Central log tail ===== -->
+      <section class="view" data-view="logs">
         <div class="activity-header">
           <div>
-            <h1 class="page-title">Activity Feed</h1>
-            <p class="subtitle">Live events from the backend (subscribed to all event types).</p>
+            <h1 class="page-title">Logs</h1>
+            <p class="subtitle">Live tail from the renderer, Electron, IPC, backend, and MCP processes.</p>
           </div>
           <div class="subscribe-indicator">
             <span class="status-dot"></span>

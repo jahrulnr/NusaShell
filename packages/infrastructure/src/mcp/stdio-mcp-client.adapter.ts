@@ -3,6 +3,12 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import type { McpClientPort, ToolDescriptor } from "@nusashell/application";
 import type { Logger } from "pino";
 
+function redactMcpLog(message: string): string {
+  return message
+    .replace(/([?&](?:token|password|secret|api[_-]?key|authorization)=)[^&\s]+/gi, "$1[REDACTED]")
+    .replace(/((?:token|password|secret|api[_-]?key|authorization)["']?\s*[:=]\s*["']?)[^,\s}"']+/gi, "$1[REDACTED]");
+}
+
 export class StdioMcpClient implements McpClientPort {
   private client: Client | null = null;
   private transport: StdioClientTransport | null = null;
@@ -30,7 +36,13 @@ export class StdioMcpClient implements McpClientPort {
       command: this.command,
       args: [...this.args],
       env: { ...process.env, ...this.env } as Record<string, string>,
+      stderr: "pipe",
       ...(this.cwd !== undefined ? { cwd: this.cwd } : {}),
+    });
+
+    this.transport.stderr?.on("data", (chunk: Buffer | string) => {
+      const message = String(chunk).trim();
+      if (message) this.logger?.warn({ command: this.command, message: redactMcpLog(message) }, "MCP stderr");
     });
 
     let closed = false;

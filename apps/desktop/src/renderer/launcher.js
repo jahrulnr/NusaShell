@@ -20,6 +20,7 @@ function connectWs() {
   ws.onopen = () => {
     connected = true;
     updateConnStatus(true);
+    writeRendererLog("info", `WebSocket connected to ${WS_URL}`);
     if (activeSubscriptions.size > 0) {
       sendRequest("subscribe", { eventTypes: [...activeSubscriptions] }).catch(() => {});
     }
@@ -29,12 +30,13 @@ function connectWs() {
   ws.onclose = () => {
     connected = false;
     updateConnStatus(false);
+    writeRendererLog("warn", "WebSocket connection closed; reconnecting");
     for (const [, ctrl] of pendingRequests) ctrl.reject(new Error("Connection closed"));
     pendingRequests.clear();
     scheduleReconnect();
   };
 
-  ws.onerror = () => {};
+  ws.onerror = () => writeRendererLog("error", "WebSocket connection error");
 
   ws.onmessage = (event) => {
     let msg;
@@ -45,8 +47,13 @@ function connectWs() {
       const ctrl = pendingRequests.get(msg.id);
       if (ctrl) {
         pendingRequests.delete(msg.id);
-        if (msg.ok) ctrl.resolve(msg.result);
-        else ctrl.reject(new Error(msg.error?.message ?? "Unknown error"));
+        if (msg.ok) {
+          writeRendererLog("debug", `WebSocket response ${msg.id}`);
+          ctrl.resolve(msg.result);
+        } else {
+          writeRendererLog("warn", `WebSocket request failed: ${msg.error?.message ?? "Unknown error"}`);
+          ctrl.reject(new Error(msg.error?.message ?? "Unknown error"));
+        }
       }
     } else if (msg.kind === "event") {
       dispatchEvent(msg.event, msg.payload, msg.sequence);
@@ -82,11 +89,13 @@ function sendRequest(method, payload, timeoutMs = 10000) {
     ctrl.resolve = (v) => { clearTimeout(timer); origResolve(v); };
     ctrl.reject = (e) => { clearTimeout(timer); origReject(e); };
 
+    writeRendererLog("debug", `WebSocket request ${method} (${id})`);
     ws.send(JSON.stringify({ kind: "request", id, method, protocolVersion: PROTOCOL_VERSION, payload }));
   });
 }
 
 function dispatchEvent(eventType, payload, sequence) {
+  writeRendererLog("debug", `Backend event ${eventType} (#${sequence})`);
   const handlers = eventHandlers.get(eventType);
   if (handlers) handlers.forEach(h => h(payload, sequence));
   const allHandlers = eventHandlers.get("*");
@@ -109,8 +118,8 @@ async function subscribe(eventTypes) {
 
 let plugins = [];
 let currentPlugin = null;
-let eventFilter = "all";
-const events = [];
+let logSourceFilter = "all";
+const logEntries = [];
 const STATES = ["idle", "starting", "running", "stopping", "crashed"];
 
 // ============ Helpers ============
@@ -124,6 +133,72 @@ function el(tag, cls, html) {
   return e;
 }
 function nowTime() { return new Date().toLocaleTimeString("en-US", { hour12: false }); }
+
+function writeRendererLog(level, message) {
+  window.shell?.logs?.write(level, message);
+}
+
+function addLogEntry(entry) {
+  if (logEntries.some((item) => item.id === entry.id)) return;
+  logEntries.push(entry);
+  logEntries.sort((a, b) => a.id - b.id);
+  if (logEntries.length > 1000) logEntries.splice(0, logEntries.length - 1000);
+  renderLogTail();
+}
+
+function renderLogTail() {
+  const tail = $("#log-tail");
+  const count = $("#log-count");
+  if (!tail || !count) return;
+
+  const stickToBottom = tail.scrollTop + tail.clientHeight >= tail.scrollHeight - 24;
+  const filtered = logSourceFilter === "all"
+    ? logEntries
+    : logEntries.filter((entry) => entry.source === logSourceFilter);
+
+  count.textContent = `${logEntries.length} / 1000`;
+  tail.textContent = "";
+  if (filtered.length === 0) {
+    const empty = el("div", "log-empty", "No logs for this source yet.");
+    tail.appendChild(empty);
+    return;
+  }
+
+  filtered.forEach((entry) => {
+    const row = el("div", "log-entry");
+    const time = new Date(entry.timestamp).toLocaleTimeString("en-US", { hour12: false });
+    row.innerHTML = `<span class="log-entry-time"></span><span class="log-entry-source"></span><span class="log-entry-level ${entry.level}"></span><span class="log-entry-message"></span>`;
+    row.children[0].textContent = time;
+    row.children[1].textContent = entry.source;
+    row.children[2].textContent = entry.level;
+    row.children[3].textContent = entry.message;
+    tail.appendChild(row);
+  });
+
+  if (stickToBottom) tail.scrollTop = tail.scrollHeight;
+}
+
+function initCentralLogs() {
+  const logs = window.shell?.logs;
+  if (!logs) return;
+
+  logs.onEntry(addLogEntry);
+  logs.list().then((entries) => entries.forEach(addLogEntry)).catch((error) => {
+    console.error("Failed to load the log tail:", error);
+  });
+
+  for (const [method, level] of [["debug", "debug"], ["info", "info"], ["log", "info"], ["warn", "warn"], ["error", "error"]]) {
+    const original = console[method].bind(console);
+    console[method] = (...args) => {
+      original(...args);
+      writeRendererLog(level, args.map((arg) => arg instanceof Error ? (arg.stack || arg.message) : String(arg)).join(" "));
+    };
+  }
+
+  window.addEventListener("error", (event) => writeRendererLog("error", event.error?.stack || event.message));
+  window.addEventListener("unhandledrejection", (event) => writeRendererLog("error", `Unhandled rejection: ${String(event.reason)}`));
+  writeRendererLog("info", "Launcher renderer initialized");
+}
 
 function isUrlIcon(icon) { return /^https?:\/\//i.test(icon); }
 function isFileIcon(icon) { return /^(file:\/\/|\.?\/|\.\\|[A-Za-z]:[\\/])/i.test(icon); }
@@ -145,26 +220,18 @@ function stateBadgeHtml(state) {
 function updateConnStatus(connected) {
   const status = $("#conn-status");
   const fill = $("#conn-fill");
-  const subDot = $("#sub-dot");
-  const subLabel = $("#sub-label");
   const settingsDot = $("#settings-conn-dot");
   const settingsLabel = $("#settings-conn-label");
 
   if (connected) {
     status.textContent = "Connected";
     fill.style.width = "100%";
-    subDot.style.background = "var(--green)";
-    subDot.style.boxShadow = "0 0 0 3px rgba(47,191,113,0.15)";
-    subLabel.textContent = "Subscribed to *";
     settingsDot.style.background = "var(--green)";
     settingsDot.style.boxShadow = "0 0 0 3px rgba(47,191,113,0.15)";
     settingsLabel.textContent = "Connected";
   } else {
     status.textContent = "Disconnected";
     fill.style.width = "0%";
-    subDot.style.background = "var(--text-faint)";
-    subDot.style.boxShadow = "none";
-    subLabel.textContent = "Not subscribed";
     settingsDot.style.background = "var(--text-faint)";
     settingsDot.style.boxShadow = "none";
     settingsLabel.textContent = "Disconnected";
@@ -274,68 +341,6 @@ function renderInstalledTable() {
   });
 }
 
-// ============ Render: Running List ============
-
-function renderRunningList() {
-  const list = $("#running-list");
-  list.innerHTML = "";
-  const running = plugins.filter(p => p.state === "running" || p.state === "starting");
-  if (running.length === 0) {
-    list.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:20px 0">No plugins currently running.</div>';
-    return;
-  }
-  running.forEach(p => {
-    const card = el("div", "running-card");
-    card.innerHTML = `<div class="running-card-icon bg-blue">${renderIconHtml(p.icon || "🧩", 20)}</div><div class="running-card-info"><div class="running-card-name">${p.name}</div><div class="running-card-meta">${p.pluginId}</div></div><div class="running-card-actions"><button class="mini-btn" data-action="stop" data-id="${p.pluginId}">Stop</button><button class="mini-btn" data-action="restart" data-id="${p.pluginId}">Restart</button></div>`;
-    list.appendChild(card);
-  });
-  list.querySelectorAll("[data-action]").forEach(btn => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const action = btn.dataset.action;
-      const id = btn.dataset.id;
-      if (action === "stop") stopPlugin(id);
-      if (action === "restart") restartPlugin(id);
-    });
-  });
-}
-
-// ============ Render: Event Timeline ============
-
-function eventDescription(e) {
-  const p = e.payload;
-  switch (e.event) {
-    case "plugin.installed": return `${p.pluginId} v${p.version} installed`;
-    case "plugin.uninstalled": return `${p.pluginId} uninstalled`;
-    case "plugin.started": return `${p.pluginId} → running`;
-    case "plugin.stopped": return `${p.pluginId} → ${p.state}`;
-    case "plugin.crashed": return `${p.pluginId} crashed (exit code ${p.exitCode})`;
-    case "plugin.state_changed": return `${p.pluginId}: ${p.oldState} → ${p.newState}`;
-    case "tool.call_completed": return `${p.pluginId} · ${p.toolName} (${p.success ? "success" : "failed"})`;
-    default: return JSON.stringify(p);
-  }
-}
-
-function renderEventTimeline() {
-  const timeline = $("#event-timeline");
-  timeline.innerHTML = "";
-  const filtered = eventFilter === "all" ? events : events.filter(e => e.event === eventFilter);
-  if (filtered.length === 0) {
-    timeline.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:20px 0">No events yet.</div>';
-    return;
-  }
-  const iconMap = { installed: "⬆", uninstalled: "⬇", started: "▶", stopped: "■", crashed: "✕", state_changed: "↻", tool_call_completed: "⚡" };
-  const recent = [...filtered].reverse().slice(0, 50);
-  recent.forEach(e => {
-    const iconKey = e.event.replace("plugin.", "").replace("tool.", "tool_call_");
-    const iconClass = e.event.replace("plugin.", "").replace("tool.", "tool_");
-    const time = e.payload.timestamp ? new Date(e.payload.timestamp).toLocaleTimeString("en-US", { hour12: false }) : "";
-    const entry = el("div", "event-entry");
-    entry.innerHTML = `<div class="event-icon ${iconClass}">${iconMap[iconKey] || "•"}</div><div class="event-content"><div class="event-type">${e.event}</div><div class="event-desc">${eventDescription(e)}</div></div><div class="event-seq">#${e.sequence}</div><div class="event-time">${time}</div>`;
-    timeline.appendChild(entry);
-  });
-}
-
 // ============ Plugin Detail Drawer ============
 
 async function openDrawer(plugin) {
@@ -422,12 +427,8 @@ function handlePluginEvent(payload, eventType) {
   if (eventType === "plugin.installed" || eventType === "plugin.uninstalled") {
     refreshAll();
   }
-  events.push({ event: eventType, payload, sequence: events.length + 1 });
-  $("#activity-badge").textContent = events.length;
   renderAppGrid();
   renderInstalledTable();
-  renderRunningList();
-  renderEventTimeline();
   if (currentPlugin?.pluginId === payload.pluginId) {
     openDrawer(plugins[idx] ?? currentPlugin);
   }
@@ -551,12 +552,13 @@ async function refreshAll() {
   await fetchPlugins();
   renderAppGrid();
   renderInstalledTable();
-  renderRunningList();
 }
 
 // ============ Init ============
 
 document.addEventListener("DOMContentLoaded", () => {
+  initCentralLogs();
+
   const windowControls = window.shell?.windowControls;
   if (windowControls) {
     $("#window-minimize").addEventListener("click", () => windowControls.minimize());
@@ -569,13 +571,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Nav switching
   $$("[data-nav]").forEach(item => item.addEventListener("click", () => switchView(item.dataset.view)));
+  $("#nav-settings-btn").addEventListener("click", () => switchView("settings"));
 
-  // Event filter chips
-  $$("[data-event-filter]").forEach(chip => chip.addEventListener("click", () => {
-    $$("[data-event-filter]").forEach(c => c.classList.remove("active"));
+  // Log source filters
+  $$("[data-log-source]").forEach(chip => chip.addEventListener("click", () => {
+    $$("[data-log-source]").forEach(c => c.classList.remove("active"));
     chip.classList.add("active");
-    eventFilter = chip.dataset.eventFilter;
-    renderEventTimeline();
+    logSourceFilter = chip.dataset.logSource;
+    renderLogTail();
   }));
 
   // Drawer

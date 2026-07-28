@@ -91,12 +91,11 @@ body {
 }
 .search input::placeholder { color: var(--text-faint); }
 
-.titlebar-spacer { flex: 1; }
-
 .top-actions {
   display: flex;
   align-items: center;
   gap: 6px;
+  margin-left: auto;
 }
 
 .icon-btn {

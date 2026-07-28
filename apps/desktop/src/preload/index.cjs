@@ -29,6 +29,19 @@ contextBridge.exposeInMainWorld("shell", {
   listTools(pluginId) {
     return ipcRenderer.invoke("tool:list", pluginId);
   },
+  logs: {
+    list() {
+      return ipcRenderer.invoke("logs:list");
+    },
+    write(level, message) {
+      ipcRenderer.send("logs:write", level, message);
+    },
+    onEntry(callback) {
+      const listener = (_event, entry) => callback(entry);
+      ipcRenderer.on("logs:entry", listener);
+      return () => ipcRenderer.removeListener("logs:entry", listener);
+    },
+  },
   updater: {
     checkForUpdates() {
       return ipcRenderer.invoke("updater:check");

@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, Menu } from "electron";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { bootstrap, type BootstrapResult } from "@nusashell/backend";
+import { LogTail, type ShellLogLevel, type ShellLogSource } from "./log-tail.js";
 import {
   createLauncherWindow,
   closeAllPluginWindows,
@@ -13,6 +14,46 @@ import type { CallToolCommand, ListToolsQuery } from "@nusashell/application";
 let backend: BootstrapResult | null = null;
 let updater: AppUpdater | null = null;
 const isDev = process.argv.includes("--dev");
+const logTail = new LogTail(1000);
+const shellLogLevels = new Set<ShellLogLevel>(["debug", "info", "warn", "error"]);
+
+function redactLogMessage(message: string): string {
+  return message
+    .replace(/([?&](?:token|password|secret|api[_-]?key|authorization)=)[^&\s]+/gi, "$1[REDACTED]")
+    .replace(/((?:token|password|secret|api[_-]?key|authorization)["']?\s*[:=]\s*["']?)[^,\s}"']+/gi, "$1[REDACTED]");
+}
+
+function formatLogArguments(args: readonly unknown[]): string {
+  const message = args.map((arg) => {
+    if (arg instanceof Error) return arg.stack ?? arg.message;
+    if (typeof arg === "string") return arg;
+    try {
+      return JSON.stringify(arg);
+    } catch {
+      return String(arg);
+    }
+  }).join(" ");
+  return redactLogMessage(message);
+}
+
+function toShellLogLevel(level: string): ShellLogLevel {
+  if (level === "error" || level === "fatal") return "error";
+  if (level === "warn") return "warn";
+  if (level === "debug" || level === "trace") return "debug";
+  return "info";
+}
+
+function captureMainConsole(): void {
+  for (const level of ["debug", "info", "warn", "error"] as const) {
+    const original = console[level].bind(console);
+    console[level] = (...args: unknown[]) => {
+      logTail.add("main", level, formatLogArguments(args));
+      original(...args);
+    };
+  }
+}
+
+captureMainConsole();
 
 if (isDev) {
   app.commandLine.appendSwitch("no-sandbox");
@@ -28,6 +69,11 @@ async function startBackend(): Promise<BootstrapResult> {
   const dbPath = process.env.NUSASHELL_DB_PATH || undefined;
   return bootstrap({
     config: { port: 9130, host: "127.0.0.1", pluginsRoot, dbPath, logLevel: isDev ? "debug" : "info" },
+    loggerObserver: ({ level, args }) => {
+      const message = formatLogArguments(args);
+      const source: ShellLogSource = /\bmcp\b|stdio/i.test(message) ? "mcp" : "backend";
+      logTail.add(source, toShellLogLevel(level), message);
+    },
   });
 }
 
@@ -45,7 +91,19 @@ async function waitForBackend(port: number, maxRetries = 30): Promise<void> {
 
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
-  registerWindowIpc();
+  registerWindowIpc((level, message) => logTail.add("ipc", level, message));
+
+  logTail.subscribe((entry) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send("logs:entry", entry);
+    }
+  });
+
+  ipcMain.handle("logs:list", () => logTail.list());
+  ipcMain.on("logs:write", (_event, level: ShellLogLevel, message: string) => {
+    if (!shellLogLevels.has(level) || typeof message !== "string") return;
+    logTail.add("renderer", level, redactLogMessage(message.slice(0, 4000)));
+  });
 
   try {
     backend = await startBackend();
@@ -64,8 +122,15 @@ app.whenReady().then(async () => {
       toolName,
       args: args ?? {},
     };
-    const result = await backend.container.commandBus.execute(command);
-    return result;
+    logTail.add("ipc", "info", `tool.call ${pluginId}.${toolName} (${command.requestId})`);
+    try {
+      const result = await backend.container.commandBus.execute(command);
+      logTail.add("ipc", "info", `tool.call completed ${pluginId}.${toolName} (${command.requestId})`);
+      return result;
+    } catch (error) {
+      logTail.add("ipc", "error", `tool.call failed ${pluginId}.${toolName}: ${String(error)}`);
+      throw error;
+    }
   });
 
   ipcMain.handle("tool:list", async (_event, pluginId: string) => {
@@ -74,8 +139,8 @@ app.whenReady().then(async () => {
       kind: "list-tools",
       pluginId,
     };
-    const result = await backend.container.queryBus.execute(query);
-    return result;
+    logTail.add("ipc", "debug", `tool.list ${pluginId}`);
+    return backend.container.queryBus.execute(query);
   });
 
   createLauncherWindow();
