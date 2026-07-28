@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.28] - 2026-07-29
+
+### Fixed
+
+- Notes example MCP server (`plugins/examples/notes/mcp/server.js`) now persists notes to `notes.json` in the plugin directory and restores them on startup, so notes created by the agent survive process restarts and plugin window closes.
+- Notes plugin UI (`plugins/examples/notes/ui/index.html`) now correctly unwraps `window.shell.callTool` results whether the backend returns a raw content array, a `CallToolResult` wrapper, or a nested `result.content` object.
+
 ## [0.0.27] - 2026-07-29
 
 ### Changed

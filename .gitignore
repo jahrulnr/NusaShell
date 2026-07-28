@@ -8,3 +8,4 @@ coverage/
 *.tsbuildinfo
 .DS_Store
 .nusashell/
+plugins/examples/notes/notes.json

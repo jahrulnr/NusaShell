@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+const fs = require("fs");
+const path = require("path");
 const { Server } = require("@modelcontextprotocol/sdk/server/index.js");
 const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
 const {
@@ -13,6 +15,36 @@ const {
 
 const notes = [];
 let nextId = 1;
+
+function notesDataFile() {
+  return process.env.NUSASHELL_NOTES_DATA_FILE || path.join(__dirname, "..", "notes.json");
+}
+
+function loadNotes() {
+  try {
+    const file = notesDataFile();
+    if (fs.existsSync(file)) {
+      const data = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (Array.isArray(data.notes)) {
+        notes.push(...data.notes);
+        const maxId = Math.max(0, ...notes.map((note) => Number(note.id) || 0));
+        nextId = maxId + 1;
+      }
+    }
+  } catch (err) {
+    console.error("[notes-mcp] failed to load notes:", err.message);
+  }
+}
+
+function saveNotes() {
+  try {
+    fs.writeFileSync(notesDataFile(), JSON.stringify({ notes }, null, 2));
+  } catch (err) {
+    console.error("[notes-mcp] failed to save notes:", err.message);
+  }
+}
+
+loadNotes();
 
 const server = new Server(
   { name: "notes-mcp", version: "1.0.0" },
@@ -102,6 +134,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const text = (args && args.text) || "";
     const note = { id: nextId++, text, createdAt: new Date().toISOString() };
     notes.push(note);
+    saveNotes();
     return {
       content: [
         {

@@ -47,11 +47,16 @@
     const textarea = document.getElementById("text");
 
     function parseMcpResult(result) {
-      if (result && Array.isArray(result) && result.length > 0 && result[0].text) {
-        return JSON.parse(result[0].text);
-      }
-      if (result && result.result && Array.isArray(result.result) && result.result.length > 0 && result.result[0].text) {
-        return JSON.parse(result.result[0].text);
+      const extractText = () => {
+        if (result && Array.isArray(result) && result.length > 0 && typeof result[0].text === "string") return result[0].text;
+        if (result && result.result && Array.isArray(result.result) && result.result.length > 0 && typeof result.result[0].text === "string") return result.result[0].text;
+        if (result && result.result && result.result.content && Array.isArray(result.result.content) && result.result.content.length > 0 && typeof result.result.content[0].text === "string") return result.result.content[0].text;
+        if (result && result.content && Array.isArray(result.content) && result.content.length > 0 && typeof result.content[0].text === "string") return result.content[0].text;
+        return undefined;
+      };
+      const text = extractText();
+      if (text) {
+        try { return JSON.parse(text); } catch { /* fallthrough */ }
       }
       return result;
     }
