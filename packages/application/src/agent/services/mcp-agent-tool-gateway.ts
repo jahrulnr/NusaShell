@@ -48,6 +48,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
       definition("mcp_enable", "Start a selected MCP plugin", { pluginId: stringSchema() }),
       definition("mcp_disable", "Stop a selected MCP plugin", { pluginId: stringSchema() }),
       definition("tool_search", "Search a running MCP plugin's tools by name or description", { pluginId: stringSchema(), query: stringSchema() }),
+      definition("tool_list", "List all tools from a running MCP plugin (names and descriptions only)", { pluginId: stringSchema() }),
       definition("tool_schema", "Load one searched MCP tool schema for the next round", { pluginId: stringSchema(), toolName: stringSchema() }),
       definition("mcp_context", "Discover or load MCP prompts and text resources", {
         pluginId: stringSchema(),
@@ -73,6 +74,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
       case "mcp_list": return this.runtimeManager.listPlugins();
       case "mcp_enable": return this.changeMcpState(args, true);
       case "mcp_disable": return this.changeMcpState(args, false);
+      case "tool_list": return this.listAllTools(args);
       case "tool_search": return this.searchTools(args);
       case "tool_schema": return this.grantTool(args, turnId);
       case "mcp_context": return this.context(args);
@@ -84,6 +86,12 @@ export class McpAgentToolGateway implements AgentToolGateway {
     const pluginId = parsePluginId(args.pluginId);
     const view = start ? await this.runtimeManager.startPlugin(pluginId) : await this.runtimeManager.stopPlugin(pluginId);
     return { pluginId: view.pluginId, state: view.state };
+  }
+
+  private async listAllTools(args: Readonly<Record<string, unknown>>): Promise<unknown> {
+    const pluginIdValue = requireString(args.pluginId, "pluginId");
+    const tools = await this.runtimeManager.listTools(parsePluginId(pluginIdValue));
+    return tools.map((tool) => ({ name: tool.name, ...(tool.description ? { description: tool.description } : {}) }));
   }
 
   private async searchTools(args: Readonly<Record<string, unknown>>): Promise<unknown> {

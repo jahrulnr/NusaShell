@@ -20,7 +20,10 @@ describe("McpAgentToolGateway", () => {
     gateway.beginTurn("turn-1");
 
     expect((await gateway.listTools([], "turn-1")).map((tool) => tool.name)).toEqual([
-      "mcp_list", "mcp_enable", "mcp_disable", "tool_search", "tool_schema", "mcp_context",
+      "mcp_list", "mcp_enable", "mcp_disable", "tool_search", "tool_list", "tool_schema", "mcp_context",
+    ]);
+    await expect(gateway.execute("tool_list", { pluginId: "com.example.notes" }, "call-tool-list", "turn-1")).resolves.toEqual([
+      { name: "createNote", description: "Create a note" },
     ]);
     await expect(gateway.execute("mcp_context", { pluginId: "com.example.notes", action: "list_prompts", query: "daily" }, "call-prompt-list", "turn-1")).resolves.toEqual([
       { name: "daily", description: "Daily prompt" },

@@ -6,7 +6,7 @@ and prompt-size limits.
 
 ## Initial tool set
 
-Every turn starts with six shell-owned meta-tools:
+Every turn starts with seven shell-owned meta-tools:
 
 - `mcp_list` — list installed MCP plugins with runtime state and autostart.
 - `mcp_enable` — start one plugin MCP through `PluginRuntimeManager`.
@@ -14,6 +14,8 @@ Every turn starts with six shell-owned meta-tools:
   `PluginRuntimeManager`.
 - `tool_search` — search a running plugin's MCP tool names/descriptions with a
   bounded result set.
+- `tool_list` — list all tool names and descriptions from a running MCP plugin
+  without a search query.
 - `tool_schema` — return one tool schema and grant that concrete tool to the
   following round.
 - `mcp_context` — access non-tool MCP context through an explicit action:
