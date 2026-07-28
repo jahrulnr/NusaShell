@@ -121,6 +121,9 @@ let currentPlugin = null;
 let logSourceFilter = "all";
 const logEntries = [];
 const STATES = ["idle", "starting", "running", "stopping", "crashed"];
+const agentMessages = [];
+const agentPluginScope = new Set();
+let agentTurnPending = false;
 
 // ============ Helpers ============
 
@@ -293,6 +296,10 @@ async function uninstallPlugin(pluginId) {
   catch (e) { return { error: e.message }; }
 }
 
+async function runAgentTurn(messages, pluginIds) {
+  return sendRequest("agent.run", { messages, pluginIds }, 120000);
+}
+
 // ============ View Switching ============
 
 function switchView(viewName) {
@@ -302,6 +309,126 @@ function switchView(viewName) {
   $$("[data-nav]").forEach(n => n.classList.toggle("active", n.dataset.view === viewName));
   closeDrawer();
   hideContextMenu();
+  if (viewName === "agent") renderAgentScope();
+}
+
+// ============ Agent workspace ============
+
+function renderAgentScope() {
+  const list = $("#agent-scope-list");
+  const count = $("#agent-scope-count");
+  if (!list || !count) return;
+
+  const running = plugins.filter((plugin) => plugin.state === "running");
+  for (const pluginId of [...agentPluginScope]) {
+    if (!running.some((plugin) => plugin.pluginId === pluginId)) agentPluginScope.delete(pluginId);
+  }
+  count.textContent = `${agentPluginScope.size} selected`;
+  list.textContent = "";
+  if (running.length === 0) {
+    list.appendChild(el("div", "agent-scope-empty", "No running plugins. You can still test the stub without MCP tools."));
+    return;
+  }
+  running.forEach((plugin) => {
+    const label = el("label", "agent-scope-item");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = agentPluginScope.has(plugin.pluginId);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) agentPluginScope.add(plugin.pluginId);
+      else agentPluginScope.delete(plugin.pluginId);
+      renderAgentScope();
+    });
+    const icon = el("span", "agent-scope-icon");
+    icon.textContent = isUrlIcon(plugin.icon) || isFileIcon(plugin.icon) ? "◈" : (plugin.icon || "🧩");
+    const name = el("span", "agent-scope-name");
+    name.textContent = plugin.name;
+    label.append(checkbox, icon, name);
+    list.appendChild(label);
+  });
+}
+
+function appendAgentMessage(role, content, meta = {}) {
+  const thread = $("#agent-thread");
+  const empty = $("#agent-empty");
+  if (!thread) return null;
+  empty?.remove();
+  const message = el("article", `agent-message ${role}${meta.pending ? " agent-pending" : ""}`);
+  const label = el("div", "agent-message-meta");
+  label.textContent = role === "user" ? "YOU" : (meta.pending ? "AGENT · WORKING" : "NUSASHELL AGENT");
+  const bubble = el("div", "agent-bubble");
+  bubble.textContent = content;
+  message.append(label, bubble);
+
+  if (meta.traceId || meta.model || meta.toolCalls?.length) {
+    const details = el("div", "agent-turn-meta");
+    if (meta.model) {
+      const tag = el("span", "agent-turn-tag");
+      tag.textContent = meta.model;
+      details.appendChild(tag);
+    }
+    if (meta.traceId) {
+      const tag = el("span", "agent-turn-tag");
+      tag.textContent = `trace ${meta.traceId.slice(0, 8)}`;
+      details.appendChild(tag);
+    }
+    for (const toolCall of meta.toolCalls ?? []) {
+      const tag = el("span", "agent-turn-tag agent-tool-result");
+      tag.textContent = `${toolCall.ok ? "✓" : "!"} ${toolCall.name}`;
+      details.appendChild(tag);
+    }
+    message.appendChild(details);
+  }
+  thread.appendChild(message);
+  thread.scrollTop = thread.scrollHeight;
+  return message;
+}
+
+function resetAgentConversation() {
+  agentMessages.length = 0;
+  const thread = $("#agent-thread");
+  if (!thread) return;
+  thread.textContent = "";
+  const empty = el("div", "agent-empty");
+  empty.id = "agent-empty";
+  empty.innerHTML = "<div class=\"agent-empty-mark\">✦</div><h2>Start a bounded turn</h2><p>The local stub is ready. Start a plugin first if this turn needs MCP tools.</p>";
+  thread.appendChild(empty);
+}
+
+async function submitAgentTurn() {
+  const input = $("#agent-input");
+  const sendButton = $("#agent-send-btn");
+  const status = $("#agent-provider-status");
+  const text = input?.value.trim();
+  if (!text || agentTurnPending) return;
+
+  agentTurnPending = true;
+  input.disabled = true;
+  sendButton.disabled = true;
+  appendAgentMessage("user", text);
+  agentMessages.push({ role: "user", content: text });
+  input.value = "";
+  const pending = appendAgentMessage("assistant", "Running provider and scoped MCP tools…", { pending: true });
+  status.textContent = `Provider: stub · ${agentPluginScope.size} MCP scope`;
+
+  try {
+    const result = await runAgentTurn(agentMessages, [...agentPluginScope]);
+    pending?.remove();
+    appendAgentMessage("assistant", result.text, result);
+    agentMessages.push({ role: "assistant", content: result.text });
+    status.textContent = `Provider: ${result.model || "stub"} · ${result.rounds} round${result.rounds === 1 ? "" : "s"}`;
+    writeRendererLog("info", `Agent turn completed trace=${result.traceId} rounds=${result.rounds}`);
+  } catch (error) {
+    pending?.remove();
+    appendAgentMessage("assistant", `Turn failed: ${error.message || "Unknown error"}`);
+    status.textContent = "Provider: unavailable";
+    writeRendererLog("error", `Agent turn failed: ${error.message || String(error)}`);
+  } finally {
+    agentTurnPending = false;
+    input.disabled = false;
+    sendButton.disabled = false;
+    input.focus();
+  }
 }
 
 // ============ Render: App Grid (Home) ============
@@ -429,6 +556,7 @@ function handlePluginEvent(payload, eventType) {
   }
   renderAppGrid();
   renderInstalledTable();
+  renderAgentScope();
   if (currentPlugin?.pluginId === payload.pluginId) {
     openDrawer(plugins[idx] ?? currentPlugin);
   }
@@ -552,6 +680,7 @@ async function refreshAll() {
   await fetchPlugins();
   renderAppGrid();
   renderInstalledTable();
+  renderAgentScope();
 }
 
 // ============ Init ============
@@ -572,6 +701,18 @@ document.addEventListener("DOMContentLoaded", () => {
   // Nav switching
   $$("[data-nav]").forEach(item => item.addEventListener("click", () => switchView(item.dataset.view)));
   $("#nav-settings-btn").addEventListener("click", () => switchView("settings"));
+
+  $("#agent-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    void submitAgentTurn();
+  });
+  $("#agent-input").addEventListener("keydown", (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      void submitAgentTurn();
+    }
+  });
+  $("#agent-clear-btn").addEventListener("click", resetAgentConversation);
 
   // Log source filters
   $$("[data-log-source]").forEach(chip => chip.addEventListener("click", () => {

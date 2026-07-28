@@ -1,5 +1,4 @@
-import { autoUpdater, type UpdateCheckResult, type UpdateInfo } from "electron-updater";
-import type { BrowserWindow } from "electron";
+import { autoUpdater, type UpdateInfo } from "electron-updater";
 
 export interface UpdateStatus {
   available: boolean;

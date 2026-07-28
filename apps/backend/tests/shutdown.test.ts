@@ -44,7 +44,7 @@ describe("ShutdownCoordinator", () => {
     // Prevent process.exit from actually exiting
     const originalExit = process.exit;
     let exitCalled = false;
-    process.exit = ((code?: number) => { exitCalled = true; }) as never;
+    process.exit = ((_code?: number) => { exitCalled = true; }) as never;
 
     const shutdown = new ShutdownCoordinator(container);
     await shutdown.shutdown();

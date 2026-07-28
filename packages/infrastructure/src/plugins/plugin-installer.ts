@@ -1,5 +1,5 @@
 import { readFile, writeFile, mkdir, rm, readdir, stat, access } from "node:fs/promises";
-import { join, resolve, basename, extname } from "node:path";
+import { join, basename, extname } from "node:path";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
 import { pipeline } from "node:stream/promises";

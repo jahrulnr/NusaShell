@@ -25,7 +25,7 @@ export class InstallPluginHandler
     if (idResult.ok) {
       const versionResult = PluginVersion.create(result.version);
       if (versionResult.ok) {
-        this.eventDispatcher.dispatch(
+        await this.eventDispatcher.publish(
           PluginInstalledEvent.create(idResult.value, versionResult.value, this.clock.now()),
         );
       }

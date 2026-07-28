@@ -9,6 +9,9 @@ import {
   PluginInstaller,
   PluginSyncService,
   createLogger,
+  AgentProviderRegistry,
+  StaticAgentProvider,
+  OpenAiCompatibleAgentProvider,
   type Logger,
   type LogObserver,
 } from "@nusashell/infrastructure";
@@ -29,6 +32,9 @@ import {
   CallToolHandler,
   CancelToolCallHandler,
   ListToolsHandler,
+  McpAgentToolGateway,
+  RunAgentTurnHandler,
+  type AgentProvider,
   SystemPingHandler,
   SystemVersionHandler,
 } from "@nusashell/application";
@@ -45,6 +51,13 @@ export interface ContainerOptions {
   readonly dbPath?: string;
   readonly logLevel?: string;
   readonly loggerObserver?: LogObserver;
+  readonly ai?: {
+    readonly providerId: string;
+    readonly model?: string;
+    readonly baseUrl?: string;
+    readonly apiKey?: string;
+    readonly maxToolRounds: number;
+  };
 }
 
 export interface Container {
@@ -100,6 +113,16 @@ export function createContainer(options: ContainerOptions): Container {
     clock,
     logger,
   });
+  const agentToolGateway = new McpAgentToolGateway(runtimeManager);
+  const agentProviders: AgentProvider[] = [new StaticAgentProvider()];
+  if (options.ai?.baseUrl && options.ai.apiKey && options.ai.model) {
+    agentProviders.push(new OpenAiCompatibleAgentProvider({
+      baseUrl: options.ai.baseUrl,
+      apiKey: options.ai.apiKey,
+      model: options.ai.model,
+    }));
+  }
+  const agentProviderRegistry = new AgentProviderRegistry(agentProviders);
 
   const commandBus = new CommandBus();
   commandBus.register("start-plugin", new StartPluginHandler(runtimeManager));
@@ -107,6 +130,13 @@ export function createContainer(options: ContainerOptions): Container {
   commandBus.register("restart-plugin", new RestartPluginHandler(runtimeManager));
   commandBus.register("call-tool", new CallToolHandler(runtimeManager));
   commandBus.register("cancel-tool-call", new CancelToolCallHandler(runtimeManager));
+  commandBus.register("run-agent-turn", new RunAgentTurnHandler(
+    agentProviderRegistry,
+    agentToolGateway,
+    options.ai?.providerId ?? "stub",
+    options.ai?.maxToolRounds ?? 8,
+    logger,
+  ));
   if (pluginInstaller) {
     commandBus.register("install-plugin", new InstallPluginHandler(pluginInstaller, eventDispatcher, clock));
     commandBus.register("uninstall-plugin", new UninstallPluginHandler(pluginInstaller, eventDispatcher, clock));

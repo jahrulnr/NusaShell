@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { PluginId } from "@nusashell/domain";
 import {
   PluginRuntimeManager,
   EventDispatcher,
@@ -72,7 +71,7 @@ describe("PluginRuntimeManager race conditions (§15)", () => {
 
   describe("callTool while starting", () => {
     it("callTool fired concurrently with start does not hang", async () => {
-      const { pluginRepository, manager, mcpClientFactory } = setup();
+      const { pluginRepository, manager } = setup();
       const plugin = makePlugin("com.example.notes");
       pluginRepository.add(plugin);
 

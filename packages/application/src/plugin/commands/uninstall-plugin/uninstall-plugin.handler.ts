@@ -27,7 +27,7 @@ export class UninstallPluginHandler
 
     await this.installer.uninstall(command.pluginId);
 
-    this.eventDispatcher.dispatch(
+    await this.eventDispatcher.publish(
       PluginUninstalledEvent.create(idResult.value, this.clock.now()),
     );
 

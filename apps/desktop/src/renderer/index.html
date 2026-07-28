@@ -70,6 +70,10 @@
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/></svg>
           Plugins
         </a>
+        <a class="nav-item" data-view="agent" data-nav>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 3v3M12 18v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M3 12h3M18 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="12" r="4.5" stroke="currentColor" stroke-width="1.7"/></svg>
+          Agent
+        </a>
         <a class="nav-item" data-view="logs" data-nav>
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M4 5h16M4 12h10M4 19h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="17" cy="12" r="1.5" fill="currentColor"/></svg>
           Logs
@@ -123,6 +127,54 @@
         <h1 class="page-title">Plugins</h1>
         <p class="subtitle">Installed plugins and their live MCP process state.</p>
         <div class="plugin-table" id="plugin-table"></div>
+      </section>
+
+      <!-- ===== View: Agent ===== -->
+      <section class="view agent-view" data-view="agent">
+        <div class="agent-header">
+          <div>
+            <div class="agent-kicker"><span class="agent-kicker-dot"></span> Turn workspace</div>
+            <h1 class="page-title">Agent</h1>
+            <p class="subtitle">Ask the shell to work through the MCP tools you explicitly scope below.</p>
+          </div>
+          <button class="mini-btn" id="agent-clear-btn" type="button">Clear conversation</button>
+        </div>
+
+        <div class="agent-shell">
+          <aside class="agent-scope" aria-labelledby="agent-scope-title">
+            <div class="agent-scope-heading">
+              <div>
+                <div class="agent-panel-label" id="agent-scope-title">MCP scope</div>
+                <p>Only running plugins can be offered to the agent.</p>
+              </div>
+              <span class="agent-scope-count" id="agent-scope-count">0 selected</span>
+            </div>
+            <div class="agent-scope-list" id="agent-scope-list" role="group" aria-label="Plugins available to the agent"></div>
+            <p class="agent-scope-note">The provider never connects directly to a plugin. NusaShell remains the broker.</p>
+          </aside>
+
+          <div class="agent-conversation">
+            <div class="agent-thread" id="agent-thread" role="log" aria-live="polite" aria-label="Agent conversation">
+              <div class="agent-empty" id="agent-empty">
+                <div class="agent-empty-mark">✦</div>
+                <h2>Start a bounded turn</h2>
+                <p>The local stub is ready. Start a plugin first if this turn needs MCP tools.</p>
+              </div>
+            </div>
+            <form class="agent-composer" id="agent-form">
+              <label class="sr-only" for="agent-input">Message to the agent</label>
+              <textarea id="agent-input" rows="3" placeholder="Describe what you want the shell to do…" required></textarea>
+              <div class="agent-composer-footer">
+                <span class="agent-provider-status" id="agent-provider-status">Provider: stub</span>
+                <span class="agent-key-hint">Ctrl + Enter to send</span>
+                <button class="agent-send-btn" id="agent-send-btn" type="submit">
+                  Send turn
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       </section>
 
       <!-- ===== View: Central log tail ===== -->
@@ -267,6 +319,6 @@
 
 </div>
 
-<script src="launcher.js"></script>
+<script type="module" src="launcher.js"></script>
 </body>
 </html>

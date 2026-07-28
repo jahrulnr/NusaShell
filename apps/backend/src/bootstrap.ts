@@ -21,9 +21,16 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
   const container = createContainer({
     port: config.port,
     host: config.host,
-    pluginsRoot: config.pluginsRoot,
-    dbPath: config.dbPath,
+    ...(config.pluginsRoot !== undefined ? { pluginsRoot: config.pluginsRoot } : {}),
+    ...(config.dbPath !== undefined ? { dbPath: config.dbPath } : {}),
     logLevel: config.logLevel,
+    ai: {
+      providerId: config.ai.providerId,
+      ...(config.ai.model !== undefined ? { model: config.ai.model } : {}),
+      ...(config.ai.baseUrl !== undefined ? { baseUrl: config.ai.baseUrl } : {}),
+      ...(config.ai.apiKey !== undefined ? { apiKey: config.ai.apiKey } : {}),
+      maxToolRounds: config.ai.maxToolRounds,
+    },
     ...(options.loggerObserver ? { loggerObserver: options.loggerObserver } : {}),
   });
   const shutdown = new ShutdownCoordinator(container);

@@ -114,6 +114,38 @@ export const ToolListRequestSchema = z.object({
   }),
 });
 
+const AgentMessageSchema = z.union([
+  z.object({ role: z.enum(["system", "user"]), content: z.string().min(1) }),
+  z.object({
+    role: z.literal("assistant"),
+    content: z.string().optional(),
+    toolCalls: z.array(z.object({
+      id: z.string().min(1),
+      name: z.string().min(1),
+      args: z.record(z.string(), z.unknown()),
+    })).optional(),
+  }),
+  z.object({
+    role: z.literal("tool"),
+    toolCallId: z.string().min(1),
+    name: z.string().min(1),
+    content: z.string(),
+  }),
+]);
+
+export const AgentRunRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("agent.run"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    messages: z.array(AgentMessageSchema).min(1),
+    pluginIds: z.array(z.string().min(1)).default([]),
+    providerId: z.string().min(1).optional(),
+    maxToolRounds: z.number().int().min(1).max(32).optional(),
+  }),
+});
+
 export const SystemPingRequestSchema = z.object({
   kind: z.literal("request"),
   id: z.string().min(1),
@@ -162,6 +194,7 @@ export const RequestSchema = z.discriminatedUnion("method", [
   ToolCallRequestSchema,
   ToolCancelRequestSchema,
   ToolListRequestSchema,
+  AgentRunRequestSchema,
   SystemPingRequestSchema,
   SystemVersionRequestSchema,
   SubscribeRequestSchema,
@@ -179,4 +212,5 @@ export type PluginStateRequest = z.infer<typeof PluginStateRequestSchema>;
 export type ToolCallRequest = z.infer<typeof ToolCallRequestSchema>;
 export type ToolCancelRequest = z.infer<typeof ToolCancelRequestSchema>;
 export type ToolListRequest = z.infer<typeof ToolListRequestSchema>;
+export type AgentRunRequest = z.infer<typeof AgentRunRequestSchema>;
 export type ParsedRequest = z.infer<typeof RequestSchema>;

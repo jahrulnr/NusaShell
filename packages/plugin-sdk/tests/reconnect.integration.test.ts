@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach, beforeEach } from "vitest";
+import { describe, expect, it, afterEach } from "vitest";
 import { NusaClient } from "../src/client/nusa-client.js";
 import { WebSocketServer, MessageRouter } from "@nusashell/transport-ws";
 import { CommandBus, QueryBus } from "@nusashell/application";

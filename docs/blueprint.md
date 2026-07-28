@@ -345,7 +345,9 @@ live state stays in `PluginRuntimeManager` (backend).
 - Long-press / right-click → context menu: **Open, Force Stop, Uninstall, Settings**
 - Search bar to filter when many plugins are installed
 - `➕ Install New` → file picker (later: marketplace browser)
-- Launcher navigation is **Home**, **Plugins**, and **Logs**. The Plugins view combines installed metadata with each plugin's live MCP state; Settings opens only from the top-bar gear.
+- Launcher navigation is **Home**, **Plugins**, **Agent**, and **Logs**. The Plugins view combines installed metadata with each plugin's live MCP state; Settings opens only from the top-bar gear.
+- Agent is a shell-owned turn workspace. The user explicitly selects from running plugins as the MCP scope for each turn; the provider only receives normalized tool schemas and all execution remains brokered by the shell. The first surface uses the configured provider (or local stub), shows the trace/model/tool summary, and keeps conversation state in the renderer only until durable conversations are introduced.
+- MCP capability adoption follows [`mcp-capability-policy.md`](./architecture/mcp-capability-policy.md): tools, prompts, resources, and completion are the stable implementation track; deferred capabilities remain documented for operator and agent knowledge but are not advertised as supported.
 - Logs is a shell-owned live tail for renderer, Electron, IPC, backend, and MCP output. It retains at most 1,000 entries and must redact credential-like values before rendering.
 
 ### 4.2 Window Management

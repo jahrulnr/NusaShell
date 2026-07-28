@@ -34,10 +34,29 @@ describe("E2E: notes plugin", () => {
     expect(result.plugins[0]!.state).toBe("idle");
   });
 
+  it("runs a bounded offline agent turn through the WebSocket command", async () => {
+    const result = await client.agent.run([{ role: "user", content: "Hello agent" }]);
+
+    expect(result.text).toBe("(stub) received: Hello agent");
+    expect(result.rounds).toBe(1);
+    expect(result.toolCalls).toEqual([]);
+    expect(result.traceId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
   it("starts the notes plugin", async () => {
     const result = await client.plugins.start("com.example.notes");
     expect(result.pluginId).toBe("com.example.notes");
     expect(result.state).toBe("running");
+  });
+
+  it("runs the stub agent with a running plugin explicitly scoped", async () => {
+    const result = await client.agent.run(
+      [{ role: "user", content: "Confirm the selected MCP scope" }],
+      { pluginIds: ["com.example.notes"] },
+    );
+
+    expect(result.text).toBe("(stub) received: Confirm the selected MCP scope");
+    expect(result.rounds).toBe(1);
   });
 
   it("receives plugin.started event", async () => {

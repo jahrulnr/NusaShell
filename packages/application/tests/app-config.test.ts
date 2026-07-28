@@ -9,6 +9,7 @@ describe("loadConfig", () => {
     expect(config.pluginsRoot).toBeUndefined();
     expect(config.dbPath).toBeUndefined();
     expect(config.logLevel).toBe("info");
+    expect(config.ai).toEqual({ providerId: "stub", model: undefined, baseUrl: undefined, apiKey: undefined, maxToolRounds: 8 });
   });
 
   it("reads port from NUSASHELL_PORT", () => {
@@ -43,6 +44,11 @@ describe("loadConfig", () => {
       NUSASHELL_PLUGINS_ROOT: "/app/plugins",
       NUSASHELL_DB_PATH: "/app/data.db",
       NUSASHELL_LOG_LEVEL: "warn",
+      NUSASHELL_AI_PROVIDER: "openai-compatible",
+      NUSASHELL_AI_MODEL: "gpt-test",
+      NUSASHELL_AI_BASE_URL: "https://example.test/v1",
+      NUSASHELL_AI_API_KEY: "not-a-real-key",
+      NUSASHELL_AI_MAX_TOOL_ROUNDS: "4",
     });
     expect(config).toEqual({
       port: 3000,
@@ -50,6 +56,13 @@ describe("loadConfig", () => {
       pluginsRoot: "/app/plugins",
       dbPath: "/app/data.db",
       logLevel: "warn",
+      ai: {
+        providerId: "openai-compatible",
+        model: "gpt-test",
+        baseUrl: "https://example.test/v1",
+        apiKey: "not-a-real-key",
+        maxToolRounds: 4,
+      },
     });
   });
 });

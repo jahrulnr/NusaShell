@@ -7,10 +7,11 @@ import type {
   UninstallPluginCommand,
   CallToolCommand,
   CancelToolCallCommand,
+  RunAgentTurnCommand,
 } from "@nusashell/application";
 
 export function mapToCommand(request: ParsedRequest):
-  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | CallToolCommand | CancelToolCallCommand }
+  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand }
   | { kind: "query" } {
   switch (request.method) {
     case "plugin.start":
@@ -76,6 +77,17 @@ export function mapToCommand(request: ParsedRequest):
           pluginId: request.payload.pluginId,
           requestId: request.payload.requestId,
         } as CancelToolCallCommand,
+      };
+    case "agent.run":
+      return {
+        kind: "command",
+        command: {
+          kind: "run-agent-turn",
+          messages: request.payload.messages,
+          pluginIds: request.payload.pluginIds,
+          ...(request.payload.providerId !== undefined ? { providerId: request.payload.providerId } : {}),
+          ...(request.payload.maxToolRounds !== undefined ? { maxToolRounds: request.payload.maxToolRounds } : {}),
+        } as RunAgentTurnCommand,
       };
     default:
       return { kind: "query" };

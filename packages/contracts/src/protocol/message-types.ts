@@ -12,6 +12,7 @@ export type RequestMethod =
   | "tool.call"
   | "tool.cancel"
   | "tool.list"
+  | "agent.run"
   | "system.ping"
   | "system.version"
   | "subscribe"

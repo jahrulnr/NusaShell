@@ -76,6 +76,25 @@ export {
 export type { CallToolCommand, CallToolResult, CancelToolCallCommand, CancelToolCallResult, ListToolsQuery, ListToolsResult, ToolItem } from "./tool/index.js";
 export { CallToolHandler, CancelToolCallHandler, ListToolsHandler } from "./tool/index.js";
 
+// Agent runtime
+export type {
+  AgentMessage,
+  AgentToolCall,
+  AgentToolDefinition,
+  AgentProviderRequest,
+  AgentProviderResult,
+  AgentProvider,
+  AgentProviderRegistryPort,
+  AgentToolGateway,
+  AgentTurnRunnerDeps,
+  RunAgentTurnInput,
+  AgentTurnResult,
+  AgentToolExecution,
+  AgentTurnWorker,
+  RunAgentTurnCommand,
+} from "./agent/index.js";
+export { AgentTurnRunner, McpAgentToolGateway, InProcessAgentTurnWorker, RunAgentTurnHandler } from "./agent/index.js";
+
 // Config
 export { type AppConfig, loadConfig } from "./config/index.js";
 

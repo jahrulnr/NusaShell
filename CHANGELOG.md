@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20] - 2026-07-28
+
+### Added
+- Agent runtime with a bounded, traceable provider → MCP tool → provider turn loop.
+- MCP-only agent tool gateway: it exposes only tools from running plugins and rejects model calls outside the current allowlist.
+- Provider registry with offline `stub` mode and an OpenAI-compatible Chat Completions adapter for configured OpenAI-compatible gateways.
+- `agent.run` WebSocket command and `NusaClient.agent.run()` SDK API.
+- Desktop Agent workspace with explicit running-plugin MCP scope, conversation turn metadata, stub status, and centralized trace logging.
+- MCP capability policy documenting the stable implementation track and deferred experimental/evolving capabilities for operator and agent knowledge.
+- Focused tests for text turns, MCP tool calls, allowlist rejection, round limits, and OpenAI-compatible function-call parsing.
+
+### Changed
+- Backend and package type checks now pass after correcting existing event dispatch and strict TypeScript issues.
+
 ## [0.0.19] - 2026-07-29
 
 ### Added

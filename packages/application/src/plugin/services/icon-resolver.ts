@@ -1,4 +1,4 @@
-import { resolve, join } from "node:path";
+import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 /**
@@ -25,7 +25,7 @@ export function resolveIcon(icon: string, installPath: string): string {
   // e.g. "file://icon.png" or "file://assets/icon.png"
   const fileRelMatch = trimmed.match(/^file:\/\/(.+)$/i);
   if (fileRelMatch) {
-    const relPath = fileRelMatch[1];
+    const relPath = fileRelMatch[1] ?? "";
     return pathToFileURL(resolve(installPath, relPath)).href;
   }
 
