@@ -77,8 +77,18 @@ export async function openPluginWindow(
   });
 
   const uiPath = resolve(installPath, "ui", "index.html");
-  await win.loadURL(`file://${uiPath}`);
+  console.log("[openPluginWindow] uiPath:", uiPath, "exists:", require("fs").existsSync(uiPath));
+  if (!installPath) {
+    console.error("[openPluginWindow] installPath is empty — cannot load UI");
+  }
+  try {
+    await win.loadURL(`file://${uiPath}`);
+  } catch (err) {
+    console.error("[openPluginWindow] loadURL failed:", err);
+  }
   win.once("ready-to-show", () => win.show());
+  // Fallback: show window after 3s even if ready-to-show didn't fire
+  setTimeout(() => { if (!win.isDestroyed() && !win.isVisible()) win.show(); }, 3000);
 
   win.on("closed", () => {
     pluginWindows.delete(pluginId);

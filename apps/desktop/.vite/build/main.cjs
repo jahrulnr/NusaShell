@@ -33872,8 +33872,19 @@ async function openPluginWindow(pluginId, name, icon, installPath, windowMode) {
     }
   });
   const uiPath = R.resolve(installPath, "ui", "index.html");
-  await win.loadURL(`file://${uiPath}`);
+  console.log("[openPluginWindow] uiPath:", uiPath, "exists:", require("fs").existsSync(uiPath));
+  if (!installPath) {
+    console.error("[openPluginWindow] installPath is empty — cannot load UI");
+  }
+  try {
+    await win.loadURL(`file://${uiPath}`);
+  } catch (err2) {
+    console.error("[openPluginWindow] loadURL failed:", err2);
+  }
   win.once("ready-to-show", () => win.show());
+  setTimeout(() => {
+    if (!win.isDestroyed() && !win.isVisible()) win.show();
+  }, 3e3);
   win.on("closed", () => {
     pluginWindows.delete(pluginId);
   });

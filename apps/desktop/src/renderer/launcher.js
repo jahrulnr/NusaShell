@@ -384,14 +384,23 @@ function closeDrawer() {
 // ============ Plugin Window (opens in separate BrowserWindow via IPC) ============
 
 async function openPluginWindow(plugin) {
-  if (plugin.state === "idle") {
-    await startPlugin(plugin.pluginId);
-  }
-  const detail = await getPluginDetail(plugin.pluginId);
-  const installPath = detail?.installPath ?? "";
-  const windowMode = detail?.manifest?.windowMode ?? "panel";
-  if (window.shell?.openPlugin) {
-    await window.shell.openPlugin(plugin.pluginId, plugin.name, plugin.icon || "🧩", installPath, windowMode);
+  try {
+    if (plugin.state === "idle") {
+      await startPlugin(plugin.pluginId);
+    }
+    const detail = await getPluginDetail(plugin.pluginId);
+    console.log("[openPluginWindow] detail:", detail);
+    const installPath = detail?.installPath ?? "";
+    const windowMode = detail?.manifest?.windowMode ?? "panel";
+    console.log("[openPluginWindow] installPath:", installPath, "windowMode:", windowMode);
+    if (window.shell?.openPlugin) {
+      const result = await window.shell.openPlugin(plugin.pluginId, plugin.name, plugin.icon || "🧩", installPath, windowMode);
+      console.log("[openPluginWindow] openPlugin result:", result);
+    } else {
+      console.error("[openPluginWindow] window.shell.openPlugin not available");
+    }
+  } catch (err) {
+    console.error("[openPluginWindow] error:", err);
   }
 }
 

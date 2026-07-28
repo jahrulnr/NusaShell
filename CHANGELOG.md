@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `electron-updater` externalized in Vite main config
 - Updater IPC exposed in preload: `window.shell.updater.checkForUpdates()`, `.quitAndInstall()`, `.getStatus()`, `.on(channel, cb)`
 - `pnpm desktop:publish` root convenience script
+- Launcher UI: "Add Plugin" modal dialog with URL and local path install flows
+- Launcher UI: uninstall button in context menu and plugin detail drawer with confirm prompt
+- Launcher UI: `plugin.installed` and `plugin.uninstalled` event handling with activity timeline entries and filter chips
+- Launcher UI: auto-update notification banner (update available, download progress, restart-to-update button)
+- Launcher UI: toast notification system for install/uninstall/update feedback
+- `plugin.installed` and `plugin.uninstalled` event schemas in contracts with `EventType` and `EventSchema` discriminated union
+- Client event mapper handles `plugin.installed` and `plugin.uninstalled` domain events
 
 ### Changed
 - `RequestMethod` type extended with `plugin.install` and `plugin.uninstall`
