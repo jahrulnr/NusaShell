@@ -1,4 +1,5 @@
-import { buildAgentContext, mergeCompactionCheckpoint, searchConversations } from "./agent-conversation-ui.js";
+import { buildAgentContext, mergeCompactionCheckpoint, renderAssistantMarkdown, searchConversations } from "./agent-conversation-ui.js";
+import { formatContextUsage } from "./ai-model-ui.js";
 
 export class AgentConversationController {
   constructor({ shell, runTurn, cancelTurn, getActiveModel, notify, log }) {
@@ -93,7 +94,7 @@ export class AgentConversationController {
 
       pending = this.appendMessage("assistant", retry ? "Retrying turn…" : "Working…", { pending: true });
       selectedModel = this.getActiveModel();
-      status.textContent = selectedModel ? `${selectedModel.providerName} · ${selectedModel.id}` : "Choose a model";
+      status.textContent = selectedModel ? formatContextUsage(estimateContextTokens(buildAgentContext(this.conversation)), selectedModel.contextWindow) : "Choose a model";
       const bubble = pending?.querySelector(".agent-bubble");
       let streamedText = "";
       const result = await this.runTurn(buildAgentContext(this.conversation), {
@@ -136,7 +137,7 @@ export class AgentConversationController {
       }
       this.appendMessage("assistant", result.text, result);
       await this.refresh();
-      status.textContent = `${selectedModel?.providerName || "Provider"} · ${result.rounds} round${result.rounds === 1 ? "" : "s"}`;
+      status.textContent = selectedModel ? formatContextUsage(estimateContextTokens(buildAgentContext(this.conversation)), selectedModel.contextWindow) : "Choose a model";
       this.log("info", `Agent turn completed trace=${result.traceId} rounds=${result.rounds}`);
     } catch (error) {
       pending?.remove();
@@ -276,6 +277,14 @@ export class AgentConversationController {
     this.activeId = conversation.id;
     this.renderThread();
     this.renderList();
+    this.updateContextStatus();
+  }
+
+  updateContextStatus() {
+    const status = $("#agent-provider-status");
+    const selectedModel = this.getActiveModel();
+    if (!status || !selectedModel) return;
+    status.textContent = formatContextUsage(estimateContextTokens(buildAgentContext(this.conversation)), selectedModel.contextWindow);
   }
 
   conversationRow(conversation) {
@@ -320,7 +329,9 @@ export class AgentConversationController {
     const label = element("div", "agent-message-meta");
     label.textContent = role === "user" ? "YOU" : (meta.pending ? "AGENT · WORKING" : "NUSASHELL AGENT");
     const bubble = element("div", "agent-bubble");
-    bubble.textContent = content || (meta.attachments?.length ? "Attached files" : "");
+    const text = content || (meta.attachments?.length ? "Attached files" : "");
+    if (role === "assistant" && !meta.pending && !meta.error) bubble.innerHTML = renderAssistantMarkdown(text);
+    else bubble.textContent = text;
     message.append(label, bubble);
     if (meta.attachments?.length) {
       const attachmentList = element("div", "agent-turn-meta");
@@ -396,6 +407,10 @@ function element(tagName, className, content) {
 
 function tag(content, extraClass = "") {
   return element("span", `agent-turn-tag${extraClass ? ` ${extraClass}` : ""}`, content);
+}
+
+function estimateContextTokens(messages = []) {
+  return Math.ceil(messages.reduce((total, message) => total + (typeof message.content === "string" ? message.content.length : JSON.stringify(message.content || "").length), 0) / 4);
 }
 
 function formatTime(timestamp) {

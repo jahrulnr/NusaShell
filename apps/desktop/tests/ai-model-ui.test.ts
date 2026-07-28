@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampModelEffort, modelCompatibility, searchModels } from "../src/renderer/ai-model-ui.js";
+import { clampModelEffort, formatContextUsage, modelCompatibility, searchModels } from "../src/renderer/ai-model-ui.js";
 
 const visionModel = {
   id: "openai/gpt-5",
@@ -21,6 +21,12 @@ describe("agent model UI projections", () => {
     expect(searchModels([visionModel], "openrouter")).toEqual([visionModel]);
     expect(searchModels([visionModel], "gpt-5")).toEqual([visionModel]);
     expect(searchModels([visionModel], "claude")).toEqual([]);
+  });
+
+  it("formats context usage as used of maximum", () => {
+    expect(formatContextUsage(12_400, 200_000)).toBe("12K/200K context");
+    expect(formatContextUsage(1_200_000, 1_000_000)).toBe("1.2M/1M context");
+    expect(formatContextUsage(0, 0)).toBe("0 ctx");
   });
 
   it("clamps unsupported effort to the model default while preserving auto", () => {

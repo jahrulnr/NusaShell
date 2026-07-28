@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.24] - 2026-07-29
+
+### Added
+- System prompt and context builder for the agent runtime: prompt files in `resources/agent/prompts/` (`system.md`, `mcp-tools.md`, `developer.md`, `compact.md`) are loaded via `FilesystemPromptLoader` and injected before conversation messages reach the provider.
+- `PromptLoaderPort` interface and `injectPrompts()` service in `@nusashell/application` — prepends static and developer prompts, applies `{{current_date}}`, `{{environment}}`, and `{{available_tools}}` template substitution to `developer.md`, preserves compaction summaries, and drops stale non-summary system messages.
+- `FilesystemPromptLoader` adapter in `@nusashell/infrastructure` — reads and caches prompt files from a configurable root (`promptsRoot` container option, defaults to `resources/agent/prompts`); loads `compact.md` lazily.
+- `tool_list` meta-tool in `McpAgentToolGateway` — lists all tool names and descriptions from a running MCP plugin without requiring a search query, complementing `tool_search` for full tool discovery.
+- `compactPrompt` option in `AgentTurnRunnerDeps` — compaction instruction loaded from `compact.md` with fallback to the built-in default.
+- 9 unit tests for `injectPrompts` and `applyVars` covering template substitution, prompt ordering, compaction summary preservation, and edge cases.
+- "System prompts" section in `docs/architecture/agent-runtime.md` documenting the prompt files, injection point, template variables, and fallback behavior.
+
+### Changed
+- `RunAgentTurnHandler` now accepts an optional `PromptLoaderPort` constructor dependency; loads prompts, resolves available meta-tool names for `{{available_tools}}`, and injects system messages before passing conversation to the runner. Falls back to raw messages on loader failure.
+- `AgentTurnRunner` compaction instruction now uses `compactPrompt` from deps when available instead of the hardcoded string.
+- `container.ts` wires `FilesystemPromptLoader` and passes it to `RunAgentTurnHandler`; `ContainerOptions` accepts optional `promptsRoot`.
+
 ## [0.0.23] - 2026-07-29
 
 ### Added

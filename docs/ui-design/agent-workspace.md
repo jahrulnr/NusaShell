@@ -16,7 +16,17 @@ The model picker searches the complete imported catalog and identifies each
 model's provider, context window, supported input modes, tool compatibility, and
 reasoning effort. Attachments are accepted only when the selected model and
 provider can handle them. A running turn streams into one pending assistant
-message and exposes a Stop action.
+message and exposes a Stop action. Completed assistant messages render
+GitHub-Flavored Markdown, including tables and code blocks; user, pending, and
+error messages remain plain text. Every scrollable renderer surface uses the
+shared graphite scrollbar with a blue hover thumb; native light scrollbars are
+not part of the NusaShell UI. The Agent view fills the shell viewport: the
+conversation list and composer remain fixed while only the message thread
+scrolls. Composer attach/stop/send actions are compact icon buttons; launcher
+search filters installed plugins by name, ID, or description, and plugin or
+editable-field right-clicks open the appropriate shell-owned context menu. The
+composer status summarizes estimated `used/max` context tokens instead of
+repeating the selected model name.
 
 ## AI providers
 

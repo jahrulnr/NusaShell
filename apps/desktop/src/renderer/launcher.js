@@ -1,8 +1,9 @@
 // NusaShell launcher renderer — connects to backend via WebSocket,
 // renders plugin grid, and handles plugin lifecycle actions.
 // Uses the native browser WebSocket (not the `ws` npm package).
-import { clampModelEffort, formatTokenCount, modelCompatibility, searchModels } from "./ai-model-ui.js";
+import { clampModelEffort, formatContextUsage, formatTokenCount, modelCompatibility, searchModels } from "./ai-model-ui.js";
 import { AgentConversationController } from "./agent-conversation-controller.js";
+import { filterLauncherPlugins, positionContextMenu } from "./launcher-ui.js";
 
 const WS_URL = window.shell?.wsUrl ?? "ws://127.0.0.1:9130";
 const PROTOCOL_VERSION = "1.0";
@@ -127,6 +128,7 @@ let logSourceFilter = "all";
 const logEntries = [];
 const STATES = ["idle", "starting", "running", "stopping", "crashed"];
 let agentConversationController = null;
+let launcherSearchQuery = "";
 let aiSettings = { activeProviderId: "", activeModelKey: "", effort: "auto", providers: [], models: [] };
 let currentProviderDetailId = "";
 let pendingProviderDeleteId = "";
@@ -404,7 +406,12 @@ function renderAppGrid() {
     grid.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:20px 0">No plugins installed. Add a plugin folder to plugins/examples/.</div>';
     return;
   }
-  plugins.forEach(p => {
+  const visiblePlugins = filterLauncherPlugins(plugins, launcherSearchQuery);
+  if (visiblePlugins.length === 0) {
+    grid.appendChild(el("div", "app-grid-empty", `No plugins match “${launcherSearchQuery}”.`));
+    return;
+  }
+  visiblePlugins.forEach(p => {
     const cell = el("button", "app-cell");
     cell.dataset.pluginId = p.pluginId;
     cell.innerHTML = `<div class="app-icon bg-blue">${renderIconHtml(p.icon || "🧩", 28)}</div><div class="app-name">${p.name}</div><div class="app-status ${p.state}">${stateBadgeHtml(p.state)}</div>`;
@@ -498,9 +505,40 @@ async function openPluginWindow(plugin) {
 function showContextMenu(x, y, plugin) {
   const menu = $("#context-menu");
   menu.style.display = "block";
-  menu.style.left = `${x}px`;
-  menu.style.top = `${y}px`;
   menu.dataset.pluginId = plugin.pluginId;
+  setContextMenuMode("plugin");
+  const point = positionContextMenu(
+    { x, y },
+    { width: menu.offsetWidth || 180, height: menu.offsetHeight || 200 },
+    { width: window.innerWidth, height: window.innerHeight },
+  );
+  menu.style.left = `${point.x}px`;
+  menu.style.top = `${point.y}px`;
+  menu.querySelector(".ctx-item")?.focus();
+}
+
+function showEditContextMenu(x, y) {
+  const menu = $("#context-menu");
+  menu.style.display = "block";
+  delete menu.dataset.pluginId;
+  setContextMenuMode("edit");
+  const point = positionContextMenu(
+    { x, y },
+    { width: menu.offsetWidth || 180, height: menu.offsetHeight || 150 },
+    { width: window.innerWidth, height: window.innerHeight },
+  );
+  menu.style.left = `${point.x}px`;
+  menu.style.top = `${point.y}px`;
+}
+
+function setContextMenuMode(mode) {
+  const menu = $("#context-menu");
+  $$("#context-menu .ctx-item").forEach((item) => {
+    const action = item.dataset.action;
+    const isEditAction = ["cut", "copy", "paste"].includes(action);
+    item.hidden = mode === "edit" ? !isEditAction : isEditAction;
+  });
+  $$("#context-menu .ctx-divider").forEach((divider) => divider.hidden = mode === "edit");
 }
 
 function hideContextMenu() { $("#context-menu").style.display = "none"; }
@@ -798,7 +836,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const renderAgentModelPicker = () => {
     const selected = activeModel();
     $("#agent-model-trigger-label").textContent = `${selected?.id || "Choose model"} · ${aiSettings.effort || "auto"}`;
-    $("#agent-provider-status").textContent = selected ? `${selected.providerName} · ${selected.id}` : "Choose a model";
+    $("#agent-provider-status").textContent = selected ? formatContextUsage(estimateContextTokens(), selected.contextWindow) : "Choose a model";
     const list = $("#agent-model-list");
     list.textContent = "";
     const models = searchModels(aiSettings.models, $("#agent-model-search").value);
@@ -1088,10 +1126,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Context menu
   document.addEventListener("click", hideContextMenu);
+  document.addEventListener("contextmenu", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement) || !target.closest("input, textarea")) return;
+    event.preventDefault();
+    showEditContextMenu(event.clientX, event.clientY);
+  });
   $$(".ctx-item").forEach(item => item.addEventListener("click", (e) => {
     e.stopPropagation();
     const action = item.dataset.action;
     const id = $("#context-menu").dataset.pluginId;
+    if (!id && ["cut", "copy", "paste"].includes(action)) {
+      document.execCommand(action);
+      hideContextMenu();
+      return;
+    }
     const p = plugins.find(pp => pp.pluginId === id);
     if (!p && action !== "uninstall") return;
     switch (action) {
@@ -1139,15 +1188,25 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Search
   const searchInput = $("#search-input");
+  const searchClear = $("#search-clear");
   if (searchInput) {
     searchInput.addEventListener("input", () => {
-      const q = searchInput.value.toLowerCase();
-      $$("#app-grid .app-cell").forEach(cell => {
-        const name = cell.querySelector(".app-name")?.textContent.toLowerCase() || "";
-        cell.style.display = !q || name.includes(q) ? "" : "none";
-      });
+      launcherSearchQuery = searchInput.value;
+      searchClear.hidden = !launcherSearchQuery;
+      renderAppGrid();
+    });
+    searchInput.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && launcherSearchQuery) {
+        searchInput.value = "";
+        searchInput.dispatchEvent(new Event("input"));
+      }
     });
   }
+  searchClear?.addEventListener("click", () => {
+    searchInput.value = "";
+    searchInput.dispatchEvent(new Event("input"));
+    searchInput.focus();
+  });
 
   // Version
   getVersion().then(v => {

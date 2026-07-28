@@ -21,7 +21,8 @@
     "@nusashell/backend": "workspace:*",
     "@nusashell/plugin-sdk": "workspace:*",
     "@nusashell/contracts": "workspace:*",
-    "electron-updater": "^6.3.9"
+    "electron-updater": "^6.3.9",
+    "markdown-it": "14.3.0"
   },
   "devDependencies": {
     "@electron-forge/cli": "^7.6.0",

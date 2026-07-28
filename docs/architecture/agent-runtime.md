@@ -110,6 +110,32 @@ Provider connections, imported models, selected model, and effort are persisted
 through the dedicated Electron provider registry. API keys use Electron
 `safeStorage`; the renderer receives only masked availability.
 
+## System prompts
+
+`RunAgentTurnHandler` loads prompt files from `resources/agent/prompts/` via
+`FilesystemPromptLoader` and injects them before conversation messages reach the
+runner. The injection point is the application layer (backend), not the renderer.
+
+| File | Role | Template vars |
+| --- | --- | --- |
+| `system.md` | Agent identity, product context, what the agent can do | No |
+| `mcp-tools.md` | Progressive MCP tool workflow: discovery → grant → call | No |
+| `developer.md` | Runtime context: date, environment, available meta-tool names | Yes |
+| `compact.md` | Compaction instruction for the checkpoint LLM call | No |
+
+`developer.md` is the single injection surface for `{{current_date}}`,
+`{{environment}}`, and `{{available_tools}}` template variables. Static prompts
+are injected as-is. Compaction summary messages from prior turns are preserved
+between the developer prompt and user messages. Non-summary system messages from
+the conversation are dropped to avoid duplicate or stale instructions.
+
+If the prompt loader fails (missing files, I/O error), the handler logs a
+warning and sends the raw conversation messages without injected prompts.
+
+The compaction prompt (`compact.md`) replaces the previously hardcoded
+compaction instruction string in `AgentTurnRunner`. If the file is absent, the
+runner falls back to the built-in default.
+
 ## Stability boundary
 
 Tools, prompts, resources, resource templates, completion, and logging are the

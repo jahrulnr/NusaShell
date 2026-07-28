@@ -3,6 +3,7 @@ import {
   buildAgentContext,
   mergeCompactionCheckpoint,
   searchConversations,
+  renderAssistantMarkdown,
 } from "../src/renderer/agent-conversation-ui.js";
 
 describe("agent conversation UI helpers", () => {
@@ -41,6 +42,11 @@ describe("agent conversation UI helpers", () => {
     ];
 
     expect(searchConversations(conversations, "mcp").map((item) => item.id)).toEqual(["1"]);
+  });
+
+  it("renders GFM tables while keeping raw HTML as text", () => {
+    expect(renderAssistantMarkdown("## Tools\n\n| Tool | Function |\n| --- | --- |\n| **createNote** | Create a note |\n\n<script>alert(1)</script>")).toContain("<table>");
+    expect(renderAssistantMarkdown("<script>alert(1)</script>")).toContain("&lt;script&gt;");
   });
 
   it("restores persisted image and document attachments as provider content parts", () => {

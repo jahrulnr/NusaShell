@@ -12,3 +12,4 @@ export type {
   ReasoningEffort,
 } from "./agent-provider.port.js";
 export type { AgentToolGateway } from "./agent-tool-gateway.port.js";
+export type { AgentPrompt, PromptLoaderPort } from "./prompt-loader.port.js";

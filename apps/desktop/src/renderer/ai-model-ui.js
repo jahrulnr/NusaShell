@@ -39,6 +39,12 @@ export function formatTokenCount(value) {
   return String(value);
 }
 
+export function formatContextUsage(usedTokens, contextWindow) {
+  const used = Number.isFinite(usedTokens) && usedTokens > 0 ? usedTokens : 0;
+  const limit = formatTokenCount(contextWindow);
+  return limit ? `${formatTokenCount(used)}/${limit} context` : `${used} ctx`;
+}
+
 function normalize(value) {
   return String(value || "").trim().toLowerCase();
 }

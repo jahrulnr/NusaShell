@@ -39,7 +39,8 @@
         <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
         <path d="M20 20L16.65 16.65" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
       </svg>
-      <input type="text" placeholder="Search apps..." id="search-input" />
+      <input type="search" placeholder="Search apps, ids, or descriptions..." id="search-input" autocomplete="off" />
+      <button class="search-clear" id="search-clear" type="button" aria-label="Clear app search" hidden>×</button>
     </div>
 
     <div class="titlebar-actions">
@@ -154,7 +155,9 @@
                 <div class="agent-panel-label" id="agent-conversations-title">Conversations</div>
                 <span class="agent-conversation-count" id="agent-conversation-count">0 threads</span>
               </div>
-              <button class="agent-new-conversation" id="agent-new-conversation" type="button" aria-label="New conversation">+</button>
+              <button class="agent-new-conversation" id="agent-new-conversation" type="button" aria-label="New conversation" title="New conversation">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+              </button>
             </div>
             <label class="agent-conversation-search"><span aria-hidden="true">⌕</span><input id="agent-conversation-search" type="search" placeholder="Search conversations…" autocomplete="off"></label>
             <div class="agent-conversation-list" id="agent-conversation-list" role="list"></div>
@@ -175,7 +178,9 @@
               <div class="agent-attachments" id="agent-attachments" aria-live="polite"></div>
               <input class="sr-only" id="agent-file-input" type="file" accept="image/*,application/pdf" multiple>
               <div class="agent-composer-footer">
-                <button class="agent-attach-btn" id="agent-attach-btn" type="button" aria-label="Attach images or PDF">＋ Attach</button>
+                <button class="agent-attach-btn" id="agent-attach-btn" type="button" aria-label="Attach images or PDF" title="Attach images or PDF">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="m21 11-8.5 8.5a5.25 5.25 0 0 1-7.4-7.4l8.5-8.5a3.5 3.5 0 0 1 4.95 4.95l-8.5 8.5a1.75 1.75 0 0 1-2.48-2.48l8-8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
                 <div class="agent-model-control">
                   <button class="agent-model-trigger" id="agent-model-trigger" type="button" aria-haspopup="dialog" aria-expanded="false"><span id="agent-model-trigger-label">Model · auto</span><span aria-hidden="true">⌄</span></button>
                   <div class="agent-model-menu" id="agent-model-menu" role="dialog" aria-label="Choose model and effort" hidden>
@@ -184,11 +189,12 @@
                   </div>
                 </div>
                 <span class="agent-provider-status" id="agent-provider-status">Choose a model</span>
-                <span class="agent-key-hint">Ctrl + Enter to send</span>
-                <button class="agent-stop-btn" id="agent-stop-btn" type="button" hidden>Stop</button>
-                <button class="agent-send-btn" id="agent-send-btn" type="submit">
-                  Send turn
-                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span class="agent-key-hint">Ctrl + Enter</span>
+                <button class="agent-stop-btn" id="agent-stop-btn" type="button" aria-label="Stop turn" title="Stop turn" hidden>
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
+                </button>
+                <button class="agent-send-btn" id="agent-send-btn" type="submit" aria-label="Send turn" title="Send turn">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button>
               </div>
             </form>
@@ -352,6 +358,10 @@
 
     <!-- ===== Context Menu ===== -->
     <div class="context-menu" id="context-menu" style="display:none">
+      <button class="ctx-item" data-action="cut">Cut</button>
+      <button class="ctx-item" data-action="copy">Copy</button>
+      <button class="ctx-item" data-action="paste">Paste</button>
+      <div class="ctx-divider"></div>
       <button class="ctx-item" data-action="open">Open</button>
       <button class="ctx-item" data-action="start">Start</button>
       <button class="ctx-item" data-action="stop">Force Stop</button>

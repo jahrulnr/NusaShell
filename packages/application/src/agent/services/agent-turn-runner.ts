@@ -65,6 +65,7 @@ export interface AgentTurnRunnerDeps {
   readonly logger?: LoggerPort;
   readonly defaultMaxToolRounds?: number;
   readonly context?: AgentContextOptions;
+  readonly compactPrompt?: string;
 }
 
 const DEFAULT_MAX_TOOL_ROUNDS = 8;
@@ -290,7 +291,7 @@ export class AgentTurnRunner {
         messages: [
           {
             role: "system",
-            content: "Create a concise context checkpoint for another AI. Preserve goals, decisions, constraints, important tool results, and unfinished work. Reply with the checkpoint only.",
+            content: this.deps.compactPrompt ?? "Create a concise context checkpoint for another AI. Preserve goals, decisions, constraints, important tool results, and unfinished work. Reply with the checkpoint only.",
           },
           { role: "user", content: excerpt },
         ],

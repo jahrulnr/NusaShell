@@ -102,6 +102,8 @@ export type {
   AgentProviderRegistryPort,
   ReasoningEffort,
   AgentToolGateway,
+  AgentPrompt,
+  PromptLoaderPort,
   AgentTurnRunnerDeps,
   RunAgentTurnInput,
   AgentTurnResult,
@@ -109,6 +111,7 @@ export type {
   AgentTurnWorker,
   AgentProviderStrategy,
   RoutedAgentProviderOptions,
+  PromptVars,
   RunAgentTurnCommand,
   CancelAgentTurnCommand,
   CancelAgentTurnResult,
@@ -121,6 +124,8 @@ export {
   AgentTurnCoordinator,
   RunAgentTurnHandler,
   CancelAgentTurnHandler,
+  injectPrompts,
+  applyVars,
 } from "./agent/index.js";
 
 // Config

@@ -11,6 +11,8 @@ export type {
   AgentProviderRegistryPort,
   ReasoningEffort,
   AgentToolGateway,
+  AgentPrompt,
+  PromptLoaderPort,
 } from "./ports/index.js";
 export {
   AgentTurnRunner,
@@ -26,6 +28,9 @@ export {
   type AgentToolExecution,
   type AgentProviderStrategy,
   type RoutedAgentProviderOptions,
+  injectPrompts,
+  applyVars,
+  type PromptVars,
 } from "./services/index.js";
 export type { AgentTurnWorker } from "./services/index.js";
 export type {

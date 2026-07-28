@@ -8,6 +8,7 @@ import {
   SqlitePluginRepository,
   PluginInstaller,
   PluginSyncService,
+  FilesystemPromptLoader,
   createLogger,
   AgentProviderRegistry,
   StaticAgentProvider,
@@ -57,6 +58,7 @@ export interface ContainerOptions {
   readonly port: number;
   readonly host?: string;
   readonly pluginsRoot?: string;
+  readonly promptsRoot?: string;
   readonly dbPath?: string;
   readonly logLevel?: string;
   readonly loggerObserver?: LogObserver;
@@ -165,6 +167,9 @@ export function createContainer(options: ContainerOptions): Container {
     logger,
   });
   const agentToolGateway = new McpAgentToolGateway(runtimeManager);
+  const promptLoader = new FilesystemPromptLoader(
+    options.promptsRoot ?? new URL("../../resources/agent/prompts", import.meta.url).pathname,
+  );
   const agentProviders: AgentProvider[] = options.ai?.stubEnabled ? [new StaticAgentProvider()] : [];
   if (options.ai?.baseUrl) {
     agentProviders.push(new OpenAiCompatibleAgentProvider({
@@ -201,6 +206,7 @@ export function createContainer(options: ContainerOptions): Container {
     (traceId, delta) => {
       void eventDispatcher.publish(createAgentTextDeltaEvent(traceId, delta));
     },
+    promptLoader,
   ));
   commandBus.register("cancel-agent-turn", new CancelAgentTurnHandler(agentTurnCoordinator));
   if (pluginInstaller) {

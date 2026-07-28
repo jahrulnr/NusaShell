@@ -1,3 +1,11 @@
+import markdownit from "markdown-it";
+
+const assistantMarkdown = markdownit({ html: false });
+
+export function renderAssistantMarkdown(content) {
+  return assistantMarkdown.render(String(content ?? ""));
+}
+
 /**
  * Build the provider-visible context without restoring messages already covered
  * by a durable compaction checkpoint.
