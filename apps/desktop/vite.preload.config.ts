@@ -10,6 +10,9 @@ export default defineConfig({
     },
     rollupOptions: {
       external: ["electron"],
+      output: {
+        entryFileNames: "preload.cjs",
+      },
     },
     emptyOutDir: false,
   },

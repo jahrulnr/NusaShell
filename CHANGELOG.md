@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.18] - 2026-07-29
+
+### Fixed
+- Plugin popup window now opens correctly when clicking a plugin icon
+- Preload script output forced to `preload.cjs` via `entryFileNames` in Vite preload config — Electron cannot `require()` ESM `.js` files when `package.json` has `"type": "module"`
+- Removed `index.js` fallback for preload path — only `preload.cjs` is valid
+- `openPluginWindow` no longer blocks on `getPluginDetail` WS call (which raced with `startLocked`); uses `plugin.installPath` from `plugin.list` response directly
+- `handlePluginEvent` now checks `payload.newState` (from `plugin.state_changed` events) in addition to `payload.state`
+- `PluginRuntimeManager.doStart` logging fixed: `this.logger` → `this.deps.logger` with correct `LoggerPort` signature
+- `StdioMcpClient.connect()` no longer hangs — added timeout and transport-close detection
+- WebSocket server handles messages concurrently so `plugin.start` doesn't block `plugin.get`
+- Plugin MCP server stopped via WS when plugin window closes (`keepAliveOnClose: false`)
+- Hardcoded WS port replaced with `NUSASHELL_PORT` env var in window cleanup
+
 ## [0.0.17] - 2026-07-29
 
 ### Added

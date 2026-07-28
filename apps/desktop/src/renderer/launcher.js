@@ -388,12 +388,9 @@ async function openPluginWindow(plugin) {
     if (plugin.state === "idle") {
       startPlugin(plugin.pluginId).catch((e) => console.error("[openPluginWindow] startPlugin error:", e));
     }
-    // Use installPath from list response as primary — plugin.get may race with startLocked
-    const detail = await getPluginDetail(plugin.pluginId);
-    const installPath = plugin.installPath || detail?.installPath || "";
-    const windowMode = "panel";
+    const installPath = plugin.installPath || "";
     if (window.shell?.openPlugin) {
-      await window.shell.openPlugin(plugin.pluginId, plugin.name, plugin.icon || "🧩", installPath, windowMode);
+      await window.shell.openPlugin(plugin.pluginId, plugin.name, plugin.icon || "🧩", installPath, "panel");
     }
   } catch (err) {
     console.error("[openPluginWindow] error:", err);
