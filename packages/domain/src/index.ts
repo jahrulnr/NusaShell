@@ -43,6 +43,7 @@ export { PluginLifecyclePolicy } from "./plugin/services/plugin-lifecycle-policy
 
 // Plugin events
 export { PluginInstalledEvent } from "./plugin/events/plugin-installed.event.js";
+export { PluginUninstalledEvent } from "./plugin/events/plugin-uninstalled.event.js";
 export { PluginStartedEvent } from "./plugin/events/plugin-started.event.js";
 export { PluginStoppedEvent } from "./plugin/events/plugin-stopped.event.js";
 export { PluginCrashedEvent } from "./plugin/events/plugin-crashed.event.js";

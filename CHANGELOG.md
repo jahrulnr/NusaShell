@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.17] - 2026-07-29
+
+### Added
+- Plugin installation from URL: `plugin.install` command with `source: "url"` downloads and extracts zip/tar.gz archives
+- Plugin installation from local path: `plugin.install` command with `source: "local"` installs from a local directory or archive file
+- Plugin uninstallation: `plugin.uninstall` command removes a plugin from the plugins directory
+- `PluginInstaller` infrastructure adapter — downloads URLs, extracts `.zip` (via `adm-zip`) and `.tar.gz`/`.tgz` (via `tar`), validates manifest, copies to plugins root
+- `PluginInstallerPort` application port interface for install/uninstall operations
+- `InstallPluginCommand`/`InstallPluginHandler` and `UninstallPluginCommand`/`UninstallPluginHandler` in application layer
+- `PluginUninstalledEvent` domain event
+- `PluginInstallRequestSchema`, `PluginUninstallRequestSchema` in contracts with `plugin.install` and `plugin.uninstall` request methods
+- `PluginInstallResultSchema`, `PluginUninstallResultSchema` response schemas
+- `PluginsApi.install()` and `PluginsApi.uninstall()` in plugin-sdk
+- Command mapper handles `plugin.install` and `plugin.uninstall` methods
+- Container wires `PluginInstaller` + install/uninstall handlers when `pluginsRoot` is configured
+- Auto-update via `electron-updater`: `AppUpdater` module in desktop main process checks for updates on startup (packaged only), auto-downloads, and notifies renderer via IPC
+- `@electron-forge/publisher-github` configured in `forge.config.ts` for publishing to GitHub Releases
+- `electron-updater` externalized in Vite main config
+- Updater IPC exposed in preload: `window.shell.updater.checkForUpdates()`, `.quitAndInstall()`, `.getStatus()`, `.on(channel, cb)`
+- `pnpm desktop:publish` root convenience script
+
+### Changed
+- `RequestMethod` type extended with `plugin.install` and `plugin.uninstall`
+- `RequestSchema` discriminated union includes `PluginInstallRequestSchema` and `PluginUninstallRequestSchema`
+- Infrastructure `package.json` adds `adm-zip`, `tar` dependencies and `@types/adm-zip`, `@types/tar` dev dependencies
+- Desktop `package.json` adds `electron-updater` dependency and `@electron-forge/publisher-github` dev dependency
+- Removed stale `pnpm.onlyBuiltDependencies` from root `package.json` (already in `pnpm-workspace.yaml` as `allowBuilds`)
+
+## [0.0.16] - 2026-07-29
+
+### Added
+- Electron Forge integration with Vite plugin for bundling main, preload, and renderer
+- `forge.config.ts` with AppImage + deb makers for Linux packaging
+- Vite configs: `vite.main.config.ts`, `vite.preload.config.ts`, `vite.renderer.config.ts`
+- `@electron/rebuild` for native module (`better-sqlite3`) ABI compatibility in packaged builds
+- Plugin examples bundled as extra resources via `packagerConfig.extraResource`
+- Root convenience scripts: `pnpm desktop:dev`, `pnpm desktop:make`
+
+### Changed
+- Dev script now uses `electron-forge start` instead of raw `electron .`
+- Main process entry changed from `electron-entry.mjs` (tsx loader) to `.vite/build/main.cjs` (Vite CJS output)
+- `window-manager.ts` uses Forge Vite dev server URL in dev mode, file loading in production
+- `pnpm-workspace.yaml` — added `nodeLinker: hoisted` for Forge compatibility
+- `.npmrc` — added `node-linker=hoisted`
+- `tsconfig.json` — includes `forge.config.ts` and `vite.*.config.ts`
+- `--no-sandbox` flag added to dev script for Linux chrome-sandbox SUID fix
+
+### Removed
+- `electron-entry.mjs` — replaced by Forge + Vite build pipeline
+
 ## [0.0.15] - 2026-07-29
 
 ### Added

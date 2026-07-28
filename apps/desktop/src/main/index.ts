@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
 import { resolve } from "node:path";
 import { bootstrap, type BootstrapResult } from "@nusashell/backend";
 import {
@@ -6,12 +6,20 @@ import {
   closeAllPluginWindows,
   registerWindowIpc,
 } from "./window-manager.js";
+import { AppUpdater } from "./updater.js";
 
 let backend: BootstrapResult | null = null;
+let updater: AppUpdater | null = null;
 const isDev = process.argv.includes("--dev");
 
+if (isDev) {
+  app.commandLine.appendSwitch("no-sandbox");
+}
+
 async function startBackend(): Promise<BootstrapResult> {
-  const pluginsRoot = resolve(__dirname, "..", "..", "..", "..", "plugins", "examples");
+  const pluginsRoot = app.isPackaged
+    ? resolve(process.resourcesPath, "plugins", "examples")
+    : resolve(__dirname, "..", "..", "..", "..", "plugins", "examples");
   return bootstrap({
     config: {
       port: 9130,
@@ -42,6 +50,14 @@ app.whenReady().then(async () => {
   await waitForBackend(backend.config.port);
 
   createLauncherWindow();
+
+  if (app.isPackaged) {
+    updater = new AppUpdater();
+    ipcMain.handle("updater:check", async () => updater?.checkForUpdates());
+    ipcMain.handle("updater:quit-install", () => updater?.quitAndInstall());
+    ipcMain.handle("updater:status", () => updater?.getStatus());
+    void updater.checkForUpdates();
+  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

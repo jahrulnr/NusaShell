@@ -12,4 +12,21 @@ contextBridge.exposeInMainWorld("shell", {
   closePlugin(pluginId) {
     return ipcRenderer.invoke("window:close-plugin", pluginId);
   },
+  updater: {
+    checkForUpdates() {
+      return ipcRenderer.invoke("updater:check");
+    },
+    quitAndInstall() {
+      return ipcRenderer.invoke("updater:quit-install");
+    },
+    getStatus() {
+      return ipcRenderer.invoke("updater:status");
+    },
+    on(channel, callback) {
+      const validChannels = ["update-available", "update-not-available", "download-progress", "update-downloaded", "update-error"];
+      if (validChannels.includes(channel)) {
+        ipcRenderer.on(`updater:${channel}`, (_event, data) => callback(data));
+      }
+    },
+  },
 });

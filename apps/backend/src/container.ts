@@ -6,6 +6,7 @@ import {
   FilesystemPluginRegistry,
   SqliteDatabase,
   SqlitePluginRepository,
+  PluginInstaller,
   createLogger,
   type Logger,
 } from "@nusashell/infrastructure";
@@ -18,6 +19,8 @@ import {
   StartPluginHandler,
   StopPluginHandler,
   RestartPluginHandler,
+  InstallPluginHandler,
+  UninstallPluginHandler,
   ListPluginsHandler,
   GetPluginHandler,
   GetPluginStateHandler,
@@ -75,6 +78,10 @@ export function createContainer(options: ContainerOptions): Container {
 
   const eventDispatcher = new EventDispatcher();
 
+  const pluginInstaller = options.pluginsRoot
+    ? new PluginInstaller(options.pluginsRoot, logger)
+    : null;
+
   const runtimeManager = new PluginRuntimeManager({
     pluginRepository,
     processAdapter,
@@ -90,6 +97,10 @@ export function createContainer(options: ContainerOptions): Container {
   commandBus.register("restart-plugin", new RestartPluginHandler(runtimeManager));
   commandBus.register("call-tool", new CallToolHandler(runtimeManager));
   commandBus.register("cancel-tool-call", new CancelToolCallHandler(runtimeManager));
+  if (pluginInstaller) {
+    commandBus.register("install-plugin", new InstallPluginHandler(pluginInstaller, eventDispatcher, clock));
+    commandBus.register("uninstall-plugin", new UninstallPluginHandler(pluginInstaller, eventDispatcher, clock));
+  }
 
   const queryBus = new QueryBus();
   queryBus.register("list-plugins", new ListPluginsHandler(runtimeManager));

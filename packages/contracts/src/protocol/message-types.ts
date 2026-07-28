@@ -4,6 +4,8 @@ export type RequestMethod =
   | "plugin.start"
   | "plugin.stop"
   | "plugin.restart"
+  | "plugin.install"
+  | "plugin.uninstall"
   | "plugin.list"
   | "plugin.get"
   | "plugin.state"

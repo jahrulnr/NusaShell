@@ -3,12 +3,14 @@ import type {
   StartPluginCommand,
   StopPluginCommand,
   RestartPluginCommand,
+  InstallPluginCommand,
+  UninstallPluginCommand,
   CallToolCommand,
   CancelToolCallCommand,
 } from "@nusashell/application";
 
 export function mapToCommand(request: ParsedRequest):
-  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | CallToolCommand | CancelToolCallCommand }
+  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | CallToolCommand | CancelToolCallCommand }
   | { kind: "query" } {
   switch (request.method) {
     case "plugin.start":
@@ -34,6 +36,23 @@ export function mapToCommand(request: ParsedRequest):
           kind: "restart-plugin",
           pluginId: request.payload.pluginId,
         } as RestartPluginCommand,
+      };
+    case "plugin.install":
+      return {
+        kind: "command",
+        command: {
+          kind: "install-plugin",
+          source: request.payload.source,
+          path: request.payload.path,
+        } as InstallPluginCommand,
+      };
+    case "plugin.uninstall":
+      return {
+        kind: "command",
+        command: {
+          kind: "uninstall-plugin",
+          pluginId: request.payload.pluginId,
+        } as UninstallPluginCommand,
       };
     case "tool.call":
       return {

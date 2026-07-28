@@ -1,4 +1,4 @@
-import type { ParsedEvent, EventType, PluginListItem, PluginStateResultDto, PluginGetResultDto, ToolCallResultDto, ToolListResultDto } from "@nusashell/contracts";
+import type { ParsedEvent, EventType, PluginListItem, PluginStateResultDto, PluginGetResultDto, PluginInstallResult, PluginUninstallResult, ToolCallResultDto, ToolListResultDto } from "@nusashell/contracts";
 import { NusaClient } from "../client/nusa-client.js";
 
 export class PluginsApi {
@@ -18,6 +18,14 @@ export class PluginsApi {
 
   restart(pluginId: string, timeoutMs?: number): Promise<PluginStateResultDto> {
     return this.client.request("plugin.restart", { pluginId }, timeoutMs);
+  }
+
+  install(source: "url" | "local", path: string, timeoutMs?: number): Promise<PluginInstallResult> {
+    return this.client.request("plugin.install", { source, path }, timeoutMs);
+  }
+
+  uninstall(pluginId: string, timeoutMs?: number): Promise<PluginUninstallResult> {
+    return this.client.request("plugin.uninstall", { pluginId }, timeoutMs);
   }
 
   get(pluginId: string, timeoutMs?: number): Promise<PluginGetResultDto> {

@@ -1,5 +1,6 @@
 export type {
   PluginRepositoryPort,
+  PluginInstallerPort,
   PluginProcessPort,
   ProcessHandle,
   McpClientPort,
@@ -23,8 +24,18 @@ export type {
   StopPluginResult,
   RestartPluginCommand,
   RestartPluginResult,
+  InstallPluginCommand,
+  InstallPluginResult,
+  UninstallPluginCommand,
+  UninstallPluginResult,
 } from "./commands/index.js";
-export { StartPluginHandler, StopPluginHandler, RestartPluginHandler } from "./commands/index.js";
+export {
+  StartPluginHandler,
+  StopPluginHandler,
+  RestartPluginHandler,
+  InstallPluginHandler,
+  UninstallPluginHandler,
+} from "./commands/index.js";
 export type {
   ListPluginsQuery,
   ListPluginsResult,

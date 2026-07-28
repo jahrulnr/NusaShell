@@ -18,6 +18,15 @@ export const PluginStopResultSchema = z.object({
   state: PluginStateSchema,
 });
 
+export const PluginInstallResultSchema = z.object({
+  pluginId: z.string(),
+  installPath: z.string(),
+});
+
+export const PluginUninstallResultSchema = z.object({
+  pluginId: z.string(),
+});
+
 export const PluginListItemSchema = z.object({
   pluginId: z.string(),
   name: z.string(),
@@ -64,6 +73,8 @@ export const ResponseSchema = z.discriminatedUnion("ok", [
 
 export type PluginStartResult = z.infer<typeof PluginStartResultSchema>;
 export type PluginStopResult = z.infer<typeof PluginStopResultSchema>;
+export type PluginInstallResult = z.infer<typeof PluginInstallResultSchema>;
+export type PluginUninstallResult = z.infer<typeof PluginUninstallResultSchema>;
 export type PluginListItem = z.infer<typeof PluginListItemSchema>;
 export type PluginListResult = z.infer<typeof PluginListResultSchema>;
 export type ToolCallResult = z.infer<typeof ToolCallResultSchema>;

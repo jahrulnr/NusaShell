@@ -29,6 +29,7 @@ export {
 // Plugin use cases + ports + services
 export type {
   PluginRepositoryPort,
+  PluginInstallerPort,
   PluginProcessPort,
   ProcessHandle,
   McpClientPort,
@@ -47,6 +48,8 @@ export {
   StartPluginHandler,
   StopPluginHandler,
   RestartPluginHandler,
+  InstallPluginHandler,
+  UninstallPluginHandler,
   ListPluginsHandler,
   GetPluginHandler,
   GetPluginStateHandler,
@@ -56,6 +59,10 @@ export {
   type StopPluginResult,
   type RestartPluginCommand,
   type RestartPluginResult,
+  type InstallPluginCommand,
+  type InstallPluginResult,
+  type UninstallPluginCommand,
+  type UninstallPluginResult,
   type ListPluginsQuery,
   type ListPluginsResult,
   type PluginListItem,

@@ -1,8 +1,10 @@
 import { BrowserWindow, ipcMain } from "electron";
 import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 
-const RENDERER_DIR = join(__dirname, "..", "renderer");
+const isDev = process.argv.includes("--dev");
+
+const RENDERER_DIST = join(__dirname, "..", "renderer");
+const PRELOAD_PATH = join(__dirname, "preload.cjs");
 
 let launcherWindow: BrowserWindow | null = null;
 const pluginWindows = new Map<string, BrowserWindow>();
@@ -16,14 +18,19 @@ export function createLauncherWindow(): BrowserWindow {
     show: false,
     title: "NusaShell",
     webPreferences: {
-      preload: join(__dirname, "..", "preload", "index.cjs"),
+      preload: PRELOAD_PATH,
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
     },
   });
 
-  launcherWindow.loadFile(join(RENDERER_DIR, "index.html"));
+  const devServerUrl = MAIN_WINDOW_VITE_DEV_SERVER_URL;
+  if (isDev && devServerUrl) {
+    void launcherWindow.loadURL(devServerUrl);
+  } else {
+    void launcherWindow.loadFile(join(RENDERER_DIST, "index.html"));
+  }
   launcherWindow.once("ready-to-show", () => launcherWindow?.show());
 
   launcherWindow.on("closed", () => {
@@ -62,7 +69,7 @@ export async function openPluginWindow(
     show: false,
     ...(launcherWindow ? { parent: launcherWindow } : {}),
     webPreferences: {
-      preload: join(__dirname, "..", "preload", "index.cjs"),
+      preload: PRELOAD_PATH,
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
@@ -70,7 +77,7 @@ export async function openPluginWindow(
   });
 
   const uiPath = resolve(installPath, "ui", "index.html");
-  await win.loadURL(pathToFileURL(uiPath).href);
+  await win.loadURL(`file://${uiPath}`);
   win.once("ready-to-show", () => win.show());
 
   win.on("closed", () => {

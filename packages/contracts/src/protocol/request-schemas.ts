@@ -63,6 +63,27 @@ export const PluginRestartRequestSchema = z.object({
   }),
 });
 
+export const PluginInstallRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("plugin.install"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    source: z.enum(["url", "local"]),
+    path: z.string().min(1),
+  }),
+});
+
+export const PluginUninstallRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("plugin.uninstall"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    pluginId: z.string().min(1),
+  }),
+});
+
 export const PluginGetRequestSchema = z.object({
   kind: z.literal("request"),
   id: z.string().min(1),
@@ -134,6 +155,8 @@ export const RequestSchema = z.discriminatedUnion("method", [
   PluginStopRequestSchema,
   PluginListRequestSchema,
   PluginRestartRequestSchema,
+  PluginInstallRequestSchema,
+  PluginUninstallRequestSchema,
   PluginGetRequestSchema,
   PluginStateRequestSchema,
   ToolCallRequestSchema,
@@ -149,6 +172,8 @@ export type PluginStartRequest = z.infer<typeof PluginStartRequestSchema>;
 export type PluginStopRequest = z.infer<typeof PluginStopRequestSchema>;
 export type PluginListRequest = z.infer<typeof PluginListRequestSchema>;
 export type PluginRestartRequest = z.infer<typeof PluginRestartRequestSchema>;
+export type PluginInstallRequest = z.infer<typeof PluginInstallRequestSchema>;
+export type PluginUninstallRequest = z.infer<typeof PluginUninstallRequestSchema>;
 export type PluginGetRequest = z.infer<typeof PluginGetRequestSchema>;
 export type PluginStateRequest = z.infer<typeof PluginStateRequestSchema>;
 export type ToolCallRequest = z.infer<typeof ToolCallRequestSchema>;

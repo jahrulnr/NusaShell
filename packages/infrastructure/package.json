@@ -17,12 +17,16 @@
     "@nusashell/application": "workspace:*",
     "@nusashell/contracts": "workspace:*",
     "@nusashell/domain": "workspace:*",
+    "adm-zip": "^0.5.16",
     "better-sqlite3": "^13.0.1",
-    "pino": "^9.5.0"
+    "pino": "^9.5.0",
+    "tar": "^7.4.3"
   },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
+    "@types/tar": "^6.1.13",
     "tsx": "^4.19.0",
     "tsup": "^8.3.5",
     "typescript": "^5.9.2",

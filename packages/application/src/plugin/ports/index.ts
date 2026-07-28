@@ -1,4 +1,5 @@
 export type { PluginRepositoryPort } from "./plugin-repository.port.js";
+export type { PluginInstallerPort } from "./plugin-installer.port.js";
 export type {
   PluginProcessPort,
   ProcessHandle,
