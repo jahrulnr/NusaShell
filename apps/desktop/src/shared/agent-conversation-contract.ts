@@ -15,6 +15,7 @@ export interface AgentConversationMessage {
   readonly traceId?: string;
   readonly model?: string;
   readonly rounds?: number;
+  readonly reasoning?: string;
   readonly toolCalls?: readonly {
     readonly id: string;
     readonly name: string;

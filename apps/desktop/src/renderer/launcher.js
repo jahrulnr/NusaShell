@@ -8,6 +8,7 @@ import {
   countLogsBySource,
   filterLauncherPlugins,
   positionContextMenu,
+  providerApiModes,
 } from "./launcher-ui.js";
 
 const WS_URL = window.shell?.wsUrl ?? "ws://127.0.0.1:9130";
@@ -799,10 +800,10 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   const providerPresets = {
-    openrouter: { id: "openrouter", type: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", api: "chat", detail: "API key · OpenAI-compatible chat", apiKeyOptional: false },
-    omniroute: { id: "omniroute", type: "omniroute", label: "OmniRoute", baseUrl: "http://127.0.0.1:20128/v1", api: "responses", detail: "Local OpenAI-compatible Responses gateway", apiKeyOptional: true },
+    openrouter: { id: "openrouter", type: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", api: "chat", detail: "API key · OpenAI-compatible endpoint", apiKeyOptional: false },
+    omniroute: { id: "omniroute", type: "omniroute", label: "OmniRoute", baseUrl: "http://127.0.0.1:20128/v1", api: "responses", detail: "Local OpenAI-compatible gateway", apiKeyOptional: true },
     "9router": { id: "9router", type: "9router", label: "9Router", baseUrl: "http://127.0.0.1:20128/v1", api: "chat", detail: "Local OpenAI-compatible gateway", apiKeyOptional: true },
-    openai: { id: "openai", type: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", api: "responses", detail: "Official OpenAI Responses endpoint", apiKeyOptional: false },
+    openai: { id: "openai", type: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", api: "responses", detail: "Official OpenAI endpoint", apiKeyOptional: false },
     claude: { id: "claude", type: "claude", label: "Claude API", baseUrl: "https://api.anthropic.com/v1", api: "messages", detail: "Anthropic model catalog · Messages compatibility", apiKeyOptional: false },
     custom: { id: "", type: "openai-compatible", label: "Custom provider", baseUrl: "", api: "chat", detail: "OpenAI-compatible endpoint", apiKeyOptional: false },
   };
@@ -869,6 +870,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const status = card.querySelector(".provider-status");
       const dot = card.querySelector(".provider-toggle");
       const action = card.querySelector(".provider-card-action");
+      const apiKind = card.querySelector(".provider-card-head p");
       const footer = card.querySelector(".provider-card-footer");
       let actions = footer?.querySelector(".provider-card-actions");
       if (footer && action && !actions) {
@@ -878,6 +880,9 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       actions?.querySelector(".provider-card-delete")?.remove();
       status.textContent = provider ? (configured ? `● Configured · ${provider.models.length} models` : "● Needs API key") : "● Not configured";
+      if (apiKind) {
+        apiKind.textContent = `${preset.apiKeyOptional ? "LOCAL" : "API KEY"} · ${(provider?.api || preset.api).toUpperCase()}`;
+      }
       status.classList.toggle("configured", Boolean(configured));
       dot?.classList.toggle("is-active", Boolean(configured && provider.enabled));
       if (dot) {
@@ -995,11 +1000,27 @@ document.addEventListener("DOMContentLoaded", () => {
     $("#ai-settings-subtitle").textContent = preset.detail;
     $("#provider-custom-fields").hidden = !custom;
     $("#settings-ai-preset-id").value = presetId;
-    $("#settings-ai-provider-type").value = existing?.type || preset.type || "openai-compatible";
+    const providerType = existing?.type || preset.type || "openai-compatible";
+    $("#settings-ai-provider-type").value = providerType;
     $("#settings-ai-name").value = existing?.name || (custom ? "" : preset.label);
     $("#settings-ai-id").value = existing?.id || preset.id;
     $("#settings-ai-id").readOnly = Boolean(existing);
-    $("#settings-ai-api").value = existing?.api || preset.api;
+    const selectedApi = existing?.api || preset.api;
+    const apiSelect = $("#settings-ai-api");
+    const apiModes = providerApiModes(providerType);
+    if (selectedApi && !apiModes.some((mode) => mode.value === selectedApi)) {
+      apiModes.push({
+        value: selectedApi,
+        label: selectedApi === "messages" ? "Anthropic Messages" : selectedApi,
+      });
+    }
+    apiSelect.replaceChildren(...apiModes.map((mode) => {
+      const option = document.createElement("option");
+      option.value = mode.value;
+      option.textContent = mode.label;
+      return option;
+    }));
+    apiSelect.value = selectedApi;
     $("#settings-ai-base-url").value = existing?.baseUrl || preset.baseUrl;
     $("#settings-ai-model").value = existing?.defaultModel || "";
     $("#settings-ai-api-key").value = "";

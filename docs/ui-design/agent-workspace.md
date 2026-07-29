@@ -24,7 +24,10 @@ message and exposes a Stop action. Completed assistant messages render
 GitHub-Flavored Markdown, including tables and code blocks, on an editorial
 full-width runway rather than inside a heavy chat bubble. User turns remain
 compact right-aligned cards with persisted attachment previews, timestamps, and
-a copy action. Completed tool executions appear before the answer in a
+a copy action. When a provider returns reasoning or a thinking summary, it is
+persisted with the assistant message and appears before the answer in a muted,
+collapsed `Thinking` disclosure. Opening it reveals sanitized Markdown; models
+that return no reasoning do not leave an empty placeholder. Completed tool executions appear before the answer in a
 collapsible vertical activity timeline; the timeline reports only persisted
 tool names and success/failure results and must not imply live progress that the
 backend has not emitted. Pending and error messages remain plain text. Every scrollable renderer surface uses the
@@ -48,8 +51,10 @@ and actions. A provider is green only after its required connection fields are
 configured; otherwise its status is grey.
 
 Selecting a built-in card opens a titled details modal for that provider. It
-does not show a provider-type selector. `+ Custom provider` opens the extended
-form for name, stable ID, API family, connection details, retry tuning, and
+does not show an internal provider-type selector, but it always exposes the API
+mode: OpenAI-compatible providers can choose Chat Completions or Responses,
+while native Anthropic uses Messages. `+ Custom provider` opens the extended
+form for name, stable ID, API mode, connection details, retry tuning, and
 enablement. Both forms have explicit close and cancel controls.
 
 Provider details expose connection metadata, edit/delete actions, model import,

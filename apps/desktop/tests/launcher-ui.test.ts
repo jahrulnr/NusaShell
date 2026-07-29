@@ -4,6 +4,7 @@ import {
   countLogsBySource,
   filterLauncherPlugins,
   positionContextMenu,
+  providerApiModes,
 } from "../src/renderer/launcher-ui.js";
 
 describe("launcher UI helpers", () => {
@@ -63,5 +64,23 @@ describe("launcher UI helpers", () => {
       { source: "main" },
       { source: "ipc" },
     ])).toEqual({ all: 4, main: 2, backend: 1, ipc: 1 });
+  });
+
+  it("offers both OpenAI-compatible API modes for built-in gateways", () => {
+    expect(providerApiModes("openrouter")).toEqual([
+      { value: "chat", label: "Chat Completions" },
+      { value: "responses", label: "Responses API" },
+    ]);
+  });
+
+  it("keeps native and custom provider dialects explicit", () => {
+    expect(providerApiModes("claude")).toEqual([
+      { value: "messages", label: "Anthropic Messages" },
+    ]);
+    expect(providerApiModes("openai-compatible")).toEqual([
+      { value: "chat", label: "Chat Completions" },
+      { value: "responses", label: "Responses API" },
+      { value: "messages", label: "Anthropic Messages" },
+    ]);
   });
 });

@@ -5,6 +5,7 @@ import {
   formatMessageTimestamp,
   mergeCompactionCheckpoint,
   renderAssistantMarkdown,
+  renderReasoningMarkdown,
   searchConversations,
 } from "./agent-conversation-ui.js";
 import { estimateContextTokens, formatContextUsage } from "./ai-model-ui.js";
@@ -128,6 +129,7 @@ export class AgentConversationController {
           traceId: result.traceId,
           model: result.model,
           rounds: result.rounds,
+          reasoning: result.reasoning,
           toolCalls: result.toolCalls,
         });
       } catch (error) {
@@ -385,6 +387,10 @@ export class AgentConversationController {
       message.appendChild(this.messageAttachments(meta.attachments));
     }
 
+    if (role === "assistant" && meta.reasoning?.trim()) {
+      message.appendChild(this.reasoningDisclosure(meta.reasoning));
+    }
+
     if (role === "assistant" && meta.toolCalls?.length) {
       message.appendChild(this.toolActivity(meta.toolCalls));
     }
@@ -449,6 +455,26 @@ export class AgentConversationController {
       gallery.appendChild(file);
     });
     return gallery;
+  }
+
+  reasoningDisclosure(reasoning) {
+    const disclosure = document.createElement("details");
+    disclosure.className = "agent-reasoning";
+    const summary = document.createElement("summary");
+    summary.append(
+      element("span", "agent-reasoning-mark", "⌁"),
+      element("span", "agent-reasoning-title", "Thinking"),
+      element("span", "agent-reasoning-hint", "Show reasoning"),
+      element("span", "agent-reasoning-chevron", "⌄"),
+    );
+    const content = element("div", "agent-reasoning-content");
+    content.innerHTML = renderReasoningMarkdown(reasoning);
+    disclosure.addEventListener("toggle", () => {
+      const hint = disclosure.querySelector(".agent-reasoning-hint");
+      if (hint) hint.textContent = disclosure.open ? "Hide reasoning" : "Show reasoning";
+    });
+    disclosure.append(summary, content);
+    return disclosure;
   }
 
   toolActivity(toolCalls) {

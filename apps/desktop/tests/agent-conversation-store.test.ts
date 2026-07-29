@@ -12,7 +12,11 @@ describe("AgentConversationStore", () => {
 
     const created = await first.create();
     await first.appendMessage(created.id, { role: "user", content: "Investigate MCP logs" });
-    await first.appendMessage(created.id, { role: "assistant", content: "I found the issue." });
+    await first.appendMessage(created.id, {
+      role: "assistant",
+      content: "I found the issue.",
+      reasoning: "I inspected the renderer and traced the empty state.",
+    });
     await first.saveCheckpoint(created.id, {
       summary: "The user asked to investigate MCP logs.",
       compactedMessageCount: 2,
@@ -23,6 +27,10 @@ describe("AgentConversationStore", () => {
     const loaded = await second.get(created.id);
     expect(loaded?.title).toBe("Investigate MCP logs");
     expect(loaded?.messages).toHaveLength(2);
+    expect(loaded?.messages[1]).toMatchObject({
+      role: "assistant",
+      reasoning: "I inspected the renderer and traced the empty state.",
+    });
     expect(loaded?.checkpoint).toEqual({
       summary: "The user asked to investigate MCP logs.",
       compactedMessageCount: 2,

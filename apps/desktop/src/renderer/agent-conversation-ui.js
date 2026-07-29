@@ -6,6 +6,10 @@ export function renderAssistantMarkdown(content) {
   return assistantMarkdown.render(String(content ?? ""));
 }
 
+export function renderReasoningMarkdown(content) {
+  return assistantMarkdown.render(String(content ?? ""));
+}
+
 export function formatMessageTimestamp(timestamp, locale, timeZone) {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return "";

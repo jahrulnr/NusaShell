@@ -419,9 +419,12 @@
     <div class="provider-custom-fields" id="provider-custom-fields" hidden>
       <label class="settings-field">Name<input id="settings-ai-name" autocomplete="off" placeholder="My gateway"></label>
       <label class="settings-field">ID / prefix<input id="settings-ai-id" autocomplete="off" placeholder="my-gateway"></label>
-      <label class="settings-field">API type<select id="settings-ai-api"><option value="chat">Chat completions</option><option value="responses">Responses</option><option value="messages">Messages</option></select></label>
     </div>
     <input id="settings-ai-preset-id" type="hidden">
+    <label class="settings-field">API mode
+      <select id="settings-ai-api"><option value="chat">Chat Completions</option><option value="responses">Responses API</option></select>
+      <span class="settings-field-help">Choose the endpoint dialect supported by this provider.</span>
+    </label>
     <label class="settings-field">Base URL<input id="settings-ai-base-url" type="url" autocomplete="url" placeholder="https://api.openai.com/v1"></label>
     <label class="settings-field">API key<input id="settings-ai-api-key" type="password" autocomplete="off" placeholder="Leave blank to keep saved key"></label>
     <label class="settings-field">Default model <span class="field-optional">Optional</span><input id="settings-ai-model" autocomplete="off" placeholder="Leave blank and choose after importing"></label>

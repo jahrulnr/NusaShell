@@ -192,7 +192,7 @@
         {
           "heading": "Conversation thread",
           "paragraphs": [
-            "The full-height message runway separates compact user cards from editorial assistant responses. User attachments render as image previews or file cards; completed tool calls form a collapsible status timeline based on real turn results. Message footers expose timestamps, model/trace metadata, copy, and retry where applicable. Only this area scrolls."
+            "The full-height message runway separates compact user cards from editorial assistant responses. User attachments render as image previews or file cards. Provider reasoning is persisted and appears before the answer in a collapsed Thinking disclosure with sanitized Markdown; models that return no reasoning show no placeholder. Completed tool calls form a collapsible status timeline based on real turn results. Message footers expose timestamps, model/trace metadata, copy, and retry where applicable. Only this area scrolls."
           ],
           "controls": [
             "agent-thread",
@@ -200,6 +200,7 @@
             "agent-message",
             "agent-bubble",
             "agent-message-attachments",
+            "agent-reasoning",
             "agent-activity",
             "agent-message-action",
             "agent-retry-btn"
@@ -459,7 +460,7 @@
         {
           "heading": "Identity",
           "paragraphs": [
-            "For custom providers: name and id/prefix. Built-in providers hide the custom fields and use their preset id."
+            "For custom providers: name and id/prefix. Built-in providers hide those custom identity fields and use their preset id. API mode remains visible for every provider so the request dialect can match the endpoint."
           ],
           "controls": [
             "ai-settings-form",
@@ -919,6 +920,14 @@
       "selector": ".agent-activity",
       "generated": true,
       "action": "Expands or collapses the completed tool-call timeline. Each row reports the persisted tool name and success or failure state without implying live progress."
+    },
+    "agent-reasoning": {
+      "section": "Conversation thread",
+      "label": "Thinking",
+      "type": "disclosure",
+      "selector": ".agent-reasoning",
+      "generated": true,
+      "action": "Appears when the provider returns reasoning or a thinking summary. Expand it to inspect sanitized Markdown; it is collapsed by default and remains available after reopening the conversation."
     },
     "agent-message-action": {
       "section": "Conversation thread",
@@ -1462,7 +1471,7 @@
       "section": "Identity",
       "label": "Custom provider fields",
       "type": "fieldset",
-      "action": "Shown only for custom providers. Contains name, id, and API type."
+      "action": "Shown only for custom providers. Contains name and id."
     },
     "settings-ai-name": {
       "section": "Identity",
@@ -1478,9 +1487,9 @@
     },
     "settings-ai-api": {
       "section": "Identity",
-      "label": "API type",
+      "label": "API mode",
       "type": "select",
-      "action": "Protocol used by the provider: Chat completions, Responses, or Messages."
+      "action": "Always visible. Selects the request dialect supported by the endpoint: Chat Completions or Responses API for OpenAI-compatible providers, and Anthropic Messages where applicable."
     },
     "settings-ai-base-url": {
       "section": "Connection",

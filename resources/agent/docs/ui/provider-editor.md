@@ -6,7 +6,7 @@ Form to configure or edit an AI provider connection and its runtime defaults.
 
 ## Identity
 
-For custom providers: name and id/prefix. Built-in providers hide the custom fields and use their preset id.
+For custom providers: name and id/prefix. Built-in providers hide those custom identity fields and use their preset id. API mode remains visible for every provider so the request dialect can match the endpoint.
 
 - **Provider editor form** (`#ai-settings-form`):
   - Section: Identity
@@ -41,7 +41,7 @@ For custom providers: name and id/prefix. Built-in providers hide the custom fie
 - **Custom provider fields** (`#provider-custom-fields`):
   - Section: Identity
   - Type: fieldset
-  - Action: Shown only for custom providers. Contains name, id, and API type.
+  - Action: Shown only for custom providers. Contains name and id.
 
 - **Provider name** (`#settings-ai-name`):
   - Section: Identity
@@ -53,10 +53,10 @@ For custom providers: name and id/prefix. Built-in providers hide the custom fie
   - Type: text input
   - Action: Machine-friendly id for a custom provider. Read-only when editing.
 
-- **API type** (`#settings-ai-api`):
+- **API mode** (`#settings-ai-api`):
   - Section: Identity
   - Type: select
-  - Action: Protocol used by the provider: Chat completions, Responses, or Messages.
+  - Action: Always visible. Selects the request dialect supported by the endpoint: Chat Completions or Responses API for OpenAI-compatible providers, and Anthropic Messages where applicable.
 
 ## Connection
 

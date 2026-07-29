@@ -162,6 +162,11 @@ function isConversationMessage(value: unknown): value is AgentConversationMessag
   const message = value as Partial<AgentConversationMessage>;
   return (message.role === "user" || message.role === "assistant")
     && typeof message.content === "string"
+    && (message.reasoning === undefined || (
+      message.role === "assistant"
+      && typeof message.reasoning === "string"
+      && message.reasoning.length <= 1_000_000
+    ))
     && (message.attachments === undefined || (
       message.role === "user"
       && Array.isArray(message.attachments)

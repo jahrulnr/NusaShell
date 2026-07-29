@@ -45,3 +45,17 @@ export function countLogsBySource(entries) {
     return counts;
   }, { all: 0 });
 }
+
+export function providerApiModes(providerType) {
+  if (providerType === "claude") {
+    return [{ value: "messages", label: "Anthropic Messages" }];
+  }
+
+  const openAiCompatible = [
+    { value: "chat", label: "Chat Completions" },
+    { value: "responses", label: "Responses API" },
+  ];
+  return providerType === "openai-compatible"
+    ? [...openAiCompatible, { value: "messages", label: "Anthropic Messages" }]
+    : openAiCompatible;
+}

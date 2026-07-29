@@ -7,6 +7,7 @@ import {
   mergeCompactionCheckpoint,
   searchConversations,
   renderAssistantMarkdown,
+  renderReasoningMarkdown,
 } from "../src/renderer/agent-conversation-ui.js";
 
 describe("agent conversation UI helpers", () => {
@@ -50,6 +51,11 @@ describe("agent conversation UI helpers", () => {
   it("renders GFM tables while keeping raw HTML as text", () => {
     expect(renderAssistantMarkdown("## Tools\n\n| Tool | Function |\n| --- | --- |\n| **createNote** | Create a note |\n\n<script>alert(1)</script>")).toContain("<table>");
     expect(renderAssistantMarkdown("<script>alert(1)</script>")).toContain("&lt;script&gt;");
+  });
+
+  it("renders model reasoning as safe markdown", () => {
+    expect(renderReasoningMarkdown("I should **inspect the logs** first.")).toContain("<strong>inspect the logs</strong>");
+    expect(renderReasoningMarkdown("<img src=x onerror=alert(1)>")).toContain("&lt;img");
   });
 
   it("formats persisted message timestamps as compact local metadata", () => {

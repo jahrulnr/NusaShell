@@ -41,7 +41,7 @@ A fixed workbench rail listing local conversation threads. Click a thread to ope
 
 ## Conversation thread
 
-The full-height message runway separates compact user cards from editorial assistant responses. User attachments render as image previews or file cards; completed tool calls form a collapsible status timeline based on real turn results. Message footers expose timestamps, model/trace metadata, copy, and retry where applicable. Only this area scrolls.
+The full-height message runway separates compact user cards from editorial assistant responses. User attachments render as image previews or file cards. Provider reasoning is persisted and appears before the answer in a collapsed Thinking disclosure with sanitized Markdown; models that return no reasoning show no placeholder. Completed tool calls form a collapsible status timeline based on real turn results. Message footers expose timestamps, model/trace metadata, copy, and retry where applicable. Only this area scrolls.
 
 - **Conversation thread** (`#agent-thread`):
   - Section: Conversation thread
@@ -67,6 +67,11 @@ The full-height message runway separates compact user cards from editorial assis
   - Section: Conversation thread
   - Type: attachment gallery
   - Action: Shows persisted image attachments as bounded thumbnails and PDF or text attachments as compact file cards above the user message.
+
+- **Thinking** (`.agent-reasoning`):
+  - Section: Conversation thread
+  - Type: disclosure
+  - Action: Appears when the provider returns reasoning or a thinking summary. Expand it to inspect sanitized Markdown; it is collapsed by default and remains available after reopening the conversation.
 
 - **Tool activity** (`.agent-activity`):
   - Section: Conversation thread
