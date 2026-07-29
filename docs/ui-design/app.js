@@ -369,6 +369,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
   $$("[data-nav]").forEach(item => item.addEventListener("click", () => switchView(item.dataset.view)));
   $("#nav-settings-btn").addEventListener("click", () => switchView("settings"));
+  $("#window-always-on-top").addEventListener("click", event => {
+    const button = event.currentTarget;
+    const isActive = button.getAttribute("aria-pressed") !== "true";
+    const label = isActive ? "Stop keeping window on top" : "Keep window on top";
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+    button.setAttribute("aria-label", label);
+    button.title = label;
+  });
 
   $$("[data-tab]").forEach(tab => tab.addEventListener("click", () => {
     $$("[data-tab]").forEach(t => t.classList.remove("active"));

@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>NusaShell</title>
+<link rel="icon" href="nusashell-mark.png" type="image/png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
@@ -26,10 +27,7 @@
   <div class="titlebar">
     <div class="brand">
       <span class="brand-logo">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none">
-          <rect width="24" height="24" rx="6" fill="#3b6ef0"/>
-          <path d="M8 8L16 16M16 8L8 16" stroke="white" stroke-width="2" stroke-linecap="round"/>
-        </svg>
+        <img src="nusashell-mark.png" alt="" width="24" height="24">
       </span>
       NusaShell
     </div>
@@ -53,6 +51,9 @@
       </button>
       <button class="icon-btn" id="nav-settings-btn" aria-label="Settings">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><path d="M19.4 13a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V19.4a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 17.76a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.64 13a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.64 7a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 3.13 1.7 1.7 0 0 0 10 1.6V1.51a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 3.13a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.36 7a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z" stroke="currentColor" stroke-width="1.2"/></svg>
+      </button>
+      <button class="icon-btn" id="window-always-on-top" type="button" aria-label="Keep window on top" aria-pressed="false" title="Keep window on top">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true"><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 14v7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
       </button>
       <div class="avatar">JR</div>
     </div>

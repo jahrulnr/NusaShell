@@ -1,4 +1,12 @@
-import { buildAgentContext, mergeCompactionCheckpoint, renderAssistantMarkdown, searchConversations } from "./agent-conversation-ui.js";
+import {
+  buildAgentContext,
+  composerTextareaSize,
+  describeToolActivity,
+  formatMessageTimestamp,
+  mergeCompactionCheckpoint,
+  renderAssistantMarkdown,
+  searchConversations,
+} from "./agent-conversation-ui.js";
 import { estimateContextTokens, formatContextUsage } from "./ai-model-ui.js";
 import { inspectAttachmentContent, toDataUrl } from "./attachment-content.js";
 
@@ -19,6 +27,8 @@ export class AgentConversationController {
     this.activeTraceId = "";
     this.failedMessage = null;
     this.attachments = [];
+    this.composerInputWidth = 0;
+    this.composerResizeObserver = null;
   }
 
   async initialize() {
@@ -86,8 +96,10 @@ export class AgentConversationController {
           content: text,
           ...(attachments.length ? { attachments } : {}),
         });
-        this.appendMessage("user", text, { attachments });
+        const savedMessage = this.conversation.messages.at(-1);
+        this.appendMessage("user", text, savedMessage ?? { attachments });
         input.value = "";
+        this.resizeComposerInput();
         this.attachments = [];
         this.renderAttachments();
         await this.refresh();
@@ -137,7 +149,8 @@ export class AgentConversationController {
           this.log("error", `Agent checkpoint persistence failed trace=${result.traceId}: ${error.message || String(error)}`);
         }
       }
-      this.appendMessage("assistant", result.text, result);
+      const savedMessage = this.conversation.messages.at(-1);
+      this.appendMessage("assistant", result.text, savedMessage ?? result);
       await this.refresh();
       status.textContent = selectedModel ? formatContextUsage(estimateContextTokens(buildAgentContext(this.conversation)), selectedModel.contextWindow) : "Choose a model";
       this.log("info", `Agent turn completed trace=${result.traceId} rounds=${result.rounds}`);
@@ -177,12 +190,21 @@ export class AgentConversationController {
       event.preventDefault();
       void this.submit();
     });
-    $("#agent-input").addEventListener("keydown", (event) => {
+    const input = $("#agent-input");
+    input.addEventListener("input", () => this.resizeComposerInput());
+    input.addEventListener("keydown", (event) => {
       if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
         event.preventDefault();
         void this.submit();
       }
     });
+    this.composerResizeObserver = new ResizeObserver(([entry]) => {
+      if (!entry || entry.contentRect.width === this.composerInputWidth) return;
+      this.composerInputWidth = entry.contentRect.width;
+      this.resizeComposerInput();
+    });
+    this.composerResizeObserver.observe(input);
+    this.resizeComposerInput();
     $("#agent-stop-btn").addEventListener("click", () => void this.stop());
     $("#agent-attach-btn").addEventListener("click", () => $("#agent-file-input").click());
     $("#agent-file-input").addEventListener("change", (event) => void this.addAttachments(event.target.files));
@@ -251,6 +273,21 @@ export class AgentConversationController {
       chip.appendChild(remove);
       list.appendChild(chip);
     });
+  }
+
+  resizeComposerInput() {
+    const input = $("#agent-input");
+    if (!input) return;
+    input.style.height = "auto";
+    const style = window.getComputedStyle(input);
+    const size = composerTextareaSize({
+      scrollHeight: input.scrollHeight,
+      lineHeight: Number.parseFloat(style.lineHeight) || 19,
+      paddingTop: Number.parseFloat(style.paddingTop) || 0,
+      paddingBottom: Number.parseFloat(style.paddingBottom) || 0,
+    });
+    input.style.height = `${size.height}px`;
+    input.style.overflowY = size.overflowY;
   }
 
   async stop() {
@@ -333,37 +370,135 @@ export class AgentConversationController {
     if (!thread) return null;
     $("#agent-empty")?.remove();
     const message = element("article", `agent-message ${role}${meta.pending ? " agent-pending" : ""}${meta.error ? " agent-message-error" : ""}`);
-    const label = element("div", "agent-message-meta");
-    label.textContent = role === "user" ? "YOU" : (meta.pending ? "AGENT · WORKING" : "NUSASHELL AGENT");
+    message.setAttribute("aria-label", role === "user" ? "Your message" : "NusaShell Agent response");
+
+    if (role === "assistant") {
+      const identity = element("div", "agent-message-identity");
+      identity.append(
+        element("span", "agent-message-mark", meta.pending ? "◌" : "✦"),
+        element("span", "agent-message-meta", meta.pending ? "Working" : "NusaShell Agent"),
+      );
+      message.appendChild(identity);
+    }
+
+    if (meta.attachments?.length) {
+      message.appendChild(this.messageAttachments(meta.attachments));
+    }
+
+    if (role === "assistant" && meta.toolCalls?.length) {
+      message.appendChild(this.toolActivity(meta.toolCalls));
+    }
+
     const bubble = element("div", "agent-bubble");
     const text = content || (meta.attachments?.length ? "Attached files" : "");
     if (role === "assistant" && !meta.pending && !meta.error) bubble.innerHTML = renderAssistantMarkdown(text);
     else bubble.textContent = text;
-    message.append(label, bubble);
-    if (meta.attachments?.length) {
-      const attachmentList = element("div", "agent-turn-meta");
-      meta.attachments.forEach((attachment) => attachmentList.appendChild(tag(`${attachment.type === "image" ? "IMG" : attachment.type === "file" ? "PDF" : "TXT"} · ${attachment.name}`)));
-      message.appendChild(attachmentList);
-    }
+    message.appendChild(bubble);
 
-    if (meta.traceId || meta.model || meta.toolCalls?.length) {
-      const details = element("div", "agent-turn-meta");
-      if (meta.model) details.appendChild(tag(meta.model));
-      if (meta.traceId) details.appendChild(tag(`trace ${meta.traceId.slice(0, 8)}`));
-      for (const toolCall of meta.toolCalls ?? []) {
-        details.appendChild(tag(`${toolCall.ok ? "✓" : "!"} ${toolCall.name}`, "agent-tool-result"));
-      }
-      message.appendChild(details);
+    const footer = element("footer", "agent-message-footer");
+    const timestamp = formatMessageTimestamp(meta.createdAt);
+    if (timestamp) {
+      const time = element("time", "agent-message-time", timestamp);
+      time.dateTime = meta.createdAt;
+      footer.appendChild(time);
     }
+    if (role === "assistant" && meta.model) footer.appendChild(messageDetail(meta.model));
+    if (role === "assistant" && meta.rounds) footer.appendChild(messageDetail(`${meta.rounds} round${meta.rounds === 1 ? "" : "s"}`));
+    if (role === "assistant" && meta.traceId) footer.appendChild(messageDetail(`trace ${meta.traceId.slice(0, 8)}`));
+
+    const actions = element("div", "agent-message-actions");
+    const copy = iconButton("Copy message", copyIcon());
+    copy.addEventListener("click", () => void this.copyMessage(
+      content || meta.attachments?.map((attachment) => attachment.name).join("\n") || "",
+      copy,
+    ));
+    actions.appendChild(copy);
     if (meta.retry) {
-      const retry = element("button", "agent-retry-btn", "Retry turn");
+      const retry = element("button", "agent-retry-btn", "Retry");
       retry.type = "button";
       retry.addEventListener("click", () => void this.submit({ retry: true }));
-      message.appendChild(retry);
+      actions.prepend(retry);
     }
+    footer.appendChild(actions);
+    message.appendChild(footer);
+
     thread.appendChild(message);
     thread.scrollTop = thread.scrollHeight;
     return message;
+  }
+
+  messageAttachments(attachments) {
+    const gallery = element("div", "agent-message-attachments");
+    gallery.setAttribute("aria-label", `${attachments.length} attachment${attachments.length === 1 ? "" : "s"}`);
+    attachments.forEach((attachment) => {
+      if (attachment.type === "image") {
+        const figure = element("figure", "agent-message-attachment agent-message-image");
+        const image = document.createElement("img");
+        image.src = attachment.dataUrl;
+        image.alt = attachment.name;
+        image.loading = "lazy";
+        figure.append(image, element("figcaption", "", attachment.name));
+        gallery.appendChild(figure);
+        return;
+      }
+      const file = element("div", "agent-message-attachment agent-message-file");
+      file.append(
+        element("span", "agent-message-file-kind", attachment.type === "file" ? "PDF" : "TXT"),
+        element("span", "agent-message-file-name", attachment.name),
+      );
+      gallery.appendChild(file);
+    });
+    return gallery;
+  }
+
+  toolActivity(toolCalls) {
+    const activity = document.createElement("details");
+    activity.className = "agent-activity";
+    activity.open = toolCalls.length <= 6 || toolCalls.some((call) => !call.ok);
+    const summary = document.createElement("summary");
+    const activitySummary = describeToolActivity(toolCalls);
+    summary.append(
+      element("span", "agent-activity-terminal", "›_"),
+      element("span", "agent-activity-title", activitySummary.label),
+      element(
+        "span",
+        `agent-activity-status${activitySummary.failed ? " has-errors" : ""}`,
+        activitySummary.failed
+          ? `${activitySummary.succeeded} complete · ${activitySummary.failed} failed`
+          : "Completed",
+      ),
+      element("span", "agent-activity-chevron", "⌄"),
+    );
+    const list = element("ol", "agent-activity-list");
+    toolCalls.forEach((toolCall) => {
+      const item = element("li", `agent-activity-item ${toolCall.ok ? "is-success" : "is-error"}`);
+      const state = element("span", "agent-activity-state", toolCall.ok ? "✓" : "!");
+      const copy = element("div", "agent-activity-copy");
+      copy.appendChild(element("code", "agent-activity-name", toolCall.name));
+      if (toolCall.error) copy.appendChild(element("span", "agent-activity-error", toolCall.error));
+      item.append(state, copy);
+      list.appendChild(item);
+    });
+    activity.append(summary, list);
+    return activity;
+  }
+
+  async copyMessage(content, button) {
+    try {
+      if (this.shell?.clipboard?.writeText) this.shell.clipboard.writeText(content);
+      else if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(content);
+      else throw new Error("Clipboard is unavailable");
+      button.classList.add("is-confirmed");
+      button.setAttribute("aria-label", "Message copied");
+      button.title = "Copied";
+      window.setTimeout(() => {
+        button.classList.remove("is-confirmed");
+        button.setAttribute("aria-label", "Copy message");
+        button.title = "Copy message";
+      }, 1200);
+    } catch (error) {
+      this.notify(`Could not copy message: ${error.message || error}`, "error");
+    }
   }
 
   openDeleteDialog(conversationId) {
@@ -412,8 +547,21 @@ function element(tagName, className, content) {
   return node;
 }
 
-function tag(content, extraClass = "") {
-  return element("span", `agent-turn-tag${extraClass ? ` ${extraClass}` : ""}`, content);
+function messageDetail(content) {
+  return element("span", "agent-message-detail", content);
+}
+
+function iconButton(label, icon) {
+  const button = element("button", "agent-message-action");
+  button.type = "button";
+  button.setAttribute("aria-label", label);
+  button.title = label;
+  button.innerHTML = icon;
+  return button;
+}
+
+function copyIcon() {
+  return '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" stroke="currentColor" stroke-width="1.6"/></svg>';
 }
 
 function formatTime(timestamp) {

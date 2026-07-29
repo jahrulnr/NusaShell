@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>NusaShell</title>
+<link rel="icon" href="./nusashell-mark.png" type="image/png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
@@ -26,27 +27,22 @@
   <div class="titlebar">
     <div class="brand">
       <span class="brand-logo">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none">
-          <rect width="24" height="24" rx="6" fill="#3b6ef0"/>
-          <path d="M8 8L16 16M16 8L8 16" stroke="white" stroke-width="2" stroke-linecap="round"/>
-        </svg>
+        <img src="./nusashell-mark.png" alt="" width="24" height="24">
       </span>
       NusaShell
-    </div>
-
-    <div class="search">
-      <svg class="search-icon" viewBox="0 0 24 24" width="15" height="15" fill="none">
-        <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
-        <path d="M20 20L16.65 16.65" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-      </svg>
-      <input type="search" placeholder="Search apps, ids, or descriptions..." id="search-input" autocomplete="off" />
-      <button class="search-clear" id="search-clear" type="button" aria-label="Clear app search" hidden>×</button>
+      <span class="connection-state" title="Backend connection status">
+        <span class="connection-orb" id="conn-fill"></span>
+        <span id="conn-status">Connecting…</span>
+      </span>
     </div>
 
     <div class="titlebar-actions">
       <div class="top-actions">
         <button class="icon-btn" aria-label="Settings" id="nav-settings-btn">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><path d="M19.4 13a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V19.4a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 17.76a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.64 13a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.64 7a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 3.13 1.7 1.7 0 0 0 10 1.6V1.51a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 3.13a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.36 7a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z" stroke="currentColor" stroke-width="1.2"/></svg>
+        </button>
+        <button class="icon-btn" id="window-always-on-top" type="button" aria-label="Keep window on top" aria-pressed="false" title="Keep window on top">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true"><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 14v7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
         </button>
       </div>
 
@@ -61,45 +57,49 @@
   <!-- ===== Body: sidebar + content ===== -->
   <div class="body">
 
-    <aside class="sidebar">
+    <aside class="sidebar" id="sidebar">
       <nav class="nav-main">
-        <a class="nav-item active" data-view="home" data-nav>
+        <a class="nav-item active" data-view="home" data-nav title="Home">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M3 11l9-8 9 8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 10v10h14V10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          Home
+          <span class="nav-label">Home</span>
         </a>
-        <a class="nav-item" data-view="plugins" data-nav>
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/></svg>
-          Plugins
-        </a>
-        <a class="nav-item" data-view="agent" data-nav>
+        <a class="nav-item" data-view="agent" data-nav title="Agent">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 3v3M12 18v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M3 12h3M18 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="12" r="4.5" stroke="currentColor" stroke-width="1.7"/></svg>
-          Agent
+          <span class="nav-label">Agent</span>
         </a>
-        <a class="nav-item" data-view="ai-providers" data-nav>
+        <a class="nav-item" data-view="plugins" data-nav title="Plugins">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/></svg>
+          <span class="nav-label">Plugins</span>
+        </a>
+        <a class="nav-item" data-view="ai-providers" data-nav title="AI Providers">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM4.5 21a7.5 7.5 0 0 1 15 0M19 5v4M21 7h-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-          AI Providers
+          <span class="nav-label">AI Providers</span>
         </a>
-        <a class="nav-item" data-view="autostart" data-nav>
+        <a class="nav-item" data-view="autostart" data-nav title="Autostart">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 3v4M6.34 6.34l2.83 2.83M3 12h4M6.34 17.66l2.83-2.83M12 17v4M17.66 17.66l-2.83-2.83M17 12h4M17.66 6.34l-2.83 2.83" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.6"/></svg>
-          Autostart
+          <span class="nav-label">Autostart</span>
         </a>
-        <a class="nav-item" data-view="logs" data-nav>
+        <a class="nav-item" data-view="logs" data-nav title="Logs">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M4 5h16M4 12h10M4 19h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="17" cy="12" r="1.5" fill="currentColor"/></svg>
-          Logs
+          <span class="nav-label">Logs</span>
         </a>
       </nav>
 
-      <button class="add-plugin-btn" id="open-add-plugin">
+      <button class="add-plugin-btn" id="open-add-plugin" title="Add Plugin">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-        Add Plugin
+        <span class="nav-label">Add Plugin</span>
       </button>
 
-      <div class="storage">
-        <div class="storage-row">
-          <span>Connection</span>
-          <span class="storage-text" id="conn-status">Connecting...</span>
-        </div>
-        <div class="storage-bar"><div class="storage-fill" id="conn-fill" style="width:0%"></div></div>
+      <div class="sidebar-footer">
+        <button class="sidebar-footer-action" id="open-docs" type="button" title="Open NusaShell docs on GitHub">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="M5 4.5A2.5 2.5 0 0 1 7.5 2H20v16H7.5A2.5 2.5 0 0 0 5 20.5v-16Z" stroke="currentColor" stroke-width="1.6"/><path d="M5 20.5A2.5 2.5 0 0 1 7.5 18H20M9 6h7M9 10h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <span class="nav-label">Docs on GitHub</span>
+          <svg class="sidebar-external-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" aria-hidden="true"><path d="M14 5h5v5M19 5l-8 8M18 13v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="sidebar-mode-toggle" id="sidebar-mode-toggle" type="button" aria-label="Collapse sidebar" aria-pressed="false" title="Use icon-only sidebar">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M9 4v16M15 9l-3 3 3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="nav-label">Collapse Sidebar</span>
+        </button>
       </div>
     </aside>
 
@@ -115,6 +115,14 @@
         </div>
 
         <div class="filter-row">
+          <div class="search home-search">
+            <svg class="search-icon" viewBox="0 0 24 24" width="15" height="15" fill="none">
+              <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
+              <path d="M20 20L16.65 16.65" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <input type="search" placeholder="Search installed apps, ids, or descriptions…" id="search-input" autocomplete="off" />
+            <button class="search-clear" id="search-clear" type="button" aria-label="Clear app search" hidden>×</button>
+          </div>
           <div class="tabs">
             <button class="tab active" data-tab>All</button>
           </div>
@@ -129,13 +137,6 @@
             <div class="app-status"></div>
           </div>
         </div>
-      </section>
-
-      <!-- ===== View: Plugins ===== -->
-      <section class="view" data-view="plugins">
-        <h1 class="page-title">Plugins</h1>
-        <p class="subtitle">Installed plugins and their live MCP process state.</p>
-        <div class="plugin-table" id="plugin-table"></div>
       </section>
 
       <!-- ===== View: Agent ===== -->
@@ -161,7 +162,6 @@
             </div>
             <label class="agent-conversation-search"><span aria-hidden="true">⌕</span><input id="agent-conversation-search" type="search" placeholder="Search conversations…" autocomplete="off"></label>
             <div class="agent-conversation-list" id="agent-conversation-list" role="list"></div>
-            <p class="agent-conversation-note">Stored locally. MCP servers and context stay discoverable through agent tools.</p>
           </aside>
 
           <div class="agent-conversation">
@@ -174,7 +174,7 @@
             </div>
             <form class="agent-composer" id="agent-form">
               <label class="sr-only" for="agent-input">Message to the agent</label>
-              <textarea id="agent-input" rows="3" placeholder="Describe what you want the shell to do…"></textarea>
+              <textarea id="agent-input" rows="1" placeholder="Describe what you want the shell to do…"></textarea>
               <div class="agent-attachments" id="agent-attachments" aria-live="polite"></div>
               <input class="sr-only" id="agent-file-input" type="file" multiple>
               <div class="agent-composer-footer">
@@ -208,6 +208,13 @@
           </div>
           <div class="agent-delete-actions"><button class="mini-btn" id="agent-delete-cancel" type="button">Cancel</button><button class="mini-btn danger" id="agent-delete-confirm" type="button">Delete</button></div>
         </div>
+      </section>
+
+      <!-- ===== View: Plugins ===== -->
+      <section class="view" data-view="plugins">
+        <h1 class="page-title">Plugins</h1>
+        <p class="subtitle">Installed plugins and their live MCP process state.</p>
+        <div class="plugin-table" id="plugin-table"></div>
       </section>
 
       <section class="view" data-view="autostart">
@@ -252,7 +259,7 @@
       </section>
 
       <!-- ===== View: Central log tail ===== -->
-      <section class="view" data-view="logs">
+      <section class="view logs-view" data-view="logs">
         <div class="log-header">
           <div>
             <h1 class="page-title">Logs</h1>
@@ -261,12 +268,12 @@
           <span class="log-count" id="log-count">0 / 1000</span>
         </div>
         <div class="log-filters" aria-label="Filter logs by source">
-          <button class="chip active" data-log-source="all">All</button>
-          <button class="chip" data-log-source="renderer">Frontend</button>
-          <button class="chip" data-log-source="main">Electron</button>
-          <button class="chip" data-log-source="ipc">IPC</button>
-          <button class="chip" data-log-source="backend">Backend</button>
-          <button class="chip" data-log-source="mcp">MCP</button>
+          <button class="chip active" data-log-source="all">All <span class="chip-count">0</span></button>
+          <button class="chip" data-log-source="renderer">Frontend <span class="chip-count">0</span></button>
+          <button class="chip" data-log-source="main">Electron <span class="chip-count">0</span></button>
+          <button class="chip" data-log-source="ipc">IPC <span class="chip-count">0</span></button>
+          <button class="chip" data-log-source="backend">Backend <span class="chip-count">0</span></button>
+          <button class="chip" data-log-source="mcp">MCP <span class="chip-count">0</span></button>
         </div>
         <div class="log-tail" id="log-tail" role="log" aria-live="polite"></div>
       </section>
@@ -393,9 +400,11 @@
         <div class="modal-section">
           <div class="modal-label">Install from Local Path</div>
           <div class="modal-input-row">
-            <input type="text" class="modal-input" id="install-local-input" placeholder="/path/to/plugin.zip or /path/to/plugin-dir" />
+            <input type="text" class="modal-input" id="install-local-input" placeholder="Choose a plugin folder or archive…" readonly />
+            <button class="action-btn" id="pick-local-folder-btn" type="button">Choose folder</button>
             <button class="action-btn action-start" id="install-local-btn">Install</button>
           </div>
+          <button class="local-archive-btn" id="pick-local-archive-btn" type="button">Choose a .zip or .tar.gz archive instead</button>
         </div>
         <div class="modal-status" id="install-status" style="display:none"></div>
       </div>

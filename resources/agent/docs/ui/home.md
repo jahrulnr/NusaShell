@@ -10,20 +10,20 @@ Displays the product name, greeting, and the tagline 'Your AI tool shell — plu
 
 ## Search and filters
 
-The title bar search filters the grid in real time. Filter tabs below the greeting let you scope the list.
+The Home search filters installed plugin cards by name, id, or description in real time. It lives beside the Home filter tabs so its scope is visible.
 
-- **Global app search** (`#search-input`):
-  - Section: Title bar
+- **Installed app search** (`#search-input`):
+  - Section: Search and filters
   - Type: search input
-  - Action: Filters the Home app grid by plugin name, plugin id, or description as the user types. Also updates Plugins and other views that honor the query.
+  - Action: Filters only the Home app grid by plugin name, plugin id, or description as the user types.
   - Shortcut: Escape clears the current query when the input is focused.
   - Related: Clear search (`#search-clear`), Installed plugin grid (`#app-grid`)
 
 - **Clear search** (`#search-clear`):
-  - Section: Title bar
+  - Section: Search and filters
   - Type: button
   - Action: Clears the global app search field and refocuses it.
-  - Related: Global app search (`#search-input`)
+  - Related: Installed app search (`#search-input`)
 
 - **Filter tabs** (`.tabs .tab`):
   - Section: Search and filters

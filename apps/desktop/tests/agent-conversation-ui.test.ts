@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAgentContext,
+  composerTextareaSize,
+  describeToolActivity,
+  formatMessageTimestamp,
   mergeCompactionCheckpoint,
   searchConversations,
   renderAssistantMarkdown,
@@ -47,6 +50,37 @@ describe("agent conversation UI helpers", () => {
   it("renders GFM tables while keeping raw HTML as text", () => {
     expect(renderAssistantMarkdown("## Tools\n\n| Tool | Function |\n| --- | --- |\n| **createNote** | Create a note |\n\n<script>alert(1)</script>")).toContain("<table>");
     expect(renderAssistantMarkdown("<script>alert(1)</script>")).toContain("&lt;script&gt;");
+  });
+
+  it("formats persisted message timestamps as compact local metadata", () => {
+    expect(formatMessageTimestamp("2026-07-29T10:05:00.000Z", "en-US", "UTC")).toBe("Jul 29, 10:05 AM");
+    expect(formatMessageTimestamp("not-a-date", "en-US", "UTC")).toBe("");
+  });
+
+  it("summarizes completed tool activity without implying live progress", () => {
+    expect(describeToolActivity([
+      { id: "1", name: "notes.list", ok: true },
+      { id: "2", name: "notes.create", ok: false, error: "Permission denied" },
+    ])).toEqual({
+      label: "2 tool calls",
+      succeeded: 1,
+      failed: 1,
+    });
+  });
+
+  it("grows the composer through ten rows before enabling internal scroll", () => {
+    expect(composerTextareaSize({
+      scrollHeight: 76,
+      lineHeight: 20,
+      paddingTop: 7,
+      paddingBottom: 7,
+    })).toEqual({ height: 76, overflowY: "hidden" });
+    expect(composerTextareaSize({
+      scrollHeight: 260,
+      lineHeight: 20,
+      paddingTop: 7,
+      paddingBottom: 7,
+    })).toEqual({ height: 214, overflowY: "auto" });
   });
 
   it("restores persisted image and document attachments as provider content parts", () => {

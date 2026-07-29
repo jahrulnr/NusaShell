@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "electron-forge start",
-    "dev": "electron-forge start -- --dev --no-sandbox",
+    "dev": "tsx scripts/register-linux-desktop.ts && electron-forge start -- --dev --no-sandbox",
     "package": "electron-forge package",
     "make": "electron-forge make",
     "publish": "electron-forge publish",

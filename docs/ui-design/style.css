@@ -65,7 +65,14 @@ body {
   white-space: nowrap;
 }
 
-.brand-logo { display: flex; }
+.brand-logo {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  filter: drop-shadow(0 0 7px rgba(42, 198, 246, .2));
+}
+.brand-logo img { display: block; width: 24px; height: 24px; }
 
 .search {
   display: flex;
@@ -113,6 +120,8 @@ body {
   transition: background .15s, color .15s;
 }
 .icon-btn:hover { background: var(--panel-alt); color: var(--text); }
+.icon-btn.is-active { background: var(--accent-soft); color: #a9c2ff; }
+.icon-btn:disabled { cursor: wait; opacity: .65; }
 
 .dot {
   position: absolute;

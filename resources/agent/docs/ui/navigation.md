@@ -1,6 +1,6 @@
 # Navigation and Shell Chrome
 
-Global chrome surrounding every NusaShell view: title bar, window controls, update banner, sidebar, and connection status.
+Global chrome surrounding every NusaShell view: title bar, window controls, update banner, two-mode sidebar, documentation link, and connection status.
 
 **How to open:** Always visible when the NusaShell main window is open.
 
@@ -31,26 +31,28 @@ A status banner at the top of the window that reports update availability, downl
 
 ## Title bar
 
-The top bar contains the NusaShell brand, the global app search, a settings shortcut, and native window controls.
+The top bar identifies NusaShell with its tile-and-wave brand mark and wordmark, followed by compact backend connection status, settings and always-on-top shortcuts, and native window controls. App search is intentionally scoped to Home.
 
-- **Global app search** (`#search-input`):
+- **Connection status text** (`#conn-status`):
   - Section: Title bar
-  - Type: search input
-  - Action: Filters the Home app grid by plugin name, plugin id, or description as the user types. Also updates Plugins and other views that honor the query.
-  - Shortcut: Escape clears the current query when the input is focused.
-  - Related: Clear search (`#search-clear`), Installed plugin grid (`#app-grid`)
+  - Type: status text
+  - Action: Displays 'Connecting...' or 'Connected' depending on the WebSocket state.
 
-- **Clear search** (`#search-clear`):
+- **Connection status indicator** (`#conn-fill`):
   - Section: Title bar
-  - Type: button
-  - Action: Clears the global app search field and refocuses it.
-  - Related: Global app search (`#search-input`)
+  - Type: status indicator
+  - Action: Changes from neutral to green when the backend WebSocket is connected.
 
 - **Settings** (`#nav-settings-btn`):
   - Section: Title bar
   - Type: icon button
   - Action: Switches to the Settings view from anywhere in the app.
   - Related: settings (`#settings`)
+
+- **Keep window on top** (`#window-always-on-top`):
+  - Section: Title bar
+  - Type: toggle icon button
+  - Action: Toggles whether the NusaShell launcher stays above other desktop windows for the current app session.
 
 - **Minimize window** (`#window-minimize`):
   - Section: Title bar
@@ -69,25 +71,25 @@ The top bar contains the NusaShell brand, the global app search, a settings shor
 
 ## Sidebar
 
-Vertical navigation on the left. Each item switches to a top-level view. The connection meter sits at the bottom.
+Vertical navigation on the left, ordered Home, Agent, Plugins, AI Providers, Autostart, and Logs. It can show icons with labels or icons only, remembers that choice locally, and links to the project documentation on GitHub from its footer.
 
 - **Home navigation** (`[data-view="home"].nav-item`):
   - Section: Sidebar
   - Type: nav item
   - Action: Switches the main content to the Home (launcher) view.
-  - Related: Installed plugin grid (`#app-grid`), Global app search (`#search-input`)
-
-- **Plugins navigation** (`[data-view="plugins"].nav-item`):
-  - Section: Sidebar
-  - Type: nav item
-  - Action: Switches the main content to the Plugins list view.
-  - Related: Installed plugin table (`#plugin-table`)
+  - Related: Installed plugin grid (`#app-grid`), Installed app search (`#search-input`)
 
 - **Agent navigation** (`[data-view="agent"].nav-item`):
   - Section: Sidebar
   - Type: nav item
   - Action: Switches the main content to the Agent conversation view.
   - Related: Conversation thread (`#agent-thread`), Message input (`#agent-input`)
+
+- **Plugins navigation** (`[data-view="plugins"].nav-item`):
+  - Section: Sidebar
+  - Type: nav item
+  - Action: Switches the main content to the Plugins list view.
+  - Related: Installed plugin table (`#plugin-table`)
 
 - **AI Providers navigation** (`[data-view="ai-providers"].nav-item`):
   - Section: Sidebar
@@ -110,15 +112,15 @@ Vertical navigation on the left. Each item switches to a top-level view. The con
 - **Add Plugin** (`#open-add-plugin`):
   - Section: Sidebar
   - Type: button
-  - Action: Opens the Add Plugin modal to install a plugin from a URL or local path.
+  - Action: Opens the Add Plugin modal to install a plugin from a URL, native folder picker, or native archive picker.
   - Related: Add Plugin modal (`#add-plugin-modal`), Install from URL (`#install-url-input`)
 
-- **Connection status text** (`#conn-status`):
+- **Docs on GitHub** (`#open-docs`):
   - Section: Sidebar
-  - Type: status text
-  - Action: Displays 'Connecting...' or 'Connected' depending on the WebSocket state.
+  - Type: button
+  - Action: Opens the NusaShell docs directory on GitHub in the system browser.
 
-- **Connection status bar** (`#conn-fill`):
+- **Sidebar display mode** (`#sidebar-mode-toggle`):
   - Section: Sidebar
-  - Type: progress bar
-  - Action: Visual fill showing WebSocket connection progress.
+  - Type: toggle button
+  - Action: Switches between icon-only and icon-with-text sidebar modes and remembers the choice on this device.

@@ -2,7 +2,7 @@
   "views": {
     "navigation": {
       "title": "Navigation and Shell Chrome",
-      "purpose": "Global chrome surrounding every NusaShell view: title bar, window controls, update banner, sidebar, and connection status.",
+      "purpose": "Global chrome surrounding every NusaShell view: title bar, window controls, update banner, two-mode sidebar, documentation link, and connection status.",
       "howToOpen": "Always visible when the NusaShell main window is open.",
       "sections": [
         {
@@ -20,12 +20,13 @@
         {
           "heading": "Title bar",
           "paragraphs": [
-            "The top bar contains the NusaShell brand, the global app search, a settings shortcut, and native window controls."
+            "The top bar identifies NusaShell with its tile-and-wave brand mark and wordmark, followed by compact backend connection status, settings and always-on-top shortcuts, and native window controls. App search is intentionally scoped to Home."
           ],
           "controls": [
-            "search-input",
-            "search-clear",
+            "conn-status",
+            "conn-fill",
             "nav-settings-btn",
+            "window-always-on-top",
             "window-minimize",
             "window-maximize",
             "window-close"
@@ -34,18 +35,18 @@
         {
           "heading": "Sidebar",
           "paragraphs": [
-            "Vertical navigation on the left. Each item switches to a top-level view. The connection meter sits at the bottom."
+            "Vertical navigation on the left, ordered Home, Agent, Plugins, AI Providers, Autostart, and Logs. It can show icons with labels or icons only, remembers that choice locally, and links to the project documentation on GitHub from its footer."
           ],
           "controls": [
             "nav-home",
-            "nav-plugins",
             "nav-agent",
+            "nav-plugins",
             "nav-ai-providers",
             "nav-autostart",
             "nav-logs",
             "open-add-plugin",
-            "conn-status",
-            "conn-fill"
+            "open-docs",
+            "sidebar-mode-toggle"
           ]
         }
       ]
@@ -65,7 +66,7 @@
         {
           "heading": "Search and filters",
           "paragraphs": [
-            "The title bar search filters the grid in real time. Filter tabs below the greeting let you scope the list."
+            "The Home search filters installed plugin cards by name, id, or description in real time. It lives beside the Home filter tabs so its scope is visible."
           ],
           "controls": [
             "search-input",
@@ -177,7 +178,7 @@
         {
           "heading": "Conversation list",
           "paragraphs": [
-            "Left panel listing local conversation threads. Click a thread to open it; use the × button to delete."
+            "A fixed workbench rail listing local conversation threads. Click a thread to open it; use the × button to delete. The rail remains visible beside a wider conversation surface at desktop widths."
           ],
           "controls": [
             "agent-conversations-title",
@@ -191,20 +192,23 @@
         {
           "heading": "Conversation thread",
           "paragraphs": [
-            "Main message area showing user and assistant messages, tool-call result tags, attachments, and retry buttons."
+            "The full-height message runway separates compact user cards from editorial assistant responses. User attachments render as image previews or file cards; completed tool calls form a collapsible status timeline based on real turn results. Message footers expose timestamps, model/trace metadata, copy, and retry where applicable. Only this area scrolls."
           ],
           "controls": [
             "agent-thread",
             "agent-empty",
             "agent-message",
             "agent-bubble",
+            "agent-message-attachments",
+            "agent-activity",
+            "agent-message-action",
             "agent-retry-btn"
           ]
         },
         {
           "heading": "Composer",
           "paragraphs": [
-            "Input area at the bottom of the thread. Write a prompt, attach images, PDFs, or text files, choose a model, and send the turn."
+            "A raised command dock at the bottom of the thread. Its message input starts at one row, grows with wrapped or explicit lines, and caps at ten rows before scrolling internally. Attach images, PDFs, or text files, choose a model, and send the turn without losing the conversation rail."
           ],
           "controls": [
             "agent-form",
@@ -335,13 +339,13 @@
     },
     "logs": {
       "title": "Logs",
-      "purpose": "Live tail of renderer, Electron, IPC, backend, and MCP process log messages.",
+      "purpose": "Live tail of renderer, Electron, IPC, backend, and MCP process log messages, with retained counts per producer.",
       "howToOpen": "Click the Logs item in the left sidebar.",
       "sections": [
         {
           "heading": "Log filters",
           "paragraphs": [
-            "Chips filter the tail by source: All, Frontend, Electron, IPC, Backend, and MCP."
+            "Chips filter the tail by source and show how many retained entries each producer has. Electron receives main-process console output, IPC receives window and tool-call activity, and Backend receives server logger output; an empty source explains what action produces entries."
           ],
           "controls": [
             "log-count",
@@ -356,7 +360,7 @@
         {
           "heading": "Log tail",
           "paragraphs": [
-            "Scrollable list of log entries with auto-stick to the bottom. Shows count of visible / total entries."
+            "The log card fills the remaining shell viewport and scrolls internally, so tall windows do not leave a detached empty area below it. The tail auto-sticks to the bottom and shows retained counts."
           ],
           "controls": [
             "log-tail"
@@ -417,13 +421,13 @@
     },
     "add-plugin-modal": {
       "title": "Add Plugin Modal",
-      "purpose": "Install a plugin from a remote URL or a local path/zip.",
+      "purpose": "Install a plugin from a remote URL or a locally selected folder/archive.",
       "howToOpen": "Click the Add Plugin button in the sidebar or the Home empty-state prompt.",
       "sections": [
         {
           "heading": "Install options",
           "paragraphs": [
-            "Two input groups: install from a URL, or install from a local directory/zip path."
+            "Install from a URL, choose a local plugin folder with the native directory picker, or choose a zip/tar.gz archive with the native file picker. The selected path is read-only."
           ],
           "controls": [
             "add-plugin-modal",
@@ -431,6 +435,8 @@
             "install-url-input",
             "install-url-btn",
             "install-local-input",
+            "pick-local-folder-btn",
+            "pick-local-archive-btn",
             "install-local-btn"
           ]
         },
@@ -576,15 +582,15 @@
       "action": "Dismisses the update banner until the next update event."
     },
     "search-input": {
-      "section": "Title bar",
-      "label": "Global app search",
+      "section": "Search and filters",
+      "label": "Installed app search",
       "type": "search input",
-      "action": "Filters the Home app grid by plugin name, plugin id, or description as the user types. Also updates Plugins and other views that honor the query.",
+      "action": "Filters only the Home app grid by plugin name, plugin id, or description as the user types.",
       "shortcut": "Escape clears the current query when the input is focused.",
       "related": ["search-clear", "app-grid"]
     },
     "search-clear": {
-      "section": "Title bar",
+      "section": "Search and filters",
       "label": "Clear search",
       "type": "button",
       "action": "Clears the global app search field and refocuses it.",
@@ -596,6 +602,12 @@
       "type": "icon button",
       "action": "Switches to the Settings view from anywhere in the app.",
       "related": ["settings"]
+    },
+    "window-always-on-top": {
+      "section": "Title bar",
+      "label": "Keep window on top",
+      "type": "toggle icon button",
+      "action": "Toggles whether the NusaShell launcher stays above other desktop windows for the current app session."
     },
     "window-minimize": {
       "section": "Title bar",
@@ -673,20 +685,32 @@
       "section": "Sidebar",
       "label": "Add Plugin",
       "type": "button",
-      "action": "Opens the Add Plugin modal to install a plugin from a URL or local path.",
+      "action": "Opens the Add Plugin modal to install a plugin from a URL, native folder picker, or native archive picker.",
       "related": ["add-plugin-modal", "install-url-input"]
     },
-    "conn-status": {
+    "open-docs": {
       "section": "Sidebar",
+      "label": "Docs on GitHub",
+      "type": "button",
+      "action": "Opens the NusaShell docs directory on GitHub in the system browser."
+    },
+    "sidebar-mode-toggle": {
+      "section": "Sidebar",
+      "label": "Sidebar display mode",
+      "type": "toggle button",
+      "action": "Switches between icon-only and icon-with-text sidebar modes and remembers the choice on this device."
+    },
+    "conn-status": {
+      "section": "Title bar",
       "label": "Connection status text",
       "type": "status text",
       "action": "Displays 'Connecting...' or 'Connected' depending on the WebSocket state."
     },
     "conn-fill": {
-      "section": "Sidebar",
-      "label": "Connection status bar",
-      "type": "progress bar",
-      "action": "Visual fill showing WebSocket connection progress."
+      "section": "Title bar",
+      "label": "Connection status indicator",
+      "type": "status indicator",
+      "action": "Changes from neutral to green when the backend WebSocket is connected."
     },
     "home-filter-tabs": {
       "section": "Search and filters",
@@ -870,7 +894,7 @@
       "type": "article",
       "selector": ".agent-message",
       "generated": true,
-      "action": "Displays a user or assistant message bubble, plus metadata like model, trace id, and tool-call badges."
+      "action": "Displays a right-aligned user card or a full-width editorial assistant response with a compact metadata and action footer."
     },
     "agent-bubble": {
       "section": "Conversation thread",
@@ -878,7 +902,31 @@
       "type": "div",
       "selector": ".agent-bubble",
       "generated": true,
-      "action": "Contains the rendered message text. Assistant messages are rendered as Markdown."
+      "action": "Displays plain text inside a compact user card; completed assistant messages render sanitized GitHub-Flavored Markdown directly on the conversation runway."
+    },
+    "agent-message-attachments": {
+      "section": "Conversation thread",
+      "label": "Sent attachment preview",
+      "type": "attachment gallery",
+      "selector": ".agent-message-attachments",
+      "generated": true,
+      "action": "Shows persisted image attachments as bounded thumbnails and PDF or text attachments as compact file cards above the user message."
+    },
+    "agent-activity": {
+      "section": "Conversation thread",
+      "label": "Tool activity",
+      "type": "disclosure",
+      "selector": ".agent-activity",
+      "generated": true,
+      "action": "Expands or collapses the completed tool-call timeline. Each row reports the persisted tool name and success or failure state without implying live progress."
+    },
+    "agent-message-action": {
+      "section": "Conversation thread",
+      "label": "Copy message",
+      "type": "icon button",
+      "selector": ".agent-message-action",
+      "generated": true,
+      "action": "Copies the message text through the Electron clipboard bridge and briefly confirms success."
     },
     "agent-retry-btn": {
       "section": "Conversation thread",
@@ -898,7 +946,7 @@
       "section": "Composer",
       "label": "Message input",
       "type": "textarea",
-      "action": "Primary text area for typing a prompt to the agent.",
+      "action": "Primary text area for typing a prompt. Starts at one row, grows automatically with content, and scrolls internally after reaching ten rows.",
       "shortcut": "Ctrl+Enter or Cmd+Enter submits the turn."
     },
     "agent-attachments": {
@@ -1176,7 +1224,7 @@
       "section": "Log filters",
       "label": "Log count",
       "type": "status text",
-      "action": "Shows the number of visible log entries out of the total stored."
+      "action": "Shows the total retained entries against the 1,000-entry limit. Each source chip shows its own retained count."
     },
     "log-filter-all": {
       "section": "Log filters",
@@ -1342,16 +1390,30 @@
     },
     "install-local-input": {
       "section": "Install options",
-      "label": "Install from local path",
-      "type": "text input",
-      "action": "Accepts a local directory or zip path. Press Enter or click Install to submit.",
-      "related": ["install-local-btn"]
+      "label": "Selected local plugin",
+      "type": "read-only text input",
+      "action": "Displays the folder or archive returned by the native picker; paths cannot be typed manually.",
+      "related": ["pick-local-folder-btn", "pick-local-archive-btn", "install-local-btn"]
+    },
+    "pick-local-folder-btn": {
+      "section": "Install options",
+      "label": "Choose folder",
+      "type": "button",
+      "action": "Opens the operating system directory picker and stores the selected plugin folder in the read-only path field.",
+      "related": ["install-local-input", "install-local-btn"]
+    },
+    "pick-local-archive-btn": {
+      "section": "Install options",
+      "label": "Choose archive",
+      "type": "button",
+      "action": "Opens the operating system file picker for zip, tar.gz, or tgz plugin archives.",
+      "related": ["install-local-input", "install-local-btn"]
     },
     "install-local-btn": {
       "section": "Install options",
       "label": "Install (local)",
       "type": "button",
-      "action": "Installs the plugin from the local path in the adjacent input.",
+      "action": "Installs the folder or archive selected by the native picker.",
       "related": ["install-local-input"]
     },
     "install-status": {

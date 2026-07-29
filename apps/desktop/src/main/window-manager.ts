@@ -1,10 +1,16 @@
-import { BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
 import { join, resolve } from "node:path";
+import { resolveWindowIconPath } from "./window-assets.js";
 
 const isDev = process.argv.includes("--dev");
 
 const RENDERER_DIST = join(__dirname, "..", "renderer");
 const PRELOAD_PATH = join(__dirname, "preload.cjs");
+const WINDOW_ICON_PATH = resolveWindowIconPath({
+  isPackaged: app.isPackaged,
+  moduleDir: __dirname,
+  resourcesPath: process.resourcesPath,
+});
 
 type WindowLog = (level: "debug" | "info", message: string) => void;
 
@@ -19,6 +25,7 @@ export function createLauncherWindow(): BrowserWindow {
     minHeight: 600,
     show: false,
     title: "NusaShell",
+    icon: WINDOW_ICON_PATH,
     frame: false,
     webPreferences: {
       preload: PRELOAD_PATH,
@@ -71,6 +78,7 @@ export async function openPluginWindow(
     minHeight: 300,
     title: `${icon} ${name}`,
     show: false,
+    icon: WINDOW_ICON_PATH,
     ...(launcherWindow ? { parent: launcherWindow } : {}),
     webPreferences: {
       preload: PRELOAD_PATH,
@@ -147,6 +155,16 @@ export function registerWindowIpc(log?: WindowLog): void {
 
     window.maximize();
     return true;
+  });
+
+  ipcMain.handle("window:toggle-always-on-top", (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window) return false;
+
+    const alwaysOnTop = !window.isAlwaysOnTop();
+    window.setAlwaysOnTop(alwaysOnTop);
+    log?.("debug", `window.always-on-top ${alwaysOnTop ? "enabled" : "disabled"}`);
+    return alwaysOnTop;
   });
 
   ipcMain.handle("window:close", (event) => {

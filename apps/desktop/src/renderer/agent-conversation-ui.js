@@ -6,6 +6,42 @@ export function renderAssistantMarkdown(content) {
   return assistantMarkdown.render(String(content ?? ""));
 }
 
+export function formatMessageTimestamp(timestamp, locale, timeZone) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(locale, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    ...(timeZone ? { timeZone } : {}),
+  }).format(date);
+}
+
+export function describeToolActivity(toolCalls) {
+  const calls = Array.isArray(toolCalls) ? toolCalls : [];
+  const failed = calls.filter((call) => !call.ok).length;
+  return {
+    label: `${calls.length} tool call${calls.length === 1 ? "" : "s"}`,
+    succeeded: calls.length - failed,
+    failed,
+  };
+}
+
+export function composerTextareaSize({
+  scrollHeight,
+  lineHeight,
+  paddingTop = 0,
+  paddingBottom = 0,
+  maxRows = 10,
+}) {
+  const maxHeight = (lineHeight * maxRows) + paddingTop + paddingBottom;
+  return {
+    height: Math.min(scrollHeight, maxHeight),
+    overflowY: scrollHeight > maxHeight ? "auto" : "hidden",
+  };
+}
+
 /**
  * Build the provider-visible context without restoring messages already covered
  * by a durable compaction checkpoint.

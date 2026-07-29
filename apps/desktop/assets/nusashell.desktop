@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=NusaShell
+Comment=Desktop shell for AI tools
+Exec=nusashell
+Icon=nusashell
+Terminal=false
+NoDisplay=true
+Categories=Development;Utility;
+StartupNotify=true
+StartupWMClass=nusashell

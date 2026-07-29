@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell, type OpenDialogOptions } from "electron";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { bootstrap, type BootstrapResult } from "@nusashell/backend";
@@ -8,6 +8,7 @@ import {
   closeAllPluginWindows,
   registerWindowIpc,
 } from "./window-manager.js";
+import { LINUX_DESKTOP_APP_NAME } from "./window-assets.js";
 import { AppUpdater } from "./updater.js";
 import { loadConfig, type CallToolCommand, type ListToolsQuery } from "@nusashell/application";
 import { AiSettingsStore, type AiRegistrySettings, type SaveAiProviderInput } from "./ai-settings.js";
@@ -28,6 +29,11 @@ const logTail = new LogTail(1000);
 const shellLogLevels = new Set<ShellLogLevel>(["debug", "info", "warn", "error"]);
 const aiRuntimeConfig = loadConfig().ai;
 const aiStubEnabled = aiRuntimeConfig.stubEnabled;
+const DOCS_URL = "https://github.com/jahrulnr/NusaShell/tree/master/docs";
+
+if (process.platform === "linux") {
+  app.setName(LINUX_DESKTOP_APP_NAME);
+}
 
 function redactLogMessage(message: string): string {
   return message
@@ -159,6 +165,35 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   agentConversationStore = new AgentConversationStore(resolve(app.getPath("userData"), "agent-conversations.json"));
   registerWindowIpc((level, message) => logTail.add("ipc", level, message));
+  logTail.add("main", "info", "Electron main process ready");
+  logTail.add("ipc", "debug", "Shell IPC handlers registered");
+
+  ipcMain.handle("shell:open-docs", async () => {
+    await shell.openExternal(DOCS_URL);
+  });
+  ipcMain.handle("shell:pick-plugin-source", async (event, kind: "directory" | "archive") => {
+    if (kind !== "directory" && kind !== "archive") return null;
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    const options: OpenDialogOptions = kind === "directory"
+      ? {
+          title: "Choose a NusaShell plugin folder",
+          buttonLabel: "Choose folder",
+          properties: ["openDirectory"],
+        }
+      : {
+          title: "Choose a NusaShell plugin archive",
+          buttonLabel: "Choose archive",
+          properties: ["openFile"],
+          filters: [
+            { name: "Plugin archives", extensions: ["zip", "tgz", "gz"] },
+            { name: "All files", extensions: ["*"] },
+          ],
+        };
+    const result = owner
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options);
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
 
   logTail.subscribe((entry) => {
     for (const window of BrowserWindow.getAllWindows()) {
@@ -238,6 +273,7 @@ app.whenReady().then(async () => {
   try {
     backend = await startBackend();
     await waitForBackend(backend.config.port);
+    logTail.add("backend", "info", `Backend ready on ${backend.config.host}:${backend.config.port}`);
   } catch (err) {
     console.error("[main] startBackend failed:", err);
   }

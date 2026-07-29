@@ -9,17 +9,25 @@ const config: ForgeConfig = {
   packagerConfig: {
     name: "NusaShell",
     asar: true,
-    extraResource: [resolve(__dirname, "..", "..", "plugins", "examples")],
+    extraResource: [
+      resolve(__dirname, "..", "..", "plugins", "examples"),
+      resolve(__dirname, "assets", "nusashell.png"),
+    ],
   },
   makers: [
     new MakerAppImage({
       options: {
         name: "nusashell",
+        productName: "NusaShell",
+        icon: resolve(__dirname, "assets", "nusashell.png"),
       },
     }),
     new MakerDeb({
       options: {
         name: "nusashell",
+        productName: "NusaShell",
+        icon: resolve(__dirname, "assets", "nusashell.png"),
+        desktopTemplate: resolve(__dirname, "assets", "nusashell.desktop.ejs"),
       },
     }),
   ],

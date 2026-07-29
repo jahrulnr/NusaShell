@@ -1,12 +1,12 @@
 # Add Plugin Modal
 
-Install a plugin from a remote URL or a local path/zip.
+Install a plugin from a remote URL or a locally selected folder/archive.
 
 **How to open:** Click the Add Plugin button in the sidebar or the Home empty-state prompt.
 
 ## Install options
 
-Two input groups: install from a URL, or install from a local directory/zip path.
+Install from a URL, choose a local plugin folder with the native directory picker, or choose a zip/tar.gz archive with the native file picker. The selected path is read-only.
 
 - **Add Plugin modal** (`#add-plugin-modal`):
   - Section: Install options
@@ -30,17 +30,29 @@ Two input groups: install from a URL, or install from a local directory/zip path
   - Action: Installs the plugin from the URL in the adjacent input.
   - Related: Install from URL (`#install-url-input`)
 
-- **Install from local path** (`#install-local-input`):
+- **Selected local plugin** (`#install-local-input`):
   - Section: Install options
-  - Type: text input
-  - Action: Accepts a local directory or zip path. Press Enter or click Install to submit.
-  - Related: Install (local) (`#install-local-btn`)
+  - Type: read-only text input
+  - Action: Displays the folder or archive returned by the native picker; paths cannot be typed manually.
+  - Related: Choose folder (`#pick-local-folder-btn`), Choose archive (`#pick-local-archive-btn`), Install (local) (`#install-local-btn`)
+
+- **Choose folder** (`#pick-local-folder-btn`):
+  - Section: Install options
+  - Type: button
+  - Action: Opens the operating system directory picker and stores the selected plugin folder in the read-only path field.
+  - Related: Selected local plugin (`#install-local-input`), Install (local) (`#install-local-btn`)
+
+- **Choose archive** (`#pick-local-archive-btn`):
+  - Section: Install options
+  - Type: button
+  - Action: Opens the operating system file picker for zip, tar.gz, or tgz plugin archives.
+  - Related: Selected local plugin (`#install-local-input`), Install (local) (`#install-local-btn`)
 
 - **Install (local)** (`#install-local-btn`):
   - Section: Install options
   - Type: button
-  - Action: Installs the plugin from the local path in the adjacent input.
-  - Related: Install from local path (`#install-local-input`)
+  - Action: Installs the folder or archive selected by the native picker.
+  - Related: Selected local plugin (`#install-local-input`)
 
 ## Install status
 

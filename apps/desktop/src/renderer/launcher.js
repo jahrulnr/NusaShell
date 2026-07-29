@@ -3,7 +3,12 @@
 // Uses the native browser WebSocket (not the `ws` npm package).
 import { clampModelEffort, estimateContextTokens, formatContextUsage, formatTokenCount, modelCompatibility, searchModels } from "./ai-model-ui.js";
 import { AgentConversationController } from "./agent-conversation-controller.js";
-import { filterLauncherPlugins, positionContextMenu } from "./launcher-ui.js";
+import {
+  applyTextEdit,
+  countLogsBySource,
+  filterLauncherPlugins,
+  positionContextMenu,
+} from "./launcher-ui.js";
 
 const WS_URL = window.shell?.wsUrl ?? "ws://127.0.0.1:9130";
 const PROTOCOL_VERSION = "1.0";
@@ -132,6 +137,7 @@ let launcherSearchQuery = "";
 let aiSettings = { activeProviderId: "", activeModelKey: "", effort: "auto", providers: [], models: [] };
 let currentProviderDetailId = "";
 let pendingProviderDeleteId = "";
+let editContextTarget = null;
 
 // ============ Helpers ============
 
@@ -166,11 +172,24 @@ function renderLogTail() {
   const filtered = logSourceFilter === "all"
     ? logEntries
     : logEntries.filter((entry) => entry.source === logSourceFilter);
+  const sourceCounts = countLogsBySource(logEntries);
 
   count.textContent = `${logEntries.length} / 1000`;
+  $$("[data-log-source]").forEach((chip) => {
+    const badge = chip.querySelector(".chip-count");
+    if (badge) badge.textContent = String(sourceCounts[chip.dataset.logSource] ?? 0);
+  });
   tail.textContent = "";
   if (filtered.length === 0) {
-    const empty = el("div", "log-empty", "No logs for this source yet.");
+    const emptyMessages = {
+      main: "No Electron entries yet. Main-process console output appears here when emitted.",
+      ipc: "No IPC entries yet. Window controls and plugin tool calls appear here when used.",
+      backend: "No backend entries yet. Backend lifecycle and request logs appear here when emitted.",
+      mcp: "No MCP entries yet. Start or use a plugin to produce MCP process logs.",
+      renderer: "No frontend entries yet. Renderer lifecycle and browser errors appear here.",
+      all: "No shell logs have been retained yet.",
+    };
+    const empty = el("div", "log-empty", emptyMessages[logSourceFilter] ?? emptyMessages.all);
     tail.appendChild(empty);
     return;
   }
@@ -236,13 +255,13 @@ function updateConnStatus(connected) {
 
   if (connected) {
     status.textContent = "Connected";
-    fill.style.width = "100%";
+    fill.classList.add("is-connected");
     settingsDot.style.background = "var(--green)";
     settingsDot.style.boxShadow = "0 0 0 3px rgba(47,191,113,0.15)";
     settingsLabel.textContent = "Connected";
   } else {
     status.textContent = "Disconnected";
-    fill.style.width = "0%";
+    fill.classList.remove("is-connected");
     settingsDot.style.background = "var(--text-faint)";
     settingsDot.style.boxShadow = "none";
     settingsLabel.textContent = "Disconnected";
@@ -508,6 +527,7 @@ function showContextMenu(x, y, plugin) {
   menu.style.display = "block";
   menu.dataset.pluginId = plugin.pluginId;
   setContextMenuMode("plugin");
+  $$("#context-menu .ctx-item").forEach((item) => { item.disabled = false; });
   const point = positionContextMenu(
     { x, y },
     { width: menu.offsetWidth || 180, height: menu.offsetHeight || 200 },
@@ -518,11 +538,21 @@ function showContextMenu(x, y, plugin) {
   menu.querySelector(".ctx-item")?.focus();
 }
 
-function showEditContextMenu(x, y) {
+function isEditableTextControl(target) {
+  if (target instanceof HTMLTextAreaElement) return true;
+  return target instanceof HTMLInputElement
+    && ["text", "search", "url", "tel", "password"].includes(target.type);
+}
+
+function showEditContextMenu(x, y, target) {
   const menu = $("#context-menu");
+  editContextTarget = target;
   menu.style.display = "block";
   delete menu.dataset.pluginId;
   setContextMenuMode("edit");
+  $$("#context-menu .ctx-item").forEach((item) => {
+    item.disabled = target.readOnly && item.dataset.action !== "copy";
+  });
   const point = positionContextMenu(
     { x, y },
     { width: menu.offsetWidth || 180, height: menu.offsetHeight || 150 },
@@ -542,7 +572,43 @@ function setContextMenuMode(mode) {
   $$("#context-menu .ctx-divider").forEach((divider) => divider.hidden = mode === "edit");
 }
 
-function hideContextMenu() { $("#context-menu").style.display = "none"; }
+function hideContextMenu() {
+  $("#context-menu").style.display = "none";
+  if (!$("#context-menu").dataset.pluginId) editContextTarget = null;
+}
+
+async function runEditContextAction(action) {
+  const target = editContextTarget;
+  if (!isEditableTextControl(target) || (target.readOnly && action !== "copy")) return;
+  const clipboard = window.shell?.clipboard;
+  const clipboardText = action === "paste" ? (clipboard?.readText() ?? "") : "";
+  const result = applyTextEdit({
+    value: target.value,
+    selectionStart: target.selectionStart,
+    selectionEnd: target.selectionEnd,
+  }, action, clipboardText);
+
+  if ((action === "copy" || action === "cut") && result.clipboardText) {
+    clipboard?.writeText(result.clipboardText);
+  }
+  if (action !== "copy" && result.value !== target.value) {
+    target.value = result.value;
+    target.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  target.focus();
+  target.setSelectionRange(result.selectionStart, result.selectionEnd);
+}
+
+function setSidebarCompact(compact, persist = true) {
+  const sidebar = $("#sidebar");
+  const toggle = $("#sidebar-mode-toggle");
+  sidebar.classList.toggle("is-compact", compact);
+  toggle.setAttribute("aria-pressed", String(compact));
+  toggle.setAttribute("aria-label", compact ? "Expand sidebar" : "Collapse sidebar");
+  toggle.title = compact ? "Show icons and text" : "Use icon-only sidebar";
+  toggle.querySelector(".nav-label").textContent = compact ? "Show labels" : "Collapse Sidebar";
+  if (persist) localStorage.setItem("nusashell.sidebarMode", compact ? "icons" : "full");
+}
 
 // ============ Event handling ============
 
@@ -602,7 +668,7 @@ function showInstallStatus(message, isError) {
 
 async function doInstall(source, path) {
   if (!path || !path.trim()) {
-    showInstallStatus("Please enter a path.", true);
+    showInstallStatus(source === "local" ? "Choose a plugin folder or archive first." : "Enter a plugin URL first.", true);
     return;
   }
   showInstallStatus("Installing...", false);
@@ -690,12 +756,31 @@ async function refreshAll() {
 
 document.addEventListener("DOMContentLoaded", () => {
   initCentralLogs();
+  const savedSidebarMode = localStorage.getItem("nusashell.sidebarMode");
+  setSidebarCompact(savedSidebarMode ? savedSidebarMode === "icons" : window.innerWidth <= 960, false);
 
   const windowControls = window.shell?.windowControls;
   if (windowControls) {
     $("#window-minimize").addEventListener("click", () => windowControls.minimize());
     $("#window-maximize").addEventListener("click", () => windowControls.toggleMaximize());
     $("#window-close").addEventListener("click", () => windowControls.close());
+
+    const alwaysOnTopButton = $("#window-always-on-top");
+    alwaysOnTopButton.addEventListener("click", async () => {
+      alwaysOnTopButton.disabled = true;
+      try {
+        const isActive = await windowControls.toggleAlwaysOnTop();
+        const label = isActive ? "Stop keeping window on top" : "Keep window on top";
+        alwaysOnTopButton.classList.toggle("is-active", isActive);
+        alwaysOnTopButton.setAttribute("aria-pressed", String(isActive));
+        alwaysOnTopButton.setAttribute("aria-label", label);
+        alwaysOnTopButton.title = label;
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : "Could not change always-on-top mode", "error");
+      } finally {
+        alwaysOnTopButton.disabled = false;
+      }
+    });
   }
 
   // Display WS URL in settings
@@ -704,6 +789,14 @@ document.addEventListener("DOMContentLoaded", () => {
   // Nav switching
   $$("[data-nav]").forEach(item => item.addEventListener("click", () => switchView(item.dataset.view)));
   $("#nav-settings-btn").addEventListener("click", () => switchView("settings"));
+  $("#sidebar-mode-toggle").addEventListener("click", () => {
+    setSidebarCompact(!$("#sidebar").classList.contains("is-compact"));
+  });
+  $("#open-docs").addEventListener("click", () => {
+    window.shell?.shellControls?.openDocs().catch((error) => {
+      showToast(`Could not open docs: ${error.message || error}`, "error");
+    });
+  });
 
   const providerPresets = {
     openrouter: { id: "openrouter", type: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", api: "chat", detail: "API key · OpenAI-compatible chat", apiKeyOptional: false },
@@ -1130,16 +1223,18 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("click", hideContextMenu);
   document.addEventListener("contextmenu", (event) => {
     const target = event.target;
-    if (!(target instanceof HTMLElement) || !target.closest("input, textarea")) return;
+    if (!(target instanceof HTMLElement)) return;
+    const editable = target.closest("input, textarea");
+    if (!isEditableTextControl(editable)) return;
     event.preventDefault();
-    showEditContextMenu(event.clientX, event.clientY);
+    showEditContextMenu(event.clientX, event.clientY, editable);
   });
-  $$(".ctx-item").forEach(item => item.addEventListener("click", (e) => {
+  $$(".ctx-item").forEach(item => item.addEventListener("click", async (e) => {
     e.stopPropagation();
     const action = item.dataset.action;
     const id = $("#context-menu").dataset.pluginId;
     if (!id && ["cut", "copy", "paste"].includes(action)) {
-      document.execCommand(action);
+      await runEditContextAction(action);
       hideContextMenu();
       return;
     }
@@ -1168,11 +1263,26 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#install-local-btn").addEventListener("click", () => {
     doInstall("local", $("#install-local-input").value);
   });
+  const pickPluginSource = async (kind) => {
+    const controls = window.shell?.shellControls;
+    if (!controls) {
+      showInstallStatus("Native file picker is unavailable. Restart NusaShell after rebuilding.", true);
+      return;
+    }
+    try {
+      const path = await controls.pickPluginSource(kind);
+      if (path) {
+        $("#install-local-input").value = path;
+        showInstallStatus(`${kind === "directory" ? "Folder" : "Archive"} selected. Ready to install.`, false);
+      }
+    } catch (error) {
+      showInstallStatus(`Could not open picker: ${error.message || error}`, true);
+    }
+  };
+  $("#pick-local-folder-btn").addEventListener("click", () => void pickPluginSource("directory"));
+  $("#pick-local-archive-btn").addEventListener("click", () => void pickPluginSource("archive"));
   $("#install-url-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") doInstall("url", e.target.value);
-  });
-  $("#install-local-input").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") doInstall("local", e.target.value);
   });
 
   // Uninstall button in drawer

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { filterLauncherPlugins, positionContextMenu } from "../src/renderer/launcher-ui.js";
+import {
+  applyTextEdit,
+  countLogsBySource,
+  filterLauncherPlugins,
+  positionContextMenu,
+} from "../src/renderer/launcher-ui.js";
 
 describe("launcher UI helpers", () => {
   it("filters plugins by name, plugin id, and manifest description", () => {
@@ -15,5 +20,48 @@ describe("launcher UI helpers", () => {
 
   it("keeps a right-click menu inside the window", () => {
     expect(positionContextMenu({ x: 880, y: 670 }, { width: 220, height: 240 }, { width: 900, height: 700 })).toEqual({ x: 672, y: 452 });
+  });
+
+  it("pastes clipboard text at the current selection and moves the caret", () => {
+    expect(applyTextEdit(
+      { value: "hello world", selectionStart: 6, selectionEnd: 11 },
+      "paste",
+      "NusaShell",
+    )).toEqual({
+      value: "hello NusaShell",
+      selectionStart: 15,
+      selectionEnd: 15,
+      clipboardText: "",
+    });
+  });
+
+  it("cuts and copies only the selected text", () => {
+    expect(applyTextEdit(
+      { value: "hello world", selectionStart: 0, selectionEnd: 5 },
+      "cut",
+    )).toEqual({
+      value: " world",
+      selectionStart: 0,
+      selectionEnd: 0,
+      clipboardText: "hello",
+    });
+    expect(applyTextEdit(
+      { value: "hello world", selectionStart: 6, selectionEnd: 11 },
+      "copy",
+    )).toEqual({
+      value: "hello world",
+      selectionStart: 6,
+      selectionEnd: 11,
+      clipboardText: "world",
+    });
+  });
+
+  it("counts retained logs per producer source", () => {
+    expect(countLogsBySource([
+      { source: "main" },
+      { source: "backend" },
+      { source: "main" },
+      { source: "ipc" },
+    ])).toEqual({ all: 4, main: 2, backend: 1, ipc: 1 });
   });
 });

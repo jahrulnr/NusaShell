@@ -6,7 +6,7 @@ The agent conversation workspace. Chat with the NusaShell agent, attach files, p
 
 ## Conversation list
 
-Left panel listing local conversation threads. Click a thread to open it; use the × button to delete.
+A fixed workbench rail listing local conversation threads. Click a thread to open it; use the × button to delete. The rail remains visible beside a wider conversation surface at desktop widths.
 
 - **Conversations heading** (`#agent-conversations-title`):
   - Section: Conversation list
@@ -41,7 +41,7 @@ Left panel listing local conversation threads. Click a thread to open it; use th
 
 ## Conversation thread
 
-Main message area showing user and assistant messages, tool-call result tags, attachments, and retry buttons.
+The full-height message runway separates compact user cards from editorial assistant responses. User attachments render as image previews or file cards; completed tool calls form a collapsible status timeline based on real turn results. Message footers expose timestamps, model/trace metadata, copy, and retry where applicable. Only this area scrolls.
 
 - **Conversation thread** (`#agent-thread`):
   - Section: Conversation thread
@@ -56,12 +56,27 @@ Main message area showing user and assistant messages, tool-call result tags, at
 - **Message row** (`.agent-message`):
   - Section: Conversation thread
   - Type: article
-  - Action: Displays a user or assistant message bubble, plus metadata like model, trace id, and tool-call badges.
+  - Action: Displays a right-aligned user card or a full-width editorial assistant response with a compact metadata and action footer.
 
 - **Message bubble** (`.agent-bubble`):
   - Section: Conversation thread
   - Type: div
-  - Action: Contains the rendered message text. Assistant messages are rendered as Markdown.
+  - Action: Displays plain text inside a compact user card; completed assistant messages render sanitized GitHub-Flavored Markdown directly on the conversation runway.
+
+- **Sent attachment preview** (`.agent-message-attachments`):
+  - Section: Conversation thread
+  - Type: attachment gallery
+  - Action: Shows persisted image attachments as bounded thumbnails and PDF or text attachments as compact file cards above the user message.
+
+- **Tool activity** (`.agent-activity`):
+  - Section: Conversation thread
+  - Type: disclosure
+  - Action: Expands or collapses the completed tool-call timeline. Each row reports the persisted tool name and success or failure state without implying live progress.
+
+- **Copy message** (`.agent-message-action`):
+  - Section: Conversation thread
+  - Type: icon button
+  - Action: Copies the message text through the Electron clipboard bridge and briefly confirms success.
 
 - **Retry turn** (`.agent-retry-btn`):
   - Section: Conversation thread
@@ -70,7 +85,7 @@ Main message area showing user and assistant messages, tool-call result tags, at
 
 ## Composer
 
-Input area at the bottom of the thread. Write a prompt, attach images, PDFs, or text files, choose a model, and send the turn.
+A raised command dock at the bottom of the thread. Its message input starts at one row, grows with wrapped or explicit lines, and caps at ten rows before scrolling internally. Attach images, PDFs, or text files, choose a model, and send the turn without losing the conversation rail.
 
 - **Composer form** (`#agent-form`):
   - Section: Composer
@@ -80,7 +95,7 @@ Input area at the bottom of the thread. Write a prompt, attach images, PDFs, or 
 - **Message input** (`#agent-input`):
   - Section: Composer
   - Type: textarea
-  - Action: Primary text area for typing a prompt to the agent.
+  - Action: Primary text area for typing a prompt. Starts at one row, grows automatically with content, and scrolls internally after reaching ten rows.
   - Shortcut: Ctrl+Enter or Cmd+Enter submits the turn.
 
 - **Attachment chips** (`#agent-attachments`):
