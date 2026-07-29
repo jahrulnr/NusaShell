@@ -74,7 +74,7 @@ Configures how the agent picks and retries models: provider strategy, attempt bu
 - **Vision** (`#settings-ai-vision`):
   - Section: Agent runtime
   - Type: select
-  - Action: Gates multimodal image input: Automatic from catalog, Always allow, or Disable.
+  - Action: Controls image delivery. Automatic sends image parts first and retries once without them after a provider 4xx response; Disable omits image pixels.
 
 - **Stream responses** (`#settings-ai-stream`):
   - Section: Agent runtime

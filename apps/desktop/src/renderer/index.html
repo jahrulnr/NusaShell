@@ -296,7 +296,7 @@
             <div class="settings-card-title">Agent runtime</div>
             <label class="settings-field">Provider strategy<select id="settings-ai-strategy"><option value="failover">Failover</option><option value="round-robin">Round robin</option><option value="switch">Selected provider only</option></select></label>
             <label class="settings-field">Total attempt budget<input id="settings-ai-budget" type="number" min="1" max="32" value="4"></label>
-            <label class="settings-field">Vision<select id="settings-ai-vision"><option value="auto">Automatic from model catalog</option><option value="on">Always allow image pixels</option><option value="off">Disable image pixels</option></select></label>
+            <label class="settings-field">Vision<select id="settings-ai-vision"><option value="auto">Send images with fallback</option><option value="on">Always allow image pixels</option><option value="off">Disable image pixels</option></select></label>
             <div class="settings-row"><span>Stream responses</span><label class="toggle"><input id="settings-ai-stream" type="checkbox" checked><span class="toggle-slider"></span></label></div>
             <div class="settings-row"><span>Applies without restart</span><button class="mini-btn" type="submit">Save runtime</button></div>
           </form>
