@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.29] - 2026-07-29
+
+### Fixed
+
+- Plugin windows (e.g. Notes) could not be reopened after closing: the `ready-to-show` handler was registered after `await loadURL`, so on fast/cached loads the event fired before the handler and the window stayed hidden. The handler is now registered before `loadURL` with a fallback `win.show()` after load completes.
+- `openPluginWindow` and `closePluginWindow` now guard against destroyed `BrowserWindow` references lingering in the plugin window map.
+
 ## [0.0.28] - 2026-07-29
 
 ### Fixed

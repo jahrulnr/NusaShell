@@ -55,10 +55,11 @@ export async function openPluginWindow(
   windowMode?: string,
 ): Promise<void> {
   const existing = pluginWindows.get(pluginId);
-  if (existing) {
+  if (existing && !existing.isDestroyed()) {
     existing.focus();
     return;
   }
+  pluginWindows.delete(pluginId);
 
   const width = windowMode === "fullscreen" ? 1200 : 720;
   const height = windowMode === "fullscreen" ? 800 : 480;
@@ -79,13 +80,19 @@ export async function openPluginWindow(
     },
   });
 
+  win.once("ready-to-show", () => {
+    if (!win.isDestroyed()) win.show();
+  });
+
   const uiPath = resolve(installPath, "ui", "index.html");
   try {
     await win.loadURL(`file://${uiPath}?pluginId=${encodeURIComponent(pluginId)}`);
   } catch (err) {
     console.error("[openPluginWindow] loadURL failed:", err);
   }
-  win.once("ready-to-show", () => win.show());
+  if (!win.isDestroyed() && !win.isVisible()) {
+    win.show();
+  }
 
   win.on("closed", () => {
     pluginWindows.delete(pluginId);
@@ -109,10 +116,10 @@ export async function openPluginWindow(
 
 export function closePluginWindow(pluginId: string): void {
   const win = pluginWindows.get(pluginId);
-  if (win) {
+  if (win && !win.isDestroyed()) {
     win.close();
-    pluginWindows.delete(pluginId);
   }
+  pluginWindows.delete(pluginId);
 }
 
 export function closeAllPluginWindows(): void {
