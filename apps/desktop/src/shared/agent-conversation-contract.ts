@@ -1,9 +1,11 @@
-export interface AgentConversationAttachment {
-  readonly type: "image" | "file";
-  readonly dataUrl: string;
+interface AgentConversationAttachmentBase {
   readonly mediaType: string;
   readonly name: string;
 }
+
+export type AgentConversationAttachment =
+  | (AgentConversationAttachmentBase & { readonly type: "image" | "file"; readonly dataUrl: string })
+  | (AgentConversationAttachmentBase & { readonly type: "text"; readonly content: string });
 
 export interface AgentConversationMessage {
   readonly role: "user" | "assistant";

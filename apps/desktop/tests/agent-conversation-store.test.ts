@@ -56,4 +56,20 @@ describe("AgentConversationStore", () => {
     await expect(store.list()).rejects.toThrow("Could not load conversations");
     expect(await readFile(path, "utf8")).toBe("{not-json");
   });
+
+  it("persists a content-inspected text attachment", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-"));
+    const path = join(root, "agent-conversations.json");
+    const first = new AgentConversationStore(path, () => new Date("2026-07-29T10:00:00.000Z"), () => "conv-text");
+    const conversation = await first.create();
+    await first.appendMessage(conversation.id, {
+      role: "user",
+      content: "Review this",
+      attachments: [{ type: "text", mediaType: "text/plain", name: "layout.css", content: ".shell { display: grid; }" }],
+    });
+
+    await expect(new AgentConversationStore(path).get(conversation.id)).resolves.toMatchObject({
+      messages: [{ attachments: [{ type: "text", name: "layout.css", content: ".shell { display: grid; }" }] }],
+    });
+  });
 });

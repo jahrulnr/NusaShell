@@ -53,14 +53,19 @@ function toProviderMessage(message) {
     role: "user",
     content: [
       ...(message.content ? [{ type: "text", text: message.content }] : []),
-      ...message.attachments.map((attachment) => attachment.type === "image"
-        ? { type: "image", dataUrl: attachment.dataUrl, name: attachment.name }
-        : {
+      ...message.attachments.map((attachment) => {
+        if (attachment.type === "text") {
+          return { type: "text", text: `Attached text file: ${attachment.name}\n\n${attachment.content}` };
+        }
+        return attachment.type === "image"
+          ? { type: "image", dataUrl: attachment.dataUrl, name: attachment.name }
+          : {
             type: "file",
             dataUrl: attachment.dataUrl,
             mediaType: attachment.mediaType,
             name: attachment.name,
-          }),
+          };
+      }),
     ],
   };
 }

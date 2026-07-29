@@ -171,6 +171,7 @@ const AgentModelCapabilitiesSchema = z.object({
   reasoningMandatory: z.boolean().optional(),
   reasoningSupportsMaxTokens: z.boolean().optional(),
   supportsTools: z.boolean().optional(),
+  supportsVision: z.boolean().optional(),
 });
 
 export const AgentRunRequestSchema = z.object({

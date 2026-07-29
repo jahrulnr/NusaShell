@@ -107,7 +107,7 @@ async function startBackend(): Promise<BootstrapResult> {
       model: activeModel?.id,
       baseUrl: activeProvider?.baseUrl || undefined,
       apiKey: activeProvider?.apiKey,
-      maxToolRounds: 8,
+      maxToolRounds: 50,
       strategy: aiSettings.strategy,
       totalAttemptBudget: aiSettings.totalAttemptBudget,
       stream: aiSettings.stream,

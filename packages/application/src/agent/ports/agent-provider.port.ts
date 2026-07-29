@@ -67,6 +67,7 @@ export interface AgentModelCapabilities {
   readonly reasoningMandatory?: boolean;
   readonly reasoningSupportsMaxTokens?: boolean;
   readonly supportsTools?: boolean;
+  readonly supportsVision?: boolean;
 }
 
 export interface AgentTokenUsage {

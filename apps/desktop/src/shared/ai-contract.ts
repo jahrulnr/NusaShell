@@ -23,6 +23,8 @@ export interface AiModelSettings {
   readonly reasoningSupportsMaxTokens?: boolean;
   /** Undefined means the provider catalog did not advertise this capability. */
   readonly supportsTools?: boolean;
+  /** Undefined means the provider catalog did not advertise image input support. */
+  readonly supportsVision?: boolean;
   readonly description?: string;
 }
 

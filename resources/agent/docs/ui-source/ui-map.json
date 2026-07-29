@@ -204,7 +204,7 @@
         {
           "heading": "Composer",
           "paragraphs": [
-            "Input area at the bottom of the thread. Write a prompt, attach images or PDFs, choose a model, and send the turn."
+            "Input area at the bottom of the thread. Write a prompt, attach images, PDFs, or text files, choose a model, and send the turn."
           ],
           "controls": [
             "agent-form",
@@ -911,13 +911,13 @@
       "section": "Composer",
       "label": "File attachment input",
       "type": "file input",
-      "action": "Hidden file picker triggered by the attach button. Accepts images and PDFs."
+      "action": "Hidden file picker triggered by the attach button. It inspects file bytes, accepting supported images and PDFs plus valid UTF-8 text such as source code, markup, and configuration; filenames and claimed MIME types are not trusted."
     },
     "agent-attach-btn": {
       "section": "Composer",
       "label": "Attach files",
       "type": "icon button",
-      "action": "Opens the file picker to attach images or PDFs to the current turn. Up to 4 files, each under 4 MiB.",
+      "action": "Opens the file picker to attach images, PDFs, or UTF-8 text files to the current turn. Up to 4 files, each under 4 MiB. Text attachments are included as text context for every chat model. Unless image input is disabled in Agent runtime settings, images are sent optimistically; a provider 4xx response retries the same turn once without image parts.",
       "related": ["agent-file-input", "agent-attachments"]
     },
     "agent-model-trigger": {
@@ -936,7 +936,7 @@
       "section": "Composer",
       "label": "Model picker dropdown",
       "type": "dialog",
-      "action": "Searchable list of imported models. Choose a model and, if supported, a reasoning effort level."
+      "action": "Searchable list of imported models. Capability badges distinguish vision, no vision, and vision unknown using explicit provider metadata only; they do not block image attachments. Choose a model and, if supported, a reasoning effort level."
     },
     "agent-model-search": {
       "section": "Composer",
@@ -1306,7 +1306,7 @@
       "section": "Agent runtime",
       "label": "Vision",
       "type": "select",
-      "action": "Gates multimodal image input: Automatic from catalog, Always allow, or Disable."
+      "action": "Controls image delivery. Automatic sends image parts first and retries once without them after a provider 4xx response; Disable omits image pixels."
     },
     "settings-ai-stream": {
       "section": "Agent runtime",

@@ -11,6 +11,7 @@ export interface ModelCapabilities {
   readonly reasoningMandatory?: boolean;
   readonly reasoningSupportsMaxTokens?: boolean;
   readonly supportsTools?: boolean;
+  readonly supportsVision?: boolean;
 }
 
 export interface ModelRuntimePolicy {
@@ -47,9 +48,11 @@ export function resolveModelRuntimePolicy(input: {
     capabilities,
   );
   const inputModes = capabilities?.inputModes?.map((mode) => mode.toLowerCase()) ?? [];
-  const supportsVision = inputModes.length > 0
-    ? inputModes.includes("image")
-    : heuristicModelSupportsVision(input.model);
+  const supportsVision = capabilities?.supportsVision !== undefined
+    ? capabilities.supportsVision
+    : inputModes.length > 0
+      ? inputModes.includes("image")
+      : heuristicModelSupportsVision(input.model);
 
   return {
     ...(effort ? { effort } : {}),

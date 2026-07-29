@@ -70,7 +70,7 @@ Main message area showing user and assistant messages, tool-call result tags, at
 
 ## Composer
 
-Input area at the bottom of the thread. Write a prompt, attach images or PDFs, choose a model, and send the turn.
+Input area at the bottom of the thread. Write a prompt, attach images, PDFs, or text files, choose a model, and send the turn.
 
 - **Composer form** (`#agent-form`):
   - Section: Composer
@@ -91,12 +91,12 @@ Input area at the bottom of the thread. Write a prompt, attach images or PDFs, c
 - **File attachment input** (`#agent-file-input`):
   - Section: Composer
   - Type: file input
-  - Action: Hidden file picker triggered by the attach button. Accepts images and PDFs.
+  - Action: Hidden file picker triggered by the attach button. It inspects file bytes, accepting supported images and PDFs plus valid UTF-8 text such as source code, markup, and configuration; filenames and claimed MIME types are not trusted.
 
 - **Attach files** (`#agent-attach-btn`):
   - Section: Composer
   - Type: icon button
-  - Action: Opens the file picker to attach images or PDFs to the current turn. Up to 4 files, each under 4 MiB.
+  - Action: Opens the file picker to attach images, PDFs, or UTF-8 text files to the current turn. Up to 4 files, each under 4 MiB. Text attachments are included as text context for every chat model. Unless image input is disabled in Agent runtime settings, images are sent optimistically; a provider 4xx response retries the same turn once without image parts.
   - Related: File attachment input (`#agent-file-input`), Attachment chips (`#agent-attachments`)
 
 - **Model and effort trigger** (`#agent-model-trigger`):
@@ -112,7 +112,7 @@ Input area at the bottom of the thread. Write a prompt, attach images or PDFs, c
 - **Model picker dropdown** (`#agent-model-menu`):
   - Section: Composer
   - Type: dialog
-  - Action: Searchable list of imported models. Choose a model and, if supported, a reasoning effort level.
+  - Action: Searchable list of imported models. Capability badges distinguish vision, no vision, and vision unknown using explicit provider metadata only; they do not block image attachments. Choose a model and, if supported, a reasoning effort level.
 
 - **Search models** (`#agent-model-search`):
   - Section: Composer

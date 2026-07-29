@@ -1,8 +1,11 @@
 export function modelCompatibility(model) {
+  const visionStatus = modelVisionStatus(model);
   const inputModes = new Set((model?.inputModes || []).map(normalize));
   const outputModes = new Set((model?.outputModes || []).map(normalize));
   const labels = [];
-  if (inputModes.has("image")) labels.push("vision");
+  if (visionStatus === "supported") labels.push("vision");
+  if (visionStatus === "unsupported") labels.push("no vision");
+  if (visionStatus === "unknown") labels.push("vision unknown");
   if (inputModes.has("file") || inputModes.has("pdf") || inputModes.has("document")) labels.push("document");
   ["audio", "video"].forEach((mode) => {
     if (inputModes.has(mode) || outputModes.has(mode)) labels.push(mode);
@@ -10,6 +13,14 @@ export function modelCompatibility(model) {
   if (model?.supportsTools) labels.push("tools");
   if ((model?.supportedEfforts || []).length > 0) labels.push("reasoning");
   return [...new Set(labels)];
+}
+
+export function modelVisionStatus(model) {
+  if (model?.supportsVision === true) return "supported";
+  if (model?.supportsVision === false) return "unsupported";
+  const inputModes = (model?.inputModes || []).map(normalize);
+  if (inputModes.includes("image")) return "supported";
+  return inputModes.length > 0 ? "unsupported" : "unknown";
 }
 
 export function searchModels(models, query) {

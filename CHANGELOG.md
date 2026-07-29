@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.30] - 2026-07-29
+
+### Added
+
+- `postinstall` script in `apps/desktop/package.json` runs `electron-rebuild -f -w better-sqlite3` automatically after `pnpm install`, ensuring the native SQLite module is rebuilt for Electron's ABI without manual steps.
+- README "Prerequisites" section documenting Node.js 20+, pnpm 11+, and native build tools (`python3`, `make`, `g++`) needed for `better-sqlite3` with per-OS install instructions.
+- README "Quickstart (Desktop App)" section with the `pnpm install && make dev` flow for the Electron desktop app.
+
+### Changed
+
+- Desktop `maxToolRounds` raised from `8` to `50` in `apps/desktop/src/main/index.ts`, matching `DEFAULT_MAX_TOOL_ROUNDS` in the application package so the agent turn loop can actually use the full tool-round budget.
+- README "Project status" and "Repo layout (today)" updated to reflect implemented packages (application, infrastructure, transport-ws, contracts, plugin-sdk, backend, desktop) instead of stale "stubs" labels.
+
 ## [0.0.29] - 2026-07-29
 
 ### Fixed

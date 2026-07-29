@@ -112,18 +112,25 @@ export class OpenAiCompatibleAgentProvider implements AgentProvider {
       ...(policy.effort ? { effort: policy.effort } : { effort: "auto" }),
     };
     const stream = this.api !== "messages" && (this.options.stream ?? true);
-    const allowVision = this.options.vision === "off"
-      ? false
-      : this.options.vision === "on"
-        ? true
-        : policy.supportsVision;
+    const allowVision = this.options.vision !== "off";
     const body = this.api === "responses"
       ? toResponsesBody(normalizedRequest, model, allowVision, policy.maxOutput ?? this.options.maxOutputTokens)
       : this.api === "messages"
         ? toMessagesBody(normalizedRequest, model, allowVision, policy.maxOutput ?? this.options.maxOutputTokens)
         : toChatBody(normalizedRequest, model, allowVision, policy.maxOutput ?? this.options.maxOutputTokens);
 
-    const payload = await this.post(body, request, stream, true);
+    let payload: unknown;
+    try {
+      payload = await this.post(body, request, stream, true);
+    } catch (error) {
+      if (!shouldRetryWithoutImages(error, request.messages, request.signal)) throw error;
+      const fallbackBody = this.api === "responses"
+        ? toResponsesBody(normalizedRequest, model, false, policy.maxOutput ?? this.options.maxOutputTokens)
+        : this.api === "messages"
+          ? toMessagesBody(normalizedRequest, model, false, policy.maxOutput ?? this.options.maxOutputTokens)
+          : toChatBody(normalizedRequest, model, false, policy.maxOutput ?? this.options.maxOutputTokens);
+      payload = await this.post(fallbackBody, request, stream, true);
+    }
     const parsed = this.api === "responses"
       ? looksLikeChatCompletion(payload)
         ? parseChatResult(payload, model)
@@ -688,6 +695,20 @@ function looksLikeJsonStreamReject(value: unknown): boolean {
 
 function isTransient(error: unknown): boolean {
   return error instanceof AgentProviderHttpError && error.transient;
+}
+
+function shouldRetryWithoutImages(
+  error: unknown,
+  messages: readonly AgentMessage[],
+  signal: AbortSignal | undefined,
+): boolean {
+  return !signal?.aborted
+    && error instanceof AgentProviderHttpError
+    && error.status >= 400
+    && error.status < 500
+    && messages.some((message) => message.role === "user"
+      && Array.isArray(message.content)
+      && message.content.some((part) => part.type === "image"));
 }
 
 function retryAfterMs(error: unknown): number {

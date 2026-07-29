@@ -335,6 +335,7 @@ async function runAgentTurn(messages, options = {}) {
         reasoningMandatory: selected.reasoningMandatory,
         reasoningSupportsMaxTokens: selected.reasoningSupportsMaxTokens,
         supportsTools: selected.supportsTools,
+        supportsVision: selected.supportsVision,
       },
       ...(options.traceId ? { traceId: options.traceId } : {}),
     }, 300000);
@@ -761,6 +762,7 @@ document.addEventListener("DOMContentLoaded", () => {
     runTurn: runAgentTurn,
     cancelTurn: cancelAgentTurn,
     getActiveModel: activeModel,
+    getVisionMode: () => aiSettings.vision,
     notify: showToast,
     log: writeRendererLog,
   });

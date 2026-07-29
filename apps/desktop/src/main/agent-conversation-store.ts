@@ -173,12 +173,16 @@ function isConversationMessage(value: unknown): value is AgentConversationMessag
 function isConversationAttachment(value: unknown): boolean {
   if (typeof value !== "object" || value === null) return false;
   const attachment = value as Record<string, unknown>;
-  return (attachment.type === "image" || attachment.type === "file")
-    && typeof attachment.name === "string"
+  const validBase = typeof attachment.name === "string"
     && attachment.name.length > 0
     && attachment.name.length <= 255
     && typeof attachment.mediaType === "string"
-    && attachment.mediaType.length > 0
+    && attachment.mediaType.length > 0;
+  if (!validBase) return false;
+  if (attachment.type === "text") {
+    return typeof attachment.content === "string" && attachment.content.length <= 4_000_000;
+  }
+  return (attachment.type === "image" || attachment.type === "file")
     && typeof attachment.dataUrl === "string"
     && attachment.dataUrl.length <= 6_000_000
     && /^data:[^;,]+;base64,/i.test(attachment.dataUrl);

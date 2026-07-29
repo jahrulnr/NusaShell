@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampModelEffort, formatContextUsage, modelCompatibility, searchModels } from "../src/renderer/ai-model-ui.js";
+import { clampModelEffort, formatContextUsage, modelCompatibility, modelVisionStatus, searchModels } from "../src/renderer/ai-model-ui.js";
 
 const visionModel = {
   id: "openai/gpt-5",
@@ -15,6 +15,13 @@ const visionModel = {
 describe("agent model UI projections", () => {
   it("shows provider compatibility independently from effort", () => {
     expect(modelCompatibility(visionModel)).toEqual(["vision", "document", "tools", "reasoning"]);
+  });
+
+  it("reports confirmed, unavailable, and unknown vision support separately", () => {
+    expect(modelVisionStatus(visionModel)).toBe("supported");
+    expect(modelVisionStatus({ ...visionModel, inputModes: ["text"] })).toBe("unsupported");
+    expect(modelVisionStatus({ ...visionModel, inputModes: [] })).toBe("unknown");
+    expect(modelVisionStatus({ ...visionModel, inputModes: [], supportsVision: false })).toBe("unsupported");
   });
 
   it("searches model ID, label, and provider name", () => {

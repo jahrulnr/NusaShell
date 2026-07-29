@@ -68,4 +68,20 @@ describe("agent conversation UI helpers", () => {
       ],
     }]);
   });
+
+  it("restores text attachments as named text context for any chat model", () => {
+    expect(buildAgentContext({
+      messages: [{
+        role: "user",
+        content: "Review this source",
+        attachments: [{ type: "text", content: "body { color: red; }", mediaType: "text/plain", name: "theme.css" }],
+      }],
+    })).toEqual([{
+      role: "user",
+      content: [
+        { type: "text", text: "Review this source" },
+        { type: "text", text: "Attached text file: theme.css\n\nbody { color: red; }" },
+      ],
+    }]);
+  });
 });

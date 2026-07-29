@@ -6,6 +6,7 @@ import {
   PluginListRequestSchema,
   ToolCallRequestSchema,
   ToolCancelRequestSchema,
+  AgentRunRequestSchema,
   AgentCancelRequestSchema,
 } from "../src/index.js";
 
@@ -141,6 +142,24 @@ describe("Request schemas", () => {
         method: "agent.cancel",
         payload: {},
       }).success).toBe(false);
+    });
+  });
+
+  describe("agent.run", () => {
+    it("preserves an explicit vision capability for the selected model", () => {
+      const result = AgentRunRequestSchema.safeParse({
+        kind: "request",
+        id: "req_agent_vision",
+        method: "agent.run",
+        payload: {
+          pluginIds: [],
+          messages: [{ role: "user", content: "Describe the image" }],
+          modelCapabilities: { supportsVision: false },
+        },
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data.payload.modelCapabilities?.supportsVision).toBe(false);
     });
   });
 

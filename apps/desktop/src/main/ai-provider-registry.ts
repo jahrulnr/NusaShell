@@ -208,7 +208,12 @@ function normalizeImportedModel(value: unknown): AiModelSettings | null {
     inputModes.push(...modes(input?.split("+")));
     outputModes.push(...modes(output?.split("+")));
   }
-  if (record(capabilities.image_input).supported === true) addUnique(inputModes, "image");
+  const imageInputSupported = record(capabilities.image_input).supported;
+  if (imageInputSupported === true) addUnique(inputModes, "image");
+  const supportsVision = typeof imageInputSupported === "boolean"
+    ? imageInputSupported
+    : inputModes.includes("image") ? true
+      : inputModes.length > 0 ? false : undefined;
   if (record(capabilities.pdf_input).supported === true) addUnique(inputModes, "pdf");
 
   const supportedEfforts = normalizeEfforts(
@@ -245,6 +250,7 @@ function normalizeImportedModel(value: unknown): AiModelSettings | null {
     reasoningMandatory: reasoning.mandatory === true,
     reasoningSupportsMaxTokens: reasoning.supports_max_tokens === true,
     ...(supportsTools ? { supportsTools: true } : {}),
+    ...(supportsVision !== undefined ? { supportsVision } : {}),
     ...(text(item.description) ? { description: text(item.description) } : {}),
   };
 }
@@ -300,6 +306,7 @@ function normalizeModel(value: unknown): AiModelSettings | null {
     ...(model.reasoningMandatory === true ? { reasoningMandatory: true } : {}),
     ...(model.reasoningSupportsMaxTokens === true ? { reasoningSupportsMaxTokens: true } : {}),
     ...(typeof model.supportsTools === "boolean" ? { supportsTools: model.supportsTools } : {}),
+    ...(typeof model.supportsVision === "boolean" ? { supportsVision: model.supportsVision } : {}),
     ...(text(model.description) ? { description: text(model.description) } : {}),
   };
 }

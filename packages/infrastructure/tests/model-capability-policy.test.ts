@@ -84,4 +84,11 @@ describe("model capability policy", () => {
     expect(heuristicModelSupportsVision("google/gemini-2.5-pro")).toBe(true);
     expect(heuristicModelSupportsVision("deepseek/deepseek-chat")).toBe(false);
   });
+
+  it("honors explicit vision capability ahead of empty input modality metadata", () => {
+    expect(resolveModelRuntimePolicy({
+      model: "provider/model",
+      capabilities: { inputModes: [], supportsVision: false },
+    }).supportsVision).toBe(false);
+  });
 });

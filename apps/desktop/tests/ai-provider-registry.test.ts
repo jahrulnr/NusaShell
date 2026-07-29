@@ -105,7 +105,59 @@ describe("AI provider registry", () => {
       reasoningMandatory: true,
       reasoningSupportsMaxTokens: true,
       supportsTools: true,
+      supportsVision: true,
     })]);
+  });
+
+  it("preserves an explicitly advertised lack of image input", async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      data: [{
+        id: "deepseek/deepseek-v4-flash:free",
+        capabilities: { image_input: { supported: false } },
+      }],
+    }), { status: 200 }));
+
+    const models = await importProviderModels(provider("gateway", "Gateway", []), fetchFn);
+
+    expect(models[0]).toMatchObject({ supportsVision: false });
+  });
+
+  it("keeps vision unknown when a gateway catalog only returns model IDs", () => {
+    const state = normalizeRegistryState({
+      providers: [{
+        ...provider("gateway", "Gateway", []),
+        models: [
+          { id: "agy/claude-opus-4-6-thinking", label: "Claude Opus", task: "", inputModes: [], outputModes: [], supportedEfforts: [], defaultEffort: "auto" },
+          { id: "agy/claude-sonnet-4-6", label: "Claude Sonnet", task: "", inputModes: [], outputModes: [], supportedEfforts: [], defaultEffort: "auto" },
+          { id: "agy/gemini-2.5-flash", label: "Gemini", task: "", inputModes: [], outputModes: [], supportedEfforts: [], defaultEffort: "auto" },
+          { id: "oc/deepseek-v4-flash-free", label: "DeepSeek", task: "", inputModes: [], outputModes: [], supportedEfforts: [], defaultEffort: "auto" },
+        ],
+      }],
+    });
+
+    expect(state.providers[0]?.models).toMatchObject([
+      { id: "agy/claude-opus-4-6-thinking" },
+      { id: "agy/claude-sonnet-4-6" },
+      { id: "agy/gemini-2.5-flash" },
+      { id: "oc/deepseek-v4-flash-free" },
+    ]);
+    expect(state.providers[0]?.models[0]).not.toHaveProperty("supportsVision");
+    expect(state.providers[0]?.models[1]).not.toHaveProperty("supportsVision");
+    expect(state.providers[0]?.models[2]).not.toHaveProperty("supportsVision");
+    expect(state.providers[0]?.models[3]).not.toHaveProperty("supportsVision");
+  });
+
+  it("records explicit text-only input modality metadata", async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      data: [{
+        id: "deepseek/deepseek-chat",
+        architecture: { input_modalities: ["text"] },
+      }],
+    }), { status: 200 }));
+
+    const models = await importProviderModels(provider("gateway", "Gateway", []), fetchFn);
+
+    expect(models[0]).toMatchObject({ supportsVision: false });
   });
 
   it("treats supported_parameters reasoning as advertised effort support", async () => {

@@ -1,12 +1,14 @@
 import { buildAgentContext, mergeCompactionCheckpoint, renderAssistantMarkdown, searchConversations } from "./agent-conversation-ui.js";
 import { estimateContextTokens, formatContextUsage } from "./ai-model-ui.js";
+import { inspectAttachmentContent, toDataUrl } from "./attachment-content.js";
 
 export class AgentConversationController {
-  constructor({ shell, runTurn, cancelTurn, getActiveModel, notify, log }) {
+  constructor({ shell, runTurn, cancelTurn, getActiveModel, getVisionMode, notify, log }) {
     this.shell = shell;
     this.runTurn = runTurn;
     this.cancelTurn = cancelTurn;
     this.getActiveModel = getActiveModel;
+    this.getVisionMode = getVisionMode;
     this.notify = notify;
     this.log = log;
     this.conversation = null;
@@ -204,26 +206,30 @@ export class AgentConversationController {
         this.notify(`${file.name} is larger than 4 MiB.`, "error");
         continue;
       }
-      if (!file.type.startsWith("image/") && file.type !== "application/pdf") {
-        this.notify(`${file.name} is not a supported image or PDF.`, "error");
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const attachment = inspectAttachmentContent(bytes);
+      if (!attachment) {
+        this.notify(`${file.name} is not a supported image, PDF, or UTF-8 text file.`, "error");
         continue;
       }
       const selectedModel = this.getActiveModel();
-      const mode = file.type.startsWith("image/") ? "image" : "file";
+      const mode = attachment.kind;
+      const visionMode = this.getVisionMode?.() ?? "auto";
       const advertisedModes = selectedModel?.inputModes ?? [];
-      const supported = mode === "image"
-        ? advertisedModes.includes("image")
-        : advertisedModes.some((item) => ["file", "pdf", "document"].includes(item));
-      if (advertisedModes.length && !supported) {
-        this.notify(`${selectedModel.id} does not advertise ${mode === "image" ? "image" : "document"} input support.`, "error");
+      const supported = mode === "text"
+        || (mode === "image"
+          ? visionMode !== "off"
+          : advertisedModes.some((item) => ["file", "pdf", "document"].includes(item)));
+      if (!supported) {
+        const reason = mode === "image"
+          ? "has image input disabled in Agent runtime settings."
+          : "does not advertise document input support.";
+        this.notify(`${selectedModel?.id || "Selected model"} ${reason}`, "error");
         continue;
       }
-      this.attachments.push({
-        type: mode,
-        dataUrl: await readDataUrl(file),
-        mediaType: file.type,
-        name: file.name,
-      });
+      this.attachments.push(attachment.kind === "text"
+        ? { type: "text", content: attachment.content, mediaType: attachment.mediaType, name: file.name }
+        : { type: attachment.kind, dataUrl: toDataUrl(bytes, attachment.mediaType), mediaType: attachment.mediaType, name: file.name });
     }
     this.renderAttachments();
   }
@@ -233,7 +239,8 @@ export class AgentConversationController {
     list.textContent = "";
     this.attachments.forEach((attachment, index) => {
       const chip = element("span", "agent-attachment");
-      chip.appendChild(element("span", "agent-attachment-name", `${attachment.type === "image" ? "IMG" : "PDF"} · ${attachment.name}`));
+      const kind = attachment.type === "image" ? "IMG" : attachment.type === "file" ? "PDF" : "TXT";
+      chip.appendChild(element("span", "agent-attachment-name", `${kind} · ${attachment.name}`));
       const remove = element("button", "agent-attachment-remove", "×");
       remove.type = "button";
       remove.setAttribute("aria-label", `Remove ${attachment.name}`);
@@ -335,7 +342,7 @@ export class AgentConversationController {
     message.append(label, bubble);
     if (meta.attachments?.length) {
       const attachmentList = element("div", "agent-turn-meta");
-      meta.attachments.forEach((attachment) => attachmentList.appendChild(tag(`${attachment.type === "image" ? "IMG" : "PDF"} · ${attachment.name}`)));
+      meta.attachments.forEach((attachment) => attachmentList.appendChild(tag(`${attachment.type === "image" ? "IMG" : attachment.type === "file" ? "PDF" : "TXT"} · ${attachment.name}`)));
       message.appendChild(attachmentList);
     }
 
@@ -413,13 +420,4 @@ function formatTime(timestamp) {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
-function readDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
-    reader.readAsDataURL(file);
-  });
 }

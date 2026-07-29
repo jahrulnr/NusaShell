@@ -294,6 +294,46 @@ describe("OpenAiCompatibleAgentProvider", () => {
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
+  it("retries a 4xx image rejection once without image parts", async () => {
+    const fetchFn = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("image input is not supported", { status: 400 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        model: "text-only-model",
+        choices: [{ message: { content: "I received the text." } }],
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+    const provider = new OpenAiCompatibleAgentProvider({
+      baseUrl: "https://provider.example/v1",
+      apiKey: "secret",
+      fetchFn,
+    });
+
+    const result = await provider.complete({
+      traceId: "trace-image-fallback",
+      round: 1,
+      model: "text-only-model",
+      tools: [],
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "What is in this image?" },
+          { type: "image", name: "photo.png", dataUrl: "data:image/png;base64,YQ==" },
+        ],
+      }],
+    });
+
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body))).toMatchObject({
+      messages: [{ content: [
+        { type: "text", text: "What is in this image?" },
+        { type: "image_url" },
+      ] }],
+    });
+    expect(JSON.parse(String(fetchFn.mock.calls[1]?.[1]?.body))).toMatchObject({
+      messages: [{ content: [{ type: "text", text: "What is in this image?" }] }],
+    });
+    expect(result.text).toBe("I received the text.");
+  });
+
   it("uses runtime model policy for effort, tools, and max output", async () => {
     const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       model: "reasoner",

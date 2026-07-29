@@ -60,6 +60,14 @@ bridge API (`window.shell.callTool`). See the docs map below for the full story.
 | [`docs/PoC/`](./docs/PoC/) | Runnable zero-dep bridge demo (behavioral reference, not the target layout) |
 | [`docs/ui-design/`](./docs/ui-design/) | Launcher visual sketch |
 
+## Prerequisites
+
+- **Node.js 20+** and **pnpm 11+**
+- **Native build tools** (required by `better-sqlite3`):
+  - Linux: `sudo apt install python3 make g++` (or distro equivalent)
+  - macOS: `xcode-select --install`
+  - Windows: `npm install --global windows-build-tools` or Visual Studio Build Tools
+
 ## Quickstart (PoC)
 
 Requires Node.js only (no `npm install` for the proof of concept).
@@ -80,6 +88,21 @@ Then open **http://localhost:8420** in your browser.
 - The icon gets a green "running" badge once its MCP process is alive
 
 More detail: [`docs/PoC/README.md`](./docs/PoC/README.md).
+
+## Quickstart (Desktop App)
+
+Requires Node.js 20+, pnpm 11+, and native build tools (see [Prerequisites](#prerequisites)).
+
+```bash
+git clone <your-repo-url> nusashell
+cd nusashell
+pnpm install
+make dev
+```
+
+This launches the Electron desktop app with the backend embedded.
+The app starts in AI stub mode by default — configure a real provider
+in Settings to enable actual AI responses.
 
 ## Writing your own plugin
 
@@ -118,14 +141,21 @@ matching the response back to the right request.
 
 ## Project status
 
-This repo is **early scaffold**: a pnpm monorepo exists with a fully implemented
-`packages/domain` layer; apps and other packages are stubs. Architecture docs and
-the PoC under `docs/` remain authoritative for product intent.
+This repo is **early scaffold with a working desktop app**: a pnpm monorepo with
+implemented domain, application, infrastructure, transport, contracts, and plugin-sdk
+packages; a backend composition root; and an Electron desktop shell. Architecture
+docs and the PoC under `docs/` remain authoritative for product intent.
 
 **Monorepo today:**
 - `packages/domain` — plugin identity, manifest, runtime state, lifecycle policies, tool-call model (Vitest-covered)
-- `packages/{application,infrastructure,transport-ws,contracts,plugin-sdk,shared,testing}` — stubs
-- `apps/{backend,desktop}` — stubs
+- `packages/application` — command/query handlers, agent turn runner, prompt injection, docs tools
+- `packages/infrastructure` — SQLite, filesystem registry, MCP clients (stdio/HTTP/SSE), Pino logger, docs index
+- `packages/transport-ws` — WebSocket protocol, message router, session registry, event publisher
+- `packages/contracts` — Zod request/response/event schemas and DTOs
+- `packages/plugin-sdk` — `NusaClient` WebSocket client with reconnect
+- `packages/{shared,testing}` — shared test fakes and helpers
+- `apps/backend` — composition root wiring all layers
+- `apps/desktop` — Electron shell with launcher, plugin windows, agent workspace, AI provider settings
 
 **What the PoC demonstrates** (`docs/PoC/`):
 - Plugin discovery (folder scan), manifest parsing
@@ -158,17 +188,17 @@ and infrastructure are next.
 ├── pnpm-workspace.yaml
 ├── tsconfig.base.json
 ├── apps/
-│   ├── backend/               # stub
-│   └── desktop/               # stub
+│   ├── backend/               # composition root (bootstrap, container, shutdown)
+│   └── desktop/               # Electron shell (launcher, plugin windows, agent workspace)
 ├── packages/
 │   ├── domain/                # implemented (plugin runtime, policies, events)
-│   ├── application/           # stub
-│   ├── infrastructure/        # stub
-│   ├── transport-ws/          # stub
-│   ├── contracts/             # stub
-│   ├── plugin-sdk/            # stub
+│   ├── application/           # implemented (handlers, agent runner, prompts, docs tools)
+│   ├── infrastructure/        # implemented (SQLite, FS registry, MCP clients, logger)
+│   ├── transport-ws/          # implemented (WS protocol, router, sessions, events)
+│   ├── contracts/             # implemented (Zod schemas, DTOs)
+│   ├── plugin-sdk/            # implemented (NusaClient, reconnect)
 │   ├── shared/                # stub
-│   └── testing/               # stub
+│   └── testing/               # test fakes and helpers
 └── docs/
     ├── blueprint.md           # product / plugin architecture
     ├── backend-structure.md   # target backend monorepo + WS protocol
