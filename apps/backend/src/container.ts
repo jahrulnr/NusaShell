@@ -10,6 +10,7 @@ import {
   PluginSyncService,
   FilesystemPromptLoader,
   MarkdownDocsIndex,
+  FilesystemSkillRegistry,
   createLogger,
   AgentProviderRegistry,
   StaticAgentProvider,
@@ -17,7 +18,7 @@ import {
   type Logger,
   type LogObserver,
 } from "@nusashell/infrastructure";
-import type { PluginRepositoryPort } from "@nusashell/application";
+import type { PluginRepositoryPort, SkillRegistryPort } from "@nusashell/application";
 import {
   CommandBus,
   QueryBus,
@@ -62,6 +63,7 @@ export interface ContainerOptions {
   readonly promptsRoot?: string;
   readonly docsRoot?: string;
   readonly docsIndexStorageRoot?: string;
+  readonly skillsRoot?: string;
   readonly dbPath?: string;
   readonly logLevel?: string;
   readonly loggerObserver?: LogObserver;
@@ -103,6 +105,7 @@ export interface Container {
   readonly wsServer: WebSocketServer;
   readonly eventPublisher: WebSocketEventPublisher;
   readonly pluginRepository: PluginRepositoryPort;
+  readonly skillRegistry: SkillRegistryPort;
   readonly db?: SqliteDatabase | undefined;
   readonly logger: Logger;
   configureAi(settings: {
@@ -176,7 +179,9 @@ export function createContainer(options: ContainerOptions): Container {
     logger.warn({ err }, "Docs index initial build failed; will retry on demand");
   });
 
-  const agentToolGateway = new McpAgentToolGateway(runtimeManager, docsIndex);
+  const skillsRoot = options.skillsRoot ?? new URL("../../../.nusashell/agent/skills", import.meta.url).pathname;
+  const skillRegistry = new FilesystemSkillRegistry(skillsRoot);
+  const agentToolGateway = new McpAgentToolGateway(runtimeManager, docsIndex, skillRegistry);
   const promptLoader = new FilesystemPromptLoader(
     options.promptsRoot ?? new URL("../../../resources/agent/prompts", import.meta.url).pathname,
   );
@@ -256,6 +261,7 @@ export function createContainer(options: ContainerOptions): Container {
     wsServer,
     eventPublisher,
     pluginRepository,
+    skillRegistry,
     db,
     logger,
     configureAi(settings) {

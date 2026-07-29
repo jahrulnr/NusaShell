@@ -9,6 +9,7 @@ export interface BootstrapOptions {
   readonly promptsRoot?: string;
   readonly docsRoot?: string;
   readonly docsIndexStorageRoot?: string;
+  readonly skillsRoot?: string;
 }
 
 export interface BootstrapResult {
@@ -29,6 +30,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     ...(options.promptsRoot !== undefined ? { promptsRoot: options.promptsRoot } : {}),
     ...(options.docsRoot !== undefined ? { docsRoot: options.docsRoot } : {}),
     ...(options.docsIndexStorageRoot !== undefined ? { docsIndexStorageRoot: options.docsIndexStorageRoot } : {}),
+    ...(options.skillsRoot !== undefined ? { skillsRoot: options.skillsRoot } : {}),
     logLevel: config.logLevel,
     ai: {
       providerId: config.ai.providerId,

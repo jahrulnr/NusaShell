@@ -3,6 +3,7 @@
 // Uses the native browser WebSocket (not the `ws` npm package).
 import { clampModelEffort, estimateContextTokens, formatContextUsage, formatTokenCount, modelCompatibility, searchModels } from "./ai-model-ui.js";
 import { AgentConversationController } from "./agent-conversation-controller.js";
+import { SkillsController } from "./skills-controller.js";
 import {
   applyTextEdit,
   countLogsBySource,
@@ -134,6 +135,7 @@ let logSourceFilter = "all";
 const logEntries = [];
 const STATES = ["idle", "starting", "running", "stopping", "crashed"];
 let agentConversationController = null;
+let skillsController = null;
 let launcherSearchQuery = "";
 let aiSettings = { activeProviderId: "", activeModelKey: "", effort: "auto", providers: [], models: [] };
 let currentProviderDetailId = "";
@@ -378,6 +380,7 @@ function switchView(viewName) {
   closeDrawer();
   hideContextMenu();
   if (viewName === "agent") agentConversationController?.renderList();
+  if (viewName === "skills") void skillsController?.refresh();
   if (viewName === "autostart") renderAutostartList();
 }
 
@@ -857,6 +860,11 @@ document.addEventListener("DOMContentLoaded", () => {
     cancelTurn: cancelAgentTurn,
     getActiveModel: activeModel,
     getVisionMode: () => aiSettings.vision,
+    notify: showToast,
+    log: writeRendererLog,
+  });
+  skillsController = new SkillsController({
+    shell: window.shell,
     notify: showToast,
     log: writeRendererLog,
   });
@@ -1360,6 +1368,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   void agentConversationController.initialize().catch((error) => {
     showToast(`Could not load conversations: ${error.message || error}`, "error");
+  });
+  void skillsController.initialize().catch((error) => {
+    showToast(`Could not load skills: ${error.message || error}`, "error");
   });
 
   // Connect and subscribe

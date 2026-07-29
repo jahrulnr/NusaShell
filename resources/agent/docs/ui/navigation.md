@@ -71,7 +71,7 @@ The top bar identifies NusaShell with its tile-and-wave brand mark and wordmark,
 
 ## Sidebar
 
-Vertical navigation on the left, ordered Home, Agent, Plugins, AI Providers, Autostart, and Logs. It can show icons with labels or icons only, remembers that choice locally, and links to the project documentation on GitHub from its footer.
+Vertical navigation on the left, ordered Home, Agent, Skills, Plugins, AI Providers, Autostart, and Logs. It can show icons with labels or icons only, remembers that choice locally, and links to the project documentation on GitHub from its footer.
 
 - **Home navigation** (`[data-view="home"].nav-item`):
   - Section: Sidebar
@@ -84,6 +84,12 @@ Vertical navigation on the left, ordered Home, Agent, Plugins, AI Providers, Aut
   - Type: nav item
   - Action: Switches the main content to the Agent conversation view.
   - Related: Conversation thread (`#agent-thread`), Message input (`#agent-input`)
+
+- **Skills navigation** (`[data-view="skills"].nav-item`):
+  - Section: Sidebar
+  - Type: nav item
+  - Action: Switches the main content to the managed Skills workspace.
+  - Related: Installed skills (`#skills-list`), Skill file tree (`#skills-file-tree`), Skill text editor (`#skill-editor`)
 
 - **Plugins navigation** (`[data-view="plugins"].nav-item`):
   - Section: Sidebar

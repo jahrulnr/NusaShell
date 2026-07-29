@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.31] - 2026-07-30
+
+### Added
+
+- Managed local agent skills library with safe `.skill`/`.zip` installation,
+  bounded filesystem access, UTF-8 editing, binary metadata viewing, and
+  managed-copy deletion.
+- Three-pane Skills workspace in the desktop launcher for searching skills,
+  browsing package files, and editing package text.
+- Read-only `skill_list`, `skill_search`, and `skill_read` agent meta-tools.
+
+### Security
+
+- Skill package extraction rejects traversal paths and symbolic links, limits
+  archive entry and expanded sizes, and prevents reads or writes outside the
+  selected managed skill.
+
 ## [0.0.30] - 2026-07-29
 
 ### Added

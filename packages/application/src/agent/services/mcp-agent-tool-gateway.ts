@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { PluginId } from "@nusashell/domain";
 import { ApplicationError } from "../../errors/application-error.js";
 import type { PluginRuntimeManager } from "../../plugin/services/plugin-runtime-manager.js";
+import type { SkillRegistryPort } from "../../skill/ports/skill-registry.port.js";
 import type { DocsIndexPort } from "../ports/docs-index.port.js";
 import type { AgentToolDefinition } from "../ports/agent-provider.port.js";
 import type { AgentToolGateway } from "../ports/agent-tool-gateway.port.js";
@@ -26,6 +27,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
   constructor(
     private readonly runtimeManager: PluginRuntimeManager,
     private readonly docsIndex?: DocsIndexPort,
+    private readonly skillRegistry?: SkillRegistryPort,
   ) {}
 
   beginTurn(turnId: string): void {
@@ -78,6 +80,19 @@ export class McpAgentToolGateway implements AgentToolGateway {
         max_chars: { type: "integer", minimum: 0, maximum: 20000, description: "Maximum characters to return; 0 means no limit" },
         offset: { type: "integer", minimum: 0, description: "Character offset for pagination" },
       }, ["path"]),
+      definition("skill_list", "List installed agent skills and their descriptions", {
+        limit: { type: "integer", minimum: 1, maximum: 100, description: "Maximum number of skills" },
+      }),
+      definition("skill_search", "Search installed agent skills by name or description", {
+        query: stringSchema(),
+        limit: { type: "integer", minimum: 1, maximum: 50, description: "Maximum number of skills" },
+      }, ["query"]),
+      definition("skill_read", "Read SKILL.md or another text file inside an installed agent skill", {
+        skill_id: { type: "string", description: "Installed skill ID from skill_list or skill_search" },
+        path: { type: "string", description: "Relative file path; defaults to SKILL.md" },
+        offset: { type: "integer", minimum: 0, description: "Character offset for pagination" },
+        max_chars: { type: "integer", minimum: 1, maximum: 100000, description: "Maximum characters to return" },
+      }, ["skill_id"]),
       ...[...routes.entries()].map(([name, route]) => ({
         name,
         ...(route.description ? { description: route.description } : {}),
@@ -98,6 +113,9 @@ export class McpAgentToolGateway implements AgentToolGateway {
       case "docs_search": return this.execDocsSearch(args);
       case "docs_list": return this.execDocsList(args);
       case "docs_read": return this.execDocsRead(args);
+      case "skill_list": return this.execSkillList(args);
+      case "skill_search": return this.execSkillSearch(args);
+      case "skill_read": return this.execSkillRead(args);
       default: return this.callGrantedTool(name, args, requestId, turnId);
     }
   }
@@ -307,6 +325,52 @@ export class McpAgentToolGateway implements AgentToolGateway {
       meta: { index_ready: true, data_is_untrusted: true },
     };
   }
+
+  private async execSkillList(args: Readonly<Record<string, unknown>>): Promise<unknown> {
+    const registry = this.skillRegistry;
+    if (!registry) return skillsNotConfigured();
+    const limit = clampInt(args.limit, 50, 1, 100);
+    const all = await registry.list();
+    const skills = all.slice(0, limit);
+    return {
+      ok: true,
+      data: { skills },
+      meta: { count: skills.length, truncated: all.length > limit, data_is_untrusted: true },
+    };
+  }
+
+  private async execSkillSearch(args: Readonly<Record<string, unknown>>): Promise<unknown> {
+    const registry = this.skillRegistry;
+    if (!registry) return skillsNotConfigured();
+    const query = requireString(args.query, "query");
+    const limit = clampInt(args.limit, 20, 1, 50);
+    const matches = await registry.search(query, limit + 1);
+    const skills = matches.slice(0, limit);
+    return {
+      ok: true,
+      data: { skills },
+      meta: { count: skills.length, truncated: matches.length > limit, data_is_untrusted: true },
+    };
+  }
+
+  private async execSkillRead(args: Readonly<Record<string, unknown>>): Promise<unknown> {
+    const registry = this.skillRegistry;
+    if (!registry) return skillsNotConfigured();
+    const skillId = requireString(args.skill_id, "skill_id");
+    const path = optionalString(args.path) || "SKILL.md";
+    const offset = clampInt(args.offset, 0, 0, 10_000_000);
+    const maxChars = clampInt(args.max_chars, 20_000, 1, 100_000);
+    try {
+      const file = await registry.read(skillId, path, offset, maxChars);
+      return { ok: true, data: file, meta: { data_is_untrusted: true } };
+    } catch {
+      return {
+        ok: false,
+        error: { code: "not_found", message: "Skill or skill file not found" },
+        meta: { data_is_untrusted: true },
+      };
+    }
+  }
 }
 
 function definition(
@@ -358,6 +422,13 @@ function docsNotReady(): unknown {
     ok: false,
     error: { code: "docs_index_not_ready", message: "Documentation index is not ready" },
     meta: { index_ready: false },
+  };
+}
+function skillsNotConfigured(): unknown {
+  return {
+    ok: false,
+    error: { code: "skills_not_configured", message: "Skill registry is not configured" },
+    meta: { data_is_untrusted: true },
   };
 }
 function clampInt(value: unknown, fallback: number, min: number, max: number): number {

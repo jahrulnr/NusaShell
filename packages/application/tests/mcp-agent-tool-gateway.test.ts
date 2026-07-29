@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { McpAgentToolGateway } from "../src/index.js";
-import type { DocContent, DocsIndexPort, DocsHit, DocSummary } from "../src/index.js";
+import type {
+  DocContent,
+  DocsIndexPort,
+  DocsHit,
+  DocSummary,
+  SkillRegistryPort,
+} from "../src/index.js";
 
 const fakeRuntime = {
   listPlugins: async () => [],
@@ -24,6 +30,7 @@ describe("McpAgentToolGateway", () => {
     expect((await gateway.listTools([], "turn-1")).map((tool) => tool.name)).toEqual([
       "mcp_list", "mcp_enable", "mcp_disable", "tool_search", "tool_list", "tool_schema", "mcp_context",
       "docs_search", "docs_list", "docs_read",
+      "skill_list", "skill_search", "skill_read",
     ]);
     await expect(gateway.execute("tool_list", { pluginId: "com.example.notes" }, "call-tool-list", "turn-1")).resolves.toEqual([
       { name: "createNote", description: "Create a note" },
@@ -135,6 +142,82 @@ describe("McpAgentToolGateway", () => {
       ok: false,
       error: { code: "docs_not_configured", message: "Documentation index is not configured" },
       meta: { index_ready: false },
+    });
+  });
+
+  it("exposes bounded read-only skill tools without exposing skill mutations", async () => {
+    const summary = {
+      id: "code-review",
+      name: "code-review",
+      description: "Review code changes carefully.",
+      fileCount: 2,
+      updatedAt: "2026-07-30T00:00:00.000Z",
+    };
+    const fakeSkills: SkillRegistryPort = {
+      list: async () => [summary],
+      search: async () => [summary],
+      get: async () => ({ ...summary, files: [] }),
+      read: async (skillId, path = "SKILL.md") => ({
+        skillId,
+        path,
+        content: "# Code Review",
+        sizeBytes: 13,
+        editable: true,
+        truncated: false,
+      }),
+      installFromArchive: async () => ({ ...summary, files: [] }),
+      write: async () => ({
+        skillId: summary.id,
+        path: "SKILL.md",
+        content: "",
+        sizeBytes: 0,
+        editable: true,
+        truncated: false,
+      }),
+      delete: async () => {},
+    };
+    const gateway = new McpAgentToolGateway(fakeRuntime as never, undefined, fakeSkills);
+    gateway.beginTurn("turn-skills");
+
+    const toolNames = (await gateway.listTools([], "turn-skills")).map((tool) => tool.name);
+    expect(toolNames).toEqual(expect.arrayContaining(["skill_list", "skill_search", "skill_read"]));
+    expect(toolNames).not.toEqual(expect.arrayContaining(["skill_install", "skill_edit", "skill_delete", "skill_exec"]));
+
+    await expect(gateway.execute("skill_list", {}, "call-list", "turn-skills")).resolves.toEqual({
+      ok: true,
+      data: { skills: [summary] },
+      meta: { count: 1, truncated: false, data_is_untrusted: true },
+    });
+    await expect(gateway.execute("skill_search", { query: "review", limit: 5 }, "call-search", "turn-skills")).resolves.toEqual({
+      ok: true,
+      data: { skills: [summary] },
+      meta: { count: 1, truncated: false, data_is_untrusted: true },
+    });
+    await expect(gateway.execute("skill_read", {
+      skill_id: "code-review",
+      path: "SKILL.md",
+    }, "call-read", "turn-skills")).resolves.toEqual({
+      ok: true,
+      data: {
+        skillId: "code-review",
+        path: "SKILL.md",
+        content: "# Code Review",
+        sizeBytes: 13,
+        editable: true,
+        truncated: false,
+      },
+      meta: { data_is_untrusted: true },
+    });
+  });
+
+  it("returns skills_not_configured when no skill registry is wired", async () => {
+    const gateway = new McpAgentToolGateway(fakeRuntime as never);
+    gateway.beginTurn("turn-skills");
+
+    await expect(gateway.execute("skill_list", {}, "call-list", "turn-skills")).resolves.toEqual({
+      ok: false,
+      error: { code: "skills_not_configured", message: "Skill registry is not configured" },
+      meta: { data_is_untrusted: true },
     });
   });
 });

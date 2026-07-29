@@ -19,3 +19,4 @@ export {
   type TextToolCallParseResult,
 } from "./ai/index.js";
 export { FilesystemPromptLoader, MarkdownDocsIndex } from "./agent/index.js";
+export { FilesystemSkillRegistry } from "./skills/index.js";

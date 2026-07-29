@@ -142,3 +142,12 @@ export { SystemPingHandler, SystemVersionHandler } from "./system/index.js";
 // MCP capability queries
 export type { GetPromptQuery, ListPromptsQuery, ListResourcesQuery, ListResourceTemplatesQuery, ReadResourceQuery } from "./mcp/index.js";
 export { GetPromptHandler, ListPromptsHandler, ListResourcesHandler, ListResourceTemplatesHandler, ReadResourceHandler } from "./mcp/index.js";
+
+// Local Agent Skills
+export type {
+  SkillDetail,
+  SkillFileEntry,
+  SkillReadResult,
+  SkillRegistryPort,
+  SkillSummary,
+} from "./skill/index.js";

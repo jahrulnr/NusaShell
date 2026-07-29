@@ -94,6 +94,7 @@ async function startBackend(): Promise<BootstrapResult> {
   const promptsRoot = resolve(runtimeRoot, "resources", "agent", "prompts");
   const docsRoot = resolve(runtimeRoot, "resources", "agent", "docs");
   const docsIndexStorageRoot = resolve(dataRoot, ".nusashell", "agent", "docs-index");
+  const skillsRoot = resolve(app.getPath("userData"), "skills");
 
   // SQLite requires better-sqlite3 native module rebuilt for Electron's ABI.
   // Until that's set up, default to filesystem registry. Set NUSASHELL_DB_PATH to opt in.
@@ -106,6 +107,7 @@ async function startBackend(): Promise<BootstrapResult> {
     promptsRoot,
     docsRoot,
     docsIndexStorageRoot,
+    skillsRoot,
     config: { port: 9130, host: "127.0.0.1", pluginsRoot, dbPath, logLevel: isDev ? "debug" : "info", ai: {
       providerId: activeProvider?.id ?? (aiStubEnabled ? "stub" : ""),
       stubEnabled: aiStubEnabled,
@@ -194,6 +196,32 @@ app.whenReady().then(async () => {
       : await dialog.showOpenDialog(options);
     return result.canceled ? null : (result.filePaths[0] ?? null);
   });
+  ipcMain.handle("skills:install", async (event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    const options: OpenDialogOptions = {
+      title: "Install an agent skill",
+      buttonLabel: "Install skill",
+      properties: ["openFile"],
+      filters: [
+        { name: "Agent skill packages", extensions: ["skill", "zip"] },
+        { name: "All files", extensions: ["*"] },
+      ],
+    };
+    const selection = owner
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options);
+    if (selection.canceled || !selection.filePaths[0]) return null;
+    return requireBackend().container.skillRegistry.installFromArchive(selection.filePaths[0]);
+  });
+  ipcMain.handle("skills:list", () => requireBackend().container.skillRegistry.list());
+  ipcMain.handle("skills:get", (_event, skillId: string) =>
+    requireBackend().container.skillRegistry.get(skillId));
+  ipcMain.handle("skills:read", (_event, skillId: string, path?: string) =>
+    requireBackend().container.skillRegistry.read(skillId, path));
+  ipcMain.handle("skills:write", (_event, skillId: string, path: string, content: string) =>
+    requireBackend().container.skillRegistry.write(skillId, path, content));
+  ipcMain.handle("skills:delete", (_event, skillId: string) =>
+    requireBackend().container.skillRegistry.delete(skillId));
 
   logTail.subscribe((entry) => {
     for (const window of BrowserWindow.getAllWindows()) {
@@ -331,6 +359,11 @@ app.whenReady().then(async () => {
 function requireConversationStore(): AgentConversationStore {
   if (!agentConversationStore) throw new Error("Agent conversations are not ready");
   return agentConversationStore;
+}
+
+function requireBackend(): BootstrapResult {
+  if (!backend) throw new Error("Backend not ready");
+  return backend;
 }
 
 function normalizeProviderId(value: string): string {

@@ -35,11 +35,12 @@
         {
           "heading": "Sidebar",
           "paragraphs": [
-            "Vertical navigation on the left, ordered Home, Agent, Plugins, AI Providers, Autostart, and Logs. It can show icons with labels or icons only, remembers that choice locally, and links to the project documentation on GitHub from its footer."
+            "Vertical navigation on the left, ordered Home, Agent, Skills, Plugins, AI Providers, Autostart, and Logs. It can show icons with labels or icons only, remembers that choice locally, and links to the project documentation on GitHub from its footer."
           ],
           "controls": [
             "nav-home",
             "nav-agent",
+            "nav-skills",
             "nav-plugins",
             "nav-ai-providers",
             "nav-autostart",
@@ -240,6 +241,49 @@
             "agent-delete-close",
             "agent-delete-cancel",
             "agent-delete-confirm"
+          ]
+        }
+      ]
+    },
+    "skills": {
+      "title": "Skills",
+      "purpose": "Managed file workspace for installing, inspecting, editing, and deleting agent skill packages.",
+      "howToOpen": "Click the Skills item in the left sidebar.",
+      "sections": [
+        {
+          "heading": "Skill library",
+          "paragraphs": [
+            "Lists installed skills with their descriptions and file counts. Search filters the local library, while Install package opens a native picker for .skill and .zip archives."
+          ],
+          "controls": [
+            "skills-install-btn",
+            "skills-search",
+            "skills-list",
+            "skills-empty"
+          ]
+        },
+        {
+          "heading": "Package files",
+          "paragraphs": [
+            "Shows the selected skill package as a compact file tree. Text and binary entries are visually distinguished, and selecting a file opens it in the adjacent viewer."
+          ],
+          "controls": [
+            "skills-file-tree",
+            "skills-file-count"
+          ]
+        },
+        {
+          "heading": "File editor",
+          "paragraphs": [
+            "UTF-8 text files can be edited and saved in place. Binary or large files expose metadata without rendering their contents. Delete skill removes the entire managed package after confirmation."
+          ],
+          "controls": [
+            "skill-file-title",
+            "skill-file-meta",
+            "skill-editor",
+            "skill-binary-view",
+            "skill-save-btn",
+            "skill-delete-btn"
           ]
         }
       ]
@@ -654,6 +698,87 @@
       "generated": true,
       "action": "Switches the main content to the Agent conversation view.",
       "related": ["agent-thread", "agent-input"]
+    },
+    "nav-skills": {
+      "section": "Sidebar",
+      "label": "Skills navigation",
+      "type": "nav item",
+      "selector": "[data-view=\"skills\"].nav-item",
+      "generated": true,
+      "action": "Switches the main content to the managed Skills workspace.",
+      "related": ["skills-list", "skills-file-tree", "skill-editor"]
+    },
+    "skills-install-btn": {
+      "section": "Skill library",
+      "label": "Install package",
+      "type": "button",
+      "action": "Opens a native file picker and installs a .skill or .zip package into NusaShell's managed skills directory."
+    },
+    "skills-search": {
+      "section": "Skill library",
+      "label": "Search skills",
+      "type": "search input",
+      "action": "Filters installed skills by name and description."
+    },
+    "skills-list": {
+      "section": "Skill library",
+      "label": "Installed skills",
+      "type": "listbox",
+      "action": "Lists installed skills and selects the package shown in the file tree."
+    },
+    "skills-empty": {
+      "section": "Skill library",
+      "label": "Skills empty state",
+      "type": "status",
+      "action": "Explains how to install the first skill, or reports when the desktop bridge is unavailable."
+    },
+    "skills-file-tree": {
+      "section": "Package files",
+      "label": "Skill file tree",
+      "type": "tree",
+      "action": "Lists directories and files within the selected managed skill package."
+    },
+    "skills-file-count": {
+      "section": "Package files",
+      "label": "Skill file count",
+      "type": "status text",
+      "action": "Shows the number of files in the selected skill package."
+    },
+    "skill-file-title": {
+      "section": "File editor",
+      "label": "Selected file",
+      "type": "heading",
+      "action": "Shows the relative path of the file open in the viewer."
+    },
+    "skill-file-meta": {
+      "section": "File editor",
+      "label": "File metadata",
+      "type": "status text",
+      "action": "Shows file size and whether the selected file is editable UTF-8 text."
+    },
+    "skill-editor": {
+      "section": "File editor",
+      "label": "Skill text editor",
+      "type": "textarea",
+      "action": "Edits the selected UTF-8 text file inside the managed skill."
+    },
+    "skill-binary-view": {
+      "section": "File editor",
+      "label": "Binary file viewer",
+      "type": "read-only viewer",
+      "action": "Shows safe metadata instead of rendering binary or oversized file contents."
+    },
+    "skill-save-btn": {
+      "section": "File editor",
+      "label": "Save file",
+      "type": "button",
+      "action": "Writes changes to the selected text file inside the managed skill."
+    },
+    "skill-delete-btn": {
+      "section": "File editor",
+      "label": "Delete skill",
+      "type": "button",
+      "action": "Deletes the selected managed skill package after confirmation."
     },
     "nav-ai-providers": {
       "section": "Sidebar",

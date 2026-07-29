@@ -67,6 +67,10 @@
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 3v3M12 18v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M3 12h3M18 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="12" r="4.5" stroke="currentColor" stroke-width="1.7"/></svg>
           <span class="nav-label">Agent</span>
         </a>
+        <a class="nav-item" data-view="skills" data-nav title="Skills">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5v-16Z" stroke="currentColor" stroke-width="1.6"/><path d="M4 21.5A2.5 2.5 0 0 1 6.5 19H20M9 7h6M9 11h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <span class="nav-label">Skills</span>
+        </a>
         <a class="nav-item" data-view="plugins" data-nav title="Plugins">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/></svg>
           <span class="nav-label">Plugins</span>
@@ -207,6 +211,57 @@
             <button class="provider-modal-close" id="agent-delete-close" type="button" aria-label="Close delete confirmation">×</button>
           </div>
           <div class="agent-delete-actions"><button class="mini-btn" id="agent-delete-cancel" type="button">Cancel</button><button class="mini-btn danger" id="agent-delete-confirm" type="button">Delete</button></div>
+        </div>
+      </section>
+
+      <!-- ===== View: Skills ===== -->
+      <section class="view skills-view" data-view="skills">
+        <div class="skills-header">
+          <div>
+            <div class="agent-kicker"><span class="agent-kicker-dot"></span> Managed workspace</div>
+            <h1 class="page-title">Skills</h1>
+            <p class="subtitle">Inspect and maintain the instruction packages available to the agent.</p>
+          </div>
+          <button class="action-btn skills-install-btn" id="skills-install-btn" type="button">Install package</button>
+        </div>
+
+        <div class="skills-workspace">
+          <aside class="skills-catalog" aria-labelledby="skills-catalog-title">
+            <div class="skills-pane-head">
+              <div><h2 id="skills-catalog-title">Library</h2><span id="skills-count">0 skills</span></div>
+            </div>
+            <label class="skills-search"><span aria-hidden="true">⌕</span><input id="skills-search" type="search" placeholder="Search skills…" autocomplete="off"></label>
+            <div class="skills-list" id="skills-list" role="listbox" aria-label="Installed skills"></div>
+            <div class="skills-empty" id="skills-empty" hidden>
+              <strong>No skills installed</strong>
+              <span>Install a .skill or .zip package to start a managed library.</span>
+            </div>
+          </aside>
+
+          <section class="skills-files" aria-labelledby="skills-files-title">
+            <div class="skills-pane-head">
+              <div><h2 id="skills-files-title">Package files</h2><span id="skills-file-count">Select a skill</span></div>
+            </div>
+            <div class="skills-file-tree" id="skills-file-tree" role="tree" aria-label="Skill package files"></div>
+          </section>
+
+          <section class="skills-editor-pane" aria-labelledby="skill-file-title">
+            <div class="skills-pane-head skills-editor-head">
+              <div><h2 id="skill-file-title">No file selected</h2><span id="skill-file-meta">Choose a text file to inspect it.</span></div>
+              <div class="skills-editor-actions">
+                <button class="mini-btn danger" id="skill-delete-btn" type="button" disabled>Delete skill</button>
+                <button class="mini-btn" id="skill-save-btn" type="button" disabled>Save file</button>
+              </div>
+            </div>
+            <div class="skills-editor-empty" id="skills-editor-empty">
+              <span class="skills-editor-glyph" aria-hidden="true">⌘</span>
+              <strong>Open a package file</strong>
+              <span>Text files can be edited. Binary assets stay read-only.</span>
+            </div>
+            <label class="sr-only" for="skill-editor">Skill file content</label>
+            <textarea class="skill-editor" id="skill-editor" spellcheck="false" hidden></textarea>
+            <pre class="skill-binary-view" id="skill-binary-view" hidden></pre>
+          </section>
         </div>
       </section>
 

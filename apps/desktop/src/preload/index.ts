@@ -6,6 +6,11 @@ import type {
   AgentConversationMessage,
   AgentConversationSummary,
 } from "../shared/agent-conversation-contract.js";
+import type {
+  SkillDetail,
+  SkillReadResult,
+  SkillSummary,
+} from "@nusashell/application";
 
 export interface ShellApi {
   readonly wsUrl: string;
@@ -48,6 +53,14 @@ export interface ShellApi {
     append(id: string, message: AgentConversationMessage): Promise<AgentConversation>;
     saveCheckpoint(id: string, checkpoint: AgentConversationCheckpoint): Promise<AgentConversation>;
     delete(id: string): Promise<void>;
+  };
+  readonly skills: {
+    list(): Promise<readonly SkillSummary[]>;
+    get(skillId: string): Promise<SkillDetail>;
+    read(skillId: string, path?: string): Promise<SkillReadResult>;
+    install(): Promise<SkillDetail | null>;
+    write(skillId: string, path: string, content: string): Promise<SkillReadResult>;
+    delete(skillId: string): Promise<void>;
   };
 }
 
@@ -136,6 +149,14 @@ const api: ShellApi = {
     append: (id, message) => ipcRenderer.invoke("agent-conversations:append", id, message),
     saveCheckpoint: (id, checkpoint) => ipcRenderer.invoke("agent-conversations:checkpoint", id, checkpoint),
     delete: (id) => ipcRenderer.invoke("agent-conversations:delete", id),
+  },
+  skills: {
+    list: () => ipcRenderer.invoke("skills:list"),
+    get: (skillId) => ipcRenderer.invoke("skills:get", skillId),
+    read: (skillId, path) => ipcRenderer.invoke("skills:read", skillId, path),
+    install: () => ipcRenderer.invoke("skills:install"),
+    write: (skillId, path, content) => ipcRenderer.invoke("skills:write", skillId, path, content),
+    delete: (skillId) => ipcRenderer.invoke("skills:delete", skillId),
   },
 };
 

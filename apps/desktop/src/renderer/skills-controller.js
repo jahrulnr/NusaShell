@@ -1,0 +1,240 @@
+function formatBytes(value) {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export class SkillsController {
+  constructor({ shell, notify, log }) {
+    this.api = shell?.skills;
+    this.notify = notify;
+    this.log = log;
+    this.skills = [];
+    this.selectedSkillId = "";
+    this.selectedPath = "";
+    this.savedContent = "";
+  }
+
+  async initialize() {
+    this.bind();
+    if (!this.api) {
+      this.setUnavailable();
+      return;
+    }
+    await this.refresh();
+  }
+
+  bind() {
+    document.querySelector("#skills-search")?.addEventListener("input", () => this.renderSkills());
+    document.querySelector("#skills-install-btn")?.addEventListener("click", () => void this.install());
+    document.querySelector("#skill-save-btn")?.addEventListener("click", () => void this.save());
+    document.querySelector("#skill-delete-btn")?.addEventListener("click", () => void this.deleteSelected());
+    document.querySelector("#skill-editor")?.addEventListener("input", () => this.syncDirtyState());
+  }
+
+  async refresh(preferredId = this.selectedSkillId) {
+    this.skills = [...await this.api.list()];
+    const nextId = this.skills.some((skill) => skill.id === preferredId)
+      ? preferredId
+      : (this.skills[0]?.id ?? "");
+    this.renderSkills();
+    if (nextId) await this.selectSkill(nextId);
+    else this.clearSelection();
+  }
+
+  renderSkills() {
+    const list = document.querySelector("#skills-list");
+    const empty = document.querySelector("#skills-empty");
+    const count = document.querySelector("#skills-count");
+    if (!list || !empty || !count) return;
+    const query = document.querySelector("#skills-search")?.value.trim().toLowerCase() ?? "";
+    const filtered = this.skills.filter((skill) =>
+      `${skill.name} ${skill.description}`.toLowerCase().includes(query));
+    count.textContent = `${this.skills.length} ${this.skills.length === 1 ? "skill" : "skills"}`;
+    empty.hidden = this.skills.length !== 0;
+    list.textContent = "";
+    for (const skill of filtered) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "skills-list-item";
+      button.dataset.skillId = skill.id;
+      button.setAttribute("role", "option");
+      button.setAttribute("aria-selected", String(skill.id === this.selectedSkillId));
+      button.classList.toggle("active", skill.id === this.selectedSkillId);
+      const name = document.createElement("strong");
+      name.textContent = skill.name;
+      const description = document.createElement("span");
+      description.textContent = skill.description;
+      const meta = document.createElement("small");
+      meta.textContent = `${skill.fileCount} files`;
+      button.append(name, description, meta);
+      button.addEventListener("click", () => void this.selectSkill(skill.id));
+      list.append(button);
+    }
+  }
+
+  async selectSkill(skillId) {
+    if (!this.canLeaveEditor()) return;
+    try {
+      const detail = await this.api.get(skillId);
+      this.selectedSkillId = skillId;
+      this.selectedPath = "";
+      this.savedContent = "";
+      this.renderSkills();
+      this.renderFiles(detail);
+      this.resetEditor();
+      document.querySelector("#skill-delete-btn").disabled = false;
+      const firstFile = detail.files.find((entry) => entry.path === "SKILL.md")
+        ?? detail.files.find((entry) => entry.type === "file");
+      if (firstFile) await this.openFile(firstFile);
+    } catch (error) {
+      this.notify(`Could not open skill: ${errorMessage(error)}`, "error");
+    }
+  }
+
+  renderFiles(detail) {
+    const tree = document.querySelector("#skills-file-tree");
+    const count = document.querySelector("#skills-file-count");
+    tree.textContent = "";
+    count.textContent = `${detail.fileCount} ${detail.fileCount === 1 ? "file" : "files"}`;
+    for (const entry of detail.files) {
+      const row = document.createElement(entry.type === "file" ? "button" : "div");
+      row.className = `skill-file-row ${entry.type}`;
+      row.style.setProperty("--file-depth", String(entry.path.split("/").length - 1));
+      row.setAttribute("role", "treeitem");
+      row.setAttribute("aria-label", entry.path);
+      const icon = document.createElement("span");
+      icon.className = "skill-file-icon";
+      icon.textContent = entry.type === "directory" ? "⌄" : (entry.editable ? "≡" : "◇");
+      const label = document.createElement("span");
+      label.className = "skill-file-name";
+      label.textContent = entry.path.split("/").at(-1);
+      row.append(icon, label);
+      if (entry.type === "file") {
+        row.type = "button";
+        const size = document.createElement("small");
+        size.textContent = formatBytes(entry.sizeBytes);
+        row.append(size);
+        row.addEventListener("click", () => void this.openFile(entry));
+      }
+      tree.append(row);
+    }
+  }
+
+  async openFile(entry) {
+    if (!this.canLeaveEditor()) return;
+    try {
+      const file = await this.api.read(this.selectedSkillId, entry.path);
+      this.selectedPath = entry.path;
+      document.querySelectorAll(".skill-file-row.file").forEach((row) =>
+        row.classList.toggle("active", row.getAttribute("aria-label") === entry.path));
+      document.querySelector("#skill-file-title").textContent = entry.path;
+      document.querySelector("#skill-file-meta").textContent =
+        `${formatBytes(file.sizeBytes)} · ${file.editable ? "UTF-8 text · editable" : "Binary or large file · read-only"}`;
+      document.querySelector("#skills-editor-empty").hidden = true;
+      const editor = document.querySelector("#skill-editor");
+      const binary = document.querySelector("#skill-binary-view");
+      editor.hidden = !file.editable;
+      binary.hidden = file.editable;
+      if (file.editable) {
+        this.savedContent = file.content ?? "";
+        editor.value = this.savedContent;
+      } else {
+        this.savedContent = "";
+        binary.textContent = `${entry.path}\n\nThis file is not rendered or editable.\nSize: ${formatBytes(file.sizeBytes)}`;
+      }
+      this.syncDirtyState();
+    } catch (error) {
+      this.notify(`Could not read file: ${errorMessage(error)}`, "error");
+    }
+  }
+
+  async install() {
+    try {
+      const installed = await this.api.install();
+      if (!installed) return;
+      await this.refresh(installed.id);
+      this.notify(`${installed.name} installed.`, "success");
+    } catch (error) {
+      this.notify(`Could not install skill: ${errorMessage(error)}`, "error");
+    }
+  }
+
+  async save() {
+    const editor = document.querySelector("#skill-editor");
+    if (!this.selectedSkillId || !this.selectedPath || editor.hidden) return;
+    const button = document.querySelector("#skill-save-btn");
+    button.disabled = true;
+    try {
+      await this.api.write(this.selectedSkillId, this.selectedPath, editor.value);
+      this.savedContent = editor.value;
+      this.syncDirtyState();
+      if (this.selectedPath === "SKILL.md") await this.refresh(this.selectedSkillId);
+      this.notify(`${this.selectedPath} saved.`, "success");
+    } catch (error) {
+      this.notify(`Could not save file: ${errorMessage(error)}`, "error");
+      this.syncDirtyState();
+    }
+  }
+
+  async deleteSelected() {
+    if (!this.selectedSkillId || !this.canLeaveEditor()) return;
+    const skill = this.skills.find((item) => item.id === this.selectedSkillId);
+    if (!window.confirm(`Delete ${skill?.name ?? this.selectedSkillId} from this device?`)) return;
+    try {
+      await this.api.delete(this.selectedSkillId);
+      const deletedName = skill?.name ?? this.selectedSkillId;
+      this.selectedSkillId = "";
+      await this.refresh();
+      this.notify(`${deletedName} deleted.`, "success");
+    } catch (error) {
+      this.notify(`Could not delete skill: ${errorMessage(error)}`, "error");
+    }
+  }
+
+  syncDirtyState() {
+    const editor = document.querySelector("#skill-editor");
+    const dirty = !editor.hidden && editor.value !== this.savedContent;
+    const save = document.querySelector("#skill-save-btn");
+    save.disabled = !dirty;
+    save.textContent = dirty ? "Save changes" : "Saved";
+  }
+
+  canLeaveEditor() {
+    const editor = document.querySelector("#skill-editor");
+    return editor.hidden || editor.value === this.savedContent
+      || window.confirm("Discard unsaved changes?");
+  }
+
+  resetEditor() {
+    this.selectedPath = "";
+    this.savedContent = "";
+    document.querySelector("#skill-file-title").textContent = "No file selected";
+    document.querySelector("#skill-file-meta").textContent = "Choose a text file to inspect it.";
+    document.querySelector("#skills-editor-empty").hidden = false;
+    document.querySelector("#skill-editor").hidden = true;
+    document.querySelector("#skill-binary-view").hidden = true;
+    document.querySelector("#skill-save-btn").disabled = true;
+  }
+
+  clearSelection() {
+    this.selectedSkillId = "";
+    document.querySelector("#skills-file-tree").textContent = "";
+    document.querySelector("#skills-file-count").textContent = "Select a skill";
+    document.querySelector("#skill-delete-btn").disabled = true;
+    this.resetEditor();
+    this.renderSkills();
+  }
+
+  setUnavailable() {
+    document.querySelector("#skills-install-btn").disabled = true;
+    document.querySelector("#skills-empty").hidden = false;
+    document.querySelector("#skills-empty strong").textContent = "Skills bridge unavailable";
+    document.querySelector("#skills-empty span").textContent = "Restart NusaShell after rebuilding the desktop preload.";
+    this.log?.("warn", "Skills preload bridge is unavailable");
+  }
+}
