@@ -67,6 +67,9 @@ export interface ContainerOptions {
   readonly dbPath?: string;
   readonly logLevel?: string;
   readonly loggerObserver?: LogObserver;
+  readonly resolvePluginRuntimeEnvironment?: (
+    pluginId: string,
+  ) => Promise<Readonly<Record<string, string>>> | Readonly<Record<string, string>>;
   readonly ai?: {
     readonly providerId: string;
     readonly stubEnabled?: boolean;
@@ -171,6 +174,9 @@ export function createContainer(options: ContainerOptions): Container {
     eventDispatcher,
     clock,
     logger,
+    ...(options.resolvePluginRuntimeEnvironment
+      ? { resolveRuntimeEnvironment: options.resolvePluginRuntimeEnvironment }
+      : {}),
   });
   const docsRoot = options.docsRoot ?? new URL("../../../resources/agent/docs", import.meta.url).pathname;
   const docsIndexStorageRoot = options.docsIndexStorageRoot ?? new URL("../../../.nusashell/agent/docs-index", import.meta.url).pathname;

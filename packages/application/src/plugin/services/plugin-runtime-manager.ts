@@ -51,6 +51,15 @@ interface RuntimeEntry {
   installPath: string;
   enabled: boolean;
   autostart: boolean;
+  ui: {
+    readonly entry: string;
+    readonly window?: {
+      readonly mode?: "panel" | "fullscreen" | "widget";
+      readonly defaultSize?: { readonly width: number; readonly height: number };
+      readonly resizable?: boolean;
+    };
+  };
+  keepAliveOnClose: boolean;
   runtime: PluginRuntime;
   startPromise: Promise<void> | null;
   readonly queue: PluginOperationQueue;
@@ -67,6 +76,9 @@ export interface PluginRuntimeManagerDeps {
   readonly eventDispatcher: EventDispatcher;
   readonly clock: ClockPort;
   readonly logger?: LoggerPort;
+  readonly resolveRuntimeEnvironment?: (
+    pluginId: string,
+  ) => Promise<Readonly<Record<string, string>>> | Readonly<Record<string, string>>;
   readonly startTimeoutMs?: number;
   readonly stopTimeoutMs?: number;
   readonly toolCallTimeoutMs?: number;
@@ -92,6 +104,8 @@ export interface PluginView {
   readonly state: PluginRuntimeState;
   readonly enabled: boolean;
   readonly autostart: boolean;
+  readonly ui: RuntimeEntry["ui"];
+  readonly keepAliveOnClose: boolean;
 }
 
 export class PluginRuntimeManager {
@@ -115,6 +129,8 @@ export class PluginRuntimeManager {
         state: entry?.runtime.state ?? "idle",
         enabled: plugin.enabled,
         autostart: plugin.manifest.mcp.autostart,
+        ui: plugin.manifest.ui,
+        keepAliveOnClose: plugin.manifest.mcp.keepAliveOnClose,
       };
     });
   }
@@ -216,6 +232,8 @@ export class PluginRuntimeManager {
         entry.installPath = plugin.installPath;
         entry.enabled = plugin.enabled;
         entry.autostart = plugin.manifest.mcp.autostart;
+        entry.ui = plugin.manifest.ui;
+        entry.keepAliveOnClose = plugin.manifest.mcp.keepAliveOnClose;
       }
       return this.view(entry);
     }
@@ -230,6 +248,8 @@ export class PluginRuntimeManager {
       state: "idle",
       enabled: plugin.enabled,
       autostart: plugin.manifest.mcp.autostart,
+      ui: plugin.manifest.ui,
+      keepAliveOnClose: plugin.manifest.mcp.keepAliveOnClose,
     };
   }
 
@@ -269,6 +289,8 @@ export class PluginRuntimeManager {
       installPath: "",
       enabled: true,
       autostart: false,
+      ui: { entry: "ui/index.html" },
+      keepAliveOnClose: false,
       runtime: PluginRuntime.createIdle(pluginId),
       startPromise: null,
       queue: new PluginOperationQueue(),
@@ -296,6 +318,8 @@ export class PluginRuntimeManager {
     entry.installPath = plugin.installPath;
     entry.enabled = plugin.enabled;
     entry.autostart = plugin.manifest.mcp.autostart;
+    entry.ui = plugin.manifest.ui;
+    entry.keepAliveOnClose = plugin.manifest.mcp.keepAliveOnClose;
     const canStart = PluginLifecyclePolicy.canStart(plugin, entry.runtime);
     if (!canStart.ok) {
       throw this.mapDomainError(canStart.error, entry.pluginId);
@@ -329,10 +353,17 @@ export class PluginRuntimeManager {
           );
         }
 
+        const runtimeEnvironment = await this.deps.resolveRuntimeEnvironment?.(
+          PluginId.toString(entry.pluginId),
+        ) ?? {};
+        const environment = {
+          ...manifest.mcp.env,
+          ...runtimeEnvironment,
+        };
         const mcpClient = this.deps.mcpClientFactory.createForStdio(
           command,
           manifest.mcp.args,
-          manifest.mcp.env,
+          environment,
           plugin.installPath,
         );
         this.deps.logger?.debug("Starting MCP stdio process: command=%s args=%j cwd=%s", command, manifest.mcp.args, plugin.installPath);
@@ -665,6 +696,8 @@ export class PluginRuntimeManager {
       state: entry.runtime.state,
       enabled: entry.enabled,
       autostart: entry.autostart,
+      ui: entry.ui,
+      keepAliveOnClose: entry.keepAliveOnClose,
     };
   }
 

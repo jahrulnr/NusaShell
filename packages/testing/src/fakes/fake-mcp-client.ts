@@ -127,13 +127,25 @@ export class FakeMcpClient implements McpClientPort {
 
 export class FakeMcpClientFactory implements McpClientFactoryPort {
   readonly created: FakeMcpClient[] = [];
+  readonly stdioCalls: Array<{
+    readonly command: string;
+    readonly args: readonly string[];
+    readonly env: Readonly<Record<string, string>>;
+    readonly cwd?: string;
+  }> = [];
 
   createForStdio(
-    _command: string,
-    _args: readonly string[],
-    _env: Readonly<Record<string, string>>,
-    _cwd?: string,
+    command: string,
+    args: readonly string[],
+    env: Readonly<Record<string, string>>,
+    cwd?: string,
   ): McpClientPort {
+    this.stdioCalls.push({
+      command,
+      args,
+      env,
+      ...(cwd !== undefined ? { cwd } : {}),
+    });
     const client = new FakeMcpClient();
     this.created.push(client);
     return client;

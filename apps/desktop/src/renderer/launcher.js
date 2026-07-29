@@ -8,6 +8,8 @@ import {
   applyTextEdit,
   countLogsBySource,
   filterLauncherPlugins,
+  normalizeTransparentIcon,
+  pluginIconPresentation,
   positionContextMenu,
   providerApiModes,
 } from "./launcher-ui.js";
@@ -233,13 +235,44 @@ function initCentralLogs() {
   writeRendererLog("info", "Launcher renderer initialized");
 }
 
-function isUrlIcon(icon) { return /^https?:\/\//i.test(icon); }
-function isFileIcon(icon) { return /^(file:\/\/|\.?\/|\.\\|[A-Za-z]:[\\/])/i.test(icon); }
+function setPluginIcon(container, icon, size, installPath = "") {
+  const presentation = pluginIconPresentation(icon);
+  container.replaceChildren();
+  container.classList.toggle("has-image", presentation.kind === "image");
+  container.classList.add("bg-blue");
 
-function renderIconHtml(icon, fontSize) {
-  if (isUrlIcon(icon)) return `<img src="${icon}" alt="" style="width:${fontSize}px;height:${fontSize}px;object-fit:contain" />`;
-  if (isFileIcon(icon)) return `<img src="${icon}" alt="" style="width:${fontSize}px;height:${fontSize}px;object-fit:contain" onerror="this.style.display='none';this.parentNode.textContent='📦'" />`;
-  return `<span style="font-size:${fontSize}px">${icon}</span>`;
+  if (presentation.kind === "image") {
+    const image = document.createElement("img");
+    image.className = "plugin-icon-image";
+    image.alt = "";
+    image.width = size;
+    image.height = size;
+    const showFallback = () => {
+      container.classList.remove("has-image");
+      container.classList.add("bg-blue");
+      setPluginIcon(container, "🧩", Math.min(size, 28));
+    };
+    image.addEventListener("error", showFallback, { once: true });
+    image.addEventListener("load", () => normalizeTransparentIcon(image), { once: true });
+    container.appendChild(image);
+    const localIcon = presentation.source.startsWith("file:");
+    if (localIcon && window.shell?.pluginIcons?.read && installPath) {
+      window.shell.pluginIcons.read(presentation.source, installPath)
+        .then((dataUrl) => {
+          image.src = dataUrl;
+        })
+        .catch(showFallback);
+    } else {
+      image.src = presentation.source;
+    }
+    return;
+  }
+
+  const glyph = document.createElement("span");
+  glyph.className = "plugin-icon-glyph";
+  glyph.style.fontSize = `${size}px`;
+  glyph.textContent = presentation.text;
+  container.appendChild(glyph);
 }
 
 function stateBadgeHtml(state) {
@@ -397,7 +430,7 @@ function renderAutostartList() {
   plugins.forEach((plugin) => {
     const row = el("div", "autostart-row");
     const icon = el("div", "autostart-icon");
-    icon.textContent = isUrlIcon(plugin.icon) || isFileIcon(plugin.icon) ? "◈" : (plugin.icon || "🧩");
+    setPluginIcon(icon, plugin.icon || "🧩", 28, plugin.installPath);
     const info = el("div", "autostart-info");
     const name = el("div", "autostart-name"); name.textContent = plugin.name;
     const meta = el("div", "autostart-meta"); meta.textContent = `${plugin.pluginId} · ${plugin.state}`;
@@ -438,7 +471,13 @@ function renderAppGrid() {
   visiblePlugins.forEach(p => {
     const cell = el("button", "app-cell");
     cell.dataset.pluginId = p.pluginId;
-    cell.innerHTML = `<div class="app-icon bg-blue">${renderIconHtml(p.icon || "🧩", 28)}</div><div class="app-name">${p.name}</div><div class="app-status ${p.state}">${stateBadgeHtml(p.state)}</div>`;
+    const icon = el("div", "app-icon");
+    setPluginIcon(icon, p.icon || "🧩", 60, p.installPath);
+    const name = el("div", "app-name");
+    name.textContent = p.name;
+    const status = el("div", `app-status ${p.state}`);
+    status.innerHTML = stateBadgeHtml(p.state);
+    cell.append(icon, name, status);
     cell.addEventListener("click", () => openPluginWindow(p));
     cell.addEventListener("contextmenu", (e) => { e.preventDefault(); showContextMenu(e.clientX, e.clientY, p); });
     grid.appendChild(cell);
@@ -457,7 +496,17 @@ function renderInstalledTable() {
   plugins.forEach(p => {
     const row = el("div", "plugin-row");
     row.dataset.pluginId = p.pluginId;
-    row.innerHTML = `<div class="plugin-row-icon bg-blue">${renderIconHtml(p.icon || "🧩", 18)}</div><div class="plugin-row-info"><div class="plugin-row-name">${p.name}</div><div class="plugin-row-meta">${p.pluginId} · v${p.version}</div></div><div class="plugin-row-state ${p.state}">${stateBadgeHtml(p.state) || "Idle"}</div>`;
+    const icon = el("div", "plugin-row-icon");
+    setPluginIcon(icon, p.icon || "🧩", 38, p.installPath);
+    const info = el("div", "plugin-row-info");
+    const name = el("div", "plugin-row-name");
+    name.textContent = p.name;
+    const meta = el("div", "plugin-row-meta");
+    meta.textContent = `${p.pluginId} · v${p.version}`;
+    info.append(name, meta);
+    const state = el("div", `plugin-row-state ${p.state}`);
+    state.innerHTML = stateBadgeHtml(p.state) || "Idle";
+    row.append(icon, info, state);
     row.addEventListener("click", () => openDrawer(p));
     table.appendChild(row);
   });
@@ -467,8 +516,8 @@ function renderInstalledTable() {
 
 async function openDrawer(plugin) {
   currentPlugin = plugin;
-  $("#drawer-icon").className = "drawer-icon bg-blue";
-  $("#drawer-icon").innerHTML = renderIconHtml(plugin.icon || "🧩", 20);
+  $("#drawer-icon").className = "drawer-icon";
+  setPluginIcon($("#drawer-icon"), plugin.icon || "🧩", 38, plugin.installPath);
   $("#drawer-title").textContent = plugin.name;
   $("#drawer-subtitle").textContent = `${plugin.pluginId} · v${plugin.version}`;
 
@@ -513,11 +562,20 @@ function closeDrawer() {
 async function openPluginWindow(plugin) {
   try {
     if (plugin.state === "idle") {
-      startPlugin(plugin.pluginId).catch((e) => console.error("[openPluginWindow] startPlugin error:", e));
+      await sendRequest("plugin.start", { pluginId: plugin.pluginId });
     }
     const installPath = plugin.installPath || "";
     if (window.shell?.openPlugin) {
-      await window.shell.openPlugin(plugin.pluginId, plugin.name, plugin.icon || "🧩", installPath, "panel");
+      await window.shell.openPlugin(
+        plugin.pluginId,
+        plugin.name,
+        plugin.icon || "🧩",
+        installPath,
+        {
+          ...(plugin.ui || {}),
+          keepAliveOnClose: Boolean(plugin.keepAliveOnClose),
+        },
+      );
     }
   } catch (err) {
     console.error("[openPluginWindow] error:", err);

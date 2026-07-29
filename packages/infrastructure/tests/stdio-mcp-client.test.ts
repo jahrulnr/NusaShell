@@ -48,4 +48,14 @@ describe("StdioMcpClient", () => {
 
     await expect(client.callTool("echo", {})).rejects.toThrow("not connected");
   });
+
+  it("throws the MCP tool error text when a tool result has isError", async () => {
+    const factory = new McpClientFactory();
+    client = factory.createForStdio("node", [MOCK_SERVER_PATH], {});
+
+    await client.connect();
+
+    await expect(client.callTool("fail", {}))
+      .rejects.toThrow("Mailbox authentication failed");
+  });
 });

@@ -29,6 +29,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (req.params.name === "echo") {
     return { content: [{ type: "text", text: args.message }] };
   }
+  if (req.params.name === "fail") {
+    return {
+      isError: true,
+      content: [{ type: "text", text: "Mailbox authentication failed" }],
+    };
+  }
   return { content: [{ type: "text", text: "unknown tool" }] };
 });
 

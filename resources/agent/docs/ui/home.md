@@ -32,7 +32,7 @@ The Home search filters installed plugin cards by name, id, or description in re
 
 ## App grid
 
-A grid of installed plugins. Each tile shows the plugin icon, name, and a state badge (idle, starting, running, stopping, crashed).
+A grid of installed plugins. Each tile shows the plugin icon, name, and a state badge (idle, starting, running, stopping, crashed). Emoji and image artwork share one 64-pixel icon plate; transparent margins in local PNG artwork are normalized at render time so mixed icon sources keep comparable visual weight.
 
 - **Installed plugin grid** (`#app-grid`):
   - Section: App grid

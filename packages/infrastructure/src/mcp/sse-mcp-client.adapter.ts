@@ -3,6 +3,7 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import type { CompletionReference, CompletionResult, McpClientPort, PromptDescriptor, PromptResult, ResourceDescriptor, ResourceReadResult, ResourceTemplateDescriptor, ToolDescriptor } from "@nusashell/application";
 import type { Logger } from "pino";
 import { registerMcpLogging } from "./mcp-logging.js";
+import { unwrapMcpToolResult } from "./tool-result.js";
 
 export class SseMcpClient implements McpClientPort {
   private client: Client | null = null;
@@ -85,7 +86,7 @@ export class SseMcpClient implements McpClientPort {
       arguments: { ...args },
     });
 
-    return result.content;
+    return unwrapMcpToolResult(result);
   }
 
   async listPrompts(): Promise<readonly PromptDescriptor[]> {

@@ -33,10 +33,12 @@ describe("E2E: notes plugin", () => {
 
   it("lists the notes plugin", async () => {
     const result = await client.plugins.list();
-    expect(result.plugins).toHaveLength(1);
-    expect(result.plugins[0]!.pluginId).toBe("com.example.notes");
-    expect(result.plugins[0]!.name).toBe("Notes");
-    expect(result.plugins[0]!.state).toBe("idle");
+    const notes = result.plugins.find((plugin) => plugin.pluginId === "com.example.notes");
+    expect(notes).toMatchObject({
+      pluginId: "com.example.notes",
+      name: "Notes",
+      state: "idle",
+    });
   });
 
   it("runs a bounded offline agent turn through the WebSocket command", async () => {

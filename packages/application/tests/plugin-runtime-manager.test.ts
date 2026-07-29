@@ -47,13 +47,36 @@ describe("PluginRuntimeManager", () => {
   describe("listPlugins", () => {
     it("returns idle state for plugins without runtime entries", async () => {
       const { pluginRepository, manager } = setup();
-      pluginRepository.add(makePlugin("com.example.notes"));
+      pluginRepository.add(makePlugin("com.example.notes", {
+        ui: {
+          entry: "ui/mail.html",
+          window: {
+            mode: "fullscreen",
+            defaultSize: { width: 1280, height: 800 },
+            resizable: true,
+          },
+        },
+        mcp: {
+          transport: "stdio",
+          command: "node",
+          keepAliveOnClose: true,
+        },
+      }));
 
       const views = await manager.listPlugins();
 
       expect(views).toHaveLength(1);
       expect(views[0]!.pluginId).toBe("com.example.notes");
       expect(views[0]!.state).toBe("idle");
+      expect(views[0]!.ui).toEqual({
+        entry: "ui/mail.html",
+        window: {
+          mode: "fullscreen",
+          defaultSize: { width: 1280, height: 800 },
+          resizable: true,
+        },
+      });
+      expect(views[0]!.keepAliveOnClose).toBe(true);
     });
 
     it("returns empty list when no plugins installed", async () => {
@@ -64,6 +87,36 @@ describe("PluginRuntimeManager", () => {
   });
 
   describe("startPlugin", () => {
+    it("merges host-provided runtime environment without mutating the manifest", async () => {
+      const { pluginRepository, mcpClientFactory } = setup();
+      const plugin = makePlugin("com.example.notes", {
+        mcp: {
+          transport: "stdio",
+          command: "node",
+          args: ["server.js"],
+          env: { MANIFEST_VALUE: "kept" },
+        },
+      });
+      pluginRepository.add(plugin);
+      const managerWithEnvironment = new PluginRuntimeManager({
+        pluginRepository,
+        processAdapter: new FakeProcessAdapter(),
+        mcpClientFactory,
+        eventDispatcher: new EventDispatcher(),
+        clock: new FakeClock(),
+        resolveRuntimeEnvironment: async (pluginId) =>
+          pluginId === "com.example.notes" ? { RUNTIME_SECRET: "injected" } : {},
+      });
+
+      await managerWithEnvironment.startPlugin(plugin.id);
+
+      expect(mcpClientFactory.stdioCalls[0]?.env).toEqual({
+        MANIFEST_VALUE: "kept",
+        RUNTIME_SECRET: "injected",
+      });
+      expect(plugin.manifest.mcp.env).toEqual({ MANIFEST_VALUE: "kept" });
+    });
+
     it("transitions idle -> starting -> running and publishes events", async () => {
       const { pluginRepository, manager, eventDispatcher } = setup();
       const plugin = makePlugin("com.example.notes");

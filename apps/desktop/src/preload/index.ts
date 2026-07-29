@@ -11,12 +11,17 @@ import type {
   SkillReadResult,
   SkillSummary,
 } from "@nusashell/application";
+import type {
+  PublicMailSettings,
+  SaveMailAccountInput,
+} from "../shared/mail-contract.js";
+import type { PluginWindowOptionsInput } from "../main/plugin-window-options.js";
 
 export interface ShellApi {
   readonly wsUrl: string;
   callTool(pluginId: string, toolName: string, args: Record<string, unknown>): Promise<unknown>;
   listTools(pluginId: string): Promise<unknown>;
-  openPlugin(pluginId: string, name: string, icon: string, installPath: string, windowMode?: string): Promise<void>;
+  openPlugin(pluginId: string, name: string, icon: string, installPath: string, options?: PluginWindowOptionsInput): Promise<void>;
   closePlugin(pluginId: string): Promise<void>;
   readonly windowControls: {
     minimize(): Promise<void>;
@@ -27,6 +32,9 @@ export interface ShellApi {
   readonly shellControls: {
     openDocs(): Promise<void>;
     pickPluginSource(kind: "directory" | "archive"): Promise<string | null>;
+  };
+  readonly pluginIcons: {
+    read(source: string, installPath: string): Promise<string>;
   };
   readonly clipboard: {
     readText(): string;
@@ -62,6 +70,11 @@ export interface ShellApi {
     write(skillId: string, path: string, content: string): Promise<SkillReadResult>;
     delete(skillId: string): Promise<void>;
   };
+  readonly mailAccounts: {
+    list(): Promise<PublicMailSettings>;
+    save(input: SaveMailAccountInput): Promise<PublicMailSettings>;
+    delete(accountId: string): Promise<PublicMailSettings>;
+  };
 }
 
 export type ShellLogLevel = "debug" | "info" | "warn" | "error";
@@ -84,8 +97,8 @@ const api: ShellApi = {
   listTools(pluginId) {
     return ipcRenderer.invoke("tool:list", pluginId);
   },
-  openPlugin(pluginId, name, icon, installPath, windowMode) {
-    return ipcRenderer.invoke("window:open-plugin", pluginId, name, icon, installPath, windowMode);
+  openPlugin(pluginId, name, icon, installPath, options) {
+    return ipcRenderer.invoke("window:open-plugin", pluginId, name, icon, installPath, options);
   },
   closePlugin(pluginId) {
     return ipcRenderer.invoke("window:close-plugin", pluginId);
@@ -110,6 +123,11 @@ const api: ShellApi = {
     },
     pickPluginSource(kind) {
       return ipcRenderer.invoke("shell:pick-plugin-source", kind);
+    },
+  },
+  pluginIcons: {
+    read(source, installPath) {
+      return ipcRenderer.invoke("plugin-icons:read", source, installPath);
     },
   },
   clipboard: {
@@ -157,6 +175,11 @@ const api: ShellApi = {
     install: () => ipcRenderer.invoke("skills:install"),
     write: (skillId, path, content) => ipcRenderer.invoke("skills:write", skillId, path, content),
     delete: (skillId) => ipcRenderer.invoke("skills:delete", skillId),
+  },
+  mailAccounts: {
+    list: () => ipcRenderer.invoke("mail-accounts:list"),
+    save: (input) => ipcRenderer.invoke("mail-accounts:save", input),
+    delete: (accountId) => ipcRenderer.invoke("mail-accounts:delete", accountId),
   },
 };
 

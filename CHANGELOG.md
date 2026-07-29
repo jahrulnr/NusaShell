@@ -5,6 +5,66 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.32] - 2026-07-30
+
+### Added
+
+- First-party Mail plugin with an original three-pane mailbox UI and eight
+  read-only `mail_*` MCP tools for account discovery, connection tests,
+  mailboxes, inboxes, search, and MIME message reading.
+- Multi-account IMAP/SMTP settings managed by the Mail UI, encrypted with
+  Electron `safeStorage`, and injected into the Mail MCP process only at
+  runtime.
+- Manifest-driven plugin window sizing, entry points, resize behavior, and
+  close lifecycle so full-screen plugin surfaces can use their declared
+  presentation.
+- Browser fixture, MCP service tests, credential-store tests, and plugin-window
+  option tests for the new Mail integration.
+
+### Security
+
+- Mail credentials are excluded from renderer responses, MCP schemas and tool
+  output, plugin manifests, and persisted plugin metadata.
+- Mail server configuration requires TLS or STARTTLS with certificate
+  verification enabled by default; message bodies are bounded before reaching
+  the agent or UI, and formatted alternatives stay inside a restricted
+  document without script, form, frame, API, or shell access.
+
+### Fixed
+
+- Mail account IPC is authorized during the plugin's initial page load, so a
+  configured account can be read immediately without weakening plugin-window
+  sender validation.
+- Mail now selects the first enabled account on initial open and loads that
+  account's folders and inbox instead of leaving the account selection empty.
+- MCP tool failures now preserve the server's safe error text through the
+  transport adapters; Mail also surfaces IMAP response details such as
+  authentication rejection and records failed tool names in the MCP log.
+- Home now renders plugin-local `file://` PNG artwork instead of a generic
+  fallback glyph, and Mail uses its dedicated launcher artwork inside the
+  same icon plate as other plugins.
+- Packaged desktop artifacts now preserve the expected
+  `resources/plugins/examples` layout, so bundled plugins and their local
+  artwork remain discoverable outside development.
+- Mail account rows now expose an explicit edit action with account deletion
+  available in the editor, and Gmail setup and authentication failures direct
+  users to replace regular account passwords with Google App Passwords.
+- Plugin windows now fit their requested dimensions to the active display work
+  area, while Mail switches to a responsive two-pane/read view on narrow
+  windows instead of clipping content beyond the screen.
+- Home normalizes transparent padding in PNG plugin artwork and gives image
+  and emoji icons the same visual plate, preventing mixed icon sources from
+  appearing at unrelated sizes.
+- Mail now renders formatted HTML alternatives, including inline styling and
+  HTTPS images, inside a sandboxed document that cannot run scripts, submit
+  forms, open nested frames, connect to APIs, or access the shell bridge.
+
+### Attribution
+
+- Mail service structure was adapted from `codefuturist/email-mcp` at pinned
+  revision `99ce431aa81dd4cafc2879bd35b6ee3acd0f2d74`; upstream source, license,
+  and the scope of NusaShell's changes are recorded with the plugin.
+
 ## [0.0.31] - 2026-07-30
 
 ### Added

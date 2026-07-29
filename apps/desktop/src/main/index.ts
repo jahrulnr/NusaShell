@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell, type OpenDialogOptions } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell, type IpcMainInvokeEvent, type OpenDialogOptions } from "electron";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { bootstrap, type BootstrapResult } from "@nusashell/backend";
@@ -6,6 +6,8 @@ import { LogTail, type ShellLogLevel, type ShellLogSource } from "./log-tail.js"
 import {
   createLauncherWindow,
   closeAllPluginWindows,
+  getLauncherWindow,
+  isPluginWindowSender,
   registerWindowIpc,
 } from "./window-manager.js";
 import { LINUX_DESKTOP_APP_NAME } from "./window-assets.js";
@@ -18,18 +20,23 @@ import type {
   AgentConversationCheckpoint,
   AgentConversationMessage,
 } from "../shared/agent-conversation-contract.js";
+import { MailSettingsStore } from "./mail-settings.js";
+import type { SaveMailAccountInput } from "../shared/mail-contract.js";
+import { loadPluginPngDataUrl } from "./plugin-icon.js";
 
 let backend: BootstrapResult | null = null;
 let updater: AppUpdater | null = null;
 let aiSettingsStore: AiSettingsStore | null = null;
 let aiSettings: AiRegistrySettings | null = null;
 let agentConversationStore: AgentConversationStore | null = null;
+let mailSettingsStore: MailSettingsStore | null = null;
 const isDev = process.argv.includes("--dev");
 const logTail = new LogTail(1000);
 const shellLogLevels = new Set<ShellLogLevel>(["debug", "info", "warn", "error"]);
 const aiRuntimeConfig = loadConfig().ai;
 const aiStubEnabled = aiRuntimeConfig.stubEnabled;
 const DOCS_URL = "https://github.com/jahrulnr/NusaShell/tree/master/docs";
+const MAIL_PLUGIN_ID = "com.nusashell.mail";
 
 if (process.platform === "linux") {
   app.setName(LINUX_DESKTOP_APP_NAME);
@@ -95,6 +102,8 @@ async function startBackend(): Promise<BootstrapResult> {
   const docsRoot = resolve(runtimeRoot, "resources", "agent", "docs");
   const docsIndexStorageRoot = resolve(dataRoot, ".nusashell", "agent", "docs-index");
   const skillsRoot = resolve(app.getPath("userData"), "skills");
+  mailSettingsStore ??= new MailSettingsStore(resolve(app.getPath("userData"), "mail-settings.json"));
+  await mailSettingsStore.load();
 
   // SQLite requires better-sqlite3 native module rebuilt for Electron's ABI.
   // Until that's set up, default to filesystem registry. Set NUSASHELL_DB_PATH to opt in.
@@ -108,6 +117,8 @@ async function startBackend(): Promise<BootstrapResult> {
     docsRoot,
     docsIndexStorageRoot,
     skillsRoot,
+    resolvePluginRuntimeEnvironment: (pluginId) =>
+      pluginId === MAIL_PLUGIN_ID ? mailSettingsStore?.runtimeEnvironment() ?? {} : {},
     config: { port: 9130, host: "127.0.0.1", pluginsRoot, dbPath, logLevel: isDev ? "debug" : "info", ai: {
       providerId: activeProvider?.id ?? (aiStubEnabled ? "stub" : ""),
       stubEnabled: aiStubEnabled,
@@ -173,6 +184,12 @@ app.whenReady().then(async () => {
   ipcMain.handle("shell:open-docs", async () => {
     await shell.openExternal(DOCS_URL);
   });
+  ipcMain.handle("plugin-icons:read", (event, source: string, installPath: string) => {
+    if (event.sender !== getLauncherWindow()?.webContents) {
+      throw new Error("Plugin icons are only available to the launcher");
+    }
+    return loadPluginPngDataUrl(source, installPath);
+  });
   ipcMain.handle("shell:pick-plugin-source", async (event, kind: "directory" | "archive") => {
     if (kind !== "directory" && kind !== "archive") return null;
     const owner = BrowserWindow.fromWebContents(event.sender);
@@ -222,6 +239,22 @@ app.whenReady().then(async () => {
     requireBackend().container.skillRegistry.write(skillId, path, content));
   ipcMain.handle("skills:delete", (_event, skillId: string) =>
     requireBackend().container.skillRegistry.delete(skillId));
+  ipcMain.handle("mail-accounts:list", (event) => {
+    assertMailPluginSender(event);
+    return requireMailSettingsStore().getPublic();
+  });
+  ipcMain.handle("mail-accounts:save", async (event, input: SaveMailAccountInput) => {
+    assertMailPluginSender(event);
+    const result = await requireMailSettingsStore().save(input);
+    await restartMailPlugin();
+    return result;
+  });
+  ipcMain.handle("mail-accounts:delete", async (event, accountId: string) => {
+    assertMailPluginSender(event);
+    const result = await requireMailSettingsStore().delete(accountId);
+    await restartMailPlugin();
+    return result;
+  });
 
   logTail.subscribe((entry) => {
     for (const window of BrowserWindow.getAllWindows()) {
@@ -364,6 +397,34 @@ function requireConversationStore(): AgentConversationStore {
 function requireBackend(): BootstrapResult {
   if (!backend) throw new Error("Backend not ready");
   return backend;
+}
+
+function requireMailSettingsStore(): MailSettingsStore {
+  if (!mailSettingsStore) throw new Error("Mail settings are not ready");
+  return mailSettingsStore;
+}
+
+async function restartMailPlugin(): Promise<void> {
+  await requireBackend().container.commandBus.execute({
+    kind: "restart-plugin",
+    pluginId: MAIL_PLUGIN_ID,
+  });
+}
+
+function assertMailPluginSender(event: IpcMainInvokeEvent): void {
+  let source: URL;
+  try {
+    source = new URL(event.sender.getURL());
+  } catch {
+    throw new Error("Mail account settings are only available to the Mail plugin");
+  }
+  if (
+    source.protocol !== "file:"
+    || source.searchParams.get("pluginId") !== MAIL_PLUGIN_ID
+    || !isPluginWindowSender(event.sender, MAIL_PLUGIN_ID)
+  ) {
+    throw new Error("Mail account settings are only available to the Mail plugin");
+  }
 }
 
 function normalizeProviderId(value: string): string {

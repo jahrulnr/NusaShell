@@ -57,6 +57,8 @@ bridge API (`window.shell.callTool`). See the docs map below for the full story.
 | [`AGENTS.md`](./AGENTS.md) | Agent/human working rules, architecture locks, versioning |
 | [`docs/blueprint.md`](./docs/blueprint.md) | Product concept: plugin shape, launcher UX, lifecycle, MCP transports, runtime trade-offs |
 | [`docs/backend-structure.md`](./docs/backend-structure.md) | Target backend: Clean Architecture monorepo, WebSocket protocol, package boundaries, MVP scope |
+| [`docs/mcp/nusashell-mail-mcp-plugin-spec.md`](./docs/mcp/nusashell-mail-mcp-plugin-spec.md) | Mail plugin protocol assessment, security model, and target tool contract |
+| [`docs/mcp/nusashell-mail-mcp-plugin-implementation.md`](./docs/mcp/nusashell-mail-mcp-plugin-implementation.md) | Implemented read-only Mail milestone, runtime wiring, and current limitations |
 | [`docs/PoC/`](./docs/PoC/) | Runnable zero-dep bridge demo (behavioral reference, not the target layout) |
 | [`docs/ui-design/`](./docs/ui-design/) | Launcher visual sketch |
 
@@ -111,6 +113,7 @@ A plugin is just a folder with three things:
 ```
 plugins/my-plugin/
 ├── manifest.json     # declares the UI entry point + how to start the MCP server
+├── icon.png          # 512×512 launcher artwork
 ├── ui/
 │   └── index.html    # rendered inside a window/iframe
 └── mcp/
@@ -124,7 +127,7 @@ Minimal manifest:
   "id": "com.you.my-plugin",
   "name": "My Plugin",
   "version": "1.0.0",
-  "icon": "🔧",
+  "icon": "file://icon.png",
   "ui": { "entry": "ui/index.html" },
   "mcp": { "transport": "stdio", "command": "node mcp/server.js" }
 }
@@ -138,6 +141,10 @@ const result = await window.shell.callTool("myTool", { some: "args" });
 
 NusaShell takes care of spawning your MCP process, routing the call, and
 matching the response back to the right request.
+
+The bundled examples under `plugins/examples/` include Notes and a read-only
+Mail client. Mail demonstrates a larger plugin surface, multi-account
+host-owned settings, and runtime-only credential delivery to an MCP process.
 
 ## Project status
 

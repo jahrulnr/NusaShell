@@ -13,6 +13,7 @@ import type {
 } from "@nusashell/application";
 import type { Logger } from "pino";
 import { redactMcpText, registerMcpLogging } from "./mcp-logging.js";
+import { unwrapMcpToolResult } from "./tool-result.js";
 
 export class StdioMcpClient implements McpClientPort {
   private client: Client | null = null;
@@ -128,7 +129,7 @@ export class StdioMcpClient implements McpClientPort {
       arguments: { ...args },
     });
 
-    return result.content;
+    return unwrapMcpToolResult(result);
   }
 
   async listPrompts(): Promise<readonly PromptDescriptor[]> {

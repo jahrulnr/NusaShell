@@ -10,7 +10,7 @@ const config: ForgeConfig = {
     name: "NusaShell",
     asar: true,
     extraResource: [
-      resolve(__dirname, "..", "..", "plugins", "examples"),
+      resolve(__dirname, "..", "..", "plugins"),
       resolve(__dirname, "assets", "nusashell.png"),
     ],
   },

@@ -1,6 +1,14 @@
-import { app, BrowserWindow, ipcMain } from "electron";
-import { join, resolve } from "node:path";
+import { app, BrowserWindow, ipcMain, screen, type WebContents } from "electron";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { resolveWindowIconPath } from "./window-assets.js";
+import {
+  fitPluginWindowToWorkArea,
+  normalizePluginWindowOptions,
+  pluginWindowTitle,
+  resolvePluginUiPath,
+  type PluginWindowOptionsInput,
+} from "./plugin-window-options.js";
 
 const isDev = process.argv.includes("--dev");
 
@@ -59,7 +67,7 @@ export async function openPluginWindow(
   name: string,
   icon: string,
   installPath: string,
-  windowMode?: string,
+  requestedOptions?: PluginWindowOptionsInput,
 ): Promise<void> {
   const existing = pluginWindows.get(pluginId);
   if (existing && !existing.isDestroyed()) {
@@ -68,15 +76,22 @@ export async function openPluginWindow(
   }
   pluginWindows.delete(pluginId);
 
-  const width = windowMode === "fullscreen" ? 1200 : 720;
-  const height = windowMode === "fullscreen" ? 800 : 480;
+  const options = normalizePluginWindowOptions(requestedOptions);
+  const display = launcherWindow
+    ? screen.getDisplayMatching(launcherWindow.getBounds())
+    : screen.getPrimaryDisplay();
+  const windowSize = fitPluginWindowToWorkArea(options, display.workAreaSize);
+  const uiPath = resolvePluginUiPath(installPath, options.entry);
+  const uiUrl = pathToFileURL(uiPath);
+  uiUrl.searchParams.set("pluginId", pluginId);
 
   const win = new BrowserWindow({
-    width,
-    height,
-    minWidth: 400,
-    minHeight: 300,
-    title: `${icon} ${name}`,
+    width: windowSize.width,
+    height: windowSize.height,
+    minWidth: Math.min(400, windowSize.width),
+    minHeight: Math.min(300, windowSize.height),
+    resizable: options.resizable,
+    title: pluginWindowTitle(name, icon),
     show: false,
     icon: WINDOW_ICON_PATH,
     ...(launcherWindow ? { parent: launcherWindow } : {}),
@@ -92,19 +107,9 @@ export async function openPluginWindow(
     if (!win.isDestroyed()) win.show();
   });
 
-  const uiPath = resolve(installPath, "ui", "index.html");
-  try {
-    await win.loadURL(`file://${uiPath}?pluginId=${encodeURIComponent(pluginId)}`);
-  } catch (err) {
-    console.error("[openPluginWindow] loadURL failed:", err);
-  }
-  if (!win.isDestroyed() && !win.isVisible()) {
-    win.show();
-  }
-
   win.on("closed", () => {
     pluginWindows.delete(pluginId);
-    // Stop the plugin's MCP server when its window closes (keepAliveOnClose: false)
+    if (options.keepAliveOnClose) return;
     const ws = new (require("ws"))(`ws://127.0.0.1:${process.env.NUSASHELL_PORT ?? "9130"}`);
     ws.on("open", () => {
       ws.send(JSON.stringify({
@@ -119,7 +124,18 @@ export async function openPluginWindow(
     ws.on("error", () => { /* best-effort */ });
   });
 
+  // Plugin preload code can invoke IPC while loadURL is still pending.
+  // Register ownership first so sender authorization is valid during startup.
   pluginWindows.set(pluginId, win);
+
+  try {
+    await win.loadURL(uiUrl.toString());
+  } catch (err) {
+    console.error("[openPluginWindow] loadURL failed:", err);
+  }
+  if (!win.isDestroyed() && !win.isVisible()) {
+    win.show();
+  }
 }
 
 export function closePluginWindow(pluginId: string): void {
@@ -135,6 +151,17 @@ export function closeAllPluginWindows(): void {
     win.close();
   }
   pluginWindows.clear();
+}
+
+export function isPluginWindowSender(sender: WebContents, pluginId: string): boolean {
+  const window = pluginWindows.get(pluginId);
+  return Boolean(window && !window.isDestroyed() && window.webContents === sender);
+}
+
+function assertLauncherSender(sender: WebContents): void {
+  if (!launcherWindow || launcherWindow.isDestroyed() || launcherWindow.webContents !== sender) {
+    throw new Error("Plugin windows can only be opened or closed by the launcher");
+  }
 }
 
 export function registerWindowIpc(log?: WindowLog): void {
@@ -172,12 +199,14 @@ export function registerWindowIpc(log?: WindowLog): void {
     BrowserWindow.fromWebContents(event.sender)?.close();
   });
 
-  ipcMain.handle("window:open-plugin", async (_event, pluginId: string, name: string, icon: string, installPath: string, windowMode?: string) => {
+  ipcMain.handle("window:open-plugin", async (event, pluginId: string, name: string, icon: string, installPath: string, options?: PluginWindowOptionsInput) => {
+    assertLauncherSender(event.sender);
     log?.("info", `window.open-plugin ${pluginId}`);
-    await openPluginWindow(pluginId, name, icon, installPath, windowMode);
+    await openPluginWindow(pluginId, name, icon, installPath, options);
   });
 
-  ipcMain.handle("window:close-plugin", (_event, pluginId: string) => {
+  ipcMain.handle("window:close-plugin", (event, pluginId: string) => {
+    assertLauncherSender(event.sender);
     log?.("info", `window.close-plugin ${pluginId}`);
     closePluginWindow(pluginId);
   });

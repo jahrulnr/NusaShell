@@ -58,8 +58,8 @@ describe("Response schemas", () => {
   it("parses plugin.list result", () => {
     const result = PluginListResultSchema.safeParse({
       plugins: [
-        { pluginId: "com.example.a", name: "A", version: "1.0.0", icon: "📝", installPath: "/plugins/a", state: "idle", enabled: true, autostart: false },
-        { pluginId: "com.example.b", name: "B", version: "2.0.0", icon: "🤖", installPath: "/plugins/b", state: "running", enabled: true, autostart: true },
+        { pluginId: "com.example.a", name: "A", version: "1.0.0", icon: "📝", installPath: "/plugins/a", state: "idle", enabled: true, autostart: false, ui: { entry: "ui/index.html" }, keepAliveOnClose: false },
+        { pluginId: "com.example.b", name: "B", version: "2.0.0", icon: "🤖", installPath: "/plugins/b", state: "running", enabled: true, autostart: true, ui: { entry: "ui/index.html", window: { mode: "panel" } }, keepAliveOnClose: true },
       ],
     });
     expect(result.success).toBe(true);

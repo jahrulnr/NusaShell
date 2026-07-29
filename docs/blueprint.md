@@ -343,7 +343,7 @@ live state stays in `PluginRuntimeManager` (backend).
 - Icon grid; click → open the plugin window/panel
 - Small badge on the icon when the plugin is `running` / `background`
 - Right-click → context menu: **Open, Start, Force Stop, Restart, Details, Uninstall**; editable fields get shell-owned **Cut / Copy / Paste** backed by the Electron clipboard bridge.
-- Home owns the installed-app search because it filters only plugin cards by name, ID, or manifest description; the title bar does not imply a global search.
+- Home owns the installed-app search because it filters only plugin cards by name, ID, or manifest description; the title bar does not imply a global search. Plugin artwork may be an emoji, HTTP(S) URL, or a plugin-relative local asset such as `file://icon.png`; local assets resolve to absolute `file://` URLs before the renderer displays them. Image and emoji artwork share one icon plate, and transparent PNG margins are normalized at render time so plugins keep comparable visual weight without rewriting their source assets.
 - Shell-owned chrome uses the NusaShell tile-and-wave emblem as its primary small-size brand mark. The detailed horizontal logo remains reference artwork; compact surfaces pair the simplified SVG emblem with a live text wordmark so both stay sharp at desktop title-bar scale. Windows and Linux launcher/plugin windows also receive a transparent PNG rendition at runtime, including development, so native window previews and taskbar/dock entries do not fall back to Electron's default icon; packaged builds copy that PNG into the application resources.
 - `➕ Install New` → URL input or native operating-system pickers for a local plugin folder/archive (later: marketplace browser). The selected local path is read-only.
 - Launcher navigation is **Home**, **Agent**, **Skills**, **Plugins**, **AI Providers**, **Autostart**, and **Logs**. The sidebar supports persisted icon-only and icon-with-text modes; its footer opens the project docs on GitHub. The Skills view is a three-pane managed workspace for installing `.skill`/`.zip` packages, browsing package files, editing bounded UTF-8 text, viewing binary metadata, and deleting the managed copy. The Plugins view combines installed metadata with each plugin's live MCP state. Settings opens from the top-bar gear, and the adjacent pin toggles always-on-top mode for the current launcher session.
@@ -362,6 +362,9 @@ Each plugin opens as:
 - **Widget**: small, dockable in a sidebar - good for always-visible plugins (mini chat, clock)
 
 Mode comes from the plugin manifest (`ui.window.mode`); users can override per plugin.
+Declared default dimensions are capped to the active display work area. Plugin
+surfaces remain responsible for responsive layouts down to their declared
+minimum size rather than relying on a desktop-sized viewport.
 
 ### 4.3 Multi-window / Multi-tab
 
