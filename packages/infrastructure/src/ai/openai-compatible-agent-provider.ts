@@ -120,25 +120,39 @@ export class OpenAiCompatibleAgentProvider implements AgentProvider {
         : toChatBody(normalizedRequest, model, allowVision, policy.maxOutput ?? this.options.maxOutputTokens);
 
     let payload: unknown;
+    let usedApi: ProviderApi = this.api;
     try {
       payload = await this.post(body, request, stream, true);
     } catch (error) {
-      if (!shouldRetryWithoutImages(error, request.messages, request.signal)) throw error;
-      const fallbackBody = this.api === "responses"
-        ? toResponsesBody(normalizedRequest, model, false, policy.maxOutput ?? this.options.maxOutputTokens)
-        : this.api === "messages"
-          ? toMessagesBody(normalizedRequest, model, false, policy.maxOutput ?? this.options.maxOutputTokens)
-          : toChatBody(normalizedRequest, model, false, policy.maxOutput ?? this.options.maxOutputTokens);
-      payload = await this.post(fallbackBody, request, stream, true);
+      if (this.api === "responses" && isResponsesUnsupported(error) && !request.signal?.aborted) {
+        const chatBody = toChatBody(normalizedRequest, model, allowVision, policy.maxOutput ?? this.options.maxOutputTokens);
+        const chatEndpoint = `${this.options.baseUrl.replace(/\/+$/, "")}/chat/completions`;
+        try {
+          payload = await this.post(chatBody, request, stream, true, chatEndpoint, "chat");
+        } catch (chatError) {
+          if (!shouldRetryWithoutImages(chatError, request.messages, request.signal)) throw chatError;
+          const fallbackChatBody = toChatBody(normalizedRequest, model, false, policy.maxOutput ?? this.options.maxOutputTokens);
+          payload = await this.post(fallbackChatBody, request, stream, true, chatEndpoint, "chat");
+        }
+        usedApi = "chat";
+      } else {
+        if (!shouldRetryWithoutImages(error, request.messages, request.signal)) throw error;
+        const fallbackBody = this.api === "responses"
+          ? toResponsesBody(normalizedRequest, model, false, policy.maxOutput ?? this.options.maxOutputTokens)
+          : this.api === "messages"
+            ? toMessagesBody(normalizedRequest, model, false, policy.maxOutput ?? this.options.maxOutputTokens)
+            : toChatBody(normalizedRequest, model, false, policy.maxOutput ?? this.options.maxOutputTokens);
+        payload = await this.post(fallbackBody, request, stream, true);
+      }
     }
-    const parsed = this.api === "responses"
+    const parsed = usedApi === "responses"
       ? looksLikeChatCompletion(payload)
         ? parseChatResult(payload, model)
         : parseResponsesResult(payload, model)
-      : this.api === "messages"
+      : usedApi === "messages"
         ? parseMessagesResult(payload, model)
         : parseChatResult(payload, model);
-    return { ...parsed, providerId: this.id, api: this.api };
+    return { ...parsed, providerId: this.id, api: usedApi };
   }
 
   private async post(
@@ -146,33 +160,37 @@ export class OpenAiCompatibleAgentProvider implements AgentProvider {
     request: AgentProviderRequest,
     stream: boolean,
     allowStreamFallback: boolean,
+    overrideEndpoint?: string,
+    overrideApi?: ProviderApi,
   ): Promise<unknown> {
+    const endpoint = overrideEndpoint ?? this.endpoint;
+    const api = overrideApi ?? this.api;
     body.stream = stream;
     const timeout = timeoutSignal(this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS, request.signal);
     let response: Response;
     try {
-      response = await this.fetchFn(this.endpoint, {
+      response = await this.fetchFn(endpoint, {
         method: "POST",
-        headers: providerHeaders(this.api, this.options.apiKey, stream),
+        headers: providerHeaders(api, this.options.apiKey, stream),
         body: JSON.stringify(body),
         signal: timeout.signal,
       });
     } catch (error) {
       timeout.dispose();
       if (timeout.timedOut()) {
-        throw new AgentProviderHttpError("Provider request timed out", 0, true, 0, "connect", error);
+        throw new AgentProviderHttpError(`Provider request timed out at ${endpoint}`, 0, true, 0, "connect", error);
       }
       if (request.signal?.aborted) {
-        throw new AgentProviderHttpError("Provider request was cancelled", 0, false, 0, "connect", error);
+        throw new AgentProviderHttpError(`Provider request was cancelled at ${endpoint}`, 0, false, 0, "connect", error);
       }
-      throw new AgentProviderHttpError("Provider connection failed", 0, true, 0, "connect", error);
+      throw new AgentProviderHttpError(`Provider connection failed at ${endpoint}`, 0, true, 0, "connect", error);
     }
 
     try {
       if (!response.ok) {
         const errorBody = await readTextLimited(response, Math.min(this.maxResponseBytes(), 4096));
         if (stream && allowStreamFallback && isStreamUnsupported(response.status, errorBody)) {
-          return this.post(body, request, false, false);
+          return this.post(body, request, false, false, overrideEndpoint, overrideApi);
         }
         throw new AgentProviderHttpError(
           `Provider returned HTTP ${response.status}${errorBody ? `: ${safeSnippet(errorBody)}` : ""}`,
@@ -187,7 +205,7 @@ export class OpenAiCompatibleAgentProvider implements AgentProvider {
         try {
           return await parseOpenAiSse(
             response,
-            this.api === "responses" ? "responses" : "chat",
+            api === "responses" ? "responses" : "chat",
             request.onTextDelta,
             request.onReasoningDelta,
             this.maxResponseBytes(),
@@ -202,13 +220,13 @@ export class OpenAiCompatibleAgentProvider implements AgentProvider {
 
       const raw = await readTextLimited(response, this.maxResponseBytes());
       if (!raw.trim()) {
-        if (stream && allowStreamFallback) return this.post(body, request, false, false);
+        if (stream && allowStreamFallback) return this.post(body, request, false, false, overrideEndpoint, overrideApi);
         throw new AgentProviderHttpError("Provider returned an empty response body", response.status, false, 0, "http_status");
       }
       if (stream && looksLikeSseText(raw)) {
         return parseOpenAiSse(
           new Response(raw, { status: response.status, headers: { "content-type": "text/event-stream" } }),
-          this.api === "responses" ? "responses" : "chat",
+          api === "responses" ? "responses" : "chat",
           request.onTextDelta,
           request.onReasoningDelta,
           this.maxResponseBytes(),
@@ -228,7 +246,7 @@ export class OpenAiCompatibleAgentProvider implements AgentProvider {
         );
       }
       if (stream && allowStreamFallback && looksLikeJsonStreamReject(payload)) {
-        return this.post(body, request, false, false);
+        return this.post(body, request, false, false, overrideEndpoint, overrideApi);
       }
       return payload;
     } finally {
@@ -686,6 +704,15 @@ function isStreamUnsupported(status: number, body: string): boolean {
   return status >= 400 && status < 500
     && normalized.includes("stream")
     && ["not support", "unsupported", "disabled", "not available", "not enabled", "must be false", "non-stream"]
+      .some((phrase) => normalized.includes(phrase));
+}
+
+function isResponsesUnsupported(error: unknown): boolean {
+  if (!(error instanceof AgentProviderHttpError)) return false;
+  if (error.status === 404 || error.status === 405) return true;
+  const normalized = error.message.toLowerCase();
+  return error.status >= 400 && error.status < 600
+    && ["not found", "not supported", "does not support", "unavailable"]
       .some((phrase) => normalized.includes(phrase));
 }
 

@@ -50,7 +50,16 @@ describe("resolvePath", () => {
     expect(resolvePath(tmpDir, "sub/file.txt")).toBe(path.resolve(tmpDir, "sub/file.txt"));
   });
 
-  it("resolves absolute paths as-is", () => {
-    expect(resolvePath(tmpDir, "/absolute/path")).toBe("/absolute/path");
+  it("rejects absolute paths outside root", () => {
+    expect(() => resolvePath(tmpDir, "/absolute/path")).toThrow(/escapes files root/);
+  });
+
+  it("rejects relative paths that escape root via traversal", () => {
+    expect(() => resolvePath(tmpDir, "../../etc/passwd")).toThrow(/escapes files root/);
+    expect(() => resolvePath(tmpDir, "../../../")).toThrow(/escapes files root/);
+  });
+
+  it("allows nested paths inside root", () => {
+    expect(resolvePath(tmpDir, "sub/dir/file.txt")).toBe(path.resolve(tmpDir, "sub/dir/file.txt"));
   });
 });

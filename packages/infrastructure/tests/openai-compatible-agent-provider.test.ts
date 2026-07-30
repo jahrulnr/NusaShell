@@ -544,6 +544,34 @@ describe("OpenAiCompatibleAgentProvider", () => {
     expect(result.text).toBe("fallback");
   });
 
+  it("falls back from responses to chat when the responses endpoint is not supported", async () => {
+    const fetchFn = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("Not Found", { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        model: "gateway-model",
+        choices: [{ message: { content: "chat fallback ok" } }],
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+    const provider = new OpenAiCompatibleAgentProvider({
+      id: "omniroute",
+      api: "responses",
+      baseUrl: "http://127.0.0.1:20128/v1",
+      fetchFn,
+    });
+
+    const result = await provider.complete({
+      traceId: "trace-responses-fallback",
+      round: 1,
+      messages: [{ role: "user", content: "Hello" }],
+      tools: [],
+      model: "gateway-model",
+    });
+
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(fetchFn.mock.calls[0]?.[0]).toBe("http://127.0.0.1:20128/v1/responses");
+    expect(fetchFn.mock.calls[1]?.[0]).toBe("http://127.0.0.1:20128/v1/chat/completions");
+    expect(result).toMatchObject({ text: "chat fallback ok", providerId: "omniroute", api: "chat" });
+  });
+
   it("aborts a request at the configured timeout", async () => {
     const provider = new OpenAiCompatibleAgentProvider({
       baseUrl: "https://provider.example/v1",

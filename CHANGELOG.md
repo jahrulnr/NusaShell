@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.32] - 2026-07-30
 
+### Fixed
+
+- `OpenAiCompatibleAgentProvider` now falls back from the `responses` API to `chat/completions` within the same provider when the responses endpoint returns 404, 405, or a 4xx/5xx body indicating the endpoint is not supported. This fixes OmniRoute gateway turns where an upstream provider does not support `/responses` — the turn retries via `/chat/completions` instead of failing.
+- `OpenAiCompatibleAgentProvider` connection and timeout errors now include the attempted endpoint URL for easier diagnostics.
+
 ### Added
 
 - First-party Mail plugin with an original three-pane mailbox UI and eight

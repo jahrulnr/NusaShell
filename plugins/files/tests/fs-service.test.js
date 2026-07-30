@@ -182,6 +182,11 @@ describe("FileService.deleteFile", () => {
     const result = await service.deleteFile("dir", true);
     expect(result.deleted).toBe(true);
   });
+
+  it("refuses to delete paths that escape root", async () => {
+    await expect(service.deleteFile("../../etc", true)).rejects.toThrow(/escapes files root/);
+    await expect(service.deleteFile("/absolute/path", false)).rejects.toThrow(/escapes files root/);
+  });
 });
 
 describe("FileService.searchFiles", () => {

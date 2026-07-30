@@ -1450,14 +1450,9 @@ document.addEventListener("DOMContentLoaded", () => {
     showToast(`Could not load skills: ${error.message || error}`, "error");
   });
 
-  // Connect and subscribe
+  // Connect and subscribe — pre-seed activeSubscriptions so onopen always subscribes
+  activeSubscriptions.add("*");
   connectWs();
-  // Subscribe after connect (handled in ws.onopen)
-  setTimeout(async () => {
-    if (connected) {
-      try { await subscribe(["*"]); } catch {}
-    }
-  }, 500);
 
   // Periodic refresh (fallback for state sync)
   setInterval(() => { if (connected) refreshAll(); }, 5000);

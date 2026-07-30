@@ -8,9 +8,8 @@ import fs from "node:fs/promises";
  * Source: NUSASHELL_FILES_ROOT env var, or user home directory as fallback.
  * The root must exist and be a directory.
  *
- * No path sandboxing is performed. All file operations resolve paths
- * relative to this root but do NOT restrict access to it. This is a
- * known limitation documented in the plugin docs.
+ * All file operations are sandboxed to this root. Paths that escape
+ * the root (via absolute paths or ../ traversal) are rejected.
  *
  * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} environment
  */
@@ -41,5 +40,10 @@ export async function loadRootFromEnvironment(environment = process.env) {
 export function resolvePath(root, input) {
   if (!input || input === "/" || input === "") return root;
   const resolved = path.isAbsolute(input) ? input : path.resolve(root, input);
+  const normalizedRoot = path.resolve(root);
+  const relative = path.relative(normalizedRoot, resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`Path escapes files root: ${input}`);
+  }
   return resolved;
 }
