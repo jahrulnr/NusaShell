@@ -92378,7 +92378,8 @@ var MailService = class {
     resolveAccount(this.accounts, accountId2);
     const client = await this.connections.getImapClient(accountId2);
     const allMailboxes = await client.list();
-    const mailboxes = allMailboxes.slice(0, MAX_MAILBOXES);
+    const selectable = allMailboxes.filter((mb) => !isNonSelectable(mb));
+    const mailboxes = selectable.slice(0, MAX_MAILBOXES);
     const statuses = [];
     for (let offset = 0; offset < mailboxes.length; offset += MAILBOX_STATUS_CONCURRENCY) {
       const batch = mailboxes.slice(offset, offset + MAILBOX_STATUS_CONCURRENCY);
@@ -92613,6 +92614,12 @@ function textWasTruncated(value) {
 }
 function boundHeader(value) {
   return String(value ?? "").slice(0, MAX_HEADER_CHARS);
+}
+function isNonSelectable(mailbox) {
+  const flags = mailbox?.flags;
+  if (!flags) return false;
+  const set2 = flags instanceof Set ? flags : new Set(flags);
+  return set2.has("\\Noselect") || set2.has("\\NonExistent");
 }
 function safeDate(value) {
   const date5 = value ? new Date(value) : /* @__PURE__ */ new Date(0);

@@ -16,6 +16,7 @@ function fakeClient(messages) {
   return {
     list: vi.fn(async () => [
       { name: "Inbox", path: "INBOX", specialUse: "\\Inbox" },
+      { name: "[Gmail]", path: "[Gmail]", flags: new Set(["\\Noselect", "\\HasChildren"]) },
       { name: "Archive", path: "Archive" },
     ]),
     status: vi.fn(async (path) => ({

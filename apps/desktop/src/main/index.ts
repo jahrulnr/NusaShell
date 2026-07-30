@@ -6,6 +6,7 @@ import { LogTail, type ShellLogLevel, type ShellLogSource } from "./log-tail.js"
 import {
   createLauncherWindow,
   closeAllPluginWindows,
+  closePluginWindow,
   getLauncherWindow,
   isPluginWindowSender,
   registerWindowIpc,
@@ -335,6 +336,14 @@ app.whenReady().then(async () => {
     backend = await startBackend();
     await waitForBackend(backend.config.port);
     logTail.add("backend", "info", `Backend ready on ${backend.config.host}:${backend.config.port}`);
+
+    backend.container.eventDispatcher.on("plugin.uninstalled", {
+      handle: (event) => {
+        const pluginId = (event as { aggregateId: string }).aggregateId;
+        logTail.add("main", "info", `plugin.uninstalled closing window for ${pluginId}`);
+        closePluginWindow(pluginId);
+      },
+    });
   } catch (err) {
     console.error("[main] startBackend failed:", err);
   }

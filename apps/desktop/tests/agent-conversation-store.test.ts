@@ -80,4 +80,32 @@ describe("AgentConversationStore", () => {
       messages: [{ attachments: [{ type: "text", name: "layout.css", content: ".shell { display: grid; }" }] }],
     });
   });
+
+  it("persists assistant steps (chronological reasoning, tool calls, text)", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-"));
+    const path = join(root, "agent-conversations.json");
+    const first = new AgentConversationStore(path, () => new Date("2026-07-30T10:00:00.000Z"), () => "conv-steps");
+    const conversation = await first.create();
+    await first.appendMessage(conversation.id, { role: "user", content: "Check tools" });
+    await first.appendMessage(conversation.id, {
+      role: "assistant",
+      content: "There are 2 plugins.",
+      reasoning: "I should check what plugins are available.",
+      toolCalls: [{ id: "call-1", name: "mcp_list", ok: true }],
+      steps: [
+        { type: "reasoning", content: "I should check what plugins are available." },
+        { type: "tool_calls", calls: [{ id: "call-1", name: "mcp_list", ok: true }] },
+        { type: "reasoning", content: "There are 2 plugins: Mail and Notes." },
+        { type: "text", content: "There are 2 plugins." },
+      ],
+    });
+
+    const loaded = await new AgentConversationStore(path).get(conversation.id);
+    expect(loaded?.messages[1]?.steps).toEqual([
+      { type: "reasoning", content: "I should check what plugins are available." },
+      { type: "tool_calls", calls: [{ id: "call-1", name: "mcp_list", ok: true }] },
+      { type: "reasoning", content: "There are 2 plugins: Mail and Notes." },
+      { type: "text", content: "There are 2 plugins." },
+    ]);
+  });
 });

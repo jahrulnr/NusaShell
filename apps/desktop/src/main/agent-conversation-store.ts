@@ -5,6 +5,8 @@ import type {
   AgentConversation,
   AgentConversationCheckpoint,
   AgentConversationMessage,
+  AgentConversationStep,
+  AgentConversationToolCall,
   AgentConversationSummary,
 } from "../shared/agent-conversation-contract.js";
 
@@ -167,12 +169,38 @@ function isConversationMessage(value: unknown): value is AgentConversationMessag
       && typeof message.reasoning === "string"
       && message.reasoning.length <= 1_000_000
     ))
+    && (message.steps === undefined || (
+      message.role === "assistant"
+      && Array.isArray(message.steps)
+      && message.steps.every(isConversationStep)
+    ))
     && (message.attachments === undefined || (
       message.role === "user"
       && Array.isArray(message.attachments)
       && message.attachments.length <= 4
       && message.attachments.every(isConversationAttachment)
     ));
+}
+
+function isConversationStep(value: unknown): value is AgentConversationStep {
+  if (typeof value !== "object" || value === null) return false;
+  const step = value as Record<string, unknown>;
+  if (step.type === "reasoning" || step.type === "text") {
+    return typeof step.content === "string" && step.content.length <= 1_000_000;
+  }
+  if (step.type === "tool_calls") {
+    return Array.isArray(step.calls) && step.calls.every(isConversationToolCall);
+  }
+  return false;
+}
+
+function isConversationToolCall(value: unknown): value is AgentConversationToolCall {
+  if (typeof value !== "object" || value === null) return false;
+  const call = value as Record<string, unknown>;
+  return typeof call.id === "string"
+    && typeof call.name === "string"
+    && typeof call.ok === "boolean"
+    && (call.error === undefined || typeof call.error === "string");
 }
 
 function isConversationAttachment(value: unknown): boolean {

@@ -107,20 +107,42 @@ export class AgentConversationController {
       }
       retryIsSafe = true;
 
-      pending = this.appendMessage("assistant", retry ? "Retrying turn…" : "Working…", { pending: true });
+      pending = this.createStreamingMessage();
       selectedModel = this.getActiveModel();
       status.textContent = selectedModel ? formatContextUsage(estimateContextTokens(buildAgentContext(this.conversation)), selectedModel.contextWindow) : "Choose a model";
-      const bubble = pending?.querySelector(".agent-bubble");
-      let streamedText = "";
+      const streamState = {
+        reasoningEl: null,
+        reasoningText: "",
+        toolCards: new Map(),
+        textBubble: pending?.querySelector(".agent-bubble"),
+        streamedText: "",
+      };
       const result = await this.runTurn(buildAgentContext(this.conversation), {
         traceId: this.activeTraceId,
         onDelta: (delta) => {
-          streamedText += delta;
-          if (bubble) bubble.textContent = streamedText;
+          streamState.streamedText += delta;
+          if (streamState.textBubble) streamState.textBubble.textContent = streamState.streamedText;
+        },
+        onReasoningDelta: (delta) => {
+          streamState.reasoningText += delta;
+          if (!streamState.reasoningEl) {
+            streamState.reasoningEl = this.createStreamingReasoningBlock();
+            streamState.textBubble?.before(streamState.reasoningEl);
+          }
+          const content = streamState.reasoningEl.querySelector(".agent-reasoning-content");
+          if (content) content.textContent = streamState.reasoningText;
+        },
+        onToolCallStart: (payload) => {
+          const card = this.createStreamingToolCard(payload.callId, payload.name);
+          streamState.toolCards.set(payload.callId, card);
+          streamState.textBubble?.before(card);
+        },
+        onToolCallEnd: (payload) => {
+          const card = streamState.toolCards.get(payload.callId);
+          if (card) this.updateStreamingToolCard(card, payload);
         },
       });
       retryIsSafe = false;
-      pending?.remove();
 
       try {
         this.conversation = await this.shell.agentConversations.append(this.conversation.id, {
@@ -131,9 +153,10 @@ export class AgentConversationController {
           rounds: result.rounds,
           reasoning: result.reasoning,
           toolCalls: result.toolCalls,
+          ...(result.steps ? { steps: result.steps } : {}),
         });
       } catch (error) {
-        this.appendMessage("assistant", result.text, result);
+        this.sealStreamingMessage(pending, result);
         status.textContent = "Response completed · local save failed";
         this.notify("The response completed but could not be saved locally.", "error");
         this.log("error", `Agent response persistence failed trace=${result.traceId}: ${error.message || String(error)}`);
@@ -152,7 +175,7 @@ export class AgentConversationController {
         }
       }
       const savedMessage = this.conversation.messages.at(-1);
-      this.appendMessage("assistant", result.text, savedMessage ?? result);
+      this.sealStreamingMessage(pending, savedMessage ?? result);
       await this.refresh();
       status.textContent = selectedModel ? formatContextUsage(estimateContextTokens(buildAgentContext(this.conversation)), selectedModel.contextWindow) : "Choose a model";
       this.log("info", `Agent turn completed trace=${result.traceId} rounds=${result.rounds}`);
@@ -387,19 +410,33 @@ export class AgentConversationController {
       message.appendChild(this.messageAttachments(meta.attachments));
     }
 
-    if (role === "assistant" && meta.reasoning?.trim()) {
-      message.appendChild(this.reasoningDisclosure(meta.reasoning));
-    }
+    if (role === "assistant" && meta.steps?.length) {
+      for (const step of meta.steps) {
+        if (step.type === "reasoning" && step.content?.trim()) {
+          message.appendChild(this.reasoningDisclosure(step.content));
+        } else if (step.type === "tool_calls" && step.calls?.length) {
+          message.appendChild(this.toolActivity(step.calls));
+        } else if (step.type === "text" && step.content) {
+          const stepBubble = element("div", "agent-bubble");
+          stepBubble.innerHTML = renderAssistantMarkdown(step.content);
+          message.appendChild(stepBubble);
+        }
+      }
+    } else {
+      if (role === "assistant" && meta.reasoning?.trim()) {
+        message.appendChild(this.reasoningDisclosure(meta.reasoning));
+      }
 
-    if (role === "assistant" && meta.toolCalls?.length) {
-      message.appendChild(this.toolActivity(meta.toolCalls));
-    }
+      if (role === "assistant" && meta.toolCalls?.length) {
+        message.appendChild(this.toolActivity(meta.toolCalls));
+      }
 
-    const bubble = element("div", "agent-bubble");
-    const text = content || (meta.attachments?.length ? "Attached files" : "");
-    if (role === "assistant" && !meta.pending && !meta.error) bubble.innerHTML = renderAssistantMarkdown(text);
-    else bubble.textContent = text;
-    message.appendChild(bubble);
+      const bubble = element("div", "agent-bubble");
+      const text = content || (meta.attachments?.length ? "Attached files" : "");
+      if (role === "assistant" && !meta.pending && !meta.error) bubble.innerHTML = renderAssistantMarkdown(text);
+      else bubble.textContent = text;
+      message.appendChild(bubble);
+    }
 
     const footer = element("footer", "agent-message-footer");
     const timestamp = formatMessageTimestamp(meta.createdAt);
@@ -507,6 +544,110 @@ export class AgentConversationController {
     });
     activity.append(summary, list);
     return activity;
+  }
+
+  createStreamingMessage() {
+    const thread = $("#agent-thread");
+    if (!thread) return null;
+    $("#agent-empty")?.remove();
+    const message = element("article", "agent-message assistant agent-pending");
+    message.setAttribute("aria-label", "NusaShell Agent response");
+    const identity = element("div", "agent-message-identity");
+    identity.append(
+      element("span", "agent-message-mark", "◌"),
+      element("span", "agent-message-meta", "Working"),
+    );
+    message.appendChild(identity);
+    message.appendChild(element("div", "agent-bubble"));
+    thread.appendChild(message);
+    thread.scrollTop = thread.scrollHeight;
+    return message;
+  }
+
+  createStreamingReasoningBlock() {
+    const disclosure = document.createElement("details");
+    disclosure.className = "agent-reasoning";
+    disclosure.open = true;
+    const summary = document.createElement("summary");
+    summary.append(
+      element("span", "agent-reasoning-mark", "⌁"),
+      element("span", "agent-reasoning-title", "Thinking"),
+      element("span", "agent-reasoning-hint", "Hide reasoning"),
+      element("span", "agent-reasoning-chevron", "⌄"),
+    );
+    const content = element("div", "agent-reasoning-content");
+    disclosure.append(summary, content);
+    return disclosure;
+  }
+
+  createStreamingToolCard(callId, name) {
+    const card = element("div", "agent-tool-card is-running");
+    card.dataset.callId = callId;
+    const state = element("span", "agent-tool-card-state", "◌");
+    const copy = element("div", "agent-tool-card-copy");
+    copy.appendChild(element("code", "agent-tool-card-name", name));
+    card.append(state, copy);
+    return card;
+  }
+
+  updateStreamingToolCard(card, payload) {
+    card.classList.remove("is-running");
+    card.classList.add(payload.ok ? "is-success" : "is-error");
+    const state = card.querySelector(".agent-tool-card-state");
+    if (state) state.textContent = payload.ok ? "✓" : "!";
+    if (payload.error) {
+      const copy = card.querySelector(".agent-tool-card-copy");
+      if (copy) copy.appendChild(element("span", "agent-activity-error", payload.error));
+    }
+  }
+
+  sealStreamingMessage(message, meta) {
+    if (!message) return;
+    message.classList.remove("agent-pending");
+    const mark = message.querySelector(".agent-message-mark");
+    if (mark) mark.textContent = "✦";
+    const metaLabel = message.querySelector(".agent-message-meta");
+    if (metaLabel) metaLabel.textContent = "NusaShell Agent";
+
+    if (!message.querySelector(".agent-reasoning") && meta.reasoning?.trim()) {
+      const disclosure = this.reasoningDisclosure(meta.reasoning);
+      const bubble = message.querySelector(".agent-bubble");
+      if (bubble) bubble.before(disclosure);
+      else message.appendChild(disclosure);
+    }
+
+    if (!message.querySelector(".agent-tool-card, .agent-activity") && meta.toolCalls?.length) {
+      const activity = this.toolActivity(meta.toolCalls);
+      const bubble = message.querySelector(".agent-bubble");
+      if (bubble) bubble.before(activity);
+      else message.appendChild(activity);
+    }
+
+    const bubble = message.querySelector(".agent-bubble");
+    if (bubble) {
+      const content = bubble.textContent || meta.text || meta.content || "";
+      if (content) bubble.innerHTML = renderAssistantMarkdown(content);
+    }
+
+    const footer = element("footer", "agent-message-footer");
+    const timestamp = formatMessageTimestamp(meta.createdAt ?? new Date().toISOString());
+    if (timestamp) {
+      const time = element("time", "agent-message-time", timestamp);
+      time.dateTime = meta.createdAt ?? new Date().toISOString();
+      footer.appendChild(time);
+    }
+    if (meta.model) footer.appendChild(messageDetail(meta.model));
+    if (meta.rounds) footer.appendChild(messageDetail(`${meta.rounds} round${meta.rounds === 1 ? "" : "s"}`));
+    if (meta.traceId) footer.appendChild(messageDetail(`trace ${meta.traceId.slice(0, 8)}`));
+    const actions = element("div", "agent-message-actions");
+    const copy = iconButton("Copy message", copyIcon());
+    copy.addEventListener("click", () => void this.copyMessage(
+      bubble?.textContent || "",
+      copy,
+    ));
+    actions.appendChild(copy);
+    footer.appendChild(actions);
+    message.appendChild(footer);
   }
 
   async copyMessage(content, button) {

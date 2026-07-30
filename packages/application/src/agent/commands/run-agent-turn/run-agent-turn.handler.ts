@@ -1,12 +1,13 @@
 import { ApplicationError } from "../../../errors/application-error.js";
 import type { CommandHandler } from "../../../messaging/command-handler.js";
-import type { AgentProviderRegistryPort } from "../../ports/agent-provider.port.js";
+import type { AgentProviderRegistryPort, AgentToolCall } from "../../ports/agent-provider.port.js";
 import type { AgentToolGateway } from "../../ports/agent-tool-gateway.port.js";
 import type { PromptLoaderPort } from "../../ports/prompt-loader.port.js";
 import {
   AgentTurnRunner,
   type AgentContextOptions,
   type AgentTurnResult,
+  type AgentToolExecution,
 } from "../../services/agent-turn-runner.js";
 import { injectPrompts, type PromptVars } from "../../services/prompt-injector.js";
 import { InProcessAgentTurnWorker, type AgentTurnWorker } from "../../services/in-process-agent-turn-worker.js";
@@ -33,6 +34,9 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
     } = { strategy: "failover", totalAttemptBudget: 4 },
     private readonly coordinator: AgentTurnCoordinator = new AgentTurnCoordinator(),
     private readonly onTextDelta?: (traceId: string, delta: string) => void,
+    private readonly onReasoningDelta?: (traceId: string, delta: string) => void,
+    private readonly onToolCallStart?: (traceId: string, call: AgentToolCall) => void,
+    private readonly onToolCallEnd?: (traceId: string, execution: AgentToolExecution) => void,
     private readonly promptLoader?: PromptLoaderPort,
   ) {}
 
@@ -66,6 +70,9 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
       traceId,
       signal,
       ...(this.onTextDelta ? { onTextDelta: (delta) => this.onTextDelta?.(traceId, delta) } : {}),
+      ...(this.onReasoningDelta ? { onReasoningDelta: (delta) => this.onReasoningDelta?.(traceId, delta) } : {}),
+      ...(this.onToolCallStart ? { onToolCallStart: (call) => this.onToolCallStart?.(traceId, call) } : {}),
+      ...(this.onToolCallEnd ? { onToolCallEnd: (execution) => this.onToolCallEnd?.(traceId, execution) } : {}),
       ...(command.maxToolRounds !== undefined ? { maxToolRounds: command.maxToolRounds } : {}),
       ...(command.model !== undefined ? { model: command.model } : {}),
       ...(command.effort !== undefined ? { effort: command.effort } : {}),

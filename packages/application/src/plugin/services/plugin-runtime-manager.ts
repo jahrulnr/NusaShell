@@ -262,6 +262,15 @@ export class PluginRuntimeManager {
     );
   }
 
+  async removePlugin(pluginId: PluginId): Promise<void> {
+    const key = PluginId.toString(pluginId);
+    const entry = this.runtimes.get(key);
+    if (entry) {
+      await entry.queue.enqueue(async () => this.stopLocked(entry));
+      this.runtimes.delete(key);
+    }
+  }
+
   async setAutostart(pluginId: PluginId, autostart: boolean): Promise<PluginView> {
     const plugin = await this.loadPlugin(pluginId);
     await this.deps.pluginRepository.save(plugin.withMcpAutostart(autostart));

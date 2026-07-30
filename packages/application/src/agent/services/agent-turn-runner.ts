@@ -24,6 +24,9 @@ export interface RunAgentTurnInput {
   readonly traceId?: string;
   readonly signal?: AbortSignal;
   readonly onTextDelta?: (delta: string) => void;
+  readonly onReasoningDelta?: (delta: string) => void;
+  readonly onToolCallStart?: (call: AgentToolCall) => void;
+  readonly onToolCallEnd?: (execution: AgentToolExecution) => void;
 }
 
 export interface AgentToolExecution {
@@ -34,11 +37,17 @@ export interface AgentToolExecution {
   readonly error?: string;
 }
 
+export type AgentTurnStep =
+  | { readonly type: "reasoning"; readonly content: string }
+  | { readonly type: "tool_calls"; readonly calls: readonly AgentToolExecution[] }
+  | { readonly type: "text"; readonly content: string };
+
 export interface AgentTurnResult {
   readonly traceId: string;
   readonly text: string;
   readonly rounds: number;
   readonly toolCalls: readonly AgentToolExecution[];
+  readonly steps?: readonly AgentTurnStep[];
   readonly model?: string;
   readonly providerId?: string;
   readonly api?: "chat" | "responses" | "messages";
@@ -117,6 +126,7 @@ export class AgentTurnRunner {
     let providerId: string | undefined;
     let api: "chat" | "responses" | "messages" | undefined;
     let reasoning: string | undefined;
+    const steps: AgentTurnStep[] = [];
     let emptyResponseNudged = false;
 
     this.deps.logger?.info("Agent turn started traceId=%s provider=%s", traceId, this.deps.provider.id);
@@ -138,6 +148,7 @@ export class AgentTurnRunner {
           ...(input.modelCapabilities ? { modelCapabilities: input.modelCapabilities } : {}),
           ...(input.signal ? { signal: input.signal } : {}),
           ...(input.onTextDelta ? { onTextDelta: input.onTextDelta } : {}),
+          ...(input.onReasoningDelta ? { onReasoningDelta: input.onReasoningDelta } : {}),
         });
       } catch (error) {
         if (input.signal?.aborted) {
@@ -154,6 +165,9 @@ export class AgentTurnRunner {
       providerId = response.providerId ?? providerId;
       api = response.api ?? api;
       reasoning = response.reasoning ?? reasoning;
+      if (response.reasoning?.trim()) {
+        steps.push({ type: "reasoning", content: response.reasoning.trim() });
+      }
       addUsage(usage, response.usage);
       const requestedCalls = response.toolCalls ?? [];
 
@@ -178,11 +192,13 @@ export class AgentTurnRunner {
           text = "(empty model response)";
         }
         this.deps.logger?.info("Agent turn completed traceId=%s provider=%s rounds=%d", traceId, this.deps.provider.id, round);
+        steps.push({ type: "text", content: text });
         return {
           traceId,
           text,
           rounds: round,
           toolCalls,
+          steps,
           ...(model ? { model } : {}),
           ...(providerId ? { providerId } : {}),
           ...(api ? { api } : {}),
@@ -200,6 +216,7 @@ export class AgentTurnRunner {
           text: `The agent stopped because the model repeated the same tool call ${this.defaultMaxRepeatedToolCalls} times.`,
           rounds: round,
           toolCalls,
+          steps,
           ...(model ? { model } : {}),
           ...(providerId ? { providerId } : {}),
           ...(api ? { api } : {}),
@@ -218,18 +235,28 @@ export class AgentTurnRunner {
         );
         continue;
       }
+      if (response.text?.trim()) {
+        steps.push({ type: "text", content: response.text.trim() });
+      }
       messages.push({ role: "assistant", ...(response.text ? { content: response.text } : {}), toolCalls: requestedCalls });
 
+      const roundExecutions: AgentToolExecution[] = [];
       for (const call of requestedCalls) {
         assertTurnActive(input.signal, traceId);
+        input.onToolCallStart?.(call);
         const execution = await this.executeTool(call, traceId, round);
+        input.onToolCallEnd?.(execution);
         toolCalls.push(execution);
+        roundExecutions.push(execution);
         messages.push({
           role: "tool",
           toolCallId: call.id,
           name: call.name,
           content: serializeToolResult(execution),
         });
+      }
+      if (roundExecutions.length > 0) {
+        steps.push({ type: "tool_calls", calls: [...roundExecutions] });
       }
     }
 
@@ -239,6 +266,7 @@ export class AgentTurnRunner {
       text: "The agent reached the maximum tool rounds before producing a final answer.",
       rounds: maxToolRounds,
       toolCalls,
+      steps,
       ...(model ? { model } : {}),
       ...(providerId ? { providerId } : {}),
       ...(api ? { api } : {}),

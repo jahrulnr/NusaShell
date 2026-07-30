@@ -34,7 +34,8 @@ export class MailService {
     resolveAccount(this.accounts, accountId);
     const client = await this.connections.getImapClient(accountId);
     const allMailboxes = await client.list();
-    const mailboxes = allMailboxes.slice(0, MAX_MAILBOXES);
+    const selectable = allMailboxes.filter((mb) => !isNonSelectable(mb));
+    const mailboxes = selectable.slice(0, MAX_MAILBOXES);
     const statuses = [];
     for (let offset = 0; offset < mailboxes.length; offset += MAILBOX_STATUS_CONCURRENCY) {
       const batch = mailboxes.slice(offset, offset + MAILBOX_STATUS_CONCURRENCY);
@@ -299,6 +300,13 @@ function textWasTruncated(value) {
 
 function boundHeader(value) {
   return String(value ?? "").slice(0, MAX_HEADER_CHARS);
+}
+
+function isNonSelectable(mailbox) {
+  const flags = mailbox?.flags;
+  if (!flags) return false;
+  const set = flags instanceof Set ? flags : new Set(flags);
+  return set.has("\\Noselect") || set.has("\\NonExistent");
 }
 
 function safeDate(value) {

@@ -2493,6 +2493,55 @@ body {
   font-size: 10px;
   line-height: 1.4;
 }
+.agent-tool-card {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 9px;
+  margin: 4px 0;
+  padding: 4px 0 4px 22px;
+  min-height: 24px;
+  align-items: start;
+}
+.agent-tool-card-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid #293749;
+  border-radius: 50%;
+  font-size: 10px;
+}
+.agent-tool-card.is-running .agent-tool-card-state {
+  border-color: #4a6a8a;
+  color: #7ab5d9;
+  animation: agent-tool-card-pulse 1.2s ease-in-out infinite;
+}
+.agent-tool-card.is-success .agent-tool-card-state {
+  border-color: rgba(85, 217, 150, .42);
+  color: #66d59c;
+}
+.agent-tool-card.is-error .agent-tool-card-state {
+  border-color: rgba(245, 91, 104, .45);
+  color: #ff8f99;
+}
+.agent-tool-card-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding-top: 1px;
+}
+.agent-tool-card-name {
+  overflow: hidden;
+  color: #8899ae;
+  font: 10px 'JetBrains Mono', monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes agent-tool-card-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
 .agent-turn-tag {
   border-color: #2d3d53;
   background: #111b28;

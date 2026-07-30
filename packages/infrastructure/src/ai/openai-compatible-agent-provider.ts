@@ -189,6 +189,7 @@ export class OpenAiCompatibleAgentProvider implements AgentProvider {
             response,
             this.api === "responses" ? "responses" : "chat",
             request.onTextDelta,
+            request.onReasoningDelta,
             this.maxResponseBytes(),
           );
         } catch (error) {
@@ -209,6 +210,7 @@ export class OpenAiCompatibleAgentProvider implements AgentProvider {
           new Response(raw, { status: response.status, headers: { "content-type": "text/event-stream" } }),
           this.api === "responses" ? "responses" : "chat",
           request.onTextDelta,
+          request.onReasoningDelta,
           this.maxResponseBytes(),
         );
       }

@@ -100,6 +100,43 @@ export const AgentTextDeltaEventSchema = z.object({
   }),
 });
 
+export const AgentReasoningDeltaEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("agent.reasoning_delta"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    traceId: z.string().min(1),
+    delta: z.string(),
+    timestamp: z.string(),
+  }),
+});
+
+export const AgentToolCallStartEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("agent.tool_call_start"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    traceId: z.string().min(1),
+    callId: z.string(),
+    name: z.string(),
+    timestamp: z.string(),
+  }),
+});
+
+export const AgentToolCallEndEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("agent.tool_call_end"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    traceId: z.string().min(1),
+    callId: z.string(),
+    name: z.string(),
+    ok: z.boolean(),
+    error: z.string().optional(),
+    timestamp: z.string(),
+  }),
+});
+
 export const EventSchema = z.discriminatedUnion("event", [
   PluginInstalledEventSchema,
   PluginUninstalledEventSchema,
@@ -109,6 +146,9 @@ export const EventSchema = z.discriminatedUnion("event", [
   PluginStateChangedEventSchema,
   ToolCallCompletedEventSchema,
   AgentTextDeltaEventSchema,
+  AgentReasoningDeltaEventSchema,
+  AgentToolCallStartEventSchema,
+  AgentToolCallEndEventSchema,
 ]);
 
 export type PluginInstalledEvent = z.infer<typeof PluginInstalledEventSchema>;
@@ -119,4 +159,7 @@ export type PluginCrashedEvent = z.infer<typeof PluginCrashedEventSchema>;
 export type PluginStateChangedEvent = z.infer<typeof PluginStateChangedEventSchema>;
 export type ToolCallCompletedEvent = z.infer<typeof ToolCallCompletedEventSchema>;
 export type AgentTextDeltaEvent = z.infer<typeof AgentTextDeltaEventSchema>;
+export type AgentReasoningDeltaEvent = z.infer<typeof AgentReasoningDeltaEventSchema>;
+export type AgentToolCallStartEvent = z.infer<typeof AgentToolCallStartEventSchema>;
+export type AgentToolCallEndEvent = z.infer<typeof AgentToolCallEndEventSchema>;
 export type ParsedEvent = z.infer<typeof EventSchema>;

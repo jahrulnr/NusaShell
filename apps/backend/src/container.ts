@@ -46,6 +46,9 @@ import {
   CancelAgentTurnHandler,
   AgentTurnCoordinator,
   createAgentTextDeltaEvent,
+  createAgentReasoningDeltaEvent,
+  createAgentToolCallStartEvent,
+  createAgentToolCallEndEvent,
   type AgentProvider,
   SystemPingHandler,
   SystemVersionHandler,
@@ -227,12 +230,21 @@ export function createContainer(options: ContainerOptions): Container {
     (traceId, delta) => {
       void eventDispatcher.publish(createAgentTextDeltaEvent(traceId, delta));
     },
+    (traceId, delta) => {
+      void eventDispatcher.publish(createAgentReasoningDeltaEvent(traceId, delta));
+    },
+    (traceId, call) => {
+      void eventDispatcher.publish(createAgentToolCallStartEvent(traceId, call));
+    },
+    (traceId, execution) => {
+      void eventDispatcher.publish(createAgentToolCallEndEvent(traceId, execution));
+    },
     promptLoader,
   ));
   commandBus.register("cancel-agent-turn", new CancelAgentTurnHandler(agentTurnCoordinator));
   if (pluginInstaller) {
     commandBus.register("install-plugin", new InstallPluginHandler(pluginInstaller, eventDispatcher, clock));
-    commandBus.register("uninstall-plugin", new UninstallPluginHandler(pluginInstaller, eventDispatcher, clock));
+    commandBus.register("uninstall-plugin", new UninstallPluginHandler(pluginInstaller, runtimeManager, pluginRepository, eventDispatcher, clock));
   }
 
   const queryBus = new QueryBus();

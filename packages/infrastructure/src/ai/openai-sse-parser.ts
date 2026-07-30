@@ -11,6 +11,7 @@ export async function parseOpenAiSse(
   response: Response,
   api: "chat" | "responses",
   onTextDelta: ((delta: string) => void) | undefined,
+  onReasoningDelta: ((delta: string) => void) | undefined,
   maxBytes: number,
 ): Promise<unknown> {
   if (!response.body) throw new SseTransportError("SSE response has no body");
@@ -20,8 +21,8 @@ export async function parseOpenAiSse(
   let bytes = 0;
   let completed = false;
   let finalPayload: unknown;
-  const chat = new ChatAccumulator(onTextDelta);
-  const responses = new ResponsesAccumulator(onTextDelta);
+  const chat = new ChatAccumulator(onTextDelta, onReasoningDelta);
+  const responses = new ResponsesAccumulator(onTextDelta, onReasoningDelta);
   const acceptBlock = (block: string) => {
     const data = block.split(/\r?\n/)
       .filter((line) => line.startsWith("data:"))
@@ -78,7 +79,10 @@ class ChatAccumulator {
   private readonly tools = new Map<number, { id: string; name: string; arguments: string }>();
   completed = false;
 
-  constructor(private readonly onTextDelta?: (delta: string) => void) {}
+  constructor(
+    private readonly onTextDelta?: (delta: string) => void,
+    private readonly onReasoningDelta?: (delta: string) => void,
+  ) {}
 
   accept(value: unknown): void {
     const event = record(value);
@@ -93,7 +97,11 @@ class ChatAccumulator {
         this.text += text;
         this.onTextDelta?.(text);
       }
-      this.reasoning += textValue(delta.reasoning_content) || textValue(delta.reasoning) || textValue(delta.thinking);
+      const reasoningDelta = textValue(delta.reasoning_content) || textValue(delta.reasoning) || textValue(delta.thinking);
+      if (reasoningDelta) {
+        this.reasoning += reasoningDelta;
+        this.onReasoningDelta?.(reasoningDelta);
+      }
       for (const rawTool of Array.isArray(delta.tool_calls) ? delta.tool_calls : []) {
         const tool = record(rawTool);
         const index = numberValue(tool.index);
@@ -139,7 +147,10 @@ class ResponsesAccumulator {
   private usage: unknown;
   private readonly calls = new Map<string, { id: string; name: string; arguments: string }>();
 
-  constructor(private readonly onTextDelta?: (delta: string) => void) {}
+  constructor(
+    private readonly onTextDelta?: (delta: string) => void,
+    private readonly onReasoningDelta?: (delta: string) => void,
+  ) {}
 
   accept(value: unknown): { completed: boolean; finalPayload?: unknown } {
     const event = record(value);
@@ -160,7 +171,9 @@ class ResponsesAccumulator {
       if (delta) this.onTextDelta?.(delta);
     }
     if (type === "response.reasoning_summary_text.delta" || type === "response.reasoning_text.delta") {
-      this.reasoning += textValue(event.delta);
+      const delta = textValue(event.delta);
+      this.reasoning += delta;
+      if (delta) this.onReasoningDelta?.(delta);
     }
     if (type === "response.reasoning_summary_text.done" && !this.reasoning) this.reasoning = textValue(event.text);
     const item = record(event.item);

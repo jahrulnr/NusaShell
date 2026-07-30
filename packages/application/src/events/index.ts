@@ -2,3 +2,9 @@ export type { ApplicationEvent, EventHandler, EventHandlerFn } from "./event-dis
 export { EventDispatcher } from "./event-dispatcher.js";
 export type { AgentTextDeltaEvent } from "./agent-text-delta.event.js";
 export { createAgentTextDeltaEvent } from "./agent-text-delta.event.js";
+export type { AgentReasoningDeltaEvent } from "./agent-reasoning-delta.event.js";
+export { createAgentReasoningDeltaEvent } from "./agent-reasoning-delta.event.js";
+export type { AgentToolCallStartEvent } from "./agent-tool-call-start.event.js";
+export { createAgentToolCallStartEvent } from "./agent-tool-call-start.event.js";
+export type { AgentToolCallEndEvent } from "./agent-tool-call-end.event.js";
+export { createAgentToolCallEndEvent } from "./agent-tool-call-end.event.js";

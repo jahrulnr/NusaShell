@@ -63,7 +63,10 @@ export type EventType =
   | "plugin.crashed"
   | "plugin.state_changed"
   | "tool.call_completed"
-  | "agent.text_delta";
+  | "agent.text_delta"
+  | "agent.reasoning_delta"
+  | "agent.tool_call_start"
+  | "agent.tool_call_end";
 
 export interface EventEnvelope<TPayload = unknown> {
   readonly kind: "event";

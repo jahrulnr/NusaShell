@@ -52,6 +52,7 @@ export interface AgentProviderRequest {
   readonly modelCapabilities?: AgentModelCapabilities;
   readonly signal?: AbortSignal;
   readonly onTextDelta?: (delta: string) => void;
+  readonly onReasoningDelta?: (delta: string) => void;
   /** Router-owned global HTTP-attempt budget. Providers consume before I/O. */
   readonly consumeAttempt?: () => boolean;
 }

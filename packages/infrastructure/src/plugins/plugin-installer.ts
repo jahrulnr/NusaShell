@@ -10,6 +10,7 @@ import { ManifestSchema } from "@nusashell/contracts";
 import type { Logger } from "pino";
 import AdmZip from "adm-zip";
 import * as tar from "tar";
+import { scanPluginDirectories, resolveManifestPath } from "./plugin-directory-layout.js";
 
 export class PluginInstaller implements PluginInstallerPort {
   constructor(
@@ -58,13 +59,31 @@ export class PluginInstaller implements PluginInstallerPort {
   }
 
   async uninstall(pluginId: string): Promise<void> {
-    const pluginDir = join(this.pluginsRoot, pluginId);
-    const exists = await access(pluginDir).then(() => true).catch(() => false);
-    if (!exists) {
-      throw new Error(`Plugin directory not found: ${pluginDir}`);
-    }
+    const pluginDir = await this.resolvePluginDir(pluginId);
     this.logger?.info({ pluginId, pluginDir }, "Uninstalling plugin");
     await rm(pluginDir, { recursive: true, force: true });
+  }
+
+  private async resolvePluginDir(pluginId: string): Promise<string> {
+    const directPath = join(this.pluginsRoot, pluginId);
+    const directExists = await access(directPath).then(() => true).catch(() => false);
+    if (directExists) return directPath;
+
+    const dirs = await scanPluginDirectories(this.pluginsRoot);
+    for (const dir of dirs) {
+      try {
+        const raw = await readFile(resolveManifestPath(dir.path), "utf-8");
+        const parsed: unknown = JSON.parse(raw);
+        const result = ManifestSchema.safeParse(parsed);
+        if (result.success && result.data.id === pluginId) {
+          return dir.path;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    throw new Error(`Plugin directory not found for id: ${pluginId}`);
   }
 
   private async installFromArchive(archivePath: string, workDir: string): Promise<{ installPath: string; pluginId: string; version: string }> {

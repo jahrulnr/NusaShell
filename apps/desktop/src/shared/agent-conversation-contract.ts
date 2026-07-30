@@ -7,6 +7,18 @@ export type AgentConversationAttachment =
   | (AgentConversationAttachmentBase & { readonly type: "image" | "file"; readonly dataUrl: string })
   | (AgentConversationAttachmentBase & { readonly type: "text"; readonly content: string });
 
+export interface AgentConversationToolCall {
+  readonly id: string;
+  readonly name: string;
+  readonly ok: boolean;
+  readonly error?: string;
+}
+
+export type AgentConversationStep =
+  | { readonly type: "reasoning"; readonly content: string }
+  | { readonly type: "tool_calls"; readonly calls: readonly AgentConversationToolCall[] }
+  | { readonly type: "text"; readonly content: string };
+
 export interface AgentConversationMessage {
   readonly role: "user" | "assistant";
   readonly content: string;
@@ -16,12 +28,8 @@ export interface AgentConversationMessage {
   readonly model?: string;
   readonly rounds?: number;
   readonly reasoning?: string;
-  readonly toolCalls?: readonly {
-    readonly id: string;
-    readonly name: string;
-    readonly ok: boolean;
-    readonly error?: string;
-  }[];
+  readonly toolCalls?: readonly AgentConversationToolCall[];
+  readonly steps?: readonly AgentConversationStep[];
 }
 
 export interface AgentConversationCheckpoint {

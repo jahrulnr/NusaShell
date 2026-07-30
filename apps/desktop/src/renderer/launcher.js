@@ -367,11 +367,27 @@ async function setPluginAutostart(pluginId, autostart) {
 async function runAgentTurn(messages, options = {}) {
   const selected = aiSettings.models.find((model) => model.key === aiSettings.activeModelKey);
   if (!selected) throw new Error("Choose an imported AI model before sending a turn.");
-  const dispose = options.onDelta
-    ? onEvent("agent.text_delta", (payload) => {
+  const disposers = [];
+  if (options.onDelta) {
+    disposers.push(onEvent("agent.text_delta", (payload) => {
       if (payload?.traceId === options.traceId && payload.delta) options.onDelta(payload.delta);
-    })
-    : () => {};
+    }));
+  }
+  if (options.onReasoningDelta) {
+    disposers.push(onEvent("agent.reasoning_delta", (payload) => {
+      if (payload?.traceId === options.traceId && payload.delta) options.onReasoningDelta(payload.delta);
+    }));
+  }
+  if (options.onToolCallStart) {
+    disposers.push(onEvent("agent.tool_call_start", (payload) => {
+      if (payload?.traceId === options.traceId) options.onToolCallStart(payload);
+    }));
+  }
+  if (options.onToolCallEnd) {
+    disposers.push(onEvent("agent.tool_call_end", (payload) => {
+      if (payload?.traceId === options.traceId) options.onToolCallEnd(payload);
+    }));
+  }
   try {
     return await sendRequest("agent.run", {
       messages,
@@ -395,7 +411,7 @@ async function runAgentTurn(messages, options = {}) {
       ...(options.traceId ? { traceId: options.traceId } : {}),
     }, 300000);
   } finally {
-    dispose();
+    disposers.forEach((dispose) => dispose());
   }
 }
 

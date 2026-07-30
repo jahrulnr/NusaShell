@@ -10,8 +10,14 @@ export {
 export {
   EventDispatcher,
   createAgentTextDeltaEvent,
+  createAgentReasoningDeltaEvent,
+  createAgentToolCallStartEvent,
+  createAgentToolCallEndEvent,
   type ApplicationEvent,
   type AgentTextDeltaEvent,
+  type AgentReasoningDeltaEvent,
+  type AgentToolCallStartEvent,
+  type AgentToolCallEndEvent,
   type EventHandler,
   type EventHandlerFn,
 } from "./events/index.js";
