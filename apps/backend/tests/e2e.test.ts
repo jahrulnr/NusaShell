@@ -5,7 +5,7 @@ import { createContainer } from "../src/container.js";
 import { NusaClient } from "@nusashell/plugin-sdk";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PLUGINS_ROOT = resolve(__dirname, "../../../plugins/examples");
+const PLUGINS_ROOT = resolve(__dirname, "../../../plugins");
 const PORT = 9140;
 
 describe("E2E: notes plugin", () => {

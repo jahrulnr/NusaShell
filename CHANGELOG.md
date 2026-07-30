@@ -44,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fallback glyph, and Mail uses its dedicated launcher artwork inside the
   same icon plate as other plugins.
 - Packaged desktop artifacts now preserve the expected
-  `resources/plugins/examples` layout, so bundled plugins and their local
+  `resources/plugins` layout, so bundled plugins and their local
   artwork remain discoverable outside development.
 - Mail account rows now expose an explicit edit action with account deletion
   available in the editor, and Gmail setup and authentication failures direct
@@ -106,8 +106,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Notes example MCP server (`plugins/examples/notes/mcp/server.js`) now persists notes to `notes.json` in the plugin directory and restores them on startup, so notes created by the agent survive process restarts and plugin window closes.
-- Notes plugin UI (`plugins/examples/notes/ui/index.html`) now correctly unwraps `window.shell.callTool` results whether the backend returns a raw content array, a `CallToolResult` wrapper, or a nested `result.content` object.
+- Notes built-in MCP server (`plugins/notes/mcp/server.js`) now persists notes to `notes.json` in the plugin directory and restores them on startup, so notes created by the agent survive process restarts and plugin window closes.
+- Notes plugin UI (`plugins/notes/ui/index.html`) now correctly unwraps `window.shell.callTool` results whether the backend returns a raw content array, a `CallToolResult` wrapper, or a nested `result.content` object.
 
 ## [0.0.27] - 2026-07-29
 
@@ -483,7 +483,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `plugins/examples/notes/`: example notes plugin using official MCP SDK
+- `plugins/notes/`: built-in notes plugin using official MCP SDK
   - `manifest.json` with `command: "node", args: ["mcp/server.js"]`
   - `mcp/server.js`: MCP server with `createNote` and `listNotes` tools (in-memory)
   - `ui/index.html`: placeholder UI
@@ -501,7 +501,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `StdioMcpClient`: implements `onClose` (via `StdioClientTransport.onclose`) and `pid` getter; accepts `cwd` parameter
 - `PluginView`: enriched with `name`, `version`, `enabled` from manifest
 - `ListPluginsHandler`: returns actual plugin name/version/enabled from manifest instead of placeholder values
-- `pnpm-workspace.yaml`: includes `plugins/examples/*`
+- `pnpm-workspace.yaml`: includes `plugins/*`
 
 ### Notes
 

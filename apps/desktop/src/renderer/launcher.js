@@ -476,7 +476,7 @@ function renderAppGrid() {
   const grid = $("#app-grid");
   grid.innerHTML = "";
   if (plugins.length === 0) {
-    grid.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:20px 0">No plugins installed. Add a plugin folder to plugins/examples/.</div>';
+    grid.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:20px 0">No plugins installed. Add a plugin folder to plugins/.</div>';
     return;
   }
   const visiblePlugins = filterLauncherPlugins(plugins, launcherSearchQuery);

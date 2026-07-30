@@ -1,7 +1,7 @@
 # NusaShell Mail — Read-only Implementation
 
 Status: Implemented first milestone  
-Plugin: `plugins/examples/mail`  
+Plugin: `plugins/mail`  
 Target specification: `docs/mcp/nusashell-mail-mcp-plugin-spec.md`
 
 ## Scope
@@ -57,7 +57,7 @@ The service separation and mail behavior were adapted from
 [`codefuturist/email-mcp`](https://github.com/codefuturist/email-mcp) at
 revision `99ce431aa81dd4cafc2879bd35b6ee3acd0f2d74`. The pinned source,
 upstream license, and adaptation notes live in
-`plugins/examples/mail/UPSTREAM.md`, `LICENSE.upstream`, and
+`plugins/mail/UPSTREAM.md`, `LICENSE.upstream`, and
 `THIRD_PARTY_NOTICES.md`.
 
 NusaShell's UI, broker integration, account IPC contract, credential store,
@@ -82,7 +82,7 @@ pnpm --filter @nusashell/example-mail build
 ```
 
 The browser-only fixture at
-`plugins/examples/mail/tests/browser-harness.html` supplies non-secret fake
+`plugins/mail/tests/browser-harness.html` supplies non-secret fake
 data for responsive and accessibility checks. It is not used by the packaged
 plugin.
 

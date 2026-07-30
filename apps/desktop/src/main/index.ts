@@ -97,8 +97,8 @@ async function startBackend(): Promise<BootstrapResult> {
   const runtimeRoot = getRuntimeRoot();
   const dataRoot = getDataRoot();
   const pluginsRoot = app.isPackaged
-    ? resolve(process.resourcesPath, "plugins", "examples")
-    : resolve(__dirname, "..", "..", "..", "..", "plugins", "examples");
+    ? resolve(process.resourcesPath, "plugins")
+    : resolve(__dirname, "..", "..", "..", "..", "plugins");
   const promptsRoot = resolve(runtimeRoot, "resources", "agent", "prompts");
   const docsRoot = resolve(runtimeRoot, "resources", "agent", "docs");
   const docsIndexStorageRoot = resolve(dataRoot, ".nusashell", "agent", "docs-index");

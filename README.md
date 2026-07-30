@@ -142,7 +142,7 @@ const result = await window.shell.callTool("myTool", { some: "args" });
 NusaShell takes care of spawning your MCP process, routing the call, and
 matching the response back to the right request.
 
-The bundled examples under `plugins/examples/` include Notes and a read-only
+The built-in plugins under `plugins/` include Notes and a read-only
 Mail client. Mail demonstrates a larger plugin surface, multi-account
 host-owned settings, and runtime-only credential delivery to an MCP process.
 
@@ -213,7 +213,7 @@ and infrastructure are next.
     └── ui-design/             # launcher visual sketch
 ```
 
-Further monorepo pieces (`plugins/examples/`, full apps) are specified in
+Further monorepo pieces (`plugins/`, full apps) are specified in
 [`docs/backend-structure.md`](./docs/backend-structure.md) §2 and land in later milestones.
 
 ## License
