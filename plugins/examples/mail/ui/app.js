@@ -86,6 +86,7 @@ const elements = Object.fromEntries([
 
 function parseToolResult(result) {
   if (result?.structuredContent) return result.structuredContent;
+  if (result?.result != null && !Array.isArray(result?.result)) return result.result;
   const containers = [
     result?.content,
     result?.result?.content,

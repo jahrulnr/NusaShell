@@ -43,6 +43,10 @@ async function callTool(name, args = {}) {
   // form so a host-side transport refactor cannot turn a healthy MCP response
   // into an undefined renderer value.
   const value = result?.structuredContent ?? result?.data ?? result?.result ?? result;
+  if (Array.isArray(value) && value.some((p) => p?.type === "text")) {
+    const text = value.find((p) => p?.type === "text")?.text;
+    if (typeof text === "string") { try { return JSON.parse(text); } catch { return text; } }
+  }
   if (value?.content && !value?.items && !value?.tree && !value?.results && !value?.path) {
     const text = value.content.find((part) => part?.type === "text")?.text;
     if (typeof text === "string") {

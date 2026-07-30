@@ -3,9 +3,13 @@ export function unwrapMcpToolResult(result: unknown): unknown {
   const toolResult = result as {
     readonly content?: unknown;
     readonly isError?: boolean;
+    readonly structuredContent?: unknown;
   };
   if (toolResult.isError) {
     throw new Error(toolErrorMessage(toolResult.content));
+  }
+  if (toolResult.structuredContent !== undefined) {
+    return toolResult.structuredContent;
   }
   return toolResult.content;
 }
