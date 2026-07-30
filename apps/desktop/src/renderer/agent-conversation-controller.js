@@ -116,29 +116,25 @@ export class AgentConversationController {
         toolCards: new Map(),
         textBubble: pending?.querySelector(".agent-bubble"),
         streamedText: "",
-        sawToolCallEnd: false,
       };
       const result = await this.runTurn(buildAgentContext(this.conversation), {
         traceId: this.activeTraceId,
         onDelta: (delta) => {
           streamState.streamedText += delta;
-          if (streamState.textBubble) streamState.textBubble.textContent = streamState.streamedText;
+          if (streamState.textBubble) streamState.textBubble.innerHTML = renderAssistantMarkdown(streamState.streamedText);
         },
         onReasoningDelta: (delta) => {
-          if (streamState.reasoningEl && streamState.sawToolCallEnd) {
-            streamState.reasoningEl = null;
-            streamState.reasoningText = "";
-            streamState.sawToolCallEnd = false;
-          }
           streamState.reasoningText += delta;
           if (!streamState.reasoningEl) {
             streamState.reasoningEl = this.createStreamingReasoningBlock();
             streamState.textBubble?.before(streamState.reasoningEl);
           }
           const content = streamState.reasoningEl.querySelector(".agent-reasoning-content");
-          if (content) content.textContent = streamState.reasoningText;
+          if (content) content.innerHTML = renderReasoningMarkdown(streamState.reasoningText);
         },
         onToolCallStart: (payload) => {
+          streamState.reasoningEl = null;
+          streamState.reasoningText = "";
           const card = this.createStreamingToolCard(payload.callId, payload.name);
           streamState.toolCards.set(payload.callId, card);
           streamState.textBubble?.before(card);
@@ -146,7 +142,6 @@ export class AgentConversationController {
         onToolCallEnd: (payload) => {
           const card = streamState.toolCards.get(payload.callId);
           if (card) this.updateStreamingToolCard(card, payload);
-          streamState.sawToolCallEnd = true;
         },
       });
       retryIsSafe = false;
@@ -535,7 +530,7 @@ export class AgentConversationController {
   toolActivity(toolCalls) {
     const activity = document.createElement("details");
     activity.className = "agent-activity";
-    activity.open = toolCalls.length <= 6 || toolCalls.some((call) => !call.ok);
+    activity.open = false;
     const summary = document.createElement("summary");
     const activitySummary = describeToolActivity(toolCalls);
     summary.append(
@@ -585,12 +580,12 @@ export class AgentConversationController {
   createStreamingReasoningBlock() {
     const disclosure = document.createElement("details");
     disclosure.className = "agent-reasoning";
-    disclosure.open = true;
+    disclosure.open = false;
     const summary = document.createElement("summary");
     summary.append(
       element("span", "agent-reasoning-mark", "⌁"),
       element("span", "agent-reasoning-title", "Thinking"),
-      element("span", "agent-reasoning-hint", "Hide reasoning"),
+      element("span", "agent-reasoning-hint", "Show reasoning"),
       element("span", "agent-reasoning-chevron", "⌄"),
     );
     const content = element("div", "agent-reasoning-content");

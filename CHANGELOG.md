@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.34] - 2026-07-31
+
+### Added
+
+- Untrusted tool output wrapping: MCP tool results (prefix `mcp_`) are now
+  wrapped in `<untrusted_tool_result>` delimiters before being fed back to the
+  model. This is an architectural defense against indirect prompt injection
+  from file contents, search results, or other external data — the model is
+  told the content is data, not instructions. Embedded delimiter tokens are
+  neutralized so attacker content cannot break out of the wrapper.
+
+### Changed
+
+- Agent UI streaming: markdown is now rendered progressively as deltas arrive,
+  instead of showing raw markdown text during streaming and only rendering on
+  completion.
+- Agent system prompt now documents the `<untrusted_tool_result>` delimiter
+  convention so the model understands the trust boundary.
+
 ## [0.0.33] - 2026-07-31
 
 ### Added
