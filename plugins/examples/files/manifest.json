@@ -2,7 +2,7 @@
   "id": "nusashell.files",
   "name": "Files",
   "version": "0.1.0",
-  "icon": "file://icon.png",
+  "icon": "📂",
   "ui": {
     "entry": "ui/index.html",
     "window": {
