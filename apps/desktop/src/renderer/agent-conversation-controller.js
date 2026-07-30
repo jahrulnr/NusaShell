@@ -1,12 +1,17 @@
 import {
   buildAgentContext,
   composerTextareaSize,
-  describeToolActivity,
   formatMessageTimestamp,
+  formatToolOutput,
+  formatToolTerminalInput,
   mergeCompactionCheckpoint,
   renderAssistantMarkdown,
   renderReasoningMarkdown,
+  renderToolCodeHtml,
+  sanitizeAssistantSteps,
   searchConversations,
+  summarizeToolArgs,
+  toConversationToolCall,
 } from "./agent-conversation-ui.js";
 import { estimateContextTokens, formatContextUsage } from "./ai-model-ui.js";
 import { inspectAttachmentContent, toDataUrl } from "./attachment-content.js";
@@ -66,6 +71,8 @@ export class AgentConversationController {
     this.conversation = await this.shell.agentConversations.create();
     this.activeId = this.conversation.id;
     this.renderThread();
+    this.updateWorkspaceLabel();
+    this.updateContextStatus();
     await this.refresh();
     $("#agent-input")?.focus();
   }
@@ -109,44 +116,78 @@ export class AgentConversationController {
 
       pending = this.createStreamingMessage();
       selectedModel = this.getActiveModel();
-      status.textContent = selectedModel ? formatContextUsage(estimateContextTokens(buildAgentContext(this.conversation)), selectedModel.contextWindow) : "Choose a model";
+      const baseTokens = estimateContextTokens(buildAgentContext(this.conversation));
+      let liveTokens = baseTokens;
+      const setContextStatus = (tokens) => {
+        liveTokens = Math.max(liveTokens, tokens);
+        if (selectedModel) status.textContent = formatContextUsage(liveTokens, selectedModel.contextWindow);
+      };
+      setContextStatus(baseTokens);
       const streamState = {
+        message: pending,
+        lastKind: null,
         reasoningEl: null,
         reasoningText: "",
         toolCards: new Map(),
-        textBubble: pending?.querySelector(".agent-bubble"),
+        textBubble: null,
         streamedText: "",
+      };
+      const appendStreamChild = (node) => {
+        streamState.message?.appendChild(node);
+        this.scrollToBottom();
       };
       const result = await this.runTurn(buildAgentContext(this.conversation), {
         traceId: this.activeTraceId,
+        workspace: this.conversation?.workspace,
         onDelta: (delta) => {
+          // Append in arrival order. A new text segment starts after reasoning/tools.
+          if (streamState.lastKind !== "text") {
+            streamState.textBubble = element("div", "agent-bubble");
+            streamState.streamedText = "";
+            appendStreamChild(streamState.textBubble);
+            streamState.lastKind = "text";
+          }
           streamState.streamedText += delta;
-          if (streamState.textBubble) streamState.textBubble.innerHTML = renderAssistantMarkdown(streamState.streamedText);
+          if (streamState.textBubble) {
+            streamState.textBubble.innerHTML = renderAssistantMarkdown(streamState.streamedText);
+          }
+          setContextStatus(liveTokens + Math.ceil(delta.length / 4));
         },
         onReasoningDelta: (delta) => {
-          streamState.reasoningText += delta;
-          if (!streamState.reasoningEl) {
+          if (streamState.lastKind !== "reasoning") {
             streamState.reasoningEl = this.createStreamingReasoningBlock();
-            streamState.textBubble?.before(streamState.reasoningEl);
+            streamState.reasoningText = "";
+            appendStreamChild(streamState.reasoningEl);
+            streamState.lastKind = "reasoning";
           }
-          const content = streamState.reasoningEl.querySelector(".agent-reasoning-content");
+          streamState.reasoningText += delta;
+          const content = streamState.reasoningEl?.querySelector(".agent-reasoning-content");
           if (content) content.innerHTML = renderReasoningMarkdown(streamState.reasoningText);
+          setContextStatus(liveTokens + Math.ceil(delta.length / 4));
         },
         onToolCallStart: (payload) => {
-          streamState.reasoningEl = null;
-          streamState.reasoningText = "";
-          const card = this.createStreamingToolCard(payload.callId, payload.name);
+          streamState.lastKind = "tool";
+          const card = this.createStreamingToolCard(payload.callId, payload.name, payload.args);
           streamState.toolCards.set(payload.callId, card);
-          streamState.textBubble?.before(card);
+          appendStreamChild(card);
         },
         onToolCallEnd: (payload) => {
           const card = streamState.toolCards.get(payload.callId);
           if (card) this.updateStreamingToolCard(card, payload);
         },
+        onContextUpdate: (payload) => {
+          const fromUsage = Number(payload?.inputTokens) || 0;
+          const estimated = Number(payload?.estimatedTokens) || 0;
+          setContextStatus(Math.max(fromUsage, estimated));
+        },
       });
       retryIsSafe = false;
 
       try {
+        const toolCalls = Array.isArray(result.toolCalls)
+          ? result.toolCalls.map(toConversationToolCall)
+          : undefined;
+        const steps = sanitizeAssistantSteps(result.steps);
         this.conversation = await this.shell.agentConversations.append(this.conversation.id, {
           role: "assistant",
           content: result.text,
@@ -154,8 +195,8 @@ export class AgentConversationController {
           model: result.model,
           rounds: result.rounds,
           reasoning: result.reasoning,
-          toolCalls: result.toolCalls,
-          ...(result.steps ? { steps: result.steps } : {}),
+          ...(toolCalls?.length ? { toolCalls } : {}),
+          ...(steps?.length ? { steps } : {}),
         });
       } catch (error) {
         this.sealStreamingMessage(pending, result);
@@ -179,7 +220,13 @@ export class AgentConversationController {
       const savedMessage = this.conversation.messages.at(-1);
       this.sealStreamingMessage(pending, savedMessage ?? result);
       await this.refresh();
-      status.textContent = selectedModel ? formatContextUsage(estimateContextTokens(buildAgentContext(this.conversation)), selectedModel.contextWindow) : "Choose a model";
+      const finalTokens = Math.max(
+        liveTokens,
+        estimateContextTokens(buildAgentContext(this.conversation)),
+        estimateContextTokens(this.conversation?.messages || []),
+        Number(result.usage?.inputTokens) || 0,
+      );
+      status.textContent = selectedModel ? formatContextUsage(finalTokens, selectedModel.contextWindow) : "Choose a model";
       this.log("info", `Agent turn completed trace=${result.traceId} rounds=${result.rounds}`);
     } catch (error) {
       pending?.remove();
@@ -241,6 +288,7 @@ export class AgentConversationController {
     $("#agent-delete-close").addEventListener("click", () => this.closeDeleteDialog());
     $("#agent-delete-cancel").addEventListener("click", () => this.closeDeleteDialog());
     $("#agent-delete-confirm").addEventListener("click", () => this.runUiAction(this.deletePending(), "Could not delete conversation"));
+    $("#agent-workspace-btn").addEventListener("click", () => this.runUiAction(this.chooseWorkspace(), "Could not choose workspace"));
   }
 
   async addAttachments(fileList) {
@@ -349,13 +397,42 @@ export class AgentConversationController {
     this.renderThread();
     this.renderList();
     this.updateContextStatus();
+    this.updateWorkspaceLabel();
+  }
+
+  updateWorkspaceLabel() {
+    const label = $("#agent-workspace-label");
+    if (!label) return;
+    const ws = this.conversation?.workspace;
+    label.textContent = ws ? ws.split("/").pop() || ws : "Home";
+    const btn = $("#agent-workspace-btn");
+    if (btn) btn.title = ws || "Home (user home directory)";
+  }
+
+  async chooseWorkspace() {
+    if (!this.conversation) return;
+    const picked = await this.shell.shellControls.pickPluginSource("directory");
+    if (!picked) return;
+    this.conversation = await this.shell.agentConversations.setWorkspace(this.conversation.id, picked);
+    this.updateWorkspaceLabel();
   }
 
   updateContextStatus() {
     const status = $("#agent-provider-status");
     const selectedModel = this.getActiveModel();
-    if (!status || !selectedModel) return;
-    status.textContent = formatContextUsage(estimateContextTokens(buildAgentContext(this.conversation)), selectedModel.contextWindow);
+    if (!status) return;
+    if (!selectedModel) {
+      status.textContent = "Choose a model";
+      return;
+    }
+    // Prefer the richer of provider-bound context vs full thread (steps/tools),
+    // so loading a chat or finishing a turn does not collapse to 0/tiny counts.
+    const providerTokens = estimateContextTokens(buildAgentContext(this.conversation));
+    const threadTokens = estimateContextTokens(this.conversation?.messages || []);
+    status.textContent = formatContextUsage(
+      Math.max(providerTokens, threadTokens),
+      selectedModel.contextWindow,
+    );
   }
 
   conversationRow(conversation) {
@@ -528,35 +605,54 @@ export class AgentConversationController {
   }
 
   toolActivity(toolCalls) {
-    const activity = document.createElement("details");
-    activity.className = "agent-activity";
-    activity.open = false;
+    const stack = element("div", "agent-tool-stack");
+    toolCalls.forEach((toolCall) => {
+      stack.appendChild(this.toolTerminal(toolCall));
+    });
+    return stack;
+  }
+
+  toolTerminal(toolCall, { open = false, running = false } = {}) {
+    const terminal = document.createElement("details");
+    terminal.className = `agent-tool-terminal${running ? " is-running" : toolCall.ok === false ? " is-error" : " is-success"}`;
+    terminal.open = open;
+    if (toolCall.id) terminal.dataset.callId = toolCall.id;
+
     const summary = document.createElement("summary");
-    const activitySummary = describeToolActivity(toolCalls);
+    const meta = summarizeToolArgs(toolCall.args);
     summary.append(
-      element("span", "agent-activity-terminal", "›_"),
-      element("span", "agent-activity-title", activitySummary.label),
+      element("span", "agent-tool-terminal-prompt", "›_"),
+      element("span", "agent-tool-terminal-title", toolCall.name || "tool"),
       element(
         "span",
-        `agent-activity-status${activitySummary.failed ? " has-errors" : ""}`,
-        activitySummary.failed
-          ? `${activitySummary.succeeded} complete · ${activitySummary.failed} failed`
-          : "Completed",
+        "agent-tool-terminal-meta",
+        running ? "Running" : meta || (toolCall.ok === false ? "Failed" : "Completed"),
       ),
-      element("span", "agent-activity-chevron", "⌄"),
+      element("span", "agent-tool-terminal-chevron", "⌄"),
     );
-    const list = element("ol", "agent-activity-list");
-    toolCalls.forEach((toolCall) => {
-      const item = element("li", `agent-activity-item ${toolCall.ok ? "is-success" : "is-error"}`);
-      const state = element("span", "agent-activity-state", toolCall.ok ? "✓" : "!");
-      const copy = element("div", "agent-activity-copy");
-      copy.appendChild(element("code", "agent-activity-name", toolCall.name));
-      if (toolCall.error) copy.appendChild(element("span", "agent-activity-error", toolCall.error));
-      item.append(state, copy);
-      list.appendChild(item);
-    });
-    activity.append(summary, list);
-    return activity;
+
+    const body = element("div", "agent-tool-terminal-body");
+
+    const callPanel = element("div", "agent-tool-terminal-panel");
+    callPanel.appendChild(element("div", "agent-tool-terminal-panel-label", "tool"));
+    const input = element("pre", "agent-tool-terminal-input");
+    input.innerHTML = renderToolCodeHtml(formatToolTerminalInput(toolCall.name || "tool", toolCall.args));
+    callPanel.appendChild(input);
+    body.appendChild(callPanel);
+
+    const outputText = toolCall.output
+      || (toolCall.error ? toolCall.error : "")
+      || (toolCall.result !== undefined ? formatToolOutput(toolCall.result) : "")
+      || (running ? "…" : toolCall.ok === false ? "Tool failed." : "ok");
+    const outputPanel = element("div", "agent-tool-terminal-panel");
+    outputPanel.appendChild(element("div", "agent-tool-terminal-panel-label", "Output"));
+    const output = element("pre", `agent-tool-terminal-output${toolCall.ok === false ? " is-error" : ""}`);
+    output.innerHTML = renderToolCodeHtml(outputText);
+    outputPanel.appendChild(output);
+    body.appendChild(outputPanel);
+
+    terminal.append(summary, body);
+    return terminal;
   }
 
   createStreamingMessage() {
@@ -571,7 +667,6 @@ export class AgentConversationController {
       element("span", "agent-message-meta", "Working"),
     );
     message.appendChild(identity);
-    message.appendChild(element("div", "agent-bubble"));
     thread.appendChild(message);
     thread.scrollTop = thread.scrollHeight;
     return message;
@@ -593,24 +688,40 @@ export class AgentConversationController {
     return disclosure;
   }
 
-  createStreamingToolCard(callId, name) {
-    const card = element("div", "agent-tool-card is-running");
-    card.dataset.callId = callId;
-    const state = element("span", "agent-tool-card-state", "◌");
-    const copy = element("div", "agent-tool-card-copy");
-    copy.appendChild(element("code", "agent-tool-card-name", name));
-    card.append(state, copy);
+  createStreamingToolCard(callId, name, args) {
+    const card = this.toolTerminal(
+      { id: callId, name, ok: true, args },
+      { open: true, running: true },
+    );
+    if (args && typeof args === "object") card._toolArgs = args;
     return card;
   }
 
   updateStreamingToolCard(card, payload) {
     card.classList.remove("is-running");
-    card.classList.add(payload.ok ? "is-success" : "is-error");
-    const state = card.querySelector(".agent-tool-card-state");
-    if (state) state.textContent = payload.ok ? "✓" : "!";
-    if (payload.error) {
-      const copy = card.querySelector(".agent-tool-card-copy");
-      if (copy) copy.appendChild(element("span", "agent-activity-error", payload.error));
+    card.classList.toggle("is-success", payload.ok !== false);
+    card.classList.toggle("is-error", payload.ok === false);
+    card.open = false;
+    const args = payload.args && typeof payload.args === "object"
+      ? payload.args
+      : card._toolArgs;
+    if (payload.args && typeof payload.args === "object") card._toolArgs = payload.args;
+    const meta = card.querySelector(".agent-tool-terminal-meta");
+    if (meta) {
+      meta.textContent = summarizeToolArgs(args) || (payload.ok === false ? "Failed" : "Completed");
+    }
+    const input = card.querySelector(".agent-tool-terminal-input");
+    if (input) {
+      input.innerHTML = renderToolCodeHtml(formatToolTerminalInput(payload.name || "tool", args));
+    }
+    const output = card.querySelector(".agent-tool-terminal-output");
+    if (output) {
+      output.classList.toggle("is-error", payload.ok === false);
+      output.innerHTML = renderToolCodeHtml(
+        payload.output
+          || payload.error
+          || (payload.ok === false ? "Tool failed." : "ok"),
+      );
     }
   }
 
@@ -622,24 +733,46 @@ export class AgentConversationController {
     const metaLabel = message.querySelector(".agent-message-meta");
     if (metaLabel) metaLabel.textContent = "NusaShell Agent";
 
-    if (!message.querySelector(".agent-reasoning") && meta.reasoning?.trim()) {
-      const disclosure = this.reasoningDisclosure(meta.reasoning);
-      const bubble = message.querySelector(".agent-bubble");
-      if (bubble) bubble.before(disclosure);
-      else message.appendChild(disclosure);
-    }
+    const identity = message.querySelector(".agent-message-identity");
+    if (meta.steps?.length) {
+      [...message.children].forEach((child) => {
+        if (child !== identity) child.remove();
+      });
+      for (const step of meta.steps) {
+        if (step.type === "reasoning" && step.content?.trim()) {
+          message.appendChild(this.reasoningDisclosure(step.content));
+        } else if (step.type === "tool_calls" && step.calls?.length) {
+          message.appendChild(this.toolActivity(step.calls));
+        } else if (step.type === "text" && step.content) {
+          const stepBubble = element("div", "agent-bubble");
+          stepBubble.innerHTML = renderAssistantMarkdown(step.content);
+          message.appendChild(stepBubble);
+        }
+      }
+    } else {
+      if (!message.querySelector(".agent-reasoning") && meta.reasoning?.trim()) {
+        const disclosure = this.reasoningDisclosure(meta.reasoning);
+        const bubble = message.querySelector(".agent-bubble");
+        if (bubble) bubble.before(disclosure);
+        else message.appendChild(disclosure);
+      }
 
-    if (!message.querySelector(".agent-tool-card, .agent-activity") && meta.toolCalls?.length) {
-      const activity = this.toolActivity(meta.toolCalls);
-      const bubble = message.querySelector(".agent-bubble");
-      if (bubble) bubble.before(activity);
-      else message.appendChild(activity);
-    }
+      if (!message.querySelector(".agent-tool-terminal, .agent-tool-stack") && meta.toolCalls?.length) {
+        const activity = this.toolActivity(meta.toolCalls);
+        const bubble = message.querySelector(".agent-bubble");
+        if (bubble) bubble.before(activity);
+        else message.appendChild(activity);
+      }
 
-    const bubble = message.querySelector(".agent-bubble");
-    if (bubble) {
-      const content = bubble.textContent || meta.text || meta.content || "";
-      if (content) bubble.innerHTML = renderAssistantMarkdown(content);
+      const bubble = message.querySelector(".agent-bubble");
+      if (bubble) {
+        const content = bubble.textContent || meta.text || meta.content || "";
+        if (content) bubble.innerHTML = renderAssistantMarkdown(content);
+      } else if (meta.text || meta.content) {
+        const fallback = element("div", "agent-bubble");
+        fallback.innerHTML = renderAssistantMarkdown(meta.text || meta.content || "");
+        message.appendChild(fallback);
+      }
     }
 
     const footer = element("footer", "agent-message-footer");
@@ -654,10 +787,10 @@ export class AgentConversationController {
     if (meta.traceId) footer.appendChild(messageDetail(`trace ${meta.traceId.slice(0, 8)}`));
     const actions = element("div", "agent-message-actions");
     const copy = iconButton("Copy message", copyIcon());
-    copy.addEventListener("click", () => void this.copyMessage(
-      bubble?.textContent || "",
-      copy,
-    ));
+    const copyText = meta.steps?.length
+      ? meta.steps.filter((step) => step.type === "text").map((step) => step.content).join("\n\n")
+      : (message.querySelector(".agent-bubble")?.textContent || meta.text || meta.content || "");
+    copy.addEventListener("click", () => void this.copyMessage(copyText, copy));
     actions.appendChild(copy);
     footer.appendChild(actions);
     message.appendChild(footer);

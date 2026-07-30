@@ -130,7 +130,8 @@ async function startBackend(): Promise<BootstrapResult> {
       model: activeModel?.id,
       baseUrl: activeProvider?.baseUrl || undefined,
       apiKey: activeProvider?.apiKey,
-      maxToolRounds: 50,
+      maxToolRounds: aiSettings.maxToolRounds,
+      maxRepeatedToolCalls: aiSettings.maxRepeatedToolCalls,
       strategy: aiSettings.strategy,
       totalAttemptBudget: aiSettings.totalAttemptBudget,
       stream: aiSettings.stream,
@@ -141,7 +142,13 @@ async function startBackend(): Promise<BootstrapResult> {
         ...aiRuntimeConfig.retry,
         attemptBudget: activeProvider?.maxAttempts ?? aiRuntimeConfig.retry.attemptBudget,
       },
-      context: aiRuntimeConfig.context,
+      context: {
+        compactionEnabled: aiSettings.compactionEnabled,
+        maxInputTokens: aiSettings.maxInputTokens,
+        reserveTokens: aiSettings.reserveTokens,
+        recentTurns: aiSettings.recentTurns,
+        summaryMaxChars: aiSettings.summaryMaxChars,
+      },
     } },
     loggerObserver: ({ level, args }) => {
       const message = formatLogArguments(args);
@@ -295,7 +302,7 @@ app.whenReady().then(async () => {
     aiSettings = await aiSettingsStore.load();
     return result;
   });
-  ipcMain.handle("ai-providers:add-model", async (_event, providerId: string, model: { id: string; label: string }) => {
+  ipcMain.handle("ai-providers:add-model", async (_event, providerId: string, model: { id: string; label: string; contextWindow?: number }) => {
     if (!aiSettingsStore) throw new Error("AI settings are not ready");
     const result = await aiSettingsStore.addModel(providerId, model);
     aiSettings = await aiSettingsStore.load();
@@ -307,7 +314,7 @@ app.whenReady().then(async () => {
     aiSettings = await aiSettingsStore.load();
     return result;
   });
-  ipcMain.handle("ai-providers:update-runtime", async (_event, input: Pick<AiRegistrySettings, "strategy" | "totalAttemptBudget" | "stream" | "vision" | "userPrompt">) => {
+  ipcMain.handle("ai-providers:update-runtime", async (_event, input: Pick<AiRegistrySettings, "strategy" | "totalAttemptBudget" | "stream" | "vision" | "userPrompt" | "maxToolRounds" | "maxRepeatedToolCalls" | "compactionEnabled" | "maxInputTokens" | "reserveTokens" | "recentTurns" | "summaryMaxChars">) => {
     if (!aiSettingsStore || !backend) throw new Error("Backend not ready");
     const result = await aiSettingsStore.updateRuntime(input);
     aiSettings = await aiSettingsStore.load();
@@ -317,6 +324,13 @@ app.whenReady().then(async () => {
       stream: aiSettings.stream,
       vision: aiSettings.vision,
       userPrompt: aiSettings.userPrompt,
+      maxToolRounds: aiSettings.maxToolRounds,
+      maxRepeatedToolCalls: aiSettings.maxRepeatedToolCalls,
+      compactionEnabled: aiSettings.compactionEnabled,
+      maxInputTokens: aiSettings.maxInputTokens,
+      reserveTokens: aiSettings.reserveTokens,
+      recentTurns: aiSettings.recentTurns,
+      summaryMaxChars: aiSettings.summaryMaxChars,
     });
     for (const provider of aiSettings.providers) {
       backend.container.removeAi(provider.id);
@@ -332,6 +346,8 @@ app.whenReady().then(async () => {
   ipcMain.handle("agent-conversations:checkpoint", (_event, id: string, checkpoint: AgentConversationCheckpoint) =>
     requireConversationStore().saveCheckpoint(id, checkpoint));
   ipcMain.handle("agent-conversations:delete", (_event, id: string) => requireConversationStore().delete(id));
+  ipcMain.handle("agent-conversations:set-workspace", (_event, id: string, workspace: string) =>
+    requireConversationStore().setWorkspace(id, workspace));
   ipcMain.on("logs:write", (_event, level: ShellLogLevel, message: string) => {
     if (!shellLogLevels.has(level) || typeof message !== "string") return;
     logTail.add("renderer", level, redactLogMessage(message.slice(0, 4000)));

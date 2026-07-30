@@ -52,7 +52,7 @@ export interface ShellApi {
     importModels(providerId: string): Promise<PublicAiRegistry>;
     addModel(providerId: string, model: { id: string; label: string }): Promise<PublicAiRegistry>;
     select(input: { modelKey?: string; effort?: ReasoningEffort }): Promise<PublicAiRegistry>;
-    updateRuntime(input: Pick<PublicAiRegistry, "strategy" | "totalAttemptBudget" | "stream" | "vision">): Promise<PublicAiRegistry>;
+    updateRuntime(input: Pick<PublicAiRegistry, "strategy" | "totalAttemptBudget" | "stream" | "vision" | "userPrompt" | "maxToolRounds" | "maxRepeatedToolCalls" | "compactionEnabled" | "maxInputTokens" | "reserveTokens" | "recentTurns" | "summaryMaxChars">): Promise<PublicAiRegistry>;
   };
   readonly agentConversations: {
     list(): Promise<readonly AgentConversationSummary[]>;
@@ -61,6 +61,7 @@ export interface ShellApi {
     append(id: string, message: AgentConversationMessage): Promise<AgentConversation>;
     saveCheckpoint(id: string, checkpoint: AgentConversationCheckpoint): Promise<AgentConversation>;
     delete(id: string): Promise<void>;
+    setWorkspace(id: string, workspace: string): Promise<AgentConversation>;
   };
   readonly skills: {
     list(): Promise<readonly SkillSummary[]>;
@@ -167,6 +168,7 @@ const api: ShellApi = {
     append: (id, message) => ipcRenderer.invoke("agent-conversations:append", id, message),
     saveCheckpoint: (id, checkpoint) => ipcRenderer.invoke("agent-conversations:checkpoint", id, checkpoint),
     delete: (id) => ipcRenderer.invoke("agent-conversations:delete", id),
+    setWorkspace: (id, workspace) => ipcRenderer.invoke("agent-conversations:set-workspace", id, workspace),
   },
   skills: {
     list: () => ipcRenderer.invoke("skills:list"),

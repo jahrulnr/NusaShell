@@ -13,11 +13,13 @@ export {
   createAgentReasoningDeltaEvent,
   createAgentToolCallStartEvent,
   createAgentToolCallEndEvent,
+  createAgentContextUpdateEvent,
   type ApplicationEvent,
   type AgentTextDeltaEvent,
   type AgentReasoningDeltaEvent,
   type AgentToolCallStartEvent,
   type AgentToolCallEndEvent,
+  type AgentContextUpdateEvent,
   type EventHandler,
   type EventHandlerFn,
 } from "./events/index.js";

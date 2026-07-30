@@ -155,6 +155,43 @@ describe("AgentTurnRunner", () => {
     });
   });
 
+  it("records steps in provider order: reasoning → text → tools", async () => {
+    const provider = new ScriptedProvider([
+      {
+        reasoning: "I should create the note first.",
+        text: "Creating the roadmap note now.",
+        toolCalls: [{ id: "call-1", name: "notes.create", args: { title: "Roadmap" } }],
+      },
+      {
+        reasoning: "The tool succeeded.",
+        text: "The note is ready.",
+      },
+    ]);
+    const runner = new AgentTurnRunner({ provider, toolGateway: new FakeToolGateway() });
+
+    const result = await runner.run({
+      messages: [{ role: "user", content: "Create a roadmap note" }],
+      pluginIds: ["notes"],
+    });
+
+    expect(result.steps).toEqual([
+      { type: "reasoning", content: "I should create the note first." },
+      { type: "text", content: "Creating the roadmap note now." },
+      {
+        type: "tool_calls",
+        calls: [{
+          id: "call-1",
+          name: "notes.create",
+          ok: true,
+          args: { title: "Roadmap" },
+          result: { id: "note-1" },
+        }],
+      },
+      { type: "reasoning", content: "The tool succeeded." },
+      { type: "text", content: "The note is ready." },
+    ]);
+  });
+
   it("does not execute a tool that is outside the MCP allowlist", async () => {
     const provider = new ScriptedProvider([
       { toolCalls: [{ id: "call-1", name: "filesystem.delete", args: { path: "/tmp/a" } }] },

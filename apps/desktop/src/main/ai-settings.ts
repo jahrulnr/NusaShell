@@ -139,7 +139,7 @@ export class AiSettingsStore {
     return this.public(this.state);
   }
 
-  async addModel(providerId: string, model: Pick<AiModelSettings, "id" | "label">): Promise<PublicAiRegistry> {
+  async addModel(providerId: string, model: Pick<AiModelSettings, "id" | "label"> & Partial<Pick<AiModelSettings, "contextWindow">>): Promise<PublicAiRegistry> {
     const current = await this.load();
     const provider = current.providers.find((item) => item.id === providerId);
     if (!provider) throw new Error(`Provider not found: ${providerId}`);
@@ -149,6 +149,7 @@ export class AiSettingsStore {
       id,
       label: model.label.trim() || id,
       task: "chat",
+      ...(typeof model.contextWindow === "number" && model.contextWindow > 0 ? { contextWindow: model.contextWindow } : {}),
       inputModes: ["text"],
       outputModes: ["text"],
       supportedEfforts: [],
@@ -195,6 +196,13 @@ export class AiSettingsStore {
     readonly stream?: boolean;
     readonly vision?: AiRegistrySettings["vision"];
     readonly userPrompt?: string;
+    readonly maxToolRounds?: number;
+    readonly maxRepeatedToolCalls?: number;
+    readonly compactionEnabled?: boolean;
+    readonly maxInputTokens?: number;
+    readonly reserveTokens?: number;
+    readonly recentTurns?: number;
+    readonly summaryMaxChars?: number;
   }): Promise<PublicAiRegistry> {
     const current = await this.load();
     const userPrompt = typeof input.userPrompt === "string" ? input.userPrompt.trim() : current.userPrompt;
@@ -206,6 +214,13 @@ export class AiSettingsStore {
       stream: input.stream !== false,
       vision: input.vision === "on" || input.vision === "off" ? input.vision : "auto",
       userPrompt,
+      maxToolRounds: integerInRange(input.maxToolRounds, 1, 100, current.maxToolRounds),
+      maxRepeatedToolCalls: integerInRange(input.maxRepeatedToolCalls, 1, 200, current.maxRepeatedToolCalls),
+      compactionEnabled: typeof input.compactionEnabled === "boolean" ? input.compactionEnabled : current.compactionEnabled,
+      maxInputTokens: integerInRange(input.maxInputTokens, 1000, 2_000_000, current.maxInputTokens),
+      reserveTokens: integerInRange(input.reserveTokens, 0, 1_000_000, current.reserveTokens),
+      recentTurns: integerInRange(input.recentTurns, 1, 100, current.recentTurns),
+      summaryMaxChars: integerInRange(input.summaryMaxChars, 100, 1_000_000, current.summaryMaxChars),
     };
     await this.persist(this.state);
     return this.public(this.state);
@@ -221,6 +236,13 @@ export class AiSettingsStore {
       stream: settings.stream,
       vision: settings.vision,
       userPrompt: settings.userPrompt,
+      maxToolRounds: settings.maxToolRounds,
+      maxRepeatedToolCalls: settings.maxRepeatedToolCalls,
+      compactionEnabled: settings.compactionEnabled,
+      maxInputTokens: settings.maxInputTokens,
+      reserveTokens: settings.reserveTokens,
+      recentTurns: settings.recentTurns,
+      summaryMaxChars: settings.summaryMaxChars,
       canPersistApiKey: safeStorage.isEncryptionAvailable(),
       providers: settings.providers.map(({ apiKey, ...provider }) => ({
         ...provider,

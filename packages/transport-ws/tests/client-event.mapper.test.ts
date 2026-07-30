@@ -19,4 +19,59 @@ describe("mapDomainEvent", () => {
       },
     });
   });
+
+  it("maps tool call end events with truncated output previews", () => {
+    expect(mapDomainEvent({
+      type: "agent.tool_call_end",
+      occurredAt: new Date("2026-07-29T00:00:00.000Z"),
+      aggregateId: "trace-1",
+      execution: {
+        id: "call-1",
+        name: "docs_list",
+        ok: true,
+        args: { limit: 2 },
+        result: { docs: ["a.md", "b.md"] },
+      },
+    } as Parameters<typeof mapDomainEvent>[0], 3)).toEqual({
+      kind: "event",
+      event: "agent.tool_call_end",
+      sequence: 3,
+      payload: {
+        traceId: "trace-1",
+        callId: "call-1",
+        name: "docs_list",
+        ok: true,
+        args: { limit: 2 },
+        output: "{\n  \"docs\": [\n    \"a.md\",\n    \"b.md\"\n  ]\n}",
+        timestamp: "2026-07-29T00:00:00.000Z",
+      },
+    });
+  });
+
+  it("maps live context estimates during an agent turn", () => {
+    expect(mapDomainEvent({
+      type: "agent.context",
+      occurredAt: new Date("2026-07-29T00:00:00.000Z"),
+      aggregateId: "trace-1",
+      estimatedTokens: 1280,
+      usage: {
+        inputTokens: 1200,
+        outputTokens: 80,
+        cachedInputTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningOutputTokens: 0,
+      },
+    } as Parameters<typeof mapDomainEvent>[0], 4)).toEqual({
+      kind: "event",
+      event: "agent.context",
+      sequence: 4,
+      payload: {
+        traceId: "trace-1",
+        estimatedTokens: 1280,
+        inputTokens: 1200,
+        outputTokens: 80,
+        timestamp: "2026-07-29T00:00:00.000Z",
+      },
+    });
+  });
 });

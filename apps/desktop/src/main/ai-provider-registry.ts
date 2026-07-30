@@ -47,6 +47,13 @@ export function normalizeRegistryState(raw: unknown): AiRegistrySettings {
       stream: value.stream !== false,
       vision: normalizeVision(value.vision),
       userPrompt: text(value.userPrompt),
+      maxToolRounds: integerInRange(value.maxToolRounds, 1, 100, 50),
+      maxRepeatedToolCalls: integerInRange(value.maxRepeatedToolCalls, 1, 200, 50),
+      compactionEnabled: value.compactionEnabled !== false,
+      maxInputTokens: integerInRange(value.maxInputTokens, 1000, 2_000_000, 12000),
+      reserveTokens: integerInRange(value.reserveTokens, 0, 1_000_000, 3000),
+      recentTurns: integerInRange(value.recentTurns, 1, 100, 4),
+      summaryMaxChars: integerInRange(value.summaryMaxChars, 100, 1_000_000, 12000),
       providers,
     };
   }
@@ -62,6 +69,13 @@ export function normalizeRegistryState(raw: unknown): AiRegistrySettings {
       stream: true,
       vision: "auto",
       userPrompt: text(value.userPrompt),
+      maxToolRounds: integerInRange(value.maxToolRounds, 1, 100, 50),
+      maxRepeatedToolCalls: integerInRange(value.maxRepeatedToolCalls, 1, 200, 50),
+      compactionEnabled: value.compactionEnabled !== false,
+      maxInputTokens: integerInRange(value.maxInputTokens, 1000, 2_000_000, 12000),
+      reserveTokens: integerInRange(value.reserveTokens, 0, 1_000_000, 3000),
+      recentTurns: integerInRange(value.recentTurns, 1, 100, 4),
+      summaryMaxChars: integerInRange(value.summaryMaxChars, 100, 1_000_000, 12000),
       providers: [{
         id: "openai-compatible",
         name: "OpenAI compatible",
@@ -89,6 +103,13 @@ export function normalizeRegistryState(raw: unknown): AiRegistrySettings {
     stream: true,
     vision: "auto",
     userPrompt: text(value.userPrompt),
+    maxToolRounds: integerInRange(value.maxToolRounds, 1, 100, 50),
+    maxRepeatedToolCalls: integerInRange(value.maxRepeatedToolCalls, 1, 200, 50),
+    compactionEnabled: value.compactionEnabled !== false,
+    maxInputTokens: integerInRange(value.maxInputTokens, 1000, 2_000_000, 12000),
+    reserveTokens: integerInRange(value.reserveTokens, 0, 1_000_000, 3000),
+    recentTurns: integerInRange(value.recentTurns, 1, 100, 4),
+    summaryMaxChars: integerInRange(value.summaryMaxChars, 100, 1_000_000, 12000),
     providers: [],
   };
 }

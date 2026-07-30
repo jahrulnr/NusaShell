@@ -42,4 +42,4 @@ export type {
   CancelAgentTurnCommand,
   CancelAgentTurnResult,
 } from "./commands/index.js";
-export { RunAgentTurnHandler, CancelAgentTurnHandler } from "./commands/index.js";
+export { RunAgentTurnHandler, CancelAgentTurnHandler, type AgentRuntimeSettings } from "./commands/index.js";

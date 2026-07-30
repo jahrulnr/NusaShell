@@ -17,6 +17,13 @@ describe("AI provider registry", () => {
       stream: true,
       vision: "auto",
       userPrompt: "",
+      maxToolRounds: 50,
+      maxRepeatedToolCalls: 50,
+      compactionEnabled: true,
+      maxInputTokens: 12000,
+      reserveTokens: 3000,
+      recentTurns: 4,
+      summaryMaxChars: 12000,
       providers: [],
     });
   });

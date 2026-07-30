@@ -91,10 +91,10 @@ describe("AgentConversationStore", () => {
       role: "assistant",
       content: "There are 2 plugins.",
       reasoning: "I should check what plugins are available.",
-      toolCalls: [{ id: "call-1", name: "mcp_list", ok: true }],
+      toolCalls: [{ id: "call-1", name: "mcp_list", ok: true, args: { q: "plugins" }, output: '{"count":2}' }],
       steps: [
         { type: "reasoning", content: "I should check what plugins are available." },
-        { type: "tool_calls", calls: [{ id: "call-1", name: "mcp_list", ok: true }] },
+        { type: "tool_calls", calls: [{ id: "call-1", name: "mcp_list", ok: true, args: { q: "plugins" }, output: '{"count":2}' }] },
         { type: "reasoning", content: "There are 2 plugins: Mail and Notes." },
         { type: "text", content: "There are 2 plugins." },
       ],
@@ -103,9 +103,32 @@ describe("AgentConversationStore", () => {
     const loaded = await new AgentConversationStore(path).get(conversation.id);
     expect(loaded?.messages[1]?.steps).toEqual([
       { type: "reasoning", content: "I should check what plugins are available." },
-      { type: "tool_calls", calls: [{ id: "call-1", name: "mcp_list", ok: true }] },
+      { type: "tool_calls", calls: [{ id: "call-1", name: "mcp_list", ok: true, args: { q: "plugins" }, output: '{"count":2}' }] },
       { type: "reasoning", content: "There are 2 plugins: Mail and Notes." },
       { type: "text", content: "There are 2 plugins." },
     ]);
+  });
+
+  it("persists workspace across store instances", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-"));
+    const path = join(root, "agent-conversations.json");
+    const first = new AgentConversationStore(path, () => new Date("2026-07-30T12:00:00.000Z"), () => "conv-ws");
+    const created = await first.create();
+    await first.setWorkspace(created.id, "/home/user/projects/myapp");
+
+    const loaded = await new AgentConversationStore(path).get(created.id);
+    expect(loaded?.workspace).toBe("/home/user/projects/myapp");
+  });
+
+  it("clears workspace when set to empty string", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-"));
+    const path = join(root, "agent-conversations.json");
+    const first = new AgentConversationStore(path, () => new Date("2026-07-30T12:00:00.000Z"), () => "conv-ws2");
+    const created = await first.create();
+    await first.setWorkspace(created.id, "/home/user/projects/myapp");
+    await first.setWorkspace(created.id, "");
+
+    const loaded = await new AgentConversationStore(path).get(created.id);
+    expect(loaded?.workspace).toBeUndefined();
   });
 });

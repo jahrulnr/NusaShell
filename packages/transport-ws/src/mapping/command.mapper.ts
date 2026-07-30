@@ -96,6 +96,7 @@ export function mapToCommand(request: ParsedRequest):
           ...(request.payload.userPrompt !== undefined ? { userPrompt: request.payload.userPrompt } : {}),
           ...(request.payload.traceId !== undefined ? { traceId: request.payload.traceId } : {}),
           ...(request.payload.maxToolRounds !== undefined ? { maxToolRounds: request.payload.maxToolRounds } : {}),
+          ...(request.payload.workspace !== undefined ? { workspace: request.payload.workspace } : {}),
         } as RunAgentTurnCommand,
       };
     case "agent.cancel":

@@ -1,4 +1,4 @@
-import type { AgentReasoningDeltaEvent, AgentTextDeltaEvent, AgentToolCallEndEvent, AgentToolCallStartEvent, ApplicationEvent } from "@nusashell/application";
+import type { AgentReasoningDeltaEvent, AgentTextDeltaEvent, AgentToolCallEndEvent, AgentToolCallStartEvent, AgentContextUpdateEvent, ApplicationEvent } from "@nusashell/application";
 import {
   PluginInstalledEvent,
   PluginUninstalledEvent,
@@ -154,6 +154,7 @@ export function mapDomainEvent(event: ApplicationEvent, sequence: number): Event
           traceId: e.aggregateId,
           callId: e.call.id,
           name: e.call.name,
+          ...(hasArgs(e.call.args) ? { args: e.call.args } : {}),
           timestamp,
         },
       };
@@ -161,6 +162,7 @@ export function mapDomainEvent(event: ApplicationEvent, sequence: number): Event
 
     case "agent.tool_call_end": {
       const e = event as AgentToolCallEndEvent;
+      const output = formatToolEventOutput(e.execution);
       return {
         kind: "event",
         event: "agent.tool_call_end",
@@ -171,6 +173,26 @@ export function mapDomainEvent(event: ApplicationEvent, sequence: number): Event
           name: e.execution.name,
           ok: e.execution.ok,
           ...(e.execution.error ? { error: e.execution.error } : {}),
+          ...(hasArgs(e.execution.args) ? { args: e.execution.args } : {}),
+          ...(output ? { output } : {}),
+          timestamp,
+        },
+      };
+    }
+
+    case "agent.context": {
+      const e = event as AgentContextUpdateEvent;
+      return {
+        kind: "event",
+        event: "agent.context",
+        sequence,
+        payload: {
+          traceId: e.aggregateId,
+          estimatedTokens: e.estimatedTokens,
+          ...(e.usage ? {
+            inputTokens: e.usage.inputTokens,
+            outputTokens: e.usage.outputTokens,
+          } : {}),
           timestamp,
         },
       };
@@ -179,4 +201,23 @@ export function mapDomainEvent(event: ApplicationEvent, sequence: number): Event
     default:
       return null;
   }
+}
+
+function hasArgs(args: Readonly<Record<string, unknown>> | undefined): args is Readonly<Record<string, unknown>> {
+  return Boolean(args && Object.keys(args).length > 0);
+}
+
+function formatToolEventOutput(execution: AgentToolCallEndEvent["execution"]): string | undefined {
+  if (execution.error) return clampToolText(execution.error, 12_000);
+  if (execution.result === undefined) return undefined;
+  if (typeof execution.result === "string") return clampToolText(execution.result, 12_000);
+  try {
+    return clampToolText(JSON.stringify(execution.result, null, 2), 12_000);
+  } catch {
+    return clampToolText(String(execution.result), 12_000);
+  }
+}
+
+function clampToolText(value: string, maxChars: number): string {
+  return value.length <= maxChars ? value : `${value.slice(0, maxChars)}\n…`;
 }

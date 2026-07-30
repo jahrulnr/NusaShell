@@ -12,6 +12,8 @@ export interface AgentConversationToolCall {
   readonly name: string;
   readonly ok: boolean;
   readonly error?: string;
+  readonly args?: Readonly<Record<string, unknown>>;
+  readonly output?: string;
 }
 
 export type AgentConversationStep =
@@ -45,6 +47,7 @@ export interface AgentConversation {
   readonly updatedAt: string;
   readonly messages: readonly AgentConversationMessage[];
   readonly checkpoint?: AgentConversationCheckpoint;
+  readonly workspace?: string;
 }
 
 export type AgentConversationSummary = Omit<AgentConversation, "messages" | "checkpoint"> & {

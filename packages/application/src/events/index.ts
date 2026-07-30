@@ -8,3 +8,5 @@ export type { AgentToolCallStartEvent } from "./agent-tool-call-start.event.js";
 export { createAgentToolCallStartEvent } from "./agent-tool-call-start.event.js";
 export type { AgentToolCallEndEvent } from "./agent-tool-call-end.event.js";
 export { createAgentToolCallEndEvent } from "./agent-tool-call-end.event.js";
+export type { AgentContextUpdateEvent } from "./agent-context-update.event.js";
+export { createAgentContextUpdateEvent } from "./agent-context-update.event.js";

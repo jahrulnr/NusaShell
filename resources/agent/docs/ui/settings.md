@@ -54,7 +54,7 @@ Toggles for WebSocket auto-reconnect and auto-resubscribe.
 
 ## Agent runtime
 
-Configures how the agent picks and retries models: provider strategy, attempt budget, vision mode, and streaming.
+Configures how the agent picks and retries models: provider strategy, attempt budget, vision mode, user prompt, and streaming.
 
 - **Agent runtime form** (`#ai-runtime-form`):
   - Section: Agent runtime
@@ -76,10 +76,68 @@ Configures how the agent picks and retries models: provider strategy, attempt bu
   - Type: select
   - Action: Controls image delivery. Automatic sends image parts first and retries once without them after a provider 4xx response; Disable omits image pixels.
 
+- **User prompt** (`#settings-ai-user-prompt`):
+  - Section: Agent runtime
+  - Type: textarea
+  - Action: Additional instructions appended after the system prompt. Use for personality, tone, or task-specific guidance.
+
 - **Stream responses** (`#settings-ai-stream`):
   - Section: Agent runtime
   - Type: checkbox
   - Action: Enables streaming assistant responses when the provider supports it.
+
+## Agent limits
+
+Controls how many tool calls and rounds the agent can make per turn. Prevents runaway loops.
+
+- **Agent limits form** (`#ai-limits-form`):
+  - Section: Agent limits
+  - Type: form
+  - Action: Contains max tool rounds and max repeated tool calls. Submit saves the limits.
+
+- **Max tool rounds** (`#settings-ai-max-tool-rounds`):
+  - Section: Agent limits
+  - Type: number input
+  - Action: Maximum number of tool-call rounds per agent turn (1–100). Default 50.
+
+- **Max repeated tool calls** (`#settings-ai-max-repeated-tool-calls`):
+  - Section: Agent limits
+  - Type: number input
+  - Action: Stops the agent if the same tool call repeats this many times (1–200). Default 50.
+
+## Context compaction
+
+Controls how the agent compacts conversation history when the input token budget is exceeded.
+
+- **Context compaction form** (`#ai-context-form`):
+  - Section: Context compaction
+  - Type: form
+  - Action: Contains compaction toggle and token budget settings. Submit saves the context config.
+
+- **Enable compaction** (`#settings-ai-compaction`):
+  - Section: Context compaction
+  - Type: toggle
+  - Action: When enabled, the agent summarizes older conversation history to fit within the token budget.
+
+- **Max input tokens** (`#settings-ai-max-input-tokens`):
+  - Section: Context compaction
+  - Type: number input
+  - Action: Token budget for the input prompt before compaction triggers (1000–2000000). Default 12000.
+
+- **Reserve tokens** (`#settings-ai-reserve-tokens`):
+  - Section: Context compaction
+  - Type: number input
+  - Action: Tokens reserved for the model response, subtracted from the input budget (0–1000000). Default 3000.
+
+- **Recent turns to keep** (`#settings-ai-recent-turns`):
+  - Section: Context compaction
+  - Type: number input
+  - Action: Number of recent user-assistant turns preserved during compaction (1–100). Default 4.
+
+- **Summary max characters** (`#settings-ai-summary-max-chars`):
+  - Section: Context compaction
+  - Type: number input
+  - Action: Maximum character length of the compacted summary (100–1000000). Default 12000.
 
 ## About
 

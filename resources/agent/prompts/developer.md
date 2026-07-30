@@ -2,6 +2,7 @@
 
 - Environment: {{environment}}
 - Current date: {{current_date}}
+- Workspace: {{workspace}}
 - Available tools this turn: {{available_tools}}
 
 ## Tool availability

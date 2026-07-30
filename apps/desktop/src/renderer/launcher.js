@@ -1,7 +1,7 @@
 // NusaShell launcher renderer — connects to backend via WebSocket,
 // renders plugin grid, and handles plugin lifecycle actions.
 // Uses the native browser WebSocket (not the `ws` npm package).
-import { clampModelEffort, estimateContextTokens, formatContextUsage, formatTokenCount, modelCompatibility, searchModels } from "./ai-model-ui.js";
+import { clampModelEffort, formatTokenCount, modelCompatibility, searchModels } from "./ai-model-ui.js";
 import { AgentConversationController } from "./agent-conversation-controller.js";
 import { SkillsController } from "./skills-controller.js";
 import {
@@ -388,6 +388,11 @@ async function runAgentTurn(messages, options = {}) {
       if (payload?.traceId === options.traceId) options.onToolCallEnd(payload);
     }));
   }
+  if (options.onContextUpdate) {
+    disposers.push(onEvent("agent.context", (payload) => {
+      if (payload?.traceId === options.traceId) options.onContextUpdate(payload);
+    }));
+  }
   try {
     return await sendRequest("agent.run", {
       messages,
@@ -396,6 +401,7 @@ async function runAgentTurn(messages, options = {}) {
       model: selected.id,
       effort: aiSettings.effort,
       userPrompt: aiSettings.userPrompt,
+      ...(options.workspace ? { workspace: options.workspace } : {}),
       modelCapabilities: {
         contextWindow: selected.contextWindow,
         maxOutput: selected.maxOutput,
@@ -432,6 +438,7 @@ function switchView(viewName) {
   if (viewName === "agent") {
     agentConversationController?.renderList();
     agentConversationController?.scrollToBottom();
+    agentConversationController?.updateContextStatus();
   }
   if (viewName === "skills") void skillsController?.refresh();
   if (viewName === "autostart") renderAutostartList();
@@ -1022,7 +1029,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const renderAgentModelPicker = () => {
     const selected = activeModel();
     $("#agent-model-trigger-label").textContent = `${selected?.id || "Choose model"} · ${aiSettings.effort || "auto"}`;
-    $("#agent-provider-status").textContent = selected ? formatContextUsage(estimateContextTokens(), selected.contextWindow) : "Choose a model";
+    if (selected) agentConversationController?.updateContextStatus();
+    else $("#agent-provider-status").textContent = "Choose a model";
     const list = $("#agent-model-list");
     list.textContent = "";
     const models = searchModels(aiSettings.models, $("#agent-model-search").value);
@@ -1064,6 +1072,13 @@ document.addEventListener("DOMContentLoaded", () => {
     $("#settings-ai-stream").checked = aiSettings.stream !== false;
     $("#settings-ai-vision").value = aiSettings.vision || "auto";
     $("#settings-ai-user-prompt").value = aiSettings.userPrompt || "";
+    $("#settings-ai-max-tool-rounds").value = aiSettings.maxToolRounds ?? 50;
+    $("#settings-ai-max-repeated-tool-calls").value = aiSettings.maxRepeatedToolCalls ?? 50;
+    $("#settings-ai-compaction").checked = aiSettings.compactionEnabled !== false;
+    $("#settings-ai-max-input-tokens").value = aiSettings.maxInputTokens ?? 12000;
+    $("#settings-ai-reserve-tokens").value = aiSettings.reserveTokens ?? 3000;
+    $("#settings-ai-recent-turns").value = aiSettings.recentTurns ?? 4;
+    $("#settings-ai-summary-max-chars").value = aiSettings.summaryMaxChars ?? 12000;
   };
 
   const selectAgentModel = async (modelKey, effort) => {
@@ -1217,6 +1232,35 @@ document.addEventListener("DOMContentLoaded", () => {
       showToast("Agent runtime saved.", "success");
     } catch (error) {
       showToast(`Could not save agent runtime: ${error.message || error}`, "error");
+    }
+  });
+  $("#ai-limits-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      aiSettings = await window.shell.aiProviders.updateRuntime({
+        maxToolRounds: Number($("#settings-ai-max-tool-rounds").value),
+        maxRepeatedToolCalls: Number($("#settings-ai-max-repeated-tool-calls").value),
+      });
+      syncAiControls();
+      showToast("Agent limits saved.", "success");
+    } catch (error) {
+      showToast(`Could not save agent limits: ${error.message || error}`, "error");
+    }
+  });
+  $("#ai-context-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      aiSettings = await window.shell.aiProviders.updateRuntime({
+        compactionEnabled: $("#settings-ai-compaction").checked,
+        maxInputTokens: Number($("#settings-ai-max-input-tokens").value),
+        reserveTokens: Number($("#settings-ai-reserve-tokens").value),
+        recentTurns: Number($("#settings-ai-recent-turns").value),
+        summaryMaxChars: Number($("#settings-ai-summary-max-chars").value),
+      });
+      syncAiControls();
+      showToast("Context settings saved.", "success");
+    } catch (error) {
+      showToast(`Could not save context settings: ${error.message || error}`, "error");
     }
   });
   $("#ai-settings-close").addEventListener("click", closeProviderEditor);

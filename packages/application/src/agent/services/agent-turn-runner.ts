@@ -27,12 +27,19 @@ export interface RunAgentTurnInput {
   readonly onReasoningDelta?: (delta: string) => void;
   readonly onToolCallStart?: (call: AgentToolCall) => void;
   readonly onToolCallEnd?: (execution: AgentToolExecution) => void;
+  readonly onContextUpdate?: (update: AgentContextUpdate) => void;
+}
+
+export interface AgentContextUpdate {
+  readonly estimatedTokens: number;
+  readonly usage?: AgentTokenUsage;
 }
 
 export interface AgentToolExecution {
   readonly id: string;
   readonly name: string;
   readonly ok: boolean;
+  readonly args?: Readonly<Record<string, unknown>>;
   readonly result?: unknown;
   readonly error?: string;
 }
@@ -130,6 +137,13 @@ export class AgentTurnRunner {
     let emptyResponseNudged = false;
 
     this.deps.logger?.info("Agent turn started traceId=%s provider=%s", traceId, this.deps.provider.id);
+    const publishContext = () => {
+      input.onContextUpdate?.({
+        estimatedTokens: estimateMessageTokens(messages),
+        ...(hasUsage(usage) ? { usage: { ...usage } } : {}),
+      });
+    };
+    publishContext();
 
     for (let round = 1; round <= maxToolRounds; round += 1) {
       assertTurnActive(input.signal, traceId);
@@ -170,6 +184,7 @@ export class AgentTurnRunner {
       }
       addUsage(usage, response.usage);
       const requestedCalls = response.toolCalls ?? [];
+      publishContext();
 
       if (requestedCalls.length === 0) {
         let text = response.text?.trim();
@@ -235,10 +250,13 @@ export class AgentTurnRunner {
         );
         continue;
       }
+      messages.push({ role: "assistant", ...(response.text ? { content: response.text } : {}), toolCalls: requestedCalls });
+      // Keep provider order for the round: reasoning (already pushed) → text → tools.
+      // Streaming UIs also append by delta arrival; do not reorder text after tools.
       if (response.text?.trim()) {
         steps.push({ type: "text", content: response.text.trim() });
       }
-      messages.push({ role: "assistant", ...(response.text ? { content: response.text } : {}), toolCalls: requestedCalls });
+      publishContext();
 
       const roundExecutions: AgentToolExecution[] = [];
       for (const call of requestedCalls) {
@@ -254,6 +272,7 @@ export class AgentTurnRunner {
           name: call.name,
           content: serializeToolResult(execution, call.name),
         });
+        publishContext();
       }
       if (roundExecutions.length > 0) {
         steps.push({ type: "tool_calls", calls: [...roundExecutions] });
@@ -284,11 +303,11 @@ export class AgentTurnRunner {
     try {
       const result = await this.deps.toolGateway.execute(call.name, call.args, requestId, traceId);
       this.deps.logger?.info("Agent MCP tool completed traceId=%s tool=%s round=%d", traceId, call.name, round);
-      return { id: call.id, name: call.name, ok: true, result };
+      return { id: call.id, name: call.name, ok: true, args: call.args, result };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Tool execution failed";
       this.deps.logger?.warn("Agent MCP tool failed traceId=%s tool=%s round=%d", traceId, call.name, round);
-      return { id: call.id, name: call.name, ok: false, error: message };
+      return { id: call.id, name: call.name, ok: false, args: call.args, error: message };
     }
   }
 

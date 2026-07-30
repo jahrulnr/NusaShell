@@ -84,6 +84,10 @@ export {
   PluginStateChangedEventSchema,
   ToolCallCompletedEventSchema,
   AgentTextDeltaEventSchema,
+  AgentReasoningDeltaEventSchema,
+  AgentToolCallStartEventSchema,
+  AgentToolCallEndEventSchema,
+  AgentContextEventSchema,
   type PluginInstalledEvent,
   type PluginUninstalledEvent,
   type PluginStartedEvent,
@@ -92,6 +96,10 @@ export {
   type PluginStateChangedEvent,
   type ToolCallCompletedEvent,
   type AgentTextDeltaEvent,
+  type AgentReasoningDeltaEvent,
+  type AgentToolCallStartEvent,
+  type AgentToolCallEndEvent,
+  type AgentContextEvent,
   type ParsedEvent,
 } from "./protocol/event-schemas.js";
 

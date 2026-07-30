@@ -5,6 +5,80 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.37] - 2026-07-31
+
+### Fixed
+
+- Agent multi-round turns interleave stream segments in arrival order
+  (reasoning / text / tool deltas), instead of forcing thinking → tool → reason
+  or dumping every text segment into one bubble at the end. Persisted steps keep
+  the same provider order per round.
+
+- Context usage updates live during a turn via `agent.context` events (message
+  estimate after each model/tool step, plus provider input tokens when available)
+  instead of staying stuck on the pre-turn conversation size until completion.
+  Opening a chat, returning to the agent view, or refreshing the model picker now
+  recomputes from the active conversation instead of resetting to `0 ctx`.
+
+- Reasoning markdown no longer auto-linkifies bare filenames like `plugins.md`
+  (linkify treated `.md` as Moldova's TLD and rendered them as blue links).
+  Explicit markdown links in thinking still use a muted amber instead of accent blue.
+
+- Agent tool calls keep the timeline ›_ rail chrome and expand into nested
+  `tool` / `Output` panels (args + truncated result), instead of a name-only row
+  or a bordered terminal card.
+
+- Markdown renderer now supports raw HTML tags like `<br>`, `<kbd>`, `<details>`,
+  and `<img>` in agent messages. Previously `html: false` escaped all HTML
+  literally, causing tags to leak as visible text. Enabled `html: true` in
+  markdown-it and added `isomorphic-dompurify` sanitization with an explicit
+  allowlist — `<script>`, `onerror`, and other dangerous markup is stripped.
+
+### Changed
+
+- `markdown-it` config now uses `linkify: true` and `breaks: true` for
+  auto-linking URLs and converting newlines to `<br>`.
+
+## [0.0.36] - 2026-07-31
+
+### Added
+
+- Agent limits and context compaction settings are now configurable from the
+  settings page instead of being hardcoded. New "Agent limits" card exposes
+  max tool rounds (default 50) and max repeated tool calls (default 50). New
+  "Context compaction" card exposes compaction toggle (default on), max input
+  tokens (default 12000), reserve tokens (default 3000), recent turns to keep
+  (default 4), and summary max characters (default 12000). All values persist
+  in AI settings and apply without restart.
+
+### Changed
+
+- Settings page design polished: card titles use uppercase letter-spacing
+  with bottom borders, inputs have focus glow, cards have subtle gradient
+  backgrounds, and mini buttons have active press feedback.
+
+- `RunAgentTurnHandler` now accepts a mutable `AgentRuntimeSettings` reference
+  instead of static `defaultMaxToolRounds` and `context` parameters. The
+  container's `configureAiRuntime` updates the reference in place.
+
+## [0.0.35] - 2026-07-31
+
+### Added
+
+- Per-conversation workspace picker: a folder button in the agent composer
+  footer opens the OS directory dialog. The selected workspace is persisted
+  per conversation and injected into the agent system prompt via `{{workspace}}`.
+  Default is the user home directory when no workspace is selected.
+
+- `addModel` now accepts an optional `contextWindow` so manually added models
+  can report used/total context.
+
+### Changed
+
+- Context usage display: format is now `1k/1M context` (used/total) instead
+  of raw token count. When the model has no known context window, shows
+  `4k ctx` (formatted used tokens only).
+
 ## [0.0.34] - 2026-07-31
 
 ### Added

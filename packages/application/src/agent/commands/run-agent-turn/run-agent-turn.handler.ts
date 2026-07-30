@@ -8,6 +8,7 @@ import {
   type AgentContextOptions,
   type AgentTurnResult,
   type AgentToolExecution,
+  type AgentContextUpdate,
 } from "../../services/agent-turn-runner.js";
 import { injectPrompts, type PromptVars } from "../../services/prompt-injector.js";
 import { InProcessAgentTurnWorker, type AgentTurnWorker } from "../../services/in-process-agent-turn-worker.js";
@@ -20,23 +21,27 @@ import {
 import { AgentTurnCoordinator } from "../../services/agent-turn-coordinator.js";
 import { randomUUID } from "node:crypto";
 
+export interface AgentRuntimeSettings {
+  maxToolRounds: number;
+  maxRepeatedToolCalls: number;
+  strategy: AgentProviderStrategy;
+  totalAttemptBudget: number;
+  context?: AgentContextOptions;
+}
+
 export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, AgentTurnResult> {
   constructor(
     private readonly providers: AgentProviderRegistryPort,
     private readonly toolGateway: AgentToolGateway,
     private readonly defaultProviderId: string,
-    private readonly defaultMaxToolRounds: number,
+    private readonly runtime: AgentRuntimeSettings,
     private readonly logger?: LoggerPort,
-    private readonly context?: AgentContextOptions,
-    private readonly routing: {
-      readonly strategy: AgentProviderStrategy;
-      readonly totalAttemptBudget: number;
-    } = { strategy: "failover", totalAttemptBudget: 4 },
     private readonly coordinator: AgentTurnCoordinator = new AgentTurnCoordinator(),
     private readonly onTextDelta?: (traceId: string, delta: string) => void,
     private readonly onReasoningDelta?: (traceId: string, delta: string) => void,
     private readonly onToolCallStart?: (traceId: string, call: AgentToolCall) => void,
     private readonly onToolCallEnd?: (traceId: string, execution: AgentToolExecution) => void,
+    private readonly onContextUpdate?: (traceId: string, update: AgentContextUpdate) => void,
     private readonly promptLoader?: PromptLoaderPort,
     private readonly userPrompt: string = "",
   ) {}
@@ -50,16 +55,17 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
     const provider = new RoutedAgentProvider({
       providers: this.providers.list(),
       preferredProviderId: preferredProvider.id,
-      strategy: this.routing.strategy,
-      totalAttemptBudget: this.routing.totalAttemptBudget,
+      strategy: this.runtime.strategy,
+      totalAttemptBudget: this.runtime.totalAttemptBudget,
     });
     const compactPrompt = await this.loadCompactPrompt();
     const runner = new AgentTurnRunner({
       provider,
       toolGateway: this.toolGateway,
-      defaultMaxToolRounds: this.defaultMaxToolRounds,
+      defaultMaxToolRounds: this.runtime.maxToolRounds,
+      defaultMaxRepeatedToolCalls: this.runtime.maxRepeatedToolCalls,
       ...(this.logger ? { logger: this.logger } : {}),
-      ...(this.context ? { context: this.context } : {}),
+      ...(this.runtime.context ? { context: this.runtime.context } : {}),
       ...(compactPrompt ? { compactPrompt } : {}),
     });
     const worker: AgentTurnWorker = new InProcessAgentTurnWorker((input) => runner.run(input));
@@ -74,6 +80,7 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
       ...(this.onReasoningDelta ? { onReasoningDelta: (delta) => this.onReasoningDelta?.(traceId, delta) } : {}),
       ...(this.onToolCallStart ? { onToolCallStart: (call) => this.onToolCallStart?.(traceId, call) } : {}),
       ...(this.onToolCallEnd ? { onToolCallEnd: (execution) => this.onToolCallEnd?.(traceId, execution) } : {}),
+      ...(this.onContextUpdate ? { onContextUpdate: (update) => this.onContextUpdate?.(traceId, update) } : {}),
       ...(command.maxToolRounds !== undefined ? { maxToolRounds: command.maxToolRounds } : {}),
       ...(command.model !== undefined ? { model: command.model } : {}),
       ...(command.effort !== undefined ? { effort: command.effort } : {}),
@@ -90,6 +97,7 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
         currentDate: new Date().toISOString().slice(0, 10),
         environment: process.env.NODE_ENV === "production" ? "production" : "development",
         availableTools: tools.map((tool) => tool.name).join(", "),
+        ...(command.workspace ? { workspace: command.workspace } : {}),
       };
       return injectPrompts(prompts, vars, command.messages, command.userPrompt ?? this.userPrompt);
     } catch (error) {

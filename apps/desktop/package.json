@@ -20,9 +20,10 @@
   "dependencies": {
     "@nusashell/application": "workspace:*",
     "@nusashell/backend": "workspace:*",
-    "@nusashell/plugin-sdk": "workspace:*",
     "@nusashell/contracts": "workspace:*",
+    "@nusashell/plugin-sdk": "workspace:*",
     "electron-updater": "^6.3.9",
+    "isomorphic-dompurify": "^3.20.0",
     "markdown-it": "14.3.0"
   },
   "devDependencies": {
@@ -31,9 +32,9 @@
     "@electron-forge/plugin-vite": "^7.6.0",
     "@electron-forge/publisher-github": "^7.6.0",
     "@electron-forge/shared-types": "^7.6.0",
+    "@electron/rebuild": "^3.7.0",
     "@reforged/maker-appimage": "^5.2.0",
     "@types/node": "^22.10.0",
-    "@electron/rebuild": "^3.7.0",
     "electron": "^33.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.9.2",

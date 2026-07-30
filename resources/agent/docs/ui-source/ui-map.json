@@ -193,7 +193,7 @@
         {
           "heading": "Conversation thread",
           "paragraphs": [
-            "The full-height message runway separates compact user cards from editorial assistant responses. User attachments render as image previews or file cards. Provider reasoning is persisted and appears before the answer in a collapsed Thinking disclosure with sanitized Markdown; models that return no reasoning show no placeholder. Completed tool calls form a collapsible status timeline based on real turn results. Message footers expose timestamps, model/trace metadata, copy, and retry where applicable. Only this area scrolls."
+            "The full-height message runway separates compact user cards from editorial assistant responses. User attachments render as image previews or file cards. Provider reasoning is persisted and appears before the answer in a collapsed Thinking disclosure with sanitized Markdown; models that return no reasoning show no placeholder. Completed tool calls render as expandable terminal cards with the tool name in the header and full args/output in the body. Message footers expose timestamps, model/trace metadata, copy, and retry where applicable. Only this area scrolls."
           ],
           "controls": [
             "agent-thread",
@@ -202,7 +202,7 @@
             "agent-bubble",
             "agent-message-attachments",
             "agent-reasoning",
-            "agent-activity",
+            "agent-tool-terminal",
             "agent-message-action",
             "agent-retry-btn"
           ]
@@ -445,14 +445,40 @@
         {
           "heading": "Agent runtime",
           "paragraphs": [
-            "Configures how the agent picks and retries models: provider strategy, attempt budget, vision mode, and streaming."
+            "Configures how the agent picks and retries models: provider strategy, attempt budget, vision mode, user prompt, and streaming."
           ],
           "controls": [
             "ai-runtime-form",
             "settings-ai-strategy",
             "settings-ai-budget",
             "settings-ai-vision",
+            "settings-ai-user-prompt",
             "settings-ai-stream"
+          ]
+        },
+        {
+          "heading": "Agent limits",
+          "paragraphs": [
+            "Controls how many tool calls and rounds the agent can make per turn. Prevents runaway loops."
+          ],
+          "controls": [
+            "ai-limits-form",
+            "settings-ai-max-tool-rounds",
+            "settings-ai-max-repeated-tool-calls"
+          ]
+        },
+        {
+          "heading": "Context compaction",
+          "paragraphs": [
+            "Controls how the agent compacts conversation history when the input token budget is exceeded."
+          ],
+          "controls": [
+            "ai-context-form",
+            "settings-ai-compaction",
+            "settings-ai-max-input-tokens",
+            "settings-ai-reserve-tokens",
+            "settings-ai-recent-turns",
+            "settings-ai-summary-max-chars"
           ]
         },
         {
@@ -1038,13 +1064,13 @@
       "generated": true,
       "action": "Shows persisted image attachments as bounded thumbnails and PDF or text attachments as compact file cards above the user message."
     },
-    "agent-activity": {
+    "agent-tool-terminal": {
       "section": "Conversation thread",
-      "label": "Tool activity",
+      "label": "Tool terminal",
       "type": "disclosure",
-      "selector": ".agent-activity",
+      "selector": ".agent-tool-terminal",
       "generated": true,
-      "action": "Expands or collapses the completed tool-call timeline. Each row reports the persisted tool name and success or failure state without implying live progress."
+      "action": "Timeline-style expandable tool call. Header keeps the ›_ rail badge plus tool name and status. Expand to inspect nested tool and Output panels with args and truncated result text."
     },
     "agent-reasoning": {
       "section": "Conversation thread",
@@ -1495,6 +1521,66 @@
       "label": "Stream responses",
       "type": "checkbox",
       "action": "Enables streaming assistant responses when the provider supports it."
+    },
+    "settings-ai-user-prompt": {
+      "section": "Agent runtime",
+      "label": "User prompt",
+      "type": "textarea",
+      "action": "Additional instructions appended after the system prompt. Use for personality, tone, or task-specific guidance."
+    },
+    "ai-limits-form": {
+      "section": "Agent limits",
+      "label": "Agent limits form",
+      "type": "form",
+      "action": "Contains max tool rounds and max repeated tool calls. Submit saves the limits."
+    },
+    "settings-ai-max-tool-rounds": {
+      "section": "Agent limits",
+      "label": "Max tool rounds",
+      "type": "number input",
+      "action": "Maximum number of tool-call rounds per agent turn (1–100). Default 50."
+    },
+    "settings-ai-max-repeated-tool-calls": {
+      "section": "Agent limits",
+      "label": "Max repeated tool calls",
+      "type": "number input",
+      "action": "Stops the agent if the same tool call repeats this many times (1–200). Default 50."
+    },
+    "ai-context-form": {
+      "section": "Context compaction",
+      "label": "Context compaction form",
+      "type": "form",
+      "action": "Contains compaction toggle and token budget settings. Submit saves the context config."
+    },
+    "settings-ai-compaction": {
+      "section": "Context compaction",
+      "label": "Enable compaction",
+      "type": "toggle",
+      "action": "When enabled, the agent summarizes older conversation history to fit within the token budget."
+    },
+    "settings-ai-max-input-tokens": {
+      "section": "Context compaction",
+      "label": "Max input tokens",
+      "type": "number input",
+      "action": "Token budget for the input prompt before compaction triggers (1000–2000000). Default 12000."
+    },
+    "settings-ai-reserve-tokens": {
+      "section": "Context compaction",
+      "label": "Reserve tokens",
+      "type": "number input",
+      "action": "Tokens reserved for the model response, subtracted from the input budget (0–1000000). Default 3000."
+    },
+    "settings-ai-recent-turns": {
+      "section": "Context compaction",
+      "label": "Recent turns to keep",
+      "type": "number input",
+      "action": "Number of recent user-assistant turns preserved during compaction (1–100). Default 4."
+    },
+    "settings-ai-summary-max-chars": {
+      "section": "Context compaction",
+      "label": "Summary max characters",
+      "type": "number input",
+      "action": "Maximum character length of the compacted summary (100–1000000). Default 12000."
     },
     "add-plugin-modal": {
       "section": "Install options",

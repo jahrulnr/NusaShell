@@ -94,6 +94,19 @@ export class AgentConversationStore {
     ]);
   }
 
+  async setWorkspace(id: string, workspace: string): Promise<AgentConversation> {
+    return this.mutate(async (state) => {
+      const current = requireConversation(state, id);
+      const { workspace: _oldWs, ...rest } = current;
+      const updated: AgentConversation = {
+        ...rest,
+        ...(workspace ? { workspace } : {}),
+        updatedAt: this.now().toISOString(),
+      };
+      return [replaceConversation(state, updated), updated];
+    });
+  }
+
   private async load(): Promise<ConversationDocument> {
     if (this.state) return this.state;
     try {
@@ -150,6 +163,7 @@ function normalizeDocument(value: unknown): ConversationDocument {
       updatedAt: candidate.updatedAt,
       messages,
       ...(isCheckpoint(candidate.checkpoint) ? { checkpoint: candidate.checkpoint } : {}),
+      ...(typeof candidate.workspace === "string" && candidate.workspace ? { workspace: candidate.workspace } : {}),
     }];
   });
   return { version: 1, conversations };
@@ -197,10 +211,24 @@ function isConversationStep(value: unknown): value is AgentConversationStep {
 function isConversationToolCall(value: unknown): value is AgentConversationToolCall {
   if (typeof value !== "object" || value === null) return false;
   const call = value as Record<string, unknown>;
-  return typeof call.id === "string"
+  if (!(typeof call.id === "string"
     && typeof call.name === "string"
     && typeof call.ok === "boolean"
-    && (call.error === undefined || typeof call.error === "string");
+    && (call.error === undefined || typeof call.error === "string"))) {
+    return false;
+  }
+  if (call.args !== undefined) {
+    if (typeof call.args !== "object" || call.args === null || Array.isArray(call.args)) return false;
+    try {
+      if (JSON.stringify(call.args).length > 8_000) return false;
+    } catch {
+      return false;
+    }
+  }
+  if (call.output !== undefined && (typeof call.output !== "string" || call.output.length > 12_000)) {
+    return false;
+  }
+  return true;
 }
 
 function isConversationAttachment(value: unknown): boolean {

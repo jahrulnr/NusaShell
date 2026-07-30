@@ -189,6 +189,7 @@ export const AgentRunRequestSchema = z.object({
     userPrompt: z.string().max(10000).optional(),
     traceId: z.string().min(1).max(128).optional(),
     maxToolRounds: z.number().int().min(1).max(100).optional(),
+    workspace: z.string().max(4096).optional(),
   }),
 });
 

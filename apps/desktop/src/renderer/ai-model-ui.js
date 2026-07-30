@@ -46,7 +46,7 @@ export function clampModelEffort(model, effort) {
 export function formatTokenCount(value) {
   if (!Number.isFinite(value) || value <= 0) return "0";
   if (value >= 1_000_000) return `${Number((value / 1_000_000).toFixed(1))}M`;
-  if (value >= 1_000) return `${Math.round(value / 1_000)}K`;
+  if (value >= 1_000) return `${Math.round(value / 1_000)}k`;
   return String(value);
 }
 
@@ -55,11 +55,37 @@ export function formatContextUsage(usedTokens, contextWindow) {
   if (Number.isFinite(contextWindow) && contextWindow > 0) {
     return `${formatTokenCount(used)}/${formatTokenCount(contextWindow)} context`;
   }
-  return `${used} ctx`;
+  return `${formatTokenCount(used)} ctx`;
 }
 
 export function estimateContextTokens(messages = []) {
-  return Math.ceil(messages.reduce((total, message) => total + (typeof message.content === "string" ? message.content.length : JSON.stringify(message.content || "").length), 0) / 4);
+  return Math.ceil(messages.reduce((total, message) => total + estimateMessageChars(message), 0) / 4);
+}
+
+export function estimateTokenChars(value) {
+  if (value == null) return 0;
+  if (typeof value === "string") return value.length;
+  try {
+    return JSON.stringify(value).length;
+  } catch {
+    return String(value).length;
+  }
+}
+
+function estimateMessageChars(message) {
+  if (!message || typeof message !== "object") return 0;
+  let chars = 0;
+  if (typeof message.content === "string") chars += message.content.length;
+  else if (message.content != null) chars += estimateTokenChars(message.content);
+  if (typeof message.reasoning === "string") chars += message.reasoning.length;
+  if (message.toolCalls) chars += estimateTokenChars(message.toolCalls);
+  if (message.steps) chars += estimateTokenChars(message.steps);
+  if (message.attachments) chars += estimateTokenChars(message.attachments);
+  if (message.role === "tool") {
+    chars += estimateTokenChars(message.name);
+    chars += estimateTokenChars(message.toolCallId);
+  }
+  return chars;
 }
 
 function normalize(value) {

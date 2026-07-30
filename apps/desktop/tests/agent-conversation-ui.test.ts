@@ -4,10 +4,15 @@ import {
   composerTextareaSize,
   describeToolActivity,
   formatMessageTimestamp,
+  formatToolOutput,
+  formatToolTerminalInput,
   mergeCompactionCheckpoint,
   searchConversations,
   renderAssistantMarkdown,
   renderReasoningMarkdown,
+  renderToolCodeHtml,
+  summarizeToolArgs,
+  toConversationToolCall,
 } from "../src/renderer/agent-conversation-ui.js";
 
 describe("agent conversation UI helpers", () => {
@@ -48,14 +53,50 @@ describe("agent conversation UI helpers", () => {
     expect(searchConversations(conversations, "mcp").map((item) => item.id)).toEqual(["1"]);
   });
 
-  it("renders GFM tables while keeping raw HTML as text", () => {
+  it("renders GFM tables and sanitizes dangerous HTML", () => {
     expect(renderAssistantMarkdown("## Tools\n\n| Tool | Function |\n| --- | --- |\n| **createNote** | Create a note |\n\n<script>alert(1)</script>")).toContain("<table>");
-    expect(renderAssistantMarkdown("<script>alert(1)</script>")).toContain("&lt;script&gt;");
+    expect(renderAssistantMarkdown("<script>alert(1)</script>")).not.toContain("<script>");
+  });
+
+  it("renders safe HTML tags like br and kbd", () => {
+    expect(renderAssistantMarkdown("Line 1<br>Line 2")).toContain("<br>");
+    expect(renderAssistantMarkdown("Press <kbd>Ctrl+C</kbd> to copy")).toContain("<kbd>");
   });
 
   it("renders model reasoning as safe markdown", () => {
     expect(renderReasoningMarkdown("I should **inspect the logs** first.")).toContain("<strong>inspect the logs</strong>");
-    expect(renderReasoningMarkdown("<img src=x onerror=alert(1)>")).toContain("&lt;img");
+    expect(renderReasoningMarkdown("<img src=x onerror=alert(1)>")).not.toContain("onerror");
+  });
+
+  it("summarizes tool args and formats terminal input/output previews", () => {
+    expect(summarizeToolArgs({ path: "resources/agent/docs/ui/plugins.md" })).toBe("\"resources/agent/docs/ui/plugins.md\"");
+    expect(summarizeToolArgs({ a: 1, b: 2 })).toBe("2 args");
+    expect(formatToolTerminalInput("docs_search", { query: "dokumentasi" })).toBe("docs_search(\"dokumentasi\")");
+    expect(formatToolTerminalInput("docs_read", { path: "ui/agent.md", max_chars: 200 })).toBe("docs_read(path=\"ui/agent.md\", max_chars=200)");
+    expect(formatToolTerminalInput("docs_list", {})).toBe("docs_list()");
+    expect(formatToolOutput({ ok: true, items: ["a"] })).toContain('"ok": true');
+    expect(renderToolCodeHtml('docs_search("dokumentasi")')).toContain('class="tok-cmd"');
+    expect(renderToolCodeHtml('docs_search("dokumentasi")')).toContain('class="tok-str"');
+    expect(toConversationToolCall({
+      id: "call-1",
+      name: "docs_list",
+      ok: true,
+      args: { limit: 20 },
+      result: { docs: ["plugins.md"] },
+    })).toEqual({
+      id: "call-1",
+      name: "docs_list",
+      ok: true,
+      args: { limit: 20 },
+      output: "{\n  \"docs\": [\n    \"plugins.md\"\n  ]\n}",
+    });
+  });
+
+  it("does not auto-link .md filenames in reasoning as blue Moldova URLs", () => {
+    const html = renderReasoningMarkdown('Read "mcp-tools.md" or "plugins.md" next.');
+    expect(html).not.toContain("<a ");
+    expect(html).toContain("mcp-tools.md");
+    expect(html).toContain("plugins.md");
   });
 
   it("formats persisted message timestamps as compact local metadata", () => {

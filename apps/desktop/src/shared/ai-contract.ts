@@ -53,6 +53,13 @@ export interface AiRegistrySettings {
   readonly stream: boolean;
   readonly vision: "auto" | "on" | "off";
   readonly userPrompt: string;
+  readonly maxToolRounds: number;
+  readonly maxRepeatedToolCalls: number;
+  readonly compactionEnabled: boolean;
+  readonly maxInputTokens: number;
+  readonly reserveTokens: number;
+  readonly recentTurns: number;
+  readonly summaryMaxChars: number;
   readonly providers: readonly AiProviderSettings[];
 }
 
@@ -90,6 +97,13 @@ export interface PublicAiRegistry {
   readonly stream: boolean;
   readonly vision: AiRegistrySettings["vision"];
   readonly userPrompt: string;
+  readonly maxToolRounds: number;
+  readonly maxRepeatedToolCalls: number;
+  readonly compactionEnabled: boolean;
+  readonly maxInputTokens: number;
+  readonly reserveTokens: number;
+  readonly recentTurns: number;
+  readonly summaryMaxChars: number;
   readonly canPersistApiKey: boolean;
   readonly providers: readonly PublicAiProvider[];
   readonly models: readonly AgentModelOption[];

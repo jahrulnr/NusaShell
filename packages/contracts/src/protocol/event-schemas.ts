@@ -119,6 +119,7 @@ export const AgentToolCallStartEventSchema = z.object({
     traceId: z.string().min(1),
     callId: z.string(),
     name: z.string(),
+    args: z.record(z.string(), z.unknown()).optional(),
     timestamp: z.string(),
   }),
 });
@@ -133,6 +134,21 @@ export const AgentToolCallEndEventSchema = z.object({
     name: z.string(),
     ok: z.boolean(),
     error: z.string().optional(),
+    args: z.record(z.string(), z.unknown()).optional(),
+    output: z.string().max(12_000).optional(),
+    timestamp: z.string(),
+  }),
+});
+
+export const AgentContextEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("agent.context"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    traceId: z.string().min(1),
+    estimatedTokens: z.number().int().nonnegative(),
+    inputTokens: z.number().int().nonnegative().optional(),
+    outputTokens: z.number().int().nonnegative().optional(),
     timestamp: z.string(),
   }),
 });
@@ -149,6 +165,7 @@ export const EventSchema = z.discriminatedUnion("event", [
   AgentReasoningDeltaEventSchema,
   AgentToolCallStartEventSchema,
   AgentToolCallEndEventSchema,
+  AgentContextEventSchema,
 ]);
 
 export type PluginInstalledEvent = z.infer<typeof PluginInstalledEventSchema>;
@@ -162,4 +179,5 @@ export type AgentTextDeltaEvent = z.infer<typeof AgentTextDeltaEventSchema>;
 export type AgentReasoningDeltaEvent = z.infer<typeof AgentReasoningDeltaEventSchema>;
 export type AgentToolCallStartEvent = z.infer<typeof AgentToolCallStartEventSchema>;
 export type AgentToolCallEndEvent = z.infer<typeof AgentToolCallEndEventSchema>;
+export type AgentContextEvent = z.infer<typeof AgentContextEventSchema>;
 export type ParsedEvent = z.infer<typeof EventSchema>;

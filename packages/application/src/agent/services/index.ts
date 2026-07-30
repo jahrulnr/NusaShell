@@ -6,6 +6,7 @@ export {
   type AgentCompactionCheckpoint,
   type AgentContextOptions,
   type AgentToolExecution,
+  type AgentContextUpdate,
 } from "./agent-turn-runner.js";
 export { McpAgentToolGateway } from "./mcp-agent-tool-gateway.js";
 export { InProcessAgentTurnWorker, type AgentTurnWorker } from "./in-process-agent-turn-worker.js";

@@ -9,6 +9,11 @@ const vars: PromptVars = {
   availableTools: "mcp_list, tool_list, tool_search, tool_schema",
 };
 
+const varsWithWorkspace: PromptVars = {
+  ...vars,
+  workspace: "/home/user/projects/myapp",
+};
+
 const prompts: AgentPrompt[] = [
   { name: "system", content: "You are the NusaShell agent.", isTemplate: false },
   { name: "mcp-tools", content: "Use tool_list to discover tools.", isTemplate: false },
@@ -24,6 +29,16 @@ describe("applyVars", () => {
   it("leaves unknown variables as-is", () => {
     const result = applyVars("{{unknown_var}} stays", vars);
     expect(result).toBe("{{unknown_var}} stays");
+  });
+
+  it("substitutes {{workspace}} when provided", () => {
+    const result = applyVars("Workspace: {{workspace}}", varsWithWorkspace);
+    expect(result).toBe("Workspace: /home/user/projects/myapp");
+  });
+
+  it("falls back to home directory when workspace is not provided", () => {
+    const result = applyVars("Workspace: {{workspace}}", vars);
+    expect(result).toBe("Workspace: the user's home directory");
   });
 });
 

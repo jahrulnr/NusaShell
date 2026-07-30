@@ -45,10 +45,12 @@ import {
   RunAgentTurnHandler,
   CancelAgentTurnHandler,
   AgentTurnCoordinator,
+  type AgentRuntimeSettings,
   createAgentTextDeltaEvent,
   createAgentReasoningDeltaEvent,
   createAgentToolCallStartEvent,
   createAgentToolCallEndEvent,
+  createAgentContextUpdateEvent,
   type AgentProvider,
   SystemPingHandler,
   SystemVersionHandler,
@@ -81,6 +83,7 @@ export interface ContainerOptions {
     readonly baseUrl?: string;
     readonly apiKey?: string;
     readonly maxToolRounds: number;
+    readonly maxRepeatedToolCalls?: number;
     readonly strategy?: "failover" | "round-robin" | "switch";
     readonly totalAttemptBudget?: number;
     readonly stream?: boolean;
@@ -130,6 +133,13 @@ export interface Container {
     stream: boolean;
     vision: "auto" | "on" | "off";
     userPrompt: string;
+    maxToolRounds?: number;
+    maxRepeatedToolCalls?: number;
+    compactionEnabled?: boolean;
+    maxInputTokens?: number;
+    reserveTokens?: number;
+    recentTurns?: number;
+    summaryMaxChars?: number;
   }): void;
   removeAi(providerId: string): void;
 }
@@ -161,12 +171,15 @@ export function createContainer(options: ContainerOptions): Container {
   const mcpClientFactory = new McpClientFactory(logger);
 
   const eventDispatcher = new EventDispatcher();
-  const aiRuntime = {
+  const aiRuntime: AgentRuntimeSettings & { stream: boolean; vision: "auto" | "on" | "off"; userPrompt: string } = {
     strategy: options.ai?.strategy ?? "failover" as "failover" | "round-robin" | "switch",
     totalAttemptBudget: options.ai?.totalAttemptBudget ?? 4,
     stream: options.ai?.stream ?? true,
     vision: options.ai?.vision ?? "auto" as "auto" | "on" | "off",
     userPrompt: options.ai?.userPrompt ?? "",
+    maxToolRounds: options.ai?.maxToolRounds ?? 50,
+    maxRepeatedToolCalls: options.ai?.maxRepeatedToolCalls ?? 50,
+    ...(options.ai?.context ? { context: options.ai.context } : {}),
   };
 
   const pluginInstaller = options.pluginsRoot
@@ -225,10 +238,8 @@ export function createContainer(options: ContainerOptions): Container {
     agentProviderRegistry,
     agentToolGateway,
     options.ai?.providerId || (options.ai?.stubEnabled ? "stub" : ""),
-    options.ai?.maxToolRounds ?? 50,
-    logger,
-    options.ai?.context,
     aiRuntime,
+    logger,
     agentTurnCoordinator,
     (traceId, delta) => {
       void eventDispatcher.publish(createAgentTextDeltaEvent(traceId, delta));
@@ -241,6 +252,9 @@ export function createContainer(options: ContainerOptions): Container {
     },
     (traceId, execution) => {
       void eventDispatcher.publish(createAgentToolCallEndEvent(traceId, execution));
+    },
+    (traceId, update) => {
+      void eventDispatcher.publish(createAgentContextUpdateEvent(traceId, update.estimatedTokens, update.usage));
     },
     promptLoader,
     aiRuntime.userPrompt,
@@ -318,6 +332,17 @@ export function createContainer(options: ContainerOptions): Container {
       aiRuntime.stream = settings.stream;
       aiRuntime.vision = settings.vision;
       aiRuntime.userPrompt = settings.userPrompt;
+      if (typeof settings.maxToolRounds === "number") aiRuntime.maxToolRounds = settings.maxToolRounds;
+      if (typeof settings.maxRepeatedToolCalls === "number") aiRuntime.maxRepeatedToolCalls = settings.maxRepeatedToolCalls;
+      if (typeof settings.compactionEnabled === "boolean" || typeof settings.maxInputTokens === "number" || typeof settings.reserveTokens === "number" || typeof settings.recentTurns === "number" || typeof settings.summaryMaxChars === "number") {
+        aiRuntime.context = {
+          compactionEnabled: typeof settings.compactionEnabled === "boolean" ? settings.compactionEnabled : aiRuntime.context?.compactionEnabled ?? true,
+          maxInputTokens: typeof settings.maxInputTokens === "number" ? settings.maxInputTokens : aiRuntime.context?.maxInputTokens ?? 12000,
+          reserveTokens: typeof settings.reserveTokens === "number" ? settings.reserveTokens : aiRuntime.context?.reserveTokens ?? 3000,
+          recentTurns: typeof settings.recentTurns === "number" ? settings.recentTurns : aiRuntime.context?.recentTurns ?? 4,
+          summaryMaxChars: typeof settings.summaryMaxChars === "number" ? settings.summaryMaxChars : aiRuntime.context?.summaryMaxChars ?? 12000,
+        };
+      }
     },
   };
 }

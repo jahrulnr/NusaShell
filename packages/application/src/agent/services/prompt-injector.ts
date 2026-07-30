@@ -5,6 +5,7 @@ export interface PromptVars {
   readonly currentDate: string;
   readonly environment: string;
   readonly availableTools: string;
+  readonly workspace?: string;
 }
 
 const STATIC_PROMPT_NAMES = ["system", "mcp-tools"];
@@ -60,5 +61,6 @@ export function applyVars(text: string, vars: PromptVars): string {
   return text
     .replace(/\{\{current_date\}\}/g, vars.currentDate)
     .replace(/\{\{environment\}\}/g, vars.environment)
-    .replace(/\{\{available_tools\}\}/g, vars.availableTools);
+    .replace(/\{\{available_tools\}\}/g, vars.availableTools)
+    .replace(/\{\{workspace\}\}/g, vars.workspace || "the user's home directory");
 }

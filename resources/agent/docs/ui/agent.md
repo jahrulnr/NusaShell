@@ -41,7 +41,7 @@ A fixed workbench rail listing local conversation threads. Click a thread to ope
 
 ## Conversation thread
 
-The full-height message runway separates compact user cards from editorial assistant responses. User attachments render as image previews or file cards. Provider reasoning is persisted and appears before the answer in a collapsed Thinking disclosure with sanitized Markdown; models that return no reasoning show no placeholder. Completed tool calls form a collapsible status timeline based on real turn results. Message footers expose timestamps, model/trace metadata, copy, and retry where applicable. Only this area scrolls.
+The full-height message runway separates compact user cards from editorial assistant responses. User attachments render as image previews or file cards. Provider reasoning is persisted and appears before the answer in a collapsed Thinking disclosure with sanitized Markdown; models that return no reasoning show no placeholder. Completed tool calls render as expandable terminal cards with the tool name in the header and full args/output in the body. Message footers expose timestamps, model/trace metadata, copy, and retry where applicable. Only this area scrolls.
 
 - **Conversation thread** (`#agent-thread`):
   - Section: Conversation thread
@@ -73,10 +73,10 @@ The full-height message runway separates compact user cards from editorial assis
   - Type: disclosure
   - Action: Appears when the provider returns reasoning or a thinking summary. Expand it to inspect sanitized Markdown; it is collapsed by default and remains available after reopening the conversation.
 
-- **Tool activity** (`.agent-activity`):
+- **Tool terminal** (`.agent-tool-terminal`):
   - Section: Conversation thread
   - Type: disclosure
-  - Action: Expands or collapses the completed tool-call timeline. Each row reports the persisted tool name and success or failure state without implying live progress.
+  - Action: Timeline-style expandable tool call. Header keeps the ›_ rail badge plus tool name and status. Expand to inspect nested tool and Output panels with args and truncated result text.
 
 - **Copy message** (`.agent-message-action`):
   - Section: Conversation thread

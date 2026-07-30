@@ -192,6 +192,10 @@
                     <div class="agent-model-list" id="agent-model-list" role="listbox" aria-label="Available models"></div>
                   </div>
                 </div>
+                <button class="agent-workspace-btn" id="agent-workspace-btn" type="button" aria-label="Choose workspace folder" title="Workspace">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  <span id="agent-workspace-label">Home</span>
+                </button>
                 <span class="agent-provider-status" id="agent-provider-status">Choose a model</span>
                 <span class="agent-key-hint">Ctrl + Enter</span>
                 <button class="agent-stop-btn" id="agent-stop-btn" type="button" aria-label="Stop turn" title="Stop turn" hidden>
@@ -335,8 +339,10 @@
 
       <!-- ===== View: Settings ===== -->
       <section class="view" data-view="settings">
-        <h1 class="page-title">Settings</h1>
-        <p class="subtitle">System configuration and preferences.</p>
+        <div class="settings-header">
+          <h1 class="page-title">Settings</h1>
+          <p class="subtitle">System configuration and preferences.</p>
+        </div>
 
         <div class="settings-grid">
           <div class="settings-card">
@@ -367,6 +373,22 @@
             <div class="settings-row"><span>Applies without restart</span><button class="mini-btn" type="submit">Save runtime</button></div>
           </form>
 
+          <form class="settings-card" id="ai-limits-form">
+            <div class="settings-card-title">Agent limits</div>
+            <label class="settings-field">Max tool rounds<input id="settings-ai-max-tool-rounds" type="number" min="1" max="100" value="50"><span class="settings-field-help">Maximum number of tool-call rounds per agent turn.</span></label>
+            <label class="settings-field">Max repeated tool calls<input id="settings-ai-max-repeated-tool-calls" type="number" min="1" max="200" value="50"><span class="settings-field-help">Stop the agent if the same tool call repeats this many times.</span></label>
+            <div class="settings-row"><span>Applies without restart</span><button class="mini-btn" type="submit">Save limits</button></div>
+          </form>
+
+          <form class="settings-card" id="ai-context-form">
+            <div class="settings-card-title">Context compaction</div>
+            <div class="settings-row"><span>Enable compaction</span><label class="toggle"><input id="settings-ai-compaction" type="checkbox" checked><span class="toggle-slider"></span></label></div>
+            <label class="settings-field">Max input tokens<input id="settings-ai-max-input-tokens" type="number" min="1000" max="2000000" step="1000" value="12000"><span class="settings-field-help">Token budget for the input prompt before compaction triggers.</span></label>
+            <label class="settings-field">Reserve tokens<input id="settings-ai-reserve-tokens" type="number" min="0" max="1000000" step="500" value="3000"><span class="settings-field-help">Tokens reserved for the model response, subtracted from the input budget.</span></label>
+            <label class="settings-field">Recent turns to keep<input id="settings-ai-recent-turns" type="number" min="1" max="100" value="4"><span class="settings-field-help">Number of recent user-assistant turns preserved during compaction.</span></label>
+            <label class="settings-field">Summary max characters<input id="settings-ai-summary-max-chars" type="number" min="100" max="1000000" step="100" value="12000"><span class="settings-field-help">Maximum character length of the compacted summary.</span></label>
+            <div class="settings-row"><span>Applies without restart</span><button class="mini-btn" type="submit">Save context</button></div>
+          </form>
 
           <div class="settings-card">
             <div class="settings-card-title">About</div>
