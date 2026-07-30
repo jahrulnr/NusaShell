@@ -52,6 +52,7 @@ export interface AiRegistrySettings {
   readonly totalAttemptBudget: number;
   readonly stream: boolean;
   readonly vision: "auto" | "on" | "off";
+  readonly userPrompt: string;
   readonly providers: readonly AiProviderSettings[];
 }
 
@@ -88,6 +89,7 @@ export interface PublicAiRegistry {
   readonly totalAttemptBudget: number;
   readonly stream: boolean;
   readonly vision: AiRegistrySettings["vision"];
+  readonly userPrompt: string;
   readonly canPersistApiKey: boolean;
   readonly providers: readonly PublicAiProvider[];
   readonly models: readonly AgentModelOption[];

@@ -17,7 +17,7 @@ describe("AiSettingsStore", () => {
   it("saves a configured provider without requiring a default model and never exposes its key", async () => {
     const directory = await mkdtemp(join(tmpdir(), "nusashell-ai-settings-"));
     const path = join(directory, "ai-settings.json");
-    const store = new AiSettingsStore(path);
+    const store = new AiSettingsStore(path, join(directory, "user-prompt.md"));
 
     const result = await store.saveProvider({
       id: "omniroute",
@@ -42,7 +42,7 @@ describe("AiSettingsStore", () => {
 
   it("preserves a saved key when provider details are updated with a blank key", async () => {
     const directory = await mkdtemp(join(tmpdir(), "nusashell-ai-settings-"));
-    const store = new AiSettingsStore(join(directory, "ai-settings.json"));
+    const store = new AiSettingsStore(join(directory, "ai-settings.json"), join(directory, "user-prompt.md"));
     await store.saveProvider({
       id: "openrouter",
       name: "OpenRouter",
@@ -73,7 +73,7 @@ describe("AiSettingsStore", () => {
 
   it("clears a selected model and moves the active provider when its provider is disabled", async () => {
     const directory = await mkdtemp(join(tmpdir(), "nusashell-ai-settings-"));
-    const store = new AiSettingsStore(join(directory, "ai-settings.json"));
+    const store = new AiSettingsStore(join(directory, "ai-settings.json"), join(directory, "user-prompt.md"));
     for (const id of ["first", "second"]) {
       await store.saveProvider({
         id,
@@ -108,7 +108,8 @@ describe("AiSettingsStore", () => {
   it("deletes a provider, its models, credential, and stale active selection", async () => {
     const directory = await mkdtemp(join(tmpdir(), "nusashell-ai-settings-"));
     const path = join(directory, "ai-settings.json");
-    const store = new AiSettingsStore(path);
+    const userPromptPath = join(directory, "user-prompt.md");
+    const store = new AiSettingsStore(path, userPromptPath);
     await store.saveProvider({
       id: "openrouter",
       name: "OpenRouter",
@@ -140,7 +141,7 @@ describe("AiSettingsStore", () => {
     expect(result.activeProviderId).toBe("openrouter");
     expect(result.activeModelKey).toBe("");
     expect(result.effort).toBe("auto");
-    const reloaded = await new AiSettingsStore(path).load();
+    const reloaded = await new AiSettingsStore(path, userPromptPath).load();
     expect(reloaded.providers.map((provider) => provider.id)).toEqual(["openrouter"]);
     expect(reloaded.providers[0]?.apiKey).toBe("remaining-secret");
     expect(await readFile(path, "utf8")).not.toContain("omniroute");
@@ -148,7 +149,7 @@ describe("AiSettingsStore", () => {
 
   it("treats deleting an unknown provider as an idempotent no-op", async () => {
     const directory = await mkdtemp(join(tmpdir(), "nusashell-ai-settings-"));
-    const store = new AiSettingsStore(join(directory, "ai-settings.json"));
+    const store = new AiSettingsStore(join(directory, "ai-settings.json"), join(directory, "user-prompt.md"));
 
     await expect(store.deleteProvider("missing")).resolves.toMatchObject({
       activeProviderId: "",
@@ -160,13 +161,15 @@ describe("AiSettingsStore", () => {
   it("persists hot-reloadable routing, streaming, and vision settings", async () => {
     const directory = await mkdtemp(join(tmpdir(), "nusashell-ai-settings-"));
     const path = join(directory, "ai-settings.json");
-    const store = new AiSettingsStore(path);
+    const userPromptPath = join(directory, "user-prompt.md");
+    const store = new AiSettingsStore(path, userPromptPath);
 
     const result = await store.updateRuntime({
       strategy: "round-robin",
       totalAttemptBudget: 7,
       stream: false,
       vision: "off",
+      userPrompt: "Be concise.",
     });
 
     expect(result).toMatchObject({
@@ -174,13 +177,16 @@ describe("AiSettingsStore", () => {
       totalAttemptBudget: 7,
       stream: false,
       vision: "off",
+      userPrompt: "Be concise.",
     });
-    await expect(new AiSettingsStore(path).load()).resolves.toMatchObject({
+    await expect(new AiSettingsStore(path, userPromptPath).load()).resolves.toMatchObject({
       strategy: "round-robin",
       totalAttemptBudget: 7,
       stream: false,
       vision: "off",
+      userPrompt: "Be concise.",
     });
+    await expect(readFile(userPromptPath, "utf8")).resolves.toBe("Be concise.");
   });
 
   it("does not replace a corrupt provider registry with empty settings", async () => {
@@ -188,7 +194,7 @@ describe("AiSettingsStore", () => {
     const path = join(directory, "ai-settings.json");
     await writeFile(path, "{not-json", "utf8");
 
-    await expect(new AiSettingsStore(path).load()).rejects.toThrow("Could not load AI settings");
+    await expect(new AiSettingsStore(path, join(directory, "user-prompt.md")).load()).rejects.toThrow("Could not load AI settings");
     expect(await readFile(path, "utf8")).toBe("{not-json");
   });
 });

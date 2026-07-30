@@ -19,6 +19,7 @@ export interface AiConfig {
   readonly totalAttemptBudget: number;
   readonly stream: boolean;
   readonly vision: "auto" | "on" | "off";
+  readonly userPrompt: string;
   readonly timeoutMs: number;
   readonly retry: {
     readonly attemptBudget: number;
@@ -56,6 +57,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       vision: env.NUSASHELL_AI_VISION === "on" || env.NUSASHELL_AI_VISION === "off"
         ? env.NUSASHELL_AI_VISION
         : "auto",
+      userPrompt: env.NUSASHELL_AI_USER_PROMPT ?? "",
       timeoutMs: integerInRange(env.NUSASHELL_AI_TIMEOUT_MS, 1000, 600_000, 60_000),
       retry: {
         attemptBudget: integerInRange(env.NUSASHELL_AI_RETRY_ATTEMPTS, 1, 10, 4),

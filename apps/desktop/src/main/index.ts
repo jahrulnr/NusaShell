@@ -109,7 +109,10 @@ async function startBackend(): Promise<BootstrapResult> {
   // SQLite requires better-sqlite3 native module rebuilt for Electron's ABI.
   // Until that's set up, default to filesystem registry. Set NUSASHELL_DB_PATH to opt in.
   const dbPath = process.env.NUSASHELL_DB_PATH || undefined;
-  aiSettingsStore = new AiSettingsStore(resolve(app.getPath("userData"), "ai-settings.json"));
+  aiSettingsStore = new AiSettingsStore(
+    resolve(app.getPath("userData"), "ai-settings.json"),
+    resolve(app.getPath("userData"), "user-prompt.md"),
+  );
   aiSettings = await aiSettingsStore.load();
   const activeProvider = aiSettings.providers.find((provider) => provider.id === aiSettings?.activeProviderId);
   const activeModel = flattenModelCatalog(aiSettings.providers).find((model) => model.key === aiSettings?.activeModelKey);
@@ -132,6 +135,7 @@ async function startBackend(): Promise<BootstrapResult> {
       totalAttemptBudget: aiSettings.totalAttemptBudget,
       stream: aiSettings.stream,
       vision: aiSettings.vision,
+      userPrompt: aiSettings.userPrompt,
       timeoutMs: activeProvider?.timeoutMs ?? aiRuntimeConfig.timeoutMs,
       retry: {
         ...aiRuntimeConfig.retry,
@@ -303,7 +307,7 @@ app.whenReady().then(async () => {
     aiSettings = await aiSettingsStore.load();
     return result;
   });
-  ipcMain.handle("ai-providers:update-runtime", async (_event, input: Pick<AiRegistrySettings, "strategy" | "totalAttemptBudget" | "stream" | "vision">) => {
+  ipcMain.handle("ai-providers:update-runtime", async (_event, input: Pick<AiRegistrySettings, "strategy" | "totalAttemptBudget" | "stream" | "vision" | "userPrompt">) => {
     if (!aiSettingsStore || !backend) throw new Error("Backend not ready");
     const result = await aiSettingsStore.updateRuntime(input);
     aiSettings = await aiSettingsStore.load();
@@ -312,6 +316,7 @@ app.whenReady().then(async () => {
       totalAttemptBudget: aiSettings.totalAttemptBudget,
       stream: aiSettings.stream,
       vision: aiSettings.vision,
+      userPrompt: aiSettings.userPrompt,
     });
     for (const provider of aiSettings.providers) {
       backend.container.removeAi(provider.id);

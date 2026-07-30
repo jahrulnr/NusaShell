@@ -98,4 +98,24 @@ describe("injectPrompts", () => {
     const result = injectPrompts([], vars, messages);
     expect(result).toEqual(messages);
   });
+
+  it("injects user prompt after static prompts and before developer prompt", () => {
+    const messages: AgentMessage[] = [{ role: "user", content: "hi" }];
+    const result = injectPrompts(prompts, vars, messages, "Be concise.");
+    expect(result).toHaveLength(5);
+    expect(result[0]).toEqual({ role: "system", content: "You are the NusaShell agent." });
+    expect(result[1]).toEqual({ role: "system", content: "Use tool_list to discover tools." });
+    expect(result[2]).toEqual({ role: "system", content: "Be concise." });
+    expect(result[3]).toMatchObject({ role: "system" });
+    expect((result[3] as { content: string }).content).toContain("2026-07-29");
+    expect(result[4]).toEqual({ role: "user", content: "hi" });
+  });
+
+  it("skips user prompt when it is empty or undefined", () => {
+    const messages: AgentMessage[] = [{ role: "user", content: "hi" }];
+    const withUndefined = injectPrompts(prompts, vars, messages);
+    const withEmpty = injectPrompts(prompts, vars, messages, "");
+    expect(withUndefined).toEqual(withEmpty);
+    expect(withEmpty).toHaveLength(4);
+  });
 });

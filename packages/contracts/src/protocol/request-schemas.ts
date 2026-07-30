@@ -186,6 +186,7 @@ export const AgentRunRequestSchema = z.object({
     model: z.string().min(1).max(200).optional(),
     effort: z.enum(["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
     modelCapabilities: AgentModelCapabilitiesSchema.optional(),
+    userPrompt: z.string().max(10000).optional(),
     traceId: z.string().min(1).max(128).optional(),
     maxToolRounds: z.number().int().min(1).max(100).optional(),
   }),

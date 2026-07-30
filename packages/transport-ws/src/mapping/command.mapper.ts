@@ -93,6 +93,7 @@ export function mapToCommand(request: ParsedRequest):
           ...(request.payload.model !== undefined ? { model: request.payload.model } : {}),
           ...(request.payload.effort !== undefined ? { effort: request.payload.effort } : {}),
           ...(request.payload.modelCapabilities !== undefined ? { modelCapabilities: request.payload.modelCapabilities } : {}),
+          ...(request.payload.userPrompt !== undefined ? { userPrompt: request.payload.userPrompt } : {}),
           ...(request.payload.traceId !== undefined ? { traceId: request.payload.traceId } : {}),
           ...(request.payload.maxToolRounds !== undefined ? { maxToolRounds: request.payload.maxToolRounds } : {}),
         } as RunAgentTurnCommand,

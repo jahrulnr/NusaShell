@@ -12,13 +12,15 @@ const STATIC_PROMPT_NAMES = ["system", "mcp-tools"];
 /**
  * Prepend system and developer prompts before conversation messages.
  * Static prompts are injected as-is; the developer prompt gets {{var}}
- * substitution. Compaction summary messages from the conversation are
- * preserved between the developer prompt and user messages.
+ * substitution. A user-supplied prompt is injected after the static prompts
+ * and before the developer prompt. Compaction summary messages from the
+ * conversation are preserved between the developer prompt and user messages.
  */
 export function injectPrompts(
   prompts: readonly AgentPrompt[],
   vars: PromptVars,
   messages: readonly AgentMessage[],
+  userPrompt?: string,
 ): AgentMessage[] {
   const staticPrompts = prompts.filter(
     (prompt) => STATIC_PROMPT_NAMES.includes(prompt.name) && !prompt.isTemplate,
@@ -31,6 +33,10 @@ export function injectPrompts(
 
   for (const prompt of staticPrompts) {
     out.push({ role: "system", content: prompt.content });
+  }
+
+  if (userPrompt) {
+    out.push({ role: "system", content: userPrompt });
   }
 
   if (developerPrompt) {

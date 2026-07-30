@@ -38,6 +38,7 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
     private readonly onToolCallStart?: (traceId: string, call: AgentToolCall) => void,
     private readonly onToolCallEnd?: (traceId: string, execution: AgentToolExecution) => void,
     private readonly promptLoader?: PromptLoaderPort,
+    private readonly userPrompt: string = "",
   ) {}
 
   async handle(command: RunAgentTurnCommand): Promise<AgentTurnResult> {
@@ -90,7 +91,7 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
         environment: process.env.NODE_ENV === "production" ? "production" : "development",
         availableTools: tools.map((tool) => tool.name).join(", "),
       };
-      return injectPrompts(prompts, vars, command.messages);
+      return injectPrompts(prompts, vars, command.messages, command.userPrompt ?? this.userPrompt);
     } catch (error) {
       this.logger?.warn("Prompt injection failed, sending raw messages: %s", error instanceof Error ? error.message : String(error));
       return command.messages;

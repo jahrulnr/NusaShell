@@ -85,6 +85,7 @@ export interface ContainerOptions {
     readonly totalAttemptBudget?: number;
     readonly stream?: boolean;
     readonly vision?: "auto" | "on" | "off";
+    readonly userPrompt?: string;
     readonly timeoutMs?: number;
     readonly retry?: {
       readonly attemptBudget: number;
@@ -128,6 +129,7 @@ export interface Container {
     totalAttemptBudget: number;
     stream: boolean;
     vision: "auto" | "on" | "off";
+    userPrompt: string;
   }): void;
   removeAi(providerId: string): void;
 }
@@ -164,6 +166,7 @@ export function createContainer(options: ContainerOptions): Container {
     totalAttemptBudget: options.ai?.totalAttemptBudget ?? 4,
     stream: options.ai?.stream ?? true,
     vision: options.ai?.vision ?? "auto" as "auto" | "on" | "off",
+    userPrompt: options.ai?.userPrompt ?? "",
   };
 
   const pluginInstaller = options.pluginsRoot
@@ -240,6 +243,7 @@ export function createContainer(options: ContainerOptions): Container {
       void eventDispatcher.publish(createAgentToolCallEndEvent(traceId, execution));
     },
     promptLoader,
+    aiRuntime.userPrompt,
   ));
   commandBus.register("cancel-agent-turn", new CancelAgentTurnHandler(agentTurnCoordinator));
   if (pluginInstaller) {
@@ -313,6 +317,7 @@ export function createContainer(options: ContainerOptions): Container {
       aiRuntime.totalAttemptBudget = settings.totalAttemptBudget;
       aiRuntime.stream = settings.stream;
       aiRuntime.vision = settings.vision;
+      aiRuntime.userPrompt = settings.userPrompt;
     },
   };
 }

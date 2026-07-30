@@ -16,6 +16,7 @@ describe("AI provider registry", () => {
       totalAttemptBudget: 4,
       stream: true,
       vision: "auto",
+      userPrompt: "",
       providers: [],
     });
   });

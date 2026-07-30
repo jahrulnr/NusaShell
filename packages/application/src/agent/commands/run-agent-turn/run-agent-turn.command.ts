@@ -14,5 +14,6 @@ export interface RunAgentTurnCommand extends Command {
   readonly model?: string;
   readonly effort?: ReasoningEffort;
   readonly modelCapabilities?: AgentModelCapabilities;
+  readonly userPrompt?: string;
   readonly traceId?: string;
 }

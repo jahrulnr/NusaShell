@@ -395,6 +395,7 @@ async function runAgentTurn(messages, options = {}) {
       providerId: selected.providerId,
       model: selected.id,
       effort: aiSettings.effort,
+      userPrompt: aiSettings.userPrompt,
       modelCapabilities: {
         contextWindow: selected.contextWindow,
         maxOutput: selected.maxOutput,
@@ -1059,6 +1060,7 @@ document.addEventListener("DOMContentLoaded", () => {
     $("#settings-ai-budget").value = aiSettings.totalAttemptBudget || 4;
     $("#settings-ai-stream").checked = aiSettings.stream !== false;
     $("#settings-ai-vision").value = aiSettings.vision || "auto";
+    $("#settings-ai-user-prompt").value = aiSettings.userPrompt || "";
   };
 
   const selectAgentModel = async (modelKey, effort) => {
@@ -1206,6 +1208,7 @@ document.addEventListener("DOMContentLoaded", () => {
         totalAttemptBudget: Number($("#settings-ai-budget").value),
         stream: $("#settings-ai-stream").checked,
         vision: $("#settings-ai-vision").value,
+        userPrompt: $("#settings-ai-user-prompt").value,
       });
       syncAiControls();
       showToast("Agent runtime saved.", "success");

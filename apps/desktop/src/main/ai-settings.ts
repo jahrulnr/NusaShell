@@ -19,16 +19,21 @@ import { normalizeProviderInput } from "./ai-provider-definitions.js";
 export class AiSettingsStore {
   private state: AiRegistrySettings | null = null;
 
-  constructor(private readonly path: string) {}
+  constructor(
+    private readonly path: string,
+    private readonly userPromptPath: string,
+  ) {}
 
   async load(): Promise<AiRegistrySettings> {
     if (this.state) return this.state;
     try {
       const raw = JSON.parse(await readFile(this.path, "utf8")) as Record<string, unknown>;
-      this.state = normalizeRegistryState(decryptStoredKeys(raw));
+      const userPrompt = await this.loadUserPrompt();
+      this.state = normalizeRegistryState({ ...decryptStoredKeys(raw), userPrompt });
     } catch (error) {
       if (isFileNotFound(error)) {
-        this.state = normalizeRegistryState({});
+        const userPrompt = await this.loadUserPrompt().catch(() => "");
+        this.state = normalizeRegistryState({ userPrompt });
       } else {
         throw new Error("Could not load AI settings", { cause: error });
       }
@@ -189,14 +194,18 @@ export class AiSettingsStore {
     readonly totalAttemptBudget?: number;
     readonly stream?: boolean;
     readonly vision?: AiRegistrySettings["vision"];
+    readonly userPrompt?: string;
   }): Promise<PublicAiRegistry> {
     const current = await this.load();
+    const userPrompt = typeof input.userPrompt === "string" ? input.userPrompt.trim() : current.userPrompt;
+    await this.persistUserPrompt(userPrompt);
     this.state = {
       ...current,
       strategy: input.strategy === "round-robin" || input.strategy === "switch" ? input.strategy : "failover",
       totalAttemptBudget: integerInRange(input.totalAttemptBudget, 1, 32, current.totalAttemptBudget),
       stream: input.stream !== false,
       vision: input.vision === "on" || input.vision === "off" ? input.vision : "auto",
+      userPrompt,
     };
     await this.persist(this.state);
     return this.public(this.state);
@@ -211,6 +220,7 @@ export class AiSettingsStore {
       totalAttemptBudget: settings.totalAttemptBudget,
       stream: settings.stream,
       vision: settings.vision,
+      userPrompt: settings.userPrompt,
       canPersistApiKey: safeStorage.isEncryptionAvailable(),
       providers: settings.providers.map(({ apiKey, ...provider }) => ({
         ...provider,
@@ -226,9 +236,28 @@ export class AiSettingsStore {
       ...provider,
       ...(provider.apiKey ? { apiKey: safeStorage.encryptString(provider.apiKey).toString("base64") } : {}),
     }));
+    const { userPrompt: _userPrompt, ...settingsToPersist } = settings;
     const temporaryPath = `${this.path}.tmp`;
-    await writeFile(temporaryPath, JSON.stringify({ ...settings, providers }, null, 2), { mode: 0o600 });
+    await writeFile(temporaryPath, JSON.stringify({ ...settingsToPersist, providers }, null, 2), { mode: 0o600 });
     await rename(temporaryPath, this.path);
+  }
+
+  private async loadUserPrompt(): Promise<string> {
+    try {
+      return (await readFile(this.userPromptPath, "utf8")).trim();
+    } catch (error) {
+      if (isFileNotFound(error)) {
+        return "";
+      }
+      throw new Error("Could not load user prompt", { cause: error });
+    }
+  }
+
+  private async persistUserPrompt(userPrompt: string): Promise<void> {
+    await mkdir(dirname(this.userPromptPath), { recursive: true });
+    const temporaryPath = `${this.userPromptPath}.tmp`;
+    await writeFile(temporaryPath, userPrompt, { mode: 0o600 });
+    await rename(temporaryPath, this.userPromptPath);
   }
 }
 

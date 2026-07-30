@@ -50,6 +50,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
       totalAttemptBudget: config.ai.totalAttemptBudget,
       stream: config.ai.stream,
       vision: config.ai.vision,
+      userPrompt: config.ai.userPrompt,
       timeoutMs: config.ai.timeoutMs,
       retry: config.ai.retry,
       context: config.ai.context,

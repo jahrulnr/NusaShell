@@ -46,6 +46,7 @@ export function normalizeRegistryState(raw: unknown): AiRegistrySettings {
       totalAttemptBudget: integerInRange(value.totalAttemptBudget, 1, 32, 4),
       stream: value.stream !== false,
       vision: normalizeVision(value.vision),
+      userPrompt: text(value.userPrompt),
       providers,
     };
   }
@@ -60,6 +61,7 @@ export function normalizeRegistryState(raw: unknown): AiRegistrySettings {
       totalAttemptBudget: 4,
       stream: true,
       vision: "auto",
+      userPrompt: text(value.userPrompt),
       providers: [{
         id: "openai-compatible",
         name: "OpenAI compatible",
@@ -86,6 +88,7 @@ export function normalizeRegistryState(raw: unknown): AiRegistrySettings {
     totalAttemptBudget: 4,
     stream: true,
     vision: "auto",
+    userPrompt: text(value.userPrompt),
     providers: [],
   };
 }
