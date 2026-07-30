@@ -136,6 +136,14 @@ describe("FileService.writeFile", () => {
   });
 });
 
+describe("FileService.makeDir", () => {
+  it("creates an empty nested directory", async () => {
+    const result = await service.makeDir("empty/nested");
+    expect(result.created).toBe(true);
+    expect((await fs.stat(path.join(tmpDir, "empty", "nested"))).isDirectory()).toBe(true);
+  });
+});
+
 describe("FileService.moveFile", () => {
   it("moves a file", async () => {
     await fs.writeFile(path.join(tmpDir, "src.txt"), "data");

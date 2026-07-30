@@ -156,6 +156,16 @@ export class FileService {
   }
 
   /**
+   * Create an empty directory, including any missing parents.
+   * @param {string} input
+   */
+  async makeDir(input) {
+    const dirPath = resolvePath(this.root, input);
+    await fs.mkdir(dirPath, { recursive: true });
+    return { path: path.relative(this.root, dirPath) || path.basename(dirPath), created: true };
+  }
+
+  /**
    * @param {string} source
    * @param {string} destination
    */

@@ -75,6 +75,12 @@ describe("callFilesTool", () => {
     expect(await fs.readFile(path.join(tmpDir, "new.txt"), "utf8")).toBe("data");
   });
 
+  it("files_mkdir creates an empty directory", async () => {
+    const result = await callFilesTool(service, "files_mkdir", { path: "empty/nested" });
+    expect(result.created).toBe(true);
+    expect((await fs.stat(path.join(tmpDir, "empty", "nested"))).isDirectory()).toBe(true);
+  });
+
   it("files_move moves a file", async () => {
     await fs.writeFile(path.join(tmpDir, "src.txt"), "x");
     const result = await callFilesTool(service, "files_move", {

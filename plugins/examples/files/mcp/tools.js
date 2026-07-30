@@ -13,6 +13,7 @@ const schemas = {
   files_tree: z.object({ path: filePath.default("/"), depth }).strict(),
   files_read: z.object({ path: filePath, head, tail }).strict(),
   files_write: z.object({ path: filePath, content: z.string().max(10 * 1024 * 1024) }).strict(),
+  files_mkdir: z.object({ path: filePath }).strict(),
   files_move: z.object({ source: filePath, destination: filePath }).strict(),
   files_delete: z.object({ path: filePath, recursive }).strict(),
   files_search: z.object({ path: filePath.default("/"), pattern }).strict(),
@@ -36,6 +37,9 @@ export const FILES_TOOLS = Object.freeze([
     path: stringProperty("File path relative to root."),
     content: { type: "string", description: "File content (UTF-8 text, max 10 MB)." },
   }, ["path", "content"], false),
+  descriptor("files_mkdir", "Create an empty directory. Missing parent directories are created automatically.", {
+    path: stringProperty("Directory path relative to root."),
+  }, ["path"], false),
   descriptor("files_move", "Move or rename a file or directory.", {
     source: stringProperty("Current path relative to root."),
     destination: stringProperty("New path relative to root."),
@@ -71,6 +75,8 @@ export async function callFilesTool(service, name, rawArguments = {}) {
       return { path: input.path, ...(await service.readFile(input.path, input.head, input.tail)) };
     case "files_write":
       return await service.writeFile(input.path, input.content);
+    case "files_mkdir":
+      return await service.makeDir(input.path);
     case "files_move":
       return await service.moveFile(input.source, input.destination);
     case "files_delete":

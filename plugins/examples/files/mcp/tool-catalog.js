@@ -3,6 +3,7 @@ export const FILES_TOOL_NAMES = Object.freeze([
   "files_tree",
   "files_read",
   "files_write",
+  "files_mkdir",
   "files_move",
   "files_delete",
   "files_search",
