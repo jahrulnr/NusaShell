@@ -55,15 +55,15 @@ function setupBus() {
 describe("StartPluginHandler via CommandBus", () => {
   it("starts a plugin and returns running state", async () => {
     const { commandBus, pluginRepository } = setupBus();
-    pluginRepository.add(makePlugin("com.example.notes"));
+    pluginRepository.add(makePlugin("nusashell.notes"));
 
     const result = await commandBus.execute({
       kind: "start-plugin",
-      pluginId: "com.example.notes",
+      pluginId: "nusashell.notes",
     });
 
     expect(result).toEqual({
-      pluginId: "com.example.notes",
+      pluginId: "nusashell.notes",
       state: "running",
     });
   });
@@ -83,20 +83,20 @@ describe("StartPluginHandler via CommandBus", () => {
 describe("StopPluginHandler via CommandBus", () => {
   it("stops a running plugin", async () => {
     const { commandBus, pluginRepository } = setupBus();
-    pluginRepository.add(makePlugin("com.example.notes"));
+    pluginRepository.add(makePlugin("nusashell.notes"));
 
     await commandBus.execute({
       kind: "start-plugin",
-      pluginId: "com.example.notes",
+      pluginId: "nusashell.notes",
     });
 
     const result = await commandBus.execute({
       kind: "stop-plugin",
-      pluginId: "com.example.notes",
+      pluginId: "nusashell.notes",
     });
 
     expect(result).toEqual({
-      pluginId: "com.example.notes",
+      pluginId: "nusashell.notes",
       state: "idle",
     });
   });
@@ -105,18 +105,18 @@ describe("StopPluginHandler via CommandBus", () => {
 describe("CallToolHandler via CommandBus", () => {
   it("calls a tool on a running plugin", async () => {
     const { commandBus, pluginRepository, mcpClientFactory } = setupBus();
-    pluginRepository.add(makePlugin("com.example.notes"));
+    pluginRepository.add(makePlugin("nusashell.notes"));
 
     await commandBus.execute({
       kind: "start-plugin",
-      pluginId: "com.example.notes",
+      pluginId: "nusashell.notes",
     });
 
     mcpClientFactory.created[0]!.setToolResult("create_note", { id: "n1" });
 
     const result = await commandBus.execute({
       kind: "call-tool",
-      pluginId: "com.example.notes",
+      pluginId: "nusashell.notes",
       requestId: "00000000-0000-1000-8000-000000000010",
       toolName: "create_note",
       args: { text: "hello" },
@@ -132,8 +132,8 @@ describe("CallToolHandler via CommandBus", () => {
 describe("ListPluginsHandler via QueryBus", () => {
   it("lists all installed plugins with their runtime state", async () => {
     const { queryBus, pluginRepository } = setupBus();
-    pluginRepository.add(makePlugin("com.example.a"));
-    pluginRepository.add(makePlugin("com.example.b"));
+    pluginRepository.add(makePlugin("example.a"));
+    pluginRepository.add(makePlugin("example.b"));
 
     const result = await queryBus.execute({ kind: "list-plugins" }) as {
       plugins: readonly { pluginId: string; state: string }[];
@@ -141,17 +141,17 @@ describe("ListPluginsHandler via QueryBus", () => {
 
     expect(result.plugins).toHaveLength(2);
     const ids = result.plugins.map((p) => p.pluginId).sort();
-    expect(ids).toEqual(["com.example.a", "com.example.b"]);
+    expect(ids).toEqual(["example.a", "example.b"]);
     expect(result.plugins.every((p) => p.state === "idle")).toBe(true);
   });
 
   it("returns running state for started plugins", async () => {
     const { queryBus, commandBus, pluginRepository } = setupBus();
-    pluginRepository.add(makePlugin("com.example.notes"));
+    pluginRepository.add(makePlugin("nusashell.notes"));
 
     await commandBus.execute({
       kind: "start-plugin",
-      pluginId: "com.example.notes",
+      pluginId: "nusashell.notes",
     });
 
     const result = await queryBus.execute({ kind: "list-plugins" }) as {

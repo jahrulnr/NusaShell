@@ -5,7 +5,7 @@ import { makePlugin } from "../fakes/fake-plugin-repository.js";
 import type { FakePluginRepository } from "../fakes/fake-plugin-repository.js";
 
 export function pluginFixture(
-  id: string = "com.example.notes",
+  id: string = "nusashell.notes",
   overrides: Partial<PluginManifestInput> = {},
 ): Plugin {
   return makePlugin(id, overrides);
@@ -14,7 +14,7 @@ export function pluginFixture(
 export async function runningPluginFixture(
   manager: PluginRuntimeManager,
   repository: FakePluginRepository,
-  id: string = "com.example.notes",
+  id: string = "nusashell.notes",
   overrides: Partial<PluginManifestInput> = {},
 ): Promise<Plugin> {
   const plugin = makePlugin(id, overrides);

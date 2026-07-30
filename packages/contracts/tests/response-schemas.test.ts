@@ -14,7 +14,7 @@ describe("Response schemas", () => {
       kind: "response",
       id: "req_001",
       ok: true,
-      result: { pluginId: "com.example.notes", state: "running" },
+      result: { pluginId: "nusashell.notes", state: "running" },
     });
     expect(result.success).toBe(true);
   });
@@ -49,7 +49,7 @@ describe("Response schemas", () => {
 
   it("parses plugin.start result", () => {
     const result = PluginStartResultSchema.safeParse({
-      pluginId: "com.example.notes",
+      pluginId: "nusashell.notes",
       state: "running",
     });
     expect(result.success).toBe(true);
@@ -58,8 +58,8 @@ describe("Response schemas", () => {
   it("parses plugin.list result", () => {
     const result = PluginListResultSchema.safeParse({
       plugins: [
-        { pluginId: "com.example.a", name: "A", version: "1.0.0", icon: "📝", installPath: "/plugins/a", state: "idle", enabled: true, autostart: false, ui: { entry: "ui/index.html" }, keepAliveOnClose: false },
-        { pluginId: "com.example.b", name: "B", version: "2.0.0", icon: "🤖", installPath: "/plugins/b", state: "running", enabled: true, autostart: true, ui: { entry: "ui/index.html", window: { mode: "panel" } }, keepAliveOnClose: true },
+        { pluginId: "example.a", name: "A", version: "1.0.0", icon: "📝", installPath: "/plugins/a", state: "idle", enabled: true, autostart: false, ui: { entry: "ui/index.html" }, keepAliveOnClose: false },
+        { pluginId: "example.b", name: "B", version: "2.0.0", icon: "🤖", installPath: "/plugins/b", state: "running", enabled: true, autostart: true, ui: { entry: "ui/index.html", window: { mode: "panel" } }, keepAliveOnClose: true },
       ],
     });
     expect(result.success).toBe(true);
@@ -75,7 +75,7 @@ describe("Response schemas", () => {
 
   it("rejects invalid plugin state", () => {
     const result = PluginStartResultSchema.safeParse({
-      pluginId: "com.example.notes",
+      pluginId: "nusashell.notes",
       state: "unknown",
     });
     expect(result.success).toBe(false);

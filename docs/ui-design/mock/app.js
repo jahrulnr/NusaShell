@@ -5,52 +5,52 @@
 // ============ Mock Data ============
 
 const MOCK_PLUGINS = [
-  { pluginId: "com.example.notes", name: "Notes", version: "1.0.0", state: "idle", enabled: true, icon: "📝", iconBg: "bg-white", category: "Productivity", manifest: { transport: "stdio", command: "node mcp/server.js", autostart: false, keepAliveOnClose: false, windowMode: "panel" } },
-  { pluginId: "com.example.weather", name: "Weather", version: "1.2.0", state: "running", enabled: true, icon: "🌤", iconBg: "bg-blue", category: "Utilities", pid: 12345, manifest: { transport: "stdio", command: "node mcp/server.js", autostart: true, keepAliveOnClose: true, windowMode: "widget" } },
-  { pluginId: "com.example.chat", name: "AI Chat", version: "0.9.0", state: "crashed", enabled: true, icon: "🤖", iconBg: "bg-purple", category: "AI Tools", manifest: { transport: "sse", command: "https://chat.example.com/mcp", autostart: false, keepAliveOnClose: false, windowMode: "fullscreen" } },
-  { pluginId: "com.example.calendar", name: "Calendar", version: "2.1.0", state: "idle", enabled: true, icon: "📅", iconBg: "bg-blue", category: "Productivity", manifest: { transport: "stdio", command: "node mcp/server.js", autostart: false, keepAliveOnClose: false, windowMode: "panel" } },
-  { pluginId: "com.example.terminal", name: "Terminal", version: "1.0.0", state: "running", enabled: true, icon: "⬛", iconBg: "bg-black", category: "Developer", pid: 12346, manifest: { transport: "stdio", command: "node mcp/server.js", autostart: true, keepAliveOnClose: true, windowMode: "fullscreen" } },
-  { pluginId: "com.example.music", name: "Music", version: "3.0.0", state: "idle", enabled: false, icon: "🎵", iconBg: "bg-red", category: "Utilities", manifest: { transport: "http", command: "https://music.example.com/mcp", autostart: false, keepAliveOnClose: false, windowMode: "panel" } },
-  { pluginId: "com.example.tasks", name: "Tasks", version: "1.1.0", state: "idle", enabled: true, icon: "https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/2705.png", iconBg: "bg-green", category: "Productivity", manifest: { transport: "stdio", command: "node mcp/server.js", autostart: false, keepAliveOnClose: false, windowMode: "panel" } },
-  { pluginId: "com.example.timer", name: "Timer", version: "0.5.0", state: "idle", enabled: true, icon: "file://icon.png", iconBg: "bg-orange", category: "Utilities", manifest: { transport: "stdio", command: "node mcp/server.js", autostart: false, keepAliveOnClose: false, windowMode: "widget" } },
+  { pluginId: "nusashell.notes", name: "Notes", version: "1.0.0", state: "idle", enabled: true, icon: "📝", iconBg: "bg-white", category: "Productivity", manifest: { transport: "stdio", command: "node mcp/server.js", autostart: false, keepAliveOnClose: false, windowMode: "panel" } },
+  { pluginId: "example.weather", name: "Weather", version: "1.2.0", state: "running", enabled: true, icon: "🌤", iconBg: "bg-blue", category: "Utilities", pid: 12345, manifest: { transport: "stdio", command: "node mcp/server.js", autostart: true, keepAliveOnClose: true, windowMode: "widget" } },
+  { pluginId: "example.chat", name: "AI Chat", version: "0.9.0", state: "crashed", enabled: true, icon: "🤖", iconBg: "bg-purple", category: "AI Tools", manifest: { transport: "sse", command: "https://chat.example.com/mcp", autostart: false, keepAliveOnClose: false, windowMode: "fullscreen" } },
+  { pluginId: "example.calendar", name: "Calendar", version: "2.1.0", state: "idle", enabled: true, icon: "📅", iconBg: "bg-blue", category: "Productivity", manifest: { transport: "stdio", command: "node mcp/server.js", autostart: false, keepAliveOnClose: false, windowMode: "panel" } },
+  { pluginId: "example.terminal", name: "Terminal", version: "1.0.0", state: "running", enabled: true, icon: "⬛", iconBg: "bg-black", category: "Developer", pid: 12346, manifest: { transport: "stdio", command: "node mcp/server.js", autostart: true, keepAliveOnClose: true, windowMode: "fullscreen" } },
+  { pluginId: "example.music", name: "Music", version: "3.0.0", state: "idle", enabled: false, icon: "🎵", iconBg: "bg-red", category: "Utilities", manifest: { transport: "http", command: "https://music.example.com/mcp", autostart: false, keepAliveOnClose: false, windowMode: "panel" } },
+  { pluginId: "example.tasks", name: "Tasks", version: "1.1.0", state: "idle", enabled: true, icon: "https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/2705.png", iconBg: "bg-green", category: "Productivity", manifest: { transport: "stdio", command: "node mcp/server.js", autostart: false, keepAliveOnClose: false, windowMode: "panel" } },
+  { pluginId: "example.timer", name: "Timer", version: "0.5.0", state: "idle", enabled: true, icon: "file://icon.png", iconBg: "bg-orange", category: "Utilities", manifest: { transport: "stdio", command: "node mcp/server.js", autostart: false, keepAliveOnClose: false, windowMode: "widget" } },
 ];
 
 const MOCK_TOOLS = {
-  "com.example.notes": [
+  "nusashell.notes": [
     { name: "createNote", description: "Create a new note with text content" },
     { name: "listNotes", description: "List all saved notes" },
     { name: "deleteNote", description: "Delete a note by ID" },
     { name: "searchNotes", description: "Search notes by keyword" },
   ],
-  "com.example.weather": [
+  "example.weather": [
     { name: "getForecast", description: "Get weather forecast for a location" },
     { name: "getAlerts", description: "Get active weather alerts" },
   ],
-  "com.example.chat": [
+  "example.chat": [
     { name: "sendMessage", description: "Send a message to the AI" },
     { name: "getHistory", description: "Get conversation history" },
     { name: "clearHistory", description: "Clear all conversation history" },
   ],
-  "com.example.calendar": [
+  "example.calendar": [
     { name: "createEvent", description: "Create a calendar event" },
     { name: "listEvents", description: "List upcoming events" },
     { name: "deleteEvent", description: "Delete an event by ID" },
   ],
-  "com.example.terminal": [
+  "example.terminal": [
     { name: "execCommand", description: "Execute a shell command" },
     { name: "getCwd", description: "Get current working directory" },
   ],
-  "com.example.music": [
+  "example.music": [
     { name: "play", description: "Play a track by ID or name" },
     { name: "pause", description: "Pause playback" },
     { name: "getQueue", description: "Get current playback queue" },
   ],
-  "com.example.tasks": [
+  "example.tasks": [
     { name: "createTask", description: "Create a new task" },
     { name: "listTasks", description: "List all tasks" },
     { name: "completeTask", description: "Mark a task as complete" },
   ],
-  "com.example.timer": [
+  "example.timer": [
     { name: "startTimer", description: "Start a countdown timer" },
     { name: "stopTimer", description: "Stop the active timer" },
     { name: "getRemaining", description: "Get remaining time" },
@@ -58,12 +58,12 @@ const MOCK_TOOLS = {
 };
 
 const MOCK_EVENTS = [
-  { event: "plugin.started", sequence: 1, payload: { pluginId: "com.example.weather", state: "running", pid: 12345, timestamp: "2026-07-28T18:00:00Z" } },
-  { event: "plugin.started", sequence: 2, payload: { pluginId: "com.example.terminal", state: "running", pid: 12346, timestamp: "2026-07-28T18:01:00Z" } },
-  { event: "plugin.crashed", sequence: 3, payload: { pluginId: "com.example.chat", state: "crashed", exitCode: 1, timestamp: "2026-07-28T18:02:00Z" } },
-  { event: "plugin.state_changed", sequence: 4, payload: { pluginId: "com.example.chat", oldState: "running", newState: "crashed", timestamp: "2026-07-28T18:02:00Z" } },
-  { event: "tool.call_completed", sequence: 5, payload: { pluginId: "com.example.weather", requestId: "req_001", toolName: "getForecast", success: true, timestamp: "2026-07-28T18:03:00Z" } },
-  { event: "plugin.stopped", sequence: 6, payload: { pluginId: "com.example.notes", state: "idle", timestamp: "2026-07-28T18:04:00Z" } },
+  { event: "plugin.started", sequence: 1, payload: { pluginId: "example.weather", state: "running", pid: 12345, timestamp: "2026-07-28T18:00:00Z" } },
+  { event: "plugin.started", sequence: 2, payload: { pluginId: "example.terminal", state: "running", pid: 12346, timestamp: "2026-07-28T18:01:00Z" } },
+  { event: "plugin.crashed", sequence: 3, payload: { pluginId: "example.chat", state: "crashed", exitCode: 1, timestamp: "2026-07-28T18:02:00Z" } },
+  { event: "plugin.state_changed", sequence: 4, payload: { pluginId: "example.chat", oldState: "running", newState: "crashed", timestamp: "2026-07-28T18:02:00Z" } },
+  { event: "tool.call_completed", sequence: 5, payload: { pluginId: "example.weather", requestId: "req_001", toolName: "getForecast", success: true, timestamp: "2026-07-28T18:03:00Z" } },
+  { event: "plugin.stopped", sequence: 6, payload: { pluginId: "nusashell.notes", state: "idle", timestamp: "2026-07-28T18:04:00Z" } },
 ];
 
 const MOCK_RECENT_INSTALLS = [
@@ -303,7 +303,7 @@ function closeAddPluginModal() {
 
 function showManifestPreview() {
   const content = $("#manifest-preview-content");
-  content.innerHTML = `<div class="manifest-row"><span class="manifest-key">id</span><span class="manifest-val">com.example.new-plugin</span></div><div class="manifest-row"><span class="manifest-key">name</span><span class="manifest-val">New Plugin</span></div><div class="manifest-row"><span class="manifest-key">version</span><span class="manifest-val">1.0.0</span></div><div class="manifest-row"><span class="manifest-key">transport</span><span class="manifest-val">stdio</span></div><div class="manifest-row"><span class="manifest-key">window</span><span class="manifest-val">panel</span></div>`;
+  content.innerHTML = `<div class="manifest-row"><span class="manifest-key">id</span><span class="manifest-val">example.new-plugin</span></div><div class="manifest-row"><span class="manifest-key">name</span><span class="manifest-val">New Plugin</span></div><div class="manifest-row"><span class="manifest-key">version</span><span class="manifest-val">1.0.0</span></div><div class="manifest-row"><span class="manifest-key">transport</span><span class="manifest-val">stdio</span></div><div class="manifest-row"><span class="manifest-key">window</span><span class="manifest-val">panel</span></div>`;
   $("#manifest-preview").style.display = "block";
 }
 
@@ -311,7 +311,7 @@ function simulateInstall() {
   const url = $("#plugin-url-input").value.trim();
   if (!url) { showManifestPreview(); return; }
   const newPlugin = {
-    pluginId: `com.example.${url.split("/").pop() || "new-plugin"}`,
+    pluginId: `example.${url.split("/").pop() || "new-plugin"}`,
     name: url.split("/").pop() || "New Plugin",
     version: "1.0.0", state: "idle", enabled: true, icon: "🧩", iconBg: "bg-purple",
     category: "Utilities",

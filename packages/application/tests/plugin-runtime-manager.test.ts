@@ -32,8 +32,8 @@ function setup() {
 describe("PluginRuntimeManager", () => {
   it("persists autostart and starts only opted-in plugins", async () => {
     const { manager, pluginRepository } = setup();
-    const optedIn = makePlugin("com.example.autostart");
-    const onDemand = makePlugin("com.example.on-demand");
+    const optedIn = makePlugin("example.autostart");
+    const onDemand = makePlugin("example.on-demand");
     pluginRepository.add(optedIn);
     pluginRepository.add(onDemand);
 
@@ -47,7 +47,7 @@ describe("PluginRuntimeManager", () => {
   describe("listPlugins", () => {
     it("returns idle state for plugins without runtime entries", async () => {
       const { pluginRepository, manager } = setup();
-      pluginRepository.add(makePlugin("com.example.notes", {
+      pluginRepository.add(makePlugin("nusashell.notes", {
         ui: {
           entry: "ui/mail.html",
           window: {
@@ -66,7 +66,7 @@ describe("PluginRuntimeManager", () => {
       const views = await manager.listPlugins();
 
       expect(views).toHaveLength(1);
-      expect(views[0]!.pluginId).toBe("com.example.notes");
+      expect(views[0]!.pluginId).toBe("nusashell.notes");
       expect(views[0]!.state).toBe("idle");
       expect(views[0]!.ui).toEqual({
         entry: "ui/mail.html",
@@ -89,7 +89,7 @@ describe("PluginRuntimeManager", () => {
   describe("startPlugin", () => {
     it("merges host-provided runtime environment without mutating the manifest", async () => {
       const { pluginRepository, mcpClientFactory } = setup();
-      const plugin = makePlugin("com.example.notes", {
+      const plugin = makePlugin("nusashell.notes", {
         mcp: {
           transport: "stdio",
           command: "node",
@@ -105,7 +105,7 @@ describe("PluginRuntimeManager", () => {
         eventDispatcher: new EventDispatcher(),
         clock: new FakeClock(),
         resolveRuntimeEnvironment: async (pluginId) =>
-          pluginId === "com.example.notes" ? { RUNTIME_SECRET: "injected" } : {},
+          pluginId === "nusashell.notes" ? { RUNTIME_SECRET: "injected" } : {},
       });
 
       await managerWithEnvironment.startPlugin(plugin.id);
@@ -119,7 +119,7 @@ describe("PluginRuntimeManager", () => {
 
     it("transitions idle -> starting -> running and publishes events", async () => {
       const { pluginRepository, manager, eventDispatcher } = setup();
-      const plugin = makePlugin("com.example.notes");
+      const plugin = makePlugin("nusashell.notes");
       pluginRepository.add(plugin);
 
       const events: string[] = [];
@@ -148,7 +148,7 @@ describe("PluginRuntimeManager", () => {
 
     it("throws PLUGIN_DISABLED for disabled plugin", async () => {
       const { pluginRepository, manager } = setup();
-      const plugin = makePlugin("com.example.notes", {}, false);
+      const plugin = makePlugin("nusashell.notes", {}, false);
       pluginRepository.add(plugin);
 
       await expect(manager.startPlugin(plugin.id)).rejects.toMatchObject({
@@ -158,7 +158,7 @@ describe("PluginRuntimeManager", () => {
 
     it("is idempotent when already running", async () => {
       const { pluginRepository, manager } = setup();
-      const plugin = makePlugin("com.example.notes");
+      const plugin = makePlugin("nusashell.notes");
       pluginRepository.add(plugin);
 
       await manager.startPlugin(plugin.id);
@@ -169,7 +169,7 @@ describe("PluginRuntimeManager", () => {
 
     it("serializes concurrent start requests (single-flight)", async () => {
       const { pluginRepository, manager } = setup();
-      const plugin = makePlugin("com.example.notes");
+      const plugin = makePlugin("nusashell.notes");
       pluginRepository.add(plugin);
 
       const [a, b] = await Promise.all([
@@ -185,7 +185,7 @@ describe("PluginRuntimeManager", () => {
   describe("stopPlugin", () => {
     it("transitions running -> stopping -> idle and publishes stopped event", async () => {
       const { pluginRepository, manager, eventDispatcher } = setup();
-      const plugin = makePlugin("com.example.notes");
+      const plugin = makePlugin("nusashell.notes");
       pluginRepository.add(plugin);
 
       await manager.startPlugin(plugin.id);
@@ -204,7 +204,7 @@ describe("PluginRuntimeManager", () => {
 
     it("is a no-op when already idle", async () => {
       const { pluginRepository, manager } = setup();
-      const plugin = makePlugin("com.example.notes");
+      const plugin = makePlugin("nusashell.notes");
       pluginRepository.add(plugin);
 
       const view = await manager.stopPlugin(plugin.id);
@@ -215,7 +215,7 @@ describe("PluginRuntimeManager", () => {
   describe("callTool", () => {
     it("calls the MCP client and returns result", async () => {
       const { pluginRepository, manager, mcpClientFactory } = setup();
-      const plugin = makePlugin("com.example.notes");
+      const plugin = makePlugin("nusashell.notes");
       pluginRepository.add(plugin);
 
       await manager.startPlugin(plugin.id);
@@ -236,7 +236,7 @@ describe("PluginRuntimeManager", () => {
 
     it("publishes tool.call_completed event", async () => {
       const { pluginRepository, manager, eventDispatcher, mcpClientFactory } = setup();
-      const plugin = makePlugin("com.example.notes");
+      const plugin = makePlugin("nusashell.notes");
       pluginRepository.add(plugin);
 
       await manager.startPlugin(plugin.id);
@@ -260,7 +260,7 @@ describe("PluginRuntimeManager", () => {
 
     it("throws when plugin is not running", async () => {
       const { pluginRepository, manager } = setup();
-      const plugin = makePlugin("com.example.notes");
+      const plugin = makePlugin("nusashell.notes");
       pluginRepository.add(plugin);
 
       await expect(
@@ -276,7 +276,7 @@ describe("PluginRuntimeManager", () => {
 
     it("rejects with timeout when tool call exceeds timeout", async () => {
       const { pluginRepository, manager, mcpClientFactory } = setup();
-      const plugin = makePlugin("com.example.notes");
+      const plugin = makePlugin("nusashell.notes");
       pluginRepository.add(plugin);
 
       await manager.startPlugin(plugin.id);
@@ -298,7 +298,7 @@ describe("PluginRuntimeManager", () => {
   describe("MCP prompts and resources", () => {
     it("brokers prompt and resource capability calls for a running plugin", async () => {
       const { pluginRepository, manager, mcpClientFactory } = setup();
-      const plugin = makePlugin("com.example.context");
+      const plugin = makePlugin("example.context");
       pluginRepository.add(plugin);
 
       await manager.startPlugin(plugin.id);
@@ -332,7 +332,7 @@ describe("PluginRuntimeManager", () => {
 
     it("rejects prompt discovery when the plugin is not running", async () => {
       const { pluginRepository, manager } = setup();
-      const plugin = makePlugin("com.example.context");
+      const plugin = makePlugin("example.context");
       pluginRepository.add(plugin);
 
       await expect(manager.listPrompts(plugin.id)).rejects.toMatchObject({
@@ -344,7 +344,7 @@ describe("PluginRuntimeManager", () => {
   describe("process crash", () => {
     it("transitions to crashed on unexpected process exit and publishes event", async () => {
       const { pluginRepository, manager, eventDispatcher, mcpClientFactory } = setup();
-      const plugin = makePlugin("com.example.notes");
+      const plugin = makePlugin("nusashell.notes");
       pluginRepository.add(plugin);
 
       await manager.startPlugin(plugin.id);
@@ -368,7 +368,7 @@ describe("PluginRuntimeManager", () => {
 
     it("cancels pending tool calls on crash", async () => {
       const { pluginRepository, manager, mcpClientFactory } = setup();
-      const plugin = makePlugin("com.example.notes");
+      const plugin = makePlugin("nusashell.notes");
       pluginRepository.add(plugin);
 
       await manager.startPlugin(plugin.id);
@@ -394,8 +394,8 @@ describe("PluginRuntimeManager", () => {
   describe("stopAll", () => {
     it("stops all running plugins", async () => {
       const { pluginRepository, manager } = setup();
-      const pluginA = makePlugin("com.example.a");
-      const pluginB = makePlugin("com.example.b");
+      const pluginA = makePlugin("example.a");
+      const pluginB = makePlugin("example.b");
       pluginRepository.add(pluginA);
       pluginRepository.add(pluginB);
 

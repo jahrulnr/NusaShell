@@ -7,7 +7,7 @@ describe("validateIncomingMessage", () => {
       kind: "request",
       id: "req_001",
       method: "plugin.start",
-      payload: { pluginId: "com.example.notes" },
+      payload: { pluginId: "nusashell.notes" },
     });
 
     expect(result.success).toBe(true);

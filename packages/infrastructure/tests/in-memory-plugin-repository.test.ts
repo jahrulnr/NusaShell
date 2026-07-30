@@ -45,7 +45,7 @@ describe("InMemoryPluginRepository", () => {
   });
 
   it("saves and finds a plugin by id", async () => {
-    const plugin = makePlugin("com.example.notes");
+    const plugin = makePlugin("nusashell.notes");
     repo.add(plugin);
 
     const found = await repo.findById(plugin.id);
@@ -54,15 +54,15 @@ describe("InMemoryPluginRepository", () => {
   });
 
   it("lists all saved plugins", async () => {
-    repo.add(makePlugin("com.example.a"));
-    repo.add(makePlugin("com.example.b"));
+    repo.add(makePlugin("example.a"));
+    repo.add(makePlugin("example.b"));
 
     const list = await repo.list();
     expect(list).toHaveLength(2);
   });
 
   it("removes a plugin", async () => {
-    const plugin = makePlugin("com.example.notes");
+    const plugin = makePlugin("nusashell.notes");
     repo.add(plugin);
 
     await repo.remove(plugin.id);
@@ -71,10 +71,10 @@ describe("InMemoryPluginRepository", () => {
   });
 
   it("overwrites on save with same id", async () => {
-    const plugin = makePlugin("com.example.notes");
+    const plugin = makePlugin("nusashell.notes");
     repo.add(plugin);
 
-    const updated = makePlugin("com.example.notes", false);
+    const updated = makePlugin("nusashell.notes", false);
     await repo.save(updated);
 
     const found = await repo.findById(plugin.id);

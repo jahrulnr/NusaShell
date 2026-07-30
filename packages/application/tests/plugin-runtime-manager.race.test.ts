@@ -32,7 +32,7 @@ describe("PluginRuntimeManager race conditions (§15)", () => {
   describe("concurrent start and stop", () => {
     it("Promise.all([start, stop]) ends in a consistent state", async () => {
       const { pluginRepository, manager } = setup();
-      const plugin = makePlugin("com.example.notes");
+      const plugin = makePlugin("nusashell.notes");
       pluginRepository.add(plugin);
 
       const [startResult, stopResult] = await Promise.allSettled([
@@ -51,7 +51,7 @@ describe("PluginRuntimeManager race conditions (§15)", () => {
 
     it("Promise.all([stop, start]) ends in a consistent state", async () => {
       const { pluginRepository, manager } = setup();
-      const plugin = makePlugin("com.example.notes");
+      const plugin = makePlugin("nusashell.notes");
       pluginRepository.add(plugin);
 
       await manager.startPlugin(plugin.id);
@@ -72,7 +72,7 @@ describe("PluginRuntimeManager race conditions (§15)", () => {
   describe("callTool while starting", () => {
     it("callTool fired concurrently with start does not hang", async () => {
       const { pluginRepository, manager } = setup();
-      const plugin = makePlugin("com.example.notes");
+      const plugin = makePlugin("nusashell.notes");
       pluginRepository.add(plugin);
 
       const startPromise = manager.startPlugin(plugin.id);
@@ -98,7 +98,7 @@ describe("PluginRuntimeManager race conditions (§15)", () => {
   describe("timeout followed by late response", () => {
     it("timeout error is thrown, late response is ignored", async () => {
       const { pluginRepository, manager, mcpClientFactory } = setup();
-      const plugin = makePlugin("com.example.notes");
+      const plugin = makePlugin("nusashell.notes");
       pluginRepository.add(plugin);
 
       await manager.startPlugin(plugin.id);
@@ -140,8 +140,8 @@ describe("PluginRuntimeManager race conditions (§15)", () => {
   describe("backend shutdown while plugins are active", () => {
     it("stopAll transitions all running plugins to idle", async () => {
       const { pluginRepository, manager } = setup();
-      const pluginA = makePlugin("com.example.a");
-      const pluginB = makePlugin("com.example.b");
+      const pluginA = makePlugin("example.a");
+      const pluginB = makePlugin("example.b");
       pluginRepository.add(pluginA);
       pluginRepository.add(pluginB);
 
@@ -159,7 +159,7 @@ describe("PluginRuntimeManager race conditions (§15)", () => {
 
     it("stopAll cancels pending tool calls", async () => {
       const { pluginRepository, manager, mcpClientFactory } = setup();
-      const plugin = makePlugin("com.example.notes");
+      const plugin = makePlugin("nusashell.notes");
       pluginRepository.add(plugin);
 
       await manager.startPlugin(plugin.id);
@@ -196,7 +196,7 @@ describe("PluginRuntimeManager race conditions (§15)", () => {
   describe("duplicate request ID", () => {
     it("two callTool with same requestId do not deadlock", async () => {
       const { pluginRepository, manager, mcpClientFactory } = setup();
-      const plugin = makePlugin("com.example.notes");
+      const plugin = makePlugin("nusashell.notes");
       pluginRepository.add(plugin);
 
       await manager.startPlugin(plugin.id);
@@ -230,7 +230,7 @@ describe("PluginRuntimeManager race conditions (§15)", () => {
   describe("concurrent restart and stop", () => {
     it("Promise.all([restart, stop]) ends in a consistent state", async () => {
       const { pluginRepository, manager } = setup();
-      const plugin = makePlugin("com.example.notes");
+      const plugin = makePlugin("nusashell.notes");
       pluginRepository.add(plugin);
 
       await manager.startPlugin(plugin.id);

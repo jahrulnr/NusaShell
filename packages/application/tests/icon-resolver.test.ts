@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveIcon } from "../src/plugin/services/icon-resolver.js";
 
-const INSTALL_PATH = "/home/user/.nusashell/plugins/com.example.notes";
+const INSTALL_PATH = "/home/user/.nusashell/plugins/nusashell.notes";
 
 describe("resolveIcon", () => {
   it("passes through emoji/text icons", () => {

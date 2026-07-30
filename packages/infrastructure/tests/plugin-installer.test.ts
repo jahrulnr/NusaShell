@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { PluginInstaller } from "../src/plugins/plugin-installer.js";
 
 const NOTES_MANIFEST = {
-  id: "com.example.notes",
+  id: "nusashell.notes",
   name: "Notes",
   version: "1.0.0",
   icon: "📝",
@@ -26,12 +26,12 @@ describe("PluginInstaller", () => {
 
   describe("uninstall", () => {
     it("removes a plugin whose directory name matches its id", async () => {
-      const dir = join(pluginsRoot, "com.example.notes");
+      const dir = join(pluginsRoot, "nusashell.notes");
       await mkdir(dir, { recursive: true });
       await writeFile(join(dir, "manifest.json"), JSON.stringify(NOTES_MANIFEST));
 
       const installer = new PluginInstaller(pluginsRoot);
-      await installer.uninstall("com.example.notes");
+      await installer.uninstall("nusashell.notes");
 
       await expect(access(dir)).rejects.toThrow();
     });
@@ -42,14 +42,14 @@ describe("PluginInstaller", () => {
       await writeFile(join(dir, "manifest.json"), JSON.stringify(NOTES_MANIFEST));
 
       const installer = new PluginInstaller(pluginsRoot);
-      await installer.uninstall("com.example.notes");
+      await installer.uninstall("nusashell.notes");
 
       await expect(access(dir)).rejects.toThrow();
     });
 
     it("throws when no matching plugin directory exists", async () => {
       const installer = new PluginInstaller(pluginsRoot);
-      await expect(installer.uninstall("com.example.missing")).rejects.toThrow(
+      await expect(installer.uninstall("example.missing")).rejects.toThrow(
         /Plugin directory not found/,
       );
     });

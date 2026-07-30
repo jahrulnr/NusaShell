@@ -8,7 +8,7 @@ describe("MessageRouter", () => {
     queryBus.register("list-plugins", {
       handle: async () => ({
         plugins: [
-          { pluginId: "com.example.notes", name: "Notes", version: "1.0.0", icon: "📝", installPath: "/plugins/notes", state: "idle", enabled: true },
+          { pluginId: "nusashell.notes", name: "Notes", version: "1.0.0", icon: "📝", installPath: "/plugins/notes", state: "idle", enabled: true },
         ],
       }),
     } as never);

@@ -4,7 +4,7 @@ import { ProtocolError } from "../src/protocol/websocket-error.js";
 
 describe("response mapper", () => {
   it("maps success response", () => {
-    const response = mapSuccessResponse("req_001", { pluginId: "com.example.notes", state: "running" });
+    const response = mapSuccessResponse("req_001", { pluginId: "nusashell.notes", state: "running" });
     expect(response.kind).toBe("response");
     expect(response.id).toBe("req_001");
     expect(response.ok).toBe(true);

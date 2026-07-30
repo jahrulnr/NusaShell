@@ -51,10 +51,10 @@ describe("RuntimeTransitionPolicy", () => {
 
 describe("PluginId", () => {
   it("accepts valid ids", () => {
-    const result = PluginId.create("com.example.notes");
+    const result = PluginId.create("nusashell.notes");
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(PluginId.toString(result.value)).toBe("com.example.notes");
+      expect(PluginId.toString(result.value)).toBe("nusashell.notes");
     }
   });
 

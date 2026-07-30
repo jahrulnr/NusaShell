@@ -31,7 +31,7 @@ export function makeManifest(
   overrides: Partial<PluginManifestInput> = {},
 ): PluginManifest {
   const raw: PluginManifestInput = {
-    id: "com.example.notes",
+    id: "nusashell.notes",
     name: "Notes",
     version: "1.0.0",
     icon: "note",
@@ -51,7 +51,7 @@ export function makeManifest(
 }
 
 export function makePlugin(
-  id: string = "com.example.notes",
+  id: string = "nusashell.notes",
   overrides: Partial<PluginManifestInput> = {},
   enabled: boolean = true,
 ): Plugin {

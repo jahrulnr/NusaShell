@@ -17,7 +17,7 @@ describe("Request schemas", () => {
         kind: "request",
         id: "req_001",
         method: "plugin.start",
-        payload: { pluginId: "com.example.notes" },
+        payload: { pluginId: "nusashell.notes" },
       });
       expect(result.success).toBe(true);
     });
@@ -39,7 +39,7 @@ describe("Request schemas", () => {
         kind: "request",
         id: "req_002",
         method: "plugin.stop",
-        payload: { pluginId: "com.example.notes" },
+        payload: { pluginId: "nusashell.notes" },
       });
       expect(result.success).toBe(true);
     });
@@ -73,7 +73,7 @@ describe("Request schemas", () => {
         id: "req_004",
         method: "tool.call",
         payload: {
-          pluginId: "com.example.notes",
+          pluginId: "nusashell.notes",
           requestId: "req-uuid-001",
           toolName: "echo",
           args: { message: "hello" },
@@ -88,7 +88,7 @@ describe("Request schemas", () => {
         id: "req_004",
         method: "tool.call",
         payload: {
-          pluginId: "com.example.notes",
+          pluginId: "nusashell.notes",
           requestId: "req-uuid-001",
           toolName: "echo",
           args: {},
@@ -104,7 +104,7 @@ describe("Request schemas", () => {
         id: "req_004",
         method: "tool.call",
         payload: {
-          pluginId: "com.example.notes",
+          pluginId: "nusashell.notes",
           requestId: "req-uuid-001",
           args: {},
         },
@@ -120,7 +120,7 @@ describe("Request schemas", () => {
         id: "req_005",
         method: "tool.cancel",
         payload: {
-          pluginId: "com.example.notes",
+          pluginId: "nusashell.notes",
           requestId: "req-uuid-001",
         },
       });
@@ -169,7 +169,7 @@ describe("Request schemas", () => {
         kind: "request",
         id: "req_006",
         method: "plugin.start",
-        payload: { pluginId: "com.example.notes" },
+        payload: { pluginId: "nusashell.notes" },
       });
       expect(result.success).toBe(true);
       if (result.success) {

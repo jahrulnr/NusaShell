@@ -1,7 +1,13 @@
 import { z } from "zod";
 
 export const ManifestSchema = z.object({
-  id: z.string().min(1),
+  id: z
+    .string()
+    .min(1)
+    .regex(
+      /^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*$/,
+      "id must follow publisher.name format (lowercase, dot-separated)",
+    ),
   name: z.string().min(1),
   version: z.string().min(1),
   /**

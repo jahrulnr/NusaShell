@@ -6,7 +6,7 @@ import { FilesystemPluginRegistry } from "../src/persistence/filesystem/filesyst
 import { PluginId } from "@nusashell/domain";
 
 const VALID_MANIFEST = {
-  id: "com.example.notes",
+  id: "nusashell.notes",
   name: "Notes Plugin",
   version: "1.0.0",
   icon: "notes",
@@ -32,7 +32,7 @@ describe("FilesystemPluginRegistry", () => {
   });
 
   it("loads a plugin from a directory with valid manifest.json", async () => {
-    const pluginDir = join(tempDir, "com.example.notes");
+    const pluginDir = join(tempDir, "nusashell.notes");
     await mkdir(pluginDir, { recursive: true });
     await writeFile(
       join(pluginDir, "manifest.json"),
@@ -46,7 +46,7 @@ describe("FilesystemPluginRegistry", () => {
   });
 
   it("finds a plugin by id", async () => {
-    const pluginDir = join(tempDir, "com.example.notes");
+    const pluginDir = join(tempDir, "nusashell.notes");
     await mkdir(pluginDir, { recursive: true });
     await writeFile(
       join(pluginDir, "manifest.json"),
@@ -54,7 +54,7 @@ describe("FilesystemPluginRegistry", () => {
     );
 
     const registry = new FilesystemPluginRegistry(tempDir);
-    const idResult = PluginId.create("com.example.notes");
+    const idResult = PluginId.create("nusashell.notes");
     if (!idResult.ok) throw new Error("bad id");
 
     const plugin = await registry.findById(idResult.value);
@@ -72,14 +72,14 @@ describe("FilesystemPluginRegistry", () => {
   });
 
   it("skips directories without manifest.json", async () => {
-    const validDir = join(tempDir, "com.example.valid");
+    const validDir = join(tempDir, "example.valid");
     await mkdir(validDir, { recursive: true });
     await writeFile(
       join(validDir, "manifest.json"),
       JSON.stringify(VALID_MANIFEST),
     );
 
-    const noManifestDir = join(tempDir, "com.example.broken");
+    const noManifestDir = join(tempDir, "example.broken");
     await mkdir(noManifestDir, { recursive: true });
 
     const registry = new FilesystemPluginRegistry(tempDir);
@@ -89,14 +89,14 @@ describe("FilesystemPluginRegistry", () => {
   });
 
   it("skips directories with invalid manifest", async () => {
-    const validDir = join(tempDir, "com.example.valid");
+    const validDir = join(tempDir, "example.valid");
     await mkdir(validDir, { recursive: true });
     await writeFile(
       join(validDir, "manifest.json"),
       JSON.stringify(VALID_MANIFEST),
     );
 
-    const invalidDir = join(tempDir, "com.example.invalid");
+    const invalidDir = join(tempDir, "example.invalid");
     await mkdir(invalidDir, { recursive: true });
     await writeFile(
       join(invalidDir, "manifest.json"),
@@ -109,7 +109,7 @@ describe("FilesystemPluginRegistry", () => {
   });
 
   it("loads multiple plugins", async () => {
-    for (const id of ["com.example.a", "com.example.b", "com.example.c"]) {
+    for (const id of ["example.a", "example.b", "example.c"]) {
       const dir = join(tempDir, id);
       await mkdir(dir, { recursive: true });
       await writeFile(

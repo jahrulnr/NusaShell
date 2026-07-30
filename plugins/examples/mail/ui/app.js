@@ -6,7 +6,7 @@ import {
   readableMailError,
 } from "./mail-ui-state.js";
 
-const pluginId = new URLSearchParams(location.search).get("pluginId") || "com.nusashell.mail";
+const pluginId = new URLSearchParams(location.search).get("pluginId") || "nusashell.mail";
 
 const providerPresets = {
   gmail: {

@@ -11,8 +11,8 @@ import type {
 const fakeRuntime = {
   listPlugins: async () => [],
   listTools: async () => [{ name: "createNote", description: "Create a note", inputSchema: { type: "object", properties: { text: { type: "string" } } } }],
-  startPlugin: async () => ({ pluginId: "com.example.notes", state: "running" }),
-  stopPlugin: async () => ({ pluginId: "com.example.notes", state: "idle" }),
+  startPlugin: async () => ({ pluginId: "nusashell.notes", state: "running" }),
+  stopPlugin: async () => ({ pluginId: "nusashell.notes", state: "idle" }),
   callTool: async () => ({ ok: true }),
   listPrompts: async () => [{ name: "daily", description: "Daily prompt" }],
   getPrompt: async () => ({ messages: [{ role: "user", content: { type: "text", text: "Review today" } }] }),
@@ -32,23 +32,23 @@ describe("McpAgentToolGateway", () => {
       "docs_search", "docs_list", "docs_read",
       "skill_list", "skill_search", "skill_read",
     ]);
-    await expect(gateway.execute("tool_list", { pluginId: "com.example.notes" }, "call-tool-list", "turn-1")).resolves.toEqual([
+    await expect(gateway.execute("tool_list", { pluginId: "nusashell.notes" }, "call-tool-list", "turn-1")).resolves.toEqual([
       { name: "createNote", description: "Create a note" },
     ]);
-    await expect(gateway.execute("mcp_context", { pluginId: "com.example.notes", action: "list_prompts", query: "daily" }, "call-prompt-list", "turn-1")).resolves.toEqual([
+    await expect(gateway.execute("mcp_context", { pluginId: "nusashell.notes", action: "list_prompts", query: "daily" }, "call-prompt-list", "turn-1")).resolves.toEqual([
       { name: "daily", description: "Daily prompt" },
     ]);
-    await expect(gateway.execute("mcp_context", { pluginId: "com.example.notes", action: "get_prompt", name: "daily", arguments: {} }, "call-prompt-get", "turn-1")).resolves.toEqual({
+    await expect(gateway.execute("mcp_context", { pluginId: "nusashell.notes", action: "get_prompt", name: "daily", arguments: {} }, "call-prompt-get", "turn-1")).resolves.toEqual({
       messages: [{ role: "user", content: { type: "text", text: "Review today" } }],
     });
-    await expect(gateway.execute("mcp_context", { pluginId: "com.example.notes", action: "search_resources", query: "daily" }, "call-resource-search", "turn-1")).resolves.toEqual([
+    await expect(gateway.execute("mcp_context", { pluginId: "nusashell.notes", action: "search_resources", query: "daily" }, "call-resource-search", "turn-1")).resolves.toEqual([
       { uri: "notes://daily", name: "Daily notes", mimeType: "text/markdown" },
     ]);
-    await expect(gateway.execute("mcp_context", { pluginId: "com.example.notes", action: "list_resource_templates", query: "date" }, "call-resource-template", "turn-1")).resolves.toEqual([
+    await expect(gateway.execute("mcp_context", { pluginId: "nusashell.notes", action: "list_resource_templates", query: "date" }, "call-resource-template", "turn-1")).resolves.toEqual([
       { uriTemplate: "notes://{date}", name: "Notes by date", mimeType: "text/markdown" },
     ]);
     await expect(gateway.execute("mcp_context", {
-      pluginId: "com.example.notes",
+      pluginId: "nusashell.notes",
       action: "complete",
       refType: "resource",
       uri: "notes://{date}",
@@ -60,10 +60,10 @@ describe("McpAgentToolGateway", () => {
       total: 1,
       hasMore: false,
     });
-    await expect(gateway.execute("mcp_context", { pluginId: "com.example.notes", action: "read_resource", uri: "notes://daily" }, "call-resource-read", "turn-1")).resolves.toEqual({
+    await expect(gateway.execute("mcp_context", { pluginId: "nusashell.notes", action: "read_resource", uri: "notes://daily" }, "call-resource-read", "turn-1")).resolves.toEqual({
       contents: [{ uri: "notes://daily", mimeType: "text/markdown", text: "# Today" }],
     });
-    const grant = await gateway.execute("tool_schema", { pluginId: "com.example.notes", toolName: "createNote" }, "call-1", "turn-1") as { name: string };
+    const grant = await gateway.execute("tool_schema", { pluginId: "nusashell.notes", toolName: "createNote" }, "call-1", "turn-1") as { name: string };
     expect((await gateway.listTools([], "turn-1")).map((tool) => tool.name)).toContain(grant.name);
     expect((await gateway.listTools([], "turn-2")).map((tool) => tool.name)).not.toContain(grant.name);
     expect(await gateway.execute(grant.name, { text: "hello" }, "call-2", "turn-1")).toEqual({ ok: true });

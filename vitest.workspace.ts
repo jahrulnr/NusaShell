@@ -10,5 +10,6 @@ export default defineWorkspace([
   "apps/backend",
   "apps/desktop",
   "plugins/examples/mail",
+  "plugins/examples/files",
   "scripts",
 ]);

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ManifestSchema } from "../src/manifest/manifest-schema.js";
 
 const VALID = {
-  id: "com.example.notes",
+  id: "nusashell.notes",
   name: "Notes",
   version: "1.0.0",
   icon: "📝",

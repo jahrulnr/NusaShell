@@ -48,12 +48,12 @@ describe("launcher UI helpers", () => {
 
   it("filters plugins by name, plugin id, and manifest description", () => {
     const plugins = [
-      { pluginId: "com.example.notes", name: "Notes", description: "Quick markdown notes" },
-      { pluginId: "com.example.browse", name: "Browser", description: "Web automation" },
+      { pluginId: "nusashell.notes", name: "Notes", description: "Quick markdown notes" },
+      { pluginId: "example.browse", name: "Browser", description: "Web automation" },
     ];
 
-    expect(filterLauncherPlugins(plugins, "markdown").map((plugin) => plugin.pluginId)).toEqual(["com.example.notes"]);
-    expect(filterLauncherPlugins(plugins, "browse").map((plugin) => plugin.pluginId)).toEqual(["com.example.browse"]);
+    expect(filterLauncherPlugins(plugins, "markdown").map((plugin) => plugin.pluginId)).toEqual(["nusashell.notes"]);
+    expect(filterLauncherPlugins(plugins, "browse").map((plugin) => plugin.pluginId)).toEqual(["example.browse"]);
     expect(filterLauncherPlugins(plugins, "")).toHaveLength(2);
   });
 

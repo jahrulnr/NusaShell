@@ -8,7 +8,7 @@ function makeServer(port: number): WebSocketServer {
   queryBus.register("list-plugins", {
     handle: async () => ({
       plugins: [
-        { pluginId: "com.example.notes", name: "Notes", version: "1.0.0", icon: "📝", installPath: "/plugins/notes", state: "idle", enabled: true },
+        { pluginId: "nusashell.notes", name: "Notes", version: "1.0.0", icon: "📝", installPath: "/plugins/notes", state: "idle", enabled: true },
       ],
     }),
   } as never);
@@ -104,7 +104,7 @@ describe("NusaClient reconnect integration", () => {
       event: "plugin.started",
       sequence: 1,
       payload: {
-        pluginId: "com.example.notes",
+        pluginId: "nusashell.notes",
         state: "running",
         pid: 999,
         timestamp: new Date().toISOString(),
@@ -112,7 +112,7 @@ describe("NusaClient reconnect integration", () => {
     });
 
     await waitFor(() => receivedPayload !== null, 2000);
-    expect(receivedPayload).toMatchObject({ pluginId: "com.example.notes", state: "running" });
+    expect(receivedPayload).toMatchObject({ pluginId: "nusashell.notes", state: "running" });
   });
 
   it("auto-resubscribe restores server-side subscriptions after reconnect", async () => {

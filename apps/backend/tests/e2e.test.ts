@@ -33,9 +33,9 @@ describe("E2E: notes plugin", () => {
 
   it("lists the notes plugin", async () => {
     const result = await client.plugins.list();
-    const notes = result.plugins.find((plugin) => plugin.pluginId === "com.example.notes");
+    const notes = result.plugins.find((plugin) => plugin.pluginId === "nusashell.notes");
     expect(notes).toMatchObject({
-      pluginId: "com.example.notes",
+      pluginId: "nusashell.notes",
       name: "Notes",
       state: "idle",
     });
@@ -51,15 +51,15 @@ describe("E2E: notes plugin", () => {
   });
 
   it("starts the notes plugin", async () => {
-    const result = await client.plugins.start("com.example.notes");
-    expect(result.pluginId).toBe("com.example.notes");
+    const result = await client.plugins.start("nusashell.notes");
+    expect(result.pluginId).toBe("nusashell.notes");
     expect(result.state).toBe("running");
   });
 
   it("runs the stub agent with a running plugin explicitly scoped", async () => {
     const result = await client.agent.run(
       [{ role: "user", content: "Confirm the selected MCP scope" }],
-      { pluginIds: ["com.example.notes"] },
+      { pluginIds: ["nusashell.notes"] },
     );
 
     expect(result.text).toBe("(stub) received: Confirm the selected MCP scope");
@@ -71,7 +71,7 @@ describe("E2E: notes plugin", () => {
     const unsub = client.on<{ pluginId: string; state: string }>(
       "plugin.started",
       (payload) => {
-        if (payload.pluginId === "com.example.notes") {
+        if (payload.pluginId === "nusashell.notes") {
           received = true;
         }
       },
@@ -79,8 +79,8 @@ describe("E2E: notes plugin", () => {
 
     // Event may have already been published during start.
     // Re-start to capture it.
-    await client.plugins.stop("com.example.notes");
-    await client.plugins.start("com.example.notes");
+    await client.plugins.stop("nusashell.notes");
+    await client.plugins.start("nusashell.notes");
 
     await new Promise((resolve) => setTimeout(resolve, 100));
     unsub();
@@ -89,7 +89,7 @@ describe("E2E: notes plugin", () => {
 
   it("calls createNote tool", async () => {
     const result = await client.tools.call(
-      "com.example.notes",
+      "nusashell.notes",
       "00000000-0000-1000-8000-000000000001",
       "createNote",
       { text: "Hello from E2E" },
@@ -105,7 +105,7 @@ describe("E2E: notes plugin", () => {
 
   it("calls listNotes tool", async () => {
     const result = await client.tools.call(
-      "com.example.notes",
+      "nusashell.notes",
       "00000000-0000-1000-8000-000000000002",
       "listNotes",
       {},
@@ -120,14 +120,14 @@ describe("E2E: notes plugin", () => {
   });
 
   it("stops the notes plugin", async () => {
-    const result = await client.plugins.stop("com.example.notes");
-    expect(result.pluginId).toBe("com.example.notes");
+    const result = await client.plugins.stop("nusashell.notes");
+    expect(result.pluginId).toBe("nusashell.notes");
     expect(result.state).toBe("idle");
   });
 
   it("gets single plugin details", async () => {
-    const result = await client.plugins.get("com.example.notes");
-    expect(result.pluginId).toBe("com.example.notes");
+    const result = await client.plugins.get("nusashell.notes");
+    expect(result.pluginId).toBe("nusashell.notes");
     expect(result.name).toBe("Notes");
     expect(result.version).toBe("1.0.0");
     expect(result.icon).toBe("📝");
@@ -136,40 +136,40 @@ describe("E2E: notes plugin", () => {
   });
 
   it("gets plugin state", async () => {
-    const result = await client.plugins.getState("com.example.notes");
-    expect(result.pluginId).toBe("com.example.notes");
+    const result = await client.plugins.getState("nusashell.notes");
+    expect(result.pluginId).toBe("nusashell.notes");
     expect(result.state).toBe("idle");
   });
 
   it("restarts the notes plugin", async () => {
-    const result = await client.plugins.restart("com.example.notes");
-    expect(result.pluginId).toBe("com.example.notes");
+    const result = await client.plugins.restart("nusashell.notes");
+    expect(result.pluginId).toBe("nusashell.notes");
     expect(result.state).toBe("running");
   });
 
   it("lists tools from running plugin", async () => {
-    const result = await client.tools.list("com.example.notes");
+    const result = await client.tools.list("nusashell.notes");
     expect(result.tools).toHaveLength(2);
     const names = result.tools.map((t) => t.name).sort();
     expect(names).toEqual(["createNote", "listNotes"]);
   });
 
   it("brokers Notes prompts and resources through the SDK", async () => {
-    const prompts = await client.mcp.listPrompts("com.example.notes");
+    const prompts = await client.mcp.listPrompts("nusashell.notes");
     expect(prompts.prompts.map((prompt) => prompt.name)).toEqual(["summarize_notes"]);
 
-    const prompt = await client.mcp.getPrompt("com.example.notes", "summarize_notes") as { messages: Array<{ content: { text: string } }> };
+    const prompt = await client.mcp.getPrompt("nusashell.notes", "summarize_notes") as { messages: Array<{ content: { text: string } }> };
     expect(prompt.messages[0]!.content.text).toContain("attached Notes MCP resource");
 
-    const resources = await client.mcp.listResources("com.example.notes");
+    const resources = await client.mcp.listResources("nusashell.notes");
     expect(resources.resources.map((resource) => resource.uri)).toEqual(["notes://all"]);
 
-    const read = await client.mcp.readResource("com.example.notes", "notes://all") as { contents: Array<{ text: string }> };
+    const read = await client.mcp.readResource("nusashell.notes", "notes://all") as { contents: Array<{ text: string }> };
     expect(JSON.parse(read.contents[0]!.text).notes).toBeInstanceOf(Array);
   });
 
   it("rejects tool.list when plugin is not running", async () => {
-    await client.plugins.stop("com.example.notes");
-    await expect(client.tools.list("com.example.notes")).rejects.toThrow();
+    await client.plugins.stop("nusashell.notes");
+    await expect(client.tools.list("nusashell.notes")).rejects.toThrow();
   });
 });

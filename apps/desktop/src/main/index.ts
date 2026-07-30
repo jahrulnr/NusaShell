@@ -37,7 +37,7 @@ const shellLogLevels = new Set<ShellLogLevel>(["debug", "info", "warn", "error"]
 const aiRuntimeConfig = loadConfig().ai;
 const aiStubEnabled = aiRuntimeConfig.stubEnabled;
 const DOCS_URL = "https://github.com/jahrulnr/NusaShell/tree/master/docs";
-const MAIL_PLUGIN_ID = "com.nusashell.mail";
+const MAIL_PLUGIN_ID = "nusashell.mail";
 
 if (process.platform === "linux") {
   app.setName(LINUX_DESKTOP_APP_NAME);

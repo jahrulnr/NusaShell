@@ -270,7 +270,7 @@ function setPluginIcon(container, icon, size, installPath = "") {
 
   const glyph = document.createElement("span");
   glyph.className = "plugin-icon-glyph";
-  glyph.style.fontSize = `${size}px`;
+  glyph.style.fontSize = `${Math.round(size * 0.55)}px`;
   glyph.textContent = presentation.text;
   container.appendChild(glyph);
 }

@@ -12,7 +12,7 @@ import {
 } from "@nusashell/domain";
 
 function makePlugin(
-  id: string = "com.example.notes",
+  id: string = "nusashell.notes",
   overrides: Partial<PluginManifestInput> = {},
   enabled: boolean = true,
 ): Plugin {
@@ -58,10 +58,10 @@ describe("SqlitePluginRepository", () => {
   });
 
   it("save + findById roundtrip", async () => {
-    const plugin = makePlugin("com.example.notes");
+    const plugin = makePlugin("nusashell.notes");
     await repo.save(plugin);
 
-    const idResult = PluginId.create("com.example.notes");
+    const idResult = PluginId.create("nusashell.notes");
     if (!idResult.ok) throw new Error("bad id");
 
     const found = await repo.findById(idResult.value);
@@ -69,23 +69,23 @@ describe("SqlitePluginRepository", () => {
     expect(found!.manifest.name).toBe("Notes");
     expect(found!.manifest.version.toString()).toBe("1.0.0");
     expect(found!.enabled).toBe(true);
-    expect(found!.installPath).toBe("/plugins/com.example.notes");
+    expect(found!.installPath).toBe("/plugins/nusashell.notes");
   });
 
   it("list returns all saved plugins", async () => {
-    await repo.save(makePlugin("com.example.a"));
-    await repo.save(makePlugin("com.example.b"));
-    await repo.save(makePlugin("com.example.c"));
+    await repo.save(makePlugin("example.a"));
+    await repo.save(makePlugin("example.b"));
+    await repo.save(makePlugin("example.c"));
 
     const list = await repo.list();
     expect(list).toHaveLength(3);
   });
 
   it("remove deletes a plugin", async () => {
-    const plugin = makePlugin("com.example.notes");
+    const plugin = makePlugin("nusashell.notes");
     await repo.save(plugin);
 
-    const idResult = PluginId.create("com.example.notes");
+    const idResult = PluginId.create("nusashell.notes");
     if (!idResult.ok) throw new Error("bad id");
 
     await repo.remove(idResult.value);
@@ -94,13 +94,13 @@ describe("SqlitePluginRepository", () => {
   });
 
   it("save overwrites existing (UPSERT)", async () => {
-    const plugin = makePlugin("com.example.notes", { name: "Original" });
+    const plugin = makePlugin("nusashell.notes", { name: "Original" });
     await repo.save(plugin);
 
-    const updated = makePlugin("com.example.notes", { name: "Updated" });
+    const updated = makePlugin("nusashell.notes", { name: "Updated" });
     await repo.save(updated);
 
-    const idResult = PluginId.create("com.example.notes");
+    const idResult = PluginId.create("nusashell.notes");
     if (!idResult.ok) throw new Error("bad id");
 
     const found = await repo.findById(idResult.value);
@@ -117,7 +117,7 @@ describe("SqlitePluginRepository", () => {
   });
 
   it("preserves manifest with optional fields", async () => {
-    const plugin = makePlugin("com.example.advanced", {
+    const plugin = makePlugin("example.advanced", {
       ui: {
         entry: "ui/index.html",
         window: { mode: "panel", defaultSize: { width: 480, height: 560 }, resizable: true },
@@ -134,7 +134,7 @@ describe("SqlitePluginRepository", () => {
     });
     await repo.save(plugin);
 
-    const idResult = PluginId.create("com.example.advanced");
+    const idResult = PluginId.create("example.advanced");
     if (!idResult.ok) throw new Error("bad id");
 
     const found = await repo.findById(idResult.value);
@@ -148,10 +148,10 @@ describe("SqlitePluginRepository", () => {
   });
 
   it("persists disabled state", async () => {
-    const plugin = makePlugin("com.example.notes", {}, false);
+    const plugin = makePlugin("nusashell.notes", {}, false);
     await repo.save(plugin);
 
-    const idResult = PluginId.create("com.example.notes");
+    const idResult = PluginId.create("nusashell.notes");
     if (!idResult.ok) throw new Error("bad id");
 
     const found = await repo.findById(idResult.value);

@@ -153,7 +153,7 @@ my-plugin/
 
 ```jsonc
 {
-  "id": "com.example.notes-plugin",
+  "id": "nusashell.notes",
   "name": "Notes",
   "version": "1.0.0",
   "icon": "icon.png",
@@ -248,10 +248,10 @@ phase before SQLite is wired.
 {
   "installed": [
     {
-      "id": "com.example.notes-plugin",
+      "id": "nusashell.notes",
       "version": "1.0.0",
       "installedAt": "2026-07-27T10:00:00Z",
-      "path": "/plugins/com.example.notes-plugin"
+      "path": "/plugins/nusashell.notes"
     }
   ]
 }

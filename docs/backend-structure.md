@@ -591,7 +591,7 @@ The transport layer must not own plugin runtime state.
   "id": "req_01J...",
   "method": "plugin.start",
   "payload": {
-    "pluginId": "com.example.notes"
+    "pluginId": "nusashell.notes"
   }
 }
 ```
@@ -604,7 +604,7 @@ The transport layer must not own plugin runtime state.
   "id": "req_01J...",
   "ok": true,
   "result": {
-    "pluginId": "com.example.notes",
+    "pluginId": "nusashell.notes",
     "state": "running"
   }
 }
@@ -633,7 +633,7 @@ The transport layer must not own plugin runtime state.
   "event": "plugin.state_changed",
   "sequence": 182,
   "payload": {
-    "pluginId": "com.example.notes",
+    "pluginId": "nusashell.notes",
     "previousState": "starting",
     "state": "running"
   }
@@ -766,7 +766,7 @@ const client = new NusaClient({
 await client.connect();
 
 const result = await client.plugins.start(
-  "com.example.notes",
+  "nusashell.notes",
 );
 ```
 

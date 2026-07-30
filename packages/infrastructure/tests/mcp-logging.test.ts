@@ -20,7 +20,7 @@ describe("MCP protocol logging", () => {
       error: vi.fn(),
     } as unknown as Logger;
 
-    registerMcpLogging(client, logger, "com.example.notes");
+    registerMcpLogging(client, logger, "nusashell.notes");
     handler?.({
       params: {
         level: "warning",
@@ -34,7 +34,7 @@ describe("MCP protocol logging", () => {
       message: string;
       source: string;
     };
-    expect(fields.source).toBe("com.example.notes");
+    expect(fields.source).toBe("nusashell.notes");
     expect(fields.message).not.toContain("secret-value");
     expect(fields.message).toContain("[REDACTED]");
     expect(fields.message.length).toBeLessThanOrEqual(4000);

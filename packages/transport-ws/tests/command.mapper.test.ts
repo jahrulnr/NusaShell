@@ -16,7 +16,7 @@ function makeRequest(method: string, payload: Record<string, unknown>): ParsedRe
 
 describe("mapToCommand", () => {
   it("maps plugin.start to StartPluginCommand", () => {
-    const result = mapToCommand(makeRequest("plugin.start", { pluginId: "com.example.notes" }));
+    const result = mapToCommand(makeRequest("plugin.start", { pluginId: "nusashell.notes" }));
     expect(result.kind).toBe("command");
     if (result.kind === "command") {
       expect(result.command.kind).toBe("start-plugin");
@@ -24,7 +24,7 @@ describe("mapToCommand", () => {
   });
 
   it("maps plugin.stop to StopPluginCommand", () => {
-    const result = mapToCommand(makeRequest("plugin.stop", { pluginId: "com.example.notes" }));
+    const result = mapToCommand(makeRequest("plugin.stop", { pluginId: "nusashell.notes" }));
     expect(result.kind).toBe("command");
     if (result.kind === "command") {
       expect(result.command.kind).toBe("stop-plugin");
@@ -34,7 +34,7 @@ describe("mapToCommand", () => {
   it("maps tool.call to CallToolCommand", () => {
     const result = mapToCommand(
       makeRequest("tool.call", {
-        pluginId: "com.example.notes",
+        pluginId: "nusashell.notes",
         requestId: "req-uuid-001",
         toolName: "echo",
         args: { message: "hello" },
@@ -74,13 +74,13 @@ describe("mapToCommand", () => {
 
   it("maps plugin.uninstall to UninstallPluginCommand", () => {
     const result = mapToCommand(
-      makeRequest("plugin.uninstall", { pluginId: "com.example.notes" }),
+      makeRequest("plugin.uninstall", { pluginId: "nusashell.notes" }),
     );
     expect(result.kind).toBe("command");
     if (result.kind === "command") {
       expect(result.command.kind).toBe("uninstall-plugin");
       const cmd = result.command as UninstallPluginCommand;
-      expect(cmd.pluginId).toBe("com.example.notes");
+      expect(cmd.pluginId).toBe("nusashell.notes");
     }
   });
 

@@ -17,7 +17,7 @@ describe("Event schemas", () => {
       event: "plugin.installed",
       sequence: 1,
       payload: {
-        pluginId: "com.example.notes",
+        pluginId: "nusashell.notes",
         version: "1.0.0",
         timestamp: "2026-01-01T00:00:00Z",
       },
@@ -31,7 +31,7 @@ describe("Event schemas", () => {
       event: "plugin.uninstalled",
       sequence: 1,
       payload: {
-        pluginId: "com.example.notes",
+        pluginId: "nusashell.notes",
         timestamp: "2026-01-01T00:00:00Z",
       },
     });
@@ -44,7 +44,7 @@ describe("Event schemas", () => {
       event: "plugin.installed",
       sequence: 1,
       payload: {
-        pluginId: "com.example.notes",
+        pluginId: "nusashell.notes",
         version: "1.0.0",
         timestamp: "2026-01-01T00:00:00Z",
       },
@@ -61,7 +61,7 @@ describe("Event schemas", () => {
       event: "plugin.uninstalled",
       sequence: 1,
       payload: {
-        pluginId: "com.example.notes",
+        pluginId: "nusashell.notes",
         timestamp: "2026-01-01T00:00:00Z",
       },
     });
@@ -77,7 +77,7 @@ describe("Event schemas", () => {
       event: "plugin.started",
       sequence: 1,
       payload: {
-        pluginId: "com.example.notes",
+        pluginId: "nusashell.notes",
         state: "running",
         pid: 12345,
         timestamp: "2026-01-01T00:00:00Z",
@@ -92,7 +92,7 @@ describe("Event schemas", () => {
       event: "plugin.stopped",
       sequence: 1,
       payload: {
-        pluginId: "com.example.notes",
+        pluginId: "nusashell.notes",
         state: "idle",
         timestamp: "2026-01-01T00:00:00Z",
       },
@@ -106,7 +106,7 @@ describe("Event schemas", () => {
       event: "plugin.crashed",
       sequence: 1,
       payload: {
-        pluginId: "com.example.notes",
+        pluginId: "nusashell.notes",
         state: "crashed",
         exitCode: 1,
         timestamp: "2026-01-01T00:00:00Z",
@@ -121,7 +121,7 @@ describe("Event schemas", () => {
       event: "plugin.state_changed",
       sequence: 1,
       payload: {
-        pluginId: "com.example.notes",
+        pluginId: "nusashell.notes",
         oldState: "starting",
         newState: "running",
         timestamp: "2026-01-01T00:00:00Z",
@@ -136,7 +136,7 @@ describe("Event schemas", () => {
       event: "tool.call_completed",
       sequence: 1,
       payload: {
-        pluginId: "com.example.notes",
+        pluginId: "nusashell.notes",
         requestId: "req-uuid-001",
         toolName: "echo",
         success: true,
@@ -152,7 +152,7 @@ describe("Event schemas", () => {
       event: "plugin.started",
       sequence: 1,
       payload: {
-        pluginId: "com.example.notes",
+        pluginId: "nusashell.notes",
         state: "running",
         pid: 12345,
         timestamp: "2026-01-01T00:00:00Z",

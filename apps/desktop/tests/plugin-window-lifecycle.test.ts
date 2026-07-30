@@ -73,12 +73,12 @@ describe("plugin window lifecycle", () => {
     electronState.onLoad = (window) => {
       authorizedDuringLoad = isPluginWindowSender(
         window.webContents as WebContents,
-        "com.nusashell.mail",
+        "nusashell.mail",
       );
     };
 
     await openPluginWindow(
-      "com.nusashell.mail",
+      "nusashell.mail",
       "Mail",
       "✉",
       "/plugins/mail",

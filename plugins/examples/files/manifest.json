@@ -1,6 +1,6 @@
 {
-  "id": "nusashell.mail",
-  "name": "Mail",
+  "id": "nusashell.files",
+  "name": "Files",
   "version": "0.1.0",
   "icon": "file://icon.png",
   "ui": {

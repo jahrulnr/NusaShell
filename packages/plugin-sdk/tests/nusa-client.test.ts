@@ -15,7 +15,7 @@ describe("NusaClient", () => {
     queryBus.register("list-plugins", {
       handle: async () => ({
         plugins: [
-          { pluginId: "com.example.notes", name: "Notes", version: "1.0.0", icon: "📝", installPath: "/plugins/notes", state: "idle", enabled: true },
+          { pluginId: "nusashell.notes", name: "Notes", version: "1.0.0", icon: "📝", installPath: "/plugins/notes", state: "idle", enabled: true },
         ],
       }),
     } as never);
@@ -23,7 +23,7 @@ describe("NusaClient", () => {
     const commandBus = new CommandBus();
     commandBus.register("start-plugin", {
       handle: async () => ({
-        pluginId: "com.example.notes",
+        pluginId: "nusashell.notes",
         state: "running",
       }),
     } as never);
@@ -44,12 +44,12 @@ describe("NusaClient", () => {
   it("connects and lists plugins", async () => {
     const result = await client.plugins.list();
     expect(result.plugins).toHaveLength(1);
-    expect(result.plugins[0]!.pluginId).toBe("com.example.notes");
+    expect(result.plugins[0]!.pluginId).toBe("nusashell.notes");
   });
 
   it("starts a plugin", async () => {
-    const result = await client.plugins.start("com.example.notes");
-    expect(result.pluginId).toBe("com.example.notes");
+    const result = await client.plugins.start("nusashell.notes");
+    expect(result.pluginId).toBe("nusashell.notes");
     expect(result.state).toBe("running");
   });
 
@@ -60,7 +60,7 @@ describe("NusaClient", () => {
       event: "plugin.started",
       sequence: 1,
       payload: {
-        pluginId: "com.example.notes",
+        pluginId: "nusashell.notes",
         state: "running",
         pid: 12345,
         timestamp: new Date().toISOString(),
@@ -76,7 +76,7 @@ describe("NusaClient", () => {
       event: "plugin.started",
       sequence: 2,
       payload: {
-        pluginId: "com.example.notes",
+        pluginId: "nusashell.notes",
         state: "running",
         pid: 12345,
         timestamp: new Date().toISOString(),
@@ -84,7 +84,7 @@ describe("NusaClient", () => {
     });
 
     const payload = await eventPromise;
-    expect(payload).toMatchObject({ pluginId: "com.example.notes", state: "running" });
+    expect(payload).toMatchObject({ pluginId: "nusashell.notes", state: "running" });
   });
 
   it("rejects with NusaClientError on error response", async () => {

@@ -9,7 +9,7 @@ import {
 } from "../src/index.js";
 
 const manifestInput = {
-  id: "com.example.notes",
+  id: "nusashell.notes",
   name: "Notes",
   version: "1.0.0",
   icon: "notes.png",
@@ -28,7 +28,7 @@ function createPlugin(enabled = true): Plugin {
   if (!manifest.ok) {
     throw new Error("manifest setup failed");
   }
-  const id = PluginId.create("com.example.notes");
+  const id = PluginId.create("nusashell.notes");
   const version = PluginVersion.create("1.0.0");
   if (!id.ok || !version.ok) {
     throw new Error("value object setup failed");
@@ -46,7 +46,7 @@ function createPlugin(enabled = true): Plugin {
 describe("PluginLifecyclePolicy", () => {
   it("rejects start when plugin is disabled", () => {
     const plugin = createPlugin(false);
-    const idResult = PluginId.create("com.example.notes");
+    const idResult = PluginId.create("nusashell.notes");
     expect(idResult.ok).toBe(true);
     if (!idResult.ok) return;
     const runtime = PluginRuntime.createIdle(idResult.value);
@@ -59,7 +59,7 @@ describe("PluginLifecyclePolicy", () => {
 
   it("allows start from idle when enabled", () => {
     const plugin = createPlugin(true);
-    const idResult = PluginId.create("com.example.notes");
+    const idResult = PluginId.create("nusashell.notes");
     if (!idResult.ok) throw new Error("id setup failed");
     const runtime = PluginRuntime.createIdle(idResult.value);
     const result = PluginLifecyclePolicy.canStart(plugin, runtime);
@@ -68,7 +68,7 @@ describe("PluginLifecyclePolicy", () => {
 
   it("allows stop from running", () => {
     const plugin = createPlugin(true);
-    const idResult = PluginId.create("com.example.notes");
+    const idResult = PluginId.create("nusashell.notes");
     if (!idResult.ok) throw new Error("id setup failed");
     const runtime = PluginRuntime.create(idResult.value, "running");
     const result = PluginLifecyclePolicy.canStop(plugin, runtime);
@@ -77,7 +77,7 @@ describe("PluginLifecyclePolicy", () => {
 
   it("allows callTool only when running", () => {
     const plugin = createPlugin(true);
-    const idResult = PluginId.create("com.example.notes");
+    const idResult = PluginId.create("nusashell.notes");
     if (!idResult.ok) throw new Error("id setup failed");
     const running = PluginRuntime.create(idResult.value, "running");
     const idle = PluginRuntime.create(idResult.value, "idle");
