@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.33] - 2026-07-31
+
+### Added
+
+- `files_copy` tool: copy a file or directory recursively to a new path.
+  Destination parent directories are created automatically.
+- `files_grep` tool: search file contents by regex pattern (like grep), with
+  optional glob filter to narrow by file name (e.g. `*.js`). Only text files
+  are scanned; results include path, line number, and matching line content.
+- `files_patch` tool: replace the first occurrence of `old_string` with
+  `new_string` in a file. Safer than `files_write` for targeted edits.
+- `files_append` tool: append content to the end of a file, creating it if it
+  does not exist. Parent directories are created automatically.
+
+### Changed
+
+- All files tool schema descriptions now explicitly mention "files plugin root
+  (user home directory by default)" instead of the ambiguous "root", making it
+  clear what paths are relative to.
+- ENOENT errors from files plugin operations now include a hint with the actual
+  root path (e.g. `Files plugin root is "/home/user"`) so the agent does not
+  have to guess what root is.
+
+### Fixed
+
+- Agent UI streaming: reasoning blocks from multiple rounds now appear as
+  separate sections instead of merging into one. Previously, all reasoning
+  deltas across rounds were appended to a single block. Now a new reasoning
+  block is created whenever reasoning resumes after a tool call ends, so the
+  visual order matches the actual flow: thinking → tool → thinking → tool →
+  response.
+- Agent UI streaming: the renderer never subscribed to WebSocket events on
+  first connect because `activeSubscriptions` was empty and the `onopen`
+  handler only re-subscribes when it is non-empty. The 500 ms `setTimeout`
+  fallback silently failed if the WebSocket was not yet connected. Now
+  `activeSubscriptions` is pre-seeded with `"*"` before `connectWs()` so the
+  subscribe request is always sent in `onopen`.
+
 ## [0.0.32] - 2026-07-30
 
 ### Fixed

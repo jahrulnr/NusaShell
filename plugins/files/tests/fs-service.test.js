@@ -230,3 +230,169 @@ describe("FileService.fileInfo", () => {
     expect(info.type).toBe("dir");
   });
 });
+
+describe("FileService error hints", () => {
+  it("includes root path hint on ENOENT for listDir", async () => {
+    await expect(service.listDir("nonexistent")).rejects.toThrow(/Files plugin root/);
+  });
+
+  it("includes root path hint on ENOENT for readFile", async () => {
+    await expect(service.readFile("missing.txt")).rejects.toThrow(/Files plugin root/);
+  });
+
+  it("includes root path hint on ENOENT for fileInfo", async () => {
+    await expect(service.fileInfo("missing.txt")).rejects.toThrow(/Files plugin root/);
+  });
+
+  it("includes root path hint on ENOENT for deleteFile", async () => {
+    await expect(service.deleteFile("missing.txt", false)).rejects.toThrow(/Files plugin root/);
+  });
+
+  it("includes root path hint on ENOENT for tree", async () => {
+    await expect(service.tree("nonexistent")).rejects.toThrow(/Files plugin root/);
+  });
+
+  it("includes root path hint on ENOENT for searchFiles", async () => {
+    await expect(service.searchFiles("nonexistent", "*.txt")).rejects.toThrow(/Files plugin root/);
+  });
+});
+
+describe("FileService.grepFiles", () => {
+  it("finds matching lines in text files", async () => {
+    await fs.writeFile(path.join(tmpDir, "a.js"), "function foo() {}\nconst x = 1;\nfunction bar() {}");
+    await fs.writeFile(path.join(tmpDir, "b.js"), "const y = 2;\nfunction baz() {}");
+    await fs.writeFile(path.join(tmpDir, "c.md"), "# Hello\nfunction notMatched() {}");
+
+    const results = await service.grepFiles("/", "function\\s+\\w+");
+    expect(results).toHaveLength(4);
+    expect(results.every((r) => r.line > 0)).toBe(true);
+    expect(results.every((r) => r.content.includes("function"))).toBe(true);
+  });
+
+  it("filters by glob pattern", async () => {
+    await fs.writeFile(path.join(tmpDir, "a.js"), "function foo() {}");
+    await fs.writeFile(path.join(tmpDir, "b.ts"), "function bar() {}");
+    await fs.writeFile(path.join(tmpDir, "c.md"), "function baz() {}");
+
+    const results = await service.grepFiles("/", "function", "*.js");
+    expect(results).toHaveLength(1);
+    expect(results[0].path).toBe("a.js");
+  });
+
+  it("skips non-text files", async () => {
+    await fs.writeFile(path.join(tmpDir, "data.bin"), Buffer.from([0x00, 0x01, 0x02]));
+    await fs.writeFile(path.join(tmpDir, "a.txt"), "hello world");
+
+    const results = await service.grepFiles("/", "hello");
+    expect(results).toHaveLength(1);
+    expect(results[0].path).toBe("a.txt");
+  });
+
+  it("searches recursively", async () => {
+    await fs.mkdir(path.join(tmpDir, "sub"));
+    await fs.writeFile(path.join(tmpDir, "sub", "deep.js"), "TODO: fix this");
+
+    const results = await service.grepFiles("/", "TODO");
+    expect(results).toHaveLength(1);
+    expect(results[0].path).toBe("sub/deep.js");
+    expect(results[0].line).toBe(1);
+  });
+
+  it("includes root path hint on ENOENT", async () => {
+    await expect(service.grepFiles("nonexistent", "pattern")).rejects.toThrow(/Files plugin root/);
+  });
+});
+
+describe("FileService.patchFile", () => {
+  it("replaces first occurrence of old_string", async () => {
+    await fs.writeFile(path.join(tmpDir, "test.txt"), "hello world\nfoo bar");
+    const result = await service.patchFile("test.txt", "foo bar", "baz qux");
+    expect(result.patched).toBe(true);
+    const content = await fs.readFile(path.join(tmpDir, "test.txt"), "utf8");
+    expect(content).toBe("hello world\nbaz qux");
+  });
+
+  it("only replaces first occurrence", async () => {
+    await fs.writeFile(path.join(tmpDir, "test.txt"), "aaa\naaa\naaa");
+    await service.patchFile("test.txt", "aaa", "bbb");
+    const content = await fs.readFile(path.join(tmpDir, "test.txt"), "utf8");
+    expect(content).toBe("bbb\naaa\naaa");
+  });
+
+  it("throws if old_string not found", async () => {
+    await fs.writeFile(path.join(tmpDir, "test.txt"), "hello world");
+    await expect(service.patchFile("test.txt", "missing", "replacement")).rejects.toThrow(/old_string not found/);
+  });
+
+  it("throws on ENOENT with root hint", async () => {
+    await expect(service.patchFile("missing.txt", "a", "b")).rejects.toThrow(/Files plugin root/);
+  });
+});
+
+describe("FileService.appendFile", () => {
+  it("appends to an existing file", async () => {
+    await fs.writeFile(path.join(tmpDir, "log.txt"), "line1\n");
+    const result = await service.appendFile("log.txt", "line2\n");
+    expect(result.appended).toBe(true);
+    const content = await fs.readFile(path.join(tmpDir, "log.txt"), "utf8");
+    expect(content).toBe("line1\nline2\n");
+  });
+
+  it("creates a new file if it does not exist", async () => {
+    const result = await service.appendFile("new.txt", "content");
+    expect(result.appended).toBe(true);
+    const content = await fs.readFile(path.join(tmpDir, "new.txt"), "utf8");
+    expect(content).toBe("content");
+  });
+
+  it("creates parent directories", async () => {
+    await service.appendFile("sub/dir/file.txt", "nested");
+    const content = await fs.readFile(path.join(tmpDir, "sub", "dir", "file.txt"), "utf8");
+    expect(content).toBe("nested");
+  });
+});
+
+describe("FileService.copyFile", () => {
+  it("copies a file", async () => {
+    await fs.writeFile(path.join(tmpDir, "original.txt"), "hello world");
+    const result = await service.copyFile("original.txt", "copy.txt");
+    expect(result.copied).toBe(true);
+    expect(result.from).toBe("original.txt");
+    expect(result.to).toBe("copy.txt");
+    const content = await fs.readFile(path.join(tmpDir, "copy.txt"), "utf8");
+    expect(content).toBe("hello world");
+    const original = await fs.readFile(path.join(tmpDir, "original.txt"), "utf8");
+    expect(original).toBe("hello world");
+  });
+
+  it("copies a directory recursively", async () => {
+    await fs.mkdir(path.join(tmpDir, "srcdir"));
+    await fs.writeFile(path.join(tmpDir, "srcdir", "a.txt"), "aaa");
+    await fs.writeFile(path.join(tmpDir, "srcdir", "b.txt"), "bbb");
+
+    const result = await service.copyFile("srcdir", "dstdir");
+    expect(result.copied).toBe(true);
+    const aContent = await fs.readFile(path.join(tmpDir, "dstdir", "a.txt"), "utf8");
+    const bContent = await fs.readFile(path.join(tmpDir, "dstdir", "b.txt"), "utf8");
+    expect(aContent).toBe("aaa");
+    expect(bContent).toBe("bbb");
+  });
+
+  it("creates parent directories for destination", async () => {
+    await fs.writeFile(path.join(tmpDir, "file.txt"), "content");
+    await service.copyFile("file.txt", "sub/deep/copy.txt");
+    const content = await fs.readFile(path.join(tmpDir, "sub", "deep", "copy.txt"), "utf8");
+    expect(content).toBe("content");
+  });
+
+  it("throws on ENOENT with root hint", async () => {
+    await expect(service.copyFile("missing.txt", "copy.txt")).rejects.toThrow(/Files plugin root/);
+  });
+
+  it("respects path sandboxing", async () => {
+    await fs.writeFile(path.join(tmpDir, "file.txt"), "content");
+    await expect(service.copyFile("file.txt", "../../../etc/copy")).rejects.toThrow(
+      "Path escapes files root",
+    );
+  });
+});

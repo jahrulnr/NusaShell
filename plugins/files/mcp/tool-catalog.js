@@ -5,7 +5,11 @@ export const FILES_TOOL_NAMES = Object.freeze([
   "files_write",
   "files_mkdir",
   "files_move",
+  "files_copy",
   "files_delete",
   "files_search",
   "files_info",
+  "files_grep",
+  "files_patch",
+  "files_append",
 ]);

@@ -54,11 +54,29 @@ export class FileService {
   }
 
   /**
+   * Wraps fs errors with contextual hints about the plugin root.
+   * @param {Promise<T>} p
+   * @returns {Promise<T>}
+   * @template T
+   */
+  async _wrap(p) {
+    try {
+      return await p;
+    } catch (error) {
+      if (error && typeof error === "object" && error.code === "ENOENT") {
+        const hint = `Path not found. Files plugin root is "${this.root}". Use paths relative to that root (e.g. "" for root, "Documents" for a subdirectory).`;
+        throw new Error(`${error.message}. ${hint}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
    * @param {string} input
    */
   async listDir(input) {
     const dir = resolvePath(this.root, input);
-    const entries = await fs.readdir(dir, { withFileTypes: true });
+    const entries = await this._wrap(fs.readdir(dir, { withFileTypes: true }));
     const items = await Promise.all(
       entries.map(async (entry) => {
         const entryPath = path.join(dir, entry.name);
@@ -90,6 +108,7 @@ export class FileService {
   async tree(input, depth = 3) {
     const clampedDepth = Math.min(Math.max(depth, 1), MAX_TREE_DEPTH);
     const dir = resolvePath(this.root, input);
+    await this._wrap(fs.stat(dir));
     return this._buildTree(dir, clampedDepth);
   }
 
@@ -128,7 +147,7 @@ export class FileService {
    */
   async readFile(input, head, tail) {
     const filePath = resolvePath(this.root, input);
-    const stat = await fs.stat(filePath);
+    const stat = await this._wrap(fs.stat(filePath));
     if (stat.size > MAX_READ_BYTES) {
       throw new Error(`File too large (${formatFileSize(stat.size)}), max ${formatFileSize(MAX_READ_BYTES)}`);
     }
@@ -183,7 +202,7 @@ export class FileService {
    */
   async deleteFile(input, recursive) {
     const target = resolvePath(this.root, input);
-    const stat = await fs.stat(target);
+    const stat = await this._wrap(fs.stat(target));
     if (stat.isDirectory() && !recursive) {
       const entries = await fs.readdir(target);
       if (entries.length > 0) {
@@ -200,6 +219,7 @@ export class FileService {
    */
   async searchFiles(input, pattern) {
     const dir = resolvePath(this.root, input);
+    await this._wrap(fs.stat(dir));
     const regex = globToRegex(pattern);
     const results = [];
     await this._searchRecursive(dir, regex, results);
@@ -232,11 +252,104 @@ export class FileService {
   }
 
   /**
+   * Search file contents for a regex pattern (like grep).
+   * @param {string} input - directory to search in
+   * @param {string} pattern - regex pattern
+   * @param {string} [glob] - optional file name glob filter (e.g. "*.js")
+   */
+  async grepFiles(input, pattern, glob) {
+    const dir = resolvePath(this.root, input);
+    await this._wrap(fs.stat(dir));
+    const regex = new RegExp(pattern);
+    const globRegex = glob ? globToRegex(glob) : null;
+    const results = [];
+    await this._grepRecursive(dir, regex, globRegex, results);
+    return results.slice(0, MAX_SEARCH_RESULTS);
+  }
+
+  async _grepRecursive(dir, regex, globRegex, results) {
+    if (results.length >= MAX_SEARCH_RESULTS) return;
+    const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (results.length >= MAX_SEARCH_RESULTS) return;
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await this._grepRecursive(entryPath, regex, globRegex, results);
+        continue;
+      }
+      if (globRegex && !globRegex.test(entry.name)) continue;
+      const fileType = detectFileType(entry.name);
+      if (fileType !== "text") continue;
+      const stat = await fs.stat(entryPath).catch(() => null);
+      if (!stat || stat.size > MAX_READ_BYTES) continue;
+      const content = await fs.readFile(entryPath, "utf8").catch(() => null);
+      if (!content) continue;
+      const lines = content.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        if (results.length >= MAX_SEARCH_RESULTS) break;
+        if (regex.test(lines[i])) {
+          results.push({
+            path: path.relative(this.root, entryPath) || entry.name,
+            line: i + 1,
+            content: lines[i].slice(0, 500),
+          });
+        }
+      }
+    }
+  }
+
+  /**
+   * Replace the first occurrence of old_string with new_string in a file.
+   * @param {string} input
+   * @param {string} oldString
+   * @param {string} newString
+   */
+  async patchFile(input, oldString, newString) {
+    const filePath = resolvePath(this.root, input);
+    const stat = await this._wrap(fs.stat(filePath));
+    if (stat.size > MAX_READ_BYTES) {
+      throw new Error(`File too large (${formatFileSize(stat.size)}), max ${formatFileSize(MAX_READ_BYTES)}`);
+    }
+    const content = await fs.readFile(filePath, "utf8");
+    if (!content.includes(oldString)) {
+      throw new Error("old_string not found in file. Ensure the string matches exactly, including whitespace and indentation.");
+    }
+    const patched = content.replace(oldString, newString);
+    await fs.writeFile(filePath, patched, "utf8");
+    return { path: path.relative(this.root, filePath) || path.basename(filePath), patched: true };
+  }
+
+  /**
+   * Copy a file or directory recursively.
+   * @param {string} input - source path
+   * @param {string} destination - destination path
+   */
+  async copyFile(input, destination) {
+    const src = resolvePath(this.root, input);
+    const dst = resolvePath(this.root, destination);
+    await this._wrap(fs.stat(src));
+    await fs.cp(src, dst, { recursive: true });
+    return { from: path.relative(this.root, src) || path.basename(src), to: path.relative(this.root, dst) || path.basename(dst), copied: true };
+  }
+
+  /**
+   * Append content to the end of a file (creates it if it doesn't exist).
+   * @param {string} input
+   * @param {string} content
+   */
+  async appendFile(input, content) {
+    const filePath = resolvePath(this.root, input);
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.appendFile(filePath, content, "utf8");
+    return { path: path.relative(this.root, filePath) || path.basename(filePath), appended: true };
+  }
+
+  /**
    * @param {string} input
    */
   async fileInfo(input) {
     const filePath = resolvePath(this.root, input);
-    const stat = await fs.stat(filePath);
+    const stat = await this._wrap(fs.stat(filePath));
     return {
       name: path.basename(filePath),
       path: path.relative(this.root, filePath) || path.basename(filePath),

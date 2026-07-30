@@ -429,7 +429,10 @@ function switchView(viewName) {
   $$("[data-nav]").forEach(n => n.classList.toggle("active", n.dataset.view === viewName));
   closeDrawer();
   hideContextMenu();
-  if (viewName === "agent") agentConversationController?.renderList();
+  if (viewName === "agent") {
+    agentConversationController?.renderList();
+    agentConversationController?.scrollToBottom();
+  }
   if (viewName === "skills") void skillsController?.refresh();
   if (viewName === "autostart") renderAutostartList();
 }

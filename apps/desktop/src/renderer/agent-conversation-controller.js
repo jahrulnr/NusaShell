@@ -116,6 +116,7 @@ export class AgentConversationController {
         toolCards: new Map(),
         textBubble: pending?.querySelector(".agent-bubble"),
         streamedText: "",
+        sawToolCallEnd: false,
       };
       const result = await this.runTurn(buildAgentContext(this.conversation), {
         traceId: this.activeTraceId,
@@ -124,6 +125,11 @@ export class AgentConversationController {
           if (streamState.textBubble) streamState.textBubble.textContent = streamState.streamedText;
         },
         onReasoningDelta: (delta) => {
+          if (streamState.reasoningEl && streamState.sawToolCallEnd) {
+            streamState.reasoningEl = null;
+            streamState.reasoningText = "";
+            streamState.sawToolCallEnd = false;
+          }
           streamState.reasoningText += delta;
           if (!streamState.reasoningEl) {
             streamState.reasoningEl = this.createStreamingReasoningBlock();
@@ -140,6 +146,7 @@ export class AgentConversationController {
         onToolCallEnd: (payload) => {
           const card = streamState.toolCards.get(payload.callId);
           if (card) this.updateStreamingToolCard(card, payload);
+          streamState.sawToolCallEnd = true;
         },
       });
       retryIsSafe = false;
@@ -375,6 +382,16 @@ export class AgentConversationController {
     return row;
   }
 
+  scrollToBottom() {
+    const thread = $("#agent-thread");
+    if (!thread) return;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        thread.scrollTop = thread.scrollHeight;
+      });
+    });
+  }
+
   renderThread() {
     const thread = $("#agent-thread");
     if (!thread) return;
@@ -388,6 +405,7 @@ export class AgentConversationController {
       return;
     }
     this.conversation.messages.forEach((message) => this.appendMessage(message.role, message.content, message));
+    this.scrollToBottom();
   }
 
   appendMessage(role, content, meta = {}) {
