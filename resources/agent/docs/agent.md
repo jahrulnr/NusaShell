@@ -5,8 +5,9 @@ The shell-wide agent can control plugins, answer questions about NusaShell, and 
 ## How the agent sees the conversation
 
 1. Static system prompts (`system.md`, `mcp-tools.md`, `developer.md`) are injected before the conversation messages.
-2. The developer prompt includes runtime context such as `{{current_date}}`, `{{environment}}`, and `{{available_tools}}`.
-3. If the context window grows too large, older turns are compacted into a summary using `compact.md`.
+2. The developer prompt includes runtime context such as `{{current_date}}`, `{{environment}}`, `{{workspace}}`, and `{{available_tools}}`.
+3. The selected conversation workspace is prompt context only — it is not injected into MCP tool arguments, environment variables, or plugin working directories. The agent must pass absolute paths explicitly to tools that need them.
+4. If the context window grows too large, older turns are compacted into a summary using `compact.md`.
 
 ## Compaction
 

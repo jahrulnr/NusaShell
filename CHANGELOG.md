@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.38] - 2026-07-31
+
+### Added
+
+- Terminal plugin (`nusashell.terminal`): real PTY-backed terminal MCP plus an
+  interactive xterm.js UI. `terminal_exec` runs one-shot commands, while
+  `terminal_open` / `terminal_write` / `terminal_read` / `terminal_resize` /
+  `terminal_close` / `terminal_list` manage interactive sessions. Default
+  working directory is the user's home directory when no absolute `cwd` is
+  passed.
+
+### Changed
+
+- Agent prompts now state explicitly that the conversation workspace is prompt
+  context only and is not injected into MCP tool arguments, environment
+  variables, or plugin working directories. Tools that need a path or `cwd`
+  must be given an explicit absolute path (`developer.md`, `mcp-tools.md`,
+  plus matching docs and compaction notes).
+
 ## [0.0.37] - 2026-07-31
 
 ### Fixed

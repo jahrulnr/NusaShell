@@ -1,0 +1,315 @@
+#!/usr/bin/env node
+const os = require("node:os");
+const fs = require("node:fs");
+const path = require("node:path");
+const { randomUUID } = require("node:crypto");
+const { spawn } = require("node:child_process");
+const { Server } = require("@modelcontextprotocol/sdk/server/index.js");
+const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
+const {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+} = require("@modelcontextprotocol/sdk/types.js");
+
+let pty;
+try {
+  pty = require("node-pty");
+} catch (err) {
+  console.error("[terminal-mcp] node-pty is required for terminal sessions:", err.message);
+}
+
+const HOME = os.homedir();
+const MAX_BUFFER_CHARS = 200 * 1024;
+
+function defaultCwd() {
+  return HOME;
+}
+
+function resolveCwd(input) {
+  const cwd = typeof input === "string" && input.trim() ? input.trim() : defaultCwd();
+  if (!path.isAbsolute(cwd)) {
+    throw new Error(`cwd must be an absolute path (got: ${cwd}). The conversation workspace is not applied automatically; pass the full path explicitly.`);
+  }
+  const stat = fs.statSync(cwd, { throwIfNoEntry: false });
+  if (!stat || !stat.isDirectory()) {
+    throw new Error(`cwd is not a directory: ${cwd}`);
+  }
+  return cwd;
+}
+
+function defaultShell() {
+  return process.env.SHELL || (process.platform === "win32" ? "cmd.exe" : "/bin/bash");
+}
+
+function trimBuffer(text) {
+  if (text.length > MAX_BUFFER_CHARS) return text.slice(text.length - MAX_BUFFER_CHARS);
+  return text;
+}
+
+const server = new Server(
+  { name: "nusashell-terminal", version: "1.0.0" },
+  { capabilities: { tools: {} } },
+);
+
+const sessions = new Map();
+
+function createSession(opts = {}) {
+  if (!pty) throw new Error("node-pty is not available; rebuild the terminal plugin dependencies.");
+  const shell = opts.shell || defaultShell();
+  const cwd = resolveCwd(opts.cwd);
+  const cols = Number.isFinite(opts.cols) ? Math.max(1, Math.floor(opts.cols)) : 120;
+  const rows = Number.isFinite(opts.rows) ? Math.max(1, Math.floor(opts.rows)) : 30;
+  const id = randomUUID();
+
+  const term = pty.spawn(shell, [], {
+    name: "xterm-256color",
+    cwd,
+    cols,
+    rows,
+    env: { ...process.env, HOME, TERM: "xterm-256color", COLORTERM: "truecolor" },
+  });
+
+  const session = {
+    id,
+    term,
+    shell,
+    cwd,
+    cols,
+    rows,
+    buffer: "",
+    createdAt: Date.now(),
+    exited: false,
+    exitCode: null,
+  };
+
+  term.onData((data) => {
+    session.buffer = trimBuffer(session.buffer + data);
+  });
+  term.onExit(({ exitCode }) => {
+    session.exited = true;
+    session.exitCode = exitCode;
+  });
+
+  sessions.set(id, session);
+  return session;
+}
+
+function getSession(id) {
+  const session = sessions.get(id);
+  if (!session) throw new Error(`Session not found: ${id}`);
+  return session;
+}
+
+function drainBuffer(session, clear = true) {
+  const stdout = session.buffer;
+  if (clear) session.buffer = "";
+  return { stdout, stderr: "" };
+}
+
+function runExec({ command, cwd, timeoutMs }) {
+  return new Promise((resolve, reject) => {
+    if (typeof command !== "string" || !command.trim()) {
+      reject(new Error("command is required"));
+      return;
+    }
+    const resolvedCwd = resolveCwd(cwd);
+    const shell = defaultShell();
+    const args = process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-lc", command];
+    const child = spawn(shell, args, { cwd: resolvedCwd, env: { ...process.env, HOME } });
+
+    let stdout = "";
+    let stderr = "";
+    let killed = false;
+    const max = MAX_BUFFER_CHARS;
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          killed = true;
+          child.kill("SIGKILL");
+        }, timeoutMs)
+      : null;
+
+    child.stdout.on("data", (chunk) => { stdout = trimBuffer(stdout + chunk.toString()); });
+    child.stderr.on("data", (chunk) => { stderr = trimBuffer(stderr + chunk.toString()); });
+    child.on("error", (err) => {
+      if (timer) clearTimeout(timer);
+      reject(err);
+    });
+    child.on("close", (code, signal) => {
+      if (timer) clearTimeout(timer);
+      resolve({ stdout, stderr, exitCode: code, signal, timedOut: killed, cwd: resolvedCwd, shell });
+    });
+  });
+}
+
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: [
+    {
+      name: "terminal_exec",
+      description:
+        "Run a one-shot shell command and return stdout/stderr/exitCode. cwd defaults to the user's home directory; the conversation workspace is not applied automatically, so pass an absolute cwd if you want a specific folder.",
+      inputSchema: {
+        type: "object",
+        required: ["command"],
+        properties: {
+          command: { type: "string", description: "Shell command to execute (run via the user's login shell)." },
+          cwd: { type: "string", description: `Absolute working directory (default: ${HOME}).` },
+          timeoutMs: { type: "number", description: "Optional timeout in milliseconds before the command is killed." },
+        },
+      },
+    },
+    {
+      name: "terminal_open",
+      description:
+        "Open a new interactive terminal session (PTY) in the user's shell. cwd defaults to the user's home directory; the conversation workspace is not applied automatically, so pass an absolute cwd to open elsewhere.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          shell: { type: "string", description: `Shell command (default: $SHELL or ${defaultShell()})` },
+          cwd: { type: "string", description: `Absolute working directory (default: ${HOME}).` },
+          cols: { type: "number", description: "Columns (default: 120)" },
+          rows: { type: "number", description: "Rows (default: 30)" },
+        },
+      },
+    },
+    {
+      name: "terminal_write",
+      description: "Write input to a terminal session.",
+      inputSchema: {
+        type: "object",
+        required: ["sessionId", "data"],
+        properties: {
+          sessionId: { type: "string" },
+          data: { type: "string", description: "Text to send to the terminal (include \\n to run a command)." },
+        },
+      },
+    },
+    {
+      name: "terminal_read",
+      description: "Read buffered output from a terminal session.",
+      inputSchema: {
+        type: "object",
+        required: ["sessionId"],
+        properties: {
+          sessionId: { type: "string" },
+          clear: { type: "boolean", description: "Clear the buffer after reading (default: true)" },
+        },
+      },
+    },
+    {
+      name: "terminal_resize",
+      description: "Resize a terminal session.",
+      inputSchema: {
+        type: "object",
+        required: ["sessionId", "cols", "rows"],
+        properties: {
+          sessionId: { type: "string" },
+          cols: { type: "number", minimum: 1 },
+          rows: { type: "number", minimum: 1 },
+        },
+      },
+    },
+    {
+      name: "terminal_close",
+      description: "Close a terminal session.",
+      inputSchema: {
+        type: "object",
+        required: ["sessionId"],
+        properties: { sessionId: { type: "string" } },
+      },
+    },
+    {
+      name: "terminal_list",
+      description: "List active terminal sessions.",
+      inputSchema: { type: "object", properties: {} },
+    },
+  ],
+}));
+
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const { name, arguments: args = {} } = request.params;
+  try {
+    switch (name) {
+      case "terminal_exec": {
+        const timeoutMs = Number.isFinite(args.timeoutMs) ? Math.max(0, Math.floor(args.timeoutMs)) : null;
+        const result = await runExec({ command: args.command, cwd: args.cwd, timeoutMs });
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+      case "terminal_open": {
+        const session = createSession({
+          shell: typeof args.shell === "string" ? args.shell : undefined,
+          cwd: args.cwd,
+          cols: args.cols,
+          rows: args.rows,
+        });
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({ sessionId: session.id, shell: session.shell, cwd: session.cwd, cols: session.cols, rows: session.rows }),
+          }],
+        };
+      }
+      case "terminal_write": {
+        const session = getSession(args.sessionId);
+        if (session.exited) throw new Error("Session has exited");
+        session.term.write(String(args.data ?? ""));
+        return { content: [{ type: "text", text: "OK" }] };
+      }
+      case "terminal_read": {
+        const session = getSession(args.sessionId);
+        const clear = args.clear === undefined ? true : Boolean(args.clear);
+        const { stdout, stderr } = drainBuffer(session, clear);
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({ stdout, stderr, exited: session.exited, exitCode: session.exitCode }),
+          }],
+        };
+      }
+      case "terminal_resize": {
+        const session = getSession(args.sessionId);
+        const cols = Math.max(1, Math.floor(args.cols));
+        const rows = Math.max(1, Math.floor(args.rows));
+        session.cols = cols;
+        session.rows = rows;
+        if (!session.exited) session.term.resize(cols, rows);
+        return { content: [{ type: "text", text: "OK" }] };
+      }
+      case "terminal_close": {
+        const session = getSession(args.sessionId);
+        if (!session.exited) {
+          try { session.term.kill(); } catch (_) { /* ignore */ }
+        }
+        sessions.delete(args.sessionId);
+        return { content: [{ type: "text", text: "OK" }] };
+      }
+      case "terminal_list": {
+        const list = Array.from(sessions.values()).map((session) => ({
+          sessionId: session.id,
+          shell: session.shell,
+          cwd: session.cwd,
+          cols: session.cols,
+          rows: session.rows,
+          createdAt: session.createdAt,
+          exited: session.exited,
+          exitCode: session.exitCode,
+        }));
+        return { content: [{ type: "text", text: JSON.stringify(list, null, 2) }] };
+      }
+      default:
+        throw new Error(`Unknown tool: ${name}`);
+    }
+  } catch (err) {
+    return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+  }
+});
+
+async function main() {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  console.error("[terminal-mcp] Server running on stdio");
+}
+
+main().catch((err) => {
+  console.error("[terminal-mcp] fatal:", err);
+  process.exit(1);
+});

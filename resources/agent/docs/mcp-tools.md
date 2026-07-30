@@ -10,6 +10,10 @@ NusaShell uses a progressive MCP discovery flow.
 4. `tool_schema` loads the full input schema of a tool.
 5. The model then calls the tool in a following round using the schema it just loaded.
 
+## Paths and workspace
+
+The conversation workspace picker is prompt context only; it is not injected into MCP tool arguments, environment variables, or plugin working directories. When a tool expects a path or `cwd`, the model must pass an explicit absolute path. Individual plugins may use their own default root (for example Files is relative to its own root, Terminal defaults to the user's home directory).
+
 ## Shell-owned meta-tools
 
 The following meta-tools are always available without a running MCP server:

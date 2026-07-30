@@ -13,7 +13,7 @@ import {
 } from "./window-manager.js";
 import { LINUX_DESKTOP_APP_NAME } from "./window-assets.js";
 import { AppUpdater } from "./updater.js";
-import { loadConfig, type CallToolCommand, type ListToolsQuery } from "@nusashell/application";
+import { loadConfig, type CallToolCommand, type ListToolsQuery, type StartPluginCommand } from "@nusashell/application";
 import { AiSettingsStore, type AiRegistrySettings, type SaveAiProviderInput } from "./ai-settings.js";
 import { flattenModelCatalog } from "./ai-provider-registry.js";
 import { AgentConversationStore } from "./agent-conversation-store.js";
@@ -189,7 +189,14 @@ async function waitForBackend(port: number, maxRetries = 30): Promise<void> {
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   agentConversationStore = new AgentConversationStore(resolve(app.getPath("userData"), "agent-conversations.json"));
-  registerWindowIpc((level, message) => logTail.add("ipc", level, message));
+  registerWindowIpc(
+    (level, message) => logTail.add("ipc", level, message),
+    async (pluginId) => {
+      if (!backend) throw new Error("Backend not ready");
+      const command: StartPluginCommand = { kind: "start-plugin", pluginId };
+      await backend.container.commandBus.execute(command);
+    },
+  );
   logTail.add("main", "info", "Electron main process ready");
   logTail.add("ipc", "debug", "Shell IPC handlers registered");
 

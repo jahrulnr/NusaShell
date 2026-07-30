@@ -21,6 +21,7 @@ const WINDOW_ICON_PATH = resolveWindowIconPath({
 });
 
 type WindowLog = (level: "debug" | "info", message: string) => void;
+type EnsurePluginStarted = (pluginId: string) => Promise<void>;
 
 let launcherWindow: BrowserWindow | null = null;
 const pluginWindows = new Map<string, BrowserWindow>();
@@ -68,6 +69,7 @@ export async function openPluginWindow(
   icon: string,
   installPath: string,
   requestedOptions?: PluginWindowOptionsInput,
+  ensurePluginStarted?: EnsurePluginStarted,
 ): Promise<void> {
   const existing = pluginWindows.get(pluginId);
   if (existing && !existing.isDestroyed()) {
@@ -75,6 +77,16 @@ export async function openPluginWindow(
     return;
   }
   pluginWindows.delete(pluginId);
+
+  // Ensure the plugin's MCP server is running before the UI loads, so
+  // window.shell.callTool works immediately (callTool rejects when not running).
+  if (ensurePluginStarted) {
+    try {
+      await ensurePluginStarted(pluginId);
+    } catch (err) {
+      console.error(`[openPluginWindow] failed to start plugin ${pluginId}:`, err);
+    }
+  }
 
   const options = normalizePluginWindowOptions(requestedOptions);
   const display = launcherWindow
@@ -164,7 +176,7 @@ function assertLauncherSender(sender: WebContents): void {
   }
 }
 
-export function registerWindowIpc(log?: WindowLog): void {
+export function registerWindowIpc(log?: WindowLog, ensurePluginStarted?: EnsurePluginStarted): void {
   ipcMain.handle("window:minimize", (event) => {
     log?.("debug", "window.minimize");
     BrowserWindow.fromWebContents(event.sender)?.minimize();
@@ -202,7 +214,7 @@ export function registerWindowIpc(log?: WindowLog): void {
   ipcMain.handle("window:open-plugin", async (event, pluginId: string, name: string, icon: string, installPath: string, options?: PluginWindowOptionsInput) => {
     assertLauncherSender(event.sender);
     log?.("info", `window.open-plugin ${pluginId}`);
-    await openPluginWindow(pluginId, name, icon, installPath, options);
+    await openPluginWindow(pluginId, name, icon, installPath, options, ensurePluginStarted);
   });
 
   ipcMain.handle("window:close-plugin", (event, pluginId: string) => {
