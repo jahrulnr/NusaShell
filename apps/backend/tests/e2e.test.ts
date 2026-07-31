@@ -87,34 +87,30 @@ describe("E2E: notes plugin", () => {
     expect(received).toBe(true);
   });
 
-  it("calls createNote tool", async () => {
+  it("calls notes_create tool", async () => {
     const result = await client.tools.call(
       "nusashell.notes",
       "00000000-0000-1000-8000-000000000001",
-      "createNote",
+      "notes_create",
       { text: "Hello from E2E" },
     );
 
     expect(result.requestId).toBe("00000000-0000-1000-8000-000000000001");
-    const content = result.result as Array<{ type: string; text: string }>;
-    expect(content).toHaveLength(1);
-    const parsed = JSON.parse(content[0]!.text);
+    const parsed = result.result as { note: { text: string }; totalNotes: number };
     expect(parsed.note.text).toBe("Hello from E2E");
     expect(parsed.totalNotes).toBeGreaterThanOrEqual(1);
   });
 
-  it("calls listNotes tool", async () => {
+  it("calls notes_list tool", async () => {
     const result = await client.tools.call(
       "nusashell.notes",
       "00000000-0000-1000-8000-000000000002",
-      "listNotes",
+      "notes_list",
       {},
     );
 
     expect(result.requestId).toBe("00000000-0000-1000-8000-000000000002");
-    const content = result.result as Array<{ type: string; text: string }>;
-    expect(content).toHaveLength(1);
-    const parsed = JSON.parse(content[0]!.text);
+    const parsed = result.result as { notes: unknown[]; total: number };
     expect(parsed.notes).toBeInstanceOf(Array);
     expect(parsed.notes.length).toBeGreaterThanOrEqual(1);
   });
@@ -149,23 +145,14 @@ describe("E2E: notes plugin", () => {
 
   it("lists tools from running plugin", async () => {
     const result = await client.tools.list("nusashell.notes");
-    expect(result.tools).toHaveLength(2);
+    expect(result.tools).toHaveLength(6);
     const names = result.tools.map((t) => t.name).sort();
-    expect(names).toEqual(["createNote", "listNotes"]);
+    expect(names).toEqual(["notes_create", "notes_delete", "notes_get", "notes_list", "notes_search", "notes_update"]);
   });
 
-  it("brokers Notes prompts and resources through the SDK", async () => {
-    const prompts = await client.mcp.listPrompts("nusashell.notes");
-    expect(prompts.prompts.map((prompt) => prompt.name)).toEqual(["summarize_notes"]);
-
-    const prompt = await client.mcp.getPrompt("nusashell.notes", "summarize_notes") as { messages: Array<{ content: { text: string } }> };
-    expect(prompt.messages[0]!.content.text).toContain("attached Notes MCP resource");
-
-    const resources = await client.mcp.listResources("nusashell.notes");
-    expect(resources.resources.map((resource) => resource.uri)).toEqual(["notes://all"]);
-
-    const read = await client.mcp.readResource("nusashell.notes", "notes://all") as { contents: Array<{ text: string }> };
-    expect(JSON.parse(read.contents[0]!.text).notes).toBeInstanceOf(Array);
+  it("rejects prompts/resources when plugin does not expose them", async () => {
+    await expect(client.mcp.listPrompts("nusashell.notes")).rejects.toThrow();
+    await expect(client.mcp.listResources("nusashell.notes")).rejects.toThrow();
   });
 
   it("rejects tool.list when plugin is not running", async () => {

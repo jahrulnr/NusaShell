@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { PluginId } from "@nusashell/domain";
 import { ApplicationError } from "../../errors/application-error.js";
 import type { PluginRuntimeManager } from "../../plugin/services/plugin-runtime-manager.js";
@@ -449,8 +448,7 @@ function parsePluginId(value: unknown): PluginId {
 function toProviderToolName(pluginId: string, toolName: string): string {
   const readablePlugin = pluginId.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 28);
   const readableTool = toolName.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 20);
-  const fingerprint = createHash("sha256").update(`${pluginId}\u0000${toolName}`).digest("hex").slice(0, 12);
-  return `mcp_${readablePlugin}_${readableTool}_${fingerprint}`;
+  return `mcp_${readablePlugin}_${readableTool}`;
 }
 function docsNotConfigured(): unknown {
   return {
