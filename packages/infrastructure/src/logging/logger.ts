@@ -1,4 +1,6 @@
-import pino, { type Logger } from "pino";
+import { createWriteStream, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import pino, { type Logger, type StreamEntry } from "pino";
 
 export interface LogRecord {
   readonly level: string;
@@ -16,18 +18,50 @@ const levelNames: Readonly<Record<number, string>> = {
   60: "fatal",
 };
 
-export function createLogger(level: string = "info", observer?: LogObserver): Logger {
-  if (!observer) return pino({ level });
+export interface CreateLoggerOptions {
+  readonly level?: string;
+  readonly observer?: LogObserver;
+  readonly logFile?: string;
+}
 
-  return pino({
+export function createLogger(
+  levelOrOptions: string | CreateLoggerOptions = "info",
+  observer?: LogObserver,
+): Logger {
+  const opts: CreateLoggerOptions = typeof levelOrOptions === "string"
+    ? { level: levelOrOptions, ...(observer ? { observer } : {}) }
+    : levelOrOptions;
+  const level = opts.level ?? "info";
+
+  const streams: StreamEntry[] = [{ level: level as pino.Level, stream: process.stdout }];
+
+  if (opts.logFile) {
+    try {
+      mkdirSync(dirname(opts.logFile), { recursive: true });
+      streams.push({ level: level as pino.Level, stream: createWriteStream(opts.logFile, { flags: "a" }) });
+    } catch {
+      // File logging is best-effort; don't crash startup if the path is bad.
+    }
+  }
+
+  const baseConfig = {
     level,
-    hooks: {
-        logMethod(args, method, logLevel) {
-          observer({ level: levelNames[logLevel] ?? "info", args });
-          method.apply(this, args);
-        },
-      },
-  });
+    ...(opts.observer
+      ? {
+          hooks: {
+            logMethod(args: unknown[], method: (...a: unknown[]) => void, logLevel: number) {
+              opts.observer!({ level: levelNames[logLevel] ?? "info", args });
+              method.apply(this, args);
+            },
+          },
+        }
+      : {}),
+  };
+
+  if (streams.length === 1) {
+    return pino(baseConfig);
+  }
+  return pino(baseConfig, pino.multistream(streams));
 }
 
 export type { Logger } from "pino";

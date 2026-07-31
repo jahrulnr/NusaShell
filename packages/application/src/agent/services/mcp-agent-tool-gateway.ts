@@ -6,6 +6,7 @@ import type { SkillRegistryPort } from "../../skill/ports/skill-registry.port.js
 import type { DocsIndexPort } from "../ports/docs-index.port.js";
 import type { AgentToolDefinition } from "../ports/agent-provider.port.js";
 import type { AgentToolGateway } from "../ports/agent-tool-gateway.port.js";
+import type { LoggerPort } from "../../plugin/ports/logger.port.js";
 
 interface McpToolRoute {
   readonly pluginId: string;
@@ -28,6 +29,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
     private readonly runtimeManager: PluginRuntimeManager,
     private readonly docsIndex?: DocsIndexPort,
     private readonly skillRegistry?: SkillRegistryPort,
+    private readonly logger?: LoggerPort,
   ) {}
 
   beginTurn(turnId: string): void {
@@ -127,6 +129,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
 
   private async changeMcpState(args: Readonly<Record<string, unknown>>, start: boolean): Promise<unknown> {
     const pluginId = parsePluginId(args.pluginId);
+    this.logger?.info("Agent MCP plugin %s via agent tool plugin=%s", start ? "start" : "stop", PluginId.toString(pluginId));
     const view = start ? await this.runtimeManager.startPlugin(pluginId) : await this.runtimeManager.stopPlugin(pluginId);
     return { pluginId: view.pluginId, state: view.state };
   }
@@ -269,7 +272,10 @@ export class McpAgentToolGateway implements AgentToolGateway {
 
   private async callGrantedTool(name: string, args: Readonly<Record<string, unknown>>, requestId: string, turnId: string): Promise<unknown> {
     const route = this.routesFor(turnId).get(name);
-    if (!route) throw new ApplicationError("AGENT_TOOL_NOT_ALLOWED", "AI provider requested a tool outside the MCP allowlist", { name });
+    if (!route) {
+      this.logger?.warn("Agent MCP tool rejected (not in allowlist) tool=%s turnId=%s", name, turnId);
+      throw new ApplicationError("AGENT_TOOL_NOT_ALLOWED", "AI provider requested a tool outside the MCP allowlist", { name });
+    }
     const calls = this.activeCalls.get(turnId);
     calls?.set(requestId, route.pluginId);
     try {

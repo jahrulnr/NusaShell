@@ -121,6 +121,7 @@ async function startBackend(): Promise<BootstrapResult> {
     docsRoot,
     docsIndexStorageRoot,
     skillsRoot,
+    logFile: resolve(app.getPath("userData"), "logs", "nusashell.log"),
     resolvePluginRuntimeEnvironment: (pluginId) =>
       pluginId === MAIL_PLUGIN_ID ? mailSettingsStore?.runtimeEnvironment() ?? {} : {},
     config: { port: 9130, host: "127.0.0.1", pluginsRoot, dbPath, logLevel: isDev ? "debug" : "info", ai: {

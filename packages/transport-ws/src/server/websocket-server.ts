@@ -1,5 +1,6 @@
 import { WebSocketServer as WsServer, type WebSocket } from "ws";
 import { randomUUID } from "node:crypto";
+import type { LoggerPort } from "@nusashell/application";
 import { WebSocketSession } from "./websocket-session.js";
 import { SessionRegistry } from "./session-registry.js";
 import { ClientSubscriptionRegistry } from "../events/client-subscription-registry.js";
@@ -10,6 +11,7 @@ import { isSupportedVersion } from "@nusashell/contracts";
 export interface WebSocketServerOptions {
   readonly port: number;
   readonly host?: string;
+  readonly logger?: LoggerPort;
 }
 
 export class WebSocketServer {
@@ -85,7 +87,8 @@ export class WebSocketServer {
           this.subscriptions.clear(sessionId);
         });
 
-        ws.on("error", () => {
+        ws.on("error", (err) => {
+          this.options.logger?.error("WebSocket session error sessionId=%s: %s", sessionId, err);
           this.registry.remove(sessionId);
           this.subscriptions.clear(sessionId);
         });

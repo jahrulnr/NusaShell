@@ -40,6 +40,9 @@ executed once, nudged on its second appearance, and stops the loop on its third.
 
 - Conversations are stored in Electron `userData/agent-conversations.json`
   using serialized mutations and atomic rename.
+- System logs (backend, agent, plugin, MCP) are persisted to
+  `userData/logs/nusashell.log` via Pino multistream (stdout + file).
+  The file is appended to across restarts and is safe to inspect after a crash.
 - The first user message creates a short deterministic title; the conversation
   list is newest-first and deletions require explicit confirmation.
 - A failed provider turn does not persist a fake assistant message. The

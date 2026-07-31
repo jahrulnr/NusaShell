@@ -57,6 +57,7 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
       preferredProviderId: preferredProvider.id,
       strategy: this.runtime.strategy,
       totalAttemptBudget: this.runtime.totalAttemptBudget,
+      ...(this.logger ? { logger: this.logger } : {}),
     });
     const compactPrompt = await this.loadCompactPrompt();
     const runner = new AgentTurnRunner({

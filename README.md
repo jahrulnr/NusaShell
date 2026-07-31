@@ -75,7 +75,7 @@ bridge API (`window.shell.callTool`). See the docs map below for the full story.
 Requires Node.js only (no `npm install` for the proof of concept).
 
 ```bash
-git clone <your-repo-url> nusashell
+git clone https://github.com/jahrulnr/NusaShell.git nusashell
 cd nusashell/docs/PoC
 node server.js
 ```
@@ -163,6 +163,10 @@ docs and the PoC under `docs/` remain authoritative for product intent.
 - `packages/{shared,testing}` — shared test fakes and helpers
 - `apps/backend` — composition root wiring all layers
 - `apps/desktop` — Electron shell with launcher, plugin windows, agent workspace, AI provider settings
+
+**Persistent logs:** System logs (backend, agent, plugin, MCP) are written to
+`userData/logs/nusashell.log` via Pino multistream (stdout + file append).
+The file survives restarts and is the primary source for post-incident debugging.
 
 **What the PoC demonstrates** (`docs/PoC/`):
 - Plugin discovery (folder scan), manifest parsing

@@ -194,6 +194,7 @@ export class AgentTurnRunner {
           this.deps.logger?.warn("Agent provider returned an empty response traceId=%s provider=%s round=%d", traceId, this.deps.provider.id, round);
           if (!emptyResponseNudged && round < maxToolRounds) {
             emptyResponseNudged = true;
+            this.deps.logger?.info("Agent nudged: empty response, requesting text or tool call traceId=%s round=%d", traceId, round);
             const reasoningOnly = Boolean(response.reasoning?.trim());
             messages.push(
               { role: "assistant", content: "" },
@@ -228,6 +229,7 @@ export class AgentTurnRunner {
       validateRequestedTools(requestedCalls, toolsByName, traceId);
       const duplicate = repeatedToolDecision(requestedCalls, repeatedCalls, this.defaultMaxRepeatedToolCalls);
       if (duplicate === "stop") {
+        this.deps.logger?.warn("Agent stopped: repeated tool call limit (%d) reached traceId=%s", this.defaultMaxRepeatedToolCalls, traceId);
         return {
           traceId,
           text: `The agent stopped because the model repeated the same tool call ${this.defaultMaxRepeatedToolCalls} times.`,
@@ -243,6 +245,7 @@ export class AgentTurnRunner {
         };
       }
       if (duplicate === "nudge") {
+        this.deps.logger?.info("Agent nudged: repeated tool call detected traceId=%s", traceId);
         messages.push(
           { role: "assistant", ...(response.text ? { content: response.text } : {}), toolCalls: requestedCalls },
           {
@@ -336,6 +339,8 @@ export class AgentTurnRunner {
     const oldMessages = input.messages.slice(0, keepFrom);
     const recentMessages = input.messages.slice(keepFrom);
     if (oldMessages.length === 0) return { messages: input.messages };
+
+    this.deps.logger?.info("Agent context compaction triggered traceId=%s estimatedTokens=%d threshold=%d oldMessages=%d", traceId, estimatedInputTokens, threshold, oldMessages.length);
 
     const excerpt = clampText(formatMessagesForSummary(oldMessages), options.summaryMaxChars);
     let summary = excerpt;

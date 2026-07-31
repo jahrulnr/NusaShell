@@ -2,6 +2,7 @@ import type {
   CommandBus,
   QueryBus,
 } from "@nusashell/application";
+import type { LoggerPort } from "@nusashell/application";
 import type { ResponseEnvelope } from "@nusashell/contracts";
 import { validateIncomingMessage } from "../validation/incoming-message.validator.js";
 import { mapToCommand } from "../mapping/command.mapper.js";
@@ -14,6 +15,7 @@ import { ApplicationError } from "@nusashell/application";
 export interface MessageRouterDeps {
   readonly commandBus: CommandBus;
   readonly queryBus: QueryBus;
+  readonly logger?: LoggerPort;
 }
 
 export class MessageRouter {
@@ -73,6 +75,7 @@ export class MessageRouter {
       if (err instanceof ProtocolError) {
         return mapErrorResponse(request.id, err);
       }
+      this.deps.logger?.error("WS message router unhandled error method=%s requestId=%s: %s", request.method, request.id, err);
       return mapErrorResponse(
         request.id,
         new ProtocolError("INTERNAL_ERROR", String(err), request.id),

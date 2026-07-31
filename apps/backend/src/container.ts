@@ -71,6 +71,7 @@ export interface ContainerOptions {
   readonly skillsRoot?: string;
   readonly dbPath?: string;
   readonly logLevel?: string;
+  readonly logFile?: string;
   readonly loggerObserver?: LogObserver;
   readonly resolvePluginRuntimeEnvironment?: (
     pluginId: string,
@@ -146,7 +147,11 @@ export interface Container {
 
 export function createContainer(options: ContainerOptions): Container {
   const clock = new SystemClock();
-  const logger = createLogger(options.logLevel ?? "info", options.loggerObserver);
+  const logger = createLogger({
+    level: options.logLevel ?? "info",
+    ...(options.loggerObserver ? { observer: options.loggerObserver } : {}),
+    ...(options.logFile ? { logFile: options.logFile } : {}),
+  });
 
   let pluginRepository: PluginRepositoryPort;
   let db: SqliteDatabase | undefined;
@@ -206,7 +211,7 @@ export function createContainer(options: ContainerOptions): Container {
 
   const skillsRoot = options.skillsRoot ?? new URL("../../../.nusashell/agent/skills", import.meta.url).pathname;
   const skillRegistry = new FilesystemSkillRegistry(skillsRoot);
-  const agentToolGateway = new McpAgentToolGateway(runtimeManager, docsIndex, skillRegistry);
+  const agentToolGateway = new McpAgentToolGateway(runtimeManager, docsIndex, skillRegistry, logger);
   const promptLoader = new FilesystemPromptLoader(
     options.promptsRoot ?? new URL("../../../resources/agent/prompts", import.meta.url).pathname,
   );
@@ -218,7 +223,13 @@ export function createContainer(options: ContainerOptions): Container {
       baseUrl: options.ai.baseUrl,
       ...(options.ai.apiKey ? { apiKey: options.ai.apiKey } : {}),
       ...(options.ai.model ? { model: options.ai.model } : {}),
-      ...(options.ai.retry ? { retry: options.ai.retry } : {}),
+      logger,
+      ...(options.ai.retry ? { retry: {
+        ...options.ai.retry,
+        onRetry: (event) => {
+          logger.warn("AI provider retry provider=%s attempt=%d delayMs=%d status=%d kind=%s", event.providerId, event.attempt, event.delayMs, event.status, event.kind);
+        },
+      } } : {}),
       stream: aiRuntime.stream,
       vision: aiRuntime.vision,
       ...(options.ai.timeoutMs !== undefined ? { timeoutMs: options.ai.timeoutMs } : {}),
@@ -278,11 +289,12 @@ export function createContainer(options: ContainerOptions): Container {
   queryBus.register("system-ping", new SystemPingHandler());
   queryBus.register("system-version", new SystemVersionHandler());
 
-  const router = new MessageRouter({ commandBus, queryBus });
+  const router = new MessageRouter({ commandBus, queryBus, logger });
 
   const wsServer = new WebSocketServer(router, {
     port: options.port,
     host: options.host ?? "0.0.0.0",
+    logger,
   });
 
   const eventPublisher = new WebSocketEventPublisher(wsServer.sessionRegistry, wsServer.subscriptionRegistry);
@@ -308,10 +320,14 @@ export function createContainer(options: ContainerOptions): Container {
         baseUrl: settings.baseUrl,
         ...(settings.apiKey ? { apiKey: settings.apiKey } : {}),
         ...(settings.model ? { model: settings.model } : {}),
+        logger,
         ...(options.ai?.retry ? {
           retry: {
             ...options.ai.retry,
             attemptBudget: settings.maxAttempts ?? options.ai.retry.attemptBudget,
+            onRetry: (event) => {
+              logger.warn("AI provider retry provider=%s attempt=%d delayMs=%d status=%d kind=%s", event.providerId, event.attempt, event.delayMs, event.status, event.kind);
+            },
           },
         } : {}),
         stream: aiRuntime.stream,

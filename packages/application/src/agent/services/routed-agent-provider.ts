@@ -3,6 +3,7 @@ import type {
   AgentProviderRequest,
   AgentProviderResult,
 } from "../ports/agent-provider.port.js";
+import type { LoggerPort } from "../../plugin/ports/logger.port.js";
 
 export type AgentProviderStrategy = "failover" | "round-robin" | "switch";
 
@@ -11,6 +12,7 @@ export interface RoutedAgentProviderOptions {
   readonly preferredProviderId: string;
   readonly strategy: AgentProviderStrategy;
   readonly totalAttemptBudget: number;
+  readonly logger?: LoggerPort;
 }
 
 let roundRobinCursor = 0;
@@ -49,13 +51,18 @@ export class RoutedAgentProvider implements AgentProvider {
           { ...request, consumeAttempt },
           provider.id === this.options.preferredProviderId,
         );
+        if (this.pinned?.id !== provider.id) {
+          this.options.logger?.info("Agent provider pinned provider=%s previous=%s", provider.id, this.pinned?.id ?? "none");
+        }
         this.pinned = provider;
         return result;
       } catch (error) {
         lastError = error;
         if (!isTransientProviderError(error)) throw error;
+        this.options.logger?.warn("Agent provider transient failure, failing over provider=%s attempts=%d/%d", provider.id, attempts, budget);
       }
     }
+    this.options.logger?.error("Agent providers exhausted attempts=%d/%d", attempts, budget);
     throw lastError ?? new Error("AI providers are exhausted");
   }
 

@@ -25,6 +25,10 @@ export interface OpenAiCompatibleAgentProviderOptions {
   readonly timeoutMs?: number;
   readonly maxOutputTokens?: number;
   readonly maxResponseBytes?: number;
+  readonly logger?: {
+    warn(msg: string, ...args: unknown[]): void;
+    info(msg: string, ...args: unknown[]): void;
+  };
   readonly retry?: {
     readonly attemptBudget: number;
     readonly baseDelayMs: number;
@@ -125,18 +129,21 @@ export class OpenAiCompatibleAgentProvider implements AgentProvider {
       payload = await this.post(body, request, stream, true);
     } catch (error) {
       if (this.api === "responses" && isResponsesUnsupported(error) && !request.signal?.aborted) {
+        this.options.logger?.warn("Agent provider falling back responses→chat provider=%s", this.id);
         const chatBody = toChatBody(normalizedRequest, model, allowVision, policy.maxOutput ?? this.options.maxOutputTokens);
         const chatEndpoint = `${this.options.baseUrl.replace(/\/+$/, "")}/chat/completions`;
         try {
           payload = await this.post(chatBody, request, stream, true, chatEndpoint, "chat");
         } catch (chatError) {
           if (!shouldRetryWithoutImages(chatError, request.messages, request.signal)) throw chatError;
+          this.options.logger?.warn("Agent provider falling back without images (chat) provider=%s", this.id);
           const fallbackChatBody = toChatBody(normalizedRequest, model, false, policy.maxOutput ?? this.options.maxOutputTokens);
           payload = await this.post(fallbackChatBody, request, stream, true, chatEndpoint, "chat");
         }
         usedApi = "chat";
       } else {
         if (!shouldRetryWithoutImages(error, request.messages, request.signal)) throw error;
+        this.options.logger?.warn("Agent provider falling back without images provider=%s api=%s", this.id, this.api);
         const fallbackBody = this.api === "responses"
           ? toResponsesBody(normalizedRequest, model, false, policy.maxOutput ?? this.options.maxOutputTokens)
           : this.api === "messages"
@@ -190,6 +197,7 @@ export class OpenAiCompatibleAgentProvider implements AgentProvider {
       if (!response.ok) {
         const errorBody = await readTextLimited(response, Math.min(this.maxResponseBytes(), 4096));
         if (stream && allowStreamFallback && isStreamUnsupported(response.status, errorBody)) {
+          this.options.logger?.warn("Agent provider falling back stream→non-stream provider=%s status=%d", this.id, response.status);
           return this.post(body, request, false, false, overrideEndpoint, overrideApi);
         }
         throw new AgentProviderHttpError(

@@ -589,6 +589,7 @@ export class PluginRuntimeManager {
     ) {
       return;
     }
+    this.deps.logger?.warn("Plugin process exited unexpectedly plugin=%s code=%d state=%s", PluginId.toString(entry.pluginId), code, entry.runtime.state);
     await this.crash(entry, `Process exited with code ${code}`);
   }
 
