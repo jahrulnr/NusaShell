@@ -72,6 +72,7 @@ Captured from the Electron desktop app (`make dev`):
 | [`docs/architecture/agent-runtime.md`](./docs/architecture/agent-runtime.md) | Agent turn loop, provider routing, tool-call recovery, conversation/checkpoint model |
 | [`docs/architecture/agent-skills-platform-technical-spec.md`](./docs/architecture/agent-skills-platform-technical-spec.md) | Full technical spec for a general-purpose agent skills platform (draft, larger than the shipped subset) |
 | [`docs/architecture/local-agent-skills.md`](./docs/architecture/local-agent-skills.md) | Current, shipped boundary of the local managed skills library and its read-only meta-tools |
+| [`docs/architecture/agent-memory.md`](./docs/architecture/agent-memory.md) | Persistent agent memory (MEMORY.md + USER.md), snapshot injection, and the `memory` meta-tool |
 | [`docs/architecture/mcp-capability-policy.md`](./docs/architecture/mcp-capability-policy.md) | Which MCP protocol capabilities NusaShell implements now vs. defers, and the adoption gate |
 | [`docs/architecture/progressive-mcp-tools.md`](./docs/architecture/progressive-mcp-tools.md) | Shell-owned meta-tools used to keep MCP tool discovery bounded per agent turn |
 | [`docs/mcp/nusashell-mail-mcp-plugin-spec.md`](./docs/mcp/nusashell-mail-mcp-plugin-spec.md) | Mail plugin protocol assessment, security model, and target tool contract |
@@ -226,8 +227,3 @@ isolation - next phase after core plumbing, kept separate on purpose
 
 Further monorepo pieces (`plugins/`, full apps) are specified in
 [`docs/backend-structure.md`](./docs/backend-structure.md) §2 and land in later milestones.
-
-## License
-
-Not yet decided - add one before sharing this publicly (MIT is a reasonable
-default for a project at this stage if you don't have other constraints).
