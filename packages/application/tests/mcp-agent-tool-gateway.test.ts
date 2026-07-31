@@ -490,5 +490,27 @@ describe("McpAgentToolGateway", () => {
         meta: { data_is_untrusted: true },
       });
     });
+
+    it("blocks delete of a pinned skill", async () => {
+      const registry = fakeRegistry();
+      const provenance = fakeProvenance({ "my-skill": "agent" });
+      const usage = {
+        getRecord: async () => ({ skillId: "my-skill", useCount: 0, viewCount: 0, patchCount: 0, lastUsedAt: null, lastViewedAt: null, lastPatchedAt: null, state: "active" as const, pinned: true, archivedAt: null, createdAt: new Date().toISOString() }),
+        record: async () => {},
+        setState: async () => {},
+        setPinned: async () => {},
+        clear: async () => {},
+        listRecords: async () => [],
+      };
+      const gateway = new McpAgentToolGateway(fakeRuntime as never, undefined, registry, undefined, undefined, provenance, undefined, usage as never);
+      gateway.beginTurn("turn-pinned-del");
+
+      const result = await gateway.execute("skill_manage", { action: "delete", name: "my-skill" }, "call-pinned-del", "turn-pinned-del");
+      expect(result).toEqual({
+        ok: false,
+        error: { code: "skill_pinned", message: 'Skill "my-skill" is pinned and cannot be deleted' },
+        meta: {},
+      });
+    });
   });
 });

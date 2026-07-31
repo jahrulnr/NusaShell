@@ -27,6 +27,7 @@ export class SkillsController {
     }
     await this.refresh();
     await this.refreshPending();
+    await this.refreshCuratorStatus();
   }
 
   bind() {
@@ -297,6 +298,83 @@ export class SkillsController {
       await this.refreshPending();
     } catch (error) {
       this.notify(`Could not reject: ${errorMessage(error)}`, "error");
+    }
+  }
+
+  async refreshCuratorStatus() {
+    const container = document.querySelector("#skills-curator-status");
+    if (!container) return;
+    try {
+      const status = await this.api.curatorStatus();
+      container.textContent = `Last run: ${status.lastRunAt ?? "never"} · Running: ${status.running ? "yes" : "no"}`;
+    } catch {
+      container.textContent = "Curator status unavailable.";
+    }
+  }
+
+  async runCurator(dryRun = false) {
+    try {
+      const result = await this.api.curatorRun(dryRun);
+      const count = result?.changes?.length ?? 0;
+      this.notify(`Curator ${dryRun ? "dry-run" : "run"} complete: ${count} change(s).`, "success");
+      await this.refreshCuratorStatus();
+      if (!dryRun) await this.refresh();
+    } catch (error) {
+      this.notify(`Curator run failed: ${errorMessage(error)}`, "error");
+    }
+  }
+
+  async pinSkill(skillId, pinned) {
+    try {
+      await this.api.pin(skillId, pinned);
+      this.notify(`${skillId} ${pinned ? "pinned" : "unpinned"}.`, "success");
+    } catch (error) {
+      this.notify(`Could not pin: ${errorMessage(error)}`, "error");
+    }
+  }
+
+  async restoreSkill(skillId) {
+    try {
+      await this.api.restore(skillId);
+      this.notify(`${skillId} restored.`, "success");
+      await this.refresh();
+    } catch (error) {
+      this.notify(`Could not restore: ${errorMessage(error)}`, "error");
+    }
+  }
+
+  async refreshArchived() {
+    const container = document.querySelector("#skills-archived-list");
+    if (!container) return;
+    try {
+      const archived = await this.api.archivedList();
+      container.textContent = "";
+      if (archived.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "skills-archived-empty";
+        empty.textContent = "No archived skills.";
+        container.append(empty);
+        return;
+      }
+      for (const skill of archived) {
+        const row = document.createElement("div");
+        row.className = "skills-archived-item";
+        const info = document.createElement("div");
+        info.className = "skills-archived-info";
+        const name = document.createElement("strong");
+        name.textContent = skill.name;
+        const desc = document.createElement("small");
+        desc.textContent = skill.description;
+        info.append(name, desc);
+        const restore = document.createElement("button");
+        restore.type = "button";
+        restore.textContent = "Restore";
+        restore.addEventListener("click", () => void this.restoreSkill(skill.id));
+        row.append(info, restore);
+        container.append(row);
+      }
+    } catch {
+      container.textContent = "Could not load archived skills.";
     }
   }
 }

@@ -13,6 +13,7 @@ import {
   MarkdownDocsIndex,
   FilesystemSkillRegistry,
   FilesystemSkillProvenance,
+  FilesystemSkillUsage,
   SkillApprovalStaging,
   type PendingSkillWrite,
   FilesystemMemoryStore,
@@ -23,7 +24,7 @@ import {
   type Logger,
   type LogObserver,
 } from "@nusashell/infrastructure";
-import type { PluginRepositoryPort, SkillRegistryPort, SkillProvenancePort } from "@nusashell/application";
+import type { PluginRepositoryPort, SkillRegistryPort, SkillProvenancePort, SkillUsagePort, CuratorSettings } from "@nusashell/application";
 import {
   CommandBus,
   QueryBus,
@@ -53,6 +54,10 @@ import {
   BackgroundReviewScheduler,
   DEFAULT_REVIEW_SETTINGS,
   type BackgroundReviewSettings,
+  SkillCuratorService,
+  SkillCuratorScheduler,
+  DEFAULT_CURATOR_SETTINGS,
+  DEFAULT_SCHEDULER_SETTINGS,
   RunAgentTurnHandler,
   CancelAgentTurnHandler,
   AgentTurnCoordinator,
@@ -131,7 +136,10 @@ export interface Container {
   readonly pluginRepository: PluginRepositoryPort;
   readonly skillRegistry: SkillRegistryPort;
   readonly skillProvenance: SkillProvenancePort;
+  readonly skillUsage: SkillUsagePort;
   readonly skillApprovalStaging: SkillApprovalStaging;
+  readonly skillCurator: SkillCuratorService;
+  readonly skillCuratorScheduler: SkillCuratorScheduler;
   readonly backgroundReviewScheduler: BackgroundReviewScheduler;
   readonly db?: SqliteDatabase | undefined;
   readonly logger: Logger;
@@ -160,6 +168,8 @@ export interface Container {
   }): void;
   removeAi(providerId: string): void;
   configureBackgroundReview(settings: Partial<BackgroundReviewSettings>): void;
+  configureCurator(settings: Partial<CuratorSettings>): void;
+  configureCuratorScheduler(settings: Partial<{ enabled: boolean; intervalHours: number; paused: boolean }>): void;
 }
 
 export function createContainer(options: ContainerOptions): Container {
@@ -229,10 +239,26 @@ export function createContainer(options: ContainerOptions): Container {
   const skillsRoot = options.skillsRoot ?? new URL("../../../.nusashell/agent/skills", import.meta.url).pathname;
   const skillRegistry = new FilesystemSkillRegistry(skillsRoot);
   const skillProvenance = new FilesystemSkillProvenance(skillsRoot);
+  const skillUsage = new FilesystemSkillUsage(skillsRoot);
   const skillApprovalStaging = new SkillApprovalStaging(skillsRoot);
+  const skillCurator = new SkillCuratorService({
+    registry: skillRegistry,
+    provenance: skillProvenance,
+    usage: skillUsage,
+    eventDispatcher,
+    logger,
+  });
+  const skillCuratorScheduler = new SkillCuratorScheduler({
+    curator: skillCurator,
+    stateRoot: skillsRoot,
+    logger,
+  });
+  void skillCuratorScheduler.initialize().catch((err) => {
+    logger.warn({ err }, "Skill curator scheduler initialization failed");
+  });
   const memoryRoot = options.memoryRoot ?? new URL("../../../.nusashell/agent/memory", import.meta.url).pathname;
   const memoryStore = new FilesystemMemoryStore(memoryRoot);
-  const agentToolGateway = new McpAgentToolGateway(runtimeManager, docsIndex, skillRegistry, logger, memoryStore, skillProvenance, skillApprovalStaging);
+  const agentToolGateway = new McpAgentToolGateway(runtimeManager, docsIndex, skillRegistry, logger, memoryStore, skillProvenance, skillApprovalStaging, skillUsage);
   const promptLoader = new FilesystemPromptLoader(
     options.promptsRoot ?? new URL("../../../resources/agent/prompts", import.meta.url).pathname,
   );
@@ -309,7 +335,7 @@ export function createContainer(options: ContainerOptions): Container {
     promptLoader,
     aiRuntime.userPrompt,
     memoryStore,
-    (result) => backgroundReviewScheduler.tick(result),
+    (result) => { void backgroundReviewScheduler.tick(result); void skillCuratorScheduler.tick(); },
   ));
   commandBus.register("cancel-agent-turn", new CancelAgentTurnHandler(agentTurnCoordinator));
   if (pluginInstaller) {
@@ -352,7 +378,10 @@ export function createContainer(options: ContainerOptions): Container {
     pluginRepository,
     skillRegistry,
     skillProvenance,
+    skillUsage,
     skillApprovalStaging,
+    skillCurator,
+    skillCuratorScheduler,
     backgroundReviewScheduler,
     db,
     logger,
@@ -388,6 +417,12 @@ export function createContainer(options: ContainerOptions): Container {
     },
     configureBackgroundReview(settings) {
       backgroundReviewScheduler.configure(settings);
+    },
+    configureCurator(settings: Partial<CuratorSettings>) {
+      skillCurator.configure(settings);
+    },
+    configureCuratorScheduler(settings: Partial<{ enabled: boolean; intervalHours: number; paused: boolean }>) {
+      skillCuratorScheduler.configure(settings);
     },
     configureAiRuntime(settings) {
       aiRuntime.strategy = settings.strategy;

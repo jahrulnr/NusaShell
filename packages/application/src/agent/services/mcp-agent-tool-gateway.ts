@@ -3,6 +3,7 @@ import { ApplicationError } from "../../errors/application-error.js";
 import type { PluginRuntimeManager } from "../../plugin/services/plugin-runtime-manager.js";
 import type { SkillRegistryPort } from "../../skill/ports/skill-registry.port.js";
 import type { SkillProvenancePort } from "../../skill/ports/skill-provenance.port.js";
+import type { SkillUsagePort, UsageBumpKind } from "../../skill/ports/skill-usage.port.js";
 import type { MemoryStorePort, MemoryTarget } from "../../memory/ports/memory-store.port.js";
 import type { DocsIndexPort } from "../ports/docs-index.port.js";
 import type { AgentToolDefinition } from "../ports/agent-provider.port.js";
@@ -42,6 +43,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
     private readonly memoryStore?: MemoryStorePort,
     private readonly skillProvenance?: SkillProvenancePort,
     private readonly approvalStaging?: SkillApprovalStagingPort,
+    private readonly skillUsage?: SkillUsagePort,
   ) {}
 
   setWriteOrigin(origin: WriteOrigin): void {
@@ -442,6 +444,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
     const maxChars = clampInt(args.max_chars, 20_000, 1, 100_000);
     try {
       const file = await registry.read(skillId, path, offset, maxChars);
+      void this.bumpUsage(skillId, "view");
       return { ok: true, data: file, meta: { data_is_untrusted: true } };
     } catch {
       return {
@@ -450,6 +453,13 @@ export class McpAgentToolGateway implements AgentToolGateway {
         meta: { data_is_untrusted: true },
       };
     }
+  }
+
+  private bumpUsage(skillId: string, kind: UsageBumpKind): Promise<void> {
+    if (!this.skillUsage) return Promise.resolve();
+    return this.skillUsage.record(skillId, kind).catch((error) => {
+      this.logger?.warn("skill usage bump failed skill=%s kind=%s: %s", skillId, kind, error instanceof Error ? error.message : String(error));
+    });
   }
 
   private async execMemory(args: Readonly<Record<string, unknown>>): Promise<unknown> {
@@ -508,6 +518,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
           }
           const detail = await registry.create(skillId, content);
           await provenance.markAgent(skillId);
+          void this.bumpUsage(skillId, "patch");
           return { ok: true, data: detail, meta: { provenance: "agent" } };
         }
         case "edit": {
@@ -519,6 +530,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
             return { ok: true, data: { staged: true, id: pending.id }, meta: { provenance: "agent", staged: true } };
           }
           const result = await registry.write(skillId, "SKILL.md", content);
+          void this.bumpUsage(skillId, "patch");
           return { ok: true, data: result, meta: { provenance: "agent" } };
         }
         case "write_file": {
@@ -531,11 +543,16 @@ export class McpAgentToolGateway implements AgentToolGateway {
             return { ok: true, data: { staged: true, id: pending.id }, meta: { provenance: "agent", staged: true } };
           }
           const result = await registry.write(skillId, filePath, content);
+          void this.bumpUsage(skillId, "patch");
           return { ok: true, data: result, meta: { provenance: "agent" } };
         }
         case "delete": {
           const origin = await provenance.get(skillId);
           if (origin !== "agent") return skillProtected(skillId);
+          if (this.skillUsage) {
+            const usage = await this.skillUsage.getRecord(skillId);
+            if (usage.pinned) return skillPinned(skillId);
+          }
           if (shouldStage) {
             const pending = await this.approvalStaging!.stage(skillId, "delete", "", "");
             return { ok: true, data: { staged: true, id: pending.id }, meta: { provenance: "agent", staged: true } };
@@ -561,6 +578,14 @@ function skillProtected(skillId: string): unknown {
   return {
     ok: false,
     error: { code: "skill_protected", message: `Skill "${skillId}" is not agent-owned and cannot be mutated by the model` },
+    meta: {},
+  };
+}
+
+function skillPinned(skillId: string): unknown {
+  return {
+    ok: false,
+    error: { code: "skill_pinned", message: `Skill "${skillId}" is pinned and cannot be deleted` },
     meta: {},
   };
 }

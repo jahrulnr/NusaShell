@@ -98,3 +98,9 @@ desktop launcher shows a toast notification.
 Review counters are stored in `{memoryRoot}/.review-state.json` using
 `FilesystemReviewStateStore`. The file is atomically written and survives
 restarts.
+
+### Skill curator (growth control)
+
+Agent-owned skills are automatically curated via the `SkillCuratorService` and
+`SkillCuratorScheduler`. See [skill-curator.md](./skill-curator.md) for the
+full lifecycle, usage sidecar, eligibility rules, and scheduler configuration.

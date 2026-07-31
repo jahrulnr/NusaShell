@@ -16,6 +16,7 @@ import type {
   SkillReadResult,
   SkillRegistryPort,
   SkillSummary,
+  ArchivedSkillSummary,
 } from "@nusashell/application";
 import AdmZip from "adm-zip";
 
@@ -190,6 +191,51 @@ export class FilesystemSkillRegistry implements SkillRegistryPort {
     const target = this.skillRoot(skillId);
     if (!await exists(resolve(target, "SKILL.md"))) throw new Error(`Skill not found: ${skillId}`);
     await rm(target, { recursive: true, force: false });
+  }
+
+  async archive(skillId: string): Promise<void> {
+    const source = this.skillRoot(skillId);
+    if (!await exists(resolve(source, "SKILL.md"))) throw new Error(`Skill not found: ${skillId}`);
+    const archiveDir = resolve(this.root, ".archive");
+    await mkdir(archiveDir, { recursive: true });
+    const destination = resolve(archiveDir, skillId);
+    if (await exists(destination)) throw new Error(`Skill already archived: ${skillId}`);
+    await rename(source, destination);
+  }
+
+  async restore(skillId: string): Promise<void> {
+    if (!SKILL_ID.test(skillId)) throw new Error("Invalid skill id");
+    const archiveDir = resolve(this.root, ".archive");
+    const source = resolve(archiveDir, skillId);
+    if (!await exists(resolve(source, "SKILL.md"))) throw new Error(`Archived skill not found: ${skillId}`);
+    const destination = this.skillRoot(skillId);
+    if (await exists(destination)) throw new Error(`Skill already exists: ${skillId}`);
+    await rename(source, destination);
+  }
+
+  async listArchived(): Promise<readonly ArchivedSkillSummary[]> {
+    const archiveDir = resolve(this.root, ".archive");
+    if (!await exists(archiveDir)) return [];
+    const entries = await readdir(archiveDir, { withFileTypes: true });
+    const skills = await Promise.all(entries
+      .filter((entry) => entry.isDirectory() && SKILL_ID.test(entry.name))
+      .map(async (entry) => {
+        try {
+          const skillFile = resolve(archiveDir, entry.name, "SKILL.md");
+          const metadata = parseFrontmatter(await readFile(skillFile, "utf8"));
+          const info = await stat(resolve(archiveDir, entry.name));
+          return {
+            id: entry.name,
+            name: metadata.name,
+            description: metadata.description,
+            archivedAt: info.mtime.toISOString(),
+          } satisfies ArchivedSkillSummary;
+        } catch {
+          return null;
+        }
+      }));
+    return skills.filter((skill): skill is ArchivedSkillSummary => skill !== null)
+      .sort((left, right) => left.name.localeCompare(right.name));
   }
 
   private skillRoot(skillId: string): string {

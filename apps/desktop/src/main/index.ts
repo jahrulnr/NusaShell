@@ -301,6 +301,37 @@ app.whenReady().then(async () => {
   ipcMain.handle("skills:pending:reject", async (_event, id: string) => {
     await requireBackend().container.skillApprovalStaging.remove(id);
   });
+  ipcMain.handle("skills:curator:status", () => {
+    const c = requireBackend().container;
+    return {
+      ...c.skillCuratorScheduler.getStatus(),
+      scheduler: c.skillCuratorScheduler.getSettings(),
+      curator: c.skillCurator.getSettings(),
+    };
+  });
+  ipcMain.handle("skills:curator:run", async (_event, dryRun: boolean) => {
+    return requireBackend().container.skillCuratorScheduler.runManual(dryRun);
+  });
+  ipcMain.handle("skills:curator:configure", async (_event, settings: Record<string, unknown>) => {
+    const c = requireBackend().container;
+    if (settings.curator) c.configureCurator(settings.curator as Record<string, never>);
+    if (settings.scheduler) c.configureCuratorScheduler(settings.scheduler as Record<string, never>);
+    return {
+      scheduler: c.skillCuratorScheduler.getSettings(),
+      curator: c.skillCurator.getSettings(),
+    };
+  });
+  ipcMain.handle("skills:pin", async (_event, skillId: string, pinned: boolean) => {
+    await requireBackend().container.skillUsage.setPinned(skillId, pinned);
+    return { ok: true };
+  });
+  ipcMain.handle("skills:restore", async (_event, skillId: string) => {
+    await requireBackend().container.skillRegistry.restore(skillId);
+    await requireBackend().container.skillUsage.setState(skillId, "active");
+    return { ok: true };
+  });
+  ipcMain.handle("skills:archived:list", () =>
+    requireBackend().container.skillRegistry.listArchived());
   ipcMain.handle("mail-accounts:list", (event) => {
     assertMailPluginSender(event);
     return requireMailSettingsStore().getPublic();

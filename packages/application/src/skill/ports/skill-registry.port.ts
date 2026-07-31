@@ -27,6 +27,13 @@ export interface SkillReadResult {
   readonly nextOffset?: number;
 }
 
+export interface ArchivedSkillSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly archivedAt: string;
+}
+
 export interface SkillRegistryPort {
   list(): Promise<readonly SkillSummary[]>;
   search(query: string, limit?: number): Promise<readonly SkillSummary[]>;
@@ -36,4 +43,7 @@ export interface SkillRegistryPort {
   create(skillId: string, skillMd: string): Promise<SkillDetail>;
   write(skillId: string, path: string, content: string): Promise<SkillReadResult>;
   delete(skillId: string): Promise<void>;
+  archive(skillId: string): Promise<void>;
+  restore(skillId: string): Promise<void>;
+  listArchived(): Promise<readonly ArchivedSkillSummary[]>;
 }

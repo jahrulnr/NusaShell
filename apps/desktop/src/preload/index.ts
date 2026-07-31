@@ -74,6 +74,12 @@ export interface ShellApi {
     pendingList(): Promise<readonly PendingSkillWrite[]>;
     pendingApprove(id: string): Promise<unknown>;
     pendingReject(id: string): Promise<void>;
+    curatorStatus(): Promise<unknown>;
+    curatorRun(dryRun: boolean): Promise<unknown>;
+    curatorConfigure(settings: Record<string, unknown>): Promise<unknown>;
+    pin(skillId: string, pinned: boolean): Promise<{ ok: boolean }>;
+    restore(skillId: string): Promise<{ ok: boolean }>;
+    archivedList(): Promise<readonly unknown[]>;
   };
   readonly backgroundReview: {
     configure(settings: Record<string, unknown>): Promise<{ ok: boolean }>;
@@ -188,6 +194,12 @@ const api: ShellApi = {
     pendingList: () => ipcRenderer.invoke("skills:pending:list"),
     pendingApprove: (id) => ipcRenderer.invoke("skills:pending:approve", id),
     pendingReject: (id) => ipcRenderer.invoke("skills:pending:reject", id),
+    curatorStatus: () => ipcRenderer.invoke("skills:curator:status"),
+    curatorRun: (dryRun) => ipcRenderer.invoke("skills:curator:run", dryRun),
+    curatorConfigure: (settings) => ipcRenderer.invoke("skills:curator:configure", settings),
+    pin: (skillId, pinned) => ipcRenderer.invoke("skills:pin", skillId, pinned),
+    restore: (skillId) => ipcRenderer.invoke("skills:restore", skillId),
+    archivedList: () => ipcRenderer.invoke("skills:archived:list"),
   },
   backgroundReview: {
     configure: (settings) => ipcRenderer.invoke("background-review:configure", settings),

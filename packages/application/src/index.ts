@@ -173,9 +173,29 @@ export type {
   SkillReadResult,
   SkillRegistryPort,
   SkillSummary,
+  ArchivedSkillSummary,
   SkillOrigin,
   SkillProvenanceEntry,
   SkillProvenancePort,
+  SkillState,
+  UsageBumpKind,
+  SkillUsageRecord,
+  SkillUsagePort,
+} from "./skill/index.js";
+export { latestActivityAt } from "./skill/index.js";
+export {
+  SkillCuratorService,
+  type CuratorSettings,
+  type CuratorChange,
+  type CuratorResult,
+  type SkillCuratorDeps,
+  DEFAULT_CURATOR_SETTINGS,
+} from "./skill/index.js";
+export {
+  SkillCuratorScheduler,
+  type CuratorSchedulerSettings,
+  type SkillCuratorSchedulerDeps,
+  DEFAULT_SCHEDULER_SETTINGS,
 } from "./skill/index.js";
 
 // Agent Memory

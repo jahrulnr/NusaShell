@@ -1,0 +1,115 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
+import {
+  SkillCuratorService,
+  SkillCuratorScheduler,
+  DEFAULT_SCHEDULER_SETTINGS,
+  type SkillCuratorDeps,
+} from "../src/index.js";
+
+function makeCurator(): SkillCuratorService {
+  return new SkillCuratorService({
+    registry: { list: async () => [], archive: async () => {} },
+    provenance: { get: async () => "agent" },
+    usage: { getRecord: async () => ({ skillId: "x", useCount: 0, viewCount: 0, patchCount: 0, lastUsedAt: null, lastViewedAt: null, lastPatchedAt: null, state: "active", pinned: false, archivedAt: null, createdAt: new Date().toISOString() }), setState: async () => {}, setPinned: async () => {} },
+  } as unknown as SkillCuratorDeps);
+}
+
+describe("SkillCuratorScheduler", () => {
+  it("uses default settings", () => {
+    const curator = makeCurator();
+    const scheduler = new SkillCuratorScheduler({ curator, stateRoot: "/tmp" });
+    expect(scheduler.getSettings()).toEqual(DEFAULT_SCHEDULER_SETTINGS);
+  });
+
+  it("interval gate blocks tick before interval elapses", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-sched-"));
+    const now = new Date("2025-01-01T00:00:00Z");
+    const curator = makeCurator();
+    const scheduler = new SkillCuratorScheduler({ curator, stateRoot: root, now: () => now });
+    await scheduler.initialize();
+
+    await scheduler.runManual(false);
+    const tick = await scheduler.tick();
+    expect(tick).toBeNull();
+  });
+
+  it("tick runs after interval elapses", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-sched-"));
+    let now = new Date("2025-01-01T00:00:00Z");
+    const curator = makeCurator();
+    const scheduler = new SkillCuratorScheduler({ curator, stateRoot: root, now: () => now });
+    await scheduler.initialize();
+
+    await scheduler.runManual(false);
+    now = new Date("2025-01-08T00:00:01Z");
+    const tick = await scheduler.tick();
+    expect(tick).not.toBeNull();
+  });
+
+  it("paused blocks automatic tick", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-sched-"));
+    let now = new Date("2025-01-01T00:00:00Z");
+    const curator = makeCurator();
+    const scheduler = new SkillCuratorScheduler({ curator, stateRoot: root, now: () => now });
+    await scheduler.initialize();
+    scheduler.configure({ paused: true });
+
+    now = new Date("2025-02-01T00:00:00Z");
+    const tick = await scheduler.tick();
+    expect(tick).toBeNull();
+  });
+
+  it("manual run bypasses interval and paused", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-sched-"));
+    const now = new Date("2025-01-01T00:00:00Z");
+    const curator = makeCurator();
+    const scheduler = new SkillCuratorScheduler({ curator, stateRoot: root, now: () => now });
+    await scheduler.initialize();
+    scheduler.configure({ paused: true });
+
+    const result = await scheduler.runManual(true);
+    expect(result).not.toBeNull();
+    expect(result?.dryRun).toBe(true);
+  });
+
+  it("manual run works when not paused", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-sched-"));
+    const now = new Date("2025-01-01T00:00:00Z");
+    const curator = makeCurator();
+    const scheduler = new SkillCuratorScheduler({ curator, stateRoot: root, now: () => now });
+    await scheduler.initialize();
+
+    const result = await scheduler.runManual(true);
+    expect(result).not.toBeNull();
+    expect(result?.dryRun).toBe(true);
+  });
+
+  it("persists lastRunAt across instances", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-sched-"));
+    const now = new Date("2025-01-01T00:00:00Z");
+    const curator = makeCurator();
+    const scheduler1 = new SkillCuratorScheduler({ curator, stateRoot: root, now: () => now });
+    await scheduler1.initialize();
+    await scheduler1.runManual(false);
+    expect(scheduler1.getStatus().lastRunAt).not.toBeNull();
+
+    const scheduler2 = new SkillCuratorScheduler({ curator, stateRoot: root, now: () => now });
+    await scheduler2.initialize();
+    expect(scheduler2.getStatus().lastRunAt).not.toBeNull();
+  });
+
+  it("disabled scheduler does not tick", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-sched-"));
+    const now = new Date("2025-06-01T00:00:00Z");
+    const curator = makeCurator();
+    const scheduler = new SkillCuratorScheduler({ curator, stateRoot: root, now: () => now });
+    await scheduler.initialize();
+    scheduler.configure({ enabled: false });
+
+    const tick = await scheduler.tick();
+    expect(tick).toBeNull();
+  });
+});
