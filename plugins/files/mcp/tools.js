@@ -30,55 +30,55 @@ const schemas = {
 
 export const FILES_TOOLS = Object.freeze([
   descriptor("files_list", "List directory contents with file metadata (name, size, modified, type).", {
-    path: stringProperty("Directory path relative to the files plugin root (user home directory by default). Use empty string or \"/\" for root.", "/"),
+    path: stringProperty("Directory path relative to the files plugin root — user home by default (NOT the OS filesystem root). Use empty string or \"/\" for root.", "/"),
   }),
   descriptor("files_tree", "Recursive directory tree up to a depth limit.", {
-    path: stringProperty("Directory path relative to the files plugin root (user home directory by default). Use empty string or \"/\" for root.", "/"),
+    path: stringProperty("Directory path relative to the files plugin root — user home by default (NOT the OS filesystem root). Use empty string or \"/\" for root.", "/"),
     depth: integerProperty(1, 10, 3, "Maximum tree depth (1-10)."),
   }),
   descriptor("files_read", "Read a text file. Use head or tail to limit output.", {
-    path: stringProperty("File path relative to the files plugin root (user home directory by default)."),
+    path: stringProperty("File path relative to the files plugin root — user home by default (NOT the OS filesystem root)."),
     head: integerProperty(1, 100000, undefined, "Number of lines from the top."),
     tail: integerProperty(1, 100000, undefined, "Number of lines from the bottom."),
   }, ["path"]),
   descriptor("files_write", "Create or overwrite a file. Parent directories are created automatically.", {
-    path: stringProperty("File path relative to the files plugin root (user home directory by default)."),
+    path: stringProperty("File path relative to the files plugin root — user home by default (NOT the OS filesystem root)."),
     content: { type: "string", description: "File content (UTF-8 text, max 10 MB)." },
   }, ["path", "content"], false),
   descriptor("files_mkdir", "Create an empty directory. Missing parent directories are created automatically.", {
-    path: stringProperty("Directory path relative to the files plugin root (user home directory by default)."),
+    path: stringProperty("Directory path relative to the files plugin root — user home by default (NOT the OS filesystem root)."),
   }, ["path"], false),
   descriptor("files_move", "Move or rename a file or directory.", {
-    source: stringProperty("Current path relative to the files plugin root (user home directory by default)."),
-    destination: stringProperty("New path relative to the files plugin root (user home directory by default)."),
+    source: stringProperty("Current path relative to the files plugin root — user home by default (NOT the OS filesystem root)."),
+    destination: stringProperty("New path relative to the files plugin root — user home by default (NOT the OS filesystem root)."),
   }, ["source", "destination"], false),
   descriptor("files_copy", "Copy a file or directory recursively. Destination parent directories are created automatically.", {
-    source: stringProperty("Path to copy from, relative to the files plugin root (user home directory by default)."),
-    destination: stringProperty("Path to copy to, relative to the files plugin root (user home directory by default)."),
+    source: stringProperty("Path to copy from, relative to the files plugin root — user home by default (NOT the OS filesystem root)."),
+    destination: stringProperty("Path to copy to, relative to the files plugin root — user home by default (NOT the OS filesystem root)."),
   }, ["source", "destination"], false),
   descriptor("files_delete", "Delete a file or directory. Directories require recursive=true if not empty.", {
-    path: stringProperty("Path to delete relative to the files plugin root (user home directory by default)."),
+    path: stringProperty("Path to delete relative to the files plugin root — user home by default (NOT the OS filesystem root)."),
     recursive: { type: "boolean", description: "Allow deleting non-empty directories.", default: false },
   }, ["path"], false),
   descriptor("files_search", "Search for files by name pattern (glob: * and ?).", {
-    path: stringProperty("Search root directory relative to the files plugin root. Defaults to root.", "/"),
+    path: stringProperty("Search root directory relative to the files plugin root (user home, NOT OS /). Defaults to root.", "/"),
     pattern: stringProperty("Glob pattern (e.g. *.txt, config.*, *.test.js)."),
   }, ["pattern"]),
   descriptor("files_info", "Get detailed file metadata (size, dates, permissions, type).", {
-    path: stringProperty("File or directory path relative to the files plugin root (user home directory by default)."),
+    path: stringProperty("File or directory path relative to the files plugin root — user home by default (NOT the OS filesystem root)."),
   }, ["path"]),
   descriptor("files_grep", "Search file contents for a regex pattern (like grep). Only text files are scanned.", {
-    path: stringProperty("Directory to search in, relative to the files plugin root. Defaults to root.", "/"),
+    path: stringProperty("Directory to search in, relative to the files plugin root (user home, NOT OS /). Defaults to root.", "/"),
     pattern: stringProperty("Regular expression pattern to match against file contents (e.g. 'function\\s+\\w+', 'TODO.*')."),
     glob: stringProperty("Optional file name glob filter to narrow search (e.g. '*.js', '*.ts'). If omitted, all text files are scanned."),
   }, ["pattern"]),
   descriptor("files_patch", "Replace the first occurrence of old_string with new_string in a file. Safer than files_write for small edits.", {
-    path: stringProperty("File path relative to the files plugin root (user home directory by default)."),
+    path: stringProperty("File path relative to the files plugin root — user home by default (NOT the OS filesystem root)."),
     old_string: { type: "string", description: "Exact string to find in the file (must match exactly, including whitespace and indentation)." },
     new_string: { type: "string", description: "Replacement string." },
   }, ["path", "old_string", "new_string"], false),
   descriptor("files_append", "Append content to the end of a file. Creates the file if it does not exist.", {
-    path: stringProperty("File path relative to the files plugin root (user home directory by default)."),
+    path: stringProperty("File path relative to the files plugin root — user home by default (NOT the OS filesystem root)."),
     content: { type: "string", description: "Content to append (UTF-8 text, max 10 MB)." },
   }, ["path", "content"], false),
 ]);

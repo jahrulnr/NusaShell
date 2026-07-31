@@ -154,7 +154,11 @@ function normalizeDocument(value: unknown): ConversationDocument {
     const candidate = item as Partial<AgentConversation>;
     if (typeof candidate.id !== "string" || typeof candidate.createdAt !== "string" || typeof candidate.updatedAt !== "string") return [];
     const messages = Array.isArray(candidate.messages)
-      ? candidate.messages.filter(isConversationMessage)
+      ? candidate.messages.flatMap((item) => {
+          if (isConversationMessage(item)) return [item];
+          const repaired = repairConversationMessage(item);
+          return repaired ? [repaired] : [];
+        })
       : [];
     return [{
       id: candidate.id,
@@ -231,8 +235,48 @@ function isConversationToolCall(value: unknown): value is AgentConversationToolC
   return true;
 }
 
-function isConversationAttachment(value: unknown): boolean {
-  if (typeof value !== "object" || value === null) return false;
+/**
+ * Salvage a persisted message whose only violations are over-length clamped
+ * fields (e.g. tool output saved as 12_002 chars by an older clamp). Clamp
+ * instead of dropping so a restart does not erase the visible chat history.
+ */
+function repairConversationMessage(value: unknown): AgentConversationMessage | null {
+  if (typeof value !== "object" || value === null) return null;
+  const message = structuredClone(value) as Record<string, unknown>;
+  if (Array.isArray(message.toolCalls)) message.toolCalls.forEach(repairToolCallRecord);
+  if (Array.isArray(message.steps)) message.steps.forEach(repairStepRecord);
+  if (typeof message.reasoning === "string" && message.reasoning.length > 1_000_000) {
+    message.reasoning = message.reasoning.slice(0, 1_000_000);
+  }
+  return isConversationMessage(message) ? message : null;
+}
+
+function repairStepRecord(step: unknown): void {
+  if (typeof step !== "object" || step === null) return;
+  const record = step as Record<string, unknown>;
+  if ((record.type === "reasoning" || record.type === "text") && typeof record.content === "string" && record.content.length > 1_000_000) {
+    record.content = record.content.slice(0, 1_000_000);
+  }
+  if (record.type === "tool_calls" && Array.isArray(record.calls)) record.calls.forEach(repairToolCallRecord);
+}
+
+function repairToolCallRecord(call: unknown): void {
+  if (typeof call !== "object" || call === null) return;
+  const record = call as Record<string, unknown>;
+  if (typeof record.output === "string" && record.output.length > 12_000) {
+    record.output = record.output.slice(0, 12_000);
+  }
+  const args = record.args;
+  if (args !== undefined && typeof args === "object" && args !== null && !Array.isArray(args)) {
+    try {
+      if (JSON.stringify(args).length > 8_000) delete record.args;
+    } catch {
+      delete record.args;
+    }
+  }
+}
+
+function isConversationAttachment(value: unknown): boolean {  if (typeof value !== "object" || value === null) return false;
   const attachment = value as Record<string, unknown>;
   const validBase = typeof attachment.name === "string"
     && attachment.name.length > 0

@@ -131,4 +131,58 @@ describe("AgentConversationStore", () => {
     const loaded = await new AgentConversationStore(path).get(created.id);
     expect(loaded?.workspace).toBeUndefined();
   });
+
+  it("round-trips assistant messages with boundary-length truncated tool output", async () => {
+    // Regression: a clamped output of 12_002 chars ("...\n…" past the cap) used
+    // to fail validation on load and silently drop the whole assistant message.
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-"));
+    const path = join(root, "agent-conversations.json");
+    const first = new AgentConversationStore(path, () => new Date("2026-07-31T10:00:00.000Z"), () => "conv-boundary");
+    const conversation = await first.create();
+    await first.appendMessage(conversation.id, { role: "user", content: "Run a long command" });
+    await first.appendMessage(conversation.id, {
+      role: "assistant",
+      content: "Done.",
+      steps: [
+        { type: "tool_calls", calls: [{ id: "call-1", name: "terminal_read", ok: true, output: `${"y".repeat(11_998)}\n…` }] },
+        { type: "text", content: "Done." },
+      ],
+    });
+
+    const loaded = await new AgentConversationStore(path).get(conversation.id);
+    expect(loaded?.messages).toHaveLength(2);
+    expect(loaded?.messages[1]?.steps?.[0]).toMatchObject({ type: "tool_calls" });
+  });
+
+  it("repairs legacy over-cap tool output on load instead of dropping the message", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-"));
+    const path = join(root, "agent-conversations.json");
+    const legacyOutput = `${"y".repeat(12_000)}\n…`; // 12_002 chars, written by the old clamp
+    await writeFile(path, JSON.stringify({
+      version: 1,
+      conversations: [{
+        id: "conv-legacy",
+        title: "Legacy chat",
+        createdAt: "2026-07-31T08:00:00.000Z",
+        updatedAt: "2026-07-31T08:05:00.000Z",
+        messages: [
+          { role: "user", content: "hai" },
+          {
+            role: "assistant",
+            content: "Done.",
+            steps: [
+              { type: "tool_calls", calls: [{ id: "call-9", name: "terminal_read", ok: true, output: legacyOutput }] },
+              { type: "text", content: "Done." },
+            ],
+          },
+        ],
+      }],
+    }), "utf8");
+
+    const loaded = await new AgentConversationStore(path).get("conv-legacy");
+    expect(loaded?.messages).toHaveLength(2);
+    const step = loaded?.messages[1]?.steps?.[0];
+    expect(step?.type).toBe("tool_calls");
+    if (step?.type === "tool_calls") expect(step.calls[0]?.output).toHaveLength(12_000);
+  });
 });

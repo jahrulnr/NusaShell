@@ -56,6 +56,10 @@ export class McpAgentToolGateway implements AgentToolGateway {
       definition("tool_search", "Search a running MCP plugin's tools by name or description", { pluginId: stringSchema(), query: stringSchema() }),
       definition("tool_list", "List all tools from a running MCP plugin (names and descriptions only)", { pluginId: stringSchema() }),
       definition("tool_schema", "Load one searched MCP tool schema for the next round", { pluginId: stringSchema(), toolName: stringSchema() }),
+      definition("tool_schemas", "Load multiple MCP tool schemas for the next round in one call", {
+        pluginId: stringSchema(),
+        toolNames: { type: "array", items: { type: "string" }, minItems: 1, description: "Tool names to grant for the current turn" },
+      }, ["pluginId", "toolNames"]),
       definition("mcp_context", "Discover or load MCP prompts and text resources", {
         pluginId: stringSchema(),
         action: { type: "string", enum: ["list_prompts", "get_prompt", "search_resources", "list_resource_templates", "complete", "read_resource"] },
@@ -109,6 +113,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
       case "tool_list": return this.listAllTools(args);
       case "tool_search": return this.searchTools(args);
       case "tool_schema": return this.grantTool(args, turnId);
+      case "tool_schemas": return this.grantTools(args, turnId);
       case "mcp_context": return this.context(args);
       case "docs_search": return this.execDocsSearch(args);
       case "docs_list": return this.execDocsList(args);
@@ -151,6 +156,37 @@ export class McpAgentToolGateway implements AgentToolGateway {
     const inputSchema = tool.inputSchema ?? emptySchema;
     this.routesFor(turnId).set(providerName, { pluginId: pluginIdValue, toolName: tool.name, inputSchema, ...(tool.description ? { description: tool.description } : {}) });
     return { name: providerName, ...(tool.description ? { description: tool.description } : {}), inputSchema };
+  }
+
+  private async grantTools(args: Readonly<Record<string, unknown>>, turnId: string): Promise<unknown> {
+    const pluginIdValue = requireString(args.pluginId, "pluginId");
+    const names = Array.isArray(args.toolNames)
+      ? args.toolNames.filter((n): n is string => typeof n === "string" && n.trim().length > 0)
+      : [];
+    if (names.length === 0) {
+      throw new ApplicationError("AGENT_INVALID_INPUT", "tool_schemas requires a non-empty toolNames array");
+    }
+    const tools = await this.runtimeManager.listTools(parsePluginId(pluginIdValue));
+    const byName = new Map(tools.map((tool) => [tool.name, tool]));
+    const granted: Array<{ name: string; description?: string; inputSchema: unknown }> = [];
+    const missing: string[] = [];
+    for (const rawName of names) {
+      const tool = byName.get(rawName);
+      if (!tool) {
+        missing.push(rawName);
+        continue;
+      }
+      const providerName = toProviderToolName(pluginIdValue, tool.name);
+      const inputSchema = tool.inputSchema ?? emptySchema;
+      this.routesFor(turnId).set(providerName, {
+        pluginId: pluginIdValue,
+        toolName: tool.name,
+        inputSchema,
+        ...(tool.description ? { description: tool.description } : {}),
+      });
+      granted.push({ name: providerName, ...(tool.description ? { description: tool.description } : {}), inputSchema });
+    }
+    return { granted, ...(missing.length ? { missing } : {}) };
   }
 
   private async context(args: Readonly<Record<string, unknown>>): Promise<unknown> {

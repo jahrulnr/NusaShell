@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.40] - 2026-07-31
+
+### Fixed
+
+- Agent chat history no longer disappears after an Electron restart. Clamped
+  tool outputs were persisted 2 chars over the store validator cap
+  (`12_000 + "\n…"`), so the whole assistant message failed validation on load
+  and was silently dropped. Producers now clamp inside the budget (output,
+  args wrapper, reasoning/text steps), and the store repairs legacy over-cap
+  fields on load instead of dropping the message.
+
+## [0.0.39] - 2026-07-31
+
+### Added
+
+- `tool_schemas` batch meta-tool in the agent gateway: grants several tools from
+  the same plugin in one call (`pluginId` + `toolNames[]`), returning `granted`
+  and `missing` lists so agents save turns when they need multiple tools.
+
+### Changed
+
+- Files plugin tool descriptions and agent prompt/docs now state explicitly that
+  Files `path` arguments are relative to the Files plugin root (user home by
+  default, `NUSASHELL_FILES_ROOT`) and that `/` there is **not** the OS
+  filesystem root. Agents are directed to the Terminal plugin with an absolute
+  `cwd` for paths outside the Files root.
+
 ## [0.0.38] - 2026-07-31
 
 ### Added

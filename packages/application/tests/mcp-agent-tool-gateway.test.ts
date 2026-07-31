@@ -28,7 +28,7 @@ describe("McpAgentToolGateway", () => {
     gateway.beginTurn("turn-1");
 
     expect((await gateway.listTools([], "turn-1")).map((tool) => tool.name)).toEqual([
-      "mcp_list", "mcp_enable", "mcp_disable", "tool_search", "tool_list", "tool_schema", "mcp_context",
+      "mcp_list", "mcp_enable", "mcp_disable", "tool_search", "tool_list", "tool_schema", "tool_schemas", "mcp_context",
       "docs_search", "docs_list", "docs_read",
       "skill_list", "skill_search", "skill_read",
     ]);
@@ -70,6 +70,29 @@ describe("McpAgentToolGateway", () => {
     await expect(gateway.execute(grant.name, { text: "hello" }, "call-3", "turn-2")).rejects.toThrow("outside the MCP allowlist");
     gateway.endTurn("turn-1");
     expect((await gateway.listTools([], "turn-1")).map((tool) => tool.name)).not.toContain(grant.name);
+  });
+
+  it("grants multiple tools in one call via tool_schemas", async () => {
+    const runtime = {
+      ...fakeRuntime,
+      listTools: async () => [
+        { name: "createNote", description: "Create a note", inputSchema: { type: "object", properties: { text: { type: "string" } } } },
+        { name: "listNotes", description: "List notes", inputSchema: { type: "object", properties: {} } },
+      ],
+    };
+    const gateway = new McpAgentToolGateway(runtime as never);
+    gateway.beginTurn("turn-batch");
+
+    const result = await gateway.execute("tool_schemas", {
+      pluginId: "nusashell.notes",
+      toolNames: ["createNote", "listNotes", "missingTool"],
+    }, "call-batch", "turn-batch") as { granted: Array<{ name: string }>; missing?: string[] };
+
+    expect(result.granted.map((g) => g.name)).toHaveLength(2);
+    expect(result.missing).toEqual(["missingTool"]);
+    const names = (await gateway.listTools([], "turn-batch")).map((tool) => tool.name);
+    for (const g of result.granted) expect(names).toContain(g.name);
+    expect(names).not.toContain("missingTool");
   });
 
   it("exposes docs_* meta-tools and returns envelope results", async () => {

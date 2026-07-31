@@ -59,7 +59,11 @@ const TOOL_OUTPUT_MAX_CHARS = 12_000;
 
 export function clampToolText(value, maxChars = TOOL_OUTPUT_MAX_CHARS) {
   const text = String(value ?? "");
-  return text.length <= maxChars ? text : `${text.slice(0, maxChars)}\n…`;
+  if (text.length <= maxChars) return text;
+  // The "\n…" marker must fit inside the budget: AgentConversationStore
+  // rejects persisted tool outputs longer than TOOL_OUTPUT_MAX_CHARS, and an
+  // over-budget output silently drops the whole assistant message on load.
+  return `${text.slice(0, Math.max(0, maxChars - 2))}\n…`;
 }
 
 export function formatToolOutput(value, maxChars = TOOL_OUTPUT_MAX_CHARS) {
@@ -155,7 +159,18 @@ export function toConversationToolCall(call) {
     try {
       const encoded = JSON.stringify(args);
       if (encoded.length <= TOOL_ARGS_MAX_CHARS) safeArgs = args;
-      else safeArgs = { _truncated: clampToolText(encoded, TOOL_ARGS_MAX_CHARS) };
+      else {
+        // JSON-escaping inside the {"_truncated":"…"} wrapper makes the final
+        // size unpredictable, so shrink iteratively against the real measure.
+        let budget = TOOL_ARGS_MAX_CHARS - JSON.stringify({ _truncated: "" }).length;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          safeArgs = { _truncated: clampToolText(encoded, budget) };
+          const overflow = JSON.stringify(safeArgs).length - TOOL_ARGS_MAX_CHARS;
+          if (overflow <= 0) break;
+          budget -= overflow;
+        }
+        if (JSON.stringify(safeArgs).length > TOOL_ARGS_MAX_CHARS) safeArgs = undefined;
+      }
     } catch {
       safeArgs = undefined;
     }
@@ -182,6 +197,9 @@ export function sanitizeAssistantSteps(steps) {
   return steps.map((step) => {
     if (step?.type === "tool_calls" && Array.isArray(step.calls)) {
       return { type: "tool_calls", calls: step.calls.map(toConversationToolCall) };
+    }
+    if ((step?.type === "reasoning" || step?.type === "text") && typeof step.content === "string") {
+      return { ...step, content: clampToolText(step.content, 1_000_000) };
     }
     return step;
   });

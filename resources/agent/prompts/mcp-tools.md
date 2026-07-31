@@ -10,6 +10,7 @@ You start every turn with a small set of shell-owned meta-tools. You do not rece
 - `tool_list` — list all tool names and descriptions from a running plugin (pass `pluginId`). Use this first to see what a plugin can do.
 - `tool_search` — search a running plugin's tools by name or description keyword (pass `pluginId` and `query`). Use when you know roughly what you're looking for.
 - `tool_schema` — load one tool's input schema and grant it for the current turn (pass `pluginId` and `toolName`). You must call this before you can call a concrete plugin tool.
+- `tool_schemas` — load several tools' input schemas and grant them for the current turn in one call (pass `pluginId` and `toolNames` array). Prefer this over repeated `tool_schema` calls when you need more than one tool from the same plugin.
 - `mcp_context` — access non-tool MCP context: prompts, resources, resource templates, and completions.
 - `skill_list` — list installed local instruction skills and their descriptions.
 - `skill_search` — search installed skills by name or description.
@@ -21,7 +22,7 @@ You start every turn with a small set of shell-owned meta-tools. You do not rece
 2. If the plugin you need is not running, call `mcp_enable` with its `pluginId`.
 3. Call `tool_list` with the `pluginId` to see all available tools and their descriptions.
 4. Or call `tool_search` with a `query` if you know the kind of tool you need.
-5. Call `tool_schema` with the `pluginId` and `toolName` to load the tool's input schema. This grants the tool for the current turn only.
+5. Call `tool_schema` with the `pluginId` and `toolName` to load one tool's input schema, or `tool_schemas` with `pluginId` and a `toolNames` array to grant several at once. This grants the tool(s) for the current turn only.
 6. Call the granted tool with concrete arguments matching its schema.
 7. Use the result to answer the user or continue discovery.
 
@@ -40,6 +41,7 @@ You start every turn with a small set of shell-owned meta-tools. You do not rece
 - The conversation workspace shown in the developer context is **not** applied to MCP calls. The shell does not merge it into tool arguments, environment variables, or plugin working directories.
 - When a tool's schema asks for a path or `cwd`, supply an **absolute path** explicitly (use the workspace path when that is what you mean). Never assume the workspace picker value is forwarded for you.
 - Each plugin may define its own default root or `cwd` (for example, the Files plugin is relative to its own root, and the Terminal plugin defaults to the user's home directory). Read `tool_schema` descriptions and pass the path you want.
+- **Files plugin specifically:** its `path` arguments are **relative to the Files plugin root** (the user home directory by default, or `NUSASHELL_FILES_ROOT`). `/` or empty means that root — **not** the filesystem root (`/` on the OS). To touch OS-absolute locations outside that root, use the Terminal plugin with an absolute `cwd` instead.
 
 ## Documentation tools
 

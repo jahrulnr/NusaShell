@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAgentContext,
+  clampToolText,
   composerTextareaSize,
   describeToolActivity,
   formatMessageTimestamp,
@@ -97,6 +98,23 @@ describe("agent conversation UI helpers", () => {
     expect(html).not.toContain("<a ");
     expect(html).toContain("mcp-tools.md");
     expect(html).toContain("plugins.md");
+  });
+
+  it("keeps clamped tool output and args within the persistence validator caps", () => {
+    expect(clampToolText("x".repeat(20_000))).toHaveLength(12_000);
+    expect(clampToolText("x".repeat(100), 50)).toHaveLength(50);
+    expect(clampToolText("short")).toBe("short");
+
+    const hugeOutput = toConversationToolCall({ id: "c1", name: "terminal_read", ok: true, output: "y".repeat(50_000) });
+    expect(hugeOutput.output).toHaveLength(12_000);
+
+    const hugeArgs = toConversationToolCall({
+      id: "c2",
+      name: "files_write",
+      ok: true,
+      args: { path: "/a.txt", content: "z".repeat(20_000) },
+    });
+    expect(JSON.stringify(hugeArgs.args).length).toBeLessThanOrEqual(8_000);
   });
 
   it("formats persisted message timestamps as compact local metadata", () => {
