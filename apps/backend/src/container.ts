@@ -23,6 +23,7 @@ import {
   OpenAiCompatibleAgentProvider,
   SqliteJobStore,
   JsonJobStore,
+  AcpJsonRpcClient,
   type Logger,
   type LogObserver,
 } from "@nusashell/infrastructure";
@@ -77,6 +78,14 @@ import {
   ListJobsHandler,
   JobOutputHandler,
   ValidateScheduleHandler,
+  AcpSessionService,
+  AcpPermissionService,
+  AcpAskBridgeService,
+  RunAcpTurnHandler,
+  CancelAcpTurnHandler,
+  AnswerAcpPermissionHandler,
+  AnswerAcpAskHandler,
+  GetAcpSessionInfoHandler,
   type JobStorePort,
   type JobSchedulerSettings,
   type AgentRuntimeSettings,
@@ -362,6 +371,18 @@ export function createContainer(options: ContainerOptions): Container {
     jobScheduler.configure(options.jobs);
   }
 
+  // ---- ACP external agent surface ----
+  const acpClient = new AcpJsonRpcClient();
+  const acpPermissionService = new AcpPermissionService();
+  const acpAskService = new AcpAskBridgeService();
+  const acpSessionService = new AcpSessionService({
+    client: acpClient,
+    permissionService: acpPermissionService,
+    askService: acpAskService,
+    eventDispatcher,
+    logger,
+  });
+
   const commandBus = new CommandBus();
   commandBus.register("start-plugin", new StartPluginHandler(runtimeManager));
   commandBus.register("stop-plugin", new StopPluginHandler(runtimeManager));
@@ -402,6 +423,10 @@ export function createContainer(options: ContainerOptions): Container {
   commandBus.register("set-job-enabled", new SetJobEnabledHandler(jobStore));
   commandBus.register("run-job-now", new RunJobNowHandler(jobScheduler));
   commandBus.register("remove-job", new RemoveJobHandler(jobStore));
+  commandBus.register("run-acp-turn", new RunAcpTurnHandler(acpSessionService));
+  commandBus.register("cancel-acp-turn", new CancelAcpTurnHandler(acpSessionService));
+  commandBus.register("answer-acp-permission", new AnswerAcpPermissionHandler(acpPermissionService));
+  commandBus.register("answer-acp-ask", new AnswerAcpAskHandler(acpAskService));
   if (pluginInstaller) {
     commandBus.register("install-plugin", new InstallPluginHandler(pluginInstaller, eventDispatcher, clock));
     commandBus.register("uninstall-plugin", new UninstallPluginHandler(pluginInstaller, runtimeManager, pluginRepository, eventDispatcher, clock));
@@ -422,6 +447,7 @@ export function createContainer(options: ContainerOptions): Container {
   queryBus.register("list-jobs", new ListJobsHandler(jobStore));
   queryBus.register("job-output", new JobOutputHandler(jobStore));
   queryBus.register("validate-schedule", new ValidateScheduleHandler());
+  queryBus.register("get-acp-session-info", new GetAcpSessionInfoHandler(acpSessionService));
 
   const router = new MessageRouter({ commandBus, queryBus, logger });
 

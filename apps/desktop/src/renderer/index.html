@@ -171,12 +171,21 @@
               <button class="agent-new-conversation" id="agent-new-conversation" type="button" aria-label="New conversation" title="New conversation">
                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
               </button>
+              <div class="agent-new-acp-wrap">
+                <button class="agent-new-conversation" id="agent-new-acp" type="button" aria-label="New ACP thread" title="New ACP thread" hidden>+ ACP</button>
+                <div class="agent-new-acp-menu" id="agent-new-acp-menu" hidden></div>
+              </div>
             </div>
             <label class="agent-conversation-search"><span aria-hidden="true">⌕</span><input id="agent-conversation-search" type="search" placeholder="Search conversations…" autocomplete="off"></label>
             <div class="agent-conversation-list" id="agent-conversation-list" role="list"></div>
           </aside>
 
           <div class="agent-conversation">
+            <div class="acp-status-bar" id="acp-status-bar" hidden>
+              <span class="acp-status-label">EXTERNAL AGENT</span>
+              <span class="acp-status-provider" id="acp-status-provider">—</span>
+              <span class="acp-status-chip" id="acp-status-chip">● IDLE</span>
+            </div>
             <div class="agent-thread" id="agent-thread" role="log" aria-live="polite" aria-label="Agent conversation">
               <div class="agent-empty" id="agent-empty">
                 <div class="agent-empty-mark">✦</div>
@@ -195,6 +204,7 @@
                 </button>
                 <div class="agent-model-control">
                   <button class="agent-model-trigger" id="agent-model-trigger" type="button" aria-haspopup="dialog" aria-expanded="false"><span id="agent-model-trigger-label">Model · auto</span><span aria-hidden="true">⌄</span></button>
+                  <button class="agent-acp-pill" id="agent-acp-pill" type="button" hidden><span id="agent-acp-pill-label">—</span></button>
                   <div class="agent-model-menu" id="agent-model-menu" role="dialog" aria-label="Choose model and effort" hidden>
                     <label class="agent-model-search"><span aria-hidden="true">⌕</span><input id="agent-model-search" type="search" placeholder="Search models or providers…" autocomplete="off"></label>
                     <div class="agent-model-list" id="agent-model-list" role="listbox" aria-label="Available models"></div>
@@ -395,6 +405,8 @@
           <article class="provider-registry-card accent-oa" data-provider-preset="openai"><div class="provider-card-head"><span class="provider-mark">OA</span><div><h2>OpenAI</h2><p>API KEY · RESPONSES</p></div><button type="button" class="provider-toggle" aria-label="Enable OpenAI" disabled>●</button></div><p>Official OpenAI Responses API with native tool-call mapping.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
           <article class="provider-registry-card accent-ai" data-provider-preset="claude"><div class="provider-card-head"><span class="provider-mark">AI</span><div><h2>Claude API</h2><p>API KEY · MESSAGES</p></div><button type="button" class="provider-toggle" aria-label="Enable Claude API" disabled>●</button></div><p>Official Anthropic Messages API with native tool-use mapping.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
         </div>
+        <div class="acp-agents-header"><div class="agent-kicker"><span class="agent-kicker-dot"></span> ACP Agents</div><p class="subtitle">External agent partners that run over the Agent Client Protocol.</p></div>
+        <div class="provider-registry" id="acp-provider-registry" role="list"></div>
       </section>
 
       <section class="view" data-view="provider-details">
@@ -719,6 +731,17 @@
     </div>
     <div class="agent-delete-actions"><button class="mini-btn" id="provider-delete-cancel" type="button">Cancel</button><button class="mini-btn danger" id="provider-delete-confirm" type="button">Delete</button></div>
   </div>
+
+  <!-- ===== ACP provider configure modal ===== -->
+  <div class="provider-modal-overlay" id="acp-provider-modal-overlay" hidden></div>
+  <form class="settings-card provider-settings-card" id="acp-provider-form" hidden>
+    <div class="provider-modal-head"><div><div class="settings-card-title" id="acp-provider-title">Configure ACP agent</div><p class="provider-modal-subtitle" id="acp-provider-subtitle"></p></div><button class="provider-modal-close" id="acp-provider-close" type="button" aria-label="Close ACP provider details">×</button></div>
+    <input id="acp-provider-id" type="hidden">
+    <label class="provider-enabled-field"><input id="acp-provider-enabled" type="checkbox"> Enabled</label>
+    <label class="settings-field">Command<input id="acp-provider-command" autocomplete="off" placeholder="agent"></label>
+    <label class="settings-field">Args<input id="acp-provider-args" autocomplete="off" placeholder="acp"></label>
+    <div class="settings-row"><span id="acp-provider-auth-method">—</span><button class="mini-btn" type="submit">Save ACP provider</button></div>
+  </form>
 
   <!-- ===== Toast container ===== -->
   <div class="toast-container" id="toast-container"></div>

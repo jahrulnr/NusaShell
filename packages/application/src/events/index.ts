@@ -14,3 +14,25 @@ export type { AgentLearningUpdatedEvent } from "./agent-learning-updated.event.j
 export { createLearningUpdatedEvent } from "./agent-learning-updated.event.js";
 export type { JobCompletedEvent, JobFailedEvent } from "./job-events.event.js";
 export { createJobCompletedEvent, createJobFailedEvent } from "./job-events.event.js";
+export type {
+  AcpTextDeltaEvent,
+  AcpThoughtDeltaEvent,
+  AcpToolCallEvent,
+  AcpToolCallUpdateEvent,
+  AcpPlanEvent,
+  AcpPermissionRequestEvent,
+  AcpAskRequestEvent,
+  AcpTurnEndEvent,
+  AcpSessionStateEvent,
+} from "../acp/events/index.js";
+export {
+  createAcpTextDeltaEvent,
+  createAcpThoughtDeltaEvent,
+  createAcpToolCallEvent,
+  createAcpToolCallUpdateEvent,
+  createAcpPlanEvent,
+  createAcpPermissionRequestEvent,
+  createAcpAskRequestEvent,
+  createAcpTurnEndEvent,
+  createAcpSessionStateEvent,
+} from "../acp/events/index.js";

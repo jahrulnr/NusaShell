@@ -1,0 +1,18 @@
+export type {
+  AcpProviderDescriptor,
+  AcpContentBlock,
+  AcpToolKind,
+  AcpToolStatus,
+  AcpToolCall,
+  AcpPlanStep,
+  AcpPermissionOption,
+  AcpPermissionRequest,
+  AcpPermissionAnswer,
+  AcpAskOption,
+  AcpAskRequest,
+  AcpAskAnswer,
+  AcpClientEvent,
+  AcpSessionState,
+  AcpClientSink,
+  AcpClientPort,
+} from "./acp-client.port.js";

@@ -7,6 +7,10 @@ import type {
   AgentConversationSummary,
 } from "../shared/agent-conversation-contract.js";
 import type {
+  AcpProviderPublic,
+  AcpProviderSaveInput,
+} from "../shared/acp-provider-contract.js";
+import type {
   SkillDetail,
   SkillReadResult,
   SkillSummary,
@@ -60,12 +64,17 @@ export interface ShellApi {
   };
   readonly agentConversations: {
     list(): Promise<readonly AgentConversationSummary[]>;
-    create(): Promise<AgentConversation>;
+    create(options?: { kind?: "agent" | "acp"; acp?: { providerId: string; sessionId?: string; workspace?: string } }): Promise<AgentConversation>;
     get(id: string): Promise<AgentConversation | null>;
     append(id: string, message: AgentConversationMessage): Promise<AgentConversation>;
     saveCheckpoint(id: string, checkpoint: AgentConversationCheckpoint): Promise<AgentConversation>;
     delete(id: string): Promise<void>;
     setWorkspace(id: string, workspace: string): Promise<AgentConversation>;
+  };
+  readonly acpProviders: {
+    list(): Promise<readonly AcpProviderPublic[]>;
+    save(input: AcpProviderSaveInput): Promise<readonly AcpProviderPublic[]>;
+    get(providerId: string): Promise<AcpProviderPublic | null>;
   };
   readonly skills: {
     list(): Promise<readonly SkillSummary[]>;
@@ -199,12 +208,17 @@ const api: ShellApi = {
   },
   agentConversations: {
     list: () => ipcRenderer.invoke("agent-conversations:list"),
-    create: () => ipcRenderer.invoke("agent-conversations:create"),
+    create: (options) => ipcRenderer.invoke("agent-conversations:create", options),
     get: (id) => ipcRenderer.invoke("agent-conversations:get", id),
     append: (id, message) => ipcRenderer.invoke("agent-conversations:append", id, message),
     saveCheckpoint: (id, checkpoint) => ipcRenderer.invoke("agent-conversations:checkpoint", id, checkpoint),
     delete: (id) => ipcRenderer.invoke("agent-conversations:delete", id),
     setWorkspace: (id, workspace) => ipcRenderer.invoke("agent-conversations:set-workspace", id, workspace),
+  },
+  acpProviders: {
+    list: () => ipcRenderer.invoke("acp-providers:list"),
+    save: (input) => ipcRenderer.invoke("acp-providers:save", input),
+    get: (providerId) => ipcRenderer.invoke("acp-providers:get", providerId),
   },
   skills: {
     list: () => ipcRenderer.invoke("skills:list"),

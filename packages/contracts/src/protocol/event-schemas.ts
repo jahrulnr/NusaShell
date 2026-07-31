@@ -189,6 +189,140 @@ export const JobFailedEventSchema = z.object({
   }),
 });
 
+export const AcpTextDeltaEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("acp.text_delta"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    traceId: z.string().min(1),
+    delta: z.string(),
+    timestamp: z.string(),
+  }),
+});
+
+export const AcpThoughtDeltaEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("acp.thought_delta"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    traceId: z.string().min(1),
+    delta: z.string(),
+    timestamp: z.string(),
+  }),
+});
+
+const AcpToolKindSchema = z.enum(["terminal", "read", "edit", "unknown"]);
+const AcpToolStatusSchema = z.enum(["pending", "running", "ok", "fail"]);
+
+export const AcpToolCallEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("acp.tool_call"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    traceId: z.string().min(1),
+    call: z.object({
+      id: z.string().min(1),
+      title: z.string().min(1),
+      kind: AcpToolKindSchema,
+      status: AcpToolStatusSchema,
+      summary: z.string().max(1000),
+    }),
+    timestamp: z.string(),
+  }),
+});
+
+export const AcpToolCallUpdateEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("acp.tool_call_update"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    traceId: z.string().min(1),
+    callId: z.string().min(1),
+    status: AcpToolStatusSchema,
+    summary: z.string().max(1000).optional(),
+    timestamp: z.string(),
+  }),
+});
+
+export const AcpPlanEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("acp.plan"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    traceId: z.string().min(1),
+    steps: z.array(z.object({
+      id: z.string().min(1),
+      text: z.string().min(1),
+      done: z.boolean(),
+    })),
+    timestamp: z.string(),
+  }),
+});
+
+const AcpPermissionOptionSchema = z.object({
+  optionId: z.string().min(1),
+  name: z.string().min(1),
+  kind: z.enum(["allow", "deny", "allow_once", "allow_always"]).optional(),
+});
+
+export const AcpPermissionRequestEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("acp.permission_request"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    traceId: z.string().min(1),
+    requestId: z.string().min(1),
+    toolTitle: z.string().min(1),
+    detail: z.string().max(2000).optional(),
+    options: z.array(AcpPermissionOptionSchema).min(1),
+    timestamp: z.string(),
+  }),
+});
+
+const AcpAskOptionSchema = z.object({
+  optionId: z.string().min(1),
+  name: z.string().min(1),
+});
+
+export const AcpAskRequestEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("acp.ask_request"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    traceId: z.string().min(1),
+    requestId: z.string().min(1),
+    question: z.string().min(1).max(4000),
+    options: z.array(AcpAskOptionSchema).optional(),
+    multiSelect: z.boolean().optional(),
+    allowFreeText: z.boolean().optional(),
+    timestamp: z.string(),
+  }),
+});
+
+export const AcpTurnEndEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("acp.turn_end"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    traceId: z.string().min(1),
+    ok: z.boolean(),
+    error: z.string().max(4000).optional(),
+    timestamp: z.string(),
+  }),
+});
+
+export const AcpSessionStateEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("acp.session_state"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    traceId: z.string().min(1),
+    conversationId: z.string().min(1),
+    state: z.enum(["idle", "starting", "running", "error", "cancelled"]),
+    timestamp: z.string(),
+  }),
+});
+
 export const EventSchema = z.discriminatedUnion("event", [
   PluginInstalledEventSchema,
   PluginUninstalledEventSchema,
@@ -205,6 +339,15 @@ export const EventSchema = z.discriminatedUnion("event", [
   AgentLearningUpdatedEventSchema,
   JobCompletedEventSchema,
   JobFailedEventSchema,
+  AcpTextDeltaEventSchema,
+  AcpThoughtDeltaEventSchema,
+  AcpToolCallEventSchema,
+  AcpToolCallUpdateEventSchema,
+  AcpPlanEventSchema,
+  AcpPermissionRequestEventSchema,
+  AcpAskRequestEventSchema,
+  AcpTurnEndEventSchema,
+  AcpSessionStateEventSchema,
 ]);
 
 export type PluginInstalledEvent = z.infer<typeof PluginInstalledEventSchema>;
@@ -222,4 +365,13 @@ export type AgentContextEvent = z.infer<typeof AgentContextEventSchema>;
 export type AgentLearningUpdatedEvent = z.infer<typeof AgentLearningUpdatedEventSchema>;
 export type JobCompletedEvent = z.infer<typeof JobCompletedEventSchema>;
 export type JobFailedEvent = z.infer<typeof JobFailedEventSchema>;
+export type AcpTextDeltaEvent = z.infer<typeof AcpTextDeltaEventSchema>;
+export type AcpThoughtDeltaEvent = z.infer<typeof AcpThoughtDeltaEventSchema>;
+export type AcpToolCallEvent = z.infer<typeof AcpToolCallEventSchema>;
+export type AcpToolCallUpdateEvent = z.infer<typeof AcpToolCallUpdateEventSchema>;
+export type AcpPlanEvent = z.infer<typeof AcpPlanEventSchema>;
+export type AcpPermissionRequestEvent = z.infer<typeof AcpPermissionRequestEventSchema>;
+export type AcpAskRequestEvent = z.infer<typeof AcpAskRequestEventSchema>;
+export type AcpTurnEndEvent = z.infer<typeof AcpTurnEndEventSchema>;
+export type AcpSessionStateEvent = z.infer<typeof AcpSessionStateEventSchema>;
 export type ParsedEvent = z.infer<typeof EventSchema>;

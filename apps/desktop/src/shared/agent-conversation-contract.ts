@@ -40,6 +40,14 @@ export interface AgentConversationCheckpoint {
   readonly via: "provider" | "extractive";
 }
 
+export interface AgentConversationAcp {
+  readonly providerId: string;
+  readonly sessionId?: string;
+  readonly workspace?: string;
+}
+
+export type AgentConversationKind = "agent" | "acp";
+
 export interface AgentConversation {
   readonly id: string;
   readonly title: string;
@@ -48,6 +56,8 @@ export interface AgentConversation {
   readonly messages: readonly AgentConversationMessage[];
   readonly checkpoint?: AgentConversationCheckpoint;
   readonly workspace?: string;
+  readonly kind?: AgentConversationKind;
+  readonly acp?: AgentConversationAcp;
 }
 
 export type AgentConversationSummary = Omit<AgentConversation, "messages" | "checkpoint"> & {

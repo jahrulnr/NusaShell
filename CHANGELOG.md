@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.45] - 2026-07-31
+
+### Added
+
+- **Agent Client Protocol (ACP) thread support** — first-class external-agent
+  conversations that spawn a JSON-RPC stdio provider (e.g. Cursor `agent acp`)
+  and stream text/thought/tool/plan/session events over the existing WebSocket.
+  - New `packages/contracts` protocol: `acp.*` request/event methods + Zod
+    schemas (`acp-request-schemas.ts`, `acp-event-schemas.ts`).
+  - New `packages/application/src/acp/` domain area: `AcpSessionService`,
+    `AcpPermissionService`, `AcpAskBridgeService`, commands (`run-acp-turn`,
+    `cancel-acp-turn`, `answer-acp-permission`, `answer-acp-ask`),
+    query (`get-acp-session-info`), and events (`acp.text_delta`,
+    `acp.thought_delta`, `acp.tool_call`, `acp.tool_call_update`, `acp.plan`,
+    `acp.permission_request`, `acp.ask_request`, `acp.session_state`,
+    `acp.turn_end`).
+  - `AcpJsonRpcClient` in `packages/infrastructure/src/acp/`: spawns the
+    provider, handles JSON-RPC 2.0 framing, server→client `session/request_permission`,
+    `cursor/ask_question`, `cursor/create_plan` requests, and forwards
+    `session/update` notifications.
+  - `transport-ws` command/query/event mapping and `apps/backend` container
+    wiring for all ACP commands/queries and events.
+  - Desktop ACP provider registry (`AcpProviderStore`, shared contract,
+    preload API, main-process IPC, new ACP Agents section in AI Providers view).
+  - Desktop conversation store supports `kind: "agent" | "acp"` and optional
+    `acp` metadata; minimal ACP status bar, ACP thread button, and ACP pill
+    controls in the Agent view.
+  - New `ACP_SESSION_NOT_FOUND` and `ACP_PROVIDER_FAILED` error codes.
+
 ## [0.0.44] - 2026-07-31
 
 ### Added

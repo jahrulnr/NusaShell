@@ -18,6 +18,8 @@ import { LINUX_DESKTOP_APP_NAME } from "./window-assets.js";
 import { AppUpdater } from "./updater.js";
 import { loadConfig, type CallToolCommand, type ListToolsQuery, type StartPluginCommand } from "@nusashell/application";
 import { AiSettingsStore, type AiRegistrySettings, type SaveAiProviderInput } from "./ai-settings.js";
+import { AcpProviderStore } from "./acp-provider-store.js";
+import type { AcpProviderSaveInput } from "../shared/acp-provider-contract.js";
 import { flattenModelCatalog } from "./ai-provider-registry.js";
 import { AgentConversationStore } from "./agent-conversation-store.js";
 import type {
@@ -43,6 +45,7 @@ let aiSettingsStore: AiSettingsStore | null = null;
 let aiSettings: AiRegistrySettings | null = null;
 let agentConversationStore: AgentConversationStore | null = null;
 let mailSettingsStore: MailSettingsStore | null = null;
+let acpProviderStore: AcpProviderStore | null = null;
 let appBehaviorStore: AppBehaviorStore | null = null;
 let appBehavior: AppBehaviorSettings | null = null;
 let loginAutostart: LoginAutostart | null = null;
@@ -219,6 +222,7 @@ async function waitForBackend(port: number, maxRetries = 30): Promise<void> {
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   agentConversationStore = new AgentConversationStore(resolve(app.getPath("userData"), "agent-conversations.json"));
+  acpProviderStore = new AcpProviderStore(resolve(app.getPath("userData"), "acp-providers.json"));
   appBehaviorStore = new AppBehaviorStore(resolve(app.getPath("userData"), "app-behavior.json"));
   appBehavior = await appBehaviorStore.load();
   loginAutostart = createLoginAutostart({
@@ -475,7 +479,11 @@ app.whenReady().then(async () => {
     return result;
   });
   ipcMain.handle("agent-conversations:list", () => requireConversationStore().list());
-  ipcMain.handle("agent-conversations:create", () => requireConversationStore().create());
+  ipcMain.handle("agent-conversations:create", (_event, options?: { kind?: "agent" | "acp"; acp?: { providerId: string; sessionId?: string; workspace?: string } }) =>
+    requireConversationStore().create(options));
+  ipcMain.handle("acp-providers:list", () => requireAcpProviderStore().list());
+  ipcMain.handle("acp-providers:save", (_event, input: AcpProviderSaveInput) => requireAcpProviderStore().save(input));
+  ipcMain.handle("acp-providers:get", (_event, providerId: string) => requireAcpProviderStore().getEffective(providerId));
   ipcMain.handle("agent-conversations:get", (_event, id: string) => requireConversationStore().get(id));
   ipcMain.handle("agent-conversations:append", (_event, id: string, message: AgentConversationMessage) =>
     requireConversationStore().appendMessage(id, message));
@@ -616,6 +624,11 @@ app.whenReady().then(async () => {
 function requireConversationStore(): AgentConversationStore {
   if (!agentConversationStore) throw new Error("Agent conversations are not ready");
   return agentConversationStore;
+}
+
+function requireAcpProviderStore(): AcpProviderStore {
+  if (!acpProviderStore) throw new Error("ACP provider store is not ready");
+  return acpProviderStore;
 }
 
 function requireBackend(): BootstrapResult {

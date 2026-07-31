@@ -1,4 +1,4 @@
-import type { AgentReasoningDeltaEvent, AgentTextDeltaEvent, AgentToolCallEndEvent, AgentToolCallStartEvent, AgentContextUpdateEvent, AgentLearningUpdatedEvent, JobCompletedEvent, JobFailedEvent, ApplicationEvent } from "@nusashell/application";
+import type { AgentReasoningDeltaEvent, AgentTextDeltaEvent, AgentToolCallEndEvent, AgentToolCallStartEvent, AgentContextUpdateEvent, AgentLearningUpdatedEvent, JobCompletedEvent, JobFailedEvent, ApplicationEvent, AcpTextDeltaEvent, AcpThoughtDeltaEvent, AcpToolCallEvent, AcpToolCallUpdateEvent, AcpPlanEvent, AcpPermissionRequestEvent, AcpAskRequestEvent, AcpTurnEndEvent, AcpSessionStateEvent } from "@nusashell/application";
 import {
   PluginInstalledEvent,
   PluginUninstalledEvent,
@@ -238,6 +238,135 @@ export function mapDomainEvent(event: ApplicationEvent, sequence: number): Event
           jobId: e.jobId,
           name: e.name,
           error: e.error,
+          timestamp,
+        },
+      };
+    }
+
+    case "acp.text_delta": {
+      const e = event as AcpTextDeltaEvent;
+      return {
+        kind: "event",
+        event: "acp.text_delta",
+        sequence,
+        payload: { traceId: e.aggregateId, delta: e.delta, timestamp },
+      };
+    }
+
+    case "acp.thought_delta": {
+      const e = event as AcpThoughtDeltaEvent;
+      return {
+        kind: "event",
+        event: "acp.thought_delta",
+        sequence,
+        payload: { traceId: e.aggregateId, delta: e.delta, timestamp },
+      };
+    }
+
+    case "acp.tool_call": {
+      const e = event as AcpToolCallEvent;
+      return {
+        kind: "event",
+        event: "acp.tool_call",
+        sequence,
+        payload: {
+          traceId: e.aggregateId,
+          call: { ...e.call },
+          timestamp,
+        },
+      };
+    }
+
+    case "acp.tool_call_update": {
+      const e = event as AcpToolCallUpdateEvent;
+      return {
+        kind: "event",
+        event: "acp.tool_call_update",
+        sequence,
+        payload: {
+          traceId: e.aggregateId,
+          callId: e.callId,
+          status: e.status,
+          ...(e.summary !== undefined ? { summary: e.summary } : {}),
+          timestamp,
+        },
+      };
+    }
+
+    case "acp.plan": {
+      const e = event as AcpPlanEvent;
+      return {
+        kind: "event",
+        event: "acp.plan",
+        sequence,
+        payload: {
+          traceId: e.aggregateId,
+          steps: [...e.steps],
+          timestamp,
+        },
+      };
+    }
+
+    case "acp.permission_request": {
+      const e = event as AcpPermissionRequestEvent;
+      return {
+        kind: "event",
+        event: "acp.permission_request",
+        sequence,
+        payload: {
+          traceId: e.aggregateId,
+          requestId: e.requestId,
+          toolTitle: e.toolTitle,
+          ...(e.detail !== undefined ? { detail: e.detail } : {}),
+          options: [...e.options],
+          timestamp,
+        },
+      };
+    }
+
+    case "acp.ask_request": {
+      const e = event as AcpAskRequestEvent;
+      return {
+        kind: "event",
+        event: "acp.ask_request",
+        sequence,
+        payload: {
+          traceId: e.aggregateId,
+          requestId: e.requestId,
+          question: e.question,
+          ...(e.options !== undefined ? { options: [...e.options] } : {}),
+          ...(e.multiSelect !== undefined ? { multiSelect: e.multiSelect } : {}),
+          ...(e.allowFreeText !== undefined ? { allowFreeText: e.allowFreeText } : {}),
+          timestamp,
+        },
+      };
+    }
+
+    case "acp.turn_end": {
+      const e = event as AcpTurnEndEvent;
+      return {
+        kind: "event",
+        event: "acp.turn_end",
+        sequence,
+        payload: {
+          traceId: e.aggregateId,
+          ok: e.ok,
+          ...(e.error !== undefined ? { error: e.error } : {}),
+          timestamp,
+        },
+      };
+    }
+
+    case "acp.session_state": {
+      const e = event as AcpSessionStateEvent;
+      return {
+        kind: "event",
+        event: "acp.session_state",
+        sequence,
+        payload: {
+          traceId: e.aggregateId,
+          conversationId: e.conversationId,
+          state: e.state,
           timestamp,
         },
       };

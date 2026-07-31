@@ -17,7 +17,7 @@ import { estimateContextTokens, formatContextUsage } from "./ai-model-ui.js";
 import { inspectAttachmentContent, toDataUrl } from "./attachment-content.js";
 
 export class AgentConversationController {
-  constructor({ shell, runTurn, cancelTurn, answerAsk, getActiveModel, getVisionMode, notify, log }) {
+  constructor({ shell, runTurn, cancelTurn, answerAsk, getActiveModel, getVisionMode, notify, log, runAcpTurn, cancelAcpTurn, answerAcpPermission, answerAcpAsk }) {
     this.shell = shell;
     this.runTurn = runTurn;
     this.cancelTurn = cancelTurn;
@@ -26,6 +26,10 @@ export class AgentConversationController {
     this.getVisionMode = getVisionMode;
     this.notify = notify;
     this.log = log;
+    this.runAcpTurn = runAcpTurn;
+    this.cancelAcpTurn = cancelAcpTurn;
+    this.answerAcpPermission = answerAcpPermission;
+    this.answerAcpAsk = answerAcpAsk;
     this.conversation = null;
     this.conversations = [];
     this.activeId = "";
@@ -63,19 +67,56 @@ export class AgentConversationController {
     visible.forEach((conversation) => list.appendChild(this.conversationRow(conversation)));
   }
 
-  async create() {
+  async renderAcpMenu(menu, forceClose) {
+    if (forceClose) {
+      menu.hidden = true;
+      return;
+    }
+    let providers = [];
+    try {
+      providers = [...await this.shell.acpProviders.list()];
+    } catch (error) {
+      this.notify(`Could not load ACP providers: ${error.message || error}`, "error");
+    }
+    menu.textContent = "";
+    const enabled = providers.filter((p) => p.config.enabled);
+    if (enabled.length === 0) {
+      const item = element("button", "disabled", "No enabled ACP agents");
+      item.type = "button";
+      item.disabled = true;
+      menu.appendChild(item);
+    } else {
+      for (const provider of enabled) {
+        const item = element("button", "", provider.manifest.displayName);
+        item.type = "button";
+        item.addEventListener("click", () => {
+          menu.hidden = true;
+          void this.runUiAction(this.createAcp(provider.manifest.id), `Could not create ACP conversation`);
+        });
+        menu.appendChild(item);
+      }
+    }
+    menu.hidden = false;
+  }
+
+  async create(options) {
     if (this.turnPending) return;
-    if (this.conversation?.messages.length === 0) {
+    if (this.conversation?.messages.length === 0 && !options) {
       $("#agent-input")?.focus();
       return;
     }
-    this.conversation = await this.shell.agentConversations.create();
+    this.conversation = await this.shell.agentConversations.create(options);
     this.activeId = this.conversation.id;
     this.renderThread();
     this.updateWorkspaceLabel();
     this.updateContextStatus();
+    this.updateAcpStatus();
     await this.refresh();
     $("#agent-input")?.focus();
+  }
+
+  async createAcp(providerId) {
+    await this.create({ kind: "acp", acp: { providerId } });
   }
 
   async submit({ retry = false } = {}) {
@@ -86,6 +127,10 @@ export class AgentConversationController {
     const text = input?.value.trim();
     if ((!retry && !text && this.attachments.length === 0) || this.turnPending) return;
     if (!this.conversation) await this.create();
+
+    if (this.conversation?.kind === "acp") {
+      return await this.submitAcp({ text, retry });
+    }
 
     let pending = null;
     let selectedModel = null;
@@ -254,6 +299,79 @@ export class AgentConversationController {
     }
   }
 
+  async submitAcp({ text, retry }) {
+    const input = $("#agent-input");
+    const sendButton = $("#agent-send-btn");
+    const stopButton = $("#agent-stop-btn");
+    const status = $("#agent-provider-status");
+    if (this.turnPending || !this.conversation?.acp) return;
+
+    let pending = null;
+    let retryIsSafe = false;
+    try {
+      this.turnPending = true;
+      this.activeTraceId = crypto.randomUUID();
+      input.disabled = true;
+      sendButton.disabled = true;
+      stopButton.hidden = false;
+      this.failedMessage?.remove();
+      this.failedMessage = null;
+      if (!retry) {
+        this.conversation = await this.shell.agentConversations.append(this.conversation.id, {
+          role: "user",
+          content: text,
+        });
+        this.appendMessage("user", text);
+        input.value = "";
+        this.resizeComposerInput();
+        await this.refresh();
+      }
+      retryIsSafe = true;
+
+      pending = this.createStreamingMessage();
+      const streamState = { message: pending, textBubble: null, streamedText: "" };
+      const result = await this.runAcpTurn([{ type: "text", text }], {
+        traceId: this.activeTraceId,
+        conversationId: this.conversation.id,
+        workspace: this.conversation.workspace,
+        providerId: this.conversation.acp.providerId,
+        onDelta: (delta) => {
+          if (!streamState.textBubble) {
+            streamState.textBubble = element("div", "agent-bubble");
+            streamState.message?.appendChild(streamState.textBubble);
+            this.scrollToBottom();
+          }
+          streamState.streamedText += delta;
+          if (streamState.textBubble) streamState.textBubble.innerHTML = renderAssistantMarkdown(streamState.streamedText);
+        },
+      });
+      retryIsSafe = false;
+
+      this.conversation = await this.shell.agentConversations.append(this.conversation.id, {
+        role: "assistant",
+        content: streamState.streamedText || "Done.",
+        traceId: this.activeTraceId,
+        model: this.conversation.acp.providerId,
+      });
+      const savedMessage = this.conversation.messages.at(-1);
+      this.sealStreamingMessage(pending, savedMessage ?? { content: streamState.streamedText });
+      await this.refresh();
+      status.textContent = `ACP · ${this.conversation.acp.providerId}`;
+    } catch (error) {
+      pending?.remove();
+      this.failedMessage = this.appendMessage("assistant", `Turn failed: ${error.message || "Unknown error"}`, { error: true, retry: retryIsSafe });
+      status.textContent = retryIsSafe ? "ACP turn failed · ready to retry" : "ACP turn error";
+      this.log("error", `ACP turn failed: ${error.message || String(error)}`);
+    } finally {
+      this.turnPending = false;
+      this.activeTraceId = "";
+      input.disabled = false;
+      sendButton.disabled = false;
+      stopButton.hidden = true;
+      input.focus();
+    }
+  }
+
   closeDeleteDialog() {
     this.pendingDeleteId = "";
     $("#agent-delete-overlay").hidden = true;
@@ -284,6 +402,17 @@ export class AgentConversationController {
     $("#agent-attach-btn").addEventListener("click", () => $("#agent-file-input").click());
     $("#agent-file-input").addEventListener("change", (event) => void this.addAttachments(event.target.files));
     $("#agent-new-conversation").addEventListener("click", () => this.runUiAction(this.create(), "Could not create conversation"));
+    const acpButton = $("#agent-new-acp");
+    const acpMenu = $("#agent-new-acp-menu");
+    if (acpButton && acpMenu) {
+      acpButton.hidden = false;
+      acpButton.addEventListener("click", () => this.renderAcpMenu(acpMenu, !acpMenu.hidden));
+      document.addEventListener("click", (event) => {
+        if (!acpMenu.hidden && !acpButton.contains(event.target) && !acpMenu.contains(event.target)) {
+          acpMenu.hidden = true;
+        }
+      });
+    }
     $("#agent-conversation-search").addEventListener("input", () => this.renderList());
     $("#agent-delete-overlay").addEventListener("click", () => this.closeDeleteDialog());
     $("#agent-delete-close").addEventListener("click", () => this.closeDeleteDialog());
@@ -367,12 +496,15 @@ export class AgentConversationController {
   }
 
   async stop() {
-    if (!this.turnPending || !this.activeTraceId || !this.cancelTurn) return;
+    if (!this.turnPending || !this.activeTraceId) return;
+    const isAcp = this.conversation?.kind === "acp";
+    const cancel = isAcp ? this.cancelAcpTurn : this.cancelTurn;
+    if (!cancel) return;
     const button = $("#agent-stop-btn");
     button.disabled = true;
     button.textContent = "Stopping…";
     try {
-      await this.cancelTurn(this.activeTraceId);
+      await (isAcp ? cancel(this.activeTraceId, this.conversation.id) : cancel(this.activeTraceId));
     } catch (error) {
       this.notify(`Could not stop the turn: ${error.message || error}`, "error");
     } finally {
@@ -399,6 +531,7 @@ export class AgentConversationController {
     this.renderList();
     this.updateContextStatus();
     this.updateWorkspaceLabel();
+    this.updateAcpStatus();
   }
 
   updateWorkspaceLabel() {
@@ -408,6 +541,27 @@ export class AgentConversationController {
     label.textContent = ws ? ws.split("/").pop() || ws : "Home";
     const btn = $("#agent-workspace-btn");
     if (btn) btn.title = ws || "Home (user home directory)";
+  }
+
+  updateAcpStatus() {
+    const bar = $("#acp-status-bar");
+    const provider = $("#acp-status-provider");
+    const chip = $("#acp-status-chip");
+    const pill = $("#agent-acp-pill");
+    const pillLabel = $("#agent-acp-pill-label");
+    if (!bar || !provider || !chip) return;
+    if (this.conversation?.kind === "acp") {
+      bar.hidden = false;
+      pill.hidden = false;
+      const providerId = this.conversation.acp?.providerId ?? "unknown";
+      provider.textContent = providerId;
+      chip.textContent = this.turnPending ? "● RUNNING" : "● IDLE";
+      chip.className = `acp-status-chip ${this.turnPending ? "is-running" : "is-idle"}`;
+      pillLabel.textContent = `ACP · ${providerId}`;
+    } else {
+      bar.hidden = true;
+      pill.hidden = true;
+    }
   }
 
   async chooseWorkspace() {
@@ -443,6 +597,10 @@ export class AgentConversationController {
     open.type = "button";
     const title = element("span", "agent-conversation-title");
     title.textContent = conversation.title;
+    if (conversation.kind === "acp") {
+      const badge = element("span", "acp-conversation-badge", "ACP");
+      title.appendChild(badge);
+    }
     const time = element("span", "agent-conversation-time");
     time.textContent = `${formatTime(conversation.updatedAt)} · ${conversation.messageCount} message${conversation.messageCount === 1 ? "" : "s"}`;
     open.append(title, time);
@@ -470,10 +628,15 @@ export class AgentConversationController {
     if (!thread) return;
     thread.textContent = "";
     this.failedMessage = null;
+    this.updateAcpStatus();
     if (!this.conversation?.messages.length) {
       const empty = element("div", "agent-empty");
       empty.id = "agent-empty";
-      empty.innerHTML = "<div class=\"agent-empty-mark\">✦</div><h2>Start a conversation</h2><p>Choose a configured model. The agent can discover and start MCP servers when the task needs them.</p>";
+      if (this.conversation?.kind === "acp") {
+        empty.innerHTML = "<div class=\"agent-empty-mark\">✦</div><h2>Start an ACP conversation</h2><p>This thread talks to an external ACP agent over stdio JSON-RPC.</p>";
+      } else {
+        empty.innerHTML = "<div class=\"agent-empty-mark\">✦</div><h2>Start a conversation</h2><p>Choose a configured model. The agent can discover and start MCP servers when the task needs them.</p>";
+      }
       thread.appendChild(empty);
       return;
     }

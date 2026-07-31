@@ -15,10 +15,14 @@ import type {
   SetJobEnabledCommand,
   RunJobNowCommand,
   RemoveJobCommand,
+  RunAcpTurnCommand,
+  CancelAcpTurnCommand,
+  AnswerAcpPermissionCommand,
+  AnswerAcpAskCommand,
 } from "@nusashell/application";
 
 export function mapToCommand(request: ParsedRequest):
-  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | SetPluginAutostartCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand | CancelAgentTurnCommand | AnswerAskQuestionCommand | AddJobCommand | SetJobEnabledCommand | RunJobNowCommand | RemoveJobCommand }
+  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | SetPluginAutostartCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand | CancelAgentTurnCommand | AnswerAskQuestionCommand | AddJobCommand | SetJobEnabledCommand | RunJobNowCommand | RemoveJobCommand | RunAcpTurnCommand | CancelAcpTurnCommand | AnswerAcpPermissionCommand | AnswerAcpAskCommand }
   | { kind: "query" } {
   switch (request.method) {
     case "plugin.start":
@@ -160,6 +164,50 @@ export function mapToCommand(request: ParsedRequest):
           kind: "remove-job",
           id: request.payload.id,
         } as RemoveJobCommand,
+      };
+    case "acp.run":
+      return {
+        kind: "command",
+        command: {
+          kind: "run-acp-turn",
+          traceId: request.payload.traceId,
+          conversationId: request.payload.conversationId,
+          workspace: request.payload.workspace,
+          provider: request.payload.provider,
+          prompt: request.payload.prompt,
+        } as RunAcpTurnCommand,
+      };
+    case "acp.cancel":
+      return {
+        kind: "command",
+        command: {
+          kind: "cancel-acp-turn",
+          traceId: request.payload.traceId,
+          conversationId: request.payload.conversationId,
+        } as CancelAcpTurnCommand,
+      };
+    case "acp.permission_answer":
+      return {
+        kind: "command",
+        command: {
+          kind: "answer-acp-permission",
+          traceId: request.payload.traceId,
+          conversationId: request.payload.conversationId,
+          requestId: request.payload.requestId,
+          optionId: request.payload.optionId,
+        } as AnswerAcpPermissionCommand,
+      };
+    case "acp.ask_answer":
+      return {
+        kind: "command",
+        command: {
+          kind: "answer-acp-ask",
+          traceId: request.payload.traceId,
+          conversationId: request.payload.conversationId,
+          requestId: request.payload.requestId,
+          optionIds: request.payload.optionIds,
+          text: request.payload.text,
+        } as AnswerAcpAskCommand,
       };
     default:
       return { kind: "query" };

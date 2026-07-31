@@ -3,7 +3,9 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type {
   AgentConversation,
+  AgentConversationAcp,
   AgentConversationCheckpoint,
+  AgentConversationKind,
   AgentConversationMessage,
   AgentConversationStep,
   AgentConversationToolCall,
@@ -35,15 +37,18 @@ export class AgentConversationStore {
       }));
   }
 
-  async create(): Promise<AgentConversation> {
+  async create(options?: { kind?: AgentConversationKind; acp?: AgentConversationAcp }): Promise<AgentConversation> {
     return this.mutate(async (state) => {
       const timestamp = this.now().toISOString();
+      const title = options?.kind === "acp" ? "New ACP conversation" : "New conversation";
       const conversation: AgentConversation = {
         id: this.createId(),
-        title: "New conversation",
+        title,
         createdAt: timestamp,
         updatedAt: timestamp,
         messages: [],
+        ...(options?.kind ? { kind: options.kind } : {}),
+        ...(options?.acp ? { acp: options.acp } : {}),
       };
       return [{ ...state, conversations: [conversation, ...state.conversations] }, conversation];
     });
@@ -168,6 +173,8 @@ function normalizeDocument(value: unknown): ConversationDocument {
       messages,
       ...(isCheckpoint(candidate.checkpoint) ? { checkpoint: candidate.checkpoint } : {}),
       ...(typeof candidate.workspace === "string" && candidate.workspace ? { workspace: candidate.workspace } : {}),
+      ...(candidate.kind === "acp" || candidate.kind === "agent" ? { kind: candidate.kind } : {}),
+      ...(isAcp(candidate.acp) ? { acp: candidate.acp } : {}),
     }];
   });
   return { version: 1, conversations };
@@ -291,6 +298,12 @@ function isConversationAttachment(value: unknown): boolean {  if (typeof value !
     && typeof attachment.dataUrl === "string"
     && attachment.dataUrl.length <= 6_000_000
     && /^data:[^;,]+;base64,/i.test(attachment.dataUrl);
+}
+
+function isAcp(value: unknown): value is AgentConversationAcp {
+  if (typeof value !== "object" || value === null) return false;
+  const acp = value as Partial<AgentConversationAcp>;
+  return typeof acp.providerId === "string" && acp.providerId.length > 0;
 }
 
 function isCheckpoint(value: unknown): value is AgentConversationCheckpoint {

@@ -24,6 +24,10 @@ A fixed workbench rail listing local conversation threads. Click a thread to ope
   - Action: Creates a new empty conversation thread and focuses the composer.
   - Related: Message input (`#agent-input`)
 
+- **`#agent-new-acp`** (missing map entry)
+
+- **`#agent-new-acp-menu`** (missing map entry)
+
 - **Search conversations** (`#agent-conversation-search`):
   - Section: Conversation list
   - Type: search input
@@ -42,6 +46,14 @@ A fixed workbench rail listing local conversation threads. Click a thread to ope
 ## Conversation thread
 
 The full-height message runway separates compact user cards from editorial assistant responses. User attachments render as image previews or file cards. Provider reasoning is persisted and appears before the answer in a collapsed Thinking disclosure with sanitized Markdown; models that return no reasoning show no placeholder. Completed tool calls render as expandable terminal cards with the tool name in the header and full args/output in the body. Interactive ask_question calls render as Ask Question cards with selectable options and an optional free-text answer; after the user replies, the sealed card shows the chosen answer. Message footers expose timestamps, model/trace metadata, copy, and retry where applicable. Only this area scrolls.
+
+- **`#acp-status-bar`** (missing map entry)
+
+- **`#acp-status-label`** (missing map entry)
+
+- **`#acp-status-provider`** (missing map entry)
+
+- **`#acp-status-chip`** (missing map entry)
 
 - **Conversation thread** (`#agent-thread`):
   - Section: Conversation thread
@@ -143,6 +155,10 @@ A raised command dock at the bottom of the thread. Its message input starts at o
   - Section: Composer
   - Type: text
   - Action: Text inside the model trigger showing the selected model id and effort value.
+
+- **`#agent-acp-pill`** (missing map entry)
+
+- **`#agent-acp-pill-label`** (missing map entry)
 
 - **Model picker dropdown** (`#agent-model-menu`):
   - Section: Composer

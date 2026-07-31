@@ -428,6 +428,76 @@ async function cancelAgentTurn(traceId) {
   return sendRequest("agent.cancel", { traceId });
 }
 
+async function runAcpTurn(prompt, options = {}) {
+  const providers = await window.shell.acpProviders.list();
+  const selected = providers.find((p) => p.manifest.id === options.providerId);
+  if (!selected) throw new Error("The ACP provider for this conversation is not configured.");
+  const disposers = [];
+  if (options.onDelta) {
+    disposers.push(onEvent("acp.text_delta", (payload) => {
+      if (payload?.traceId === options.traceId && payload.delta) options.onDelta(payload.delta);
+    }));
+  }
+  if (options.onReasoningDelta) {
+    disposers.push(onEvent("acp.thought_delta", (payload) => {
+      if (payload?.traceId === options.traceId && payload.delta) options.onReasoningDelta(payload.delta);
+    }));
+  }
+  if (options.onToolCallStart) {
+    disposers.push(onEvent("acp.tool_call", (payload) => {
+      if (payload?.traceId === options.traceId) options.onToolCallStart({ callId: payload.call.id, name: payload.call.title, args: {} });
+    }));
+  }
+  if (options.onToolCallEnd) {
+    disposers.push(onEvent("acp.tool_call_update", (payload) => {
+      if (payload?.traceId === options.traceId) options.onToolCallEnd({ callId: payload.callId, ok: payload.status === "ok", error: payload.status === "fail" ? "Failed" : undefined });
+    }));
+  }
+  if (options.onTurnEnd) {
+    disposers.push(onEvent("acp.turn_end", (payload) => {
+      if (payload?.traceId === options.traceId) options.onTurnEnd({ ok: payload.ok, error: payload.error });
+    }));
+  }
+  if (options.onPermissionRequest) {
+    disposers.push(onEvent("acp.permission_request", (payload) => {
+      if (payload?.traceId === options.traceId) options.onPermissionRequest(payload);
+    }));
+  }
+  if (options.onAskRequest) {
+    disposers.push(onEvent("acp.ask_request", (payload) => {
+      if (payload?.traceId === options.traceId) options.onAskRequest(payload);
+    }));
+  }
+  if (options.onTurnEnd) {
+    disposers.push(onEvent("acp.turn_end", (payload) => {
+      if (payload?.traceId === options.traceId) options.onTurnEnd({ ok: payload.ok, error: payload.error });
+    }));
+  }
+  try {
+    return await sendRequest("acp.run", {
+      traceId: options.traceId,
+      conversationId: options.conversationId,
+      workspace: options.workspace,
+      provider: { providerId: selected.manifest.id, command: selected.config.command, args: selected.config.args, authMethodId: selected.manifest.authMethodId },
+      prompt,
+    }, 1800000);
+  } finally {
+    disposers.forEach((dispose) => dispose());
+  }
+}
+
+async function cancelAcpTurn(traceId, conversationId) {
+  return sendRequest("acp.cancel", { traceId, conversationId });
+}
+
+async function answerAcpPermission(payload) {
+  return sendRequest("acp.permission_answer", payload, 30000);
+}
+
+async function answerAcpAsk(payload) {
+  return sendRequest("acp.ask_answer", payload, 30000);
+}
+
 async function answerAskQuestion(payload) {
   return sendRequest("agent.ask_answer", payload, 30000);
 }
@@ -1202,6 +1272,18 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   };
   const closeProviderEditor = () => { $("#ai-settings-form").hidden = true; $("#provider-modal-overlay").hidden = true; };
+  const closeAcpProviderEditor = () => { $("#acp-provider-form").hidden = true; $("#acp-provider-modal-overlay").hidden = true; };
+  const showAcpProviderEditor = (provider) => {
+    $("#acp-provider-modal-overlay").hidden = false;
+    $("#acp-provider-form").hidden = false;
+    $("#acp-provider-title").textContent = `Configure ${provider.manifest.displayName}`;
+    $("#acp-provider-subtitle").textContent = provider.manifest.description;
+    $("#acp-provider-id").value = provider.manifest.id;
+    $("#acp-provider-enabled").checked = provider.config.enabled;
+    $("#acp-provider-command").value = provider.config.command || "";
+    $("#acp-provider-args").value = (provider.config.args || []).join(" ");
+    $("#acp-provider-auth-method").textContent = provider.manifest.authMethodId ? `Auth: ${provider.manifest.authMethodId}` : "No auth required";
+  };
   const closeProviderDeleteDialog = () => {
     pendingProviderDeleteId = "";
     $("#provider-delete-dialog").hidden = true;
@@ -1228,6 +1310,10 @@ document.addEventListener("DOMContentLoaded", () => {
     getVisionMode: () => aiSettings.vision,
     notify: showToast,
     log: writeRendererLog,
+    runAcpTurn,
+    cancelAcpTurn,
+    answerAcpPermission,
+    answerAcpAsk,
   });
   skillsController = new SkillsController({
     shell: window.shell,
@@ -1308,6 +1394,52 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   };
 
+  const renderAcpProviderCards = async () => {
+    const registry = $("#acp-provider-registry");
+    if (!registry) return;
+    registry.textContent = "";
+    try {
+      const providers = await window.shell.acpProviders.list();
+      for (const provider of providers) {
+        const card = el("article", `provider-registry-card acp-provider-card${provider.status === "configured" ? " is-active" : ""}`);
+        card.dataset.acpProviderId = provider.manifest.id;
+        const head = el("div", "provider-card-head");
+        const mark = el("span", "provider-mark", provider.manifest.monogram);
+        const identity = el("div");
+        const title = document.createElement("h2"); title.textContent = provider.manifest.displayName;
+        const kind = document.createElement("p"); kind.textContent = provider.manifest.unverified ? "ACP · UNVERIFIED" : "ACP";
+        identity.append(title, kind);
+        const beta = provider.manifest.unverified ? el("span", "acp-provider-beta", "BETA") : null;
+        const dot = el("button", `provider-toggle${provider.config.enabled ? " is-active" : ""}`, "●");
+        dot.type = "button";
+        dot.setAttribute("aria-pressed", String(provider.config.enabled));
+        dot.setAttribute("aria-label", `${provider.config.enabled ? "Disable" : "Enable"} ${provider.manifest.displayName}`);
+        dot.addEventListener("click", async () => {
+          try {
+            await window.shell.acpProviders.save({ providerId: provider.manifest.id, enabled: !provider.config.enabled });
+            await renderAcpProviderCards();
+            showToast(`${provider.manifest.displayName} ${!provider.config.enabled ? "enabled" : "disabled"}.`, "success");
+          } catch (error) {
+            showToast(`Could not update ACP provider: ${error.message || error}`, "error");
+          }
+        });
+        head.append(mark, identity, beta, dot);
+        const description = document.createElement("p"); description.textContent = provider.manifest.description;
+        const footer = el("div", "provider-card-footer");
+        const statusText = provider.status === "configured" ? "● Configured" : provider.status === "disabled" ? "● Disabled" : `● ${provider.manifest.unverified ? "Unverified" : "Not configured"}`;
+        const status = el("span", `provider-status${provider.status === "configured" ? " configured" : ""}`, statusText);
+        const action = el("button", "mini-btn provider-card-action", "Configure");
+        action.type = "button";
+        action.addEventListener("click", () => showAcpProviderEditor(provider));
+        footer.append(status, action);
+        card.append(head, description, footer);
+        registry.appendChild(card);
+      }
+    } catch (error) {
+      showToast(`Could not load ACP providers: ${error.message || error}`, "error");
+    }
+  };
+
   const renderAgentModelPicker = () => {
     const selected = activeModel();
     $("#agent-model-trigger-label").textContent = `${selected?.id || "Choose model"} · ${aiSettings.effort || "auto"}`;
@@ -1347,6 +1479,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const syncAiControls = () => {
     renderProviderCards();
+    void renderAcpProviderCards();
     renderAgentModelPicker();
     if (currentProviderDetailId) renderProviderDetail();
     $("#settings-ai-strategy").value = aiSettings.strategy || "failover";
@@ -1758,6 +1891,24 @@ document.addEventListener("DOMContentLoaded", () => {
     searchInput.dispatchEvent(new Event("input"));
     searchInput.focus();
   });
+
+  $("#acp-provider-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const id = $("#acp-provider-id").value;
+    const command = $("#acp-provider-command").value.trim() || undefined;
+    const argsString = $("#acp-provider-args").value.trim();
+    const args = argsString ? argsString.split(/\s+/).filter(Boolean) : undefined;
+    try {
+      await window.shell.acpProviders.save({ providerId: id, enabled: $("#acp-provider-enabled").checked, command, args });
+      closeAcpProviderEditor();
+      await renderAcpProviderCards();
+      showToast("ACP provider saved.", "success");
+    } catch (error) {
+      showToast(`Could not save ACP provider: ${error.message || error}`, "error");
+    }
+  });
+  $("#acp-provider-close").addEventListener("click", closeAcpProviderEditor);
+  $("#acp-provider-modal-overlay").addEventListener("click", closeAcpProviderEditor);
 
   // Version
   getVersion().then(v => {

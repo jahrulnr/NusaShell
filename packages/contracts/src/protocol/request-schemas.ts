@@ -316,6 +316,84 @@ export const JobValidateScheduleRequestSchema = z.object({
   }),
 });
 
+const AcpContentBlockSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("text"), text: z.string().min(1) }),
+  z.object({
+    type: z.literal("image"),
+    data: z.string().min(1),
+    mimeType: z.string().min(1),
+  }),
+]);
+
+const AcpProviderDescriptorSchema = z.object({
+  providerId: z.string().min(1),
+  command: z.string().min(1),
+  args: z.array(z.string()),
+  authMethodId: z.string().optional(),
+});
+
+export const AcpRunRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("acp.run"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    traceId: z.string().min(1).max(128),
+    conversationId: z.string().min(1).max(128),
+    workspace: z.string().max(4096).optional(),
+    provider: AcpProviderDescriptorSchema,
+    prompt: z.array(AcpContentBlockSchema).min(1).max(32),
+  }),
+});
+
+export const AcpCancelRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("acp.cancel"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    traceId: z.string().min(1).max(128),
+    conversationId: z.string().min(1).max(128),
+  }),
+});
+
+export const AcpPermissionAnswerRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("acp.permission_answer"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    traceId: z.string().min(1).max(128),
+    conversationId: z.string().min(1).max(128),
+    requestId: z.string().min(1).max(128),
+    optionId: z.string().min(1).max(128),
+  }),
+});
+
+export const AcpAskAnswerRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("acp.ask_answer"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    traceId: z.string().min(1).max(128),
+    conversationId: z.string().min(1).max(128),
+    requestId: z.string().min(1).max(128),
+    optionIds: z.array(z.string().min(1).max(128)).max(16).optional(),
+    text: z.string().max(8000).optional(),
+  }),
+});
+
+export const AcpSessionInfoRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("acp.session_info"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    conversationId: z.string().min(1).max(128),
+  }),
+});
+
 export const SubscribeRequestSchema = z.object({
   kind: z.literal("request"),
   id: z.string().min(1),
@@ -366,6 +444,11 @@ export const RequestSchema = z.discriminatedUnion("method", [
   JobRemoveRequestSchema,
   JobOutputRequestSchema,
   JobValidateScheduleRequestSchema,
+  AcpRunRequestSchema,
+  AcpCancelRequestSchema,
+  AcpPermissionAnswerRequestSchema,
+  AcpAskAnswerRequestSchema,
+  AcpSessionInfoRequestSchema,
   SubscribeRequestSchema,
   UnsubscribeRequestSchema,
 ]);
@@ -397,4 +480,9 @@ export type JobRunRequest = z.infer<typeof JobRunRequestSchema>;
 export type JobRemoveRequest = z.infer<typeof JobRemoveRequestSchema>;
 export type JobOutputRequest = z.infer<typeof JobOutputRequestSchema>;
 export type JobValidateScheduleRequest = z.infer<typeof JobValidateScheduleRequestSchema>;
+export type AcpRunRequest = z.infer<typeof AcpRunRequestSchema>;
+export type AcpCancelRequest = z.infer<typeof AcpCancelRequestSchema>;
+export type AcpPermissionAnswerRequest = z.infer<typeof AcpPermissionAnswerRequestSchema>;
+export type AcpAskAnswerRequest = z.infer<typeof AcpAskAnswerRequestSchema>;
+export type AcpSessionInfoRequest = z.infer<typeof AcpSessionInfoRequestSchema>;
 export type ParsedRequest = z.infer<typeof RequestSchema>;

@@ -22,7 +22,9 @@ export type ApplicationErrorCode =
   | "UNAVAILABLE"
   | "INTERNAL_ERROR"
   | "JOB_NOT_FOUND"
-  | "JOB_INVALID_SCHEDULE";
+  | "JOB_INVALID_SCHEDULE"
+  | "ACP_SESSION_NOT_FOUND"
+  | "ACP_PROVIDER_FAILED";
 
 export class ApplicationError extends Error {
   readonly code: ApplicationErrorCode;

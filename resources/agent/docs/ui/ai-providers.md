@@ -41,3 +41,41 @@ Button to create a new custom OpenAI-compatible provider.
   - Section: Add custom provider
   - Type: button
   - Action: Opens the provider editor for a new custom OpenAI-compatible provider.
+
+## ACP agents
+
+Registry of ACP (Agent Client Protocol) external agents. Enable and configure providers such as Cursor, Codex, Claude Code, and Gemini.
+
+- **`#acp-provider-registry`** (missing map entry)
+
+- **`#acp-provider-card`** (missing map entry)
+
+- **`#acp-provider-toggle`** (missing map entry)
+
+- **`#acp-provider-status`** (missing map entry)
+
+- **`#acp-provider-configure`** (missing map entry)
+
+## ACP provider configure modal
+
+Modal for editing an ACP provider's command, args, and enabled state.
+
+- **`#acp-provider-modal-overlay`** (missing map entry)
+
+- **`#acp-provider-form`** (missing map entry)
+
+- **`#acp-provider-title`** (missing map entry)
+
+- **`#acp-provider-subtitle`** (missing map entry)
+
+- **`#acp-provider-close`** (missing map entry)
+
+- **`#acp-provider-id`** (missing map entry)
+
+- **`#acp-provider-enabled`** (missing map entry)
+
+- **`#acp-provider-command`** (missing map entry)
+
+- **`#acp-provider-args`** (missing map entry)
+
+- **`#acp-provider-auth-method`** (missing map entry)

@@ -186,6 +186,8 @@
             "agent-conversations-title",
             "agent-conversation-count",
             "agent-new-conversation",
+            "agent-new-acp",
+            "agent-new-acp-menu",
             "agent-conversation-search",
             "agent-conversation-list",
             "agent-conversation-item"
@@ -197,6 +199,10 @@
             "The full-height message runway separates compact user cards from editorial assistant responses. User attachments render as image previews or file cards. Provider reasoning is persisted and appears before the answer in a collapsed Thinking disclosure with sanitized Markdown; models that return no reasoning show no placeholder. Completed tool calls render as expandable terminal cards with the tool name in the header and full args/output in the body. Interactive ask_question calls render as Ask Question cards with selectable options and an optional free-text answer; after the user replies, the sealed card shows the chosen answer. Message footers expose timestamps, model/trace metadata, copy, and retry where applicable. Only this area scrolls."
           ],
           "controls": [
+            "acp-status-bar",
+            "acp-status-label",
+            "acp-status-provider",
+            "acp-status-chip",
             "agent-thread",
             "agent-empty",
             "agent-message",
@@ -224,6 +230,8 @@
             "agent-attach-btn",
             "agent-model-trigger",
             "agent-model-trigger-label",
+            "agent-acp-pill",
+            "agent-acp-pill-label",
             "agent-model-menu",
             "agent-model-search",
             "agent-model-list",
@@ -407,6 +415,37 @@
           ],
           "controls": [
             "add-custom-provider"
+          ]
+        },
+        {
+          "heading": "ACP agents",
+          "paragraphs": [
+            "Registry of ACP (Agent Client Protocol) external agents. Enable and configure providers such as Cursor, Codex, Claude Code, and Gemini."
+          ],
+          "controls": [
+            "acp-provider-registry",
+            "acp-provider-card",
+            "acp-provider-toggle",
+            "acp-provider-status",
+            "acp-provider-configure"
+          ]
+        },
+        {
+          "heading": "ACP provider configure modal",
+          "paragraphs": [
+            "Modal for editing an ACP provider's command, args, and enabled state."
+          ],
+          "controls": [
+            "acp-provider-modal-overlay",
+            "acp-provider-form",
+            "acp-provider-title",
+            "acp-provider-subtitle",
+            "acp-provider-close",
+            "acp-provider-id",
+            "acp-provider-enabled",
+            "acp-provider-command",
+            "acp-provider-args",
+            "acp-provider-auth-method"
           ]
         }
       ]

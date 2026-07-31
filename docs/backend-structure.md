@@ -139,7 +139,8 @@ nusashell/
 │       ├── websocket-protocol.md
 │       ├── plugin-lifecycle.md
 │       ├── manifest-spec.md
-│       └── job-automation.md      # scheduled jobs (Phase F)
+│       ├── job-automation.md      # scheduled jobs (Phase F)
+│       └── acp-threads.md         # ACP external-agent conversations
 │
 ├── scripts/
 │   ├── build.ts

@@ -30,6 +30,11 @@ export type RequestMethod =
   | "job.remove"
   | "job.output"
   | "job.validate-schedule"
+  | "acp.run"
+  | "acp.cancel"
+  | "acp.permission_answer"
+  | "acp.ask_answer"
+  | "acp.session_info"
   | "subscribe"
   | "unsubscribe";
 
@@ -78,7 +83,16 @@ export type EventType =
   | "agent.context"
   | "agent.learning_updated"
   | "job.completed"
-  | "job.failed";
+  | "job.failed"
+  | "acp.text_delta"
+  | "acp.thought_delta"
+  | "acp.tool_call"
+  | "acp.tool_call_update"
+  | "acp.plan"
+  | "acp.permission_request"
+  | "acp.ask_request"
+  | "acp.turn_end"
+  | "acp.session_state";
 
 export interface EventEnvelope<TPayload = unknown> {
   readonly kind: "event";
