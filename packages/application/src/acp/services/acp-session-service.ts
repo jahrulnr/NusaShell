@@ -16,6 +16,7 @@ import type {
   AcpClientEvent,
   AcpClientPort,
   AcpClientSink,
+  AcpConfigOption,
   AcpContentBlock,
   AcpProviderDescriptor,
 } from "../ports/acp-client.port.js";
@@ -29,6 +30,7 @@ export interface AcpSessionInfo {
   readonly workspace: string;
   readonly state: "idle" | "starting" | "running" | "error" | "cancelled";
   readonly traceId?: string | undefined;
+  readonly configOptions?: readonly AcpConfigOption[] | undefined;
 }
 
 interface AcpSession {
@@ -51,6 +53,54 @@ export class AcpSessionService {
   private readonly sessions = new Map<string, AcpSession>();
 
   constructor(private readonly deps: AcpSessionServiceDeps) {}
+
+  /**
+   * Start an ACP session for a conversation without sending a prompt.
+   * Used so the client can fetch config options (models, modes) before the
+   * first turn. If a session already exists for this conversation, it is a
+   * no-op. Returns the session info (including configOptions), or null if
+   * the provider could not be started.
+   */
+  async ensureSession(
+    conversationId: string,
+    workspace: string | undefined,
+    provider: AcpProviderDescriptor,
+  ): Promise<AcpSessionInfo | null> {
+    const cwd = workspace ?? process.cwd();
+    const existing = this.sessions.get(conversationId);
+    if (existing && sameProvider(existing.provider, provider) && existing.workspace === cwd) {
+      return this.getSessionInfo(conversationId);
+    }
+    if (existing) {
+      await this.deps.client.closeSession(conversationId).catch((err) => {
+        this.deps.logger?.warn(`Error closing previous ACP session for ${conversationId}: ${err}`);
+      });
+    }
+    const traceId = `ensure-${Date.now()}`;
+    try {
+      const sessionId = await this.deps.client.startSession(
+        conversationId,
+        provider,
+        cwd,
+        this.buildSink(conversationId, traceId),
+      );
+      this.sessions.set(conversationId, {
+        sessionId,
+        provider,
+        workspace: cwd,
+        traceId,
+        state: "idle",
+      });
+      this.deps.eventDispatcher.publish(createAcpSessionStateEvent(traceId, conversationId, "idle"));
+      return this.getSessionInfo(conversationId);
+    } catch (error) {
+      throw new ApplicationError(
+        "AGENT_PROVIDER_FAILED",
+        `Failed to start ACP session: ${error instanceof Error ? error.message : String(error)}`,
+        { providerId: provider.providerId, conversationId },
+      );
+    }
+  }
 
   async startTurn(
     traceId: string,
@@ -119,7 +169,12 @@ export class AcpSessionService {
       workspace: session.workspace,
       state: session.state,
       traceId: session.traceId ?? undefined,
+      configOptions: this.deps.client.getConfigOptions?.(conversationId) ?? [],
     };
+  }
+
+  async setConfigOption(conversationId: string, configId: string, value: string | boolean): Promise<readonly AcpConfigOption[]> {
+    return this.deps.client.setConfigOption(conversationId, configId, value);
   }
 
   async closeSession(conversationId: string): Promise<void> {
@@ -183,7 +238,7 @@ export class AcpSessionService {
   private handleClientEvent(conversationId: string, traceId: string, event: AcpClientEvent): void {
     switch (event.type) {
       case "acp.text_delta":
-        this.deps.eventDispatcher.publish(createAcpTextDeltaEvent(traceId, conversationId, event.delta));
+        this.deps.eventDispatcher.publish(createAcpTextDeltaEvent(traceId, conversationId, event.delta, event.messageId));
         break;
       case "acp.thought_delta":
         this.deps.eventDispatcher.publish(createAcpThoughtDeltaEvent(traceId, conversationId, event.delta));

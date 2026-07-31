@@ -249,7 +249,7 @@ export function mapDomainEvent(event: ApplicationEvent, sequence: number): Event
         kind: "event",
         event: "acp.text_delta",
         sequence,
-        payload: { traceId: e.aggregateId, delta: e.delta, timestamp },
+        payload: { traceId: e.aggregateId, delta: e.delta, messageId: e.messageId, timestamp },
       };
     }
 

@@ -945,6 +945,9 @@ body {
 .agent-model-list { max-height:370px; overflow:auto; padding:6px; }
 .agent-model-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:center; border-radius:7px; padding:4px; }
 .agent-model-row:hover, .agent-model-row.is-selected { background:#111d29; }
+.agent-model-section { padding:4px 0; }
+.agent-model-section + .agent-model-section { border-top:1px solid var(--border-soft); margin-top:6px; padding-top:8px; }
+.agent-model-section-title { padding:4px 8px; color:var(--text-faint); font:9px 'JetBrains Mono', monospace; text-transform:uppercase; letter-spacing:.08em; }
 .agent-model-choice { display:flex; min-width:0; flex-direction:column; gap:4px; border:0; padding:6px; background:transparent; color:var(--text); text-align:left; cursor:pointer; }
 .agent-model-name { overflow:hidden; font:11px 'JetBrains Mono', monospace; text-overflow:ellipsis; white-space:nowrap; }
 .agent-model-meta { display:flex; flex-wrap:wrap; gap:5px; align-items:center; color:var(--text-faint); font-size:9.5px; }

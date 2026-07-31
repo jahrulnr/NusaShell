@@ -394,6 +394,35 @@ export const AcpSessionInfoRequestSchema = z.object({
   }),
 });
 
+export const AcpSetConfigOptionRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("acp.set_config_option"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    conversationId: z.string().min(1).max(128),
+    configId: z.string().min(1).max(128),
+    value: z.union([z.string(), z.boolean()]),
+  }),
+});
+
+export const AcpEnsureSessionRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("acp.ensure_session"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    conversationId: z.string().min(1).max(128),
+    workspace: z.string().optional(),
+    provider: z.object({
+      providerId: z.string().min(1),
+      command: z.string().min(1),
+      args: z.array(z.string()).default([]),
+      authMethodId: z.string().optional(),
+    }),
+  }),
+});
+
 export const SubscribeRequestSchema = z.object({
   kind: z.literal("request"),
   id: z.string().min(1),
@@ -449,6 +478,8 @@ export const RequestSchema = z.discriminatedUnion("method", [
   AcpPermissionAnswerRequestSchema,
   AcpAskAnswerRequestSchema,
   AcpSessionInfoRequestSchema,
+  AcpSetConfigOptionRequestSchema,
+  AcpEnsureSessionRequestSchema,
   SubscribeRequestSchema,
   UnsubscribeRequestSchema,
 ]);
@@ -485,4 +516,6 @@ export type AcpCancelRequest = z.infer<typeof AcpCancelRequestSchema>;
 export type AcpPermissionAnswerRequest = z.infer<typeof AcpPermissionAnswerRequestSchema>;
 export type AcpAskAnswerRequest = z.infer<typeof AcpAskAnswerRequestSchema>;
 export type AcpSessionInfoRequest = z.infer<typeof AcpSessionInfoRequestSchema>;
+export type AcpSetConfigOptionRequest = z.infer<typeof AcpSetConfigOptionRequestSchema>;
+export type AcpEnsureSessionRequest = z.infer<typeof AcpEnsureSessionRequestSchema>;
 export type ParsedRequest = z.infer<typeof RequestSchema>;

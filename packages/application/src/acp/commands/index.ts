@@ -6,3 +6,7 @@ export type { AnswerAcpPermissionCommand } from "./answer-acp-permission/answer-
 export { AnswerAcpPermissionHandler } from "./answer-acp-permission/answer-acp-permission.handler.js";
 export type { AnswerAcpAskCommand } from "./answer-acp-ask/answer-acp-ask.command.js";
 export { AnswerAcpAskHandler } from "./answer-acp-ask/answer-acp-ask.handler.js";
+export type { SetAcpConfigOptionCommand, SetAcpConfigOptionResult } from "./set-acp-config-option/set-acp-config-option.command.js";
+export { SetAcpConfigOptionHandler } from "./set-acp-config-option/set-acp-config-option.handler.js";
+export type { EnsureAcpSessionCommand, EnsureAcpSessionResult } from "./ensure-acp-session/ensure-acp-session.command.js";
+export { EnsureAcpSessionHandler } from "./ensure-acp-session/ensure-acp-session.handler.js";

@@ -18,6 +18,7 @@ export interface AcpToolCall {
   readonly kind: AcpToolKind;
   readonly status: AcpToolStatus;
   readonly summary: string;
+  readonly rawInput?: unknown;
 }
 
 export interface AcpPlanStep {
@@ -62,13 +63,29 @@ export interface AcpAskAnswer {
 }
 
 export type AcpClientEvent =
-  | { readonly type: "acp.text_delta"; readonly traceId: string; readonly delta: string }
+  | { readonly type: "acp.text_delta"; readonly traceId: string; readonly delta: string; readonly messageId?: string | undefined }
   | { readonly type: "acp.thought_delta"; readonly traceId: string; readonly delta: string }
   | { readonly type: "acp.tool_call"; readonly traceId: string; readonly call: AcpToolCall }
   | { readonly type: "acp.tool_call_update"; readonly traceId: string; readonly callId: string; readonly status: AcpToolStatus; readonly summary?: string | undefined }
   | { readonly type: "acp.plan"; readonly traceId: string; readonly steps: readonly AcpPlanStep[] }
   | { readonly type: "acp.session_state"; readonly traceId: string; readonly conversationId: string; readonly state: AcpSessionState }
   | { readonly type: "acp.turn_end"; readonly traceId: string; readonly ok: boolean; readonly error?: string | undefined };
+
+export interface AcpConfigOptionValue {
+  readonly value: string;
+  readonly name: string;
+  readonly description?: string | undefined;
+}
+
+export interface AcpConfigOption {
+  readonly id: string;
+  readonly name: string;
+  readonly description?: string | undefined;
+  readonly category?: string | undefined;
+  readonly type: "select" | "boolean";
+  readonly currentValue: string | boolean;
+  readonly options?: readonly AcpConfigOptionValue[] | undefined;
+}
 
 export type AcpSessionState = "idle" | "starting" | "running" | "error" | "cancelled";
 
@@ -104,4 +121,15 @@ export interface AcpClientPort {
    * Release all resources and kill the child process for a session.
    */
   closeSession(conversationId: string): Promise<void>;
+
+  /**
+   * Get the current config options for a session (models, modes, etc).
+   */
+  getConfigOptions(conversationId: string): readonly AcpConfigOption[];
+
+  /**
+   * Change a session config option (e.g. model, mode).
+   * Returns the full updated config options list.
+   */
+  setConfigOption(conversationId: string, configId: string, value: string | boolean): Promise<readonly AcpConfigOption[]>;
 }

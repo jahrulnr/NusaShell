@@ -435,7 +435,7 @@ async function runAcpTurn(prompt, options = {}) {
   const disposers = [];
   if (options.onDelta) {
     disposers.push(onEvent("acp.text_delta", (payload) => {
-      if (payload?.traceId === options.traceId && payload.delta) options.onDelta(payload.delta);
+      if (payload?.traceId === options.traceId && payload.delta) options.onDelta(payload.delta, payload.messageId);
     }));
   }
   if (options.onReasoningDelta) {
@@ -445,7 +445,7 @@ async function runAcpTurn(prompt, options = {}) {
   }
   if (options.onToolCallStart) {
     disposers.push(onEvent("acp.tool_call", (payload) => {
-      if (payload?.traceId === options.traceId) options.onToolCallStart({ callId: payload.call.id, name: payload.call.title, args: {} });
+      if (payload?.traceId === options.traceId) options.onToolCallStart({ callId: payload.call.id, name: payload.call.title, args: payload.call.rawInput ?? {} });
     }));
   }
   if (options.onToolCallEnd) {
@@ -488,6 +488,18 @@ async function runAcpTurn(prompt, options = {}) {
 
 async function cancelAcpTurn(traceId, conversationId) {
   return sendRequest("acp.cancel", { traceId, conversationId });
+}
+
+async function getAcpSessionInfo(conversationId) {
+  return sendRequest("acp.session_info", { conversationId });
+}
+
+async function setAcpConfigOption(conversationId, configId, value) {
+  return sendRequest("acp.set_config_option", { conversationId, configId, value });
+}
+
+async function ensureAcpSession(conversationId, workspace, provider) {
+  return sendRequest("acp.ensure_session", { conversationId, workspace, provider });
 }
 
 async function answerAcpPermission(payload) {
@@ -1314,6 +1326,9 @@ document.addEventListener("DOMContentLoaded", () => {
     cancelAcpTurn,
     answerAcpPermission,
     answerAcpAsk,
+    getAcpSessionInfo,
+    setAcpConfigOption,
+    ensureAcpSession,
   });
   skillsController = new SkillsController({
     shell: window.shell,
@@ -1443,12 +1458,16 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   const renderAgentModelPicker = () => {
+    const list = $("#agent-model-list");
+    list.textContent = "";
+    if (agentConversationController?.conversation?.kind === "acp") {
+      renderAcpConfigPicker(list);
+      return;
+    }
     const selected = activeModel();
     $("#agent-model-trigger-label").textContent = `${selected?.id || "Choose model"} · ${aiSettings.effort || "auto"}`;
     if (selected) agentConversationController?.updateContextStatus();
     else $("#agent-provider-status").textContent = "Choose a model";
-    const list = $("#agent-model-list");
-    list.textContent = "";
     const models = searchModels(aiSettings.models, $("#agent-model-search").value);
     if (models.length === 0) {
       list.appendChild(el("div", "agent-model-empty", aiSettings.models.length ? "No models match this search." : "No imported models. Open a provider and import its catalog."));
@@ -1476,6 +1495,42 @@ document.addEventListener("DOMContentLoaded", () => {
         row.appendChild(effortRow);
       }
       list.appendChild(row);
+    });
+  };
+
+  const renderAcpConfigPicker = (list) => {
+    const options = agentConversationController?.acpConfigOptions ?? [];
+    if (options.length === 0) {
+      list.appendChild(el("div", "agent-model-empty", "No ACP config options available yet. Start a turn to load the session."));
+      return;
+    }
+    const query = ($("#agent-model-search").value || "").toLowerCase();
+    options.forEach((opt) => {
+      if (opt.type !== "select" || !opt.options) return;
+      const section = el("div", "agent-model-section");
+      const header = el("div", "agent-model-section-title", opt.name);
+      if (opt.description) header.title = opt.description;
+      section.appendChild(header);
+      const filtered = opt.options.filter((o) => !query || o.name.toLowerCase().includes(query) || o.value.toLowerCase().includes(query));
+      filtered.forEach((o) => {
+        const isCurrent = String(opt.currentValue) === o.value;
+        const row = el(`div`, `agent-model-row${isCurrent ? " is-selected" : ""}`);
+        const choose = el("button", "agent-model-choice"); choose.type = "button"; choose.setAttribute("role", "option");
+        const name = el("span", "agent-model-name"); name.textContent = o.name;
+        const meta = el("span", "agent-model-meta");
+        const tag = el("span", "agent-model-provider"); tag.textContent = opt.name;
+        meta.appendChild(tag);
+        if (o.description) { const desc = el("span", "agent-model-capability"); desc.textContent = o.description; meta.appendChild(desc); }
+        choose.append(name, meta);
+        choose.addEventListener("click", () => {
+          void agentConversationController?.selectAcpConfigOption(opt.id, o.value);
+          $("#agent-model-menu").hidden = true;
+          $("#agent-model-trigger").setAttribute("aria-expanded", "false");
+        });
+        row.appendChild(choose);
+        section.appendChild(row);
+      });
+      list.appendChild(section);
     });
   };
 

@@ -5,12 +5,14 @@ export interface AcpTextDeltaEvent extends DomainEvent {
   readonly traceId: string;
   readonly conversationId: string;
   readonly delta: string;
+  readonly messageId?: string | undefined;
 }
 
 export function createAcpTextDeltaEvent(
   traceId: string,
   conversationId: string,
   delta: string,
+  messageId?: string,
   occurredAt = new Date(),
 ): AcpTextDeltaEvent {
   return {
@@ -20,5 +22,6 @@ export function createAcpTextDeltaEvent(
     traceId,
     conversationId,
     delta,
+    messageId,
   };
 }

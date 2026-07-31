@@ -290,12 +290,18 @@ export type {
   AcpSessionState,
   AcpClientSink,
   AcpClientPort,
+  AcpConfigOption,
+  AcpConfigOptionValue,
   AcpSessionInfo,
   AcpSessionServiceDeps,
   RunAcpTurnCommand,
   CancelAcpTurnCommand,
   AnswerAcpPermissionCommand,
   AnswerAcpAskCommand,
+  SetAcpConfigOptionCommand,
+  SetAcpConfigOptionResult,
+  EnsureAcpSessionCommand,
+  EnsureAcpSessionResult,
   GetAcpSessionInfoQuery,
   GetAcpSessionInfoResult,
 } from "./acp/index.js";
@@ -307,6 +313,8 @@ export {
   CancelAcpTurnHandler,
   AnswerAcpPermissionHandler,
   AnswerAcpAskHandler,
+  SetAcpConfigOptionHandler,
+  EnsureAcpSessionHandler,
   GetAcpSessionInfoHandler,
 } from "./acp/index.js";
 

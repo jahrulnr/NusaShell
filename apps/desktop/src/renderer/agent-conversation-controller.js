@@ -17,7 +17,7 @@ import { estimateContextTokens, formatContextUsage } from "./ai-model-ui.js";
 import { inspectAttachmentContent, toDataUrl } from "./attachment-content.js";
 
 export class AgentConversationController {
-  constructor({ shell, runTurn, cancelTurn, answerAsk, getActiveModel, getVisionMode, notify, log, runAcpTurn, cancelAcpTurn, answerAcpPermission, answerAcpAsk }) {
+  constructor({ shell, runTurn, cancelTurn, answerAsk, getActiveModel, getVisionMode, notify, log, runAcpTurn, cancelAcpTurn, answerAcpPermission, answerAcpAsk, getAcpSessionInfo, setAcpConfigOption, ensureAcpSession }) {
     this.shell = shell;
     this.runTurn = runTurn;
     this.cancelTurn = cancelTurn;
@@ -30,6 +30,10 @@ export class AgentConversationController {
     this.cancelAcpTurn = cancelAcpTurn;
     this.answerAcpPermission = answerAcpPermission;
     this.answerAcpAsk = answerAcpAsk;
+    this.getAcpSessionInfo = getAcpSessionInfo;
+    this.setAcpConfigOption = setAcpConfigOption;
+    this.ensureAcpSession = ensureAcpSession;
+    this.acpConfigOptions = [];
     this.conversation = null;
     this.conversations = [];
     this.activeId = "";
@@ -329,29 +333,86 @@ export class AgentConversationController {
       retryIsSafe = true;
 
       pending = this.createStreamingMessage();
-      const streamState = { message: pending, textBubble: null, streamedText: "" };
+      const streamState = { message: pending, textBubble: null, streamedText: "", reasoningEl: null, reasoningText: "", lastKind: null, toolCards: new Map(), toolCalls: [], steps: [] };
+      const appendStreamChild = (node) => {
+        streamState.message?.appendChild(node);
+        this.scrollToBottom();
+      };
+      const sealStep = () => {
+        if (streamState.lastKind === "reasoning" && streamState.reasoningText?.trim()) {
+          streamState.steps.push({ type: "reasoning", content: streamState.reasoningText });
+        } else if (streamState.lastKind === "text" && streamState.streamedText?.trim()) {
+          streamState.steps.push({ type: "text", content: streamState.streamedText });
+        }
+      };
       const result = await this.runAcpTurn([{ type: "text", text }], {
         traceId: this.activeTraceId,
         conversationId: this.conversation.id,
         workspace: this.conversation.workspace,
         providerId: this.conversation.acp.providerId,
         onDelta: (delta) => {
-          if (!streamState.textBubble) {
+          if (streamState.lastKind !== "text") {
+            sealStep();
             streamState.textBubble = element("div", "agent-bubble");
+            streamState.streamedText = "";
             streamState.message?.appendChild(streamState.textBubble);
             this.scrollToBottom();
           }
+          streamState.lastKind = "text";
           streamState.streamedText += delta;
           if (streamState.textBubble) streamState.textBubble.innerHTML = renderAssistantMarkdown(streamState.streamedText);
         },
+        onReasoningDelta: (delta) => {
+          if (streamState.lastKind !== "reasoning") {
+            sealStep();
+            streamState.reasoningEl = this.createStreamingReasoningBlock();
+            streamState.reasoningText = "";
+            streamState.message?.appendChild(streamState.reasoningEl);
+            this.scrollToBottom();
+          }
+          streamState.lastKind = "reasoning";
+          streamState.reasoningText += delta;
+          const content = streamState.reasoningEl?.querySelector(".agent-reasoning-content");
+          if (content) content.innerHTML = renderReasoningMarkdown(streamState.reasoningText);
+        },
+        onToolCallStart: (payload) => {
+          if (streamState.lastKind !== "tool") sealStep();
+          streamState.lastKind = "tool";
+          const card = this.createStreamingToolCard(payload.callId, payload.name, payload.args);
+          streamState.toolCards.set(payload.callId, card);
+          streamState.toolCalls.push({ id: payload.callId, name: payload.name, ok: true, args: payload.args });
+          streamState.steps.push({ type: "tool_calls", calls: [{ id: payload.callId, name: payload.name, ok: true, args: payload.args }] });
+          appendStreamChild(card);
+        },
+        onToolCallEnd: (payload) => {
+          const card = streamState.toolCards.get(payload.callId);
+          if (card) this.updateStreamingToolCard(card, payload);
+          const tc = streamState.toolCalls.find((t) => t.id === payload.callId);
+          if (tc) { tc.ok = payload.ok !== false; if (payload.error) tc.error = payload.error; }
+          const step = [...streamState.steps].reverse().find((s) => s.type === "tool_calls" && s.calls.some((c) => c.id === payload.callId));
+          if (step) { const call = step.calls.find((c) => c.id === payload.callId); if (call) { call.ok = payload.ok !== false; if (payload.error) call.error = payload.error; } }
+        },
       });
+      sealStep();
       retryIsSafe = false;
+
+      const fullText = streamState.steps
+        .filter((s) => s.type === "text")
+        .map((s) => s.content)
+        .join("\n\n");
+      const fullReasoning = streamState.steps
+        .filter((s) => s.type === "reasoning")
+        .map((s) => s.content)
+        .join("\n\n");
 
       this.conversation = await this.shell.agentConversations.append(this.conversation.id, {
         role: "assistant",
-        content: streamState.streamedText || "Done.",
+        content: fullText || "Done.",
         traceId: this.activeTraceId,
         model: this.conversation.acp.providerId,
+        reasoning: fullReasoning || undefined,
+        ...(streamState.toolCalls.length ? { toolCalls: streamState.toolCalls } : {}),
+        ...(streamState.steps.length ? { steps: streamState.steps } : {}),
       });
       const savedMessage = this.conversation.messages.at(-1);
       this.sealStreamingMessage(pending, savedMessage ?? { content: streamState.streamedText });
@@ -543,7 +604,7 @@ export class AgentConversationController {
     if (btn) btn.title = ws || "Home (user home directory)";
   }
 
-  updateAcpStatus() {
+  async updateAcpStatus() {
     const bar = $("#acp-status-bar");
     const provider = $("#acp-status-provider");
     const chip = $("#acp-status-chip");
@@ -557,10 +618,76 @@ export class AgentConversationController {
       provider.textContent = providerId;
       chip.textContent = this.turnPending ? "● RUNNING" : "● IDLE";
       chip.className = `acp-status-chip ${this.turnPending ? "is-running" : "is-idle"}`;
-      pillLabel.textContent = `ACP · ${providerId}`;
+      const modelName = this.currentAcpModelName() ?? providerId;
+      pillLabel.textContent = `ACP · ${modelName}`;
+      await this.ensureAcpSessionIfNeeded();
     } else {
       bar.hidden = true;
       pill.hidden = true;
+      this.acpConfigOptions = [];
+    }
+  }
+
+  async ensureAcpSessionIfNeeded() {
+    if (this.conversation?.kind !== "acp" || !this.ensureAcpSession) return;
+    if (this.acpConfigOptions.length > 0) return;
+    const providers = await this.shell.acpProviders.list();
+    const descriptor = providers.find((p) => p.manifest.id === this.conversation.acp.providerId);
+    if (!descriptor) return;
+    try {
+      const info = await this.ensureAcpSession(
+        this.conversation.id,
+        this.conversation.workspace,
+        {
+          providerId: descriptor.manifest.id,
+          command: descriptor.manifest.command,
+          args: descriptor.manifest.args,
+          authMethodId: descriptor.manifest.authMethodId,
+        },
+      );
+      this.acpConfigOptions = info?.configOptions ?? [];
+      this.updateAcpModelLabel();
+    } catch (error) {
+      this.log("warn", `Failed to ensure ACP session: ${error.message || error}`);
+    }
+  }
+
+  updateAcpModelLabel() {
+    const modelName = this.currentAcpModelName();
+    if (!modelName) return;
+    const pillLabel = $("#agent-acp-pill-label");
+    if (pillLabel) pillLabel.textContent = `ACP · ${modelName}`;
+    const triggerLabel = $("#agent-model-trigger-label");
+    if (triggerLabel) triggerLabel.textContent = `${modelName} · ACP`;
+  }
+
+  currentAcpModelName() {
+    const opt = this.acpConfigOptions.find((o) => o.id === "model");
+    if (!opt) return undefined;
+    const value = String(opt.currentValue ?? "");
+    const matched = opt.options?.find((o) => o.value === value);
+    return matched?.name ?? value;
+  }
+
+  async refreshAcpConfigOptions() {
+    if (this.conversation?.kind !== "acp") return;
+    try {
+      const info = await this.getAcpSessionInfo(this.conversation.id);
+      this.acpConfigOptions = info?.configOptions ?? [];
+      this.updateAcpModelLabel();
+    } catch (error) {
+      this.log("warn", `Failed to load ACP config options: ${error.message || error}`);
+    }
+  }
+
+  async selectAcpConfigOption(configId, value) {
+    if (this.conversation?.kind !== "acp" || !this.setAcpConfigOption) return;
+    try {
+      const updated = await this.setAcpConfigOption(this.conversation.id, configId, value);
+      this.acpConfigOptions = updated ?? [];
+      this.updateAcpModelLabel();
+    } catch (error) {
+      this.notify(`Could not change ACP ${configId}: ${error.message || error}`, "error");
     }
   }
 

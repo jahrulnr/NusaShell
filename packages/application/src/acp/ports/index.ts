@@ -15,4 +15,6 @@ export type {
   AcpSessionState,
   AcpClientSink,
   AcpClientPort,
+  AcpConfigOption,
+  AcpConfigOptionValue,
 } from "./acp-client.port.js";

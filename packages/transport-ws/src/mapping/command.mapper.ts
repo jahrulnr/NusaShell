@@ -19,10 +19,12 @@ import type {
   CancelAcpTurnCommand,
   AnswerAcpPermissionCommand,
   AnswerAcpAskCommand,
+  SetAcpConfigOptionCommand,
+  EnsureAcpSessionCommand,
 } from "@nusashell/application";
 
 export function mapToCommand(request: ParsedRequest):
-  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | SetPluginAutostartCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand | CancelAgentTurnCommand | AnswerAskQuestionCommand | AddJobCommand | SetJobEnabledCommand | RunJobNowCommand | RemoveJobCommand | RunAcpTurnCommand | CancelAcpTurnCommand | AnswerAcpPermissionCommand | AnswerAcpAskCommand }
+  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | SetPluginAutostartCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand | CancelAgentTurnCommand | AnswerAskQuestionCommand | AddJobCommand | SetJobEnabledCommand | RunJobNowCommand | RemoveJobCommand | RunAcpTurnCommand | CancelAcpTurnCommand | AnswerAcpPermissionCommand | AnswerAcpAskCommand | SetAcpConfigOptionCommand | EnsureAcpSessionCommand }
   | { kind: "query" } {
   switch (request.method) {
     case "plugin.start":
@@ -208,6 +210,31 @@ export function mapToCommand(request: ParsedRequest):
           optionIds: request.payload.optionIds,
           text: request.payload.text,
         } as AnswerAcpAskCommand,
+      };
+    case "acp.set_config_option":
+      return {
+        kind: "command",
+        command: {
+          kind: "set-acp-config-option",
+          conversationId: request.payload.conversationId,
+          configId: request.payload.configId,
+          value: request.payload.value,
+        } as SetAcpConfigOptionCommand,
+      };
+    case "acp.ensure_session":
+      return {
+        kind: "command",
+        command: {
+          kind: "ensure-acp-session",
+          conversationId: request.payload.conversationId,
+          workspace: request.payload.workspace,
+          provider: {
+            providerId: request.payload.provider.providerId,
+            command: request.payload.provider.command,
+            args: request.payload.provider.args,
+            authMethodId: request.payload.provider.authMethodId,
+          },
+        } as EnsureAcpSessionCommand,
       };
     default:
       return { kind: "query" };

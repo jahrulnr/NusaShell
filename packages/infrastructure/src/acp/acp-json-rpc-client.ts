@@ -3,6 +3,8 @@ import { ApplicationError } from "@nusashell/application";
 import type {
   AcpClientPort,
   AcpClientSink,
+  AcpConfigOption,
+  AcpConfigOptionValue,
   AcpContentBlock,
   AcpPermissionOption,
   AcpPermissionRequest,
@@ -49,23 +51,31 @@ interface Session {
   readonly child: ChildProcess;
   readonly provider: AcpProviderDescriptor;
   sessionId: string;
+  traceId: string | null;
   nextId: number;
   pending: Map<number, PendingRequest>;
   sink: AcpClientSink | undefined;
   buffer: string;
+  stderrBuffer: string;
   closed: boolean;
+  configOptions: readonly AcpConfigOption[];
 }
 
 function toolKindFrom(kind: string | undefined): AcpToolKind {
   switch (kind) {
     case "terminal":
+    case "execute":
     case "run_command":
       return "terminal";
     case "read":
     case "read_file":
+    case "search":
+    case "fetch":
       return "read";
     case "edit":
     case "write_file":
+    case "delete":
+    case "move":
       return "edit";
     default:
       return "unknown";
@@ -76,11 +86,14 @@ function toolStatusFrom(status: string | undefined): AcpToolStatus {
   switch (status) {
     case "ok":
     case "success":
+    case "completed":
       return "ok";
     case "fail":
     case "error":
+    case "failed":
       return "fail";
     case "running":
+    case "in_progress":
       return "running";
     default:
       return "pending";
@@ -114,11 +127,14 @@ export class AcpJsonRpcClient implements AcpClientPort {
       child,
       provider,
       sessionId: "",
+      traceId: null,
       nextId: 1,
       pending: new Map(),
       sink,
       buffer: "",
+      stderrBuffer: "",
       closed: false,
+      configOptions: [],
     };
     this.sessions.set(conversationId, session);
 
@@ -136,8 +152,9 @@ export class AcpJsonRpcClient implements AcpClientPort {
       this.onData(session, chunk.toString("utf8"));
     });
 
-    child.stderr?.on("data", (_chunk: Buffer) => {
-      // Surface stdio diagnostics via a turn_end event? For now, ignore or log via debug.
+    child.stderr?.on("data", (chunk: Buffer) => {
+      const text = chunk.toString("utf8").trim();
+      if (text) session.stderrBuffer += text + "\n";
     });
 
     try {
@@ -147,18 +164,25 @@ export class AcpJsonRpcClient implements AcpClientPort {
           fs: { readTextFile: false, writeTextFile: false },
           terminal: false,
         },
-      })) as { authMethods?: readonly string[]; sessionId?: string };
+        clientInfo: {
+          name: "nusashell",
+          title: "NusaShell",
+          version: "0.0.1",
+        },
+      })) as { authMethods?: readonly { id: string }[]; sessionId?: string };
 
-      if (provider.authMethodId && init.authMethods?.includes(provider.authMethodId)) {
-        await this.request(session, "authenticate", { authMethod: provider.authMethodId });
+      const authMethodIds = init.authMethods?.map((m) => m.id) ?? [];
+      if (provider.authMethodId && authMethodIds.includes(provider.authMethodId)) {
+        await this.request(session, "authenticate", { methodId: provider.authMethodId });
       }
 
       const sessionResult = (await this.request(session, "session/new", {
         cwd,
         mcpServers: [],
-      })) as { sessionId: string };
+      })) as { sessionId: string; configOptions?: unknown };
 
       session.sessionId = sessionResult.sessionId;
+      session.configOptions = parseConfigOptions(sessionResult.configOptions);
       return sessionResult.sessionId;
     } catch (error) {
       this.cleanup(session);
@@ -175,8 +199,9 @@ export class AcpJsonRpcClient implements AcpClientPort {
     if (!session) {
       throw new ApplicationError("AGENT_PROVIDER_FAILED", `No ACP session for conversation ${conversationId}`, { conversationId });
     }
+    session.traceId = traceId;
     try {
-      await this.request(session, "session/prompt", { traceId, content });
+      await this.request(session, "session/prompt", { sessionId: session.sessionId, prompt: content });
       if (session.sink) {
         session.sink.publish({ type: "acp.turn_end", traceId, ok: true });
       }
@@ -184,21 +209,43 @@ export class AcpJsonRpcClient implements AcpClientPort {
       if (session.sink) {
         session.sink.publish({ type: "acp.turn_end", traceId, ok: false, error: error instanceof Error ? error.message : String(error) });
       }
-      throw error;
+      throw new ApplicationError(
+        "AGENT_PROVIDER_FAILED",
+        `ACP prompt failed: ${error instanceof Error ? error.message : String(error)}`,
+        { traceId, conversationId, providerId: session.provider.providerId },
+      );
     }
   }
 
-  async cancel(traceId: string, conversationId: string): Promise<void> {
+  async cancel(_traceId: string, conversationId: string): Promise<void> {
     const session = this.sessions.get(conversationId);
     if (!session) return;
-    this.send(session, { jsonrpc: "2.0", method: "session/cancel", params: { traceId } });
+    this.send(session, { jsonrpc: "2.0", method: "session/cancel", params: { sessionId: session.sessionId } });
   }
 
   async closeSession(conversationId: string): Promise<void> {
     const session = this.sessions.get(conversationId);
     if (!session) return;
-    this.send(session, { jsonrpc: "2.0", method: "session/exit", params: { sessionId: session.sessionId } });
+    this.send(session, { jsonrpc: "2.0", method: "session/close", params: { sessionId: session.sessionId } });
     this.cleanup(session);
+  }
+
+  getConfigOptions(conversationId: string): readonly AcpConfigOption[] {
+    return this.sessions.get(conversationId)?.configOptions ?? [];
+  }
+
+  async setConfigOption(conversationId: string, configId: string, value: string | boolean): Promise<readonly AcpConfigOption[]> {
+    const session = this.sessions.get(conversationId);
+    if (!session) {
+      throw new ApplicationError("AGENT_PROVIDER_FAILED", `No ACP session for conversation ${conversationId}`, { conversationId });
+    }
+    const result = (await this.request(session, "session/set_config_option", {
+      sessionId: session.sessionId,
+      configId,
+      value,
+    })) as { configOptions?: unknown };
+    session.configOptions = parseConfigOptions(result.configOptions);
+    return session.configOptions;
   }
 
   private request(session: Session, method: string, params?: unknown): Promise<unknown> {
@@ -245,7 +292,9 @@ export class AcpJsonRpcClient implements AcpClientPort {
       if (!pending) return;
       session.pending.delete(message.id);
       if (message.error) {
-        pending.reject(new Error(`${message.error.message} (code ${message.error.code})`));
+        const stderrTail = session.stderrBuffer.trim().split("\n").slice(-3).join("\n");
+        const detail = stderrTail ? `\n[ACP stderr]\n${stderrTail}` : "";
+        pending.reject(new Error(`${message.error.message} (code ${message.error.code})${detail}`));
       } else {
         pending.resolve(message.result);
       }
@@ -267,7 +316,7 @@ export class AcpJsonRpcClient implements AcpClientPort {
         const req = parsePermissionRequest(params);
         if (!session.sink) return;
         const answer = await session.sink.requestPermission(req);
-        this.send(session, { jsonrpc: "2.0", id, result: { optionId: answer.optionId } });
+        this.send(session, { jsonrpc: "2.0", id, result: { outcome: { outcome: "selected", optionId: answer.optionId } } });
         return;
       }
       case "cursor/ask_question": {
@@ -279,10 +328,9 @@ export class AcpJsonRpcClient implements AcpClientPort {
       }
       case "cursor/create_plan": {
         if (session.sink) {
-          const steps = parsePlanSteps(params.steps);
+          const steps = parsePlanSteps(params.steps ?? params.entries);
           if (steps.length > 0) {
-            const traceId = (params.traceId as string | undefined) ?? session.sessionId ?? "unknown";
-            session.sink.publish({ type: "acp.plan", traceId, steps });
+            session.sink.publish({ type: "acp.plan", traceId: session.traceId ?? session.sessionId ?? "unknown", steps });
           }
         }
         this.send(session, { jsonrpc: "2.0", id, result: { accepted: true } });
@@ -302,55 +350,69 @@ export class AcpJsonRpcClient implements AcpClientPort {
     if (!session.sink) return;
     if (notification.method !== "session/update") return;
     const params = (notification.params ?? {}) as Record<string, unknown>;
-    const traceId = (params.traceId as string | undefined) ?? session.sessionId ?? "unknown";
-    const updateType = params.type as string | undefined;
+    const update = (params.update ?? {}) as Record<string, unknown>;
+    const traceId = session.traceId ?? session.sessionId ?? "unknown";
+    const updateType = update.sessionUpdate as string | undefined;
+    if (updateType) session.stderrBuffer += `[acp-debug] sessionUpdate=${updateType} messageId=${String(update.messageId ?? "none")}\n`;
     switch (updateType) {
-      case "agent_message_chunk":
-      case "text_delta":
-        session.sink.publish({ type: "acp.text_delta", traceId, delta: String(params.delta ?? "") });
+      case "agent_message_chunk": {
+        const content = update.content as Record<string, unknown> | undefined;
+        const text = content ? String(content.text ?? "") : "";
+        if (text) {
+          const messageId = String(update.messageId ?? "");
+          session.sink.publish({ type: "acp.text_delta", traceId, delta: text, messageId: messageId || undefined });
+        }
         break;
-      case "agent_thought_chunk":
-      case "thought_delta":
-        session.sink.publish({ type: "acp.thought_delta", traceId, delta: String(params.delta ?? "") });
+      }
+      case "user_message_chunk":
+        // The agent echoes the user's message back. Do not display it as agent output.
         break;
+      case "agent_thought_chunk": {
+        const content = update.content as Record<string, unknown> | undefined;
+        const text = content ? String(content.text ?? "") : "";
+        if (text) session.sink.publish({ type: "acp.thought_delta", traceId, delta: text });
+        break;
+      }
       case "tool_call": {
-        const call = params.call as Record<string, unknown> | undefined;
-        if (!call) break;
         session.sink.publish({
           type: "acp.tool_call",
           traceId,
-          call: toToolCall(call),
+          call: toToolCall(update),
         });
         break;
       }
       case "tool_call_update": {
-        const call = params.call as Record<string, unknown> | undefined;
-        if (!call) break;
+        const content = update.content as unknown;
+        let summary: string | undefined;
+        if (Array.isArray(content)) {
+          for (const item of content) {
+            if (typeof item === "object" && item !== null) {
+              const c = (item as Record<string, unknown>).content as Record<string, unknown> | undefined;
+              if (c && typeof c.text === "string") { summary = c.text; break; }
+            }
+          }
+        }
         session.sink.publish({
           type: "acp.tool_call_update",
           traceId,
-          callId: String(call.id ?? ""),
-          status: toolStatusFrom(call.status as string | undefined),
-          summary: call.summary ? String(call.summary) : undefined,
+          callId: String(update.toolCallId ?? ""),
+          status: toolStatusFrom(update.status as string | undefined),
+          summary,
         });
         break;
       }
       case "plan": {
-        const steps = parsePlanSteps(params.steps);
+        const steps = parsePlanSteps(update.entries);
         if (steps.length > 0) {
           session.sink.publish({ type: "acp.plan", traceId, steps });
         }
         break;
       }
-      case "session_state": {
-        const state = parseSessionState(params.state);
-        session.sink.publish({ type: "acp.session_state", traceId, conversationId: session.conversationId, state });
+      case "usage_update":
+      case "session_info_update":
+      case "available_commands_update":
+        // Not surfaced to the UI yet.
         break;
-      }
-      case "turn_end": {
-        session.sink.publish({ type: "acp.turn_end", traceId, ok: Boolean(params.ok ?? true), error: params.error ? String(params.error) : undefined });
-        break;
-      }
     }
   }
 
@@ -381,26 +443,28 @@ export class AcpJsonRpcClient implements AcpClientPort {
   }
 }
 
-function toToolCall(call: Record<string, unknown>): AcpToolCall {
+function toToolCall(update: Record<string, unknown>): AcpToolCall {
   return {
-    id: String(call.id ?? ""),
-    title: String(call.title ?? call.name ?? ""),
-    kind: toolKindFrom(call.kind as string | undefined),
-    status: toolStatusFrom(call.status as string | undefined),
-    summary: call.summary ? String(call.summary) : "",
+    id: String(update.toolCallId ?? update.id ?? ""),
+    title: String(update.title ?? update.name ?? ""),
+    kind: toolKindFrom(update.kind as string | undefined),
+    status: toolStatusFrom(update.status as string | undefined),
+    summary: "",
+    rawInput: update.rawInput,
   };
 }
 
-function parsePlanSteps(steps: unknown): readonly AcpPlanStep[] {
-  if (!Array.isArray(steps)) return [];
+function parsePlanSteps(entries: unknown): readonly AcpPlanStep[] {
+  if (!Array.isArray(entries)) return [];
   const result: AcpPlanStep[] = [];
-  for (const step of steps) {
-    if (typeof step !== "object" || step === null) continue;
-    const s = step as Record<string, unknown>;
-    const id = String(s.id ?? "");
-    const text = String(s.text ?? s.description ?? "");
-    if (!id || !text) continue;
-    result.push({ id, text, done: Boolean(s.done ?? s.completed ?? false) });
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    if (typeof entry !== "object" || entry === null) continue;
+    const s = entry as Record<string, unknown>;
+    const text = String(s.content ?? s.text ?? s.description ?? "");
+    if (!text) continue;
+    const status = String(s.status ?? "pending");
+    result.push({ id: String(s.id ?? `step_${i}`), text, done: status === "completed" || status === "done" });
   }
   return result;
 }
@@ -411,15 +475,16 @@ function parsePermissionRequest(params: Record<string, unknown>): AcpPermissionR
   for (const opt of rawOptions) {
     if (typeof opt !== "object" || opt === null) continue;
     const o = opt as Record<string, unknown>;
-    const optionId = String(o.id ?? o.optionId ?? "");
+    const optionId = String(o.optionId ?? o.id ?? "");
     const name = String(o.name ?? o.label ?? optionId);
     if (!optionId) continue;
     options.push({ optionId, name, kind: (o.kind as AcpPermissionOption["kind"] | undefined) ?? undefined });
   }
+  const toolCall = (params.toolCall ?? {}) as Record<string, unknown>;
   return {
-    requestId: String(params.requestId ?? ""),
-    toolTitle: String(params.toolTitle ?? params.title ?? ""),
-    detail: params.detail ? String(params.detail) : undefined,
+    requestId: String(params.sessionId ?? params.requestId ?? ""),
+    toolTitle: String(toolCall.title ?? params.toolTitle ?? params.title ?? ""),
+    detail: toolCall.detail ? String(toolCall.detail) : (params.detail ? String(params.detail) : undefined),
     options,
   };
 }
@@ -455,15 +520,36 @@ function toAskAnswerJson(answer: AcpAskAnswer): Record<string, unknown> {
   return result;
 }
 
-function parseSessionState(state: unknown): "idle" | "starting" | "running" | "error" | "cancelled" {
-  switch (state) {
-    case "idle":
-    case "starting":
-    case "running":
-    case "error":
-    case "cancelled":
-      return state;
-    default:
-      return "running";
+function parseConfigOptions(raw: unknown): readonly AcpConfigOption[] {
+  if (!Array.isArray(raw)) return [];
+  const result: AcpConfigOption[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) continue;
+    const o = item as Record<string, unknown>;
+    const id = String(o.id ?? "");
+    const name = String(o.name ?? "");
+    const type = (o.type as string | undefined) === "boolean" ? "boolean" : "select";
+    if (!id || !name) continue;
+    const options: AcpConfigOptionValue[] = [];
+    if (Array.isArray(o.options)) {
+      for (const opt of o.options) {
+        if (typeof opt !== "object" || opt === null) continue;
+        const ov = opt as Record<string, unknown>;
+        const value = String(ov.value ?? "");
+        const optName = String(ov.name ?? value);
+        if (!value) continue;
+        options.push({ value, name: optName, description: ov.description ? String(ov.description) : undefined });
+      }
+    }
+    result.push({
+      id,
+      name,
+      description: o.description ? String(o.description) : undefined,
+      category: o.category ? String(o.category) : undefined,
+      type,
+      currentValue: typeof o.currentValue === "boolean" ? o.currentValue : String(o.currentValue ?? ""),
+      options: options.length > 0 ? options : undefined,
+    });
   }
+  return result;
 }

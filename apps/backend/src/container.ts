@@ -85,6 +85,8 @@ import {
   CancelAcpTurnHandler,
   AnswerAcpPermissionHandler,
   AnswerAcpAskHandler,
+  SetAcpConfigOptionHandler,
+  EnsureAcpSessionHandler,
   GetAcpSessionInfoHandler,
   type JobStorePort,
   type JobSchedulerSettings,
@@ -427,6 +429,8 @@ export function createContainer(options: ContainerOptions): Container {
   commandBus.register("cancel-acp-turn", new CancelAcpTurnHandler(acpSessionService));
   commandBus.register("answer-acp-permission", new AnswerAcpPermissionHandler(acpPermissionService));
   commandBus.register("answer-acp-ask", new AnswerAcpAskHandler(acpAskService));
+  commandBus.register("set-acp-config-option", new SetAcpConfigOptionHandler(acpSessionService));
+  commandBus.register("ensure-acp-session", new EnsureAcpSessionHandler(acpSessionService));
   if (pluginInstaller) {
     commandBus.register("install-plugin", new InstallPluginHandler(pluginInstaller, eventDispatcher, clock));
     commandBus.register("uninstall-plugin", new UninstallPluginHandler(pluginInstaller, runtimeManager, pluginRepository, eventDispatcher, clock));
