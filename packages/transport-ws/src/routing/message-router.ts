@@ -55,6 +55,10 @@ export class MessageRouter {
 
       if (mapped.kind === "command") {
         const result = await this.deps.commandBus.execute(mapped.command);
+        if (mapped.command.kind === "run-agent-turn" && result && typeof result === "object" && "messages" in result) {
+          const { messages: _messages, ...stripped } = result as Record<string, unknown>;
+          return mapSuccessResponse(request.id, stripped);
+        }
         return mapSuccessResponse(request.id, result);
       }
 

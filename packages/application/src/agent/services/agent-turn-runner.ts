@@ -61,6 +61,7 @@ export interface AgentTurnResult {
   readonly reasoning?: string;
   readonly usage?: AgentTokenUsage;
   readonly compaction?: AgentCompactionCheckpoint;
+  readonly messages?: readonly AgentMessage[];
 }
 
 export interface AgentCompactionCheckpoint {
@@ -217,6 +218,7 @@ export class AgentTurnRunner {
           rounds: round,
           toolCalls,
           steps,
+          messages,
           ...(model ? { model } : {}),
           ...(providerId ? { providerId } : {}),
           ...(api ? { api } : {}),
@@ -236,6 +238,7 @@ export class AgentTurnRunner {
           rounds: round,
           toolCalls,
           steps,
+          messages,
           ...(model ? { model } : {}),
           ...(providerId ? { providerId } : {}),
           ...(api ? { api } : {}),
@@ -291,6 +294,7 @@ export class AgentTurnRunner {
       rounds: maxToolRounds,
       toolCalls,
       steps,
+      messages,
       ...(model ? { model } : {}),
       ...(providerId ? { providerId } : {}),
       ...(api ? { api } : {}),

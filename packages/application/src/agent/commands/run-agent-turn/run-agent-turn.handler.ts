@@ -47,6 +47,7 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
     private readonly promptLoader?: PromptLoaderPort,
     private readonly userPrompt: string = "",
     private readonly memoryStore?: MemoryStorePort,
+    private readonly onTurnComplete?: (result: AgentTurnResult) => Promise<void> | void,
   ) {}
 
   async handle(command: RunAgentTurnCommand): Promise<AgentTurnResult> {
@@ -75,7 +76,7 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
     const worker: AgentTurnWorker = new InProcessAgentTurnWorker((input) => runner.run(input));
     const traceId = command.traceId ?? randomUUID();
     const messages = await this.injectSystemPrompts(command, traceId);
-    return this.coordinator.run(traceId, (signal) => worker.run({
+    const result = await this.coordinator.run(traceId, (signal) => worker.run({
       messages,
       pluginIds: command.pluginIds,
       traceId,
@@ -90,6 +91,14 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
       ...(command.effort !== undefined ? { effort: command.effort } : {}),
       ...(command.modelCapabilities !== undefined ? { modelCapabilities: command.modelCapabilities } : {}),
     }));
+    if (this.onTurnComplete) {
+      try {
+        await this.onTurnComplete(result);
+      } catch (error) {
+        this.logger?.error("onTurnComplete callback failed: %s", error instanceof Error ? error.message : String(error));
+      }
+    }
+    return result;
   }
 
   private async injectSystemPrompts(command: RunAgentTurnCommand, traceId: string) {

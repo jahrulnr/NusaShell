@@ -9,6 +9,12 @@ import type { AgentToolDefinition } from "../ports/agent-provider.port.js";
 import type { AgentToolGateway } from "../ports/agent-tool-gateway.port.js";
 import type { LoggerPort } from "../../plugin/ports/logger.port.js";
 
+export type WriteOrigin = "foreground" | "background_review";
+
+export interface SkillApprovalStagingPort {
+  stage(skillId: string, action: "create" | "edit" | "write_file" | "delete", path: string, content: string): Promise<{ id: string }>;
+}
+
 interface McpToolRoute {
   readonly pluginId: string;
   readonly toolName: string;
@@ -25,6 +31,8 @@ const emptySchema = { type: "object", properties: {} } as const;
 export class McpAgentToolGateway implements AgentToolGateway {
   private readonly turnRoutes = new Map<string, Map<string, McpToolRoute>>();
   private readonly activeCalls = new Map<string, Map<string, string>>();
+  private writeOrigin: WriteOrigin = "foreground";
+  private writeApprovalEnabled = false;
 
   constructor(
     private readonly runtimeManager: PluginRuntimeManager,
@@ -33,7 +41,20 @@ export class McpAgentToolGateway implements AgentToolGateway {
     private readonly logger?: LoggerPort,
     private readonly memoryStore?: MemoryStorePort,
     private readonly skillProvenance?: SkillProvenancePort,
+    private readonly approvalStaging?: SkillApprovalStagingPort,
   ) {}
+
+  setWriteOrigin(origin: WriteOrigin): void {
+    this.writeOrigin = origin;
+  }
+
+  getWriteOrigin(): WriteOrigin {
+    return this.writeOrigin;
+  }
+
+  setWriteApprovalEnabled(enabled: boolean): void {
+    this.writeApprovalEnabled = enabled;
+  }
 
   beginTurn(turnId: string): void {
     this.turnRoutes.set(turnId, new Map());
@@ -476,10 +497,15 @@ export class McpAgentToolGateway implements AgentToolGateway {
     const skillId = requireString(args.name, "name");
     const content = optionalString(args.content);
     const filePath = optionalString(args.path);
+    const shouldStage = this.writeOrigin === "background_review" && this.writeApprovalEnabled && this.approvalStaging;
     try {
       switch (action) {
         case "create": {
           if (!content) throw new ApplicationError("AGENT_INVALID_INPUT", "content is required for create");
+          if (shouldStage) {
+            const pending = await this.approvalStaging!.stage(skillId, "create", "SKILL.md", content);
+            return { ok: true, data: { staged: true, id: pending.id }, meta: { provenance: "agent", staged: true } };
+          }
           const detail = await registry.create(skillId, content);
           await provenance.markAgent(skillId);
           return { ok: true, data: detail, meta: { provenance: "agent" } };
@@ -488,6 +514,10 @@ export class McpAgentToolGateway implements AgentToolGateway {
           if (!content) throw new ApplicationError("AGENT_INVALID_INPUT", "content is required for edit");
           const origin = await provenance.get(skillId);
           if (origin !== "agent") return skillProtected(skillId);
+          if (shouldStage) {
+            const pending = await this.approvalStaging!.stage(skillId, "edit", "SKILL.md", content);
+            return { ok: true, data: { staged: true, id: pending.id }, meta: { provenance: "agent", staged: true } };
+          }
           const result = await registry.write(skillId, "SKILL.md", content);
           return { ok: true, data: result, meta: { provenance: "agent" } };
         }
@@ -496,12 +526,20 @@ export class McpAgentToolGateway implements AgentToolGateway {
           if (!filePath) throw new ApplicationError("AGENT_INVALID_INPUT", "path is required for write_file");
           const origin = await provenance.get(skillId);
           if (origin !== "agent") return skillProtected(skillId);
+          if (shouldStage) {
+            const pending = await this.approvalStaging!.stage(skillId, "write_file", filePath, content);
+            return { ok: true, data: { staged: true, id: pending.id }, meta: { provenance: "agent", staged: true } };
+          }
           const result = await registry.write(skillId, filePath, content);
           return { ok: true, data: result, meta: { provenance: "agent" } };
         }
         case "delete": {
           const origin = await provenance.get(skillId);
           if (origin !== "agent") return skillProtected(skillId);
+          if (shouldStage) {
+            const pending = await this.approvalStaging!.stage(skillId, "delete", "", "");
+            return { ok: true, data: { staged: true, id: pending.id }, meta: { provenance: "agent", staged: true } };
+          }
           await registry.delete(skillId);
           await provenance.clear(skillId);
           return { ok: true, data: { deleted: skillId }, meta: { provenance: "agent" } };

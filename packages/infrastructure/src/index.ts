@@ -18,6 +18,6 @@ export {
   type ModelRuntimePolicy,
   type TextToolCallParseResult,
 } from "./ai/index.js";
-export { FilesystemPromptLoader, MarkdownDocsIndex } from "./agent/index.js";
+export { FilesystemPromptLoader, FilesystemReviewStateStore, MarkdownDocsIndex } from "./agent/index.js";
 export { FilesystemSkillRegistry, FilesystemSkillProvenance, SkillApprovalStaging, type PendingSkillWrite } from "./skills/index.js";
 export { FilesystemMemoryStore } from "./memory/index.js";

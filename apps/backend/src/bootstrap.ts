@@ -1,6 +1,6 @@
 import { createContainer, type Container } from "./container.js";
 import { ShutdownCoordinator } from "./shutdown.js";
-import { loadConfig, type AppConfig } from "@nusashell/application";
+import { loadConfig, type AppConfig, type BackgroundReviewSettings } from "@nusashell/application";
 import type { LogObserver } from "@nusashell/infrastructure";
 
 export interface BootstrapOptions {
@@ -12,6 +12,7 @@ export interface BootstrapOptions {
   readonly docsIndexStorageRoot?: string;
   readonly skillsRoot?: string;
   readonly memoryRoot?: string;
+  readonly backgroundReview?: Partial<BackgroundReviewSettings>;
   readonly resolvePluginRuntimeEnvironment?: (
     pluginId: string,
   ) => Promise<Readonly<Record<string, string>>> | Readonly<Record<string, string>>;
@@ -60,6 +61,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
       context: config.ai.context,
     },
     ...(options.loggerObserver ? { loggerObserver: options.loggerObserver } : {}),
+    ...(options.backgroundReview ? { backgroundReview: options.backgroundReview } : {}),
   });
   const shutdown = new ShutdownCoordinator(container);
 

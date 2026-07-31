@@ -4,7 +4,10 @@ export interface AgentPrompt {
   readonly isTemplate: boolean;
 }
 
+export type ReviewPromptKind = "memory" | "skill" | "combined";
+
 export interface PromptLoaderPort {
   loadPrompts(): Promise<readonly AgentPrompt[]>;
   loadCompactPrompt(): Promise<string | undefined>;
+  loadReviewPrompt(kind: ReviewPromptKind): Promise<string>;
 }

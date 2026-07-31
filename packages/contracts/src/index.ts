@@ -88,6 +88,7 @@ export {
   AgentToolCallStartEventSchema,
   AgentToolCallEndEventSchema,
   AgentContextEventSchema,
+  AgentLearningUpdatedEventSchema,
   type PluginInstalledEvent,
   type PluginUninstalledEvent,
   type PluginStartedEvent,
@@ -100,6 +101,7 @@ export {
   type AgentToolCallStartEvent,
   type AgentToolCallEndEvent,
   type AgentContextEvent,
+  type AgentLearningUpdatedEvent,
   type ParsedEvent,
 } from "./protocol/event-schemas.js";
 

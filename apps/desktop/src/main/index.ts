@@ -398,6 +398,12 @@ app.whenReady().then(async () => {
   ipcMain.handle("agent-conversations:delete", (_event, id: string) => requireConversationStore().delete(id));
   ipcMain.handle("agent-conversations:set-workspace", (_event, id: string, workspace: string) =>
     requireConversationStore().setWorkspace(id, workspace));
+  ipcMain.handle("background-review:configure", (_event, settings: Record<string, unknown>) => {
+    requireBackend().container.configureBackgroundReview(settings);
+    return { ok: true };
+  });
+  ipcMain.handle("background-review:settings", () =>
+    requireBackend().container.backgroundReviewScheduler.getSettings());
   ipcMain.on("logs:write", (_event, level: ShellLogLevel, message: string) => {
     if (!shellLogLevels.has(level) || typeof message !== "string") return;
     logTail.add("renderer", level, redactLogMessage(message.slice(0, 4000)));

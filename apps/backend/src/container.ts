@@ -9,6 +9,7 @@ import {
   PluginInstaller,
   PluginSyncService,
   FilesystemPromptLoader,
+  FilesystemReviewStateStore,
   MarkdownDocsIndex,
   FilesystemSkillRegistry,
   FilesystemSkillProvenance,
@@ -46,6 +47,12 @@ import {
   ListResourceTemplatesHandler,
   ReadResourceHandler,
   McpAgentToolGateway,
+  ReviewAgentToolGateway,
+  AgentTurnRunner,
+  InProcessAgentTurnWorker,
+  BackgroundReviewScheduler,
+  DEFAULT_REVIEW_SETTINGS,
+  type BackgroundReviewSettings,
   RunAgentTurnHandler,
   CancelAgentTurnHandler,
   AgentTurnCoordinator,
@@ -110,6 +117,7 @@ export interface ContainerOptions {
       readonly summaryMaxChars: number;
     };
   };
+  readonly backgroundReview?: Partial<BackgroundReviewSettings>;
 }
 
 export interface Container {
@@ -124,6 +132,7 @@ export interface Container {
   readonly skillRegistry: SkillRegistryPort;
   readonly skillProvenance: SkillProvenancePort;
   readonly skillApprovalStaging: SkillApprovalStaging;
+  readonly backgroundReviewScheduler: BackgroundReviewScheduler;
   readonly db?: SqliteDatabase | undefined;
   readonly logger: Logger;
   configureAi(settings: {
@@ -150,6 +159,7 @@ export interface Container {
     summaryMaxChars?: number;
   }): void;
   removeAi(providerId: string): void;
+  configureBackgroundReview(settings: Partial<BackgroundReviewSettings>): void;
 }
 
 export function createContainer(options: ContainerOptions): Container {
@@ -222,7 +232,7 @@ export function createContainer(options: ContainerOptions): Container {
   const skillApprovalStaging = new SkillApprovalStaging(skillsRoot);
   const memoryRoot = options.memoryRoot ?? new URL("../../../.nusashell/agent/memory", import.meta.url).pathname;
   const memoryStore = new FilesystemMemoryStore(memoryRoot);
-  const agentToolGateway = new McpAgentToolGateway(runtimeManager, docsIndex, skillRegistry, logger, memoryStore, skillProvenance);
+  const agentToolGateway = new McpAgentToolGateway(runtimeManager, docsIndex, skillRegistry, logger, memoryStore, skillProvenance, skillApprovalStaging);
   const promptLoader = new FilesystemPromptLoader(
     options.promptsRoot ?? new URL("../../../resources/agent/prompts", import.meta.url).pathname,
   );
@@ -248,6 +258,24 @@ export function createContainer(options: ContainerOptions): Container {
   }
   const agentProviderRegistry = new AgentProviderRegistry(agentProviders);
   const agentTurnCoordinator = new AgentTurnCoordinator();
+  const reviewGateway = new ReviewAgentToolGateway(agentToolGateway);
+  const reviewStateStore = new FilesystemReviewStateStore(memoryRoot);
+  const backgroundReviewScheduler = new BackgroundReviewScheduler({
+    stateStore: reviewStateStore,
+    promptLoader,
+    providerRegistry: agentProviderRegistry,
+    reviewGateway,
+    runnerFactory: ({ provider, toolGateway, maxToolRounds }) => {
+      const worker = new InProcessAgentTurnWorker(provider, toolGateway, logger);
+      return new AgentTurnRunner(worker, { maxToolRounds });
+    },
+    defaultProviderId: options.ai?.providerId || (options.ai?.stubEnabled ? "stub" : ""),
+    eventDispatcher,
+    logger,
+  });
+  if (options.backgroundReview) {
+    backgroundReviewScheduler.configure(options.backgroundReview);
+  }
 
   const commandBus = new CommandBus();
   commandBus.register("start-plugin", new StartPluginHandler(runtimeManager));
@@ -281,6 +309,7 @@ export function createContainer(options: ContainerOptions): Container {
     promptLoader,
     aiRuntime.userPrompt,
     memoryStore,
+    (result) => backgroundReviewScheduler.tick(result),
   ));
   commandBus.register("cancel-agent-turn", new CancelAgentTurnHandler(agentTurnCoordinator));
   if (pluginInstaller) {
@@ -324,6 +353,7 @@ export function createContainer(options: ContainerOptions): Container {
     skillRegistry,
     skillProvenance,
     skillApprovalStaging,
+    backgroundReviewScheduler,
     db,
     logger,
     configureAi(settings) {
@@ -355,6 +385,9 @@ export function createContainer(options: ContainerOptions): Container {
     },
     removeAi(providerId) {
       agentProviderRegistry.delete(providerId);
+    },
+    configureBackgroundReview(settings) {
+      backgroundReviewScheduler.configure(settings);
     },
     configureAiRuntime(settings) {
       aiRuntime.strategy = settings.strategy;

@@ -14,12 +14,14 @@ export {
   createAgentToolCallStartEvent,
   createAgentToolCallEndEvent,
   createAgentContextUpdateEvent,
+  createLearningUpdatedEvent,
   type ApplicationEvent,
   type AgentTextDeltaEvent,
   type AgentReasoningDeltaEvent,
   type AgentToolCallStartEvent,
   type AgentToolCallEndEvent,
   type AgentContextUpdateEvent,
+  type AgentLearningUpdatedEvent,
   type EventHandler,
   type EventHandlerFn,
 } from "./events/index.js";
@@ -112,6 +114,9 @@ export type {
   AgentToolGateway,
   AgentPrompt,
   PromptLoaderPort,
+  ReviewPromptKind,
+  ReviewState,
+  ReviewStateStorePort,
   DocsHit,
   DocSummary,
   DocContent,
@@ -131,6 +136,8 @@ export type {
 export {
   AgentTurnRunner,
   McpAgentToolGateway,
+  ReviewAgentToolGateway,
+  BackgroundReviewScheduler,
   InProcessAgentTurnWorker,
   RoutedAgentProvider,
   AgentTurnCoordinator,
@@ -139,6 +146,13 @@ export {
   injectPrompts,
   applyVars,
   formatMemoryPrompt,
+  DEFAULT_REVIEW_SETTINGS,
+} from "./agent/index.js";
+export type {
+  WriteOrigin,
+  SkillApprovalStagingPort,
+  BackgroundReviewSettings,
+  BackgroundReviewSchedulerDeps,
 } from "./agent/index.js";
 
 // Config

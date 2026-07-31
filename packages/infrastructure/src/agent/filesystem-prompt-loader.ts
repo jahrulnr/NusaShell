@@ -1,20 +1,26 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { AgentPrompt, PromptLoaderPort } from "@nusashell/application";
+import type { AgentPrompt, PromptLoaderPort, ReviewPromptKind } from "@nusashell/application";
 
 const STATIC_PROMPT_FILES = ["system.md", "mcp-tools.md"] as const;
 const DEVELOPER_PROMPT_FILE = "developer.md";
 const COMPACT_PROMPT_FILE = "compact.md";
+const REVIEW_PROMPT_FILES: Record<ReviewPromptKind, string> = {
+  memory: "memory-review.md",
+  skill: "skill-review.md",
+  combined: "combined-review.md",
+};
 
 /**
  * Loads agent prompt files from a filesystem directory. Static prompts
  * (system.md, mcp-tools.md) are returned as-is; developer.md is flagged
  * as a template for {{var}} substitution. compact.md is loaded lazily
- * only when compaction runs.
+ * only when compaction runs. Review prompts are loaded on demand.
  */
 export class FilesystemPromptLoader implements PromptLoaderPort {
   private cachedPrompts: readonly AgentPrompt[] | undefined;
   private cachedCompact: string | undefined | null;
+  private readonly cachedReview = new Map<ReviewPromptKind, string>();
 
   constructor(private readonly promptsRoot: string) {}
 
@@ -42,6 +48,15 @@ export class FilesystemPromptLoader implements PromptLoaderPort {
       this.cachedCompact = null;
       return undefined;
     }
+  }
+
+  async loadReviewPrompt(kind: ReviewPromptKind): Promise<string> {
+    const cached = this.cachedReview.get(kind);
+    if (cached) return cached;
+    const fileName = REVIEW_PROMPT_FILES[kind];
+    const content = await this.readPromptFile(fileName);
+    this.cachedReview.set(kind, content);
+    return content;
   }
 
   private async readPromptFile(name: string): Promise<string> {

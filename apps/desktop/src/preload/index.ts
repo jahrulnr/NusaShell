@@ -75,6 +75,10 @@ export interface ShellApi {
     pendingApprove(id: string): Promise<unknown>;
     pendingReject(id: string): Promise<void>;
   };
+  readonly backgroundReview: {
+    configure(settings: Record<string, unknown>): Promise<{ ok: boolean }>;
+    settings(): Promise<Record<string, unknown>>;
+  };
   readonly mailAccounts: {
     list(): Promise<PublicMailSettings>;
     save(input: SaveMailAccountInput): Promise<PublicMailSettings>;
@@ -184,6 +188,10 @@ const api: ShellApi = {
     pendingList: () => ipcRenderer.invoke("skills:pending:list"),
     pendingApprove: (id) => ipcRenderer.invoke("skills:pending:approve", id),
     pendingReject: (id) => ipcRenderer.invoke("skills:pending:reject", id),
+  },
+  backgroundReview: {
+    configure: (settings) => ipcRenderer.invoke("background-review:configure", settings),
+    settings: () => ipcRenderer.invoke("background-review:settings"),
   },
   mailAccounts: {
     list: () => ipcRenderer.invoke("mail-accounts:list"),

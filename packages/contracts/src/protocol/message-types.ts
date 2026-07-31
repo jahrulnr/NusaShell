@@ -67,7 +67,8 @@ export type EventType =
   | "agent.reasoning_delta"
   | "agent.tool_call_start"
   | "agent.tool_call_end"
-  | "agent.context";
+  | "agent.context"
+  | "agent.learning_updated";
 
 export interface EventEnvelope<TPayload = unknown> {
   readonly kind: "event";

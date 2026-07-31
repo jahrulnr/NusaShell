@@ -62,3 +62,39 @@ also available as desktop UI operations.
 `skill_exec` is intentionally absent. Adding it requires a separate decision
 covering process isolation, interpreter policy, filesystem/network access,
 resource limits, user approval, cancellation, and audit logging.
+
+## Background Learning Review
+
+After each successful agent turn, a `BackgroundReviewScheduler` ticks counters
+and fire-and-forget spawns a restricted review turn when thresholds are
+crossed. The review turn uses a `ReviewAgentToolGateway` that whitelists only
+`memory`, `skill_list`, `skill_search`, `skill_read`, and `skill_manage` —
+no MCP/plugin tools are available.
+
+### Settings
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `enabled` | `true` | Master toggle |
+| `memoryEveryNTurns` | `10` | Turns between memory reviews |
+| `skillEveryNToolRounds` | `10` | Tool rounds between skill reviews |
+| `maxToolRounds` | `6` | Max rounds for the review turn |
+| `transcriptTailMessages` | `40` | Messages from the end of the transcript to send |
+
+### Write origin and staging
+
+When `writeOrigin` is `"background_review"`, skill mutations are staged via
+`SkillApprovalStaging` instead of applied directly. The user sees pending
+writes in the desktop UI and can approve or reject them.
+
+### Event
+
+When the review turn produces mutations, an `agent.learning_updated` event is
+dispatched through the `EventDispatcher` and mapped to a WebSocket event. The
+desktop launcher shows a toast notification.
+
+### State persistence
+
+Review counters are stored in `{memoryRoot}/.review-state.json` using
+`FilesystemReviewStateStore`. The file is atomically written and survives
+restarts.

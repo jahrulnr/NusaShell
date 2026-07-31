@@ -153,6 +153,18 @@ export const AgentContextEventSchema = z.object({
   }),
 });
 
+export const AgentLearningUpdatedEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("agent.learning_updated"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    reviewTraceId: z.string().min(1),
+    kinds: z.array(z.string()),
+    summary: z.string(),
+    timestamp: z.string(),
+  }),
+});
+
 export const EventSchema = z.discriminatedUnion("event", [
   PluginInstalledEventSchema,
   PluginUninstalledEventSchema,
@@ -166,6 +178,7 @@ export const EventSchema = z.discriminatedUnion("event", [
   AgentToolCallStartEventSchema,
   AgentToolCallEndEventSchema,
   AgentContextEventSchema,
+  AgentLearningUpdatedEventSchema,
 ]);
 
 export type PluginInstalledEvent = z.infer<typeof PluginInstalledEventSchema>;
@@ -180,4 +193,5 @@ export type AgentReasoningDeltaEvent = z.infer<typeof AgentReasoningDeltaEventSc
 export type AgentToolCallStartEvent = z.infer<typeof AgentToolCallStartEventSchema>;
 export type AgentToolCallEndEvent = z.infer<typeof AgentToolCallEndEventSchema>;
 export type AgentContextEvent = z.infer<typeof AgentContextEventSchema>;
+export type AgentLearningUpdatedEvent = z.infer<typeof AgentLearningUpdatedEventSchema>;
 export type ParsedEvent = z.infer<typeof EventSchema>;

@@ -1487,6 +1487,12 @@ document.addEventListener("DOMContentLoaded", () => {
   onEvent("plugin.state_changed", (payload) => handlePluginEvent(payload, "plugin.state_changed"));
   onEvent("tool.call_completed", (payload) => handlePluginEvent(payload, "tool.call_completed"));
 
+  onEvent("agent.learning_updated", (payload) => {
+    const kinds = Array.isArray(payload?.kinds) ? payload.kinds.join(", ") : "unknown";
+    const summary = payload?.summary ? `: ${payload.summary}` : "";
+    showToast(`Background review updated ${kinds}${summary}`, "info");
+  });
+
   // Auto-update
   initUpdater();
 

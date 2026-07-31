@@ -74,4 +74,29 @@ describe("mapDomainEvent", () => {
       },
     });
   });
+
+  it("maps agent.learning_updated events", () => {
+    expect(mapDomainEvent({
+      type: "agent.learning_updated",
+      occurredAt: new Date("2026-07-29T00:00:00.000Z"),
+      aggregateId: "review-trace-1",
+      kinds: ["memory", "skills"],
+      summary: "Updated memory and skills",
+      reviewTraceId: "review-trace-1",
+    } as Parameters<typeof mapDomainEvent>[0] & {
+      kinds: string[];
+      summary: string;
+      reviewTraceId: string;
+    }, 9)).toEqual({
+      kind: "event",
+      event: "agent.learning_updated",
+      sequence: 9,
+      payload: {
+        reviewTraceId: "review-trace-1",
+        kinds: ["memory", "skills"],
+        summary: "Updated memory and skills",
+        timestamp: "2026-07-29T00:00:00.000Z",
+      },
+    });
+  });
 });
