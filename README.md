@@ -23,17 +23,20 @@ scenes, NusaShell spawns (or reuses) that plugin's MCP server process on
 demand and brokers every tool call between the UI and the server.
 
 **Why this exists:**
+
 - **AI tools deserve a real UI, not just a chat log.** A lot of tool interactions
-  (browsing data, filling a form, watching a live dashboard) are just better as
-  a visual surface than as text back-and-forth.
+(browsing data, filling a form, watching a live dashboard) are just better as
+a visual surface than as text back-and-forth.
 - **Install/uninstall should feel like a desktop app.** Drop a plugin in, it
-  shows up as an icon. Remove it, it's gone - no config file surgery.
+shows up as an icon. Remove it, it's gone - no config file surgery.
 - **UI and backend logic shouldn't need to trust each other directly.** The
-  shell sits in the middle as a broker, which keeps plugin lifecycle
-  (spawn, suspend, kill) and communication routing in one predictable place.
+shell sits in the middle as a broker, which keeps plugin lifecycle
+(spawn, suspend, kill) and communication routing in one predictable place.
 - **Plugin authors shouldn't have to reinvent MCP.** If you already have an
-  MCP server, you mostly just add a `ui/` folder next to it - NusaShell
-  handles the rest.
+MCP server, you mostly just add a `ui/` folder next to it - NusaShell
+handles the rest.
+
+
 
 ## How it works (short version)
 
@@ -50,6 +53,15 @@ Plugin UI and MCP never peer-connect. In the target architecture the host talks
 to the backend over WebSocket; the plugin iframe talks to the host via a small
 bridge API (`window.shell.callTool`). See the docs map below for the full story.
 
+## Screenshots
+
+Captured from the Electron desktop app (`make dev`):
+
+| Launcher | Agent workspace | Skills workspace |
+| --- | --- | --- |
+| ![NusaShell launcher](./docs/assets/screenshots/desktop-app.png) | ![Agent workspace with a live conversation](./docs/assets/screenshots/agent-workspace.png) | ![Skills workspace, empty-library state](./docs/assets/screenshots/skills-workspace.png) |
+| Home grid with installed plugins (Files, Mail, Notes, Terminal) and live running-state badges. | Full-bleed conversation rail + message runway, streaming a real provider turn. | Three-pane package browser (library, files, editor) shown in its empty state. |
+
 ## Documentation map
 
 | Doc | Role |
@@ -57,10 +69,16 @@ bridge API (`window.shell.callTool`). See the docs map below for the full story.
 | [`AGENTS.md`](./AGENTS.md) | Agent/human working rules, architecture locks, versioning |
 | [`docs/blueprint.md`](./docs/blueprint.md) | Product concept: plugin shape, launcher UX, lifecycle, MCP transports, runtime trade-offs |
 | [`docs/backend-structure.md`](./docs/backend-structure.md) | Target backend: Clean Architecture monorepo, WebSocket protocol, package boundaries, MVP scope |
+| [`docs/architecture/agent-runtime.md`](./docs/architecture/agent-runtime.md) | Agent turn loop, provider routing, tool-call recovery, conversation/checkpoint model |
+| [`docs/architecture/agent-skills-platform-technical-spec.md`](./docs/architecture/agent-skills-platform-technical-spec.md) | Full technical spec for a general-purpose agent skills platform (draft, larger than the shipped subset) |
+| [`docs/architecture/local-agent-skills.md`](./docs/architecture/local-agent-skills.md) | Current, shipped boundary of the local managed skills library and its read-only meta-tools |
+| [`docs/architecture/mcp-capability-policy.md`](./docs/architecture/mcp-capability-policy.md) | Which MCP protocol capabilities NusaShell implements now vs. defers, and the adoption gate |
+| [`docs/architecture/progressive-mcp-tools.md`](./docs/architecture/progressive-mcp-tools.md) | Shell-owned meta-tools used to keep MCP tool discovery bounded per agent turn |
 | [`docs/mcp/nusashell-mail-mcp-plugin-spec.md`](./docs/mcp/nusashell-mail-mcp-plugin-spec.md) | Mail plugin protocol assessment, security model, and target tool contract |
 | [`docs/mcp/nusashell-mail-mcp-plugin-implementation.md`](./docs/mcp/nusashell-mail-mcp-plugin-implementation.md) | Implemented read-only Mail milestone, runtime wiring, and current limitations |
 | [`docs/PoC/`](./docs/PoC/) | Runnable zero-dep bridge demo (behavioral reference, not the target layout) |
-| [`docs/ui-design/`](./docs/ui-design/) | Launcher visual sketch |
+| [`docs/ui-design/`](./docs/ui-design/) | Launcher visual sketch, plus the Agent workspace and Skills workspace visual contracts |
+
 
 ## Prerequisites
 
@@ -69,6 +87,8 @@ bridge API (`window.shell.callTool`). See the docs map below for the full story.
   - Linux: `sudo apt install python3 make g++` (or distro equivalent)
   - macOS: `xcode-select --install`
   - Windows: `npm install --global windows-build-tools` or Visual Studio Build Tools
+
+
 
 ## Quickstart (PoC)
 
@@ -80,13 +100,13 @@ cd nusashell/docs/PoC
 node server.js
 ```
 
-Then open **http://localhost:8420** in your browser.
+Then open **[http://localhost:8420](http://localhost:8420)** in your browser.
 
 - Click the **Notes** icon → its UI opens in a window
 - Type a note, click **Create Note** → this calls a tool through the bridge,
-  which spawns the plugin's MCP process on first use
+which spawns the plugin's MCP process on first use
 - Watch the live log panel at the bottom of the launcher - it shows the actual
-  `tool_call` / `tool_result` traffic going through the broker
+`tool_call` / `tool_result` traffic going through the broker
 - The icon gets a green "running" badge once its MCP process is alive
 
 More detail: [`docs/PoC/README.md`](./docs/PoC/README.md).
@@ -96,7 +116,7 @@ More detail: [`docs/PoC/README.md`](./docs/PoC/README.md).
 Requires Node.js 20+, pnpm 11+, and native build tools (see [Prerequisites](#prerequisites)).
 
 ```bash
-git clone <your-repo-url> nusashell
+git clone https://github.com/jahrulnr/NusaShell.git nusashell
 cd nusashell
 pnpm install
 make dev
@@ -124,7 +144,7 @@ Minimal manifest:
 
 ```jsonc
 {
-  "id": "com.you.my-plugin",
+  "id": "you.my-plugin",
   "name": "My Plugin",
   "version": "1.0.0",
   "icon": "file://icon.png",
@@ -154,6 +174,7 @@ packages; a backend composition root; and an Electron desktop shell. Architectur
 docs and the PoC under `docs/` remain authoritative for product intent.
 
 **Monorepo today:**
+
 - `packages/domain` — plugin identity, manifest, runtime state, lifecycle policies, tool-call model (Vitest-covered)
 - `packages/application` — command/query handlers, agent turn runner, prompt injection, docs tools
 - `packages/infrastructure` — SQLite, filesystem registry, MCP clients (stdio/HTTP/SSE), Pino logger, docs index
@@ -169,6 +190,7 @@ docs and the PoC under `docs/` remain authoritative for product intent.
 The file survives restarts and is the primary source for post-incident debugging.
 
 **What the PoC demonstrates** (`docs/PoC/`):
+
 - Plugin discovery (folder scan), manifest parsing
 - Lazy MCP process spawning, one process per plugin, reused across calls
 - UI ↔ shell ↔ MCP bridge over a simple request/response protocol
@@ -180,12 +202,15 @@ SDK, SQLite for installed-plugin metadata. Domain layer is in place; application
 and infrastructure are next.
 
 **Deliberately deferred** (by design, to avoid premature complexity):
+
 - Security: iframe sandboxing, install-time permission prompts, process
-  isolation - next phase after core plumbing, kept separate on purpose
+isolation - next phase after core plumbing, kept separate on purpose
 - Swapping the PoC hand-rolled stdio JSON-RPC for `@modelcontextprotocol/sdk`
 - Idle-timeout auto-suspend for MCP processes
 - Installing from a packaged `.zip` instead of a raw folder
 - True multi-window support (PoC uses a single modal window)
+
+
 
 ## Repo layout (today)
 
@@ -213,8 +238,11 @@ and infrastructure are next.
 └── docs/
     ├── blueprint.md           # product / plugin architecture
     ├── backend-structure.md   # target backend monorepo + WS protocol
+    ├── architecture/          # agent runtime, skills platform, MCP capability/tooling policy
+    ├── mcp/                   # Mail plugin protocol spec + implementation notes
+    ├── assets/screenshots/    # README screenshots of the running desktop app
     ├── PoC/                   # runnable zero-dep bridge demo
-    └── ui-design/             # launcher visual sketch
+    └── ui-design/             # launcher, agent workspace, and skills workspace visual sketches
 ```
 
 Further monorepo pieces (`plugins/`, full apps) are specified in

@@ -8,9 +8,12 @@ NusaShell is a desktop-like **shell for AI tools**: each plugin bundles a **UI +
 MCP server**; the shell brokers lifecycle and tool calls so plugins get a real
 visual surface (not chat-only MCP).
 
-**Current stage:** early scaffold. `packages/domain` is implemented; `apps/` and
-other `packages/` are stubs. Authoritative intent lives in docs; the runnable
-demo is `docs/PoC/`.
+**Current stage:** working desktop app on top of a pnpm monorepo. `domain`,
+`application`, `infrastructure`, `transport-ws`, `contracts`, and `plugin-sdk`
+packages are implemented; `apps/backend` (composition root) and `apps/desktop`
+(Electron shell) are implemented. `packages/shared` and `packages/testing` are
+still stub/helper-only. Architecture docs and `docs/PoC/` remain the
+authoritative behavioral reference for product intent.
 
 | Path | Role |
 | --- | --- |
@@ -18,8 +21,10 @@ demo is `docs/PoC/`.
 | `packages/domain/` | Pure domain layer (plugin runtime, policies, events) |
 | `docs/blueprint.md` | Product / plugin architecture, launcher UX, MCP transports |
 | `docs/backend-structure.md` | Target Clean Architecture monorepo + WebSocket protocol |
+| `docs/architecture/` | Agent runtime, agent skills platform, MCP capability policy, progressive MCP tools |
+| `docs/mcp/` | Mail plugin MCP protocol spec + implementation notes |
 | `docs/PoC/` | Behavioral bridge demo (not the target layout) |
-| `docs/ui-design/` | Launcher visual sketch |
+| `docs/ui-design/` | Launcher, agent workspace, and skills workspace visual sketches |
 | `VERSION` | Current semver |
 | `CHANGELOG.md` | User-facing notable changes |
 | `.agents/skills/frontend-design/` | Distinctive UI design skill for shell/plugin surfaces |
@@ -29,8 +34,9 @@ demo is `docs/PoC/`.
 1. Read this file and the relevant section of `README.md`.
 2. For product/plugin UX → `docs/blueprint.md`.
 3. For backend folders, layers, WS protocol, MVP scope → `docs/backend-structure.md`.
-4. Treat `docs/PoC/` as a **behavioral reference**, not the scaffold target.
-5. For launcher / plugin UI work → also load `.agents/skills/frontend-design/SKILL.md`.
+4. For agent runtime, MCP tool policy, or local skills → `docs/architecture/`.
+5. Treat `docs/PoC/` as a **behavioral reference**, not the scaffold target.
+6. For launcher / plugin UI work → also load `.agents/skills/frontend-design/SKILL.md`.
 
 ### Run the PoC
 
