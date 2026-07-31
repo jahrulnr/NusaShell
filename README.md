@@ -90,27 +90,6 @@ Captured from the Electron desktop app (`make dev`):
 
 
 
-## Quickstart (PoC)
-
-Requires Node.js only (no `npm install` for the proof of concept).
-
-```bash
-git clone https://github.com/jahrulnr/NusaShell.git nusashell
-cd nusashell/docs/PoC
-node server.js
-```
-
-Then open **[http://localhost:8420](http://localhost:8420)** in your browser.
-
-- Click the **Notes** icon → its UI opens in a window
-- Type a note, click **Create Note** → this calls a tool through the bridge,
-which spawns the plugin's MCP process on first use
-- Watch the live log panel at the bottom of the launcher - it shows the actual
-`tool_call` / `tool_result` traffic going through the broker
-- The icon gets a green "running" badge once its MCP process is alive
-
-More detail: [`docs/PoC/README.md`](./docs/PoC/README.md).
-
 ## Quickstart (Desktop App)
 
 Requires Node.js 20+, pnpm 11+, and native build tools (see [Prerequisites](#prerequisites)).
