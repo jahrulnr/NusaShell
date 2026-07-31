@@ -18,4 +18,5 @@ export interface RunAgentTurnCommand extends Command {
   readonly traceId?: string;
   readonly workspace?: string;
   readonly interactive?: boolean;
+  readonly resume?: boolean;
 }

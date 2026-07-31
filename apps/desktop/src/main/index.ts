@@ -165,6 +165,7 @@ async function startBackend(): Promise<BootstrapResult> {
       apiKey: activeProvider?.apiKey,
       maxToolRounds: aiSettings.maxToolRounds,
       maxRepeatedToolCalls: aiSettings.maxRepeatedToolCalls,
+      softRecoverAttempts: aiRuntimeConfig.softRecoverAttempts,
       strategy: aiSettings.strategy,
       totalAttemptBudget: aiSettings.totalAttemptBudget,
       stream: aiSettings.stream,
@@ -490,6 +491,8 @@ app.whenReady().then(async () => {
   ipcMain.handle("agent-conversations:checkpoint", (_event, id: string, checkpoint: AgentConversationCheckpoint) =>
     requireConversationStore().saveCheckpoint(id, checkpoint));
   ipcMain.handle("agent-conversations:delete", (_event, id: string) => requireConversationStore().delete(id));
+  ipcMain.handle("agent-conversations:replace-interrupted", (_event, id: string, message: AgentConversationMessage) =>
+    requireConversationStore().replaceLastInterrupted(id, message));
   ipcMain.handle("agent-conversations:set-workspace", (_event, id: string, workspace: string) =>
     requireConversationStore().setWorkspace(id, workspace));
   ipcMain.handle("background-review:configure", (_event, settings: Record<string, unknown>) => {

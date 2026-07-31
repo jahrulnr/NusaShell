@@ -11,7 +11,7 @@ receive an MCP transport, process handle, credential, or plugin UI channel.
 ```text
 conversation JSON (Electron main)
   -> Agent composer rebuilds context from the durable checkpoint
-  -> agent.run (WebSocket command)
+  -> agent.run (WebSocket command; `resume: true` skips system-prompt injection)
   -> RunAgentTurnHandler -> InProcessAgentTurnWorker
   -> AgentTurnRunner
      -> compact older context when the configured threshold is exceeded
@@ -47,6 +47,28 @@ executed once, nudged on its second appearance, and stops the loop on its third.
   list is newest-first and deletions require explicit confirmation.
 - A failed provider turn does not persist a fake assistant message. The
   unanswered user message remains durable and the UI exposes **Retry turn**.
+- When a provider call fails mid-turn after tool work has already accumulated,
+  the runner first attempts a **soft recover** — re-calling the provider with
+  the same accumulated messages up to `softRecoverAttempts` times (default 1,
+  max 3, configurable via `NUSASHELL_AI_SOFT_RECOVER_ATTEMPTS`). Cancellation
+  aborts immediately and is never retried.
+- If soft recover is exhausted and the turn had progress, the runner throws
+  `AGENT_PROVIDER_FAILED` with a `details.partial` snapshot containing the
+  accumulated `messages`, `steps`, `toolCalls`, `traceId`, `rounds`, and
+  optional `model`/`providerId`/`usage`. The desktop seals the streaming
+  message, persists an **interrupted** assistant message (`status:
+  "interrupted"`) carrying `resumeMessages`, and still shows the error footer
+  with **Retry**.
+- **Retry** on an interrupted message calls `agent.run` with `resume: true`
+  and the saved `resumeMessages`, skipping system-prompt injection so the
+  provider sees the exact mid-turn context. On success the interrupted
+  message is replaced with the completed assistant message; on a new
+  mid-turn failure the same interrupted message is updated with the new
+  partial. If `resumeMessages` was dropped (snapshot exceeded ~512 KiB),
+  Retry falls back to a full restart from durable history.
+- `buildAgentContext` skips `status: "interrupted"` messages when building
+  context for a new turn — interrupted progress lives only in
+  `resumeMessages` for the continue path.
 - Renderer-only working/error bubbles disappear after reload; durable user and
   assistant messages remain the source of truth.
 - SSE text deltas update the current working bubble only. `agent.cancel`
@@ -94,6 +116,7 @@ Environment is currently the process-level runtime boundary:
 | `NUSASHELL_AI_BASE_URL` | empty | Initial provider base URL |
 | `NUSASHELL_AI_API_KEY` | empty | Initial API key; never returned or logged |
 | `NUSASHELL_AI_MAX_TOOL_ROUNDS` | `8` | Maximum provider/tool rounds |
+| `NUSASHELL_AI_SOFT_RECOVER_ATTEMPTS` | `1` | Mid-turn soft recover retries after a provider call fails with tool progress already accumulated (0–3) |
 | `NUSASHELL_AI_STRATEGY` | `failover` | `failover`, `round-robin`, or selected-provider `switch` |
 | `NUSASHELL_AI_TOTAL_ATTEMPT_BUDGET` | `4` | Shared retry/failover attempt ceiling per provider round |
 | `NUSASHELL_AI_STREAM` | `true` | Request SSE where the provider dialect supports it |

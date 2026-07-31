@@ -68,6 +68,7 @@ export interface ShellApi {
     get(id: string): Promise<AgentConversation | null>;
     append(id: string, message: AgentConversationMessage): Promise<AgentConversation>;
     saveCheckpoint(id: string, checkpoint: AgentConversationCheckpoint): Promise<AgentConversation>;
+    replaceLastInterrupted(id: string, message: AgentConversationMessage): Promise<AgentConversation>;
     delete(id: string): Promise<void>;
     setWorkspace(id: string, workspace: string): Promise<AgentConversation>;
   };
@@ -212,6 +213,7 @@ const api: ShellApi = {
     get: (id) => ipcRenderer.invoke("agent-conversations:get", id),
     append: (id, message) => ipcRenderer.invoke("agent-conversations:append", id, message),
     saveCheckpoint: (id, checkpoint) => ipcRenderer.invoke("agent-conversations:checkpoint", id, checkpoint),
+    replaceLastInterrupted: (id, message) => ipcRenderer.invoke("agent-conversations:replace-interrupted", id, message),
     delete: (id) => ipcRenderer.invoke("agent-conversations:delete", id),
     setWorkspace: (id, workspace) => ipcRenderer.invoke("agent-conversations:set-workspace", id, workspace),
   },

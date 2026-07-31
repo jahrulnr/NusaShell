@@ -33,6 +33,7 @@ export {
   type AgentTurnRunnerDeps,
   type RunAgentTurnInput,
   type AgentTurnResult,
+  type AgentTurnPartial,
   type AgentCompactionCheckpoint,
   type AgentContextOptions,
   type AgentToolExecution,

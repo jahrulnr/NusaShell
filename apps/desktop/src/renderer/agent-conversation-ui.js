@@ -226,11 +226,11 @@ export function composerTextareaSize({
 export function buildAgentContext(conversation) {
   const checkpoint = conversation?.checkpoint;
   const messages = Array.isArray(conversation?.messages) ? conversation.messages : [];
-  if (!checkpoint?.summary) return messages.map(toProviderMessage);
+  if (!checkpoint?.summary) return messages.filter((m) => m.status !== "interrupted").map(toProviderMessage);
 
   return [
     { role: "system", content: `Conversation summary:\n${checkpoint.summary}` },
-    ...messages.slice(checkpoint.compactedMessageCount).map(toProviderMessage),
+    ...messages.slice(checkpoint.compactedMessageCount).filter((m) => m.status !== "interrupted").map(toProviderMessage),
   ];
 }
 

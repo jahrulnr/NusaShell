@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.46] - 2026-08-01
+
+### Added
+
+- **Mid-turn recover & continue** — a failed provider call no longer discards
+  in-progress tool work for the turn.
+  - `AgentTurnRunner` now performs a **soft recover** after the router/provider
+    retry budget is exhausted: if the turn already accumulated tool results, it
+    re-calls the provider with the same messages up to `softRecoverAttempts`
+    times (default 1, max 3, env `NUSASHELL_AI_SOFT_RECOVER_ATTEMPTS`).
+    Cancellation aborts immediately and is never retried.
+  - When soft recover is exhausted with progress on the turn, the runner
+    throws `AGENT_PROVIDER_FAILED` with a typed `details.partial` snapshot
+    (`messages`, `steps`, `toolCalls`, `traceId`, `rounds`, optional
+    `model`/`providerId`/`usage`).
+  - New `agent.run` `resume?: boolean` flag (contracts + command mapper). When
+    `resume: true`, `RunAgentTurnHandler` skips system-prompt injection so the
+    provider sees the exact mid-turn context. `AgentRuntimeSettings` gains
+    `softRecoverAttempts`; `AiConfig` and `apps/backend` container/bootstrap
+    wire it through.
+  - Desktop conversation contract gains `status?: "complete" | "interrupted"`
+    and `resumeMessages?: unknown[]` on assistant messages. The store
+    validates both, clamps `resumeMessages` at ~512 KiB (dropping it on
+    overflow so Retry falls back to a full restart), and exposes
+    `replaceLastInterrupted` + IPC `agent-conversations:replace-interrupted`.
+  - On a mid-turn failure with `partial`, the desktop seals the streaming
+    message, persists an **interrupted** assistant message carrying
+    `resumeMessages`, and keeps the error footer + **Retry** button. **Retry**
+    on an interrupted message calls `agent.run` with `resume: true` and the
+    saved `resumeMessages`; on success the interrupted message is replaced
+    with the completed assistant message.
+  - `buildAgentContext` skips `status: "interrupted"` messages when building
+    context for a new turn — interrupted progress lives only in
+    `resumeMessages` for the continue path.
+  - New unit tests: runner soft-recover + `details.partial` (4),
+    `replaceLastInterrupted`/interrupted persistence/budget clamp (4),
+    `buildAgentContext` skip (1), `agent.run` `resume` mapper (1).
+
 ## [0.0.45] - 2026-07-31
 
 ### Added

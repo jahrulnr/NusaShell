@@ -155,6 +155,7 @@ export type {
   RunAgentTurnCommand,
   CancelAgentTurnCommand,
   CancelAgentTurnResult,
+  AgentTurnPartial,
   AnswerAskQuestionCommand,
   AskAnswerVia,
   AskQuestionAnswer,
@@ -178,6 +179,7 @@ export {
   applyVars,
   formatMemoryPrompt,
   DEFAULT_REVIEW_SETTINGS,
+  type AgentRuntimeSettings,
 } from "./agent/index.js";
 export type {
   WriteOrigin,

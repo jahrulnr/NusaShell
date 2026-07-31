@@ -183,4 +183,15 @@ describe("agent conversation UI helpers", () => {
       ],
     }]);
   });
+
+  it("skips interrupted assistant messages when building provider context", () => {
+    expect(buildAgentContext({
+      messages: [
+        { role: "user", content: "Create a note" },
+        { role: "assistant", content: "Turn interrupted.", status: "interrupted", resumeMessages: [{ role: "user", content: "Create a note" }] },
+      ],
+    })).toEqual([
+      { role: "user", content: "Create a note" },
+    ]);
+  });
 });

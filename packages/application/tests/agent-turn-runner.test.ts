@@ -21,6 +21,29 @@ class ScriptedProvider implements AgentProvider {
   }
 }
 
+class FlakyProvider implements AgentProvider {
+  readonly id = "flaky";
+  readonly requests: AgentProviderRequest[] = [];
+  private queue: (AgentProviderResult | Error)[];
+
+  constructor(
+    responses: readonly (AgentProviderResult | Error)[],
+    private readonly onCall?: (index: number) => void,
+  ) {
+    this.queue = [...responses];
+  }
+
+  async complete(request: AgentProviderRequest): Promise<AgentProviderResult> {
+    const index = this.requests.length;
+    this.requests.push(request);
+    this.onCall?.(index);
+    const next = this.queue.shift();
+    if (next instanceof Error) throw next;
+    if (!next) throw new Error("No scripted provider response");
+    return next;
+  }
+}
+
 class FakeToolGateway implements AgentToolGateway {
   readonly calls: Array<{ name: string; args: Readonly<Record<string, unknown>> }> = [];
   readonly begunTurns: string[] = [];
@@ -399,5 +422,93 @@ describe("AgentTurnRunner", () => {
         reasoningOutputTokens: 5,
       },
     });
+  });
+
+  it("throws without details.partial when the provider fails on round 1 with no tool progress", async () => {
+    const provider = new FlakyProvider([new Error("boom")]);
+    const runner = new AgentTurnRunner({ provider, toolGateway: new FakeToolGateway(), softRecoverAttempts: 1 });
+
+    const error = await runner.run({
+      messages: [{ role: "user", content: "Fail immediately" }],
+      pluginIds: [],
+    }).catch((e) => e);
+
+    expect(error).toMatchObject({ code: "AGENT_PROVIDER_FAILED" });
+    expect(error.details?.partial).toBeUndefined();
+  });
+
+  it("soft-recovers after a tool round succeeds and the next provider call fails", async () => {
+    const provider = new FlakyProvider([
+      { toolCalls: [{ id: "call-1", name: "notes.create", args: { title: "Roadmap" } }] },
+      new Error("transient boom"),
+      { text: "Recovered after soft retry" },
+    ]);
+    const tools = new FakeToolGateway();
+    const runner = new AgentTurnRunner({ provider, toolGateway: tools, softRecoverAttempts: 1 });
+
+    const result = await runner.run({
+      messages: [{ role: "user", content: "Create a note then answer" }],
+      pluginIds: ["notes"],
+    });
+
+    expect(result.text).toBe("Recovered after soft retry");
+    expect(result.rounds).toBe(2);
+    expect(provider.requests).toHaveLength(3);
+    expect(tools.calls).toEqual([{ name: "notes.create", args: { title: "Roadmap" } }]);
+    expect(provider.requests[2]?.messages).toEqual([
+      { role: "user", content: "Create a note then answer" },
+      { role: "assistant", toolCalls: [{ id: "call-1", name: "notes.create", args: { title: "Roadmap" } }] },
+      {
+        role: "tool",
+        toolCallId: "call-1",
+        name: "notes.create",
+        content: expect.stringContaining("note-1"),
+      },
+    ]);
+  });
+
+  it("throws with details.partial containing tool messages when soft recover is exhausted", async () => {
+    const provider = new FlakyProvider([
+      { toolCalls: [{ id: "call-1", name: "notes.create", args: { title: "Roadmap" } }] },
+      new Error("fail once"),
+      new Error("fail again"),
+    ]);
+    const tools = new FakeToolGateway();
+    const runner = new AgentTurnRunner({ provider, toolGateway: tools, softRecoverAttempts: 1 });
+
+    const error = await runner.run({
+      messages: [{ role: "user", content: "Create a note then answer" }],
+      pluginIds: ["notes"],
+    }).catch((e) => e);
+
+    expect(error).toMatchObject({ code: "AGENT_PROVIDER_FAILED" });
+    expect(error.details?.partial).toBeDefined();
+    expect(error.details.partial.rounds).toBe(1);
+    expect(error.details.partial.toolCalls).toHaveLength(1);
+    expect(error.details.partial.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "tool", toolCallId: "call-1" }),
+    ]));
+  });
+
+  it("surfaces cancellation without a partial when aborted during soft recover", async () => {
+    const controller = new AbortController();
+    const provider = new FlakyProvider([
+      { toolCalls: [{ id: "call-1", name: "notes.create", args: { title: "Roadmap" } }] },
+      new Error("fail once"),
+      new Error("fail again"),
+    ], (index) => {
+      if (index === 2) controller.abort();
+    });
+    const tools = new FakeToolGateway();
+    const runner = new AgentTurnRunner({ provider, toolGateway: tools, softRecoverAttempts: 1 });
+
+    const error = await runner.run({
+      messages: [{ role: "user", content: "Create a note" }],
+      pluginIds: ["notes"],
+      signal: controller.signal,
+    }).catch((e) => e);
+
+    expect(error).toMatchObject({ code: "AGENT_TURN_CANCELLED" });
+    expect(error.details?.partial).toBeUndefined();
   });
 });

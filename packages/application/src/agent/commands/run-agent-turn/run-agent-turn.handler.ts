@@ -26,6 +26,7 @@ import { randomUUID } from "node:crypto";
 export interface AgentRuntimeSettings {
   maxToolRounds: number;
   maxRepeatedToolCalls: number;
+  softRecoverAttempts: number;
   strategy: AgentProviderStrategy;
   totalAttemptBudget: number;
   context?: AgentContextOptions;
@@ -69,6 +70,7 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
       toolGateway: this.toolGateway,
       defaultMaxToolRounds: this.runtime.maxToolRounds,
       defaultMaxRepeatedToolCalls: this.runtime.maxRepeatedToolCalls,
+      softRecoverAttempts: this.runtime.softRecoverAttempts,
       ...(this.logger ? { logger: this.logger } : {}),
       ...(this.runtime.context ? { context: this.runtime.context } : {}),
       ...(compactPrompt ? { compactPrompt } : {}),
@@ -78,7 +80,9 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
     this.toolGateway.beginTurn?.(traceId, {
       ...(command.interactive !== undefined ? { interactive: command.interactive } : {}),
     });
-    const messages = await this.injectSystemPrompts(command, traceId);
+    const messages = command.resume
+      ? command.messages
+      : await this.injectSystemPrompts(command, traceId);
     const result = await this.coordinator.run(traceId, (signal) => worker.run({
       messages,
       pluginIds: command.pluginIds,

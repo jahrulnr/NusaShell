@@ -63,7 +63,7 @@ export class AgentConversationStore {
     return this.mutate(async (state) => {
       const current = requireConversation(state, id);
       const timestamp = this.now().toISOString();
-      const savedMessage = { ...message, createdAt: message.createdAt ?? timestamp };
+      const savedMessage = { ...clampResumeMessages(message), createdAt: message.createdAt ?? timestamp };
       const title = current.messages.length === 0 && message.role === "user"
         ? conversationTitle(message.content)
         : current.title;
@@ -87,6 +87,23 @@ export class AgentConversationStore {
           ...checkpoint,
           compactedMessageCount: Math.min(current.messages.length, Math.max(0, checkpoint.compactedMessageCount)),
         },
+      };
+      return [replaceConversation(state, updated), updated];
+    });
+  }
+
+  async replaceLastInterrupted(id: string, message: AgentConversationMessage): Promise<AgentConversation> {
+    return this.mutate(async (state) => {
+      const current = requireConversation(state, id);
+      const last = current.messages.at(-1);
+      if (!last || last.role !== "assistant" || last.status !== "interrupted") {
+        throw new Error("Last message is not an interrupted assistant message");
+      }
+      const savedMessage = { ...clampResumeMessages(message), createdAt: message.createdAt ?? this.now().toISOString() };
+      const updated: AgentConversation = {
+        ...current,
+        updatedAt: this.now().toISOString(),
+        messages: [...current.messages.slice(0, -1), savedMessage],
       };
       return [replaceConversation(state, updated), updated];
     });
@@ -204,6 +221,14 @@ function isConversationMessage(value: unknown): value is AgentConversationMessag
       && Array.isArray(message.attachments)
       && message.attachments.length <= 4
       && message.attachments.every(isConversationAttachment)
+    ))
+    && (message.status === undefined || (
+      message.role === "assistant"
+      && (message.status === "complete" || message.status === "interrupted")
+    ))
+    && (message.resumeMessages === undefined || (
+      message.role === "assistant"
+      && Array.isArray(message.resumeMessages)
     ));
 }
 
@@ -331,4 +356,23 @@ function conversationTitle(content: string): string {
   const normalized = content.trim().replace(/\s+/g, " ");
   if (!normalized) return "New conversation";
   return normalized.length <= 60 ? normalized : `${normalized.slice(0, 57)}…`;
+}
+
+const RESUME_MESSAGES_MAX_BYTES = 512 * 1024;
+
+/**
+ * Drop `resumeMessages` when the serialized message exceeds the resume budget.
+ * The interrupted assistant message keeps its `steps`/`toolCalls` for display,
+ * but Retry falls back to a restart when the snapshot was too large to persist.
+ */
+function clampResumeMessages(message: AgentConversationMessage): AgentConversationMessage {
+  if (!message.resumeMessages) return message;
+  try {
+    const serialized = JSON.stringify(message);
+    if (serialized.length <= RESUME_MESSAGES_MAX_BYTES) return message;
+  } catch {
+    // fall through to drop
+  }
+  const { resumeMessages: _drop, ...rest } = message;
+  return rest;
 }

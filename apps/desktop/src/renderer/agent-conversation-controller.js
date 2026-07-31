@@ -164,9 +164,15 @@ export class AgentConversationController {
       }
       retryIsSafe = true;
 
+      const lastDurable = this.conversation?.messages.at(-1);
+      const resumeFrom = retry && lastDurable?.status === "interrupted" && Array.isArray(lastDurable.resumeMessages)
+        ? lastDurable
+        : null;
+
       pending = this.createStreamingMessage();
       selectedModel = this.getActiveModel();
-      const baseTokens = estimateContextTokens(buildAgentContext(this.conversation));
+      const turnMessages = resumeFrom ? resumeFrom.resumeMessages : buildAgentContext(this.conversation);
+      const baseTokens = estimateContextTokens(turnMessages);
       let liveTokens = baseTokens;
       const setContextStatus = (tokens) => {
         liveTokens = Math.max(liveTokens, tokens);
@@ -186,9 +192,10 @@ export class AgentConversationController {
         streamState.message?.appendChild(node);
         this.scrollToBottom();
       };
-      const result = await this.runTurn(buildAgentContext(this.conversation), {
+      const result = await this.runTurn(turnMessages, {
         traceId: this.activeTraceId,
         workspace: this.conversation?.workspace,
+        ...(resumeFrom ? { resume: true } : {}),
         onDelta: (delta) => {
           // Append in arrival order. A new text segment starts after reasoning/tools.
           if (streamState.lastKind !== "text") {
@@ -238,7 +245,7 @@ export class AgentConversationController {
           ? result.toolCalls.map(toConversationToolCall)
           : undefined;
         const steps = sanitizeAssistantSteps(result.steps);
-        this.conversation = await this.shell.agentConversations.append(this.conversation.id, {
+        const assistantMessage = {
           role: "assistant",
           content: result.text,
           traceId: result.traceId,
@@ -247,7 +254,10 @@ export class AgentConversationController {
           reasoning: result.reasoning,
           ...(toolCalls?.length ? { toolCalls } : {}),
           ...(steps?.length ? { steps } : {}),
-        });
+        };
+        this.conversation = resumeFrom
+          ? await this.shell.agentConversations.replaceLastInterrupted(this.conversation.id, assistantMessage)
+          : await this.shell.agentConversations.append(this.conversation.id, assistantMessage);
       } catch (error) {
         this.sealStreamingMessage(pending, result);
         status.textContent = "Response completed · local save failed";
@@ -279,20 +289,53 @@ export class AgentConversationController {
       status.textContent = selectedModel ? formatContextUsage(finalTokens, selectedModel.contextWindow) : "Choose a model";
       this.log("info", `Agent turn completed trace=${result.traceId} rounds=${result.rounds}`);
     } catch (error) {
-      pending?.remove();
       if (error.code === "AGENT_TURN_CANCELLED") {
+        pending?.remove();
         this.appendMessage("assistant", "Turn stopped.", { error: true });
         status.textContent = "Turn stopped";
         this.log("info", `Agent turn stopped trace=${this.activeTraceId}`);
         return;
       }
-      this.failedMessage = this.appendMessage(
-        "assistant",
-        `Turn failed: ${error.message || "Unknown error"}`,
-        { error: true, retry: retryIsSafe },
-      );
-      status.textContent = retryIsSafe ? "Turn failed · ready to retry" : "Local conversation error";
-      this.log("error", `Agent turn failed: ${error.message || String(error)}`);
+      const partial = error.details?.partial;
+      if (partial) {
+        this.sealStreamingMessage(pending, partial);
+        const interruptedMessage = {
+          role: "assistant",
+          content: `Turn interrupted after ${partial.rounds} tool round${partial.rounds === 1 ? "" : "s"}.`,
+          status: "interrupted",
+          traceId: partial.traceId,
+          model: partial.model,
+          rounds: partial.rounds,
+          steps: sanitizeAssistantSteps(partial.steps),
+          ...(Array.isArray(partial.toolCalls) && partial.toolCalls.length
+            ? { toolCalls: partial.toolCalls.map(toConversationToolCall) }
+            : {}),
+          ...(Array.isArray(partial.messages) ? { resumeMessages: partial.messages } : {}),
+        };
+        try {
+          this.conversation = resumeFrom
+            ? await this.shell.agentConversations.replaceLastInterrupted(this.conversation.id, interruptedMessage)
+            : await this.shell.agentConversations.append(this.conversation.id, interruptedMessage);
+        } catch (persistError) {
+          this.log("error", `Interrupted assistant persistence failed: ${persistError.message || String(persistError)}`);
+        }
+        this.failedMessage = this.appendMessage(
+          "assistant",
+          `Turn failed: ${error.message || "Unknown error"}`,
+          { error: true, retry: true },
+        );
+        status.textContent = "Turn interrupted · ready to retry";
+        this.log("error", `Agent turn failed: ${error.message || String(error)}`);
+      } else {
+        pending?.remove();
+        this.failedMessage = this.appendMessage(
+          "assistant",
+          `Turn failed: ${error.message || "Unknown error"}`,
+          { error: true, retry: retryIsSafe },
+        );
+        status.textContent = retryIsSafe ? "Turn failed · ready to retry" : "Local conversation error";
+        this.log("error", `Agent turn failed: ${error.message || String(error)}`);
+      }
     } finally {
       this.turnPending = false;
       this.activeTraceId = "";
@@ -775,14 +818,14 @@ export class AgentConversationController {
     const thread = $("#agent-thread");
     if (!thread) return null;
     $("#agent-empty")?.remove();
-    const message = element("article", `agent-message ${role}${meta.pending ? " agent-pending" : ""}${meta.error ? " agent-message-error" : ""}`);
+    const message = element("article", `agent-message ${role}${meta.pending ? " agent-pending" : ""}${meta.error ? " agent-message-error" : ""}${meta.status === "interrupted" ? " agent-message-interrupted" : ""}`);
     message.setAttribute("aria-label", role === "user" ? "Your message" : "NusaShell Agent response");
 
     if (role === "assistant") {
       const identity = element("div", "agent-message-identity");
       identity.append(
         element("span", "agent-message-mark", meta.pending ? "◌" : "✦"),
-        element("span", "agent-message-meta", meta.pending ? "Working" : "NusaShell Agent"),
+        element("span", "agent-message-meta", meta.pending ? "Working" : meta.status === "interrupted" ? "Interrupted" : "NusaShell Agent"),
       );
       message.appendChild(identity);
     }
@@ -1284,10 +1327,11 @@ export class AgentConversationController {
   sealStreamingMessage(message, meta) {
     if (!message) return;
     message.classList.remove("agent-pending");
+    if (meta.status === "interrupted") message.classList.add("agent-message-interrupted");
     const mark = message.querySelector(".agent-message-mark");
     if (mark) mark.textContent = "✦";
     const metaLabel = message.querySelector(".agent-message-meta");
-    if (metaLabel) metaLabel.textContent = "NusaShell Agent";
+    if (metaLabel) metaLabel.textContent = meta.status === "interrupted" ? "Interrupted" : "NusaShell Agent";
 
     const identity = message.querySelector(".agent-message-identity");
     if (meta.steps?.length) {

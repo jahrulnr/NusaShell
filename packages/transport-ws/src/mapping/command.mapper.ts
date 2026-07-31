@@ -109,6 +109,7 @@ export function mapToCommand(request: ParsedRequest):
           ...(request.payload.traceId !== undefined ? { traceId: request.payload.traceId } : {}),
           ...(request.payload.maxToolRounds !== undefined ? { maxToolRounds: request.payload.maxToolRounds } : {}),
           ...(request.payload.workspace !== undefined ? { workspace: request.payload.workspace } : {}),
+          ...(request.payload.resume !== undefined ? { resume: request.payload.resume } : {}),
         } as RunAgentTurnCommand,
       };
     case "agent.cancel":

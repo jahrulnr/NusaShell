@@ -404,6 +404,7 @@ async function runAgentTurn(messages, options = {}) {
       effort: aiSettings.effort,
       userPrompt: aiSettings.userPrompt,
       ...(options.workspace ? { workspace: options.workspace } : {}),
+      ...(options.resume ? { resume: true } : {}),
       modelCapabilities: {
         contextWindow: selected.contextWindow,
         maxOutput: selected.maxOutput,

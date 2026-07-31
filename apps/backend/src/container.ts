@@ -132,6 +132,7 @@ export interface ContainerOptions {
     readonly apiKey?: string;
     readonly maxToolRounds: number;
     readonly maxRepeatedToolCalls?: number;
+    readonly softRecoverAttempts?: number;
     readonly strategy?: "failover" | "round-robin" | "switch";
     readonly totalAttemptBudget?: number;
     readonly stream?: boolean;
@@ -194,6 +195,7 @@ export interface Container {
     userPrompt: string;
     maxToolRounds?: number;
     maxRepeatedToolCalls?: number;
+    softRecoverAttempts?: number;
     compactionEnabled?: boolean;
     maxInputTokens?: number;
     reserveTokens?: number;
@@ -246,6 +248,7 @@ export function createContainer(options: ContainerOptions): Container {
     userPrompt: options.ai?.userPrompt ?? "",
     maxToolRounds: options.ai?.maxToolRounds ?? 50,
     maxRepeatedToolCalls: options.ai?.maxRepeatedToolCalls ?? 50,
+    softRecoverAttempts: options.ai?.softRecoverAttempts ?? 1,
     ...(options.ai?.context ? { context: options.ai.context } : {}),
   };
 
@@ -535,6 +538,7 @@ export function createContainer(options: ContainerOptions): Container {
       aiRuntime.userPrompt = settings.userPrompt;
       if (typeof settings.maxToolRounds === "number") aiRuntime.maxToolRounds = settings.maxToolRounds;
       if (typeof settings.maxRepeatedToolCalls === "number") aiRuntime.maxRepeatedToolCalls = settings.maxRepeatedToolCalls;
+      if (typeof settings.softRecoverAttempts === "number") aiRuntime.softRecoverAttempts = settings.softRecoverAttempts;
       if (typeof settings.compactionEnabled === "boolean" || typeof settings.maxInputTokens === "number" || typeof settings.reserveTokens === "number" || typeof settings.recentTurns === "number" || typeof settings.summaryMaxChars === "number") {
         aiRuntime.context = {
           compactionEnabled: typeof settings.compactionEnabled === "boolean" ? settings.compactionEnabled : aiRuntime.context?.compactionEnabled ?? true,

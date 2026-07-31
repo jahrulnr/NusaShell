@@ -185,4 +185,88 @@ describe("AgentConversationStore", () => {
     expect(step?.type).toBe("tool_calls");
     if (step?.type === "tool_calls") expect(step.calls[0]?.output).toHaveLength(12_000);
   });
+
+  it("persists an interrupted assistant message with status and resumeMessages", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-"));
+    const path = join(root, "agent-conversations.json");
+    const store = new AgentConversationStore(path, () => new Date("2026-08-01T10:00:00.000Z"), () => "conv-int");
+    const conversation = await store.create();
+    await store.appendMessage(conversation.id, { role: "user", content: "Create a note" });
+    await store.appendMessage(conversation.id, {
+      role: "assistant",
+      content: "Turn interrupted after 1 tool round.",
+      status: "interrupted",
+      traceId: "trace-1",
+      rounds: 1,
+      steps: [{ type: "tool_calls", calls: [{ id: "call-1", name: "notes.create", ok: true }] }],
+      resumeMessages: [
+        { role: "user", content: "Create a note" },
+        { role: "assistant", toolCalls: [{ id: "call-1", name: "notes.create", args: { title: "X" } }] },
+        { role: "tool", toolCallId: "call-1", name: "notes.create", content: '{"ok":true}' },
+      ],
+    });
+
+    const loaded = await new AgentConversationStore(path).get(conversation.id);
+    expect(loaded?.messages[1]).toMatchObject({ status: "interrupted", rounds: 1 });
+    expect(loaded?.messages[1]?.resumeMessages).toHaveLength(3);
+  });
+
+  it("replaces the last interrupted assistant message with replaceLastInterrupted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-"));
+    const path = join(root, "agent-conversations.json");
+    const store = new AgentConversationStore(path, () => new Date("2026-08-01T10:00:00.000Z"), () => "conv-replace");
+    const conversation = await store.create();
+    await store.appendMessage(conversation.id, { role: "user", content: "Create a note" });
+    await store.appendMessage(conversation.id, {
+      role: "assistant",
+      content: "Turn interrupted after 1 tool round.",
+      status: "interrupted",
+      resumeMessages: [{ role: "user", content: "Create a note" }],
+    });
+
+    const updated = await store.replaceLastInterrupted(conversation.id, {
+      role: "assistant",
+      content: "The note is ready.",
+      traceId: "trace-1",
+      rounds: 2,
+    });
+
+    expect(updated.messages).toHaveLength(2);
+    expect(updated.messages[1]).toMatchObject({ content: "The note is ready.", rounds: 2 });
+    expect(updated.messages[1]?.status).toBeUndefined();
+    expect(updated.messages[1]?.resumeMessages).toBeUndefined();
+  });
+
+  it("rejects replaceLastInterrupted when the last message is not interrupted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-"));
+    const path = join(root, "agent-conversations.json");
+    const store = new AgentConversationStore(path, () => new Date("2026-08-01T10:00:00.000Z"), () => "conv-reject");
+    const conversation = await store.create();
+    await store.appendMessage(conversation.id, { role: "user", content: "Hello" });
+    await store.appendMessage(conversation.id, { role: "assistant", content: "Hi there." });
+
+    await expect(store.replaceLastInterrupted(conversation.id, {
+      role: "assistant",
+      content: "Replacement",
+    })).rejects.toThrow("not an interrupted assistant message");
+  });
+
+  it("drops resumeMessages when the serialized message exceeds the budget", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-"));
+    const path = join(root, "agent-conversations.json");
+    const store = new AgentConversationStore(path, () => new Date("2026-08-01T10:00:00.000Z"), () => "conv-large");
+    const conversation = await store.create();
+    await store.appendMessage(conversation.id, { role: "user", content: "Go" });
+    const hugeResume = [{ role: "system", content: "x".repeat(600_000) }];
+    await store.appendMessage(conversation.id, {
+      role: "assistant",
+      content: "Turn interrupted.",
+      status: "interrupted",
+      resumeMessages: hugeResume,
+    });
+
+    const loaded = await new AgentConversationStore(path).get(conversation.id);
+    expect(loaded?.messages[1]?.status).toBe("interrupted");
+    expect(loaded?.messages[1]?.resumeMessages).toBeUndefined();
+  });
 });

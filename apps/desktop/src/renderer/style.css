@@ -921,6 +921,8 @@ body {
 .agent-tool-result { color: var(--blue-info); }
 .agent-pending .agent-bubble { color: var(--text-dim); }
 .agent-message-error .agent-bubble { border-color: rgba(245, 91, 104, .55); color: #ffadb4; }
+.agent-message-interrupted .agent-bubble { border-color: rgba(245, 178, 91, .5); color: #ffc88a; }
+.agent-message-interrupted .agent-message-meta { color: rgba(245, 178, 91, .85); }
 .agent-retry-btn { align-self: flex-start; border: 1px solid rgba(245, 91, 104, .45); border-radius: 6px; padding: 5px 8px; background: rgba(245, 91, 104, .08); color: #ff9ca5; cursor: pointer; font: 10px 'JetBrains Mono', monospace; }
 .agent-retry-btn:hover { background: rgba(245, 91, 104, .16); }
 .agent-composer { flex: none; padding: 12px 14px; border-top: 1px solid var(--border-soft); background: rgba(10, 14, 22, .72); }
@@ -2216,6 +2218,15 @@ body {
   padding: 12px 14px;
   background: rgba(245, 91, 104, .06);
   color: #ffadb4;
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+}
+.agent-message-interrupted.assistant .agent-bubble {
+  border: 1px solid rgba(245, 178, 91, .3);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: rgba(245, 178, 91, .05);
+  color: #ffc88a;
   font-family: 'Inter', sans-serif;
   font-size: 13px;
 }

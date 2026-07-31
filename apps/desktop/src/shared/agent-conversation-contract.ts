@@ -32,6 +32,8 @@ export interface AgentConversationMessage {
   readonly reasoning?: string;
   readonly toolCalls?: readonly AgentConversationToolCall[];
   readonly steps?: readonly AgentConversationStep[];
+  readonly status?: "complete" | "interrupted";
+  readonly resumeMessages?: readonly unknown[];
 }
 
 export interface AgentConversationCheckpoint {

@@ -13,6 +13,8 @@ import type { AgentToolGateway } from "../ports/agent-tool-gateway.port.js";
 
 const MAX_REPEATED_TOOL_CALLS = 50;
 const DEFAULT_MAX_TOOL_ROUNDS = 50;
+const DEFAULT_SOFT_RECOVER_ATTEMPTS = 1;
+const MAX_SOFT_RECOVER_ATTEMPTS = 3;
 
 export interface RunAgentTurnInput {
   readonly messages: readonly AgentMessage[];
@@ -72,6 +74,26 @@ export interface AgentCompactionCheckpoint {
   readonly via: "provider" | "extractive";
 }
 
+/**
+ * Mid-turn progress snapshot attached to `AGENT_PROVIDER_FAILED.details.partial`
+ * when a provider call fails after the turn already accumulated tool work.
+ * Field names mirror `AgentTurnResult` so the desktop can treat it like a
+ * result for sealing/persisting the interrupted assistant message.
+ */
+export interface AgentTurnPartial {
+  readonly traceId: string;
+  readonly rounds: number;
+  readonly text: string;
+  readonly toolCalls: readonly AgentToolExecution[];
+  readonly steps: readonly AgentTurnStep[];
+  readonly messages: readonly AgentMessage[];
+  readonly model?: string;
+  readonly providerId?: string;
+  readonly api?: "chat" | "responses" | "messages";
+  readonly reasoning?: string;
+  readonly usage?: AgentTokenUsage;
+}
+
 export interface AgentContextOptions {
   readonly compactionEnabled: boolean;
   readonly maxInputTokens: number;
@@ -86,6 +108,7 @@ export interface AgentTurnRunnerDeps {
   readonly logger?: LoggerPort;
   readonly defaultMaxToolRounds?: number;
   readonly defaultMaxRepeatedToolCalls?: number;
+  readonly softRecoverAttempts?: number;
   readonly context?: AgentContextOptions;
   readonly compactPrompt?: string;
 }
@@ -97,10 +120,12 @@ export interface AgentTurnRunnerDeps {
 export class AgentTurnRunner {
   private readonly defaultMaxToolRounds: number;
   private readonly defaultMaxRepeatedToolCalls: number;
+  private readonly softRecoverAttempts: number;
 
   constructor(private readonly deps: AgentTurnRunnerDeps) {
     this.defaultMaxToolRounds = normalizeMaxRounds(deps.defaultMaxToolRounds);
     this.defaultMaxRepeatedToolCalls = deps.defaultMaxRepeatedToolCalls ?? MAX_REPEATED_TOOL_CALLS;
+    this.softRecoverAttempts = normalizeSoftRecover(deps.softRecoverAttempts);
   }
 
   async run(input: RunAgentTurnInput): Promise<AgentTurnResult> {
@@ -139,6 +164,7 @@ export class AgentTurnRunner {
     let reasoning: string | undefined;
     const steps: AgentTurnStep[] = [];
     let emptyResponseNudged = false;
+    let softRecoverUsed = 0;
 
     this.deps.logger?.info("Agent turn started traceId=%s provider=%s", traceId, this.deps.provider.id);
     const publishContext = () => {
@@ -155,29 +181,47 @@ export class AgentTurnRunner {
       assertTurnActive(input.signal, traceId);
       const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
       let response;
-      try {
-        response = await this.deps.provider.complete({
-          traceId,
-          round,
-          messages,
-          tools,
-          ...(input.model ? { model: input.model } : {}),
-          ...(input.effort ? { effort: input.effort } : {}),
-          ...(input.modelCapabilities ? { modelCapabilities: input.modelCapabilities } : {}),
-          ...(input.signal ? { signal: input.signal } : {}),
-          ...(input.onTextDelta ? { onTextDelta: input.onTextDelta } : {}),
-          ...(input.onReasoningDelta ? { onReasoningDelta: input.onReasoningDelta } : {}),
-        });
-      } catch (error) {
-        if (input.signal?.aborted) {
-          throw new ApplicationError("AGENT_TURN_CANCELLED", "Agent turn cancelled", { traceId });
+      for (;;) {
+        try {
+          response = await this.deps.provider.complete({
+            traceId,
+            round,
+            messages,
+            tools,
+            ...(input.model ? { model: input.model } : {}),
+            ...(input.effort ? { effort: input.effort } : {}),
+            ...(input.modelCapabilities ? { modelCapabilities: input.modelCapabilities } : {}),
+            ...(input.signal ? { signal: input.signal } : {}),
+            ...(input.onTextDelta ? { onTextDelta: input.onTextDelta } : {}),
+            ...(input.onReasoningDelta ? { onReasoningDelta: input.onReasoningDelta } : {}),
+          });
+          break;
+        } catch (error) {
+          if (input.signal?.aborted) {
+            throw new ApplicationError("AGENT_TURN_CANCELLED", "Agent turn cancelled", { traceId });
+          }
+          if (softRecoverUsed < this.softRecoverAttempts && hasTurnProgress(toolCalls, steps, messages)) {
+            softRecoverUsed += 1;
+            this.deps.logger?.warn(
+              "Agent soft recover %d/%d traceId=%s provider=%s round=%d",
+              softRecoverUsed, this.softRecoverAttempts, traceId, this.deps.provider.id, round,
+            );
+            continue;
+          }
+          this.deps.logger?.error("Agent provider failed traceId=%s provider=%s", traceId, this.deps.provider.id);
+          const details: Record<string, unknown> = {
+            providerId: this.deps.provider.id,
+            traceId,
+            cause: error instanceof Error ? error.message : String(error),
+          };
+          if (hasTurnProgress(toolCalls, steps, messages)) {
+            details.partial = buildTurnPartial(
+              traceId, round - 1, toolCalls, steps, messages,
+              model, providerId, api, reasoning, usage,
+            );
+          }
+          throw new ApplicationError("AGENT_PROVIDER_FAILED", "AI provider request failed", details);
         }
-        this.deps.logger?.error("Agent provider failed traceId=%s provider=%s", traceId, this.deps.provider.id);
-        throw new ApplicationError("AGENT_PROVIDER_FAILED", "AI provider request failed", {
-          providerId: this.deps.provider.id,
-          traceId,
-          cause: error instanceof Error ? error.message : String(error),
-        });
       }
       model = response.model ?? model;
       providerId = response.providerId ?? providerId;
@@ -500,6 +544,49 @@ function normalizeMaxRounds(value: number | undefined): number {
     throw new ApplicationError("AGENT_INVALID_INPUT", "maxToolRounds must be an integer between 1 and 100");
   }
   return value;
+}
+
+function normalizeSoftRecover(value: number | undefined): number {
+  if (value === undefined) return DEFAULT_SOFT_RECOVER_ATTEMPTS;
+  if (!Number.isInteger(value) || value < 0) return 0;
+  return Math.min(value, MAX_SOFT_RECOVER_ATTEMPTS);
+}
+
+function hasTurnProgress(
+  toolCalls: readonly AgentToolExecution[],
+  steps: readonly AgentTurnStep[],
+  messages: readonly AgentMessage[],
+): boolean {
+  if (toolCalls.length > 0) return true;
+  if (steps.some((step) => step.type === "tool_calls")) return true;
+  return messages.some((message) => message.role === "tool");
+}
+
+function buildTurnPartial(
+  traceId: string,
+  completedRounds: number,
+  toolCalls: readonly AgentToolExecution[],
+  steps: readonly AgentTurnStep[],
+  messages: readonly AgentMessage[],
+  model: string | undefined,
+  providerId: string | undefined,
+  api: "chat" | "responses" | "messages" | undefined,
+  reasoning: string | undefined,
+  usage: AgentTokenUsage,
+): AgentTurnPartial {
+  return {
+    traceId,
+    rounds: Math.max(0, completedRounds),
+    text: "",
+    toolCalls: [...toolCalls],
+    steps: [...steps],
+    messages: [...messages],
+    ...(model ? { model } : {}),
+    ...(providerId ? { providerId } : {}),
+    ...(api ? { api } : {}),
+    ...(reasoning ? { reasoning } : {}),
+    ...(hasUsage(usage) ? { usage: { ...usage } } : {}),
+  };
 }
 
 function estimateMessageTokens(messages: readonly AgentMessage[]): number {

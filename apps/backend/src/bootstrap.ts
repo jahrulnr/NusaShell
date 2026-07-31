@@ -51,6 +51,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
       ...(config.ai.baseUrl !== undefined ? { baseUrl: config.ai.baseUrl } : {}),
       ...(config.ai.apiKey !== undefined ? { apiKey: config.ai.apiKey } : {}),
       maxToolRounds: config.ai.maxToolRounds,
+      softRecoverAttempts: config.ai.softRecoverAttempts,
       strategy: config.ai.strategy,
       totalAttemptBudget: config.ai.totalAttemptBudget,
       stream: config.ai.stream,

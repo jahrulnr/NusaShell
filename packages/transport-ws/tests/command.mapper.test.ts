@@ -113,6 +113,21 @@ describe("mapToCommand", () => {
     }
   });
 
+  it("maps agent.run resume flag to RunAgentTurnCommand", () => {
+    const result = mapToCommand(makeRequest("agent.run", {
+      messages: [{ role: "user", content: "hi" }],
+      pluginIds: [],
+      resume: true,
+    }));
+    expect(result.kind).toBe("command");
+    if (result.kind === "command") {
+      expect(result.command).toMatchObject({
+        kind: "run-agent-turn",
+        resume: true,
+      });
+    }
+  });
+
   it("maps agent.ask_answer to AnswerAskQuestionCommand", () => {
     const result = mapToCommand(makeRequest("agent.ask_answer", {
       traceId: "trace-1",
