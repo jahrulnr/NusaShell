@@ -11,6 +11,8 @@ import {
   type AgentContextUpdate,
 } from "../../services/agent-turn-runner.js";
 import { injectPrompts, type PromptVars } from "../../services/prompt-injector.js";
+import { formatMemoryPrompt } from "../../services/memory-prompt-formatter.js";
+import type { MemoryStorePort } from "../../../memory/ports/memory-store.port.js";
 import { InProcessAgentTurnWorker, type AgentTurnWorker } from "../../services/in-process-agent-turn-worker.js";
 import type { RunAgentTurnCommand } from "./run-agent-turn.command.js";
 import type { LoggerPort } from "../../../plugin/ports/logger.port.js";
@@ -44,6 +46,7 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
     private readonly onContextUpdate?: (traceId: string, update: AgentContextUpdate) => void,
     private readonly promptLoader?: PromptLoaderPort,
     private readonly userPrompt: string = "",
+    private readonly memoryStore?: MemoryStorePort,
   ) {}
 
   async handle(command: RunAgentTurnCommand): Promise<AgentTurnResult> {
@@ -100,7 +103,16 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
         availableTools: tools.map((tool) => tool.name).join(", "),
         ...(command.workspace ? { workspace: command.workspace } : {}),
       };
-      return injectPrompts(prompts, vars, command.messages, command.userPrompt ?? this.userPrompt);
+      let memoryPrompt: string | undefined;
+      if (this.memoryStore) {
+        try {
+          const snapshot = await this.memoryStore.loadSnapshot();
+          memoryPrompt = formatMemoryPrompt(snapshot);
+        } catch (error) {
+          this.logger?.warn("Memory snapshot load failed: %s", error instanceof Error ? error.message : String(error));
+        }
+      }
+      return injectPrompts(prompts, vars, command.messages, command.userPrompt ?? this.userPrompt, memoryPrompt);
     } catch (error) {
       this.logger?.warn("Prompt injection failed, sending raw messages: %s", error instanceof Error ? error.message : String(error));
       return command.messages;

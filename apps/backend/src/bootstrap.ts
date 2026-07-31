@@ -11,6 +11,7 @@ export interface BootstrapOptions {
   readonly docsRoot?: string;
   readonly docsIndexStorageRoot?: string;
   readonly skillsRoot?: string;
+  readonly memoryRoot?: string;
   readonly resolvePluginRuntimeEnvironment?: (
     pluginId: string,
   ) => Promise<Readonly<Record<string, string>>> | Readonly<Record<string, string>>;
@@ -35,6 +36,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     ...(options.docsRoot !== undefined ? { docsRoot: options.docsRoot } : {}),
     ...(options.docsIndexStorageRoot !== undefined ? { docsIndexStorageRoot: options.docsIndexStorageRoot } : {}),
     ...(options.skillsRoot !== undefined ? { skillsRoot: options.skillsRoot } : {}),
+    ...(options.memoryRoot !== undefined ? { memoryRoot: options.memoryRoot } : {}),
     ...(options.resolvePluginRuntimeEnvironment !== undefined
       ? { resolvePluginRuntimeEnvironment: options.resolvePluginRuntimeEnvironment }
       : {}),

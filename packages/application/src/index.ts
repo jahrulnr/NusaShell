@@ -138,6 +138,7 @@ export {
   CancelAgentTurnHandler,
   injectPrompts,
   applyVars,
+  formatMemoryPrompt,
 } from "./agent/index.js";
 
 // Config
@@ -159,3 +160,31 @@ export type {
   SkillRegistryPort,
   SkillSummary,
 } from "./skill/index.js";
+
+// Agent Memory
+export type {
+  MemoryTarget,
+  MemoryEntry,
+  MemoryUsage,
+  MemorySnapshot,
+  MemoryMutationResult,
+  MemoryStorePort,
+} from "./memory/index.js";
+export {
+  MEMORY_LIMIT,
+  USER_LIMIT,
+  ENTRY_DELIMITER,
+  limitFor,
+  splitEntries,
+  joinEntries,
+  charsOf,
+  usageOf,
+  checkCapacity,
+  findUniqueMatch,
+  MATCH_AMBIGUOUS,
+  MATCH_NOT_FOUND,
+  MATCH_EMPTY,
+  addEntry,
+  replaceEntry,
+  removeEntry,
+} from "./memory/index.js";

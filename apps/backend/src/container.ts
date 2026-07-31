@@ -11,6 +11,7 @@ import {
   FilesystemPromptLoader,
   MarkdownDocsIndex,
   FilesystemSkillRegistry,
+  FilesystemMemoryStore,
   createLogger,
   AgentProviderRegistry,
   StaticAgentProvider,
@@ -69,6 +70,7 @@ export interface ContainerOptions {
   readonly docsRoot?: string;
   readonly docsIndexStorageRoot?: string;
   readonly skillsRoot?: string;
+  readonly memoryRoot?: string;
   readonly dbPath?: string;
   readonly logLevel?: string;
   readonly logFile?: string;
@@ -211,7 +213,9 @@ export function createContainer(options: ContainerOptions): Container {
 
   const skillsRoot = options.skillsRoot ?? new URL("../../../.nusashell/agent/skills", import.meta.url).pathname;
   const skillRegistry = new FilesystemSkillRegistry(skillsRoot);
-  const agentToolGateway = new McpAgentToolGateway(runtimeManager, docsIndex, skillRegistry, logger);
+  const memoryRoot = options.memoryRoot ?? new URL("../../../.nusashell/agent/memory", import.meta.url).pathname;
+  const memoryStore = new FilesystemMemoryStore(memoryRoot);
+  const agentToolGateway = new McpAgentToolGateway(runtimeManager, docsIndex, skillRegistry, logger, memoryStore);
   const promptLoader = new FilesystemPromptLoader(
     options.promptsRoot ?? new URL("../../../resources/agent/prompts", import.meta.url).pathname,
   );
@@ -269,6 +273,7 @@ export function createContainer(options: ContainerOptions): Container {
     },
     promptLoader,
     aiRuntime.userPrompt,
+    memoryStore,
   ));
   commandBus.register("cancel-agent-turn", new CancelAgentTurnHandler(agentTurnCoordinator));
   if (pluginInstaller) {

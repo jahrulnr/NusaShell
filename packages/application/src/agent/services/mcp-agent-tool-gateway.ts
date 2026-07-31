@@ -2,6 +2,7 @@ import { PluginId } from "@nusashell/domain";
 import { ApplicationError } from "../../errors/application-error.js";
 import type { PluginRuntimeManager } from "../../plugin/services/plugin-runtime-manager.js";
 import type { SkillRegistryPort } from "../../skill/ports/skill-registry.port.js";
+import type { MemoryStorePort, MemoryTarget } from "../../memory/ports/memory-store.port.js";
 import type { DocsIndexPort } from "../ports/docs-index.port.js";
 import type { AgentToolDefinition } from "../ports/agent-provider.port.js";
 import type { AgentToolGateway } from "../ports/agent-tool-gateway.port.js";
@@ -29,6 +30,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
     private readonly docsIndex?: DocsIndexPort,
     private readonly skillRegistry?: SkillRegistryPort,
     private readonly logger?: LoggerPort,
+    private readonly memoryStore?: MemoryStorePort,
   ) {}
 
   beginTurn(turnId: string): void {
@@ -98,6 +100,12 @@ export class McpAgentToolGateway implements AgentToolGateway {
         offset: { type: "integer", minimum: 0, description: "Character offset for pagination" },
         max_chars: { type: "integer", minimum: 1, maximum: 100000, description: "Maximum characters to return" },
       }, ["skill_id"]),
+      definition("memory", "Save, update, or remove a personal memory or user-profile entry", {
+        action: { type: "string", enum: ["add", "replace", "remove"], description: "Mutation action" },
+        target: { type: "string", enum: ["memory", "user"], description: "\"memory\" for personal notes, \"user\" for user-profile facts" },
+        content: { type: "string", description: "New entry text (required for add and replace; omit or empty to delete via replace)" },
+        old_text: { type: "string", description: "Unique substring of the existing entry to match (required for replace and remove)" },
+      }, ["action", "target"]),
       ...[...routes.entries()].map(([name, route]) => ({
         name,
         ...(route.description ? { description: route.description } : {}),
@@ -122,6 +130,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
       case "skill_list": return this.execSkillList(args);
       case "skill_search": return this.execSkillSearch(args);
       case "skill_read": return this.execSkillRead(args);
+      case "memory": return this.execMemory(args);
       default: return this.callGrantedTool(name, args, requestId, turnId);
     }
   }
@@ -412,6 +421,42 @@ export class McpAgentToolGateway implements AgentToolGateway {
       };
     }
   }
+
+  private async execMemory(args: Readonly<Record<string, unknown>>): Promise<unknown> {
+    const store = this.memoryStore;
+    if (!store) return memoryNotConfigured();
+    const action = requireString(args.action, "action");
+    const target = requireString(args.target, "target") as MemoryTarget;
+    if (target !== "memory" && target !== "user") {
+      throw new ApplicationError("AGENT_INVALID_INPUT", `target must be "memory" or "user"`);
+    }
+    const content = optionalString(args.content);
+    const oldText = optionalString(args.old_text);
+    try {
+      switch (action) {
+        case "add":
+          if (!content) throw new ApplicationError("AGENT_INVALID_INPUT", "content is required for add");
+          return await store.add(target, content);
+        case "replace":
+          if (!oldText) throw new ApplicationError("AGENT_INVALID_INPUT", "old_text is required for replace");
+          return await store.replace(target, oldText, content);
+        case "remove":
+          if (!oldText) throw new ApplicationError("AGENT_INVALID_INPUT", "old_text is required for remove");
+          return await store.remove(target, oldText);
+        default:
+          throw new ApplicationError("AGENT_INVALID_INPUT", `Unsupported memory action: ${action}`);
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "memory_error",
+          message: error instanceof Error ? error.message : String(error),
+        },
+        meta: {},
+      };
+    }
+  }
 }
 
 function definition(
@@ -469,6 +514,13 @@ function skillsNotConfigured(): unknown {
     ok: false,
     error: { code: "skills_not_configured", message: "Skill registry is not configured" },
     meta: { data_is_untrusted: true },
+  };
+}
+function memoryNotConfigured(): unknown {
+  return {
+    ok: false,
+    error: { code: "memory_not_configured", message: "Memory store is not configured" },
+    meta: {},
   };
 }
 function clampInt(value: unknown, fallback: number, min: number, max: number): number {

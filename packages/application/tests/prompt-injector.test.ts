@@ -133,4 +133,24 @@ describe("injectPrompts", () => {
     expect(withUndefined).toEqual(withEmpty);
     expect(withEmpty).toHaveLength(4);
   });
+
+  it("injects memory block after developer prompt and before conversation messages", () => {
+    const messages: AgentMessage[] = [{ role: "user", content: "hi" }];
+    const result = injectPrompts(prompts, vars, messages, undefined, "MEMORY (personal notes) [10% — 220/2200 chars]\nremember to be concise");
+    expect(result).toHaveLength(5);
+    expect(result[0]).toEqual({ role: "system", content: "You are the NusaShell agent." });
+    expect(result[1]).toEqual({ role: "system", content: "Use tool_list to discover tools." });
+    expect(result[2]).toMatchObject({ role: "system" });
+    expect((result[2] as { content: string }).content).toContain("2026-07-29");
+    expect(result[3]).toEqual({ role: "system", content: "MEMORY (personal notes) [10% — 220/2200 chars]\nremember to be concise" });
+    expect(result[4]).toEqual({ role: "user", content: "hi" });
+  });
+
+  it("skips memory block when memoryPrompt is undefined or empty", () => {
+    const messages: AgentMessage[] = [{ role: "user", content: "hi" }];
+    const without = injectPrompts(prompts, vars, messages);
+    const withEmpty = injectPrompts(prompts, vars, messages, undefined, "");
+    expect(without).toEqual(withEmpty);
+    expect(withEmpty).toHaveLength(4);
+  });
 });

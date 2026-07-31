@@ -1,6 +1,5 @@
-import { createWriteStream, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
-import pino, { type Logger, type StreamEntry } from "pino";
+import pino, { type DestinationStream, type Logger, type StreamEntry } from "pino";
+import { RotatingFileStream } from "./rotating-file-stream.js";
 
 export interface LogRecord {
   readonly level: string;
@@ -22,6 +21,7 @@ export interface CreateLoggerOptions {
   readonly level?: string;
   readonly observer?: LogObserver;
   readonly logFile?: string;
+  readonly retentionDays?: number;
 }
 
 export function createLogger(
@@ -37,8 +37,10 @@ export function createLogger(
 
   if (opts.logFile) {
     try {
-      mkdirSync(dirname(opts.logFile), { recursive: true });
-      streams.push({ level: level as pino.Level, stream: createWriteStream(opts.logFile, { flags: "a" }) });
+      const fileStream = new RotatingFileStream(opts.logFile, {
+        retentionDays: opts.retentionDays ?? 3,
+      });
+      streams.push({ level: level as pino.Level, stream: fileStream as unknown as DestinationStream });
     } catch {
       // File logging is best-effort; don't crash startup if the path is bad.
     }

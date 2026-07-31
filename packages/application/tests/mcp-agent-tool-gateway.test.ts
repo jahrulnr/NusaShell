@@ -6,6 +6,9 @@ import type {
   DocsHit,
   DocSummary,
   SkillRegistryPort,
+  MemoryStorePort,
+  MemorySnapshot,
+  MemoryMutationResult,
 } from "../src/index.js";
 
 const fakeRuntime = {
@@ -31,6 +34,7 @@ describe("McpAgentToolGateway", () => {
       "mcp_list", "mcp_enable", "mcp_disable", "tool_search", "tool_list", "tool_schema", "tool_schemas", "mcp_context",
       "docs_search", "docs_list", "docs_read",
       "skill_list", "skill_search", "skill_read",
+      "memory",
     ]);
     await expect(gateway.execute("tool_list", { pluginId: "nusashell.notes" }, "call-tool-list", "turn-1")).resolves.toEqual([
       { name: "createNote", description: "Create a note" },
@@ -241,6 +245,81 @@ describe("McpAgentToolGateway", () => {
       ok: false,
       error: { code: "skills_not_configured", message: "Skill registry is not configured" },
       meta: { data_is_untrusted: true },
+    });
+  });
+
+  it("returns memory_not_configured when no memory store is wired", async () => {
+    const gateway = new McpAgentToolGateway(fakeRuntime as never);
+    gateway.beginTurn("turn-mem");
+
+    await expect(gateway.execute("memory", { action: "add", target: "memory", content: "test" }, "call-mem", "turn-mem")).resolves.toEqual({
+      ok: false,
+      error: { code: "memory_not_configured", message: "Memory store is not configured" },
+      meta: {},
+    });
+  });
+
+  it("handles memory add/replace/remove via the gateway", async () => {
+    let memoryEntries = [{ text: "existing note" }];
+    const fakeMemory: MemoryStorePort = {
+      loadSnapshot: async (): Promise<MemorySnapshot> => ({
+        memory: memoryEntries,
+        user: [],
+        usage: {
+          memory: { chars: memoryEntries.map((e) => e.text).join("\n§\n").length, limit: 2200 },
+          user: { chars: 0, limit: 1375 },
+        },
+      }),
+      add: async (_target, content): Promise<MemoryMutationResult> => {
+        memoryEntries = [...memoryEntries, { text: content }];
+        return { ok: true, data: { entries: memoryEntries, usage: { chars: 100, limit: 2200 } } };
+      },
+      replace: async (_target, _oldText, content): Promise<MemoryMutationResult> => {
+        memoryEntries = [{ text: content }];
+        return { ok: true, data: { entries: memoryEntries, usage: { chars: 50, limit: 2200 } } };
+      },
+      remove: async (_target, _oldText): Promise<MemoryMutationResult> => {
+        memoryEntries = [];
+        return { ok: true, data: { entries: [], usage: { chars: 0, limit: 2200 } } };
+      },
+    };
+    const gateway = new McpAgentToolGateway(fakeRuntime as never, undefined, undefined, undefined, fakeMemory);
+    gateway.beginTurn("turn-mem-2");
+
+    const addResult = await gateway.execute("memory", { action: "add", target: "memory", content: "new note" }, "call-add", "turn-mem-2");
+    expect(addResult).toEqual({
+      ok: true,
+      data: { entries: [{ text: "existing note" }, { text: "new note" }], usage: { chars: 100, limit: 2200 } },
+    });
+
+    const replaceResult = await gateway.execute("memory", { action: "replace", target: "memory", old_text: "existing", content: "updated" }, "call-replace", "turn-mem-2");
+    expect(replaceResult).toEqual({
+      ok: true,
+      data: { entries: [{ text: "updated" }], usage: { chars: 50, limit: 2200 } },
+    });
+
+    const removeResult = await gateway.execute("memory", { action: "remove", target: "memory", old_text: "updated" }, "call-remove", "turn-mem-2");
+    expect(removeResult).toEqual({
+      ok: true,
+      data: { entries: [], usage: { chars: 0, limit: 2200 } },
+    });
+  });
+
+  it("returns memory_error on capacity overflow", async () => {
+    const fakeMemory: MemoryStorePort = {
+      loadSnapshot: async () => ({ memory: [], user: [], usage: { memory: { chars: 0, limit: 2200 }, user: { chars: 0, limit: 1375 } } }),
+      add: async () => { throw new Error("Memory capacity exceeded for \"memory\": 2300/2200 chars (overflow 100). Remove or shorten entries first."); },
+      replace: async () => { throw new Error("not reached"); },
+      remove: async () => { throw new Error("not reached"); },
+    };
+    const gateway = new McpAgentToolGateway(fakeRuntime as never, undefined, undefined, undefined, fakeMemory);
+    gateway.beginTurn("turn-mem-3");
+
+    const result = await gateway.execute("memory", { action: "add", target: "memory", content: "x".repeat(2300) }, "call-overflow", "turn-mem-3");
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "memory_error", message: "Memory capacity exceeded for \"memory\": 2300/2200 chars (overflow 100). Remove or shorten entries first." },
+      meta: {},
     });
   });
 });

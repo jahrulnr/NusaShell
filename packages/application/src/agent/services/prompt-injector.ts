@@ -22,6 +22,7 @@ export function injectPrompts(
   vars: PromptVars,
   messages: readonly AgentMessage[],
   userPrompt?: string,
+  memoryPrompt?: string,
 ): AgentMessage[] {
   const staticPrompts = prompts.filter(
     (prompt) => STATIC_PROMPT_NAMES.includes(prompt.name) && !prompt.isTemplate,
@@ -42,6 +43,10 @@ export function injectPrompts(
 
   if (developerPrompt) {
     out.push({ role: "system", content: applyVars(developerPrompt.content, vars) });
+  }
+
+  if (memoryPrompt) {
+    out.push({ role: "system", content: memoryPrompt });
   }
 
   for (const message of messages) {

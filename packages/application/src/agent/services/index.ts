@@ -17,3 +17,4 @@ export {
 } from "./routed-agent-provider.js";
 export { AgentTurnCoordinator } from "./agent-turn-coordinator.js";
 export { injectPrompts, applyVars, type PromptVars } from "./prompt-injector.js";
+export { formatMemoryPrompt } from "./memory-prompt-formatter.js";

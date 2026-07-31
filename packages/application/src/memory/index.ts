@@ -1,0 +1,26 @@
+export type {
+  MemoryTarget,
+  MemoryEntry,
+  MemoryUsage,
+  MemorySnapshot,
+  MemoryMutationResult,
+  MemoryStorePort,
+} from "./ports/memory-store.port.js";
+export {
+  MEMORY_LIMIT,
+  USER_LIMIT,
+  ENTRY_DELIMITER,
+  limitFor,
+  splitEntries,
+  joinEntries,
+  charsOf,
+  usageOf,
+  checkCapacity,
+  findUniqueMatch,
+  MATCH_AMBIGUOUS,
+  MATCH_NOT_FOUND,
+  MATCH_EMPTY,
+  addEntry,
+  replaceEntry,
+  removeEntry,
+} from "./memory-entries.js";

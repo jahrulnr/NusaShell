@@ -103,6 +103,7 @@ async function startBackend(): Promise<BootstrapResult> {
   const docsRoot = resolve(runtimeRoot, "resources", "agent", "docs");
   const docsIndexStorageRoot = resolve(dataRoot, ".nusashell", "agent", "docs-index");
   const skillsRoot = resolve(app.getPath("userData"), "skills");
+  const memoryRoot = resolve(app.getPath("userData"), "memories");
   mailSettingsStore ??= new MailSettingsStore(resolve(app.getPath("userData"), "mail-settings.json"));
   await mailSettingsStore.load();
 
@@ -121,6 +122,7 @@ async function startBackend(): Promise<BootstrapResult> {
     docsRoot,
     docsIndexStorageRoot,
     skillsRoot,
+    memoryRoot,
     logFile: resolve(app.getPath("userData"), "logs", "nusashell.log"),
     resolvePluginRuntimeEnvironment: (pluginId) =>
       pluginId === MAIL_PLUGIN_ID ? mailSettingsStore?.runtimeEnvironment() ?? {} : {},

@@ -35,6 +35,7 @@ export {
   injectPrompts,
   applyVars,
   type PromptVars,
+  formatMemoryPrompt,
 } from "./services/index.js";
 export type { AgentTurnWorker } from "./services/index.js";
 export type {
