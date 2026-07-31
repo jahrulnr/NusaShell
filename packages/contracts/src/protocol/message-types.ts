@@ -22,6 +22,13 @@ export type RequestMethod =
   | "agent.cancel"
   | "system.ping"
   | "system.version"
+  | "job.add"
+  | "job.list"
+  | "job.set-enabled"
+  | "job.run"
+  | "job.remove"
+  | "job.output"
+  | "job.validate-schedule"
   | "subscribe"
   | "unsubscribe";
 
@@ -68,7 +75,9 @@ export type EventType =
   | "agent.tool_call_start"
   | "agent.tool_call_end"
   | "agent.context"
-  | "agent.learning_updated";
+  | "agent.learning_updated"
+  | "job.completed"
+  | "job.failed";
 
 export interface EventEnvelope<TPayload = unknown> {
   readonly kind: "event";

@@ -445,6 +445,63 @@ function switchView(viewName) {
   if (viewName === "skills") void skillsController?.refresh();
   if (viewName === "learning") learningController?.initialize();
   if (viewName === "autostart") renderAutostartList();
+  if (viewName === "jobs") void jobsController.refresh();
+  if (viewName === "settings") void syncAppBehaviorControls();
+}
+
+async function syncAppBehaviorControls() {
+  const launchAtLogin = $("#settings-launch-at-login");
+  const startHidden = $("#settings-start-hidden");
+  const keepInBackground = $("#settings-keep-in-background");
+  const help = $("#settings-launch-at-login-help");
+  if (!launchAtLogin || !startHidden || !keepInBackground || !window.shell?.appBehavior) return;
+  try {
+    const settings = await window.shell.appBehavior.get();
+    launchAtLogin.checked = Boolean(settings.launchAtLogin);
+    startHidden.checked = Boolean(settings.startHidden);
+    keepInBackground.checked = Boolean(settings.keepInBackground);
+    launchAtLogin.disabled = !settings.canSetLoginAutostart;
+    if (help) {
+      help.textContent = settings.canSetLoginAutostart
+        ? "Starts NusaShell when you log in."
+        : "Starts NusaShell when you log in. Requires a packaged build.";
+    }
+  } catch (error) {
+    showToast(`Could not load startup settings: ${error.message || error}`, "error");
+  }
+}
+
+function wireAppBehaviorToggle(id, key) {
+  const input = $(id);
+  if (!input || !window.shell?.appBehavior) return;
+  input.addEventListener("change", async () => {
+    const previous = !input.checked;
+    input.disabled = true;
+    try {
+      const settings = await window.shell.appBehavior.set({ [key]: input.checked });
+      input.checked = Boolean(settings[key]);
+      const launchAtLogin = $("#settings-launch-at-login");
+      if (launchAtLogin) {
+        launchAtLogin.disabled = !settings.canSetLoginAutostart;
+        launchAtLogin.checked = Boolean(settings.launchAtLogin);
+      }
+      const startHidden = $("#settings-start-hidden");
+      if (startHidden) startHidden.checked = Boolean(settings.startHidden);
+      const keepInBackground = $("#settings-keep-in-background");
+      if (keepInBackground) keepInBackground.checked = Boolean(settings.keepInBackground);
+      showToast("Startup settings saved.", "success");
+    } catch (error) {
+      input.checked = previous;
+      showToast(`Could not save startup settings: ${error.message || error}`, "error");
+    } finally {
+      try {
+        const settings = await window.shell.appBehavior.get();
+        input.disabled = key === "launchAtLogin" && !settings.canSetLoginAutostart;
+      } catch {
+        input.disabled = false;
+      }
+    }
+  });
 }
 
 function renderAutostartList() {
@@ -724,6 +781,222 @@ function handlePluginEvent(payload, eventType) {
 }
 
 // ============ Toast ============
+
+// ============ Jobs Controller ============
+
+const jobsController = {
+  list: [],
+  _modalOpen: false,
+
+  async refresh() {
+    try {
+      const result = await sendRequest("job.list", {});
+      this.list = result.jobs ?? [];
+      this.render();
+    } catch (error) {
+      showToast(`Could not load jobs: ${error.message || error}`, "error");
+    }
+  },
+
+  render() {
+    const container = $("#jobs-list");
+    if (!container) return;
+    container.innerHTML = "";
+    if (this.list.length === 0) {
+      container.innerHTML = '<div class="empty-state">No jobs yet. Click “New Job” to create one.</div>';
+      return;
+    }
+    for (const job of this.list) {
+      container.appendChild(this._renderRow(job));
+    }
+  },
+
+  _renderRow(job) {
+    const row = el("div", "job-row");
+    row.dataset.jobId = job.id;
+    const statusDot = el("span", `job-status-dot job-status-${job.lastStatus ?? "idle"}`);
+    const info = el("div", "job-info");
+    const title = el("div", "job-title");
+    title.textContent = job.name;
+    const meta = el("div", "job-meta");
+    meta.textContent = `${describeJobSchedule(job.schedule)} · ${describeJobMode(job.mode)}${job.repeat.times ? ` · ${job.repeat.completed}/${job.repeat.times}` : ""}`;
+    info.appendChild(title);
+    info.appendChild(meta);
+    const next = el("div", "job-next");
+    next.textContent = job.enabled ? `next: ${job.nextRunAt ?? "—"}` : "paused";
+    const actions = el("div", "job-actions");
+    const runBtn = el("button", "mini-btn");
+    runBtn.textContent = "Run";
+    runBtn.dataset.control = "job-run-btn";
+    runBtn.addEventListener("click", () => this.runJob(job.id));
+    const toggleBtn = el("button", "mini-btn");
+    toggleBtn.textContent = job.enabled ? "Pause" : "Resume";
+    toggleBtn.dataset.control = "job-toggle-btn";
+    toggleBtn.addEventListener("click", () => this.toggleJob(job.id, !job.enabled));
+    const outputBtn = el("button", "mini-btn");
+    outputBtn.textContent = "Output";
+    outputBtn.dataset.control = "job-output-btn";
+    outputBtn.addEventListener("click", () => this.showOutput(job.id, job.name));
+    const removeBtn = el("button", "mini-btn danger-btn");
+    removeBtn.textContent = "Remove";
+    removeBtn.dataset.control = "job-remove-btn";
+    removeBtn.addEventListener("click", () => this.removeJob(job.id));
+    actions.append(runBtn, toggleBtn, outputBtn, removeBtn);
+    row.append(statusDot, info, next, actions);
+    return row;
+  },
+
+  openModal() {
+    this._modalOpen = true;
+    $("#job-modal-title").textContent = "New Job";
+    $("#job-field-name").value = "";
+    $("#job-field-schedule").value = "";
+    $("#job-field-mode").value = "agent";
+    $("#job-field-prompt").value = "";
+    $("#job-field-plugin-id").value = "";
+    $("#job-field-tool-name").value = "";
+    $("#job-field-args").value = "{}";
+    $("#job-field-repeat").value = "";
+    $("#job-schedule-help").textContent = "";
+    this._toggleModeFields();
+    $("#job-modal").style.display = "flex";
+  },
+
+  closeModal() {
+    this._modalOpen = false;
+    $("#job-modal").style.display = "none";
+  },
+
+  _toggleModeFields() {
+    const mode = $("#job-field-mode").value;
+    $("#job-agent-prompt-label").style.display = mode === "agent" ? "" : "none";
+    $("#job-tool-fields").style.display = mode === "tool" ? "" : "none";
+  },
+
+  async validateSchedule() {
+    const schedule = $("#job-field-schedule").value.trim();
+    const help = $("#job-schedule-help");
+    if (!schedule) { help.textContent = ""; return; }
+    try {
+      const result = await sendRequest("job.validate-schedule", { schedule });
+      help.textContent = result.ok ? `✓ ${result.description}` : `✗ ${result.error}`;
+      help.style.color = result.ok ? "var(--accent)" : "var(--danger)";
+    } catch (error) {
+      help.textContent = `✗ ${error.message || error}`;
+      help.style.color = "var(--danger)";
+    }
+  },
+
+  async saveJob() {
+    const name = $("#job-field-name").value.trim();
+    const schedule = $("#job-field-schedule").value.trim();
+    const modeType = $("#job-field-mode").value;
+    if (!name || !schedule) { showToast("Name and schedule are required", "error"); return; }
+    let mode;
+    if (modeType === "agent") {
+      const prompt = $("#job-field-prompt").value.trim();
+      if (!prompt) { showToast("Prompt is required for agent mode", "error"); return; }
+      mode = { type: "agent", prompt };
+    } else {
+      const pluginId = $("#job-field-plugin-id").value.trim();
+      const toolName = $("#job-field-tool-name").value.trim();
+      const argsText = $("#job-field-args").value.trim() || "{}";
+      let args;
+      try { args = JSON.parse(argsText); } catch { showToast("Args must be valid JSON", "error"); return; }
+      if (!pluginId || !toolName) { showToast("Plugin ID and tool name are required", "error"); return; }
+      mode = { type: "tool", pluginId, toolName, args };
+    }
+    const repeatRaw = $("#job-field-repeat").value.trim();
+    const payload = { name, schedule, mode };
+    if (repeatRaw) payload.repeatTimes = parseInt(repeatRaw, 10);
+    try {
+      await sendRequest("job.add", payload);
+      showToast("Job created", "success");
+      this.closeModal();
+      await this.refresh();
+    } catch (error) {
+      showToast(`Could not create job: ${error.message || error}`, "error");
+    }
+  },
+
+  async runJob(id) {
+    try {
+      const result = await sendRequest("job.run", { id });
+      if (!result.ok) showToast(`Run failed: ${result.error ?? "unknown"}`, "error");
+      else showToast("Job started", "success");
+      await this.refresh();
+    } catch (error) {
+      showToast(`Could not run job: ${error.message || error}`, "error");
+    }
+  },
+
+  async toggleJob(id, enabled) {
+    try {
+      await sendRequest("job.set-enabled", { id, enabled });
+      await this.refresh();
+    } catch (error) {
+      showToast(`Could not update job: ${error.message || error}`, "error");
+    }
+  },
+
+  async removeJob(id) {
+    if (!confirm("Remove this job?")) return;
+    try {
+      await sendRequest("job.remove", { id });
+      await this.refresh();
+    } catch (error) {
+      showToast(`Could not remove job: ${error.message || error}`, "error");
+    }
+  },
+
+  async showOutput(id, name) {
+    try {
+      const result = await sendRequest("job.output", { id, limit: 20 });
+      $("#job-output-title").textContent = `Output: ${name}`;
+      const body = $("#job-output-body");
+      body.innerHTML = "";
+      const entries = result.outputs ?? [];
+      if (entries.length === 0) {
+        body.innerHTML = '<div class="empty-state">No output yet.</div>';
+      } else {
+        for (const entry of entries) {
+          const card = el("div", "job-output-entry");
+          const header = el("div", "job-output-header");
+          header.textContent = `${entry.runAt} · ${entry.status}`;
+          if (entry.status === "error") header.classList.add("job-output-error");
+          const summary = el("pre", "job-output-summary");
+          summary.textContent = entry.summary;
+          card.appendChild(header);
+          card.appendChild(summary);
+          body.appendChild(card);
+        }
+      }
+      $("#job-output-modal").style.display = "flex";
+    } catch (error) {
+      showToast(`Could not load output: ${error.message || error}`, "error");
+    }
+  },
+};
+
+function describeJobSchedule(schedule) {
+  if (!schedule) return "—";
+  if (schedule.kind === "once") return `once @ ${schedule.runAt}`;
+  if (schedule.kind === "interval") {
+    const m = schedule.minutes;
+    if (m % 1440 === 0) return `every ${m / 1440}d`;
+    if (m % 60 === 0) return `every ${m / 60}h`;
+    return `every ${m}m`;
+  }
+  if (schedule.kind === "cron") return `cron ${schedule.expr}`;
+  return "—";
+}
+
+function describeJobMode(mode) {
+  if (!mode) return "—";
+  if (mode.type === "agent") return `agent: ${mode.prompt.slice(0, 60)}`;
+  if (mode.type === "tool") return `tool: ${mode.pluginId}/${mode.toolName}`;
+  return "—";
+}
 
 function showToast(message, type = "info") {
   const container = $("#toast-container");
@@ -1238,6 +1511,10 @@ document.addEventListener("DOMContentLoaded", () => {
       showToast(`Could not save agent runtime: ${error.message || error}`, "error");
     }
   });
+  wireAppBehaviorToggle("#settings-launch-at-login", "launchAtLogin");
+  wireAppBehaviorToggle("#settings-start-hidden", "startHidden");
+  wireAppBehaviorToggle("#settings-keep-in-background", "keepInBackground");
+  void syncAppBehaviorControls();
   $("#ai-limits-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
@@ -1511,6 +1788,23 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   void learningController.initialize().catch((error) => {
     showToast(`Could not load learning graph: ${error.message || error}`, "error");
+  });
+
+  // Jobs: modal wiring + event subscriptions
+  $("#jobs-new-btn")?.addEventListener("click", () => jobsController.openModal());
+  $("#job-modal-close")?.addEventListener("click", () => jobsController.closeModal());
+  $("#job-modal-cancel")?.addEventListener("click", () => jobsController.closeModal());
+  $("#job-modal-save")?.addEventListener("click", () => jobsController.saveJob());
+  $("#job-field-mode")?.addEventListener("change", () => jobsController._toggleModeFields());
+  $("#job-field-schedule")?.addEventListener("blur", () => jobsController.validateSchedule());
+  $("#job-output-close")?.addEventListener("click", () => { $("#job-output-modal").style.display = "none"; });
+  onEvent("job.completed", (payload) => {
+    showToast(`Job “${payload.name}” completed`, "success");
+    if ($(".view[data-view='jobs']")?.classList.contains("active")) void jobsController.refresh();
+  });
+  onEvent("job.failed", (payload) => {
+    showToast(`Job “${payload.name}” failed: ${payload.error}`, "error");
+    if ($(".view[data-view='jobs']")?.classList.contains("active")) void jobsController.refresh();
   });
 
   // Connect and subscribe — pre-seed activeSubscriptions so onopen always subscribes

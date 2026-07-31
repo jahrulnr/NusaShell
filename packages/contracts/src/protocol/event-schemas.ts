@@ -165,6 +165,30 @@ export const AgentLearningUpdatedEventSchema = z.object({
   }),
 });
 
+export const JobCompletedEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("job.completed"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    jobId: z.string(),
+    name: z.string(),
+    summary: z.string(),
+    timestamp: z.string(),
+  }),
+});
+
+export const JobFailedEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("job.failed"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    jobId: z.string(),
+    name: z.string(),
+    error: z.string(),
+    timestamp: z.string(),
+  }),
+});
+
 export const EventSchema = z.discriminatedUnion("event", [
   PluginInstalledEventSchema,
   PluginUninstalledEventSchema,
@@ -179,6 +203,8 @@ export const EventSchema = z.discriminatedUnion("event", [
   AgentToolCallEndEventSchema,
   AgentContextEventSchema,
   AgentLearningUpdatedEventSchema,
+  JobCompletedEventSchema,
+  JobFailedEventSchema,
 ]);
 
 export type PluginInstalledEvent = z.infer<typeof PluginInstalledEventSchema>;
@@ -194,4 +220,6 @@ export type AgentToolCallStartEvent = z.infer<typeof AgentToolCallStartEventSche
 export type AgentToolCallEndEvent = z.infer<typeof AgentToolCallEndEventSchema>;
 export type AgentContextEvent = z.infer<typeof AgentContextEventSchema>;
 export type AgentLearningUpdatedEvent = z.infer<typeof AgentLearningUpdatedEventSchema>;
+export type JobCompletedEvent = z.infer<typeof JobCompletedEventSchema>;
+export type JobFailedEvent = z.infer<typeof JobFailedEventSchema>;
 export type ParsedEvent = z.infer<typeof EventSchema>;

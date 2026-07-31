@@ -21,6 +21,8 @@ import {
   AgentProviderRegistry,
   StaticAgentProvider,
   OpenAiCompatibleAgentProvider,
+  SqliteJobStore,
+  JsonJobStore,
   type Logger,
   type LogObserver,
 } from "@nusashell/infrastructure";
@@ -62,6 +64,19 @@ import {
   RunAgentTurnHandler,
   CancelAgentTurnHandler,
   AgentTurnCoordinator,
+  JobAgentToolGateway,
+  JobAgentExecutor,
+  JobScheduler,
+  DEFAULT_JOB_EXECUTOR_SETTINGS,
+  AddJobHandler,
+  SetJobEnabledHandler,
+  RunJobNowHandler,
+  RemoveJobHandler,
+  ListJobsHandler,
+  JobOutputHandler,
+  ValidateScheduleHandler,
+  type JobStorePort,
+  type JobSchedulerSettings,
   type AgentRuntimeSettings,
   createAgentTextDeltaEvent,
   createAgentReasoningDeltaEvent,
@@ -87,6 +102,7 @@ export interface ContainerOptions {
   readonly docsIndexStorageRoot?: string;
   readonly skillsRoot?: string;
   readonly memoryRoot?: string;
+  readonly jobsRoot?: string;
   readonly dbPath?: string;
   readonly logLevel?: string;
   readonly logFile?: string;
@@ -124,6 +140,7 @@ export interface ContainerOptions {
     };
   };
   readonly backgroundReview?: Partial<BackgroundReviewSettings>;
+  readonly jobs?: Partial<JobSchedulerSettings>;
 }
 
 export interface Container {
@@ -142,6 +159,7 @@ export interface Container {
   readonly skillCurator: SkillCuratorService;
   readonly skillCuratorScheduler: SkillCuratorScheduler;
   readonly backgroundReviewScheduler: BackgroundReviewScheduler;
+  readonly jobScheduler: JobScheduler;
   readonly learningGraph: LearningGraphService;
   readonly memoryStore: MemoryStorePort;
   readonly db?: SqliteDatabase | undefined;
@@ -173,6 +191,7 @@ export interface Container {
   configureBackgroundReview(settings: Partial<BackgroundReviewSettings>): void;
   configureCurator(settings: Partial<CuratorSettings>): void;
   configureCuratorScheduler(settings: Partial<{ enabled: boolean; intervalHours: number; paused: boolean }>): void;
+  configureJobScheduler(settings: Partial<JobSchedulerSettings>): void;
 }
 
 export function createContainer(options: ContainerOptions): Container {
@@ -312,6 +331,34 @@ export function createContainer(options: ContainerOptions): Container {
     backgroundReviewScheduler.configure(options.backgroundReview);
   }
 
+  // ---- Job automation waist ----
+  const jobsRoot = options.jobsRoot ?? new URL("../../../.nusashell/agent/jobs", import.meta.url).pathname;
+  let jobStore: JobStorePort;
+  if (db) {
+    jobStore = new SqliteJobStore(db);
+  } else {
+    jobStore = new JsonJobStore(jobsRoot);
+  }
+  const jobToolGateway = new JobAgentToolGateway(agentToolGateway);
+  const jobExecutor = new JobAgentExecutor({
+    providerRegistry: agentProviderRegistry,
+    toolGateway: jobToolGateway,
+    defaultProviderId: options.ai?.providerId || (options.ai?.stubEnabled ? "stub" : ""),
+    logger,
+  });
+  const jobScheduler = new JobScheduler({
+    store: jobStore,
+    executor: jobExecutor,
+    callToolHandler: new CallToolHandler(runtimeManager),
+    eventDispatcher,
+    jobsRoot,
+    executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS,
+    logger,
+  });
+  if (options.jobs) {
+    jobScheduler.configure(options.jobs);
+  }
+
   const commandBus = new CommandBus();
   commandBus.register("start-plugin", new StartPluginHandler(runtimeManager));
   commandBus.register("stop-plugin", new StopPluginHandler(runtimeManager));
@@ -347,6 +394,10 @@ export function createContainer(options: ContainerOptions): Container {
     (result) => { void backgroundReviewScheduler.tick(result); void skillCuratorScheduler.tick(); },
   ));
   commandBus.register("cancel-agent-turn", new CancelAgentTurnHandler(agentTurnCoordinator));
+  commandBus.register("add-job", new AddJobHandler(jobStore));
+  commandBus.register("set-job-enabled", new SetJobEnabledHandler(jobStore));
+  commandBus.register("run-job-now", new RunJobNowHandler(jobScheduler));
+  commandBus.register("remove-job", new RemoveJobHandler(jobStore));
   if (pluginInstaller) {
     commandBus.register("install-plugin", new InstallPluginHandler(pluginInstaller, eventDispatcher, clock));
     commandBus.register("uninstall-plugin", new UninstallPluginHandler(pluginInstaller, runtimeManager, pluginRepository, eventDispatcher, clock));
@@ -364,6 +415,9 @@ export function createContainer(options: ContainerOptions): Container {
   queryBus.register("read-resource", new ReadResourceHandler(runtimeManager));
   queryBus.register("system-ping", new SystemPingHandler());
   queryBus.register("system-version", new SystemVersionHandler());
+  queryBus.register("list-jobs", new ListJobsHandler(jobStore));
+  queryBus.register("job-output", new JobOutputHandler(jobStore));
+  queryBus.register("validate-schedule", new ValidateScheduleHandler());
 
   const router = new MessageRouter({ commandBus, queryBus, logger });
 
@@ -392,6 +446,7 @@ export function createContainer(options: ContainerOptions): Container {
     skillCurator,
     skillCuratorScheduler,
     backgroundReviewScheduler,
+    jobScheduler,
     learningGraph,
     memoryStore,
     db,
@@ -434,6 +489,9 @@ export function createContainer(options: ContainerOptions): Container {
     },
     configureCuratorScheduler(settings: Partial<{ enabled: boolean; intervalHours: number; paused: boolean }>) {
       skillCuratorScheduler.configure(settings);
+    },
+    configureJobScheduler(settings: Partial<JobSchedulerSettings>) {
+      jobScheduler.configure(settings);
     },
     configureAiRuntime(settings) {
       aiRuntime.strategy = settings.strategy;

@@ -1,0 +1,348 @@
+import { mkdir, open, readdir, rm, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import type { JobStorePort } from "../ports/job-store.port.js";
+import type { Job, JobOutputEntry } from "../job-model.js";
+import {
+  computeNextRun,
+  describeSchedule,
+} from "../schedule-parser.js";
+import {
+  ONCE_GRACE_SECONDS,
+  recurringCatchupGraceSeconds,
+  isRecurring,
+} from "../job-model.js";
+import type { JobAgentExecutorSettings, JobExecutionResult } from "./job-agent-executor.js";
+import type { CallToolCommand } from "../../tool/commands/call-tool/call-tool.command.js";
+import type { EventDispatcher } from "../../events/event-dispatcher.js";
+import { createJobCompletedEvent, createJobFailedEvent } from "../../events/job-events.event.js";
+import type { LoggerPort } from "../../plugin/ports/logger.port.js";
+
+/** Minimal executor surface the scheduler needs (structural — accepts JobAgentExecutor or fakes). */
+export interface JobExecutorPort {
+  runAgent(prompt: string, settings: JobAgentExecutorSettings): Promise<JobExecutionResult>;
+}
+
+/** Minimal call-tool surface the scheduler needs (structural — accepts CallToolHandler or fakes). */
+export interface JobCallToolPort {
+  handle(command: CallToolCommand): Promise<{ requestId: string; result: unknown }>;
+}
+
+export interface JobSchedulerSettings {
+  readonly enabled: boolean;
+  readonly tickSeconds: number;
+  readonly inactivityTimeoutSeconds: number;
+  readonly maxOutputChars: number;
+  readonly claimTtlSeconds: number;
+}
+
+export const DEFAULT_JOB_SCHEDULER_SETTINGS: JobSchedulerSettings = {
+  enabled: true,
+  tickSeconds: 60,
+  inactivityTimeoutSeconds: 600,
+  maxOutputChars: 8000,
+  claimTtlSeconds: 300,
+};
+
+export interface JobSchedulerDeps {
+  readonly store: JobStorePort;
+  readonly executor: JobExecutorPort;
+  readonly callToolHandler: JobCallToolPort;
+  readonly eventDispatcher: EventDispatcher;
+  readonly jobsRoot: string;
+  readonly executorSettings: JobAgentExecutorSettings;
+  readonly logger?: LoggerPort;
+  readonly now?: () => Date;
+}
+
+const TICK_LOCK_FILE = ".tick.lock";
+const STALE_PID_AFTER_MS = 5 * 60 * 1000;
+
+/**
+ * Wall-clock tick scheduler for durable jobs. Runs a 60s interval plus one
+ * immediate tick at start. Each tick acquires an exclusive `.tick.lock`,
+ * selects due jobs, claims each (at-most-once), dispatches them sequentially,
+ * persists output, and publishes completion/failure events.
+ *
+ * Jobs run only while NusaShell is open. Missed one-shots (past the 120s grace
+ * at tick time, e.g. after an app restart) are marked errored + disabled
+ * rather than silently dropped.
+ */
+export class JobScheduler {
+  private settings: JobSchedulerSettings = DEFAULT_JOB_SCHEDULER_SETTINGS;
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private ticking = false;
+  private readonly activeJobIds = new Set<string>();
+  private lastTickAt: string | null = null;
+
+  constructor(private readonly deps: JobSchedulerDeps) {}
+
+  configure(settings: Partial<JobSchedulerSettings>): void {
+    this.settings = { ...this.settings, ...settings };
+  }
+
+  getSettings(): JobSchedulerSettings {
+    return this.settings;
+  }
+
+  getStatus(): { running: boolean; lastTickAt: string | null; activeJobIds: readonly string[] } {
+    return {
+      running: this.timer !== null,
+      lastTickAt: this.lastTickAt,
+      activeJobIds: [...this.activeJobIds],
+    };
+  }
+
+  start(): void {
+    if (this.timer) return;
+    if (!this.settings.enabled) {
+      this.deps.logger?.info("job scheduler disabled; not starting");
+      return;
+    }
+    // One immediate tick so due recurring jobs catch up at launch.
+    void this.tick().catch((err) => {
+      this.deps.logger?.error("job scheduler initial tick failed: %s", err instanceof Error ? err.message : String(err));
+    });
+    this.timer = setInterval(() => {
+      void this.tick().catch((err) => {
+        this.deps.logger?.error("job scheduler tick failed: %s", err instanceof Error ? err.message : String(err));
+      });
+    }, Math.max(10, this.settings.tickSeconds) * 1000);
+  }
+
+  stop(): void {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  }
+
+  async tick(): Promise<void> {
+    if (!this.settings.enabled) return;
+    if (this.ticking) return;
+    this.ticking = true;
+    try {
+      if (!(await this.acquireTickLock())) {
+        this.deps.logger?.debug("job scheduler tick skipped: lock held");
+        return;
+      }
+      const now = (this.deps.now ?? (() => new Date()))();
+      this.lastTickAt = now.toISOString();
+      const due = await this.deps.store.listDue(now);
+      for (const job of due) {
+        await this.processJob(job, now);
+      }
+    } catch (error) {
+      this.deps.logger?.error("job scheduler tick error: %s", error instanceof Error ? error.message : String(error));
+    } finally {
+      await this.releaseTickLock();
+      this.ticking = false;
+    }
+  }
+
+  /** Fire a job immediately (manual run), respecting the claim lock. */
+  async runOneNow(jobId: string): Promise<{ ok: boolean; error?: string }> {
+    const job = await this.deps.store.get(jobId);
+    if (!job) return { ok: false, error: "job not found" };
+    if (!job.enabled) return { ok: false, error: "job is paused" };
+    const now = (this.deps.now ?? (() => new Date()))();
+    const claimId = randomUUID();
+    const claimed = await this.deps.store.claimFire(jobId, claimId, this.settings.claimTtlSeconds, now);
+    if (!claimed) return { ok: false, error: "job is already running" };
+    try {
+      await this.dispatch(job, now, claimId);
+      return { ok: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false, error: message };
+    }
+  }
+
+  private async processJob(job: Job, now: Date): Promise<void> {
+    const claimId = randomUUID();
+    const claimed = await this.deps.store.claimFire(job.id, claimId, this.settings.claimTtlSeconds, now);
+    if (!claimed) return;
+
+    // Missed one-shot: runAt older than the grace window at tick time.
+    if (job.schedule.kind === "once") {
+      const runAtMs = new Date(job.schedule.runAt).getTime();
+      const ageSeconds = (now.getTime() - runAtMs) / 1000;
+      if (ageSeconds > ONCE_GRACE_SECONDS) {
+        this.deps.logger?.warn("job %s missed while app was closed; marking error", job.id);
+        await this.deps.store.markRun(job.id, "error", "missed while app was closed", null, now);
+        await this.deps.store.releaseFire(job.id, claimId);
+        await this.deps.eventDispatcher.publish(
+          createJobFailedEvent(job.id, job.name, "missed while app was closed", now),
+        );
+        return;
+      }
+    }
+
+    // Catchup for recurring jobs late beyond the grace window: fire once now,
+    // then fast-forward nextRunAt past the missed slots.
+    if (isRecurring(job.schedule)) {
+      const periodMinutes = periodMinutesFor(job.schedule);
+      const grace = recurringCatchupGraceSeconds(periodMinutes);
+      const nextRunMs = job.nextRunAt ? new Date(job.nextRunAt).getTime() : now.getTime();
+      const latenessSeconds = (now.getTime() - nextRunMs) / 1000;
+      if (latenessSeconds > grace) {
+        this.deps.logger?.info("job %s catchup: firing once and fast-forwarding", job.id);
+      }
+    }
+
+    try {
+      await this.dispatch(job, now, claimId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.deps.logger?.error("job %s dispatch failed: %s", job.id, message);
+      await this.deps.store.markRun(job.id, "error", message, computeNext(job.schedule, now.toISOString(), now), now);
+      await this.deps.store.releaseFire(job.id, claimId);
+      await this.deps.eventDispatcher.publish(createJobFailedEvent(job.id, job.name, message, now));
+    }
+  }
+
+  private async dispatch(job: Job, now: Date, claimId: string): Promise<void> {
+    this.activeJobIds.add(job.id);
+    try {
+      let status: "ok" | "error";
+      let summary: string;
+      let error: string | null = null;
+
+      if (job.mode.type === "agent") {
+        const result = await this.deps.executor.runAgent(job.mode.prompt, this.deps.executorSettings);
+        status = result.status;
+        summary = result.summary;
+        if (result.status === "error") error = result.error ?? summary;
+      } else {
+        const command: CallToolCommand = {
+          kind: "call-tool",
+          pluginId: job.mode.pluginId,
+          requestId: randomUUID(),
+          toolName: job.mode.toolName,
+          args: job.mode.args,
+        };
+        try {
+          const result = await this.deps.callToolHandler.handle(command);
+          summary = formatToolOutput(result.result, this.settings.maxOutputChars);
+          status = "ok";
+        } catch (err) {
+          error = err instanceof Error ? err.message : String(err);
+          summary = error;
+          status = "error";
+        }
+      }
+
+      const outputEntry = await this.persistOutput(job, now, status, summary);
+      if (outputEntry) await this.deps.store.appendOutput(job.id, outputEntry);
+      const nextRunAt = computeNext(job.schedule, now.toISOString(), now);
+      await this.deps.store.markRun(job.id, status, error, nextRunAt, now);
+      await this.deps.store.releaseFire(job.id, claimId);
+
+      if (status === "ok") {
+        await this.deps.eventDispatcher.publish(createJobCompletedEvent(job.id, job.name, summary, now));
+      } else {
+        await this.deps.eventDispatcher.publish(createJobFailedEvent(job.id, job.name, error ?? summary, now));
+      }
+    } finally {
+      this.activeJobIds.delete(job.id);
+    }
+  }
+
+  private async persistOutput(
+    job: Job,
+    now: Date,
+    status: "ok" | "error",
+    summary: string,
+  ): Promise<JobOutputEntry | null> {
+    try {
+      const dir = resolve(this.deps.jobsRoot, "output", job.id);
+      await mkdir(dir, { recursive: true });
+      const stamp = now.toISOString().replace(/[:.]/g, "-");
+      const path = resolve(dir, `${stamp}.md`);
+      const header = `# Job: ${job.name}\n- id: ${job.id}\n- schedule: ${describeSchedule(job.schedule)}\n- runAt: ${now.toISOString()}\n- status: ${status}\n\n`;
+      await writeFile(path, header + summary + "\n", "utf8");
+      return {
+        jobId: job.id,
+        runAt: now.toISOString(),
+        status,
+        summary: summary.slice(0, 500),
+        path,
+      };
+    } catch (error) {
+      this.deps.logger?.warn("job %s output persist failed: %s", job.id, error instanceof Error ? error.message : String(error));
+      return null;
+    }
+  }
+
+  private async acquireTickLock(): Promise<boolean> {
+    const lockPath = resolve(this.deps.jobsRoot, TICK_LOCK_FILE);
+    try {
+      await mkdir(this.deps.jobsRoot, { recursive: true });
+      // Reap stale lock: if the lock file is older than STALE_PID_AFTER_MS, remove it.
+      try {
+        const entries = await readdir(this.deps.jobsRoot);
+        if (entries.includes(TICK_LOCK_FILE)) {
+          const content = await (await import("node:fs/promises")).readFile(lockPath, "utf8").catch(() => "");
+          const pidMatch = /pid:(\d+)/.exec(content);
+          const startedMatch = /started:(\S+)/.exec(content);
+          const staleByAge = startedMatch
+            ? Date.now() - new Date(startedMatch[1]!).getTime() > STALE_PID_AFTER_MS
+            : false;
+          const pidDead = pidMatch ? !processAlive(parseInt(pidMatch[1]!, 10)) : false;
+          if (staleByAge || pidDead) {
+            await rm(lockPath, { force: true });
+          }
+        }
+      } catch {
+        // best-effort
+      }
+      const fh = await open(lockPath, "wx");
+      await fh.writeFile(`pid:${process.pid}\nstarted:${new Date().toISOString()}\n`);
+      await fh.close();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async releaseTickLock(): Promise<void> {
+    const lockPath = resolve(this.deps.jobsRoot, TICK_LOCK_FILE);
+    await rm(lockPath, { force: true }).catch(() => {});
+  }
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function periodMinutesFor(schedule: Job["schedule"]): number {
+  if (schedule.kind === "interval") return schedule.minutes;
+  // cron: approximate with a 1h minimum; exact period is not needed for grace.
+  return 60;
+}
+
+function computeNext(
+  schedule: Job["schedule"],
+  lastRunAt: string | null,
+  now: Date,
+): string | null {
+  return computeNextRun(schedule, lastRunAt, now);
+}
+
+function formatToolOutput(result: unknown, maxChars: number): string {
+  let text: string;
+  if (typeof result === "string") text = result;
+  else {
+    try {
+      text = JSON.stringify(result, null, 2);
+    } catch {
+      text = String(result);
+    }
+  }
+  return text.length <= maxChars ? text : `${text.slice(0, maxChars)}\n…[truncated]`;
+}

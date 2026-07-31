@@ -67,6 +67,8 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
 
   await container.runtimeManager.startAutostartPlugins();
 
+  container.jobScheduler.start();
+
   await container.wsServer.start();
 
   process.on("SIGTERM", () => void shutdown.shutdown());

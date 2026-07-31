@@ -24,6 +24,8 @@ const ERROR_CODE_MAP: Record<ApplicationErrorCode, string> = {
   UNAUTHORIZED: "UNAUTHORIZED",
   UNAVAILABLE: "UNAVAILABLE",
   INTERNAL_ERROR: "INTERNAL_ERROR",
+  JOB_NOT_FOUND: "JOB_NOT_FOUND",
+  JOB_INVALID_SCHEDULE: "JOB_INVALID_SCHEDULE",
 };
 
 export function mapApplicationError(

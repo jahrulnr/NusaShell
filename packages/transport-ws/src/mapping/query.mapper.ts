@@ -1,9 +1,9 @@
 import type { ParsedRequest } from "@nusashell/contracts";
-import type { GetPromptQuery, GetPluginQuery, GetPluginStateQuery, ListPluginsQuery, ListPromptsQuery, ListResourcesQuery, ListResourceTemplatesQuery, ListToolsQuery, ReadResourceQuery, SystemPingQuery, SystemVersionQuery } from "@nusashell/application";
+import type { GetPromptQuery, GetPluginQuery, GetPluginStateQuery, ListPluginsQuery, ListPromptsQuery, ListResourcesQuery, ListResourceTemplatesQuery, ListToolsQuery, ReadResourceQuery, SystemPingQuery, SystemVersionQuery, ListJobsQuery, JobOutputQuery, ValidateScheduleQuery } from "@nusashell/application";
 
 export function mapToQuery(
   request: ParsedRequest,
-): ListPluginsQuery | GetPluginQuery | GetPluginStateQuery | ListToolsQuery | ListPromptsQuery | GetPromptQuery | ListResourcesQuery | ListResourceTemplatesQuery | ReadResourceQuery | SystemPingQuery | SystemVersionQuery | null {
+): ListPluginsQuery | GetPluginQuery | GetPluginStateQuery | ListToolsQuery | ListPromptsQuery | GetPromptQuery | ListResourcesQuery | ListResourceTemplatesQuery | ReadResourceQuery | SystemPingQuery | SystemVersionQuery | ListJobsQuery | JobOutputQuery | ValidateScheduleQuery | null {
   switch (request.method) {
     case "plugin.list":
       return { kind: "list-plugins" } as ListPluginsQuery;
@@ -36,6 +36,16 @@ export function mapToQuery(
       return { kind: "system-ping" } as SystemPingQuery;
     case "system.version":
       return { kind: "system-version" } as SystemVersionQuery;
+    case "job.list":
+      return { kind: "list-jobs" } as ListJobsQuery;
+    case "job.output":
+      return {
+        kind: "job-output",
+        id: request.payload.id,
+        ...(request.payload.limit !== undefined ? { limit: request.payload.limit } : {}),
+      } as JobOutputQuery;
+    case "job.validate-schedule":
+      return { kind: "validate-schedule", schedule: request.payload.schedule } as ValidateScheduleQuery;
     default:
       return null;
   }

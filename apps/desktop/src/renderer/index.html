@@ -91,6 +91,10 @@
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M4 5h16M4 12h10M4 19h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="17" cy="12" r="1.5" fill="currentColor"/></svg>
           <span class="nav-label">Logs</span>
         </a>
+        <a class="nav-item" data-view="jobs" data-nav title="Jobs">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v4l2.5 2.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <span class="nav-label">Jobs</span>
+        </a>
       </nav>
 
       <button class="add-plugin-btn" id="open-add-plugin" title="Add Plugin">
@@ -432,7 +436,74 @@
         <div class="log-tail" id="log-tail" role="log" aria-live="polite"></div>
       </section>
 
+      <!-- ===== View: Jobs ===== -->
+      <section class="view jobs-view" data-view="jobs">
+        <div class="jobs-header">
+          <div>
+            <h1 class="page-title">Jobs</h1>
+            <p class="subtitle">Scheduled automation that fires headless agent turns or plugin tool calls while NusaShell is open.</p>
+          </div>
+          <button class="primary-btn" id="jobs-new-btn" data-control="jobs-new-btn">+ New Job</button>
+        </div>
+        <div class="jobs-hint" id="jobs-hint">Jobs run only while the app is open. A one-shot missed while the app was closed is marked errored, not silently fired.</div>
+        <div class="jobs-list" id="jobs-list" role="list" aria-label="Scheduled jobs"></div>
+      </section>
+
+      <!-- ===== Job Modal ===== -->
+      <div class="modal-overlay" id="job-modal" style="display:none">
+        <div class="modal-card">
+          <div class="modal-header">
+            <h2 id="job-modal-title">New Job</h2>
+            <button class="modal-close" id="job-modal-close" aria-label="Close">&times;</button>
+          </div>
+          <div class="modal-body">
+            <label class="form-label">Name<input type="text" id="job-field-name" placeholder="Daily inbox summary" data-control="job-field-name"></label>
+            <label class="form-label">Schedule
+              <input type="text" id="job-field-schedule" placeholder="every 30m / 2h / 1d / 0 9 * * * / 2025-12-01T09:00:00Z" data-control="job-field-schedule">
+              <span class="form-help" id="job-schedule-help"></span>
+            </label>
+            <label class="form-label">Mode
+              <select id="job-field-mode" data-control="job-field-mode">
+                <option value="agent">Agent prompt</option>
+                <option value="tool">Plugin tool call</option>
+              </select>
+            </label>
+            <label class="form-label" id="job-agent-prompt-label">Prompt
+              <textarea id="job-field-prompt" rows="4" placeholder="Summarize unread mail and create a note." data-control="job-field-prompt"></textarea>
+            </label>
+            <div id="job-tool-fields" style="display:none">
+              <label class="form-label">Plugin ID<input type="text" id="job-field-plugin-id" placeholder="nusashell.mail" data-control="job-field-plugin-id"></label>
+              <label class="form-label">Tool name<input type="text" id="job-field-tool-name" placeholder="send" data-control="job-field-tool-name"></label>
+              <label class="form-label">Args (JSON)<textarea id="job-field-args" rows="3" placeholder='{"to":"x@y.com"}' data-control="job-field-args"></textarea></label>
+            </div>
+            <label class="form-label">Repeat (times, blank = forever)<input type="number" id="job-field-repeat" min="1" placeholder="∞" data-control="job-field-repeat"></label>
+          </div>
+          <div class="modal-footer">
+            <button class="ghost-btn" id="job-modal-cancel">Cancel</button>
+            <button class="primary-btn" id="job-modal-save" data-control="job-modal-save">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== Job Output Modal ===== -->
+      <div class="modal-overlay" id="job-output-modal" style="display:none">
+        <div class="modal-card modal-card-wide">
+          <div class="modal-header">
+            <h2 id="job-output-title">Job output</h2>
+            <button class="modal-close" id="job-output-close" aria-label="Close">&times;</button>
+          </div>
+          <div class="modal-body" id="job-output-body"></div>
+        </div>
+      </div>
+
       <!-- ===== View: Settings ===== -->
+      <!-- Hidden stubs for dynamically-created job row controls (scan:ui-docs source validation) -->
+      <template id="job-row-controls-template" aria-hidden="true">
+        <button id="job-run-btn" hidden>Run</button>
+        <button id="job-toggle-btn" hidden>Pause</button>
+        <button id="job-output-btn" hidden>Output</button>
+        <button id="job-remove-btn" hidden>Remove</button>
+      </template>
       <section class="view" data-view="settings">
         <div class="settings-header">
           <h1 class="page-title">Settings</h1>
@@ -453,6 +524,32 @@
             <div class="settings-card-title">Connection</div>
             <div class="settings-row"><span>Auto-reconnect</span><label class="toggle"><input type="checkbox" checked><span class="toggle-slider"></span></label></div>
             <div class="settings-row"><span>Auto-resubscribe</span><label class="toggle"><input type="checkbox" checked><span class="toggle-slider"></span></label></div>
+          </div>
+
+          <div class="settings-card" id="app-behavior-card">
+            <div class="settings-card-title">Startup &amp; background</div>
+            <p class="settings-card-lede">Keep learning and scheduled work alive after the window closes. Quit from the tray menu when you want a full stop.</p>
+            <div class="settings-row">
+              <span>
+                Launch at login
+                <span class="settings-field-help" id="settings-launch-at-login-help">Starts NusaShell when you log in. Requires a packaged build.</span>
+              </span>
+              <label class="toggle"><input id="settings-launch-at-login" type="checkbox" data-control="settings-launch-at-login"><span class="toggle-slider"></span></label>
+            </div>
+            <div class="settings-row">
+              <span>
+                Start in tray
+                <span class="settings-field-help">When launched at login, stay in the tray until you open the window.</span>
+              </span>
+              <label class="toggle"><input id="settings-start-hidden" type="checkbox" data-control="settings-start-hidden" checked><span class="toggle-slider"></span></label>
+            </div>
+            <div class="settings-row">
+              <span>
+                Keep running when window is closed
+                <span class="settings-field-help">Hides to the tray instead of quitting. Jobs and learning keep running.</span>
+              </span>
+              <label class="toggle"><input id="settings-keep-in-background" type="checkbox" data-control="settings-keep-in-background" checked><span class="toggle-slider"></span></label>
+            </div>
           </div>
 
           <form class="settings-card" id="ai-runtime-form">

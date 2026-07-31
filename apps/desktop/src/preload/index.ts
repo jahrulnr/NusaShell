@@ -94,12 +94,25 @@ export interface ShellApi {
     configure(settings: Record<string, unknown>): Promise<{ ok: boolean }>;
     settings(): Promise<Record<string, unknown>>;
   };
+  readonly appBehavior: {
+    get(): Promise<AppBehaviorPublic>;
+    set(patch: AppBehaviorPatch): Promise<AppBehaviorPublic>;
+  };
   readonly mailAccounts: {
     list(): Promise<PublicMailSettings>;
     save(input: SaveMailAccountInput): Promise<PublicMailSettings>;
     delete(accountId: string): Promise<PublicMailSettings>;
   };
 }
+
+export interface AppBehaviorPublic {
+  readonly launchAtLogin: boolean;
+  readonly startHidden: boolean;
+  readonly keepInBackground: boolean;
+  readonly canSetLoginAutostart: boolean;
+}
+
+export type AppBehaviorPatch = Partial<Pick<AppBehaviorPublic, "launchAtLogin" | "startHidden" | "keepInBackground">>;
 
 export type ShellLogLevel = "debug" | "info" | "warn" | "error";
 
@@ -219,6 +232,10 @@ const api: ShellApi = {
   backgroundReview: {
     configure: (settings) => ipcRenderer.invoke("background-review:configure", settings),
     settings: () => ipcRenderer.invoke("background-review:settings"),
+  },
+  appBehavior: {
+    get: () => ipcRenderer.invoke("app-behavior:get"),
+    set: (patch) => ipcRenderer.invoke("app-behavior:set", patch),
   },
   mailAccounts: {
     list: () => ipcRenderer.invoke("mail-accounts:list"),

@@ -38,7 +38,7 @@ export class SqliteDatabase {
     `);
 
     const migrationsDir = join(__dirname, "migrations");
-    const migrationFiles = ["001-init.sql"];
+    const migrationFiles = ["001-init.sql", "002-jobs.sql"];
 
     for (const file of migrationFiles) {
       const version = parseInt(file.split("-")[0]!, 10);

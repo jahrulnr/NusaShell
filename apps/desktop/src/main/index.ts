@@ -10,6 +10,9 @@ import {
   getLauncherWindow,
   isPluginWindowSender,
   registerWindowIpc,
+  setLauncherClosePolicy,
+  showLauncherWindow,
+  toggleLauncherWindow,
 } from "./window-manager.js";
 import { LINUX_DESKTOP_APP_NAME } from "./window-assets.js";
 import { AppUpdater } from "./updater.js";
@@ -24,6 +27,15 @@ import type {
 import { MailSettingsStore } from "./mail-settings.js";
 import type { SaveMailAccountInput } from "../shared/mail-contract.js";
 import { loadPluginPngDataUrl } from "./plugin-icon.js";
+import {
+  AppBehaviorStore,
+  shouldHideOnClose,
+  shouldQuitOnAllWindowsClosed,
+  type AppBehaviorPatch,
+  type AppBehaviorSettings,
+} from "./app-behavior-settings.js";
+import { createLoginAutostart, type LoginAutostart } from "./login-autostart.js";
+import { TrayManager } from "./tray.js";
 
 let backend: BootstrapResult | null = null;
 let updater: AppUpdater | null = null;
@@ -31,13 +43,28 @@ let aiSettingsStore: AiSettingsStore | null = null;
 let aiSettings: AiRegistrySettings | null = null;
 let agentConversationStore: AgentConversationStore | null = null;
 let mailSettingsStore: MailSettingsStore | null = null;
+let appBehaviorStore: AppBehaviorStore | null = null;
+let appBehavior: AppBehaviorSettings | null = null;
+let loginAutostart: LoginAutostart | null = null;
+let trayManager: TrayManager | null = null;
+let isQuitting = false;
 const isDev = process.argv.includes("--dev");
+const startHidden = process.argv.includes("--hidden") || process.argv.includes("--background");
 const logTail = new LogTail(1000);
 const shellLogLevels = new Set<ShellLogLevel>(["debug", "info", "warn", "error"]);
 const aiRuntimeConfig = loadConfig().ai;
 const aiStubEnabled = aiRuntimeConfig.stubEnabled;
 const DOCS_URL = "https://github.com/jahrulnr/NusaShell/tree/master/docs";
 const MAIL_PLUGIN_ID = "nusashell.mail";
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    showLauncherWindow();
+  });
+}
 
 if (process.platform === "linux") {
   app.setName(LINUX_DESKTOP_APP_NAME);
@@ -192,6 +219,25 @@ async function waitForBackend(port: number, maxRetries = 30): Promise<void> {
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   agentConversationStore = new AgentConversationStore(resolve(app.getPath("userData"), "agent-conversations.json"));
+  appBehaviorStore = new AppBehaviorStore(resolve(app.getPath("userData"), "app-behavior.json"));
+  appBehavior = await appBehaviorStore.load();
+  loginAutostart = createLoginAutostart({
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    exePath: app.getPath("exe"),
+    homeDir: app.getPath("home"),
+    ...(process.env.XDG_CONFIG_HOME ? { xdgConfigHome: process.env.XDG_CONFIG_HOME } : {}),
+    setLoginItemSettings: (settings) => app.setLoginItemSettings(settings),
+    getLoginItemSettings: () => app.getLoginItemSettings(),
+    log: (message) => logTail.add("main", "info", message),
+  });
+  await loginAutostart.reconcile(appBehavior);
+  setLauncherClosePolicy({
+    shouldHide: () => shouldHideOnClose({
+      keepInBackground: appBehavior?.keepInBackground ?? true,
+      isQuitting,
+    }),
+  });
   registerWindowIpc(
     (level, message) => logTail.add("ipc", level, message),
     async (pluginId) => {
@@ -496,7 +542,61 @@ app.whenReady().then(async () => {
     return backend.container.queryBus.execute(query);
   });
 
-  createLauncherWindow();
+  ipcMain.handle("app-behavior:get", async () => {
+    const settings = await requireAppBehaviorStore().load();
+    return {
+      ...settings,
+      canSetLoginAutostart: app.isPackaged,
+    };
+  });
+  ipcMain.handle("app-behavior:set", async (_event, patch: AppBehaviorPatch) => {
+    const store = requireAppBehaviorStore();
+    const previous = await store.load();
+    const next = await store.set(patch);
+    appBehavior = next;
+    const loginSettingsChanged =
+      next.launchAtLogin !== previous.launchAtLogin
+      || (next.launchAtLogin && next.startHidden !== previous.startHidden);
+    if (loginSettingsChanged) {
+      try {
+        await requireLoginAutostart().set(next.launchAtLogin, { hidden: next.startHidden });
+      } catch (error) {
+        appBehavior = await store.set({
+          launchAtLogin: previous.launchAtLogin,
+          startHidden: previous.startHidden,
+        });
+        throw error;
+      }
+    }
+    return {
+      ...next,
+      canSetLoginAutostart: app.isPackaged,
+    };
+  });
+
+  trayManager = new TrayManager({
+    isPackaged: app.isPackaged,
+    moduleDir: __dirname,
+    resourcesPath: process.resourcesPath,
+    getStatusLabel: () => backend ? "NusaShell — running" : "NusaShell — starting",
+    onOpen: () => {
+      showLauncherWindow();
+    },
+    onQuit: () => {
+      isQuitting = true;
+      app.quit();
+    },
+    onToggle: () => {
+      toggleLauncherWindow();
+    },
+  });
+  trayManager.create();
+
+  if (!startHidden) {
+    createLauncherWindow();
+  } else {
+    logTail.add("main", "info", "Started hidden in tray (--hidden)");
+  }
 
   if (app.isPackaged) {
     updater = new AppUpdater();
@@ -509,9 +609,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("updater:status", () => updater?.getStatus() ?? null);
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createLauncherWindow();
-    }
+    showLauncherWindow();
   });
 });
 
@@ -528,6 +626,16 @@ function requireBackend(): BootstrapResult {
 function requireMailSettingsStore(): MailSettingsStore {
   if (!mailSettingsStore) throw new Error("Mail settings are not ready");
   return mailSettingsStore;
+}
+
+function requireAppBehaviorStore(): AppBehaviorStore {
+  if (!appBehaviorStore) throw new Error("App behavior settings are not ready");
+  return appBehaviorStore;
+}
+
+function requireLoginAutostart(): LoginAutostart {
+  if (!loginAutostart) throw new Error("Login autostart is not ready");
+  return loginAutostart;
 }
 
 async function restartMailPlugin(): Promise<void> {
@@ -559,12 +667,18 @@ function normalizeProviderId(value: string): string {
 
 app.on("window-all-closed", () => {
   closeAllPluginWindows();
-  if (process.platform !== "darwin") {
+  if (shouldQuitOnAllWindowsClosed({
+    keepInBackground: appBehavior?.keepInBackground ?? true,
+    platform: process.platform,
+  })) {
     app.quit();
   }
 });
 
 app.on("before-quit", async (e) => {
+  isQuitting = true;
+  trayManager?.destroy();
+  trayManager = null;
   if (backend) {
     e.preventDefault();
     try {

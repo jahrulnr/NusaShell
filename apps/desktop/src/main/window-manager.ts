@@ -23,10 +23,23 @@ const WINDOW_ICON_PATH = resolveWindowIconPath({
 type WindowLog = (level: "debug" | "info", message: string) => void;
 type EnsurePluginStarted = (pluginId: string) => Promise<void>;
 
+export interface LauncherClosePolicy {
+  shouldHide(): boolean;
+}
+
 let launcherWindow: BrowserWindow | null = null;
+let launcherClosePolicy: LauncherClosePolicy | null = null;
 const pluginWindows = new Map<string, BrowserWindow>();
 
+export function setLauncherClosePolicy(policy: LauncherClosePolicy | null): void {
+  launcherClosePolicy = policy;
+}
+
 export function createLauncherWindow(): BrowserWindow {
+  if (launcherWindow && !launcherWindow.isDestroyed()) {
+    return launcherWindow;
+  }
+
   launcherWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -52,6 +65,14 @@ export function createLauncherWindow(): BrowserWindow {
   }
   launcherWindow.once("ready-to-show", () => launcherWindow?.show());
 
+  launcherWindow.on("close", (event) => {
+    if (!launcherClosePolicy?.shouldHide()) return;
+    event.preventDefault();
+    if (launcherWindow && !launcherWindow.isDestroyed()) {
+      launcherWindow.hide();
+    }
+  });
+
   launcherWindow.on("closed", () => {
     launcherWindow = null;
   });
@@ -61,6 +82,36 @@ export function createLauncherWindow(): BrowserWindow {
 
 export function getLauncherWindow(): BrowserWindow | null {
   return launcherWindow;
+}
+
+export function showLauncherWindow(): BrowserWindow {
+  const existing = getLauncherWindow();
+  if (existing && !existing.isDestroyed()) {
+    if (existing.isMinimized()) existing.restore();
+    existing.show();
+    existing.focus();
+    return existing;
+  }
+  const created = createLauncherWindow();
+  if (!created.isVisible()) created.show();
+  created.focus();
+  return created;
+}
+
+export function hideLauncherWindow(): void {
+  const existing = getLauncherWindow();
+  if (existing && !existing.isDestroyed() && existing.isVisible()) {
+    existing.hide();
+  }
+}
+
+export function toggleLauncherWindow(): void {
+  const existing = getLauncherWindow();
+  if (existing && !existing.isDestroyed() && existing.isVisible()) {
+    existing.hide();
+    return;
+  }
+  showLauncherWindow();
 }
 
 export async function openPluginWindow(

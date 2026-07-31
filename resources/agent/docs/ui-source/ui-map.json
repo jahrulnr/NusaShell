@@ -504,9 +504,80 @@
         }
       ]
     },
+    "jobs": {
+      "title": "Jobs",
+      "purpose": "Scheduled automation that fires headless agent turns or plugin tool calls on a once/interval/cron schedule while NusaShell is open.",
+      "howToOpen": "Click the Jobs item in the left sidebar.",
+      "sections": [
+        {
+          "heading": "Job list",
+          "paragraphs": [
+            "Lists all scheduled jobs with their schedule, mode, repeat progress, next run time, and last status. Each row offers Run, Pause/Resume, Output, and Remove actions. A hint reminds the user that jobs run only while the app is open and missed one-shots are marked errored, not silently fired."
+          ],
+          "controls": [
+            "jobs-new-btn",
+            "jobs-hint",
+            "jobs-list"
+          ]
+        },
+        {
+          "heading": "Job row actions",
+          "paragraphs": [
+            "Each job row has Run (fire immediately), Pause/Resume (toggle enabled), Output (recent run summaries), and Remove (delete the job)."
+          ],
+          "controls": [
+            "job-run-btn",
+            "job-toggle-btn",
+            "job-output-btn",
+            "job-remove-btn"
+          ]
+        }
+      ]
+    },
+    "job-modal": {
+      "title": "New Job modal",
+      "purpose": "Form to create a new scheduled job with name, schedule expression, mode (agent prompt or plugin tool call), and optional repeat limit.",
+      "howToOpen": "Click the + New Job button in the Jobs view.",
+      "sections": [
+        {
+          "heading": "Job form",
+          "paragraphs": [
+            "Name, schedule (every 30m / 2h / 1d / 5-field cron / ISO timestamp), mode selector, agent prompt or plugin tool fields, and optional repeat count. Schedule is validated on blur with a live description or error."
+          ],
+          "controls": [
+            "job-field-name",
+            "job-field-schedule",
+            "job-schedule-help",
+            "job-field-mode",
+            "job-field-prompt",
+            "job-field-plugin-id",
+            "job-field-tool-name",
+            "job-field-args",
+            "job-field-repeat",
+            "job-modal-save"
+          ]
+        }
+      ]
+    },
+    "job-output-modal": {
+      "title": "Job output modal",
+      "purpose": "Shows recent run output entries (run time, status, summary) for a selected job.",
+      "howToOpen": "Click the Output button on a job row.",
+      "sections": [
+        {
+          "heading": "Output entries",
+          "paragraphs": [
+            "Lists up to 20 recent output entries newest-first, each showing the run timestamp, status (ok/error), and a truncated summary."
+          ],
+          "controls": [
+            "job-output-body"
+          ]
+        }
+      ]
+    },
     "settings": {
       "title": "Settings",
-      "purpose": "System configuration, connection status, agent runtime preferences, and app info.",
+      "purpose": "System configuration, connection status, startup/background behavior, agent runtime preferences, and app info.",
       "howToOpen": "Click the settings gear icon in the title bar, or use the Settings navigation if added.",
       "sections": [
         {
@@ -531,6 +602,18 @@
           "controls": [
             "connection-auto-reconnect",
             "connection-auto-resubscribe"
+          ]
+        },
+        {
+          "heading": "Startup & background",
+          "paragraphs": [
+            "Controls OS login autostart, tray-first launch, and whether closing the launcher hides to the tray so learning and scheduled work keep running. Quit from the tray menu for a full stop."
+          ],
+          "controls": [
+            "app-behavior-card",
+            "settings-launch-at-login",
+            "settings-start-hidden",
+            "settings-keep-in-background"
           ]
         },
         {
@@ -723,7 +806,11 @@
       "label": "Update banner",
       "type": "banner",
       "action": "Displays update availability and download progress. Hidden when no update is pending.",
-      "related": ["update-banner-text", "update-banner-btn", "update-banner-close"]
+      "related": [
+        "update-banner-text",
+        "update-banner-btn",
+        "update-banner-close"
+      ]
     },
     "update-banner-text": {
       "section": "Update banner",
@@ -749,21 +836,28 @@
       "type": "search input",
       "action": "Filters only the Home app grid by plugin name, plugin id, or description as the user types.",
       "shortcut": "Escape clears the current query when the input is focused.",
-      "related": ["search-clear", "app-grid"]
+      "related": [
+        "search-clear",
+        "app-grid"
+      ]
     },
     "search-clear": {
       "section": "Search and filters",
       "label": "Clear search",
       "type": "button",
       "action": "Clears the global app search field and refocuses it.",
-      "related": ["search-input"]
+      "related": [
+        "search-input"
+      ]
     },
     "nav-settings-btn": {
       "section": "Title bar",
       "label": "Settings",
       "type": "icon button",
       "action": "Switches to the Settings view from anywhere in the app.",
-      "related": ["settings"]
+      "related": [
+        "settings"
+      ]
     },
     "window-always-on-top": {
       "section": "Title bar",
@@ -796,7 +890,10 @@
       "selector": "[data-view=\"home\"].nav-item",
       "generated": true,
       "action": "Switches the main content to the Home (launcher) view.",
-      "related": ["app-grid", "search-input"]
+      "related": [
+        "app-grid",
+        "search-input"
+      ]
     },
     "nav-plugins": {
       "section": "Sidebar",
@@ -805,7 +902,9 @@
       "selector": "[data-view=\"plugins\"].nav-item",
       "generated": true,
       "action": "Switches the main content to the Plugins list view.",
-      "related": ["plugin-table"]
+      "related": [
+        "plugin-table"
+      ]
     },
     "nav-agent": {
       "section": "Sidebar",
@@ -814,7 +913,10 @@
       "selector": "[data-view=\"agent\"].nav-item",
       "generated": true,
       "action": "Switches the main content to the Agent conversation view.",
-      "related": ["agent-thread", "agent-input"]
+      "related": [
+        "agent-thread",
+        "agent-input"
+      ]
     },
     "nav-skills": {
       "section": "Sidebar",
@@ -823,7 +925,11 @@
       "selector": "[data-view=\"skills\"].nav-item",
       "generated": true,
       "action": "Switches the main content to the managed Skills workspace.",
-      "related": ["skills-list", "skills-file-tree", "skill-editor"]
+      "related": [
+        "skills-list",
+        "skills-file-tree",
+        "skill-editor"
+      ]
     },
     "skills-install-btn": {
       "section": "Skill library",
@@ -964,7 +1070,11 @@
       "selector": "[data-view=\"learning\"].nav-item",
       "generated": true,
       "action": "Switches the main content to the Learning journey view.",
-      "related": ["learning-timeline-list", "learning-constellation-svg", "learning-detail-editor"]
+      "related": [
+        "learning-timeline-list",
+        "learning-constellation-svg",
+        "learning-detail-editor"
+      ]
     },
     "learning-stat-skills": {
       "section": "Stats",
@@ -1075,7 +1185,9 @@
       "selector": "[data-view=\"ai-providers\"].nav-item",
       "generated": true,
       "action": "Switches the main content to the AI Providers registry view.",
-      "related": ["provider-registry"]
+      "related": [
+        "provider-registry"
+      ]
     },
     "nav-autostart": {
       "section": "Sidebar",
@@ -1084,7 +1196,9 @@
       "selector": "[data-view=\"autostart\"].nav-item",
       "generated": true,
       "action": "Switches the main content to the Autostart view.",
-      "related": ["autostart-list"]
+      "related": [
+        "autostart-list"
+      ]
     },
     "nav-logs": {
       "section": "Sidebar",
@@ -1093,14 +1207,19 @@
       "selector": "[data-view=\"logs\"].nav-item",
       "generated": true,
       "action": "Switches the main content to the Logs tail view.",
-      "related": ["log-tail"]
+      "related": [
+        "log-tail"
+      ]
     },
     "open-add-plugin": {
       "section": "Sidebar",
       "label": "Add Plugin",
       "type": "button",
       "action": "Opens the Add Plugin modal to install a plugin from a URL, native folder picker, or native archive picker.",
-      "related": ["add-plugin-modal", "install-url-input"]
+      "related": [
+        "add-plugin-modal",
+        "install-url-input"
+      ]
     },
     "open-docs": {
       "section": "Sidebar",
@@ -1139,7 +1258,9 @@
       "label": "Installed plugin grid",
       "type": "grid",
       "action": "Container for plugin tiles. Renders an empty message when no plugins match or are installed.",
-      "related": ["app-grid-cell"]
+      "related": [
+        "app-grid-cell"
+      ]
     },
     "app-grid-cell": {
       "section": "App grid",
@@ -1148,14 +1269,18 @@
       "selector": ".app-cell",
       "generated": true,
       "action": "Click to open the plugin window. Right-click to open the plugin context menu. Shows icon, name, and state badge.",
-      "related": ["context-menu"]
+      "related": [
+        "context-menu"
+      ]
     },
     "plugin-table": {
       "section": "Plugin table",
       "label": "Installed plugin table",
       "type": "list/table",
       "action": "Container for plugin rows. Renders an empty message when no plugins are installed.",
-      "related": ["plugin-row"]
+      "related": [
+        "plugin-row"
+      ]
     },
     "plugin-row": {
       "section": "Plugin table",
@@ -1164,7 +1289,9 @@
       "selector": ".plugin-row",
       "generated": true,
       "action": "Click to open the plugin detail drawer. Shows icon, name, plugin id, version, and state.",
-      "related": ["plugin-detail"]
+      "related": [
+        "plugin-detail"
+      ]
     },
     "drawer-overlay": {
       "section": "Header",
@@ -1231,7 +1358,10 @@
       "label": "Uninstall",
       "type": "button",
       "action": "Removes the selected plugin after a confirmation prompt.",
-      "related": ["plugin-table", "app-grid"]
+      "related": [
+        "plugin-table",
+        "app-grid"
+      ]
     },
     "tool-count": {
       "section": "Tools",
@@ -1268,7 +1398,9 @@
       "label": "New conversation",
       "type": "icon button",
       "action": "Creates a new empty conversation thread and focuses the composer.",
-      "related": ["agent-input"]
+      "related": [
+        "agent-input"
+      ]
     },
     "agent-conversation-search": {
       "section": "Conversation list",
@@ -1388,7 +1520,10 @@
       "label": "Attach files",
       "type": "icon button",
       "action": "Opens the file picker to attach images, PDFs, or UTF-8 text files to the current turn. Up to 4 files, each under 4 MiB. Text attachments are included as text context for every chat model. Unless image input is disabled in Agent runtime settings, images are sent optimistically; a provider 4xx response retries the same turn once without image parts.",
-      "related": ["agent-file-input", "agent-attachments"]
+      "related": [
+        "agent-file-input",
+        "agent-attachments"
+      ]
     },
     "agent-model-trigger": {
       "section": "Composer",
@@ -1754,6 +1889,30 @@
       "generated": true,
       "action": "When enabled, the renderer re-subscribes to backend events after reconnecting."
     },
+    "app-behavior-card": {
+      "section": "Startup & background",
+      "label": "Startup & background card",
+      "type": "panel",
+      "action": "Holds login autostart, start-in-tray, and keep-in-background toggles for the desktop shell."
+    },
+    "settings-launch-at-login": {
+      "section": "Startup & background",
+      "label": "Launch at login",
+      "type": "toggle",
+      "action": "When enabled on a packaged build, writes OS login autostart so NusaShell starts after login. Disabled in unpackaged/dev builds."
+    },
+    "settings-start-hidden": {
+      "section": "Startup & background",
+      "label": "Start in tray",
+      "type": "toggle",
+      "action": "When launch-at-login starts the app, stay in the system tray until Open NusaShell is chosen."
+    },
+    "settings-keep-in-background": {
+      "section": "Startup & background",
+      "label": "Keep running when window is closed",
+      "type": "toggle",
+      "action": "Closing the launcher hides to the tray instead of quitting so learning and jobs keep running. Quit from the tray menu to stop fully."
+    },
     "ai-runtime-form": {
       "section": "Agent runtime",
       "label": "Agent runtime form",
@@ -1861,42 +2020,58 @@
       "label": "Install from URL",
       "type": "text input",
       "action": "Accepts a URL to a plugin zip/archive. Press Enter or click Install to submit.",
-      "related": ["install-url-btn"]
+      "related": [
+        "install-url-btn"
+      ]
     },
     "install-url-btn": {
       "section": "Install options",
       "label": "Install (URL)",
       "type": "button",
       "action": "Installs the plugin from the URL in the adjacent input.",
-      "related": ["install-url-input"]
+      "related": [
+        "install-url-input"
+      ]
     },
     "install-local-input": {
       "section": "Install options",
       "label": "Selected local plugin",
       "type": "read-only text input",
       "action": "Displays the folder or archive returned by the native picker; paths cannot be typed manually.",
-      "related": ["pick-local-folder-btn", "pick-local-archive-btn", "install-local-btn"]
+      "related": [
+        "pick-local-folder-btn",
+        "pick-local-archive-btn",
+        "install-local-btn"
+      ]
     },
     "pick-local-folder-btn": {
       "section": "Install options",
       "label": "Choose folder",
       "type": "button",
       "action": "Opens the operating system directory picker and stores the selected plugin folder in the read-only path field.",
-      "related": ["install-local-input", "install-local-btn"]
+      "related": [
+        "install-local-input",
+        "install-local-btn"
+      ]
     },
     "pick-local-archive-btn": {
       "section": "Install options",
       "label": "Choose archive",
       "type": "button",
       "action": "Opens the operating system file picker for zip, tar.gz, or tgz plugin archives.",
-      "related": ["install-local-input", "install-local-btn"]
+      "related": [
+        "install-local-input",
+        "install-local-btn"
+      ]
     },
     "install-local-btn": {
       "section": "Install options",
       "label": "Install (local)",
       "type": "button",
       "action": "Installs the folder or archive selected by the native picker.",
-      "related": ["install-local-input"]
+      "related": [
+        "install-local-input"
+      ]
     },
     "install-status": {
       "section": "Install status",
@@ -2137,6 +2312,143 @@
       "selector": "[data-action=\"uninstall\"].ctx-item",
       "generated": true,
       "action": "Removes the selected plugin after a confirmation prompt."
+    },
+    "nav-jobs": {
+      "section": "Sidebar",
+      "label": "Jobs navigation",
+      "type": "nav item",
+      "selector": "[data-view=\"jobs\"].nav-item",
+      "generated": true,
+      "action": "Switches the main content to the Jobs view.",
+      "related": [
+        "jobs-list"
+      ]
+    },
+    "jobs-new-btn": {
+      "section": "Job list",
+      "label": "New Job",
+      "type": "button",
+      "selector": "#jobs-new-btn",
+      "action": "Opens the New Job modal."
+    },
+    "jobs-hint": {
+      "section": "Job list",
+      "label": "Jobs hint",
+      "type": "status text",
+      "selector": "#jobs-hint",
+      "action": "Explains that jobs run only while the app is open and missed one-shots are marked errored."
+    },
+    "jobs-list": {
+      "section": "Job list",
+      "label": "Jobs list",
+      "type": "list",
+      "selector": "#jobs-list",
+      "action": "Renders all scheduled jobs as rows."
+    },
+    "job-run-btn": {
+      "section": "Job row actions",
+      "label": "Run",
+      "type": "button",
+      "selector": "[data-control=\"job-run-btn\"]",
+      "action": "Fires the job immediately via job.run."
+    },
+    "job-toggle-btn": {
+      "section": "Job row actions",
+      "label": "Pause/Resume",
+      "type": "button",
+      "selector": "[data-control=\"job-toggle-btn\"]",
+      "action": "Toggles job enabled state via job.set-enabled."
+    },
+    "job-output-btn": {
+      "section": "Job row actions",
+      "label": "Output",
+      "type": "button",
+      "selector": "[data-control=\"job-output-btn\"]",
+      "action": "Opens the job output modal showing recent run summaries."
+    },
+    "job-remove-btn": {
+      "section": "Job row actions",
+      "label": "Remove",
+      "type": "button",
+      "selector": "[data-control=\"job-remove-btn\"]",
+      "action": "Deletes the job after confirmation via job.remove."
+    },
+    "job-field-name": {
+      "section": "Job form",
+      "label": "Name",
+      "type": "text input",
+      "selector": "#job-field-name",
+      "action": "Job display name."
+    },
+    "job-field-schedule": {
+      "section": "Job form",
+      "label": "Schedule",
+      "type": "text input",
+      "selector": "#job-field-schedule",
+      "action": "Schedule expression (every 30m / 2h / 1d / cron / ISO). Validated on blur."
+    },
+    "job-schedule-help": {
+      "section": "Job form",
+      "label": "Schedule help",
+      "type": "status text",
+      "selector": "#job-schedule-help",
+      "action": "Live validation result for the schedule expression."
+    },
+    "job-field-mode": {
+      "section": "Job form",
+      "label": "Mode",
+      "type": "select",
+      "selector": "#job-field-mode",
+      "action": "Switches between agent prompt and plugin tool call mode."
+    },
+    "job-field-prompt": {
+      "section": "Job form",
+      "label": "Prompt",
+      "type": "textarea",
+      "selector": "#job-field-prompt",
+      "action": "Agent prompt for agent-mode jobs."
+    },
+    "job-field-plugin-id": {
+      "section": "Job form",
+      "label": "Plugin ID",
+      "type": "text input",
+      "selector": "#job-field-plugin-id",
+      "action": "Plugin ID for tool-mode jobs."
+    },
+    "job-field-tool-name": {
+      "section": "Job form",
+      "label": "Tool name",
+      "type": "text input",
+      "selector": "#job-field-tool-name",
+      "action": "Tool name for tool-mode jobs."
+    },
+    "job-field-args": {
+      "section": "Job form",
+      "label": "Args JSON",
+      "type": "textarea",
+      "selector": "#job-field-args",
+      "action": "JSON arguments for the tool call."
+    },
+    "job-field-repeat": {
+      "section": "Job form",
+      "label": "Repeat count",
+      "type": "number input",
+      "selector": "#job-field-repeat",
+      "action": "How many times to fire (blank = repeat forever)."
+    },
+    "job-modal-save": {
+      "section": "Job form",
+      "label": "Save",
+      "type": "button",
+      "selector": "#job-modal-save",
+      "action": "Creates the job via job.add and closes the modal."
+    },
+    "job-output-body": {
+      "section": "Output entries",
+      "label": "Output entries",
+      "type": "list",
+      "selector": "#job-output-body",
+      "action": "Renders recent run output entries."
     }
   }
 }

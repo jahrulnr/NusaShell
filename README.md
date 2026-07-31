@@ -75,6 +75,7 @@ Captured from the Electron desktop app (`make dev`):
 | [`docs/architecture/agent-memory.md`](./docs/architecture/agent-memory.md) | Persistent agent memory (MEMORY.md + USER.md), snapshot injection, and the `memory` meta-tool |
 | [`docs/architecture/mcp-capability-policy.md`](./docs/architecture/mcp-capability-policy.md) | Which MCP protocol capabilities NusaShell implements now vs. defers, and the adoption gate |
 | [`docs/architecture/progressive-mcp-tools.md`](./docs/architecture/progressive-mcp-tools.md) | Shell-owned meta-tools used to keep MCP tool discovery bounded per agent turn |
+| [`docs/architecture/job-automation.md`](./docs/architecture/job-automation.md) | Scheduled durable jobs (one-shot/recurring) that fire headless agent turns or plugin tool calls |
 | [`docs/mcp/nusashell-mail-mcp-plugin-spec.md`](./docs/mcp/nusashell-mail-mcp-plugin-spec.md) | Mail plugin protocol assessment, security model, and target tool contract |
 | [`docs/mcp/nusashell-mail-mcp-plugin-implementation.md`](./docs/mcp/nusashell-mail-mcp-plugin-implementation.md) | Implemented read-only Mail milestone, runtime wiring, and current limitations |
 | [`docs/PoC/`](./docs/PoC/) | Runnable zero-dep bridge demo (behavioral reference, not the target layout) |
@@ -105,6 +106,11 @@ make dev
 This launches the Electron desktop app with the backend embedded.
 The app starts in AI stub mode by default — configure a real provider
 in Settings to enable actual AI responses.
+
+Background learning (and future scheduled jobs) run only while NusaShell is
+running. Enable **Keep running when window is closed** under Settings →
+Startup & background so closing the window hides to the tray instead of
+quitting. Optional **Launch at login** is available on packaged builds.
 
 ## Writing your own plugin
 

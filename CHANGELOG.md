@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.43] - 2026-07-31
+
+### Added
+
+- **Job automation waist** — durable scheduled jobs that fire headless agent
+  turns or plugin tool calls while NusaShell is open. Jobs support
+  once/interval/cron schedules with grace rules, at-most-once dispatch,
+  catchup for recurring jobs, and missed one-shot detection.
+  - New `packages/application/src/job/` area: `Job` model, schedule parser
+    (dependency-free 5-field cron matcher), `JobStorePort`,
+    `JobAgentToolGateway` (denies memory/skill tools), `JobAgentExecutor`
+    (headless `AgentTurnRunner` with inactivity watchdog), and
+    `JobScheduler` (60s tick, `.tick.lock`, due selection, output
+    persistence).
+  - `SqliteJobStore` + `002-jobs.sql` migration; `JsonJobStore` fallback
+    for dev environments without SQLite.
+  - WS protocol: `job.add`, `job.list`, `job.set-enabled`, `job.run`,
+    `job.remove`, `job.output`, `job.validate-schedule`.
+  - Events: `job.completed`, `job.failed` mapped to client event envelopes.
+  - Desktop **Jobs** sidebar view: list, create (modal with live schedule
+    validation), run, pause/resume, output, remove. Toast notifications on
+    job completion/failure.
+  - Architecture doc: `docs/architecture/job-automation.md`.
+  - Tests: 69 new tests covering schedule parsing, both store
+    implementations, the restricted gateway, the headless executor, and the
+    scheduler (at-most-once, missed one-shots, catchup, tick lock, error
+    isolation).
+
+### Changed
+
+- Blueprint §4 documents the Jobs navigation item and surface.
+- `backend-structure.md` references the job-automation architecture doc.
+- Error mapper includes `JOB_NOT_FOUND` and `JOB_INVALID_SCHEDULE` codes.
+
+## [0.0.42] - 2026-07-31
+
+### Added
+
+- System tray residency: closing the launcher can hide to the tray instead of
+  quitting, so background review, skill curator, and future scheduled jobs keep
+  running. Tray menu offers Open NusaShell and Quit; left-click toggles the
+  window.
+- OS login autostart (packaged builds): Linux writes XDG
+  `~/.config/autostart/nusashell.desktop` (self-healed on each launch for
+  AppImage path changes); macOS/Windows use `app.setLoginItemSettings`.
+  Unpackaged/dev builds refuse login autostart with a clear error.
+- `--hidden` / `--background` boot flag for tray-only login starts.
+- Single-instance lock: a second launch focuses the existing window.
+- Settings → **Startup & background** toggles: Launch at login, Start in tray,
+  Keep running when window is closed. Persisted in `app-behavior.json`.
+
+### Changed
+
+- `window-all-closed` no longer quits when keep-in-background is enabled
+  (non-darwin). Explicit Quit still runs full backend shutdown.
+- Blueprint §4 documents tray-resident mode and distinguishes plugin MCP
+  Autostart from OS login autostart.
+- UI documentation regenerated from updated `ui-map.json` (16 docs).
+
 ## [0.0.41] - 2026-07-31
 
 ### Added

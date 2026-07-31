@@ -10,10 +10,14 @@ import type {
   SetPluginAutostartCommand,
   RunAgentTurnCommand,
   CancelAgentTurnCommand,
+  AddJobCommand,
+  SetJobEnabledCommand,
+  RunJobNowCommand,
+  RemoveJobCommand,
 } from "@nusashell/application";
 
 export function mapToCommand(request: ParsedRequest):
-  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | SetPluginAutostartCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand | CancelAgentTurnCommand }
+  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | SetPluginAutostartCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand | CancelAgentTurnCommand | AddJobCommand | SetJobEnabledCommand | RunJobNowCommand | RemoveJobCommand }
   | { kind: "query" } {
   switch (request.method) {
     case "plugin.start":
@@ -106,6 +110,42 @@ export function mapToCommand(request: ParsedRequest):
           kind: "cancel-agent-turn",
           traceId: request.payload.traceId,
         } as CancelAgentTurnCommand,
+      };
+    case "job.add":
+      return {
+        kind: "command",
+        command: {
+          kind: "add-job",
+          name: request.payload.name,
+          schedule: request.payload.schedule,
+          mode: request.payload.mode,
+          ...(request.payload.repeatTimes !== undefined ? { repeatTimes: request.payload.repeatTimes } : {}),
+        } as AddJobCommand,
+      };
+    case "job.set-enabled":
+      return {
+        kind: "command",
+        command: {
+          kind: "set-job-enabled",
+          id: request.payload.id,
+          enabled: request.payload.enabled,
+        } as SetJobEnabledCommand,
+      };
+    case "job.run":
+      return {
+        kind: "command",
+        command: {
+          kind: "run-job-now",
+          id: request.payload.id,
+        } as RunJobNowCommand,
+      };
+    case "job.remove":
+      return {
+        kind: "command",
+        command: {
+          kind: "remove-job",
+          id: request.payload.id,
+        } as RemoveJobCommand,
       };
     default:
       return { kind: "query" };

@@ -1,4 +1,4 @@
-import type { AgentReasoningDeltaEvent, AgentTextDeltaEvent, AgentToolCallEndEvent, AgentToolCallStartEvent, AgentContextUpdateEvent, AgentLearningUpdatedEvent, ApplicationEvent } from "@nusashell/application";
+import type { AgentReasoningDeltaEvent, AgentTextDeltaEvent, AgentToolCallEndEvent, AgentToolCallStartEvent, AgentContextUpdateEvent, AgentLearningUpdatedEvent, JobCompletedEvent, JobFailedEvent, ApplicationEvent } from "@nusashell/application";
 import {
   PluginInstalledEvent,
   PluginUninstalledEvent,
@@ -208,6 +208,36 @@ export function mapDomainEvent(event: ApplicationEvent, sequence: number): Event
           reviewTraceId: e.reviewTraceId,
           kinds: [...e.kinds],
           summary: e.summary,
+          timestamp,
+        },
+      };
+    }
+
+    case "job.completed": {
+      const e = event as JobCompletedEvent;
+      return {
+        kind: "event",
+        event: "job.completed",
+        sequence,
+        payload: {
+          jobId: e.jobId,
+          name: e.name,
+          summary: e.summary,
+          timestamp,
+        },
+      };
+    }
+
+    case "job.failed": {
+      const e = event as JobFailedEvent;
+      return {
+        kind: "event",
+        event: "job.failed",
+        sequence,
+        payload: {
+          jobId: e.jobId,
+          name: e.name,
+          error: e.error,
           timestamp,
         },
       };

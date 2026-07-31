@@ -1,6 +1,6 @@
 # Settings
 
-System configuration, connection status, agent runtime preferences, and app info.
+System configuration, connection status, startup/background behavior, agent runtime preferences, and app info.
 
 **How to open:** Click the settings gear icon in the title bar, or use the Settings navigation if added.
 
@@ -51,6 +51,30 @@ Toggles for WebSocket auto-reconnect and auto-resubscribe.
   - Section: Connection
   - Type: toggle
   - Action: When enabled, the renderer re-subscribes to backend events after reconnecting.
+
+## Startup & background
+
+Controls OS login autostart, tray-first launch, and whether closing the launcher hides to the tray so learning and scheduled work keep running. Quit from the tray menu for a full stop.
+
+- **Startup & background card** (`#app-behavior-card`):
+  - Section: Startup & background
+  - Type: panel
+  - Action: Holds login autostart, start-in-tray, and keep-in-background toggles for the desktop shell.
+
+- **Launch at login** (`#settings-launch-at-login`):
+  - Section: Startup & background
+  - Type: toggle
+  - Action: When enabled on a packaged build, writes OS login autostart so NusaShell starts after login. Disabled in unpackaged/dev builds.
+
+- **Start in tray** (`#settings-start-hidden`):
+  - Section: Startup & background
+  - Type: toggle
+  - Action: When launch-at-login starts the app, stay in the system tray until Open NusaShell is chosen.
+
+- **Keep running when window is closed** (`#settings-keep-in-background`):
+  - Section: Startup & background
+  - Type: toggle
+  - Action: Closing the launcher hides to the tray instead of quitting so learning and jobs keep running. Quit from the tray menu to stop fully.
 
 ## Agent runtime
 

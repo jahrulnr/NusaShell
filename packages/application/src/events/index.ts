@@ -12,3 +12,5 @@ export type { AgentContextUpdateEvent } from "./agent-context-update.event.js";
 export { createAgentContextUpdateEvent } from "./agent-context-update.event.js";
 export type { AgentLearningUpdatedEvent } from "./agent-learning-updated.event.js";
 export { createLearningUpdatedEvent } from "./agent-learning-updated.event.js";
+export type { JobCompletedEvent, JobFailedEvent } from "./job-events.event.js";
+export { createJobCompletedEvent, createJobFailedEvent } from "./job-events.event.js";

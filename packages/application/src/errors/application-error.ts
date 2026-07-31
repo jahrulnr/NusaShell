@@ -20,7 +20,9 @@ export type ApplicationErrorCode =
   | "AGENT_TURN_CANCELLED"
   | "UNAUTHORIZED"
   | "UNAVAILABLE"
-  | "INTERNAL_ERROR";
+  | "INTERNAL_ERROR"
+  | "JOB_NOT_FOUND"
+  | "JOB_INVALID_SCHEDULE";
 
 export class ApplicationError extends Error {
   readonly code: ApplicationErrorCode;

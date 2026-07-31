@@ -219,6 +219,89 @@ export const SystemVersionRequestSchema = z.object({
   payload: z.object({}).optional().default({}),
 });
 
+const JobModeSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("agent"), prompt: z.string().min(1).max(10000) }),
+  z.object({
+    type: z.literal("tool"),
+    pluginId: z.string().min(1),
+    toolName: z.string().min(1),
+    args: z.record(z.string(), z.unknown()),
+  }),
+]);
+
+export const JobAddRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("job.add"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    name: z.string().min(1).max(200),
+    schedule: z.string().min(1).max(200),
+    mode: JobModeSchema,
+    repeatTimes: z.number().int().min(1).max(100000).optional(),
+  }),
+});
+
+export const JobListRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("job.list"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({}).optional().default({}),
+});
+
+export const JobSetEnabledRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("job.set-enabled"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    id: z.string().min(1),
+    enabled: z.boolean(),
+  }),
+});
+
+export const JobRunRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("job.run"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    id: z.string().min(1),
+  }),
+});
+
+export const JobRemoveRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("job.remove"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    id: z.string().min(1),
+  }),
+});
+
+export const JobOutputRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("job.output"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    id: z.string().min(1),
+    limit: z.number().int().min(1).max(100).optional(),
+  }),
+});
+
+export const JobValidateScheduleRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("job.validate-schedule"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    schedule: z.string().min(1).max(200),
+  }),
+});
+
 export const SubscribeRequestSchema = z.object({
   kind: z.literal("request"),
   id: z.string().min(1),
@@ -261,6 +344,13 @@ export const RequestSchema = z.discriminatedUnion("method", [
   AgentCancelRequestSchema,
   SystemPingRequestSchema,
   SystemVersionRequestSchema,
+  JobAddRequestSchema,
+  JobListRequestSchema,
+  JobSetEnabledRequestSchema,
+  JobRunRequestSchema,
+  JobRemoveRequestSchema,
+  JobOutputRequestSchema,
+  JobValidateScheduleRequestSchema,
   SubscribeRequestSchema,
   UnsubscribeRequestSchema,
 ]);
@@ -284,4 +374,11 @@ export type ResourceTemplateListRequest = z.infer<typeof ResourceTemplateListReq
 export type ResourceReadRequest = z.infer<typeof ResourceReadRequestSchema>;
 export type AgentRunRequest = z.infer<typeof AgentRunRequestSchema>;
 export type AgentCancelRequest = z.infer<typeof AgentCancelRequestSchema>;
+export type JobAddRequest = z.infer<typeof JobAddRequestSchema>;
+export type JobListRequest = z.infer<typeof JobListRequestSchema>;
+export type JobSetEnabledRequest = z.infer<typeof JobSetEnabledRequestSchema>;
+export type JobRunRequest = z.infer<typeof JobRunRequestSchema>;
+export type JobRemoveRequest = z.infer<typeof JobRemoveRequestSchema>;
+export type JobOutputRequest = z.infer<typeof JobOutputRequestSchema>;
+export type JobValidateScheduleRequest = z.infer<typeof JobValidateScheduleRequestSchema>;
 export type ParsedRequest = z.infer<typeof RequestSchema>;

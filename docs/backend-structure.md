@@ -138,7 +138,8 @@ nusashell/
 │   └── architecture/             # planned splits (optional later)
 │       ├── websocket-protocol.md
 │       ├── plugin-lifecycle.md
-│       └── manifest-spec.md
+│       ├── manifest-spec.md
+│       └── job-automation.md      # scheduled jobs (Phase F)
 │
 ├── scripts/
 │   ├── build.ts

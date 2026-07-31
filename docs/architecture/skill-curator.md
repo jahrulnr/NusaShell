@@ -55,6 +55,11 @@ review scheduler). It respects:
 
 State is persisted in `.curator-state.json` under the skills root.
 
+The curator (and background review) only tick while the NusaShell process is
+alive. Closing the launcher with **Keep running when window is closed** enabled
+hides to the system tray and keeps these schedulers running; Quit from the tray
+stops them. See [`docs/blueprint.md`](../blueprint.md) §4 Startup & background.
+
 ### Manual run
 
 The desktop UI can trigger a curator run (dry-run or real) via IPC. Manual runs
