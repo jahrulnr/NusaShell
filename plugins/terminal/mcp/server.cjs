@@ -20,6 +20,51 @@ try {
 
 const HOME = os.homedir();
 const MAX_BUFFER_CHARS = 200 * 1024;
+const BOOTSTRAP_DIR = path.join(os.tmpdir(), "nusashell-terminal-bootstrap");
+const BASH_RC = path.join(BOOTSTRAP_DIR, "bashrc");
+const ZSH_RC = path.join(BOOTSTRAP_DIR, ".zshrc");
+const COLOR_BOOTSTRAP_SRC = path.join(__dirname, "color-bootstrap.sh");
+
+function ensureBootstrapFiles() {
+  fs.mkdirSync(BOOTSTRAP_DIR, { recursive: true });
+  const color = fs.readFileSync(COLOR_BOOTSTRAP_SRC, "utf8");
+  fs.writeFileSync(
+    BASH_RC,
+    `# NusaShell bash bootstrap\n[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"\n${color}`,
+  );
+  fs.writeFileSync(
+    ZSH_RC,
+    `# NusaShell zsh bootstrap\n[ -f "$HOME/.zshrc" ] && . "$HOME/.zshrc"\n${color}`,
+  );
+}
+
+function shellSpawnArgs(shell) {
+  const base = path.basename(shell || "");
+  // Do not pass -i together with --rcfile: bash then errors with
+  // "/bin/bash: --: invalid option" under node-pty.
+  if (base === "bash" || String(shell).endsWith("/bash")) {
+    return ["--rcfile", BASH_RC];
+  }
+  if (base === "zsh" || String(shell).endsWith("/zsh")) {
+    return [];
+  }
+  return [];
+}
+
+function shellSpawnEnv(shell, baseEnv) {
+  const env = { ...baseEnv };
+  const base = path.basename(shell || "");
+  if (base === "zsh" || String(shell).endsWith("/zsh")) {
+    env.ZDOTDIR = BOOTSTRAP_DIR;
+  }
+  return env;
+}
+
+try {
+  ensureBootstrapFiles();
+} catch (err) {
+  console.error("[terminal-mcp] failed to write bootstrap rc:", err.message);
+}
 
 function defaultCwd() {
   return HOME;
@@ -61,12 +106,18 @@ function createSession(opts = {}) {
   const rows = Number.isFinite(opts.rows) ? Math.max(1, Math.floor(opts.rows)) : 30;
   const id = randomUUID();
 
-  const term = pty.spawn(shell, [], {
+  const baseEnv = {
+    ...process.env,
+    HOME,
+    TERM: "xterm-256color",
+    COLORTERM: "truecolor",
+  };
+  const term = pty.spawn(shell, shellSpawnArgs(shell), {
     name: "xterm-256color",
     cwd,
     cols,
     rows,
-    env: { ...process.env, HOME, TERM: "xterm-256color", COLORTERM: "truecolor" },
+    env: shellSpawnEnv(shell, baseEnv),
   });
 
   const session = {

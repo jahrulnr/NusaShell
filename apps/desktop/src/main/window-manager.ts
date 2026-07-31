@@ -112,8 +112,23 @@ export async function openPluginWindow(
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      devTools: true,
     },
   });
+
+  if (isDev) {
+    win.webContents.on("before-input-event", (event, input) => {
+      const key = String(input.key || "").toLowerCase();
+      const isDevtoolsKey =
+        key === "f12" ||
+        ((input.control || input.meta) && input.shift && (key === "i" || key === "j" || key === "c"));
+      if (isDevtoolsKey) {
+        event.preventDefault();
+        if (win.webContents.isDevToolsOpened()) win.webContents.closeDevTools();
+        else win.webContents.openDevTools({ mode: "detach" });
+      }
+    });
+  }
 
   win.once("ready-to-show", () => {
     if (!win.isDestroyed()) win.show();

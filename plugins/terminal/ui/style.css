@@ -79,17 +79,27 @@ button:hover { border-color: #2c3948; }
 .secondary-button { color: var(--muted); }
 
 .terminal-main { position: relative; flex: 1; min-height: 0; }
-.terminal-container { position: absolute; inset: 0; padding: 8px; }
+.terminal-container { position: absolute; inset: 0; padding: 8px; outline: none; }
+.terminal-container:focus,
+.terminal-container:focus-within { outline: none; }
 .terminal-container .xterm { height: 100%; }
 .terminal-container .xterm-viewport { background: transparent !important; }
+.terminal-container .xterm-helper-textarea { caret-color: transparent; }
 
 .terminal-overlay {
   position: absolute;
   inset: 0;
-  display: grid;
+  display: none;
   place-items: center;
   background: rgba(5, 8, 12, 0.72);
   backdrop-filter: blur(4px);
+  z-index: 5;
+}
+.terminal-overlay.is-visible {
+  display: grid;
+}
+.terminal-overlay[hidden] {
+  display: none !important;
 }
 .overlay-card {
   max-width: 420px;
