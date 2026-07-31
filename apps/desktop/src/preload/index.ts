@@ -10,6 +10,9 @@ import type {
   SkillDetail,
   SkillReadResult,
   SkillSummary,
+  LearningGraph,
+  LearningNodeDetail,
+  MutationResult,
 } from "@nusashell/application";
 import type { PendingSkillWrite } from "@nusashell/infrastructure";
 import type {
@@ -80,6 +83,12 @@ export interface ShellApi {
     pin(skillId: string, pinned: boolean): Promise<{ ok: boolean }>;
     restore(skillId: string): Promise<{ ok: boolean }>;
     archivedList(): Promise<readonly unknown[]>;
+  };
+  readonly learning: {
+    graph(): Promise<LearningGraph>;
+    getNode(nodeId: string): Promise<LearningNodeDetail>;
+    editNode(nodeId: string, content: string): Promise<MutationResult>;
+    deleteNode(nodeId: string): Promise<MutationResult>;
   };
   readonly backgroundReview: {
     configure(settings: Record<string, unknown>): Promise<{ ok: boolean }>;
@@ -200,6 +209,12 @@ const api: ShellApi = {
     pin: (skillId, pinned) => ipcRenderer.invoke("skills:pin", skillId, pinned),
     restore: (skillId) => ipcRenderer.invoke("skills:restore", skillId),
     archivedList: () => ipcRenderer.invoke("skills:archived:list"),
+  },
+  learning: {
+    graph: () => ipcRenderer.invoke("learning:graph"),
+    getNode: (nodeId) => ipcRenderer.invoke("learning:node:get", nodeId),
+    editNode: (nodeId, content) => ipcRenderer.invoke("learning:node:edit", nodeId, content),
+    deleteNode: (nodeId) => ipcRenderer.invoke("learning:node:delete", nodeId),
   },
   backgroundReview: {
     configure: (settings) => ipcRenderer.invoke("background-review:configure", settings),

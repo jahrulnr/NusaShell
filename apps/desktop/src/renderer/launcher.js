@@ -4,6 +4,7 @@
 import { clampModelEffort, formatTokenCount, modelCompatibility, searchModels } from "./ai-model-ui.js";
 import { AgentConversationController } from "./agent-conversation-controller.js";
 import { SkillsController } from "./skills-controller.js";
+import { LearningController } from "./learning-controller.js";
 import {
   applyTextEdit,
   countLogsBySource,
@@ -138,6 +139,7 @@ const logEntries = [];
 const STATES = ["idle", "starting", "running", "stopping", "crashed"];
 let agentConversationController = null;
 let skillsController = null;
+let learningController = null;
 let launcherSearchQuery = "";
 let aiSettings = { activeProviderId: "", activeModelKey: "", effort: "auto", providers: [], models: [] };
 let currentProviderDetailId = "";
@@ -441,6 +443,7 @@ function switchView(viewName) {
     agentConversationController?.updateContextStatus();
   }
   if (viewName === "skills") void skillsController?.refresh();
+  if (viewName === "learning") learningController?.initialize();
   if (viewName === "autostart") renderAutostartList();
 }
 
@@ -953,6 +956,7 @@ document.addEventListener("DOMContentLoaded", () => {
     notify: showToast,
     log: writeRendererLog,
   });
+  learningController = new LearningController(window.shell);
 
   const renderProviderCards = () => {
     $$("[data-custom-provider-card]").forEach((card) => card.remove());
@@ -1491,6 +1495,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const kinds = Array.isArray(payload?.kinds) ? payload.kinds.join(", ") : "unknown";
     const summary = payload?.summary ? `: ${payload.summary}` : "";
     showToast(`Background review updated ${kinds}${summary}`, "info");
+    learningController?.refresh();
+    skillsController?.refreshPending();
+    skillsController?.refreshArchived();
   });
 
   // Auto-update
@@ -1501,6 +1508,9 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   void skillsController.initialize().catch((error) => {
     showToast(`Could not load skills: ${error.message || error}`, "error");
+  });
+  void learningController.initialize().catch((error) => {
+    showToast(`Could not load learning graph: ${error.message || error}`, "error");
   });
 
   // Connect and subscribe — pre-seed activeSubscriptions so onopen always subscribes

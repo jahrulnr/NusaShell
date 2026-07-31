@@ -28,6 +28,7 @@ export class SkillsController {
     await this.refresh();
     await this.refreshPending();
     await this.refreshCuratorStatus();
+    await this.refreshArchived();
   }
 
   bind() {
@@ -37,6 +38,10 @@ export class SkillsController {
     document.querySelector("#skill-delete-btn")?.addEventListener("click", () => void this.deleteSelected());
     document.querySelector("#skill-editor")?.addEventListener("input", () => this.syncDirtyState());
     document.querySelector("#skills-pending-refresh")?.addEventListener("click", () => void this.refreshPending());
+    document.querySelector("#skills-archived-refresh")?.addEventListener("click", () => void this.refreshArchived());
+    document.querySelector("#skills-curator-run")?.addEventListener("click", () => void this.runCurator(false));
+    document.querySelector("#skills-curator-dry-run")?.addEventListener("click", () => void this.runCurator(true));
+    document.querySelector("#skill-pin-btn")?.addEventListener("click", () => void this.togglePin());
   }
 
   async refresh(preferredId = this.selectedSkillId) {
@@ -91,6 +96,7 @@ export class SkillsController {
       this.renderFiles(detail);
       this.resetEditor();
       document.querySelector("#skill-delete-btn").disabled = false;
+      document.querySelector("#skill-pin-btn").disabled = false;
       const firstFile = detail.files.find((entry) => entry.path === "SKILL.md")
         ?? detail.files.find((entry) => entry.type === "file");
       if (firstFile) await this.openFile(firstFile);
@@ -229,6 +235,8 @@ export class SkillsController {
     document.querySelector("#skills-file-tree").textContent = "";
     document.querySelector("#skills-file-count").textContent = "Select a skill";
     document.querySelector("#skill-delete-btn").disabled = true;
+    document.querySelector("#skill-pin-btn").disabled = true;
+    document.querySelector("#skill-pin-btn").textContent = "Pin";
     this.resetEditor();
     this.renderSkills();
   }
@@ -246,6 +254,8 @@ export class SkillsController {
     if (!container) return;
     try {
       const pending = await this.api.pendingList();
+      const countEl = document.querySelector("#skills-pending-count");
+      if (countEl) countEl.textContent = `${pending.length} pending`;
       container.textContent = "";
       if (pending.length === 0) {
         const empty = document.createElement("p");
@@ -318,7 +328,7 @@ export class SkillsController {
       const count = result?.changes?.length ?? 0;
       this.notify(`Curator ${dryRun ? "dry-run" : "run"} complete: ${count} change(s).`, "success");
       await this.refreshCuratorStatus();
-      if (!dryRun) await this.refresh();
+      if (!dryRun) { await this.refresh(); await this.refreshArchived(); }
     } catch (error) {
       this.notify(`Curator run failed: ${errorMessage(error)}`, "error");
     }
@@ -328,9 +338,24 @@ export class SkillsController {
     try {
       await this.api.pin(skillId, pinned);
       this.notify(`${skillId} ${pinned ? "pinned" : "unpinned"}.`, "success");
+      this.updatePinButton(pinned);
     } catch (error) {
       this.notify(`Could not pin: ${errorMessage(error)}`, "error");
     }
+  }
+
+  async togglePin() {
+    if (!this.selectedSkillId) return;
+    const btn = document.querySelector("#skill-pin-btn");
+    const isPinned = btn?.dataset.pinned === "true";
+    await this.pinSkill(this.selectedSkillId, !isPinned);
+  }
+
+  updatePinButton(pinned) {
+    const btn = document.querySelector("#skill-pin-btn");
+    if (!btn) return;
+    btn.dataset.pinned = String(pinned);
+    btn.textContent = pinned ? "Unpin" : "Pin";
   }
 
   async restoreSkill(skillId) {
@@ -348,6 +373,8 @@ export class SkillsController {
     if (!container) return;
     try {
       const archived = await this.api.archivedList();
+      const countEl = document.querySelector("#skills-archived-count");
+      if (countEl) countEl.textContent = `${archived.length} archived`;
       container.textContent = "";
       if (archived.length === 0) {
         const empty = document.createElement("p");

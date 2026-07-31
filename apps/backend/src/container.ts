@@ -24,7 +24,7 @@ import {
   type Logger,
   type LogObserver,
 } from "@nusashell/infrastructure";
-import type { PluginRepositoryPort, SkillRegistryPort, SkillProvenancePort, SkillUsagePort, CuratorSettings } from "@nusashell/application";
+import type { PluginRepositoryPort, SkillRegistryPort, SkillProvenancePort, SkillUsagePort, CuratorSettings, MemoryStorePort } from "@nusashell/application";
 import {
   CommandBus,
   QueryBus,
@@ -58,6 +58,7 @@ import {
   SkillCuratorScheduler,
   DEFAULT_CURATOR_SETTINGS,
   DEFAULT_SCHEDULER_SETTINGS,
+  LearningGraphService,
   RunAgentTurnHandler,
   CancelAgentTurnHandler,
   AgentTurnCoordinator,
@@ -141,6 +142,8 @@ export interface Container {
   readonly skillCurator: SkillCuratorService;
   readonly skillCuratorScheduler: SkillCuratorScheduler;
   readonly backgroundReviewScheduler: BackgroundReviewScheduler;
+  readonly learningGraph: LearningGraphService;
+  readonly memoryStore: MemoryStorePort;
   readonly db?: SqliteDatabase | undefined;
   readonly logger: Logger;
   configureAi(settings: {
@@ -258,6 +261,12 @@ export function createContainer(options: ContainerOptions): Container {
   });
   const memoryRoot = options.memoryRoot ?? new URL("../../../.nusashell/agent/memory", import.meta.url).pathname;
   const memoryStore = new FilesystemMemoryStore(memoryRoot);
+  const learningGraph = new LearningGraphService({
+    registry: skillRegistry,
+    usage: skillUsage,
+    provenance: skillProvenance,
+    memoryStore,
+  });
   const agentToolGateway = new McpAgentToolGateway(runtimeManager, docsIndex, skillRegistry, logger, memoryStore, skillProvenance, skillApprovalStaging, skillUsage);
   const promptLoader = new FilesystemPromptLoader(
     options.promptsRoot ?? new URL("../../../resources/agent/prompts", import.meta.url).pathname,
@@ -383,6 +392,8 @@ export function createContainer(options: ContainerOptions): Container {
     skillCurator,
     skillCuratorScheduler,
     backgroundReviewScheduler,
+    learningGraph,
+    memoryStore,
     db,
     logger,
     configureAi(settings) {

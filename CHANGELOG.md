@@ -5,7 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.0.40] - 2026-07-31
+## [0.0.41] - 2026-07-31
+
+### Added
+
+- Learning Journey view: visualizes the agent's acquired skills and memory
+  entries as a timeline and constellation graph. Includes a time scrubber to
+  reveal how the journey grew, a detail pane for inspecting and editing memory
+  nodes, and node deletion (skill archive or memory removal) via IPC.
+- `LearningGraphService` in the application layer: builds a graph of skill and
+  memory nodes with edges, clusters, and stats; supports `getNode`, `editNode`,
+  and `deleteNode` mutations with stale-node detection.
+- `learning:*` IPC handlers and preload bridge (`shell.learning.graph`,
+  `getNode`, `editNode`, `deleteNode`) connecting the renderer to the backend
+  container.
+- Skills view curator panel: shows curator status with Run and Dry-run buttons.
+- Skills view pending writes panel: lists agent-authored skill writes awaiting
+  approval with Approve/Reject buttons and a count badge.
+- Skills view archived skills panel: lists curator-archived skills with Restore
+  buttons and a count badge.
+- Pin/unpin control in the Skills file editor: toggles skill pinned state to
+  exclude it from curator archival.
+
+### Changed
+
+- Sidebar navigation now includes a Learning item between Skills and Plugins.
+- `agent.learning_updated` events now refresh both the Learning view and the
+  Skills pending/archived panels.
+- UI documentation regenerated from updated `ui-map.json` (16 docs).
 
 ### Fixed
 

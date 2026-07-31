@@ -75,3 +75,65 @@ UTF-8 text files can be edited and saved in place. Binary or large files expose 
   - Section: File editor
   - Type: button
   - Action: Deletes the selected managed skill package after confirmation.
+
+- **Pin / Unpin skill** (`#skill-pin-btn`):
+  - Section: File editor
+  - Type: button
+  - Action: Toggles the pinned state of the selected skill. Pinned skills are excluded from curator archival.
+
+## Curator
+
+Shows the skill curator's last-run timestamp and running state. Run executes the curator to transition stale skills to archived; Dry-run previews changes without applying them.
+
+- **Curator status** (`#skills-curator-status`):
+  - Section: Curator
+  - Type: status text
+  - Action: Shows the curator's last-run timestamp and whether it is currently running.
+
+- **Run curator** (`#skills-curator-run`):
+  - Section: Curator
+  - Type: button
+  - Action: Executes the skill curator to transition stale skills to archived based on usage and provenance.
+
+- **Dry-run curator** (`#skills-curator-dry-run`):
+  - Section: Curator
+  - Type: button
+  - Action: Previews curator changes without applying them.
+
+## Pending writes
+
+Lists skill writes authored by the agent that await user approval. Each row shows the action, skill id, and file path, with Approve and Reject buttons.
+
+- **Pending count** (`#skills-pending-count`):
+  - Section: Pending writes
+  - Type: status text
+  - Action: Shows the number of pending skill writes awaiting approval.
+
+- **Refresh pending** (`#skills-pending-refresh`):
+  - Section: Pending writes
+  - Type: button
+  - Action: Reloads the list of pending skill writes from the backend.
+
+- **Pending writes list** (`#skills-pending-list`):
+  - Section: Pending writes
+  - Type: list
+  - Action: Lists agent-authored skill writes awaiting user approval, with Approve and Reject buttons per item.
+
+## Archived skills
+
+Lists skills the curator has archived. Each row shows the skill name and description with a Restore button.
+
+- **Archived count** (`#skills-archived-count`):
+  - Section: Archived skills
+  - Type: status text
+  - Action: Shows the number of archived skills.
+
+- **Refresh archived** (`#skills-archived-refresh`):
+  - Section: Archived skills
+  - Type: button
+  - Action: Reloads the list of archived skills from the backend.
+
+- **Archived skills list** (`#skills-archived-list`):
+  - Section: Archived skills
+  - Type: list
+  - Action: Lists skills the curator has archived, with a Restore button per item.

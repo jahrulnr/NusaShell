@@ -35,12 +35,13 @@
         {
           "heading": "Sidebar",
           "paragraphs": [
-            "Vertical navigation on the left, ordered Home, Agent, Skills, Plugins, AI Providers, Autostart, and Logs. It can show icons with labels or icons only, remembers that choice locally, and links to the project documentation on GitHub from its footer."
+            "Vertical navigation on the left, ordered Home, Agent, Skills, Learning, Plugins, AI Providers, Autostart, and Logs. It can show icons with labels or icons only, remembers that choice locally, and links to the project documentation on GitHub from its footer."
           ],
           "controls": [
             "nav-home",
             "nav-agent",
             "nav-skills",
+            "nav-learning",
             "nav-plugins",
             "nav-ai-providers",
             "nav-autostart",
@@ -283,7 +284,97 @@
             "skill-editor",
             "skill-binary-view",
             "skill-save-btn",
-            "skill-delete-btn"
+            "skill-delete-btn",
+            "skill-pin-btn"
+          ]
+        },
+        {
+          "heading": "Curator",
+          "paragraphs": [
+            "Shows the skill curator's last-run timestamp and running state. Run executes the curator to transition stale skills to archived; Dry-run previews changes without applying them."
+          ],
+          "controls": [
+            "skills-curator-status",
+            "skills-curator-run",
+            "skills-curator-dry-run"
+          ]
+        },
+        {
+          "heading": "Pending writes",
+          "paragraphs": [
+            "Lists skill writes authored by the agent that await user approval. Each row shows the action, skill id, and file path, with Approve and Reject buttons."
+          ],
+          "controls": [
+            "skills-pending-count",
+            "skills-pending-refresh",
+            "skills-pending-list"
+          ]
+        },
+        {
+          "heading": "Archived skills",
+          "paragraphs": [
+            "Lists skills the curator has archived. Each row shows the skill name and description with a Restore button."
+          ],
+          "controls": [
+            "skills-archived-count",
+            "skills-archived-refresh",
+            "skills-archived-list"
+          ]
+        }
+      ]
+    },
+    "learning": {
+      "title": "Learning",
+      "purpose": "Visualizes the agent's learning journey as a timeline and constellation of skill and memory nodes, with a time scrubber and a detail pane for inspecting and editing individual nodes.",
+      "howToOpen": "Click the Learning item in the left sidebar.",
+      "sections": [
+        {
+          "heading": "Stats",
+          "paragraphs": [
+            "Summary cards showing the total number of learned skills, memory entries, agent-created nodes, and nodes used in turns."
+          ],
+          "controls": [
+            "learning-stat-skills",
+            "learning-stat-memory",
+            "learning-stat-agent",
+            "learning-stat-used"
+          ]
+        },
+        {
+          "heading": "Timeline",
+          "paragraphs": [
+            "A chronological list of learning nodes grouped by day. Each row shows a colored dot indicating kind (skill or memory) and state (active, stale, archived), the node label, category, use count, and a pin indicator. Click a row to inspect it in the detail pane."
+          ],
+          "controls": [
+            "learning-timeline-list",
+            "learning-timeline-count",
+            "learning-empty"
+          ]
+        },
+        {
+          "heading": "Constellation",
+          "paragraphs": [
+            "An SVG graph that positions nodes by timestamp (horizontal) and cluster category (vertical) and draws edges between related skills. Node color reflects kind and state. Click a dot to select the node. A time scrubber below fades nodes that fall after the selected percentage of the timeline."
+          ],
+          "controls": [
+            "learning-constellation-svg",
+            "learning-constellation-meta",
+            "learning-scrubber",
+            "learning-scrubber-value"
+          ]
+        },
+        {
+          "heading": "Detail",
+          "paragraphs": [
+            "Shows the selected node's label and content. Memory nodes can be edited and saved; skill nodes are read-only and can be archived. Delete archives skills or removes memory entries after confirmation."
+          ],
+          "controls": [
+            "learning-detail-meta",
+            "learning-detail-empty",
+            "learning-detail-editor",
+            "learning-save-btn",
+            "learning-delete-btn",
+            "learning-refresh-btn"
           ]
         }
       ]
@@ -805,6 +896,177 @@
       "label": "Delete skill",
       "type": "button",
       "action": "Deletes the selected managed skill package after confirmation."
+    },
+    "skill-pin-btn": {
+      "section": "File editor",
+      "label": "Pin / Unpin skill",
+      "type": "button",
+      "action": "Toggles the pinned state of the selected skill. Pinned skills are excluded from curator archival."
+    },
+    "skills-curator-status": {
+      "section": "Curator",
+      "label": "Curator status",
+      "type": "status text",
+      "action": "Shows the curator's last-run timestamp and whether it is currently running."
+    },
+    "skills-curator-run": {
+      "section": "Curator",
+      "label": "Run curator",
+      "type": "button",
+      "action": "Executes the skill curator to transition stale skills to archived based on usage and provenance."
+    },
+    "skills-curator-dry-run": {
+      "section": "Curator",
+      "label": "Dry-run curator",
+      "type": "button",
+      "action": "Previews curator changes without applying them."
+    },
+    "skills-pending-count": {
+      "section": "Pending writes",
+      "label": "Pending count",
+      "type": "status text",
+      "action": "Shows the number of pending skill writes awaiting approval."
+    },
+    "skills-pending-refresh": {
+      "section": "Pending writes",
+      "label": "Refresh pending",
+      "type": "button",
+      "action": "Reloads the list of pending skill writes from the backend."
+    },
+    "skills-pending-list": {
+      "section": "Pending writes",
+      "label": "Pending writes list",
+      "type": "list",
+      "action": "Lists agent-authored skill writes awaiting user approval, with Approve and Reject buttons per item."
+    },
+    "skills-archived-count": {
+      "section": "Archived skills",
+      "label": "Archived count",
+      "type": "status text",
+      "action": "Shows the number of archived skills."
+    },
+    "skills-archived-refresh": {
+      "section": "Archived skills",
+      "label": "Refresh archived",
+      "type": "button",
+      "action": "Reloads the list of archived skills from the backend."
+    },
+    "skills-archived-list": {
+      "section": "Archived skills",
+      "label": "Archived skills list",
+      "type": "list",
+      "action": "Lists skills the curator has archived, with a Restore button per item."
+    },
+    "nav-learning": {
+      "section": "Sidebar",
+      "label": "Learning navigation",
+      "type": "nav item",
+      "selector": "[data-view=\"learning\"].nav-item",
+      "generated": true,
+      "action": "Switches the main content to the Learning journey view.",
+      "related": ["learning-timeline-list", "learning-constellation-svg", "learning-detail-editor"]
+    },
+    "learning-stat-skills": {
+      "section": "Stats",
+      "label": "Learned skills count",
+      "type": "stat card",
+      "action": "Shows the total number of learned skill nodes in the graph."
+    },
+    "learning-stat-memory": {
+      "section": "Stats",
+      "label": "Memory entries count",
+      "type": "stat card",
+      "action": "Shows the total number of memory entry nodes in the graph."
+    },
+    "learning-stat-agent": {
+      "section": "Stats",
+      "label": "Agent-created count",
+      "type": "stat card",
+      "action": "Shows the number of nodes created by the agent (as opposed to user-created)."
+    },
+    "learning-stat-used": {
+      "section": "Stats",
+      "label": "Used in turns count",
+      "type": "stat card",
+      "action": "Shows the number of nodes that have been used in at least one agent turn."
+    },
+    "learning-timeline-list": {
+      "section": "Timeline",
+      "label": "Learning timeline",
+      "type": "listbox",
+      "action": "Chronological list of learning nodes grouped by day. Click a row to inspect it in the detail pane."
+    },
+    "learning-timeline-count": {
+      "section": "Timeline",
+      "label": "Timeline node count",
+      "type": "status text",
+      "action": "Shows the total number of nodes in the timeline."
+    },
+    "learning-empty": {
+      "section": "Timeline",
+      "label": "Learning empty state",
+      "type": "status",
+      "action": "Shown when the agent has not created any skills or memory entries yet."
+    },
+    "learning-constellation-svg": {
+      "section": "Constellation",
+      "label": "Constellation graph",
+      "type": "svg graph",
+      "action": "Visualizes learning nodes as dots positioned by timestamp and cluster, with edges between related skills. Click a dot to select a node."
+    },
+    "learning-constellation-meta": {
+      "section": "Constellation",
+      "label": "Constellation metadata",
+      "type": "status text",
+      "action": "Shows the number of edges in the constellation graph."
+    },
+    "learning-scrubber": {
+      "section": "Constellation",
+      "label": "Time scrubber",
+      "type": "range slider",
+      "action": "Fades nodes that fall after the selected percentage of the timeline, revealing how the journey grew over time."
+    },
+    "learning-scrubber-value": {
+      "section": "Constellation",
+      "label": "Scrubber value",
+      "type": "status text",
+      "action": "Shows the current scrubber percentage."
+    },
+    "learning-detail-meta": {
+      "section": "Detail",
+      "label": "Node detail metadata",
+      "type": "status text",
+      "action": "Shows the label of the currently selected node."
+    },
+    "learning-detail-empty": {
+      "section": "Detail",
+      "label": "Detail empty state",
+      "type": "status",
+      "action": "Prompt to select a node from the timeline or constellation."
+    },
+    "learning-detail-editor": {
+      "section": "Detail",
+      "label": "Node content editor",
+      "type": "textarea",
+      "action": "Shows the content of the selected node. Memory nodes can be edited; skill nodes are read-only."
+    },
+    "learning-save-btn": {
+      "section": "Detail",
+      "label": "Save node",
+      "type": "button",
+      "action": "Saves edits to the selected memory node's content."
+    },
+    "learning-delete-btn": {
+      "section": "Detail",
+      "label": "Delete / Archive node",
+      "type": "button",
+      "action": "Archives the selected skill node or removes the selected memory entry after confirmation."
+    },
+    "learning-refresh-btn": {
+      "section": "Detail",
+      "label": "Refresh graph",
+      "type": "button",
+      "action": "Reloads the entire learning graph from the backend."
     },
     "nav-ai-providers": {
       "section": "Sidebar",

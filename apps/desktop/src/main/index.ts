@@ -332,6 +332,15 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle("skills:archived:list", () =>
     requireBackend().container.skillRegistry.listArchived());
+
+  ipcMain.handle("learning:graph", () =>
+    requireBackend().container.learningGraph.buildGraph());
+  ipcMain.handle("learning:node:get", (_event, nodeId: string) =>
+    requireBackend().container.learningGraph.getNode(nodeId));
+  ipcMain.handle("learning:node:edit", (_event, nodeId: string, content: string) =>
+    requireBackend().container.learningGraph.editNode(nodeId, content));
+  ipcMain.handle("learning:node:delete", (_event, nodeId: string) =>
+    requireBackend().container.learningGraph.deleteNode(nodeId));
   ipcMain.handle("mail-accounts:list", (event) => {
     assertMailPluginSender(event);
     return requireMailSettingsStore().getPublic();
