@@ -1,163 +1,66 @@
 #!/usr/bin/env node
-const fs = require("fs");
-const path = require("path");
-const { Server } = require("@modelcontextprotocol/sdk/server/index.js");
-const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
-const {
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import {
   CallToolRequestSchema,
-  GetPromptRequestSchema,
-  ListPromptsRequestSchema,
-  ListResourcesRequestSchema,
-  ListResourceTemplatesRequestSchema,
-  ReadResourceRequestSchema,
   ListToolsRequestSchema,
-} = require("@modelcontextprotocol/sdk/types.js");
+} from "@modelcontextprotocol/sdk/types.js";
+import { safeNotesError } from "./errors.js";
+import { NoteService } from "./note-service.js";
+import { callNotesTool, NOTES_TOOLS } from "./tools.js";
 
-const notes = [];
-let nextId = 1;
+async function main() {
+  const service = new NoteService();
+  await service.load();
 
-function notesDataFile() {
-  return process.env.NUSASHELL_NOTES_DATA_FILE || path.join(__dirname, "..", "notes.json");
-}
+  const server = new Server(
+    { name: "nusashell-notes", version: "1.0.0" },
+    { capabilities: { tools: {} } },
+  );
 
-function loadNotes() {
-  try {
-    const file = notesDataFile();
-    if (fs.existsSync(file)) {
-      const data = JSON.parse(fs.readFileSync(file, "utf8"));
-      if (Array.isArray(data.notes)) {
-        notes.push(...data.notes);
-        const maxId = Math.max(0, ...notes.map((note) => Number(note.id) || 0));
-        nextId = maxId + 1;
-      }
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: NOTES_TOOLS,
+  }));
+
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    try {
+      const result = await callNotesTool(
+        service,
+        request.params.name,
+        request.params.arguments ?? {},
+      );
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        structuredContent: result,
+      };
+    } catch (error) {
+      const safeError = safeNotesError(error);
+      process.stderr.write(
+        `[nusashell-notes] tool failed name=${request.params.name} error=${safeError}\n`,
+      );
+      return {
+        isError: true,
+        content: [{
+          type: "text",
+          text: safeError,
+        }],
+      };
     }
-  } catch (err) {
-    console.error("[notes-mcp] failed to load notes:", err.message);
+  });
+
+  async function shutdown() {
+    await server.close();
   }
+
+  process.once("SIGINT", () => void shutdown());
+  process.once("SIGTERM", () => void shutdown());
+
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  process.stderr.write(`[nusashell-notes] ready (${service.notes.length} notes loaded)\n`);
 }
 
-function saveNotes() {
-  try {
-    fs.writeFileSync(notesDataFile(), JSON.stringify({ notes }, null, 2));
-  } catch (err) {
-    console.error("[notes-mcp] failed to save notes:", err.message);
-  }
-}
-
-loadNotes();
-
-const server = new Server(
-  { name: "notes-mcp", version: "1.0.0" },
-  { capabilities: { tools: {}, prompts: {}, resources: {} } },
-);
-
-server.setRequestHandler(ListPromptsRequestSchema, async () => ({
-  prompts: [
-    {
-      name: "summarize_notes",
-      description: "Ask the assistant to summarize the Notes MCP resource.",
-    },
-  ],
-}));
-
-server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-  if (request.params.name !== "summarize_notes") throw new Error("Unknown prompt: " + request.params.name);
-  return {
-    description: "Summarize the notes currently exposed by this MCP server.",
-    messages: [{
-      role: "user",
-      content: { type: "text", text: "Summarize the attached Notes MCP resource. Call out themes and action items." },
-    }],
-  };
+void main().catch((error) => {
+  process.stderr.write(`[nusashell-notes] ${safeNotesError(error)}\n`);
+  process.exitCode = 1;
 });
-
-server.setRequestHandler(ListResourcesRequestSchema, async () => ({
-  resources: [{
-    uri: "notes://all",
-    name: "All notes",
-    description: "Current notes in this local Notes MCP server.",
-    mimeType: "application/json",
-  }],
-}));
-
-server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
-  resourceTemplates: [{
-    uriTemplate: "notes://{id}",
-    name: "Note by ID",
-    description: "One note addressed by its numeric ID.",
-    mimeType: "application/json",
-  }],
-}));
-
-server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-  const uri = request.params.uri;
-  if (uri === "notes://all") {
-    return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify({ notes }) }] };
-  }
-  const match = /^notes:\/\/(\d+)$/.exec(uri);
-  if (match) {
-    const note = notes.find((item) => item.id === Number(match[1]));
-    if (!note) throw new Error("Note not found: " + match[1]);
-    return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify({ note }) }] };
-  }
-  throw new Error("Unknown resource: " + uri);
-});
-
-server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [
-    {
-      name: "createNote",
-      description: "Create a new note",
-      inputSchema: {
-        type: "object",
-        properties: {
-          text: { type: "string", description: "The note text" },
-        },
-        required: ["text"],
-      },
-    },
-    {
-      name: "listNotes",
-      description: "List all stored notes",
-      inputSchema: {
-        type: "object",
-        properties: {},
-      },
-    },
-  ],
-}));
-
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
-
-  if (name === "createNote") {
-    const text = (args && args.text) || "";
-    const note = { id: nextId++, text, createdAt: new Date().toISOString() };
-    notes.push(note);
-    saveNotes();
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify({ note, totalNotes: notes.length }),
-        },
-      ],
-    };
-  }
-
-  if (name === "listNotes") {
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify({ notes }),
-        },
-      ],
-    };
-  }
-
-  throw new Error("Unknown tool: " + name);
-});
-
-const transport = new StdioServerTransport();
-server.connect(transport);

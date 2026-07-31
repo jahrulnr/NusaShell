@@ -4,102 +4,45 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Notes</title>
-  <style>
-    :root { color-scheme: dark; }
-    body {
-      margin: 0; padding: 16px; font-family: -apple-system, "Segoe UI", sans-serif;
-      background: #14181f; color: #e6e9ef; height: 100vh; box-sizing: border-box;
-      display: flex; flex-direction: column;
-    }
-    h2 { margin: 0 0 12px; font-size: 16px; color: #9fb3ff; }
-    textarea {
-      width: 100%; box-sizing: border-box; background: #1d2330; color: #e6e9ef;
-      border: 1px solid #2c3550; border-radius: 8px; padding: 10px; font-size: 14px;
-      resize: none; height: 60px; font-family: inherit;
-    }
-    button {
-      margin-top: 8px; background: #4c6fff; color: white; border: none;
-      padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13px;
-    }
-    button:hover { background: #3d5ce6; }
-    button:disabled { opacity: 0.5; cursor: default; }
-    #status { font-size: 11px; color: #7d8aa8; margin-top: 6px; min-height: 14px; }
-    ul { list-style: none; padding: 0; margin: 16px 0 0; overflow-y: auto; flex: 1; }
-    li {
-      background: #1d2330; border: 1px solid #2c3550; border-radius: 8px;
-      padding: 10px; margin-bottom: 8px; font-size: 13px;
-    }
-    li .meta { font-size: 10px; color: #7d8aa8; margin-top: 4px; }
-  </style>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <h2>📝 Notes</h2>
-  <textarea id="text" placeholder="Write a note..."></textarea>
-  <button id="createBtn">Create Note</button>
-  <div id="status"></div>
-  <ul id="list"></ul>
+  <div id="app">
+    <div id="sidebar"></div>
+    <div id="main">
+      <div id="toolbar">
+        <input id="searchInput" type="text" placeholder="Search notes..." />
+        <button id="newNoteBtn">+ New Note</button>
+      </div>
+      <div id="content"></div>
+      <div id="status"></div>
+    </div>
+  </div>
 
-  <script>
-    const pluginId = new URLSearchParams(location.search).get("pluginId") || "";
-    const statusEl = document.getElementById("status");
-    const listEl = document.getElementById("list");
-    const btn = document.getElementById("createBtn");
-    const textarea = document.getElementById("text");
+  <div id="editor">
+    <div class="editor-panel">
+      <h3 id="editorTitle">New Note</h3>
+      <textarea id="editorText" placeholder="Write a note... (Markdown supported)"></textarea>
+      <input id="editorTags" class="editor-tags" type="text" placeholder="Tags (comma-separated)" />
+      <div class="editor-actions">
+        <button class="btn-cancel" id="editorCancel">Cancel</button>
+        <button class="btn-save" id="editorSave">Save</button>
+      </div>
+    </div>
+  </div>
 
-    function parseMcpResult(result) {
-      const extractText = () => {
-        if (result && Array.isArray(result) && result.length > 0 && typeof result[0].text === "string") return result[0].text;
-        if (result && result.result && Array.isArray(result.result) && result.result.length > 0 && typeof result.result[0].text === "string") return result.result[0].text;
-        if (result && result.result && result.result.content && Array.isArray(result.result.content) && result.result.content.length > 0 && typeof result.result.content[0].text === "string") return result.result.content[0].text;
-        if (result && result.content && Array.isArray(result.content) && result.content.length > 0 && typeof result.content[0].text === "string") return result.content[0].text;
-        return undefined;
-      };
-      const text = extractText();
-      if (text) {
-        try { return JSON.parse(text); } catch { /* fallthrough */ }
-      }
-      return result;
-    }
+  <div id="confirmDialog">
+    <div class="confirm-panel">
+      <h3 id="confirmTitle">Confirm</h3>
+      <p id="confirmMessage"></p>
+      <div class="confirm-actions">
+        <button class="btn-cancel" id="confirmNo">Cancel</button>
+        <button class="btn-danger" id="confirmYes">Delete</button>
+      </div>
+    </div>
+  </div>
 
-    function escapeHtml(s) {
-      return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-    }
-
-    function renderNotes(notes) {
-      listEl.innerHTML = notes.slice().reverse().map(n =>
-        `<li>${escapeHtml(n.text)}<div class="meta">#${n.id} · ${new Date(n.createdAt).toLocaleTimeString()}</div></li>`
-      ).join("");
-    }
-
-    async function refreshList() {
-      try {
-        const result = await window.shell.callTool(pluginId, "listNotes", {});
-        const data = parseMcpResult(result);
-        renderNotes(data.notes || []);
-      } catch (err) {
-        statusEl.textContent = "✗ Failed to load notes: " + err.message;
-      }
-    }
-
-    btn.addEventListener("click", async () => {
-      const text = textarea.value.trim();
-      if (!text) return;
-      btn.disabled = true;
-      statusEl.textContent = "Creating note...";
-      try {
-        const result = await window.shell.callTool(pluginId, "createNote", { text });
-        const data = parseMcpResult(result);
-        statusEl.textContent = `✓ Note #${data.note.id} created. Total: ${data.totalNotes}`;
-        textarea.value = "";
-        await refreshList();
-      } catch (err) {
-        statusEl.textContent = "✗ Error: " + err.message;
-      } finally {
-        btn.disabled = false;
-      }
-    });
-
-    refreshList().catch(() => {});
-  </script>
+  <script src="marked.min.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
