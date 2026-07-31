@@ -25,6 +25,7 @@ export {
   AgentTurnRunner,
   McpAgentToolGateway,
   ReviewAgentToolGateway,
+  BackgroundReviewScheduler,
   InProcessAgentTurnWorker,
   RoutedAgentProvider,
   AgentTurnCoordinator,
