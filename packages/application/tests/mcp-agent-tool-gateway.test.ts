@@ -6,6 +6,7 @@ import type {
   DocsHit,
   DocSummary,
   SkillRegistryPort,
+  SkillProvenancePort,
   MemoryStorePort,
   MemorySnapshot,
   MemoryMutationResult,
@@ -34,7 +35,7 @@ describe("McpAgentToolGateway", () => {
       "mcp_list", "mcp_enable", "mcp_disable", "tool_search", "tool_list", "tool_schema", "tool_schemas", "mcp_context",
       "docs_search", "docs_list", "docs_read",
       "skill_list", "skill_search", "skill_read",
-      "memory",
+      "memory", "skill_manage",
     ]);
     await expect(gateway.execute("tool_list", { pluginId: "nusashell.notes" }, "call-tool-list", "turn-1")).resolves.toEqual([
       { name: "createNote", description: "Create a note" },
@@ -193,6 +194,7 @@ describe("McpAgentToolGateway", () => {
         truncated: false,
       }),
       installFromArchive: async () => ({ ...summary, files: [] }),
+      create: async () => ({ ...summary, files: [] }),
       write: async () => ({
         skillId: summary.id,
         path: "SKILL.md",
@@ -207,7 +209,7 @@ describe("McpAgentToolGateway", () => {
     gateway.beginTurn("turn-skills");
 
     const toolNames = (await gateway.listTools([], "turn-skills")).map((tool) => tool.name);
-    expect(toolNames).toEqual(expect.arrayContaining(["skill_list", "skill_search", "skill_read"]));
+    expect(toolNames).toEqual(expect.arrayContaining(["skill_list", "skill_search", "skill_read", "skill_manage"]));
     expect(toolNames).not.toEqual(expect.arrayContaining(["skill_install", "skill_edit", "skill_delete", "skill_exec"]));
 
     await expect(gateway.execute("skill_list", {}, "call-list", "turn-skills")).resolves.toEqual({
@@ -320,6 +322,173 @@ describe("McpAgentToolGateway", () => {
       ok: false,
       error: { code: "memory_error", message: "Memory capacity exceeded for \"memory\": 2300/2200 chars (overflow 100). Remove or shorten entries first." },
       meta: {},
+    });
+  });
+
+  describe("skill_manage", () => {
+    const skillSummary = {
+      id: "my-skill",
+      name: "my-skill",
+      description: "A test skill.",
+      fileCount: 1,
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    };
+    const skillDetail = { ...skillSummary, files: [{ path: "SKILL.md", type: "file" as const, sizeBytes: 50, editable: true }] };
+    const skillMd = "---\nname: my-skill\ndescription: A test skill.\n---\n# My Skill\nDo things.";
+
+    function fakeRegistry(overrides: Partial<SkillRegistryPort> = {}): SkillRegistryPort {
+      return {
+        list: async () => [skillSummary],
+        search: async () => [skillSummary],
+        get: async () => skillDetail,
+        read: async (skillId, path = "SKILL.md") => ({ skillId, path, content: skillMd, sizeBytes: skillMd.length, editable: true, truncated: false }),
+        installFromArchive: async () => skillDetail,
+        create: async () => skillDetail,
+        write: async (skillId, path) => ({ skillId, path, content: skillMd, sizeBytes: skillMd.length, editable: true, truncated: false }),
+        delete: async () => {},
+        ...overrides,
+      };
+    }
+
+    function fakeProvenance(originMap: Record<string, "agent" | "user"> = {}): SkillProvenancePort {
+      return {
+        get: async (id) => originMap[id] ?? "user",
+        markAgent: async () => {},
+        markUser: async () => {},
+        clear: async () => {},
+      };
+    }
+
+    it("creates a new agent-owned skill and marks provenance", async () => {
+      const registry = fakeRegistry();
+      const provenance = fakeProvenance();
+      let markedAgent = false;
+      provenance.markAgent = async () => { markedAgent = true; };
+      const gateway = new McpAgentToolGateway(fakeRuntime as never, undefined, registry, undefined, undefined, provenance);
+      gateway.beginTurn("turn-create");
+
+      const result = await gateway.execute("skill_manage", { action: "create", name: "my-skill", content: skillMd }, "call-create", "turn-create");
+      expect(result).toEqual({ ok: true, data: skillDetail, meta: { provenance: "agent" } });
+      expect(markedAgent).toBe(true);
+    });
+
+    it("rejects create when skill already exists", async () => {
+      const registry = fakeRegistry({
+        create: async () => { throw new Error("Skill already exists: my-skill"); },
+      });
+      const gateway = new McpAgentToolGateway(fakeRuntime as never, undefined, registry, undefined, undefined, fakeProvenance());
+      gateway.beginTurn("turn-dup");
+
+      const result = await gateway.execute("skill_manage", { action: "create", name: "my-skill", content: skillMd }, "call-dup", "turn-dup");
+      expect(result).toEqual({
+        ok: false,
+        error: { code: "skill_exists", message: "Skill already exists: my-skill" },
+        meta: {},
+      });
+    });
+
+    it("rejects create with description > 60 chars", async () => {
+      const longDesc = "x".repeat(61);
+      const registry = fakeRegistry({
+        create: async () => { throw new Error("SKILL.md description must be 60 characters or fewer (got 61)"); },
+      });
+      const gateway = new McpAgentToolGateway(fakeRuntime as never, undefined, registry, undefined, undefined, fakeProvenance());
+      gateway.beginTurn("turn-long");
+
+      const result = await gateway.execute("skill_manage", { action: "create", name: "my-skill", content: skillMd }, "call-long", "turn-long");
+      expect(result).toEqual({
+        ok: false,
+        error: { code: "description_too_long", message: "SKILL.md description must be 60 characters or fewer (got 61)" },
+        meta: {},
+      });
+    });
+
+    it("edits an agent-owned skill", async () => {
+      const registry = fakeRegistry();
+      const provenance = fakeProvenance({ "my-skill": "agent" });
+      const gateway = new McpAgentToolGateway(fakeRuntime as never, undefined, registry, undefined, undefined, provenance);
+      gateway.beginTurn("turn-edit");
+
+      const result = await gateway.execute("skill_manage", { action: "edit", name: "my-skill", content: skillMd }, "call-edit", "turn-edit");
+      expect(result).toEqual({ ok: true, data: expect.objectContaining({ skillId: "my-skill" }), meta: { provenance: "agent" } });
+    });
+
+    it("blocks edit on a user-owned skill", async () => {
+      const registry = fakeRegistry();
+      const provenance = fakeProvenance({ "my-skill": "user" });
+      const gateway = new McpAgentToolGateway(fakeRuntime as never, undefined, registry, undefined, undefined, provenance);
+      gateway.beginTurn("turn-protect");
+
+      const result = await gateway.execute("skill_manage", { action: "edit", name: "my-skill", content: skillMd }, "call-protect", "turn-protect");
+      expect(result).toEqual({
+        ok: false,
+        error: { code: "skill_protected", message: 'Skill "my-skill" is not agent-owned and cannot be mutated by the model' },
+        meta: {},
+      });
+    });
+
+    it("writes a support file to an agent-owned skill", async () => {
+      const registry = fakeRegistry();
+      const provenance = fakeProvenance({ "my-skill": "agent" });
+      const gateway = new McpAgentToolGateway(fakeRuntime as never, undefined, registry, undefined, undefined, provenance);
+      gateway.beginTurn("turn-writefile");
+
+      const result = await gateway.execute("skill_manage", { action: "write_file", name: "my-skill", path: "references/guide.md", content: "# Guide" }, "call-writefile", "turn-writefile");
+      expect(result).toEqual({ ok: true, data: expect.objectContaining({ skillId: "my-skill" }), meta: { provenance: "agent" } });
+    });
+
+    it("blocks write_file on a user-owned skill", async () => {
+      const registry = fakeRegistry();
+      const provenance = fakeProvenance({ "my-skill": "user" });
+      const gateway = new McpAgentToolGateway(fakeRuntime as never, undefined, registry, undefined, undefined, provenance);
+      gateway.beginTurn("turn-wf-protect");
+
+      const result = await gateway.execute("skill_manage", { action: "write_file", name: "my-skill", path: "references/guide.md", content: "# Guide" }, "call-wf-protect", "turn-wf-protect");
+      expect(result).toEqual({
+        ok: false,
+        error: { code: "skill_protected", message: 'Skill "my-skill" is not agent-owned and cannot be mutated by the model' },
+        meta: {},
+      });
+    });
+
+    it("deletes an agent-owned skill and clears provenance", async () => {
+      const registry = fakeRegistry();
+      let cleared = false;
+      const provenance = fakeProvenance({ "my-skill": "agent" });
+      provenance.clear = async () => { cleared = true; };
+      const gateway = new McpAgentToolGateway(fakeRuntime as never, undefined, registry, undefined, undefined, provenance);
+      gateway.beginTurn("turn-delete");
+
+      const result = await gateway.execute("skill_manage", { action: "delete", name: "my-skill" }, "call-delete", "turn-delete");
+      expect(result).toEqual({ ok: true, data: { deleted: "my-skill" }, meta: { provenance: "agent" } });
+      expect(cleared).toBe(true);
+    });
+
+    it("blocks delete on a user-owned skill", async () => {
+      const registry = fakeRegistry();
+      const provenance = fakeProvenance({ "my-skill": "user" });
+      const gateway = new McpAgentToolGateway(fakeRuntime as never, undefined, registry, undefined, undefined, provenance);
+      gateway.beginTurn("turn-del-protect");
+
+      const result = await gateway.execute("skill_manage", { action: "delete", name: "my-skill" }, "call-del-protect", "turn-del-protect");
+      expect(result).toEqual({
+        ok: false,
+        error: { code: "skill_protected", message: 'Skill "my-skill" is not agent-owned and cannot be mutated by the model' },
+        meta: {},
+      });
+    });
+
+    it("returns skills_not_configured when no provenance is wired", async () => {
+      const registry = fakeRegistry();
+      const gateway = new McpAgentToolGateway(fakeRuntime as never, undefined, registry);
+      gateway.beginTurn("turn-no-prov");
+
+      const result = await gateway.execute("skill_manage", { action: "create", name: "my-skill", content: skillMd }, "call-no-prov", "turn-no-prov");
+      expect(result).toEqual({
+        ok: false,
+        error: { code: "skills_not_configured", message: "Skill registry is not configured" },
+        meta: { data_is_untrusted: true },
+      });
     });
   });
 });

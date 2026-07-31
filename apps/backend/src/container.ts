@@ -11,6 +11,9 @@ import {
   FilesystemPromptLoader,
   MarkdownDocsIndex,
   FilesystemSkillRegistry,
+  FilesystemSkillProvenance,
+  SkillApprovalStaging,
+  type PendingSkillWrite,
   FilesystemMemoryStore,
   createLogger,
   AgentProviderRegistry,
@@ -19,7 +22,7 @@ import {
   type Logger,
   type LogObserver,
 } from "@nusashell/infrastructure";
-import type { PluginRepositoryPort, SkillRegistryPort } from "@nusashell/application";
+import type { PluginRepositoryPort, SkillRegistryPort, SkillProvenancePort } from "@nusashell/application";
 import {
   CommandBus,
   QueryBus,
@@ -119,6 +122,8 @@ export interface Container {
   readonly eventPublisher: WebSocketEventPublisher;
   readonly pluginRepository: PluginRepositoryPort;
   readonly skillRegistry: SkillRegistryPort;
+  readonly skillProvenance: SkillProvenancePort;
+  readonly skillApprovalStaging: SkillApprovalStaging;
   readonly db?: SqliteDatabase | undefined;
   readonly logger: Logger;
   configureAi(settings: {
@@ -213,9 +218,11 @@ export function createContainer(options: ContainerOptions): Container {
 
   const skillsRoot = options.skillsRoot ?? new URL("../../../.nusashell/agent/skills", import.meta.url).pathname;
   const skillRegistry = new FilesystemSkillRegistry(skillsRoot);
+  const skillProvenance = new FilesystemSkillProvenance(skillsRoot);
+  const skillApprovalStaging = new SkillApprovalStaging(skillsRoot);
   const memoryRoot = options.memoryRoot ?? new URL("../../../.nusashell/agent/memory", import.meta.url).pathname;
   const memoryStore = new FilesystemMemoryStore(memoryRoot);
-  const agentToolGateway = new McpAgentToolGateway(runtimeManager, docsIndex, skillRegistry, logger, memoryStore);
+  const agentToolGateway = new McpAgentToolGateway(runtimeManager, docsIndex, skillRegistry, logger, memoryStore, skillProvenance);
   const promptLoader = new FilesystemPromptLoader(
     options.promptsRoot ?? new URL("../../../resources/agent/prompts", import.meta.url).pathname,
   );
@@ -315,6 +322,8 @@ export function createContainer(options: ContainerOptions): Container {
     eventPublisher,
     pluginRepository,
     skillRegistry,
+    skillProvenance,
+    skillApprovalStaging,
     db,
     logger,
     configureAi(settings) {

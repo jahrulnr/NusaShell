@@ -33,6 +33,7 @@ export interface SkillRegistryPort {
   get(skillId: string): Promise<SkillDetail>;
   read(skillId: string, path?: string, offset?: number, maxChars?: number): Promise<SkillReadResult>;
   installFromArchive(archivePath: string): Promise<SkillDetail>;
+  create(skillId: string, skillMd: string): Promise<SkillDetail>;
   write(skillId: string, path: string, content: string): Promise<SkillReadResult>;
   delete(skillId: string): Promise<void>;
 }

@@ -250,7 +250,9 @@ app.whenReady().then(async () => {
       ? await dialog.showOpenDialog(owner, options)
       : await dialog.showOpenDialog(options);
     if (selection.canceled || !selection.filePaths[0]) return null;
-    return requireBackend().container.skillRegistry.installFromArchive(selection.filePaths[0]);
+    const installed = await requireBackend().container.skillRegistry.installFromArchive(selection.filePaths[0]);
+    await requireBackend().container.skillProvenance.markUser(installed.id);
+    return installed;
   });
   ipcMain.handle("skills:list", () => requireBackend().container.skillRegistry.list());
   ipcMain.handle("skills:get", (_event, skillId: string) =>
@@ -261,6 +263,44 @@ app.whenReady().then(async () => {
     requireBackend().container.skillRegistry.write(skillId, path, content));
   ipcMain.handle("skills:delete", (_event, skillId: string) =>
     requireBackend().container.skillRegistry.delete(skillId));
+  ipcMain.handle("skills:pending:list", () =>
+    requireBackend().container.skillApprovalStaging.list());
+  ipcMain.handle("skills:pending:approve", async (_event, id: string) => {
+    const staging = requireBackend().container.skillApprovalStaging;
+    const pending = await staging.get(id);
+    if (!pending) throw new Error(`Pending write not found: ${id}`);
+    const registry = requireBackend().container.skillRegistry;
+    const provenance = requireBackend().container.skillProvenance;
+    switch (pending.action) {
+      case "create": {
+        const detail = await registry.create(pending.skillId, pending.content);
+        await provenance.markAgent(pending.skillId);
+        await staging.remove(id);
+        return detail;
+      }
+      case "edit": {
+        const result = await registry.write(pending.skillId, "SKILL.md", pending.content);
+        await staging.remove(id);
+        return result;
+      }
+      case "write_file": {
+        const result = await registry.write(pending.skillId, pending.path, pending.content);
+        await staging.remove(id);
+        return result;
+      }
+      case "delete": {
+        await registry.delete(pending.skillId);
+        await provenance.clear(pending.skillId);
+        await staging.remove(id);
+        return { deleted: pending.skillId };
+      }
+      default:
+        throw new Error(`Unknown pending action: ${pending.action}`);
+    }
+  });
+  ipcMain.handle("skills:pending:reject", async (_event, id: string) => {
+    await requireBackend().container.skillApprovalStaging.remove(id);
+  });
   ipcMain.handle("mail-accounts:list", (event) => {
     assertMailPluginSender(event);
     return requireMailSettingsStore().getPublic();

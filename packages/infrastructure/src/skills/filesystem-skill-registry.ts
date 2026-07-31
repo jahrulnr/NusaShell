@@ -23,7 +23,9 @@ const MAX_ARCHIVE_ENTRIES = 500;
 const MAX_ARCHIVE_BYTES = 32 * 1024 * 1024;
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const MAX_EDITABLE_BYTES = 1024 * 1024;
+const MAX_DESCRIPTION_CHARS = 60;
 const SKILL_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const SUPPORT_FILE_PREFIXES = ["references/", "templates/", "scripts/", "assets/"];
 
 export class FilesystemSkillRegistry implements SkillRegistryPort {
   constructor(private readonly root: string) {}
@@ -144,16 +146,42 @@ export class FilesystemSkillRegistry implements SkillRegistryPort {
     return this.get(metadata.name);
   }
 
+  async create(skillId: string, skillMd: string): Promise<SkillDetail> {
+    if (!SKILL_ID.test(skillId)) throw new Error("Invalid skill id");
+    const metadata = parseFrontmatter(skillMd);
+    if (metadata.name !== skillId) throw new Error(`SKILL.md name must match its id: ${skillId}`);
+    if (metadata.description.length > MAX_DESCRIPTION_CHARS) {
+      throw new Error(`SKILL.md description must be ${MAX_DESCRIPTION_CHARS} characters or fewer (got ${metadata.description.length})`);
+    }
+    const destination = this.skillRoot(skillId);
+    if (await exists(destination)) throw new Error(`Skill already exists: ${skillId}`);
+    await mkdir(destination, { recursive: true });
+    await writeFile(resolve(destination, "SKILL.md"), skillMd, "utf8");
+    return this.get(skillId);
+  }
+
   async write(skillId: string, path: string, content: string): Promise<SkillReadResult> {
     if (Buffer.byteLength(content, "utf8") > MAX_EDITABLE_BYTES) throw new Error("Skill file exceeds the editable size limit");
     const normalizedPath = normalizedRelative(path);
     if (normalizedPath === "SKILL.md") {
       const metadata = parseFrontmatter(content);
       if (metadata.name !== skillId) throw new Error(`SKILL.md name must remain ${skillId}`);
+      if (metadata.description.length > MAX_DESCRIPTION_CHARS) {
+        throw new Error(`SKILL.md description must be ${MAX_DESCRIPTION_CHARS} characters or fewer (got ${metadata.description.length})`);
+      }
     }
     const target = this.skillPath(skillId, normalizedPath);
-    const current = await readFile(target);
-    if (!isUtf8Text(current) || current.byteLength > MAX_EDITABLE_BYTES) throw new Error("Only UTF-8 text skill files can be edited");
+    const fileExists = await exists(target);
+    if (fileExists) {
+      const current = await readFile(target);
+      if (!isUtf8Text(current) || current.byteLength > MAX_EDITABLE_BYTES) throw new Error("Only UTF-8 text skill files can be edited");
+    } else {
+      if (normalizedPath === "SKILL.md") throw new Error("SKILL.md does not exist; use create() instead");
+      if (!SUPPORT_FILE_PREFIXES.some((prefix) => normalizedPath.startsWith(prefix))) {
+        throw new Error(`Support file creation is only allowed under: ${SUPPORT_FILE_PREFIXES.join(", ")}`);
+      }
+      await mkdir(resolve(target, ".."), { recursive: true });
+    }
     await writeFile(target, content, "utf8");
     return this.read(skillId, path, 0, 100_000);
   }

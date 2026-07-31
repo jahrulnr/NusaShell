@@ -159,6 +159,9 @@ export type {
   SkillReadResult,
   SkillRegistryPort,
   SkillSummary,
+  SkillOrigin,
+  SkillProvenanceEntry,
+  SkillProvenancePort,
 } from "./skill/index.js";
 
 // Agent Memory

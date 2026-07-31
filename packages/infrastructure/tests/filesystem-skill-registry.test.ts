@@ -92,4 +92,55 @@ describe("FilesystemSkillRegistry", () => {
     });
     await expect(registry.installFromArchive(ambiguous)).rejects.toThrow(/outside its package root/i);
   });
+
+  it("creates a new skill with valid frontmatter", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-skills-"));
+    const registry = new FilesystemSkillRegistry(join(root, "managed"));
+    const skillMd = "---\nname: my-skill\ndescription: A test skill.\n---\n# My Skill\n";
+    const detail = await registry.create("my-skill", skillMd);
+    expect(detail).toMatchObject({ id: "my-skill", name: "my-skill", fileCount: 1 });
+    await expect(registry.read("my-skill")).resolves.toMatchObject({ content: skillMd });
+  });
+
+  it("rejects create when skill already exists", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-skills-"));
+    const registry = new FilesystemSkillRegistry(join(root, "managed"));
+    const skillMd = "---\nname: dup\ndescription: A skill.\n---\n# Dup\n";
+    await registry.create("dup", skillMd);
+    await expect(registry.create("dup", skillMd)).rejects.toThrow(/already exists/i);
+  });
+
+  it("rejects create when description exceeds 60 characters", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-skills-"));
+    const registry = new FilesystemSkillRegistry(join(root, "managed"));
+    const longDesc = "x".repeat(61);
+    const skillMd = `---\nname: long\ndescription: ${longDesc}\n---\n# Long\n`;
+    await expect(registry.create("long", skillMd)).rejects.toThrow(/60 characters or fewer/i);
+  });
+
+  it("rejects create when name does not match skill id", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-skills-"));
+    const registry = new FilesystemSkillRegistry(join(root, "managed"));
+    const skillMd = "---\nname: wrong\ndescription: A skill.\n---\n# Wrong\n";
+    await expect(registry.create("correct", skillMd)).rejects.toThrow(/name must match/i);
+  });
+
+  it("creates support files under allowlisted directories via write", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-skills-"));
+    const registry = new FilesystemSkillRegistry(join(root, "managed"));
+    const skillMd = "---\nname: supp\ndescription: A skill.\n---\n# Supp\n";
+    await registry.create("supp", skillMd);
+    await registry.write("supp", "references/guide.md", "# Guide\n");
+    expect(await readFile(join(root, "managed", "supp", "references", "guide.md"), "utf8")).toBe("# Guide\n");
+    await registry.write("supp", "templates/tmpl.md", "# Template\n");
+    expect(await readFile(join(root, "managed", "supp", "templates", "tmpl.md"), "utf8")).toBe("# Template\n");
+  });
+
+  it("rejects support file creation outside allowlisted directories", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-skills-"));
+    const registry = new FilesystemSkillRegistry(join(root, "managed"));
+    const skillMd = "---\nname: supp2\ndescription: A skill.\n---\n# Supp2\n";
+    await registry.create("supp2", skillMd);
+    await expect(registry.write("supp2", "random/file.md", "# Random\n")).rejects.toThrow(/only allowed under/i);
+  });
 });

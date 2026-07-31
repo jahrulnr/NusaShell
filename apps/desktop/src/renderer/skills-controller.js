@@ -26,6 +26,7 @@ export class SkillsController {
       return;
     }
     await this.refresh();
+    await this.refreshPending();
   }
 
   bind() {
@@ -34,6 +35,7 @@ export class SkillsController {
     document.querySelector("#skill-save-btn")?.addEventListener("click", () => void this.save());
     document.querySelector("#skill-delete-btn")?.addEventListener("click", () => void this.deleteSelected());
     document.querySelector("#skill-editor")?.addEventListener("input", () => this.syncDirtyState());
+    document.querySelector("#skills-pending-refresh")?.addEventListener("click", () => void this.refreshPending());
   }
 
   async refresh(preferredId = this.selectedSkillId) {
@@ -236,5 +238,65 @@ export class SkillsController {
     document.querySelector("#skills-empty strong").textContent = "Skills bridge unavailable";
     document.querySelector("#skills-empty span").textContent = "Restart NusaShell after rebuilding the desktop preload.";
     this.log?.("warn", "Skills preload bridge is unavailable");
+  }
+
+  async refreshPending() {
+    const container = document.querySelector("#skills-pending-list");
+    if (!container) return;
+    try {
+      const pending = await this.api.pendingList();
+      container.textContent = "";
+      if (pending.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "skills-pending-empty";
+        empty.textContent = "No pending skill writes.";
+        container.append(empty);
+        return;
+      }
+      for (const item of pending) {
+        const row = document.createElement("div");
+        row.className = "skills-pending-item";
+        const info = document.createElement("div");
+        info.className = "skills-pending-info";
+        const action = document.createElement("strong");
+        action.textContent = `${item.action}: ${item.skillId}`;
+        const path = document.createElement("small");
+        path.textContent = item.path !== "SKILL.md" ? item.path : "";
+        info.append(action, path);
+        const approve = document.createElement("button");
+        approve.type = "button";
+        approve.textContent = "Approve";
+        approve.addEventListener("click", () => void this.approvePending(item.id));
+        const reject = document.createElement("button");
+        reject.type = "button";
+        reject.textContent = "Reject";
+        reject.addEventListener("click", () => void this.rejectPending(item.id));
+        row.append(info, approve, reject);
+        container.append(row);
+      }
+    } catch {
+      container.textContent = "Could not load pending writes.";
+    }
+  }
+
+  async approvePending(id) {
+    try {
+      await this.api.pendingApprove(id);
+      this.notify("Pending skill write approved.", "success");
+      await this.refresh();
+      await this.refreshPending();
+    } catch (error) {
+      this.notify(`Could not approve: ${errorMessage(error)}`, "error");
+    }
+  }
+
+  async rejectPending(id) {
+    try {
+      await this.api.pendingReject(id);
+      this.notify("Pending skill write rejected.", "info");
+      await this.refreshPending();
+    } catch (error) {
+      this.notify(`Could not reject: ${errorMessage(error)}`, "error");
+    }
   }
 }

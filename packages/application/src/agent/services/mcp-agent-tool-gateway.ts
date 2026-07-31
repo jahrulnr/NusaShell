@@ -2,6 +2,7 @@ import { PluginId } from "@nusashell/domain";
 import { ApplicationError } from "../../errors/application-error.js";
 import type { PluginRuntimeManager } from "../../plugin/services/plugin-runtime-manager.js";
 import type { SkillRegistryPort } from "../../skill/ports/skill-registry.port.js";
+import type { SkillProvenancePort } from "../../skill/ports/skill-provenance.port.js";
 import type { MemoryStorePort, MemoryTarget } from "../../memory/ports/memory-store.port.js";
 import type { DocsIndexPort } from "../ports/docs-index.port.js";
 import type { AgentToolDefinition } from "../ports/agent-provider.port.js";
@@ -31,6 +32,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
     private readonly skillRegistry?: SkillRegistryPort,
     private readonly logger?: LoggerPort,
     private readonly memoryStore?: MemoryStorePort,
+    private readonly skillProvenance?: SkillProvenancePort,
   ) {}
 
   beginTurn(turnId: string): void {
@@ -106,6 +108,12 @@ export class McpAgentToolGateway implements AgentToolGateway {
         content: { type: "string", description: "New entry text (required for add and replace; omit or empty to delete via replace)" },
         old_text: { type: "string", description: "Unique substring of the existing entry to match (required for replace and remove)" },
       }, ["action", "target"]),
+      definition("skill_manage", "Create, edit, write a support file in, or delete an agent-owned skill", {
+        action: { type: "string", enum: ["create", "edit", "write_file", "delete"], description: "Mutation action" },
+        name: { type: "string", description: "Skill ID (lowercase slug); must match the frontmatter name in SKILL.md" },
+        content: { type: "string", description: "Full SKILL.md content (for create/edit) or file content (for write_file)" },
+        path: { type: "string", description: "Relative file path under the skill (for write_file only); must be under references/, templates/, scripts/, or assets/" },
+      }, ["action", "name"]),
       ...[...routes.entries()].map(([name, route]) => ({
         name,
         ...(route.description ? { description: route.description } : {}),
@@ -131,6 +139,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
       case "skill_search": return this.execSkillSearch(args);
       case "skill_read": return this.execSkillRead(args);
       case "memory": return this.execMemory(args);
+      case "skill_manage": return this.execSkillManage(args);
       default: return this.callGrantedTool(name, args, requestId, turnId);
     }
   }
@@ -457,6 +466,65 @@ export class McpAgentToolGateway implements AgentToolGateway {
       };
     }
   }
+
+  private async execSkillManage(args: Readonly<Record<string, unknown>>): Promise<unknown> {
+    const registry = this.skillRegistry;
+    if (!registry) return skillsNotConfigured();
+    const provenance = this.skillProvenance;
+    if (!provenance) return skillsNotConfigured();
+    const action = requireString(args.action, "action");
+    const skillId = requireString(args.name, "name");
+    const content = optionalString(args.content);
+    const filePath = optionalString(args.path);
+    try {
+      switch (action) {
+        case "create": {
+          if (!content) throw new ApplicationError("AGENT_INVALID_INPUT", "content is required for create");
+          const detail = await registry.create(skillId, content);
+          await provenance.markAgent(skillId);
+          return { ok: true, data: detail, meta: { provenance: "agent" } };
+        }
+        case "edit": {
+          if (!content) throw new ApplicationError("AGENT_INVALID_INPUT", "content is required for edit");
+          const origin = await provenance.get(skillId);
+          if (origin !== "agent") return skillProtected(skillId);
+          const result = await registry.write(skillId, "SKILL.md", content);
+          return { ok: true, data: result, meta: { provenance: "agent" } };
+        }
+        case "write_file": {
+          if (!content) throw new ApplicationError("AGENT_INVALID_INPUT", "content is required for write_file");
+          if (!filePath) throw new ApplicationError("AGENT_INVALID_INPUT", "path is required for write_file");
+          const origin = await provenance.get(skillId);
+          if (origin !== "agent") return skillProtected(skillId);
+          const result = await registry.write(skillId, filePath, content);
+          return { ok: true, data: result, meta: { provenance: "agent" } };
+        }
+        case "delete": {
+          const origin = await provenance.get(skillId);
+          if (origin !== "agent") return skillProtected(skillId);
+          await registry.delete(skillId);
+          await provenance.clear(skillId);
+          return { ok: true, data: { deleted: skillId }, meta: { provenance: "agent" } };
+        }
+        default:
+          throw new ApplicationError("AGENT_INVALID_INPUT", `Unsupported skill_manage action: ${action}`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const code = message.includes("already exists") ? "skill_exists"
+        : message.includes("60 characters") ? "description_too_long"
+        : "skill_error";
+      return { ok: false, error: { code, message }, meta: {} };
+    }
+  }
+}
+
+function skillProtected(skillId: string): unknown {
+  return {
+    ok: false,
+    error: { code: "skill_protected", message: `Skill "${skillId}" is not agent-owned and cannot be mutated by the model` },
+    meta: {},
+  };
 }
 
 function definition(

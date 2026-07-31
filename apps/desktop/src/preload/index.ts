@@ -11,6 +11,7 @@ import type {
   SkillReadResult,
   SkillSummary,
 } from "@nusashell/application";
+import type { PendingSkillWrite } from "@nusashell/infrastructure";
 import type {
   PublicMailSettings,
   SaveMailAccountInput,
@@ -70,6 +71,9 @@ export interface ShellApi {
     install(): Promise<SkillDetail | null>;
     write(skillId: string, path: string, content: string): Promise<SkillReadResult>;
     delete(skillId: string): Promise<void>;
+    pendingList(): Promise<readonly PendingSkillWrite[]>;
+    pendingApprove(id: string): Promise<unknown>;
+    pendingReject(id: string): Promise<void>;
   };
   readonly mailAccounts: {
     list(): Promise<PublicMailSettings>;
@@ -177,6 +181,9 @@ const api: ShellApi = {
     install: () => ipcRenderer.invoke("skills:install"),
     write: (skillId, path, content) => ipcRenderer.invoke("skills:write", skillId, path, content),
     delete: (skillId) => ipcRenderer.invoke("skills:delete", skillId),
+    pendingList: () => ipcRenderer.invoke("skills:pending:list"),
+    pendingApprove: (id) => ipcRenderer.invoke("skills:pending:approve", id),
+    pendingReject: (id) => ipcRenderer.invoke("skills:pending:reject", id),
   },
   mailAccounts: {
     list: () => ipcRenderer.invoke("mail-accounts:list"),
