@@ -29,6 +29,10 @@ Every turn starts with thirteen shell-owned meta-tools:
 - `skill_list` — list installed local skill summaries.
 - `skill_search` — search installed skills by name and description.
 - `skill_read` — read bounded text from one selected skill package.
+- `ask_question` — interactive clarifying question available only on
+  interactive desktop turns. The turn pauses until the user answers via
+  `agent.ask_answer` or cancels the turn. Background jobs and review turns
+  never receive this tool.
 
 `tool_schema` is the bridge to execution: after discovery, the actual MCP tool
 is added to the next provider request and called through the normal typed

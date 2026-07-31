@@ -1,5 +1,5 @@
 import type { AgentToolDefinition } from "../../agent/ports/agent-provider.port.js";
-import type { AgentToolGateway } from "../../agent/ports/agent-tool-gateway.port.js";
+import type { AgentToolGateway, AgentTurnContext } from "../../agent/ports/agent-tool-gateway.port.js";
 import type { McpAgentToolGateway } from "../../agent/services/mcp-agent-tool-gateway.js";
 
 /**
@@ -12,6 +12,7 @@ const JOB_DENYLIST = new Set([
   "skill_list",
   "skill_search",
   "skill_read",
+  "ask_question",
 ]);
 
 /**
@@ -23,8 +24,8 @@ const JOB_DENYLIST = new Set([
 export class JobAgentToolGateway implements AgentToolGateway {
   constructor(private readonly inner: McpAgentToolGateway) {}
 
-  beginTurn(turnId: string): void {
-    this.inner.beginTurn(turnId);
+  beginTurn(turnId: string, context?: AgentTurnContext): void {
+    this.inner.beginTurn(turnId, context);
   }
 
   endTurn(turnId: string): void {
@@ -45,10 +46,11 @@ export class JobAgentToolGateway implements AgentToolGateway {
     args: Readonly<Record<string, unknown>>,
     requestId: string,
     turnId: string,
+    callId?: string,
   ): Promise<unknown> {
     if (JOB_DENYLIST.has(name)) {
       throw new Error(`Tool "${name}" is not allowed in a scheduled job`);
     }
-    return this.inner.execute(name, args, requestId, turnId);
+    return this.inner.execute(name, args, requestId, turnId, callId);
   }
 }

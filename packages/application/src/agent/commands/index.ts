@@ -5,3 +5,5 @@ export {
   CancelAgentTurnHandler,
   type CancelAgentTurnResult,
 } from "./cancel-agent-turn/cancel-agent-turn.handler.js";
+export type { AnswerAskQuestionCommand } from "./answer-ask-question/answer-ask-question.command.js";
+export { AnswerAskQuestionHandler } from "./answer-ask-question/answer-ask-question.handler.js";

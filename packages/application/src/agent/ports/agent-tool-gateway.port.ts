@@ -1,7 +1,11 @@
 import type { AgentToolDefinition } from "./agent-provider.port.js";
 
+export interface AgentTurnContext {
+  readonly interactive?: boolean;
+}
+
 export interface AgentToolGateway {
-  beginTurn?(turnId: string): void;
+  beginTurn?(turnId: string, context?: AgentTurnContext): void;
   endTurn?(turnId: string): void;
   cancelTurn?(turnId: string): Promise<void> | void;
   listTools(pluginIds: readonly string[], turnId: string): Promise<readonly AgentToolDefinition[]>;
@@ -10,5 +14,6 @@ export interface AgentToolGateway {
     args: Readonly<Record<string, unknown>>,
     requestId: string,
     turnId: string,
+    callId?: string,
   ): Promise<unknown>;
 }

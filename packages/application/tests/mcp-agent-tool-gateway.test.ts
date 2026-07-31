@@ -513,4 +513,53 @@ describe("McpAgentToolGateway", () => {
       });
     });
   });
+
+  describe("ask_question", () => {
+    it("omits ask_question when the turn is not interactive", async () => {
+      const { AskQuestionService } = await import("../src/index.js");
+      const asks = new AskQuestionService();
+      const gateway = new McpAgentToolGateway(fakeRuntime as never, undefined, undefined, undefined, undefined, undefined, undefined, undefined, asks);
+      gateway.beginTurn("turn-non-interactive");
+      expect((await gateway.listTools([], "turn-non-interactive")).map((tool) => tool.name)).not.toContain("ask_question");
+    });
+
+    it("lists ask_question for interactive turns and resolves via AskQuestionService", async () => {
+      const { AskQuestionService } = await import("../src/index.js");
+      const asks = new AskQuestionService();
+      const gateway = new McpAgentToolGateway(fakeRuntime as never, undefined, undefined, undefined, undefined, undefined, undefined, undefined, asks);
+      gateway.beginTurn("turn-ask", { interactive: true });
+      expect((await gateway.listTools([], "turn-ask")).map((tool) => tool.name)).toContain("ask_question");
+
+      const pending = gateway.execute("ask_question", {
+        question: "Pick one",
+        options: [
+          { id: "a", label: "Alpha", default: true },
+          { id: "b", label: "Beta", description: "Second choice" },
+        ],
+      }, "req-uuid", "turn-ask", "call-ask-1");
+
+      const answered = asks.answer("turn-ask", "call-ask-1", { via: "option", optionIds: ["b"] });
+      expect(answered).toEqual({
+        ok: true,
+        data: { via: "option", answer: "Beta", optionIds: ["b"] },
+        meta: {},
+      });
+      await expect(pending).resolves.toEqual(answered);
+    });
+
+    it("rejects pending asks when the turn is cancelled", async () => {
+      const { AskQuestionService } = await import("../src/index.js");
+      const asks = new AskQuestionService();
+      const gateway = new McpAgentToolGateway(fakeRuntime as never, undefined, undefined, undefined, undefined, undefined, undefined, undefined, asks);
+      gateway.beginTurn("turn-cancel", { interactive: true });
+
+      const pending = gateway.execute("ask_question", {
+        question: "Continue?",
+        options: [{ id: "yes", label: "Yes" }],
+      }, "req-uuid", "turn-cancel", "call-ask-2");
+
+      await gateway.cancelTurn("turn-cancel");
+      await expect(pending).rejects.toThrow(/interrupted|cancelled/i);
+    });
+  });
 });

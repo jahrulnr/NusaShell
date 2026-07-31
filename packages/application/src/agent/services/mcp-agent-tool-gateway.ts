@@ -7,8 +7,9 @@ import type { SkillUsagePort, UsageBumpKind } from "../../skill/ports/skill-usag
 import type { MemoryStorePort, MemoryTarget } from "../../memory/ports/memory-store.port.js";
 import type { DocsIndexPort } from "../ports/docs-index.port.js";
 import type { AgentToolDefinition } from "../ports/agent-provider.port.js";
-import type { AgentToolGateway } from "../ports/agent-tool-gateway.port.js";
+import type { AgentToolGateway, AgentTurnContext } from "../ports/agent-tool-gateway.port.js";
 import type { LoggerPort } from "../../plugin/ports/logger.port.js";
+import type { AskQuestionOption, AskQuestionService } from "./ask-question-service.js";
 
 export type WriteOrigin = "foreground" | "background_review";
 
@@ -24,6 +25,7 @@ interface McpToolRoute {
 }
 
 const emptySchema = { type: "object", properties: {} } as const;
+const MAX_ASK_OPTIONS = 8;
 
 /**
  * Shell-owned progressive MCP catalog. The model first discovers servers and
@@ -32,6 +34,7 @@ const emptySchema = { type: "object", properties: {} } as const;
 export class McpAgentToolGateway implements AgentToolGateway {
   private readonly turnRoutes = new Map<string, Map<string, McpToolRoute>>();
   private readonly activeCalls = new Map<string, Map<string, string>>();
+  private readonly turnInteractive = new Map<string, boolean>();
   private writeOrigin: WriteOrigin = "foreground";
   private writeApprovalEnabled = false;
 
@@ -44,6 +47,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
     private readonly skillProvenance?: SkillProvenancePort,
     private readonly approvalStaging?: SkillApprovalStagingPort,
     private readonly skillUsage?: SkillUsagePort,
+    private readonly askQuestions?: AskQuestionService,
   ) {}
 
   setWriteOrigin(origin: WriteOrigin): void {
@@ -58,17 +62,21 @@ export class McpAgentToolGateway implements AgentToolGateway {
     this.writeApprovalEnabled = enabled;
   }
 
-  beginTurn(turnId: string): void {
-    this.turnRoutes.set(turnId, new Map());
-    this.activeCalls.set(turnId, new Map());
+  beginTurn(turnId: string, context?: AgentTurnContext): void {
+    if (!this.turnRoutes.has(turnId)) this.turnRoutes.set(turnId, new Map());
+    if (!this.activeCalls.has(turnId)) this.activeCalls.set(turnId, new Map());
+    if (context?.interactive !== undefined) this.turnInteractive.set(turnId, context.interactive);
   }
 
   endTurn(turnId: string): void {
+    this.askQuestions?.clearTurn(turnId);
     this.turnRoutes.delete(turnId);
     this.activeCalls.delete(turnId);
+    this.turnInteractive.delete(turnId);
   }
 
   async cancelTurn(turnId: string): Promise<void> {
+    this.askQuestions?.rejectTurn(turnId);
     const calls = [...(this.activeCalls.get(turnId)?.entries() ?? [])];
     await Promise.allSettled(calls.map(([requestId, pluginId]) =>
       this.runtimeManager.cancelTool(parsePluginId(pluginId), requestId),
@@ -137,6 +145,30 @@ export class McpAgentToolGateway implements AgentToolGateway {
         content: { type: "string", description: "Full SKILL.md content (for create/edit) or file content (for write_file)" },
         path: { type: "string", description: "Relative file path under the skill (for write_file only); must be under references/, templates/, scripts/, or assets/" },
       }, ["action", "name"]),
+      ...(this.isInteractive(turnId) ? [definition("ask_question", "Pause and ask the user a structured clarifying question before continuing. Use only for genuine decisions the user must make.", {
+        question: { type: "string", description: "The question to show the user" },
+        options: {
+          type: "array",
+          minItems: 1,
+          maxItems: MAX_ASK_OPTIONS,
+          description: "Selectable choices (1-8). Mark one default when possible.",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string", description: "Stable option id" },
+              label: { type: "string", description: "Short option label" },
+              description: { type: "string", description: "Optional one-line explanation" },
+              default: { type: "boolean", description: "Whether this option is the recommended default" },
+              icon: { type: "string", description: "Optional emoji or short icon glyph" },
+              image: { type: "string", description: "Optional image URL or compact data URI" },
+            },
+            required: ["id", "label"],
+            additionalProperties: false,
+          },
+        },
+        allow_free_text: { type: "boolean", description: "Whether the user may type a custom answer (default true)" },
+        multi_select: { type: "boolean", description: "Whether the user may select multiple options (default false)" },
+      }, ["question", "options"])] : []),
       ...[...routes.entries()].map(([name, route]) => ({
         name,
         ...(route.description ? { description: route.description } : {}),
@@ -145,7 +177,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
     ];
   }
 
-  async execute(name: string, args: Readonly<Record<string, unknown>>, requestId: string, turnId: string): Promise<unknown> {
+  async execute(name: string, args: Readonly<Record<string, unknown>>, requestId: string, turnId: string, callId?: string): Promise<unknown> {
     switch (name) {
       case "mcp_list": return this.runtimeManager.listPlugins();
       case "mcp_enable": return this.changeMcpState(args, true);
@@ -163,6 +195,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
       case "skill_read": return this.execSkillRead(args);
       case "memory": return this.execMemory(args);
       case "skill_manage": return this.execSkillManage(args);
+      case "ask_question": return this.execAskQuestion(args, callId ?? requestId, turnId);
       default: return this.callGrantedTool(name, args, requestId, turnId);
     }
   }
@@ -572,6 +605,68 @@ export class McpAgentToolGateway implements AgentToolGateway {
       return { ok: false, error: { code, message }, meta: {} };
     }
   }
+
+  private async execAskQuestion(
+    args: Readonly<Record<string, unknown>>,
+    callId: string,
+    turnId: string,
+  ): Promise<unknown> {
+    if (!this.askQuestions) {
+      throw new ApplicationError("AGENT_INVALID_INPUT", "ask_question is not available in this runtime");
+    }
+    if (!this.isInteractive(turnId)) {
+      throw new ApplicationError("AGENT_INVALID_INPUT", "ask_question is only available during interactive agent turns");
+    }
+    const question = requireString(args.question, "question").trim();
+    if (!question) throw new ApplicationError("AGENT_INVALID_INPUT", "question must not be empty");
+    const options = parseAskOptions(args.options);
+    const allowFreeText = args.allow_free_text === undefined ? true : Boolean(args.allow_free_text);
+    const multiSelect = Boolean(args.multi_select);
+    return this.askQuestions.ask(turnId, callId, {
+      question,
+      options,
+      allowFreeText,
+      multiSelect,
+    });
+  }
+
+  private isInteractive(turnId: string): boolean {
+    return this.askQuestions !== undefined && this.turnInteractive.get(turnId) === true;
+  }
+}
+
+function parseAskOptions(raw: unknown): AskQuestionOption[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new ApplicationError("AGENT_INVALID_INPUT", "options must be a non-empty array");
+  }
+  if (raw.length > MAX_ASK_OPTIONS) {
+    throw new ApplicationError("AGENT_INVALID_INPUT", `options must contain at most ${MAX_ASK_OPTIONS} items`);
+  }
+  const seen = new Set<string>();
+  const options: AskQuestionOption[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new ApplicationError("AGENT_INVALID_INPUT", "each option must be an object");
+    }
+    const id = requireString(entry.id, "options[].id").trim();
+    const label = requireString(entry.label, "options[].label").trim();
+    if (!id || !label) {
+      throw new ApplicationError("AGENT_INVALID_INPUT", "each option requires non-empty id and label");
+    }
+    if (seen.has(id)) {
+      throw new ApplicationError("AGENT_INVALID_INPUT", `duplicate option id: ${id}`);
+    }
+    seen.add(id);
+    options.push({
+      id,
+      label,
+      ...(typeof entry.description === "string" && entry.description.trim() ? { description: entry.description.trim() } : {}),
+      ...(entry.default === true ? { default: true } : {}),
+      ...(typeof entry.icon === "string" && entry.icon.trim() ? { icon: entry.icon.trim() } : {}),
+      ...(typeof entry.image === "string" && entry.image.trim() ? { image: entry.image.trim() } : {}),
+    });
+  }
+  return options;
 }
 
 function skillProtected(skillId: string): unknown {

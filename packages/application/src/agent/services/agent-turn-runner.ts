@@ -22,6 +22,7 @@ export interface RunAgentTurnInput {
   readonly effort?: ReasoningEffort;
   readonly modelCapabilities?: AgentModelCapabilities;
   readonly traceId?: string;
+  readonly interactive?: boolean;
   readonly signal?: AbortSignal;
   readonly onTextDelta?: (delta: string) => void;
   readonly onReasoningDelta?: (delta: string) => void;
@@ -108,7 +109,9 @@ export class AgentTurnRunner {
     }
 
     const traceId = input.traceId ?? randomUUID();
-    this.deps.toolGateway.beginTurn?.(traceId);
+    this.deps.toolGateway.beginTurn?.(traceId, {
+      ...(input.interactive !== undefined ? { interactive: input.interactive } : {}),
+    });
     const cancelTools = () => {
       void this.deps.toolGateway.cancelTurn?.(traceId);
     };
@@ -310,7 +313,7 @@ export class AgentTurnRunner {
     // request id used for tracking/cancellation must be a valid UUID.
     const requestId = randomUUID();
     try {
-      const result = await this.deps.toolGateway.execute(call.name, call.args, requestId, traceId);
+      const result = await this.deps.toolGateway.execute(call.name, call.args, requestId, traceId, call.id);
       this.deps.logger?.info("Agent MCP tool completed traceId=%s tool=%s round=%d", traceId, call.name, round);
       return { id: call.id, name: call.name, ok: true, args: call.args, result };
     } catch (error) {

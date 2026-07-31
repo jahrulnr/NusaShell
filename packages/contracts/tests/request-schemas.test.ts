@@ -8,6 +8,7 @@ import {
   ToolCancelRequestSchema,
   AgentRunRequestSchema,
   AgentCancelRequestSchema,
+  AgentAskAnswerRequestSchema,
 } from "../src/index.js";
 
 describe("Request schemas", () => {
@@ -160,6 +161,52 @@ describe("Request schemas", () => {
 
       expect(result.success).toBe(true);
       if (result.success) expect(result.data.payload.modelCapabilities?.supportsVision).toBe(false);
+    });
+  });
+
+  describe("agent.ask_answer", () => {
+    it("parses a valid option answer", () => {
+      const result = AgentAskAnswerRequestSchema.safeParse({
+        kind: "request",
+        id: "req_ask_1",
+        method: "agent.ask_answer",
+        payload: {
+          traceId: "trace-1",
+          callId: "call-1",
+          via: "option",
+          optionIds: ["websocket"],
+        },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("parses a free-text answer", () => {
+      const result = AgentAskAnswerRequestSchema.safeParse({
+        kind: "request",
+        id: "req_ask_2",
+        method: "agent.ask_answer",
+        payload: {
+          traceId: "trace-1",
+          callId: "call-2",
+          via: "text",
+          text: "Use both transports for now",
+        },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("rejects missing callId", () => {
+      const result = AgentAskAnswerRequestSchema.safeParse({
+        kind: "request",
+        id: "req_ask_3",
+        method: "agent.ask_answer",
+        payload: {
+          traceId: "trace-1",
+          via: "option",
+          optionIds: ["a"],
+        },
+      });
+      expect(result.success).toBe(false);
     });
   });
 

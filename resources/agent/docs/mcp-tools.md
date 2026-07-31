@@ -25,6 +25,7 @@ The following meta-tools are always available without a running MCP server:
 - `tool_search` / `tool_list` / `tool_schema` / `tool_schemas`
 - `mcp_context`
 - `docs_search` / `docs_list` / `docs_read`
+- `ask_question` — interactive clarifying question (desktop turns only). Pass a question plus 1-8 options; optionally allow free text or multi-select. The turn pauses until the user answers or cancels.
 
 ## When to use docs tools
 

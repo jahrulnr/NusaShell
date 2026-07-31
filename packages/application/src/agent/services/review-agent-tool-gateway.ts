@@ -1,6 +1,6 @@
 import type { AgentToolDefinition } from "../ports/agent-provider.port.js";
-import type { AgentToolGateway } from "../ports/agent-tool-gateway.port.js";
-import type { McpAgentToolGateway, WriteOrigin } from "./mcp-agent-tool-gateway.js";
+import type { AgentToolGateway, AgentTurnContext } from "../ports/agent-tool-gateway.port.js";
+import type { McpAgentToolGateway } from "./mcp-agent-tool-gateway.js";
 
 const REVIEW_WHITELIST = new Set([
   "memory",
@@ -18,8 +18,8 @@ const REVIEW_WHITELIST = new Set([
 export class ReviewAgentToolGateway implements AgentToolGateway {
   constructor(private readonly inner: McpAgentToolGateway) {}
 
-  beginTurn(turnId: string): void {
-    this.inner.beginTurn(turnId);
+  beginTurn(turnId: string, context?: AgentTurnContext): void {
+    this.inner.beginTurn(turnId, context);
   }
 
   endTurn(turnId: string): void {
@@ -40,6 +40,7 @@ export class ReviewAgentToolGateway implements AgentToolGateway {
     args: Readonly<Record<string, unknown>>,
     requestId: string,
     turnId: string,
+    callId?: string,
   ): Promise<unknown> {
     if (!REVIEW_WHITELIST.has(name)) {
       throw new Error(`Tool "${name}" is not allowed in background review`);
@@ -47,7 +48,7 @@ export class ReviewAgentToolGateway implements AgentToolGateway {
     const prev = this.inner.getWriteOrigin();
     this.inner.setWriteOrigin("background_review");
     try {
-      return await this.inner.execute(name, args, requestId, turnId);
+      return await this.inner.execute(name, args, requestId, turnId, callId);
     } finally {
       this.inner.setWriteOrigin(prev);
     }

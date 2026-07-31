@@ -10,6 +10,7 @@ import type {
   SetPluginAutostartCommand,
   RunAgentTurnCommand,
   CancelAgentTurnCommand,
+  AnswerAskQuestionCommand,
   AddJobCommand,
   SetJobEnabledCommand,
   RunJobNowCommand,
@@ -17,7 +18,7 @@ import type {
 } from "@nusashell/application";
 
 export function mapToCommand(request: ParsedRequest):
-  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | SetPluginAutostartCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand | CancelAgentTurnCommand | AddJobCommand | SetJobEnabledCommand | RunJobNowCommand | RemoveJobCommand }
+  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | SetPluginAutostartCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand | CancelAgentTurnCommand | AnswerAskQuestionCommand | AddJobCommand | SetJobEnabledCommand | RunJobNowCommand | RemoveJobCommand }
   | { kind: "query" } {
   switch (request.method) {
     case "plugin.start":
@@ -93,6 +94,7 @@ export function mapToCommand(request: ParsedRequest):
           kind: "run-agent-turn",
           messages: request.payload.messages,
           pluginIds: request.payload.pluginIds,
+          interactive: true,
           ...(request.payload.providerId !== undefined ? { providerId: request.payload.providerId } : {}),
           ...(request.payload.model !== undefined ? { model: request.payload.model } : {}),
           ...(request.payload.effort !== undefined ? { effort: request.payload.effort } : {}),
@@ -110,6 +112,18 @@ export function mapToCommand(request: ParsedRequest):
           kind: "cancel-agent-turn",
           traceId: request.payload.traceId,
         } as CancelAgentTurnCommand,
+      };
+    case "agent.ask_answer":
+      return {
+        kind: "command",
+        command: {
+          kind: "answer-ask-question",
+          traceId: request.payload.traceId,
+          callId: request.payload.callId,
+          via: request.payload.via,
+          ...(request.payload.optionIds !== undefined ? { optionIds: request.payload.optionIds } : {}),
+          ...(request.payload.text !== undefined ? { text: request.payload.text } : {}),
+        } as AnswerAskQuestionCommand,
       };
     case "job.add":
       return {

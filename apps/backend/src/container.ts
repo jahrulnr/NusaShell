@@ -63,6 +63,8 @@ import {
   LearningGraphService,
   RunAgentTurnHandler,
   CancelAgentTurnHandler,
+  AnswerAskQuestionHandler,
+  AskQuestionService,
   AgentTurnCoordinator,
   JobAgentToolGateway,
   JobAgentExecutor,
@@ -286,7 +288,8 @@ export function createContainer(options: ContainerOptions): Container {
     provenance: skillProvenance,
     memoryStore,
   });
-  const agentToolGateway = new McpAgentToolGateway(runtimeManager, docsIndex, skillRegistry, logger, memoryStore, skillProvenance, skillApprovalStaging, skillUsage);
+  const askQuestionService = new AskQuestionService();
+  const agentToolGateway = new McpAgentToolGateway(runtimeManager, docsIndex, skillRegistry, logger, memoryStore, skillProvenance, skillApprovalStaging, skillUsage, askQuestionService);
   const promptLoader = new FilesystemPromptLoader(
     options.promptsRoot ?? new URL("../../../resources/agent/prompts", import.meta.url).pathname,
   );
@@ -394,6 +397,7 @@ export function createContainer(options: ContainerOptions): Container {
     (result) => { void backgroundReviewScheduler.tick(result); void skillCuratorScheduler.tick(); },
   ));
   commandBus.register("cancel-agent-turn", new CancelAgentTurnHandler(agentTurnCoordinator));
+  commandBus.register("answer-ask-question", new AnswerAskQuestionHandler(askQuestionService));
   commandBus.register("add-job", new AddJobHandler(jobStore));
   commandBus.register("set-job-enabled", new SetJobEnabledHandler(jobStore));
   commandBus.register("run-job-now", new RunJobNowHandler(jobScheduler));

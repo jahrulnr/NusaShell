@@ -194,7 +194,7 @@
         {
           "heading": "Conversation thread",
           "paragraphs": [
-            "The full-height message runway separates compact user cards from editorial assistant responses. User attachments render as image previews or file cards. Provider reasoning is persisted and appears before the answer in a collapsed Thinking disclosure with sanitized Markdown; models that return no reasoning show no placeholder. Completed tool calls render as expandable terminal cards with the tool name in the header and full args/output in the body. Message footers expose timestamps, model/trace metadata, copy, and retry where applicable. Only this area scrolls."
+            "The full-height message runway separates compact user cards from editorial assistant responses. User attachments render as image previews or file cards. Provider reasoning is persisted and appears before the answer in a collapsed Thinking disclosure with sanitized Markdown; models that return no reasoning show no placeholder. Completed tool calls render as expandable terminal cards with the tool name in the header and full args/output in the body. Interactive ask_question calls render as Ask Question cards with selectable options and an optional free-text answer; after the user replies, the sealed card shows the chosen answer. Message footers expose timestamps, model/trace metadata, copy, and retry where applicable. Only this area scrolls."
           ],
           "controls": [
             "agent-thread",
@@ -204,6 +204,9 @@
             "agent-message-attachments",
             "agent-reasoning",
             "agent-tool-terminal",
+            "agent-ask-card",
+            "agent-ask-option",
+            "agent-ask-send",
             "agent-message-action",
             "agent-retry-btn"
           ]
@@ -1465,6 +1468,30 @@
       "selector": ".agent-tool-terminal",
       "generated": true,
       "action": "Timeline-style expandable tool call. Header keeps the ›_ rail badge plus tool name and status. Expand to inspect nested tool and Output panels with args and truncated result text."
+    },
+    "agent-ask-card": {
+      "section": "Conversation thread",
+      "label": "Ask Question card",
+      "type": "interactive card",
+      "selector": ".agent-ask-card",
+      "generated": true,
+      "action": "Rendered when the agent calls ask_question. Shows the question, selectable option rows, optional free-text answer, and Send answer. After the user replies or on reload, the sealed card shows the chosen answer."
+    },
+    "agent-ask-option": {
+      "section": "Conversation thread",
+      "label": "Ask option",
+      "type": "button",
+      "selector": ".agent-ask-option",
+      "generated": true,
+      "action": "Selects one option (or toggles multi-select options) on an Ask Question card before sending the answer."
+    },
+    "agent-ask-send": {
+      "section": "Conversation thread",
+      "label": "Send ask answer",
+      "type": "button",
+      "selector": ".agent-ask-send",
+      "generated": true,
+      "action": "Submits the selected option(s) or typed free-text answer for the pending ask_question tool call."
     },
     "agent-reasoning": {
       "section": "Conversation thread",

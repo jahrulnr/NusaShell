@@ -75,12 +75,16 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
     });
     const worker: AgentTurnWorker = new InProcessAgentTurnWorker((input) => runner.run(input));
     const traceId = command.traceId ?? randomUUID();
+    this.toolGateway.beginTurn?.(traceId, {
+      ...(command.interactive !== undefined ? { interactive: command.interactive } : {}),
+    });
     const messages = await this.injectSystemPrompts(command, traceId);
     const result = await this.coordinator.run(traceId, (signal) => worker.run({
       messages,
       pluginIds: command.pluginIds,
       traceId,
       signal,
+      ...(command.interactive !== undefined ? { interactive: command.interactive } : {}),
       ...(this.onTextDelta ? { onTextDelta: (delta) => this.onTextDelta?.(traceId, delta) } : {}),
       ...(this.onReasoningDelta ? { onReasoningDelta: (delta) => this.onReasoningDelta?.(traceId, delta) } : {}),
       ...(this.onToolCallStart ? { onToolCallStart: (call) => this.onToolCallStart?.(traceId, call) } : {}),

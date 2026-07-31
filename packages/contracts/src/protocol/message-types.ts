@@ -20,6 +20,7 @@ export type RequestMethod =
   | "resource.read"
   | "agent.run"
   | "agent.cancel"
+  | "agent.ask_answer"
   | "system.ping"
   | "system.version"
   | "job.add"

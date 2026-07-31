@@ -418,7 +418,7 @@ async function runAgentTurn(messages, options = {}) {
         supportsVision: selected.supportsVision,
       },
       ...(options.traceId ? { traceId: options.traceId } : {}),
-    }, 300000);
+    }, 1800000);
   } finally {
     disposers.forEach((dispose) => dispose());
   }
@@ -426,6 +426,10 @@ async function runAgentTurn(messages, options = {}) {
 
 async function cancelAgentTurn(traceId) {
   return sendRequest("agent.cancel", { traceId });
+}
+
+async function answerAskQuestion(payload) {
+  return sendRequest("agent.ask_answer", payload, 30000);
 }
 
 // ============ View Switching ============
@@ -1219,6 +1223,7 @@ document.addEventListener("DOMContentLoaded", () => {
     shell: window.shell,
     runTurn: runAgentTurn,
     cancelTurn: cancelAgentTurn,
+    answerAsk: answerAskQuestion,
     getActiveModel: activeModel,
     getVisionMode: () => aiSettings.vision,
     notify: showToast,

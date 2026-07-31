@@ -25,3 +25,11 @@ export {
   type BackgroundReviewSchedulerDeps,
   DEFAULT_REVIEW_SETTINGS,
 } from "./background-review-scheduler.js";
+export {
+  AskQuestionService,
+  type AskAnswerVia,
+  type AskQuestionAnswer,
+  type AskQuestionOption,
+  type AskQuestionRequest,
+  type AskQuestionResult,
+} from "./ask-question-service.js";

@@ -96,6 +96,41 @@ describe("mapToCommand", () => {
       command: { kind: "cancel-agent-turn", traceId: "trace-1" },
     });
   });
+
+  it("maps agent.run with interactive true", () => {
+    const result = mapToCommand(makeRequest("agent.run", {
+      messages: [{ role: "user", content: "hi" }],
+      pluginIds: [],
+      traceId: "trace-run",
+    }));
+    expect(result.kind).toBe("command");
+    if (result.kind === "command") {
+      expect(result.command).toMatchObject({
+        kind: "run-agent-turn",
+        interactive: true,
+        traceId: "trace-run",
+      });
+    }
+  });
+
+  it("maps agent.ask_answer to AnswerAskQuestionCommand", () => {
+    const result = mapToCommand(makeRequest("agent.ask_answer", {
+      traceId: "trace-1",
+      callId: "call-1",
+      via: "option",
+      optionIds: ["a"],
+    }));
+    expect(result).toEqual({
+      kind: "command",
+      command: {
+        kind: "answer-ask-question",
+        traceId: "trace-1",
+        callId: "call-1",
+        via: "option",
+        optionIds: ["a"],
+      },
+    });
+  });
 });
 
 describe("mapToQuery", () => {

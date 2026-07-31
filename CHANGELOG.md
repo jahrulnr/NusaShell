@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.44] - 2026-07-31
+
+### Added
+
+- **Ask Question host meta-tool** — interactive `ask_question` pauses an
+  agent turn mid-tool so the desktop can render a single/multi-select card
+  (options + optional free text). The user's answer returns via
+  `agent.ask_answer` and resumes the turn as the tool result.
+  - `AskQuestionService` pending registry; tool listed only when
+    `interactive: true` (desktop `agent.run`); denied on job/headless turns.
+  - Stop/cancel rejects pending asks so the turn unblocks immediately.
+  - Desktop conversation UI: interactive ask card, seal on answer, read-only
+    card on conversation reload; `agent.run` WS timeout raised to 30 minutes.
+  - Docs/prompts updated (`developer.md`, `mcp-tools.md`, progressive MCP
+    tools); UI map + generated docs for ask-card controls.
+
 ## [0.0.43] - 2026-07-31
 
 ### Added

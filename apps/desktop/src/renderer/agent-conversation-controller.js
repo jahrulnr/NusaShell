@@ -17,10 +17,11 @@ import { estimateContextTokens, formatContextUsage } from "./ai-model-ui.js";
 import { inspectAttachmentContent, toDataUrl } from "./attachment-content.js";
 
 export class AgentConversationController {
-  constructor({ shell, runTurn, cancelTurn, getActiveModel, getVisionMode, notify, log }) {
+  constructor({ shell, runTurn, cancelTurn, answerAsk, getActiveModel, getVisionMode, notify, log }) {
     this.shell = shell;
     this.runTurn = runTurn;
     this.cancelTurn = cancelTurn;
+    this.answerAsk = answerAsk;
     this.getActiveModel = getActiveModel;
     this.getVisionMode = getVisionMode;
     this.notify = notify;
@@ -626,7 +627,16 @@ export class AgentConversationController {
   toolActivity(toolCalls) {
     const stack = element("div", "agent-tool-stack");
     toolCalls.forEach((toolCall) => {
-      stack.appendChild(this.toolTerminal(toolCall));
+      if (toolCall.name === "ask_question") {
+        stack.appendChild(this.createAskCard(toolCall.id, toolCall.args, {
+          sealed: true,
+          output: toolCall.output,
+          ok: toolCall.ok !== false,
+          error: toolCall.error,
+        }));
+      } else {
+        stack.appendChild(this.toolTerminal(toolCall));
+      }
     });
     return stack;
   }
@@ -708,6 +718,9 @@ export class AgentConversationController {
   }
 
   createStreamingToolCard(callId, name, args) {
+    if (name === "ask_question") {
+      return this.createAskCard(callId, args, { sealed: false });
+    }
     const card = this.toolTerminal(
       { id: callId, name, ok: true, args },
       { open: true, running: true },
@@ -717,6 +730,10 @@ export class AgentConversationController {
   }
 
   updateStreamingToolCard(card, payload) {
+    if (card.classList.contains("agent-ask-card")) {
+      this.sealAskCard(card, payload);
+      return;
+    }
     card.classList.remove("is-running");
     card.classList.toggle("is-success", payload.ok !== false);
     card.classList.toggle("is-error", payload.ok === false);
@@ -741,6 +758,236 @@ export class AgentConversationController {
           || payload.error
           || (payload.ok === false ? "Tool failed." : "ok"),
       );
+    }
+  }
+
+  createAskCard(callId, args, { sealed = false, output = "", ok = true, error = "" } = {}) {
+    const question = typeof args?.question === "string" ? args.question : "Choose a response";
+    const options = Array.isArray(args?.options) ? args.options : [];
+    const multiSelect = Boolean(args?.multi_select);
+    const allowFreeText = args?.allow_free_text !== false;
+    const parsedAnswer = sealed ? parseAskAnswer(output) : null;
+
+    const card = element("div", `agent-ask-card${sealed ? " is-sealed" : " is-pending"}${ok === false ? " is-error" : ""}`);
+    card.dataset.callId = callId || "";
+    card._toolArgs = args && typeof args === "object" ? args : {};
+
+    const header = element("div", "agent-ask-header");
+    header.append(
+      element("span", "agent-ask-header-icon", "⚒"),
+      element("span", "agent-ask-header-title", "Ask Question"),
+    );
+    card.appendChild(header);
+
+    const body = element("div", "agent-ask-body");
+    body.appendChild(element("div", "agent-ask-question", question));
+    body.appendChild(element(
+      "div",
+      "agent-ask-hint",
+      multiSelect ? "Choose one or more responses so I can continue the task." : "Choose one response so I can continue the task.",
+    ));
+
+    const optionsWrap = element("div", "agent-ask-options");
+    const selected = new Set(
+      sealed && parsedAnswer?.optionIds?.length
+        ? parsedAnswer.optionIds
+        : options.filter((option) => option?.default).map((option) => String(option.id)),
+    );
+    if (!multiSelect && selected.size > 1) {
+      const first = [...selected][0];
+      selected.clear();
+      if (first) selected.add(first);
+    }
+
+    options.forEach((option) => {
+      if (!option || typeof option !== "object") return;
+      const id = String(option.id ?? "");
+      const label = String(option.label ?? id);
+      const row = element("button", `agent-ask-option${selected.has(id) ? " is-selected" : ""}`);
+      row.type = "button";
+      row.dataset.optionId = id;
+      row.setAttribute("aria-pressed", selected.has(id) ? "true" : "false");
+      if (sealed) row.disabled = true;
+
+      const marker = element("span", `agent-ask-option-marker${multiSelect ? " is-check" : " is-radio"}`);
+      const media = element("div", "agent-ask-option-media");
+      if (typeof option.image === "string" && option.image.trim()) {
+        const img = document.createElement("img");
+        img.className = "agent-ask-option-image";
+        img.src = option.image.trim();
+        img.alt = "";
+        media.appendChild(img);
+      } else if (typeof option.icon === "string" && option.icon.trim()) {
+        media.appendChild(element("span", "agent-ask-option-icon", option.icon.trim()));
+      } else {
+        media.appendChild(element("span", "agent-ask-option-icon is-empty", "•"));
+      }
+
+      const copy = element("div", "agent-ask-option-copy");
+      const titleRow = element("div", "agent-ask-option-title-row");
+      titleRow.appendChild(element("span", "agent-ask-option-label", label));
+      if (option.default) titleRow.appendChild(element("span", "agent-ask-option-badge", "Recommended"));
+      copy.appendChild(titleRow);
+      if (typeof option.description === "string" && option.description.trim()) {
+        copy.appendChild(element("div", "agent-ask-option-desc", option.description.trim()));
+      }
+
+      row.append(marker, media, copy);
+      if (!sealed) {
+        row.addEventListener("click", () => {
+          if (card.classList.contains("is-submitting") || card.classList.contains("is-sealed")) return;
+          if (multiSelect) {
+            if (selected.has(id)) selected.delete(id);
+            else selected.add(id);
+          } else {
+            selected.clear();
+            selected.add(id);
+            card.querySelectorAll(".agent-ask-option").forEach((node) => {
+              node.classList.toggle("is-selected", node.dataset.optionId === id);
+              node.setAttribute("aria-pressed", node.dataset.optionId === id ? "true" : "false");
+            });
+            const custom = card.querySelector(".agent-ask-custom");
+            custom?.classList.remove("is-active");
+            const textarea = card.querySelector(".agent-ask-textarea");
+            if (textarea) textarea.value = "";
+          }
+          row.classList.toggle("is-selected", selected.has(id));
+          row.setAttribute("aria-pressed", selected.has(id) ? "true" : "false");
+          this.syncAskSendState(card, selected);
+        });
+      }
+      optionsWrap.appendChild(row);
+    });
+    body.appendChild(optionsWrap);
+
+    if (allowFreeText || (sealed && parsedAnswer?.via === "text")) {
+      const custom = element("div", `agent-ask-custom${sealed && parsedAnswer?.via === "text" ? " is-active" : ""}`);
+      const customToggle = element("button", "agent-ask-custom-toggle");
+      customToggle.type = "button";
+      customToggle.textContent = sealed && parsedAnswer?.via === "text" ? "Custom answer" : "Type answer...";
+      customToggle.disabled = sealed;
+      const textarea = document.createElement("textarea");
+      textarea.className = "agent-ask-textarea";
+      textarea.rows = 3;
+      textarea.placeholder = "Type a different direction...";
+      textarea.maxLength = 8000;
+      if (sealed && parsedAnswer?.via === "text") {
+        textarea.value = parsedAnswer.answer || "";
+        textarea.disabled = true;
+      }
+      if (!sealed) {
+        customToggle.addEventListener("click", () => {
+          custom.classList.add("is-active");
+          if (!multiSelect) {
+            selected.clear();
+            card.querySelectorAll(".agent-ask-option").forEach((node) => {
+              node.classList.remove("is-selected");
+              node.setAttribute("aria-pressed", "false");
+            });
+          }
+          textarea.focus();
+          this.syncAskSendState(card, selected);
+        });
+        textarea.addEventListener("input", () => this.syncAskSendState(card, selected));
+      }
+      custom.append(customToggle, textarea);
+      body.appendChild(custom);
+    }
+
+    if (sealed) {
+      const answerLine = element(
+        "div",
+        "agent-ask-answer",
+        ok === false
+          ? (error || "Ask question failed.")
+          : `Answer: ${parsedAnswer?.answer || output || "—"}`,
+      );
+      body.appendChild(answerLine);
+    } else {
+      const actions = element("div", "agent-ask-actions");
+      const send = element("button", "agent-ask-send");
+      send.type = "button";
+      send.innerHTML = `<span class="agent-ask-send-icon">✈</span><span>Send answer</span>`;
+      send.addEventListener("click", () => void this.submitAskCard(card, selected));
+      actions.append(
+        send,
+        element("span", "agent-ask-dismiss-hint", "Esc / Stop to dismiss"),
+      );
+      body.appendChild(actions);
+      this.syncAskSendState(card, selected);
+    }
+
+    card.appendChild(body);
+    return card;
+  }
+
+  syncAskSendState(card, selected) {
+    const send = card.querySelector(".agent-ask-send");
+    if (!send) return;
+    const textarea = card.querySelector(".agent-ask-textarea");
+    const customActive = card.querySelector(".agent-ask-custom")?.classList.contains("is-active");
+    const hasText = Boolean(textarea?.value?.trim());
+    const hasOptions = selected.size > 0;
+    send.disabled = card.classList.contains("is-submitting") || (!hasOptions && !(customActive && hasText));
+  }
+
+  async submitAskCard(card, selected) {
+    if (!this.answerAsk || !this.activeTraceId || card.classList.contains("is-submitting")) return;
+    const callId = card.dataset.callId;
+    if (!callId) return;
+    const textarea = card.querySelector(".agent-ask-textarea");
+    const customActive = card.querySelector(".agent-ask-custom")?.classList.contains("is-active");
+    const text = textarea?.value?.trim() || "";
+    const via = customActive && text ? "text" : "option";
+    if (via === "option" && selected.size === 0) return;
+    if (via === "text" && !text) return;
+
+    card.classList.add("is-submitting");
+    this.syncAskSendState(card, selected);
+    try {
+      await this.answerAsk({
+        traceId: this.activeTraceId,
+        callId,
+        via,
+        ...(via === "option" ? { optionIds: [...selected] } : { text }),
+      });
+      card.querySelectorAll("button, textarea").forEach((node) => {
+        node.disabled = true;
+      });
+    } catch (error) {
+      card.classList.remove("is-submitting");
+      this.syncAskSendState(card, selected);
+      this.notify(error instanceof Error ? error.message : "Could not send answer", "error");
+    }
+  }
+
+  sealAskCard(card, payload) {
+    card.classList.remove("is-pending", "is-submitting");
+    card.classList.add("is-sealed");
+    card.classList.toggle("is-error", payload.ok === false);
+    card.querySelectorAll("button, textarea").forEach((node) => {
+      node.disabled = true;
+    });
+    const parsed = parseAskAnswer(payload.output);
+    let answerEl = card.querySelector(".agent-ask-answer");
+    if (!answerEl) {
+      answerEl = element("div", "agent-ask-answer");
+      card.querySelector(".agent-ask-body")?.appendChild(answerEl);
+    }
+    answerEl.textContent = payload.ok === false
+      ? (payload.error || "Ask question failed.")
+      : `Answer: ${parsed?.answer || payload.output || "—"}`;
+    if (parsed?.via === "option" && parsed.optionIds?.length) {
+      const chosen = new Set(parsed.optionIds);
+      card.querySelectorAll(".agent-ask-option").forEach((node) => {
+        node.classList.toggle("is-selected", chosen.has(node.dataset.optionId));
+      });
+    }
+    if (parsed?.via === "text") {
+      const custom = card.querySelector(".agent-ask-custom");
+      const textarea = card.querySelector(".agent-ask-textarea");
+      custom?.classList.add("is-active");
+      if (textarea) textarea.value = parsed.answer || "";
     }
   }
 
@@ -883,6 +1130,22 @@ function element(tagName, className, content) {
   if (className) node.className = className;
   if (content !== undefined) node.textContent = content;
   return node;
+}
+
+function parseAskAnswer(output) {
+  if (!output || typeof output !== "string") return null;
+  try {
+    const parsed = JSON.parse(output);
+    const data = parsed?.result?.data ?? parsed?.data ?? parsed;
+    if (!data || typeof data !== "object") return null;
+    return {
+      via: data.via === "text" ? "text" : "option",
+      answer: typeof data.answer === "string" ? data.answer : "",
+      optionIds: Array.isArray(data.optionIds) ? data.optionIds.map(String) : [],
+    };
+  } catch {
+    return { via: "text", answer: output, optionIds: [] };
+  }
 }
 
 function messageDetail(content) {

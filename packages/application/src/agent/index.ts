@@ -11,6 +11,7 @@ export type {
   AgentProviderRegistryPort,
   ReasoningEffort,
   AgentToolGateway,
+  AgentTurnContext,
   AgentPrompt,
   PromptLoaderPort,
   ReviewPromptKind,
@@ -46,11 +47,18 @@ export {
   applyVars,
   type PromptVars,
   formatMemoryPrompt,
+  AskQuestionService,
+  type AskAnswerVia,
+  type AskQuestionAnswer,
+  type AskQuestionOption,
+  type AskQuestionRequest,
+  type AskQuestionResult,
 } from "./services/index.js";
 export type { AgentTurnWorker } from "./services/index.js";
 export type {
   RunAgentTurnCommand,
   CancelAgentTurnCommand,
   CancelAgentTurnResult,
+  AnswerAskQuestionCommand,
 } from "./commands/index.js";
-export { RunAgentTurnHandler, CancelAgentTurnHandler, type AgentRuntimeSettings } from "./commands/index.js";
+export { RunAgentTurnHandler, CancelAgentTurnHandler, AnswerAskQuestionHandler, type AgentRuntimeSettings } from "./commands/index.js";

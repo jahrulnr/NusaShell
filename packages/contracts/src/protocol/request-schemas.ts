@@ -203,6 +203,20 @@ export const AgentCancelRequestSchema = z.object({
   }),
 });
 
+export const AgentAskAnswerRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("agent.ask_answer"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    traceId: z.string().min(1).max(128),
+    callId: z.string().min(1).max(128),
+    via: z.enum(["option", "text"]),
+    optionIds: z.array(z.string().min(1).max(128)).max(16).optional(),
+    text: z.string().max(8000).optional(),
+  }),
+});
+
 export const SystemPingRequestSchema = z.object({
   kind: z.literal("request"),
   id: z.string().min(1),
@@ -342,6 +356,7 @@ export const RequestSchema = z.discriminatedUnion("method", [
   ResourceReadRequestSchema,
   AgentRunRequestSchema,
   AgentCancelRequestSchema,
+  AgentAskAnswerRequestSchema,
   SystemPingRequestSchema,
   SystemVersionRequestSchema,
   JobAddRequestSchema,
@@ -374,6 +389,7 @@ export type ResourceTemplateListRequest = z.infer<typeof ResourceTemplateListReq
 export type ResourceReadRequest = z.infer<typeof ResourceReadRequestSchema>;
 export type AgentRunRequest = z.infer<typeof AgentRunRequestSchema>;
 export type AgentCancelRequest = z.infer<typeof AgentCancelRequestSchema>;
+export type AgentAskAnswerRequest = z.infer<typeof AgentAskAnswerRequestSchema>;
 export type JobAddRequest = z.infer<typeof JobAddRequestSchema>;
 export type JobListRequest = z.infer<typeof JobListRequestSchema>;
 export type JobSetEnabledRequest = z.infer<typeof JobSetEnabledRequestSchema>;

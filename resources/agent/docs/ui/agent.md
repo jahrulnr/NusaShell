@@ -41,7 +41,7 @@ A fixed workbench rail listing local conversation threads. Click a thread to ope
 
 ## Conversation thread
 
-The full-height message runway separates compact user cards from editorial assistant responses. User attachments render as image previews or file cards. Provider reasoning is persisted and appears before the answer in a collapsed Thinking disclosure with sanitized Markdown; models that return no reasoning show no placeholder. Completed tool calls render as expandable terminal cards with the tool name in the header and full args/output in the body. Message footers expose timestamps, model/trace metadata, copy, and retry where applicable. Only this area scrolls.
+The full-height message runway separates compact user cards from editorial assistant responses. User attachments render as image previews or file cards. Provider reasoning is persisted and appears before the answer in a collapsed Thinking disclosure with sanitized Markdown; models that return no reasoning show no placeholder. Completed tool calls render as expandable terminal cards with the tool name in the header and full args/output in the body. Interactive ask_question calls render as Ask Question cards with selectable options and an optional free-text answer; after the user replies, the sealed card shows the chosen answer. Message footers expose timestamps, model/trace metadata, copy, and retry where applicable. Only this area scrolls.
 
 - **Conversation thread** (`#agent-thread`):
   - Section: Conversation thread
@@ -77,6 +77,21 @@ The full-height message runway separates compact user cards from editorial assis
   - Section: Conversation thread
   - Type: disclosure
   - Action: Timeline-style expandable tool call. Header keeps the ›_ rail badge plus tool name and status. Expand to inspect nested tool and Output panels with args and truncated result text.
+
+- **Ask Question card** (`.agent-ask-card`):
+  - Section: Conversation thread
+  - Type: interactive card
+  - Action: Rendered when the agent calls ask_question. Shows the question, selectable option rows, optional free-text answer, and Send answer. After the user replies or on reload, the sealed card shows the chosen answer.
+
+- **Ask option** (`.agent-ask-option`):
+  - Section: Conversation thread
+  - Type: button
+  - Action: Selects one option (or toggles multi-select options) on an Ask Question card before sending the answer.
+
+- **Send ask answer** (`.agent-ask-send`):
+  - Section: Conversation thread
+  - Type: button
+  - Action: Submits the selected option(s) or typed free-text answer for the pending ask_question tool call.
 
 - **Copy message** (`.agent-message-action`):
   - Section: Conversation thread
