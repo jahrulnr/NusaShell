@@ -31,7 +31,7 @@ export class LearningController {
     }
 
     initialize() {
-      this.refresh();
+      return this.refresh();
     }
 
     async refresh() {

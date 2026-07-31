@@ -153,7 +153,7 @@ function $$(sel) { return document.querySelectorAll(sel); }
 function el(tag, cls, html) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
-  if (html !== undefined) e.innerHTML = html;
+  if (html != null) e.innerHTML = html;
   return e;
 }
 function nowTime() { return new Date().toLocaleTimeString("en-US", { hour12: false }); }
@@ -1403,13 +1403,15 @@ document.addEventListener("DOMContentLoaded", () => {
       for (const provider of providers) {
         const card = el("article", `provider-registry-card acp-provider-card${provider.status === "configured" ? " is-active" : ""}`);
         card.dataset.acpProviderId = provider.manifest.id;
+        const isUnverifiedProvider = Boolean(provider.manifest.unverified) === true;
+        const kindLabel = isUnverifiedProvider ? "ACP · UNVERIFIED" : "ACP";
         const head = el("div", "provider-card-head");
         const mark = el("span", "provider-mark", provider.manifest.monogram);
         const identity = el("div");
         const title = document.createElement("h2"); title.textContent = provider.manifest.displayName;
-        const kind = document.createElement("p"); kind.textContent = provider.manifest.unverified ? "ACP · UNVERIFIED" : "ACP";
+        const kind = document.createElement("p"); kind.textContent = String(kindLabel || "ACP");
         identity.append(title, kind);
-        const beta = provider.manifest.unverified ? el("span", "acp-provider-beta", "BETA") : null;
+        const beta = isUnverifiedProvider ? el("span", "acp-provider-beta", "BETA") : null;
         const dot = el("button", `provider-toggle${provider.config.enabled ? " is-active" : ""}`, "●");
         dot.type = "button";
         dot.setAttribute("aria-pressed", String(provider.config.enabled));
@@ -1423,10 +1425,10 @@ document.addEventListener("DOMContentLoaded", () => {
             showToast(`Could not update ACP provider: ${error.message || error}`, "error");
           }
         });
-        head.append(mark, identity, beta, dot);
+        head.append(mark, identity, beta ?? "", dot);
         const description = document.createElement("p"); description.textContent = provider.manifest.description;
         const footer = el("div", "provider-card-footer");
-        const statusText = provider.status === "configured" ? "● Configured" : provider.status === "disabled" ? "● Disabled" : `● ${provider.manifest.unverified ? "Unverified" : "Not configured"}`;
+        const statusText = provider.status === "configured" ? "● Configured" : provider.status === "disabled" ? "● Disabled" : `● ${isUnverifiedProvider ? "Unverified" : "Not configured"}`;
         const status = el("span", `provider-status${provider.status === "configured" ? " configured" : ""}`, statusText);
         const action = el("button", "mini-btn provider-card-action", "Configure");
         action.type = "button";

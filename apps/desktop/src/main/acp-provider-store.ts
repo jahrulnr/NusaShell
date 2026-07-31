@@ -12,6 +12,7 @@ const ACP_PROVIDER_MANIFESTS: readonly AcpProviderManifest[] = [
     command: process.env.NUSASHELL_CURSOR_AGENT_BIN ?? "agent",
     args: ["acp"],
     authMethodId: "cursor_login",
+    unverified: false,
   },
   {
     id: "codex",
@@ -61,7 +62,7 @@ export class AcpProviderStore {
       const detected = await isCommandOnPath(command);
       const status = !enabled ? "disabled" : (command && detected ? "configured" : "not-configured");
       result.push({
-        manifest: { ...manifest },
+        manifest: { ...manifest, unverified: manifest.unverified ?? false },
         config: { providerId: manifest.id, enabled, command, args },
         detected,
         status,
