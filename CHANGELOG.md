@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.48] - 2026-08-01
+
+### Added
+
+- **Per-traceId stream sequencing** — agent and ACP streaming events now
+  carry a `streamSeq` integer (monotonic per `traceId`, starting at 1)
+  assigned at the application publish site via `StreamSeqRegistry`. The WS
+  transport copies it into the payload but does not generate it. The
+  desktop renderer wraps handlers in a `createStreamSeqGate()` that drops
+  stale events and flags gaps so the presenter can mark a turn incomplete.
+- **Turn lifecycle events** — `agent.turn_started`, `agent.turn_end`
+  (reason: completed / cancelled / failed / superseded),
+  `agent.cancel_requested`, and `agent.turn_superseded` are now published
+  on the WS event stream. `agent.cancel` returns `phase: "requested"`
+  immediately; the UI waits for `agent.turn_end` (2-second fallback) before
+  sealing streaming tool cards and the streaming message.
+- **Supersede** — `agent.run` accepts `supersedeTraceId` to cancel an
+  in-flight turn and emit `agent.turn_superseded` so the UI can mark the
+  old turn as superseded.
+- **Incomplete tool card sealing** — `tool_call_start` creates a skeleton
+  card; if `turn_end` fires while any card is still running,
+  `sealStreamingToolCardsIncomplete()` marks those cards as incomplete so
+  the UI never leaves a spinning card behind.
+- **WS-edge redaction** — tool call args, output, error strings, and
+  `ApplicationError.details` are scrubbed at the WS mapper boundary before
+  reaching the renderer. Secret-like keys (`password`, `token`, `apiKey`,
+  …), Bearer tokens, `Authorization` headers, and `sk-` API keys are
+  replaced with `[REDACTED]`.
+
 ## [0.0.47] - 2026-08-01
 
 ### Added

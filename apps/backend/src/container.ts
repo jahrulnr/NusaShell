@@ -67,6 +67,7 @@ import {
   AnswerAskQuestionHandler,
   AskQuestionService,
   AgentTurnCoordinator,
+  StreamSeqRegistry,
   JobAgentToolGateway,
   JobAgentExecutor,
   JobScheduler,
@@ -96,6 +97,10 @@ import {
   createAgentToolCallStartEvent,
   createAgentToolCallEndEvent,
   createAgentContextUpdateEvent,
+  createAgentTurnStartedEvent,
+  createAgentTurnEndEvent,
+  createAgentTurnSupersededEvent,
+  createAgentCancelRequestedEvent,
   type AgentProvider,
   SystemPingHandler,
   SystemVersionHandler,
@@ -332,6 +337,11 @@ export function createContainer(options: ContainerOptions): Container {
   }
   const agentProviderRegistry = new AgentProviderRegistry(agentProviders);
   const agentTurnCoordinator = new AgentTurnCoordinator();
+  const streamSeqRegistry = new StreamSeqRegistry();
+  const withStreamSeq = <T extends { readonly aggregateId: string }>(event: T): T & { streamSeq: number } => ({
+    ...event,
+    streamSeq: streamSeqRegistry.next(event.aggregateId),
+  });
   const reviewGateway = new ReviewAgentToolGateway(agentToolGateway);
   const reviewStateStore = new FilesystemReviewStateStore(memoryRoot);
   const backgroundReviewScheduler = new BackgroundReviewScheduler({
@@ -389,6 +399,7 @@ export function createContainer(options: ContainerOptions): Container {
     askService: acpAskService,
     eventDispatcher,
     logger,
+    streamSeq: streamSeqRegistry,
   });
 
   const commandBus = new CommandBus();
@@ -406,26 +417,39 @@ export function createContainer(options: ContainerOptions): Container {
     logger,
     agentTurnCoordinator,
     (traceId, delta) => {
-      void eventDispatcher.publish(createAgentTextDeltaEvent(traceId, delta));
+      void eventDispatcher.publish(withStreamSeq(createAgentTextDeltaEvent(traceId, delta)));
     },
     (traceId, delta) => {
-      void eventDispatcher.publish(createAgentReasoningDeltaEvent(traceId, delta));
+      void eventDispatcher.publish(withStreamSeq(createAgentReasoningDeltaEvent(traceId, delta)));
     },
     (traceId, call) => {
-      void eventDispatcher.publish(createAgentToolCallStartEvent(traceId, call));
+      void eventDispatcher.publish(withStreamSeq(createAgentToolCallStartEvent(traceId, call)));
     },
     (traceId, execution) => {
-      void eventDispatcher.publish(createAgentToolCallEndEvent(traceId, execution));
+      void eventDispatcher.publish(withStreamSeq(createAgentToolCallEndEvent(traceId, execution)));
     },
     (traceId, update) => {
-      void eventDispatcher.publish(createAgentContextUpdateEvent(traceId, update.estimatedTokens, update.usage));
+      void eventDispatcher.publish(withStreamSeq(createAgentContextUpdateEvent(traceId, update.estimatedTokens, update.usage)));
     },
     promptLoader,
     aiRuntime.userPrompt,
     memoryStore,
     (result) => { void backgroundReviewScheduler.tick(result); void skillCuratorScheduler.tick(); },
+    (traceId, reason) => {
+      void eventDispatcher.publish(withStreamSeq(createAgentTurnEndEvent(traceId, reason)));
+      streamSeqRegistry.clear(traceId);
+    },
+    (traceId) => {
+      void eventDispatcher.publish(withStreamSeq(createAgentTurnStartedEvent(traceId)));
+    },
+    (oldTraceId, newTraceId) => {
+      void eventDispatcher.publish(withStreamSeq(createAgentTurnSupersededEvent(oldTraceId, newTraceId)));
+    },
   ));
-  commandBus.register("cancel-agent-turn", new CancelAgentTurnHandler(agentTurnCoordinator));
+  commandBus.register("cancel-agent-turn", new CancelAgentTurnHandler(
+    agentTurnCoordinator,
+    (traceId) => { void eventDispatcher.publish(withStreamSeq(createAgentCancelRequestedEvent(traceId))); },
+  ));
   commandBus.register("answer-ask-question", new AnswerAskQuestionHandler(askQuestionService));
   commandBus.register("add-job", new AddJobHandler(jobStore));
   commandBus.register("set-job-enabled", new SetJobEnabledHandler(jobStore));

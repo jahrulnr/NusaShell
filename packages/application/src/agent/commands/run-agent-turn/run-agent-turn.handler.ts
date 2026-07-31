@@ -34,6 +34,8 @@ export interface AgentRuntimeSettings {
 }
 
 export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, AgentTurnResult> {
+  private readonly supersededTraceIds = new Set<string>();
+
   constructor(
     private readonly providers: AgentProviderRegistryPort,
     private readonly toolGateway: AgentToolGateway,
@@ -50,6 +52,9 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
     private readonly userPrompt: string = "",
     private readonly memoryStore?: MemoryStorePort,
     private readonly onTurnComplete?: (result: AgentTurnResult) => Promise<void> | void,
+    private readonly onTurnEnd?: (traceId: string, reason: "completed" | "cancelled" | "failed" | "superseded") => void,
+    private readonly onTurnStarted?: (traceId: string) => void,
+    private readonly onTurnSuperseded?: (oldTraceId: string, newTraceId: string) => void,
   ) {}
 
   async handle(command: RunAgentTurnCommand): Promise<AgentTurnResult> {
@@ -79,36 +84,54 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
     });
     const worker: AgentTurnWorker = new InProcessAgentTurnWorker((input) => runner.run(input));
     const traceId = command.traceId ?? randomUUID();
+    if (command.supersedeTraceId && command.supersedeTraceId !== traceId) {
+      this.supersededTraceIds.add(command.supersedeTraceId);
+      this.coordinator.cancel(command.supersedeTraceId);
+      this.onTurnSuperseded?.(command.supersedeTraceId, traceId);
+    }
+    this.onTurnStarted?.(traceId);
     this.toolGateway.beginTurn?.(traceId, {
       ...(command.interactive !== undefined ? { interactive: command.interactive } : {}),
     });
     const messages = command.resume
       ? command.messages
       : await this.injectSystemPrompts(command, traceId);
-    const result = await this.coordinator.run(traceId, (signal) => worker.run({
-      messages,
-      pluginIds: command.pluginIds,
-      traceId,
-      signal,
-      ...(command.interactive !== undefined ? { interactive: command.interactive } : {}),
-      ...(this.onTextDelta ? { onTextDelta: (delta) => this.onTextDelta?.(traceId, delta) } : {}),
-      ...(this.onReasoningDelta ? { onReasoningDelta: (delta) => this.onReasoningDelta?.(traceId, delta) } : {}),
-      ...(this.onToolCallStart ? { onToolCallStart: (call) => this.onToolCallStart?.(traceId, call) } : {}),
-      ...(this.onToolCallEnd ? { onToolCallEnd: (execution) => this.onToolCallEnd?.(traceId, execution) } : {}),
-      ...(this.onContextUpdate ? { onContextUpdate: (update) => this.onContextUpdate?.(traceId, update) } : {}),
-      ...(command.maxToolRounds !== undefined ? { maxToolRounds: command.maxToolRounds } : {}),
-      ...(command.model !== undefined ? { model: command.model } : {}),
-      ...(command.effort !== undefined ? { effort: command.effort } : {}),
-      ...(command.modelCapabilities !== undefined ? { modelCapabilities: command.modelCapabilities } : {}),
-    }));
-    if (this.onTurnComplete) {
-      try {
-        await this.onTurnComplete(result);
-      } catch (error) {
-        this.logger?.error("onTurnComplete callback failed: %s", error instanceof Error ? error.message : String(error));
+    let turnEndReason: "completed" | "cancelled" | "failed" | "superseded" = "completed";
+    try {
+      const result = await this.coordinator.run(traceId, (signal) => worker.run({
+        messages,
+        pluginIds: command.pluginIds,
+        traceId,
+        signal,
+        ...(command.interactive !== undefined ? { interactive: command.interactive } : {}),
+        ...(this.onTextDelta ? { onTextDelta: (delta) => this.onTextDelta?.(traceId, delta) } : {}),
+        ...(this.onReasoningDelta ? { onReasoningDelta: (delta) => this.onReasoningDelta?.(traceId, delta) } : {}),
+        ...(this.onToolCallStart ? { onToolCallStart: (call) => this.onToolCallStart?.(traceId, call) } : {}),
+        ...(this.onToolCallEnd ? { onToolCallEnd: (execution) => this.onToolCallEnd?.(traceId, execution) } : {}),
+        ...(this.onContextUpdate ? { onContextUpdate: (update) => this.onContextUpdate?.(traceId, update) } : {}),
+        ...(command.maxToolRounds !== undefined ? { maxToolRounds: command.maxToolRounds } : {}),
+        ...(command.model !== undefined ? { model: command.model } : {}),
+        ...(command.effort !== undefined ? { effort: command.effort } : {}),
+        ...(command.modelCapabilities !== undefined ? { modelCapabilities: command.modelCapabilities } : {}),
+      }));
+      if (this.onTurnComplete) {
+        try {
+          await this.onTurnComplete(result);
+        } catch (error) {
+          this.logger?.error("onTurnComplete callback failed: %s", error instanceof Error ? error.message : String(error));
+        }
       }
+      return result;
+    } catch (error) {
+      if (this.supersededTraceIds.delete(traceId)) {
+        turnEndReason = "superseded";
+      } else {
+        turnEndReason = error instanceof ApplicationError && error.code === "AGENT_TURN_CANCELLED" ? "cancelled" : "failed";
+      }
+      throw error;
+    } finally {
+      this.onTurnEnd?.(traceId, turnEndReason);
     }
-    return result;
   }
 
   private async injectSystemPrompts(command: RunAgentTurnCommand, traceId: string) {

@@ -1,4 +1,5 @@
-import type { AgentReasoningDeltaEvent, AgentTextDeltaEvent, AgentToolCallEndEvent, AgentToolCallStartEvent, AgentContextUpdateEvent, AgentLearningUpdatedEvent, JobCompletedEvent, JobFailedEvent, ApplicationEvent, AcpTextDeltaEvent, AcpThoughtDeltaEvent, AcpToolCallEvent, AcpToolCallUpdateEvent, AcpPlanEvent, AcpPermissionRequestEvent, AcpAskRequestEvent, AcpTurnEndEvent, AcpSessionStateEvent } from "@nusashell/application";
+import type { AgentReasoningDeltaEvent, AgentTextDeltaEvent, AgentToolCallEndEvent, AgentToolCallStartEvent, AgentContextUpdateEvent, AgentTurnStartedEvent, AgentTurnEndEvent, AgentTurnSupersededEvent, AgentCancelRequestedEvent, AgentLearningUpdatedEvent, JobCompletedEvent, JobFailedEvent, ApplicationEvent, AcpTextDeltaEvent, AcpThoughtDeltaEvent, AcpToolCallEvent, AcpToolCallUpdateEvent, AcpPlanEvent, AcpPermissionRequestEvent, AcpAskRequestEvent, AcpTurnEndEvent, AcpSessionStateEvent } from "@nusashell/application";
+import { redactArgs, redactString, redactValue } from "./redact.js";
 import {
   PluginInstalledEvent,
   PluginUninstalledEvent,
@@ -11,6 +12,17 @@ import {
 import type { EventEnvelope } from "@nusashell/contracts";
 
 export function mapDomainEvent(event: ApplicationEvent, sequence: number): EventEnvelope | null {
+  const envelope = mapDomainEventInner(event, sequence);
+  if (envelope && event.streamSeq !== undefined) {
+    return {
+      ...envelope,
+      payload: { ...(envelope.payload as Record<string, unknown>), streamSeq: event.streamSeq },
+    };
+  }
+  return envelope;
+}
+
+function mapDomainEventInner(event: ApplicationEvent, sequence: number): EventEnvelope | null {
   const timestamp = event.occurredAt.toISOString();
 
   switch (event.type) {
@@ -154,7 +166,7 @@ export function mapDomainEvent(event: ApplicationEvent, sequence: number): Event
           traceId: e.aggregateId,
           callId: e.call.id,
           name: e.call.name,
-          ...(hasArgs(e.call.args) ? { args: e.call.args } : {}),
+          ...(hasArgs(e.call.args) ? { args: redactArgs(e.call.args) } : {}),
           timestamp,
         },
       };
@@ -172,9 +184,9 @@ export function mapDomainEvent(event: ApplicationEvent, sequence: number): Event
           callId: e.execution.id,
           name: e.execution.name,
           ok: e.execution.ok,
-          ...(e.execution.error ? { error: e.execution.error } : {}),
-          ...(hasArgs(e.execution.args) ? { args: e.execution.args } : {}),
-          ...(output ? { output } : {}),
+          ...(e.execution.error ? { error: redactString(e.execution.error) } : {}),
+          ...(hasArgs(e.execution.args) ? { args: redactArgs(e.execution.args) } : {}),
+          ...(output ? { output: redactString(output) } : {}),
           timestamp,
         },
       };
@@ -193,6 +205,61 @@ export function mapDomainEvent(event: ApplicationEvent, sequence: number): Event
             inputTokens: e.usage.inputTokens,
             outputTokens: e.usage.outputTokens,
           } : {}),
+          timestamp,
+        },
+      };
+    }
+
+    case "agent.turn_started": {
+      const e = event as AgentTurnStartedEvent;
+      return {
+        kind: "event",
+        event: "agent.turn_started",
+        sequence,
+        payload: {
+          traceId: e.aggregateId,
+          ...(e.conversationId !== undefined ? { conversationId: e.conversationId } : {}),
+          timestamp,
+        },
+      };
+    }
+
+    case "agent.turn_end": {
+      const e = event as AgentTurnEndEvent;
+      return {
+        kind: "event",
+        event: "agent.turn_end",
+        sequence,
+        payload: {
+          traceId: e.aggregateId,
+          reason: e.reason,
+          timestamp,
+        },
+      };
+    }
+
+    case "agent.turn_superseded": {
+      const e = event as AgentTurnSupersededEvent;
+      return {
+        kind: "event",
+        event: "agent.turn_superseded",
+        sequence,
+        payload: {
+          traceId: e.aggregateId,
+          byTraceId: e.byTraceId,
+          timestamp,
+        },
+      };
+    }
+
+    case "agent.cancel_requested": {
+      const e = event as AgentCancelRequestedEvent;
+      return {
+        kind: "event",
+        event: "agent.cancel_requested",
+        sequence,
+        payload: {
+          traceId: e.aggregateId,
           timestamp,
         },
       };
@@ -271,7 +338,7 @@ export function mapDomainEvent(event: ApplicationEvent, sequence: number): Event
         sequence,
         payload: {
           traceId: e.aggregateId,
-          call: { ...e.call },
+          call: redactValue({ ...e.call }),
           timestamp,
         },
       };
@@ -287,7 +354,7 @@ export function mapDomainEvent(event: ApplicationEvent, sequence: number): Event
           traceId: e.aggregateId,
           callId: e.callId,
           status: e.status,
-          ...(e.summary !== undefined ? { summary: e.summary } : {}),
+          ...(e.summary !== undefined ? { summary: redactString(e.summary) } : {}),
           timestamp,
         },
       };
@@ -351,7 +418,7 @@ export function mapDomainEvent(event: ApplicationEvent, sequence: number): Event
         payload: {
           traceId: e.aggregateId,
           ok: e.ok,
-          ...(e.error !== undefined ? { error: e.error } : {}),
+          ...(e.error !== undefined ? { error: redactString(e.error) } : {}),
           timestamp,
         },
       };

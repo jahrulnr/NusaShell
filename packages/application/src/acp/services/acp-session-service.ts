@@ -22,6 +22,8 @@ import type {
 } from "../ports/acp-client.port.js";
 import type { AcpPermissionService } from "./acp-permission-service.js";
 import type { AcpAskBridgeService } from "./acp-ask-bridge-service.js";
+import type { StreamSeqRegistry } from "../../agent/services/stream-seq-registry.js";
+import type { ApplicationEvent } from "../../events/event-dispatcher.js";
 
 export interface AcpSessionInfo {
   readonly conversationId: string;
@@ -47,12 +49,22 @@ export interface AcpSessionServiceDeps {
   readonly askService: AcpAskBridgeService;
   readonly eventDispatcher: EventDispatcher;
   readonly logger?: LoggerPort;
+  readonly streamSeq?: StreamSeqRegistry;
 }
 
 export class AcpSessionService {
   private readonly sessions = new Map<string, AcpSession>();
 
   constructor(private readonly deps: AcpSessionServiceDeps) {}
+
+  /** Publishes an ACP streaming event with a per-traceId `streamSeq` when a registry is configured. */
+  private publish(traceId: string, event: ApplicationEvent): void {
+    if (this.deps.streamSeq) {
+      this.deps.eventDispatcher.publish({ ...event, streamSeq: this.deps.streamSeq.next(traceId) });
+    } else {
+      this.deps.eventDispatcher.publish(event);
+    }
+  }
 
   /**
    * Start an ACP session for a conversation without sending a prompt.
@@ -91,7 +103,7 @@ export class AcpSessionService {
         traceId,
         state: "idle",
       });
-      this.deps.eventDispatcher.publish(createAcpSessionStateEvent(traceId, conversationId, "idle"));
+      this.publish(traceId, createAcpSessionStateEvent(traceId, conversationId, "idle"));
       return this.getSessionInfo(conversationId);
     } catch (error) {
       throw new ApplicationError(
@@ -132,7 +144,7 @@ export class AcpSessionService {
         traceId,
         state: "starting",
       });
-      this.deps.eventDispatcher.publish(createAcpSessionStateEvent(traceId, conversationId, "starting"));
+      this.publish(traceId, createAcpSessionStateEvent(traceId, conversationId, "starting"));
     } else {
       existing.traceId = traceId;
       existing.state = "starting";
@@ -141,7 +153,7 @@ export class AcpSessionService {
     const session = this.sessions.get(conversationId)!;
     session.traceId = traceId;
     session.state = "running";
-    this.deps.eventDispatcher.publish(createAcpSessionStateEvent(traceId, conversationId, "running"));
+    this.publish(traceId, createAcpSessionStateEvent(traceId, conversationId, "running"));
 
     try {
       await this.deps.client.prompt(traceId, conversationId, prompt);
@@ -157,6 +169,11 @@ export class AcpSessionService {
     }
     session.traceId = traceId;
     await this.deps.client.cancel(traceId, conversationId);
+    // The external agent may not emit its own turn_end on cancel, so publish a
+    // terminal event here to fill the hole and let the UI seal the turn.
+    this.publish(traceId, createAcpTurnEndEvent(traceId, conversationId, false, "cancelled"));
+    this.finishTurn(conversationId, traceId);
+    this.deps.streamSeq?.clear(traceId);
   }
 
   async getSessionInfo(conversationId: string): Promise<AcpSessionInfo | null> {
@@ -205,7 +222,8 @@ export class AcpSessionService {
       publish: (event) => this.handleClientEvent(conversationId, resolveTraceId(), event),
       requestPermission: async (request) => {
         const traceId = resolveTraceId();
-        this.deps.eventDispatcher.publish(
+        this.publish(
+          traceId,
           createAcpPermissionRequestEvent(
             traceId,
             conversationId,
@@ -219,7 +237,8 @@ export class AcpSessionService {
       },
       askQuestion: async (request) => {
         const traceId = resolveTraceId();
-        this.deps.eventDispatcher.publish(
+        this.publish(
+          traceId,
           createAcpAskRequestEvent(
             traceId,
             conversationId,
@@ -238,26 +257,27 @@ export class AcpSessionService {
   private handleClientEvent(conversationId: string, traceId: string, event: AcpClientEvent): void {
     switch (event.type) {
       case "acp.text_delta":
-        this.deps.eventDispatcher.publish(createAcpTextDeltaEvent(traceId, conversationId, event.delta, event.messageId));
+        this.publish(traceId, createAcpTextDeltaEvent(traceId, conversationId, event.delta, event.messageId));
         break;
       case "acp.thought_delta":
-        this.deps.eventDispatcher.publish(createAcpThoughtDeltaEvent(traceId, conversationId, event.delta));
+        this.publish(traceId, createAcpThoughtDeltaEvent(traceId, conversationId, event.delta));
         break;
       case "acp.tool_call":
-        this.deps.eventDispatcher.publish(createAcpToolCallEvent(traceId, conversationId, event.call));
+        this.publish(traceId, createAcpToolCallEvent(traceId, conversationId, event.call));
         break;
       case "acp.tool_call_update":
-        this.deps.eventDispatcher.publish(createAcpToolCallUpdateEvent(traceId, conversationId, event.callId, event.status, event.summary));
+        this.publish(traceId, createAcpToolCallUpdateEvent(traceId, conversationId, event.callId, event.status, event.summary));
         break;
       case "acp.plan":
-        this.deps.eventDispatcher.publish(createAcpPlanEvent(traceId, conversationId, event.steps));
+        this.publish(traceId, createAcpPlanEvent(traceId, conversationId, event.steps));
         break;
       case "acp.session_state":
-        this.deps.eventDispatcher.publish(createAcpSessionStateEvent(traceId, event.conversationId, event.state));
+        this.publish(traceId, createAcpSessionStateEvent(traceId, event.conversationId, event.state));
         break;
       case "acp.turn_end":
-        this.deps.eventDispatcher.publish(createAcpTurnEndEvent(traceId, conversationId, event.ok, event.error));
+        this.publish(traceId, createAcpTurnEndEvent(traceId, conversationId, event.ok, event.error));
         this.finishTurn(conversationId, traceId);
+        this.deps.streamSeq?.clear(traceId);
         break;
     }
   }

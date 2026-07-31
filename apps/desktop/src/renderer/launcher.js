@@ -5,6 +5,7 @@ import { clampModelEffort, formatTokenCount, modelCompatibility, searchModels } 
 import { AgentConversationController } from "./agent-conversation-controller.js";
 import { SkillsController } from "./skills-controller.js";
 import { LearningController } from "./learning-controller.js";
+import { createStreamSeqGate } from "./stream-seq-gate.js";
 import {
   applyTextEdit,
   countLogsBySource,
@@ -370,30 +371,62 @@ async function runAgentTurn(messages, options = {}) {
   const selected = aiSettings.models.find((model) => model.key === aiSettings.activeModelKey);
   if (!selected) throw new Error("Choose an imported AI model before sending a turn.");
   const disposers = [];
+  const seqGate = createStreamSeqGate();
+  const gate = (payload, handler) => {
+    if (payload?.traceId !== options.traceId) return;
+    const decision = seqGate.check(payload.traceId, payload.streamSeq);
+    if (!decision.accept) {
+      writeRendererLog("debug", `Dropping stale agent event streamSeq=${payload.streamSeq} trace=${payload.traceId}`);
+      return;
+    }
+    if (decision.gap) {
+      writeRendererLog("warn", `Agent stream gap before streamSeq=${payload.streamSeq} trace=${payload.traceId}`);
+      options.onStreamGap?.(payload.traceId, payload.streamSeq);
+    }
+    handler(payload);
+  };
   if (options.onDelta) {
-    disposers.push(onEvent("agent.text_delta", (payload) => {
-      if (payload?.traceId === options.traceId && payload.delta) options.onDelta(payload.delta);
-    }));
+    disposers.push(onEvent("agent.text_delta", (payload) => gate(payload, (p) => {
+      if (p.delta) options.onDelta(p.delta);
+    })));
   }
   if (options.onReasoningDelta) {
-    disposers.push(onEvent("agent.reasoning_delta", (payload) => {
-      if (payload?.traceId === options.traceId && payload.delta) options.onReasoningDelta(payload.delta);
-    }));
+    disposers.push(onEvent("agent.reasoning_delta", (payload) => gate(payload, (p) => {
+      if (p.delta) options.onReasoningDelta(p.delta);
+    })));
   }
   if (options.onToolCallStart) {
-    disposers.push(onEvent("agent.tool_call_start", (payload) => {
-      if (payload?.traceId === options.traceId) options.onToolCallStart(payload);
-    }));
+    disposers.push(onEvent("agent.tool_call_start", (payload) => gate(payload, (p) => options.onToolCallStart(p))));
   }
   if (options.onToolCallEnd) {
-    disposers.push(onEvent("agent.tool_call_end", (payload) => {
-      if (payload?.traceId === options.traceId) options.onToolCallEnd(payload);
-    }));
+    disposers.push(onEvent("agent.tool_call_end", (payload) => gate(payload, (p) => options.onToolCallEnd(p))));
   }
   if (options.onContextUpdate) {
-    disposers.push(onEvent("agent.context", (payload) => {
-      if (payload?.traceId === options.traceId) options.onContextUpdate(payload);
-    }));
+    disposers.push(onEvent("agent.context", (payload) => gate(payload, (p) => options.onContextUpdate(p))));
+  }
+  // Lifecycle handlers stay registered briefly after the run settles so a
+  // turn_end/cancel_requested event published asynchronously after the
+  // agent.run rejection still reaches the UI (WS delivery order is not
+  // guaranteed; streamSeq + the 2s UI wait make ordering best-effort).
+  const lifecycleDisposers = [];
+  const lifecycleGate = (payload, handler) => {
+    if (payload?.traceId !== options.traceId) return;
+    const decision = seqGate.check(payload.traceId, payload.streamSeq);
+    if (!decision.accept) return;
+    if (decision.gap) options.onStreamGap?.(payload.traceId, payload.streamSeq);
+    handler(payload);
+  };
+  if (options.onTurnStarted) {
+    lifecycleDisposers.push(onEvent("agent.turn_started", (payload) => lifecycleGate(payload, (p) => options.onTurnStarted(p))));
+  }
+  if (options.onTurnEnd) {
+    lifecycleDisposers.push(onEvent("agent.turn_end", (payload) => lifecycleGate(payload, (p) => options.onTurnEnd(p))));
+  }
+  if (options.onCancelRequested) {
+    lifecycleDisposers.push(onEvent("agent.cancel_requested", (payload) => lifecycleGate(payload, (p) => options.onCancelRequested(p))));
+  }
+  if (options.onTurnSuperseded) {
+    lifecycleDisposers.push(onEvent("agent.turn_superseded", (payload) => lifecycleGate(payload, (p) => options.onTurnSuperseded(p))));
   }
   try {
     return await sendRequest("agent.run", {
@@ -405,6 +438,7 @@ async function runAgentTurn(messages, options = {}) {
       userPrompt: aiSettings.userPrompt,
       ...(options.workspace ? { workspace: options.workspace } : {}),
       ...(options.resume ? { resume: true } : {}),
+      ...(options.supersedeTraceId ? { supersedeTraceId: options.supersedeTraceId } : {}),
       modelCapabilities: {
         contextWindow: selected.contextWindow,
         maxOutput: selected.maxOutput,
@@ -422,6 +456,7 @@ async function runAgentTurn(messages, options = {}) {
     }, 1800000);
   } finally {
     disposers.forEach((dispose) => dispose());
+    setTimeout(() => lifecycleDisposers.forEach((dispose) => dispose()), 2500);
   }
 }
 
@@ -467,11 +502,6 @@ async function runAcpTurn(prompt, options = {}) {
   if (options.onAskRequest) {
     disposers.push(onEvent("acp.ask_request", (payload) => {
       if (payload?.traceId === options.traceId) options.onAskRequest(payload);
-    }));
-  }
-  if (options.onTurnEnd) {
-    disposers.push(onEvent("acp.turn_end", (payload) => {
-      if (payload?.traceId === options.traceId) options.onTurnEnd({ ok: payload.ok, error: payload.error });
     }));
   }
   try {

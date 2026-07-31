@@ -104,6 +104,75 @@ serialize through the per-plugin `PluginOperationQueue` inside
   `onToolCallEnd` is emitted so the UI seals every card. Every `tool_call_id`
   in the assistant message gets a tool result — siblings are never dropped.
 
+## Stream reliability
+
+Agent and ACP streaming events carry a **per-traceId `streamSeq`** — a
+monotonic integer starting at 1, assigned at the application publish site
+(`StreamSeqRegistry` in `container.ts` / `AcpSessionService`). The WS
+transport stays a dumb broadcaster; it copies `streamSeq` into the event
+payload but does not generate it. The counter is cleared when a turn ends.
+
+### Turn lifecycle events
+
+| Event | When | Payload |
+| --- | --- | --- |
+| `agent.turn_started` | Before the runner starts the first provider round | `traceId`, `streamSeq` |
+| `agent.turn_end` | After the turn settles (completed / cancelled / failed / superseded) | `traceId`, `reason`, `streamSeq` |
+| `agent.cancel_requested` | User clicks Stop; `cancel-agent-turn` command received | `traceId`, `streamSeq` |
+| `agent.turn_superseded` | A new turn supersedes an in-flight one via `supersedeTraceId` | `traceId` (old), `byTraceId` (new) |
+
+`agent.cancel` returns immediately with `phase: "requested"`. The UI does
+**not** assume the turn is sealed at that point — it waits for
+`agent.turn_end` (with a 2-second fallback timeout) before sealing streaming
+tool cards and the streaming message. This prevents the "card stuck in
+running" state when in-flight MCP calls take time to drain after cancel.
+
+### Supersede
+
+`agent.run` accepts an optional `supersedeTraceId`. When set, the handler
+cancels the old trace via `AgentTurnCoordinator.cancel()` and emits
+`agent.turn_superseded` so the UI can mark the old turn as superseded. The
+old turn's `onTurnEnd` fires with `reason: "superseded"`.
+
+### Desktop sequence gate
+
+The renderer wraps streaming event handlers in a `createStreamSeqGate()`
+(`stream-seq-gate.js`). The gate:
+
+1. **Drops stale events** — `streamSeq <= lastSeen` for the same `traceId`
+   is silently dropped (prevents out-of-order rendering from late events).
+2. **Flags gaps** — `streamSeq > lastSeen + 1` is accepted but the gate
+   calls `onStreamGap(traceId, streamSeq)` so the presenter can mark the
+   turn incomplete.
+3. **Accepts non-streaming events** — events without `streamSeq` pass
+   through unchanged (legacy/plugin events are unaffected).
+
+### Incomplete tool card sealing
+
+`tool_call_start` creates a **skeleton** tool card in the presenter. The
+card is only sealed (success/error state, output rendered) when the matching
+`tool_call_end` arrives. If `turn_end` fires while any card is still in the
+`is-running` state, `sealStreamingToolCardsIncomplete()` marks those cards
+as incomplete (`is-incomplete` / `is-error` class, "Tool call did not
+complete" output) so the UI never leaves a spinning card behind.
+
+### WS-edge redaction
+
+Before an event envelope or error response crosses the WebSocket boundary,
+the transport mapper redacts likely-sensitive values from:
+
+- **Tool call args** — object keys matching `password`, `token`, `apiKey`,
+  `secret`, `bearer`, `credential`, etc. are replaced with `[REDACTED]`.
+- **Tool output and error strings** — `Bearer <token>`, `Authorization:
+  <scheme> <value>`, `sk-…` API keys, and long base64-like tokens are
+  scrubbed.
+- **Error details** — `ApplicationError.details` (structured context) is
+  recursively redacted before being sent to the client.
+
+This is defense-in-depth; the application layer should also avoid emitting
+secrets, but the WS mapper is the last choke point before data reaches the
+renderer.
+
 ## Context compaction
 
 Before a provider round, the runner estimates input size as `chars / 4`. When

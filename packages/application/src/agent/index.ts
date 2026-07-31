@@ -30,6 +30,7 @@ export {
   InProcessAgentTurnWorker,
   RoutedAgentProvider,
   AgentTurnCoordinator,
+  StreamSeqRegistry,
   type AgentTurnRunnerDeps,
   type RunAgentTurnInput,
   type AgentTurnResult,

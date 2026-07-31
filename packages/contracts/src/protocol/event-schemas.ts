@@ -96,6 +96,7 @@ export const AgentTextDeltaEventSchema = z.object({
   payload: z.object({
     traceId: z.string().min(1),
     delta: z.string(),
+    streamSeq: z.number().int().positive().optional(),
     timestamp: z.string(),
   }),
 });
@@ -107,6 +108,7 @@ export const AgentReasoningDeltaEventSchema = z.object({
   payload: z.object({
     traceId: z.string().min(1),
     delta: z.string(),
+    streamSeq: z.number().int().positive().optional(),
     timestamp: z.string(),
   }),
 });
@@ -120,6 +122,7 @@ export const AgentToolCallStartEventSchema = z.object({
     callId: z.string(),
     name: z.string(),
     args: z.record(z.string(), z.unknown()).optional(),
+    streamSeq: z.number().int().positive().optional(),
     timestamp: z.string(),
   }),
 });
@@ -136,6 +139,7 @@ export const AgentToolCallEndEventSchema = z.object({
     error: z.string().optional(),
     args: z.record(z.string(), z.unknown()).optional(),
     output: z.string().max(12_000).optional(),
+    streamSeq: z.number().int().positive().optional(),
     timestamp: z.string(),
   }),
 });
@@ -149,6 +153,54 @@ export const AgentContextEventSchema = z.object({
     estimatedTokens: z.number().int().nonnegative(),
     inputTokens: z.number().int().nonnegative().optional(),
     outputTokens: z.number().int().nonnegative().optional(),
+    streamSeq: z.number().int().positive().optional(),
+    timestamp: z.string(),
+  }),
+});
+
+export const AgentTurnStartedEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("agent.turn_started"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    traceId: z.string().min(1),
+    conversationId: z.string().min(1).optional(),
+    streamSeq: z.number().int().positive(),
+    timestamp: z.string(),
+  }),
+});
+
+export const AgentTurnEndEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("agent.turn_end"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    traceId: z.string().min(1),
+    reason: z.enum(["completed", "cancelled", "failed", "superseded"]),
+    streamSeq: z.number().int().positive(),
+    timestamp: z.string(),
+  }),
+});
+
+export const AgentTurnSupersededEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("agent.turn_superseded"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    traceId: z.string().min(1),
+    byTraceId: z.string().min(1),
+    streamSeq: z.number().int().positive().optional(),
+    timestamp: z.string(),
+  }),
+});
+
+export const AgentCancelRequestedEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("agent.cancel_requested"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    traceId: z.string().min(1),
+    streamSeq: z.number().int().positive().optional(),
     timestamp: z.string(),
   }),
 });
@@ -196,6 +248,7 @@ export const AcpTextDeltaEventSchema = z.object({
   payload: z.object({
     traceId: z.string().min(1),
     delta: z.string(),
+    streamSeq: z.number().int().positive().optional(),
     timestamp: z.string(),
   }),
 });
@@ -207,6 +260,7 @@ export const AcpThoughtDeltaEventSchema = z.object({
   payload: z.object({
     traceId: z.string().min(1),
     delta: z.string(),
+    streamSeq: z.number().int().positive().optional(),
     timestamp: z.string(),
   }),
 });
@@ -227,6 +281,7 @@ export const AcpToolCallEventSchema = z.object({
       status: AcpToolStatusSchema,
       summary: z.string().max(1000),
     }),
+    streamSeq: z.number().int().positive().optional(),
     timestamp: z.string(),
   }),
 });
@@ -240,6 +295,7 @@ export const AcpToolCallUpdateEventSchema = z.object({
     callId: z.string().min(1),
     status: AcpToolStatusSchema,
     summary: z.string().max(1000).optional(),
+    streamSeq: z.number().int().positive().optional(),
     timestamp: z.string(),
   }),
 });
@@ -255,6 +311,7 @@ export const AcpPlanEventSchema = z.object({
       text: z.string().min(1),
       done: z.boolean(),
     })),
+    streamSeq: z.number().int().positive().optional(),
     timestamp: z.string(),
   }),
 });
@@ -275,6 +332,7 @@ export const AcpPermissionRequestEventSchema = z.object({
     toolTitle: z.string().min(1),
     detail: z.string().max(2000).optional(),
     options: z.array(AcpPermissionOptionSchema).min(1),
+    streamSeq: z.number().int().positive().optional(),
     timestamp: z.string(),
   }),
 });
@@ -295,6 +353,7 @@ export const AcpAskRequestEventSchema = z.object({
     options: z.array(AcpAskOptionSchema).optional(),
     multiSelect: z.boolean().optional(),
     allowFreeText: z.boolean().optional(),
+    streamSeq: z.number().int().positive().optional(),
     timestamp: z.string(),
   }),
 });
@@ -307,6 +366,7 @@ export const AcpTurnEndEventSchema = z.object({
     traceId: z.string().min(1),
     ok: z.boolean(),
     error: z.string().max(4000).optional(),
+    streamSeq: z.number().int().positive().optional(),
     timestamp: z.string(),
   }),
 });
@@ -319,6 +379,7 @@ export const AcpSessionStateEventSchema = z.object({
     traceId: z.string().min(1),
     conversationId: z.string().min(1),
     state: z.enum(["idle", "starting", "running", "error", "cancelled"]),
+    streamSeq: z.number().int().positive().optional(),
     timestamp: z.string(),
   }),
 });
@@ -336,6 +397,10 @@ export const EventSchema = z.discriminatedUnion("event", [
   AgentToolCallStartEventSchema,
   AgentToolCallEndEventSchema,
   AgentContextEventSchema,
+  AgentTurnStartedEventSchema,
+  AgentTurnEndEventSchema,
+  AgentTurnSupersededEventSchema,
+  AgentCancelRequestedEventSchema,
   AgentLearningUpdatedEventSchema,
   JobCompletedEventSchema,
   JobFailedEventSchema,
@@ -362,6 +427,10 @@ export type AgentReasoningDeltaEvent = z.infer<typeof AgentReasoningDeltaEventSc
 export type AgentToolCallStartEvent = z.infer<typeof AgentToolCallStartEventSchema>;
 export type AgentToolCallEndEvent = z.infer<typeof AgentToolCallEndEventSchema>;
 export type AgentContextEvent = z.infer<typeof AgentContextEventSchema>;
+export type AgentTurnStartedEvent = z.infer<typeof AgentTurnStartedEventSchema>;
+export type AgentTurnEndEvent = z.infer<typeof AgentTurnEndEventSchema>;
+export type AgentTurnSupersededEvent = z.infer<typeof AgentTurnSupersededEventSchema>;
+export type AgentCancelRequestedEvent = z.infer<typeof AgentCancelRequestedEventSchema>;
 export type AgentLearningUpdatedEvent = z.infer<typeof AgentLearningUpdatedEventSchema>;
 export type JobCompletedEvent = z.infer<typeof JobCompletedEventSchema>;
 export type JobFailedEvent = z.infer<typeof JobFailedEventSchema>;

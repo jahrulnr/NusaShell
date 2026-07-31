@@ -2230,6 +2230,8 @@ body {
   font-family: 'Inter', sans-serif;
   font-size: 13px;
 }
+.agent-message-stopped .agent-message-meta { color: rgba(245, 178, 91, .85); }
+.agent-tool-terminal.is-incomplete .agent-tool-terminal-meta { color: rgba(245, 178, 91, .85); }
 .agent-message-attachments {
   display: flex;
   max-width: 100%;

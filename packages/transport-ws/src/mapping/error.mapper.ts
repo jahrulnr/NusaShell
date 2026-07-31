@@ -1,5 +1,6 @@
 import { ApplicationError, type ApplicationErrorCode } from "@nusashell/application";
 import { ProtocolError } from "../protocol/websocket-error.js";
+import { redactString, redactValue } from "./redact.js";
 
 const ERROR_CODE_MAP: Record<ApplicationErrorCode, string> = {
   PLUGIN_NOT_FOUND: "PLUGIN_NOT_FOUND",
@@ -35,5 +36,5 @@ export function mapApplicationError(
   requestId?: string,
 ): ProtocolError {
   const code = ERROR_CODE_MAP[error.code] ?? "INTERNAL_ERROR";
-  return new ProtocolError(code, error.message, requestId, error.details);
+  return new ProtocolError(code, redactString(error.message), requestId, redactValue(error.details));
 }

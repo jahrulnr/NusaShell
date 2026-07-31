@@ -139,6 +139,10 @@ export class AgentConversationController {
     let pending = null;
     let selectedModel = null;
     let retryIsSafe = false;
+    let streamState = null;
+    let turnEndResolve = null;
+    const turnEndPromise = new Promise((resolve) => { turnEndResolve = resolve; });
+    let turnEnded = false;
     try {
       this.turnPending = true;
       this.activeTraceId = crypto.randomUUID();
@@ -179,7 +183,7 @@ export class AgentConversationController {
         if (selectedModel) status.textContent = formatContextUsage(liveTokens, selectedModel.contextWindow);
       };
       setContextStatus(baseTokens);
-      const streamState = {
+      streamState = {
         message: pending,
         lastKind: null,
         reasoningEl: null,
@@ -237,6 +241,15 @@ export class AgentConversationController {
           const estimated = Number(payload?.estimatedTokens) || 0;
           setContextStatus(Math.max(fromUsage, estimated));
         },
+        onTurnEnd: () => {
+          this.sealStreamingToolCardsIncomplete(streamState);
+          turnEnded = true;
+          turnEndResolve?.();
+        },
+        onCancelRequested: () => {
+          const btn = $("#agent-stop-btn");
+          if (btn) btn.textContent = "Stopping…";
+        },
       });
       retryIsSafe = false;
 
@@ -290,7 +303,19 @@ export class AgentConversationController {
       this.log("info", `Agent turn completed trace=${result.traceId} rounds=${result.rounds}`);
     } catch (error) {
       if (error.code === "AGENT_TURN_CANCELLED") {
-        pending?.remove();
+        // Wait for the terminal turn_end event (published after in-flight
+        // tools drain) before sealing, with a 2s fallback so the UI never
+        // hangs on a missing event.
+        if (!turnEnded) {
+          await Promise.race([turnEndPromise, new Promise((r) => setTimeout(r, 2000))]);
+        }
+        this.sealStreamingToolCardsIncomplete(streamState);
+        if (pending && streamState?.streamedText) {
+          this.sealStreamingMessage(pending, { content: streamState.streamedText });
+          pending.classList.add("agent-message-stopped");
+        } else {
+          pending?.remove();
+        }
         this.appendMessage("assistant", "Turn stopped.", { error: true });
         status.textContent = "Turn stopped";
         this.log("info", `Agent turn stopped trace=${this.activeTraceId}`);
@@ -435,8 +460,12 @@ export class AgentConversationController {
           const step = [...streamState.steps].reverse().find((s) => s.type === "tool_calls" && s.calls.some((c) => c.id === payload.callId));
           if (step) { const call = step.calls.find((c) => c.id === payload.callId); if (call) { call.ok = payload.ok !== false; if (payload.error) call.error = payload.error; } }
         },
+        onTurnEnd: () => {
+          this.sealStreamingToolCardsIncomplete(streamState);
+        },
       });
       sealStep();
+      this.sealStreamingToolCardsIncomplete(streamState);
       retryIsSafe = false;
 
       const fullText = streamState.steps
@@ -1091,6 +1120,30 @@ export class AgentConversationController {
           || payload.error
           || (payload.ok === false ? "Tool failed." : "ok"),
       );
+    }
+  }
+
+  sealStreamingToolCardsIncomplete(streamState) {
+    if (!streamState?.toolCards) return;
+    for (const card of streamState.toolCards.values()) {
+      if (!card) continue;
+      if (card.classList.contains("agent-ask-card")) {
+        if (!card.classList.contains("is-sealed")) {
+          card.classList.remove("is-pending", "is-submitting");
+          card.classList.add("is-sealed", "is-error");
+        }
+        continue;
+      }
+      if (card.classList.contains("is-running")) {
+        card.classList.remove("is-running");
+        card.classList.add("is-error", "is-incomplete");
+        card.open = false;
+        const output = card.querySelector(".agent-tool-terminal-output");
+        if (output) {
+          output.classList.add("is-error");
+          output.innerHTML = renderToolCodeHtml("Tool call did not complete (turn stopped).");
+        }
+      }
     }
   }
 

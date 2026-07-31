@@ -99,4 +99,106 @@ describe("mapDomainEvent", () => {
       },
     });
   });
+
+  it("carries streamSeq into the payload when the event has one", () => {
+    expect(mapDomainEvent({
+      type: "agent.text_delta",
+      occurredAt: new Date("2026-07-29T00:00:00.000Z"),
+      aggregateId: "trace-1",
+      delta: "hi",
+      streamSeq: 3,
+    } as Parameters<typeof mapDomainEvent>[0] & { delta: string; streamSeq: number }, 7)).toEqual({
+      kind: "event",
+      event: "agent.text_delta",
+      sequence: 7,
+      payload: {
+        traceId: "trace-1",
+        delta: "hi",
+        streamSeq: 3,
+        timestamp: "2026-07-29T00:00:00.000Z",
+      },
+    });
+  });
+
+  it("omits streamSeq from the payload when the event does not carry one", () => {
+    const envelope = mapDomainEvent({
+      type: "plugin.installed",
+      occurredAt: new Date("2026-07-29T00:00:00.000Z"),
+      aggregateId: "notes",
+      version: "1.0.0",
+    } as Parameters<typeof mapDomainEvent>[0] & { version: string }, 2);
+    expect(envelope?.payload).not.toHaveProperty("streamSeq");
+  });
+
+  it("maps agent.turn_started events", () => {
+    expect(mapDomainEvent({
+      type: "agent.turn_started",
+      occurredAt: new Date("2026-07-29T00:00:00.000Z"),
+      aggregateId: "trace-1",
+      streamSeq: 1,
+    } as Parameters<typeof mapDomainEvent>[0], 5)).toEqual({
+      kind: "event",
+      event: "agent.turn_started",
+      sequence: 5,
+      payload: {
+        traceId: "trace-1",
+        streamSeq: 1,
+        timestamp: "2026-07-29T00:00:00.000Z",
+      },
+    });
+  });
+
+  it("maps agent.turn_end events with reason", () => {
+    expect(mapDomainEvent({
+      type: "agent.turn_end",
+      occurredAt: new Date("2026-07-29T00:00:00.000Z"),
+      aggregateId: "trace-1",
+      reason: "cancelled",
+      streamSeq: 10,
+    } as Parameters<typeof mapDomainEvent>[0] & { reason: string }, 6)).toEqual({
+      kind: "event",
+      event: "agent.turn_end",
+      sequence: 6,
+      payload: {
+        traceId: "trace-1",
+        reason: "cancelled",
+        streamSeq: 10,
+        timestamp: "2026-07-29T00:00:00.000Z",
+      },
+    });
+  });
+
+  it("maps agent.turn_superseded events with byTraceId", () => {
+    expect(mapDomainEvent({
+      type: "agent.turn_superseded",
+      occurredAt: new Date("2026-07-29T00:00:00.000Z"),
+      aggregateId: "trace-old",
+      byTraceId: "trace-new",
+    } as Parameters<typeof mapDomainEvent>[0] & { byTraceId: string }, 7)).toEqual({
+      kind: "event",
+      event: "agent.turn_superseded",
+      sequence: 7,
+      payload: {
+        traceId: "trace-old",
+        byTraceId: "trace-new",
+        timestamp: "2026-07-29T00:00:00.000Z",
+      },
+    });
+  });
+
+  it("maps agent.cancel_requested events", () => {
+    expect(mapDomainEvent({
+      type: "agent.cancel_requested",
+      occurredAt: new Date("2026-07-29T00:00:00.000Z"),
+      aggregateId: "trace-1",
+    } as Parameters<typeof mapDomainEvent>[0], 8)).toEqual({
+      kind: "event",
+      event: "agent.cancel_requested",
+      sequence: 8,
+      payload: {
+        traceId: "trace-1",
+        timestamp: "2026-07-29T00:00:00.000Z",
+      },
+    });
+  });
 });
