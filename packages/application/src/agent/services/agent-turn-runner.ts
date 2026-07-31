@@ -15,6 +15,14 @@ const MAX_REPEATED_TOOL_CALLS = 50;
 const DEFAULT_MAX_TOOL_ROUNDS = 50;
 const DEFAULT_SOFT_RECOVER_ATTEMPTS = 1;
 const MAX_SOFT_RECOVER_ATTEMPTS = 3;
+const DEFAULT_MAX_CONCURRENT_TOOL_CALLS = 8;
+const MAX_CONCURRENT_TOOL_CALLS_CAP = 32;
+
+/**
+ * Tools that must run alone, in order (interactive barriers).
+ * `ask_question` blocks the turn for user input and cannot overlap siblings.
+ */
+const BARRIER_TOOLS: ReadonlySet<string> = new Set(["ask_question"]);
 
 export interface RunAgentTurnInput {
   readonly messages: readonly AgentMessage[];
@@ -109,6 +117,7 @@ export interface AgentTurnRunnerDeps {
   readonly defaultMaxToolRounds?: number;
   readonly defaultMaxRepeatedToolCalls?: number;
   readonly softRecoverAttempts?: number;
+  readonly maxConcurrentToolCalls?: number;
   readonly context?: AgentContextOptions;
   readonly compactPrompt?: string;
 }
@@ -121,11 +130,13 @@ export class AgentTurnRunner {
   private readonly defaultMaxToolRounds: number;
   private readonly defaultMaxRepeatedToolCalls: number;
   private readonly softRecoverAttempts: number;
+  private readonly maxConcurrentToolCalls: number;
 
   constructor(private readonly deps: AgentTurnRunnerDeps) {
     this.defaultMaxToolRounds = normalizeMaxRounds(deps.defaultMaxToolRounds);
     this.defaultMaxRepeatedToolCalls = deps.defaultMaxRepeatedToolCalls ?? MAX_REPEATED_TOOL_CALLS;
     this.softRecoverAttempts = normalizeSoftRecover(deps.softRecoverAttempts);
+    this.maxConcurrentToolCalls = normalizeConcurrentToolCalls(deps.maxConcurrentToolCalls);
   }
 
   async run(input: RunAgentTurnInput): Promise<AgentTurnResult> {
@@ -314,21 +325,14 @@ export class AgentTurnRunner {
       publishContext();
 
       const roundExecutions: AgentToolExecution[] = [];
-      for (const call of requestedCalls) {
-        assertTurnActive(input.signal, traceId);
-        input.onToolCallStart?.(call);
-        const execution = await this.executeTool(call, traceId, round);
-        input.onToolCallEnd?.(execution);
-        toolCalls.push(execution);
-        roundExecutions.push(execution);
-        messages.push({
-          role: "tool",
-          toolCallId: call.id,
-          name: call.name,
-          content: serializeToolResult(execution, call.name),
-        });
-        publishContext();
-      }
+      await this.executeToolBatch(requestedCalls, {
+        traceId,
+        round,
+        ...(input.signal ? { signal: input.signal } : {}),
+        ...(input.onToolCallStart ? { onToolCallStart: input.onToolCallStart } : {}),
+        ...(input.onToolCallEnd ? { onToolCallEnd: input.onToolCallEnd } : {}),
+      }, toolCalls, roundExecutions, messages);
+      publishContext();
       if (roundExecutions.length > 0) {
         steps.push({ type: "tool_calls", calls: [...roundExecutions], ...(stepModel ? { model: stepModel } : {}), ...(stepProviderId ? { providerId: stepProviderId } : {}) });
       }
@@ -365,6 +369,117 @@ export class AgentTurnRunner {
       this.deps.logger?.warn("Agent MCP tool failed traceId=%s tool=%s round=%d", traceId, call.name, round);
       return { id: call.id, name: call.name, ok: false, args: call.args, error: message };
     }
+  }
+
+  /**
+   * Execute one round's tool-call batch with segmentation + bounded parallelism.
+   *
+   * - Barrier tools (e.g. `ask_question`) run alone, in order.
+   * - Contiguous non-barrier calls form a parallel segment executed via a
+   *   bounded pool (`maxConcurrentToolCalls`). Same-plugin calls naturally
+   *   serialize through `PluginOperationQueue` inside the gateway.
+   * - Every `tool_call_id` in the batch gets a tool result message (success,
+   *   failure, or cancelled) — siblings are never dropped.
+   * - On cancel mid-batch: in-flight calls drain via `cancelTurn`; any slot
+   *   without an execution is filled with a cancelled stub. Results are
+   *   recorded into `messages`/`toolCalls`/`roundExecutions` in call order
+   *   before the caller throws `AGENT_TURN_CANCELLED`.
+   */
+  private async executeToolBatch(
+    requestedCalls: readonly AgentToolCall[],
+    ctx: {
+      readonly traceId: string;
+      readonly round: number;
+      readonly signal?: AbortSignal;
+      readonly onToolCallStart?: (call: AgentToolCall) => void;
+      readonly onToolCallEnd?: (execution: AgentToolExecution) => void;
+    },
+    toolCalls: AgentToolExecution[],
+    roundExecutions: AgentToolExecution[],
+    messages: AgentMessage[],
+  ): Promise<void> {
+    const segments = segmentToolBatch(requestedCalls);
+    for (const segment of segments) {
+      if (segment.kind === "barrier") {
+        const call = segment.calls[0];
+        if (!call) continue;
+        const execution = await this.runOneTool(call, ctx);
+        this.recordExecution(execution, call, toolCalls, roundExecutions, messages);
+      } else {
+        const executions = await this.runParallelSegment(segment.calls, ctx);
+        for (let i = 0; i < segment.calls.length; i++) {
+          const call = segment.calls[i];
+          if (!call) continue;
+          const execution = executions[i] ?? cancelledExecution(call);
+          this.recordExecution(execution, call, toolCalls, roundExecutions, messages);
+        }
+      }
+    }
+  }
+
+  private async runOneTool(
+    call: AgentToolCall,
+    ctx: { readonly traceId: string; readonly round: number; readonly signal?: AbortSignal;
+      readonly onToolCallStart?: (call: AgentToolCall) => void; readonly onToolCallEnd?: (execution: AgentToolExecution) => void; },
+  ): Promise<AgentToolExecution> {
+    assertTurnActive(ctx.signal, ctx.traceId);
+    ctx.onToolCallStart?.(call);
+    const execution = await this.executeTool(call, ctx.traceId, ctx.round);
+    ctx.onToolCallEnd?.(execution);
+    return execution;
+  }
+
+  private async runParallelSegment(
+    calls: readonly AgentToolCall[],
+    ctx: { readonly traceId: string; readonly round: number; readonly signal?: AbortSignal;
+      readonly onToolCallStart?: (call: AgentToolCall) => void; readonly onToolCallEnd?: (execution: AgentToolExecution) => void; },
+  ): Promise<(AgentToolExecution | undefined)[]> {
+    // Emit start for all calls up front so the UI shows the full batch.
+    for (const call of calls) {
+      ctx.onToolCallStart?.(call);
+    }
+    const results = await runPool(calls, this.maxConcurrentToolCalls, async (call, index) => {
+      try {
+        assertTurnActive(ctx.signal, ctx.traceId);
+      } catch {
+        return { index, execution: cancelledExecution(call) };
+      }
+      const execution = await this.executeTool(call, ctx.traceId, ctx.round);
+      ctx.onToolCallEnd?.(execution);
+      return { index, execution };
+    });
+    // Order by original index; fill any missing slot with a cancelled stub.
+    const ordered: (AgentToolExecution | undefined)[] = new Array(calls.length).fill(undefined);
+    for (const { index, execution } of results) {
+      ordered[index] = execution;
+    }
+    for (let i = 0; i < ordered.length; i++) {
+      if (!ordered[i]) {
+        const call = calls[i];
+        if (!call) continue;
+        const stub = cancelledExecution(call);
+        ordered[i] = stub;
+        ctx.onToolCallEnd?.(stub);
+      }
+    }
+    return ordered;
+  }
+
+  private recordExecution(
+    execution: AgentToolExecution,
+    call: AgentToolCall,
+    toolCalls: AgentToolExecution[],
+    roundExecutions: AgentToolExecution[],
+    messages: AgentMessage[],
+  ): void {
+    toolCalls.push(execution);
+    roundExecutions.push(execution);
+    messages.push({
+      role: "tool",
+      toolCallId: call.id,
+      name: call.name,
+      content: serializeToolResult(execution, call.name),
+    });
   }
 
   private async compactMessages(
@@ -550,6 +665,80 @@ function normalizeSoftRecover(value: number | undefined): number {
   if (value === undefined) return DEFAULT_SOFT_RECOVER_ATTEMPTS;
   if (!Number.isInteger(value) || value < 0) return 0;
   return Math.min(value, MAX_SOFT_RECOVER_ATTEMPTS);
+}
+
+function normalizeConcurrentToolCalls(value: number | undefined): number {
+  if (value === undefined) return DEFAULT_MAX_CONCURRENT_TOOL_CALLS;
+  if (!Number.isInteger(value) || value < 1) return 1;
+  return Math.min(value, MAX_CONCURRENT_TOOL_CALLS_CAP);
+}
+
+function isBarrierTool(name: string): boolean {
+  return BARRIER_TOOLS.has(name);
+}
+
+type ToolBatchSegment =
+  | { readonly kind: "parallel"; readonly calls: readonly AgentToolCall[] }
+  | { readonly kind: "barrier"; readonly calls: readonly AgentToolCall[] };
+
+/**
+ * Split a round's tool-call batch into contiguous parallel-safe runs and
+ * standalone barrier segments. Barrier tools (e.g. `ask_question`) must run
+ * alone, in order; non-barrier neighbors are grouped into parallel segments.
+ */
+function segmentToolBatch(calls: readonly AgentToolCall[]): readonly ToolBatchSegment[] {
+  const segments: ToolBatchSegment[] = [];
+  let buffer: AgentToolCall[] = [];
+  const flush = () => {
+    if (buffer.length > 0) {
+      segments.push({ kind: "parallel", calls: [...buffer] });
+      buffer = [];
+    }
+  };
+  for (const call of calls) {
+    if (isBarrierTool(call.name)) {
+      flush();
+      segments.push({ kind: "barrier", calls: [call] });
+    } else {
+      buffer.push(call);
+    }
+  }
+  flush();
+  return segments;
+}
+
+function cancelledExecution(call: AgentToolCall): AgentToolExecution {
+  return { id: call.id, name: call.name, ok: false, args: call.args, error: "Tool call cancelled" };
+}
+
+/**
+ * Bounded concurrency pool. Runs `worker(item, index)` with at most
+ * `concurrency` in-flight, preserving results indexed by original position.
+ * No external dependency — just a tiny index-based worker pool.
+ */
+async function runPool<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const limit = Math.max(1, concurrency);
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function run(): Promise<void> {
+    while (true) {
+      const index = next++;
+      if (index >= items.length) return;
+      const item = items[index];
+      if (item === undefined) return;
+      results[index] = await worker(item, index);
+    }
+  }
+  const workers: Promise<void>[] = [];
+  for (let i = 0; i < Math.min(limit, items.length); i++) {
+    workers.push(run());
+  }
+  await Promise.all(workers);
+  return results;
 }
 
 function hasTurnProgress(

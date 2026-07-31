@@ -78,6 +78,32 @@ executed once, nudged on its second appearance, and stops the loop on its third.
   wire contract accepts bounded data URLs only; remote attachment URLs and
   arbitrary filesystem paths are rejected.
 
+## Parallel tool rounds
+
+When a provider round emits multiple tool calls, the runner executes them
+**concurrently** by default — not sequentially. This applies to calls that
+target different plugins or independent I/O; same-plugin calls naturally
+serialize through the per-plugin `PluginOperationQueue` inside
+`McpAgentToolGateway`.
+
+- **Segmentation:** the batch is split into contiguous parallel-safe runs and
+  standalone **barrier** segments. Barrier tools (currently `ask_question`)
+  must run alone, in order — they block the turn for user input and cannot
+  overlap siblings. Non-barrier neighbors form one parallel segment.
+- **Bounded pool:** parallel segments run through a tiny worker pool capped at
+  `maxConcurrentToolCalls` (env `NUSASHELL_AI_MAX_CONCURRENT_TOOL_CALLS`,
+  default **8**, clamp 1–32). `maxConcurrentToolCalls: 1` is a full sequential
+  escape hatch.
+- **Order preservation:** `onToolCallStart` fires for all calls in a segment
+  up front (the UI shows the full batch immediately). Results are collected
+  indexed by original call order and appended to `messages`/`steps` in that
+  order regardless of completion order.
+- **Cancel mid-batch:** if the abort signal fires, in-flight calls drain via
+  `cancelTurn` / MCP cancel. Any slot still without an execution is filled
+  with a cancelled stub (`{ ok: false, error: "Tool call cancelled" }`) and
+  `onToolCallEnd` is emitted so the UI seals every card. Every `tool_call_id`
+  in the assistant message gets a tool result — siblings are never dropped.
+
 ## Context compaction
 
 Before a provider round, the runner estimates input size as `chars / 4`. When
@@ -117,6 +143,7 @@ Environment is currently the process-level runtime boundary:
 | `NUSASHELL_AI_API_KEY` | empty | Initial API key; never returned or logged |
 | `NUSASHELL_AI_MAX_TOOL_ROUNDS` | `8` | Maximum provider/tool rounds |
 | `NUSASHELL_AI_SOFT_RECOVER_ATTEMPTS` | `1` | Mid-turn soft recover retries after a provider call fails with tool progress already accumulated (0–3) |
+| `NUSASHELL_AI_MAX_CONCURRENT_TOOL_CALLS` | `8` | Maximum concurrent tool executions within a parallel segment (1–32; 1 = sequential) |
 | `NUSASHELL_AI_STRATEGY` | `failover` | `failover`, `round-robin`, or selected-provider `switch` |
 | `NUSASHELL_AI_TOTAL_ATTEMPT_BUDGET` | `4` | Shared retry/failover attempt ceiling per provider round |
 | `NUSASHELL_AI_STREAM` | `true` | Request SSE where the provider dialect supports it |

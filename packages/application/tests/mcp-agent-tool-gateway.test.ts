@@ -562,4 +562,70 @@ describe("McpAgentToolGateway", () => {
       await expect(pending).rejects.toThrow(/interrupted|cancelled/i);
     });
   });
+
+  describe("concurrent execution + cancelTurn", () => {
+    it("tracks overlapping activeCalls on different plugins and cancels both", async () => {
+      let resolveA: (value: unknown) => void = () => {};
+      let resolveB: (value: unknown) => void = () => {};
+      const callToolCalls: Array<{ requestId: string; pluginId: string }> = [];
+      const cancelCalls: Array<{ requestId: string; pluginId: string }> = [];
+      const runtime = {
+        ...fakeRuntime,
+        listTools: async (pluginId: unknown) => {
+          const id = String(pluginId);
+          if (id === "nusashell.mail") return [{ name: "readB", description: "read B", inputSchema: { type: "object" } }];
+          return [{ name: "readA", description: "read A", inputSchema: { type: "object" } }];
+        },
+        callTool: async (_pluginId: unknown, req: { requestId: string; toolName: string }) => {
+          callToolCalls.push({ requestId: req.requestId, pluginId: String(_pluginId) });
+          if (req.toolName === "readA") return new Promise((r) => { resolveA = r; });
+          if (req.toolName === "readB") return new Promise((r) => { resolveB = r; });
+          return { ok: true };
+        },
+        cancelTool: async (pluginId: unknown, requestId: string) => {
+          cancelCalls.push({ requestId, pluginId: String(pluginId) });
+        },
+      };
+      const gateway = new McpAgentToolGateway(runtime as never);
+      gateway.beginTurn("turn-concurrent");
+      const grantA = await gateway.execute("tool_schemas", { pluginId: "nusashell.notes", toolNames: ["readA"] }, "grant-a", "turn-concurrent") as { granted: Array<{ name: string }> };
+      const grantB = await gateway.execute("tool_schemas", { pluginId: "nusashell.mail", toolNames: ["readB"] }, "grant-b", "turn-concurrent") as { granted: Array<{ name: string }> };
+      const nameA = grantA.granted[0]!.name;
+      const nameB = grantB.granted[0]!.name;
+
+      const execA = gateway.execute(nameA, {}, "req-a", "turn-concurrent", "call-a");
+      const execB = gateway.execute(nameB, {}, "req-b", "turn-concurrent", "call-b");
+
+      // Both should have registered in activeCalls and started callTool.
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(callToolCalls.map((c) => c.requestId)).toEqual(expect.arrayContaining(["req-a", "req-b"]));
+
+      await gateway.cancelTurn("turn-concurrent");
+      expect(cancelCalls.map((c) => c.requestId)).toEqual(expect.arrayContaining(["req-a", "req-b"]));
+
+      resolveA({ ok: true });
+      resolveB({ ok: true });
+      await Promise.allSettled([execA, execB]);
+      gateway.endTurn("turn-concurrent");
+    });
+
+    it("unregisters requestIds after callTool settles", async () => {
+      const runtime = {
+        ...fakeRuntime,
+        listTools: async () => [{ name: "ping", description: "ping", inputSchema: { type: "object" } }],
+        callTool: async () => "pong",
+      };
+      const gateway = new McpAgentToolGateway(runtime as never);
+      gateway.beginTurn("turn-unreg");
+      const grant = await gateway.execute("tool_schemas", { pluginId: "nusashell.notes", toolNames: ["ping"] }, "grant", "turn-unreg") as { granted: Array<{ name: string }> };
+      const name = grant.granted[0]!.name;
+
+      await gateway.execute(name, {}, "req-1", "turn-unreg", "call-1");
+
+      // After settling, cancelTurn should have nothing to cancel (no error, no-op).
+      await expect(gateway.cancelTurn("turn-unreg")).resolves.toBeUndefined();
+      gateway.endTurn("turn-unreg");
+    });
+  });
 });

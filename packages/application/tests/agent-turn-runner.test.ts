@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   AgentTurnRunner,
   type AgentProvider,
@@ -74,6 +74,72 @@ class FakeToolGateway implements AgentToolGateway {
     this.calls.push({ name, args });
     if (name === "notes.create") return { id: "note-1" };
     throw new Error(`Unexpected tool ${name}`);
+  }
+}
+
+/**
+ * Gateway that defers each tool call, allowing tests to observe overlap and
+ * control completion order. Records the start order and the completion order.
+ */
+class DeferredToolGateway implements AgentToolGateway {
+  readonly startOrder: string[] = [];
+  readonly endOrder: string[] = [];
+  private readonly pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+  private readonly toolNames: readonly string[];
+
+  constructor(toolNames: readonly string[] = ["tool_a", "tool_b", "tool_pre", "tool_post", "ask_question"]) {
+    this.toolNames = toolNames;
+  }
+
+  beginTurn() {}
+  endTurn() {}
+  cancelTurn() {
+    for (const [callId, entry] of this.pending) {
+      this.pending.delete(callId);
+      this.endOrder.push(callId);
+      entry.reject(new Error("Tool call cancelled"));
+    }
+  }
+
+  async listTools() {
+    return this.toolNames.map((name) => ({
+      name,
+      description: `Test tool ${name}`,
+      inputSchema: { type: "object", properties: {} },
+    }));
+  }
+
+  async execute(name: string, _args: Readonly<Record<string, unknown>>, _requestId: string, _turnId: string, callId: string): Promise<unknown> {
+    this.startOrder.push(callId);
+    return new Promise((resolve, reject) => {
+      this.pending.set(callId, { resolve, reject });
+    });
+  }
+
+  complete(callId: string, result: unknown): void {
+    const entry = this.pending.get(callId);
+    if (entry) {
+      this.pending.delete(callId);
+      this.endOrder.push(callId);
+      entry.resolve(result);
+    }
+  }
+
+  fail(callId: string, error: Error): void {
+    const entry = this.pending.get(callId);
+    if (entry) {
+      this.pending.delete(callId);
+      this.endOrder.push(callId);
+      entry.reject(error);
+    }
+  }
+
+  isStarted(callId: string): boolean {
+    return this.startOrder.includes(callId);
+  }
+
+  isPending(callId: string): boolean {
+    return this.pending.has(callId);
   }
 }
 
@@ -510,5 +576,159 @@ describe("AgentTurnRunner", () => {
 
     expect(error).toMatchObject({ code: "AGENT_TURN_CANCELLED" });
     expect(error.details?.partial).toBeUndefined();
+  });
+
+  it("executes two tool calls in a round concurrently (overlap)", async () => {
+    const tools = new DeferredToolGateway();
+    const provider = new ScriptedProvider([
+      { toolCalls: [
+        { id: "call-a", name: "tool_a", args: {} },
+        { id: "call-b", name: "tool_b", args: {} },
+      ] },
+      { text: "Done" },
+    ]);
+    const runner = new AgentTurnRunner({ provider, toolGateway: tools, maxConcurrentToolCalls: 8 });
+
+    const turnPromise = runner.run({
+      messages: [{ role: "user", content: "Run both" }],
+      pluginIds: [],
+    });
+
+    // Wait for both to start (concurrent dispatch).
+    await vi.waitFor(() => {
+      expect(tools.isStarted("call-a")).toBe(true);
+      expect(tools.isStarted("call-b")).toBe(true);
+    });
+
+    // Complete in reverse order to prove order is preserved in results.
+    tools.complete("call-b", { b: 1 });
+    tools.complete("call-a", { a: 1 });
+
+    const result = await turnPromise;
+    expect(result.text).toBe("Done");
+    expect(result.toolCalls.map((tc) => tc.id)).toEqual(["call-a", "call-b"]);
+    // Tool messages in messages array preserve call order.
+    const toolMessages = result.messages.filter((m) => m.role === "tool");
+    expect(toolMessages.map((m) => m.toolCallId)).toEqual(["call-a", "call-b"]);
+  });
+
+  it("preserves call order in steps despite reverse completion", async () => {
+    const tools = new DeferredToolGateway(["tool_first", "tool_second"]);
+    const provider = new ScriptedProvider([
+      { toolCalls: [
+        { id: "first", name: "tool_first", args: {} },
+        { id: "second", name: "tool_second", args: {} },
+      ] },
+      { text: "Done" },
+    ]);
+    const runner = new AgentTurnRunner({ provider, toolGateway: tools, maxConcurrentToolCalls: 8 });
+
+    const turnPromise = runner.run({
+      messages: [{ role: "user", content: "Run both" }],
+      pluginIds: [],
+    });
+
+    await vi.waitFor(() => expect(tools.isStarted("first")).toBe(true));
+    tools.complete("second", "s");
+    tools.complete("first", "f");
+
+    const result = await turnPromise;
+    const toolStep = result.steps.find((s) => s.type === "tool_calls");
+    expect(toolStep?.type).toBe("tool_calls");
+    if (toolStep?.type === "tool_calls") {
+      expect(toolStep.calls.map((c) => c.id)).toEqual(["first", "second"]);
+    }
+  });
+
+  it("does not overlap a barrier tool (ask_question) with neighbors", async () => {
+    const tools = new DeferredToolGateway();
+    const provider = new ScriptedProvider([
+      { toolCalls: [
+        { id: "pre", name: "tool_pre", args: {} },
+        { id: "ask", name: "ask_question", args: { question: "q", options: [{ id: "y", label: "Y" }] } },
+        { id: "post", name: "tool_post", args: {} },
+      ] },
+      { text: "Done" },
+    ]);
+    const runner = new AgentTurnRunner({ provider, toolGateway: tools, maxConcurrentToolCalls: 8 });
+
+    const turnPromise = runner.run({
+      messages: [{ role: "user", content: "Run all three" }],
+      pluginIds: [],
+    });
+
+    // "pre" starts first (parallel segment of 1); "ask" must NOT start until "pre" completes.
+    await vi.waitFor(() => expect(tools.isStarted("pre")).toBe(true));
+    expect(tools.isStarted("ask")).toBe(false);
+    tools.complete("pre", "p");
+
+    // Now "ask" (barrier) starts; "post" must NOT start until "ask" completes.
+    await vi.waitFor(() => expect(tools.isStarted("ask")).toBe(true));
+    expect(tools.isStarted("post")).toBe(false);
+    tools.complete("ask", { answer: "Y" });
+
+    // Now "post" starts.
+    await vi.waitFor(() => expect(tools.isStarted("post")).toBe(true));
+    tools.complete("post", "d");
+
+    const result = await turnPromise;
+    expect(result.toolCalls.map((tc) => tc.id)).toEqual(["pre", "ask", "post"]);
+  });
+
+  it("fills cancelled stubs for all calls when aborted mid-batch", async () => {
+    const controller = new AbortController();
+    const tools = new DeferredToolGateway();
+    const provider = new ScriptedProvider([
+      { toolCalls: [
+        { id: "call-a", name: "tool_a", args: {} },
+        { id: "call-b", name: "tool_b", args: {} },
+      ] },
+      { text: "Done" },
+    ]);
+    const runner = new AgentTurnRunner({ provider, toolGateway: tools, maxConcurrentToolCalls: 8 });
+
+    const turnPromise = runner.run({
+      messages: [{ role: "user", content: "Run both" }],
+      pluginIds: [],
+      signal: controller.signal,
+    });
+
+    await vi.waitFor(() => {
+      expect(tools.isStarted("call-a")).toBe(true);
+      expect(tools.isStarted("call-b")).toBe(true);
+    });
+
+    controller.abort();
+    // The turn should reject with AGENT_TURN_CANCELLED.
+    const error = await turnPromise.catch((e) => e);
+    expect(error).toMatchObject({ code: "AGENT_TURN_CANCELLED" });
+  });
+
+  it("runs sequentially when maxConcurrentToolCalls is 1", async () => {
+    const tools = new DeferredToolGateway();
+    const provider = new ScriptedProvider([
+      { toolCalls: [
+        { id: "call-a", name: "tool_a", args: {} },
+        { id: "call-b", name: "tool_b", args: {} },
+      ] },
+      { text: "Done" },
+    ]);
+    const runner = new AgentTurnRunner({ provider, toolGateway: tools, maxConcurrentToolCalls: 1 });
+
+    const turnPromise = runner.run({
+      messages: [{ role: "user", content: "Run both" }],
+      pluginIds: [],
+    });
+
+    // "call-a" starts; "call-b" must NOT start until "call-a" completes.
+    await vi.waitFor(() => expect(tools.isStarted("call-a")).toBe(true));
+    expect(tools.isStarted("call-b")).toBe(false);
+    tools.complete("call-a", "a");
+
+    await vi.waitFor(() => expect(tools.isStarted("call-b")).toBe(true));
+    tools.complete("call-b", "b");
+
+    const result = await turnPromise;
+    expect(result.toolCalls.map((tc) => tc.id)).toEqual(["call-a", "call-b"]);
   });
 });

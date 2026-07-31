@@ -133,6 +133,7 @@ export interface ContainerOptions {
     readonly maxToolRounds: number;
     readonly maxRepeatedToolCalls?: number;
     readonly softRecoverAttempts?: number;
+    readonly maxConcurrentToolCalls?: number;
     readonly strategy?: "failover" | "round-robin" | "switch";
     readonly totalAttemptBudget?: number;
     readonly stream?: boolean;
@@ -196,6 +197,7 @@ export interface Container {
     maxToolRounds?: number;
     maxRepeatedToolCalls?: number;
     softRecoverAttempts?: number;
+    maxConcurrentToolCalls?: number;
     compactionEnabled?: boolean;
     maxInputTokens?: number;
     reserveTokens?: number;
@@ -249,6 +251,7 @@ export function createContainer(options: ContainerOptions): Container {
     maxToolRounds: options.ai?.maxToolRounds ?? 50,
     maxRepeatedToolCalls: options.ai?.maxRepeatedToolCalls ?? 50,
     softRecoverAttempts: options.ai?.softRecoverAttempts ?? 1,
+    maxConcurrentToolCalls: options.ai?.maxConcurrentToolCalls ?? 8,
     ...(options.ai?.context ? { context: options.ai.context } : {}),
   };
 
@@ -539,6 +542,7 @@ export function createContainer(options: ContainerOptions): Container {
       if (typeof settings.maxToolRounds === "number") aiRuntime.maxToolRounds = settings.maxToolRounds;
       if (typeof settings.maxRepeatedToolCalls === "number") aiRuntime.maxRepeatedToolCalls = settings.maxRepeatedToolCalls;
       if (typeof settings.softRecoverAttempts === "number") aiRuntime.softRecoverAttempts = settings.softRecoverAttempts;
+      if (typeof settings.maxConcurrentToolCalls === "number") aiRuntime.maxConcurrentToolCalls = settings.maxConcurrentToolCalls;
       if (typeof settings.compactionEnabled === "boolean" || typeof settings.maxInputTokens === "number" || typeof settings.reserveTokens === "number" || typeof settings.recentTurns === "number" || typeof settings.summaryMaxChars === "number") {
         aiRuntime.context = {
           compactionEnabled: typeof settings.compactionEnabled === "boolean" ? settings.compactionEnabled : aiRuntime.context?.compactionEnabled ?? true,

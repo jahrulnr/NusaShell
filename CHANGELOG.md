@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.47] - 2026-08-01
+
+### Added
+
+- **Parallel tool rounds** — a provider round with multiple tool calls now
+  executes them concurrently instead of serially.
+  - `AgentTurnRunner` segments the batch into contiguous parallel-safe runs
+    and standalone **barrier** segments. Barrier tools (`ask_question` for
+    MVP) run alone, in order; non-barrier neighbors run through a bounded
+    worker pool (`maxConcurrentToolCalls`, env
+    `NUSASHELL_AI_MAX_CONCURRENT_TOOL_CALLS`, default 8, clamp 1–32).
+    `maxConcurrentToolCalls: 1` is a full sequential escape hatch.
+  - Same-plugin calls naturally serialize through the per-plugin
+    `PluginOperationQueue` — "parallel" means cross-plugin / independent I/O
+    overlap, not breaking plugin single-flight.
+  - `onToolCallStart` fires for all calls in a segment up front (UI shows the
+    full batch immediately). Results are collected in original call order
+    regardless of completion order — every `tool_call_id` gets a tool result
+    message (success, failure, or cancelled); siblings are never dropped.
+  - On cancel mid-batch: in-flight calls drain via `cancelTurn` / MCP cancel;
+    any slot without an execution is filled with a cancelled stub and
+    `onToolCallEnd` is emitted so the UI seals every card.
+  - Wired through `AiConfig`, `AgentRuntimeSettings`, `apps/backend`
+    container + bootstrap, and desktop `main/index.ts`.
+  - New unit tests: concurrent overlap (2 calls), order preservation despite
+    reverse completion, barrier non-overlap (`ask_question`), cancel mid-batch
+    with cancelled stubs, `maxConcurrentToolCalls: 1` sequential. Gateway
+    tests: overlapping `activeCalls` on different plugins + `cancelTurn`,
+    requestId unregister after settle.
+
 ## [0.0.46] - 2026-08-01
 
 ### Added

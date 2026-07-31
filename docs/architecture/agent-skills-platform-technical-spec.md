@@ -1927,6 +1927,7 @@ sequenceDiagram
 ```
 
 The orchestrator should preserve the model's tool-call IDs and return results in a provider-compatible form.
+Implemented in `AgentTurnRunner` — see [agent-runtime.md § Parallel tool rounds](agent-runtime.md#parallel-tool-rounds).
 
 ---
 

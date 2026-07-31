@@ -52,6 +52,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
       ...(config.ai.apiKey !== undefined ? { apiKey: config.ai.apiKey } : {}),
       maxToolRounds: config.ai.maxToolRounds,
       softRecoverAttempts: config.ai.softRecoverAttempts,
+      maxConcurrentToolCalls: config.ai.maxConcurrentToolCalls,
       strategy: config.ai.strategy,
       totalAttemptBudget: config.ai.totalAttemptBudget,
       stream: config.ai.stream,

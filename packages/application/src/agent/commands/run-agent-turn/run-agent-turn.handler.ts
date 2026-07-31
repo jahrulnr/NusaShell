@@ -27,6 +27,7 @@ export interface AgentRuntimeSettings {
   maxToolRounds: number;
   maxRepeatedToolCalls: number;
   softRecoverAttempts: number;
+  maxConcurrentToolCalls: number;
   strategy: AgentProviderStrategy;
   totalAttemptBudget: number;
   context?: AgentContextOptions;
@@ -71,6 +72,7 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
       defaultMaxToolRounds: this.runtime.maxToolRounds,
       defaultMaxRepeatedToolCalls: this.runtime.maxRepeatedToolCalls,
       softRecoverAttempts: this.runtime.softRecoverAttempts,
+      maxConcurrentToolCalls: this.runtime.maxConcurrentToolCalls,
       ...(this.logger ? { logger: this.logger } : {}),
       ...(this.runtime.context ? { context: this.runtime.context } : {}),
       ...(compactPrompt ? { compactPrompt } : {}),
