@@ -196,7 +196,7 @@ export function sanitizeAssistantSteps(steps) {
   if (!Array.isArray(steps)) return undefined;
   return steps.map((step) => {
     if (step?.type === "tool_calls" && Array.isArray(step.calls)) {
-      return { type: "tool_calls", calls: step.calls.map(toConversationToolCall) };
+      return { type: "tool_calls", calls: step.calls.map(toConversationToolCall), ...(step.model ? { model: step.model } : {}), ...(step.providerId ? { providerId: step.providerId } : {}) };
     }
     if ((step?.type === "reasoning" || step?.type === "text") && typeof step.content === "string") {
       return { ...step, content: clampToolText(step.content, 1_000_000) };

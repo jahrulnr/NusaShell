@@ -45,9 +45,9 @@ export interface AgentToolExecution {
 }
 
 export type AgentTurnStep =
-  | { readonly type: "reasoning"; readonly content: string }
-  | { readonly type: "tool_calls"; readonly calls: readonly AgentToolExecution[] }
-  | { readonly type: "text"; readonly content: string };
+  | { readonly type: "reasoning"; readonly content: string; readonly model?: string; readonly providerId?: string }
+  | { readonly type: "tool_calls"; readonly calls: readonly AgentToolExecution[]; readonly model?: string; readonly providerId?: string }
+  | { readonly type: "text"; readonly content: string; readonly model?: string; readonly providerId?: string };
 
 export interface AgentTurnResult {
   readonly traceId: string;
@@ -179,8 +179,10 @@ export class AgentTurnRunner {
       providerId = response.providerId ?? providerId;
       api = response.api ?? api;
       reasoning = response.reasoning ?? reasoning;
+      const stepModel = response.model;
+      const stepProviderId = response.providerId;
       if (response.reasoning?.trim()) {
-        steps.push({ type: "reasoning", content: response.reasoning.trim() });
+        steps.push({ type: "reasoning", content: response.reasoning.trim(), ...(stepModel ? { model: stepModel } : {}), ...(stepProviderId ? { providerId: stepProviderId } : {}) });
       }
       addUsage(usage, response.usage);
       const requestedCalls = response.toolCalls ?? [];
@@ -207,7 +209,7 @@ export class AgentTurnRunner {
           text = "(empty model response)";
         }
         this.deps.logger?.info("Agent turn completed traceId=%s provider=%s rounds=%d", traceId, this.deps.provider.id, round);
-        steps.push({ type: "text", content: text });
+        steps.push({ type: "text", content: text, ...(stepModel ? { model: stepModel } : {}), ...(stepProviderId ? { providerId: stepProviderId } : {}) });
         return {
           traceId,
           text,
@@ -254,7 +256,7 @@ export class AgentTurnRunner {
       // Keep provider order for the round: reasoning (already pushed) → text → tools.
       // Streaming UIs also append by delta arrival; do not reorder text after tools.
       if (response.text?.trim()) {
-        steps.push({ type: "text", content: response.text.trim() });
+        steps.push({ type: "text", content: response.text.trim(), ...(stepModel ? { model: stepModel } : {}), ...(stepProviderId ? { providerId: stepProviderId } : {}) });
       }
       publishContext();
 
@@ -275,7 +277,7 @@ export class AgentTurnRunner {
         publishContext();
       }
       if (roundExecutions.length > 0) {
-        steps.push({ type: "tool_calls", calls: [...roundExecutions] });
+        steps.push({ type: "tool_calls", calls: [...roundExecutions], ...(stepModel ? { model: stepModel } : {}), ...(stepProviderId ? { providerId: stepProviderId } : {}) });
       }
     }
 

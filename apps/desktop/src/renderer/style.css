@@ -2298,6 +2298,43 @@ body {
   margin: 0 6px;
   color: #435064;
 }
+.agent-model-step {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+  color: #6f7f93;
+  font: 9px 'JetBrains Mono', monospace;
+  letter-spacing: 0.04em;
+  user-select: none;
+}
+.agent-model-step-mark {
+  font-size: 10px;
+  color: #4a6076;
+  line-height: 1;
+}
+.agent-model-step-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+.agent-model-step::after {
+  content: "";
+  flex: 1;
+  height: 0;
+  border-top: 1px dashed #2a3a4d;
+  margin-left: 2px;
+}
+.agent-model-step.is-fallback {
+  color: #e8a838;
+}
+.agent-model-step.is-fallback .agent-model-step-mark {
+  color: #e8a838;
+}
+.agent-model-step.is-fallback::after {
+  border-top-color: rgba(232, 168, 56, 0.25);
+}
 .agent-message-actions {
   display: flex;
   align-items: center;
@@ -2682,6 +2719,7 @@ body {
   .agent-message.user { width: auto; max-width: 90%; }
   .agent-message.assistant .agent-bubble { font-size: 15px; }
   .agent-message-detail { display: none; }
+  .agent-model-step-name { max-width: 140px; }
   .agent-tool-terminal summary { grid-template-columns: 24px minmax(0, 1fr) auto auto; }
   .agent-tool-terminal-meta { text-align: right; }
   .agent-composer { margin-inline: 14px; }

@@ -501,7 +501,13 @@ export class AgentConversationController {
     }
 
     if (role === "assistant" && meta.steps?.length) {
+      let lastStepModel = null;
       for (const step of meta.steps) {
+        if (step.model && step.model !== lastStepModel) {
+          const divider = this.modelDivider(step.model);
+          if (divider) message.appendChild(divider);
+          lastStepModel = step.model;
+        }
         if (step.type === "reasoning" && step.content?.trim()) {
           message.appendChild(this.reasoningDisclosure(step.content));
         } else if (step.type === "tool_calls" && step.calls?.length) {
@@ -582,6 +588,19 @@ export class AgentConversationController {
       gallery.appendChild(file);
     });
     return gallery;
+  }
+
+  modelDivider(model) {
+    if (!model) return null;
+    const selected = this.getActiveModel?.();
+    const isFallback = selected && model !== selected.id;
+    const divider = element("div", `agent-model-step${isFallback ? " is-fallback" : ""}`);
+    divider.append(
+      element("span", "agent-model-step-mark", "◈"),
+      element("span", "agent-model-step-name", shortModelName(model)),
+    );
+    if (isFallback) divider.title = `Routed to ${model} (selected: ${selected.id})`;
+    return divider;
   }
 
   reasoningDisclosure(reasoning) {
@@ -738,7 +757,13 @@ export class AgentConversationController {
       [...message.children].forEach((child) => {
         if (child !== identity) child.remove();
       });
+      let lastStepModel = null;
       for (const step of meta.steps) {
+        if (step.model && step.model !== lastStepModel) {
+          const divider = this.modelDivider(step.model);
+          if (divider) message.appendChild(divider);
+          lastStepModel = step.model;
+        }
         if (step.type === "reasoning" && step.content?.trim()) {
           message.appendChild(this.reasoningDisclosure(step.content));
         } else if (step.type === "tool_calls" && step.calls?.length) {
@@ -862,6 +887,12 @@ function element(tagName, className, content) {
 
 function messageDetail(content) {
   return element("span", "agent-message-detail", content);
+}
+
+function shortModelName(model) {
+  if (!model) return "";
+  const parts = String(model).split("/");
+  return parts[parts.length - 1] || model;
 }
 
 function iconButton(label, icon) {
