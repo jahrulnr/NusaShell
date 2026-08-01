@@ -120,7 +120,18 @@ executable agents.
 
 ### Codex manifest defaults
 
-The Codex manifest seeds two spawn env defaults:
+The Codex manifest defaults to running the adapter through `npx`:
+
+```
+npx -y @agentclientprotocol/codex-acp
+```
+
+This works without a global install (npx downloads the package on first run,
+which adds a few seconds to the first Connect). To skip the download, install
+globally (`npm install -g @agentclientprotocol/codex-acp`) and set
+`NUSASHELL_CODEX_ACP_BIN=codex-acp` in the Electron process env.
+
+The manifest also seeds two spawn env defaults:
 
 - `NO_BROWSER=1` — prevents the Codex CLI from opening a browser during
   `authenticate`; required for headless/desktop usage.

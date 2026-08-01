@@ -170,15 +170,30 @@ function normalizeConfigs(value: unknown): AcpProviderConfig[] {
     if (typeof item !== "object" || item === null) return [];
     const candidate = item as Partial<AcpProviderConfig>;
     if (typeof candidate.providerId !== "string" || typeof candidate.enabled !== "boolean") return [];
+    let command = candidate.command;
+    let args = Array.isArray(candidate.args) ? candidate.args.filter((arg): arg is string => typeof arg === "string") : undefined;
+    // v0.0.49 migration: the Codex manifest default changed from `codex-acp`
+    // to `npx -y @agentclientprotocol/codex-acp`. Drop stale saved commands
+    // that match the old default so the new manifest default takes over.
+    let authStatus = candidate.authStatus;
+    let authError = candidate.authError;
+    let authCheckedAt = candidate.authCheckedAt;
+    if (candidate.providerId === "codex" && command === "codex-acp") {
+      command = undefined;
+      args = undefined;
+      authStatus = undefined;
+      authError = undefined;
+      authCheckedAt = undefined;
+    }
     return [{
       providerId: candidate.providerId,
       enabled: candidate.enabled,
-      command: candidate.command,
-      args: Array.isArray(candidate.args) ? candidate.args.filter((arg): arg is string => typeof arg === "string") : undefined,
+      command,
+      args,
       ...(typeof candidate.authMethodId === "string" ? { authMethodId: candidate.authMethodId } : {}),
-      ...(candidate.authStatus === "connected" || candidate.authStatus === "needs-auth" ? { authStatus: candidate.authStatus } : {}),
-      ...(typeof candidate.authCheckedAt === "string" ? { authCheckedAt: candidate.authCheckedAt } : {}),
-      ...(typeof candidate.authError === "string" ? { authError: candidate.authError } : {}),
+      ...(authStatus === "connected" || authStatus === "needs-auth" ? { authStatus } : {}),
+      ...(typeof authCheckedAt === "string" ? { authCheckedAt } : {}),
+      ...(typeof authError === "string" ? { authError } : {}),
     }];
   });
 }
