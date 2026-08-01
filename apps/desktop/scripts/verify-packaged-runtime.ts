@@ -2,7 +2,7 @@ import { listPackage } from "@electron/asar";
 import { readdir } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { REQUIRED_RUNTIME_FILES } from "./package-runtime-dependencies.js";
+import { missingPackagedRuntimeFiles } from "./package-runtime-dependencies.js";
 
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packagedAppPath = join(
@@ -37,10 +37,8 @@ if (archives.length !== 1) {
 }
 
 const archivePath = archives[0]!;
-const archiveFiles = new Set(listPackage(archivePath, { isPack: false }));
-const missingRuntimeFiles = REQUIRED_RUNTIME_FILES.filter(
-  (runtimeFile) => !archiveFiles.has(`/node_modules/${runtimeFile}`),
-);
+const archiveFiles = listPackage(archivePath, { isPack: false });
+const missingRuntimeFiles = missingPackagedRuntimeFiles(archiveFiles);
 if (missingRuntimeFiles.length > 0) {
   throw new Error(
     `Packaged app.asar is missing required runtime files: ${missingRuntimeFiles.join(", ")}`,

@@ -16,6 +16,16 @@ export const REQUIRED_RUNTIME_FILES = [
   "ajv-formats/dist/formats.js",
 ] as const;
 
+export function missingPackagedRuntimeFiles(archiveFiles: Iterable<string>): string[] {
+  const normalizedArchiveFiles = new Set(
+    [...archiveFiles].map((archiveFile) => archiveFile.replaceAll("\\", "/")),
+  );
+
+  return REQUIRED_RUNTIME_FILES.filter(
+    (runtimeFile) => !normalizedArchiveFiles.has(`/node_modules/${runtimeFile}`),
+  );
+}
+
 type Deploy = (deployPath: string) => Promise<void>;
 
 export interface StageRuntimeDependenciesOptions {

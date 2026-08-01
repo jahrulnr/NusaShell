@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  missingPackagedRuntimeFiles,
   REQUIRED_RUNTIME_FILES,
   stageRuntimeDependencies,
 } from "../scripts/package-runtime-dependencies";
@@ -22,6 +23,14 @@ afterEach(async () => {
 });
 
 describe("desktop runtime dependency packaging", () => {
+  it("recognizes Windows-style paths returned by the ASAR reader", () => {
+    const windowsArchiveFiles = REQUIRED_RUNTIME_FILES.map(
+      (runtimeFile) => `\\node_modules\\${runtimeFile.replaceAll("/", "\\")}`,
+    );
+
+    expect(missingPackagedRuntimeFiles(windowsArchiveFiles)).toEqual([]);
+  });
+
   it("copies a standalone production dependency tree into the Forge build", async () => {
     const buildPath = await temporaryDirectory("nusashell-forge-build-");
 
