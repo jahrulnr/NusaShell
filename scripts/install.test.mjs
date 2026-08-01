@@ -16,7 +16,7 @@ afterEach(async () => {
   );
 });
 
-describe("Linux installer version activation", () => {
+describe.runIf(process.platform === "linux")("Linux installer version activation", () => {
   it("atomically replaces a current symlink that already points to a directory", async () => {
     const root = await mkdtemp(join(tmpdir(), "nusashell-installer-current-"));
     temporaryDirectories.push(root);
