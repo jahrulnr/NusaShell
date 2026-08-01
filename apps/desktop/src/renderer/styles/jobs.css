@@ -1,0 +1,215 @@
+/* ============ Jobs view ============ */
+.jobs-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.jobs-hint {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-bottom: 16px;
+  padding: 8px 12px;
+  background: var(--panel-alt);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.jobs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.jobs-list[aria-busy="true"] { opacity: 0.6; }
+
+.jobs-empty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 7px;
+  min-height: 180px;
+  padding: 28px;
+  color: #8795aa;
+  text-align: center;
+}
+.jobs-empty strong { color: #bdc8d8; font-size: 13px; }
+.jobs-empty span { max-width: 270px; font-size: 11px; line-height: 1.55; }
+
+.jobs-error {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 124, 137, 0.35);
+  border-radius: var(--radius-md);
+  background: rgba(255, 124, 137, 0.08);
+  color: var(--text-dim);
+}
+.jobs-error strong { color: var(--red); font-size: 13px; }
+.jobs-error span { font-size: 11.5px; line-height: 1.5; }
+
+.job-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.job-row:hover { border-color: var(--border-soft); background: var(--panel-alt); }
+.job-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  flex-shrink: 0;
+}
+.job-status-dot.job-status-ok { background: var(--green); }
+.job-status-dot.job-status-error { background: var(--danger); }
+.job-info { flex: 1; min-width: 0; }
+.job-title { font-weight: 600; font-size: 14px; }
+.job-meta {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.job-strip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.job-strip-next { color: var(--text-dim); }
+.job-strip-last.is-ok { color: var(--green); }
+.job-strip-last.is-error { color: var(--danger); }
+.job-strip-error {
+  font-size: 11px;
+  color: var(--danger);
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.job-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+.job-output-entry {
+  padding: 12px;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+.job-output-header { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.job-output-header.job-output-error { color: var(--danger); }
+.job-output-summary {
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+  margin: 0;
+  font-family: var(--mono-font, monospace);
+}
+
+/* Job create/output modals reuse the shared .modal-overlay + .active pattern
+   from modals.css. .modal-card is the Jobs-form variant of .modal. */
+.modal-card {
+  width: 520px;
+  max-width: 90vw;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;
+}
+.modal-card-wide { width: 720px; }
+.modal-card .modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+}
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 22px;
+  cursor: pointer;
+  color: var(--text-faint);
+}
+.form-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.form-label input,
+.form-label textarea,
+.form-label select {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+}
+.form-help { font-size: 11px; color: var(--text-faint); }
+.ghost-btn {
+  padding: 8px 16px;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* ===== Job delete dialog (mirrors agent/provider delete dialogs) ===== */
+.job-delete-overlay:not([hidden]) {
+  position: fixed;
+  z-index: 31;
+  inset: 0;
+  background: rgba(3, 7, 12, 0.72);
+}
+.job-delete-dialog:not([hidden]) {
+  position: fixed;
+  z-index: 32;
+  top: 50%;
+  left: 50%;
+  width: min(390px, calc(100vw - 40px));
+  transform: translate(-50%, -50%);
+  border: 1px solid #3b5667;
+  border-radius: 12px;
+  padding: 17px;
+  background: #0d151d;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+}
+
+@media (max-width: 720px) {
+  .job-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .job-strip {
+    order: 2;
+    flex-basis: 100%;
+    align-items: flex-start;
+    padding-left: 20px;
+  }
+  .job-actions {
+    order: 3;
+    flex-basis: 100%;
+    padding-left: 20px;
+    padding-top: 4px;
+  }
+}

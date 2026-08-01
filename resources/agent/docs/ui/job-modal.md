@@ -1,12 +1,12 @@
-# New Job modal
+# New job modal
 
 Form to create a new scheduled job with name, schedule expression, mode (agent prompt or plugin tool call), and optional repeat limit.
 
-**How to open:** Click the + New Job button in the Jobs view.
+**How to open:** Click the + New job button in the Jobs view.
 
 ## Job form
 
-Name, schedule (every 30m / 2h / 1d / 5-field cron / ISO timestamp), mode selector, agent prompt or plugin tool fields, and optional repeat count. Schedule is validated on blur with a live description or error.
+Name, schedule (every 30m / 2h / 1d / 5-field cron / ISO timestamp), mode selector, agent prompt or plugin tool fields, and optional repeat count. Schedule is validated on blur with a live description or error. The mode-dependent fields (agent prompt vs plugin tool fields) toggle via hidden + aria-hidden. The dialog supports Escape and overlay click to close, and returns focus to the trigger on close.
 
 - **Name** (`#job-field-name`):
   - Section: Job form

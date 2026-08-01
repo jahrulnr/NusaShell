@@ -6,7 +6,7 @@ Shows recent run output entries (run time, status, summary) for a selected job.
 
 ## Output entries
 
-Lists up to 20 recent output entries newest-first, each showing the run timestamp, status (ok/error), and a truncated summary.
+Lists up to 20 recent output entries newest-first, each showing the run timestamp, status (ok/error), and a truncated summary. The dialog supports Escape and overlay click to close.
 
 - **Output entries** (`#job-output-body`):
   - Section: Output entries

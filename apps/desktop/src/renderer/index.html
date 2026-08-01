@@ -24,6 +24,7 @@
 <link rel="stylesheet" href="styles/shell-ux.css">
 <link rel="stylesheet" href="styles/learning.css">
 <link rel="stylesheet" href="styles/learning-detail.css">
+<link rel="stylesheet" href="styles/jobs.css">
 <link rel="stylesheet" href="styles/acp.css">
 </head>
 <body>
@@ -469,27 +470,35 @@
       <section class="view jobs-view" data-view="jobs">
         <div class="jobs-header">
           <div>
+            <div class="agent-kicker"><span class="agent-kicker-dot"></span> Scheduled automation</div>
             <h1 class="page-title">Jobs</h1>
             <p class="subtitle">Scheduled automation that fires headless agent turns or plugin tool calls while NusaShell is open.</p>
           </div>
-          <button class="primary-btn" id="jobs-new-btn" data-control="jobs-new-btn">+ New Job</button>
+          <button class="action-btn" id="jobs-new-btn" type="button" data-control="jobs-new-btn">+ New job</button>
         </div>
-        <div class="jobs-hint" id="jobs-hint">Jobs run only while the app is open. A one-shot missed while the app was closed is marked errored, not silently fired.</div>
-        <div class="jobs-list" id="jobs-list" role="list" aria-label="Scheduled jobs"></div>
+        <div class="jobs-error" id="jobs-error" hidden>
+          <strong>Could not load jobs</strong>
+          <span id="jobs-error-message"></span>
+        </div>
+        <div class="jobs-list" id="jobs-list" role="list" aria-label="Scheduled jobs" aria-busy="false"></div>
+        <div class="jobs-empty" id="jobs-empty" hidden>
+          <strong>No jobs yet</strong>
+          <span>Schedule a headless agent turn or plugin tool call to run on a timer while NusaShell is open.</span>
+        </div>
       </section>
 
       <!-- ===== Job Modal ===== -->
-      <div class="modal-overlay" id="job-modal" style="display:none">
+      <div class="modal-overlay" id="job-modal" role="dialog" aria-modal="true" aria-labelledby="job-modal-title">
         <div class="modal-card">
           <div class="modal-header">
-            <h2 id="job-modal-title">New Job</h2>
-            <button class="modal-close" id="job-modal-close" aria-label="Close">&times;</button>
+            <h2 id="job-modal-title">New job</h2>
+            <button class="modal-close" id="job-modal-close" type="button" aria-label="Close">&times;</button>
           </div>
           <div class="modal-body">
             <label class="form-label">Name<input type="text" id="job-field-name" placeholder="Daily inbox summary" data-control="job-field-name"></label>
             <label class="form-label">Schedule
               <input type="text" id="job-field-schedule" placeholder="every 30m / 2h / 1d / 0 9 * * * / 2025-12-01T09:00:00Z" data-control="job-field-schedule">
-              <span class="form-help" id="job-schedule-help"></span>
+              <span class="form-help" id="job-schedule-help" aria-live="polite"></span>
             </label>
             <label class="form-label">Mode
               <select id="job-field-mode" data-control="job-field-mode">
@@ -500,7 +509,7 @@
             <label class="form-label" id="job-agent-prompt-label">Prompt
               <textarea id="job-field-prompt" rows="4" placeholder="Summarize unread mail and create a note." data-control="job-field-prompt"></textarea>
             </label>
-            <div id="job-tool-fields" style="display:none">
+            <div id="job-tool-fields" hidden aria-hidden="true">
               <label class="form-label">Plugin ID<input type="text" id="job-field-plugin-id" placeholder="nusashell.mail" data-control="job-field-plugin-id"></label>
               <label class="form-label">Tool name<input type="text" id="job-field-tool-name" placeholder="send" data-control="job-field-tool-name"></label>
               <label class="form-label">Args (JSON)<textarea id="job-field-args" rows="3" placeholder='{"to":"x@y.com"}' data-control="job-field-args"></textarea></label>
@@ -508,21 +517,31 @@
             <label class="form-label">Repeat (times, blank = forever)<input type="number" id="job-field-repeat" min="1" placeholder="∞" data-control="job-field-repeat"></label>
           </div>
           <div class="modal-footer">
-            <button class="ghost-btn" id="job-modal-cancel">Cancel</button>
-            <button class="primary-btn" id="job-modal-save" data-control="job-modal-save">Save</button>
+            <button class="ghost-btn" id="job-modal-cancel" type="button">Cancel</button>
+            <button class="primary-btn" id="job-modal-save" type="button" data-control="job-modal-save">Save</button>
           </div>
         </div>
       </div>
 
       <!-- ===== Job Output Modal ===== -->
-      <div class="modal-overlay" id="job-output-modal" style="display:none">
+      <div class="modal-overlay" id="job-output-modal" role="dialog" aria-modal="true" aria-labelledby="job-output-title">
         <div class="modal-card modal-card-wide">
           <div class="modal-header">
             <h2 id="job-output-title">Job output</h2>
-            <button class="modal-close" id="job-output-close" aria-label="Close">&times;</button>
+            <button class="modal-close" id="job-output-close" type="button" aria-label="Close">&times;</button>
           </div>
           <div class="modal-body" id="job-output-body"></div>
         </div>
+      </div>
+
+      <!-- ===== Job delete confirmation ===== -->
+      <div class="job-delete-overlay" id="job-delete-overlay" hidden></div>
+      <div class="job-delete-dialog" id="job-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="job-delete-title" aria-describedby="job-delete-copy" hidden>
+        <div class="provider-modal-head">
+          <div><div class="settings-card-title" id="job-delete-title">Remove job?</div><p class="provider-modal-subtitle" id="job-delete-copy">This permanently removes the scheduled job.</p></div>
+          <button class="provider-modal-close" id="job-delete-close" type="button" aria-label="Close delete confirmation">×</button>
+        </div>
+        <div class="agent-delete-actions"><button class="mini-btn" id="job-delete-cancel" type="button">Cancel</button><button class="mini-btn danger" id="job-delete-confirm" type="button">Remove</button></div>
       </div>
 
       <!-- ===== View: Settings ===== -->

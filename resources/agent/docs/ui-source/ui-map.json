@@ -558,18 +558,21 @@
         {
           "heading": "Job list",
           "paragraphs": [
-            "Lists all scheduled jobs with their schedule, mode, repeat progress, next run time, and last status. Each row offers Run, Pause/Resume, Output, and Remove actions. A hint reminds the user that jobs run only while the app is open and missed one-shots are marked errored, not silently fired."
+            "Lists all scheduled jobs. Each row leads with a status dot and shows the job name, schedule, mode, and repeat progress, plus a schedule strip with a humanized next run time and a textual last status (Never / OK / Error). Each row offers Run, Pause/Resume, Output, and Remove actions. A hint reminds the user that jobs run only while the app is open and missed one-shots are marked errored, not silently fired. An inline error panel appears when the list fails to load, and an empty state offers a New job action."
           ],
           "controls": [
             "jobs-new-btn",
             "jobs-hint",
-            "jobs-list"
+            "jobs-list",
+            "jobs-empty",
+            "jobs-empty-new-btn",
+            "jobs-error"
           ]
         },
         {
           "heading": "Job row actions",
           "paragraphs": [
-            "Each job row has Run (fire immediately), Pause/Resume (toggle enabled), Output (recent run summaries), and Remove (delete the job)."
+            "Each job row has Run (fire immediately), Pause/Resume (toggle enabled), Output (recent run summaries), and Remove (opens a delete confirmation dialog)."
           ],
           "controls": [
             "job-run-btn",
@@ -577,18 +580,30 @@
             "job-output-btn",
             "job-remove-btn"
           ]
+        },
+        {
+          "heading": "Job delete confirmation",
+          "paragraphs": [
+            "An in-app dialog confirms job removal before deleting it via job.remove. It opens from a row's Remove action and closes on Cancel, overlay click, or Escape."
+          ],
+          "controls": [
+            "job-delete-dialog",
+            "job-delete-copy",
+            "job-delete-cancel",
+            "job-delete-confirm"
+          ]
         }
       ]
     },
     "job-modal": {
-      "title": "New Job modal",
+      "title": "New job modal",
       "purpose": "Form to create a new scheduled job with name, schedule expression, mode (agent prompt or plugin tool call), and optional repeat limit.",
-      "howToOpen": "Click the + New Job button in the Jobs view.",
+      "howToOpen": "Click the + New job button in the Jobs view.",
       "sections": [
         {
           "heading": "Job form",
           "paragraphs": [
-            "Name, schedule (every 30m / 2h / 1d / 5-field cron / ISO timestamp), mode selector, agent prompt or plugin tool fields, and optional repeat count. Schedule is validated on blur with a live description or error."
+            "Name, schedule (every 30m / 2h / 1d / 5-field cron / ISO timestamp), mode selector, agent prompt or plugin tool fields, and optional repeat count. Schedule is validated on blur with a live description or error. The mode-dependent fields (agent prompt vs plugin tool fields) toggle via hidden + aria-hidden. The dialog supports Escape and overlay click to close, and returns focus to the trigger on close."
           ],
           "controls": [
             "job-field-name",
@@ -613,7 +628,7 @@
         {
           "heading": "Output entries",
           "paragraphs": [
-            "Lists up to 20 recent output entries newest-first, each showing the run timestamp, status (ok/error), and a truncated summary."
+            "Lists up to 20 recent output entries newest-first, each showing the run timestamp, status (ok/error), and a truncated summary. The dialog supports Escape and overlay click to close."
           ],
           "controls": [
             "job-output-body"
@@ -2396,10 +2411,31 @@
     },
     "jobs-new-btn": {
       "section": "Job list",
-      "label": "New Job",
+      "label": "New job",
       "type": "button",
       "selector": "#jobs-new-btn",
-      "action": "Opens the New Job modal."
+      "action": "Opens the New job modal."
+    },
+    "jobs-empty": {
+      "section": "Job list",
+      "label": "Jobs empty state",
+      "type": "status text",
+      "selector": "#jobs-empty",
+      "action": "Shown when no jobs are scheduled, with a direction and a New job action."
+    },
+    "jobs-empty-new-btn": {
+      "section": "Job list",
+      "label": "New job (empty state)",
+      "type": "button",
+      "selector": "#jobs-empty-new-btn",
+      "action": "Opens the New job modal from the empty state."
+    },
+    "jobs-error": {
+      "section": "Job list",
+      "label": "Jobs load error",
+      "type": "status text",
+      "selector": "#jobs-error",
+      "action": "Inline error panel shown when the job list fails to load."
     },
     "jobs-hint": {
       "section": "Job list",
@@ -2441,7 +2477,35 @@
       "label": "Remove",
       "type": "button",
       "selector": "[data-control=\"job-remove-btn\"]",
-      "action": "Deletes the job after confirmation via job.remove."
+      "action": "Opens the job delete confirmation dialog."
+    },
+    "job-delete-dialog": {
+      "section": "Job delete confirmation",
+      "label": "Delete dialog",
+      "type": "dialog",
+      "selector": "#job-delete-dialog",
+      "action": "Confirms job removal before calling job.remove. Closes on Cancel, overlay click, or Escape."
+    },
+    "job-delete-copy": {
+      "section": "Job delete confirmation",
+      "label": "Delete copy",
+      "type": "status text",
+      "selector": "#job-delete-copy",
+      "action": "States which job will be permanently removed from this device."
+    },
+    "job-delete-cancel": {
+      "section": "Job delete confirmation",
+      "label": "Cancel",
+      "type": "button",
+      "selector": "#job-delete-cancel",
+      "action": "Closes the delete dialog without removing the job."
+    },
+    "job-delete-confirm": {
+      "section": "Job delete confirmation",
+      "label": "Remove",
+      "type": "button",
+      "selector": "#job-delete-confirm",
+      "action": "Removes the job via job.remove and closes the dialog."
     },
     "job-field-name": {
       "section": "Job form",

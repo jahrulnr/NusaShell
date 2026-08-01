@@ -11,6 +11,7 @@
   --accent-soft: rgba(59, 110, 240, 0.14);
   --green: #55d996;
   --red: #ff7c89;
+  --danger: var(--red);
   --purple: #ad96ff;
   --amber: #ffc15c;
   --blue-info: #74adff;
