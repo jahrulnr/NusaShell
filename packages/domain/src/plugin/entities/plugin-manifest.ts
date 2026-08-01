@@ -15,7 +15,7 @@ export interface PluginManifestInput {
   readonly name: string;
   readonly version: string;
   readonly icon: string;
-  readonly ui: {
+  readonly ui?: {
     readonly entry: string;
     readonly window?: {
       readonly mode?: WindowMode;
@@ -85,7 +85,7 @@ export class PluginManifest {
       return err(new ManifestValidationError("Plugin icon must not be empty"));
     }
 
-    if (raw.ui.entry.trim().length === 0) {
+    if (raw.ui && raw.ui.entry.trim().length === 0) {
       return err(new ManifestValidationError("UI entry must not be empty"));
     }
 
@@ -116,7 +116,7 @@ export class PluginManifest {
       );
     }
 
-    const windowMode = raw.ui.window?.mode;
+    const windowMode = raw.ui?.window?.mode;
     if (
       windowMode !== undefined &&
       windowMode !== "panel" &&
@@ -164,7 +164,8 @@ export class PluginManifest {
 
   toInput(): PluginManifestInput {
     return {
-      id: PluginIdFactory.toString(this.id), name: this.name, version: this.version.toString(), icon: this.icon, ui: this.ui,
+      id: PluginIdFactory.toString(this.id), name: this.name, version: this.version.toString(), icon: this.icon,
+      ...(this.ui !== undefined ? { ui: this.ui } : {}),
       mcp: { transport: this.mcp.transport, ...(this.mcp.command !== undefined ? { command: this.mcp.command } : {}), args: this.mcp.args, ...(this.mcp.url !== undefined ? { url: this.mcp.url } : {}), env: this.mcp.env, autostart: this.mcp.autostart, keepAliveOnClose: this.mcp.keepAliveOnClose },
       ...(this.dependencies.shell !== undefined ? { dependencies: this.dependencies } : {}),
     };

@@ -11,6 +11,7 @@ import {
   countLogsBySource,
   describeToolsPanel,
   filterLauncherPlugins,
+  hasPluginUi,
   normalizeTransparentIcon,
   pluginIconPresentation,
   positionContextMenu,
@@ -318,11 +319,16 @@ function renderAutostartList() {
 function renderAppGrid() {
   const grid = $("#app-grid");
   grid.innerHTML = "";
+  const uiPlugins = plugins.filter(hasPluginUi);
   if (plugins.length === 0) {
     grid.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:20px 0">No plugins installed. Add a plugin folder to plugins/.</div>';
     return;
   }
-  const visiblePlugins = filterLauncherPlugins(plugins, launcherSearchQuery);
+  if (uiPlugins.length === 0) {
+    grid.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:20px 0">No apps to launch. Installed plugins are MCP-only — manage them from the Plugins view.</div>';
+    return;
+  }
+  const visiblePlugins = filterLauncherPlugins(uiPlugins, launcherSearchQuery);
   if (visiblePlugins.length === 0) {
     grid.appendChild(el("div", "app-grid-empty", `No plugins match “${launcherSearchQuery}”.`));
     return;
@@ -421,6 +427,10 @@ function closeDrawer() {
 
 async function openPluginWindow(plugin) {
   try {
+    if (!hasPluginUi(plugin)) {
+      console.warn("[openPluginWindow] plugin has no UI; ignoring open request", plugin.pluginId);
+      return;
+    }
     if (plugin.state === "idle") {
       await sendRequest("plugin.start", { pluginId: plugin.pluginId });
     }
@@ -449,7 +459,10 @@ function showContextMenu(x, y, plugin) {
   menu.style.display = "block";
   menu.dataset.pluginId = plugin.pluginId;
   setContextMenuMode("plugin");
-  $$("#context-menu .ctx-item").forEach((item) => { item.disabled = false; });
+  const canOpen = hasPluginUi(plugin);
+  $$("#context-menu .ctx-item").forEach((item) => {
+    item.disabled = item.dataset.action === "open" ? !canOpen : false;
+  });
   const point = positionContextMenu(
     { x, y },
     { width: menu.offsetWidth || 180, height: menu.offsetHeight || 200 },

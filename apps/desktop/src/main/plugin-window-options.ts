@@ -35,8 +35,12 @@ export function normalizePluginWindowOptions(
     : mode === "widget"
       ? { width: 420, height: 360 }
       : { width: 720, height: 480 };
+  const entry = input.entry?.trim() ?? "";
+  if (!entry) {
+    throw new Error("Plugin has no UI entry (headless plugin); cannot open a window");
+  }
   return {
-    entry: input.entry?.trim() || "ui/index.html",
+    entry,
     width: clampDimension(input.window?.defaultSize?.width, 400, 1920, defaults.width),
     height: clampDimension(input.window?.defaultSize?.height, 300, 1200, defaults.height),
     resizable: input.window?.resizable !== false,

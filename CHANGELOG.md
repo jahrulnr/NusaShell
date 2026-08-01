@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.54] - 2026-08-01
+
+### Added
+
+- **Headless MCP plugins (optional `ui`)** — a plugin manifest may now omit `ui`
+  to ship a headless MCP-only plugin. Headless plugins never open a
+  `BrowserWindow`, do not appear on the Home launcher grid, and are managed from
+  the Plugins view (Start / Stop / Autostart / uninstall) and via agent `mcp_*`
+  tools. `icon` stays required (emoji/text is valid). Existing manifests with
+  `ui` are unchanged (backward compatible).
+  - **Contracts:** `ManifestSchema.ui`, `PluginListItemSchema.ui`, and
+    `PluginDto.ui` are now optional. `ui.entry` must still be non-empty when
+    `ui` is present.
+  - **Domain:** `PluginManifestInput.ui` and the `PluginManifest.ui` field are
+    optional; validation of `entry` and window mode only runs when `ui` is
+    present; `toInput()` omits `ui` when absent.
+  - **Application:** `RuntimeEntry.ui` / `PluginView.ui` are optional;
+    `PluginRuntimeManager.ensureEntry` no longer invents a placeholder
+    `ui: { entry: "ui/index.html" }`. `ListPluginsHandler` now forwards `ui`
+    and `keepAliveOnClose` (previously stripped — see Fixed). New
+    `hasPluginUi(view)` helper exported from `@nusashell/application`.
+  - **Infrastructure:** `PluginInstaller.installFromDirectory` now `access()`es
+    the resolved `ui.entry` file (when declared) and local file icons under the
+    plugin folder before copy, failing the install early with
+    `Invalid plugin package: ui.entry not found: …` / `icon not found: …` if
+    missing or escaping the plugin dir. `PluginSyncService` applies the same
+    check on cold sync and skips broken packages instead of resurrecting them.
+    Shared util in `packages/infrastructure/src/plugins/plugin-path-checks.ts`.
+
+### Changed
+
+- **Home launcher grid = UI plugins only.** Headless MCP-only plugins are
+  filtered out of the Home grid (`hasPluginUi`); the Plugins view still lists
+  all installed plugins. The Home empty state now distinguishes "no plugins
+  installed" from "installed plugins are MCP-only".
+- **Context menu `Open` is disabled for headless plugins** (no window to open).
+  `openPluginWindow` in the renderer also guards against headless plugins as a
+  defense-in-depth.
+
+### Fixed
+
+- **`ListPluginsHandler` stripped `ui` and `keepAliveOnClose`** from the
+  `plugin.list` response while `PluginListItemSchema` expected them, so the
+  launcher could fall back to a phantom `ui/index.html` default via
+  `normalizePluginWindowOptions` and open the wrong path for UI plugins whose
+  entry differed. The handler now forwards both fields, and
+  `normalizePluginWindowOptions` no longer silently defaults a missing entry to
+  `ui/index.html` — it throws `Plugin has no UI entry (headless plugin);
+  cannot open a window` so a headless plugin can never open a blank window.
+
 ## [0.0.53] - 2026-08-01
 
 ### Added

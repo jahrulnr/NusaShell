@@ -132,10 +132,15 @@ The shell only needs to spawn/connect and speak standard MCP.
 
 ### 3.1 Package layout
 
+A plugin is one folder with `manifest.json` + `mcp/`, and optionally `ui/` +
+an icon asset. Two shapes ship:
+
+**UI plugin** (gets a Home tile and a window):
+
 ```
 my-plugin/
 ├── manifest.json          # metadata + entry points
-├── icon.png               # 512x512, for the launcher
+├── icon.png               # 512x512, for the launcher (or emoji/text in manifest)
 ├── ui/
 │   ├── index.html
 │   ├── bundle.js          # UI logic; talks via the bridge
@@ -143,6 +148,17 @@ my-plugin/
 ├── mcp/
 │   ├── server.js          # or any-language binary/script
 │   └── package.json       # (if the MCP server is Node-based)
+└── README.md
+```
+
+**Headless MCP plugin** (no window, not on Home; managed from Plugins view
+and via agent `mcp_*` tools):
+
+```
+my-indexer/
+├── manifest.json          # metadata + MCP transport; no `ui`
+├── mcp/
+│   └── server.js
 └── README.md
 ```
 
@@ -155,6 +171,7 @@ my-plugin/
   "version": "1.0.0",
   "icon": "icon.png",
 
+  // `ui` is optional. Omit it for a headless MCP-only plugin.
   "ui": {
     "entry": "ui/index.html",
     "window": {
@@ -185,9 +202,18 @@ Design notes:
   valid if executable on the target environment).
 - `autostart` vs lazy spawn: default is **lazy** (spawn when the user first opens
   the UI) so idle cost stays low - similar to an Android Service bound on demand.
+  For headless plugins, `autostart: true` is the normal way to start the MCP
+  server at boot since there is no UI to open.
 - `keepAliveOnClose`: for plugins with background work (file watchers, scheduled
   sync). The MCP process stays up after the window closes and shows a “running”
   badge on the launcher icon.
+- **`ui` optional:** omit `ui` for a headless MCP-only plugin. Headless plugins
+  never open a `BrowserWindow`, do not appear on the Home launcher grid, and are
+  managed from the **Plugins** view (Start / Stop / Autostart / uninstall) and
+  via agent `mcp_*` tools. `icon` stays required (emoji/text is valid). At
+  install time, when `ui.entry` is declared the shell `access()`es the resolved
+  file under the plugin folder and fails the install early if it is missing or
+  escapes the plugin dir; local file icons get the same check.
 
 ### 3.3 Communication Bridge
 
@@ -288,9 +314,13 @@ live state stays in `PluginRuntimeManager` (backend).
 1. User drops a `.zip` / `.tar.gz` package (or later a marketplace URL)
 2. Shell extracts into `plugins/<id>/`
 3. Parse `manifest.json`, validate required fields
-4. If the MCP side needs dependency install (e.g. `npm install` in the MCP folder), run it once at install
-5. Register in the installed-metadata store
-6. Icon appears in the launcher
+4. When `ui.entry` is declared, `access()` the resolved file under the plugin
+   folder (fail install early if missing or outside the dir); local file icons
+   get the same check. Headless plugins (no `ui`) skip the entry check.
+5. If the MCP side needs dependency install (e.g. `npm install` in the MCP folder), run it once at install
+6. Register in the installed-metadata store
+7. UI plugins appear on the Home launcher grid; headless plugins appear only
+   in the Plugins view
 
 **Uninstall:**
 
@@ -321,9 +351,13 @@ live state stays in `PluginRuntimeManager` (backend).
 └──────────────────────────────────────────────┘
 ```
 
-- Icon grid; click → open the plugin window/panel
+- Icon grid; click → open the plugin window/panel. **Home shows UI plugins only**;
+  headless MCP-only plugins (no `ui` in their manifest) never get a Home tile and
+  are managed from the Plugins view instead.
 - Small badge on the icon when the plugin is `running` / `background`
-- Right-click → context menu: **Open, Start, Force Stop, Restart, Details, Uninstall**; editable fields get shell-owned **Cut / Copy / Paste** backed by the Electron clipboard bridge.
+- Right-click → context menu: **Open, Start, Force Stop, Restart, Details, Uninstall**;
+  **Open** is disabled for headless plugins (no window to open). Editable fields
+  get shell-owned **Cut / Copy / Paste** backed by the Electron clipboard bridge.
 - Home owns the installed-app search because it filters only plugin cards by name, ID, or manifest description; the title bar does not imply a global search. Plugin artwork may be an emoji, HTTP(S) URL, or a plugin-relative local asset such as `file://icon.png`; local assets resolve to absolute `file://` URLs before the renderer displays them. Image and emoji artwork share one icon plate, and transparent PNG margins are normalized at render time so plugins keep comparable visual weight without rewriting their source assets.
 - Shell-owned chrome uses the NusaShell tile-and-wave emblem as its primary small-size brand mark. The detailed horizontal logo remains reference artwork; compact surfaces pair the simplified SVG emblem with a live text wordmark so both stay sharp at desktop title-bar scale. Windows and Linux launcher/plugin windows also receive a transparent PNG rendition at runtime, including development, so native window previews and taskbar/dock entries do not fall back to Electron's default icon; packaged builds copy that PNG into the application resources.
 - `➕ Install New` → URL input or native operating-system pickers for a local plugin folder/archive (later: marketplace browser). The selected local path is read-only.
@@ -384,7 +418,7 @@ than shipping a new server from scratch.
 | Backend shape | Clean Architecture monorepo; details in [`backend-structure.md`](./backend-structure.md) |
 | Host ↔ backend | WebSocket (`ws`) as client transport; not an internal bus |
 | Plugin UI ↔ host | iframe + `postMessage` / `window.shell.callTool` |
-| Plugin bundling | One folder = manifest + `ui/` + `mcp/` |
+| Plugin bundling | One folder = manifest + `mcp/` (optional `ui/` for windowed plugins) |
 | MCP connect | child_process (stdio) or existing remote (sse/http) - schema supports both |
 | Installed metadata | filesystem/JSON early → SQLite in the monorepo MVP |
 | Live runtime state | `PluginRuntimeManager` in-memory (not duplicated in DB/renderer/gateway) |

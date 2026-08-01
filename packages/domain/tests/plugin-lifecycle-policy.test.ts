@@ -102,4 +102,22 @@ describe("PluginManifest", () => {
     });
     expect(result.ok).toBe(false);
   });
+
+  it("accepts a headless manifest without ui", () => {
+    const { ui: _omit, ...headless } = manifestInput;
+    void _omit;
+    const result = PluginManifest.create(headless);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.ui).toBeUndefined();
+    }
+  });
+
+  it("rejects ui with empty entry when ui is present", () => {
+    const result = PluginManifest.create({
+      ...manifestInput,
+      ui: { entry: "" },
+    });
+    expect(result.ok).toBe(false);
+  });
 });

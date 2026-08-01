@@ -33,14 +33,14 @@ export interface RuntimeEntry {
   installPath: string;
   enabled: boolean;
   autostart: boolean;
-  ui: {
+  ui?: {
     readonly entry: string;
     readonly window?: {
       readonly mode?: "panel" | "fullscreen" | "widget";
       readonly defaultSize?: { readonly width: number; readonly height: number };
       readonly resizable?: boolean;
     };
-  };
+  } | undefined;
   keepAliveOnClose: boolean;
   runtime: import("@nusashell/domain").PluginRuntime;
   startPromise: Promise<void> | null;

@@ -10,6 +10,7 @@ import {
 import { ManifestSchema } from "@nusashell/contracts";
 import type { Logger } from "pino";
 import { scanPluginDirectories, resolveManifestPath } from "./plugin-directory-layout.js";
+import { assertDeclaredFilesExist } from "./plugin-path-checks.js";
 
 export class PluginSyncService {
   constructor(
@@ -68,6 +69,16 @@ export class PluginSyncService {
     }
 
     const parsed = schemaResult.data;
+
+    // Do not resurrect broken UI/icon packages from a cold filesystem: a
+    // declared ui.entry or local icon that is missing on disk is skipped so
+    // the launcher never opens a blank window for it.
+    try {
+      await assertDeclaredFilesExist(dirPath, parsed);
+    } catch (err) {
+      this.logger?.warn({ err, manifestPath }, "Plugin skipped during sync: declared file missing or outside plugin dir");
+      return null;
+    }
     const manifestInput = {
       id: parsed.id,
       name: parsed.name,

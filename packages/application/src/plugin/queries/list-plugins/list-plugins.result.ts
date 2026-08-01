@@ -9,6 +9,15 @@ export interface PluginListItem {
   readonly state: PluginRuntimeState;
   readonly enabled: boolean;
   readonly autostart: boolean;
+  readonly ui?: {
+    readonly entry: string;
+    readonly window?: {
+      readonly mode?: "panel" | "fullscreen" | "widget";
+      readonly defaultSize?: { readonly width: number; readonly height: number };
+      readonly resizable?: boolean;
+    };
+  };
+  readonly keepAliveOnClose: boolean;
 }
 
 export interface ListPluginsResult {

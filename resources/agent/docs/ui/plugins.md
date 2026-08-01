@@ -1,12 +1,12 @@
 # Plugins
 
-List of installed plugins with their live MCP process state in a compact table.
+List of all installed plugins (UI and headless MCP-only) with their live MCP process state in a compact table. Headless plugins that do not appear on Home are managed here.
 
 **How to open:** Click the Plugins item in the left sidebar.
 
 ## Plugin table
 
-Shows plugin icon, name, plugin id, version, and current state. Click any row to open the plugin detail drawer.
+Shows plugin icon, name, plugin id, version, and current state for every installed plugin, including headless MCP-only plugins that do not appear on Home. Click any row to open the plugin detail drawer.
 
 - **Installed plugin table** (`#plugin-table`):
   - Section: Plugin table

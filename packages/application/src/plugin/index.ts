@@ -27,6 +27,8 @@ export {
   type CallToolOptions,
   type WorkspaceSyncResult,
   type PluginLaunchSpec,
+  resolveIcon,
+  hasPluginUi,
 } from "./services/index.js";
 export type {
   StartPluginCommand,

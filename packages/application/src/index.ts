@@ -103,6 +103,8 @@ export {
   type CallToolOptions,
   type WorkspaceSyncResult,
   type PluginLaunchSpec,
+  resolveIcon,
+  hasPluginUi,
   StartPluginHandler,
   StopPluginHandler,
   RestartPluginHandler,

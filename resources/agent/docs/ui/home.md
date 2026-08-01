@@ -1,6 +1,6 @@
 # Home (Launcher)
 
-The default view and app launcher. Shows installed plugins as a searchable grid of app tiles.
+The default view and app launcher. Shows windowed (UI) plugins as a searchable grid of app tiles. Headless MCP-only plugins do not appear here — manage them from the Plugins view.
 
 **How to open:** Open NusaShell, or click the Home item in the left sidebar.
 
@@ -32,7 +32,7 @@ The Home search filters installed plugin cards by name, id, or description in re
 
 ## App grid
 
-A grid of installed plugins. Each tile shows the plugin icon, name, and a state badge (idle, starting, running, stopping, crashed). Emoji and image artwork share one 64-pixel icon plate; transparent margins in local PNG artwork are normalized at render time so mixed icon sources keep comparable visual weight.
+A grid of installed UI plugins (plugins whose manifest declares a `ui.entry`). Each tile shows the plugin icon, name, and a state badge (idle, starting, running, stopping, crashed). Headless MCP-only plugins are filtered out of Home and managed from the Plugins view. Emoji and image artwork share one 64-pixel icon plate; transparent margins in local PNG artwork are normalized at render time so mixed icon sources keep comparable visual weight.
 
 - **Installed plugin grid** (`#app-grid`):
   - Section: App grid

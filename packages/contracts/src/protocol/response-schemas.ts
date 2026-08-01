@@ -37,17 +37,19 @@ export const PluginListItemSchema = z.object({
   state: PluginStateSchema,
   enabled: z.boolean(),
   autostart: z.boolean(),
-  ui: z.object({
-    entry: z.string(),
-    window: z.object({
-      mode: z.enum(["panel", "fullscreen", "widget"]).optional(),
-      defaultSize: z.object({
-        width: z.number().int().positive(),
-        height: z.number().int().positive(),
+  ui: z
+    .object({
+      entry: z.string(),
+      window: z.object({
+        mode: z.enum(["panel", "fullscreen", "widget"]).optional(),
+        defaultSize: z.object({
+          width: z.number().int().positive(),
+          height: z.number().int().positive(),
+        }).optional(),
+        resizable: z.boolean().optional(),
       }).optional(),
-      resizable: z.boolean().optional(),
-    }).optional(),
-  }),
+    })
+    .optional(),
   keepAliveOnClose: z.boolean(),
 });
 

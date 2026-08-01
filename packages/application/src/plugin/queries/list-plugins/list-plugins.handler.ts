@@ -22,6 +22,8 @@ export class ListPluginsHandler
       state: view.state,
       enabled: view.enabled,
       autostart: view.autostart,
+      ...(view.ui !== undefined ? { ui: view.ui } : {}),
+      keepAliveOnClose: view.keepAliveOnClose,
     }));
     return { plugins: items };
   }

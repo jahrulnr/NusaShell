@@ -14,7 +14,7 @@ export interface PluginDto {
   readonly state: PluginStateDto;
   readonly enabled: boolean;
   readonly autostart: boolean;
-  readonly ui: {
+  readonly ui?: {
     readonly entry: string;
     readonly window?: {
       readonly mode?: "panel" | "fullscreen" | "widget";

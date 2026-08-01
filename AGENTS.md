@@ -70,8 +70,16 @@ Vitest, Pino. Details: `docs/backend-structure.md` §2 / §18 / §19.
 A plugin is one folder:
 
 ```text
-manifest.json + ui/ + mcp/
+manifest.json + mcp/            # headless MCP-only plugin
+manifest.json + ui/ + mcp/      # plugin with a window (UI + MCP)
 ```
+
+`ui/` is **optional**. Omit it for a headless MCP-only plugin (no window, not on
+the Home launcher grid; managed from the Plugins view and via agent `mcp_*`
+tools). `icon` stays required (emoji/text like `N` / `📝` is valid). When
+`ui.entry` is declared, the installer `access()`es the resolved file under the
+plugin folder and fails the install early if it is missing or escapes the plugin
+dir; local file icons get the same check.
 
 Authors call tools via `window.shell.callTool(...)` and never speak raw MCP from
 the iframe. Manifest schema should support both local `stdio` and remote

@@ -17,21 +17,29 @@ export const ManifestSchema = z.object({
    * 3. URL — e.g. "https://example.com/icon.png"
    */
   icon: z.string().min(1),
-  ui: z.object({
-    entry: z.string().min(1),
-    window: z
-      .object({
-        mode: z.enum(["panel", "fullscreen", "widget"]).optional(),
-        defaultSize: z
-          .object({
-            width: z.number().int().positive(),
-            height: z.number().int().positive(),
-          })
-          .optional(),
-        resizable: z.boolean().optional(),
-      })
-      .optional(),
-  }),
+  /**
+   * Plugin UI surface. Omit for a headless MCP-only plugin (no window, not
+   * shown on the Home launcher grid; managed from the Plugins view and via
+   * agent `mcp_*` tools). When present, `entry` must be non-empty and point
+   * to a file inside the plugin folder.
+   */
+  ui: z
+    .object({
+      entry: z.string().min(1),
+      window: z
+        .object({
+          mode: z.enum(["panel", "fullscreen", "widget"]).optional(),
+          defaultSize: z
+            .object({
+              width: z.number().int().positive(),
+              height: z.number().int().positive(),
+            })
+            .optional(),
+          resizable: z.boolean().optional(),
+        })
+        .optional(),
+    })
+    .optional(),
   mcp: z.object({
     transport: z.enum(["stdio", "sse", "http"]),
     command: z.string().min(1).optional(),

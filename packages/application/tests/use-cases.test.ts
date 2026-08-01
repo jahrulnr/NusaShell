@@ -159,4 +159,44 @@ describe("ListPluginsHandler via QueryBus", () => {
     };
     expect(result.plugins[0]!.state).toBe("running");
   });
+
+  it("forwards ui and keepAliveOnClose for UI plugins", async () => {
+    const { queryBus, pluginRepository } = setupBus();
+    pluginRepository.add(makePlugin("nusashell.notes", {
+      ui: { entry: "ui/mail.html", window: { mode: "fullscreen" } },
+      mcp: { transport: "stdio", command: "node", keepAliveOnClose: true },
+    }));
+
+    const result = await queryBus.execute({ kind: "list-plugins" }) as {
+      plugins: readonly {
+        pluginId: string;
+        ui?: { entry: string };
+        keepAliveOnClose: boolean;
+      }[];
+    };
+
+    expect(result.plugins).toHaveLength(1);
+    expect(result.plugins[0]!.ui).toEqual({ entry: "ui/mail.html", window: { mode: "fullscreen" } });
+    expect(result.plugins[0]!.keepAliveOnClose).toBe(true);
+  });
+
+  it("omits ui for headless plugins and still returns keepAliveOnClose", async () => {
+    const { queryBus, pluginRepository } = setupBus();
+    const headless = makePlugin("nusashell.indexer", { ui: undefined });
+
+    pluginRepository.add(headless);
+
+    const result = await queryBus.execute({ kind: "list-plugins" }) as {
+      plugins: readonly {
+        pluginId: string;
+        ui?: { entry: string };
+        keepAliveOnClose: boolean;
+      }[];
+    };
+
+    expect(result.plugins).toHaveLength(1);
+    expect(result.plugins[0]!.pluginId).toBe("nusashell.indexer");
+    expect(result.plugins[0]!.ui).toBeUndefined();
+    expect(result.plugins[0]!.keepAliveOnClose).toBe(false);
+  });
 });

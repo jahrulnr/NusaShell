@@ -305,7 +305,6 @@ export class PluginRuntimeManager {
       installPath: "",
       enabled: true,
       autostart: false,
-      ui: { entry: "ui/index.html" },
       keepAliveOnClose: false,
       runtime: PluginRuntime.createIdle(pluginId),
       startPromise: null,

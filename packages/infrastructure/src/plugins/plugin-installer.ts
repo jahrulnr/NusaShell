@@ -11,6 +11,7 @@ import type { Logger } from "pino";
 import AdmZip from "adm-zip";
 import * as tar from "tar";
 import { scanPluginDirectories, resolveManifestPath } from "./plugin-directory-layout.js";
+import { assertDeclaredFilesExist } from "./plugin-path-checks.js";
 
 export class PluginInstaller implements PluginInstallerPort {
   constructor(
@@ -120,6 +121,10 @@ export class PluginInstaller implements PluginInstallerPort {
     const manifest = schemaResult.data;
     const pluginId = manifest.id;
     const version = manifest.version;
+
+    // Fail fast before copy: declared ui.entry and local icon files must exist
+    // inside the plugin folder. Headless plugins (no ui) skip the entry check.
+    await assertDeclaredFilesExist(dir, manifest);
 
     const destDir = join(this.pluginsRoot, pluginId);
     const exists = await access(destDir).then(() => true).catch(() => false);

@@ -127,19 +127,22 @@ quitting. Optional **Launch at login** is available on packaged builds.
 
 ## Writing your own plugin
 
-A plugin is just a folder with three things:
+A plugin is a folder with `manifest.json` + `mcp/`, and optionally `ui/` for a
+windowed plugin. `ui/` is optional — omit it for a **headless MCP-only plugin**
+(no window, not on the Home grid; managed from the Plugins view and via agent
+`mcp_*` tools).
 
 ```
 plugins/my-plugin/
 ├── manifest.json     # declares the UI entry point + how to start the MCP server
-├── icon.png          # 512×512 launcher artwork
-├── ui/
+├── icon.png          # 512×512 launcher artwork (or emoji/text in manifest)
+├── ui/               # optional — omit for a headless MCP-only plugin
 │   └── index.html    # rendered inside a window/iframe
 └── mcp/
     └── server.js      # your MCP server - any language, runs as its own process
 ```
 
-Minimal manifest:
+Minimal manifest (windowed plugin):
 
 ```jsonc
 {
@@ -149,6 +152,18 @@ Minimal manifest:
   "icon": "file://icon.png",
   "ui": { "entry": "ui/index.html" },
   "mcp": { "transport": "stdio", "command": "node mcp/server.js" }
+}
+```
+
+Headless MCP-only plugin (no `ui`):
+
+```jsonc
+{
+  "id": "you.indexer",
+  "name": "Indexer",
+  "version": "1.0.0",
+  "icon": "🧩",
+  "mcp": { "transport": "stdio", "command": "node mcp/server.js", "autostart": true }
 }
 ```
 

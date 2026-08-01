@@ -56,4 +56,9 @@ describe("plugin window options", () => {
       { width: 1920, height: 1040 },
     )).toEqual({ width: 1280, height: 800 });
   });
+
+  it("throws when no entry is provided (headless plugin)", () => {
+    expect(() => normalizePluginWindowOptions({})).toThrow(/no UI entry/i);
+    expect(() => normalizePluginWindowOptions({ entry: "   " })).toThrow(/no UI entry/i);
+  });
 });

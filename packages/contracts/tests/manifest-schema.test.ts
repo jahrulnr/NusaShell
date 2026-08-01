@@ -49,6 +49,21 @@ describe("ManifestSchema", () => {
     expect(result.success).toBe(false);
   });
 
+  it("accepts a headless manifest without ui", () => {
+    const { ui: _omit, ...headless } = VALID;
+    void _omit;
+    const result = ManifestSchema.safeParse(headless);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.ui).toBeUndefined();
+    }
+  });
+
+  it("rejects ui with empty entry when ui is present", () => {
+    const result = ManifestSchema.safeParse({ ...VALID, ui: { entry: "" } });
+    expect(result.success).toBe(false);
+  });
+
   it("accepts file path icon", () => {
     const result = ManifestSchema.safeParse({ ...VALID, icon: "file://icon.png" });
     expect(result.success).toBe(true);

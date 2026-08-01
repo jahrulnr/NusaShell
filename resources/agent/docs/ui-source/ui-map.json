@@ -55,7 +55,7 @@
     },
     "home": {
       "title": "Home (Launcher)",
-      "purpose": "The default view and app launcher. Shows installed plugins as a searchable grid of app tiles.",
+      "purpose": "The default view and app launcher. Shows windowed (UI) plugins as a searchable grid of app tiles. Headless MCP-only plugins do not appear here — manage them from the Plugins view.",
       "howToOpen": "Open NusaShell, or click the Home item in the left sidebar.",
       "sections": [
         {
@@ -79,7 +79,7 @@
         {
           "heading": "App grid",
           "paragraphs": [
-            "A grid of installed plugins. Each tile shows the plugin icon, name, and a state badge (idle, starting, running, stopping, crashed). Emoji and image artwork share one 64-pixel icon plate; transparent margins in local PNG artwork are normalized at render time so mixed icon sources keep comparable visual weight."
+            "A grid of installed UI plugins (plugins whose manifest declares a `ui.entry`). Each tile shows the plugin icon, name, and a state badge (idle, starting, running, stopping, crashed). Headless MCP-only plugins are filtered out of Home and managed from the Plugins view. Emoji and image artwork share one 64-pixel icon plate; transparent margins in local PNG artwork are normalized at render time so mixed icon sources keep comparable visual weight."
           ],
           "controls": [
             "app-grid",
@@ -97,13 +97,13 @@
     },
     "plugins": {
       "title": "Plugins",
-      "purpose": "List of installed plugins with their live MCP process state in a compact table.",
+      "purpose": "List of all installed plugins (UI and headless MCP-only) with their live MCP process state in a compact table. Headless plugins that do not appear on Home are managed here.",
       "howToOpen": "Click the Plugins item in the left sidebar.",
       "sections": [
         {
           "heading": "Plugin table",
           "paragraphs": [
-            "Shows plugin icon, name, plugin id, version, and current state. Click any row to open the plugin detail drawer."
+            "Shows plugin icon, name, plugin id, version, and current state for every installed plugin, including headless MCP-only plugins that do not appear on Home. Click any row to open the plugin detail drawer."
           ],
           "controls": [
             "plugin-table",

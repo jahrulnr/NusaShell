@@ -5,6 +5,7 @@ import {
   describeToolsPanel,
   filterLauncherPlugins,
   findOpaqueBounds,
+  hasPluginUi,
   pluginIconPresentation,
   positionContextMenu,
   providerApiModes,
@@ -169,6 +170,22 @@ describe("describeToolsPanel (finding 3a — Tools=0 honesty)", () => {
     const panel = describeToolsPanel(null, { state: "running" });
     expect(panel.status).toBe("empty");
     expect(panel.count).toBe(0);
+  });
+});
+
+describe("hasPluginUi", () => {
+  it("returns true for a plugin with a non-empty ui.entry", () => {
+    expect(hasPluginUi({ ui: { entry: "ui/index.html" } })).toBe(true);
+  });
+
+  it("returns false for a headless plugin without ui", () => {
+    expect(hasPluginUi({})).toBe(false);
+    expect(hasPluginUi({ ui: undefined })).toBe(false);
+  });
+
+  it("returns false when ui.entry is empty or whitespace", () => {
+    expect(hasPluginUi({ ui: { entry: "" } })).toBe(false);
+    expect(hasPluginUi({ ui: { entry: "   " } })).toBe(false);
   });
 });
 

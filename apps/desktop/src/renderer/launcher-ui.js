@@ -6,6 +6,15 @@ export function pluginIconPresentation(icon) {
   return { kind: "text", text: value };
 }
 
+/**
+ * Whether a plugin exposes a UI surface (a window entry). Headless MCP-only
+ * plugins omit `ui` and return false here so the Home grid can keep them off
+ * while the Plugins view still lists them.
+ */
+export function hasPluginUi(plugin) {
+  return Boolean(plugin?.ui?.entry?.trim());
+}
+
 export function findOpaqueBounds(pixels, width, height, alphaThreshold = 8) {
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
     return null;
