@@ -16,6 +16,7 @@ import {
   type JobSchedulerSettings,
 } from "@nusashell/application";
 import type { SqliteDatabase } from "@nusashell/infrastructure";
+import { fileURLToPath } from "node:url";
 import type { ContainerOptions } from "../container.js";
 import type { PluginRuntimeParts } from "./plugin-runtime.js";
 import type { AgentRuntimeParts } from "./agent-runtime.js";
@@ -33,7 +34,7 @@ export function createJobRuntime(
   plugin: PluginRuntimeParts,
   agent: AgentRuntimeParts,
 ): JobRuntimeParts {
-  const jobsRoot = options.jobsRoot ?? new URL("../../../.nusashell/agent/jobs", import.meta.url).pathname;
+  const jobsRoot = options.jobsRoot ?? fileURLToPath(new URL("../../../.nusashell/agent/jobs", import.meta.url));
   let jobStore: JobStorePort;
   if (plugin.db) {
     jobStore = new SqliteJobStore(plugin.db);

@@ -118,7 +118,11 @@ function getRuntimeRoot(): string {
 }
 
 function getDataRoot(): string {
-  return app.isPackaged ? app.getPath("userData") : resolve(__dirname, "..", "..", "..", "..");
+  // Durable app state always lives under Electron userData — both packaged and
+  // unpackaged. Previously unpackaged used the repo root, which mixed durable
+  // state (docs-index cache) into the git checkout. Bundled read-only assets
+  // (prompts, docs, plugins) stay on the runtime/bundle path via getRuntimeRoot.
+  return app.getPath("userData");
 }
 
 function configureProvider(target: BootstrapResult, provider: AiRegistrySettings["providers"][number]): void {
@@ -143,16 +147,16 @@ async function startBackend(): Promise<BootstrapResult> {
     : resolve(__dirname, "..", "..", "..", "..", "plugins");
   const promptsRoot = resolve(runtimeRoot, "resources", "agent", "prompts");
   const docsRoot = resolve(runtimeRoot, "resources", "agent", "docs");
-  const docsIndexStorageRoot = resolve(dataRoot, ".nusashell", "agent", "docs-index");
-  const skillsRoot = resolve(app.getPath("userData"), "skills");
-  const memoryRoot = resolve(app.getPath("userData"), "memories");
-  mailSettingsStore ??= new MailSettingsStore(resolve(app.getPath("userData"), "mail-settings.json"));
+  const docsIndexStorageRoot = resolve(dataRoot, "agent", "docs-index");
+  const skillsRoot = resolve(dataRoot, "skills");
+  const memoryRoot = resolve(dataRoot, "memories");
+  mailSettingsStore ??= new MailSettingsStore(resolve(dataRoot, "mail-settings.json"));
   await mailSettingsStore.load();
 
   const dbPath = process.env.NUSASHELL_DB_PATH || undefined;
   aiSettingsStore = new AiSettingsStore(
-    resolve(app.getPath("userData"), "ai-settings.json"),
-    resolve(app.getPath("userData"), "user-prompt.md"),
+    resolve(dataRoot, "ai-settings.json"),
+    resolve(dataRoot, "user-prompt.md"),
   );
   aiSettings = await aiSettingsStore.load();
   const activeProvider = aiSettings.providers.find((provider) => provider.id === aiSettings?.activeProviderId);
@@ -163,7 +167,7 @@ async function startBackend(): Promise<BootstrapResult> {
     docsIndexStorageRoot,
     skillsRoot,
     memoryRoot,
-    logFile: resolve(app.getPath("userData"), "logs", "nusashell.log"),
+    logFile: resolve(dataRoot, "logs", "nusashell.log"),
     resolvePluginRuntimeEnvironment: (pluginId) =>
       pluginId === MAIL_PLUGIN_ID ? mailSettingsStore?.runtimeEnvironment() ?? {} : {},
     config: { port: 9130, host: "127.0.0.1", pluginsRoot, dbPath, logLevel: isDev ? "debug" : "info", ai: {

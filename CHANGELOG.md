@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.58] - 2026-08-01
+
+### Fixed
+
+- **MCP Roots `file://` URIs now round-trip correctly on Windows.**
+  `mcp-session-manager.ts` `applyRoots` built URIs via
+  `` `file://${workspace}` `` string concatenation — on Windows this produces
+  `file://C:\Users\...` which is not a valid file URI. The Files plugin parsed
+  it back with `.replace(/^file:\/\//, "")`, losing the drive letter. Both sides
+  now use `pathToFileURL(path.resolve(workspace)).href` (build) and
+  `fileURLToPath(uri)` (parse). Rebuilt `plugins/files/mcp/server.cjs`.
+- **Backend composer defaults no longer use `new URL(...).pathname`.** On
+  Windows, `.pathname` returns a leading-slash path without the drive letter
+  (e.g. `/C:/Users/...`). All four composers (`plugin-runtime.ts`,
+  `agent-runtime.ts`, `job-runtime.ts`, `skills-runtime.ts`) now use
+  `fileURLToPath(new URL(rel, import.meta.url))`.
+- **Desktop durable state always lives under Electron `userData`.**
+  `getDataRoot()` previously returned the repo root when unpackaged, mixing
+  durable state (docs-index cache, skills, memory, settings) into the git
+  checkout. It now always returns `app.getPath("userData")` — packaged and
+  unpackaged. Bundled read-only assets (prompts, docs, plugins) still resolve
+  from the app/repo tree via `getRuntimeRoot()`.
+- **Workspace label handles Windows backslash paths.** `updateWorkspaceLabel`
+  used `ws.split("/").pop()` which breaks on `D:\proj`. Now splits on
+  `[\\/]/` to get the basename on both POSIX and Windows.
+
+### Added
+
+- **ADR: cross-platform path layout** (`docs/architecture/path-layout.md`).
+  Documents the stateRoot vs tmp vs bundle placement policy and the
+  `pathToFileURL` / `fileURLToPath` rules for `file://` round-trips.
+
+### Tests
+
+- `plugin-runtime-manager.workspace.test.ts` now computes expected `file://`
+  URIs via `pathToFileURL(resolve(...))` — the same call `applyRoots` uses — so
+  tests pass on both POSIX and Windows.
+- `files-bundle-sandbox.test.ts` replaced `os.tmpdir() + "/prefix"` with
+  `join(os.tmpdir(), "prefix")` for cross-platform path construction.
+
 ## [0.0.57] - 2026-08-01
 
 ### Fixed
@@ -17,9 +57,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rebuild even though `better-sqlite3@13.0.1` ships N-API prebuilds for
   `win32-x64` (ABI-stable across Node and Electron). Removing the `-f` flag lets
   `electron-rebuild` detect the prebuild as compatible and skip the rebuild.
-  CI test jobs (frontend + backend) now also use `pnpm install --ignore-scripts`
-  to skip the `electron-rebuild` postinstall entirely — tests use system Node,
-  not Electron, so the N-API prebuilds are sufficient.
+  CI test jobs use `pnpm install --ignore-scripts` to skip postinstall scripts
+  entirely. Frontend jobs then run `node node_modules/electron/install.js`
+  explicitly to fetch the Electron binary needed by tray tests (without
+  triggering `electron-rebuild`). Backend jobs need no extra step — N-API
+  prebuilds work under system Node.
+- **Windows CI: path separator failures in backend tests.** Five test files
+  hardcoded POSIX paths or used `path.posix` in expectations, producing
+  `D:\tmp\proj` vs `/tmp/proj` mismatches on Windows. Fixed by switching to
+  platform-aware `path.resolve` / `path.join` and computing expected `file://`
+  URLs via `pathToFileURL(resolve(...))` — the same calls the implementation
+  uses. Affected: `icon-resolver.test.ts`, `workspace-tool-wrap.test.ts`,
+  `mcp-agent-tool-gateway.test.ts`, `plugin-path-checks.test.ts`,
+  `fs-service.test.js`.
+- **Windows CI: `.mjs` SyntaxError from CRLF line endings.** Git's
+  `core.autocrlf=true` on Windows converts LF→CRLF on checkout, breaking
+  shebangs and ESM imports in `.mjs` files (`scan-ui-docs.mjs` imported by
+  `markdown-docs-index.test.ts`). Added `.gitattributes` with
+  `* text=auto eol=lf` to force LF for all text files across platforms.
 
 ## [0.0.56] - 2026-08-01
 

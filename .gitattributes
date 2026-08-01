@@ -1,0 +1,21 @@
+# Force LF line endings for source files that break on CRLF (shebangs,
+# .mjs ESM imports, regex literals). Git on Windows defaults to autocrlf=true
+# which converts LF→CRLF on checkout, causing SyntaxError in .mjs files.
+* text=auto eol=lf
+
+# Binary files — never normalize
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.woff binary
+*.woff2 binary
+*.eot binary
+*.ttf binary
+*.otf binary
+*.zip binary
+*.tar.gz binary
+*.tgz binary
+*.node binary

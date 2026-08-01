@@ -6,6 +6,7 @@ import {
   ListToolsRequestSchema,
   RootsListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { fileURLToPath } from "node:url";
 import { loadRootFromEnvironment } from "./config.js";
 import { safeFilesError } from "./errors.js";
 import { FileService } from "./fs-service.js";
@@ -25,9 +26,9 @@ async function main() {
   async function refreshRoots() {
     try {
       const result = await server.listRoots();
-      const fileRoot = result.roots.find((r) => r.uri.startsWith("file://"));
+      const fileRoot = result.roots.find((r) => r.uri.startsWith("file:"));
       if (fileRoot) {
-        const fsPath = fileRoot.uri.replace(/^file:\/\//, "");
+        const fsPath = fileURLToPath(fileRoot.uri);
         await service.setRoot(fsPath);
         process.stderr.write(`[nusashell-files] root=${service.root} (via roots)\n`);
       }

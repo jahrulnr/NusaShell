@@ -48,6 +48,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
 
+      - name: Install Electron binary
+        # --ignore-scripts skips Electron's postinstall (binary download) and
+        # the desktop electron-rebuild postinstall. Tray tests need the Electron
+        # binary, so run its install explicitly. electron-rebuild is skipped —
+        # better-sqlite3 N-API prebuilds are ABI-stable across Node/Electron.
+        run: node node_modules/electron/install.js
+
       - name: Run frontend tests
         run: pnpm test:frontend
 

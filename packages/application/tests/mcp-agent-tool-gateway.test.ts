@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import path from "node:path";
 import { McpAgentToolGateway } from "../src/index.js";
 import type {
   DocContent,
@@ -634,7 +635,7 @@ describe("McpAgentToolGateway", () => {
   });
 
   describe("workspace binding", () => {
-    const WS = "/tmp/proj";
+    const WS = path.resolve("/tmp/proj");
 
     function makeRuntime(opts: {
       tools?: Array<{ name: string; description?: string; inputSchema?: unknown }>;
@@ -684,8 +685,8 @@ describe("McpAgentToolGateway", () => {
       gateway.beginTurn("turn-ws", { workspace: WS });
       const grant = await gateway.execute("tool_schemas", { pluginId: "nusashell.files", toolNames: ["files_read"] }, "g", "turn-ws") as { granted: Array<{ name: string }> };
       await gateway.execute(grant.granted[0]!.name, { path: "src/foo.ts" }, "req", "turn-ws");
-      const path = require("node:path").posix.join(WS, "src/foo.ts");
-      expect(calls[0]!.args).toEqual({ path });
+      const filePath = path.join(WS, "src/foo.ts");
+      expect(calls[0]!.args).toEqual({ path: filePath });
       gateway.endTurn("turn-ws");
     });
 

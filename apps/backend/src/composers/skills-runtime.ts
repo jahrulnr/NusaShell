@@ -17,6 +17,7 @@ import {
   type SkillUsagePort,
   type MemoryStorePort,
 } from "@nusashell/application";
+import { fileURLToPath } from "node:url";
 import type { ContainerOptions } from "../container.js";
 
 export interface SkillsRuntimeParts {
@@ -35,7 +36,7 @@ export function createSkillsRuntime(
   logger: Logger,
   eventDispatcher: EventDispatcher,
 ): SkillsRuntimeParts {
-  const skillsRoot = options.skillsRoot ?? new URL("../../../.nusashell/agent/skills", import.meta.url).pathname;
+  const skillsRoot = options.skillsRoot ?? fileURLToPath(new URL("../../../.nusashell/agent/skills", import.meta.url));
   const skillRegistry = new FilesystemSkillRegistry(skillsRoot);
   const skillProvenance = new FilesystemSkillProvenance(skillsRoot);
   const skillUsage = new FilesystemSkillUsage(skillsRoot);
@@ -56,7 +57,7 @@ export function createSkillsRuntime(
     logger.warn({ err }, "Skill curator scheduler initialization failed");
   });
 
-  const memoryRoot = options.memoryRoot ?? new URL("../../../.nusashell/agent/memory", import.meta.url).pathname;
+  const memoryRoot = options.memoryRoot ?? fileURLToPath(new URL("../../../.nusashell/agent/memory", import.meta.url));
   const memoryStore = new FilesystemMemoryStore(memoryRoot);
   const learningGraph = new LearningGraphService({
     registry: skillRegistry,

@@ -6,7 +6,7 @@ import {
   wrapFilesArgs,
 } from "../src/agent/services/workspace-tool-wrap.js";
 
-const WS = path.posix.resolve("/tmp/proj");
+const WS = path.resolve("/tmp/proj");
 
 describe("workspace-tool-wrap", () => {
   describe("wrapTerminalArgs", () => {
@@ -27,7 +27,7 @@ describe("workspace-tool-wrap", () => {
     });
 
     it("preserves an explicit absolute cwd", () => {
-      const other = path.posix.resolve("/etc");
+      const other = path.resolve("/etc");
       const result = wrapTerminalArgs("terminal_exec", { command: "ls", cwd: other }, WS);
       expect(result.args.cwd).toBe(other);
       expect(result.rewritten).toEqual([]);
@@ -43,19 +43,19 @@ describe("workspace-tool-wrap", () => {
   describe("wrapFilesArgs", () => {
     it("rewrites a relative path to absolute under workspace", () => {
       const result = wrapFilesArgs("files_read", { path: "src/foo.ts" }, WS);
-      expect(result.args.path).toBe(path.posix.join(WS, "src/foo.ts"));
+      expect(result.args.path).toBe(path.join(WS, "src/foo.ts"));
       expect(result.rewritten).toEqual(["path"]);
     });
 
     it("rewrites source and destination for files_move", () => {
       const result = wrapFilesArgs("files_move", { source: "a.txt", destination: "b.txt" }, WS);
-      expect(result.args.source).toBe(path.posix.join(WS, "a.txt"));
-      expect(result.args.destination).toBe(path.posix.join(WS, "b.txt"));
+      expect(result.args.source).toBe(path.join(WS, "a.txt"));
+      expect(result.args.destination).toBe(path.join(WS, "b.txt"));
       expect(result.rewritten).toEqual(["source", "destination"]);
     });
 
     it("preserves an absolute path", () => {
-      const abs = path.posix.resolve("/etc/hosts");
+      const abs = path.resolve("/etc/hosts");
       const result = wrapFilesArgs("files_read", { path: abs }, WS);
       expect(result.args.path).toBe(abs);
       expect(result.rewritten).toEqual([]);
@@ -79,7 +79,7 @@ describe("workspace-tool-wrap", () => {
     });
 
     it("routes files by plugin id", () => {
-      expect(wrapToolArgs("nusashell.files", "files_read", { path: "a.ts" }, WS).path).toBe(path.posix.join(WS, "a.ts"));
+      expect(wrapToolArgs("nusashell.files", "files_read", { path: "a.ts" }, WS).path).toBe(path.join(WS, "a.ts"));
     });
 
     it("passes third-party plugins through unchanged", () => {

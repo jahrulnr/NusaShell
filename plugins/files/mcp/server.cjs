@@ -24767,6 +24767,9 @@ var StdioServerTransport = class {
   }
 };
 
+// mcp/server.js
+var import_node_url = require("node:url");
+
 // mcp/config.js
 var import_node_os = __toESM(require("node:os"), 1);
 var import_node_path = __toESM(require("node:path"), 1);
@@ -25399,9 +25402,9 @@ async function main() {
   async function refreshRoots() {
     try {
       const result = await server.listRoots();
-      const fileRoot = result.roots.find((r) => r.uri.startsWith("file://"));
+      const fileRoot = result.roots.find((r) => r.uri.startsWith("file:"));
       if (fileRoot) {
-        const fsPath = fileRoot.uri.replace(/^file:\/\//, "");
+        const fsPath = (0, import_node_url.fileURLToPath)(fileRoot.uri);
         await service.setRoot(fsPath);
         process.stderr.write(`[nusashell-files] root=${service.root} (via roots)
 `);

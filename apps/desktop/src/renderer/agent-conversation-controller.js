@@ -686,7 +686,9 @@ export class AgentConversationController {
     const label = $("#agent-workspace-label");
     if (!label) return;
     const ws = this.conversation?.workspace;
-    label.textContent = ws ? ws.split("/").pop() || ws : "Home";
+    // Handle both POSIX (/) and Windows (\) path separators — a simple
+    // split("/") breaks on Windows paths like "D:\proj".
+    label.textContent = ws ? ws.split(/[\\/]/).pop() || ws : "Home";
     const btn = $("#agent-workspace-btn");
     if (btn) btn.title = ws || "Home (user home directory)";
   }

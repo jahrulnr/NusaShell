@@ -26,6 +26,7 @@ import {
   type SkillApprovalStaging,
   type MarkdownDocsIndex,
 } from "@nusashell/application";
+import { fileURLToPath } from "node:url";
 import type { ContainerOptions } from "../container.js";
 import type { PluginRuntimeParts } from "./plugin-runtime.js";
 import type { SkillsRuntimeParts } from "./skills-runtime.js";
@@ -78,7 +79,7 @@ export function createAgentRuntime(
   );
 
   const promptLoader = new FilesystemPromptLoader(
-    options.promptsRoot ?? new URL("../../../resources/agent/prompts", import.meta.url).pathname,
+    options.promptsRoot ?? fileURLToPath(new URL("../../../resources/agent/prompts", import.meta.url)),
   );
 
   const agentProviders: AgentProvider[] = options.ai?.stubEnabled ? [new StaticAgentProvider()] : [];
@@ -111,7 +112,7 @@ export function createAgentRuntime(
 
   const reviewGateway = new ReviewAgentToolGateway(agentToolGateway);
   const reviewStateStore = new FilesystemReviewStateStore(
-    options.memoryRoot ?? new URL("../../../.nusashell/agent/memory", import.meta.url).pathname,
+    options.memoryRoot ?? fileURLToPath(new URL("../../../.nusashell/agent/memory", import.meta.url)),
   );
   const backgroundReviewScheduler = new BackgroundReviewScheduler({
     stateStore: reviewStateStore,

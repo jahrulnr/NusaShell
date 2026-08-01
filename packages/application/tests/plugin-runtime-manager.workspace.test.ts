@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { PluginId } from "@nusashell/domain";
 import {
   PluginRuntimeManager,
@@ -11,6 +13,11 @@ import {
   FakeProcessAdapter,
   makePlugin,
 } from "./fakes.js";
+
+/** Compute the expected file:// URI the same way applyRoots does. */
+function fileUri(ws: string): string {
+  return pathToFileURL(resolve(ws)).href;
+}
 
 function setup() {
   const clock = new FakeClock();
@@ -49,7 +56,7 @@ describe("PluginRuntimeManager workspace binding", () => {
     const result = await manager.syncWorkspace(FILES, "/tmp/proj");
     expect(result.mode).toBe("roots");
     expect(result.respawned).toBe(false);
-    expect(client.roots).toEqual([{ uri: "file:///tmp/proj", name: "workspace" }]);
+    expect(client.roots).toEqual([{ uri: fileUri("/tmp/proj"), name: "workspace" }]);
     expect(client.rootsNotifications).toHaveLength(1);
 
     // Second sync with the same workspace does not re-notify.
@@ -59,7 +66,7 @@ describe("PluginRuntimeManager workspace binding", () => {
 
     // A different workspace notifies again.
     await manager.syncWorkspace(FILES, "/tmp/other");
-    expect(client.roots[0]!.uri).toBe("file:///tmp/other");
+    expect(client.roots[0]!.uri).toBe(fileUri("/tmp/other"));
     expect(client.rootsNotifications).toHaveLength(2);
   });
 

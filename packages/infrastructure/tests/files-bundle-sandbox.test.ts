@@ -1,7 +1,7 @@
 import { describe, expect, it, afterEach, beforeEach } from "vitest";
 import { McpClientFactory } from "../src/mcp/mcp-client.factory.js";
 import type { McpClientPort } from "@nusashell/application";
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -33,7 +33,7 @@ describe("Files bundle sandbox (runtime escape regression)", () => {
   let tmpRoot: string;
 
   beforeEach(async () => {
-    tmpRoot = await fs.mkdtemp(os.tmpdir() + "/files-bundle-sandbox-");
+    tmpRoot = await fs.mkdtemp(join(os.tmpdir(), "files-bundle-sandbox-"));
     // Seed a marker file inside the root so a positive read proves containment.
     await fs.writeFile(resolve(tmpRoot, "inside.txt"), "sandbox-marker");
   });

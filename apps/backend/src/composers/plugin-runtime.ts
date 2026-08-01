@@ -13,6 +13,7 @@ import {
 } from "@nusashell/infrastructure";
 import { PluginRuntimeManager, type PluginRepositoryPort } from "@nusashell/application";
 import type { EventDispatcher } from "@nusashell/application";
+import { fileURLToPath } from "node:url";
 import type { ContainerOptions } from "../container.js";
 
 export interface PluginRuntimeParts {
@@ -62,8 +63,8 @@ export function createPluginRuntime(
       : {}),
   });
 
-  const docsRoot = options.docsRoot ?? new URL("../../../resources/agent/docs", import.meta.url).pathname;
-  const docsIndexStorageRoot = options.docsIndexStorageRoot ?? new URL("../../../.nusashell/agent/docs-index", import.meta.url).pathname;
+  const docsRoot = options.docsRoot ?? fileURLToPath(new URL("../../../resources/agent/docs", import.meta.url));
+  const docsIndexStorageRoot = options.docsIndexStorageRoot ?? fileURLToPath(new URL("../../../.nusashell/agent/docs-index", import.meta.url));
   const docsIndex = new MarkdownDocsIndex(docsRoot, docsIndexStorageRoot);
   void docsIndex.reindex().catch((err) => {
     logger.warn({ err }, "Docs index initial build failed; will retry on demand");

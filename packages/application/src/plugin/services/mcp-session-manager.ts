@@ -6,6 +6,8 @@ import {
   PluginStartedEvent,
   RuntimeTransitionPolicy,
 } from "@nusashell/domain";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { ApplicationError } from "../../errors/application-error.js";
 import type {
   McpClientPort,
@@ -166,7 +168,7 @@ export class McpSessionManager {
   async applyRoots(entry: RuntimeEntry, workspace: string): Promise<void> {
     const client = entry.mcpClient;
     if (!client?.setRoots) return;
-    const roots: RootDescriptor[] = [{ uri: `file://${workspace}`, name: "workspace" }];
+    const roots: RootDescriptor[] = [{ uri: pathToFileURL(resolve(workspace)).href, name: "workspace" }];
     client.setRoots(roots);
   }
 
