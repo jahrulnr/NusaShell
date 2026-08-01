@@ -159,11 +159,11 @@
 .job-output-md h1, .job-output-md h2, .job-output-md h3 {
   font-size: 14px;
   font-weight: 600;
-  margin: 8px 0 4px;
+  margin: 0 0 4px;
 }
 .job-output-md p { margin: 4px 0; }
-.job-output-md ul, .job-output-md ol { margin: 4px 0; padding-left: 20px; }
-.job-output-md li { margin: 2px 0; }
+.job-output-md ul, .job-output-md ol { margin: 2px 0 4px; padding-left: 20px; }
+.job-output-md li { margin: 0; }
 .job-output-md pre {
   background: var(--bg);
   border: 1px solid var(--border);
@@ -202,10 +202,17 @@
 /* ===== Model picker + schema form ===== */
 .job-model-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .job-model-row .form-label {
-  flex: 1;
+  flex: 1 1 140px;
+  min-width: 0;
+}
+.job-model-row .form-label select,
+.job-model-row .form-label input {
+  width: 100%;
+  min-width: 0;
 }
 .job-schema-form {
   display: flex;

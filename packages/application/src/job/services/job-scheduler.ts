@@ -320,8 +320,8 @@ export class JobScheduler {
   ): Promise<JobOutputEntry | null> {
     try {
       const stamp = now.toISOString().replace(/[:.]/g, "-");
-      const header = `# Job: ${job.name}\n- id: ${job.id}\n- schedule: ${describeSchedule(job.schedule)}\n- runAt: ${now.toISOString()}\n- status: ${status}\n- traceId: ${traceId}\n\n`;
-      const content = header + summary + "\n";
+      const header = `# Job: ${job.name}\n\n- id: ${job.id}\n- schedule: ${describeSchedule(job.schedule)}\n- runAt: ${now.toISOString()}\n- status: ${status}\n- traceId: ${traceId}\n\n`;
+      const content = header + summary;
       const path = await this.deps.jobFs.persistJobOutput(job.id, stamp, content);
       if (path === null) return null;
       return {

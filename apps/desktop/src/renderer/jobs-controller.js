@@ -1,6 +1,6 @@
 import { sendRequest, onEvent } from "./ws-client.js";
 import { fetchPlugins, listTools, startPlugin } from "./plugin-api.js";
-import { renderAssistantMarkdown } from "./agent-conversation-ui.js";
+import { renderJobOutputMarkdown } from "./agent-conversation-ui.js";
 import { serializeSchemaArgs } from "./jobs-form-helpers.js";
 
 const JOB_RUN_TIMEOUT_MS = 300_000;
@@ -827,7 +827,7 @@ export class JobsController {
     if (entry.status === "cancelled") header.classList.add("job-output-cancelled");
     const summary = document.createElement("div");
     summary.className = "job-output-md";
-    summary.innerHTML = renderAssistantMarkdown(entry.summary);
+    summary.innerHTML = renderJobOutputMarkdown(entry.summary);
     card.append(header, summary);
 
     const expandBtn = document.createElement("button");
@@ -848,7 +848,7 @@ export class JobsController {
         if (match?.body) {
           const body = document.createElement("div");
           body.className = "job-output-md job-output-full";
-          body.innerHTML = renderAssistantMarkdown(match.body);
+          body.innerHTML = renderJobOutputMarkdown(match.body);
           card.appendChild(body);
           expandBtn.textContent = "Shown";
         } else {

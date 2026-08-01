@@ -5,6 +5,9 @@ const assistantMarkdown = markdownit({ html: true, linkify: true, breaks: true }
 // Reasoning often mentions paths like plugins.md; linkify treats .md as a TLD
 // and paints them as blue links. Keep breaks, skip auto-link.
 const reasoningMarkdown = markdownit({ html: true, linkify: false, breaks: true });
+// Job output is structured markdown (headings, lists, paragraphs) — no breaks
+// so single \n between list items doesn't become <br> and add extra spacing.
+const jobOutputMarkdown = markdownit({ html: true, linkify: true, breaks: false });
 
 const ASSISTANT_MARKDOWN_TAGS = [
   "h1", "h2", "h3", "h4", "h5", "h6",
@@ -20,6 +23,18 @@ const ASSISTANT_MARKDOWN_TAGS = [
 
 export function renderAssistantMarkdown(content) {
   return DOMPurify.sanitize(assistantMarkdown.render(String(content ?? "")), {
+    ALLOWED_TAGS: ASSISTANT_MARKDOWN_TAGS,
+    ALLOWED_ATTR: ["href", "title", "alt", "src", "class", "id", "target", "rel", "colspan", "rowspan"],
+  });
+}
+
+export function renderJobOutputMarkdown(content) {
+  const raw = jobOutputMarkdown.render(String(content ?? ""));
+  // Strip inter-block whitespace so copy-paste doesn't produce double newlines
+  // (browsers ignore this whitespace for rendering, but it creates extra text
+  // nodes that add blank lines when copied).
+  const compact = raw.replace(/>\s+</g, "><").trim();
+  return DOMPurify.sanitize(compact, {
     ALLOWED_TAGS: ASSISTANT_MARKDOWN_TAGS,
     ALLOWED_ATTR: ["href", "title", "alt", "src", "class", "id", "target", "rel", "colspan", "rowspan"],
   });
