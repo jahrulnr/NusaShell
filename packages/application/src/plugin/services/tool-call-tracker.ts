@@ -6,8 +6,6 @@ import {
   ToolName,
 } from "@nusashell/domain";
 import { ApplicationError } from "../../errors/application-error.js";
-import type { ClockPort } from "../ports/clock.port.js";
-import type { EventDispatcher } from "../../events/event-dispatcher.js";
 import type { RuntimeEntry, PendingToolCall, CallToolOptions } from "./plugin-runtime-types.js";
 import type { PluginRuntimeManagerDeps } from "./plugin-runtime-manager.js";
 

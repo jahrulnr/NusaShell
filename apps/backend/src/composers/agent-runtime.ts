@@ -18,13 +18,6 @@ import {
   type AgentRuntimeSettings,
   type AgentProvider,
   type EventDispatcher,
-  type PluginRuntimeManager,
-  type SkillRegistryPort,
-  type SkillProvenancePort,
-  type SkillUsagePort,
-  type MemoryStorePort,
-  type SkillApprovalStaging,
-  type MarkdownDocsIndex,
 } from "@nusashell/application";
 import { fileURLToPath } from "node:url";
 import type { ContainerOptions } from "../container.js";

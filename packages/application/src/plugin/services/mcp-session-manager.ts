@@ -1,25 +1,15 @@
 import {
   type DomainEvent,
   PluginId,
-  PluginLifecyclePolicy,
   PluginRuntime,
   PluginStartedEvent,
-  RuntimeTransitionPolicy,
 } from "@nusashell/domain";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ApplicationError } from "../../errors/application-error.js";
 import type {
   McpClientPort,
-  CompletionReference,
-  CompletionResult,
-  PromptDescriptor,
-  PromptResult,
-  ResourceDescriptor,
-  ResourceReadResult,
-  ResourceTemplateDescriptor,
   RootDescriptor,
-  ToolDescriptor,
 } from "../ports/mcp-client.port.js";
 import type { PluginRuntimeManagerDeps } from "./plugin-runtime-manager.js";
 import type { RuntimeEntry, WorkspaceSyncResult } from "./plugin-runtime-types.js";
@@ -195,21 +185,5 @@ export class McpSessionManager {
       default:
         return new ApplicationError("INTERNAL_ERROR", error.message, { pluginId: id });
     }
-  }
-
-  private toApplicationError(
-    error: unknown,
-    fallbackCode: "PLUGIN_START_FAILED" | "PLUGIN_STOP_FAILED",
-    pluginId: PluginId,
-  ): ApplicationError {
-    if (error instanceof ApplicationError) return error;
-    if (error instanceof Error) {
-      return new ApplicationError(fallbackCode, error.message, {
-        pluginId: PluginId.toString(pluginId),
-      });
-    }
-    return new ApplicationError(fallbackCode, String(error), {
-      pluginId: PluginId.toString(pluginId),
-    });
   }
 }

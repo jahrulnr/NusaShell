@@ -13,9 +13,7 @@ import {
   type EventDispatcher,
   type JobStorePort,
   type JobFsPort,
-  type JobSchedulerSettings,
 } from "@nusashell/application";
-import type { SqliteDatabase } from "@nusashell/infrastructure";
 import { fileURLToPath } from "node:url";
 import type { ContainerOptions } from "../container.js";
 import type { PluginRuntimeParts } from "./plugin-runtime.js";

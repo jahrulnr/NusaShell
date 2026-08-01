@@ -1,8 +1,6 @@
 import {
-  type DomainEvent,
   PluginId,
   PluginLifecyclePolicy,
-  PluginRuntime,
   PluginCrashedEvent,
   PluginStoppedEvent,
   RuntimeTransitionPolicy,

@@ -1,10 +1,11 @@
 import {
   SystemClock,
   createLogger,
-  AgentProviderRegistry,
   OpenAiCompatibleAgentProvider,
   type Logger,
   type LogObserver,
+  type SkillApprovalStaging,
+  type SqliteDatabase,
 } from "@nusashell/infrastructure";
 import {
   EventDispatcher,
@@ -22,10 +23,8 @@ import {
   type SkillCuratorScheduler,
   type JobScheduler,
   type LearningGraphService,
-  type SkillApprovalStaging,
   type BackgroundReviewSettings,
   type JobSchedulerSettings,
-  type JobStorePort,
   type AiConfigurationPort,
 } from "@nusashell/application";
 import {
@@ -33,7 +32,6 @@ import {
   WebSocketServer,
   WebSocketEventPublisher,
 } from "@nusashell/transport-ws";
-import type { SqliteDatabase } from "@nusashell/infrastructure";
 import {
   createPluginRuntime,
   createSkillsRuntime,

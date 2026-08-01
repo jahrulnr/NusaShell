@@ -89,6 +89,7 @@ Captured from the Electron desktop app (`make dev`):
 | [`docs/architecture/plugin-sandbox-readiness.md`](./docs/architecture/plugin-sandbox-readiness.md) | Files root-containment bundle guard, plugin process-death status SoT, and Tools=0 honesty mitigations |
 | [`docs/architecture/workspace-mcp-binding.md`](./docs/architecture/workspace-mcp-binding.md) | How `conversation.workspace` binds to MCP (wrap → Roots → respawn/enable overrides) |
 | [`docs/RISK.md`](./docs/RISK.md) | Residual risk register: agent MCP launch overrides (`npx` swap), advisory roots |
+| [`docs/INSTALL.md`](./docs/INSTALL.md) | User-space install, update channels, verification, and uninstall |
 | [`docs/mcp/nusashell-mail-mcp-plugin-spec.md`](./docs/mcp/nusashell-mail-mcp-plugin-spec.md) | Mail plugin protocol assessment, security model, and target tool contract |
 | [`docs/mcp/nusashell-mail-mcp-plugin-implementation.md`](./docs/mcp/nusashell-mail-mcp-plugin-implementation.md) | Implemented read-only Mail milestone, runtime wiring, and current limitations |
 | [`docs/PoC/`](./docs/PoC/) | Runnable zero-dep bridge demo (behavioral reference, not the target layout) |
@@ -105,7 +106,18 @@ Captured from the Electron desktop app (`make dev`):
 
 
 
-## Quickstart (Desktop App)
+## Install
+
+Linux and macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/install.sh | bash
+```
+
+Windows PowerShell: `irm https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/install.ps1 | iex`.
+See [Install NusaShell](./docs/INSTALL.md) for checksum verification, pinned versions, update behavior, and alternatives.
+
+### Development
 
 Requires Node.js 20+, pnpm 11+, and native build tools (see [Prerequisites](#prerequisites)).
 
@@ -116,10 +128,6 @@ pnpm install
 make dev
 ```
 
-This launches the Electron desktop app with the backend embedded.
-The app starts in AI stub mode by default — configure a real provider
-in Settings to enable actual AI responses.
-
 ## Continuous integration
 
 GitHub Actions runs the desktop/frontend tests and backend/package/plugin tests
@@ -127,10 +135,12 @@ in parallel on Linux, Windows, and macOS with Node.js 24. Once every test matrix
 entry passes, Electron Forge builds native distributables on the same three
 platforms and stores them as workflow artifacts for 14 days.
 
-The final GitHub Release and version-tag job is present but intentionally
-disabled until release publishing is ready to be enabled. When enabled, it
-reads the tag version from `VERSION` and uses the matching `CHANGELOG.md`
-section as the release notes.
+Pull requests and manual workflow runs stop after that build. A GitHub Release
+is created only on pushes to `master` (including merged PRs): it tags
+`v$(cat VERSION)`, attaches the install payloads (`latest.json`, tar.gz,
+checksums, and Forge artifacts), and uses the matching `CHANGELOG.md` section
+as release notes. If that tag already exists, publish is skipped until
+`VERSION` is bumped.
 
 Background learning (and future scheduled jobs) run only while NusaShell is
 running. Enable **Keep running when window is closed** under Settings →

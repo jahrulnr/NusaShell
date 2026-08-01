@@ -3,7 +3,7 @@ import {
   WebSocketServer,
   WebSocketEventPublisher,
 } from "@nusashell/transport-ws";
-import type { CommandBus, QueryBus, EventDispatcher } from "@nusashell/application";
+import type { EventDispatcher } from "@nusashell/application";
 import type { Logger } from "@nusashell/infrastructure";
 import type { ContainerOptions } from "../container.js";
 import type { BusParts } from "./bus-registration.js";
