@@ -1,0 +1,4 @@
+interface:
+  display_name: "NusaShell Plugin Builder"
+  short_description: "Build headless or headed NusaShell plugins"
+  default_prompt: "Use $build-nusashell-plugin to create or review a NusaShell plugin and choose the right headless or headed shape."
