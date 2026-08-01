@@ -6,6 +6,7 @@ import type { AgentMessage } from "../src/index.js";
 const vars: PromptVars = {
   currentDate: "2026-07-29",
   environment: "development",
+  runtimeOs: "linux (ubuntu)",
   availableTools: "mcp_list, tool_list, tool_search, tool_schema",
 };
 
@@ -17,13 +18,13 @@ const varsWithWorkspace: PromptVars = {
 const prompts: AgentPrompt[] = [
   { name: "system", content: "You are the NusaShell agent.", isTemplate: false },
   { name: "mcp-tools", content: "Use tool_list to discover tools.", isTemplate: false },
-  { name: "developer", content: "Date: {{current_date}} Env: {{environment}} Tools: {{available_tools}}", isTemplate: true },
+  { name: "developer", content: "Date: {{current_date}} Env: {{environment}} OS: {{runtime_os}} Tools: {{available_tools}}", isTemplate: true },
 ];
 
 describe("applyVars", () => {
   it("replaces all template variables", () => {
-    const result = applyVars("{{current_date}} {{environment}} {{available_tools}}", vars);
-    expect(result).toBe("2026-07-29 development mcp_list, tool_list, tool_search, tool_schema");
+    const result = applyVars("{{current_date}} {{environment}} {{runtime_os}} {{available_tools}}", vars);
+    expect(result).toBe("2026-07-29 development linux (ubuntu) mcp_list, tool_list, tool_search, tool_schema");
   });
 
   it("leaves unknown variables as-is", () => {
@@ -51,7 +52,7 @@ describe("injectPrompts", () => {
     expect(result).toHaveLength(4);
     expect(result[0]).toEqual({ role: "system", content: "You are the NusaShell agent." });
     expect(result[1]).toEqual({ role: "system", content: "Use tool_list to discover tools." });
-    expect(result[2]).toEqual({ role: "system", content: "Date: 2026-07-29 Env: development Tools: mcp_list, tool_list, tool_search, tool_schema" });
+    expect(result[2]).toEqual({ role: "system", content: "Date: 2026-07-29 Env: development OS: linux (ubuntu) Tools: mcp_list, tool_list, tool_search, tool_schema" });
     expect(result[3]).toEqual({ role: "user", content: "hello" });
   });
 

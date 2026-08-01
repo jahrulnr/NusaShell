@@ -208,6 +208,7 @@ describe("OpenAiCompatibleAgentProvider", () => {
     }));
     expect(JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body))).toMatchObject({
       model: "gpt-test",
+      thinking: { type: "enabled" },
       reasoning_effort: "high",
       reasoning: { effort: "high" },
       tool_choice: "auto",
@@ -364,10 +365,43 @@ describe("OpenAiCompatibleAgentProvider", () => {
     const body = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body));
     expect(body).toMatchObject({
       max_tokens: 16_000,
+      thinking: { type: "enabled" },
       reasoning_effort: "high",
     });
     expect(body).not.toHaveProperty("tools");
     expect(body).not.toHaveProperty("tool_choice");
+  });
+
+  it("enables thinking for glm even when catalog marked reasoning unsupported", async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      model: "glm-5.2",
+      choices: [{ message: { content: "ok", reasoning_content: "plan" } }],
+    }), { status: 200 }));
+    const provider = new OpenAiCompatibleAgentProvider({
+      baseUrl: "https://api.z.ai/api/paas/v4",
+      apiKey: "secret",
+      fetchFn,
+    });
+
+    const result = await provider.complete({
+      traceId: "trace-glm",
+      round: 1,
+      messages: [{ role: "user", content: "Hello" }],
+      tools: [],
+      model: "glm-5.2",
+      effort: "auto",
+      modelCapabilities: {
+        reasoningSupported: false,
+        supportedEfforts: [],
+        defaultEffort: "auto",
+      },
+    });
+
+    expect(JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body))).toMatchObject({
+      thinking: { type: "enabled" },
+      reasoning_effort: "medium",
+    });
+    expect(result).toMatchObject({ reasoning: "plan" });
   });
 
   it("maps image data URLs to Chat and Responses content parts", async () => {

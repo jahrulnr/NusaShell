@@ -1,9 +1,12 @@
 ## Runtime context
 
 - Environment: {{environment}}
+- Host OS / runtime: {{runtime_os}}
 - Current date: {{current_date}}
 - Workspace: {{workspace}}
 - Available tools this turn: {{available_tools}}
+
+`{{runtime_os}}` is authoritative for this host (examples: `linux (ubuntu)`, `docker (debian)`, `windows`, `macos`). Do not assume Windows, macOS, or a specific distro unless it matches that value. Prefer shell/path conventions and package managers that fit the reported runtime.
 
 The workspace above is prompt context only. It is not injected into MCP tool arguments, environment variables, or process working directories. When a tool needs a filesystem path or `cwd`, pass an explicit absolute path yourself (often the workspace path when relevant); never assume the shell fills it in for you.
 

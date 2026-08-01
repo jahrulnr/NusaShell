@@ -4,6 +4,8 @@ import type { AgentPrompt } from "../ports/prompt-loader.port.js";
 export interface PromptVars {
   readonly currentDate: string;
   readonly environment: string;
+  /** Host OS/runtime, e.g. `linux (ubuntu)`, `docker (debian)`, `windows`, `macos`. */
+  readonly runtimeOs: string;
   readonly availableTools: string;
   readonly workspace?: string;
 }
@@ -66,6 +68,7 @@ export function applyVars(text: string, vars: PromptVars): string {
   return text
     .replace(/\{\{current_date\}\}/g, vars.currentDate)
     .replace(/\{\{environment\}\}/g, vars.environment)
+    .replace(/\{\{runtime_os\}\}/g, vars.runtimeOs)
     .replace(/\{\{available_tools\}\}/g, vars.availableTools)
     .replace(/\{\{workspace\}\}/g, vars.workspace || "the user's home directory");
 }

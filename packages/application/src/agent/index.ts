@@ -48,6 +48,8 @@ export {
   injectPrompts,
   applyVars,
   type PromptVars,
+  detectRuntimeOs,
+  type RuntimeOsProbe,
   formatMemoryPrompt,
   AskQuestionService,
   type AskAnswerVia,

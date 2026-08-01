@@ -55,7 +55,7 @@ describe("model capability policy", () => {
     }).effort).toBe("low");
   });
 
-  it("omits unsupported effort and uses conservative heuristics only when metadata is absent", () => {
+  it("omits unsupported effort and uses heuristics even when catalog omitted reasoning fields", () => {
     expect(resolveModelRuntimePolicy({
       model: "gpt-4o-mini",
       requestedEffort: "high",
@@ -64,6 +64,16 @@ describe("model capability policy", () => {
     expect(resolveModelRuntimePolicy({
       model: "deepseek-r1",
       requestedEffort: "auto",
+    }).effort).toBe("medium");
+    expect(resolveModelRuntimePolicy({
+      model: "z-ai/glm-5.2",
+      requestedEffort: "auto",
+      capabilities: { reasoningSupported: false, supportedEfforts: [], defaultEffort: "auto" },
+    }).effort).toBe("medium");
+    expect(resolveModelRuntimePolicy({
+      model: "blackbox/kimi-k3",
+      requestedEffort: "auto",
+      capabilities: { reasoningSupported: false },
     }).effort).toBe("medium");
   });
 
@@ -81,6 +91,8 @@ describe("model capability policy", () => {
   it("recognizes known reasoning and vision model families conservatively", () => {
     expect(heuristicModelSupportsEffort("anthropic/claude-sonnet-4")).toBe(true);
     expect(heuristicModelSupportsEffort("openai/gpt-4o-mini")).toBe(false);
+    expect(heuristicModelSupportsEffort("z-ai::glm-5.2")).toBe(true);
+    expect(heuristicModelSupportsEffort("kimi-k3")).toBe(true);
     expect(heuristicModelSupportsVision("google/gemini-2.5-pro")).toBe(true);
     expect(heuristicModelSupportsVision("deepseek/deepseek-chat")).toBe(false);
   });

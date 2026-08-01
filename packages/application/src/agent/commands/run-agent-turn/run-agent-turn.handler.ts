@@ -11,6 +11,7 @@ import {
   type AgentContextUpdate,
 } from "../../services/agent-turn-runner.js";
 import { injectPrompts, type PromptVars } from "../../services/prompt-injector.js";
+import { detectRuntimeOs } from "../../services/runtime-os.js";
 import { formatMemoryPrompt } from "../../services/memory-prompt-formatter.js";
 import type { MemoryStorePort } from "../../../memory/ports/memory-store.port.js";
 import { InProcessAgentTurnWorker, type AgentTurnWorker } from "../../services/in-process-agent-turn-worker.js";
@@ -142,6 +143,7 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
       const vars: PromptVars = {
         currentDate: new Date().toISOString().slice(0, 10),
         environment: process.env.NODE_ENV === "production" ? "production" : "development",
+        runtimeOs: detectRuntimeOs(),
         availableTools: tools.map((tool) => tool.name).join(", "),
         ...(command.workspace ? { workspace: command.workspace } : {}),
       };

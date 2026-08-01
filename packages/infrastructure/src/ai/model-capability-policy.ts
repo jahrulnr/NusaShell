@@ -38,10 +38,14 @@ export function resolveModelRuntimePolicy(input: {
   readonly capabilities?: ModelCapabilities;
 }): ModelRuntimePolicy {
   const capabilities = input.capabilities;
-  const supportsReasoning = capabilities?.reasoningSupported !== undefined
-    ? capabilities.reasoningSupported
-    : Boolean(capabilities?.reasoningMandatory || capabilities?.supportedEfforts?.length)
-      || heuristicModelSupportsEffort(input.model);
+  // Catalog often stores reasoningSupported:false when the provider listing
+  // omitted reasoning fields. Known reasoner families still take the heuristic
+  // so effort/thinking params are not silently dropped (e.g. glm-5.2, kimi).
+  const supportsReasoning =
+    capabilities?.reasoningSupported === true
+    || Boolean(capabilities?.reasoningMandatory)
+    || Boolean(capabilities?.supportedEfforts?.length)
+    || heuristicModelSupportsEffort(input.model);
   const effort = resolveEffort(
     input.requestedEffort ?? "auto",
     supportsReasoning,
@@ -103,6 +107,7 @@ export function heuristicModelSupportsEffort(modelId: string): boolean {
     "deepseek-r1", "deepseek-reasoner", "claude-3-7", "claude-4",
     "claude-opus-4", "claude-sonnet-4", "gemini-2.5", "gemini-3",
     "grok-3", "grok-4", "qwq", "qwen3",
+    "glm-5", "glm-4.7", "glm-4.6", "glm-4.5", "kimi", "moonshot",
   ].some((marker) => model.includes(marker));
 }
 

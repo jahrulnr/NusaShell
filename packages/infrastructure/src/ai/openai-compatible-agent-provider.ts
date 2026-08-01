@@ -489,9 +489,21 @@ function toResponsesTool(tool: AgentProviderRequest["tools"][number]): Record<st
 }
 
 function chatEffort(effort: AgentProviderRequest["effort"]): Record<string, unknown> {
-  return effort && effort !== "auto"
-    ? { reasoning_effort: effort, reasoning: { effort } }
-    : {};
+  if (!effort || effort === "auto") return {};
+  // z.ai GLM (and similar) enable CoT via thinking.type; OpenAI-compatible
+  // gateways ignore unknown fields, so this is safe alongside reasoning_effort.
+  if (effort === "none") {
+    return {
+      thinking: { type: "disabled" },
+      reasoning_effort: effort,
+      reasoning: { effort },
+    };
+  }
+  return {
+    thinking: { type: "enabled" },
+    reasoning_effort: effort,
+    reasoning: { effort },
+  };
 }
 
 function responsesEffort(effort: AgentProviderRequest["effort"]): Record<string, unknown> {
