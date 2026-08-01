@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.53] - 2026-08-01
+
+### Added
+
+- **`job` agent meta-tool** — the foreground agent can now manage scheduled
+  automation with full CRUD parity to the desktop Jobs surface and the
+  `job.*` WS methods, through one always-on `job` meta-tool with an `action`
+  enum (`list`, `validate_schedule`, `add`, `set_enabled`, `run`, `remove`,
+  `output`). Same envelope style as `memory` (`{ ok, data?, error?, meta }`);
+  `ApplicationError` codes `JOB_NOT_FOUND` / `JOB_INVALID_SCHEDULE` map to
+  structured `job_not_found` / `job_invalid_schedule` envelopes so a bad
+  action never crashes the turn. Reuses the existing schedule parser and
+  `JobStorePort` / `JobScheduler` ports — no parallel model.
+  - **Wiring:** job deps are late-bound because the agent is constructed
+    before jobs in the composition root. `McpAgentToolGateway.bindJobs(store,
+    scheduler)` is called in `apps/backend/src/container.ts` after
+    `createJobRuntime(...)`; the `job` tool only appears in `listTools()` when
+    both deps are bound.
+  - **Anti-recursion:** `job` is added to `JobAgentToolGateway.JOB_DENYLIST`
+    so a scheduled job turn cannot manage other jobs. The
+    `ReviewAgentToolGateway` whitelist is unchanged — review stays
+    learning-only (memory + skills), so `job` is also unavailable during
+    background review turns.
+  - Prompt copy states jobs run **only while NusaShell is open**, cron is
+    UTC, and missed one-shots are not silently fired.
+- `docs/architecture/job-automation.md` — new "Agent tools" section with the
+  action table, envelope mapping, and wiring notes.
+- `docs/architecture/progressive-mcp-tools.md` — cross-link to the `job` tool
+  and `job-automation.md`.
+
+### Changed
+
+- `mcp-tools.md`, `developer.md`, and `system.md` prompts now document the
+  `job` meta-tool and the app-open / UTC / no-silent-missed-one-shot
+  semantics.
+
 ## [0.0.52] - 2026-08-01
 
 ### Fixed

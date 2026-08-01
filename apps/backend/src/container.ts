@@ -164,6 +164,7 @@ export function createContainer(options: ContainerOptions): Container {
   const skills = createSkillsRuntime(options, logger, eventDispatcher);
   const agent = createAgentRuntime(options, logger, eventDispatcher, plugin, skills);
   const jobs = createJobRuntime(options, logger, eventDispatcher, plugin, agent);
+  agent.agentToolGateway.bindJobs(jobs.jobStore, jobs.jobScheduler);
   const acp = createAcpRuntime(options, logger, eventDispatcher, agent);
 
   const aiConfiguration = createAiConfiguration(options, logger, agent);

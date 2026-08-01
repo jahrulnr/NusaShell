@@ -5,6 +5,8 @@ import type { SkillRegistryPort } from "../../skill/ports/skill-registry.port.js
 import type { SkillProvenancePort } from "../../skill/ports/skill-provenance.port.js";
 import type { SkillUsagePort, UsageBumpKind } from "../../skill/ports/skill-usage.port.js";
 import type { MemoryStorePort, MemoryTarget } from "../../memory/ports/memory-store.port.js";
+import type { JobStorePort } from "../../job/ports/job-store.port.js";
+import type { JobScheduler } from "../../job/services/job-scheduler.js";
 import type { DocsIndexPort } from "../ports/docs-index.port.js";
 import type { AgentToolDefinition } from "../ports/agent-provider.port.js";
 import type { AgentToolGateway, AgentTurnContext } from "../ports/agent-tool-gateway.port.js";
@@ -18,6 +20,7 @@ import {
 import { execDocsSearch, execDocsList, execDocsRead } from "./docs-tool-handlers.js";
 import { execSkillList, execSkillSearch, execSkillRead, execSkillManage } from "./skill-tool-handlers.js";
 import { execMemory } from "./memory-tool-handler.js";
+import { execJob } from "./job-tool-handler.js";
 import { execAskQuestion } from "./ask-question-tool-handler.js";
 
 export type WriteOrigin = "foreground" | "background_review";
@@ -47,6 +50,8 @@ export class McpAgentToolGateway implements AgentToolGateway {
   private readonly turnWorkspace = new Map<string, string | undefined>();
   private writeOrigin: WriteOrigin = "foreground";
   private writeApprovalEnabled = false;
+  private jobStore?: JobStorePort;
+  private jobScheduler?: JobScheduler;
 
   constructor(
     private readonly runtimeManager: PluginRuntimeManager,
@@ -63,6 +68,12 @@ export class McpAgentToolGateway implements AgentToolGateway {
   setWriteOrigin(origin: WriteOrigin): void { this.writeOrigin = origin; }
   getWriteOrigin(): WriteOrigin { return this.writeOrigin; }
   setWriteApprovalEnabled(enabled: boolean): void { this.writeApprovalEnabled = enabled; }
+
+  /** Late-bind job deps after construction (agent is built before jobs in the container). */
+  bindJobs(store: JobStorePort, scheduler: JobScheduler): void {
+    this.jobStore = store;
+    this.jobScheduler = scheduler;
+  }
 
   beginTurn(turnId: string, context?: AgentTurnContext): void {
     if (!this.turnRoutes.has(turnId)) this.turnRoutes.set(turnId, new Map());
@@ -153,6 +164,20 @@ export class McpAgentToolGateway implements AgentToolGateway {
         content: { type: "string", description: "Full SKILL.md content (for create/edit) or file content (for write_file)" },
         path: { type: "string", description: "Relative file path under the skill (for write_file only); must be under references/, templates/, scripts/, or assets/" },
       }, ["action", "name"]),
+      ...(this.jobStore && this.jobScheduler ? [definition("job", "Manage scheduled automation jobs (run only while NusaShell is open; cron is UTC; missed one-shots are not silently fired)", {
+        action: { type: "string", enum: ["list", "validate_schedule", "add", "set_enabled", "run", "remove", "output"], description: "Job operation" },
+        id: { type: "string", description: "Job ID (required for set_enabled, run, remove, output)" },
+        name: { type: "string", description: "Job name (required for add)" },
+        schedule: { type: "string", description: "Schedule expression (required for add, validate_schedule): \"every 30m\", \"2h\", \"0 9 * * *\", or an ISO timestamp" },
+        mode: { type: "string", enum: ["agent", "tool"], description: "Job mode (required for add)" },
+        prompt: { type: "string", description: "Agent prompt (required when mode=agent)" },
+        pluginId: { type: "string", description: "Plugin ID (required when mode=tool)" },
+        toolName: { type: "string", description: "Tool name (required when mode=tool)" },
+        args: { type: "object", additionalProperties: true, description: "Static tool args (when mode=tool)" },
+        enabled: { type: "boolean", description: "Pause/resume flag (required for set_enabled)" },
+        repeat_times: { type: "integer", minimum: 1, maximum: 100000, description: "Optional finite repeat count (add only); omit for repeat forever" },
+        limit: { type: "integer", minimum: 1, maximum: 100, description: "Max output entries (output only; default 20)" },
+      }, ["action"])] : []),
       ...(this.isInteractive(turnId) ? [definition("ask_question", "Pause and ask the user a structured clarifying question before continuing. Use only for genuine decisions the user must make.", {
         question: { type: "string", description: "The question to show the user" },
         options: {
@@ -203,6 +228,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
       case "skill_read": return execSkillRead(this.skillRegistry, this.skillUsage, this.logger, args);
       case "memory": return execMemory(this.memoryStore, args);
       case "skill_manage": return execSkillManage(this.skillRegistry, this.skillProvenance, this.skillUsage, this.approvalStaging, this.logger, this.writeOrigin, this.writeApprovalEnabled, args);
+      case "job": return execJob(this.jobStore, this.jobScheduler, args);
       case "ask_question": return execAskQuestion(this.askQuestions, this.isInteractive(turnId), args, callId ?? requestId, turnId);
       default: return this.callGrantedTool(name, args, requestId, turnId);
     }

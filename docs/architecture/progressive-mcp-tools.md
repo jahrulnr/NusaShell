@@ -47,6 +47,13 @@ are validated. Prompt/resource search is capped at 20 results; text resource
 reads are capped at 50 KB. Binary resource content is not injected into the
 provider.
 
+The foreground agent also owns `memory`, `skill_manage`, and `job` meta-tools
+(personal memory, agent-owned skill mutation, and scheduled automation
+management respectively). `job` exposes the same CRUD surface as the `job.*`
+WS methods and is denied inside scheduled job turns; see
+[`job-automation.md`](job-automation.md) for the action table and recursion
+guard.
+
 The Agent UI intentionally has no MCP catalog, scope selector, prompt browser,
 or resource attachment panel. The model can discover, start, stop, and inspect
 MCPs when needed; NusaShell remains the only broker.

@@ -86,6 +86,14 @@ export function memoryNotConfigured(): unknown {
   };
 }
 
+export function jobsNotConfigured(): unknown {
+  return {
+    ok: false,
+    error: { code: "jobs_not_configured", message: "Job store is not configured" },
+    meta: {},
+  };
+}
+
 export function skillProtected(skillId: string): unknown {
   return {
     ok: false,

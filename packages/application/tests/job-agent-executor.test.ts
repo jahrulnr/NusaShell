@@ -27,6 +27,7 @@ class FakeInnerGateway implements AgentToolGateway {
       { name: "skill_list", description: "list skills" },
       { name: "skill_read", description: "read skill" },
       { name: "skill_search", description: "search skills" },
+      { name: "job", description: "manage jobs" },
       { name: "mcp_notes_create", description: "granted plugin tool" },
     ];
   }
@@ -51,9 +52,10 @@ describe("JobAgentToolGateway", () => {
     expect(names).not.toContain("skill_list");
     expect(names).not.toContain("skill_read");
     expect(names).not.toContain("skill_search");
+    expect(names).not.toContain("job");
   });
 
-  it("denies executing memory and skill tools", async () => {
+  it("denies executing memory, skill, and job tools", async () => {
     const inner = new FakeInnerGateway();
     const gateway = new JobAgentToolGateway(inner as unknown as McpAgentToolGateway);
     await expect(gateway.execute("memory", {}, "r1", "t1")).rejects.toThrow(/not allowed/);
@@ -61,6 +63,7 @@ describe("JobAgentToolGateway", () => {
     await expect(gateway.execute("skill_list", {}, "r1", "t1")).rejects.toThrow(/not allowed/);
     await expect(gateway.execute("skill_read", {}, "r1", "t1")).rejects.toThrow(/not allowed/);
     await expect(gateway.execute("skill_search", {}, "r1", "t1")).rejects.toThrow(/not allowed/);
+    await expect(gateway.execute("job", { action: "list" }, "r1", "t1")).rejects.toThrow(/not allowed/);
     expect(inner.executed).toHaveLength(0);
   });
 

@@ -4,7 +4,8 @@ import type { McpAgentToolGateway } from "../../agent/services/mcp-agent-tool-ga
 
 /**
  * Tools a scheduled job may NOT touch this ship. Jobs must not mutate the
- * learning stores (memory/skills) — they are automation, not learning.
+ * learning stores (memory/skills) — they are automation, not learning — and
+ * must not manage other jobs (recursion guard).
  */
 const JOB_DENYLIST = new Set([
   "memory",
@@ -13,6 +14,7 @@ const JOB_DENYLIST = new Set([
   "skill_search",
   "skill_read",
   "ask_question",
+  "job",
 ]);
 
 /**

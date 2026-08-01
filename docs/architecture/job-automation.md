@@ -80,9 +80,41 @@ Both implement `JobStorePort` with fire-time dedup via `claimFire`/
 ### JobAgentToolGateway
 
 Wraps `McpAgentToolGateway` with a denylist: `memory`, `skill_manage`,
-`skill_list`, `skill_search`, `skill_read`. Jobs cannot mutate the user's
-learning stores. MCP plugin tool discovery/granting and docs tools are
-allowed.
+`skill_list`, `skill_search`, `skill_read`, `ask_question`, and `job`. Jobs
+cannot mutate the user's learning stores, and the `job` meta-tool is denied
+inside scheduled job turns to prevent recursion. MCP plugin tool
+discovery/granting and docs tools are allowed.
+
+## Agent tools
+
+The foreground agent can manage jobs through the `job` meta-tool on
+`McpAgentToolGateway` — full CRUD parity with the desktop Jobs surface and the
+`job.*` WS methods. One tool with an `action` enum keeps the always-present
+catalog small (same envelope style as `memory`):
+
+| action | Required args | Behavior |
+| --- | --- | --- |
+| `list` | — | Compact jobs: `id`, `name`, `schedule`, `enabled`, `nextRunAt`, `lastStatus` |
+| `validate_schedule` | `schedule` | Parse + describe; returns `{ ok, data: { description } }` or a `job_invalid_schedule` envelope |
+| `add` | `name`, `schedule`, `mode` (`agent`\|`tool`), plus mode fields / optional `repeat_times` | Same schedule parsing and `JOB_INVALID_SCHEDULE` mapping as `AddJobHandler` |
+| `set_enabled` | `id`, `enabled` | Pause/resume; recomputes `nextRunAt` like `SetJobEnabledHandler` |
+| `run` | `id` | `scheduler.runOneNow` (manual fire, respects the claim lock) |
+| `remove` | `id` | Delete |
+| `output` | `id`, optional `limit` (1-100, default 20) | Recent output entries |
+
+Returns `{ ok, data?, error?, meta }` like the other shell-owned meta-tools.
+`ApplicationError` codes `JOB_NOT_FOUND` and `JOB_INVALID_SCHEDULE` are mapped
+into structured `error` envelopes (`job_not_found`, `job_invalid_schedule`) so a
+bad action never crashes the turn.
+
+### Wiring
+
+The agent is constructed before jobs in the composition root, so job deps are
+late-bound: `McpAgentToolGateway.bindJobs(store, scheduler)` is called in
+`apps/backend/src/container.ts` after `createJobRuntime(...)`. The `job` tool
+only appears in `listTools()` when both deps are bound. The `ReviewAgentToolGateway`
+whitelist is unchanged — review stays learning-only (memory + skills), so `job`
+is not available during background review turns either.
 
 ### JobAgentExecutor
 

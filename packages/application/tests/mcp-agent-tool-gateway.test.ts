@@ -10,7 +10,11 @@ import type {
   MemoryStorePort,
   MemorySnapshot,
   MemoryMutationResult,
+  JobStorePort,
+  Job,
+  JobOutputEntry,
 } from "../src/index.js";
+import type { JobScheduler } from "../src/job/services/job-scheduler.js";
 
 const fakeRuntime = {
   listPlugins: async () => [],
@@ -753,4 +757,275 @@ describe("McpAgentToolGateway", () => {
       gateway.endTurn("turn-list");
     });
   });
+
+  describe("job", () => {
+    function fakeJob(overrides: Partial<Job> = {}): Job {
+      return {
+        id: "job-1",
+        name: "Daily digest",
+        schedule: { kind: "interval", minutes: 60 },
+        mode: { type: "agent", prompt: "Summarize the inbox" },
+        enabled: true,
+        repeat: { times: null, completed: 0 },
+        nextRunAt: "2026-08-01T10:00:00.000Z",
+        lastRunAt: null,
+        lastStatus: null,
+        lastError: null,
+        createdAt: "2026-08-01T09:00:00.000Z",
+        ...overrides,
+      };
+    }
+
+    function fakeStore(jobs: Job[] = [], outputs: JobOutputEntry[] = []): JobStorePort {
+      const store: JobStorePort = {
+        create: async (job) => { jobs.push(job); return job; },
+        update: async (job) => {
+          const idx = jobs.findIndex((j) => j.id === job.id);
+          if (idx >= 0) jobs[idx] = job;
+          return job;
+        },
+        get: async (id) => jobs.find((j) => j.id === id) ?? null,
+        list: async () => [...jobs],
+        remove: async (id) => {
+          const idx = jobs.findIndex((j) => j.id === id);
+          if (idx >= 0) jobs.splice(idx, 1);
+        },
+        markRun: async (id, status, error, nextRunAt) => {
+          const job = jobs.find((j) => j.id === id);
+          if (!job) return null;
+          const updated = { ...job, lastRunAt: "2026-08-01T10:00:00.000Z", lastStatus: status, lastError: error, nextRunAt };
+          const idx = jobs.findIndex((j) => j.id === id);
+          jobs[idx] = updated;
+          return updated;
+        },
+        claimFire: async () => true,
+        releaseFire: async () => {},
+        listDue: async () => [],
+        appendOutput: async (jobId, entry) => { outputs.unshift(entry); },
+        listOutputs: async (jobId, limit) => outputs.slice(0, limit),
+      };
+      return store;
+    }
+
+    function fakeScheduler(): JobScheduler {
+      const runOneNow = async (jobId: string): Promise<{ ok: boolean; error?: string }> => {
+        if (jobId === "missing") return { ok: false, error: "job not found" };
+        return { ok: true };
+      };
+      return { runOneNow } as unknown as JobScheduler;
+    }
+
+    it("omits the job tool when jobs are not bound", async () => {
+      const gateway = new McpAgentToolGateway(fakeRuntime as never);
+      gateway.beginTurn("turn-no-jobs");
+      expect((await gateway.listTools([], "turn-no-jobs")).map((t) => t.name)).not.toContain("job");
+      await expect(gateway.execute("job", { action: "list" }, "c", "turn-no-jobs")).resolves.toEqual({
+        ok: false,
+        error: { code: "jobs_not_configured", message: "Job store is not configured" },
+        meta: {},
+      });
+    });
+
+    it("lists the job tool when bound and runs list", async () => {
+      const store = fakeStore([fakeJob()]);
+      const gateway = new McpAgentToolGateway(fakeRuntime as never);
+      gateway.bindJobs(store, fakeScheduler());
+      gateway.beginTurn("turn-list");
+      expect((await gateway.listTools([], "turn-list")).map((t) => t.name)).toContain("job");
+
+      const result = await gateway.execute("job", { action: "list" }, "c-list", "turn-list");
+      expect(result).toEqual({
+        ok: true,
+        data: {
+          jobs: [{
+            id: "job-1",
+            name: "Daily digest",
+            schedule: "every 1h",
+            enabled: true,
+            nextRunAt: "2026-08-01T10:00:00.000Z",
+            lastStatus: null,
+          }],
+        },
+        meta: { count: 1 },
+      });
+    });
+
+    it("validates a schedule and rejects a bad one with an envelope", async () => {
+      const gateway = new McpAgentToolGateway(fakeRuntime as never);
+      gateway.bindJobs(fakeStore(), fakeScheduler());
+      gateway.beginTurn("turn-validate");
+
+      const ok = await gateway.execute("job", { action: "validate_schedule", schedule: "every 30m" }, "c-vok", "turn-validate");
+      expect(ok).toEqual({ ok: true, data: { description: "every 30m" }, meta: {} });
+
+      const bad = await gateway.execute("job", { action: "validate_schedule", schedule: "garbage" }, "c-vbad", "turn-validate");
+      expect(bad).toEqual({
+        ok: false,
+        error: { code: "job_invalid_schedule", message: expect.stringMatching(/unrecognized schedule/) },
+        meta: {},
+      });
+    });
+
+    it("adds an agent-mode job and returns the created job", async () => {
+      const store = fakeStore();
+      const gateway = new McpAgentToolGateway(fakeRuntime as never);
+      gateway.bindJobs(store, fakeScheduler());
+      gateway.beginTurn("turn-add");
+
+      const result = await gateway.execute("job", {
+        action: "add",
+        name: "Inbox sweep",
+        schedule: "0 9 * * *",
+        mode: "agent",
+        prompt: "Summarize the inbox",
+      }, "c-add", "turn-add") as { ok: boolean; data: Job };
+      expect(result.ok).toBe(true);
+      expect(result.data.name).toBe("Inbox sweep");
+      expect(result.data.schedule).toEqual({ kind: "cron", expr: "0 9 * * *" });
+      expect(result.data.mode).toEqual({ type: "agent", prompt: "Summarize the inbox" });
+      expect(result.data.enabled).toBe(true);
+      expect(result.data.nextRunAt).not.toBeNull();
+    });
+
+    it("adds a tool-mode job with static args", async () => {
+      const store = fakeStore();
+      const gateway = new McpAgentToolGateway(fakeRuntime as never);
+      gateway.bindJobs(store, fakeScheduler());
+      gateway.beginTurn("turn-add-tool");
+
+      const result = await gateway.execute("job", {
+        action: "add",
+        name: "Notes ping",
+        schedule: "every 1h",
+        mode: "tool",
+        pluginId: "nusashell.notes",
+        toolName: "createNote",
+        args: { text: "hello" },
+        repeat_times: 5,
+      }, "c-add-tool", "turn-add-tool") as { ok: boolean; data: Job };
+      expect(result.ok).toBe(true);
+      expect(result.data.mode).toEqual({
+        type: "tool",
+        pluginId: "nusashell.notes",
+        toolName: "createNote",
+        args: { text: "hello" },
+      });
+      expect(result.data.repeat.times).toBe(5);
+    });
+
+    it("rejects add with an invalid schedule via an envelope", async () => {
+      const store = fakeStore();
+      const gateway = new McpAgentToolGateway(fakeRuntime as never);
+      gateway.bindJobs(store, fakeScheduler());
+      gateway.beginTurn("turn-add-bad");
+
+      const result = await gateway.execute("job", {
+        action: "add",
+        name: "bad",
+        schedule: "not a schedule",
+        mode: "agent",
+        prompt: "x",
+      }, "c-add-bad", "turn-add-bad");
+      expect(result).toEqual({
+        ok: false,
+        error: { code: "job_invalid_schedule", message: expect.stringMatching(/unrecognized schedule/) },
+        meta: {},
+      });
+      expect(await store.list()).toHaveLength(0);
+    });
+
+    it("set_enabled pauses and resumes a job", async () => {
+      const store = fakeStore([fakeJob()]);
+      const gateway = new McpAgentToolGateway(fakeRuntime as never);
+      gateway.bindJobs(store, fakeScheduler());
+      gateway.beginTurn("turn-pause");
+
+      const paused = await gateway.execute("job", { action: "set_enabled", id: "job-1", enabled: false }, "c-pause", "turn-pause") as { ok: boolean; data: Job };
+      expect(paused.ok).toBe(true);
+      expect(paused.data.enabled).toBe(false);
+
+      const resumed = await gateway.execute("job", { action: "set_enabled", id: "job-1", enabled: true }, "c-resume", "turn-pause") as { ok: boolean; data: Job };
+      expect(resumed.data.enabled).toBe(true);
+    });
+
+    it("set_enabled returns job_not_found for a missing id", async () => {
+      const gateway = new McpAgentToolGateway(fakeRuntime as never);
+      gateway.bindJobs(fakeStore(), fakeScheduler());
+      gateway.beginTurn("turn-missing");
+
+      const result = await gateway.execute("job", { action: "set_enabled", id: "nope", enabled: true }, "c", "turn-missing");
+      expect(result).toEqual({
+        ok: false,
+        error: { code: "job_not_found", message: expect.stringMatching(/Job not found/) },
+        meta: {},
+      });
+    });
+
+    it("run fires a job immediately via the scheduler", async () => {
+      const gateway = new McpAgentToolGateway(fakeRuntime as never);
+      gateway.bindJobs(fakeStore([fakeJob()]), fakeScheduler());
+      gateway.beginTurn("turn-run");
+
+      const result = await gateway.execute("job", { action: "run", id: "job-1" }, "c-run", "turn-run");
+      expect(result).toEqual({ ok: true, data: { ok: true }, meta: {} });
+    });
+
+    it("run maps a not-found scheduler error to a job_not_found envelope", async () => {
+      const gateway = new McpAgentToolGateway(fakeRuntime as never);
+      gateway.bindJobs(fakeStore(), fakeScheduler());
+      gateway.beginTurn("turn-run-missing");
+
+      const result = await gateway.execute("job", { action: "run", id: "missing" }, "c-run-missing", "turn-run-missing");
+      expect(result).toEqual({
+        ok: false,
+        error: { code: "job_not_found", message: "job not found" },
+        meta: {},
+      });
+    });
+
+    it("removes a job and returns job_not_found when absent", async () => {
+      const store = fakeStore([fakeJob()]);
+      const gateway = new McpAgentToolGateway(fakeRuntime as never);
+      gateway.bindJobs(store, fakeScheduler());
+      gateway.beginTurn("turn-remove");
+
+      const removed = await gateway.execute("job", { action: "remove", id: "job-1" }, "c-rm", "turn-remove");
+      expect(removed).toEqual({ ok: true, data: { id: "job-1", removed: true }, meta: {} });
+      expect(await store.list()).toHaveLength(0);
+
+      const missing = await gateway.execute("job", { action: "remove", id: "job-1" }, "c-rm2", "turn-remove");
+      expect(missing).toEqual({
+        ok: false,
+        error: { code: "job_not_found", message: expect.stringMatching(/Job not found/) },
+        meta: {},
+      });
+    });
+
+    it("returns recent output entries with a limit", async () => {
+      const outputs: JobOutputEntry[] = [
+        { jobId: "job-1", runAt: "2026-08-01T10:00:00.000Z", status: "ok", summary: "ok", path: "/o/1.md" },
+        { jobId: "job-1", runAt: "2026-08-01T09:00:00.000Z", status: "error", summary: "err", path: "/o/2.md" },
+      ];
+      const gateway = new McpAgentToolGateway(fakeRuntime as never);
+      gateway.bindJobs(fakeStore([fakeJob()], outputs), fakeScheduler());
+      gateway.beginTurn("turn-out");
+
+      const result = await gateway.execute("job", { action: "output", id: "job-1", limit: 1 }, "c-out", "turn-out");
+      expect(result).toEqual({ ok: true, data: { entries: [outputs[0]] }, meta: { count: 1 } });
+    });
+
+    it("rejects an unknown action with an envelope", async () => {
+      const gateway = new McpAgentToolGateway(fakeRuntime as never);
+      gateway.bindJobs(fakeStore(), fakeScheduler());
+      gateway.beginTurn("turn-bad-action");
+
+      const result = await gateway.execute("job", { action: "frobnicate" }, "c", "turn-bad-action");
+      expect(result).toEqual({
+        ok: false,
+        error: { code: "job_error", message: expect.stringMatching(/Unsupported job action/) },
+        meta: {},
+      });
+    });
+  });
 });
+
