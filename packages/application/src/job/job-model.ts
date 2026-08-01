@@ -20,7 +20,7 @@ export type JobMode =
       readonly args: Readonly<Record<string, unknown>>;
     };
 
-export type JobStatus = "ok" | "error" | null;
+export type JobStatus = "ok" | "error" | "cancelled" | null;
 
 export interface Job {
   readonly id: string;
@@ -40,9 +40,10 @@ export interface Job {
 export interface JobOutputEntry {
   readonly jobId: string;
   readonly runAt: string;
-  readonly status: "ok" | "error";
+  readonly status: "ok" | "error" | "cancelled";
   readonly summary: string;
   readonly path: string;
+  readonly traceId?: string;
 }
 
 /** One-shot grace window: a `once` job older than this at tick time is missed. */

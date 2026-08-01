@@ -1,5 +1,7 @@
 import { sendRequest, onEvent } from "./ws-client.js";
 
+const JOB_RUN_TIMEOUT_MS = 300_000;
+
 function describeJobSchedule(schedule) {
   if (!schedule) return "—";
   if (schedule.kind === "once") return `once @ ${schedule.runAt}`;
@@ -23,6 +25,7 @@ function describeJobMode(mode) {
 function describeLastStatus(status) {
   if (status === "ok") return "OK";
   if (status === "error") return "Error";
+  if (status === "cancelled") return "Cancelled";
   return "Never";
 }
 
@@ -46,6 +49,7 @@ export class JobsController {
     this.loading = false;
     this.pendingDeleteId = "";
     this._lastFocus = null;
+    this._runningIds = new Set();
     this.els = {
       list: document.getElementById("jobs-list"),
       empty: document.getElementById("jobs-empty"),
@@ -85,12 +89,23 @@ export class JobsController {
 
   initialize() {
     this.bind();
+    onEvent("job.started", (payload) => {
+      this._runningIds.add(payload.jobId);
+      if (this._isViewActive()) this._patchRowRunning(payload.jobId, true);
+    });
+    onEvent("job.cancelled", (payload) => {
+      this.notify(`Job “${payload.name}” cancelled`, "info");
+      this._runningIds.delete(payload.jobId);
+      if (this._isViewActive()) void this.refresh();
+    });
     onEvent("job.completed", (payload) => {
       this.notify(`Job “${payload.name}” completed`, "success");
+      this._runningIds.delete(payload.jobId);
       if (this._isViewActive()) void this.refresh();
     });
     onEvent("job.failed", (payload) => {
       this.notify(`Job “${payload.name}” failed: ${payload.error}`, "error");
+      this._runningIds.delete(payload.jobId);
       if (this._isViewActive()) void this.refresh();
     });
   }
@@ -177,15 +192,41 @@ export class JobsController {
     }
   }
 
+  _isJobRunning(jobId) {
+    return this._runningIds.has(jobId);
+  }
+
+  _patchRowRunning(jobId, running) {
+    const row = this.els.list?.querySelector(`[data-job-id="${jobId}"]`);
+    if (!row) return;
+    row.classList.toggle("job-row-running", running);
+    const stopBtn = row.querySelector('[data-control="job-stop-btn"]');
+    const runBtn = row.querySelector('[data-control="job-run-btn"]');
+    const toggleBtn = row.querySelector('[data-control="job-toggle-btn"]');
+    if (running) {
+      if (stopBtn) stopBtn.hidden = false;
+      if (runBtn) runBtn.disabled = true;
+      if (toggleBtn) toggleBtn.disabled = true;
+    } else {
+      if (stopBtn) stopBtn.hidden = true;
+      if (runBtn) runBtn.disabled = false;
+      if (toggleBtn) toggleBtn.disabled = false;
+    }
+  }
+
   _renderRow(job) {
     const row = document.createElement("div");
     row.className = "job-row";
     row.dataset.jobId = job.id;
     row.setAttribute("role", "listitem");
 
+    const running = this._isJobRunning(job.id);
+    if (running) row.classList.add("job-row-running");
+
     const status = job.lastStatus ?? "idle";
     const statusDot = document.createElement("span");
     statusDot.className = `job-status-dot job-status-${status}`;
+    if (running) statusDot.classList.add("job-status-running");
     statusDot.setAttribute("aria-hidden", "true");
 
     const info = document.createElement("div");
@@ -203,7 +244,9 @@ export class JobsController {
     strip.className = "job-strip";
     const next = document.createElement("div");
     next.className = "job-strip-next";
-    if (job.enabled && job.nextRunAt) {
+    if (running) {
+      next.textContent = "running…";
+    } else if (job.enabled && job.nextRunAt) {
       next.textContent = `next ${humanizeNextRun(job.nextRunAt)}`;
       next.title = new Date(job.nextRunAt).toLocaleString();
     } else if (!job.enabled) {
@@ -225,20 +268,34 @@ export class JobsController {
 
     const actions = document.createElement("div");
     actions.className = "job-actions";
+
     const runBtn = document.createElement("button");
     runBtn.type = "button";
     runBtn.className = "mini-btn";
     runBtn.textContent = "Run";
     runBtn.dataset.control = "job-run-btn";
     runBtn.setAttribute("aria-label", `Run ${job.name} now`);
+    runBtn.disabled = running;
     runBtn.addEventListener("click", () => void this.runJob(job.id));
+
+    const stopBtn = document.createElement("button");
+    stopBtn.type = "button";
+    stopBtn.className = "mini-btn danger";
+    stopBtn.textContent = "Stop";
+    stopBtn.dataset.control = "job-stop-btn";
+    stopBtn.setAttribute("aria-label", `Stop ${job.name}`);
+    stopBtn.hidden = !running;
+    stopBtn.addEventListener("click", () => void this.cancelJob(job.id, job.name));
+
     const toggleBtn = document.createElement("button");
     toggleBtn.type = "button";
     toggleBtn.className = "mini-btn";
     toggleBtn.textContent = job.enabled ? "Pause" : "Resume";
     toggleBtn.dataset.control = "job-toggle-btn";
     toggleBtn.setAttribute("aria-label", `${job.enabled ? "Pause" : "Resume"} ${job.name}`);
+    toggleBtn.disabled = running;
     toggleBtn.addEventListener("click", () => void this.toggleJob(job.id, !job.enabled));
+
     const outputBtn = document.createElement("button");
     outputBtn.type = "button";
     outputBtn.className = "mini-btn";
@@ -246,6 +303,7 @@ export class JobsController {
     outputBtn.dataset.control = "job-output-btn";
     outputBtn.setAttribute("aria-label", `View output for ${job.name}`);
     outputBtn.addEventListener("click", () => void this.showOutput(job.id, job.name));
+
     const removeBtn = document.createElement("button");
     removeBtn.type = "button";
     removeBtn.className = "mini-btn danger";
@@ -253,8 +311,8 @@ export class JobsController {
     removeBtn.dataset.control = "job-remove-btn";
     removeBtn.setAttribute("aria-label", `Remove ${job.name}`);
     removeBtn.addEventListener("click", () => this.openDeleteDialog(job.id, job.name));
-    actions.append(runBtn, toggleBtn, outputBtn, removeBtn);
 
+    actions.append(runBtn, stopBtn, toggleBtn, outputBtn, removeBtn);
     row.append(statusDot, info, strip, actions);
     return row;
   }
@@ -354,12 +412,22 @@ export class JobsController {
 
   async runJob(id) {
     try {
-      const result = await sendRequest("job.run", { id });
+      const result = await sendRequest("job.run", { id }, JOB_RUN_TIMEOUT_MS);
       if (!result.ok) this.notify(`Run failed: ${result.error ?? "unknown"}`, "error");
       else this.notify("Job started", "success");
       await this.refresh();
     } catch (error) {
       this.notify(`Could not run job: ${error.message || error}`, "error");
+    }
+  }
+
+  async cancelJob(id, name) {
+    try {
+      const result = await sendRequest("job.cancel", { id });
+      if (!result.ok) this.notify(`Could not stop: ${result.error ?? "unknown"}`, "error");
+      else this.notify(`Stopping “${name}”…`, "info");
+    } catch (error) {
+      this.notify(`Could not stop job: ${error.message || error}`, "error");
     }
   }
 
@@ -400,7 +468,7 @@ export class JobsController {
 
   async showOutput(id, name) {
     try {
-      const result = await sendRequest("job.output", { id, limit: 20 });
+      const result = await sendRequest("job.output", { id, limit: 20, includeBody: false });
       this._lastFocus = document.activeElement;
       this.els.outputTitle.textContent = `Output: ${name}`;
       this.els.outputBody.textContent = "";
@@ -412,17 +480,7 @@ export class JobsController {
         this.els.outputBody.appendChild(empty);
       } else {
         for (const entry of entries) {
-          const card = document.createElement("div");
-          card.className = "job-output-entry";
-          const header = document.createElement("div");
-          header.className = "job-output-header";
-          header.textContent = `${entry.runAt} · ${entry.status}`;
-          if (entry.status === "error") header.classList.add("job-output-error");
-          const summary = document.createElement("pre");
-          summary.className = "job-output-summary";
-          summary.textContent = entry.summary;
-          card.append(header, summary);
-          this.els.outputBody.appendChild(card);
+          this.els.outputBody.appendChild(this._renderOutputEntry(id, entry));
         }
       }
       this.els.outputModal.classList.add("active");
@@ -430,6 +488,53 @@ export class JobsController {
     } catch (error) {
       this.notify(`Could not load output: ${error.message || error}`, "error");
     }
+  }
+
+  _renderOutputEntry(jobId, entry) {
+    const card = document.createElement("div");
+    card.className = "job-output-entry";
+    const header = document.createElement("div");
+    header.className = "job-output-header";
+    header.textContent = `${entry.runAt} · ${entry.status}`;
+    if (entry.status === "error") header.classList.add("job-output-error");
+    if (entry.status === "cancelled") header.classList.add("job-output-cancelled");
+    const summary = document.createElement("pre");
+    summary.className = "job-output-summary";
+    summary.textContent = entry.summary;
+    card.append(header, summary);
+
+    const expandBtn = document.createElement("button");
+    expandBtn.type = "button";
+    expandBtn.className = "mini-btn job-output-expand";
+    expandBtn.textContent = "Show full output";
+    expandBtn.dataset.control = "job-output-expand";
+    let expanded = false;
+    expandBtn.addEventListener("click", async () => {
+      if (expanded) return;
+      expanded = true;
+      expandBtn.disabled = true;
+      expandBtn.textContent = "Loading…";
+      try {
+        const full = await sendRequest("job.output", { id: jobId, limit: 20, includeBody: true });
+        const items = full.outputs ?? [];
+        const match = items.find((item) => item.runAt === entry.runAt && item.path === entry.path);
+        if (match?.body) {
+          const body = document.createElement("pre");
+          body.className = "job-output-full";
+          body.textContent = match.body;
+          card.appendChild(body);
+          expandBtn.textContent = "Shown";
+        } else {
+          expandBtn.textContent = "No full output";
+        }
+      } catch (error) {
+        expandBtn.textContent = "Failed to load";
+        expandBtn.disabled = false;
+        expanded = false;
+      }
+    });
+    card.appendChild(expandBtn);
+    return card;
   }
 
   closeOutput() {

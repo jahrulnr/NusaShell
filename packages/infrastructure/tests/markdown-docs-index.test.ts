@@ -156,6 +156,7 @@ describe("MarkdownDocsIndex", () => {
       resolve(repoRoot, "apps/desktop/src/renderer/agent-conversation-controller.js"),
       resolve(repoRoot, "apps/desktop/src/renderer/agent-conversation-ui.js"),
       resolve(repoRoot, "apps/desktop/src/renderer/ai-model-ui.js"),
+      resolve(repoRoot, "apps/desktop/src/renderer/jobs-controller.js"),
     ];
 
     await generate({

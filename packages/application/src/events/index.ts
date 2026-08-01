@@ -20,8 +20,8 @@ export type { AgentCancelRequestedEvent } from "./agent-cancel-requested.event.j
 export { createAgentCancelRequestedEvent } from "./agent-cancel-requested.event.js";
 export type { AgentLearningUpdatedEvent } from "./agent-learning-updated.event.js";
 export { createLearningUpdatedEvent } from "./agent-learning-updated.event.js";
-export type { JobCompletedEvent, JobFailedEvent } from "./job-events.event.js";
-export { createJobCompletedEvent, createJobFailedEvent } from "./job-events.event.js";
+export type { JobCompletedEvent, JobFailedEvent, JobStartedEvent, JobCancelledEvent } from "./job-events.event.js";
+export { createJobCompletedEvent, createJobFailedEvent, createJobStartedEvent, createJobCancelledEvent } from "./job-events.event.js";
 export type {
   AcpTextDeltaEvent,
   AcpThoughtDeltaEvent,

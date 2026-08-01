@@ -812,7 +812,12 @@ describe("McpAgentToolGateway", () => {
         if (jobId === "missing") return { ok: false, error: "job not found" };
         return { ok: true };
       };
-      return { runOneNow } as unknown as JobScheduler;
+      const cancel = async (_jobId: string): Promise<{ ok: boolean; error?: string }> => {
+        return { ok: false, error: "job is not running" };
+      };
+      const isRunning = (_jobId: string): boolean => false;
+      const activeTraceId = (_jobId: string): string | null => null;
+      return { runOneNow, cancel, isRunning, activeTraceId } as unknown as JobScheduler;
     }
 
     it("omits the job tool when jobs are not bound", async () => {
@@ -844,6 +849,7 @@ describe("McpAgentToolGateway", () => {
             enabled: true,
             nextRunAt: "2026-08-01T10:00:00.000Z",
             lastStatus: null,
+            running: false,
           }],
         },
         meta: { count: 1 },

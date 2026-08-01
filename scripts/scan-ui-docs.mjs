@@ -66,6 +66,14 @@ const JS_PATHS = [
     "renderer",
     "ai-model-ui.js",
   ),
+  join(
+    REPO_ROOT,
+    "apps",
+    "desktop",
+    "src",
+    "renderer",
+    "jobs-controller.js",
+  ),
 ];
 
 const viewRegex = /<section[^>]*\bclass="[^"]*view[^"]*"[^>]*\bdata-view="([^"]+)"/g;

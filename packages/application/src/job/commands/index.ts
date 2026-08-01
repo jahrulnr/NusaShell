@@ -8,3 +8,6 @@ export { RunJobNowHandler } from "./run-job-now/run-job-now.handler.js";
 export type { RemoveJobCommand } from "./remove-job/remove-job.command.js";
 export type { RemoveJobResult } from "./remove-job/remove-job.handler.js";
 export { RemoveJobHandler } from "./remove-job/remove-job.handler.js";
+export type { CancelJobCommand } from "./cancel-job/cancel-job.command.js";
+export type { CancelJobResult } from "./cancel-job/cancel-job.command.js";
+export { CancelJobHandler } from "./cancel-job/cancel-job.handler.js";

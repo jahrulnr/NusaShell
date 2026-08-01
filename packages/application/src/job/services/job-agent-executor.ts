@@ -61,7 +61,7 @@ const JOB_SYSTEM_PROMPT =
 export class JobAgentExecutor {
   constructor(private readonly deps: JobAgentExecutorDeps) {}
 
-  async runAgent(prompt: string, settings: JobAgentExecutorSettings): Promise<JobExecutionResult> {
+  async runAgent(prompt: string, settings: JobAgentExecutorSettings, externalSignal?: AbortSignal): Promise<JobExecutionResult> {
     const provider = this.deps.providerRegistry.get(this.deps.defaultProviderId);
     if (!provider) {
       return {
@@ -93,6 +93,12 @@ export class JobAgentExecutor {
     const traceId = randomUUID();
 
     const controller = new AbortController();
+    // Bridge an external cancel signal (from the scheduler) to the internal
+    // controller so either inactivity-timeout or user-cancel aborts the turn.
+    if (externalSignal) {
+      if (externalSignal.aborted) controller.abort();
+      else externalSignal.addEventListener("abort", () => controller.abort(), { once: true });
+    }
     const watchdog = startInactivityWatchdog(
       controller,
       settings.inactivityTimeoutSeconds,

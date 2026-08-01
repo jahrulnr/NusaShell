@@ -27,11 +27,12 @@ export async function execJob(
   const action = requireString(args.action, "action");
   try {
     switch (action) {
-      case "list": return await listJobs(store);
+      case "list": return await listJobs(store, scheduler);
       case "validate_schedule": return await validateSchedule(args);
       case "add": return await addJob(store, args);
       case "set_enabled": return await setEnabled(store, args);
       case "run": return await runNow(scheduler, args);
+      case "cancel": return await cancelJob(scheduler, args);
       case "remove": return await removeJob(store, args);
       case "output": return await jobOutput(store, args);
       default:
@@ -42,9 +43,9 @@ export async function execJob(
   }
 }
 
-async function listJobs(store: JobStorePort): Promise<unknown> {
+async function listJobs(store: JobStorePort, scheduler?: JobScheduler): Promise<unknown> {
   const jobs = await store.list();
-  const data = jobs.map(compactJob);
+  const data = jobs.map((job) => compactJob(job, scheduler));
   return { ok: true, data: { jobs: data }, meta: { count: data.length } };
 }
 
@@ -120,6 +121,15 @@ async function runNow(scheduler: JobScheduler, args: Readonly<Record<string, unk
   return { ok: true, data: result, meta: {} };
 }
 
+async function cancelJob(scheduler: JobScheduler, args: Readonly<Record<string, unknown>>): Promise<unknown> {
+  const id = requireString(args.id, "id");
+  const result = await scheduler.cancel(id);
+  if (!result.ok && result.error?.includes("not running")) {
+    throw new ApplicationError("JOB_NOT_RUNNING", result.error);
+  }
+  return { ok: true, data: result, meta: {} };
+}
+
 async function removeJob(store: JobStorePort, args: Readonly<Record<string, unknown>>): Promise<unknown> {
   const id = requireString(args.id, "id");
   const existing = await store.get(id);
@@ -172,7 +182,7 @@ function parseBoolean(value: unknown, name: string): boolean {
   return value;
 }
 
-function compactJob(job: Job): unknown {
+function compactJob(job: Job, scheduler?: JobScheduler): unknown {
   return {
     id: job.id,
     name: job.name,
@@ -180,6 +190,8 @@ function compactJob(job: Job): unknown {
     enabled: job.enabled,
     nextRunAt: job.nextRunAt,
     lastStatus: job.lastStatus,
+    running: scheduler?.isRunning(job.id) ?? false,
+    ...(scheduler?.activeTraceId(job.id) ? { activeTraceId: scheduler.activeTraceId(job.id) } : {}),
   };
 }
 
@@ -189,7 +201,9 @@ function jobErrorEnvelope(error: unknown): unknown {
       ? "job_not_found"
       : error.code === "JOB_INVALID_SCHEDULE"
         ? "job_invalid_schedule"
-        : "job_error";
+        : error.code === "JOB_NOT_RUNNING"
+          ? "job_not_running"
+          : "job_error";
     return { ok: false, error: { code, message: error.message }, meta: {} };
   }
   return {

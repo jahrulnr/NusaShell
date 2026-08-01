@@ -5,6 +5,14 @@ export interface JobOutputQuery extends Query {
   readonly kind: "job-output";
   readonly id: string;
   readonly limit?: number;
+  /** When true, include the full markdown body for each entry (capped). */
+  readonly includeBody?: boolean;
 }
 
-export type JobOutputResult = readonly JobOutputEntry[];
+export interface JobOutputItem extends JobOutputEntry {
+  readonly body?: string;
+}
+
+export interface JobOutputResult {
+  readonly outputs: readonly JobOutputItem[];
+}

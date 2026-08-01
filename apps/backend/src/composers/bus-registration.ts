@@ -24,6 +24,7 @@ import {
   AddJobHandler,
   SetJobEnabledHandler,
   RunJobNowHandler,
+  CancelJobHandler,
   RemoveJobHandler,
   ListJobsHandler,
   JobOutputHandler,
@@ -133,6 +134,7 @@ export function registerBuses(
   commandBus.register("add-job", new AddJobHandler(jobs.jobStore));
   commandBus.register("set-job-enabled", new SetJobEnabledHandler(jobs.jobStore));
   commandBus.register("run-job-now", new RunJobNowHandler(jobs.jobScheduler));
+  commandBus.register("cancel-job", new CancelJobHandler(jobs.jobScheduler));
   commandBus.register("remove-job", new RemoveJobHandler(jobs.jobStore));
   commandBus.register("run-acp-turn", new RunAcpTurnHandler(acp.acpSessionService));
   commandBus.register("cancel-acp-turn", new CancelAcpTurnHandler(acp.acpSessionService));
@@ -162,7 +164,7 @@ export function registerBuses(
   queryBus.register("system-ping", new SystemPingHandler());
   queryBus.register("system-version", new SystemVersionHandler());
   queryBus.register("list-jobs", new ListJobsHandler(jobs.jobStore));
-  queryBus.register("job-output", new JobOutputHandler(jobs.jobStore));
+  queryBus.register("job-output", new JobOutputHandler(jobs.jobStore, jobs.jobFs));
   queryBus.register("validate-schedule", new ValidateScheduleHandler());
   queryBus.register("get-acp-session-info", new GetAcpSessionInfoHandler(acp.acpSessionService));
 

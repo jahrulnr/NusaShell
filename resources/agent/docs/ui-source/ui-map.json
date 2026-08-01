@@ -572,10 +572,11 @@
         {
           "heading": "Job row actions",
           "paragraphs": [
-            "Each job row has Run (fire immediately), Pause/Resume (toggle enabled), Output (recent run summaries), and Remove (opens a delete confirmation dialog)."
+            "Each job row has Run (fire immediately), Stop (cancel an in-flight run, visible only while running), Pause/Resume (toggle enabled), Output (recent run summaries), and Remove (opens a delete confirmation dialog). While a job is running, the row highlights with a pulsing dot and the Run/Pause buttons are disabled."
           ],
           "controls": [
             "job-run-btn",
+            "job-stop-btn",
             "job-toggle-btn",
             "job-output-btn",
             "job-remove-btn"
@@ -628,10 +629,11 @@
         {
           "heading": "Output entries",
           "paragraphs": [
-            "Lists up to 20 recent output entries newest-first, each showing the run timestamp, status (ok/error), and a truncated summary. The dialog supports Escape and overlay click to close."
+            "Lists up to 20 recent output entries newest-first, each showing the run timestamp, status (ok/error/cancelled), and a truncated summary. Each entry has a Show full output button that loads the full markdown body from disk via job.output with includeBody. The dialog supports Escape and overlay click to close."
           ],
           "controls": [
-            "job-output-body"
+            "job-output-body",
+            "job-output-expand"
           ]
         }
       ]
@@ -2456,7 +2458,15 @@
       "label": "Run",
       "type": "button",
       "selector": "[data-control=\"job-run-btn\"]",
-      "action": "Fires the job immediately via job.run."
+      "action": "Fires the job immediately via job.run. Disabled while the job is running."
+    },
+    "job-stop-btn": {
+      "section": "Job row actions",
+      "label": "Stop",
+      "type": "button",
+      "selector": "[data-control=\"job-stop-btn\"]",
+      "action": "Cancels an in-flight job run via job.cancel. Visible only while the job is running.",
+      "generated": true
     },
     "job-toggle-btn": {
       "section": "Job row actions",
@@ -2583,6 +2593,14 @@
       "type": "list",
       "selector": "#job-output-body",
       "action": "Renders recent run output entries."
+    },
+    "job-output-expand": {
+      "section": "Output entries",
+      "label": "Show full output",
+      "type": "button",
+      "selector": "[data-control=\"job-output-expand\"]",
+      "action": "Loads the full markdown body for a run entry via job.output with includeBody.",
+      "generated": true
     }
   }
 }

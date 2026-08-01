@@ -9,7 +9,7 @@ export interface JobStorePort {
   /** Record a run result and advance repeat/nextRunAt counters. */
   markRun(
     id: string,
-    status: "ok" | "error",
+    status: "ok" | "error" | "cancelled",
     error: string | null,
     nextRunAt: string | null,
     now: Date,

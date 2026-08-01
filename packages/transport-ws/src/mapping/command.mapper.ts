@@ -14,6 +14,7 @@ import type {
   AddJobCommand,
   SetJobEnabledCommand,
   RunJobNowCommand,
+  CancelJobCommand,
   RemoveJobCommand,
   RunAcpTurnCommand,
   CancelAcpTurnCommand,
@@ -25,7 +26,7 @@ import type {
 } from "@nusashell/application";
 
 export function mapToCommand(request: ParsedRequest):
-  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | SetPluginAutostartCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand | CancelAgentTurnCommand | AnswerAskQuestionCommand | AddJobCommand | SetJobEnabledCommand | RunJobNowCommand | RemoveJobCommand | RunAcpTurnCommand | CancelAcpTurnCommand | AnswerAcpPermissionCommand | AnswerAcpAskCommand | SetAcpConfigOptionCommand | EnsureAcpSessionCommand | ProbeAcpProviderCommand }
+  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | SetPluginAutostartCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand | CancelAgentTurnCommand | AnswerAskQuestionCommand | AddJobCommand | SetJobEnabledCommand | RunJobNowCommand | CancelJobCommand | RemoveJobCommand | RunAcpTurnCommand | CancelAcpTurnCommand | AnswerAcpPermissionCommand | AnswerAcpAskCommand | SetAcpConfigOptionCommand | EnsureAcpSessionCommand | ProbeAcpProviderCommand }
   | { kind: "query" } {
   switch (request.method) {
     case "plugin.start":
@@ -161,6 +162,14 @@ export function mapToCommand(request: ParsedRequest):
           kind: "run-job-now",
           id: request.payload.id,
         } as RunJobNowCommand,
+      };
+    case "job.cancel":
+      return {
+        kind: "command",
+        command: {
+          kind: "cancel-job",
+          id: request.payload.id,
+        } as CancelJobCommand,
       };
     case "job.remove":
       return {

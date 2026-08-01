@@ -58,12 +58,12 @@ packages/application/src/job/
 ├── schedule-parser.ts        # parseSchedule + computeNextRun + cron matcher
 ├── ports/
 │   └── job-store.port.ts     # JobStorePort interface
-├── commands/                 # add-job, set-job-enabled, run-job-now, remove-job
+├── commands/                 # add-job, set-job-enabled, run-job-now, cancel-job, remove-job
 ├── queries/                  # list-jobs, job-output, validate-schedule
 └── services/
     ├── job-agent-tool-gateway.ts   # restricted gateway (denies memory/skill tools)
     ├── job-agent-executor.ts       # headless AgentTurnRunner with inactivity watchdog
-    └── job-scheduler.ts            # 60s tick, file lock, due selection, dispatch
+    └── job-scheduler.ts            # 60s tick, file lock, due selection, dispatch, cancel
 ```
 
 ### JobStore
@@ -94,18 +94,19 @@ catalog small (same envelope style as `memory`):
 
 | action | Required args | Behavior |
 | --- | --- | --- |
-| `list` | — | Compact jobs: `id`, `name`, `schedule`, `enabled`, `nextRunAt`, `lastStatus` |
+| `list` | — | Compact jobs: `id`, `name`, `schedule`, `enabled`, `nextRunAt`, `lastStatus`, `running`, `activeTraceId` |
 | `validate_schedule` | `schedule` | Parse + describe; returns `{ ok, data: { description } }` or a `job_invalid_schedule` envelope |
 | `add` | `name`, `schedule`, `mode` (`agent`\|`tool`), plus mode fields / optional `repeat_times` | Same schedule parsing and `JOB_INVALID_SCHEDULE` mapping as `AddJobHandler` |
 | `set_enabled` | `id`, `enabled` | Pause/resume; recomputes `nextRunAt` like `SetJobEnabledHandler` |
 | `run` | `id` | `scheduler.runOneNow` (manual fire, respects the claim lock) |
+| `cancel` | `id` | `scheduler.cancel` (abort in-flight run; `JOB_NOT_RUNNING` if not active) |
 | `remove` | `id` | Delete |
 | `output` | `id`, optional `limit` (1-100, default 20) | Recent output entries |
 
 Returns `{ ok, data?, error?, meta }` like the other shell-owned meta-tools.
-`ApplicationError` codes `JOB_NOT_FOUND` and `JOB_INVALID_SCHEDULE` are mapped
-into structured `error` envelopes (`job_not_found`, `job_invalid_schedule`) so a
-bad action never crashes the turn.
+`ApplicationError` codes `JOB_NOT_FOUND`, `JOB_INVALID_SCHEDULE`, and
+`JOB_NOT_RUNNING` are mapped into structured `error` envelopes (`job_not_found`,
+`job_invalid_schedule`, `job_not_running`) so a bad action never crashes the turn.
 
 ### Wiring
 
@@ -123,7 +124,9 @@ Builds a fresh `AgentTurnRunner` per run with:
 - no streaming callbacks (headless),
 - no memory injection,
 - the restricted `JobAgentToolGateway`,
-- an inactivity watchdog (default 600s) that aborts the turn.
+- an inactivity watchdog (default 600s) that aborts the turn,
+- an external `AbortSignal` from the scheduler (bridged with the watchdog
+  controller so either inactivity-timeout or user-cancel aborts the turn).
 
 Job turns are **never** persisted into `agent-conversations.json`.
 
@@ -142,23 +145,32 @@ flowchart LR
   MarkRun --> ReleaseFire["releaseFire"]
 ```
 - Output persisted to `{jobsRoot}/output/{jobId}/{timestamp}.md` and
-  metadata stored via `appendOutput`.
-- Publishes `job.completed` / `job.failed` application events.
+  metadata stored via `appendOutput`. The `traceId` is persisted on each
+  `JobOutputEntry` for run correlation.
+- Active-run tracking: a `Map<jobId, { traceId, controller, startedAt }>`
+  entries are registered while `dispatch` is in flight. `isRunning(jobId)`
+  and `activeTraceId(jobId)` expose live state to the UI and agent tool.
+- `cancel(jobId)` aborts the in-flight `AbortController`, publishes
+  `job.cancelled`, and marks the run as `lastStatus: "cancelled"`.
+- Publishes `job.started`, `job.completed`, `job.failed`, and
+  `job.cancelled` application events.
 
 ## WS protocol
 
 | Method | Kind | Description |
 | --- | --- | --- |
 | `job.add` | command | Create a new job |
-| `job.list` | query | List all jobs |
+| `job.list` | query | List all jobs (returns `{ jobs: [...] }`) |
 | `job.set-enabled` | command | Pause/resume a job |
 | `job.run` | command | Fire a job immediately |
+| `job.cancel` | command | Cancel an in-flight job run |
 | `job.remove` | command | Delete a job |
-| `job.output` | query | Recent output entries |
+| `job.output` | query | Recent output entries (returns `{ outputs: [...] }`; pass `includeBody: true` to include full markdown) |
 | `job.validate-schedule` | query | Validate a schedule expression |
 
-Events: `job.completed`, `job.failed` (mapped to client event envelopes by
-`client-event.mapper.ts`).
+Events: `job.started`, `job.completed`, `job.failed`, `job.cancelled` (mapped
+to client event envelopes by `client-event.mapper.ts`). Each event includes
+a `traceId` for run correlation.
 
 ## Settings
 
@@ -168,7 +180,9 @@ Events: `job.completed`, `job.failed` (mapped to client event envelopes by
 
 ## Known gaps
 
-- Jobs run only while the app is open. This is documented in the UI hint.
+- Jobs run only while the app is open. 
 - No cross-device sync. Jobs are local to the machine.
-- No job dependencies or chaining.
+- No job dependencies or chaining (e.g. planning auto-triggers execute).
 - Cron is UTC-only.
+- No live token streaming into the Jobs UI; full output is available
+  post-run via the output modal's "Show full output" button.

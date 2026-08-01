@@ -43,6 +43,7 @@ export function mapToQuery(
         kind: "job-output",
         id: request.payload.id,
         ...(request.payload.limit !== undefined ? { limit: request.payload.limit } : {}),
+        ...(request.payload.includeBody !== undefined ? { includeBody: request.payload.includeBody } : {}),
       } as JobOutputQuery;
     case "job.validate-schedule":
       return { kind: "validate-schedule", schedule: request.payload.schedule } as ValidateScheduleQuery;

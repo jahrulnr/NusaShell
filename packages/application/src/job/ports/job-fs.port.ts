@@ -10,6 +10,12 @@ export interface JobFsPort {
    */
   persistJobOutput(jobId: string, stamp: string, content: string): Promise<string | null>;
 
+  /**
+   * Read a persisted job run output file (full markdown body).
+   * @returns the file content, or `null` if the file cannot be read.
+   */
+  readJobOutput(path: string): Promise<string | null>;
+
   /** Acquire an exclusive tick lock with stale-PID reaping. */
   acquireTickLock(): Promise<boolean>;
 

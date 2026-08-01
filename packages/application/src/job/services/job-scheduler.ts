@@ -14,12 +14,12 @@ import {
 import type { JobAgentExecutorSettings, JobExecutionResult } from "./job-agent-executor.js";
 import type { CallToolCommand } from "../../tool/commands/call-tool/call-tool.command.js";
 import type { EventDispatcher } from "../../events/event-dispatcher.js";
-import { createJobCompletedEvent, createJobFailedEvent } from "../../events/job-events.event.js";
+import { createJobCompletedEvent, createJobFailedEvent, createJobStartedEvent, createJobCancelledEvent } from "../../events/job-events.event.js";
 import type { LoggerPort } from "../../plugin/ports/logger.port.js";
 
 /** Minimal executor surface the scheduler needs (structural — accepts JobAgentExecutor or fakes). */
 export interface JobExecutorPort {
-  runAgent(prompt: string, settings: JobAgentExecutorSettings): Promise<JobExecutionResult>;
+  runAgent(prompt: string, settings: JobAgentExecutorSettings, signal?: AbortSignal): Promise<JobExecutionResult>;
 }
 
 /** Minimal call-tool surface the scheduler needs (structural — accepts CallToolHandler or fakes). */
@@ -54,6 +54,12 @@ export interface JobSchedulerDeps {
   readonly now?: () => Date;
 }
 
+interface ActiveRun {
+  readonly traceId: string;
+  readonly controller: AbortController;
+  readonly startedAt: Date;
+}
+
 /**
  * Wall-clock tick scheduler for durable jobs. Runs a 60s interval plus one
  * immediate tick at start. Each tick acquires an exclusive `.tick.lock`,
@@ -69,6 +75,7 @@ export class JobScheduler {
   private timer: ReturnType<typeof setInterval> | null = null;
   private ticking = false;
   private readonly activeJobIds = new Set<string>();
+  private readonly activeRuns = new Map<string, ActiveRun>();
   private lastTickAt: string | null = null;
 
   constructor(private readonly deps: JobSchedulerDeps) {}
@@ -87,6 +94,35 @@ export class JobScheduler {
       lastTickAt: this.lastTickAt,
       activeJobIds: [...this.activeJobIds],
     };
+  }
+
+  /** Whether a job is currently in-flight (dispatched but not yet completed). */
+  isRunning(jobId: string): boolean {
+    return this.activeRuns.has(jobId);
+  }
+
+  /** The traceId of the currently active run for a job, or null. */
+  activeTraceId(jobId: string): string | null {
+    return this.activeRuns.get(jobId)?.traceId ?? null;
+  }
+
+  /**
+   * Cancel an in-flight job run. Aborts the AbortController, marks the job
+   * as cancelled, publishes job.cancelled, and releases the claim.
+   * Returns false if the job is not currently running.
+   */
+  async cancel(jobId: string): Promise<{ ok: boolean; error?: string }> {
+    const run = this.activeRuns.get(jobId);
+    if (!run) return { ok: false, error: "job is not running" };
+    run.controller.abort();
+    // The dispatch method's finally block will clean up the activeRuns entry
+    // and activeJobIds. We publish the cancelled event here; the dispatch
+    // method will still persist output + markRun + publish completed/failed
+    // depending on how the executor exits.
+    const job = await this.deps.store.get(jobId);
+    const name = job?.name ?? jobId;
+    await this.deps.eventDispatcher.publish(createJobCancelledEvent(jobId, name, run.traceId));
+    return { ok: true };
   }
 
   start(): void {
@@ -199,16 +235,27 @@ export class JobScheduler {
 
   private async dispatch(job: Job, now: Date, claimId: string): Promise<void> {
     this.activeJobIds.add(job.id);
+    const traceId = randomUUID();
+    const controller = new AbortController();
+    const run: ActiveRun = { traceId, controller, startedAt: now };
+    this.activeRuns.set(job.id, run);
+    await this.deps.eventDispatcher.publish(createJobStartedEvent(job.id, job.name, traceId, now, job.mode));
     try {
-      let status: "ok" | "error";
+      let status: "ok" | "error" | "cancelled";
       let summary: string;
       let error: string | null = null;
 
       if (job.mode.type === "agent") {
-        const result = await this.deps.executor.runAgent(job.mode.prompt, this.deps.executorSettings);
-        status = result.status;
-        summary = result.summary;
-        if (result.status === "error") error = result.error ?? summary;
+        const result = await this.deps.executor.runAgent(job.mode.prompt, this.deps.executorSettings, controller.signal);
+        if (controller.signal.aborted) {
+          status = "cancelled";
+          summary = "cancelled by user";
+          error = "cancelled by user";
+        } else {
+          status = result.status;
+          summary = result.summary;
+          if (result.status === "error") error = result.error ?? summary;
+        }
       } else {
         const command: CallToolCommand = {
           kind: "call-tool",
@@ -220,7 +267,8 @@ export class JobScheduler {
         try {
           const result = await this.deps.callToolHandler.handle(command);
           summary = formatToolOutput(result.result, this.settings.maxOutputChars);
-          status = "ok";
+          status = controller.signal.aborted ? "cancelled" : "ok";
+          if (status === "cancelled") { summary = "cancelled by user"; error = "cancelled by user"; }
         } catch (err) {
           error = err instanceof Error ? err.message : String(err);
           summary = error;
@@ -228,31 +276,36 @@ export class JobScheduler {
         }
       }
 
-      const outputEntry = await this.persistOutput(job, now, status, summary);
+      const outputEntry = await this.persistOutput(job, now, status, summary, traceId);
       if (outputEntry) await this.deps.store.appendOutput(job.id, outputEntry);
       const nextRunAt = computeNext(job.schedule, now.toISOString(), now);
       await this.deps.store.markRun(job.id, status, error, nextRunAt, now);
       await this.deps.store.releaseFire(job.id, claimId);
 
       if (status === "ok") {
-        await this.deps.eventDispatcher.publish(createJobCompletedEvent(job.id, job.name, summary, now));
+        await this.deps.eventDispatcher.publish(createJobCompletedEvent(job.id, job.name, summary, now, traceId));
+      } else if (status === "cancelled") {
+        // job.cancelled already published by cancel(); publish failed for consistency
+        await this.deps.eventDispatcher.publish(createJobFailedEvent(job.id, job.name, error ?? summary, now, traceId));
       } else {
-        await this.deps.eventDispatcher.publish(createJobFailedEvent(job.id, job.name, error ?? summary, now));
+        await this.deps.eventDispatcher.publish(createJobFailedEvent(job.id, job.name, error ?? summary, now, traceId));
       }
     } finally {
       this.activeJobIds.delete(job.id);
+      this.activeRuns.delete(job.id);
     }
   }
 
   private async persistOutput(
     job: Job,
     now: Date,
-    status: "ok" | "error",
+    status: "ok" | "error" | "cancelled",
     summary: string,
+    traceId: string,
   ): Promise<JobOutputEntry | null> {
     try {
       const stamp = now.toISOString().replace(/[:.]/g, "-");
-      const header = `# Job: ${job.name}\n- id: ${job.id}\n- schedule: ${describeSchedule(job.schedule)}\n- runAt: ${now.toISOString()}\n- status: ${status}\n\n`;
+      const header = `# Job: ${job.name}\n- id: ${job.id}\n- schedule: ${describeSchedule(job.schedule)}\n- runAt: ${now.toISOString()}\n- status: ${status}\n- traceId: ${traceId}\n\n`;
       const content = header + summary + "\n";
       const path = await this.deps.jobFs.persistJobOutput(job.id, stamp, content);
       if (path === null) return null;
@@ -262,6 +315,7 @@ export class JobScheduler {
         status,
         summary: summary.slice(0, 500),
         path,
+        traceId,
       };
     } catch (error) {
       this.deps.logger?.warn("job %s output persist failed: %s", job.id, error instanceof Error ? error.message : String(error));

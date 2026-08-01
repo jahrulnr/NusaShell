@@ -24,6 +24,14 @@ export class FilesystemJobFs implements JobFsPort {
     }
   }
 
+  async readJobOutput(path: string): Promise<string | null> {
+    try {
+      return await readFile(path, "utf8");
+    } catch {
+      return null;
+    }
+  }
+
   async acquireTickLock(): Promise<boolean> {
     const lockPath = resolve(this.jobsRoot, TICK_LOCK_FILE);
     try {

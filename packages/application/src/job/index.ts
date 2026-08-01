@@ -41,18 +41,22 @@ export type {
   RunJobNowResult,
   RemoveJobCommand,
   RemoveJobResult,
+  CancelJobCommand,
+  CancelJobResult,
 } from "./commands/index.js";
 export {
   AddJobHandler,
   SetJobEnabledHandler,
   RunJobNowHandler,
   RemoveJobHandler,
+  CancelJobHandler,
 } from "./commands/index.js";
 export type {
   ListJobsQuery,
   ListJobsResult,
   JobOutputQuery,
   JobOutputResult,
+  JobOutputItem,
   ValidateScheduleQuery,
   ValidateScheduleResult,
 } from "./queries/index.js";

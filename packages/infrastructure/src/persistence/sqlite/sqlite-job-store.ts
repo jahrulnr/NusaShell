@@ -35,6 +35,7 @@ interface OutputRow {
   status: string;
   summary: string;
   path: string;
+  trace_id?: string | null;
 }
 
 /**
@@ -202,10 +203,10 @@ export class SqliteJobStore implements JobStorePort {
   async appendOutput(jobId: string, entry: JobOutputEntry): Promise<void> {
     this.database.raw
       .prepare(
-        `INSERT INTO job_outputs (job_id, run_at, status, summary, path)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO job_outputs (job_id, run_at, status, summary, path, trace_id)
+         VALUES (?, ?, ?, ?, ?, ?)`,
       )
-      .run(entry.jobId, entry.runAt, entry.status, entry.summary, entry.path);
+      .run(entry.jobId, entry.runAt, entry.status, entry.summary, entry.path, entry.traceId ?? null);
   }
 
   async listOutputs(jobId: string, limit: number): Promise<readonly JobOutputEntry[]> {
@@ -217,9 +218,10 @@ export class SqliteJobStore implements JobStorePort {
     return rows.map((row) => ({
       jobId: row.job_id,
       runAt: row.run_at,
-      status: row.status as "ok" | "error",
+      status: row.status as "ok" | "error" | "cancelled",
       summary: row.summary,
       path: row.path,
+      ...(row.trace_id != null ? { traceId: row.trace_id } : {}),
     }));
   }
 }

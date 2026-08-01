@@ -5,6 +5,7 @@ import type { ListJobsQuery, ListJobsResult } from "./list-jobs.query.js";
 export class ListJobsHandler implements QueryHandler<ListJobsQuery, ListJobsResult> {
   constructor(private readonly store: JobStorePort) {}
   async handle(): Promise<ListJobsResult> {
-    return this.store.list();
+    const jobs = await this.store.list();
+    return { jobs };
   }
 }

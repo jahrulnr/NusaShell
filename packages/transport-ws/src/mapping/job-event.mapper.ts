@@ -1,8 +1,8 @@
 import type { EventEnvelope } from "@nusashell/contracts";
-import type { JobCompletedEvent, JobFailedEvent, ApplicationEvent } from "@nusashell/application";
+import type { JobCompletedEvent, JobFailedEvent, JobStartedEvent, JobCancelledEvent, ApplicationEvent } from "@nusashell/application";
 
 /**
- * Maps job-domain events (completed/failed) to WS event envelopes.
+ * Maps job-domain events (started/completed/failed/cancelled) to WS event envelopes.
  */
 export function mapJobEvent(
   event: ApplicationEvent,
@@ -16,7 +16,13 @@ export function mapJobEvent(
         kind: "event",
         event: "job.completed",
         sequence,
-        payload: { jobId: e.jobId, name: e.name, summary: e.summary, timestamp },
+        payload: {
+          jobId: e.jobId,
+          name: e.name,
+          summary: e.summary,
+          timestamp,
+          ...(e.traceId !== undefined ? { traceId: e.traceId } : {}),
+        },
       };
     }
     case "job.failed": {
@@ -25,7 +31,42 @@ export function mapJobEvent(
         kind: "event",
         event: "job.failed",
         sequence,
-        payload: { jobId: e.jobId, name: e.name, error: e.error, timestamp },
+        payload: {
+          jobId: e.jobId,
+          name: e.name,
+          error: e.error,
+          timestamp,
+          ...(e.traceId !== undefined ? { traceId: e.traceId } : {}),
+        },
+      };
+    }
+    case "job.started": {
+      const e = event as JobStartedEvent;
+      return {
+        kind: "event",
+        event: "job.started",
+        sequence,
+        payload: {
+          jobId: e.jobId,
+          name: e.name,
+          traceId: e.traceId,
+          startedAt: e.startedAt,
+          timestamp,
+        },
+      };
+    }
+    case "job.cancelled": {
+      const e = event as JobCancelledEvent;
+      return {
+        kind: "event",
+        event: "job.cancelled",
+        sequence,
+        payload: {
+          jobId: e.jobId,
+          name: e.name,
+          traceId: e.traceId,
+          timestamp,
+        },
       };
     }
     default:

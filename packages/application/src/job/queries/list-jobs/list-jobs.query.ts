@@ -5,4 +5,6 @@ export interface ListJobsQuery extends Query {
   readonly kind: "list-jobs";
 }
 
-export type ListJobsResult = readonly Job[];
+export interface ListJobsResult {
+  readonly jobs: readonly Job[];
+}

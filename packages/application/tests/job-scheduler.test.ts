@@ -427,6 +427,99 @@ describe("JobScheduler", () => {
     scheduler.stop();
     expect(scheduler.getStatus().running).toBe(false);
   });
+
+  it("publishes job.started when dispatch begins", async () => {
+    const store = new FakeJobStore();
+    await store.create(makeJob({ id: "start-1", nextRunAt: "2024-12-31T23:00:00.000Z" }));
+    const events: ApplicationEvent[] = [];
+    const eventDispatcher = new EventDispatcher();
+    eventDispatcher.onAny({ handle: (e) => { events.push(e); } });
+    const scheduler = new JobScheduler({
+      store, executor: new ScriptedExecutor(() => ({ traceId: "t-start", status: "ok", summary: "done" })),
+      callToolHandler: new FakeCallToolHandler(), eventDispatcher,
+      jobFs: new TestJobFs(tempDir), executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
+      now: () => NOW,
+    });
+    await scheduler.tick();
+    const started = events.find((e) => e.type === "job.started");
+    expect(started).toBeDefined();
+    expect((started as { jobId: string }).jobId).toBe("start-1");
+  });
+
+  it("cancel aborts an in-flight run and marks cancelled", async () => {
+    const store = new FakeJobStore();
+    await store.create(makeJob({ id: "cancel-1", nextRunAt: "2024-12-31T23:00:00.000Z" }));
+    const events: ApplicationEvent[] = [];
+    const eventDispatcher = new EventDispatcher();
+    eventDispatcher.onAny({ handle: (e) => { events.push(e); } });
+
+    // Executor that blocks until the signal aborts, then returns an error.
+    const executor = {
+      async runAgent(_prompt: string, _settings: JobAgentExecutorSettings, signal?: AbortSignal): Promise<JobExecutionResult> {
+        if (!signal) return { traceId: "t-cancel", status: "ok", summary: "no signal" };
+        return new Promise((resolve) => {
+          if (signal.aborted) {
+            resolve({ traceId: "t-cancel", status: "error", summary: "aborted", error: "aborted" });
+            return;
+          }
+          signal.addEventListener("abort", () => {
+            resolve({ traceId: "t-cancel", status: "error", summary: "aborted", error: "aborted" });
+          }, { once: true });
+        });
+      },
+    };
+
+    const scheduler = new JobScheduler({
+      store, executor, callToolHandler: new FakeCallToolHandler(), eventDispatcher,
+      jobFs: new TestJobFs(tempDir), executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
+      now: () => NOW,
+    });
+
+    // Start the tick (dispatch runs async), then cancel while in-flight.
+    const tickPromise = scheduler.tick();
+    // Wait for the job to be registered as active by polling.
+    while (!scheduler.isRunning("cancel-1")) {
+      await new Promise((r) => setTimeout(r, 1));
+    }
+    expect(scheduler.isRunning("cancel-1")).toBe(true);
+    const cancelResult = await scheduler.cancel("cancel-1");
+    expect(cancelResult.ok).toBe(true);
+    await tickPromise;
+
+    const job = await store.get("cancel-1");
+    expect(job!.lastStatus).toBe("cancelled");
+    expect(events.some((e) => e.type === "job.cancelled")).toBe(true);
+    expect(scheduler.isRunning("cancel-1")).toBe(false);
+  });
+
+  it("cancel returns not-running for an idle job", async () => {
+    const store = new FakeJobStore();
+    await store.create(makeJob({ id: "idle-1" }));
+    const scheduler = new JobScheduler({
+      store, executor: new ScriptedExecutor(() => ({ traceId: "t", status: "ok", summary: "" })),
+      callToolHandler: new FakeCallToolHandler(), eventDispatcher: new EventDispatcher(),
+      jobFs: new TestJobFs(tempDir), executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
+      now: () => NOW,
+    });
+    const result = await scheduler.cancel("idle-1");
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/not running/);
+  });
+
+  it("job.output entries include traceId", async () => {
+    const store = new FakeJobStore();
+    await store.create(makeJob({ id: "trace-1", nextRunAt: "2024-12-31T23:00:00.000Z" }));
+    const scheduler = new JobScheduler({
+      store, executor: new ScriptedExecutor(() => ({ traceId: "trace-xyz", status: "ok", summary: "done" })),
+      callToolHandler: new FakeCallToolHandler(), eventDispatcher: new EventDispatcher(),
+      jobFs: new TestJobFs(tempDir), executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
+      now: () => NOW,
+    });
+    await scheduler.tick();
+    const outputs = await store.listOutputs("trace-1", 10);
+    expect(outputs.length).toBe(1);
+    expect(outputs[0]!.traceId).toBeDefined();
+  });
 });
 
 // Re-export event factories so the test module is self-contained.

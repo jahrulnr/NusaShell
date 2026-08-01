@@ -12,6 +12,7 @@ import {
   DEFAULT_JOB_EXECUTOR_SETTINGS,
   type EventDispatcher,
   type JobStorePort,
+  type JobFsPort,
   type JobSchedulerSettings,
 } from "@nusashell/application";
 import type { SqliteDatabase } from "@nusashell/infrastructure";
@@ -22,6 +23,7 @@ import type { AgentRuntimeParts } from "./agent-runtime.js";
 export interface JobRuntimeParts {
   readonly jobScheduler: JobScheduler;
   readonly jobStore: JobStorePort;
+  readonly jobFs: JobFsPort;
 }
 
 export function createJobRuntime(
@@ -45,17 +47,18 @@ export function createJobRuntime(
     defaultProviderId: options.ai?.providerId || (options.ai?.stubEnabled ? "stub" : ""),
     logger,
   });
+  const jobFs: JobFsPort = new FilesystemJobFs(jobsRoot);
   const jobScheduler = new JobScheduler({
     store: jobStore,
     executor: jobExecutor,
     callToolHandler: new CallToolHandler(plugin.runtimeManager),
     eventDispatcher,
-    jobFs: new FilesystemJobFs(jobsRoot),
+    jobFs,
     executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS,
     logger,
   });
   if (options.jobs) {
     jobScheduler.configure(options.jobs);
   }
-  return { jobScheduler, jobStore };
+  return { jobScheduler, jobStore, jobFs };
 }

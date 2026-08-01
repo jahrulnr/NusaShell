@@ -226,6 +226,7 @@ export const JobCompletedEventSchema = z.object({
     name: z.string(),
     summary: z.string(),
     timestamp: z.string(),
+    traceId: z.string().optional(),
   }),
 });
 
@@ -237,6 +238,32 @@ export const JobFailedEventSchema = z.object({
     jobId: z.string(),
     name: z.string(),
     error: z.string(),
+    timestamp: z.string(),
+    traceId: z.string().optional(),
+  }),
+});
+
+export const JobStartedEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("job.started"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    jobId: z.string(),
+    name: z.string(),
+    traceId: z.string(),
+    startedAt: z.string(),
+    timestamp: z.string(),
+  }),
+});
+
+export const JobCancelledEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("job.cancelled"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    jobId: z.string(),
+    name: z.string(),
+    traceId: z.string(),
     timestamp: z.string(),
   }),
 });
@@ -404,6 +431,8 @@ export const EventSchema = z.discriminatedUnion("event", [
   AgentLearningUpdatedEventSchema,
   JobCompletedEventSchema,
   JobFailedEventSchema,
+  JobStartedEventSchema,
+  JobCancelledEventSchema,
   AcpTextDeltaEventSchema,
   AcpThoughtDeltaEventSchema,
   AcpToolCallEventSchema,
@@ -434,6 +463,8 @@ export type AgentCancelRequestedEvent = z.infer<typeof AgentCancelRequestedEvent
 export type AgentLearningUpdatedEvent = z.infer<typeof AgentLearningUpdatedEventSchema>;
 export type JobCompletedEvent = z.infer<typeof JobCompletedEventSchema>;
 export type JobFailedEvent = z.infer<typeof JobFailedEventSchema>;
+export type JobStartedEvent = z.infer<typeof JobStartedEventSchema>;
+export type JobCancelledEvent = z.infer<typeof JobCancelledEventSchema>;
 export type AcpTextDeltaEvent = z.infer<typeof AcpTextDeltaEventSchema>;
 export type AcpThoughtDeltaEvent = z.infer<typeof AcpThoughtDeltaEventSchema>;
 export type AcpToolCallEvent = z.infer<typeof AcpToolCallEventSchema>;
