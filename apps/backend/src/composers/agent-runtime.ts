@@ -11,7 +11,6 @@ import {
   McpAgentToolGateway,
   ReviewAgentToolGateway,
   AgentTurnRunner,
-  InProcessAgentTurnWorker,
   BackgroundReviewScheduler,
   AskQuestionService,
   AgentTurnCoordinator,
@@ -119,10 +118,13 @@ export function createAgentRuntime(
     promptLoader,
     providerRegistry: agentProviderRegistry,
     reviewGateway,
-    runnerFactory: ({ provider, toolGateway, maxToolRounds }) => {
-      const worker = new InProcessAgentTurnWorker(provider, toolGateway, logger);
-      return new AgentTurnRunner(worker, { maxToolRounds });
-    },
+    runnerFactory: ({ provider, toolGateway, maxToolRounds }) =>
+      new AgentTurnRunner({
+        provider,
+        toolGateway,
+        defaultMaxToolRounds: maxToolRounds,
+        logger,
+      }),
     defaultProviderId: options.ai?.providerId || (options.ai?.stubEnabled ? "stub" : ""),
     eventDispatcher,
     logger,

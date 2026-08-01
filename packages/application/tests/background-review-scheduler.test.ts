@@ -227,3 +227,142 @@ describe("BackgroundReviewScheduler", () => {
     expect(runArg).toBe(6);
   });
 });
+
+describe("BackgroundReviewScheduler runnerFactory composition (regression)", () => {
+  // Reproduces the bug where the composer's runnerFactory constructed
+  // AgentTurnRunner with (worker, {maxToolRounds}) instead of a proper
+  // AgentTurnRunnerDeps object, leaving toolGateway undefined and crashing
+  // on beginTurn. This test uses the SAME factory shape as
+  // apps/backend/src/composers/agent-runtime.ts to guard against regressions.
+  it("a factory-built AgentTurnRunner receives toolGateway and run does not throw on beginTurn", async () => {
+    const { AgentTurnRunner } = await import("../src/agent/services/agent-turn-runner.js");
+    const { ReviewAgentToolGateway } = await import("../src/agent/services/review-agent-tool-gateway.js");
+    const { McpAgentToolGateway } = await import("../src/agent/services/mcp-agent-tool-gateway.js");
+    type AgentToolDefinition = import("../src/agent/ports/agent-provider.port.js").AgentToolDefinition;
+    type AgentToolGateway = import("../src/agent/ports/agent-tool-gateway.port.js").AgentToolGateway;
+
+    const innerGateway: AgentToolGateway = {
+      beginTurn: () => {},
+      endTurn: () => {},
+      cancelTurn: () => {},
+      async listTools(): Promise<readonly AgentToolDefinition[]> { return []; },
+      async execute(): Promise<unknown> { return { ok: true }; },
+    };
+    const mcpGateway = new McpAgentToolGateway(innerGateway as unknown as never);
+    const reviewGateway = new ReviewAgentToolGateway(mcpGateway);
+
+    // Spy on the review gateway's beginTurn/endTurn to verify they're called.
+    const beginSpy = vi.spyOn(reviewGateway, "beginTurn");
+    const endSpy = vi.spyOn(reviewGateway, "endTurn");
+
+    const stubProvider: AgentProvider = {
+      id: "stub",
+      async complete() {
+        return {
+          text: "review done",
+          model: "stub",
+          finishReason: "stop",
+          tokens: { input: 10, output: 5 },
+          toolCalls: [],
+        };
+      },
+    };
+
+    // This is the exact factory shape from agent-runtime.ts.
+    const runnerFactory = ({ provider, toolGateway, maxToolRounds }: {
+      provider: AgentProvider;
+      toolGateway: typeof reviewGateway;
+      maxToolRounds: number;
+    }) => new AgentTurnRunner({
+      provider,
+      toolGateway,
+      defaultMaxToolRounds: maxToolRounds,
+    });
+
+    const runner = runnerFactory({ provider: stubProvider, toolGateway: reviewGateway, maxToolRounds: 3 });
+    expect(runner).toBeInstanceOf(AgentTurnRunner);
+
+    // The crash was here: toolGateway was undefined, so beginTurn threw
+    // "Cannot read properties of undefined (reading 'beginTurn')".
+    const result = await runner.run({
+      messages: [
+        { role: "system", content: "You are a review agent." },
+        { role: "user", content: "Review this transcript." },
+      ],
+      pluginIds: [],
+      traceId: "regression-trace",
+      maxToolRounds: 3,
+    });
+
+    expect(beginSpy).toHaveBeenCalledWith("regression-trace", expect.any(Object));
+    expect(endSpy).toHaveBeenCalledWith("regression-trace");
+    expect(result.text).toBe("review done");
+  });
+
+  it("end-to-end: scheduler with a real factory-built runner spawns and resets state without beginTurn crash", async () => {
+    const { AgentTurnRunner } = await import("../src/agent/services/agent-turn-runner.js");
+    const { ReviewAgentToolGateway } = await import("../src/agent/services/review-agent-tool-gateway.js");
+    const { McpAgentToolGateway } = await import("../src/agent/services/mcp-agent-tool-gateway.js");
+    type AgentToolDefinition = import("../src/agent/ports/agent-provider.port.js").AgentToolDefinition;
+    type AgentToolGateway = import("../src/agent/ports/agent-tool-gateway.port.js").AgentToolGateway;
+
+    const innerGateway: AgentToolGateway = {
+      beginTurn: () => {},
+      endTurn: () => {},
+      cancelTurn: () => {},
+      async listTools(): Promise<readonly AgentToolDefinition[]> { return []; },
+      async execute(): Promise<unknown> { return { ok: true }; },
+    };
+    const mcpGateway = new McpAgentToolGateway(innerGateway as unknown as never);
+    const reviewGateway = new ReviewAgentToolGateway(mcpGateway);
+
+    const stubProvider: AgentProvider = {
+      id: "stub",
+      async complete() {
+        return {
+          text: "review ok",
+          model: "stub",
+          finishReason: "stop",
+          tokens: { input: 10, output: 5 },
+          toolCalls: [],
+        };
+      },
+    };
+
+    const stateStore2 = makeFakeStateStore();
+    const promptLoader2 = makeFakePromptLoader();
+    const providerRegistry2 = makeFakeProviderRegistry(stubProvider);
+    const eventDispatcher2 = {
+      publish: vi.fn(async () => {}),
+      on: vi.fn(),
+      onAny: vi.fn(),
+      publishAll: vi.fn(),
+    } as unknown as EventDispatcher;
+
+    // Same factory shape as agent-runtime.ts — the bug was constructing
+    // AgentTurnRunner(worker, {maxToolRounds}) instead of AgentTurnRunner({provider, toolGateway, ...}).
+    const scheduler2 = new BackgroundReviewScheduler({
+      stateStore: stateStore2,
+      promptLoader: promptLoader2,
+      providerRegistry: providerRegistry2,
+      reviewGateway,
+      runnerFactory: ({ provider, toolGateway, maxToolRounds }) =>
+        new AgentTurnRunner({ provider, toolGateway, defaultMaxToolRounds: maxToolRounds }),
+      defaultProviderId: "stub",
+      eventDispatcher: eventDispatcher2,
+    });
+
+    scheduler2.configure({ memoryEveryNTurns: 1, skillEveryNToolRounds: 100 });
+    await scheduler2.tick(makeResult({ rounds: 0 }));
+    // Wait for fire-and-forget spawn to complete.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    // If the factory were broken (toolGateway undefined), the scheduler's
+    // catch block would log "Background review failed: Cannot read properties
+    // of undefined (reading 'beginTurn')" and the state would NOT be reset
+    // (the reset happens after run completes successfully). With the fix,
+    // the review completes and turnsSinceMemory is reset to 0.
+    const state = await stateStore2.load();
+    expect(state.turnsSinceMemory).toBe(0);
+  });
+});
