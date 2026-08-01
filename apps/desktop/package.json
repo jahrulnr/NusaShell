@@ -2,6 +2,7 @@
   "name": "@nusashell/desktop",
   "private": true,
   "version": "0.0.2",
+  "author": "Jahrulnr",
   "type": "module",
   "main": ".vite/build/main.cjs",
   "exports": {

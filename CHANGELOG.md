@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Windows Electron packaging now has the required author metadata.**
+  `apps/desktop/package.json` now declares a non-empty `author`, preventing
+  Electron Packager from aborting before it creates the Windows distributable.
 - **MCP Roots `file://` URIs now round-trip correctly on Windows.**
   `mcp-session-manager.ts` `applyRoots` built URIs via
   `` `file://${workspace}` `` string concatenation — on Windows this produces
