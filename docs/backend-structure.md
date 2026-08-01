@@ -140,7 +140,8 @@ nusashell/
 │       ├── plugin-lifecycle.md
 │       ├── manifest-spec.md
 │       ├── job-automation.md      # scheduled jobs (Phase F)
-│       └── acp-threads.md         # ACP external-agent conversations
+│       ├── acp-threads.md         # ACP external-agent conversations
+│       └── plugin-sandbox-readiness.md  # Files containment, crash SoT, Tools=0 honesty
 │
 ├── scripts/
 │   ├── build.ts

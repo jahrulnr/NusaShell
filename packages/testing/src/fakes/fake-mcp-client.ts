@@ -18,6 +18,8 @@ export class FakeMcpClient implements McpClientPort {
   readonly resourceTemplates: ResourceTemplateDescriptor[] = [];
   private connected = false;
   private closeCallback: (() => void) | null = null;
+  /** True once onClose() registered a close watcher (test instrumentation). */
+  onCloseRegistered = false;
   readonly callLog: Array<{
     name: string;
     args: Readonly<Record<string, unknown>>;
@@ -54,6 +56,7 @@ export class FakeMcpClient implements McpClientPort {
 
   onClose(callback: () => void): void {
     this.closeCallback = callback;
+    this.onCloseRegistered = true;
   }
 
   emitClose(): void {

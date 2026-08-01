@@ -403,6 +403,11 @@ export class PluginRuntimeManager {
         entry.mcpClient = mcpClient;
       }
 
+      // Register the close/exit watcher BEFORE transitioning to "running" so
+      // an external kill between connect and the running transition cannot
+// leave the SoT stuck on "running" with no observer (finding 2).
+      this.registerExitWatcher(entry);
+
       const transition = entry.runtime.transitionTo(
         "running",
         this.deps.clock.now(),
@@ -416,24 +421,9 @@ export class PluginRuntimeManager {
       const startedEvent = PluginStartedEvent.create(
         entry.pluginId,
         this.deps.clock.now(),
+        entry.mcpClient?.pid ?? entry.process?.pid ?? null,
       );
       await this.deps.eventDispatcher.publish(startedEvent);
-
-      if (entry.process) {
-        entry.process.exited
-          .then((code) => {
-            void this.handleProcessExit(entry, code);
-          })
-          .catch(() => {
-            void this.handleProcessExit(entry, -1);
-          });
-      } else if (entry.mcpClient && entry.mcpClient.onClose) {
-        entry.mcpClient.onClose(() => {
-          if (entry.runtime.state === "running") {
-            void this.handleProcessExit(entry, -1);
-          }
-        });
-      }
     } catch (error) {
       this.deps.logger?.error("doStart failed for plugin %s: %s", PluginId.toString(entry.pluginId), String(error));
       await this.crash(entry, this.describeError(error));
@@ -580,6 +570,30 @@ export class PluginRuntimeManager {
           }
         });
     });
+  }
+
+  /**
+   * Registers the process/MCP close watcher that flips a "running" plugin to
+   * "crashed" when the underlying process dies outside NusaShell's stop path
+   * (finding 2). Registered before the "running" transition in `doStart` so
+   * there is no race window where an external kill is missed.
+   */
+  private registerExitWatcher(entry: RuntimeEntry): void {
+    if (entry.process) {
+      entry.process.exited
+        .then((code) => {
+          void this.handleProcessExit(entry, code);
+        })
+        .catch(() => {
+          void this.handleProcessExit(entry, -1);
+        });
+    } else if (entry.mcpClient && entry.mcpClient.onClose) {
+      entry.mcpClient.onClose(() => {
+        // handleProcessExit skips "stopping"/"idle"; this catches deaths
+        // during "starting" and "running" alike (finding 2 race window).
+        void this.handleProcessExit(entry, -1);
+      });
+    }
   }
 
   private async handleProcessExit(entry: RuntimeEntry, code: number): Promise<void> {

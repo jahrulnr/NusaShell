@@ -62,7 +62,7 @@ function mapDomainEventInner(event: ApplicationEvent, sequence: number): EventEn
         payload: {
           pluginId: e.aggregateId,
           state: "running",
-          pid: 0,
+          pid: e.pid ?? 0,
           timestamp,
         },
       };

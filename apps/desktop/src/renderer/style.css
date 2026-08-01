@@ -1547,6 +1547,18 @@ body {
 .tool-item-info { min-width: 0; }
 .tool-item-name { font-size: 12.5px; font-weight: 600; font-family: 'JetBrains Mono', monospace; }
 .tool-item-desc { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
+.tools-empty,
+.tools-unavailable {
+  font-size: 12px;
+  padding: 10px 12px;
+  border-radius: 9px;
+}
+.tools-empty { color: var(--text-faint); }
+.tools-unavailable {
+  color: var(--accent-warn, #c98a2b);
+  background: rgba(201, 138, 43, 0.08);
+  border: 1px solid rgba(201, 138, 43, 0.25);
+}
 .tool-try-btn {
   font-size: 11px;
   font-weight: 600;

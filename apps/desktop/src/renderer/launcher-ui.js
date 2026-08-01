@@ -141,3 +141,36 @@ export function providerApiModes(providerType) {
     ? [...openAiCompatible, { value: "messages", label: "Anthropic Messages" }]
     : openAiCompatible;
 }
+
+/**
+ * Maps a `tool.list` outcome to a drawer UI descriptor, distinguishing a
+ * genuine empty toolset from a transport/runtime failure (finding 3a).
+ *
+ * The launcher previously swallowed listTools errors as `{ tools: [] }`,
+ * which made the drawer show "No tools available" even when the plugin was
+ * running but the listing failed. This helper keeps the caller honest: it
+ * surfaces the error so the drawer can show "Tools unavailable: …" instead
+ * of a silent Tools=0.
+ *
+ * @param {{ tools?: unknown[], error?: { message?: string } | null } | null} result
+ * @param {{ state?: string } | null} [plugin]
+ * @returns {{ status: "ready" | "empty" | "unavailable", count: number, tools: unknown[], message: string }}
+ */
+export function describeToolsPanel(result, plugin) {
+  const tools = Array.isArray(result?.tools) ? result.tools : [];
+  const count = tools.length;
+  const state = plugin?.state ?? "idle";
+
+  if (result?.error) {
+    const reason = result.error.message || "tool.list failed";
+    return { status: "unavailable", count, tools, message: `Tools unavailable: ${reason}` };
+  }
+  if (count > 0) {
+    return { status: "ready", count, tools, message: `${count} tool${count === 1 ? "" : "s"}` };
+  }
+  // No tools and no error: distinguish idle (not started) from running-but-empty.
+  if (state === "running") {
+    return { status: "empty", count: 0, tools, message: "No tools exposed by this plugin." };
+  }
+  return { status: "empty", count: 0, tools, message: "No tools available. Start the plugin to discover tools." };
+}

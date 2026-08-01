@@ -9,6 +9,7 @@ import { createStreamSeqGate } from "./stream-seq-gate.js";
 import {
   applyTextEdit,
   countLogsBySource,
+  describeToolsPanel,
   filterLauncherPlugins,
   normalizeTransparentIcon,
   pluginIconPresentation,
@@ -335,7 +336,13 @@ async function getPluginDetail(pluginId) {
 }
 
 async function listTools(pluginId) {
-  try { return await sendRequest("tool.list", { pluginId }); } catch (e) { return { tools: [] }; }
+  // Do not swallow errors as an empty tool list (finding 3a): surface the
+  // failure so the drawer can distinguish "listing failed" from "no tools".
+  try {
+    return await sendRequest("tool.list", { pluginId });
+  } catch (e) {
+    return { tools: [], error: { message: e?.message || "tool.list failed" } };
+  }
 }
 
 async function callTool(pluginId, toolName, args) {
@@ -733,18 +740,19 @@ async function openDrawer(plugin) {
   });
 
   const toolsResult = await listTools(plugin.pluginId);
-  const tools = toolsResult?.tools ?? [];
-  $("#tool-count").textContent = tools.length;
+  const panel = describeToolsPanel(toolsResult, plugin);
+  $("#tool-count").textContent = panel.count;
   const tl = $("#tools-list");
   tl.innerHTML = "";
-  if (tools.length === 0) {
-    tl.innerHTML = '<div style="color:var(--text-faint);font-size:12px">No tools available. Start the plugin to discover tools.</div>';
-  } else {
-    tools.forEach(t => {
+  if (panel.status === "ready") {
+    panel.tools.forEach(t => {
       const item = el("div", "tool-item");
       item.innerHTML = `<div class="tool-item-info"><div class="tool-item-name">${t.name}</div><div class="tool-item-desc">${t.description || ""}</div></div>`;
       tl.appendChild(item);
     });
+  } else {
+    const cls = panel.status === "unavailable" ? "tools-unavailable" : "tools-empty";
+    tl.innerHTML = `<div class="${cls}">${panel.message}</div>`;
   }
 
   const detail = await getPluginDetail(plugin.pluginId);

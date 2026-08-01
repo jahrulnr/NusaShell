@@ -69,7 +69,7 @@ Primary lifecycle actions for the selected plugin.
 
 ## Tools
 
-Lists the tools reported by the plugin's MCP server when running. If the plugin is idle, it prompts to start it so tools can be discovered.
+Lists the tools reported by the plugin's MCP server when running. If the plugin is idle, it prompts to start it so tools can be discovered. If the tool listing fails (e.g. plugin crashed or transport error), it shows a Tools unavailable message with the error reason instead of a silent Tools=0.
 
 - **Tool count** (`#tool-count`):
   - Section: Tools

@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.50] - 2026-08-01
+
+### Fixed
+
+- **Files sandbox bundle escape (P0, critical)** — the shipped Files MCP
+  bundle (`plugins/files/mcp/server.cjs`) was stale and returned resolved
+  paths with no containment check, so `../../` traversal and absolute paths
+  outside `NUSASHELL_FILES_ROOT` escaped the sandbox. Rebuilt the bundle so
+  the guarded `resolvePath` lives in the shipped artifact, and added a
+  bundle-containment regression test plus a runtime stdio MCP sandbox test
+  that spawns the bundle and verifies escape is rejected.
+- **Plugin crash status SoT (P1)** — killing an MCP process from outside
+  NusaShell left the runtime state stuck on `running` because the close
+  watcher was registered after the `running` transition and `plugin.started`
+  event. The watcher is now registered before the transition (closing the
+  race window), the `onClose` path catches deaths during `starting` too, and
+  `plugin.started` carries the real `pid` instead of a hardcoded `0`.
+- **Tools=0 honesty (P2)** — the launcher's `listTools` swallowed `tool.list`
+  errors as an empty tool list, so the plugin drawer showed "No tools
+  available" even when the listing failed. The drawer now distinguishes a
+  failed listing ("Tools unavailable: …") from a genuine empty toolset, via a
+  tested `describeToolsPanel` helper.
+
+### Added
+
+- `docs/architecture/plugin-sandbox-readiness.md` documenting the three
+  mitigations and the deferred finding 3b (`ui.capture` / `panelIndex` /
+  `FileSystem not renderable` — not found in this repo).
+- `plugins/files/README.md` documenting the bundle rebuild + containment
+  contract.
+
 ## [0.0.49] - 2026-08-01
 
 ### Added

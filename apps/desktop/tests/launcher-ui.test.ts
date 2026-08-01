@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyTextEdit,
   countLogsBySource,
+  describeToolsPanel,
   filterLauncherPlugins,
   findOpaqueBounds,
   pluginIconPresentation,
@@ -122,3 +123,52 @@ describe("launcher UI helpers", () => {
     ]);
   });
 });
+
+describe("describeToolsPanel (finding 3a — Tools=0 honesty)", () => {
+  it("reports ready with a tool count when tools are listed", () => {
+    const panel = describeToolsPanel(
+      { tools: [{ name: "files_read" }, { name: "files_write" }] },
+      { state: "running" },
+    );
+    expect(panel).toEqual({
+      status: "ready",
+      count: 2,
+      tools: [{ name: "files_read" }, { name: "files_write" }],
+      message: "2 tools",
+    });
+  });
+
+  it("surfaces the error instead of a silent Tools=0 when listing fails", () => {
+    const panel = describeToolsPanel(
+      { tools: [], error: { message: "Plugin is not running" } },
+      { state: "crashed" },
+    );
+    expect(panel.status).toBe("unavailable");
+    expect(panel.count).toBe(0);
+    expect(panel.message).toContain("Tools unavailable");
+    expect(panel.message).toContain("Plugin is not running");
+  });
+
+  it("uses a generic reason when the error has no message", () => {
+    const panel = describeToolsPanel({ tools: [], error: {} }, { state: "running" });
+    expect(panel.status).toBe("unavailable");
+    expect(panel.message).toContain("tool.list failed");
+  });
+
+  it("distinguishes running-but-empty from idle-not-started", () => {
+    const running = describeToolsPanel({ tools: [] }, { state: "running" });
+    expect(running.status).toBe("empty");
+    expect(running.message).toContain("No tools exposed");
+
+    const idle = describeToolsPanel({ tools: [] }, { state: "idle" });
+    expect(idle.status).toBe("empty");
+    expect(idle.message).toContain("Start the plugin");
+  });
+
+  it("treats a null result as an unavailable listing, not empty", () => {
+    const panel = describeToolsPanel(null, { state: "running" });
+    expect(panel.status).toBe("empty");
+    expect(panel.count).toBe(0);
+  });
+});
+

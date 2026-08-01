@@ -76,6 +76,7 @@ Captured from the Electron desktop app (`make dev`):
 | [`docs/architecture/mcp-capability-policy.md`](./docs/architecture/mcp-capability-policy.md) | Which MCP protocol capabilities NusaShell implements now vs. defers, and the adoption gate |
 | [`docs/architecture/progressive-mcp-tools.md`](./docs/architecture/progressive-mcp-tools.md) | Shell-owned meta-tools used to keep MCP tool discovery bounded per agent turn |
 | [`docs/architecture/job-automation.md`](./docs/architecture/job-automation.md) | Scheduled durable jobs (one-shot/recurring) that fire headless agent turns or plugin tool calls |
+| [`docs/architecture/plugin-sandbox-readiness.md`](./docs/architecture/plugin-sandbox-readiness.md) | Files root-containment bundle guard, plugin process-death status SoT, and Tools=0 honesty mitigations |
 | [`docs/mcp/nusashell-mail-mcp-plugin-spec.md`](./docs/mcp/nusashell-mail-mcp-plugin-spec.md) | Mail plugin protocol assessment, security model, and target tool contract |
 | [`docs/mcp/nusashell-mail-mcp-plugin-implementation.md`](./docs/mcp/nusashell-mail-mcp-plugin-implementation.md) | Implemented read-only Mail milestone, runtime wiring, and current limitations |
 | [`docs/PoC/`](./docs/PoC/) | Runnable zero-dep bridge demo (behavioral reference, not the target layout) |

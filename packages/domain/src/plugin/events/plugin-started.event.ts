@@ -8,12 +8,14 @@ export class PluginStartedEvent implements DomainEvent {
   constructor(
     readonly aggregateId: string,
     readonly occurredAt: Date,
+    readonly pid: number | null = null,
   ) {}
 
   static create(
     pluginId: PluginId,
     occurredAt: Date = new Date(),
+    pid: number | null = null,
   ): PluginStartedEvent {
-    return new PluginStartedEvent(PluginIdVO.toString(pluginId), occurredAt);
+    return new PluginStartedEvent(PluginIdVO.toString(pluginId), occurredAt, pid);
   }
 }
