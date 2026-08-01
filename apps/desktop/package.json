@@ -15,7 +15,7 @@
     "publish": "electron-forge publish",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "postinstall": "electron-rebuild -f -w better-sqlite3"
+    "postinstall": "electron-rebuild -w better-sqlite3"
   },
   "dependencies": {
     "@nusashell/application": "workspace:*",

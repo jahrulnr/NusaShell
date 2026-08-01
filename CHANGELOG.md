@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.57] - 2026-08-01
+
+### Fixed
+
+- **Windows CI no longer fails on `better-sqlite3` native build.** The
+  `windows-latest` GitHub Actions runner ships Visual Studio 18, which
+  `@electron/node-gyp` (used by `electron-rebuild`) does not recognize — it
+  reports `unknown version "undefined"` and aborts. The desktop postinstall used
+  `electron-rebuild -f -w better-sqlite3` where `-f` forced a from-source
+  rebuild even though `better-sqlite3@13.0.1` ships N-API prebuilds for
+  `win32-x64` (ABI-stable across Node and Electron). Removing the `-f` flag lets
+  `electron-rebuild` detect the prebuild as compatible and skip the rebuild.
+  CI test jobs (frontend + backend) now also use `pnpm install --ignore-scripts`
+  to skip the `electron-rebuild` postinstall entirely — tests use system Node,
+  not Electron, so the N-API prebuilds are sufficient.
+
 ## [0.0.56] - 2026-08-01
 
 ### Added
