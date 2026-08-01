@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-08-02
+
+### Fixed
+
+- **Linux curl installer no longer claims success when Chromium sandbox is broken.**
+  Chromium aborts if `chrome-sandbox` exists without root ownership and mode
+  `4755`, even when unprivileged user namespaces are on. The installer now
+  detects that before finishing, prompts for a one-time `sudo` fix (via
+  `/dev/tty` so `curl | bash` still prompts), and falls back to renaming the
+  helper + `--no-sandbox` when sudo is declined or unavailable.
+
 ## [0.1.0] - 2026-08-02
 
 ### Added

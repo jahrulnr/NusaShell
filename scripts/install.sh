@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Installs a signed-by-checksum NusaShell release without requiring root.
+# Installs a signed-by-checksum NusaShell release without requiring root by default.
+# On Linux, chrome-sandbox needs root:4755 for Chromium's setuid helper. If that
+# cannot be set, the installer disables the helper and launches with --no-sandbox
+# — and it does so before claiming success.
 set -euo pipefail
 
 repo="${NUSASHELL_REPOSITORY:-jahrulnr/NusaShell}"
@@ -38,14 +41,87 @@ fi
 root="$home_dir/.local/share/nusashell"; versions="$root/versions"; current="$root/current"; bin="$home_dir/.local/bin"
 mkdir -p "$versions" "$bin" "$home_dir/.local/share/applications"
 target="$versions/$resolved_version"
-if [[ ! -d "$target" ]]; then mkdir -p "$target"; tar -xzf "$tmp_dir/$file_name" -C "$target" --strip-components=1; fi
-no_sandbox=""
-if [[ "$(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || echo 0)" != 1 ]] || [[ "$(cat /proc/sys/user/max_user_namespaces 2>/dev/null || echo 0)" == 0 ]]; then
-  no_sandbox=" --no-sandbox"
-  echo "Notice: unprivileged user namespaces are disabled; NusaShell will use --no-sandbox. Enable kernel.unprivileged_userns_clone=1 to remove this fallback." >&2
+if [[ ! -d "$target/NusaShell" && ! -x "$target/NusaShell" ]]; then
+  mkdir -p "$target"
+  tar -xzf "$tmp_dir/$file_name" -C "$target" --strip-components=1
 fi
-ln -s "$target" "$root/.current-$resolved_version"; mv -f "$root/.current-$resolved_version" "$current"
-printf '#!/usr/bin/env sh\nexec "%s/NusaShell"%s "$@"\n' "$current" "$no_sandbox" > "$bin/nusashell"; chmod +x "$bin/nusashell"
+
+# Chromium aborts if chrome-sandbox exists but is not root-owned mode 4755 —
+# even when unprivileged user namespaces are enabled. Handle this before success.
+sandbox="$target/chrome-sandbox"
+no_sandbox=""
+sandbox_ok=0
+if [[ -e "$sandbox" ]]; then
+  mode="$(stat -c '%a' "$sandbox" 2>/dev/null || echo 0)"
+  owner="$(stat -c '%u' "$sandbox" 2>/dev/null || echo 1)"
+  if [[ "$owner" == "0" && "$mode" == "4755" ]]; then
+    sandbox_ok=1
+  fi
+else
+  # No helper binary: Chromium will use userns or fail later; still prefer --no-sandbox
+  # only when userns is unavailable.
+  if [[ "$(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || echo 0)" == 1 ]] \
+    && [[ "$(cat /proc/sys/user/max_user_namespaces 2>/dev/null || echo 0)" != 0 ]]; then
+    sandbox_ok=1
+  fi
+fi
+
+if [[ "$sandbox_ok" -ne 1 ]]; then
+  echo "" >&2
+  echo "Chromium sandbox helper needs a one-time root fix before NusaShell can start:" >&2
+  echo "  sudo chown root:root \"$sandbox\"" >&2
+  echo "  sudo chmod 4755 \"$sandbox\"" >&2
+  echo "" >&2
+
+  applied=0
+  can_prompt=0
+  if [[ "${NUSASHELL_NON_INTERACTIVE:-}" != "1" ]] && { [[ -t 0 ]] || [[ -r /dev/tty ]]; }; then
+    can_prompt=1
+  fi
+
+  if [[ "$can_prompt" -eq 1 ]]; then
+    if [[ -r /dev/tty ]]; then
+      printf "Apply that fix with sudo now? [Y/n] " >/dev/tty
+      read -r reply </dev/tty || reply=n
+    else
+      printf "Apply that fix with sudo now? [Y/n] " >&2
+      read -r reply || reply=n
+    fi
+    case "${reply:-Y}" in
+      Y|y|"")
+        if command -v sudo >/dev/null 2>&1 \
+          && sudo chown root:root "$sandbox" \
+          && sudo chmod 4755 "$sandbox"; then
+          applied=1
+          echo "Sandbox helper configured (root:4755)." >&2
+        else
+          echo "sudo failed; falling back to --no-sandbox." >&2
+        fi
+        ;;
+      *)
+        echo "Skipping sudo; falling back to --no-sandbox." >&2
+        ;;
+    esac
+  else
+    echo "Non-interactive install: falling back to --no-sandbox (setuid not applied)." >&2
+  fi
+
+  if [[ "$applied" -ne 1 ]]; then
+    # Misconfigured helper causes FATAL abort — rename it away, then force --no-sandbox.
+    if [[ -e "$sandbox" ]]; then
+      mv -f "$sandbox" "$sandbox.disabled"
+    fi
+    no_sandbox=" --no-sandbox"
+    echo "Launch wrapper will use --no-sandbox. To restore the real sandbox later:" >&2
+    echo "  sudo chown root:root \"$sandbox.disabled\" && sudo chmod 4755 \"$sandbox.disabled\" && mv \"$sandbox.disabled\" \"$sandbox\"" >&2
+    echo "  then re-run this installer to rewrite the launcher without --no-sandbox." >&2
+  fi
+fi
+
+ln -sfn "$target" "$root/.current-$resolved_version"
+mv -f "$root/.current-$resolved_version" "$current"
+printf '#!/usr/bin/env sh\nexec "%s/NusaShell"%s "$@"\n' "$current" "$no_sandbox" > "$bin/nusashell"
+chmod +x "$bin/nusashell"
 cat > "$home_dir/.local/share/applications/nusashell.desktop" <<EOF
 [Desktop Entry]
 Type=Application

@@ -13,7 +13,13 @@ The installer downloads the release manifest and payload, verifies SHA-256 befor
 
 On Linux, releases live in `~/.local/share/nusashell/versions/`; `current` points to the active version and `~/.local/bin/nusashell` launches it. A desktop-menu entry is written under `~/.local/share/applications`. Updates download a new version, verify it, and switch `current`, leaving the previous version intact. AppImage builds continue to use Electron's updater; system packages should be updated through the system package manager.
 
-Electron needs unprivileged user namespaces for its sandbox. If your Linux system disables them, the installer adds `--no-sandbox` and prints a notice. Prefer enabling them with `sudo sysctl kernel.unprivileged_userns_clone=1` rather than relying on that fallback.
+Electron ships a `chrome-sandbox` helper that must be owned by root with mode
+`4755`. Without that, Chromium aborts even when user namespaces are enabled.
+The installer detects this before claiming success: it prompts (via `/dev/tty`,
+so `curl | bash` still works) to run a one-time `sudo chown`/`chmod`. If you
+decline, sudo fails, or `NUSASHELL_NON_INTERACTIVE=1` is set, it renames the
+helper and launches with `--no-sandbox` instead. To restore the real sandbox
+later, fix the renamed helper and re-run the installer.
 
 macOS installs to `~/Applications/NusaShell.app`; the installer removes the quarantine attribute when present. If `~/.local/bin` is not on Linux's PATH, add the exact line printed by the installer to your shell profile.
 
