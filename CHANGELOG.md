@@ -36,6 +36,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Desktop shell redesign:** replaced the blue dashboard styling with a
+  graphite instrument-workbench system across Home, Agent, Skills, Learning,
+  Plugins, AI Providers, Autostart, Logs, Jobs, Settings, drawers, and modals.
+  The new shell uses normalized plugin launch plates, compact semantic tokens,
+  phosphor state/action accents, visible keyboard focus, reduced-motion support,
+  and responsive icon-only navigation at the 900px desktop minimum.
+- Sidebar navigation and installed-plugin rows now use native buttons. The
+  plugin details drawer is removed from the accessibility tree while closed,
+  receives focus when opened, and restores focus to its trigger when dismissed.
 - **Home launcher grid = UI plugins only.** Headless MCP-only plugins are
   filtered out of the Home grid (`hasPluginUi`); the Plugins view still lists
   all installed plugins. The Home empty state now distinguishes "no plugins
@@ -46,6 +55,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Workbench theme polish now preserves natural plugin and brand icon colors,
+  brings AI Provider cards and dialogs onto graphite theme surfaces, softens
+  phosphor selection borders, and uses dark ink on filled phosphor controls for
+  readable contrast.
 - **`ListPluginsHandler` stripped `ui` and `keepAliveOnClose`** from the
   `plugin.list` response while `PluginListItemSchema` expected them, so the
   launcher could fall back to a phantom `ui/index.html` default via

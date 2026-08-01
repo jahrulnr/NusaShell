@@ -40,6 +40,7 @@ let aiSettings = { activeProviderId: "", activeModelKey: "", effort: "auto", pro
 let currentProviderDetailId = "";
 let pendingProviderDeleteId = "";
 let editContextTarget = null;
+let drawerReturnFocus = null;
 
 // ============ Helpers ============
 
@@ -359,7 +360,8 @@ function renderInstalledTable() {
     return;
   }
   plugins.forEach(p => {
-    const row = el("div", "plugin-row");
+    const row = el("button", "plugin-row");
+    row.type = "button";
     row.dataset.pluginId = p.pluginId;
     const icon = el("div", "plugin-row-icon");
     setPluginIcon(icon, p.icon || "🧩", 38, p.installPath);
@@ -380,6 +382,7 @@ function renderInstalledTable() {
 // ============ Plugin Detail Drawer ============
 
 async function openDrawer(plugin) {
+  drawerReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   currentPlugin = plugin;
   $("#drawer-icon").className = "drawer-icon";
   setPluginIcon($("#drawer-icon"), plugin.icon || "🧩", 38, plugin.installPath);
@@ -413,14 +416,30 @@ async function openDrawer(plugin) {
   const m = detail || plugin;
   $("#manifest-info").innerHTML = `<div class="manifest-row"><span class="manifest-key">id</span><span class="manifest-val">${plugin.pluginId}</span></div><div class="manifest-row"><span class="manifest-key">version</span><span class="manifest-val">${plugin.version}</span></div><div class="manifest-row"><span class="manifest-key">state</span><span class="manifest-val">${plugin.state}</span></div><div class="manifest-row"><span class="manifest-key">enabled</span><span class="manifest-val">${plugin.enabled}</span></div>`;
 
-  $("#plugin-drawer").classList.add("active");
-  $("#drawer-overlay").classList.add("active");
+  const drawer = $("#plugin-drawer");
+  const overlay = $("#drawer-overlay");
+  drawer.hidden = false;
+  drawer.inert = false;
+  drawer.setAttribute("aria-hidden", "false");
+  overlay.setAttribute("aria-hidden", "false");
+  drawer.classList.add("active");
+  overlay.classList.add("active");
+  $("#drawer-close").focus();
 }
 
 function closeDrawer() {
-  $("#plugin-drawer").classList.remove("active");
-  $("#drawer-overlay").classList.remove("active");
+  const drawer = $("#plugin-drawer");
+  const overlay = $("#drawer-overlay");
+  const wasOpen = drawer.classList.contains("active");
+  drawer.classList.remove("active");
+  overlay.classList.remove("active");
+  drawer.setAttribute("aria-hidden", "true");
+  overlay.setAttribute("aria-hidden", "true");
+  drawer.inert = true;
+  drawer.hidden = true;
   currentPlugin = null;
+  if (wasOpen && drawerReturnFocus?.isConnected) drawerReturnFocus.focus();
+  drawerReturnFocus = null;
 }
 
 // ============ Plugin Window (opens in separate BrowserWindow via IPC) ============

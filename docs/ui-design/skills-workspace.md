@@ -1,7 +1,8 @@
 # Skills workspace visual contract
 
-The Skills view extends NusaShell's dark workbench language with a compact,
-three-pane artifact browser. It is a management surface, not a marketplace:
+The Skills view extends NusaShell's graphite instrument-workbench language with
+a compact, three-pane artifact browser. Phosphor marks only active files,
+keyboard focus, and the install/save actions. It is a management surface, not a marketplace:
 the interface prioritizes package identity, actual file structure, and safe
 local editing over promotional cards.
 

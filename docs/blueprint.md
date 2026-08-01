@@ -331,25 +331,35 @@ live state stays in `PluginRuntimeManager` (backend).
 
 ---
 
-## 4. UI Design - Launcher (Android-style)
+## 4. UI Design - Instrument Workbench Launcher
 
 ### 4.1 Layout
 
 ```
-┌──────────────────────────────────────────────┐
-│  🔍 Search plugins...              ⚙️ Settings │
-├──────────────────────────────────────────────┤
-│                                                │
-│   [📝]      [🌤️]      [📅]      [➕]          │
-│  Notes    Weather   Calendar  Install New     │
-│                                                │
-│   [💬]      [📊]      [🎨]                     │
-│   Chat     Analytics  Design                  │
-│                                                │
-├──────────────────────────────────────────────┤
-│  ● Notes                        ● Weather    │
-└──────────────────────────────────────────────┘
+┌─ NusaShell · Connected ─────────────── ⚙  pin  window controls ─┐
+├───────────────────┬──────────────────────────────────────────────┤
+│ Home              │  NusaShell                                   │
+│ Agent             │  Your AI tool shell — plugins with real UIs.│
+│ Skills            │                                              │
+│ Learning          │  [ Search installed apps…              ] All│
+│ Plugins           │                                              │
+│ AI Providers      │   [ Files ] [ Mail ] [ Notes ] [ Terminal ] │
+│ Autostart         │                                              │
+│ Logs / Jobs       │                                              │
+│                   │                                              │
+│ + Add Plugin      │                                              │
+│ ────────────────  │                                              │
+│ Docs / Collapse   │                                              │
+└───────────────────┴──────────────────────────────────────────────┘
 ```
+
+The visual contract is detailed in
+[`ui-design/shell-workbench.md`](./ui-design/shell-workbench.md). The shell uses
+graphite instrument surfaces, compact corner radii, and a phosphor accent kept
+strictly for connection, selection, running state, focus, and primary actions.
+Nested rails and plugin launch plates provide a physical-console signature;
+ordinary cards stay quiet so dense Agent, Skills, Jobs, and Logs workspaces
+remain comfortable for long sessions.
 
 - Icon grid; click → open the plugin window/panel. **Home shows UI plugins only**;
   headless MCP-only plugins (no `ui` in their manifest) never get a Home tile and

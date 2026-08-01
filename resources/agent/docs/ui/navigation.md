@@ -1,6 +1,6 @@
 # Navigation and Shell Chrome
 
-Global chrome surrounding every NusaShell view: title bar, window controls, update banner, two-mode sidebar, documentation link, and connection status.
+Global instrument-workbench chrome surrounding every NusaShell view: title bar, window controls, update banner, two-mode sidebar, documentation link, and connection status.
 
 **How to open:** Always visible when the NusaShell main window is open.
 
@@ -31,7 +31,7 @@ A status banner at the top of the window that reports update availability, downl
 
 ## Title bar
 
-The top bar identifies NusaShell with its tile-and-wave brand mark and wordmark, followed by compact backend connection status, settings and always-on-top shortcuts, and native window controls. App search is intentionally scoped to Home.
+The top bar identifies NusaShell with its tile-and-wave brand mark and wordmark, followed by compact backend connection status, settings and always-on-top shortcuts, and native window controls. Graphite rails frame the shell while phosphor is reserved for live, selected, focused, and primary-action state. App search is intentionally scoped to Home.
 
 - **Connection status text** (`#conn-status`):
   - Section: Title bar

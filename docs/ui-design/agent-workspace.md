@@ -1,8 +1,9 @@
 # Agent workspace visual contract
 
-The Agent workspace follows the launcher language: dark graphite surfaces,
-compact blue accents, restrained borders, and information-dense controls. It
-must remain usable at Electron's 900 × 700 minimum window size.
+The Agent workspace follows the instrument-workbench language defined in
+[`shell-workbench.md`](./shell-workbench.md): dark graphite surfaces, phosphor
+only for selected/live/action state, restrained borders, and information-dense
+controls. It must remain usable at Electron's 900 × 700 minimum window size.
 
 ## Agent
 

@@ -2,7 +2,7 @@
   "views": {
     "navigation": {
       "title": "Navigation and Shell Chrome",
-      "purpose": "Global chrome surrounding every NusaShell view: title bar, window controls, update banner, two-mode sidebar, documentation link, and connection status.",
+      "purpose": "Global instrument-workbench chrome surrounding every NusaShell view: title bar, window controls, update banner, two-mode sidebar, documentation link, and connection status.",
       "howToOpen": "Always visible when the NusaShell main window is open.",
       "sections": [
         {
@@ -20,7 +20,7 @@
         {
           "heading": "Title bar",
           "paragraphs": [
-            "The top bar identifies NusaShell with its tile-and-wave brand mark and wordmark, followed by compact backend connection status, settings and always-on-top shortcuts, and native window controls. App search is intentionally scoped to Home."
+            "The top bar identifies NusaShell with its tile-and-wave brand mark and wordmark, followed by compact backend connection status, settings and always-on-top shortcuts, and native window controls. Graphite rails frame the shell while phosphor is reserved for live, selected, focused, and primary-action state. App search is intentionally scoped to Home."
           ],
           "controls": [
             "conn-status",
@@ -61,7 +61,7 @@
         {
           "heading": "Greeting",
           "paragraphs": [
-            "Displays the product name, greeting, and the tagline 'Your AI tool shell — plugins with real UIs.'"
+            "Displays a compact local-workbench kicker, the product name, and the tagline 'Your AI tool shell — plugins with real UIs.'"
           ],
           "controls": []
         },
@@ -79,7 +79,7 @@
         {
           "heading": "App grid",
           "paragraphs": [
-            "A grid of installed UI plugins (plugins whose manifest declares a `ui.entry`). Each tile shows the plugin icon, name, and a state badge (idle, starting, running, stopping, crashed). Headless MCP-only plugins are filtered out of Home and managed from the Plugins view. Emoji and image artwork share one 64-pixel icon plate; transparent margins in local PNG artwork are normalized at render time so mixed icon sources keep comparable visual weight."
+            "A grid of installed UI plugins (plugins whose manifest declares a `ui.entry`). Each tile uses an instrument-style launch plate and shows the plugin icon, name, and a textual state badge (idle, starting, running, stopping, crashed). Headless MCP-only plugins are filtered out of Home and managed from the Plugins view. Emoji and image artwork share one normalized plate; transparent margins in local PNG artwork are normalized at render time so mixed icon sources keep comparable visual weight."
           ],
           "controls": [
             "app-grid",

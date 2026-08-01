@@ -6,7 +6,7 @@ The default view and app launcher. Shows windowed (UI) plugins as a searchable g
 
 ## Greeting
 
-Displays the product name, greeting, and the tagline 'Your AI tool shell — plugins with real UIs.'
+Displays a compact local-workbench kicker, the product name, and the tagline 'Your AI tool shell — plugins with real UIs.'
 
 ## Search and filters
 
@@ -32,7 +32,7 @@ The Home search filters installed plugin cards by name, id, or description in re
 
 ## App grid
 
-A grid of installed UI plugins (plugins whose manifest declares a `ui.entry`). Each tile shows the plugin icon, name, and a state badge (idle, starting, running, stopping, crashed). Headless MCP-only plugins are filtered out of Home and managed from the Plugins view. Emoji and image artwork share one 64-pixel icon plate; transparent margins in local PNG artwork are normalized at render time so mixed icon sources keep comparable visual weight.
+A grid of installed UI plugins (plugins whose manifest declares a `ui.entry`). Each tile uses an instrument-style launch plate and shows the plugin icon, name, and a textual state badge (idle, starting, running, stopping, crashed). Headless MCP-only plugins are filtered out of Home and managed from the Plugins view. Emoji and image artwork share one normalized plate; transparent margins in local PNG artwork are normalized at render time so mixed icon sources keep comparable visual weight.
 
 - **Installed plugin grid** (`#app-grid`):
   - Section: App grid

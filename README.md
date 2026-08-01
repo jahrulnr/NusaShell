@@ -92,7 +92,7 @@ Captured from the Electron desktop app (`make dev`):
 | [`docs/mcp/nusashell-mail-mcp-plugin-spec.md`](./docs/mcp/nusashell-mail-mcp-plugin-spec.md) | Mail plugin protocol assessment, security model, and target tool contract |
 | [`docs/mcp/nusashell-mail-mcp-plugin-implementation.md`](./docs/mcp/nusashell-mail-mcp-plugin-implementation.md) | Implemented read-only Mail milestone, runtime wiring, and current limitations |
 | [`docs/PoC/`](./docs/PoC/) | Runnable zero-dep bridge demo (behavioral reference, not the target layout) |
-| [`docs/ui-design/`](./docs/ui-design/) | Launcher visual sketch, plus the Agent workspace and Skills workspace visual contracts |
+| [`docs/ui-design/`](./docs/ui-design/) | Instrument-workbench shell, Agent workspace, and Skills workspace visual contracts |
 
 
 ## Prerequisites
