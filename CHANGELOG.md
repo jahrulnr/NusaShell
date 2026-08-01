@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-08-02
+
+### Fixed
+
+- **Built-in MCP plugins no longer require a system-wide Node.js installation.**
+  In packaged Electron builds, `command: "node"` is resolved to the bundled
+  Electron executable in Node mode, so autostart plugins such as Notes can
+  launch from user-space installations.
+- Packaged builds now include the agent prompts and documentation used by the
+  backend, and the artifact verifier checks representative files from both.
+- Main-process log projection now preserves nested error names, messages,
+  codes, and stacks instead of reducing backend failures to an opaque error code.
+
+### Tests
+
+- Packaged runtime-path fixtures now preserve Windows drive-qualified paths.
+
 ## [0.1.2] - 2026-08-02
 
 ### Fixed
@@ -17,14 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI now inspects each packaged desktop artifact for the required WebSocket,
   updater, SQLite, and AJV runtime files and verifies that a SQLite native binary
   was unpacked.
-- **Built-in MCP plugins no longer require a system-wide Node.js installation.**
-  In packaged Electron builds, `command: "node"` is resolved to the bundled
-  Electron executable in Node mode, so autostart plugins such as Notes can
-  launch from user-space installations.
-- Packaged builds now include the agent prompts and documentation used by the
-  backend, and the artifact verifier checks representative files from both.
-- Main-process log projection now preserves nested error names, messages,
-  codes, and stacks instead of reducing backend failures to an opaque error code.
 - **Linux upgrades now switch the `current` symlink to the newly installed
   version.** The installer no longer lets `mv` follow the existing symlink as a
   directory, which previously left the launcher on the old version while moving
