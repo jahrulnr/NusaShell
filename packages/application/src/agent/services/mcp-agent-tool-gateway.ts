@@ -3,8 +3,8 @@ import { ApplicationError } from "../../errors/application-error.js";
 import type { PluginRuntimeManager } from "../../plugin/services/plugin-runtime-manager.js";
 import type { SkillRegistryPort } from "../../skill/ports/skill-registry.port.js";
 import type { SkillProvenancePort } from "../../skill/ports/skill-provenance.port.js";
-import type { SkillUsagePort, UsageBumpKind } from "../../skill/ports/skill-usage.port.js";
-import type { MemoryStorePort, MemoryTarget } from "../../memory/ports/memory-store.port.js";
+import type { SkillUsagePort } from "../../skill/ports/skill-usage.port.js";
+import type { MemoryStorePort } from "../../memory/ports/memory-store.port.js";
 import type { JobStorePort } from "../../job/ports/job-store.port.js";
 import type { JobScheduler } from "../../job/services/job-scheduler.js";
 import type { DocsIndexPort } from "../ports/docs-index.port.js";
@@ -237,11 +237,16 @@ export class McpAgentToolGateway implements AgentToolGateway {
       case "skill_read": return execSkillRead(this.skillRegistry, this.skillUsage, this.logger, args);
       case "memory": return execMemory(this.memoryStore, args);
       case "skill_manage": return execSkillManage(this.skillRegistry, this.skillProvenance, this.skillUsage, this.approvalStaging, this.logger, this.writeOrigin, this.writeApprovalEnabled, args);
-      case "job": return execJob(this.jobStore, this.jobScheduler, args, {
-        providerId: this.turnProviderId.get(turnId),
-        model: this.turnModel.get(turnId),
-        effort: this.turnEffort.get(turnId),
-      });
+      case "job": {
+        const providerId = this.turnProviderId.get(turnId);
+        const model = this.turnModel.get(turnId);
+        const effort = this.turnEffort.get(turnId);
+        return execJob(this.jobStore, this.jobScheduler, args, {
+          ...(providerId !== undefined ? { providerId } : {}),
+          ...(model !== undefined ? { model } : {}),
+          ...(effort !== undefined ? { effort } : {}),
+        });
+      }
       case "ask_question": return execAskQuestion(this.askQuestions, this.isInteractive(turnId), args, callId ?? requestId, turnId);
       default: return this.callGrantedTool(name, args, requestId, turnId);
     }

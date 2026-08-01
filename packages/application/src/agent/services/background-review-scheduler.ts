@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
-import type { AgentMessage } from "../ports/agent-provider.port.js";
 import type { AgentProviderRegistryPort } from "../ports/agent-provider.port.js";
 import type { PromptLoaderPort, ReviewPromptKind } from "../ports/prompt-loader.port.js";
-import type { ReviewState, ReviewStateStorePort } from "../ports/review-state-store.port.js";
+import type { ReviewStateStorePort } from "../ports/review-state-store.port.js";
 import type { LoggerPort } from "../../plugin/ports/logger.port.js";
 import type { AgentTurnRunner, AgentTurnResult } from "./agent-turn-runner.js";
 import type { ReviewAgentToolGateway } from "./review-agent-tool-gateway.js";

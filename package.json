@@ -8,6 +8,8 @@
     "prebuild": "pnpm scan:ui-docs",
     "scan:ui-docs": "node scripts/scan-ui-docs.mjs",
     "test": "vitest run",
+    "test:frontend": "vitest run --project=@nusashell/desktop",
+    "test:backend": "vitest run --project=!@nusashell/desktop",
     "test:watch": "vitest",
     "typecheck": "tsc -b",
     "desktop:dev": "pnpm --filter @nusashell/desktop run dev",

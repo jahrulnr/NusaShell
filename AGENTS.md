@@ -139,7 +139,9 @@ Until the monorepo is fully wired:
   and running badge.
 - Domain unit tests: `cd packages/domain && npx vitest run` (or `pnpm test` from root
   once workspace install scripts are approved).
-- There is no full workspace CI yet — do not invent CI commands that are not in the repo.
+- GitHub Actions runs `pnpm test:frontend` and `pnpm test:backend` independently
+  on Linux, Windows, and macOS before allowing the three-platform build matrix.
+  Keep CI commands backed by root `package.json` scripts.
 
 ## Pull requests
 

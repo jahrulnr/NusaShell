@@ -1,4 +1,4 @@
-import type { CommandHandler } from "../../../messaging/command.js";
+import type { CommandHandler } from "../../../messaging/command-handler.js";
 import type { RemoveAiCommand } from "./remove-ai.command.js";
 import type { AiConfigurationPort } from "../../ports/ai-configuration.port.js";
 
@@ -7,7 +7,7 @@ export class RemoveAiHandler implements CommandHandler<RemoveAiCommand> {
 
   constructor(private readonly port: AiConfigurationPort) {}
 
-  handle(command: RemoveAiCommand): void {
+  async handle(command: RemoveAiCommand): Promise<void> {
     this.port.removeAi(command.providerId);
   }
 }

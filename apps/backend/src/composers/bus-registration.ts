@@ -57,7 +57,7 @@ import {
   createAgentTurnSupersededEvent,
   createAgentCancelRequestedEvent,
 } from "@nusashell/application";
-import { SystemClock } from "@nusashell/application";
+import { SystemClock } from "@nusashell/infrastructure";
 import type { ContainerOptions } from "../container.js";
 import type { PluginRuntimeParts } from "./plugin-runtime.js";
 import type { SkillsRuntimeParts } from "./skills-runtime.js";

@@ -1,4 +1,4 @@
-import type { CommandHandler } from "../../../messaging/command.js";
+import type { CommandHandler } from "../../../messaging/command-handler.js";
 import type { ConfigureAiRuntimeCommand } from "./configure-ai-runtime.command.js";
 import type { AiConfigurationPort } from "../../ports/ai-configuration.port.js";
 
@@ -7,7 +7,7 @@ export class ConfigureAiRuntimeHandler implements CommandHandler<ConfigureAiRunt
 
   constructor(private readonly port: AiConfigurationPort) {}
 
-  handle(command: ConfigureAiRuntimeCommand): void {
+  async handle(command: ConfigureAiRuntimeCommand): Promise<void> {
     this.port.configureAiRuntime({
       strategy: command.strategy,
       totalAttemptBudget: command.totalAttemptBudget,

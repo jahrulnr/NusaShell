@@ -5,15 +5,12 @@ import {
   emptySchema,
   extractContentText,
   firstText,
-  limitAttachments,
   mapMessages,
   parseToolCall,
   parseUsage,
   positiveInteger,
-  record,
   requireRecord,
   validDataUrl,
-  MAX_IMAGES_PER_MESSAGE,
 } from "./openai-shared.js";
 
 export class ChatApiStrategy implements ApiStrategy {

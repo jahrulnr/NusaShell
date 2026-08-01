@@ -1,25 +1,14 @@
 import {
-  type DomainEvent,
   Plugin,
-  PluginCrashedEvent,
   PluginId,
-  PluginLifecyclePolicy,
   PluginRuntime,
   type PluginRuntimeState,
-  PluginStartedEvent,
-  PluginStoppedEvent,
-  RequestId,
-  RuntimeTransitionPolicy,
-  ToolCall,
-  ToolCallCompletedEvent,
-  ToolName,
 } from "@nusashell/domain";
 import { ApplicationError } from "../../errors/application-error.js";
 import type { ClockPort } from "../ports/clock.port.js";
 import type { LoggerPort } from "../ports/logger.port.js";
 import type {
   McpClientFactoryPort,
-  McpClientPort,
   CompletionReference,
   CompletionResult,
   PromptDescriptor,
@@ -27,10 +16,9 @@ import type {
   ResourceDescriptor,
   ResourceReadResult,
   ResourceTemplateDescriptor,
-  RootDescriptor,
   ToolDescriptor,
 } from "../ports/mcp-client.port.js";
-import type { PluginProcessPort, ProcessHandle } from "../ports/plugin-process.port.js";
+import type { PluginProcessPort } from "../ports/plugin-process.port.js";
 import type { PluginRepositoryPort } from "../ports/plugin-repository.port.js";
 import { EventDispatcher } from "../../events/event-dispatcher.js";
 import { PluginOperationQueue } from "./plugin-operation-queue.js";

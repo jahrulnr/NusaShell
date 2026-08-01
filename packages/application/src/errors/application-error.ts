@@ -23,6 +23,7 @@ export type ApplicationErrorCode =
   | "INTERNAL_ERROR"
   | "JOB_NOT_FOUND"
   | "JOB_INVALID_SCHEDULE"
+  | "JOB_NOT_RUNNING"
   | "ACP_SESSION_NOT_FOUND"
   | "ACP_PROVIDER_FAILED";
 

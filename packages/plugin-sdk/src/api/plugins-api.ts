@@ -1,4 +1,4 @@
-import type { ParsedEvent, EventType, PluginListItem, PluginStateResultDto, PluginGetResultDto, PluginInstallResult, PluginUninstallResult, ToolCallResultDto, ToolListResultDto } from "@nusashell/contracts";
+import type { PluginListItem, PluginStateResultDto, PluginGetResultDto, PluginInstallResult, PluginUninstallResult, ToolCallResultDto, ToolListResultDto } from "@nusashell/contracts";
 import { NusaClient } from "../client/nusa-client.js";
 
 export class PluginsApi {
@@ -108,4 +108,4 @@ export class McpContextApi {
   }
 }
 
-export type { ParsedEvent, EventType };
+export type { ParsedEvent, EventType } from "@nusashell/contracts";

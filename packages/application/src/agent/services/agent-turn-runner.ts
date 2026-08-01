@@ -2,15 +2,12 @@ import { randomUUID } from "node:crypto";
 import { ApplicationError } from "../../errors/application-error.js";
 import type {
   AgentMessage,
-  AgentTokenUsage,
-  AgentToolCall,
   AgentToolExecution,
   AgentTurnResult,
   AgentTurnStep,
   RunAgentTurnInput,
   AgentTurnRunnerDeps,
 } from "./agent-turn-types.js";
-import type { AgentCompactionCheckpoint } from "./agent-turn-types.js";
 import {
   assertTurnActive,
   buildTurnPartial,

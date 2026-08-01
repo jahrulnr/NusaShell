@@ -1,4 +1,7 @@
 import type { AgentProviderRequest, AgentProviderResult } from "@nusashell/application";
+import { ChatApiStrategy } from "./openai-chat-strategy.js";
+import { MessagesApiStrategy } from "./openai-messages-strategy.js";
+import { ResponsesApiStrategy } from "./openai-responses-strategy.js";
 
 export type ProviderApi = "chat" | "responses" | "messages";
 
@@ -27,6 +30,4 @@ export function createApiStrategy(api: ProviderApi): ApiStrategy {
 }
 
 // --- Strategy implementations are in separate modules and re-exported ---
-export { ChatApiStrategy } from "./openai-chat-strategy.js";
-export { ResponsesApiStrategy } from "./openai-responses-strategy.js";
-export { MessagesApiStrategy } from "./openai-messages-strategy.js";
+export { ChatApiStrategy, MessagesApiStrategy, ResponsesApiStrategy };

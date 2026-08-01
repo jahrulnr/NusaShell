@@ -22,12 +22,6 @@ interface JobRow {
   created_at: string;
 }
 
-interface ClaimRow {
-  job_id: string;
-  claim_id: string;
-  expires_at: string;
-}
-
 interface OutputRow {
   id: number;
   job_id: string;
@@ -200,7 +194,7 @@ export class SqliteJobStore implements JobStorePort {
     return result;
   }
 
-  async appendOutput(jobId: string, entry: JobOutputEntry): Promise<void> {
+  async appendOutput(_jobId: string, entry: JobOutputEntry): Promise<void> {
     this.database.raw
       .prepare(
         `INSERT INTO job_outputs (job_id, run_at, status, summary, path, trace_id)

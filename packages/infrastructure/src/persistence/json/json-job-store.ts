@@ -32,10 +32,12 @@ export class JsonJobStore implements JobStorePort {
     if (this.loaded) return;
     try {
       const data = await readFile(resolve(this.root, STATE_FILE), "utf8");
-      this.state = JSON.parse(data) as PersistedState;
-      // Defensive defaults for older states.
-      this.state.claims ??= {};
-      this.state.outputs ??= {};
+      const persisted = JSON.parse(data) as Partial<PersistedState>;
+      this.state = {
+        jobs: persisted.jobs ?? {},
+        claims: persisted.claims ?? {},
+        outputs: persisted.outputs ?? {},
+      };
     } catch {
       this.state = { jobs: {}, claims: {}, outputs: {} };
     }

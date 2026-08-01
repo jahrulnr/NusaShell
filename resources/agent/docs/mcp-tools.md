@@ -12,9 +12,9 @@ NusaShell uses a progressive MCP discovery flow.
 
 ## Paths and workspace
 
-The conversation workspace picker is prompt context only; it is not injected into MCP tool arguments, environment variables, or plugin working directories. When a tool expects a path or `cwd`, the model must pass an explicit absolute path. Individual plugins may use their own default root (for example Files is relative to its own root, Terminal defaults to the user's home directory).
+The conversation workspace is the source of truth for agent tool I/O (not prompt-only). The shell binds it to bundled path/cwd-shaped tools: Terminal defaults `cwd` to the workspace when omitted; Files rewrites relative `path`/`source`/`destination` against the workspace. Absolute paths are preserved. MCP Roots + `roots/list_changed` update the Files root in-process when supported; static servers may get `NUSASHELL_WORKSPACE` at spawn / via `mcp_enable` overrides. Third-party plugins that ignore roots still need an explicit absolute path. Full design: `docs/architecture/workspace-mcp-binding.md`.
 
-**Files plugin root:** Files `path` arguments are relative to the Files plugin root (user home by default, overridable via `NUSASHELL_FILES_ROOT`). `/` or empty means that root — not the OS filesystem root. Use the Terminal plugin with an absolute `cwd` for paths outside the Files root.
+**Files plugin root:** Files containment is under the Files root (`NUSASHELL_FILES_ROOT`, else workspace via roots/`NUSASHELL_WORKSPACE`, else home). `/` or empty means that root — not the OS filesystem root.
 
 ## Shell-owned meta-tools
 

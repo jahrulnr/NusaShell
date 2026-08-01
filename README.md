@@ -69,8 +69,8 @@ Captured from the Electron desktop app (`make dev`):
 
 | Launcher | Agent workspace | Skills workspace |
 | --- | --- | --- |
-| ![NusaShell launcher](./docs/assets/screenshots/desktop-app.png) | ![Agent workspace with a live conversation](./docs/assets/screenshots/agent-workspace.png) | ![Skills workspace, empty-library state](./docs/assets/screenshots/skills-workspace.png) |
-| Home grid with installed plugins (Files, Mail, Notes, Terminal) and live running-state badges. | Full-bleed conversation rail + message runway, streaming a real provider turn. | Three-pane package browser (library, files, editor) shown in its empty state. |
+| ![NusaShell launcher](./docs/assets/screenshots/desktop-app.png) | ![Agent workspace ready for a conversation](./docs/assets/screenshots/agent-workspace.png) | ![Skills workspace, empty-library state](./docs/assets/screenshots/skills-workspace.png) |
+| Home grid with installed plugins (Files, Mail, Notes, Terminal) and live running-state badges. | Conversation rail, empty-turn state, and model-aware composer in a clean local profile. | Three-pane package browser (library, files, editor) shown in its empty state. |
 
 ## Documentation map
 
@@ -119,6 +119,18 @@ make dev
 This launches the Electron desktop app with the backend embedded.
 The app starts in AI stub mode by default — configure a real provider
 in Settings to enable actual AI responses.
+
+## Continuous integration
+
+GitHub Actions runs the desktop/frontend tests and backend/package/plugin tests
+in parallel on Linux, Windows, and macOS with Node.js 24. Once every test matrix
+entry passes, Electron Forge builds native distributables on the same three
+platforms and stores them as workflow artifacts for 14 days.
+
+The final GitHub Release and version-tag job is present but intentionally
+disabled until release publishing is ready to be enabled. When enabled, it
+reads the tag version from `VERSION` and uses the matching `CHANGELOG.md`
+section as the release notes.
 
 Background learning (and future scheduled jobs) run only while NusaShell is
 running. Enable **Keep running when window is closed** under Settings →

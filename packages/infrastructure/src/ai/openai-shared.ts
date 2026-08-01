@@ -1,4 +1,4 @@
-import type { AgentContentPart, AgentMessage, AgentProviderResult, AgentTokenUsage, AgentToolCall } from "@nusashell/application";
+import type { AgentContentPart, AgentMessage, AgentTokenUsage, AgentToolCall } from "@nusashell/application";
 import type { ProviderApi } from "./openai-api-strategy.js";
 
 export const transientStatuses = new Set([408, 409, 413, 425, 429, 500, 501, 502, 503, 504]);

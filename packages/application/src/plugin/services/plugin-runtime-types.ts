@@ -4,15 +4,6 @@ import type {
 } from "@nusashell/domain";
 import type {
   McpClientPort,
-  CompletionReference,
-  CompletionResult,
-  PromptDescriptor,
-  PromptResult,
-  ResourceDescriptor,
-  ResourceReadResult,
-  ResourceTemplateDescriptor,
-  RootDescriptor,
-  ToolDescriptor,
 } from "../ports/mcp-client.port.js";
 import type { ProcessHandle } from "../ports/plugin-process.port.js";
 import type { PluginOperationQueue } from "./plugin-operation-queue.js";

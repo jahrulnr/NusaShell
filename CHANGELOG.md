@@ -7,8 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.56] - 2026-08-01
 
+### Added
+
+- **Cross-platform CI:** GitHub Actions now runs frontend and backend tests in
+  parallel on Linux, Windows, and macOS with Node.js 24, then builds native
+  Electron distributables on all three platforms. Build artifacts are retained
+  for 14 days; the final GitHub Release and version-tag job is scaffolded but
+  intentionally disabled. When enabled, it reads the tag from `VERSION` and
+  publishes the matching `CHANGELOG.md` section as the GitHub Release notes.
+
 ### Fixed
 
+- Workspace declaration builds and backend startup no longer fail on stale
+  imports left behind by runtime-manager and agent-service extractions. AI
+  strategy bindings, persisted job defaults, and optional job caller context
+  now also satisfy their declared contracts.
 - **ACP model label no longer sticks on regular chats after switching.** The
   shared `#agent-model-trigger-label` was written as `"{model} · ACP"` by
   `updateAcpModelLabel` after `ensureAcpSession` / `refreshAcpConfigOptions` /

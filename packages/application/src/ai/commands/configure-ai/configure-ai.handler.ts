@@ -1,4 +1,4 @@
-import type { CommandHandler } from "../../../messaging/command.js";
+import type { CommandHandler } from "../../../messaging/command-handler.js";
 import type { ConfigureAiCommand } from "./configure-ai.command.js";
 import type { AiConfigurationPort } from "../../ports/ai-configuration.port.js";
 
@@ -7,7 +7,7 @@ export class ConfigureAiHandler implements CommandHandler<ConfigureAiCommand> {
 
   constructor(private readonly port: AiConfigurationPort) {}
 
-  handle(command: ConfigureAiCommand): void {
+  async handle(command: ConfigureAiCommand): Promise<void> {
     this.port.configureAi({
       providerId: command.providerId,
       ...(command.api !== undefined ? { api: command.api } : {}),

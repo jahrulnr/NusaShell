@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { SkillOrigin, SkillProvenancePort } from "@nusashell/application";
