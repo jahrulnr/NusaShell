@@ -130,6 +130,9 @@ jobs:
       - name: Build desktop distributable
         run: pnpm desktop:make
 
+      - name: Verify packaged runtime dependencies
+        run: pnpm --filter @nusashell/desktop run verify:package-runtime
+
       - name: Package Linux directory install artifact
         if: matrix.platform == 'linux'
         shell: bash

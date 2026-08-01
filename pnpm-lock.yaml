@@ -69,6 +69,9 @@ importers:
       '@nusashell/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
+      better-sqlite3:
+        specifier: ^13.0.1
+        version: 13.0.1
       electron-updater:
         specifier: ^6.3.9
         version: 6.8.9(supports-color@8.1.1)
@@ -78,6 +81,9 @@ importers:
       markdown-it:
         specifier: 14.3.0
         version: 14.3.0
+      ws:
+        specifier: ^8.21.1
+        version: 8.21.1
     devDependencies:
       '@electron-forge/cli':
         specifier: ^7.6.0
@@ -97,6 +103,9 @@ importers:
       '@electron-forge/shared-types':
         specifier: ^7.6.0
         version: 7.11.2(bluebird@3.7.2)(supports-color@8.1.1)
+      '@electron/asar':
+        specifier: ^3.4.1
+        version: 3.4.1
       '@electron/rebuild':
         specifier: ^3.7.0
         version: 3.7.2(bluebird@3.7.2)(supports-color@8.1.1)

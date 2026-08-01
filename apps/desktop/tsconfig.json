@@ -6,6 +6,6 @@
     "lib": ["ES2022", "DOM"],
     "types": ["node"]
   },
-  "include": ["src", "forge.config.ts", "vite.*.config.ts"],
+  "include": ["src", "scripts", "forge.config.ts", "vite.*.config.ts"],
   "exclude": ["dist", "node_modules", ".vite"]
 }

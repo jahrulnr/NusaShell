@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-08-02
+
+### Fixed
+
+- **Packaged desktop builds now include their externalized runtime dependencies.**
+  Electron Forge stages a standalone production dependency tree before creating
+  `app.asar`, preventing startup failures such as `Cannot find module 'ws'`.
+  Native Node binaries are unpacked from ASAR so `better-sqlite3` can load its
+  platform prebuild.
+- CI now inspects each packaged desktop artifact for the required WebSocket,
+  updater, SQLite, and AJV runtime files and verifies that a SQLite native binary
+  was unpacked.
+- **Linux upgrades now switch the `current` symlink to the newly installed
+  version.** The installer no longer lets `mv` follow the existing symlink as a
+  directory, which previously left the launcher on the old version while moving
+  the new activation link inside that old version's folder.
+
 ## [0.1.1] - 2026-08-02
 
 ### Fixed

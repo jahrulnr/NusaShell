@@ -119,7 +119,9 @@ if [[ "$sandbox_ok" -ne 1 ]]; then
 fi
 
 ln -sfn "$target" "$root/.current-$resolved_version"
-mv -f "$root/.current-$resolved_version" "$current"
+# Without -T, GNU mv follows the existing directory symlink and moves the
+# candidate inside the old version instead of replacing `current`.
+mv -Tf "$root/.current-$resolved_version" "$current"
 printf '#!/usr/bin/env sh\nexec "%s/NusaShell"%s "$@"\n' "$current" "$no_sandbox" > "$bin/nusashell"
 chmod +x "$bin/nusashell"
 cat > "$home_dir/.local/share/applications/nusashell.desktop" <<EOF

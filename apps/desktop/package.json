@@ -13,6 +13,7 @@
     "dev": "tsx scripts/register-linux-desktop.ts && electron-forge start -- --dev --no-sandbox",
     "package": "electron-forge package",
     "make": "electron-forge make",
+    "verify:package-runtime": "tsx scripts/verify-packaged-runtime.ts",
     "publish": "electron-forge publish",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -23,11 +24,14 @@
     "@nusashell/backend": "workspace:*",
     "@nusashell/contracts": "workspace:*",
     "@nusashell/plugin-sdk": "workspace:*",
+    "better-sqlite3": "^13.0.1",
     "electron-updater": "^6.3.9",
     "isomorphic-dompurify": "^3.20.0",
-    "markdown-it": "14.3.0"
+    "markdown-it": "14.3.0",
+    "ws": "^8.21.1"
   },
   "devDependencies": {
+    "@electron/asar": "^3.4.1",
     "@electron-forge/cli": "^7.6.0",
     "@electron-forge/maker-deb": "^7.6.0",
     "@electron-forge/maker-zip": "^7.11.2",

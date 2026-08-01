@@ -5,6 +5,7 @@ import { MakerDeb } from "@electron-forge/maker-deb";
 import { PublisherGithub } from "@electron-forge/publisher-github";
 import { resolve } from "node:path";
 import { readFileSync, writeFileSync } from "node:fs";
+import { stageRuntimeDependencies } from "./scripts/package-runtime-dependencies.js";
 
 const releaseVersion = readFileSync(resolve(__dirname, "..", "..", "VERSION"), "utf8").trim();
 
@@ -13,7 +14,9 @@ const config: ForgeConfig = {
     name: "NusaShell",
     appVersion: releaseVersion,
     buildVersion: releaseVersion,
-    asar: true,
+    asar: {
+      unpack: "**/*.node",
+    },
     extraResource: [
       resolve(__dirname, "..", "..", "plugins"),
       resolve(__dirname, "assets", "nusashell.png"),
@@ -24,6 +27,9 @@ const config: ForgeConfig = {
       ...packageJson,
       version: releaseVersion,
     }),
+    packageAfterCopy: async (_forgeConfig, buildPath) => {
+      await stageRuntimeDependencies({ buildPath });
+    },
     packageAfterPrune: async (_forgeConfig, buildPath) => {
       const packageJsonPath = resolve(buildPath, "package.json");
       const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as Record<string, unknown>;
