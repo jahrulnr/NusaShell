@@ -4,14 +4,16 @@ import { resolveRuntimePaths } from "../src/main/runtime-paths.js";
 
 describe("desktop runtime paths", () => {
   it("resolves packaged plugins and agent resources from Electron resources", () => {
+    const resourcesPath = resolve("/opt/NusaShell/resources");
+
     expect(resolveRuntimePaths({
       isPackaged: true,
       moduleDir: "/unused",
-      resourcesPath: "/opt/NusaShell/resources",
+      resourcesPath,
     })).toEqual({
-      pluginsRoot: join("/opt/NusaShell/resources", "plugins"),
-      promptsRoot: join("/opt/NusaShell/resources", "agent", "prompts"),
-      docsRoot: join("/opt/NusaShell/resources", "agent", "docs"),
+      pluginsRoot: join(resourcesPath, "plugins"),
+      promptsRoot: join(resourcesPath, "agent", "prompts"),
+      docsRoot: join(resourcesPath, "agent", "docs"),
     });
   });
 
