@@ -86,6 +86,7 @@ export type {
   ResourceTemplateDescriptor,
   CompletionReference,
   CompletionResult,
+  RootDescriptor,
   ClockPort,
   LoggerPort,
 } from "./plugin/index.js";
@@ -96,6 +97,8 @@ export {
   type PluginView,
   type StartPluginOptions,
   type CallToolOptions,
+  type WorkspaceSyncResult,
+  type PluginLaunchSpec,
   StartPluginHandler,
   StopPluginHandler,
   RestartPluginHandler,

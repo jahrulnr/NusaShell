@@ -141,7 +141,8 @@ nusashell/
 │       ├── manifest-spec.md
 │       ├── job-automation.md      # scheduled jobs (Phase F)
 │       ├── acp-threads.md         # ACP external-agent conversations
-│       └── plugin-sandbox-readiness.md  # Files containment, crash SoT, Tools=0 honesty
+│       ├── plugin-sandbox-readiness.md  # Files containment, crash SoT, Tools=0 honesty
+│       └── workspace-mcp-binding.md     # conversation.workspace → MCP (wrap → Roots → respawn)
 │
 ├── scripts/
 │   ├── build.ts

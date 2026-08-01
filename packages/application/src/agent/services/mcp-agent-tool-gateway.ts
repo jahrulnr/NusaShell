@@ -10,6 +10,7 @@ import type { AgentToolDefinition } from "../ports/agent-provider.port.js";
 import type { AgentToolGateway, AgentTurnContext } from "../ports/agent-tool-gateway.port.js";
 import type { LoggerPort } from "../../plugin/ports/logger.port.js";
 import type { AskQuestionOption, AskQuestionService } from "./ask-question-service.js";
+import { wrapToolArgs } from "./workspace-tool-wrap.js";
 
 export type WriteOrigin = "foreground" | "background_review";
 
@@ -35,6 +36,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
   private readonly turnRoutes = new Map<string, Map<string, McpToolRoute>>();
   private readonly activeCalls = new Map<string, Map<string, string>>();
   private readonly turnInteractive = new Map<string, boolean>();
+  private readonly turnWorkspace = new Map<string, string | undefined>();
   private writeOrigin: WriteOrigin = "foreground";
   private writeApprovalEnabled = false;
 
@@ -66,6 +68,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
     if (!this.turnRoutes.has(turnId)) this.turnRoutes.set(turnId, new Map());
     if (!this.activeCalls.has(turnId)) this.activeCalls.set(turnId, new Map());
     if (context?.interactive !== undefined) this.turnInteractive.set(turnId, context.interactive);
+    this.turnWorkspace.set(turnId, context?.workspace);
   }
 
   endTurn(turnId: string): void {
@@ -73,6 +76,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
     this.turnRoutes.delete(turnId);
     this.activeCalls.delete(turnId);
     this.turnInteractive.delete(turnId);
+    this.turnWorkspace.delete(turnId);
   }
 
   async cancelTurn(turnId: string): Promise<void> {
@@ -86,8 +90,12 @@ export class McpAgentToolGateway implements AgentToolGateway {
   async listTools(_pluginIds: readonly string[], turnId: string): Promise<readonly AgentToolDefinition[]> {
     const routes = this.routesFor(turnId);
     return [
-      definition("mcp_list", "List MCP plugins, runtime state, and autostart preference"),
-      definition("mcp_enable", "Start a selected MCP plugin", { pluginId: stringSchema() }),
+      definition("mcp_list", "List MCP plugins, runtime state, autostart preference, and launch spec (command, args, env keys — values redacted)"),
+      definition("mcp_enable", "Start a selected MCP plugin. Optional args/env override the launch spec (command is immutable); a different launchSpec while running triggers a respawn.", {
+        pluginId: stringSchema(),
+        args: { type: "array", items: { type: "string" }, description: "Optional full replacement for the manifest args array." },
+        env: { type: "object", additionalProperties: { type: "string" }, description: "Optional env overrides merged onto the manifest env (values are not echoed back)." },
+      }),
       definition("mcp_disable", "Stop a selected MCP plugin", { pluginId: stringSchema() }),
       definition("tool_search", "Search a running MCP plugin's tools by name or description", { pluginId: stringSchema(), query: stringSchema() }),
       definition("tool_list", "List all tools from a running MCP plugin (names and descriptions only)", { pluginId: stringSchema() }),
@@ -179,9 +187,9 @@ export class McpAgentToolGateway implements AgentToolGateway {
 
   async execute(name: string, args: Readonly<Record<string, unknown>>, requestId: string, turnId: string, callId?: string): Promise<unknown> {
     switch (name) {
-      case "mcp_list": return this.runtimeManager.listPlugins();
-      case "mcp_enable": return this.changeMcpState(args, true);
-      case "mcp_disable": return this.changeMcpState(args, false);
+      case "mcp_list": return this.listMcpPlugins();
+      case "mcp_enable": return this.changeMcpState(args, true, turnId);
+      case "mcp_disable": return this.changeMcpState(args, false, turnId);
       case "tool_list": return this.listAllTools(args);
       case "tool_search": return this.searchTools(args);
       case "tool_schema": return this.grantTool(args, turnId);
@@ -200,10 +208,36 @@ export class McpAgentToolGateway implements AgentToolGateway {
     }
   }
 
-  private async changeMcpState(args: Readonly<Record<string, unknown>>, start: boolean): Promise<unknown> {
+  private async listMcpPlugins(): Promise<unknown> {
+    const plugins = await this.runtimeManager.listPlugins();
+    const enriched = await Promise.all(plugins.map(async (plugin) => {
+      try {
+        const spec = await this.runtimeManager.getLaunchSpec?.(parsePluginId(plugin.pluginId));
+        return { ...plugin, ...(spec ? { launchSpec: spec } : {}) };
+      } catch {
+        return plugin;
+      }
+    }));
+    return enriched;
+  }
+
+  private async changeMcpState(args: Readonly<Record<string, unknown>>, start: boolean, turnId: string): Promise<unknown> {
     const pluginId = parsePluginId(args.pluginId);
     this.logger?.info("Agent MCP plugin %s via agent tool plugin=%s", start ? "start" : "stop", PluginId.toString(pluginId));
-    const view = start ? await this.runtimeManager.startPlugin(pluginId) : await this.runtimeManager.stopPlugin(pluginId);
+    if (start) {
+      const workspace = this.turnWorkspace.get(turnId);
+      const overrides: { args?: readonly string[]; env?: Readonly<Record<string, string>>; workspace?: string } = {};
+      if (Array.isArray(args.args) && args.args.every((v) => typeof v === "string")) overrides.args = args.args as string[];
+      if (args.env && typeof args.env === "object" && !Array.isArray(args.env)) {
+        overrides.env = Object.fromEntries(
+          Object.entries(args.env as Record<string, unknown>).filter(([, v]) => typeof v === "string"),
+        ) as Record<string, string>;
+      }
+      if (workspace) overrides.workspace = workspace;
+      const view = await this.runtimeManager.startPlugin(pluginId, Object.keys(overrides).length > 0 ? overrides : undefined);
+      return { pluginId: view.pluginId, state: view.state };
+    }
+    const view = await this.runtimeManager.stopPlugin(pluginId);
     return { pluginId: view.pluginId, state: view.state };
   }
 
@@ -349,10 +383,19 @@ export class McpAgentToolGateway implements AgentToolGateway {
       this.logger?.warn("Agent MCP tool rejected (not in allowlist) tool=%s turnId=%s", name, turnId);
       throw new ApplicationError("AGENT_TOOL_NOT_ALLOWED", "AI provider requested a tool outside the MCP allowlist", { name });
     }
+    const workspace = this.turnWorkspace.get(turnId);
+    const wrappedArgs = wrapToolArgs(route.pluginId, route.toolName, args, workspace);
+    if (workspace) {
+      try {
+        await this.runtimeManager.syncWorkspace?.(parsePluginId(route.pluginId), workspace);
+      } catch (error) {
+        this.logger?.warn("Workspace sync failed for plugin %s: %s", route.pluginId, error instanceof Error ? error.message : String(error));
+      }
+    }
     const calls = this.activeCalls.get(turnId);
     calls?.set(requestId, route.pluginId);
     try {
-      return await this.runtimeManager.callTool(parsePluginId(route.pluginId), { requestId, toolName: route.toolName, args });
+      return await this.runtimeManager.callTool(parsePluginId(route.pluginId), { requestId, toolName: route.toolName, args: wrappedArgs });
     } finally {
       calls?.delete(requestId);
     }

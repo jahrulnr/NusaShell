@@ -6,4 +6,6 @@ export {
   type PluginView,
   type StartPluginOptions,
   type CallToolOptions,
+  type WorkspaceSyncResult,
+  type PluginLaunchSpec,
 } from "./plugin-runtime-manager.js";

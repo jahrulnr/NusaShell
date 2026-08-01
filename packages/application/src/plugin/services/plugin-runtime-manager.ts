@@ -28,6 +28,7 @@ import type {
   ResourceDescriptor,
   ResourceReadResult,
   ResourceTemplateDescriptor,
+  RootDescriptor,
   ToolDescriptor,
 } from "../ports/mcp-client.port.js";
 import type { PluginProcessPort, ProcessHandle } from "../ports/plugin-process.port.js";
@@ -67,6 +68,16 @@ interface RuntimeEntry {
   mcpClient: McpClientPort | null;
   readonly pendingCalls: Map<string, PendingToolCall>;
   restartCount: number;
+  /** Last workspace bound to this plugin (for roots sync / spawn env). */
+  workspace: string | undefined;
+  /** Last workspace reported to the client via roots (to detect change). */
+  lastRootsWorkspace: string | undefined;
+  /** Agent-supplied launch overrides (Phase 3). command is always immutable. */
+  launchArgs: readonly string[] | undefined;
+  launchEnv: Readonly<Record<string, string>> | undefined;
+  /** Launch spec the currently-running process was started with (for respawn detection). */
+  runningArgs: readonly string[] | undefined;
+  runningEnv: Readonly<Record<string, string>> | undefined;
 }
 
 export interface PluginRuntimeManagerDeps {
@@ -85,7 +96,31 @@ export interface PluginRuntimeManagerDeps {
 }
 
 export interface StartPluginOptions {
-  readonly args?: Readonly<Record<string, unknown>>;
+  /**
+   * Agent-supplied launch overrides (Phase 3). `command` is always immutable;
+   * only `args` and `env` may be patched. A different launchSpec while the
+   * plugin is running triggers a stop+start respawn.
+   */
+  readonly args?: readonly string[];
+  readonly env?: Readonly<Record<string, string>>;
+  /** Conversation workspace to bind at spawn (sets NUSASHELL_WORKSPACE env). */
+  readonly workspace?: string;
+}
+
+export interface WorkspaceSyncResult {
+  readonly mode: "roots" | "static" | "idle";
+  readonly respawned: boolean;
+}
+
+export interface PluginLaunchSpec {
+  readonly pluginId: string;
+  readonly transport: string;
+  readonly command?: string;
+  readonly args: readonly string[];
+  /** Env keys only — values are redacted (secrets may live in env). */
+  readonly envKeys: readonly string[];
+  readonly workspace?: string;
+  readonly rootsCapable: boolean;
 }
 
 export interface CallToolOptions {
@@ -140,8 +175,13 @@ export class PluginRuntimeManager {
     return entry?.runtime.state ?? "idle";
   }
 
-  async startPlugin(pluginId: PluginId): Promise<PluginView> {
+  async startPlugin(pluginId: PluginId, options?: StartPluginOptions): Promise<PluginView> {
     const entry = await this.ensureEntry(pluginId);
+    if (options) {
+      entry.launchArgs = options.args;
+      entry.launchEnv = options.env;
+      if (options.workspace !== undefined) entry.workspace = options.workspace;
+    }
     return entry.queue.enqueue(async () => this.startLocked(entry));
   }
 
@@ -218,6 +258,42 @@ export class PluginRuntimeManager {
       }
       return this.startLocked(entry);
     });
+  }
+
+  /**
+   * Bind `conversation.workspace` to a running plugin. For roots-capable
+   * servers (those that call `roots/list`), the roots are updated in-process
+   * and `roots/list_changed` is sent — no restart. For static servers, the
+   * workspace is recorded and applied on the next spawn (via
+   * `NUSASHELL_WORKSPACE` env); no automatic respawn here so workspace-agnostic
+   * plugins (e.g. Terminal, whose `cwd` is per-call) are not needlessly
+   * restarted. Use `mcp_enable` with launch overrides to force a respawn.
+   */
+  async syncWorkspace(pluginId: PluginId, workspace: string): Promise<WorkspaceSyncResult> {
+    const entry = await this.ensureEntry(pluginId);
+    return entry.queue.enqueue(async () => this.syncWorkspaceLocked(entry, workspace));
+  }
+
+  /**
+   * Redacted launch spec for `mcp_list`: command, args, env keys (values
+   * redacted), bound workspace, and whether the server is roots-capable.
+   */
+  async getLaunchSpec(pluginId: PluginId): Promise<PluginLaunchSpec | null> {
+    const key = PluginId.toString(pluginId);
+    const entry = this.runtimes.get(key);
+    if (!entry) return null;
+    const plugin = await this.loadPlugin(pluginId);
+    const manifest = plugin.manifest;
+    const envKeys = Object.keys({ ...manifest.mcp.env, ...(entry.launchEnv ?? {}) });
+    return {
+      pluginId: key,
+      transport: manifest.mcp.transport,
+      ...(manifest.mcp.command !== undefined ? { command: manifest.mcp.command } : {}),
+      args: entry.launchArgs ?? manifest.mcp.args,
+      envKeys,
+      ...(entry.workspace ? { workspace: entry.workspace } : {}),
+      rootsCapable: entry.mcpClient?.rootsRequested?.() ?? false,
+    };
   }
 
   async getPlugin(pluginId: PluginId): Promise<PluginView | null> {
@@ -307,6 +383,12 @@ export class PluginRuntimeManager {
       mcpClient: null,
       pendingCalls: new Map(),
       restartCount: 0,
+      workspace: undefined,
+      lastRootsWorkspace: undefined,
+      launchArgs: undefined,
+      launchEnv: undefined,
+      runningArgs: undefined,
+      runningEnv: undefined,
     };
     this.runtimes.set(key, entry);
     return entry;
@@ -314,10 +396,16 @@ export class PluginRuntimeManager {
 
   private async startLocked(entry: RuntimeEntry): Promise<PluginView> {
     if (entry.runtime.state === "running" || entry.runtime.state === "starting") {
-      if (entry.startPromise) {
-        await entry.startPromise;
+      // Phase 3: a different launchSpec while running triggers a respawn.
+      if (this.launchSpecChanged(entry)) {
+        this.deps.logger?.info("Respawning plugin %s for launchSpec override", PluginId.toString(entry.pluginId));
+        await this.stopLocked(entry);
+      } else {
+        if (entry.startPromise) {
+          await entry.startPromise;
+        }
+        return this.view(entry);
       }
-      return this.view(entry);
     }
 
     const plugin = await this.loadPlugin(entry.pluginId);
@@ -350,6 +438,44 @@ export class PluginRuntimeManager {
     return this.view(entry);
   }
 
+  private launchSpecChanged(entry: RuntimeEntry): boolean {
+    if (entry.launchArgs !== undefined && !arrayEquals(entry.launchArgs, entry.runningArgs ?? [])) return true;
+    if (entry.launchEnv !== undefined && !recordEquals(entry.launchEnv, entry.runningEnv ?? {})) return true;
+    return false;
+  }
+
+  private async syncWorkspaceLocked(entry: RuntimeEntry, workspace: string): Promise<WorkspaceSyncResult> {
+    const previous = entry.workspace;
+    entry.workspace = workspace;
+    if (entry.runtime.state !== "running" || !entry.mcpClient) {
+      return { mode: "idle", respawned: false };
+    }
+    const client = entry.mcpClient;
+    if (client.rootsRequested?.()) {
+      await this.applyRoots(entry, workspace);
+      if (entry.lastRootsWorkspace !== workspace) {
+        entry.lastRootsWorkspace = workspace;
+        try {
+          await client.notifyRootsChanged?.();
+        } catch (error) {
+          this.deps.logger?.warn("roots/list_changed notify failed for %s: %s", PluginId.toString(entry.pluginId), error instanceof Error ? error.message : String(error));
+        }
+      }
+      return { mode: "roots", respawned: false };
+    }
+    // Static server: workspace applies on next spawn. No automatic respawn so
+    // workspace-agnostic plugins (Terminal) are not needlessly restarted.
+    void previous;
+    return { mode: "static", respawned: false };
+  }
+
+  private async applyRoots(entry: RuntimeEntry, workspace: string): Promise<void> {
+    const client = entry.mcpClient;
+    if (!client?.setRoots) return;
+    const roots: RootDescriptor[] = [{ uri: `file://${workspace}`, name: "workspace" }];
+    client.setRoots(roots);
+  }
+
   private async doStart(entry: RuntimeEntry, plugin: Plugin): Promise<void> {
     try {
       const manifest = plugin.manifest;
@@ -368,17 +494,29 @@ export class PluginRuntimeManager {
         const environment = {
           ...manifest.mcp.env,
           ...runtimeEnvironment,
+          ...(entry.workspace ? { NUSASHELL_WORKSPACE: entry.workspace } : {}),
+          ...(entry.launchEnv ?? {}),
         };
+        const args = entry.launchArgs ?? manifest.mcp.args;
         const mcpClient = this.deps.mcpClientFactory.createForStdio(
           command,
-          manifest.mcp.args,
+          args,
           environment,
           plugin.installPath,
         );
-        this.deps.logger?.debug("Starting MCP stdio process: command=%s args=%j cwd=%s", command, manifest.mcp.args, plugin.installPath);
+        this.deps.logger?.debug("Starting MCP stdio process: command=%s args=%j cwd=%s workspace=%s", command, args, plugin.installPath, entry.workspace ?? "(none)");
         await mcpClient.connect();
         this.deps.logger?.info("MCP client connected (stdio) for plugin %s", PluginId.toString(entry.pluginId));
         entry.mcpClient = mcpClient;
+        entry.runningArgs = args;
+        entry.runningEnv = environment;
+        if (entry.workspace) {
+          try {
+            await this.applyRoots(entry, entry.workspace);
+          } catch (error) {
+            this.deps.logger?.warn("Initial roots apply failed for %s: %s", PluginId.toString(entry.pluginId), error instanceof Error ? error.message : String(error));
+          }
+        }
       } else if (manifest.mcp.transport === "http") {
         const url = manifest.mcp.url;
         if (!url) {
@@ -765,4 +903,18 @@ export class PluginRuntimeManager {
     if (error instanceof Error) return error.message;
     return String(error);
   }
+}
+
+function arrayEquals(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+function recordEquals(a: Readonly<Record<string, string>>, b: Readonly<Record<string, string>>): boolean {
+  const ak = Object.keys(a);
+  const bk = Object.keys(b);
+  if (ak.length !== bk.length) return false;
+  for (const key of ak) if (a[key] !== b[key]) return false;
+  return true;
 }

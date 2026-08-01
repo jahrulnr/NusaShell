@@ -8,6 +8,7 @@ import type {
   ResourceDescriptor,
   ResourceReadResult,
   ResourceTemplateDescriptor,
+  RootDescriptor,
   ToolDescriptor,
 } from "@nusashell/application";
 
@@ -125,6 +126,30 @@ export class FakeMcpClient implements McpClientPort {
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
     return this.callResults.get(name) ?? { ok: true };
+  }
+
+  /** Roots set via setRoots (test instrumentation). */
+  roots: readonly RootDescriptor[] = [];
+  /** True once rootsRequested() has been called (simulates a roots-capable server). */
+  private rootsRequestedFlag = false;
+  /** Roots notifications sent (test instrumentation). */
+  readonly rootsNotifications: number[] = [];
+
+  setRoots(roots: readonly RootDescriptor[]): void {
+    this.roots = roots;
+  }
+
+  async notifyRootsChanged(): Promise<void> {
+    this.rootsNotifications.push(Date.now());
+  }
+
+  rootsRequested(): boolean {
+    return this.rootsRequestedFlag;
+  }
+
+  /** Test helper: mark this client as roots-capable (server called roots/list). */
+  markRootsRequested(): void {
+    this.rootsRequestedFlag = true;
   }
 }
 

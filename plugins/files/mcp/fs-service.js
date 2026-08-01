@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { resolvePath } from "./config.js";
+import { resolvePath, validateRoot } from "./config.js";
 
 const MAX_READ_BYTES = 10 * 1024 * 1024;
 const MAX_TREE_DEPTH = 10;
@@ -51,6 +51,17 @@ export class FileService {
    */
   constructor(root) {
     this.root = root;
+  }
+
+  /**
+   * Update the root directory in-process (MCP Roots / set_root bridge).
+   * The new root must exist and be a directory; containment is re-established
+   * against it for all subsequent operations.
+   * @param {string} newRoot
+   */
+  async setRoot(newRoot) {
+    this.root = await validateRoot(newRoot);
+    return this.root;
   }
 
   /**

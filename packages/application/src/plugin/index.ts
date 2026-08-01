@@ -14,6 +14,7 @@ export type {
   ResourceTemplateDescriptor,
   CompletionReference,
   CompletionResult,
+  RootDescriptor,
   ClockPort,
   LoggerPort,
 } from "./ports/index.js";
@@ -24,6 +25,8 @@ export {
   type PluginView,
   type StartPluginOptions,
   type CallToolOptions,
+  type WorkspaceSyncResult,
+  type PluginLaunchSpec,
 } from "./services/index.js";
 export type {
   StartPluginCommand,

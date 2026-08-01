@@ -58,6 +58,11 @@ export interface CompletionResult {
   readonly hasMore?: boolean;
 }
 
+export interface RootDescriptor {
+  readonly uri: string;
+  readonly name?: string;
+}
+
 export interface McpClientPort {
   connect(): Promise<void>;
   close(): Promise<void>;
@@ -81,6 +86,23 @@ export interface McpClientPort {
   ): Promise<unknown>;
   onClose?: (callback: () => void) => void;
   readonly pid?: number | null;
+  /**
+   * Update the roots this client reports to a server via `roots/list`. The
+   * client must advertise the `roots` capability (with `listChanged`) at
+   * handshake so roots-capable servers can query it.
+   */
+  setRoots?(roots: readonly RootDescriptor[]): Promise<void> | void;
+  /**
+   * Notify the server that the roots changed (`roots/list_changed`). Only
+   * meaningful after the server has called `roots/list` at least once.
+   */
+  notifyRootsChanged?(): Promise<void> | void;
+  /**
+   * True once the server has called `roots/list` at least once, i.e. the
+   * server is roots-capable and consumes workspace roots. Static servers
+   * (which only read env/args at spawn) never call it and stay false.
+   */
+  rootsRequested?(): boolean;
 }
 
 export interface McpClientFactoryPort {

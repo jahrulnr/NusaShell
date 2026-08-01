@@ -23,6 +23,12 @@ export { injectPrompts, applyVars, type PromptVars } from "./prompt-injector.js"
 export { detectRuntimeOs, type RuntimeOsProbe } from "./runtime-os.js";
 export { formatMemoryPrompt } from "./memory-prompt-formatter.js";
 export {
+  wrapToolArgs,
+  wrapTerminalArgs,
+  wrapFilesArgs,
+  type WorkspaceToolWrapResult,
+} from "./workspace-tool-wrap.js";
+export {
   BackgroundReviewScheduler,
   type BackgroundReviewSettings,
   type BackgroundReviewSchedulerDeps,

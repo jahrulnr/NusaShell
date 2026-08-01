@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.51] - 2026-08-01
+
+### Added
+
+- **Workspace MCP binding** — `conversation.workspace` is now the source of
+  truth for agent tool I/O, not just prompt context. It flows through
+  `RunAgentTurnHandler` → `AgentTurnContext.workspace` →
+  `McpAgentToolGateway.beginTurn` and reaches bundled MCP tools in three
+  locked layers (full design in
+  `docs/architecture/workspace-mcp-binding.md`):
+  - **Phase 1 — Gateway arg wrap:** the Terminal plugin's `cwd` defaults to
+    the workspace when omitted/relative, and the Files plugin's relative
+    `path`/`source`/`destination` arguments are rewritten to absolute paths
+    under the workspace. Absolute paths and `/` are preserved; containment is
+    still enforced by each plugin server. Third-party plugins are passed
+    through unchanged.
+  - **Phase 2 — MCP Roots:** the shell is now an MCP client that advertises
+    the `roots` capability with `listChanged`. `StdioMcpClient` answers
+    `roots/list` with the workspace root and sends `roots/list_changed` on
+    change. The bundled Files server calls `roots/list` on connect and
+    re-fetches on `roots/list_changed`, updating its in-process root via
+    `FileService.setRoot` — no process restart.
+  - **Phase 3 — Static-server respawn + enable overrides:** `mcp_enable`
+    accepts optional `args`/`env` overrides (command is immutable); a
+    different launchSpec while running triggers a stop+start respawn. Static
+    servers get `NUSASHELL_WORKSPACE` at spawn. `mcp_list` now enriches
+    plugins with a redacted `launchSpec` (command, args, env keys — values
+    redacted, roots capability flag).
+- `docs/RISK.md` — residual risk register (agent MCP launch overrides /
+  `npx` argument swap, advisory roots, workspace binding scope).
+- `docs/architecture/workspace-mcp-binding.md` — full ADR for the wrap →
+  Roots → respawn binding order and the rejected-for-MVP alternatives.
+- Files plugin: `NUSASHELL_WORKSPACE` env fallback (after
+  `NUSASHELL_FILES_ROOT`) and `FileService.setRoot` for in-process root
+  updates from MCP Roots.
+
+### Changed
+
+- `AgentTurnContext` now carries an optional `workspace` field; the gateway
+  captures it per turn and syncs it to roots-capable plugins before granted
+  tool calls.
+- `McpClientPort` adds optional `setRoots`, `notifyRootsChanged`, and
+  `rootsRequested` members; `PluginRuntimeManager` adds `syncWorkspace` and
+  `getLaunchSpec`; `StartPluginOptions` carries optional `args`/`env`/
+  `workspace` overrides.
+- `mcp-capability-policy.md` moves Roots from "deferred" to "implemented
+  now" with the interoperability-not-security caveat.
+- Developer and MCP-tools prompts now describe the workspace as bound to
+  bundled tools (was: "prompt context only, pass absolute paths yourself").
+
 ## [0.0.50] - 2026-08-01
 
 ### Fixed

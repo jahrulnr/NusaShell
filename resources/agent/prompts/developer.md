@@ -8,7 +8,7 @@
 
 `{{runtime_os}}` is authoritative for this host (examples: `linux (ubuntu)`, `docker (debian)`, `windows`, `macos`). Do not assume Windows, macOS, or a specific distro unless it matches that value. Prefer shell/path conventions and package managers that fit the reported runtime.
 
-The workspace above is prompt context only. It is not injected into MCP tool arguments, environment variables, or process working directories. When a tool needs a filesystem path or `cwd`, pass an explicit absolute path yourself (often the workspace path when relevant); never assume the shell fills it in for you.
+The workspace above is the source of truth for agent tool I/O. The shell binds it to bundled path/cwd-shaped tools automatically: the Terminal plugin runs commands with `cwd` defaulting to the workspace when you omit it, and the Files plugin resolves relative `path` arguments against the workspace. You can still pass an explicit absolute path or `cwd` to target somewhere else. For third-party MCP plugins that do not consume workspace roots, pass an absolute path explicitly — the shell does not mutate their arguments.
 
 ## Tool availability
 

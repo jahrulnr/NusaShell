@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  RootsListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { loadRootFromEnvironment } from "./config.js";
 import { safeFilesError } from "./errors.js";
@@ -17,6 +18,24 @@ async function main() {
     { name: "nusashell-files", version: "0.1.0" },
     { capabilities: { tools: {} } },
   );
+
+  // MCP Roots: the shell client advertises roots and notifies on change.
+  // Fetch the workspace root on connect and re-fetch on roots/list_changed,
+  // updating the in-process root without a process restart (Phase 2).
+  async function refreshRoots() {
+    try {
+      const result = await server.listRoots();
+      const fileRoot = result.roots.find((r) => r.uri.startsWith("file://"));
+      if (fileRoot) {
+        const fsPath = fileRoot.uri.replace(/^file:\/\//, "");
+        await service.setRoot(fsPath);
+        process.stderr.write(`[nusashell-files] root=${service.root} (via roots)\n`);
+      }
+    } catch (error) {
+      // Client does not support roots, or request failed — keep the env root.
+      process.stderr.write(`[nusashell-files] roots refresh skipped: ${safeFilesError(error)}\n`);
+    }
+  }
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: FILES_TOOLS,
@@ -58,6 +77,11 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   process.stderr.write(`[nusashell-files] root=${root}\n`);
+
+  server.setNotificationHandler(RootsListChangedNotificationSchema, async () => {
+    await refreshRoots();
+  });
+  await refreshRoots();
 }
 
 void main().catch((error) => {

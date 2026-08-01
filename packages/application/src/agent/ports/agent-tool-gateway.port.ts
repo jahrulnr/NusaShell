@@ -2,6 +2,13 @@ import type { AgentToolDefinition } from "./agent-provider.port.js";
 
 export interface AgentTurnContext {
   readonly interactive?: boolean;
+  /**
+   * Conversation workspace, the source of truth for agent tool I/O. When set,
+   * the gateway injects it into bundled path/cwd-shaped tool arguments and
+   * syncs it to roots-capable MCP servers (Phase 2) / respawns static ones
+   * (Phase 3). Prompt-only injection is the legacy fallback.
+   */
+  readonly workspace?: string;
 }
 
 export interface AgentToolGateway {

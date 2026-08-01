@@ -93,6 +93,7 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
     this.onTurnStarted?.(traceId);
     this.toolGateway.beginTurn?.(traceId, {
       ...(command.interactive !== undefined ? { interactive: command.interactive } : {}),
+      ...(command.workspace ? { workspace: command.workspace } : {}),
     });
     const messages = command.resume
       ? command.messages

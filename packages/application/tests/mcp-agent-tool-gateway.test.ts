@@ -628,4 +628,129 @@ describe("McpAgentToolGateway", () => {
       gateway.endTurn("turn-unreg");
     });
   });
+
+  describe("workspace binding", () => {
+    const WS = "/tmp/proj";
+
+    function makeRuntime(opts: {
+      tools?: Array<{ name: string; description?: string; inputSchema?: unknown }>;
+      syncWorkspace?: (pluginId: unknown, workspace: string) => Promise<unknown>;
+      getLaunchSpec?: (pluginId: unknown) => Promise<unknown>;
+      startPlugin?: (pluginId: unknown, options?: unknown) => Promise<unknown>;
+    } = {}) {
+      const calls: Array<{ pluginId: string; toolName: string; args: unknown }> = [];
+      const syncs: Array<{ pluginId: string; workspace: string }> = [];
+      return {
+        calls,
+        syncs,
+        runtime: {
+          listPlugins: async () => [{ pluginId: "nusashell.terminal", state: "running" }],
+          listTools: async () => opts.tools ?? [
+            { name: "terminal_exec", description: "Run command", inputSchema: { type: "object" } },
+            { name: "files_read", description: "Read file", inputSchema: { type: "object" } },
+          ],
+          startPlugin: async (pluginId: unknown, options?: unknown) => {
+            await opts.startPlugin?.(pluginId, options);
+            return { pluginId: "nusashell.terminal", state: "running" };
+          },
+          stopPlugin: async () => ({ pluginId: "nusashell.terminal", state: "idle" }),
+          callTool: async (pluginId: unknown, options: { toolName: string; args: unknown }) => {
+            calls.push({ pluginId: pluginId as string, toolName: options.toolName, args: options.args });
+            return { ok: true };
+          },
+          ...(opts.syncWorkspace ? { syncWorkspace: async (pluginId: unknown, workspace: string) => { syncs.push({ pluginId: pluginId as string, workspace }); return opts.syncWorkspace!(pluginId, workspace); } } : {}),
+          ...(opts.getLaunchSpec ? { getLaunchSpec: opts.getLaunchSpec } : {}),
+        },
+      };
+    }
+
+    it("wraps Terminal cwd with the turn workspace before calling the tool", async () => {
+      const { runtime, calls } = makeRuntime();
+      const gateway = new McpAgentToolGateway(runtime as never);
+      gateway.beginTurn("turn-ws", { workspace: WS });
+      const grant = await gateway.execute("tool_schemas", { pluginId: "nusashell.terminal", toolNames: ["terminal_exec"] }, "g", "turn-ws") as { granted: Array<{ name: string }> };
+      await gateway.execute(grant.granted[0]!.name, { command: "pwd" }, "req", "turn-ws");
+      expect(calls[0]!.args).toEqual({ command: "pwd", cwd: WS });
+      gateway.endTurn("turn-ws");
+    });
+
+    it("wraps Files relative paths with the turn workspace", async () => {
+      const { runtime, calls } = makeRuntime();
+      const gateway = new McpAgentToolGateway(runtime as never);
+      gateway.beginTurn("turn-ws", { workspace: WS });
+      const grant = await gateway.execute("tool_schemas", { pluginId: "nusashell.files", toolNames: ["files_read"] }, "g", "turn-ws") as { granted: Array<{ name: string }> };
+      await gateway.execute(grant.granted[0]!.name, { path: "src/foo.ts" }, "req", "turn-ws");
+      const path = require("node:path").posix.join(WS, "src/foo.ts");
+      expect(calls[0]!.args).toEqual({ path });
+      gateway.endTurn("turn-ws");
+    });
+
+    it("syncs workspace to the runtime manager before a granted call", async () => {
+      const { runtime, syncs } = makeRuntime({ syncWorkspace: async () => ({ mode: "roots", respawned: false }) });
+      const gateway = new McpAgentToolGateway(runtime as never);
+      gateway.beginTurn("turn-sync", { workspace: WS });
+      const grant = await gateway.execute("tool_schemas", { pluginId: "nusashell.files", toolNames: ["files_read"] }, "g", "turn-sync") as { granted: Array<{ name: string }> };
+      await gateway.execute(grant.granted[0]!.name, { path: "x" }, "req", "turn-sync");
+      expect(syncs).toEqual([{ pluginId: "nusashell.files", workspace: WS }]);
+      gateway.endTurn("turn-sync");
+    });
+
+    it("does not sync or wrap when no workspace is set", async () => {
+      const { runtime, calls, syncs } = makeRuntime({ syncWorkspace: async () => ({ mode: "roots", respawned: false }) });
+      const gateway = new McpAgentToolGateway(runtime as never);
+      gateway.beginTurn("turn-nows");
+      const grant = await gateway.execute("tool_schemas", { pluginId: "nusashell.terminal", toolNames: ["terminal_exec"] }, "g", "turn-nows") as { granted: Array<{ name: string }> };
+      await gateway.execute(grant.granted[0]!.name, { command: "pwd" }, "req", "turn-nows");
+      expect(calls[0]!.args).toEqual({ command: "pwd" });
+      expect(syncs).toEqual([]);
+      gateway.endTurn("turn-nows");
+    });
+
+    it("mcp_enable forwards args/env overrides and the turn workspace", async () => {
+      const starts: Array<{ pluginId: unknown; options: unknown }> = [];
+      const { runtime } = makeRuntime({
+        startPlugin: async (pluginId: unknown, options: unknown) => { starts.push({ pluginId, options }); },
+      });
+      const gateway = new McpAgentToolGateway(runtime as never);
+      gateway.beginTurn("turn-enable", { workspace: WS });
+      await gateway.execute("mcp_enable", { pluginId: "nusashell.files", args: ["mcp/server.cjs", "--root", "/tmp/proj"], env: { NUSASHELL_FILES_ROOT: "/tmp/proj" } }, "call", "turn-enable");
+      expect(starts[0]!.options).toEqual({
+        args: ["mcp/server.cjs", "--root", "/tmp/proj"],
+        env: { NUSASHELL_FILES_ROOT: "/tmp/proj" },
+        workspace: WS,
+      });
+      gateway.endTurn("turn-enable");
+    });
+
+    it("mcp_enable passes undefined options when no overrides and no workspace", async () => {
+      const starts: Array<{ pluginId: unknown; options: unknown }> = [];
+      const { runtime } = makeRuntime({
+        startPlugin: async (pluginId: unknown, options: unknown) => { starts.push({ pluginId, options }); },
+      });
+      const gateway = new McpAgentToolGateway(runtime as never);
+      gateway.beginTurn("turn-enable-bare");
+      await gateway.execute("mcp_enable", { pluginId: "nusashell.files" }, "call", "turn-enable-bare");
+      expect(starts[0]!.options).toBeUndefined();
+      gateway.endTurn("turn-enable-bare");
+    });
+
+    it("mcp_list enriches plugins with launchSpec (redacted env keys)", async () => {
+      const { runtime } = makeRuntime({
+        getLaunchSpec: async () => ({
+          pluginId: "nusashell.terminal",
+          transport: "stdio",
+          command: "node",
+          args: ["mcp/server.cjs"],
+          envKeys: ["NUSASHELL_FILES_ROOT", "SECRET_TOKEN"],
+          rootsCapable: false,
+        }),
+      });
+      const gateway = new McpAgentToolGateway(runtime as never);
+      gateway.beginTurn("turn-list");
+      const list = await gateway.execute("mcp_list", {}, "call", "turn-list") as Array<{ pluginId: string; launchSpec: { envKeys: string[]; command: string } }>;
+      expect(list[0]!.launchSpec.envKeys).toEqual(["NUSASHELL_FILES_ROOT", "SECRET_TOKEN"]);
+      expect(list[0]!.launchSpec.command).toBe("node");
+      gateway.endTurn("turn-list");
+    });
+  });
 });

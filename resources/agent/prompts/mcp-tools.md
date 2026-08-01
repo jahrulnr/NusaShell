@@ -42,10 +42,12 @@ You start every turn with a small set of shell-owned meta-tools. You do not rece
 
 ### Paths and workspace
 
-- The conversation workspace shown in the developer context is **not** applied to MCP calls. The shell does not merge it into tool arguments, environment variables, or plugin working directories.
-- When a tool's schema asks for a path or `cwd`, supply an **absolute path** explicitly (use the workspace path when that is what you mean). Never assume the workspace picker value is forwarded for you.
-- Each plugin may define its own default root or `cwd` (for example, the Files plugin is relative to its own root, and the Terminal plugin defaults to the user's home directory). Read `tool_schema` descriptions and pass the path you want.
-- **Files plugin specifically:** its `path` arguments are **relative to the Files plugin root** (the user home directory by default, or `NUSASHELL_FILES_ROOT`). `/` or empty means that root — **not** the filesystem root (`/` on the OS). To touch OS-absolute locations outside that root, use the Terminal plugin with an absolute `cwd` instead.
+- The conversation workspace is bound to bundled tools automatically:
+  - **Terminal:** when you omit `cwd` (or pass a relative one), the command runs in the workspace. Pass an absolute `cwd` to run elsewhere.
+  - **Files:** relative `path`/`source`/`destination` arguments are resolved against the workspace. Absolute paths, `/`, and empty are preserved (still subject to the Files root containment guard).
+- For third-party MCP plugins that do not consume workspace roots, pass an **absolute path** explicitly. The shell does not rewrite their arguments.
+- Each plugin may define its own default root or `cwd`. Read `tool_schema` descriptions and pass the path you want when in doubt.
+- **Files plugin specifically:** its `path` arguments are relative to the Files plugin root. When a workspace is bound and you pass a relative path, the shell rewrites it to an absolute path under the workspace (which must be within the Files root, or the call is rejected — use the Terminal plugin with an absolute `cwd` for locations outside the Files root). `/` or empty means the Files root — **not** the OS filesystem root.
 
 ## Documentation tools
 

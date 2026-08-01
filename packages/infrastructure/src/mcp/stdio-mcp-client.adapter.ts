@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type {
   CompletionReference,
   CompletionResult,
@@ -9,6 +10,7 @@ import type {
   ResourceDescriptor,
   ResourceReadResult,
   ResourceTemplateDescriptor,
+  RootDescriptor,
   ToolDescriptor,
 } from "@nusashell/application";
 import type { Logger } from "pino";
@@ -19,6 +21,8 @@ export class StdioMcpClient implements McpClientPort {
   private client: Client | null = null;
   private transport: StdioClientTransport | null = null;
   private closeCallback: (() => void) | null = null;
+  private currentRoots: readonly RootDescriptor[] = [];
+  private rootsRequestedFlag = false;
 
   constructor(
     private readonly command: string,
@@ -62,9 +66,19 @@ export class StdioMcpClient implements McpClientPort {
 
     this.client = new Client(
       { name: "nusashell-backend", version: "0.0.2" },
-      { capabilities: {} },
+      { capabilities: { roots: { listChanged: true } } },
     );
     registerMcpLogging(this.client, this.logger, this.command);
+
+    this.client.setRequestHandler(ListRootsRequestSchema, async () => {
+      this.rootsRequestedFlag = true;
+      return {
+        roots: this.currentRoots.map((root) => ({
+          uri: root.uri,
+          ...(root.name !== undefined ? { name: root.name } : {}),
+        })),
+      };
+    });
 
     // Race connect against transport close + timeout to avoid hanging
     // when the MCP process exits immediately (e.g. broken deps)
@@ -201,6 +215,19 @@ export class StdioMcpClient implements McpClientPort {
       ...(typeof result.completion.total === "number" ? { total: result.completion.total } : {}),
       ...(typeof result.completion.hasMore === "boolean" ? { hasMore: result.completion.hasMore } : {}),
     };
+  }
+
+  setRoots(roots: readonly RootDescriptor[]): void {
+    this.currentRoots = roots;
+  }
+
+  async notifyRootsChanged(): Promise<void> {
+    if (!this.client) return;
+    await this.client.sendRootsListChanged();
+  }
+
+  rootsRequested(): boolean {
+    return this.rootsRequestedFlag;
   }
 
   private requireClient(): Client {

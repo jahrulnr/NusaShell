@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { loadRootFromEnvironment, resolvePath } from "../mcp/config.js";
+import { loadRootFromEnvironment, resolvePath, validateRoot } from "../mcp/config.js";
 
 let tmpDir;
 
@@ -37,6 +37,36 @@ describe("loadRootFromEnvironment", () => {
     await expect(
       loadRootFromEnvironment({ NUSASHELL_FILES_ROOT: filePath }),
     ).rejects.toThrow(/not a directory/);
+  });
+
+  it("falls back to NUSASHELL_WORKSPACE when NUSASHELL_FILES_ROOT is unset", async () => {
+    const root = await loadRootFromEnvironment({ NUSASHELL_WORKSPACE: tmpDir });
+    expect(root).toBe(path.resolve(tmpDir));
+  });
+
+  it("prefers NUSASHELL_FILES_ROOT over NUSASHELL_WORKSPACE", async () => {
+    const root = await loadRootFromEnvironment({
+      NUSASHELL_FILES_ROOT: tmpDir,
+      NUSASHELL_WORKSPACE: "/nonexistent/should-not-be-used",
+    });
+    expect(root).toBe(path.resolve(tmpDir));
+  });
+});
+
+describe("validateRoot", () => {
+  it("resolves and validates an existing directory", async () => {
+    const root = await validateRoot(tmpDir);
+    expect(root).toBe(path.resolve(tmpDir));
+  });
+
+  it("throws when the path does not exist", async () => {
+    await expect(validateRoot("/nonexistent/path/xyz")).rejects.toThrow(/does not exist/);
+  });
+
+  it("throws when the path is not a directory", async () => {
+    const filePath = path.join(tmpDir, "file.txt");
+    await fs.writeFile(filePath, "x");
+    await expect(validateRoot(filePath)).rejects.toThrow(/not a directory/);
   });
 });
 

@@ -24772,20 +24772,24 @@ var import_node_os = __toESM(require("node:os"), 1);
 var import_node_path = __toESM(require("node:path"), 1);
 var import_promises = __toESM(require("node:fs/promises"), 1);
 async function loadRootFromEnvironment(environment = process.env) {
-  const raw = environment.NUSASHELL_FILES_ROOT;
+  const raw = environment.NUSASHELL_FILES_ROOT || environment.NUSASHELL_WORKSPACE;
   const root = raw ? import_node_path.default.resolve(raw) : import_node_os.default.homedir();
+  return validateRoot(root);
+}
+async function validateRoot(root) {
+  const resolved = import_node_path.default.resolve(root);
   try {
-    const stat = await import_promises.default.stat(root);
+    const stat = await import_promises.default.stat(resolved);
     if (!stat.isDirectory()) {
-      throw new Error(`Files root is not a directory: ${root}`);
+      throw new Error(`Files root is not a directory: ${resolved}`);
     }
   } catch (error51) {
-    if (error51.code === "ENOENT") {
-      throw new Error(`Files root does not exist: ${root}`);
+    if (error51 && error51.code === "ENOENT") {
+      throw new Error(`Files root does not exist: ${resolved}`);
     }
     throw error51;
   }
-  return root;
+  return resolved;
 }
 function resolvePath(root, input) {
   if (!input || input === "/" || input === "") return root;
@@ -24904,6 +24908,16 @@ var FileService = class {
    */
   constructor(root) {
     this.root = root;
+  }
+  /**
+   * Update the root directory in-process (MCP Roots / set_root bridge).
+   * The new root must exist and be a directory; containment is re-established
+   * against it for all subsequent operations.
+   * @param {string} newRoot
+   */
+  async setRoot(newRoot) {
+    this.root = await validateRoot(newRoot);
+    return this.root;
   }
   /**
    * Wraps fs errors with contextual hints about the plugin root.
@@ -25382,6 +25396,21 @@ async function main() {
     { name: "nusashell-files", version: "0.1.0" },
     { capabilities: { tools: {} } }
   );
+  async function refreshRoots() {
+    try {
+      const result = await server.listRoots();
+      const fileRoot = result.roots.find((r) => r.uri.startsWith("file://"));
+      if (fileRoot) {
+        const fsPath = fileRoot.uri.replace(/^file:\/\//, "");
+        await service.setRoot(fsPath);
+        process.stderr.write(`[nusashell-files] root=${service.root} (via roots)
+`);
+      }
+    } catch (error51) {
+      process.stderr.write(`[nusashell-files] roots refresh skipped: ${safeFilesError(error51)}
+`);
+    }
+  }
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: FILES_TOOLS
   }));
@@ -25420,6 +25449,10 @@ async function main() {
   await server.connect(transport);
   process.stderr.write(`[nusashell-files] root=${root}
 `);
+  server.setNotificationHandler(RootsListChangedNotificationSchema, async () => {
+    await refreshRoots();
+  });
+  await refreshRoots();
 }
 void main().catch((error51) => {
   process.stderr.write(`[nusashell-files] ${safeFilesError(error51)}

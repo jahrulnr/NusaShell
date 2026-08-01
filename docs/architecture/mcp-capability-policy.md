@@ -13,6 +13,7 @@ operators and agents a single capability vocabulary.
 | Resources | `resources/list`, `resources/templates/list`, `resources/read` | Expose as bounded shell-managed context through `mcp_context`; binary content is not injected into the model. |
 | Completion | `completion/complete` | Expose only after a prompt or resource template is discovered, with bounded completion results. |
 | Logging / progress | protocol notifications | Forward sanitized diagnostics to the shell log UI; progress is presentation only until task support is adopted. |
+| Roots | `roots/list`, `roots/list_changed` | Client advertises roots + `listChanged`; `PluginRuntimeManager.syncWorkspace` updates the workspace root and notifies. The bundled Files server consumes roots in-process. Roots are interoperability, not security (see `docs/RISK.md`). Full design in `docs/architecture/workspace-mcp-binding.md`. |
 
 The control model is intentional: prompts are user-controlled, resources are
 application-controlled, and tools are model-controlled. The shell still brokers
@@ -26,7 +27,6 @@ every request and does not let plugin UIs or providers connect directly to MCP.
 | Elicitation, form mode | Stable capability but not enabled by NusaShell yet | Requires clear server attribution, review/edit/decline UI, and input handling policy. |
 | Elicitation, URL mode | Recently introduced and still evolving | Requires consent, URL/domain presentation, and safe external-navigation handling. |
 | Sampling | Stable capability but not enabled by NusaShell yet | A server can request model generation and tools; it needs a human approval and cost-control design. |
-| Roots | Under active protocol evolution/deprecation discussion | Do not establish a public NusaShell contract around it yet. |
 | MCP Apps / UI extensions | Extension ecosystem, not a core MVP primitive | Evaluate after the broker/lifecycle and plugin UI contract are proven. |
 
 “Skills” are not an MCP core primitive. NusaShell may later support its own

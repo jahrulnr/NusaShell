@@ -5,7 +5,11 @@ import fs from "node:fs/promises";
 /**
  * Resolves the root directory for file operations.
  *
- * Source: NUSASHELL_FILES_ROOT env var, or user home directory as fallback.
+ * Source precedence: NUSASHELL_FILES_ROOT → NUSASHELL_WORKSPACE → user home.
+ * The workspace fallback binds the Files root to the conversation workspace
+ * when the shell spawns the plugin with NUSASHELL_WORKSPACE (Phase 3 respawn
+ * path). Roots (Phase 2) update the root in-process after spawn.
+ *
  * The root must exist and be a directory.
  *
  * All file operations are sandboxed to this root. Paths that escape
@@ -14,22 +18,29 @@ import fs from "node:fs/promises";
  * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} environment
  */
 export async function loadRootFromEnvironment(environment = process.env) {
-  const raw = environment.NUSASHELL_FILES_ROOT;
+  const raw = environment.NUSASHELL_FILES_ROOT || environment.NUSASHELL_WORKSPACE;
   const root = raw ? path.resolve(raw) : os.homedir();
+  return validateRoot(root);
+}
 
+/**
+ * Validate that a path exists and is a directory, returning the resolved root.
+ * @param {string} root
+ */
+export async function validateRoot(root) {
+  const resolved = path.resolve(root);
   try {
-    const stat = await fs.stat(root);
+    const stat = await fs.stat(resolved);
     if (!stat.isDirectory()) {
-      throw new Error(`Files root is not a directory: ${root}`);
+      throw new Error(`Files root is not a directory: ${resolved}`);
     }
   } catch (error) {
-    if (error.code === "ENOENT") {
-      throw new Error(`Files root does not exist: ${root}`);
+    if (error && error.code === "ENOENT") {
+      throw new Error(`Files root does not exist: ${resolved}`);
     }
     throw error;
   }
-
-  return root;
+  return resolved;
 }
 
 /**

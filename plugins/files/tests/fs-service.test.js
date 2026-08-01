@@ -396,3 +396,28 @@ describe("FileService.copyFile", () => {
     );
   });
 });
+
+describe("FileService.setRoot", () => {
+  it("updates the in-process root and subsequent operations use it", async () => {
+    const newRoot = await fs.mkdtemp(path.join(os.tmpdir(), "files-setroot-"));
+    try {
+      await fs.writeFile(path.join(newRoot, "hello.txt"), "hi");
+      await service.setRoot(newRoot);
+      expect(service.root).toBe(path.resolve(newRoot));
+      const result = await service.readFile("hello.txt");
+      expect(result.content).toBe("hi");
+    } finally {
+      await fs.rm(newRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a non-existent root", async () => {
+    await expect(service.setRoot("/nonexistent/path/xyz")).rejects.toThrow(/does not exist/);
+  });
+
+  it("rejects a root that is not a directory", async () => {
+    const filePath = path.join(tmpDir, "not-a-dir.txt");
+    await fs.writeFile(filePath, "x");
+    await expect(service.setRoot(filePath)).rejects.toThrow(/not a directory/);
+  });
+});
