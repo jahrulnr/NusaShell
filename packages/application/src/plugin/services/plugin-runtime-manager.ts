@@ -1,5 +1,4 @@
 import {
-  DomainError,
   type DomainEvent,
   Plugin,
   PluginCrashedEvent,
@@ -36,49 +35,17 @@ import type { PluginRepositoryPort } from "../ports/plugin-repository.port.js";
 import { EventDispatcher } from "../../events/event-dispatcher.js";
 import { PluginOperationQueue } from "./plugin-operation-queue.js";
 import { resolveIcon } from "./icon-resolver.js";
-
-interface PendingToolCall {
-  readonly toolCall: ToolCall;
-  readonly resolve: (value: unknown) => void;
-  readonly reject: (error: unknown) => void;
-  readonly timer: ReturnType<typeof setTimeout> | undefined;
-}
-
-interface RuntimeEntry {
-  readonly pluginId: PluginId;
-  name: string;
-  version: string;
-  icon: string;
-  installPath: string;
-  enabled: boolean;
-  autostart: boolean;
-  ui: {
-    readonly entry: string;
-    readonly window?: {
-      readonly mode?: "panel" | "fullscreen" | "widget";
-      readonly defaultSize?: { readonly width: number; readonly height: number };
-      readonly resizable?: boolean;
-    };
-  };
-  keepAliveOnClose: boolean;
-  runtime: PluginRuntime;
-  startPromise: Promise<void> | null;
-  readonly queue: PluginOperationQueue;
-  process: ProcessHandle | null;
-  mcpClient: McpClientPort | null;
-  readonly pendingCalls: Map<string, PendingToolCall>;
-  restartCount: number;
-  /** Last workspace bound to this plugin (for roots sync / spawn env). */
-  workspace: string | undefined;
-  /** Last workspace reported to the client via roots (to detect change). */
-  lastRootsWorkspace: string | undefined;
-  /** Agent-supplied launch overrides (Phase 3). command is always immutable. */
-  launchArgs: readonly string[] | undefined;
-  launchEnv: Readonly<Record<string, string>> | undefined;
-  /** Launch spec the currently-running process was started with (for respawn detection). */
-  runningArgs: readonly string[] | undefined;
-  runningEnv: Readonly<Record<string, string>> | undefined;
-}
+import { ToolCallTracker } from "./tool-call-tracker.js";
+import { McpSessionManager } from "./mcp-session-manager.js";
+import { PluginLifecycleCoordinator } from "./plugin-lifecycle-coordinator.js";
+import type {
+  RuntimeEntry,
+  StartPluginOptions,
+  WorkspaceSyncResult,
+  PluginLaunchSpec,
+  CallToolOptions,
+  PluginView,
+} from "./plugin-runtime-types.js";
 
 export interface PluginRuntimeManagerDeps {
   readonly pluginRepository: PluginRepositoryPort;
@@ -95,60 +62,37 @@ export interface PluginRuntimeManagerDeps {
   readonly toolCallTimeoutMs?: number;
 }
 
-export interface StartPluginOptions {
-  /**
-   * Agent-supplied launch overrides (Phase 3). `command` is always immutable;
-   * only `args` and `env` may be patched. A different launchSpec while the
-   * plugin is running triggers a stop+start respawn.
-   */
-  readonly args?: readonly string[];
-  readonly env?: Readonly<Record<string, string>>;
-  /** Conversation workspace to bind at spawn (sets NUSASHELL_WORKSPACE env). */
-  readonly workspace?: string;
-}
+export type {
+  StartPluginOptions,
+  WorkspaceSyncResult,
+  PluginLaunchSpec,
+  CallToolOptions,
+  PluginView,
+} from "./plugin-runtime-types.js";
 
-export interface WorkspaceSyncResult {
-  readonly mode: "roots" | "static" | "idle";
-  readonly respawned: boolean;
-}
-
-export interface PluginLaunchSpec {
-  readonly pluginId: string;
-  readonly transport: string;
-  readonly command?: string;
-  readonly args: readonly string[];
-  /** Env keys only — values are redacted (secrets may live in env). */
-  readonly envKeys: readonly string[];
-  readonly workspace?: string;
-  readonly rootsCapable: boolean;
-}
-
-export interface CallToolOptions {
-  readonly requestId: string;
-  readonly toolName: string;
-  readonly args: Readonly<Record<string, unknown>>;
-  readonly timeoutMs?: number;
-}
-
-export interface PluginView {
-  readonly pluginId: string;
-  readonly name: string;
-  readonly version: string;
-  readonly icon: string;
-  readonly installPath: string;
-  readonly state: PluginRuntimeState;
-  readonly enabled: boolean;
-  readonly autostart: boolean;
-  readonly ui: RuntimeEntry["ui"];
-  readonly keepAliveOnClose: boolean;
-}
-
+/**
+ * Facade for plugin runtime management. Holds the single `runtimes` map
+ * (SoT) and delegates to three focused sub-modules:
+ *
+ * - `PluginLifecycleCoordinator` — start/stop/restart/crash/exit-watcher
+ * - `McpSessionManager` — MCP transport creation, workspace roots, discovery
+ * - `ToolCallTracker` — in-flight tool calls, timeouts, completion events
+ *
+ * The facade keeps the public API stable; callers (IPC, WS gateway, agent
+ * turn runner) see no change.
+ */
 export class PluginRuntimeManager {
   private readonly runtimes = new Map<string, RuntimeEntry>();
   private readonly deps: PluginRuntimeManagerDeps;
+  private readonly tracker: ToolCallTracker;
+  private readonly sessions: McpSessionManager;
+  private readonly lifecycle: PluginLifecycleCoordinator;
 
   constructor(deps: PluginRuntimeManagerDeps) {
     this.deps = deps;
+    this.tracker = new ToolCallTracker(deps);
+    this.sessions = new McpSessionManager(deps);
+    this.lifecycle = new PluginLifecycleCoordinator(deps, this.tracker, this.sessions);
   }
 
   async listPlugins(): Promise<readonly PluginView[]> {
@@ -182,12 +126,12 @@ export class PluginRuntimeManager {
       entry.launchEnv = options.env;
       if (options.workspace !== undefined) entry.workspace = options.workspace;
     }
-    return entry.queue.enqueue(async () => this.startLocked(entry));
+    return entry.queue.enqueue(async () => this.lifecycle.startLocked(entry));
   }
 
   async stopPlugin(pluginId: PluginId): Promise<PluginView> {
     const entry = await this.ensureEntry(pluginId);
-    return entry.queue.enqueue(async () => this.stopLocked(entry));
+    return entry.queue.enqueue(async () => this.lifecycle.stopLocked(entry));
   }
 
   async callTool(
@@ -195,24 +139,24 @@ export class PluginRuntimeManager {
     options: CallToolOptions,
   ): Promise<unknown> {
     const entry = await this.ensureEntry(pluginId);
-    return entry.queue.enqueue(async () => this.callToolLocked(entry, options));
+    return entry.queue.enqueue(async () => this.tracker.callToolLocked(entry, options));
   }
 
   async cancelTool(pluginId: PluginId, requestId: string): Promise<void> {
     const entry = await this.ensureEntry(pluginId);
     return entry.queue.enqueue(async () => {
-      this.cancelPendingCall(entry, requestId, "TOOL_CALL_CANCELLED", "Cancelled by client");
+      this.tracker.cancelPendingCall(entry, requestId, "TOOL_CALL_CANCELLED", "Cancelled by client");
     });
   }
 
   async listTools(pluginId: PluginId): Promise<readonly ToolDescriptor[]> {
     const entry = await this.ensureEntry(pluginId);
-    return entry.queue.enqueue(async () => this.requireRunningClient(entry).listTools());
+    return entry.queue.enqueue(async () => this.sessions.requireRunningClient(entry).listTools());
   }
 
   async listPrompts(pluginId: PluginId): Promise<readonly PromptDescriptor[]> {
     const entry = await this.ensureEntry(pluginId);
-    return entry.queue.enqueue(async () => this.requireRunningClient(entry).listPrompts());
+    return entry.queue.enqueue(async () => this.sessions.requireRunningClient(entry).listPrompts());
   }
 
   async getPrompt(
@@ -221,22 +165,22 @@ export class PluginRuntimeManager {
     args: Readonly<Record<string, string>>,
   ): Promise<PromptResult> {
     const entry = await this.ensureEntry(pluginId);
-    return entry.queue.enqueue(async () => this.requireRunningClient(entry).getPrompt(name, args));
+    return entry.queue.enqueue(async () => this.sessions.requireRunningClient(entry).getPrompt(name, args));
   }
 
   async listResources(pluginId: PluginId): Promise<readonly ResourceDescriptor[]> {
     const entry = await this.ensureEntry(pluginId);
-    return entry.queue.enqueue(async () => this.requireRunningClient(entry).listResources());
+    return entry.queue.enqueue(async () => this.sessions.requireRunningClient(entry).listResources());
   }
 
   async listResourceTemplates(pluginId: PluginId): Promise<readonly ResourceTemplateDescriptor[]> {
     const entry = await this.ensureEntry(pluginId);
-    return entry.queue.enqueue(async () => this.requireRunningClient(entry).listResourceTemplates());
+    return entry.queue.enqueue(async () => this.sessions.requireRunningClient(entry).listResourceTemplates());
   }
 
   async readResource(pluginId: PluginId, uri: string): Promise<ResourceReadResult> {
     const entry = await this.ensureEntry(pluginId);
-    return entry.queue.enqueue(async () => this.requireRunningClient(entry).readResource(uri));
+    return entry.queue.enqueue(async () => this.sessions.requireRunningClient(entry).readResource(uri));
   }
 
   async complete(
@@ -247,37 +191,24 @@ export class PluginRuntimeManager {
   ): Promise<CompletionResult> {
     const entry = await this.ensureEntry(pluginId);
     return entry.queue.enqueue(async () =>
-      this.requireRunningClient(entry).complete(reference, argument, context));
+      this.sessions.requireRunningClient(entry).complete(reference, argument, context));
   }
 
   async restartPlugin(pluginId: PluginId): Promise<PluginView> {
     const entry = await this.ensureEntry(pluginId);
     return entry.queue.enqueue(async () => {
       if (entry.runtime.state === "running" || entry.runtime.state === "starting") {
-        await this.stopLocked(entry);
+        await this.lifecycle.stopLocked(entry);
       }
-      return this.startLocked(entry);
+      return this.lifecycle.startLocked(entry);
     });
   }
 
-  /**
-   * Bind `conversation.workspace` to a running plugin. For roots-capable
-   * servers (those that call `roots/list`), the roots are updated in-process
-   * and `roots/list_changed` is sent — no restart. For static servers, the
-   * workspace is recorded and applied on the next spawn (via
-   * `NUSASHELL_WORKSPACE` env); no automatic respawn here so workspace-agnostic
-   * plugins (e.g. Terminal, whose `cwd` is per-call) are not needlessly
-   * restarted. Use `mcp_enable` with launch overrides to force a respawn.
-   */
   async syncWorkspace(pluginId: PluginId, workspace: string): Promise<WorkspaceSyncResult> {
     const entry = await this.ensureEntry(pluginId);
-    return entry.queue.enqueue(async () => this.syncWorkspaceLocked(entry, workspace));
+    return entry.queue.enqueue(async () => this.sessions.syncWorkspaceLocked(entry, workspace));
   }
 
-  /**
-   * Redacted launch spec for `mcp_list`: command, args, env keys (values
-   * redacted), bound workspace, and whether the server is roots-capable.
-   */
   async getLaunchSpec(pluginId: PluginId): Promise<PluginLaunchSpec | null> {
     const key = PluginId.toString(pluginId);
     const entry = this.runtimes.get(key);
@@ -311,7 +242,7 @@ export class PluginRuntimeManager {
         entry.ui = plugin.manifest.ui;
         entry.keepAliveOnClose = plugin.manifest.mcp.keepAliveOnClose;
       }
-      return this.view(entry);
+      return this.lifecycle.view(entry);
     }
     const plugin = await this.deps.pluginRepository.findById(pluginId);
     if (!plugin) return null;
@@ -333,7 +264,7 @@ export class PluginRuntimeManager {
     const entries = [...this.runtimes.values()];
     await Promise.allSettled(
       entries.map((entry) =>
-        entry.queue.enqueue(async () => this.stopLocked(entry)),
+        entry.queue.enqueue(async () => this.lifecycle.stopLocked(entry)),
       ),
     );
   }
@@ -342,7 +273,7 @@ export class PluginRuntimeManager {
     const key = PluginId.toString(pluginId);
     const entry = this.runtimes.get(key);
     if (entry) {
-      await entry.queue.enqueue(async () => this.stopLocked(entry));
+      await entry.queue.enqueue(async () => this.lifecycle.stopLocked(entry));
       this.runtimes.delete(key);
     }
   }
@@ -394,419 +325,6 @@ export class PluginRuntimeManager {
     return entry;
   }
 
-  private async startLocked(entry: RuntimeEntry): Promise<PluginView> {
-    if (entry.runtime.state === "running" || entry.runtime.state === "starting") {
-      // Phase 3: a different launchSpec while running triggers a respawn.
-      if (this.launchSpecChanged(entry)) {
-        this.deps.logger?.info("Respawning plugin %s for launchSpec override", PluginId.toString(entry.pluginId));
-        await this.stopLocked(entry);
-      } else {
-        if (entry.startPromise) {
-          await entry.startPromise;
-        }
-        return this.view(entry);
-      }
-    }
-
-    const plugin = await this.loadPlugin(entry.pluginId);
-    entry.name = plugin.manifest.name;
-    entry.version = plugin.manifest.version.toString();
-    entry.icon = resolveIcon(plugin.manifest.icon, plugin.installPath);
-    entry.installPath = plugin.installPath;
-    entry.enabled = plugin.enabled;
-    entry.autostart = plugin.manifest.mcp.autostart;
-    entry.ui = plugin.manifest.ui;
-    entry.keepAliveOnClose = plugin.manifest.mcp.keepAliveOnClose;
-    const canStart = PluginLifecyclePolicy.canStart(plugin, entry.runtime);
-    if (!canStart.ok) {
-      throw this.mapDomainError(canStart.error, entry.pluginId);
-    }
-
-    const transition = entry.runtime.transitionTo("starting", this.deps.clock.now());
-    if (!transition.ok) {
-      throw this.mapDomainError(transition.error, entry.pluginId);
-    }
-    entry.runtime = transition.value;
-    await this.publishPulled(entry.runtime);
-
-    entry.startPromise = this.doStart(entry, plugin);
-    try {
-      await entry.startPromise;
-    } finally {
-      entry.startPromise = null;
-    }
-    return this.view(entry);
-  }
-
-  private launchSpecChanged(entry: RuntimeEntry): boolean {
-    if (entry.launchArgs !== undefined && !arrayEquals(entry.launchArgs, entry.runningArgs ?? [])) return true;
-    if (entry.launchEnv !== undefined && !recordEquals(entry.launchEnv, entry.runningEnv ?? {})) return true;
-    return false;
-  }
-
-  private async syncWorkspaceLocked(entry: RuntimeEntry, workspace: string): Promise<WorkspaceSyncResult> {
-    const previous = entry.workspace;
-    entry.workspace = workspace;
-    if (entry.runtime.state !== "running" || !entry.mcpClient) {
-      return { mode: "idle", respawned: false };
-    }
-    const client = entry.mcpClient;
-    if (client.rootsRequested?.()) {
-      await this.applyRoots(entry, workspace);
-      if (entry.lastRootsWorkspace !== workspace) {
-        entry.lastRootsWorkspace = workspace;
-        try {
-          await client.notifyRootsChanged?.();
-        } catch (error) {
-          this.deps.logger?.warn("roots/list_changed notify failed for %s: %s", PluginId.toString(entry.pluginId), error instanceof Error ? error.message : String(error));
-        }
-      }
-      return { mode: "roots", respawned: false };
-    }
-    // Static server: workspace applies on next spawn. No automatic respawn so
-    // workspace-agnostic plugins (Terminal) are not needlessly restarted.
-    void previous;
-    return { mode: "static", respawned: false };
-  }
-
-  private async applyRoots(entry: RuntimeEntry, workspace: string): Promise<void> {
-    const client = entry.mcpClient;
-    if (!client?.setRoots) return;
-    const roots: RootDescriptor[] = [{ uri: `file://${workspace}`, name: "workspace" }];
-    client.setRoots(roots);
-  }
-
-  private async doStart(entry: RuntimeEntry, plugin: Plugin): Promise<void> {
-    try {
-      const manifest = plugin.manifest;
-      if (manifest.mcp.transport === "stdio") {
-        const command = manifest.mcp.command;
-        if (!command) {
-          throw new ApplicationError(
-            "PLUGIN_START_FAILED",
-            `Plugin ${PluginId.toString(entry.pluginId)} stdio transport missing command`,
-          );
-        }
-
-        const runtimeEnvironment = await this.deps.resolveRuntimeEnvironment?.(
-          PluginId.toString(entry.pluginId),
-        ) ?? {};
-        const environment = {
-          ...manifest.mcp.env,
-          ...runtimeEnvironment,
-          ...(entry.workspace ? { NUSASHELL_WORKSPACE: entry.workspace } : {}),
-          ...(entry.launchEnv ?? {}),
-        };
-        const args = entry.launchArgs ?? manifest.mcp.args;
-        const mcpClient = this.deps.mcpClientFactory.createForStdio(
-          command,
-          args,
-          environment,
-          plugin.installPath,
-        );
-        this.deps.logger?.debug("Starting MCP stdio process: command=%s args=%j cwd=%s workspace=%s", command, args, plugin.installPath, entry.workspace ?? "(none)");
-        await mcpClient.connect();
-        this.deps.logger?.info("MCP client connected (stdio) for plugin %s", PluginId.toString(entry.pluginId));
-        entry.mcpClient = mcpClient;
-        entry.runningArgs = args;
-        entry.runningEnv = environment;
-        if (entry.workspace) {
-          try {
-            await this.applyRoots(entry, entry.workspace);
-          } catch (error) {
-            this.deps.logger?.warn("Initial roots apply failed for %s: %s", PluginId.toString(entry.pluginId), error instanceof Error ? error.message : String(error));
-          }
-        }
-      } else if (manifest.mcp.transport === "http") {
-        const url = manifest.mcp.url;
-        if (!url) {
-          throw new ApplicationError(
-            "PLUGIN_START_FAILED",
-            `Plugin ${PluginId.toString(entry.pluginId)} http transport missing url`,
-          );
-        }
-        const mcpClient = this.deps.mcpClientFactory.createForHttp(url);
-        await mcpClient.connect();
-        entry.mcpClient = mcpClient;
-      } else if (manifest.mcp.transport === "sse") {
-        const url = manifest.mcp.url;
-        if (!url) {
-          throw new ApplicationError(
-            "PLUGIN_START_FAILED",
-            `Plugin ${PluginId.toString(entry.pluginId)} sse transport missing url`,
-          );
-        }
-        const mcpClient = this.deps.mcpClientFactory.createForSse(url);
-        await mcpClient.connect();
-        entry.mcpClient = mcpClient;
-      }
-
-      // Register the close/exit watcher BEFORE transitioning to "running" so
-      // an external kill between connect and the running transition cannot
-// leave the SoT stuck on "running" with no observer (finding 2).
-      this.registerExitWatcher(entry);
-
-      const transition = entry.runtime.transitionTo(
-        "running",
-        this.deps.clock.now(),
-      );
-      if (!transition.ok) {
-        throw this.mapDomainError(transition.error, entry.pluginId);
-      }
-      entry.runtime = transition.value;
-      await this.publishPulled(entry.runtime);
-
-      const startedEvent = PluginStartedEvent.create(
-        entry.pluginId,
-        this.deps.clock.now(),
-        entry.mcpClient?.pid ?? entry.process?.pid ?? null,
-      );
-      await this.deps.eventDispatcher.publish(startedEvent);
-    } catch (error) {
-      this.deps.logger?.error("doStart failed for plugin %s: %s", PluginId.toString(entry.pluginId), String(error));
-      await this.crash(entry, this.describeError(error));
-      throw this.toApplicationError(error, "PLUGIN_START_FAILED", entry.pluginId);
-    }
-  }
-
-  private async stopLocked(entry: RuntimeEntry): Promise<PluginView> {
-    if (
-      entry.runtime.state === "idle" ||
-      entry.runtime.state === "crashed" ||
-      entry.runtime.state === "disabled"
-    ) {
-      return this.view(entry);
-    }
-
-    const canStop = RuntimeTransitionPolicy.assertTransition(
-      entry.runtime.state,
-      "stopping",
-    );
-    if (!canStop.ok) {
-      throw this.mapDomainError(canStop.error, entry.pluginId);
-    }
-
-    const transition = entry.runtime.transitionTo("stopping", this.deps.clock.now());
-    if (!transition.ok) {
-      throw this.mapDomainError(transition.error, entry.pluginId);
-    }
-    entry.runtime = transition.value;
-    await this.publishPulled(entry.runtime);
-
-    try {
-      this.cancelPendingCalls(entry, "TOOL_CALL_CANCELLED", "Plugin stopping");
-      if (entry.mcpClient) {
-        await entry.mcpClient.close();
-        entry.mcpClient = null;
-      }
-      if (entry.process) {
-        await entry.process.kill();
-        entry.process = null;
-      }
-    } catch (error) {
-      await this.crash(entry, this.describeError(error));
-      throw this.toApplicationError(error, "PLUGIN_STOP_FAILED", entry.pluginId);
-    }
-
-    const toIdle = entry.runtime.transitionTo("idle", this.deps.clock.now());
-    if (toIdle.ok) {
-      entry.runtime = toIdle.value;
-      await this.publishPulled(entry.runtime);
-    }
-
-    const stoppedEvent = PluginStoppedEvent.create(
-      entry.pluginId,
-      this.deps.clock.now(),
-    );
-    await this.deps.eventDispatcher.publish(stoppedEvent);
-
-    return this.view(entry);
-  }
-
-  private async callToolLocked(
-    entry: RuntimeEntry,
-    options: CallToolOptions,
-  ): Promise<unknown> {
-    const plugin = await this.loadPlugin(entry.pluginId);
-    const canCall = PluginLifecyclePolicy.canCallTool(plugin, entry.runtime);
-    if (!canCall.ok) {
-      throw this.mapDomainError(canCall.error, entry.pluginId);
-    }
-
-    if (!entry.mcpClient) {
-      throw new ApplicationError(
-        "MCP_CONNECTION_FAILED",
-        `Plugin ${PluginId.toString(entry.pluginId)} has no active MCP client`,
-      );
-    }
-
-    const requestIdResult = RequestId.create(options.requestId);
-    if (!requestIdResult.ok) {
-      throw new ApplicationError(
-        "INTERNAL_ERROR",
-        `Invalid request id: ${requestIdResult.error.message}`,
-      );
-    }
-    const toolNameResult = ToolName.create(options.toolName);
-    if (!toolNameResult.ok) {
-      throw new ApplicationError(
-        "TOOL_NOT_FOUND",
-        `Invalid tool name: ${toolNameResult.error.message}`,
-      );
-    }
-
-    const toolCall = ToolCall.createPending({
-      requestId: requestIdResult.value,
-      pluginId: entry.pluginId,
-      toolName: toolNameResult.value,
-      args: options.args,
-    });
-
-    const timeoutMs = options.timeoutMs ?? this.deps.toolCallTimeoutMs ?? 30_000;
-
-    return new Promise<unknown>((resolve, reject) => {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      if (timeoutMs > 0) {
-        timer = setTimeout(() => {
-          this.cancelPendingCall(
-            entry,
-            RequestId.toString(toolCall.requestId),
-            "TOOL_CALL_TIMEOUT",
-            `Tool call timed out after ${timeoutMs}ms`,
-          );
-        }, timeoutMs);
-      }
-
-      const pending: PendingToolCall = {
-        toolCall,
-        resolve: (value) => {
-          if (timer) clearTimeout(timer);
-          resolve(value);
-        },
-        reject: (error) => {
-          if (timer) clearTimeout(timer);
-          reject(error);
-        },
-        timer,
-      };
-      entry.pendingCalls.set(RequestId.toString(toolCall.requestId), pending);
-
-      entry.mcpClient!
-        .callTool(options.toolName, options.args)
-        .then((result) => {
-          if (entry.pendingCalls.delete(RequestId.toString(toolCall.requestId))) {
-            const completed = toolCall.withStatus("completed", result);
-            void this.publishToolCompleted(entry, completed);
-            pending.resolve(result);
-          }
-        })
-        .catch((error) => {
-          if (entry.pendingCalls.delete(RequestId.toString(toolCall.requestId))) {
-            const failed = toolCall.withStatus("failed");
-            void this.publishToolCompleted(entry, failed);
-            pending.reject(error);
-          }
-        });
-    });
-  }
-
-  /**
-   * Registers the process/MCP close watcher that flips a "running" plugin to
-   * "crashed" when the underlying process dies outside NusaShell's stop path
-   * (finding 2). Registered before the "running" transition in `doStart` so
-   * there is no race window where an external kill is missed.
-   */
-  private registerExitWatcher(entry: RuntimeEntry): void {
-    if (entry.process) {
-      entry.process.exited
-        .then((code) => {
-          void this.handleProcessExit(entry, code);
-        })
-        .catch(() => {
-          void this.handleProcessExit(entry, -1);
-        });
-    } else if (entry.mcpClient && entry.mcpClient.onClose) {
-      entry.mcpClient.onClose(() => {
-        // handleProcessExit skips "stopping"/"idle"; this catches deaths
-        // during "starting" and "running" alike (finding 2 race window).
-        void this.handleProcessExit(entry, -1);
-      });
-    }
-  }
-
-  private async handleProcessExit(entry: RuntimeEntry, code: number): Promise<void> {
-    if (
-      entry.runtime.state === "stopping" ||
-      entry.runtime.state === "idle"
-    ) {
-      return;
-    }
-    this.deps.logger?.warn("Plugin process exited unexpectedly plugin=%s code=%d state=%s", PluginId.toString(entry.pluginId), code, entry.runtime.state);
-    await this.crash(entry, `Process exited with code ${code}`);
-  }
-
-  private async crash(entry: RuntimeEntry, reason: string): Promise<void> {
-    this.cancelPendingCalls(entry, "PLUGIN_CRASHED", reason);
-    entry.process = null;
-    if (entry.mcpClient) {
-      try {
-        await entry.mcpClient.close();
-      } catch (err) {
-        this.deps.logger?.warn("Failed to close MCP client on crash: %s", err);
-      }
-      entry.mcpClient = null;
-    }
-
-    const transition = entry.runtime.transitionTo("crashed", this.deps.clock.now());
-    if (transition.ok) {
-      entry.runtime = transition.value;
-      await this.publishPulled(entry.runtime);
-    }
-
-    entry.restartCount += 1;
-    const crashedEvent = PluginCrashedEvent.create(
-      entry.pluginId,
-      reason,
-      this.deps.clock.now(),
-    );
-    await this.deps.eventDispatcher.publish(crashedEvent);
-  }
-
-  private cancelPendingCalls(
-    entry: RuntimeEntry,
-    code: "TOOL_CALL_CANCELLED" | "PLUGIN_CRASHED",
-    reason: string,
-  ): void {
-    for (const [id, pending] of entry.pendingCalls) {
-      entry.pendingCalls.delete(id);
-      if (pending.timer) clearTimeout(pending.timer);
-      pending.reject(
-        new ApplicationError(code, reason, {
-          requestId: id,
-          pluginId: PluginId.toString(entry.pluginId),
-        }),
-      );
-    }
-  }
-
-  private cancelPendingCall(
-    entry: RuntimeEntry,
-    requestId: string,
-    code: "TOOL_CALL_TIMEOUT" | "TOOL_CALL_CANCELLED",
-    reason: string,
-  ): void {
-    const pending = entry.pendingCalls.get(requestId);
-    if (!pending) return;
-    entry.pendingCalls.delete(requestId);
-    if (pending.timer) clearTimeout(pending.timer);
-    pending.reject(
-      new ApplicationError(code, reason, {
-        requestId,
-        pluginId: PluginId.toString(entry.pluginId),
-      }),
-    );
-  }
-
   private async loadPlugin(pluginId: PluginId): Promise<Plugin> {
     const plugin = await this.deps.pluginRepository.findById(pluginId);
     if (!plugin) {
@@ -818,103 +336,4 @@ export class PluginRuntimeManager {
     }
     return plugin;
   }
-
-  private requireRunningClient(entry: RuntimeEntry): McpClientPort {
-    if (!entry.mcpClient || entry.runtime.state !== "running") {
-      throw new ApplicationError(
-        "PLUGIN_NOT_RUNNING",
-        `Plugin ${PluginId.toString(entry.pluginId)} is not running`,
-        { pluginId: PluginId.toString(entry.pluginId) },
-      );
-    }
-    return entry.mcpClient;
-  }
-
-  private async publishPulled(runtime: PluginRuntime): Promise<void> {
-    const events = runtime.pullEvents() as readonly DomainEvent[];
-    await this.deps.eventDispatcher.publishAll(events);
-  }
-
-  private async publishToolCompleted(
-    entry: RuntimeEntry,
-    toolCall: ToolCall,
-  ): Promise<void> {
-    const event = ToolCallCompletedEvent.create(
-      entry.pluginId,
-      toolCall.requestId,
-      toolCall.toolName,
-      this.deps.clock.now(),
-    );
-    await this.deps.eventDispatcher.publish(event);
-  }
-
-  private view(entry: RuntimeEntry): PluginView {
-    return {
-      pluginId: PluginId.toString(entry.pluginId),
-      name: entry.name,
-      version: entry.version,
-      icon: entry.icon,
-      installPath: entry.installPath,
-      state: entry.runtime.state,
-      enabled: entry.enabled,
-      autostart: entry.autostart,
-      ui: entry.ui,
-      keepAliveOnClose: entry.keepAliveOnClose,
-    };
-  }
-
-  private mapDomainError(error: DomainError, pluginId: PluginId): ApplicationError {
-    const id = PluginId.toString(pluginId);
-    switch (error.code) {
-      case "PLUGIN_NOT_FOUND":
-        return new ApplicationError("PLUGIN_NOT_FOUND", error.message, { pluginId: id });
-      case "PLUGIN_DISABLED":
-        return new ApplicationError("PLUGIN_DISABLED", error.message, { pluginId: id });
-      case "INVALID_RUNTIME_TRANSITION":
-        return new ApplicationError(
-          "INVALID_RUNTIME_TRANSITION",
-          error.message,
-          error.details,
-        );
-      case "TOOL_NOT_FOUND":
-        return new ApplicationError("TOOL_NOT_FOUND", error.message, error.details);
-      case "TOOL_CALL_TIMEOUT":
-        return new ApplicationError("TOOL_CALL_TIMEOUT", error.message, error.details);
-      case "VALIDATION_ERROR":
-        return new ApplicationError("INTERNAL_ERROR", error.message, error.details);
-    }
-  }
-
-  private toApplicationError(
-    error: unknown,
-    fallbackCode: "PLUGIN_START_FAILED" | "PLUGIN_STOP_FAILED",
-    pluginId: PluginId,
-  ): ApplicationError {
-    if (error instanceof ApplicationError) {
-      return error;
-    }
-    const message = error instanceof Error ? error.message : String(error);
-    return new ApplicationError(fallbackCode, message, {
-      pluginId: PluginId.toString(pluginId),
-    });
-  }
-
-  private describeError(error: unknown): string {
-    if (error instanceof Error) return error.message;
-    return String(error);
-  }
-}
-
-function arrayEquals(a: readonly string[], b: readonly string[]): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-  return true;
-}
-
-function recordEquals(a: Readonly<Record<string, string>>, b: Readonly<Record<string, string>>): boolean {
-  const ak = Object.keys(a);
-  const bk = Object.keys(b);
-  if (ak.length !== bk.length) return false;
-  for (const key of ak) if (a[key] !== b[key]) return false;
-  return true;
 }

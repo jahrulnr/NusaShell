@@ -4,7 +4,10 @@
   "version": "0.0.2",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "browser": "./src/index.browser.ts",
+      "default": "./src/index.ts"
+    }
   },
   "scripts": {
     "build": "tsup",

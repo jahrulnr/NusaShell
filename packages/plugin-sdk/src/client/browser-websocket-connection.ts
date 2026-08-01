@@ -1,10 +1,16 @@
-import { WebSocket } from "ws";
-import { randomUUID } from "node:crypto";
 import type { ConnectionStatus, IWebSocketConnection, WebSocketConnectionCallbacks } from "./connection-types.js";
 
-export type { ConnectionStatus, IWebSocketConnection, WebSocketConnectionCallbacks, WebSocketConnectionFactory } from "./connection-types.js";
-
-export class WebSocketConnection implements IWebSocketConnection {
+/**
+ * Browser-compatible WebSocket connection using the native browser WebSocket API.
+ *
+ * This is the browser counterpart to `WebSocketConnection` (which uses the
+ * Node.js `ws` package). It implements the same `IWebSocketConnection` interface
+ * so `NusaClient` can work in Electron renderer / browser contexts.
+ *
+ * Uses `crypto.randomUUID()` (available in modern browsers and Node.js 20+)
+ * instead of `node:crypto`.
+ */
+export class BrowserWebSocketConnection implements IWebSocketConnection {
   private ws: WebSocket | null = null;
   private status: ConnectionStatus = "disconnected";
 
@@ -21,36 +27,44 @@ export class WebSocketConnection implements IWebSocketConnection {
     this.status = "connecting";
 
     return new Promise((resolve, reject) => {
-      this.ws = new WebSocket(this.url);
+      try {
+        this.ws = new WebSocket(this.url);
+      } catch (err) {
+        this.status = "disconnected";
+        reject(err instanceof Error ? err : new Error(String(err)));
+        return;
+      }
 
-      this.ws.on("open", () => {
+      this.ws.onopen = () => {
         this.status = "connected";
         this.callbacks.onOpen();
         resolve();
-      });
+      };
 
-      this.ws.on("message", (data: Buffer) => {
-        this.callbacks.onMessage(data.toString("utf-8"));
-      });
+      this.ws.onmessage = (event: MessageEvent) => {
+        const data = typeof event.data === "string" ? event.data : String(event.data);
+        this.callbacks.onMessage(data);
+      };
 
-      this.ws.on("close", () => {
+      this.ws.onclose = () => {
         this.status = "disconnected";
         this.callbacks.onClose();
-      });
+      };
 
-      this.ws.on("error", (err: Error) => {
+      this.ws.onerror = () => {
+        const error = new Error(`WebSocket error connecting to ${this.url}`);
         if (this.status === "connecting") {
           this.status = "disconnected";
-          reject(err);
+          reject(error);
         } else {
-          this.callbacks.onError(err);
+          this.callbacks.onError(error);
         }
-      });
+      };
     });
   }
 
   send(data: string): void {
-    if (this.ws && this.status === "connected") {
+    if (this.ws && this.status === "connected" && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(data);
     }
   }
@@ -72,10 +86,10 @@ export class WebSocketConnection implements IWebSocketConnection {
         return;
       }
 
-      ws.once("close", () => {
+      ws.onclose = () => {
         this.status = "disconnected";
         resolve();
-      });
+      };
       ws.close();
     });
   }
@@ -87,8 +101,4 @@ export class WebSocketConnection implements IWebSocketConnection {
   get connectionStatus(): ConnectionStatus {
     return this.status;
   }
-}
-
-export function generateRequestId(): string {
-  return `req_${randomUUID()}`;
 }

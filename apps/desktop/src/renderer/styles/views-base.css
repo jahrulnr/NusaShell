@@ -1,0 +1,12 @@
+/* ============ Views ============ */
+.view { display: none; }
+.view.active { display: block; }
+.view.active.agent-view { display: flex; flex-direction: column; height: calc(100vh - 102px); min-height: 0; }
+.content:has(.skills-view.active) { overflow: hidden; }
+.view.active.skills-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+

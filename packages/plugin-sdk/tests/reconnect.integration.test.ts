@@ -1,5 +1,6 @@
 import { describe, expect, it, afterEach } from "vitest";
 import { NusaClient } from "../src/client/nusa-client.js";
+import { nodeConnectionFactory } from "./test-connection-factory.js";
 import { WebSocketServer, MessageRouter } from "@nusashell/transport-ws";
 import { CommandBus, QueryBus } from "@nusashell/application";
 
@@ -45,6 +46,7 @@ describe("NusaClient reconnect integration", () => {
     client = new NusaClient({
       url: `ws://127.0.0.1:${basePort}`,
       reconnect: { enabled: true, initialDelayMs: 50, maxDelayMs: 200, jitterMs: 0 },
+      connectionFactory: nodeConnectionFactory,
     });
     await client.connect();
     expect(client.isConnected).toBe(true);
@@ -75,6 +77,7 @@ describe("NusaClient reconnect integration", () => {
     client = new NusaClient({
       url: `ws://127.0.0.1:${basePort + 1}`,
       reconnect: { enabled: true, initialDelayMs: 50, maxDelayMs: 200, jitterMs: 0 },
+      connectionFactory: nodeConnectionFactory,
     });
     await client.connect();
 
@@ -128,6 +131,7 @@ describe("NusaClient reconnect integration", () => {
     client = new NusaClient({
       url: `ws://127.0.0.1:${basePort + 6}`,
       reconnect: { enabled: true, initialDelayMs: 50, maxDelayMs: 200, jitterMs: 0 },
+      connectionFactory: nodeConnectionFactory,
     });
     await client.connect();
 
@@ -171,6 +175,7 @@ describe("NusaClient reconnect integration", () => {
     client = new NusaClient({
       url: `ws://127.0.0.1:${basePort + 2}`,
       reconnect: { enabled: true, initialDelayMs: 50, maxDelayMs: 200, jitterMs: 0 },
+      connectionFactory: nodeConnectionFactory,
     });
     client.onReconnect(() => { reconnected = true; });
     await client.connect();
@@ -200,6 +205,7 @@ describe("NusaClient reconnect integration", () => {
         maxDelayMs: 20,
         jitterMs: 0,
       },
+      connectionFactory: nodeConnectionFactory,
     });
     client.onReconnectFailed(() => { reconnectFailed = true; });
     await client.connect();
@@ -220,6 +226,7 @@ describe("NusaClient reconnect integration", () => {
     client = new NusaClient({
       url: `ws://127.0.0.1:${basePort + 4}`,
       reconnect: { enabled: true, initialDelayMs: 50, maxDelayMs: 200, jitterMs: 0 },
+      connectionFactory: nodeConnectionFactory,
     });
     await client.connect();
     expect(client.isConnected).toBe(true);
@@ -241,6 +248,7 @@ describe("NusaClient reconnect integration", () => {
     client = new NusaClient({
       url: `ws://127.0.0.1:${basePort + 5}`,
       reconnect: { enabled: true, initialDelayMs: 50, maxDelayMs: 200, jitterMs: 0 },
+      connectionFactory: nodeConnectionFactory,
       defaultTimeoutMs: 10000,
     });
     await client.connect();

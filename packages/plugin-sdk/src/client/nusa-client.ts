@@ -5,7 +5,7 @@ import type {
   EventType,
 } from "@nusashell/contracts";
 import { PROTOCOL_VERSION } from "@nusashell/contracts";
-import { WebSocketConnection } from "./websocket-connection.js";
+import type { IWebSocketConnection, WebSocketConnectionFactory, WebSocketConnectionCallbacks } from "./connection-types.js";
 import { RequestManager } from "./request-manager.js";
 import { EventSubscriber } from "./event-subscriber.js";
 import { ReconnectPolicy, type ReconnectOptions, DEFAULT_RECONNECT_OPTIONS } from "./reconnect-policy.js";
@@ -19,6 +19,12 @@ export interface NusaClientOptions {
   readonly url: string;
   readonly defaultTimeoutMs?: number;
   readonly reconnect?: Partial<ReconnectOptions>;
+  /**
+   * Optional factory for creating the WebSocket connection.
+   * Defaults to the Node.js `ws`-based `WebSocketConnection`.
+   * Pass `BrowserWebSocketConnection` factory for browser/Electron renderer use.
+   */
+  readonly connectionFactory?: WebSocketConnectionFactory;
 }
 
 export type ReconnectStatusCallback = () => void;
@@ -31,11 +37,12 @@ export class NusaClient {
   readonly agent: AgentApi;
   readonly events: EventSubscriber;
 
-  private readonly connection: WebSocketConnection;
+  private connection: IWebSocketConnection | undefined;
   private readonly requestManager: RequestManager;
   private readonly reconnectPolicy: ReconnectPolicy;
   private readonly reconnectOptions: ReconnectOptions;
   private readonly activeSubscriptions = new Set<string>();
+  private readonly connectionCallbacks: WebSocketConnectionCallbacks;
 
   private intentionalDisconnect = false;
   private reconnecting = false;
@@ -50,7 +57,7 @@ export class NusaClient {
     this.reconnectOptions = { ...DEFAULT_RECONNECT_OPTIONS, ...options.reconnect };
     this.reconnectPolicy = new ReconnectPolicy(this.reconnectOptions);
 
-    this.connection = new WebSocketConnection(options.url, {
+    this.connectionCallbacks = {
       onMessage: (data) => this.handleMessage(data),
       onOpen: () => {
         if (this.reconnecting) {
@@ -62,7 +69,17 @@ export class NusaClient {
       },
       onClose: () => this.handleClose(),
       onError: () => {},
-    });
+    };
+
+    const factory = options.connectionFactory;
+    if (factory) {
+      const result = factory(options.url, this.connectionCallbacks);
+      if (result instanceof Promise) {
+        result.then((conn) => { this.connection = conn; }).catch(() => {});
+      } else {
+        this.connection = result;
+      }
+    }
 
     this.plugins = new PluginsApi(this);
     this.tools = new ToolsApi(this);
@@ -73,7 +90,7 @@ export class NusaClient {
 
   connect(): Promise<void> {
     this.intentionalDisconnect = false;
-    return this.connection.connect();
+    return this.getConnection().connect();
   }
 
   async disconnect(): Promise<void> {
@@ -83,11 +100,11 @@ export class NusaClient {
     this.requestManager.close();
     this.events.clear();
     this.activeSubscriptions.clear();
-    await this.connection.disconnect();
+    await this.getConnection().disconnect();
   }
 
   get isConnected(): boolean {
-    return this.connection.isConnected;
+    return this.connection?.isConnected ?? false;
   }
 
   get isReconnecting(): boolean {
@@ -107,7 +124,7 @@ export class NusaClient {
     payload: Record<string, unknown>,
     timeoutMs?: number,
   ): Promise<TResult> {
-    if (!this.connection.isConnected) {
+    if (!this.connection?.isConnected) {
       return Promise.reject(new ConnectionClosedError("Not connected"));
     }
 
@@ -198,7 +215,7 @@ export class NusaClient {
     }
 
     try {
-      await this.connection.connect();
+      await this.getConnection().connect();
     } catch {
       if (this.reconnectPolicy.shouldRetry()) {
         this.scheduleReconnect();
@@ -216,6 +233,13 @@ export class NusaClient {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
     }
+  }
+
+  private getConnection(): IWebSocketConnection {
+    if (!this.connection) {
+      throw new ConnectionClosedError("Connection not initialized");
+    }
+    return this.connection;
   }
 
   private handleMessage(data: string): void {

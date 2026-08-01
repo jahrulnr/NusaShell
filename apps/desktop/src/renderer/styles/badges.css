@@ -1,0 +1,7 @@
+/* ============ State badges for app grid ============ */
+.app-status.starting { color: var(--amber); font-weight: 600; }
+.app-status.crashed { color: var(--red); font-weight: 600; }
+.app-status.starting .status-dot { background: var(--amber); box-shadow: 0 0 0 3px rgba(245,166,35,0.15); animation: pulse 1s ease-in-out infinite; }
+.app-status.crashed .status-dot { background: var(--red); box-shadow: 0 0 0 3px rgba(239,75,95,0.15); }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+

@@ -1,5 +1,6 @@
 import { describe, expect, it, afterEach } from "vitest";
 import { NusaClient } from "../src/client/nusa-client.js";
+import { nodeConnectionFactory } from "./test-connection-factory.js";
 import { WebSocketServer, MessageRouter } from "@nusashell/transport-ws";
 import { CommandBus, QueryBus, SystemPingHandler, SystemVersionHandler } from "@nusashell/application";
 
@@ -27,7 +28,7 @@ describe("SystemApi", () => {
     server = makeServer(port);
     await server.start();
 
-    client = new NusaClient({ url: `ws://127.0.0.1:${port}` });
+    client = new NusaClient({ url: `ws://127.0.0.1:${port}`, connectionFactory: nodeConnectionFactory });
     await client.connect();
 
     const result = await client.system.ping();
@@ -40,7 +41,7 @@ describe("SystemApi", () => {
     server = makeServer(port + 1);
     await server.start();
 
-    client = new NusaClient({ url: `ws://127.0.0.1:${port + 1}` });
+    client = new NusaClient({ url: `ws://127.0.0.1:${port + 1}`, connectionFactory: nodeConnectionFactory });
     await client.connect();
 
     const result = await client.system.version();

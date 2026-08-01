@@ -1,0 +1,72 @@
+/* ============ Learning view ============ */
+
+/* ============ Skills panels (curator, pending, archived) ============ */
+.skills-panels {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  flex: none;
+  gap: 1px;
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: #090e16;
+  overflow: hidden;
+}
+.skills-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 120px;
+  max-height: 240px;
+  background: var(--panel);
+}
+.skills-pending-list,
+.skills-archived-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 8px 12px;
+}
+.skills-pending-item,
+.skills-archived-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 2px;
+}
+.skills-pending-item:hover,
+.skills-archived-item:hover { background: #101824; }
+.skills-pending-info,
+.skills-archived-info {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.skills-pending-info strong,
+.skills-archived-info strong {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skills-pending-info small,
+.skills-archived-info small {
+  color: var(--text-faint);
+  font: 9.5px 'JetBrains Mono', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skills-pending-empty,
+.skills-archived-empty {
+  color: var(--text-faint);
+  font-size: 11px;
+  padding: 8px;
+  margin: 0;
+}
+@media (max-width: 860px) {
+  .skills-panels { grid-template-columns: 1fr; }
+}
+

@@ -5,7 +5,6 @@ import { clampModelEffort, formatTokenCount, modelCompatibility, searchModels } 
 import { AgentConversationController } from "./agent-conversation-controller.js";
 import { SkillsController } from "./skills-controller.js";
 import { LearningController } from "./learning-controller.js";
-import { createStreamSeqGate } from "./stream-seq-gate.js";
 import {
   applyTextEdit,
   countLogsBySource,
@@ -16,121 +15,12 @@ import {
   positionContextMenu,
   providerApiModes,
 } from "./launcher-ui.js";
+import { initWsClient, connectWs, sendRequest, onEvent, subscribe, isConnected } from "./ws-client.js";
+import { fetchPlugins, startPlugin, stopPlugin, restartPlugin, getPluginDetail, listTools, callTool, pingSystem, getVersion, installPlugin, uninstallPlugin, setPluginAutostart } from "./plugin-api.js";
+import { runAgentTurn, cancelAgentTurn, answerAskQuestion } from "./agent-api.js";
+import { runAcpTurn, cancelAcpTurn, getAcpSessionInfo, setAcpConfigOption, ensureAcpSession, answerAcpPermission, answerAcpAsk } from "./acp-api.js";
 
 const WS_URL = window.shell?.wsUrl ?? "ws://127.0.0.1:9130";
-const PROTOCOL_VERSION = "1.0";
-
-// ============ Lightweight WS client (browser-native) ============
-
-const pendingRequests = new Map();
-const eventHandlers = new Map();
-let ws = null;
-let connected = false;
-let reconnectTimer = null;
-let activeSubscriptions = new Set();
-
-function connectWs() {
-  ws = new WebSocket(WS_URL);
-
-  ws.onopen = () => {
-    connected = true;
-    updateConnStatus(true);
-    writeRendererLog("info", `WebSocket connected to ${WS_URL}`);
-    if (activeSubscriptions.size > 0) {
-      sendRequest("subscribe", { eventTypes: [...activeSubscriptions] }).catch(() => {});
-    }
-    refreshAll();
-  };
-
-  ws.onclose = () => {
-    connected = false;
-    updateConnStatus(false);
-    writeRendererLog("warn", "WebSocket connection closed; reconnecting");
-    for (const [, ctrl] of pendingRequests) ctrl.reject(new Error("Connection closed"));
-    pendingRequests.clear();
-    scheduleReconnect();
-  };
-
-  ws.onerror = () => writeRendererLog("error", "WebSocket connection error");
-
-  ws.onmessage = (event) => {
-    let msg;
-    try { msg = JSON.parse(event.data); } catch { return; }
-    if (!msg || typeof msg !== "object") return;
-
-    if (msg.kind === "response") {
-      const ctrl = pendingRequests.get(msg.id);
-      if (ctrl) {
-        pendingRequests.delete(msg.id);
-        if (msg.ok) {
-          writeRendererLog("debug", `WebSocket response ${msg.id}`);
-          ctrl.resolve(msg.result);
-        } else {
-          writeRendererLog("warn", `WebSocket request failed: ${msg.error?.message ?? "Unknown error"}`);
-          const error = new Error(msg.error?.message ?? "Unknown error");
-          error.code = msg.error?.code;
-          error.details = msg.error?.details;
-          ctrl.reject(error);
-        }
-      }
-    } else if (msg.kind === "event") {
-      dispatchEvent(msg.event, msg.payload, msg.sequence);
-    }
-  };
-}
-
-function scheduleReconnect() {
-  if (reconnectTimer) return;
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    connectWs();
-  }, 1000);
-}
-
-function sendRequest(method, payload, timeoutMs = 10000) {
-  return new Promise((resolve, reject) => {
-    if (!connected || !ws || ws.readyState !== WebSocket.OPEN) {
-      reject(new Error("Not connected"));
-      return;
-    }
-    const id = `req_${crypto.randomUUID()}`;
-    const ctrl = { resolve, reject };
-    pendingRequests.set(id, ctrl);
-
-    const timer = setTimeout(() => {
-      pendingRequests.delete(id);
-      ctrl.reject(new Error("Request timeout"));
-    }, timeoutMs);
-
-    const origResolve = ctrl.resolve;
-    const origReject = ctrl.reject;
-    ctrl.resolve = (v) => { clearTimeout(timer); origResolve(v); };
-    ctrl.reject = (e) => { clearTimeout(timer); origReject(e); };
-
-    writeRendererLog("debug", `WebSocket request ${method} (${id})`);
-    ws.send(JSON.stringify({ kind: "request", id, method, protocolVersion: PROTOCOL_VERSION, payload }));
-  });
-}
-
-function dispatchEvent(eventType, payload, sequence) {
-  writeRendererLog("debug", `Backend event ${eventType} (#${sequence})`);
-  const handlers = eventHandlers.get(eventType);
-  if (handlers) handlers.forEach(h => h(payload, sequence));
-  const allHandlers = eventHandlers.get("*");
-  if (allHandlers) allHandlers.forEach(h => h({ event: eventType, payload, sequence }));
-}
-
-function onEvent(eventType, handler) {
-  if (!eventHandlers.has(eventType)) eventHandlers.set(eventType, new Set());
-  eventHandlers.get(eventType).add(handler);
-  return () => eventHandlers.get(eventType)?.delete(handler);
-}
-
-async function subscribe(eventTypes) {
-  const types = eventTypes ?? ["*"];
-  const result = await sendRequest("subscribe", { eventTypes: types });
-  for (const t of result.subscribed) activeSubscriptions.add(t);
-}
 
 // ============ State ============
 
@@ -306,250 +196,6 @@ function updateConnStatus(connected) {
     settingsDot.style.boxShadow = "none";
     settingsLabel.textContent = "Disconnected";
   }
-}
-
-// ============ API calls ============
-
-async function fetchPlugins() {
-  try {
-    const result = await sendRequest("plugin.list", {});
-    plugins = [...result.plugins];
-  } catch (e) {
-    console.error("Failed to fetch plugins:", e);
-  }
-}
-
-async function startPlugin(pluginId) {
-  try { await sendRequest("plugin.start", { pluginId }); } catch (e) { console.error(e); }
-}
-
-async function stopPlugin(pluginId) {
-  try { await sendRequest("plugin.stop", { pluginId }); } catch (e) { console.error(e); }
-}
-
-async function restartPlugin(pluginId) {
-  try { await sendRequest("plugin.restart", { pluginId }); } catch (e) { console.error(e); }
-}
-
-async function getPluginDetail(pluginId) {
-  try { return await sendRequest("plugin.get", { pluginId }); } catch (e) { console.error(e); return null; }
-}
-
-async function listTools(pluginId) {
-  // Do not swallow errors as an empty tool list (finding 3a): surface the
-  // failure so the drawer can distinguish "listing failed" from "no tools".
-  try {
-    return await sendRequest("tool.list", { pluginId });
-  } catch (e) {
-    return { tools: [], error: { message: e?.message || "tool.list failed" } };
-  }
-}
-
-async function callTool(pluginId, toolName, args) {
-  const requestId = `req_${crypto.randomUUID()}`;
-  try { return await sendRequest("tool.call", { pluginId, requestId, toolName, args }); }
-  catch (e) { return { error: e.message }; }
-}
-
-async function pingSystem() {
-  try { return await sendRequest("system.ping", {}); } catch (e) { return { error: e.message }; }
-}
-
-async function getVersion() {
-  try { return await sendRequest("system.version", {}); } catch (e) { return { error: e.message }; }
-}
-
-async function installPlugin(source, path) {
-  try { return await sendRequest("plugin.install", { source, path }, 30000); }
-  catch (e) { return { error: e.message }; }
-}
-
-async function uninstallPlugin(pluginId) {
-  try { return await sendRequest("plugin.uninstall", { pluginId }); }
-  catch (e) { return { error: e.message }; }
-}
-
-async function setPluginAutostart(pluginId, autostart) {
-  try { return await sendRequest("plugin.autostart", { pluginId, autostart }); }
-  catch (e) { return { error: e.message }; }
-}
-
-async function runAgentTurn(messages, options = {}) {
-  const selected = aiSettings.models.find((model) => model.key === aiSettings.activeModelKey);
-  if (!selected) throw new Error("Choose an imported AI model before sending a turn.");
-  const disposers = [];
-  const seqGate = createStreamSeqGate();
-  const gate = (payload, handler) => {
-    if (payload?.traceId !== options.traceId) return;
-    const decision = seqGate.check(payload.traceId, payload.streamSeq);
-    if (!decision.accept) {
-      writeRendererLog("debug", `Dropping stale agent event streamSeq=${payload.streamSeq} trace=${payload.traceId}`);
-      return;
-    }
-    if (decision.gap) {
-      writeRendererLog("warn", `Agent stream gap before streamSeq=${payload.streamSeq} trace=${payload.traceId}`);
-      options.onStreamGap?.(payload.traceId, payload.streamSeq);
-    }
-    handler(payload);
-  };
-  if (options.onDelta) {
-    disposers.push(onEvent("agent.text_delta", (payload) => gate(payload, (p) => {
-      if (p.delta) options.onDelta(p.delta);
-    })));
-  }
-  if (options.onReasoningDelta) {
-    disposers.push(onEvent("agent.reasoning_delta", (payload) => gate(payload, (p) => {
-      if (p.delta) options.onReasoningDelta(p.delta);
-    })));
-  }
-  if (options.onToolCallStart) {
-    disposers.push(onEvent("agent.tool_call_start", (payload) => gate(payload, (p) => options.onToolCallStart(p))));
-  }
-  if (options.onToolCallEnd) {
-    disposers.push(onEvent("agent.tool_call_end", (payload) => gate(payload, (p) => options.onToolCallEnd(p))));
-  }
-  if (options.onContextUpdate) {
-    disposers.push(onEvent("agent.context", (payload) => gate(payload, (p) => options.onContextUpdate(p))));
-  }
-  // Lifecycle handlers stay registered briefly after the run settles so a
-  // turn_end/cancel_requested event published asynchronously after the
-  // agent.run rejection still reaches the UI (WS delivery order is not
-  // guaranteed; streamSeq + the 2s UI wait make ordering best-effort).
-  const lifecycleDisposers = [];
-  const lifecycleGate = (payload, handler) => {
-    if (payload?.traceId !== options.traceId) return;
-    const decision = seqGate.check(payload.traceId, payload.streamSeq);
-    if (!decision.accept) return;
-    if (decision.gap) options.onStreamGap?.(payload.traceId, payload.streamSeq);
-    handler(payload);
-  };
-  if (options.onTurnStarted) {
-    lifecycleDisposers.push(onEvent("agent.turn_started", (payload) => lifecycleGate(payload, (p) => options.onTurnStarted(p))));
-  }
-  if (options.onTurnEnd) {
-    lifecycleDisposers.push(onEvent("agent.turn_end", (payload) => lifecycleGate(payload, (p) => options.onTurnEnd(p))));
-  }
-  if (options.onCancelRequested) {
-    lifecycleDisposers.push(onEvent("agent.cancel_requested", (payload) => lifecycleGate(payload, (p) => options.onCancelRequested(p))));
-  }
-  if (options.onTurnSuperseded) {
-    lifecycleDisposers.push(onEvent("agent.turn_superseded", (payload) => lifecycleGate(payload, (p) => options.onTurnSuperseded(p))));
-  }
-  try {
-    return await sendRequest("agent.run", {
-      messages,
-      pluginIds: [],
-      providerId: selected.providerId,
-      model: selected.id,
-      effort: aiSettings.effort,
-      userPrompt: aiSettings.userPrompt,
-      ...(options.workspace ? { workspace: options.workspace } : {}),
-      ...(options.resume ? { resume: true } : {}),
-      ...(options.supersedeTraceId ? { supersedeTraceId: options.supersedeTraceId } : {}),
-      modelCapabilities: {
-        contextWindow: selected.contextWindow,
-        maxOutput: selected.maxOutput,
-        inputModes: selected.inputModes,
-        outputModes: selected.outputModes,
-        supportedEfforts: selected.supportedEfforts,
-        defaultEffort: selected.defaultEffort,
-        reasoningSupported: selected.reasoningSupported,
-        reasoningMandatory: selected.reasoningMandatory,
-        reasoningSupportsMaxTokens: selected.reasoningSupportsMaxTokens,
-        supportsTools: selected.supportsTools,
-        supportsVision: selected.supportsVision,
-      },
-      ...(options.traceId ? { traceId: options.traceId } : {}),
-    }, 1800000);
-  } finally {
-    disposers.forEach((dispose) => dispose());
-    setTimeout(() => lifecycleDisposers.forEach((dispose) => dispose()), 2500);
-  }
-}
-
-async function cancelAgentTurn(traceId) {
-  return sendRequest("agent.cancel", { traceId });
-}
-
-async function runAcpTurn(prompt, options = {}) {
-  const providers = await window.shell.acpProviders.list();
-  const selected = providers.find((p) => p.manifest.id === options.providerId);
-  if (!selected) throw new Error("The ACP provider for this conversation is not configured.");
-  const disposers = [];
-  if (options.onDelta) {
-    disposers.push(onEvent("acp.text_delta", (payload) => {
-      if (payload?.traceId === options.traceId && payload.delta) options.onDelta(payload.delta, payload.messageId);
-    }));
-  }
-  if (options.onReasoningDelta) {
-    disposers.push(onEvent("acp.thought_delta", (payload) => {
-      if (payload?.traceId === options.traceId && payload.delta) options.onReasoningDelta(payload.delta);
-    }));
-  }
-  if (options.onToolCallStart) {
-    disposers.push(onEvent("acp.tool_call", (payload) => {
-      if (payload?.traceId === options.traceId) options.onToolCallStart({ callId: payload.call.id, name: payload.call.title, args: payload.call.rawInput ?? {} });
-    }));
-  }
-  if (options.onToolCallEnd) {
-    disposers.push(onEvent("acp.tool_call_update", (payload) => {
-      if (payload?.traceId === options.traceId) options.onToolCallEnd({ callId: payload.callId, ok: payload.status === "ok", error: payload.status === "fail" ? "Failed" : undefined });
-    }));
-  }
-  if (options.onTurnEnd) {
-    disposers.push(onEvent("acp.turn_end", (payload) => {
-      if (payload?.traceId === options.traceId) options.onTurnEnd({ ok: payload.ok, error: payload.error });
-    }));
-  }
-  if (options.onPermissionRequest) {
-    disposers.push(onEvent("acp.permission_request", (payload) => {
-      if (payload?.traceId === options.traceId) options.onPermissionRequest(payload);
-    }));
-  }
-  if (options.onAskRequest) {
-    disposers.push(onEvent("acp.ask_request", (payload) => {
-      if (payload?.traceId === options.traceId) options.onAskRequest(payload);
-    }));
-  }
-  try {
-    return await sendRequest("acp.run", {
-      traceId: options.traceId,
-      conversationId: options.conversationId,
-      workspace: options.workspace,
-      provider: { providerId: selected.manifest.id, command: selected.config.command, args: selected.config.args, authMethodId: selected.manifest.authMethodId },
-      prompt,
-    }, 1800000);
-  } finally {
-    disposers.forEach((dispose) => dispose());
-  }
-}
-
-async function cancelAcpTurn(traceId, conversationId) {
-  return sendRequest("acp.cancel", { traceId, conversationId });
-}
-
-async function getAcpSessionInfo(conversationId) {
-  return sendRequest("acp.session_info", { conversationId });
-}
-
-async function setAcpConfigOption(conversationId, configId, value) {
-  return sendRequest("acp.set_config_option", { conversationId, configId, value });
-}
-
-async function ensureAcpSession(conversationId, workspace, provider) {
-  return sendRequest("acp.ensure_session", { conversationId, workspace, provider });
-}
-
-async function answerAcpPermission(payload) {
-  return sendRequest("acp.permission_answer", payload, 30000);
-}
-
-async function answerAcpAsk(payload) {
-  return sendRequest("acp.ask_answer", payload, 30000);
-}
-
-async function answerAskQuestion(payload) {
-  return sendRequest("agent.ask_answer", payload, 30000);
 }
 
 // ============ View Switching ============
@@ -1236,7 +882,7 @@ function initUpdater() {
 // ============ Refresh all views ============
 
 async function refreshAll() {
-  await fetchPlugins();
+  plugins = await fetchPlugins();
   renderAppGrid();
   renderInstalledTable();
   renderAutostartList();
@@ -1374,14 +1020,14 @@ document.addEventListener("DOMContentLoaded", () => {
   };
   agentConversationController = new AgentConversationController({
     shell: window.shell,
-    runTurn: runAgentTurn,
+    runTurn: (messages, options) => runAgentTurn(messages, { ...options, onLog: writeRendererLog }, aiSettings),
     cancelTurn: cancelAgentTurn,
     answerAsk: answerAskQuestion,
     getActiveModel: activeModel,
     getVisionMode: () => aiSettings.vision,
     notify: showToast,
     log: writeRendererLog,
-    runAcpTurn,
+    runAcpTurn: (prompt, options) => runAcpTurn(prompt, { ...options, onLog: writeRendererLog }),
     cancelAcpTurn,
     answerAcpPermission,
     answerAcpAsk,
@@ -2113,10 +1759,18 @@ document.addEventListener("DOMContentLoaded", () => {
     if ($(".view[data-view='jobs']")?.classList.contains("active")) void jobsController.refresh();
   });
 
-  // Connect and subscribe — pre-seed activeSubscriptions so onopen always subscribes
-  activeSubscriptions.add("*");
+  // Connect and subscribe — initialize WS client with callbacks, then connect
+  initWsClient({
+    url: WS_URL,
+    onOpen: (isOpen) => {
+      updateConnStatus(isOpen !== false);
+      if (isOpen !== false) refreshAll();
+    },
+    onLog: writeRendererLog,
+  });
+  subscribe(["*"]).catch(() => {});
   connectWs();
 
   // Periodic refresh (fallback for state sync)
-  setInterval(() => { if (connected) refreshAll(); }, 5000);
+  setInterval(() => { if (isConnected()) refreshAll(); }, 5000);
 });

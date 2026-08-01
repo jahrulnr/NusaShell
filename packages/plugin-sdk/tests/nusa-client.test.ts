@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { NusaClient } from "../src/client/nusa-client.js";
+import { nodeConnectionFactory } from "./test-connection-factory.js";
 import { WebSocketServer } from "@nusashell/transport-ws";
 import { MessageRouter } from "@nusashell/transport-ws";
 import { CommandBus, QueryBus } from "@nusashell/application";
@@ -32,7 +33,7 @@ describe("NusaClient", () => {
     server = new WebSocketServer(router, { port });
     await server.start();
 
-    client = new NusaClient({ url: `ws://127.0.0.1:${port}` });
+    client = new NusaClient({ url: `ws://127.0.0.1:${port}`, connectionFactory: nodeConnectionFactory });
     await client.connect();
   });
 
@@ -103,7 +104,7 @@ describe("NusaClient", () => {
     const errorServer = new WebSocketServer(router, { port: port + 1 });
     await errorServer.start();
 
-    const errorClient = new NusaClient({ url: `ws://127.0.0.1:${port + 1}` });
+    const errorClient = new NusaClient({ url: `ws://127.0.0.1:${port + 1}`, connectionFactory: nodeConnectionFactory });
     await errorClient.connect();
 
     await expect(errorClient.plugins.stop("com.unknown")).rejects.toThrow(NusaClientError);

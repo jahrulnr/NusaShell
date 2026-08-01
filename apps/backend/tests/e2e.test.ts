@@ -2,7 +2,7 @@ import { describe, expect, it, afterAll, beforeAll } from "vitest";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createContainer } from "../src/container.js";
-import { NusaClient } from "@nusashell/plugin-sdk";
+import { NusaClient, WebSocketConnection } from "@nusashell/plugin-sdk";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLUGINS_ROOT = resolve(__dirname, "../../../plugins");
@@ -21,7 +21,7 @@ describe("E2E: notes plugin", () => {
     });
     await container.wsServer.start();
 
-    client = new NusaClient({ url: `ws://127.0.0.1:${PORT}`, defaultTimeoutMs: 15000 });
+    client = new NusaClient({ url: `ws://127.0.0.1:${PORT}`, defaultTimeoutMs: 15000, connectionFactory: (url, cb) => new WebSocketConnection(url, cb) });
     await client.connect();
     await client.subscribe();
   });
