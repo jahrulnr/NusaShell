@@ -58,6 +58,48 @@ export function formatContextUsage(usedTokens, contextWindow) {
   return `${formatTokenCount(used)} ctx`;
 }
 
+/**
+ * Resolve the token count to display in the context badge during a live turn.
+ *
+ * The badge shows approximate *current prompt window* fill — NOT cumulative
+ * billing tokens. `estimatedTokens` from `agent.context` events is the display
+ * signal; `inputTokens` on that event is cumulative billing and is intentionally
+ * ignored here so multi-round tool turns do not inflate the badge to ~N× the
+ * real window.
+ *
+ * @param {{ estimatedTokens?: number, inputTokens?: number, liveTokens?: number }} input
+ * @returns {number} tokens to show (never below already-streamed output)
+ */
+export function resolveContextBadgeTokens({ estimatedTokens, inputTokens, liveTokens } = {}) {
+  // inputTokens is cumulative billing across tool rounds — intentionally ignored
+  // for the badge (BH-CTX-01/04). Accepted in the signature so callers can pass
+  // the full event payload without a separate strip step.
+  void inputTokens;
+  const estimated = Number(estimatedTokens) || 0;
+  const live = Number(liveTokens) || 0;
+  // A late agent.context event must not drop the badge below output already
+  // streamed to the user; take the richer of the two estimate-based values.
+  return Math.max(estimated, live);
+}
+
+/**
+ * Decide whether a post-await ACP UI update should still apply.
+ *
+ * ACP session/config awaits can resolve after the user has already switched to
+ * a regular chat. Applying the ACP label/options then would stick the model
+ * trigger on `"{model} · ACP"` for a non-ACP conversation. This guard returns
+ * true only when the currently active conversation is still ACP and is the same
+ * conversation that started the await.
+ *
+ * @param {{ activeId?: string, activeKind?: string, startedId?: string }} input
+ * @returns {boolean}
+ */
+export function shouldApplyAcpUiUpdate({ activeId, activeKind, startedId } = {}) {
+  if (activeKind !== "acp") return false;
+  if (!startedId || !activeId) return false;
+  return activeId === startedId;
+}
+
 export function estimateContextTokens(messages = []) {
   return Math.ceil(messages.reduce((total, message) => total + estimateMessageChars(message), 0) / 4);
 }
@@ -75,11 +117,18 @@ export function estimateTokenChars(value) {
 function estimateMessageChars(message) {
   if (!message || typeof message !== "object") return 0;
   let chars = 0;
+  // Durable assistant messages mirror content/reasoning/toolCalls inside
+  // `steps`. When steps are present, estimate from steps only to avoid
+  // double-counting the same text twice (which inflated the badge ~2x).
+  if (Array.isArray(message.steps) && message.steps.length > 0) {
+    chars += estimateTokenChars(message.steps);
+    if (message.attachments) chars += estimateTokenChars(message.attachments);
+    return chars;
+  }
   if (typeof message.content === "string") chars += message.content.length;
   else if (message.content != null) chars += estimateTokenChars(message.content);
   if (typeof message.reasoning === "string") chars += message.reasoning.length;
   if (message.toolCalls) chars += estimateTokenChars(message.toolCalls);
-  if (message.steps) chars += estimateTokenChars(message.steps);
   if (message.attachments) chars += estimateTokenChars(message.attachments);
   if (message.role === "tool") {
     chars += estimateTokenChars(message.name);

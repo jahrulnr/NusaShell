@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.56] - 2026-08-01
+
+### Fixed
+
+- **ACP model label no longer sticks on regular chats after switching.** The
+  shared `#agent-model-trigger-label` was written as `"{model} · ACP"` by
+  `updateAcpModelLabel` after `ensureAcpSession` / `refreshAcpConfigOptions` /
+  `selectAcpConfigOption` awaits resolved — without checking the conversation
+  was still ACP. Switching to a regular chat called `refreshModelPicker()`
+  (correct label), then a late ACP resolve overwrote it again. All three async
+  ACP methods now capture the conversation id before the await and re-check
+  `kind === "acp"` + `activeId === startedId` after, via the new
+  `shouldApplyAcpUiUpdate` helper. `updateAcpModelLabel` also early-returns
+  unless the current conversation is ACP. The leave-ACP path (hide chrome, clear
+  `acpConfigOptions`, `refreshModelPicker()`) is unchanged and stays synchronous.
+
+### Tests
+
+- Added `shouldApplyAcpUiUpdate({ activeId, activeKind, startedId })` unit tests
+  covering: same ACP conversation (true), switched to regular chat (false),
+  switched to a different conversation (false), missing ids (false), and
+  switched to a different ACP conversation (false).
+
+## [0.0.55] - 2026-08-01
+
+### Fixed
+
+- **Agent context badge no longer inflates after multi-round tool turns.** The
+  composer status badge is meant to show approximate *current prompt window*
+  fill, but it mixed local `chars/4` estimates with cumulative
+  `usage.inputTokens` summed across tool rounds (a billing total) and took
+  `Math.max`, so a 12k-window turn with N tool rounds displayed ~N× the real
+  window. The badge now uses `agent.context` `estimatedTokens` (window estimate)
+  only and ignores cumulative `inputTokens` on context events. After a turn,
+  `refresh()` re-estimates from persisted messages and the result is no longer
+  overwritten with `result.usage.inputTokens`.
+- **Idle badge no longer ~2× for assistant messages with `steps`.**
+  `estimateMessageChars` double-counted `content` + `reasoning` + `toolCalls`
+  and `steps` (which mirror them in durable assistant messages). When `steps` is
+  a non-empty array, the estimator now uses `steps` only (plus `attachments` for
+  user messages); it falls back to `content`/`reasoning`/`toolCalls` only when
+  `steps` are absent.
+- **ACP turns now refresh the context badge.** `submitAcp` never updated the
+  badge during/after ACP streams; it now calls `updateContextStatus()` in
+  `finally` so the badge reflects the current window fill after an ACP turn.
+
+### Changed
+
+- `resolveContextBadgeTokens` now accepts an optional `inputTokens` field in its
+  input (cumulative billing — intentionally ignored) so callers can pass the full
+  `agent.context` event payload without a separate strip step. The controller's
+  `onContextUpdate` passes `inputTokens` through; the helper drops it.
+
+### Tests
+
+- Added BH-CTX-01..09 bug-hunt catalog tests (1:1 named) covering: multi-round
+  tool turns not summing prompts (01), post-turn badge matching reopen (02),
+  steps/body not double-counted (03), window estimate preferred over cumulative
+  usage (04), unknown/known window formats (05/06), empty thread (07), ACP
+  refresh (08), and hostile transcript text treated as opaque length (09).
+
 ## [0.0.54] - 2026-08-01
 
 ### Added

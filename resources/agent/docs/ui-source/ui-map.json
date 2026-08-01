@@ -1652,7 +1652,7 @@
       "section": "Composer",
       "label": "Context usage status",
       "type": "status text",
-      "action": "Shows used / total context tokens for the selected model, or 'Choose a model' when none is selected."
+      "action": "Shows approximate used / total context window fill for the selected model (from agent.context estimates and local chars/4 estimates — not cumulative billed input tokens), or 'Choose a model' when none is selected."
     },
     "agent-stop-btn": {
       "section": "Composer",

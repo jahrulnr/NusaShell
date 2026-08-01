@@ -13,7 +13,7 @@ import {
   summarizeToolArgs,
   toConversationToolCall,
 } from "./agent-conversation-ui.js";
-import { estimateContextTokens, formatContextUsage } from "./ai-model-ui.js";
+import { estimateContextTokens, formatContextUsage, resolveContextBadgeTokens, shouldApplyAcpUiUpdate } from "./ai-model-ui.js";
 import { inspectAttachmentContent, toDataUrl } from "./attachment-content.js";
 
 export class AgentConversationController {
@@ -238,9 +238,15 @@ export class AgentConversationController {
           if (card) this.updateStreamingToolCard(card, payload);
         },
         onContextUpdate: (payload) => {
-          const fromUsage = Number(payload?.inputTokens) || 0;
-          const estimated = Number(payload?.estimatedTokens) || 0;
-          setContextStatus(Math.max(fromUsage, estimated));
+          // Badge = approximate current prompt window fill, NOT cumulative
+          // billing tokens. Pass the full event payload; the helper ignores
+          // inputTokens (cumulative billing) so multi-round tool turns do not
+          // inflate the badge ~N× the real window (BH-CTX-01/04).
+          setContextStatus(resolveContextBadgeTokens({
+            estimatedTokens: Number(payload?.estimatedTokens) || 0,
+            inputTokens: Number(payload?.inputTokens) || 0,
+            liveTokens,
+          }));
         },
         onTurnEnd: () => {
           this.sealStreamingToolCardsIncomplete(streamState);
@@ -294,13 +300,10 @@ export class AgentConversationController {
       const savedMessage = this.conversation.messages.at(-1);
       this.sealStreamingMessage(pending, savedMessage ?? result);
       await this.refresh();
-      const finalTokens = Math.max(
-        liveTokens,
-        estimateContextTokens(buildAgentContext(this.conversation)),
-        estimateContextTokens(this.conversation?.messages || []),
-        Number(result.usage?.inputTokens) || 0,
-      );
-      status.textContent = selectedModel ? formatContextUsage(finalTokens, selectedModel.contextWindow) : "Choose a model";
+      // refresh() already calls updateContextStatus() with an estimate from
+      // persisted messages. Do NOT overwrite with result.usage.inputTokens —
+      // that is cumulative billing across tool rounds, not the current window
+      // fill, and would inflate the badge ~N× after multi-round turns.
       this.log("info", `Agent turn completed trace=${result.traceId} rounds=${result.rounds}`);
     } catch (error) {
       if (error.code === "AGENT_TURN_CANCELLED") {
@@ -511,6 +514,9 @@ export class AgentConversationController {
       sendButton.disabled = false;
       stopButton.hidden = true;
       input.focus();
+      // ACP turns never emitted a context badge update; refresh from persisted
+      // messages so the badge reflects the current window fill after the turn.
+      this.updateContextStatus();
     }
   }
 
@@ -713,7 +719,9 @@ export class AgentConversationController {
   async ensureAcpSessionIfNeeded() {
     if (this.conversation?.kind !== "acp" || !this.ensureAcpSession) return;
     if (this.acpConfigOptions.length > 0) return;
+    const startedId = this.conversation.id;
     const providers = await this.shell.acpProviders.list();
+    if (!shouldApplyAcpUiUpdate({ activeId: this.activeId, activeKind: this.conversation?.kind, startedId })) return;
     const descriptor = providers.find((p) => p.manifest.id === this.conversation.acp.providerId);
     if (!descriptor) return;
     try {
@@ -727,6 +735,7 @@ export class AgentConversationController {
           authMethodId: descriptor.manifest.authMethodId,
         },
       );
+      if (!shouldApplyAcpUiUpdate({ activeId: this.activeId, activeKind: this.conversation?.kind, startedId })) return;
       this.acpConfigOptions = info?.configOptions ?? [];
       this.updateAcpModelLabel();
     } catch (error) {
@@ -735,6 +744,7 @@ export class AgentConversationController {
   }
 
   updateAcpModelLabel() {
+    if (this.conversation?.kind !== "acp") return;
     const modelName = this.currentAcpModelName();
     if (!modelName) return;
     const pillLabel = $("#agent-acp-pill-label");
@@ -753,8 +763,10 @@ export class AgentConversationController {
 
   async refreshAcpConfigOptions() {
     if (this.conversation?.kind !== "acp") return;
+    const startedId = this.conversation.id;
     try {
       const info = await this.getAcpSessionInfo(this.conversation.id);
+      if (!shouldApplyAcpUiUpdate({ activeId: this.activeId, activeKind: this.conversation?.kind, startedId })) return;
       this.acpConfigOptions = info?.configOptions ?? [];
       this.updateAcpModelLabel();
     } catch (error) {
@@ -764,8 +776,10 @@ export class AgentConversationController {
 
   async selectAcpConfigOption(configId, value) {
     if (this.conversation?.kind !== "acp" || !this.setAcpConfigOption) return;
+    const startedId = this.conversation.id;
     try {
       const updated = await this.setAcpConfigOption(this.conversation.id, configId, value);
+      if (!shouldApplyAcpUiUpdate({ activeId: this.activeId, activeKind: this.conversation?.kind, startedId })) return;
       this.acpConfigOptions = updated ?? [];
       this.updateAcpModelLabel();
     } catch (error) {

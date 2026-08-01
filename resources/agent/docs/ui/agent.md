@@ -178,7 +178,7 @@ A raised command dock at the bottom of the thread. Its message input starts at o
 - **Context usage status** (`#agent-provider-status`):
   - Section: Composer
   - Type: status text
-  - Action: Shows used / total context tokens for the selected model, or 'Choose a model' when none is selected.
+  - Action: Shows approximate used / total context window fill for the selected model (from agent.context estimates and local chars/4 estimates — not cumulative billed input tokens), or 'Choose a model' when none is selected.
 
 - **Stop turn** (`#agent-stop-btn`):
   - Section: Composer

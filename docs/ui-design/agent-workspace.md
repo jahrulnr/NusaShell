@@ -40,7 +40,10 @@ search lives on Home and filters installed plugins by name, ID, or description.
 Plugin or editable-field right-clicks open the appropriate shell-owned context
 menu; edit actions use Electron's clipboard bridge. The
 composer status summarizes estimated `used/max` context tokens instead of
-repeating the selected model name. The composer starts as a single text row,
+repeating the selected model name. The badge reflects approximate *current
+prompt window* fill (from `agent.context` estimates and local `chars/4`
+estimates), not cumulative billed input tokens summed across tool rounds. The
+composer starts as a single text row,
 grows with wrapped or explicit lines, and caps at ten rows before its textarea
 scrolls internally; the controls footer stays fixed below it.
 
