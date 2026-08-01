@@ -1338,9 +1338,7 @@ document.addEventListener("DOMContentLoaded", () => {
       authSelect.appendChild(opt);
     }
     authSelect.value = provider.config.authMethodId ?? provider.manifest.authMethodId ?? "";
-    if (provider.manifest.id === "codex") {
-      authHint.textContent = "ChatGPT login: run `codex login` then click Connect. API key: set OPENAI_API_KEY or CODEX_API_KEY in the process env that launches Electron, then choose api-key.";
-    } else if (provider.manifest.authMethodId) {
+    if (provider.manifest.authMethodId) {
       authHint.textContent = `Auth method: ${provider.manifest.authMethodId}. Click Connect after enabling.`;
     } else {
       authHint.textContent = "";
