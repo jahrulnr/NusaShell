@@ -11,7 +11,7 @@ import {
   type AgentContextUpdate,
 } from "../../services/agent-turn-runner.js";
 import { injectPrompts, type PromptVars } from "../../services/prompt-injector.js";
-import { detectRuntimeOs } from "../../services/runtime-os.js";
+import { detectRuntimeOs, type RuntimeOsProbe } from "../../services/runtime-os.js";
 import { formatMemoryPrompt } from "../../services/memory-prompt-formatter.js";
 import type { MemoryStorePort } from "../../../memory/ports/memory-store.port.js";
 import { InProcessAgentTurnWorker, type AgentTurnWorker } from "../../services/in-process-agent-turn-worker.js";
@@ -56,6 +56,7 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
     private readonly onTurnEnd?: (traceId: string, reason: "completed" | "cancelled" | "failed" | "superseded") => void,
     private readonly onTurnStarted?: (traceId: string) => void,
     private readonly onTurnSuperseded?: (oldTraceId: string, newTraceId: string) => void,
+    private readonly runtimeOsProbe?: RuntimeOsProbe,
   ) {}
 
   async handle(command: RunAgentTurnCommand): Promise<AgentTurnResult> {
@@ -144,7 +145,7 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
       const vars: PromptVars = {
         currentDate: new Date().toISOString().slice(0, 10),
         environment: process.env.NODE_ENV === "production" ? "production" : "development",
-        runtimeOs: detectRuntimeOs(),
+        runtimeOs: detectRuntimeOs(this.runtimeOsProbe),
         availableTools: tools.map((tool) => tool.name).join(", "),
         ...(command.workspace ? { workspace: command.workspace } : {}),
       };

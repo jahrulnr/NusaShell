@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdtemp, mkdir, open, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import {
   JobScheduler,
@@ -8,6 +8,7 @@ import {
   DEFAULT_JOB_EXECUTOR_SETTINGS,
   type Job,
   type JobStorePort,
+  type JobFsPort,
   type JobOutputEntry,
   type JobExecutionResult,
   type JobAgentExecutorSettings,
@@ -113,12 +114,75 @@ class FakeCallToolHandler {
   }
 }
 
+const TICK_LOCK_FILE = ".tick.lock";
+const STALE_PID_AFTER_MS = 5 * 60 * 1000;
+
+/** Test-only JobFsPort backed by the real filesystem (temp dir). */
+class TestJobFs implements JobFsPort {
+  constructor(private readonly root: string) {}
+
+  async persistJobOutput(jobId: string, stamp: string, content: string): Promise<string | null> {
+    try {
+      const dir = resolve(this.root, "output", jobId);
+      await mkdir(dir, { recursive: true });
+      const path = resolve(dir, `${stamp}.md`);
+      await writeFile(path, content, "utf8");
+      return path;
+    } catch {
+      return null;
+    }
+  }
+
+  async acquireTickLock(): Promise<boolean> {
+    const lockPath = resolve(this.root, TICK_LOCK_FILE);
+    try {
+      await mkdir(this.root, { recursive: true });
+      try {
+        const entries = await readdir(this.root);
+        if (entries.includes(TICK_LOCK_FILE)) {
+          const content = await readFile(lockPath, "utf8").catch(() => "");
+          const pidMatch = /pid:(\d+)/.exec(content);
+          const startedMatch = /started:(\S+)/.exec(content);
+          const staleByAge = startedMatch
+            ? Date.now() - new Date(startedMatch[1]!).getTime() > STALE_PID_AFTER_MS
+            : false;
+          const pidDead = pidMatch ? !processAlive(parseInt(pidMatch[1]!, 10)) : false;
+          if (staleByAge || pidDead) {
+            await rm(lockPath, { force: true });
+          }
+        }
+      } catch {
+        // best-effort
+      }
+      const fh = await open(lockPath, "wx");
+      await fh.writeFile(`pid:${process.pid}\nstarted:${new Date().toISOString()}\n`);
+      await fh.close();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async releaseTickLock(): Promise<void> {
+    await rm(resolve(this.root, TICK_LOCK_FILE), { force: true }).catch(() => {});
+  }
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function makeDeps(overrides: Partial<{
   store: FakeJobStore;
   executor: ScriptedExecutor;
   callToolHandler: FakeCallToolHandler;
   eventDispatcher: EventDispatcher;
-  jobsRoot: string;
+  jobFs: JobFsPort;
   executorSettings: JobAgentExecutorSettings;
 }> = {}) {
   const store = overrides.store ?? new FakeJobStore();
@@ -144,7 +208,7 @@ describe("JobScheduler", () => {
     const { store, executor, callToolHandler, eventDispatcher } = makeDeps();
     const scheduler = new JobScheduler({
       store, executor, callToolHandler, eventDispatcher,
-      jobsRoot: tempDir, executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
+      jobFs: new TestJobFs(tempDir), executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
       now: () => NOW,
     });
     expect(scheduler.getSettings()).toEqual(DEFAULT_JOB_SCHEDULER_SETTINGS);
@@ -159,7 +223,7 @@ describe("JobScheduler", () => {
     const executor = new ScriptedExecutor(() => ({ traceId: "t1", status: "ok", summary: "hello done" }));
     const scheduler = new JobScheduler({
       store, executor, callToolHandler: new FakeCallToolHandler(), eventDispatcher,
-      jobsRoot: tempDir, executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
+      jobFs: new TestJobFs(tempDir), executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
       now: () => NOW,
     });
     await scheduler.tick();
@@ -181,7 +245,7 @@ describe("JobScheduler", () => {
     const scheduler = new JobScheduler({
       store, executor: new ScriptedExecutor(() => ({ traceId: "t", status: "ok", summary: "" })),
       callToolHandler, eventDispatcher: new EventDispatcher(),
-      jobsRoot: tempDir, executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
+      jobFs: new TestJobFs(tempDir), executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
       now: () => NOW,
     });
     await scheduler.tick();
@@ -202,7 +266,7 @@ describe("JobScheduler", () => {
     const scheduler = new JobScheduler({
       store, executor: new ScriptedExecutor(() => ({ traceId: "t", status: "ok", summary: "ok" })),
       callToolHandler: new FakeCallToolHandler(), eventDispatcher: new EventDispatcher(),
-      jobsRoot: tempDir, executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
+      jobFs: new TestJobFs(tempDir), executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
       now: () => NOW,
     });
     await scheduler.tick();
@@ -221,7 +285,7 @@ describe("JobScheduler", () => {
     const scheduler = new JobScheduler({
       store, executor: new ScriptedExecutor(() => ({ traceId: "t", status: "ok", summary: "ok" })),
       callToolHandler: new FakeCallToolHandler(), eventDispatcher: new EventDispatcher(),
-      jobsRoot: tempDir, executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
+      jobFs: new TestJobFs(tempDir), executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
       now: () => NOW,
     });
     await scheduler.tick();
@@ -245,7 +309,7 @@ describe("JobScheduler", () => {
     const executor = new ScriptedExecutor(() => { fired += 1; return { traceId: "t", status: "ok", summary: "ok" }; });
     const scheduler = new JobScheduler({
       store, executor, callToolHandler: new FakeCallToolHandler(), eventDispatcher,
-      jobsRoot: tempDir, executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
+      jobFs: new TestJobFs(tempDir), executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
       now: () => NOW,
     });
     await scheduler.tick();
@@ -266,7 +330,7 @@ describe("JobScheduler", () => {
     const executor = new ScriptedExecutor(() => { fired += 1; return { traceId: "t", status: "ok", summary: "ok" }; });
     const scheduler = new JobScheduler({
       store, executor, callToolHandler: new FakeCallToolHandler(), eventDispatcher: new EventDispatcher(),
-      jobsRoot: tempDir, executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
+      jobFs: new TestJobFs(tempDir), executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
       now: () => NOW,
     });
     await scheduler.tick();
@@ -290,7 +354,7 @@ describe("JobScheduler", () => {
     const scheduler = new JobScheduler({
       store, executor: new ScriptedExecutor(() => ({ traceId: "t", status: "ok", summary: "ok" })),
       callToolHandler, eventDispatcher: new EventDispatcher(),
-      jobsRoot: tempDir, executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
+      jobFs: new TestJobFs(tempDir), executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
       now: () => NOW,
     });
     await scheduler.tick();
@@ -307,7 +371,7 @@ describe("JobScheduler", () => {
     const scheduler = new JobScheduler({
       store, executor: new ScriptedExecutor(() => ({ traceId: "t", status: "ok", summary: "manual ok" })),
       callToolHandler: new FakeCallToolHandler(), eventDispatcher: new EventDispatcher(),
-      jobsRoot: tempDir, executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
+      jobFs: new TestJobFs(tempDir), executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
       now: () => NOW,
     });
     const result = await scheduler.runOneNow("manual-1");
@@ -322,7 +386,7 @@ describe("JobScheduler", () => {
     const scheduler = new JobScheduler({
       store, executor: new ScriptedExecutor(() => ({ traceId: "t", status: "ok", summary: "" })),
       callToolHandler: new FakeCallToolHandler(), eventDispatcher: new EventDispatcher(),
-      jobsRoot: tempDir, executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
+      jobFs: new TestJobFs(tempDir), executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
       now: () => NOW,
     });
     const result = await scheduler.runOneNow("paused-1");
@@ -335,7 +399,7 @@ describe("JobScheduler", () => {
     const scheduler = new JobScheduler({
       store, executor: new ScriptedExecutor(() => ({ traceId: "t", status: "ok", summary: "" })),
       callToolHandler: new FakeCallToolHandler(), eventDispatcher: new EventDispatcher(),
-      jobsRoot: tempDir, executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
+      jobFs: new TestJobFs(tempDir), executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
       now: () => NOW,
     });
     // Acquire the lock manually first.
@@ -354,7 +418,7 @@ describe("JobScheduler", () => {
     const scheduler = new JobScheduler({
       store, executor: new ScriptedExecutor(() => ({ traceId: "t", status: "ok", summary: "" })),
       callToolHandler: new FakeCallToolHandler(), eventDispatcher: new EventDispatcher(),
-      jobsRoot: tempDir, executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
+      jobFs: new TestJobFs(tempDir), executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
       now: () => NOW,
     });
     expect(scheduler.getStatus().running).toBe(false);

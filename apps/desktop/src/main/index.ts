@@ -1,13 +1,11 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell, type IpcMainInvokeEvent, type OpenDialogOptions } from "electron";
+import { app, BrowserWindow, dialog, Menu } from "electron";
 import { resolve } from "node:path";
-import { randomUUID } from "node:crypto";
 import { bootstrap, type BootstrapResult } from "@nusashell/backend";
 import { LogTail, type ShellLogLevel, type ShellLogSource } from "./log-tail.js";
 import {
   createLauncherWindow,
   closeAllPluginWindows,
   closePluginWindow,
-  getLauncherWindow,
   isPluginWindowSender,
   registerWindowIpc,
   setLauncherClosePolicy,
@@ -16,28 +14,29 @@ import {
 } from "./window-manager.js";
 import { LINUX_DESKTOP_APP_NAME } from "./window-assets.js";
 import { AppUpdater } from "./updater.js";
-import { loadConfig, type CallToolCommand, type ListToolsQuery, type StartPluginCommand, type ProbeAcpProviderCommand } from "@nusashell/application";
-import { AiSettingsStore, type AiRegistrySettings, type SaveAiProviderInput } from "./ai-settings.js";
+import { loadConfig, type StartPluginCommand } from "@nusashell/application";
+import { AiSettingsStore, type AiRegistrySettings } from "./ai-settings.js";
 import { AcpProviderStore } from "./acp-provider-store.js";
-import type { AcpProviderSaveInput } from "../shared/acp-provider-contract.js";
 import { flattenModelCatalog } from "./ai-provider-registry.js";
 import { AgentConversationStore } from "./agent-conversation-store.js";
-import type {
-  AgentConversationCheckpoint,
-  AgentConversationMessage,
-} from "../shared/agent-conversation-contract.js";
 import { MailSettingsStore } from "./mail-settings.js";
-import type { SaveMailAccountInput } from "../shared/mail-contract.js";
-import { loadPluginPngDataUrl } from "./plugin-icon.js";
 import {
   AppBehaviorStore,
   shouldHideOnClose,
   shouldQuitOnAllWindowsClosed,
-  type AppBehaviorPatch,
   type AppBehaviorSettings,
 } from "./app-behavior-settings.js";
 import { createLoginAutostart, type LoginAutostart } from "./login-autostart.js";
 import { TrayManager } from "./tray.js";
+import {
+  registerSkillsIpc,
+  registerAiIpc,
+  registerAgentIpc,
+  registerMailIpc,
+  registerPluginsIpc,
+  registerShellIpc,
+  type IpcContext,
+} from "./ipc/index.js";
 
 let backend: BootstrapResult | null = null;
 let updater: AppUpdater | null = null;
@@ -57,7 +56,6 @@ const logTail = new LogTail(1000);
 const shellLogLevels = new Set<ShellLogLevel>(["debug", "info", "warn", "error"]);
 const aiRuntimeConfig = loadConfig().ai;
 const aiStubEnabled = aiRuntimeConfig.stubEnabled;
-const DOCS_URL = "https://github.com/jahrulnr/NusaShell/tree/master/docs";
 const MAIL_PLUGIN_ID = "nusashell.mail";
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
@@ -123,6 +121,20 @@ function getDataRoot(): string {
   return app.isPackaged ? app.getPath("userData") : resolve(__dirname, "..", "..", "..", "..");
 }
 
+function configureProvider(target: BootstrapResult, provider: AiRegistrySettings["providers"][number]): void {
+  if (!provider.enabled || !provider.baseUrl) return;
+  if (!provider.apiKeyOptional && !provider.apiKey) return;
+  target.container.configureAi({
+    providerId: provider.id,
+    api: provider.api,
+    baseUrl: provider.baseUrl,
+    ...(provider.apiKey ? { apiKey: provider.apiKey } : {}),
+    ...(provider.defaultModel ? { model: provider.defaultModel } : {}),
+    timeoutMs: provider.timeoutMs,
+    maxAttempts: provider.maxAttempts,
+  });
+}
+
 async function startBackend(): Promise<BootstrapResult> {
   const runtimeRoot = getRuntimeRoot();
   const dataRoot = getDataRoot();
@@ -137,8 +149,6 @@ async function startBackend(): Promise<BootstrapResult> {
   mailSettingsStore ??= new MailSettingsStore(resolve(app.getPath("userData"), "mail-settings.json"));
   await mailSettingsStore.load();
 
-  // SQLite requires better-sqlite3 native module rebuilt for Electron's ABI.
-  // Until that's set up, default to filesystem registry. Set NUSASHELL_DB_PATH to opt in.
   const dbPath = process.env.NUSASHELL_DB_PATH || undefined;
   aiSettingsStore = new AiSettingsStore(
     resolve(app.getPath("userData"), "ai-settings.json"),
@@ -195,20 +205,6 @@ async function startBackend(): Promise<BootstrapResult> {
   return result;
 }
 
-function configureProvider(target: BootstrapResult, provider: AiRegistrySettings["providers"][number]): void {
-  if (!provider.enabled || !provider.baseUrl) return;
-  if (!provider.apiKeyOptional && !provider.apiKey) return;
-  target.container.configureAi({
-    providerId: provider.id,
-    api: provider.api,
-    baseUrl: provider.baseUrl,
-    ...(provider.apiKey ? { apiKey: provider.apiKey } : {}),
-    ...(provider.defaultModel ? { model: provider.defaultModel } : {}),
-    timeoutMs: provider.timeoutMs,
-    maxAttempts: provider.maxAttempts,
-  });
-}
-
 async function waitForBackend(port: number, maxRetries = 30): Promise<void> {
   for (let i = 0; i < maxRetries; i++) {
     try {
@@ -219,6 +215,48 @@ async function waitForBackend(port: number, maxRetries = 30): Promise<void> {
     }
     await new Promise(r => setTimeout(r, 100));
   }
+}
+
+function requireBackend(): BootstrapResult {
+  if (!backend) throw new Error("Backend not ready");
+  return backend;
+}
+
+function createIpcContext(): IpcContext {
+  const b = requireBackend();
+  const c = b.container;
+  return {
+    app,
+    dialog,
+    BrowserWindow,
+    getBackend: () => requireBackend(),
+    getAiSettingsStore: () => { if (!aiSettingsStore) throw new Error("AI settings are not ready"); return aiSettingsStore; },
+    getAgentConversationStore: () => { if (!agentConversationStore) throw new Error("Agent conversations are not ready"); return agentConversationStore; },
+    getAcpProviderStore: () => { if (!acpProviderStore) throw new Error("ACP provider store is not ready"); return acpProviderStore; },
+    getMailSettingsStore: () => { if (!mailSettingsStore) throw new Error("Mail settings are not ready"); return mailSettingsStore; },
+    getAppBehaviorStore: () => { if (!appBehaviorStore) throw new Error("App behavior settings are not ready"); return appBehaviorStore; },
+    getLoginAutostart: () => { if (!loginAutostart) throw new Error("Login autostart is not ready"); return loginAutostart; },
+    getUpdater: () => updater,
+    logTail,
+    shellLogLevels,
+    commandBus: c.commandBus,
+    queryBus: c.queryBus,
+    skillRegistry: c.skillRegistry,
+    skillProvenance: c.skillProvenance,
+    skillUsage: c.skillUsage,
+    skillApprovalStaging: c.skillApprovalStaging,
+    skillCurator: c.skillCurator,
+    skillCuratorScheduler: c.skillCuratorScheduler,
+    backgroundReviewScheduler: c.backgroundReviewScheduler,
+    learningGraph: c.learningGraph,
+    configureBackgroundReview: (...args) => c.configureBackgroundReview(...args),
+    configureCurator: (...args) => c.configureCurator(...args),
+    configureCuratorScheduler: (...args) => c.configureCuratorScheduler(...args),
+    getAppBehavior: () => appBehavior,
+    setAppBehavior: (settings) => { appBehavior = settings; },
+    redactLogMessage,
+    isPluginWindowSender,
+  };
 }
 
 app.whenReady().then(async () => {
@@ -255,284 +293,6 @@ app.whenReady().then(async () => {
   logTail.add("main", "info", "Electron main process ready");
   logTail.add("ipc", "debug", "Shell IPC handlers registered");
 
-  ipcMain.handle("shell:open-docs", async () => {
-    await shell.openExternal(DOCS_URL);
-  });
-  ipcMain.handle("plugin-icons:read", (event, source: string, installPath: string) => {
-    if (event.sender !== getLauncherWindow()?.webContents) {
-      throw new Error("Plugin icons are only available to the launcher");
-    }
-    return loadPluginPngDataUrl(source, installPath);
-  });
-  ipcMain.handle("shell:pick-plugin-source", async (event, kind: "directory" | "archive") => {
-    if (kind !== "directory" && kind !== "archive") return null;
-    const owner = BrowserWindow.fromWebContents(event.sender);
-    const options: OpenDialogOptions = kind === "directory"
-      ? {
-          title: "Choose a NusaShell plugin folder",
-          buttonLabel: "Choose folder",
-          properties: ["openDirectory"],
-        }
-      : {
-          title: "Choose a NusaShell plugin archive",
-          buttonLabel: "Choose archive",
-          properties: ["openFile"],
-          filters: [
-            { name: "Plugin archives", extensions: ["zip", "tgz", "gz"] },
-            { name: "All files", extensions: ["*"] },
-          ],
-        };
-    const result = owner
-      ? await dialog.showOpenDialog(owner, options)
-      : await dialog.showOpenDialog(options);
-    return result.canceled ? null : (result.filePaths[0] ?? null);
-  });
-  ipcMain.handle("skills:install", async (event) => {
-    const owner = BrowserWindow.fromWebContents(event.sender);
-    const options: OpenDialogOptions = {
-      title: "Install an agent skill",
-      buttonLabel: "Install skill",
-      properties: ["openFile"],
-      filters: [
-        { name: "Agent skill packages", extensions: ["skill", "zip"] },
-        { name: "All files", extensions: ["*"] },
-      ],
-    };
-    const selection = owner
-      ? await dialog.showOpenDialog(owner, options)
-      : await dialog.showOpenDialog(options);
-    if (selection.canceled || !selection.filePaths[0]) return null;
-    const installed = await requireBackend().container.skillRegistry.installFromArchive(selection.filePaths[0]);
-    await requireBackend().container.skillProvenance.markUser(installed.id);
-    return installed;
-  });
-  ipcMain.handle("skills:list", () => requireBackend().container.skillRegistry.list());
-  ipcMain.handle("skills:get", (_event, skillId: string) =>
-    requireBackend().container.skillRegistry.get(skillId));
-  ipcMain.handle("skills:read", (_event, skillId: string, path?: string) =>
-    requireBackend().container.skillRegistry.read(skillId, path));
-  ipcMain.handle("skills:write", (_event, skillId: string, path: string, content: string) =>
-    requireBackend().container.skillRegistry.write(skillId, path, content));
-  ipcMain.handle("skills:delete", (_event, skillId: string) =>
-    requireBackend().container.skillRegistry.delete(skillId));
-  ipcMain.handle("skills:pending:list", () =>
-    requireBackend().container.skillApprovalStaging.list());
-  ipcMain.handle("skills:pending:approve", async (_event, id: string) => {
-    const staging = requireBackend().container.skillApprovalStaging;
-    const pending = await staging.get(id);
-    if (!pending) throw new Error(`Pending write not found: ${id}`);
-    const registry = requireBackend().container.skillRegistry;
-    const provenance = requireBackend().container.skillProvenance;
-    switch (pending.action) {
-      case "create": {
-        const detail = await registry.create(pending.skillId, pending.content);
-        await provenance.markAgent(pending.skillId);
-        await staging.remove(id);
-        return detail;
-      }
-      case "edit": {
-        const result = await registry.write(pending.skillId, "SKILL.md", pending.content);
-        await staging.remove(id);
-        return result;
-      }
-      case "write_file": {
-        const result = await registry.write(pending.skillId, pending.path, pending.content);
-        await staging.remove(id);
-        return result;
-      }
-      case "delete": {
-        await registry.delete(pending.skillId);
-        await provenance.clear(pending.skillId);
-        await staging.remove(id);
-        return { deleted: pending.skillId };
-      }
-      default:
-        throw new Error(`Unknown pending action: ${pending.action}`);
-    }
-  });
-  ipcMain.handle("skills:pending:reject", async (_event, id: string) => {
-    await requireBackend().container.skillApprovalStaging.remove(id);
-  });
-  ipcMain.handle("skills:curator:status", () => {
-    const c = requireBackend().container;
-    return {
-      ...c.skillCuratorScheduler.getStatus(),
-      scheduler: c.skillCuratorScheduler.getSettings(),
-      curator: c.skillCurator.getSettings(),
-    };
-  });
-  ipcMain.handle("skills:curator:run", async (_event, dryRun: boolean) => {
-    return requireBackend().container.skillCuratorScheduler.runManual(dryRun);
-  });
-  ipcMain.handle("skills:curator:configure", async (_event, settings: Record<string, unknown>) => {
-    const c = requireBackend().container;
-    if (settings.curator) c.configureCurator(settings.curator as Record<string, never>);
-    if (settings.scheduler) c.configureCuratorScheduler(settings.scheduler as Record<string, never>);
-    return {
-      scheduler: c.skillCuratorScheduler.getSettings(),
-      curator: c.skillCurator.getSettings(),
-    };
-  });
-  ipcMain.handle("skills:pin", async (_event, skillId: string, pinned: boolean) => {
-    await requireBackend().container.skillUsage.setPinned(skillId, pinned);
-    return { ok: true };
-  });
-  ipcMain.handle("skills:restore", async (_event, skillId: string) => {
-    await requireBackend().container.skillRegistry.restore(skillId);
-    await requireBackend().container.skillUsage.setState(skillId, "active");
-    return { ok: true };
-  });
-  ipcMain.handle("skills:archived:list", () =>
-    requireBackend().container.skillRegistry.listArchived());
-
-  ipcMain.handle("learning:graph", () =>
-    requireBackend().container.learningGraph.buildGraph());
-  ipcMain.handle("learning:node:get", (_event, nodeId: string) =>
-    requireBackend().container.learningGraph.getNode(nodeId));
-  ipcMain.handle("learning:node:edit", (_event, nodeId: string, content: string) =>
-    requireBackend().container.learningGraph.editNode(nodeId, content));
-  ipcMain.handle("learning:node:delete", (_event, nodeId: string) =>
-    requireBackend().container.learningGraph.deleteNode(nodeId));
-  ipcMain.handle("mail-accounts:list", (event) => {
-    assertMailPluginSender(event);
-    return requireMailSettingsStore().getPublic();
-  });
-  ipcMain.handle("mail-accounts:save", async (event, input: SaveMailAccountInput) => {
-    assertMailPluginSender(event);
-    const result = await requireMailSettingsStore().save(input);
-    await restartMailPlugin();
-    return result;
-  });
-  ipcMain.handle("mail-accounts:delete", async (event, accountId: string) => {
-    assertMailPluginSender(event);
-    const result = await requireMailSettingsStore().delete(accountId);
-    await restartMailPlugin();
-    return result;
-  });
-
-  logTail.subscribe((entry) => {
-    for (const window of BrowserWindow.getAllWindows()) {
-      window.webContents.send("logs:entry", entry);
-    }
-  });
-
-  ipcMain.handle("logs:list", () => logTail.list());
-  ipcMain.handle("ai-providers:list", async () => {
-    if (!aiSettingsStore) throw new Error("AI settings are not ready");
-    return aiSettingsStore.getPublic();
-  });
-  ipcMain.handle("ai-providers:save", async (_event, input: SaveAiProviderInput) => {
-    if (!aiSettingsStore || !backend) throw new Error("Backend not ready");
-    const result = await aiSettingsStore.saveProvider(input);
-    aiSettings = await aiSettingsStore.load();
-    const savedId = normalizeProviderId(input.id);
-    backend.container.removeAi(savedId);
-    const provider = aiSettings.providers.find((item) => item.id === savedId);
-    if (provider) configureProvider(backend, provider);
-    return result;
-  });
-  ipcMain.handle("ai-providers:delete", async (_event, providerId: string) => {
-    if (!aiSettingsStore || !backend) throw new Error("Backend not ready");
-    const result = await aiSettingsStore.deleteProvider(providerId);
-    backend.container.removeAi(providerId);
-    aiSettings = await aiSettingsStore.load();
-    return result;
-  });
-  ipcMain.handle("ai-providers:import-models", async (_event, providerId: string) => {
-    if (!aiSettingsStore) throw new Error("AI settings are not ready");
-    const result = await aiSettingsStore.importModels(providerId);
-    aiSettings = await aiSettingsStore.load();
-    return result;
-  });
-  ipcMain.handle("ai-providers:add-model", async (_event, providerId: string, model: { id: string; label: string; contextWindow?: number }) => {
-    if (!aiSettingsStore) throw new Error("AI settings are not ready");
-    const result = await aiSettingsStore.addModel(providerId, model);
-    aiSettings = await aiSettingsStore.load();
-    return result;
-  });
-  ipcMain.handle("ai-providers:select", async (_event, input: { modelKey?: string; effort?: AiRegistrySettings["effort"] }) => {
-    if (!aiSettingsStore) throw new Error("AI settings are not ready");
-    const result = await aiSettingsStore.select(input);
-    aiSettings = await aiSettingsStore.load();
-    return result;
-  });
-  ipcMain.handle("ai-providers:update-runtime", async (_event, input: Pick<AiRegistrySettings, "strategy" | "totalAttemptBudget" | "stream" | "vision" | "userPrompt" | "maxToolRounds" | "maxRepeatedToolCalls" | "compactionEnabled" | "maxInputTokens" | "reserveTokens" | "recentTurns" | "summaryMaxChars">) => {
-    if (!aiSettingsStore || !backend) throw new Error("Backend not ready");
-    const result = await aiSettingsStore.updateRuntime(input);
-    aiSettings = await aiSettingsStore.load();
-    backend.container.configureAiRuntime({
-      strategy: aiSettings.strategy,
-      totalAttemptBudget: aiSettings.totalAttemptBudget,
-      stream: aiSettings.stream,
-      vision: aiSettings.vision,
-      userPrompt: aiSettings.userPrompt,
-      maxToolRounds: aiSettings.maxToolRounds,
-      maxRepeatedToolCalls: aiSettings.maxRepeatedToolCalls,
-      compactionEnabled: aiSettings.compactionEnabled,
-      maxInputTokens: aiSettings.maxInputTokens,
-      reserveTokens: aiSettings.reserveTokens,
-      recentTurns: aiSettings.recentTurns,
-      summaryMaxChars: aiSettings.summaryMaxChars,
-    });
-    for (const provider of aiSettings.providers) {
-      backend.container.removeAi(provider.id);
-      configureProvider(backend, provider);
-    }
-    return result;
-  });
-  ipcMain.handle("agent-conversations:list", () => requireConversationStore().list());
-  ipcMain.handle("agent-conversations:create", (_event, options?: { kind?: "agent" | "acp"; acp?: { providerId: string; sessionId?: string; workspace?: string } }) =>
-    requireConversationStore().create(options));
-  ipcMain.handle("acp-providers:list", () => requireAcpProviderStore().list());
-  ipcMain.handle("acp-providers:save", (_event, input: AcpProviderSaveInput) => requireAcpProviderStore().save(input));
-  ipcMain.handle("acp-providers:get", (_event, providerId: string) => requireAcpProviderStore().getEffective(providerId));
-  ipcMain.handle("acp-providers:probe", async (_event, providerId: string) => {
-    const store = requireAcpProviderStore();
-    const provider = await store.getEffective(providerId);
-    if (!provider) throw new Error(`ACP provider not found: ${providerId}`);
-    const authMethodId = provider.config.authMethodId ?? provider.manifest.authMethodId;
-    const command: ProbeAcpProviderCommand = {
-      kind: "probe-acp-provider",
-      provider: {
-        providerId: provider.manifest.id,
-        command: provider.config.command || provider.manifest.command,
-        args: provider.config.args ?? provider.manifest.args,
-        ...(authMethodId ? { authMethodId } : {}),
-        ...(provider.manifest.env ? { env: provider.manifest.env } : {}),
-      },
-    };
-    const result = await requireBackend().container.commandBus.execute(command) as { ok: boolean; error?: string };
-    const authCheckedAt = new Date().toISOString();
-    if (result.ok) {
-      await store.save({ providerId, authStatus: "connected", authCheckedAt });
-    } else {
-      const errorSave: AcpProviderSaveInput = { providerId, authStatus: "needs-auth", authCheckedAt };
-      if (result.error) errorSave.authError = result.error;
-      await store.save(errorSave);
-    }
-    return store.getEffective(providerId);
-  });
-  ipcMain.handle("agent-conversations:get", (_event, id: string) => requireConversationStore().get(id));
-  ipcMain.handle("agent-conversations:append", (_event, id: string, message: AgentConversationMessage) =>
-    requireConversationStore().appendMessage(id, message));
-  ipcMain.handle("agent-conversations:checkpoint", (_event, id: string, checkpoint: AgentConversationCheckpoint) =>
-    requireConversationStore().saveCheckpoint(id, checkpoint));
-  ipcMain.handle("agent-conversations:delete", (_event, id: string) => requireConversationStore().delete(id));
-  ipcMain.handle("agent-conversations:replace-interrupted", (_event, id: string, message: AgentConversationMessage) =>
-    requireConversationStore().replaceLastInterrupted(id, message));
-  ipcMain.handle("agent-conversations:set-workspace", (_event, id: string, workspace: string) =>
-    requireConversationStore().setWorkspace(id, workspace));
-  ipcMain.handle("background-review:configure", (_event, settings: Record<string, unknown>) => {
-    requireBackend().container.configureBackgroundReview(settings);
-    return { ok: true };
-  });
-  ipcMain.handle("background-review:settings", () =>
-    requireBackend().container.backgroundReviewScheduler.getSettings());
-  ipcMain.on("logs:write", (_event, level: ShellLogLevel, message: string) => {
-    if (!shellLogLevels.has(level) || typeof message !== "string") return;
-    logTail.add("renderer", level, redactLogMessage(message.slice(0, 4000)));
-  });
-
   try {
     backend = await startBackend();
     await waitForBackend(backend.config.port);
@@ -549,67 +309,19 @@ app.whenReady().then(async () => {
     console.error("[main] startBackend failed:", err);
   }
 
-  // IPC handlers for plugin tool calls (in-process, no WS roundtrip)
-  ipcMain.handle("tool:call", async (_event, pluginId: string, toolName: string, args: Record<string, unknown>) => {
-    if (!backend) throw new Error("Backend not ready");
-    const command: CallToolCommand = {
-      kind: "call-tool",
-      pluginId,
-      requestId: randomUUID(),
-      toolName,
-      args: args ?? {},
-    };
-    logTail.add("ipc", "info", `tool.call ${pluginId}.${toolName} (${command.requestId})`);
-    try {
-      const result = await backend.container.commandBus.execute(command);
-      logTail.add("ipc", "info", `tool.call completed ${pluginId}.${toolName} (${command.requestId})`);
-      return result;
-    } catch (error) {
-      logTail.add("ipc", "error", `tool.call failed ${pluginId}.${toolName}: ${String(error)}`);
-      throw error;
-    }
-  });
+  // Register all IPC handlers through focused modules (no container.* in IPC)
+  const ctx = createIpcContext();
+  registerSkillsIpc(ctx);
+  registerAiIpc(ctx);
+  registerAgentIpc(ctx);
+  registerMailIpc(ctx);
+  registerPluginsIpc(ctx);
+  registerShellIpc(ctx);
 
-  ipcMain.handle("tool:list", async (_event, pluginId: string) => {
-    if (!backend) throw new Error("Backend not ready");
-    const query: ListToolsQuery = {
-      kind: "list-tools",
-      pluginId,
-    };
-    logTail.add("ipc", "debug", `tool.list ${pluginId}`);
-    return backend.container.queryBus.execute(query);
-  });
-
-  ipcMain.handle("app-behavior:get", async () => {
-    const settings = await requireAppBehaviorStore().load();
-    return {
-      ...settings,
-      canSetLoginAutostart: app.isPackaged,
-    };
-  });
-  ipcMain.handle("app-behavior:set", async (_event, patch: AppBehaviorPatch) => {
-    const store = requireAppBehaviorStore();
-    const previous = await store.load();
-    const next = await store.set(patch);
-    appBehavior = next;
-    const loginSettingsChanged =
-      next.launchAtLogin !== previous.launchAtLogin
-      || (next.launchAtLogin && next.startHidden !== previous.startHidden);
-    if (loginSettingsChanged) {
-      try {
-        await requireLoginAutostart().set(next.launchAtLogin, { hidden: next.startHidden });
-      } catch (error) {
-        appBehavior = await store.set({
-          launchAtLogin: previous.launchAtLogin,
-          startHidden: previous.startHidden,
-        });
-        throw error;
-      }
+  logTail.subscribe((entry) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send("logs:entry", entry);
     }
-    return {
-      ...next,
-      canSetLoginAutostart: app.isPackaged,
-    };
   });
 
   trayManager = new TrayManager({
@@ -617,16 +329,9 @@ app.whenReady().then(async () => {
     moduleDir: __dirname,
     resourcesPath: process.resourcesPath,
     getStatusLabel: () => backend ? "NusaShell — running" : "NusaShell — starting",
-    onOpen: () => {
-      showLauncherWindow();
-    },
-    onQuit: () => {
-      isQuitting = true;
-      app.quit();
-    },
-    onToggle: () => {
-      toggleLauncherWindow();
-    },
+    onOpen: () => { showLauncherWindow(); },
+    onQuit: () => { isQuitting = true; app.quit(); },
+    onToggle: () => { toggleLauncherWindow(); },
   });
   trayManager.create();
 
@@ -641,72 +346,10 @@ app.whenReady().then(async () => {
     void updater.checkForUpdates();
   }
 
-  // Register updater IPC handlers always (no-op in dev) to prevent renderer errors
-  ipcMain.handle("updater:check", async () => updater?.checkForUpdates() ?? null);
-  ipcMain.handle("updater:quit-install", () => updater?.quitAndInstall());
-  ipcMain.handle("updater:status", () => updater?.getStatus() ?? null);
-
   app.on("activate", () => {
     showLauncherWindow();
   });
 });
-
-function requireConversationStore(): AgentConversationStore {
-  if (!agentConversationStore) throw new Error("Agent conversations are not ready");
-  return agentConversationStore;
-}
-
-function requireAcpProviderStore(): AcpProviderStore {
-  if (!acpProviderStore) throw new Error("ACP provider store is not ready");
-  return acpProviderStore;
-}
-
-function requireBackend(): BootstrapResult {
-  if (!backend) throw new Error("Backend not ready");
-  return backend;
-}
-
-function requireMailSettingsStore(): MailSettingsStore {
-  if (!mailSettingsStore) throw new Error("Mail settings are not ready");
-  return mailSettingsStore;
-}
-
-function requireAppBehaviorStore(): AppBehaviorStore {
-  if (!appBehaviorStore) throw new Error("App behavior settings are not ready");
-  return appBehaviorStore;
-}
-
-function requireLoginAutostart(): LoginAutostart {
-  if (!loginAutostart) throw new Error("Login autostart is not ready");
-  return loginAutostart;
-}
-
-async function restartMailPlugin(): Promise<void> {
-  await requireBackend().container.commandBus.execute({
-    kind: "restart-plugin",
-    pluginId: MAIL_PLUGIN_ID,
-  });
-}
-
-function assertMailPluginSender(event: IpcMainInvokeEvent): void {
-  let source: URL;
-  try {
-    source = new URL(event.sender.getURL());
-  } catch {
-    throw new Error("Mail account settings are only available to the Mail plugin");
-  }
-  if (
-    source.protocol !== "file:"
-    || source.searchParams.get("pluginId") !== MAIL_PLUGIN_ID
-    || !isPluginWindowSender(event.sender, MAIL_PLUGIN_ID)
-  ) {
-    throw new Error("Mail account settings are only available to the Mail plugin");
-  }
-}
-
-function normalizeProviderId(value: string): string {
-  return value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
-}
 
 app.on("window-all-closed", () => {
   closeAllPluginWindows();

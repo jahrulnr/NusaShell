@@ -1,117 +1,49 @@
 import {
   SystemClock,
-  InMemoryPluginRepository,
-  NodeChildProcessAdapter,
-  McpClientFactory,
-  FilesystemPluginRegistry,
-  SqliteDatabase,
-  SqlitePluginRepository,
-  PluginInstaller,
-  PluginSyncService,
-  FilesystemPromptLoader,
-  FilesystemReviewStateStore,
-  MarkdownDocsIndex,
-  FilesystemSkillRegistry,
-  FilesystemSkillProvenance,
-  FilesystemSkillUsage,
-  SkillApprovalStaging,
-  type PendingSkillWrite,
-  FilesystemMemoryStore,
   createLogger,
   AgentProviderRegistry,
-  StaticAgentProvider,
   OpenAiCompatibleAgentProvider,
-  SqliteJobStore,
-  JsonJobStore,
-  AcpJsonRpcClient,
   type Logger,
   type LogObserver,
 } from "@nusashell/infrastructure";
-import { spawn } from "node:child_process";
-import type { PluginRepositoryPort, SkillRegistryPort, SkillProvenancePort, SkillUsagePort, CuratorSettings, MemoryStorePort } from "@nusashell/application";
 import {
-  CommandBus,
-  QueryBus,
   EventDispatcher,
-  PluginRuntimeManager,
-  StartPluginHandler,
-  StopPluginHandler,
-  RestartPluginHandler,
-  InstallPluginHandler,
-  UninstallPluginHandler,
-  SetPluginAutostartHandler,
-  ListPluginsHandler,
-  GetPluginHandler,
-  GetPluginStateHandler,
-  CallToolHandler,
-  CancelToolCallHandler,
-  ListToolsHandler,
-  ListPromptsHandler,
-  GetPromptHandler,
-  ListResourcesHandler,
-  ListResourceTemplatesHandler,
-  ReadResourceHandler,
-  McpAgentToolGateway,
-  ReviewAgentToolGateway,
-  AgentTurnRunner,
-  InProcessAgentTurnWorker,
-  BackgroundReviewScheduler,
-  DEFAULT_REVIEW_SETTINGS,
+  type PluginRepositoryPort,
+  type SkillRegistryPort,
+  type SkillProvenancePort,
+  type SkillUsagePort,
+  type CuratorSettings,
+  type MemoryStorePort,
+  type CommandBus,
+  type QueryBus,
+  type PluginRuntimeManager,
+  type BackgroundReviewScheduler,
+  type SkillCuratorService,
+  type SkillCuratorScheduler,
+  type JobScheduler,
+  type LearningGraphService,
+  type SkillApprovalStaging,
   type BackgroundReviewSettings,
-  SkillCuratorService,
-  SkillCuratorScheduler,
-  DEFAULT_CURATOR_SETTINGS,
-  DEFAULT_SCHEDULER_SETTINGS,
-  LearningGraphService,
-  RunAgentTurnHandler,
-  CancelAgentTurnHandler,
-  AnswerAskQuestionHandler,
-  AskQuestionService,
-  AgentTurnCoordinator,
-  StreamSeqRegistry,
-  JobAgentToolGateway,
-  JobAgentExecutor,
-  JobScheduler,
-  DEFAULT_JOB_EXECUTOR_SETTINGS,
-  AddJobHandler,
-  SetJobEnabledHandler,
-  RunJobNowHandler,
-  RemoveJobHandler,
-  ListJobsHandler,
-  JobOutputHandler,
-  ValidateScheduleHandler,
-  AcpSessionService,
-  AcpPermissionService,
-  AcpAskBridgeService,
-  RunAcpTurnHandler,
-  CancelAcpTurnHandler,
-  AnswerAcpPermissionHandler,
-  AnswerAcpAskHandler,
-  SetAcpConfigOptionHandler,
-  EnsureAcpSessionHandler,
-  ProbeAcpProviderHandler,
-  GetAcpSessionInfoHandler,
-  type JobStorePort,
   type JobSchedulerSettings,
-  type AgentRuntimeSettings,
-  createAgentTextDeltaEvent,
-  createAgentReasoningDeltaEvent,
-  createAgentToolCallStartEvent,
-  createAgentToolCallEndEvent,
-  createAgentContextUpdateEvent,
-  createAgentTurnStartedEvent,
-  createAgentTurnEndEvent,
-  createAgentTurnSupersededEvent,
-  createAgentCancelRequestedEvent,
-  type AgentProvider,
-  SystemPingHandler,
-  SystemVersionHandler,
+  type JobStorePort,
+  type AiConfigurationPort,
 } from "@nusashell/application";
 import {
   MessageRouter,
   WebSocketServer,
   WebSocketEventPublisher,
 } from "@nusashell/transport-ws";
+import type { SqliteDatabase } from "@nusashell/infrastructure";
+import {
+  createPluginRuntime,
+  createSkillsRuntime,
+  createAgentRuntime,
+  createJobRuntime,
+  createAcpRuntime,
+  registerBuses,
+  createTransport,
+  type AgentRuntimeParts,
+} from "./composers/index.js";
 
 export interface ContainerOptions {
   readonly port: number;
@@ -226,301 +158,66 @@ export function createContainer(options: ContainerOptions): Container {
     ...(options.logFile ? { logFile: options.logFile } : {}),
   });
 
-  let pluginRepository: PluginRepositoryPort;
-  let db: SqliteDatabase | undefined;
-
-  if (options.dbPath) {
-    db = new SqliteDatabase(options.dbPath);
-    pluginRepository = new SqlitePluginRepository(db);
-    // Sync filesystem plugins into SQLite so bundled plugins are registered
-    if (options.pluginsRoot) {
-      const syncService = new PluginSyncService(options.pluginsRoot, pluginRepository, logger);
-      syncService.sync().catch((err) => {
-        logger.warn({ err }, "Plugin sync failed during startup");
-      });
-    }
-  } else if (options.pluginsRoot) {
-    pluginRepository = new FilesystemPluginRegistry(options.pluginsRoot, logger);
-  } else {
-    pluginRepository = new InMemoryPluginRepository();
-  }
-
-  const processAdapter = new NodeChildProcessAdapter(logger);
-  const mcpClientFactory = new McpClientFactory(logger);
-
   const eventDispatcher = new EventDispatcher();
-  const aiRuntime: AgentRuntimeSettings & { stream: boolean; vision: "auto" | "on" | "off"; userPrompt: string } = {
-    strategy: options.ai?.strategy ?? "failover" as "failover" | "round-robin" | "switch",
-    totalAttemptBudget: options.ai?.totalAttemptBudget ?? 4,
-    stream: options.ai?.stream ?? true,
-    vision: options.ai?.vision ?? "auto" as "auto" | "on" | "off",
-    userPrompt: options.ai?.userPrompt ?? "",
-    maxToolRounds: options.ai?.maxToolRounds ?? 50,
-    maxRepeatedToolCalls: options.ai?.maxRepeatedToolCalls ?? 50,
-    softRecoverAttempts: options.ai?.softRecoverAttempts ?? 1,
-    maxConcurrentToolCalls: options.ai?.maxConcurrentToolCalls ?? 8,
-    ...(options.ai?.context ? { context: options.ai.context } : {}),
-  };
 
-  const pluginInstaller = options.pluginsRoot
-    ? new PluginInstaller(options.pluginsRoot, logger)
-    : null;
+  const plugin = createPluginRuntime(options, logger, eventDispatcher, clock);
+  const skills = createSkillsRuntime(options, logger, eventDispatcher);
+  const agent = createAgentRuntime(options, logger, eventDispatcher, plugin, skills);
+  const jobs = createJobRuntime(options, logger, eventDispatcher, plugin, agent);
+  const acp = createAcpRuntime(options, logger, eventDispatcher, agent);
 
-  const runtimeManager = new PluginRuntimeManager({
-    pluginRepository,
-    processAdapter,
-    mcpClientFactory,
-    eventDispatcher,
-    clock,
-    logger,
-    ...(options.resolvePluginRuntimeEnvironment
-      ? { resolveRuntimeEnvironment: options.resolvePluginRuntimeEnvironment }
-      : {}),
-  });
-  const docsRoot = options.docsRoot ?? new URL("../../../resources/agent/docs", import.meta.url).pathname;
-  const docsIndexStorageRoot = options.docsIndexStorageRoot ?? new URL("../../../.nusashell/agent/docs-index", import.meta.url).pathname;
-  const docsIndex = new MarkdownDocsIndex(docsRoot, docsIndexStorageRoot);
-  void docsIndex.reindex().catch((err) => {
-    logger.warn({ err }, "Docs index initial build failed; will retry on demand");
-  });
-
-  const skillsRoot = options.skillsRoot ?? new URL("../../../.nusashell/agent/skills", import.meta.url).pathname;
-  const skillRegistry = new FilesystemSkillRegistry(skillsRoot);
-  const skillProvenance = new FilesystemSkillProvenance(skillsRoot);
-  const skillUsage = new FilesystemSkillUsage(skillsRoot);
-  const skillApprovalStaging = new SkillApprovalStaging(skillsRoot);
-  const skillCurator = new SkillCuratorService({
-    registry: skillRegistry,
-    provenance: skillProvenance,
-    usage: skillUsage,
-    eventDispatcher,
-    logger,
-  });
-  const skillCuratorScheduler = new SkillCuratorScheduler({
-    curator: skillCurator,
-    stateRoot: skillsRoot,
-    logger,
-  });
-  void skillCuratorScheduler.initialize().catch((err) => {
-    logger.warn({ err }, "Skill curator scheduler initialization failed");
-  });
-  const memoryRoot = options.memoryRoot ?? new URL("../../../.nusashell/agent/memory", import.meta.url).pathname;
-  const memoryStore = new FilesystemMemoryStore(memoryRoot);
-  const learningGraph = new LearningGraphService({
-    registry: skillRegistry,
-    usage: skillUsage,
-    provenance: skillProvenance,
-    memoryStore,
-  });
-  const askQuestionService = new AskQuestionService();
-  const agentToolGateway = new McpAgentToolGateway(runtimeManager, docsIndex, skillRegistry, logger, memoryStore, skillProvenance, skillApprovalStaging, skillUsage, askQuestionService);
-  const promptLoader = new FilesystemPromptLoader(
-    options.promptsRoot ?? new URL("../../../resources/agent/prompts", import.meta.url).pathname,
-  );
-  const agentProviders: AgentProvider[] = options.ai?.stubEnabled ? [new StaticAgentProvider()] : [];
-  if (options.ai?.baseUrl) {
-    agentProviders.push(new OpenAiCompatibleAgentProvider({
-      id: options.ai.providerId,
-      ...(options.ai.api ? { api: options.ai.api } : {}),
-      baseUrl: options.ai.baseUrl,
-      ...(options.ai.apiKey ? { apiKey: options.ai.apiKey } : {}),
-      ...(options.ai.model ? { model: options.ai.model } : {}),
-      logger,
-      ...(options.ai.retry ? { retry: {
-        ...options.ai.retry,
-        onRetry: (event) => {
-          logger.warn("AI provider retry provider=%s attempt=%d delayMs=%d status=%d kind=%s", event.providerId, event.attempt, event.delayMs, event.status, event.kind);
-        },
-      } } : {}),
-      stream: aiRuntime.stream,
-      vision: aiRuntime.vision,
-      ...(options.ai.timeoutMs !== undefined ? { timeoutMs: options.ai.timeoutMs } : {}),
-    }));
-  }
-  const agentProviderRegistry = new AgentProviderRegistry(agentProviders);
-  const agentTurnCoordinator = new AgentTurnCoordinator();
-  const streamSeqRegistry = new StreamSeqRegistry();
-  const withStreamSeq = <T extends { readonly aggregateId: string }>(event: T): T & { streamSeq: number } => ({
-    ...event,
-    streamSeq: streamSeqRegistry.next(event.aggregateId),
-  });
-  const reviewGateway = new ReviewAgentToolGateway(agentToolGateway);
-  const reviewStateStore = new FilesystemReviewStateStore(memoryRoot);
-  const backgroundReviewScheduler = new BackgroundReviewScheduler({
-    stateStore: reviewStateStore,
-    promptLoader,
-    providerRegistry: agentProviderRegistry,
-    reviewGateway,
-    runnerFactory: ({ provider, toolGateway, maxToolRounds }) => {
-      const worker = new InProcessAgentTurnWorker(provider, toolGateway, logger);
-      return new AgentTurnRunner(worker, { maxToolRounds });
-    },
-    defaultProviderId: options.ai?.providerId || (options.ai?.stubEnabled ? "stub" : ""),
-    eventDispatcher,
-    logger,
-  });
-  if (options.backgroundReview) {
-    backgroundReviewScheduler.configure(options.backgroundReview);
-  }
-
-  // ---- Job automation waist ----
-  const jobsRoot = options.jobsRoot ?? new URL("../../../.nusashell/agent/jobs", import.meta.url).pathname;
-  let jobStore: JobStorePort;
-  if (db) {
-    jobStore = new SqliteJobStore(db);
-  } else {
-    jobStore = new JsonJobStore(jobsRoot);
-  }
-  const jobToolGateway = new JobAgentToolGateway(agentToolGateway);
-  const jobExecutor = new JobAgentExecutor({
-    providerRegistry: agentProviderRegistry,
-    toolGateway: jobToolGateway,
-    defaultProviderId: options.ai?.providerId || (options.ai?.stubEnabled ? "stub" : ""),
-    logger,
-  });
-  const jobScheduler = new JobScheduler({
-    store: jobStore,
-    executor: jobExecutor,
-    callToolHandler: new CallToolHandler(runtimeManager),
-    eventDispatcher,
-    jobsRoot,
-    executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS,
-    logger,
-  });
-  if (options.jobs) {
-    jobScheduler.configure(options.jobs);
-  }
-
-  // ---- ACP external agent surface ----
-  const acpClient = new AcpJsonRpcClient(spawn, logger);
-  const acpPermissionService = new AcpPermissionService();
-  const acpAskService = new AcpAskBridgeService();
-  const acpSessionService = new AcpSessionService({
-    client: acpClient,
-    permissionService: acpPermissionService,
-    askService: acpAskService,
-    eventDispatcher,
-    logger,
-    streamSeq: streamSeqRegistry,
-  });
-
-  const commandBus = new CommandBus();
-  commandBus.register("start-plugin", new StartPluginHandler(runtimeManager));
-  commandBus.register("stop-plugin", new StopPluginHandler(runtimeManager));
-  commandBus.register("restart-plugin", new RestartPluginHandler(runtimeManager));
-  commandBus.register("call-tool", new CallToolHandler(runtimeManager));
-  commandBus.register("cancel-tool-call", new CancelToolCallHandler(runtimeManager));
-  commandBus.register("set-plugin-autostart", new SetPluginAutostartHandler(runtimeManager));
-  commandBus.register("run-agent-turn", new RunAgentTurnHandler(
-    agentProviderRegistry,
-    agentToolGateway,
-    options.ai?.providerId || (options.ai?.stubEnabled ? "stub" : ""),
-    aiRuntime,
-    logger,
-    agentTurnCoordinator,
-    (traceId, delta) => {
-      void eventDispatcher.publish(withStreamSeq(createAgentTextDeltaEvent(traceId, delta)));
-    },
-    (traceId, delta) => {
-      void eventDispatcher.publish(withStreamSeq(createAgentReasoningDeltaEvent(traceId, delta)));
-    },
-    (traceId, call) => {
-      void eventDispatcher.publish(withStreamSeq(createAgentToolCallStartEvent(traceId, call)));
-    },
-    (traceId, execution) => {
-      void eventDispatcher.publish(withStreamSeq(createAgentToolCallEndEvent(traceId, execution)));
-    },
-    (traceId, update) => {
-      void eventDispatcher.publish(withStreamSeq(createAgentContextUpdateEvent(traceId, update.estimatedTokens, update.usage)));
-    },
-    promptLoader,
-    aiRuntime.userPrompt,
-    memoryStore,
-    (result) => { void backgroundReviewScheduler.tick(result); void skillCuratorScheduler.tick(); },
-    (traceId, reason) => {
-      void eventDispatcher.publish(withStreamSeq(createAgentTurnEndEvent(traceId, reason)));
-      streamSeqRegistry.clear(traceId);
-    },
-    (traceId) => {
-      void eventDispatcher.publish(withStreamSeq(createAgentTurnStartedEvent(traceId)));
-    },
-    (oldTraceId, newTraceId) => {
-      void eventDispatcher.publish(withStreamSeq(createAgentTurnSupersededEvent(oldTraceId, newTraceId)));
-    },
-  ));
-  commandBus.register("cancel-agent-turn", new CancelAgentTurnHandler(
-    agentTurnCoordinator,
-    (traceId) => { void eventDispatcher.publish(withStreamSeq(createAgentCancelRequestedEvent(traceId))); },
-  ));
-  commandBus.register("answer-ask-question", new AnswerAskQuestionHandler(askQuestionService));
-  commandBus.register("add-job", new AddJobHandler(jobStore));
-  commandBus.register("set-job-enabled", new SetJobEnabledHandler(jobStore));
-  commandBus.register("run-job-now", new RunJobNowHandler(jobScheduler));
-  commandBus.register("remove-job", new RemoveJobHandler(jobStore));
-  commandBus.register("run-acp-turn", new RunAcpTurnHandler(acpSessionService));
-  commandBus.register("cancel-acp-turn", new CancelAcpTurnHandler(acpSessionService));
-  commandBus.register("answer-acp-permission", new AnswerAcpPermissionHandler(acpPermissionService));
-  commandBus.register("answer-acp-ask", new AnswerAcpAskHandler(acpAskService));
-  commandBus.register("set-acp-config-option", new SetAcpConfigOptionHandler(acpSessionService));
-  commandBus.register("ensure-acp-session", new EnsureAcpSessionHandler(acpSessionService));
-  commandBus.register("probe-acp-provider", new ProbeAcpProviderHandler(acpClient));
-  if (pluginInstaller) {
-    commandBus.register("install-plugin", new InstallPluginHandler(pluginInstaller, eventDispatcher, clock));
-    commandBus.register("uninstall-plugin", new UninstallPluginHandler(pluginInstaller, runtimeManager, pluginRepository, eventDispatcher, clock));
-  }
-
-  const queryBus = new QueryBus();
-  queryBus.register("list-plugins", new ListPluginsHandler(runtimeManager));
-  queryBus.register("get-plugin", new GetPluginHandler(runtimeManager));
-  queryBus.register("get-plugin-state", new GetPluginStateHandler(runtimeManager));
-  queryBus.register("list-tools", new ListToolsHandler(runtimeManager));
-  queryBus.register("list-prompts", new ListPromptsHandler(runtimeManager));
-  queryBus.register("get-prompt", new GetPromptHandler(runtimeManager));
-  queryBus.register("list-resources", new ListResourcesHandler(runtimeManager));
-  queryBus.register("list-resource-templates", new ListResourceTemplatesHandler(runtimeManager));
-  queryBus.register("read-resource", new ReadResourceHandler(runtimeManager));
-  queryBus.register("system-ping", new SystemPingHandler());
-  queryBus.register("system-version", new SystemVersionHandler());
-  queryBus.register("list-jobs", new ListJobsHandler(jobStore));
-  queryBus.register("job-output", new JobOutputHandler(jobStore));
-  queryBus.register("validate-schedule", new ValidateScheduleHandler());
-  queryBus.register("get-acp-session-info", new GetAcpSessionInfoHandler(acpSessionService));
-
-  const router = new MessageRouter({ commandBus, queryBus, logger });
-
-  const wsServer = new WebSocketServer(router, {
-    port: options.port,
-    host: options.host ?? "0.0.0.0",
-    logger,
-  });
-
-  const eventPublisher = new WebSocketEventPublisher(wsServer.sessionRegistry, wsServer.subscriptionRegistry);
-  eventDispatcher.onAny(eventPublisher);
+  const aiConfiguration = createAiConfiguration(options, logger, agent);
+  const buses = registerBuses(options, logger, eventDispatcher, clock, plugin, skills, agent, jobs, acp, aiConfiguration);
+  const transport = createTransport(options, logger, eventDispatcher, buses);
 
   return {
-    commandBus,
-    queryBus,
+    commandBus: buses.commandBus,
+    queryBus: buses.queryBus,
     eventDispatcher,
-    runtimeManager,
-    router,
-    wsServer,
-    eventPublisher,
-    pluginRepository,
-    skillRegistry,
-    skillProvenance,
-    skillUsage,
-    skillApprovalStaging,
-    skillCurator,
-    skillCuratorScheduler,
-    backgroundReviewScheduler,
-    jobScheduler,
-    learningGraph,
-    memoryStore,
-    db,
+    runtimeManager: plugin.runtimeManager,
+    router: transport.router,
+    wsServer: transport.wsServer,
+    eventPublisher: transport.eventPublisher,
+    pluginRepository: plugin.pluginRepository,
+    skillRegistry: skills.skillRegistry,
+    skillProvenance: skills.skillProvenance,
+    skillUsage: skills.skillUsage,
+    skillApprovalStaging: skills.skillApprovalStaging,
+    skillCurator: skills.skillCurator,
+    skillCuratorScheduler: skills.skillCuratorScheduler,
+    backgroundReviewScheduler: agent.backgroundReviewScheduler,
+    jobScheduler: jobs.jobScheduler,
+    learningGraph: skills.learningGraph,
+    memoryStore: skills.memoryStore,
+    db: plugin.db,
     logger,
+    configureAi: (settings) => aiConfiguration.configureAi(settings),
+    removeAi: (providerId) => aiConfiguration.removeAi(providerId),
+    configureAiRuntime: (settings) => aiConfiguration.configureAiRuntime(settings),
+    configureBackgroundReview(settings) {
+      agent.backgroundReviewScheduler.configure(settings);
+    },
+    configureCurator(settings: Partial<CuratorSettings>) {
+      skills.skillCurator.configure(settings);
+    },
+    configureCuratorScheduler(settings: Partial<{ enabled: boolean; intervalHours: number; paused: boolean }>) {
+      skills.skillCuratorScheduler.configure(settings);
+    },
+    configureJobScheduler(settings: Partial<JobSchedulerSettings>) {
+      jobs.jobScheduler.configure(settings);
+    },
+  };
+}
+
+function createAiConfiguration(
+  options: ContainerOptions,
+  logger: Logger,
+  agent: AgentRuntimeParts,
+): AiConfigurationPort {
+  return {
     configureAi(settings) {
       if (!settings.baseUrl) throw new Error("OpenAI-compatible provider requires a base URL");
-      agentProviderRegistry.set(new OpenAiCompatibleAgentProvider({
+      agent.agentProviderRegistry.set(new OpenAiCompatibleAgentProvider({
         id: settings.providerId,
         ...(settings.api ? { api: settings.api } : {}),
         baseUrl: settings.baseUrl,
@@ -536,8 +233,8 @@ export function createContainer(options: ContainerOptions): Container {
             },
           },
         } : {}),
-        stream: aiRuntime.stream,
-        vision: aiRuntime.vision,
+        stream: agent.aiRuntime.stream,
+        vision: agent.aiRuntime.vision,
         ...(settings.timeoutMs !== undefined
           ? { timeoutMs: settings.timeoutMs }
           : options.ai?.timeoutMs !== undefined
@@ -546,21 +243,10 @@ export function createContainer(options: ContainerOptions): Container {
       }));
     },
     removeAi(providerId) {
-      agentProviderRegistry.delete(providerId);
-    },
-    configureBackgroundReview(settings) {
-      backgroundReviewScheduler.configure(settings);
-    },
-    configureCurator(settings: Partial<CuratorSettings>) {
-      skillCurator.configure(settings);
-    },
-    configureCuratorScheduler(settings: Partial<{ enabled: boolean; intervalHours: number; paused: boolean }>) {
-      skillCuratorScheduler.configure(settings);
-    },
-    configureJobScheduler(settings: Partial<JobSchedulerSettings>) {
-      jobScheduler.configure(settings);
+      agent.agentProviderRegistry.delete(providerId);
     },
     configureAiRuntime(settings) {
+      const aiRuntime = agent.aiRuntime;
       aiRuntime.strategy = settings.strategy;
       aiRuntime.totalAttemptBudget = settings.totalAttemptBudget;
       aiRuntime.stream = settings.stream;

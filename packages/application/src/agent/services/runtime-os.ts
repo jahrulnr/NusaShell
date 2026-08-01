@@ -1,6 +1,3 @@
-import { existsSync, readFileSync } from "node:fs";
-import { platform as nodePlatform } from "node:os";
-
 export interface RuntimeOsProbe {
   readonly platform?: string;
   readonly fileExists?: (path: string) => boolean;
@@ -12,11 +9,16 @@ export interface RuntimeOsProbe {
  *
  * Values look like: `docker`, `docker (ubuntu)`, `linux (debian)`,
  * `windows`, `macos`, or `linux` / the raw Node platform as fallback.
+ *
+ * When no probe is supplied (or the probe omits `platform`), returns
+ * `"unknown"`. Real OS detection is provided by an infrastructure adapter
+ * implementing {@link RuntimeOsProbe} (e.g. `NodeRuntimeOsProbe`).
  */
 export function detectRuntimeOs(probe: RuntimeOsProbe = {}): string {
-  const platform = probe.platform ?? nodePlatform();
-  const fileExists = probe.fileExists ?? existsSync;
-  const readTextFile = probe.readTextFile ?? safeReadTextFile;
+  const platform = probe.platform;
+  if (!platform) return "unknown";
+  const fileExists = probe.fileExists ?? (() => false);
+  const readTextFile = probe.readTextFile ?? (() => undefined);
 
   if (platform === "win32") return "windows";
   if (platform === "darwin") return "macos";
@@ -70,12 +72,4 @@ function normalizeDistroId(raw: string): string {
     linuxmint: "linuxmint",
   };
   return aliases[unquoted] ?? unquoted;
-}
-
-function safeReadTextFile(path: string): string | undefined {
-  try {
-    return readFileSync(path, "utf8");
-  } catch {
-    return undefined;
-  }
 }

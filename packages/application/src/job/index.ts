@@ -16,7 +16,7 @@ export {
   describeSchedule,
   ScheduleParseError,
 } from "./schedule-parser.js";
-export type { JobStorePort } from "./ports/index.js";
+export type { JobStorePort, JobFsPort } from "./ports/index.js";
 export { JobAgentToolGateway } from "./services/job-agent-tool-gateway.js";
 export {
   JobAgentExecutor,

@@ -1,15 +1,9 @@
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { randomBytes } from "node:crypto";
+import type { PendingSkillWrite } from "@nusashell/contracts";
 
-export interface PendingSkillWrite {
-  readonly id: string;
-  readonly skillId: string;
-  readonly action: "create" | "edit" | "write_file" | "delete";
-  readonly path: string;
-  readonly content: string;
-  readonly createdAt: string;
-}
+export type { PendingSkillWrite };
 
 export class SkillApprovalStaging {
   constructor(private readonly root: string) {}

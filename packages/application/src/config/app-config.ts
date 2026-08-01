@@ -15,6 +15,7 @@ export interface AiConfig {
   readonly baseUrl: string | undefined;
   readonly apiKey: string | undefined;
   readonly maxToolRounds: number;
+  readonly maxRepeatedToolCalls: number;
   readonly softRecoverAttempts: number;
   readonly maxConcurrentToolCalls: number;
   readonly strategy: "failover" | "round-robin" | "switch";
@@ -53,6 +54,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       baseUrl: env.NUSASHELL_AI_BASE_URL,
       apiKey: env.NUSASHELL_AI_API_KEY,
       maxToolRounds: parseMaxToolRounds(env.NUSASHELL_AI_MAX_TOOL_ROUNDS),
+      maxRepeatedToolCalls: integerInRange(env.NUSASHELL_AI_MAX_REPEATED_TOOL_CALLS, 1, 200, 50),
       softRecoverAttempts: integerInRange(env.NUSASHELL_AI_SOFT_RECOVER_ATTEMPTS, 0, 3, 1),
       maxConcurrentToolCalls: integerInRange(env.NUSASHELL_AI_MAX_CONCURRENT_TOOL_CALLS, 1, 32, 8),
       strategy: parseAiStrategy(env.NUSASHELL_AI_STRATEGY),

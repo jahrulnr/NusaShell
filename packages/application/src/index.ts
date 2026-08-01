@@ -229,6 +229,7 @@ export type {
   UsageBumpKind,
   SkillUsageRecord,
   SkillUsagePort,
+  CuratorStateStorePort,
 } from "./skill/index.js";
 export { latestActivityAt } from "./skill/index.js";
 export {
@@ -346,6 +347,7 @@ export type {
   JobStatus,
   JobOutputEntry,
   JobStorePort,
+  JobFsPort,
   JobAgentExecutorSettings,
   JobAgentExecutorDeps,
   JobExecutionResult,
@@ -386,3 +388,15 @@ export {
   JobOutputHandler,
   ValidateScheduleHandler,
 } from "./job/index.js";
+
+export type { AiConfigurationPort } from "./ai/index.js";
+export type {
+  ConfigureAiCommand,
+  ConfigureAiRuntimeCommand,
+  RemoveAiCommand,
+} from "./ai/index.js";
+export {
+  ConfigureAiHandler,
+  ConfigureAiRuntimeHandler,
+  RemoveAiHandler,
+} from "./ai/index.js";

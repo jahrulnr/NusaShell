@@ -94,8 +94,14 @@ describe("NusaClient reconnect integration", () => {
 
     await waitFor(() => client.isConnected, 5000);
 
-    // Server-side subscription should be restored after auto-resubscribe
+    // Server-side subscription should be restored after auto-resubscribe.
+    // resubscribe() is fire-and-forget in onOpen, so wait for the server-side
+    // registry to reflect the restored subscription before asserting.
     const session = server.sessionRegistry.all[0]!;
+    await waitFor(
+      () => server.subscriptionRegistry.isSubscribed(session.id, "plugin.started"),
+      5000,
+    );
     expect(server.subscriptionRegistry.isSubscribed(session.id, "plugin.started")).toBe(true);
 
     // Send an event from the server — handler should still work
@@ -142,9 +148,17 @@ describe("NusaClient reconnect integration", () => {
 
     await waitFor(() => client.isConnected, 5000);
 
-    // After reconnect, new session should have subscriptions restored
+    // After reconnect, new session should have subscriptions restored.
+    // resubscribe() is fire-and-forget in onOpen, so wait for the server-side
+    // registry to reflect the restored subscriptions before asserting.
     const sessionAfter = server.sessionRegistry.all[0]!;
     expect(sessionAfter.id).not.toBe(sessionBefore.id);
+    await waitFor(
+      () =>
+        server.subscriptionRegistry.isSubscribed(sessionAfter.id, "plugin.started") &&
+        server.subscriptionRegistry.isSubscribed(sessionAfter.id, "plugin.stopped"),
+      5000,
+    );
     expect(server.subscriptionRegistry.isSubscribed(sessionAfter.id, "plugin.started")).toBe(true);
     expect(server.subscriptionRegistry.isSubscribed(sessionAfter.id, "plugin.stopped")).toBe(true);
   });

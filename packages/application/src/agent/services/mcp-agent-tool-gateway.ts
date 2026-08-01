@@ -9,8 +9,16 @@ import type { DocsIndexPort } from "../ports/docs-index.port.js";
 import type { AgentToolDefinition } from "../ports/agent-provider.port.js";
 import type { AgentToolGateway, AgentTurnContext } from "../ports/agent-tool-gateway.port.js";
 import type { LoggerPort } from "../../plugin/ports/logger.port.js";
-import type { AskQuestionOption, AskQuestionService } from "./ask-question-service.js";
+import type { AskQuestionService } from "./ask-question-service.js";
 import { wrapToolArgs } from "./workspace-tool-wrap.js";
+import {
+  definition, stringSchema, requireString, optionalString, stringRecord, parsePluginId,
+  toProviderToolName,
+} from "./gateway-utils.js";
+import { execDocsSearch, execDocsList, execDocsRead } from "./docs-tool-handlers.js";
+import { execSkillList, execSkillSearch, execSkillRead, execSkillManage } from "./skill-tool-handlers.js";
+import { execMemory } from "./memory-tool-handler.js";
+import { execAskQuestion } from "./ask-question-tool-handler.js";
 
 export type WriteOrigin = "foreground" | "background_review";
 
@@ -52,17 +60,9 @@ export class McpAgentToolGateway implements AgentToolGateway {
     private readonly askQuestions?: AskQuestionService,
   ) {}
 
-  setWriteOrigin(origin: WriteOrigin): void {
-    this.writeOrigin = origin;
-  }
-
-  getWriteOrigin(): WriteOrigin {
-    return this.writeOrigin;
-  }
-
-  setWriteApprovalEnabled(enabled: boolean): void {
-    this.writeApprovalEnabled = enabled;
-  }
+  setWriteOrigin(origin: WriteOrigin): void { this.writeOrigin = origin; }
+  getWriteOrigin(): WriteOrigin { return this.writeOrigin; }
+  setWriteApprovalEnabled(enabled: boolean): void { this.writeApprovalEnabled = enabled; }
 
   beginTurn(turnId: string, context?: AgentTurnContext): void {
     if (!this.turnRoutes.has(turnId)) this.turnRoutes.set(turnId, new Map());
@@ -195,18 +195,20 @@ export class McpAgentToolGateway implements AgentToolGateway {
       case "tool_schema": return this.grantTool(args, turnId);
       case "tool_schemas": return this.grantTools(args, turnId);
       case "mcp_context": return this.context(args);
-      case "docs_search": return this.execDocsSearch(args);
-      case "docs_list": return this.execDocsList(args);
-      case "docs_read": return this.execDocsRead(args);
-      case "skill_list": return this.execSkillList(args);
-      case "skill_search": return this.execSkillSearch(args);
-      case "skill_read": return this.execSkillRead(args);
-      case "memory": return this.execMemory(args);
-      case "skill_manage": return this.execSkillManage(args);
-      case "ask_question": return this.execAskQuestion(args, callId ?? requestId, turnId);
+      case "docs_search": return execDocsSearch(this.docsIndex, args);
+      case "docs_list": return execDocsList(this.docsIndex, args);
+      case "docs_read": return execDocsRead(this.docsIndex, args);
+      case "skill_list": return execSkillList(this.skillRegistry, args);
+      case "skill_search": return execSkillSearch(this.skillRegistry, args);
+      case "skill_read": return execSkillRead(this.skillRegistry, this.skillUsage, this.logger, args);
+      case "memory": return execMemory(this.memoryStore, args);
+      case "skill_manage": return execSkillManage(this.skillRegistry, this.skillProvenance, this.skillUsage, this.approvalStaging, this.logger, this.writeOrigin, this.writeApprovalEnabled, args);
+      case "ask_question": return execAskQuestion(this.askQuestions, this.isInteractive(turnId), args, callId ?? requestId, turnId);
       default: return this.callGrantedTool(name, args, requestId, turnId);
     }
   }
+
+  // --- MCP plugin management handlers (tightly coupled to gateway state) ---
 
   private async listMcpPlugins(): Promise<unknown> {
     const plugins = await this.runtimeManager.listPlugins();
@@ -410,393 +412,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
     return routes;
   }
 
-  private async execDocsSearch(args: Readonly<Record<string, unknown>>): Promise<unknown> {
-    const index = this.docsIndex;
-    if (!index) return docsNotConfigured();
-    if (!index.usable()) return docsNotReady();
-    const query = requireString(args.query, "query");
-    const topK = clampInt(args.top_k, 5, 1, 10);
-    const hits = await index.search(query, topK);
-    return {
-      ok: true,
-      data: { chunks: hits },
-      meta: {
-        count: hits.length,
-        truncated: hits.length >= topK,
-        index_ready: true,
-        data_is_untrusted: true,
-      },
-    };
-  }
-
-  private async execDocsList(args: Readonly<Record<string, unknown>>): Promise<unknown> {
-    const index = this.docsIndex;
-    if (!index) return docsNotConfigured();
-    if (!index.usable()) return docsNotReady();
-    const limit = clampInt(args.limit, 50, 1, 100);
-    const documents = await index.listDocs();
-    const truncated = documents.length > limit;
-    const limited = documents.slice(0, limit);
-    return {
-      ok: true,
-      data: { documents: limited },
-      meta: {
-        count: limited.length,
-        truncated,
-        index_ready: true,
-        data_is_untrusted: true,
-      },
-    };
-  }
-
-  private async execDocsRead(args: Readonly<Record<string, unknown>>): Promise<unknown> {
-    const index = this.docsIndex;
-    if (!index) return docsNotConfigured();
-    if (!index.usable()) return docsNotReady();
-    const path = requireString(args.path, "path");
-    const chunkId = optionalString(args.chunk_id) || undefined;
-    const doc = await index.readDoc(path, chunkId);
-    if (!doc) {
-      return {
-        ok: false,
-        error: { code: "not_found", message: "Document not found in docs corpus" },
-        meta: { index_ready: true, data_is_untrusted: true },
-      };
-    }
-    const offset = clampInt(args.offset, 0, 0, 1_000_000);
-    const maxChars = clampInt(args.max_chars, 0, 0, 20_000);
-    const text = maxChars > 0 ? doc.text.slice(offset, offset + maxChars) : doc.text.slice(offset);
-    const fullEnd = offset + (maxChars > 0 ? maxChars : doc.text.length);
-    const hasMore = fullEnd < doc.text.length;
-    return {
-      ok: true,
-      data: {
-        path: doc.path,
-        title: doc.title,
-        headings: doc.headings,
-        domain: doc.domain,
-        text,
-        chunk_id: doc.chunkId,
-        has_more: hasMore,
-        next_offset: hasMore ? fullEnd : undefined,
-      },
-      meta: { index_ready: true, data_is_untrusted: true },
-    };
-  }
-
-  private async execSkillList(args: Readonly<Record<string, unknown>>): Promise<unknown> {
-    const registry = this.skillRegistry;
-    if (!registry) return skillsNotConfigured();
-    const limit = clampInt(args.limit, 50, 1, 100);
-    const all = await registry.list();
-    const skills = all.slice(0, limit);
-    return {
-      ok: true,
-      data: { skills },
-      meta: { count: skills.length, truncated: all.length > limit, data_is_untrusted: true },
-    };
-  }
-
-  private async execSkillSearch(args: Readonly<Record<string, unknown>>): Promise<unknown> {
-    const registry = this.skillRegistry;
-    if (!registry) return skillsNotConfigured();
-    const query = requireString(args.query, "query");
-    const limit = clampInt(args.limit, 20, 1, 50);
-    const matches = await registry.search(query, limit + 1);
-    const skills = matches.slice(0, limit);
-    return {
-      ok: true,
-      data: { skills },
-      meta: { count: skills.length, truncated: matches.length > limit, data_is_untrusted: true },
-    };
-  }
-
-  private async execSkillRead(args: Readonly<Record<string, unknown>>): Promise<unknown> {
-    const registry = this.skillRegistry;
-    if (!registry) return skillsNotConfigured();
-    const skillId = requireString(args.skill_id, "skill_id");
-    const path = optionalString(args.path) || "SKILL.md";
-    const offset = clampInt(args.offset, 0, 0, 10_000_000);
-    const maxChars = clampInt(args.max_chars, 20_000, 1, 100_000);
-    try {
-      const file = await registry.read(skillId, path, offset, maxChars);
-      void this.bumpUsage(skillId, "view");
-      return { ok: true, data: file, meta: { data_is_untrusted: true } };
-    } catch {
-      return {
-        ok: false,
-        error: { code: "not_found", message: "Skill or skill file not found" },
-        meta: { data_is_untrusted: true },
-      };
-    }
-  }
-
-  private bumpUsage(skillId: string, kind: UsageBumpKind): Promise<void> {
-    if (!this.skillUsage) return Promise.resolve();
-    return this.skillUsage.record(skillId, kind).catch((error) => {
-      this.logger?.warn("skill usage bump failed skill=%s kind=%s: %s", skillId, kind, error instanceof Error ? error.message : String(error));
-    });
-  }
-
-  private async execMemory(args: Readonly<Record<string, unknown>>): Promise<unknown> {
-    const store = this.memoryStore;
-    if (!store) return memoryNotConfigured();
-    const action = requireString(args.action, "action");
-    const target = requireString(args.target, "target") as MemoryTarget;
-    if (target !== "memory" && target !== "user") {
-      throw new ApplicationError("AGENT_INVALID_INPUT", `target must be "memory" or "user"`);
-    }
-    const content = optionalString(args.content);
-    const oldText = optionalString(args.old_text);
-    try {
-      switch (action) {
-        case "add":
-          if (!content) throw new ApplicationError("AGENT_INVALID_INPUT", "content is required for add");
-          return await store.add(target, content);
-        case "replace":
-          if (!oldText) throw new ApplicationError("AGENT_INVALID_INPUT", "old_text is required for replace");
-          return await store.replace(target, oldText, content);
-        case "remove":
-          if (!oldText) throw new ApplicationError("AGENT_INVALID_INPUT", "old_text is required for remove");
-          return await store.remove(target, oldText);
-        default:
-          throw new ApplicationError("AGENT_INVALID_INPUT", `Unsupported memory action: ${action}`);
-      }
-    } catch (error) {
-      return {
-        ok: false,
-        error: {
-          code: "memory_error",
-          message: error instanceof Error ? error.message : String(error),
-        },
-        meta: {},
-      };
-    }
-  }
-
-  private async execSkillManage(args: Readonly<Record<string, unknown>>): Promise<unknown> {
-    const registry = this.skillRegistry;
-    if (!registry) return skillsNotConfigured();
-    const provenance = this.skillProvenance;
-    if (!provenance) return skillsNotConfigured();
-    const action = requireString(args.action, "action");
-    const skillId = requireString(args.name, "name");
-    const content = optionalString(args.content);
-    const filePath = optionalString(args.path);
-    const shouldStage = this.writeOrigin === "background_review" && this.writeApprovalEnabled && this.approvalStaging;
-    try {
-      switch (action) {
-        case "create": {
-          if (!content) throw new ApplicationError("AGENT_INVALID_INPUT", "content is required for create");
-          if (shouldStage) {
-            const pending = await this.approvalStaging!.stage(skillId, "create", "SKILL.md", content);
-            return { ok: true, data: { staged: true, id: pending.id }, meta: { provenance: "agent", staged: true } };
-          }
-          const detail = await registry.create(skillId, content);
-          await provenance.markAgent(skillId);
-          void this.bumpUsage(skillId, "patch");
-          return { ok: true, data: detail, meta: { provenance: "agent" } };
-        }
-        case "edit": {
-          if (!content) throw new ApplicationError("AGENT_INVALID_INPUT", "content is required for edit");
-          const origin = await provenance.get(skillId);
-          if (origin !== "agent") return skillProtected(skillId);
-          if (shouldStage) {
-            const pending = await this.approvalStaging!.stage(skillId, "edit", "SKILL.md", content);
-            return { ok: true, data: { staged: true, id: pending.id }, meta: { provenance: "agent", staged: true } };
-          }
-          const result = await registry.write(skillId, "SKILL.md", content);
-          void this.bumpUsage(skillId, "patch");
-          return { ok: true, data: result, meta: { provenance: "agent" } };
-        }
-        case "write_file": {
-          if (!content) throw new ApplicationError("AGENT_INVALID_INPUT", "content is required for write_file");
-          if (!filePath) throw new ApplicationError("AGENT_INVALID_INPUT", "path is required for write_file");
-          const origin = await provenance.get(skillId);
-          if (origin !== "agent") return skillProtected(skillId);
-          if (shouldStage) {
-            const pending = await this.approvalStaging!.stage(skillId, "write_file", filePath, content);
-            return { ok: true, data: { staged: true, id: pending.id }, meta: { provenance: "agent", staged: true } };
-          }
-          const result = await registry.write(skillId, filePath, content);
-          void this.bumpUsage(skillId, "patch");
-          return { ok: true, data: result, meta: { provenance: "agent" } };
-        }
-        case "delete": {
-          const origin = await provenance.get(skillId);
-          if (origin !== "agent") return skillProtected(skillId);
-          if (this.skillUsage) {
-            const usage = await this.skillUsage.getRecord(skillId);
-            if (usage.pinned) return skillPinned(skillId);
-          }
-          if (shouldStage) {
-            const pending = await this.approvalStaging!.stage(skillId, "delete", "", "");
-            return { ok: true, data: { staged: true, id: pending.id }, meta: { provenance: "agent", staged: true } };
-          }
-          await registry.delete(skillId);
-          await provenance.clear(skillId);
-          return { ok: true, data: { deleted: skillId }, meta: { provenance: "agent" } };
-        }
-        default:
-          throw new ApplicationError("AGENT_INVALID_INPUT", `Unsupported skill_manage action: ${action}`);
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const code = message.includes("already exists") ? "skill_exists"
-        : message.includes("60 characters") ? "description_too_long"
-        : "skill_error";
-      return { ok: false, error: { code, message }, meta: {} };
-    }
-  }
-
-  private async execAskQuestion(
-    args: Readonly<Record<string, unknown>>,
-    callId: string,
-    turnId: string,
-  ): Promise<unknown> {
-    if (!this.askQuestions) {
-      throw new ApplicationError("AGENT_INVALID_INPUT", "ask_question is not available in this runtime");
-    }
-    if (!this.isInteractive(turnId)) {
-      throw new ApplicationError("AGENT_INVALID_INPUT", "ask_question is only available during interactive agent turns");
-    }
-    const question = requireString(args.question, "question").trim();
-    if (!question) throw new ApplicationError("AGENT_INVALID_INPUT", "question must not be empty");
-    const options = parseAskOptions(args.options);
-    const allowFreeText = args.allow_free_text === undefined ? true : Boolean(args.allow_free_text);
-    const multiSelect = Boolean(args.multi_select);
-    return this.askQuestions.ask(turnId, callId, {
-      question,
-      options,
-      allowFreeText,
-      multiSelect,
-    });
-  }
-
   private isInteractive(turnId: string): boolean {
     return this.askQuestions !== undefined && this.turnInteractive.get(turnId) === true;
   }
-}
-
-function parseAskOptions(raw: unknown): AskQuestionOption[] {
-  if (!Array.isArray(raw) || raw.length === 0) {
-    throw new ApplicationError("AGENT_INVALID_INPUT", "options must be a non-empty array");
-  }
-  if (raw.length > MAX_ASK_OPTIONS) {
-    throw new ApplicationError("AGENT_INVALID_INPUT", `options must contain at most ${MAX_ASK_OPTIONS} items`);
-  }
-  const seen = new Set<string>();
-  const options: AskQuestionOption[] = [];
-  for (const entry of raw) {
-    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-      throw new ApplicationError("AGENT_INVALID_INPUT", "each option must be an object");
-    }
-    const id = requireString(entry.id, "options[].id").trim();
-    const label = requireString(entry.label, "options[].label").trim();
-    if (!id || !label) {
-      throw new ApplicationError("AGENT_INVALID_INPUT", "each option requires non-empty id and label");
-    }
-    if (seen.has(id)) {
-      throw new ApplicationError("AGENT_INVALID_INPUT", `duplicate option id: ${id}`);
-    }
-    seen.add(id);
-    options.push({
-      id,
-      label,
-      ...(typeof entry.description === "string" && entry.description.trim() ? { description: entry.description.trim() } : {}),
-      ...(entry.default === true ? { default: true } : {}),
-      ...(typeof entry.icon === "string" && entry.icon.trim() ? { icon: entry.icon.trim() } : {}),
-      ...(typeof entry.image === "string" && entry.image.trim() ? { image: entry.image.trim() } : {}),
-    });
-  }
-  return options;
-}
-
-function skillProtected(skillId: string): unknown {
-  return {
-    ok: false,
-    error: { code: "skill_protected", message: `Skill "${skillId}" is not agent-owned and cannot be mutated by the model` },
-    meta: {},
-  };
-}
-
-function skillPinned(skillId: string): unknown {
-  return {
-    ok: false,
-    error: { code: "skill_pinned", message: `Skill "${skillId}" is pinned and cannot be deleted` },
-    meta: {},
-  };
-}
-
-function definition(
-  name: string,
-  description: string,
-  properties: Readonly<Record<string, unknown>> = {},
-  required: readonly string[] = Object.keys(properties),
-): AgentToolDefinition {
-  return { name, description, inputSchema: { type: "object", properties, required } };
-}
-function stringSchema(): Readonly<Record<string, unknown>> { return { type: "string" }; }
-function optionalString(value: unknown): string { return typeof value === "string" ? value.trim() : ""; }
-function requireString(value: unknown, name: string): string {
-  if (typeof value !== "string" || value.trim().length === 0) throw new ApplicationError("AGENT_INVALID_INPUT", `${name} is required`);
-  return value;
-}
-function stringRecord(value: unknown): Readonly<Record<string, string>> {
-  if (value === undefined) return {};
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new ApplicationError("AGENT_INVALID_INPUT", "arguments must be an object of strings");
-  }
-  const out: Record<string, string> = {};
-  for (const [key, item] of Object.entries(value)) {
-    if (typeof item !== "string") throw new ApplicationError("AGENT_INVALID_INPUT", `Prompt argument must be a string: ${key}`);
-    out[key] = item;
-  }
-  return out;
-}
-function parsePluginId(value: unknown): PluginId {
-  const parsed = PluginId.create(requireString(value, "pluginId"));
-  if (!parsed.ok) throw new ApplicationError("PLUGIN_NOT_FOUND", `Invalid plugin id: ${parsed.error.message}`);
-  return parsed.value;
-}
-function toProviderToolName(pluginId: string, toolName: string): string {
-  const readablePlugin = pluginId.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 28);
-  const readableTool = toolName.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 20);
-  return `mcp_${readablePlugin}_${readableTool}`;
-}
-function docsNotConfigured(): unknown {
-  return {
-    ok: false,
-    error: { code: "docs_not_configured", message: "Documentation index is not configured" },
-    meta: { index_ready: false },
-  };
-}
-function docsNotReady(): unknown {
-  return {
-    ok: false,
-    error: { code: "docs_index_not_ready", message: "Documentation index is not ready" },
-    meta: { index_ready: false },
-  };
-}
-function skillsNotConfigured(): unknown {
-  return {
-    ok: false,
-    error: { code: "skills_not_configured", message: "Skill registry is not configured" },
-    meta: { data_is_untrusted: true },
-  };
-}
-function memoryNotConfigured(): unknown {
-  return {
-    ok: false,
-    error: { code: "memory_not_configured", message: "Memory store is not configured" },
-    meta: {},
-  };
-}
-function clampInt(value: unknown, fallback: number, min: number, max: number): number {
-  let parsed: number;
-  if (typeof value === "number") parsed = value;
-  else if (typeof value === "string") parsed = Number.parseInt(value, 10);
-  else parsed = NaN;
-  if (!Number.isFinite(parsed) || Number.isNaN(parsed)) parsed = fallback;
-  return Math.max(min, Math.min(max, parsed));
 }

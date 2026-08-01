@@ -583,6 +583,28 @@ The transport layer only handles:
 
 The transport layer must not own plugin runtime state.
 
+### In-process Electron IPC vs WebSocket
+
+The Electron desktop app uses **two transport paths** for good reasons:
+
+| Path | Used by | Mechanism | Why |
+| --- | --- | --- | --- |
+| **Electron IPC** | Renderer (launcher, plugin windows) | `ipcMain.handle` → `commandBus` / `queryBus` | Zero-latency, no WS roundtrip, no serialization overhead for in-process calls |
+| **WebSocket** | Remote clients (TUI, external integrations) | `ws` → `MessageRouter` → `commandBus` / `queryBus` | Standard protocol, works across processes/machines |
+
+Both paths converge on the **same command/query bus** — they are transport
+alternatives, not separate APIs. The `tool:call` IPC handler in
+`apps/desktop/src/main/ipc/plugins.ts` dispatches a `CallToolCommand` through
+the command bus, exactly as the WS `tool.call` route does. This is **not** a
+broker violation: the shell still mediates between plugin UI and MCP; the IPC
+path is an in-process optimisation that skips the network hop while preserving
+the command-bus boundary.
+
+Remote clients must use WebSocket. Migrating the desktop renderer to WS would
+add latency and serialization cost with no benefit, since renderer and main
+share a process. The `NusaClient` SDK (in `@nusashell/plugin-sdk`) wraps the WS
+path for external consumers and is the canonical client for non-Electron hosts.
+
 ---
 
 ## 9. WebSocket Protocol

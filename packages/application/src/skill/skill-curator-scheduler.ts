@@ -1,10 +1,7 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
-import { randomBytes } from "node:crypto";
 import type { SkillCuratorService, CuratorResult, CuratorSettings } from "./index.js";
+import type { CuratorStateStorePort } from "./ports/curator-state-store.port.js";
 import type { LoggerPort } from "../plugin/ports/logger.port.js";
 
-const STATE_FILE = ".curator-state.json";
 const MS_PER_HOUR = 60 * 60 * 1000;
 
 export interface CuratorSchedulerSettings {
@@ -19,13 +16,9 @@ export const DEFAULT_SCHEDULER_SETTINGS: CuratorSchedulerSettings = {
   paused: false,
 };
 
-interface PersistedState {
-  readonly lastRunAt: string | null;
-}
-
 export interface SkillCuratorSchedulerDeps {
   readonly curator: SkillCuratorService;
-  readonly stateRoot: string;
+  readonly stateStore: CuratorStateStorePort;
   readonly logger?: LoggerPort;
   readonly now?: () => Date;
 }
@@ -94,8 +87,7 @@ export class SkillCuratorScheduler {
 
   private async loadState(): Promise<void> {
     try {
-      const data = await readFile(resolve(this.deps.stateRoot, STATE_FILE), "utf8");
-      const state = JSON.parse(data) as PersistedState;
+      const state = await this.deps.stateStore.load();
       this.lastRunAt = state.lastRunAt ?? null;
     } catch {
       this.lastRunAt = null;
@@ -103,11 +95,6 @@ export class SkillCuratorScheduler {
   }
 
   private async persistState(): Promise<void> {
-    await mkdir(this.deps.stateRoot, { recursive: true });
-    const target = resolve(this.deps.stateRoot, STATE_FILE);
-    const staging = resolve(this.deps.stateRoot, `.curator-state-${randomBytes(8).toString("hex")}.json`);
-    const state: PersistedState = { lastRunAt: this.lastRunAt };
-    await writeFile(staging, JSON.stringify(state, null, 2), "utf8");
-    await rename(staging, target);
+    await this.deps.stateStore.save({ lastRunAt: this.lastRunAt });
   }
 }

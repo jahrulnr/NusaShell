@@ -18,6 +18,7 @@ export type {
   SkillUsagePort,
 } from "./ports/skill-usage.port.js";
 export { latestActivityAt } from "./ports/skill-usage.port.js";
+export type { CuratorStateStorePort } from "./ports/curator-state-store.port.js";
 export {
   SkillCuratorService,
   type CuratorSettings,

@@ -1,0 +1,139 @@
+import {
+  FilesystemPromptLoader,
+  FilesystemReviewStateStore,
+  AgentProviderRegistry,
+  StaticAgentProvider,
+  OpenAiCompatibleAgentProvider,
+  NodeRuntimeOsProbe,
+  type Logger,
+} from "@nusashell/infrastructure";
+import {
+  McpAgentToolGateway,
+  ReviewAgentToolGateway,
+  AgentTurnRunner,
+  InProcessAgentTurnWorker,
+  BackgroundReviewScheduler,
+  AskQuestionService,
+  AgentTurnCoordinator,
+  StreamSeqRegistry,
+  type AgentRuntimeSettings,
+  type AgentProvider,
+  type EventDispatcher,
+  type PluginRuntimeManager,
+  type SkillRegistryPort,
+  type SkillProvenancePort,
+  type SkillUsagePort,
+  type MemoryStorePort,
+  type SkillApprovalStaging,
+  type MarkdownDocsIndex,
+} from "@nusashell/application";
+import type { ContainerOptions } from "../container.js";
+import type { PluginRuntimeParts } from "./plugin-runtime.js";
+import type { SkillsRuntimeParts } from "./skills-runtime.js";
+
+export interface AgentRuntimeParts {
+  readonly agentToolGateway: McpAgentToolGateway;
+  readonly agentProviderRegistry: AgentProviderRegistry;
+  readonly agentTurnCoordinator: AgentTurnCoordinator;
+  readonly streamSeqRegistry: StreamSeqRegistry;
+  readonly promptLoader: FilesystemPromptLoader;
+  readonly askQuestionService: AskQuestionService;
+  readonly reviewGateway: ReviewAgentToolGateway;
+  readonly backgroundReviewScheduler: BackgroundReviewScheduler;
+  readonly aiRuntime: AgentRuntimeSettings & { stream: boolean; vision: "auto" | "on" | "off"; userPrompt: string };
+  readonly withStreamSeq: <T extends { readonly aggregateId: string }>(event: T) => T & { streamSeq: number };
+  readonly runtimeOsProbe: NodeRuntimeOsProbe;
+}
+
+export function createAgentRuntime(
+  options: ContainerOptions,
+  logger: Logger,
+  eventDispatcher: EventDispatcher,
+  plugin: PluginRuntimeParts,
+  skills: SkillsRuntimeParts,
+): AgentRuntimeParts {
+  const aiRuntime: AgentRuntimeParts["aiRuntime"] = {
+    strategy: options.ai?.strategy ?? "failover" as "failover" | "round-robin" | "switch",
+    totalAttemptBudget: options.ai?.totalAttemptBudget ?? 4,
+    stream: options.ai?.stream ?? true,
+    vision: options.ai?.vision ?? "auto" as "auto" | "on" | "off",
+    userPrompt: options.ai?.userPrompt ?? "",
+    maxToolRounds: options.ai?.maxToolRounds ?? 50,
+    maxRepeatedToolCalls: options.ai?.maxRepeatedToolCalls ?? 50,
+    softRecoverAttempts: options.ai?.softRecoverAttempts ?? 1,
+    maxConcurrentToolCalls: options.ai?.maxConcurrentToolCalls ?? 8,
+    ...(options.ai?.context ? { context: options.ai.context } : {}),
+  };
+
+  const askQuestionService = new AskQuestionService();
+  const agentToolGateway = new McpAgentToolGateway(
+    plugin.runtimeManager,
+    plugin.docsIndex,
+    skills.skillRegistry,
+    logger,
+    skills.memoryStore,
+    skills.skillProvenance,
+    skills.skillApprovalStaging,
+    skills.skillUsage,
+    askQuestionService,
+  );
+
+  const promptLoader = new FilesystemPromptLoader(
+    options.promptsRoot ?? new URL("../../../resources/agent/prompts", import.meta.url).pathname,
+  );
+
+  const agentProviders: AgentProvider[] = options.ai?.stubEnabled ? [new StaticAgentProvider()] : [];
+  if (options.ai?.baseUrl) {
+    agentProviders.push(new OpenAiCompatibleAgentProvider({
+      id: options.ai.providerId,
+      ...(options.ai.api ? { api: options.ai.api } : {}),
+      baseUrl: options.ai.baseUrl,
+      ...(options.ai.apiKey ? { apiKey: options.ai.apiKey } : {}),
+      ...(options.ai.model ? { model: options.ai.model } : {}),
+      logger,
+      ...(options.ai.retry ? { retry: {
+        ...options.ai.retry,
+        onRetry: (event) => {
+          logger.warn("AI provider retry provider=%s attempt=%d delayMs=%d status=%d kind=%s", event.providerId, event.attempt, event.delayMs, event.status, event.kind);
+        },
+      } } : {}),
+      stream: aiRuntime.stream,
+      vision: aiRuntime.vision,
+      ...(options.ai.timeoutMs !== undefined ? { timeoutMs: options.ai.timeoutMs } : {}),
+    }));
+  }
+  const agentProviderRegistry = new AgentProviderRegistry(agentProviders);
+  const agentTurnCoordinator = new AgentTurnCoordinator();
+  const streamSeqRegistry = new StreamSeqRegistry();
+  const withStreamSeq = <T extends { readonly aggregateId: string }>(event: T): T & { streamSeq: number } => ({
+    ...event,
+    streamSeq: streamSeqRegistry.next(event.aggregateId),
+  });
+
+  const reviewGateway = new ReviewAgentToolGateway(agentToolGateway);
+  const reviewStateStore = new FilesystemReviewStateStore(
+    options.memoryRoot ?? new URL("../../../.nusashell/agent/memory", import.meta.url).pathname,
+  );
+  const backgroundReviewScheduler = new BackgroundReviewScheduler({
+    stateStore: reviewStateStore,
+    promptLoader,
+    providerRegistry: agentProviderRegistry,
+    reviewGateway,
+    runnerFactory: ({ provider, toolGateway, maxToolRounds }) => {
+      const worker = new InProcessAgentTurnWorker(provider, toolGateway, logger);
+      return new AgentTurnRunner(worker, { maxToolRounds });
+    },
+    defaultProviderId: options.ai?.providerId || (options.ai?.stubEnabled ? "stub" : ""),
+    eventDispatcher,
+    logger,
+  });
+  if (options.backgroundReview) {
+    backgroundReviewScheduler.configure(options.backgroundReview);
+  }
+
+  return {
+    agentToolGateway, agentProviderRegistry, agentTurnCoordinator, streamSeqRegistry,
+    promptLoader, askQuestionService, reviewGateway, backgroundReviewScheduler,
+    aiRuntime, withStreamSeq, runtimeOsProbe: new NodeRuntimeOsProbe(),
+  };
+}

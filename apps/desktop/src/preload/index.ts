@@ -18,7 +18,7 @@ import type {
   LearningNodeDetail,
   MutationResult,
 } from "@nusashell/application";
-import type { PendingSkillWrite } from "@nusashell/infrastructure";
+import type { PendingSkillWrite } from "@nusashell/contracts";
 import type {
   PublicMailSettings,
   SaveMailAccountInput,

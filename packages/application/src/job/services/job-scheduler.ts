@@ -1,7 +1,6 @@
-import { mkdir, open, readdir, rm, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { JobStorePort } from "../ports/job-store.port.js";
+import type { JobFsPort } from "../ports/job-fs.port.js";
 import type { Job, JobOutputEntry } from "../job-model.js";
 import {
   computeNextRun,
@@ -49,14 +48,11 @@ export interface JobSchedulerDeps {
   readonly executor: JobExecutorPort;
   readonly callToolHandler: JobCallToolPort;
   readonly eventDispatcher: EventDispatcher;
-  readonly jobsRoot: string;
+  readonly jobFs: JobFsPort;
   readonly executorSettings: JobAgentExecutorSettings;
   readonly logger?: LoggerPort;
   readonly now?: () => Date;
 }
-
-const TICK_LOCK_FILE = ".tick.lock";
-const STALE_PID_AFTER_MS = 5 * 60 * 1000;
 
 /**
  * Wall-clock tick scheduler for durable jobs. Runs a 60s interval plus one
@@ -255,12 +251,11 @@ export class JobScheduler {
     summary: string,
   ): Promise<JobOutputEntry | null> {
     try {
-      const dir = resolve(this.deps.jobsRoot, "output", job.id);
-      await mkdir(dir, { recursive: true });
       const stamp = now.toISOString().replace(/[:.]/g, "-");
-      const path = resolve(dir, `${stamp}.md`);
       const header = `# Job: ${job.name}\n- id: ${job.id}\n- schedule: ${describeSchedule(job.schedule)}\n- runAt: ${now.toISOString()}\n- status: ${status}\n\n`;
-      await writeFile(path, header + summary + "\n", "utf8");
+      const content = header + summary + "\n";
+      const path = await this.deps.jobFs.persistJobOutput(job.id, stamp, content);
+      if (path === null) return null;
       return {
         jobId: job.id,
         runAt: now.toISOString(),
@@ -275,48 +270,11 @@ export class JobScheduler {
   }
 
   private async acquireTickLock(): Promise<boolean> {
-    const lockPath = resolve(this.deps.jobsRoot, TICK_LOCK_FILE);
-    try {
-      await mkdir(this.deps.jobsRoot, { recursive: true });
-      // Reap stale lock: if the lock file is older than STALE_PID_AFTER_MS, remove it.
-      try {
-        const entries = await readdir(this.deps.jobsRoot);
-        if (entries.includes(TICK_LOCK_FILE)) {
-          const content = await (await import("node:fs/promises")).readFile(lockPath, "utf8").catch(() => "");
-          const pidMatch = /pid:(\d+)/.exec(content);
-          const startedMatch = /started:(\S+)/.exec(content);
-          const staleByAge = startedMatch
-            ? Date.now() - new Date(startedMatch[1]!).getTime() > STALE_PID_AFTER_MS
-            : false;
-          const pidDead = pidMatch ? !processAlive(parseInt(pidMatch[1]!, 10)) : false;
-          if (staleByAge || pidDead) {
-            await rm(lockPath, { force: true });
-          }
-        }
-      } catch {
-        // best-effort
-      }
-      const fh = await open(lockPath, "wx");
-      await fh.writeFile(`pid:${process.pid}\nstarted:${new Date().toISOString()}\n`);
-      await fh.close();
-      return true;
-    } catch {
-      return false;
-    }
+    return this.deps.jobFs.acquireTickLock();
   }
 
   private async releaseTickLock(): Promise<void> {
-    const lockPath = resolve(this.deps.jobsRoot, TICK_LOCK_FILE);
-    await rm(lockPath, { force: true }).catch(() => {});
-  }
-}
-
-function processAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
+    await this.deps.jobFs.releaseTickLock();
   }
 }
 

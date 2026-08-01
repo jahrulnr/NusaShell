@@ -69,7 +69,7 @@ describe("ReviewAgentToolGateway", () => {
     gateway.beginTurn("turn-1");
     gateway.endTurn("turn-1");
     void gateway.cancelTurn("turn-1");
-    expect(inner.beginTurn).toHaveBeenCalledWith("turn-1");
+    expect(inner.beginTurn).toHaveBeenCalledWith("turn-1", undefined);
     expect(inner.endTurn).toHaveBeenCalledWith("turn-1");
     expect(inner.cancelTurn).toHaveBeenCalledWith("turn-1");
   });

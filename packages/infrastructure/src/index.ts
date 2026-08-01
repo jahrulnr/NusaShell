@@ -1,5 +1,5 @@
-export { SystemClock } from "./system/index.js";
-export { InMemoryPluginRepository, FilesystemPluginRegistry, SqliteDatabase, SqlitePluginRepository, SqliteJobStore, JsonJobStore } from "./persistence/index.js";
+export { SystemClock, NodeRuntimeOsProbe } from "./system/index.js";
+export { InMemoryPluginRepository, FilesystemPluginRegistry, FilesystemJobFs, SqliteDatabase, SqlitePluginRepository, SqliteJobStore, JsonJobStore } from "./persistence/index.js";
 export { NodeChildProcessAdapter } from "./process/index.js";
 export { StdioMcpClient, HttpMcpClient, SseMcpClient, McpClientFactory } from "./mcp/index.js";
 export { scanPluginDirectories, resolveManifestPath, resolvePluginRoot, PluginInstaller, PluginSyncService } from "./plugins/index.js";
@@ -19,7 +19,7 @@ export {
   type TextToolCallParseResult,
 } from "./ai/index.js";
 export { FilesystemPromptLoader, FilesystemReviewStateStore, MarkdownDocsIndex } from "./agent/index.js";
-export { FilesystemSkillRegistry, FilesystemSkillProvenance, FilesystemSkillUsage, SkillApprovalStaging, type PendingSkillWrite } from "./skills/index.js";
+export { FilesystemSkillRegistry, FilesystemSkillProvenance, FilesystemSkillUsage, FilesystemCuratorStateStore, SkillApprovalStaging, type PendingSkillWrite } from "./skills/index.js";
 export { FilesystemMemoryStore } from "./memory/index.js";
 export { AcpJsonRpcClient } from "./acp/index.js";
 export { CursorAcpExtension, CodexAcpExtension, resolveAcpExtension } from "./acp/extensions/index.js";

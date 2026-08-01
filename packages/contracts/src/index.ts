@@ -180,6 +180,8 @@ export type {
   ToolListResultDto,
 } from "./dto/tool-dto.js";
 
+export type { PendingSkillWrite } from "./dto/skill-dto.js";
+
 export { ManifestSchema, type ManifestJson } from "./manifest/index.js";
 
 export { PROTOCOL_VERSION, SUPPORTED_VERSIONS, isSupportedVersion } from "./protocol/protocol-version.js";
