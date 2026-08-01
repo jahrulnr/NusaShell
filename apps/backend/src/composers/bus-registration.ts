@@ -22,6 +22,7 @@ import {
   CancelAgentTurnHandler,
   AnswerAskQuestionHandler,
   AddJobHandler,
+  UpdateJobHandler,
   SetJobEnabledHandler,
   RunJobNowHandler,
   CancelJobHandler,
@@ -132,6 +133,7 @@ export function registerBuses(
   ));
   commandBus.register("answer-ask-question", new AnswerAskQuestionHandler(agent.askQuestionService));
   commandBus.register("add-job", new AddJobHandler(jobs.jobStore));
+  commandBus.register("update-job", new UpdateJobHandler(jobs.jobStore));
   commandBus.register("set-job-enabled", new SetJobEnabledHandler(jobs.jobStore));
   commandBus.register("run-job-now", new RunJobNowHandler(jobs.jobScheduler));
   commandBus.register("cancel-job", new CancelJobHandler(jobs.jobScheduler));

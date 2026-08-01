@@ -8,7 +8,7 @@ import type { MemoryStorePort, MemoryTarget } from "../../memory/ports/memory-st
 import type { JobStorePort } from "../../job/ports/job-store.port.js";
 import type { JobScheduler } from "../../job/services/job-scheduler.js";
 import type { DocsIndexPort } from "../ports/docs-index.port.js";
-import type { AgentToolDefinition } from "../ports/agent-provider.port.js";
+import type { AgentToolDefinition, ReasoningEffort } from "../ports/agent-provider.port.js";
 import type { AgentToolGateway, AgentTurnContext } from "../ports/agent-tool-gateway.port.js";
 import type { LoggerPort } from "../../plugin/ports/logger.port.js";
 import type { AskQuestionService } from "./ask-question-service.js";
@@ -48,6 +48,9 @@ export class McpAgentToolGateway implements AgentToolGateway {
   private readonly activeCalls = new Map<string, Map<string, string>>();
   private readonly turnInteractive = new Map<string, boolean>();
   private readonly turnWorkspace = new Map<string, string | undefined>();
+  private readonly turnProviderId = new Map<string, string | undefined>();
+  private readonly turnModel = new Map<string, string | undefined>();
+  private readonly turnEffort = new Map<string, ReasoningEffort | undefined>();
   private writeOrigin: WriteOrigin = "foreground";
   private writeApprovalEnabled = false;
   private jobStore?: JobStorePort;
@@ -80,6 +83,9 @@ export class McpAgentToolGateway implements AgentToolGateway {
     if (!this.activeCalls.has(turnId)) this.activeCalls.set(turnId, new Map());
     if (context?.interactive !== undefined) this.turnInteractive.set(turnId, context.interactive);
     this.turnWorkspace.set(turnId, context?.workspace);
+    this.turnProviderId.set(turnId, context?.providerId);
+    this.turnModel.set(turnId, context?.model);
+    this.turnEffort.set(turnId, context?.effort);
   }
 
   endTurn(turnId: string): void {
@@ -88,6 +94,9 @@ export class McpAgentToolGateway implements AgentToolGateway {
     this.activeCalls.delete(turnId);
     this.turnInteractive.delete(turnId);
     this.turnWorkspace.delete(turnId);
+    this.turnProviderId.delete(turnId);
+    this.turnModel.delete(turnId);
+    this.turnEffort.delete(turnId);
   }
 
   async cancelTurn(turnId: string): Promise<void> {
@@ -228,7 +237,11 @@ export class McpAgentToolGateway implements AgentToolGateway {
       case "skill_read": return execSkillRead(this.skillRegistry, this.skillUsage, this.logger, args);
       case "memory": return execMemory(this.memoryStore, args);
       case "skill_manage": return execSkillManage(this.skillRegistry, this.skillProvenance, this.skillUsage, this.approvalStaging, this.logger, this.writeOrigin, this.writeApprovalEnabled, args);
-      case "job": return execJob(this.jobStore, this.jobScheduler, args);
+      case "job": return execJob(this.jobStore, this.jobScheduler, args, {
+        providerId: this.turnProviderId.get(turnId),
+        model: this.turnModel.get(turnId),
+        effort: this.turnEffort.get(turnId),
+      });
       case "ask_question": return execAskQuestion(this.askQuestions, this.isInteractive(turnId), args, callId ?? requestId, turnId);
       default: return this.callGrantedTool(name, args, requestId, turnId);
     }

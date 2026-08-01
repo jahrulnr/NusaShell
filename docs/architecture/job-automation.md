@@ -58,7 +58,7 @@ packages/application/src/job/
 ├── schedule-parser.ts        # parseSchedule + computeNextRun + cron matcher
 ├── ports/
 │   └── job-store.port.ts     # JobStorePort interface
-├── commands/                 # add-job, set-job-enabled, run-job-now, cancel-job, remove-job
+├── commands/                 # add-job, update-job, set-job-enabled, run-job-now, cancel-job, remove-job
 ├── queries/                  # list-jobs, job-output, validate-schedule
 └── services/
     ├── job-agent-tool-gateway.ts   # restricted gateway (denies memory/skill tools)
@@ -96,12 +96,17 @@ catalog small (same envelope style as `memory`):
 | --- | --- | --- |
 | `list` | — | Compact jobs: `id`, `name`, `schedule`, `enabled`, `nextRunAt`, `lastStatus`, `running`, `activeTraceId` |
 | `validate_schedule` | `schedule` | Parse + describe; returns `{ ok, data: { description } }` or a `job_invalid_schedule` envelope |
-| `add` | `name`, `schedule`, `mode` (`agent`\|`tool`), plus mode fields / optional `repeat_times` | Same schedule parsing and `JOB_INVALID_SCHEDULE` mapping as `AddJobHandler` |
+| `add` | `name`, `schedule`, `mode` (`agent`\|`tool`), plus mode fields / optional `repeat_times` | Same schedule parsing and `JOB_INVALID_SCHEDULE` mapping as `AddJobHandler`. Agent mode inherits caller turn's `providerId`/`model`/`effort` when not explicitly set. |
+| `update` | `id`, plus any of `name`, `schedule`, `mode`, `repeat_times`, `enabled` | Edits an existing job; recomputes `nextRunAt` on schedule change. Same model inheritance as `add`. |
 | `set_enabled` | `id`, `enabled` | Pause/resume; recomputes `nextRunAt` like `SetJobEnabledHandler` |
 | `run` | `id` | `scheduler.runOneNow` (manual fire, respects the claim lock) |
 | `cancel` | `id` | `scheduler.cancel` (abort in-flight run; `JOB_NOT_RUNNING` if not active) |
 | `remove` | `id` | Delete |
 | `output` | `id`, optional `limit` (1-100, default 20) | Recent output entries |
+
+Agent mode `mode` object: `{ type: "agent", prompt, providerId?, model?, effort? }`.
+Tool mode: `{ type: "tool", pluginId, toolName, args }`. Tool mode has no
+`prompt` and no AI model — it is a scheduled RPC.
 
 Returns `{ ok, data?, error?, meta }` like the other shell-owned meta-tools.
 `ApplicationError` codes `JOB_NOT_FOUND`, `JOB_INVALID_SCHEDULE`, and
@@ -126,7 +131,9 @@ Builds a fresh `AgentTurnRunner` per run with:
 - the restricted `JobAgentToolGateway`,
 - an inactivity watchdog (default 600s) that aborts the turn,
 - an external `AbortSignal` from the scheduler (bridged with the watchdog
-  controller so either inactivity-timeout or user-cancel aborts the turn).
+  controller so either inactivity-timeout or user-cancel aborts the turn),
+- per-job `providerId`/`model`/`effort` override (falls back to the shell
+  `defaultProviderId` when the job's agent mode omits them).
 
 Job turns are **never** persisted into `agent-conversations.json`.
 
@@ -160,6 +167,7 @@ flowchart LR
 | Method | Kind | Description |
 | --- | --- | --- |
 | `job.add` | command | Create a new job |
+| `job.update` | command | Edit an existing job (name, schedule, mode, repeat_times, enabled) |
 | `job.list` | query | List all jobs (returns `{ jobs: [...] }`) |
 | `job.set-enabled` | command | Pause/resume a job |
 | `job.run` | command | Fire a job immediately |

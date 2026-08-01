@@ -23,6 +23,7 @@ export {
   DEFAULT_JOB_EXECUTOR_SETTINGS,
   type JobAgentExecutorSettings,
   type JobAgentExecutorDeps,
+  type JobAgentRunOptions,
   type JobExecutionResult,
   describeMode,
 } from "./services/job-agent-executor.js";
@@ -36,6 +37,7 @@ export {
 } from "./services/job-scheduler.js";
 export type {
   AddJobCommand,
+  UpdateJobCommand,
   SetJobEnabledCommand,
   RunJobNowCommand,
   RunJobNowResult,
@@ -46,6 +48,7 @@ export type {
 } from "./commands/index.js";
 export {
   AddJobHandler,
+  UpdateJobHandler,
   SetJobEnabledHandler,
   RunJobNowHandler,
   RemoveJobHandler,

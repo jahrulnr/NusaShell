@@ -236,7 +236,13 @@ export const SystemVersionRequestSchema = z.object({
 });
 
 const JobModeSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("agent"), prompt: z.string().min(1).max(10000) }),
+  z.object({
+    type: z.literal("agent"),
+    prompt: z.string().min(1).max(10000),
+    providerId: z.string().min(1).optional(),
+    model: z.string().min(1).max(200).optional(),
+    effort: z.enum(["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
+  }),
   z.object({
     type: z.literal("tool"),
     pluginId: z.string().min(1),
@@ -255,6 +261,21 @@ export const JobAddRequestSchema = z.object({
     schedule: z.string().min(1).max(200),
     mode: JobModeSchema,
     repeatTimes: z.number().int().min(1).max(100000).optional(),
+  }),
+});
+
+export const JobUpdateRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("job.update"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    id: z.string().min(1),
+    name: z.string().min(1).max(200).optional(),
+    schedule: z.string().min(1).max(200).optional(),
+    mode: JobModeSchema.optional(),
+    repeatTimes: z.number().int().min(1).max(100000).nullable().optional(),
+    enabled: z.boolean().optional(),
   }),
 });
 
@@ -496,6 +517,7 @@ export const RequestSchema = z.discriminatedUnion("method", [
   SystemPingRequestSchema,
   SystemVersionRequestSchema,
   JobAddRequestSchema,
+  JobUpdateRequestSchema,
   JobListRequestSchema,
   JobSetEnabledRequestSchema,
   JobRunRequestSchema,
@@ -536,6 +558,7 @@ export type AgentRunRequest = z.infer<typeof AgentRunRequestSchema>;
 export type AgentCancelRequest = z.infer<typeof AgentCancelRequestSchema>;
 export type AgentAskAnswerRequest = z.infer<typeof AgentAskAnswerRequestSchema>;
 export type JobAddRequest = z.infer<typeof JobAddRequestSchema>;
+export type JobUpdateRequest = z.infer<typeof JobUpdateRequestSchema>;
 export type JobListRequest = z.infer<typeof JobListRequestSchema>;
 export type JobSetEnabledRequest = z.infer<typeof JobSetEnabledRequestSchema>;
 export type JobRunRequest = z.infer<typeof JobRunRequestSchema>;

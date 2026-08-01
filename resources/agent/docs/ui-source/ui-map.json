@@ -572,12 +572,13 @@
         {
           "heading": "Job row actions",
           "paragraphs": [
-            "Each job row has Run (fire immediately), Stop (cancel an in-flight run, visible only while running), Pause/Resume (toggle enabled), Output (recent run summaries), and Remove (opens a delete confirmation dialog). While a job is running, the row highlights with a pulsing dot and the Run/Pause buttons are disabled."
+            "Each job row has Run (fire immediately), Stop (cancel an in-flight run, visible only while running), Pause/Resume (toggle enabled), Edit (opens the create/edit modal prefilled), Output (recent run summaries), and Remove (opens a delete confirmation dialog). While a job is running, the row highlights with a pulsing dot and the Run/Pause buttons are disabled."
           ],
           "controls": [
             "job-run-btn",
             "job-stop-btn",
             "job-toggle-btn",
+            "job-edit-btn",
             "job-output-btn",
             "job-remove-btn"
           ]
@@ -604,16 +605,21 @@
         {
           "heading": "Job form",
           "paragraphs": [
-            "Name, schedule (every 30m / 2h / 1d / 5-field cron / ISO timestamp), mode selector, agent prompt or plugin tool fields, and optional repeat count. Schedule is validated on blur with a live description or error. The mode-dependent fields (agent prompt vs plugin tool fields) toggle via hidden + aria-hidden. The dialog supports Escape and overlay click to close, and returns focus to the trigger on close."
+            "Name, schedule (every 30m / 2h / 1d / 5-field cron / ISO timestamp), mode selector, agent prompt + model picker or plugin tool schema form, and optional repeat count. Schedule is validated on blur with a live description or error. The mode-dependent fields toggle via hidden + aria-hidden. Agent mode shows a required Prompt textarea plus Provider/Model/Effort selects (Default = shell active settings). Tool mode shows Plugin and Tool dropdowns populated from the live catalog, then a schema-driven arg form (primitives/enums as native inputs, object/array as JSON textareas); a JSON fallback textarea appears when no schema is available. The Edit button on a row opens this modal prefilled and saves via job.update. The dialog supports Escape and overlay click to close, and returns focus to the trigger on close."
           ],
           "controls": [
             "job-field-name",
             "job-field-schedule",
             "job-schedule-help",
             "job-field-mode",
+            "job-mode-help",
             "job-field-prompt",
+            "job-field-provider",
+            "job-field-model",
+            "job-field-effort",
             "job-field-plugin-id",
             "job-field-tool-name",
+            "job-tool-schema-form",
             "job-field-args",
             "job-field-repeat",
             "job-modal-save"
@@ -2489,6 +2495,14 @@
       "selector": "[data-control=\"job-remove-btn\"]",
       "action": "Opens the job delete confirmation dialog."
     },
+    "job-edit-btn": {
+      "section": "Job row actions",
+      "label": "Edit",
+      "type": "button",
+      "selector": "[data-control=\"job-edit-btn\"]",
+      "action": "Opens the job modal prefilled with the job's fields for editing via job.update.",
+      "generated": true
+    },
     "job-delete-dialog": {
       "section": "Job delete confirmation",
       "label": "Delete dialog",
@@ -2545,26 +2559,62 @@
       "selector": "#job-field-mode",
       "action": "Switches between agent prompt and plugin tool call mode."
     },
+    "job-mode-help": {
+      "section": "Job form",
+      "label": "Mode help",
+      "type": "status text",
+      "selector": "#job-mode-help",
+      "action": "One-line description of the selected mode (agent = uses AI model; tool = no model, direct plugin call)."
+    },
     "job-field-prompt": {
       "section": "Job form",
       "label": "Prompt",
       "type": "textarea",
       "selector": "#job-field-prompt",
-      "action": "Agent prompt for agent-mode jobs."
+      "action": "Agent prompt for agent-mode jobs. Required when mode is agent."
+    },
+    "job-field-provider": {
+      "section": "Job form",
+      "label": "Provider",
+      "type": "select",
+      "selector": "#job-field-provider",
+      "action": "AI provider for agent-mode jobs. Default = shell active settings provider."
+    },
+    "job-field-model": {
+      "section": "Job form",
+      "label": "Model",
+      "type": "select",
+      "selector": "#job-field-model",
+      "action": "AI model for agent-mode jobs. Default = shell active settings model. Options filtered by selected provider."
+    },
+    "job-field-effort": {
+      "section": "Job form",
+      "label": "Effort",
+      "type": "select",
+      "selector": "#job-field-effort",
+      "action": "Reasoning effort for agent-mode jobs. Only shown when the selected model advertises supported efforts."
     },
     "job-field-plugin-id": {
       "section": "Job form",
-      "label": "Plugin ID",
-      "type": "text input",
+      "label": "Plugin",
+      "type": "select",
       "selector": "#job-field-plugin-id",
-      "action": "Plugin ID for tool-mode jobs."
+      "action": "Plugin dropdown for tool-mode jobs, populated from the live plugin catalog. Starts the plugin if stopped."
     },
     "job-field-tool-name": {
       "section": "Job form",
-      "label": "Tool name",
-      "type": "text input",
+      "label": "Tool",
+      "type": "select",
       "selector": "#job-field-tool-name",
-      "action": "Tool name for tool-mode jobs."
+      "action": "Tool dropdown for tool-mode jobs, populated after a plugin is selected."
+    },
+    "job-tool-schema-form": {
+      "section": "Job form",
+      "label": "Schema arg form",
+      "type": "container",
+      "selector": "#job-tool-schema-form",
+      "action": "Dynamic form fields generated from the selected tool's inputSchema. Primitives and enums render as native inputs; object/array properties render as JSON textareas.",
+      "generated": true
     },
     "job-field-args": {
       "section": "Job form",

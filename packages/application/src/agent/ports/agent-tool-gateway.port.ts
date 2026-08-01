@@ -1,4 +1,4 @@
-import type { AgentToolDefinition } from "./agent-provider.port.js";
+import type { AgentToolDefinition, ReasoningEffort } from "./agent-provider.port.js";
 
 export interface AgentTurnContext {
   readonly interactive?: boolean;
@@ -9,6 +9,12 @@ export interface AgentTurnContext {
    * (Phase 3). Prompt-only injection is the legacy fallback.
    */
   readonly workspace?: string;
+  /** Caller turn's provider — inherited by agent-mode jobs created via the `job` tool. */
+  readonly providerId?: string;
+  /** Caller turn's model — inherited by agent-mode jobs created via the `job` tool. */
+  readonly model?: string;
+  /** Caller turn's reasoning effort — inherited by agent-mode jobs created via the `job` tool. */
+  readonly effort?: ReasoningEffort;
 }
 
 export interface AgentToolGateway {

@@ -476,6 +476,7 @@
           </div>
           <button class="action-btn" id="jobs-new-btn" type="button" data-control="jobs-new-btn">+ New job</button>
         </div>
+        <div class="jobs-hint" id="jobs-hint">Jobs run only while the app is open. A one-shot missed while the app was closed is marked errored, not silently fired.</div>
         <div class="jobs-error" id="jobs-error" hidden>
           <strong>Could not load jobs</strong>
           <span id="jobs-error-message"></span>
@@ -505,14 +506,44 @@
                 <option value="agent">Agent prompt</option>
                 <option value="tool">Plugin tool call</option>
               </select>
+              <span class="form-help" id="job-mode-help"></span>
             </label>
-            <label class="form-label" id="job-agent-prompt-label">Prompt
-              <textarea id="job-field-prompt" rows="4" placeholder="Summarize unread mail and create a note." data-control="job-field-prompt"></textarea>
-            </label>
+            <div id="job-agent-fields">
+              <label class="form-label" id="job-agent-prompt-label">Prompt
+                <textarea id="job-field-prompt" rows="4" placeholder="Summarize unread mail and create a note." data-control="job-field-prompt"></textarea>
+              </label>
+              <div class="job-model-row">
+                <label class="form-label">Provider
+                  <select id="job-field-provider" data-control="job-field-provider">
+                    <option value="">Default</option>
+                  </select>
+                </label>
+                <label class="form-label">Model
+                  <select id="job-field-model" data-control="job-field-model">
+                    <option value="">Default</option>
+                  </select>
+                </label>
+                <label class="form-label" id="job-effort-label">Effort
+                  <select id="job-field-effort" data-control="job-field-effort">
+                    <option value="">Default</option>
+                  </select>
+                </label>
+              </div>
+            </div>
             <div id="job-tool-fields" hidden aria-hidden="true">
-              <label class="form-label">Plugin ID<input type="text" id="job-field-plugin-id" placeholder="nusashell.mail" data-control="job-field-plugin-id"></label>
-              <label class="form-label">Tool name<input type="text" id="job-field-tool-name" placeholder="send" data-control="job-field-tool-name"></label>
-              <label class="form-label">Args (JSON)<textarea id="job-field-args" rows="3" placeholder='{"to":"x@y.com"}' data-control="job-field-args"></textarea></label>
+              <label class="form-label">Plugin
+                <select id="job-field-plugin-id" data-control="job-field-plugin-id">
+                  <option value="">Select a plugin…</option>
+                </select>
+              </label>
+              <label class="form-label">Tool
+                <select id="job-field-tool-name" data-control="job-field-tool-name">
+                  <option value="">Select a tool…</option>
+                </select>
+                <span class="form-help" id="job-tool-help" aria-live="polite"></span>
+              </label>
+              <div id="job-tool-schema-form" class="job-schema-form"></div>
+              <label class="form-label" id="job-tool-args-fallback-label" hidden>Args (JSON fallback)<textarea id="job-field-args" rows="3" placeholder='{"to":"x@y.com"}' data-control="job-field-args"></textarea></label>
             </div>
             <label class="form-label">Repeat (times, blank = forever)<input type="number" id="job-field-repeat" min="1" placeholder="∞" data-control="job-field-repeat"></label>
           </div>

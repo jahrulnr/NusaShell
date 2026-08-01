@@ -40,7 +40,7 @@ Lists all scheduled jobs. Each row leads with a status dot and shows the job nam
 
 ## Job row actions
 
-Each job row has Run (fire immediately), Stop (cancel an in-flight run, visible only while running), Pause/Resume (toggle enabled), Output (recent run summaries), and Remove (opens a delete confirmation dialog). While a job is running, the row highlights with a pulsing dot and the Run/Pause buttons are disabled.
+Each job row has Run (fire immediately), Stop (cancel an in-flight run, visible only while running), Pause/Resume (toggle enabled), Edit (opens the create/edit modal prefilled), Output (recent run summaries), and Remove (opens a delete confirmation dialog). While a job is running, the row highlights with a pulsing dot and the Run/Pause buttons are disabled.
 
 - **Run** (`[data-control="job-run-btn"]`):
   - Section: Job row actions
@@ -56,6 +56,11 @@ Each job row has Run (fire immediately), Stop (cancel an in-flight run, visible 
   - Section: Job row actions
   - Type: button
   - Action: Toggles job enabled state via job.set-enabled.
+
+- **Edit** (`[data-control="job-edit-btn"]`):
+  - Section: Job row actions
+  - Type: button
+  - Action: Opens the job modal prefilled with the job's fields for editing via job.update.
 
 - **Output** (`[data-control="job-output-btn"]`):
   - Section: Job row actions

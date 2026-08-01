@@ -12,6 +12,7 @@ import type {
   CancelAgentTurnCommand,
   AnswerAskQuestionCommand,
   AddJobCommand,
+  UpdateJobCommand,
   SetJobEnabledCommand,
   RunJobNowCommand,
   CancelJobCommand,
@@ -26,7 +27,7 @@ import type {
 } from "@nusashell/application";
 
 export function mapToCommand(request: ParsedRequest):
-  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | SetPluginAutostartCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand | CancelAgentTurnCommand | AnswerAskQuestionCommand | AddJobCommand | SetJobEnabledCommand | RunJobNowCommand | CancelJobCommand | RemoveJobCommand | RunAcpTurnCommand | CancelAcpTurnCommand | AnswerAcpPermissionCommand | AnswerAcpAskCommand | SetAcpConfigOptionCommand | EnsureAcpSessionCommand | ProbeAcpProviderCommand }
+  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | SetPluginAutostartCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand | CancelAgentTurnCommand | AnswerAskQuestionCommand | AddJobCommand | UpdateJobCommand | SetJobEnabledCommand | RunJobNowCommand | CancelJobCommand | RemoveJobCommand | RunAcpTurnCommand | CancelAcpTurnCommand | AnswerAcpPermissionCommand | AnswerAcpAskCommand | SetAcpConfigOptionCommand | EnsureAcpSessionCommand | ProbeAcpProviderCommand }
   | { kind: "query" } {
   switch (request.method) {
     case "plugin.start":
@@ -145,6 +146,19 @@ export function mapToCommand(request: ParsedRequest):
           mode: request.payload.mode,
           ...(request.payload.repeatTimes !== undefined ? { repeatTimes: request.payload.repeatTimes } : {}),
         } as AddJobCommand,
+      };
+    case "job.update":
+      return {
+        kind: "command",
+        command: {
+          kind: "update-job",
+          id: request.payload.id,
+          ...(request.payload.name !== undefined ? { name: request.payload.name } : {}),
+          ...(request.payload.schedule !== undefined ? { schedule: request.payload.schedule } : {}),
+          ...(request.payload.mode !== undefined ? { mode: request.payload.mode } : {}),
+          ...(request.payload.repeatTimes !== undefined ? { repeatTimes: request.payload.repeatTimes } : {}),
+          ...(request.payload.enabled !== undefined ? { enabled: request.payload.enabled } : {}),
+        } as UpdateJobCommand,
       };
     case "job.set-enabled":
       return {

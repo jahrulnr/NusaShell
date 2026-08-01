@@ -150,6 +150,70 @@
   font-family: var(--mono-font, monospace);
 }
 
+/* ===== Markdown output rendering ===== */
+.job-output-md {
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+.job-output-md h1, .job-output-md h2, .job-output-md h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 8px 0 4px;
+}
+.job-output-md p { margin: 4px 0; }
+.job-output-md ul, .job-output-md ol { margin: 4px 0; padding-left: 20px; }
+.job-output-md li { margin: 2px 0; }
+.job-output-md pre {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  overflow-x: auto;
+  font-size: 12px;
+  font-family: var(--mono-font, monospace);
+}
+.job-output-md code {
+  font-family: var(--mono-font, monospace);
+  font-size: 12px;
+}
+.job-output-md :not(pre) > code {
+  background: var(--panel-alt);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.job-output-md a { color: var(--accent); }
+.job-output-md blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 10px;
+  margin: 6px 0;
+  color: var(--text-dim);
+}
+.job-output-md table {
+  border-collapse: collapse;
+  margin: 6px 0;
+}
+.job-output-md th, .job-output-md td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+/* ===== Model picker + schema form ===== */
+.job-model-row {
+  display: flex;
+  gap: 8px;
+}
+.job-model-row .form-label {
+  flex: 1;
+}
+.job-schema-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
 /* Job create/output modals reuse the shared .modal-overlay + .active pattern
    from modals.css. .modal-card is the Jobs-form variant of .modal. */
 .modal-card {

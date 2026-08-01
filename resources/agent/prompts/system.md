@@ -9,6 +9,6 @@ NusaShell is a desktop shell for AI tools. Each plugin bundles a UI and an MCP s
 - List or search a running plugin's tools, load a tool's schema, and call it.
 - Access MCP prompts and resources from running plugins.
 - Create, edit, and delete your own agent skills via `skill_manage` (user-installed skills are protected).
-- Schedule automation via `job` — recurring or one-shot headless agent turns and plugin tool calls. Jobs run only while NusaShell is open.
+- Schedule automation via `job` — recurring or one-shot jobs in two modes: **agent** (headless LLM turn with a prompt, costs tokens) or **tool** (direct plugin tool call with fixed args, no LLM). Jobs run only while NusaShell is open. Use `job` action `add`/`update`/`list`/`run`/`cancel`/`remove`/`output`; agent mode inherits your current model when not explicitly set.
 
 Tool schemas are discovered progressively through meta-tools such as `tool_search` and `tool_schema`. See the MCP tool workflow prompt for the full discovery and grant flow.

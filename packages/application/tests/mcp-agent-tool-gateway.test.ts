@@ -1020,6 +1020,140 @@ describe("McpAgentToolGateway", () => {
       expect(result).toEqual({ ok: true, data: { entries: [outputs[0]] }, meta: { count: 1 } });
     });
 
+    it("update edits an existing job's name and schedule", async () => {
+      const store = fakeStore([fakeJob()]);
+      const gateway = new McpAgentToolGateway(fakeRuntime as never);
+      gateway.bindJobs(store, fakeScheduler());
+      gateway.beginTurn("turn-update");
+
+      const result = await gateway.execute(
+        "job",
+        { action: "update", id: "job-1", name: "Weekly digest", schedule: "every 7d" },
+        "c-upd",
+        "turn-update",
+      );
+      expect(result.ok).toBe(true);
+      const updated = (result as { data: Job }).data;
+      expect(updated.name).toBe("Weekly digest");
+      expect(updated.schedule).toEqual({ kind: "interval", minutes: 10080 });
+    });
+
+    it("update returns job_not_found when the id is absent", async () => {
+      const gateway = new McpAgentToolGateway(fakeRuntime as never);
+      gateway.bindJobs(fakeStore(), fakeScheduler());
+      gateway.beginTurn("turn-update-missing");
+
+      const result = await gateway.execute("job", { action: "update", id: "nope", name: "x" }, "c", "turn-update-missing");
+      expect(result).toEqual({
+        ok: false,
+        error: { code: "job_not_found", message: expect.stringMatching(/Job not found/) },
+        meta: {},
+      });
+    });
+
+    it("update maps an invalid schedule to job_invalid_schedule", async () => {
+      const gateway = new McpAgentToolGateway(fakeRuntime as never);
+      gateway.bindJobs(fakeStore([fakeJob()]), fakeScheduler());
+      gateway.beginTurn("turn-update-bad-sched");
+
+      const result = await gateway.execute("job", { action: "update", id: "job-1", schedule: "every" }, "c", "turn-update-bad-sched");
+      expect(result).toEqual({
+        ok: false,
+        error: { code: "job_invalid_schedule", message: expect.any(String) },
+        meta: {},
+      });
+    });
+
+    it("update can switch mode from agent to tool", async () => {
+      const store = fakeStore([fakeJob()]);
+      const gateway = new McpAgentToolGateway(fakeRuntime as never);
+      gateway.bindJobs(store, fakeScheduler());
+      gateway.beginTurn("turn-update-mode");
+
+      const result = await gateway.execute(
+        "job",
+        { action: "update", id: "job-1", mode: "tool", pluginId: "nusashell.mail", toolName: "send", args: { to: "x@y.com" } },
+        "c",
+        "turn-update-mode",
+      );
+      expect(result.ok).toBe(true);
+      const updated = (result as { data: Job }).data;
+      expect(updated.mode).toEqual({ type: "tool", pluginId: "nusashell.mail", toolName: "send", args: { to: "x@y.com" } });
+    });
+
+    it("add with agent mode inherits the caller turn's provider/model/effort", async () => {
+      const store = fakeStore();
+      const gateway = new McpAgentToolGateway(fakeRuntime as never);
+      gateway.bindJobs(store, fakeScheduler());
+      gateway.beginTurn("turn-inherit", {
+        interactive: true,
+        providerId: "openai",
+        model: "gpt-4o",
+        effort: "medium",
+      });
+
+      const result = await gateway.execute(
+        "job",
+        { action: "add", name: "Inherited", schedule: "every 1h", mode: "agent", prompt: "ping" },
+        "c",
+        "turn-inherit",
+      );
+      expect(result.ok).toBe(true);
+      const created = (result as { data: Job }).data;
+      expect(created.mode).toEqual({ type: "agent", prompt: "ping", providerId: "openai", model: "gpt-4o", effort: "medium" });
+    });
+
+    it("add with agent mode respects explicit model over caller inheritance", async () => {
+      const store = fakeStore();
+      const gateway = new McpAgentToolGateway(fakeRuntime as never);
+      gateway.bindJobs(store, fakeScheduler());
+      gateway.beginTurn("turn-override", { providerId: "openai", model: "gpt-4o" });
+
+      const result = await gateway.execute(
+        "job",
+        { action: "add", name: "Override", schedule: "every 1h", mode: "agent", prompt: "ping", model: "o3-mini" },
+        "c",
+        "turn-override",
+      );
+      expect(result.ok).toBe(true);
+      const created = (result as { data: Job }).data;
+      expect(created.mode).toEqual({ type: "agent", prompt: "ping", providerId: "openai", model: "o3-mini" });
+    });
+
+    it("add with agent mode omits model fields when neither caller nor explicit set them", async () => {
+      const store = fakeStore();
+      const gateway = new McpAgentToolGateway(fakeRuntime as never);
+      gateway.bindJobs(store, fakeScheduler());
+      gateway.beginTurn("turn-no-model");
+
+      const result = await gateway.execute(
+        "job",
+        { action: "add", name: "Plain", schedule: "every 1h", mode: "agent", prompt: "ping" },
+        "c",
+        "turn-no-model",
+      );
+      expect(result.ok).toBe(true);
+      const created = (result as { data: Job }).data;
+      expect(created.mode).toEqual({ type: "agent", prompt: "ping" });
+    });
+
+    it("update preserves existing agent model fields when only prompt changes", async () => {
+      const store = fakeStore([fakeJob({ mode: { type: "agent", prompt: "old", providerId: "openai", model: "gpt-4o", effort: "high" } })]);
+      const gateway = new McpAgentToolGateway(fakeRuntime as never);
+      gateway.bindJobs(store, fakeScheduler());
+      gateway.beginTurn("turn-update-prompt");
+
+      const result = await gateway.execute(
+        "job",
+        { action: "update", id: "job-1", prompt: "new prompt" },
+        "c",
+        "turn-update-prompt",
+      );
+      expect(result.ok).toBe(true);
+      const updated = (result as { data: Job }).data;
+      expect(updated.mode).toEqual({ type: "agent", prompt: "new prompt", providerId: "openai", model: "gpt-4o", effort: "high" });
+    });
+
     it("rejects an unknown action with an envelope", async () => {
       const gateway = new McpAgentToolGateway(fakeRuntime as never);
       gateway.bindJobs(fakeStore(), fakeScheduler());

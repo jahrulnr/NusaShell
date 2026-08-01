@@ -1,4 +1,7 @@
 import { sendRequest, onEvent } from "./ws-client.js";
+import { fetchPlugins, listTools, startPlugin } from "./plugin-api.js";
+import { renderAssistantMarkdown } from "./agent-conversation-ui.js";
+import { serializeSchemaArgs } from "./jobs-form-helpers.js";
 
 const JOB_RUN_TIMEOUT_MS = 300_000;
 
@@ -17,9 +20,25 @@ function describeJobSchedule(schedule) {
 
 function describeJobMode(mode) {
   if (!mode) return "—";
-  if (mode.type === "agent") return `agent: ${mode.prompt.slice(0, 60)}`;
+  if (mode.type === "agent") {
+    const model = mode.model ? ` · ${mode.model}` : "";
+    return `agent${model}: ${mode.prompt.slice(0, 60)}`;
+  }
   if (mode.type === "tool") return `tool: ${mode.pluginId}/${mode.toolName}`;
   return "—";
+}
+
+function describeScheduleKey(schedule) {
+  if (!schedule) return "";
+  if (schedule.kind === "once") return schedule.runAt;
+  if (schedule.kind === "interval") {
+    const m = schedule.minutes;
+    if (m % 1440 === 0) return `every ${m / 1440}d`;
+    if (m % 60 === 0) return `every ${m / 60}h`;
+    return `every ${m}m`;
+  }
+  if (schedule.kind === "cron") return schedule.expr;
+  return "";
 }
 
 function describeLastStatus(status) {
@@ -48,8 +67,12 @@ export class JobsController {
     this.list = [];
     this.loading = false;
     this.pendingDeleteId = "";
+    this.editingId = null;
     this._lastFocus = null;
     this._runningIds = new Set();
+    this._plugins = [];
+    this._toolSchemas = new Map();
+    this._aiSettings = null;
     this.els = {
       list: document.getElementById("jobs-list"),
       empty: document.getElementById("jobs-empty"),
@@ -66,11 +89,20 @@ export class JobsController {
       fieldSchedule: document.getElementById("job-field-schedule"),
       scheduleHelp: document.getElementById("job-schedule-help"),
       fieldMode: document.getElementById("job-field-mode"),
+      modeHelp: document.getElementById("job-mode-help"),
+      agentFields: document.getElementById("job-agent-fields"),
       promptLabel: document.getElementById("job-agent-prompt-label"),
       fieldPrompt: document.getElementById("job-field-prompt"),
+      fieldProvider: document.getElementById("job-field-provider"),
+      fieldModel: document.getElementById("job-field-model"),
+      fieldEffort: document.getElementById("job-field-effort"),
+      effortLabel: document.getElementById("job-effort-label"),
       toolFields: document.getElementById("job-tool-fields"),
       fieldPluginId: document.getElementById("job-field-plugin-id"),
       fieldToolName: document.getElementById("job-field-tool-name"),
+      toolHelp: document.getElementById("job-tool-help"),
+      schemaForm: document.getElementById("job-tool-schema-form"),
+      argsFallbackLabel: document.getElementById("job-tool-args-fallback-label"),
       fieldArgs: document.getElementById("job-field-args"),
       fieldRepeat: document.getElementById("job-field-repeat"),
       outputModal: document.getElementById("job-output-modal"),
@@ -118,6 +150,9 @@ export class JobsController {
     this.els.modalSave?.addEventListener("click", () => void this.saveJob());
     this.els.fieldMode?.addEventListener("change", () => this._toggleModeFields());
     this.els.fieldSchedule?.addEventListener("blur", () => void this.validateSchedule());
+    this.els.fieldProvider?.addEventListener("change", () => this._syncModelOptions());
+    this.els.fieldPluginId?.addEventListener("change", () => void this._onPluginChange());
+    this.els.fieldToolName?.addEventListener("change", () => this._onToolChange());
     this.els.outputClose?.addEventListener("click", () => this.closeOutput());
     this.els.modal?.addEventListener("click", (event) => {
       if (event.target === this.els.modal) this.closeModal();
@@ -304,6 +339,14 @@ export class JobsController {
     outputBtn.setAttribute("aria-label", `View output for ${job.name}`);
     outputBtn.addEventListener("click", () => void this.showOutput(job.id, job.name));
 
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "mini-btn";
+    editBtn.textContent = "Edit";
+    editBtn.dataset.control = "job-edit-btn";
+    editBtn.setAttribute("aria-label", `Edit ${job.name}`);
+    editBtn.addEventListener("click", () => void this.openModal(job));
+
     const removeBtn = document.createElement("button");
     removeBtn.type = "button";
     removeBtn.className = "mini-btn danger";
@@ -312,23 +355,47 @@ export class JobsController {
     removeBtn.setAttribute("aria-label", `Remove ${job.name}`);
     removeBtn.addEventListener("click", () => this.openDeleteDialog(job.id, job.name));
 
-    actions.append(runBtn, stopBtn, toggleBtn, outputBtn, removeBtn);
+    actions.append(runBtn, stopBtn, toggleBtn, editBtn, outputBtn, removeBtn);
     row.append(statusDot, info, strip, actions);
     return row;
   }
 
-  openModal() {
+  async openModal(job = null) {
     this._lastFocus = document.activeElement;
-    this.els.modalTitle.textContent = "New job";
-    this.els.fieldName.value = "";
-    this.els.fieldSchedule.value = "";
-    this.els.fieldMode.value = "agent";
-    this.els.fieldPrompt.value = "";
-    this.els.fieldPluginId.value = "";
-    this.els.fieldToolName.value = "";
-    this.els.fieldArgs.value = "{}";
-    this.els.fieldRepeat.value = "";
+    this.editingId = job?.id ?? null;
+    this.els.modalTitle.textContent = job ? "Edit job" : "New job";
+    this.els.fieldName.value = job?.name ?? "";
+    this.els.fieldSchedule.value = job ? describeScheduleKey(job.schedule) : "";
+    this.els.fieldMode.value = job?.mode?.type ?? "agent";
+    this.els.fieldPrompt.value = job?.mode?.type === "agent" ? job.mode.prompt : "";
+    this.els.fieldRepeat.value = job?.repeat?.times ?? "";
     this.els.scheduleHelp.textContent = "";
+    this.els.fieldArgs.value = "{}";
+    this.els.schemaForm.textContent = "";
+    this.els.argsFallbackLabel.hidden = true;
+
+    await this._loadModelOptions();
+    if (job?.mode?.type === "agent") {
+      this.els.fieldProvider.value = job.mode.providerId ?? "";
+      this._syncModelOptions();
+      this.els.fieldModel.value = job.mode.model ?? "";
+      this.els.fieldEffort.value = job.mode.effort ?? "";
+    } else {
+      this.els.fieldProvider.value = "";
+      this.els.fieldModel.value = "";
+      this.els.fieldEffort.value = "";
+    }
+
+    await this._loadPluginOptions();
+    if (job?.mode?.type === "tool") {
+      this.els.fieldPluginId.value = job.mode.pluginId;
+      await this._onPluginChange(job.mode.args, job.mode.toolName);
+    } else {
+      this.els.fieldPluginId.value = "";
+      this.els.fieldToolName.value = "";
+      this._clearToolOptions();
+    }
+
     this._toggleModeFields();
     this.els.modal.classList.add("active");
     this.els.fieldName.focus();
@@ -336,16 +403,256 @@ export class JobsController {
 
   closeModal() {
     this.els.modal.classList.remove("active");
+    this.editingId = null;
     this._restoreFocus();
   }
 
   _toggleModeFields() {
     const mode = this.els.fieldMode.value;
     const isAgent = mode === "agent";
-    this.els.promptLabel.hidden = !isAgent;
-    this.els.promptLabel.setAttribute("aria-hidden", String(!isAgent));
+    this.els.agentFields.hidden = !isAgent;
+    this.els.agentFields.setAttribute("aria-hidden", String(!isAgent));
     this.els.toolFields.hidden = isAgent;
     this.els.toolFields.setAttribute("aria-hidden", String(isAgent));
+    this.els.modeHelp.textContent = isAgent
+      ? "Uses an AI model to run a headless agent turn. Costs tokens."
+      : "Calls one plugin tool with fixed args — no AI model, no tokens.";
+  }
+
+  async _loadModelOptions() {
+    if (!window.shell?.aiProviders?.list) return;
+    try {
+      this._aiSettings = await window.shell.aiProviders.list();
+    } catch { return; }
+    const providerSelect = this.els.fieldProvider;
+    const current = providerSelect.value;
+    providerSelect.textContent = "";
+    const def = document.createElement("option");
+    def.value = "";
+    def.textContent = this._aiSettings.activeProviderId
+      ? `Default (${this._aiSettings.activeProviderId})`
+      : "Default";
+    providerSelect.appendChild(def);
+    for (const provider of this._aiSettings.providers ?? []) {
+      const opt = document.createElement("option");
+      opt.value = provider.id;
+      opt.textContent = provider.id;
+      providerSelect.appendChild(opt);
+    }
+    providerSelect.value = current;
+    this._syncModelOptions();
+  }
+
+  _syncModelOptions() {
+    const providerId = this.els.fieldProvider.value;
+    const modelSelect = this.els.fieldModel;
+    const current = modelSelect.value;
+    modelSelect.textContent = "";
+    const def = document.createElement("option");
+    const activeModel = this._aiSettings?.models?.find((m) => m.key === this._aiSettings?.activeModelKey);
+    def.value = "";
+    def.textContent = activeModel ? `Default (${activeModel.id})` : "Default";
+    modelSelect.appendChild(def);
+    const models = (this._aiSettings?.models ?? []).filter((m) => !providerId || m.providerId === providerId);
+    for (const model of models) {
+      const opt = document.createElement("option");
+      opt.value = model.id;
+      opt.textContent = model.label || model.id;
+      modelSelect.appendChild(opt);
+    }
+    modelSelect.value = current;
+    this._syncEffortOptions();
+  }
+
+  _syncEffortOptions() {
+    const modelId = this.els.fieldModel.value;
+    const effortSelect = this.els.fieldEffort;
+    const current = effortSelect.value;
+    const model = (this._aiSettings?.models ?? []).find((m) => m.id === modelId);
+    const efforts = model?.supportedEfforts ?? [];
+    effortSelect.textContent = "";
+    const def = document.createElement("option");
+    def.value = "";
+    def.textContent = "Default";
+    effortSelect.appendChild(def);
+    if (efforts.length > 0) {
+      this.els.effortLabel.hidden = false;
+      for (const eff of efforts) {
+        const opt = document.createElement("option");
+        opt.value = eff;
+        opt.textContent = eff;
+        effortSelect.appendChild(opt);
+      }
+    } else {
+      this.els.effortLabel.hidden = true;
+    }
+    effortSelect.value = current;
+  }
+
+  async _loadPluginOptions() {
+    this._plugins = await fetchPlugins();
+    const select = this.els.fieldPluginId;
+    select.textContent = "";
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Select a plugin…";
+    select.appendChild(placeholder);
+    for (const plugin of this._plugins) {
+      const opt = document.createElement("option");
+      opt.value = plugin.pluginId;
+      opt.textContent = `${plugin.pluginId}${plugin.state === "running" ? "" : " (stopped)"}`;
+      select.appendChild(opt);
+    }
+  }
+
+  _clearToolOptions() {
+    const select = this.els.fieldToolName;
+    select.textContent = "";
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Select a tool…";
+    select.appendChild(placeholder);
+    this.els.schemaForm.textContent = "";
+    this.els.toolHelp.textContent = "";
+  }
+
+  async _onPluginChange(prefillArgs, prefillTool) {
+    const pluginId = this.els.fieldPluginId.value;
+    this._clearToolOptions();
+    if (!pluginId) return;
+    const plugin = this._plugins.find((p) => p.pluginId === pluginId);
+    if (plugin && plugin.state !== "running") {
+      this.els.toolHelp.textContent = "Starting plugin…";
+      await startPlugin(pluginId);
+    }
+    let result;
+    try {
+      result = await listTools(pluginId);
+    } catch (e) {
+      this.els.toolHelp.textContent = `Could not list tools: ${e?.message || e}`;
+      return;
+    }
+    if (result.error) {
+      this.els.toolHelp.textContent = result.error.message || "tool.list failed";
+      return;
+    }
+    this.els.toolHelp.textContent = "";
+    const tools = result.tools ?? [];
+    for (const tool of tools) {
+      const opt = document.createElement("option");
+      opt.value = tool.name;
+      opt.textContent = tool.name;
+      this.els.fieldToolName.appendChild(opt);
+    }
+    if (prefillTool) this.els.fieldToolName.value = prefillTool;
+    this._onToolChange(prefillArgs);
+  }
+
+  _onToolChange(prefillArgs) {
+    const pluginId = this.els.fieldPluginId.value;
+    const toolName = this.els.fieldToolName.value;
+    this.els.schemaForm.textContent = "";
+    if (!pluginId || !toolName) return;
+    const schema = this._toolSchemas.get(`${pluginId}/${toolName}`);
+    if (schema) {
+      this._renderSchemaForm(schema, prefillArgs);
+    } else {
+      this.els.argsFallbackLabel.hidden = false;
+      this.els.fieldArgs.value = prefillArgs ? JSON.stringify(prefillArgs, null, 2) : "{}";
+    }
+  }
+
+  _renderSchemaForm(schema, prefillArgs) {
+    const form = this.els.schemaForm;
+    form.textContent = "";
+    const props = schema.properties ?? {};
+    const required = new Set(schema.required ?? []);
+    const prefill = prefillArgs ?? {};
+    const hasComplex = Object.entries(props).some(([, def]) => {
+      const t = def?.type;
+      return t === "object" || t === "array";
+    });
+
+    for (const [key, def] of Object.entries(props)) {
+      const type = def?.type ?? "string";
+      const isRequired = required.has(key);
+      if (type === "object" || type === "array") {
+        const label = document.createElement("label");
+        label.className = "form-label";
+        label.textContent = `${key}${isRequired ? " *" : ""} (${type}, JSON)`;
+        const ta = document.createElement("textarea");
+        ta.rows = 3;
+        ta.dataset.schemaKey = key;
+        ta.dataset.schemaType = "json";
+        ta.placeholder = JSON.stringify(def?.default ?? (type === "array" ? [] : {}), null, 2);
+        ta.value = key in prefill ? JSON.stringify(prefill[key], null, 2) : "";
+        label.appendChild(ta);
+        form.appendChild(label);
+      } else if (def?.enum) {
+        const label = document.createElement("label");
+        label.className = "form-label";
+        label.textContent = `${key}${isRequired ? " *" : ""}`;
+        const sel = document.createElement("select");
+        sel.dataset.schemaKey = key;
+        sel.dataset.schemaType = "enum";
+        if (!isRequired) {
+          const empty = document.createElement("option");
+          empty.value = "";
+          empty.textContent = "—";
+          sel.appendChild(empty);
+        }
+        for (const val of def.enum) {
+          const opt = document.createElement("option");
+          opt.value = val;
+          opt.textContent = val;
+          sel.appendChild(opt);
+        }
+        sel.value = key in prefill ? String(prefill[key]) : (def.default ?? "");
+        label.appendChild(sel);
+        form.appendChild(label);
+      } else {
+        const label = document.createElement("label");
+        label.className = "form-label";
+        label.textContent = `${key}${isRequired ? " *" : ""}`;
+        const input = document.createElement("input");
+        input.type = type === "number" ? "number" : type === "boolean" ? "checkbox" : "text";
+        input.dataset.schemaKey = key;
+        input.dataset.schemaType = type;
+        if (type === "boolean") {
+          input.checked = key in prefill ? Boolean(prefill[key]) : Boolean(def.default);
+        } else {
+          input.value = key in prefill ? String(prefill[key]) : (def.default ?? "");
+        }
+        if (def.description) input.title = def.description;
+        label.appendChild(input);
+        form.appendChild(label);
+      }
+    }
+
+    if (hasComplex) {
+      this.els.argsFallbackLabel.hidden = true;
+    } else {
+      this.els.argsFallbackLabel.hidden = true;
+    }
+    if (Object.keys(props).length === 0) {
+      this.els.toolHelp.textContent = "This tool takes no arguments.";
+    } else {
+      this.els.toolHelp.textContent = "";
+    }
+  }
+
+  _serializeSchemaForm() {
+    const inputs = this.els.schemaForm.querySelectorAll("[data-schema-key]");
+    const fields = [];
+    for (const input of inputs) {
+      const type = input.dataset.schemaType;
+      fields.push({
+        key: input.dataset.schemaKey,
+        type,
+        value: type === "boolean" ? input.checked : input.value,
+      });
+    }
+    return serializeSchemaArgs(fields);
   }
 
   async validateSchedule() {
@@ -380,20 +687,35 @@ export class JobsController {
         return;
       }
       mode = { type: "agent", prompt };
+      const providerId = this.els.fieldProvider.value;
+      const model = this.els.fieldModel.value;
+      const effort = this.els.fieldEffort.value;
+      if (providerId) mode.providerId = providerId;
+      if (model) mode.model = model;
+      if (effort) mode.effort = effort;
     } else {
       const pluginId = this.els.fieldPluginId.value.trim();
       const toolName = this.els.fieldToolName.value.trim();
-      const argsText = this.els.fieldArgs.value.trim() || "{}";
-      let args;
-      try {
-        args = JSON.parse(argsText);
-      } catch {
-        this.notify("Args must be valid JSON", "error");
+      if (!pluginId || !toolName) {
+        this.notify("Plugin and tool are required", "error");
         return;
       }
-      if (!pluginId || !toolName) {
-        this.notify("Plugin ID and tool name are required", "error");
-        return;
+      let args;
+      if (this.els.schemaForm.children.length > 0) {
+        try {
+          args = this._serializeSchemaForm();
+        } catch (e) {
+          this.notify(`Invalid args: ${e.message || e}`, "error");
+          return;
+        }
+      } else {
+        const argsText = this.els.fieldArgs.value.trim() || "{}";
+        try {
+          args = JSON.parse(argsText);
+        } catch {
+          this.notify("Args must be valid JSON", "error");
+          return;
+        }
       }
       mode = { type: "tool", pluginId, toolName, args };
     }
@@ -401,12 +723,17 @@ export class JobsController {
     const payload = { name, schedule, mode };
     if (repeatRaw) payload.repeatTimes = parseInt(repeatRaw, 10);
     try {
-      await sendRequest("job.add", payload);
-      this.notify("Job created", "success");
+      if (this.editingId) {
+        await sendRequest("job.update", { id: this.editingId, ...payload });
+        this.notify("Job updated", "success");
+      } else {
+        await sendRequest("job.add", payload);
+        this.notify("Job created", "success");
+      }
       this.closeModal();
       await this.refresh();
     } catch (error) {
-      this.notify(`Could not create job: ${error.message || error}`, "error");
+      this.notify(`Could not save job: ${error.message || error}`, "error");
     }
   }
 
@@ -498,9 +825,9 @@ export class JobsController {
     header.textContent = `${entry.runAt} · ${entry.status}`;
     if (entry.status === "error") header.classList.add("job-output-error");
     if (entry.status === "cancelled") header.classList.add("job-output-cancelled");
-    const summary = document.createElement("pre");
-    summary.className = "job-output-summary";
-    summary.textContent = entry.summary;
+    const summary = document.createElement("div");
+    summary.className = "job-output-md";
+    summary.innerHTML = renderAssistantMarkdown(entry.summary);
     card.append(header, summary);
 
     const expandBtn = document.createElement("button");
@@ -519,9 +846,9 @@ export class JobsController {
         const items = full.outputs ?? [];
         const match = items.find((item) => item.runAt === entry.runAt && item.path === entry.path);
         if (match?.body) {
-          const body = document.createElement("pre");
-          body.className = "job-output-full";
-          body.textContent = match.body;
+          const body = document.createElement("div");
+          body.className = "job-output-md job-output-full";
+          body.innerHTML = renderAssistantMarkdown(match.body);
           card.appendChild(body);
           expandBtn.textContent = "Shown";
         } else {

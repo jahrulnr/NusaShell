@@ -1,5 +1,7 @@
 export type { AddJobCommand } from "./add-job/add-job.command.js";
 export { AddJobHandler } from "./add-job/add-job.handler.js";
+export type { UpdateJobCommand } from "./update-job/update-job.command.js";
+export { UpdateJobHandler } from "./update-job/update-job.handler.js";
 export type { SetJobEnabledCommand } from "./set-job-enabled/set-job-enabled.command.js";
 export { SetJobEnabledHandler } from "./set-job-enabled/set-job-enabled.handler.js";
 export type { RunJobNowCommand } from "./run-job-now/run-job-now.command.js";

@@ -146,4 +146,45 @@ describe("JobAgentExecutor", () => {
     expect(result.status).toBe("error");
     expect(result.error).toMatch(/provider not found/);
   });
+
+  it("uses the options.providerId override instead of the default", async () => {
+    const { JobAgentExecutor, DEFAULT_JOB_EXECUTOR_SETTINGS } = await import("../src/job/services/job-agent-executor.js");
+    const override = new ScriptedProvider([{ text: "from override", model: "alt-model" }]);
+    const defaultProvider = new ScriptedProvider([{ text: "from default", model: "scripted" }]);
+    const inner = new FakeInnerGateway();
+    const gateway = new (await import("../src/job/services/job-agent-tool-gateway.js")).JobAgentToolGateway(inner as unknown as McpAgentToolGateway);
+    const executor = new JobAgentExecutor({
+      providerRegistry: new FakeRegistry([defaultProvider, override]) as unknown as import("../src/index.js").AgentProviderRegistryPort,
+      toolGateway: gateway,
+      defaultProviderId: "scripted",
+    });
+    const result = await executor.runAgent(
+      "Summarize",
+      { ...DEFAULT_JOB_EXECUTOR_SETTINGS, inactivityTimeoutSeconds: 0 },
+      undefined,
+      { providerId: "scripted", model: "alt-model" },
+    );
+    expect(result.status).toBe("ok");
+    expect(result.summary).toBe("from override");
+  });
+
+  it("returns an error when the override providerId is not registered", async () => {
+    const { JobAgentExecutor, DEFAULT_JOB_EXECUTOR_SETTINGS } = await import("../src/job/services/job-agent-executor.js");
+    const defaultProvider = new ScriptedProvider([{ text: "from default", model: "scripted" }]);
+    const inner = new FakeInnerGateway();
+    const gateway = new (await import("../src/job/services/job-agent-tool-gateway.js")).JobAgentToolGateway(inner as unknown as McpAgentToolGateway);
+    const executor = new JobAgentExecutor({
+      providerRegistry: new FakeRegistry([defaultProvider]) as unknown as import("../src/index.js").AgentProviderRegistryPort,
+      toolGateway: gateway,
+      defaultProviderId: "scripted",
+    });
+    const result = await executor.runAgent(
+      "Summarize",
+      DEFAULT_JOB_EXECUTOR_SETTINGS,
+      undefined,
+      { providerId: "nonexistent" },
+    );
+    expect(result.status).toBe("error");
+    expect(result.error).toMatch(/provider not found: nonexistent/);
+  });
 });

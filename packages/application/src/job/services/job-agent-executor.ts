@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { AgentProviderRegistryPort } from "../../agent/ports/agent-provider.port.js";
+import type { AgentProviderRegistryPort, ReasoningEffort } from "../../agent/ports/agent-provider.port.js";
 import type { LoggerPort } from "../../plugin/ports/logger.port.js";
 import {
   AgentTurnRunner,
@@ -40,6 +40,12 @@ export interface JobAgentExecutorDeps {
   readonly now?: () => Date;
 }
 
+export interface JobAgentRunOptions {
+  readonly providerId?: string;
+  readonly model?: string;
+  readonly effort?: ReasoningEffort;
+}
+
 export interface JobExecutionResult {
   readonly traceId: string;
   readonly status: "ok" | "error";
@@ -61,14 +67,20 @@ const JOB_SYSTEM_PROMPT =
 export class JobAgentExecutor {
   constructor(private readonly deps: JobAgentExecutorDeps) {}
 
-  async runAgent(prompt: string, settings: JobAgentExecutorSettings, externalSignal?: AbortSignal): Promise<JobExecutionResult> {
-    const provider = this.deps.providerRegistry.get(this.deps.defaultProviderId);
+  async runAgent(
+    prompt: string,
+    settings: JobAgentExecutorSettings,
+    externalSignal?: AbortSignal,
+    options?: JobAgentRunOptions,
+  ): Promise<JobExecutionResult> {
+    const providerId = options?.providerId ?? this.deps.defaultProviderId;
+    const provider = this.deps.providerRegistry.get(providerId);
     if (!provider) {
       return {
         traceId: randomUUID(),
         status: "error",
         summary: "AI provider not configured",
-        error: `provider not found: ${this.deps.defaultProviderId}`,
+        error: `provider not found: ${providerId}`,
       };
     }
 
@@ -116,6 +128,8 @@ export class JobAgentExecutor {
         traceId,
         maxToolRounds: settings.maxToolRounds,
         signal: controller.signal,
+        ...(options?.model ? { model: options.model } : {}),
+        ...(options?.effort ? { effort: options.effort } : {}),
       });
       return toJobResult(result);
     } catch (error) {

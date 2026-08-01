@@ -24,6 +24,7 @@ export type RequestMethod =
   | "system.ping"
   | "system.version"
   | "job.add"
+  | "job.update"
   | "job.list"
   | "job.set-enabled"
   | "job.run"

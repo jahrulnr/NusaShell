@@ -99,8 +99,15 @@ class FakeJobStore implements JobStorePort {
 }
 
 class ScriptedExecutor {
+  readonly capturedOptions: { providerId?: string; model?: string; effort?: string }[] = [];
   constructor(private readonly respond: (prompt: string) => JobExecutionResult) {}
-  async runAgent(prompt: string, _settings: JobAgentExecutorSettings): Promise<JobExecutionResult> {
+  async runAgent(
+    prompt: string,
+    _settings: JobAgentExecutorSettings,
+    _signal?: AbortSignal,
+    options?: { providerId?: string; model?: string; effort?: string },
+  ): Promise<JobExecutionResult> {
+    if (options) this.capturedOptions.push(options);
     return this.respond(prompt);
   }
 }
@@ -519,6 +526,38 @@ describe("JobScheduler", () => {
     const outputs = await store.listOutputs("trace-1", 10);
     expect(outputs.length).toBe(1);
     expect(outputs[0]!.traceId).toBeDefined();
+  });
+
+  it("passes the job's agent-mode provider/model/effort to the executor", async () => {
+    const store = new FakeJobStore();
+    await store.create(makeJob({
+      id: "model-job",
+      nextRunAt: "2024-12-31T23:00:00.000Z",
+      mode: { type: "agent", prompt: "Say hello", providerId: "anthropic", model: "claude-3-5-sonnet", effort: "high" },
+    }));
+    const executor = new ScriptedExecutor(() => ({ traceId: "t", status: "ok", summary: "ok" }));
+    const scheduler = new JobScheduler({
+      store, executor,
+      callToolHandler: new FakeCallToolHandler(), eventDispatcher: new EventDispatcher(),
+      jobFs: new TestJobFs(tempDir), executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
+      now: () => NOW,
+    });
+    await scheduler.tick();
+    expect(executor.capturedOptions).toEqual([{ providerId: "anthropic", model: "claude-3-5-sonnet", effort: "high" }]);
+  });
+
+  it("omits model options when the agent-mode job does not set them", async () => {
+    const store = new FakeJobStore();
+    await store.create(makeJob({ id: "plain-job", nextRunAt: "2024-12-31T23:00:00.000Z" }));
+    const executor = new ScriptedExecutor(() => ({ traceId: "t", status: "ok", summary: "ok" }));
+    const scheduler = new JobScheduler({
+      store, executor,
+      callToolHandler: new FakeCallToolHandler(), eventDispatcher: new EventDispatcher(),
+      jobFs: new TestJobFs(tempDir), executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
+      now: () => NOW,
+    });
+    await scheduler.tick();
+    expect(executor.capturedOptions).toEqual([{}]);
   });
 });
 

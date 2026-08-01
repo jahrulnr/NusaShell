@@ -6,13 +6,21 @@
  * NusaShell is open (see docs/architecture/job-automation.md).
  */
 
+import type { ReasoningEffort } from "../agent/ports/agent-provider.port.js";
+
 export type JobSchedule =
   | { readonly kind: "once"; readonly runAt: string } // ISO timestamp
   | { readonly kind: "interval"; readonly minutes: number }
   | { readonly kind: "cron"; readonly expr: string }; // 5-field
 
 export type JobMode =
-  | { readonly type: "agent"; readonly prompt: string }
+  | {
+      readonly type: "agent";
+      readonly prompt: string;
+      readonly providerId?: string;
+      readonly model?: string;
+      readonly effort?: ReasoningEffort;
+    }
   | {
       readonly type: "tool";
       readonly pluginId: string;

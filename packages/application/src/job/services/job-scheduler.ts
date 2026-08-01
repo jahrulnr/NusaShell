@@ -16,10 +16,16 @@ import type { CallToolCommand } from "../../tool/commands/call-tool/call-tool.co
 import type { EventDispatcher } from "../../events/event-dispatcher.js";
 import { createJobCompletedEvent, createJobFailedEvent, createJobStartedEvent, createJobCancelledEvent } from "../../events/job-events.event.js";
 import type { LoggerPort } from "../../plugin/ports/logger.port.js";
+import type { ReasoningEffort } from "../../agent/ports/agent-provider.port.js";
 
 /** Minimal executor surface the scheduler needs (structural — accepts JobAgentExecutor or fakes). */
 export interface JobExecutorPort {
-  runAgent(prompt: string, settings: JobAgentExecutorSettings, signal?: AbortSignal): Promise<JobExecutionResult>;
+  runAgent(
+    prompt: string,
+    settings: JobAgentExecutorSettings,
+    signal?: AbortSignal,
+    options?: { providerId?: string; model?: string; effort?: ReasoningEffort },
+  ): Promise<JobExecutionResult>;
 }
 
 /** Minimal call-tool surface the scheduler needs (structural — accepts CallToolHandler or fakes). */
@@ -246,7 +252,16 @@ export class JobScheduler {
       let error: string | null = null;
 
       if (job.mode.type === "agent") {
-        const result = await this.deps.executor.runAgent(job.mode.prompt, this.deps.executorSettings, controller.signal);
+        const result = await this.deps.executor.runAgent(
+          job.mode.prompt,
+          this.deps.executorSettings,
+          controller.signal,
+          {
+            ...(job.mode.providerId ? { providerId: job.mode.providerId } : {}),
+            ...(job.mode.model ? { model: job.mode.model } : {}),
+            ...(job.mode.effort ? { effort: job.mode.effort } : {}),
+          },
+        );
         if (controller.signal.aborted) {
           status = "cancelled";
           summary = "cancelled by user";

@@ -3,6 +3,7 @@ import { ApplicationError } from "../../errors/application-error.js";
 import type { JobStorePort } from "../../job/ports/job-store.port.js";
 import type { JobScheduler } from "../../job/services/job-scheduler.js";
 import type { Job, JobMode } from "../../job/job-model.js";
+import type { ReasoningEffort } from "../ports/agent-provider.port.js";
 import {
   parseSchedule,
   computeNextRun,
@@ -10,6 +11,12 @@ import {
   ScheduleParseError,
 } from "../../job/schedule-parser.js";
 import { clampInt, requireString, jobsNotConfigured } from "./gateway-utils.js";
+
+export interface JobToolCallerContext {
+  readonly providerId?: string;
+  readonly model?: string;
+  readonly effort?: ReasoningEffort;
+}
 
 /**
  * Foreground agent meta-tool `job` — full CRUD parity with the desktop Jobs
@@ -22,6 +29,7 @@ export async function execJob(
   store: JobStorePort | undefined,
   scheduler: JobScheduler | undefined,
   args: Readonly<Record<string, unknown>>,
+  caller?: JobToolCallerContext,
 ): Promise<unknown> {
   if (!store || !scheduler) return jobsNotConfigured();
   const action = requireString(args.action, "action");
@@ -29,7 +37,8 @@ export async function execJob(
     switch (action) {
       case "list": return await listJobs(store, scheduler);
       case "validate_schedule": return await validateSchedule(args);
-      case "add": return await addJob(store, args);
+      case "add": return await addJob(store, args, caller);
+      case "update": return await updateJob(store, args, caller);
       case "set_enabled": return await setEnabled(store, args);
       case "run": return await runNow(scheduler, args);
       case "cancel": return await cancelJob(scheduler, args);
@@ -62,10 +71,10 @@ async function validateSchedule(args: Readonly<Record<string, unknown>>): Promis
   }
 }
 
-async function addJob(store: JobStorePort, args: Readonly<Record<string, unknown>>): Promise<unknown> {
+async function addJob(store: JobStorePort, args: Readonly<Record<string, unknown>>, caller?: JobToolCallerContext): Promise<unknown> {
   const name = requireString(args.name, "name");
   const scheduleInput = requireString(args.schedule, "schedule");
-  const mode = parseJobMode(args);
+  const mode = parseJobMode(args, caller);
   const repeatTimes = parseRepeatTimes(args.repeat_times);
   let schedule;
   try {
@@ -93,6 +102,44 @@ async function addJob(store: JobStorePort, args: Readonly<Record<string, unknown
   };
   const created = await store.create(job);
   return { ok: true, data: created, meta: {} };
+}
+
+async function updateJob(store: JobStorePort, args: Readonly<Record<string, unknown>>, caller?: JobToolCallerContext): Promise<unknown> {
+  const id = requireString(args.id, "id");
+  const existing = await store.get(id);
+  if (!existing) throw new ApplicationError("JOB_NOT_FOUND", `Job not found: ${id}`);
+  let schedule = existing.schedule;
+  let nextRunAt = existing.nextRunAt;
+  if (args.schedule !== undefined) {
+    const scheduleInput = requireString(args.schedule, "schedule");
+    try {
+      schedule = parseSchedule(scheduleInput);
+    } catch (error) {
+      if (error instanceof ScheduleParseError) {
+        throw new ApplicationError("JOB_INVALID_SCHEDULE", error.message);
+      }
+      throw error;
+    }
+    nextRunAt = existing.enabled ? computeNextRun(schedule, existing.lastRunAt, new Date()) : null;
+  }
+  const mode = args.mode !== undefined || args.prompt !== undefined || args.pluginId !== undefined
+    ? parseJobMode(args, caller, existing.mode)
+    : existing.mode;
+  const repeatTimes = args.repeat_times !== undefined
+    ? parseRepeatTimes(args.repeat_times)
+    : existing.repeat.times;
+  const enabled = args.enabled !== undefined ? parseBoolean(args.enabled, "enabled") : existing.enabled;
+  const updated: Job = {
+    ...existing,
+    ...(args.name !== undefined ? { name: requireString(args.name, "name") } : {}),
+    schedule,
+    mode,
+    enabled,
+    repeat: { times: repeatTimes, completed: existing.repeat.completed },
+    nextRunAt,
+  };
+  const result = await store.update(updated);
+  return { ok: true, data: result, meta: {} };
 }
 
 async function setEnabled(store: JobStorePort, args: Readonly<Record<string, unknown>>): Promise<unknown> {
@@ -145,18 +192,38 @@ async function jobOutput(store: JobStorePort, args: Readonly<Record<string, unkn
   return { ok: true, data: { entries }, meta: { count: entries.length } };
 }
 
-function parseJobMode(args: Readonly<Record<string, unknown>>): JobMode {
-  const type = requireString(args.mode, "mode");
+function parseJobMode(
+  args: Readonly<Record<string, unknown>>,
+  caller?: JobToolCallerContext,
+  existing?: JobMode,
+): JobMode {
+  const type = args.mode !== undefined ? requireString(args.mode, "mode") : existing?.type;
   if (type === "agent") {
-    const prompt = requireString(args.prompt, "prompt");
+    const prompt = args.prompt !== undefined ? requireString(args.prompt, "prompt") : existing?.type === "agent" ? existing.prompt : undefined;
+    if (!prompt) throw new ApplicationError("AGENT_INVALID_INPUT", "prompt is required for agent mode");
     if (prompt.length > 10000) {
       throw new ApplicationError("AGENT_INVALID_INPUT", "prompt must be 10000 characters or fewer");
     }
-    return { type: "agent", prompt };
+    const providerId = args.providerId !== undefined ? String(args.providerId) : undefined;
+    const model = args.model !== undefined ? String(args.model) : undefined;
+    const effort = args.effort !== undefined ? String(args.effort) as ReasoningEffort : undefined;
+    // Precedence: explicit arg > existing mode field > caller turn's model.
+    const existingAgent = existing?.type === "agent" ? existing : undefined;
+    const resolvedProviderId = providerId ?? existingAgent?.providerId ?? caller?.providerId;
+    const resolvedModel = model ?? existingAgent?.model ?? caller?.model;
+    const resolvedEffort = effort ?? existingAgent?.effort ?? caller?.effort;
+    return {
+      type: "agent",
+      prompt,
+      ...(resolvedProviderId ? { providerId: resolvedProviderId } : {}),
+      ...(resolvedModel ? { model: resolvedModel } : {}),
+      ...(resolvedEffort ? { effort: resolvedEffort } : {}),
+    };
   }
   if (type === "tool") {
-    const pluginId = requireString(args.pluginId, "pluginId");
-    const toolName = requireString(args.toolName, "toolName");
+    const pluginId = args.pluginId !== undefined ? requireString(args.pluginId, "pluginId") : existing?.type === "tool" ? existing.pluginId : undefined;
+    const toolName = args.toolName !== undefined ? requireString(args.toolName, "toolName") : existing?.type === "tool" ? existing.toolName : undefined;
+    if (!pluginId || !toolName) throw new ApplicationError("AGENT_INVALID_INPUT", "pluginId and toolName are required for tool mode");
     const rawArgs = args.args;
     let toolArgs: Readonly<Record<string, unknown>> = {};
     if (rawArgs !== undefined) {
@@ -164,6 +231,8 @@ function parseJobMode(args: Readonly<Record<string, unknown>>): JobMode {
         throw new ApplicationError("AGENT_INVALID_INPUT", "args must be an object");
       }
       toolArgs = rawArgs as Readonly<Record<string, unknown>>;
+    } else if (existing?.type === "tool") {
+      toolArgs = existing.args;
     }
     return { type: "tool", pluginId, toolName, args: toolArgs };
   }
