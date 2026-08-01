@@ -1380,6 +1380,7 @@ document.addEventListener("DOMContentLoaded", () => {
     getAcpSessionInfo,
     setAcpConfigOption,
     ensureAcpSession,
+    refreshModelPicker: () => renderAgentModelPicker(),
   });
   skillsController = new SkillsController({
     shell: window.shell,

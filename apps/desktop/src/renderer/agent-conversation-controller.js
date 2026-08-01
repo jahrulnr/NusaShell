@@ -17,7 +17,7 @@ import { estimateContextTokens, formatContextUsage } from "./ai-model-ui.js";
 import { inspectAttachmentContent, toDataUrl } from "./attachment-content.js";
 
 export class AgentConversationController {
-  constructor({ shell, runTurn, cancelTurn, answerAsk, getActiveModel, getVisionMode, notify, log, runAcpTurn, cancelAcpTurn, answerAcpPermission, answerAcpAsk, getAcpSessionInfo, setAcpConfigOption, ensureAcpSession }) {
+  constructor({ shell, runTurn, cancelTurn, answerAsk, getActiveModel, getVisionMode, notify, log, runAcpTurn, cancelAcpTurn, answerAcpPermission, answerAcpAsk, getAcpSessionInfo, setAcpConfigOption, ensureAcpSession, refreshModelPicker }) {
     this.shell = shell;
     this.runTurn = runTurn;
     this.cancelTurn = cancelTurn;
@@ -33,6 +33,7 @@ export class AgentConversationController {
     this.getAcpSessionInfo = getAcpSessionInfo;
     this.setAcpConfigOption = setAcpConfigOption;
     this.ensureAcpSession = ensureAcpSession;
+    this.refreshModelPicker = refreshModelPicker;
     this.acpConfigOptions = [];
     this.conversation = null;
     this.conversations = [];
@@ -705,6 +706,7 @@ export class AgentConversationController {
       bar.hidden = true;
       pill.hidden = true;
       this.acpConfigOptions = [];
+      this.refreshModelPicker?.();
     }
   }
 
