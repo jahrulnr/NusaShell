@@ -40,18 +40,28 @@ handles the rest.
 
 ## How it works (short version)
 
-```
-click icon → NusaShell opens plugin's UI in a window
-           → UI calls a tool via the shell bridge
-           → NusaShell (as broker) forwards the call to the plugin's MCP process
-              (spawning it on first use, reusing it after that)
-           → MCP server executes the tool, returns a result
-           → NusaShell relays the result back to the UI
+```mermaid
+sequenceDiagram
+  participant User
+  participant UI as Plugin UI
+  participant Host as NusaShell host
+  participant Backend as Backend broker
+  participant MCP as Plugin MCP
+
+  User->>Host: Click plugin icon
+  Host->>UI: Open plugin UI window
+  UI->>Host: window.shell.callTool
+  Host->>Backend: WebSocket tool call
+  Backend->>MCP: Forward call
+  Note over Backend,MCP: Spawn on first use, reuse after
+  MCP-->>Backend: Tool result
+  Backend-->>Host: Relay result
+  Host-->>UI: Bridge response
 ```
 
-Plugin UI and MCP never peer-connect. In the target architecture the host talks
-to the backend over WebSocket; the plugin iframe talks to the host via a small
-bridge API (`window.shell.callTool`). See the docs map below for the full story.
+Plugin UI and MCP never peer-connect. The host talks to the backend over
+WebSocket; the plugin iframe talks to the host via a small bridge API
+(`window.shell.callTool`). See the docs map below for the full story.
 
 ## Screenshots
 
