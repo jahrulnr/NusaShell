@@ -57,6 +57,27 @@ describe("RoutedAgentProvider", () => {
     expect(second.requests).toHaveLength(0);
   });
 
+  it("does not fail over when preferred provider hits a billing/quota permanent failure", async () => {
+    const billing = Object.assign(
+      new Error('Provider returned HTTP 429: {"error":{"code":"1113","message":"Insufficient balance"}}'),
+      { transient: false, status: 429 },
+    );
+    const first = new Provider("z-ai", [billing]);
+    const second = new Provider("blackbox", [{ text: "must not run" }]);
+    const warnings: string[] = [];
+    const routed = new RoutedAgentProvider({
+      providers: [first, second],
+      preferredProviderId: "z-ai",
+      strategy: "failover",
+      totalAttemptBudget: 4,
+      logger: { warn: (msg) => { warnings.push(String(msg)); }, info: () => undefined, error: () => undefined, debug: () => undefined },
+    });
+
+    await expect(routed.complete(turnRequest("glm-5.2"))).rejects.toThrow("Insufficient balance");
+    expect(second.requests).toHaveLength(0);
+    expect(warnings).toHaveLength(0);
+  });
+
   it("uses only the preferred provider in switch mode", async () => {
     const transient = Object.assign(new Error("temporary"), { transient: true });
     const first = new Provider("first", [transient]);

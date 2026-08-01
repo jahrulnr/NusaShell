@@ -203,7 +203,7 @@ export class OpenAiCompatibleAgentProvider implements AgentProvider {
         throw new AgentProviderHttpError(
           `Provider returned HTTP ${response.status}${errorBody ? `: ${safeSnippet(errorBody)}` : ""}`,
           response.status,
-          transientStatuses.has(response.status),
+          isTransientHttpStatus(response.status, errorBody),
           parseRetryAfterMs(response.headers.get("retry-after")),
           "http_status",
         );
@@ -740,6 +740,36 @@ function looksLikeJsonStreamReject(value: unknown): boolean {
   const payload = record(value);
   const error = record(payload.error);
   return isStreamUnsupported(400, [error.message, error.code, error.type, payload.message].map(firstText).join(" "));
+}
+
+function isTransientHttpStatus(status: number, body: string): boolean {
+  if (!transientStatuses.has(status)) return false;
+  // Some gateways reuse 429 for billing/quota exhaustion (e.g. z.ai code 1113).
+  // Those must not retry or silently fail over to another provider.
+  return !isPermanentProviderFailure(status, body);
+}
+
+function isPermanentProviderFailure(status: number, body: string): boolean {
+  if (status === 402) return true;
+  const normalized = body.toLowerCase();
+  if ([
+    "insufficient balance",
+    "no resource package",
+    "please recharge",
+    "payment required",
+    "out of credits",
+    "credit balance",
+    "billing",
+    "top up",
+    "top-up",
+    "topup",
+    "account suspended",
+    "\"code\":\"1113\"",
+    "\"code\":1113",
+  ].some((phrase) => normalized.includes(phrase))) {
+    return true;
+  }
+  return false;
 }
 
 function isTransient(error: unknown): boolean {

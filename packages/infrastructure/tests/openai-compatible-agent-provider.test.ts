@@ -295,6 +295,32 @@ describe("OpenAiCompatibleAgentProvider", () => {
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
+  it("treats billing exhaustion on HTTP 429 as a permanent failure", async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ error: { code: "1113", message: "Insufficient balance or no resource package. Please recharge." } }),
+      { status: 429 },
+    ));
+    const provider = new OpenAiCompatibleAgentProvider({
+      baseUrl: "https://api.z.ai/api/paas/v4",
+      apiKey: "secret",
+      fetchFn,
+      retry: { attemptBudget: 4, baseDelayMs: 1, maxDelayMs: 2, jitter: 0 },
+    });
+
+    await expect(provider.complete({
+      traceId: "trace-billing",
+      round: 1,
+      messages: [{ role: "user", content: "Hello" }],
+      tools: [],
+      model: "glm-5.2",
+    })).rejects.toMatchObject({
+      name: "AgentProviderHttpError",
+      status: 429,
+      transient: false,
+    });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
   it("retries a 4xx image rejection once without image parts", async () => {
     const fetchFn = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response("image input is not supported", { status: 400 }))

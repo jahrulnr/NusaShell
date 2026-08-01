@@ -59,7 +59,13 @@ export class RoutedAgentProvider implements AgentProvider {
       } catch (error) {
         lastError = error;
         if (!isTransientProviderError(error)) throw error;
-        this.options.logger?.warn("Agent provider transient failure, failing over provider=%s attempts=%d/%d", provider.id, attempts, budget);
+        this.options.logger?.warn(
+          "Agent provider transient failure, failing over provider=%s attempts=%d/%d error=%s",
+          provider.id,
+          attempts,
+          budget,
+          error instanceof Error ? error.message : String(error),
+        );
       }
     }
     this.options.logger?.error("Agent providers exhausted attempts=%d/%d", attempts, budget);

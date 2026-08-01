@@ -219,11 +219,12 @@ export class AgentTurnRunner {
             );
             continue;
           }
-          this.deps.logger?.error("Agent provider failed traceId=%s provider=%s", traceId, this.deps.provider.id);
+          const cause = error instanceof Error ? error.message : String(error);
+          this.deps.logger?.error("Agent provider failed traceId=%s provider=%s error=%s", traceId, this.deps.provider.id, cause);
           const details: Record<string, unknown> = {
             providerId: this.deps.provider.id,
             traceId,
-            cause: error instanceof Error ? error.message : String(error),
+            cause,
           };
           if (hasTurnProgress(toolCalls, steps, messages)) {
             details.partial = buildTurnPartial(
@@ -231,7 +232,7 @@ export class AgentTurnRunner {
               model, providerId, api, reasoning, usage,
             );
           }
-          throw new ApplicationError("AGENT_PROVIDER_FAILED", "AI provider request failed", details);
+          throw new ApplicationError("AGENT_PROVIDER_FAILED", `AI provider request failed: ${cause}`, details);
         }
       }
       model = response.model ?? model;

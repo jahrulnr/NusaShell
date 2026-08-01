@@ -347,20 +347,20 @@ export class AgentConversationController {
         }
         this.failedMessage = this.appendMessage(
           "assistant",
-          `Turn failed: ${error.message || "Unknown error"}`,
+          `Turn failed: ${formatTurnError(error)}`,
           { error: true, retry: true },
         );
         status.textContent = "Turn interrupted · ready to retry";
-        this.log("error", `Agent turn failed: ${error.message || String(error)}`);
+        this.log("error", `Agent turn failed: ${formatTurnError(error)}`);
       } else {
         pending?.remove();
         this.failedMessage = this.appendMessage(
           "assistant",
-          `Turn failed: ${error.message || "Unknown error"}`,
+          `Turn failed: ${formatTurnError(error)}`,
           { error: true, retry: retryIsSafe },
         );
         status.textContent = retryIsSafe ? "Turn failed · ready to retry" : "Local conversation error";
-        this.log("error", `Agent turn failed: ${error.message || String(error)}`);
+        this.log("error", `Agent turn failed: ${formatTurnError(error)}`);
       }
     } finally {
       this.turnPending = false;
@@ -501,9 +501,9 @@ export class AgentConversationController {
       status.textContent = `ACP · ${this.conversation.acp.providerId}`;
     } catch (error) {
       pending?.remove();
-      this.failedMessage = this.appendMessage("assistant", `Turn failed: ${error.message || "Unknown error"}`, { error: true, retry: retryIsSafe });
+      this.failedMessage = this.appendMessage("assistant", `Turn failed: ${formatTurnError(error)}`, { error: true, retry: retryIsSafe });
       status.textContent = retryIsSafe ? "ACP turn failed · ready to retry" : "ACP turn error";
-      this.log("error", `ACP turn failed: ${error.message || String(error)}`);
+      this.log("error", `ACP turn failed: ${formatTurnError(error)}`);
     } finally {
       this.turnPending = false;
       this.activeTraceId = "";
@@ -1774,6 +1774,13 @@ function shortModelName(model) {
   if (!model) return "";
   const parts = String(model).split("/");
   return parts[parts.length - 1] || model;
+}
+
+function formatTurnError(error) {
+  const message = error?.message || "Unknown error";
+  const cause = typeof error?.details?.cause === "string" ? error.details.cause.trim() : "";
+  if (!cause || message.includes(cause)) return message;
+  return `${message}: ${cause}`;
 }
 
 function iconButton(label, icon) {
