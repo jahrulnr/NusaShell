@@ -1334,10 +1334,13 @@ export class AgentConversationController {
     const textarea = card.querySelector(".agent-ask-textarea");
     const customActive = card.querySelector(".agent-ask-custom")?.classList.contains("is-active");
     const text = textarea?.value?.trim() || "";
-    const via = customActive && text ? "text" : "option";
-    if (via === "option" && selected.size === 0) return;
-    if (via === "text" && !text) return;
+    const hasOptions = selected.size > 0;
+    const hasText = customActive && text.length > 0;
+    if (!hasOptions && !hasText) return;
 
+    // When both options and custom text are present (multi-select + free text),
+    // send both — the backend combines them into a single answer.
+    const via = hasOptions ? "option" : "text";
     card.classList.add("is-submitting");
     this.syncAskSendState(card, selected);
     try {
@@ -1345,7 +1348,8 @@ export class AgentConversationController {
         traceId: this.activeTraceId,
         callId,
         via,
-        ...(via === "option" ? { optionIds: [...selected] } : { text }),
+        ...(hasOptions ? { optionIds: [...selected] } : {}),
+        ...(hasText ? { text } : {}),
       });
       card.querySelectorAll("button, textarea").forEach((node) => {
         node.disabled = true;
@@ -1760,9 +1764,10 @@ function parseAskAnswer(output) {
       via: data.via === "text" ? "text" : "option",
       answer: typeof data.answer === "string" ? data.answer : "",
       optionIds: Array.isArray(data.optionIds) ? data.optionIds.map(String) : [],
+      text: typeof data.text === "string" ? data.text : "",
     };
   } catch {
-    return { via: "text", answer: output, optionIds: [] };
+    return { via: "text", answer: output, optionIds: [], text: "" };
   }
 }
 

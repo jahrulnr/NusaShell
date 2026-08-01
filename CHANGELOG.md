@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.52] - 2026-08-01
+
+### Fixed
+
+- **ask_question multi-select + custom text dropped options** — when the user
+  selected options AND typed custom text in a multi-select ask card, the
+  submit logic picked `via: "text"` and silently dropped the selected
+  `optionIds`. The UI explicitly allows both (multi-select doesn't clear the
+  custom text field), but the submit + backend treated `via` as exclusive.
+  Fixed: `submitAskCard` now sends both `optionIds` and `text` when both are
+  present; `buildResult` combines them into `"LabelA, LabelB — custom text"`
+  and exposes the supplementary `text` in the result `data`.
+- **Streaming events never reached the renderer after the ws-client refactor**
+  — the `subscribe(["*"])` call was issued before `connectWs()`, so
+  `NusaClient.request()` rejected with "Not connected" and the subscription
+  was silently swallowed by `.catch(() => {})`. The `NusaClient` `onOpen`
+  callback only re-subscribes on reconnect, not on the initial connect, so
+  the server never registered a subscription for the session and no
+  `agent.text_delta` / `agent.reasoning_delta` / `agent.tool_call_start`
+  / ask-card events were delivered. The agent appeared to hang on
+  "Working…" with nothing streaming in (including `ask_question` cards).
+  Fixed by moving `subscribe(["*"])` into the `onOpen` callback so it fires
+  after the socket is open. Regression tests in
+  `packages/plugin-sdk/tests/subscribe-after-connect.test.ts` verify that
+  subscribe-before-connect rejects, subscribe-after-connect registers
+  server-side, and initial connect does not auto-subscribe.
+
 ## [0.0.51] - 2026-08-01
 
 ### Added

@@ -30,6 +30,7 @@ export interface AskQuestionResult {
     readonly via: AskAnswerVia;
     readonly answer: string;
     readonly optionIds?: readonly string[];
+    readonly text?: string;
   };
   readonly meta: Record<string, never>;
 }
@@ -121,12 +122,22 @@ function buildResult(request: AskQuestionRequest, answer: AskQuestionAnswer): As
     labels.push(option.label);
   }
 
+  // When the user also typed custom text alongside selected options (multi-
+  // select + free text), append it to the answer and expose it as `text` so
+  // the agent sees both the chosen options and the supplementary note.
+  const text = answer.text?.trim() ?? "";
+  if (text && !request.allowFreeText) {
+    throw new ApplicationError("AGENT_INVALID_INPUT", "Free-text answers are not allowed for this question");
+  }
+  const answerStr = text ? `${labels.join(", ")} — ${text}` : labels.join(", ");
+
   return {
     ok: true,
     data: {
       via: "option",
-      answer: labels.join(", "),
+      answer: answerStr,
       optionIds,
+      ...(text ? { text } : {}),
     },
     meta: {},
   };

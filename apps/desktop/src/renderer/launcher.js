@@ -1759,16 +1759,20 @@ document.addEventListener("DOMContentLoaded", () => {
     if ($(".view[data-view='jobs']")?.classList.contains("active")) void jobsController.refresh();
   });
 
-  // Connect and subscribe — initialize WS client with callbacks, then connect
+  // Connect and subscribe — subscribe must happen AFTER the socket opens,
+  // otherwise NusaClient.request() rejects with "Not connected" and the
+  // subscription is silently lost (no streaming events reach the renderer).
   initWsClient({
     url: WS_URL,
     onOpen: (isOpen) => {
       updateConnStatus(isOpen !== false);
-      if (isOpen !== false) refreshAll();
+      if (isOpen !== false) {
+        subscribe(["*"]).catch(() => {});
+        refreshAll();
+      }
     },
     onLog: writeRendererLog,
   });
-  subscribe(["*"]).catch(() => {});
   connectWs();
 
   // Periodic refresh (fallback for state sync)
