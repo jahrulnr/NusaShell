@@ -99,7 +99,7 @@ jobs:
         include:
           - os: ubuntu-latest
             platform: linux
-          - os: windows-latest
+          - os: windows-2022
             platform: windows
           - os: macos-latest
             platform: macos
