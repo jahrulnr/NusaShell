@@ -76,6 +76,7 @@ export interface ShellApi {
     list(): Promise<readonly AcpProviderPublic[]>;
     save(input: AcpProviderSaveInput): Promise<readonly AcpProviderPublic[]>;
     get(providerId: string): Promise<AcpProviderPublic | null>;
+    probe(providerId: string): Promise<AcpProviderPublic | null>;
   };
   readonly skills: {
     list(): Promise<readonly SkillSummary[]>;
@@ -221,6 +222,7 @@ const api: ShellApi = {
     list: () => ipcRenderer.invoke("acp-providers:list"),
     save: (input) => ipcRenderer.invoke("acp-providers:save", input),
     get: (providerId) => ipcRenderer.invoke("acp-providers:get", providerId),
+    probe: (providerId) => ipcRenderer.invoke("acp-providers:probe", providerId),
   },
   skills: {
     list: () => ipcRenderer.invoke("skills:list"),

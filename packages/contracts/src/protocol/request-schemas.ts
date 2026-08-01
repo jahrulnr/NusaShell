@@ -425,6 +425,22 @@ export const AcpEnsureSessionRequestSchema = z.object({
   }),
 });
 
+export const AcpProbeRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("acp.probe"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    provider: z.object({
+      providerId: z.string().min(1),
+      command: z.string().min(1),
+      args: z.array(z.string()).default([]),
+      authMethodId: z.string().optional(),
+      env: z.record(z.string(), z.string()).optional(),
+    }),
+  }),
+});
+
 export const SubscribeRequestSchema = z.object({
   kind: z.literal("request"),
   id: z.string().min(1),
@@ -482,6 +498,7 @@ export const RequestSchema = z.discriminatedUnion("method", [
   AcpSessionInfoRequestSchema,
   AcpSetConfigOptionRequestSchema,
   AcpEnsureSessionRequestSchema,
+  AcpProbeRequestSchema,
   SubscribeRequestSchema,
   UnsubscribeRequestSchema,
 ]);
@@ -520,4 +537,5 @@ export type AcpAskAnswerRequest = z.infer<typeof AcpAskAnswerRequestSchema>;
 export type AcpSessionInfoRequest = z.infer<typeof AcpSessionInfoRequestSchema>;
 export type AcpSetConfigOptionRequest = z.infer<typeof AcpSetConfigOptionRequestSchema>;
 export type AcpEnsureSessionRequest = z.infer<typeof AcpEnsureSessionRequestSchema>;
+export type AcpProbeRequest = z.infer<typeof AcpProbeRequestSchema>;
 export type ParsedRequest = z.infer<typeof RequestSchema>;

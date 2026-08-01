@@ -3,6 +3,7 @@ export interface AcpProviderDescriptor {
   readonly command: string;
   readonly args: readonly string[];
   readonly authMethodId?: string;
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 export type AcpContentBlock =

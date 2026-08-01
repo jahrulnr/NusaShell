@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { ApplicationError } from "@nusashell/application";
+import { ApplicationError, type LoggerPort } from "@nusashell/application";
 import type {
   AcpClientPort,
   AcpClientSink,
@@ -12,11 +12,8 @@ import type {
   AcpToolCall,
   AcpToolKind,
   AcpToolStatus,
-  AcpAskOption,
-  AcpAskRequest,
-  AcpAskAnswer,
-  AcpPlanStep,
 } from "@nusashell/application";
+import { resolveAcpExtension, parsePlanSteps } from "./extensions/index.js";
 
 interface JsonRpcRequestMessage {
   jsonrpc: "2.0";
@@ -50,6 +47,7 @@ interface Session {
   readonly conversationId: string;
   readonly child: ChildProcess;
   readonly provider: AcpProviderDescriptor;
+  readonly extension: ReturnType<typeof resolveAcpExtension>;
   sessionId: string;
   traceId: string | null;
   nextId: number;
@@ -105,6 +103,7 @@ export class AcpJsonRpcClient implements AcpClientPort {
 
   constructor(
     private readonly spawnFn: (command: string, args: readonly string[], options: { cwd: string; env: NodeJS.ProcessEnv }) => ChildProcess = spawn,
+    private readonly logger?: LoggerPort,
   ) {}
 
   async startSession(
@@ -117,8 +116,12 @@ export class AcpJsonRpcClient implements AcpClientPort {
       await this.closeSession(conversationId);
     }
 
+    const extension = resolveAcpExtension(provider.providerId);
+    const baseEnv = { ...(process.env as NodeJS.ProcessEnv), ...(provider.env ?? {}) };
+    const spawnEnv = extension?.enrichSpawnEnv ? extension.enrichSpawnEnv(baseEnv) : baseEnv;
+
     const child = this.spawnFn(provider.command, [...provider.args], {
-      env: process.env as NodeJS.ProcessEnv,
+      env: spawnEnv,
       cwd,
     });
 
@@ -126,6 +129,7 @@ export class AcpJsonRpcClient implements AcpClientPort {
       conversationId,
       child,
       provider,
+      extension,
       sessionId: "",
       traceId: null,
       nextId: 1,
@@ -171,10 +175,7 @@ export class AcpJsonRpcClient implements AcpClientPort {
         },
       })) as { authMethods?: readonly { id: string }[]; sessionId?: string };
 
-      const authMethodIds = init.authMethods?.map((m) => m.id) ?? [];
-      if (provider.authMethodId && authMethodIds.includes(provider.authMethodId)) {
-        await this.request(session, "authenticate", { methodId: provider.authMethodId });
-      }
+      await this.authenticate(session, init.authMethods);
 
       const sessionResult = (await this.request(session, "session/new", {
         cwd,
@@ -191,6 +192,38 @@ export class AcpJsonRpcClient implements AcpClientPort {
         `Failed to start ACP session: ${error instanceof Error ? error.message : String(error)}`,
         { providerId: provider.providerId, conversationId },
       );
+    }
+  }
+
+  /**
+   * Authenticate with the provider using the descriptor's `authMethodId`.
+   *
+   * Auth policy:
+   * - No `authMethodId` → skip (e.g. Codex relies on `~/.codex` file auth).
+   * - `authMethodId` set but not advertised → hard fail with the available ids.
+   * - `authMethodId` set and advertised → call `authenticate`; on failure
+   *   soft-fail (log) and continue to `session/new`. File-auth users (Codex
+   *   ChatGPT tokens, Cursor cached login) still reach `session/new`.
+   */
+  private async authenticate(
+    session: Session,
+    authMethods: readonly { id: string }[] | undefined,
+  ): Promise<void> {
+    const { provider } = session;
+    if (!provider.authMethodId) return;
+    const authMethodIds = authMethods?.map((m) => m.id) ?? [];
+    if (!authMethodIds.includes(provider.authMethodId)) {
+      throw new ApplicationError(
+        "AGENT_PROVIDER_FAILED",
+        `ACP provider "${provider.providerId}" did not advertise auth method "${provider.authMethodId}". Available: ${authMethodIds.length ? authMethodIds.join(", ") : "(none)"}`,
+        { providerId: provider.providerId, authMethodId: provider.authMethodId, available: authMethodIds },
+      );
+    }
+    try {
+      await this.request(session, "authenticate", { methodId: provider.authMethodId });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger?.warn(`ACP authenticate soft-fail for ${provider.providerId} (method ${provider.authMethodId}): ${message}; continuing to session/new`);
     }
   }
 
@@ -311,39 +344,45 @@ export class AcpJsonRpcClient implements AcpClientPort {
     const method = request.method;
     const params = (request.params ?? {}) as Record<string, unknown>;
 
-    switch (method) {
-      case "session/request_permission": {
-        const req = parsePermissionRequest(params);
-        if (!session.sink) return;
-        const answer = await session.sink.requestPermission(req);
-        this.send(session, { jsonrpc: "2.0", id, result: { outcome: { outcome: "selected", optionId: answer.optionId } } });
-        return;
-      }
-      case "cursor/ask_question": {
-        const req = parseAskRequest(params);
-        if (!session.sink) return;
-        const answer = await session.sink.askQuestion(req);
-        this.send(session, { jsonrpc: "2.0", id, result: toAskAnswerJson(answer) });
-        return;
-      }
-      case "cursor/create_plan": {
-        if (session.sink) {
-          const steps = parsePlanSteps(params.steps ?? params.entries);
-          if (steps.length > 0) {
-            session.sink.publish({ type: "acp.plan", traceId: session.traceId ?? session.sessionId ?? "unknown", steps });
-          }
-        }
-        this.send(session, { jsonrpc: "2.0", id, result: { accepted: true } });
-        return;
-      }
-      default:
-        this.send(session, {
-          jsonrpc: "2.0",
-          id,
-          error: { code: -32601, message: "Method not found" },
-        });
-        return;
+    if (method === "session/request_permission") {
+      const req = parsePermissionRequest(params);
+      if (!session.sink) return;
+      const answer = await session.sink.requestPermission(req);
+      this.send(session, { jsonrpc: "2.0", id, result: { outcome: { outcome: "selected", optionId: answer.optionId } } });
+      return;
     }
+
+    const extension = session.extension;
+    if (extension?.handleServerRequest) {
+      const ctx = {
+        provider: session.provider,
+        sink: session.sink,
+        traceId: session.traceId,
+        sessionId: session.sessionId,
+      };
+      try {
+        const handled = await extension.handleServerRequest(ctx, method, params);
+        if (handled) {
+          if (handled.error) {
+            this.send(session, { jsonrpc: "2.0", id, error: handled.error });
+          } else {
+            this.send(session, { jsonrpc: "2.0", id, result: handled.result ?? null });
+          }
+          return;
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger?.warn(`ACP extension ${extension.constructor.name} threw for ${method}: ${message}`);
+        this.send(session, { jsonrpc: "2.0", id, error: { code: -32603, message } });
+        return;
+      }
+    }
+
+    this.send(session, {
+      jsonrpc: "2.0",
+      id,
+      error: { code: -32601, message: "Method not found" },
+    });
   }
 
   private handleNotification(session: Session, notification: JsonRpcNotification): void {
@@ -454,21 +493,6 @@ function toToolCall(update: Record<string, unknown>): AcpToolCall {
   };
 }
 
-function parsePlanSteps(entries: unknown): readonly AcpPlanStep[] {
-  if (!Array.isArray(entries)) return [];
-  const result: AcpPlanStep[] = [];
-  for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i];
-    if (typeof entry !== "object" || entry === null) continue;
-    const s = entry as Record<string, unknown>;
-    const text = String(s.content ?? s.text ?? s.description ?? "");
-    if (!text) continue;
-    const status = String(s.status ?? "pending");
-    result.push({ id: String(s.id ?? `step_${i}`), text, done: status === "completed" || status === "done" });
-  }
-  return result;
-}
-
 function parsePermissionRequest(params: Record<string, unknown>): AcpPermissionRequest {
   const options: AcpPermissionOption[] = [];
   const rawOptions = Array.isArray(params.options) ? params.options : [];
@@ -487,37 +511,6 @@ function parsePermissionRequest(params: Record<string, unknown>): AcpPermissionR
     detail: toolCall.detail ? String(toolCall.detail) : (params.detail ? String(params.detail) : undefined),
     options,
   };
-}
-
-function parseAskRequest(params: Record<string, unknown>): AcpAskRequest {
-  const options: AcpAskOption[] = [];
-  const rawOptions = Array.isArray(params.options) ? params.options : [];
-  for (const opt of rawOptions) {
-    if (typeof opt !== "object" || opt === null) continue;
-    const o = opt as Record<string, unknown>;
-    const optionId = String(o.id ?? o.optionId ?? "");
-    const name = String(o.name ?? o.label ?? optionId);
-    if (!optionId) continue;
-    options.push({ optionId, name });
-  }
-  return {
-    requestId: String(params.requestId ?? ""),
-    question: String(params.question ?? ""),
-    options: options.length > 0 ? options : undefined,
-    multiSelect: typeof params.multiSelect === "boolean" ? params.multiSelect : undefined,
-    allowFreeText: typeof params.allowFreeText === "boolean" ? params.allowFreeText : undefined,
-  };
-}
-
-function toAskAnswerJson(answer: AcpAskAnswer): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  if (answer.text) {
-    result.text = answer.text;
-  }
-  if (answer.optionIds) {
-    result.optionIds = answer.optionIds;
-  }
-  return result;
 }
 
 function parseConfigOptions(raw: unknown): readonly AcpConfigOption[] {

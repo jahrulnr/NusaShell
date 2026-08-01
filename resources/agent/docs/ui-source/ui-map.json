@@ -420,20 +420,22 @@
         {
           "heading": "ACP agents",
           "paragraphs": [
-            "Registry of ACP (Agent Client Protocol) external agents. Enable and configure providers such as Cursor, Codex, Claude Code, and Gemini."
+            "Registry of ACP (Agent Client Protocol) external agents. Enable and configure providers such as Cursor, Codex, Claude Code, and Gemini. Each card shows a Connect button that runs a one-shot acp.probe (spawn → initialize → authenticate → session/new → close) and persists authStatus as connected or needs-auth. The New ACP menu only lists connected providers."
           ],
           "controls": [
             "acp-provider-registry",
             "acp-provider-card",
             "acp-provider-toggle",
             "acp-provider-status",
+            "acp-connect-btn",
+            "acp-auth-error",
             "acp-provider-configure"
           ]
         },
         {
           "heading": "ACP provider configure modal",
           "paragraphs": [
-            "Modal for editing an ACP provider's command, args, and enabled state."
+            "Modal for editing an ACP provider's command, args, enabled state, and auth method. The auth method select lists the provider's advertised authMethodIds (e.g. cursor_login, api-key); choosing Default/file auth omits authMethodId so the client can fall back to file tokens (e.g. ~/.codex)."
           ],
           "controls": [
             "acp-provider-modal-overlay",
@@ -445,6 +447,8 @@
             "acp-provider-enabled",
             "acp-provider-command",
             "acp-provider-args",
+            "acp-provider-auth-select",
+            "acp-provider-auth-hint",
             "acp-provider-auth-method"
           ]
         }

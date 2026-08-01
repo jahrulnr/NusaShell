@@ -22,3 +22,5 @@ export { FilesystemPromptLoader, FilesystemReviewStateStore, MarkdownDocsIndex }
 export { FilesystemSkillRegistry, FilesystemSkillProvenance, FilesystemSkillUsage, SkillApprovalStaging, type PendingSkillWrite } from "./skills/index.js";
 export { FilesystemMemoryStore } from "./memory/index.js";
 export { AcpJsonRpcClient } from "./acp/index.js";
+export { CursorAcpExtension, CodexAcpExtension, resolveAcpExtension } from "./acp/extensions/index.js";
+export type { AcpProviderExtension, AcpExtensionContext, AcpExtensionHandled } from "./acp/extensions/index.js";

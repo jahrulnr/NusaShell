@@ -516,6 +516,174 @@ describe("OpenAiCompatibleAgentProvider", () => {
     expect(result).toMatchObject({ text: "Hello", model: "stream-model" });
   });
 
+  it("streams reasoning_content deltas via onReasoningDelta", async () => {
+    const reasoningDeltas: string[] = [];
+    const sse = [
+      'data: {"model":"m","choices":[{"delta":{"reasoning_content":"Let me think"}}]}',
+      "",
+      'data: {"model":"m","choices":[{"delta":{"reasoning_content":" about this"}}]}',
+      "",
+      'data: {"model":"m","choices":[{"delta":{"content":"Answer"},"finish_reason":"stop"}]}',
+      "",
+      "data: [DONE]",
+      "",
+    ].join("\n");
+    const provider = new OpenAiCompatibleAgentProvider({
+      baseUrl: "https://provider.example/v1",
+      fetchFn: vi.fn<typeof fetch>().mockResolvedValue(new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })),
+      stream: true,
+    });
+
+    const result = await provider.complete({
+      traceId: "trace-reasoning",
+      round: 1,
+      messages: [{ role: "user", content: "Hello" }],
+      tools: [],
+      model: "m",
+      onReasoningDelta: (delta) => { reasoningDeltas.push(delta); },
+    });
+
+    expect(reasoningDeltas).toEqual(["Let me think", " about this"]);
+    expect(result).toMatchObject({ text: "Answer", reasoning: "Let me think about this" });
+  });
+
+  it("streams reasoning from thinking field and thinking_content field", async () => {
+    const reasoningDeltas: string[] = [];
+    const sse = [
+      'data: {"model":"m","choices":[{"delta":{"thinking":"hmm"}}]}',
+      "",
+      'data: {"model":"m","choices":[{"delta":{"thinking_content":" let me see"}}]}',
+      "",
+      'data: {"model":"m","choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}',
+      "",
+      "data: [DONE]",
+      "",
+    ].join("\n");
+    const provider = new OpenAiCompatibleAgentProvider({
+      baseUrl: "https://provider.example/v1",
+      fetchFn: vi.fn<typeof fetch>().mockResolvedValue(new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })),
+      stream: true,
+    });
+
+    const result = await provider.complete({
+      traceId: "trace-thinking",
+      round: 1,
+      messages: [{ role: "user", content: "Hello" }],
+      tools: [],
+      model: "m",
+      onReasoningDelta: (delta) => { reasoningDeltas.push(delta); },
+    });
+
+    expect(reasoningDeltas).toEqual(["hmm", " let me see"]);
+    expect(result).toMatchObject({ reasoning: "hmm let me see" });
+  });
+
+  it("streams reasoning from a separate event type", async () => {
+    const reasoningDeltas: string[] = [];
+    const sse = [
+      "event: reasoning\ndata: {\"delta\":\"step 1\"}",
+      "",
+      "event: reasoning\ndata: {\"delta\":\" step 2\"}",
+      "",
+      'data: {"model":"m","choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}',
+      "",
+      "data: [DONE]",
+      "",
+    ].join("\n");
+    const provider = new OpenAiCompatibleAgentProvider({
+      baseUrl: "https://provider.example/v1",
+      fetchFn: vi.fn<typeof fetch>().mockResolvedValue(new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })),
+      stream: true,
+    });
+
+    const result = await provider.complete({
+      traceId: "trace-event-reasoning",
+      round: 1,
+      messages: [{ role: "user", content: "Hello" }],
+      tools: [],
+      model: "m",
+      onReasoningDelta: (delta) => { reasoningDeltas.push(delta); },
+    });
+
+    expect(reasoningDeltas).toEqual(["step 1", " step 2"]);
+    expect(result).toMatchObject({ reasoning: "step 1 step 2" });
+  });
+
+  it("streams reasoning from top-level field without choices", async () => {
+    const reasoningDeltas: string[] = [];
+    const sse = [
+      'data: {"reasoning":"top-level thinking"}',
+      "",
+      'data: {"model":"m","choices":[{"delta":{"content":"answer"},"finish_reason":"stop"}]}',
+      "",
+      "data: [DONE]",
+      "",
+    ].join("\n");
+    const provider = new OpenAiCompatibleAgentProvider({
+      baseUrl: "https://provider.example/v1",
+      fetchFn: vi.fn<typeof fetch>().mockResolvedValue(new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })),
+      stream: true,
+    });
+
+    const result = await provider.complete({
+      traceId: "trace-top-reasoning",
+      round: 1,
+      messages: [{ role: "user", content: "Hello" }],
+      tools: [],
+      model: "m",
+      onReasoningDelta: (delta) => { reasoningDeltas.push(delta); },
+    });
+
+    expect(reasoningDeltas).toEqual(["top-level thinking"]);
+    expect(result).toMatchObject({ reasoning: "top-level thinking" });
+  });
+
+  it("streams reasoning from array content blocks in delta", async () => {
+    const reasoningDeltas: string[] = [];
+    const sse = [
+      'data: {"model":"m","choices":[{"delta":{"reasoning_content":[{"type":"text","text":"block "}]}}]}',
+      "",
+      'data: {"model":"m","choices":[{"delta":{"reasoning_content":[{"type":"text","text":"thinking"}]}}]}',
+      "",
+      'data: {"model":"m","choices":[{"delta":{"content":"result"},"finish_reason":"stop"}]}',
+      "",
+      "data: [DONE]",
+      "",
+    ].join("\n");
+    const provider = new OpenAiCompatibleAgentProvider({
+      baseUrl: "https://provider.example/v1",
+      fetchFn: vi.fn<typeof fetch>().mockResolvedValue(new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })),
+      stream: true,
+    });
+
+    const result = await provider.complete({
+      traceId: "trace-array-reasoning",
+      round: 1,
+      messages: [{ role: "user", content: "Hello" }],
+      tools: [],
+      model: "m",
+      onReasoningDelta: (delta) => { reasoningDeltas.push(delta); },
+    });
+
+    expect(reasoningDeltas).toEqual(["block ", "thinking"]);
+    expect(result).toMatchObject({ reasoning: "block thinking" });
+  });
+
   it("falls back once to JSON when a provider rejects streaming", async () => {
     const fetchFn = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify({

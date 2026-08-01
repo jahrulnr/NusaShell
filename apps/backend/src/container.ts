@@ -27,6 +27,7 @@ import {
   type Logger,
   type LogObserver,
 } from "@nusashell/infrastructure";
+import { spawn } from "node:child_process";
 import type { PluginRepositoryPort, SkillRegistryPort, SkillProvenancePort, SkillUsagePort, CuratorSettings, MemoryStorePort } from "@nusashell/application";
 import {
   CommandBus,
@@ -88,6 +89,7 @@ import {
   AnswerAcpAskHandler,
   SetAcpConfigOptionHandler,
   EnsureAcpSessionHandler,
+  ProbeAcpProviderHandler,
   GetAcpSessionInfoHandler,
   type JobStorePort,
   type JobSchedulerSettings,
@@ -390,7 +392,7 @@ export function createContainer(options: ContainerOptions): Container {
   }
 
   // ---- ACP external agent surface ----
-  const acpClient = new AcpJsonRpcClient();
+  const acpClient = new AcpJsonRpcClient(spawn, logger);
   const acpPermissionService = new AcpPermissionService();
   const acpAskService = new AcpAskBridgeService();
   const acpSessionService = new AcpSessionService({
@@ -461,6 +463,7 @@ export function createContainer(options: ContainerOptions): Container {
   commandBus.register("answer-acp-ask", new AnswerAcpAskHandler(acpAskService));
   commandBus.register("set-acp-config-option", new SetAcpConfigOptionHandler(acpSessionService));
   commandBus.register("ensure-acp-session", new EnsureAcpSessionHandler(acpSessionService));
+  commandBus.register("probe-acp-provider", new ProbeAcpProviderHandler(acpClient));
   if (pluginInstaller) {
     commandBus.register("install-plugin", new InstallPluginHandler(pluginInstaller, eventDispatcher, clock));
     commandBus.register("uninstall-plugin", new UninstallPluginHandler(pluginInstaller, runtimeManager, pluginRepository, eventDispatcher, clock));

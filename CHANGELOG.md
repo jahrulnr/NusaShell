@@ -5,11 +5,66 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.49] - 2026-08-01
+
+### Added
+
+- **Codex ACP provider** — OpenAI Codex is now a first-class ACP provider
+  alongside Cursor. The manifest seeds `NO_BROWSER=1` and
+  `INITIAL_AGENT_MODE=agent` spawn env defaults so the Codex CLI runs headless
+  in agent mode. Authentication soft-fails: if `authenticate` errors (e.g.
+  missing `CODEX_API_KEY`), the client logs a warning and proceeds to
+  `session/new`, letting an existing `~/.codex` ChatGPT token drive the
+  session. To use an API key instead, set `OPENAI_API_KEY`/`CODEX_API_KEY` in
+  the Electron process env and choose `api-key` in Configure → Auth method.
+- **ACP provider Connect button** — the AI Providers → ACP Agents card now
+  shows a Connect button that runs a one-shot `acp.probe`
+  (spawn → initialize → optional authenticate → session/new → close). The
+  result is persisted as `authStatus` (`connected` | `needs-auth`),
+  `authCheckedAt`, and `authError` on the provider config. The New ACP menu
+  only lists providers whose `authStatus` is `connected`, so users cannot
+  start a thread against an unauthenticated provider.
+- **ACP provider extension model** — vendor-specific server→client requests
+  are now dispatched to an `AcpProviderExtension` resolved per session.
+  `CursorAcpExtension` owns `cursor/ask_question` and `cursor/create_plan`;
+  `CodexAcpExtension` is a no-op placeholder for future Codex methods. This
+  removes vendor branches from `AcpJsonRpcClient`.
+- **ACP permission and ask cards** — `submitAcp` now wires
+  `onPermissionRequest`/`onAskRequest` so ACP `session/request_permission`
+  and `session/ask_question` render inline cards in the agent thread. The
+  permission card has a distinct amber accent; answers flow back through
+  `acp.permission_answer`/`acp.ask_answer`.
+- **Codex manifest env merge** — provider `env` defaults are merged under
+  `process.env` at spawn time (provider wins on conflict).
+
+### Changed
+
+- **`AcpProviderStore`** now persists `authMethodId`, `authStatus`,
+  `authCheckedAt`, and `authError` alongside `enabled`/`command`/`args`.
+  Status computation treats `authStatus === "connected"` as `configured`;
+  otherwise enabled+detected providers show `needs-auth`.
+- **Configure modal** adds an Auth method select listing the provider's
+  advertised `authMethodIds`, plus a hint explaining Codex ChatGPT vs API key
+  auth.
+
 ## [0.0.48] - 2026-08-01
 
 ### Added
 
 - **Per-traceId stream sequencing** — agent and ACP streaming events now
+
+### Fixed
+
+- **Reasoning/thinking now streams live** — the SSE parser only recognized
+  `reasoning_content`, `reasoning`, and `thinking` fields inside
+  `choices[0].delta` as strings. Providers that send reasoning via
+  separate SSE event types (`event: reasoning`), top-level fields without
+  `choices`, array content blocks, or alternative field names
+  (`reasoning_text`, `thinking_content`, `reasoning_details`) were silently
+  dropped during streaming — reasoning only appeared after the turn
+  completed. The parser now captures the `event:` field, handles arrays
+  and objects in reasoning fields, checks 6 field name variants, and
+  extracts top-level reasoning when no `choices` are present.
   carry a `streamSeq` integer (monotonic per `traceId`, starting at 1)
   assigned at the application publish site via `StreamSeqRegistry`. The WS
   transport copies it into the payload but does not generate it. The
@@ -33,6 +88,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reaching the renderer. Secret-like keys (`password`, `token`, `apiKey`,
   …), Bearer tokens, `Authorization` headers, and `sk-` API keys are
   replaced with `[REDACTED]`.
+
+### Fixed
+
+- **Reasoning/thinking now streams live** — the SSE parser only recognized
+  `reasoning_content`, `reasoning`, and `thinking` fields inside
+  `choices[0].delta` as strings. Providers that send reasoning via
+  separate SSE event types (`event: reasoning`), top-level fields without
+  `choices`, array content blocks, or alternative field names
+  (`reasoning_text`, `thinking_content`, `reasoning_details`) were silently
+  dropped during streaming — reasoning only appeared after the turn
+  completed. The parser now captures the `event:` field, handles arrays
+  and objects in reasoning fields, checks 6 field name variants, and
+  extracts top-level reasoning when no `choices` are present.
 
 ## [0.0.47] - 2026-08-01
 

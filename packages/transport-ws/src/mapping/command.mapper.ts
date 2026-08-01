@@ -21,10 +21,11 @@ import type {
   AnswerAcpAskCommand,
   SetAcpConfigOptionCommand,
   EnsureAcpSessionCommand,
+  ProbeAcpProviderCommand,
 } from "@nusashell/application";
 
 export function mapToCommand(request: ParsedRequest):
-  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | SetPluginAutostartCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand | CancelAgentTurnCommand | AnswerAskQuestionCommand | AddJobCommand | SetJobEnabledCommand | RunJobNowCommand | RemoveJobCommand | RunAcpTurnCommand | CancelAcpTurnCommand | AnswerAcpPermissionCommand | AnswerAcpAskCommand | SetAcpConfigOptionCommand | EnsureAcpSessionCommand }
+  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | SetPluginAutostartCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand | CancelAgentTurnCommand | AnswerAskQuestionCommand | AddJobCommand | SetJobEnabledCommand | RunJobNowCommand | RemoveJobCommand | RunAcpTurnCommand | CancelAcpTurnCommand | AnswerAcpPermissionCommand | AnswerAcpAskCommand | SetAcpConfigOptionCommand | EnsureAcpSessionCommand | ProbeAcpProviderCommand }
   | { kind: "query" } {
   switch (request.method) {
     case "plugin.start":
@@ -237,6 +238,20 @@ export function mapToCommand(request: ParsedRequest):
             authMethodId: request.payload.provider.authMethodId,
           },
         } as EnsureAcpSessionCommand,
+      };
+    case "acp.probe":
+      return {
+        kind: "command",
+        command: {
+          kind: "probe-acp-provider",
+          provider: {
+            providerId: request.payload.provider.providerId,
+            command: request.payload.provider.command,
+            args: request.payload.provider.args,
+            ...(request.payload.provider.authMethodId ? { authMethodId: request.payload.provider.authMethodId } : {}),
+            ...(request.payload.provider.env ? { env: request.payload.provider.env } : {}),
+          },
+        } as ProbeAcpProviderCommand,
       };
     default:
       return { kind: "query" };

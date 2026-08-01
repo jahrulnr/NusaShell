@@ -314,6 +314,8 @@ export type {
   SetAcpConfigOptionResult,
   EnsureAcpSessionCommand,
   EnsureAcpSessionResult,
+  ProbeAcpProviderCommand,
+  ProbeAcpProviderResult,
   GetAcpSessionInfoQuery,
   GetAcpSessionInfoResult,
 } from "./acp/index.js";
@@ -327,6 +329,7 @@ export {
   AnswerAcpAskHandler,
   SetAcpConfigOptionHandler,
   EnsureAcpSessionHandler,
+  ProbeAcpProviderHandler,
   GetAcpSessionInfoHandler,
 } from "./acp/index.js";
 

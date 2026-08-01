@@ -10,3 +10,5 @@ export type { SetAcpConfigOptionCommand, SetAcpConfigOptionResult } from "./set-
 export { SetAcpConfigOptionHandler } from "./set-acp-config-option/set-acp-config-option.handler.js";
 export type { EnsureAcpSessionCommand, EnsureAcpSessionResult } from "./ensure-acp-session/ensure-acp-session.command.js";
 export { EnsureAcpSessionHandler } from "./ensure-acp-session/ensure-acp-session.handler.js";
+export type { ProbeAcpProviderCommand, ProbeAcpProviderResult } from "./probe-acp-provider/probe-acp-provider.command.js";
+export { ProbeAcpProviderHandler } from "./probe-acp-provider/probe-acp-provider.handler.js";

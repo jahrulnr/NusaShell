@@ -83,14 +83,14 @@ export class AgentConversationController {
       this.notify(`Could not load ACP providers: ${error.message || error}`, "error");
     }
     menu.textContent = "";
-    const enabled = providers.filter((p) => p.config.enabled);
-    if (enabled.length === 0) {
-      const item = element("button", "disabled", "No enabled ACP agents");
+    const connected = providers.filter((p) => p.config.enabled && p.config.authStatus === "connected");
+    if (connected.length === 0) {
+      const item = element("button", "disabled", "No connected ACP agents — connect one in AI Providers");
       item.type = "button";
       item.disabled = true;
       menu.appendChild(item);
     } else {
-      for (const provider of enabled) {
+      for (const provider of connected) {
         const item = element("button", "", provider.manifest.displayName);
         item.type = "button";
         item.addEventListener("click", () => {
@@ -462,6 +462,14 @@ export class AgentConversationController {
         },
         onTurnEnd: () => {
           this.sealStreamingToolCardsIncomplete(streamState);
+        },
+        onPermissionRequest: (payload) => {
+          const card = this.createAcpPermissionCard(payload);
+          if (card) appendStreamChild(card);
+        },
+        onAskRequest: (payload) => {
+          const card = this.createAcpAskCard(payload);
+          if (card) appendStreamChild(card);
         },
       });
       sealStep();
@@ -1374,6 +1382,227 @@ export class AgentConversationController {
       const textarea = card.querySelector(".agent-ask-textarea");
       custom?.classList.add("is-active");
       if (textarea) textarea.value = parsed.answer || "";
+    }
+  }
+
+  createAcpPermissionCard(payload) {
+    if (!payload?.requestId || !this.answerAcpPermission) return null;
+    const traceId = payload.traceId || this.activeTraceId;
+    const conversationId = this.conversation?.id;
+    if (!conversationId) return null;
+    const options = Array.isArray(payload.options) ? payload.options : [];
+    if (options.length === 0) return null;
+
+    const card = element("div", "agent-ask-card acp-permission-card is-pending");
+    card.dataset.acpRequestId = String(payload.requestId);
+    card.dataset.acpKind = "permission";
+
+    const header = element("div", "agent-ask-header");
+    header.append(
+      element("span", "agent-ask-header-icon", "🛡"),
+      element("span", "agent-ask-header-title", payload.toolTitle || "Permission required"),
+    );
+    card.appendChild(header);
+
+    const body = element("div", "agent-ask-body");
+    if (payload.detail) body.appendChild(element("div", "agent-ask-question", String(payload.detail)));
+    body.appendChild(element("div", "agent-ask-hint", "Choose how to handle this action."));
+
+    const optionsWrap = element("div", "agent-ask-options");
+    for (const option of options) {
+      if (!option || typeof option !== "object") continue;
+      const optionId = String(option.optionId ?? option.id ?? "");
+      const label = String(option.name ?? option.label ?? optionId);
+      if (!optionId) continue;
+      const row = element("button", "agent-ask-option");
+      row.type = "button";
+      row.dataset.optionId = optionId;
+      const marker = element("span", "agent-ask-option-marker is-radio");
+      const copy = element("div", "agent-ask-option-copy");
+      copy.appendChild(element("span", "agent-ask-option-label", label));
+      row.append(marker, copy);
+      row.addEventListener("click", () => {
+        if (card.classList.contains("is-submitting") || card.classList.contains("is-sealed")) return;
+        void this.submitAcpPermissionCard(card, traceId, conversationId, optionId);
+      });
+      optionsWrap.appendChild(row);
+    }
+    body.appendChild(optionsWrap);
+    card.appendChild(body);
+    return card;
+  }
+
+  async submitAcpPermissionCard(card, traceId, conversationId, optionId) {
+    if (!this.answerAcpPermission || card.classList.contains("is-submitting")) return;
+    const requestId = card.dataset.acpRequestId;
+    if (!requestId) return;
+    card.classList.add("is-submitting");
+    try {
+      await this.answerAcpPermission({ traceId, conversationId, requestId, optionId });
+      card.classList.remove("is-pending", "is-submitting");
+      card.classList.add("is-sealed");
+      card.querySelectorAll("button").forEach((node) => { node.disabled = true; });
+      const chosen = new Set([optionId]);
+      card.querySelectorAll(".agent-ask-option").forEach((node) => {
+        node.classList.toggle("is-selected", chosen.has(node.dataset.optionId));
+      });
+      const answerEl = element("div", "agent-ask-answer", `Allowed: ${optionId}`);
+      card.querySelector(".agent-ask-body")?.appendChild(answerEl);
+    } catch (error) {
+      card.classList.remove("is-submitting");
+      this.notify(error instanceof Error ? error.message : "Could not answer permission", "error");
+    }
+  }
+
+  createAcpAskCard(payload) {
+    if (!payload?.requestId || !this.answerAcpAsk) return null;
+    const traceId = payload.traceId || this.activeTraceId;
+    const conversationId = this.conversation?.id;
+    if (!conversationId) return null;
+    const options = Array.isArray(payload.options) ? payload.options : [];
+    const multiSelect = Boolean(payload.multiSelect);
+    const allowFreeText = payload.allowFreeText !== false;
+    const selected = new Set();
+
+    const card = element("div", "agent-ask-card acp-ask-card is-pending");
+    card.dataset.acpRequestId = String(payload.requestId);
+    card.dataset.acpKind = "ask";
+    card.dataset.acpTraceId = traceId;
+    card.dataset.acpConversationId = conversationId;
+
+    const header = element("div", "agent-ask-header");
+    header.append(
+      element("span", "agent-ask-header-icon", "⚒"),
+      element("span", "agent-ask-header-title", "Ask Question"),
+    );
+    card.appendChild(header);
+
+    const body = element("div", "agent-ask-body");
+    body.appendChild(element("div", "agent-ask-question", String(payload.question || "Choose a response")));
+    body.appendChild(element(
+      "div",
+      "agent-ask-hint",
+      multiSelect ? "Choose one or more responses so I can continue the task." : "Choose one response so I can continue the task.",
+    ));
+
+    const optionsWrap = element("div", "agent-ask-options");
+    for (const option of options) {
+      if (!option || typeof option !== "object") continue;
+      const optionId = String(option.optionId ?? option.id ?? "");
+      const label = String(option.name ?? option.label ?? optionId);
+      if (!optionId) continue;
+      const row = element("button", `agent-ask-option${selected.has(optionId) ? " is-selected" : ""}`);
+      row.type = "button";
+      row.dataset.optionId = optionId;
+      row.setAttribute("aria-pressed", "false");
+      const marker = element("span", `agent-ask-option-marker${multiSelect ? " is-check" : " is-radio"}`);
+      const copy = element("div", "agent-ask-option-copy");
+      copy.appendChild(element("span", "agent-ask-option-label", label));
+      row.append(marker, copy);
+      row.addEventListener("click", () => {
+        if (card.classList.contains("is-submitting") || card.classList.contains("is-sealed")) return;
+        if (multiSelect) {
+          if (selected.has(optionId)) selected.delete(optionId);
+          else selected.add(optionId);
+        } else {
+          selected.clear();
+          selected.add(optionId);
+          card.querySelectorAll(".agent-ask-option").forEach((node) => {
+            node.classList.toggle("is-selected", node.dataset.optionId === optionId);
+            node.setAttribute("aria-pressed", node.dataset.optionId === optionId ? "true" : "false");
+          });
+        }
+        row.classList.toggle("is-selected", selected.has(optionId));
+        row.setAttribute("aria-pressed", selected.has(optionId) ? "true" : "false");
+        this.syncAcpAskSendState(card, selected);
+      });
+      optionsWrap.appendChild(row);
+    }
+    body.appendChild(optionsWrap);
+
+    if (allowFreeText) {
+      const custom = element("div", "agent-ask-custom");
+      const customToggle = element("button", "agent-ask-custom-toggle");
+      customToggle.type = "button";
+      customToggle.textContent = "Type answer...";
+      const textarea = document.createElement("textarea");
+      textarea.className = "agent-ask-textarea";
+      textarea.rows = 3;
+      textarea.placeholder = "Type a different direction...";
+      textarea.maxLength = 8000;
+      customToggle.addEventListener("click", () => {
+        custom.classList.add("is-active");
+        if (!multiSelect) {
+          selected.clear();
+          card.querySelectorAll(".agent-ask-option").forEach((node) => {
+            node.classList.remove("is-selected");
+            node.setAttribute("aria-pressed", "false");
+          });
+        }
+        textarea.focus();
+        this.syncAcpAskSendState(card, selected);
+      });
+      textarea.addEventListener("input", () => this.syncAcpAskSendState(card, selected));
+      custom.append(customToggle, textarea);
+      body.appendChild(custom);
+    }
+
+    const actions = element("div", "agent-ask-actions");
+    const send = element("button", "agent-ask-send");
+    send.type = "button";
+    send.innerHTML = `<span class="agent-ask-send-icon">✈</span><span>Send answer</span>`;
+    send.addEventListener("click", () => void this.submitAcpAskCard(card, selected));
+    actions.append(send, element("span", "agent-ask-dismiss-hint", "Esc / Stop to dismiss"));
+    body.appendChild(actions);
+    card.appendChild(body);
+    this.syncAcpAskSendState(card, selected);
+    return card;
+  }
+
+  syncAcpAskSendState(card, selected) {
+    const send = card.querySelector(".agent-ask-send");
+    if (!send) return;
+    const textarea = card.querySelector(".agent-ask-textarea");
+    const customActive = card.querySelector(".agent-ask-custom")?.classList.contains("is-active");
+    const hasText = Boolean(textarea?.value?.trim());
+    send.disabled = card.classList.contains("is-submitting") || (selected.size === 0 && !(customActive && hasText));
+  }
+
+  async submitAcpAskCard(card, selected) {
+    if (!this.answerAcpAsk || card.classList.contains("is-submitting")) return;
+    const requestId = card.dataset.acpRequestId;
+    const traceId = card.dataset.acpTraceId || this.activeTraceId;
+    const conversationId = card.dataset.acpConversationId || this.conversation?.id;
+    if (!requestId || !conversationId) return;
+    const textarea = card.querySelector(".agent-ask-textarea");
+    const customActive = card.querySelector(".agent-ask-custom")?.classList.contains("is-active");
+    const text = textarea?.value?.trim() || "";
+    const via = customActive && text ? "text" : "option";
+    if (via === "option" && selected.size === 0) return;
+    if (via === "text" && !text) return;
+
+    card.classList.add("is-submitting");
+    this.syncAcpAskSendState(card, selected);
+    try {
+      await this.answerAcpAsk({
+        traceId,
+        conversationId,
+        requestId,
+        ...(via === "option" ? { optionIds: [...selected] } : { text }),
+      });
+      card.classList.remove("is-pending", "is-submitting");
+      card.classList.add("is-sealed");
+      card.querySelectorAll("button, textarea").forEach((node) => { node.disabled = true; });
+      const answerEl = element(
+        "div",
+        "agent-ask-answer",
+        via === "text" ? `Answer: ${text}` : `Answer: ${[...selected].join(", ")}`,
+      );
+      card.querySelector(".agent-ask-body")?.appendChild(answerEl);
+    } catch (error) {
+      card.classList.remove("is-submitting");
+      this.syncAcpAskSendState(card, selected);
+      this.notify(error instanceof Error ? error.message : "Could not send answer", "error");
     }
   }
 

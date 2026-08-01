@@ -16,7 +16,7 @@ import {
 } from "./window-manager.js";
 import { LINUX_DESKTOP_APP_NAME } from "./window-assets.js";
 import { AppUpdater } from "./updater.js";
-import { loadConfig, type CallToolCommand, type ListToolsQuery, type StartPluginCommand } from "@nusashell/application";
+import { loadConfig, type CallToolCommand, type ListToolsQuery, type StartPluginCommand, type ProbeAcpProviderCommand } from "@nusashell/application";
 import { AiSettingsStore, type AiRegistrySettings, type SaveAiProviderInput } from "./ai-settings.js";
 import { AcpProviderStore } from "./acp-provider-store.js";
 import type { AcpProviderSaveInput } from "../shared/acp-provider-contract.js";
@@ -486,6 +486,32 @@ app.whenReady().then(async () => {
   ipcMain.handle("acp-providers:list", () => requireAcpProviderStore().list());
   ipcMain.handle("acp-providers:save", (_event, input: AcpProviderSaveInput) => requireAcpProviderStore().save(input));
   ipcMain.handle("acp-providers:get", (_event, providerId: string) => requireAcpProviderStore().getEffective(providerId));
+  ipcMain.handle("acp-providers:probe", async (_event, providerId: string) => {
+    const store = requireAcpProviderStore();
+    const provider = await store.getEffective(providerId);
+    if (!provider) throw new Error(`ACP provider not found: ${providerId}`);
+    const authMethodId = provider.config.authMethodId ?? provider.manifest.authMethodId;
+    const command: ProbeAcpProviderCommand = {
+      kind: "probe-acp-provider",
+      provider: {
+        providerId: provider.manifest.id,
+        command: provider.config.command || provider.manifest.command,
+        args: provider.config.args ?? provider.manifest.args,
+        ...(authMethodId ? { authMethodId } : {}),
+        ...(provider.manifest.env ? { env: provider.manifest.env } : {}),
+      },
+    };
+    const result = await requireBackend().container.commandBus.execute(command) as { ok: boolean; error?: string };
+    const authCheckedAt = new Date().toISOString();
+    if (result.ok) {
+      await store.save({ providerId, authStatus: "connected", authCheckedAt });
+    } else {
+      const errorSave: AcpProviderSaveInput = { providerId, authStatus: "needs-auth", authCheckedAt };
+      if (result.error) errorSave.authError = result.error;
+      await store.save(errorSave);
+    }
+    return store.getEffective(providerId);
+  });
   ipcMain.handle("agent-conversations:get", (_event, id: string) => requireConversationStore().get(id));
   ipcMain.handle("agent-conversations:append", (_event, id: string, message: AgentConversationMessage) =>
     requireConversationStore().appendMessage(id, message));

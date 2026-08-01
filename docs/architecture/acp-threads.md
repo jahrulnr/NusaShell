@@ -38,8 +38,9 @@ ACP is framed as line-delimited JSON-RPC 2.0 over a child process's stdin/stdout
 - `cursor/ask_question` — user must answer a question.
 - `cursor/create_plan` — provider proposes a plan; acknowledged by the host.
 
-Unknown notifications are ignored. Unknown requests receive a JSON-RPC
-`-32601 Method not found` error.
+Unknown notifications are ignored. Unknown requests are dispatched to the
+provider's `AcpProviderExtension` (see below); if no extension claims the
+method, the host replies with a JSON-RPC `-32601 Method not found` error.
 
 ## Architecture
 
@@ -52,7 +53,8 @@ Backend MessageRouter
     AcpPermissionService  — tracks pending permission requests
     AcpAskBridgeService   — tracks pending ask questions
     AcpClientPort         — implemented by AcpJsonRpcClient
-      spawn("agent", ["acp"])
+      spawn(provider.command, provider.args, { env: { ...process.env, ...provider.env } })
+      ↳ resolveAcpExtension(providerId) → AcpProviderExtension
 ```
 
 - The desktop creates an `acp` conversation with a `providerId`. It sends
@@ -61,18 +63,74 @@ Backend MessageRouter
   subsequent turns in the same conversation.
 - Server-to-client requests are forwarded to the desktop over `acp.permission_request`
   and `acp.ask_request` events. The desktop replies with `acp.permission_answer`
-  or `acp.ask_answer`.
+  or `acp.ask_answer`. Vendor-specific requests (e.g. `cursor/ask_question`,
+  `cursor/create_plan`) are dispatched to the provider's `AcpProviderExtension`
+  inside `AcpJsonRpcClient.handleServerRequest`.
 - Streaming content is published as application events and forwarded to the
   desktop over the existing WebSocket event path.
+
+### Provider extensions
+
+Each ACP provider may register an `AcpProviderExtension`
+(`packages/infrastructure/src/acp/extensions/`) that owns vendor-specific
+server→client requests. The client resolves the extension once per session via
+`resolveAcpExtension(providerId)` and delegates unknown methods to it.
+
+- `CursorAcpExtension` — handles `cursor/ask_question` (forwards to
+  `AcpClientSink.askQuestion`) and `cursor/create_plan` (publishes an
+  `acp.plan` event).
+- `CodexAcpExtension` — no-op placeholder; Codex uses the standard
+  `session/request_permission` and `session/update` paths. Reserved for future
+  Codex-specific methods.
+
+Extensions keep `AcpJsonRpcClient` free of vendor branches. Add a new provider
+extension by implementing `AcpProviderExtension` and registering it in
+`extensions/index.ts`.
+
+### Authentication
+
+`AcpJsonRpcClient.startSession` drives the handshake:
+
+1. `initialize` — read `authMethods` from the provider.
+2. `authenticate` — sent only when the provider descriptor carries an
+   `authMethodId` **and** the provider advertised it. If `authenticate` fails
+   (e.g. missing `CODEX_API_KEY`), the client **soft-fails**: logs a warning and
+   proceeds to `session/new`. This lets Codex fall back to an existing
+   `~/.codex` ChatGPT token without an API key.
+3. If `authMethodId` is set but not advertised, the handshake hard-fails with
+   `ACP_PROVIDER_FAILED` (the configured auth method is unavailable).
+4. `session/new` — open the session.
+
+The AI Providers → ACP Agents card exposes a **Connect** button that runs a
+one-shot `acp.probe` (spawn → initialize → optional authenticate → session/new
+→ close). The result is persisted on the provider config as `authStatus`
+(`connected` | `needs-auth`), `authCheckedAt`, and `authError`. The New ACP
+menu only lists providers whose `authStatus` is `connected`, so users cannot
+start a thread against an unauthenticated provider.
 
 ## Provider registry
 
 The desktop owns the ACP provider catalog. `AcpProviderStore` in the main
 process combines built-in manifests (Cursor, Codex, Claude Code, Gemini) with
-user-saved overrides for `enabled`, `command`, and `args`. Detection is a shallow
+user-saved overrides for `enabled`, `command`, `args`, `authMethodId`,
+`authStatus`, `authCheckedAt`, and `authError`. Detection is a shallow
 command-on-path check. The registry is separate from the AI provider registry
 because ACP providers are not OpenAI-compatible API endpoints; they are
 executable agents.
+
+### Codex manifest defaults
+
+The Codex manifest seeds two spawn env defaults:
+
+- `NO_BROWSER=1` — prevents the Codex CLI from opening a browser during
+  `authenticate`; required for headless/desktop usage.
+- `INITIAL_AGENT_MODE=agent` — starts Codex in agent mode so it can call tools.
+
+These are merged under `process.env` at spawn time (provider `env` wins on
+conflict). The manifest omits a default `authMethodId` so Codex can fall back to
+`~/.codex` ChatGPT tokens. To use an OpenAI API key instead, set
+`OPENAI_API_KEY` (or `CODEX_API_KEY`) in the process env that launches Electron,
+then choose `api-key` in Configure → Auth method.
 
 ## Error handling
 
@@ -84,8 +142,9 @@ executable agents.
 ## Future work
 
 - Render plan steps as a checkable card in the desktop thread.
-- Expand permission and ask cards with the ACP-specific branding.
 - Support ACP attachments and file references.
 - Implement the `fs` and `terminal` client capabilities so ACP providers can
   ask NusaShell to read/write files or run terminal commands through the
   existing MCP bridge.
+- Surface `configOptions` returned by `session/new` as a per-thread settings
+  popover (model, sandbox mode, etc.) once Codex/Cursor start advertising them.

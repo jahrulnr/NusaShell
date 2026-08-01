@@ -12,15 +12,18 @@ const ACP_PROVIDER_MANIFESTS: readonly AcpProviderManifest[] = [
     command: process.env.NUSASHELL_CURSOR_AGENT_BIN ?? "agent",
     args: ["acp"],
     authMethodId: "cursor_login",
+    authMethodIds: ["cursor_login"],
     unverified: false,
   },
   {
     id: "codex",
     displayName: "Codex",
     monogram: "CX",
-    description: "OpenAI Codex ACP agent.",
-    command: "codex-acp",
+    description: "OpenAI Codex ACP agent via the `@agentclientprotocol/codex-acp` adapter. ChatGPT CLI login (`codex login`) or OPENAI_API_KEY/CODEX_API_KEY env.",
+    command: process.env.NUSASHELL_CODEX_ACP_BIN ?? "codex-acp",
     args: [],
+    authMethodIds: ["api-key"],
+    env: { NO_BROWSER: "1", INITIAL_AGENT_MODE: "agent" },
     unverified: true,
   },
   {
@@ -59,11 +62,30 @@ export class AcpProviderStore {
       const enabled = savedConfig?.enabled ?? false;
       const command = savedConfig?.command ?? manifest.command;
       const args = savedConfig?.args ?? manifest.args;
+      const authMethodId = savedConfig?.authMethodId ?? manifest.authMethodId;
+      const authStatus = savedConfig?.authStatus;
+      const authCheckedAt = savedConfig?.authCheckedAt;
+      const authError = savedConfig?.authError;
       const detected = await isCommandOnPath(command);
-      const status = !enabled ? "disabled" : (command && detected ? "configured" : "not-configured");
+      const status = !enabled
+        ? "disabled"
+        : !(command && detected)
+          ? "not-configured"
+          : authStatus === "connected"
+            ? "configured"
+            : "needs-auth";
       result.push({
         manifest: { ...manifest, unverified: manifest.unverified ?? false },
-        config: { providerId: manifest.id, enabled, command, args },
+        config: {
+          providerId: manifest.id,
+          enabled,
+          command,
+          args,
+          ...(authMethodId !== undefined ? { authMethodId } : {}),
+          ...(authStatus !== undefined ? { authStatus } : {}),
+          ...(authCheckedAt !== undefined ? { authCheckedAt } : {}),
+          ...(authError !== undefined ? { authError } : {}),
+        },
         detected,
         status,
       });
@@ -79,6 +101,18 @@ export class AcpProviderStore {
       enabled: input.enabled !== undefined ? input.enabled : (existing?.enabled ?? false),
       command: input.command !== undefined ? input.command : existing?.command,
       args: input.args !== undefined ? input.args : existing?.args,
+      ...(input.authMethodId !== undefined || existing?.authMethodId !== undefined
+        ? { authMethodId: input.authMethodId !== undefined ? input.authMethodId : existing?.authMethodId }
+        : {}),
+      ...(input.authStatus !== undefined || existing?.authStatus !== undefined
+        ? { authStatus: input.authStatus !== undefined ? input.authStatus : existing?.authStatus }
+        : {}),
+      ...(input.authCheckedAt !== undefined || existing?.authCheckedAt !== undefined
+        ? { authCheckedAt: input.authCheckedAt !== undefined ? input.authCheckedAt : existing?.authCheckedAt }
+        : {}),
+      ...(input.authError !== undefined || existing?.authError !== undefined
+        ? { authError: input.authError !== undefined ? input.authError : existing?.authError }
+        : {}),
     };
     const configs = existing
       ? current.map((item) => item.providerId === input.providerId ? next : item)
@@ -141,6 +175,10 @@ function normalizeConfigs(value: unknown): AcpProviderConfig[] {
       enabled: candidate.enabled,
       command: candidate.command,
       args: Array.isArray(candidate.args) ? candidate.args.filter((arg): arg is string => typeof arg === "string") : undefined,
+      ...(typeof candidate.authMethodId === "string" ? { authMethodId: candidate.authMethodId } : {}),
+      ...(candidate.authStatus === "connected" || candidate.authStatus === "needs-auth" ? { authStatus: candidate.authStatus } : {}),
+      ...(typeof candidate.authCheckedAt === "string" ? { authCheckedAt: candidate.authCheckedAt } : {}),
+      ...(typeof candidate.authError === "string" ? { authError: candidate.authError } : {}),
     }];
   });
 }

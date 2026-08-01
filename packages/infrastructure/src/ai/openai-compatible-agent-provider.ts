@@ -505,7 +505,7 @@ function parseChatResult(payload: unknown, fallbackModel: string): AgentProvider
   const message = requireRecord(choice.message, "Provider response does not contain a completion message");
   const nativeCalls = Array.isArray(message.tool_calls) ? message.tool_calls.map(parseToolCall) : [];
   const merged = mergeTextToolCalls(nativeCalls, extractContentText(message.content));
-  const reasoning = firstText(message.reasoning_content, message.reasoning, message.thinking);
+  const reasoning = firstText(message.reasoning_content, message.reasoning, message.thinking, message.reasoning_text, message.thinking_content);
   const usage = parseUsage(root.usage);
   return {
     ...(merged.text ? { text: merged.text } : {}),

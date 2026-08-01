@@ -44,7 +44,7 @@ Button to create a new custom OpenAI-compatible provider.
 
 ## ACP agents
 
-Registry of ACP (Agent Client Protocol) external agents. Enable and configure providers such as Cursor, Codex, Claude Code, and Gemini.
+Registry of ACP (Agent Client Protocol) external agents. Enable and configure providers such as Cursor, Codex, Claude Code, and Gemini. Each card shows a Connect button that runs a one-shot acp.probe (spawn → initialize → authenticate → session/new → close) and persists authStatus as connected or needs-auth. The New ACP menu only lists connected providers.
 
 - **`#acp-provider-registry`** (missing map entry)
 
@@ -54,11 +54,15 @@ Registry of ACP (Agent Client Protocol) external agents. Enable and configure pr
 
 - **`#acp-provider-status`** (missing map entry)
 
+- **`#acp-connect-btn`** (missing map entry)
+
+- **`#acp-auth-error`** (missing map entry)
+
 - **`#acp-provider-configure`** (missing map entry)
 
 ## ACP provider configure modal
 
-Modal for editing an ACP provider's command, args, and enabled state.
+Modal for editing an ACP provider's command, args, enabled state, and auth method. The auth method select lists the provider's advertised authMethodIds (e.g. cursor_login, api-key); choosing Default/file auth omits authMethodId so the client can fall back to file tokens (e.g. ~/.codex).
 
 - **`#acp-provider-modal-overlay`** (missing map entry)
 
@@ -77,5 +81,9 @@ Modal for editing an ACP provider's command, args, and enabled state.
 - **`#acp-provider-command`** (missing map entry)
 
 - **`#acp-provider-args`** (missing map entry)
+
+- **`#acp-provider-auth-select`** (missing map entry)
+
+- **`#acp-provider-auth-hint`** (missing map entry)
 
 - **`#acp-provider-auth-method`** (missing map entry)

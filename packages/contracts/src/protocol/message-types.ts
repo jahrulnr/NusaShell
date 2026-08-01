@@ -35,6 +35,7 @@ export type RequestMethod =
   | "acp.permission_answer"
   | "acp.ask_answer"
   | "acp.session_info"
+  | "acp.probe"
   | "subscribe"
   | "unsubscribe";
 

@@ -1325,7 +1325,27 @@ document.addEventListener("DOMContentLoaded", () => {
     $("#acp-provider-enabled").checked = provider.config.enabled;
     $("#acp-provider-command").value = provider.config.command || "";
     $("#acp-provider-args").value = (provider.config.args || []).join(" ");
-    $("#acp-provider-auth-method").textContent = provider.manifest.authMethodId ? `Auth: ${provider.manifest.authMethodId}` : "No auth required";
+    const authSelect = $("#acp-provider-auth-select");
+    const authHint = $("#acp-provider-auth-hint");
+    authSelect.textContent = "";
+    const defaultOption = el("option", "", "Default / file auth");
+    defaultOption.value = "";
+    authSelect.appendChild(defaultOption);
+    const authIds = provider.manifest.authMethodIds ?? (provider.manifest.authMethodId ? [provider.manifest.authMethodId] : []);
+    for (const id of authIds) {
+      const opt = el("option", "", id);
+      opt.value = id;
+      authSelect.appendChild(opt);
+    }
+    authSelect.value = provider.config.authMethodId ?? provider.manifest.authMethodId ?? "";
+    if (provider.manifest.id === "codex") {
+      authHint.textContent = "ChatGPT login: run `codex login` then click Connect. API key: set OPENAI_API_KEY or CODEX_API_KEY in the process env that launches Electron, then choose api-key.";
+    } else if (provider.manifest.authMethodId) {
+      authHint.textContent = `Auth method: ${provider.manifest.authMethodId}. Click Connect after enabling.`;
+    } else {
+      authHint.textContent = "";
+    }
+    $("#acp-provider-auth-method").textContent = provider.config.authStatus === "connected" ? "● Connected" : provider.config.authStatus === "needs-auth" ? "● Needs auth" : "Not probed";
   };
   const closeProviderDeleteDialog = () => {
     pendingProviderDeleteId = "";
@@ -1447,7 +1467,8 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const providers = await window.shell.acpProviders.list();
       for (const provider of providers) {
-        const card = el("article", `provider-registry-card acp-provider-card${provider.status === "configured" ? " is-active" : ""}`);
+        const isConnected = provider.config.authStatus === "connected";
+        const card = el("article", `provider-registry-card acp-provider-card${isConnected ? " is-active" : ""}`);
         card.dataset.acpProviderId = provider.manifest.id;
         const isUnverifiedProvider = Boolean(provider.manifest.unverified) === true;
         const kindLabel = isUnverifiedProvider ? "ACP · UNVERIFIED" : "ACP";
@@ -1474,13 +1495,44 @@ document.addEventListener("DOMContentLoaded", () => {
         head.append(mark, identity, beta ?? "", dot);
         const description = document.createElement("p"); description.textContent = provider.manifest.description;
         const footer = el("div", "provider-card-footer");
-        const statusText = provider.status === "configured" ? "● Configured" : provider.status === "disabled" ? "● Disabled" : `● ${isUnverifiedProvider ? "Unverified" : "Not configured"}`;
-        const status = el("span", `provider-status${provider.status === "configured" ? " configured" : ""}`, statusText);
+        let statusText;
+        let statusClass = "";
+        if (provider.status === "disabled") { statusText = "● Disabled"; }
+        else if (provider.status === "not-configured") { statusText = `● ${isUnverifiedProvider ? "Unverified" : "Not configured"}`; }
+        else if (isConnected) { statusText = "● Connected"; statusClass = " configured"; }
+        else { statusText = "● Needs auth"; statusClass = " needs-auth"; }
+        const status = el("span", `provider-status${statusClass}`, statusText);
+        const actions = el("div", "provider-card-actions");
+        const connectBtn = el("button", "mini-btn acp-connect-btn", "Connect");
+        connectBtn.type = "button";
+        connectBtn.hidden = !provider.config.enabled || provider.status === "not-configured" || isConnected;
+        connectBtn.addEventListener("click", async () => {
+          connectBtn.disabled = true;
+          connectBtn.textContent = "Connecting…";
+          try {
+            const updated = await window.shell.acpProviders.probe(provider.manifest.id);
+            if (updated?.config.authStatus === "connected") {
+              showToast(`${provider.manifest.displayName} connected.`, "success");
+            } else {
+              showToast(`${provider.manifest.displayName} not connected: ${updated?.config.authError || "auth failed"}`, "error");
+            }
+            await renderAcpProviderCards();
+          } catch (error) {
+            showToast(`Connect failed: ${error.message || error}`, "error");
+            await renderAcpProviderCards();
+          }
+        });
         const action = el("button", "mini-btn provider-card-action", "Configure");
         action.type = "button";
         action.addEventListener("click", () => showAcpProviderEditor(provider));
-        footer.append(status, action);
-        card.append(head, description, footer);
+        actions.append(connectBtn, action);
+        footer.append(status, actions);
+        if (provider.config.authError && provider.config.authStatus !== "connected") {
+          const errLine = el("p", "acp-auth-error", provider.config.authError);
+          card.append(head, description, footer, errLine);
+        } else {
+          card.append(head, description, footer);
+        }
         registry.appendChild(card);
       }
     } catch (error) {
@@ -1986,8 +2038,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const command = $("#acp-provider-command").value.trim() || undefined;
     const argsString = $("#acp-provider-args").value.trim();
     const args = argsString ? argsString.split(/\s+/).filter(Boolean) : undefined;
+    const authMethodId = $("#acp-provider-auth-select").value || undefined;
     try {
-      await window.shell.acpProviders.save({ providerId: id, enabled: $("#acp-provider-enabled").checked, command, args });
+      await window.shell.acpProviders.save({ providerId: id, enabled: $("#acp-provider-enabled").checked, command, args, authMethodId });
       closeAcpProviderEditor();
       await renderAcpProviderCards();
       showToast("ACP provider saved.", "success");

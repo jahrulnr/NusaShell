@@ -24,7 +24,8 @@ export async function parseOpenAiSse(
   const chat = new ChatAccumulator(onTextDelta, onReasoningDelta);
   const responses = new ResponsesAccumulator(onTextDelta, onReasoningDelta);
   const acceptBlock = (block: string) => {
-    const data = block.split(/\r?\n/)
+    const lines = block.split(/\r?\n/);
+    const data = lines
       .filter((line) => line.startsWith("data:"))
       .map((line) => line.slice(5).trimStart())
       .join("\n");
@@ -33,6 +34,10 @@ export async function parseOpenAiSse(
       completed = true;
       return;
     }
+    const eventType = lines
+      .find((line) => line.startsWith("event:"))
+      ?.slice(6)
+      .trim();
     let event: unknown;
     try {
       event = JSON.parse(data);
@@ -40,7 +45,7 @@ export async function parseOpenAiSse(
       return;
     }
     if (api === "chat") {
-      chat.accept(event);
+      chat.accept(event, eventType);
       if (chat.completed) completed = true;
     } else {
       const accepted = responses.accept(event);
@@ -84,10 +89,22 @@ class ChatAccumulator {
     private readonly onReasoningDelta?: (delta: string) => void,
   ) {}
 
-  accept(value: unknown): void {
+  accept(value: unknown, eventType?: string): void {
     const event = record(value);
     if (typeof event.model === "string") this.model = event.model;
     if (event.usage !== undefined) this.usage = event.usage;
+
+    // Some providers send reasoning as a separate SSE event type (e.g.
+    // `event: reasoning\ndata: {"delta": "..."}`) with the reasoning text at
+    // the top level, not inside choices[0].delta.
+    if (eventType === "reasoning" || eventType === "thinking" || eventType === "reasoning_delta") {
+      const reasoningDelta = reasoningTextValue(event.delta) || reasoningTextValue(event.text) || reasoningTextValue(event.reasoning);
+      if (reasoningDelta) {
+        this.reasoning += reasoningDelta;
+        this.onReasoningDelta?.(reasoningDelta);
+      }
+    }
+
     const choices = Array.isArray(event.choices) ? event.choices : [];
     for (const rawChoice of choices) {
       const choice = record(rawChoice);
@@ -97,7 +114,16 @@ class ChatAccumulator {
         this.text += text;
         this.onTextDelta?.(text);
       }
-      const reasoningDelta = textValue(delta.reasoning_content) || textValue(delta.reasoning) || textValue(delta.thinking);
+      // Check all known reasoning field names. Some providers use
+      // reasoning_text, thinking_content, or reasoning_details instead of
+      // the more common reasoning_content / reasoning / thinking.
+      const reasoningDelta =
+        reasoningTextValue(delta.reasoning_content) ||
+        reasoningTextValue(delta.reasoning) ||
+        reasoningTextValue(delta.thinking) ||
+        reasoningTextValue(delta.reasoning_text) ||
+        reasoningTextValue(delta.thinking_content) ||
+        reasoningTextValue(delta.reasoning_details);
       if (reasoningDelta) {
         this.reasoning += reasoningDelta;
         this.onReasoningDelta?.(reasoningDelta);
@@ -114,6 +140,21 @@ class ChatAccumulator {
       }
       if (typeof choice.finish_reason === "string" && choice.finish_reason) {
         this.finishReason = choice.finish_reason;
+      }
+    }
+
+    // Some providers send reasoning at the top level of the event (not inside
+    // choices) without a separate event type.
+    if (!choices.length) {
+      const topReasoning =
+        reasoningTextValue(event.reasoning) ||
+        reasoningTextValue(event.reasoning_content) ||
+        reasoningTextValue(event.thinking) ||
+        reasoningTextValue(event.reasoning_text) ||
+        reasoningTextValue(event.thinking_content);
+      if (topReasoning) {
+        this.reasoning += topReasoning;
+        this.onReasoningDelta?.(topReasoning);
       }
     }
   }
@@ -170,12 +211,12 @@ class ResponsesAccumulator {
       this.text += delta;
       if (delta) this.onTextDelta?.(delta);
     }
-    if (type === "response.reasoning_summary_text.delta" || type === "response.reasoning_text.delta") {
-      const delta = textValue(event.delta);
+    if (type === "response.reasoning_summary_text.delta" || type === "response.reasoning_text.delta" || type === "response.reasoning.delta") {
+      const delta = reasoningTextValue(event.delta);
       this.reasoning += delta;
       if (delta) this.onReasoningDelta?.(delta);
     }
-    if (type === "response.reasoning_summary_text.done" && !this.reasoning) this.reasoning = textValue(event.text);
+    if (type === "response.reasoning_summary_text.done" && !this.reasoning) this.reasoning = reasoningTextValue(event.text);
     const item = record(event.item);
     if (item.type === "function_call") this.registerCall(item);
     if (type === "response.function_call_arguments.delta") {
@@ -230,6 +271,26 @@ function record(value: unknown): Record<string, unknown> {
 
 function textValue(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+/**
+ * Extracts reasoning text from a value that may be a string, an array of
+ * content blocks (e.g. `[{ type: "text", text: "..." }]`), or an object
+ * with a `text` field. Returns "" for unrecognized shapes.
+ */
+function reasoningTextValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value.map((raw) => {
+      const part = record(raw);
+      return textValue(part.text) || textValue(part.content) || textValue(part.thinking);
+    }).join("");
+  }
+  if (value && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    return textValue(obj.text) || textValue(obj.content) || textValue(obj.thinking);
+  }
+  return "";
 }
 
 function numberValue(value: unknown): number {
