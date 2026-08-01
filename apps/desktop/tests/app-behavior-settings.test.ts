@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { platform } from "node:os";
 import { describe, expect, it } from "vitest";
 import {
   AppBehaviorStore,
@@ -68,8 +69,12 @@ describe("AppBehaviorStore", () => {
     const onDisk = JSON.parse(await readFile(path, "utf8")) as unknown;
     expect(onDisk).toEqual(result);
 
-    const mode = (await stat(path)).mode & 0o777;
-    expect(mode).toBe(0o600);
+    // Unix permission bits (0o600) are not enforced on Windows — the NTFS
+    // ACL system doesn't map to POSIX mode bits. Skip on win32.
+    if (platform() !== "win32") {
+      const mode = (await stat(path)).mode & 0o777;
+      expect(mode).toBe(0o600);
+    }
 
     const reloaded = new AppBehaviorStore(path);
     expect(await reloaded.load()).toEqual(result);

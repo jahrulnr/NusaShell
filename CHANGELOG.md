@@ -44,6 +44,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tests pass on both POSIX and Windows.
 - `files-bundle-sandbox.test.ts` replaced `os.tmpdir() + "/prefix"` with
   `join(os.tmpdir(), "prefix")` for cross-platform path construction.
+- `window-assets.test.ts` now computes expected paths via `resolve` / `join`
+  (same calls as the implementation) instead of hardcoding POSIX strings.
+- `app-behavior-settings.test.ts` skips the `0o600` permission-bit assertion on
+  Windows — NTFS ACLs don't map to POSIX mode bits, so `stat().mode & 0o777`
+  returns a different value than the requested `0o600`.
 
 ## [0.0.57] - 2026-08-01
 
