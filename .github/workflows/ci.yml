@@ -193,7 +193,6 @@ jobs:
           payload_sha="$(sha256sum "${payload}" | awk '{print $1}')"
           printf '{"version":"%s","files":{"linux-x64":{"name":"%s","sha256":"%s"}}}\n' \
             "${version}" "${payload_name}" "${payload_sha}" > release-artifacts/latest.json
-          printf '%s  %s\n' "${payload_sha}" "${payload_name}" > "release-artifacts/${payload_name}.sha256"
           node scripts/release-notes.mjs "${version}" CHANGELOG.md > release-notes.md
           mapfile -d '' artifacts < <(find release-artifacts -type f -print0)
           gh release create "${tag}" "${artifacts[@]}" \
