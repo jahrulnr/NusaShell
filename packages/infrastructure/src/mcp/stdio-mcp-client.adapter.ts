@@ -17,6 +17,31 @@ import type { Logger } from "pino";
 import { redactMcpText, registerMcpLogging } from "./mcp-logging.js";
 import { unwrapMcpToolResult } from "./tool-result.js";
 
+export interface StdioRuntime {
+  readonly execPath: string;
+  readonly electronVersion?: string;
+}
+
+export interface StdioLaunch {
+  readonly command: string;
+  readonly env: Readonly<Record<string, string>>;
+}
+
+export function resolveStdioLaunch(
+  command: string,
+  env: Readonly<Record<string, string>>,
+  runtime: StdioRuntime,
+): StdioLaunch {
+  if (command !== "node" || !runtime.electronVersion) {
+    return { command, env };
+  }
+
+  return {
+    command: runtime.execPath,
+    env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
+  };
+}
+
 export class StdioMcpClient implements McpClientPort {
   private client: Client | null = null;
   private transport: StdioClientTransport | null = null;
@@ -41,11 +66,22 @@ export class StdioMcpClient implements McpClientPort {
   }
 
   async connect(): Promise<void> {
-    this.logger?.debug({ command: this.command }, "Connecting stdio MCP client");
+    const launch = resolveStdioLaunch(
+      this.command,
+      { ...process.env, ...this.env } as Record<string, string>,
+      {
+        execPath: process.execPath,
+        ...(process.versions.electron ? { electronVersion: process.versions.electron } : {}),
+      },
+    );
+    this.logger?.debug(
+      { command: this.command, executable: launch.command },
+      "Connecting stdio MCP client",
+    );
     this.transport = new StdioClientTransport({
-      command: this.command,
+      command: launch.command,
       args: [...this.args],
-      env: { ...process.env, ...this.env } as Record<string, string>,
+      env: { ...launch.env },
       stderr: "pipe",
       ...(this.cwd !== undefined ? { cwd: this.cwd } : {}),
     });

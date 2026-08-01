@@ -19,6 +19,11 @@ Use this reference as a source map and shared checklist. Re-read repository sour
 | `http` | `url` | Shell connects remotely; do not assume process spawn/kill |
 | `sse` | `url` | Shell connects remotely; retain only legacy-compatible usage |
 
+In packaged Electron builds, the exact stdio command `node` resolves to the
+shell's bundled Electron executable in Node mode, so JavaScript plugins do not
+depend on a system-wide Node.js installation. Other executable names must still
+be available through `PATH` or declared as an appropriate absolute command.
+
 The runtime may inject `NUSASHELL_WORKSPACE` and MCP roots for workspace-aware calls. Do not assume the conversation workspace becomes process `cwd`.
 
 ## MCP server pattern

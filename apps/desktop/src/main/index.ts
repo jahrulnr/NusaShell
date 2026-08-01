@@ -28,6 +28,8 @@ import {
 } from "./app-behavior-settings.js";
 import { createLoginAutostart, type LoginAutostart } from "./login-autostart.js";
 import { TrayManager } from "./tray.js";
+import { formatLogArguments, redactLogMessage } from "./log-format.js";
+import { resolveRuntimePaths } from "./runtime-paths.js";
 import {
   registerSkillsIpc,
   registerAiIpc,
@@ -71,25 +73,6 @@ if (process.platform === "linux") {
   app.setName(LINUX_DESKTOP_APP_NAME);
 }
 
-function redactLogMessage(message: string): string {
-  return message
-    .replace(/([?&](?:token|password|secret|api[_-]?key|authorization)=)[^&\s]+/gi, "$1[REDACTED]")
-    .replace(/((?:token|password|secret|api[_-]?key|authorization)["']?\s*[:=]\s*["']?)[^,\s}"']+/gi, "$1[REDACTED]");
-}
-
-function formatLogArguments(args: readonly unknown[]): string {
-  const message = args.map((arg) => {
-    if (arg instanceof Error) return arg.stack ?? arg.message;
-    if (typeof arg === "string") return arg;
-    try {
-      return JSON.stringify(arg);
-    } catch {
-      return String(arg);
-    }
-  }).join(" ");
-  return redactLogMessage(message);
-}
-
 function toShellLogLevel(level: string): ShellLogLevel {
   if (level === "error" || level === "fatal") return "error";
   if (level === "warn") return "warn";
@@ -111,10 +94,6 @@ captureMainConsole();
 
 if (isDev) {
   app.commandLine.appendSwitch("no-sandbox");
-}
-
-function getRuntimeRoot(): string {
-  return app.isPackaged ? process.resourcesPath : resolve(__dirname, "..", "..", "..", "..");
 }
 
 function getDataRoot(): string {
@@ -140,13 +119,12 @@ function configureProvider(target: BootstrapResult, provider: AiRegistrySettings
 }
 
 async function startBackend(): Promise<BootstrapResult> {
-  const runtimeRoot = getRuntimeRoot();
   const dataRoot = getDataRoot();
-  const pluginsRoot = app.isPackaged
-    ? resolve(process.resourcesPath, "plugins")
-    : resolve(__dirname, "..", "..", "..", "..", "plugins");
-  const promptsRoot = resolve(runtimeRoot, "resources", "agent", "prompts");
-  const docsRoot = resolve(runtimeRoot, "resources", "agent", "docs");
+  const { pluginsRoot, promptsRoot, docsRoot } = resolveRuntimePaths({
+    isPackaged: app.isPackaged,
+    moduleDir: __dirname,
+    resourcesPath: process.resourcesPath,
+  });
   const docsIndexStorageRoot = resolve(dataRoot, "agent", "docs-index");
   const skillsRoot = resolve(dataRoot, "skills");
   const memoryRoot = resolve(dataRoot, "memories");

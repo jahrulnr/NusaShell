@@ -19,6 +19,7 @@ const config: ForgeConfig = {
     },
     extraResource: [
       resolve(__dirname, "..", "..", "plugins"),
+      resolve(__dirname, "..", "..", "resources", "agent"),
       resolve(__dirname, "assets", "nusashell.png"),
     ],
   },

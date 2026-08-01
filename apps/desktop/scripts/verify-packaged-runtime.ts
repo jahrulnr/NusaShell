@@ -1,5 +1,5 @@
 import { listPackage } from "@electron/asar";
-import { readdir } from "node:fs/promises";
+import { access, readdir } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { missingPackagedRuntimeFiles } from "./package-runtime-dependencies.js";
@@ -37,6 +37,28 @@ if (archives.length !== 1) {
 }
 
 const archivePath = archives[0]!;
+const resourcesPath = dirname(archivePath);
+const requiredAgentResources = [
+  join(resourcesPath, "agent", "prompts", "system.md"),
+  join(resourcesPath, "agent", "prompts", "developer.md"),
+  join(resourcesPath, "agent", "docs", "getting-started.md"),
+];
+const missingAgentResources = (
+  await Promise.all(requiredAgentResources.map(async (resourcePath) => {
+    try {
+      await access(resourcePath);
+      return undefined;
+    } catch {
+      return resourcePath;
+    }
+  }))
+).filter((resourcePath) => resourcePath !== undefined);
+if (missingAgentResources.length > 0) {
+  throw new Error(
+    `Packaged app is missing required agent resources: ${missingAgentResources.join(", ")}`,
+  );
+}
+
 const archiveFiles = listPackage(archivePath, { isPack: false });
 const missingRuntimeFiles = missingPackagedRuntimeFiles(archiveFiles);
 if (missingRuntimeFiles.length > 0) {
@@ -55,5 +77,5 @@ if (nativeModules.length === 0) {
 }
 
 console.log(
-  `Verified ${basename(packagedAppPath)} runtime dependencies and ${nativeModules.length} unpacked SQLite binary/binaries.`,
+  `Verified ${basename(packagedAppPath)} runtime dependencies, agent resources, and ${nativeModules.length} unpacked SQLite binary/binaries.`,
 );

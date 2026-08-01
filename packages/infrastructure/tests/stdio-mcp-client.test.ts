@@ -1,5 +1,6 @@
 import { describe, expect, it, afterEach } from "vitest";
 import { McpClientFactory } from "../src/mcp/mcp-client.factory.js";
+import { resolveStdioLaunch } from "../src/mcp/stdio-mcp-client.adapter.js";
 import type { McpClientPort } from "@nusashell/application";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +13,22 @@ const MOCK_SERVER_PATH = resolve(
 
 describe("StdioMcpClient", () => {
   let client: McpClientPort | null = null;
+
+  it("uses Electron as Node when running inside the packaged desktop", () => {
+    expect(resolveStdioLaunch("node", { PLUGIN_ENV: "yes" }, {
+      execPath: "/opt/NusaShell/NusaShell",
+      electronVersion: "33.4.11",
+    })).toEqual({
+      command: "/opt/NusaShell/NusaShell",
+      env: { PLUGIN_ENV: "yes", ELECTRON_RUN_AS_NODE: "1" },
+    });
+  });
+
+  it("keeps the manifest command outside Electron", () => {
+    expect(resolveStdioLaunch("node", { PLUGIN_ENV: "yes" }, {
+      execPath: "/usr/bin/node",
+    })).toEqual({ command: "node", env: { PLUGIN_ENV: "yes" } });
+  });
 
   afterEach(async () => {
     if (client) {
