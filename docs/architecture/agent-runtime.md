@@ -8,17 +8,21 @@ receive an MCP transport, process handle, credential, or plugin UI channel.
 
 ## Runtime flow
 
-```text
-conversation JSON (Electron main)
-  -> Agent composer rebuilds context from the durable checkpoint
-  -> agent.run (WebSocket command; `resume: true` skips system-prompt injection)
-  -> RunAgentTurnHandler -> InProcessAgentTurnWorker
-  -> AgentTurnRunner
-     -> compact older context when the configured threshold is exceeded
-     -> RoutedAgentProvider -> selected/pinned provider adapter
-     -> McpAgentToolGateway -> PluginRuntimeManager -> MCP client
-  -> agent.text_delta events + response/checkpoint/trace metadata
-  -> Electron main persists the assistant message/checkpoint
+```mermaid
+flowchart TD
+  ConvJSON["conversation JSON Electron main"] --> Composer["Agent composer rebuilds context"]
+  Composer --> AgentRun["agent.run WebSocket command"]
+  AgentRun --> Handler["RunAgentTurnHandler"]
+  Handler --> Worker["InProcessAgentTurnWorker"]
+  Worker --> Runner["AgentTurnRunner"]
+  Runner --> Compact["compact older context when threshold exceeded"]
+  Runner --> Provider["RoutedAgentProvider"]
+  Runner --> Gateway["McpAgentToolGateway"]
+  Provider --> Adapter["selected/pinned provider adapter"]
+  Gateway --> PRM["PluginRuntimeManager"]
+  PRM --> McpClient["MCP client"]
+  Runner --> Events["agent.text_delta + response/checkpoint/trace"]
+  Events --> Persist["Electron main persists assistant message/checkpoint"]
 ```
 
 The turn loop is provider-agnostic. Provider-family definitions normalize

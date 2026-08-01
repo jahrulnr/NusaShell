@@ -5,7 +5,15 @@ tracking usage and auto-archiving unused agent-owned skills.
 
 ## Lifecycle
 
-Agent-owned skills follow an `active → stale → archived` lifecycle:
+Agent-owned skills follow this lifecycle:
+
+```mermaid
+stateDiagram-v2
+  [*] --> active: create or restore
+  active --> stale: no activity for staleAfterDays
+  stale --> archived: no activity for archiveAfterDays
+  archived --> active: restore
+```
 
 1. **active** — the default state for newly created or recently used skills.
 2. **stale** — no activity for `staleAfterDays` (default: 30). The skill remains

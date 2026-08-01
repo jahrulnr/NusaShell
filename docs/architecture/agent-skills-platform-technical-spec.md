@@ -75,32 +75,18 @@ The runtime should not inject every file from every skill into the model context
 
 Recommended loading stages:
 
-```text
-Stage 1 — Discovery metadata
-Load:
-- skill id
-- name
-- description
-- tags
-- compatibility
-- tool requirements
-
-Stage 2 — Skill activation
-Load:
-- full SKILL.md body
-- runtime variables
-- relevant user/task context
-
-Stage 3 — Resource loading
-Load only when requested:
-- references/*
-- assets/*
-- examples/*
-- schemas/*
-
-Stage 4 — Script execution
-Execute scripts only when the workflow calls for them.
+```mermaid
+flowchart LR
+  S1["Stage 1 Discovery metadata"] --> S2["Stage 2 Skill activation"]
+  S2 --> S3["Stage 3 Resource loading on request"]
+  S3 --> S4["Stage 4 Script execution when needed"]
 ```
+
+Stage 1 loads skill id, name, description, tags, compatibility, and tool
+requirements. Stage 2 loads the full `SKILL.md` body, runtime variables, and
+relevant user/task context. Stage 3 loads `references/*`, `assets/*`,
+`examples/*`, and `schemas/*` only when requested. Stage 4 executes scripts
+only when the workflow calls for them.
 
 ### 2.3 Deterministic operations should be executable
 
@@ -1193,16 +1179,16 @@ The resolver determines which skill or skills are relevant to a task.
 
 Recommended pipeline:
 
-```text
-1. Filter enabled skills.
-2. Filter by workspace and runtime compatibility.
-3. Filter unavailable required tools.
-4. Generate candidates using lexical search.
-5. Generate candidates using semantic search.
-6. Merge and rank.
-7. Optionally ask an LLM classifier to rerank.
-8. Apply threshold.
-9. Return zero, one, or multiple candidates.
+```mermaid
+flowchart TD
+  F1["1 Filter enabled skills"] --> F2["2 Filter by workspace and runtime compatibility"]
+  F2 --> F3["3 Filter unavailable required tools"]
+  F3 --> F4["4 Lexical search candidates"]
+  F4 --> F5["5 Semantic search candidates"]
+  F5 --> F6["6 Merge and rank"]
+  F6 --> F7["7 Optional LLM classifier rerank"]
+  F7 --> F8["8 Apply threshold"]
+  F8 --> F9["9 Return zero one or multiple candidates"]
 ```
 
 Resolver input:
@@ -1305,20 +1291,38 @@ Responsibilities:
 
 Suggested state machine:
 
-```text
-CREATED
-  -> RESOLVING_SKILLS
-  -> LOADING_CONTEXT
-  -> MODEL_RUNNING
-  -> TOOL_PENDING
-  -> TOOL_RUNNING
-  -> MODEL_RUNNING
-  -> COMPLETED
-
-Any state:
-  -> FAILED
-  -> CANCELLED
-  -> TIMED_OUT
+```mermaid
+stateDiagram-v2
+  [*] --> CREATED
+  CREATED --> RESOLVING_SKILLS
+  RESOLVING_SKILLS --> LOADING_CONTEXT
+  LOADING_CONTEXT --> MODEL_RUNNING
+  MODEL_RUNNING --> TOOL_PENDING
+  TOOL_PENDING --> TOOL_RUNNING
+  TOOL_RUNNING --> MODEL_RUNNING
+  MODEL_RUNNING --> COMPLETED
+  CREATED --> FAILED
+  RESOLVING_SKILLS --> FAILED
+  LOADING_CONTEXT --> FAILED
+  MODEL_RUNNING --> FAILED
+  TOOL_PENDING --> FAILED
+  TOOL_RUNNING --> FAILED
+  CREATED --> CANCELLED
+  RESOLVING_SKILLS --> CANCELLED
+  LOADING_CONTEXT --> CANCELLED
+  MODEL_RUNNING --> CANCELLED
+  TOOL_PENDING --> CANCELLED
+  TOOL_RUNNING --> CANCELLED
+  CREATED --> TIMED_OUT
+  RESOLVING_SKILLS --> TIMED_OUT
+  LOADING_CONTEXT --> TIMED_OUT
+  MODEL_RUNNING --> TIMED_OUT
+  TOOL_PENDING --> TIMED_OUT
+  TOOL_RUNNING --> TIMED_OUT
+  COMPLETED --> [*]
+  FAILED --> [*]
+  CANCELLED --> [*]
+  TIMED_OUT --> [*]
 ```
 
 ## 10.9 LLM Gateway
@@ -1386,19 +1390,19 @@ Responsibilities:
 
 Tool runtime sequence:
 
-```text
-model emits tool call
-  -> locate tool definition
-  -> validate arguments
-  -> create tool_call row
-  -> emit tool.call.requested
-  -> invoke provider
-  -> stream progress events if available
-  -> normalize result
-  -> validate output
-  -> persist result
-  -> emit tool.call.completed
-  -> append result to model conversation
+```mermaid
+flowchart TD
+  Emit["model emits tool call"] --> Locate["locate tool definition"]
+  Locate --> ValidateArgs["validate arguments"]
+  ValidateArgs --> CreateRow["create tool_call row"]
+  CreateRow --> ReqEvent["emit tool.call.requested"]
+  ReqEvent --> Invoke["invoke provider"]
+  Invoke --> Progress["stream progress events if available"]
+  Progress --> Normalize["normalize result"]
+  Normalize --> ValidateOut["validate output"]
+  ValidateOut --> Persist["persist result"]
+  Persist --> DoneEvent["emit tool.call.completed"]
+  DoneEvent --> Append["append result to model conversation"]
 ```
 
 ## 10.11 Script Runtime

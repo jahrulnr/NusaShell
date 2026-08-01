@@ -132,8 +132,15 @@ Job turns are **never** persisted into `agent-conversations.json`.
 - 60s tick interval (configurable via `NUSASHELL_JOBS_TICK_SECONDS`).
 - Exclusive `.tick.lock` file in the jobs root (reaps stale locks by PID
   liveness and age).
-- `listDue` → `claimFire` (at-most-once) → dispatch → `markRun` →
-  `releaseFire`.
+- Tick pipeline:
+
+```mermaid
+flowchart LR
+  ListDue["listDue"] --> ClaimFire["claimFire at-most-once"]
+  ClaimFire --> Dispatch["dispatch"]
+  Dispatch --> MarkRun["markRun"]
+  MarkRun --> ReleaseFire["releaseFire"]
+```
 - Output persisted to `{jobsRoot}/output/{jobId}/{timestamp}.md` and
   metadata stored via `appendOutput`.
 - Publishes `job.completed` / `job.failed` application events.

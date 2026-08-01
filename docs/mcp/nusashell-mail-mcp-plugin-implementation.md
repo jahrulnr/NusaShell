@@ -31,16 +31,19 @@ required instead of accepting a regular account password.
 
 ## Runtime and credential flow
 
-```text
-Mail UI
-  -> Electron IPC account API
-  -> MailSettingsStore
-  -> Electron safeStorage encrypted file
+```mermaid
+flowchart LR
+  subgraph credentials ["Credential write path"]
+    MailUI["Mail UI"] --> IpcApi["Electron IPC account API"]
+    IpcApi --> Store["MailSettingsStore"]
+    Store --> SafeFile["Electron safeStorage encrypted file"]
+  end
 
-Plugin start/restart
-  -> application runtime environment resolver
-  -> NUSASHELL_MAIL_ACCOUNTS in child-process memory
-  -> Mail MCP stdio server
+  subgraph runtime ["Plugin start/restart"]
+    Start["Plugin start/restart"] --> Resolver["application runtime environment resolver"]
+    Resolver --> Env["NUSASHELL_MAIL_ACCOUNTS in child-process memory"]
+    Env --> Mcp["Mail MCP stdio server"]
+  end
 ```
 
 The public account shape includes `hasCredential` but never the credential

@@ -114,8 +114,11 @@ After successful submission, the plugin may need to append the message to the ac
 
 POP3 is suitable only for constrained legacy workflows:
 
-```text
-connect -> list messages -> retrieve message -> optionally delete server copy
+```mermaid
+flowchart LR
+  Connect[connect] --> List["list messages"]
+  List --> Retrieve["retrieve message"]
+  Retrieve --> Delete["optionally delete server copy"]
 ```
 
 Limitations for NusaShell:
@@ -606,12 +609,10 @@ plugins/mail/
 
 Dependency direction:
 
-```text
-MCP / UI / IMAP / SMTP / POP3 adapters
-                  ↓
-             Application
-                  ↓
-                Domain
+```mermaid
+flowchart TD
+  Adapters["MCP / UI / IMAP / SMTP / POP3 adapters"] --> Application
+  Application --> Domain
 ```
 
 The MCP layer must not call IMAP or SMTP libraries directly. Each MCP handler invokes one application use case.
@@ -984,12 +985,12 @@ Send only an existing draft. This is safer and more reviewable than accepting ar
 
 Recommended flow:
 
-```text
-mail_draft_create/update
-  -> UI renders final recipient/subject/body/attachments
-  -> user approves
-  -> NusaShell issues short-lived confirmation_token
-  -> mail_send
+```mermaid
+flowchart TD
+  Draft["mail_draft_create/update"] --> UI["UI renders final recipient/subject/body/attachments"]
+  UI --> Approve["user approves"]
+  Approve --> Token["NusaShell issues short-lived confirmation_token"]
+  Token --> Send["mail_send"]
 ```
 
 The token should bind:
@@ -1155,20 +1156,14 @@ Provider error text may be attached to logs but should be sanitized before enter
 
 The sync engine is a runtime concern, not an MCP tool loop.
 
-```text
-Timer / IMAP IDLE / manual request
-              ↓
-       MailSyncCoordinator
-              ↓
-       per-account sync lock
-              ↓
-   MailAccessPort + local cache
-              ↓
-          Domain events
-              ↓
- NusaShell application event gateway
-              ↓
-           plugin UI
+```mermaid
+flowchart TD
+  Trigger["Timer / IMAP IDLE / manual request"] --> Coord["MailSyncCoordinator"]
+  Coord --> Lock["per-account sync lock"]
+  Lock --> Access["MailAccessPort + local cache"]
+  Access --> Events["Domain events"]
+  Events --> Gateway["NusaShell application event gateway"]
+  Gateway --> UI["plugin UI"]
 ```
 
 Rules:
@@ -1281,21 +1276,21 @@ App passwords should be recommended when the provider supports them.
 
 The plugin iframe must not connect directly to IMAP, SMTP, POP3, or the MCP process.
 
-```text
-Plugin UI
-  -> window.shell.callTool / host bridge
-  -> NusaShell backend command
-  -> application use case
-  -> mail adapter
+```mermaid
+flowchart TD
+  UI["Plugin UI"] --> Bridge["window.shell.callTool / host bridge"]
+  Bridge --> Cmd["NusaShell backend command"]
+  Cmd --> UseCase["application use case"]
+  UseCase --> Adapter["mail adapter"]
 ```
 
 The agent follows the normal NusaShell progressive discovery path:
 
-```text
-tool_search
-  -> tool_schema for one concrete mail_* tool
-  -> scoped grant for the current trace
-  -> typed MCP call
+```mermaid
+flowchart TD
+  Search["tool_search"] --> Schema["tool_schema for one concrete mail_* tool"]
+  Schema --> Grant["scoped grant for the current trace"]
+  Grant --> Call["typed MCP call"]
 ```
 
 There should be no generic `mail_call` or `mail_action` bypass.
@@ -1430,10 +1425,10 @@ mail_sync_status
 
 Do not expose `mail_write` as the main compose tool because its semantics are ambiguous: it may mean draft creation, direct sending, or body mutation. Prefer the explicit sequence:
 
-```text
-mail_draft_create
-mail_draft_update
-mail_send
+```mermaid
+flowchart LR
+  Create["mail_draft_create"] --> Update["mail_draft_update"]
+  Update --> Send["mail_send"]
 ```
 
 Similarly, `mail_inbox` should be a convenience view, while `mail_messages` is the general folder-listing primitive.

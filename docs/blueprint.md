@@ -18,38 +18,35 @@
 
 ## 1. High-Level Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     SHELL HOST (Electron)                    │
-│                                                               │
-│  ┌───────────────┐   ┌──────────────────┐   ┌─────────────┐ │
-│  │   Launcher    │   │   Window Manager  │   │  Settings   │ │
-│  │  (grid icon)  │   │  (multi-window/   │   │   Panel     │ │
-│  │               │   │   tab per plugin) │   │             │ │
-│  └───────────────┘   └──────────────────┘   └─────────────┘ │
-│           │                    │                              │
-│  ┌────────▼────────────────────▼─────────────────────────┐  │
-│  │         Host client (NusaClient over WebSocket)         │  │
-│  └───────────────────────────┬───────────────────────────┘  │
-└──────────────────────────────┼──────────────────────────────┘
-                               │ WebSocket (request/response + events)
-┌──────────────────────────────▼──────────────────────────────┐
-│              BACKEND (Clean Architecture core)               │
-│  Plugin Manager: install/registry/lifecycle/tool broker      │
-│  ┌─────────────────────┐          ┌──────────────────────┐  │
-│  │ MCP Client adapter  │          │ Process / FS / DB    │  │
-│  │ (stdio | sse | http)│          │                      │  │
-│  └──────────┬──────────┘          └──────────────────────┘  │
-└─────────────┼───────────────────────────────────────────────┘
-              │
-   ┌──────────▼──────────┐
-   │  Plugin MCP Server  │   (child process or remote endpoint)
-   │  stdio / sse / http │
-   └─────────────────────┘
+```mermaid
+flowchart TB
+  subgraph shellHost ["SHELL HOST Electron"]
+    Launcher["Launcher grid icon"]
+    WindowMgr["Window Manager"]
+    Settings["Settings Panel"]
+    NusaClient["Host client NusaClient over WebSocket"]
+    Launcher --> NusaClient
+    WindowMgr --> NusaClient
+    Settings --> NusaClient
+  end
 
-Plugin UI (iframe) ──postMessage / window.shell──▶ Host renderer
-     ▲                                                  │
-     └──────────── tool_result via bridge ◀─────────────┘
+  subgraph backend ["BACKEND Clean Architecture core"]
+    PluginMgr["Plugin Manager install/registry/lifecycle/tool broker"]
+    McpAdapter["MCP Client adapter stdio/sse/http"]
+    Infra["Process / FS / DB"]
+    PluginMgr --- McpAdapter
+    PluginMgr --- Infra
+  end
+
+  McpServer["Plugin MCP Server child or remote"]
+
+  NusaClient -->|"WebSocket request/response + events"| PluginMgr
+  McpAdapter --> McpServer
+
+  PluginUI["Plugin UI iframe"]
+  HostRenderer["Host renderer"]
+  PluginUI -->|"postMessage / window.shell"| HostRenderer
+  HostRenderer -->|"tool_result via bridge"| PluginUI
 ```
 
 The two plugin sides (**UI** and **MCP**) **never peer-connect**. Everything goes
@@ -196,20 +193,19 @@ Design notes:
 
 Iframe layer (author DX):
 
-```
-Plugin UI (iframe)
-      │  postMessage({ type: "tool_call", tool: "createNote", args: {...}, requestId })
-      ▼
-Host renderer bridge
-      │  NusaClient / WebSocket → backend CallTool use case
-      ▼
-MCP Client adapter → MCP Server (child process or remote)
-      │
-      ▼  MCP response
-Host renderer bridge
-      │  postMessage({ type: "tool_result", requestId, result })
-      ▼
-Plugin UI (resolve promise by requestId)
+```mermaid
+sequenceDiagram
+  participant UI as Plugin UI iframe
+  participant Bridge as Host renderer bridge
+  participant Backend as Backend CallTool
+  participant MCP as MCP Server
+
+  UI->>Bridge: postMessage tool_call with requestId
+  Bridge->>Backend: NusaClient WebSocket
+  Backend->>MCP: MCP Client adapter
+  MCP-->>Backend: MCP response
+  Backend-->>Bridge: result
+  Bridge-->>UI: postMessage tool_result by requestId
 ```
 
 Pair requests and responses with a `requestId` (UUID) so the UI can have multiple
@@ -267,34 +263,19 @@ idle | starting | running | background | stopping | crashed | disabled
 
 Conceptual flow (UI / user-facing):
 
-```
-   [install]
-       │
-       ▼
-   ┌───────┐  open / start   ┌──────────┐     ┌─────────┐
-   │ Idle  │────────────────▶│ Starting │────▶│ Running │
-   └───────┘                 └──────────┘     └────┬────┘
-       │                                           │
-       │                    close (keepAlive=false)│ stop
-       │                           ┌───────────────┤
-       │                           ▼               ▼
-       │                     ┌──────────┐    ┌─────────┐
-       │                     │ Stopping │───▶│  Idle   │
-       │                     └──────────┘    └─────────┘
-       │                           │
-       │     close (keepAlive=true)│
-       │                           ▼
-       │                     ┌────────────┐  idle timeout  ┌───────────┐
-       │                     │ Background │───────────────▶│ (suspend  │
-       │                     └────────────┘                │  → idle / │
-       │                                                   │  respawn) │
-       │                                                   └───────────┘
-       │     unexpected process exit ──▶ crashed ──▶ (recovery / starting)
-       │
-       ▼ [uninstall]
-   ┌───────────┐
-   │  Removed  │  (kill proc if still alive, delete folder, drop registry entry)
-   └───────────┘
+```mermaid
+stateDiagram-v2
+  [*] --> Idle: install
+  Idle --> Starting: open / start
+  Starting --> Running
+  Running --> Stopping: stop or close keepAlive=false
+  Stopping --> Idle
+  Running --> Background: close keepAlive=true
+  Background --> Idle: idle timeout suspend/respawn
+  Running --> Crashed: unexpected process exit
+  Crashed --> Starting: recovery
+  Idle --> Removed: uninstall
+  Removed --> [*]
 ```
 
 The frontend may cache a state projection for launcher badges; **authoritative**

@@ -19,13 +19,13 @@ does not reach stdio MCP servers that bake root into env/args at spawn.
 
 ## Locked binding order
 
-```text
-conversation.workspace
-  → system prompt (context)
-  → gateway arg wrap (Terminal cwd, Files relative paths)
-  → MCP Roots + roots/list_changed (no restart when the server supports it)
-  → respawn with mcp_enable args/env overrides (static servers)
-  → keyed (pluginId, workspaceId) pool — deferred, only if respawn hurts UX
+```mermaid
+flowchart LR
+  Workspace["conversation.workspace"] --> Prompt["system prompt context"]
+  Prompt --> Wrap["gateway arg wrap"]
+  Wrap --> Roots["MCP Roots + roots/list_changed"]
+  Roots --> Respawn["respawn with mcp_enable overrides"]
+  Respawn --> Pool["keyed pluginId/workspaceId pool deferred"]
 ```
 
 ### Phase 1 — Gateway arg wrap

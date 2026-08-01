@@ -44,17 +44,16 @@ method, the host replies with a JSON-RPC `-32601 Method not found` error.
 
 ## Architecture
 
-```
-Desktop Agent view
-  ↕  WebSocket
-Backend MessageRouter
-  ↕  CommandBus / QueryBus
-  AcpSessionService
-    AcpPermissionService  — tracks pending permission requests
-    AcpAskBridgeService   — tracks pending ask questions
-    AcpClientPort         — implemented by AcpJsonRpcClient
-      spawn(provider.command, provider.args, { env: { ...process.env, ...provider.env } })
-      ↳ resolveAcpExtension(providerId) → AcpProviderExtension
+```mermaid
+flowchart TB
+  Desktop["Desktop Agent view"] <-->|"WebSocket"| Router["Backend MessageRouter"]
+  Router <-->|"CommandBus / QueryBus"| AcpSession["AcpSessionService"]
+  AcpSession --- Perm["AcpPermissionService"]
+  AcpSession --- Ask["AcpAskBridgeService"]
+  AcpSession --> ClientPort["AcpClientPort"]
+  ClientPort --> JsonRpc["AcpJsonRpcClient"]
+  JsonRpc --> Spawn["spawn provider.command"]
+  JsonRpc --> Ext["resolveAcpExtension providerId"]
 ```
 
 - The desktop creates an `acp` conversation with a `providerId`. It sends

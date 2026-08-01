@@ -44,38 +44,26 @@ The main goals are:
 
 Command flow:
 
-```text
-Client
-  ↓
-WebSocket Gateway
-  ↓
-Command Router
-  ↓
-Use Case
-  ↓
-Domain Service / Runtime
-  ↓
-Infrastructure Adapter
-  ↓
-MCP Process / Database / Filesystem
+```mermaid
+flowchart TD
+  Client --> WsGateway["WebSocket Gateway"]
+  WsGateway --> CommandRouter["Command Router"]
+  CommandRouter --> UseCase["Use Case"]
+  UseCase --> DomainRuntime["Domain Service / Runtime"]
+  DomainRuntime --> InfraAdapter["Infrastructure Adapter"]
+  InfraAdapter --> Targets["MCP Process / Database / Filesystem"]
 ```
 
 Event flow:
 
-```text
-MCP Process / Worker / Scheduler
-  ↓
-Infrastructure Adapter
-  ↓
-Domain Event
-  ↓
-Application Event Dispatcher
-  ↓
-Client Event Mapper
-  ↓
-WebSocket Gateway
-  ↓
-Client
+```mermaid
+flowchart TD
+  Sources["MCP Process / Worker / Scheduler"] --> InfraAdapter["Infrastructure Adapter"]
+  InfraAdapter --> DomainEvent["Domain Event"]
+  DomainEvent --> EventDispatcher["Application Event Dispatcher"]
+  EventDispatcher --> ClientMapper["Client Event Mapper"]
+  ClientMapper --> WsGateway["WebSocket Gateway"]
+  WsGateway --> Client
 ```
 
 Core rules:
@@ -165,12 +153,10 @@ and keep inventing paths aligned with this section - not with a root-level
 
 Dependencies may only point inward:
 
-```text
-Transport / Infrastructure
-          ↓
-      Application
-          ↓
-        Domain
+```mermaid
+flowchart TD
+  Outer["Transport / Infrastructure"] --> Application
+  Application --> Domain
 ```
 
 Import rules:
@@ -410,12 +396,14 @@ interface RuntimeEntry {
 
 Each plugin has its own queue:
 
-```text
-Plugin A queue:
-start → callTool → stop
-
-Plugin B queue:
-callTool → callTool
+```mermaid
+flowchart LR
+  subgraph pluginA ["Plugin A queue"]
+    A1[start] --> A2[callTool] --> A3[stop]
+  end
+  subgraph pluginB ["Plugin B queue"]
+    B1[callTool] --> B2[callTool]
+  end
 ```
 
 Operations across different plugins may run concurrently. Operations within the same plugin are serialized when they affect lifecycle state.
@@ -681,38 +669,31 @@ path for external consumers and is the canonical client for non-Electron hosts.
 
 ## 10. Message Router
 
-```text
-WebSocket frame
-  ↓
-IncomingMessageValidator
-  ↓
-MessageRouter
-  ├── command route
-  └── query route
-        ↓
-CommandBus / QueryBus
-        ↓
-Use Case Handler
+```mermaid
+flowchart TD
+  Frame["WebSocket frame"] --> Validator["IncomingMessageValidator"]
+  Validator --> Router["MessageRouter"]
+  Router --> CmdRoute["command route"]
+  Router --> QueryRoute["query route"]
+  CmdRoute --> Buses["CommandBus / QueryBus"]
+  QueryRoute --> Buses
+  Buses --> Handler["Use Case Handler"]
 ```
 
 Example mapping:
 
-```text
-plugin.start
-  ↓
-StartPluginCommand
-  ↓
-StartPluginHandler
-  ↓
-PluginRuntimeManager.start()
+```mermaid
+flowchart TD
+  PluginStart["plugin.start"] --> StartCmd["StartPluginCommand"]
+  StartCmd --> StartHandler["StartPluginHandler"]
+  StartHandler --> PRM["PluginRuntimeManager.start"]
 ```
 
 Disallowed:
 
-```text
-plugin.start
-  ↓
-child_process.spawn()
+```mermaid
+flowchart TD
+  PluginStartBad["plugin.start"] --> Spawn["child_process.spawn"]
 ```
 
 The transport layer must not access infrastructure directly.
@@ -813,19 +794,19 @@ apps/backend/src/bootstrap.ts
 
 Bootstrap order:
 
-```text
-1. load configuration
-2. initialize logger
-3. open SQLite
-4. run migrations
-5. create repositories
-6. create infrastructure adapters
-7. create runtime manager
-8. create command/query handlers
-9. create event dispatcher
-10. create WebSocket gateway
-11. start WebSocket server
-12. publish backend.ready
+```mermaid
+flowchart TD
+  S1["1 load configuration"] --> S2["2 initialize logger"]
+  S2 --> S3["3 open SQLite"]
+  S3 --> S4["4 run migrations"]
+  S4 --> S5["5 create repositories"]
+  S5 --> S6["6 create infrastructure adapters"]
+  S6 --> S7["7 create runtime manager"]
+  S7 --> S8["8 create command/query handlers"]
+  S8 --> S9["9 create event dispatcher"]
+  S9 --> S10["10 create WebSocket gateway"]
+  S10 --> S11["11 start WebSocket server"]
+  S11 --> S12["12 publish backend.ready"]
 ```
 
 Example composition root:
@@ -868,26 +849,17 @@ const wsServer = new WebSocketServer({
 
 Shutdown must be centralized:
 
-```text
-SIGTERM / Electron quit
-  ↓
-ShutdownCoordinator
-  ↓
-stop accepting connections
-  ↓
-reject new commands
-  ↓
-close active sessions
-  ↓
-cancel pending tool calls
-  ↓
-gracefully stop plugin runtimes
-  ↓
-force-kill timed-out processes
-  ↓
-close database
-  ↓
-exit
+```mermaid
+flowchart TD
+  Signal["SIGTERM / Electron quit"] --> Coord["ShutdownCoordinator"]
+  Coord --> StopAccept["stop accepting connections"]
+  StopAccept --> RejectCmds["reject new commands"]
+  RejectCmds --> CloseSessions["close active sessions"]
+  CloseSessions --> CancelTools["cancel pending tool calls"]
+  CancelTools --> StopRuntimes["gracefully stop plugin runtimes"]
+  StopRuntimes --> ForceKill["force-kill timed-out processes"]
+  ForceKill --> CloseDb["close database"]
+  CloseDb --> Exit["exit"]
 ```
 
 Structure:
@@ -970,12 +942,10 @@ reconnect and resubscribe
 
 Error flow:
 
-```text
-Infrastructure Error
-  ↓ mapped by adapter
-Application Error
-  ↓ mapped by transport
-WebSocket Error Response
+```mermaid
+flowchart TD
+  InfraErr["Infrastructure Error"] -->|"mapped by adapter"| AppErr["Application Error"]
+  AppErr -->|"mapped by transport"| WsErr["WebSocket Error Response"]
 ```
 
 Example error codes:
@@ -1096,32 +1066,24 @@ The `ws` library is recommended because it is thin and predictable. Avoid Socket
 
 ## 20. Architecture Summary
 
-```text
-┌──────────────────────────────────────────────────────┐
-│ Client / Renderer                                    │
-└──────────────────────────┬───────────────────────────┘
-                           │ WebSocket
-┌──────────────────────────▼───────────────────────────┐
-│ Transport Layer                                      │
-│ Session, auth, validation, routing, response mapping │
-└──────────────────────────┬───────────────────────────┘
-                           │ Command / Query
-┌──────────────────────────▼───────────────────────────┐
-│ Application Layer                                    │
-│ Use cases, queues, single-flight, event dispatcher   │
-└──────────────────────────┬───────────────────────────┘
-                           │ Domain operation
-┌──────────────────────────▼───────────────────────────┐
-│ Domain Layer                                         │
-│ Plugin, runtime state, lifecycle policy, events      │
-└──────────────────────────┬───────────────────────────┘
-                           │ Port
-┌──────────────────────────▼───────────────────────────┐
-│ Infrastructure Layer                                 │
-│ SQLite, process, MCP, filesystem, scheduler          │
-└──────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+  Client["Client / Renderer"]
+  Transport["Transport Layer"]
+  Application["Application Layer"]
+  Domain["Domain Layer"]
+  Infra["Infrastructure Layer"]
+
+  Client -->|"WebSocket"| Transport
+  Transport -->|"Command / Query"| Application
+  Application -->|"Domain operation"| Domain
+  Domain -->|"Port"| Infra
 ```
 
+Transport owns session, auth, validation, routing, and response mapping.
+Application owns use cases, queues, single-flight, and the event dispatcher.
+Domain owns plugin identity, runtime state, lifecycle policy, and events.
+Infrastructure owns SQLite, process, MCP, filesystem, and scheduler adapters.
 WebSocket remains full-duplex, but that full-duplex behavior is contained at the transport boundary. Workers, schedulers, MCP processes, and services must never communicate directly with the socket.
 
 With this structure, WebSocket can later be replaced or supplemented by HTTP, SSE, CLI, or Electron IPC without changing the core domain and use cases.
