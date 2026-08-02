@@ -72,6 +72,13 @@ Captured from the Electron desktop app (`make dev`):
 | ![NusaShell launcher](./docs/assets/screenshots/desktop-app.png) | ![Agent workspace ready for a conversation](./docs/assets/screenshots/agent-workspace.png) | ![Skills workspace, empty-library state](./docs/assets/screenshots/skills-workspace.png) |
 | Home grid with installed plugins (Files, Mail, Notes, Terminal) and live running-state badges. | Conversation rail, empty-turn state, and model-aware composer in a clean local profile. | Three-pane package browser (library, files, editor) shown in its empty state. |
 
+## Demo videos
+
+| Full demo | Live chat |
+| --- | --- |
+| ![Full demo of NusaShell](./docs/assets/screenshots/full-demo.gif) | ![Live chat with the NusaShell agent](./docs/assets/screenshots/live-chat.gif) |
+| Launch plugins, run an agent turn, and manage skills. | Chat with the agent. |
+
 ## Documentation map
 
 | Doc | Role |
