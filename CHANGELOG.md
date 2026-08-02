@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-08-02
+
+### Fixed
+
+- **Terminal MCP no longer crashes with MODULE_NOT_FOUND in packaged app.**
+  The Terminal plugin's `mcp/server.cjs` was hand-written CJS that
+  `require()`d `@modelcontextprotocol/sdk` at runtime. In a packaged app, the
+  plugins directory is copied as `extraResource` without `node_modules`, so the
+  SDK was missing. Terminal now follows the same esbuild bundling pattern as
+  Notes/Files/Mail: ESM source (`mcp/server.js`) → bundled CJS
+  (`mcp/server.cjs`) with the SDK inlined and `node-pty` externalized as a
+  native module.
+- **node-pty staged and rebuilt for Electron ABI in packaged app.** A new
+  `stage-terminal-native.ts` script copies `node-pty` from the workspace
+  `node_modules` into `plugins/terminal/node_modules/node-pty` and runs
+  `electron-rebuild` on it before `electron-forge make`. The `make` script
+  now runs this staging step automatically.
+
+### Changed
+
+- Root `build` script now builds all plugins with a `build` script (not just
+  `example-mail`), so CI never ships stale plugin bundles.
+- `plugins/terminal/install.sh` no longer runs `npm install` — it runs
+  `pnpm build` to rebuild the esbuild bundle.
+
+### Tests
+
+- Added `plugins/terminal/tests/bundle-sdk.test.js` — verifies `server.cjs`
+  exists, has no bare `require("@modelcontextprotocol/sdk")` (SDK is inlined),
+  and still references `node-pty` as an external module.
+- Extended `apps/desktop/scripts/verify-packaged-runtime.ts` — now checks the
+  packaged Terminal `server.cjs` has no SDK require and at least one
+  `node-pty` `.node` binary is staged under `plugins/terminal/node_modules`.
+
 ## [0.1.3] - 2026-08-02
 
 ### Fixed

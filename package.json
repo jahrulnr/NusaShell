@@ -4,7 +4,7 @@
   "type": "module",
   "packageManager": "pnpm@11.17.0",
   "scripts": {
-    "build": "pnpm --filter @nusashell/example-mail run build && pnpm -r --filter='./packages/*' run build",
+    "build": "pnpm -r --filter='./plugins/*' run build && pnpm -r --filter='./packages/*' run build",
     "prebuild": "pnpm scan:ui-docs",
     "scan:ui-docs": "node scripts/scan-ui-docs.mjs",
     "test": "vitest run",

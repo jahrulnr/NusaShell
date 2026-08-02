@@ -11,8 +11,9 @@
   "scripts": {
     "start": "electron-forge start",
     "dev": "tsx scripts/register-linux-desktop.ts && electron-forge start -- --dev --no-sandbox",
+    "stage:terminal-native": "tsx scripts/stage-terminal-native.ts",
     "package": "electron-forge package",
-    "make": "electron-forge make",
+    "make": "tsx scripts/stage-terminal-native.ts && electron-forge make",
     "verify:package-runtime": "tsx scripts/verify-packaged-runtime.ts",
     "publish": "electron-forge publish",
     "test": "vitest run",

@@ -76,6 +76,24 @@ if (nativeModules.length === 0) {
   throw new Error(`No unpacked better-sqlite3 binary was found under ${unpackedPath}`);
 }
 
+// Verify Terminal plugin bundle and staged node-pty
+const terminalBundle = join(resourcesPath, "plugins", "terminal", "mcp", "server.cjs");
+try {
+  await access(terminalBundle);
+} catch {
+  throw new Error(`Terminal plugin bundle not found at ${terminalBundle}`);
+}
+const terminalBundleSource = await import("node:fs/promises").then((fs) => fs.readFile(terminalBundle, "utf8"));
+if (terminalBundleSource.includes('require("@modelcontextprotocol/sdk')) {
+  throw new Error("Terminal plugin server.cjs has a bare SDK require — bundle is stale or unbundled");
+}
+
+const terminalNodePtyDir = join(resourcesPath, "plugins", "terminal", "node_modules", "node-pty");
+const ptyBinaries = await findFiles(terminalNodePtyDir, (fileName) => fileName.endsWith(".node"));
+if (ptyBinaries.length === 0) {
+  throw new Error(`No node-pty .node binary found under ${terminalNodePtyDir}`);
+}
+
 console.log(
-  `Verified ${basename(packagedAppPath)} runtime dependencies, agent resources, and ${nativeModules.length} unpacked SQLite binary/binaries.`,
+  `Verified ${basename(packagedAppPath)} runtime dependencies, agent resources, ${nativeModules.length} unpacked SQLite binary/binaries, and ${ptyBinaries.length} node-pty binary/binaries.`,
 );
