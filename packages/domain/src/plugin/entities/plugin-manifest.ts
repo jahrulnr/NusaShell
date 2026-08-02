@@ -9,8 +9,10 @@ import type { TransportType } from "../value-objects/transport-type.js";
 import { TRANSPORT_TYPES } from "../value-objects/transport-type.js";
 
 export type WindowMode = "panel" | "fullscreen" | "widget";
+export type PluginSource = "native-mcp" | "package";
 
 export interface PluginManifestInput {
+  readonly source?: PluginSource;
   readonly id: string;
   readonly name: string;
   readonly version: string;
@@ -29,6 +31,7 @@ export interface PluginManifestInput {
     readonly args?: readonly string[];
     readonly url?: string;
     readonly env?: Readonly<Record<string, string>>;
+    readonly headers?: Readonly<Record<string, string>>;
     readonly autostart?: boolean;
     readonly keepAliveOnClose?: boolean;
   };
@@ -51,6 +54,7 @@ export class PluginManifest {
     readonly name: string,
     readonly version: PluginVersion,
     readonly icon: string,
+    readonly source: PluginSource,
     readonly ui: PluginManifestInput["ui"],
     readonly mcp: {
       readonly transport: TransportType;
@@ -58,6 +62,7 @@ export class PluginManifest {
       readonly args: readonly string[];
       readonly url?: string;
       readonly env: Readonly<Record<string, string>>;
+      readonly headers: Readonly<Record<string, string>>;
       readonly autostart: boolean;
       readonly keepAliveOnClose: boolean;
     },
@@ -128,10 +133,15 @@ export class PluginManifest {
       );
     }
 
+    if (raw.mcp.transport === "stdio" && raw.mcp.headers && Object.keys(raw.mcp.headers).length > 0) {
+      return err(new ManifestValidationError("MCP headers are only valid for http or sse transport"));
+    }
+
     const mcp: PluginManifest["mcp"] = {
       transport: raw.mcp.transport,
       args: raw.mcp.args ?? [],
       env: raw.mcp.env ?? {},
+      headers: raw.mcp.headers ?? {},
       autostart: raw.mcp.autostart ?? false,
       keepAliveOnClose: raw.mcp.keepAliveOnClose ?? false,
       ...(raw.mcp.command !== undefined ? { command: raw.mcp.command } : {}),
@@ -149,6 +159,7 @@ export class PluginManifest {
         raw.name.trim(),
         versionResult.value,
         raw.icon.trim(),
+        raw.source ?? "package",
         raw.ui,
         mcp,
         dependencies,
@@ -164,9 +175,10 @@ export class PluginManifest {
 
   toInput(): PluginManifestInput {
     return {
+      source: this.source,
       id: PluginIdFactory.toString(this.id), name: this.name, version: this.version.toString(), icon: this.icon,
       ...(this.ui !== undefined ? { ui: this.ui } : {}),
-      mcp: { transport: this.mcp.transport, ...(this.mcp.command !== undefined ? { command: this.mcp.command } : {}), args: this.mcp.args, ...(this.mcp.url !== undefined ? { url: this.mcp.url } : {}), env: this.mcp.env, autostart: this.mcp.autostart, keepAliveOnClose: this.mcp.keepAliveOnClose },
+      mcp: { transport: this.mcp.transport, ...(this.mcp.command !== undefined ? { command: this.mcp.command } : {}), args: this.mcp.args, ...(this.mcp.url !== undefined ? { url: this.mcp.url } : {}), env: this.mcp.env, headers: this.mcp.headers, autostart: this.mcp.autostart, keepAliveOnClose: this.mcp.keepAliveOnClose },
       ...(this.dependencies.shell !== undefined ? { dependencies: this.dependencies } : {}),
     };
   }

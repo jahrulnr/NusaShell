@@ -13,6 +13,7 @@ export class SseMcpClient implements McpClientPort {
   constructor(
     private readonly url: string,
     private readonly logger?: Logger,
+    private readonly headers?: Readonly<Record<string, string>>,
   ) {}
 
   get pid(): number | null {
@@ -25,7 +26,9 @@ export class SseMcpClient implements McpClientPort {
 
   async connect(): Promise<void> {
     this.logger?.debug({ url: this.url }, "Connecting SSE MCP client");
-    this.transport = new SSEClientTransport(new URL(this.url));
+    this.transport = new SSEClientTransport(new URL(this.url), {
+      ...(this.headers ? { requestInit: { headers: this.headers } } : {}),
+    });
 
     this.transport.onclose = () => {
       this.logger?.debug({ url: this.url }, "SSE MCP transport closed");

@@ -24,6 +24,7 @@ import type {
   SaveMailAccountInput,
 } from "../shared/mail-contract.js";
 import type { PluginWindowOptionsInput } from "../main/plugin-window-options.js";
+import type { NativeMcpInput } from "../main/ipc/native-mcp.js";
 import { resolveWsPort } from "../main/runtime-mode.js";
 
 export interface ShellApi {
@@ -44,6 +45,10 @@ export interface ShellApi {
   };
   readonly pluginIcons: {
     read(source: string, installPath: string): Promise<string>;
+  };
+  readonly plugins: {
+    registerNativeMcp(input: NativeMcpInput): Promise<unknown>;
+    updateNativeMcp(pluginId: string, input: NativeMcpInput): Promise<unknown>;
   };
   readonly clipboard: {
     readText(): string;
@@ -180,6 +185,14 @@ const api: ShellApi = {
   pluginIcons: {
     read(source, installPath) {
       return ipcRenderer.invoke("plugin-icons:read", source, installPath);
+    },
+  },
+  plugins: {
+    registerNativeMcp(input) {
+      return ipcRenderer.invoke("plugins:register-native-mcp", input);
+    },
+    updateNativeMcp(pluginId, input) {
+      return ipcRenderer.invoke("plugins:update-native-mcp", pluginId, input);
     },
   },
   clipboard: {

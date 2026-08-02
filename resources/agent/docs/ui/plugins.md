@@ -19,3 +19,18 @@ Shows plugin icon, name, plugin id, version, and current state for every install
   - Type: button
   - Action: Click to open the plugin detail drawer. Shows icon, name, plugin id, version, and state.
   - Related: plugin-detail (`#plugin-detail`)
+
+- **Add MCP** (`#plugins-add-mcp`):
+  - Section: Plugins toolbar
+  - Type: button
+  - Action: Opens the Custom MCP tab for creating a native headless MCP wrapper.
+
+- **Install plugin** (`#plugins-install-plugin`):
+  - Section: Plugins toolbar
+  - Type: button
+  - Action: Opens the NusaShell Plugin tab for installing a packaged plugin.
+
+- **Edit MCP** (`#plugins-edit-mcp`):
+  - Section: Plugins toolbar
+  - Type: button
+  - Action: Opens the Custom MCP editor for the selected native MCP; disabled for package plugins.

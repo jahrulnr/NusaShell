@@ -103,6 +103,14 @@ describe("PluginManifest", () => {
     expect(result.ok).toBe(false);
   });
 
+  it("rejects headers on stdio transport", () => {
+    const result = PluginManifest.create({
+      ...manifestInput,
+      mcp: { transport: "stdio", command: "node", headers: { Authorization: "secret" } },
+    });
+    expect(result.ok).toBe(false);
+  });
+
   it("accepts a headless manifest without ui", () => {
     const { ui: _omit, ...headless } = manifestInput;
     void _omit;

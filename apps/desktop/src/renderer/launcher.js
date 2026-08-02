@@ -28,6 +28,8 @@ const WS_URL = window.shell?.wsUrl ?? "ws://127.0.0.1:9130";
 
 let plugins = [];
 let currentPlugin = null;
+let selectedPluginId = "";
+let nativeMcpEditId = "";
 let logSourceFilter = "all";
 const logEntries = [];
 const STATES = ["idle", "starting", "running", "stopping", "crashed"];
@@ -369,12 +371,18 @@ function renderInstalledTable() {
     const name = el("div", "plugin-row-name");
     name.textContent = p.name;
     const meta = el("div", "plugin-row-meta");
-    meta.textContent = `${p.pluginId} · v${p.version}`;
+    meta.textContent = `${p.pluginId} · v${p.version}${p.source === "native-mcp" ? " · Native MCP" : ""}`;
     info.append(name, meta);
     const state = el("div", `plugin-row-state ${p.state}`);
     state.innerHTML = stateBadgeHtml(p.state) || "Idle";
     row.append(icon, info, state);
-    row.addEventListener("click", () => openDrawer(p));
+    row.classList.toggle("is-selected", p.pluginId === selectedPluginId);
+    row.addEventListener("click", () => {
+      selectedPluginId = p.pluginId;
+      updateNativeMcpToolbar();
+      renderPluginList();
+      openDrawer(p);
+    });
     table.appendChild(row);
   });
 }
@@ -601,12 +609,78 @@ function showToast(message, type = "info") {
 
 // ============ Add Plugin Modal ============
 
-function openAddPluginModal() {
+function openAddPluginModal(tab = "custom", plugin = null) {
   $("#add-plugin-modal").style.display = "flex";
   $("#install-url-input").value = "";
   $("#install-local-input").value = "";
   $("#install-status").style.display = "none";
-  $("#install-url-input").focus();
+  nativeMcpEditId = plugin?.source === "native-mcp" ? plugin.pluginId : "";
+  $("#add-plugin-modal-title").textContent = nativeMcpEditId ? "Edit MCP" : "Add MCP";
+  $("#native-mcp-name").value = plugin?.name || "";
+  $("#native-mcp-id").value = plugin?.pluginId || "";
+  $("#native-mcp-transport").value = plugin?.transport || "stdio";
+  setPluginModalTab(tab);
+  if (tab === "custom") $("#native-mcp-name").focus();
+  else $("#install-url-input").focus();
+}
+
+function setPluginModalTab(tab) {
+  const custom = tab === "custom";
+  $("#custom-mcp-panel").hidden = !custom;
+  $("#nusashell-plugin-panel").hidden = custom;
+  $("#custom-mcp-tab").classList.toggle("active", custom);
+  $("#nusashell-plugin-tab").classList.toggle("active", !custom);
+  $("#custom-mcp-tab").setAttribute("aria-selected", String(custom));
+  $("#nusashell-plugin-tab").setAttribute("aria-selected", String(!custom));
+}
+
+function updateNativeMcpToolbar() {
+  const plugin = plugins.find((item) => item.pluginId === selectedPluginId);
+  $("#plugins-edit-mcp").disabled = plugin?.source !== "native-mcp";
+}
+
+function parseNativeJson(value) {
+  const parsed = JSON.parse(value);
+  const server = parsed.mcpServers ? Object.entries(parsed.mcpServers)[0] : [parsed.name || "", parsed];
+  if (!server || typeof server[1] !== "object") throw new Error("JSON must contain one MCP server");
+  const [name, config] = server;
+  $("#native-mcp-name").value = config.name || name || "";
+  $("#native-mcp-id").value = config.id || `custom.${String(name || "mcp").toLowerCase().replace(/[^a-z0-9-]+/g, "-")}`;
+  $("#native-mcp-transport").value = config.url ? (config.transport === "sse" ? "sse" : "http") : "stdio";
+  $("#native-mcp-command").value = config.command || "";
+  $("#native-mcp-args").value = Array.isArray(config.args) ? config.args.join("\\n") : "";
+  $("#native-mcp-url").value = config.url || "";
+  $("#native-mcp-env").value = JSON.stringify(config.env || {}, null, 2);
+  $("#native-mcp-headers").value = JSON.stringify(config.headers || {}, null, 2);
+}
+
+async function saveNativeMcp() {
+  try {
+    const input = {
+      id: $("#native-mcp-id").value.trim(),
+      name: $("#native-mcp-name").value.trim(),
+      transport: $("#native-mcp-transport").value,
+      command: $("#native-mcp-command").value.trim() || undefined,
+      args: $("#native-mcp-args").value.split(/\\r?\\n/).map((item) => item.trim()).filter(Boolean),
+      url: $("#native-mcp-url").value.trim() || undefined,
+      env: JSON.parse($("#native-mcp-env").value || "{}"),
+      headers: JSON.parse($("#native-mcp-headers").value || "{}"),
+      autostart: $("#native-mcp-autostart").checked,
+    };
+    $("#native-mcp-status").style.display = "block";
+    $("#native-mcp-status").textContent = "Saving MCP...";
+    const result = nativeMcpEditId
+      ? await window.shell.plugins.updateNativeMcp(nativeMcpEditId, input)
+      : await window.shell.plugins.registerNativeMcp(input);
+    if (result?.error) throw new Error(result.error);
+    showToast(nativeMcpEditId ? "MCP updated" : "MCP added", "success");
+    closeAddPluginModal();
+    await refreshAll();
+  } catch (error) {
+    $("#native-mcp-status").style.display = "block";
+    $("#native-mcp-status").textContent = `Error: ${error.message || error}`;
+    $("#native-mcp-status").className = "modal-status modal-status-error";
+  }
 }
 
 function closeAddPluginModal() {
@@ -701,9 +775,11 @@ function initUpdater() {
 
 async function refreshAll() {
   plugins = await fetchPlugins();
+  if (selectedPluginId && !plugins.some((plugin) => plugin.pluginId === selectedPluginId)) selectedPluginId = "";
   renderAppGrid();
   renderInstalledTable();
   renderAutostartList();
+  updateNativeMcpToolbar();
 }
 
 // ============ Init ============
@@ -1442,7 +1518,18 @@ document.addEventListener("DOMContentLoaded", () => {
   }));
 
   // Add Plugin modal
-  $("#open-add-plugin").addEventListener("click", openAddPluginModal);
+  $("#plugins-add-mcp").addEventListener("click", () => openAddPluginModal("custom"));
+  $("#plugins-install-plugin").addEventListener("click", () => openAddPluginModal("plugin"));
+  $("#plugins-edit-mcp").addEventListener("click", () => {
+    const plugin = plugins.find((item) => item.pluginId === selectedPluginId);
+    if (plugin?.source === "native-mcp") openAddPluginModal("custom", plugin);
+  });
+  $("#custom-mcp-tab").addEventListener("click", () => setPluginModalTab("custom"));
+  $("#nusashell-plugin-tab").addEventListener("click", () => setPluginModalTab("plugin"));
+  $("#native-mcp-import-btn").addEventListener("click", () => {
+    try { parseNativeJson($("#native-mcp-import").value); } catch (error) { $("#native-mcp-status").textContent = `Error: ${error.message || error}`; $("#native-mcp-status").style.display = "block"; }
+  });
+  $("#native-mcp-save").addEventListener("click", () => void saveNativeMcp());
   $("#modal-close").addEventListener("click", closeAddPluginModal);
   $("#add-plugin-modal").addEventListener("click", (e) => {
     if (e.target === $("#add-plugin-modal")) closeAddPluginModal();

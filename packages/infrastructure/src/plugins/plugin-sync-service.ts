@@ -86,6 +86,7 @@ export class PluginSyncService {
       return null;
     }
     const manifestInput = {
+      source: parsed.source,
       id: parsed.id,
       name: parsed.name,
       version: parsed.version,

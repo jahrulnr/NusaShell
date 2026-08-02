@@ -65,6 +65,7 @@ export class FilesystemPluginRegistry implements PluginRepositoryPort {
     const parsed = schemaResult.data;
 
     const manifestInput = {
+      source: parsed.source,
       id: parsed.id,
       name: parsed.name,
       version: parsed.version,

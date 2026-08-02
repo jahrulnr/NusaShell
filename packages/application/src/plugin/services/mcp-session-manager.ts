@@ -80,7 +80,7 @@ export class McpSessionManager {
           `Plugin ${PluginId.toString(entry.pluginId)} http transport missing url`,
         );
       }
-      const mcpClient = this.deps.mcpClientFactory.createForHttp(url);
+      const mcpClient = this.deps.mcpClientFactory.createForHttp(url, manifest.mcp.headers);
       await mcpClient.connect();
       entry.mcpClient = mcpClient;
     } else if (manifest.mcp.transport === "sse") {
@@ -91,7 +91,7 @@ export class McpSessionManager {
           `Plugin ${PluginId.toString(entry.pluginId)} sse transport missing url`,
         );
       }
-      const mcpClient = this.deps.mcpClientFactory.createForSse(url);
+      const mcpClient = this.deps.mcpClientFactory.createForSse(url, manifest.mcp.headers);
       await mcpClient.connect();
       entry.mcpClient = mcpClient;
     }

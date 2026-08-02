@@ -97,6 +97,8 @@ export class PluginRuntimeManager {
         enabled: plugin.enabled,
         autostart: plugin.manifest.mcp.autostart,
         ui: plugin.manifest.ui,
+        source: plugin.manifest.source,
+        transport: plugin.manifest.mcp.transport,
         keepAliveOnClose: plugin.manifest.mcp.keepAliveOnClose,
       };
     });
@@ -206,8 +208,11 @@ export class PluginRuntimeManager {
     const envKeys = Object.keys({ ...manifest.mcp.env, ...(entry.launchEnv ?? {}) });
     return {
       pluginId: key,
+      source: manifest.source,
       transport: manifest.mcp.transport,
       ...(manifest.mcp.command !== undefined ? { command: manifest.mcp.command } : {}),
+      ...(manifest.mcp.url !== undefined ? { url: manifest.mcp.url } : {}),
+      headerKeys: Object.keys(manifest.mcp.headers),
       args: entry.launchArgs ?? manifest.mcp.args,
       envKeys,
       ...(entry.workspace ? { workspace: entry.workspace } : {}),
@@ -225,6 +230,8 @@ export class PluginRuntimeManager {
         entry.version = plugin.manifest.version.toString();
         entry.icon = resolveIcon(plugin.manifest.icon, plugin.installPath);
         entry.installPath = plugin.installPath;
+        entry.source = plugin.manifest.source;
+        entry.transport = plugin.manifest.mcp.transport;
         entry.enabled = plugin.enabled;
         entry.autostart = plugin.manifest.mcp.autostart;
         entry.ui = plugin.manifest.ui;
@@ -244,6 +251,8 @@ export class PluginRuntimeManager {
       enabled: plugin.enabled,
       autostart: plugin.manifest.mcp.autostart,
       ui: plugin.manifest.ui,
+      source: plugin.manifest.source,
+      transport: plugin.manifest.mcp.transport,
       keepAliveOnClose: plugin.manifest.mcp.keepAliveOnClose,
     };
   }
@@ -291,6 +300,8 @@ export class PluginRuntimeManager {
       version: "",
       icon: "",
       installPath: "",
+      source: "package",
+      transport: "stdio",
       enabled: true,
       autostart: false,
       keepAliveOnClose: false,

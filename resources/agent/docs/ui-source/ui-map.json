@@ -46,8 +46,7 @@
             "nav-ai-providers",
             "nav-autostart",
             "nav-logs",
-            "open-add-plugin",
-            "open-docs",
+                    "open-docs",
             "sidebar-mode-toggle"
           ]
         }
@@ -107,7 +106,10 @@
           ],
           "controls": [
             "plugin-table",
-            "plugin-row"
+            "plugin-row",
+            "plugins-add-mcp",
+            "plugins-install-plugin",
+            "plugins-edit-mcp"
           ]
         }
       ]
@@ -746,6 +748,21 @@
           "controls": [
             "add-plugin-modal",
             "modal-close",
+            "custom-mcp-tab",
+            "nusashell-plugin-tab",
+            "native-mcp-name",
+            "native-mcp-id",
+            "native-mcp-transport",
+            "native-mcp-command",
+            "native-mcp-args",
+            "native-mcp-url",
+            "native-mcp-env",
+            "native-mcp-headers",
+            "native-mcp-autostart",
+            "native-mcp-import",
+            "native-mcp-import-btn",
+            "native-mcp-save",
+            "native-mcp-status",
             "install-url-input",
             "install-url-btn",
             "install-local-input",
@@ -1280,16 +1297,6 @@
         "log-tail"
       ]
     },
-    "open-add-plugin": {
-      "section": "Sidebar",
-      "label": "Add Plugin",
-      "type": "button",
-      "action": "Opens the Add Plugin modal to install a plugin from a URL, native folder picker, or native archive picker.",
-      "related": [
-        "add-plugin-modal",
-        "install-url-input"
-      ]
-    },
     "open-docs": {
       "section": "Sidebar",
       "label": "Docs on GitHub",
@@ -1341,6 +1348,24 @@
       "related": [
         "context-menu"
       ]
+    },
+    "plugins-add-mcp": {
+      "section": "Plugins toolbar",
+      "label": "Add MCP",
+      "type": "button",
+      "action": "Opens the Custom MCP tab for creating a native headless MCP wrapper."
+    },
+    "plugins-install-plugin": {
+      "section": "Plugins toolbar",
+      "label": "Install plugin",
+      "type": "button",
+      "action": "Opens the NusaShell Plugin tab for installing a packaged plugin."
+    },
+    "plugins-edit-mcp": {
+      "section": "Plugins toolbar",
+      "label": "Edit MCP",
+      "type": "button",
+      "action": "Opens the Custom MCP editor for the selected native MCP; disabled for package plugins."
     },
     "plugin-table": {
       "section": "Plugin table",
@@ -2102,6 +2127,21 @@
       "type": "modal",
       "action": "Modal overlay containing URL and local install options. Click the backdrop to close."
     },
+    "custom-mcp-tab": { "section": "Modal tabs", "label": "Custom MCP", "type": "tab", "action": "Shows the native MCP form." },
+    "nusashell-plugin-tab": { "section": "Modal tabs", "label": "NusaShell Plugin", "type": "tab", "action": "Shows URL, folder, and archive install controls." },
+    "native-mcp-name": { "section": "Custom MCP", "label": "MCP name", "type": "text input", "action": "Sets the display name for the native MCP." },
+    "native-mcp-id": { "section": "Custom MCP", "label": "MCP id", "type": "text input", "action": "Sets the publisher.name plugin id." },
+    "native-mcp-transport": { "section": "Custom MCP", "label": "Transport", "type": "select", "action": "Chooses stdio, HTTP, or SSE." },
+    "native-mcp-command": { "section": "Custom MCP", "label": "Command", "type": "text input", "action": "Sets the stdio command." },
+    "native-mcp-args": { "section": "Custom MCP", "label": "Arguments", "type": "textarea", "action": "Sets one stdio argument per line." },
+    "native-mcp-url": { "section": "Custom MCP", "label": "Server URL", "type": "text input", "action": "Sets the HTTP/SSE server URL." },
+    "native-mcp-env": { "section": "Custom MCP", "label": "Environment JSON", "type": "textarea", "action": "Sets optional stdio environment variables as JSON." },
+    "native-mcp-headers": { "section": "Custom MCP", "label": "Headers JSON", "type": "textarea", "action": "Sets optional HTTP/SSE headers as JSON." },
+    "native-mcp-autostart": { "section": "Custom MCP", "label": "Autostart", "type": "checkbox", "action": "Starts the native MCP when NusaShell opens." },
+    "native-mcp-import": { "section": "Custom MCP", "label": "Import JSON", "type": "textarea", "action": "Accepts a Cursor-style single-server mcpServers JSON object." },
+    "native-mcp-import-btn": { "section": "Custom MCP", "label": "Fill from JSON", "type": "button", "action": "Parses JSON into the form fields." },
+    "native-mcp-save": { "section": "Custom MCP", "label": "Save MCP", "type": "button", "action": "Writes or updates the native MCP manifest and refreshes inventory." },
+    "native-mcp-status": { "section": "Custom MCP", "label": "MCP status", "type": "status text", "action": "Shows native MCP save or validation errors." },
     "modal-close": {
       "section": "Install options",
       "label": "Close modal",

@@ -107,6 +107,7 @@ export interface Container {
   readonly wsServer: WebSocketServer;
   readonly eventPublisher: WebSocketEventPublisher;
   readonly pluginRepository: PluginRepositoryPort;
+  readonly syncPlugins: () => Promise<void>;
   readonly skillRegistry: SkillRegistryPort;
   readonly skillProvenance: SkillProvenancePort;
   readonly skillUsage: SkillUsagePort;
@@ -192,6 +193,7 @@ export function createContainer(options: ContainerOptions): Container {
     wsServer: transport.wsServer,
     eventPublisher: transport.eventPublisher,
     pluginRepository: plugin.pluginRepository,
+    syncPlugins: plugin.syncPlugins,
     skillRegistry: skills.skillRegistry,
     skillProvenance: skills.skillProvenance,
     skillUsage: skills.skillUsage,

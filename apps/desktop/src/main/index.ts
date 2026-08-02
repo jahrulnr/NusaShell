@@ -38,6 +38,7 @@ import {
   registerAgentIpc,
   registerMailIpc,
   registerPluginsIpc,
+  registerNativeMcpIpc,
   registerShellIpc,
   type IpcContext,
 } from "./ipc/index.js";
@@ -245,6 +246,7 @@ function createIpcContext(): IpcContext {
     shellLogLevels,
     commandBus: c.commandBus,
     queryBus: c.queryBus,
+    syncPlugins: c.syncPlugins,
     skillRegistry: c.skillRegistry,
     skillProvenance: c.skillProvenance,
     skillUsage: c.skillUsage,
@@ -320,6 +322,7 @@ app.whenReady().then(async () => {
   registerAgentIpc(ctx);
   registerMailIpc(ctx);
   registerPluginsIpc(ctx);
+  registerNativeMcpIpc(ctx);
   registerShellIpc(ctx);
 
   logTail.subscribe((entry) => {

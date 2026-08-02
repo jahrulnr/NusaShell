@@ -18,6 +18,81 @@ Install from a URL, choose a local plugin folder with the native directory picke
   - Type: icon button
   - Action: Closes the Add Plugin modal.
 
+- **Custom MCP** (`#custom-mcp-tab`):
+  - Section: Modal tabs
+  - Type: tab
+  - Action: Shows the native MCP form.
+
+- **NusaShell Plugin** (`#nusashell-plugin-tab`):
+  - Section: Modal tabs
+  - Type: tab
+  - Action: Shows URL, folder, and archive install controls.
+
+- **MCP name** (`#native-mcp-name`):
+  - Section: Custom MCP
+  - Type: text input
+  - Action: Sets the display name for the native MCP.
+
+- **MCP id** (`#native-mcp-id`):
+  - Section: Custom MCP
+  - Type: text input
+  - Action: Sets the publisher.name plugin id.
+
+- **Transport** (`#native-mcp-transport`):
+  - Section: Custom MCP
+  - Type: select
+  - Action: Chooses stdio, HTTP, or SSE.
+
+- **Command** (`#native-mcp-command`):
+  - Section: Custom MCP
+  - Type: text input
+  - Action: Sets the stdio command.
+
+- **Arguments** (`#native-mcp-args`):
+  - Section: Custom MCP
+  - Type: textarea
+  - Action: Sets one stdio argument per line.
+
+- **Server URL** (`#native-mcp-url`):
+  - Section: Custom MCP
+  - Type: text input
+  - Action: Sets the HTTP/SSE server URL.
+
+- **Environment JSON** (`#native-mcp-env`):
+  - Section: Custom MCP
+  - Type: textarea
+  - Action: Sets optional stdio environment variables as JSON.
+
+- **Headers JSON** (`#native-mcp-headers`):
+  - Section: Custom MCP
+  - Type: textarea
+  - Action: Sets optional HTTP/SSE headers as JSON.
+
+- **Autostart** (`#native-mcp-autostart`):
+  - Section: Custom MCP
+  - Type: checkbox
+  - Action: Starts the native MCP when NusaShell opens.
+
+- **Import JSON** (`#native-mcp-import`):
+  - Section: Custom MCP
+  - Type: textarea
+  - Action: Accepts a Cursor-style single-server mcpServers JSON object.
+
+- **Fill from JSON** (`#native-mcp-import-btn`):
+  - Section: Custom MCP
+  - Type: button
+  - Action: Parses JSON into the form fields.
+
+- **Save MCP** (`#native-mcp-save`):
+  - Section: Custom MCP
+  - Type: button
+  - Action: Writes or updates the native MCP manifest and refreshes inventory.
+
+- **MCP status** (`#native-mcp-status`):
+  - Section: Custom MCP
+  - Type: status text
+  - Action: Shows native MCP save or validation errors.
+
 - **Install from URL** (`#install-url-input`):
   - Section: Install options
   - Type: text input

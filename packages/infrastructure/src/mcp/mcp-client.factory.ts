@@ -16,11 +16,11 @@ export class McpClientFactory implements McpClientFactoryPort {
     return new StdioMcpClient(command, args, env, cwd, this.logger);
   }
 
-  createForHttp(url: string): McpClientPort {
-    return new HttpMcpClient(url, this.logger);
+  createForHttp(url: string, headers?: Readonly<Record<string, string>>): McpClientPort {
+    return new HttpMcpClient(url, this.logger, headers);
   }
 
-  createForSse(url: string): McpClientPort {
-    return new SseMcpClient(url, this.logger);
+  createForSse(url: string, headers?: Readonly<Record<string, string>>): McpClientPort {
+    return new SseMcpClient(url, this.logger, headers);
   }
 }

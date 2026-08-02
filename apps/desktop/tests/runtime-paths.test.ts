@@ -12,9 +12,9 @@ describe("desktop runtime paths", () => {
       resourcesPath,
       userDataPath: "/home/user/.config/nusashell",
     })).toEqual({
-      pluginsRoot: "/home/user/.config/nusashell/plugins",
+      pluginsRoot: resolve("/home/user/.config/nusashell", "plugins"),
       bundledPluginsRoot: join(resourcesPath, "plugins"),
-      userPluginsRoot: "/home/user/.config/nusashell/plugins",
+      userPluginsRoot: resolve("/home/user/.config/nusashell", "plugins"),
       builtinSkillsRoot: join(resourcesPath, "agent", "skills"),
       promptsRoot: join(resourcesPath, "agent", "prompts"),
       docsRoot: join(resourcesPath, "agent", "docs"),

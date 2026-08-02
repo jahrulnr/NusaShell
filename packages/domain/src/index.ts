@@ -32,6 +32,7 @@ export {
 export {
   PluginManifest,
   type PluginManifestInput,
+  type PluginSource,
   type WindowMode,
 } from "./plugin/entities/plugin-manifest.js";
 export { Plugin, type CreatePluginInput } from "./plugin/entities/plugin.js";

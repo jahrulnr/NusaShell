@@ -36,6 +36,7 @@ export interface IpcContext {
   // Container service shortcuts (facade — avoids container.* in IPC modules)
   readonly commandBus: BootstrapResult["container"]["commandBus"];
   readonly queryBus: BootstrapResult["container"]["queryBus"];
+  readonly syncPlugins: BootstrapResult["container"]["syncPlugins"];
   readonly skillRegistry: BootstrapResult["container"]["skillRegistry"];
   readonly skillProvenance: BootstrapResult["container"]["skillProvenance"];
   readonly skillUsage: BootstrapResult["container"]["skillUsage"];

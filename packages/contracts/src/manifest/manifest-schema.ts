@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const ManifestSchema = z.object({
+  source: z.enum(["native-mcp", "package"]).optional(),
   id: z
     .string()
     .min(1)
@@ -46,6 +47,7 @@ export const ManifestSchema = z.object({
     args: z.array(z.string()).optional(),
     url: z.string().min(1).optional(),
     env: z.record(z.string(), z.string()).optional(),
+    headers: z.record(z.string(), z.string()).optional(),
     autostart: z.boolean().optional(),
     keepAliveOnClose: z.boolean().optional(),
   }),

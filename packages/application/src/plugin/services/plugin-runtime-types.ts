@@ -22,6 +22,8 @@ export interface RuntimeEntry {
   version: string;
   icon: string;
   installPath: string;
+  source?: "native-mcp" | "package";
+  transport?: string;
   enabled: boolean;
   autostart: boolean;
   ui?: {
@@ -73,8 +75,11 @@ export interface WorkspaceSyncResult {
 
 export interface PluginLaunchSpec {
   readonly pluginId: string;
-  readonly transport: string;
+  readonly source?: "native-mcp" | "package";
+  readonly transport?: string;
   readonly command?: string;
+  readonly url?: string;
+  readonly headerKeys?: readonly string[];
   readonly args: readonly string[];
   /** Env keys only — values are redacted (secrets may live in env). */
   readonly envKeys: readonly string[];
@@ -99,6 +104,8 @@ export interface PluginView {
   readonly enabled: boolean;
   readonly autostart: boolean;
   readonly ui: RuntimeEntry["ui"];
+  readonly source?: "native-mcp" | "package";
+  readonly transport?: string;
   readonly keepAliveOnClose: boolean;
 }
 

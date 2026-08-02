@@ -113,7 +113,7 @@ export interface McpClientFactoryPort {
     cwd?: string,
   ): McpClientPort;
 
-  createForHttp(url: string): McpClientPort;
+  createForHttp(url: string, headers?: Readonly<Record<string, string>>): McpClientPort;
 
-  createForSse(url: string): McpClientPort;
+  createForSse(url: string, headers?: Readonly<Record<string, string>>): McpClientPort;
 }

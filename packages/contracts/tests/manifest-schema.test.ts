@@ -108,6 +108,16 @@ describe("ManifestSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts native HTTP MCP source with headers", () => {
+    const result = ManifestSchema.safeParse({
+      ...VALID,
+      source: "native-mcp",
+      ui: undefined,
+      mcp: { transport: "http", url: "https://example.test/mcp", headers: { Authorization: "Bearer secret" } },
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("accepts http transport with url", () => {
     const result = ManifestSchema.safeParse({
       ...VALID,

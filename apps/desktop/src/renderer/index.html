@@ -116,11 +116,6 @@
         </button>
       </nav>
 
-      <button class="add-plugin-btn" id="open-add-plugin" title="Add Plugin">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-        <span class="nav-label">Add Plugin</span>
-      </button>
-
       <div class="sidebar-footer">
         <button class="sidebar-footer-action" id="open-docs" type="button" title="Open NusaShell docs on GitHub">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="M5 4.5A2.5 2.5 0 0 1 7.5 2H20v16H7.5A2.5 2.5 0 0 0 5 20.5v-16Z" stroke="currentColor" stroke-width="1.6"/><path d="M5 20.5A2.5 2.5 0 0 1 7.5 18H20M9 6h7M9 10h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -400,8 +395,14 @@
 
       <!-- ===== View: Plugins ===== -->
       <section class="view" data-view="plugins">
-        <h1 class="page-title">Plugins</h1>
-        <p class="subtitle">Installed plugins and their live MCP process state.</p>
+        <div class="agent-header">
+          <div><h1 class="page-title">Plugins</h1><p class="subtitle">Installed plugins and their live MCP process state.</p></div>
+          <div class="plugins-toolbar">
+            <button class="mini-btn" id="plugins-add-mcp" type="button">+ Add MCP</button>
+            <button class="mini-btn" id="plugins-install-plugin" type="button">Install plugin</button>
+            <button class="mini-btn" id="plugins-edit-mcp" type="button" disabled>Edit MCP</button>
+          </div>
+        </div>
         <div class="plugin-table" id="plugin-table"></div>
       </section>
 
@@ -737,12 +738,33 @@
   <div class="modal-overlay" id="add-plugin-modal" style="display:none">
     <div class="modal">
       <div class="modal-header">
-        <h2>Add Plugin</h2>
+        <h2 id="add-plugin-modal-title">Add MCP</h2>
         <button class="icon-btn" id="modal-close">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
         </button>
       </div>
       <div class="modal-body">
+        <div class="plugin-modal-tabs" role="tablist" aria-label="Plugin install type">
+          <button class="plugin-modal-tab active" id="custom-mcp-tab" type="button" role="tab" aria-selected="true" aria-controls="custom-mcp-panel">Custom MCP</button>
+          <button class="plugin-modal-tab" id="nusashell-plugin-tab" type="button" role="tab" aria-selected="false" aria-controls="nusashell-plugin-panel">NusaShell Plugin</button>
+        </div>
+        <div id="custom-mcp-panel" role="tabpanel">
+          <div class="modal-section">
+            <label class="modal-label" for="native-mcp-name">Name</label><input class="modal-input" id="native-mcp-name" placeholder="My MCP server">
+            <label class="modal-label" for="native-mcp-id">ID (publisher.name)</label><input class="modal-input" id="native-mcp-id" placeholder="custom.my-mcp">
+            <label class="modal-label" for="native-mcp-transport">Transport</label><select class="modal-input" id="native-mcp-transport"><option value="stdio">stdio</option><option value="http">HTTP</option><option value="sse">SSE</option></select>
+            <label class="modal-label" for="native-mcp-command">Command</label><input class="modal-input" id="native-mcp-command" placeholder="npx">
+            <label class="modal-label" for="native-mcp-args">Arguments (one per line)</label><textarea class="modal-input" id="native-mcp-args" rows="3" placeholder="-y\npackage-name"></textarea>
+            <label class="modal-label" for="native-mcp-url">Server URL</label><input class="modal-input" id="native-mcp-url" placeholder="https://example.com/mcp">
+            <label class="modal-label" for="native-mcp-env">Environment JSON</label><textarea class="modal-input" id="native-mcp-env" rows="2" placeholder='{"KEY":"value"}'></textarea>
+            <label class="modal-label" for="native-mcp-headers">Headers JSON</label><textarea class="modal-input" id="native-mcp-headers" rows="2" placeholder='{"Authorization":"Bearer …"}'></textarea>
+            <label class="modal-checkbox"><input id="native-mcp-autostart" type="checkbox"> Start MCP when NusaShell opens</label>
+            <label class="modal-label" for="native-mcp-import">Import JSON (optional)</label><textarea class="modal-input" id="native-mcp-import" rows="3" placeholder='{"mcpServers":{"my-server":{"command":"npx","args":[]}}}'></textarea>
+            <div class="modal-input-row"><button class="action-btn" id="native-mcp-import-btn" type="button">Fill from JSON</button><button class="action-btn action-start" id="native-mcp-save" type="button">Save MCP</button></div>
+          </div>
+          <div class="modal-status" id="native-mcp-status" style="display:none"></div>
+        </div>
+        <div id="nusashell-plugin-panel" role="tabpanel" hidden>
         <div class="modal-section">
           <div class="modal-label">Install from URL</div>
           <div class="modal-input-row">
@@ -761,6 +783,7 @@
           <button class="local-archive-btn" id="pick-local-archive-btn" type="button">Choose a .zip or .tar.gz archive instead</button>
         </div>
         <div class="modal-status" id="install-status" style="display:none"></div>
+        </div>
       </div>
     </div>
   </div>

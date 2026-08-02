@@ -198,6 +198,8 @@ export class PluginLifecycleCoordinator {
       version: entry.version,
       icon: entry.icon,
       installPath: entry.installPath,
+      source: entry.source ?? "package",
+      transport: entry.transport ?? "stdio",
       state: entry.runtime.state,
       enabled: entry.enabled,
       autostart: entry.autostart,

@@ -121,12 +121,6 @@ Vertical navigation on the left, ordered Home, Agent, Skills, Learning, Plugins,
   - Action: Switches the main content to the Logs tail view.
   - Related: Log tail (`#log-tail`)
 
-- **Add Plugin** (`#open-add-plugin`):
-  - Section: Sidebar
-  - Type: button
-  - Action: Opens the Add Plugin modal to install a plugin from a URL, native folder picker, or native archive picker.
-  - Related: Add Plugin modal (`#add-plugin-modal`), Install from URL (`#install-url-input`)
-
 - **Docs on GitHub** (`#open-docs`):
   - Section: Sidebar
   - Type: button
