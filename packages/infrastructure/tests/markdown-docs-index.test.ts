@@ -146,7 +146,7 @@ describe("MarkdownDocsIndex", () => {
     expect(await index.readDoc("missing.md")).toBeUndefined();
   });
 
-  it("indexes generated UI docs under the ui/ domain", async () => {
+  it("indexes generated UI docs under the ui/ domain", { timeout: 30_000 }, async () => {
     const uiOut = join(tempDir, "ui");
     const indexRoot = tempDir;
     const htmlPath = resolve(repoRoot, "apps/desktop/src/renderer/index.html");

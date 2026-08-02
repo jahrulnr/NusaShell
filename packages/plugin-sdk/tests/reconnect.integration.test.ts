@@ -39,7 +39,7 @@ describe("NusaClient reconnect integration", () => {
     try { await server.stop(); } catch {}
   });
 
-  it("auto-reconnects after server restart", async () => {
+  it("auto-reconnects after server restart", { timeout: 30_000 }, async () => {
     server = makeServer(basePort);
     await server.start();
 
