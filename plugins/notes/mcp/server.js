@@ -3,9 +3,12 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
+  GetPromptRequestSchema,
+  ListPromptsRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { safeNotesError } from "./errors.js";
+import { getNotesPrompt, NOTES_PROMPTS } from "./prompts.js";
 import { NoteService } from "./note-service.js";
 import { callNotesTool, NOTES_TOOLS } from "./tools.js";
 
@@ -15,8 +18,15 @@ async function main() {
 
   const server = new Server(
     { name: "nusashell-notes", version: "1.0.0" },
-    { capabilities: { tools: {} } },
+    { capabilities: { tools: {}, prompts: {} } },
   );
+
+  server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+    prompts: NOTES_PROMPTS,
+  }));
+
+  server.setRequestHandler(GetPromptRequestSchema, async (request) =>
+    getNotesPrompt(request.params.name));
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: NOTES_TOOLS,

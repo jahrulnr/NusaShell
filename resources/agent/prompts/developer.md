@@ -12,7 +12,7 @@ The workspace above is the source of truth for agent tool I/O. The shell binds i
 
 ## Tool availability
 
-The tool list above is authoritative for this turn. Meta-tools (`mcp_list`, `mcp_enable`, `mcp_disable`, `tool_list`, `tool_search`, `tool_schema`, `mcp_context`, `docs_search`, `docs_list`, `docs_read`, `skill_list`, `skill_search`, `skill_read`, `memory`, `skill_manage`, `job`, and `ask_question` when this turn is interactive) are always present. Any other tool names listed here were granted for this turn only via `tool_schema` and will not be available in the next turn.
+The tool list above is authoritative for this turn. Meta-tools (`mcp_list`, `mcp_enable`, `mcp_disable`, `mcp_register`, `mcp_unregister`, `tool_list`, `tool_search`, `tool_schema`, `mcp_context`, `docs_search`, `docs_list`, `docs_read`, `skill_list`, `skill_search`, `skill_read`, `memory`, `skill_manage`, `job`, and `ask_question` when this turn is interactive) are always present. Any other tool names listed here were granted for this turn only via `tool_schema` and will not be available in the next turn.
 
 Use the progressive discovery workflow described in the `mcp-tools.md` prompt to find and call concrete plugin tools.
 

@@ -9,8 +9,9 @@ import {
   resolvePluginUiPath,
   type PluginWindowOptionsInput,
 } from "./plugin-window-options.js";
+import { resolveIsDev, resolveWsPort } from "./runtime-mode.js";
 
-const isDev = process.argv.includes("--dev");
+const isDev = resolveIsDev({ isPackaged: app.isPackaged, argv: process.argv });
 
 const RENDERER_DIST = join(__dirname, "..", "renderer");
 const PRELOAD_PATH = join(__dirname, "preload.cjs");
@@ -163,7 +164,7 @@ export async function openPluginWindow(
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      devTools: true,
+      devTools: isDev,
     },
   });
 
@@ -188,7 +189,10 @@ export async function openPluginWindow(
   win.on("closed", () => {
     pluginWindows.delete(pluginId);
     if (options.keepAliveOnClose) return;
-    const ws = new (require("ws"))(`ws://127.0.0.1:${process.env.NUSASHELL_PORT ?? "9130"}`);
+    const ws = new (require("ws"))(`ws://127.0.0.1:${resolveWsPort({
+      isDev: process.env.NUSASHELL_IS_DEV === "true",
+      envPort: process.env.NUSASHELL_PORT,
+    })}`);
     ws.on("open", () => {
       ws.send(JSON.stringify({
         kind: "request",

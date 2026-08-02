@@ -138,7 +138,7 @@ export async function execSkillManage(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const code = message.includes("already exists") ? "skill_exists"
-      : message.includes("60 characters") ? "description_too_long"
+      : message.includes("1024 characters") ? "description_too_long"
       : "skill_error";
     return { ok: false, error: { code, message }, meta: {} };
   }

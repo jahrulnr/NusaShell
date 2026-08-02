@@ -17,7 +17,7 @@ export interface LearningNode {
   readonly category: string;
   readonly useCount: number;
   readonly state: "active" | "stale" | "archived";
-  readonly createdBy: "agent" | "user";
+  readonly createdBy: "agent" | "user" | "builtin";
   readonly pinned: boolean;
   readonly memorySource?: "memory" | "user";
 }

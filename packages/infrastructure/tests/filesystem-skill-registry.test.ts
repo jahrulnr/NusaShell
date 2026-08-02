@@ -110,12 +110,40 @@ describe("FilesystemSkillRegistry", () => {
     await expect(registry.create("dup", skillMd)).rejects.toThrow(/already exists/i);
   });
 
-  it("rejects create when description exceeds 60 characters", async () => {
+  it("rejects create when description exceeds 1024 characters", async () => {
     const root = await mkdtemp(join(tmpdir(), "nusashell-skills-"));
     const registry = new FilesystemSkillRegistry(join(root, "managed"));
-    const longDesc = "x".repeat(61);
+    const longDesc = "x".repeat(1025);
     const skillMd = `---\nname: long\ndescription: ${longDesc}\n---\n# Long\n`;
-    await expect(registry.create("long", skillMd)).rejects.toThrow(/60 characters or fewer/i);
+    await expect(registry.create("long", skillMd)).rejects.toThrow(/1024 characters or fewer/i);
+  });
+
+  it("round-trips MCP requirements, compatibility, metadata, and long descriptions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-skills-"));
+    const registry = new FilesystemSkillRegistry(join(root, "managed"));
+    const description = "x".repeat(200);
+    const skillMd = [
+      "---",
+      "name: invoice-filer",
+      `description: ${description}`,
+      "requirements:",
+      "  mcp:",
+      "    - nusashell.files",
+      "    - role:terminal",
+      "compatibility: Needs filesystem write access",
+      "metadata:",
+      "  version: 1",
+      "---",
+      "# Invoice filer",
+    ].join("\n");
+    await registry.create("invoice-filer", skillMd);
+    const summary = (await registry.list())[0];
+    expect(summary).toMatchObject({
+      description,
+      requirements: { mcp: ["nusashell.files", "role:terminal"] },
+      compatibility: "Needs filesystem write access",
+      metadata: { version: "1" },
+    });
   });
 
   it("rejects create when name does not match skill id", async () => {

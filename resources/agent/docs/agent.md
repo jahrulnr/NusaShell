@@ -21,7 +21,16 @@ The agent has shell-owned tools that do not require a running MCP server:
 - `docs_list`: list all available documents.
 - `docs_read`: read a specific document by path.
 - `mcp_list`, `mcp_enable`, `mcp_disable`: control plugin lifecycle.
+- `mcp_register`, `mcp_unregister`: confirm and admit/remove user plugins under userData/plugins; bundled plugins cannot be unregistered.
 - `tool_search`, `tool_list`, `tool_schema`: discover and prepare MCP tools.
-- `mcp_context`: discover prompts and resources.
+- `mcp_context`: discover prompts and resources. For a plugin's capability
+  howto, use its `list_prompts` / `get_prompt` actions after enabling the plugin;
+  prompt retrieval adds context and never executes a tool.
+- Built-in skills, including `mcp-creator` and `skill-creator`, are seeded into
+  the managed skills library with protected `builtin` provenance.
+
+For shell/platform questions, use `docs_search`. Do not use the shell corpus as
+an inventory of removable plugin tools or plugin-specific howtos; discover those
+from the live plugin with `tool_list`/`tool_search` and plugin-owned MCP prompts.
 
 These tools appear automatically; the model does not need to start an MCP server to use them.

@@ -9,10 +9,14 @@
 > [`backend-structure.md`](./backend-structure.md). The runnable PoC lives in
 > [`PoC/`](./PoC/).
 >
-> **Scope note:** security (sandboxing, permission enforcement, signing) is
-> intentionally **not** detailed in this phase. Focus first on architectural
-> correctness and DX. Security is added later as a separate layer, not mixed in
-> from day one.
+> **Scope note:** **host isolation** (iframe sandbox attributes, install-time
+> permission prompts, process isolation, signing) is intentionally **not**
+> detailed in this phase. Focus first on architectural correctness and DX.
+> Host isolation may be added later as a separate layer, not mixed in from day
+> one. That deferred layer does **not** include vetting MCP server behavior,
+> moderating AI model output, or prompt-injection defenses — those stay
+> permanently out of scope; see
+> [`architecture/security-boundary.md`](./architecture/security-boundary.md).
 
 ---
 
@@ -210,7 +214,10 @@ Design notes:
 - **`ui` optional:** omit `ui` for a headless MCP-only plugin. Headless plugins
   never open a `BrowserWindow`, do not appear on the Home launcher grid, and are
   managed from the **Plugins** view (Start / Stop / Autostart / uninstall) and
-  via agent `mcp_*` tools. `icon` stays required (emoji/text is valid). At
+  via agent `mcp_*` tools. `icon` stays required (emoji/text is valid). The
+  in-app agent authors only under writable `userData/plugins/` and must use
+  confirmation-gated `mcp_register`; repository `plugins/` remains the Cursor/
+  monorepo development target and bundled `resources/plugins/` is read-only. At
   install time, when `ui.entry` is declared the shell `access()`es the resolved
   file under the plugin folder and fails the install early if it is missing or
   escapes the plugin dir; local file icons get the same check.
@@ -432,7 +439,7 @@ than shipping a new server from scratch.
 | MCP connect | child_process (stdio) or existing remote (sse/http) - schema supports both |
 | Installed metadata | filesystem/JSON early → SQLite in the monorepo MVP |
 | Live runtime state | `PluginRuntimeManager` in-memory (not duplicated in DB/renderer/gateway) |
-| Security | **deferred** - next phase as an additive layer, not built in from the start |
+| Host isolation | **deferred** - iframe sandbox, install permissions, process isolation as a later additive layer (not MCP/AI behavioral hardening; see [`architecture/security-boundary.md`](./architecture/security-boundary.md)) |
 
 **Status & next steps:**
 
@@ -441,4 +448,4 @@ than shipping a new server from scratch.
 3. Finalize the manifest schema (JSON Schema / Zod) + `validate-manifest` script
 4. Swap PoC hand-rolled JSON-RPC → official `@modelcontextprotocol/sdk`
 5. Exercise `keepAliveOnClose` + idle suspend on one real background case
-6. Only then enter the security phase: iframe sandboxing, permission dialogs, process isolation
+6. Only then enter the **host isolation** phase: iframe sandboxing, permission dialogs, process isolation (not MCP/AI behavioral vetting — see [`architecture/security-boundary.md`](./architecture/security-boundary.md))

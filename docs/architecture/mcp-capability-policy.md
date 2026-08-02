@@ -16,8 +16,15 @@ operators and agents a single capability vocabulary.
 | Roots | `roots/list`, `roots/list_changed` | Client advertises roots + `listChanged`; `PluginRuntimeManager.syncWorkspace` updates the workspace root and notifies. The bundled Files server consumes roots in-process. Roots are interoperability, not security (see `docs/RISK.md`). Full design in `docs/architecture/workspace-mcp-binding.md`. |
 
 The control model is intentional: prompts are user-controlled, resources are
-application-controlled, and tools are model-controlled. The shell still brokers
-every request and does not let plugin UIs or providers connect directly to MCP.
+application-controlled, and tools are model-controlled. Plugin-authored prompts
+are the plugin-local narrative knowledge channel: they travel with the plugin and
+are removed from the available knowledge surface when the plugin is uninstalled.
+The shell still brokers every request and does not let plugin UIs or providers
+connect directly to MCP.
+
+The shell corpus under `resources/agent/docs/` is reserved for NusaShell
+platform behavior. It must not become a catalog of removable plugin tools or
+plugin-specific howtos; use live tool discovery and `mcp_context` instead.
 
 ## Knowledge only: do not enable yet
 

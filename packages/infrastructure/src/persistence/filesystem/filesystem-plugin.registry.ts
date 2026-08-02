@@ -14,22 +14,27 @@ import { scanPluginDirectories, resolveManifestPath } from "../../plugins/plugin
 export class FilesystemPluginRegistry implements PluginRepositoryPort {
   private cache = new Map<string, Plugin>();
   private loaded = false;
+  private readonly rootDirs: readonly string[];
 
   constructor(
-    private readonly rootDir: string,
+    rootDirs: string | readonly string[],
     private readonly logger?: Logger,
-  ) {}
+  ) {
+    this.rootDirs = Array.isArray(rootDirs) ? rootDirs : [rootDirs];
+  }
 
   private async ensureLoaded(): Promise<void> {
     if (this.loaded) return;
     this.loaded = true;
     this.cache.clear();
 
-    const dirs = await scanPluginDirectories(this.rootDir);
-    for (const dir of dirs) {
-      const plugin = await this.loadPluginFromDir(dir.path);
-      if (plugin) {
-        this.cache.set(PluginId.toString(plugin.id), plugin);
+    for (const rootDir of this.rootDirs) {
+      const dirs = await scanPluginDirectories(rootDir);
+      for (const dir of dirs) {
+        const plugin = await this.loadPluginFromDir(dir.path);
+        if (plugin) {
+          this.cache.set(PluginId.toString(plugin.id), plugin);
+        }
       }
     }
   }
@@ -85,6 +90,11 @@ export class FilesystemPluginRegistry implements PluginRepositoryPort {
       installPath: dirPath,
       installedAt: new Date(),
     });
+  }
+
+  async refresh(): Promise<void> {
+    this.loaded = false;
+    await this.ensureLoaded();
   }
 
   async findById(id: PluginId): Promise<Plugin | null> {

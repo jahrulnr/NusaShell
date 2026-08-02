@@ -23,6 +23,26 @@ later, fix the renamed helper and re-run the installer.
 
 macOS installs to `~/Applications/NusaShell.app`; the installer removes the quarantine attribute when present. If `~/.local/bin` is not on Linux's PATH, add the exact line printed by the installer to your shell profile.
 
-To uninstall the Linux user-space installation, remove `~/.local/share/nusashell`, `~/.local/bin/nusashell`, `~/.local/share/applications/nusashell.desktop`, and optionally `~/.config/autostart/nusashell.desktop`. Remove `~/.config/nusashell` too only for a full data wipe.
+The Windows PowerShell installer stores versions under
+`%LOCALAPPDATA%\\Programs\\NusaShell\\`, keeps the active `current` junction
+there, and creates a Start Menu shortcut at
+`%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\NusaShell.lnk`.
+
+## Uninstall
+
+Close NusaShell before removing its files. To uninstall the Linux user-space
+installation, remove `~/.local/share/nusashell`, `~/.local/bin/nusashell`,
+`~/.local/share/applications/nusashell.desktop`, and optionally
+`~/.config/autostart/nusashell.desktop`. Remove `~/.config/nusashell` too only
+for a full data wipe; it contains durable app state and is not required to
+remove the program.
+
+On macOS, remove `~/Applications/NusaShell.app` from Finder or the Trash. For a
+full data wipe, also remove `~/Library/Application Support/nusashell/`.
+
+On Windows, remove `%LOCALAPPDATA%\\Programs\\NusaShell\\` and the Start Menu
+shortcut if the user-space install has no registered uninstaller. For a full
+data wipe, also remove `%APPDATA%\\nusashell\\`. Removing the app and wiping
+its data are separate choices on every OS.
 
 Before piping any installer to a shell, you can inspect it first: download it, read it, then run it. Checksums protect the release archive after download; a pinned version makes that inspection reproducible.

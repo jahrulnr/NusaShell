@@ -5,6 +5,69 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] - 2026-08-02
+
+### Added
+
+- Built-in `mcp-creator` and `skill-creator` skills for in-app MCP plugin and
+  agent-skill authoring, including progressive-disclosure templates and
+  protected builtin provenance.
+- Confirmation-gated `mcp_register` / `mcp_unregister` tools for user plugins
+  under writable `userData/plugins/`, with bundled plugin protection and
+  dual-root bundled/user discovery.
+- Plugin-owned MCP howto prompts for the built-in Notes, Files, Mail, and
+  Terminal plugins.
+- Skill frontmatter support for `requirements.mcp`, `compatibility`, and
+  string metadata, with descriptions up to 1024 characters.
+- Cross-platform agent FAQ and runtime/install documentation for data paths,
+  uninstall, contribution, and plugin authoring.
+
+### Fixed
+
+- Corrected the duplicate TypeScript `type` export in the skill ports barrel.
+
+## [0.1.6] - 2026-08-02
+
+### Added
+
+- **Explicit MCP/AI security & responsibility boundary.** New
+  `docs/architecture/security-boundary.md` (and agent-facing
+  `resources/agent/docs/security.md`) state that NusaShell is a broker/platform
+  for AI tools, not a security layer that vets MCP server behavior, AI model
+  decisions, or prompt injection. Responsibility sits with the user/operator,
+  plugin authors, and AI providers. Host isolation (iframe sandbox, install
+  permissions, process isolation) remains a deferred separate phase and is
+  not conflated with behavioral MCP/AI hardening.
+
+### Changed
+
+- `docs/RISK.md`, `docs/blueprint.md` scope note, and `README.md` now point at
+  the boundary doc; agent MCP launch-override allowlists / signed manifests /
+  approval UX are **declined**, not future roadmap.
+
+## [0.1.5] - 2026-08-02
+
+### Added
+
+- **Dev/prod runtime isolation.** Unpackaged `--dev` mode now binds the
+  embedded WebSocket server to port `9131` (prod stays on `9130`) and redirects
+  durable state to `<repo>/.nusashell/` (gitignored) via
+  `app.setPath("userData", …)`. Prod and dev can now run concurrently without
+  fighting on the port or sharing settings/DB/conversations, and dev state
+  stays in-tree for easy tracing. `NUSASHELL_PORT` always wins when set.
+
+### Changed
+
+- **Mode SoT is `app.isPackaged`** (not `NODE_ENV`). `isDev` is now
+  `!app.isPackaged && argv.includes("--dev")`, so a packaged binary can never
+  leak dev behavior (`--no-sandbox`, debug log level, Vite renderer URL,
+  DevTools) even if `--dev` is appended.
+- Plugin window `devTools` is now gated on `isDev` (was unconditionally `true`).
+- `NUSASHELL_AI_STUB` is ignored in packaged builds (prod never uses the stub).
+- Preload and window-manager derive the WS port from the shared
+  `resolveWsPort` helper instead of reading `NUSASHELL_PORT` ad hoc, removing
+  the client/server desync risk.
+
 ## [0.1.4] - 2026-08-02
 
 ### Fixed

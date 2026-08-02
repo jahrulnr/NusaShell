@@ -9,6 +9,7 @@ Use this reference as a source map and shared checklist. Re-read repository sour
 - Use semantic versions. Domain validation is stricter than the shallow Zod version field.
 - Keep `icon` non-empty for both shapes. Relative file icons must exist inside the plugin folder.
 - Keep plugin UI and MCP from peer-connecting; the shell owns lifecycle and routing.
+- Keep plugin capability knowledge with the plugin: live tool schemas plus MCP prompts for narrative howtos. Do not rely on `resources/agent/docs/` for removable plugin catalogs.
 - Treat the PoC as a behavioral reference, not the target scaffold.
 
 ## Transport selection
@@ -35,6 +36,7 @@ mcp/
 ├── server.js          # SDK transport, handlers, shutdown boundary
 ├── server.cjs         # bundled artifact when manifest declares it
 ├── tool-catalog.js    # canonical names
+├── prompts.js         # domain: strongly required; native-like: recommended
 ├── tools.js           # descriptors, strict validation, dispatch
 ├── service.js         # capability and I/O behavior
 ├── config.js          # bounded environment/config parsing
@@ -54,10 +56,10 @@ For expected failures, return `isError: true` with a bounded, sanitized message.
 
 ## Choose an exemplar
 
-- `plugins/notes/`: compact CRUD, strict Zod input, persistence, safe errors, catalog synchronization.
-- `plugins/files/`: root containment, bounded reads/search, destructive operations, split UI state.
-- `plugins/mail/`: host-owned credentials, runtime injection, multi-account behavior, remote errors.
-- `plugins/terminal/`: long-running sessions, process cleanup, absolute cwd rules, keep-alive behavior.
+- `plugins/notes/`: domain-tier compact CRUD, strict Zod input, persistence, safe errors, catalog synchronization, and a plugin-owned howto prompt.
+- `plugins/files/`: native-like root containment, bounded reads/search, destructive operations, split UI state, and a constraints prompt.
+- `plugins/mail/`: domain-tier host-owned credentials, runtime injection, multi-account behavior, remote errors, and a plugin-owned howto prompt.
+- `plugins/terminal/`: native-like long-running sessions, process cleanup, absolute cwd rules, keep-alive behavior, and a constraints prompt.
 
 Reuse the matching risk pattern rather than copying an entire plugin.
 
@@ -85,6 +87,7 @@ Reuse the matching risk pattern rather than copying an entire plugin.
 | Validation | Missing, extra, over-limit, hostile, and unknown input fails safely |
 | Results | Structured result useful; text fallback bounded; secrets absent |
 | Lifecycle | Start, call, stop, crash, restart, shutdown behave predictably |
+| Plugin knowledge | Start the plugin, then reach its howto/workflow through `mcp_context` `list_prompts` / `get_prompt`; domain tier must pass, native-like tier should pass |
 | Product | Launcher/Plugins/agent discovery matches the selected shape |
 
 Run plugin-local build, typecheck, and tests when defined. Run shared suites only for the layers changed.

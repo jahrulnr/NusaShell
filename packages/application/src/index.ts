@@ -227,6 +227,7 @@ export type {
   SkillReadResult,
   SkillRegistryPort,
   SkillSummary,
+  SkillRequirements,
   ArchivedSkillSummary,
   SkillOrigin,
   SkillProvenanceEntry,

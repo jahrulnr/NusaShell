@@ -13,23 +13,29 @@ import { scanPluginDirectories, resolveManifestPath } from "./plugin-directory-l
 import { assertDeclaredFilesExist } from "./plugin-path-checks.js";
 
 export class PluginSyncService {
+  private readonly pluginRoots: readonly string[];
+
   constructor(
-    private readonly pluginsRoot: string,
+    pluginRoots: string | readonly string[],
     private readonly repository: PluginRepositoryPort,
     private readonly logger?: Logger,
-  ) {}
+  ) {
+    this.pluginRoots = Array.isArray(pluginRoots) ? pluginRoots : [pluginRoots];
+  }
 
   async sync(): Promise<void> {
-    const dirs = await scanPluginDirectories(this.pluginsRoot);
     const foundIds = new Set<string>();
 
-    for (const dir of dirs) {
-      const plugin = await this.loadPluginFromDir(dir.path);
-      if (plugin) {
-        const idStr = PluginId.toString(plugin.id);
-        foundIds.add(idStr);
-        await this.repository.save(plugin);
-        this.logger?.debug({ pluginId: idStr, path: dir.path }, "Synced plugin to repository");
+    for (const pluginRoot of this.pluginRoots) {
+      const dirs = await scanPluginDirectories(pluginRoot);
+      for (const dir of dirs) {
+        const plugin = await this.loadPluginFromDir(dir.path);
+        if (plugin) {
+          const idStr = PluginId.toString(plugin.id);
+          foundIds.add(idStr);
+          await this.repository.save(plugin);
+          this.logger?.debug({ pluginId: idStr, path: dir.path }, "Synced plugin to repository");
+        }
       }
     }
 

@@ -4,6 +4,7 @@ export type {
   SkillReadResult,
   SkillRegistryPort,
   SkillSummary,
+  SkillRequirements,
   ArchivedSkillSummary,
 } from "./ports/skill-registry.port.js";
 export type {

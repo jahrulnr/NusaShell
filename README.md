@@ -88,8 +88,13 @@ Captured from the Electron desktop app (`make dev`):
 | [`docs/architecture/job-automation.md`](./docs/architecture/job-automation.md) | Scheduled durable jobs (one-shot/recurring) that fire headless agent turns or plugin tool calls |
 | [`docs/architecture/plugin-sandbox-readiness.md`](./docs/architecture/plugin-sandbox-readiness.md) | Files root-containment bundle guard, plugin process-death status SoT, and Tools=0 honesty mitigations |
 | [`docs/architecture/workspace-mcp-binding.md`](./docs/architecture/workspace-mcp-binding.md) | How `conversation.workspace` binds to MCP (wrap → Roots → respawn/enable overrides) |
+| [`docs/architecture/security-boundary.md`](./docs/architecture/security-boundary.md) | Explicit stance: NusaShell brokers MCP/AI; it does not vet plugin or model behavior |
 | [`docs/RISK.md`](./docs/RISK.md) | Residual risk register: agent MCP launch overrides (`npx` swap), advisory roots |
 | [`docs/INSTALL.md`](./docs/INSTALL.md) | User-space install, update channels, verification, and uninstall |
+| [`resources/agent/docs/data-locations.md`](./resources/agent/docs/data-locations.md) | In-app FAQ: OS-specific data roots, file inventory, and plugin locations |
+| [`resources/agent/docs/uninstall.md`](./resources/agent/docs/uninstall.md) | In-app FAQ: app uninstall versus plugin uninstall and data wipe |
+| [`resources/agent/docs/contribute.md`](./resources/agent/docs/contribute.md) | In-app FAQ: clone, prerequisites, development, tests, and PR norms |
+| [`resources/agent/docs/build-plugin.md`](./resources/agent/docs/build-plugin.md) | In-app FAQ: headed/windowed and headless MCP plugin authoring |
 | [`docs/mcp/nusashell-mail-mcp-plugin-spec.md`](./docs/mcp/nusashell-mail-mcp-plugin-spec.md) | Mail plugin protocol assessment, security model, and target tool contract |
 | [`docs/mcp/nusashell-mail-mcp-plugin-implementation.md`](./docs/mcp/nusashell-mail-mcp-plugin-implementation.md) | Implemented read-only Mail milestone, runtime wiring, and current limitations |
 | [`docs/PoC/`](./docs/PoC/) | Runnable zero-dep bridge demo (behavioral reference, not the target layout) |
@@ -148,6 +153,11 @@ Startup & background so closing the window hides to the tray instead of
 quitting. Optional **Launch at login** is available on packaged builds.
 
 ## Writing your own plugin
+
+Cursor/repository development uses `plugins/`. The in-app agent uses the seeded
+`mcp-creator` skill to author under writable `{userData}/plugins/`, then admits
+the existing folder with interactive `mcp_register` before enabling it. Humans
+can continue to use Add Plugin for local folders and archives.
 
 A plugin is a folder with `manifest.json` + `mcp/`, and optionally `ui/` for a
 windowed plugin. `ui/` is optional — omit it for a **headless MCP-only plugin**
@@ -237,10 +247,25 @@ Clean Architecture packages, WebSocket client transport, official MCP TypeScript
 SDK, SQLite for installed-plugin metadata. Domain layer is in place; application
 and infrastructure are next.
 
+The managed agent skills library includes builtin `mcp-creator` and
+`skill-creator` packages. `skill-creator` teaches progressive-disclosure skill
+authoring and optional MCP requirements; it does not add `skill_exec`.
+
+**Security & responsibility model:** NusaShell is a broker and host for AI
+tools — not a security layer that certifies MCP servers or AI models. You
+choose which plugins and providers to enable; plugin authors own their server
+behavior; AI providers own model behavior and injection resistance. Destructive
+or unexpected actions from an enabled tool or model are outside NusaShell's
+product responsibility. Structural platform guards (broker isolation, lifecycle
+correctness, Files/Terminal path containment, `data_is_untrusted` labels)
+remain. Full stance:
+[`docs/architecture/security-boundary.md`](./docs/architecture/security-boundary.md).
+
 **Deliberately deferred** (by design, to avoid premature complexity):
 
-- Security: iframe sandboxing, install-time permission prompts, process
-isolation - next phase after core plumbing, kept separate on purpose
+- Host isolation: iframe sandboxing, install-time permission prompts, process
+isolation — next phase after core plumbing, kept separate on purpose (protects
+the host process; does not vet MCP/AI behavior — see security boundary above)
 - Swapping the PoC hand-rolled stdio JSON-RPC for `@modelcontextprotocol/sdk`
 - Idle-timeout auto-suspend for MCP processes
 - Installing from a packaged `.zip` instead of a raw folder

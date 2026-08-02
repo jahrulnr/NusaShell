@@ -13,7 +13,7 @@ would improve future turns.
 - Do not encode environment-failure folklore or one-off debugging steps.
 - If there is nothing worth saving as a skill, respond with exactly:
   `Nothing to save.`
-- Skill descriptions must be ≤60 characters and the skill name must match the
+- Skill descriptions must be ≤1024 characters and the skill name must match the
   folder name (lowercase with hyphens).
 
 ## What not to save as skills

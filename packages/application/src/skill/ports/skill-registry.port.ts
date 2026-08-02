@@ -1,7 +1,14 @@
+export interface SkillRequirements {
+  readonly mcp?: readonly string[];
+}
+
 export interface SkillSummary {
   readonly id: string;
   readonly name: string;
   readonly description: string;
+  readonly requirements?: SkillRequirements;
+  readonly compatibility?: string;
+  readonly metadata?: Readonly<Record<string, string>>;
   readonly fileCount: number;
   readonly updatedAt: string;
 }

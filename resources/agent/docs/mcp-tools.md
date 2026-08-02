@@ -10,6 +10,15 @@ NusaShell uses a progressive MCP discovery flow.
 4. `tool_schema` loads the full input schema of one tool; `tool_schemas` grants several tools from the same plugin in one call (pass `pluginId` and `toolNames[]`). Prefer batch when you know you need more than one tool.
 5. The model then calls the tool in a following round using the schema it just loaded.
 
+For a plugin's narrative howto, use `mcp_context` with `list_prompts` and then
+`get_prompt`. Prompt retrieval provides context only; it never executes a tool.
+For skill authoring, read the builtin `skill-creator` skill before calling
+`skill_manage`. If a skill declares `requirements.mcp`, check `mcp_list` and
+enable a concrete plugin or suitable role substitute before following it.
+Plugin prompts are owned by the plugin, so uninstalling the plugin removes that
+knowledge path. Do not add built-in plugin tool catalogs or plugin-specific
+howtos to the shell documentation corpus.
+
 ## Paths and workspace
 
 The conversation workspace is the source of truth for agent tool I/O (not prompt-only). The shell binds it to bundled path/cwd-shaped tools: Terminal defaults `cwd` to the workspace when omitted; Files rewrites relative `path`/`source`/`destination` against the workspace. Absolute paths are preserved. MCP Roots + `roots/list_changed` update the Files root in-process when supported; static servers may get `NUSASHELL_WORKSPACE` at spawn / via `mcp_enable` overrides. Third-party plugins that ignore roots still need an explicit absolute path. Full design: `docs/architecture/workspace-mcp-binding.md`.
@@ -22,6 +31,7 @@ The following meta-tools are always available without a running MCP server:
 
 - `mcp_list`
 - `mcp_enable` / `mcp_disable`
+- `mcp_register` / `mcp_unregister` — admit or remove user plugins only under the writable userData `plugins/` root; both require interactive confirmation, reject repo/bundled paths, and are denied to jobs/background turns.
 - `tool_search` / `tool_list` / `tool_schema` / `tool_schemas`
 - `mcp_context`
 - `docs_search` / `docs_list` / `docs_read`

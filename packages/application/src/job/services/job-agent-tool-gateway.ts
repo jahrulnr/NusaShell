@@ -15,6 +15,8 @@ const JOB_DENYLIST = new Set([
   "skill_read",
   "ask_question",
   "job",
+  "mcp_register",
+  "mcp_unregister",
 ]);
 
 /**

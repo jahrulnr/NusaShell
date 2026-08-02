@@ -7,8 +7,11 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { getTerminalPrompt, TERMINAL_PROMPTS } from "./prompts.js";
 import {
   CallToolRequestSchema,
+  GetPromptRequestSchema,
+  ListPromptsRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
@@ -100,8 +103,15 @@ function trimBuffer(text) {
 
 const server = new Server(
   { name: "nusashell-terminal", version: "1.0.0" },
-  { capabilities: { tools: {} } },
+  { capabilities: { tools: {}, prompts: {} } },
 );
+
+server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+  prompts: TERMINAL_PROMPTS,
+}));
+
+server.setRequestHandler(GetPromptRequestSchema, async (request) =>
+  getTerminalPrompt(request.params.name));
 
 const sessions = new Map();
 

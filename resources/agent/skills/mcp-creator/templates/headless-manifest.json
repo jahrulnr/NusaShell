@@ -1,0 +1,14 @@
+{
+  "id": "example.plugin",
+  "name": "Example Plugin",
+  "version": "0.1.0",
+  "icon": "N",
+  "mcp": {
+    "transport": "stdio",
+    "command": "node",
+    "args": ["mcp/server.cjs"],
+    "env": {},
+    "autostart": false,
+    "keepAliveOnClose": false
+  }
+}

@@ -10,8 +10,12 @@ describe("desktop runtime paths", () => {
       isPackaged: true,
       moduleDir: "/unused",
       resourcesPath,
+      userDataPath: "/home/user/.config/nusashell",
     })).toEqual({
-      pluginsRoot: join(resourcesPath, "plugins"),
+      pluginsRoot: "/home/user/.config/nusashell/plugins",
+      bundledPluginsRoot: join(resourcesPath, "plugins"),
+      userPluginsRoot: "/home/user/.config/nusashell/plugins",
+      builtinSkillsRoot: join(resourcesPath, "agent", "skills"),
       promptsRoot: join(resourcesPath, "agent", "prompts"),
       docsRoot: join(resourcesPath, "agent", "docs"),
     });
@@ -24,7 +28,10 @@ describe("desktop runtime paths", () => {
       moduleDir,
       resourcesPath: "/unused",
     })).toEqual({
-      pluginsRoot: resolve(moduleDir, "..", "..", "..", "..", "plugins"),
+      pluginsRoot: resolve(moduleDir, "..", "..", "..", "..", ".nusashell", "plugins"),
+      bundledPluginsRoot: resolve(moduleDir, "..", "..", "..", "..", "plugins"),
+      userPluginsRoot: resolve(moduleDir, "..", "..", "..", "..", ".nusashell", "plugins"),
+      builtinSkillsRoot: resolve(moduleDir, "..", "..", "..", "..", "resources", "agent", "skills"),
       promptsRoot: resolve(moduleDir, "..", "..", "..", "..", "resources", "agent", "prompts"),
       docsRoot: resolve(moduleDir, "..", "..", "..", "..", "resources", "agent", "docs"),
     });

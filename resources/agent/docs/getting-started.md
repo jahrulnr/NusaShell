@@ -8,11 +8,29 @@ NusaShell is a desktop-like shell for AI tools. Each plugin bundles a **UI + MCP
 - **Plugin window**: each plugin opens in its own window or tab. The plugin UI is an iframe that talks to the shell host over `postMessage`.
 - **Agent chat**: the shell-wide assistant. Use it to start plugins, call MCP tools, and ask about product features.
 
+## Common product questions
+
+- [Where NusaShell stores data](data-locations.md) — OS-specific state roots,
+  file inventory, plugin locations, and dev/prod differences.
+- [Uninstall NusaShell](uninstall.md) — remove the app, remove one plugin, or
+  optionally wipe data.
+- [Contribute](contribute.md) — clone, prerequisites, development commands, and
+  pull-request checks.
+- [Build a plugin](build-plugin.md) — choose headed versus headless MCP and use
+  the broker bridge correctly.
+- The builtin `skill-creator` teaches agents how to author skills with
+  progressive disclosure and optional `requirements.mcp` frontmatter.
+
 ## Adding a plugin
 
-1. Place a plugin folder under the configured `pluginsRoot`. A valid plugin folder contains `manifest.json`, a `ui/` folder, and a `mcp/` folder (or a remote MCP transport config).
-2. Restart the shell or use the launcher to refresh.
-3. The plugin icon appears in the launcher.
+- **In-app agent:** read the `mcp-creator` skill, scaffold under
+  `{userData}/plugins/{folder}/`, call `mcp_register` with confirmation, then
+  `mcp_enable` and verify with `mcp_list`.
+- **Human:** use Add Plugin / the Plugins view for a local folder or archive.
+- **Cursor/repository development:** use the repository `plugins/` tree.
+
+A folder on disk is not installed inventory until it is admitted. Headless
+plugins are managed from Plugins and the agent, not the Home grid.
 
 ## Talking to the agent
 

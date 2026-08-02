@@ -18,6 +18,8 @@ import {
   type MemoryStorePort,
 } from "@nusashell/application";
 import { fileURLToPath } from "node:url";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { ContainerOptions } from "../container.js";
 
 export interface SkillsRuntimeParts {
@@ -37,6 +39,8 @@ export function createSkillsRuntime(
   eventDispatcher: EventDispatcher,
 ): SkillsRuntimeParts {
   const skillsRoot = options.skillsRoot ?? fileURLToPath(new URL("../../../.nusashell/agent/skills", import.meta.url));
+  ensureBuiltinSkill(options.builtinSkillsRoot, skillsRoot, "mcp-creator");
+  ensureBuiltinSkill(options.builtinSkillsRoot, skillsRoot, "skill-creator");
   const skillRegistry = new FilesystemSkillRegistry(skillsRoot);
   const skillProvenance = new FilesystemSkillProvenance(skillsRoot);
   const skillUsage = new FilesystemSkillUsage(skillsRoot);
@@ -70,4 +74,32 @@ export function createSkillsRuntime(
     skillRegistry, skillProvenance, skillUsage, skillApprovalStaging,
     skillCurator, skillCuratorScheduler, memoryStore, learningGraph,
   };
+}
+
+export function ensureBuiltinSkill(sourceRoot: string | undefined, skillsRoot: string, skillId: string): void {
+  if (!sourceRoot) return;
+  const source = resolve(sourceRoot, skillId);
+  const destination = resolve(skillsRoot, skillId);
+  const sourceVersionPath = resolve(source, "VERSION");
+  if (!existsSync(sourceVersionPath)) return;
+  const sourceVersion = readFileSync(sourceVersionPath, "utf8").trim();
+  const destinationVersionPath = resolve(destination, "VERSION");
+  const destinationExists = existsSync(resolve(destination, "SKILL.md"));
+  let destinationOrigin = "";
+  try {
+    const provenance = JSON.parse(readFileSync(resolve(skillsRoot, ".provenance.json"), "utf8")) as Record<string, { createdBy?: string }>;
+    destinationOrigin = provenance[skillId]?.createdBy ?? "";
+  } catch {
+    destinationOrigin = "";
+  }
+  if (destinationExists && destinationOrigin !== "builtin") return;
+  if (destinationExists && existsSync(destinationVersionPath) && readFileSync(destinationVersionPath, "utf8").trim() === sourceVersion) return;
+  mkdirSync(skillsRoot, { recursive: true });
+  if (destinationExists) rmSync(destination, { recursive: true, force: true });
+  cpSync(source, destination, { recursive: true });
+  const provenancePath = resolve(skillsRoot, ".provenance.json");
+  let provenance: Record<string, { createdBy: string; createdAt: string }> = {};
+  try { provenance = JSON.parse(readFileSync(provenancePath, "utf8")) as typeof provenance; } catch {}
+  provenance[skillId] = { createdBy: "builtin", createdAt: new Date().toISOString() };
+  writeFileSync(provenancePath, JSON.stringify(provenance, null, 2), "utf8");
 }

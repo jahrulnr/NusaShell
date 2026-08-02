@@ -12,6 +12,9 @@ Every turn starts with thirteen shell-owned meta-tools:
 - `mcp_enable` — start one plugin MCP through `PluginRuntimeManager`.
 - `mcp_disable` — stop one running plugin MCP through
   `PluginRuntimeManager`.
+- `mcp_register` / `mcp_unregister` — interactive confirmation-gated admission
+  and removal for user plugin folders directly under `{userData}/plugins/`; jobs
+  and background turns are denied, and bundled plugins are protected.
 - `tool_search` — search a running plugin's MCP tool names/descriptions with a
   bounded result set.
 - `tool_list` — list all tool names and descriptions from a running MCP plugin
@@ -45,7 +48,9 @@ function.
 initial prompt payload. Prompt arguments remain strings and required arguments
 are validated. Prompt/resource search is capped at 20 results; text resource
 reads are capped at 50 KB. Binary resource content is not injected into the
-provider.
+provider. Plugin-authored prompts are the narrative howto channel for that
+plugin; shell docs remain platform-only and must not duplicate removable plugin
+catalogs.
 
 The foreground agent also owns `memory`, `skill_manage`, and `job` meta-tools
 (personal memory, agent-owned skill mutation, and scheduled automation

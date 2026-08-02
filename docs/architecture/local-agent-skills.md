@@ -9,9 +9,12 @@ packages. This is deliberately smaller than the full platform described in
 - An install accepts a ZIP-compatible `.skill` or `.zip` archive containing one
   package-root `SKILL.md`.
 - `SKILL.md` frontmatter must contain a lowercase slug `name` and a
-  `description`. The name becomes the stable installed ID.
-- Electron stores copied packages below `userData/skills`. Editing and deletion
-  never mutate the source archive.
+  `description`. The name becomes the stable installed ID. Optional
+  `requirements.mcp` lists concrete plugin ids or role tokens such as
+  `role:files`; `compatibility` and string `metadata` are preserved.
+- Electron stores copied packages below `userData/skills`. Built-in packages are
+  seeded from `resources/agent/skills/` with `builtin` provenance; editing and
+  deletion never mutate the source package.
 - The application layer owns `SkillRegistryPort`; filesystem and archive work
   stays in the infrastructure adapter.
 - Archive extraction rejects absolute/traversal paths and symbolic links, and
@@ -37,13 +40,16 @@ A `SkillProvenancePort` sidecar (`.provenance.json` in the skills root) tracks
 whether each skill was created by the agent or installed by the user.
 
 - `installFromArchive` marks the skill as `user` origin.
+- Built-in seed packages are marked `builtin` and are protected from
+  `skill_manage` mutation/deletion.
 - `skill_manage` `create` marks the skill as `agent` origin.
 - `skill_manage` `edit`, `write_file`, and `delete` check provenance before
   mutating; non-agent skills return a `skill_protected` error.
 
 ### SKILL.md validation
 
-- The `description` frontmatter field must be **60 characters or fewer**.
+- The `description` frontmatter field must be **1024 characters or fewer** and
+  should explain what the skill does and when to use it with trigger terms.
 - The `name` frontmatter field must match the skill ID slug.
 - Support file creation via `write_file` is limited to `references/`,
   `templates/`, `scripts/`, and `assets/` subdirectories.

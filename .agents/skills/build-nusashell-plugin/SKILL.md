@@ -31,6 +31,33 @@ Preserve an existing plugin's shape unless requirements justify changing it. Do 
 - Treat every argument, path, URL, command, remote response, stored value, and UI field as untrusted input.
 - Keep credentials host-owned when shell settings exist; inject them only at runtime and never expose them in schemas, results, or logs.
 
+## Plugin knowledge and prompt tiers
+
+Let live tool schemas (`tool_list`, `tool_search`, and `tool_schema`) describe
+executable capability. Narrative usage guidance belongs in plugin-owned MCP
+prompts exposed by `prompts/list` and `prompts/get`; retrieving a prompt is
+context, not tool execution.
+
+Choose the prompt tier from the capability, not only from whether the plugin has
+UI:
+
+| Plugin kind | Examples | MCP howto/workflow prompt expectation |
+| --- | --- | --- |
+| **Domain / multi-step** | Mail, Notes, business MCPs, ordered or non-obvious tool flows | **Strongly required.** Ship at least one `howto` or `workflow` prompt covering purpose, tool order, critical constraints, and common failure modes. Schemas alone are not enough. |
+| **Native-like tools** | Files/file managers, Terminal/shell, simple self-describing CRUD | **Still recommended.** Ship a short constraints prompt covering root/cwd semantics, destructive operations, limits, and the instruction to use live schemas. |
+
+When creating or extending a plugin, register `capabilities.prompts` and
+implement `prompts/list` plus `prompts/get` for the selected tier. Prompts
+should be short English prose, name the main tools and their order, explain
+host-owned credentials or containment where relevant, point agents to live
+schemas, and remain inside the plugin package. Agents consuming a plugin should
+load its howto/workflow through shell `mcp_context` before guessing a multi-step
+flow.
+
+Keep plugin-specific catalogs and howtos out of `resources/agent/docs/` so
+uninstalling a plugin removes its knowledge path. Use the shell corpus only for
+NusaShell platform behavior.
+
 ## Implement the MCP boundary
 
 - Use the official MCP SDK and advertise only implemented capabilities.

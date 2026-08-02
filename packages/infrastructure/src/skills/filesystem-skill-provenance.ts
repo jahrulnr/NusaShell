@@ -25,6 +25,10 @@ export class FilesystemSkillProvenance implements SkillProvenancePort {
     await this.set(skillId, "user");
   }
 
+  async markBuiltin(skillId: string): Promise<void> {
+    await this.set(skillId, "builtin");
+  }
+
   async clear(skillId: string): Promise<void> {
     const map = await this.load();
     if (!(skillId in map)) return;

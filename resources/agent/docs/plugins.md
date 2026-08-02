@@ -7,7 +7,7 @@ Plugins view and via agent `mcp_*` tools).
 
 - `manifest.json`: name, version, icon, optional UI entry point, MCP transport, and autostart flag.
 - `ui/`: optional — the plugin user interface, loaded as an iframe in the shell.
-- `mcp/`: the MCP server that exposes tools, prompts, and resources to the agent.
+- `mcp/`: the MCP server that exposes tools, prompts, and resources to the agent. Plugin capability howtos belong here as MCP prompts, not in the shell's removable-agnostic docs corpus.
 
 ## UI vs headless
 
@@ -19,6 +19,16 @@ Plugins view and via agent `mcp_*` tools).
   plugin at boot since there is no UI to open.
 
 `icon` stays required for both shapes (emoji/text like `N` / `📝` is valid).
+
+## Plugin roots and admission
+
+Packaged/read-only built-ins are loaded from the application `resources/plugins/`
+tree. User-installed and in-app-agent-authored plugins live under the writable
+`{userData}/plugins/` tree. The agent must scaffold there and call
+`mcp_register`; writing a folder alone does not add it to plugin inventory.
+Humans may use Add Plugin, and all plugins still use `mcp_enable`/`mcp_disable`
+for lifecycle. `mcp_unregister` removes only user plugins; bundled built-ins are
+protected.
 
 ## Plugin states
 

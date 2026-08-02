@@ -21,8 +21,9 @@ authoritative behavioral reference for product intent.
 | `packages/domain/` | Pure domain layer (plugin runtime, policies, events) |
 | `docs/blueprint.md` | Product / plugin architecture, launcher UX, MCP transports |
 | `docs/backend-structure.md` | Target Clean Architecture monorepo + WebSocket protocol |
-| `docs/architecture/` | Agent runtime, agent skills platform, MCP capability policy, progressive MCP tools |
+| `docs/architecture/` | Agent runtime, agent skills platform, MCP capability policy, progressive MCP tools, path layout |
 | `docs/mcp/` | Mail plugin MCP protocol spec + implementation notes |
+| `resources/agent/docs/` | In-app product docs and FAQ corpus; use `docs_search` for product questions |
 | `docs/PoC/` | Behavioral bridge demo (not the target layout) |
 | `docs/ui-design/` | Launcher, agent workspace, and skills workspace visual sketches |
 | `VERSION` | Current semver |
@@ -37,6 +38,12 @@ authoritative behavioral reference for product intent.
 4. For agent runtime, MCP tool policy, or local skills → `docs/architecture/`.
 5. Treat `docs/PoC/` as a **behavioral reference**, not the scaffold target.
 6. For launcher / plugin UI work → also load `.agents/skills/frontend-design/SKILL.md`.
+7. For product questions about data locations, uninstalling, contributing, or
+   authoring plugins, use the matching documents in `resources/agent/docs/`
+   (`data-locations.md`, `uninstall.md`, `contribute.md`, and
+   `build-plugin.md`) and condition answers on Linux, macOS, or Windows. Never
+   present `~/.config/nusashell/` as a universal path; use `mcp_list.installPath`
+   for a specific installed plugin.
 
 ### Run the PoC
 
@@ -57,7 +64,7 @@ No `npm install` required for the PoC.
 - **Dependency rule:** `domain` must not import Electron, WebSocket, SQLite, `child_process`, filesystem, MCP SDK, HTTP, or SSE.
 - **Runtime SoT:** live plugin runtime belongs to `PluginRuntimeManager` (memory). Installed metadata → SQLite (filesystem/JSON OK only as an early spike). Do not duplicate authoritative “running” state in the renderer, WS gateway, or DB.
 - **Infrastructure must not** send WebSocket frames directly - publish domain/application events.
-- **Security is deferred** until broker/lifecycle correctness is proven. Do not mix iframe sandboxing, install permissions, signing, or process isolation into the first plumbing milestone.
+- **Host isolation is deferred** until broker/lifecycle correctness is proven. Do not mix iframe sandboxing, install permissions, signing, or process isolation into the first plumbing milestone. Do **not** treat MCP/AI behavioral hardening (tool-call approval gates, injection filters, plugin allowlists) as deferred NusaShell work — that stays permanently out of scope; see `docs/architecture/security-boundary.md`.
 - **MVP stays slim:** no Redis, microservices, event sourcing, external CQRS frameworks, Socket.IO-in-core, or clustered workers for the first MVP.
 
 Target stack (when scaffolding): Electron + TypeScript monorepo (pnpm), packages
@@ -83,7 +90,12 @@ dir; local file icons get the same check.
 
 Authors call tools via `window.shell.callTool(...)` and never speak raw MCP from
 the iframe. Manifest schema should support both local `stdio` and remote
-`sse`/`http` MCP transports (implementation may ship stdio first).
+`sse`/`http` MCP transports (implementation may ship stdio first). Plugin-specific
+capability knowledge belongs to live tool discovery and plugin-owned MCP prompts,
+not the shell's `resources/agent/docs/` corpus. For authoring, follow the domain
+versus native-like prompt tiers in `.agents/skills/build-nusashell-plugin/`.
+In-app authoring targets `{userData}/plugins/` and must finish with interactive
+`mcp_register`; repository `plugins/` is for Cursor/monorepo development only.
 
 When changing the manifest or bridge shape, update together: blueprint, PoC
 example plugin, and (once they exist) `packages/contracts` + `packages/plugin-sdk`.
@@ -121,15 +133,20 @@ When changing launcher or plugin UI:
 
 ## Versioning
 
-- Single source of truth for the release number: root `VERSION` (currently `0.0.1`).
+- Single source of truth for the release number: root `VERSION`; do not copy the
+  current version number into this file.
 - Follow [Semantic Versioning](https://semver.org/):
   - **MAJOR** - breaking changes to public contracts (manifest, WS protocol, plugin SDK)
   - **MINOR** - backward-compatible features
   - **PATCH** - backward-compatible fixes / docs-only releases when you choose to tag them
-- When a change should ship, bump `VERSION` and add a Keep a Changelog section in
-  `CHANGELOG.md` for that version (Added / Changed / Fixed / …).
+- Keep `VERSION` unchanged while work is local and uncommitted. Do not bump the
+  version merely because files changed or a plan is complete.
+- Only bump `VERSION` at the release boundary, when the final change is ready to
+  be committed and pushed. Add the matching Keep a Changelog section in the
+  same release change. If a release is not being committed and pushed yet, keep
+  the existing version and leave release notes for later.
 - Concept-stage (`0.0.x`): prefer documenting notable scaffolding and doc/contract
-  changes even when no binary ships yet.
+  changes even when no binary ships yet, but apply the same release-boundary rule.
 
 ## Testing
 
@@ -151,6 +168,7 @@ test notes. Link `VERSION` / `CHANGELOG.md` when the PR is meant to ship.
 ## Out of scope for agents (unless explicitly asked)
 
 - Choosing a public license
-- Implementing the full security layer early
+- Implementing host isolation (iframe sandbox, install permissions, process isolation) early
+- Building MCP/AI behavioral security (approval gates, injection filters, plugin allowlists) — permanently out of scope per `docs/architecture/security-boundary.md`
 - Replacing the architecture with Socket.IO / Redis / microservices “defaults”
 - Committing secrets or production credentials

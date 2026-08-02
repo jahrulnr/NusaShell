@@ -3,6 +3,8 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
+  GetPromptRequestSchema,
+  ListPromptsRequestSchema,
   ListToolsRequestSchema,
   RootsListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
@@ -11,14 +13,22 @@ import { loadRootFromEnvironment } from "./config.js";
 import { safeFilesError } from "./errors.js";
 import { FileService } from "./fs-service.js";
 import { callFilesTool, FILES_TOOLS } from "./tools.js";
+import { getFilesPrompt, FILES_PROMPTS } from "./prompts.js";
 
 async function main() {
   const root = await loadRootFromEnvironment();
   const service = new FileService(root);
   const server = new Server(
     { name: "nusashell-files", version: "0.1.0" },
-    { capabilities: { tools: {} } },
+    { capabilities: { tools: {}, prompts: {} } },
   );
+
+  server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+    prompts: FILES_PROMPTS,
+  }));
+
+  server.setRequestHandler(GetPromptRequestSchema, async (request) =>
+    getFilesPrompt(request.params.name));
 
   // MCP Roots: the shell client advertises roots and notifies on change.
   // Fetch the workspace root on connect and re-fetch on roots/list_changed,

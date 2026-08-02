@@ -22,7 +22,7 @@ agent-owned skills.
   domain knowledge that applies across conversations.
 - Never edit or create skills owned by the user (provenance-protected).
 - Do not encode environment-failure folklore or one-off debugging steps.
-- Skill descriptions must be ≤60 characters and the skill name must match the
+- Skill descriptions must be ≤1024 characters and the skill name must match the
   folder name (lowercase with hyphens).
 
 ## What not to save

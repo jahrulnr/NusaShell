@@ -37,6 +37,18 @@ Do not create `ui/`. Omit `ui` completely from the manifest; never use an empty 
 
 Choose the real shell compatibility floor; do not copy the example mechanically. For remote MCP, use `http` or `sse` with `url` and omit process-only assumptions.
 
+## Plugin knowledge
+
+- Domain plugins or multi-step workflows must ship at least one `howto` or
+  `workflow` MCP prompt before the MCP contract is complete. Include purpose,
+  tool order, critical constraints, and common failure modes.
+- Native-like plugins should still ship a short constraints prompt covering
+  path/root semantics, limits, destructive operations, and live schema use.
+- Advertise `prompts` in the MCP capabilities when prompts are present, and
+  expose them through `prompts/list` and `prompts/get`.
+- Do not document a removable plugin's tool catalog only in the shell corpus;
+  keep the knowledge with the plugin.
+
 ## Lifecycle
 
 - Set `autostart: true` only when the capability must be ready at shell startup. Otherwise require explicit enablement from Plugins or agent `mcp_enable`.

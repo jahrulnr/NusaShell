@@ -392,10 +392,10 @@ describe("McpAgentToolGateway", () => {
       });
     });
 
-    it("rejects create with description > 60 chars", async () => {
-      const longDesc = "x".repeat(61);
+    it("rejects create with description > 1024 chars", async () => {
+      const longDesc = "x".repeat(1025);
       const registry = fakeRegistry({
-        create: async () => { throw new Error("SKILL.md description must be 60 characters or fewer (got 61)"); },
+        create: async () => { throw new Error("SKILL.md description must be 1024 characters or fewer (got 1025)"); },
       });
       const gateway = new McpAgentToolGateway(fakeRuntime as never, undefined, registry, undefined, undefined, fakeProvenance());
       gateway.beginTurn("turn-long");
@@ -403,7 +403,7 @@ describe("McpAgentToolGateway", () => {
       const result = await gateway.execute("skill_manage", { action: "create", name: "my-skill", content: skillMd }, "call-long", "turn-long");
       expect(result).toEqual({
         ok: false,
-        error: { code: "description_too_long", message: "SKILL.md description must be 60 characters or fewer (got 61)" },
+        error: { code: "description_too_long", message: "SKILL.md description must be 1024 characters or fewer (got 1025)" },
         meta: {},
       });
     });

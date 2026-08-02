@@ -20,6 +20,7 @@ export interface PluginRuntimeParts {
   readonly pluginRepository: PluginRepositoryPort;
   readonly runtimeManager: PluginRuntimeManager;
   readonly pluginInstaller: PluginInstaller | null;
+  readonly syncPlugins: () => Promise<void>;
   readonly docsIndex: MarkdownDocsIndex;
   readonly db: SqliteDatabase | undefined;
 }
@@ -32,18 +33,29 @@ export function createPluginRuntime(
 ): PluginRuntimeParts {
   let pluginRepository: PluginRepositoryPort;
   let db: SqliteDatabase | undefined;
+  let syncPlugins: () => Promise<void> = async () => {};
+
+  const bundledPluginsRoot = options.bundledPluginsRoot;
+  const userPluginsRoot = options.userPluginsRoot ?? options.pluginsRoot;
+  const pluginRoots = [
+    ...(bundledPluginsRoot ? [bundledPluginsRoot] : []),
+    ...(userPluginsRoot && userPluginsRoot !== bundledPluginsRoot ? [userPluginsRoot] : []),
+  ];
 
   if (options.dbPath) {
     db = new SqliteDatabase(options.dbPath);
     pluginRepository = new SqlitePluginRepository(db);
-    if (options.pluginsRoot) {
-      const syncService = new PluginSyncService(options.pluginsRoot, pluginRepository, logger);
+    if (pluginRoots.length > 0) {
+      const syncService = new PluginSyncService(pluginRoots, pluginRepository, logger);
+      syncPlugins = () => syncService.sync();
       syncService.sync().catch((err) => {
         logger.warn({ err }, "Plugin sync failed during startup");
       });
     }
-  } else if (options.pluginsRoot) {
-    pluginRepository = new FilesystemPluginRegistry(options.pluginsRoot, logger);
+  } else if (pluginRoots.length > 0) {
+    const filesystemRepository = new FilesystemPluginRegistry(pluginRoots, logger);
+    pluginRepository = filesystemRepository;
+    syncPlugins = () => filesystemRepository.refresh();
   } else {
     pluginRepository = new InMemoryPluginRepository();
   }
@@ -70,9 +82,9 @@ export function createPluginRuntime(
     logger.warn({ err }, "Docs index initial build failed; will retry on demand");
   });
 
-  const pluginInstaller = options.pluginsRoot
-    ? new PluginInstaller(options.pluginsRoot, logger)
+  const pluginInstaller = userPluginsRoot
+    ? new PluginInstaller(userPluginsRoot, logger)
     : null;
 
-  return { pluginRepository, runtimeManager, pluginInstaller, docsIndex, db };
+  return { pluginRepository, runtimeManager, pluginInstaller, syncPlugins, docsIndex, db };
 }

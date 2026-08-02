@@ -22,6 +22,7 @@ import { execSkillList, execSkillSearch, execSkillRead, execSkillManage } from "
 import { execMemory } from "./memory-tool-handler.js";
 import { execJob } from "./job-tool-handler.js";
 import { execAskQuestion } from "./ask-question-tool-handler.js";
+import { execMcpRegister, execMcpUnregister, type McpPluginRegistrationDeps } from "./mcp-plugin-tool-handlers.js";
 
 export type WriteOrigin = "foreground" | "background_review";
 
@@ -55,6 +56,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
   private writeApprovalEnabled = false;
   private jobStore?: JobStorePort;
   private jobScheduler?: JobScheduler;
+  private pluginRegistration?: McpPluginRegistrationDeps;
 
   constructor(
     private readonly runtimeManager: PluginRuntimeManager,
@@ -76,6 +78,10 @@ export class McpAgentToolGateway implements AgentToolGateway {
   bindJobs(store: JobStorePort, scheduler: JobScheduler): void {
     this.jobStore = store;
     this.jobScheduler = scheduler;
+  }
+
+  bindPluginRegistration(deps: McpPluginRegistrationDeps): void {
+    this.pluginRegistration = deps;
   }
 
   beginTurn(turnId: string, context?: AgentTurnContext): void {
@@ -135,6 +141,15 @@ export class McpAgentToolGateway implements AgentToolGateway {
         argumentValue: stringSchema(),
         arguments: { type: "object", additionalProperties: { type: "string" } },
       }, ["pluginId", "action"]),
+      ...(this.pluginRegistration ? [
+        definition("mcp_register", "Register an existing valid MCP plugin folder under the writable user plugins root (interactive confirmation required)", {
+          folder: { type: "string", description: "One folder name under the user plugins root" },
+          path: { type: "string", description: "Absolute path to one folder under the user plugins root" },
+        }, []),
+        definition("mcp_unregister", "Unregister and remove a user-installed MCP plugin (interactive confirmation required)", {
+          pluginId: stringSchema(),
+        }),
+      ] : []),
       definition("docs_search", "Search the internal NusaShell documentation corpus (how-to, feature, and UI guidance)", {
         query: stringSchema(),
         top_k: { type: "integer", minimum: 1, maximum: 10, description: "Maximum number of chunks to return" },
@@ -229,6 +244,8 @@ export class McpAgentToolGateway implements AgentToolGateway {
       case "tool_schema": return this.grantTool(args, turnId);
       case "tool_schemas": return this.grantTools(args, turnId);
       case "mcp_context": return this.context(args);
+      case "mcp_register": return execMcpRegister(this.pluginRegistration!, args, turnId, callId ?? requestId, this.isInteractive(turnId));
+      case "mcp_unregister": return execMcpUnregister(this.pluginRegistration!, args, turnId, callId ?? requestId, this.isInteractive(turnId));
       case "docs_search": return execDocsSearch(this.docsIndex, args);
       case "docs_list": return execDocsList(this.docsIndex, args);
       case "docs_read": return execDocsRead(this.docsIndex, args);

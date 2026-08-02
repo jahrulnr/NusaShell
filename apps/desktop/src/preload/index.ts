@@ -24,6 +24,7 @@ import type {
   SaveMailAccountInput,
 } from "../shared/mail-contract.js";
 import type { PluginWindowOptionsInput } from "../main/plugin-window-options.js";
+import { resolveWsPort } from "../main/runtime-mode.js";
 
 export interface ShellApi {
   readonly wsUrl: string;
@@ -135,7 +136,10 @@ export interface ShellLogEntry {
   readonly message: string;
 }
 
-const wsUrl = `ws://127.0.0.1:${process.env.NUSASHELL_PORT ?? "9130"}`;
+const wsUrl = `ws://127.0.0.1:${resolveWsPort({
+  isDev: process.env.NUSASHELL_IS_DEV === "true",
+  envPort: process.env.NUSASHELL_PORT,
+})}`;
 
 const api: ShellApi = {
   wsUrl,

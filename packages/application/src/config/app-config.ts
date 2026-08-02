@@ -2,6 +2,9 @@ export interface AppConfig {
   readonly port: number;
   readonly host: string;
   readonly pluginsRoot: string | undefined;
+  readonly bundledPluginsRoot?: string;
+  readonly userPluginsRoot?: string;
+  readonly builtinSkillsRoot?: string;
   readonly dbPath: string | undefined;
   readonly logLevel: string;
   readonly ai: AiConfig;

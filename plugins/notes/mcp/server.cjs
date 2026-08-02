@@ -24796,6 +24796,40 @@ function safeNotesError(error51) {
   return message.replace(/[\u0000-\u001f\u007f]+/g, " ").slice(0, 1e3);
 }
 
+// mcp/prompts.js
+var NOTES_PROMPTS = Object.freeze([
+  {
+    name: "howto",
+    title: "Notes plugin how-to",
+    description: "How to create, find, read, update, and delete notes."
+  }
+]);
+function getNotesPrompt(name) {
+  if (name !== "howto") throw new Error(`Unknown prompt: ${name}`);
+  return {
+    description: NOTES_PROMPTS[0].description,
+    messages: [{
+      role: "user",
+      content: {
+        type: "text",
+        text: [
+          "Use the Notes plugin for persistent local notes.",
+          "",
+          "Main tools:",
+          "- notes_create: create a note with a title and body.",
+          "- notes_list: list saved notes.",
+          "- notes_get: read one note by id.",
+          "- notes_update: change a note's title or body.",
+          "- notes_delete: permanently remove a note.",
+          "- notes_search: find notes by text.",
+          "",
+          "Use tool_schema for the exact arguments and required fields. Notes are persisted by the plugin and are separate from the shell conversation history."
+        ].join("\n")
+      }
+    }]
+  };
+}
+
 // mcp/note-service.js
 var import_node_path2 = __toESM(require("node:path"), 1);
 var import_promises = __toESM(require("node:fs/promises"), 1);
@@ -25098,8 +25132,12 @@ async function main() {
   await service.load();
   const server = new Server(
     { name: "nusashell-notes", version: "1.0.0" },
-    { capabilities: { tools: {} } }
+    { capabilities: { tools: {}, prompts: {} } }
   );
+  server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+    prompts: NOTES_PROMPTS
+  }));
+  server.setRequestHandler(GetPromptRequestSchema, async (request) => getNotesPrompt(request.params.name));
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: NOTES_TOOLS
   }));

@@ -47,10 +47,13 @@ export interface ContainerOptions {
   readonly port: number;
   readonly host?: string;
   readonly pluginsRoot?: string;
+  readonly bundledPluginsRoot?: string;
+  readonly userPluginsRoot?: string;
   readonly promptsRoot?: string;
   readonly docsRoot?: string;
   readonly docsIndexStorageRoot?: string;
   readonly skillsRoot?: string;
+  readonly builtinSkillsRoot?: string;
   readonly memoryRoot?: string;
   readonly jobsRoot?: string;
   readonly dbPath?: string;
@@ -167,6 +170,17 @@ export function createContainer(options: ContainerOptions): Container {
 
   const aiConfiguration = createAiConfiguration(options, logger, agent);
   const buses = registerBuses(options, logger, eventDispatcher, clock, plugin, skills, agent, jobs, acp, aiConfiguration);
+  if (plugin.pluginInstaller && options.userPluginsRoot) {
+    agent.agentToolGateway.bindPluginRegistration({
+      installer: plugin.pluginInstaller,
+      repository: plugin.pluginRepository,
+      runtimeManager: plugin.runtimeManager,
+      syncPlugins: plugin.syncPlugins,
+      userPluginsRoot: options.userPluginsRoot,
+      ...(options.bundledPluginsRoot ? { bundledPluginsRoot: options.bundledPluginsRoot } : {}),
+      askQuestions: agent.askQuestionService,
+    });
+  }
   const transport = createTransport(options, logger, eventDispatcher, buses);
 
   return {

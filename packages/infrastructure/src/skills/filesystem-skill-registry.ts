@@ -16,6 +16,7 @@ import type {
   SkillReadResult,
   SkillRegistryPort,
   SkillSummary,
+  SkillRequirements,
   ArchivedSkillSummary,
 } from "@nusashell/application";
 import AdmZip from "adm-zip";
@@ -24,7 +25,7 @@ const MAX_ARCHIVE_ENTRIES = 500;
 const MAX_ARCHIVE_BYTES = 32 * 1024 * 1024;
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const MAX_EDITABLE_BYTES = 1024 * 1024;
-const MAX_DESCRIPTION_CHARS = 60;
+const MAX_DESCRIPTION_CHARS = 1024;
 const SKILL_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const SUPPORT_FILE_PREFIXES = ["references/", "templates/", "scripts/", "assets/"];
 
@@ -62,6 +63,9 @@ export class FilesystemSkillRegistry implements SkillRegistryPort {
       id: skillId,
       name: metadata.name,
       description: metadata.description,
+      ...(metadata.requirements ? { requirements: metadata.requirements } : {}),
+      ...(metadata.compatibility ? { compatibility: metadata.compatibility } : {}),
+      ...(metadata.metadata ? { metadata: metadata.metadata } : {}),
       fileCount: files.filter((file) => file.type === "file").length,
       updatedAt: info.mtime.toISOString(),
       files,
@@ -274,18 +278,60 @@ export class FilesystemSkillRegistry implements SkillRegistryPort {
   }
 }
 
-function parseFrontmatter(content: string): { name: string; description: string } {
+interface SkillFrontmatter {
+  readonly name: string;
+  readonly description: string;
+  readonly requirements?: SkillRequirements;
+  readonly compatibility?: string;
+  readonly metadata?: Readonly<Record<string, string>>;
+}
+
+function parseFrontmatter(content: string): SkillFrontmatter {
   const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content);
   if (!match) throw new Error("SKILL.md must begin with YAML frontmatter");
   const values = new Map<string, string>();
+  const requirementsMcp: string[] = [];
+  const metadata: Record<string, string> = {};
+  let section: "requirements" | "metadata" | undefined;
+  let requirementsField = "";
   for (const line of match[1]!.split(/\r?\n/)) {
-    const field = /^([A-Za-z][\w-]*):\s*(.+?)\s*$/.exec(line);
-    if (field) values.set(field[1]!, unquote(field[2]!));
+    const topField = /^([A-Za-z][\w-]*):\s*(.*?)\s*$/.exec(line);
+    if (topField) {
+      section = topField[1] === "requirements" || topField[1] === "metadata" ? topField[1] as "requirements" | "metadata" : undefined;
+      if (topField[2]) values.set(topField[1]!, unquote(topField[2]!));
+      continue;
+    }
+    if (section === "requirements") {
+      const nested = /^\s{2,}([A-Za-z][\w-]*):\s*(.*?)\s*$/.exec(line);
+      if (nested) {
+        requirementsField = nested[1]!;
+        if (requirementsField === "mcp" && nested[2]) requirementsMcp.push(...parseList(nested[2]!));
+        continue;
+      }
+      const item = /^\s+-\s*(.+?)\s*$/.exec(line);
+      if (requirementsField === "mcp" && item) requirementsMcp.push(unquote(item[1]!));
+    } else if (section === "metadata") {
+      const nested = /^\s{2,}([A-Za-z][\w-]*):\s*(.*?)\s*$/.exec(line);
+      if (nested && nested[2]) metadata[nested[1]!] = unquote(nested[2]!);
+    }
   }
   const name = values.get("name")?.trim() ?? "";
   const description = values.get("description")?.trim() ?? "";
   if (!name || !description) throw new Error("SKILL.md frontmatter requires name and description");
-  return { name, description };
+  const compatibility = values.get("compatibility")?.trim();
+  return {
+    name,
+    description,
+    ...(requirementsMcp.length ? { requirements: { mcp: requirementsMcp } } : {}),
+    ...(compatibility ? { compatibility } : {}),
+    ...(Object.keys(metadata).length ? { metadata } : {}),
+  };
+}
+
+function parseList(value: string): string[] {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) return [unquote(trimmed)];
+  return trimmed.slice(1, -1).split(",").map((item) => unquote(item.trim())).filter(Boolean);
 }
 
 function unquote(value: string): string {

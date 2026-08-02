@@ -47,6 +47,18 @@ plugins/example-tool/
 
 Keep `ui.entry` plugin-relative and ensure it points to a real contained file. Choose the real shell compatibility floor.
 
+## Plugin knowledge
+
+- Domain plugins or multi-step workflows must ship at least one `howto` or
+  `workflow` MCP prompt before the MCP contract is complete. Include purpose,
+  tool order, critical constraints, and common failure modes.
+- Native-like plugins should still ship a short constraints prompt covering
+  path/root semantics, limits, destructive operations, and live schema use.
+- Advertise `prompts` in the MCP capabilities when prompts are present, and
+  expose them through `prompts/list` and `prompts/get`.
+- Do not document a removable plugin's tool catalog only in the shell corpus;
+  keep the knowledge with the plugin.
+
 ## Bridge
 
 The host appends `pluginId` to the UI URL and exposes an isolated preload API:

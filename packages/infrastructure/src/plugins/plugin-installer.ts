@@ -1,5 +1,5 @@
 import { readFile, writeFile, mkdir, rm, readdir, stat, access } from "node:fs/promises";
-import { join, basename, extname } from "node:path";
+import { join, basename, extname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
 import { pipeline } from "node:stream/promises";
@@ -127,6 +127,9 @@ export class PluginInstaller implements PluginInstallerPort {
     await assertDeclaredFilesExist(dir, manifest);
 
     const destDir = join(this.pluginsRoot, pluginId);
+    if (resolve(dir) === resolve(destDir)) {
+      return { installPath: destDir, pluginId, version };
+    }
     const exists = await access(destDir).then(() => true).catch(() => false);
     if (exists) {
       this.logger?.info({ pluginId, destDir }, "Plugin already installed, replacing");

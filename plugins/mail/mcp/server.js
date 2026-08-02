@@ -3,6 +3,8 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
+  GetPromptRequestSchema,
+  ListPromptsRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { loadAccountsFromEnvironment } from "./config.js";
@@ -10,14 +12,22 @@ import { MailConnectionManager } from "./connections.js";
 import { safeMailError } from "./errors.js";
 import { MailService } from "./mail-service.js";
 import { callMailTool, MAIL_TOOLS } from "./tools.js";
+import { getMailPrompt, MAIL_PROMPTS } from "./prompts.js";
 
 const accounts = loadAccountsFromEnvironment();
 const connections = new MailConnectionManager(accounts);
 const service = new MailService(accounts, connections);
 const server = new Server(
   { name: "nusashell-mail", version: "0.1.0" },
-  { capabilities: { tools: {} } },
+  { capabilities: { tools: {}, prompts: {} } },
 );
+
+server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+  prompts: MAIL_PROMPTS,
+}));
+
+server.setRequestHandler(GetPromptRequestSchema, async (request) =>
+  getMailPrompt(request.params.name));
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: MAIL_TOOLS,

@@ -1,7 +1,9 @@
 import { app, BrowserWindow, dialog, Menu } from "electron";
+import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { bootstrap, type BootstrapResult } from "@nusashell/backend";
 import { LogTail, type ShellLogLevel, type ShellLogSource } from "./log-tail.js";
+import { resolveIsDev, resolveWsPort, resolveDataRoot } from "./runtime-mode.js";
 import {
   createLauncherWindow,
   closeAllPluginWindows,
@@ -52,13 +54,35 @@ let appBehavior: AppBehaviorSettings | null = null;
 let loginAutostart: LoginAutostart | null = null;
 let trayManager: TrayManager | null = null;
 let isQuitting = false;
-const isDev = process.argv.includes("--dev");
+const isDev = resolveIsDev({ isPackaged: app.isPackaged, argv: process.argv });
 const startHidden = process.argv.includes("--hidden") || process.argv.includes("--background");
 const logTail = new LogTail(1000);
 const shellLogLevels = new Set<ShellLogLevel>(["debug", "info", "warn", "error"]);
 const aiRuntimeConfig = loadConfig().ai;
-const aiStubEnabled = aiRuntimeConfig.stubEnabled;
+const aiStubEnabled = app.isPackaged ? false : aiRuntimeConfig.stubEnabled;
 const MAIL_PLUGIN_ID = "nusashell.mail";
+
+// Resolve the WS port once and export it via env so the preload (renderer
+// process) and window-manager derive the same port from the same inputs.
+const wsPort = resolveWsPort({ isDev, envPort: process.env.NUSASHELL_PORT });
+process.env.NUSASHELL_PORT = String(wsPort);
+process.env.NUSASHELL_IS_DEV = String(isDev);
+
+// Linux desktop entry registration must happen before any userData override so
+// the default appData/nusashell derivation is stable in prod.
+if (process.platform === "linux") {
+  app.setName(LINUX_DESKTOP_APP_NAME);
+}
+
+// Isolate dev durable state under <repo>/.nusashell (gitignored) so concurrent
+// prod + unpackaged-dev runs don't fight on userData or the WS port. Prod keeps
+// Electron's default userData under appData/nusashell — never the repo.
+const repositoryRoot = resolve(__dirname, "..", "..", "..", "..");
+if (isDev) {
+  const devDataRoot = resolveDataRoot({ isDev: true, repositoryRoot, appDataPath: app.getPath("appData") });
+  app.setPath("userData", devDataRoot);
+  mkdirSync(devDataRoot, { recursive: true });
+}
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
@@ -67,10 +91,6 @@ if (!gotSingleInstanceLock) {
   app.on("second-instance", () => {
     showLauncherWindow();
   });
-}
-
-if (process.platform === "linux") {
-  app.setName(LINUX_DESKTOP_APP_NAME);
 }
 
 function toShellLogLevel(level: string): ShellLogLevel {
@@ -120,10 +140,12 @@ function configureProvider(target: BootstrapResult, provider: AiRegistrySettings
 
 async function startBackend(): Promise<BootstrapResult> {
   const dataRoot = getDataRoot();
-  const { pluginsRoot, promptsRoot, docsRoot } = resolveRuntimePaths({
+  mkdirSync(resolve(dataRoot, "plugins"), { recursive: true });
+  const { pluginsRoot, bundledPluginsRoot, userPluginsRoot, builtinSkillsRoot, promptsRoot, docsRoot } = resolveRuntimePaths({
     isPackaged: app.isPackaged,
     moduleDir: __dirname,
     resourcesPath: process.resourcesPath,
+    userDataPath: dataRoot,
   });
   const docsIndexStorageRoot = resolve(dataRoot, "agent", "docs-index");
   const skillsRoot = resolve(dataRoot, "skills");
@@ -148,7 +170,7 @@ async function startBackend(): Promise<BootstrapResult> {
     logFile: resolve(dataRoot, "logs", "nusashell.log"),
     resolvePluginRuntimeEnvironment: (pluginId) =>
       pluginId === MAIL_PLUGIN_ID ? mailSettingsStore?.runtimeEnvironment() ?? {} : {},
-    config: { port: 9130, host: "127.0.0.1", pluginsRoot, dbPath, logLevel: isDev ? "debug" : "info", ai: {
+    config: { port: wsPort, host: "127.0.0.1", pluginsRoot, bundledPluginsRoot, userPluginsRoot, builtinSkillsRoot, dbPath, logLevel: isDev ? "debug" : "info", ai: {
       providerId: activeProvider?.id ?? (aiStubEnabled ? "stub" : ""),
       stubEnabled: aiStubEnabled,
       api: activeProvider?.api,
