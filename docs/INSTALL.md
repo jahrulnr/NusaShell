@@ -11,7 +11,7 @@ On Windows PowerShell: `irm https://raw.githubusercontent.com/jahrulnr/NusaShell
 
 The installer downloads the release manifest and payload, verifies SHA-256 before extracting, and never writes outside your user profile. Set `NUSASHELL_VERSION=0.1.0` to pin a release. Releases are published automatically from `master` when `VERSION` is new.
 
-On Linux, releases live in `~/.local/share/nusashell/versions/`; `current` points to the active version and `~/.local/bin/nusashell` launches it. A desktop-menu entry is written under `~/.local/share/applications`. Updates download a new version, verify it, and switch `current`, leaving the previous version intact. AppImage builds continue to use Electron's updater; system packages should be updated through the system package manager.
+On Linux, releases live in `~/.local/share/nusashell/versions/`; `current` points to the active version and `~/.local/bin/nusashell` launches it. A desktop-menu entry is written under `~/.local/share/applications`. Updates download a new version, verify it, and switch `current`; the installer keeps only the newly installed version and exactly one previous version. For example, `0.1.6` → `0.1.7` keeps both, then `0.1.7` → `0.1.9` removes `0.1.6` and keeps `{0.1.7, 0.1.9}`. AppImage builds continue to use Electron's updater; system packages should be updated through the system package manager.
 
 Electron ships a `chrome-sandbox` helper that must be owned by root with mode
 `4755`. Without that, Chromium aborts even when user namespaces are enabled.
@@ -35,7 +35,9 @@ installation, remove `~/.local/share/nusashell`, `~/.local/bin/nusashell`,
 `~/.local/share/applications/nusashell.desktop`, and optionally
 `~/.config/autostart/nusashell.desktop`. Remove `~/.config/nusashell` too only
 for a full data wipe; it contains durable app state and is not required to
-remove the program.
+remove the program. Older releases may have used `~/.config/@nusashell/desktop/`;
+that legacy path is obsolete and is not read or recreated by the app, so move or
+delete it manually if no longer needed.
 
 On macOS, remove `~/Applications/NusaShell.app` from Finder or the Trash. For a
 full data wipe, also remove `~/Library/Application Support/nusashell/`.

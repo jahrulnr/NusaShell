@@ -380,7 +380,7 @@ function renderInstalledTable() {
     row.addEventListener("click", () => {
       selectedPluginId = p.pluginId;
       updateNativeMcpToolbar();
-      renderPluginList();
+      renderInstalledTable();
       openDrawer(p);
     });
     table.appendChild(row);

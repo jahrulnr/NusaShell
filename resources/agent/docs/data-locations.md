@@ -13,8 +13,10 @@ release or an unpackaged development run.
 
 The `--dev` row is an intentional exception for local development. It keeps a
 dev run isolated from a packaged run and makes local state easy to inspect. The
-folder is gitignored. A packaged build always uses the normal OS application-data
-location, even if someone passes `--dev` to the executable.
+folder is gitignored. A packaged build always uses the explicit `appData/nusashell`
+location on every platform, even if someone passes `--dev` to the executable.
+Older releases may have left `~/.config/@nusashell/desktop/` on Linux; that path
+is obsolete and is not migrated or recreated.
 
 If you are answering for a specific conversation, use its `runtime_os` value
 when choosing a row. Do not assume Linux. The app may also use

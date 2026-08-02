@@ -71,8 +71,9 @@ conversations, and local state stays in-tree for easy tracing. This is the
 
 ### OS examples for packaged userData
 
-Electron resolves `app.getPath("userData")` below the OS application-data
-location. The current desktop app uses the lowercase `nusashell` app-data name:
+Packaged/non-dev startup explicitly sets `app.getPath("userData")` to
+`join(app.getPath("appData"), "nusashell")` on every platform. The current desktop
+app uses the lowercase `nusashell` app-data name:
 
 | OS | Typical packaged/non-dev path |
 |---|---|

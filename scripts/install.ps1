@@ -14,8 +14,15 @@ try {
   if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLower() -ne $entry.sha256.ToLower()) { throw 'Checksum verification failed; refusing to install.' }
   $root = Join-Path $env:LOCALAPPDATA 'Programs\NusaShell'; $versions = Join-Path $root 'versions'; $target = Join-Path $versions $manifest.version
   New-Item -ItemType Directory -Force $versions | Out-Null
+  $current = Join-Path $root 'current'; $previousVersion = ''
+  if (Test-Path $current) {
+    $currentItem = Get-Item -LiteralPath $current -Force
+    $currentTarget = [string]$currentItem.Target
+    if ($currentTarget) { $previousVersion = Split-Path $currentTarget.TrimEnd('\') -Leaf }
+  }
   if (-not (Test-Path $target)) { Expand-Archive $archive -DestinationPath $target; $child = Get-ChildItem $target | Select-Object -First 1; if ($child -and $child.PSIsContainer) { Get-ChildItem $child.FullName | Move-Item -Destination $target; Remove-Item $child.FullName } }
-  $current = Join-Path $root 'current'; if (Test-Path $current) { Remove-Item $current -Force }; New-Item -ItemType Junction -Path $current -Target $target | Out-Null
+  if (Test-Path $current) { Remove-Item $current -Force }; New-Item -ItemType Junction -Path $current -Target $target | Out-Null
+  Get-ChildItem $versions -Directory | Where-Object { $_.Name -ne $manifest.version -and $_.Name -ne $previousVersion } | Remove-Item -Recurse -Force
   $shell = New-Object -ComObject WScript.Shell; $shortcut = $shell.CreateShortcut((Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\NusaShell.lnk')); $shortcut.TargetPath = Join-Path $current 'NusaShell.exe'; $shortcut.Save()
   Write-Host "Installed NusaShell $($manifest.version)."
 } finally { Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue }

@@ -1,9 +1,9 @@
 import { app, BrowserWindow, dialog, Menu } from "electron";
 import { mkdirSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { bootstrap, type BootstrapResult } from "@nusashell/backend";
 import { LogTail, type ShellLogLevel, type ShellLogSource } from "./log-tail.js";
-import { resolveIsDev, resolveWsPort, resolveDataRoot } from "./runtime-mode.js";
+import { PROD_DATA_DIRNAME, resolveIsDev, resolveWsPort, resolveDataRoot } from "./runtime-mode.js";
 import {
   createLauncherWindow,
   closeAllPluginWindows,
@@ -76,9 +76,12 @@ if (process.platform === "linux") {
 }
 
 // Isolate dev durable state under <repo>/.nusashell (gitignored) so concurrent
-// prod + unpackaged-dev runs don't fight on userData or the WS port. Prod keeps
-// Electron's default userData under appData/nusashell — never the repo.
+// prod + unpackaged-dev runs don't fight on userData or the WS port. Prod uses
+// the explicit appData/nusashell path on every platform.
 const repositoryRoot = resolve(__dirname, "..", "..", "..", "..");
+if (!isDev) {
+  app.setPath("userData", join(app.getPath("appData"), PROD_DATA_DIRNAME));
+}
 if (isDev) {
   const devDataRoot = resolveDataRoot({ isDev: true, repositoryRoot, appDataPath: app.getPath("appData") });
   app.setPath("userData", devDataRoot);

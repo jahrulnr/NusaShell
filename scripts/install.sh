@@ -40,6 +40,11 @@ fi
 
 root="$home_dir/.local/share/nusashell"; versions="$root/versions"; current="$root/current"; bin="$home_dir/.local/bin"
 mkdir -p "$versions" "$bin" "$home_dir/.local/share/applications"
+previous_version=""
+if [[ -e "$current" || -L "$current" ]]; then
+  previous_target="$(readlink -f "$current" 2>/dev/null || true)"
+  if [[ -n "$previous_target" ]]; then previous_version="$(basename "$previous_target")"; fi
+fi
 target="$versions/$resolved_version"
 if [[ ! -d "$target/NusaShell" && ! -x "$target/NusaShell" ]]; then
   mkdir -p "$target"
@@ -122,6 +127,13 @@ ln -sfn "$target" "$root/.current-$resolved_version"
 # Without -T, GNU mv follows the existing directory symlink and moves the
 # candidate inside the old version instead of replacing `current`.
 mv -Tf "$root/.current-$resolved_version" "$current"
+for candidate in "$versions"/*; do
+  [[ -d "$candidate" && ! -L "$candidate" ]] || continue
+  candidate_version="$(basename "$candidate")"
+  if [[ "$candidate_version" != "$resolved_version" && "$candidate_version" != "$previous_version" ]]; then
+    rm -rf "$candidate"
+  fi
+done
 printf '#!/usr/bin/env sh\nexec "%s/NusaShell"%s "$@"\n' "$current" "$no_sandbox" > "$bin/nusashell"
 chmod +x "$bin/nusashell"
 cat > "$home_dir/.local/share/applications/nusashell.desktop" <<EOF

@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Locked packaged user data to the canonical `appData/nusashell` path on every
+  platform, without recreating the legacy `@nusashell/desktop` path.
+- Fixed the Plugins view row-selection crash caused by calling the removed
+  `renderPluginList()` function.
+- Updated Linux and Windows installers to retain only the active version and
+  one previous version, removing older installation directories.
+- Corrected cross-platform runtime-path test expectations for Windows.
 - Corrected the duplicate TypeScript `type` export in the skill ports barrel.
 
 ## [0.1.6] - 2026-08-02
