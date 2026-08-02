@@ -5,6 +5,7 @@ import {
   DEV_WS_PORT,
   PROD_DATA_DIRNAME,
   PROD_WS_PORT,
+  resolveBuildLabel,
   resolveDataRoot,
   resolveIsDev,
   resolveWsPort,
@@ -25,6 +26,13 @@ describe("resolveIsDev", () => {
 
   it("is never dev when packaged without --dev", () => {
     expect(resolveIsDev({ isPackaged: true, argv: [] })).toBe(false);
+  });
+});
+
+describe("resolveBuildLabel", () => {
+  it("labels dev and production modes correctly", () => {
+    expect(resolveBuildLabel(true)).toBe("dev");
+    expect(resolveBuildLabel(false)).toBe("production");
   });
 });
 

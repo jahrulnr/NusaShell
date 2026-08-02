@@ -785,6 +785,8 @@ async function refreshAll() {
 // ============ Init ============
 
 document.addEventListener("DOMContentLoaded", () => {
+  const buildLabel = $("#settings-build");
+  if (buildLabel) buildLabel.textContent = window.shell?.build ?? "production";
   initCentralLogs();
   const savedSidebarMode = localStorage.getItem("nusashell.sidebarMode");
   setSidebarCompact(savedSidebarMode ? savedSidebarMode === "icons" : window.innerWidth <= 960, false);
@@ -1618,7 +1620,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Version
   getVersion().then(v => {
-    if (v?.version) $("#settings-version").textContent = v.version;
+    if (v?.version) {
+      $("#settings-version").textContent = v.version;
+      $("#settings-about-version").textContent = v.version;
+    }
   }).catch(() => {});
 
   // Event subscriptions

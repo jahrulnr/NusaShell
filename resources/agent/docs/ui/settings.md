@@ -13,6 +13,16 @@ Shows the running NusaShell version, backend connection state, WebSocket URL, an
   - Type: text
   - Action: Displays the running NusaShell version.
 
+- **Build type** (`#settings-build`):
+  - Section: About
+  - Type: text
+  - Action: Displays dev for an unpackaged --dev run and production for packaged or non-dev runs.
+
+- **Application version** (`#settings-about-version`):
+  - Section: About
+  - Type: text
+  - Action: Displays the running NusaShell version in the About card.
+
 - **Backend status dot** (`#settings-conn-dot`):
   - Section: System
   - Type: status indicator

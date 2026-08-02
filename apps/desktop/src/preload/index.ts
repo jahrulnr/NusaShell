@@ -25,10 +25,11 @@ import type {
 } from "../shared/mail-contract.js";
 import type { PluginWindowOptionsInput } from "../main/plugin-window-options.js";
 import type { NativeMcpInput } from "../main/ipc/native-mcp.js";
-import { resolveWsPort } from "../main/runtime-mode.js";
+import { resolveBuildLabel, resolveWsPort } from "../main/runtime-mode.js";
 
 export interface ShellApi {
   readonly wsUrl: string;
+  readonly build: "dev" | "production";
   callTool(pluginId: string, toolName: string, args: Record<string, unknown>): Promise<unknown>;
   listTools(pluginId: string): Promise<unknown>;
   openPlugin(pluginId: string, name: string, icon: string, installPath: string, options?: PluginWindowOptionsInput): Promise<void>;
@@ -141,13 +142,15 @@ export interface ShellLogEntry {
   readonly message: string;
 }
 
+const isDev = process.env.NUSASHELL_IS_DEV === "true";
 const wsUrl = `ws://127.0.0.1:${resolveWsPort({
-  isDev: process.env.NUSASHELL_IS_DEV === "true",
+  isDev,
   envPort: process.env.NUSASHELL_PORT,
 })}`;
 
 const api: ShellApi = {
   wsUrl,
+  build: resolveBuildLabel(isDev),
   callTool(pluginId, toolName, args) {
     return ipcRenderer.invoke("tool:call", pluginId, toolName, args);
   },

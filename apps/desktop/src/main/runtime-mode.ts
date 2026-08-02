@@ -37,6 +37,10 @@ export function resolveIsDev({ isPackaged, argv }: IsDevOptions): boolean {
   return !isPackaged && argv.includes("--dev");
 }
 
+export function resolveBuildLabel(isDev: boolean): "dev" | "production" {
+  return isDev ? "dev" : "production";
+}
+
 export function resolveWsPort({ isDev, envPort }: WsPortOptions): number {
   const parsed = envPort !== undefined ? Number.parseInt(envPort, 10) : NaN;
   if (Number.isInteger(parsed) && parsed > 0 && parsed < 65536) return parsed;

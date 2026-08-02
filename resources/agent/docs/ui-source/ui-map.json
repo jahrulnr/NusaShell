@@ -658,6 +658,8 @@
           ],
           "controls": [
             "settings-version",
+            "settings-build",
+            "settings-about-version",
             "settings-conn-dot",
             "settings-conn-label",
             "settings-ws-url",
@@ -1960,6 +1962,18 @@
       "label": "NusaShell version",
       "type": "text",
       "action": "Displays the running NusaShell version."
+    },
+    "settings-build": {
+      "section": "About",
+      "label": "Build type",
+      "type": "text",
+      "action": "Displays dev for an unpackaged --dev run and production for packaged or non-dev runs."
+    },
+    "settings-about-version": {
+      "section": "About",
+      "label": "Application version",
+      "type": "text",
+      "action": "Displays the running NusaShell version in the About card."
     },
     "settings-conn-dot": {
       "section": "System",
