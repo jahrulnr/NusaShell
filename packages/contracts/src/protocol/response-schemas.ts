@@ -37,6 +37,9 @@ export const PluginListItemSchema = z.object({
   state: PluginStateSchema,
   enabled: z.boolean(),
   autostart: z.boolean(),
+  source: z.enum(["native-mcp", "package"]).optional(),
+  transport: z.string().optional(),
+  category: z.string().optional(),
   ui: z
     .object({
       entry: z.string(),

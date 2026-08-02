@@ -13,7 +13,7 @@ export async function fetchPlugins() {
 }
 
 export async function startPlugin(pluginId) {
-  try { await sendRequest("plugin.start", { pluginId }); } catch (e) { console.error(e); }
+  try { await sendRequest("plugin.start", { pluginId }, 310000); } catch (e) { console.error(e); }
 }
 
 export async function stopPlugin(pluginId) {

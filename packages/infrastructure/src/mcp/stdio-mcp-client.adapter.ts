@@ -117,8 +117,11 @@ export class StdioMcpClient implements McpClientPort {
     });
 
     // Race connect against transport close + timeout to avoid hanging
-    // when the MCP process exits immediately (e.g. broken deps)
-    const CONNECT_TIMEOUT_MS = 10_000;
+    // when the MCP process exits immediately (e.g. broken deps).
+    // Default 5 minutes matches Node.js defaults — some servers (e.g. npx
+    // packages) need to download dependencies on first run. Override with
+    // NUSASHELL_MCP_CONNECT_TIMEOUT (milliseconds).
+    const CONNECT_TIMEOUT_MS = Number(process.env.NUSASHELL_MCP_CONNECT_TIMEOUT) || 300_000;
     await Promise.race([
       this.client.connect(this.transport),
       new Promise<never>((_, reject) => {

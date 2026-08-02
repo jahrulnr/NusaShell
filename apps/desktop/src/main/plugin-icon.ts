@@ -1,5 +1,5 @@
 import { readFile, realpath, stat } from "node:fs/promises";
-import { isAbsolute, relative } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const MAX_PLUGIN_ICON_BYTES = 5 * 1024 * 1024;
@@ -16,9 +16,18 @@ export async function loadPluginPngDataUrl(
     throw new Error("Plugin icon must use a file URL");
   }
 
+  // `file://icon.png` (relative to the plugin dir) and `file:///abs/icon.png`
+  // (absolute) are both documented manifest forms. `new URL` parses the
+  // relative form with a non-empty host and empty path, which `fileURLToPath`
+  // rejects, so resolve relative sources against the install path ourselves.
+  const rawPath = source.slice("file://".length);
+  const iconPathInput = rawPath.startsWith("/")
+    ? fileURLToPath(sourceUrl)
+    : resolve(installPath, rawPath);
+
   const [pluginRoot, iconPath] = await Promise.all([
     realpath(installPath),
-    realpath(fileURLToPath(sourceUrl)),
+    realpath(iconPathInput),
   ]);
   const pathWithinPlugin = relative(pluginRoot, iconPath);
   if (

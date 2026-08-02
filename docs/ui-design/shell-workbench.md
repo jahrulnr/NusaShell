@@ -52,13 +52,16 @@ state.
 ## Home launcher
 
 Home is an app launcher, not an analytics overview. It opens with product
-identity and a single scoped search followed by windowed plugin launch plates.
-Each plate gives mixed plugin artwork equal visual weight, exposes a readable
-name, and includes a textual runtime state when applicable. Hover raises the
-plate by two pixels; selection and running state remain understandable without
-animation or color alone. Plugin artwork keeps its source colors: themed glyphs
-must be supplied as assets rather than produced with CSS grayscale or tint
-filters.
+identity and a single scoped search, then a compact labelled category rail,
+followed by windowed plugin launch plates. The category rail stays left-aligned,
+scrolls horizontally when space is constrained, and marks the active filter
+with the same restrained phosphor selection treatment used elsewhere in the
+shell. Each plate gives mixed plugin artwork equal visual weight, exposes a
+readable name, and includes a textual runtime state when applicable. Hover
+raises the plate by two pixels; selection and running state remain understandable
+without animation or color alone. Plugin artwork keeps its source colors:
+themed glyphs must be supplied as assets rather than produced with CSS grayscale
+or tint filters.
 
 ## Interaction rules
 

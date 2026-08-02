@@ -61,6 +61,11 @@ Primary lifecycle actions for the selected plugin.
   - Type: button
   - Action: Restarts the selected plugin's MCP process.
 
+- **Edit MCP** (`#btn-edit-mcp`):
+  - Section: Plugin drawer actions
+  - Type: button
+  - Action: Opens the Custom MCP editor for the selected native MCP; hidden for package plugins.
+
 - **Uninstall** (`#btn-uninstall`):
   - Section: Actions
   - Type: button

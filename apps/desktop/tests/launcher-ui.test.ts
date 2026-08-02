@@ -6,6 +6,7 @@ import {
   filterLauncherPlugins,
   findOpaqueBounds,
   hasPluginUi,
+  launcherGridNeedsRebuild,
   pluginIconPresentation,
   positionContextMenu,
   providerApiModes,
@@ -57,6 +58,25 @@ describe("launcher UI helpers", () => {
     expect(filterLauncherPlugins(plugins, "markdown").map((plugin) => plugin.pluginId)).toEqual(["nusashell.notes"]);
     expect(filterLauncherPlugins(plugins, "browse").map((plugin) => plugin.pluginId)).toEqual(["example.browse"]);
     expect(filterLauncherPlugins(plugins, "")).toHaveLength(2);
+  });
+
+  it("keeps launcher artwork mounted when only runtime state changes", () => {
+    const previous = [
+      {
+        pluginId: "nusashell.mail",
+        name: "Mail",
+        description: "Local mail",
+        category: "Communication",
+        icon: "file://icon.png",
+        installPath: "/plugins/mail",
+        state: "idle",
+        ui: { entry: "ui/index.html" },
+      },
+    ];
+    const refreshed = [{ ...previous[0], state: "running" }];
+
+    expect(launcherGridNeedsRebuild(previous, refreshed)).toBe(false);
+    expect(launcherGridNeedsRebuild(previous, [{ ...refreshed[0], icon: "file://new-icon.png" }])).toBe(true);
   });
 
   it("keeps a right-click menu inside the window", () => {
@@ -188,4 +208,3 @@ describe("hasPluginUi", () => {
     expect(hasPluginUi({ ui: { entry: "   " } })).toBe(false);
   });
 });
-

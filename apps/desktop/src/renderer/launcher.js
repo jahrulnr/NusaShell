@@ -12,6 +12,7 @@ import {
   describeToolsPanel,
   filterLauncherPlugins,
   hasPluginUi,
+  launcherGridNeedsRebuild,
   normalizeTransparentIcon,
   pluginIconPresentation,
   positionContextMenu,
@@ -38,6 +39,7 @@ let skillsController = null;
 let learningController = null;
 let jobsController = null;
 let launcherSearchQuery = "";
+let launcherCategory = "All";
 let aiSettings = { activeProviderId: "", activeModelKey: "", effort: "auto", providers: [], models: [] };
 let currentProviderDetailId = "";
 let pendingProviderDeleteId = "";
@@ -331,7 +333,26 @@ function renderAppGrid() {
     grid.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:20px 0">No apps to launch. Installed plugins are MCP-only — manage them from the Plugins view.</div>';
     return;
   }
-  const visiblePlugins = filterLauncherPlugins(uiPlugins, launcherSearchQuery);
+  const categories = ["All", ...new Set(uiPlugins.map((p) => p.category || "Uncategorized"))];
+  const tabsContainer = $("#launcher-tabs");
+  if (tabsContainer) {
+    tabsContainer.innerHTML = "";
+    categories.forEach((cat) => {
+      const tab = el("button", `tab${cat === launcherCategory ? " active" : ""}`);
+      tab.textContent = cat;
+      tab.dataset.category = cat;
+      tab.addEventListener("click", () => {
+        launcherCategory = cat;
+        renderAppGrid();
+      });
+      tabsContainer.appendChild(tab);
+    });
+  }
+
+  const categoryFiltered = launcherCategory === "All"
+    ? uiPlugins
+    : uiPlugins.filter((p) => (p.category || "Uncategorized") === launcherCategory);
+  const visiblePlugins = filterLauncherPlugins(categoryFiltered, launcherSearchQuery);
   if (visiblePlugins.length === 0) {
     grid.appendChild(el("div", "app-grid-empty", `No plugins match “${launcherSearchQuery}”.`));
     return;
@@ -346,10 +367,33 @@ function renderAppGrid() {
     const status = el("div", `app-status ${p.state}`);
     status.innerHTML = stateBadgeHtml(p.state);
     cell.append(icon, name, status);
-    cell.addEventListener("click", () => openPluginWindow(p));
-    cell.addEventListener("contextmenu", (e) => { e.preventDefault(); showContextMenu(e.clientX, e.clientY, p); });
+    cell.addEventListener("click", () => {
+      const plugin = plugins.find((item) => item.pluginId === p.pluginId);
+      if (plugin) openPluginWindow(plugin);
+    });
+    cell.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      const plugin = plugins.find((item) => item.pluginId === p.pluginId);
+      if (plugin) showContextMenu(e.clientX, e.clientY, plugin);
+    });
     grid.appendChild(cell);
   });
+}
+
+function updateAppGridStates() {
+  const pluginsById = new Map(plugins.map((plugin) => [plugin.pluginId, plugin]));
+  $$("#app-grid .app-cell[data-plugin-id]").forEach((cell) => {
+    const plugin = pluginsById.get(cell.dataset.pluginId);
+    const status = cell.querySelector(".app-status");
+    if (!plugin || !status) return;
+    status.className = `app-status ${plugin.state}`;
+    status.innerHTML = stateBadgeHtml(plugin.state);
+  });
+}
+
+function syncAppGrid(previousPlugins) {
+  if (launcherGridNeedsRebuild(previousPlugins, plugins)) renderAppGrid();
+  else updateAppGridStates();
 }
 
 // ============ Render: Installed Table ============
@@ -379,7 +423,6 @@ function renderInstalledTable() {
     row.classList.toggle("is-selected", p.pluginId === selectedPluginId);
     row.addEventListener("click", () => {
       selectedPluginId = p.pluginId;
-      updateNativeMcpToolbar();
       renderInstalledTable();
       openDrawer(p);
     });
@@ -396,6 +439,8 @@ async function openDrawer(plugin) {
   setPluginIcon($("#drawer-icon"), plugin.icon || "🧩", 38, plugin.installPath);
   $("#drawer-title").textContent = plugin.name;
   $("#drawer-subtitle").textContent = `${plugin.pluginId} · v${plugin.version}`;
+
+  $("#btn-edit-mcp").hidden = plugin.source !== "native-mcp";
 
   const sm = $("#state-machine");
   sm.innerHTML = "";
@@ -575,6 +620,7 @@ function setSidebarCompact(compact, persist = true) {
 // ============ Event handling ============
 
 function handlePluginEvent(payload, eventType) {
+  const previousPlugins = plugins;
   const idx = plugins.findIndex(p => p.pluginId === payload.pluginId);
   if (idx >= 0) {
     const newState = payload.state ?? payload.newState;
@@ -583,9 +629,10 @@ function handlePluginEvent(payload, eventType) {
     }
   }
   if (eventType === "plugin.installed" || eventType === "plugin.uninstalled") {
-    refreshAll();
+    void refreshAll();
+    return;
   }
-  renderAppGrid();
+  syncAppGrid(previousPlugins);
   renderInstalledTable();
   renderAutostartList();
   if (currentPlugin?.pluginId === payload.pluginId) {
@@ -609,7 +656,7 @@ function showToast(message, type = "info") {
 
 // ============ Add Plugin Modal ============
 
-function openAddPluginModal(tab = "custom", plugin = null) {
+async function openAddPluginModal(tab = "custom", plugin = null) {
   $("#add-plugin-modal").style.display = "flex";
   $("#install-url-input").value = "";
   $("#install-local-input").value = "";
@@ -618,10 +665,33 @@ function openAddPluginModal(tab = "custom", plugin = null) {
   $("#add-plugin-modal-title").textContent = nativeMcpEditId ? "Edit MCP" : "Add MCP";
   $("#native-mcp-name").value = plugin?.name || "";
   $("#native-mcp-id").value = plugin?.pluginId || "";
+  $("#native-mcp-id").disabled = Boolean(nativeMcpEditId);
+  $("#native-mcp-category").value = plugin?.category || "";
   $("#native-mcp-transport").value = plugin?.transport || "stdio";
+  toggleMcpTransportFields($("#native-mcp-transport").value);
+
+  // Fetch full manifest detail for edit (command, args, url, env, headers)
+  let detail = null;
+  if (nativeMcpEditId) {
+    detail = await getPluginDetail(nativeMcpEditId);
+  }
+  const m = detail || plugin || {};
+  if (m.category) $("#native-mcp-category").value = m.category;
+  $("#native-mcp-command").value = m.command || "";
+  $("#native-mcp-args").value = Array.isArray(m.args) ? m.args.join("\n") : "";
+  $("#native-mcp-url").value = m.url || "";
+  $("#native-mcp-env").value = JSON.stringify(m.env || {}, null, 2);
+  $("#native-mcp-headers").value = JSON.stringify(m.headers || {}, null, 2);
+
   setPluginModalTab(tab);
   if (tab === "custom") $("#native-mcp-name").focus();
   else $("#install-url-input").focus();
+}
+
+function toggleMcpTransportFields(transport) {
+  const isStdio = transport === "stdio";
+  $("#native-mcp-stdio-fields").hidden = !isStdio;
+  $("#native-mcp-remote-fields").hidden = isStdio;
 }
 
 function setPluginModalTab(tab) {
@@ -634,21 +704,22 @@ function setPluginModalTab(tab) {
   $("#nusashell-plugin-tab").setAttribute("aria-selected", String(!custom));
 }
 
-function updateNativeMcpToolbar() {
-  const plugin = plugins.find((item) => item.pluginId === selectedPluginId);
-  $("#plugins-edit-mcp").disabled = plugin?.source !== "native-mcp";
-}
-
 function parseNativeJson(value) {
-  const parsed = JSON.parse(value);
+  const trimmed = value.trim();
+  if (!trimmed) throw new Error("Paste a JSON config first");
+  let parsed;
+  try { parsed = JSON.parse(trimmed); }
+  catch { throw new Error("Invalid JSON — check the format"); }
   const server = parsed.mcpServers ? Object.entries(parsed.mcpServers)[0] : [parsed.name || "", parsed];
   if (!server || typeof server[1] !== "object") throw new Error("JSON must contain one MCP server");
   const [name, config] = server;
   $("#native-mcp-name").value = config.name || name || "";
   $("#native-mcp-id").value = config.id || `custom.${String(name || "mcp").toLowerCase().replace(/[^a-z0-9-]+/g, "-")}`;
+  $("#native-mcp-category").value = config.category || "";
   $("#native-mcp-transport").value = config.url ? (config.transport === "sse" ? "sse" : "http") : "stdio";
+  toggleMcpTransportFields($("#native-mcp-transport").value);
   $("#native-mcp-command").value = config.command || "";
-  $("#native-mcp-args").value = Array.isArray(config.args) ? config.args.join("\\n") : "";
+  $("#native-mcp-args").value = Array.isArray(config.args) ? config.args.join("\n") : "";
   $("#native-mcp-url").value = config.url || "";
   $("#native-mcp-env").value = JSON.stringify(config.env || {}, null, 2);
   $("#native-mcp-headers").value = JSON.stringify(config.headers || {}, null, 2);
@@ -659,13 +730,13 @@ async function saveNativeMcp() {
     const input = {
       id: $("#native-mcp-id").value.trim(),
       name: $("#native-mcp-name").value.trim(),
+      category: $("#native-mcp-category").value.trim() || undefined,
       transport: $("#native-mcp-transport").value,
       command: $("#native-mcp-command").value.trim() || undefined,
-      args: $("#native-mcp-args").value.split(/\\r?\\n/).map((item) => item.trim()).filter(Boolean),
+      args: $("#native-mcp-args").value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean),
       url: $("#native-mcp-url").value.trim() || undefined,
       env: JSON.parse($("#native-mcp-env").value || "{}"),
       headers: JSON.parse($("#native-mcp-headers").value || "{}"),
-      autostart: $("#native-mcp-autostart").checked,
     };
     $("#native-mcp-status").style.display = "block";
     $("#native-mcp-status").textContent = "Saving MCP...";
@@ -676,6 +747,10 @@ async function saveNativeMcp() {
     showToast(nativeMcpEditId ? "MCP updated" : "MCP added", "success");
     closeAddPluginModal();
     await refreshAll();
+    if (result?.restartRequired) {
+      showToast("Restarting MCP...", "info");
+      startPlugin(result.pluginId);
+    }
   } catch (error) {
     $("#native-mcp-status").style.display = "block";
     $("#native-mcp-status").textContent = `Error: ${error.message || error}`;
@@ -685,6 +760,7 @@ async function saveNativeMcp() {
 
 function closeAddPluginModal() {
   $("#add-plugin-modal").style.display = "none";
+  $("#native-mcp-id").disabled = false;
 }
 
 function showInstallStatus(message, isError) {
@@ -774,12 +850,12 @@ function initUpdater() {
 // ============ Refresh all views ============
 
 async function refreshAll() {
+  const previousPlugins = plugins;
   plugins = await fetchPlugins();
   if (selectedPluginId && !plugins.some((plugin) => plugin.pluginId === selectedPluginId)) selectedPluginId = "";
-  renderAppGrid();
+  syncAppGrid(previousPlugins);
   renderInstalledTable();
   renderAutostartList();
-  updateNativeMcpToolbar();
 }
 
 // ============ Init ============
@@ -1522,9 +1598,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // Add Plugin modal
   $("#plugins-add-mcp").addEventListener("click", () => openAddPluginModal("custom"));
   $("#plugins-install-plugin").addEventListener("click", () => openAddPluginModal("plugin"));
-  $("#plugins-edit-mcp").addEventListener("click", () => {
-    const plugin = plugins.find((item) => item.pluginId === selectedPluginId);
-    if (plugin?.source === "native-mcp") openAddPluginModal("custom", plugin);
+  $("#native-mcp-transport").addEventListener("change", (e) => toggleMcpTransportFields(e.target.value));
+  $("#btn-edit-mcp").addEventListener("click", () => {
+    if (currentPlugin?.source === "native-mcp") openAddPluginModal("custom", currentPlugin);
   });
   $("#custom-mcp-tab").addEventListener("click", () => setPluginModalTab("custom"));
   $("#nusashell-plugin-tab").addEventListener("click", () => setPluginModalTab("plugin"));
@@ -1618,13 +1694,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#acp-provider-close").addEventListener("click", closeAcpProviderEditor);
   $("#acp-provider-modal-overlay").addEventListener("click", closeAcpProviderEditor);
 
-  // Version
-  getVersion().then(v => {
-    if (v?.version) {
-      $("#settings-version").textContent = v.version;
-      $("#settings-about-version").textContent = v.version;
-    }
-  }).catch(() => {});
+  // Version — fetched after WS connects (see onOpen callback below)
 
   // Event subscriptions
   onEvent("plugin.installed", (payload) => handlePluginEvent(payload, "plugin.installed"));
@@ -1667,6 +1737,12 @@ document.addEventListener("DOMContentLoaded", () => {
       if (isOpen !== false) {
         subscribe(["*"]).catch(() => {});
         refreshAll();
+        getVersion().then(v => {
+          if (v?.version) {
+            $("#settings-version").textContent = v.version;
+            $("#settings-about-version").textContent = v.version;
+          }
+        }).catch(() => {});
       }
     },
     onLog: writeRendererLog,

@@ -6,8 +6,8 @@ export const ManifestSchema = z.object({
     .string()
     .min(1)
     .regex(
-      /^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*$/,
-      "id must follow publisher.name format (lowercase, dot-separated)",
+      /^[a-z0-9][a-z0-9._-]*$/i,
+      "id must start with alphanumeric and contain only letters, numbers, dots, dashes, or underscores",
     ),
   name: z.string().min(1),
   version: z.string().min(1),
@@ -18,6 +18,7 @@ export const ManifestSchema = z.object({
    * 3. URL — e.g. "https://example.com/icon.png"
    */
   icon: z.string().min(1),
+  category: z.string().min(1).optional(),
   /**
    * Plugin UI surface. Omit for a headless MCP-only plugin (no window, not
    * shown on the Home launcher grid; managed from the Plugins view and via

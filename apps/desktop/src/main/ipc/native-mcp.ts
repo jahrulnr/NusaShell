@@ -8,6 +8,7 @@ export interface NativeMcpInput {
   readonly id: string;
   readonly name: string;
   readonly icon?: string;
+  readonly category?: string;
   readonly transport: "stdio" | "http" | "sse";
   readonly command?: string;
   readonly args?: readonly string[];
@@ -33,8 +34,8 @@ async function writeNativeMcp(ctx: IpcContext, input: NativeMcpInput, updateId?:
   if (!root) throw new Error("Writable user plugin root is not configured");
   const id = input.id.trim();
   if (updateId && updateId !== id) throw new Error("Native MCP id cannot change during edit");
-  if (!/^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*$/.test(id)) {
-    throw new Error("id must follow publisher.name format");
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(id)) {
+    throw new Error("id must start with alphanumeric and contain only letters, numbers, dots, dashes, or underscores");
   }
   const folder = resolve(root, id);
   const rootPath = resolve(root);
@@ -50,6 +51,7 @@ async function writeNativeMcp(ctx: IpcContext, input: NativeMcpInput, updateId?:
     name: input.name.trim(),
     version: "0.1.0",
     icon: input.icon?.trim() || "M",
+    ...(input.category ? { category: input.category.trim() } : {}),
     mcp: {
       transport: input.transport,
       ...(input.command ? { command: input.command.trim() } : {}),

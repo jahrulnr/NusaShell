@@ -9,6 +9,9 @@ export interface PluginListItem {
   readonly state: PluginRuntimeState;
   readonly enabled: boolean;
   readonly autostart: boolean;
+  readonly source?: "native-mcp" | "package";
+  readonly transport?: string;
+  readonly category?: string;
   readonly ui?: {
     readonly entry: string;
     readonly window?: {

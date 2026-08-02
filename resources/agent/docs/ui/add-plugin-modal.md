@@ -68,11 +68,6 @@ Install from a URL, choose a local plugin folder with the native directory picke
   - Type: textarea
   - Action: Sets optional HTTP/SSE headers as JSON.
 
-- **Autostart** (`#native-mcp-autostart`):
-  - Section: Custom MCP
-  - Type: checkbox
-  - Action: Starts the native MCP when NusaShell opens.
-
 - **Import JSON** (`#native-mcp-import`):
   - Section: Custom MCP
   - Type: textarea

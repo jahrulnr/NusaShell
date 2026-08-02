@@ -2,7 +2,7 @@
   "id": "nusashell.files",
   "name": "Files",
   "version": "0.1.0",
-  "icon": "📂",
+  "icon": "\ud83d\udcc2",
   "ui": {
     "entry": "ui/index.html",
     "window": {
@@ -26,5 +26,6 @@
   },
   "dependencies": {
     "shell": ">=0.0.2"
-  }
+  },
+  "category": "Productivity"
 }

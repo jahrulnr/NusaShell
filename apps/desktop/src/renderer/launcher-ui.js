@@ -95,6 +95,22 @@ export function filterLauncherPlugins(plugins, query) {
   return plugins.filter((plugin) => `${plugin.name ?? ""} ${plugin.pluginId ?? ""} ${plugin.description ?? ""}`.toLocaleLowerCase().includes(normalized));
 }
 
+export function launcherGridNeedsRebuild(previousPlugins, nextPlugins) {
+  const snapshot = (plugins) => plugins
+    .filter(hasPluginUi)
+    .map((plugin) => ({
+      pluginId: plugin.pluginId ?? "",
+      name: plugin.name ?? "",
+      description: plugin.description ?? "",
+      category: plugin.category || "Uncategorized",
+      icon: plugin.icon || "🧩",
+      installPath: plugin.installPath ?? "",
+      uiEntry: plugin.ui?.entry?.trim() ?? "",
+    }));
+
+  return JSON.stringify(snapshot(previousPlugins)) !== JSON.stringify(snapshot(nextPlugins));
+}
+
 export function positionContextMenu(point, menuSize, viewportSize) {
   const margin = 8;
   return {

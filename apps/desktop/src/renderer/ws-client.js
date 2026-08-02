@@ -55,7 +55,7 @@ export function connectWs() {
   });
 }
 
-export function sendRequest(method, payload, timeoutMs = 10000) {
+export function sendRequest(method, payload, timeoutMs = 60000) {
   if (!client || !client.isConnected) {
     return Promise.reject(new Error("Not connected"));
   }

@@ -70,6 +70,7 @@ export class FilesystemPluginRegistry implements PluginRepositoryPort {
       name: parsed.name,
       version: parsed.version,
       icon: parsed.icon,
+      ...(parsed.category ? { category: parsed.category } : {}),
       ui: parsed.ui,
       mcp: parsed.mcp,
       ...(parsed.dependencies ? { dependencies: parsed.dependencies } : {}),

@@ -200,11 +200,17 @@ export class PluginLifecycleCoordinator {
       installPath: entry.installPath,
       source: entry.source ?? "package",
       transport: entry.transport ?? "stdio",
+      ...(entry.category !== undefined ? { category: entry.category } : {}),
       state: entry.runtime.state,
       enabled: entry.enabled,
       autostart: entry.autostart,
       ui: entry.ui,
       keepAliveOnClose: entry.keepAliveOnClose,
+      ...(entry.command !== undefined ? { command: entry.command } : {}),
+      ...(entry.args.length > 0 ? { args: entry.args } : {}),
+      ...(entry.url !== undefined ? { url: entry.url } : {}),
+      ...(Object.keys(entry.env).length > 0 ? { env: entry.env } : {}),
+      ...(Object.keys(entry.headers).length > 0 ? { headers: entry.headers } : {}),
     };
   }
 

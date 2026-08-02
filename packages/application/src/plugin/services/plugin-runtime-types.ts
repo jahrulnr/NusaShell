@@ -24,6 +24,12 @@ export interface RuntimeEntry {
   installPath: string;
   source?: "native-mcp" | "package";
   transport?: string;
+  category?: string;
+  command: string | undefined;
+  args: readonly string[];
+  url: string | undefined;
+  env: Readonly<Record<string, string>>;
+  headers: Readonly<Record<string, string>>;
   enabled: boolean;
   autostart: boolean;
   ui?: {
@@ -77,6 +83,7 @@ export interface PluginLaunchSpec {
   readonly pluginId: string;
   readonly source?: "native-mcp" | "package";
   readonly transport?: string;
+  readonly category?: string;
   readonly command?: string;
   readonly url?: string;
   readonly headerKeys?: readonly string[];
@@ -106,7 +113,13 @@ export interface PluginView {
   readonly ui: RuntimeEntry["ui"];
   readonly source?: "native-mcp" | "package";
   readonly transport?: string;
+  readonly category?: string;
   readonly keepAliveOnClose: boolean;
+  readonly command?: string;
+  readonly args?: readonly string[];
+  readonly url?: string;
+  readonly env?: Readonly<Record<string, string>>;
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 export function arrayEquals(a: readonly string[], b: readonly string[]): boolean {

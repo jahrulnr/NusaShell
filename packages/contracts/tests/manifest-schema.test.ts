@@ -34,6 +34,16 @@ describe("ManifestSchema", () => {
     expect(result.success).toBe(false);
   });
 
+  it("accepts id without a dot (dot is a convention, not a requirement)", () => {
+    const result = ManifestSchema.safeParse({ ...VALID, id: "my-mcp" });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts id with underscores", () => {
+    const result = ManifestSchema.safeParse({ ...VALID, id: "my_mcp" });
+    expect(result.success).toBe(true);
+  });
+
   it("rejects missing name", () => {
     const result = ManifestSchema.safeParse({ ...VALID, name: "" });
     expect(result.success).toBe(false);

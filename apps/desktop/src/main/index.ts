@@ -172,8 +172,10 @@ async function startBackend(): Promise<BootstrapResult> {
     skillsRoot,
     memoryRoot,
     logFile: resolve(dataRoot, "logs", "nusashell.log"),
-    resolvePluginRuntimeEnvironment: (pluginId) =>
-      pluginId === MAIL_PLUGIN_ID ? mailSettingsStore?.runtimeEnvironment() ?? {} : {},
+    resolvePluginRuntimeEnvironment: (pluginId) => ({
+      NUSASHELL_USER_DATA: dataRoot,
+      ...(pluginId === MAIL_PLUGIN_ID ? mailSettingsStore?.runtimeEnvironment() ?? {} : {}),
+    }),
     config: { port: wsPort, host: "127.0.0.1", pluginsRoot, bundledPluginsRoot, userPluginsRoot, builtinSkillsRoot, dbPath, logLevel: isDev ? "debug" : "info", ai: {
       providerId: activeProvider?.id ?? (aiStubEnabled ? "stub" : ""),
       stubEnabled: aiStubEnabled,

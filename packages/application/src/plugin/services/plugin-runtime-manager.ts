@@ -99,6 +99,7 @@ export class PluginRuntimeManager {
         ui: plugin.manifest.ui,
         source: plugin.manifest.source,
         transport: plugin.manifest.mcp.transport,
+        ...(plugin.manifest.category !== undefined ? { category: plugin.manifest.category } : {}),
         keepAliveOnClose: plugin.manifest.mcp.keepAliveOnClose,
       };
     });
@@ -232,6 +233,12 @@ export class PluginRuntimeManager {
         entry.installPath = plugin.installPath;
         entry.source = plugin.manifest.source;
         entry.transport = plugin.manifest.mcp.transport;
+        if (plugin.manifest.category !== undefined) entry.category = plugin.manifest.category;
+        entry.command = plugin.manifest.mcp.command;
+        entry.args = plugin.manifest.mcp.args;
+        entry.url = plugin.manifest.mcp.url;
+        entry.env = plugin.manifest.mcp.env;
+        entry.headers = plugin.manifest.mcp.headers;
         entry.enabled = plugin.enabled;
         entry.autostart = plugin.manifest.mcp.autostart;
         entry.ui = plugin.manifest.ui;
@@ -254,6 +261,12 @@ export class PluginRuntimeManager {
       source: plugin.manifest.source,
       transport: plugin.manifest.mcp.transport,
       keepAliveOnClose: plugin.manifest.mcp.keepAliveOnClose,
+      ...(plugin.manifest.category !== undefined ? { category: plugin.manifest.category } : {}),
+      ...(plugin.manifest.mcp.command !== undefined ? { command: plugin.manifest.mcp.command } : {}),
+      ...(plugin.manifest.mcp.args.length > 0 ? { args: plugin.manifest.mcp.args } : {}),
+      ...(plugin.manifest.mcp.url !== undefined ? { url: plugin.manifest.mcp.url } : {}),
+      ...(Object.keys(plugin.manifest.mcp.env).length > 0 ? { env: plugin.manifest.mcp.env } : {}),
+      ...(Object.keys(plugin.manifest.mcp.headers).length > 0 ? { headers: plugin.manifest.mcp.headers } : {}),
     };
   }
 
@@ -302,6 +315,11 @@ export class PluginRuntimeManager {
       installPath: "",
       source: "package",
       transport: "stdio",
+      command: undefined,
+      args: [],
+      url: undefined,
+      env: {},
+      headers: {},
       enabled: true,
       autostart: false,
       keepAliveOnClose: false,

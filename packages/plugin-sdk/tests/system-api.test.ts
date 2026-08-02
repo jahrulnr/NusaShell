@@ -7,7 +7,7 @@ import { CommandBus, QueryBus, SystemPingHandler, SystemVersionHandler } from "@
 function makeServer(port: number): WebSocketServer {
   const queryBus = new QueryBus();
   queryBus.register("system-ping", new SystemPingHandler());
-  queryBus.register("system-version", new SystemVersionHandler());
+  queryBus.register("system-version", new SystemVersionHandler("0.0.9"));
 
   const commandBus = new CommandBus();
   const router = new MessageRouter({ commandBus, queryBus });

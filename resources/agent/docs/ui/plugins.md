@@ -29,8 +29,3 @@ Shows plugin icon, name, plugin id, version, and current state for every install
   - Section: Plugins toolbar
   - Type: button
   - Action: Opens the NusaShell Plugin tab for installing a packaged plugin.
-
-- **Edit MCP** (`#plugins-edit-mcp`):
-  - Section: Plugins toolbar
-  - Type: button
-  - Action: Opens the Custom MCP editor for the selected native MCP; disabled for package plugins.

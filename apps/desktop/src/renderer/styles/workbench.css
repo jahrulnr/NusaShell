@@ -332,14 +332,16 @@ summary {
 }
 
 .filter-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
-  margin-bottom: 40px;
-  gap: var(--space-4);
+  margin-bottom: var(--space-8);
+  gap: var(--space-3);
 }
 
 .search,
 .home-search {
-  width: min(760px, 100%);
+  width: 100%;
   min-height: 50px;
   padding: 0 var(--space-4);
   border: 1px solid var(--border-strong);
@@ -359,26 +361,68 @@ summary {
   font: 400 14px var(--font-mono);
 }
 
-.tabs {
-  min-width: 72px;
+.category-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-soft);
+}
+
+.category-filter-label {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font: 600 10px/1 var(--font-mono);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+.category-filter .tabs {
+  min-width: 0;
+  max-width: 100%;
+  margin-left: 0;
   padding: 0;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: #171917;
-  box-shadow: inset 0 0 0 2px #101210;
+  gap: var(--space-1);
+  overflow-x: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  flex-wrap: nowrap;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tab {
-  min-width: 70px;
-  padding: 0 var(--space-4);
-  border-radius: calc(var(--radius-sm) - 2px);
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   color: var(--text-dim);
   font: 500 13px var(--font-mono);
 }
 
+.tab:hover {
+  border-color: var(--border);
+  background: var(--panel-raised);
+  color: var(--text);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .tab.active {
-  background: transparent;
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
   color: var(--accent);
+  box-shadow: inset 0 -2px 0 rgba(197,244,93,.36);
 }
 
 /* App launch plates */
@@ -1062,8 +1106,12 @@ summary {
   .content::before,
   .content::after { display: none; }
   .greeting { font-size: 34px; }
-  .filter-row { flex-direction: column; }
-  .filter-row .tabs { align-self: flex-start; min-height: 44px; }
+  .category-filter {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .filter-row .tabs { width: 100%; min-height: 36px; }
   .app-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 12px; }
   .app-icon { width: 96px; height: 96px; }
 }

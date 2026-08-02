@@ -150,8 +150,11 @@
             <input type="search" placeholder="Search installed apps, ids, or descriptions…" id="search-input" autocomplete="off" />
             <button class="search-clear" id="search-clear" type="button" aria-label="Clear app search" hidden>×</button>
           </div>
-          <div class="tabs">
-            <button class="tab active" data-tab>All</button>
+          <div class="category-filter">
+            <span class="category-filter-label" id="launcher-category-label">Category</span>
+            <div class="tabs" id="launcher-tabs" role="group" aria-labelledby="launcher-category-label">
+              <button class="tab active" type="button" data-category="All">All</button>
+            </div>
           </div>
         </div>
 
@@ -400,7 +403,6 @@
           <div class="plugins-toolbar">
             <button class="mini-btn" id="plugins-add-mcp" type="button">+ Add MCP</button>
             <button class="mini-btn" id="plugins-install-plugin" type="button">Install plugin</button>
-            <button class="mini-btn" id="plugins-edit-mcp" type="button" disabled>Edit MCP</button>
           </div>
         </div>
         <div class="plugin-table" id="plugin-table"></div>
@@ -479,7 +481,6 @@
           </div>
           <button class="action-btn" id="jobs-new-btn" type="button" data-control="jobs-new-btn">+ New job</button>
         </div>
-        <div class="jobs-hint" id="jobs-hint">Jobs run only while the app is open. A one-shot missed while the app was closed is marked errored, not silently fired.</div>
         <div class="jobs-error" id="jobs-error" hidden>
           <strong>Could not load jobs</strong>
           <span id="jobs-error-message"></span>
@@ -703,6 +704,7 @@
             <button class="action-btn action-start" id="btn-start">Start</button>
             <button class="action-btn action-stop" id="btn-stop">Stop</button>
             <button class="action-btn action-restart" id="btn-restart">Restart</button>
+            <button class="action-btn action-edit-mcp" id="btn-edit-mcp" hidden>Edit MCP</button>
             <button class="action-btn action-uninstall" id="btn-uninstall">Uninstall</button>
           </div>
         </div>
@@ -752,14 +754,18 @@
         <div id="custom-mcp-panel" role="tabpanel">
           <div class="modal-section">
             <label class="modal-label" for="native-mcp-name">Name</label><input class="modal-input" id="native-mcp-name" placeholder="My MCP server">
-            <label class="modal-label" for="native-mcp-id">ID (publisher.name)</label><input class="modal-input" id="native-mcp-id" placeholder="custom.my-mcp">
+            <label class="modal-label" for="native-mcp-id">ID</label><input class="modal-input" id="native-mcp-id" placeholder="my-mcp">
+            <label class="modal-label" for="native-mcp-category">Category</label><input class="modal-input" id="native-mcp-category" placeholder="Development">
             <label class="modal-label" for="native-mcp-transport">Transport</label><select class="modal-input" id="native-mcp-transport"><option value="stdio">stdio</option><option value="http">HTTP</option><option value="sse">SSE</option></select>
-            <label class="modal-label" for="native-mcp-command">Command</label><input class="modal-input" id="native-mcp-command" placeholder="npx">
-            <label class="modal-label" for="native-mcp-args">Arguments (one per line)</label><textarea class="modal-input" id="native-mcp-args" rows="3" placeholder="-y\npackage-name"></textarea>
-            <label class="modal-label" for="native-mcp-url">Server URL</label><input class="modal-input" id="native-mcp-url" placeholder="https://example.com/mcp">
+            <div id="native-mcp-stdio-fields">
+              <label class="modal-label" for="native-mcp-command">Command</label><input class="modal-input" id="native-mcp-command" placeholder="npx">
+              <label class="modal-label" for="native-mcp-args">Arguments (one per line)</label><textarea class="modal-input" id="native-mcp-args" rows="3" placeholder="-y&#10;package-name"></textarea>
+            </div>
+            <div id="native-mcp-remote-fields" hidden>
+              <label class="modal-label" for="native-mcp-url">Server URL</label><input class="modal-input" id="native-mcp-url" placeholder="https://example.com/mcp">
+              <label class="modal-label" for="native-mcp-headers">Headers JSON</label><textarea class="modal-input" id="native-mcp-headers" rows="2" placeholder='{"Authorization":"Bearer …"}'></textarea>
+            </div>
             <label class="modal-label" for="native-mcp-env">Environment JSON</label><textarea class="modal-input" id="native-mcp-env" rows="2" placeholder='{"KEY":"value"}'></textarea>
-            <label class="modal-label" for="native-mcp-headers">Headers JSON</label><textarea class="modal-input" id="native-mcp-headers" rows="2" placeholder='{"Authorization":"Bearer …"}'></textarea>
-            <label class="modal-checkbox"><input id="native-mcp-autostart" type="checkbox"> Start MCP when NusaShell opens</label>
             <label class="modal-label" for="native-mcp-import">Import JSON (optional)</label><textarea class="modal-input" id="native-mcp-import" rows="3" placeholder='{"mcpServers":{"my-server":{"command":"npx","args":[]}}}'></textarea>
             <div class="modal-input-row"><button class="action-btn" id="native-mcp-import-btn" type="button">Fill from JSON</button><button class="action-btn action-start" id="native-mcp-save" type="button">Save MCP</button></div>
           </div>

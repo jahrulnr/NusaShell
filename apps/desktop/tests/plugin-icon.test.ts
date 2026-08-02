@@ -20,6 +20,15 @@ describe("loadPluginPngDataUrl", () => {
     )).resolves.toMatch(/^data:image\/png;base64,/);
   });
 
+  it("loads a PNG referenced by a relative file URL inside the plugin folder", async () => {
+    const pluginRoot = await mkdtemp(join(tmpdir(), "nusashell-icon-rel-"));
+    const iconPath = join(pluginRoot, "icon.png");
+    await writeFile(iconPath, Buffer.concat([PNG_SIGNATURE, Buffer.from("fixture")]));
+
+    await expect(loadPluginPngDataUrl("file://icon.png", pluginRoot))
+      .resolves.toMatch(/^data:image\/png;base64,/);
+  });
+
   it("rejects files outside the plugin folder", async () => {
     const pluginRoot = await mkdtemp(join(tmpdir(), "nusashell-icon-root-"));
     const outsideRoot = await mkdtemp(join(tmpdir(), "nusashell-icon-outside-"));

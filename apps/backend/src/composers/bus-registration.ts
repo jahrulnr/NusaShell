@@ -56,6 +56,8 @@ import {
   createAgentCancelRequestedEvent,
 } from "@nusashell/application";
 import { SystemClock, type Logger } from "@nusashell/infrastructure";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { ContainerOptions } from "../container.js";
 import type { PluginRuntimeParts } from "./plugin-runtime.js";
 import type { SkillsRuntimeParts } from "./skills-runtime.js";
@@ -162,7 +164,15 @@ export function registerBuses(
   queryBus.register("list-resource-templates", new ListResourceTemplatesHandler(plugin.runtimeManager));
   queryBus.register("read-resource", new ReadResourceHandler(plugin.runtimeManager));
   queryBus.register("system-ping", new SystemPingHandler());
-  queryBus.register("system-version", new SystemVersionHandler());
+  let appVersion = "0.0.0";
+  for (const candidate of [
+    resolve(process.cwd(), "VERSION"),
+    resolve(__dirname, "../../../../../VERSION"),
+    resolve(__dirname, "../../../../VERSION"),
+  ]) {
+    try { appVersion = readFileSync(candidate, "utf8").trim(); break; } catch { /* try next */ }
+  }
+  queryBus.register("system-version", new SystemVersionHandler(appVersion));
   queryBus.register("list-jobs", new ListJobsHandler(jobs.jobStore));
   queryBus.register("job-output", new JobOutputHandler(jobs.jobStore, jobs.jobFs));
   queryBus.register("validate-schedule", new ValidateScheduleHandler());

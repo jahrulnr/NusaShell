@@ -26,6 +26,25 @@ export class GetPluginHandler
         { pluginId: query.pluginId },
       );
     }
-    return view;
+    return {
+      pluginId: view.pluginId,
+      name: view.name,
+      version: view.version,
+      icon: view.icon,
+      installPath: view.installPath,
+      state: view.state,
+      enabled: view.enabled,
+      autostart: view.autostart,
+      ...(view.source !== undefined ? { source: view.source } : {}),
+      ...(view.transport !== undefined ? { transport: view.transport } : {}),
+      ...(view.category !== undefined ? { category: view.category } : {}),
+      ...(view.command !== undefined ? { command: view.command } : {}),
+      ...(view.args !== undefined ? { args: view.args } : {}),
+      ...(view.url !== undefined ? { url: view.url } : {}),
+      ...(view.env !== undefined ? { env: view.env } : {}),
+      ...(view.headers !== undefined ? { headers: view.headers } : {}),
+      ...(view.ui !== undefined ? { ui: view.ui } : {}),
+      keepAliveOnClose: view.keepAliveOnClose,
+    };
   }
 }

@@ -22,6 +22,9 @@ export class ListPluginsHandler
       state: view.state,
       enabled: view.enabled,
       autostart: view.autostart,
+      ...(view.source !== undefined ? { source: view.source } : {}),
+      ...(view.transport !== undefined ? { transport: view.transport } : {}),
+      ...(view.category !== undefined ? { category: view.category } : {}),
       ...(view.ui !== undefined ? { ui: view.ui } : {}),
       keepAliveOnClose: view.keepAliveOnClose,
     }));

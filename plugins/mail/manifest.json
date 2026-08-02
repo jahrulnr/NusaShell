@@ -26,5 +26,6 @@
   },
   "dependencies": {
     "shell": ">=0.0.2"
-  }
+  },
+  "category": "Communication"
 }

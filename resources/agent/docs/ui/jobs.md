@@ -6,17 +6,12 @@ Scheduled automation that fires headless agent turns or plugin tool calls on a o
 
 ## Job list
 
-Lists all scheduled jobs. Each row leads with a status dot and shows the job name, schedule, mode, and repeat progress, plus a schedule strip with a humanized next run time and a textual last status (Never / OK / Error). Each row offers Run, Pause/Resume, Output, and Remove actions. A hint reminds the user that jobs run only while the app is open and missed one-shots are marked errored, not silently fired. An inline error panel appears when the list fails to load, and an empty state offers a New job action.
+Lists all scheduled jobs. Each row leads with a status dot and shows the job name, schedule, mode, and repeat progress, plus a schedule strip with a humanized next run time and a textual last status (Never / OK / Error). Each row offers Run, Pause/Resume, Output, and Remove actions. An inline error panel appears when the list fails to load, and an empty state offers a New job action.
 
 - **New job** (`#jobs-new-btn`):
   - Section: Job list
   - Type: button
   - Action: Opens the New job modal.
-
-- **Jobs hint** (`#jobs-hint`):
-  - Section: Job list
-  - Type: status text
-  - Action: Explains that jobs run only while the app is open and missed one-shots are marked errored.
 
 - **Jobs list** (`#jobs-list`):
   - Section: Job list

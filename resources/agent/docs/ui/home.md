@@ -10,7 +10,7 @@ Displays a compact local-workbench kicker, the product name, and the tagline 'Yo
 
 ## Search and filters
 
-The Home search filters installed plugin cards by name, id, or description in real time. It lives beside the Home filter tabs so its scope is visible.
+The Home search filters installed plugin cards by name, id, or description in real time. It spans the launcher above a compact, horizontally scrollable category rail so both filters read as one deliberate sequence.
 
 - **Installed app search** (`#search-input`):
   - Section: Search and filters

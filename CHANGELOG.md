@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2026-08-02
+
+### Added
+
+- Plugin `category` field in manifest schema, propagated through the full stack
+  (domain, application, infrastructure, contracts, SDK, renderer). Plugins
+  without a category show under "Uncategorized" on the Home grid.
+- Category tabs on the Home launcher grid — dynamically generated from
+  installed plugin categories, with "All" as the default tab.
+- "Category" input field in the Add/Edit MCP modal for native MCP plugins.
+- MCP config fields (`command`, `args`, `url`, `env`, `headers`) now exposed in
+  `plugin.get` results, so the Edit MCP form pre-fills all fields from the
+  existing manifest.
+- Auto-restart of native MCP plugins after editing via the Edit MCP button.
+- Transport-aware field visibility in the Add/Edit MCP modal: stdio shows
+  Command + Arguments, http/sse shows Server URL + Headers.
+
+### Changed
+
+- Moved the "Edit MCP" button from the Plugins toolbar into the plugin drawer
+  actions row (Start | Stop | Restart | Edit MCP | Uninstall) — it was
+  previously hidden behind the drawer when clicked.
+- Drawer action buttons now wrap to multiple lines instead of overflowing.
+- Simplified the Codex ACP provider description to match Cursor's brevity.
+- Removed the "Start MCP when NusaShell opens" checkbox from the Add/Edit MCP
+  modal — autostart is managed from the Autostart menu.
+- Removed the jobs hint text from the Jobs view.
+- MCP connect timeout increased from 10s to 5 minutes (configurable via
+  `NUSASHELL_MCP_CONNECT_TIMEOUT`); `plugin.start` request timeout increased
+  to 310s; global `sendRequest` default timeout increased to 60s.
+- `SystemVersionHandler` now reads the version from the `VERSION` file instead
+  of a hardcoded value; version is fetched after WebSocket connect instead of
+  at DOMContentLoaded.
+
+### Fixed
+
+- Fixed MCP args splitting: `join("\\n")` and `split(/\\r?\\n/)` used literal
+  backslash-n instead of real newlines, causing all arguments to be sent as a
+  single string to the child process.
+- Fixed the "Native MCP id cannot change during edit" error by disabling the
+  ID field during edit mode.
+- Fixed the "Unexpected end of JSON input" error in the Import JSON field with
+  user-friendly messages for empty and invalid JSON.
+- Fixed `source` and `transport` fields being dropped in `ListPluginsHandler`
+  and `GetPluginHandler`, causing the Edit MCP button to never appear for
+  native MCP plugins.
+- Fixed `category` field being dropped by `FilesystemPluginRegistry` and
+  `PluginSyncService` when mapping parsed manifest JSON to
+  `PluginManifestInput`.
+- Fixed `builtin-skill-seed` tests using `process.cwd()` instead of resolving
+  from the test file location, causing failures when run from `apps/backend`.
+- Set categories on built-in plugins: Files/Kanban/Notes → Productivity,
+  Terminal/Playwright → Development, Mail → Communication.
+- Headed `nusashell.kanban` plugin with a local SQLite-backed board UI, MCP
+  ticket/project/session tools, and a plugin-owned workflow prompt.
+
 ## [0.1.7] - 2026-08-02
 
 ### Added

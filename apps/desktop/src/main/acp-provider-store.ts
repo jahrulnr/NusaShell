@@ -19,7 +19,7 @@ const ACP_PROVIDER_MANIFESTS: readonly AcpProviderManifest[] = [
     id: "codex",
     displayName: "Codex",
     monogram: "CX",
-    description: "OpenAI Codex ACP agent via the `@agentclientprotocol/codex-acp` adapter. Runs through npx by default; set NUSASHELL_CODEX_ACP_BIN=codex-acp if globally installed.",
+    description: "OpenAI Codex ACP agent via the `codex-acp` adapter.",
     command: process.env.NUSASHELL_CODEX_ACP_BIN ?? "npx",
     args: ["-y", "@agentclientprotocol/codex-acp"],
     authMethodIds: ["api-key"],

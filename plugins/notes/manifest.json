@@ -2,7 +2,7 @@
   "id": "nusashell.notes",
   "name": "Notes",
   "version": "1.0.0",
-  "icon": "📝",
+  "icon": "\ud83d\udcdd",
   "ui": {
     "entry": "ui/index.html",
     "window": {
@@ -26,5 +26,6 @@
   },
   "dependencies": {
     "shell": ">=0.0.1"
-  }
+  },
+  "category": "Productivity"
 }
