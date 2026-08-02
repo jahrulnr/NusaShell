@@ -10,6 +10,7 @@
 import { NusaClient, BrowserWebSocketConnection } from "@nusashell/plugin-sdk";
 
 let client = null;
+const pendingEventHandlers = [];
 let onOpenCallback = null;
 let onLogCallback = null;
 let wsUrl = null;
@@ -29,6 +30,9 @@ export function initWsClient(config) {
     reconnect: { enabled: true, maxAttempts: Infinity, initialDelayMs: 1000, maxDelayMs: 1000, backoffFactor: 1, jitterMs: 0 },
     connectionFactory: (url, callbacks) => new BrowserWebSocketConnection(url, callbacks),
   });
+  for (const pending of pendingEventHandlers.splice(0)) {
+    pending.unsubscribe = client.on(pending.eventType, pending.handler);
+  }
 
   client.onReconnect(() => {
     log("info", `WebSocket reconnected to ${wsUrl}`);
@@ -60,8 +64,20 @@ export function sendRequest(method, payload, timeoutMs = 10000) {
 }
 
 export function onEvent(eventType, handler) {
-  if (!client) return () => {};
-  return client.on(eventType, (payload, sequence) => handler(payload, sequence));
+  if (client) return client.on(eventType, (payload, sequence) => handler(payload, sequence));
+  const pending = {
+    eventType,
+    handler: (payload, sequence) => handler(payload, sequence),
+    unsubscribe: null,
+  };
+  pendingEventHandlers.push(pending);
+  return () => {
+    if (pending.unsubscribe) pending.unsubscribe();
+    else {
+      const index = pendingEventHandlers.indexOf(pending);
+      if (index >= 0) pendingEventHandlers.splice(index, 1);
+    }
+  };
 }
 
 export async function subscribe(eventTypes) {

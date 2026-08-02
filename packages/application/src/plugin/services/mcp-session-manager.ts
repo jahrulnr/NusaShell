@@ -59,9 +59,9 @@ export class McpSessionManager {
         environment,
         plugin.installPath,
       );
-      this.deps.logger?.debug("Starting MCP stdio process: command=%s args=%j cwd=%s workspace=%s", command, args, plugin.installPath, entry.workspace ?? "(none)");
+      this.deps.logger?.debug(`Starting MCP stdio process: command=${command} args=${JSON.stringify(args)} cwd=${plugin.installPath} workspace=${entry.workspace ?? "(none)"}`);
       await mcpClient.connect();
-      this.deps.logger?.info("MCP client connected (stdio) for plugin %s", PluginId.toString(entry.pluginId));
+      this.deps.logger?.info(`MCP client connected (stdio) for plugin ${PluginId.toString(entry.pluginId)}`);
       entry.mcpClient = mcpClient;
       entry.runningArgs = args;
       entry.runningEnv = environment;
@@ -69,7 +69,7 @@ export class McpSessionManager {
         try {
           await this.applyRoots(entry, entry.workspace);
         } catch (error) {
-          this.deps.logger?.warn("Initial roots apply failed for %s: %s", PluginId.toString(entry.pluginId), error instanceof Error ? error.message : String(error));
+          this.deps.logger?.warn(`Initial roots apply failed for ${PluginId.toString(entry.pluginId)}: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
     } else if (manifest.mcp.transport === "http") {
@@ -146,7 +146,7 @@ export class McpSessionManager {
         try {
           await client.notifyRootsChanged?.();
         } catch (error) {
-          this.deps.logger?.warn("roots/list_changed notify failed for %s: %s", PluginId.toString(entry.pluginId), error instanceof Error ? error.message : String(error));
+          this.deps.logger?.warn(`roots/list_changed notify failed for ${PluginId.toString(entry.pluginId)}: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
       return { mode: "roots", respawned: false };

@@ -18,15 +18,23 @@ function setup() {
   const pluginRepository = new FakePluginRepository();
   const processAdapter = new FakeProcessAdapter();
   const mcpClientFactory = new FakeMcpClientFactory();
+  const logMessages: string[] = [];
+  const logger = {
+    info: (message: string) => logMessages.push(message),
+    warn: (message: string) => logMessages.push(message),
+    error: (message: string) => logMessages.push(message),
+    debug: (message: string) => logMessages.push(message),
+  };
   const manager = new PluginRuntimeManager({
     pluginRepository,
     processAdapter,
     mcpClientFactory,
     eventDispatcher,
     clock,
+    logger,
     toolCallTimeoutMs: 1000,
   });
-  return { clock, eventDispatcher, pluginRepository, processAdapter, mcpClientFactory, manager };
+  return { clock, eventDispatcher, pluginRepository, processAdapter, mcpClientFactory, manager, logMessages };
 }
 
 describe("PluginRuntimeManager", () => {
@@ -115,6 +123,17 @@ describe("PluginRuntimeManager", () => {
         RUNTIME_SECRET: "injected",
       });
       expect(plugin.manifest.mcp.env).toEqual({ MANIFEST_VALUE: "kept" });
+    });
+
+    it("logs the connected MCP plugin id without a raw printf placeholder", async () => {
+      const { pluginRepository, manager, logMessages } = setup();
+      const plugin = makePlugin("nusashell.notes");
+      pluginRepository.add(plugin);
+
+      await manager.startPlugin(plugin.id);
+
+      expect(logMessages).toContain("MCP client connected (stdio) for plugin nusashell.notes");
+      expect(logMessages.some((message) => message.includes("%s"))).toBe(false);
     });
 
     it("transitions idle -> starting -> running and publishes events", async () => {
