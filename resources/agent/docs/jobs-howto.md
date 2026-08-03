@@ -30,17 +30,46 @@ NusaShell scheduled jobs have two modes. Pick the right one for the task.
 - **Desktop:** Jobs view → + New job, or Edit on a row. The form swaps fields
   based on mode. Agent shows prompt + model picker; tool shows plugin/tool
   dropdowns + schema arg form.
-- **Agent tool:** `job` action `add` or `update` with `mode` set to
-  `"agent"` or `"tool"`.
+- **Agent tool:** call `job` directly (no jobs plugin to enable). Actions:
+  `list`, `validate_schedule`, `add`, `update`, `set_enabled`, `run`,
+  `cancel`, `remove`, `output`. Always `list` before creating a duplicate.
+  Call `validate_schedule` before `add` / schedule-changing `update`.
+  Set `mode` to `"agent"` or `"tool"`. Plugin IDs / tool names / event
+  patterns in examples are illustrative — confirm real capabilities via
+  `mcp_list` / `tool_list` before wiring them.
 - **API:** `job.add` / `job.update` WS methods. Agent mode `mode` object:
   `{ type: "agent", prompt: "...", providerId?: "...", model?: "...", effort?: "..." }`.
   Tool mode: `{ type: "tool", pluginId: "...", toolName: "...", args: {...} }`.
+- **Denial:** the `job` tool is denied inside scheduled job turns (no recursion).
 
 ## Schedule grammar
 
-`every 30m` / `2h` / `1d` / `0 9 * * *` (5-field cron, UTC) / ISO timestamp
-for one-shot. Jobs run only while NusaShell is open. A one-shot missed while
-the app was closed is marked errored, not silently fired.
+| Input | Meaning |
+| --- | --- |
+| `every 30m` / `2h` / `1d` | Relative interval from now — timezone does not matter |
+| `0 9 * * *` | 5-field cron — **hour/minute are UTC**, not the user's local clock |
+| `2025-12-01T09:00:00Z` | One-shot at that instant (UTC) |
+| `2025-12-01 09:00` (no offset) | Also treated as **UTC** — the shell appends `Z` |
+
+Jobs run only while NusaShell is open. A one-shot missed while the app was
+closed is marked errored, not silently fired.
+
+### Timezone rules (important)
+
+Cron and bare timestamps are **UTC**. The Jobs UI may show `nextRunAt` in the
+user's local timezone, but the schedule expression itself is always UTC.
+
+When the user says a local clock time (e.g. "9am" in Indonesia / WIB = UTC+7):
+
+1. Convert to UTC before writing the cron or ISO string.
+   Example: 09:00 WIB → 02:00 UTC → cron `0 2 * * *`.
+2. Prefer an explicit `Z` (or a numeric offset like `+07:00`) on one-shots so
+   the intent is unambiguous.
+3. Tell the user both times when confirming ("fires at 09:00 WIB / 02:00 UTC").
+4. Intervals (`every 30m`) need no conversion.
+
+Do not assume the host `runtime_os` implies a timezone — ask or use a known
+user preference if the offset is unclear.
 
 ## Monitoring
 

@@ -6,10 +6,15 @@ import type {
   AgentConversationCheckpoint,
   AgentConversationMessage,
   AgentConversationSummary,
+  AgentSubagentRun,
+  AgentSubagentRunStatus,
+  AgentSubagentStreamStep,
 } from "../shared/agent-conversation-contract.js";
 import type {
   AcpProviderPublic,
   AcpProviderSaveInput,
+  AcpRoutingPublic,
+  AcpRoutingSettings,
 } from "../shared/acp-provider-contract.js";
 import type {
   SkillDetail,
@@ -82,12 +87,17 @@ export interface ShellApi {
     setWorkspace(id: string, workspace: string): Promise<AgentConversation>;
     upsertCanvasArtifact(id: string, artifact: AgentCanvasArtifact): Promise<AgentConversation>;
     setActiveCanvasArtifact(id: string, artifactId: string | null): Promise<AgentConversation>;
+    upsertSubagentRun(id: string, run: AgentSubagentRun): Promise<AgentConversation>;
+    setActiveSubagentRun(id: string, runId: string | null): Promise<AgentConversation>;
+    updateSubagentRunStatus(id: string, runId: string, status: AgentSubagentRunStatus, patch?: { summary?: string; error?: string; steps?: readonly AgentSubagentStreamStep[] }): Promise<AgentConversation>;
   };
   readonly acpProviders: {
     list(): Promise<readonly AcpProviderPublic[]>;
     save(input: AcpProviderSaveInput): Promise<readonly AcpProviderPublic[]>;
     get(providerId: string): Promise<AcpProviderPublic | null>;
-    probe(providerId: string): Promise<AcpProviderPublic | null>;
+    probe(providerId: string, options?: { interactive?: boolean }): Promise<AcpProviderPublic | null>;
+    getRouting(): Promise<AcpRoutingPublic>;
+    saveRouting(settings: AcpRoutingSettings): Promise<AcpRoutingPublic>;
   };
   readonly skills: {
     list(): Promise<readonly SkillSummary[]>;
@@ -247,12 +257,17 @@ const api: ShellApi = {
     setWorkspace: (id, workspace) => ipcRenderer.invoke("agent-conversations:set-workspace", id, workspace),
     upsertCanvasArtifact: (id, artifact) => ipcRenderer.invoke("agent-conversations:upsert-canvas-artifact", id, artifact),
     setActiveCanvasArtifact: (id, artifactId) => ipcRenderer.invoke("agent-conversations:set-active-canvas-artifact", id, artifactId),
+    upsertSubagentRun: (id, run) => ipcRenderer.invoke("agent-conversations:upsert-subagent-run", id, run),
+    setActiveSubagentRun: (id, runId) => ipcRenderer.invoke("agent-conversations:set-active-subagent-run", id, runId),
+    updateSubagentRunStatus: (id, runId, status, patch) => ipcRenderer.invoke("agent-conversations:update-subagent-run-status", id, runId, status, patch),
   },
   acpProviders: {
     list: () => ipcRenderer.invoke("acp-providers:list"),
     save: (input) => ipcRenderer.invoke("acp-providers:save", input),
     get: (providerId) => ipcRenderer.invoke("acp-providers:get", providerId),
-    probe: (providerId) => ipcRenderer.invoke("acp-providers:probe", providerId),
+    probe: (providerId, options) => ipcRenderer.invoke("acp-providers:probe", providerId, options),
+    getRouting: () => ipcRenderer.invoke("acp-providers:get-routing"),
+    saveRouting: (settings) => ipcRenderer.invoke("acp-providers:save-routing", settings),
   },
   skills: {
     list: () => ipcRenderer.invoke("skills:list"),

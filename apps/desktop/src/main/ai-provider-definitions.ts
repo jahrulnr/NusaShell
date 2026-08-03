@@ -22,6 +22,8 @@ export const aiProviderDefinitions: readonly AiProviderDefinition[] = [
   definition("9router", "9Router", "Local 9Router gateway using its OpenAI-compatible endpoint.", "chat", "http://127.0.0.1:20128/v1", true, ["9router", "9_router"], [":20130"]),
   definition("openai", "OpenAI", "Official OpenAI API using the Responses API by default.", "responses", "https://api.openai.com/v1", false, ["openai"], ["api.openai.com"]),
   definition("claude", "Claude API", "Official Anthropic Messages API for Claude models.", "messages", "https://api.anthropic.com/v1", false, ["claude", "anthropic"], ["api.anthropic.com"]),
+  definition("ollama", "Ollama", "Local Ollama OpenAI-compatible API.", "chat", "http://127.0.0.1:11434/v1", true, ["ollama"], [":11434"]),
+  definition("llamacpp", "llama.cpp", "Local llama-server OpenAI-compatible API.", "chat", "http://127.0.0.1:8080/v1", true, ["llamacpp", "llama.cpp", "llama-cpp"], ["localhost:8080", "127.0.0.1:8080"]),
   {
     ...definition("openai-compatible", "OpenAI Compatible", "Custom OpenAI-compatible endpoint.", "chat", "", false, [], []),
     hideFromCatalog: true,

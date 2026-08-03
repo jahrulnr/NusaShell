@@ -26,6 +26,18 @@ export class EventDispatcher {
     }
   }
 
+  /** Remove a previously registered typed handler. No-op if not found. */
+  off<TEvent extends ApplicationEvent>(
+    eventType: string,
+    handler: EventHandler<TEvent>,
+  ): void {
+    const list = this.handlers.get(eventType);
+    if (!list) return;
+    const next = list.filter((item) => item !== handler);
+    if (next.length === 0) this.handlers.delete(eventType);
+    else this.handlers.set(eventType, next);
+  }
+
   onAny(handler: EventHandler): void {
     this.globalHandlers.push(handler);
   }

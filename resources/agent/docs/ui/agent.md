@@ -24,10 +24,6 @@ A fixed workbench rail listing local conversation threads. Click a thread to ope
   - Action: Creates a new empty conversation thread and focuses the composer.
   - Related: Message input (`#agent-input`)
 
-- **`#agent-new-acp`** (missing map entry)
-
-- **`#agent-new-acp-menu`** (missing map entry)
-
 - **Search conversations** (`#agent-conversation-search`):
   - Section: Conversation list
   - Type: search input
@@ -47,13 +43,21 @@ A fixed workbench rail listing local conversation threads. Click a thread to ope
 
 The full-height message runway separates compact user cards from editorial assistant responses. User attachments render as image previews or file cards. Provider reasoning is persisted and appears before the answer in a collapsed Thinking disclosure with sanitized Markdown; models that return no reasoning show no placeholder. Completed tool calls render as expandable terminal cards with the tool name in the header and full args/output in the body. Interactive ask_question calls render as Ask Question cards with selectable options and an optional free-text answer; after the user replies, the sealed card shows the chosen answer. Message footers expose timestamps, model/trace metadata, copy, and retry where applicable. Only this area scrolls.
 
-- **`#acp-status-bar`** (missing map entry)
+- **ACP status bar (legacy)** (`#acp-status-bar`):
+  - Section: Conversation thread
+  - Type: status bar
+  - Action: Shows the ACP provider name and running/idle chip for legacy peer-chat ACP conversations. Only visible on conversations with kind='acp'.
+  - Notes: Legacy. New ACP interactions use the subagent side pane, not peer-chat threads.
 
-- **`#acp-status-label`** (missing map entry)
+- **ACP status provider** (`#acp-status-provider`):
+  - Section: Conversation thread
+  - Type: label
+  - Action: Shows the provider id for the current ACP peer-chat conversation.
 
-- **`#acp-status-provider`** (missing map entry)
-
-- **`#acp-status-chip`** (missing map entry)
+- **ACP status chip** (`#acp-status-chip`):
+  - Section: Conversation thread
+  - Type: status chip
+  - Action: Shows running/idle state for the current ACP peer-chat conversation.
 
 - **Conversation thread** (`#agent-thread`):
   - Section: Conversation thread

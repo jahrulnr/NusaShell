@@ -28,6 +28,7 @@ export {
   wrapFilesArgs,
   type WorkspaceToolWrapResult,
 } from "./workspace-tool-wrap.js";
+export { resolveAgentWorkspace } from "./resolve-agent-workspace.js";
 export {
   BackgroundReviewScheduler,
   type BackgroundReviewSettings,

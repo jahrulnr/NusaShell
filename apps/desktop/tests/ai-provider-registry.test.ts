@@ -210,7 +210,94 @@ describe("AI provider registry", () => {
     expect(models.map((model) => model.id)).toEqual(["valid"]);
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
+
+  it("falls back to Ollama /api/tags when /v1/models fails", async () => {
+    const fetchFn = vi.fn<typeof fetch>()
+      .mockRejectedValueOnce(new Error("ECONNREFUSED"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        models: [
+          { name: "llama3.2:latest" },
+          { name: "qwen2.5:latest" },
+        ],
+      }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        capabilities: ["vision"],
+        parameters: { num_ctx: 8192 },
+      }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        capabilities: ["tools"],
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    const models = await importProviderModels(ollamaProvider(), fetchFn);
+
+    expect(models.map((m) => m.id)).toEqual(["llama3.2:latest", "qwen2.5:latest"]);
+    expect(models[0]).toMatchObject({ supportsVision: true, contextWindow: 8192 });
+    expect(models[1]).toMatchObject({ supportsTools: true });
+  });
+
+  it("maps llama.cpp path-like model ids to basename labels and meta context", async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      data: [{
+        id: "../models/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
+        object: "model",
+        meta: { n_ctx_train: 131072, n_params: 8030261312 },
+      }],
+    }), { status: 200 }));
+
+    const models = await importProviderModels(llamacppProvider(), fetchFn);
+
+    expect(models[0]).toMatchObject({
+      id: "../models/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
+      label: "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
+      contextWindow: 131072,
+      supportsTools: true,
+    });
+  });
+
+  it("wraps Ollama connection errors with actionable copy", async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockRejectedValue(new Error("ECONNREFUSED"));
+    await expect(importProviderModels(ollamaProvider(), fetchFn)).rejects.toThrow(/ollama serve/);
+  });
+
+  it("wraps llama.cpp connection errors with actionable copy", async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockRejectedValue(new Error("ECONNREFUSED"));
+    await expect(importProviderModels(llamacppProvider(), fetchFn)).rejects.toThrow(/llama-server/);
+  });
 });
+
+function ollamaProvider(): AiProviderSettings {
+  return {
+    id: "ollama",
+    name: "Ollama",
+    type: "ollama",
+    api: "chat",
+    baseUrl: "http://127.0.0.1:11434/v1",
+    apiKeyOptional: true,
+    enabled: true,
+    defaultModel: "",
+    timeoutMs: 180_000,
+    maxAttempts: 1,
+    weight: 1,
+    models: [],
+  };
+}
+
+function llamacppProvider(): AiProviderSettings {
+  return {
+    id: "llamacpp",
+    name: "llama.cpp",
+    type: "llamacpp",
+    api: "chat",
+    baseUrl: "http://127.0.0.1:8080/v1",
+    apiKeyOptional: true,
+    enabled: true,
+    defaultModel: "",
+    timeoutMs: 180_000,
+    maxAttempts: 1,
+    weight: 1,
+    models: [],
+  };
+}
 
 function provider(id: string, name: string, models: AiProviderSettings["models"]): AiProviderSettings {
   return {

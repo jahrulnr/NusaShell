@@ -10,6 +10,8 @@ import type {
   AgentTurnSupersededEvent,
   AgentCancelRequestedEvent,
   AgentLearningUpdatedEvent,
+  SubagentRunStartedEvent,
+  SubagentRunEndedEvent,
   ApplicationEvent,
 } from "@nusashell/application";
 
@@ -142,6 +144,41 @@ export function mapAgentEvent(
           reviewTraceId: e.reviewTraceId,
           kinds: [...e.kinds],
           summary: e.summary,
+          timestamp,
+        },
+      };
+    }
+    case "subagent.run_started": {
+      const e = event as SubagentRunStartedEvent;
+      return {
+        kind: "event",
+        event: "subagent.run_started",
+        sequence,
+        payload: {
+          runId: e.runId,
+          conversationId: e.conversationId,
+          providerId: e.providerId,
+          prompt: e.prompt,
+          ...(e.title ? { title: e.title } : {}),
+          ...(e.parentConversationId ? { parentConversationId: e.parentConversationId } : {}),
+          ...(e.parentTraceId ? { parentTraceId: e.parentTraceId } : {}),
+          timestamp,
+        },
+      };
+    }
+    case "subagent.run_ended": {
+      const e = event as SubagentRunEndedEvent;
+      return {
+        kind: "event",
+        event: "subagent.run_ended",
+        sequence,
+        payload: {
+          runId: e.runId,
+          conversationId: e.conversationId,
+          providerId: e.providerId,
+          ok: e.ok,
+          ...(e.summary ? { summary: e.summary } : {}),
+          ...(e.error ? { error: e.error } : {}),
           timestamp,
         },
       };

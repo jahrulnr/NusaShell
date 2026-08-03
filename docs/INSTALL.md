@@ -6,8 +6,15 @@ Linux and macOS (no administrator access required):
 curl -fsSL https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/install.sh | bash
 ```
 
-With wget: `wget -qO- https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/install.sh | bash`.
-On Windows PowerShell: `irm https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/install.ps1 | iex`.
+With wget: 
+```bash
+wget -qO- https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/install.sh | bash
+```
+
+On Windows PowerShell: 
+```bash
+irm https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/install.ps1 | iex
+```
 
 The installer downloads the release manifest and payload, verifies SHA-256 before extracting, and never writes outside your user profile. Set `NUSASHELL_VERSION=0.1.0` to pin a release. Releases are published automatically from `master` when `VERSION` is new.
 

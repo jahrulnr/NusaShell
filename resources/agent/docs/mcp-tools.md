@@ -39,4 +39,6 @@ The following meta-tools are always available without a running MCP server:
 
 ## When to use docs tools
 
-If the user asks how to use NusaShell, how plugins work, or what a setting means, prefer `docs_search` first. It searches this corpus and returns relevant chunks. Use `docs_read` with the returned `path` and `chunk_id` to read the full text.
+If the user asks how to use NusaShell, how plugins work, or what a setting means, prefer a known static path with `docs_read` when you already know it (for example `jobs-howto.md`, `pipelines-howto.md`, `data-locations.md`, `build-plugin.md`, `mermaid-workflow.md`). Use `docs_search` only when the path is unknown; then `docs_read` with the returned `path` and `chunk_id`.
+
+Plugin capability catalogs are not in this corpus — use live `mcp_list` → `tool_list` / `mcp_context` instead.

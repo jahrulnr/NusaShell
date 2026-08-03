@@ -9,4 +9,5 @@ export interface ConfigureAiCommand extends Command {
   readonly apiKey?: string;
   readonly timeoutMs?: number;
   readonly maxAttempts?: number;
+  readonly omitToolChoice?: boolean;
 }

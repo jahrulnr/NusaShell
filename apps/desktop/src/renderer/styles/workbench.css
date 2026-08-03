@@ -521,7 +521,6 @@ summary {
 .local-archive-btn,
 .pw-save-btn,
 .agent-new-conversation,
-.agent-new-acp,
 .agent-ask-send,
 .jobs-header button {
   border-radius: var(--radius-sm);
@@ -889,8 +888,6 @@ summary {
 .agent-send-btn,
 .agent-new-conversation:hover,
 .agent-new-conversation:focus-visible,
-.agent-new-acp:hover,
-.agent-new-acp:focus-visible,
 .update-banner-btn {
   color: var(--accent-ink);
 }

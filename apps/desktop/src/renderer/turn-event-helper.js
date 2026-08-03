@@ -99,10 +99,22 @@ export function subscribeAcpTurnEvents(options) {
     disposers.push(sub.onEvent("acp.thought_delta", (p) => { if (p.delta) options.onReasoningDelta(p.delta); }));
   }
   if (options.onToolCallStart) {
-    disposers.push(sub.onEvent("acp.tool_call", (p) => options.onToolCallStart({ callId: p.call.id, name: p.call.title, args: p.call.rawInput ?? {} })));
+    disposers.push(sub.onEvent("acp.tool_call", (p) => options.onToolCallStart({
+      callId: p.call.id,
+      name: p.call.title || p.call.name || "tool",
+      kind: p.call.kind || "unknown",
+      args: p.call.rawInput && typeof p.call.rawInput === "object" ? p.call.rawInput : {},
+      status: p.call.status,
+    })));
   }
   if (options.onToolCallEnd) {
-    disposers.push(sub.onEvent("acp.tool_call_update", (p) => options.onToolCallEnd({ callId: p.callId, ok: p.status === "ok", error: p.status === "fail" ? "Failed" : undefined })));
+    disposers.push(sub.onEvent("acp.tool_call_update", (p) => options.onToolCallEnd({
+      callId: p.callId,
+      ok: p.status === "ok",
+      status: p.status,
+      summary: p.summary,
+      error: p.status === "fail" ? (p.summary || "Failed") : undefined,
+    })));
   }
   if (options.onTurnEnd) {
     disposers.push(sub.onEvent("acp.turn_end", (p) => options.onTurnEnd({ ok: p.ok, error: p.error })));

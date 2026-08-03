@@ -5,6 +5,89 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **ACP subagent model.** Connected ACP coding agents (Cursor, Codex, Claude
+  Code, Gemini, etc.) can now be invoked as a `subagent` meta-tool by the main
+  agent instead of requiring a separate peer-chat conversation. The main agent
+  delegates a self-contained coding task via the `subagent` tool; the subagent
+  runs with its own tools and repository access in a separate process.
+  - **Side pane.** The subagent's live stream (thoughts, tool calls, text
+    deltas, plan steps) appears in a canvas-like side pane on the right edge.
+    The parent thread receives only a compact inline run card with the final
+    summary — the parent thread stays clean.
+  - **Try-order failover.** Settings → AI Providers now has a default ACP
+    provider + fallback order. When the `subagent` tool is called without an
+    explicit `provider_id`, the shell tries the default provider first, then
+    each fallback in order until one succeeds. Per-provider `preferredConfig`
+    (model, mode) is applied automatically.
+  - **Dynamic tool injection.** The `subagent` tool only appears in the tool
+    list when at least one ACP provider is connected. The `subagent.md` prompt
+    is conditionally injected only when the tool is available.
+  - **New conversation contract fields.** `AgentSubagentRun` records
+    (`subagentRuns`, `activeSubagentRunId`) persist across sessions. New IPC
+    handlers: `agent-conversations:upsert-subagent-run`,
+    `set-active-subagent-run`, `update-subagent-run-status`.
+  - **New WS events.** `subagent.run_started` and `subagent.run_ended` notify
+    the renderer to open/close the side pane and subscribe to the ACP stream.
+
+### Changed
+
+- The "+ ACP" primary peer-chat button is now hidden by default. Existing ACP
+  peer-chat conversations continue to work; new ones should be created via the
+  `subagent` tool from within an agent conversation.
+- `developer.md` and `mcp-tools.md` prompts updated to list `subagent` as a
+  shell meta-tool.
+
+## [0.3.0] - 2026-08-03
+
+### Added
+
+- **Ollama and llama.cpp provider presets.** Two first-class local AI provider
+  presets join the Settings → AI Providers registry alongside OpenRouter,
+  OmniRoute, 9Router, OpenAI, and Claude. Both reuse the existing
+  OpenAI-compatible chat path — NusaShell never spawns or lifecycle-manages
+  the server process.
+  - **Ollama**: default `http://127.0.0.1:11434/v1`, `api: "chat"`, API key
+    optional (ignored by Ollama). Import Models falls back to `GET /api/tags`
+    when `/v1/models` fails, then enriches each model with `POST /api/show`
+    for vision/tools capabilities and `num_ctx` context window.
+  - **llama.cpp** (`llama-server`): default `http://127.0.0.1:8080/v1`,
+    `api: "chat"`, API key optional. Supports both single-model (`-m`) and
+    router (`--models-dir`) operator modes. Path-like model IDs (e.g.
+    `../models/Llama-3.1.gguf`) are stored in full for requests; the UI label
+    is the basename. Import reads `meta.n_ctx` / `n_ctx_train` from
+    `/v1/models` and optionally enriches vision/context from `GET /props`.
+  - Both presets default to a 180-second timeout to cover cold model loads.
+  - `tool_choice` is omitted from chat requests for both presets (Ollama
+    documents it unsupported; llama.cpp is happier without hard requirements).
+    The `tools` array is still sent so function calling works when the server
+    supports it.
+  - Connection errors are wrapped with actionable copy pointing to the server
+    start command and the configured base URL.
+  - Import Models is optional — users can also add a model ID manually. Chat
+    works as long as a model ID is selected, regardless of Import success.
+  - New `omitToolChoice` flag flows through `ConfigureAiCommand` →
+    `AiConfigurationPort` → `OpenAiCompatibleAgentProvider` to control
+    `tool_choice` omission per provider.
+
+### Changed
+
+- `AiProviderType` extended with `"ollama" | "llamacpp"`. Provider definitions
+  and host inference updated; llamacpp host markers are scoped to
+  `localhost:8080` / `127.0.0.1:8080` so custom providers on port 8080 are not
+  misidentified.
+- `importProviderModels` now accepts 180s timeout for local providers (30s for
+  cloud), wraps Ollama/llama.cpp connection errors with actionable copy, and
+  runs best-effort capability enrich after the model list is built.
+- `normalizeImportedModel` extracts context window from llama.cpp `meta.n_ctx`
+  / `n_ctx_train` and uses the basename as the label for path-like IDs.
+- Agent runtime docs (`docs/architecture/agent-runtime.md`) and in-product
+  settings docs (`resources/agent/docs/settings.md`) document the new presets,
+  their defaults, and the client-only scope.
+
 ## [0.2.2] - 2026-08-03
 
 ### Fixed

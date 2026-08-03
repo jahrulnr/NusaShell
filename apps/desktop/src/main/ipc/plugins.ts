@@ -1,8 +1,9 @@
 import { ipcMain } from "electron";
 import { randomUUID } from "node:crypto";
-import type { CallToolCommand, ListToolsQuery, ProbeAcpProviderCommand } from "@nusashell/application";
+import type { CallToolCommand, ListToolsQuery } from "@nusashell/application";
 import type { IpcContext } from "./ipc-context.js";
-import type { AcpProviderSaveInput } from "../../shared/acp-provider-contract.js";
+import type { AcpProviderSaveInput, AcpRoutingSettings } from "../../shared/acp-provider-contract.js";
+import { probeAcpProviderAuth } from "../acp-auth.js";
 
 /** Register plugin tool + ACP provider IPC handlers. */
 export function registerPluginsIpc(ctx: IpcContext): void {
@@ -36,34 +37,15 @@ export function registerPluginsIpc(ctx: IpcContext): void {
     ctx.getAcpProviderStore().save(input));
   ipcMain.handle("acp-providers:get", (_event, providerId: string) =>
     ctx.getAcpProviderStore().getEffective(providerId));
-  ipcMain.handle("acp-providers:probe", async (_event, providerId: string) => {
-    const store = ctx.getAcpProviderStore();
-    const provider = await store.getEffective(providerId);
-    if (!provider) throw new Error(`ACP provider not found: ${providerId}`);
-    const authMethodId = provider.config.authMethodId ?? provider.manifest.authMethodId;
-    const command: ProbeAcpProviderCommand = {
-      kind: "probe-acp-provider",
-      provider: {
-        providerId: provider.manifest.id,
-        command: provider.config.command || provider.manifest.command,
-        args: provider.config.args ?? provider.manifest.args,
-        ...(authMethodId ? { authMethodId } : {}),
-        ...(provider.manifest.env ? { env: provider.manifest.env } : {}),
-      },
-    };
-    const result = await ctx.commandBus.execute(command) as { ok: boolean; error?: string };
-    const authCheckedAt = new Date().toISOString();
-    if (result.ok) {
-      await store.save({ providerId, authStatus: "connected", authCheckedAt });
-    } else {
-      const errorSave: AcpProviderSaveInput = {
-        providerId,
-        authStatus: "needs-auth",
-        authCheckedAt,
-        ...(result.error ? { authError: result.error } : {}),
-      };
-      await store.save(errorSave);
-    }
-    return store.getEffective(providerId);
+  ipcMain.handle("acp-providers:probe", async (_event, providerId: string, options?: { interactive?: boolean }) => {
+    return probeAcpProviderAuth(
+      ctx.getAcpProviderStore(),
+      ctx.commandBus,
+      providerId,
+      { interactive: options?.interactive !== false },
+    );
   });
+  ipcMain.handle("acp-providers:get-routing", () => ctx.getAcpProviderStore().getRouting());
+  ipcMain.handle("acp-providers:save-routing", (_event, settings: AcpRoutingSettings) =>
+    ctx.getAcpProviderStore().saveRouting(settings));
 }

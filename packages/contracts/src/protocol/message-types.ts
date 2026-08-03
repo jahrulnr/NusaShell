@@ -106,7 +106,9 @@ export type EventType =
   | "acp.permission_request"
   | "acp.ask_request"
   | "acp.turn_end"
-  | "acp.session_state";
+  | "acp.session_state"
+  | "subagent.run_started"
+  | "subagent.run_ended";
 
 export interface EventEnvelope<TPayload = unknown> {
   readonly kind: "event";

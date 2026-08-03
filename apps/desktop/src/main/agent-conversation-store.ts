@@ -12,6 +12,9 @@ import type {
   AgentConversationStep,
   AgentConversationToolCall,
   AgentConversationSummary,
+  AgentSubagentRun,
+  AgentSubagentRunStatus,
+  AgentSubagentStreamStep,
 } from "../shared/agent-conversation-contract.js";
 
 interface ConversationDocument {
@@ -22,6 +25,7 @@ interface ConversationDocument {
 const CANVAS_ARTIFACT_MAX_COUNT = 20;
 const CANVAS_ARTIFACT_MAX_TOTAL_BYTES = 3 * 1024 * 1024;
 const CANVAS_ARTIFACT_MAX_SOURCE_BYTES = 512 * 1024;
+const SUBAGENT_RUN_MAX_COUNT = 50;
 
 export class AgentConversationStore {
   private state: ConversationDocument | null = null;
@@ -172,6 +176,74 @@ export class AgentConversationStore {
     });
   }
 
+  async upsertSubagentRun(id: string, run: AgentSubagentRun): Promise<AgentConversation> {
+    return this.mutate(async (state) => {
+      const current = requireConversation(state, id);
+      if (run.conversationId !== id) {
+        throw new Error("Subagent run conversationId does not match the conversation");
+      }
+      const timestamp = this.now().toISOString();
+      const existing = current.subagentRuns ?? [];
+      const without = existing.filter((item) => item.id !== run.id);
+      const next = [...without, { ...run, updatedAt: timestamp }];
+      const evicted = next.slice(-SUBAGENT_RUN_MAX_COUNT);
+      const updated: AgentConversation = {
+        ...current,
+        subagentRuns: evicted,
+        updatedAt: timestamp,
+      };
+      return [replaceConversation(state, updated), updated];
+    });
+  }
+
+  async setActiveSubagentRun(id: string, runId: string | null): Promise<AgentConversation> {
+    return this.mutate(async (state) => {
+      const current = requireConversation(state, id);
+      const timestamp = this.now().toISOString();
+      const { activeSubagentRunId: _old, ...rest } = current;
+      const updated: AgentConversation = {
+        ...rest,
+        ...(runId ? { activeSubagentRunId: runId } : {}),
+        updatedAt: timestamp,
+      };
+      return [replaceConversation(state, updated), updated];
+    });
+  }
+
+  async updateSubagentRunStatus(
+    id: string,
+    runId: string,
+    status: AgentSubagentRunStatus,
+    patch?: { summary?: string; error?: string; steps?: readonly AgentSubagentStreamStep[] },
+  ): Promise<AgentConversation> {
+    return this.mutate(async (state) => {
+      const current = requireConversation(state, id);
+      const timestamp = this.now().toISOString();
+      const runs = current.subagentRuns ?? [];
+      const updated = runs.map((run) => {
+        if (run.runId !== runId) return run;
+        const { steps: _oldSteps, ...rest } = run;
+        const nextSteps = patch?.steps !== undefined
+          ? sanitizeSubagentSteps(patch.steps)
+          : run.steps;
+        return {
+          ...rest,
+          status,
+          ...(patch?.summary !== undefined ? { summary: patch.summary } : {}),
+          ...(patch?.error !== undefined ? { error: patch.error } : {}),
+          ...(nextSteps?.length ? { steps: nextSteps } : {}),
+          updatedAt: timestamp,
+        };
+      });
+      const conversation: AgentConversation = {
+        ...current,
+        subagentRuns: updated,
+        updatedAt: timestamp,
+      };
+      return [replaceConversation(state, conversation), conversation];
+    });
+  }
+
   private async load(): Promise<ConversationDocument> {
     if (this.state) return this.state;
     try {
@@ -236,6 +308,16 @@ function normalizeDocument(value: unknown): ConversationDocument {
       && canvasArtifacts.some((artifact) => artifact.id === candidate.activeCanvasArtifactId)
         ? candidate.activeCanvasArtifactId
         : undefined;
+    const subagentRuns = Array.isArray(candidate.subagentRuns)
+      ? candidate.subagentRuns.flatMap((entry) => {
+          const run = normalizeSubagentRun(entry, conversationId);
+          return run ? [run] : [];
+        })
+      : [];
+    const activeSubagentRunId = typeof candidate.activeSubagentRunId === "string"
+      && subagentRuns.some((run) => run.runId === candidate.activeSubagentRunId)
+        ? candidate.activeSubagentRunId
+        : undefined;
     return [{
       id: candidate.id,
       title: typeof candidate.title === "string" ? candidate.title : "New conversation",
@@ -248,6 +330,8 @@ function normalizeDocument(value: unknown): ConversationDocument {
       ...(isAcp(candidate.acp) ? { acp: candidate.acp } : {}),
       ...(canvasArtifacts.length ? { canvasArtifacts } : {}),
       ...(activeCanvasArtifactId ? { activeCanvasArtifactId } : {}),
+      ...(subagentRuns.length ? { subagentRuns } : {}),
+      ...(activeSubagentRunId ? { activeSubagentRunId } : {}),
     }];
   });
   return { version: 2, conversations };
@@ -279,6 +363,76 @@ function normalizeCanvasArtifact(value: unknown, conversationId: string): AgentC
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };
+}
+
+function normalizeSubagentRun(value: unknown, conversationId: string): AgentSubagentRun | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.id !== "string"
+    || typeof record.runId !== "string"
+    || typeof record.sourceMessageId !== "string"
+    || typeof record.providerId !== "string"
+    || typeof record.prompt !== "string"
+    || typeof record.createdAt !== "string"
+    || typeof record.updatedAt !== "string") {
+    return null;
+  }
+  if (record.status !== "running" && record.status !== "ok" && record.status !== "fail" && record.status !== "cancelled") return null;
+  const ownerConversationId = typeof record.conversationId === "string" ? record.conversationId : conversationId;
+  if (ownerConversationId !== conversationId) return null;
+  const attempted = Array.isArray(record.attempted)
+    ? record.attempted.filter((id): id is string => typeof id === "string")
+    : undefined;
+  const steps = Array.isArray(record.steps)
+    ? sanitizeSubagentSteps(record.steps)
+    : undefined;
+  return {
+    id: record.id,
+    conversationId,
+    sourceMessageId: record.sourceMessageId,
+    runId: record.runId,
+    providerId: record.providerId,
+    ...(typeof record.title === "string" ? { title: record.title } : {}),
+    prompt: record.prompt,
+    status: record.status as AgentSubagentRunStatus,
+    ...(typeof record.summary === "string" ? { summary: record.summary } : {}),
+    ...(typeof record.error === "string" ? { error: record.error } : {}),
+    ...(attempted?.length ? { attempted } : {}),
+    ...(steps?.length ? { steps } : {}),
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
+}
+
+function sanitizeSubagentSteps(value: unknown): AgentSubagentStreamStep[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const steps: AgentSubagentStreamStep[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const step = structuredClone(entry) as Record<string, unknown>;
+    repairSubagentStepRecord(step);
+    if (isConversationStep(step)) {
+      steps.push(step);
+      continue;
+    }
+    if (step.type === "plan" && Array.isArray(step.steps)) {
+      const planSteps = step.steps.flatMap((item) => {
+        if (typeof item !== "object" || item === null) return [];
+        const plan = item as Record<string, unknown>;
+        if (typeof plan.text !== "string") return [];
+        return [{
+          text: plan.text.slice(0, 4_000),
+          ...(plan.done === true ? { done: true } : {}),
+        }];
+      });
+      if (planSteps.length) steps.push({ type: "plan", steps: planSteps });
+    }
+  }
+  return steps.length ? steps : undefined;
+}
+
+function repairSubagentStepRecord(step: Record<string, unknown>): void {
+  repairStepRecord(step);
 }
 
 function evictCanvasArtifacts(artifacts: readonly AgentCanvasArtifact[], activeId?: string): readonly AgentCanvasArtifact[] {

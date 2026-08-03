@@ -717,6 +717,18 @@ describe("McpAgentToolGateway", () => {
       gateway.endTurn("turn-nows");
     });
 
+    it("preserves workspace when a later beginTurn omits it (AgentTurnRunner merge)", async () => {
+      const { runtime, calls } = makeRuntime();
+      const gateway = new McpAgentToolGateway(runtime as never);
+      gateway.beginTurn("turn-merge", { workspace: WS });
+      // Simulates RunAgentTurnHandler then AgentTurnRunner beginTurn(interactive only).
+      gateway.beginTurn("turn-merge", { interactive: true });
+      const grant = await gateway.execute("tool_schemas", { pluginId: "nusashell.terminal", toolNames: ["terminal_exec"] }, "g", "turn-merge") as { granted: Array<{ name: string }> };
+      await gateway.execute(grant.granted[0]!.name, { command: "pwd" }, "req", "turn-merge");
+      expect(calls[0]!.args).toEqual({ command: "pwd", cwd: WS });
+      gateway.endTurn("turn-merge");
+    });
+
     it("mcp_enable forwards args/env overrides and the turn workspace", async () => {
       const starts: Array<{ pluginId: unknown; options: unknown }> = [];
       const { runtime } = makeRuntime({

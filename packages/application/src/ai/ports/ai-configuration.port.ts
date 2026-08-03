@@ -12,6 +12,7 @@ export interface AiConfigurationPort {
     apiKey?: string;
     timeoutMs?: number;
     maxAttempts?: number;
+    omitToolChoice?: boolean;
   }): void;
   configureAiRuntime(settings: {
     strategy: "failover" | "round-robin" | "switch";

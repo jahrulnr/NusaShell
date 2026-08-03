@@ -43,6 +43,7 @@ export interface OpenAiCompatibleAgentProviderOptions {
   readonly timeoutMs?: number;
   readonly maxOutputTokens?: number;
   readonly maxResponseBytes?: number;
+  readonly omitToolChoice?: boolean;
   readonly logger?: {
     warn(msg: string, ...args: unknown[]): void;
     info(msg: string, ...args: unknown[]): void;
@@ -135,6 +136,7 @@ export class OpenAiCompatibleAgentProvider implements AgentProvider {
     const allowVision = this.options.vision !== "off";
     const maxOutput = policy.maxOutput ?? this.options.maxOutputTokens;
     const body = this.strategy.buildBody(normalizedRequest, model, allowVision, maxOutput);
+    if (this.options.omitToolChoice) delete (body as Record<string, unknown>).tool_choice;
 
     let payload: unknown;
     let usedStrategy: ApiStrategy = this.strategy;
@@ -145,6 +147,7 @@ export class OpenAiCompatibleAgentProvider implements AgentProvider {
         this.options.logger?.warn("Agent provider falling back responses→chat provider=%s", this.id);
         const chatStrategy = new ChatApiStrategy();
         const chatBody = chatStrategy.buildBody(normalizedRequest, model, allowVision, maxOutput);
+        if (this.options.omitToolChoice) delete (chatBody as Record<string, unknown>).tool_choice;
         const chatEndpoint = `${this.options.baseUrl.replace(/\/+$/, "")}/chat/completions`;
         try {
           payload = await this.post(chatBody, request, stream, true, chatEndpoint, "chat");
@@ -152,6 +155,7 @@ export class OpenAiCompatibleAgentProvider implements AgentProvider {
           if (!shouldRetryWithoutImages(chatError, request.messages, request.signal)) throw chatError;
           this.options.logger?.warn("Agent provider falling back without images (chat) provider=%s", this.id);
           const fallbackChatBody = chatStrategy.buildBody(normalizedRequest, model, false, maxOutput);
+          if (this.options.omitToolChoice) delete (fallbackChatBody as Record<string, unknown>).tool_choice;
           payload = await this.post(fallbackChatBody, request, stream, true, chatEndpoint, "chat");
         }
         usedStrategy = chatStrategy;
@@ -159,6 +163,7 @@ export class OpenAiCompatibleAgentProvider implements AgentProvider {
         if (!shouldRetryWithoutImages(error, request.messages, request.signal)) throw error;
         this.options.logger?.warn("Agent provider falling back without images provider=%s api=%s", this.id, this.strategy.api);
         const fallbackBody = this.strategy.buildBody(normalizedRequest, model, false, maxOutput);
+        if (this.options.omitToolChoice) delete (fallbackBody as Record<string, unknown>).tool_choice;
         payload = await this.post(fallbackBody, request, stream, true);
       }
     }

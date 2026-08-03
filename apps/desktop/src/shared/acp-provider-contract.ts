@@ -25,6 +25,8 @@ export interface AcpProviderConfig {
   readonly authStatus?: AcpAuthStatus | undefined;
   readonly authCheckedAt?: string | undefined;
   readonly authError?: string | undefined;
+  /** Per-provider config values applied on subagent spawn (e.g. mode, model). */
+  readonly preferredConfig?: Readonly<Record<string, string | boolean>> | undefined;
 }
 
 export interface AcpProviderPublic {
@@ -43,4 +45,16 @@ export interface AcpProviderSaveInput {
   readonly authStatus?: AcpAuthStatus;
   readonly authCheckedAt?: string;
   readonly authError?: string;
+  readonly preferredConfig?: Readonly<Record<string, string | boolean>>;
+}
+
+/** ACP routing preferences for subagent delegation. */
+export interface AcpRoutingSettings {
+  readonly defaultProviderId?: string | undefined;
+  readonly fallbackProviderIds?: readonly string[] | undefined;
+}
+
+export interface AcpRoutingPublic extends AcpRoutingSettings {
+  /** Effective try-order resolved from default + fallback (connected providers only). */
+  readonly tryOrder: readonly string[];
 }

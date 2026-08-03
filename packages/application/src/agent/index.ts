@@ -21,6 +21,13 @@ export type {
   DocSummary,
   DocContent,
   DocsIndexPort,
+  SubagentProviderCandidate,
+  SubagentResolveRequest,
+  SubagentResolveResult,
+  SubagentRunRequest,
+  SubagentRunResult,
+  SubagentPort,
+  AcpProviderResolverPort,
 } from "./ports/index.js";
 export {
   AgentTurnRunner,
@@ -66,3 +73,7 @@ export type {
   AnswerAskQuestionCommand,
 } from "./commands/index.js";
 export { RunAgentTurnHandler, CancelAgentTurnHandler, AnswerAskQuestionHandler, type AgentRuntimeSettings } from "./commands/index.js";
+export type { SubagentRunStartedEvent } from "./events/subagent-run-started.event.js";
+export { createSubagentRunStartedEvent } from "./events/subagent-run-started.event.js";
+export type { SubagentRunEndedEvent } from "./events/subagent-run-ended.event.js";
+export { createSubagentRunEndedEvent } from "./events/subagent-run-ended.event.js";

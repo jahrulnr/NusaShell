@@ -652,10 +652,15 @@ function handlePluginEvent(payload, eventType) {
 
 // ============ Toast ============
 
+const TOAST_MAX_CHARS = 140;
+
 function showToast(message, type = "info") {
   const container = $("#toast-container");
   const toast = el("div", `toast toast-${type}`);
-  toast.textContent = message;
+  const full = String(message ?? "").replace(/\s+/g, " ").trim();
+  const clipped = full.length > TOAST_MAX_CHARS ? `${full.slice(0, TOAST_MAX_CHARS - 1)}…` : full;
+  toast.textContent = clipped;
+  if (clipped !== full) toast.title = full;
   container.appendChild(toast);
   setTimeout(() => { toast.classList.add("toast-show"); }, 10);
   setTimeout(() => {
@@ -940,6 +945,8 @@ document.addEventListener("DOMContentLoaded", () => {
     "9router": { id: "9router", type: "9router", label: "9Router", baseUrl: "http://127.0.0.1:20128/v1", api: "chat", detail: "Local OpenAI-compatible gateway", apiKeyOptional: true },
     openai: { id: "openai", type: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", api: "responses", detail: "Official OpenAI endpoint", apiKeyOptional: false },
     claude: { id: "claude", type: "claude", label: "Claude API", baseUrl: "https://api.anthropic.com/v1", api: "messages", detail: "Anthropic model catalog · Messages compatibility", apiKeyOptional: false },
+    ollama: { id: "ollama", type: "ollama", label: "Ollama", baseUrl: "http://127.0.0.1:11434/v1", api: "chat", detail: "Local Ollama OpenAI-compatible API", apiKeyOptional: true },
+    llamacpp: { id: "llamacpp", type: "llamacpp", label: "llama.cpp", baseUrl: "http://127.0.0.1:8080/v1", api: "chat", detail: "Local llama-server OpenAI-compatible API", apiKeyOptional: true },
     custom: { id: "", type: "openai-compatible", label: "Custom provider", baseUrl: "", api: "chat", detail: "OpenAI-compatible endpoint", apiKeyOptional: false },
   };
   const builtInProviderIds = new Set(Object.values(providerPresets).map((preset) => preset.id).filter(Boolean));
@@ -994,10 +1001,12 @@ document.addEventListener("DOMContentLoaded", () => {
     authSelect.value = provider.config.authMethodId ?? provider.manifest.authMethodId ?? "";
     if (provider.manifest.id === "codex") {
       authHint.textContent = "ChatGPT login: run `codex login` then click Connect. API key: set OPENAI_API_KEY or CODEX_API_KEY in the process env that launches Electron, then choose api-key. Default command is npx -y @agentclientprotocol/codex-acp; install globally and set NUSASHELL_CODEX_ACP_BIN=codex-acp to skip the npx download.";
+    } else if (provider.manifest.id === "cursor") {
+      authHint.textContent = "Uses existing Cursor CLI login (`agent status` / ~/.config/cursor) by default. Connect first tries file auth without opening a browser; pick cursor_login only to force a fresh OAuth.";
     } else if (provider.manifest.authMethodId) {
       authHint.textContent = `Auth method: ${provider.manifest.authMethodId}. Click Connect after enabling.`;
     } else {
-      authHint.textContent = "";
+      authHint.textContent = "Auth is optional when the CLI already has file credentials. Click Connect after enabling.";
     }
     $("#acp-provider-auth-method").textContent = provider.config.authStatus === "connected" ? "● Connected" : provider.config.authStatus === "needs-auth" ? "● Needs auth" : "Not probed";
   };
@@ -1168,7 +1177,7 @@ document.addEventListener("DOMContentLoaded", () => {
           connectBtn.disabled = true;
           connectBtn.textContent = "Connecting…";
           try {
-            const updated = await window.shell.acpProviders.probe(provider.manifest.id);
+            const updated = await window.shell.acpProviders.probe(provider.manifest.id, { interactive: true });
             if (updated?.config.authStatus === "connected") {
               showToast(`${provider.manifest.displayName} connected.`, "success");
             } else {
@@ -1736,9 +1745,10 @@ document.addEventListener("DOMContentLoaded", () => {
   onEvent("tool.call_completed", (payload) => handlePluginEvent(payload, "tool.call_completed"));
 
   onEvent("agent.learning_updated", (payload) => {
-    const kinds = Array.isArray(payload?.kinds) ? payload.kinds.join(", ") : "unknown";
-    const summary = payload?.summary ? `: ${payload.summary}` : "";
-    showToast(`Background review updated ${kinds}${summary}`, "info");
+    const kinds = Array.isArray(payload?.kinds) && payload.kinds.length > 0
+      ? payload.kinds.join(", ")
+      : "learning";
+    showToast(`Learning updated (${kinds}). Open Learning to review.`, "info");
     learningController?.refresh();
     skillsController?.refreshPending();
     skillsController?.refreshArchived();

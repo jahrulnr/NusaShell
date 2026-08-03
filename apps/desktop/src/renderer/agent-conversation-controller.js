@@ -17,6 +17,7 @@ import { estimateContextTokens, formatContextUsage, resolveContextBadgeTokens, s
 import { inspectAttachmentContent, toDataUrl } from "./attachment-content.js";
 import { CANVAS_ARTIFACT_MAX_SOURCE_BYTES, canvasArtifactId, resolveCanvasFence } from "./agent-canvas-detect.js";
 import { bindCanvasZoom, renderArtifact } from "./agent-canvas-render.js";
+import { subscribeSubagentEvents, subscribeSubagentStream } from "./subagent-event-helper.js";
 
 export class AgentConversationController {
   constructor({ shell, runTurn, cancelTurn, answerAsk, getActiveModel, getVisionMode, notify, log, runAcpTurn, cancelAcpTurn, answerAcpPermission, answerAcpAsk, getAcpSessionInfo, setAcpConfigOption, ensureAcpSession, refreshModelPicker }) {
@@ -49,6 +50,10 @@ export class AgentConversationController {
     this.composerResizeObserver = null;
     this.canvasEnabled = true;
     this.activeCanvasArtifact = null;
+    this.activeSubagentRun = null;
+    this.subagentStreamState = null;
+    this.subagentStreamDisposer = null;
+    this.subagentEventDisposer = null;
   }
 
   async initialize() {
@@ -58,6 +63,7 @@ export class AgentConversationController {
     }
     this.bindEvents();
     this.bindCanvasControls();
+    this.bindSubagentEvents();
     await this.loadCanvasEnabled();
     await this.refresh();
     if (this.conversations.length === 0) await this.create();
@@ -87,38 +93,6 @@ export class AgentConversationController {
     visible.forEach((conversation) => list.appendChild(this.conversationRow(conversation)));
   }
 
-  async renderAcpMenu(menu, forceClose) {
-    if (forceClose) {
-      menu.hidden = true;
-      return;
-    }
-    let providers = [];
-    try {
-      providers = [...await this.shell.acpProviders.list()];
-    } catch (error) {
-      this.notify(`Could not load ACP providers: ${error.message || error}`, "error");
-    }
-    menu.textContent = "";
-    const connected = providers.filter((p) => p.config.enabled && p.config.authStatus === "connected");
-    if (connected.length === 0) {
-      const item = element("button", "disabled", "No connected ACP agents — connect one in AI Providers");
-      item.type = "button";
-      item.disabled = true;
-      menu.appendChild(item);
-    } else {
-      for (const provider of connected) {
-        const item = element("button", "", provider.manifest.displayName);
-        item.type = "button";
-        item.addEventListener("click", () => {
-          menu.hidden = true;
-          void this.runUiAction(this.createAcp(provider.manifest.id), `Could not create ACP conversation`);
-        });
-        menu.appendChild(item);
-      }
-    }
-    menu.hidden = false;
-  }
-
   async create(options) {
     if (this.turnPending) return;
     if (this.conversation?.messages.length === 0 && !options) {
@@ -133,10 +107,6 @@ export class AgentConversationController {
     this.updateAcpStatus();
     await this.refresh();
     $("#agent-input")?.focus();
-  }
-
-  async createAcp(providerId) {
-    await this.create({ kind: "acp", acp: { providerId } });
   }
 
   async submit({ retry = false } = {}) {
@@ -250,7 +220,10 @@ export class AgentConversationController {
         },
         onToolCallEnd: (payload) => {
           const card = streamState.toolCards.get(payload.callId);
-          if (card) this.updateStreamingToolCard(card, payload);
+          if (card) {
+            const next = this.updateStreamingToolCard(card, payload);
+            if (next) streamState.toolCards.set(payload.callId, next);
+          }
         },
         onContextUpdate: (payload) => {
           // Badge = approximate current prompt window fill, NOT cumulative
@@ -473,7 +446,10 @@ export class AgentConversationController {
         },
         onToolCallEnd: (payload) => {
           const card = streamState.toolCards.get(payload.callId);
-          if (card) this.updateStreamingToolCard(card, payload);
+          if (card) {
+            const next = this.updateStreamingToolCard(card, payload);
+            if (next) streamState.toolCards.set(payload.callId, next);
+          }
           const tc = streamState.toolCalls.find((t) => t.id === payload.callId);
           if (tc) { tc.ok = payload.ok !== false; if (payload.error) tc.error = payload.error; }
           const step = [...streamState.steps].reverse().find((s) => s.type === "tool_calls" && s.calls.some((c) => c.id === payload.callId));
@@ -565,17 +541,6 @@ export class AgentConversationController {
     $("#agent-attach-btn").addEventListener("click", () => $("#agent-file-input").click());
     $("#agent-file-input").addEventListener("change", (event) => void this.addAttachments(event.target.files));
     $("#agent-new-conversation").addEventListener("click", () => this.runUiAction(this.create(), "Could not create conversation"));
-    const acpButton = $("#agent-new-acp");
-    const acpMenu = $("#agent-new-acp-menu");
-    if (acpButton && acpMenu) {
-      acpButton.hidden = false;
-      acpButton.addEventListener("click", () => this.renderAcpMenu(acpMenu, !acpMenu.hidden));
-      document.addEventListener("click", (event) => {
-        if (!acpMenu.hidden && !acpButton.contains(event.target) && !acpMenu.contains(event.target)) {
-          acpMenu.hidden = true;
-        }
-      });
-    }
     $("#agent-conversation-search").addEventListener("input", () => this.renderList());
     $("#agent-delete-overlay").addEventListener("click", () => this.closeDeleteDialog());
     $("#agent-delete-close").addEventListener("click", () => this.closeDeleteDialog());
@@ -752,9 +717,11 @@ export class AgentConversationController {
         this.conversation.workspace,
         {
           providerId: descriptor.manifest.id,
-          command: descriptor.manifest.command,
-          args: descriptor.manifest.args,
-          authMethodId: descriptor.manifest.authMethodId,
+          command: descriptor.config.command || descriptor.manifest.command,
+          args: descriptor.config.args ?? descriptor.manifest.args,
+          ...(descriptor.config.authMethodId || descriptor.manifest.authMethodId
+            ? { authMethodId: descriptor.config.authMethodId || descriptor.manifest.authMethodId }
+            : {}),
         },
       );
       if (!shouldApplyAcpUiUpdate({ activeId: this.activeId, activeKind: this.conversation?.kind, startedId })) return;
@@ -888,6 +855,7 @@ export class AgentConversationController {
     this.conversation.messages.forEach((message, index) => this.appendMessage(message.role, message.content, { ...message, canvasMessageIndex: index }));
     this.scrollToBottom();
     this.restoreCanvas();
+    this.restoreSubpane();
   }
 
   appendMessage(role, content, meta = {}) {
@@ -999,6 +967,123 @@ export class AgentConversationController {
       const pane = $("#agent-canvas");
       if (!pane || pane.hidden || !pane.classList.contains("is-open")) return;
       this.closeCanvasSidebar();
+    });
+    $("#agent-subpane-close")?.addEventListener("click", () => this.closeSubpaneSidebar());
+    $("#agent-subpane-overlay")?.addEventListener("click", () => this.closeSubpaneSidebar());
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      const subpane = $("#agent-subpane");
+      if (!subpane || subpane.hidden || !subpane.classList.contains("is-open")) return;
+      this.closeSubpaneSidebar();
+    });
+  }
+
+  bindSubagentEvents() {
+    this.activeSubagentRun = null;
+    this.subagentStreamState = null;
+    this.subagentStreamDisposer = null;
+    this.subagentEventDisposer = subscribeSubagentEvents({
+      onRunStarted: (p) => this.handleSubagentRunStarted(p),
+      onRunEnded: (p) => this.handleSubagentRunEnded(p),
+    });
+  }
+
+  handleSubagentRunStarted(p) {
+    if (!this.conversation) return;
+    const run = {
+      id: `run-${p.runId}`,
+      conversationId: this.conversation.id,
+      sourceMessageId: String(this.conversation.messages?.length ?? 0),
+      runId: p.runId,
+      providerId: p.providerId,
+      ...(p.title ? { title: p.title } : {}),
+      prompt: p.prompt,
+      status: "running",
+      steps: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    this.resetSubagentStreamState([]);
+    this.shell.agentConversations.upsertSubagentRun(this.conversation.id, run).then((conv) => {
+      this.conversation = conv;
+      return this.shell.agentConversations.setActiveSubagentRun(this.conversation.id, run.runId);
+    }).then((conv) => {
+      this.conversation = conv;
+    }).catch((err) => this.log?.("error", `Subagent run start persist failed: ${err}`));
+
+    this.mountSubpane(run, { resumeStream: false, open: false });
+
+    this.subagentStreamDisposer?.();
+    this.subagentStreamDisposer = this.bindLiveSubagentStream(p.runId);
+  }
+
+  handleSubagentRunEnded(p) {
+    this.subagentStreamDisposer?.();
+    this.subagentStreamDisposer = null;
+
+    const status = p.ok ? "ok" : "fail";
+    this.setSubpaneStatus(`● ${status.toUpperCase()}`, p.ok ? "is-ok" : "is-fail");
+    if (!p.ok && p.error) {
+      this.setSubpaneError(p.error);
+    }
+
+    this.sealSubagentStreamSegment();
+    const steps = this.snapshotSubagentSteps();
+    if (this.activeSubagentRun) {
+      this.activeSubagentRun = { ...this.activeSubagentRun, status, ...(p.summary ? { summary: p.summary } : {}), ...(p.error ? { error: p.error } : {}), ...(steps?.length ? { steps } : {}) };
+    }
+    this.subagentStreamState = null;
+
+    if (this.conversation) {
+      this.shell.agentConversations.updateSubagentRunStatus(
+        this.conversation.id,
+        p.runId,
+        status,
+        {
+          ...(p.summary ? { summary: p.summary } : {}),
+          ...(p.error ? { error: p.error } : {}),
+          ...(steps?.length ? { steps } : {}),
+        },
+      ).then((conv) => {
+        this.conversation = conv;
+      }).catch((err) => this.log?.("error", `Subagent run end persist failed: ${err}`));
+    }
+  }
+
+  bindLiveSubagentStream(runId) {
+    return subscribeSubagentStream(runId, {
+      onDelta: (delta) => this.appendSubpaneText(delta),
+      onReasoningDelta: (delta) => this.appendSubpaneThought(delta),
+      onToolCallStart: (params) => {
+        this.appendSubpaneToolCall({
+          id: params.callId,
+          title: params.name,
+          kind: params.kind || "unknown",
+          status: params.status === "ok" ? "ok" : params.status === "fail" ? "fail" : "running",
+          args: params.args,
+          summary: summarizeToolArgs(params.args),
+        }, { persist: true });
+      },
+      onToolCallEnd: (params) => {
+        this.updateSubpaneToolCall(params.callId, params.ok ? "ok" : "fail", params.summary);
+      },
+      onPlan: (steps) => this.appendSubpanePlan(steps, { persist: true }),
+      onPermissionRequest: (payload) => {
+        const card = this.createAcpPermissionCard(payload);
+        const body = $("#agent-subpane-body");
+        if (card && body) {
+          body.appendChild(card);
+          body.scrollTop = body.scrollHeight;
+        }
+      },
+      onAskRequest: (payload) => {
+        const card = this.createAcpAskCard(payload);
+        const body = $("#agent-subpane-body");
+        if (card && body) {
+          body.appendChild(card);
+          body.scrollTop = body.scrollHeight;
+        }
+      },
     });
   }
 
@@ -1207,6 +1292,17 @@ export class AgentConversationController {
     this.mountCanvas(artifact);
   }
 
+  restoreSubpane() {
+    if (!this.conversation) return;
+    const activeId = this.conversation.activeSubagentRunId;
+    const run = this.conversation.subagentRuns?.find((item) => item.runId === activeId);
+    if (!run) return;
+    // Keep stream subscription for an in-flight run, but do not auto-open the drawer.
+    if (run.status === "running") {
+      this.mountSubpane(run, { resumeStream: true, open: false });
+    }
+  }
+
   async mountCanvas(artifact) {
     const pane = $("#agent-canvas");
     const body = $("#agent-canvas-body");
@@ -1270,6 +1366,347 @@ export class AgentConversationController {
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
+  }
+
+  // ===== Subagent side pane =====
+
+  openSubpaneDrawerUi() {
+    const pane = $("#agent-subpane");
+    const overlay = $("#agent-subpane-overlay");
+    if (!pane) return;
+    this.closeCanvasSidebar();
+    pane.hidden = false;
+    if (overlay) {
+      overlay.hidden = false;
+      requestAnimationFrame(() => {
+        overlay.classList.add("is-open");
+        pane.classList.add("is-open");
+      });
+    } else {
+      pane.classList.add("is-open");
+    }
+    $("#agent-subpane-close")?.focus();
+  }
+
+  closeSubpaneDrawerUi() {
+    const pane = $("#agent-subpane");
+    const body = $("#agent-subpane-body");
+    const overlay = $("#agent-subpane-overlay");
+    pane?.classList.remove("is-open");
+    overlay?.classList.remove("is-open");
+    if (body) body.textContent = "";
+    const hide = () => {
+      if (pane) pane.hidden = true;
+      if (overlay) overlay.hidden = true;
+    };
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      hide();
+      return;
+    }
+    window.setTimeout(hide, 260);
+  }
+
+  closeSubpaneSidebar() {
+    this.closeSubpaneDrawerUi();
+    this.activeSubagentRun = null;
+    if (this.conversation?.activeSubagentRunId) {
+      void this.shell?.agentConversations?.setActiveSubagentRun(this.conversation.id, null).catch(() => undefined);
+    }
+  }
+
+  mountSubpane(run, options = {}) {
+    const pane = $("#agent-subpane");
+    const body = $("#agent-subpane-body");
+    const badge = $("#agent-subpane-badge");
+    const title = $("#agent-subpane-title");
+    const status = $("#agent-subpane-status");
+    if (!pane || !body) return;
+    if (badge) badge.textContent = (run.providerId || "—").slice(0, 6).toUpperCase();
+    if (title) title.textContent = run.title || "Subagent";
+    if (status) {
+      status.textContent = `● ${run.status.toUpperCase()}`;
+      status.className = "agent-subpane-status";
+      if (run.status === "running") status.classList.add("is-running");
+      else if (run.status === "ok") status.classList.add("is-ok");
+      else if (run.status === "fail" || run.status === "cancelled") status.classList.add("is-fail");
+    }
+    body.textContent = "";
+    this.activeSubagentRun = run;
+    if (run.steps?.length) this.renderSubpaneSteps(run.steps);
+    if (run.error && run.status !== "running") this.setSubpaneError(run.error);
+    if (options.resumeStream && run.status === "running") {
+      this.resetSubagentStreamState(run.steps ?? []);
+      this.subagentStreamDisposer?.();
+      this.subagentStreamDisposer = this.bindLiveSubagentStream(run.runId);
+    } else if (run.status !== "running") {
+      this.subagentStreamState = null;
+      this.subagentStreamDisposer?.();
+      this.subagentStreamDisposer = null;
+    }
+    if (options.open) this.openSubpaneDrawerUi();
+  }
+
+  resetSubagentStreamState(seedSteps = []) {
+    // Live stream stays in memory while the (blocking) run is active.
+    // Durable steps are flushed once on run end — no mid-stream disk writes,
+    // no temp-file artifact spool (defer that until async subagent exists).
+    this.subagentStreamState = {
+      steps: Array.isArray(seedSteps) ? [...seedSteps] : [],
+      lastKind: null,
+      textContent: "",
+      thoughtContent: "",
+      textEl: null,
+      thoughtEl: null,
+    };
+  }
+
+  sealSubagentStreamSegment() {
+    const state = this.subagentStreamState;
+    if (!state) return;
+    if (state.lastKind === "text" && state.textContent.trim()) {
+      state.steps.push({ type: "text", content: state.textContent });
+    } else if (state.lastKind === "reasoning" && state.thoughtContent.trim()) {
+      state.steps.push({ type: "reasoning", content: state.thoughtContent });
+    }
+    state.lastKind = null;
+    state.textContent = "";
+    state.thoughtContent = "";
+    state.textEl = null;
+    state.thoughtEl = null;
+  }
+
+  snapshotSubagentSteps() {
+    const state = this.subagentStreamState;
+    if (!state) return this.activeSubagentRun?.steps;
+    const steps = [...state.steps];
+    if (state.lastKind === "text" && state.textContent) {
+      steps.push({ type: "text", content: state.textContent });
+    } else if (state.lastKind === "reasoning" && state.thoughtContent) {
+      steps.push({ type: "reasoning", content: state.thoughtContent });
+    }
+    return sanitizeAssistantSteps(steps) ?? steps;
+  }
+
+  renderSubpaneSteps(steps) {
+    if (!Array.isArray(steps)) return;
+    const body = $("#agent-subpane-body");
+    if (!body) return;
+    for (const step of steps) {
+      if (step.type === "text" && typeof step.content === "string") {
+        const el = element("div", "agent-subpane-text agent-bubble");
+        el.innerHTML = renderAssistantMarkdown(step.content);
+        body.appendChild(el);
+      } else if (step.type === "reasoning" && typeof step.content === "string") {
+        body.appendChild(this.reasoningDisclosure(step.content));
+      } else if (step.type === "tool_calls" && Array.isArray(step.calls)) {
+        body.appendChild(this.toolActivity(step.calls.map((call) => ({
+          id: call.id,
+          name: call.name,
+          ok: call.ok !== false,
+          ...(call.args ? { args: call.args } : {}),
+          ...(call.output ? { output: call.output } : {}),
+          ...(call.error ? { error: call.error } : {}),
+        }))));
+      } else if (step.type === "plan" && Array.isArray(step.steps)) {
+        this.appendSubpanePlan(step.steps, { persist: false });
+      }
+    }
+  }
+
+  appendSubpaneThought(delta) {
+    const body = $("#agent-subpane-body");
+    if (!body) return;
+    if (!this.subagentStreamState) this.resetSubagentStreamState([]);
+    const state = this.subagentStreamState;
+    if (state.lastKind !== "reasoning") {
+      this.sealSubagentStreamSegment();
+      state.lastKind = "reasoning";
+      state.thoughtContent = "";
+      state.thoughtEl = this.createStreamingReasoningBlock();
+      body.appendChild(state.thoughtEl);
+    }
+    state.thoughtContent += delta;
+    const content = state.thoughtEl?.querySelector(".agent-reasoning-content");
+    if (content) content.innerHTML = renderReasoningMarkdown(state.thoughtContent);
+    body.scrollTop = body.scrollHeight;
+  }
+
+  appendSubpaneText(delta) {
+    const body = $("#agent-subpane-body");
+    if (!body) return;
+    if (!this.subagentStreamState) this.resetSubagentStreamState([]);
+    const state = this.subagentStreamState;
+    if (state.lastKind !== "text") {
+      this.sealSubagentStreamSegment();
+      state.lastKind = "text";
+      state.textContent = "";
+      state.textEl = element("div", "agent-subpane-text agent-bubble");
+      body.appendChild(state.textEl);
+    }
+    state.textContent += delta;
+    state.textEl.innerHTML = renderAssistantMarkdown(state.textContent);
+    body.scrollTop = body.scrollHeight;
+  }
+
+  appendSubpaneToolCall(call, options = {}) {
+    const body = $("#agent-subpane-body");
+    if (!body) return;
+    const args = call.args && typeof call.args === "object" && !Array.isArray(call.args) ? call.args : undefined;
+    const hasArgs = args && Object.keys(args).length > 0;
+    if (options.persist !== false) {
+      if (!this.subagentStreamState) this.resetSubagentStreamState([]);
+      this.sealSubagentStreamSegment();
+      const state = this.subagentStreamState;
+      state.steps.push({
+        type: "tool_calls",
+        calls: [{
+          id: call.id,
+          name: call.title || "tool",
+          ok: call.status !== "fail",
+          ...(hasArgs ? { args } : {}),
+          ...(call.summary ? { output: String(call.summary).slice(0, 12_000) } : {}),
+        }],
+      });
+    }
+    const terminal = this.toolTerminal({
+      id: call.id,
+      name: call.title || "tool",
+      ok: call.status !== "fail",
+      ...(hasArgs ? { args } : {}),
+      ...(call.summary ? { output: call.summary } : {}),
+    });
+    if (call.status === "running" || call.status === "pending") {
+      terminal.classList.add("is-running");
+      terminal.classList.remove("is-success", "is-error");
+      const meta = terminal.querySelector(".agent-tool-terminal-meta");
+      if (meta) meta.textContent = "Running";
+    }
+    terminal.dataset.callId = call.id;
+    body.appendChild(terminal);
+    body.scrollTop = body.scrollHeight;
+  }
+
+  updateSubpaneToolCall(callId, status, summary) {
+    const body = $("#agent-subpane-body");
+    if (!body) return;
+    const el = body.querySelector(`.agent-tool-terminal[data-call-id="${CSS.escape(callId)}"]`);
+    if (el) {
+      el.classList.remove("is-running", "is-success", "is-error");
+      if (status === "ok") el.classList.add("is-success");
+      else if (status === "fail") el.classList.add("is-error");
+      const meta = el.querySelector(".agent-tool-terminal-meta");
+      if (meta) meta.textContent = status === "ok" ? "OK" : status === "fail" ? "FAIL" : "Running";
+      if (summary) {
+        const output = el.querySelector(".agent-tool-terminal-output");
+        if (output) {
+          output.innerHTML = renderToolCodeHtml(String(summary).slice(0, 12_000));
+          output.classList.toggle("is-error", status === "fail");
+        }
+      }
+    }
+    const state = this.subagentStreamState;
+    if (state) {
+      for (let i = state.steps.length - 1; i >= 0; i -= 1) {
+        const step = state.steps[i];
+        if (step.type !== "tool_calls") continue;
+        const call = step.calls.find((item) => item.id === callId);
+        if (!call) continue;
+        const nextCalls = step.calls.map((item) => (
+          item.id === callId
+            ? {
+                ...item,
+                ok: status !== "fail",
+                ...(summary ? { output: String(summary).slice(0, 12_000) } : {}),
+              }
+            : item
+        ));
+        state.steps[i] = { type: "tool_calls", calls: nextCalls };
+        break;
+      }
+    }
+  }
+
+  appendSubpanePlan(steps, options = {}) {
+    const body = $("#agent-subpane-body");
+    if (!body) return;
+    if (options.persist !== false) {
+      if (!this.subagentStreamState) this.resetSubagentStreamState([]);
+      this.sealSubagentStreamSegment();
+      const state = this.subagentStreamState;
+      state.steps = state.steps.filter((step) => step.type !== "plan");
+      state.steps.push({
+        type: "plan",
+        steps: (steps ?? []).map((step) => ({
+          text: String(step.text ?? ""),
+          ...(step.done ? { done: true } : {}),
+        })),
+      });
+    }
+    const existing = body.querySelector(".agent-subpane-plan");
+    if (existing) existing.remove();
+    const plan = element("div", "agent-subpane-plan");
+    plan.append(element("div", "agent-subpane-plan-title", "Plan"));
+    for (const step of steps) {
+      const stepEl = element("div", `agent-subpane-plan-step ${step.done ? "agent-subpane-plan-step-done" : "agent-subpane-plan-step-pending"}`);
+      stepEl.textContent = `${step.done ? "✓" : "○"} ${step.text}`;
+      plan.appendChild(stepEl);
+    }
+    body.appendChild(plan);
+    body.scrollTop = body.scrollHeight;
+  }
+
+  setSubpaneError(message) {
+    const body = $("#agent-subpane-body");
+    if (!body) return;
+    const existing = body.querySelector(".agent-subpane-error");
+    if (existing) existing.remove();
+    const el = element("div", "agent-subpane-error", formatSubagentError(message));
+    body.appendChild(el);
+    body.scrollTop = body.scrollHeight;
+  }
+
+  setSubpaneStatus(statusText, cls) {
+    const status = $("#agent-subpane-status");
+    if (!status) return;
+    status.textContent = statusText;
+    status.className = "agent-subpane-status";
+    if (cls) status.classList.add(cls);
+  }
+
+  renderSubagentCard(run) {
+    const card = element("div", "agent-subagent-card");
+    const head = element("div", "agent-subagent-card-head");
+    head.addEventListener("click", () => {
+      const latest = this.conversation?.subagentRuns?.find((item) => item.runId === run.runId) ?? run;
+      if (this.conversation) {
+        void this.shell.agentConversations.setActiveSubagentRun(this.conversation.id, latest.runId).catch(() => undefined);
+      }
+      const body = $("#agent-subpane-body");
+      const samePreparedRun = this.activeSubagentRun?.runId === latest.runId
+        && (body?.childNodes.length ?? 0) > 0;
+      if (samePreparedRun) {
+        this.openSubpaneDrawerUi();
+        return;
+      }
+      this.mountSubpane(latest, { resumeStream: latest.status === "running", open: true });
+    });
+    const meta = element("div", "agent-subagent-card-meta");
+    meta.append(
+      element("span", "agent-subagent-card-badge", (run.providerId || "—").slice(0, 6).toUpperCase()),
+      element("span", "agent-subagent-card-title", run.title || "Subagent run"),
+    );
+    const statusEl = element("span", `agent-subagent-card-status ${run.status === "running" ? "is-running" : run.status === "ok" ? "is-ok" : run.status === "fail" || run.status === "cancelled" ? "is-fail" : ""}`, `● ${run.status.toUpperCase()}`);
+    head.append(meta, statusEl);
+    card.appendChild(head);
+    if (run.summary) {
+      const summaryEl = element("div", "agent-subagent-card-summary");
+      summaryEl.innerHTML = renderAssistantMarkdown(run.summary);
+      card.append(summaryEl);
+    }
+    if (run.error) {
+      card.append(element("div", "agent-subagent-card-error", run.error));
+    }
+    return card;
   }
 
   messageAttachments(attachments) {
@@ -1339,11 +1776,37 @@ export class AgentConversationController {
           ok: toolCall.ok !== false,
           error: toolCall.error,
         }));
+      } else if (toolCall.name === "subagent") {
+        const card = this.createSubagentToolCard(toolCall);
+        if (card) stack.appendChild(card);
       } else {
         stack.appendChild(this.toolTerminal(toolCall));
       }
     });
     return stack;
+  }
+
+  createSubagentToolCard(toolCall) {
+    let result = {};
+    try {
+      result = typeof toolCall.output === "string" ? JSON.parse(toolCall.output) : (toolCall.output ?? {});
+    } catch { /* not JSON */ }
+    if (!result || typeof result !== "object") result = {};
+    const runId = result.runId;
+    const providerId = result.providerId || toolCall.args?.provider_id || "—";
+    const title = toolCall.args?.title || result.title || "Subagent run";
+    const status = result.ok === true ? "ok" : result.ok === false ? "fail" : "running";
+    const summary = result.summary || "";
+    const error = formatSubagentError(result.error) || formatSubagentError(toolCall.error);
+    const run = {
+      runId: runId || toolCall.id,
+      providerId,
+      title,
+      status,
+      ...(summary ? { summary } : {}),
+      ...(error ? { error } : {}),
+    };
+    return this.renderSubagentCard(run);
   }
 
   toolTerminal(toolCall, { open = false, running = false } = {}) {
@@ -1426,6 +1889,20 @@ export class AgentConversationController {
     if (name === "ask_question") {
       return this.createAskCard(callId, args, { sealed: false });
     }
+    if (name === "subagent") {
+      const title = typeof args?.title === "string" && args.title.trim() ? args.title.trim() : "Subagent run";
+      const providerId = typeof args?.provider_id === "string" && args.provider_id ? args.provider_id : "…";
+      const card = this.renderSubagentCard({
+        runId: callId,
+        providerId,
+        title,
+        status: "running",
+      });
+      card.dataset.callId = callId;
+      card.dataset.streamingSubagent = "1";
+      if (args && typeof args === "object") card._toolArgs = args;
+      return card;
+    }
     const card = this.toolTerminal(
       { id: callId, name, ok: true, args },
       { open: true, running: true },
@@ -1437,7 +1914,22 @@ export class AgentConversationController {
   updateStreamingToolCard(card, payload) {
     if (card.classList.contains("agent-ask-card")) {
       this.sealAskCard(card, payload);
-      return;
+      return card;
+    }
+    if (card.dataset.streamingSubagent === "1" || card.classList.contains("agent-subagent-card")) {
+      const sealed = this.createSubagentToolCard({
+        id: payload.callId || card.dataset.callId,
+        name: "subagent",
+        ok: payload.ok !== false,
+        args: payload.args && typeof payload.args === "object" ? payload.args : card._toolArgs,
+        output: payload.output,
+        error: payload.error,
+      });
+      if (sealed) {
+        card.replaceWith(sealed);
+        return sealed;
+      }
+      return card;
     }
     card.classList.remove("is-running");
     card.classList.toggle("is-success", payload.ok !== false);
@@ -1464,16 +1956,31 @@ export class AgentConversationController {
           || (payload.ok === false ? "Tool failed." : "ok"),
       );
     }
+    return card;
   }
 
   sealStreamingToolCardsIncomplete(streamState) {
     if (!streamState?.toolCards) return;
-    for (const card of streamState.toolCards.values()) {
+    for (const [callId, card] of streamState.toolCards.entries()) {
       if (!card) continue;
       if (card.classList.contains("agent-ask-card")) {
         if (!card.classList.contains("is-sealed")) {
           card.classList.remove("is-pending", "is-submitting");
           card.classList.add("is-sealed", "is-error");
+        }
+        continue;
+      }
+      if (card.dataset.streamingSubagent === "1" || (card.classList.contains("agent-subagent-card") && card.querySelector(".agent-subagent-card-status.is-running"))) {
+        const sealed = this.createSubagentToolCard({
+          id: callId,
+          name: "subagent",
+          ok: false,
+          args: card._toolArgs,
+          error: "Subagent run did not finish before the parent turn ended.",
+        });
+        if (sealed) {
+          card.replaceWith(sealed);
+          streamState.toolCards.set(callId, sealed);
         }
         continue;
       }
@@ -1486,6 +1993,8 @@ export class AgentConversationController {
           output.classList.add("is-error");
           output.innerHTML = renderToolCodeHtml("Tool call did not complete (turn stopped).");
         }
+        const meta = card.querySelector(".agent-tool-terminal-meta");
+        if (meta) meta.textContent = "Incomplete";
       }
     }
   }
@@ -1727,7 +2236,9 @@ export class AgentConversationController {
   createAcpPermissionCard(payload) {
     if (!payload?.requestId || !this.answerAcpPermission) return null;
     const traceId = payload.traceId || this.activeTraceId;
-    const conversationId = this.conversation?.id;
+    // Prefer the ACP session conversationId from the event (subagent runs use
+    // `subagent:<runId>`, not the parent chat id).
+    const conversationId = payload.conversationId || this.conversation?.id;
     if (!conversationId) return null;
     const options = Array.isArray(payload.options) ? payload.options : [];
     if (options.length === 0) return null;
@@ -2158,6 +2669,18 @@ function formatTurnError(error) {
   const cause = typeof error?.details?.cause === "string" ? error.details.cause.trim() : "";
   if (!cause || message.includes(cause)) return message;
   return `${message}: ${cause}`;
+}
+
+/** Coerce subagent tool/event error payloads (string or `{message}`) for UI text. */
+function formatSubagentError(error) {
+  if (!error) return "";
+  if (typeof error === "string") return error;
+  if (typeof error === "object" && typeof error.message === "string" && error.message) return error.message;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
 }
 
 function iconButton(label, icon) {

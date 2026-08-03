@@ -128,7 +128,9 @@ export class BackgroundReviewScheduler {
 
       const mutations = this.detectMutations(result);
       if (mutations.length > 0) {
-        const summary = result.text?.trim() || `Review updated: ${mutations.join(", ")}`;
+        // Keep the event summary short for UI toasts — never dump the review
+        // model's full reply (often includes newly written skill markdown).
+        const summary = `Review updated: ${mutations.join(", ")}`;
         await this.deps.eventDispatcher.publish(
           createLearningUpdatedEvent(reviewTraceId, mutations, summary),
         );

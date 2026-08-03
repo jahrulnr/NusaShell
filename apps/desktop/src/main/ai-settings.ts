@@ -70,7 +70,7 @@ export class AiSettingsStore {
       apiKeyOptional: input.apiKeyOptional,
       enabled: input.enabled,
       defaultModel: input.defaultModel?.trim() ?? existing?.defaultModel ?? "",
-      timeoutMs: integerInRange(input.timeoutMs, 1000, 600_000, existing?.timeoutMs ?? 60_000),
+      timeoutMs: integerInRange(input.timeoutMs, 1000, 600_000, existing?.timeoutMs ?? defaultTimeoutForType(input.type)),
       maxAttempts: integerInRange(input.maxAttempts, 1, 10, existing?.maxAttempts ?? 1),
       weight: integerInRange(input.weight, 1, 100, existing?.weight ?? 1),
       models: existing?.models ?? [],
@@ -343,6 +343,10 @@ function integerInRange(value: number | undefined, min: number, max: number, fal
   return Number.isInteger(value) && (value ?? 0) >= min && (value ?? 0) <= max
     ? value as number
     : fallback;
+}
+
+function defaultTimeoutForType(type: string): number {
+  return type === "ollama" || type === "llamacpp" ? 180_000 : 60_000;
 }
 
 export type {

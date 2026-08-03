@@ -1,4 +1,4 @@
-# NusaShell
+<center><img src="./docs/assets/logo.png" alt="NusaShell"/></center>
 
 **A shell platform for AI tools - install plugins like you install desktop apps.**
 
@@ -79,45 +79,6 @@ Captured from the Electron desktop app (`make dev`):
 | ![Full demo of NusaShell](./docs/assets/screenshots/full-demo.gif) | ![Live chat with the NusaShell agent](./docs/assets/screenshots/live-chat.gif) |
 | Launch plugins, run an agent turn, and manage skills. | Chat with the agent. |
 
-## Documentation map
-
-| Doc | Role |
-| --- | --- |
-| [`AGENTS.md`](./AGENTS.md) | Agent/human working rules, architecture locks, versioning |
-| [`docs/blueprint.md`](./docs/blueprint.md) | Product concept: plugin shape, launcher UX, lifecycle, MCP transports, runtime trade-offs |
-| [`docs/backend-structure.md`](./docs/backend-structure.md) | Target backend: Clean Architecture monorepo, WebSocket protocol, package boundaries, MVP scope |
-| [`docs/architecture/agent-runtime.md`](./docs/architecture/agent-runtime.md) | Agent turn loop, provider routing, tool-call recovery, conversation/checkpoint model |
-| [`docs/architecture/agent-skills-platform-technical-spec.md`](./docs/architecture/agent-skills-platform-technical-spec.md) | Full technical spec for a general-purpose agent skills platform (draft, larger than the shipped subset) |
-| [`docs/architecture/local-agent-skills.md`](./docs/architecture/local-agent-skills.md) | Current, shipped boundary of the local managed skills library and its read-only meta-tools |
-| [`docs/architecture/agent-memory.md`](./docs/architecture/agent-memory.md) | Persistent agent memory (MEMORY.md + USER.md), snapshot injection, and the `memory` meta-tool |
-| [`docs/architecture/mcp-capability-policy.md`](./docs/architecture/mcp-capability-policy.md) | Which MCP protocol capabilities NusaShell implements now vs. defers, and the adoption gate |
-| [`docs/architecture/progressive-mcp-tools.md`](./docs/architecture/progressive-mcp-tools.md) | Shell-owned meta-tools used to keep MCP tool discovery bounded per agent turn |
-| [`docs/architecture/job-automation.md`](./docs/architecture/job-automation.md) | Scheduled durable jobs (one-shot/recurring) that fire headless agent turns or plugin tool calls |
-| [`docs/architecture/plugin-sandbox-readiness.md`](./docs/architecture/plugin-sandbox-readiness.md) | Files root-containment bundle guard, plugin process-death status SoT, and Tools=0 honesty mitigations |
-| [`docs/architecture/workspace-mcp-binding.md`](./docs/architecture/workspace-mcp-binding.md) | How `conversation.workspace` binds to MCP (wrap → Roots → respawn/enable overrides) |
-| [`docs/architecture/security-boundary.md`](./docs/architecture/security-boundary.md) | Explicit stance: NusaShell brokers MCP/AI; it does not vet plugin or model behavior |
-| [`docs/RISK.md`](./docs/RISK.md) | Residual risk register: agent MCP launch overrides (`npx` swap), advisory roots |
-| [`docs/INSTALL.md`](./docs/INSTALL.md) | User-space install, update channels, verification, and uninstall |
-| [`resources/agent/docs/data-locations.md`](./resources/agent/docs/data-locations.md) | In-app FAQ: OS-specific data roots, file inventory, and plugin locations |
-| [`resources/agent/docs/uninstall.md`](./resources/agent/docs/uninstall.md) | In-app FAQ: app uninstall versus plugin uninstall and data wipe |
-| [`resources/agent/docs/contribute.md`](./resources/agent/docs/contribute.md) | In-app FAQ: clone, prerequisites, development, tests, and PR norms |
-| [`resources/agent/docs/build-plugin.md`](./resources/agent/docs/build-plugin.md) | In-app FAQ: headed/windowed and headless MCP plugin authoring |
-| [`docs/mcp/nusashell-mail-mcp-plugin-spec.md`](./docs/mcp/nusashell-mail-mcp-plugin-spec.md) | Mail plugin protocol assessment, security model, and target tool contract |
-| [`docs/mcp/nusashell-mail-mcp-plugin-implementation.md`](./docs/mcp/nusashell-mail-mcp-plugin-implementation.md) | Implemented read-only Mail milestone, runtime wiring, and current limitations |
-| [`docs/PoC/`](./docs/PoC/) | Runnable zero-dep bridge demo (behavioral reference, not the target layout) |
-| [`docs/ui-design/`](./docs/ui-design/) | Instrument-workbench shell, Agent workspace, and Skills workspace visual contracts |
-
-
-## Prerequisites
-
-- **Node.js 20+** and **pnpm 11+**
-- **Native build tools** (required by `better-sqlite3`):
-  - Linux: `sudo apt install python3 make g++` (or distro equivalent)
-  - macOS: `xcode-select --install`
-  - Windows: `npm install --global windows-build-tools` or Visual Studio Build Tools
-
-
-
 ## Install
 
 Linux and macOS:
@@ -126,38 +87,21 @@ Linux and macOS:
 curl -fsSL https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/install.sh | bash
 ```
 
-Windows PowerShell: `irm https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/install.ps1 | iex`.
-See [Install NusaShell](./docs/INSTALL.md) for checksum verification, pinned versions, update behavior, and alternatives.
-
-### Development
-
-Requires Node.js 20+, pnpm 11+, and native build tools (see [Prerequisites](#prerequisites)).
+Windows PowerShell: 
 
 ```bash
-git clone https://github.com/jahrulnr/NusaShell.git nusashell
-cd nusashell
-pnpm install
-make dev
+irm https://raw.githubusercontent.com/jahrulnr/NusaShell/master/scripts/install.ps1 | iex
 ```
-
-## Continuous integration
-
-GitHub Actions runs the desktop/frontend tests and backend/package/plugin tests
-in parallel on Linux, Windows, and macOS with Node.js 24. Once every test matrix
-entry passes, Electron Forge builds native distributables on the same three
-platforms and stores them as workflow artifacts for 14 days.
-
-Pull requests and manual workflow runs stop after that build. A GitHub Release
-is created only on pushes to `master` (including merged PRs): it tags
-`v$(cat VERSION)`, attaches the install payloads (`latest.json`, tar.gz,
-checksums, and Forge artifacts), and uses the matching `CHANGELOG.md` section
-as release notes. If that tag already exists, publish is skipped until
-`VERSION` is bumped.
+See [Install NusaShell](./docs/INSTALL.md) for checksum verification, pinned versions, update behavior, and alternatives.
 
 Background learning (and future scheduled jobs) run only while NusaShell is
 running. Enable **Keep running when window is closed** under Settings →
 Startup & background so closing the window hides to the tray instead of
 quitting. Optional **Launch at login** is available on packaged builds.
+
+**Building from source or contributing?** See
+[`CONTRIBUTING.md`](./CONTRIBUTING.md) for the development setup, repository
+layout, and CI/release flow.
 
 ## Writing your own plugin
 
@@ -226,37 +170,13 @@ implemented domain, application, infrastructure, transport, contracts, and plugi
 packages; a backend composition root; and an Electron desktop shell. Architecture
 docs and the PoC under `docs/` remain authoritative for product intent.
 
-**Monorepo today:**
-
-- `packages/domain` — plugin identity, manifest, runtime state, lifecycle policies, tool-call model (Vitest-covered)
-- `packages/application` — command/query handlers, agent turn runner, prompt injection, docs tools
-- `packages/infrastructure` — SQLite, filesystem registry, MCP clients (stdio/HTTP/SSE), Pino logger, docs index
-- `packages/transport-ws` — WebSocket protocol, message router, session registry, event publisher
-- `packages/contracts` — Zod request/response/event schemas and DTOs
-- `packages/plugin-sdk` — `NusaClient` WebSocket client with reconnect
-- `packages/{shared,testing}` — shared test fakes and helpers
-- `apps/backend` — composition root wiring all layers
-- `apps/desktop` — Electron shell with launcher, plugin windows, agent workspace, AI provider settings
+The managed agent skills library includes builtin `mcp-creator` and
+`skill-creator` packages. `skill-creator` teaches progressive-disclosure skill
+authoring and optional MCP requirements; it does not add `skill_exec`.
 
 **Persistent logs:** System logs (backend, agent, plugin, MCP) are written to
 `userData/logs/nusashell.log` via Pino multistream (stdout + file append).
 The file survives restarts and is the primary source for post-incident debugging.
-
-**What the PoC demonstrates** (`docs/PoC/`):
-
-- Plugin discovery (folder scan), manifest parsing
-- Lazy MCP process spawning, one process per plugin, reused across calls
-- UI ↔ shell ↔ MCP bridge over a simple request/response protocol
-- Launcher UI with running-state indicators
-
-**Target stack** (partially scaffolded): Electron + TypeScript monorepo (pnpm),
-Clean Architecture packages, WebSocket client transport, official MCP TypeScript
-SDK, SQLite for installed-plugin metadata. Domain layer is in place; application
-and infrastructure are next.
-
-The managed agent skills library includes builtin `mcp-creator` and
-`skill-creator` packages. `skill-creator` teaches progressive-disclosure skill
-authoring and optional MCP requirements; it does not add `skill_exec`.
 
 **Security & responsibility model:** NusaShell is a broker and host for AI
 tools — not a security layer that certifies MCP servers or AI models. You
@@ -278,40 +198,33 @@ the host process; does not vet MCP/AI behavior — see security boundary above)
 - Installing from a packaged `.zip` instead of a raw folder
 - True multi-window support (PoC uses a single modal window)
 
+## Documentation map
 
-
-## Repo layout (today)
-
-```
-.
-├── AGENTS.md
-├── README.md
-├── VERSION
-├── CHANGELOG.md
-├── package.json
-├── pnpm-workspace.yaml
-├── tsconfig.base.json
-├── apps/
-│   ├── backend/               # composition root (bootstrap, container, shutdown)
-│   └── desktop/               # Electron shell (launcher, plugin windows, agent workspace)
-├── packages/
-│   ├── domain/                # implemented (plugin runtime, policies, events)
-│   ├── application/           # implemented (handlers, agent runner, prompts, docs tools)
-│   ├── infrastructure/        # implemented (SQLite, FS registry, MCP clients, logger)
-│   ├── transport-ws/          # implemented (WS protocol, router, sessions, events)
-│   ├── contracts/             # implemented (Zod schemas, DTOs)
-│   ├── plugin-sdk/            # implemented (NusaClient, reconnect)
-│   ├── shared/                # stub
-│   └── testing/               # test fakes and helpers
-└── docs/
-    ├── blueprint.md           # product / plugin architecture
-    ├── backend-structure.md   # target backend monorepo + WS protocol
-    ├── architecture/          # agent runtime, skills platform, MCP capability/tooling policy
-    ├── mcp/                   # Mail plugin protocol spec + implementation notes
-    ├── assets/screenshots/    # README screenshots of the running desktop app
-    ├── PoC/                   # runnable zero-dep bridge demo
-    └── ui-design/             # launcher, agent workspace, and skills workspace visual sketches
-```
-
-Further monorepo pieces (`plugins/`, full apps) are specified in
-[`docs/backend-structure.md`](./docs/backend-structure.md) §2 and land in later milestones.
+| Doc | Role |
+| --- | --- |
+| [`AGENTS.md`](./AGENTS.md) | Agent/human working rules, architecture locks, versioning |
+| [`CONTRIBUTING.md`](./CONTRIBUTING.md) | Setup, verification, and PR norms for contributors |
+| [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md) | Community standards (Contributor Covenant v2.1) |
+| [`SECURITY.md`](./SECURITY.md) | Vulnerability reporting and the security responsibility split |
+| [`docs/blueprint.md`](./docs/blueprint.md) | Product concept: plugin shape, launcher UX, lifecycle, MCP transports, runtime trade-offs |
+| [`docs/backend-structure.md`](./docs/backend-structure.md) | Target backend: Clean Architecture monorepo, WebSocket protocol, package boundaries, MVP scope |
+| [`docs/architecture/agent-runtime.md`](./docs/architecture/agent-runtime.md) | Agent turn loop, provider routing, tool-call recovery, conversation/checkpoint model |
+| [`docs/architecture/agent-skills-platform-technical-spec.md`](./docs/architecture/agent-skills-platform-technical-spec.md) | Full technical spec for a general-purpose agent skills platform (draft, larger than the shipped subset) |
+| [`docs/architecture/local-agent-skills.md`](./docs/architecture/local-agent-skills.md) | Current, shipped boundary of the local managed skills library and its read-only meta-tools |
+| [`docs/architecture/agent-memory.md`](./docs/architecture/agent-memory.md) | Persistent agent memory (MEMORY.md + USER.md), snapshot injection, and the `memory` meta-tool |
+| [`docs/architecture/mcp-capability-policy.md`](./docs/architecture/mcp-capability-policy.md) | Which MCP protocol capabilities NusaShell implements now vs. defers, and the adoption gate |
+| [`docs/architecture/progressive-mcp-tools.md`](./docs/architecture/progressive-mcp-tools.md) | Shell-owned meta-tools used to keep MCP tool discovery bounded per agent turn |
+| [`docs/architecture/job-automation.md`](./docs/architecture/job-automation.md) | Scheduled durable jobs (one-shot/recurring) that fire headless agent turns or plugin tool calls |
+| [`docs/architecture/plugin-sandbox-readiness.md`](./docs/architecture/plugin-sandbox-readiness.md) | Files root-containment bundle guard, plugin process-death status SoT, and Tools=0 honesty mitigations |
+| [`docs/architecture/workspace-mcp-binding.md`](./docs/architecture/workspace-mcp-binding.md) | How `conversation.workspace` binds to MCP (wrap → Roots → respawn/enable overrides) |
+| [`docs/architecture/security-boundary.md`](./docs/architecture/security-boundary.md) | Explicit stance: NusaShell brokers MCP/AI; it does not vet plugin or model behavior |
+| [`docs/RISK.md`](./docs/RISK.md) | Residual risk register: agent MCP launch overrides (`npx` swap), advisory roots |
+| [`docs/INSTALL.md`](./docs/INSTALL.md) | User-space install, update channels, verification, and uninstall |
+| [`resources/agent/docs/data-locations.md`](./resources/agent/docs/data-locations.md) | In-app FAQ: OS-specific data roots, file inventory, and plugin locations |
+| [`resources/agent/docs/uninstall.md`](./resources/agent/docs/uninstall.md) | In-app FAQ: app uninstall versus plugin uninstall and data wipe |
+| [`resources/agent/docs/contribute.md`](./resources/agent/docs/contribute.md) | In-app FAQ: clone, prerequisites, development, tests, and PR norms |
+| [`resources/agent/docs/build-plugin.md`](./resources/agent/docs/build-plugin.md) | In-app FAQ: headed/windowed and headless MCP plugin authoring |
+| [`docs/mcp/nusashell-mail-mcp-plugin-spec.md`](./docs/mcp/nusashell-mail-mcp-plugin-spec.md) | Mail plugin protocol assessment, security model, and target tool contract |
+| [`docs/mcp/nusashell-mail-mcp-plugin-implementation.md`](./docs/mcp/nusashell-mail-mcp-plugin-implementation.md) | Implemented read-only Mail milestone, runtime wiring, and current limitations |
+| [`docs/PoC/`](./docs/PoC/) | Runnable zero-dep bridge demo (behavioral reference, not the target layout) |
+| [`docs/ui-design/`](./docs/ui-design/) | Instrument-workbench shell, Agent workspace, and Skills workspace visual contracts |

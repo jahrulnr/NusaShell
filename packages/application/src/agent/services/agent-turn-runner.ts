@@ -72,6 +72,7 @@ export class AgentTurnRunner {
     const traceId = input.traceId ?? randomUUID();
     this.deps.toolGateway.beginTurn?.(traceId, {
       ...(input.interactive !== undefined ? { interactive: input.interactive } : {}),
+      ...(input.workspace !== undefined ? { workspace: input.workspace } : {}),
     });
     const cancelTools = () => {
       void this.deps.toolGateway.cancelTurn?.(traceId);

@@ -24,7 +24,14 @@ export async function runAcpTurn(prompt, options) {
       traceId: options.traceId,
       conversationId: options.conversationId,
       workspace: options.workspace,
-      provider: { providerId: selected.manifest.id, command: selected.config.command, args: selected.config.args, authMethodId: selected.manifest.authMethodId },
+      provider: {
+        providerId: selected.manifest.id,
+        command: selected.config.command,
+        args: selected.config.args,
+        ...(selected.config.authMethodId || selected.manifest.authMethodId
+          ? { authMethodId: selected.config.authMethodId || selected.manifest.authMethodId }
+          : {}),
+      },
       prompt,
     }, 1800000);
   } finally {

@@ -15,3 +15,12 @@ export type { AgentToolGateway, AgentTurnContext } from "./agent-tool-gateway.po
 export type { AgentPrompt, PromptLoaderPort, ReviewPromptKind } from "./prompt-loader.port.js";
 export type { ReviewState, ReviewStateStorePort } from "./review-state-store.port.js";
 export type { DocsHit, DocSummary, DocContent, DocsIndexPort } from "./docs-index.port.js";
+export type {
+  SubagentProviderCandidate,
+  SubagentResolveRequest,
+  SubagentResolveResult,
+  SubagentRunRequest,
+  SubagentRunResult,
+  SubagentPort,
+  AcpProviderResolverPort,
+} from "./subagent-port.js";

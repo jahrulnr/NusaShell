@@ -60,7 +60,16 @@ Same shape as jobs:
 - Schedule: `trigger: { kind: "schedule", schedule: "every 1h" }`
 - Event: `trigger: { kind: "event", pattern: "mail.new", pluginId: "nusashell.mail" }`
 
+Schedule timezone rules match jobs: cron hour/minute and bare timestamps are
+**UTC**. Convert the user's local clock time before writing a cron/ISO string.
+Full detail: `docs_read({ path: "jobs-howto.md" })` (Timezone rules section).
+
 ## Managing pipelines
+
+Call `pipeline` directly (no pipelines plugin to enable). Actions: `list`,
+`add`, `update`, `remove`, `run`. Always `list` before creating a duplicate.
+Plugin IDs / tool names / event patterns in examples are illustrative —
+confirm real capabilities via `mcp_list` / `tool_list` before wiring them.
 
 - `pipeline action=list` — see all pipelines with status, step count, trigger
 - `pipeline action=update id=... name=...` — edit any field

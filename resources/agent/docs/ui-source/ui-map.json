@@ -188,8 +188,6 @@
             "agent-conversations-title",
             "agent-conversation-count",
             "agent-new-conversation",
-            "agent-new-acp",
-            "agent-new-acp-menu",
             "agent-conversation-search",
             "agent-conversation-list",
             "agent-conversation-item"
@@ -202,7 +200,6 @@
           ],
           "controls": [
             "acp-status-bar",
-            "acp-status-label",
             "acp-status-provider",
             "acp-status-chip",
             "agent-thread",
@@ -451,7 +448,7 @@
         {
           "heading": "ACP agents",
           "paragraphs": [
-            "Registry of ACP (Agent Client Protocol) external agents. Enable and configure providers such as Cursor, Codex, Claude Code, and Gemini. Each card shows a Connect button that runs a one-shot acp.probe (spawn → initialize → authenticate → session/new → close) and persists authStatus as connected or needs-auth. The New ACP menu only lists connected providers."
+            "Registry of ACP (Agent Client Protocol) external agents. Enable and configure providers such as Cursor, Codex, Claude Code, and Gemini. Each card shows a Connect button that runs a one-shot acp.probe (spawn → initialize → authenticate → session/new → close) and persists authStatus as connected or needs-auth. Connected providers are available as subagent targets via the subagent tool from within an agent conversation."
           ],
           "controls": [
             "acp-provider-registry",
@@ -1604,6 +1601,25 @@
       "label": "Conversation thread",
       "type": "log region",
       "action": "Main scrollable message area for the current conversation. Auto-scrolls as new content arrives."
+    },
+    "acp-status-bar": {
+      "section": "Conversation thread",
+      "label": "ACP status bar (legacy)",
+      "type": "status bar",
+      "action": "Shows the ACP provider name and running/idle chip for legacy peer-chat ACP conversations. Only visible on conversations with kind='acp'.",
+      "notes": "Legacy. New ACP interactions use the subagent side pane, not peer-chat threads."
+    },
+    "acp-status-provider": {
+      "section": "Conversation thread",
+      "label": "ACP status provider",
+      "type": "label",
+      "action": "Shows the provider id for the current ACP peer-chat conversation."
+    },
+    "acp-status-chip": {
+      "section": "Conversation thread",
+      "label": "ACP status chip",
+      "type": "status chip",
+      "action": "Shows running/idle state for the current ACP peer-chat conversation."
     },
     "agent-empty": {
       "section": "Conversation thread",

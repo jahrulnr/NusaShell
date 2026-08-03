@@ -818,4 +818,54 @@ describe("OpenAiCompatibleAgentProvider", () => {
       model: "model",
     })).rejects.toThrow(/timed out/i);
   });
+
+  it("omits tool_choice for local providers that reject it (ollama/llamacpp)", async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      model: "llama3.2",
+      choices: [{ message: { content: "ok" } }],
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const provider = new OpenAiCompatibleAgentProvider({
+      id: "ollama",
+      api: "chat",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      fetchFn,
+      omitToolChoice: true,
+    });
+
+    await provider.complete({
+      traceId: "trace-ollama",
+      round: 1,
+      messages: [{ role: "user", content: "Hello" }],
+      tools: [{ name: "tool_search", inputSchema: { type: "object" } }],
+      model: "llama3.2",
+    });
+
+    const body = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body));
+    expect(body.tools).toHaveLength(1);
+    expect(body).not.toHaveProperty("tool_choice");
+  });
+
+  it("sends tool_choice by default for standard OpenAI-compatible providers", async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      model: "model",
+      choices: [{ message: { content: "ok" } }],
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const provider = new OpenAiCompatibleAgentProvider({
+      id: "openrouter",
+      api: "chat",
+      baseUrl: "https://openrouter.ai/api/v1",
+      fetchFn,
+    });
+
+    await provider.complete({
+      traceId: "trace-default",
+      round: 1,
+      messages: [{ role: "user", content: "Hello" }],
+      tools: [{ name: "tool_search", inputSchema: { type: "object" } }],
+      model: "model",
+    });
+
+    const body = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body));
+    expect(body.tool_choice).toBe("auto");
+  });
 });

@@ -411,6 +411,37 @@ export const AcpSessionStateEventSchema = z.object({
   }),
 });
 
+export const SubagentRunStartedEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("subagent.run_started"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    runId: z.string().min(1),
+    conversationId: z.string().min(1),
+    providerId: z.string().min(1),
+    prompt: z.string(),
+    title: z.string().optional(),
+    parentConversationId: z.string().optional(),
+    parentTraceId: z.string().optional(),
+    timestamp: z.string(),
+  }),
+});
+
+export const SubagentRunEndedEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("subagent.run_ended"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    runId: z.string().min(1),
+    conversationId: z.string().min(1),
+    providerId: z.string().min(1),
+    ok: z.boolean(),
+    summary: z.string().optional(),
+    error: z.string().optional(),
+    timestamp: z.string(),
+  }),
+});
+
 export const EventSchema = z.discriminatedUnion("event", [
   PluginInstalledEventSchema,
   PluginUninstalledEventSchema,
@@ -442,6 +473,8 @@ export const EventSchema = z.discriminatedUnion("event", [
   AcpAskRequestEventSchema,
   AcpTurnEndEventSchema,
   AcpSessionStateEventSchema,
+  SubagentRunStartedEventSchema,
+  SubagentRunEndedEventSchema,
 ]);
 
 export type PluginInstalledEvent = z.infer<typeof PluginInstalledEventSchema>;

@@ -31,6 +31,8 @@ export interface RunAgentTurnInput {
   readonly modelCapabilities?: AgentModelCapabilities;
   readonly traceId?: string;
   readonly interactive?: boolean;
+  /** Conversation workspace bound for tool I/O / subagent cwd. */
+  readonly workspace?: string;
   readonly signal?: AbortSignal;
   readonly onTextDelta?: (delta: string) => void;
   readonly onReasoningDelta?: (delta: string) => void;

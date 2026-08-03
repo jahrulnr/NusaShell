@@ -1,6 +1,6 @@
 import { createContainer, type Container } from "./container.js";
 import { ShutdownCoordinator } from "./shutdown.js";
-import { loadConfig, type AppConfig, type BackgroundReviewSettings } from "@nusashell/application";
+import { loadConfig, type AppConfig, type BackgroundReviewSettings, type AcpProviderResolverPort } from "@nusashell/application";
 import type { LogObserver } from "@nusashell/infrastructure";
 
 export interface BootstrapOptions {
@@ -16,6 +16,7 @@ export interface BootstrapOptions {
   readonly resolvePluginRuntimeEnvironment?: (
     pluginId: string,
   ) => Promise<Readonly<Record<string, string>>> | Readonly<Record<string, string>>;
+  readonly acpProviderResolver?: AcpProviderResolverPort;
 }
 
 export interface BootstrapResult {
@@ -67,6 +68,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     },
     ...(options.loggerObserver ? { loggerObserver: options.loggerObserver } : {}),
     ...(options.backgroundReview ? { backgroundReview: options.backgroundReview } : {}),
+    ...(options.acpProviderResolver ? { acpProviderResolver: options.acpProviderResolver } : {}),
   });
   const shutdown = new ShutdownCoordinator(container);
 

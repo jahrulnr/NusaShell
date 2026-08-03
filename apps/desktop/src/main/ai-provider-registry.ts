@@ -134,52 +134,277 @@ export async function importProviderModels(
   const baseUrl = provider.baseUrl.trim().replace(/\/+$/, "");
   if (!baseUrl) throw new Error("Provider base URL is required before importing models");
 
+  const isLocal = provider.type === "ollama" || provider.type === "llamacpp";
+  const importTimeout = isLocal ? 180_000 : 30_000;
   let target = new URL(`${baseUrl}/models`);
   const origin = target.origin;
   const visited = new Set<string>();
   const seen = new Set<string>();
   const models: AiModelSettings[] = [];
 
-  for (let page = 0; page < 10; page += 1) {
-    if (visited.has(target.toString())) break;
-    visited.add(target.toString());
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(new Error("Models import timed out")), 30_000);
-    let response: Response;
-    let payload: unknown;
-    try {
-      response = await fetchFn(target.toString(), {
-        method: "GET",
-        headers: {
-          accept: "application/json",
-          ...(provider.apiKey ? { authorization: `Bearer ${provider.apiKey}`, "x-api-key": provider.apiKey } : {}),
-          ...(provider.api === "messages" ? { "anthropic-version": "2023-06-01" } : {}),
-        },
-        signal: controller.signal,
-      });
-      if (!response.ok) throw new Error(`Models endpoint returned HTTP ${response.status}`);
-      payload = await readJsonLimited(response, 16 * 1024 * 1024);
-    } finally {
-      clearTimeout(timer);
-    }
-    const parsed = parseModelPage(payload);
-    for (const item of parsed.items) {
-      const raw = record(item);
-      if (text(raw.object) && text(raw.object).toLowerCase() !== "model") continue;
-      if (text(raw.type) && text(raw.type).toLowerCase() !== "model") continue;
-      const model = normalizeImportedModel(item);
-      if (!model || seen.has(model.id)) continue;
-      seen.add(model.id);
-      models.push(model);
-    }
-    if (!parsed.next) break;
+  try {
+    for (let page = 0; page < 10; page += 1) {
+      if (visited.has(target.toString())) break;
+      visited.add(target.toString());
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(new Error("Models import timed out")), importTimeout);
+      let response: Response;
+      let payload: unknown;
+      try {
+        response = await fetchFn(target.toString(), {
+          method: "GET",
+          headers: {
+            accept: "application/json",
+            ...(provider.apiKey ? { authorization: `Bearer ${provider.apiKey}`, "x-api-key": provider.apiKey } : {}),
+            ...(provider.api === "messages" ? { "anthropic-version": "2023-06-01" } : {}),
+          },
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error(`Models endpoint returned HTTP ${response.status}`);
+        payload = await readJsonLimited(response, 16 * 1024 * 1024);
+      } finally {
+        clearTimeout(timer);
+      }
+      const parsed = parseModelPage(payload);
+      for (const item of parsed.items) {
+        const raw = record(item);
+        if (text(raw.object) && text(raw.object).toLowerCase() !== "model") continue;
+        if (text(raw.type) && text(raw.type).toLowerCase() !== "model") continue;
+        const model = normalizeImportedModel(item);
+        if (!model || seen.has(model.id)) continue;
+        seen.add(model.id);
+        models.push(model);
+      }
+      if (!parsed.next) break;
 
-    const next = new URL(parsed.next, target);
-    if (next.origin !== origin) throw new Error("Models pagination cannot leave the provider origin");
-    target = next;
+      const next = new URL(parsed.next, target);
+      if (next.origin !== origin) throw new Error("Models pagination cannot leave the provider origin");
+      target = next;
+    }
+  } catch (error) {
+    if (provider.type === "ollama") {
+      const fallback = await importOllamaTags(origin, provider, fetchFn, importTimeout);
+      if (fallback.length > 0) {
+        for (const model of fallback) {
+          if (!seen.has(model.id)) { seen.add(model.id); models.push(model); }
+        }
+        await enrichOllamaModels(models, origin, provider, fetchFn);
+        return models.sort((left, right) => left.id.localeCompare(right.id));
+      }
+      throw wrapLocalImportError(error, provider, baseUrl);
+    }
+    if (provider.type === "llamacpp") throw wrapLocalImportError(error, provider, baseUrl);
+    throw error;
+  }
+
+  if (provider.type === "ollama" && models.length > 0) {
+    await enrichOllamaModels(models, origin, provider, fetchFn);
+  }
+  if (provider.type === "llamacpp" && models.length > 0) {
+    await enrichLlamaCppModels(models, origin, provider, fetchFn);
+  }
+
+  if (isLocal && models.length === 0) {
+    throw new Error(
+      provider.type === "ollama"
+        ? `No models reported by Ollama at ${baseUrl}. Pull a model with \`ollama pull <name>\` then retry Import.`
+        : `No models reported by llama.cpp at ${baseUrl}. For single-model mode pass \`-m model.gguf\`; for router use \`--models-dir\`.`,
+    );
   }
 
   return models.sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function wrapLocalImportError(error: unknown, provider: AiProviderSettings, baseUrl: string): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  if (provider.type === "ollama") {
+    return new Error(
+      `Cannot reach Ollama at ${baseUrl}. Is \`ollama serve\` running? (${message})`,
+    );
+  }
+  if (provider.type === "llamacpp") {
+    if (/401|auth|key/i.test(message)) {
+      return new Error(`llama.cpp API key rejected at ${baseUrl}. Clear the key or match \`--api-key\`. (${message})`);
+    }
+    return new Error(
+      `Cannot reach llama.cpp at ${baseUrl}. Start the server (e.g. \`llama-server -m model.gguf --port 8080 --jinja\`) or fix Base URL. (${message})`,
+    );
+  }
+  return error instanceof Error ? error : new Error(message);
+}
+
+async function importOllamaTags(
+  origin: string,
+  provider: AiProviderSettings,
+  fetchFn: typeof fetch,
+  timeoutMs: number,
+): Promise<AiModelSettings[]> {
+  const tagsUrl = `${origin}/api/tags`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error("Ollama /api/tags timed out")), timeoutMs);
+  try {
+    const response = await fetchFn(tagsUrl, {
+      method: "GET",
+      headers: { accept: "application/json", ...(provider.apiKey ? { authorization: `Bearer ${provider.apiKey}` } : {}) },
+      signal: controller.signal,
+    });
+    if (!response.ok) return [];
+    const payload = await readJsonLimited(response, 16 * 1024 * 1024);
+    const root = record(payload);
+    const items = Array.isArray(root.models) ? root.models : [];
+    return items.map((item): AiModelSettings | null => {
+      const raw = record(item);
+      const id = text(raw.name).trim();
+      if (!id) return null;
+      return {
+        id,
+        label: id,
+        task: "chat",
+        inputModes: ["text"],
+        outputModes: ["text"],
+        supportedEfforts: [],
+        defaultEffort: "auto",
+        supportsTools: true,
+      };
+    }).filter((model): model is AiModelSettings => model !== null);
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function enrichOllamaModels(
+  models: AiModelSettings[],
+  origin: string,
+  provider: AiProviderSettings,
+  fetchFn: typeof fetch,
+): Promise<void> {
+  for (let index = 0; index < models.length; index += 1) {
+    const model = models[index];
+    if (!model) continue;
+    try {
+      const enriched = await fetchOllamaShow(origin, provider, model.id, fetchFn);
+      if (!enriched) continue;
+      models[index] = { ...model, ...enriched };
+    } catch {
+      // Best-effort enrich: keep the model without capability fields.
+    }
+  }
+}
+
+type ModelEnrich = {
+  readonly supportsVision?: boolean;
+  readonly supportsTools?: boolean;
+  readonly contextWindow?: number;
+};
+
+async function fetchOllamaShow(
+  origin: string,
+  provider: AiProviderSettings,
+  modelId: string,
+  fetchFn: typeof fetch,
+): Promise<ModelEnrich | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error("Ollama /api/show timed out")), 30_000);
+  try {
+    const response = await fetchFn(`${origin}/api/show`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+        ...(provider.apiKey ? { authorization: `Bearer ${provider.apiKey}` } : {}),
+      },
+      body: JSON.stringify({ model: modelId }),
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+    const payload = await readJsonLimited(response, 8 * 1024 * 1024);
+    const root = record(payload);
+    const capabilities = record(root.capabilities);
+    const capabilitiesList = Array.isArray(root.capabilities) ? root.capabilities as unknown[] : [];
+    const parameters = record(root.parameters);
+    const modelInfo = record(root.model_info);
+    const supportsVision = capabilitiesList.some((cap) => text(cap).toLowerCase() === "vision")
+      || text(capabilities.vision).toLowerCase() === "true"
+      || undefined;
+    const supportsTools = capabilitiesList.some((cap) => text(cap).toLowerCase() === "tools")
+      || text(capabilities.tools).toLowerCase() === "true"
+      || undefined;
+    const numCtx = positiveInteger(parameters.num_ctx)
+      || findContextLength(modelInfo)
+      || 0;
+    return {
+      ...(supportsVision !== undefined ? { supportsVision: supportsVision === true } : {}),
+      ...(supportsTools !== undefined ? { supportsTools: supportsTools === true } : {}),
+      ...(numCtx > 0 ? { contextWindow: numCtx } : {}),
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function findContextLength(modelInfo: Record<string, unknown>): number {
+  for (const value of Object.values(modelInfo)) {
+    if (typeof value === "number" && value > 0) continue;
+    const str = text(value).toLowerCase();
+    if (str.includes("context_length") || str.includes("context_length")) {
+      const match = str.match(/(\d{3,})/);
+      if (match) return positiveInteger(Number(match[1]));
+    }
+  }
+  return 0;
+}
+
+async function enrichLlamaCppModels(
+  models: AiModelSettings[],
+  origin: string,
+  provider: AiProviderSettings,
+  fetchFn: typeof fetch,
+): Promise<void> {
+  // Try GET /props for vision + n_ctx (best-effort, shared across all models).
+  let propsVision: boolean | undefined;
+  let propsNctx: number | undefined;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new Error("llama.cpp /props timed out")), 30_000);
+    let response: Response;
+    try {
+      response = await fetchFn(`${origin}/props`, {
+        method: "GET",
+        headers: { accept: "application/json", ...(provider.apiKey ? { authorization: `Bearer ${provider.apiKey}` } : {}) },
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (response.ok) {
+      const payload = await readJsonLimited(response, 8 * 1024 * 1024);
+      const root = record(payload);
+      const modalities = record(root.modalities);
+      if (typeof modalities.vision === "boolean") propsVision = modalities.vision;
+      else if (Array.isArray(root.modalities) && (root.modalities as unknown[]).some((m) => text(m).toLowerCase() === "vision")) propsVision = true;
+      const defaultGen = record(root.default_generation_settings);
+      propsNctx = positiveInteger(defaultGen.n_ctx) || undefined;
+    }
+  } catch {
+    // Best-effort: skip props enrich.
+  }
+
+  for (let index = 0; index < models.length; index += 1) {
+    const model = models[index];
+    if (!model) continue;
+    const contextWindow = model.contextWindow ?? propsNctx;
+    const supportsVision = model.supportsVision ?? propsVision;
+    models[index] = {
+      ...model,
+      ...(contextWindow ? { contextWindow } : {}),
+      ...(supportsVision !== undefined ? { supportsVision } : {}),
+      ...(model.supportsTools === undefined ? { supportsTools: true } : {}),
+    };
+  }
 }
 
 async function readJsonLimited(response: Response, maxBytes: number): Promise<unknown> {
@@ -257,10 +482,10 @@ function normalizeImportedModel(value: unknown): AiModelSettings | null {
 
   return {
     id,
-    label: text(item.display_name) || text(item.name) || id,
+    label: text(item.display_name) || text(item.name) || basenameLabel(id),
     task: normalizeTask(text(item.task), text(item.type)),
-    ...(positiveInteger(item.context_length) || positiveInteger(item.max_input_tokens)
-      ? { contextWindow: positiveInteger(item.context_length) || positiveInteger(item.max_input_tokens) } : {}),
+    ...(positiveInteger(item.context_length) || positiveInteger(item.max_input_tokens) || metaContextWindow(item.meta)
+      ? { contextWindow: positiveInteger(item.context_length) || positiveInteger(item.max_input_tokens) || metaContextWindow(item.meta) } : {}),
     ...(positiveInteger(item.max_tokens) ? { maxOutput: positiveInteger(item.max_tokens) } : {}),
     inputModes,
     outputModes,
@@ -407,6 +632,17 @@ function addUnique(values: string[], value: string): void {
 
 function positiveInteger(value: unknown): number {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : 0;
+}
+
+function basenameLabel(id: string): string {
+  if (!id.includes("/") && !id.includes("\\")) return id;
+  const parts = id.replace(/\\/g, "/").split("/").filter(Boolean);
+  return parts[parts.length - 1] || id;
+}
+
+function metaContextWindow(meta: unknown): number {
+  const record = typeof meta === "object" && meta !== null && !Array.isArray(meta) ? meta as Record<string, unknown> : {};
+  return positiveInteger(record.n_ctx) || positiveInteger(record.n_ctx_train) || positiveInteger(record.context_length) || 0;
 }
 
 function text(value: unknown): string {

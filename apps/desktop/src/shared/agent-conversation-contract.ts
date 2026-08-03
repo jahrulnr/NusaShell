@@ -64,6 +64,34 @@ export interface AgentCanvasArtifact {
   readonly updatedAt: string;
 }
 
+export type AgentSubagentRunStatus = "running" | "ok" | "fail" | "cancelled";
+
+/** Chronological subagent stream segments for side-pane replay. */
+export type AgentSubagentStreamStep =
+  | AgentConversationStep
+  | {
+      readonly type: "plan";
+      readonly steps: readonly { readonly text: string; readonly done?: boolean }[];
+    };
+
+export interface AgentSubagentRun {
+  readonly id: string;
+  readonly conversationId: string;
+  readonly sourceMessageId: string;
+  readonly runId: string;
+  readonly providerId: string;
+  readonly title?: string;
+  readonly prompt: string;
+  readonly status: AgentSubagentRunStatus;
+  readonly summary?: string;
+  readonly error?: string;
+  readonly attempted?: readonly string[];
+  /** Persisted live stream (text / reasoning / tools / plan) for review after the run. */
+  readonly steps?: readonly AgentSubagentStreamStep[];
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
 export interface AgentConversation {
   readonly id: string;
   readonly title: string;
@@ -76,6 +104,8 @@ export interface AgentConversation {
   readonly acp?: AgentConversationAcp;
   readonly canvasArtifacts?: readonly AgentCanvasArtifact[];
   readonly activeCanvasArtifactId?: string;
+  readonly subagentRuns?: readonly AgentSubagentRun[];
+  readonly activeSubagentRunId?: string;
 }
 
 export type AgentConversationSummary = Omit<AgentConversation, "messages" | "checkpoint"> & {

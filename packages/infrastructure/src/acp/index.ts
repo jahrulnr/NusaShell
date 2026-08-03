@@ -1,1 +1,1 @@
-export { AcpJsonRpcClient } from "./acp-json-rpc-client.js";
+export { AcpJsonRpcClient, summarizeToolUpdate } from "./acp-json-rpc-client.js";

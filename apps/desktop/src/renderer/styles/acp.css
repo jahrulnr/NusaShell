@@ -1,25 +1,4 @@
 /* ============ ACP surface (Agent Client Protocol) ============ */
-.agent-new-acp {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--accent);
-  border-radius: 7px;
-  background: var(--accent-soft);
-  color: #8db2ff;
-  cursor: pointer;
-  font: 10px/1 'Inter', sans-serif;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-}
-.agent-new-acp:hover, .agent-new-acp:focus-visible { background: var(--accent); color: #fff; outline: none; }
-.agent-new-acp-wrap { position: relative; }
-.agent-new-acp-menu { position: absolute; z-index: 25; right: 0; top: calc(100% + 6px); min-width: 150px; border: 1px solid var(--border); border-radius: 9px; padding: 6px; background: #0b121a; box-shadow: 0 14px 45px rgba(0,0,0,.55); }
-.agent-new-acp-menu button { display: block; width: 100%; border: 0; border-radius: 6px; padding: 7px 10px; background: transparent; color: var(--text); text-align: left; font: 12px 'Inter', sans-serif; cursor: pointer; }
-.agent-new-acp-menu button:hover { background: var(--accent-soft); }
-.agent-new-acp-menu .disabled { color: var(--text-faint); cursor: default; }
 
 .acp-agents-header { margin: 24px 0 12px; }
 .acp-agents-header .agent-kicker { display: inline-flex; }

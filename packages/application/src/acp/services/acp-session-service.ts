@@ -24,6 +24,7 @@ import type { AcpPermissionService } from "./acp-permission-service.js";
 import type { AcpAskBridgeService } from "./acp-ask-bridge-service.js";
 import type { StreamSeqRegistry } from "../../agent/services/stream-seq-registry.js";
 import type { ApplicationEvent } from "../../events/event-dispatcher.js";
+import { resolveAgentWorkspace } from "../../agent/services/resolve-agent-workspace.js";
 
 export interface AcpSessionInfo {
   readonly conversationId: string;
@@ -78,7 +79,7 @@ export class AcpSessionService {
     workspace: string | undefined,
     provider: AcpProviderDescriptor,
   ): Promise<AcpSessionInfo | null> {
-    const cwd = workspace ?? process.cwd();
+    const cwd = resolveAgentWorkspace(workspace, undefined);
     const existing = this.sessions.get(conversationId);
     if (existing && sameProvider(existing.provider, provider) && existing.workspace === cwd) {
       return this.getSessionInfo(conversationId);
@@ -121,7 +122,7 @@ export class AcpSessionService {
     provider: AcpProviderDescriptor,
     prompt: readonly AcpContentBlock[],
   ): Promise<void> {
-    const cwd = workspace ?? process.cwd();
+    const cwd = resolveAgentWorkspace(workspace, undefined);
     const existing = this.sessions.get(conversationId);
 
     if (!existing || !sameProvider(existing.provider, provider) || existing.workspace !== cwd) {

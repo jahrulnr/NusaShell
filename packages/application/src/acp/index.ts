@@ -17,6 +17,9 @@ export type {
   AcpClientPort,
   AcpConfigOption,
   AcpConfigOptionValue,
+  AcpResolverCandidate,
+  AcpResolverResult,
+  AcpProviderResolverPort,
 } from "./ports/index.js";
 export type { AcpSessionInfo, AcpSessionServiceDeps } from "./services/index.js";
 export { AcpSessionService, AcpPermissionService, AcpAskBridgeService } from "./services/index.js";

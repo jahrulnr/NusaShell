@@ -18,3 +18,4 @@ export type {
   AcpConfigOption,
   AcpConfigOptionValue,
 } from "./acp-client.port.js";
+export type { AcpResolverCandidate, AcpResolverResult, AcpProviderResolverPort } from "./acp-provider-resolver.port.js";

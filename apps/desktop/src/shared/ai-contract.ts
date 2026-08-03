@@ -5,6 +5,8 @@ export type AiProviderType =
   | "9router"
   | "openai"
   | "claude"
+  | "ollama"
+  | "llamacpp"
   | "openai-compatible";
 export type AiProviderApi = "chat" | "responses" | "messages";
 

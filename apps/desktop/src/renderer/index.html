@@ -193,10 +193,6 @@
               <button class="agent-new-conversation" id="agent-new-conversation" type="button" aria-label="New conversation" title="New conversation">
                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
               </button>
-              <div class="agent-new-acp-wrap">
-                <button class="agent-new-acp" id="agent-new-acp" type="button" aria-label="New ACP thread" title="New ACP thread" hidden>+ ACP</button>
-                <div class="agent-new-acp-menu" id="agent-new-acp-menu" hidden></div>
-              </div>
             </div>
             <label class="agent-conversation-search"><span aria-hidden="true">⌕</span><input id="agent-conversation-search" type="search" placeholder="Search conversations…" autocomplete="off"></label>
             <div class="agent-conversation-list" id="agent-conversation-list" role="list"></div>
@@ -270,6 +266,23 @@
             </div>
             <div class="agent-canvas-body" id="agent-canvas-body" aria-live="polite"></div>
             <p class="agent-canvas-hint" id="agent-canvas-hint" hidden></p>
+        </aside>
+
+        <div class="agent-subpane-overlay" id="agent-subpane-overlay" hidden></div>
+        <aside class="agent-subpane" id="agent-subpane" role="dialog" aria-modal="true" aria-labelledby="agent-subpane-title" hidden>
+            <div class="agent-subpane-head">
+              <div class="agent-subpane-head-meta">
+                <span class="agent-subpane-badge" id="agent-subpane-badge">—</span>
+                <span class="agent-subpane-title" id="agent-subpane-title">Subagent</span>
+                <span class="agent-subpane-status" id="agent-subpane-status">● IDLE</span>
+              </div>
+              <div class="agent-subpane-actions">
+                <button class="agent-subpane-btn" id="agent-subpane-close" type="button" aria-label="Close subagent pane" title="Close">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="agent-subpane-body" id="agent-subpane-body" aria-live="polite"></div>
         </aside>
         <div class="agent-delete-overlay" id="agent-delete-overlay" hidden></div>
         <div class="agent-delete-dialog" id="agent-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="agent-delete-title" hidden>
@@ -454,6 +467,8 @@
           <article class="provider-registry-card accent-9r" data-provider-preset="9router"><div class="provider-card-head"><span class="provider-mark">9R</span><div><h2>9Router</h2><p>LOCAL · CHAT</p></div><button type="button" class="provider-toggle" aria-label="Enable 9Router" disabled>●</button></div><p>Local 9Router gateway using its OpenAI-compatible endpoint.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
           <article class="provider-registry-card accent-oa" data-provider-preset="openai"><div class="provider-card-head"><span class="provider-mark">OA</span><div><h2>OpenAI</h2><p>API KEY · RESPONSES</p></div><button type="button" class="provider-toggle" aria-label="Enable OpenAI" disabled>●</button></div><p>Official OpenAI Responses API with native tool-call mapping.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
           <article class="provider-registry-card accent-ai" data-provider-preset="claude"><div class="provider-card-head"><span class="provider-mark">AI</span><div><h2>Claude API</h2><p>API KEY · MESSAGES</p></div><button type="button" class="provider-toggle" aria-label="Enable Claude API" disabled>●</button></div><p>Official Anthropic Messages API with native tool-use mapping.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
+          <article class="provider-registry-card accent-ol" data-provider-preset="ollama"><div class="provider-card-head"><span class="provider-mark">OL</span><div><h2>Ollama</h2><p>LOCAL · CHAT</p></div><button type="button" class="provider-toggle" aria-label="Enable Ollama" disabled>●</button></div><p>Local Ollama OpenAI-compatible API. Start <code>ollama serve</code> then Import models.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
+          <article class="provider-registry-card accent-lc" data-provider-preset="llamacpp"><div class="provider-card-head"><span class="provider-mark">LC</span><div><h2>llama.cpp</h2><p>LOCAL · CHAT</p></div><button type="button" class="provider-toggle" aria-label="Enable llama.cpp" disabled>●</button></div><p>Local llama-server OpenAI-compatible API. Start <code>llama-server -m model.gguf --port 8080 --jinja</code> then Import models.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
         </div>
         <div class="acp-agents-header"><div class="agent-kicker"><span class="agent-kicker-dot"></span> ACP Agents</div><p class="subtitle">External agent partners that run over the Agent Client Protocol.</p></div>
         <div class="provider-registry" id="acp-provider-registry" role="list"></div>

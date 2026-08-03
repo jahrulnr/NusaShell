@@ -27,6 +27,7 @@ import {
   type BackgroundReviewSettings,
   type JobSchedulerSettings,
   type AiConfigurationPort,
+  type AcpProviderResolverPort,
 } from "@nusashell/application";
 import {
   MessageRouter,
@@ -41,6 +42,7 @@ import {
   createAcpRuntime,
   registerBuses,
   createTransport,
+  SubagentPortImpl,
   type AgentRuntimeParts,
 } from "./composers/index.js";
 
@@ -97,6 +99,8 @@ export interface ContainerOptions {
   };
   readonly backgroundReview?: Partial<BackgroundReviewSettings>;
   readonly jobs?: Partial<JobSchedulerSettings>;
+  /** Desktop-side ACP provider resolver (for subagent routing). */
+  readonly acpProviderResolver?: AcpProviderResolverPort;
 }
 
 export interface Container {
@@ -130,6 +134,7 @@ export interface Container {
     apiKey?: string;
     timeoutMs?: number;
     maxAttempts?: number;
+    omitToolChoice?: boolean;
   }): void;
   configureAiRuntime(settings: {
     strategy: "failover" | "round-robin" | "switch";
@@ -173,6 +178,9 @@ export function createContainer(options: ContainerOptions): Container {
     agent.agentToolGateway.bindPipelines(jobs.pipelineStore, jobs.pipelineScheduler);
   }
   const acp = createAcpRuntime(options, logger, eventDispatcher, agent);
+  if (options.acpProviderResolver) {
+    agent.agentToolGateway.bindSubagent(new SubagentPortImpl(options.acpProviderResolver, acp.acpSessionService, eventDispatcher, logger));
+  }
 
   const aiConfiguration = createAiConfiguration(options, logger, agent);
   const buses = registerBuses(options, logger, eventDispatcher, clock, plugin, skills, agent, jobs, acp, aiConfiguration);
@@ -261,6 +269,7 @@ function createAiConfiguration(
           : options.ai?.timeoutMs !== undefined
             ? { timeoutMs: options.ai.timeoutMs }
             : {}),
+        ...(settings.omitToolChoice ? { omitToolChoice: true } : {}),
       }));
     },
     removeAi(providerId) {

@@ -421,22 +421,12 @@ export class AcpJsonRpcClient implements AcpClientPort {
         break;
       }
       case "tool_call_update": {
-        const content = update.content as unknown;
-        let summary: string | undefined;
-        if (Array.isArray(content)) {
-          for (const item of content) {
-            if (typeof item === "object" && item !== null) {
-              const c = (item as Record<string, unknown>).content as Record<string, unknown> | undefined;
-              if (c && typeof c.text === "string") { summary = c.text; break; }
-            }
-          }
-        }
         session.sink.publish({
           type: "acp.tool_call_update",
           traceId,
           callId: String(update.toolCallId ?? ""),
           status: toolStatusFrom(update.status as string | undefined),
-          summary,
+          summary: summarizeToolUpdate(update),
         });
         break;
       }
@@ -489,8 +479,62 @@ function toToolCall(update: Record<string, unknown>): AcpToolCall {
     kind: toolKindFrom(update.kind as string | undefined),
     status: toolStatusFrom(update.status as string | undefined),
     summary: "",
-    rawInput: update.rawInput,
+    rawInput: normalizeToolRawInput(update),
   };
+}
+
+/**
+ * Cursor often sends empty `rawInput` for read/edit; shell tools put the
+ * command in `rawInput.command` or in a backticked `title`. Prefer whatever
+ * is useful for the UI args panel.
+ */
+function normalizeToolRawInput(update: Record<string, unknown>): unknown {
+  const raw = update.rawInput;
+  if (raw && typeof raw === "object" && !Array.isArray(raw) && Object.keys(raw as object).length > 0) {
+    return raw;
+  }
+  const title = typeof update.title === "string" ? update.title.trim() : "";
+  if (title.startsWith("`") && title.endsWith("`") && title.length > 2) {
+    return { command: title.slice(1, -1) };
+  }
+  if (typeof raw === "object" && raw !== null) return raw;
+  return {};
+}
+
+/**
+ * Build a short UI summary from Cursor/Codex tool_call_update payloads.
+ * Prefer path (diff), then stdout/stderr, then nested text content.
+ */
+export function summarizeToolUpdate(update: Record<string, unknown>): string | undefined {
+  const content = update.content;
+  if (Array.isArray(content)) {
+    for (const item of content) {
+      if (typeof item !== "object" || item === null) continue;
+      const rec = item as Record<string, unknown>;
+      if (rec.type === "diff" && typeof rec.path === "string" && rec.path.trim()) {
+        return rec.path.trim();
+      }
+      const nested = rec.content as Record<string, unknown> | undefined;
+      if (nested && typeof nested.text === "string" && nested.text.trim()) {
+        return nested.text.trim().slice(0, 2_000);
+      }
+      if (typeof rec.text === "string" && rec.text.trim()) {
+        return rec.text.trim().slice(0, 2_000);
+      }
+    }
+  }
+
+  const rawOutput = update.rawOutput;
+  if (typeof rawOutput === "string" && rawOutput.trim()) {
+    return rawOutput.trim().slice(0, 2_000);
+  }
+  if (typeof rawOutput === "object" && rawOutput !== null) {
+    const out = rawOutput as Record<string, unknown>;
+    if (typeof out.stdout === "string" && out.stdout.trim()) return out.stdout.trim().slice(0, 2_000);
+    if (typeof out.stderr === "string" && out.stderr.trim()) return out.stderr.trim().slice(0, 2_000);
+    if (typeof out.content === "string" && out.content.trim()) return out.content.trim().slice(0, 2_000);
+  }
+  return undefined;
 }
 
 function parsePermissionRequest(params: Record<string, unknown>): AcpPermissionRequest {

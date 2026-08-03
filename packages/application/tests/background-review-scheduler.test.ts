@@ -34,6 +34,7 @@ function makeFakePromptLoader(): PromptLoaderPort {
   return {
     async loadPrompts() { return []; },
     async loadCompactPrompt() { return undefined; },
+    async loadSubagentPrompt() { return undefined; },
     async loadReviewPrompt(kind: ReviewPromptKind) { return prompts[kind]; },
   };
 }

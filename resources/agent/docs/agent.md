@@ -6,7 +6,7 @@ The shell-wide agent can control plugins, answer questions about NusaShell, and 
 
 1. Static system prompts (`system.md`, `mcp-tools.md`, `developer.md`) are injected before the conversation messages.
 2. The developer prompt includes runtime context such as `{{current_date}}`, `{{environment}}`, `{{workspace}}`, and `{{available_tools}}`.
-3. The selected conversation workspace is prompt context only — it is not injected into MCP tool arguments, environment variables, or plugin working directories. The agent must pass absolute paths explicitly to tools that need them.
+3. The conversation workspace is the source of truth for agent tool I/O: bundled Terminal/Files calls are workspace-bound, and `subagent` uses it as the ACP cwd (user home when unset). Prefer absolute paths in prompts when location matters; read `workspace` from the `subagent` tool result before telling the user where files went.
 4. If the context window grows too large, older turns are compacted into a summary using `compact.md`.
 
 ## Compaction

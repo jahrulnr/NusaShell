@@ -19,6 +19,8 @@ import { AppUpdater } from "./updater.js";
 import { loadConfig, type StartPluginCommand } from "@nusashell/application";
 import { AiSettingsStore, type AiRegistrySettings } from "./ai-settings.js";
 import { AcpProviderStore } from "./acp-provider-store.js";
+import { AcpProviderResolverAdapter } from "./acp-provider-resolver-adapter.js";
+import { refreshAcpAuthStatuses } from "./acp-auth.js";
 import { flattenModelCatalog } from "./ai-provider-registry.js";
 import { AgentConversationStore } from "./agent-conversation-store.js";
 import { MailSettingsStore } from "./mail-settings.js";
@@ -139,6 +141,7 @@ function configureProvider(target: BootstrapResult, provider: AiRegistrySettings
     ...(provider.defaultModel ? { model: provider.defaultModel } : {}),
     timeoutMs: provider.timeoutMs,
     maxAttempts: provider.maxAttempts,
+    omitToolChoice: provider.type === "ollama" || provider.type === "llamacpp",
   });
 }
 
@@ -210,6 +213,7 @@ async function startBackend(): Promise<BootstrapResult> {
       const source: ShellLogSource = /\bmcp\b|stdio/i.test(message) ? "mcp" : "backend";
       logTail.add(source, toShellLogLevel(level), message);
     },
+    acpProviderResolver: new AcpProviderResolverAdapter(acpProviderStore!),
   });
   for (const provider of aiSettings.providers) configureProvider(result, provider);
   return result;
@@ -272,7 +276,10 @@ function createIpcContext(): IpcContext {
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   agentConversationStore = new AgentConversationStore(resolve(app.getPath("userData"), "agent-conversations.json"));
-  acpProviderStore = new AcpProviderStore(resolve(app.getPath("userData"), "acp-providers.json"));
+  acpProviderStore = new AcpProviderStore(
+    resolve(app.getPath("userData"), "acp-providers.json"),
+    resolve(app.getPath("userData"), "acp-routing.json"),
+  );
   appBehaviorStore = new AppBehaviorStore(resolve(app.getPath("userData"), "app-behavior.json"));
   appBehavior = await appBehaviorStore.load();
   loginAutostart = createLoginAutostart({
@@ -328,6 +335,16 @@ app.whenReady().then(async () => {
   registerPluginsIpc(ctx);
   registerNativeMcpIpc(ctx);
   registerShellIpc(ctx);
+
+  // Restore Connected badges from CLI file auth (no browser). Runs after the
+  // command bus is up; failures stay silent and never downgrade a prior status.
+  if (backend) {
+    void refreshAcpAuthStatuses(
+      acpProviderStore,
+      backend.container.commandBus,
+      (message) => logTail.add("main", "info", message),
+    );
+  }
 
   logTail.subscribe((entry) => {
     for (const window of BrowserWindow.getAllWindows()) {

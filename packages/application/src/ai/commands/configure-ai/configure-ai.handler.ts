@@ -16,6 +16,7 @@ export class ConfigureAiHandler implements CommandHandler<ConfigureAiCommand> {
       ...(command.apiKey !== undefined ? { apiKey: command.apiKey } : {}),
       ...(command.timeoutMs !== undefined ? { timeoutMs: command.timeoutMs } : {}),
       ...(command.maxAttempts !== undefined ? { maxAttempts: command.maxAttempts } : {}),
+      ...(command.omitToolChoice !== undefined ? { omitToolChoice: command.omitToolChoice } : {}),
     });
   }
 }

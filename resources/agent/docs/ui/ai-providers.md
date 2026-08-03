@@ -44,7 +44,7 @@ Button to create a new custom OpenAI-compatible provider.
 
 ## ACP agents
 
-Registry of ACP (Agent Client Protocol) external agents. Enable and configure providers such as Cursor, Codex, Claude Code, and Gemini. Each card shows a Connect button that runs a one-shot acp.probe (spawn → initialize → authenticate → session/new → close) and persists authStatus as connected or needs-auth. The New ACP menu only lists connected providers.
+Registry of ACP (Agent Client Protocol) external agents. Enable and configure providers such as Cursor, Codex, Claude Code, and Gemini. Each card shows a Connect button that runs a one-shot acp.probe (spawn → initialize → authenticate → session/new → close) and persists authStatus as connected or needs-auth. Connected providers are available as subagent targets via the subagent tool from within an agent conversation.
 
 - **`#acp-provider-registry`** (missing map entry)
 

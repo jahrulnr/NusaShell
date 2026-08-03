@@ -95,17 +95,35 @@ extension by implementing `AcpProviderExtension` and registering it in
    `authMethodId` **and** the provider advertised it. If `authenticate` fails
    (e.g. missing `CODEX_API_KEY`), the client **soft-fails**: logs a warning and
    proceeds to `session/new`. This lets Codex fall back to an existing
-   `~/.codex` ChatGPT token without an API key.
+   `~/.codex` ChatGPT token without an API key. Cursor likewise prefers
+   existing `~/.config/cursor` CLI login and does **not** default to
+   `cursor_login` (that would open a browser OAuth on every session).
 3. If `authMethodId` is set but not advertised, the handshake hard-fails with
    `ACP_PROVIDER_FAILED` (the configured auth method is unavailable).
 4. `session/new` — open the session.
 
 The AI Providers → ACP Agents card exposes a **Connect** button that runs a
-one-shot `acp.probe` (spawn → initialize → optional authenticate → session/new
-→ close). The result is persisted on the provider config as `authStatus`
-(`connected` | `needs-auth`), `authCheckedAt`, and `authError`. The New ACP
-menu only lists providers whose `authStatus` is `connected`, so users cannot
-start a thread against an unauthenticated provider.
+two-phase probe:
+
+1. **File auth first** — spawn → initialize → `session/new` → close, with
+   **no** `authMethodId`. Reuses Cursor/Codex CLI credentials already on disk.
+2. **Interactive fallback** (Connect only) — if phase 1 fails and an auth
+   method is available (`cursor_login`, `api-key`, …), retry with
+   `authenticate`. This is the only path that should open a browser OAuth.
+
+On app start, a **silent refresh** runs phase 1 for enabled providers that are
+not already `connected`. That restores the Connected badge across
+dev (`<repo>/.nusashell`) vs packaged userData switches without prompting
+OAuth. Silent refresh only upgrades to `connected`; it never downgrades on a
+transient failure.
+
+Probe results are persisted as `authStatus` (`connected` | `needs-auth`),
+`authCheckedAt`, and `authError`. The New ACP menu only lists providers whose
+`authStatus` is `connected`.
+
+NusaShell does **not** store OAuth tokens. Credentials stay with the external
+CLIs (`~/.config/cursor/auth.json`, `~/.codex/auth.json`). The shell only
+stores the connection status flag under its own userData.
 
 ## Provider registry
 

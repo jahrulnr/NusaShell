@@ -107,6 +107,7 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
         traceId,
         signal,
         ...(command.interactive !== undefined ? { interactive: command.interactive } : {}),
+        ...(command.workspace !== undefined ? { workspace: command.workspace } : {}),
         ...(this.onTextDelta ? { onTextDelta: (delta) => this.onTextDelta?.(traceId, delta) } : {}),
         ...(this.onReasoningDelta ? { onReasoningDelta: (delta) => this.onReasoningDelta?.(traceId, delta) } : {}),
         ...(this.onToolCallStart ? { onToolCallStart: (call) => this.onToolCallStart?.(traceId, call) } : {}),
@@ -158,7 +159,9 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
           this.logger?.warn("Memory snapshot load failed: %s", error instanceof Error ? error.message : String(error));
         }
       }
-      return injectPrompts(prompts, vars, command.messages, command.userPrompt ?? this.userPrompt, memoryPrompt);
+      const hasSubagentTool = tools.some((tool) => tool.name === "subagent");
+      const subagentPrompt = hasSubagentTool ? await this.promptLoader.loadSubagentPrompt() : undefined;
+      return injectPrompts(prompts, vars, command.messages, command.userPrompt ?? this.userPrompt, memoryPrompt, subagentPrompt);
     } catch (error) {
       this.logger?.warn("Prompt injection failed, sending raw messages: %s", error instanceof Error ? error.message : String(error));
       return command.messages;

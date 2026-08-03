@@ -12,6 +12,7 @@ import type { PipelineScheduler } from "../../job/services/pipeline-scheduler.js
 import type { DocsIndexPort } from "../ports/docs-index.port.js";
 import type { AgentToolDefinition, ReasoningEffort } from "../ports/agent-provider.port.js";
 import type { AgentToolGateway, AgentTurnContext } from "../ports/agent-tool-gateway.port.js";
+import type { SubagentPort } from "../ports/subagent-port.js";
 import type { LoggerPort } from "../../plugin/ports/logger.port.js";
 import type { AskQuestionService } from "./ask-question-service.js";
 import { wrapToolArgs } from "./workspace-tool-wrap.js";
@@ -25,6 +26,7 @@ import { execMemory } from "./memory-tool-handler.js";
 import { execJob } from "./job-tool-handler.js";
 import { execPipeline } from "./pipeline-tool-handler.js";
 import { execAskQuestion } from "./ask-question-tool-handler.js";
+import { execSubagent } from "./subagent-tool-handler.js";
 import { execMcpRegister, execMcpUnregister, type McpPluginRegistrationDeps } from "./mcp-plugin-tool-handlers.js";
 
 export type WriteOrigin = "foreground" | "background_review";
@@ -62,6 +64,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
   private pipelineStore?: PipelineStorePort;
   private pipelineScheduler?: PipelineScheduler;
   private pluginRegistration?: McpPluginRegistrationDeps;
+  private subagentPort?: SubagentPort;
 
   constructor(
     private readonly runtimeManager: PluginRuntimeManager,
@@ -95,14 +98,21 @@ export class McpAgentToolGateway implements AgentToolGateway {
     this.pluginRegistration = deps;
   }
 
+  /** Late-bind subagent port (ACP provider resolver + session runner). */
+  bindSubagent(port: SubagentPort): void {
+    this.subagentPort = port;
+  }
+
   beginTurn(turnId: string, context?: AgentTurnContext): void {
     if (!this.turnRoutes.has(turnId)) this.turnRoutes.set(turnId, new Map());
     if (!this.activeCalls.has(turnId)) this.activeCalls.set(turnId, new Map());
+    // Merge only provided fields so a later beginTurn (e.g. AgentTurnRunner)
+    // cannot wipe workspace / provider context set by RunAgentTurnHandler.
     if (context?.interactive !== undefined) this.turnInteractive.set(turnId, context.interactive);
-    this.turnWorkspace.set(turnId, context?.workspace);
-    this.turnProviderId.set(turnId, context?.providerId);
-    this.turnModel.set(turnId, context?.model);
-    this.turnEffort.set(turnId, context?.effort);
+    if (context?.workspace !== undefined) this.turnWorkspace.set(turnId, context.workspace);
+    if (context?.providerId !== undefined) this.turnProviderId.set(turnId, context.providerId);
+    if (context?.model !== undefined) this.turnModel.set(turnId, context.model);
+    if (context?.effort !== undefined) this.turnEffort.set(turnId, context.effort);
   }
 
   endTurn(turnId: string): void {
@@ -199,7 +209,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
         content: { type: "string", description: "Full SKILL.md content (for create/edit) or file content (for write_file)" },
         path: { type: "string", description: "Relative file path under the skill (for write_file only); must be under references/, templates/, scripts/, or assets/" },
       }, ["action", "name"]),
-      ...(this.jobStore && this.jobScheduler ? [definition("job", "Manage scheduled automation jobs (run only while NusaShell is open; cron is UTC; missed one-shots are not silently fired)", {
+      ...(this.jobStore && this.jobScheduler ? [definition("job", "Manage scheduled automation jobs (run only while NusaShell is open; cron hours and bare timestamps are UTC — convert from the user's local timezone before scheduling; missed one-shots are not silently fired)", {
         action: { type: "string", enum: ["list", "validate_schedule", "add", "update", "set_enabled", "run", "cancel", "remove", "output"], description: "Job operation" },
         id: { type: "string", description: "Job ID (required for update, set_enabled, run, cancel, remove, output)" },
         name: { type: "string", description: "Job name (required for add)" },
@@ -215,7 +225,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
         on_complete: { type: "object", description: "Emit an automation event on successful completion (soft chain): { type: '...', payload?: {...} }. Set null to clear." },
         limit: { type: "integer", minimum: 1, maximum: 100, description: "Max output entries (output only; default 20)" },
       }, ["action"])] : []),
-      ...(this.pipelineStore && this.pipelineScheduler ? [definition("pipeline", "Manage multi-step DAG pipelines (event/schedule triggered, step dependencies, conditional branching, context passing). Runs only while NusaShell is open.", {
+      ...(this.pipelineStore && this.pipelineScheduler ? [definition("pipeline", "Manage multi-step DAG pipelines (event/schedule triggered, step dependencies, conditional branching, context passing). Runs only while NusaShell is open; schedule cron/bare timestamps are UTC like jobs.", {
         action: { type: "string", enum: ["list", "add", "update", "remove", "run"], description: "Pipeline operation" },
         id: { type: "string", description: "Pipeline ID (required for update, remove, run)" },
         name: { type: "string", description: "Pipeline name (required for add)" },
@@ -255,6 +265,12 @@ export class McpAgentToolGateway implements AgentToolGateway {
         allow_free_text: { type: "boolean", description: "Whether the user may type a custom answer (default true)" },
         multi_select: { type: "boolean", description: "Whether the user may select multiple options (default false)" },
       }, ["question", "options"])] : []),
+      ...(this.subagentPort ? [definition("subagent", "Delegate a task to a connected ACP coding agent (Cursor, Codex, etc). The subagent runs with its own tools and repo access; its live stream appears in the side pane. Returns a summary when done. Config (model, mode) is set in Settings, not in the tool call.", {
+        prompt: { type: "string", description: "The task brief for the subagent (required)" },
+        provider_id: { type: "string", description: "Optional ACP provider override (e.g. \"cursor\", \"codex\"). Omit to use the default + fallback order from Settings." },
+        title: { type: "string", description: "Optional label for the side pane and inline run card" },
+        workspace: { type: "string", description: "Optional absolute cwd override; defaults to the conversation workspace, or the user home directory when unset. Never invent a path." },
+      }, ["prompt"])] : []),
       ...[...routes.entries()].map(([name, route]) => ({
         name,
         ...(route.description ? { description: route.description } : {}),
@@ -295,6 +311,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
       }
       case "pipeline": return execPipeline(this.pipelineStore, this.pipelineScheduler, args);
       case "ask_question": return execAskQuestion(this.askQuestions, this.isInteractive(turnId), args, callId ?? requestId, turnId);
+      case "subagent": return execSubagent(this.subagentPort, args, turnId, this.turnWorkspace.get(turnId), this.logger);
       default: return this.callGrantedTool(name, args, requestId, turnId);
     }
   }

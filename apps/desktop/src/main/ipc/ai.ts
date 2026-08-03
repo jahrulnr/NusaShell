@@ -94,6 +94,7 @@ function configureProvider(ctx: IpcContext, provider: AiRegistrySettings["provid
     ...(provider.defaultModel ? { model: provider.defaultModel } : {}),
     timeoutMs: provider.timeoutMs,
     maxAttempts: provider.maxAttempts,
+    omitToolChoice: provider.type === "ollama" || provider.type === "llamacpp",
   };
   ctx.commandBus.execute(cmd);
 }

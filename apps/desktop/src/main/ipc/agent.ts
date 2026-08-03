@@ -4,6 +4,8 @@ import type {
   AgentCanvasArtifact,
   AgentConversationCheckpoint,
   AgentConversationMessage,
+  AgentSubagentRun,
+  AgentSubagentRunStatus,
 } from "../../shared/agent-conversation-contract.js";
 
 /** Register agent conversation + background review IPC handlers. */
@@ -27,6 +29,12 @@ export function registerAgentIpc(ctx: IpcContext): void {
     store().upsertCanvasArtifact(id, artifact));
   ipcMain.handle("agent-conversations:set-active-canvas-artifact", (_event, id: string, artifactId: string | null) =>
     store().setActiveCanvasArtifact(id, artifactId));
+  ipcMain.handle("agent-conversations:upsert-subagent-run", (_event, id: string, run: AgentSubagentRun) =>
+    store().upsertSubagentRun(id, run));
+  ipcMain.handle("agent-conversations:set-active-subagent-run", (_event, id: string, runId: string | null) =>
+    store().setActiveSubagentRun(id, runId));
+  ipcMain.handle("agent-conversations:update-subagent-run-status", (_event, id: string, runId: string, status: AgentSubagentRunStatus, patch?: { summary?: string; error?: string }) =>
+    store().updateSubagentRunStatus(id, runId, status, patch));
 
   ipcMain.handle("background-review:configure", (_event, settings: Record<string, unknown>) => {
     ctx.configureBackgroundReview(settings);

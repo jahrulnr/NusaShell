@@ -26,14 +26,39 @@ flowchart TD
 ```
 
 The turn loop is provider-agnostic. Provider-family definitions normalize
-OpenRouter, OmniRoute, 9Router, OpenAI, Claude, and custom connections; the
-infrastructure adapter maps their selected dialect (`chat`, `responses`, or
-`messages`) to its wire format. Model catalog metadata drives context/output
-limits, tool availability, image support, and reasoning effort. Tool calls are validated against the schemas
+OpenRouter, OmniRoute, 9Router, OpenAI, Claude, Ollama, llama.cpp, and custom
+connections; the infrastructure adapter maps their selected dialect (`chat`,
+`responses`, or `messages`) to its wire format. Model catalog metadata drives
+context/output limits, tool availability, image support, and reasoning effort.
+Tool calls are validated against the schemas
 advertised for that exact round and execute only through
 `PluginRuntimeManager`. A reasoning-only/empty provider response receives one
 semantic nudge on the next bounded round; a second empty result becomes an
 explicit runtime response instead of an opaque failed turn.
+
+### Local providers (Ollama, llama.cpp)
+
+Ollama and llama.cpp are first-class presets that reuse the OpenAI-compatible
+chat path — NusaShell never spawns or lifecycle-manages the server process.
+
+- **Ollama**: default `http://127.0.0.1:11434/v1`, `api: "chat"`, API key
+  optional (ignored by Ollama). Import falls back to `GET /api/tags` when
+  `/v1/models` fails, then enriches each model with `POST /api/show`
+  (vision/tools capabilities, `num_ctx`).
+- **llama.cpp** (`llama-server`): default `http://127.0.0.1:8080/v1`,
+  `api: "chat"`, API key optional. Supports both single-model (`-m`) and
+  router (`--models-dir`) operator modes. Path-like model IDs are stored in
+  full for requests; the UI label is the basename. Import reads `meta.n_ctx`
+  / `n_ctx_train` from `/v1/models` and optionally enriches vision/context
+  from `GET /props`.
+- **`tool_choice` omission**: both presets omit `tool_choice` from the chat
+  request body (Ollama documents it unsupported; llama.cpp is happier without
+  hard requirements). The `tools` array is still sent.
+- **Timeout**: both default to 180s (cold model load). Connection errors are
+  wrapped with actionable copy pointing to the server start command.
+- **Out of scope**: NusaShell does not spawn `ollama`/`llama-server`, pick
+  GGUF paths, manage router child processes, or call native `/api/chat` /
+  `/completion` endpoints.
 
 Native JSON tool calls are preferred. A bounded parser also recovers fenced
 function XML, Anthropic-style `<invoke>` blocks, and Kimi tool-use text when a
