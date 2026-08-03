@@ -259,12 +259,23 @@ export function estimateMessageTokens(messages: readonly AgentMessage[]): number
   return Math.ceil(chars / 4);
 }
 
-export function formatMessagesForSummary(messages: readonly AgentMessage[]): string {
+export function formatMessagesForSummary(
+  messages: readonly AgentMessage[],
+  summaryMaxChars = 12_000,
+): string {
+  // Per-tool-result budget scales with the overall summary cap so a handful of
+  // large outcomes cannot starve the rest of the conversation. Floor at 800
+  // (the previous fixed cap) and cap at 4000 so a single result never dominates.
+  const toolBudget = Math.min(4_000, Math.max(800, Math.floor(summaryMaxChars / 8)));
   return messages.map((message) => {
-    if (message.role === "tool") return `Tool ${message.name}: ${clampText(message.content, 800)}`;
+    if (message.role === "tool") return `Tool ${message.name}: ${clampText(message.content, toolBudget)}`;
     if (message.role === "assistant") {
-      const calls = message.toolCalls?.map((call) => call.name).join(", ");
-      return `Assistant: ${message.content ?? ""}${calls ? `\nTool calls: ${calls}` : ""}`.trim();
+      const calls = message.toolCalls?.map((call) => {
+        const argsText = call.args ? clampText(JSON.stringify(call.args), 400) : "";
+        return argsText ? `${call.name}(${argsText})` : call.name;
+      }).join(", ");
+      const reasoning = message.reasoning ? clampText(message.reasoning, 600) : "";
+      return `Assistant: ${message.content ?? ""}${calls ? `\nTool calls: ${calls}` : ""}${reasoning ? `\nReasoning: ${reasoning}` : ""}`.trim();
     }
     const content = typeof message.content === "string"
       ? message.content

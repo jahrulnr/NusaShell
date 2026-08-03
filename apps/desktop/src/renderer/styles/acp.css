@@ -2,6 +2,13 @@
 
 .acp-agents-header { margin: 24px 0 12px; }
 .acp-agents-header .agent-kicker { display: inline-flex; }
+.acp-routing-card { display: grid; gap: 8px; margin: 0 0 14px; border: 1px solid var(--border); border-radius: 10px; padding: 14px; background: #0d151d; }
+.acp-routing-card .settings-card-title { margin: 0; }
+.acp-routing-card .settings-card-copy { margin: 0; color: var(--text-faint); font-size: 11px; line-height: 1.45; }
+.acp-routing-fallbacks { margin: 4px 0 0; border: 0; padding: 0; }
+.acp-routing-fallbacks legend { margin-bottom: 6px; color: var(--text-dim); font-size: 11px; font-weight: 600; }
+.acp-routing-fallback-option { display: inline-flex; align-items: center; gap: 7px; margin: 0 12px 6px 0; color: var(--text); font-size: 11px; }
+.acp-provider-default-badge { display: inline-block; border: 1px solid rgba(87, 198, 142, .45); border-radius: 4px; padding: 2px 5px; color: var(--green); font: 9px 'JetBrains Mono', monospace; font-weight: 500; vertical-align: middle; }
 
 .acp-status-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 12px; border-bottom: 1px solid var(--border-soft); background: rgba(10, 14, 22, .72); }
 .acp-status-label { color: var(--text-faint); font: 9px 'JetBrains Mono', monospace; letter-spacing: .08em; }

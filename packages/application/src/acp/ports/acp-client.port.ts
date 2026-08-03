@@ -4,6 +4,8 @@ export interface AcpProviderDescriptor {
   readonly args: readonly string[];
   readonly authMethodId?: string;
   readonly env?: Readonly<Record<string, string>>;
+  /** Config options applied after session/new, such as provider-specific mode. */
+  readonly preferredConfig?: Readonly<Record<string, string | boolean>>;
 }
 
 export type AcpContentBlock =

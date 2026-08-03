@@ -169,6 +169,7 @@ async function startBackend(): Promise<BootstrapResult> {
   const activeProvider = aiSettings.providers.find((provider) => provider.id === aiSettings?.activeProviderId);
   const activeModel = flattenModelCatalog(aiSettings.providers).find((model) => model.key === aiSettings?.activeModelKey);
   const result = await bootstrap({
+    appVersion: app.getVersion(),
     promptsRoot,
     docsRoot,
     docsIndexStorageRoot,

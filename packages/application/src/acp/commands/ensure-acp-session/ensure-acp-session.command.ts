@@ -10,6 +10,7 @@ export interface EnsureAcpSessionCommand extends Command {
     readonly command: string;
     readonly args: readonly string[];
     readonly authMethodId?: string;
+    readonly preferredConfig?: Readonly<Record<string, string | boolean>>;
   };
 }
 

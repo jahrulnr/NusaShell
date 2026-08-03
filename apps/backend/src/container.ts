@@ -58,6 +58,7 @@ export interface ContainerOptions {
   readonly skillsRoot?: string;
   readonly builtinSkillsRoot?: string;
   readonly memoryRoot?: string;
+  readonly appVersion?: string;
   readonly jobsRoot?: string;
   readonly dbPath?: string;
   readonly logLevel?: string;

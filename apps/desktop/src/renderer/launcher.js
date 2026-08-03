@@ -43,6 +43,7 @@ let pipelinesController = null;
 let launcherSearchQuery = "";
 let launcherCategory = "All";
 let aiSettings = { activeProviderId: "", activeModelKey: "", effort: "auto", providers: [], models: [] };
+let acpRouting = { defaultProviderId: "", fallbackProviderIds: [], tryOrder: [] };
 let currentProviderDetailId = "";
 let pendingProviderDeleteId = "";
 let editContextTarget = null;
@@ -977,6 +978,60 @@ document.addEventListener("DOMContentLoaded", () => {
   };
   const closeProviderEditor = () => { $("#ai-settings-form").hidden = true; $("#provider-modal-overlay").hidden = true; };
   const closeAcpProviderEditor = () => { $("#acp-provider-form").hidden = true; $("#acp-provider-modal-overlay").hidden = true; };
+  const connectedAcpProviders = (providers) => providers.filter((provider) => provider.config.enabled && provider.config.authStatus === "connected");
+  const renderAcpRouting = (providers) => {
+    const defaultSelect = $("#acp-routing-default");
+    const fallbackContainer = $("#acp-routing-fallbacks");
+    if (!defaultSelect || !fallbackContainer) return;
+    const connected = connectedAcpProviders(providers);
+    const connectedIds = new Set(connected.map((provider) => provider.manifest.id));
+    const fallbackIds = (acpRouting.fallbackProviderIds || []).filter((id) => connectedIds.has(id) && id !== acpRouting.defaultProviderId);
+    defaultSelect.textContent = "";
+    const emptyOption = el("option", "", "Manifest order (no preference)");
+    emptyOption.value = "";
+    defaultSelect.appendChild(emptyOption);
+    for (const provider of connected) {
+      const option = el("option", "", provider.manifest.displayName);
+      option.value = provider.manifest.id;
+      option.selected = provider.manifest.id === acpRouting.defaultProviderId;
+      defaultSelect.appendChild(option);
+    }
+    defaultSelect.value = connectedIds.has(acpRouting.defaultProviderId) ? acpRouting.defaultProviderId : "";
+    fallbackContainer.textContent = "";
+    for (const provider of connected) {
+      if (provider.manifest.id === defaultSelect.value) continue;
+      const label = el("label", "acp-routing-fallback-option");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = provider.manifest.id;
+      checkbox.checked = fallbackIds.includes(provider.manifest.id);
+      checkbox.addEventListener("change", async () => {
+        const nextFallbacks = connected
+          .filter((item) => item.manifest.id !== defaultSelect.value)
+          .filter((item) => item.manifest.id === provider.manifest.id ? checkbox.checked : fallbackIds.includes(item.manifest.id))
+          .map((item) => item.manifest.id);
+        await saveAcpRouting({ defaultProviderId: defaultSelect.value, fallbackProviderIds: nextFallbacks });
+      });
+      label.append(checkbox, document.createTextNode(provider.manifest.displayName));
+      fallbackContainer.appendChild(label);
+    }
+    $("#acp-routing-status").textContent = connected.length > 0
+      ? `Effective order: ${acpRouting.tryOrder?.map((id) => connected.find((provider) => provider.manifest.id === id)?.manifest.displayName || id).join(" → ") || "manifest order"}`
+      : "Connect an ACP agent to set a subagent route.";
+  };
+  const saveAcpRouting = async (settings) => {
+    try {
+      acpRouting = await window.shell.acpProviders.saveRouting({
+        defaultProviderId: settings.defaultProviderId || undefined,
+        fallbackProviderIds: settings.fallbackProviderIds,
+      });
+      await renderAcpProviderCards();
+      return true;
+    } catch (error) {
+      showToast(`Could not save ACP routing: ${error.message || error}`, "error");
+      return false;
+    }
+  };
   const showAcpProviderEditor = (provider) => {
     $("#acp-provider-modal-overlay").hidden = false;
     $("#acp-provider-form").hidden = false;
@@ -984,6 +1039,7 @@ document.addEventListener("DOMContentLoaded", () => {
     $("#acp-provider-subtitle").textContent = provider.manifest.description;
     $("#acp-provider-id").value = provider.manifest.id;
     $("#acp-provider-enabled").checked = provider.config.enabled;
+    $("#acp-provider-set-default").checked = acpRouting.defaultProviderId === provider.manifest.id;
     $("#acp-provider-command").value = provider.config.command || "";
     $("#acp-provider-args").value = (provider.config.args || []).join(" ");
     const authSelect = $("#acp-provider-auth-select");
@@ -1003,6 +1059,8 @@ document.addEventListener("DOMContentLoaded", () => {
       authHint.textContent = "ChatGPT login: run `codex login` then click Connect. API key: set OPENAI_API_KEY or CODEX_API_KEY in the process env that launches Electron, then choose api-key. Default command is npx -y @agentclientprotocol/codex-acp; install globally and set NUSASHELL_CODEX_ACP_BIN=codex-acp to skip the npx download.";
     } else if (provider.manifest.id === "cursor") {
       authHint.textContent = "Uses existing Cursor CLI login (`agent status` / ~/.config/cursor) by default. Connect first tries file auth without opening a browser; pick cursor_login only to force a fresh OAuth.";
+    } else if (provider.manifest.id === "devin") {
+      authHint.textContent = "Devin ACP requires browser login. Click Connect to start the Devin browser/PKCE flow; ACP mode does not reuse local CLI credentials.";
     } else if (provider.manifest.authMethodId) {
       authHint.textContent = `Auth method: ${provider.manifest.authMethodId}. Click Connect after enabling.`;
     } else {
@@ -1132,7 +1190,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!registry) return;
     registry.textContent = "";
     try {
-      const providers = await window.shell.acpProviders.list();
+      const [providers, routing] = await Promise.all([
+        window.shell.acpProviders.list(),
+        window.shell.acpProviders.getRouting(),
+      ]);
+      acpRouting = routing;
+      renderAcpRouting(providers);
       for (const provider of providers) {
         const isConnected = provider.config.authStatus === "connected";
         const card = el("article", `provider-registry-card acp-provider-card${isConnected ? " is-active" : ""}`);
@@ -1143,6 +1206,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const mark = el("span", "provider-mark", provider.manifest.monogram);
         const identity = el("div");
         const title = document.createElement("h2"); title.textContent = provider.manifest.displayName;
+        if (acpRouting.defaultProviderId === provider.manifest.id) {
+          title.append(" ", el("span", "acp-provider-default-badge", "Default"));
+        }
         const kind = document.createElement("p"); kind.textContent = String(kindLabel || "ACP");
         identity.append(title, kind);
         const beta = isUnverifiedProvider ? el("span", "acp-provider-beta", "BETA") : null;
@@ -1714,6 +1780,13 @@ document.addEventListener("DOMContentLoaded", () => {
     searchInput.focus();
   });
 
+  $("#acp-routing-default")?.addEventListener("change", async (event) => {
+    const defaultProviderId = event.target.value;
+    await saveAcpRouting({
+      defaultProviderId,
+      fallbackProviderIds: (acpRouting.fallbackProviderIds || []).filter((id) => id !== defaultProviderId),
+    });
+  });
   $("#acp-provider-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const id = $("#acp-provider-id").value;
@@ -1723,6 +1796,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const authMethodId = $("#acp-provider-auth-select").value || undefined;
     try {
       await window.shell.acpProviders.save({ providerId: id, enabled: $("#acp-provider-enabled").checked, command, args, authMethodId });
+      const setAsDefault = $("#acp-provider-set-default").checked;
+      if (setAsDefault || acpRouting.defaultProviderId === id) {
+        const routingSaved = await saveAcpRouting({
+          defaultProviderId: setAsDefault ? id : "",
+          fallbackProviderIds: acpRouting.fallbackProviderIds,
+        });
+        if (!routingSaved) return;
+      }
       closeAcpProviderEditor();
       await renderAcpProviderCards();
       showToast("ACP provider saved.", "success");

@@ -21,8 +21,17 @@ describe("createContainer", () => {
     expect(container.eventPublisher).toBeDefined();
   });
 
+  it("uses the stamped app version for the system version query", async () => {
+    container = createContainer({ port: 9137, appVersion: "0.3.0" });
+
+    await expect(container.queryBus.execute({ kind: "system-version" })).resolves.toMatchObject({
+      version: "0.3.0",
+      name: "NusaShell",
+    });
+  });
+
   it("configures an OpenAI-compatible provider without requiring a default model", () => {
-    container = createContainer({ port: 9137 });
+    container = createContainer({ port: 9138 });
 
     expect(() => container.configureAi({
       providerId: "openai-compatible",

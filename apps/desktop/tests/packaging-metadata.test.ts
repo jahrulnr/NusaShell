@@ -10,4 +10,13 @@ describe("desktop packaging metadata", () => {
     expect(packageJson.author).toEqual(expect.any(String));
     expect((packageJson.author as string).trim()).not.toBe("");
   });
+
+  it("keeps Electron's app version aligned with the repository VERSION", () => {
+    const packageJson = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    ) as { readonly version?: unknown };
+    const repositoryVersion = readFileSync(new URL("../../../VERSION", import.meta.url), "utf8").trim();
+
+    expect(packageJson.version).toBe(repositoryVersion);
+  });
 });

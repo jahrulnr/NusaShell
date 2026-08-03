@@ -309,6 +309,7 @@ export function mapToCommand(request: ParsedRequest):
             command: request.payload.provider.command,
             args: request.payload.provider.args,
             authMethodId: request.payload.provider.authMethodId,
+            ...(request.payload.provider.preferredConfig ? { preferredConfig: request.payload.provider.preferredConfig } : {}),
           },
         } as EnsureAcpSessionCommand,
       };

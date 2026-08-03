@@ -15,6 +15,41 @@ async function makeStore(providers: unknown, routing?: unknown) {
   return new AcpProviderStore(providersPath, routingPath);
 }
 
+describe("AcpProviderStore", () => {
+  it("lists Devin as an unverified built-in provider with the devin acp command", async () => {
+    const store = await makeStore([]);
+    const devin = (await store.list()).find((provider) => provider.manifest.id === "devin");
+
+    expect(devin?.manifest).toMatchObject({
+      displayName: "Devin",
+      monogram: "DV",
+      command: "devin",
+      args: ["acp"],
+      authMethodIds: ["devin-browser"],
+      preferredConfig: { mode: "bypass" },
+      unverified: true,
+    });
+  });
+
+  it("publishes provider-specific ACP mode defaults", async () => {
+    const store = await makeStore([]);
+    const providers = await store.list();
+
+    expect(providers.find((provider) => provider.manifest.id === "cursor")?.config.preferredConfig).toEqual({ mode: "agent" });
+    expect(providers.find((provider) => provider.manifest.id === "codex")?.config.preferredConfig).toEqual({ mode: "agent-full-access" });
+    expect(providers.find((provider) => provider.manifest.id === "devin")?.config.preferredConfig).toEqual({ mode: "bypass" });
+  });
+
+  it("allows a saved Devin command override without changing the manifest identity", async () => {
+    const store = await makeStore([]);
+    const updated = await store.save({ providerId: "devin", enabled: true, command: "/opt/devin", args: ["acp", "--local"] });
+    const devin = updated.find((provider) => provider.manifest.id === "devin");
+
+    expect(devin?.manifest.id).toBe("devin");
+    expect(devin?.config).toMatchObject({ enabled: true, command: "/opt/devin", args: ["acp", "--local"] });
+  });
+});
+
 describe("AcpProviderStore.resolveTryOrder", () => {
   it("falls back to connected enabled providers when routing is missing", async () => {
     const store = await makeStore([

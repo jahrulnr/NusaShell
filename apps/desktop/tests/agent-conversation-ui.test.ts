@@ -194,4 +194,117 @@ describe("agent conversation UI helpers", () => {
       { role: "user", content: "Create a note" },
     ]);
   });
+
+  it("reconstructs assistant toolCalls into an assistant message plus one role:tool result per call", () => {
+    const result = buildAgentContext({
+      messages: [
+        { role: "user", content: "Write a file then list the dir" },
+        {
+          role: "assistant",
+          content: "Done.",
+          toolCalls: [
+            { id: "call-1", name: "files_write", ok: true, args: { path: "/a.txt", content: "hi" }, output: "wrote 2 bytes" },
+            { id: "call-2", name: "files_list", ok: false, args: { path: "/" }, error: "Permission denied" },
+          ],
+        },
+      ],
+    });
+
+    expect(result).toEqual([
+      { role: "user", content: "Write a file then list the dir" },
+      { role: "assistant", content: "Done.", toolCalls: [
+        { id: "call-1", name: "files_write", args: { path: "/a.txt", content: "hi" } },
+        { id: "call-2", name: "files_list", args: { path: "/" } },
+      ] },
+      { role: "tool", toolCallId: "call-1", name: "files_write", content: "wrote 2 bytes" },
+      { role: "tool", toolCallId: "call-2", name: "files_list", content: "[TOOL ERROR] Permission denied" },
+    ]);
+  });
+
+  it("wraps mcp_* tool results in the untrusted_tool_result envelope and leaves non-mcp results bare", () => {
+    const result = buildAgentContext({
+      messages: [
+        { role: "user", content: "run it" },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [
+            { id: "call-1", name: "mcp_mail_search", ok: true, args: { query: "inbox" }, output: "Subject: hello\nBody: this is a long enough message body to trigger wrapping" },
+            { id: "call-2", name: "files_read", ok: true, args: { path: "/a.txt" }, output: "plain content body" },
+          ],
+        },
+      ],
+    });
+
+    const mcpResult = result.find((m) => m.role === "tool" && m.name === "mcp_mail_search");
+    expect(mcpResult?.content).toContain("<untrusted_tool_result source=\"mcp_mail_search\">");
+    expect(mcpResult?.content).toContain("Subject: hello");
+
+    const filesResult = result.find((m) => m.role === "tool" && m.name === "files_read");
+    expect(filesResult?.content).toBe("plain content body");
+    expect(filesResult?.content).not.toContain("untrusted_tool_result");
+  });
+
+  it("emits an empty tool result when a persisted call has neither output nor error", () => {
+    const result = buildAgentContext({
+      messages: [
+        { role: "user", content: "go" },
+        { role: "assistant", content: "", toolCalls: [{ id: "call-1", name: "files_read", ok: true, args: { path: "/a" } }] },
+      ],
+    });
+
+    expect(result).toEqual([
+      { role: "user", content: "go" },
+      { role: "assistant", content: "", toolCalls: [{ id: "call-1", name: "files_read", args: { path: "/a" } }] },
+      { role: "tool", toolCallId: "call-1", name: "files_read", content: "" },
+    ]);
+  });
+
+  it("skips toolCalls missing id or name but keeps the rest stable in order", () => {
+    const result = buildAgentContext({
+      messages: [
+        { role: "user", content: "go" },
+        {
+          role: "assistant",
+          content: "partial",
+          toolCalls: [
+            { id: "call-1", name: "files_write", ok: true, args: { path: "/a" }, output: "ok" },
+            { name: "no-id", ok: true, output: "x" },
+            { id: "call-3", ok: true, output: "y" },
+            { id: "call-4", name: "files_read", ok: true, args: { path: "/b" }, output: "b" },
+          ],
+        },
+      ],
+    });
+
+    expect(result.map((m) => m.role)).toEqual(["user", "assistant", "tool", "tool"]);
+    expect(result[1]).toMatchObject({ role: "assistant", toolCalls: [
+      { id: "call-1", name: "files_write" },
+      { id: "call-4", name: "files_read" },
+    ] });
+    expect(result[2]).toMatchObject({ role: "tool", toolCallId: "call-1" });
+    expect(result[3]).toMatchObject({ role: "tool", toolCallId: "call-4" });
+  });
+
+  it("reconstructs tool context on the checkpoint branch alongside the summary system message", () => {
+    const result = buildAgentContext({
+      messages: [
+        { role: "user", content: "old question" },
+        {
+          role: "assistant",
+          content: "old answer",
+          toolCalls: [{ id: "call-1", name: "files_write", ok: true, args: { path: "/a" }, output: "wrote" }],
+        },
+        { role: "user", content: "follow up" },
+      ],
+      checkpoint: { summary: "Earlier file was written.", compactedMessageCount: 1, via: "provider" },
+    });
+
+    expect(result).toEqual([
+      { role: "system", content: "Conversation summary:\nEarlier file was written." },
+      { role: "assistant", content: "old answer", toolCalls: [{ id: "call-1", name: "files_write", args: { path: "/a" } }] },
+      { role: "tool", toolCallId: "call-1", name: "files_write", content: "wrote" },
+      { role: "user", content: "follow up" },
+    ]);
+  });
 });

@@ -44,7 +44,27 @@ Button to create a new custom OpenAI-compatible provider.
 
 ## ACP agents
 
-Registry of ACP (Agent Client Protocol) external agents. Enable and configure providers such as Cursor, Codex, Claude Code, and Gemini. Each card shows a Connect button that runs a one-shot acp.probe (spawn → initialize → authenticate → session/new → close) and persists authStatus as connected or needs-auth. Connected providers are available as subagent targets via the subagent tool from within an agent conversation.
+Registry of ACP (Agent Client Protocol) external agents. Enable and configure providers such as Cursor, Devin, Codex, Claude Code, and Gemini. The Subagent routing card chooses a connected default and fallback order; each provider card shows a Connect button that runs a one-shot acp.probe (spawn → initialize → authenticate → session/new → close) and persists authStatus as connected or needs-auth. Connected providers are available as subagent targets via the subagent tool from within an agent conversation.
+
+- **Subagent routing** (`#acp-routing-card`):
+  - Section: ACP agents
+  - Type: settings card
+  - Action: Groups the default ACP agent and fallback controls for subagent delegation.
+
+- **Default ACP agent** (`#acp-routing-default`):
+  - Section: ACP agents
+  - Type: select
+  - Action: Chooses the connected ACP provider tried first by subagents, or manifest order when empty.
+
+- **Fallback order** (`#acp-routing-fallbacks`):
+  - Section: ACP agents
+  - Type: checkbox list
+  - Action: Chooses connected ACP providers that subagents try after the default.
+
+- **Effective ACP order** (`#acp-routing-status`):
+  - Section: ACP agents
+  - Type: status text
+  - Action: Shows the currently resolved subagent try order.
 
 - **`#acp-provider-registry`** (missing map entry)
 
@@ -60,9 +80,14 @@ Registry of ACP (Agent Client Protocol) external agents. Enable and configure pr
 
 - **`#acp-provider-configure`** (missing map entry)
 
+- **Default badge** (`.acp-provider-default-badge`):
+  - Section: ACP agents
+  - Type: badge
+  - Action: Marks the provider currently selected as the subagent default.
+
 ## ACP provider configure modal
 
-Modal for editing an ACP provider's command, args, enabled state, and auth method. The auth method select lists the provider's advertised authMethodIds (e.g. cursor_login, api-key); choosing Default/file auth omits authMethodId so the client can fall back to file tokens (e.g. ~/.codex).
+Modal for editing an ACP provider's command, args, enabled state, auth method, and whether it is the default subagent ACP agent. The auth method select lists the provider's advertised authMethodIds (e.g. cursor_login, api-key); choosing Default/file auth omits authMethodId so the client can fall back to file tokens (e.g. ~/.codex).
 
 - **`#acp-provider-modal-overlay`** (missing map entry)
 
@@ -77,6 +102,11 @@ Modal for editing an ACP provider's command, args, enabled state, and auth metho
 - **`#acp-provider-id`** (missing map entry)
 
 - **`#acp-provider-enabled`** (missing map entry)
+
+- **Set as default ACP** (`#acp-provider-set-default`):
+  - Section: ACP provider configure modal
+  - Type: checkbox
+  - Action: Sets this provider as the default ACP agent for subagent delegation when saved.
 
 - **`#acp-provider-command`** (missing map entry)
 

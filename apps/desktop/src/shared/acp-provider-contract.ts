@@ -10,6 +10,8 @@ export interface AcpProviderManifest {
   readonly authMethodIds?: readonly string[];
   /** Default spawn env merged under process.env (e.g. NO_BROWSER, INITIAL_AGENT_MODE). */
   readonly env?: Readonly<Record<string, string>>;
+  /** ACP session config applied after session/new (for example mode). */
+  readonly preferredConfig?: Readonly<Record<string, string | boolean>>;
   readonly unverified?: boolean;
 }
 

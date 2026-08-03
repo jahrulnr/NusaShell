@@ -12,6 +12,7 @@ export class EnsureAcpSessionHandler implements CommandHandler<EnsureAcpSessionC
       command: command.provider.command,
       args: command.provider.args,
       ...(command.provider.authMethodId ? { authMethodId: command.provider.authMethodId } : {}),
+      ...(command.provider.preferredConfig ? { preferredConfig: command.provider.preferredConfig } : {}),
     };
     return this.sessionService.ensureSession(command.conversationId, command.workspace, provider);
   }

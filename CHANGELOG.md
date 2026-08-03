@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.1] - 2026-08-03
 
 ### Added
 
@@ -40,6 +40,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `subagent` tool from within an agent conversation.
 - `developer.md` and `mcp-tools.md` prompts updated to list `subagent` as a
   shell meta-tool.
+- **Devin ACP provider.** Added Devin Local as an unverified built-in provider
+  using `devin acp`, with browser/PKCE authentication and provider-specific
+  mode defaults: Cursor `agent`, Codex `agent-full-access`, and Devin `bypass`.
+- **ACP routing controls.** Settings can choose a default ACP provider and
+  fallback order, with per-provider Default badges and persisted routing.
+- **ACP stream rendering.** Subagent side panes preserve live reasoning,
+  text, tool calls, and tool updates while a run is active.
+
+### Fixed
+
+- **Conversation tool context.** Reconstructed persisted assistant tool calls
+  and tool results for subsequent provider turns, including untrusted MCP
+  result envelopes and defensive size limits.
+- **Compaction handoff fidelity.** Compaction summaries now preserve tool args,
+  assistant reasoning, and bounded slices of tool outcomes; the prompt calls
+  out durable state changes and decisions explicitly.
+- **Version reporting.** Electron desktop version metadata is synchronized
+  with the root `VERSION` file so About and system version display the release
+  version instead of stale package metadata.
+- **Settings layout.** Long Startup & background descriptions now wrap beside
+  fixed-width toggles instead of being covered by the checkbox.
 
 ## [0.3.0] - 2026-08-03
 

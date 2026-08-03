@@ -104,6 +104,13 @@ export class AcpSessionService {
         traceId,
         state: "idle",
       });
+      for (const [configId, value] of Object.entries(provider.preferredConfig ?? {})) {
+        try {
+          await this.deps.client.setConfigOption(conversationId, configId, value);
+        } catch (error) {
+          this.deps.logger?.warn(`ACP preferred config failed provider=${provider.providerId} configId=${configId}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
       this.publish(traceId, createAcpSessionStateEvent(traceId, conversationId, "idle"));
       return this.getSessionInfo(conversationId);
     } catch (error) {

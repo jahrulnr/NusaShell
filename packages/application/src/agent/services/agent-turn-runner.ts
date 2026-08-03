@@ -235,7 +235,7 @@ export class AgentTurnRunner {
       if (duplicate === "nudge") {
         this.deps.logger?.info("Agent nudged: repeated tool call detected traceId=%s", traceId);
         messages.push(
-          { role: "assistant", ...(response.text ? { content: response.text } : {}), toolCalls: requestedCalls },
+          { role: "assistant", ...(response.text ? { content: response.text } : {}), ...(response.reasoning?.trim() ? { reasoning: response.reasoning.trim() } : {}), toolCalls: requestedCalls },
           {
             role: "system",
             content: "You are repeating the same tool call with identical arguments. Use the previous tool result, change the arguments, or answer the user without repeating it.",
@@ -243,7 +243,7 @@ export class AgentTurnRunner {
         );
         continue;
       }
-      messages.push({ role: "assistant", ...(response.text ? { content: response.text } : {}), toolCalls: requestedCalls });
+      messages.push({ role: "assistant", ...(response.text ? { content: response.text } : {}), ...(response.reasoning?.trim() ? { reasoning: response.reasoning.trim() } : {}), toolCalls: requestedCalls });
       // Keep provider order for the round: reasoning (already pushed) → text → tools.
       // Streaming UIs also append by delta arrival; do not reorder text after tools.
       if (response.text?.trim()) {

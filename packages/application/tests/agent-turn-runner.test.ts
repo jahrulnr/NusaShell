@@ -388,6 +388,52 @@ describe("AgentTurnRunner", () => {
     expect(result.text).toBe("Final answer");
   });
 
+  it("preserves tool args, reasoning, and a slice of tool outcomes in the extractive compaction summary", async () => {
+    class FailingSummaryProvider extends ScriptedProvider {
+      override async complete(request: AgentProviderRequest): Promise<AgentProviderResult> {
+        this.requests.push(request);
+        if (this.requests.length === 1) throw new Error("summary unavailable");
+        return { text: "Final answer" };
+      }
+    }
+    const provider = new FailingSummaryProvider([]);
+    const runner = new AgentTurnRunner({
+      provider,
+      toolGateway: new FakeToolGateway(),
+      context: {
+        compactionEnabled: true,
+        maxInputTokens: 1200,
+        reserveTokens: 200,
+        recentTurns: 1,
+        summaryMaxChars: 20_000,
+      },
+    });
+
+    const oldToolOutput = "wrote 2 bytes to /a.txt";
+    const result = await runner.run({
+      messages: [
+        { role: "user", content: "write a scratch file. ".repeat(400) },
+        {
+          role: "assistant",
+          content: "Done.",
+          reasoning: "I chose /a.txt because the user asked for a scratch file.",
+          toolCalls: [{ id: "call-1", name: "files_write", args: { path: "/a.txt", content: "hi" } }],
+        },
+        { role: "tool", toolCallId: "call-1", name: "files_write", content: oldToolOutput },
+        { role: "user", content: "latest question" },
+      ],
+      pluginIds: [],
+    });
+
+    expect(result.compaction?.via).toBe("extractive");
+    const summary = result.compaction?.summary ?? "";
+    expect(summary).toContain("files_write(");
+    expect(summary).toContain("/a.txt");
+    expect(summary).toContain("Reasoning:");
+    expect(summary).toContain("scratch file");
+    expect(summary).toContain(oldToolOutput);
+  });
+
   it("uses the selected model context window and output reserve for compaction", async () => {
     const provider = new ScriptedProvider([
       { text: "Model-aware checkpoint" },

@@ -572,6 +572,7 @@ export const AcpEnsureSessionRequestSchema = z.object({
       command: z.string().min(1),
       args: z.array(z.string()).default([]),
       authMethodId: z.string().optional(),
+      preferredConfig: z.record(z.string(), z.union([z.string(), z.boolean()])).optional(),
     }),
   }),
 });

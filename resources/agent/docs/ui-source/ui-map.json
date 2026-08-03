@@ -448,22 +448,27 @@
         {
           "heading": "ACP agents",
           "paragraphs": [
-            "Registry of ACP (Agent Client Protocol) external agents. Enable and configure providers such as Cursor, Codex, Claude Code, and Gemini. Each card shows a Connect button that runs a one-shot acp.probe (spawn → initialize → authenticate → session/new → close) and persists authStatus as connected or needs-auth. Connected providers are available as subagent targets via the subagent tool from within an agent conversation."
+            "Registry of ACP (Agent Client Protocol) external agents. Enable and configure providers such as Cursor, Devin, Codex, Claude Code, and Gemini. The Subagent routing card chooses a connected default and fallback order; each provider card shows a Connect button that runs a one-shot acp.probe (spawn → initialize → authenticate → session/new → close) and persists authStatus as connected or needs-auth. Connected providers are available as subagent targets via the subagent tool from within an agent conversation."
           ],
           "controls": [
+            "acp-routing-card",
+            "acp-routing-default",
+            "acp-routing-fallbacks",
+            "acp-routing-status",
             "acp-provider-registry",
             "acp-provider-card",
             "acp-provider-toggle",
             "acp-provider-status",
             "acp-connect-btn",
             "acp-auth-error",
-            "acp-provider-configure"
+            "acp-provider-configure",
+            "acp-provider-default-badge"
           ]
         },
         {
           "heading": "ACP provider configure modal",
           "paragraphs": [
-            "Modal for editing an ACP provider's command, args, enabled state, and auth method. The auth method select lists the provider's advertised authMethodIds (e.g. cursor_login, api-key); choosing Default/file auth omits authMethodId so the client can fall back to file tokens (e.g. ~/.codex)."
+            "Modal for editing an ACP provider's command, args, enabled state, auth method, and whether it is the default subagent ACP agent. The auth method select lists the provider's advertised authMethodIds (e.g. cursor_login, api-key); choosing Default/file auth omits authMethodId so the client can fall back to file tokens (e.g. ~/.codex)."
           ],
           "controls": [
             "acp-provider-modal-overlay",
@@ -473,6 +478,7 @@
             "acp-provider-close",
             "acp-provider-id",
             "acp-provider-enabled",
+            "acp-provider-set-default",
             "acp-provider-command",
             "acp-provider-args",
             "acp-provider-auth-select",
@@ -758,7 +764,7 @@
         {
           "heading": "Startup & background",
           "paragraphs": [
-            "Controls OS login autostart, tray-first launch, and whether closing the launcher hides to the tray so learning and scheduled work keep running. Quit from the tray menu for a full stop."
+            "Controls OS login autostart, tray-first launch, and whether closing the launcher hides to the tray so learning and scheduled work keep running. Descriptions wrap in the text column beside each fixed-width toggle. Quit from the tray menu for a full stop."
           ],
           "controls": [
             "app-behavior-card",
@@ -1601,6 +1607,44 @@
       "label": "Conversation thread",
       "type": "log region",
       "action": "Main scrollable message area for the current conversation. Auto-scrolls as new content arrives."
+    },
+    "acp-routing-card": {
+      "section": "ACP agents",
+      "label": "Subagent routing",
+      "type": "settings card",
+      "action": "Groups the default ACP agent and fallback controls for subagent delegation."
+    },
+    "acp-routing-default": {
+      "section": "ACP agents",
+      "label": "Default ACP agent",
+      "type": "select",
+      "action": "Chooses the connected ACP provider tried first by subagents, or manifest order when empty."
+    },
+    "acp-routing-fallbacks": {
+      "section": "ACP agents",
+      "label": "Fallback order",
+      "type": "checkbox list",
+      "action": "Chooses connected ACP providers that subagents try after the default."
+    },
+    "acp-routing-status": {
+      "section": "ACP agents",
+      "label": "Effective ACP order",
+      "type": "status text",
+      "action": "Shows the currently resolved subagent try order."
+    },
+    "acp-provider-default-badge": {
+      "section": "ACP agents",
+      "label": "Default badge",
+      "type": "badge",
+      "selector": ".acp-provider-default-badge",
+      "generated": true,
+      "action": "Marks the provider currently selected as the subagent default."
+    },
+    "acp-provider-set-default": {
+      "section": "ACP provider configure modal",
+      "label": "Set as default ACP",
+      "type": "checkbox",
+      "action": "Sets this provider as the default ACP agent for subagent delegation when saved."
     },
     "acp-status-bar": {
       "section": "Conversation thread",

@@ -4,6 +4,7 @@ import { loadConfig, type AppConfig, type BackgroundReviewSettings, type AcpProv
 import type { LogObserver } from "@nusashell/infrastructure";
 
 export interface BootstrapOptions {
+  readonly appVersion?: string;
   readonly config?: Partial<AppConfig>;
   readonly loggerObserver?: LogObserver;
   readonly logFile?: string;
@@ -42,6 +43,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     ...(options.docsIndexStorageRoot !== undefined ? { docsIndexStorageRoot: options.docsIndexStorageRoot } : {}),
     ...(options.skillsRoot !== undefined ? { skillsRoot: options.skillsRoot } : {}),
     ...(options.memoryRoot !== undefined ? { memoryRoot: options.memoryRoot } : {}),
+    ...(options.appVersion !== undefined ? { appVersion: options.appVersion } : {}),
     ...(options.resolvePluginRuntimeEnvironment !== undefined
       ? { resolvePluginRuntimeEnvironment: options.resolvePluginRuntimeEnvironment }
       : {}),

@@ -471,6 +471,16 @@
           <article class="provider-registry-card accent-lc" data-provider-preset="llamacpp"><div class="provider-card-head"><span class="provider-mark">LC</span><div><h2>llama.cpp</h2><p>LOCAL · CHAT</p></div><button type="button" class="provider-toggle" aria-label="Enable llama.cpp" disabled>●</button></div><p>Local llama-server OpenAI-compatible API. Start <code>llama-server -m model.gguf --port 8080 --jinja</code> then Import models.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
         </div>
         <div class="acp-agents-header"><div class="agent-kicker"><span class="agent-kicker-dot"></span> ACP Agents</div><p class="subtitle">External agent partners that run over the Agent Client Protocol.</p></div>
+        <div class="acp-routing-card" id="acp-routing-card">
+          <div class="settings-card-title">Subagent routing</div>
+          <p class="settings-card-copy">Subagent tries Default first, then Fallbacks, then any other connected agents.</p>
+          <label class="settings-field" for="acp-routing-default">Default ACP agent<select id="acp-routing-default"><option value="">Manifest order (no preference)</option></select></label>
+          <fieldset class="acp-routing-fallbacks">
+            <legend>Fallback order</legend>
+            <div id="acp-routing-fallbacks"></div>
+          </fieldset>
+          <p class="settings-card-copy" id="acp-routing-status" role="status" aria-live="polite"></p>
+        </div>
         <div class="provider-registry" id="acp-provider-registry" role="list"></div>
       </section>
 
@@ -981,6 +991,7 @@
     <div class="provider-modal-head"><div><div class="settings-card-title" id="acp-provider-title">Configure ACP agent</div><p class="provider-modal-subtitle" id="acp-provider-subtitle"></p></div><button class="provider-modal-close" id="acp-provider-close" type="button" aria-label="Close ACP provider details">×</button></div>
     <input id="acp-provider-id" type="hidden">
     <label class="provider-enabled-field"><input id="acp-provider-enabled" type="checkbox"> Enabled</label>
+    <label class="provider-enabled-field"><input id="acp-provider-set-default" type="checkbox"> Set as default ACP for subagent</label>
     <label class="settings-field">Command<input id="acp-provider-command" autocomplete="off" placeholder="agent"></label>
     <label class="settings-field">Args<input id="acp-provider-args" autocomplete="off" placeholder="acp"></label>
     <label class="settings-field">Auth method (optional)<select id="acp-provider-auth-select"><option value="">Default / file auth</option></select></label>

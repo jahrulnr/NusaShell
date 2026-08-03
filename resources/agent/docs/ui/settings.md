@@ -64,7 +64,7 @@ Toggles for WebSocket auto-reconnect and auto-resubscribe.
 
 ## Startup & background
 
-Controls OS login autostart, tray-first launch, and whether closing the launcher hides to the tray so learning and scheduled work keep running. Quit from the tray menu for a full stop.
+Controls OS login autostart, tray-first launch, and whether closing the launcher hides to the tray so learning and scheduled work keep running. Descriptions wrap in the text column beside each fixed-width toggle. Quit from the tray menu for a full stop.
 
 - **Startup & background card** (`#app-behavior-card`):
   - Section: Startup & background

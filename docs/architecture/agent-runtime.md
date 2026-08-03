@@ -206,6 +206,29 @@ it exceeds `max input tokens - reserve tokens` (with a 1,000-token floor), it:
 3. falls back to a bounded extractive checkpoint if that request fails;
 4. returns the checkpoint so Electron can persist its absolute message offset.
 
+The provider context for every turn carries reconstructed assistant
+`toolCalls` plus one `role: "tool"` result per call. `buildAgentContext` (in
+the renderer) expands each persisted assistant message that carries `toolCalls`
+into the assistant tool-call message followed by one `role: "tool"` result
+per call, using the persisted `output` (success) or `error` (failure, marked
+`[TOOL ERROR]`) as the result content. Calls missing `id` or `name` are
+skipped; order is preserved. Tool results from `mcp_*` tools are wrapped in
+the `untrusted_tool_result` envelope (mirrored from the application-layer
+`wrapUntrustedResult`) so the model treats plugin output as data, not
+instructions. Without this reconstruction the model would see an assistant
+claim with no tool-use record and no results, and could not verify what was
+actually done.
+
+The compaction summary preserves tool outcomes, not just tool names.
+`formatMessagesForSummary` includes each call's args (truncated to ~400 chars)
+alongside its name, appends the assistant `reasoning` (truncated to ~600 chars)
+when present, and gives each tool result a proportional slice of
+`summaryMaxChars` (floor 800, cap 4000) instead of a fixed 800-char budget.
+The `compact.md` prompt instructs the checkpoint LLM to preserve tool
+outcomes that changed durable state, the tool args that identify what was
+acted on, and the assistant's stated decisions — without copying raw tool
+output verbatim.
+
 Opening the conversation later sends the saved summary plus only messages
 after that offset. Recompaction replaces the previous summary and advances the
 absolute checkpoint without duplicating already-compacted messages.

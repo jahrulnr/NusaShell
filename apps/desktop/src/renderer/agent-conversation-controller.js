@@ -722,6 +722,9 @@ export class AgentConversationController {
           ...(descriptor.config.authMethodId || descriptor.manifest.authMethodId
             ? { authMethodId: descriptor.config.authMethodId || descriptor.manifest.authMethodId }
             : {}),
+          ...(descriptor.config.preferredConfig || descriptor.manifest.preferredConfig
+            ? { preferredConfig: descriptor.config.preferredConfig || descriptor.manifest.preferredConfig }
+            : {}),
         },
       );
       if (!shouldApplyAcpUiUpdate({ activeId: this.activeId, activeKind: this.conversation?.kind, startedId })) return;
@@ -1003,7 +1006,7 @@ export class AgentConversationController {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    this.resetSubagentStreamState([]);
+    this.resetSubagentStreamState([], p.runId);
     this.shell.agentConversations.upsertSubagentRun(this.conversation.id, run).then((conv) => {
       this.conversation = conv;
       return this.shell.agentConversations.setActiveSubagentRun(this.conversation.id, run.runId);
@@ -1032,6 +1035,7 @@ export class AgentConversationController {
     if (this.activeSubagentRun) {
       this.activeSubagentRun = { ...this.activeSubagentRun, status, ...(p.summary ? { summary: p.summary } : {}), ...(p.error ? { error: p.error } : {}), ...(steps?.length ? { steps } : {}) };
     }
+    this.renderSubagentStreamState();
     this.subagentStreamState = null;
 
     if (this.conversation) {
@@ -1390,11 +1394,9 @@ export class AgentConversationController {
 
   closeSubpaneDrawerUi() {
     const pane = $("#agent-subpane");
-    const body = $("#agent-subpane-body");
     const overlay = $("#agent-subpane-overlay");
     pane?.classList.remove("is-open");
     overlay?.classList.remove("is-open");
-    if (body) body.textContent = "";
     const hide = () => {
       if (pane) pane.hidden = true;
       if (overlay) overlay.hidden = true;
@@ -1408,6 +1410,7 @@ export class AgentConversationController {
 
   closeSubpaneSidebar() {
     this.closeSubpaneDrawerUi();
+    if (this.activeSubagentRun?.status === "running") return;
     this.activeSubagentRun = null;
     if (this.conversation?.activeSubagentRunId) {
       void this.shell?.agentConversations?.setActiveSubagentRun(this.conversation.id, null).catch(() => undefined);
@@ -1430,15 +1433,19 @@ export class AgentConversationController {
       else if (run.status === "ok") status.classList.add("is-ok");
       else if (run.status === "fail" || run.status === "cancelled") status.classList.add("is-fail");
     }
-    body.textContent = "";
     this.activeSubagentRun = run;
-    if (run.steps?.length) this.renderSubpaneSteps(run.steps);
-    if (run.error && run.status !== "running") this.setSubpaneError(run.error);
-    if (options.resumeStream && run.status === "running") {
-      this.resetSubagentStreamState(run.steps ?? []);
-      this.subagentStreamDisposer?.();
-      this.subagentStreamDisposer = this.bindLiveSubagentStream(run.runId);
-    } else if (run.status !== "running") {
+    if (run.status === "running") {
+      if (!this.subagentStreamState || this.subagentStreamState.runId !== run.runId) {
+        this.resetSubagentStreamState(run.steps ?? [], run.runId);
+      }
+      this.renderSubagentStreamState();
+      if (options.resumeStream && !this.subagentStreamDisposer) {
+        this.subagentStreamDisposer = this.bindLiveSubagentStream(run.runId);
+      }
+    } else {
+      body.textContent = "";
+      if (run.steps?.length) this.renderSubpaneSteps(run.steps);
+      if (run.error) this.setSubpaneError(run.error);
       this.subagentStreamState = null;
       this.subagentStreamDisposer?.();
       this.subagentStreamDisposer = null;
@@ -1446,11 +1453,12 @@ export class AgentConversationController {
     if (options.open) this.openSubpaneDrawerUi();
   }
 
-  resetSubagentStreamState(seedSteps = []) {
+  resetSubagentStreamState(seedSteps = [], runId = this.activeSubagentRun?.runId) {
     // Live stream stays in memory while the (blocking) run is active.
     // Durable steps are flushed once on run end — no mid-stream disk writes,
     // no temp-file artifact spool (defer that until async subagent exists).
     this.subagentStreamState = {
+      runId,
       steps: Array.isArray(seedSteps) ? [...seedSteps] : [],
       lastKind: null,
       textContent: "",
@@ -1513,37 +1521,62 @@ export class AgentConversationController {
     }
   }
 
-  appendSubpaneThought(delta) {
+  renderSubagentStreamState() {
     const body = $("#agent-subpane-body");
-    if (!body) return;
+    const state = this.subagentStreamState;
+    if (!body || !state) return;
+    body.textContent = "";
+    this.renderSubpaneSteps(state.steps);
+    if (state.lastKind === "text" && state.textContent) {
+      state.textEl = element("div", "agent-subpane-text agent-bubble");
+      state.textEl.innerHTML = renderAssistantMarkdown(state.textContent);
+      body.appendChild(state.textEl);
+    } else if (state.lastKind === "reasoning" && state.thoughtContent) {
+      state.thoughtEl = this.createStreamingReasoningBlock();
+      const content = state.thoughtEl.querySelector(".agent-reasoning-content");
+      if (content) content.innerHTML = renderReasoningMarkdown(state.thoughtContent);
+      body.appendChild(state.thoughtEl);
+    }
+    body.scrollTop = body.scrollHeight;
+  }
+
+  appendSubpaneThought(delta) {
     if (!this.subagentStreamState) this.resetSubagentStreamState([]);
     const state = this.subagentStreamState;
     if (state.lastKind !== "reasoning") {
       this.sealSubagentStreamSegment();
       state.lastKind = "reasoning";
       state.thoughtContent = "";
+      state.thoughtEl = null;
+    }
+    state.thoughtContent += delta;
+    const body = $("#agent-subpane-body");
+    if (!body) return;
+    if (!state.thoughtEl) {
       state.thoughtEl = this.createStreamingReasoningBlock();
       body.appendChild(state.thoughtEl);
     }
-    state.thoughtContent += delta;
-    const content = state.thoughtEl?.querySelector(".agent-reasoning-content");
+    const content = state.thoughtEl.querySelector(".agent-reasoning-content");
     if (content) content.innerHTML = renderReasoningMarkdown(state.thoughtContent);
     body.scrollTop = body.scrollHeight;
   }
 
   appendSubpaneText(delta) {
-    const body = $("#agent-subpane-body");
-    if (!body) return;
     if (!this.subagentStreamState) this.resetSubagentStreamState([]);
     const state = this.subagentStreamState;
     if (state.lastKind !== "text") {
       this.sealSubagentStreamSegment();
       state.lastKind = "text";
       state.textContent = "";
+      state.textEl = null;
+    }
+    state.textContent += delta;
+    const body = $("#agent-subpane-body");
+    if (!body) return;
+    if (!state.textEl) {
       state.textEl = element("div", "agent-subpane-text agent-bubble");
       body.appendChild(state.textEl);
     }
-    state.textContent += delta;
     state.textEl.innerHTML = renderAssistantMarkdown(state.textContent);
     body.scrollTop = body.scrollHeight;
   }

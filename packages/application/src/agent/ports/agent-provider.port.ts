@@ -20,6 +20,12 @@ export type AgentMessage =
       readonly role: "assistant";
       readonly content?: string;
       readonly toolCalls?: readonly AgentToolCall[];
+      /**
+       * Model reasoning emitted alongside this assistant turn. Carried through
+       * the internal message log so context compaction can preserve the
+       * assistant's stated decisions; provider adapters do not send it.
+       */
+      readonly reasoning?: string;
     }
   | {
       readonly role: "tool";

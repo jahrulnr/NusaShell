@@ -175,13 +175,16 @@ export function registerBuses(
   queryBus.register("list-resource-templates", new ListResourceTemplatesHandler(plugin.runtimeManager));
   queryBus.register("read-resource", new ReadResourceHandler(plugin.runtimeManager));
   queryBus.register("system-ping", new SystemPingHandler());
-  let appVersion = "0.0.0";
-  for (const candidate of [
-    resolve(process.cwd(), "VERSION"),
-    resolve(__dirname, "../../../../../VERSION"),
-    resolve(__dirname, "../../../../VERSION"),
-  ]) {
-    try { appVersion = readFileSync(candidate, "utf8").trim(); break; } catch { /* try next */ }
+  const providedVersion = options.appVersion?.trim();
+  let appVersion = providedVersion || "0.0.0";
+  if (!providedVersion) {
+    for (const candidate of [
+      resolve(process.cwd(), "VERSION"),
+      resolve(__dirname, "../../../../../VERSION"),
+      resolve(__dirname, "../../../../VERSION"),
+    ]) {
+      try { appVersion = readFileSync(candidate, "utf8").trim(); break; } catch { /* try next */ }
+    }
   }
   queryBus.register("system-version", new SystemVersionHandler(appVersion));
   queryBus.register("list-jobs", new ListJobsHandler(jobs.jobStore));

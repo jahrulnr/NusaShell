@@ -6,8 +6,8 @@ speak the Agent Client Protocol (ACP) over stdio JSON-RPC.
 ## Motivation
 
 NusaShell's own agent turns are good for tasks that fit the MCP tool model, but
-some tools — notably Cursor — already expose an agent CLI that can drive an
-external editor/terminal session. ACP threads let those external agents run
+some tools — notably Cursor and Devin Local — expose an agent CLI that can drive
+an external editor/terminal session. ACP threads let those external agents run
 inside the same desktop conversation surface, with NusaShell acting as the host
 and the ACP provider as the worker.
 
@@ -121,6 +121,26 @@ Probe results are persisted as `authStatus` (`connected` | `needs-auth`),
 `authCheckedAt`, and `authError`. The New ACP menu only lists providers whose
 `authStatus` is `connected`.
 
+## ACP routing
+
+The AI Providers → ACP Agents section includes **Subagent routing** controls.
+The **Default ACP agent** select chooses the connected provider tried first;
+**Fallback order** checkboxes select additional connected providers to try
+next. The Configure modal also has **Set as default ACP for subagent**, and
+cards show a **Default** badge for the active choice.
+
+Routing is persisted in `acp-routing.json` through the preload
+`acpProviders.getRouting` / `saveRouting` methods. The effective order is:
+
+1. the configured default, if it is enabled and connected;
+2. configured fallback ids, filtered to enabled and connected providers;
+3. every remaining enabled and connected provider in built-in manifest order.
+
+When no routing file exists, or default/fallback are empty, this final manifest
+order is the compatibility fallback. A subagent can pass an explicit
+`provider_id` to `resolveTryOrder(provider_id?)`; that connected provider is
+placed first while the configured order remains available afterward.
+
 NusaShell does **not** store OAuth tokens. Credentials stay with the external
 CLIs (`~/.config/cursor/auth.json`, `~/.codex/auth.json`). The shell only
 stores the connection status flag under its own userData.
@@ -128,12 +148,29 @@ stores the connection status flag under its own userData.
 ## Provider registry
 
 The desktop owns the ACP provider catalog. `AcpProviderStore` in the main
-process combines built-in manifests (Cursor, Codex, Claude Code, Gemini) with
-user-saved overrides for `enabled`, `command`, `args`, `authMethodId`,
+process combines built-in manifests (Cursor, Devin, Codex, Claude Code, Gemini)
+with user-saved overrides for `enabled`, `command`, `args`, `authMethodId`,
 `authStatus`, `authCheckedAt`, and `authError`. Detection is a shallow
 command-on-path check. The registry is separate from the AI provider registry
 because ACP providers are not OpenAI-compatible API endpoints; they are
 executable agents.
+
+### Devin Local
+
+Devin is an unverified built-in provider with the default command:
+
+```
+devin acp
+```
+
+NusaShell is the ACP host and Devin Local is the ACP server. Devin ACP
+advertises the `devin-browser` authentication method and intentionally does
+not reuse local CLI credentials in ACP mode. Click **Connect** in NusaShell to
+start the browser/PKCE login; the browser flow must finish before
+`session/new` can open. NusaShell does not ship the binary or store Devin
+credentials. Set `NUSASHELL_DEVIN_BIN` in the Electron process environment to
+use a different executable path. The Configure modal can also override the
+command and args for local installations or wrappers.
 
 ### Codex manifest defaults
 
@@ -155,7 +192,13 @@ The manifest also seeds two spawn env defaults:
 - `INITIAL_AGENT_MODE=agent` — starts Codex in agent mode so it can call tools.
 
 These are merged under `process.env` at spawn time (provider `env` wins on
-conflict). The manifest omits a default `authMethodId` so Codex can fall back to
+conflict). After `session/new`, NusaShell applies the provider's ACP mode
+preference through `session/set_config_option`: Cursor uses `agent`, Codex
+uses `agent-full-access` (the ACP equivalent of YOLO), and Devin uses
+`bypass` (Bypass Permissions). The preference is applied for both normal ACP
+threads and subagent ACP runs, unless a saved provider override replaces it.
+
+The manifest omits a default `authMethodId` so Codex can fall back to
 `~/.codex` ChatGPT tokens. To use an OpenAI API key instead, set
 `OPENAI_API_KEY` (or `CODEX_API_KEY`) in the process env that launches Electron,
 then choose `api-key` in Configure → Auth method.

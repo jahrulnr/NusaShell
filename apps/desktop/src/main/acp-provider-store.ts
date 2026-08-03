@@ -22,7 +22,21 @@ const ACP_PROVIDER_MANIFESTS: readonly AcpProviderManifest[] = [
     // cursor_login — that forces a browser OAuth on every Connect/session.
     // Users can still pick cursor_login under Configure for a fresh login.
     authMethodIds: ["cursor_login"],
+    preferredConfig: { mode: "agent" },
     unverified: false,
+  },
+  {
+    id: "devin",
+    displayName: "Devin",
+    monogram: "DV",
+    description: "Devin Local ACP agent via the `devin acp` CLI.",
+    command: process.env.NUSASHELL_DEVIN_BIN ?? "devin",
+    args: ["acp"],
+    // Devin ACP intentionally does not reuse CLI credentials; Connect must
+    // invoke the advertised browser/PKCE authentication method.
+    authMethodIds: ["devin-browser"],
+    preferredConfig: { mode: "bypass" },
+    unverified: true,
   },
   {
     id: "codex",
@@ -33,6 +47,8 @@ const ACP_PROVIDER_MANIFESTS: readonly AcpProviderManifest[] = [
     args: ["-y", "@agentclientprotocol/codex-acp"],
     authMethodIds: ["api-key"],
     env: { NO_BROWSER: "1", INITIAL_AGENT_MODE: "agent" },
+    // ACP exposes this as agent-full-access; it is Codex's YOLO equivalent.
+    preferredConfig: { mode: "agent-full-access" },
     unverified: true,
   },
   {
@@ -96,7 +112,9 @@ export class AcpProviderStore {
           ...(authStatus !== undefined ? { authStatus } : {}),
           ...(authCheckedAt !== undefined ? { authCheckedAt } : {}),
           ...(authError !== undefined ? { authError } : {}),
-          ...(savedConfig?.preferredConfig ? { preferredConfig: savedConfig.preferredConfig } : {}),
+          ...((savedConfig?.preferredConfig ?? manifest.preferredConfig)
+            ? { preferredConfig: savedConfig?.preferredConfig ?? manifest.preferredConfig }
+            : {}),
         },
         detected,
         status,
