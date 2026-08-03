@@ -231,6 +231,7 @@ async function syncAppBehaviorControls() {
   const launchAtLogin = $("#settings-launch-at-login");
   const startHidden = $("#settings-start-hidden");
   const keepInBackground = $("#settings-keep-in-background");
+  const canvasEnabled = $("#settings-canvas-enabled");
   const help = $("#settings-launch-at-login-help");
   if (!launchAtLogin || !startHidden || !keepInBackground || !window.shell?.appBehavior) return;
   try {
@@ -238,6 +239,7 @@ async function syncAppBehaviorControls() {
     launchAtLogin.checked = Boolean(settings.launchAtLogin);
     startHidden.checked = Boolean(settings.startHidden);
     keepInBackground.checked = Boolean(settings.keepInBackground);
+    if (canvasEnabled) canvasEnabled.checked = settings.canvasEnabled !== false;
     launchAtLogin.disabled = !settings.canSetLoginAutostart;
     if (help) {
       help.textContent = settings.canSetLoginAutostart
@@ -267,6 +269,11 @@ function wireAppBehaviorToggle(id, key) {
       if (startHidden) startHidden.checked = Boolean(settings.startHidden);
       const keepInBackground = $("#settings-keep-in-background");
       if (keepInBackground) keepInBackground.checked = Boolean(settings.keepInBackground);
+      const canvasEnabled = $("#settings-canvas-enabled");
+      if (canvasEnabled) canvasEnabled.checked = settings.canvasEnabled !== false;
+      if (key === "canvasEnabled") {
+        agentConversationController?.setCanvasEnabled(settings.canvasEnabled !== false);
+      }
       showToast("Startup settings saved.", "success");
     } catch (error) {
       input.checked = previous;
@@ -1421,6 +1428,7 @@ document.addEventListener("DOMContentLoaded", () => {
   wireAppBehaviorToggle("#settings-launch-at-login", "launchAtLogin");
   wireAppBehaviorToggle("#settings-start-hidden", "startHidden");
   wireAppBehaviorToggle("#settings-keep-in-background", "keepInBackground");
+  wireAppBehaviorToggle("#settings-canvas-enabled", "canvasEnabled");
   void syncAppBehaviorControls();
   $("#ai-limits-form").addEventListener("submit", async (event) => {
     event.preventDefault();

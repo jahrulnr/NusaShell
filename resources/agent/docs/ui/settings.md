@@ -86,6 +86,11 @@ Controls OS login autostart, tray-first launch, and whether closing the launcher
   - Type: toggle
   - Action: Closing the launcher hides to the tray instead of quitting so learning and jobs keep running. Quit from the tray menu to stop fully.
 
+- **Agent Canvas** (`#settings-canvas-enabled`):
+  - Section: Startup & background
+  - Type: toggle
+  - Action: Enables or disables inline SVG/Mermaid rendering and the HTML preview sidebar. When off, canvas fences stay as source code blocks.
+
 ## Agent runtime
 
 Configures how the agent picks and retries models: provider strategy, attempt budget, vision mode, user prompt, and streaming.

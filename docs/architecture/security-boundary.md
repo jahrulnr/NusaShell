@@ -49,7 +49,10 @@ installed plugins or models are "safe":
 - **Process lifecycle:** spawn, stop, crash detection via
   `PluginRuntimeManager`.
 - **Bundled Files / Terminal path containment:** `resolvePath` (and related
-  guards) reject root escapes for those bundled plugins. This is a
+  guards) reject relative-path root escapes (`../` traversal) for those bundled
+  plugins. Absolute paths are accepted as-is — the agent is a trusted actor
+  operating on behalf of the user and may access any path the user can. The
+  root is a convenience for relative path resolution, not a jail. This is a
   correctness guard for those plugins, not a security certification of
   third-party MCP servers.
 - **`data_is_untrusted` labeling:** external tool/resource/docs content is

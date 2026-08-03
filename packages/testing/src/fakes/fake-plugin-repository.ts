@@ -39,6 +39,7 @@ export function makeManifest(
     mcp: {
       transport: "stdio",
       command: "node",
+      args: ["mcp/server.js"],
       env: {},
     },
     ...overrides,

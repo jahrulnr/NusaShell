@@ -1,6 +1,7 @@
 import { ipcMain } from "electron";
 import type { IpcContext } from "./ipc-context.js";
 import type {
+  AgentCanvasArtifact,
   AgentConversationCheckpoint,
   AgentConversationMessage,
 } from "../../shared/agent-conversation-contract.js";
@@ -22,6 +23,10 @@ export function registerAgentIpc(ctx: IpcContext): void {
     store().replaceLastInterrupted(id, message));
   ipcMain.handle("agent-conversations:set-workspace", (_event, id: string, workspace: string) =>
     store().setWorkspace(id, workspace));
+  ipcMain.handle("agent-conversations:upsert-canvas-artifact", (_event, id: string, artifact: AgentCanvasArtifact) =>
+    store().upsertCanvasArtifact(id, artifact));
+  ipcMain.handle("agent-conversations:set-active-canvas-artifact", (_event, id: string, artifactId: string | null) =>
+    store().setActiveCanvasArtifact(id, artifactId));
 
   ipcMain.handle("background-review:configure", (_event, settings: Record<string, unknown>) => {
     ctx.configureBackgroundReview(settings);

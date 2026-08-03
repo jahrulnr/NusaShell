@@ -54,7 +54,6 @@ export interface IpcContext {
   setAppBehavior(settings: AppBehaviorSettings): void;
 
   // Misc helpers
-  redactLogMessage(message: string): string;
   isPluginWindowSender(sender: Electron.WebContents, pluginId: string): boolean;
 }
 

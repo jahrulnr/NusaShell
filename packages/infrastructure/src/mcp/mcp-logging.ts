@@ -6,8 +6,8 @@ export function registerMcpLogging(client: Client, logger: Logger | undefined, s
   client.setNotificationHandler(LoggingMessageNotificationSchema, (notification) => {
     if (!logger) return;
     const fields = {
-      source: redactMcpText(source),
-      logger: notification.params.logger ? redactMcpText(notification.params.logger).slice(0, 200) : undefined,
+      source: boundMcpText(source),
+      logger: notification.params.logger ? boundMcpText(notification.params.logger).slice(0, 200) : undefined,
       mcpLevel: notification.params.level,
       message: formatMcpLogData(notification.params.data),
     };
@@ -28,17 +28,29 @@ export function registerMcpLogging(client: Client, logger: Logger | undefined, s
   });
 }
 
-export function redactMcpText(value: string): string {
-  return value
-    .replace(/([?&](?:token|password|secret|api[_-]?key|authorization)=)[^&\s]+/gi, "$1[REDACTED]")
-    .replace(/((?:token|password|secret|api[_-]?key|authorization)["']?\s*[:=]\s*["']?)[^,\s}"']+/gi, "$1[REDACTED]")
-    .slice(0, 4000);
+/**
+ * Truncate MCP protocol log notifications to a bounded size for flood control.
+ * No pattern-based secret scrubbing — NusaShell is not a secret-filter product
+ * (see docs/architecture/security-boundary.md). Users may intentionally paste
+ * credentials; false positives on base64/hash/MD5/SHA are unacceptable.
+ */
+export function boundMcpText(value: string): string {
+  return value.slice(0, 4000);
+}
+
+/**
+ * Truncate child-process stderr to a bounded size for flood control. No
+ * pattern-based secret scrubbing — stderr is diagnostic output (crash dumps,
+ * stack traces, JSON-RPC frames) and must pass through verbatim for debugging.
+ */
+export function boundMcpStderr(value: string): string {
+  return value.slice(0, 8192);
 }
 
 function formatMcpLogData(value: unknown): string {
-  if (typeof value === "string") return redactMcpText(value);
+  if (typeof value === "string") return boundMcpText(value);
   try {
-    return redactMcpText(JSON.stringify(value));
+    return boundMcpText(JSON.stringify(value));
   } catch {
     return "[unserializable MCP log data]";
   }

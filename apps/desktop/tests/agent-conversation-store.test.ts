@@ -269,4 +269,170 @@ describe("AgentConversationStore", () => {
     expect(loaded?.messages[1]?.status).toBe("interrupted");
     expect(loaded?.messages[1]?.resumeMessages).toBeUndefined();
   });
+
+  it("normalizes a legacy version-1 document without canvas artifacts and fills empty", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-"));
+    const path = join(root, "agent-conversations.json");
+    await writeFile(path, JSON.stringify({
+      version: 1,
+      conversations: [{
+        id: "conv-legacy-v1",
+        title: "Legacy v1",
+        createdAt: "2026-08-02T08:00:00.000Z",
+        updatedAt: "2026-08-02T08:05:00.000Z",
+        messages: [{ role: "user", content: "hi" }],
+      }],
+    }), "utf8");
+
+    const loaded = await new AgentConversationStore(path).get("conv-legacy-v1");
+    expect(loaded?.messages).toHaveLength(1);
+    expect(loaded?.canvasArtifacts).toBeUndefined();
+    expect(loaded?.activeCanvasArtifactId).toBeUndefined();
+  });
+
+  it("upserts, activates, and round-trips canvas artifacts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-"));
+    const path = join(root, "agent-conversations.json");
+    const store = new AgentConversationStore(path, () => new Date("2026-08-03T10:00:00.000Z"), () => "conv-canvas");
+    const conversation = await store.create();
+
+    const artifact = {
+      id: "conv-canvas:0:0",
+      conversationId: conversation.id,
+      sourceMessageId: "0",
+      fenceIndex: 0,
+      kind: "svg" as const,
+      title: "Diagram",
+      source: "<svg></svg>",
+      createdAt: "2026-08-03T10:00:00.000Z",
+      updatedAt: "2026-08-03T10:00:00.000Z",
+    };
+    await store.upsertCanvasArtifact(conversation.id, artifact);
+    const activated = await store.setActiveCanvasArtifact(conversation.id, artifact.id);
+
+    expect(activated.canvasArtifacts).toEqual([artifact]);
+    expect(activated.activeCanvasArtifactId).toBe(artifact.id);
+
+    const loaded = await new AgentConversationStore(path).get(conversation.id);
+    expect(loaded?.canvasArtifacts?.[0]).toMatchObject({ id: artifact.id, kind: "svg" });
+    expect(loaded?.activeCanvasArtifactId).toBe(artifact.id);
+  });
+
+  it("replaces an existing artifact on upsert by id and clears active when set to null", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-"));
+    const path = join(root, "agent-conversations.json");
+    const store = new AgentConversationStore(path, () => new Date("2026-08-03T10:00:00.000Z"), () => "conv-canvas-up");
+    const conversation = await store.create();
+    const base = {
+      id: "conv-canvas-up:0:0",
+      conversationId: conversation.id,
+      sourceMessageId: "0",
+      fenceIndex: 0,
+      kind: "mermaid" as const,
+      title: "Flow",
+      source: "flowchart LR\n  A-->B",
+      createdAt: "2026-08-03T10:00:00.000Z",
+      updatedAt: "2026-08-03T10:00:00.000Z",
+    };
+    await store.upsertCanvasArtifact(conversation.id, base);
+    const updated = await store.upsertCanvasArtifact(conversation.id, { ...base, source: "flowchart LR\n  A-->C", title: "Flow v2" });
+    expect(updated.canvasArtifacts).toHaveLength(1);
+    expect(updated.canvasArtifacts?.[0]?.source).toBe("flowchart LR\n  A-->C");
+    expect(updated.canvasArtifacts?.[0]?.title).toBe("Flow v2");
+
+    const cleared = await store.setActiveCanvasArtifact(conversation.id, null);
+    expect(cleared.activeCanvasArtifactId).toBeUndefined();
+  });
+
+  it("evicts oldest non-active artifacts past the count cap", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-"));
+    const path = join(root, "agent-conversations.json");
+    let tick = 0;
+    const store = new AgentConversationStore(
+      path,
+      () => new Date(1_900_000_000_000 + tick++ * 1000),
+      () => "conv-canvas-evict",
+    );
+    const conversation = await store.create();
+    // Activate the very first artifact before the count cap is reached, so the
+    // eviction policy must keep it even though it is the oldest by createdAt.
+    await store.upsertCanvasArtifact(conversation.id, {
+      id: "conv-canvas-evict:0:0",
+      conversationId: conversation.id,
+      sourceMessageId: "0",
+      fenceIndex: 0,
+      kind: "svg",
+      title: "Art 0",
+      source: "<svg></svg>",
+      createdAt: new Date(1_900_000_000_000).toISOString(),
+      updatedAt: new Date(1_900_000_000_000).toISOString(),
+    });
+    await store.setActiveCanvasArtifact(conversation.id, "conv-canvas-evict:0:0");
+    for (let index = 1; index < 22; index++) {
+      await store.upsertCanvasArtifact(conversation.id, {
+        id: `conv-canvas-evict:0:${index}`,
+        conversationId: conversation.id,
+        sourceMessageId: "0",
+        fenceIndex: index,
+        kind: "svg",
+        title: `Art ${index}`,
+        source: "<svg></svg>",
+        createdAt: new Date(1_900_000_000_000 + index * 1000).toISOString(),
+        updatedAt: new Date(1_900_000_000_000 + index * 1000).toISOString(),
+      });
+    }
+    const loaded = await store.get(conversation.id);
+    expect(loaded?.canvasArtifacts).toHaveLength(20);
+    expect(loaded?.canvasArtifacts?.some((item) => item.id === "conv-canvas-evict:0:0")).toBe(true);
+    expect(loaded?.canvasArtifacts?.some((item) => item.id === "conv-canvas-evict:0:1")).toBe(false);
+  });
+
+  it("rejects an artifact whose source exceeds the per-artifact byte cap", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-"));
+    const path = join(root, "agent-conversations.json");
+    const store = new AgentConversationStore(path, () => new Date("2026-08-03T10:00:00.000Z"), () => "conv-canvas-big");
+    const conversation = await store.create();
+    await expect(store.upsertCanvasArtifact(conversation.id, {
+      id: "conv-canvas-big:0:0",
+      conversationId: conversation.id,
+      sourceMessageId: "0",
+      fenceIndex: 0,
+      kind: "html",
+      title: "Big",
+      source: "x".repeat(513 * 1024),
+      createdAt: "2026-08-03T10:00:00.000Z",
+      updatedAt: "2026-08-03T10:00:00.000Z",
+    })).rejects.toThrow("exceeds the");
+  });
+
+  it("drops canvas artifacts whose conversationId does not match on normalize", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-"));
+    const path = join(root, "agent-conversations.json");
+    await writeFile(path, JSON.stringify({
+      version: 2,
+      conversations: [{
+        id: "conv-mismatch",
+        title: "Mismatch",
+        createdAt: "2026-08-03T08:00:00.000Z",
+        updatedAt: "2026-08-03T08:05:00.000Z",
+        messages: [],
+        canvasArtifacts: [{
+          id: "conv-mismatch:0:0",
+          conversationId: "other-conv",
+          sourceMessageId: "0",
+          fenceIndex: 0,
+          kind: "svg",
+          title: "Stray",
+          source: "<svg></svg>",
+          createdAt: "2026-08-03T08:00:00.000Z",
+          updatedAt: "2026-08-03T08:00:00.000Z",
+        }],
+        activeCanvasArtifactId: "conv-mismatch:0:0",
+      }],
+    }), "utf8");
+
+    const loaded = await new AgentConversationStore(path).get("conv-mismatch");
+    expect(loaded?.canvasArtifacts).toBeUndefined();
+    expect(loaded?.activeCanvasArtifactId).toBeUndefined();
+  });
 });

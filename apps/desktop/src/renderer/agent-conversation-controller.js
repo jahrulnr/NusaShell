@@ -15,6 +15,8 @@ import {
 } from "./agent-conversation-ui.js";
 import { estimateContextTokens, formatContextUsage, resolveContextBadgeTokens, shouldApplyAcpUiUpdate } from "./ai-model-ui.js";
 import { inspectAttachmentContent, toDataUrl } from "./attachment-content.js";
+import { CANVAS_ARTIFACT_MAX_SOURCE_BYTES, canvasArtifactId, canvasKindForLang } from "./agent-canvas-detect.js";
+import { renderArtifact } from "./agent-canvas-render.js";
 
 export class AgentConversationController {
   constructor({ shell, runTurn, cancelTurn, answerAsk, getActiveModel, getVisionMode, notify, log, runAcpTurn, cancelAcpTurn, answerAcpPermission, answerAcpAsk, getAcpSessionInfo, setAcpConfigOption, ensureAcpSession, refreshModelPicker }) {
@@ -45,6 +47,8 @@ export class AgentConversationController {
     this.attachments = [];
     this.composerInputWidth = 0;
     this.composerResizeObserver = null;
+    this.canvasEnabled = true;
+    this.activeCanvasArtifact = null;
   }
 
   async initialize() {
@@ -53,9 +57,20 @@ export class AgentConversationController {
       return;
     }
     this.bindEvents();
+    this.bindCanvasControls();
+    await this.loadCanvasEnabled();
     await this.refresh();
     if (this.conversations.length === 0) await this.create();
     else await this.open(this.conversations[0].id);
+  }
+
+  async loadCanvasEnabled() {
+    try {
+      const behavior = await this.shell?.appBehavior?.get();
+      this.setCanvasEnabled(behavior ? behavior.canvasEnabled !== false : true);
+    } catch {
+      this.setCanvasEnabled(true);
+    }
   }
 
   renderList() {
@@ -682,6 +697,16 @@ export class AgentConversationController {
     this.updateAcpStatus();
   }
 
+  clearCanvasOnSwitch() {
+    const pane = $("#agent-canvas");
+    const body = $("#agent-canvas-body");
+    const shell = $("#agent-shell");
+    if (pane) pane.hidden = true;
+    if (body) body.textContent = "";
+    shell?.classList.remove("is-canvas-open");
+    this.activeCanvasArtifact = null;
+  }
+
   updateWorkspaceLabel() {
     const label = $("#agent-workspace-label");
     if (!label) return;
@@ -865,8 +890,9 @@ export class AgentConversationController {
       thread.appendChild(empty);
       return;
     }
-    this.conversation.messages.forEach((message) => this.appendMessage(message.role, message.content, message));
+    this.conversation.messages.forEach((message, index) => this.appendMessage(message.role, message.content, { ...message, canvasMessageIndex: index }));
     this.scrollToBottom();
+    this.restoreCanvas();
   }
 
   appendMessage(role, content, meta = {}) {
@@ -952,7 +978,193 @@ export class AgentConversationController {
 
     thread.appendChild(message);
     thread.scrollTop = thread.scrollHeight;
+    if (role === "assistant" && !meta.pending && !meta.error) {
+      this.enhanceCanvasFences(message, meta.canvasMessageIndex ?? this.currentMessageIndex());
+    }
     return message;
+  }
+
+  currentMessageIndex() {
+    const messages = this.conversation?.messages;
+    return messages && messages.length > 0 ? messages.length - 1 : 0;
+  }
+
+  setCanvasEnabled(enabled) {
+    this.canvasEnabled = Boolean(enabled);
+    if (!this.canvasEnabled) this.closeCanvasSidebar();
+  }
+
+  bindCanvasControls() {
+    $("#agent-canvas-close")?.addEventListener("click", () => this.closeCanvasSidebar());
+    $("#agent-canvas-refresh")?.addEventListener("click", () => this.refreshCanvas());
+    $("#agent-canvas-download")?.addEventListener("click", () => this.downloadCanvasSource());
+  }
+
+  enhanceCanvasFences(messageEl, messageIndex) {
+    if (!this.canvasEnabled || !messageEl) return;
+    const conversationId = this.conversation?.id;
+    if (!conversationId) return;
+    const blocks = messageEl.querySelectorAll("pre > code");
+    if (!blocks.length) return;
+    let fenceIndex = 0;
+    blocks.forEach((code) => {
+      const langClass = [...code.classList].find((cls) => cls.startsWith("language-"));
+      const lang = langClass ? langClass.slice("language-".length) : "";
+      const kind = canvasKindForLang(lang);
+      if (!kind) return;
+      const pre = code.parentElement;
+      if (!pre) return;
+      const source = code.textContent ?? "";
+      const artifactId = canvasArtifactId(conversationId, String(messageIndex), fenceIndex);
+      const tooLarge = source.length > CANVAS_ARTIFACT_MAX_SOURCE_BYTES;
+      const title = `${kind} ${fenceIndex + 1}`;
+      this.decorateCanvasFence(pre, code, { artifactId, kind, source, title, tooLarge, messageIndex, fenceIndex });
+      fenceIndex += 1;
+    });
+  }
+
+  decorateCanvasFence(pre, code, ctx) {
+    const actions = element("div", "agent-canvas-fence-actions");
+    if (ctx.kind === "html") {
+      const preview = element("button", "agent-canvas-fence-btn is-primary", "Preview");
+      preview.type = "button";
+      preview.addEventListener("click", () => void this.openCanvasSidebar(ctx));
+      actions.appendChild(preview);
+    } else {
+      // svg / mermaid: auto-render inline, keep source accessible via Sidebar.
+      this.renderInlineCanvas(pre, code, ctx).catch((error) => {
+        this.log?.("error", `Canvas inline render failed: ${error.message || error}`);
+      });
+    }
+    const sidebar = element("button", "agent-canvas-fence-btn", "Sidebar");
+    sidebar.type = "button";
+    sidebar.addEventListener("click", () => void this.openCanvasSidebar(ctx));
+    actions.appendChild(sidebar);
+    pre.after(actions);
+  }
+
+  async renderInlineCanvas(pre, code, ctx) {
+    const container = element("div", "agent-canvas-inline");
+    container.setAttribute("aria-label", ctx.title);
+    const result = await renderArtifact({ kind: ctx.kind, source: ctx.source });
+    if (result.type === "svg" && result.svg) {
+      container.innerHTML = result.svg;
+    } else if (result.type === "error") {
+      // Leave the original code block visible; do not crash on a bad diagram.
+      return;
+    }
+    pre.before(container);
+  }
+
+  async openCanvasSidebar(ctx) {
+    if (!this.canvasEnabled || !this.conversation) return;
+    if (ctx.tooLarge) {
+      this.notify(`Artifact is larger than ${Math.round(CANVAS_ARTIFACT_MAX_SOURCE_BYTES / 1024)}KB and cannot be previewed.`, "error");
+      return;
+    }
+    const conversationId = this.conversation.id;
+    const timestamp = new Date().toISOString();
+    const artifact = {
+      id: ctx.artifactId,
+      conversationId,
+      sourceMessageId: String(ctx.messageIndex),
+      fenceIndex: ctx.fenceIndex,
+      kind: ctx.kind,
+      title: ctx.title,
+      source: ctx.source,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    try {
+      this.conversation = await this.shell.agentConversations.upsertCanvasArtifact(conversationId, artifact);
+      this.conversation = await this.shell.agentConversations.setActiveCanvasArtifact(conversationId, artifact.id);
+    } catch (error) {
+      this.notify(`Could not save canvas artifact: ${error.message || error}`, "error");
+    }
+    this.activeCanvasArtifact = artifact;
+    this.mountCanvas(artifact);
+  }
+
+  restoreCanvas() {
+    if (!this.canvasEnabled || !this.conversation) {
+      this.closeCanvasSidebar();
+      return;
+    }
+    const activeId = this.conversation.activeCanvasArtifactId;
+    const artifact = this.conversation.canvasArtifacts?.find((item) => item.id === activeId);
+    if (!artifact) {
+      this.closeCanvasSidebar();
+      return;
+    }
+    this.activeCanvasArtifact = artifact;
+    this.mountCanvas(artifact);
+  }
+
+  async mountCanvas(artifact) {
+    const pane = $("#agent-canvas");
+    const body = $("#agent-canvas-body");
+    const badge = $("#agent-canvas-badge");
+    const title = $("#agent-canvas-title");
+    const hint = $("#agent-canvas-hint");
+    const shell = $("#agent-shell");
+    if (!pane || !body || !badge || !title) return;
+    badge.textContent = artifact.kind.toUpperCase();
+    title.textContent = artifact.title;
+    body.textContent = "";
+    if (hint) hint.hidden = true;
+    pane.hidden = false;
+    shell?.classList.add("is-canvas-open");
+    this.activeCanvasArtifact = artifact;
+    const result = await renderArtifact({ kind: artifact.kind, source: artifact.source });
+    if (result.type === "html") {
+      const iframe = document.createElement("iframe");
+      iframe.setAttribute("sandbox", "allow-scripts");
+      iframe.setAttribute("aria-label", artifact.title);
+      iframe.srcdoc = result.srcdoc;
+      body.appendChild(iframe);
+    } else if (result.type === "svg" && result.svg) {
+      const wrap = element("div", "agent-canvas-svg");
+      wrap.innerHTML = result.svg;
+      body.appendChild(wrap);
+    } else if (result.type === "error") {
+      const errorBox = element("div", "agent-canvas-error", result.message || "Could not render this artifact.");
+      body.appendChild(errorBox);
+      if (hint) {
+        hint.textContent = "The source is still available in the message.";
+        hint.hidden = false;
+      }
+    }
+  }
+
+  closeCanvasSidebar() {
+    const pane = $("#agent-canvas");
+    const body = $("#agent-canvas-body");
+    const shell = $("#agent-shell");
+    if (pane) pane.hidden = true;
+    if (body) body.textContent = "";
+    shell?.classList.remove("is-canvas-open");
+    this.activeCanvasArtifact = null;
+    if (this.conversation?.activeCanvasArtifactId) {
+      void this.shell?.agentConversations?.setActiveCanvasArtifact(this.conversation.id, null).catch(() => undefined);
+    }
+  }
+
+  refreshCanvas() {
+    if (this.activeCanvasArtifact) void this.mountCanvas(this.activeCanvasArtifact);
+  }
+
+  downloadCanvasSource() {
+    const artifact = this.activeCanvasArtifact;
+    if (!artifact) return;
+    const blob = new Blob([artifact.source], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${artifact.kind}-${artifact.fenceIndex + 1}.${artifact.kind === "mermaid" ? "mmd" : artifact.kind}`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
   }
 
   messageAttachments(attachments) {
@@ -1704,6 +1916,9 @@ export class AgentConversationController {
     actions.appendChild(copy);
     footer.appendChild(actions);
     message.appendChild(footer);
+    if (meta.status !== "interrupted") {
+      this.enhanceCanvasFences(message, this.currentMessageIndex());
+    }
   }
 
   async copyMessage(content, button) {

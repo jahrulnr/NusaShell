@@ -1,3 +1,5 @@
+import { format } from "node:util";
+
 function serializeLogValue(value: unknown, seen: WeakSet<object>): unknown {
   if (value && typeof value === "object") {
     if (seen.has(value)) return "[Circular]";
@@ -36,22 +38,34 @@ function serializeLogValue(value: unknown, seen: WeakSet<object>): unknown {
   return value;
 }
 
-export function redactLogMessage(message: string): string {
-  return message
-    .replace(/([?&](?:token|password|secret|api[_-]?key|authorization)=)[^&\s]+/gi, "$1[REDACTED]")
-    .replace(/((?:token|password|secret|api[_-]?key|authorization)["']?\s*[:=]\s*["']?)[^,\s}"']+/gi, "$1[REDACTED]");
+function serializeArg(arg: unknown, seen: WeakSet<object>): unknown {
+  if (arg instanceof Error) return arg.stack ?? arg.message;
+  if (typeof arg === "string") return arg;
+  try {
+    return JSON.stringify(serializeLogValue(arg, seen));
+  } catch {
+    return String(arg);
+  }
 }
 
 export function formatLogArguments(args: readonly unknown[]): string {
   const seen = new WeakSet<object>();
-  const message = args.map((arg) => {
-    if (arg instanceof Error) return arg.stack ?? arg.message;
-    if (typeof arg === "string") return arg;
-    try {
-      return JSON.stringify(serializeLogValue(arg, seen));
-    } catch {
-      return String(arg);
-    }
-  }).join(" ");
-  return redactLogMessage(message);
+
+  // Message-first pino shape: logger.warn("msg %s", value)
+  // Apply util.format so printf placeholders interpolate instead of leaving
+  // literal %s/%d with values appended.
+  if (typeof args[0] === "string") {
+    return format(args[0], ...args.slice(1).map((arg) => serializeArg(arg, seen)));
+  }
+
+  // Bindings-first pino shape: logger.warn({ err }, "msg %s", value)
+  // Serialize the bindings object, then interpolate the message.
+  if (args[0] && typeof args[0] === "object" && !(args[0] instanceof Error) && typeof args[1] === "string") {
+    const bindings = serializeArg(args[0], seen);
+    const message = format(args[1], ...args.slice(2).map((arg) => serializeArg(arg, seen)));
+    return `${bindings} ${message}`;
+  }
+
+  // Fallback: no string message — join serialized args (e.g. formatLogArguments([{ err }])).
+  return args.map((arg) => serializeArg(arg, seen)).join(" ");
 }

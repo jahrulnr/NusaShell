@@ -67,6 +67,7 @@ describe("PluginRuntimeManager", () => {
         mcp: {
           transport: "stdio",
           command: "node",
+          args: ["mcp/server.js"],
           keepAliveOnClose: true,
         },
       }));

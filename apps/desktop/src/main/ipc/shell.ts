@@ -47,7 +47,7 @@ export function registerShellIpc(ctx: IpcContext): void {
   ipcMain.handle("logs:list", () => ctx.logTail.list());
   ipcMain.on("logs:write", (_event, level: string, message: string) => {
     if (!ctx.shellLogLevels.has(level as never) || typeof message !== "string") return;
-    ctx.logTail.add("renderer", level as ShellLogLevel, ctx.redactLogMessage(message.slice(0, 4000)));
+    ctx.logTail.add("renderer", level as ShellLogLevel, message.slice(0, 4000));
   });
 
   // App behavior

@@ -50,6 +50,20 @@ export interface AgentConversationAcp {
 
 export type AgentConversationKind = "agent" | "acp";
 
+export type AgentCanvasArtifactKind = "html" | "svg" | "mermaid";
+
+export interface AgentCanvasArtifact {
+  readonly id: string;
+  readonly conversationId: string;
+  readonly sourceMessageId: string;
+  readonly fenceIndex: number;
+  readonly kind: AgentCanvasArtifactKind;
+  readonly title: string;
+  readonly source: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
 export interface AgentConversation {
   readonly id: string;
   readonly title: string;
@@ -60,6 +74,8 @@ export interface AgentConversation {
   readonly workspace?: string;
   readonly kind?: AgentConversationKind;
   readonly acp?: AgentConversationAcp;
+  readonly canvasArtifacts?: readonly AgentCanvasArtifact[];
+  readonly activeCanvasArtifactId?: string;
 }
 
 export type AgentConversationSummary = Omit<AgentConversation, "messages" | "checkpoint"> & {

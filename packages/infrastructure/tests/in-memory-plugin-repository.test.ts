@@ -9,7 +9,7 @@ function makePlugin(id: string, enabled = true): Plugin {
     version: "1.0.0",
     icon: "test",
     ui: { entry: "index.html" },
-    mcp: { transport: "stdio", command: "node", env: {} },
+    mcp: { transport: "stdio", command: "node", args: ["mcp/server.js"], env: {} },
   });
   if (!manifestResult.ok) throw new Error(manifestResult.error.message);
 

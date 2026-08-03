@@ -183,9 +183,15 @@ describe("FileService.deleteFile", () => {
     expect(result.deleted).toBe(true);
   });
 
-  it("refuses to delete paths that escape root", async () => {
+  it("refuses to delete relative paths that escape root via traversal", async () => {
     await expect(service.deleteFile("../../etc", true)).rejects.toThrow(/escapes files root/);
-    await expect(service.deleteFile("/absolute/path", false)).rejects.toThrow(/escapes files root/);
+  });
+
+  it("allows absolute paths (agent is a trusted actor)", async () => {
+    const absFile = path.join(tmpDir, "abs-file.txt");
+    await fs.writeFile(absFile, "x");
+    const result = await service.deleteFile(absFile, false);
+    expect(result.deleted).toBe(true);
   });
 });
 

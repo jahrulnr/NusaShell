@@ -95,6 +95,33 @@ describe("PluginManifest", () => {
     expect(result.ok).toBe(false);
   });
 
+  it("rejects stdio command 'node' with no args (would eval stdin as JS)", () => {
+    const result = PluginManifest.create({
+      ...manifestInput,
+      mcp: { transport: "stdio", command: "node" },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toMatch(/node.*args/);
+    }
+  });
+
+  it("rejects stdio command 'node' with only whitespace args", () => {
+    const result = PluginManifest.create({
+      ...manifestInput,
+      mcp: { transport: "stdio", command: "node", args: ["   "] },
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it("accepts stdio command 'node' with a script path in args", () => {
+    const result = PluginManifest.create({
+      ...manifestInput,
+      mcp: { transport: "stdio", command: "node", args: ["mcp/server.js"] },
+    });
+    expect(result.ok).toBe(true);
+  });
+
   it("requires mcp.url for sse transport", () => {
     const result = PluginManifest.create({
       ...manifestInput,

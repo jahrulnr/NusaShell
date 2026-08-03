@@ -34,3 +34,30 @@ an inventory of removable plugin tools or plugin-specific howtos; discover those
 from the live plugin with `tool_list`/`tool_search` and plugin-owned MCP prompts.
 
 These tools appear automatically; the model does not need to start an MCP server to use them.
+
+## Agent Canvas
+
+Completed assistant messages can carry **canvas fences** — fenced code blocks
+tagged `html`/`htm`, `svg`, or `mermaid`. The shell renders these beside the
+conversation in a shell-owned preview pane:
+
+- **SVG** and **Mermaid** fences auto-render inline on completed messages.
+  Mermaid is lazy-loaded and runs with `securityLevel: 'strict'`, so it
+  compiles to static SVG. A **Sidebar** action promotes the fence into the
+  canvas pane.
+- **HTML** fences stay as source until the user clicks **Preview**, which opens
+  the pane with a sandboxed iframe (`sandbox="allow-scripts"`, no
+  `allow-same-origin`) and a Content-Security-Policy that denies every remote
+  origin in v1 (empty external allowlist). Remote scripts, stylesheets, and
+  fonts referenced by the artifact fail closed; this is intended. Inline
+  scripts and styles work.
+- Artifacts persist per conversation (max 20 and 3 MB total, oldest non-active
+  evicted) and survive compaction. Switching conversations hides the pane and
+  reopens it only for the newly selected conversation's active artifact.
+- The canvas can be disabled from **Settings → Startup & background → Agent
+  Canvas**. When off, canvas fences stay as source code blocks only.
+
+The canvas is shell chrome, not a plugin window. It does not vet or moderate
+model output — the source is always visible verbatim in the message — and it
+does not expand the deferred host-isolation or MCP/AI behavioral-security
+scope.

@@ -61,7 +61,7 @@ NusaShell platform behavior.
 ## Implement the MCP boundary
 
 - Use the official MCP SDK and advertise only implemented capabilities.
-- Keep stdout exclusively for stdio MCP protocol traffic; write bounded, redacted diagnostics to stderr.
+- Keep stdout exclusively for stdio MCP protocol traffic; write bounded diagnostics to stderr.
 - Validate runtime inputs strictly even when JSON Schema already describes them.
 - Keep a canonical catalog synchronized with descriptors and dispatch handlers.
 - Return useful `structuredContent` with a compact text fallback. Return safe `isError: true` results for expected failures.

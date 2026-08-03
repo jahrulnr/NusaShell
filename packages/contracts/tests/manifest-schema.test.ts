@@ -23,7 +23,7 @@ describe("ManifestSchema", () => {
         entry: "ui/index.html",
         window: { mode: "panel", defaultSize: { width: 480, height: 560 }, resizable: true },
       },
-      mcp: { transport: "stdio", command: "node", env: { FOO: "bar" }, autostart: true, keepAliveOnClose: false },
+      mcp: { transport: "stdio", command: "node", args: ["mcp/server.js"], env: { FOO: "bar" }, autostart: true, keepAliveOnClose: false },
       dependencies: { shell: ">=0.1.0" },
     });
     expect(result.success).toBe(true);
@@ -100,6 +100,25 @@ describe("ManifestSchema", () => {
       mcp: { transport: "websocket", command: "node" },
     });
     expect(result.success).toBe(false);
+  });
+
+  it("rejects stdio command 'node' with no args (would eval stdin as JS)", () => {
+    const result = ManifestSchema.safeParse({
+      ...VALID,
+      mcp: { transport: "stdio", command: "node" },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.message).toMatch(/node.*args/);
+    }
+  });
+
+  it("accepts stdio command 'node' with a script path in args", () => {
+    const result = ManifestSchema.safeParse({
+      ...VALID,
+      mcp: { transport: "stdio", command: "node", args: ["mcp/server.js"] },
+    });
+    expect(result.success).toBe(true);
   });
 
   it("rejects invalid window mode", () => {

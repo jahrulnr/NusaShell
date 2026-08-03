@@ -42,16 +42,29 @@ export const ManifestSchema = z.object({
         .optional(),
     })
     .optional(),
-  mcp: z.object({
-    transport: z.enum(["stdio", "sse", "http"]),
-    command: z.string().min(1).optional(),
-    args: z.array(z.string()).optional(),
-    url: z.string().min(1).optional(),
-    env: z.record(z.string(), z.string()).optional(),
-    headers: z.record(z.string(), z.string()).optional(),
-    autostart: z.boolean().optional(),
-    keepAliveOnClose: z.boolean().optional(),
-  }),
+  mcp: z
+    .object({
+      transport: z.enum(["stdio", "sse", "http"]),
+      command: z.string().min(1).optional(),
+      args: z.array(z.string()).optional(),
+      url: z.string().min(1).optional(),
+      env: z.record(z.string(), z.string()).optional(),
+      headers: z.record(z.string(), z.string()).optional(),
+      autostart: z.boolean().optional(),
+      keepAliveOnClose: z.boolean().optional(),
+    })
+    .superRefine((mcp, ctx) => {
+      if (mcp.transport === "stdio" && mcp.command === "node") {
+        const hasScript = mcp.args?.some((arg) => arg.trim().length > 0);
+        if (!hasScript) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["mcp", "args"],
+            message: "stdio transport with command 'node' requires a script path in mcp.args",
+          });
+        }
+      }
+    }),
   dependencies: z
     .object({
       shell: z.string().optional(),

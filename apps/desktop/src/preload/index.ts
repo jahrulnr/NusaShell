@@ -1,6 +1,7 @@
 import { clipboard, contextBridge, ipcRenderer } from "electron";
 import type { PublicAiRegistry, ReasoningEffort, SaveAiProviderInput } from "../shared/ai-contract.js";
 import type {
+  AgentCanvasArtifact,
   AgentConversation,
   AgentConversationCheckpoint,
   AgentConversationMessage,
@@ -78,6 +79,8 @@ export interface ShellApi {
     replaceLastInterrupted(id: string, message: AgentConversationMessage): Promise<AgentConversation>;
     delete(id: string): Promise<void>;
     setWorkspace(id: string, workspace: string): Promise<AgentConversation>;
+    upsertCanvasArtifact(id: string, artifact: AgentCanvasArtifact): Promise<AgentConversation>;
+    setActiveCanvasArtifact(id: string, artifactId: string | null): Promise<AgentConversation>;
   };
   readonly acpProviders: {
     list(): Promise<readonly AcpProviderPublic[]>;
@@ -127,6 +130,7 @@ export interface AppBehaviorPublic {
   readonly launchAtLogin: boolean;
   readonly startHidden: boolean;
   readonly keepInBackground: boolean;
+  readonly canvasEnabled: boolean;
   readonly canSetLoginAutostart: boolean;
 }
 
@@ -237,6 +241,8 @@ const api: ShellApi = {
     replaceLastInterrupted: (id, message) => ipcRenderer.invoke("agent-conversations:replace-interrupted", id, message),
     delete: (id) => ipcRenderer.invoke("agent-conversations:delete", id),
     setWorkspace: (id, workspace) => ipcRenderer.invoke("agent-conversations:set-workspace", id, workspace),
+    upsertCanvasArtifact: (id, artifact) => ipcRenderer.invoke("agent-conversations:upsert-canvas-artifact", id, artifact),
+    setActiveCanvasArtifact: (id, artifactId) => ipcRenderer.invoke("agent-conversations:set-active-canvas-artifact", id, artifactId),
   },
   acpProviders: {
     list: () => ipcRenderer.invoke("acp-providers:list"),

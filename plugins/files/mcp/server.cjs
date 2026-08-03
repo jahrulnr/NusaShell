@@ -24796,10 +24796,11 @@ async function validateRoot(root) {
 }
 function resolvePath(root, input) {
   if (!input || input === "/" || input === "") return root;
-  const resolved = import_node_path.default.isAbsolute(input) ? input : import_node_path.default.resolve(root, input);
+  if (import_node_path.default.isAbsolute(input)) return import_node_path.default.resolve(input);
+  const resolved = import_node_path.default.resolve(root, input);
   const normalizedRoot = import_node_path.default.resolve(root);
   const relative = import_node_path.default.relative(normalizedRoot, resolved);
-  if (relative.startsWith("..") || import_node_path.default.isAbsolute(relative)) {
+  if (relative.startsWith("..")) {
     throw new Error(`Path escapes files root: ${input}`);
   }
   return resolved;

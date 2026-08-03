@@ -11,7 +11,6 @@ import type {
   AcpSessionStateEvent,
   ApplicationEvent,
 } from "@nusashell/application";
-import { redactString, redactValue } from "./redact.js";
 
 /**
  * Maps ACP-domain events (text/thought deltas, tool calls, plan, permission/
@@ -47,7 +46,7 @@ export function mapAcpEvent(
         kind: "event",
         event: "acp.tool_call",
         sequence,
-        payload: { traceId: e.aggregateId, call: redactValue({ ...e.call }), timestamp },
+        payload: { traceId: e.aggregateId, call: { ...e.call }, timestamp },
       };
     }
     case "acp.tool_call_update": {
@@ -60,7 +59,7 @@ export function mapAcpEvent(
           traceId: e.aggregateId,
           callId: e.callId,
           status: e.status,
-          ...(e.summary !== undefined ? { summary: redactString(e.summary) } : {}),
+          ...(e.summary !== undefined ? { summary: e.summary } : {}),
           timestamp,
         },
       };
@@ -116,7 +115,7 @@ export function mapAcpEvent(
         payload: {
           traceId: e.aggregateId,
           ok: e.ok,
-          ...(e.error !== undefined ? { error: redactString(e.error) } : {}),
+          ...(e.error !== undefined ? { error: e.error } : {}),
           timestamp,
         },
       };

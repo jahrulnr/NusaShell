@@ -228,3 +228,67 @@ Confirmation dialog shown before permanently removing a conversation thread.
   - Section: Delete conversation dialog
   - Type: button
   - Action: Permanently deletes the selected conversation thread.
+
+## Agent Canvas
+
+A shell-owned preview pane beside the conversation. Completed assistant messages auto-render svg and mermaid fences inline (mermaid is lazy-loaded, strict mode) with a Sidebar action that promotes the fence into the pane. html fences stay as source until the Preview action opens a sandboxed iframe (sandbox=allow-scripts, no allow-same-origin, CSP with an empty external allowlist in v1). The pane shows one active artifact at a time with a type badge, Refresh, Download source, and Close. Artifacts persist per conversation and restore on reopen; a Settings toggle disables the canvas entirely.
+
+- **Canvas sidebar pane** (`#agent-canvas`):
+  - Section: Agent Canvas
+  - Type: complementary region
+  - Action: Shell-owned preview surface beside the conversation. Hidden until a Sidebar or Preview action opens it, or the active conversation has a persisted activeCanvasArtifactId.
+
+- **Canvas title** (`#agent-canvas-title`):
+  - Section: Agent Canvas
+  - Type: status text
+  - Action: Shows the active artifact title.
+
+- **Canvas type badge** (`#agent-canvas-badge`):
+  - Section: Agent Canvas
+  - Type: badge
+  - Action: Labels the artifact kind (HTML, SVG, or MERMAID).
+
+- **Canvas body** (`#agent-canvas-body`):
+  - Section: Agent Canvas
+  - Type: region
+  - Action: Hosts the rendered artifact: a sandboxed iframe for HTML, or a static SVG container for SVG/Mermaid.
+
+- **Canvas hint** (`#agent-canvas-hint`):
+  - Section: Agent Canvas
+  - Type: status text
+  - Action: Shows a fallback note when an artifact fails to render.
+
+- **Refresh canvas** (`#agent-canvas-refresh`):
+  - Section: Agent Canvas
+  - Type: icon button
+  - Action: Re-runs the render pipeline for the active artifact.
+
+- **Download source** (`#agent-canvas-download`):
+  - Section: Agent Canvas
+  - Type: icon button
+  - Action: Downloads the active artifact source as a file.
+
+- **Close canvas** (`#agent-canvas-close`):
+  - Section: Agent Canvas
+  - Type: icon button
+  - Action: Hides the pane and clears the active artifact for the conversation.
+
+- **Canvas fence actions** (`.agent-canvas-fence-actions`):
+  - Section: Agent Canvas
+  - Type: group
+  - Action: Action row appended to a canvas-tagged code fence.
+
+- **Canvas fence action button** (`.agent-canvas-fence-btn`):
+  - Section: Agent Canvas
+  - Type: button
+  - Action: Preview (HTML) or Sidebar action attached to a canvas fence.
+
+- **Inline canvas render** (`.agent-canvas-inline`):
+  - Section: Agent Canvas
+  - Type: region
+  - Action: Static SVG container rendered inline above an svg/mermaid fence on completed assistant messages.
+
+- **Canvas SVG host** (`.agent-canvas-svg`):
+  - Section: Agent Canvas
+  - Type: region
+  - Action: Centered SVG host inside the canvas body for svg/mermaid artifacts.

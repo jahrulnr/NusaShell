@@ -160,22 +160,16 @@ card is only sealed (success/error state, output rendered) when the matching
 as incomplete (`is-incomplete` / `is-error` class, "Tool call did not
 complete" output) so the UI never leaves a spinning card behind.
 
-### WS-edge redaction
+### WS-edge passthrough (no pattern scrubbing)
 
-Before an event envelope or error response crosses the WebSocket boundary,
-the transport mapper redacts likely-sensitive values from:
-
-- **Tool call args** — object keys matching `password`, `token`, `apiKey`,
-  `secret`, `bearer`, `credential`, etc. are replaced with `[REDACTED]`.
-- **Tool output and error strings** — `Bearer <token>`, `Authorization:
-  <scheme> <value>`, `sk-…` API keys, and long base64-like tokens are
-  scrubbed.
-- **Error details** — `ApplicationError.details` (structured context) is
-  recursively redacted before being sent to the client.
-
-This is defense-in-depth; the application layer should also avoid emitting
-secrets, but the WS mapper is the last choke point before data reaches the
-renderer.
+WS event and error mappers pass tool call args, output, error strings, and
+structured error details through to the renderer **verbatim** — no
+pattern-based `[REDACTED]` scrubbing is applied. NusaShell is not a
+secret-filter product (see
+[`security-boundary.md`](./security-boundary.md)); users may intentionally
+paste credentials into tool args, and false positives on base64/hash/MD5/SHA
+content are unacceptable. Size caps remain for flood control. The
+`mcp_list` agent tool still returns env **keys only** (values never exposed).
 
 ## Context compaction
 

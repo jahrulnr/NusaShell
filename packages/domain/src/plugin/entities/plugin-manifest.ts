@@ -111,6 +111,24 @@ export class PluginManifest {
       );
     }
 
+    // `node` with no args drops into eval-stdin mode: the MCP SDK writes the
+    // JSON-RPC `initialize` frame to the child's stdin, Node parses it as JS,
+    // and the server crashes with `SyntaxError: Unexpected token ':'`. The
+    // shell rewrites `node` → Electron-as-node (resolveStdioLaunch), so a
+    // script path in args is mandatory for this command.
+    if (
+      raw.mcp.transport === "stdio" &&
+      raw.mcp.command?.trim() === "node" &&
+      !(raw.mcp.args?.length && raw.mcp.args.some((arg) => arg.trim().length > 0))
+    ) {
+      return err(
+        new ManifestValidationError(
+          "stdio transport with command 'node' requires a script path in mcp.args",
+          { transport: raw.mcp.transport, command: raw.mcp.command },
+        ),
+      );
+    }
+
     if (
       (raw.mcp.transport === "sse" || raw.mcp.transport === "http") &&
       !raw.mcp.url?.trim()

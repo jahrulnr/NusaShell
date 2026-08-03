@@ -46,7 +46,7 @@
             "nav-ai-providers",
             "nav-autostart",
             "nav-logs",
-                    "open-docs",
+            "open-docs",
             "sidebar-mode-toggle"
           ]
         }
@@ -255,6 +255,26 @@
             "agent-delete-close",
             "agent-delete-cancel",
             "agent-delete-confirm"
+          ]
+        },
+        {
+          "heading": "Agent Canvas",
+          "paragraphs": [
+            "A shell-owned preview pane beside the conversation. Completed assistant messages auto-render svg and mermaid fences inline (mermaid is lazy-loaded, strict mode) with a Sidebar action that promotes the fence into the pane. html fences stay as source until the Preview action opens a sandboxed iframe (sandbox=allow-scripts, no allow-same-origin, CSP with an empty external allowlist in v1). The pane shows one active artifact at a time with a type badge, Refresh, Download source, and Close. Artifacts persist per conversation and restore on reopen; a Settings toggle disables the canvas entirely."
+          ],
+          "controls": [
+            "agent-canvas",
+            "agent-canvas-title",
+            "agent-canvas-badge",
+            "agent-canvas-body",
+            "agent-canvas-hint",
+            "agent-canvas-refresh",
+            "agent-canvas-download",
+            "agent-canvas-close",
+            "agent-canvas-fence-actions",
+            "agent-canvas-fence-btn",
+            "agent-canvas-inline",
+            "agent-canvas-svg"
           ]
         }
       ]
@@ -685,7 +705,8 @@
             "app-behavior-card",
             "settings-launch-at-login",
             "settings-start-hidden",
-            "settings-keep-in-background"
+            "settings-keep-in-background",
+            "settings-canvas-enabled"
           ]
         },
         {
@@ -2139,20 +2160,90 @@
       "type": "modal",
       "action": "Modal overlay containing URL and local install options. Click the backdrop to close."
     },
-    "custom-mcp-tab": { "section": "Modal tabs", "label": "Custom MCP", "type": "tab", "action": "Shows the native MCP form." },
-    "nusashell-plugin-tab": { "section": "Modal tabs", "label": "NusaShell Plugin", "type": "tab", "action": "Shows URL, folder, and archive install controls." },
-    "native-mcp-name": { "section": "Custom MCP", "label": "MCP name", "type": "text input", "action": "Sets the display name for the native MCP." },
-    "native-mcp-id": { "section": "Custom MCP", "label": "MCP id", "type": "text input", "action": "Sets the publisher.name plugin id." },
-    "native-mcp-transport": { "section": "Custom MCP", "label": "Transport", "type": "select", "action": "Chooses stdio, HTTP, or SSE." },
-    "native-mcp-command": { "section": "Custom MCP", "label": "Command", "type": "text input", "action": "Sets the stdio command." },
-    "native-mcp-args": { "section": "Custom MCP", "label": "Arguments", "type": "textarea", "action": "Sets one stdio argument per line." },
-    "native-mcp-url": { "section": "Custom MCP", "label": "Server URL", "type": "text input", "action": "Sets the HTTP/SSE server URL." },
-    "native-mcp-env": { "section": "Custom MCP", "label": "Environment JSON", "type": "textarea", "action": "Sets optional stdio environment variables as JSON." },
-    "native-mcp-headers": { "section": "Custom MCP", "label": "Headers JSON", "type": "textarea", "action": "Sets optional HTTP/SSE headers as JSON." },
-    "native-mcp-import": { "section": "Custom MCP", "label": "Import JSON", "type": "textarea", "action": "Accepts a Cursor-style single-server mcpServers JSON object." },
-    "native-mcp-import-btn": { "section": "Custom MCP", "label": "Fill from JSON", "type": "button", "action": "Parses JSON into the form fields." },
-    "native-mcp-save": { "section": "Custom MCP", "label": "Save MCP", "type": "button", "action": "Writes or updates the native MCP manifest and refreshes inventory." },
-    "native-mcp-status": { "section": "Custom MCP", "label": "MCP status", "type": "status text", "action": "Shows native MCP save or validation errors." },
+    "custom-mcp-tab": {
+      "section": "Modal tabs",
+      "label": "Custom MCP",
+      "type": "tab",
+      "action": "Shows the native MCP form."
+    },
+    "nusashell-plugin-tab": {
+      "section": "Modal tabs",
+      "label": "NusaShell Plugin",
+      "type": "tab",
+      "action": "Shows URL, folder, and archive install controls."
+    },
+    "native-mcp-name": {
+      "section": "Custom MCP",
+      "label": "MCP name",
+      "type": "text input",
+      "action": "Sets the display name for the native MCP."
+    },
+    "native-mcp-id": {
+      "section": "Custom MCP",
+      "label": "MCP id",
+      "type": "text input",
+      "action": "Sets the publisher.name plugin id."
+    },
+    "native-mcp-transport": {
+      "section": "Custom MCP",
+      "label": "Transport",
+      "type": "select",
+      "action": "Chooses stdio, HTTP, or SSE."
+    },
+    "native-mcp-command": {
+      "section": "Custom MCP",
+      "label": "Command",
+      "type": "text input",
+      "action": "Sets the stdio command."
+    },
+    "native-mcp-args": {
+      "section": "Custom MCP",
+      "label": "Arguments",
+      "type": "textarea",
+      "action": "Sets one stdio argument per line."
+    },
+    "native-mcp-url": {
+      "section": "Custom MCP",
+      "label": "Server URL",
+      "type": "text input",
+      "action": "Sets the HTTP/SSE server URL."
+    },
+    "native-mcp-env": {
+      "section": "Custom MCP",
+      "label": "Environment JSON",
+      "type": "textarea",
+      "action": "Sets optional stdio environment variables as JSON."
+    },
+    "native-mcp-headers": {
+      "section": "Custom MCP",
+      "label": "Headers JSON",
+      "type": "textarea",
+      "action": "Sets optional HTTP/SSE headers as JSON."
+    },
+    "native-mcp-import": {
+      "section": "Custom MCP",
+      "label": "Import JSON",
+      "type": "textarea",
+      "action": "Accepts a Cursor-style single-server mcpServers JSON object."
+    },
+    "native-mcp-import-btn": {
+      "section": "Custom MCP",
+      "label": "Fill from JSON",
+      "type": "button",
+      "action": "Parses JSON into the form fields."
+    },
+    "native-mcp-save": {
+      "section": "Custom MCP",
+      "label": "Save MCP",
+      "type": "button",
+      "action": "Writes or updates the native MCP manifest and refreshes inventory."
+    },
+    "native-mcp-status": {
+      "section": "Custom MCP",
+      "label": "MCP status",
+      "type": "status text",
+      "action": "Shows native MCP save or validation errors."
+    },
     "modal-close": {
       "section": "Install options",
       "label": "Close modal",
@@ -2695,6 +2786,92 @@
       "selector": "[data-control=\"job-output-expand\"]",
       "action": "Loads the full markdown body for a run entry via job.output with includeBody.",
       "generated": true
+    },
+    "agent-canvas": {
+      "section": "Agent Canvas",
+      "label": "Canvas sidebar pane",
+      "type": "complementary region",
+      "action": "Shell-owned preview surface beside the conversation. Hidden until a Sidebar or Preview action opens it, or the active conversation has a persisted activeCanvasArtifactId."
+    },
+    "agent-canvas-title": {
+      "section": "Agent Canvas",
+      "label": "Canvas title",
+      "type": "status text",
+      "action": "Shows the active artifact title."
+    },
+    "agent-canvas-badge": {
+      "section": "Agent Canvas",
+      "label": "Canvas type badge",
+      "type": "badge",
+      "action": "Labels the artifact kind (HTML, SVG, or MERMAID)."
+    },
+    "agent-canvas-body": {
+      "section": "Agent Canvas",
+      "label": "Canvas body",
+      "type": "region",
+      "action": "Hosts the rendered artifact: a sandboxed iframe for HTML, or a static SVG container for SVG/Mermaid."
+    },
+    "agent-canvas-hint": {
+      "section": "Agent Canvas",
+      "label": "Canvas hint",
+      "type": "status text",
+      "action": "Shows a fallback note when an artifact fails to render."
+    },
+    "agent-canvas-refresh": {
+      "section": "Agent Canvas",
+      "label": "Refresh canvas",
+      "type": "icon button",
+      "action": "Re-runs the render pipeline for the active artifact."
+    },
+    "agent-canvas-download": {
+      "section": "Agent Canvas",
+      "label": "Download source",
+      "type": "icon button",
+      "action": "Downloads the active artifact source as a file."
+    },
+    "agent-canvas-close": {
+      "section": "Agent Canvas",
+      "label": "Close canvas",
+      "type": "icon button",
+      "action": "Hides the pane and clears the active artifact for the conversation."
+    },
+    "agent-canvas-fence-actions": {
+      "section": "Agent Canvas",
+      "label": "Canvas fence actions",
+      "type": "group",
+      "selector": ".agent-canvas-fence-actions",
+      "generated": true,
+      "action": "Action row appended to a canvas-tagged code fence."
+    },
+    "agent-canvas-fence-btn": {
+      "section": "Agent Canvas",
+      "label": "Canvas fence action button",
+      "type": "button",
+      "selector": ".agent-canvas-fence-btn",
+      "generated": true,
+      "action": "Preview (HTML) or Sidebar action attached to a canvas fence."
+    },
+    "agent-canvas-inline": {
+      "section": "Agent Canvas",
+      "label": "Inline canvas render",
+      "type": "region",
+      "selector": ".agent-canvas-inline",
+      "generated": true,
+      "action": "Static SVG container rendered inline above an svg/mermaid fence on completed assistant messages."
+    },
+    "agent-canvas-svg": {
+      "section": "Agent Canvas",
+      "label": "Canvas SVG host",
+      "type": "region",
+      "selector": ".agent-canvas-svg",
+      "generated": true,
+      "action": "Centered SVG host inside the canvas body for svg/mermaid artifacts."
+    },
+    "settings-canvas-enabled": {
+      "section": "Startup & background",
+      "label": "Agent Canvas",
+      "type": "toggle",
+      "action": "Enables or disables inline SVG/Mermaid rendering and the HTML preview sidebar. When off, canvas fences stay as source code blocks."
     }
   }
 }

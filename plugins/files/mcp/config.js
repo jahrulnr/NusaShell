@@ -45,15 +45,22 @@ export async function validateRoot(root) {
 
 /**
  * Resolves a path relative to the root directory.
+ *
+ * Absolute paths are accepted as-is — the agent is a trusted actor operating
+ * on behalf of the user and may access any path the user can. The root is a
+ * convenience for relative path resolution, not a jail. Relative paths that
+ * escape the root via `../` traversal are still rejected as a safety net.
+ *
  * @param {string} root
  * @param {string} input
  */
 export function resolvePath(root, input) {
   if (!input || input === "/" || input === "") return root;
-  const resolved = path.isAbsolute(input) ? input : path.resolve(root, input);
+  if (path.isAbsolute(input)) return path.resolve(input);
+  const resolved = path.resolve(root, input);
   const normalizedRoot = path.resolve(root);
   const relative = path.relative(normalizedRoot, resolved);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+  if (relative.startsWith("..")) {
     throw new Error(`Path escapes files root: ${input}`);
   }
   return resolved;

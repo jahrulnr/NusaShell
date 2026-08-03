@@ -47,6 +47,30 @@ composer starts as a single text row,
 grows with wrapped or explicit lines, and caps at ten rows before its textarea
 scrolls internally; the controls footer stays fixed below it.
 
+### Agent Canvas
+
+A shell-owned preview pane sits beside the conversation as a third grid column
+when open. It is hidden until a Sidebar or Preview action promotes a canvas
+fence, or until a conversation with a persisted `activeCanvasArtifactId` is
+reopened. Completed assistant messages auto-render `svg` and `mermaid` fences
+inline in a light, bounded container above the source block; mermaid is
+lazy-loaded via dynamic `import()` only when a mermaid fence is present, and
+runs with `securityLevel: 'strict'` so it compiles to static SVG. Each canvas
+fence (`html`/`htm`/`svg`/`mermaid`) gains a Sidebar action; `html` fences also
+gain a Preview action that opens the pane with a sandboxed iframe
+(`sandbox="allow-scripts"`, no `allow-same-origin`, CSP with an empty external
+allowlist in v1). The pane chrome is restrained instrument-workbench: a
+monospace kind badge (HTML/SVG/MERMAID), a title, and compact Refresh,
+Download source, and Close icon buttons. The body is a light surface so
+rendered HTML/SVG read as authored content, not shell chrome. At the desktop
+minimum width the pane becomes a full-bleed overlay. Artifacts persist per
+conversation (max 20 and 3 MB total, oldest non-active evicted) and survive
+compaction; switching conversations hides the pane and reopens it only for the
+newly selected conversation's active artifact. A Settings toggle disables the
+canvas entirely so fences stay as source code blocks. The canvas is shell
+chrome, not a plugin window; it does not expand the deferred host-isolation or
+MCP/AI behavioral-security scope.
+
 ## AI providers
 
 Providers use a responsive card grid rather than a shared settings form. Every

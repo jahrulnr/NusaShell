@@ -11,7 +11,7 @@ const VALID_MANIFEST = {
   version: "1.0.0",
   icon: "notes",
   ui: { entry: "index.html" },
-  mcp: { transport: "stdio", command: "node", env: {} },
+  mcp: { transport: "stdio", command: "node", args: ["mcp/server.js"], env: {} },
 };
 
 describe("FilesystemPluginRegistry", () => {

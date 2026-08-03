@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-08-03
+
+### Added
+
+- **Agent Canvas v1:** a shell-owned preview pane beside the Agent conversation.
+  Completed assistant messages auto-render `svg` and `mermaid` fenced code blocks
+  inline (mermaid is lazy-loaded via dynamic `import()` with
+  `securityLevel: 'strict'`, compiling to static SVG). Each canvas fence
+  (`html`/`htm`/`svg`/`mermaid`) gains a **Sidebar** action that promotes it into
+  the pane; `html` fences also gain a **Preview** action that opens the pane with
+  a sandboxed iframe (`sandbox="allow-scripts"`, no `allow-same-origin`, CSP with
+  an empty external allowlist — remote scripts/styles/fonts fail closed in v1).
+  Pane chrome: kind badge (HTML/SVG/MERMAID), title, Refresh, Download source,
+  and Close. At the desktop minimum width the pane becomes a full-bleed overlay.
+- Canvas artifacts persist per conversation (`canvasArtifacts` /
+  `activeCanvasArtifactId` on `AgentConversation`), survive compaction, and
+  restore on reopen. Eviction caps at 20 artifacts and 3 MB total per
+  conversation, oldest non-active first. The conversation document version
+  bumped to 2; legacy version-1 files normalize with empty artifacts.
+- New IPC + preload surface: `agentConversations.upsertCanvasArtifact` and
+  `agentConversations.setActiveCanvasArtifact`.
+- **Settings → Startup & background → Agent Canvas** toggle to disable the
+  canvas entirely (inline render, Preview, and Sidebar are short-circuited;
+  fences stay as source code blocks). Defaults to on. Stored on
+  `AppBehaviorSettings.canvasEnabled`.
+- Operator note added to the in-product agent docs corpus
+  (`resources/agent/docs/agent.md`) covering media kinds, the empty CDN
+  allowlist, Sidebar/Preview, and the opt-out.
+
+### Changed
+
+- Agent workspace visual contract (`docs/ui-design/agent-workspace.md`) and
+  blueprint §4 now document the Canvas pane and its shell-chrome (non-plugin,
+  non-host-isolation) scope.
+- UI docs map (`resources/agent/docs/ui-source/ui-map.json`) and generated
+  `resources/agent/docs/ui/*.md` regenerated to cover the new Agent Canvas and
+  settings controls.
+
+### Notes
+
+- The canvas is shell chrome, not a plugin window. It renders model output
+  verbatim in a structural sandbox; it does not moderate, filter, or block what
+  the model can emit, and does not expand the deferred host-isolation or
+  permanently-out-of-scope MCP/AI behavioral-security tracks. Split-window
+  pop-out remains deferred to v1.1.
+
 ## [0.1.8] - 2026-08-02
 
 ### Added

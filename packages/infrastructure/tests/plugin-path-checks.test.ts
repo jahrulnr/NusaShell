@@ -54,7 +54,9 @@ describe("resolveInsidePluginDir", () => {
   });
 
   it("throws for an absolute path", () => {
-    expect(() => resolveInsidePluginDir("/plugins/x", "/etc/passwd", "ui.entry")).toThrow(
+    // Use path.resolve so the path is truly absolute on all platforms.
+    // On Windows, "/etc/passwd" is not absolute (relative to current drive).
+    expect(() => resolveInsidePluginDir("/plugins/x", resolve("/etc/passwd"), "ui.entry")).toThrow(
       /points outside its install directory/,
     );
   });

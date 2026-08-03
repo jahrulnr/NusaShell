@@ -28,6 +28,7 @@ describe("normalizeAppBehavior", () => {
       launchAtLogin: true,
       startHidden: false,
       keepInBackground: false,
+      canvasEnabled: true,
     });
   });
 });
@@ -64,6 +65,7 @@ describe("AppBehaviorStore", () => {
       launchAtLogin: true,
       startHidden: false,
       keepInBackground: true,
+      canvasEnabled: true,
     });
 
     const onDisk = JSON.parse(await readFile(path, "utf8")) as unknown;
@@ -93,6 +95,7 @@ describe("AppBehaviorStore", () => {
       launchAtLogin: true,
       startHidden: true,
       keepInBackground: true,
+      canvasEnabled: true,
     });
   });
 });

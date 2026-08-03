@@ -80,8 +80,10 @@ describe("resolvePath", () => {
     expect(resolvePath(tmpDir, "sub/file.txt")).toBe(path.resolve(tmpDir, "sub/file.txt"));
   });
 
-  it("rejects absolute paths outside root", () => {
-    expect(() => resolvePath(tmpDir, "/absolute/path")).toThrow(/escapes files root/);
+  it("allows absolute paths outside root (agent is a trusted actor)", () => {
+    expect(resolvePath(tmpDir, "/absolute/path")).toBe(path.resolve("/absolute/path"));
+    const deepPath = "/some/deep/workspace/tmp/plan/foo.md";
+    expect(resolvePath(tmpDir, deepPath)).toBe(path.resolve(deepPath));
   });
 
   it("rejects relative paths that escape root via traversal", () => {

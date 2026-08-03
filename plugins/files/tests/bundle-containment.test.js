@@ -9,11 +9,12 @@ const bundlePath = path.resolve(__dirname, "../mcp/server.cjs");
 /**
  * Regression guard for finding 1 (Files path escape via stale bundle).
  *
- * The source `mcp/config.js` rejects paths that escape the files root, but
- * production runs the esbuild bundle `mcp/server.cjs`. A stale bundle that
- * predates the guard reintroduces the escape silently. These tests assert
- * the *shipped* artifact contains the containment check so a forgotten
- * rebuild cannot regress the sandbox.
+ * The source `mcp/config.js` rejects relative paths that escape the files
+ * root via `../` traversal, but allows absolute paths (the agent is a trusted
+ * actor). Production runs the esbuild bundle `mcp/server.cjs`. A stale bundle
+ * that predates the guard reintroduces the escape silently. These tests
+ * assert the *shipped* artifact contains the traversal check so a forgotten
+ * rebuild cannot regress the guard.
  *
  * See plan: plugin_sandbox_readiness_b0476ef9 — P0.
  */
@@ -22,14 +23,13 @@ describe("server.cjs bundle containment (finding 1 regression guard)", () => {
     expect(fs.existsSync(bundlePath)).toBe(true);
   });
 
-  it("bundle resolvePath rejects paths that escape the root", () => {
+  it("bundle resolvePath rejects relative paths that escape the root via traversal", () => {
     const source = fs.readFileSync(bundlePath, "utf8");
-    // The guarded resolvePath must throw "Path escapes files root" — the
-    // stale bundle returned the resolved path with no check.
+    // The guarded resolvePath must throw "Path escapes files root" for `../`
+    // traversal — the stale bundle returned the resolved path with no check.
     expect(source).toContain("escapes files root");
-    // The guard must compute a relative path and reject `..` / absolute escape.
+    // The guard must compute a relative path and reject `..` escape.
     expect(source).toContain('startsWith("..")');
-    expect(source).toContain("isAbsolute(relative)");
   });
 
   it("bundle does not contain the unguarded resolvePath that returns resolved directly", () => {

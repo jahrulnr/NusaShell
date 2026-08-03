@@ -12,7 +12,6 @@ import type {
   AgentLearningUpdatedEvent,
   ApplicationEvent,
 } from "@nusashell/application";
-import { redactArgs, redactString } from "./redact.js";
 
 /**
  * Maps agent-domain events (text/reasoning deltas, tool call start/end, context
@@ -52,7 +51,7 @@ export function mapAgentEvent(
           traceId: e.aggregateId,
           callId: e.call.id,
           name: e.call.name,
-          ...(hasArgs(e.call.args) ? { args: redactArgs(e.call.args) } : {}),
+          ...(hasArgs(e.call.args) ? { args: e.call.args } : {}),
           timestamp,
         },
       };
@@ -69,9 +68,9 @@ export function mapAgentEvent(
           callId: e.execution.id,
           name: e.execution.name,
           ok: e.execution.ok,
-          ...(e.execution.error ? { error: redactString(e.execution.error) } : {}),
-          ...(hasArgs(e.execution.args) ? { args: redactArgs(e.execution.args) } : {}),
-          ...(output ? { output: redactString(output) } : {}),
+          ...(e.execution.error ? { error: e.execution.error } : {}),
+          ...(hasArgs(e.execution.args) ? { args: e.execution.args } : {}),
+          ...(output ? { output } : {}),
           timestamp,
         },
       };

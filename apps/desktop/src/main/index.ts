@@ -30,7 +30,7 @@ import {
 } from "./app-behavior-settings.js";
 import { createLoginAutostart, type LoginAutostart } from "./login-autostart.js";
 import { TrayManager } from "./tray.js";
-import { formatLogArguments, redactLogMessage } from "./log-format.js";
+import { formatLogArguments } from "./log-format.js";
 import { resolveRuntimePaths } from "./runtime-paths.js";
 import {
   registerSkillsIpc,
@@ -265,7 +265,6 @@ function createIpcContext(): IpcContext {
     configureCuratorScheduler: (...args) => c.configureCuratorScheduler(...args),
     getAppBehavior: () => appBehavior,
     setAppBehavior: (settings) => { appBehavior = settings; },
-    redactLogMessage,
     isPluginWindowSender,
   };
 }

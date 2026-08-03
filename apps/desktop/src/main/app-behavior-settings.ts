@@ -5,6 +5,7 @@ export interface AppBehaviorSettings {
   readonly launchAtLogin: boolean;
   readonly startHidden: boolean;
   readonly keepInBackground: boolean;
+  readonly canvasEnabled: boolean;
 }
 
 export type AppBehaviorPatch = Partial<AppBehaviorSettings>;
@@ -13,6 +14,7 @@ export const DEFAULT_APP_BEHAVIOR: AppBehaviorSettings = {
   launchAtLogin: false,
   startHidden: true,
   keepInBackground: true,
+  canvasEnabled: true,
 };
 
 export function normalizeAppBehavior(raw: unknown): AppBehaviorSettings {
@@ -21,6 +23,7 @@ export function normalizeAppBehavior(raw: unknown): AppBehaviorSettings {
     launchAtLogin: booleanOr(record.launchAtLogin, DEFAULT_APP_BEHAVIOR.launchAtLogin),
     startHidden: booleanOr(record.startHidden, DEFAULT_APP_BEHAVIOR.startHidden),
     keepInBackground: booleanOr(record.keepInBackground, DEFAULT_APP_BEHAVIOR.keepInBackground),
+    canvasEnabled: booleanOr(record.canvasEnabled, DEFAULT_APP_BEHAVIOR.canvasEnabled),
   };
 }
 

@@ -14,7 +14,7 @@ import type {
   ToolDescriptor,
 } from "@nusashell/application";
 import type { Logger } from "pino";
-import { redactMcpText, registerMcpLogging } from "./mcp-logging.js";
+import { boundMcpStderr, registerMcpLogging } from "./mcp-logging.js";
 import { unwrapMcpToolResult } from "./tool-result.js";
 
 export interface StdioRuntime {
@@ -88,7 +88,7 @@ export class StdioMcpClient implements McpClientPort {
 
     this.transport.stderr?.on("data", (chunk: Buffer | string) => {
       const message = String(chunk).trim();
-      if (message) this.logger?.warn({ command: this.command, message: redactMcpText(message) }, "MCP stderr");
+      if (message) this.logger?.warn({ command: this.command, message: boundMcpStderr(message) }, "MCP stderr");
     });
 
     let closed = false;

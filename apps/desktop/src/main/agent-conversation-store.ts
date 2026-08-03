@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type {
+  AgentCanvasArtifact,
+  AgentCanvasArtifactKind,
   AgentConversation,
   AgentConversationAcp,
   AgentConversationCheckpoint,
@@ -13,9 +15,13 @@ import type {
 } from "../shared/agent-conversation-contract.js";
 
 interface ConversationDocument {
-  readonly version: 1;
+  readonly version: 2;
   readonly conversations: readonly AgentConversation[];
 }
+
+const CANVAS_ARTIFACT_MAX_COUNT = 20;
+const CANVAS_ARTIFACT_MAX_TOTAL_BYTES = 3 * 1024 * 1024;
+const CANVAS_ARTIFACT_MAX_SOURCE_BYTES = 512 * 1024;
 
 export class AgentConversationStore {
   private state: ConversationDocument | null = null;
@@ -129,6 +135,43 @@ export class AgentConversationStore {
     });
   }
 
+  async upsertCanvasArtifact(id: string, artifact: AgentCanvasArtifact): Promise<AgentConversation> {
+    return this.mutate(async (state) => {
+      const current = requireConversation(state, id);
+      if (artifact.conversationId !== id) {
+        throw new Error("Canvas artifact conversationId does not match the conversation");
+      }
+      if (typeof artifact.source === "string" && artifact.source.length > CANVAS_ARTIFACT_MAX_SOURCE_BYTES) {
+        throw new Error(`Canvas artifact source exceeds the ${CANVAS_ARTIFACT_MAX_SOURCE_BYTES} byte cap`);
+      }
+      const timestamp = this.now().toISOString();
+      const existing = current.canvasArtifacts ?? [];
+      const without = existing.filter((item) => item.id !== artifact.id);
+      const next = [...without, { ...artifact, updatedAt: timestamp }];
+      const evicted = evictCanvasArtifacts(next, current.activeCanvasArtifactId);
+      const updated: AgentConversation = {
+        ...current,
+        canvasArtifacts: evicted,
+        updatedAt: timestamp,
+      };
+      return [replaceConversation(state, updated), updated];
+    });
+  }
+
+  async setActiveCanvasArtifact(id: string, artifactId: string | null): Promise<AgentConversation> {
+    return this.mutate(async (state) => {
+      const current = requireConversation(state, id);
+      const timestamp = this.now().toISOString();
+      const { activeCanvasArtifactId: _old, ...rest } = current;
+      const updated: AgentConversation = {
+        ...rest,
+        ...(artifactId ? { activeCanvasArtifactId: artifactId } : {}),
+        updatedAt: timestamp,
+      };
+      return [replaceConversation(state, updated), updated];
+    });
+  }
+
   private async load(): Promise<ConversationDocument> {
     if (this.state) return this.state;
     try {
@@ -136,7 +179,7 @@ export class AgentConversationStore {
       this.state = normalizeDocument(parsed);
     } catch (error) {
       if (isFileNotFound(error)) {
-        this.state = { version: 1, conversations: [] };
+        this.state = { version: 2, conversations: [] };
       } else {
         throw new Error("Could not load conversations", { cause: error });
       }
@@ -175,6 +218,7 @@ function normalizeDocument(value: unknown): ConversationDocument {
     if (typeof item !== "object" || item === null) return [];
     const candidate = item as Partial<AgentConversation>;
     if (typeof candidate.id !== "string" || typeof candidate.createdAt !== "string" || typeof candidate.updatedAt !== "string") return [];
+    const conversationId = candidate.id;
     const messages = Array.isArray(candidate.messages)
       ? candidate.messages.flatMap((item) => {
           if (isConversationMessage(item)) return [item];
@@ -182,6 +226,16 @@ function normalizeDocument(value: unknown): ConversationDocument {
           return repaired ? [repaired] : [];
         })
       : [];
+    const canvasArtifacts = Array.isArray(candidate.canvasArtifacts)
+      ? candidate.canvasArtifacts.flatMap((entry) => {
+          const artifact = normalizeCanvasArtifact(entry, conversationId);
+          return artifact ? [artifact] : [];
+        })
+      : [];
+    const activeCanvasArtifactId = typeof candidate.activeCanvasArtifactId === "string"
+      && canvasArtifacts.some((artifact) => artifact.id === candidate.activeCanvasArtifactId)
+        ? candidate.activeCanvasArtifactId
+        : undefined;
     return [{
       id: candidate.id,
       title: typeof candidate.title === "string" ? candidate.title : "New conversation",
@@ -192,9 +246,54 @@ function normalizeDocument(value: unknown): ConversationDocument {
       ...(typeof candidate.workspace === "string" && candidate.workspace ? { workspace: candidate.workspace } : {}),
       ...(candidate.kind === "acp" || candidate.kind === "agent" ? { kind: candidate.kind } : {}),
       ...(isAcp(candidate.acp) ? { acp: candidate.acp } : {}),
+      ...(canvasArtifacts.length ? { canvasArtifacts } : {}),
+      ...(activeCanvasArtifactId ? { activeCanvasArtifactId } : {}),
     }];
   });
-  return { version: 1, conversations };
+  return { version: 2, conversations };
+}
+
+function normalizeCanvasArtifact(value: unknown, conversationId: string): AgentCanvasArtifact | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.id !== "string"
+    || typeof record.sourceMessageId !== "string"
+    || typeof record.source !== "string"
+    || typeof record.createdAt !== "string"
+    || typeof record.updatedAt !== "string") {
+    return null;
+  }
+  if (record.kind !== "html" && record.kind !== "svg" && record.kind !== "mermaid") return null;
+  if (typeof record.fenceIndex !== "number" || !Number.isFinite(record.fenceIndex) || record.fenceIndex < 0) return null;
+  if (record.source.length > CANVAS_ARTIFACT_MAX_SOURCE_BYTES) return null;
+  const ownerConversationId = typeof record.conversationId === "string" ? record.conversationId : conversationId;
+  if (ownerConversationId !== conversationId) return null;
+  return {
+    id: record.id,
+    conversationId: conversationId,
+    sourceMessageId: record.sourceMessageId,
+    fenceIndex: record.fenceIndex,
+    kind: record.kind as AgentCanvasArtifactKind,
+    title: typeof record.title === "string" ? record.title : record.kind,
+    source: record.source,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
+}
+
+function evictCanvasArtifacts(artifacts: readonly AgentCanvasArtifact[], activeId?: string): readonly AgentCanvasArtifact[] {
+  let list = [...artifacts].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  while (list.length > CANVAS_ARTIFACT_MAX_COUNT) {
+    const removable = list.findIndex((artifact) => artifact.id !== activeId);
+    if (removable === -1) break;
+    list.splice(removable, 1);
+  }
+  while (list.reduce((total, artifact) => total + artifact.source.length, 0) > CANVAS_ARTIFACT_MAX_TOTAL_BYTES) {
+    const removable = list.findIndex((artifact) => artifact.id !== activeId);
+    if (removable === -1) break;
+    list.splice(removable, 1);
+  }
+  return list;
 }
 
 function isFileNotFound(error: unknown): boolean {

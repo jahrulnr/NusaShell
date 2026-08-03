@@ -22,7 +22,7 @@ function makePlugin(
     version: "1.0.0",
     icon: "note",
     ui: { entry: "index.html" },
-    mcp: { transport: "stdio", command: "node", env: {} },
+    mcp: { transport: "stdio", command: "node", args: ["mcp/server.js"], env: {} },
     ...overrides,
   };
   const manifestResult = PluginManifest.create(raw);

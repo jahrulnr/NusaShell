@@ -164,7 +164,7 @@ describe("ListPluginsHandler via QueryBus", () => {
     const { queryBus, pluginRepository } = setupBus();
     pluginRepository.add(makePlugin("nusashell.notes", {
       ui: { entry: "ui/mail.html", window: { mode: "fullscreen" } },
-      mcp: { transport: "stdio", command: "node", keepAliveOnClose: true },
+      mcp: { transport: "stdio", command: "node", args: ["mcp/server.js"], keepAliveOnClose: true },
     }));
 
     const result = await queryBus.execute({ kind: "list-plugins" }) as {
