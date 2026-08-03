@@ -1,25 +1,32 @@
-import { dirname, isAbsolute } from "node:path";
-
-const PATH_DELIMITER = process.platform === "win32" ? ";" : ":";
+import { delimiter as pathDelimiter, dirname, isAbsolute } from "node:path";
 
 /**
  * Merge PATH-like segments, preserving order and dropping empty/duplicate entries.
+ * Uses the host PATH delimiter (`:` on POSIX, `;` on Windows).
  */
 export function mergePathSegments(
+  ...parts: Array<string | undefined | null>
+): string {
+  return mergePathSegmentsWith(pathDelimiter, ...parts);
+}
+
+/** Same as {@link mergePathSegments} with an explicit delimiter (for cross-platform tests). */
+export function mergePathSegmentsWith(
+  delimiter: string,
   ...parts: Array<string | undefined | null>
 ): string {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const part of parts) {
     if (!part) continue;
-    for (const segment of part.split(PATH_DELIMITER)) {
+    for (const segment of part.split(delimiter)) {
       const trimmed = segment.trim();
       if (!trimmed || seen.has(trimmed)) continue;
       seen.add(trimmed);
       out.push(trimmed);
     }
   }
-  return out.join(PATH_DELIMITER);
+  return out.join(delimiter);
 }
 
 /**

@@ -1,3 +1,4 @@
+import { delimiter as pathDelimiter } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   commandDirForPath,
@@ -7,13 +8,15 @@ import {
 } from "../src/process/spawn-env.js";
 import { resolveStdioLaunch } from "../src/mcp/stdio-mcp-client.adapter.js";
 
+const d = pathDelimiter;
+
 describe("mergePathSegments", () => {
   it("dedupes while preserving first-seen order", () => {
-    expect(mergePathSegments("/a:/b", "/b:/c", "/a")).toBe("/a:/b:/c");
+    expect(mergePathSegments(`/a${d}/b`, `/b${d}/c`, "/a")).toBe(`/a${d}/b${d}/c`);
   });
 
   it("ignores empty segments", () => {
-    expect(mergePathSegments("/a::/b", undefined, "")).toBe("/a:/b");
+    expect(mergePathSegments(`/a${d}${d}/b`, undefined, "")).toBe(`/a${d}/b`);
   });
 });
 
@@ -33,11 +36,11 @@ describe("commandDirForPath", () => {
 describe("enrichSpawnEnv", () => {
   it("prepends absolute command dirname to PATH", () => {
     const env = enrichSpawnEnv("/opt/nvm/bin/npx", {
-      PATH: "/usr/bin:/bin",
+      PATH: `/usr/bin${d}/bin`,
       FOO: "bar",
     });
     expect(env.FOO).toBe("bar");
-    expect(env.PATH?.startsWith("/opt/nvm/bin:")).toBe(true);
+    expect(env.PATH?.startsWith(`/opt/nvm/bin${d}`)).toBe(true);
     expect(env.PATH).toContain("/usr/bin");
   });
 
@@ -56,13 +59,13 @@ describe("resolveStdioLaunch PATH enrichment", () => {
     );
     // Absolute "node" path is not the bare "node" token — no Electron remap.
     expect(launch.command).toBe("/opt/nvm/bin/node");
-    expect(launch.env.PATH?.startsWith("/opt/nvm/bin:")).toBe(true);
+    expect(launch.env.PATH?.startsWith(`/opt/nvm/bin${d}`)).toBe(true);
   });
 
   it("remaps bare node under Electron and preserves PATH enrichment from env", () => {
     const launch = resolveStdioLaunch(
       "node",
-      { PATH: "/custom/bin:/usr/bin", PLUGIN_ENV: "yes" },
+      { PATH: `/custom/bin${d}/usr/bin`, PLUGIN_ENV: "yes" },
       { execPath: "/opt/NusaShell/NusaShell", electronVersion: "33.0.0" },
     );
     expect(launch.command).toBe("/opt/NusaShell/NusaShell");

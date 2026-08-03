@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
+import { delimiter as hostPathDelimiter } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const PATH_DELIMITER = process.platform === "win32" ? ";" : ":";
 
 export interface EnrichProcessPathOptions {
   readonly platform?: NodeJS.Platform;
@@ -12,24 +12,36 @@ export interface EnrichProcessPathOptions {
   readonly readLoginPath?: () => Promise<string | undefined>;
 }
 
+function pathDelimiterFor(platform: NodeJS.Platform): string {
+  return platform === "win32" ? ";" : ":";
+}
+
 /**
  * Merge PATH-like segments, preserving order and dropping empty/duplicate entries.
+ * Defaults to the host PATH delimiter; pass `delimiter` when simulating another OS.
  */
 export function mergePathSegments(
+  ...parts: Array<string | undefined | null>
+): string {
+  return mergePathSegmentsWith(hostPathDelimiter, ...parts);
+}
+
+export function mergePathSegmentsWith(
+  delimiter: string,
   ...parts: Array<string | undefined | null>
 ): string {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const part of parts) {
     if (!part) continue;
-    for (const segment of part.split(PATH_DELIMITER)) {
+    for (const segment of part.split(delimiter)) {
       const trimmed = segment.trim();
       if (!trimmed || seen.has(trimmed)) continue;
       seen.add(trimmed);
       out.push(trimmed);
     }
   }
-  return out.join(PATH_DELIMITER);
+  return out.join(delimiter);
 }
 
 /**
@@ -59,7 +71,7 @@ export async function enrichProcessPathFromLoginShell(
     if (!loginPath?.trim()) {
       return { enriched: false, path: current };
     }
-    const merged = mergePathSegments(current, loginPath);
+    const merged = mergePathSegmentsWith(pathDelimiterFor(platform), current, loginPath);
     if (merged === current) {
       return { enriched: false, path: current };
     }

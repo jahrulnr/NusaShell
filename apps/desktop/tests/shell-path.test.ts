@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   enrichProcessPathFromLoginShell,
-  mergePathSegments,
+  mergePathSegmentsWith,
 } from "../src/main/shell-path.js";
 
-describe("mergePathSegments", () => {
+describe("mergePathSegmentsWith", () => {
   it("dedupes login extras after existing Electron PATH", () => {
-    expect(mergePathSegments("/usr/bin:/bin", "/home/u/.nvm/bin:/usr/bin")).toBe(
+    expect(mergePathSegmentsWith(":", "/usr/bin:/bin", "/home/u/.nvm/bin:/usr/bin")).toBe(
       "/usr/bin:/bin:/home/u/.nvm/bin",
+    );
+  });
+
+  it("uses Windows PATH delimiter", () => {
+    expect(mergePathSegmentsWith(";", "C:\\Windows;C:\\bin", "C:\\nvm;C:\\Windows")).toBe(
+      "C:\\Windows;C:\\bin;C:\\nvm",
     );
   });
 });
