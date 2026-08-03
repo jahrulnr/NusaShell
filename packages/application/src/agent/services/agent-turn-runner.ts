@@ -20,6 +20,7 @@ import {
   normalizeSoftRecover,
   normalizeConcurrentToolCalls,
   repeatedToolDecision,
+  rethrowWithTurnPartial,
   validateRequestedTools,
 } from "./agent-turn-utils.js";
 import { ContextCompactor } from "./agent-context-compaction.js";
@@ -112,173 +113,202 @@ export class AgentTurnRunner {
     };
     publishContext();
 
-    for (let round = 1; round <= maxToolRounds; round += 1) {
-      assertTurnActive(input.signal, traceId);
-      const tools = await this.deps.toolGateway.listTools(input.pluginIds, traceId);
-      assertTurnActive(input.signal, traceId);
-      const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
-      let response;
-      for (;;) {
-        try {
-          response = await this.deps.provider.complete({
+    // Tracks the in-flight provider/tool round so mid-turn failures (allowlist,
+    // listTools, 4xx/5xx after soft recover, etc.) can attach a resume snapshot.
+    let activeRound = 0;
+    try {
+      for (let round = 1; round <= maxToolRounds; round += 1) {
+        activeRound = round;
+        assertTurnActive(input.signal, traceId);
+        const tools = await this.deps.toolGateway.listTools(input.pluginIds, traceId);
+        assertTurnActive(input.signal, traceId);
+        const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
+        let response;
+        for (;;) {
+          try {
+            response = await this.deps.provider.complete({
+              traceId,
+              round,
+              messages,
+              tools,
+              ...(input.model ? { model: input.model } : {}),
+              ...(input.effort ? { effort: input.effort } : {}),
+              ...(input.modelCapabilities ? { modelCapabilities: input.modelCapabilities } : {}),
+              ...(input.signal ? { signal: input.signal } : {}),
+              ...(input.onTextDelta ? { onTextDelta: input.onTextDelta } : {}),
+              ...(input.onReasoningDelta ? { onReasoningDelta: input.onReasoningDelta } : {}),
+            });
+            break;
+          } catch (error) {
+            if (input.signal?.aborted) {
+              throw new ApplicationError("AGENT_TURN_CANCELLED", "Agent turn cancelled", { traceId });
+            }
+            // Soft recover covers transient provider failures (incl. exhausted
+            // HTTP 5xx / retriable 4xx budgets) when tool work already exists.
+            if (softRecoverUsed < this.softRecoverAttempts && hasTurnProgress(toolCalls, steps, messages)) {
+              softRecoverUsed += 1;
+              this.deps.logger?.warn(
+                "Agent soft recover %d/%d traceId=%s provider=%s round=%d",
+                softRecoverUsed, this.softRecoverAttempts, traceId, this.deps.provider.id, round,
+              );
+              continue;
+            }
+            const cause = error instanceof Error ? error.message : String(error);
+            this.deps.logger?.error("Agent provider failed traceId=%s provider=%s error=%s", traceId, this.deps.provider.id, cause);
+            const details: Record<string, unknown> = {
+              providerId: this.deps.provider.id,
+              traceId,
+              cause,
+            };
+            if (hasTurnProgress(toolCalls, steps, messages)) {
+              details.partial = buildTurnPartial(
+                traceId, round - 1, toolCalls, steps, messages,
+                model, providerId, api, reasoning, usage,
+              );
+            }
+            throw new ApplicationError("AGENT_PROVIDER_FAILED", `AI provider request failed: ${cause}`, details);
+          }
+        }
+        model = response.model ?? model;
+        providerId = response.providerId ?? providerId;
+        api = response.api ?? api;
+        reasoning = response.reasoning ?? reasoning;
+        const stepModel = response.model;
+        const stepProviderId = response.providerId;
+        if (response.reasoning?.trim()) {
+          steps.push({ type: "reasoning", content: response.reasoning.trim(), ...(stepModel ? { model: stepModel } : {}), ...(stepProviderId ? { providerId: stepProviderId } : {}) });
+        }
+        addUsage(usage, response.usage);
+        const requestedCalls = response.toolCalls ?? [];
+        publishContext();
+
+        if (requestedCalls.length === 0) {
+          let text = response.text?.trim();
+          if (!text) {
+            this.deps.logger?.warn("Agent provider returned an empty response traceId=%s provider=%s round=%d", traceId, this.deps.provider.id, round);
+            if (!emptyResponseNudged && round < maxToolRounds) {
+              emptyResponseNudged = true;
+              this.deps.logger?.info("Agent nudged: empty response, requesting text or tool call traceId=%s round=%d", traceId, round);
+              const reasoningOnly = Boolean(response.reasoning?.trim());
+              messages.push(
+                { role: "assistant", content: "" },
+                {
+                  role: "system",
+                  content: reasoningOnly
+                    ? "You produced reasoning but no user-facing answer and no tool call. Answer the user now in plain text, or call a tool with concrete arguments."
+                    : "You produced no user-facing answer and no tool call. Answer the user now in plain text, or call a tool with concrete arguments.",
+                },
+              );
+              continue;
+            }
+            text = "(empty model response)";
+          }
+          this.deps.logger?.info("Agent turn completed traceId=%s provider=%s rounds=%d", traceId, this.deps.provider.id, round);
+          steps.push({ type: "text", content: text, ...(stepModel ? { model: stepModel } : {}), ...(stepProviderId ? { providerId: stepProviderId } : {}) });
+          return {
             traceId,
-            round,
+            text,
+            rounds: round,
+            toolCalls,
+            steps,
             messages,
-            tools,
-            ...(input.model ? { model: input.model } : {}),
-            ...(input.effort ? { effort: input.effort } : {}),
-            ...(input.modelCapabilities ? { modelCapabilities: input.modelCapabilities } : {}),
-            ...(input.signal ? { signal: input.signal } : {}),
-            ...(input.onTextDelta ? { onTextDelta: input.onTextDelta } : {}),
-            ...(input.onReasoningDelta ? { onReasoningDelta: input.onReasoningDelta } : {}),
-          });
-          break;
-        } catch (error) {
-          if (input.signal?.aborted) {
-            throw new ApplicationError("AGENT_TURN_CANCELLED", "Agent turn cancelled", { traceId });
-          }
-          if (softRecoverUsed < this.softRecoverAttempts && hasTurnProgress(toolCalls, steps, messages)) {
-            softRecoverUsed += 1;
-            this.deps.logger?.warn(
-              "Agent soft recover %d/%d traceId=%s provider=%s round=%d",
-              softRecoverUsed, this.softRecoverAttempts, traceId, this.deps.provider.id, round,
-            );
-            continue;
-          }
-          const cause = error instanceof Error ? error.message : String(error);
-          this.deps.logger?.error("Agent provider failed traceId=%s provider=%s error=%s", traceId, this.deps.provider.id, cause);
-          const details: Record<string, unknown> = {
-            providerId: this.deps.provider.id,
-            traceId,
-            cause,
+            ...(model ? { model } : {}),
+            ...(providerId ? { providerId } : {}),
+            ...(api ? { api } : {}),
+            ...(reasoning ? { reasoning } : {}),
+            ...(hasUsage(usage) ? { usage } : {}),
+            ...(compacted.checkpoint ? { compaction: compacted.checkpoint } : {}),
           };
-          if (hasTurnProgress(toolCalls, steps, messages)) {
-            details.partial = buildTurnPartial(
-              traceId, round - 1, toolCalls, steps, messages,
-              model, providerId, api, reasoning, usage,
-            );
-          }
-          throw new ApplicationError("AGENT_PROVIDER_FAILED", `AI provider request failed: ${cause}`, details);
+        }
+
+        validateRequestedTools(requestedCalls, toolsByName, traceId);
+        const duplicate = repeatedToolDecision(requestedCalls, repeatedCalls, this.defaultMaxRepeatedToolCalls);
+        if (duplicate === "stop") {
+          this.deps.logger?.warn("Agent stopped: repeated tool call limit (%d) reached traceId=%s", this.defaultMaxRepeatedToolCalls, traceId);
+          return {
+            traceId,
+            text: `The agent stopped because the model repeated the same tool call ${this.defaultMaxRepeatedToolCalls} times.`,
+            rounds: round,
+            toolCalls,
+            steps,
+            messages,
+            ...(model ? { model } : {}),
+            ...(providerId ? { providerId } : {}),
+            ...(api ? { api } : {}),
+            ...(reasoning ? { reasoning } : {}),
+            ...(hasUsage(usage) ? { usage } : {}),
+            ...(compacted.checkpoint ? { compaction: compacted.checkpoint } : {}),
+          };
+        }
+        if (duplicate === "nudge") {
+          this.deps.logger?.info("Agent nudged: repeated tool call detected traceId=%s", traceId);
+          messages.push(
+            { role: "assistant", ...(response.text ? { content: response.text } : {}), ...(response.reasoning?.trim() ? { reasoning: response.reasoning.trim() } : {}), toolCalls: requestedCalls },
+            {
+              role: "system",
+              content: "You are repeating the same tool call with identical arguments. Use the previous tool result, change the arguments, or answer the user without repeating it.",
+            },
+          );
+          continue;
+        }
+        messages.push({ role: "assistant", ...(response.text ? { content: response.text } : {}), ...(response.reasoning?.trim() ? { reasoning: response.reasoning.trim() } : {}), toolCalls: requestedCalls });
+        // Keep provider order for the round: reasoning (already pushed) → text → tools.
+        // Streaming UIs also append by delta arrival; do not reorder text after tools.
+        if (response.text?.trim()) {
+          steps.push({ type: "text", content: response.text.trim(), ...(stepModel ? { model: stepModel } : {}), ...(stepProviderId ? { providerId: stepProviderId } : {}) });
+        }
+        publishContext();
+
+        const roundExecutions: AgentToolExecution[] = [];
+        await this.toolPolicy.executeBatch(requestedCalls, {
+          traceId,
+          round,
+          ...(input.signal ? { signal: input.signal } : {}),
+          ...(input.onToolCallStart ? { onToolCallStart: input.onToolCallStart } : {}),
+          ...(input.onToolCallEnd ? { onToolCallEnd: input.onToolCallEnd } : {}),
+        }, toolCalls, roundExecutions, messages);
+        publishContext();
+        if (roundExecutions.length > 0) {
+          steps.push({ type: "tool_calls", calls: [...roundExecutions], ...(stepModel ? { model: stepModel } : {}), ...(stepProviderId ? { providerId: stepProviderId } : {}) });
         }
       }
-      model = response.model ?? model;
-      providerId = response.providerId ?? providerId;
-      api = response.api ?? api;
-      reasoning = response.reasoning ?? reasoning;
-      const stepModel = response.model;
-      const stepProviderId = response.providerId;
-      if (response.reasoning?.trim()) {
-        steps.push({ type: "reasoning", content: response.reasoning.trim(), ...(stepModel ? { model: stepModel } : {}), ...(stepProviderId ? { providerId: stepProviderId } : {}) });
-      }
-      addUsage(usage, response.usage);
-      const requestedCalls = response.toolCalls ?? [];
-      publishContext();
 
-      if (requestedCalls.length === 0) {
-        let text = response.text?.trim();
-        if (!text) {
-          this.deps.logger?.warn("Agent provider returned an empty response traceId=%s provider=%s round=%d", traceId, this.deps.provider.id, round);
-          if (!emptyResponseNudged && round < maxToolRounds) {
-            emptyResponseNudged = true;
-            this.deps.logger?.info("Agent nudged: empty response, requesting text or tool call traceId=%s round=%d", traceId, round);
-            const reasoningOnly = Boolean(response.reasoning?.trim());
-            messages.push(
-              { role: "assistant", content: "" },
-              {
-                role: "system",
-                content: reasoningOnly
-                  ? "You produced reasoning but no user-facing answer and no tool call. Answer the user now in plain text, or call a tool with concrete arguments."
-                  : "You produced no user-facing answer and no tool call. Answer the user now in plain text, or call a tool with concrete arguments.",
-              },
-            );
-            continue;
-          }
-          text = "(empty model response)";
-        }
-        this.deps.logger?.info("Agent turn completed traceId=%s provider=%s rounds=%d", traceId, this.deps.provider.id, round);
-        steps.push({ type: "text", content: text, ...(stepModel ? { model: stepModel } : {}), ...(stepProviderId ? { providerId: stepProviderId } : {}) });
-        return {
-          traceId,
-          text,
-          rounds: round,
-          toolCalls,
-          steps,
-          messages,
-          ...(model ? { model } : {}),
-          ...(providerId ? { providerId } : {}),
-          ...(api ? { api } : {}),
-          ...(reasoning ? { reasoning } : {}),
-          ...(hasUsage(usage) ? { usage } : {}),
-          ...(compacted.checkpoint ? { compaction: compacted.checkpoint } : {}),
-        };
-      }
-
-      validateRequestedTools(requestedCalls, toolsByName, traceId);
-      const duplicate = repeatedToolDecision(requestedCalls, repeatedCalls, this.defaultMaxRepeatedToolCalls);
-      if (duplicate === "stop") {
-        this.deps.logger?.warn("Agent stopped: repeated tool call limit (%d) reached traceId=%s", this.defaultMaxRepeatedToolCalls, traceId);
-        return {
-          traceId,
-          text: `The agent stopped because the model repeated the same tool call ${this.defaultMaxRepeatedToolCalls} times.`,
-          rounds: round,
-          toolCalls,
-          steps,
-          messages,
-          ...(model ? { model } : {}),
-          ...(providerId ? { providerId } : {}),
-          ...(api ? { api } : {}),
-          ...(reasoning ? { reasoning } : {}),
-          ...(hasUsage(usage) ? { usage } : {}),
-          ...(compacted.checkpoint ? { compaction: compacted.checkpoint } : {}),
-        };
-      }
-      if (duplicate === "nudge") {
-        this.deps.logger?.info("Agent nudged: repeated tool call detected traceId=%s", traceId);
-        messages.push(
-          { role: "assistant", ...(response.text ? { content: response.text } : {}), ...(response.reasoning?.trim() ? { reasoning: response.reasoning.trim() } : {}), toolCalls: requestedCalls },
-          {
-            role: "system",
-            content: "You are repeating the same tool call with identical arguments. Use the previous tool result, change the arguments, or answer the user without repeating it.",
-          },
-        );
-        continue;
-      }
-      messages.push({ role: "assistant", ...(response.text ? { content: response.text } : {}), ...(response.reasoning?.trim() ? { reasoning: response.reasoning.trim() } : {}), toolCalls: requestedCalls });
-      // Keep provider order for the round: reasoning (already pushed) → text → tools.
-      // Streaming UIs also append by delta arrival; do not reorder text after tools.
-      if (response.text?.trim()) {
-        steps.push({ type: "text", content: response.text.trim(), ...(stepModel ? { model: stepModel } : {}), ...(stepProviderId ? { providerId: stepProviderId } : {}) });
-      }
-      publishContext();
-
-      const roundExecutions: AgentToolExecution[] = [];
-      await this.toolPolicy.executeBatch(requestedCalls, {
+      this.deps.logger?.warn("Agent turn reached tool-round limit traceId=%s provider=%s limit=%d", traceId, this.deps.provider.id, maxToolRounds);
+      return {
         traceId,
-        round,
-        ...(input.signal ? { signal: input.signal } : {}),
-        ...(input.onToolCallStart ? { onToolCallStart: input.onToolCallStart } : {}),
-        ...(input.onToolCallEnd ? { onToolCallEnd: input.onToolCallEnd } : {}),
-      }, toolCalls, roundExecutions, messages);
-      publishContext();
-      if (roundExecutions.length > 0) {
-        steps.push({ type: "tool_calls", calls: [...roundExecutions], ...(stepModel ? { model: stepModel } : {}), ...(stepProviderId ? { providerId: stepProviderId } : {}) });
-      }
+        text: "The agent reached the maximum tool rounds before producing a final answer.",
+        rounds: maxToolRounds,
+        toolCalls,
+        steps,
+        messages,
+        ...(model ? { model } : {}),
+        ...(providerId ? { providerId } : {}),
+        ...(api ? { api } : {}),
+        ...(reasoning ? { reasoning } : {}),
+        ...(hasUsage(usage) ? { usage } : {}),
+        ...(compacted.checkpoint ? { compaction: compacted.checkpoint } : {}),
+      };
+    } catch (error) {
+      // Provider soft-recover exhaustion already attaches partial. This catch
+      // covers allowlist rejection, listTools failures, user cancel after tool
+      // progress, and other mid-turn ApplicationErrors so Retry can resume
+      // instead of restarting from scratch.
+      if (!hasTurnProgress(toolCalls, steps, messages)) throw error;
+      rethrowWithTurnPartial(
+        error,
+        buildTurnPartial(
+          traceId,
+          Math.max(0, activeRound - 1),
+          toolCalls,
+          steps,
+          messages,
+          model,
+          providerId,
+          api,
+          reasoning,
+          usage,
+        ),
+      );
     }
-
-    this.deps.logger?.warn("Agent turn reached tool-round limit traceId=%s provider=%s limit=%d", traceId, this.deps.provider.id, maxToolRounds);
-    return {
-      traceId,
-      text: "The agent reached the maximum tool rounds before producing a final answer.",
-      rounds: maxToolRounds,
-      toolCalls,
-      steps,
-      messages,
-      ...(model ? { model } : {}),
-      ...(providerId ? { providerId } : {}),
-      ...(api ? { api } : {}),
-      ...(reasoning ? { reasoning } : {}),
-      ...(hasUsage(usage) ? { usage } : {}),
-      ...(compacted.checkpoint ? { compaction: compacted.checkpoint } : {}),
-    };
   }
 }

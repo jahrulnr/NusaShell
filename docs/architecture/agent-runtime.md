@@ -80,14 +80,22 @@ executed once, nudged on its second appearance, and stops the loop on its third.
   the runner first attempts a **soft recover** — re-calling the provider with
   the same accumulated messages up to `softRecoverAttempts` times (default 1,
   max 3, configurable via `NUSASHELL_AI_SOFT_RECOVER_ATTEMPTS`). Cancellation
-  aborts immediately and is never retried.
-- If soft recover is exhausted and the turn had progress, the runner throws
-  `AGENT_PROVIDER_FAILED` with a `details.partial` snapshot containing the
-  accumulated `messages`, `steps`, `toolCalls`, `traceId`, `rounds`, and
-  optional `model`/`providerId`/`usage`. The desktop seals the streaming
+  aborts immediately and is never retried. Soft recover applies after the
+  shared HTTP adapter has already exhausted its transient retries (connection
+  failures, `408`/`409`/`413`/`425`/`429`, `500`–`504`); permanent 4xx still
+  fail the provider call immediately and then soft-recover / attach partial
+  the same way when tool progress exists.
+- If soft recover is exhausted **or** another mid-turn failure occurs with
+  progress (e.g. `AGENT_TOOL_NOT_ALLOWED` allowlist rejection, `listTools`
+  failure, or **user cancel** after tools already ran), the runner throws with
+  a `details.partial` snapshot containing the accumulated `messages`, `steps`,
+  `toolCalls`, `traceId`, `rounds`, and optional `model`/`providerId`/`usage`.
+  Cancel still uses `AGENT_TURN_CANCELLED` and is never soft-retried; the
+  partial is only for durable resume. The desktop seals the streaming
   message, persists an **interrupted** assistant message (`status:
   "interrupted"`) carrying `resumeMessages`, and still shows the error footer
-  with **Retry**.
+  with **Retry** / resume. Progress is never discarded solely because the
+  error code was cancel or was not `AGENT_PROVIDER_FAILED`.
 - **Retry** on an interrupted message calls `agent.run` with `resume: true`
   and the saved `resumeMessages`, skipping system-prompt injection so the
   provider sees the exact mid-turn context. On success the interrupted
@@ -101,8 +109,10 @@ executed once, nudged on its second appearance, and stops the loop on its third.
 - Renderer-only working/error bubbles disappear after reload; durable user and
   assistant messages remain the source of truth.
 - SSE text deltas update the current working bubble only. `agent.cancel`
-  aborts provider HTTP, retry waits, and active MCP calls by trace ID. Partial
-  text from a cancelled turn is not persisted.
+  aborts provider HTTP, retry waits, and active MCP calls by trace ID. When
+  the turn already had tool progress, cancel persists an interrupted
+  assistant + `resumeMessages` so Stop → Resume continues mid-turn; cancel
+  with no tool progress still leaves only the durable user message.
 - User messages may persist up to four images/PDFs, each at most 4 MiB. The
   wire contract accepts bounded data URLs only; remote attachment URLs and
   arbitrary filesystem paths are rejected.

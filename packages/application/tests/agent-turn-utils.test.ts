@@ -1,6 +1,66 @@
 import { describe, expect, it } from "vitest";
 import type { AgentMessage } from "../src/agent/ports/agent-provider.port.js";
-import { clampText, formatMessagesForSummary } from "../src/agent/services/agent-turn-utils.js";
+import { ApplicationError } from "../src/errors/application-error.js";
+import {
+  clampText,
+  formatMessagesForSummary,
+  rethrowWithTurnPartial,
+} from "../src/agent/services/agent-turn-utils.js";
+import type { AgentTurnPartial } from "../src/agent/services/agent-turn-types.js";
+
+const samplePartial: AgentTurnPartial = {
+  traceId: "trace-1",
+  rounds: 2,
+  text: "",
+  toolCalls: [],
+  steps: [],
+  messages: [{ role: "user", content: "hi" }],
+};
+
+describe("rethrowWithTurnPartial", () => {
+  it("attaches partial to cancel so Stop can resume", () => {
+    try {
+      rethrowWithTurnPartial(
+        new ApplicationError("AGENT_TURN_CANCELLED", "cancelled", { traceId: "t" }),
+        samplePartial,
+      );
+      expect.unreachable("should throw");
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "AGENT_TURN_CANCELLED",
+        details: { traceId: "t", partial: samplePartial },
+      });
+    }
+  });
+
+  it("wraps allowlist errors with partial for resume", () => {
+    try {
+      rethrowWithTurnPartial(
+        new ApplicationError("AGENT_TOOL_NOT_ALLOWED", "outside allowlist", { toolName: "x" }),
+        samplePartial,
+      );
+      expect.unreachable("should throw");
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "AGENT_TOOL_NOT_ALLOWED",
+        details: { toolName: "x", partial: samplePartial, traceId: "trace-1" },
+      });
+    }
+  });
+
+  it("passes through errors that already carry partial", () => {
+    const original = new ApplicationError("AGENT_PROVIDER_FAILED", "boom", {
+      partial: samplePartial,
+      cause: "429",
+    });
+    try {
+      rethrowWithTurnPartial(original, { ...samplePartial, rounds: 9 });
+      expect.unreachable("should throw");
+    } catch (error) {
+      expect(error).toBe(original);
+    }
+  });
+});
 
 describe("formatMessagesForSummary", () => {
   it("includes tool call args alongside names on assistant messages", () => {

@@ -246,6 +246,25 @@ export function buildTurnPartial(
   };
 }
 
+/**
+ * Re-throw with `details.partial` when the turn already has tool progress so
+ * the desktop can seal/persist an interrupted assistant and Retry can resume
+ * (including user cancel). Errors that already carry a partial pass through.
+ */
+export function rethrowWithTurnPartial(error: unknown, partial: AgentTurnPartial | undefined): never {
+  if (!partial) throw error;
+  if (error instanceof ApplicationError) {
+    if (error.details && Object.prototype.hasOwnProperty.call(error.details, "partial")) throw error;
+    throw new ApplicationError(error.code, error.message, {
+      ...error.details,
+      partial,
+      traceId: typeof error.details?.traceId === "string" ? error.details.traceId : partial.traceId,
+    });
+  }
+  const cause = error instanceof Error ? error.message : String(error);
+  throw new ApplicationError("INTERNAL_ERROR", cause, { cause, partial, traceId: partial.traceId });
+}
+
 export function estimateMessageTokens(messages: readonly AgentMessage[]): number {
   let chars = 0;
   for (const message of messages) {

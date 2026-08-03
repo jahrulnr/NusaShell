@@ -288,11 +288,37 @@ describe("AgentTurnRunner", () => {
     const tools = new FakeToolGateway();
     const runner = new AgentTurnRunner({ provider, toolGateway: tools });
 
-    await expect(runner.run({
+    const error = await runner.run({
       messages: [{ role: "user", content: "Delete a file" }],
       pluginIds: ["notes"],
-    })).rejects.toMatchObject({ code: "AGENT_TOOL_NOT_ALLOWED" });
+    }).catch((e) => e);
+
+    expect(error).toMatchObject({ code: "AGENT_TOOL_NOT_ALLOWED" });
+    expect(error.details?.partial).toBeUndefined();
     expect(tools.calls).toEqual([]);
+  });
+
+  it("attaches details.partial when allowlist rejects after prior tool progress", async () => {
+    const provider = new ScriptedProvider([
+      { toolCalls: [{ id: "call-1", name: "notes.create", args: { title: "Roadmap" } }] },
+      { toolCalls: [{ id: "call-2", name: "filesystem.delete", args: { path: "/tmp/a" } }] },
+    ]);
+    const tools = new FakeToolGateway();
+    const runner = new AgentTurnRunner({ provider, toolGateway: tools });
+
+    const error = await runner.run({
+      messages: [{ role: "user", content: "Create then delete" }],
+      pluginIds: ["notes"],
+    }).catch((e) => e);
+
+    expect(error).toMatchObject({ code: "AGENT_TOOL_NOT_ALLOWED" });
+    expect(error.details?.partial).toBeDefined();
+    expect(error.details.partial.rounds).toBe(1);
+    expect(error.details.partial.toolCalls).toHaveLength(1);
+    expect(error.details.partial.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "tool", toolCallId: "call-1" }),
+    ]));
+    expect(tools.calls).toEqual([{ name: "notes.create", args: { title: "Roadmap" } }]);
   });
 
   it("returns a bounded runtime answer when the provider exceeds the tool-round limit", async () => {
@@ -602,7 +628,7 @@ describe("AgentTurnRunner", () => {
     ]));
   });
 
-  it("surfaces cancellation without a partial when aborted during soft recover", async () => {
+  it("attaches details.partial when cancelled after prior tool progress", async () => {
     const controller = new AbortController();
     const provider = new FlakyProvider([
       { toolCalls: [{ id: "call-1", name: "notes.create", args: { title: "Roadmap" } }] },
@@ -617,6 +643,34 @@ describe("AgentTurnRunner", () => {
     const error = await runner.run({
       messages: [{ role: "user", content: "Create a note" }],
       pluginIds: ["notes"],
+      signal: controller.signal,
+    }).catch((e) => e);
+
+    expect(error).toMatchObject({ code: "AGENT_TURN_CANCELLED" });
+    expect(error.details?.partial).toBeDefined();
+    expect(error.details.partial.rounds).toBe(1);
+    expect(error.details.partial.toolCalls).toHaveLength(1);
+    expect(error.details.partial.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "tool", toolCallId: "call-1" }),
+    ]));
+  });
+
+  it("cancels without partial when aborted before any tool progress", async () => {
+    const controller = new AbortController();
+    const provider = new FlakyProvider([
+      new Error("boom"),
+    ], () => {
+      controller.abort();
+    });
+    const runner = new AgentTurnRunner({
+      provider,
+      toolGateway: new FakeToolGateway(),
+      softRecoverAttempts: 0,
+    });
+
+    const error = await runner.run({
+      messages: [{ role: "user", content: "Fail immediately" }],
+      pluginIds: [],
       signal: controller.signal,
     }).catch((e) => e);
 

@@ -83,8 +83,9 @@ export interface AgentCompactionCheckpoint {
 }
 
 /**
- * Mid-turn progress snapshot attached to `AGENT_PROVIDER_FAILED.details.partial`
- * when a provider call fails after the turn already accumulated tool work.
+ * Mid-turn progress snapshot attached to ApplicationError `details.partial`
+ * when a turn fails after tool work has already accumulated (provider 4xx/5xx
+ * after soft recover, allowlist rejection, listTools failure, etc.).
  * Field names mirror `AgentTurnResult` so the desktop can treat it like a
  * result for sealing/persisting the interrupted assistant message.
  */

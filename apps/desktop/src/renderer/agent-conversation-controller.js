@@ -309,31 +309,23 @@ export class AgentConversationController {
       // fill, and would inflate the badge ~N× after multi-round turns.
       this.log("info", `Agent turn completed trace=${result.traceId} rounds=${result.rounds}`);
     } catch (error) {
-      if (error.code === "AGENT_TURN_CANCELLED") {
+      if (error.code === "AGENT_TURN_CANCELLED" && !turnEnded) {
         // Wait for the terminal turn_end event (published after in-flight
         // tools drain) before sealing, with a 2s fallback so the UI never
         // hangs on a missing event.
-        if (!turnEnded) {
-          await Promise.race([turnEndPromise, new Promise((r) => setTimeout(r, 2000))]);
-        }
-        this.sealStreamingToolCardsIncomplete(streamState);
-        if (pending && streamState?.streamedText) {
-          this.sealStreamingMessage(pending, { content: streamState.streamedText });
-          pending.classList.add("agent-message-stopped");
-        } else {
-          pending?.remove();
-        }
-        this.appendMessage("assistant", "Turn stopped.", { error: true });
-        status.textContent = "Turn stopped";
-        this.log("info", `Agent turn stopped trace=${this.activeTraceId}`);
-        return;
+        await Promise.race([turnEndPromise, new Promise((r) => setTimeout(r, 2000))]);
       }
       const partial = error.details?.partial;
+      const isCancel = error.code === "AGENT_TURN_CANCELLED";
       if (partial) {
-        this.sealStreamingMessage(pending, partial);
+        this.sealStreamingToolCardsIncomplete(streamState);
+        this.sealStreamingMessage(pending, { ...partial, status: "interrupted" });
+        if (pending && isCancel) pending.classList.add("agent-message-stopped");
         const interruptedMessage = {
           role: "assistant",
-          content: `Turn interrupted after ${partial.rounds} tool round${partial.rounds === 1 ? "" : "s"}.`,
+          content: isCancel
+            ? `Turn stopped after ${partial.rounds} tool round${partial.rounds === 1 ? "" : "s"}.`
+            : `Turn interrupted after ${partial.rounds} tool round${partial.rounds === 1 ? "" : "s"}.`,
           status: "interrupted",
           traceId: partial.traceId,
           model: partial.model,
@@ -353,13 +345,40 @@ export class AgentConversationController {
         }
         this.failedMessage = this.appendMessage(
           "assistant",
-          `Turn failed: ${formatTurnError(error)}`,
+          isCancel ? "Turn stopped." : `Turn failed: ${formatTurnError(error)}`,
           { error: true, retry: true },
         );
-        status.textContent = "Turn interrupted · ready to retry";
-        this.log("error", `Agent turn failed: ${formatTurnError(error)}`);
+        status.textContent = isCancel ? "Turn stopped · ready to resume" : "Turn interrupted · ready to retry";
+        this.log(isCancel ? "info" : "error", isCancel
+          ? `Agent turn stopped trace=${this.activeTraceId}`
+          : `Agent turn failed: ${formatTurnError(error)}`);
+      } else if (isCancel) {
+        this.sealStreamingToolCardsIncomplete(streamState);
+        if (pending && streamState?.streamedText) {
+          this.sealStreamingMessage(pending, { content: streamState.streamedText });
+          pending.classList.add("agent-message-stopped");
+        } else {
+          pending?.remove();
+        }
+        this.appendMessage("assistant", "Turn stopped.", { error: true });
+        status.textContent = "Turn stopped";
+        this.log("info", `Agent turn stopped trace=${this.activeTraceId}`);
       } else {
-        pending?.remove();
+        // Keep streamed UI visible even when the backend omitted a resume
+        // snapshot (e.g. failure before any tool progress).
+        const hasStream = Boolean(
+          streamState
+          && (streamState.streamedText || streamState.reasoningText || streamState.toolCards.size > 0),
+        );
+        if (pending && hasStream) {
+          this.sealStreamingToolCardsIncomplete(streamState);
+          this.sealStreamingMessage(pending, {
+            content: streamState.streamedText || "",
+            ...(streamState.reasoningText ? { reasoning: streamState.reasoningText } : {}),
+          });
+        } else {
+          pending?.remove();
+        }
         this.failedMessage = this.appendMessage(
           "assistant",
           `Turn failed: ${formatTurnError(error)}`,
