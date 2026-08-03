@@ -2,6 +2,8 @@ export type MemoryTarget = "memory" | "user";
 
 export interface MemoryEntry {
   readonly text: string;
+  /** ISO-8601 creation time when known; null for legacy undated entries. */
+  readonly createdAt: string | null;
 }
 
 export interface MemoryUsage {

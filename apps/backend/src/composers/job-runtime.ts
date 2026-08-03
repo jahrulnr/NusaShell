@@ -2,17 +2,21 @@ import {
   FilesystemJobFs,
   SqliteJobStore,
   JsonJobStore,
+  JsonPipelineStore,
   type Logger,
 } from "@nusashell/infrastructure";
 import {
   JobAgentToolGateway,
   JobAgentExecutor,
   JobScheduler,
+  EventJobMatcher,
+  PipelineScheduler,
   CallToolHandler,
   DEFAULT_JOB_EXECUTOR_SETTINGS,
   type EventDispatcher,
   type JobStorePort,
   type JobFsPort,
+  type PipelineStorePort,
 } from "@nusashell/application";
 import { fileURLToPath } from "node:url";
 import type { ContainerOptions } from "../container.js";
@@ -23,6 +27,9 @@ export interface JobRuntimeParts {
   readonly jobScheduler: JobScheduler;
   readonly jobStore: JobStorePort;
   readonly jobFs: JobFsPort;
+  readonly eventJobMatcher: EventJobMatcher;
+  readonly pipelineStore?: PipelineStorePort;
+  readonly pipelineScheduler?: PipelineScheduler;
 }
 
 export function createJobRuntime(
@@ -59,5 +66,23 @@ export function createJobRuntime(
   if (options.jobs) {
     jobScheduler.configure(options.jobs);
   }
-  return { jobScheduler, jobStore, jobFs };
+  const pipelineStore = new JsonPipelineStore(jobsRoot);
+  const pipelineScheduler = new PipelineScheduler({
+    store: pipelineStore,
+    executor: jobExecutor,
+    callToolHandler: new CallToolHandler(plugin.runtimeManager),
+    eventDispatcher,
+    executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS,
+    logger,
+  });
+  const eventJobMatcher = new EventJobMatcher({
+    store: jobStore,
+    scheduler: jobScheduler,
+    eventDispatcher,
+    logger,
+    pipelineStore,
+    pipelineScheduler,
+  });
+  eventJobMatcher.start();
+  return { jobScheduler, jobStore, jobFs, eventJobMatcher, pipelineStore, pipelineScheduler };
 }

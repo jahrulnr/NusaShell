@@ -17,6 +17,8 @@ export type {
   CompletionReference,
   CompletionResult,
   RootDescriptor,
+  AutomationClientDeps,
+  AutomationRateLimiterPort,
 } from "./mcp-client.port.js";
 export type { ClockPort } from "./clock.port.js";
 export type { LoggerPort } from "./logger.port.js";

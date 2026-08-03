@@ -267,7 +267,7 @@ describe("McpAgentToolGateway", () => {
   });
 
   it("handles memory add/replace/remove via the gateway", async () => {
-    let memoryEntries = [{ text: "existing note" }];
+    let memoryEntries = [{ text: "existing note", createdAt: null as string | null }];
     const fakeMemory: MemoryStorePort = {
       loadSnapshot: async (): Promise<MemorySnapshot> => ({
         memory: memoryEntries,
@@ -278,11 +278,11 @@ describe("McpAgentToolGateway", () => {
         },
       }),
       add: async (_target, content): Promise<MemoryMutationResult> => {
-        memoryEntries = [...memoryEntries, { text: content }];
+        memoryEntries = [...memoryEntries, { text: content, createdAt: "2026-08-03T00:00:00.000Z" }];
         return { ok: true, data: { entries: memoryEntries, usage: { chars: 100, limit: 2200 } } };
       },
       replace: async (_target, _oldText, content): Promise<MemoryMutationResult> => {
-        memoryEntries = [{ text: content }];
+        memoryEntries = [{ text: content, createdAt: null }];
         return { ok: true, data: { entries: memoryEntries, usage: { chars: 50, limit: 2200 } } };
       },
       remove: async (_target, _oldText): Promise<MemoryMutationResult> => {
@@ -296,13 +296,19 @@ describe("McpAgentToolGateway", () => {
     const addResult = await gateway.execute("memory", { action: "add", target: "memory", content: "new note" }, "call-add", "turn-mem-2");
     expect(addResult).toEqual({
       ok: true,
-      data: { entries: [{ text: "existing note" }, { text: "new note" }], usage: { chars: 100, limit: 2200 } },
+      data: {
+        entries: [
+          { text: "existing note", createdAt: null },
+          { text: "new note", createdAt: "2026-08-03T00:00:00.000Z" },
+        ],
+        usage: { chars: 100, limit: 2200 },
+      },
     });
 
     const replaceResult = await gateway.execute("memory", { action: "replace", target: "memory", old_text: "existing", content: "updated" }, "call-replace", "turn-mem-2");
     expect(replaceResult).toEqual({
       ok: true,
-      data: { entries: [{ text: "updated" }], usage: { chars: 50, limit: 2200 } },
+      data: { entries: [{ text: "updated", createdAt: null }], usage: { chars: 50, limit: 2200 } },
     });
 
     const removeResult = await gateway.execute("memory", { action: "remove", target: "memory", old_text: "updated" }, "call-remove", "turn-mem-2");
@@ -764,7 +770,7 @@ describe("McpAgentToolGateway", () => {
       return {
         id: "job-1",
         name: "Daily digest",
-        schedule: { kind: "interval", minutes: 60 },
+        trigger: { kind: "schedule", schedule: { kind: "interval", minutes: 60 } },
         mode: { type: "agent", prompt: "Summarize the inbox" },
         enabled: true,
         repeat: { times: null, completed: 0 },
@@ -846,7 +852,7 @@ describe("McpAgentToolGateway", () => {
           jobs: [{
             id: "job-1",
             name: "Daily digest",
-            schedule: "every 1h",
+            trigger: "every 1h",
             enabled: true,
             nextRunAt: "2026-08-01T10:00:00.000Z",
             lastStatus: null,
@@ -888,7 +894,7 @@ describe("McpAgentToolGateway", () => {
       }, "c-add", "turn-add") as { ok: boolean; data: Job };
       expect(result.ok).toBe(true);
       expect(result.data.name).toBe("Inbox sweep");
-      expect(result.data.schedule).toEqual({ kind: "cron", expr: "0 9 * * *" });
+      expect(result.data.trigger).toEqual({ kind: "schedule", schedule: { kind: "cron", expr: "0 9 * * *" } });
       expect(result.data.mode).toEqual({ type: "agent", prompt: "Summarize the inbox" });
       expect(result.data.enabled).toBe(true);
       expect(result.data.nextRunAt).not.toBeNull();
@@ -1036,7 +1042,7 @@ describe("McpAgentToolGateway", () => {
       expect(result.ok).toBe(true);
       const updated = (result as { data: Job }).data;
       expect(updated.name).toBe("Weekly digest");
-      expect(updated.schedule).toEqual({ kind: "interval", minutes: 10080 });
+      expect(updated.trigger).toEqual({ kind: "schedule", schedule: { kind: "interval", minutes: 10080 } });
     });
 
     it("update returns job_not_found when the id is absent", async () => {

@@ -22,6 +22,7 @@ import {
   type SkillCuratorService,
   type SkillCuratorScheduler,
   type JobScheduler,
+  type EventJobMatcher,
   type LearningGraphService,
   type BackgroundReviewSettings,
   type JobSchedulerSettings,
@@ -116,6 +117,7 @@ export interface Container {
   readonly skillCuratorScheduler: SkillCuratorScheduler;
   readonly backgroundReviewScheduler: BackgroundReviewScheduler;
   readonly jobScheduler: JobScheduler;
+  readonly eventJobMatcher: EventJobMatcher;
   readonly learningGraph: LearningGraphService;
   readonly memoryStore: MemoryStorePort;
   readonly db?: SqliteDatabase | undefined;
@@ -167,6 +169,9 @@ export function createContainer(options: ContainerOptions): Container {
   const agent = createAgentRuntime(options, logger, eventDispatcher, plugin, skills);
   const jobs = createJobRuntime(options, logger, eventDispatcher, plugin, agent);
   agent.agentToolGateway.bindJobs(jobs.jobStore, jobs.jobScheduler);
+  if (jobs.pipelineStore && jobs.pipelineScheduler) {
+    agent.agentToolGateway.bindPipelines(jobs.pipelineStore, jobs.pipelineScheduler);
+  }
   const acp = createAcpRuntime(options, logger, eventDispatcher, agent);
 
   const aiConfiguration = createAiConfiguration(options, logger, agent);
@@ -202,6 +207,7 @@ export function createContainer(options: ContainerOptions): Container {
     skillCuratorScheduler: skills.skillCuratorScheduler,
     backgroundReviewScheduler: agent.backgroundReviewScheduler,
     jobScheduler: jobs.jobScheduler,
+    eventJobMatcher: jobs.eventJobMatcher,
     learningGraph: skills.learningGraph,
     memoryStore: skills.memoryStore,
     db: plugin.db,

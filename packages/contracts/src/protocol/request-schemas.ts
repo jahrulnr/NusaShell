@@ -251,6 +251,33 @@ const JobModeSchema = z.discriminatedUnion("type", [
   }),
 ]);
 
+const ConditionSchema = z.object({
+  path: z.string().min(1).max(500),
+  op: z.enum(["eq", "contains", "regex"]),
+  value: z.string().max(2000),
+});
+
+const JobScheduleSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("once"), runAt: z.string().min(1) }),
+  z.object({ kind: z.literal("interval"), minutes: z.number().int().min(1).max(525600) }),
+  z.object({ kind: z.literal("cron"), expr: z.string().min(1).max(200) }),
+]);
+
+const JobTriggerSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("schedule"),
+    schedule: JobScheduleSchema,
+  }),
+  z.object({
+    kind: z.literal("event"),
+    pattern: z.string().min(1).max(500),
+    pluginId: z.string().min(1).optional(),
+    conditions: z.array(ConditionSchema).optional(),
+    throttleMs: z.number().int().min(0).max(60 * 60 * 1000).optional(),
+    maxFiresPerHour: z.number().int().min(1).max(100000).optional(),
+  }),
+]);
+
 export const JobAddRequestSchema = z.object({
   kind: z.literal("request"),
   id: z.string().min(1),
@@ -258,9 +285,14 @@ export const JobAddRequestSchema = z.object({
   protocolVersion: z.string().optional(),
   payload: z.object({
     name: z.string().min(1).max(200),
-    schedule: z.string().min(1).max(200),
+    schedule: z.string().min(1).max(200).optional(),
+    trigger: JobTriggerSchema.optional(),
     mode: JobModeSchema,
     repeatTimes: z.number().int().min(1).max(100000).optional(),
+    onComplete: z.object({
+      type: z.string().min(1).max(200),
+      payload: z.record(z.unknown()).optional(),
+    }).optional(),
   }),
 });
 
@@ -273,9 +305,14 @@ export const JobUpdateRequestSchema = z.object({
     id: z.string().min(1),
     name: z.string().min(1).max(200).optional(),
     schedule: z.string().min(1).max(200).optional(),
+    trigger: JobTriggerSchema.optional(),
     mode: JobModeSchema.optional(),
     repeatTimes: z.number().int().min(1).max(100000).nullable().optional(),
     enabled: z.boolean().optional(),
+    onComplete: z.object({
+      type: z.string().min(1).max(200),
+      payload: z.record(z.unknown()).optional(),
+    }).nullable().optional(),
   }),
 });
 
@@ -348,6 +385,88 @@ export const JobValidateScheduleRequestSchema = z.object({
   payload: z.object({
     schedule: z.string().min(1).max(200),
   }),
+});
+
+export const PipelineAddRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("pipeline.add"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    name: z.string().min(1).max(200),
+    description: z.string().max(2000).optional(),
+    trigger: JobTriggerSchema,
+    steps: z.array(z.object({
+      id: z.string().min(1).max(100),
+      name: z.string().min(1).max(200),
+      action: JobModeSchema,
+      dependsOn: z.array(z.string().min(1).max(100)).optional(),
+      condition: z.unknown().optional(),
+      outputKey: z.string().min(1).max(100).optional(),
+      timeoutMs: z.number().int().min(0).optional(),
+    })).min(1),
+    settings: z.object({
+      maxConcurrency: z.number().int().min(1).max(32).optional(),
+      timeoutMs: z.number().int().min(0).optional(),
+      maxRetries: z.number().int().min(0).max(10).optional(),
+    }).optional(),
+  }),
+});
+
+export const PipelineUpdateRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("pipeline.update"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    id: z.string().min(1),
+    name: z.string().min(1).max(200).optional(),
+    description: z.string().max(2000).nullable().optional(),
+    trigger: JobTriggerSchema.optional(),
+    steps: z.array(z.object({
+      id: z.string().min(1).max(100),
+      name: z.string().min(1).max(200),
+      action: JobModeSchema,
+      dependsOn: z.array(z.string().min(1).max(100)).optional(),
+      condition: z.unknown().optional(),
+      outputKey: z.string().min(1).max(100).optional(),
+      timeoutMs: z.number().int().min(0).optional(),
+    })).min(1).optional(),
+    settings: z.object({
+      maxConcurrency: z.number().int().min(1).max(32).optional(),
+      timeoutMs: z.number().int().min(0).optional(),
+      maxRetries: z.number().int().min(0).max(10).optional(),
+    }).nullable().optional(),
+    enabled: z.boolean().optional(),
+  }),
+});
+
+export const PipelineRemoveRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("pipeline.remove"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    id: z.string().min(1),
+  }),
+});
+
+export const PipelineRunRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("pipeline.run"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    id: z.string().min(1),
+  }),
+});
+
+export const PipelineListRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("pipeline.list"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({}),
 });
 
 const AcpContentBlockSchema = z.discriminatedUnion("type", [
@@ -525,6 +644,11 @@ export const RequestSchema = z.discriminatedUnion("method", [
   JobRemoveRequestSchema,
   JobOutputRequestSchema,
   JobValidateScheduleRequestSchema,
+  PipelineAddRequestSchema,
+  PipelineUpdateRequestSchema,
+  PipelineRemoveRequestSchema,
+  PipelineRunRequestSchema,
+  PipelineListRequestSchema,
   AcpRunRequestSchema,
   AcpCancelRequestSchema,
   AcpPermissionAnswerRequestSchema,
@@ -566,6 +690,11 @@ export type JobCancelRequest = z.infer<typeof JobCancelRequestSchema>;
 export type JobRemoveRequest = z.infer<typeof JobRemoveRequestSchema>;
 export type JobOutputRequest = z.infer<typeof JobOutputRequestSchema>;
 export type JobValidateScheduleRequest = z.infer<typeof JobValidateScheduleRequestSchema>;
+export type PipelineAddRequest = z.infer<typeof PipelineAddRequestSchema>;
+export type PipelineUpdateRequest = z.infer<typeof PipelineUpdateRequestSchema>;
+export type PipelineRemoveRequest = z.infer<typeof PipelineRemoveRequestSchema>;
+export type PipelineRunRequest = z.infer<typeof PipelineRunRequestSchema>;
+export type PipelineListRequest = z.infer<typeof PipelineListRequestSchema>;
 export type AcpRunRequest = z.infer<typeof AcpRunRequestSchema>;
 export type AcpCancelRequest = z.infer<typeof AcpCancelRequestSchema>;
 export type AcpPermissionAnswerRequest = z.infer<typeof AcpPermissionAnswerRequestSchema>;

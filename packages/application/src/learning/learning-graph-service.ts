@@ -170,11 +170,11 @@ export class LearningGraphService {
   private appendMemoryNodes(nodes: LearningNode[], snapshot: MemorySnapshot): void {
     let globalIndex = 0;
     for (const entry of snapshot.memory) {
-      nodes.push(this.makeMemoryNode(entry, "memory", globalIndex, snapshot));
+      nodes.push(this.makeMemoryNode(entry, "memory", globalIndex));
       globalIndex++;
     }
     for (const entry of snapshot.user) {
-      nodes.push(this.makeMemoryNode(entry, "user", globalIndex, snapshot));
+      nodes.push(this.makeMemoryNode(entry, "user", globalIndex));
       globalIndex++;
     }
   }
@@ -183,16 +183,15 @@ export class LearningGraphService {
     entry: MemoryEntry,
     source: MemoryTarget,
     index: number,
-    snapshot: MemorySnapshot,
   ): LearningNode {
     const id = `memory:${source}:${index}`;
     const label = entry.text.length > 60 ? `${entry.text.slice(0, 57)}…` : entry.text;
-    const usage = source === "memory" ? snapshot.usage.memory : snapshot.usage.user;
+    const timestamp = entry.createdAt ? new Date(entry.createdAt).getTime() : null;
     return {
       id,
       label,
       kind: "memory",
-      timestamp: usage.chars + index,
+      timestamp: timestamp !== null && !Number.isNaN(timestamp) ? timestamp : null,
       category: source === "memory" ? "memory" : "user",
       useCount: 0,
       state: "active",
@@ -402,7 +401,7 @@ export function parseMemoryNodeId(nodeId: string): { source: MemoryTarget; index
 export function parseRelatedSkills(content: string): string[] {
   const fm = extractFrontmatter(content);
   if (!fm) return [];
-  const match = fm.match(/^related_skills:\s*\n((?:\s*-\s+.+\n?)+)/m);
+  const match = fm.match(/^related_skills:\s*\r?\n((?:\s*-\s+.+\r?\n?)+)/m);
   if (!match) {
     const inline = fm.match(/^related_skills:\s*\[(.+?)\]/m);
     if (!inline) return [];
@@ -411,7 +410,7 @@ export function parseRelatedSkills(content: string): string[] {
       .map((s) => s.trim().replace(/^["']|["']$/g, ""))
       .filter((s) => s.length > 0);
   }
-  const lines = match[1]!.split("\n").filter((l) => l.trim().startsWith("-"));
+  const lines = match[1]!.split(/\r?\n/).filter((l) => l.trim().startsWith("-"));
   return lines
     .map((l) => l.replace(/^\s*-\s*/, "").trim().replace(/^["']|["']$/g, ""))
     .filter((s) => s.length > 0);
@@ -419,7 +418,10 @@ export function parseRelatedSkills(content: string): string[] {
 
 function extractFrontmatter(content: string): string | null {
   if (!content.startsWith("---")) return null;
-  const end = content.indexOf("\n---", 3);
+  const endMatch = content.slice(3).match(/\r?\n---/);
+  if (!endMatch) return null;
+  const end = endMatch.index! + 3;
+  return content.slice(3, end);
   if (end === -1) return null;
   return content.slice(3, end);
 }

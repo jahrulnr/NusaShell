@@ -3,6 +3,8 @@ import {
   buildHtmlSandboxDoc,
   renderArtifact,
   sanitizeSvgString,
+  softenMermaidSequenceRects,
+  softenMermaidSvgRects,
   stripDangerousHtml,
 } from "../src/renderer/agent-canvas-render.js";
 
@@ -34,6 +36,31 @@ describe("agent canvas render pipeline", () => {
     expect(body).not.toContain("refresh");
     expect(body).not.toMatch(/javascript:/i);
     expect(body).toContain('href="#"');
+  });
+
+  it("softens opaque mermaid sequence rect colors to rgba", () => {
+    const source = [
+      "sequenceDiagram",
+      "    rect rgb(30, 60, 90)",
+      "        A->>B: hi",
+      "    end",
+      "    rect rgba(10, 20, 30, 0.5)",
+      "        A->>B: keep",
+      "    end",
+    ].join("\n");
+    const out = softenMermaidSequenceRects(source);
+    expect(out).toContain("rect rgba(30, 60, 90, 0.18)");
+    expect(out).toContain("rect rgba(10, 20, 30, 0.5)");
+    expect(out).not.toMatch(/rect rgb\(30, 60, 90\)\s*$/m);
+  });
+
+  it("adds fill-opacity to opaque SVG rects without one", () => {
+    const svg = '<svg><rect fill="#1e3c5a" width="10" height="10"/><rect fill="none" width="1" height="1"/><rect fill="#abc" fill-opacity="0.4" width="2" height="2"/></svg>';
+    const out = softenMermaidSvgRects(svg);
+    expect(out).toMatch(/fill="#1e3c5a"[^>]*fill-opacity="0\.18"/);
+    expect(out).toContain('fill="none"');
+    expect(out).toContain('fill-opacity="0.4"');
+    expect(out.match(/fill-opacity="0\.18"/g)?.length).toBe(1);
   });
 
   it("renderArtifact routes svg through sanitizeSvgString", async () => {

@@ -17,6 +17,10 @@ import type {
   RunJobNowCommand,
   CancelJobCommand,
   RemoveJobCommand,
+  AddPipelineCommand,
+  UpdatePipelineCommand,
+  RemovePipelineCommand,
+  RunPipelineCommand,
   RunAcpTurnCommand,
   CancelAcpTurnCommand,
   AnswerAcpPermissionCommand,
@@ -27,7 +31,7 @@ import type {
 } from "@nusashell/application";
 
 export function mapToCommand(request: ParsedRequest):
-  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | SetPluginAutostartCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand | CancelAgentTurnCommand | AnswerAskQuestionCommand | AddJobCommand | UpdateJobCommand | SetJobEnabledCommand | RunJobNowCommand | CancelJobCommand | RemoveJobCommand | RunAcpTurnCommand | CancelAcpTurnCommand | AnswerAcpPermissionCommand | AnswerAcpAskCommand | SetAcpConfigOptionCommand | EnsureAcpSessionCommand | ProbeAcpProviderCommand }
+  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | SetPluginAutostartCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand | CancelAgentTurnCommand | AnswerAskQuestionCommand | AddJobCommand | UpdateJobCommand | SetJobEnabledCommand | RunJobNowCommand | CancelJobCommand | RemoveJobCommand | AddPipelineCommand | UpdatePipelineCommand | RemovePipelineCommand | RunPipelineCommand | RunAcpTurnCommand | CancelAcpTurnCommand | AnswerAcpPermissionCommand | AnswerAcpAskCommand | SetAcpConfigOptionCommand | EnsureAcpSessionCommand | ProbeAcpProviderCommand }
   | { kind: "query" } {
   switch (request.method) {
     case "plugin.start":
@@ -142,9 +146,11 @@ export function mapToCommand(request: ParsedRequest):
         command: {
           kind: "add-job",
           name: request.payload.name,
-          schedule: request.payload.schedule,
+          ...(request.payload.trigger !== undefined ? { trigger: request.payload.trigger } : {}),
+          ...(request.payload.schedule !== undefined ? { schedule: request.payload.schedule } : {}),
           mode: request.payload.mode,
           ...(request.payload.repeatTimes !== undefined ? { repeatTimes: request.payload.repeatTimes } : {}),
+          ...(request.payload.onComplete !== undefined ? { onComplete: request.payload.onComplete } : {}),
         } as AddJobCommand,
       };
     case "job.update":
@@ -154,10 +160,12 @@ export function mapToCommand(request: ParsedRequest):
           kind: "update-job",
           id: request.payload.id,
           ...(request.payload.name !== undefined ? { name: request.payload.name } : {}),
+          ...(request.payload.trigger !== undefined ? { trigger: request.payload.trigger } : {}),
           ...(request.payload.schedule !== undefined ? { schedule: request.payload.schedule } : {}),
           ...(request.payload.mode !== undefined ? { mode: request.payload.mode } : {}),
           ...(request.payload.repeatTimes !== undefined ? { repeatTimes: request.payload.repeatTimes } : {}),
           ...(request.payload.enabled !== undefined ? { enabled: request.payload.enabled } : {}),
+          ...(request.payload.onComplete !== undefined ? { onComplete: request.payload.onComplete } : {}),
         } as UpdateJobCommand,
       };
     case "job.set-enabled":
@@ -192,6 +200,48 @@ export function mapToCommand(request: ParsedRequest):
           kind: "remove-job",
           id: request.payload.id,
         } as RemoveJobCommand,
+      };
+    case "pipeline.add":
+      return {
+        kind: "command",
+        command: {
+          kind: "add-pipeline",
+          name: request.payload.name,
+          trigger: request.payload.trigger,
+          steps: request.payload.steps,
+          ...(request.payload.description !== undefined ? { description: request.payload.description } : {}),
+          ...(request.payload.settings !== undefined ? { settings: request.payload.settings } : {}),
+        } as AddPipelineCommand,
+      };
+    case "pipeline.update":
+      return {
+        kind: "command",
+        command: {
+          kind: "update-pipeline",
+          id: request.payload.id,
+          ...(request.payload.name !== undefined ? { name: request.payload.name } : {}),
+          ...(request.payload.description !== undefined ? { description: request.payload.description } : {}),
+          ...(request.payload.trigger !== undefined ? { trigger: request.payload.trigger } : {}),
+          ...(request.payload.steps !== undefined ? { steps: request.payload.steps } : {}),
+          ...(request.payload.settings !== undefined ? { settings: request.payload.settings } : {}),
+          ...(request.payload.enabled !== undefined ? { enabled: request.payload.enabled } : {}),
+        } as UpdatePipelineCommand,
+      };
+    case "pipeline.remove":
+      return {
+        kind: "command",
+        command: {
+          kind: "remove-pipeline",
+          id: request.payload.id,
+        } as RemovePipelineCommand,
+      };
+    case "pipeline.run":
+      return {
+        kind: "command",
+        command: {
+          kind: "run-pipeline",
+          id: request.payload.id,
+        } as RunPipelineCommand,
       };
     case "acp.run":
       return {

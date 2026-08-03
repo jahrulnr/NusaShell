@@ -22,7 +22,7 @@ function makeJob(overrides: Partial<Job> = {}): Job {
   return {
     id: "job-1",
     name: "Test job",
-    schedule: { kind: "interval", minutes: 30 },
+    trigger: { kind: "schedule", schedule: { kind: "interval", minutes: 30 } },
     mode: { type: "agent", prompt: "Say hello" },
     enabled: true,
     repeat: { times: null, completed: 0 },
@@ -56,7 +56,8 @@ class FakeJobStore implements JobStorePort {
     const completed = existing.repeat.completed + 1;
     const times = existing.repeat.times;
     const limitReached = times !== null && completed >= times;
-    const enabled = existing.schedule.kind === "once" ? false : limitReached ? false : existing.enabled;
+    const existingSchedule = existing.trigger.kind === "schedule" ? existing.trigger.schedule : null;
+    const enabled = existingSchedule?.kind === "once" ? false : limitReached ? false : existing.enabled;
     const updated: Job = {
       ...existing,
       enabled,
@@ -266,7 +267,7 @@ describe("JobScheduler", () => {
     const store = new FakeJobStore();
     await store.create(makeJob({
       id: "once-1",
-      schedule: { kind: "once", runAt: "2024-12-31T23:59:30.000Z" },
+      trigger: { kind: "schedule", schedule: { kind: "once", runAt: "2024-12-31T23:59:30.000Z" } },
       nextRunAt: "2024-12-31T23:59:30.000Z",
       repeat: { times: 1, completed: 0 },
     }));
@@ -286,7 +287,7 @@ describe("JobScheduler", () => {
     const store = new FakeJobStore();
     await store.create(makeJob({
       id: "bounded-1",
-      schedule: { kind: "interval", minutes: 30 },
+      trigger: { kind: "schedule", schedule: { kind: "interval", minutes: 30 } },
       repeat: { times: 2, completed: 1 },
     }));
     const scheduler = new JobScheduler({
@@ -305,7 +306,7 @@ describe("JobScheduler", () => {
     const store = new FakeJobStore();
     await store.create(makeJob({
       id: "missed-1",
-      schedule: { kind: "once", runAt: "2024-12-31T22:00:00.000Z" },
+      trigger: { kind: "schedule", schedule: { kind: "once", runAt: "2024-12-31T22:00:00.000Z" } },
       nextRunAt: "2024-12-31T22:00:00.000Z",
       repeat: { times: 1, completed: 0 },
     }));

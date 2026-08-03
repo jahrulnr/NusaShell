@@ -48,6 +48,11 @@ export {
   JobRemoveRequestSchema,
   JobOutputRequestSchema,
   JobValidateScheduleRequestSchema,
+  PipelineAddRequestSchema,
+  PipelineUpdateRequestSchema,
+  PipelineRemoveRequestSchema,
+  PipelineRunRequestSchema,
+  PipelineListRequestSchema,
   SubscribeRequestSchema,
   UnsubscribeRequestSchema,
   type PluginStartRequest,
@@ -86,6 +91,11 @@ export {
   type JobRemoveRequest,
   type JobOutputRequest,
   type JobValidateScheduleRequest,
+  type PipelineAddRequest,
+  type PipelineUpdateRequest,
+  type PipelineRemoveRequest,
+  type PipelineRunRequest,
+  type PipelineListRequest,
   type ParsedRequest,
 } from "./protocol/request-schemas.js";
 

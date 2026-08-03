@@ -1,9 +1,9 @@
 import type { ParsedRequest } from "@nusashell/contracts";
-import type { GetPromptQuery, GetPluginQuery, GetPluginStateQuery, ListPluginsQuery, ListPromptsQuery, ListResourcesQuery, ListResourceTemplatesQuery, ListToolsQuery, ReadResourceQuery, SystemPingQuery, SystemVersionQuery, ListJobsQuery, JobOutputQuery, ValidateScheduleQuery, GetAcpSessionInfoQuery } from "@nusashell/application";
+import type { GetPromptQuery, GetPluginQuery, GetPluginStateQuery, ListPluginsQuery, ListPromptsQuery, ListResourcesQuery, ListResourceTemplatesQuery, ListToolsQuery, ReadResourceQuery, SystemPingQuery, SystemVersionQuery, ListJobsQuery, JobOutputQuery, ValidateScheduleQuery, GetAcpSessionInfoQuery, ListPipelinesQuery } from "@nusashell/application";
 
 export function mapToQuery(
   request: ParsedRequest,
-): ListPluginsQuery | GetPluginQuery | GetPluginStateQuery | ListToolsQuery | ListPromptsQuery | GetPromptQuery | ListResourcesQuery | ListResourceTemplatesQuery | ReadResourceQuery | SystemPingQuery | SystemVersionQuery | ListJobsQuery | JobOutputQuery | ValidateScheduleQuery | GetAcpSessionInfoQuery | null {
+): ListPluginsQuery | GetPluginQuery | GetPluginStateQuery | ListToolsQuery | ListPromptsQuery | GetPromptQuery | ListResourcesQuery | ListResourceTemplatesQuery | ReadResourceQuery | SystemPingQuery | SystemVersionQuery | ListJobsQuery | JobOutputQuery | ValidateScheduleQuery | GetAcpSessionInfoQuery | ListPipelinesQuery | null {
   switch (request.method) {
     case "plugin.list":
       return { kind: "list-plugins" } as ListPluginsQuery;
@@ -38,6 +38,8 @@ export function mapToQuery(
       return { kind: "system-version" } as SystemVersionQuery;
     case "job.list":
       return { kind: "list-jobs" } as ListJobsQuery;
+    case "pipeline.list":
+      return { kind: "list-pipelines" } as ListPipelinesQuery;
     case "job.output":
       return {
         kind: "job-output",

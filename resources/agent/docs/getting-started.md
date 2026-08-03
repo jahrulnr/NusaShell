@@ -36,4 +36,6 @@ plugins are managed from Plugins and the agent, not the Home grid.
 
 - Ask the agent to start, stop, or restart a plugin.
 - Ask about internal documentation using the built-in `docs_search`, `docs_list`, and `docs_read` tools.
+- For diagrams in chat (when to use Mermaid, which type): see
+  [mermaid-workflow.md](mermaid-workflow.md).
 - When you want to call an MCP tool, the agent discovers it through `tool_search`/`tool_list`, loads its schema with `tool_schema`, and then calls it in a following round.

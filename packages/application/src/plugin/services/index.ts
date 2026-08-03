@@ -10,3 +10,4 @@ export {
   type WorkspaceSyncResult,
   type PluginLaunchSpec,
 } from "./plugin-runtime-manager.js";
+export { AutomationEmitRegistry } from "./automation-emit-registry.js";

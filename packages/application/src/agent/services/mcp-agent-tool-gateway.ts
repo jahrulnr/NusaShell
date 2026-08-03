@@ -6,7 +6,9 @@ import type { SkillProvenancePort } from "../../skill/ports/skill-provenance.por
 import type { SkillUsagePort } from "../../skill/ports/skill-usage.port.js";
 import type { MemoryStorePort } from "../../memory/ports/memory-store.port.js";
 import type { JobStorePort } from "../../job/ports/job-store.port.js";
+import type { PipelineStorePort } from "../../job/ports/pipeline-store.port.js";
 import type { JobScheduler } from "../../job/services/job-scheduler.js";
+import type { PipelineScheduler } from "../../job/services/pipeline-scheduler.js";
 import type { DocsIndexPort } from "../ports/docs-index.port.js";
 import type { AgentToolDefinition, ReasoningEffort } from "../ports/agent-provider.port.js";
 import type { AgentToolGateway, AgentTurnContext } from "../ports/agent-tool-gateway.port.js";
@@ -21,6 +23,7 @@ import { execDocsSearch, execDocsList, execDocsRead } from "./docs-tool-handlers
 import { execSkillList, execSkillSearch, execSkillRead, execSkillManage } from "./skill-tool-handlers.js";
 import { execMemory } from "./memory-tool-handler.js";
 import { execJob } from "./job-tool-handler.js";
+import { execPipeline } from "./pipeline-tool-handler.js";
 import { execAskQuestion } from "./ask-question-tool-handler.js";
 import { execMcpRegister, execMcpUnregister, type McpPluginRegistrationDeps } from "./mcp-plugin-tool-handlers.js";
 
@@ -56,6 +59,8 @@ export class McpAgentToolGateway implements AgentToolGateway {
   private writeApprovalEnabled = false;
   private jobStore?: JobStorePort;
   private jobScheduler?: JobScheduler;
+  private pipelineStore?: PipelineStorePort;
+  private pipelineScheduler?: PipelineScheduler;
   private pluginRegistration?: McpPluginRegistrationDeps;
 
   constructor(
@@ -78,6 +83,12 @@ export class McpAgentToolGateway implements AgentToolGateway {
   bindJobs(store: JobStorePort, scheduler: JobScheduler): void {
     this.jobStore = store;
     this.jobScheduler = scheduler;
+  }
+
+  /** Late-bind pipeline deps (same reason as bindJobs). */
+  bindPipelines(store: PipelineStorePort, scheduler: PipelineScheduler): void {
+    this.pipelineStore = store;
+    this.pipelineScheduler = scheduler;
   }
 
   bindPluginRegistration(deps: McpPluginRegistrationDeps): void {
@@ -189,10 +200,11 @@ export class McpAgentToolGateway implements AgentToolGateway {
         path: { type: "string", description: "Relative file path under the skill (for write_file only); must be under references/, templates/, scripts/, or assets/" },
       }, ["action", "name"]),
       ...(this.jobStore && this.jobScheduler ? [definition("job", "Manage scheduled automation jobs (run only while NusaShell is open; cron is UTC; missed one-shots are not silently fired)", {
-        action: { type: "string", enum: ["list", "validate_schedule", "add", "set_enabled", "run", "remove", "output"], description: "Job operation" },
-        id: { type: "string", description: "Job ID (required for set_enabled, run, remove, output)" },
+        action: { type: "string", enum: ["list", "validate_schedule", "add", "update", "set_enabled", "run", "cancel", "remove", "output"], description: "Job operation" },
+        id: { type: "string", description: "Job ID (required for update, set_enabled, run, cancel, remove, output)" },
         name: { type: "string", description: "Job name (required for add)" },
-        schedule: { type: "string", description: "Schedule expression (required for add, validate_schedule): \"every 30m\", \"2h\", \"0 9 * * *\", or an ISO timestamp" },
+        trigger: { type: "object", description: "Trigger object: { kind: 'schedule', schedule: '...' } or { kind: 'event', pattern: '...', pluginId?: '...', conditions?: [...], throttleMs?: N, maxFiresPerHour?: N }" },
+        schedule: { type: "string", description: "Schedule expression (legacy shorthand for trigger.kind=schedule): \"every 30m\", \"2h\", \"0 9 * * *\", or an ISO timestamp" },
         mode: { type: "string", enum: ["agent", "tool"], description: "Job mode (required for add)" },
         prompt: { type: "string", description: "Agent prompt (required when mode=agent)" },
         pluginId: { type: "string", description: "Plugin ID (required when mode=tool)" },
@@ -200,7 +212,24 @@ export class McpAgentToolGateway implements AgentToolGateway {
         args: { type: "object", additionalProperties: true, description: "Static tool args (when mode=tool)" },
         enabled: { type: "boolean", description: "Pause/resume flag (required for set_enabled)" },
         repeat_times: { type: "integer", minimum: 1, maximum: 100000, description: "Optional finite repeat count (add only); omit for repeat forever" },
+        on_complete: { type: "object", description: "Emit an automation event on successful completion (soft chain): { type: '...', payload?: {...} }. Set null to clear." },
         limit: { type: "integer", minimum: 1, maximum: 100, description: "Max output entries (output only; default 20)" },
+      }, ["action"])] : []),
+      ...(this.pipelineStore && this.pipelineScheduler ? [definition("pipeline", "Manage multi-step DAG pipelines (event/schedule triggered, step dependencies, conditional branching, context passing). Runs only while NusaShell is open.", {
+        action: { type: "string", enum: ["list", "add", "update", "remove", "run"], description: "Pipeline operation" },
+        id: { type: "string", description: "Pipeline ID (required for update, remove, run)" },
+        name: { type: "string", description: "Pipeline name (required for add)" },
+        description: { type: "string", description: "Optional pipeline description" },
+        trigger: { type: "object", description: "Trigger object: { kind: 'schedule', schedule: '...' } or { kind: 'event', pattern: '...', pluginId?: '...' }" },
+        enabled: { type: "boolean", description: "Enable/disable pipeline (update only)" },
+        steps: { type: "array", description: "Pipeline steps in topological order", items: { type: "object", properties: {
+          id: { type: "string", description: "Unique step ID within pipeline" },
+          name: { type: "string", description: "Step display name" },
+          action: { type: "object", description: "Step action: { type: 'agent', prompt: '...' } or { type: 'tool', pluginId: '...', toolName: '...', args: {...} }" },
+          dependsOn: { type: "array", items: { type: "string" }, description: "Step IDs that must complete before this step" },
+          outputKey: { type: "string", description: "Store step output in context under this key for downstream steps" },
+          condition: { type: "object", description: "Skip step if condition is false: { path: 'payload.x', op: 'eq', value: '...' } or { or: [...] } / { not: ... }" },
+        } } },
       }, ["action"])] : []),
       ...(this.isInteractive(turnId) ? [definition("ask_question", "Pause and ask the user a structured clarifying question before continuing. Use only for genuine decisions the user must make.", {
         question: { type: "string", description: "The question to show the user" },
@@ -264,6 +293,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
           ...(effort !== undefined ? { effort } : {}),
         });
       }
+      case "pipeline": return execPipeline(this.pipelineStore, this.pipelineScheduler, args);
       case "ask_question": return execAskQuestion(this.askQuestions, this.isInteractive(turnId), args, callId ?? requestId, turnId);
       default: return this.callGrantedTool(name, args, requestId, turnId);
     }

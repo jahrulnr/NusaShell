@@ -15,8 +15,8 @@ import {
 } from "./agent-conversation-ui.js";
 import { estimateContextTokens, formatContextUsage, resolveContextBadgeTokens, shouldApplyAcpUiUpdate } from "./ai-model-ui.js";
 import { inspectAttachmentContent, toDataUrl } from "./attachment-content.js";
-import { CANVAS_ARTIFACT_MAX_SOURCE_BYTES, canvasArtifactId, canvasKindForLang } from "./agent-canvas-detect.js";
-import { renderArtifact } from "./agent-canvas-render.js";
+import { CANVAS_ARTIFACT_MAX_SOURCE_BYTES, canvasArtifactId, resolveCanvasFence } from "./agent-canvas-detect.js";
+import { bindCanvasZoom, renderArtifact } from "./agent-canvas-render.js";
 
 export class AgentConversationController {
   constructor({ shell, runTurn, cancelTurn, answerAsk, getActiveModel, getVisionMode, notify, log, runAcpTurn, cancelAcpTurn, answerAcpPermission, answerAcpAsk, getAcpSessionInfo, setAcpConfigOption, ensureAcpSession, refreshModelPicker }) {
@@ -698,12 +698,7 @@ export class AgentConversationController {
   }
 
   clearCanvasOnSwitch() {
-    const pane = $("#agent-canvas");
-    const body = $("#agent-canvas-body");
-    const shell = $("#agent-shell");
-    if (pane) pane.hidden = true;
-    if (body) body.textContent = "";
-    shell?.classList.remove("is-canvas-open");
+    this.closeCanvasDrawerUi();
     this.activeCanvasArtifact = null;
   }
 
@@ -998,6 +993,50 @@ export class AgentConversationController {
     $("#agent-canvas-close")?.addEventListener("click", () => this.closeCanvasSidebar());
     $("#agent-canvas-refresh")?.addEventListener("click", () => this.refreshCanvas());
     $("#agent-canvas-download")?.addEventListener("click", () => this.downloadCanvasSource());
+    $("#agent-canvas-overlay")?.addEventListener("click", () => this.closeCanvasSidebar());
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      const pane = $("#agent-canvas");
+      if (!pane || pane.hidden || !pane.classList.contains("is-open")) return;
+      this.closeCanvasSidebar();
+    });
+  }
+
+  openCanvasDrawerUi() {
+    const pane = $("#agent-canvas");
+    const overlay = $("#agent-canvas-overlay");
+    if (!pane) return;
+    pane.hidden = false;
+    if (overlay) {
+      overlay.hidden = false;
+      // Next frame so opacity/transform transitions run after un-hiding.
+      requestAnimationFrame(() => {
+        overlay.classList.add("is-open");
+        pane.classList.add("is-open");
+      });
+    } else {
+      pane.classList.add("is-open");
+    }
+    $("#agent-canvas-close")?.focus();
+  }
+
+  closeCanvasDrawerUi() {
+    const pane = $("#agent-canvas");
+    const body = $("#agent-canvas-body");
+    const overlay = $("#agent-canvas-overlay");
+    pane?.classList.remove("is-open");
+    overlay?.classList.remove("is-open");
+    if (body) body.textContent = "";
+    // Allow slide-out to finish before display:none, unless reduced motion.
+    const hide = () => {
+      if (pane) pane.hidden = true;
+      if (overlay) overlay.hidden = true;
+    };
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      hide();
+      return;
+    }
+    window.setTimeout(hide, 260);
   }
 
   enhanceCanvasFences(messageEl, messageIndex) {
@@ -1010,11 +1049,12 @@ export class AgentConversationController {
     blocks.forEach((code) => {
       const langClass = [...code.classList].find((cls) => cls.startsWith("language-"));
       const lang = langClass ? langClass.slice("language-".length) : "";
-      const kind = canvasKindForLang(lang);
-      if (!kind) return;
+      const rawSource = code.textContent ?? "";
+      const resolved = resolveCanvasFence(lang, rawSource);
+      if (!resolved) return;
       const pre = code.parentElement;
       if (!pre) return;
-      const source = code.textContent ?? "";
+      const { kind, source } = resolved;
       const artifactId = canvasArtifactId(conversationId, String(messageIndex), fenceIndex);
       const tooLarge = source.length > CANVAS_ARTIFACT_MAX_SOURCE_BYTES;
       const title = `${kind} ${fenceIndex + 1}`;
@@ -1024,36 +1064,103 @@ export class AgentConversationController {
   }
 
   decorateCanvasFence(pre, code, ctx) {
-    const actions = element("div", "agent-canvas-fence-actions");
     if (ctx.kind === "html") {
-      const preview = element("button", "agent-canvas-fence-btn is-primary", "Preview");
-      preview.type = "button";
-      preview.addEventListener("click", () => void this.openCanvasSidebar(ctx));
-      actions.appendChild(preview);
-    } else {
-      // svg / mermaid: auto-render inline, keep source accessible via Sidebar.
-      this.renderInlineCanvas(pre, code, ctx).catch((error) => {
-        this.log?.("error", `Canvas inline render failed: ${error.message || error}`);
-      });
+      this.decorateHtmlFence(pre, code, ctx);
+      return;
     }
+    // svg / mermaid: auto-render inline; collapse the raw fence once render succeeds.
+    const actions = element("div", "agent-canvas-fence-actions");
     const sidebar = element("button", "agent-canvas-fence-btn", "Sidebar");
     sidebar.type = "button";
     sidebar.addEventListener("click", () => void this.openCanvasSidebar(ctx));
-    actions.appendChild(sidebar);
+    const showSource = element("button", "agent-canvas-fence-btn", "Show source");
+    showSource.type = "button";
+    const getPreview = () =>
+      pre.parentElement?.querySelector(`.agent-canvas-inline[data-artifact-id="${cssEscape(ctx.artifactId)}"]`) ?? null;
+    bindCanvasSourceToggle({ pre, showSource, getPreview });
+    actions.append(sidebar, showSource);
+    // Hide source optimistically; restore if render fails.
+    pre.hidden = true;
     pre.after(actions);
+    this.renderInlineCanvas(pre, code, ctx).then((ok) => {
+      if (!ok) setCanvasSourceVisible({ pre, showSource, getPreview, visible: true });
+    }).catch((error) => {
+      setCanvasSourceVisible({ pre, showSource, getPreview, visible: true });
+      this.log?.("error", `Canvas inline render failed: ${error.message || error}`);
+    });
+  }
+
+  decorateHtmlFence(pre, code, ctx) {
+    const lineCount = ctx.source.split("\n").length;
+    const sizeHint = formatByteHint(ctx.source.length);
+    const card = element("div", "agent-canvas-card");
+    card.setAttribute("data-artifact-id", ctx.artifactId);
+
+    const head = element("div", "agent-canvas-card-head");
+    const badge = element("span", "agent-canvas-card-badge", ctx.kind.toUpperCase());
+    const title = element("span", "agent-canvas-card-title", ctx.title);
+    const meta = element("span", "agent-canvas-card-meta", `${lineCount} lines · ${sizeHint}`);
+    head.append(badge, title, meta);
+
+    const actions = element("div", "agent-canvas-card-actions");
+    const sidebar = element("button", "agent-canvas-fence-btn", "Sidebar");
+    sidebar.type = "button";
+    sidebar.addEventListener("click", () => void this.openCanvasSidebar(ctx));
+    const showSource = element("button", "agent-canvas-fence-btn", "Show source");
+    showSource.type = "button";
+    const getPreview = () =>
+      pre.parentElement?.querySelector(`.agent-canvas-inline-preview[data-artifact-id="${cssEscape(ctx.artifactId)}"]`) ?? null;
+    bindCanvasSourceToggle({ pre, showSource, getPreview });
+    actions.append(sidebar, showSource);
+
+    card.append(head, actions);
+    // Collapse the source by default; Show source reveals it (and hides the preview).
+    pre.hidden = true;
+    pre.after(card);
+    void this.mountInlineHtmlPreview(pre, card, ctx).catch((error) => {
+      setCanvasSourceVisible({ pre, showSource, getPreview, visible: true });
+      this.log?.("error", `Inline HTML render failed: ${error.message || error}`);
+    });
+  }
+
+  async mountInlineHtmlPreview(pre, card, ctx) {
+    const existing = pre.parentElement?.querySelector(`.agent-canvas-inline-preview[data-artifact-id="${cssEscape(ctx.artifactId)}"]`);
+    if (existing) return;
+    const result = await renderArtifact({ kind: ctx.kind, source: ctx.source });
+    const container = element("div", "agent-canvas-inline-preview");
+    container.setAttribute("data-artifact-id", ctx.artifactId);
+    if (result.type === "html") {
+      const iframe = document.createElement("iframe");
+      iframe.setAttribute("sandbox", "allow-scripts");
+      iframe.setAttribute("aria-label", ctx.title);
+      iframe.srcdoc = result.srcdoc;
+      container.appendChild(iframe);
+    } else if (result.type === "error") {
+      const errorBox = element("div", "agent-canvas-error", result.message || "Could not render this artifact.");
+      container.appendChild(errorBox);
+    }
+    // Visual first (like svg/mermaid), then the card chrome, then the collapsed source.
+    card.before(container);
   }
 
   async renderInlineCanvas(pre, code, ctx) {
     const container = element("div", "agent-canvas-inline");
     container.setAttribute("aria-label", ctx.title);
+    container.setAttribute("data-artifact-id", ctx.artifactId);
     const result = await renderArtifact({ kind: ctx.kind, source: ctx.source });
     if (result.type === "svg" && result.svg) {
       container.innerHTML = result.svg;
-    } else if (result.type === "error") {
-      // Leave the original code block visible; do not crash on a bad diagram.
-      return;
+      bindCanvasZoom(container);
+      // Place diagram above the fence actions / collapsed source.
+      const actions = pre.nextElementSibling?.classList?.contains("agent-canvas-fence-actions")
+        ? pre.nextElementSibling
+        : null;
+      if (actions) actions.before(container);
+      else pre.before(container);
+      return true;
     }
-    pre.before(container);
+    // Leave the original code block visible; do not crash on a bad diagram.
+    return false;
   }
 
   async openCanvasSidebar(ctx) {
@@ -1106,14 +1213,12 @@ export class AgentConversationController {
     const badge = $("#agent-canvas-badge");
     const title = $("#agent-canvas-title");
     const hint = $("#agent-canvas-hint");
-    const shell = $("#agent-shell");
     if (!pane || !body || !badge || !title) return;
     badge.textContent = artifact.kind.toUpperCase();
     title.textContent = artifact.title;
     body.textContent = "";
     if (hint) hint.hidden = true;
-    pane.hidden = false;
-    shell?.classList.add("is-canvas-open");
+    this.openCanvasDrawerUi();
     this.activeCanvasArtifact = artifact;
     const result = await renderArtifact({ kind: artifact.kind, source: artifact.source });
     if (result.type === "html") {
@@ -1125,7 +1230,12 @@ export class AgentConversationController {
     } else if (result.type === "svg" && result.svg) {
       const wrap = element("div", "agent-canvas-svg");
       wrap.innerHTML = result.svg;
+      bindCanvasZoom(wrap);
       body.appendChild(wrap);
+      if (hint) {
+        hint.textContent = "Ctrl + scroll to zoom · double-click to reset · Esc to close";
+        hint.hidden = false;
+      }
     } else if (result.type === "error") {
       const errorBox = element("div", "agent-canvas-error", result.message || "Could not render this artifact.");
       body.appendChild(errorBox);
@@ -1137,12 +1247,7 @@ export class AgentConversationController {
   }
 
   closeCanvasSidebar() {
-    const pane = $("#agent-canvas");
-    const body = $("#agent-canvas-body");
-    const shell = $("#agent-shell");
-    if (pane) pane.hidden = true;
-    if (body) body.textContent = "";
-    shell?.classList.remove("is-canvas-open");
+    this.closeCanvasDrawerUi();
     this.activeCanvasArtifact = null;
     if (this.conversation?.activeCanvasArtifactId) {
       void this.shell?.agentConversations?.setActiveCanvasArtifact(this.conversation.id, null).catch(() => undefined);
@@ -2010,6 +2115,42 @@ function shortModelName(model) {
   if (!model) return "";
   const parts = String(model).split("/");
   return parts[parts.length - 1] || model;
+}
+
+function formatByteHint(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * Show source replaces the inline preview (does not stack under it).
+ * @param {{ pre: HTMLElement, showSource: HTMLButtonElement, getPreview: () => HTMLElement | null | undefined, visible: boolean }} opts
+ */
+function setCanvasSourceVisible({ pre, showSource, getPreview, visible }) {
+  pre.classList.add("agent-canvas-source");
+  pre.hidden = !visible;
+  const preview = getPreview?.() ?? null;
+  if (preview) preview.hidden = visible;
+  showSource.textContent = visible ? "Hide source" : "Show source";
+  showSource.setAttribute("aria-expanded", String(visible));
+}
+
+/**
+ * @param {{ pre: HTMLElement, showSource: HTMLButtonElement, getPreview: () => HTMLElement | null | undefined }} opts
+ */
+function bindCanvasSourceToggle(opts) {
+  opts.pre.classList.add("agent-canvas-source");
+  opts.showSource.setAttribute("aria-expanded", "false");
+  opts.showSource.addEventListener("click", () => {
+    const willShowSource = opts.pre.hidden;
+    setCanvasSourceVisible({ ...opts, visible: willShowSource });
+  });
+}
+
+function cssEscape(value) {
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") return CSS.escape(value);
+  return String(value).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
 }
 
 function formatTurnError(error) {

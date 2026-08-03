@@ -1,8 +1,9 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { CompletionReference, CompletionResult, McpClientPort, PromptDescriptor, PromptResult, ResourceDescriptor, ResourceReadResult, ResourceTemplateDescriptor, ToolDescriptor } from "@nusashell/application";
+import type { CompletionReference, CompletionResult, McpClientPort, PromptDescriptor, PromptResult, ResourceDescriptor, ResourceReadResult, ResourceTemplateDescriptor, ToolDescriptor, AutomationClientDeps } from "@nusashell/application";
 import type { Logger } from "pino";
 import { registerMcpLogging } from "./mcp-logging.js";
+import { registerMcpAutomation } from "./mcp-automation.js";
 import { unwrapMcpToolResult } from "./tool-result.js";
 
 export class HttpMcpClient implements McpClientPort {
@@ -14,6 +15,7 @@ export class HttpMcpClient implements McpClientPort {
     private readonly url: string,
     private readonly logger?: Logger,
     private readonly headers?: Readonly<Record<string, string>>,
+    private readonly automation?: AutomationClientDeps,
   ) {}
 
   get pid(): number | null {
@@ -42,6 +44,14 @@ export class HttpMcpClient implements McpClientPort {
       { capabilities: {} },
     );
     registerMcpLogging(this.client, this.logger, this.url);
+    if (this.automation) {
+      registerMcpAutomation(this.client, this.automation.pluginId, {
+        eventDispatcher: this.automation.eventDispatcher,
+        emitRegistry: this.automation.emitRegistry,
+        rateLimiter: this.automation.rateLimiter,
+        ...(this.logger ? { logger: this.logger } : {}),
+      });
+    }
 
     await this.client.connect(this.transport as never);
   }

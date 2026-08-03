@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Pipeline DAG orchestration (Phase E):** multi-step pipelines with
+  `dependsOn` dependencies, per-step conditions evaluated against accumulated
+  context, `outputKey` for passing results between steps, and topological-sort
+  execution. New `Pipeline` entity, `PipelineScheduler`, `PipelineStorePort`
+  (JSON sidecar), WS methods (`pipeline.add`/`update`/`remove`/`run`/`list`),
+  and a Pipelines view with a step editor modal. Template resolution extended
+  with `{{context.*}}` for referencing prior step outputs. Cycle detection via
+  DFS graph-walk. See `docs/architecture/job-automation.md` §Pipelines.
+
 ## [0.2.0] - 2026-08-03
 
 ### Added

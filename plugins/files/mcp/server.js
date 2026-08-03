@@ -59,6 +59,8 @@ async function main() {
         request.params.name,
         request.params.arguments ?? {},
       );
+      // Emit automation notifications for mutating operations (Watch→Agent demo).
+      emitAutomationForTool(server, request.params.name, request.params.arguments ?? {});
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
         structuredContent: result,
@@ -99,3 +101,24 @@ void main().catch((error) => {
   process.stderr.write(`[nusashell-files] ${safeFilesError(error)}\n`);
   process.exitCode = 1;
 });
+
+/**
+ * Emit NusaShell automation notifications for mutating file operations.
+ * This is the demo path for the Watch→Agent loop: a file write/delete/move
+ * emits a typed event that the shell can match against event-triggered jobs.
+ */
+function emitAutomationForTool(server, toolName, args) {
+  const notifications = {
+    files_write: () => ({ type: "files.modified", payload: { path: args.path, action: "write" } }),
+    files_patch: () => ({ type: "files.modified", payload: { path: args.path, action: "patch" } }),
+    files_append: () => ({ type: "files.modified", payload: { path: args.path, action: "append" } }),
+    files_mkdir: () => ({ type: "files.modified", payload: { path: args.path, action: "mkdir" } }),
+    files_delete: () => ({ type: "files.deleted", payload: { path: args.path, recursive: !!args.recursive } }),
+    files_move: () => ({ type: "files.moved", payload: { source: args.source, destination: args.destination } }),
+    files_copy: () => ({ type: "files.moved", payload: { source: args.source, destination: args.destination } }),
+  };
+  const builder = notifications[toolName];
+  if (!builder) return;
+  const { type, payload } = builder();
+  server.notification({ method: "notifications/nusashell/automation", params: { type, payload } });
+}

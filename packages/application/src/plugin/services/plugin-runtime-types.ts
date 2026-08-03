@@ -58,6 +58,8 @@ export interface RuntimeEntry {
   /** Launch spec the currently-running process was started with (for respawn detection). */
   runningArgs: readonly string[] | undefined;
   runningEnv: Readonly<Record<string, string>> | undefined;
+  /** Automation config from the plugin manifest (emits + poll). */
+  automation: import("@nusashell/domain").AutomationConfig | undefined;
 }
 
 export type { PluginRuntimeManagerDeps };
@@ -120,6 +122,7 @@ export interface PluginView {
   readonly url?: string;
   readonly env?: Readonly<Record<string, string>>;
   readonly headers?: Readonly<Record<string, string>>;
+  readonly automation?: RuntimeEntry["automation"];
 }
 
 export function arrayEquals(a: readonly string[], b: readonly string[]): boolean {

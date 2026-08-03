@@ -316,3 +316,60 @@
     padding-top: 4px;
   }
 }
+
+/* ===== Pipeline editor ===== */
+.pipeline-steps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.pipeline-step-row {
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--surface-2, rgba(255,255,255,0.02));
+}
+.pipeline-step-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.pipeline-step-index {
+  font-size: 12px;
+  color: var(--text-dim, rgba(255,255,255,0.5));
+  flex-shrink: 0;
+}
+.pipeline-step-id {
+  width: 100px;
+  flex-shrink: 0;
+}
+.pipeline-step-name {
+  flex: 1;
+}
+.pipeline-step-row .form-label {
+  display: block;
+  margin-bottom: 6px;
+}
+.pipeline-step-row textarea,
+.pipeline-step-row input,
+.pipeline-step-row select {
+  width: 100%;
+}
+.job-oncomplete-details {
+  margin-top: 8px;
+  border-top: 1px solid var(--border, rgba(255,255,255,0.08));
+  padding-top: 8px;
+}
+.job-oncomplete-details summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-dim, rgba(255,255,255,0.6));
+  margin-bottom: 8px;
+}
+.job-oncomplete-details .form-help {
+  font-size: 12px;
+  color: var(--text-dim, rgba(255,255,255,0.4));
+  margin: 4px 0 8px;
+}

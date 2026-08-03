@@ -39,18 +39,25 @@ These tools appear automatically; the model does not need to start an MCP server
 
 Completed assistant messages can carry **canvas fences** — fenced code blocks
 tagged `html`/`htm`, `svg`, or `mermaid`. The shell renders these beside the
-conversation in a shell-owned preview pane:
+conversation in a shell-owned preview pane.
+
+When to draw Mermaid and which diagram type to pick (flowchart, sequence, class,
+ER, state, and the rest of Mermaid’s sample gallery): see
+[mermaid-workflow.md](mermaid-workflow.md). If the visual must be dynamic or
+interactive beyond what Mermaid can render, use an `html` canvas fence instead
+(auto-rendered inline; Sidebar for the drawer); use `svg` for static custom drawings.
 
 - **SVG** and **Mermaid** fences auto-render inline on completed messages.
   Mermaid is lazy-loaded and runs with `securityLevel: 'strict'`, so it
   compiles to static SVG. A **Sidebar** action promotes the fence into the
   canvas pane.
-- **HTML** fences stay as source until the user clicks **Preview**, which opens
-  the pane with a sandboxed iframe (`sandbox="allow-scripts"`, no
-  `allow-same-origin`) and a Content-Security-Policy that denies every remote
-  origin in v1 (empty external allowlist). Remote scripts, stylesheets, and
-  fonts referenced by the artifact fail closed; this is intended. Inline
-  scripts and styles work.
+- **HTML** fences also auto-render inline in a sandboxed iframe
+  (`sandbox="allow-scripts"`, no `allow-same-origin`) with a
+  Content-Security-Policy that denies every remote origin in v1 (empty
+  external allowlist). Remote scripts, stylesheets, and fonts referenced by
+  the artifact fail closed; this is intended. Inline scripts and styles work.
+  **Sidebar** opens the drawer; **Show source** hides the inline preview and
+  shows a scrollable source block (about 10 rows).
 - Artifacts persist per conversation (max 20 and 3 MB total, oldest non-active
   evicted) and survive compaction. Switching conversations hides the pane and
   reopens it only for the newly selected conversation's active artifact.

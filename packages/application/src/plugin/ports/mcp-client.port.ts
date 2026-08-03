@@ -111,9 +111,32 @@ export interface McpClientFactoryPort {
     args: readonly string[],
     env: Readonly<Record<string, string>>,
     cwd?: string,
+    automation?: AutomationClientDeps,
   ): McpClientPort;
 
-  createForHttp(url: string, headers?: Readonly<Record<string, string>>): McpClientPort;
+  createForHttp(url: string, headers?: Readonly<Record<string, string>>, automation?: AutomationClientDeps): McpClientPort;
 
-  createForSse(url: string, headers?: Readonly<Record<string, string>>): McpClientPort;
+  createForSse(url: string, headers?: Readonly<Record<string, string>>, automation?: AutomationClientDeps): McpClientPort;
+}
+
+/**
+ * Per-connection automation wiring. `pluginId` is bound from the connection
+ * identity (never from notification params). The registry, rate limiter, and
+ * event dispatcher are shared across connections.
+ */
+export interface AutomationClientDeps {
+  readonly pluginId: string;
+  readonly eventDispatcher: import("../../events/event-dispatcher.js").EventDispatcher;
+  readonly emitRegistry: import("../services/automation-emit-registry.js").AutomationEmitRegistry;
+  readonly rateLimiter: AutomationRateLimiterPort;
+}
+
+/**
+ * Port for per-plugin token-bucket rate limiting of automation notifications.
+ * Implemented by `AutomationRateLimiter` in the infrastructure layer.
+ */
+export interface AutomationRateLimiterPort {
+  allow(pluginId: string): boolean;
+  boundPayload(payload: unknown): { truncated: boolean; text: string };
+  reset(pluginId: string): void;
 }

@@ -16,6 +16,13 @@ The agent has two persistent memory targets:
 Each target is a single Markdown file (`MEMORY.md` / `USER.md`) stored under
 the memory root. Entries are delimited by `§` on its own line.
 
+Optional creation metadata may prefix an entry as
+`<!--ns-created:ISO-8601-->` (UTC). It is stripped from the entry `text` used
+in prompts, matching, and capacity accounting. Legacy entries without the
+prefix load with `createdAt: null`. New `add` writes stamp `createdAt`;
+`replace` preserves it. The Learning timeline uses `createdAt` when present
+and shows `unknown` for undated legacy entries.
+
 ## Architecture
 
 ```

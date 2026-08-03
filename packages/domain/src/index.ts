@@ -34,6 +34,9 @@ export {
   type PluginManifestInput,
   type PluginSource,
   type WindowMode,
+  type AutomationConfig,
+  type AutomationEmit,
+  type AutomationPoll,
 } from "./plugin/entities/plugin-manifest.js";
 export { Plugin, type CreatePluginInput } from "./plugin/entities/plugin.js";
 export { PluginRuntime } from "./plugin/entities/plugin-runtime.js";

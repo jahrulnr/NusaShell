@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { JobStorePort } from "@nusashell/application";
 import type { Job, JobOutputEntry } from "@nusashell/application";
+import { normalizeTrigger, scheduleOf } from "@nusashell/application";
 
 interface PersistedClaim {
   readonly claimId: string;
@@ -33,8 +34,20 @@ export class JsonJobStore implements JobStorePort {
     try {
       const data = await readFile(resolve(this.root, STATE_FILE), "utf8");
       const persisted = JSON.parse(data) as Partial<PersistedState>;
+      const rawJobs = persisted.jobs ?? {};
+      // Migrate legacy `schedule` field to `trigger` on load.
+      const jobs: Record<string, Job> = {};
+      for (const [id, job] of Object.entries(rawJobs)) {
+        const raw = job as unknown as Record<string, unknown>;
+        if (raw && typeof raw === "object" && !("trigger" in raw) && "schedule" in raw) {
+          const { schedule, ...rest } = raw;
+          jobs[id] = { ...rest, trigger: normalizeTrigger({ schedule: schedule as never }) } as Job;
+        } else {
+          jobs[id] = job as Job;
+        }
+      }
       this.state = {
-        jobs: persisted.jobs ?? {},
+        jobs,
         claims: persisted.claims ?? {},
         outputs: persisted.outputs ?? {},
       };
@@ -103,7 +116,8 @@ export class JsonJobStore implements JobStorePort {
     const completed = existing.repeat.completed + 1;
     const times = existing.repeat.times;
     const limitReached = times !== null && completed >= times;
-    const enabled = existing.schedule.kind === "once"
+    const existingSchedule = scheduleOf(existing.trigger);
+    const enabled = existingSchedule?.kind === "once"
       ? false
       : limitReached ? false : existing.enabled;
     const updated: Job = {

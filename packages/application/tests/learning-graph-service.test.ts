@@ -37,14 +37,14 @@ function fakeUsageRecord(skillId: string, overrides: Partial<SkillUsageRecord> =
 }
 
 function fakeSnapshot(memory: string[] = [], user: string[] = []): MemorySnapshot {
-  const memEntries = memory.map((text) => ({ text }));
-  const userEntries = user.map((text) => ({ text }));
+  const memEntries = memory.map((text) => ({ text, createdAt: null as string | null }));
+  const userEntries = user.map((text) => ({ text, createdAt: null as string | null }));
   return {
     memory: memEntries,
     user: userEntries,
     usage: {
-      memory: { chars: memEntries.join("").length, limit: 2200 },
-      user: { chars: userEntries.join("").length, limit: 1375 },
+      memory: { chars: memEntries.map((e) => e.text).join("").length, limit: 2200 },
+      user: { chars: userEntries.map((e) => e.text).join("").length, limit: 1375 },
     },
   };
 }
@@ -186,7 +186,7 @@ describe("LearningGraphService.buildGraph", () => {
     expect(graph.edges).not.toContainEqual({ source: "alpha", target: "delta" });
   });
 
-  it("orders timestamps: memory nodes after skill nodes by stable ordering", async () => {
+  it("uses memory createdAt when present and null for legacy undated entries", async () => {
     const deps = makeDeps({
       registry: {
         list: async () => [fakeSummary("skill-a", { updatedAt: "2025-06-01T00:00:00Z" })],
@@ -198,16 +198,28 @@ describe("LearningGraphService.buildGraph", () => {
       } as unknown as SkillUsagePort,
       provenance: { get: async () => "agent" } as unknown as SkillProvenancePort,
       memoryStore: {
-        loadSnapshot: async () => fakeSnapshot(["mem1"]),
+        loadSnapshot: async () => ({
+          memory: [
+            { text: "legacy", createdAt: null },
+            { text: "dated", createdAt: "2026-08-02T12:00:00.000Z" },
+          ],
+          user: [],
+          usage: {
+            memory: { chars: 12, limit: 2200 },
+            user: { chars: 0, limit: 1375 },
+          },
+        }),
       } as unknown as MemoryStorePort,
     });
     const service = new LearningGraphService(deps);
     const graph = await service.buildGraph();
 
     const skillNode = graph.nodes.find((n) => n.kind === "skill")!;
-    const memNode = graph.nodes.find((n) => n.kind === "memory")!;
+    const legacy = graph.nodes.find((n) => n.label === "legacy")!;
+    const dated = graph.nodes.find((n) => n.label === "dated")!;
     expect(skillNode.timestamp).toBe(new Date("2025-06-15T00:00:00Z").getTime());
-    expect(memNode.timestamp).toBeGreaterThan(0);
+    expect(legacy.timestamp).toBeNull();
+    expect(dated.timestamp).toBe(new Date("2026-08-02T12:00:00.000Z").getTime());
   });
 
   it("builds clusters and stats correctly", async () => {

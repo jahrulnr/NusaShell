@@ -3,8 +3,7 @@
  *
  * Scans assistant Markdown for fenced code blocks tagged as canvas media
  * (`html`/`htm`, `svg`, `mermaid`) and returns one candidate per fence in
- * document order. Candidates power both inline auto-render (svg/mermaid) and
- * the HTML Preview action.
+ * document order. Candidates power inline auto-render for html, svg, and mermaid.
  */
 
 export const CANVAS_FENCE_LANGS = new Set(["html", "htm", "svg", "mermaid"]);
@@ -13,17 +12,51 @@ export const CANVAS_ARTIFACT_MAX_SOURCE_BYTES = 512 * 1024;
 
 /**
  * Resolve the canvas kind for a fence language, or `null` when the language is
- * not a canvas medium. `htm` is treated as `html`.
+ * not a canvas medium. `htm` is treated as `html`. Only the first token of the
+ * info string is considered (`mermaid title` → mermaid).
  *
  * @param {string} lang
  * @returns {"html" | "svg" | "mermaid" | null}
  */
 export function canvasKindForLang(lang) {
-  const normalized = String(lang ?? "").trim().toLocaleLowerCase();
+  const normalized = String(lang ?? "").trim().split(/\s+/)[0]?.toLocaleLowerCase() ?? "";
   if (normalized === "html" || normalized === "htm") return "html";
   if (normalized === "svg") return "svg";
   if (normalized === "mermaid") return "mermaid";
   return null;
+}
+
+/**
+ * Resolve a fence into a canvas artifact, including the common model mistake
+ * where the language sits on the first body line instead of the opening fence:
+ *
+ * ````
+ * ```
+ * mermaid
+ * flowchart LR
+ * ```
+ * ````
+ *
+ * @param {string} lang
+ * @param {string} source
+ * @returns {{ kind: "html"|"svg"|"mermaid", source: string, lang: string } | null}
+ */
+export function resolveCanvasFence(lang, source) {
+  const rawSource = String(source ?? "");
+  const tagged = canvasKindForLang(lang);
+  if (tagged) {
+    return { kind: tagged, source: rawSource, lang: String(lang ?? "").trim() };
+  }
+
+  const match = rawSource.match(/^[\t ]*(html|htm|svg|mermaid)[\t ]*(?:\r?\n|$)/i);
+  if (!match) return null;
+  const kind = canvasKindForLang(match[1]);
+  if (!kind) return null;
+  return {
+    kind,
+    source: rawSource.slice(match[0].length),
+    lang: match[1].toLowerCase(),
+  };
 }
 
 /**
@@ -48,31 +81,31 @@ export function extractCanvasCandidates(markdown) {
 
     const langMatch = text.slice(fenceStart).match(/^`{3,}([^\n\r]*)/);
     const lang = langMatch ? langMatch[1].trim() : "";
-    const kind = canvasKindForLang(lang);
     const fenceMarkerMatch = text.slice(fenceStart).match(/^`{3,}/);
     const fenceMarker = fenceMarkerMatch ? fenceMarkerMatch[0] : "```";
     const bodyStart = fenceStart + fenceMarker.length + (langMatch ? langMatch[1].length : 0);
     const lineEnd = text.indexOf("\n", bodyStart);
     const contentStart = lineEnd === -1 ? text.length : lineEnd + 1;
     const fenceEnd = findFenceClose(text, contentStart, fenceMarker);
+    const rawSource = fenceEnd === -1
+      ? text.slice(contentStart)
+      : text.slice(contentStart, fenceEnd);
+    const resolved = resolveCanvasFence(lang, rawSource);
 
-    if (!kind) {
+    if (!resolved) {
       // Not a canvas fence — skip past it so nested non-canvas fences don't
       // confuse the scanner, but still advance past the close if present.
       position = fenceEnd === -1 ? text.length : fenceEnd + fenceMarker.length;
       continue;
     }
 
-    const source = fenceEnd === -1
-      ? text.slice(contentStart)
-      : text.slice(contentStart, fenceEnd);
     candidates.push({
-      lang,
-      kind,
-      source,
+      lang: resolved.lang || lang,
+      kind: resolved.kind,
+      source: resolved.source,
       fenceIndex,
-      title: titleForKind(kind, fenceIndex),
-      tooLarge: source.length > CANVAS_ARTIFACT_MAX_SOURCE_BYTES,
+      title: titleForKind(resolved.kind, fenceIndex),
+      tooLarge: resolved.source.length > CANVAS_ARTIFACT_MAX_SOURCE_BYTES,
     });
     fenceIndex += 1;
     position = fenceEnd === -1 ? text.length : fenceEnd + fenceMarker.length;

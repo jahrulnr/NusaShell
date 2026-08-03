@@ -231,12 +231,22 @@ Confirmation dialog shown before permanently removing a conversation thread.
 
 ## Agent Canvas
 
-A shell-owned preview pane beside the conversation. Completed assistant messages auto-render svg and mermaid fences inline (mermaid is lazy-loaded, strict mode) with a Sidebar action that promotes the fence into the pane. html fences stay as source until the Preview action opens a sandboxed iframe (sandbox=allow-scripts, no allow-same-origin, CSP with an empty external allowlist in v1). The pane shows one active artifact at a time with a type badge, Refresh, Download source, and Close. Artifacts persist per conversation and restore on reopen; a Settings toggle disables the canvas entirely.
+A shell-owned canvas drawer over the agent workbench. Completed assistant messages auto-render html, svg, and mermaid fences inline (mermaid is lazy-loaded, strict mode; html uses a sandboxed iframe via renderArtifact, sandbox=allow-scripts, no allow-same-origin, CSP with an empty external allowlist in v1); the raw fence is hidden after a successful render. Show source hides the inline preview and reveals a scrollable source block capped at about 10 rows; Hide source restores the preview. Sidebar opens the overlay drawer. html fences also show a compact artifact card with a type badge, title, size hint, Sidebar, and Show source. The drawer slides in from the right with a dimmed overlay (plugin-drawer style); it shows one active artifact at a time with a type badge, Refresh, Download source, and Close (overlay click or Escape also closes). Artifacts persist per conversation and restore on reopen; a Settings toggle disables the canvas entirely.
 
-- **Canvas sidebar pane** (`#agent-canvas`):
+- **Agent shell grid** (`#agent-shell`):
   - Section: Agent Canvas
-  - Type: complementary region
-  - Action: Shell-owned preview surface beside the conversation. Hidden until a Sidebar or Preview action opens it, or the active conversation has a persisted activeCanvasArtifactId.
+  - Type: region
+  - Action: Two-column agent workbench (conversations · thread). Canvas opens as a fixed overlay drawer and does not add a third grid column.
+
+- **Canvas drawer overlay** (`#agent-canvas-overlay`):
+  - Section: Agent Canvas
+  - Type: overlay
+  - Action: Dimmed backdrop behind the canvas drawer; click closes the drawer.
+
+- **Canvas overlay drawer** (`#agent-canvas`):
+  - Section: Agent Canvas
+  - Type: dialog
+  - Action: Right-edge overlay drawer for the active canvas artifact. Slides over the agent workbench without resizing the chat column; closed via Close, overlay click, or Escape.
 
 - **Canvas title** (`#agent-canvas-title`):
   - Section: Agent Canvas
@@ -281,12 +291,47 @@ A shell-owned preview pane beside the conversation. Completed assistant messages
 - **Canvas fence action button** (`.agent-canvas-fence-btn`):
   - Section: Agent Canvas
   - Type: button
-  - Action: Preview (HTML) or Sidebar action attached to a canvas fence.
+  - Action: Sidebar or Show source action attached to a canvas fence. Show source replaces the inline preview with a scrollable ~10-row source block.
+
+- **Artifact card** (`.agent-canvas-card`):
+  - Section: Agent Canvas
+  - Type: region
+  - Action: Compact card under an auto-rendered HTML preview; shows badge, title, size hint, Sidebar, and Show source.
+
+- **Artifact card header** (`.agent-canvas-card-head`):
+  - Section: Agent Canvas
+  - Type: region
+  - Action: Header row of an artifact card with badge, title, and meta.
+
+- **Artifact card badge** (`.agent-canvas-card-badge`):
+  - Section: Agent Canvas
+  - Type: label
+  - Action: Type badge (HTML) on an artifact card.
+
+- **Artifact card title** (`.agent-canvas-card-title`):
+  - Section: Agent Canvas
+  - Type: label
+  - Action: Title label on an artifact card (e.g. 'html 1').
+
+- **Artifact card meta** (`.agent-canvas-card-meta`):
+  - Section: Agent Canvas
+  - Type: label
+  - Action: Size hint (lines · bytes) on an artifact card.
+
+- **Artifact card actions** (`.agent-canvas-card-actions`):
+  - Section: Agent Canvas
+  - Type: region
+  - Action: Action row on an artifact card containing Sidebar and Show source buttons.
 
 - **Inline canvas render** (`.agent-canvas-inline`):
   - Section: Agent Canvas
   - Type: region
   - Action: Static SVG container rendered inline above an svg/mermaid fence on completed assistant messages.
+
+- **Inline HTML preview** (`.agent-canvas-inline-preview`):
+  - Section: Agent Canvas
+  - Type: region
+  - Action: In-chat sandboxed iframe auto-rendered for HTML canvas fences on completed assistant messages.
 
 - **Canvas SVG host** (`.agent-canvas-svg`):
   - Section: Agent Canvas

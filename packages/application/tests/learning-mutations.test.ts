@@ -32,14 +32,14 @@ function fakeUsageRecord(skillId: string, overrides: Partial<SkillUsageRecord> =
 }
 
 function fakeSnapshot(memory: string[] = [], user: string[] = []): MemorySnapshot {
-  const memEntries = memory.map((text) => ({ text }));
-  const userEntries = user.map((text) => ({ text }));
+  const memEntries = memory.map((text) => ({ text, createdAt: null as string | null }));
+  const userEntries = user.map((text) => ({ text, createdAt: null as string | null }));
   return {
     memory: memEntries,
     user: userEntries,
     usage: {
-      memory: { chars: memEntries.join("").length, limit: 2200 },
-      user: { chars: userEntries.join("").length, limit: 1375 },
+      memory: { chars: memEntries.map((e) => e.text).join("").length, limit: 2200 },
+      user: { chars: userEntries.map((e) => e.text).join("").length, limit: 1375 },
     },
   };
 }

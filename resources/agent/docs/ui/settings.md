@@ -89,7 +89,7 @@ Controls OS login autostart, tray-first launch, and whether closing the launcher
 - **Agent Canvas** (`#settings-canvas-enabled`):
   - Section: Startup & background
   - Type: toggle
-  - Action: Enables or disables inline SVG/Mermaid rendering and the HTML preview sidebar. When off, canvas fences stay as source code blocks.
+  - Action: Enables or disables inline HTML/SVG/Mermaid rendering and the canvas sidebar. When off, canvas fences stay as source code blocks.
 
 ## Agent runtime
 

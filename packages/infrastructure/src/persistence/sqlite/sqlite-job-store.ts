@@ -3,8 +3,10 @@ import type {
   Job,
   JobSchedule,
   JobMode,
+  JobTrigger,
   JobOutputEntry,
 } from "@nusashell/application";
+import { normalizeTrigger, scheduleOf } from "@nusashell/application";
 import type { SqliteDatabase } from "./database.js";
 
 interface JobRow {
@@ -51,7 +53,7 @@ export class SqliteJobStore implements JobStorePort {
       .run(
         job.id,
         job.name,
-        JSON.stringify(job.schedule),
+        JSON.stringify(job.trigger),
         JSON.stringify(job.mode),
         job.enabled ? 1 : 0,
         job.repeat.times,
@@ -76,7 +78,7 @@ export class SqliteJobStore implements JobStorePort {
       )
       .run(
         job.name,
-        JSON.stringify(job.schedule),
+        JSON.stringify(job.trigger),
         JSON.stringify(job.mode),
         job.enabled ? 1 : 0,
         job.repeat.times,
@@ -127,7 +129,8 @@ export class SqliteJobStore implements JobStorePort {
     const times = existing.repeat.times;
     // Disable when a one-shot completed, or when a bounded repeat limit is reached.
     const limitReached = times !== null && completed >= times;
-    const enabled = existing.schedule.kind === "once"
+    const existingSchedule = scheduleOf(existing.trigger);
+    const enabled = existingSchedule?.kind === "once"
       ? false
       : limitReached ? false : existing.enabled;
     this.database.raw
@@ -221,12 +224,13 @@ export class SqliteJobStore implements JobStorePort {
 }
 
 function rowToJob(row: JobRow): Job {
-  const schedule = JSON.parse(row.schedule_json) as JobSchedule;
+  const raw = JSON.parse(row.schedule_json) as { trigger?: JobTrigger; schedule?: JobSchedule };
+  const trigger = normalizeTrigger(raw);
   const mode = JSON.parse(row.mode_json) as JobMode;
   return {
     id: row.id,
     name: row.name,
-    schedule,
+    trigger,
     mode,
     enabled: row.enabled === 1,
     repeat: { times: row.repeat_times, completed: row.repeat_completed },

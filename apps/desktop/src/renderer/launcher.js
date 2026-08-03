@@ -6,6 +6,7 @@ import { AgentConversationController } from "./agent-conversation-controller.js"
 import { SkillsController } from "./skills-controller.js";
 import { LearningController } from "./learning-controller.js";
 import { JobsController } from "./jobs-controller.js";
+import { PipelinesController } from "./pipelines-controller.js";
 import {
   applyTextEdit,
   countLogsBySource,
@@ -38,6 +39,7 @@ let agentConversationController = null;
 let skillsController = null;
 let learningController = null;
 let jobsController = null;
+let pipelinesController = null;
 let launcherSearchQuery = "";
 let launcherCategory = "All";
 let aiSettings = { activeProviderId: "", activeModelKey: "", effort: "auto", providers: [], models: [] };
@@ -224,6 +226,7 @@ function switchView(viewName) {
   if (viewName === "learning") learningController?.initialize();
   if (viewName === "autostart") renderAutostartList();
   if (viewName === "jobs") void jobsController?.refresh();
+  if (viewName === "pipelines") void pipelinesController?.loadPipelines();
   if (viewName === "settings") void syncAppBehaviorControls();
 }
 
@@ -1023,6 +1026,7 @@ document.addEventListener("DOMContentLoaded", () => {
   learningController = new LearningController(window.shell);
   jobsController = new JobsController({ notify: showToast });
   jobsController.initialize();
+  pipelinesController = new PipelinesController({ notify: showToast });
 
   const renderProviderCards = () => {
     $$("[data-custom-provider-card]").forEach((card) => card.remove());

@@ -69,6 +69,66 @@ NusaShell platform behavior.
 - Bound work and output; support effective cleanup/cancellation for long-running operations.
 - Handle SIGINT/SIGTERM and fatal startup failures predictably.
 
+## Automation (plugin-emitted events)
+
+Plugins can push automation events to the shell by declaring an `automation`
+block in `manifest.json` and sending MCP notifications. This enables the
+Watch→Agent loop: plugin observes something → emits event → shell matches
+event-job → fires agent turn or tool call.
+
+### Manifest `automation` block
+
+```json
+{
+  "automation": {
+    "emits": [
+      {
+        "type": "mail.new",
+        "description": "New mail arrived",
+        "payloadSchema": {
+          "type": "object",
+          "properties": { "messageId": { "type": "string" } },
+          "required": ["messageId"]
+        }
+      }
+    ],
+    "poll": [
+      { "tool": "mail_sync", "suggestEvery": "5m", "diffHint": "new message ids" }
+    ]
+  }
+}
+```
+
+- `emits[].type` — event type string (e.g. `mail.new`). Ownership is bound to
+  the declaring plugin; no other plugin can emit the same type.
+- `emits[].payloadSchema` — JSON Schema fragment (v1: documentation only, not
+  enforced at runtime).
+- `poll[].tool` — must match a tool the plugin exposes; the shell may call it
+  on a schedule as a polling fallback.
+- `poll[].suggestEvery` — hint like `5m`, `30s`, `1h` (shell may ignore/clamp).
+
+### Sending automation notifications
+
+Two intake paths:
+
+1. **`notifications/resources/updated`** (standard MCP) — for resource-modeled
+   state changes. Params: `{ uri }`.
+2. **`notifications/nusashell/automation`** (NusaShell convention) — for typed
+   events. Params: `{ type, payload }`.
+
+The shell binds `pluginId` from the connection identity (never from params),
+enforces per-plugin rate limits (token bucket: 10/min default, 20 burst, 64KB
+payload cap), and rejects event types not declared in the plugin's `emits`.
+
+### Rules
+
+- Only declare types your plugin owns. Type collisions between plugins are
+  rejected at manifest load time.
+- Keep payloads under 64KB; larger payloads are truncated + logged.
+- Design for the rate limit: batch rapid bursts client-side when possible.
+- `notifications/nusashell/automation` is a NusaShell convention, NOT an MCP
+  standard — do not register it as a capability with the MCP spec.
+
 ## Verify in layers
 
 1. Unit-test services with temporary data or fakes rather than developer-owned state.

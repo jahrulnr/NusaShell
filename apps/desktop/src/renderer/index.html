@@ -114,6 +114,10 @@
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v4l2.5 2.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           <span class="nav-label">Jobs</span>
         </button>
+        <button class="nav-item" type="button" data-view="pipelines" data-nav title="Pipelines">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><circle cx="6" cy="6" r="3" stroke="currentColor" stroke-width="1.6"/><circle cx="18" cy="6" r="3" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="18" r="3" stroke="currentColor" stroke-width="1.6"/><path d="M7.5 8L11 15M16.5 8L13 15M9 6h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <span class="nav-label">Pipelines</span>
+        </button>
       </nav>
 
       <div class="sidebar-footer">
@@ -179,7 +183,7 @@
           </div>
         </div>
 
-        <div class="agent-shell">
+        <div class="agent-shell" id="agent-shell">
           <aside class="agent-conversations" aria-labelledby="agent-conversations-title">
             <div class="agent-conversations-head">
               <div>
@@ -243,8 +247,10 @@
               </div>
             </form>
           </div>
+        </div>
 
-          <aside class="agent-canvas" id="agent-canvas" aria-labelledby="agent-canvas-title" hidden>
+        <div class="agent-canvas-overlay" id="agent-canvas-overlay" hidden></div>
+        <aside class="agent-canvas" id="agent-canvas" role="dialog" aria-modal="true" aria-labelledby="agent-canvas-title" hidden>
             <div class="agent-canvas-head">
               <div class="agent-canvas-head-meta">
                 <span class="agent-canvas-badge" id="agent-canvas-badge">—</span>
@@ -264,8 +270,7 @@
             </div>
             <div class="agent-canvas-body" id="agent-canvas-body" aria-live="polite"></div>
             <p class="agent-canvas-hint" id="agent-canvas-hint" hidden></p>
-          </aside>
-        </div>
+        </aside>
         <div class="agent-delete-overlay" id="agent-delete-overlay" hidden></div>
         <div class="agent-delete-dialog" id="agent-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="agent-delete-title" hidden>
           <div class="provider-modal-head">
@@ -514,6 +519,64 @@
         </div>
       </section>
 
+      <!-- ===== Pipelines View ===== -->
+      <section class="view jobs-view" data-view="pipelines">
+        <div class="jobs-header">
+          <div>
+            <div class="agent-kicker"><span class="agent-kicker-dot"></span> Multi-step orchestration</div>
+            <h1 class="page-title">Pipelines</h1>
+            <p class="subtitle">DAG pipelines that chain multiple agent turns or tool calls with conditional branching and context passing.</p>
+          </div>
+          <button class="action-btn" id="pipelines-new-btn" type="button" data-control="pipelines-new-btn">+ New pipeline</button>
+        </div>
+        <div class="jobs-error" id="pipelines-error" hidden>
+          <strong>Could not load pipelines</strong>
+          <span id="pipelines-error-message"></span>
+        </div>
+        <div class="jobs-list" id="pipelines-list" role="list" aria-label="Pipelines" aria-busy="false"></div>
+        <div class="jobs-empty" id="pipelines-empty" hidden>
+          <strong>No pipelines yet</strong>
+          <span>Create a multi-step pipeline to orchestrate agent turns with conditional branching.</span>
+        </div>
+      </section>
+
+      <!-- ===== Pipeline Modal ===== -->
+      <div class="modal-overlay" id="pipeline-modal" role="dialog" aria-modal="true" aria-labelledby="pipeline-modal-title">
+        <div class="modal-card">
+          <div class="modal-header">
+            <h2 id="pipeline-modal-title">New pipeline</h2>
+            <button class="modal-close" id="pipeline-modal-close" type="button" aria-label="Close">&times;</button>
+          </div>
+          <div class="modal-body">
+            <label class="form-label">Name<input type="text" id="pipeline-field-name" placeholder="Email triage pipeline" data-control="pipeline-field-name"></label>
+            <label class="form-label">Description (optional)<input type="text" id="pipeline-field-description" placeholder="Classify and route incoming emails" data-control="pipeline-field-description"></label>
+            <div class="job-trigger-row">
+              <label class="form-label">Trigger type
+                <select id="pipeline-field-trigger-kind" data-control="pipeline-field-trigger-kind">
+                  <option value="event">Event</option>
+                  <option value="schedule">Schedule</option>
+                </select>
+              </label>
+            </div>
+            <div id="pipeline-schedule-fields" hidden>
+              <label class="form-label">Schedule (e.g. "every 30m", "at 9am", "cron 0 */6 * * *")<input type="text" id="pipeline-field-schedule" placeholder="every 30m" data-control="pipeline-field-schedule"></label>
+              <p class="form-help" id="pipeline-schedule-help"></p>
+            </div>
+            <div id="pipeline-event-fields" hidden>
+              <label class="form-label">Event pattern (glob, e.g. "mail.*", "files.modified")<input type="text" id="pipeline-field-event-pattern" placeholder="mail.new" data-control="pipeline-field-event-pattern"></label>
+              <label class="form-label">Plugin scope (optional)<input type="text" id="pipeline-field-event-plugin" placeholder="nusashell.mail" data-control="pipeline-field-event-plugin"></label>
+            </div>
+            <div class="form-label">Steps</div>
+            <div id="pipeline-steps-list" class="pipeline-steps-list"></div>
+            <button class="ghost-btn" id="pipeline-add-step-btn" type="button" data-control="pipeline-add-step-btn">+ Add step</button>
+          </div>
+          <div class="modal-footer">
+            <button class="ghost-btn" id="pipeline-modal-cancel" type="button">Cancel</button>
+            <button class="primary-btn" id="pipeline-modal-save" type="button" data-control="pipeline-modal-save">Save</button>
+          </div>
+        </div>
+      </div>
+
       <!-- ===== Job Modal ===== -->
       <div class="modal-overlay" id="job-modal" role="dialog" aria-modal="true" aria-labelledby="job-modal-title">
         <div class="modal-card">
@@ -523,10 +586,37 @@
           </div>
           <div class="modal-body">
             <label class="form-label">Name<input type="text" id="job-field-name" placeholder="Daily inbox summary" data-control="job-field-name"></label>
-            <label class="form-label">Schedule
-              <input type="text" id="job-field-schedule" placeholder="every 30m / 2h / 1d / 0 9 * * * / 2025-12-01T09:00:00Z" data-control="job-field-schedule">
-              <span class="form-help" id="job-schedule-help" aria-live="polite"></span>
+            <label class="form-label">Trigger
+              <select id="job-field-trigger" data-control="job-field-trigger">
+                <option value="schedule">Schedule (time-based)</option>
+                <option value="event">Event (plugin-triggered)</option>
+              </select>
             </label>
+            <div id="job-schedule-fields">
+              <label class="form-label">Schedule
+                <input type="text" id="job-field-schedule" placeholder="every 30m / 2h / 1d / 0 9 * * * / 2025-12-01T09:00:00Z" data-control="job-field-schedule">
+                <span class="form-help" id="job-schedule-help" aria-live="polite"></span>
+              </label>
+            </div>
+            <div id="job-event-fields" hidden aria-hidden="true">
+              <label class="form-label">Event pattern
+                <input type="text" id="job-field-event-pattern" placeholder="mail.new / files.* / *.created" data-control="job-field-event-pattern">
+                <span class="form-help" id="job-event-help" aria-live="polite">Glob pattern matched against event types from plugin manifests.</span>
+              </label>
+              <label class="form-label">Plugin (optional, scope to one plugin)
+                <select id="job-field-event-plugin" data-control="job-field-event-plugin">
+                  <option value="">Any plugin</option>
+                </select>
+              </label>
+              <div class="job-model-row">
+                <label class="form-label">Throttle (ms, min gap)
+                  <input type="number" id="job-field-throttle-ms" min="0" placeholder="0" data-control="job-field-throttle-ms">
+                </label>
+                <label class="form-label">Max fires/hour
+                  <input type="number" id="job-field-max-fires" min="0" placeholder="∞" data-control="job-field-max-fires">
+                </label>
+              </div>
+            </div>
             <label class="form-label">Mode
               <select id="job-field-mode" data-control="job-field-mode">
                 <option value="agent">Agent prompt</option>
@@ -572,6 +662,16 @@
               <label class="form-label" id="job-tool-args-fallback-label" hidden>Args (JSON fallback)<textarea id="job-field-args" rows="3" placeholder='{"to":"x@y.com"}' data-control="job-field-args"></textarea></label>
             </div>
             <label class="form-label">Repeat (times, blank = forever)<input type="number" id="job-field-repeat" min="1" placeholder="∞" data-control="job-field-repeat"></label>
+            <details id="job-oncomplete-details" class="job-oncomplete-details">
+              <summary>Emit on complete (optional chain)</summary>
+              <p class="form-help">When this job finishes successfully, emit an automation event that other event-jobs can match. Leave empty for no chain.</p>
+              <label class="form-label">Emit event type
+                <input type="text" id="job-field-oncomplete-type" placeholder="job.summary.ready" data-control="job-field-oncomplete-type">
+              </label>
+              <label class="form-label">Emit payload (JSON, optional)
+                <textarea id="job-field-oncomplete-payload" rows="2" placeholder='{"summary":"{{payload.subject}}"}' data-control="job-field-oncomplete-payload"></textarea>
+              </label>
+            </details>
           </div>
           <div class="modal-footer">
             <button class="ghost-btn" id="job-modal-cancel" type="button">Cancel</button>

@@ -4,3 +4,5 @@ export type { JobOutputQuery, JobOutputResult, JobOutputItem } from "./job-outpu
 export { JobOutputHandler } from "./job-output/job-output.handler.js";
 export type { ValidateScheduleQuery, ValidateScheduleResult } from "./validate-schedule/validate-schedule.query.js";
 export { ValidateScheduleHandler } from "./validate-schedule/validate-schedule.handler.js";
+export type { ListPipelinesQuery, ListPipelinesResult } from "./list-pipelines/list-pipelines.query.js";
+export { ListPipelinesHandler } from "./list-pipelines/list-pipelines.handler.js";

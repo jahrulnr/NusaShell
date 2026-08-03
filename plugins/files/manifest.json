@@ -24,6 +24,46 @@
     "autostart": false,
     "keepAliveOnClose": false
   },
+  "automation": {
+    "emits": [
+      {
+        "type": "files.modified",
+        "description": "A file was created, written, patched, or appended",
+        "payloadSchema": {
+          "type": "object",
+          "properties": {
+            "path": { "type": "string" },
+            "action": { "type": "string", "enum": ["write", "patch", "append", "mkdir"] }
+          },
+          "required": ["path", "action"]
+        }
+      },
+      {
+        "type": "files.deleted",
+        "description": "A file or directory was deleted",
+        "payloadSchema": {
+          "type": "object",
+          "properties": {
+            "path": { "type": "string" },
+            "recursive": { "type": "boolean" }
+          },
+          "required": ["path"]
+        }
+      },
+      {
+        "type": "files.moved",
+        "description": "A file or directory was moved or renamed",
+        "payloadSchema": {
+          "type": "object",
+          "properties": {
+            "source": { "type": "string" },
+            "destination": { "type": "string" }
+          },
+          "required": ["source", "destination"]
+        }
+      }
+    ]
+  },
   "dependencies": {
     "shell": ">=0.0.2"
   },

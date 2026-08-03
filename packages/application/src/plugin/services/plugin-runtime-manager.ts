@@ -26,6 +26,7 @@ import { resolveIcon } from "./icon-resolver.js";
 import { ToolCallTracker } from "./tool-call-tracker.js";
 import { McpSessionManager } from "./mcp-session-manager.js";
 import { PluginLifecycleCoordinator } from "./plugin-lifecycle-coordinator.js";
+import { AutomationEmitRegistry } from "./automation-emit-registry.js";
 import type {
   RuntimeEntry,
   StartPluginOptions,
@@ -34,6 +35,7 @@ import type {
   CallToolOptions,
   PluginView,
 } from "./plugin-runtime-types.js";
+import type { AutomationRateLimiterPort } from "../ports/mcp-client.port.js";
 
 export interface PluginRuntimeManagerDeps {
   readonly pluginRepository: PluginRepositoryPort;
@@ -48,6 +50,8 @@ export interface PluginRuntimeManagerDeps {
   readonly startTimeoutMs?: number;
   readonly stopTimeoutMs?: number;
   readonly toolCallTimeoutMs?: number;
+  readonly automationEmitRegistry?: AutomationEmitRegistry;
+  readonly automationRateLimiter?: AutomationRateLimiterPort;
 }
 
 export type {
@@ -243,6 +247,7 @@ export class PluginRuntimeManager {
         entry.autostart = plugin.manifest.mcp.autostart;
         entry.ui = plugin.manifest.ui;
         entry.keepAliveOnClose = plugin.manifest.mcp.keepAliveOnClose;
+        entry.automation = plugin.manifest.automation;
       }
       return this.lifecycle.view(entry);
     }
@@ -336,6 +341,7 @@ export class PluginRuntimeManager {
       launchEnv: undefined,
       runningArgs: undefined,
       runningEnv: undefined,
+      automation: undefined,
     };
     this.runtimes.set(key, entry);
     return entry;

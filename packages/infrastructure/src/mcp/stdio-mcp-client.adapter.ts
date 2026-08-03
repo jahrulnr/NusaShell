@@ -12,9 +12,11 @@ import type {
   ResourceTemplateDescriptor,
   RootDescriptor,
   ToolDescriptor,
+  AutomationClientDeps,
 } from "@nusashell/application";
 import type { Logger } from "pino";
 import { boundMcpStderr, registerMcpLogging } from "./mcp-logging.js";
+import { registerMcpAutomation } from "./mcp-automation.js";
 import { unwrapMcpToolResult } from "./tool-result.js";
 
 export interface StdioRuntime {
@@ -55,6 +57,7 @@ export class StdioMcpClient implements McpClientPort {
     private readonly env: Readonly<Record<string, string>>,
     private readonly cwd?: string,
     private readonly logger?: Logger,
+    private readonly automation?: AutomationClientDeps,
   ) {}
 
   get pid(): number | null {
@@ -105,6 +108,14 @@ export class StdioMcpClient implements McpClientPort {
       { capabilities: { roots: { listChanged: true } } },
     );
     registerMcpLogging(this.client, this.logger, this.command);
+    if (this.automation) {
+      registerMcpAutomation(this.client, this.automation.pluginId, {
+        eventDispatcher: this.automation.eventDispatcher,
+        emitRegistry: this.automation.emitRegistry,
+        rateLimiter: this.automation.rateLimiter,
+        ...(this.logger ? { logger: this.logger } : {}),
+      });
+    }
 
     this.client.setRequestHandler(ListRootsRequestSchema, async () => {
       this.rootsRequestedFlag = true;

@@ -335,7 +335,7 @@ export class LearningController {
     }
 
     _dayKey(timestamp) {
-      if (!timestamp) return "unknown";
+      if (timestamp == null || timestamp === 0) return "unknown";
       const d = new Date(timestamp);
       if (isNaN(d.getTime())) return "unknown";
       return d.toISOString().slice(0, 10);

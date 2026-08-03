@@ -1,13 +1,18 @@
 # Job Automation Waist
 
-Scheduled durable jobs that fire headless agent turns or plugin tool calls
-while NusaShell is open.
+Scheduled and event-triggered durable jobs that fire headless agent turns or
+plugin tool calls while NusaShell is open.
 
 ## Overview
 
 The job automation waist adds a thin scheduling layer on top of the existing
-agent runtime and plugin tool infrastructure. A **Job** is a durable,
-time-triggered unit of work that runs either:
+agent runtime and plugin tool infrastructure. A **Job** is a durable unit of
+work triggered by either:
+
+- **Schedule** — time-based (cron, interval, or one-shot), or
+- **Event** — plugin-emitted automation events matched by pattern + conditions.
+
+Each job runs either:
 
 - **Agent mode** — a headless agent turn with a fixed prompt, or
 - **Tool mode** — a direct plugin tool call with static args.
@@ -186,11 +191,161 @@ a `traceId` for run correlation.
 - `NUSASHELL_JOBS_TIMEOUT_SECONDS` — agent inactivity timeout (default 600).
 - `jobs.*` in the AI settings JSON blob (tick, timeout, enabled).
 
+## Event triggers (Watch→Agent)
+
+In addition to schedule-based firing, jobs can be triggered by automation
+events emitted by MCP plugins. This extends the job model from time-only to
+time + event without forking the scheduler.
+
+### Trigger model
+
+A job's `trigger` field is a union:
+
+- `{ kind: "schedule", schedule: <existing schedule shape> }` — time-based.
+- `{ kind: "event", pattern: <glob>, pluginId?: <scope>, conditions?: [...], throttleMs?: <n>, maxFiresPerHour?: <n> }` — event-based.
+
+Existing schedule jobs are migrated to `{ kind: "schedule", schedule: <old> }`
+automatically (backward compatible).
+
+### Event intake
+
+Plugins emit automation events via two MCP notification paths:
+
+1. `notifications/resources/updated` (standard MCP) → `resource.updated` event
+2. `notifications/nusashell/automation` (NusaShell convention) → `AutomationEvent`
+
+The shell binds `pluginId` from the connection identity (never from params),
+enforces per-plugin rate limits (token bucket, 10/min default, 64KB payload
+cap), and rejects event types not declared in the plugin's manifest
+`automation.emits`.
+
+### Matching
+
+`EventJobMatcher` subscribes to `AutomationEvent`s on the existing
+`EventDispatcher`, matches them against enabled event-jobs by:
+
+1. `pluginId` filter (optional, for plugin-scoped subscriptions)
+2. Glob pattern match against `event.type` (via `micromatch`)
+3. Conditions (dot-path comparisons against the payload)
+
+Order: pattern → conditions → `maxFiresPerHour` → `throttleMs` coalesce →
+dispatch. Matching jobs fire via `JobScheduler.runOneNow` with a template
+context.
+
+### Template resolution
+
+Agent prompts and tool args may contain templates resolved at fire time:
+
+- `{{event.type}}` → the event type string (e.g. `mail.new`)
+- `{{event.pluginId}}` → the emitting plugin id
+- `{{payload.*}}` → dot-path into the event payload (e.g. `{{payload.subject}}`)
+
+Rules:
+
+1. Dot-path only — no expression evaluation, no `eval`.
+2. Missing path → leave literal (including braces) so failures are visible.
+3. Non-string values stringified with `String(value)`.
+4. No whitespace inside braces — `{{ payload.x }}` is NOT resolved in v1.
+5. Resolved once per fire, after throttle/coalesce.
+
+### Manifest declaration
+
+Plugins declare automation capability in `manifest.json`:
+
+```json
+{
+  "automation": {
+    "emits": [
+      { "type": "mail.new", "description": "New mail arrived" }
+    ],
+    "poll": [
+      { "tool": "mail_sync", "suggestEvery": "5m" }
+    ]
+  }
+}
+```
+
+See `tmp/plan/watch-to-agent/04-mcp-automation-contract.md` for the full
+contract.
+
 ## Known gaps
 
 - Jobs run only while the app is open. 
 - No cross-device sync. Jobs are local to the machine.
-- No job dependencies or chaining (e.g. planning auto-triggers execute).
 - Cron is UTC-only.
 - No live token streaming into the Jobs UI; full output is available
   post-run via the output modal's "Show full output" button.
+
+## Pipelines (Phase E — DAG orchestration)
+
+Pipelines extend the job model from single-action units to multi-step DAGs.
+A Pipeline has a trigger (schedule or event), a list of steps with `dependsOn`
+dependencies, per-step conditions evaluated against accumulated context, and
+`outputKey` for passing results to downstream steps.
+
+### Pipeline model
+
+```typescript
+interface Pipeline {
+  id: string;
+  name: string;
+  trigger: JobTrigger;          // schedule or event
+  steps: PipelineStep[];
+  enabled: boolean;
+}
+
+interface PipelineStep {
+  id: string;                   // unique within pipeline
+  name: string;
+  action: { type: "agent" | "tool"; ... };
+  dependsOn?: string[];         // step IDs that must complete first
+  condition?: ConditionNode;    // evaluated against accumulated context
+  outputKey?: string;           // store result as context[outputKey]
+}
+```
+
+### Execution
+
+The `PipelineScheduler` runs steps in topological order. For each step:
+
+1. Evaluate `condition` against the accumulated context bag. If false, skip.
+2. Run the step's action (agent turn or tool call).
+3. If `outputKey` is set, store the result in `context[outputKey]`.
+4. If the step errors, stop the pipeline.
+
+Template resolution supports `{{context.outputKey}}` in addition to
+`{{event.*}}` and `{{payload.*}}`, so downstream prompts can reference
+prior step outputs.
+
+### Cycle detection
+
+`detectCycle()` performs a DFS over the step graph. `validatePipeline()`
+checks for duplicate IDs, unknown dependencies, and cycles. The scheduler
+throws on cycle detection.
+
+### WS protocol
+
+- `pipeline.add` — create a new pipeline
+- `pipeline.update` — update name, steps, trigger, enabled
+- `pipeline.remove` — delete a pipeline
+- `pipeline.run` — manually trigger a pipeline run
+- `pipeline.list` — list all pipelines
+
+### UI
+
+The Pipelines view (nav item below Jobs) shows all pipelines with status,
+step count, and trigger. The pipeline modal editor supports:
+- Event or schedule trigger
+- Step list with add/remove
+- Per-step: id, name, action type (agent/tool), dependsOn (multi-select),
+  outputKey, and tool args (JSON)
+
+### Comparison with soft chains (Phase D)
+
+| | Soft chain (Phase D) | Pipeline DAG (Phase E) |
+| --- | --- | --- |
+| Model | N independent jobs sharing event types | One Pipeline aggregate with steps |
+| State passing | Prior JobOutputEntry only | Accumulated context via outputKey |
+| Branching | Trigger matching | Per-step condition |
+| Visual editor | None (two normal jobs) | Pipeline modal with step editor |
+| Cycle protection | Self-trigger + maxFiresPerHour + chain depth | Graph-walk cycle detector |

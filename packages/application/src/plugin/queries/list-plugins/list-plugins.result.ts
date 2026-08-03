@@ -1,4 +1,4 @@
-import type { PluginRuntimeState } from "@nusashell/domain";
+import type { PluginRuntimeState, AutomationConfig } from "@nusashell/domain";
 
 export interface PluginListItem {
   readonly pluginId: string;
@@ -21,6 +21,7 @@ export interface PluginListItem {
     };
   };
   readonly keepAliveOnClose: boolean;
+  readonly automation?: AutomationConfig;
 }
 
 export interface ListPluginsResult {

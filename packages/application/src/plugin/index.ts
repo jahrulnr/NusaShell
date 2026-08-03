@@ -17,6 +17,8 @@ export type {
   RootDescriptor,
   ClockPort,
   LoggerPort,
+  AutomationClientDeps,
+  AutomationRateLimiterPort,
 } from "./ports/index.js";
 export {
   PluginOperationQueue,
@@ -29,6 +31,7 @@ export {
   type PluginLaunchSpec,
   resolveIcon,
   hasPluginUi,
+  AutomationEmitRegistry,
 } from "./services/index.js";
 export type {
   StartPluginCommand,

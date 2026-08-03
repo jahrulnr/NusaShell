@@ -4,6 +4,9 @@ export const MEMORY_LIMIT = 2200;
 export const USER_LIMIT = 1375;
 export const ENTRY_DELIMITER = "\n§\n";
 
+/** Persisted prefix; stripped from `text` and excluded from capacity accounting. */
+const CREATED_AT_RE = /^<!--ns-created:(\d{4}-\d{2}-\d{2}T[\d:.]+Z)-->\r?\n?/;
+
 const TARGET_LIMITS: Readonly<Record<MemoryTarget, number>> = {
   memory: MEMORY_LIMIT,
   user: USER_LIMIT,
@@ -16,15 +19,20 @@ export function limitFor(target: MemoryTarget): number {
 export function splitEntries(raw: string): readonly MemoryEntry[] {
   const trimmed = raw.trim();
   if (trimmed.length === 0) return [];
-  return trimmed.split(/§/).map((s) => s.trim()).filter((s) => s.length > 0).map((text) => ({ text }));
+  return trimmed
+    .split(/§/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+    .map(parseEntrySegment);
 }
 
 export function joinEntries(entries: readonly MemoryEntry[]): string {
-  return entries.map((e) => e.text).join(ENTRY_DELIMITER);
+  return entries.map(serializeEntry).join(ENTRY_DELIMITER);
 }
 
 export function charsOf(entries: readonly MemoryEntry[]): number {
-  return joinEntries(entries).length;
+  if (entries.length === 0) return 0;
+  return entries.reduce((sum, e) => sum + e.text.length, 0) + ENTRY_DELIMITER.length * (entries.length - 1);
 }
 
 export function usageOf(entries: readonly MemoryEntry[], target: MemoryTarget): MemoryUsage {
@@ -58,10 +66,11 @@ export function findUniqueMatch(entries: readonly MemoryEntry[], oldText: string
 export function addEntry(
   entries: readonly MemoryEntry[],
   content: string,
+  now: () => Date = () => new Date(),
 ): readonly MemoryEntry[] {
   const text = content.trim();
   if (text.length === 0) return entries;
-  return [...entries, { text }];
+  return [...entries, { text, createdAt: now().toISOString() }];
 }
 
 export function replaceEntry(
@@ -76,7 +85,8 @@ export function replaceEntry(
   if (text.length === 0) {
     next.splice(index, 1);
   } else {
-    next[index] = { text };
+    const previous = entries[index]!;
+    next[index] = { text, createdAt: previous.createdAt };
   }
   return { entries: next, matchedIndex: index };
 }
@@ -90,4 +100,17 @@ export function removeEntry(
   const next = [...entries];
   next.splice(index, 1);
   return { entries: next, matchedIndex: index };
+}
+
+function parseEntrySegment(segment: string): MemoryEntry {
+  const match = CREATED_AT_RE.exec(segment);
+  if (!match) return { text: segment, createdAt: null };
+  const createdAt = match[1]!;
+  const text = segment.slice(match[0].length).trim();
+  return { text, createdAt };
+}
+
+function serializeEntry(entry: MemoryEntry): string {
+  if (!entry.createdAt) return entry.text;
+  return `<!--ns-created:${entry.createdAt}-->\n${entry.text}`;
 }

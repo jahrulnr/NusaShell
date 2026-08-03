@@ -34,6 +34,8 @@ export class McpSessionManager {
    */
   async connectTransport(entry: RuntimeEntry, plugin: import("@nusashell/domain").Plugin): Promise<void> {
     const manifest = plugin.manifest;
+    this.registerAutomationEmits(entry, manifest);
+    const automation = this.buildAutomationDeps(entry);
     if (manifest.mcp.transport === "stdio") {
       const command = manifest.mcp.command;
       if (!command) {
@@ -58,6 +60,7 @@ export class McpSessionManager {
         args,
         environment,
         plugin.installPath,
+        automation,
       );
       this.deps.logger?.debug(`Starting MCP stdio process: command=${command} args=${JSON.stringify(args)} cwd=${plugin.installPath} workspace=${entry.workspace ?? "(none)"}`);
       await mcpClient.connect();
@@ -80,7 +83,7 @@ export class McpSessionManager {
           `Plugin ${PluginId.toString(entry.pluginId)} http transport missing url`,
         );
       }
-      const mcpClient = this.deps.mcpClientFactory.createForHttp(url, manifest.mcp.headers);
+      const mcpClient = this.deps.mcpClientFactory.createForHttp(url, manifest.mcp.headers, automation);
       await mcpClient.connect();
       entry.mcpClient = mcpClient;
     } else if (manifest.mcp.transport === "sse") {
@@ -91,10 +94,54 @@ export class McpSessionManager {
           `Plugin ${PluginId.toString(entry.pluginId)} sse transport missing url`,
         );
       }
-      const mcpClient = this.deps.mcpClientFactory.createForSse(url, manifest.mcp.headers);
+      const mcpClient = this.deps.mcpClientFactory.createForSse(url, manifest.mcp.headers, automation);
       await mcpClient.connect();
       entry.mcpClient = mcpClient;
     }
+  }
+
+  /**
+   * Register the plugin's automation emits with the shared registry so the
+   * MCP automation handler can enforce emit ownership. Called on
+   * `connectTransport` before the client is created.
+   */
+  private registerAutomationEmits(entry: RuntimeEntry, manifest: import("@nusashell/domain").PluginManifest): void {
+    if (!this.deps.automationEmitRegistry) return;
+    const pluginIdStr = PluginId.toString(entry.pluginId);
+    try {
+      this.deps.automationEmitRegistry.register(pluginIdStr, manifest.automation);
+    } catch (error) {
+      this.deps.logger?.warn(
+        `Automation emit registration failed for ${pluginIdStr}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  /**
+   * Unregister the plugin's automation emits (e.g. on stop/uninstall).
+   */
+  unregisterAutomationEmits(entry: RuntimeEntry): void {
+    if (!this.deps.automationEmitRegistry) return;
+    const pluginIdStr = PluginId.toString(entry.pluginId);
+    this.deps.automationEmitRegistry.unregister(pluginIdStr);
+    this.deps.automationRateLimiter?.reset(pluginIdStr);
+  }
+
+  /**
+   * Build the per-connection automation deps for the MCP client factory.
+   * Returns `undefined` when automation infrastructure is not configured
+   * (e.g. in tests that don't exercise the automation path).
+   */
+  private buildAutomationDeps(entry: RuntimeEntry): import("../ports/mcp-client.port.js").AutomationClientDeps | undefined {
+    if (!this.deps.automationEmitRegistry || !this.deps.automationRateLimiter) {
+      return undefined;
+    }
+    return {
+      pluginId: PluginId.toString(entry.pluginId),
+      eventDispatcher: this.deps.eventDispatcher,
+      emitRegistry: this.deps.automationEmitRegistry,
+      rateLimiter: this.deps.automationRateLimiter,
+    };
   }
 
   /**

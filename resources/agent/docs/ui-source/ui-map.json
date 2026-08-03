@@ -260,9 +260,11 @@
         {
           "heading": "Agent Canvas",
           "paragraphs": [
-            "A shell-owned preview pane beside the conversation. Completed assistant messages auto-render svg and mermaid fences inline (mermaid is lazy-loaded, strict mode) with a Sidebar action that promotes the fence into the pane. html fences stay as source until the Preview action opens a sandboxed iframe (sandbox=allow-scripts, no allow-same-origin, CSP with an empty external allowlist in v1). The pane shows one active artifact at a time with a type badge, Refresh, Download source, and Close. Artifacts persist per conversation and restore on reopen; a Settings toggle disables the canvas entirely."
+            "A shell-owned canvas drawer over the agent workbench. Completed assistant messages auto-render html, svg, and mermaid fences inline (mermaid is lazy-loaded, strict mode; html uses a sandboxed iframe via renderArtifact, sandbox=allow-scripts, no allow-same-origin, CSP with an empty external allowlist in v1); the raw fence is hidden after a successful render. Show source hides the inline preview and reveals a scrollable source block capped at about 10 rows; Hide source restores the preview. Sidebar opens the overlay drawer. html fences also show a compact artifact card with a type badge, title, size hint, Sidebar, and Show source. The drawer slides in from the right with a dimmed overlay (plugin-drawer style); it shows one active artifact at a time with a type badge, Refresh, Download source, and Close (overlay click or Escape also closes). Artifacts persist per conversation and restore on reopen; a Settings toggle disables the canvas entirely."
           ],
           "controls": [
+            "agent-shell",
+            "agent-canvas-overlay",
             "agent-canvas",
             "agent-canvas-title",
             "agent-canvas-badge",
@@ -273,7 +275,14 @@
             "agent-canvas-close",
             "agent-canvas-fence-actions",
             "agent-canvas-fence-btn",
+            "agent-canvas-card",
+            "agent-canvas-card-head",
+            "agent-canvas-card-badge",
+            "agent-canvas-card-title",
+            "agent-canvas-card-meta",
+            "agent-canvas-card-actions",
             "agent-canvas-inline",
+            "agent-canvas-inline-preview",
             "agent-canvas-svg"
           ]
         }
@@ -626,12 +635,20 @@
         {
           "heading": "Job form",
           "paragraphs": [
-            "Name, schedule (every 30m / 2h / 1d / 5-field cron / ISO timestamp), mode selector, agent prompt + model picker or plugin tool schema form, and optional repeat count. Schedule is validated on blur with a live description or error. The mode-dependent fields toggle via hidden + aria-hidden. Agent mode shows a required Prompt textarea plus Provider/Model/Effort selects (Default = shell active settings). Tool mode shows Plugin and Tool dropdowns populated from the live catalog, then a schema-driven arg form (primitives/enums as native inputs, object/array as JSON textareas); a JSON fallback textarea appears when no schema is available. The Edit button on a row opens this modal prefilled and saves via job.update. The dialog supports Escape and overlay click to close, and returns focus to the trigger on close."
+            "Name, trigger picker (schedule vs event), schedule (every 30m / 2h / 1d / 5-field cron / ISO timestamp) or event pattern + plugin scope + throttle/max-fires, mode selector, agent prompt + model picker or plugin tool schema form, and optional repeat count. Schedule is validated on blur with a live description or error. Event pattern hints show available event types from the selected plugin's manifest automation.emits. The mode-dependent fields toggle via hidden + aria-hidden. Agent mode shows a required Prompt textarea plus Provider/Model/Effort selects (Default = shell active settings). Tool mode shows Plugin and Tool dropdowns populated from the live catalog, then a schema-driven arg form (primitives/enums as native inputs, object/array as JSON textareas); a JSON fallback textarea appears when no schema is available. An optional 'Emit on complete' section allows configuring an onComplete emit event type and payload for soft chains. The Edit button on a row opens this modal prefilled and saves via job.update. The dialog supports Escape and overlay click to close, and returns focus to the trigger on close."
           ],
           "controls": [
             "job-field-name",
+            "job-field-trigger",
+            "job-schedule-fields",
             "job-field-schedule",
             "job-schedule-help",
+            "job-event-fields",
+            "job-field-event-pattern",
+            "job-event-help",
+            "job-field-event-plugin",
+            "job-field-throttle-ms",
+            "job-field-max-fires",
             "job-field-mode",
             "job-mode-help",
             "job-field-prompt",
@@ -643,7 +660,52 @@
             "job-tool-schema-form",
             "job-field-args",
             "job-field-repeat",
+            "job-field-oncomplete-type",
+            "job-field-oncomplete-payload",
             "job-modal-save"
+          ]
+        }
+      ]
+    },
+    "pipelines": {
+      "title": "Pipelines",
+      "purpose": "Multi-step DAG pipelines that chain multiple agent turns or tool calls with conditional branching and context passing.",
+      "howToOpen": "Click the Pipelines item in the left sidebar.",
+      "sections": [
+        {
+          "heading": "Pipeline list",
+          "paragraphs": [
+            "Lists all pipelines. Each card shows the pipeline name, status, trigger type (event or schedule), step count, and enabled/disabled state. Each card offers Edit, Run now, Enable/Disable, and Delete actions. An inline error panel appears when the list fails to load, and an empty state offers a New pipeline action."
+          ],
+          "controls": [
+            "pipelines-new-btn",
+            "pipelines-list",
+            "pipelines-empty",
+            "pipelines-error"
+          ]
+        }
+      ]
+    },
+    "pipeline-modal": {
+      "title": "Pipeline editor modal",
+      "purpose": "Form to create or edit a multi-step pipeline with a trigger, step list, and per-step configuration.",
+      "howToOpen": "Click the + New pipeline button in the Pipelines view, or Edit on a pipeline card.",
+      "sections": [
+        {
+          "heading": "Pipeline form",
+          "paragraphs": [
+            "The modal collects a pipeline name, optional description, trigger type (event or schedule with pattern/schedule fields), and a list of steps. Each step has an id, name, action type (agent prompt or plugin tool call), optional dependsOn (multi-select of other step IDs), and optional outputKey. Steps can be added or removed dynamically."
+          ],
+          "controls": [
+            "pipeline-modal-save",
+            "pipeline-field-name",
+            "pipeline-field-description",
+            "pipeline-field-trigger-kind",
+            "pipeline-field-schedule",
+            "pipeline-field-event-pattern",
+            "pipeline-field-event-plugin",
+            "pipeline-add-step-btn",
+            "pipeline-steps-list"
           ]
         }
       ]
@@ -2559,6 +2621,17 @@
         "jobs-list"
       ]
     },
+    "nav-pipelines": {
+      "section": "Sidebar",
+      "label": "Pipelines navigation",
+      "type": "nav item",
+      "selector": "[data-view=\"pipelines\"].nav-item",
+      "generated": true,
+      "action": "Switches the main content to the Pipelines view.",
+      "related": [
+        "pipelines-list"
+      ]
+    },
     "jobs-new-btn": {
       "section": "Job list",
       "label": "New job",
@@ -2678,7 +2751,71 @@
       "label": "Schedule",
       "type": "text input",
       "selector": "#job-field-schedule",
-      "action": "Schedule expression (every 30m / 2h / 1d / cron / ISO). Validated on blur."
+      "action": "Schedule expression (every 30m / 2h / 1d / cron / ISO). Validated on blur. Visible only when trigger kind is 'schedule'."
+    },
+    "job-field-trigger": {
+      "section": "Job form",
+      "label": "Trigger kind",
+      "type": "select",
+      "selector": "#job-field-trigger",
+      "generated": true,
+      "action": "Picker for schedule (time-based) vs event (plugin-triggered). Toggles schedule/event field visibility."
+    },
+    "job-schedule-fields": {
+      "section": "Job form",
+      "label": "Schedule fields",
+      "type": "region",
+      "selector": "#job-schedule-fields",
+      "generated": true,
+      "action": "Container for schedule input, shown when trigger kind is 'schedule'."
+    },
+    "job-event-fields": {
+      "section": "Job form",
+      "label": "Event fields",
+      "type": "region",
+      "selector": "#job-event-fields",
+      "generated": true,
+      "action": "Container for event trigger inputs (pattern, plugin, throttle, max fires), shown when trigger kind is 'event'."
+    },
+    "job-field-event-pattern": {
+      "section": "Job form",
+      "label": "Event pattern",
+      "type": "text input",
+      "selector": "#job-field-event-pattern",
+      "generated": true,
+      "action": "Glob pattern matched against automation event types (e.g. mail.new, files.*)."
+    },
+    "job-event-help": {
+      "section": "Job form",
+      "label": "Event help",
+      "type": "status text",
+      "selector": "#job-event-help",
+      "generated": true,
+      "action": "Shows available event types from the selected plugin's manifest automation.emits."
+    },
+    "job-field-event-plugin": {
+      "section": "Job form",
+      "label": "Event plugin scope",
+      "type": "select",
+      "selector": "#job-field-event-plugin",
+      "generated": true,
+      "action": "Optional plugin scope for the event trigger (Any plugin or a specific pluginId)."
+    },
+    "job-field-throttle-ms": {
+      "section": "Job form",
+      "label": "Throttle (ms)",
+      "type": "number input",
+      "selector": "#job-field-throttle-ms",
+      "generated": true,
+      "action": "Minimum gap between fires for this event job (coalesce burst events)."
+    },
+    "job-field-max-fires": {
+      "section": "Job form",
+      "label": "Max fires/hour",
+      "type": "number input",
+      "selector": "#job-field-max-fires",
+      "generated": true,
+      "action": "Hard cap on dispatches per rolling hour for this event job."
     },
     "job-schedule-help": {
       "section": "Job form",
@@ -2772,6 +2909,69 @@
       "selector": "#job-modal-save",
       "action": "Creates the job via job.add and closes the modal."
     },
+    "pipelines-new-btn": {
+      "section": "Pipeline list",
+      "label": "New pipeline",
+      "type": "button",
+      "selector": "#pipelines-new-btn",
+      "action": "Opens the New pipeline modal."
+    },
+    "pipelines-list": {
+      "section": "Pipeline list",
+      "label": "Pipeline list",
+      "type": "list",
+      "selector": "#pipelines-list",
+      "action": "Renders pipeline cards with status, trigger, step count, and actions."
+    },
+    "pipelines-empty": {
+      "section": "Pipeline list",
+      "label": "Pipelines empty state",
+      "type": "status text",
+      "selector": "#pipelines-empty",
+      "action": "Shown when no pipelines exist."
+    },
+    "pipelines-error": {
+      "section": "Pipeline list",
+      "label": "Pipelines error",
+      "type": "error panel",
+      "selector": "#pipelines-error",
+      "action": "Shown when the pipeline list fails to load."
+    },
+    "pipeline-modal-save": {
+      "section": "Pipeline form",
+      "label": "Save",
+      "type": "button",
+      "selector": "#pipeline-modal-save",
+      "action": "Creates or updates the pipeline via pipeline.add/update and closes the modal."
+    },
+    "pipeline-field-name": {
+      "section": "Pipeline form",
+      "label": "Pipeline name",
+      "type": "text input",
+      "selector": "#pipeline-field-name",
+      "action": "Sets the pipeline name."
+    },
+    "pipeline-field-trigger-kind": {
+      "section": "Pipeline form",
+      "label": "Trigger type",
+      "type": "select",
+      "selector": "#pipeline-field-trigger-kind",
+      "action": "Toggles between event and schedule trigger fields."
+    },
+    "pipeline-add-step-btn": {
+      "section": "Pipeline form",
+      "label": "Add step",
+      "type": "button",
+      "selector": "#pipeline-add-step-btn",
+      "action": "Adds a new step row to the pipeline."
+    },
+    "pipeline-steps-list": {
+      "section": "Pipeline form",
+      "label": "Steps list",
+      "type": "list",
+      "selector": "#pipeline-steps-list",
+      "action": "Renders editable step rows with id, name, action, dependsOn, outputKey."
+    },
     "job-output-body": {
       "section": "Output entries",
       "label": "Output entries",
@@ -2789,9 +2989,15 @@
     },
     "agent-canvas": {
       "section": "Agent Canvas",
-      "label": "Canvas sidebar pane",
-      "type": "complementary region",
-      "action": "Shell-owned preview surface beside the conversation. Hidden until a Sidebar or Preview action opens it, or the active conversation has a persisted activeCanvasArtifactId."
+      "label": "Canvas overlay drawer",
+      "type": "dialog",
+      "action": "Right-edge overlay drawer for the active canvas artifact. Slides over the agent workbench without resizing the chat column; closed via Close, overlay click, or Escape."
+    },
+    "agent-canvas-overlay": {
+      "section": "Agent Canvas",
+      "label": "Canvas drawer overlay",
+      "type": "overlay",
+      "action": "Dimmed backdrop behind the canvas drawer; click closes the drawer."
     },
     "agent-canvas-title": {
       "section": "Agent Canvas",
@@ -2849,7 +3055,7 @@
       "type": "button",
       "selector": ".agent-canvas-fence-btn",
       "generated": true,
-      "action": "Preview (HTML) or Sidebar action attached to a canvas fence."
+      "action": "Sidebar or Show source action attached to a canvas fence. Show source replaces the inline preview with a scrollable ~10-row source block."
     },
     "agent-canvas-inline": {
       "section": "Agent Canvas",
@@ -2867,11 +3073,75 @@
       "generated": true,
       "action": "Centered SVG host inside the canvas body for svg/mermaid artifacts."
     },
+    "agent-shell": {
+      "section": "Agent Canvas",
+      "label": "Agent shell grid",
+      "type": "region",
+      "selector": "#agent-shell",
+      "generated": true,
+      "action": "Two-column agent workbench (conversations · thread). Canvas opens as a fixed overlay drawer and does not add a third grid column."
+    },
+    "agent-canvas-card": {
+      "section": "Agent Canvas",
+      "label": "Artifact card",
+      "type": "region",
+      "selector": ".agent-canvas-card",
+      "generated": true,
+      "action": "Compact card under an auto-rendered HTML preview; shows badge, title, size hint, Sidebar, and Show source."
+    },
+    "agent-canvas-card-head": {
+      "section": "Agent Canvas",
+      "label": "Artifact card header",
+      "type": "region",
+      "selector": ".agent-canvas-card-head",
+      "generated": true,
+      "action": "Header row of an artifact card with badge, title, and meta."
+    },
+    "agent-canvas-card-badge": {
+      "section": "Agent Canvas",
+      "label": "Artifact card badge",
+      "type": "label",
+      "selector": ".agent-canvas-card-badge",
+      "generated": true,
+      "action": "Type badge (HTML) on an artifact card."
+    },
+    "agent-canvas-card-title": {
+      "section": "Agent Canvas",
+      "label": "Artifact card title",
+      "type": "label",
+      "selector": ".agent-canvas-card-title",
+      "generated": true,
+      "action": "Title label on an artifact card (e.g. 'html 1')."
+    },
+    "agent-canvas-card-meta": {
+      "section": "Agent Canvas",
+      "label": "Artifact card meta",
+      "type": "label",
+      "selector": ".agent-canvas-card-meta",
+      "generated": true,
+      "action": "Size hint (lines · bytes) on an artifact card."
+    },
+    "agent-canvas-card-actions": {
+      "section": "Agent Canvas",
+      "label": "Artifact card actions",
+      "type": "region",
+      "selector": ".agent-canvas-card-actions",
+      "generated": true,
+      "action": "Action row on an artifact card containing Sidebar and Show source buttons."
+    },
+    "agent-canvas-inline-preview": {
+      "section": "Agent Canvas",
+      "label": "Inline HTML preview",
+      "type": "region",
+      "selector": ".agent-canvas-inline-preview",
+      "generated": true,
+      "action": "In-chat sandboxed iframe auto-rendered for HTML canvas fences on completed assistant messages."
+    },
     "settings-canvas-enabled": {
       "section": "Startup & background",
       "label": "Agent Canvas",
       "type": "toggle",
-      "action": "Enables or disables inline SVG/Mermaid rendering and the HTML preview sidebar. When off, canvas fences stay as source code blocks."
+      "action": "Enables or disables inline HTML/SVG/Mermaid rendering and the canvas sidebar. When off, canvas fences stay as source code blocks."
     }
   }
 }

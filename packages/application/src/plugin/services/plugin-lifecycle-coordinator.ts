@@ -105,6 +105,7 @@ export class PluginLifecycleCoordinator {
         await entry.process.kill();
         entry.process = null;
       }
+      this.sessions.unregisterAutomationEmits(entry);
     } catch (error) {
       await this.crash(entry, this.describeError(error));
       throw this.toApplicationError(error, "PLUGIN_STOP_FAILED", entry.pluginId);
@@ -211,6 +212,7 @@ export class PluginLifecycleCoordinator {
       ...(entry.url !== undefined ? { url: entry.url } : {}),
       ...(Object.keys(entry.env).length > 0 ? { env: entry.env } : {}),
       ...(Object.keys(entry.headers).length > 0 ? { headers: entry.headers } : {}),
+      ...(entry.automation !== undefined ? { automation: entry.automation } : {}),
     };
   }
 

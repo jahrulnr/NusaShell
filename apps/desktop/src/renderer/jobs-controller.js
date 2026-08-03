@@ -5,6 +5,16 @@ import { serializeSchemaArgs } from "./jobs-form-helpers.js";
 
 const JOB_RUN_TIMEOUT_MS = 300_000;
 
+function describeJobTrigger(trigger) {
+  if (!trigger) return "—";
+  if (trigger.kind === "schedule") return describeJobSchedule(trigger.schedule);
+  if (trigger.kind === "event") {
+    const plugin = trigger.pluginId ? ` @${trigger.pluginId}` : "";
+    return `⚡ event ${trigger.pattern}${plugin}`;
+  }
+  return "—";
+}
+
 function describeJobSchedule(schedule) {
   if (!schedule) return "—";
   if (schedule.kind === "once") return `once @ ${schedule.runAt}`;
@@ -38,6 +48,13 @@ function describeScheduleKey(schedule) {
     return `every ${m}m`;
   }
   if (schedule.kind === "cron") return schedule.expr;
+  return "";
+}
+
+function describeTriggerKey(trigger) {
+  if (!trigger) return "";
+  if (trigger.kind === "schedule") return describeScheduleKey(trigger.schedule);
+  if (trigger.kind === "event") return `event:${trigger.pattern}`;
   return "";
 }
 
@@ -86,8 +103,16 @@ export class JobsController {
       modalCancel: document.getElementById("job-modal-cancel"),
       modalSave: document.getElementById("job-modal-save"),
       fieldName: document.getElementById("job-field-name"),
+      fieldTrigger: document.getElementById("job-field-trigger"),
+      scheduleFields: document.getElementById("job-schedule-fields"),
+      eventFields: document.getElementById("job-event-fields"),
       fieldSchedule: document.getElementById("job-field-schedule"),
       scheduleHelp: document.getElementById("job-schedule-help"),
+      fieldEventPattern: document.getElementById("job-field-event-pattern"),
+      eventHelp: document.getElementById("job-event-help"),
+      fieldEventPlugin: document.getElementById("job-field-event-plugin"),
+      fieldThrottleMs: document.getElementById("job-field-throttle-ms"),
+      fieldMaxFires: document.getElementById("job-field-max-fires"),
       fieldMode: document.getElementById("job-field-mode"),
       modeHelp: document.getElementById("job-mode-help"),
       agentFields: document.getElementById("job-agent-fields"),
@@ -105,6 +130,8 @@ export class JobsController {
       argsFallbackLabel: document.getElementById("job-tool-args-fallback-label"),
       fieldArgs: document.getElementById("job-field-args"),
       fieldRepeat: document.getElementById("job-field-repeat"),
+      fieldOnCompleteType: document.getElementById("job-field-oncomplete-type"),
+      fieldOnCompletePayload: document.getElementById("job-field-oncomplete-payload"),
       outputModal: document.getElementById("job-output-modal"),
       outputTitle: document.getElementById("job-output-title"),
       outputClose: document.getElementById("job-output-close"),
@@ -149,7 +176,9 @@ export class JobsController {
     this.els.modalCancel?.addEventListener("click", () => this.closeModal());
     this.els.modalSave?.addEventListener("click", () => void this.saveJob());
     this.els.fieldMode?.addEventListener("change", () => this._toggleModeFields());
+    this.els.fieldTrigger?.addEventListener("change", () => this._toggleTriggerFields());
     this.els.fieldSchedule?.addEventListener("blur", () => void this.validateSchedule());
+    this.els.fieldEventPlugin?.addEventListener("change", () => void this._populateEventPatternHints());
     this.els.fieldProvider?.addEventListener("change", () => this._syncModelOptions());
     this.els.fieldPluginId?.addEventListener("change", () => void this._onPluginChange());
     this.els.fieldToolName?.addEventListener("change", () => this._onToolChange());
@@ -272,7 +301,7 @@ export class JobsController {
     const meta = document.createElement("div");
     meta.className = "job-meta";
     const repeat = job.repeat?.times ? ` · ${job.repeat.completed}/${job.repeat.times}` : "";
-    meta.textContent = `${describeJobSchedule(job.schedule)} · ${describeJobMode(job.mode)}${repeat}`;
+    meta.textContent = `${describeJobTrigger(job.trigger)} · ${describeJobMode(job.mode)}${repeat}`;
     info.append(title, meta);
 
     const strip = document.createElement("div");
@@ -365,10 +394,18 @@ export class JobsController {
     this.editingId = job?.id ?? null;
     this.els.modalTitle.textContent = job ? "Edit job" : "New job";
     this.els.fieldName.value = job?.name ?? "";
-    this.els.fieldSchedule.value = job ? describeScheduleKey(job.schedule) : "";
+    const triggerKind = job?.trigger?.kind ?? "schedule";
+    this.els.fieldTrigger.value = triggerKind;
+    this.els.fieldSchedule.value = triggerKind === "schedule" && job ? describeTriggerKey(job.trigger) : "";
+    this.els.fieldEventPattern.value = triggerKind === "event" && job ? job.trigger.pattern : "";
+    this.els.fieldEventPlugin.value = triggerKind === "event" && job?.trigger?.pluginId ? job.trigger.pluginId : "";
+    this.els.fieldThrottleMs.value = triggerKind === "event" && job?.trigger?.throttleMs ? String(job.trigger.throttleMs) : "";
+    this.els.fieldMaxFires.value = triggerKind === "event" && job?.trigger?.maxFiresPerHour ? String(job.trigger.maxFiresPerHour) : "";
     this.els.fieldMode.value = job?.mode?.type ?? "agent";
     this.els.fieldPrompt.value = job?.mode?.type === "agent" ? job.mode.prompt : "";
     this.els.fieldRepeat.value = job?.repeat?.times ?? "";
+    this.els.fieldOnCompleteType.value = job?.onComplete?.type ?? "";
+    this.els.fieldOnCompletePayload.value = job?.onComplete?.payload ? JSON.stringify(job.onComplete.payload, null, 2) : "";
     this.els.scheduleHelp.textContent = "";
     this.els.fieldArgs.value = "{}";
     this.els.schemaForm.textContent = "";
@@ -397,6 +434,8 @@ export class JobsController {
     }
 
     this._toggleModeFields();
+    await this._loadEventPluginOptions();
+    this._toggleTriggerFields();
     this.els.modal.classList.add("active");
     this.els.fieldName.focus();
   }
@@ -417,6 +456,54 @@ export class JobsController {
     this.els.modeHelp.textContent = isAgent
       ? "Uses an AI model to run a headless agent turn. Costs tokens."
       : "Calls one plugin tool with fixed args — no AI model, no tokens.";
+  }
+
+  _toggleTriggerFields() {
+    const kind = this.els.fieldTrigger?.value ?? "schedule";
+    const isEvent = kind === "event";
+    if (this.els.scheduleFields) {
+      this.els.scheduleFields.hidden = isEvent;
+      this.els.scheduleFields.setAttribute("aria-hidden", String(isEvent));
+    }
+    if (this.els.eventFields) {
+      this.els.eventFields.hidden = !isEvent;
+      this.els.eventFields.setAttribute("aria-hidden", String(!isEvent));
+    }
+    if (isEvent) void this._populateEventPatternHints();
+  }
+
+  async _loadEventPluginOptions() {
+    if (!this.els.fieldEventPlugin) return;
+    const select = this.els.fieldEventPlugin;
+    const currentValue = select.value;
+    while (select.options.length > 1) select.remove(1);
+    // Reuse the plugin list already loaded by _loadPluginOptions
+    const plugins = this._plugins ?? [];
+    for (const plugin of plugins) {
+      const opt = document.createElement("option");
+      opt.value = plugin.pluginId;
+      opt.textContent = plugin.pluginId;
+      select.appendChild(opt);
+    }
+    if (currentValue) select.value = currentValue;
+  }
+
+  async _populateEventPatternHints() {
+    const pluginId = this.els.fieldEventPlugin?.value || "";
+    if (!this.els.eventHelp) return;
+    if (!pluginId) {
+      this.els.eventHelp.textContent = "Glob pattern matched against event types from plugin manifests.";
+      return;
+    }
+    // Look up the manifest from the loaded plugin list
+    const plugin = this._plugins?.find((p) => p.pluginId === pluginId);
+    const emits = plugin?.manifest?.automation?.emits;
+    if (emits && emits.length > 0) {
+      const types = emits.map((e) => e.type).join(", ");
+      this.els.eventHelp.textContent = `Available events: ${types}`;
+    } else {
+      this.els.eventHelp.textContent = "This plugin declares no automation events.";
+    }
   }
 
   async _loadModelOptions() {
@@ -673,11 +760,33 @@ export class JobsController {
 
   async saveJob() {
     const name = this.els.fieldName.value.trim();
+    const triggerKind = this.els.fieldTrigger?.value ?? "schedule";
     const schedule = this.els.fieldSchedule.value.trim();
+    const eventPattern = this.els.fieldEventPattern?.value.trim() ?? "";
     const modeType = this.els.fieldMode.value;
-    if (!name || !schedule) {
-      this.notify("Name and schedule are required", "error");
+    if (!name) {
+      this.notify("Name is required", "error");
       return;
+    }
+    let trigger;
+    if (triggerKind === "event") {
+      if (!eventPattern) {
+        this.notify("Event pattern is required for event trigger", "error");
+        return;
+      }
+      trigger = { kind: "event", pattern: eventPattern };
+      const eventPlugin = this.els.fieldEventPlugin?.value.trim();
+      if (eventPlugin) trigger.pluginId = eventPlugin;
+      const throttleMs = parseInt(this.els.fieldThrottleMs?.value ?? "", 10);
+      if (!isNaN(throttleMs) && throttleMs > 0) trigger.throttleMs = throttleMs;
+      const maxFires = parseInt(this.els.fieldMaxFires?.value ?? "", 10);
+      if (!isNaN(maxFires) && maxFires > 0) trigger.maxFiresPerHour = maxFires;
+    } else {
+      if (!schedule) {
+        this.notify("Schedule is required", "error");
+        return;
+      }
+      trigger = { kind: "schedule", schedule };
     }
     let mode;
     if (modeType === "agent") {
@@ -720,8 +829,22 @@ export class JobsController {
       mode = { type: "tool", pluginId, toolName, args };
     }
     const repeatRaw = this.els.fieldRepeat.value.trim();
-    const payload = { name, schedule, mode };
+    const payload = { name, trigger, mode };
     if (repeatRaw) payload.repeatTimes = parseInt(repeatRaw, 10);
+    const onCompleteType = this.els.fieldOnCompleteType?.value.trim() ?? "";
+    if (onCompleteType) {
+      const onComplete = { type: onCompleteType };
+      const onCompletePayloadText = this.els.fieldOnCompletePayload?.value.trim() ?? "";
+      if (onCompletePayloadText) {
+        try {
+          onComplete.payload = JSON.parse(onCompletePayloadText);
+        } catch {
+          this.notify("On-complete payload must be valid JSON", "error");
+          return;
+        }
+      }
+      payload.onComplete = onComplete;
+    }
     try {
       if (this.editingId) {
         await sendRequest("job.update", { id: this.editingId, ...payload });

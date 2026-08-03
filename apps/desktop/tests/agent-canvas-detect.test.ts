@@ -4,6 +4,7 @@ import {
   canvasArtifactId,
   canvasKindForLang,
   extractCanvasCandidates,
+  resolveCanvasFence,
 } from "../src/renderer/agent-canvas-detect.js";
 
 describe("extractCanvasCandidates", () => {
@@ -68,12 +69,44 @@ describe("extractCanvasCandidates", () => {
     expect(candidates[0].tooLarge).toBe(true);
   });
 
+  it("recovers when the language is on the first body line instead of the fence", () => {
+    const md = "```\nmermaid\nflowchart LR\n  A-->B\n```\n\n```\nhtml\n<p>hi</p>\n```";
+    const candidates = extractCanvasCandidates(md);
+    expect(candidates).toHaveLength(2);
+    expect(candidates[0]).toMatchObject({
+      kind: "mermaid",
+      lang: "mermaid",
+      source: "flowchart LR\n  A-->B\n",
+      fenceIndex: 0,
+    });
+    expect(candidates[1]).toMatchObject({
+      kind: "html",
+      source: "<p>hi</p>\n",
+      fenceIndex: 1,
+    });
+  });
+
+  it("resolveCanvasFence strips a leading language line only when the fence lang is empty", () => {
+    expect(resolveCanvasFence("mermaid", "flowchart LR\nA-->B")).toEqual({
+      kind: "mermaid",
+      lang: "mermaid",
+      source: "flowchart LR\nA-->B",
+    });
+    expect(resolveCanvasFence("", "mermaid\nflowchart LR\nA-->B")).toEqual({
+      kind: "mermaid",
+      lang: "mermaid",
+      source: "flowchart LR\nA-->B",
+    });
+    expect(resolveCanvasFence("", "js\nconsole.log(1)")).toBeNull();
+  });
+
   it("canvasKindForLang resolves html/htm/svg/mermaid and rejects others", () => {
     expect(canvasKindForLang("html")).toBe("html");
     expect(canvasKindForLang("htm")).toBe("html");
     expect(canvasKindForLang("svg")).toBe("svg");
     expect(canvasKindForLang("mermaid")).toBe("mermaid");
     expect(canvasKindForLang("Mermaid")).toBe("mermaid");
+    expect(canvasKindForLang("mermaid title")).toBe("mermaid");
     expect(canvasKindForLang("js")).toBeNull();
     expect(canvasKindForLang("")).toBeNull();
   });

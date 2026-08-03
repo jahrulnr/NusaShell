@@ -25,8 +25,9 @@ export class ShutdownCoordinator {
       this.container.logger.warn({ err }, "Error during runtime shutdown");
     }
 
-    // 5. Stop the job scheduler tick loop
+    // 5. Stop the job scheduler tick loop and event matcher
     try {
+      this.container.eventJobMatcher.stop();
       this.container.jobScheduler.stop();
     } catch (err) {
       this.container.logger.warn({ err }, "Error stopping job scheduler");

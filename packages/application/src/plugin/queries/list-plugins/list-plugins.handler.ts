@@ -27,6 +27,7 @@ export class ListPluginsHandler
       ...(view.category !== undefined ? { category: view.category } : {}),
       ...(view.ui !== undefined ? { ui: view.ui } : {}),
       keepAliveOnClose: view.keepAliveOnClose,
+      ...(view.automation !== undefined ? { automation: view.automation } : {}),
     }));
     return { plugins: items };
   }

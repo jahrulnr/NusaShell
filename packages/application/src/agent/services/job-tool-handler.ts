@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { ApplicationError } from "../../errors/application-error.js";
 import type { JobStorePort } from "../../job/ports/job-store.port.js";
 import type { JobScheduler } from "../../job/services/job-scheduler.js";
-import type { Job, JobMode } from "../../job/job-model.js";
+import type { Job, JobMode, JobTrigger, Condition, OnCompleteEmit } from "../../job/job-model.js";
+import { scheduleOf } from "../../job/job-model.js";
 import type { ReasoningEffort } from "../ports/agent-provider.port.js";
 import {
   parseSchedule,
@@ -73,24 +74,16 @@ async function validateSchedule(args: Readonly<Record<string, unknown>>): Promis
 
 async function addJob(store: JobStorePort, args: Readonly<Record<string, unknown>>, caller?: JobToolCallerContext): Promise<unknown> {
   const name = requireString(args.name, "name");
-  const scheduleInput = requireString(args.schedule, "schedule");
   const mode = parseJobMode(args, caller);
   const repeatTimes = parseRepeatTimes(args.repeat_times);
-  let schedule;
-  try {
-    schedule = parseSchedule(scheduleInput);
-  } catch (error) {
-    if (error instanceof ScheduleParseError) {
-      throw new ApplicationError("JOB_INVALID_SCHEDULE", error.message);
-    }
-    throw error;
-  }
+  const trigger = parseTriggerFromArgs(args);
   const now = new Date();
-  const nextRunAt = computeNextRun(schedule, null, now);
+  const schedule = trigger.kind === "schedule" ? trigger.schedule : null;
+  const nextRunAt = schedule ? computeNextRun(schedule, null, now) : null;
   const job: Job = {
     id: randomUUID(),
     name,
-    schedule,
+    trigger,
     mode,
     enabled: true,
     repeat: { times: repeatTimes, completed: 0 },
@@ -99,6 +92,7 @@ async function addJob(store: JobStorePort, args: Readonly<Record<string, unknown
     lastStatus: null,
     lastError: null,
     createdAt: now.toISOString(),
+    ...(args.on_complete !== undefined && args.on_complete !== null ? { onComplete: parseOnComplete(args.on_complete) } : {}),
   };
   const created = await store.create(job);
   return { ok: true, data: created, meta: {} };
@@ -108,19 +102,24 @@ async function updateJob(store: JobStorePort, args: Readonly<Record<string, unkn
   const id = requireString(args.id, "id");
   const existing = await store.get(id);
   if (!existing) throw new ApplicationError("JOB_NOT_FOUND", `Job not found: ${id}`);
-  let schedule = existing.schedule;
+  let trigger: JobTrigger = existing.trigger;
   let nextRunAt = existing.nextRunAt;
-  if (args.schedule !== undefined) {
+  if (args.trigger !== undefined) {
+    trigger = parseTriggerObject(args.trigger);
+    const schedule = trigger.kind === "schedule" ? trigger.schedule : null;
+    nextRunAt = schedule && existing.enabled ? computeNextRun(schedule, existing.lastRunAt, new Date()) : null;
+  } else if (args.schedule !== undefined) {
     const scheduleInput = requireString(args.schedule, "schedule");
     try {
-      schedule = parseSchedule(scheduleInput);
+      const schedule = parseSchedule(scheduleInput);
+      trigger = { kind: "schedule", schedule };
+      nextRunAt = existing.enabled ? computeNextRun(schedule, existing.lastRunAt, new Date()) : null;
     } catch (error) {
       if (error instanceof ScheduleParseError) {
         throw new ApplicationError("JOB_INVALID_SCHEDULE", error.message);
       }
       throw error;
     }
-    nextRunAt = existing.enabled ? computeNextRun(schedule, existing.lastRunAt, new Date()) : null;
   }
   const mode = args.mode !== undefined || args.prompt !== undefined || args.pluginId !== undefined
     ? parseJobMode(args, caller, existing.mode)
@@ -132,11 +131,12 @@ async function updateJob(store: JobStorePort, args: Readonly<Record<string, unkn
   const updated: Job = {
     ...existing,
     ...(args.name !== undefined ? { name: requireString(args.name, "name") } : {}),
-    schedule,
+    trigger,
     mode,
     enabled,
     repeat: { times: repeatTimes, completed: existing.repeat.completed },
     nextRunAt,
+    ...(args.on_complete !== undefined ? (args.on_complete === null ? {} : { onComplete: parseOnComplete(args.on_complete) }) : {}),
   };
   const result = await store.update(updated);
   return { ok: true, data: result, meta: {} };
@@ -147,12 +147,13 @@ async function setEnabled(store: JobStorePort, args: Readonly<Record<string, unk
   const enabled = parseBoolean(args.enabled, "enabled");
   const job = await store.get(id);
   if (!job) throw new ApplicationError("JOB_NOT_FOUND", `Job not found: ${id}`);
+  const schedule = scheduleOf(job.trigger);
   let nextRunAt = job.nextRunAt;
-  if (enabled && job.schedule.kind !== "once" && (!nextRunAt || new Date(nextRunAt).getTime() <= Date.now())) {
-    nextRunAt = computeNextRun(job.schedule, job.lastRunAt, new Date());
+  if (schedule && enabled && schedule.kind !== "once" && (!nextRunAt || new Date(nextRunAt).getTime() <= Date.now())) {
+    nextRunAt = computeNextRun(schedule, job.lastRunAt, new Date());
   }
-  if (enabled && job.schedule.kind === "once" && !nextRunAt) {
-    nextRunAt = job.schedule.runAt;
+  if (schedule && enabled && schedule.kind === "once" && !nextRunAt) {
+    nextRunAt = schedule.runAt;
   }
   const updated: Job = { ...job, enabled, ...(nextRunAt !== job.nextRunAt ? { nextRunAt } : {}) };
   const result = await store.update(updated);
@@ -246,16 +247,127 @@ function parseRepeatTimes(value: unknown): number | null {
   return n;
 }
 
+/**
+ * Parse a trigger from tool args. Accepts either:
+ * - `trigger` object ({ kind: "event", pattern, ... } | { kind: "schedule", schedule })
+ * - `schedule` string (legacy — wraps as { kind: "schedule", schedule })
+ */
+function parseTriggerFromArgs(args: Readonly<Record<string, unknown>>): JobTrigger {
+  if (args.trigger !== undefined) {
+    return parseTriggerObject(args.trigger);
+  }
+  if (args.schedule !== undefined) {
+    const scheduleInput = requireString(args.schedule, "schedule");
+    try {
+      const schedule = parseSchedule(scheduleInput);
+      return { kind: "schedule", schedule };
+    } catch (error) {
+      if (error instanceof ScheduleParseError) {
+        throw new ApplicationError("JOB_INVALID_SCHEDULE", error.message);
+      }
+      throw error;
+    }
+  }
+  throw new ApplicationError("AGENT_INVALID_INPUT", "either `trigger` or `schedule` is required");
+}
+
+function parseTriggerObject(raw: unknown): JobTrigger {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new ApplicationError("AGENT_INVALID_INPUT", "trigger must be an object");
+  }
+  const obj = raw as Record<string, unknown>;
+  const kind = obj.kind;
+  if (kind === "schedule") {
+    if (obj.schedule === undefined) {
+      throw new ApplicationError("AGENT_INVALID_INPUT", "schedule trigger requires a `schedule` field");
+    }
+    const scheduleInput = typeof obj.schedule === "string" ? obj.schedule : JSON.stringify(obj.schedule);
+    try {
+      const schedule = parseSchedule(scheduleInput);
+      return { kind: "schedule", schedule };
+    } catch (error) {
+      if (error instanceof ScheduleParseError) {
+        throw new ApplicationError("JOB_INVALID_SCHEDULE", error.message);
+      }
+      throw error;
+    }
+  }
+  if (kind === "event") {
+    const pattern = requireString(obj.pattern, "pattern");
+    const trigger: { kind: "event"; pattern: string; pluginId?: string; conditions?: Condition[]; throttleMs?: number; maxFiresPerHour?: number } = {
+      kind: "event",
+      pattern,
+    };
+    if (obj.pluginId !== undefined && obj.pluginId !== null) {
+      trigger.pluginId = requireString(obj.pluginId, "pluginId");
+    }
+    if (obj.conditions !== undefined && obj.conditions !== null) {
+      if (!Array.isArray(obj.conditions)) {
+        throw new ApplicationError("AGENT_INVALID_INPUT", "conditions must be an array");
+      }
+      trigger.conditions = obj.conditions.map((c) => parseCondition(c));
+    }
+    if (obj.throttleMs !== undefined && obj.throttleMs !== null) {
+      trigger.throttleMs = clampInt(obj.throttleMs, NaN, 0, 60 * 60 * 1000);
+    }
+    if (obj.maxFiresPerHour !== undefined && obj.maxFiresPerHour !== null) {
+      trigger.maxFiresPerHour = clampInt(obj.maxFiresPerHour, NaN, 1, 100000);
+    }
+    return trigger;
+  }
+  throw new ApplicationError("AGENT_INVALID_INPUT", `trigger.kind must be "schedule" or "event"`);
+}
+
+function parseCondition(raw: unknown): Condition {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new ApplicationError("AGENT_INVALID_INPUT", "condition must be an object");
+  }
+  const obj = raw as Record<string, unknown>;
+  const path = requireString(obj.path, "path");
+  const op = obj.op;
+  if (op !== "eq" && op !== "contains" && op !== "regex") {
+    throw new ApplicationError("AGENT_INVALID_INPUT", "condition.op must be eq, contains, or regex");
+  }
+  const value = requireString(obj.value, "value");
+  if (op === "regex") {
+    try {
+      new RegExp(value);
+    } catch {
+      throw new ApplicationError("AGENT_INVALID_INPUT", `condition regex is invalid: ${value}`);
+    }
+  }
+  return { path, op, value };
+}
+
 function parseBoolean(value: unknown, name: string): boolean {
   if (typeof value !== "boolean") throw new ApplicationError("AGENT_INVALID_INPUT", `${name} is required`);
   return value;
 }
 
+function parseOnComplete(raw: unknown): OnCompleteEmit {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new ApplicationError("AGENT_INVALID_INPUT", "on_complete must be an object");
+  }
+  const obj = raw as Record<string, unknown>;
+  const type = requireString(obj.type, "on_complete.type");
+  if (obj.payload !== undefined && obj.payload !== null) {
+    if (typeof obj.payload !== "object" || obj.payload === null || Array.isArray(obj.payload)) {
+      throw new ApplicationError("AGENT_INVALID_INPUT", "on_complete.payload must be an object");
+    }
+    return { type, payload: obj.payload as Readonly<Record<string, unknown>> };
+  }
+  return { type };
+}
+
 function compactJob(job: Job, scheduler?: JobScheduler): unknown {
+  const schedule = scheduleOf(job.trigger);
+  const triggerDesc = schedule
+    ? describeSchedule(schedule)
+    : job.trigger.kind === "event" ? `event ${job.trigger.pattern}` : "—";
   return {
     id: job.id,
     name: job.name,
-    schedule: describeSchedule(job.schedule),
+    trigger: triggerDesc,
     enabled: job.enabled,
     nextRunAt: job.nextRunAt,
     lastStatus: job.lastStatus,

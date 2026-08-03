@@ -70,6 +70,45 @@ export const ManifestSchema = z.object({
       shell: z.string().optional(),
     })
     .optional(),
+  /**
+   * Plugin automation capability. Optional — plugins that omit it behave
+   * exactly as today (pull-only MCP). When present, declares what events the
+   * plugin can emit (push) and which tools are safe to poll (fallback).
+   *
+   * See tmp/plan/watch-to-agent/04-mcp-automation-contract.md.
+   */
+  automation: z
+    .object({
+      emits: z
+        .array(
+          z.object({
+            type: z
+              .string()
+              .min(1)
+              .max(200)
+              .regex(
+                /^[a-z0-9][a-z0-9._-]*$/i,
+                "emit type must start with alphanumeric and contain only letters, numbers, dots, dashes, or underscores",
+              ),
+            description: z.string().min(1).max(500),
+            payloadSchema: z.record(z.string(), z.unknown()).optional(),
+          }),
+        )
+        .optional(),
+      poll: z
+        .array(
+          z.object({
+            tool: z.string().min(1).max(200),
+            suggestEvery: z
+              .string()
+              .regex(/^\d+(s|m|h)$/, "suggestEvery must be like '5m', '30s', '1h'")
+              .optional(),
+            diffHint: z.string().max(500).optional(),
+          }),
+        )
+        .optional(),
+    })
+    .optional(),
 });
 
 export type ManifestJson = z.infer<typeof ManifestSchema>;

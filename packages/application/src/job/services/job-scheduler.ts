@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { JobStorePort } from "../ports/job-store.port.js";
 import type { JobFsPort } from "../ports/job-fs.port.js";
-import type { Job, JobOutputEntry } from "../job-model.js";
+import type { Job, JobOutputEntry, JobSchedule } from "../job-model.js";
 import {
   computeNextRun,
   describeSchedule,
@@ -10,6 +10,7 @@ import {
   ONCE_GRACE_SECONDS,
   recurringCatchupGraceSeconds,
   isRecurring,
+  scheduleOf,
 } from "../job-model.js";
 import type { JobAgentExecutorSettings, JobExecutionResult } from "./job-agent-executor.js";
 import type { CallToolCommand } from "../../tool/commands/call-tool/call-tool.command.js";
@@ -17,6 +18,9 @@ import type { EventDispatcher } from "../../events/event-dispatcher.js";
 import { createJobCompletedEvent, createJobFailedEvent, createJobStartedEvent, createJobCancelledEvent } from "../../events/job-events.event.js";
 import type { LoggerPort } from "../../plugin/ports/logger.port.js";
 import type { ReasoningEffort } from "../../agent/ports/agent-provider.port.js";
+import type { TemplateContext } from "./job-template-resolver.js";
+import { resolveTemplates, resolveTemplatesInRecord } from "./job-template-resolver.js";
+import { createAutomationEvent } from "../../events/automation-event.js";
 
 /** Minimal executor surface the scheduler needs (structural — accepts JobAgentExecutor or fakes). */
 export interface JobExecutorPort {
@@ -179,7 +183,11 @@ export class JobScheduler {
   }
 
   /** Fire a job immediately (manual run), respecting the claim lock. */
-  async runOneNow(jobId: string): Promise<{ ok: boolean; error?: string }> {
+  async runOneNow(
+    jobId: string,
+    templateContext?: TemplateContext,
+    chainOrigin?: { readonly originJobId: string; readonly chainDepth: number },
+  ): Promise<{ ok: boolean; error?: string }> {
     const job = await this.deps.store.get(jobId);
     if (!job) return { ok: false, error: "job not found" };
     if (!job.enabled) return { ok: false, error: "job is paused" };
@@ -188,7 +196,7 @@ export class JobScheduler {
     const claimed = await this.deps.store.claimFire(jobId, claimId, this.settings.claimTtlSeconds, now);
     if (!claimed) return { ok: false, error: "job is already running" };
     try {
-      await this.dispatch(job, now, claimId);
+      await this.dispatch(job, now, claimId, templateContext, chainOrigin);
       return { ok: true };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -197,13 +205,19 @@ export class JobScheduler {
   }
 
   private async processJob(job: Job, now: Date): Promise<void> {
+    // Event-trigger jobs are not fired by the wall-clock tick; they are fired
+    // by EventJobMatcher. Skip them here (they may appear in listDue if
+    // nextRunAt is set, but event jobs should not have nextRunAt).
+    if (job.trigger.kind !== "schedule") return;
+
+    const schedule = job.trigger.schedule;
     const claimId = randomUUID();
     const claimed = await this.deps.store.claimFire(job.id, claimId, this.settings.claimTtlSeconds, now);
     if (!claimed) return;
 
     // Missed one-shot: runAt older than the grace window at tick time.
-    if (job.schedule.kind === "once") {
-      const runAtMs = new Date(job.schedule.runAt).getTime();
+    if (schedule.kind === "once") {
+      const runAtMs = new Date(schedule.runAt).getTime();
       const ageSeconds = (now.getTime() - runAtMs) / 1000;
       if (ageSeconds > ONCE_GRACE_SECONDS) {
         this.deps.logger?.warn("job %s missed while app was closed; marking error", job.id);
@@ -218,8 +232,8 @@ export class JobScheduler {
 
     // Catchup for recurring jobs late beyond the grace window: fire once now,
     // then fast-forward nextRunAt past the missed slots.
-    if (isRecurring(job.schedule)) {
-      const periodMinutes = periodMinutesFor(job.schedule);
+    if (isRecurring(schedule)) {
+      const periodMinutes = periodMinutesFor(schedule);
       const grace = recurringCatchupGraceSeconds(periodMinutes);
       const nextRunMs = job.nextRunAt ? new Date(job.nextRunAt).getTime() : now.getTime();
       const latenessSeconds = (now.getTime() - nextRunMs) / 1000;
@@ -233,13 +247,19 @@ export class JobScheduler {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.deps.logger?.error("job %s dispatch failed: %s", job.id, message);
-      await this.deps.store.markRun(job.id, "error", message, computeNext(job.schedule, now.toISOString(), now), now);
+      await this.deps.store.markRun(job.id, "error", message, computeNext(schedule, now.toISOString(), now), now);
       await this.deps.store.releaseFire(job.id, claimId);
       await this.deps.eventDispatcher.publish(createJobFailedEvent(job.id, job.name, message, now));
     }
   }
 
-  private async dispatch(job: Job, now: Date, claimId: string): Promise<void> {
+  private async dispatch(
+    job: Job,
+    now: Date,
+    claimId: string,
+    templateContext?: TemplateContext,
+    chainOrigin?: { readonly originJobId: string; readonly chainDepth: number },
+  ): Promise<void> {
     this.activeJobIds.add(job.id);
     const traceId = randomUUID();
     const controller = new AbortController();
@@ -252,8 +272,9 @@ export class JobScheduler {
       let error: string | null = null;
 
       if (job.mode.type === "agent") {
+        const prompt = templateContext ? resolveTemplates(job.mode.prompt, templateContext) : job.mode.prompt;
         const result = await this.deps.executor.runAgent(
-          job.mode.prompt,
+          prompt,
           this.deps.executorSettings,
           controller.signal,
           {
@@ -272,12 +293,15 @@ export class JobScheduler {
           if (result.status === "error") error = result.error ?? summary;
         }
       } else {
+        const args = templateContext && job.mode.args
+          ? resolveTemplatesInRecord(job.mode.args, templateContext)
+          : job.mode.args;
         const command: CallToolCommand = {
           kind: "call-tool",
           pluginId: job.mode.pluginId,
           requestId: randomUUID(),
           toolName: job.mode.toolName,
-          args: job.mode.args,
+          args,
         };
         try {
           const result = await this.deps.callToolHandler.handle(command);
@@ -293,12 +317,29 @@ export class JobScheduler {
 
       const outputEntry = await this.persistOutput(job, now, status, summary, traceId);
       if (outputEntry) await this.deps.store.appendOutput(job.id, outputEntry);
-      const nextRunAt = computeNext(job.schedule, now.toISOString(), now);
+      const schedule = scheduleOf(job.trigger);
+      const nextRunAt = schedule ? computeNext(schedule, now.toISOString(), now) : null;
       await this.deps.store.markRun(job.id, status, error, nextRunAt, now);
       await this.deps.store.releaseFire(job.id, claimId);
 
       if (status === "ok") {
         await this.deps.eventDispatcher.publish(createJobCompletedEvent(job.id, job.name, summary, now, traceId));
+        // Phase D: emit onComplete automation event for soft chains.
+        if (job.onComplete) {
+          const nextDepth = (chainOrigin?.chainDepth ?? 0) + 1;
+          const emitPayload = templateContext && job.onComplete.payload
+            ? resolveTemplatesInRecord(job.onComplete.payload as Record<string, unknown>, templateContext)
+            : (job.onComplete.payload ?? {});
+          const automationEvt = createAutomationEvent(
+            job.onComplete.type,
+            undefined,
+            emitPayload,
+            now,
+            undefined,
+            { jobId: job.id, chainDepth: nextDepth },
+          );
+          await this.deps.eventDispatcher.publish(automationEvt);
+        }
       } else if (status === "cancelled") {
         // job.cancelled already published by cancel(); publish failed for consistency
         await this.deps.eventDispatcher.publish(createJobFailedEvent(job.id, job.name, error ?? summary, now, traceId));
@@ -320,7 +361,9 @@ export class JobScheduler {
   ): Promise<JobOutputEntry | null> {
     try {
       const stamp = now.toISOString().replace(/[:.]/g, "-");
-      const header = `# Job: ${job.name}\n\n- id: ${job.id}\n- schedule: ${describeSchedule(job.schedule)}\n- runAt: ${now.toISOString()}\n- status: ${status}\n- traceId: ${traceId}\n\n`;
+      const schedule = scheduleOf(job.trigger);
+      const triggerDesc = schedule ? describeSchedule(schedule) : `event ${job.trigger.kind === "event" ? job.trigger.pattern : ""}`;
+      const header = `# Job: ${job.name}\n\n- id: ${job.id}\n- trigger: ${triggerDesc}\n- runAt: ${now.toISOString()}\n- status: ${status}\n- traceId: ${traceId}\n\n`;
       const content = header + summary;
       const path = await this.deps.jobFs.persistJobOutput(job.id, stamp, content);
       if (path === null) return null;
@@ -347,14 +390,14 @@ export class JobScheduler {
   }
 }
 
-function periodMinutesFor(schedule: Job["schedule"]): number {
+function periodMinutesFor(schedule: JobSchedule): number {
   if (schedule.kind === "interval") return schedule.minutes;
   // cron: approximate with a 1h minimum; exact period is not needed for grace.
   return 60;
 }
 
 function computeNext(
-  schedule: Job["schedule"],
+  schedule: JobSchedule,
   lastRunAt: string | null,
   now: Date,
 ): string | null {

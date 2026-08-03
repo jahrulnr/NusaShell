@@ -10,7 +10,7 @@ function makeJob(overrides: Partial<Job> = {}): Job {
   return {
     id: "job-1",
     name: "Test job",
-    schedule: { kind: "interval", minutes: 30 },
+    trigger: { kind: "schedule", schedule: { kind: "interval", minutes: 30 } },
     mode: { type: "agent", prompt: "Say hello" },
     enabled: true,
     repeat: { times: null, completed: 0 },
@@ -46,7 +46,7 @@ function runStoreContract(name: string, makeStore: () => Promise<{ store: JobSto
       const found = await store.get("job-1");
       expect(found).not.toBeNull();
       expect(found!.name).toBe("Test job");
-      expect(found!.schedule).toEqual({ kind: "interval", minutes: 30 });
+      expect(found!.trigger).toEqual({ kind: "schedule", schedule: { kind: "interval", minutes: 30 } });
       expect(found!.mode).toEqual({ type: "agent", prompt: "Say hello" });
     });
 
@@ -75,7 +75,7 @@ function runStoreContract(name: string, makeStore: () => Promise<{ store: JobSto
     it("markRun advances counters and disables one-shot", async () => {
       const once = makeJob({
         id: "once-1",
-        schedule: { kind: "once", runAt: "2025-01-01T00:00:10.000Z" },
+        trigger: { kind: "schedule", schedule: { kind: "once", runAt: "2025-01-01T00:00:10.000Z" } },
         nextRunAt: "2025-01-01T00:00:10.000Z",
         repeat: { times: 1, completed: 0 },
       });
@@ -91,7 +91,7 @@ function runStoreContract(name: string, makeStore: () => Promise<{ store: JobSto
     it("markRun disables recurring job when repeat limit reached", async () => {
       const job = makeJob({
         id: "bounded-1",
-        schedule: { kind: "interval", minutes: 30 },
+        trigger: { kind: "schedule", schedule: { kind: "interval", minutes: 30 } },
         repeat: { times: 2, completed: 1 },
       });
       await store.create(job);

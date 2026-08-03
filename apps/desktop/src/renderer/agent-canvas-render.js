@@ -117,16 +117,60 @@ export function stripDangerousHtml(source) {
  * @returns {Promise<{ type: "svg", svg: string } | { type: "error", message: string }>}
  */
 async function renderMermaid(source) {
-  const text = String(source ?? "");
+  const text = softenMermaidSequenceRects(String(source ?? ""));
   if (!text.trim()) return { type: "error", message: "Empty mermaid diagram" };
   try {
     const mermaid = await loadMermaid();
     const id = `mmd-${randomId()}`;
     const { svg } = await mermaid.render(id, text);
-    return { type: "svg", svg: sanitizeSvgString(svg) };
+    return { type: "svg", svg: softenMermaidSvgRects(sanitizeSvgString(svg)) };
   } catch (error) {
     return { type: "error", message: error instanceof Error ? error.message : String(error) };
   }
+}
+
+/**
+ * Mermaid sequence `rect rgb(r, g, b)` paints fully opaque backgrounds that
+ * often cover arrows/messages (looks like a "leak"). Rewrite opaque rgb/hsl
+ * rect fills to translucent rgba/hsla before render. Leave rects that already
+ * specify alpha alone.
+ *
+ * @param {string} source
+ * @returns {string}
+ */
+export function softenMermaidSequenceRects(source) {
+  return String(source ?? "")
+    .replace(
+      /^([ \t]*rect[ \t]+)rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*$/gim,
+      "$1rgba($2, $3, $4, 0.18)",
+    )
+    .replace(
+      /^([ \t]*rect[ \t]+)hsl\(\s*([\d.]+)\s*,\s*([\d.]+%)\s*,\s*([\d.]+%)\s*\)\s*$/gim,
+      "$1hsla($2, $3, $4, 0.18)",
+    );
+}
+
+/**
+ * Defense in depth: if Mermaid still emits opaque activation/background rects,
+ * force a translucent fill-opacity on filled <rect> nodes that lack one.
+ *
+ * @param {string} svg
+ * @returns {string}
+ */
+export function softenMermaidSvgRects(svg) {
+  const text = String(svg ?? "");
+  if (!text) return text;
+  return text.replace(/<rect\b([^>]*)>/gi, (full, attrs) => {
+    const selfClosing = /\/\s*$/.test(attrs);
+    const cleanAttrs = attrs.replace(/\/\s*$/, "");
+    if (/\bfill-opacity\s*=/i.test(cleanAttrs)) return full;
+    if (/\bopacity\s*=/i.test(cleanAttrs)) return full;
+    // Skip hollow rects (no fill / fill=none).
+    const fillMatch = cleanAttrs.match(/\bfill\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/i);
+    const fill = (fillMatch?.[2] ?? fillMatch?.[3] ?? fillMatch?.[4] ?? "").trim();
+    if (!fill || /^none$/i.test(fill)) return full;
+    return `<rect${cleanAttrs} fill-opacity="0.18"${selfClosing ? " /" : ""}>`;
+  });
 }
 
 /**
@@ -137,7 +181,23 @@ function loadMermaid() {
     mermaidPromise = import("mermaid")
       .then((mod) => {
         const mermaid = mod.default ?? mod;
-        mermaid.initialize({ securityLevel: "strict", startOnLoad: false });
+        mermaid.initialize({
+          securityLevel: "strict",
+          startOnLoad: false,
+          theme: "neutral",
+          // Keep sequence activation/rects from painting solid walls over arrows.
+          themeVariables: {
+            actorBkg: "#e8eef7",
+            actorBorder: "#7a8aa0",
+            actorTextColor: "#1a1a1a",
+            signalColor: "#1a1a1a",
+            signalTextColor: "#1a1a1a",
+            noteBkgColor: "#fff6c8",
+            noteTextColor: "#1a1a1a",
+            activationBkgColor: "rgba(90, 130, 180, 0.18)",
+            activationBorderColor: "#7a8aa0",
+          },
+        });
         return mermaid;
       })
       .catch((error) => {
@@ -153,4 +213,138 @@ function randomId() {
     return crypto.randomUUID().replace(/-/g, "").slice(0, 12);
   }
   return `mmd${Math.random().toString(36).slice(2, 14)}`;
+}
+
+const CANVAS_ZOOM_MIN = 0.4;
+const CANVAS_ZOOM_MAX = 3;
+const CANVAS_ZOOM_STEP = 0.1;
+
+/**
+ * Bind Ctrl/Cmd + wheel zoom on an SVG canvas host. Double-click resets to 100%.
+ * Idempotent: safe to call twice on the same element.
+ *
+ * Zooms by resizing the SVG (viewBox stays put) so Chromium re-rasterizes as a
+ * vector — CSS `transform: scale()` would promote a bitmap layer and look like
+ * a stretched PNG when zooming in.
+ *
+ * @param {HTMLElement | null | undefined} host
+ */
+export function bindCanvasZoom(host) {
+  if (!host || host.dataset.canvasZoomBound === "1") return;
+  host.dataset.canvasZoomBound = "1";
+  host.classList.add("agent-canvas-zoomable");
+  host.title = host.title || "Ctrl + scroll to zoom · double-click to reset";
+
+  let stage = host.querySelector(":scope > .agent-canvas-zoom-stage");
+  if (!stage) {
+    stage = document.createElement("div");
+    stage.className = "agent-canvas-zoom-stage";
+    while (host.firstChild) stage.appendChild(host.firstChild);
+    host.appendChild(stage);
+  }
+
+  let label = host.querySelector(":scope > .agent-canvas-zoom-label");
+  if (!label) {
+    label = document.createElement("div");
+    label.className = "agent-canvas-zoom-label";
+    label.hidden = true;
+    label.setAttribute("aria-live", "polite");
+    host.appendChild(label);
+  }
+
+  let scale = 1;
+  let hideTimer = 0;
+
+  const applyScale = (next) => {
+    scale = Math.min(CANVAS_ZOOM_MAX, Math.max(CANVAS_ZOOM_MIN, next));
+    const svg = stage.querySelector("svg");
+    if (svg) {
+      applySvgZoom(svg, scale);
+      stage.style.zoom = "";
+      stage.style.transform = "";
+    } else {
+      // Non-SVG fallback (rare): Chromium `zoom` reflows sharper than transform.
+      stage.style.transform = "";
+      stage.style.zoom = String(scale);
+    }
+    label.textContent = `${Math.round(scale * 100)}%`;
+    label.hidden = false;
+    window.clearTimeout(hideTimer);
+    hideTimer = window.setTimeout(() => {
+      label.hidden = true;
+    }, 900);
+  };
+
+  host.addEventListener(
+    "wheel",
+    (event) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const direction = event.deltaY < 0 ? 1 : -1;
+      applyScale(scale + direction * CANVAS_ZOOM_STEP);
+    },
+    { passive: false },
+  );
+
+  host.addEventListener("dblclick", (event) => {
+    if (event.target.closest(".agent-canvas-zoom-label")) return;
+    applyScale(1);
+  });
+}
+
+/**
+ * @param {SVGSVGElement} svg
+ * @param {number} scale
+ */
+function applySvgZoom(svg, scale) {
+  const base = ensureSvgZoomBase(svg);
+  const width = base.width * scale;
+  const height = base.height * scale;
+  svg.setAttribute("width", String(width));
+  svg.setAttribute("height", String(height));
+  svg.style.width = `${width}px`;
+  svg.style.height = `${height}px`;
+  svg.style.maxWidth = "none";
+}
+
+/**
+ * @param {SVGSVGElement} svg
+ * @returns {{ width: number, height: number }}
+ */
+function ensureSvgZoomBase(svg) {
+  if (svg.dataset.zoomBaseW && svg.dataset.zoomBaseH) {
+    return {
+      width: Number(svg.dataset.zoomBaseW),
+      height: Number(svg.dataset.zoomBaseH),
+    };
+  }
+
+  const viewBox = svg.viewBox?.baseVal;
+  let width = viewBox && viewBox.width > 0 ? viewBox.width : 0;
+  let height = viewBox && viewBox.height > 0 ? viewBox.height : 0;
+
+  if (!width || !height) {
+    const attrW = Number.parseFloat(svg.getAttribute("width") || "");
+    const attrH = Number.parseFloat(svg.getAttribute("height") || "");
+    if (Number.isFinite(attrW) && attrW > 0) width = attrW;
+    if (Number.isFinite(attrH) && attrH > 0) height = attrH;
+  }
+
+  if (!width || !height) {
+    try {
+      const box = svg.getBBox();
+      if (box.width > 0) width = box.width;
+      if (box.height > 0) height = box.height;
+    } catch {
+      // Not rendered yet.
+    }
+  }
+
+  if (!width) width = svg.clientWidth || 400;
+  if (!height) height = svg.clientHeight || Math.round(width * 0.6);
+
+  svg.dataset.zoomBaseW = String(width);
+  svg.dataset.zoomBaseH = String(height);
+  return { width, height };
 }

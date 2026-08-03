@@ -30,6 +30,11 @@ import {
   ListJobsHandler,
   JobOutputHandler,
   ValidateScheduleHandler,
+  AddPipelineHandler,
+  UpdatePipelineHandler,
+  RemovePipelineHandler,
+  RunPipelineHandler,
+  ListPipelinesHandler,
   RunAcpTurnHandler,
   CancelAcpTurnHandler,
   AnswerAcpPermissionHandler,
@@ -138,6 +143,12 @@ export function registerBuses(
   commandBus.register("run-job-now", new RunJobNowHandler(jobs.jobScheduler));
   commandBus.register("cancel-job", new CancelJobHandler(jobs.jobScheduler));
   commandBus.register("remove-job", new RemoveJobHandler(jobs.jobStore));
+  if (jobs.pipelineStore && jobs.pipelineScheduler) {
+    commandBus.register("add-pipeline", new AddPipelineHandler(jobs.pipelineStore));
+    commandBus.register("update-pipeline", new UpdatePipelineHandler(jobs.pipelineStore));
+    commandBus.register("remove-pipeline", new RemovePipelineHandler(jobs.pipelineStore));
+    commandBus.register("run-pipeline", new RunPipelineHandler(jobs.pipelineScheduler));
+  }
   commandBus.register("run-acp-turn", new RunAcpTurnHandler(acp.acpSessionService));
   commandBus.register("cancel-acp-turn", new CancelAcpTurnHandler(acp.acpSessionService));
   commandBus.register("answer-acp-permission", new AnswerAcpPermissionHandler(acp.acpPermissionService));
@@ -176,6 +187,9 @@ export function registerBuses(
   queryBus.register("list-jobs", new ListJobsHandler(jobs.jobStore));
   queryBus.register("job-output", new JobOutputHandler(jobs.jobStore, jobs.jobFs));
   queryBus.register("validate-schedule", new ValidateScheduleHandler());
+  if (jobs.pipelineStore) {
+    queryBus.register("list-pipelines", new ListPipelinesHandler(jobs.pipelineStore));
+  }
   queryBus.register("get-acp-session-info", new GetAcpSessionInfoHandler(acp.acpSessionService));
 
   return { commandBus, queryBus };

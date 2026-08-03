@@ -11,6 +11,23 @@ import { TRANSPORT_TYPES } from "../value-objects/transport-type.js";
 export type WindowMode = "panel" | "fullscreen" | "widget";
 export type PluginSource = "native-mcp" | "package";
 
+export interface AutomationEmit {
+  readonly type: string;
+  readonly description: string;
+  readonly payloadSchema?: Readonly<Record<string, unknown>>;
+}
+
+export interface AutomationPoll {
+  readonly tool: string;
+  readonly suggestEvery?: string;
+  readonly diffHint?: string;
+}
+
+export interface AutomationConfig {
+  readonly emits?: readonly AutomationEmit[];
+  readonly poll?: readonly AutomationPoll[];
+}
+
 export interface PluginManifestInput {
   readonly source?: PluginSource;
   readonly id: string;
@@ -39,6 +56,7 @@ export interface PluginManifestInput {
   readonly dependencies?: {
     readonly shell?: string;
   };
+  readonly automation?: AutomationConfig;
 }
 
 class ManifestValidationError extends DomainError {
@@ -71,6 +89,7 @@ export class PluginManifest {
     readonly dependencies: {
       readonly shell?: string;
     },
+    readonly automation: AutomationConfig | undefined,
   ) {}
 
   static create(raw: PluginManifestInput): Result<PluginManifest, DomainError> {
@@ -184,6 +203,7 @@ export class PluginManifest {
         raw.ui,
         mcp,
         dependencies,
+        raw.automation,
       ),
     );
   }
@@ -202,6 +222,7 @@ export class PluginManifest {
       ...(this.ui !== undefined ? { ui: this.ui } : {}),
       mcp: { transport: this.mcp.transport, ...(this.mcp.command !== undefined ? { command: this.mcp.command } : {}), args: this.mcp.args, ...(this.mcp.url !== undefined ? { url: this.mcp.url } : {}), env: this.mcp.env, headers: this.mcp.headers, autostart: this.mcp.autostart, keepAliveOnClose: this.mcp.keepAliveOnClose },
       ...(this.dependencies.shell !== undefined ? { dependencies: this.dependencies } : {}),
+      ...(this.automation !== undefined ? { automation: this.automation } : {}),
     };
   }
 }

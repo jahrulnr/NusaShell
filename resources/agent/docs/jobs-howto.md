@@ -48,3 +48,45 @@ the app was closed is marked errored, not silently fired.
 - `job.cancel` aborts an in-flight run.
 - Events: `job.started`, `job.completed`, `job.failed`, `job.cancelled`.
 - `job.output` with `includeBody: true` returns the full markdown body.
+
+## Event triggers
+
+Jobs can fire on events instead of schedules. Use `trigger` instead of `schedule`:
+
+```json
+{
+  "action": "add",
+  "name": "Auto-reply to new mail",
+  "trigger": { "kind": "event", "pattern": "mail.new", "pluginId": "nusashell.mail" },
+  "mode": "agent",
+  "prompt": "Draft a reply to the new email."
+}
+```
+
+- `pattern` is a glob (`*` matches any segment, e.g. `mail.*` matches `mail.new` and `mail.sent`).
+- `pluginId` optionally scopes to one plugin's events.
+- `conditions` adds AND-conditions on the event payload: `[{ path: "payload.urgent", op: "eq", value: "true" }]`.
+- `throttleMs` and `maxFiresPerHour` prevent runaway loops.
+
+## Soft chains (on_complete)
+
+A job can emit an automation event when it completes successfully. Another job
+with a matching event trigger will fire — forming a chain without a full DAG.
+
+```json
+{
+  "action": "add",
+  "name": "Classify email",
+  "trigger": { "kind": "event", "pattern": "mail.new" },
+  "mode": "agent",
+  "prompt": "Classify this email. Reply with 'urgent' or 'normal'.",
+  "on_complete": { "type": "mail.classified", "payload": { "source": "auto" } }
+}
+```
+
+Another job with `trigger: { kind: "event", pattern: "mail.classified" }` will
+fire when this one completes. Cycle guards prevent infinite loops
+(self-triggers and mutual cycles are detected and blocked).
+
+For multi-step workflows with branching and context passing, use `pipeline`
+instead of chaining jobs — see the Pipelines doc.

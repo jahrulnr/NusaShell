@@ -22,6 +22,8 @@ export type { AgentLearningUpdatedEvent } from "./agent-learning-updated.event.j
 export { createLearningUpdatedEvent } from "./agent-learning-updated.event.js";
 export type { JobCompletedEvent, JobFailedEvent, JobStartedEvent, JobCancelledEvent } from "./job-events.event.js";
 export { createJobCompletedEvent, createJobFailedEvent, createJobStartedEvent, createJobCancelledEvent } from "./job-events.event.js";
+export type { AutomationEvent } from "./automation-event.js";
+export { createAutomationEvent } from "./automation-event.js";
 export type {
   AcpTextDeltaEvent,
   AcpThoughtDeltaEvent,
