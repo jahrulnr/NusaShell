@@ -10,6 +10,7 @@ describe("RuntimeTransitionPolicy", () => {
   const allowed: Array<[PluginRuntimeState, PluginRuntimeState]> = [
     ["idle", "starting"],
     ["starting", "running"],
+    ["starting", "stopping"],
     ["starting", "crashed"],
     ["running", "stopping"],
     ["running", "background"],

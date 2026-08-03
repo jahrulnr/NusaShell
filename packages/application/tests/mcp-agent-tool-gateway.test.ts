@@ -757,6 +757,18 @@ describe("McpAgentToolGateway", () => {
       gateway.endTurn("turn-enable-bare");
     });
 
+    it("mcp_enable ignores empty args/env overrides", async () => {
+      const starts: Array<{ pluginId: unknown; options: unknown }> = [];
+      const { runtime } = makeRuntime({
+        startPlugin: async (pluginId: unknown, options: unknown) => { starts.push({ pluginId, options }); },
+      });
+      const gateway = new McpAgentToolGateway(runtime as never);
+      gateway.beginTurn("turn-enable-empty", { workspace: WS });
+      await gateway.execute("mcp_enable", { pluginId: "nusashell.files", args: [], env: {} }, "call", "turn-enable-empty");
+      expect(starts[0]!.options).toEqual({ workspace: WS });
+      gateway.endTurn("turn-enable-empty");
+    });
+
     it("mcp_list enriches plugins with launchSpec (redacted env keys)", async () => {
       const { runtime } = makeRuntime({
         getLaunchSpec: async () => ({

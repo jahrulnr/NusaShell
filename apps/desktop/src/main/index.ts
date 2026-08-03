@@ -23,6 +23,7 @@ import { AcpProviderResolverAdapter } from "./acp-provider-resolver-adapter.js";
 import { refreshAcpAuthStatuses } from "./acp-auth.js";
 import { flattenModelCatalog } from "./ai-provider-registry.js";
 import { AgentConversationStore } from "./agent-conversation-store.js";
+import { buildAssistantMessage } from "../shared/agent-message-builder.js";
 import { MailSettingsStore } from "./mail-settings.js";
 import {
   AppBehaviorStore,
@@ -34,6 +35,7 @@ import { createLoginAutostart, type LoginAutostart } from "./login-autostart.js"
 import { TrayManager } from "./tray.js";
 import { formatLogArguments } from "./log-format.js";
 import { resolveRuntimePaths } from "./runtime-paths.js";
+import { enrichProcessPathFromLoginShell } from "./shell-path.js";
 import {
   registerSkillsIpc,
   registerAiIpc,
@@ -215,6 +217,39 @@ async function startBackend(): Promise<BootstrapResult> {
       logTail.add(source, toShellLogLevel(level), message);
     },
     acpProviderResolver: new AcpProviderResolverAdapter(acpProviderStore!),
+    sealAgentTurn: async (conversationId, result, options) => {
+      const store = agentConversationStore;
+      if (!store) {
+        logTail.add("main", "warn", `sealAgentTurn: store not ready for conversation ${conversationId}`);
+        return;
+      }
+      try {
+        const message = buildAssistantMessage(result);
+        if (options.resume) {
+          await store.replaceLastInterrupted(conversationId, message);
+        } else {
+          await store.appendMessage(conversationId, message);
+        }
+        if (result.compaction?.summary) {
+          const updated = await store.get(conversationId);
+          const previous = updated?.checkpoint;
+          const previousOffset = previous?.compactedMessageCount ?? 0;
+          const summaryMessageCount = previous?.summary ? 1 : 0;
+          const messageCount = updated?.messages.length ?? 0;
+          await store.saveCheckpoint(conversationId, {
+            summary: result.compaction.summary,
+            compactedMessageCount: Math.min(
+              messageCount,
+              previousOffset + Math.max(0, result.compaction.compactedMessageCount - summaryMessageCount),
+            ),
+            via: result.compaction.via,
+          });
+        }
+        logTail.add("main", "debug", `Sealed assistant turn for ${conversationId} trace=${result.traceId}`);
+      } catch (error) {
+        logTail.add("main", "error", `sealAgentTurn failed for ${conversationId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
   });
   for (const provider of aiSettings.providers) configureProvider(result, provider);
   return result;
@@ -310,6 +345,13 @@ app.whenReady().then(async () => {
   );
   logTail.add("main", "info", "Electron main process ready");
   logTail.add("ipc", "debug", "Shell IPC handlers registered");
+
+  // GUI launches inherit a stripped PATH; merge login-shell PATH so nvm/fnm
+  // tools (npx, node, agent, …) resolve for MCP stdio and ACP spawns.
+  const pathEnrichment = await enrichProcessPathFromLoginShell();
+  if (pathEnrichment.enriched) {
+    logTail.add("main", "info", "Merged login-shell PATH into process environment");
+  }
 
   try {
     backend = await startBackend();

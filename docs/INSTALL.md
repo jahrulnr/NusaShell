@@ -30,6 +30,18 @@ later, fix the renamed helper and re-run the installer.
 
 macOS installs to `~/Applications/NusaShell.app`; the installer removes the quarantine attribute when present. If `~/.local/bin` is not on Linux's PATH, add the exact line printed by the installer to your shell profile.
 
+### GUI launch and Node / nvm tools
+
+Desktop-menu launches inherit a stripped `PATH` (no interactive shell profile).
+NusaShell merges the login-shell `PATH` at boot and, for absolute MCP/ACP
+commands, prepends the command's directory so shebang scripts like nvm's `npx`
+can find sibling `node`. If a native MCP still fails with `spawn npx ENOENT` or
+`/usr/bin/env: 'node': No such file or directory`, either:
+
+- launch NusaShell from a terminal that already loaded nvm/fnm, or
+- set the plugin's Environment JSON `PATH` to include that Node `bin` directory, or
+- point `command` at an absolute binary that does not rely on `env node`.
+
 The Windows PowerShell installer stores versions under
 `%LOCALAPPDATA%\\Programs\\NusaShell\\`, keeps the active `current` junction
 there, and creates a Start Menu shortcut at

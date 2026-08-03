@@ -8,7 +8,7 @@ import {
 import { ApplicationError } from "../../errors/application-error.js";
 import type { PluginRuntimeManagerDeps } from "./plugin-runtime-manager.js";
 import type { RuntimeEntry, PluginView } from "./plugin-runtime-types.js";
-import { arrayEquals, recordEquals } from "./plugin-runtime-types.js";
+import { arrayEquals, hydrateEntryFromPlugin, recordEquals } from "./plugin-runtime-types.js";
 import type { ToolCallTracker } from "./tool-call-tracker.js";
 import type { McpSessionManager } from "./mcp-session-manager.js";
 import { resolveIcon } from "./icon-resolver.js";
@@ -42,19 +42,13 @@ export class PluginLifecycleCoordinator {
     }
 
     const plugin = await this.loadPlugin(entry.pluginId);
-    entry.name = plugin.manifest.name;
-    entry.version = plugin.manifest.version.toString();
-    entry.icon = resolveIcon(plugin.manifest.icon, plugin.installPath);
-    entry.installPath = plugin.installPath;
-    entry.enabled = plugin.enabled;
-    entry.autostart = plugin.manifest.mcp.autostart;
-    entry.ui = plugin.manifest.ui;
-    entry.keepAliveOnClose = plugin.manifest.mcp.keepAliveOnClose;
+    hydrateEntryFromPlugin(entry, plugin, resolveIcon);
     const canStart = PluginLifecyclePolicy.canStart(plugin, entry.runtime);
     if (!canStart.ok) {
       throw this.mapDomainError(canStart.error, entry.pluginId);
     }
 
+    entry.startAborted = false;
     const transition = entry.runtime.transitionTo("starting", this.deps.clock.now());
     if (!transition.ok) {
       throw this.mapDomainError(transition.error, entry.pluginId);
@@ -72,13 +66,22 @@ export class PluginLifecycleCoordinator {
   }
 
   async stopLocked(entry: RuntimeEntry): Promise<PluginView> {
-    if (
-      entry.runtime.state === "idle" ||
-      entry.runtime.state === "crashed" ||
-      entry.runtime.state === "disabled"
-    ) {
+    if (entry.runtime.state === "idle" || entry.runtime.state === "disabled") {
       return this.view(entry);
     }
+
+    if (entry.runtime.state === "crashed") {
+      const toIdle = entry.runtime.transitionTo("idle", this.deps.clock.now());
+      if (!toIdle.ok) {
+        throw this.mapDomainError(toIdle.error, entry.pluginId);
+      }
+      entry.runtime = toIdle.value;
+      entry.startAborted = false;
+      await this.sessions.publishPulled(entry.runtime);
+      return this.view(entry);
+    }
+
+    entry.startAborted = entry.runtime.state === "starting" || entry.startAborted;
 
     const canStop = RuntimeTransitionPolicy.assertTransition(
       entry.runtime.state,
@@ -116,6 +119,7 @@ export class PluginLifecycleCoordinator {
       entry.runtime = toIdle.value;
       await this.sessions.publishPulled(entry.runtime);
     }
+    entry.startAborted = false;
 
     const stoppedEvent = PluginStoppedEvent.create(
       entry.pluginId,
@@ -218,8 +222,18 @@ export class PluginLifecycleCoordinator {
 
   private async doStart(entry: RuntimeEntry, plugin: import("@nusashell/domain").Plugin): Promise<void> {
     try {
+      if (entry.startAborted || entry.runtime.state === "stopping" || entry.runtime.state === "idle") {
+        return;
+      }
       // 1. Connect the MCP transport (stdio/http/sse)
       await this.sessions.connectTransport(entry, plugin);
+      if (entry.startAborted || entry.runtime.state === "stopping" || entry.runtime.state === "idle") {
+        if (entry.mcpClient) {
+          await entry.mcpClient.close().catch(() => {});
+          entry.mcpClient = null;
+        }
+        return;
+      }
       // 2. Register the close/exit watcher BEFORE transitioning to "running"
       //    so an external kill between connect and the running transition
       //    cannot leave the SoT stuck on "running" with no observer (finding 2).
@@ -227,6 +241,11 @@ export class PluginLifecycleCoordinator {
       // 3. Transition to "running" and publish PluginStartedEvent
       await this.sessions.transitionToRunning(entry);
     } catch (error) {
+      if (entry.startAborted || entry.runtime.state === "stopping" || entry.runtime.state === "idle") {
+        entry.mcpClient = null;
+        entry.process = null;
+        return;
+      }
       this.deps.logger?.error("doStart failed for plugin %s: %s", PluginId.toString(entry.pluginId), String(error));
       await this.crash(entry, this.describeError(error));
       throw this.toApplicationError(error, "PLUGIN_START_FAILED", entry.pluginId);

@@ -1,6 +1,6 @@
 import { createContainer, type Container } from "./container.js";
 import { ShutdownCoordinator } from "./shutdown.js";
-import { loadConfig, type AppConfig, type BackgroundReviewSettings, type AcpProviderResolverPort } from "@nusashell/application";
+import { loadConfig, type AppConfig, type BackgroundReviewSettings, type AcpProviderResolverPort, type AgentTurnResult } from "@nusashell/application";
 import type { LogObserver } from "@nusashell/infrastructure";
 
 export interface BootstrapOptions {
@@ -18,6 +18,14 @@ export interface BootstrapOptions {
     pluginId: string,
   ) => Promise<Readonly<Record<string, string>>> | Readonly<Record<string, string>>;
   readonly acpProviderResolver?: AcpProviderResolverPort;
+  /**
+   * Durable seal callback invoked from the agent turn handler when a turn
+   * completes (or is interrupted with partial work). The desktop main process
+   * implements this to write the assistant message to the conversation store
+   * off the renderer critical path, so a renderer restart mid-turn does not
+   * orphan the reply.
+   */
+  readonly sealAgentTurn?: (conversationId: string, result: AgentTurnResult, options: { resume: boolean }) => Promise<void>;
 }
 
 export interface BootstrapResult {
@@ -71,6 +79,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     ...(options.loggerObserver ? { loggerObserver: options.loggerObserver } : {}),
     ...(options.backgroundReview ? { backgroundReview: options.backgroundReview } : {}),
     ...(options.acpProviderResolver ? { acpProviderResolver: options.acpProviderResolver } : {}),
+    ...(options.sealAgentTurn ? { sealAgentTurn: options.sealAgentTurn } : {}),
   });
   const shutdown = new ShutdownCoordinator(container);
 

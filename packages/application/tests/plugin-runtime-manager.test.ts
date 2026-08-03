@@ -428,4 +428,101 @@ describe("PluginRuntimeManager", () => {
       expect(await manager.getPluginState(pluginB.id)).toBe("idle");
     });
   });
+
+  describe("getPlugin manifest refresh", () => {
+    it("returns updated command/env after repository save without restarting", async () => {
+      const { pluginRepository, manager } = setup();
+      const plugin = makePlugin("example.native", {
+        source: "native-mcp",
+        mcp: {
+          transport: "stdio",
+          command: "npx",
+          args: ["-y", "@playwright/mcp@latest"],
+          env: { OLD: "1" },
+        },
+      });
+      pluginRepository.add(plugin);
+
+      await manager.startPlugin(plugin.id);
+      const before = await manager.getPlugin(plugin.id);
+      expect(before?.command).toBe("npx");
+      expect(before?.env).toEqual({ OLD: "1" });
+
+      const updated = makePlugin("example.native", {
+        source: "native-mcp",
+        mcp: {
+          transport: "stdio",
+          command: "npx",
+          args: ["-y", "@playwright/mcp@latest"],
+          env: {
+            PATH: "/home/u/.nvm/versions/node/v24/bin:/usr/bin:/bin",
+            OLD: "1",
+          },
+        },
+      });
+      await pluginRepository.save(updated);
+
+      const after = await manager.getPlugin(plugin.id);
+      expect(after?.command).toBe("npx");
+      expect(after?.env).toEqual({
+        PATH: "/home/u/.nvm/versions/node/v24/bin:/usr/bin:/bin",
+        OLD: "1",
+      });
+      expect(after?.state).toBe("running");
+    });
+  });
+
+  describe("stop during start / crashed", () => {
+    it("aborts a hung connect and lands on idle", async () => {
+      const { pluginRepository, manager, mcpClientFactory } = setup();
+      const plugin = makePlugin("example.slow");
+      pluginRepository.add(plugin);
+      mcpClientFactory.nextConnectDelayMs = 5_000;
+
+      const startPromise = manager.startPlugin(plugin.id);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(await manager.getPluginState(plugin.id)).toBe("starting");
+
+      const stopPromise = manager.stopPlugin(plugin.id);
+      await Promise.allSettled([startPromise, stopPromise]);
+
+      expect(await manager.getPluginState(plugin.id)).toBe("idle");
+    });
+
+    it("clears crashed to idle on stop", async () => {
+      const { pluginRepository, manager, mcpClientFactory } = setup();
+      const plugin = makePlugin("example.crash-clear");
+      pluginRepository.add(plugin);
+
+      await manager.startPlugin(plugin.id);
+      mcpClientFactory.created[0]!.emitClose();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(await manager.getPluginState(plugin.id)).toBe("crashed");
+
+      const view = await manager.stopPlugin(plugin.id);
+      expect(view.state).toBe("idle");
+      expect(await manager.getPluginState(plugin.id)).toBe("idle");
+    });
+
+    it("ignores empty launch args and keeps the manifest script path", async () => {
+      const { pluginRepository, manager, mcpClientFactory } = setup();
+      const plugin = makePlugin("example.node-script");
+      pluginRepository.add(plugin);
+
+      await manager.startPlugin(plugin.id, { args: [] });
+      expect(mcpClientFactory.stdioCalls[0]!.args).toEqual(["mcp/server.js"]);
+      expect(await manager.getPluginState(plugin.id)).toBe("running");
+    });
+
+    it("fails fast when a launch override leaves node without a script", async () => {
+      const { pluginRepository, manager } = setup();
+      const plugin = makePlugin("example.flag-only");
+      pluginRepository.add(plugin);
+
+      await expect(manager.startPlugin(plugin.id, { args: ["--inspect"] })).rejects.toThrow(
+        /requires a script path/,
+      );
+      expect(await manager.getPluginState(plugin.id)).toBe("crashed");
+    });
+  });
 });

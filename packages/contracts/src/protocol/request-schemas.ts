@@ -149,7 +149,7 @@ const AgentMessageSchema = z.union([
     toolCalls: z.array(z.object({
       id: z.string().min(1),
       name: z.string().min(1),
-      args: z.record(z.string(), z.unknown()),
+      args: z.record(z.string(), z.unknown()).default({}),
     })).optional(),
   }),
   z.object({
@@ -192,6 +192,7 @@ export const AgentRunRequestSchema = z.object({
     workspace: z.string().max(4096).optional(),
     resume: z.boolean().optional(),
     supersedeTraceId: z.string().min(1).max(128).optional(),
+    conversationId: z.string().min(1).max(128).optional(),
   }),
 });
 

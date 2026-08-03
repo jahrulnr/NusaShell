@@ -460,24 +460,11 @@ async function openDrawer(plugin) {
     sm.appendChild(el("span", `state-node${s === plugin.state ? " current" : ""}`, s));
   });
 
-  const toolsResult = await listTools(plugin.pluginId);
-  const panel = describeToolsPanel(toolsResult, plugin);
-  $("#tool-count").textContent = panel.count;
+  // Open immediately — never block the drawer on tool.list (same serial queue
+  // as plugin.start, which can hang for minutes on a stuck MCP connect).
   const tl = $("#tools-list");
-  tl.innerHTML = "";
-  if (panel.status === "ready") {
-    panel.tools.forEach(t => {
-      const item = el("div", "tool-item");
-      item.innerHTML = `<div class="tool-item-info"><div class="tool-item-name">${t.name}</div><div class="tool-item-desc">${t.description || ""}</div></div>`;
-      tl.appendChild(item);
-    });
-  } else {
-    const cls = panel.status === "unavailable" ? "tools-unavailable" : "tools-empty";
-    tl.innerHTML = `<div class="${cls}">${panel.message}</div>`;
-  }
-
-  const detail = await getPluginDetail(plugin.pluginId);
-  const m = detail || plugin;
+  $("#tool-count").textContent = "…";
+  tl.innerHTML = `<div class="tools-empty">Loading tools…</div>`;
   $("#manifest-info").innerHTML = `<div class="manifest-row"><span class="manifest-key">id</span><span class="manifest-val">${plugin.pluginId}</span></div><div class="manifest-row"><span class="manifest-key">version</span><span class="manifest-val">${plugin.version}</span></div><div class="manifest-row"><span class="manifest-key">state</span><span class="manifest-val">${plugin.state}</span></div><div class="manifest-row"><span class="manifest-key">enabled</span><span class="manifest-val">${plugin.enabled}</span></div>`;
 
   const drawer = $("#plugin-drawer");
@@ -489,6 +476,30 @@ async function openDrawer(plugin) {
   drawer.classList.add("active");
   overlay.classList.add("active");
   $("#drawer-close").focus();
+
+  const openedFor = plugin.pluginId;
+  void (async () => {
+    const [toolsResult, detail] = await Promise.all([
+      listTools(plugin.pluginId),
+      getPluginDetail(plugin.pluginId),
+    ]);
+    if (currentPlugin?.pluginId !== openedFor) return;
+    const panel = describeToolsPanel(toolsResult, detail || plugin);
+    $("#tool-count").textContent = String(panel.count);
+    tl.innerHTML = "";
+    if (panel.status === "ready") {
+      panel.tools.forEach(t => {
+        const item = el("div", "tool-item");
+        item.innerHTML = `<div class="tool-item-info"><div class="tool-item-name">${t.name}</div><div class="tool-item-desc">${t.description || ""}</div></div>`;
+        tl.appendChild(item);
+      });
+    } else {
+      const cls = panel.status === "unavailable" ? "tools-unavailable" : "tools-empty";
+      tl.innerHTML = `<div class="${cls}">${panel.message}</div>`;
+    }
+    const m = detail || plugin;
+    $("#manifest-info").innerHTML = `<div class="manifest-row"><span class="manifest-key">id</span><span class="manifest-val">${plugin.pluginId}</span></div><div class="manifest-row"><span class="manifest-key">version</span><span class="manifest-val">${m.version ?? plugin.version}</span></div><div class="manifest-row"><span class="manifest-key">state</span><span class="manifest-val">${m.state ?? plugin.state}</span></div><div class="manifest-row"><span class="manifest-key">enabled</span><span class="manifest-val">${m.enabled ?? plugin.enabled}</span></div>`;
+  })();
 }
 
 function closeDrawer() {

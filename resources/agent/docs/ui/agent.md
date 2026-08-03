@@ -119,6 +119,95 @@ The full-height message runway separates compact user cards from editorial assis
   - Type: button
   - Action: Appears on a failed assistant turn. Click to re-run the same turn.
 
+## Subagent activity
+
+When the parent agent delegates work through the subagent tool, an in-chat Subagent run card appears in the message thread. While the subagent run is active, the card shows a compact mini activity stream (roughly ten monospace rows) that mirrors the full Subagent side pane: live reasoning, text snippets, tool calls with success/failure marks, and plan progress. The mini stream auto-scrolls to the bottom while the user is pinned to the tail; scrolling up pauses stickiness until the user returns to the bottom. Clicking the card head opens the full Subagent side pane, which preserves the complete live log with markdown rendering, expandable tool terminals, plan steps, and permission/ask cards. Clicks inside the mini stream do not toggle the drawer. When the run ends, the mini stream freezes in place until the parent turn seals the tool card; the side pane keeps the full frozen history for review.
+
+- **Subagent side pane** (`#agent-subpane`):
+  - Section: Agent
+  - Type: drawer
+  - Action: Full-height drawer that renders the complete live subagent stream with markdown, tool terminals, plans, and permission/ask cards.
+
+- **Subagent pane overlay** (`#agent-subpane-overlay`):
+  - Section: Agent
+  - Type: overlay
+  - Action: Dimmed backdrop behind the Subagent side pane.
+
+- **Subagent pane header** (`.agent-subpane-head`):
+  - Section: Agent
+  - Type: header
+  - Action: Shows the provider badge, run title, live status chip, and close button.
+
+- **Subagent pane badge** (`#agent-subpane-badge`):
+  - Section: Agent
+  - Type: badge
+  - Action: Short uppercase provider id for the active subagent run.
+
+- **Subagent pane title** (`#agent-subpane-title`):
+  - Section: Agent
+  - Type: text
+  - Action: Title of the active subagent run.
+
+- **Subagent pane status** (`#agent-subpane-status`):
+  - Section: Agent
+  - Type: status
+  - Action: Live status chip (RUNNING/OK/FAIL) for the active subagent run.
+
+- **Subagent pane close** (`#agent-subpane-close`):
+  - Section: Agent
+  - Type: button
+  - Action: Closes the Subagent side pane drawer.
+
+- **Subagent pane body** (`#agent-subpane-body`):
+  - Section: Agent
+  - Type: scroll container
+  - Action: Scrollable log that renders the full subagent stream: reasoning disclosures, text bubbles, tool terminals, plan steps, and error blocks.
+
+- **Subagent run card** (`.agent-subagent-card`):
+  - Section: Agent
+  - Type: card
+  - Action: In-chat card representing a subagent run. The head opens the full Subagent side pane; while running, a mini activity stream is shown below the head.
+
+- **Subagent card head** (`.agent-subagent-card-head`):
+  - Section: Agent
+  - Type: button
+  - Action: Clickable header that opens the full Subagent side pane for the run.
+
+- **Subagent card badge** (`.agent-subagent-card-badge`):
+  - Section: Agent
+  - Type: badge
+  - Action: Short uppercase provider id on the in-chat subagent card.
+
+- **Subagent card title** (`.agent-subagent-card-title`):
+  - Section: Agent
+  - Type: text
+  - Action: Title of the subagent run shown on the in-chat card.
+
+- **Subagent card status** (`.agent-subagent-card-status`):
+  - Section: Agent
+  - Type: status
+  - Action: Live status chip on the in-chat subagent card (RUNNING/OK/FAIL).
+
+- **Subagent mini activity stream** (`.agent-subagent-card-stream`):
+  - Section: Agent
+  - Type: scroll container
+  - Action: Compact scrollable mini log inside the running subagent card. Mirrors the full side pane as one-line rows (Thinking, text, tool calls, plan). Auto-scrolls while pinned to the bottom; scrolling up pauses stickiness.
+
+- **Subagent mini stream row** (`.agent-subagent-card-stream-row`):
+  - Section: Agent
+  - Type: row
+  - Action: Single compact activity row in the mini stream (reasoning, text, tool, or plan).
+
+- **Subagent card summary** (`.agent-subagent-card-summary`):
+  - Section: Agent
+  - Type: text
+  - Action: Markdown summary shown on the sealed subagent card after the run ends.
+
+- **Subagent card error** (`.agent-subagent-card-error`):
+  - Section: Agent
+  - Type: text
+  - Action: Error message shown on the subagent card when the run fails.
+
 ## Composer
 
 A raised command dock at the bottom of the thread. Its message input starts at one row, grows with wrapped or explicit lines, and caps at ten rows before scrolling internally. Attach images, PDFs, or text files, choose a model, and send the turn without losing the conversation rail.

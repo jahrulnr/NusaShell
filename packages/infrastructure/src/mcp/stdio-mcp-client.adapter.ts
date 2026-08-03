@@ -15,6 +15,7 @@ import type {
   AutomationClientDeps,
 } from "@nusashell/application";
 import type { Logger } from "pino";
+import { enrichSpawnEnv, formatSpawnEnoentHint } from "../process/spawn-env.js";
 import { boundMcpStderr, registerMcpLogging } from "./mcp-logging.js";
 import { registerMcpAutomation } from "./mcp-automation.js";
 import { unwrapMcpToolResult } from "./tool-result.js";
@@ -34,13 +35,14 @@ export function resolveStdioLaunch(
   env: Readonly<Record<string, string>>,
   runtime: StdioRuntime,
 ): StdioLaunch {
+  const withPath = enrichSpawnEnv(command, env);
   if (command !== "node" || !runtime.electronVersion) {
-    return { command, env };
+    return { command, env: withPath };
   }
 
   return {
     command: runtime.execPath,
-    env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
+    env: { ...withPath, ELECTRON_RUN_AS_NODE: "1" },
   };
 }
 
@@ -50,6 +52,7 @@ export class StdioMcpClient implements McpClientPort {
   private closeCallback: (() => void) | null = null;
   private currentRoots: readonly RootDescriptor[] = [];
   private rootsRequestedFlag = false;
+  private stderrBuffer = "";
 
   constructor(
     private readonly command: string,
@@ -69,6 +72,7 @@ export class StdioMcpClient implements McpClientPort {
   }
 
   async connect(): Promise<void> {
+    this.stderrBuffer = "";
     const launch = resolveStdioLaunch(
       this.command,
       { ...process.env, ...this.env } as Record<string, string>,
@@ -91,7 +95,9 @@ export class StdioMcpClient implements McpClientPort {
 
     this.transport.stderr?.on("data", (chunk: Buffer | string) => {
       const message = String(chunk).trim();
-      if (message) this.logger?.warn({ command: this.command, message: boundMcpStderr(message) }, "MCP stderr");
+      if (!message) return;
+      this.stderrBuffer += `${message}\n`;
+      this.logger?.warn({ command: this.command, message: boundMcpStderr(message) }, "MCP stderr");
     });
 
     let closed = false;
@@ -133,25 +139,44 @@ export class StdioMcpClient implements McpClientPort {
     // packages) need to download dependencies on first run. Override with
     // NUSASHELL_MCP_CONNECT_TIMEOUT (milliseconds).
     const CONNECT_TIMEOUT_MS = Number(process.env.NUSASHELL_MCP_CONNECT_TIMEOUT) || 300_000;
-    await Promise.race([
-      this.client.connect(this.transport),
-      new Promise<never>((_, reject) => {
-        const timer = setTimeout(() => {
-          reject(new Error(`MCP connect timed out after ${CONNECT_TIMEOUT_MS}ms`));
-        }, CONNECT_TIMEOUT_MS);
-        // If transport closes before connect completes, reject immediately
-        const checkClose = setInterval(() => {
-          if (closed) {
-            clearInterval(checkClose);
-            clearTimeout(timer);
-            reject(new Error("MCP process exited before handshake completed"));
-          }
-        }, 100);
-        // Clean up interval when connect succeeds or times out
-        const origClear = clearInterval;
-        setTimeout(() => origClear(checkClose), CONNECT_TIMEOUT_MS + 100);
-      }),
-    ]);
+    try {
+      await Promise.race([
+        this.client.connect(this.transport),
+        new Promise<never>((_, reject) => {
+          const timer = setTimeout(() => {
+            reject(new Error(`MCP connect timed out after ${CONNECT_TIMEOUT_MS}ms`));
+          }, CONNECT_TIMEOUT_MS);
+          // If transport closes before connect completes, reject immediately
+          const checkClose = setInterval(() => {
+            if (closed) {
+              clearInterval(checkClose);
+              clearTimeout(timer);
+              reject(new Error("MCP process exited before handshake completed"));
+            }
+          }, 100);
+          // Clean up interval when connect succeeds or times out
+          const origClear = clearInterval;
+          setTimeout(() => origClear(checkClose), CONNECT_TIMEOUT_MS + 100);
+        }),
+      ]);
+    } catch (error) {
+      throw this.enrichConnectError(error);
+    }
+  }
+
+  private enrichConnectError(error: unknown): Error {
+    const base = error instanceof Error ? error.message : String(error);
+    const code = typeof error === "object" && error !== null && "code" in error
+      ? String((error as { code?: unknown }).code)
+      : "";
+    const enoentHint = code === "ENOENT" || /spawn .* ENOENT/i.test(base)
+      ? formatSpawnEnoentHint(this.command)
+      : "";
+    const stderrTail = this.stderrBuffer.trim().split("\n").slice(-8).join("\n");
+    const parts = [base];
+    if (enoentHint && !base.includes(enoentHint)) parts.push(enoentHint);
+    if (stderrTail) parts.push(`[MCP stderr]\n${stderrTail}`);
+    return new Error(parts.join("\n"), { cause: error });
   }
 
   async close(): Promise<void> {

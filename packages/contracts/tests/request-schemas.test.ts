@@ -162,6 +162,33 @@ describe("Request schemas", () => {
       expect(result.success).toBe(true);
       if (result.success) expect(result.data.payload.modelCapabilities?.supportsVision).toBe(false);
     });
+
+    it("accepts assistant toolCalls with omitted args and defaults to {}", () => {
+      const result = AgentRunRequestSchema.safeParse({
+        kind: "request",
+        id: "req_agent_no_args",
+        method: "agent.run",
+        payload: {
+          pluginIds: [],
+          messages: [
+            { role: "user", content: "List plugins" },
+            { role: "assistant", content: "", toolCalls: [{ id: "call-1", name: "mcp_list" }] },
+            { role: "tool", toolCallId: "call-1", name: "mcp_list", content: "[]" },
+            { role: "user", content: "Continue" },
+          ],
+        },
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        const messages = result.data.payload.messages;
+        const assistant = messages.find((m) => m.role === "assistant");
+        expect(assistant).toBeDefined();
+        if (assistant && assistant.role === "assistant" && assistant.toolCalls && assistant.toolCalls[0]) {
+          expect(assistant.toolCalls[0].args).toEqual({});
+        }
+      }
+    });
   });
 
   describe("agent.ask_answer", () => {

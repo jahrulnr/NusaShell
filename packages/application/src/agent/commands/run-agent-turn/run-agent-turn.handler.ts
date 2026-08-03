@@ -52,7 +52,7 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
     private readonly promptLoader?: PromptLoaderPort,
     private readonly userPrompt: string = "",
     private readonly memoryStore?: MemoryStorePort,
-    private readonly onTurnComplete?: (result: AgentTurnResult) => Promise<void> | void,
+    private readonly onTurnComplete?: (result: AgentTurnResult, context?: { conversationId?: string; resume?: boolean }) => Promise<void> | void,
     private readonly onTurnEnd?: (traceId: string, reason: "completed" | "cancelled" | "failed" | "superseded") => void,
     private readonly onTurnStarted?: (traceId: string) => void,
     private readonly onTurnSuperseded?: (oldTraceId: string, newTraceId: string) => void,
@@ -120,7 +120,10 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
       }));
       if (this.onTurnComplete) {
         try {
-          await this.onTurnComplete(result);
+          await this.onTurnComplete(result, {
+            ...(command.conversationId ? { conversationId: command.conversationId } : {}),
+            ...(command.resume ? { resume: true } : {}),
+          });
         } catch (error) {
           this.logger?.error("onTurnComplete callback failed: %s", error instanceof Error ? error.message : String(error));
         }

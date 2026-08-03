@@ -119,7 +119,17 @@ export function registerBuses(
     agent.promptLoader,
     agent.aiRuntime.userPrompt,
     skills.memoryStore,
-    (result) => { void agent.backgroundReviewScheduler.tick(result); void skills.skillCuratorScheduler.tick(); },
+    async (result, context) => {
+      void agent.backgroundReviewScheduler.tick(result);
+      void skills.skillCuratorScheduler.tick();
+      if (context?.conversationId && options.sealAgentTurn) {
+        try {
+          await options.sealAgentTurn(context.conversationId, result, { resume: context.resume === true });
+        } catch (error) {
+          logger.error("sealAgentTurn failed for conversation %s: %s", context.conversationId, error instanceof Error ? error.message : String(error));
+        }
+      }
+    },
     (traceId, reason) => {
       void eventDispatcher.publish(agent.withStreamSeq(createAgentTurnEndEvent(traceId, reason)));
       agent.streamSeqRegistry.clear(traceId);

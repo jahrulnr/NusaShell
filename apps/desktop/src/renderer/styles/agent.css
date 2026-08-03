@@ -728,6 +728,62 @@
   line-height: 1.5;
 }
 
+/* ============ Subagent in-chat mini activity stream ============ */
+.agent-subagent-card-stream {
+  max-height: calc(1.55em * 10 + 16px);
+  min-height: calc(1.55em * 3 + 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px 12px 8px 12px;
+  border-top: 1px solid var(--border-soft);
+  background: rgba(8, 12, 19, .55);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.agent-subagent-card-stream::-webkit-scrollbar { width: 6px; }
+.agent-subagent-card-stream::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.agent-subagent-card-stream::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+.agent-subagent-card-stream:empty::before {
+  content: 'Waiting for subagent activity…';
+  color: var(--text-faint);
+  font-size: 10px;
+  font-style: italic;
+}
+.agent-subagent-card-stream-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-dim);
+  font: 10px/1.55 'JetBrains Mono', monospace;
+  white-space: nowrap;
+}
+.agent-subagent-card-stream-row > .agent-subagent-card-stream-mark {
+  flex: none;
+  color: var(--text-faint);
+}
+.agent-subagent-card-stream-row > .agent-subagent-card-stream-text {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-subagent-card-stream-row.is-thinking { color: var(--text-dim); }
+.agent-subagent-card-stream-row.is-thinking .agent-subagent-card-stream-mark { color: var(--accent); }
+.agent-subagent-card-stream-row.is-text { color: var(--text); }
+.agent-subagent-card-stream-row.is-text .agent-subagent-card-stream-mark { color: var(--text-faint); }
+.agent-subagent-card-stream-row.is-tool { color: var(--text-dim); }
+.agent-subagent-card-stream-row.is-tool .agent-subagent-card-stream-mark { color: var(--text-faint); }
+.agent-subagent-card-stream-row.is-tool.is-ok .agent-subagent-card-stream-mark { color: #4ade80; }
+.agent-subagent-card-stream-row.is-tool.is-fail .agent-subagent-card-stream-mark { color: var(--red); }
+.agent-subagent-card-stream-row.is-tool.is-running .agent-subagent-card-stream-mark { color: var(--accent); }
+.agent-subagent-card-stream-row.is-plan { color: var(--text-faint); }
+.agent-subagent-card-stream-row.is-plan .agent-subagent-card-stream-mark { color: var(--text-faint); }
+
 /* ============ Agent Canvas artifact card (HTML fence collapse) ============ */
 .agent-canvas-card {
   margin: 8px 0;

@@ -35,6 +35,7 @@ import type {
   CallToolOptions,
   PluginView,
 } from "./plugin-runtime-types.js";
+import { hydrateEntryFromPlugin } from "./plugin-runtime-types.js";
 import type { AutomationRateLimiterPort } from "../ports/mcp-client.port.js";
 
 export interface PluginRuntimeManagerDeps {
@@ -117,8 +118,13 @@ export class PluginRuntimeManager {
   async startPlugin(pluginId: PluginId, options?: StartPluginOptions): Promise<PluginView> {
     const entry = await this.ensureEntry(pluginId);
     if (options) {
-      entry.launchArgs = options.args;
-      entry.launchEnv = options.env;
+      // Empty args must not override the manifest (hangs `node` with no script).
+      if (options.args !== undefined) {
+        entry.launchArgs = options.args.length > 0 ? options.args : undefined;
+      }
+      if (options.env !== undefined) {
+        entry.launchEnv = Object.keys(options.env).length > 0 ? options.env : undefined;
+      }
       if (options.workspace !== undefined) entry.workspace = options.workspace;
     }
     return entry.queue.enqueue(async () => this.lifecycle.startLocked(entry));
@@ -126,6 +132,14 @@ export class PluginRuntimeManager {
 
   async stopPlugin(pluginId: PluginId): Promise<PluginView> {
     const entry = await this.ensureEntry(pluginId);
+    // Abort a hung connect immediately so stop is not stuck behind the
+    // connect timeout on the serial queue.
+    if (entry.runtime.state === "starting") {
+      entry.startAborted = true;
+      if (entry.mcpClient) {
+        void entry.mcpClient.close().catch(() => {});
+      }
+    }
     return entry.queue.enqueue(async () => this.lifecycle.stopLocked(entry));
   }
 
@@ -229,25 +243,9 @@ export class PluginRuntimeManager {
     const key = PluginId.toString(pluginId);
     const entry = this.runtimes.get(key);
     if (entry) {
-      if (!entry.name) {
-        const plugin = await this.loadPlugin(pluginId);
-        entry.name = plugin.manifest.name;
-        entry.version = plugin.manifest.version.toString();
-        entry.icon = resolveIcon(plugin.manifest.icon, plugin.installPath);
-        entry.installPath = plugin.installPath;
-        entry.source = plugin.manifest.source;
-        entry.transport = plugin.manifest.mcp.transport;
-        if (plugin.manifest.category !== undefined) entry.category = plugin.manifest.category;
-        entry.command = plugin.manifest.mcp.command;
-        entry.args = plugin.manifest.mcp.args;
-        entry.url = plugin.manifest.mcp.url;
-        entry.env = plugin.manifest.mcp.env;
-        entry.headers = plugin.manifest.mcp.headers;
-        entry.enabled = plugin.enabled;
-        entry.autostart = plugin.manifest.mcp.autostart;
-        entry.ui = plugin.manifest.ui;
-        entry.keepAliveOnClose = plugin.manifest.mcp.keepAliveOnClose;
-        entry.automation = plugin.manifest.automation;
+      const plugin = await this.deps.pluginRepository.findById(pluginId);
+      if (plugin) {
+        hydrateEntryFromPlugin(entry, plugin, resolveIcon);
       }
       return this.lifecycle.view(entry);
     }
@@ -330,6 +328,7 @@ export class PluginRuntimeManager {
       keepAliveOnClose: false,
       runtime: PluginRuntime.createIdle(pluginId),
       startPromise: null,
+      startAborted: false,
       queue: new PluginOperationQueue(),
       process: null,
       mcpClient: null,

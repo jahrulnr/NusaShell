@@ -1,7 +1,13 @@
 export { SystemClock, NodeRuntimeOsProbe } from "./system/index.js";
 export { InMemoryPluginRepository, FilesystemPluginRegistry, FilesystemJobFs, SqliteDatabase, SqlitePluginRepository, SqliteJobStore, JsonJobStore, JsonPipelineStore } from "./persistence/index.js";
-export { NodeChildProcessAdapter } from "./process/index.js";
-export { StdioMcpClient, HttpMcpClient, SseMcpClient, McpClientFactory, AutomationRateLimiter, DEFAULT_AUTOMATION_RATE_LIMITS, type RateLimiterSettings, registerMcpAutomation, type RegisterMcpAutomationDeps } from "./mcp/index.js";
+export {
+  NodeChildProcessAdapter,
+  mergePathSegments,
+  commandDirForPath,
+  enrichSpawnEnv,
+  formatSpawnEnoentHint,
+} from "./process/index.js";
+export { StdioMcpClient, resolveStdioLaunch, HttpMcpClient, SseMcpClient, McpClientFactory, AutomationRateLimiter, DEFAULT_AUTOMATION_RATE_LIMITS, type RateLimiterSettings, registerMcpAutomation, type RegisterMcpAutomationDeps } from "./mcp/index.js";
 export { scanPluginDirectories, resolveManifestPath, resolvePluginRoot, PluginInstaller, PluginSyncService } from "./plugins/index.js";
 export { createLogger, type Logger, type LogObserver, type LogRecord } from "./logging/index.js";
 export {

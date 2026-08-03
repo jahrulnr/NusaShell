@@ -185,6 +185,12 @@ which adds a few seconds to the first Connect). To skip the download, install
 globally (`npm install -g @agentclientprotocol/codex-acp`) and set
 `NUSASHELL_CODEX_ACP_BIN=codex-acp` in the Electron process env.
 
+GUI launches (`.desktop` / Start Menu) often lack nvm/fnm on `PATH`. NusaShell
+merges the login-shell `PATH` before spawning ACP providers and prepends the
+dirname of absolute commands so shebang `npx` scripts can resolve `node`. If
+Connect still fails with `spawn npx ENOENT`, set Configure → Command to an
+absolute path or install a global binary via `NUSASHELL_CODEX_ACP_BIN`.
+
 The manifest also seeds two spawn env defaults:
 
 - `NO_BROWSER=1` — prevents the Codex CLI from opening a browser during

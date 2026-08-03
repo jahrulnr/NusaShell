@@ -53,6 +53,7 @@ export class AgentConversationController {
     this.activeSubagentRun = null;
     this.subagentStreamState = null;
     this.subagentStreamDisposer = null;
+    this.activeSubagentCardStream = null;
     this.subagentEventDisposer = null;
   }
 
@@ -185,6 +186,7 @@ export class AgentConversationController {
       const result = await this.runTurn(turnMessages, {
         traceId: this.activeTraceId,
         workspace: this.conversation?.workspace,
+        conversationId: this.conversation?.id,
         ...(resumeFrom ? { resume: true } : {}),
         onDelta: (delta) => {
           // Append in arrival order. A new text segment starts after reasoning/tools.
@@ -249,23 +251,36 @@ export class AgentConversationController {
       retryIsSafe = false;
 
       try {
-        const toolCalls = Array.isArray(result.toolCalls)
-          ? result.toolCalls.map(toConversationToolCall)
-          : undefined;
-        const steps = sanitizeAssistantSteps(result.steps);
-        const assistantMessage = {
-          role: "assistant",
-          content: result.text,
-          traceId: result.traceId,
-          model: result.model,
-          rounds: result.rounds,
-          reasoning: result.reasoning,
-          ...(toolCalls?.length ? { toolCalls } : {}),
-          ...(steps?.length ? { steps } : {}),
-        };
-        this.conversation = resumeFrom
-          ? await this.shell.agentConversations.replaceLastInterrupted(this.conversation.id, assistantMessage)
-          : await this.shell.agentConversations.append(this.conversation.id, assistantMessage);
+        // The main process seals the assistant message off the renderer
+        // critical path (via sealAgentTurn) so a renderer restart mid-turn
+        // does not orphan the reply. Refresh from the store; if the sealed
+        // message is missing (seal failed or no conversationId), fall back to
+        // renderer-side append.
+        this.conversation = await this.shell.agentConversations.get(this.conversation.id);
+        const lastMessage = this.conversation?.messages.at(-1);
+        const sealedByMain = lastMessage?.role === "assistant" && lastMessage?.traceId === result.traceId;
+        if (!sealedByMain) {
+          const toolCalls = Array.isArray(result.toolCalls)
+            ? result.toolCalls.map(toConversationToolCall)
+            : undefined;
+          const steps = sanitizeAssistantSteps(result.steps);
+          const assistantMessage = {
+            role: "assistant",
+            content: result.text,
+            traceId: result.traceId,
+            model: result.model,
+            rounds: result.rounds,
+            reasoning: result.reasoning,
+            ...(toolCalls?.length ? { toolCalls } : {}),
+            ...(steps?.length ? { steps } : {}),
+          };
+          this.conversation = resumeFrom
+            ? await this.shell.agentConversations.replaceLastInterrupted(this.conversation.id, assistantMessage)
+            : await this.shell.agentConversations.append(this.conversation.id, assistantMessage);
+        } else if (result.compaction) {
+          // Main already saved the checkpoint; just refresh into memory.
+          this.conversation = await this.shell.agentConversations.get(this.conversation.id);
+        }
       } catch (error) {
         this.sealStreamingMessage(pending, result);
         status.textContent = "Response completed · local save failed";
@@ -273,7 +288,7 @@ export class AgentConversationController {
         this.log("error", `Agent response persistence failed trace=${result.traceId}: ${error.message || String(error)}`);
         return;
       }
-      if (result.compaction) {
+      if (result.compaction && !this.conversation?.checkpoint?.summary) {
         try {
           const checkpoint = mergeCompactionCheckpoint(
             this.conversation.checkpoint,
@@ -856,9 +871,29 @@ export class AgentConversationController {
       return;
     }
     this.conversation.messages.forEach((message, index) => this.appendMessage(message.role, message.content, { ...message, canvasMessageIndex: index }));
+    this.detectOrphanedTurn();
     this.scrollToBottom();
     this.restoreCanvas();
     this.restoreSubpane();
+  }
+
+  /**
+   * Surface an incomplete turn (trailing user message with no assistant reply)
+   * as a retryable error banner. This happens when the renderer died mid-turn
+   * before the main-side seal shipped; the user message is on disk but the
+   * assistant reply was lost.
+   */
+  detectOrphanedTurn() {
+    if (!this.conversation?.messages?.length) return;
+    const last = this.conversation.messages.at(-1);
+    if (last?.role !== "user") return;
+    if (this.turnPending) return;
+    this.failedMessage?.remove();
+    this.failedMessage = this.appendMessage(
+      "assistant",
+      "Incomplete turn — the previous reply was lost when the app restarted. Retry to continue.",
+      { error: true, retry: true },
+    );
   }
 
   appendMessage(role, content, meta = {}) {
@@ -985,6 +1020,7 @@ export class AgentConversationController {
     this.activeSubagentRun = null;
     this.subagentStreamState = null;
     this.subagentStreamDisposer = null;
+    this.activeSubagentCardStream = null;
     this.subagentEventDisposer = subscribeSubagentEvents({
       onRunStarted: (p) => this.handleSubagentRunStarted(p),
       onRunEnded: (p) => this.handleSubagentRunEnded(p),
@@ -1016,6 +1052,8 @@ export class AgentConversationController {
 
     this.mountSubpane(run, { resumeStream: false, open: false });
 
+    this.attachSubagentCardStream(p.runId);
+
     this.subagentStreamDisposer?.();
     this.subagentStreamDisposer = this.bindLiveSubagentStream(p.runId);
   }
@@ -1038,6 +1076,10 @@ export class AgentConversationController {
     this.renderSubagentStreamState();
     this.subagentStreamState = null;
 
+    // Stop appending to the in-chat mini stream; the frozen tail stays
+    // visible until the parent turn's tool card is replaced on tool_call_end.
+    this.disposeSubagentCardStream();
+
     if (this.conversation) {
       this.shell.agentConversations.updateSubagentRunStatus(
         this.conversation.id,
@@ -1056,22 +1098,35 @@ export class AgentConversationController {
 
   bindLiveSubagentStream(runId) {
     return subscribeSubagentStream(runId, {
-      onDelta: (delta) => this.appendSubpaneText(delta),
-      onReasoningDelta: (delta) => this.appendSubpaneThought(delta),
+      onDelta: (delta) => {
+        this.appendSubpaneText(delta);
+        this.appendCardStreamText(delta);
+      },
+      onReasoningDelta: (delta) => {
+        this.appendSubpaneThought(delta);
+        this.appendCardStreamThought(delta);
+      },
       onToolCallStart: (params) => {
-        this.appendSubpaneToolCall({
+        const call = {
           id: params.callId,
           title: params.name,
           kind: params.kind || "unknown",
           status: params.status === "ok" ? "ok" : params.status === "fail" ? "fail" : "running",
           args: params.args,
           summary: summarizeToolArgs(params.args),
-        }, { persist: true });
+        };
+        this.appendSubpaneToolCall(call, { persist: true });
+        this.appendCardStreamToolCall(call);
       },
       onToolCallEnd: (params) => {
-        this.updateSubpaneToolCall(params.callId, params.ok ? "ok" : "fail", params.summary);
+        const status = params.ok ? "ok" : "fail";
+        this.updateSubpaneToolCall(params.callId, status, params.summary);
+        this.updateCardStreamToolCall(params.callId, status, params.summary);
       },
-      onPlan: (steps) => this.appendSubpanePlan(steps, { persist: true }),
+      onPlan: (steps) => {
+        this.appendSubpanePlan(steps, { persist: true });
+        this.appendCardStreamPlan(steps);
+      },
       onPermissionRequest: (payload) => {
         const card = this.createAcpPermissionCard(payload);
         const body = $("#agent-subpane-body");
@@ -1706,8 +1761,160 @@ export class AgentConversationController {
     if (cls) status.classList.add(cls);
   }
 
+  // ---- In-chat subagent card mini activity stream ----
+  // Mirrors the full subpane log into a compact, scrollable viewport inside
+  // the running subagent card. One event fan-out, two views (subpane + card).
+
+  attachSubagentCardStream(runId) {
+    const card = document.querySelector(`.agent-subagent-card[data-streaming-subagent="1"]`)
+      || document.querySelector(`.agent-subagent-card[data-run-id="${CSS.escape(runId)}"]`);
+    if (!card) return null;
+    card.dataset.runId = runId;
+    let stream = card.querySelector(".agent-subagent-card-stream");
+    if (!stream) {
+      stream = element("div", "agent-subagent-card-stream");
+      stream.setAttribute("aria-label", "Subagent live activity");
+      stream.addEventListener("click", (event) => event.stopPropagation());
+      stream.addEventListener("scroll", () => {
+        const state = this.activeSubagentCardStream;
+        if (!state || state.el !== stream) return;
+        state.pinned = stream.scrollTop + stream.clientHeight >= stream.scrollHeight - 4;
+      });
+      card.append(stream);
+    }
+    const state = {
+      runId,
+      card,
+      el: stream,
+      lastKind: null,
+      textContent: "",
+      thoughtContent: "",
+      textRow: null,
+      thoughtRow: null,
+      toolRows: new Map(),
+      pinned: true,
+    };
+    this.activeSubagentCardStream = state;
+    return state;
+  }
+
+  stickCardStreamToBottom(state) {
+    if (!state?.el || !state.pinned) return;
+    state.el.scrollTop = state.el.scrollHeight;
+  }
+
+  appendCardStreamRow(state, kind, mark, text, { key = null } = {}) {
+    if (!state?.el) return null;
+    const row = element("div", `agent-subagent-card-stream-row is-${kind}`);
+    row.append(
+      element("span", "agent-subagent-card-stream-mark", mark),
+      element("span", "agent-subagent-card-stream-text", text),
+    );
+    state.el.appendChild(row);
+    if (key) state.toolRows.set(key, row);
+    this.pruneCardStreamRows(state);
+    this.stickCardStreamToBottom(state);
+    return row;
+  }
+
+  pruneCardStreamRows(state) {
+    if (!state?.el) return;
+    const max = 50;
+    const rows = state.el.querySelectorAll(".agent-subagent-card-stream-row");
+    if (rows.length <= max) return;
+    const drop = rows.length - max;
+    for (let i = 0; i < drop; i += 1) rows[i].remove();
+  }
+
+  sealCardStreamSegment(state) {
+    if (!state) return;
+    state.lastKind = null;
+    state.textContent = "";
+    state.thoughtContent = "";
+    state.textRow = null;
+    state.thoughtRow = null;
+  }
+
+  appendCardStreamThought(delta) {
+    const state = this.activeSubagentCardStream;
+    if (!state) return;
+    if (state.lastKind !== "reasoning") {
+      this.sealCardStreamSegment(state);
+      state.lastKind = "reasoning";
+      state.thoughtContent = "";
+      state.thoughtRow = this.appendCardStreamRow(state, "thinking", "⌁", "Thinking…");
+    }
+    state.thoughtContent += delta;
+    if (state.thoughtRow) {
+      const text = state.thoughtRow.querySelector(".agent-subagent-card-stream-text");
+      if (text) text.textContent = truncateCardStreamLine(state.thoughtContent, 120);
+    }
+    this.stickCardStreamToBottom(state);
+  }
+
+  appendCardStreamText(delta) {
+    const state = this.activeSubagentCardStream;
+    if (!state) return;
+    if (state.lastKind !== "text") {
+      this.sealCardStreamSegment(state);
+      state.lastKind = "text";
+      state.textContent = "";
+      state.textRow = this.appendCardStreamRow(state, "text", "·", "");
+    }
+    state.textContent += delta;
+    if (state.textRow) {
+      const text = state.textRow.querySelector(".agent-subagent-card-stream-text");
+      if (text) text.textContent = truncateCardStreamLine(state.textContent, 160);
+    }
+    this.stickCardStreamToBottom(state);
+  }
+
+  appendCardStreamToolCall(call) {
+    const state = this.activeSubagentCardStream;
+    if (!state) return;
+    this.sealCardStreamSegment(state);
+    const meta = summarizeToolArgs(call.args) || (call.status === "fail" ? "failed" : "running");
+    const mark = call.status === "fail" ? "✕" : call.status === "ok" ? "✓" : "›";
+    const label = `${call.title || "tool"} ${meta}`.trim();
+    this.appendCardStreamRow(state, "tool", mark, label, { key: call.id });
+  }
+
+  updateCardStreamToolCall(callId, status, summary) {
+    const state = this.activeSubagentCardStream;
+    if (!state) return;
+    const row = state.toolRows.get(callId);
+    if (!row) return;
+    row.classList.remove("is-running", "is-ok", "is-fail");
+    row.classList.add(status === "ok" ? "is-ok" : status === "fail" ? "is-fail" : "is-running");
+    const mark = row.querySelector(".agent-subagent-card-stream-mark");
+    if (mark) mark.textContent = status === "fail" ? "✕" : status === "ok" ? "✓" : "›";
+    if (summary) {
+      const text = row.querySelector(".agent-subagent-card-stream-text");
+      if (text) {
+        const base = text.dataset.label || text.textContent?.split(" — ")[0] || text.textContent || "";
+        if (!text.dataset.label) text.dataset.label = base;
+        text.textContent = `${base} — ${truncateCardStreamLine(String(summary), 80)}`;
+      }
+    }
+    this.stickCardStreamToBottom(state);
+  }
+
+  appendCardStreamPlan(steps) {
+    const state = this.activeSubagentCardStream;
+    if (!state) return;
+    this.sealCardStreamSegment(state);
+    const done = (steps ?? []).filter((s) => s.done).length;
+    const total = (steps ?? []).length;
+    this.appendCardStreamRow(state, "plan", "📋", `Plan ${done}/${total}`);
+  }
+
+  disposeSubagentCardStream() {
+    this.activeSubagentCardStream = null;
+  }
+
   renderSubagentCard(run) {
     const card = element("div", "agent-subagent-card");
+    card.dataset.runId = run.runId || "";
     const head = element("div", "agent-subagent-card-head");
     head.addEventListener("click", () => {
       const latest = this.conversation?.subagentRuns?.find((item) => item.runId === run.runId) ?? run;
@@ -1731,6 +1938,17 @@ export class AgentConversationController {
     const statusEl = element("span", `agent-subagent-card-status ${run.status === "running" ? "is-running" : run.status === "ok" ? "is-ok" : run.status === "fail" || run.status === "cancelled" ? "is-fail" : ""}`, `● ${run.status.toUpperCase()}`);
     head.append(meta, statusEl);
     card.appendChild(head);
+    if (run.status === "running") {
+      const stream = element("div", "agent-subagent-card-stream");
+      stream.setAttribute("aria-label", "Subagent live activity");
+      stream.addEventListener("click", (event) => event.stopPropagation());
+      stream.addEventListener("scroll", () => {
+        const state = this.activeSubagentCardStream;
+        if (!state || state.el !== stream) return;
+        state.pinned = stream.scrollTop + stream.clientHeight >= stream.scrollHeight - 4;
+      });
+      card.append(stream);
+    }
     if (run.summary) {
       const summaryEl = element("div", "agent-subagent-card-summary");
       summaryEl.innerHTML = renderAssistantMarkdown(run.summary);
@@ -2632,6 +2850,11 @@ function element(tagName, className, content) {
   if (className) node.className = className;
   if (content !== undefined) node.textContent = content;
   return node;
+}
+
+function truncateCardStreamLine(text, max = 120) {
+  const flat = String(text ?? "").replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 }
 
 function parseAskAnswer(output) {

@@ -75,6 +75,15 @@ describe("PluginLifecyclePolicy", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("allows stop from starting (cancel hung connect)", () => {
+    const plugin = createPlugin(true);
+    const idResult = PluginId.create("nusashell.notes");
+    if (!idResult.ok) throw new Error("id setup failed");
+    const runtime = PluginRuntime.create(idResult.value, "starting");
+    const result = PluginLifecyclePolicy.canStop(plugin, runtime);
+    expect(result.ok).toBe(true);
+  });
+
   it("allows callTool only when running", () => {
     const plugin = createPlugin(true);
     const idResult = PluginId.create("nusashell.notes");

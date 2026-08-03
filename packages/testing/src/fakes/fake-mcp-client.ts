@@ -21,6 +21,9 @@ export class FakeMcpClient implements McpClientPort {
   private closeCallback: (() => void) | null = null;
   /** True once onClose() registered a close watcher (test instrumentation). */
   onCloseRegistered = false;
+  /** Artificial connect delay (ms); close() aborts an in-flight connect. */
+  connectDelayMs = 0;
+  private connectAbort: ((error: Error) => void) | null = null;
   readonly callLog: Array<{
     name: string;
     args: Readonly<Record<string, unknown>>;
@@ -67,11 +70,30 @@ export class FakeMcpClient implements McpClientPort {
   }
 
   async connect(): Promise<void> {
+    if (this.connectDelayMs > 0) {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          this.connectAbort = null;
+          this.connected = true;
+          resolve();
+        }, this.connectDelayMs);
+        this.connectAbort = (error) => {
+          clearTimeout(timer);
+          this.connectAbort = null;
+          reject(error);
+        };
+      });
+      return;
+    }
     this.connected = true;
   }
 
   async close(): Promise<void> {
+    if (this.connectAbort) {
+      this.connectAbort(new Error("MCP connect aborted"));
+    }
     this.connected = false;
+    this.closeCallback = null;
   }
 
   isConnected(): boolean {
@@ -155,6 +177,8 @@ export class FakeMcpClient implements McpClientPort {
 
 export class FakeMcpClientFactory implements McpClientFactoryPort {
   readonly created: FakeMcpClient[] = [];
+  /** Applied to the next FakeMcpClient created via createForStdio/Http/Sse. */
+  nextConnectDelayMs = 0;
   readonly stdioCalls: Array<{
     readonly command: string;
     readonly args: readonly string[];
@@ -175,6 +199,10 @@ export class FakeMcpClientFactory implements McpClientFactoryPort {
       ...(cwd !== undefined ? { cwd } : {}),
     });
     const client = new FakeMcpClient();
+    if (this.nextConnectDelayMs > 0) {
+      client.connectDelayMs = this.nextConnectDelayMs;
+      this.nextConnectDelayMs = 0;
+    }
     this.created.push(client);
     return client;
   }

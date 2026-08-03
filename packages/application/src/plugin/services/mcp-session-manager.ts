@@ -15,6 +15,26 @@ import type { PluginRuntimeManagerDeps } from "./plugin-runtime-manager.js";
 import type { RuntimeEntry, WorkspaceSyncResult } from "./plugin-runtime-types.js";
 
 /**
+ * `node` / `node.exe` with no script path reads stdin as JS — MCP initialize
+ * JSON then throws SyntaxError and the start hangs until connect timeout.
+ */
+export function assertNodeStdioHasScript(
+  command: string,
+  args: readonly string[],
+  pluginId: PluginId,
+): void {
+  const base = command.split(/[/\\]/).pop()?.toLowerCase() ?? command.toLowerCase();
+  if (base !== "node" && base !== "node.exe") return;
+  if (args.some((arg) => typeof arg === "string" && arg.length > 0 && !arg.startsWith("-"))) {
+    return;
+  }
+  throw new ApplicationError(
+    "PLUGIN_START_FAILED",
+    `Plugin ${PluginId.toString(pluginId)} stdio command "${command}" requires a script path in args (empty args hang the MCP handshake)`,
+    { pluginId: PluginId.toString(pluginId), command },
+  );
+}
+/**
  * Manages MCP client sessions: creates stdio/http/sse connections, provides
  * access to running clients, syncs workspace roots, and proxies MCP
  * discovery calls (tools/prompts/resources/completion).
@@ -55,6 +75,7 @@ export class McpSessionManager {
         ...(entry.launchEnv ?? {}),
       };
       const args = entry.launchArgs ?? manifest.mcp.args;
+      assertNodeStdioHasScript(command, args, entry.pluginId);
       const mcpClient = this.deps.mcpClientFactory.createForStdio(
         command,
         args,
@@ -62,10 +83,11 @@ export class McpSessionManager {
         plugin.installPath,
         automation,
       );
+      // Attach before connect so stop can abort a hung handshake.
+      entry.mcpClient = mcpClient;
       this.deps.logger?.debug(`Starting MCP stdio process: command=${command} args=${JSON.stringify(args)} cwd=${plugin.installPath} workspace=${entry.workspace ?? "(none)"}`);
       await mcpClient.connect();
       this.deps.logger?.info(`MCP client connected (stdio) for plugin ${PluginId.toString(entry.pluginId)}`);
-      entry.mcpClient = mcpClient;
       entry.runningArgs = args;
       entry.runningEnv = environment;
       if (entry.workspace) {
@@ -84,8 +106,8 @@ export class McpSessionManager {
         );
       }
       const mcpClient = this.deps.mcpClientFactory.createForHttp(url, manifest.mcp.headers, automation);
-      await mcpClient.connect();
       entry.mcpClient = mcpClient;
+      await mcpClient.connect();
     } else if (manifest.mcp.transport === "sse") {
       const url = manifest.mcp.url;
       if (!url) {
@@ -95,8 +117,8 @@ export class McpSessionManager {
         );
       }
       const mcpClient = this.deps.mcpClientFactory.createForSse(url, manifest.mcp.headers, automation);
-      await mcpClient.connect();
       entry.mcpClient = mcpClient;
+      await mcpClient.connect();
     }
   }
 

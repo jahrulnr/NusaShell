@@ -117,6 +117,34 @@ describe("agent conversation UI helpers", () => {
     expect(JSON.stringify(hugeArgs.args).length).toBeLessThanOrEqual(8_000);
   });
 
+  it("defaults missing args to {} in toConversationToolCall", () => {
+    const call = toConversationToolCall({ id: "c1", name: "mcp_list", ok: true, output: "[]" });
+    expect(call.args).toEqual({});
+    expect(call.id).toBe("c1");
+    expect(call.name).toBe("mcp_list");
+  });
+
+  it("defaults missing args to {} in toProviderToolCall via buildAgentContext", () => {
+    const messages = [
+      { role: "user" as const, content: "List plugins" },
+      {
+        role: "assistant" as const,
+        content: "",
+        toolCalls: [{ id: "call-1", name: "mcp_list", ok: true, output: "[]" }],
+      },
+      { role: "tool" as const, toolCallId: "call-1", name: "mcp_list", content: "[]" },
+      { role: "user" as const, content: "Continue" },
+    ];
+    const context = buildAgentContext({ messages });
+    const assistant = context.find(
+      (m) => m.role === "assistant" && "toolCalls" in m && Array.isArray(m.toolCalls) && m.toolCalls.length > 0,
+    );
+    expect(assistant).toBeDefined();
+    if (assistant && "toolCalls" in assistant && assistant.toolCalls) {
+      expect(assistant.toolCalls[0].args).toEqual({});
+    }
+  });
+
   it("formats persisted message timestamps as compact local metadata", () => {
     expect(formatMessageTimestamp("2026-07-29T10:05:00.000Z", "en-US", "UTC")).toBe("Jul 29, 10:05 AM");
     expect(formatMessageTimestamp("not-a-date", "en-US", "UTC")).toBe("");

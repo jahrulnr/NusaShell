@@ -28,6 +28,7 @@ import {
   type JobSchedulerSettings,
   type AiConfigurationPort,
   type AcpProviderResolverPort,
+  type AgentTurnResult,
 } from "@nusashell/application";
 import {
   MessageRouter,
@@ -102,6 +103,12 @@ export interface ContainerOptions {
   readonly jobs?: Partial<JobSchedulerSettings>;
   /** Desktop-side ACP provider resolver (for subagent routing). */
   readonly acpProviderResolver?: AcpProviderResolverPort;
+  /**
+   * Durable seal callback invoked when an agent turn completes. The desktop
+   * main process writes the assistant message to the conversation store so a
+   * renderer restart mid-turn does not orphan the reply.
+   */
+  readonly sealAgentTurn?: (conversationId: string, result: AgentTurnResult, options: { resume: boolean }) => Promise<void>;
 }
 
 export interface Container {

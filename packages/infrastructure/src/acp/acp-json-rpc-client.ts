@@ -13,6 +13,7 @@ import type {
   AcpToolKind,
   AcpToolStatus,
 } from "@nusashell/application";
+import { enrichSpawnEnv, formatSpawnEnoentHint } from "../process/spawn-env.js";
 import { resolveAcpExtension, parsePlanSteps } from "./extensions/index.js";
 
 interface JsonRpcRequestMessage {
@@ -118,7 +119,8 @@ export class AcpJsonRpcClient implements AcpClientPort {
 
     const extension = resolveAcpExtension(provider.providerId);
     const baseEnv = { ...(process.env as NodeJS.ProcessEnv), ...(provider.env ?? {}) };
-    const spawnEnv = extension?.enrichSpawnEnv ? extension.enrichSpawnEnv(baseEnv) : baseEnv;
+    const providerEnv = extension?.enrichSpawnEnv ? extension.enrichSpawnEnv(baseEnv) : baseEnv;
+    const spawnEnv = enrichSpawnEnv(provider.command, providerEnv);
 
     const child = this.spawnFn(provider.command, [...provider.args], {
       env: spawnEnv,
@@ -143,7 +145,7 @@ export class AcpJsonRpcClient implements AcpClientPort {
     this.sessions.set(conversationId, session);
 
     child.on("error", (err) => {
-      this.failSession(session, err);
+      this.failSession(session, this.enrichSpawnError(provider.command, err));
     });
 
     child.on("exit", (code) => {
@@ -187,9 +189,13 @@ export class AcpJsonRpcClient implements AcpClientPort {
       return sessionResult.sessionId;
     } catch (error) {
       this.cleanup(session);
+      const enriched = this.enrichSpawnError(
+        provider.command,
+        error instanceof Error ? error : new Error(String(error)),
+      );
       throw new ApplicationError(
         "AGENT_PROVIDER_FAILED",
-        `Failed to start ACP session: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to start ACP session: ${enriched.message}`,
         { providerId: provider.providerId, conversationId },
       );
     }
@@ -459,6 +465,16 @@ export class AcpJsonRpcClient implements AcpClientPort {
       });
     }
     this.cleanup(session);
+  }
+
+  private enrichSpawnError(command: string, error: Error): Error {
+    const code = "code" in error ? String((error as { code?: unknown }).code) : "";
+    if (code !== "ENOENT" && !/spawn .* ENOENT/i.test(error.message)) {
+      return error;
+    }
+    const hint = formatSpawnEnoentHint(command);
+    if (error.message.includes(hint)) return error;
+    return Object.assign(error, { message: `${error.message}\n${hint}` });
   }
 
   private cleanup(session: Session): void {

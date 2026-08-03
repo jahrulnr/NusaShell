@@ -202,7 +202,7 @@ export function toConversationToolCall(call) {
     name: call.name,
     ok: call.ok !== false,
     ...(call.error ? { error: clampToolText(call.error, 4_000) } : {}),
-    ...(safeArgs ? { args: safeArgs } : {}),
+    args: safeArgs ?? {},
     ...(output ? { output } : {}),
   };
 }
@@ -339,7 +339,7 @@ function toProviderToolCall(call) {
       args = undefined;
     }
   }
-  return { id, name, ...(args ? { args } : {}) };
+  return { id, name, args: args ?? {} };
 }
 
 /**

@@ -41,6 +41,18 @@ protected.
 
 The agent can control lifecycle through the `mcp_enable`, `mcp_disable`, and `mcp_list` shell-owned tools. Launcher controls also exist for users.
 
+Stop is allowed while a plugin is still `starting` (cancels a hung MCP connect)
+and clears `crashed` back to idle. Native MCP Edit reloads command/args/env from
+disk on each `plugin.get` so saved changes appear without restarting the app.
+`mcp_enable` ignores empty `args`/`env` overrides so they cannot wipe the
+manifest script path (that used to hang `node` on the MCP handshake).
+
+### stdio commands and PATH
+
+GUI-launched NusaShell may not see nvm/fnm. Prefer absolute commands, or set
+`mcp.env.PATH` to include the Node bin directory. Absolute `npx` still needs
+`node` on PATH for its shebang; the shell prepends `dirname(command)` at spawn.
+
 ## Autostart
 
 Set `autostart: true` in `manifest.json` to start the MCP server when the shell boots. The UI is only loaded when the user opens the plugin window (windowed plugins only).

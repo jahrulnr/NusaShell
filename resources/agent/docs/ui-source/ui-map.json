@@ -217,6 +217,31 @@
           ]
         },
         {
+          "heading": "Subagent activity",
+          "paragraphs": [
+            "When the parent agent delegates work through the subagent tool, an in-chat Subagent run card appears in the message thread. While the subagent run is active, the card shows a compact mini activity stream (roughly ten monospace rows) that mirrors the full Subagent side pane: live reasoning, text snippets, tool calls with success/failure marks, and plan progress. The mini stream auto-scrolls to the bottom while the user is pinned to the tail; scrolling up pauses stickiness until the user returns to the bottom. Clicking the card head opens the full Subagent side pane, which preserves the complete live log with markdown rendering, expandable tool terminals, plan steps, and permission/ask cards. Clicks inside the mini stream do not toggle the drawer. When the run ends, the mini stream freezes in place until the parent turn seals the tool card; the side pane keeps the full frozen history for review."
+          ],
+          "controls": [
+            "agent-subpane",
+            "agent-subpane-overlay",
+            "agent-subpane-head",
+            "agent-subpane-badge",
+            "agent-subpane-title",
+            "agent-subpane-status",
+            "agent-subpane-close",
+            "agent-subpane-body",
+            "agent-subagent-card",
+            "agent-subagent-card-head",
+            "agent-subagent-card-badge",
+            "agent-subagent-card-title",
+            "agent-subagent-card-status",
+            "agent-subagent-card-stream",
+            "agent-subagent-card-stream-row",
+            "agent-subagent-card-summary",
+            "agent-subagent-card-error"
+          ]
+        },
+        {
           "heading": "Composer",
           "paragraphs": [
             "A raised command dock at the bottom of the thread. Its message input starts at one row, grows with wrapped or explicit lines, and caps at ten rows before scrolling internally. Attach images, PDFs, or text files, choose a model, and send the turn without losing the conversation rail."
@@ -3202,6 +3227,142 @@
       "label": "Agent Canvas",
       "type": "toggle",
       "action": "Enables or disables inline HTML/SVG/Mermaid rendering and the canvas sidebar. When off, canvas fences stay as source code blocks."
+    },
+    "agent-subpane": {
+      "section": "Agent",
+      "label": "Subagent side pane",
+      "type": "drawer",
+      "selector": "#agent-subpane",
+      "generated": true,
+      "action": "Full-height drawer that renders the complete live subagent stream with markdown, tool terminals, plans, and permission/ask cards."
+    },
+    "agent-subpane-overlay": {
+      "section": "Agent",
+      "label": "Subagent pane overlay",
+      "type": "overlay",
+      "selector": "#agent-subpane-overlay",
+      "generated": true,
+      "action": "Dimmed backdrop behind the Subagent side pane."
+    },
+    "agent-subpane-head": {
+      "section": "Agent",
+      "label": "Subagent pane header",
+      "type": "header",
+      "selector": ".agent-subpane-head",
+      "generated": true,
+      "action": "Shows the provider badge, run title, live status chip, and close button."
+    },
+    "agent-subpane-badge": {
+      "section": "Agent",
+      "label": "Subagent pane badge",
+      "type": "badge",
+      "selector": "#agent-subpane-badge",
+      "generated": true,
+      "action": "Short uppercase provider id for the active subagent run."
+    },
+    "agent-subpane-title": {
+      "section": "Agent",
+      "label": "Subagent pane title",
+      "type": "text",
+      "selector": "#agent-subpane-title",
+      "generated": true,
+      "action": "Title of the active subagent run."
+    },
+    "agent-subpane-status": {
+      "section": "Agent",
+      "label": "Subagent pane status",
+      "type": "status",
+      "selector": "#agent-subpane-status",
+      "generated": true,
+      "action": "Live status chip (RUNNING/OK/FAIL) for the active subagent run."
+    },
+    "agent-subpane-close": {
+      "section": "Agent",
+      "label": "Subagent pane close",
+      "type": "button",
+      "selector": "#agent-subpane-close",
+      "generated": true,
+      "action": "Closes the Subagent side pane drawer."
+    },
+    "agent-subpane-body": {
+      "section": "Agent",
+      "label": "Subagent pane body",
+      "type": "scroll container",
+      "selector": "#agent-subpane-body",
+      "generated": true,
+      "action": "Scrollable log that renders the full subagent stream: reasoning disclosures, text bubbles, tool terminals, plan steps, and error blocks."
+    },
+    "agent-subagent-card": {
+      "section": "Agent",
+      "label": "Subagent run card",
+      "type": "card",
+      "selector": ".agent-subagent-card",
+      "generated": true,
+      "action": "In-chat card representing a subagent run. The head opens the full Subagent side pane; while running, a mini activity stream is shown below the head."
+    },
+    "agent-subagent-card-head": {
+      "section": "Agent",
+      "label": "Subagent card head",
+      "type": "button",
+      "selector": ".agent-subagent-card-head",
+      "generated": true,
+      "action": "Clickable header that opens the full Subagent side pane for the run."
+    },
+    "agent-subagent-card-badge": {
+      "section": "Agent",
+      "label": "Subagent card badge",
+      "type": "badge",
+      "selector": ".agent-subagent-card-badge",
+      "generated": true,
+      "action": "Short uppercase provider id on the in-chat subagent card."
+    },
+    "agent-subagent-card-title": {
+      "section": "Agent",
+      "label": "Subagent card title",
+      "type": "text",
+      "selector": ".agent-subagent-card-title",
+      "generated": true,
+      "action": "Title of the subagent run shown on the in-chat card."
+    },
+    "agent-subagent-card-status": {
+      "section": "Agent",
+      "label": "Subagent card status",
+      "type": "status",
+      "selector": ".agent-subagent-card-status",
+      "generated": true,
+      "action": "Live status chip on the in-chat subagent card (RUNNING/OK/FAIL)."
+    },
+    "agent-subagent-card-stream": {
+      "section": "Agent",
+      "label": "Subagent mini activity stream",
+      "type": "scroll container",
+      "selector": ".agent-subagent-card-stream",
+      "generated": true,
+      "action": "Compact scrollable mini log inside the running subagent card. Mirrors the full side pane as one-line rows (Thinking, text, tool calls, plan). Auto-scrolls while pinned to the bottom; scrolling up pauses stickiness."
+    },
+    "agent-subagent-card-stream-row": {
+      "section": "Agent",
+      "label": "Subagent mini stream row",
+      "type": "row",
+      "selector": ".agent-subagent-card-stream-row",
+      "generated": true,
+      "action": "Single compact activity row in the mini stream (reasoning, text, tool, or plan)."
+    },
+    "agent-subagent-card-summary": {
+      "section": "Agent",
+      "label": "Subagent card summary",
+      "type": "text",
+      "selector": ".agent-subagent-card-summary",
+      "generated": true,
+      "action": "Markdown summary shown on the sealed subagent card after the run ends."
+    },
+    "agent-subagent-card-error": {
+      "section": "Agent",
+      "label": "Subagent card error",
+      "type": "text",
+      "selector": ".agent-subagent-card-error",
+      "generated": true,
+      "action": "Error message shown on the subagent card when the run fails."
     }
   }
 }

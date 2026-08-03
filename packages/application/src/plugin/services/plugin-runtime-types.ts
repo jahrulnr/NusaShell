@@ -43,6 +43,8 @@ export interface RuntimeEntry {
   keepAliveOnClose: boolean;
   runtime: import("@nusashell/domain").PluginRuntime;
   startPromise: Promise<void> | null;
+  /** Set when stop interrupts an in-flight start so doStart skips crash. */
+  startAborted: boolean;
   readonly queue: PluginOperationQueue;
   process: ProcessHandle | null;
   mcpClient: McpClientPort | null;
@@ -123,6 +125,38 @@ export interface PluginView {
   readonly env?: Readonly<Record<string, string>>;
   readonly headers?: Readonly<Record<string, string>>;
   readonly automation?: RuntimeEntry["automation"];
+}
+
+/**
+ * Refresh RuntimeEntry manifest/display fields from the repository plugin.
+ * Runtime state, process, and mcpClient stay the live SoT.
+ */
+export function hydrateEntryFromPlugin(
+  entry: RuntimeEntry,
+  plugin: import("@nusashell/domain").Plugin,
+  resolveIcon: (icon: string, installPath: string) => string,
+): void {
+  entry.name = plugin.manifest.name;
+  entry.version = plugin.manifest.version.toString();
+  entry.icon = resolveIcon(plugin.manifest.icon, plugin.installPath);
+  entry.installPath = plugin.installPath;
+  entry.source = plugin.manifest.source;
+  entry.transport = plugin.manifest.mcp.transport;
+  if (plugin.manifest.category !== undefined) {
+    entry.category = plugin.manifest.category;
+  } else {
+    delete entry.category;
+  }
+  entry.command = plugin.manifest.mcp.command;
+  entry.args = plugin.manifest.mcp.args;
+  entry.url = plugin.manifest.mcp.url;
+  entry.env = plugin.manifest.mcp.env;
+  entry.headers = plugin.manifest.mcp.headers;
+  entry.enabled = plugin.enabled;
+  entry.autostart = plugin.manifest.mcp.autostart;
+  entry.ui = plugin.manifest.ui;
+  entry.keepAliveOnClose = plugin.manifest.mcp.keepAliveOnClose;
+  entry.automation = plugin.manifest.automation;
 }
 
 export function arrayEquals(a: readonly string[], b: readonly string[]): boolean {

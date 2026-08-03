@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-08-04
+
+### Fixed
+
+- **Agent transcript `args` validation.** Continuing a conversation after a
+  no-argument tool call (e.g. `mcp_list`) no longer fails with
+  `payload.messages.1: Invalid input`. Tool calls now always emit `args: {}`
+  (previously omitted when empty), and the `AgentMessageSchema` defaults
+  missing `args` to `{}` so older persisted transcripts still validate.
+- **Durable assistant turn persistence.** The assistant reply is now sealed
+  to the conversation store by the main process when the turn completes, off
+  the renderer critical path. A Vite HMR reload or Electron restart mid-turn
+  no longer orphans the reply — the message survives because main writes it
+  via a new `sealAgentTurn` callback wired through `BootstrapOptions` →
+  `ContainerOptions` → `RunAgentTurnHandler.onTurnComplete`. The renderer
+  refreshes from the store and only falls back to renderer-side append if the
+  seal is absent.
+  - **New `agent.run` payload field.** `conversationId` (optional) ties the
+    turn to a durable conversation so the main process can seal the reply.
+  - **Orphan detection.** On conversation load, a trailing user message with
+    no following assistant reply surfaces a retryable "Incomplete turn"
+    banner instead of a silent hole.
+
+### Added
+
+- **Shared assistant message builder**
+  (`apps/desktop/src/shared/agent-message-builder.ts`). Constructs the durable
+  `AgentConversationMessage` from an `AgentTurnResult` or partial, with the
+  same clamping logic as the renderer, so main and renderer stay in sync.
+
 ## [0.3.1] - 2026-08-03
 
 ### Added

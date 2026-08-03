@@ -337,11 +337,22 @@ export class McpAgentToolGateway implements AgentToolGateway {
     if (start) {
       const workspace = this.turnWorkspace.get(turnId);
       const overrides: { args?: readonly string[]; env?: Readonly<Record<string, string>>; workspace?: string } = {};
-      if (Array.isArray(args.args) && args.args.every((v) => typeof v === "string")) overrides.args = args.args as string[];
+      // Ignore empty args arrays — they would wipe the manifest script path and
+      // hang `node` on stdin eval of the MCP handshake (Bug C).
+      if (
+        Array.isArray(args.args)
+        && args.args.length > 0
+        && args.args.every((v) => typeof v === "string")
+      ) {
+        overrides.args = args.args as string[];
+      }
       if (args.env && typeof args.env === "object" && !Array.isArray(args.env)) {
-        overrides.env = Object.fromEntries(
-          Object.entries(args.env as Record<string, unknown>).filter(([, v]) => typeof v === "string"),
-        ) as Record<string, string>;
+        const envEntries = Object.entries(args.env as Record<string, unknown>).filter(
+          ([, v]) => typeof v === "string",
+        ) as Array<[string, string]>;
+        if (envEntries.length > 0) {
+          overrides.env = Object.fromEntries(envEntries);
+        }
       }
       if (workspace) overrides.workspace = workspace;
       const view = await this.runtimeManager.startPlugin(pluginId, Object.keys(overrides).length > 0 ? overrides : undefined);

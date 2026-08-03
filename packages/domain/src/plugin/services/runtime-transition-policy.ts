@@ -8,7 +8,7 @@ const ALLOWED_TRANSITIONS: Readonly<
   Record<PluginRuntimeState, readonly PluginRuntimeState[]>
 > = {
   idle: ["starting", "disabled"],
-  starting: ["running", "crashed"],
+  starting: ["running", "stopping", "crashed"],
   running: ["stopping", "background", "crashed"],
   background: ["running", "stopping", "crashed"],
   stopping: ["idle", "crashed"],
