@@ -43,6 +43,7 @@ export interface ShellApi {
   };
   readonly shellControls: {
     openDocs(): Promise<void>;
+    openExternal(url: string): Promise<void>;
     pickPluginSource(kind: "directory" | "archive"): Promise<string | null>;
   };
   readonly pluginIcons: {
@@ -184,6 +185,9 @@ const api: ShellApi = {
   shellControls: {
     openDocs() {
       return ipcRenderer.invoke("shell:open-docs");
+    },
+    openExternal(url) {
+      return ipcRenderer.invoke("shell:open-external", url);
     },
     pickPluginSource(kind) {
       return ipcRenderer.invoke("shell:pick-plugin-source", kind);

@@ -12,6 +12,18 @@ export function registerShellIpc(ctx: IpcContext): void {
     await shell.openExternal(DOCS_URL);
   });
 
+  ipcMain.handle("shell:open-external", async (_event, url: string) => {
+    if (typeof url !== "string" || url.length === 0) return;
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return;
+    }
+    if (!["http:", "https:", "mailto:"].includes(parsed.protocol)) return;
+    await shell.openExternal(parsed.toString());
+  });
+
   ipcMain.handle("plugin-icons:read", (event, source: string, installPath: string) => {
     if (event.sender !== getLauncherWindow()?.webContents) {
       throw new Error("Plugin icons are only available to the launcher");

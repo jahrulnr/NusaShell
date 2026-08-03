@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-08-03
+
+### Fixed
+
+- External link clicks in the launcher renderer no longer navigate the
+  Electron shell away. A delegated `document` click handler intercepts
+  `a[href]` clicks, calls `preventDefault()` on every link (so relative
+  `.md` / `/path` / `file:` references are swallowed instead of navigating
+  the `BrowserWindow` to a `file://` or Vite path that "loses" the shell),
+  and forwards only `http`/`https`/`mailto` URLs to the system browser via
+  a new thin `shell:open-external` IPC handler. `download` links, `blob:`
+  URLs (canvas exports), and `#` fragments are skipped. Plugin windows
+  (separate `BrowserWindow` documents) are out of scope for this fix.
+
 ## [0.2.1] - 2026-08-03
 
 ### Added

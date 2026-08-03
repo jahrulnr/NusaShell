@@ -916,6 +916,24 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  // Externalize link clicks: block all in-app <a> navigation, open http(s)/mailto
+  // in the system browser. Relative/file/javascript links are swallowed so the
+  // Electron shell never navigates away and "disappears".
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const anchor = target.closest?.("a[href]");
+    if (!anchor || anchor.hasAttribute("download")) return;
+    const href = (anchor.getAttribute("href") || "").trim();
+    if (!href || href.startsWith("#") || href.startsWith("blob:")) return;
+    event.preventDefault();
+    if (/^(https?:|mailto:)/i.test(href)) {
+      window.shell?.shellControls?.openExternal(href).catch((error) => {
+        showToast(`Could not open link: ${error.message || error}`, "error");
+      });
+    }
+  });
+
   const providerPresets = {
     openrouter: { id: "openrouter", type: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", api: "chat", detail: "API key · OpenAI-compatible endpoint", apiKeyOptional: false },
     omniroute: { id: "omniroute", type: "omniroute", label: "OmniRoute", baseUrl: "http://127.0.0.1:20128/v1", api: "responses", detail: "Local OpenAI-compatible gateway", apiKeyOptional: true },
