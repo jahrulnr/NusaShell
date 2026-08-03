@@ -18,6 +18,7 @@ export {
   createAgentTurnEndEvent,
   createAgentTurnSupersededEvent,
   createAgentCancelRequestedEvent,
+  createAgentAskRequestEvent,
   createLearningUpdatedEvent,
   createJobCompletedEvent,
   createJobFailedEvent,
@@ -38,6 +39,7 @@ export {
   type AgentReasoningDeltaEvent,
   type AgentToolCallStartEvent,
   type AgentToolCallEndEvent,
+  type AgentAskRequestEvent,
   type AgentContextUpdateEvent,
   type AgentTurnStartedEvent,
   type AgentTurnEndEvent,
@@ -191,8 +193,10 @@ export type {
   AskAnswerVia,
   AskQuestionAnswer,
   AskQuestionOption,
+  AskQuestionPendingNotice,
   AskQuestionRequest,
   AskQuestionResult,
+  AskQuestionServiceOptions,
 } from "./agent/index.js";
 export {
   AgentTurnRunner,

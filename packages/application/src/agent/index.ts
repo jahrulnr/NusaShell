@@ -62,8 +62,10 @@ export {
   type AskAnswerVia,
   type AskQuestionAnswer,
   type AskQuestionOption,
+  type AskQuestionPendingNotice,
   type AskQuestionRequest,
   type AskQuestionResult,
+  type AskQuestionServiceOptions,
 } from "./services/index.js";
 export type { AgentTurnWorker } from "./services/index.js";
 export type {

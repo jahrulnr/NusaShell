@@ -227,6 +227,24 @@ export class AgentConversationController {
             if (next) streamState.toolCards.set(payload.callId, next);
           }
         },
+        onAskRequest: (payload) => {
+          streamState.lastKind = "tool";
+          const callId = payload.callId;
+          const args = {
+            question: payload.question,
+            options: payload.options,
+            allow_free_text: payload.allowFreeText === true,
+            multi_select: payload.multiSelect === true,
+          };
+          const card = this.createAskCard(callId, args, { sealed: false });
+          const existing = streamState.toolCards.get(callId);
+          if (existing?.parentNode) existing.replaceWith(card);
+          else appendStreamChild(card);
+          streamState.toolCards.set(callId, card);
+          this.log("info", `Waiting for confirmation call=${callId}`);
+          status.textContent = "Waiting for confirmation…";
+          this.scrollToBottom();
+        },
         onContextUpdate: (payload) => {
           // Badge = approximate current prompt window fill, NOT cumulative
           // billing tokens. Pass the full event payload; the helper ignores

@@ -40,6 +40,8 @@ export {
   type AskAnswerVia,
   type AskQuestionAnswer,
   type AskQuestionOption,
+  type AskQuestionPendingNotice,
   type AskQuestionRequest,
   type AskQuestionResult,
+  type AskQuestionServiceOptions,
 } from "./ask-question-service.js";

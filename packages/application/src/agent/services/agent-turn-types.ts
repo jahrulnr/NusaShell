@@ -19,8 +19,13 @@ export const MAX_CONCURRENT_TOOL_CALLS_CAP = 32;
 /**
  * Tools that must run alone, in order (interactive barriers).
  * `ask_question` blocks the turn for user input and cannot overlap siblings.
+ * `mcp_register` / `mcp_unregister` also wait on nested confirmation asks.
  */
-export const BARRIER_TOOLS: ReadonlySet<string> = new Set(["ask_question"]);
+export const BARRIER_TOOLS: ReadonlySet<string> = new Set([
+  "ask_question",
+  "mcp_register",
+  "mcp_unregister",
+]);
 
 export interface RunAgentTurnInput {
   readonly messages: readonly AgentMessage[];

@@ -200,5 +200,36 @@ describe("mapDomainEvent", () => {
         timestamp: "2026-07-29T00:00:00.000Z",
       },
     });
+
+    expect(mapDomainEvent({
+      type: "agent.ask_request",
+      aggregateId: "trace-ask",
+      occurredAt: new Date("2026-07-29T00:00:00.000Z"),
+      traceId: "trace-ask",
+      callId: "call-reg",
+      question: "Register the MCP plugin?",
+      options: [
+        { id: "confirm", label: "Register", default: true },
+        { id: "cancel", label: "Cancel" },
+      ],
+      allowFreeText: false,
+      multiSelect: false,
+    } as Parameters<typeof mapDomainEvent>[0], 9)).toEqual({
+      kind: "event",
+      event: "agent.ask_request",
+      sequence: 9,
+      payload: {
+        traceId: "trace-ask",
+        callId: "call-reg",
+        question: "Register the MCP plugin?",
+        options: [
+          { id: "confirm", label: "Register", default: true },
+          { id: "cancel", label: "Cancel" },
+        ],
+        allowFreeText: false,
+        multiSelect: false,
+        timestamp: "2026-07-29T00:00:00.000Z",
+      },
+    });
   });
 });

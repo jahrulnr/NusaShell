@@ -62,4 +62,29 @@ describe("AskQuestionService", () => {
       asks.answer("turn-1", "call-1", { via: "option", optionIds: ["a"], text: "extra" }),
     ).toThrow(/not allowed/i);
   });
+
+  it("notifies onAsk when a question becomes pending", async () => {
+    const notices: Array<{ turnId: string; callId: string; question: string }> = [];
+    const asks = new AskQuestionService({
+      onAsk: (pending) => {
+        notices.push({ turnId: pending.turnId, callId: pending.callId, question: pending.request.question });
+      },
+    });
+    const pending = asks.ask("turn-1", "call-1", {
+      question: "Register the MCP plugin?",
+      options: [
+        { id: "confirm", label: "Register", default: true },
+        { id: "cancel", label: "Cancel" },
+      ],
+      allowFreeText: false,
+      multiSelect: false,
+    });
+    expect(notices).toEqual([{
+      turnId: "turn-1",
+      callId: "call-1",
+      question: "Register the MCP plugin?",
+    }]);
+    asks.answer("turn-1", "call-1", { via: "option", optionIds: ["confirm"] });
+    await expect(pending).resolves.toMatchObject({ data: { answer: "Register" } });
+  });
 });

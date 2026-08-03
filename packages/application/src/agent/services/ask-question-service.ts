@@ -35,6 +35,16 @@ export interface AskQuestionResult {
   readonly meta: Record<string, never>;
 }
 
+export interface AskQuestionPendingNotice {
+  readonly turnId: string;
+  readonly callId: string;
+  readonly request: AskQuestionRequest;
+}
+
+export interface AskQuestionServiceOptions {
+  readonly onAsk?: (pending: AskQuestionPendingNotice) => void;
+}
+
 interface PendingAsk {
   readonly turnId: string;
   readonly request: AskQuestionRequest;
@@ -49,9 +59,22 @@ function pendingKey(turnId: string, callId: string): string {
 /**
  * Holds in-flight ask_question tool calls until the desktop answers them over
  * WebSocket, or the turn is cancelled / ended.
+ *
+ * Nested confirmations (e.g. mcp_register) also use this service. Callers that
+ * need a UI card must wire `onAsk` so the renderer can surface Register/Cancel
+ * instead of leaving a silent "Running…" tool card.
  */
 export class AskQuestionService {
   private readonly pending = new Map<string, PendingAsk>();
+  private onAsk?: (pending: AskQuestionPendingNotice) => void;
+
+  constructor(options: AskQuestionServiceOptions = {}) {
+    if (options.onAsk) this.onAsk = options.onAsk;
+  }
+
+  setOnAsk(onAsk: ((pending: AskQuestionPendingNotice) => void) | undefined): void {
+    this.onAsk = onAsk;
+  }
 
   ask(turnId: string, callId: string, request: AskQuestionRequest): Promise<AskQuestionResult> {
     const key = pendingKey(turnId, callId);
@@ -60,6 +83,11 @@ export class AskQuestionService {
     }
     return new Promise<AskQuestionResult>((resolve, reject) => {
       this.pending.set(key, { turnId, request, resolve, reject });
+      try {
+        this.onAsk?.({ turnId, callId, request });
+      } catch {
+        // UI notification must never block the pending ask.
+      }
     });
   }
 

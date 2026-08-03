@@ -144,6 +144,29 @@ export const AgentToolCallEndEventSchema = z.object({
   }),
 });
 
+export const AgentAskRequestEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("agent.ask_request"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    traceId: z.string().min(1),
+    callId: z.string().min(1),
+    question: z.string().min(1),
+    options: z.array(z.object({
+      id: z.string().min(1),
+      label: z.string().min(1),
+      description: z.string().optional(),
+      default: z.boolean().optional(),
+      icon: z.string().optional(),
+      image: z.string().optional(),
+    })).min(1).max(8),
+    allowFreeText: z.boolean(),
+    multiSelect: z.boolean(),
+    streamSeq: z.number().int().positive().optional(),
+    timestamp: z.string(),
+  }),
+});
+
 export const AgentContextEventSchema = z.object({
   kind: z.literal("event"),
   event: z.literal("agent.context"),
@@ -454,6 +477,7 @@ export const EventSchema = z.discriminatedUnion("event", [
   AgentReasoningDeltaEventSchema,
   AgentToolCallStartEventSchema,
   AgentToolCallEndEventSchema,
+  AgentAskRequestEventSchema,
   AgentContextEventSchema,
   AgentTurnStartedEventSchema,
   AgentTurnEndEventSchema,
@@ -488,6 +512,7 @@ export type AgentTextDeltaEvent = z.infer<typeof AgentTextDeltaEventSchema>;
 export type AgentReasoningDeltaEvent = z.infer<typeof AgentReasoningDeltaEventSchema>;
 export type AgentToolCallStartEvent = z.infer<typeof AgentToolCallStartEventSchema>;
 export type AgentToolCallEndEvent = z.infer<typeof AgentToolCallEndEventSchema>;
+export type AgentAskRequestEvent = z.infer<typeof AgentAskRequestEventSchema>;
 export type AgentContextEvent = z.infer<typeof AgentContextEventSchema>;
 export type AgentTurnStartedEvent = z.infer<typeof AgentTurnStartedEventSchema>;
 export type AgentTurnEndEvent = z.infer<typeof AgentTurnEndEventSchema>;

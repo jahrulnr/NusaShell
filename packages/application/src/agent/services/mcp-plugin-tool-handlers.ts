@@ -28,7 +28,9 @@ export async function execMcpRegister(
   assertConfigured(deps);
   assertInteractive(interactive);
   const folder = await resolveUserPluginFolder(deps.userPluginsRoot!, args);
-  await confirm(deps.askQuestions, turnId, callId, `Register the MCP plugin in ${folder}?`);
+  await confirm(deps.askQuestions, turnId, callId, `Register the MCP plugin in ${folder}?`, {
+    confirmLabel: "Register",
+  });
 
   const result = await deps.installer!.installFromPath(folder);
   await deps.syncPlugins?.();
@@ -70,7 +72,9 @@ export async function execMcpUnregister(
     throw new ApplicationError("AGENT_INVALID_INPUT", "Plugin folder does not match the requested plugin id");
   }
 
-  await confirm(deps.askQuestions, turnId, callId, `Unregister and remove the MCP plugin ${pluginIdValue}?`);
+  await confirm(deps.askQuestions, turnId, callId, `Unregister and remove the MCP plugin ${pluginIdValue}?`, {
+    confirmLabel: "Unregister",
+  });
   await deps.runtimeManager.removePlugin(pluginId.value);
   await deps.repository!.remove(pluginId.value);
   await deps.installer!.uninstall(pluginIdValue);
@@ -112,12 +116,18 @@ function isDirectChild(root: string, candidate: string): boolean {
   return child.length > 0 && !child.startsWith("..") && !child.includes("/") && !child.includes("\\");
 }
 
-async function confirm(askQuestions: AskQuestionService | undefined, turnId: string, callId: string, question: string): Promise<void> {
+async function confirm(
+  askQuestions: AskQuestionService | undefined,
+  turnId: string,
+  callId: string,
+  question: string,
+  labels: { readonly confirmLabel: string },
+): Promise<void> {
   if (!askQuestions) throw new ApplicationError("AGENT_INVALID_INPUT", "Confirmation is not available in this runtime");
   const answer = await askQuestions.ask(turnId, callId, {
     question,
     options: [
-      { id: "confirm", label: "Register", default: true },
+      { id: "confirm", label: labels.confirmLabel, default: true },
       { id: "cancel", label: "Cancel" },
     ],
     allowFreeText: false,

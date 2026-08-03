@@ -85,6 +85,9 @@ executed once, nudged on its second appearance, and stops the loop on its third.
   failures, `408`/`409`/`413`/`425`/`429`, `500`–`504`); permanent 4xx still
   fail the provider call immediately and then soft-recover / attach partial
   the same way when tool progress exists.
+- Nested interactive confirms (`mcp_register` / `mcp_unregister`) publish
+  `agent.ask_request` so the desktop can show Register/Cancel on the tool card.
+  Without that event the turn appears hung on “Running…” with no logs.
 - If soft recover is exhausted **or** another mid-turn failure occurs with
   progress (e.g. `AGENT_TOOL_NOT_ALLOWED` allowlist rejection, `listTools`
   failure, or **user cancel** after tools already ran), the runner throws with

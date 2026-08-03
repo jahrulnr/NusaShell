@@ -15,6 +15,7 @@ import {
   AskQuestionService,
   AgentTurnCoordinator,
   StreamSeqRegistry,
+  createAgentAskRequestEvent,
   type AgentRuntimeSettings,
   type AgentProvider,
   type EventDispatcher,
@@ -101,6 +102,23 @@ export function createAgentRuntime(
   const withStreamSeq = <T extends { readonly aggregateId: string }>(event: T): T & { streamSeq: number } => ({
     ...event,
     streamSeq: streamSeqRegistry.next(event.aggregateId),
+  });
+
+  askQuestionService.setOnAsk((pending) => {
+    logger.info(
+      "Agent ask pending turnId=%s callId=%s question=%s",
+      pending.turnId,
+      pending.callId,
+      pending.request.question.slice(0, 120),
+    );
+    void eventDispatcher.publish(withStreamSeq(createAgentAskRequestEvent(
+      pending.turnId,
+      pending.callId,
+      pending.request.question,
+      pending.request.options,
+      pending.request.allowFreeText,
+      pending.request.multiSelect,
+    )));
   });
 
   const reviewGateway = new ReviewAgentToolGateway(agentToolGateway);

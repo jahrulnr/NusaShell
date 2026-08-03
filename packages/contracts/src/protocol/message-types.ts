@@ -88,6 +88,7 @@ export type EventType =
   | "agent.reasoning_delta"
   | "agent.tool_call_start"
   | "agent.tool_call_end"
+  | "agent.ask_request"
   | "agent.context"
   | "agent.turn_started"
   | "agent.turn_end"

@@ -43,7 +43,7 @@ export function createTurnSubscriber(options) {
 /**
  * Subscribe to agent turn events with streamSeq gating.
  *
- * @param {{ traceId: string, onDelta?: (delta: string) => void, onReasoningDelta?: (delta: string) => void, onToolCallStart?: (p: any) => void, onToolCallEnd?: (p: any) => void, onContextUpdate?: (p: any) => void, onTurnStarted?: (p: any) => void, onTurnEnd?: (p: any) => void, onCancelRequested?: (p: any) => void, onTurnSuperseded?: (p: any) => void, onStreamGap?: (traceId: string, streamSeq: number) => void, onLog?: (level: string, message: string) => void }} options
+ * @param {{ traceId: string, onDelta?: (delta: string) => void, onReasoningDelta?: (delta: string) => void, onToolCallStart?: (p: any) => void, onToolCallEnd?: (p: any) => void, onAskRequest?: (p: any) => void, onContextUpdate?: (p: any) => void, onTurnStarted?: (p: any) => void, onTurnEnd?: (p: any) => void, onCancelRequested?: (p: any) => void, onTurnSuperseded?: (p: any) => void, onStreamGap?: (traceId: string, streamSeq: number) => void, onLog?: (level: string, message: string) => void }} options
  * @returns {{ disposers: (() => void)[], lifecycleDisposers: (() => void)[] }}
  */
 export function subscribeAgentTurnEvents(options) {
@@ -62,6 +62,9 @@ export function subscribeAgentTurnEvents(options) {
   }
   if (options.onToolCallEnd) {
     disposers.push(sub.onEvent("agent.tool_call_end", (p) => options.onToolCallEnd(p)));
+  }
+  if (options.onAskRequest) {
+    disposers.push(sub.onEvent("agent.ask_request", (p) => options.onAskRequest(p)));
   }
   if (options.onContextUpdate) {
     disposers.push(sub.onEvent("agent.context", (p) => options.onContextUpdate(p)));

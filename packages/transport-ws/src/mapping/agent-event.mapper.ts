@@ -1,5 +1,6 @@
 import type { EventEnvelope } from "@nusashell/contracts";
 import type {
+  AgentAskRequestEvent,
   AgentReasoningDeltaEvent,
   AgentTextDeltaEvent,
   AgentToolCallEndEvent,
@@ -73,6 +74,30 @@ export function mapAgentEvent(
           ...(e.execution.error ? { error: e.execution.error } : {}),
           ...(hasArgs(e.execution.args) ? { args: e.execution.args } : {}),
           ...(output ? { output } : {}),
+          timestamp,
+        },
+      };
+    }
+    case "agent.ask_request": {
+      const e = event as AgentAskRequestEvent;
+      return {
+        kind: "event",
+        event: "agent.ask_request",
+        sequence,
+        payload: {
+          traceId: e.traceId,
+          callId: e.callId,
+          question: e.question,
+          options: e.options.map((option) => ({
+            id: option.id,
+            label: option.label,
+            ...(option.description ? { description: option.description } : {}),
+            ...(option.default ? { default: true } : {}),
+            ...(option.icon ? { icon: option.icon } : {}),
+            ...(option.image ? { image: option.image } : {}),
+          })),
+          allowFreeText: e.allowFreeText,
+          multiSelect: e.multiSelect,
           timestamp,
         },
       };

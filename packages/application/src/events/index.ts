@@ -18,6 +18,8 @@ export type { AgentTurnSupersededEvent } from "./agent-turn-superseded.event.js"
 export { createAgentTurnSupersededEvent } from "./agent-turn-superseded.event.js";
 export type { AgentCancelRequestedEvent } from "./agent-cancel-requested.event.js";
 export { createAgentCancelRequestedEvent } from "./agent-cancel-requested.event.js";
+export type { AgentAskRequestEvent } from "./agent-ask-request.event.js";
+export { createAgentAskRequestEvent } from "./agent-ask-request.event.js";
 export type { AgentLearningUpdatedEvent } from "./agent-learning-updated.event.js";
 export { createLearningUpdatedEvent } from "./agent-learning-updated.event.js";
 export type { JobCompletedEvent, JobFailedEvent, JobStartedEvent, JobCancelledEvent } from "./job-events.event.js";
