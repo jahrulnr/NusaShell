@@ -185,7 +185,13 @@ export class AcpJsonRpcClient implements AcpClientPort {
       })) as { sessionId: string; configOptions?: unknown };
 
       session.sessionId = sessionResult.sessionId;
-      session.configOptions = parseConfigOptions(sessionResult.configOptions);
+      // Provider extensions (e.g. Gemini) may normalize a non-baseline
+      // session/new shape into synthetic configOptions. Fall back to the
+      // baseline parser when the extension does not engage.
+      const normalized = extension?.normalizeSessionConfig?.(sessionResult);
+      session.configOptions = normalized && normalized.length > 0
+        ? normalized
+        : parseConfigOptions(sessionResult.configOptions);
       return sessionResult.sessionId;
     } catch (error) {
       this.cleanup(session);
@@ -277,6 +283,22 @@ export class AcpJsonRpcClient implements AcpClientPort {
     const session = this.sessions.get(conversationId);
     if (!session) {
       throw new ApplicationError("AGENT_PROVIDER_FAILED", `No ACP session for conversation ${conversationId}`, { conversationId });
+    }
+    // Provider extensions (e.g. Gemini) may route config changes to a
+    // vendor-specific JSON-RPC method. Fall back to the baseline
+    // `session/set_config_option` when the extension does not engage.
+    const descriptor = session.extension?.applyConfigOption?.(session.sessionId, configId, value);
+    if (descriptor) {
+      const result = await this.request(session, descriptor.method, descriptor.params);
+      const rebuilt = descriptor.toConfigOptions?.(result);
+      if (rebuilt && rebuilt.length > 0) {
+        session.configOptions = rebuilt;
+      } else {
+        // Vendor method did not echo a fresh snapshot — update the changed
+        // option's currentValue locally so the UI reflects the new state.
+        session.configOptions = updateConfigOptionValue(session.configOptions, configId, value);
+      }
+      return session.configOptions;
     }
     const result = (await this.request(session, "session/set_config_option", {
       sessionId: session.sessionId,
@@ -571,6 +593,21 @@ function parsePermissionRequest(params: Record<string, unknown>): AcpPermissionR
     detail: toolCall.detail ? String(toolCall.detail) : (params.detail ? String(params.detail) : undefined),
     options,
   };
+}
+
+/**
+ * Update a single configOption's `currentValue` in-place (immutably).
+ *
+ * Used when a provider-specific apply method (e.g. Gemini `session/set_mode`)
+ * does not echo a fresh configOptions snapshot — we mirror the requested
+ * value locally so the UI reflects the change without a re-probe.
+ */
+function updateConfigOptionValue(
+  options: readonly AcpConfigOption[],
+  configId: string,
+  value: string | boolean,
+): readonly AcpConfigOption[] {
+  return options.map((opt) => opt.id === configId ? { ...opt, currentValue: value } : opt);
 }
 
 function parseConfigOptions(raw: unknown): readonly AcpConfigOption[] {

@@ -86,7 +86,7 @@ export class SkillsController {
   }
 
   async selectSkill(skillId) {
-    if (!this.canLeaveEditor()) return;
+    if (!await this.canLeaveEditor()) return;
     try {
       const detail = await this.api.get(skillId);
       this.selectedSkillId = skillId;
@@ -135,7 +135,7 @@ export class SkillsController {
   }
 
   async openFile(entry) {
-    if (!this.canLeaveEditor()) return;
+    if (!await this.canLeaveEditor()) return;
     try {
       const file = await this.api.read(this.selectedSkillId, entry.path);
       this.selectedPath = entry.path;
@@ -191,9 +191,9 @@ export class SkillsController {
   }
 
   async deleteSelected() {
-    if (!this.selectedSkillId || !this.canLeaveEditor()) return;
+    if (!this.selectedSkillId || !await this.canLeaveEditor()) return;
     const skill = this.skills.find((item) => item.id === this.selectedSkillId);
-    if (!window.confirm(`Delete ${skill?.name ?? this.selectedSkillId} from this device?`)) return;
+    if (!await confirmDialog({ title: "Delete skill?", message: `Delete ${skill?.name ?? this.selectedSkillId} from this device?`, confirmLabel: "Delete", danger: true })) return;
     try {
       await this.api.delete(this.selectedSkillId);
       const deletedName = skill?.name ?? this.selectedSkillId;
@@ -213,10 +213,10 @@ export class SkillsController {
     save.textContent = dirty ? "Save changes" : "Saved";
   }
 
-  canLeaveEditor() {
+  async canLeaveEditor() {
     const editor = document.querySelector("#skill-editor");
     return editor.hidden || editor.value === this.savedContent
-      || window.confirm("Discard unsaved changes?");
+      || await confirmDialog({ title: "Discard changes?", message: "Your unsaved edits will be lost.", confirmLabel: "Discard", danger: true });
   }
 
   resetEditor() {
@@ -405,3 +405,4 @@ export class SkillsController {
     }
   }
 }
+import { confirmDialog } from "./ui-dialogs.js";

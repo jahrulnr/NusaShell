@@ -60,7 +60,7 @@ No `npm install` required for the PoC.
 - **Broker only:** plugin UI and MCP never peer-connect; all traffic goes through the shell.
 - **Two transport layers (do not conflate):**
   - Plugin iframe ↔ host: `postMessage` / `window.shell.callTool`
-  - Host ↔ backend: WebSocket (`ws`) via application commands/queries - **not** an internal event bus
+  - Host ↔ backend: **Electron IPC** (`ipcMain.handle("shell:request")` → `MessageRouter` → command/query bus) — **not** an internal event bus. WebSocket is a legacy/optional adapter for non-Electron hosts; the desktop product path does not start the WS server (`startWsServer: false`).
 - **Dependency rule:** `domain` must not import Electron, WebSocket, SQLite, `child_process`, filesystem, MCP SDK, HTTP, or SSE.
 - **Runtime SoT:** live plugin runtime belongs to `PluginRuntimeManager` (memory). Installed metadata → SQLite (filesystem/JSON OK only as an early spike). Do not duplicate authoritative “running” state in the renderer, WS gateway, or DB.
 - **Infrastructure must not** send WebSocket frames directly - publish domain/application events.
@@ -149,6 +149,30 @@ When changing launcher or plugin UI:
   changes even when no binary ships yet, but apply the same release-boundary rule.
 
 ## Testing
+
+### Red–green–refactor
+
+When adding or changing behavior that already has (or should have) automated
+tests, work in this order:
+
+1. **Red** — write or extend a failing test that names the desired behavior
+   (or reproduces the bug). Run it and confirm it fails for the right reason.
+2. **Green** — implement the smallest change that makes the test pass. Do not
+   broaden scope while the suite is red.
+3. **Refactor** — clean structure, names, and duplication only while tests stay
+   green. No behavior change without returning to red/green.
+
+Rules of thumb:
+
+- Prefer one behavior slice per red–green cycle; avoid multi-feature batches
+  that skip a failing test.
+- Bug fixes: failing reproduction first, then the fix.
+- Pure docs, generated UI map output, or trivial renames may skip the cycle
+  when no testable contract changes.
+- Do not delete or weaken a test only to go green; fix the product or adjust
+  the assertion to the agreed contract.
+- Keep domain pure and I/O in infrastructure; tests should pin the contract
+  the cycle is proving.
 
 Until the monorepo is fully wired:
 

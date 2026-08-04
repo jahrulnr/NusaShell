@@ -45,7 +45,7 @@ export type {
   AcpTurnEndEvent,
   AcpSessionStateEvent,
 } from "./events/index.js";
-export type { RunAcpTurnCommand, CancelAcpTurnCommand, AnswerAcpPermissionCommand, AnswerAcpAskCommand, SetAcpConfigOptionCommand, SetAcpConfigOptionResult, EnsureAcpSessionCommand, EnsureAcpSessionResult, ProbeAcpProviderCommand, ProbeAcpProviderResult } from "./commands/index.js";
-export { RunAcpTurnHandler, CancelAcpTurnHandler, AnswerAcpPermissionHandler, AnswerAcpAskHandler, SetAcpConfigOptionHandler, EnsureAcpSessionHandler, ProbeAcpProviderHandler } from "./commands/index.js";
+export type { RunAcpTurnCommand, CancelAcpTurnCommand, AnswerAcpPermissionCommand, AnswerAcpAskCommand, SetAcpConfigOptionCommand, SetAcpConfigOptionResult, EnsureAcpSessionCommand, EnsureAcpSessionResult, ProbeAcpProviderCommand, ProbeAcpProviderResult, ImportAcpModelsCommand, ImportAcpModelsResult } from "./commands/index.js";
+export { RunAcpTurnHandler, CancelAcpTurnHandler, AnswerAcpPermissionHandler, AnswerAcpAskHandler, SetAcpConfigOptionHandler, EnsureAcpSessionHandler, ProbeAcpProviderHandler, ImportAcpModelsHandler } from "./commands/index.js";
 export type { GetAcpSessionInfoQuery, GetAcpSessionInfoResult } from "./queries/index.js";
 export { GetAcpSessionInfoHandler } from "./queries/index.js";

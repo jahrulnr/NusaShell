@@ -105,7 +105,13 @@ export class PluginLifecycleCoordinator {
         entry.mcpClient = null;
       }
       if (entry.process) {
-        await entry.process.kill();
+        // Use killGroup to terminate the process and all its children
+        // (e.g. Terminal plugin's spawned shell commands).
+        if (entry.process.killGroup) {
+          await entry.process.killGroup("SIGTERM");
+        } else {
+          await entry.process.kill();
+        }
         entry.process = null;
       }
       this.sessions.unregisterAutomationEmits(entry);

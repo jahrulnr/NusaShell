@@ -82,6 +82,12 @@ const elements = Object.fromEntries([
   "save-account-button",
   "delete-account-button",
   "cancel-account-button",
+  "confirm-modal",
+  "confirm-modal-title",
+  "confirm-modal-copy",
+  "confirm-modal-close",
+  "confirm-modal-cancel",
+  "confirm-modal-submit",
 ].map((id) => [id, document.getElementById(id)]));
 
 function parseToolResult(result) {
@@ -429,7 +435,7 @@ async function saveAccount(event) {
 async function deleteCurrentAccount() {
   const id = elements["account-id"].value;
   const account = state.settings.accounts.find((item) => item.id === id);
-  if (!account || !confirm(`Delete ${account.name} from NusaShell Mail? Messages on the server are not deleted.`)) {
+  if (!account || !(await confirmAccountDelete(account.name))) {
     return;
   }
   try {
@@ -446,6 +452,26 @@ async function deleteCurrentAccount() {
   } finally {
     setAccountFormBusy(false);
   }
+}
+
+function confirmAccountDelete(name) {
+  elements["confirm-modal-title"].textContent = "Delete account?";
+  elements["confirm-modal-copy"].textContent = `Delete ${name} from NusaShell Mail? Messages on the server are not deleted.`;
+  elements["confirm-modal"].hidden = false;
+  return new Promise((resolve) => {
+    const close = (result) => {
+      elements["confirm-modal"].hidden = true;
+      elements["confirm-modal-cancel"].onclick = null;
+      elements["confirm-modal-submit"].onclick = null;
+      elements["confirm-modal-close"].onclick = null;
+      resolve(result);
+    };
+    elements["confirm-modal-cancel"].onclick = () => close(false);
+    elements["confirm-modal-close"].onclick = () => close(false);
+    elements["confirm-modal-submit"].onclick = () => close(true);
+    elements["confirm-modal"].onclick = (event) => { if (event.target === elements["confirm-modal"]) close(false); };
+    elements["confirm-modal-cancel"].focus();
+  });
 }
 
 function applyProviderPreset(provider) {
@@ -469,6 +495,9 @@ function bindEvents() {
   elements["cancel-account-button"].addEventListener("click", closeAccountModal);
   elements["account-form"].addEventListener("submit", (event) => void saveAccount(event));
   elements["delete-account-button"].addEventListener("click", () => void deleteCurrentAccount());
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !elements["confirm-modal"].hidden) elements["confirm-modal-cancel"].click();
+  });
   elements["account-modal"].addEventListener("click", (event) => {
     if (event.target === elements["account-modal"]) closeAccountModal();
   });

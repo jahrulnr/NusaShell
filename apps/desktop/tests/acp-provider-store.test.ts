@@ -1,10 +1,10 @@
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AcpProviderStore } from "../src/main/acp-provider-store.js";
 
-async function makeStore(providers: unknown, routing?: unknown) {
+async function makeStore(providers: unknown, routing?: unknown, logger?: { info: (msg: string, ...args: unknown[]) => void }) {
   const directory = await mkdtemp(join(tmpdir(), "nusashell-acp-"));
   const providersPath = join(directory, "acp-providers.json");
   const routingPath = join(directory, "acp-routing.json");
@@ -12,7 +12,7 @@ async function makeStore(providers: unknown, routing?: unknown) {
   if (routing !== undefined) {
     await writeFile(routingPath, JSON.stringify(routing, null, 2));
   }
-  return new AcpProviderStore(providersPath, routingPath);
+  return new AcpProviderStore(providersPath, routingPath, logger);
 }
 
 describe("AcpProviderStore", () => {
@@ -81,12 +81,33 @@ describe("AcpProviderStore.resolveTryOrder", () => {
     await expect(store.resolveTryOrder()).resolves.toEqual(["cursor"]);
   });
 
-  it("puts an override first when that provider is connected", async () => {
+  it("returns the routing try-order as-is (Settings authoritative)", async () => {
     const store = await makeStore([
       { providerId: "codex", enabled: true, authStatus: "connected" },
       { providerId: "cursor", enabled: true, authStatus: "connected" },
     ]);
 
-    await expect(store.resolveTryOrder("codex")).resolves.toEqual(["codex", "cursor"]);
+    await expect(store.resolveTryOrder()).resolves.toEqual(["cursor", "codex"]);
+  });
+});
+
+describe("AcpProviderStore.resolveTryOrder logging", () => {
+  it("logs info with tryOrder list", async () => {
+    const info = vi.fn();
+    const store = await makeStore(
+      [
+        { providerId: "gemini", enabled: true, authStatus: "connected" },
+        { providerId: "cursor", enabled: true, authStatus: "connected" },
+      ],
+      { defaultProviderId: "gemini", fallbackProviderIds: ["cursor"] },
+      { info },
+    );
+
+    await store.resolveTryOrder();
+
+    expect(info).toHaveBeenCalledTimes(1);
+    const msg = info.mock.calls[0][0];
+    expect(msg).toContain("acp.resolveTryOrder");
+    expect(msg).toContain("[gemini,cursor]");
   });
 });

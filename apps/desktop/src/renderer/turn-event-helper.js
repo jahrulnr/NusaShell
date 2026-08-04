@@ -86,6 +86,46 @@ export function subscribeAgentTurnEvents(options) {
 }
 
 /**
+ * Subscribe to agent todo_updated events for a conversation.
+ * Unlike turn events, todo_updated is keyed by conversationId (not traceId),
+ * so it uses a plain onEvent subscription without the streamSeq gate.
+ *
+ * @param {{ conversationId: string, onTodoUpdated?: (items: any[]) => void }} options
+ * @returns {() => void} disposer
+ */
+export function subscribeTodoEvents(options) {
+  return onEvent("agent.todo_updated", (payload) => {
+    if (payload?.conversationId !== options.conversationId) return;
+    options.onTodoUpdated?.(payload.items ?? []);
+  });
+}
+
+/**
+ * Subscribe to async tool job events for a conversation.
+ * Handles tool_job_started, tool_job_update, and tool_job_ended.
+ *
+ * @param {{ conversationId: string, onJobStarted?: (p: any) => void, onJobUpdate?: (p: any) => void, onJobEnded?: (p: any) => void }} options
+ * @returns {() => void} disposer
+ */
+export function subscribeToolJobEvents(options) {
+  const disposers = [
+    onEvent("agent.tool_job_started", (payload) => {
+      if (payload?.conversationId !== options.conversationId) return;
+      options.onJobStarted?.(payload);
+    }),
+    onEvent("agent.tool_job_update", (payload) => {
+      if (payload?.conversationId !== options.conversationId) return;
+      options.onJobUpdate?.(payload);
+    }),
+    onEvent("agent.tool_job_ended", (payload) => {
+      if (payload?.conversationId !== options.conversationId) return;
+      options.onJobEnded?.(payload);
+    }),
+  ];
+  return () => disposers.forEach((d) => d());
+}
+
+/**
  * Subscribe to ACP turn events with streamSeq gating (unified with agent turn).
  *
  * @param {{ traceId: string, onDelta?: (delta: string, messageId?: string) => void, onReasoningDelta?: (delta: string) => void, onToolCallStart?: (p: any) => void, onToolCallEnd?: (p: any) => void, onTurnEnd?: (p: any) => void, onPermissionRequest?: (p: any) => void, onAskRequest?: (p: any) => void, onStreamGap?: (traceId: string, streamSeq: number) => void, onLog?: (level: string, message: string) => void }} options

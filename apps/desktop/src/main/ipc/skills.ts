@@ -87,6 +87,11 @@ export function registerSkillsIpc(ctx: IpcContext): void {
   ipcMain.handle("skills:restore", async (_event, skillId: string) => {
     await ctx.skillRegistry.restore(skillId);
     await ctx.skillUsage.setState(skillId, "active");
+    // If this was a builtin skill the user previously deleted, unmark it so
+    // the seeder resumes tracking and updating it on future startups.
+    if (ctx.skillProvenance.unmarkBuiltinDeleted) {
+      await ctx.skillProvenance.unmarkBuiltinDeleted(skillId);
+    }
     return { ok: true };
   });
   ipcMain.handle("skills:archived:list", () => ctx.skillRegistry.listArchived());

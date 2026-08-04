@@ -45,7 +45,11 @@ prompt window* fill (from `agent.context` estimates and local `chars/4`
 estimates), not cumulative billed input tokens summed across tool rounds. The
 composer starts as a single text row,
 grows with wrapped or explicit lines, and caps at ten rows before its textarea
-scrolls internally; the controls footer stays fixed below it.
+scrolls internally. Its compact footer keeps attachment, model, and workspace
+context in one flexible cluster, with context usage and turn actions aligned as
+a separate trailing cluster. Long model and workspace labels truncate instead
+of crowding actions; the full model label remains available as a tooltip. At
+very narrow widths the action cluster moves to a second row.
 
 ### Subagent activity
 

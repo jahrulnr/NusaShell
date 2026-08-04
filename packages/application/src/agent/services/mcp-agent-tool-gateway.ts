@@ -12,6 +12,7 @@ import type { PipelineScheduler } from "../../job/services/pipeline-scheduler.js
 import type { DocsIndexPort } from "../ports/docs-index.port.js";
 import type { AgentToolDefinition, ReasoningEffort } from "../ports/agent-provider.port.js";
 import type { AgentToolGateway, AgentTurnContext } from "../ports/agent-tool-gateway.port.js";
+import type { ConversationTodoPort } from "../ports/conversation-todo.port.js";
 import type { SubagentPort } from "../ports/subagent-port.js";
 import type { LoggerPort } from "../../plugin/ports/logger.port.js";
 import type { AskQuestionService } from "./ask-question-service.js";
@@ -27,6 +28,9 @@ import { execJob } from "./job-tool-handler.js";
 import { execPipeline } from "./pipeline-tool-handler.js";
 import { execAskQuestion } from "./ask-question-tool-handler.js";
 import { execSubagent } from "./subagent-tool-handler.js";
+import { execTodo } from "./todo-tool-handler.js";
+import { execAsyncRun, execAsyncWait, execAsyncPeek, execAsyncKill } from "./async-tool-handlers.js";
+import type { AsyncToolRuntime } from "./async-tool-runtime.js";
 import { execMcpRegister, execMcpUnregister, type McpPluginRegistrationDeps } from "./mcp-plugin-tool-handlers.js";
 
 export type WriteOrigin = "foreground" | "background_review";
@@ -46,8 +50,10 @@ const emptySchema = { type: "object", properties: {} } as const;
 const MAX_ASK_OPTIONS = 8;
 
 /**
- * Shell-owned progressive MCP catalog. The model first discovers servers and
- * tools, then grants one typed MCP tool for the following provider round.
+ * Shell-owned progressive MCP catalog. The model starts with meta-tools, then
+ * discovers servers and tools. Concrete MCP tools may be advertised via
+ * `tool_schema`/`tool_schemas`, or lazily resolved when the model recalls a
+ * previously used `mcp_<plugin>_<tool>` name and that plugin is already running.
  */
 export class McpAgentToolGateway implements AgentToolGateway {
   private readonly turnRoutes = new Map<string, Map<string, McpToolRoute>>();
@@ -57,6 +63,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
   private readonly turnProviderId = new Map<string, string | undefined>();
   private readonly turnModel = new Map<string, string | undefined>();
   private readonly turnEffort = new Map<string, ReasoningEffort | undefined>();
+  private readonly turnConversationId = new Map<string, string | undefined>();
   private writeOrigin: WriteOrigin = "foreground";
   private writeApprovalEnabled = false;
   private jobStore?: JobStorePort;
@@ -65,6 +72,9 @@ export class McpAgentToolGateway implements AgentToolGateway {
   private pipelineScheduler?: PipelineScheduler;
   private pluginRegistration?: McpPluginRegistrationDeps;
   private subagentPort?: SubagentPort;
+  private todoPort?: ConversationTodoPort | undefined;
+  private todoEventPublisher?: ((conversationId: string, items: readonly import("./agent-todo.js").AgentTodoItem[]) => void) | undefined;
+  private asyncToolRuntime?: AsyncToolRuntime | undefined;
 
   constructor(
     private readonly runtimeManager: PluginRuntimeManager,
@@ -98,9 +108,23 @@ export class McpAgentToolGateway implements AgentToolGateway {
     this.pluginRegistration = deps;
   }
 
+  /** Late-bind conversation todo port + event publisher. */
+  bindTodos(
+    port: ConversationTodoPort,
+    publish?: ((conversationId: string, items: readonly import("./agent-todo.js").AgentTodoItem[]) => void) | undefined,
+  ): void {
+    this.todoPort = port;
+    this.todoEventPublisher = publish;
+  }
+
   /** Late-bind subagent port (ACP provider resolver + session runner). */
   bindSubagent(port: SubagentPort): void {
     this.subagentPort = port;
+  }
+
+  /** Late-bind the async tool runtime (background handle registry). */
+  bindAsyncToolRuntime(runtime: AsyncToolRuntime): void {
+    this.asyncToolRuntime = runtime;
   }
 
   beginTurn(turnId: string, context?: AgentTurnContext): void {
@@ -113,6 +137,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
     if (context?.providerId !== undefined) this.turnProviderId.set(turnId, context.providerId);
     if (context?.model !== undefined) this.turnModel.set(turnId, context.model);
     if (context?.effort !== undefined) this.turnEffort.set(turnId, context.effort);
+    if (context?.conversationId !== undefined) this.turnConversationId.set(turnId, context.conversationId);
   }
 
   endTurn(turnId: string): void {
@@ -124,6 +149,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
     this.turnProviderId.delete(turnId);
     this.turnModel.delete(turnId);
     this.turnEffort.delete(turnId);
+    this.turnConversationId.delete(turnId);
   }
 
   async cancelTurn(turnId: string): Promise<void> {
@@ -146,10 +172,10 @@ export class McpAgentToolGateway implements AgentToolGateway {
       definition("mcp_disable", "Stop a selected MCP plugin", { pluginId: stringSchema() }),
       definition("tool_search", "Search a running MCP plugin's tools by name or description", { pluginId: stringSchema(), query: stringSchema() }),
       definition("tool_list", "List all tools from a running MCP plugin (names and descriptions only)", { pluginId: stringSchema() }),
-      definition("tool_schema", "Load one searched MCP tool schema for the next round", { pluginId: stringSchema(), toolName: stringSchema() }),
-      definition("tool_schemas", "Load multiple MCP tool schemas for the next round in one call", {
+      definition("tool_schema", "Load one MCP tool schema and advertise it for this turn (optional when recalling a known mcp_* name on a running plugin)", { pluginId: stringSchema(), toolName: stringSchema() }),
+      definition("tool_schemas", "Load multiple MCP tool schemas and advertise them for this turn in one call (optional when recalling known mcp_* names on a running plugin)", {
         pluginId: stringSchema(),
-        toolNames: { type: "array", items: { type: "string" }, minItems: 1, description: "Tool names to grant for the current turn" },
+        toolNames: { type: "array", items: { type: "string" }, minItems: 1, description: "Tool names to advertise for the current turn" },
       }, ["pluginId", "toolNames"]),
       definition("mcp_context", "Discover or load MCP prompts and text resources", {
         pluginId: stringSchema(),
@@ -203,6 +229,38 @@ export class McpAgentToolGateway implements AgentToolGateway {
         content: { type: "string", description: "New entry text (required for add and replace; omit or empty to delete via replace)" },
         old_text: { type: "string", description: "Unique substring of the existing entry to match (required for replace and remove)" },
       }, ["action", "target"]),
+      ...(this.todoPort ? [definition("todo", "Replace the conversation task checklist (full replace, Claude TodoWrite style). Empty items clears the list. The user can delete items from the UI — treat deleted items as gone and do not re-add them.", {
+        items: {
+          type: "array",
+          description: "Full replacement list of todo items (max 50)",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string", description: "Stable item id (unique within the list)" },
+              content: { type: "string", description: "Short task description (max 500 chars)" },
+              status: { type: "string", enum: ["pending", "in_progress", "completed"], description: "Item status; prefer exactly one in_progress at a time" },
+            },
+            required: ["id", "content", "status"],
+          },
+        },
+      }, ["items"])] : []),
+      ...(this.asyncToolRuntime ? [
+        definition("async_run", "Start a granted MCP tool in the background and return immediately with a handleId. The handle survives turn end. Use for long-running commands (docker logs -f, builds, servers). The tool name must be in the current allowlist.", {
+          tool: { type: "string", description: "Granted MCP tool name to run in background" },
+          args: { type: "object", additionalProperties: true, description: "Arguments to pass to the tool" },
+          maxRuntimeMs: { type: "integer", minimum: 1000, description: "Optional max runtime before auto-fail (ms)" },
+        }, ["tool"]),
+        definition("async_wait", "Block this tool-call until the handle settles or timeoutMs elapses (1s–5min). Returns the final status if settled, or running if still in-flight. Prefer this over busy-loop peeking.", {
+          handleId: { type: "string", description: "Handle id from async_run" },
+          timeoutMs: { type: "integer", minimum: 1000, maximum: 300000, description: "Max time to wait in milliseconds (1s–5min)" },
+        }, ["handleId", "timeoutMs"]),
+        definition("async_peek", "Non-blocking read of a handle's buffered output and current status (running/ok/fail/killed). Does not mark the handle done.", {
+          handleId: { type: "string", description: "Handle id from async_run" },
+        }, ["handleId"]),
+        definition("async_kill", "Soft-cancel a running handle. Returns the final status. Use when the user asks to stop a background job.", {
+          handleId: { type: "string", description: "Handle id from async_run" },
+        }, ["handleId"]),
+      ] : []),
       definition("skill_manage", "Create, edit, write a support file in, or delete an agent-owned skill", {
         action: { type: "string", enum: ["create", "edit", "write_file", "delete"], description: "Mutation action" },
         name: { type: "string", description: "Skill ID (lowercase slug); must match the frontmatter name in SKILL.md" },
@@ -265,11 +323,11 @@ export class McpAgentToolGateway implements AgentToolGateway {
         allow_free_text: { type: "boolean", description: "Whether the user may type a custom answer (default true)" },
         multi_select: { type: "boolean", description: "Whether the user may select multiple options (default false)" },
       }, ["question", "options"])] : []),
-      ...(this.subagentPort ? [definition("subagent", "Delegate a task to a connected ACP coding agent (Cursor, Codex, etc). The subagent runs with its own tools and repo access; its live stream appears in the side pane. Returns a summary when done. Config (model, mode) is set in Settings, not in the tool call.", {
+      ...(this.subagentPort ? [definition("subagent", "Delegate a task to a connected ACP coding agent. The subagent runs with its own tools and repo access; its live stream appears in the side pane. Returns a summary when done. Provider, model, and mode are set in Settings → ACP Agents, not in the tool call. Pass `async: true` to run the subagent in the background (returns a handleId immediately; use async_wait/peek/kill to manage it).", {
         prompt: { type: "string", description: "The task brief for the subagent (required)" },
-        provider_id: { type: "string", description: "Optional ACP provider override (e.g. \"cursor\", \"codex\"). Omit to use the default + fallback order from Settings." },
         title: { type: "string", description: "Optional label for the side pane and inline run card" },
         workspace: { type: "string", description: "Optional absolute cwd override; defaults to the conversation workspace, or the user home directory when unset. Never invent a path." },
+        async: { type: "boolean", description: "If true, run the subagent in the background and return a handleId immediately (default false). Use async_wait/peek/kill to manage the background handle." },
       }, ["prompt"])] : []),
       ...[...routes.entries()].map(([name, route]) => ({
         name,
@@ -279,7 +337,14 @@ export class McpAgentToolGateway implements AgentToolGateway {
     ];
   }
 
-  async execute(name: string, args: Readonly<Record<string, unknown>>, requestId: string, turnId: string, callId?: string): Promise<unknown> {
+  async execute(
+    name: string,
+    args: Readonly<Record<string, unknown>>,
+    requestId: string,
+    turnId: string,
+    callId?: string,
+    options?: { readonly signal?: AbortSignal },
+  ): Promise<unknown> {
     switch (name) {
       case "mcp_list": return this.listMcpPlugins();
       case "mcp_enable": return this.changeMcpState(args, true, turnId);
@@ -298,6 +363,66 @@ export class McpAgentToolGateway implements AgentToolGateway {
       case "skill_search": return execSkillSearch(this.skillRegistry, args);
       case "skill_read": return execSkillRead(this.skillRegistry, this.skillUsage, this.logger, args);
       case "memory": return execMemory(this.memoryStore, args);
+      case "todo": {
+        const result = await execTodo(this.todoPort, args, turnId, this.turnConversationId.get(turnId));
+        if (result && typeof result === "object" && "ok" in result && result.ok && "conversationId" in result && "items" in result) {
+          const r = result as unknown as { conversationId: string; items: readonly import("./agent-todo.js").AgentTodoItem[] };
+          this.todoEventPublisher?.(r.conversationId, r.items);
+        }
+        return result;
+      }
+      case "async_run": {
+        if (!this.asyncToolRuntime) {
+          return { ok: false, error: { code: "async_not_configured", message: "Async tool runtime is not available." } };
+        }
+        const conversationId = this.turnConversationId.get(turnId);
+        if (!conversationId) {
+          throw new ApplicationError("AGENT_INVALID_INPUT", "async_run requires a conversation context");
+        }
+        const toolName = typeof args.tool === "string" ? args.tool.trim() : "";
+        if (!toolName) {
+          throw new ApplicationError("AGENT_INVALID_INPUT", "async_run requires a non-empty 'tool' name");
+        }
+        const toolArgs = (args.args && typeof args.args === "object" ? args.args : {}) as Readonly<Record<string, unknown>>;
+        const turnSignal = options?.signal;
+        const runtime = this.asyncToolRuntime;
+        // Spawn the granted tool call as background work.
+        // The handle's abort signal is combined with the turn's signal so
+        // either kill or turn cancel aborts the in-flight MCP call.
+        // Progress notifications from the MCP server are piped into the
+        // handle's tail buffer for streaming peek.
+        return execAsyncRun(this.asyncToolRuntime, args, {
+          conversationId,
+          ...(turnId ? { traceId: turnId } : {}),
+          kind: "mcp",
+          spawnWork: (handleSignal: AbortSignal, handleId: string) => {
+            const combined = combineSignals(handleSignal, turnSignal);
+            return this.callGrantedTool(toolName, toolArgs, requestId, turnId, combined, (progress) => {
+              if (progress.message) {
+                runtime.appendTail(handleId, progress.message);
+              }
+            });
+          },
+        });
+      }
+      case "async_wait": {
+        if (!this.asyncToolRuntime) {
+          return { ok: false, error: { code: "async_not_configured", message: "Async tool runtime is not available." } };
+        }
+        return execAsyncWait(this.asyncToolRuntime, args, options?.signal);
+      }
+      case "async_peek": {
+        if (!this.asyncToolRuntime) {
+          return { ok: false, error: { code: "async_not_configured", message: "Async tool runtime is not available." } };
+        }
+        return execAsyncPeek(this.asyncToolRuntime, args);
+      }
+      case "async_kill": {
+        if (!this.asyncToolRuntime) {
+          return { ok: false, error: { code: "async_not_configured", message: "Async tool runtime is not available." } };
+        }
+        return execAsyncKill(this.asyncToolRuntime, args);
+      }
       case "skill_manage": return execSkillManage(this.skillRegistry, this.skillProvenance, this.skillUsage, this.approvalStaging, this.logger, this.writeOrigin, this.writeApprovalEnabled, args);
       case "job": {
         const providerId = this.turnProviderId.get(turnId);
@@ -311,8 +436,31 @@ export class McpAgentToolGateway implements AgentToolGateway {
       }
       case "pipeline": return execPipeline(this.pipelineStore, this.pipelineScheduler, args);
       case "ask_question": return execAskQuestion(this.askQuestions, this.isInteractive(turnId), args, callId ?? requestId, turnId);
-      case "subagent": return execSubagent(this.subagentPort, args, turnId, this.turnWorkspace.get(turnId), this.logger);
-      default: return this.callGrantedTool(name, args, requestId, turnId);
+      case "subagent": {
+        const isAsync = args.async === true;
+        if (isAsync && this.asyncToolRuntime) {
+          const conversationId = this.turnConversationId.get(turnId);
+          if (!conversationId) {
+            throw new ApplicationError("AGENT_INVALID_INPUT", "async subagent requires a conversation context");
+          }
+          const runtime = this.asyncToolRuntime;
+          const workspace = this.turnWorkspace.get(turnId);
+          return execAsyncRun(runtime, args, {
+            conversationId,
+            ...(turnId ? { traceId: turnId } : {}),
+            kind: "subagent",
+            spawnWork: (_handleSignal, handleId) => execSubagent(this.subagentPort, args, turnId, workspace, this.logger).then((result) => {
+              // Store the subagent result in the handle's tail for peek.
+              if (result && typeof result === "object" && "summary" in result) {
+                runtime.appendTail(handleId, String((result as { summary?: unknown }).summary ?? ""));
+              }
+              return result;
+            }),
+          });
+        }
+        return execSubagent(this.subagentPort, args, turnId, this.turnWorkspace.get(turnId), this.logger);
+      }
+      default: return this.callGrantedTool(name, args, requestId, turnId, options?.signal);
     }
   }
 
@@ -498,8 +646,22 @@ export class McpAgentToolGateway implements AgentToolGateway {
     };
   }
 
-  private async callGrantedTool(name: string, args: Readonly<Record<string, unknown>>, requestId: string, turnId: string): Promise<unknown> {
-    const route = this.routesFor(turnId).get(name);
+  private async callGrantedTool(
+    name: string,
+    args: Readonly<Record<string, unknown>>,
+    requestId: string,
+    turnId: string,
+    signal?: AbortSignal,
+    onProgress?: (progress: { progress: number; total?: number | undefined; message?: string | undefined }) => void,
+  ): Promise<unknown> {
+    let route = this.routesFor(turnId).get(name);
+    if (!route) {
+      route = await this.resolveRunningToolRoute(name);
+      if (route) {
+        // Auto-grant for the rest of this turn so subsequent rounds advertise the schema.
+        this.routesFor(turnId).set(name, route);
+      }
+    }
     if (!route) {
       this.logger?.warn("Agent MCP tool rejected (not in allowlist) tool=%s turnId=%s", name, turnId);
       throw new ApplicationError("AGENT_TOOL_NOT_ALLOWED", "AI provider requested a tool outside the MCP allowlist", { name });
@@ -510,16 +672,59 @@ export class McpAgentToolGateway implements AgentToolGateway {
       try {
         await this.runtimeManager.syncWorkspace?.(parsePluginId(route.pluginId), workspace);
       } catch (error) {
-        this.logger?.warn("Workspace sync failed for plugin %s: %s", route.pluginId, error instanceof Error ? error.message : String(error));
+        const msg = error instanceof Error ? error.message : String(error);
+        this.logger?.warn("Workspace sync failed for plugin %s: %s", route.pluginId, msg);
+        // C4: fail-fast with a clear error rather than silently running the
+        // tool against a stale workspace (wrong file context).
+        throw new ApplicationError("WORKSPACE_SYNC_FAILED", `Workspace sync failed for plugin ${route.pluginId}: ${msg}`, {
+          pluginId: route.pluginId,
+          workspace,
+          cause: msg,
+        });
       }
     }
     const calls = this.activeCalls.get(turnId);
     calls?.set(requestId, route.pluginId);
     try {
-      return await this.runtimeManager.callTool(parsePluginId(route.pluginId), { requestId, toolName: route.toolName, args: wrappedArgs });
+      return await this.runtimeManager.callTool(
+        parsePluginId(route.pluginId),
+        { requestId, toolName: route.toolName, args: wrappedArgs, ...(onProgress ? { onProgress } : {}) },
+        signal,
+      );
     } finally {
       calls?.delete(requestId);
     }
+  }
+
+  /**
+   * Resolve an ungranted `mcp_<plugin>_<tool>` name against currently running
+   * plugins. Used when the model recalls a tool from a prior turn without
+   * re-running `tool_schema`. Idle/stopped plugins are never matched.
+   */
+  private async resolveRunningToolRoute(name: string): Promise<McpToolRoute | undefined> {
+    const plugins = await this.runtimeManager.listPlugins();
+    for (const plugin of plugins) {
+      if (plugin.state !== "running") continue;
+      let tools: Awaited<ReturnType<PluginRuntimeManager["listTools"]>>;
+      try {
+        tools = await this.runtimeManager.listTools(parsePluginId(plugin.pluginId));
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.logger?.warn("Lazy MCP resolve skipped plugin=%s: %s", plugin.pluginId, msg);
+        continue;
+      }
+      for (const tool of tools) {
+        if (toProviderToolName(plugin.pluginId, tool.name) !== name) continue;
+        const inputSchema = tool.inputSchema ?? emptySchema;
+        return {
+          pluginId: plugin.pluginId,
+          toolName: tool.name,
+          inputSchema,
+          ...(tool.description ? { description: tool.description } : {}),
+        };
+      }
+    }
+    return undefined;
   }
 
   private routesFor(turnId: string): Map<string, McpToolRoute> {
@@ -534,4 +739,28 @@ export class McpAgentToolGateway implements AgentToolGateway {
   private isInteractive(turnId: string): boolean {
     return this.askQuestions !== undefined && this.turnInteractive.get(turnId) === true;
   }
+}
+
+/**
+ * Combine multiple abort signals into one. If any signal aborts, the combined
+ * signal aborts. Uses `AbortSignal.any` when available (Node 20+), otherwise
+ * falls back to a manual controller.
+ */
+function combineSignals(...signals: (AbortSignal | undefined)[]): AbortSignal | undefined {
+  const valid = signals.filter((s): s is AbortSignal => s !== undefined);
+  if (valid.length === 0) return undefined;
+  if (valid.length === 1) return valid[0];
+  // If any is already aborted, return an already-aborted signal.
+  const alreadyAborted = valid.find((s) => s.aborted);
+  if (alreadyAborted) return alreadyAborted;
+  // Use AbortSignal.any if available (Node 20+).
+  if (typeof (AbortSignal as unknown as { any?: unknown }).any === "function") {
+    return (AbortSignal as unknown as { any: (signals: AbortSignal[]) => AbortSignal }).any(valid);
+  }
+  // Fallback: manual controller.
+  const controller = new AbortController();
+  for (const signal of valid) {
+    signal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+  return controller.signal;
 }

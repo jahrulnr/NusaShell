@@ -129,6 +129,31 @@ describe("LearningGraphService.buildGraph", () => {
     expect(skillIds).not.toContain("inactive-user-skill");
   });
 
+  it("keeps builtin skills out of Learning even when they have usage activity", async () => {
+    const deps = makeDeps({
+      registry: {
+        list: async () => [fakeSummary("skill-creator"), fakeSummary("agent-skill")],
+        read: async () => ({ skillId: "", path: "", content: "", sizeBytes: 0, editable: false, truncated: false }),
+      } as unknown as SkillRegistryPort,
+      usage: {
+        listRecords: async () => [
+          fakeUsageRecord("skill-creator", { useCount: 8, viewCount: 3 }),
+          fakeUsageRecord("agent-skill", { useCount: 1 }),
+        ],
+        getRecord: async (id: string) => fakeUsageRecord(id),
+      } as unknown as SkillUsagePort,
+      provenance: {
+        get: async (id: string) => id === "skill-creator" ? "builtin" : "agent",
+      } as unknown as SkillProvenancePort,
+      memoryStore: { loadSnapshot: async () => fakeSnapshot() } as unknown as MemoryStorePort,
+    });
+    const graph = await new LearningGraphService(deps).buildGraph();
+    const skillIds = graph.nodes.filter((node) => node.kind === "skill").map((node) => node.id);
+
+    expect(skillIds).not.toContain("skill-creator");
+    expect(skillIds).toContain("agent-skill");
+  });
+
   it("excludes archived skills from the graph", async () => {
     const deps = makeDeps({
       registry: {

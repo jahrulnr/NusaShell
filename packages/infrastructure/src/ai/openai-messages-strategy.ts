@@ -16,8 +16,8 @@ import {
 export class MessagesApiStrategy implements ApiStrategy {
   readonly api = "messages" as const;
   readonly endpointPath = "messages";
-  readonly supportsStream = false;
-  readonly sseMode = "chat" as const;
+  readonly supportsStream = true;
+  readonly sseMode = "messages" as const;
 
   buildBody(
     request: AgentProviderRequest,

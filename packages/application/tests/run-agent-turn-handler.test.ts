@@ -197,4 +197,49 @@ describe("RunAgentTurnHandler lifecycle callbacks", () => {
     expect(superseded).toEqual([{ oldId: "trace-old", newId: "trace-new" }]);
     expect(ended).toEqual([{ traceId: "trace-new", reason: "completed" }]);
   });
+
+  it("projects sealed steps onto ActiveTurnProjection for the conversation", async () => {
+    const { InMemoryActiveTurnProjection } = await import("../src/index.js");
+    const provider = new ScriptedProvider([{ text: "final answer" }]);
+    const tools = new FakeToolGateway();
+    const activeTurns = new InMemoryActiveTurnProjection();
+    const progress: string[] = [];
+    const handler = new RunAgentTurnHandler(
+      makeRegistry(provider),
+      tools,
+      "scripted",
+      RUNTIME,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      activeTurns,
+      (snap) => { progress.push(`${snap.traceId}:${snap.steps.length}`); },
+    );
+    const pending = handler.handle({
+      kind: "run-agent-turn",
+      traceId: "trace-proj",
+      conversationId: "conv-1",
+      messages: [{ role: "user", content: "hi" }],
+      pluginIds: [],
+    });
+    // Mid-turn snapshot exists before completion finishes clearing it.
+    await Promise.resolve();
+    const result = await pending;
+    expect(result.text).toBe("final answer");
+    // Cleared on finally after success.
+    expect(activeTurns.get("conv-1")).toBeUndefined();
+    expect(progress.some((p) => p.startsWith("trace-proj:"))).toBe(true);
+  });
 });

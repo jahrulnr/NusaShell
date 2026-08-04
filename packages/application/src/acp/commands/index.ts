@@ -12,3 +12,5 @@ export type { EnsureAcpSessionCommand, EnsureAcpSessionResult } from "./ensure-a
 export { EnsureAcpSessionHandler } from "./ensure-acp-session/ensure-acp-session.handler.js";
 export type { ProbeAcpProviderCommand, ProbeAcpProviderResult } from "./probe-acp-provider/probe-acp-provider.command.js";
 export { ProbeAcpProviderHandler } from "./probe-acp-provider/probe-acp-provider.handler.js";
+export type { ImportAcpModelsCommand, ImportAcpModelsResult } from "./import-acp-models/import-acp-models.command.js";
+export { ImportAcpModelsHandler } from "./import-acp-models/import-acp-models.handler.js";

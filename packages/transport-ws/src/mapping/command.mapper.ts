@@ -11,6 +11,8 @@ import type {
   RunAgentTurnCommand,
   CancelAgentTurnCommand,
   AnswerAskQuestionCommand,
+  ManageTodosCommand,
+  KillToolJobCommand,
   AddJobCommand,
   UpdateJobCommand,
   SetJobEnabledCommand,
@@ -28,11 +30,12 @@ import type {
   SetAcpConfigOptionCommand,
   EnsureAcpSessionCommand,
   ProbeAcpProviderCommand,
+  ToolJobListQuery,
 } from "@nusashell/application";
 
 export function mapToCommand(request: ParsedRequest):
-  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | SetPluginAutostartCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand | CancelAgentTurnCommand | AnswerAskQuestionCommand | AddJobCommand | UpdateJobCommand | SetJobEnabledCommand | RunJobNowCommand | CancelJobCommand | RemoveJobCommand | AddPipelineCommand | UpdatePipelineCommand | RemovePipelineCommand | RunPipelineCommand | RunAcpTurnCommand | CancelAcpTurnCommand | AnswerAcpPermissionCommand | AnswerAcpAskCommand | SetAcpConfigOptionCommand | EnsureAcpSessionCommand | ProbeAcpProviderCommand }
-  | { kind: "query" } {
+  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | SetPluginAutostartCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand | CancelAgentTurnCommand | AnswerAskQuestionCommand | ManageTodosCommand | KillToolJobCommand | AddJobCommand | UpdateJobCommand | SetJobEnabledCommand | RunJobNowCommand | CancelJobCommand | RemoveJobCommand | AddPipelineCommand | UpdatePipelineCommand | RemovePipelineCommand | RunPipelineCommand | RunAcpTurnCommand | CancelAcpTurnCommand | AnswerAcpPermissionCommand | AnswerAcpAskCommand | SetAcpConfigOptionCommand | EnsureAcpSessionCommand | ProbeAcpProviderCommand }
+  | { kind: "query"; query?: ToolJobListQuery } {
   switch (request.method) {
     case "plugin.start":
       return {
@@ -140,6 +143,51 @@ export function mapToCommand(request: ParsedRequest):
           ...(request.payload.optionIds !== undefined ? { optionIds: request.payload.optionIds } : {}),
           ...(request.payload.text !== undefined ? { text: request.payload.text } : {}),
         } as AnswerAskQuestionCommand,
+      };
+    case "agent.todos_set":
+      return {
+        kind: "command",
+        command: {
+          kind: "manage-todos",
+          conversationId: request.payload.conversationId,
+          action: "set",
+          ...(Array.isArray(request.payload.items) ? { items: request.payload.items } : {}),
+        } as ManageTodosCommand,
+      };
+    case "agent.todos_get":
+      return {
+        kind: "command",
+        command: {
+          kind: "manage-todos",
+          conversationId: request.payload.conversationId,
+          action: "get",
+        } as ManageTodosCommand,
+      };
+    case "agent.todos_delete":
+      return {
+        kind: "command",
+        command: {
+          kind: "manage-todos",
+          conversationId: request.payload.conversationId,
+          action: "delete",
+          ...(Array.isArray(request.payload.ids) ? { ids: request.payload.ids } : {}),
+        } as ManageTodosCommand,
+      };
+    case "agent.tool_job_list":
+      return {
+        kind: "query",
+        query: {
+          kind: "tool-job-list",
+          conversationId: request.payload.conversationId,
+        },
+      };
+    case "agent.tool_job_kill":
+      return {
+        kind: "command",
+        command: {
+          kind: "kill-tool-job",
+          handleId: request.payload.handleId,
+        },
       };
     case "job.add":
       return {

@@ -21,6 +21,10 @@ import {
   RunAgentTurnHandler,
   CancelAgentTurnHandler,
   AnswerAskQuestionHandler,
+  ManageTodosHandler,
+  KillToolJobHandler,
+  GetActiveTurnHandler,
+  ToolJobListHandler,
   AddJobHandler,
   UpdateJobHandler,
   SetJobEnabledHandler,
@@ -42,6 +46,7 @@ import {
   SetAcpConfigOptionHandler,
   EnsureAcpSessionHandler,
   ProbeAcpProviderHandler,
+  ImportAcpModelsHandler,
   GetAcpSessionInfoHandler,
   SystemPingHandler,
   SystemVersionHandler,
@@ -59,11 +64,13 @@ import {
   createAgentTurnEndEvent,
   createAgentTurnSupersededEvent,
   createAgentCancelRequestedEvent,
+  createAgentTodoUpdatedEvent,
 } from "@nusashell/application";
 import { SystemClock, type Logger } from "@nusashell/infrastructure";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ContainerOptions } from "../container.js";
+import type { SubagentPortImpl } from "./subagent-port-impl.js";
 import type { PluginRuntimeParts } from "./plugin-runtime.js";
 import type { SkillsRuntimeParts } from "./skills-runtime.js";
 import type { AgentRuntimeParts } from "./agent-runtime.js";
@@ -86,6 +93,7 @@ export function registerBuses(
   jobs: JobRuntimeParts,
   acp: AcpRuntimeParts,
   aiConfiguration: AiConfigurationPort,
+  subagentPort?: SubagentPortImpl,
 ): BusParts {
   const commandBus = new CommandBus();
   commandBus.register("start-plugin", new StartPluginHandler(plugin.runtimeManager));
@@ -141,12 +149,23 @@ export function registerBuses(
       void eventDispatcher.publish(agent.withStreamSeq(createAgentTurnSupersededEvent(oldTraceId, newTraceId)));
     },
     agent.runtimeOsProbe,
+    agent.activeTurns,
+    undefined,
+    subagentPort,
+    agent.conversationTodos,
   ));
   commandBus.register("cancel-agent-turn", new CancelAgentTurnHandler(
     agent.agentTurnCoordinator,
     (traceId) => { void eventDispatcher.publish(agent.withStreamSeq(createAgentCancelRequestedEvent(traceId))); },
   ));
   commandBus.register("answer-ask-question", new AnswerAskQuestionHandler(agent.askQuestionService));
+  commandBus.register("manage-todos", new ManageTodosHandler(
+    agent.conversationTodos,
+    (conversationId, items) => {
+      void eventDispatcher.publish(createAgentTodoUpdatedEvent(conversationId, items));
+    },
+  ));
+  commandBus.register("kill-tool-job", new KillToolJobHandler(agent.asyncToolRuntime));
   commandBus.register("add-job", new AddJobHandler(jobs.jobStore));
   commandBus.register("update-job", new UpdateJobHandler(jobs.jobStore));
   commandBus.register("set-job-enabled", new SetJobEnabledHandler(jobs.jobStore));
@@ -166,6 +185,7 @@ export function registerBuses(
   commandBus.register("set-acp-config-option", new SetAcpConfigOptionHandler(acp.acpSessionService));
   commandBus.register("ensure-acp-session", new EnsureAcpSessionHandler(acp.acpSessionService));
   commandBus.register("probe-acp-provider", new ProbeAcpProviderHandler(acp.acpClient));
+  commandBus.register("import-acp-models", new ImportAcpModelsHandler(acp.acpSessionService));
   commandBus.register("configure-ai", new ConfigureAiHandler(aiConfiguration));
   commandBus.register("configure-ai-runtime", new ConfigureAiRuntimeHandler(aiConfiguration));
   commandBus.register("remove-ai", new RemoveAiHandler(aiConfiguration));
@@ -204,6 +224,8 @@ export function registerBuses(
     queryBus.register("list-pipelines", new ListPipelinesHandler(jobs.pipelineStore));
   }
   queryBus.register("get-acp-session-info", new GetAcpSessionInfoHandler(acp.acpSessionService));
+  queryBus.register("get-active-turn", new GetActiveTurnHandler(agent.activeTurns));
+  queryBus.register("tool-job-list", new ToolJobListHandler(agent.asyncToolRuntime));
 
   return { commandBus, queryBus };
 }

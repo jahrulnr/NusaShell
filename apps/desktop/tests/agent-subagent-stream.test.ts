@@ -5,6 +5,9 @@ import { AgentConversationController } from "../src/renderer/agent-conversation-
 
 function installDom() {
   document.body.innerHTML = `
+    <input id="agent-input">
+    <button id="agent-send-btn"></button>
+    <button id="agent-stop-btn"></button>
     <aside id="agent-subpane" hidden>
       <div id="agent-subpane-overlay" hidden></div>
       <span id="agent-subpane-badge"></span>
@@ -67,6 +70,67 @@ describe("AgentConversationController — subagent stream pane", () => {
       "ok",
       expect.objectContaining({ summary: "Done", steps: [{ type: "text", content: "Completed output" }] }),
     );
+  });
+});
+
+describe("AgentConversationController — conversation-scoped composer state", () => {
+  beforeEach(() => installDom());
+
+  it("allows New conversation while another turn is running", async () => {
+    const createConversation = vi.fn().mockResolvedValue({ id: "conversation-b", messages: [] });
+    const controller = new AgentConversationController({
+      shell: { agentConversations: { create: createConversation } },
+    } as never);
+    controller.conversation = { id: "conversation-a", messages: [{ role: "user", content: "Working" }] } as never;
+    controller.turnPending = true;
+    controller.resetComposerForConversation = vi.fn();
+    controller.renderThread = vi.fn();
+    controller.updateWorkspaceLabel = vi.fn();
+    controller.updateContextStatus = vi.fn();
+    controller.updateAcpStatus = vi.fn();
+    controller.refresh = vi.fn().mockResolvedValue(undefined);
+
+    await controller.create(undefined, { bypassTurnGuard: true });
+
+    expect(createConversation).toHaveBeenCalledOnce();
+    expect(controller.activeId).toBe("conversation-b");
+  });
+
+  it("resets composer controls when switching away from a running conversation", () => {
+    const controller = new AgentConversationController({} as never);
+    const input = document.querySelector<HTMLInputElement>("#agent-input")!;
+    const send = document.querySelector<HTMLButtonElement>("#agent-send-btn")!;
+    const stop = document.querySelector<HTMLButtonElement>("#agent-stop-btn")!;
+
+    controller.turnPending = true;
+    controller.turnOwnerConversationId = "conversation-a";
+    input.disabled = true;
+    send.disabled = true;
+    stop.hidden = false;
+    stop.classList.add("is-stopping");
+
+    controller.resetComposerForConversation("conversation-b");
+
+    expect(input.disabled).toBe(false);
+    expect(send.disabled).toBe(false);
+    expect(stop.hidden).toBe(true);
+    expect(stop.disabled).toBe(false);
+    expect(stop.classList.contains("is-stopping")).toBe(false);
+  });
+
+  it("keeps the stop state when the active conversation owns the turn", () => {
+    const controller = new AgentConversationController({} as never);
+    const input = document.querySelector<HTMLInputElement>("#agent-input")!;
+    const send = document.querySelector<HTMLButtonElement>("#agent-send-btn")!;
+    const stop = document.querySelector<HTMLButtonElement>("#agent-stop-btn")!;
+
+    controller.turnPending = true;
+    controller.turnOwnerConversationId = "conversation-a";
+    controller.resetComposerForConversation("conversation-a");
+
+    expect(input.disabled).toBe(true);
+    expect(send.disabled).toBe(true);
+    expect(stop.hidden).toBe(false);
   });
 });
 
@@ -204,5 +268,101 @@ describe("AgentConversationController — in-chat subagent mini stream", () => {
 
     const rows = card.querySelectorAll(".agent-subagent-card-stream-row");
     expect(rows.length).toBe(50);
+  });
+
+  it("renders markdown HTML in thinking/text card stream rows", () => {
+    const controller = new AgentConversationController({} as never);
+    const card = controller.renderSubagentCard({ runId: "run-md", providerId: "gemini", title: "T", status: "running" });
+    document.body.appendChild(card);
+    controller.attachSubagentCardStream("run-md");
+    controller.appendCardStreamText("## Profile\n\n**Bold** line");
+
+    const textEl = card.querySelector(".agent-subagent-card-stream-row.is-text .agent-subagent-card-stream-text");
+    expect(textEl?.tagName).toBe("DIV");
+    expect(textEl?.querySelector("strong")?.textContent).toBe("Bold");
+    expect(textEl?.querySelector("h2")?.textContent).toBe("Profile");
+    // No raw markdown fences left for closed tokens.
+    expect(textEl?.textContent).not.toContain("**");
+    expect(textEl?.textContent).not.toContain("##");
+  });
+
+  it("strips markdown from compact tool summary lines", () => {
+    const controller = new AgentConversationController({} as never);
+    const card = controller.renderSubagentCard({ runId: "run-md2", providerId: "gemini", title: "T", status: "running" });
+    document.body.appendChild(card);
+    controller.attachSubagentCardStream("run-md2");
+    controller.appendCardStreamToolCall({ id: "tc-md", title: "Update topic", status: "running", args: {} });
+    controller.updateCardStreamToolCall("tc-md", "ok", '## 📁 Topic: **Create Personal Profile Page**');
+
+    const text = card.querySelector(".agent-subagent-card-stream-row.is-tool .agent-subagent-card-stream-text")?.textContent ?? "";
+    expect(text).toContain("Topic:");
+    expect(text).toContain("Create Personal Profile Page");
+    expect(text).not.toContain("##");
+    expect(text).not.toContain("**");
+  });
+
+  it("does not reset the live stream when the card still closes over the tool callId", () => {
+    const controller = new AgentConversationController({
+      shell: {
+        agentConversations: {
+          upsertSubagentRun: vi.fn().mockResolvedValue({ id: "conv-live", messages: [], subagentRuns: [] }),
+          setActiveSubagentRun: vi.fn().mockResolvedValue({ id: "conv-live", messages: [], subagentRuns: [] }),
+        },
+      },
+    } as never);
+    controller.conversation = { id: "conv-live", messages: [] } as never;
+
+    // Parent tool card is keyed by tool call id until run_started rewrites dataset.runId.
+    const card = controller.createStreamingToolCard("call-tool-1", "subagent", {
+      prompt: "Fix it",
+      title: "Refactor",
+      provider_id: "gemini",
+    });
+    document.body.appendChild(card);
+    controller.handleSubagentRunStarted({
+      runId: "acp-run-1",
+      providerId: "gemini",
+      title: "Refactor",
+      prompt: "Fix it",
+    });
+    controller.appendSubpaneText("Live sidebar body");
+    expect(document.querySelector("#agent-subpane-body")?.textContent).toContain("Live sidebar body");
+    expect(controller.subagentStreamState?.runId).toBe("acp-run-1");
+
+    // Click uses dataset.runId (real) after attach; even if callId was used, mount must not wipe.
+    card.querySelector(".agent-subagent-card-head")?.dispatchEvent(new Event("click"));
+
+    expect(controller.subagentStreamState?.runId).toBe("acp-run-1");
+    expect(document.querySelector("#agent-subpane-body")?.textContent).toContain("Live sidebar body");
+  });
+
+  it("recreates a running subagent card after renderThread (chat switch)", () => {
+    document.body.innerHTML += `<div id="agent-thread"></div>`;
+    const controller = new AgentConversationController({} as never);
+    controller.conversation = {
+      id: "conv-switch",
+      kind: "agent",
+      messages: [{ role: "user", content: "make a profile", id: "m1" }],
+      subagentRuns: [{
+        runId: "run-switch",
+        providerId: "gemini",
+        title: "Web Profile HTML",
+        status: "running",
+        steps: [],
+      }],
+      activeSubagentRunId: "run-switch",
+    } as never;
+    controller.subagentOwnerConversationId = "conv-switch";
+    controller.resetSubagentStreamState([], "run-switch");
+    controller.subagentStreamState!.textContent = "Rebuilt on return";
+    controller.subagentStreamState!.lastKind = "text";
+
+    controller.renderThread();
+
+    const card = document.querySelector(".agent-subagent-card[data-run-id=\"run-switch\"]");
+    expect(card).not.toBeNull();
+    expect(card?.querySelector(".agent-subagent-card-status")?.textContent).toMatch(/RUNNING/i);
+    // Rebuilt mini stream should show the live text snapshot.
+    expect(card?.querySelector(".agent-subagent-card-stream-row.is-text")?.textContent).toContain("Rebuilt on return");
   });
 });

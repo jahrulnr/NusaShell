@@ -62,3 +62,45 @@ export async function cancelAgentTurn(traceId) {
 export async function answerAskQuestion(payload) {
   return sendRequest("agent.ask_answer", payload, 30000);
 }
+
+/**
+ * Fetch the application-layer mid-turn projection for a conversation.
+ * Used to rehydrate the Working draft after a chat switch.
+ */
+export async function getActiveTurn(conversationId) {
+  return sendRequest("agent.get_active_turn", { conversationId }, 15000);
+}
+
+/**
+ * Replace the conversation todo list (user-initiated from the strip UI).
+ */
+export async function setTodos(conversationId, items) {
+  return sendRequest("agent.todos_set", { conversationId, items }, 15000);
+}
+
+/**
+ * Delete specific todo items by id (user-initiated from the strip UI).
+ */
+export async function deleteTodos(conversationId, ids) {
+  return sendRequest("agent.todos_delete", { conversationId, ids }, 15000);
+}
+
+/** Fetch the current checklist so the strip can recover after a late mount. */
+export async function getTodos(conversationId) {
+  const result = await sendRequest("agent.todos_get", { conversationId }, 15000);
+  return result?.items ?? [];
+}
+
+/**
+ * List active async tool jobs for a conversation (rehydrate on chat switch).
+ */
+export async function listToolJobs(conversationId) {
+  return sendRequest("agent.tool_job_list", { conversationId }, 15000);
+}
+
+/**
+ * Kill a background tool job by handleId (user-initiated from the job card).
+ */
+export async function killToolJob(handleId) {
+  return sendRequest("agent.tool_job_kill", { handleId }, 15000);
+}

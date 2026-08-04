@@ -174,7 +174,7 @@ function drainBuffer(session, clear = true) {
   return { stdout, stderr: "" };
 }
 
-function runExec({ command, cwd, timeoutMs }) {
+function runExec({ command, cwd, timeoutMs }, extra) {
   return new Promise((resolve, reject) => {
     if (typeof command !== "string" || !command.trim()) {
       reject(new Error("command is required"));
@@ -189,6 +189,20 @@ function runExec({ command, cwd, timeoutMs }) {
     let stderr = "";
     let killed = false;
     const max = MAX_BUFFER_CHARS;
+    const progressToken = extra?._meta?.progressToken;
+    const signal = extra?.signal;
+    let progressSeq = 0;
+
+    const sendProgress = (text) => {
+      if (progressToken === undefined) return;
+      progressSeq++;
+      const chunk = text.slice(-2000);
+      extra.sendNotification({
+        method: "notifications/progress",
+        params: { progressToken, progress: progressSeq, message: chunk },
+      }).catch(() => {});
+    };
+
     const timer = timeoutMs
       ? setTimeout(() => {
           killed = true;
@@ -196,15 +210,35 @@ function runExec({ command, cwd, timeoutMs }) {
         }, timeoutMs)
       : null;
 
-    child.stdout.on("data", (chunk) => { stdout = trimBuffer(stdout + chunk.toString()); });
-    child.stderr.on("data", (chunk) => { stderr = trimBuffer(stderr + chunk.toString()); });
+    // If the abort signal fires (async_kill / turn cancel), kill the child process.
+    const onAbort = () => {
+      killed = true;
+      try { child.kill("SIGKILL"); } catch {}
+    };
+    if (signal) {
+      if (signal.aborted) { onAbort(); }
+      else { signal.addEventListener("abort", onAbort, { once: true }); }
+    }
+
+    child.stdout.on("data", (chunk) => {
+      const text = chunk.toString();
+      stdout = trimBuffer(stdout + text);
+      sendProgress(text);
+    });
+    child.stderr.on("data", (chunk) => {
+      const text = chunk.toString();
+      stderr = trimBuffer(stderr + text);
+      sendProgress(text);
+    });
     child.on("error", (err) => {
       if (timer) clearTimeout(timer);
+      if (signal) signal.removeEventListener("abort", onAbort);
       reject(err);
     });
-    child.on("close", (code, signal) => {
+    child.on("close", (code, signalName) => {
       if (timer) clearTimeout(timer);
-      resolve({ stdout, stderr, exitCode: code, signal, timedOut: killed, cwd: resolvedCwd, shell });
+      if (signal) signal.removeEventListener("abort", onAbort);
+      resolve({ stdout, stderr, exitCode: code, signal: signalName, timedOut: killed, cwd: resolvedCwd, shell });
     });
   });
 }
@@ -293,13 +327,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   ],
 }));
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
   const { name, arguments: args = {} } = request.params;
   try {
     switch (name) {
       case "terminal_exec": {
         const timeoutMs = Number.isFinite(args.timeoutMs) ? Math.max(0, Math.floor(args.timeoutMs)) : null;
-        const result = await runExec({ command: args.command, cwd: args.cwd, timeoutMs });
+        const result = await runExec({ command: args.command, cwd: args.cwd, timeoutMs }, extra);
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
       case "terminal_open": {

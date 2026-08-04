@@ -64,6 +64,12 @@ export interface ContainerOptions {
   readonly dbPath?: string;
   readonly logLevel?: string;
   readonly logFile?: string;
+  /**
+   * When false, the WebSocket server is created (for type compatibility) but
+   * never started. Desktop uses IPC instead; WS is kept off the product path.
+   * Default: true (preserve existing behavior for non-desktop callers).
+   */
+  readonly startWsServer?: boolean;
   readonly loggerObserver?: LogObserver;
   readonly resolvePluginRuntimeEnvironment?: (
     pluginId: string,
@@ -186,12 +192,14 @@ export function createContainer(options: ContainerOptions): Container {
     agent.agentToolGateway.bindPipelines(jobs.pipelineStore, jobs.pipelineScheduler);
   }
   const acp = createAcpRuntime(options, logger, eventDispatcher, agent);
+  let subagentPort: SubagentPortImpl | undefined;
   if (options.acpProviderResolver) {
-    agent.agentToolGateway.bindSubagent(new SubagentPortImpl(options.acpProviderResolver, acp.acpSessionService, eventDispatcher, logger));
+    subagentPort = new SubagentPortImpl(options.acpProviderResolver, acp.acpSessionService, eventDispatcher, logger);
+    agent.agentToolGateway.bindSubagent(subagentPort);
   }
 
   const aiConfiguration = createAiConfiguration(options, logger, agent);
-  const buses = registerBuses(options, logger, eventDispatcher, clock, plugin, skills, agent, jobs, acp, aiConfiguration);
+  const buses = registerBuses(options, logger, eventDispatcher, clock, plugin, skills, agent, jobs, acp, aiConfiguration, subagentPort);
   if (plugin.pluginInstaller && options.userPluginsRoot) {
     agent.agentToolGateway.bindPluginRegistration({
       installer: plugin.pluginInstaller,

@@ -9,7 +9,7 @@ export class SseTransportError extends Error {
 
 export async function parseOpenAiSse(
   response: Response,
-  api: "chat" | "responses",
+  api: "chat" | "responses" | "messages",
   onTextDelta: ((delta: string) => void) | undefined,
   onReasoningDelta: ((delta: string) => void) | undefined,
   maxBytes: number,
@@ -23,6 +23,7 @@ export async function parseOpenAiSse(
   let finalPayload: unknown;
   const chat = new ChatAccumulator(onTextDelta, onReasoningDelta);
   const responses = new ResponsesAccumulator(onTextDelta, onReasoningDelta);
+  const messages = new MessagesAccumulator(onTextDelta, onReasoningDelta);
   const acceptBlock = (block: string) => {
     const lines = block.split(/\r?\n/);
     const data = lines
@@ -47,6 +48,10 @@ export async function parseOpenAiSse(
     if (api === "chat") {
       chat.accept(event, eventType);
       if (chat.completed) completed = true;
+    } else if (api === "messages") {
+      const accepted = messages.accept(event, eventType);
+      if (accepted.completed) completed = true;
+      if (accepted.finalPayload !== undefined) finalPayload = accepted.finalPayload;
     } else {
       const accepted = responses.accept(event);
       if (accepted.completed) completed = true;
@@ -72,7 +77,9 @@ export async function parseOpenAiSse(
   if (buffer.trim()) acceptBlock(buffer);
 
   if (!completed) throw new SseTransportError("SSE stream ended before completion");
-  return finalPayload ?? (api === "chat" ? chat.payload() : responses.payload());
+  if (api === "chat") return finalPayload ?? chat.payload();
+  if (api === "messages") return finalPayload ?? messages.payload();
+  return finalPayload ?? responses.payload();
 }
 
 class ChatAccumulator {
@@ -261,6 +268,149 @@ class ResponsesAccumulator {
 
 export function parseStreamingToolArguments(calls: readonly AgentToolCall[]): readonly AgentToolCall[] {
   return calls;
+}
+
+/**
+ * Accumulator for Anthropic Messages API SSE stream format.
+ *
+ * Anthropic SSE uses typed events:
+ * - `message_start` → message metadata
+ * - `content_block_start` → new content block (text, thinking, tool_use)
+ * - `content_block_delta` → incremental delta for a content block
+ *   - `text_delta` → text content
+ *   - `thinking_delta` → thinking/reasoning content
+ *   - `input_json_delta` → partial tool use input JSON
+ * - `content_block_stop` → content block complete
+ * - `message_delta` → message-level delta (stop_reason, usage)
+ * - `message_stop` → stream complete
+ *
+ * Some OpenAI-compatible proxies that accept Messages API body format
+ * still return OpenAI Chat completions SSE format. In that case, the
+ * ChatAccumulator would be used instead (sseMode = "chat").
+ */
+class MessagesAccumulator {
+  private text = "";
+  private reasoning = "";
+  private model = "";
+  private stopReason = "";
+  private usage: unknown;
+  private readonly contentBlocks = new Map<number, { type: string; text?: string; thinking?: string; toolUseId?: string; toolName?: string; toolInput?: string }>();
+  completed = false;
+
+  constructor(
+    private readonly onTextDelta?: (delta: string) => void,
+    private readonly onReasoningDelta?: (delta: string) => void,
+  ) {}
+
+  accept(value: unknown, eventType?: string): { completed: boolean; finalPayload?: unknown } {
+    const event = record(value);
+    const type = textValue(event.type) || eventType || "";
+
+    if (type === "message_start") {
+      const message = record(event.message);
+      if (typeof message.model === "string") this.model = message.model;
+      if (message.usage !== undefined) this.usage = message.usage;
+      return { completed: false };
+    }
+
+    if (type === "content_block_start") {
+      const index = numberValue(event.index);
+      const block = record(event.content_block);
+      // Store block metadata only (type, tool id/name). Do NOT store
+      // initial text/thinking from content_block_start — some proxies
+      // (e.g. Blackbox) include initial content here AND repeat it in
+      // the first content_block_delta, which would double-count.
+      // Deltas are the source of truth for streaming content.
+      this.contentBlocks.set(index, {
+        type: textValue(block.type),
+        ...(typeof block.id === "string" ? { toolUseId: block.id } : {}),
+        ...(typeof block.name === "string" ? { toolName: block.name } : {}),
+      });
+      return { completed: false };
+    }
+
+    if (type === "content_block_delta") {
+      const index = numberValue(event.index);
+      const delta = record(event.delta);
+      const deltaType = textValue(delta.type);
+      const block = this.contentBlocks.get(index) ?? { type: "" };
+
+      if (deltaType === "text_delta") {
+        const text = textValue(delta.text);
+        if (text) {
+          this.text += text;
+          block.text = (block.text ?? "") + text;
+          this.contentBlocks.set(index, block);
+          this.onTextDelta?.(text);
+        }
+      } else if (deltaType === "thinking_delta") {
+        const thinking = textValue(delta.thinking);
+        if (thinking) {
+          this.reasoning += thinking;
+          block.thinking = (block.thinking ?? "") + thinking;
+          this.contentBlocks.set(index, block);
+          this.onReasoningDelta?.(thinking);
+        }
+      } else if (deltaType === "input_json_delta") {
+        const partialJson = textValue(delta.partial_json);
+        if (partialJson) {
+          block.toolInput = (block.toolInput ?? "") + partialJson;
+          this.contentBlocks.set(index, block);
+        }
+      }
+      return { completed: false };
+    }
+
+    if (type === "content_block_stop") {
+      // Content block complete — nothing to do, data already accumulated
+      return { completed: false };
+    }
+
+    if (type === "message_delta") {
+      const delta = record(event.delta);
+      if (typeof delta.stop_reason === "string") this.stopReason = delta.stop_reason;
+      if (event.usage !== undefined) this.usage = event.usage;
+      return { completed: false };
+    }
+
+    if (type === "message_stop") {
+      this.completed = true;
+      return { completed: true, finalPayload: this.payload() };
+    }
+
+    if (type === "error") {
+      const error = record(event.error);
+      throw new SseTransportError(`Messages SSE error: ${textValue(error.message) || textValue(event.message) || "unknown"}`);
+    }
+
+    return { completed: false };
+  }
+
+  payload(): unknown {
+    const content: Record<string, unknown>[] = [];
+    const sortedBlocks = [...this.contentBlocks.entries()].sort(([a], [b]) => a - b);
+    for (const [, block] of sortedBlocks) {
+      if (block.type === "text" && block.text) {
+        content.push({ type: "text", text: block.text });
+      } else if ((block.type === "thinking" || block.type === "reasoning") && block.thinking) {
+        content.push({ type: block.type, thinking: block.thinking });
+      } else if (block.type === "tool_use" && block.toolName) {
+        let input: unknown = {};
+        try {
+          input = block.toolInput ? JSON.parse(block.toolInput) : {};
+        } catch {
+          input = {};
+        }
+        content.push({ type: "tool_use", id: block.toolUseId ?? "", name: block.toolName, input });
+      }
+    }
+    return {
+      model: this.model,
+      content,
+      ...(this.stopReason ? { stop_reason: this.stopReason } : {}),
+      ...(this.usage !== undefined ? { usage: this.usage } : {}),
+    };
+  }
 }
 
 function record(value: unknown): Record<string, unknown> {

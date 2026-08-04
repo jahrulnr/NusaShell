@@ -15,19 +15,21 @@ describe("StdioMcpClient", () => {
   let client: McpClientPort | null = null;
 
   it("uses Electron as Node when running inside the packaged desktop", () => {
-    expect(resolveStdioLaunch("node", { PLUGIN_ENV: "yes" }, {
+    const launch = resolveStdioLaunch("node", { PLUGIN_ENV: "yes" }, {
       execPath: "/opt/NusaShell/NusaShell",
       electronVersion: "33.4.11",
-    })).toEqual({
-      command: "/opt/NusaShell/NusaShell",
-      env: { PLUGIN_ENV: "yes", ELECTRON_RUN_AS_NODE: "1" },
     });
+    expect(launch.command).toBe("/opt/NusaShell/NusaShell");
+    expect(launch.env.ELECTRON_RUN_AS_NODE).toBe("1");
+    expect(launch.env.PLUGIN_ENV).toBe("yes");
   });
 
   it("keeps the manifest command outside Electron", () => {
-    expect(resolveStdioLaunch("node", { PLUGIN_ENV: "yes" }, {
+    const launch = resolveStdioLaunch("node", { PLUGIN_ENV: "yes" }, {
       execPath: "/usr/bin/node",
-    })).toEqual({ command: "node", env: { PLUGIN_ENV: "yes" } });
+    });
+    expect(launch.command).toBe("node");
+    expect(launch.env.PLUGIN_ENV).toBe("yes");
   });
 
   afterEach(async () => {

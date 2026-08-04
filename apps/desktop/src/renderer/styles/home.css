@@ -15,7 +15,6 @@
   letter-spacing: -0.01em;
   margin: 0 0 4px;
 }
-.wave { display: inline-block; }
 .subtitle {
   font-size: 13px;
   color: var(--text-dim);
@@ -57,26 +56,6 @@
 }
 .tab:hover { color: var(--text); }
 .tab.active { background: var(--accent); color: white; }
-.tab-add {
-  width: 30px;
-  padding: 7px 0;
-  text-align: center;
-  color: var(--text-faint);
-}
-
-.customize-btn {
-  border: 1px solid var(--border);
-  background: var(--panel-alt);
-  color: var(--text-dim);
-  font-size: 12.5px;
-  font-weight: 600;
-  padding: 9px 16px;
-  border-radius: 10px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: border-color .15s, color .15s;
-}
-.customize-btn:hover { border-color: var(--accent); color: var(--text); }
 
 /* ============ App grid ============ */
 .app-grid {
@@ -122,37 +101,11 @@
 }
 .plugin-icon-glyph { line-height: 1; }
 
-.bg-white { background: #f4f6fb; }
 .bg-blue  { background: linear-gradient(160deg, #4d7cff, #3257d6); }
-.bg-purple{ background: linear-gradient(160deg, #9d7bff, #7c56e6); }
-.bg-black { background: #14171c; border: 1px solid #262b33; }
-.bg-red   { background: linear-gradient(160deg, #ff6b7a, #e6394f); }
 .bg-dashed{
   background: transparent;
   border: 1.5px dashed var(--border);
   color: var(--text-faint);
-}
-
-.cal-num {
-  position: absolute;
-  font-family: 'Inter', sans-serif;
-  font-weight: 800;
-  font-size: 18px;
-  color: white;
-}
-
-.pinwheel {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  background: conic-gradient(
-    #ff6b7a 0deg 60deg,
-    #ffb648 60deg 120deg,
-    #ffe066 120deg 180deg,
-    #5fd18c 180deg 240deg,
-    #4d9bff 240deg 300deg,
-    #b06bff 300deg 360deg
-  );
 }
 
 .app-name {
@@ -179,7 +132,6 @@
   box-shadow: 0 0 0 3px rgba(47,191,113,0.15);
 }
 
-.app-cell-add .app-name { color: var(--text-faint); }
 .app-grid-empty { grid-column: 1 / -1; padding: 28px 4px; color: var(--text-faint); font-size: 12.5px; }
 
 /* ============ Scrollbars ============ */
@@ -189,27 +141,4 @@
 *::-webkit-scrollbar-thumb { border: 3px solid var(--scrollbar-track); border-radius: 999px; background: var(--scrollbar-thumb); }
 *::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
 *::-webkit-scrollbar-corner { background: var(--scrollbar-track); }
-
-/* ============ Add Plugin button ============ */
-.add-plugin-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 10px;
-  border-radius: 9px;
-  border: 1px dashed var(--border);
-  background: transparent;
-  color: var(--text-dim);
-  font-size: 13px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  transition: border-color .15s, color .15s, background .15s;
-  margin-top: 12px;
-}
-.add-plugin-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: var(--accent-soft);
-}
 

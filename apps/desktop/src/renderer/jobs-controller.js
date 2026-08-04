@@ -454,7 +454,7 @@ export class JobsController {
     this.els.toolFields.hidden = isAgent;
     this.els.toolFields.setAttribute("aria-hidden", String(isAgent));
     this.els.modeHelp.textContent = isAgent
-      ? "Uses an AI model to run a headless agent turn. Costs tokens."
+      ? "Uses a model to run a task without opening a window. Uses tokens."
       : "Calls one plugin tool with fixed args — no AI model, no tokens.";
   }
 

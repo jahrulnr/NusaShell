@@ -95,7 +95,7 @@ Vertical navigation on the left, ordered Home, Agent, Skills, Learning, Plugins,
   - Section: Sidebar
   - Type: nav item
   - Action: Switches the main content to the Learning journey view.
-  - Related: Learning timeline (`#learning-timeline-list`), Constellation graph (`#learning-constellation-svg`), Node content editor (`#learning-detail-editor`)
+  - Related: Learning timeline (`#learning-timeline-list`), Constellation graph (`#learning-constellation-canvas`), Node content editor (`#learning-detail-editor`)
 
 - **Plugins navigation** (`[data-view="plugins"].nav-item`):
   - Section: Sidebar

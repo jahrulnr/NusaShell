@@ -103,6 +103,10 @@ export interface CallToolOptions {
   readonly toolName: string;
   readonly args: Readonly<Record<string, unknown>>;
   readonly timeoutMs?: number;
+  /** When provided, the call rejects with TOOL_CALL_CANCELLED if the signal aborts. */
+  readonly signal?: AbortSignal;
+  /** Progress notification callback (MCP `notifications/progress`). */
+  readonly onProgress?: (progress: { progress: number; total?: number | undefined; message?: string | undefined }) => void;
 }
 
 export interface PluginView {

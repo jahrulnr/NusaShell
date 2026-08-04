@@ -2,6 +2,8 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { access } from "node:fs/promises";
 import type {
+  AcpConfigOptionSummary,
+  AcpModelOption,
   AcpProviderConfig,
   AcpProviderManifest,
   AcpProviderPublic,
@@ -9,6 +11,8 @@ import type {
   AcpRoutingPublic,
   AcpRoutingSettings,
 } from "../shared/acp-provider-contract.js";
+import type { LoggerPort } from "@nusashell/application";
+import { computeAcpTryOrder } from "./acp-routing-order.js";
 
 const ACP_PROVIDER_MANIFESTS: readonly AcpProviderManifest[] = [
   {
@@ -23,6 +27,7 @@ const ACP_PROVIDER_MANIFESTS: readonly AcpProviderManifest[] = [
     // Users can still pick cursor_login under Configure for a fresh login.
     authMethodIds: ["cursor_login"],
     preferredConfig: { mode: "agent" },
+    defaultMode: "agent",
     unverified: false,
   },
   {
@@ -49,6 +54,7 @@ const ACP_PROVIDER_MANIFESTS: readonly AcpProviderManifest[] = [
     env: { NO_BROWSER: "1", INITIAL_AGENT_MODE: "agent" },
     // ACP exposes this as agent-full-access; it is Codex's YOLO equivalent.
     preferredConfig: { mode: "agent-full-access" },
+    defaultMode: "agent-full-access",
     unverified: true,
   },
   {
@@ -64,9 +70,15 @@ const ACP_PROVIDER_MANIFESTS: readonly AcpProviderManifest[] = [
     id: "gemini",
     displayName: "Gemini",
     monogram: "GM",
-    description: "Google Gemini ACP agent.",
-    command: "gemini",
-    args: ["--experimental-acp"],
+    description: "Google Gemini CLI ACP agent.",
+    command: process.env.NUSASHELL_GEMINI_BIN ?? "gemini",
+    args: ["--acp"],
+    // Gemini CLI 0.53.1+ advertises these auth methods; session/new succeeds
+    // without explicit authenticate when a cached OAuth token exists.
+    authMethodIds: ["oauth-personal", "gemini-api-key", "vertex-ai", "gateway"],
+    // `yolo` is Gemini's bypass equivalent (auto-apply all tool permissions).
+    preferredConfig: { mode: "yolo" },
+    defaultMode: "yolo",
     unverified: true,
   },
 ];
@@ -78,6 +90,7 @@ export class AcpProviderStore {
   constructor(
     private readonly path: string,
     private readonly routingPath: string,
+    private readonly logger?: LoggerPort,
   ) {}
 
   async list(): Promise<readonly AcpProviderPublic[]> {
@@ -115,6 +128,9 @@ export class AcpProviderStore {
           ...((savedConfig?.preferredConfig ?? manifest.preferredConfig)
             ? { preferredConfig: savedConfig?.preferredConfig ?? manifest.preferredConfig }
             : {}),
+          ...(savedConfig?.models ? { models: savedConfig.models } : {}),
+          ...(savedConfig?.defaultModelId ? { defaultModelId: savedConfig.defaultModelId } : {}),
+          ...(savedConfig?.configOptions ? { configOptions: savedConfig.configOptions } : {}),
         },
         detected,
         status,
@@ -151,12 +167,47 @@ export class AcpProviderStore {
       ...(input.preferredConfig !== undefined || existing?.preferredConfig !== undefined
         ? { preferredConfig: input.preferredConfig !== undefined ? input.preferredConfig : existing?.preferredConfig }
         : {}),
+      ...(input.models !== undefined || existing?.models !== undefined
+        ? { models: input.models !== undefined ? input.models : existing?.models }
+        : {}),
+      ...(input.defaultModelId !== undefined || existing?.defaultModelId !== undefined
+        ? { defaultModelId: input.defaultModelId !== undefined ? input.defaultModelId : existing?.defaultModelId }
+        : {}),
+      ...(input.configOptions !== undefined || existing?.configOptions !== undefined
+        ? { configOptions: input.configOptions !== undefined ? input.configOptions : existing?.configOptions }
+        : {}),
     };
     const configs = existing
       ? current.map((item) => item.providerId === input.providerId ? next : item)
       : [next, ...current];
     await this.persist(configs);
     return this.list();
+  }
+
+  /**
+   * Set the default model for a provider: mirror it into `preferredConfig.model`
+   * and persist `defaultModelId` so the detail view can show the selection.
+   */
+  async setDefaultModel(providerId: string, modelId: string): Promise<readonly AcpProviderPublic[]> {
+    const provider = await this.getEffective(providerId);
+    const preferredConfig = {
+      ...(provider?.config.preferredConfig ?? {}),
+      model: modelId,
+    };
+    return this.save({ providerId, defaultModelId: modelId, preferredConfig });
+  }
+
+  /**
+   * Set the default mode (bypass/yolo) for a provider: mirror it into
+   * `preferredConfig.mode` and persist so subagent runs inherit it.
+   */
+  async setDefaultMode(providerId: string, mode: string): Promise<readonly AcpProviderPublic[]> {
+    const provider = await this.getEffective(providerId);
+    const preferredConfig = {
+      ...(provider?.config.preferredConfig ?? {}),
+      mode,
+    };
+    return this.save({ providerId, preferredConfig });
   }
 
   async getEffective(providerId: string): Promise<AcpProviderPublic | null> {
@@ -167,34 +218,14 @@ export class AcpProviderStore {
   async getRouting(): Promise<AcpRoutingPublic> {
     const routing = await this.loadRouting();
     const providers = await this.list();
-    // Enabled + connected only. Auth alone is not enough — a disabled provider
-    // must not enter the subagent try-order.
     const connected = providers
       .filter((p) => p.config.enabled && p.config.authStatus === "connected")
       .map((p) => p.manifest.id);
-    const connectedSet = new Set(connected);
-    const order: string[] = [];
-    const seen = new Set<string>();
-    if (routing.defaultProviderId && connectedSet.has(routing.defaultProviderId)) {
-      order.push(routing.defaultProviderId);
-      seen.add(routing.defaultProviderId);
-    }
-    for (const id of routing.fallbackProviderIds ?? []) {
-      if (connectedSet.has(id) && !seen.has(id)) {
-        order.push(id);
-        seen.add(id);
-      }
-    }
-    // No routing file / empty default+fallback is the common case today — the
-    // Settings UI connects providers but never writes acp-routing.json. Fall
-    // back to every remaining connected provider in manifest list order so
-    // subagent does not report "no ACP providers" while cards show Connected.
-    for (const id of connected) {
-      if (!seen.has(id)) {
-        order.push(id);
-        seen.add(id);
-      }
-    }
+    const order = computeAcpTryOrder({
+      defaultProviderId: routing.defaultProviderId,
+      fallbackProviderIds: routing.fallbackProviderIds,
+      connectedIds: connected,
+    });
     return {
       ...(routing.defaultProviderId ? { defaultProviderId: routing.defaultProviderId } : {}),
       ...(routing.fallbackProviderIds ? { fallbackProviderIds: routing.fallbackProviderIds } : {}),
@@ -211,30 +242,10 @@ export class AcpProviderStore {
     return this.getRouting();
   }
 
-  /** Resolve the effective try-order for a subagent spawn, with optional override. */
-  async resolveTryOrder(providerIdOverride?: string): Promise<readonly string[]> {
+  /** Resolve the effective try-order for a subagent spawn. */
+  async resolveTryOrder(): Promise<readonly string[]> {
     const routing = await this.getRouting();
-    if (providerIdOverride) {
-      const providers = await this.list();
-      const connectedSet = new Set(
-        providers
-          .filter((p) => p.config.enabled && p.config.authStatus === "connected")
-          .map((p) => p.manifest.id),
-      );
-      const order: string[] = [];
-      const seen = new Set<string>();
-      if (connectedSet.has(providerIdOverride)) {
-        order.push(providerIdOverride);
-        seen.add(providerIdOverride);
-      }
-      for (const id of routing.tryOrder) {
-        if (!seen.has(id)) {
-          order.push(id);
-          seen.add(id);
-        }
-      }
-      return order;
-    }
+    this.logger?.info(`acp.resolveTryOrder tryOrder=[${routing.tryOrder.join(",")}]`);
     return routing.tryOrder;
   }
 
@@ -332,6 +343,53 @@ function normalizeConfigs(value: unknown): AcpProviderConfig[] {
       ...(candidate.preferredConfig && typeof candidate.preferredConfig === "object" && !Array.isArray(candidate.preferredConfig)
         ? { preferredConfig: normalizePreferredConfig(candidate.preferredConfig as Record<string, unknown>) }
         : {}),
+      ...(Array.isArray(candidate.models) ? { models: normalizeModels(candidate.models) } : {}),
+      ...(typeof candidate.defaultModelId === "string" && candidate.defaultModelId ? { defaultModelId: candidate.defaultModelId } : {}),
+      ...(Array.isArray(candidate.configOptions) ? { configOptions: normalizeConfigOptions(candidate.configOptions) } : {}),
+    }];
+  });
+}
+
+function normalizeModels(value: unknown): AcpModelOption[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (typeof item !== "object" || item === null) return [];
+    const candidate = item as Partial<AcpModelOption>;
+    if (typeof candidate.id !== "string" || typeof candidate.label !== "string") return [];
+    return [{
+      id: candidate.id,
+      label: candidate.label,
+      ...(typeof candidate.description === "string" ? { description: candidate.description } : {}),
+    }];
+  });
+}
+
+function normalizeConfigOptions(value: unknown): AcpConfigOptionSummary[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (typeof item !== "object" || item === null) return [];
+    const candidate = item as Partial<AcpConfigOptionSummary>;
+    if (typeof candidate.id !== "string" || typeof candidate.name !== "string") return [];
+    if (candidate.type !== "select" && candidate.type !== "boolean") return [];
+    const currentValue = candidate.currentValue;
+    if (candidate.type === "boolean") {
+      if (typeof currentValue !== "boolean") return [];
+    } else {
+      if (typeof currentValue !== "string") return [];
+    }
+    return [{
+      id: candidate.id,
+      name: candidate.name,
+      type: candidate.type,
+      currentValue,
+      ...(Array.isArray(candidate.options) ? { options: candidate.options.flatMap((opt) => {
+        if (typeof opt !== "object" || opt === null) return [];
+        const o = opt as { value?: unknown; name?: unknown; description?: unknown };
+        if (typeof o.value !== "string" || typeof o.name !== "string") return [];
+        return [{ value: o.value, name: o.name, ...(typeof o.description === "string" ? { description: o.description } : {}) }];
+      }) } : {}),
+      ...(typeof candidate.description === "string" ? { description: candidate.description } : {}),
+      ...(typeof candidate.category === "string" ? { category: candidate.category } : {}),
     }];
   });
 }

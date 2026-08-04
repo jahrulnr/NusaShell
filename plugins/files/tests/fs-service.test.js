@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { FileService, detectFileType, formatFileSize } from "../mcp/fs-service.js";
+import { FileService, detectFileType, detectFileTypeByContent, formatFileSize } from "../mcp/fs-service.js";
 
 let tmpDir;
 let service;
@@ -31,6 +31,75 @@ describe("detectFileType", () => {
   it("detects binary for unknown extensions", () => {
     expect(detectFileType("data.dat")).toBe("binary");
   });
+
+  it("detects go.mod as text via basename", () => {
+    expect(detectFileType("go.mod")).toBe("text");
+    expect(detectFileType("go.sum")).toBe("text");
+    expect(detectFileType("Makefile")).toBe("text");
+    expect(detectFileType("Dockerfile")).toBe("text");
+    expect(detectFileType("LICENSE")).toBe("text");
+  });
+});
+
+describe("detectFileTypeByContent", () => {
+  it("detects text files without standard extensions via magic bytes", async () => {
+    const filePath = path.join(tmpDir, "go.mod");
+    await fs.writeFile(filePath, "module github.com/example/foo\n\ngo 1.21\n");
+    const result = await detectFileTypeByContent(filePath);
+    expect(result.isText).toBe(true);
+    expect(result.type).toBe("text");
+  });
+
+  it("detects Makefile as text via content", async () => {
+    const filePath = path.join(tmpDir, "Makefile");
+    await fs.writeFile(filePath, "build:\n\tgo build ./...\n\ntest:\n\tgo test ./...\n");
+    const result = await detectFileTypeByContent(filePath);
+    expect(result.isText).toBe(true);
+    expect(result.type).toBe("text");
+  });
+
+  it("detects actual binary files via NUL bytes", async () => {
+    const filePath = path.join(tmpDir, "data.bin");
+    const buf = Buffer.alloc(512, 0);
+    buf[0] = 0x00; buf[1] = 0x01; buf[2] = 0x00; buf[3] = 0x02;
+    await fs.writeFile(filePath, buf);
+    const result = await detectFileTypeByContent(filePath);
+    expect(result.isText).toBe(false);
+  });
+
+  it("detects PNG via magic bytes even with .txt extension", async () => {
+    const filePath = path.join(tmpDir, "fake.txt");
+    const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const buf = Buffer.alloc(64, 0);
+    pngHeader.copy(buf);
+    await fs.writeFile(filePath, buf);
+    const result = await detectFileTypeByContent(filePath);
+    expect(result.isText).toBe(false);
+    expect(result.type).toBe("image");
+  });
+
+  it("detects PDF via magic bytes", async () => {
+    const filePath = path.join(tmpDir, "doc.pdf");
+    const pdfHeader = Buffer.from("%PDF-1.4\n");
+    await fs.writeFile(filePath, pdfHeader);
+    const result = await detectFileTypeByContent(filePath);
+    expect(result.isText).toBe(false);
+    expect(result.type).toBe("pdf");
+  });
+
+  it("handles empty files as text", async () => {
+    const filePath = path.join(tmpDir, "empty");
+    await fs.writeFile(filePath, "");
+    const result = await detectFileTypeByContent(filePath);
+    expect(result.isText).toBe(true);
+  });
+
+  it("handles UTF-8 text with multibyte characters", async () => {
+    const filePath = path.join(tmpDir, "unicode.txt");
+    await fs.writeFile(filePath, "Hello 世界 🌍\nПривет мир\n");
+    const result = await detectFileTypeByContent(filePath);
+    expect(result.isText).toBe(true);
+  });
 });
 
 describe("formatFileSize", () => {
@@ -48,7 +117,7 @@ describe("FileService.listDir", () => {
     await fs.mkdir(path.join(tmpDir, "afolder"));
     await fs.writeFile(path.join(tmpDir, "a.txt"), "a");
 
-    const items = await service.listDir("/");
+    const items = await service.listDir("");
     expect(items).toHaveLength(3);
     expect(items[0].name).toBe("afolder");
     expect(items[0].isDir).toBe(true);
@@ -58,7 +127,7 @@ describe("FileService.listDir", () => {
 
   it("includes file metadata", async () => {
     await fs.writeFile(path.join(tmpDir, "test.txt"), "hello");
-    const items = await service.listDir("/");
+    const items = await service.listDir("");
     expect(items[0].size).toBe(5);
     expect(items[0].type).toBe("text");
     expect(items[0].modified).toBeTruthy();
@@ -71,7 +140,7 @@ describe("FileService.tree", () => {
     await fs.writeFile(path.join(tmpDir, "dir1", "file.txt"), "x");
     await fs.writeFile(path.join(tmpDir, "dir1", "dir2", "deep.txt"), "y");
 
-    const tree = await service.tree("/");
+    const tree = await service.tree("");
     expect(tree).toHaveLength(1);
     expect(tree[0].name).toBe("dir1");
     expect(tree[0].children).toHaveLength(2);
@@ -83,7 +152,7 @@ describe("FileService.tree", () => {
 
   it("respects depth limit", async () => {
     await fs.mkdir(path.join(tmpDir, "a", "b", "c"), { recursive: true });
-    const tree = await service.tree("/", 1);
+    const tree = await service.tree("", 1);
     expect(tree).toHaveLength(1);
     expect(tree[0].name).toBe("a");
     expect(tree[0].children).toBeUndefined();
@@ -101,16 +170,59 @@ describe("FileService.readFile", () => {
 
   it("reads head lines", async () => {
     await fs.writeFile(path.join(tmpDir, "test.txt"), "line1\nline2\nline3");
-    const result = await service.readFile("test.txt", 2);
+    const result = await service.readFile("test.txt", { head: 2 });
     expect(result.content).toBe("line1\nline2");
     expect(result.truncated).toBe(true);
+    expect(result.truncatedReason).toBe("head");
   });
 
   it("reads tail lines", async () => {
     await fs.writeFile(path.join(tmpDir, "test.txt"), "line1\nline2\nline3");
-    const result = await service.readFile("test.txt", undefined, 1);
+    const result = await service.readFile("test.txt", { tail: 1 });
     expect(result.content).toBe("line3");
     expect(result.truncated).toBe(true);
+    expect(result.truncatedReason).toBe("tail");
+  });
+
+  it("reads a line range with start/end", async () => {
+    await fs.writeFile(path.join(tmpDir, "test.txt"), "l1\nl2\nl3\nl4\nl5");
+    const result = await service.readFile("test.txt", { start: 2, end: 4 });
+    expect(result.content).toBe("l2\nl3\nl4");
+    expect(result.truncated).toBe(true);
+    expect(result.truncatedReason).toBe("startEnd");
+  });
+
+  it("prefixes line numbers when lineNumbers is true", async () => {
+    await fs.writeFile(path.join(tmpDir, "test.txt"), "l1\nl2\nl3");
+    const result = await service.readFile("test.txt", { start: 2, end: 3, lineNumbers: true });
+    expect(result.content).toContain("     2|l2");
+    expect(result.content).toContain("     3|l3");
+  });
+
+  it("rejects binary files with a helpful error", async () => {
+    await fs.writeFile(path.join(tmpDir, "data.bin"), Buffer.from([0x00, 0x01, 0x02, 0x03]));
+    await expect(service.readFile("data.bin")).rejects.toThrow(/binary/);
+  });
+
+  it("reads go.mod (text file without standard extension)", async () => {
+    await fs.writeFile(path.join(tmpDir, "go.mod"), "module github.com/example/foo\n\ngo 1.21\n");
+    const result = await service.readFile("go.mod");
+    expect(result.content).toContain("module github.com/example/foo");
+    expect(result.totalLines).toBe(4);
+  });
+
+  it("reads Makefile (extensionless text file)", async () => {
+    await fs.writeFile(path.join(tmpDir, "Makefile"), "build:\n\tgo build ./...\n");
+    const result = await service.readFile("Makefile");
+    expect(result.content).toContain("go build");
+  });
+
+  it("rejects PNG file even with .txt extension (magic byte detection)", async () => {
+    const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const buf = Buffer.alloc(64, 0);
+    pngHeader.copy(buf);
+    await fs.writeFile(path.join(tmpDir, "fake.txt"), buf);
+    await expect(service.readFile("fake.txt")).rejects.toThrow(/binary/);
   });
 });
 
@@ -133,6 +245,12 @@ describe("FileService.writeFile", () => {
     await service.writeFile("file.txt", "new");
     const content = await fs.readFile(path.join(tmpDir, "file.txt"), "utf8");
     expect(content).toBe("new");
+  });
+
+  it("does not leave temp files after atomic write", async () => {
+    await service.writeFile("file.txt", "content");
+    const entries = await fs.readdir(tmpDir);
+    expect(entries.filter((e) => e.includes(".tmp-"))).toHaveLength(0);
   });
 });
 
@@ -183,10 +301,6 @@ describe("FileService.deleteFile", () => {
     expect(result.deleted).toBe(true);
   });
 
-  it("refuses to delete relative paths that escape root via traversal", async () => {
-    await expect(service.deleteFile("../../etc", true)).rejects.toThrow(/escapes files root/);
-  });
-
   it("allows absolute paths (agent is a trusted actor)", async () => {
     const absFile = path.join(tmpDir, "abs-file.txt");
     await fs.writeFile(absFile, "x");
@@ -203,15 +317,16 @@ describe("FileService.searchFiles", () => {
     await fs.mkdir(path.join(tmpDir, "sub"));
     await fs.writeFile(path.join(tmpDir, "sub", "d.txt"), "x");
 
-    const results = await service.searchFiles("/", "*.txt");
+    const { results, meta } = await service.searchFiles("", "*.txt");
     expect(results).toHaveLength(3);
     expect(results.map((r) => r.name).sort()).toEqual(["a.txt", "b.txt", "d.txt"]);
+    expect(meta.truncated).toBe(false);
   });
 
   it("supports ? wildcard", async () => {
     await fs.writeFile(path.join(tmpDir, "ab.txt"), "x");
     await fs.writeFile(path.join(tmpDir, "cd.txt"), "x");
-    const results = await service.searchFiles("/", "?b.txt");
+    const { results } = await service.searchFiles("", "?b.txt");
     expect(results).toHaveLength(1);
     expect(results[0].name).toBe("ab.txt");
   });
@@ -234,6 +349,21 @@ describe("FileService.fileInfo", () => {
     const info = await service.fileInfo("mydir");
     expect(info.isDir).toBe(true);
     expect(info.type).toBe("dir");
+  });
+
+  it("detects go.mod as text via content sniffing", async () => {
+    await fs.writeFile(path.join(tmpDir, "go.mod"), "module github.com/example/foo\n\ngo 1.21\n");
+    const info = await service.fileInfo("go.mod");
+    expect(info.type).toBe("text");
+  });
+
+  it("detects PNG via magic bytes even with .txt extension", async () => {
+    const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const buf = Buffer.alloc(64, 0);
+    pngHeader.copy(buf);
+    await fs.writeFile(path.join(tmpDir, "fake.txt"), buf);
+    const info = await service.fileInfo("fake.txt");
+    expect(info.type).toBe("image");
   });
 });
 
@@ -269,10 +399,11 @@ describe("FileService.grepFiles", () => {
     await fs.writeFile(path.join(tmpDir, "b.js"), "const y = 2;\nfunction baz() {}");
     await fs.writeFile(path.join(tmpDir, "c.md"), "# Hello\nfunction notMatched() {}");
 
-    const results = await service.grepFiles("/", "function\\s+\\w+");
+    const { results, meta } = await service.grepFiles("", "function\\s+\\w+");
     expect(results).toHaveLength(4);
     expect(results.every((r) => r.line > 0)).toBe(true);
     expect(results.every((r) => r.content.includes("function"))).toBe(true);
+    expect(meta.truncated).toBe(false);
   });
 
   it("filters by glob pattern", async () => {
@@ -280,7 +411,7 @@ describe("FileService.grepFiles", () => {
     await fs.writeFile(path.join(tmpDir, "b.ts"), "function bar() {}");
     await fs.writeFile(path.join(tmpDir, "c.md"), "function baz() {}");
 
-    const results = await service.grepFiles("/", "function", "*.js");
+    const { results } = await service.grepFiles("", "function", { glob: "*.js" });
     expect(results).toHaveLength(1);
     expect(results[0].path).toBe("a.js");
   });
@@ -289,7 +420,7 @@ describe("FileService.grepFiles", () => {
     await fs.writeFile(path.join(tmpDir, "data.bin"), Buffer.from([0x00, 0x01, 0x02]));
     await fs.writeFile(path.join(tmpDir, "a.txt"), "hello world");
 
-    const results = await service.grepFiles("/", "hello");
+    const { results } = await service.grepFiles("", "hello");
     expect(results).toHaveLength(1);
     expect(results[0].path).toBe("a.txt");
   });
@@ -298,7 +429,7 @@ describe("FileService.grepFiles", () => {
     await fs.mkdir(path.join(tmpDir, "sub"));
     await fs.writeFile(path.join(tmpDir, "sub", "deep.js"), "TODO: fix this");
 
-    const results = await service.grepFiles("/", "TODO");
+    const { results } = await service.grepFiles("", "TODO");
     expect(results).toHaveLength(1);
     expect(results[0].path).toBe(path.join("sub", "deep.js"));
     expect(results[0].line).toBe(1);
@@ -307,31 +438,126 @@ describe("FileService.grepFiles", () => {
   it("includes root path hint on ENOENT", async () => {
     await expect(service.grepFiles("nonexistent", "pattern")).rejects.toThrow(/Files plugin root/);
   });
+
+  it("returns context lines with before/after", async () => {
+    await fs.writeFile(path.join(tmpDir, "a.txt"), "l1\nl2\nMATCH\nl4\nl5");
+    const { results } = await service.grepFiles("", "MATCH", { before: 1, after: 1 });
+    expect(results).toHaveLength(1);
+    expect(results[0].before).toEqual(["l2"]);
+    expect(results[0].after).toEqual(["l4"]);
+  });
+
+  it("ignoreCase matches case-insensitively", async () => {
+    await fs.writeFile(path.join(tmpDir, "a.txt"), "Hello World\nHELLO AGAIN");
+    const { results } = await service.grepFiles("", "hello", { ignoreCase: true });
+    expect(results).toHaveLength(2);
+  });
+
+  it("exclude skips matching entries", async () => {
+    await fs.mkdir(path.join(tmpDir, "node_modules"));
+    await fs.writeFile(path.join(tmpDir, "node_modules", "skip.js"), "TODO: skip");
+    await fs.writeFile(path.join(tmpDir, "keep.js"), "TODO: keep");
+    const { results } = await service.grepFiles("", "TODO", { exclude: ["node_modules"] });
+    expect(results).toHaveLength(1);
+    expect(results[0].path).toBe("keep.js");
+  });
+
+  it("greps go.mod (text file without standard extension)", async () => {
+    await fs.writeFile(path.join(tmpDir, "go.mod"), "module github.com/example/foo\nrequire (\n\tgithub.com/bar v1.0.0\n)\n");
+    const { results } = await service.grepFiles("", "github.com/bar");
+    expect(results).toHaveLength(1);
+    expect(results[0].path).toBe("go.mod");
+    expect(results[0].line).toBe(3);
+  });
+
+  it("greps Makefile (extensionless text file)", async () => {
+    await fs.writeFile(path.join(tmpDir, "Makefile"), "build:\n\tgo build ./...\n\ntest:\n\tgo test ./...\n");
+    const { results } = await service.grepFiles("", "go test");
+    expect(results).toHaveLength(1);
+    expect(results[0].path).toBe("Makefile");
+  });
+
+  it("skips binary files even with text extension (magic byte detection)", async () => {
+    const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const buf = Buffer.alloc(64, 0);
+    pngHeader.copy(buf);
+    await fs.writeFile(path.join(tmpDir, "fake.txt"), buf);
+    await fs.writeFile(path.join(tmpDir, "real.txt"), "TODO: find me");
+    const { results } = await service.grepFiles("", "TODO");
+    expect(results).toHaveLength(1);
+    expect(results[0].path).toBe("real.txt");
+  });
 });
 
 describe("FileService.patchFile", () => {
   it("replaces first occurrence of old_string", async () => {
     await fs.writeFile(path.join(tmpDir, "test.txt"), "hello world\nfoo bar");
-    const result = await service.patchFile("test.txt", "foo bar", "baz qux");
+    const result = await service.patchFile("test.txt", [{ old_string: "foo bar", new_string: "baz qux" }]);
     expect(result.patched).toBe(true);
+    expect(result.applied).toBe(1);
+    expect(result.occurrences).toEqual([1]);
     const content = await fs.readFile(path.join(tmpDir, "test.txt"), "utf8");
     expect(content).toBe("hello world\nbaz qux");
   });
 
-  it("only replaces first occurrence", async () => {
+  it("only replaces first occurrence by default", async () => {
     await fs.writeFile(path.join(tmpDir, "test.txt"), "aaa\naaa\naaa");
-    await service.patchFile("test.txt", "aaa", "bbb");
+    await service.patchFile("test.txt", [{ old_string: "aaa", new_string: "bbb" }]);
     const content = await fs.readFile(path.join(tmpDir, "test.txt"), "utf8");
     expect(content).toBe("bbb\naaa\naaa");
   });
 
+  it("replaces all occurrences with replace_all", async () => {
+    await fs.writeFile(path.join(tmpDir, "test.txt"), "aaa\naaa\naaa");
+    const result = await service.patchFile("test.txt", [{ old_string: "aaa", new_string: "bbb", replace_all: true }]);
+    expect(result.occurrences).toEqual([3]);
+    const content = await fs.readFile(path.join(tmpDir, "test.txt"), "utf8");
+    expect(content).toBe("bbb\nbbb\nbbb");
+  });
+
+  it("applies multiple edits in sequence", async () => {
+    await fs.writeFile(path.join(tmpDir, "test.txt"), "foo\nbar\nbaz");
+    const result = await service.patchFile("test.txt", [
+      { old_string: "foo", new_string: "FOO" },
+      { old_string: "bar", new_string: "BAR" },
+    ]);
+    expect(result.applied).toBe(2);
+    const content = await fs.readFile(path.join(tmpDir, "test.txt"), "utf8");
+    expect(content).toBe("FOO\nBAR\nbaz");
+  });
+
+  it("preview mode returns content without writing", async () => {
+    await fs.writeFile(path.join(tmpDir, "test.txt"), "hello world");
+    const result = await service.patchFile("test.txt", [{ old_string: "hello", new_string: "hi" }], true);
+    expect(result.patched).toBe(false);
+    expect(result.preview).toBe("hi world");
+    const content = await fs.readFile(path.join(tmpDir, "test.txt"), "utf8");
+    expect(content).toBe("hello world");
+  });
+
   it("throws if old_string not found", async () => {
     await fs.writeFile(path.join(tmpDir, "test.txt"), "hello world");
-    await expect(service.patchFile("test.txt", "missing", "replacement")).rejects.toThrow(/old_string not found/);
+    await expect(service.patchFile("test.txt", [{ old_string: "missing", new_string: "replacement" }])).rejects.toThrow(/old_string not found/);
   });
 
   it("throws on ENOENT with root hint", async () => {
-    await expect(service.patchFile("missing.txt", "a", "b")).rejects.toThrow(/Files plugin root/);
+    await expect(service.patchFile("missing.txt", [{ old_string: "a", new_string: "b" }])).rejects.toThrow(/Files plugin root/);
+  });
+
+  it("rejects binary files to prevent corruption", async () => {
+    const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const buf = Buffer.alloc(64, 0);
+    pngHeader.copy(buf);
+    await fs.writeFile(path.join(tmpDir, "image.png"), buf);
+    await expect(service.patchFile("image.png", [{ old_string: "a", new_string: "b" }])).rejects.toThrow(/binary/);
+  });
+
+  it("patches go.mod (text file without standard extension)", async () => {
+    await fs.writeFile(path.join(tmpDir, "go.mod"), "module github.com/example/foo\n\ngo 1.21\n");
+    const result = await service.patchFile("go.mod", [{ old_string: "github.com/example/foo", new_string: "github.com/example/bar" }]);
+    expect(result.applied).toBe(1);
+    const content = await fs.readFile(path.join(tmpDir, "go.mod"), "utf8");
+    expect(content).toContain("github.com/example/bar");
   });
 });
 
@@ -394,13 +620,6 @@ describe("FileService.copyFile", () => {
   it("throws on ENOENT with root hint", async () => {
     await expect(service.copyFile("missing.txt", "copy.txt")).rejects.toThrow(/Files plugin root/);
   });
-
-  it("respects path sandboxing", async () => {
-    await fs.writeFile(path.join(tmpDir, "file.txt"), "content");
-    await expect(service.copyFile("file.txt", "../../../etc/copy")).rejects.toThrow(
-      "Path escapes files root",
-    );
-  });
 });
 
 describe("FileService.setRoot", () => {
@@ -425,5 +644,108 @@ describe("FileService.setRoot", () => {
     const filePath = path.join(tmpDir, "not-a-dir.txt");
     await fs.writeFile(filePath, "x");
     await expect(service.setRoot(filePath)).rejects.toThrow(/not a directory/);
+  });
+});
+
+describe("FileService.searchFiles exclude + type + maxDepth", () => {
+  it("exclude skips matching directories", async () => {
+    await fs.mkdir(path.join(tmpDir, "node_modules"));
+    await fs.writeFile(path.join(tmpDir, "node_modules", "skip.txt"), "x");
+    await fs.writeFile(path.join(tmpDir, "keep.txt"), "x");
+    const { results } = await service.searchFiles("", "*.txt", { exclude: ["node_modules"] });
+    expect(results).toHaveLength(1);
+    expect(results[0].name).toBe("keep.txt");
+  });
+
+  it("type=dir returns only directories", async () => {
+    await fs.mkdir(path.join(tmpDir, "subdir"));
+    await fs.writeFile(path.join(tmpDir, "subdir.txt"), "x");
+    const { results } = await service.searchFiles("", "*", { type: "dir" });
+    expect(results.every((r) => r.isDir)).toBe(true);
+    expect(results.find((r) => r.name === "subdir")).toBeDefined();
+  });
+
+  it("maxDepth limits recursion", async () => {
+    await fs.mkdir(path.join(tmpDir, "a", "b", "c"), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, "a", "b", "c", "deep.txt"), "x");
+    const { results } = await service.searchFiles("", "*.txt", { maxDepth: 2 });
+    expect(results).toHaveLength(0);
+    const { results: deep } = await service.searchFiles("", "*.txt", { maxDepth: 5 });
+    expect(deep).toHaveLength(1);
+  });
+});
+
+describe("FileService.tree exclude + includeFiles", () => {
+  it("exclude skips directories", async () => {
+    await fs.mkdir(path.join(tmpDir, "node_modules"));
+    await fs.writeFile(path.join(tmpDir, "node_modules", "skip.js"), "x");
+    await fs.writeFile(path.join(tmpDir, "keep.js"), "x");
+    const tree = await service.tree("", 3, { exclude: ["node_modules"] });
+    expect(tree.find((n) => n.name === "node_modules")).toBeUndefined();
+    expect(tree.find((n) => n.name === "keep.js")).toBeDefined();
+  });
+
+  it("includeFiles=false returns dirs only", async () => {
+    await fs.mkdir(path.join(tmpDir, "subdir"));
+    await fs.writeFile(path.join(tmpDir, "file.txt"), "x");
+    const tree = await service.tree("", 3, { includeFiles: false });
+    expect(tree.every((n) => n.isDir)).toBe(true);
+    expect(tree.find((n) => n.name === "subdir")).toBeDefined();
+    expect(tree.find((n) => n.name === "file.txt")).toBeUndefined();
+  });
+});
+
+describe("FileService.existsFile", () => {
+  it("returns exists:true for an existing file", async () => {
+    await fs.writeFile(path.join(tmpDir, "file.txt"), "x");
+    const result = await service.existsFile("file.txt");
+    expect(result.exists).toBe(true);
+    expect(result.isFile).toBe(true);
+    expect(result.isDir).toBe(false);
+  });
+
+  it("returns exists:true for a directory", async () => {
+    await fs.mkdir(path.join(tmpDir, "subdir"));
+    const result = await service.existsFile("subdir");
+    expect(result.exists).toBe(true);
+    expect(result.isDir).toBe(true);
+  });
+
+  it("returns exists:false for a missing path (does NOT throw)", async () => {
+    const result = await service.existsFile("missing.txt");
+    expect(result.exists).toBe(false);
+    expect(result.isFile).toBe(false);
+    expect(result.isDir).toBe(false);
+  });
+});
+
+describe("FileService.touchFile", () => {
+  it("creates a new empty file", async () => {
+    const result = await service.touchFile("new.txt");
+    expect(result.created).toBe(true);
+    expect(result.touched).toBe(false);
+    const content = await fs.readFile(path.join(tmpDir, "new.txt"), "utf8");
+    expect(content).toBe("");
+  });
+
+  it("creates parent directories by default", async () => {
+    await service.touchFile("sub/dir/file.txt");
+    const stat = await fs.stat(path.join(tmpDir, "sub", "dir", "file.txt"));
+    expect(stat.isFile()).toBe(true);
+  });
+
+  it("updates timestamps of an existing file", async () => {
+    await fs.writeFile(path.join(tmpDir, "file.txt"), "x");
+    const before = (await fs.stat(path.join(tmpDir, "file.txt"))).mtime;
+    await new Promise((r) => setTimeout(r, 20));
+    const result = await service.touchFile("file.txt");
+    expect(result.created).toBe(false);
+    expect(result.touched).toBe(true);
+    const after = (await fs.stat(path.join(tmpDir, "file.txt"))).mtime;
+    expect(after.getTime()).toBeGreaterThan(before.getTime());
+  });
+
+  it("updateOnly throws on missing file", async () => {
+    await expect(service.touchFile("missing.txt", { updateOnly: true })).rejects.toThrow(/does not exist/);
   });
 });

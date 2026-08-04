@@ -21,5 +21,5 @@ export interface AcpResolverResult {
  */
 export interface AcpProviderResolverPort {
   /** Resolve the effective try-order and candidate descriptors. */
-  resolve(providerIdOverride?: string): Promise<AcpResolverResult>;
+  resolve(): Promise<AcpResolverResult>;
 }

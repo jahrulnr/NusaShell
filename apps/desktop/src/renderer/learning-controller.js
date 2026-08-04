@@ -1,4 +1,4 @@
-const NS = "http://www.w3.org/2000/svg";
+import { LearningSigmaGraph } from "./learning-sigma-graph.js";
 
 export class LearningController {
   constructor(shell) {
@@ -6,6 +6,9 @@ export class LearningController {
       this.graph = null;
       this.selectedNodeId = null;
       this.scrubberValue = 100;
+      this.zoom = 1;
+      this.sigmaGraph = null;
+      this.activeTab = "table";
 
       this.els = {
         statsSkills: document.getElementById("learning-stat-skills"),
@@ -15,7 +18,7 @@ export class LearningController {
         timelineList: document.getElementById("learning-timeline-list"),
         timelineCount: document.getElementById("learning-timeline-count"),
         empty: document.getElementById("learning-empty"),
-        svg: document.getElementById("learning-constellation-svg"),
+        graphCanvas: document.getElementById("learning-constellation-canvas"),
         constellationMeta: document.getElementById("learning-constellation-meta"),
         scrubber: document.getElementById("learning-scrubber"),
         scrubberValue: document.getElementById("learning-scrubber-value"),
@@ -24,9 +27,21 @@ export class LearningController {
         editor: document.getElementById("learning-detail-editor"),
         saveBtn: document.getElementById("learning-save-btn"),
         deleteBtn: document.getElementById("learning-delete-btn"),
+        detailActions: document.querySelector(".learning-detail .skills-editor-actions"),
+        detailStatus: document.querySelector(".learning-detail-status"),
         refreshBtn: document.getElementById("learning-refresh-btn"),
+        zoomIn: document.getElementById("learning-zoom-in"),
+        zoomOut: document.getElementById("learning-zoom-out"),
+        zoomReset: document.getElementById("learning-zoom-reset"),
+        zoomValue: document.getElementById("learning-zoom-value"),
+        constellationWrap: document.querySelector(".learning-constellation-svg-wrap"),
+        tabTable: document.getElementById("learning-tab-table"),
+        tabConnections: document.getElementById("learning-tab-connections"),
+        panelTable: document.getElementById("learning-panel-table"),
+        panelConnections: document.getElementById("learning-panel-connections"),
       };
 
+      this._clearSelection();
       this._bindEvents();
     }
 
@@ -37,6 +52,9 @@ export class LearningController {
     async refresh() {
       try {
         this.graph = await this.shell.learning.graph();
+        if (this.selectedNodeId && !this.graph.nodes.some((node) => node.id === this.selectedNodeId)) {
+          this._clearSelection();
+        }
         this._renderStats();
         this._renderTimeline();
         this._renderConstellation();
@@ -55,6 +73,31 @@ export class LearningController {
         this.els.scrubberValue.textContent = `${this.scrubberValue}%`;
         this._applyScrubber();
       });
+      this.els.zoomIn.addEventListener("click", () => this.sigmaGraph?.zoomIn());
+      this.els.zoomOut.addEventListener("click", () => this.sigmaGraph?.zoomOut());
+      this.els.zoomReset.addEventListener("click", () => this.sigmaGraph?.resetView());
+      this.els.tabTable.addEventListener("click", () => this._setTab("table"));
+      this.els.tabConnections.addEventListener("click", () => this._setTab("connections"));
+      window.addEventListener("resize", () => {
+        this.sigmaGraph?.resize();
+      });
+    }
+
+    _setTab(tab) {
+      this.activeTab = tab;
+      const connections = tab === "connections";
+      this.els.tabTable.classList.toggle("active", !connections);
+      this.els.tabConnections.classList.toggle("active", connections);
+      this.els.tabTable.setAttribute("aria-selected", String(!connections));
+      this.els.tabConnections.setAttribute("aria-selected", String(connections));
+      this.els.panelTable.hidden = connections;
+      this.els.panelConnections.hidden = !connections;
+      if (connections) {
+        requestAnimationFrame(() => {
+          this.sigmaGraph?.resize();
+          this.sigmaGraph?.resetView();
+        });
+      }
     }
 
     _renderStats() {
@@ -141,83 +184,27 @@ export class LearningController {
 
     _renderConstellation() {
       if (!this.graph) return;
-      const svg = this.els.svg;
-      svg.innerHTML = "";
-
       const nodes = this.graph.nodes;
       if (nodes.length === 0) {
         this.els.constellationMeta.textContent = "No nodes";
+        this.sigmaGraph?.destroy();
         return;
       }
 
       const edges = this.graph.edges;
-      this.els.constellationMeta.textContent = `${edges.length} edge${edges.length === 1 ? "" : "s"}`;
-
-      const timestamps = nodes.map((n) => n.timestamp ?? 0);
-      const minT = Math.min(...timestamps);
-      const maxT = Math.max(...timestamps);
-      const tRange = maxT - minT || 1;
-
-      const clusterMap = new Map();
-      this.graph.clusters.forEach((c, i) => clusterMap.set(c.category, i));
-      const clusterCount = Math.max(this.graph.clusters.length, 1);
-
-      const W = 600;
-      const H = 400;
-      const padX = 40;
-      const padY = 30;
-
-      const positions = new Map();
-      for (const node of nodes) {
-        const t = node.timestamp ?? 0;
-        const x = padX + ((t - minT) / tRange) * (W - 2 * padX);
-        const clusterIdx = clusterMap.get(node.category) ?? 0;
-        const y = padY + (clusterIdx / clusterCount) * (H - 2 * padY);
-        positions.set(node.id, { x, y });
+      this.els.constellationMeta.textContent = `Force layout · ${edges.length} edge${edges.length === 1 ? "" : "s"}`;
+      if (!this.sigmaGraph) {
+        this.sigmaGraph = new LearningSigmaGraph(this.els.graphCanvas, {
+          onNodeSelect: (nodeId) => nodeId ? void this._selectNode(nodeId) : this._clearSelection(),
+          onZoom: (percent) => {
+            this.zoom = percent / 100;
+            this.els.zoomValue.textContent = `${percent}%`;
+          },
+        });
       }
-
-      for (const edge of edges) {
-        const s = positions.get(edge.source);
-        const t = positions.get(edge.target);
-        if (!s || !t) continue;
-        const line = document.createElementNS(NS, "line");
-        line.setAttribute("x1", String(s.x));
-        line.setAttribute("y1", String(s.y));
-        line.setAttribute("x2", String(t.x));
-        line.setAttribute("y2", String(t.y));
-        line.classList.add("ledge");
-        line.dataset.source = edge.source;
-        line.dataset.target = edge.target;
-        svg.appendChild(line);
-      }
-
-      for (const node of nodes) {
-        const pos = positions.get(node.id);
-        if (!pos) continue;
-
-        const g = document.createElementNS(NS, "g");
-        g.classList.add("lnode");
-        if (node.kind === "memory") g.classList.add("memory");
-        if (node.state === "stale") g.classList.add("stale");
-        if (node.state === "archived") g.classList.add("archived");
-        if (node.id === this.selectedNodeId) g.classList.add("selected");
-        g.dataset.nodeId = node.id;
-
-        const circle = document.createElementNS(NS, "circle");
-        circle.setAttribute("cx", String(pos.x));
-        circle.setAttribute("cy", String(pos.y));
-        circle.setAttribute("r", "5");
-        g.appendChild(circle);
-
-        const text = document.createElementNS(NS, "text");
-        text.setAttribute("x", String(pos.x + 8));
-        text.setAttribute("y", String(pos.y + 3));
-        text.textContent = this._shortLabel(node.label, 18);
-        g.appendChild(text);
-
-        g.addEventListener("click", () => this._selectNode(node.id));
-        svg.appendChild(g);
-      }
+      this.sigmaGraph.mount(nodes, edges);
+      this.sigmaGraph.setSelected(this.selectedNodeId);
+      this.sigmaGraph.setScrubber(this.scrubberValue);
     }
 
     _renderScrubber() {
@@ -241,14 +228,7 @@ export class LearningController {
         }
       }
 
-      for (const g of this.els.svg.querySelectorAll(".lnode")) {
-        const id = g.dataset.nodeId;
-        g.classList.toggle("faded", !visibleIds.has(id));
-      }
-      for (const line of this.els.svg.querySelectorAll(".ledge")) {
-        const visible = visibleIds.has(line.dataset.source) && visibleIds.has(line.dataset.target);
-        line.classList.toggle("faded", !visible);
-      }
+      this.sigmaGraph?.setScrubber(this.scrubberValue);
 
       for (const item of this.els.timelineList.querySelectorAll(".learning-timeline-item")) {
         const id = item.dataset.nodeId;
@@ -256,15 +236,20 @@ export class LearningController {
       }
     }
 
+    _setZoom(value) {
+      if (value === 1) this.sigmaGraph?.resetView();
+      else if (value > this.zoom) this.sigmaGraph?.zoomIn();
+      else this.sigmaGraph?.zoomOut();
+    }
+
     async _selectNode(nodeId) {
       this.selectedNodeId = nodeId;
+      this._setStatus("");
 
       this.els.timelineList.querySelectorAll(".learning-timeline-item").forEach((el) => {
         el.classList.toggle("active", el.dataset.nodeId === nodeId);
       });
-      this.els.svg.querySelectorAll(".lnode").forEach((el) => {
-        el.classList.toggle("selected", el.dataset.nodeId === nodeId);
-      });
+      this.sigmaGraph?.setSelected(nodeId);
 
       try {
         const detail = await this.shell.learning.getNode(nodeId);
@@ -276,7 +261,10 @@ export class LearningController {
         this.els.saveBtn.disabled = !detail.editable;
         this.els.deleteBtn.disabled = false;
         this.els.deleteBtn.textContent = detail.kind === "skill" ? "Archive" : "Remove";
+        this.els.detailActions.hidden = false;
       } catch (err) {
+        this._clearSelection();
+        this._setStatus(`Could not load this node: ${err.message || err}`, "error");
         console.error("[learning] getNode failed:", err);
       }
     }
@@ -289,17 +277,19 @@ export class LearningController {
         const result = await this.shell.learning.editNode(this.selectedNodeId, content);
         if (result.ok) {
           this.els.saveBtn.disabled = false;
+          this._setStatus("Saved", "success");
           await this.refresh();
-          await this._selectNode(this.selectedNodeId);
+          if (this.selectedNodeId) await this._selectNode(this.selectedNodeId);
         } else {
           this.els.saveBtn.disabled = false;
-          alert(result.error || "Edit failed");
+          this._setStatus(result.error || "Could not save this node.", "error");
           if (result.code === "node_stale") {
             await this.refresh();
           }
         }
       } catch (err) {
         this.els.saveBtn.disabled = false;
+        this._setStatus(`Could not save this node: ${err.message || err}`, "error");
         console.error("[learning] edit failed:", err);
       }
     }
@@ -308,30 +298,100 @@ export class LearningController {
       if (!this.selectedNodeId) return;
       const detail = await this.shell.learning.getNode(this.selectedNodeId).catch(() => null);
       const word = detail?.kind === "skill" ? "archive" : "remove";
-      if (!confirm(`Are you sure you want to ${word} this ${detail?.kind ?? "node"}?`)) return;
+      const confirmed = await this._confirmMutation({
+        action: word,
+        kind: detail?.kind ?? "node",
+        label: detail?.label ?? this.selectedNodeId,
+      });
+      if (!confirmed) return;
 
       this.els.deleteBtn.disabled = true;
       try {
         const result = await this.shell.learning.deleteNode(this.selectedNodeId);
         if (result.ok) {
-          this.selectedNodeId = null;
-          this.els.detailEmpty.hidden = false;
-          this.els.editor.hidden = true;
-          this.els.deleteBtn.disabled = true;
-          this.els.saveBtn.disabled = true;
-          this.els.detailMeta.textContent = "Select a node";
+          this._clearSelection();
+          this._setStatus(detail?.kind === "skill" ? "Skill archived." : "Memory removed.", "success");
           await this.refresh();
         } else {
           this.els.deleteBtn.disabled = false;
-          alert(result.error || "Delete failed");
+          this._setStatus(result.error || `Could not ${word} this node.`, "error");
           if (result.code === "node_stale") {
             await this.refresh();
           }
         }
       } catch (err) {
         this.els.deleteBtn.disabled = false;
+        this._setStatus(`Could not ${word} this node: ${err.message || err}`, "error");
         console.error("[learning] delete failed:", err);
       }
+    }
+
+    _clearSelection() {
+      this.selectedNodeId = null;
+      if (!this.els) return;
+      this.els.detailEmpty.hidden = false;
+      this.els.editor.hidden = true;
+      this.els.editor.value = "";
+      this.els.editor.disabled = true;
+      this.els.deleteBtn.disabled = true;
+      this.els.saveBtn.disabled = true;
+      this.els.detailMeta.textContent = "Select a node";
+      this.els.detailActions.hidden = true;
+      this.els.timelineList?.querySelectorAll(".learning-timeline-item.active").forEach((el) => el.classList.remove("active"));
+      this.sigmaGraph?.setSelected(null);
+    }
+
+    _setStatus(message, type = "info") {
+      const status = this.els.detailStatus;
+      if (!status) return;
+      status.textContent = message;
+      status.hidden = !message;
+      status.dataset.type = type;
+    }
+
+    _confirmMutation({ action, kind, label }) {
+      return new Promise((resolve) => {
+        const overlay = document.createElement("div");
+        overlay.className = "learning-confirm-overlay";
+        const dialog = document.createElement("div");
+        dialog.className = "learning-confirm-dialog";
+        dialog.setAttribute("role", "dialog");
+        dialog.setAttribute("aria-modal", "true");
+        dialog.setAttribute("aria-label", `${action} ${kind}`);
+        const title = document.createElement("strong");
+        title.textContent = `${action === "archive" ? "Archive skill" : "Remove memory"}?`;
+        const copy = document.createElement("p");
+        copy.textContent = `${label} will ${action === "archive" ? "leave Learning and stay available in Archived skills" : "be removed from saved memory"}.`;
+        const actions = document.createElement("div");
+        actions.className = "learning-confirm-actions";
+        const cancel = document.createElement("button");
+        cancel.className = "mini-btn";
+        cancel.type = "button";
+        cancel.textContent = "Cancel";
+        const confirmButton = document.createElement("button");
+        confirmButton.className = "mini-btn danger";
+        confirmButton.type = "button";
+        confirmButton.textContent = action === "archive" ? "Archive" : "Remove";
+        actions.append(cancel, confirmButton);
+        dialog.append(title, copy, actions);
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+
+        const finish = (value) => {
+          overlay.remove();
+          resolve(value);
+        };
+        overlay.addEventListener("click", (event) => {
+          if (event.target === overlay) finish(false);
+        });
+        const onKeyDown = (event) => {
+          if (event.key === "Escape") finish(false);
+        };
+        overlay.addEventListener("keydown", onKeyDown);
+        cancel.addEventListener("click", () => finish(false));
+        confirmButton.addEventListener("click", () => finish(true));
+        confirmButton.focus();
+      });
     }
 
     _dayKey(timestamp) {

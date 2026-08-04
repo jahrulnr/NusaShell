@@ -33,7 +33,7 @@
           "type": "object",
           "properties": {
             "path": { "type": "string" },
-            "action": { "type": "string", "enum": ["write", "patch", "append", "mkdir"] }
+            "action": { "type": "string", "enum": ["write", "patch", "append", "mkdir", "touch"] }
           },
           "required": ["path", "action"]
         }

@@ -31,6 +31,8 @@ const FILES_PATH_FIELDS: Readonly<Record<string, readonly string[]>> = {
   files_append: ["path"],
   files_move: ["source", "destination"],
   files_copy: ["source", "destination"],
+  files_exists: ["path"],
+  files_touch: ["path"],
 };
 
 export interface WorkspaceToolWrapResult {
@@ -72,8 +74,8 @@ export function wrapTerminalArgs(
 /**
  * Rewrite relative path-shaped arguments for Files tools into absolute paths
  * under the workspace. Absolute paths, `/`, and empty values are preserved.
- * The Files server still enforces root containment, so an absolute path
- * outside the Files root is rejected (the "else need Phase 2/3" fallback).
+ * The Files server resolves paths predictably (no containment jail); see
+ * docs/architecture/security-boundary.md.
  */
 export function wrapFilesArgs(
   toolName: string,

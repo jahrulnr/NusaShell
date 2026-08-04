@@ -26,6 +26,11 @@ export interface BootstrapOptions {
    * orphan the reply.
    */
   readonly sealAgentTurn?: (conversationId: string, result: AgentTurnResult, options: { resume: boolean }) => Promise<void>;
+  /**
+   * When false, do not start the WebSocket server. Desktop sets this to false
+   * since the renderer uses IPC. Default: true.
+   */
+  readonly startWsServer?: boolean;
 }
 
 export interface BootstrapResult {
@@ -80,6 +85,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     ...(options.backgroundReview ? { backgroundReview: options.backgroundReview } : {}),
     ...(options.acpProviderResolver ? { acpProviderResolver: options.acpProviderResolver } : {}),
     ...(options.sealAgentTurn ? { sealAgentTurn: options.sealAgentTurn } : {}),
+    ...(options.startWsServer === false ? { startWsServer: false } : {}),
   });
   const shutdown = new ShutdownCoordinator(container);
 
@@ -87,7 +93,9 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
 
   container.jobScheduler.start();
 
-  await container.wsServer.start();
+  if (options.startWsServer !== false) {
+    await container.wsServer.start();
+  }
 
   process.on("SIGTERM", () => void shutdown.shutdown());
   process.on("SIGINT", () => void shutdown.shutdown());

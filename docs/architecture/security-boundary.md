@@ -48,13 +48,16 @@ installed plugins or models are "safe":
   through the shell (`docs/blueprint.md`, architecture locks).
 - **Process lifecycle:** spawn, stop, crash detection via
   `PluginRuntimeManager`.
-- **Bundled Files / Terminal path containment:** `resolvePath` (and related
-  guards) reject relative-path root escapes (`../` traversal) for those bundled
-  plugins. Absolute paths are accepted as-is — the agent is a trusted actor
+- **Bundled Terminal path containment:** `resolvePath` (and related guards)
+  reject relative-path root escapes (`../` traversal) for the bundled Terminal
+  plugin. Absolute paths are accepted as-is — the agent is a trusted actor
   operating on behalf of the user and may access any path the user can. The
   root is a convenience for relative path resolution, not a jail. This is a
-  correctness guard for those plugins, not a security certification of
-  third-party MCP servers.
+  correctness guard for that plugin, not a security certification of
+  third-party MCP servers. (The bundled Files plugin's containment was
+  reversed on 2026-08-04 — see
+  [`docs/architecture/plugin-sandbox-readiness.md`](./plugin-sandbox-readiness.md)
+  Finding 1.)
 - **`data_is_untrusted` labeling:** external tool/resource/docs content is
   marked so the model is instructed to treat it as data, not instructions.
   Labeling is not a filter or injection detector.

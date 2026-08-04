@@ -220,6 +220,74 @@ export const AgentAskAnswerRequestSchema = z.object({
   }),
 });
 
+export const AgentGetActiveTurnRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("agent.get_active_turn"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    conversationId: z.string().min(1).max(128),
+  }),
+});
+
+const TodoItemSchema = z.object({
+  id: z.string().min(1).max(128),
+  content: z.string().min(1).max(500),
+  status: z.enum(["pending", "in_progress", "completed"]),
+});
+
+export const AgentTodosSetRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("agent.todos_set"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    conversationId: z.string().min(1).max(128),
+    items: z.array(TodoItemSchema).max(50),
+  }),
+});
+
+export const AgentTodosDeleteRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("agent.todos_delete"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    conversationId: z.string().min(1).max(128),
+    ids: z.array(z.string().min(1).max(128)).max(50),
+  }),
+});
+
+export const AgentTodosGetRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("agent.todos_get"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    conversationId: z.string().min(1).max(128),
+  }),
+});
+
+export const AgentToolJobListRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("agent.tool_job_list"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    conversationId: z.string().min(1).max(128),
+  }),
+});
+
+export const AgentToolJobKillRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("agent.tool_job_kill"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    handleId: z.string().min(1).max(128),
+  }),
+});
+
 export const SystemPingRequestSchema = z.object({
   kind: z.literal("request"),
   id: z.string().min(1),
@@ -635,6 +703,12 @@ export const RequestSchema = z.discriminatedUnion("method", [
   AgentRunRequestSchema,
   AgentCancelRequestSchema,
   AgentAskAnswerRequestSchema,
+  AgentGetActiveTurnRequestSchema,
+  AgentTodosSetRequestSchema,
+  AgentTodosDeleteRequestSchema,
+  AgentTodosGetRequestSchema,
+  AgentToolJobListRequestSchema,
+  AgentToolJobKillRequestSchema,
   SystemPingRequestSchema,
   SystemVersionRequestSchema,
   JobAddRequestSchema,
@@ -683,6 +757,12 @@ export type ResourceReadRequest = z.infer<typeof ResourceReadRequestSchema>;
 export type AgentRunRequest = z.infer<typeof AgentRunRequestSchema>;
 export type AgentCancelRequest = z.infer<typeof AgentCancelRequestSchema>;
 export type AgentAskAnswerRequest = z.infer<typeof AgentAskAnswerRequestSchema>;
+export type AgentGetActiveTurnRequest = z.infer<typeof AgentGetActiveTurnRequestSchema>;
+export type AgentTodosSetRequest = z.infer<typeof AgentTodosSetRequestSchema>;
+export type AgentTodosDeleteRequest = z.infer<typeof AgentTodosDeleteRequestSchema>;
+export type AgentTodosGetRequest = z.infer<typeof AgentTodosGetRequestSchema>;
+export type AgentToolJobListRequest = z.infer<typeof AgentToolJobListRequestSchema>;
+export type AgentToolJobKillRequest = z.infer<typeof AgentToolJobKillRequestSchema>;
 export type JobAddRequest = z.infer<typeof JobAddRequestSchema>;
 export type JobUpdateRequest = z.infer<typeof JobUpdateRequestSchema>;
 export type JobListRequest = z.infer<typeof JobListRequestSchema>;

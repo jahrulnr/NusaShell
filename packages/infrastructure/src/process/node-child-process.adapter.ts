@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, execSync, type ChildProcess } from "node:child_process";
 import type { PluginProcessPort, ProcessHandle } from "@nusashell/application";
 import type { Logger } from "pino";
 
@@ -19,6 +19,28 @@ class NodeProcessHandle implements ProcessHandle {
   async kill(signal?: string): Promise<void> {
     if (!this.child.killed) {
       this.child.kill(signal as NodeJS.Signals ?? "SIGTERM");
+    }
+  }
+
+  async killGroup(signal?: string): Promise<void> {
+    const sig = signal ?? "SIGTERM";
+    if (this.pid <= 0) return;
+    if (process.platform === "win32") {
+      try {
+        execSync(`taskkill /PID ${this.pid} /T /F`, { stdio: "ignore" });
+      } catch {
+        // Fallback to direct kill.
+        await this.kill(signal);
+      }
+    } else {
+      try {
+        // Kill the process group (negative PID).
+        process.kill(-this.pid, sig as NodeJS.Signals);
+      } catch {
+        // If process-group kill fails (e.g. already exited or not a group leader),
+        // fall back to direct kill.
+        await this.kill(signal);
+      }
     }
   }
 }

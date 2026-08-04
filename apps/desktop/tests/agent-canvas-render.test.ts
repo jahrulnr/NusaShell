@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { describe, expect, it } from "vitest";
 import {
   buildHtmlSandboxDoc,
@@ -63,6 +65,19 @@ describe("agent canvas render pipeline", () => {
     expect(out.match(/fill-opacity="0\.18"/g)?.length).toBe(1);
   });
 
+  it("does not mistake Mermaid error CSS definitions for an error diagram", async () => {
+    const validMermaidSvg = [
+      '<svg id="valid-diagram">',
+      "<style>.error-icon{fill:#552222}.error-text{fill:#552222}</style>",
+      '<g class="node"><text>Plugin UI</text></g>',
+      "</svg>",
+    ].join("");
+
+    const { isMermaidErrorDiagramSvg } = await import("../src/renderer/agent-canvas-render.js");
+    expect(isMermaidErrorDiagramSvg(validMermaidSvg)).toBe(false);
+    expect(isMermaidErrorDiagramSvg('<svg><text class="error-text">Syntax error in text</text></svg>')).toBe(true);
+  });
+
   it("renderArtifact routes svg through sanitizeSvgString", async () => {
     const result = await renderArtifact({ kind: "svg", source: "<svg onload=\"alert(1)\"></svg>" });
     expect(result.type).toBe("svg");
@@ -81,5 +96,27 @@ describe("agent canvas render pipeline", () => {
   it("renderArtifact returns an error for an unknown kind", async () => {
     const result = await renderArtifact({ kind: "chartjs", source: "x" });
     expect(result.type).toBe("error");
+  });
+
+  it("mermaid syntax errors return type error and do not leak SVG into document.body", async () => {
+    // Mermaid's default error diagram injects a huge "Syntax error in text" SVG
+    // onto document.body when suppressErrorRendering is off and the temp node
+    // is not removed — that breaks Electron shell layout.
+    const before = document.body.innerHTML;
+    const result = await renderArtifact({
+      kind: "mermaid",
+      source: "flowchart\n  A[\n  B ---",
+    });
+    expect(result.type).toBe("error");
+    if (result.type === "error") {
+      expect(result.message.length).toBeGreaterThan(0);
+      expect(result.message).not.toMatch(/Could not load mermaid/i);
+    }
+    expect(document.body.textContent ?? "").not.toContain("Syntax error in text");
+    expect(document.body.querySelectorAll("svg.error-icon, .error-text, svg").length).toBe(0);
+    // No leftover mermaid temp hosts (`d{id}` / `i{id}`).
+    expect(document.body.querySelector("[id^='d'], [id^='i']")).toBeNull();
+    // Body should not have grown with mermaid leftovers.
+    expect(document.body.innerHTML.length).toBeLessThanOrEqual(before.length + 32);
   });
 });

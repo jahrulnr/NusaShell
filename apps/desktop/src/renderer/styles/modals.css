@@ -10,6 +10,36 @@
 }
 .modal-overlay.active { display: flex; }
 
+.ui-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, .68);
+  backdrop-filter: blur(4px);
+}
+.ui-dialog {
+  width: min(430px, 100%);
+  max-height: min(90vh, 520px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .45);
+}
+.ui-dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 20px 14px; border-bottom: 1px solid var(--border-soft); }
+.ui-dialog-header h2 { margin: 0; font-size: 16px; }
+.ui-dialog-close { border: 0; background: transparent; color: var(--text-faint); font-size: 22px; line-height: 1; cursor: pointer; }
+.ui-dialog-close:hover { color: var(--text); }
+.ui-dialog-body { padding: 18px 20px 4px; }
+.ui-dialog-message { margin: 0; color: var(--text-dim); line-height: 1.55; overflow-wrap: anywhere; }
+.ui-dialog-field { display: grid; gap: 7px; margin-top: 16px; color: var(--text-dim); font-size: 12px; }
+.ui-dialog-field input { width: 100%; box-sizing: border-box; padding: 10px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-alt); color: var(--text); font: inherit; }
+.ui-dialog-field input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ui-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 16px 20px 20px; }
+
 .modal {
   width: 480px;
   max-width: 90vw;
@@ -131,4 +161,3 @@
 .ctx-item:disabled:hover { background: transparent; }
 .ctx-danger:hover { background: rgba(239,75,95,0.15); color: var(--red); }
 .ctx-divider { height: 1px; background: var(--border-soft); margin: 4px 0; }
-

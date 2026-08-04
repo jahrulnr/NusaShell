@@ -378,6 +378,7 @@ export const AcpPermissionRequestEventSchema = z.object({
   sequence: z.number().int().nonnegative(),
   payload: z.object({
     traceId: z.string().min(1),
+    conversationId: z.string().min(1),
     requestId: z.string().min(1),
     toolTitle: z.string().min(1),
     detail: z.string().max(2000).optional(),
@@ -398,6 +399,7 @@ export const AcpAskRequestEventSchema = z.object({
   sequence: z.number().int().nonnegative(),
   payload: z.object({
     traceId: z.string().min(1),
+    conversationId: z.string().min(1),
     requestId: z.string().min(1),
     question: z.string().min(1).max(4000),
     options: z.array(AcpAskOptionSchema).optional(),
@@ -465,6 +467,73 @@ export const SubagentRunEndedEventSchema = z.object({
   }),
 });
 
+const AgentTodoStatusSchema = z.enum(["pending", "in_progress", "completed"]);
+
+export const AgentTodoUpdatedEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("agent.todo_updated"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    conversationId: z.string().min(1),
+    items: z.array(z.object({
+      id: z.string().min(1),
+      content: z.string().min(1),
+      status: AgentTodoStatusSchema,
+    })),
+    timestamp: z.string(),
+  }),
+});
+
+const AsyncToolStatusSchema = z.enum(["running", "ok", "fail", "killed"]);
+const AsyncToolKindSchema = z.enum(["mcp", "subagent"]);
+const AsyncToolEndReasonSchema = z.enum(["completed", "killed", "failed"]);
+
+export const AgentToolJobStartedEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("agent.tool_job_started"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    handleId: z.string().min(1),
+    conversationId: z.string().min(1),
+    kind: AsyncToolKindSchema,
+    toolName: z.string().min(1),
+    pluginId: z.string().optional(),
+    argsSummary: z.string(),
+    traceId: z.string().optional(),
+    timestamp: z.string(),
+  }),
+});
+
+export const AgentToolJobUpdateEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("agent.tool_job_update"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    handleId: z.string().min(1),
+    conversationId: z.string().min(1),
+    status: AsyncToolStatusSchema,
+    tail: z.string(),
+    bytes: z.number().int().nonnegative(),
+    streamSeq: z.number().int().nonnegative(),
+    timestamp: z.string(),
+  }),
+});
+
+export const AgentToolJobEndedEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("agent.tool_job_ended"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    handleId: z.string().min(1),
+    conversationId: z.string().min(1),
+    ok: z.boolean(),
+    reason: AsyncToolEndReasonSchema,
+    error: z.string().optional(),
+    output: z.unknown().optional(),
+    timestamp: z.string(),
+  }),
+});
+
 export const EventSchema = z.discriminatedUnion("event", [
   PluginInstalledEventSchema,
   PluginUninstalledEventSchema,
@@ -499,6 +568,10 @@ export const EventSchema = z.discriminatedUnion("event", [
   AcpSessionStateEventSchema,
   SubagentRunStartedEventSchema,
   SubagentRunEndedEventSchema,
+  AgentTodoUpdatedEventSchema,
+  AgentToolJobStartedEventSchema,
+  AgentToolJobUpdateEventSchema,
+  AgentToolJobEndedEventSchema,
 ]);
 
 export type PluginInstalledEvent = z.infer<typeof PluginInstalledEventSchema>;
@@ -532,4 +605,8 @@ export type AcpPermissionRequestEvent = z.infer<typeof AcpPermissionRequestEvent
 export type AcpAskRequestEvent = z.infer<typeof AcpAskRequestEventSchema>;
 export type AcpTurnEndEvent = z.infer<typeof AcpTurnEndEventSchema>;
 export type AcpSessionStateEvent = z.infer<typeof AcpSessionStateEventSchema>;
+export type AgentTodoUpdatedEvent = z.infer<typeof AgentTodoUpdatedEventSchema>;
+export type AgentToolJobStartedEvent = z.infer<typeof AgentToolJobStartedEventSchema>;
+export type AgentToolJobUpdateEvent = z.infer<typeof AgentToolJobUpdateEventSchema>;
+export type AgentToolJobEndedEvent = z.infer<typeof AgentToolJobEndedEventSchema>;
 export type ParsedEvent = z.infer<typeof EventSchema>;

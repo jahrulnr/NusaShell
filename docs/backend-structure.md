@@ -1,7 +1,8 @@
 # NusaShell Backend Structure
 
 This document defines the **target** NusaShell backend folder structure using
-**Clean Architecture** with **WebSocket as the primary client transport**.
+**Clean Architecture** with **Electron IPC as the primary desktop client
+transport** (WebSocket is a legacy/optional adapter for non-Electron hosts).
 
 It is not a description of the tree on disk today. The repo is still
 concept-stage: see [`../README.md`](../README.md). Product/plugin UX lives in
@@ -573,25 +574,31 @@ The transport layer must not own plugin runtime state.
 
 ### In-process Electron IPC vs WebSocket
 
-The Electron desktop app uses **two transport paths** for good reasons:
+The Electron desktop app uses **IPC as the primary client transport**. The
+renderer talks to main via `window.shell.backend.request(method, payload)` →
+`ipcMain.handle("shell:request")` → `MessageRouter` → `commandBus` / `queryBus`.
+Events flow back via `eventDispatcher.onAny` → `webContents.send("shell:event")`.
 
-| Path | Used by | Mechanism | Why |
+| Path | Used by | Mechanism | Status |
 | --- | --- | --- | --- |
-| **Electron IPC** | Renderer (launcher, plugin windows) | `ipcMain.handle` → `commandBus` / `queryBus` | Zero-latency, no WS roundtrip, no serialization overhead for in-process calls |
-| **WebSocket** | Remote clients (TUI, external integrations) | `ws` → `MessageRouter` → `commandBus` / `queryBus` | Standard protocol, works across processes/machines |
+| **Electron IPC** | Renderer (launcher, plugin windows) | `ipcMain.handle` → `MessageRouter` → `commandBus` / `queryBus` | **Primary** — zero-latency, no TCP socket, no port allocation |
+| **WebSocket** | Historical / optional non-Electron clients | `ws` → `MessageRouter` → `commandBus` / `queryBus` | **Legacy** — server not started in desktop product path (`startWsServer: false`) |
 
-Both paths converge on the **same command/query bus** — they are transport
-alternatives, not separate APIs. The `tool:call` IPC handler in
-`apps/desktop/src/main/ipc/plugins.ts` dispatches a `CallToolCommand` through
-the command bus, exactly as the WS `tool.call` route does. This is **not** a
-broker violation: the shell still mediates between plugin UI and MCP; the IPC
-path is an in-process optimisation that skips the network hop while preserving
-the command-bus boundary.
+Both paths converge on the **same `MessageRouter`** — they are transport
+alternatives, not separate APIs. The `IpcRequestBridge` in
+`apps/desktop/src/main/ipc-bridge.ts` reuses the same `MessageRouter` that the
+WS transport uses, so method → bus mapping is identical. The
+`IpcEventBridge` reuses `mapDomainEvent` so event payloads match the former WS
+envelopes exactly.
 
-Remote clients must use WebSocket. Migrating the desktop renderer to WS would
-add latency and serialization cost with no benefit, since renderer and main
-share a process. The `NusaClient` SDK (in `@nusashell/plugin-sdk`) wraps the WS
-path for external consumers and is the canonical client for non-Electron hosts.
+The desktop renderer no longer imports `@nusashell/plugin-sdk` or
+`NusaClient`. The `ws-client.js` shim in the renderer now delegates to
+`window.shell.backend.*` (IPC) while preserving the former `sendRequest` /
+`onEvent` / `subscribe` exports so call sites did not need to change.
+
+The `NusaClient` SDK (in `@nusashell/plugin-sdk`) remains the canonical client
+for non-Electron hosts (TUI, external integrations) if WebSocket is revived.
+The `@nusashell/transport-ws` package is kept for tests and legacy consumers.
 
 ---
 

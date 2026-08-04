@@ -28,7 +28,8 @@ export type ApplicationErrorCode =
   | "PIPELINE_NOT_FOUND"
   | "PIPELINE_INVALID"
   | "ACP_SESSION_NOT_FOUND"
-  | "ACP_PROVIDER_FAILED";
+  | "ACP_PROVIDER_FAILED"
+  | "WORKSPACE_SYNC_FAILED";
 
 export class ApplicationError extends Error {
   readonly code: ApplicationErrorCode;

@@ -113,6 +113,7 @@ function emitAutomationForTool(server, toolName, args) {
     files_patch: () => ({ type: "files.modified", payload: { path: args.path, action: "patch" } }),
     files_append: () => ({ type: "files.modified", payload: { path: args.path, action: "append" } }),
     files_mkdir: () => ({ type: "files.modified", payload: { path: args.path, action: "mkdir" } }),
+    files_touch: () => ({ type: "files.modified", payload: { path: args.path, action: "touch" } }),
     files_delete: () => ({ type: "files.deleted", payload: { path: args.path, recursive: !!args.recursive } }),
     files_move: () => ({ type: "files.moved", payload: { source: args.source, destination: args.destination } }),
     files_copy: () => ({ type: "files.moved", payload: { source: args.source, destination: args.destination } }),

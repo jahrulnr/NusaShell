@@ -11,8 +11,8 @@ import type { AcpProviderPublic } from "../shared/acp-provider-contract.js";
 export class AcpProviderResolverAdapter implements AcpProviderResolverPort {
   constructor(private readonly store: AcpProviderStore) {}
 
-  async resolve(providerIdOverride?: string): Promise<AcpResolverResult> {
-    const tryOrder = await this.store.resolveTryOrder(providerIdOverride);
+  async resolve(): Promise<AcpResolverResult> {
+    const tryOrder = await this.store.resolveTryOrder();
     const candidates = new Map<string, AcpResolverCandidate>();
     for (const providerId of tryOrder) {
       const provider = await this.store.getEffective(providerId);

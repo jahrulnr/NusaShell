@@ -1,0 +1,354 @@
+// @vitest-environment jsdom
+/**
+ * Unit tests for agent rooms / live turn / subagent / drawers.
+ * Mapped from tmp/plan/agent-ui-bh-catalog.md (BH-AGENT-*).
+ */
+
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AgentConversationController } from "../src/renderer/agent-conversation-controller.js";
+import {
+  describeToolActivity,
+  renderReasoningMarkdown,
+} from "../src/renderer/agent-conversation-ui.js";
+
+function installDom() {
+  document.body.innerHTML = `
+    <div id="agent-conversation-list"></div>
+    <span id="agent-conversation-count"></span>
+    <input id="agent-conversation-search" value="">
+    <div id="agent-thread"></div>
+    <input id="agent-input">
+    <button id="agent-send-btn"></button>
+    <button id="agent-stop-btn" hidden></button>
+    <span id="agent-provider-status"></span>
+    <span id="agent-workspace-label"></span>
+    <button id="agent-workspace-btn"></button>
+    <div id="acp-status-bar" hidden>
+      <span id="acp-status-provider"></span>
+      <span id="acp-status-chip"></span>
+    </div>
+    <button id="agent-acp-pill" hidden><span id="agent-acp-pill-label"></span></button>
+    <div class="agent-canvas-overlay" id="agent-canvas-overlay" hidden></div>
+    <aside class="agent-canvas" id="agent-canvas" hidden>
+      <div id="agent-canvas-resize" role="separator" tabindex="0"></div>
+      <span id="agent-canvas-badge"></span>
+      <span id="agent-canvas-title"></span>
+      <button id="agent-canvas-close" type="button"></button>
+      <button id="agent-canvas-refresh" type="button"></button>
+      <button id="agent-canvas-download" type="button"></button>
+      <div id="agent-canvas-body"></div>
+      <p id="agent-canvas-hint"></p>
+    </aside>
+    <aside id="agent-subpane" hidden>
+      <div id="agent-subpane-overlay" hidden></div>
+      <span id="agent-subpane-badge"></span>
+      <span id="agent-subpane-title"></span>
+      <span id="agent-subpane-status"></span>
+      <button id="agent-subpane-close"></button>
+      <div id="agent-subpane-body"></div>
+    </aside>
+  `;
+  globalThis.$ = (selector: string) => document.querySelector(selector);
+  window.matchMedia = vi.fn((query: string) => ({
+    matches: String(query).includes("prefers-reduced-motion"),
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })) as typeof window.matchMedia;
+}
+
+function room(id: string, patch: Record<string, unknown> = {}) {
+  return {
+    id,
+    title: `Room ${id}`,
+    kind: "agent",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    messageCount: Array.isArray(patch.messages) ? (patch.messages as unknown[]).length : 0,
+    messages: [],
+    ...patch,
+  };
+}
+
+function makeController(opts: {
+  rooms?: Map<string, ReturnType<typeof room>>;
+  getActiveTurn?: (conversationId: string) => Promise<unknown>;
+} = {}) {
+  const rooms = opts.rooms ?? new Map([
+    ["room-a", room("room-a", { messages: [{ role: "user", content: "hi A" }] })],
+    ["room-b", room("room-b", { messages: [{ role: "user", content: "hi B" }] })],
+  ]);
+  const get = vi.fn(async (id: string) => rooms.get(id) ?? null);
+  const list = vi.fn(async () =>
+    [...rooms.values()].map((c) => ({
+      id: c.id,
+      title: c.title,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+      messageCount: c.messageCount,
+      kind: c.kind,
+    })),
+  );
+  const controller = new AgentConversationController({
+    shell: {
+      agentConversations: {
+        get,
+        list,
+        upsertSubagentRun: vi.fn(async (id: string, run: unknown) => {
+          const c = rooms.get(id);
+          if (!c) return null;
+          const runs = [...(c.subagentRuns ?? []).filter((r: { runId: string }) => r.runId !== (run as { runId: string }).runId), run];
+          const next = { ...c, subagentRuns: runs };
+          rooms.set(id, next);
+          return next;
+        }),
+        setActiveSubagentRun: vi.fn(async (id: string) => rooms.get(id) ?? null),
+        updateSubagentRunStatus: vi.fn(async (id: string) => rooms.get(id) ?? null),
+      },
+    },
+    getActiveModel: () => null,
+    getActiveTurn: opts.getActiveTurn,
+    log: vi.fn(),
+  } as never);
+  controller.conversations = [...rooms.values()].map((c) => ({
+    id: c.id,
+    title: c.title,
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
+    messageCount: c.messageCount,
+  })) as never;
+  return { controller, rooms, get, list };
+}
+
+describe("BH-AGENT room / turn / drawer suite", () => {
+  beforeEach(() => installDom());
+
+  it("BH-AGENT-01 keeps other room composer free while a background room owns the turn", async () => {
+    const { controller } = makeController();
+    const input = document.querySelector<HTMLInputElement>("#agent-input")!;
+    const send = document.querySelector<HTMLButtonElement>("#agent-send-btn")!;
+    const stop = document.querySelector<HTMLButtonElement>("#agent-stop-btn")!;
+
+    controller.turnPending = true;
+    controller.turnOwnerConversationId = "room-a";
+    controller.conversation = room("room-a") as never;
+    controller.activeId = "room-a";
+    input.disabled = true;
+    send.disabled = true;
+    stop.hidden = false;
+
+    await controller.open("room-b");
+
+    expect(controller.activeId).toBe("room-b");
+    expect(controller.turnOwnerConversationId).toBe("room-a");
+    expect(controller.turnPending).toBe(true);
+    expect(input.disabled).toBe(false);
+    expect(send.disabled).toBe(false);
+    expect(stop.hidden).toBe(true);
+  });
+
+  it("BH-AGENT-02/03/04/05 rehydrate Working with reasoning, tool, and text after return", async () => {
+    const getActiveTurn = vi.fn(async (id: string) => {
+      if (id !== "room-a") return null;
+      return {
+        conversationId: "room-a",
+        traceId: "trace-a",
+        status: "running",
+        steps: [
+          { type: "reasoning", content: "Plan the fix carefully." },
+          { type: "text", content: "Starting work." },
+        ],
+        openTools: [
+          { id: "call-1", name: "docs_search", status: "running", args: { query: "agent" } },
+        ],
+        streaming: { kind: "text", content: " more tokens…" },
+        updatedAt: new Date().toISOString(),
+      };
+    });
+    const { controller } = makeController({ getActiveTurn });
+    controller.turnPending = false;
+    await controller.open("room-a");
+    await controller.restoreActiveTurnUi();
+
+    expect(controller.turnPending).toBe(true);
+    expect(controller.activeTraceId).toBe("trace-a");
+    expect(document.querySelector("#agent-stop-btn")?.hidden).toBe(false);
+
+    const host = document.querySelector("#agent-thread article.agent-message.agent-pending");
+    expect(host).not.toBeNull();
+    expect(host?.querySelector(".agent-message-meta")?.textContent).toMatch(/Working/i);
+    expect(host?.querySelector(".agent-reasoning")).not.toBeNull();
+    expect(host?.querySelector(".agent-reasoning-content")?.innerHTML).toMatch(/Plan the fix/);
+    expect(host?.textContent).toContain("Starting work.");
+    expect(host?.textContent).toContain("more tokens");
+    // Tool terminal card for open tool
+    const toolCard = host?.querySelector("[data-call-id=\"call-1\"]");
+    expect(toolCard).not.toBeNull();
+    expect(toolCard?.textContent ?? "").toMatch(/docs_search/i);
+  });
+
+  it("BH-AGENT-06 restores only the visible room's running subagents", async () => {
+    const rooms = new Map([
+      ["room-a", room("room-a", {
+        messages: [{ role: "user", content: "A" }],
+        subagentRuns: [{
+          runId: "sub-a",
+          providerId: "cursor",
+          prompt: "task A",
+          status: "running",
+          title: "Sub A",
+          steps: [],
+        }],
+      })],
+      ["room-b", room("room-b", {
+        messages: [{ role: "user", content: "B" }],
+        subagentRuns: [{
+          runId: "sub-b",
+          providerId: "codex",
+          prompt: "task B",
+          status: "running",
+          title: "Sub B",
+          steps: [],
+        }],
+      })],
+    ]);
+    const { controller } = makeController({ rooms });
+
+    await controller.open("room-a");
+    expect(document.querySelector('[data-run-id="sub-a"]')).not.toBeNull();
+    expect(document.querySelector('[data-run-id="sub-b"]')).toBeNull();
+
+    await controller.open("room-b");
+    expect(document.querySelector('[data-run-id="sub-b"]')).not.toBeNull();
+    expect(document.querySelector('[data-run-id="sub-a"]')).toBeNull();
+  });
+
+  it("BH-AGENT-07 preserves subpane live text across close/remount", () => {
+    const { controller } = makeController();
+    const run = {
+      runId: "sub-live",
+      providerId: "gemini",
+      prompt: "x",
+      status: "running",
+      title: "Live sub",
+      steps: [],
+    };
+    controller.conversation = room("room-a") as never;
+    controller.activeSubagentRun = run as never;
+    controller.resetSubagentStreamState([], run.runId);
+    controller.appendSubpaneText("live drawer body");
+    controller.closeSubpaneDrawerUi();
+    controller.mountSubpane(run as never, { open: true });
+    expect(document.querySelector("#agent-subpane-body")?.textContent).toContain("live drawer body");
+  });
+
+  it("BH-AGENT-08 shows Stop when opened room only has a running subagent", async () => {
+    const rooms = new Map([
+      ["room-b", room("room-b", {
+        messages: [{ role: "assistant", content: "done earlier" }],
+        subagentRuns: [{
+          runId: "sub-only",
+          providerId: "cursor",
+          prompt: "solo",
+          status: "running",
+          title: "Solo",
+          steps: [],
+        }],
+      })],
+    ]);
+    const { controller } = makeController({ rooms });
+    controller.turnPending = false;
+    await controller.open("room-b");
+    await controller.restoreRunningTurnState();
+    expect(document.querySelector("#agent-stop-btn")?.hidden).toBe(false);
+  });
+
+  it("BH-AGENT-09/10 open and close canvas drawer without leaving body junk", async () => {
+    const { controller } = makeController();
+    const body = document.querySelector("#agent-canvas-body")!;
+    body.textContent = "stale artifact";
+    controller.openCanvasDrawerUi();
+    // rAF runs class is-open
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const pane = document.querySelector("#agent-canvas") as HTMLElement;
+    const overlay = document.querySelector("#agent-canvas-overlay") as HTMLElement;
+    expect(pane.hidden).toBe(false);
+    expect(overlay.hidden).toBe(false);
+
+    controller.closeCanvasDrawerUi();
+    expect(body.textContent).toBe("");
+    expect(pane.classList.contains("is-open")).toBe(false);
+    // reduced-motion path hides immediately in installDom
+    expect(pane.hidden).toBe(true);
+  });
+
+  it("resizes the canvas drawer with keyboard controls and preserves the width", () => {
+    const { controller } = makeController();
+    controller.bindCanvasControls();
+    const pane = document.querySelector<HTMLElement>("#agent-canvas")!;
+    const handle = document.querySelector<HTMLElement>("#agent-canvas-resize")!;
+
+    handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    expect(pane.style.getPropertyValue("--agent-canvas-width")).toBe("584px");
+    expect(controller.getCanvasDrawerWidth()).toBe(584);
+
+    handle.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
+    expect(controller.getCanvasDrawerWidth()).toBe(960);
+    expect(window.localStorage.getItem("nusashell.agent.canvas.drawer-width")).toBe("960");
+  });
+
+  it("BH-AGENT-11 paints incomplete turn when trailing user and no parent mutex", () => {
+    const { controller } = makeController();
+    controller.turnPending = false;
+    controller.conversation = room("room-a", {
+      messages: [{ role: "user", content: "only user left" }],
+    }) as never;
+    controller.renderThread();
+    const incomplete = document.querySelector("#agent-thread article.agent-message-error");
+    expect(incomplete?.textContent).toMatch(/Incomplete turn/i);
+    expect(incomplete?.querySelector(".agent-retry-btn, button")).toBeTruthy();
+  });
+
+  it("BH-AGENT-12 rehydrate still creates Working when projection is running", async () => {
+    const getActiveTurn = vi.fn(async () => ({
+      conversationId: "room-a",
+      traceId: "t-live",
+      status: "running",
+      steps: [],
+      openTools: [],
+      streaming: { kind: "text", content: "still going" },
+      updatedAt: new Date().toISOString(),
+    }));
+    const { controller } = makeController({ getActiveTurn });
+    controller.turnPending = false;
+    controller.conversation = room("room-a", {
+      messages: [{ role: "user", content: "orphan shape" }],
+    }) as never;
+    controller.activeId = "room-a";
+    controller.renderThread();
+    await controller.restoreActiveTurnUi();
+    expect(controller.turnPending).toBe(true);
+    expect(document.querySelector("#agent-thread article.agent-pending")?.textContent).toContain("still going");
+    expect(document.querySelector("#agent-thread article.agent-message-error")).toBeNull();
+  });
+
+  it("BH-AGENT-13 rejects executable markup in reasoning HTML", () => {
+    const html = renderReasoningMarkdown("<img src=x onerror=alert(1)> **ok**");
+    expect(html).not.toMatch(/onerror/i);
+    expect(html).toContain("ok");
+  });
+
+  it("BH-AGENT-14 describes tool activity clearly", () => {
+    const summary = describeToolActivity([
+      { name: "docs_search", ok: true, args: { query: "x" } },
+      { name: "docs_read", ok: false },
+    ]);
+    expect(summary.label).toMatch(/2 tool calls/);
+    expect(summary.succeeded).toBe(1);
+    expect(summary.failed).toBe(1);
+  });
+});

@@ -131,7 +131,13 @@ for candidate in "$versions"/*; do
   [[ -d "$candidate" && ! -L "$candidate" ]] || continue
   candidate_version="$(basename "$candidate")"
   if [[ "$candidate_version" != "$resolved_version" && "$candidate_version" != "$previous_version" ]]; then
-    rm -rf "$candidate"
+    # Do not delete a version folder while its process is still running —
+    # the user may not have quit NusaShell before updating.
+    if pgrep -f "$candidate" >/dev/null 2>&1; then
+      echo "Keeping old version $candidate_version (process still running)." >&2
+    else
+      rm -rf "$candidate"
+    fi
   fi
 done
 printf '#!/usr/bin/env sh\nexec "%s/NusaShell"%s "$@"\n' "$current" "$no_sandbox" > "$bin/nusashell"
@@ -147,4 +153,54 @@ Terminal=false
 Categories=Utility;Development;
 EOF
 if [[ ":$PATH:" != *":$bin:"* ]]; then echo "Add this to your shell profile: export PATH=\"\$HOME/.local/bin:\$PATH\""; fi
-echo "Installed NusaShell $resolved_version. Run: nusashell"
+echo "Installed NusaShell $resolved_version."
+
+# Detect if NusaShell is still running from a previous version. Electron's
+# single-instance lock means launching a new process would just focus the old
+# one — the user must quit and relaunch to activate the update.
+running_pid=""
+if pgrep -f "$root/versions/.*/NusaShell" >/dev/null 2>&1; then
+  running_pid="$(pgrep -f "$root/versions/.*/NusaShell" | head -1)"
+fi
+
+if [[ -n "$running_pid" ]]; then
+  echo "NusaShell is still running (PID $running_pid) from a previous version." >&2
+  can_prompt=0
+  if [[ "${NUSASHELL_NON_INTERACTIVE:-}" != "1" ]] && { [[ -t 0 ]] || [[ -r /dev/tty ]]; }; then
+    can_prompt=1
+  fi
+  if [[ "$can_prompt" -eq 1 ]]; then
+    if [[ -r /dev/tty ]]; then
+      printf "Restart NusaShell now to activate the new version? [Y/n] " >/dev/tty
+      read -r reply </dev/tty || reply=n
+    else
+      printf "Restart NusaShell now to activate the new version? [Y/n] " >&2
+      read -r reply || reply=n
+    fi
+    case "${reply:-Y}" in
+      Y|y|"")
+        echo "Quitting NusaShell (PID $running_pid)..." >&2
+        kill "$running_pid" 2>/dev/null || true
+        # Wait up to 5 seconds for graceful exit.
+        for _ in 1 2 3 4 5; do
+          kill -0 "$running_pid" 2>/dev/null || break
+          sleep 1
+        done
+        # Force-kill if still alive.
+        kill -9 "$running_pid" 2>/dev/null || true
+        sleep 1
+        echo "Launching NusaShell $resolved_version..." >&2
+        nohup "$bin/nusashell" >/dev/null 2>&1 &
+        echo "NusaShell $resolved_version launched."
+        exit 0
+        ;;
+      *)
+        echo "Restart NusaShell manually to use the new version: nusashell" >&2
+        ;;
+    esac
+  else
+    echo "Restart NusaShell manually to use the new version: nusashell" >&2
+  fi
+else
+  echo "Run: nusashell"
+fi

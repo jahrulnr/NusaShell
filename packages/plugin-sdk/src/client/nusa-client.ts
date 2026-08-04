@@ -49,6 +49,7 @@ export class NusaClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private onReconnectCallback: ReconnectStatusCallback | undefined;
   private onReconnectFailedCallback: ReconnectStatusCallback | undefined;
+  private onCloseCallback: (() => void) | undefined;
 
   constructor(options: NusaClientOptions) {
     this.requestManager = new RequestManager(options.defaultTimeoutMs);
@@ -119,6 +120,11 @@ export class NusaClient {
     this.onReconnectFailedCallback = callback;
   }
 
+  /** Register a callback fired when the WebSocket connection closes (B2). */
+  onClose(callback: () => void): void {
+    this.onCloseCallback = callback;
+  }
+
   request<TResult = unknown>(
     method: RequestMethod,
     payload: Record<string, unknown>,
@@ -182,6 +188,7 @@ export class NusaClient {
 
   private handleClose(): void {
     this.requestManager.close();
+    this.onCloseCallback?.();
 
     if (this.intentionalDisconnect) {
       this.events.clear();

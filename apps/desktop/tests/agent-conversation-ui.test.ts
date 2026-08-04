@@ -240,12 +240,120 @@ describe("agent conversation UI helpers", () => {
 
     expect(result).toEqual([
       { role: "user", content: "Write a file then list the dir" },
-      { role: "assistant", content: "Done.", toolCalls: [
+      { role: "assistant", content: "", toolCalls: [
         { id: "call-1", name: "files_write", args: { path: "/a.txt", content: "hi" } },
         { id: "call-2", name: "files_list", args: { path: "/" } },
       ] },
       { role: "tool", toolCallId: "call-1", name: "files_write", content: "wrote 2 bytes" },
       { role: "tool", toolCallId: "call-2", name: "files_list", content: "[TOOL ERROR] Permission denied" },
+      { role: "assistant", content: "Done." },
+    ]);
+  });
+
+  it("rebuilds multi-round steps as interleaved assistant/tool/assistant/tool + final text after tools", () => {
+    const result = buildAgentContext({
+      messages: [
+        { role: "user", content: "Read go.mod then grep for TODO" },
+        {
+          role: "assistant",
+          content: "I read go.mod and found no TODOs.",
+          toolCalls: [
+            { id: "call-1", name: "files_read", ok: true, args: { path: "go.mod" }, output: "module example" },
+            { id: "call-2", name: "files_grep", ok: true, args: { pattern: "TODO" }, output: "no matches" },
+          ],
+          steps: [
+            { type: "tool_calls", calls: [
+              { id: "call-1", name: "files_read", ok: true, args: { path: "go.mod" }, output: "module example" },
+            ] },
+            { type: "tool_calls", calls: [
+              { id: "call-2", name: "files_grep", ok: true, args: { pattern: "TODO" }, output: "no matches" },
+            ] },
+            { type: "text", content: "I read go.mod and found no TODOs." },
+          ],
+        },
+      ],
+    });
+
+    expect(result).toEqual([
+      { role: "user", content: "Read go.mod then grep for TODO" },
+      { role: "assistant", content: "", toolCalls: [
+        { id: "call-1", name: "files_read", args: { path: "go.mod" } },
+      ] },
+      { role: "tool", toolCallId: "call-1", name: "files_read", content: "module example" },
+      { role: "assistant", content: "", toolCalls: [
+        { id: "call-2", name: "files_grep", args: { pattern: "TODO" } },
+      ] },
+      { role: "tool", toolCallId: "call-2", name: "files_grep", content: "no matches" },
+      { role: "assistant", content: "I read go.mod and found no TODOs." },
+    ]);
+  });
+
+  it("skips reasoning steps when rebuilding from steps (keeps confabulated reasoning out of next prompt)", () => {
+    const result = buildAgentContext({
+      messages: [
+        { role: "user", content: "go" },
+        {
+          role: "assistant",
+          content: "Done.",
+          toolCalls: [{ id: "call-1", name: "files_read", ok: true, args: { path: "/a" }, output: "hi" }],
+          steps: [
+            { type: "reasoning", content: "I should skip this tool because it failed before" },
+            { type: "tool_calls", calls: [
+              { id: "call-1", name: "files_read", ok: true, args: { path: "/a" }, output: "hi" },
+            ] },
+            { type: "text", content: "Done." },
+          ],
+        },
+      ],
+    });
+
+    expect(result).toEqual([
+      { role: "user", content: "go" },
+      { role: "assistant", content: "", toolCalls: [
+        { id: "call-1", name: "files_read", args: { path: "/a" } },
+      ] },
+      { role: "tool", toolCallId: "call-1", name: "files_read", content: "hi" },
+      { role: "assistant", content: "Done." },
+    ]);
+  });
+
+  it("emits mid-turn text steps between tool rounds as standalone assistant messages", () => {
+    const result = buildAgentContext({
+      messages: [
+        { role: "user", content: "go" },
+        {
+          role: "assistant",
+          content: "Mid text\nFinal answer",
+          toolCalls: [
+            { id: "call-1", name: "files_read", ok: true, args: { path: "/a" }, output: "a" },
+            { id: "call-2", name: "files_read", ok: true, args: { path: "/b" }, output: "b" },
+          ],
+          steps: [
+            { type: "tool_calls", calls: [
+              { id: "call-1", name: "files_read", ok: true, args: { path: "/a" }, output: "a" },
+            ] },
+            { type: "text", content: "Mid text" },
+            { type: "tool_calls", calls: [
+              { id: "call-2", name: "files_read", ok: true, args: { path: "/b" }, output: "b" },
+            ] },
+            { type: "text", content: "Final answer" },
+          ],
+        },
+      ],
+    });
+
+    expect(result).toEqual([
+      { role: "user", content: "go" },
+      { role: "assistant", content: "", toolCalls: [
+        { id: "call-1", name: "files_read", args: { path: "/a" } },
+      ] },
+      { role: "tool", toolCallId: "call-1", name: "files_read", content: "a" },
+      { role: "assistant", content: "Mid text" },
+      { role: "assistant", content: "", toolCalls: [
+        { id: "call-2", name: "files_read", args: { path: "/b" } },
+      ] },
+      { role: "tool", toolCallId: "call-2", name: "files_read", content: "b" },
+      { role: "assistant", content: "Final answer" },
     ]);
   });
 
@@ -305,13 +413,14 @@ describe("agent conversation UI helpers", () => {
       ],
     });
 
-    expect(result.map((m) => m.role)).toEqual(["user", "assistant", "tool", "tool"]);
+    expect(result.map((m) => m.role)).toEqual(["user", "assistant", "tool", "tool", "assistant"]);
     expect(result[1]).toMatchObject({ role: "assistant", toolCalls: [
       { id: "call-1", name: "files_write" },
       { id: "call-4", name: "files_read" },
     ] });
     expect(result[2]).toMatchObject({ role: "tool", toolCallId: "call-1" });
     expect(result[3]).toMatchObject({ role: "tool", toolCallId: "call-4" });
+    expect(result[4]).toMatchObject({ role: "assistant", content: "partial" });
   });
 
   it("reconstructs tool context on the checkpoint branch alongside the summary system message", () => {
@@ -330,9 +439,40 @@ describe("agent conversation UI helpers", () => {
 
     expect(result).toEqual([
       { role: "system", content: "Conversation summary:\nEarlier file was written." },
-      { role: "assistant", content: "old answer", toolCalls: [{ id: "call-1", name: "files_write", args: { path: "/a" } }] },
+      { role: "assistant", content: "", toolCalls: [{ id: "call-1", name: "files_write", args: { path: "/a" } }] },
       { role: "tool", toolCallId: "call-1", name: "files_write", content: "wrote" },
+      { role: "assistant", content: "old answer" },
       { role: "user", content: "follow up" },
     ]);
+  });
+
+  // --- Dual-space: full transcript for UI, compact only for model send ---
+
+  it("dual-space: buildAgentContext with checkpoint is shorter than full messages while store stays intact", () => {
+    const messages = [
+      { role: "user" as const, content: "x".repeat(5000) },
+      { role: "assistant" as const, content: "x".repeat(5000) },
+      { role: "user" as const, content: "x".repeat(5000) },
+      { role: "assistant" as const, content: "x".repeat(5000) },
+      { role: "user" as const, content: "latest question" },
+    ];
+    const checkpoint = { summary: "Old turns summarized.", compactedMessageCount: 4, via: "provider" as const };
+    const conversation = { messages, checkpoint };
+
+    const providerContext = buildAgentContext(conversation);
+
+    // Provider context starts with summary system message + only the last user turn.
+    expect(providerContext[0]).toEqual({ role: "system", content: "Conversation summary:\nOld turns summarized." });
+    expect(providerContext).toHaveLength(2);
+    expect(providerContext[1]).toEqual({ role: "user", content: "latest question" });
+
+    // Full transcript is untouched — UI would still render all 5 messages.
+    expect(messages.length).toBe(5);
+    expect(messages[0]).toEqual({ role: "user", content: "x".repeat(5000) });
+
+    // Provider context is significantly shorter than full thread.
+    const providerChars = JSON.stringify(providerContext).length;
+    const fullChars = JSON.stringify(messages).length;
+    expect(providerChars).toBeLessThan(fullChars / 3);
   });
 });

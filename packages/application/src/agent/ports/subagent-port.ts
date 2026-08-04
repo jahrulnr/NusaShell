@@ -4,13 +4,18 @@ import type { AcpProviderResolverPort, AcpResolverResult } from "../../acp/ports
 export type { AcpResolverCandidate as SubagentProviderCandidate } from "../../acp/ports/acp-provider-resolver.port.js";
 
 export interface SubagentResolveRequest {
-  /** Optional provider override from the tool arg. */
-  readonly providerIdOverride?: string | undefined;
   /** Workspace from the parent turn (used as default cwd). */
   readonly workspace?: string | undefined;
 }
 
 export type SubagentResolveResult = AcpResolverResult;
+
+export interface SubagentRoutingInfo {
+  /** Comma-separated list of connected+enabled ACP provider IDs. */
+  readonly availableSubagents: string;
+  /** The user-configured default ACP provider ID (first in try-order). */
+  readonly defaultSubagent: string;
+}
 
 export interface SubagentRunRequest {
   readonly runId: string;
@@ -29,6 +34,8 @@ export interface SubagentRunResult {
   readonly providerId: string;
   readonly summary: string;
   readonly error?: string;
+  /** Non-fatal preferredConfig apply failures (surfaced to agent/user). */
+  readonly configWarnings?: readonly string[];
 }
 
 /**
@@ -39,6 +46,8 @@ export interface SubagentRunResult {
 export interface SubagentPort {
   /** Resolve the effective try-order and candidate descriptors. */
   resolve(request: SubagentResolveRequest): Promise<SubagentResolveResult>;
+  /** Resolve connected ACP providers + default for subagent prompt injection. */
+  getRoutingInfo(): Promise<SubagentRoutingInfo | null>;
   /** Run a single ACP turn (blocking until turn_end). */
   run(request: SubagentRunRequest): Promise<SubagentRunResult>;
   /** Cancel an in-progress subagent turn. */

@@ -81,6 +81,7 @@ export function mapAcpEvent(
         sequence,
         payload: {
           traceId: e.aggregateId,
+          conversationId: e.conversationId,
           requestId: e.requestId,
           toolTitle: e.toolTitle,
           ...(e.detail !== undefined ? { detail: e.detail } : {}),
@@ -97,6 +98,7 @@ export function mapAcpEvent(
         sequence,
         payload: {
           traceId: e.aggregateId,
+          conversationId: e.conversationId,
           requestId: e.requestId,
           question: e.question,
           ...(e.options !== undefined ? { options: [...e.options] } : {}),

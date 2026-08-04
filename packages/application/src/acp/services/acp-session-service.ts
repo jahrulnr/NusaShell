@@ -34,6 +34,8 @@ export interface AcpSessionInfo {
   readonly state: "idle" | "starting" | "running" | "error" | "cancelled";
   readonly traceId?: string | undefined;
   readonly configOptions?: readonly AcpConfigOption[] | undefined;
+  /** Non-fatal config apply failures from preferredConfig (surfaced to caller). */
+  readonly configWarnings?: readonly string[] | undefined;
 }
 
 interface AcpSession {
@@ -42,6 +44,7 @@ interface AcpSession {
   workspace: string;
   traceId: string | null;
   state: AcpSessionInfo["state"];
+  configWarnings: string[];
 }
 
 export interface AcpSessionServiceDeps {
@@ -103,13 +106,12 @@ export class AcpSessionService {
         workspace: cwd,
         traceId,
         state: "idle",
+        configWarnings: [],
       });
-      for (const [configId, value] of Object.entries(provider.preferredConfig ?? {})) {
-        try {
-          await this.deps.client.setConfigOption(conversationId, configId, value);
-        } catch (error) {
-          this.deps.logger?.warn(`ACP preferred config failed provider=${provider.providerId} configId=${configId}: ${error instanceof Error ? error.message : String(error)}`);
-        }
+      const configWarnings = await this.applyPreferredConfig(conversationId, provider);
+      if (configWarnings.length > 0) {
+        const session = this.sessions.get(conversationId);
+        if (session) this.sessions.set(conversationId, { ...session, configWarnings: [...configWarnings] });
       }
       this.publish(traceId, createAcpSessionStateEvent(traceId, conversationId, "idle"));
       return this.getSessionInfo(conversationId);
@@ -151,7 +153,16 @@ export class AcpSessionService {
         workspace: cwd,
         traceId,
         state: "starting",
+        configWarnings: [],
       });
+      // Apply preferredConfig on fresh sessions too (B/A3 fix): subagent runs
+      // go straight to startTurn, so default model/mode bypass must be applied
+      // here, not only in ensureSession.
+      const configWarnings = await this.applyPreferredConfig(conversationId, provider);
+      if (configWarnings.length > 0) {
+        const session = this.sessions.get(conversationId);
+        if (session) this.sessions.set(conversationId, { ...session, configWarnings: [...configWarnings] });
+      }
       this.publish(traceId, createAcpSessionStateEvent(traceId, conversationId, "starting"));
     } else {
       existing.traceId = traceId;
@@ -195,6 +206,7 @@ export class AcpSessionService {
       state: session.state,
       traceId: session.traceId ?? undefined,
       configOptions: this.deps.client.getConfigOptions?.(conversationId) ?? [],
+      ...(session.configWarnings.length > 0 ? { configWarnings: session.configWarnings } : {}),
     };
   }
 
@@ -211,6 +223,26 @@ export class AcpSessionService {
     });
   }
 
+  /**
+   * Probe a throwaway session for a provider and return its live config
+   * options (models, modes, etc.). Used by the Import models flow to
+   * discover the model list without persisting anything in the domain.
+   * The session is closed before returning.
+   */
+  async importModels(provider: AcpProviderDescriptor): Promise<readonly AcpConfigOption[]> {
+    const conversationId = `probe:${provider.providerId}:${Date.now()}`;
+    const cwd = resolveAgentWorkspace(undefined, undefined);
+    try {
+      await this.ensureSession(conversationId, cwd, provider);
+      const options = this.deps.client.getConfigOptions(conversationId) ?? [];
+      return options;
+    } finally {
+      await this.closeSession(conversationId).catch((err) => {
+        this.deps.logger?.warn(`Error closing import-models probe session for ${provider.providerId}: ${err}`);
+      });
+    }
+  }
+
   private finishTurn(conversationId: string, traceId: string): void {
     const session = this.sessions.get(conversationId);
     if (!session || session.traceId !== traceId) return;
@@ -218,6 +250,30 @@ export class AcpSessionService {
     session.traceId = null;
     this.deps.askService.clearTurn(conversationId);
     this.deps.permissionService.clearTurn(conversationId);
+  }
+
+  /**
+   * Apply a provider's preferredConfig (model, mode, etc.) to a live session.
+   * Shared by `ensureSession` and `startTurn` so default model/mode bypass
+   * takes effect on both interactive threads and subagent runs.
+   * Returns a list of config failures so callers can surface them to the
+   * agent/user instead of silently swallowing them.
+   */
+  private async applyPreferredConfig(
+    conversationId: string,
+    provider: AcpProviderDescriptor,
+  ): Promise<readonly string[]> {
+    const failures: string[] = [];
+    for (const [configId, value] of Object.entries(provider.preferredConfig ?? {})) {
+      try {
+        await this.deps.client.setConfigOption(conversationId, configId, value);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.deps.logger?.warn(`ACP preferred config failed provider=${provider.providerId} configId=${configId}: ${msg}`);
+        failures.push(`${configId}=${value}: ${msg}`);
+      }
+    }
+    return failures;
   }
 
   private buildSink(conversationId: string, activeTraceId: string): AcpClientSink {

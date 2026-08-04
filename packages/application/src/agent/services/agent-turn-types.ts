@@ -25,6 +25,7 @@ export const BARRIER_TOOLS: ReadonlySet<string> = new Set([
   "ask_question",
   "mcp_register",
   "mcp_unregister",
+  "async_wait",
 ]);
 
 export interface RunAgentTurnInput {
@@ -44,6 +45,11 @@ export interface RunAgentTurnInput {
   readonly onToolCallStart?: (call: AgentToolCall) => void;
   readonly onToolCallEnd?: (execution: AgentToolExecution) => void;
   readonly onContextUpdate?: (update: AgentContextUpdate) => void;
+  /**
+   * Fired whenever the sealed step list grows (reasoning / text / tool_calls).
+   * Used by ActiveTurnProjection — not every token.
+   */
+  readonly onStepsChanged?: (steps: readonly AgentTurnStep[]) => void;
 }
 
 export interface AgentContextUpdate {

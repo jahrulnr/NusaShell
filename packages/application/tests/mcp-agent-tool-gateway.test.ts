@@ -82,6 +82,53 @@ describe("McpAgentToolGateway", () => {
     expect((await gateway.listTools([], "turn-1")).map((tool) => tool.name)).not.toContain(grant.name);
   });
 
+  it("lazily resolves an ungranted mcp_* tool when the plugin is already running", async () => {
+    const callToolArgs: Array<{ toolName: string; args: Readonly<Record<string, unknown>> }> = [];
+    const runtime = {
+      ...fakeRuntime,
+      listPlugins: async () => [
+        { pluginId: "nusashell.notes", name: "Notes", state: "running", enabled: true },
+      ],
+      listTools: async () => [
+        { name: "createNote", description: "Create a note", inputSchema: { type: "object", properties: { text: { type: "string" } } } },
+      ],
+      callTool: async (_pluginId: unknown, options: { toolName: string; args: Readonly<Record<string, unknown>> }) => {
+        callToolArgs.push({ toolName: options.toolName, args: options.args });
+        return { ok: true, created: true };
+      },
+    };
+    const gateway = new McpAgentToolGateway(runtime as never);
+    gateway.beginTurn("turn-lazy");
+
+    const providerName = "mcp_nusashell_notes_createNote";
+    expect((await gateway.listTools([], "turn-lazy")).map((tool) => tool.name)).not.toContain(providerName);
+    await expect(gateway.execute(providerName, { text: "remembered" }, "call-lazy", "turn-lazy")).resolves.toEqual({
+      ok: true,
+      created: true,
+    });
+    expect(callToolArgs).toEqual([{ toolName: "createNote", args: { text: "remembered" } }]);
+    // Lazy resolve auto-grants for the rest of the turn.
+    expect((await gateway.listTools([], "turn-lazy")).map((tool) => tool.name)).toContain(providerName);
+  });
+
+  it("rejects an ungranted mcp_* tool when the matching plugin is not running", async () => {
+    const runtime = {
+      ...fakeRuntime,
+      listPlugins: async () => [
+        { pluginId: "nusashell.notes", name: "Notes", state: "idle", enabled: true },
+      ],
+      listTools: async () => [
+        { name: "createNote", description: "Create a note", inputSchema: { type: "object", properties: { text: { type: "string" } } } },
+      ],
+    };
+    const gateway = new McpAgentToolGateway(runtime as never);
+    gateway.beginTurn("turn-idle");
+
+    await expect(
+      gateway.execute("mcp_nusashell_notes_createNote", { text: "nope" }, "call-idle", "turn-idle"),
+    ).rejects.toThrow("outside the MCP allowlist");
+  });
+
   it("grants multiple tools in one call via tool_schemas", async () => {
     const runtime = {
       ...fakeRuntime,

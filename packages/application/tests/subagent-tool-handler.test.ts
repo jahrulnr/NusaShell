@@ -93,4 +93,48 @@ describe("execSubagent", () => {
     const result = await execSubagent(port, { prompt: "noop" }, "turn-1", undefined);
     expect(result).toMatchObject({ ok: true, workspace: os.homedir() });
   });
+
+  it("tries the routing default first", async () => {
+    const run = vi.fn(async (request) => {
+      return { ok: true, providerId: request.providerId, summary: "done" };
+    });
+    const port: SubagentPort = {
+      resolve: async () => ({
+        tryOrder: ["gemini", "cursor"],
+        candidates: new Map([
+          ["gemini", { providerId: "gemini", descriptor: { providerId: "gemini", command: "gemini", args: ["--acp"] }, preferredConfig: { mode: "yolo" } }],
+          ["cursor", { providerId: "cursor", descriptor: { providerId: "cursor", command: "agent", args: ["acp"] }, preferredConfig: { mode: "agent" } }],
+        ]),
+      }),
+      run,
+      cancel: async () => undefined,
+    };
+
+    const result = await execSubagent(port, { prompt: "do it" }, "turn-1", "/tmp");
+    expect(result).toMatchObject({ ok: true, providerId: "gemini" });
+    expect(run).toHaveBeenCalledOnce();
+    expect(run.mock.calls[0][0].providerId).toBe("gemini");
+  });
+
+  it("ignores provider_id from the LLM — Settings routing is authoritative", async () => {
+    const run = vi.fn(async (request) => {
+      return { ok: true, providerId: request.providerId, summary: "done" };
+    });
+    const resolve = vi.fn(async () => ({
+      tryOrder: ["gemini", "cursor"],
+      candidates: new Map([
+        ["gemini", { providerId: "gemini", descriptor: { providerId: "gemini", command: "gemini", args: ["--acp"] }, preferredConfig: { mode: "yolo" } }],
+        ["cursor", { providerId: "cursor", descriptor: { providerId: "cursor", command: "agent", args: ["acp"] }, preferredConfig: { mode: "agent" } }],
+      ]),
+    }));
+    const port: SubagentPort = { resolve, run, cancel: async () => undefined };
+
+    // LLM passes provider_id: "cursor" but user set Gemini as default.
+    // The handler does not forward provider_id to the resolver — Settings
+    // routing is authoritative.
+    const result = await execSubagent(port, { prompt: "do it", provider_id: "cursor" }, "turn-1", "/tmp");
+
+    expect(result).toMatchObject({ ok: true, providerId: "gemini" });
+    expect(run.mock.calls[0][0].providerId).toBe("gemini");
+  });
 });

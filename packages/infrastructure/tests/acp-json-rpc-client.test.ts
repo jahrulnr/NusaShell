@@ -322,3 +322,88 @@ describe("AcpJsonRpcClient — extension dispatch", () => {
     expect(await errorResponse).toBe(-32601);
   });
 });
+
+describe("AcpJsonRpcClient — Gemini session/new modes+models", () => {
+  const geminiProvider: AcpProviderDescriptor = {
+    providerId: "gemini",
+    command: "gemini",
+    args: ["--acp"],
+  };
+
+  const geminiSessionNewResult = {
+    sessionId: "sess-g1",
+    modes: {
+      currentModeId: "default",
+      availableModes: [
+        { id: "default", name: "Default" },
+        { id: "yolo", name: "YOLO" },
+      ],
+    },
+    models: {
+      currentModelId: "gemini-2.5-pro",
+      availableModels: [
+        { modelId: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
+        { modelId: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
+      ],
+    },
+  };
+
+  /** Drive a Gemini handshake: initialize (no auth) + session/new with modes+models. */
+  async function driveGeminiStart(child: FakeChildProcess): Promise<void> {
+    const init = await waitForRequest(child, "initialize");
+    child.respond(init.id, { authMethods: [{ id: "oauth-personal" }] });
+    const newSession = await waitForRequest(child, "session/new");
+    child.respond(newSession.id, geminiSessionNewResult);
+  }
+
+  it("normalizes modes+models into synthetic configOptions (not [])", async () => {
+    const child = new FakeChildProcess();
+    const client = new AcpJsonRpcClient(() => child as unknown as import("node:child_process").ChildProcess);
+    const promise = client.startSession("c1", geminiProvider, "/tmp", makeSink());
+    await driveGeminiStart(child);
+    await promise;
+    const options = client.getConfigOptions("c1");
+    expect(options).toHaveLength(2);
+    const mode = options.find((o) => o.id === "mode");
+    expect(mode).toBeDefined();
+    expect(mode!.currentValue).toBe("default");
+    expect(mode!.options).toHaveLength(2);
+    const model = options.find((o) => o.id === "model");
+    expect(model).toBeDefined();
+    expect(model!.currentValue).toBe("gemini-2.5-pro");
+    expect(model!.options).toHaveLength(2);
+  });
+
+  it("routes setConfigOption('mode','yolo') to session/set_mode and updates currentValue locally", async () => {
+    const child = new FakeChildProcess();
+    const client = new AcpJsonRpcClient(() => child as unknown as import("node:child_process").ChildProcess);
+    const startPromise = client.startSession("c1", geminiProvider, "/tmp", makeSink());
+    await driveGeminiStart(child);
+    await startPromise;
+
+    const setPromise = client.setConfigOption("c1", "mode", "yolo");
+    const setModeReq = await waitForRequest(child, "session/set_mode");
+    expect(setModeReq.params).toEqual({ sessionId: "sess-g1", modeId: "yolo" });
+    // Gemini session/set_mode response is empty — core client mirrors value locally.
+    child.respond(setModeReq.id, {});
+    await setPromise;
+    const mode = client.getConfigOptions("c1").find((o) => o.id === "mode");
+    expect(mode!.currentValue).toBe("yolo");
+  });
+
+  it("routes setConfigOption('model', ...) to session/set_model", async () => {
+    const child = new FakeChildProcess();
+    const client = new AcpJsonRpcClient(() => child as unknown as import("node:child_process").ChildProcess);
+    const startPromise = client.startSession("c1", geminiProvider, "/tmp", makeSink());
+    await driveGeminiStart(child);
+    await startPromise;
+
+    const setPromise = client.setConfigOption("c1", "model", "gemini-2.5-flash");
+    const setModelReq = await waitForRequest(child, "session/set_model");
+    expect(setModelReq.params).toEqual({ sessionId: "sess-g1", modelId: "gemini-2.5-flash" });
+    child.respond(setModelReq.id, {});
+    await setPromise;
+    const model = client.getConfigOptions("c1").find((o) => o.id === "model");
+    expect(model!.currentValue).toBe("gemini-2.5-flash");
+  });
+});

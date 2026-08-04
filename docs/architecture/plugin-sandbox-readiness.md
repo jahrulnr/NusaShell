@@ -24,6 +24,18 @@ bundle, so production was vulnerable to `../../` and absolute-path escape.
 Containment is solely `resolvePath` under `NUSASHELL_FILES_ROOT` / home. No
 `System32` denylist. See `plugins/files/README.md` for the rebuild contract.
 
+> **Reversed on 2026-08-04:** the Files plugin's `../` traversal containment
+> was removed because it was both confusing (`/` resolved to the home root
+> instead of the OS root) and a false sense of security (the agent is a
+> trusted actor; real security is the user/AI provider's responsibility per
+> `docs/architecture/security-boundary.md`). `resolvePath` now does a plain
+> `path.resolve(root, input)` — `/` and absolute paths resolve to OS-absolute
+> paths, `../` traversal is allowed, and the root is purely a convenience for
+> relative path resolution. The Terminal plugin's containment (if any) is
+> unaffected. The `bundle-containment.test.js` and
+> `files-bundle-sandbox.test.ts` regression guards were removed as obsolete.
+> See plan: `enrich_files_plugin_for_agent_reliability`.
+
 ## Finding 2 — Process death ↔ Status SoT (P1)
 
 **Risk:** killing the MCP process from outside NusaShell left the runtime

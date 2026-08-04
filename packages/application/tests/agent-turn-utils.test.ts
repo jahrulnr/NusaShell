@@ -4,9 +4,17 @@ import { ApplicationError } from "../src/errors/application-error.js";
 import {
   clampText,
   formatMessagesForSummary,
+  isLazyResolvableMcpToolName,
+  isToolAllowed,
   rethrowWithTurnPartial,
+  unknownToolExecution,
+  resolveContextThreshold,
+  tokenLimitReached,
+  resolveModelContextDefaults,
+  DEFAULT_UNKNOWN_CONTEXT_WINDOW,
+  MIN_AGENTIC_CONTEXT_WINDOW,
 } from "../src/agent/services/agent-turn-utils.js";
-import type { AgentTurnPartial } from "../src/agent/services/agent-turn-types.js";
+import type { AgentTurnPartial, AgentContextOptions } from "../src/agent/services/agent-turn-types.js";
 
 const samplePartial: AgentTurnPartial = {
   traceId: "trace-1",
@@ -59,6 +67,83 @@ describe("rethrowWithTurnPartial", () => {
     } catch (error) {
       expect(error).toBe(original);
     }
+  });
+});
+
+describe("isLazyResolvableMcpToolName", () => {
+  it("accepts mcp_* provider names that are not shell meta-tools", () => {
+    expect(isLazyResolvableMcpToolName("mcp_nusashell_notes_createNote")).toBe(true);
+    expect(isLazyResolvableMcpToolName("mcp_nusashell_files_files_read")).toBe(true);
+  });
+
+  it("rejects shell meta-tools and non-mcp names", () => {
+    expect(isLazyResolvableMcpToolName("mcp_list")).toBe(false);
+    expect(isLazyResolvableMcpToolName("mcp_enable")).toBe(false);
+    expect(isLazyResolvableMcpToolName("mcp_disable")).toBe(false);
+    expect(isLazyResolvableMcpToolName("mcp_context")).toBe(false);
+    expect(isLazyResolvableMcpToolName("mcp_register")).toBe(false);
+    expect(isLazyResolvableMcpToolName("mcp_unregister")).toBe(false);
+    expect(isLazyResolvableMcpToolName("tool_schema")).toBe(false);
+    expect(isLazyResolvableMcpToolName("ReadFile")).toBe(false);
+    expect(isLazyResolvableMcpToolName("")).toBe(false);
+  });
+});
+
+describe("isToolAllowed", () => {
+  it("returns true when the tool name is in the allowlist", () => {
+    const allow = new Map([["notes.create", {}]]);
+    expect(isToolAllowed({ id: "c1", name: "notes.create", args: {} }, allow)).toBe(true);
+  });
+
+  it("returns false when the tool name is missing", () => {
+    const allow = new Map([["notes.create", {}]]);
+    expect(isToolAllowed({ id: "c1", name: "", args: {} }, allow)).toBe(false);
+  });
+
+  it("returns false when the tool name is not in the allowlist", () => {
+    const allow = new Map([["notes.create", {}]]);
+    expect(isToolAllowed({ id: "c1", name: "ReadFile", args: {} }, allow)).toBe(false);
+  });
+});
+
+describe("unknownToolExecution", () => {
+  it("builds a failed execution with the rejected tool name in the error", () => {
+    const allow = new Map([["notes.create", {}], ["tool_list", {}]]);
+    const exec = unknownToolExecution({ id: "c1", name: "ReadFile", args: { path: "/x" } }, allow);
+    expect(exec.ok).toBe(false);
+    expect(exec.id).toBe("c1");
+    expect(exec.name).toBe("ReadFile");
+    expect(exec.args).toEqual({ path: "/x" });
+    expect(exec.error).toContain("ReadFile");
+    expect(exec.error).toContain("not");
+  });
+
+  it("points the model to discovery tools", () => {
+    const allow = new Map([["tool_list", {}], ["notes.create", {}]]);
+    const exec = unknownToolExecution({ id: "c1", name: "ReadFile", args: {} }, allow);
+    expect(exec.error).toContain("tool_list");
+  });
+
+  it("includes a sample of currently advertised names", () => {
+    const allow = new Map([
+      ["tool_list", {}], ["notes.create", {}], ["mcp_list", {}],
+    ]);
+    const exec = unknownToolExecution({ id: "c1", name: "ReadFile", args: {} }, allow);
+    expect(exec.error).toContain("notes.create");
+  });
+
+  it("handles missing id by keeping the call id as-is", () => {
+    const allow = new Map([["notes.create", {}]]);
+    const exec = unknownToolExecution({ id: "", name: "ReadFile", args: {} }, allow);
+    expect(exec.id).toBe("");
+    expect(exec.ok).toBe(false);
+  });
+
+  it("handles missing name", () => {
+    const allow = new Map([["notes.create", {}]]);
+    const exec = unknownToolExecution({ id: "c1", name: "", args: {} }, allow);
+    expect(exec.ok).toBe(false);
+    expect(exec.error).toContain("not");
   });
 });
 
@@ -133,5 +218,167 @@ describe("formatMessagesForSummary", () => {
     // The args JSON is clamped to 400 chars; the full 5000-char content must not survive.
     expect(summary).not.toContain("y".repeat(500));
     expect(summary.length).toBeLessThan(1_000);
+  });
+});
+
+describe("resolveContextThreshold", () => {
+  const base: AgentContextOptions = {
+    compactionEnabled: true,
+    maxInputTokens: 32_000,
+    reserveTokens: 0,
+    recentTurns: 4,
+    summaryMaxChars: 1000,
+  };
+
+  it("soft = 90% of window when window > 10k (10k free floor wins for small windows)", () => {
+    // window = 32000, 90% = 28800, window-10k = 22000 → 10k free wins
+    const t = resolveContextThreshold(base, { contextWindow: 32_000 });
+    expect(t.window).toBe(32_000);
+    expect(t.soft).toBe(22_000);
+  });
+
+  it("soft = 90% when 90% is more conservative than 10k free (large window)", () => {
+    // window = 128000, 90% = 115200, window-10k = 118000 → 90% wins
+    const t = resolveContextThreshold({ ...base, maxInputTokens: 128_000 }, { contextWindow: 128_000 });
+    expect(t.window).toBe(128_000);
+    expect(t.soft).toBe(115_200);
+  });
+
+  it("reserveTokens clamps soft further when smaller than 10k free", () => {
+    // window = 32000, 90% = 28800, 10k free = 22000, reserve=5000 → 27000 → min(22000, 27000) = 22000
+    const t = resolveContextThreshold({ ...base, reserveTokens: 5_000 }, { contextWindow: 32_000 });
+    expect(t.soft).toBe(22_000);
+  });
+
+  it("reserveTokens wins when it produces a smaller soft than 10k free", () => {
+    // window = 32000, 10k free = 22000, reserve=20000 → max(1000, 12000) = 12000 → min(22000, 12000) = 12000
+    const t = resolveContextThreshold({ ...base, reserveTokens: 20_000 }, { contextWindow: 32_000 });
+    expect(t.soft).toBe(12_000);
+  });
+
+  it("maxInputTokens caps the window below model contextWindow (user cost ceiling)", () => {
+    const t = resolveContextThreshold({ ...base, maxInputTokens: 8_000 }, { contextWindow: 200_000 });
+    expect(t.window).toBe(8_000);
+    // window=8000 < 30k so 10k-free branch skipped; soft = floor(7200) = 7200
+    expect(t.soft).toBe(7_200);
+  });
+
+  it("10k free floor does NOT apply to small windows (12k → soft=10800, not 2000)", () => {
+    // Bug fix: previously 10k floor applied to all windows > 10k, collapsing
+    // a 12k window to soft=2000 and forcing compaction every turn.
+    // Now the floor only applies when window >= 30k.
+    const t = resolveContextThreshold({ ...base, maxInputTokens: 12_000 }, { contextWindow: 200_000 });
+    expect(t.window).toBe(12_000);
+    expect(t.soft).toBe(10_800); // 90% of 12k, no 10k floor
+  });
+
+  it("10k free floor applies at exactly 30k boundary", () => {
+    // window=30000, 90% = 27000, 10k free = 20000 → 10k free wins
+    const t = resolveContextThreshold({ ...base, maxInputTokens: 30_000 }, { contextWindow: 200_000 });
+    expect(t.window).toBe(30_000);
+    expect(t.soft).toBe(20_000);
+  });
+
+  it("10k free floor does NOT apply just below 30k boundary (29k)", () => {
+    // window=29000 < 30k → no 10k floor; soft = floor(26100) = 26100
+    const t = resolveContextThreshold({ ...base, maxInputTokens: 29_000 }, { contextWindow: 200_000 });
+    expect(t.window).toBe(29_000);
+    expect(t.soft).toBe(26_100);
+  });
+
+  it("falls back to family heuristic when contextWindow absent", () => {
+    const t = resolveContextThreshold({ ...base, maxInputTokens: 400_000 }, undefined, "openai/gpt-5-nano");
+    // gpt-5 family → 400k, capped by maxInputTokens 400k → window 400k
+    expect(t.window).toBe(400_000);
+    expect(t.soft).toBe(360_000); // 90% wins over 390k (10k free)
+  });
+
+  it("falls back to 200k default when model id unknown and no capabilities", () => {
+    const t = resolveContextThreshold({ ...base, maxInputTokens: 500_000 }, undefined, "unknown-vendor/x");
+    expect(t.window).toBe(Math.max(MIN_AGENTIC_CONTEXT_WINDOW, DEFAULT_UNKNOWN_CONTEXT_WINDOW));
+    expect(t.soft).toBe(Math.floor(t.window * 0.9));
+  });
+
+  it("invalid maxInputTokens (0) clamps to default instead of collapsing window", () => {
+    const t = resolveContextThreshold({ ...base, maxInputTokens: 0 }, undefined, "unknown-vendor/x");
+    // Should NOT collapse to window=0; falls back to DEFAULT_UNKNOWN_CONTEXT_WINDOW
+    expect(t.window).toBe(DEFAULT_UNKNOWN_CONTEXT_WINDOW);
+    expect(t.soft).toBeGreaterThanOrEqual(1);
+  });
+
+  it("invalid maxInputTokens (negative) clamps to default", () => {
+    const t = resolveContextThreshold({ ...base, maxInputTokens: -5 }, { contextWindow: 32_000 });
+    expect(t.window).toBe(32_000);
+    expect(t.soft).toBe(22_000);
+  });
+
+  it("soft is always ≥ 1 (Math.max(1, soft) floor)", () => {
+    // window=1 → 90% = 0 → floor → Math.max(1, 0) = 1
+    const t = resolveContextThreshold({ ...base, maxInputTokens: 1 }, { contextWindow: 1 });
+    expect(t.soft).toBe(1);
+  });
+
+  it("MIN_AGENTIC_CONTEXT_WINDOW floors heuristic-derived model window", () => {
+    // A family rule with a tiny window would be floored to MIN_AGENTIC_CONTEXT_WINDOW.
+    // No current rule is that small, so simulate by checking the floor applies
+    // when capabilities are absent: window ≥ MIN_AGENTIC_CONTEXT_WINDOW.
+    const t = resolveContextThreshold({ ...base, maxInputTokens: 10_000_000 }, undefined, "unknown-vendor/x");
+    expect(t.window).toBeGreaterThanOrEqual(MIN_AGENTIC_CONTEXT_WINDOW);
+  });
+});
+
+describe("tokenLimitReached", () => {
+  const base: AgentContextOptions = {
+    compactionEnabled: true,
+    maxInputTokens: 32_000,
+    reserveTokens: 0,
+    recentTurns: 4,
+    summaryMaxChars: 1000,
+  };
+
+  it("returns false when estimated < soft", () => {
+    const t = resolveContextThreshold(base, { contextWindow: 32_000 });
+    expect(tokenLimitReached(21_999, t)).toBe(false);
+  });
+
+  it("returns true when estimated ≥ soft (Codex soft trigger)", () => {
+    const t = resolveContextThreshold(base, { contextWindow: 32_000 });
+    expect(tokenLimitReached(22_000, t)).toBe(true);
+  });
+
+  it("returns true when estimated ≥ full window (hard safety net)", () => {
+    // soft is 22000, but estimate 32000 ≥ window → hard trigger
+    const t = resolveContextThreshold(base, { contextWindow: 32_000 });
+    expect(tokenLimitReached(32_000, t)).toBe(true);
+  });
+
+  it("hard window forces even if soft is somehow higher than window", () => {
+    // Construct a degenerate threshold where soft > window (shouldn't happen
+    // normally, but the hard clause is the safety net).
+    const t = { window: 1000, soft: 2000 };
+    expect(tokenLimitReached(1000, t)).toBe(true);
+  });
+});
+
+describe("resolveModelContextDefaults family table", () => {
+  it("GPT-4o / o-series resolve to 128k (not 200k fallback)", () => {
+    expect(resolveModelContextDefaults("openai/gpt-4o").contextWindow).toBe(128_000);
+    expect(resolveModelContextDefaults("openai/gpt-4.1-mini").contextWindow).toBe(128_000);
+    expect(resolveModelContextDefaults("openai/o3-mini").contextWindow).toBe(128_000);
+    expect(resolveModelContextDefaults("openai/o4-mini").contextWindow).toBe(128_000);
+  });
+
+  it("GPT-5 series still wins over GPT-4o (first-match-wins ordering)", () => {
+    expect(resolveModelContextDefaults("openai/gpt-5-nano").contextWindow).toBe(400_000);
+  });
+
+  it("first-match-wins: deepseek-v4-flash hits 1M rule before generic deepseek 164k", () => {
+    expect(resolveModelContextDefaults("deepseek/deepseek-v4-flash").contextWindow).toBe(1_048_576);
+    expect(resolveModelContextDefaults("deepseek/deepseek-chat").contextWindow).toBe(163_840);
+  });
+
+  it("first-match-wins: claude-haiku hits 200k before generic claude 200k (same value, but specific rule)", () => {
+    expect(resolveModelContextDefaults("anthropic/claude-haiku-4").contextWindow).toBe(200_000);
+    expect(resolveModelContextDefaults("anthropic/claude-sonnet-4").contextWindow).toBe(1_000_000);
   });
 });

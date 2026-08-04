@@ -137,9 +137,8 @@ Routing is persisted in `acp-routing.json` through the preload
 3. every remaining enabled and connected provider in built-in manifest order.
 
 When no routing file exists, or default/fallback are empty, this final manifest
-order is the compatibility fallback. A subagent can pass an explicit
-`provider_id` to `resolveTryOrder(provider_id?)`; that connected provider is
-placed first while the configured order remains available afterward.
+order is the compatibility fallback. The LLM cannot override the try-order —
+Settings → ACP Agents is authoritative.
 
 NusaShell does **not** store OAuth tokens. Credentials stay with the external
 CLIs (`~/.config/cursor/auth.json`, `~/.codex/auth.json`). The shell only

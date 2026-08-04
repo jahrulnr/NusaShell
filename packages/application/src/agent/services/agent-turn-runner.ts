@@ -21,7 +21,6 @@ import {
   normalizeConcurrentToolCalls,
   repeatedToolDecision,
   rethrowWithTurnPartial,
-  validateRequestedTools,
 } from "./agent-turn-utils.js";
 import { ContextCompactor } from "./agent-context-compaction.js";
 import { ToolExecutionPolicy } from "./agent-tool-execution-policy.js";
@@ -123,6 +122,10 @@ export class AgentTurnRunner {
         const tools = await this.deps.toolGateway.listTools(input.pluginIds, traceId);
         assertTurnActive(input.signal, traceId);
         const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
+        // Pre-sample gate (Codex pre_sampling): re-estimate before each
+        // provider.complete and shrink if token budget exceeded. This catches
+        // growth from prior tool rounds without waiting for the next turn.
+        this.compactor.shrink(messages, input.modelCapabilities, input.model);
         let response;
         for (;;) {
           try {
@@ -177,6 +180,7 @@ export class AgentTurnRunner {
         const stepProviderId = response.providerId;
         if (response.reasoning?.trim()) {
           steps.push({ type: "reasoning", content: response.reasoning.trim(), ...(stepModel ? { model: stepModel } : {}), ...(stepProviderId ? { providerId: stepProviderId } : {}) });
+          input.onStepsChanged?.(steps);
         }
         addUsage(usage, response.usage);
         const requestedCalls = response.toolCalls ?? [];
@@ -205,6 +209,7 @@ export class AgentTurnRunner {
           }
           this.deps.logger?.info("Agent turn completed traceId=%s provider=%s rounds=%d", traceId, this.deps.provider.id, round);
           steps.push({ type: "text", content: text, ...(stepModel ? { model: stepModel } : {}), ...(stepProviderId ? { providerId: stepProviderId } : {}) });
+          input.onStepsChanged?.(steps);
           return {
             traceId,
             text,
@@ -221,7 +226,6 @@ export class AgentTurnRunner {
           };
         }
 
-        validateRequestedTools(requestedCalls, toolsByName, traceId);
         const duplicate = repeatedToolDecision(requestedCalls, repeatedCalls, this.defaultMaxRepeatedToolCalls);
         if (duplicate === "stop") {
           this.deps.logger?.warn("Agent stopped: repeated tool call limit (%d) reached traceId=%s", this.defaultMaxRepeatedToolCalls, traceId);
@@ -256,6 +260,7 @@ export class AgentTurnRunner {
         // Streaming UIs also append by delta arrival; do not reorder text after tools.
         if (response.text?.trim()) {
           steps.push({ type: "text", content: response.text.trim(), ...(stepModel ? { model: stepModel } : {}), ...(stepProviderId ? { providerId: stepProviderId } : {}) });
+          input.onStepsChanged?.(steps);
         }
         publishContext();
 
@@ -263,13 +268,19 @@ export class AgentTurnRunner {
         await this.toolPolicy.executeBatch(requestedCalls, {
           traceId,
           round,
+          toolsByName,
           ...(input.signal ? { signal: input.signal } : {}),
           ...(input.onToolCallStart ? { onToolCallStart: input.onToolCallStart } : {}),
           ...(input.onToolCallEnd ? { onToolCallEnd: input.onToolCallEnd } : {}),
         }, toolCalls, roundExecutions, messages);
+        // MidTurn gate (Codex post_sampling roll-over): after tool results are
+        // appended, shrink if the live messages array exceeds the token budget
+        // so the next provider.complete payload stays under the window.
+        this.compactor.shrink(messages, input.modelCapabilities, input.model);
         publishContext();
         if (roundExecutions.length > 0) {
           steps.push({ type: "tool_calls", calls: [...roundExecutions], ...(stepModel ? { model: stepModel } : {}), ...(stepProviderId ? { providerId: stepProviderId } : {}) });
+          input.onStepsChanged?.(steps);
         }
       }
 

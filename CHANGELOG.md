@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2026-08-05
+
+### Fixed
+
+- **Messages API streaming.** `MessagesApiStrategy` now supports streaming
+  (`supportsStream = true`, `sseMode = "messages"`), so providers using the
+  Anthropic Messages API (e.g. Blackbox with `blackboxai/moonshotai/kimi-k3`)
+  now stream thinking and text deltas live to the UI instead of only showing
+  reasoning after the turn completes. Added a `MessagesAccumulator` to the SSE
+  parser that handles `message_start`, `content_block_start`,
+  `content_block_delta` (`text_delta`, `thinking_delta`, `input_json_delta`),
+  `message_delta`, and `message_stop` events. Fixed a double-count bug where
+  some proxies (Blackbox) include initial content in `content_block_start` AND
+  repeat it in the first delta — the parser now treats deltas as the single
+  source of truth and only stores block metadata from `content_block_start`.
+- **10k free floor no longer collapses small context windows.**
+  `resolveContextThreshold` previously applied the 10k free floor to any
+  window > 10k, which collapsed a 12k window to `soft = 2000` and forced
+  compaction every turn — shrinking tool results so aggressively that the
+  model could not see them. The floor now only applies when
+  `window >= 30_000` (roomy windows where 10k is ≤33% reserve). Small windows
+  use the 90% rule alone.
+- **MCP stdio `~` expansion and GUI PATH enrichment.** Node's
+  `child_process.spawn` does not perform shell expansion, so a manifest
+  command like `~/.local/bin/messager-mcp` failed with ENOENT. The spawn env
+  helper now expands `~/` and `~` to `os.homedir()` in both the command path
+  and PATH entries, and prepends common user bin directories
+  (`~/.local/bin`, `~/bin`, `~/.cargo/bin`, `~/.npm-global/bin`, etc.) that
+  GUI-launched Electron would not otherwise have on PATH (GUI launches do not
+  source `.bashrc`/`.zshrc`).
+
 ## [0.3.4] - 2026-08-04
 
 ### Fixed

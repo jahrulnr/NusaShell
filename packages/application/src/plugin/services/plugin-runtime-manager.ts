@@ -146,9 +146,11 @@ export class PluginRuntimeManager {
   async callTool(
     pluginId: PluginId,
     options: CallToolOptions,
+    signal?: AbortSignal,
   ): Promise<unknown> {
     const entry = await this.ensureEntry(pluginId);
-    return entry.queue.enqueue(async () => this.tracker.callToolLocked(entry, options));
+    const mergedOptions = signal ? { ...options, signal } : options;
+    return entry.queue.enqueue(async () => this.tracker.callToolLocked(entry, mergedOptions));
   }
 
   async cancelTool(pluginId: PluginId, requestId: string): Promise<void> {

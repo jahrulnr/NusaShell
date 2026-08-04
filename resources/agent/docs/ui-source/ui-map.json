@@ -54,13 +54,13 @@
     },
     "home": {
       "title": "Home (Launcher)",
-      "purpose": "The default view and app launcher. Shows windowed (UI) plugins as a searchable grid of app tiles. Headless MCP-only plugins do not appear here — manage them from the Plugins view.",
+      "purpose": "The default view and app launcher. Shows windowed (UI) plugins as a searchable grid of app tiles. Headless MCP-only plugins do not appear here \u2014 manage them from the Plugins view.",
       "howToOpen": "Open NusaShell, or click the Home item in the left sidebar.",
       "sections": [
         {
           "heading": "Greeting",
           "paragraphs": [
-            "Displays a compact local-workbench kicker, the product name, and the tagline 'Your AI tool shell — plugins with real UIs.'"
+            "Displays a compact local-workbench kicker, the product name, and the tagline 'Your AI tool shell \u2014 plugins with real UIs.'"
           ],
           "controls": []
         },
@@ -182,7 +182,7 @@
         {
           "heading": "Conversation list",
           "paragraphs": [
-            "A fixed workbench rail listing local conversation threads. Click a thread to open it; use the × button to delete. The rail remains visible beside a wider conversation surface at desktop widths."
+            "A fixed workbench rail listing local conversation threads. Click a thread to open it; use the \u00d7 button to delete. The rail remains visible beside a wider conversation surface at desktop widths."
           ],
           "controls": [
             "agent-conversations-title",
@@ -244,7 +244,7 @@
         {
           "heading": "Composer",
           "paragraphs": [
-            "A raised command dock at the bottom of the thread. Its message input starts at one row, grows with wrapped or explicit lines, and caps at ten rows before scrolling internally. Attach images, PDFs, or text files, choose a model, and send the turn without losing the conversation rail."
+            "A compact command dock at the bottom of the thread. Its message input starts at one row, grows with wrapped or explicit lines, and caps at ten rows before scrolling internally. Attachment, model, and workspace context stay grouped separately from context usage and turn actions; long labels truncate, and actions wrap below only at very narrow widths."
           ],
           "controls": [
             "agent-form",
@@ -262,6 +262,28 @@
             "agent-provider-status",
             "agent-stop-btn",
             "agent-send-btn"
+          ]
+        },
+        {
+          "heading": "Task strip",
+          "paragraphs": [
+            "A collapsible checklist above the composer that mirrors the agent-owned todo list. The agent writes it via the `todo` meta-tool; the user can delete individual items (which removes them from the runtime port so they do not reappear in the next prompt injection) and collapse the strip. It hides automatically when the list is empty."
+          ],
+          "controls": [
+            "agent-todo-strip",
+            "agent-todo-strip-toggle",
+            "agent-todo-strip-count",
+            "agent-todo-strip-list"
+          ]
+        },
+        {
+          "heading": "Background jobs strip",
+          "paragraphs": [
+            "A strip above the composer (below the task strip) that shows running and recently finished async tool jobs started via `async_run`. Each card shows the tool name, status badge, live tail output, and a Stop button that calls `agent.tool_job_kill`. The strip rehydrates from `agent.tool_job_list` on conversation open and hides when no jobs are active."
+          ],
+          "controls": [
+            "agent-tool-job-strip",
+            "agent-tool-job-list"
           ]
         },
         {
@@ -288,6 +310,7 @@
             "agent-shell",
             "agent-canvas-overlay",
             "agent-canvas",
+            "agent-canvas-resize",
             "agent-canvas-title",
             "agent-canvas-badge",
             "agent-canvas-body",
@@ -389,9 +412,19 @@
     },
     "learning": {
       "title": "Learning",
-      "purpose": "Visualizes the agent's learning journey as a timeline and constellation of skill and memory nodes, with a time scrubber and a detail pane for inspecting and editing individual nodes.",
+      "purpose": "Reviews saved learning data in two focused views: a table for timeline and node details, and a full-width Connections graph.",
       "howToOpen": "Click the Learning item in the left sidebar.",
       "sections": [
+        {
+          "heading": "View tabs",
+          "paragraphs": [
+            "Switches between the Table view for browsing and editing nodes and the Connections view for exploring relationships across the full available width."
+          ],
+          "controls": [
+            "learning-tab-table",
+            "learning-tab-connections"
+          ]
+        },
         {
           "heading": "Stats",
           "paragraphs": [
@@ -407,7 +440,7 @@
         {
           "heading": "Timeline",
           "paragraphs": [
-            "A chronological list of learning nodes grouped by day. Each row shows a colored dot indicating kind (skill or memory) and state (active, stale, archived), the node label, category, use count, and a pin indicator. Click a row to inspect it in the detail pane."
+            "The Table view contains a chronological list of learning nodes grouped by day. Each row shows a colored dot indicating kind (skill or memory) and state (active, stale, archived), the node label, category, use count, and a pin indicator. Click a row to inspect it in the detail pane."
           ],
           "controls": [
             "learning-timeline-list",
@@ -418,11 +451,15 @@
         {
           "heading": "Constellation",
           "paragraphs": [
-            "An SVG graph that positions nodes by timestamp (horizontal) and cluster category (vertical) and draws edges between related skills. Node color reflects kind and state. Click a dot to select the node. A time scrubber below fades nodes that fall after the selected percentage of the timeline."
+            "The Connections view gives the graph the full panel width. It uses a compact force layout for related nodes and packs isolated nodes nearby, with edges between related skills. Node size reflects connection degree and labels become selective on larger graphs as the user zooms. Node color reflects kind and state. Click a dot to select the node and highlight its neighborhood. A time scrubber below fades nodes that fall after the selected percentage of the timeline."
           ],
           "controls": [
-            "learning-constellation-svg",
+            "learning-constellation-canvas",
             "learning-constellation-meta",
+            "learning-zoom-in",
+            "learning-zoom-out",
+            "learning-zoom-reset",
+            "learning-zoom-value",
             "learning-scrubber",
             "learning-scrubber-value"
           ]
@@ -473,7 +510,7 @@
         {
           "heading": "ACP agents",
           "paragraphs": [
-            "Registry of ACP (Agent Client Protocol) external agents. Enable and configure providers such as Cursor, Devin, Codex, Claude Code, and Gemini. The Subagent routing card chooses a connected default and fallback order; each provider card shows a Connect button that runs a one-shot acp.probe (spawn → initialize → authenticate → session/new → close) and persists authStatus as connected or needs-auth. Connected providers are available as subagent targets via the subagent tool from within an agent conversation."
+            "Registry of ACP (Agent Client Protocol) external agents. Enable and configure providers such as Cursor, Devin, Codex, Claude Code, and Gemini. The Subagent routing card chooses a connected default and fallback order; each provider card shows a Connect button that runs a one-shot acp.probe (spawn \u2192 initialize \u2192 authenticate \u2192 session/new \u2192 close) and persists authStatus as connected or needs-auth. Connected providers are available as subagent targets via the subagent tool from within an agent conversation."
           ],
           "controls": [
             "acp-routing-card",
@@ -995,6 +1032,71 @@
           ]
         }
       ]
+    },
+    "acp-provider-details": {
+      "title": "ACP Provider Details",
+      "purpose": "Deep view for one ACP agent: connection info, imported models, default model/mode selection, import catalog, edit, and live config-option snapshot.",
+      "howToOpen": "Click Details on a connected ACP Agents card.",
+      "sections": [
+        {
+          "heading": "ACP agent summary",
+          "paragraphs": [
+            "Back link, agent display name, description, command, auth status, default model, default mode, and enabled status."
+          ],
+          "controls": [
+            "acp-provider-details-back",
+            "acp-provider-detail-title",
+            "acp-provider-detail-subtitle",
+            "acp-provider-detail-command",
+            "acp-provider-detail-auth",
+            "acp-provider-detail-default-model",
+            "acp-provider-detail-default-mode",
+            "acp-provider-detail-status"
+          ]
+        },
+        {
+          "heading": "ACP agent actions",
+          "paragraphs": [
+            "Edit the agent configuration or import its model catalog by probing a fresh session."
+          ],
+          "controls": [
+            "acp-provider-detail-edit",
+            "acp-provider-import-models",
+            "acp-provider-import-error"
+          ]
+        },
+        {
+          "heading": "Models",
+          "paragraphs": [
+            "Searchable list of imported models discovered from the last probe. Each row shows model id and label."
+          ],
+          "controls": [
+            "acp-provider-model-count",
+            "acp-provider-model-search",
+            "acp-provider-model-list"
+          ]
+        },
+        {
+          "heading": "Defaults",
+          "paragraphs": [
+            "Default model and default mode (bypass / yolo) selects. Applied to every subagent run and ACP thread from this agent via preferredConfig."
+          ],
+          "controls": [
+            "acp-provider-default-model-select",
+            "acp-provider-default-mode-select"
+          ]
+        },
+        {
+          "heading": "Config options snapshot",
+          "paragraphs": [
+            "Read-only snapshot of live session config options from the last probe, excluding model and mode which have their own controls above."
+          ],
+          "controls": [
+            "acp-provider-config-options-card",
+            "acp-provider-config-options"
+          ]
+        }
+      ]
     }
   },
   "controls": {
@@ -1269,7 +1371,7 @@
       "action": "Switches the main content to the Learning journey view.",
       "related": [
         "learning-timeline-list",
-        "learning-constellation-svg",
+        "learning-constellation-canvas",
         "learning-detail-editor"
       ]
     },
@@ -1297,6 +1399,18 @@
       "type": "stat card",
       "action": "Shows the number of nodes that have been used in at least one agent turn."
     },
+    "learning-tab-table": {
+      "section": "View tabs",
+      "label": "Table view",
+      "type": "tab",
+      "action": "Shows the learning timeline and selected node detail."
+    },
+    "learning-tab-connections": {
+      "section": "View tabs",
+      "label": "Connections view",
+      "type": "tab",
+      "action": "Shows the full-width learning connections graph."
+    },
     "learning-timeline-list": {
       "section": "Timeline",
       "label": "Learning timeline",
@@ -1315,17 +1429,41 @@
       "type": "status",
       "action": "Shown when the agent has not created any skills or memory entries yet."
     },
-    "learning-constellation-svg": {
+    "learning-constellation-canvas": {
       "section": "Constellation",
       "label": "Constellation graph",
-      "type": "svg graph",
-      "action": "Visualizes learning nodes as dots positioned by timestamp and cluster, with edges between related skills. Click a dot to select a node."
+      "type": "interactive graph",
+      "action": "Visualizes learning nodes with Sigma.js and Graphology using a force-directed layout, curved edges, semantic zoom, and neighborhood selection."
     },
     "learning-constellation-meta": {
       "section": "Constellation",
       "label": "Constellation metadata",
       "type": "status text",
       "action": "Shows the number of edges in the constellation graph."
+    },
+    "learning-zoom-in": {
+      "section": "Constellation",
+      "label": "Zoom in connections",
+      "type": "button",
+      "action": "Increases the connection graph scale."
+    },
+    "learning-zoom-out": {
+      "section": "Constellation",
+      "label": "Zoom out connections",
+      "type": "button",
+      "action": "Decreases the connection graph scale."
+    },
+    "learning-zoom-reset": {
+      "section": "Constellation",
+      "label": "Reset connection zoom",
+      "type": "button",
+      "action": "Returns the connection graph to 100% scale."
+    },
+    "learning-zoom-value": {
+      "section": "Constellation",
+      "label": "Connection zoom value",
+      "type": "status text",
+      "action": "Shows the current connection graph scale."
     },
     "learning-scrubber": {
       "section": "Constellation",
@@ -1625,7 +1763,7 @@
       "type": "listitem",
       "selector": ".agent-conversation-item",
       "generated": true,
-      "action": "Click the row to open the conversation; click the × button to delete it."
+      "action": "Click the row to open the conversation; click the \u00d7 button to delete it."
     },
     "agent-thread": {
       "section": "Conversation thread",
@@ -1633,11 +1771,23 @@
       "type": "log region",
       "action": "Main scrollable message area for the current conversation. Auto-scrolls as new content arrives."
     },
-    "acp-routing-card": {
+    "acp-routing-settings": {
       "section": "ACP agents",
-      "label": "Subagent routing",
-      "type": "settings card",
-      "action": "Groups the default ACP agent and fallback controls for subagent delegation."
+      "label": "Fallback settings",
+      "type": "button",
+      "action": "Opens the fallback order dialog for choosing the default ACP provider and fallback providers."
+    },
+    "acp-routing-dialog": {
+      "section": "ACP agents",
+      "label": "Fallback order dialog",
+      "type": "dialog",
+      "action": "Groups the default ACP provider and fallback controls for subagent delegation."
+    },
+    "acp-routing-close": {
+      "section": "ACP agents",
+      "label": "Close fallback settings",
+      "type": "button",
+      "action": "Closes the fallback order dialog."
     },
     "acp-routing-default": {
       "section": "ACP agents",
@@ -1726,7 +1876,7 @@
       "type": "disclosure",
       "selector": ".agent-tool-terminal",
       "generated": true,
-      "action": "Timeline-style expandable tool call. Header keeps the ›_ rail badge plus tool name and status. Expand to inspect nested tool and Output panels with args and truncated result text."
+      "action": "Timeline-style expandable tool call. Header keeps the \u203a_ rail badge plus tool name and status. Expand to inspect nested tool and Output panels with args and truncated result text."
     },
     "agent-ask-card": {
       "section": "Conversation thread",
@@ -1782,6 +1932,49 @@
       "type": "form",
       "action": "Wraps the message textarea, attachments, and send controls. Submit triggers the agent turn."
     },
+    "agent-todo-strip": {
+      "section": "Task strip",
+      "label": "Task strip",
+      "type": "container",
+      "selector": ".agent-todo-strip",
+      "action": "Collapsible checklist above the composer mirroring the agent-owned todo list. Hides when the list is empty."
+    },
+    "agent-todo-strip-toggle": {
+      "section": "Task strip",
+      "label": "Collapse tasks",
+      "type": "button",
+      "selector": ".agent-todo-strip-toggle",
+      "action": "Collapses or expands the task list."
+    },
+    "agent-todo-strip-count": {
+      "section": "Task strip",
+      "label": "Task count",
+      "type": "text",
+      "selector": ".agent-todo-strip-count",
+      "generated": true,
+      "action": "Shows incomplete/total task counts."
+    },
+    "agent-todo-strip-list": {
+      "section": "Task strip",
+      "label": "Task list",
+      "type": "list",
+      "selector": ".agent-todo-strip-list",
+      "action": "Renders each task with a status glyph and a delete button. Clicking the delete button removes the item via agent.todos_delete."
+    },
+    "agent-tool-job-strip": {
+      "section": "Background jobs strip",
+      "label": "Background jobs strip",
+      "type": "container",
+      "selector": ".agent-tool-job-strip",
+      "action": "Shows running and recently finished async tool jobs. Hides when no jobs are active."
+    },
+    "agent-tool-job-list": {
+      "section": "Background jobs strip",
+      "label": "Job cards",
+      "type": "list",
+      "selector": ".agent-tool-job-list",
+      "action": "Renders each job as a card with tool name, status badge, live tail, and a Stop button. Clicking Stop calls agent.tool_job_kill."
+    },
     "agent-input": {
       "section": "Composer",
       "label": "Message input",
@@ -1815,7 +2008,7 @@
       "section": "Composer",
       "label": "Model and effort trigger",
       "type": "button",
-      "action": "Opens the model/effort picker dropdown. Label shows the selected model and effort, e.g. 'Model · auto'."
+      "action": "Opens the model/effort picker dropdown. Label shows the selected model and effort, e.g. 'Model \u00b7 auto'."
     },
     "agent-model-trigger-label": {
       "section": "Composer",
@@ -1845,7 +2038,7 @@
       "section": "Composer",
       "label": "Context usage status",
       "type": "status text",
-      "action": "Shows approximate used / total context window fill for the selected model (from agent.context estimates and local chars/4 estimates — not cumulative billed input tokens), or 'Choose a model' when none is selected."
+      "action": "Shows approximate used / total context window fill for the selected model (from agent.context estimates and local chars/4 estimates \u2014 not cumulative billed input tokens), or 'Choose a model' when none is selected."
     },
     "agent-stop-btn": {
       "section": "Composer",
@@ -1857,7 +2050,8 @@
       "section": "Composer",
       "label": "Send turn",
       "type": "submit button",
-      "action": "Submits the composer form and starts the agent turn."
+      "action": "Submits the composer form and starts the agent turn. Shortcut is shown as a tooltip (Ctrl+Enter / ⌘↩).",
+      "shortcut": "Ctrl+Enter or Cmd+Enter submits the turn."
     },
     "agent-delete-overlay": {
       "section": "Delete conversation dialog",
@@ -1937,7 +2131,7 @@
       "type": "status text",
       "selector": ".provider-status",
       "generated": true,
-      "action": "Shows 'Not configured', 'Needs API key', or 'Configured · N models'."
+      "action": "Shows 'Not configured', 'Needs API key', or 'Configured \u00b7 N models'."
     },
     "add-custom-provider": {
       "section": "Add custom provider",
@@ -1979,7 +2173,7 @@
       "section": "Provider summary",
       "label": "Default model",
       "type": "text",
-      "action": "Displays the provider's default model or 'Not set — choose per turn'."
+      "action": "Displays the provider's default model or 'Not set \u2014 choose per turn'."
     },
     "provider-detail-status": {
       "section": "Provider summary",
@@ -2227,7 +2421,7 @@
       "section": "Agent runtime",
       "label": "Total attempt budget",
       "type": "number input",
-      "action": "Maximum number of agent tool-call attempts per turn (1–32)."
+      "action": "Maximum number of agent tool-call attempts per turn (1\u201332)."
     },
     "settings-ai-vision": {
       "section": "Agent runtime",
@@ -2257,13 +2451,13 @@
       "section": "Agent limits",
       "label": "Max tool rounds",
       "type": "number input",
-      "action": "Maximum number of tool-call rounds per agent turn (1–100). Default 50."
+      "action": "Maximum number of tool-call rounds per agent turn (1\u2013100). Default 50."
     },
     "settings-ai-max-repeated-tool-calls": {
       "section": "Agent limits",
       "label": "Max repeated tool calls",
       "type": "number input",
-      "action": "Stops the agent if the same tool call repeats this many times (1–200). Default 50."
+      "action": "Stops the agent if the same tool call repeats this many times (1\u2013200). Default 50."
     },
     "ai-context-form": {
       "section": "Context compaction",
@@ -2281,25 +2475,25 @@
       "section": "Context compaction",
       "label": "Max input tokens",
       "type": "number input",
-      "action": "Token budget for the input prompt before compaction triggers (1000–2000000). Default 12000."
+      "action": "Token budget for the input prompt before compaction triggers (1000\u20132000000). Default 12000."
     },
     "settings-ai-reserve-tokens": {
       "section": "Context compaction",
       "label": "Reserve tokens",
       "type": "number input",
-      "action": "Tokens reserved for the model response, subtracted from the input budget (0–1000000). Default 3000."
+      "action": "Tokens reserved for the model response, subtracted from the input budget (0\u20131000000). Default 3000."
     },
     "settings-ai-recent-turns": {
       "section": "Context compaction",
       "label": "Recent turns to keep",
       "type": "number input",
-      "action": "Number of recent user-assistant turns preserved during compaction (1–100). Default 4."
+      "action": "Number of recent user-assistant turns preserved during compaction (1\u2013100). Default 4."
     },
     "settings-ai-summary-max-chars": {
       "section": "Context compaction",
       "label": "Summary max characters",
       "type": "number input",
-      "action": "Maximum character length of the compacted summary (100–1000000). Default 12000."
+      "action": "Maximum character length of the compacted summary (100\u20131000000). Default 12000."
     },
     "add-plugin-modal": {
       "section": "Install options",
@@ -2543,13 +2737,13 @@
       "section": "Runtime",
       "label": "Timeout (seconds)",
       "type": "number input",
-      "action": "Request timeout in seconds (1–600)."
+      "action": "Request timeout in seconds (1\u2013600)."
     },
     "settings-ai-attempts": {
       "section": "Runtime",
       "label": "Attempts",
       "type": "number input",
-      "action": "Maximum retry attempts for a single request (1–10)."
+      "action": "Maximum retry attempts for a single request (1\u201310)."
     },
     "settings-ai-weight": {
       "section": "Runtime",
@@ -2615,7 +2809,7 @@
       "section": "Confirmation",
       "label": "Delete",
       "type": "button",
-      "action": "Permanently deletes the provider after disabling the button and showing 'Deleting…'."
+      "action": "Permanently deletes the provider after disabling the button and showing 'Deleting\u2026'."
     },
     "context-menu": {
       "section": "Plugin actions",
@@ -3078,6 +3272,12 @@
       "type": "dialog",
       "action": "Right-edge overlay drawer for the active canvas artifact. Slides over the agent workbench without resizing the chat column; closed via Close, overlay click, or Escape."
     },
+    "agent-canvas-resize": {
+      "section": "Agent Canvas",
+      "label": "Resize canvas drawer",
+      "type": "separator",
+      "action": "Drag the left edge to resize the drawer. ArrowLeft/ArrowRight adjust it by keyboard; Home and End go to the widest and narrowest supported sizes."
+    },
     "agent-canvas-overlay": {
       "section": "Agent Canvas",
       "label": "Canvas drawer overlay",
@@ -3164,7 +3364,7 @@
       "type": "region",
       "selector": "#agent-shell",
       "generated": true,
-      "action": "Two-column agent workbench (conversations · thread). Canvas opens as a fixed overlay drawer and does not add a third grid column."
+      "action": "Two-column agent workbench (conversations \u00b7 thread). Canvas opens as a fixed overlay drawer and does not add a third grid column."
     },
     "agent-canvas-card": {
       "section": "Agent Canvas",
@@ -3204,7 +3404,7 @@
       "type": "label",
       "selector": ".agent-canvas-card-meta",
       "generated": true,
-      "action": "Size hint (lines · bytes) on an artifact card."
+      "action": "Size hint (lines \u00b7 bytes) on an artifact card."
     },
     "agent-canvas-card-actions": {
       "section": "Agent Canvas",
@@ -3363,6 +3563,126 @@
       "selector": ".agent-subagent-card-error",
       "generated": true,
       "action": "Error message shown on the subagent card when the run fails."
+    },
+    "acp-provider-form-default-model": {
+      "section": "ACP provider configure modal",
+      "label": "Default model",
+      "type": "select",
+      "action": "Sets the default model for this ACP agent; mirrored into preferredConfig.model on save."
+    },
+    "acp-provider-form-default-mode": {
+      "section": "ACP provider configure modal",
+      "label": "Default mode (bypass / yolo)",
+      "type": "select",
+      "action": "Sets the default mode for this ACP agent; mirrored into preferredConfig.mode on save."
+    },
+    "acp-provider-default-model-select": {
+      "section": "ACP provider details",
+      "label": "Default model",
+      "type": "select",
+      "action": "Sets the default model for this ACP agent via setDefaultModel; mirrored into preferredConfig.model."
+    },
+    "acp-provider-default-mode-select": {
+      "section": "ACP provider details",
+      "label": "Default mode (bypass / yolo)",
+      "type": "select",
+      "action": "Sets the default mode for this ACP agent via setDefaultMode; mirrored into preferredConfig.mode."
+    },
+    "acp-provider-import-models": {
+      "section": "ACP provider details",
+      "label": "Import models",
+      "type": "button",
+      "action": "Probes a fresh ACP session, discovers the model list and config-option snapshot, and persists them to the store."
+    },
+    "acp-provider-detail-edit": {
+      "section": "ACP provider details",
+      "label": "Edit",
+      "type": "button",
+      "action": "Opens the ACP provider configure modal for this agent."
+    },
+    "acp-provider-details-back": {
+      "section": "ACP provider details",
+      "label": "Back to ACP Agents",
+      "type": "button",
+      "action": "Returns to the AI Providers view."
+    },
+    "acp-provider-detail-title": {
+      "section": "ACP provider details",
+      "label": "Agent title",
+      "type": "text",
+      "action": "Displays the ACP agent display name."
+    },
+    "acp-provider-detail-subtitle": {
+      "section": "ACP provider details",
+      "label": "Agent description",
+      "type": "text",
+      "action": "Displays the ACP agent manifest description."
+    },
+    "acp-provider-detail-command": {
+      "section": "ACP provider details",
+      "label": "Command",
+      "type": "text",
+      "action": "Displays the resolved command and args for the ACP agent."
+    },
+    "acp-provider-detail-auth": {
+      "section": "ACP provider details",
+      "label": "Auth status",
+      "type": "text",
+      "action": "Displays the ACP agent auth status (Connected, Needs auth, Not probed)."
+    },
+    "acp-provider-detail-default-model": {
+      "section": "ACP provider details",
+      "label": "Default model",
+      "type": "text",
+      "action": "Displays the persisted default model id for this ACP agent."
+    },
+    "acp-provider-detail-default-mode": {
+      "section": "ACP provider details",
+      "label": "Default mode",
+      "type": "text",
+      "action": "Displays the effective default mode (preferredConfig.mode or manifest defaultMode)."
+    },
+    "acp-provider-detail-status": {
+      "section": "ACP provider details",
+      "label": "Status",
+      "type": "text",
+      "action": "Displays whether the ACP agent is enabled or disabled."
+    },
+    "acp-provider-import-error": {
+      "section": "ACP provider details",
+      "label": "Import error",
+      "type": "text",
+      "action": "Shows the error message when an import-models probe fails."
+    },
+    "acp-provider-model-count": {
+      "section": "ACP provider details",
+      "label": "Model count",
+      "type": "text",
+      "action": "Displays the number of imported models for this ACP agent."
+    },
+    "acp-provider-model-search": {
+      "section": "ACP provider details",
+      "label": "Search models",
+      "type": "search",
+      "action": "Filters the imported model list by id, label, or description."
+    },
+    "acp-provider-model-list": {
+      "section": "ACP provider details",
+      "label": "Model list",
+      "type": "container",
+      "action": "Renders the searchable list of imported models."
+    },
+    "acp-provider-config-options-card": {
+      "section": "ACP provider details",
+      "label": "Config options card",
+      "type": "container",
+      "action": "Wraps the read-only config-option snapshot from the last probe."
+    },
+    "acp-provider-config-options": {
+      "section": "ACP provider details",
+      "label": "Config options",
+      "type": "container",
+      "action": "Renders read-only rows for each live config option (excluding model and mode)."
     }
   }
 }

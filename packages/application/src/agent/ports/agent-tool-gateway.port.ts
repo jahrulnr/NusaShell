@@ -3,6 +3,11 @@ import type { AgentToolDefinition, ReasoningEffort } from "./agent-provider.port
 export interface AgentTurnContext {
   readonly interactive?: boolean;
   /**
+   * Conversation id scoped to this turn. Used by conversation-scoped meta-tools
+   * (e.g. `todo`) to address the right conversation todo list.
+   */
+  readonly conversationId?: string;
+  /**
    * Conversation workspace, the source of truth for agent tool I/O. When set,
    * the gateway injects it into bundled path/cwd-shaped tool arguments and
    * syncs it to roots-capable MCP servers (Phase 2) / respawns static ones
@@ -28,5 +33,6 @@ export interface AgentToolGateway {
     requestId: string,
     turnId: string,
     callId?: string,
+    options?: { readonly signal?: AbortSignal },
   ): Promise<unknown>;
 }

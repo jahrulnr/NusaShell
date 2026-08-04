@@ -89,16 +89,32 @@ executed once, nudged on its second appearance, and stops the loop on its third.
   `agent.ask_request` so the desktop can show Register/Cancel on the tool card.
   Without that event the turn appears hung on “Running…” with no logs.
 - If soft recover is exhausted **or** another mid-turn failure occurs with
-  progress (e.g. `AGENT_TOOL_NOT_ALLOWED` allowlist rejection, `listTools`
-  failure, or **user cancel** after tools already ran), the runner throws with
-  a `details.partial` snapshot containing the accumulated `messages`, `steps`,
-  `toolCalls`, `traceId`, `rounds`, and optional `model`/`providerId`/`usage`.
-  Cancel still uses `AGENT_TURN_CANCELLED` and is never soft-retried; the
-  partial is only for durable resume. The desktop seals the streaming
-  message, persists an **interrupted** assistant message (`status:
-  "interrupted"`) carrying `resumeMessages`, and still shows the error footer
-  with **Retry** / resume. Progress is never discarded solely because the
-  error code was cancel or was not `AGENT_PROVIDER_FAILED`.
+  progress (e.g. `listTools` failure, or **user cancel** after tools already
+  ran), the runner throws with a `details.partial` snapshot containing the
+  accumulated `messages`, `steps`, `toolCalls`, `traceId`, `rounds`, and
+  optional `model`/`providerId`/`usage`. Cancel still uses
+  `AGENT_TURN_CANCELLED` and is never soft-retried; the partial is only for
+  durable resume. The desktop seals the streaming message, persists an
+  **interrupted** assistant message (`status: "interrupted"`) carrying
+  `resumeMessages`, and still shows the error footer with **Retry** / resume.
+  Progress is never discarded solely because the error code was cancel or was
+  not `AGENT_PROVIDER_FAILED`.
+- **Unknown tool names are soft-rejected, not hard-failed.** When a provider
+  (especially OpenAI-compat proxies like 9router/OmniRoute) emits tool calls
+  for names outside the current NusaShell allowlist (`ReadFile`, IDE terminal,
+  etc.), the `ToolExecutionPolicy` records a normal failed tool result using
+  the existing `{ ok: false, error }` envelope — the rejected name, a note
+  that it is not a NusaShell tool, a pointer to discovery tools
+  (`tool_list`, `tool_search`, `tool_schemas` / `tool_schema`, `mcp_list`),
+  and a short sample of currently advertised names. The turn continues so the
+  model can recover on the next round and the FE shows a failed tool card
+  instead of a global turn error. Mixed batches (unknown + known calls) keep
+  provider order: unknown calls are short-circuited inside
+  `executeTool` before reaching the gateway, while known calls dispatch
+  normally. The gateway still throws `AGENT_TOOL_NOT_ALLOWED` on
+  `callGrantedTool` when a name is missing from the per-turn route map — that
+  path is caught by `executeTool`'s catch and converted to `ok: false`, so it
+  acts as defense-in-depth, not the primary rejection path.
 - **Retry** on an interrupted message calls `agent.run` with `resume: true`
   and the saved `resumeMessages`, skipping system-prompt injection so the
   provider sees the exact mid-turn context. On success the interrupted
@@ -300,7 +316,7 @@ runner. The injection point is the application layer (backend), not the renderer
 | File | Role | Template vars |
 | --- | --- | --- |
 | `system.md` | Agent identity, product context, what the agent can do | No |
-| `mcp-tools.md` | Progressive MCP tool workflow: discovery → grant → call | No |
+| `mcp-tools.md` | Progressive MCP tool workflow: discovery / recall → call | No |
 | `developer.md` | Runtime context: date, environment, available meta-tool names | Yes |
 | `compact.md` | Compaction instruction for the checkpoint LLM call | No |
 
@@ -347,3 +363,112 @@ stable MCP surface used by this phase. Elicitation and other evolving MCP
 capabilities remain documented in `progressive-mcp-tools.md` but are not
 silently exposed to the model until their protocol and consent semantics are
 stable.
+
+## Async tool handles
+
+Agent tool calls are blocking by default. The `async_run` / `async_wait` /
+`async_peek` / `async_kill` meta-tools let the agent opt into non-blocking
+background execution for long-running work (forever-watchers like `docker logs
+-f`, long builds, servers).
+
+### Handle registry
+
+`AsyncToolRuntime` (application layer, in-memory SoT) owns all background
+handles. Each handle has:
+
+- `handleId`, `conversationId`, `traceId` (spawn turn), `kind` (`mcp` |
+  `subagent`), `pluginId`, `toolName`, `status` (`running` | `ok` | `fail` |
+  `killed`), `startedAt`, `endedAt`, ring buffer of text (capped at 256KB), and
+  the final JSON result.
+
+APIs: `spawn`, `peek`, `wait(timeoutMs)`, `kill`, `list(conversationId)`,
+`killAllForConversation`, `appendTail`, `dispose`.
+
+`wait` is harness-local (Promise + timer + status watch) — the model never
+calls a `sleep` tool. `async_wait` is a barrier tool (runs alone, like
+`ask_question`).
+
+### Cancel scopes
+
+- **Turn cancel ≠ job kill.** Stopping the turn aborts in-turn `async_wait`
+  calls and sync MCP calls, but background handles keep running unless the
+  agent or user kills them.
+- **User kill** via the job card Stop button calls `agent.tool_job_kill`, which
+  soft-cancels the handle.
+- **Conversation delete** kills all running handles for that conversation
+  (client-side cleanup before deleting the conversation).
+- **App quit** disposes the runtime, killing all remaining handles.
+
+### Events
+
+- `agent.tool_job_started` — handleId, name, args summary, conversationId.
+- `agent.tool_job_update` — handleId, status, tail (clamped), bytes, streamSeq.
+- `agent.tool_job_ended` — handleId, ok, error?, output?, reason
+  (`completed` | `killed` | `failed`).
+
+### MCP without streaming
+
+Until MCP supports progress notifications, `async_peek` returns status + empty
+tail for most plugins. The handle is still useful: the agent can detach, keep
+reasoning, and `async_wait` for the final result. Terminal streaming peek
+(Phase C) adds real partial stdout for forever commands via MCP progress
+notifications — see below.
+
+### Streaming peek (Phase C)
+
+The Terminal plugin sends MCP `notifications/progress` with partial stdout
+chunks as they arrive. The shell's MCP client wires `onProgress` through the
+tool-call tracker → `callGrantedTool` → `AsyncToolRuntime.appendTail`, which
+publishes `agent.tool_job_update` events. The desktop job card shows the live
+tail in real time.
+
+Plugins that do not send progress notifications (Files, Notes, etc.) are
+final-result-only: `async_peek` returns status + empty tail until the call
+completes. The handle is still useful for detach + `async_wait`.
+
+### Hard process kill (Phase C)
+
+`async_kill` does two things:
+
+1. **Aborts the in-flight MCP call** — the per-handle `AbortController` fires,
+   which cancels the pending tool call in the tool-call tracker. The MCP SDK
+   also passes the `AbortSignal` to the server's request handler, so the
+   plugin can kill its own subprocess (Terminal does this with `SIGKILL`).
+2. **Settles the handle as `killed`** — the runtime marks the handle and
+   publishes `agent.tool_job_ended` with `reason: "killed"`.
+
+Plugin stop uses `ProcessHandle.killGroup()` (Unix: `process.kill(-pid)`,
+Windows: `taskkill /T /F /PID`) to terminate the MCP server process and all
+its children — so a Terminal plugin that spawned a long-running command gets
+fully cleaned up when the user stops the plugin.
+
+Turn cancel does **not** kill background handles — only the per-handle
+`AbortController` or explicit `async_kill` / `agent.tool_job_kill` does.
+
+### Completion steering (Phase D)
+
+When a background job ends and the conversation is idle (no active turn), the
+desktop auto-starts a follow-up turn with a synthetic system message
+containing the job completion summary. This lets the agent react to
+background results without the user having to manually prompt it.
+
+The `CompletionSteerer` (desktop renderer) subscribes to `tool_job_ended`
+events, debounces 500ms to coalesce multiple completions, checks
+`turnPending`, and calls `submit()` with a formatted summary. If the
+conversation has an active turn, the steer is skipped — the agent will see
+the completed jobs in the job strip on its next natural turn.
+
+### Async subagent sugar (Phase D)
+
+The `subagent` tool accepts `async: true` to run the subagent in the
+background via `AsyncToolRuntime`. The agent gets a `handleId` immediately
+and can use `async_wait` / `async_peek` / `async_kill` to manage it. This is
+useful for long-running subagent tasks (e.g. "refactor this module while I
+continue working").
+
+### Wait interrupt on user steer (Phase D)
+
+`async_wait` races the wait against the turn's abort signal. If the user
+sends a new message (which supersedes the current turn), the wait returns
+immediately with `interrupted: true` and the current status — instead of
+blocking until the timeout. The background handle keeps running.

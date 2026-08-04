@@ -73,22 +73,25 @@ describe("validateRoot", () => {
 describe("resolvePath", () => {
   it("returns root for empty input", () => {
     expect(resolvePath(tmpDir, "")).toBe(tmpDir);
-    expect(resolvePath(tmpDir, "/")).toBe(tmpDir);
+  });
+
+  it("resolves / to OS root (not the files root)", () => {
+    expect(resolvePath(tmpDir, "/")).toBe(path.resolve("/"));
   });
 
   it("resolves relative paths against root", () => {
     expect(resolvePath(tmpDir, "sub/file.txt")).toBe(path.resolve(tmpDir, "sub/file.txt"));
   });
 
-  it("allows absolute paths outside root (agent is a trusted actor)", () => {
+  it("resolves absolute paths to OS-absolute (agent is a trusted actor)", () => {
     expect(resolvePath(tmpDir, "/absolute/path")).toBe(path.resolve("/absolute/path"));
     const deepPath = "/some/deep/workspace/tmp/plan/foo.md";
     expect(resolvePath(tmpDir, deepPath)).toBe(path.resolve(deepPath));
   });
 
-  it("rejects relative paths that escape root via traversal", () => {
-    expect(() => resolvePath(tmpDir, "../../etc/passwd")).toThrow(/escapes files root/);
-    expect(() => resolvePath(tmpDir, "../../../")).toThrow(/escapes files root/);
+  it("allows ../ traversal to escape root (no containment)", () => {
+    expect(resolvePath(tmpDir, "../../etc/passwd")).toBe(path.resolve(tmpDir, "../../etc/passwd"));
+    expect(resolvePath(tmpDir, "../../../")).toBe(path.resolve(tmpDir, "../../../"));
   });
 
   it("allows nested paths inside root", () => {

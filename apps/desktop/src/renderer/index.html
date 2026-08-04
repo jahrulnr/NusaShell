@@ -38,8 +38,8 @@
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 6v4l3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
     </span>
     <span class="update-banner-text" id="update-banner-text">Update available</span>
-    <button class="update-banner-btn" id="update-banner-btn" style="display:none">Restart to update</button>
-    <button class="update-banner-close" id="update-banner-close">&times;</button>
+    <button class="update-banner-btn" id="update-banner-btn" type="button" style="display:none">Restart to update</button>
+    <button class="update-banner-close" id="update-banner-close" type="button" aria-label="Dismiss update notice" title="Dismiss">&times;</button>
   </div>
 
   <!-- ===== Title bar ===== -->
@@ -57,7 +57,7 @@
 
     <div class="titlebar-actions">
       <div class="top-actions">
-        <button class="icon-btn" aria-label="Settings" id="nav-settings-btn">
+        <button class="icon-btn" aria-label="Settings" id="nav-settings-btn" type="button">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><path d="M19.4 13a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V19.4a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 17.76a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.64 13a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.64 7a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 3.13 1.7 1.7 0 0 0 10 1.6V1.51a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 3.13a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.36 7a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z" stroke="currentColor" stroke-width="1.2"/></svg>
         </button>
         <button class="icon-btn" id="window-always-on-top" type="button" aria-label="Keep window on top" aria-pressed="false" title="Keep window on top">
@@ -66,9 +66,9 @@
       </div>
 
       <div class="window-controls">
-        <button class="wc" id="window-minimize" aria-label="Minimize"><svg viewBox="0 0 12 12" width="11" height="11"><rect x="1" y="5.5" width="10" height="1.4" fill="currentColor"/></svg></button>
-        <button class="wc" id="window-maximize" aria-label="Maximize"><svg viewBox="0 0 12 12" width="10" height="10"><rect x="1.2" y="1.2" width="9.6" height="9.6" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button>
-        <button class="wc wc-close" id="window-close" aria-label="Close"><svg viewBox="0 0 12 12" width="11" height="11"><path d="M1.5 1.5L10.5 10.5M10.5 1.5L1.5 10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
+        <button class="wc" id="window-minimize" type="button" aria-label="Minimize"><svg viewBox="0 0 12 12" width="11" height="11"><rect x="1" y="5.5" width="10" height="1.4" fill="currentColor"/></svg></button>
+        <button class="wc" id="window-maximize" type="button" aria-label="Maximize"><svg viewBox="0 0 12 12" width="10" height="10"><rect x="1.2" y="1.2" width="9.6" height="9.6" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button>
+        <button class="wc wc-close" id="window-close" type="button" aria-label="Close"><svg viewBox="0 0 12 12" width="11" height="11"><path d="M1.5 1.5L10.5 10.5M10.5 1.5L1.5 10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
       </div>
     </div>
   </div>
@@ -98,9 +98,9 @@
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/></svg>
           <span class="nav-label">Plugins</span>
         </button>
-        <button class="nav-item" type="button" data-view="ai-providers" data-nav title="AI Providers">
+        <button class="nav-item" type="button" data-view="ai-providers" data-nav title="Providers">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM4.5 21a7.5 7.5 0 0 1 15 0M19 5v4M21 7h-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-          <span class="nav-label">AI Providers</span>
+          <span class="nav-label">Providers</span>
         </button>
         <button class="nav-item" type="button" data-view="autostart" data-nav title="Autostart">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 3v4M6.34 6.34l2.83 2.83M3 12h4M6.34 17.66l2.83-2.83M12 17v4M17.66 17.66l-2.83-2.83M17 12h4M17.66 6.34l-2.83 2.83" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.6"/></svg>
@@ -139,9 +139,9 @@
       <section class="view active" data-view="home">
         <div class="greeting-row">
           <div>
-            <div class="home-kicker" aria-hidden="true">LOCAL AI WORKBENCH</div>
+            <div class="home-kicker" aria-hidden="true">LOCAL WORKBENCH</div>
             <h1 class="greeting">NusaShell</h1>
-            <p class="subtitle">Your AI tool shell — plugins with real UIs.</p>
+            <p class="subtitle">Your plugins, in one place.</p>
           </div>
         </div>
 
@@ -177,9 +177,9 @@
       <section class="view agent-view" data-view="agent">
         <div class="agent-header">
           <div>
-            <div class="agent-kicker"><span class="agent-kicker-dot"></span> Turn workspace</div>
+            <div class="agent-kicker"><span class="agent-kicker-dot"></span> Conversation</div>
             <h1 class="page-title">Agent</h1>
-            <p class="subtitle">The agent discovers MCP servers and tool schemas progressively before it acts.</p>
+            <p class="subtitle">Ask the shell to work with your files, plugins, and tools.</p>
           </div>
         </div>
 
@@ -208,38 +208,57 @@
               <div class="agent-empty" id="agent-empty">
                 <div class="agent-empty-mark">✦</div>
                 <h2>Start a conversation</h2>
-                <p>Choose a configured model. The agent can discover and start MCP servers when the task needs them.</p>
+                <p>Choose a model, then tell the shell what you need.</p>
               </div>
+            </div>
+            <div class="agent-todo-strip" id="agent-todo-strip" hidden aria-label="Agent task checklist">
+              <div class="agent-todo-strip-head">
+                <button class="agent-todo-strip-toggle" id="agent-todo-strip-toggle" type="button" aria-expanded="true" aria-controls="agent-todo-strip-list" title="Collapse/expand tasks">
+                  <span class="agent-todo-strip-chevron" aria-hidden="true">▾</span>
+                  <span class="agent-todo-strip-title">Tasks</span>
+                  <span class="agent-todo-strip-count" id="agent-todo-strip-count"></span>
+                </button>
+              </div>
+              <ol class="agent-todo-strip-list" id="agent-todo-strip-list" role="list"></ol>
+            </div>
+            <div class="agent-tool-job-strip" id="agent-tool-job-strip" hidden aria-label="Background tool jobs">
+              <div class="agent-tool-job-strip-head">
+                <span class="agent-tool-job-strip-title">Background jobs</span>
+              </div>
+              <div class="agent-tool-job-list" id="agent-tool-job-list"></div>
             </div>
             <form class="agent-composer" id="agent-form">
               <label class="sr-only" for="agent-input">Message to the agent</label>
-              <textarea id="agent-input" rows="1" placeholder="Describe what you want the shell to do…"></textarea>
+              <textarea id="agent-input" rows="1" placeholder="Describe what you want the shell to do…" title="Ctrl+Enter or ⌘↩ to send"></textarea>
               <div class="agent-attachments" id="agent-attachments" aria-live="polite"></div>
               <input class="sr-only" id="agent-file-input" type="file" multiple>
               <div class="agent-composer-footer">
-                <button class="agent-attach-btn" id="agent-attach-btn" type="button" aria-label="Attach images, PDFs, or text files" title="Attach images, PDFs, or text files">
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="m21 11-8.5 8.5a5.25 5.25 0 0 1-7.4-7.4l8.5-8.5a3.5 3.5 0 0 1 4.95 4.95l-8.5 8.5a1.75 1.75 0 0 1-2.48-2.48l8-8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                </button>
-                <div class="agent-model-control">
-                  <button class="agent-model-trigger" id="agent-model-trigger" type="button" aria-haspopup="dialog" aria-expanded="false"><span id="agent-model-trigger-label">Model · auto</span><span aria-hidden="true">⌄</span></button>
-                  <button class="agent-acp-pill" id="agent-acp-pill" type="button" hidden><span id="agent-acp-pill-label">—</span></button>
-                  <div class="agent-model-menu" id="agent-model-menu" role="dialog" aria-label="Choose model and effort" hidden>
-                    <label class="agent-model-search"><span aria-hidden="true">⌕</span><input id="agent-model-search" type="search" placeholder="Search models or providers…" autocomplete="off"></label>
-                    <div class="agent-model-list" id="agent-model-list" role="listbox" aria-label="Available models"></div>
+                <div class="agent-composer-context">
+                  <button class="agent-attach-btn" id="agent-attach-btn" type="button" aria-label="Attach images, PDFs, or text files" title="Attach images, PDFs, or text files">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="m21 11-8.5 8.5a5.25 5.25 0 0 1-7.4-7.4l8.5-8.5a3.5 3.5 0 0 1 4.95 4.95l-8.5 8.5a1.75 1.75 0 0 1-2.48-2.48l8-8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </button>
+                  <div class="agent-model-control">
+                    <button class="agent-model-trigger" id="agent-model-trigger" type="button" aria-haspopup="dialog" aria-expanded="false"><span id="agent-model-trigger-label">Model · auto</span><span aria-hidden="true">⌄</span></button>
+                    <button class="agent-acp-pill" id="agent-acp-pill" type="button" hidden><span id="agent-acp-pill-label">—</span></button>
+                    <div class="agent-model-menu" id="agent-model-menu" role="dialog" aria-label="Choose model and effort" hidden>
+                      <label class="agent-model-search"><span aria-hidden="true">⌕</span><input id="agent-model-search" type="search" placeholder="Search models or providers…" autocomplete="off"></label>
+                      <div class="agent-model-list" id="agent-model-list" role="listbox" aria-label="Available models"></div>
+                    </div>
                   </div>
+                  <button class="agent-workspace-btn" id="agent-workspace-btn" type="button" aria-label="Choose workspace folder" title="Workspace">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <span id="agent-workspace-label">Home</span>
+                  </button>
                 </div>
-                <button class="agent-workspace-btn" id="agent-workspace-btn" type="button" aria-label="Choose workspace folder" title="Workspace">
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                  <span id="agent-workspace-label">Home</span>
-                </button>
-                <span class="agent-provider-status" id="agent-provider-status">Choose a model</span>
-                <span class="agent-key-hint">Ctrl + Enter</span>
-                <button class="agent-stop-btn" id="agent-stop-btn" type="button" aria-label="Stop turn" title="Stop turn" hidden>
-                  <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
-                </button>
-                <button class="agent-send-btn" id="agent-send-btn" type="submit" aria-label="Send turn" title="Send turn">
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                </button>
+                <div class="agent-composer-actions">
+                  <span class="agent-provider-status" id="agent-provider-status">Choose a model</span>
+                  <button class="agent-stop-btn" id="agent-stop-btn" type="button" aria-label="Stop" title="Stop" hidden>
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
+                  </button>
+                  <button class="agent-send-btn" id="agent-send-btn" type="submit" aria-label="Send" title="Send · Ctrl+Enter (⌘↩ on Mac)" aria-keyshortcuts="Control+Enter Meta+Enter">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -247,6 +266,7 @@
 
         <div class="agent-canvas-overlay" id="agent-canvas-overlay" hidden></div>
         <aside class="agent-canvas" id="agent-canvas" role="dialog" aria-modal="true" aria-labelledby="agent-canvas-title" hidden>
+            <div class="agent-canvas-resize" id="agent-canvas-resize" role="separator" aria-orientation="vertical" aria-label="Resize canvas sidebar" tabindex="0"></div>
             <div class="agent-canvas-head">
               <div class="agent-canvas-head-meta">
                 <span class="agent-canvas-badge" id="agent-canvas-badge">—</span>
@@ -298,9 +318,9 @@
       <section class="view skills-view" data-view="skills">
         <div class="skills-header">
           <div>
-            <div class="agent-kicker"><span class="agent-kicker-dot"></span> Managed workspace</div>
+            <div class="agent-kicker"><span class="agent-kicker-dot"></span> Instruction library</div>
             <h1 class="page-title">Skills</h1>
-            <p class="subtitle">Inspect and maintain the instruction packages available to the agent.</p>
+            <p class="subtitle">Manage the instructions available to your conversations.</p>
           </div>
           <button class="action-btn skills-install-btn" id="skills-install-btn" type="button">Install package</button>
         </div>
@@ -308,13 +328,13 @@
         <div class="skills-workspace">
           <aside class="skills-catalog" aria-labelledby="skills-catalog-title">
             <div class="skills-pane-head">
-              <div><h2 id="skills-catalog-title">Library</h2><span id="skills-count">0 skills</span></div>
+              <div><h2 id="skills-catalog-title">Installed skills</h2><span id="skills-count">0 skills</span></div>
             </div>
             <label class="skills-search"><span aria-hidden="true">⌕</span><input id="skills-search" type="search" placeholder="Search skills…" autocomplete="off"></label>
             <div class="skills-list" id="skills-list" role="listbox" aria-label="Installed skills"></div>
             <div class="skills-empty" id="skills-empty" hidden>
-              <strong>No skills installed</strong>
-              <span>Install a .skill or .zip package to start a managed library.</span>
+              <strong>No skills yet</strong>
+              <span>Install a .skill or .zip file to add one.</span>
             </div>
           </aside>
 
@@ -378,60 +398,76 @@
       <section class="view learning-view" data-view="learning">
         <div class="learning-header">
           <div>
-            <div class="agent-kicker"><span class="agent-kicker-dot"></span> Journey workspace</div>
+            <div class="agent-kicker"><span class="agent-kicker-dot"></span> History</div>
             <h1 class="page-title">Learning</h1>
-            <p class="subtitle">Skills and memory the agent has acquired, visualized as a timeline and constellation.</p>
+            <p class="subtitle">Review saved memory and skills created here. Built-in skills stay in Skills.</p>
           </div>
           <button class="mini-btn" id="learning-refresh-btn" type="button">Refresh</button>
         </div>
 
         <div class="learning-stats" id="learning-stats">
-          <div class="learning-stat"><strong id="learning-stat-skills">0</strong><span>Learned skills</span></div>
+          <div class="learning-stat"><strong id="learning-stat-skills">0</strong><span>Saved skills</span></div>
           <div class="learning-stat"><strong id="learning-stat-memory">0</strong><span>Memory entries</span></div>
-          <div class="learning-stat"><strong id="learning-stat-agent">0</strong><span>Agent-created</span></div>
-          <div class="learning-stat"><strong id="learning-stat-used">0</strong><span>Used in turns</span></div>
+          <div class="learning-stat"><strong id="learning-stat-agent">0</strong><span>Created here</span></div>
+          <div class="learning-stat"><strong id="learning-stat-used">0</strong><span>Used in tasks</span></div>
+        </div>
+
+        <div class="learning-tabs" role="tablist" aria-label="Learning views">
+          <button class="learning-tab active" id="learning-tab-table" type="button" role="tab" aria-selected="true" aria-controls="learning-panel-table">Table</button>
+          <button class="learning-tab" id="learning-tab-connections" type="button" role="tab" aria-selected="false" aria-controls="learning-panel-connections">Connections</button>
         </div>
 
         <div class="learning-workspace">
-          <aside class="learning-timeline" aria-labelledby="learning-timeline-title">
-            <div class="skills-pane-head">
-              <div><h2 id="learning-timeline-title">Timeline</h2><span id="learning-timeline-count">0 nodes</span></div>
-            </div>
-            <div class="learning-timeline-list" id="learning-timeline-list" role="listbox" aria-label="Learning timeline"></div>
-            <div class="learning-empty" id="learning-empty" hidden>
-              <strong>No learning yet</strong>
-              <span>The agent hasn't created skills or memory entries. Interact with the agent to build a journey.</span>
-            </div>
-          </aside>
+          <section class="learning-panel learning-table-panel" id="learning-panel-table" role="tabpanel" aria-labelledby="learning-tab-table">
+            <aside class="learning-timeline" aria-labelledby="learning-timeline-title">
+              <div class="skills-pane-head">
+                <div><h2 id="learning-timeline-title">Timeline</h2><span id="learning-timeline-count">0 nodes</span></div>
+              </div>
+              <div class="learning-timeline-list" id="learning-timeline-list" role="listbox" aria-label="Learning timeline"></div>
+              <div class="learning-empty" id="learning-empty" hidden>
+                <strong>Nothing saved yet</strong>
+                <span>Saved skills and memory will appear here.</span>
+              </div>
+            </aside>
 
-          <section class="learning-constellation" aria-labelledby="learning-constellation-title">
-            <div class="skills-pane-head">
-              <div><h2 id="learning-constellation-title">Constellation</h2><span id="learning-constellation-meta">Related skills linked</span></div>
-            </div>
-            <div class="learning-constellation-svg-wrap">
-              <svg class="learning-constellation-svg" id="learning-constellation-svg" viewBox="0 0 600 400" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
-            </div>
-            <div class="learning-scrubber-wrap">
-              <label class="learning-scrubber-label" for="learning-scrubber">Time range</label>
-              <input type="range" class="learning-scrubber" id="learning-scrubber" min="0" max="100" value="100" step="1" aria-label="Reveal nodes up to a point in time">
-              <span class="learning-scrubber-value" id="learning-scrubber-value">100%</span>
-            </div>
+            <section class="learning-detail" aria-labelledby="learning-detail-title">
+              <div class="skills-pane-head">
+                <div class="learning-detail-heading"><h2 id="learning-detail-title">Detail</h2><span id="learning-detail-meta">Select a node</span></div>
+                <div class="skills-editor-actions" hidden>
+                  <button class="mini-btn danger" id="learning-delete-btn" type="button" disabled>Delete</button>
+                  <button class="mini-btn" id="learning-save-btn" type="button" disabled>Save</button>
+                </div>
+              </div>
+              <div class="learning-detail-status" role="status" aria-live="polite" hidden></div>
+              <div class="learning-detail-empty" id="learning-detail-empty">
+                <strong>Select a node</strong>
+                <span>Click a timeline row to inspect and edit.</span>
+              </div>
+              <label class="sr-only" for="learning-detail-editor">Node content</label>
+              <textarea class="skill-editor learning-detail-editor" id="learning-detail-editor" spellcheck="false" hidden></textarea>
+            </section>
           </section>
 
-          <section class="learning-detail" aria-labelledby="learning-detail-title">
-            <div class="skills-pane-head">
-              <div><h2 id="learning-detail-title">Detail</h2><span id="learning-detail-meta">Select a node</span></div>
-              <div class="skills-editor-actions">
-                <button class="mini-btn danger" id="learning-delete-btn" type="button" disabled>Delete</button>
-                <button class="mini-btn" id="learning-save-btn" type="button" disabled>Save</button>
+          <section class="learning-panel learning-connections-panel" id="learning-panel-connections" role="tabpanel" aria-labelledby="learning-tab-connections" hidden>
+            <section class="learning-constellation" aria-labelledby="learning-constellation-title">
+              <div class="skills-pane-head">
+                <div><h2 id="learning-constellation-title">Connections</h2><span id="learning-constellation-meta">Related items linked</span></div>
+                <div class="learning-zoom-controls" aria-label="Connection graph zoom">
+                  <button class="mini-btn" id="learning-zoom-out" type="button" aria-label="Zoom out connections" title="Zoom out">−</button>
+                  <span id="learning-zoom-value" aria-live="polite">100%</span>
+                  <button class="mini-btn" id="learning-zoom-in" type="button" aria-label="Zoom in connections" title="Zoom in">+</button>
+                  <button class="mini-btn" id="learning-zoom-reset" type="button" aria-label="Reset connection zoom" title="Reset zoom">Reset</button>
+                </div>
               </div>
-            </div>
-            <div class="learning-detail-empty" id="learning-detail-empty">
-              <strong>Select a node</strong>
-              <span>Click a timeline row or constellation dot to inspect and edit.</span>
-            </div>
-            <label class="sr-only" for="learning-detail-editor">Node content</label>
-            <textarea class="skill-editor learning-detail-editor" id="learning-detail-editor" spellcheck="false" hidden></textarea>
+              <div class="learning-constellation-svg-wrap">
+                <div class="learning-constellation-canvas" id="learning-constellation-canvas" role="application" aria-label="Learning connections graph"></div>
+              </div>
+              <div class="learning-scrubber-wrap">
+                <label class="learning-scrubber-label" for="learning-scrubber">Time range</label>
+                <input type="range" class="learning-scrubber" id="learning-scrubber" min="0" max="100" value="100" step="1" aria-label="Reveal nodes up to a point in time">
+                <span class="learning-scrubber-value" id="learning-scrubber-value">100%</span>
+              </div>
+            </section>
           </section>
         </div>
       </section>
@@ -439,7 +475,7 @@
       <!-- ===== View: Plugins ===== -->
       <section class="view" data-view="plugins">
         <div class="agent-header">
-          <div><h1 class="page-title">Plugins</h1><p class="subtitle">Installed plugins and their live MCP process state.</p></div>
+          <div><h1 class="page-title">Plugins</h1><p class="subtitle">Installed plugins and their current status.</p></div>
           <div class="plugins-toolbar">
             <button class="mini-btn" id="plugins-add-mcp" type="button">+ Add MCP</button>
             <button class="mini-btn" id="plugins-install-plugin" type="button">Install plugin</button>
@@ -452,7 +488,7 @@
         <div class="autostart-header">
           <div>
             <h1 class="page-title">Autostart</h1>
-            <p class="subtitle">Choose which MCP servers start when NusaShell opens.</p>
+            <p class="subtitle">Choose which plugins start when NusaShell opens.</p>
           </div>
           <span class="autostart-count" id="autostart-count">0 enabled</span>
         </div>
@@ -460,7 +496,7 @@
       </section>
 
       <section class="view" data-view="ai-providers">
-        <div class="agent-header"><div><div class="agent-kicker"><span class="agent-kicker-dot"></span> Provider registry</div><h1 class="page-title">AI Providers</h1><p class="subtitle">Manage direct APIs and local AI gateways. Credentials stay masked in the Electron main process.</p></div><button class="mini-btn provider-add-btn" id="add-custom-provider" type="button">+ Custom provider</button></div>
+        <div class="agent-header"><div><div class="agent-kicker"><span class="agent-kicker-dot"></span> Provider registry</div><h1 class="page-title">Providers</h1><p class="subtitle">Connect model providers and local gateways. Keys stay private.</p></div><button class="mini-btn provider-add-btn" id="add-custom-provider" type="button">+ Custom provider</button></div>
         <div class="provider-registry" id="provider-registry" role="list">
           <article class="provider-registry-card accent-or" data-provider-preset="openrouter"><div class="provider-card-head"><span class="provider-mark">OR</span><div><h2>OpenRouter</h2><p>API KEY · CHAT</p></div><button type="button" class="provider-toggle" aria-label="Enable OpenRouter" disabled>●</button></div><p>One API for models from many upstream providers.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
           <article class="provider-registry-card accent-om" data-provider-preset="omniroute"><div class="provider-card-head"><span class="provider-mark">OM</span><div><h2>OmniRoute</h2><p>LOCAL · RESPONSES</p></div><button type="button" class="provider-toggle" aria-label="Enable OmniRoute" disabled>●</button></div><p>Local multi-provider gateway with OpenAI-compatible endpoints.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
@@ -470,22 +506,12 @@
           <article class="provider-registry-card accent-ol" data-provider-preset="ollama"><div class="provider-card-head"><span class="provider-mark">OL</span><div><h2>Ollama</h2><p>LOCAL · CHAT</p></div><button type="button" class="provider-toggle" aria-label="Enable Ollama" disabled>●</button></div><p>Local Ollama OpenAI-compatible API. Start <code>ollama serve</code> then Import models.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
           <article class="provider-registry-card accent-lc" data-provider-preset="llamacpp"><div class="provider-card-head"><span class="provider-mark">LC</span><div><h2>llama.cpp</h2><p>LOCAL · CHAT</p></div><button type="button" class="provider-toggle" aria-label="Enable llama.cpp" disabled>●</button></div><p>Local llama-server OpenAI-compatible API. Start <code>llama-server -m model.gguf --port 8080 --jinja</code> then Import models.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
         </div>
-        <div class="acp-agents-header"><div class="agent-kicker"><span class="agent-kicker-dot"></span> ACP Agents</div><p class="subtitle">External agent partners that run over the Agent Client Protocol.</p></div>
-        <div class="acp-routing-card" id="acp-routing-card">
-          <div class="settings-card-title">Subagent routing</div>
-          <p class="settings-card-copy">Subagent tries Default first, then Fallbacks, then any other connected agents.</p>
-          <label class="settings-field" for="acp-routing-default">Default ACP agent<select id="acp-routing-default"><option value="">Manifest order (no preference)</option></select></label>
-          <fieldset class="acp-routing-fallbacks">
-            <legend>Fallback order</legend>
-            <div id="acp-routing-fallbacks"></div>
-          </fieldset>
-          <p class="settings-card-copy" id="acp-routing-status" role="status" aria-live="polite"></p>
-        </div>
+        <div class="acp-agents-header"><div><div class="agent-kicker"><span class="agent-kicker-dot"></span> External providers</div><p class="subtitle">Connect tools that use the Agent Client Protocol.</p></div><button class="mini-btn" id="acp-routing-settings" type="button" aria-haspopup="dialog" aria-controls="acp-routing-dialog">Settings</button></div>
         <div class="provider-registry" id="acp-provider-registry" role="list"></div>
       </section>
 
       <section class="view" data-view="provider-details">
-        <button class="provider-back" id="provider-details-back" type="button">← AI Providers</button>
+        <button class="provider-back" id="provider-details-back" type="button">← Providers</button>
         <div class="provider-detail-head"><div><h1 class="page-title" id="provider-detail-title">Provider</h1><p class="subtitle" id="provider-detail-subtitle"></p></div></div>
         <div class="provider-detail-card">
           <dl class="provider-detail-grid">
@@ -503,22 +529,54 @@
         </div>
       </section>
 
+      <!-- ===== View: ACP provider details ===== -->
+      <section class="view" data-view="acp-provider-details">
+        <button class="provider-back" id="acp-provider-details-back" type="button">← External providers</button>
+        <div class="provider-detail-head"><div><h1 class="page-title" id="acp-provider-detail-title">ACP provider</h1><p class="subtitle" id="acp-provider-detail-subtitle"></p></div></div>
+        <div class="provider-detail-card">
+          <dl class="provider-detail-grid">
+            <div><dt>Command</dt><dd id="acp-provider-detail-command">—</dd></div>
+            <div><dt>Auth</dt><dd id="acp-provider-detail-auth">—</dd></div>
+            <div><dt>Default model</dt><dd id="acp-provider-detail-default-model">Not set</dd></div>
+            <div><dt>Default mode</dt><dd id="acp-provider-detail-default-mode">—</dd></div>
+            <div><dt>Status</dt><dd id="acp-provider-detail-status">—</dd></div>
+          </dl>
+          <div class="provider-detail-actions"><button class="mini-btn" id="acp-provider-detail-edit" type="button">Edit</button><button class="mini-btn" id="acp-provider-import-models" type="button">Import models</button></div>
+          <p class="provider-detail-error" id="acp-provider-import-error" role="alert" hidden></p>
+        </div>
+        <div class="provider-models-card">
+          <div class="provider-models-head"><div><h2>Models</h2><p id="acp-provider-model-count">0 models</p></div><div class="provider-model-tools"><input id="acp-provider-model-search" type="search" placeholder="Search models…"></div></div>
+          <div class="provider-model-list" id="acp-provider-model-list"></div>
+        </div>
+        <div class="provider-detail-card">
+          <div class="settings-card-title">Defaults</div>
+          <p class="settings-card-copy">Applied to every subagent run and ACP thread from this agent.</p>
+          <label class="settings-field" for="acp-provider-default-model-select">Default model<select id="acp-provider-default-model-select"><option value="">Not set — choose per turn</option></select></label>
+          <label class="settings-field" for="acp-provider-default-mode-select">Default mode (bypass / yolo)<select id="acp-provider-default-mode-select"><option value="">Provider default</option></select></label>
+        </div>
+        <div class="provider-detail-card" id="acp-provider-config-options-card" hidden>
+          <div class="settings-card-title">Config options</div>
+          <p class="settings-card-copy">Live session options from the last probe (read-only snapshot).</p>
+          <div id="acp-provider-config-options"></div>
+        </div>
+      </section>
+
       <!-- ===== View: Central log tail ===== -->
       <section class="view logs-view" data-view="logs">
         <div class="log-header">
           <div>
             <h1 class="page-title">Logs</h1>
-            <p class="subtitle">Live tail from the renderer, Electron, IPC, backend, and MCP processes.</p>
+            <p class="subtitle">Live output from NusaShell and its plugins.</p>
           </div>
           <span class="log-count" id="log-count">0 / 1000</span>
         </div>
         <div class="log-filters" aria-label="Filter logs by source">
-          <button class="chip active" data-log-source="all">All <span class="chip-count">0</span></button>
-          <button class="chip" data-log-source="renderer">Frontend <span class="chip-count">0</span></button>
-          <button class="chip" data-log-source="main">Electron <span class="chip-count">0</span></button>
-          <button class="chip" data-log-source="ipc">IPC <span class="chip-count">0</span></button>
-          <button class="chip" data-log-source="backend">Backend <span class="chip-count">0</span></button>
-          <button class="chip" data-log-source="mcp">MCP <span class="chip-count">0</span></button>
+          <button class="chip active" type="button" data-log-source="all">All <span class="chip-count">0</span></button>
+          <button class="chip" type="button" data-log-source="renderer">Frontend <span class="chip-count">0</span></button>
+          <button class="chip" type="button" data-log-source="main">Electron <span class="chip-count">0</span></button>
+          <button class="chip" type="button" data-log-source="ipc">IPC <span class="chip-count">0</span></button>
+          <button class="chip" type="button" data-log-source="backend">Backend <span class="chip-count">0</span></button>
+          <button class="chip" type="button" data-log-source="mcp">MCP <span class="chip-count">0</span></button>
         </div>
         <div class="log-tail" id="log-tail" role="log" aria-live="polite"></div>
       </section>
@@ -529,7 +587,7 @@
           <div>
             <div class="agent-kicker"><span class="agent-kicker-dot"></span> Scheduled automation</div>
             <h1 class="page-title">Jobs</h1>
-            <p class="subtitle">Scheduled automation that fires headless agent turns or plugin tool calls while NusaShell is open.</p>
+            <p class="subtitle">Run a task or plugin action on a schedule while NusaShell is open.</p>
           </div>
           <button class="action-btn" id="jobs-new-btn" type="button" data-control="jobs-new-btn">+ New job</button>
         </div>
@@ -540,7 +598,7 @@
         <div class="jobs-list" id="jobs-list" role="list" aria-label="Scheduled jobs" aria-busy="false"></div>
         <div class="jobs-empty" id="jobs-empty" hidden>
           <strong>No jobs yet</strong>
-          <span>Schedule a headless agent turn or plugin tool call to run on a timer while NusaShell is open.</span>
+              <span>Schedule a task or plugin action to run while NusaShell is open.</span>
         </div>
       </section>
 
@@ -548,9 +606,9 @@
       <section class="view jobs-view" data-view="pipelines">
         <div class="jobs-header">
           <div>
-            <div class="agent-kicker"><span class="agent-kicker-dot"></span> Multi-step orchestration</div>
+            <div class="agent-kicker"><span class="agent-kicker-dot"></span> Multi-step tasks</div>
             <h1 class="page-title">Pipelines</h1>
-            <p class="subtitle">DAG pipelines that chain multiple agent turns or tool calls with conditional branching and context passing.</p>
+            <p class="subtitle">Run several tasks in order, with optional conditions.</p>
           </div>
           <button class="action-btn" id="pipelines-new-btn" type="button" data-control="pipelines-new-btn">+ New pipeline</button>
         </div>
@@ -561,7 +619,7 @@
         <div class="jobs-list" id="pipelines-list" role="list" aria-label="Pipelines" aria-busy="false"></div>
         <div class="jobs-empty" id="pipelines-empty" hidden>
           <strong>No pipelines yet</strong>
-          <span>Create a multi-step pipeline to orchestrate agent turns with conditional branching.</span>
+              <span>Create a pipeline to run tasks in sequence.</span>
         </div>
       </section>
 
@@ -729,10 +787,10 @@
       <!-- ===== View: Settings ===== -->
       <!-- Hidden stubs for dynamically-created job row controls (scan:ui-docs source validation) -->
       <template id="job-row-controls-template" aria-hidden="true">
-        <button id="job-run-btn" hidden>Run</button>
-        <button id="job-toggle-btn" hidden>Pause</button>
-        <button id="job-output-btn" hidden>Output</button>
-        <button id="job-remove-btn" hidden>Remove</button>
+        <button id="job-run-btn" type="button" hidden>Run</button>
+        <button id="job-toggle-btn" type="button" hidden>Pause</button>
+        <button id="job-output-btn" type="button" hidden>Output</button>
+        <button id="job-remove-btn" type="button" hidden>Remove</button>
       </template>
       <section class="view" data-view="settings">
         <div class="settings-header">
@@ -746,7 +804,7 @@
             <div class="settings-row"><span>NusaShell Version</span><span class="settings-value" id="settings-version">—</span></div>
             <div class="settings-row"><span>Backend Status</span><span class="settings-value"><span class="status-dot" id="settings-conn-dot" style="background:var(--text-faint);box-shadow:none"></span><span id="settings-conn-label">Disconnected</span></span></div>
             <div class="settings-row"><span>WebSocket URL</span><span class="settings-value"><code id="settings-ws-url">—</code></span></div>
-            <div class="settings-row"><span>Ping</span><button class="mini-btn" id="ping-btn">Ping</button></div>
+            <div class="settings-row"><span>Ping</span><button class="mini-btn" id="ping-btn" type="button">Ping</button></div>
             <div class="settings-row ping-result" id="ping-result" style="display:none"><span></span><span class="settings-value"></span></div>
           </div>
 
@@ -790,12 +848,12 @@
           </div>
 
           <form class="settings-card" id="ai-runtime-form">
-            <div class="settings-card-title">Agent runtime</div>
+            <div class="settings-card-title">Runtime</div>
             <label class="settings-field">Provider strategy<select id="settings-ai-strategy"><option value="failover">Failover</option><option value="round-robin">Round robin</option><option value="switch">Selected provider only</option></select></label>
             <label class="settings-field">Total attempt budget<input id="settings-ai-budget" type="number" min="1" max="32" value="4"></label>
             <label class="settings-field">Vision<select id="settings-ai-vision"><option value="auto">Send images with fallback</option><option value="on">Always allow image pixels</option><option value="off">Disable image pixels</option></select></label>
             <label class="settings-field">User prompt
-              <textarea id="settings-ai-user-prompt" rows="4" placeholder="Additional instructions for the agent (optional)"></textarea>
+              <textarea id="settings-ai-user-prompt" rows="4" placeholder="Additional instructions (optional)"></textarea>
               <span class="settings-field-help">Added after the system prompt. Use for personality, tone, or task-specific guidance.</span>
             </label>
             <div class="settings-row"><span>Stream responses</span><label class="toggle"><input id="settings-ai-stream" type="checkbox" checked><span class="toggle-slider"></span></label></div>
@@ -803,18 +861,18 @@
           </form>
 
           <form class="settings-card" id="ai-limits-form">
-            <div class="settings-card-title">Agent limits</div>
-            <label class="settings-field">Max tool rounds<input id="settings-ai-max-tool-rounds" type="number" min="1" max="100" value="50"><span class="settings-field-help">Maximum number of tool-call rounds per agent turn.</span></label>
-            <label class="settings-field">Max repeated tool calls<input id="settings-ai-max-repeated-tool-calls" type="number" min="1" max="200" value="50"><span class="settings-field-help">Stop the agent if the same tool call repeats this many times.</span></label>
+            <div class="settings-card-title">Usage limits</div>
+            <label class="settings-field">Max tool rounds<input id="settings-ai-max-tool-rounds" type="number" min="1" max="100" value="50"><span class="settings-field-help">Maximum tool-call rounds per task.</span></label>
+            <label class="settings-field">Max repeated tool calls<input id="settings-ai-max-repeated-tool-calls" type="number" min="1" max="200" value="50"><span class="settings-field-help">Stop if the same tool call repeats this many times.</span></label>
             <div class="settings-row"><span>Applies without restart</span><button class="mini-btn" type="submit">Save limits</button></div>
           </form>
 
           <form class="settings-card" id="ai-context-form">
             <div class="settings-card-title">Context compaction</div>
             <div class="settings-row"><span>Enable compaction</span><label class="toggle"><input id="settings-ai-compaction" type="checkbox" checked><span class="toggle-slider"></span></label></div>
-            <label class="settings-field">Max input tokens<input id="settings-ai-max-input-tokens" type="number" min="1000" max="2000000" step="1000" value="12000"><span class="settings-field-help">Token budget for the input prompt before compaction triggers.</span></label>
-            <label class="settings-field">Reserve tokens<input id="settings-ai-reserve-tokens" type="number" min="0" max="1000000" step="500" value="3000"><span class="settings-field-help">Tokens reserved for the model response, subtracted from the input budget.</span></label>
-            <label class="settings-field">Recent turns to keep<input id="settings-ai-recent-turns" type="number" min="1" max="100" value="4"><span class="settings-field-help">Number of recent user-assistant turns preserved during compaction.</span></label>
+            <label class="settings-field">Max input tokens<input id="settings-ai-max-input-tokens" type="number" min="1000" max="2000000" step="1000" value="12000"><span class="settings-field-help">Cost ceiling on the input prompt. Compaction triggers at 90% of the model window or when this budget is reached, whichever is smaller.</span></label>
+            <label class="settings-field">Reserve tokens<input id="settings-ai-reserve-tokens" type="number" min="0" max="1000000" step="500" value="3000"><span class="settings-field-help">Free headroom kept below the threshold. The trigger fires earlier when this is large; 0 leaves the 90% / 10k-free floor in control.</span></label>
+            <label class="settings-field">Recent turns to keep<input id="settings-ai-recent-turns" type="number" min="1" max="100" value="4"><span class="settings-field-help">Soft preference for how many recent user turns to keep verbatim. Compaction still runs when the token budget is exceeded regardless of this value.</span></label>
             <label class="settings-field">Summary max characters<input id="settings-ai-summary-max-chars" type="number" min="100" max="1000000" step="100" value="12000"><span class="settings-field-help">Maximum character length of the compacted summary.</span></label>
             <div class="settings-row"><span>Applies without restart</span><button class="mini-btn" type="submit">Save context</button></div>
           </form>
@@ -855,11 +913,11 @@
         <div class="drawer-section">
           <div class="drawer-label">Actions</div>
           <div class="drawer-actions">
-            <button class="action-btn action-start" id="btn-start">Start</button>
-            <button class="action-btn action-stop" id="btn-stop">Stop</button>
-            <button class="action-btn action-restart" id="btn-restart">Restart</button>
-            <button class="action-btn action-edit-mcp" id="btn-edit-mcp" hidden>Edit MCP</button>
-            <button class="action-btn action-uninstall" id="btn-uninstall">Uninstall</button>
+            <button class="action-btn action-start" id="btn-start" type="button">Start</button>
+            <button class="action-btn action-stop" id="btn-stop" type="button">Stop</button>
+            <button class="action-btn action-restart" id="btn-restart" type="button">Restart</button>
+            <button class="action-btn action-edit-mcp" id="btn-edit-mcp" type="button" hidden>Edit MCP</button>
+            <button class="action-btn action-uninstall" id="btn-uninstall" type="button">Uninstall</button>
           </div>
         </div>
 
@@ -877,18 +935,18 @@
 
     <!-- ===== Context Menu ===== -->
     <div class="context-menu" id="context-menu" style="display:none">
-      <button class="ctx-item" data-action="cut">Cut</button>
-      <button class="ctx-item" data-action="copy">Copy</button>
-      <button class="ctx-item" data-action="paste">Paste</button>
+      <button class="ctx-item" type="button" data-action="cut">Cut</button>
+      <button class="ctx-item" type="button" data-action="copy">Copy</button>
+      <button class="ctx-item" type="button" data-action="paste">Paste</button>
       <div class="ctx-divider"></div>
-      <button class="ctx-item" data-action="open">Open</button>
-      <button class="ctx-item" data-action="start">Start</button>
-      <button class="ctx-item" data-action="stop">Force Stop</button>
-      <button class="ctx-item" data-action="restart">Restart</button>
+      <button class="ctx-item" type="button" data-action="open">Open</button>
+      <button class="ctx-item" type="button" data-action="start">Start</button>
+      <button class="ctx-item" type="button" data-action="stop">Force Stop</button>
+      <button class="ctx-item" type="button" data-action="restart">Restart</button>
       <div class="ctx-divider"></div>
-      <button class="ctx-item" data-action="detail">Details</button>
+      <button class="ctx-item" type="button" data-action="detail">Details</button>
       <div class="ctx-divider"></div>
-      <button class="ctx-item ctx-danger" data-action="uninstall">Uninstall</button>
+      <button class="ctx-item ctx-danger" type="button" data-action="uninstall">Uninstall</button>
     </div>
   </div>
   <!-- ===== Add Plugin Modal ===== -->
@@ -896,7 +954,7 @@
     <div class="modal">
       <div class="modal-header">
         <h2 id="add-plugin-modal-title">Add MCP</h2>
-        <button class="icon-btn" id="modal-close">
+        <button class="icon-btn" id="modal-close" type="button" aria-label="Close add plugin dialog" title="Close">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
         </button>
       </div>
@@ -930,7 +988,7 @@
           <div class="modal-label">Install from URL</div>
           <div class="modal-input-row">
             <input type="text" class="modal-input" id="install-url-input" placeholder="https://example.com/plugin.zip" />
-            <button class="action-btn action-start" id="install-url-btn">Install</button>
+            <button class="action-btn action-start" id="install-url-btn" type="button">Install</button>
           </div>
         </div>
         <div class="modal-divider">or</div>
@@ -939,7 +997,7 @@
           <div class="modal-input-row">
             <input type="text" class="modal-input" id="install-local-input" placeholder="Choose a plugin folder or archive…" readonly />
             <button class="action-btn" id="pick-local-folder-btn" type="button">Choose folder</button>
-            <button class="action-btn action-start" id="install-local-btn">Install</button>
+            <button class="action-btn action-start" id="install-local-btn" type="button">Install</button>
           </div>
           <button class="local-archive-btn" id="pick-local-archive-btn" type="button">Choose a .zip or .tar.gz archive instead</button>
         </div>
@@ -988,7 +1046,7 @@
   <!-- ===== ACP provider configure modal ===== -->
   <div class="provider-modal-overlay" id="acp-provider-modal-overlay" hidden></div>
   <form class="settings-card provider-settings-card" id="acp-provider-form" hidden>
-    <div class="provider-modal-head"><div><div class="settings-card-title" id="acp-provider-title">Configure ACP agent</div><p class="provider-modal-subtitle" id="acp-provider-subtitle"></p></div><button class="provider-modal-close" id="acp-provider-close" type="button" aria-label="Close ACP provider details">×</button></div>
+    <div class="provider-modal-head"><div><div class="settings-card-title" id="acp-provider-title">Configure ACP provider</div><p class="provider-modal-subtitle" id="acp-provider-subtitle"></p></div><button class="provider-modal-close" id="acp-provider-close" type="button" aria-label="Close ACP provider details">×</button></div>
     <input id="acp-provider-id" type="hidden">
     <label class="provider-enabled-field"><input id="acp-provider-enabled" type="checkbox"> Enabled</label>
     <label class="provider-enabled-field"><input id="acp-provider-set-default" type="checkbox"> Set as default ACP for subagent</label>
@@ -996,8 +1054,22 @@
     <label class="settings-field">Args<input id="acp-provider-args" autocomplete="off" placeholder="acp"></label>
     <label class="settings-field">Auth method (optional)<select id="acp-provider-auth-select"><option value="">Default / file auth</option></select></label>
     <p class="acp-auth-hint" id="acp-provider-auth-hint"></p>
+    <label class="settings-field">Default model<select id="acp-provider-form-default-model"><option value="">Not set — choose per turn</option></select></label>
+    <label class="settings-field">Default mode (bypass / yolo)<select id="acp-provider-form-default-mode"><option value="">Provider default</option></select></label>
     <div class="settings-row"><span id="acp-provider-auth-method">—</span><button class="mini-btn" type="submit">Save ACP provider</button></div>
   </form>
+
+  <!-- ===== ACP fallback order modal ===== -->
+  <div class="provider-modal-overlay" id="acp-routing-modal-overlay" hidden></div>
+  <section class="settings-card provider-settings-card acp-routing-dialog" id="acp-routing-dialog" role="dialog" aria-modal="true" aria-labelledby="acp-routing-title" hidden>
+    <div class="provider-modal-head"><div><div class="settings-card-title" id="acp-routing-title">Fallback order</div><p class="provider-modal-subtitle">Use the default first, then try fallbacks.</p></div><button class="provider-modal-close" id="acp-routing-close" type="button" aria-label="Close fallback settings">×</button></div>
+    <label class="settings-field" for="acp-routing-default">Default provider<select id="acp-routing-default"><option value="">Manifest order (no preference)</option></select></label>
+    <fieldset class="acp-routing-fallbacks">
+      <legend>Fallback order</legend>
+      <div id="acp-routing-fallbacks"></div>
+    </fieldset>
+    <p class="settings-card-copy" id="acp-routing-status" role="status" aria-live="polite"></p>
+  </section>
 
   <!-- ===== Toast container ===== -->
   <div class="toast-container" id="toast-container"></div>

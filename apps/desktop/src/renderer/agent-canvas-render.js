@@ -119,14 +119,67 @@ export function stripDangerousHtml(source) {
 async function renderMermaid(source) {
   const text = softenMermaidSequenceRects(String(source ?? ""));
   if (!text.trim()) return { type: "error", message: "Empty mermaid diagram" };
+  const id = `mmd-${randomId()}`;
+  // Host off-layout so any Mermaid temp nodes never reflow the shell UI. Mermaid
+  // defaults to appending `#d{id}` under document.body; a parse failure without
+  // suppressErrorRendering leaves a huge error diagram (viewBox 2412×512) there.
+  const host = typeof document !== "undefined" ? document.createElement("div") : null;
+  if (host) {
+    host.setAttribute("data-mermaid-render-host", id);
+    host.setAttribute("aria-hidden", "true");
+    host.style.cssText = "position:absolute;left:-10000px;top:0;width:0;height:0;overflow:hidden;pointer-events:none;";
+    document.body.appendChild(host);
+  }
   try {
     const mermaid = await loadMermaid();
-    const id = `mmd-${randomId()}`;
-    const { svg } = await mermaid.render(id, text);
+    // Prefer the 3-arg form so temp SVG lives under `host`, not the page root.
+    const { svg } = host
+      ? await mermaid.render(id, text, host)
+      : await mermaid.render(id, text);
+    // Never surface Mermaid's built-in error diagram as a "successful" SVG.
+    if (isMermaidErrorDiagramSvg(svg)) {
+      return { type: "error", message: "Mermaid syntax error" };
+    }
     return { type: "svg", svg: softenMermaidSvgRects(sanitizeSvgString(svg)) };
   } catch (error) {
     return { type: "error", message: error instanceof Error ? error.message : String(error) };
+  } finally {
+    removeMermaidRenderArtifacts(id, host);
   }
+}
+
+/**
+ * Detect Mermaid's fallback error diagram (bomb + "Syntax error in text").
+ * That diagram is enormous and must never be mounted into chat UI.
+ *
+ * @param {string} svg
+ * @returns {boolean}
+ */
+export function isMermaidErrorDiagramSvg(svg) {
+  // Mermaid includes `.error-icon` and `.error-text` CSS definitions in valid
+  // SVGs too. Strip styles before inspecting rendered markup, otherwise every
+  // successful diagram is falsely classified as an error.
+  const text = String(svg ?? "").replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "");
+  if (!text) return false;
+  if (text.includes("Syntax error in text")) return true;
+  if (text.includes("error-icon") && text.includes("error-text")) return true;
+  return false;
+}
+
+/**
+ * Remove Mermaid temp nodes that can survive a thrown parse/render failure.
+ * Mermaid IDs: svg=`id`, enclosing div=`d{id}`, sandbox iframe=`i{id}`.
+ *
+ * @param {string} id
+ * @param {HTMLElement | null} host
+ */
+function removeMermaidRenderArtifacts(id, host) {
+  if (typeof document === "undefined") return;
+  for (const nodeId of [id, `d${id}`, `i${id}`]) {
+    document.getElementById(nodeId)?.remove();
+  }
+  host?.remove();
+  document.querySelectorAll(`[data-mermaid-render-host="${CSS.escape ? CSS.escape(id) : id}"]`).forEach((node) => node.remove());
 }
 
 /**
@@ -184,6 +237,9 @@ function loadMermaid() {
         mermaid.initialize({
           securityLevel: "strict",
           startOnLoad: false,
+          // On parse failure, throw + strip temp DOM instead of injecting Mermaid's
+          // giant built-in error SVG into the page (breaks Electron layout).
+          suppressErrorRendering: true,
           theme: "neutral",
           // Keep sequence activation/rects from painting solid walls over arrows.
           themeVariables: {

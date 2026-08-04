@@ -1,13 +1,13 @@
 /* ============ ACP surface (Agent Client Protocol) ============ */
 
-.acp-agents-header { margin: 24px 0 12px; }
+.acp-agents-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin: 24px 0 12px; }
 .acp-agents-header .agent-kicker { display: inline-flex; }
-.acp-routing-card { display: grid; gap: 8px; margin: 0 0 14px; border: 1px solid var(--border); border-radius: 10px; padding: 14px; background: #0d151d; }
-.acp-routing-card .settings-card-title { margin: 0; }
-.acp-routing-card .settings-card-copy { margin: 0; color: var(--text-faint); font-size: 11px; line-height: 1.45; }
+.acp-routing-dialog { display: grid; gap: 8px; }
+.acp-routing-dialog .settings-card-copy { margin: 0; color: var(--text-faint); font-size: 11px; line-height: 1.45; }
 .acp-routing-fallbacks { margin: 4px 0 0; border: 0; padding: 0; }
 .acp-routing-fallbacks legend { margin-bottom: 6px; color: var(--text-dim); font-size: 11px; font-weight: 600; }
 .acp-routing-fallback-option { display: inline-flex; align-items: center; gap: 7px; margin: 0 12px 6px 0; color: var(--text); font-size: 11px; }
+.acp-routing-dialog:not([hidden]) { max-width: 460px; }
 .acp-provider-default-badge { display: inline-block; border: 1px solid rgba(87, 198, 142, .45); border-radius: 4px; padding: 2px 5px; color: var(--green); font: 9px 'JetBrains Mono', monospace; font-weight: 500; vertical-align: middle; }
 
 .acp-status-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 12px; border-bottom: 1px solid var(--border-soft); background: rgba(10, 14, 22, .72); }
@@ -35,3 +35,9 @@
 .provider-status.needs-auth { color: var(--amber); }
 .acp-auth-error { margin: 0; padding: 8px 12px 12px; color: var(--red, #e07a82); font: 11px/1.4 'JetBrains Mono', monospace; word-break: break-word; }
 .acp-auth-hint { margin: -4px 0 8px; color: var(--text-dim); font: 11px/1.45 'IBM Plex Sans', system-ui, sans-serif; }
+
+/* ACP provider detail view — config option snapshot */
+.acp-config-option-snapshot { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border-soft); }
+.acp-config-option-snapshot:last-child { border-bottom: 0; }
+.acp-config-option-snapshot-label { color: var(--text-dim); font: 11px 'JetBrains Mono', monospace; }
+.acp-config-option-snapshot-value { color: var(--text); font: 11px 'JetBrains Mono', monospace; text-align: right; }

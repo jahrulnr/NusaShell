@@ -83,6 +83,12 @@ export interface McpClientPort {
   callTool(
     name: string,
     args: Readonly<Record<string, unknown>>,
+    options?: {
+      /** Progress notification callback (MCP `notifications/progress`). */
+      onProgress?: (progress: { progress: number; total?: number | undefined; message?: string | undefined }) => void;
+      /** Abort signal to cancel the in-flight call. */
+      signal?: AbortSignal;
+    },
   ): Promise<unknown>;
   onClose?: (callback: () => void) => void;
   readonly pid?: number | null;

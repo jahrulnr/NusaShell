@@ -997,6 +997,14 @@ legend {
   border-top: 1px solid var(--line);
 }
 
+.confirm-modal-copy {
+  margin: 20px 22px 0;
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
 .form-error {
   flex: 1;
   color: #ff9da6;

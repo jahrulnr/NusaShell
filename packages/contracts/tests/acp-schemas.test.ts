@@ -200,6 +200,7 @@ describe("ACP event schemas", () => {
       sequence: 6,
       payload: {
         traceId: "trace-1",
+        conversationId: "conv-1",
         requestId: "perm-1",
         toolTitle: "Run npm test",
         detail: "Allow running tests?",
@@ -213,6 +214,24 @@ describe("ACP event schemas", () => {
     expect(result.success).toBe(true);
   });
 
+  it("rejects acp.permission_request without conversationId", () => {
+    const result = AcpPermissionRequestEventSchema.safeParse({
+      kind: "event",
+      event: "acp.permission_request",
+      sequence: 6,
+      payload: {
+        traceId: "trace-1",
+        requestId: "perm-1",
+        toolTitle: "Run npm test",
+        options: [
+          { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
+        ],
+        timestamp: "2026-01-01T00:00:00Z",
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
   it("parses acp.ask_request", () => {
     const result = AcpAskRequestEventSchema.safeParse({
       kind: "event",
@@ -220,6 +239,7 @@ describe("ACP event schemas", () => {
       sequence: 7,
       payload: {
         traceId: "trace-1",
+        conversationId: "conv-1",
         requestId: "ask-1",
         question: "Which package manager?",
         options: [{ optionId: "npm", name: "npm" }],
@@ -229,6 +249,21 @@ describe("ACP event schemas", () => {
       },
     });
     expect(result.success).toBe(true);
+  });
+
+  it("rejects acp.ask_request without conversationId", () => {
+    const result = AcpAskRequestEventSchema.safeParse({
+      kind: "event",
+      event: "acp.ask_request",
+      sequence: 7,
+      payload: {
+        traceId: "trace-1",
+        requestId: "ask-1",
+        question: "Which package manager?",
+        timestamp: "2026-01-01T00:00:00Z",
+      },
+    });
+    expect(result.success).toBe(false);
   });
 
   it("parses acp.turn_end", () => {

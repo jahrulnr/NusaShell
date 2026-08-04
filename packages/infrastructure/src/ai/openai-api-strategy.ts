@@ -13,7 +13,7 @@ export interface ApiStrategy {
   readonly api: ProviderApi;
   readonly endpointPath: string;
   readonly supportsStream: boolean;
-  readonly sseMode: "chat" | "responses";
+  readonly sseMode: "chat" | "responses" | "messages";
   buildBody(
     request: AgentProviderRequest,
     model: string,

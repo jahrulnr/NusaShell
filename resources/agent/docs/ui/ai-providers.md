@@ -46,10 +46,7 @@ Button to create a new custom OpenAI-compatible provider.
 
 Registry of ACP (Agent Client Protocol) external agents. Enable and configure providers such as Cursor, Devin, Codex, Claude Code, and Gemini. The Subagent routing card chooses a connected default and fallback order; each provider card shows a Connect button that runs a one-shot acp.probe (spawn → initialize → authenticate → session/new → close) and persists authStatus as connected or needs-auth. Connected providers are available as subagent targets via the subagent tool from within an agent conversation.
 
-- **Subagent routing** (`#acp-routing-card`):
-  - Section: ACP agents
-  - Type: settings card
-  - Action: Groups the default ACP agent and fallback controls for subagent delegation.
+- **`#acp-routing-card`** (missing map entry)
 
 - **Default ACP agent** (`#acp-routing-default`):
   - Section: ACP agents

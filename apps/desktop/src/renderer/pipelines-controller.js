@@ -5,6 +5,7 @@
  */
 
 import { sendRequest } from "./ws-client.js";
+import { confirmDialog } from "./ui-dialogs.js";
 
 export class PipelinesController {
   constructor({ notify }) {
@@ -167,7 +168,7 @@ export class PipelinesController {
         </select>
       </label>
       <div class="pipeline-step-agent" ${step.action?.type === "tool" ? "hidden" : ""}>
-        <label class="form-label">Prompt<textarea rows="2" data-field="agent-prompt" placeholder="Classify this email...">${this._escape(step.action?.prompt ?? "")}</textarea></label>
+        <label class="form-label">Instructions<textarea rows="2" data-field="agent-prompt" placeholder="Classify this email…">${this._escape(step.action?.prompt ?? "")}</textarea></label>
       </div>
       <div class="pipeline-step-tool" ${step.action?.type !== "tool" ? "hidden" : ""}>
         <label class="form-label">Plugin ID<input type="text" data-field="tool-plugin" value="${this._escape(step.action?.pluginId ?? "")}" placeholder="nusashell.mail"></label>
@@ -336,7 +337,7 @@ export class PipelinesController {
   }
 
   async _deletePipeline(id) {
-    if (!confirm("Delete this pipeline?")) return;
+    if (!await confirmDialog({ title: "Delete pipeline?", message: "This removes the pipeline and its steps.", confirmLabel: "Delete", danger: true })) return;
     try {
       await sendRequest("pipeline.remove", { id });
       this.notify("Pipeline deleted", "success");

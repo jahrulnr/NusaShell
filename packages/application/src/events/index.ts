@@ -20,6 +20,14 @@ export type { AgentCancelRequestedEvent } from "./agent-cancel-requested.event.j
 export { createAgentCancelRequestedEvent } from "./agent-cancel-requested.event.js";
 export type { AgentAskRequestEvent } from "./agent-ask-request.event.js";
 export { createAgentAskRequestEvent } from "./agent-ask-request.event.js";
+export type { AgentTodoUpdatedEvent } from "./agent-todo-updated.event.js";
+export { createAgentTodoUpdatedEvent } from "./agent-todo-updated.event.js";
+export type { AgentToolJobStartedEvent } from "./agent-tool-job-started.event.js";
+export { createAgentToolJobStartedEvent } from "./agent-tool-job-started.event.js";
+export type { AgentToolJobUpdateEvent } from "./agent-tool-job-update.event.js";
+export { createAgentToolJobUpdateEvent } from "./agent-tool-job-update.event.js";
+export type { AgentToolJobEndedEvent } from "./agent-tool-job-ended.event.js";
+export { createAgentToolJobEndedEvent } from "./agent-tool-job-ended.event.js";
 export type { AgentLearningUpdatedEvent } from "./agent-learning-updated.event.js";
 export { createLearningUpdatedEvent } from "./agent-learning-updated.event.js";
 export type { JobCompletedEvent, JobFailedEvent, JobStartedEvent, JobCancelledEvent } from "./job-events.event.js";

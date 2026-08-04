@@ -15,7 +15,7 @@ import type {
   AutomationClientDeps,
 } from "@nusashell/application";
 import type { Logger } from "pino";
-import { enrichSpawnEnv, formatSpawnEnoentHint } from "../process/spawn-env.js";
+import { enrichSpawnEnv, expandTilde, formatSpawnEnoentHint } from "../process/spawn-env.js";
 import { boundMcpStderr, registerMcpLogging } from "./mcp-logging.js";
 import { registerMcpAutomation } from "./mcp-automation.js";
 import { unwrapMcpToolResult } from "./tool-result.js";
@@ -35,9 +35,13 @@ export function resolveStdioLaunch(
   env: Readonly<Record<string, string>>,
   runtime: StdioRuntime,
 ): StdioLaunch {
-  const withPath = enrichSpawnEnv(command, env);
-  if (command !== "node" || !runtime.electronVersion) {
-    return { command, env: withPath };
+  // Expand `~` in the command path — Node's child_process.spawn does NOT
+  // perform shell expansion, so `~/.local/bin/messager-mcp` would fail with
+  // ENOENT. This lets plugin manifests use `~/` like they would in a shell.
+  const expandedCommand = expandTilde(command) ?? command;
+  const withPath = enrichSpawnEnv(expandedCommand, env);
+  if (expandedCommand !== "node" || !runtime.electronVersion) {
+    return { command: expandedCommand, env: withPath };
   }
 
   return {
@@ -97,13 +101,13 @@ export class StdioMcpClient implements McpClientPort {
       const message = String(chunk).trim();
       if (!message) return;
       this.stderrBuffer += `${message}\n`;
-      this.logger?.warn({ command: this.command, message: boundMcpStderr(message) }, "MCP stderr");
+      this.logger?.warn({ command: launch.command, message: boundMcpStderr(message) }, "MCP stderr");
     });
 
     let closed = false;
     this.transport.onclose = () => {
       closed = true;
-      this.logger?.debug({ command: this.command }, "Stdio MCP transport closed");
+      this.logger?.debug({ command: launch.command }, "Stdio MCP transport closed");
       if (this.closeCallback) {
         this.closeCallback();
       }
@@ -169,8 +173,11 @@ export class StdioMcpClient implements McpClientPort {
     const code = typeof error === "object" && error !== null && "code" in error
       ? String((error as { code?: unknown }).code)
       : "";
+    // Use the expanded command for the hint so the user sees the resolved
+    // absolute path, not the raw `~/...` from the manifest.
+    const hintCommand = expandTilde(this.command) ?? this.command;
     const enoentHint = code === "ENOENT" || /spawn .* ENOENT/i.test(base)
-      ? formatSpawnEnoentHint(this.command)
+      ? formatSpawnEnoentHint(hintCommand)
       : "";
     const stderrTail = this.stderrBuffer.trim().split("\n").slice(-8).join("\n");
     const parts = [base];
@@ -208,15 +215,26 @@ export class StdioMcpClient implements McpClientPort {
   async callTool(
     name: string,
     args: Readonly<Record<string, unknown>>,
+    options?: {
+      onProgress?: (progress: { progress: number; total?: number | undefined; message?: string | undefined }) => void;
+      signal?: AbortSignal;
+    },
   ): Promise<unknown> {
     if (!this.client) {
       throw new Error("MCP client not connected");
     }
 
-    const result = await this.client.callTool({
-      name,
-      arguments: { ...args },
-    });
+    const result = await this.client.callTool(
+      {
+        name,
+        arguments: { ...args },
+      },
+      undefined,
+      {
+        ...(options?.onProgress ? { onprogress: options.onProgress } : {}),
+        ...(options?.signal ? { signal: options.signal } : {}),
+      },
+    );
 
     return unwrapMcpToolResult(result);
   }

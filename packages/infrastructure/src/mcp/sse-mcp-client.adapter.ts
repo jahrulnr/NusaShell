@@ -89,15 +89,26 @@ export class SseMcpClient implements McpClientPort {
   async callTool(
     name: string,
     args: Readonly<Record<string, unknown>>,
+    options?: {
+      onProgress?: (progress: { progress: number; total?: number | undefined; message?: string | undefined }) => void;
+      signal?: AbortSignal;
+    },
   ): Promise<unknown> {
     if (!this.client) {
       throw new Error("MCP client not connected");
     }
 
-    const result = await this.client.callTool({
-      name,
-      arguments: { ...args },
-    });
+    const result = await this.client.callTool(
+      {
+        name,
+        arguments: { ...args },
+      },
+      undefined,
+      {
+        ...(options?.onProgress ? { onprogress: options.onProgress } : {}),
+        ...(options?.signal ? { signal: options.signal } : {}),
+      },
+    );
 
     return unwrapMcpToolResult(result);
   }

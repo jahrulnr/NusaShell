@@ -6,7 +6,9 @@ import {
   filterLauncherPlugins,
   findOpaqueBounds,
   hasPluginUi,
+  launcherAutostartListNeedsRebuild,
   launcherGridNeedsRebuild,
+  launcherPluginTableNeedsRebuild,
   pluginIconPresentation,
   positionContextMenu,
   providerApiModes,
@@ -77,6 +79,35 @@ describe("launcher UI helpers", () => {
 
     expect(launcherGridNeedsRebuild(previous, refreshed)).toBe(false);
     expect(launcherGridNeedsRebuild(previous, [{ ...refreshed[0], icon: "file://new-icon.png" }])).toBe(true);
+  });
+
+  it("keeps the installed plugin table mounted when only runtime state changes", () => {
+    const previous = [{
+      pluginId: "nusashell.mail",
+      name: "Mail",
+      version: "1.0.0",
+      source: "local",
+      icon: "file://icon.png",
+      installPath: "/plugins/mail",
+      state: "idle",
+    }];
+
+    expect(launcherPluginTableNeedsRebuild(previous, [{ ...previous[0], state: "running" }])).toBe(false);
+    expect(launcherPluginTableNeedsRebuild(previous, [{ ...previous[0], version: "1.1.0" }])).toBe(true);
+  });
+
+  it("keeps the autostart list mounted when only runtime or toggle state changes", () => {
+    const previous = [{
+      pluginId: "nusashell.mail",
+      name: "Mail",
+      icon: "file://icon.png",
+      installPath: "/plugins/mail",
+      state: "idle",
+      autostart: false,
+    }];
+
+    expect(launcherAutostartListNeedsRebuild(previous, [{ ...previous[0], state: "running", autostart: true }])).toBe(false);
+    expect(launcherAutostartListNeedsRebuild(previous, [{ ...previous[0], icon: "file://new-icon.png" }])).toBe(true);
   });
 
   it("keeps a right-click menu inside the window", () => {

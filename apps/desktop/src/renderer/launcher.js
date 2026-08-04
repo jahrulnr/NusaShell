@@ -13,7 +13,9 @@ import {
   describeToolsPanel,
   filterLauncherPlugins,
   hasPluginUi,
+  launcherAutostartListNeedsRebuild,
   launcherGridNeedsRebuild,
+  launcherPluginTableNeedsRebuild,
   normalizeTransparentIcon,
   pluginIconPresentation,
   positionContextMenu,
@@ -21,10 +23,9 @@ import {
 } from "./launcher-ui.js";
 import { initWsClient, connectWs, sendRequest, onEvent, subscribe, isConnected } from "./ws-client.js";
 import { fetchPlugins, startPlugin, stopPlugin, restartPlugin, getPluginDetail, listTools, callTool, pingSystem, getVersion, installPlugin, uninstallPlugin, setPluginAutostart } from "./plugin-api.js";
-import { runAgentTurn, cancelAgentTurn, answerAskQuestion } from "./agent-api.js";
+import { runAgentTurn, cancelAgentTurn, answerAskQuestion, getActiveTurn, deleteTodos } from "./agent-api.js";
 import { runAcpTurn, cancelAcpTurn, getAcpSessionInfo, setAcpConfigOption, ensureAcpSession, answerAcpPermission, answerAcpAsk } from "./acp-api.js";
-
-const WS_URL = window.shell?.wsUrl ?? "ws://127.0.0.1:9130";
+import { confirmDialog, promptDialog } from "./ui-dialogs.js";
 
 // ============ State ============
 
@@ -45,6 +46,7 @@ let launcherCategory = "All";
 let aiSettings = { activeProviderId: "", activeModelKey: "", effort: "auto", providers: [], models: [] };
 let acpRouting = { defaultProviderId: "", fallbackProviderIds: [], tryOrder: [] };
 let currentProviderDetailId = "";
+let currentAcpProviderDetailId = "";
 let pendingProviderDeleteId = "";
 let editContextTarget = null;
 let drawerReturnFocus = null;
@@ -305,6 +307,7 @@ function renderAutostartList() {
   }
   plugins.forEach((plugin) => {
     const row = el("div", "autostart-row");
+    row.dataset.pluginId = plugin.pluginId;
     const icon = el("div", "autostart-icon");
     setPluginIcon(icon, plugin.icon || "🧩", 28, plugin.installPath);
     const info = el("div", "autostart-info");
@@ -320,11 +323,25 @@ function renderAutostartList() {
       toggle.disabled = true;
       const result = await setPluginAutostart(plugin.pluginId, toggle.checked);
       if (result.error) { toggle.checked = !toggle.checked; showToast(`Autostart update failed: ${result.error}`, "error"); }
-      else { plugin.autostart = toggle.checked; renderAutostartList(); }
+      else { plugin.autostart = toggle.checked; updateAutostartListStates(); }
       toggle.disabled = false;
     });
     row.append(icon, info, toggle);
     list.appendChild(row);
+  });
+}
+
+function updateAutostartListStates() {
+  const count = $("#autostart-count");
+  if (count) count.textContent = `${plugins.filter((plugin) => plugin.autostart).length} enabled`;
+  const pluginsById = new Map(plugins.map((plugin) => [plugin.pluginId, plugin]));
+  $$("#autostart-list .autostart-row[data-plugin-id]").forEach((row) => {
+    const plugin = pluginsById.get(row.dataset.pluginId);
+    if (!plugin) return;
+    const meta = row.querySelector(".autostart-meta");
+    if (meta) meta.textContent = `${plugin.pluginId} · ${plugin.state}`;
+    const toggle = row.querySelector(".autostart-toggle");
+    if (toggle) toggle.checked = Boolean(plugin.autostart);
   });
 }
 
@@ -402,6 +419,18 @@ function updateAppGridStates() {
   });
 }
 
+function updateInstalledTableStates() {
+  const pluginsById = new Map(plugins.map((plugin) => [plugin.pluginId, plugin]));
+  $$("#plugin-table .plugin-row[data-plugin-id]").forEach((row) => {
+    const plugin = pluginsById.get(row.dataset.pluginId);
+    const state = row.querySelector(".plugin-row-state");
+    if (!plugin || !state) return;
+    state.className = `plugin-row-state ${plugin.state}`;
+    state.innerHTML = stateBadgeHtml(plugin.state) || "Idle";
+    row.classList.toggle("is-selected", plugin.pluginId === selectedPluginId);
+  });
+}
+
 function syncAppGrid(previousPlugins) {
   if (launcherGridNeedsRebuild(previousPlugins, plugins)) renderAppGrid();
   else updateAppGridStates();
@@ -434,7 +463,7 @@ function renderInstalledTable() {
     row.classList.toggle("is-selected", p.pluginId === selectedPluginId);
     row.addEventListener("click", () => {
       selectedPluginId = p.pluginId;
-      renderInstalledTable();
+      updateInstalledTableStates();
       openDrawer(p);
     });
     table.appendChild(row);
@@ -453,12 +482,7 @@ async function openDrawer(plugin) {
 
   $("#btn-edit-mcp").hidden = plugin.source !== "native-mcp";
 
-  const sm = $("#state-machine");
-  sm.innerHTML = "";
-  STATES.forEach((s, i) => {
-    if (i > 0) sm.appendChild(el("span", "state-arrow", "→"));
-    sm.appendChild(el("span", `state-node${s === plugin.state ? " current" : ""}`, s));
-  });
+  renderDrawerState(plugin);
 
   // Open immediately — never block the drawer on tool.list (same serial queue
   // as plugin.start, which can hang for minutes on a stuck MCP connect).
@@ -500,6 +524,20 @@ async function openDrawer(plugin) {
     const m = detail || plugin;
     $("#manifest-info").innerHTML = `<div class="manifest-row"><span class="manifest-key">id</span><span class="manifest-val">${plugin.pluginId}</span></div><div class="manifest-row"><span class="manifest-key">version</span><span class="manifest-val">${m.version ?? plugin.version}</span></div><div class="manifest-row"><span class="manifest-key">state</span><span class="manifest-val">${m.state ?? plugin.state}</span></div><div class="manifest-row"><span class="manifest-key">enabled</span><span class="manifest-val">${m.enabled ?? plugin.enabled}</span></div>`;
   })();
+}
+
+function renderDrawerState(plugin) {
+  const sm = $("#state-machine");
+  if (!sm) return;
+  sm.innerHTML = "";
+  STATES.forEach((s, i) => {
+    if (i > 0) sm.appendChild(el("span", "state-arrow", "→"));
+    sm.appendChild(el("span", `state-node${s === plugin.state ? " current" : ""}`, s));
+  });
+  const stateValue = [...($("#manifest-info")?.querySelectorAll(".manifest-row") ?? [])]
+    .find((row) => row.querySelector(".manifest-key")?.textContent === "state")
+    ?.querySelector(".manifest-val");
+  if (stateValue) stateValue.textContent = plugin.state;
 }
 
 function closeDrawer() {
@@ -655,10 +693,13 @@ function handlePluginEvent(payload, eventType) {
     return;
   }
   syncAppGrid(previousPlugins);
-  renderInstalledTable();
-  renderAutostartList();
+  if (launcherPluginTableNeedsRebuild(previousPlugins, plugins)) renderInstalledTable();
+  else updateInstalledTableStates();
+  if (launcherAutostartListNeedsRebuild(previousPlugins, plugins)) renderAutostartList();
+  else updateAutostartListStates();
   if (currentPlugin?.pluginId === payload.pluginId) {
-    openDrawer(plugins[idx] ?? currentPlugin);
+    currentPlugin = plugins[idx] ?? currentPlugin;
+    renderDrawerState(currentPlugin);
   }
 }
 
@@ -818,7 +859,7 @@ async function doInstall(source, path) {
 // ============ Uninstall ============
 
 async function doUninstall(pluginId, pluginName) {
-  if (!confirm(`Uninstall "${pluginName || pluginId}"? This cannot be undone.`)) return;
+  if (!await confirmDialog({ title: "Uninstall plugin?", message: `Uninstall “${pluginName || pluginId}”? This cannot be undone.`, confirmLabel: "Uninstall", danger: true })) return;
   const result = await uninstallPlugin(pluginId);
   if (result.error) {
     showToast(`Uninstall failed: ${result.error}`, "error");
@@ -840,8 +881,8 @@ function initUpdater() {
   const bannerClose = $("#update-banner-close");
 
   bannerClose.addEventListener("click", () => { banner.style.display = "none"; });
-  bannerBtn.addEventListener("click", () => {
-    if (confirm("Restart now to apply the update?")) {
+  bannerBtn.addEventListener("click", async () => {
+    if (await confirmDialog({ title: "Restart to update?", message: "NusaShell will restart now to apply the downloaded update.", confirmLabel: "Restart" })) {
       window.shell.updater.quitAndInstall();
     }
   });
@@ -881,8 +922,10 @@ async function refreshAll() {
   plugins = await fetchPlugins();
   if (selectedPluginId && !plugins.some((plugin) => plugin.pluginId === selectedPluginId)) selectedPluginId = "";
   syncAppGrid(previousPlugins);
-  renderInstalledTable();
-  renderAutostartList();
+  if (launcherPluginTableNeedsRebuild(previousPlugins, plugins)) renderInstalledTable();
+  else updateInstalledTableStates();
+  if (launcherAutostartListNeedsRebuild(previousPlugins, plugins)) renderAutostartList();
+  else updateAutostartListStates();
 }
 
 // ============ Init ============
@@ -918,8 +961,9 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Display WS URL in settings
-  $("#settings-ws-url").textContent = WS_URL;
+  // Display transport mode in settings (IPC since Phase 2; WS is legacy)
+  const wsUrlEl = $("#settings-ws-url");
+  if (wsUrlEl) wsUrlEl.textContent = "IPC (in-process)";
 
   // Nav switching
   $$("[data-nav]").forEach(item => item.addEventListener("click", () => switchView(item.dataset.view)));
@@ -989,6 +1033,17 @@ document.addEventListener("DOMContentLoaded", () => {
   };
   const closeProviderEditor = () => { $("#ai-settings-form").hidden = true; $("#provider-modal-overlay").hidden = true; };
   const closeAcpProviderEditor = () => { $("#acp-provider-form").hidden = true; $("#acp-provider-modal-overlay").hidden = true; };
+  const closeAcpRouting = () => {
+    $("#acp-routing-dialog").hidden = true;
+    $("#acp-routing-modal-overlay").hidden = true;
+    $("#acp-routing-settings")?.setAttribute("aria-expanded", "false");
+  };
+  const openAcpRouting = () => {
+    $("#acp-routing-dialog").hidden = false;
+    $("#acp-routing-modal-overlay").hidden = false;
+    $("#acp-routing-settings")?.setAttribute("aria-expanded", "true");
+    $("#acp-routing-default")?.focus();
+  };
   const connectedAcpProviders = (providers) => providers.filter((provider) => provider.config.enabled && provider.config.authStatus === "connected");
   const renderAcpRouting = (providers) => {
     const defaultSelect = $("#acp-routing-default");
@@ -1028,7 +1083,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     $("#acp-routing-status").textContent = connected.length > 0
       ? `Effective order: ${acpRouting.tryOrder?.map((id) => connected.find((provider) => provider.manifest.id === id)?.manifest.displayName || id).join(" → ") || "manifest order"}`
-      : "Connect an ACP agent to set a subagent route.";
+      : "Connect an ACP provider to set a fallback route.";
   };
   const saveAcpRouting = async (settings) => {
     try {
@@ -1078,6 +1133,137 @@ document.addEventListener("DOMContentLoaded", () => {
       authHint.textContent = "Auth is optional when the CLI already has file credentials. Click Connect after enabling.";
     }
     $("#acp-provider-auth-method").textContent = provider.config.authStatus === "connected" ? "● Connected" : provider.config.authStatus === "needs-auth" ? "● Needs auth" : "Not probed";
+    populateAcpProviderFormDefaults(provider);
+  };
+
+  const showAcpProviderDetail = async (providerId) => {
+    currentAcpProviderDetailId = providerId;
+    await renderAcpProviderDetail();
+    switchView("acp-provider-details");
+  };
+
+  const renderAcpProviderDetail = async () => {
+    if (!currentAcpProviderDetailId) { switchView("ai-providers"); return; }
+    let provider;
+    try {
+      provider = await window.shell.acpProviders.get(currentAcpProviderDetailId);
+    } catch (error) {
+      showToast(`Could not load ACP provider: ${error.message || error}`, "error");
+      switchView("ai-providers");
+      return;
+    }
+    if (!provider) { switchView("ai-providers"); return; }
+    const models = provider.config.models ?? [];
+    const configOptions = provider.config.configOptions ?? [];
+    const modeOption = configOptions.find((o) => o.id === "mode");
+    $("#acp-provider-detail-title").textContent = provider.manifest.displayName;
+    $("#acp-provider-detail-subtitle").textContent = provider.manifest.description;
+    $("#acp-provider-detail-command").textContent = `${provider.config.command || provider.manifest.command} ${(provider.config.args ?? provider.manifest.args).join(" ")}`.trim();
+    $("#acp-provider-detail-auth").textContent = provider.config.authStatus === "connected" ? "● Connected" : provider.config.authStatus === "needs-auth" ? "● Needs auth" : "Not probed";
+    $("#acp-provider-detail-default-model").textContent = provider.config.defaultModelId || "Not set";
+    const currentMode = provider.config.preferredConfig?.mode;
+    $("#acp-provider-detail-default-mode").textContent = currentMode ?? provider.manifest.defaultMode ?? "—";
+    $("#acp-provider-detail-status").textContent = provider.config.enabled ? "Enabled" : "Disabled";
+    $("#acp-provider-import-models").disabled = false;
+    $("#acp-provider-detail-edit").disabled = false;
+    const query = ($("#acp-provider-model-search").value || "").trim().toLowerCase();
+    const filtered = models.filter((m) => !query || `${m.id} ${m.label} ${m.description || ""}`.toLowerCase().includes(query));
+    $("#acp-provider-model-count").textContent = `${models.length} model${models.length === 1 ? "" : "s"}`;
+    const list = $("#acp-provider-model-list");
+    list.textContent = "";
+    if (filtered.length === 0) {
+    list.appendChild(el("div", "provider-model-empty", models.length ? "No models match this search." : "No models yet. Import the provider list to see them here."));
+    } else {
+      filtered.forEach((model) => {
+        const row = el("div", "provider-model-item");
+        const top = el("div", "provider-model-item-head");
+        const identity = el("div");
+        const id = el("code", "provider-model-id"); id.textContent = model.id;
+        const label = el("span", "provider-model-label"); label.textContent = model.label !== model.id ? model.label : "";
+        identity.append(id, label);
+        top.append(identity);
+        row.appendChild(top);
+        if (model.description) { const description = el("p", "provider-model-description"); description.textContent = model.description; row.appendChild(description); }
+        list.appendChild(row);
+      });
+    }
+    populateAcpDefaultModelSelect(models, provider.config.defaultModelId);
+    populateAcpDefaultModeSelect(modeOption, provider.manifest.defaultMode, currentMode);
+    renderAcpConfigOptionsSnapshot(configOptions);
+  };
+
+  const populateAcpDefaultModelSelect = (models, defaultModelId) => {
+    const select = $("#acp-provider-default-model-select");
+    select.textContent = "";
+    const none = el("option", "", "Not set — choose per turn"); none.value = ""; select.appendChild(none);
+    models.forEach((model) => {
+      const opt = el("option", "", model.label || model.id); opt.value = model.id;
+      if (model.id === defaultModelId) opt.selected = true;
+      select.appendChild(opt);
+    });
+  };
+
+  const populateAcpDefaultModeSelect = (modeOption, manifestDefaultMode, currentMode) => {
+    const select = $("#acp-provider-default-mode-select");
+    select.textContent = "";
+    const none = el("option", "", "Provider default"); none.value = ""; select.appendChild(none);
+    const options = modeOption?.options ?? [];
+    options.forEach((opt) => {
+      const node = el("option", "", opt.name || opt.value); node.value = opt.value;
+      if (opt.value === currentMode) node.selected = true;
+      select.appendChild(node);
+    });
+    if (options.length === 0 && manifestDefaultMode) {
+      const node = el("option", "", manifestDefaultMode); node.value = manifestDefaultMode;
+      if (manifestDefaultMode === currentMode) node.selected = true;
+      select.appendChild(node);
+    }
+  };
+
+  const renderAcpConfigOptionsSnapshot = (configOptions) => {
+    const card = $("#acp-provider-config-options-card");
+    const wrap = $("#acp-provider-config-options");
+    wrap.textContent = "";
+    const interesting = configOptions.filter((o) => o.id !== "model" && o.id !== "mode");
+    if (interesting.length === 0) { card.hidden = true; return; }
+    card.hidden = false;
+    interesting.forEach((opt) => {
+      const row = el("div", "acp-config-option-snapshot");
+      const label = el("div", "acp-config-option-snapshot-label", opt.name);
+      if (opt.description) label.title = opt.description;
+      const value = el("div", "acp-config-option-snapshot-value");
+      value.textContent = opt.type === "boolean" ? (opt.currentValue ? "On" : "Off") : String(opt.currentValue ?? "—");
+      row.append(label, value);
+      wrap.appendChild(row);
+    });
+  };
+
+  const populateAcpProviderFormDefaults = (provider) => {
+    const models = provider.config.models ?? [];
+    const configOptions = provider.config.configOptions ?? [];
+    const modeOption = configOptions.find((o) => o.id === "mode");
+    const modelSelect = $("#acp-provider-form-default-model");
+    modelSelect.textContent = "";
+    const modelNone = el("option", "", "Not set — choose per turn"); modelNone.value = ""; modelSelect.appendChild(modelNone);
+    models.forEach((model) => {
+      const opt = el("option", "", model.label || model.id); opt.value = model.id;
+      if (model.id === provider.config.defaultModelId) opt.selected = true;
+      modelSelect.appendChild(opt);
+    });
+    const modeSelect = $("#acp-provider-form-default-mode");
+    modeSelect.textContent = "";
+    const modeNone = el("option", "", "Provider default"); modeNone.value = ""; modeSelect.appendChild(modeNone);
+    const modeOptions = modeOption?.options ?? [];
+    modeOptions.forEach((opt) => {
+      const node = el("option", "", opt.name || opt.value); node.value = opt.value;
+      if (opt.value === provider.config.preferredConfig?.mode) node.selected = true;
+      modeSelect.appendChild(node);
+    });
+    if (modeOptions.length === 0 && provider.manifest.defaultMode) {
+      const node = el("option", "", provider.manifest.defaultMode); node.value = provider.manifest.defaultMode;
+      if (provider.manifest.defaultMode === provider.config.preferredConfig?.mode) node.selected = true;
+      modeSelect.appendChild(node);
+    }
   };
   const closeProviderDeleteDialog = () => {
     pendingProviderDeleteId = "";
@@ -1113,6 +1299,8 @@ document.addEventListener("DOMContentLoaded", () => {
     setAcpConfigOption,
     ensureAcpSession,
     refreshModelPicker: () => renderAgentModelPicker(),
+    getActiveTurn,
+    deleteTodos,
   });
   skillsController = new SkillsController({
     shell: window.shell,
@@ -1266,9 +1454,12 @@ document.addEventListener("DOMContentLoaded", () => {
             await renderAcpProviderCards();
           }
         });
-        const action = el("button", "mini-btn provider-card-action", "Configure");
+        const action = el("button", "mini-btn provider-card-action", isConnected ? "Details" : "Configure");
         action.type = "button";
-        action.addEventListener("click", () => showAcpProviderEditor(provider));
+        action.addEventListener("click", () => {
+          if (isConnected) showAcpProviderDetail(provider.manifest.id);
+          else showAcpProviderEditor(provider);
+        });
         actions.append(connectBtn, action);
         footer.append(status, actions);
         if (provider.config.authError && provider.config.authStatus !== "connected") {
@@ -1292,7 +1483,9 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     const selected = activeModel();
-    $("#agent-model-trigger-label").textContent = `${selected?.id || "Choose model"} · ${aiSettings.effort || "auto"}`;
+    const triggerLabel = $("#agent-model-trigger-label");
+    triggerLabel.textContent = `${selected?.id || "Choose model"} · ${aiSettings.effort || "auto"}`;
+    $("#agent-model-trigger").title = triggerLabel.textContent;
     if (selected) agentConversationController?.updateContextStatus();
     else $("#agent-provider-status").textContent = "Choose a model";
     const models = searchModels(aiSettings.models, $("#agent-model-search").value);
@@ -1528,7 +1721,7 @@ document.addEventListener("DOMContentLoaded", () => {
         userPrompt: $("#settings-ai-user-prompt").value,
       });
       syncAiControls();
-      showToast("Agent runtime saved.", "success");
+      showToast("Runtime settings saved.", "success");
     } catch (error) {
       showToast(`Could not save agent runtime: ${error.message || error}`, "error");
     }
@@ -1546,7 +1739,7 @@ document.addEventListener("DOMContentLoaded", () => {
         maxRepeatedToolCalls: Number($("#settings-ai-max-repeated-tool-calls").value),
       });
       syncAiControls();
-      showToast("Agent limits saved.", "success");
+      showToast("Usage limits saved.", "success");
     } catch (error) {
       showToast(`Could not save agent limits: ${error.message || error}`, "error");
     }
@@ -1625,11 +1818,11 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
   $("#provider-add-model").addEventListener("click", async () => {
-    const modelId = window.prompt("Model ID");
-    if (!modelId?.trim()) return;
-    const label = window.prompt("Display label (optional)") || "";
+    const modelId = await promptDialog({ title: "Add model", message: "Enter the model identifier used by this provider.", label: "Model ID" });
+    if (!modelId) return;
+    const label = await promptDialog({ title: "Add model", message: "Add a shorter label for the model, or leave it blank to use its ID.", label: "Display label", allowEmpty: true });
     try {
-      aiSettings = await window.shell.aiProviders.addModel(currentProviderDetailId, { id: modelId.trim(), label: label.trim() });
+      aiSettings = await window.shell.aiProviders.addModel(currentProviderDetailId, { id: modelId.trim(), label: (label || modelId).trim() });
       syncAiControls();
       showToast("Model added.", "success");
     } catch (error) {
@@ -1654,6 +1847,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (event.key !== "Escape") return;
     if (!$("#ai-settings-form").hidden) closeProviderEditor();
     if (!$("#provider-delete-dialog").hidden) closeProviderDeleteDialog();
+    if (!$("#acp-routing-dialog").hidden) closeAcpRouting();
     if (!$("#agent-delete-dialog").hidden) agentConversationController?.closeDeleteDialog();
     if (!$("#job-delete-dialog").hidden) jobsController?.closeDeleteDialog();
     if ($("#job-modal")?.classList.contains("active")) jobsController?.closeModal();
@@ -1798,6 +1992,9 @@ document.addEventListener("DOMContentLoaded", () => {
       fallbackProviderIds: (acpRouting.fallbackProviderIds || []).filter((id) => id !== defaultProviderId),
     });
   });
+  $("#acp-routing-settings")?.addEventListener("click", openAcpRouting);
+  $("#acp-routing-close")?.addEventListener("click", closeAcpRouting);
+  $("#acp-routing-modal-overlay")?.addEventListener("click", closeAcpRouting);
   $("#acp-provider-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const id = $("#acp-provider-id").value;
@@ -1805,8 +2002,24 @@ document.addEventListener("DOMContentLoaded", () => {
     const argsString = $("#acp-provider-args").value.trim();
     const args = argsString ? argsString.split(/\s+/).filter(Boolean) : undefined;
     const authMethodId = $("#acp-provider-auth-select").value || undefined;
+    const defaultModelId = $("#acp-provider-form-default-model").value || undefined;
+    const defaultMode = $("#acp-provider-form-default-mode").value || undefined;
+    // Build preferredConfig from the form's default model/mode selects. Empty
+    // values are dropped so the manifest default stays in effect.
+    const preferredConfig = {};
+    if (defaultModelId) preferredConfig.model = defaultModelId;
+    if (defaultMode) preferredConfig.mode = defaultMode;
+    const preferredConfigInput = Object.keys(preferredConfig).length > 0 ? preferredConfig : undefined;
     try {
-      await window.shell.acpProviders.save({ providerId: id, enabled: $("#acp-provider-enabled").checked, command, args, authMethodId });
+      await window.shell.acpProviders.save({
+        providerId: id,
+        enabled: $("#acp-provider-enabled").checked,
+        command,
+        args,
+        authMethodId,
+        preferredConfig: preferredConfigInput,
+        ...(defaultModelId ? { defaultModelId } : {}),
+      });
       const setAsDefault = $("#acp-provider-set-default").checked;
       if (setAsDefault || acpRouting.defaultProviderId === id) {
         const routingSaved = await saveAcpRouting({
@@ -1824,6 +2037,62 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   $("#acp-provider-close").addEventListener("click", closeAcpProviderEditor);
   $("#acp-provider-modal-overlay").addEventListener("click", closeAcpProviderEditor);
+
+  // ACP provider detail view controls
+  $("#acp-provider-details-back").addEventListener("click", () => switchView("ai-providers"));
+  $("#acp-provider-detail-edit").addEventListener("click", async () => {
+    if (!currentAcpProviderDetailId) return;
+    const provider = await window.shell.acpProviders.get(currentAcpProviderDetailId);
+    if (provider) showAcpProviderEditor(provider);
+  });
+  $("#acp-provider-import-models").addEventListener("click", async () => {
+    const button = $("#acp-provider-import-models");
+    const errorBox = $("#acp-provider-import-error");
+    errorBox.hidden = true;
+    button.disabled = true;
+    button.textContent = "Importing…";
+    try {
+      const result = await window.shell.acpProviders.importModels(currentAcpProviderDetailId);
+      if (result.error) {
+        errorBox.textContent = result.error;
+        errorBox.hidden = false;
+        showToast(`Import failed: ${result.error}`, "error");
+      } else {
+        showToast(`Imported ${result.models.length} model${result.models.length === 1 ? "" : "s"}.`, "success");
+      }
+      await renderAcpProviderDetail();
+    } catch (error) {
+      errorBox.textContent = error.message || String(error);
+      errorBox.hidden = false;
+      showToast(`Could not import models: ${error.message || error}`, "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = "Import models";
+    }
+  });
+  $("#acp-provider-model-search").addEventListener("input", () => void renderAcpProviderDetail());
+  $("#acp-provider-default-model-select").addEventListener("change", async (event) => {
+    const modelId = event.target.value;
+    if (!currentAcpProviderDetailId) return;
+    try {
+      await window.shell.acpProviders.setDefaultModel(currentAcpProviderDetailId, modelId);
+      await renderAcpProviderDetail();
+      showToast("Default model saved.", "success");
+    } catch (error) {
+      showToast(`Could not save default model: ${error.message || error}`, "error");
+    }
+  });
+  $("#acp-provider-default-mode-select").addEventListener("change", async (event) => {
+    const mode = event.target.value;
+    if (!currentAcpProviderDetailId) return;
+    try {
+      await window.shell.acpProviders.setDefaultMode(currentAcpProviderDetailId, mode);
+      await renderAcpProviderDetail();
+      showToast("Default mode saved.", "success");
+    } catch (error) {
+      showToast(`Could not save default mode: ${error.message || error}`, "error");
+    }
+  });
 
   // Version — fetched after WS connects (see onOpen callback below)
 
@@ -1852,6 +2121,11 @@ document.addEventListener("DOMContentLoaded", () => {
   void agentConversationController.initialize().catch((error) => {
     showToast(`Could not load conversations: ${error.message || error}`, "error");
   });
+  // B3: tear down the controller on page unload so observers/subscriptions
+  // do not leak across renderer reloads.
+  window.addEventListener("beforeunload", () => {
+    agentConversationController?.destroy();
+  });
   void skillsController.initialize().catch((error) => {
     showToast(`Could not load skills: ${error.message || error}`, "error");
   });
@@ -1859,14 +2133,14 @@ document.addEventListener("DOMContentLoaded", () => {
     showToast(`Could not load learning graph: ${error.message || error}`, "error");
   });
 
-  // Connect and subscribe — subscribe must happen AFTER the socket opens,
-  // otherwise NusaClient.request() rejects with "Not connected" and the
-  // subscription is silently lost (no streaming events reach the renderer).
+  // Initialize the host client (IPC bridge to in-process backend).
+  // No TCP connect step — "open" fires on next microtask once preload is ready.
   initWsClient({
-    url: WS_URL,
     onOpen: (isOpen) => {
       updateConnStatus(isOpen !== false);
       if (isOpen !== false) {
+        // subscribe is a no-op in IPC mode (fan-out is process-local), but
+        // keep the call for symmetry with the former WS path.
         subscribe(["*"]).catch(() => {});
         refreshAll();
         getVersion().then(v => {
@@ -1878,6 +2152,13 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     },
     onLog: writeRendererLog,
+    onConnectionChange: (state) => {
+      if (state === "closed" || state === "failed") {
+        agentConversationController?.handleConnectionLost();
+      } else if (state === "open") {
+        agentConversationController?.handleConnectionRestored();
+      }
+    },
   });
   connectWs();
 

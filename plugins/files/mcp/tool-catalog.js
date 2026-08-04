@@ -12,4 +12,6 @@ export const FILES_TOOL_NAMES = Object.freeze([
   "files_grep",
   "files_patch",
   "files_append",
+  "files_exists",
+  "files_touch",
 ]);

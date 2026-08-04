@@ -69,6 +69,33 @@ export function describeToolActivity(toolCalls) {
   };
 }
 
+/**
+ * Human-readable turn failure from application/transport errors.
+ * Backend often puts the real reason in `details.cause` while `message` is
+ * a short code phrase — surface both when cause is not already embedded.
+ */
+export function formatTurnError(error) {
+  const message = error?.message || "Unknown error";
+  const cause = typeof error?.details?.cause === "string" ? error.details.cause.trim() : "";
+  if (!cause || message.includes(cause)) return message;
+  return `${message}: ${cause}`;
+}
+
+/**
+ * Subagent tool/event error payloads may be a string or `{ message }`.
+ * Never show `[object Object]` when the backend sent a structured error.
+ */
+export function formatSubagentError(error) {
+  if (!error) return "";
+  if (typeof error === "string") return error;
+  if (typeof error === "object" && typeof error.message === "string" && error.message) return error.message;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
 const TOOL_ARGS_MAX_CHARS = 8_000;
 const TOOL_OUTPUT_MAX_CHARS = 12_000;
 
@@ -344,31 +371,24 @@ function toProviderToolCall(call) {
 
 /**
  * Expand one durable message into the provider-message array the runner expects.
- * Returns an array so an assistant message with `toolCalls` can be reconstructed
- * as the assistant tool-call message plus one `role: "tool"` result per call.
+ *
+ * For assistant messages with tool calls:
+ * - If `message.steps` contains `tool_calls` steps, rebuild round-accurately
+ *   from steps: each `tool_calls` step becomes an assistant+toolCalls message
+ *   followed by its tool results; `text` steps become standalone assistant
+ *   messages; `reasoning` steps are skipped (keeps confabulated reasoning out
+ *   of the next prompt). This preserves the live round order the model saw.
+ * - Otherwise (flat fallback), emit one assistant with empty content + all
+ *   toolCalls, then tool results, then — if `message.content` is nonempty — a
+ *   trailing assistant with the final text. This puts the answer AFTER tools
+ *   instead of gluing it onto the tool-call message.
  */
 function toProviderMessages(message) {
   if (message.role === "assistant" && Array.isArray(message.toolCalls) && message.toolCalls.length > 0) {
-    const calls = message.toolCalls.map(toProviderToolCall).filter(Boolean);
-    if (calls.length === 0) return [{ role: "assistant", content: message.content ?? "" }];
-    const assistantMessage = {
-      role: "assistant",
-      content: typeof message.content === "string" ? message.content : "",
-      toolCalls: calls,
-    };
-    const toolResults = message.toolCalls
-      .map((call) => {
-        const expanded = toProviderToolCall(call);
-        if (!expanded) return undefined;
-        return {
-          role: "tool",
-          toolCallId: expanded.id,
-          name: expanded.name,
-          content: wrapUntrustedToolResult(expanded.name, toolResultContent(call)),
-        };
-      })
-      .filter(Boolean);
-    return [assistantMessage, ...toolResults];
+    if (Array.isArray(message.steps) && message.steps.some((s) => s?.type === "tool_calls" && Array.isArray(s.calls) && s.calls.length > 0)) {
+      return toProviderMessagesFromSteps(message);
+    }
+    return toProviderMessagesFlat(message);
   }
   if (message.role !== "user" || !message.attachments?.length) {
     return [{ role: message.role, content: message.content }];
@@ -392,4 +412,76 @@ function toProviderMessages(message) {
       }),
     ],
   }];
+}
+
+/**
+ * Rebuild provider messages from round-accurate `steps`.
+ * - `reasoning` steps are skipped (not re-injected into provider context).
+ * - `tool_calls` steps emit `{role:"assistant", content:"", toolCalls}` + tool results.
+ * - `text` steps emit `{role:"assistant", content}` (mid-turn or final).
+ * - If no text step was emitted, `message.content` is used as a trailing assistant.
+ */
+function toProviderMessagesFromSteps(message) {
+  const out = [];
+  let hasText = false;
+  for (const step of message.steps) {
+    if (!step || typeof step !== "object") continue;
+    if (step.type === "reasoning") continue;
+    if (step.type === "text" && typeof step.content === "string") {
+      hasText = true;
+      out.push({ role: "assistant", content: step.content });
+      continue;
+    }
+    if (step.type === "tool_calls" && Array.isArray(step.calls) && step.calls.length > 0) {
+      const calls = step.calls.map(toProviderToolCall).filter(Boolean);
+      if (calls.length === 0) continue;
+      out.push({ role: "assistant", content: "", toolCalls: calls });
+      for (const call of step.calls) {
+        const expanded = toProviderToolCall(call);
+        if (!expanded) continue;
+        out.push({
+          role: "tool",
+          toolCallId: expanded.id,
+          name: expanded.name,
+          content: wrapUntrustedToolResult(expanded.name, toolResultContent(call)),
+        });
+      }
+    }
+  }
+  if (!hasText && typeof message.content === "string" && message.content.trim()) {
+    out.push({ role: "assistant", content: message.content });
+  }
+  return out.length > 0 ? out : [{ role: "assistant", content: message.content ?? "" }];
+}
+
+/**
+ * Flat fallback when no `steps` are available: emit assistant with empty
+ * content + all toolCalls, then tool results, then a trailing assistant with
+ * the final text (if nonempty). This puts the answer AFTER tools.
+ */
+function toProviderMessagesFlat(message) {
+  const calls = message.toolCalls.map(toProviderToolCall).filter(Boolean);
+  if (calls.length === 0) return [{ role: "assistant", content: message.content ?? "" }];
+  const assistantMessage = {
+    role: "assistant",
+    content: "",
+    toolCalls: calls,
+  };
+  const toolResults = message.toolCalls
+    .map((call) => {
+      const expanded = toProviderToolCall(call);
+      if (!expanded) return undefined;
+      return {
+        role: "tool",
+        toolCallId: expanded.id,
+        name: expanded.name,
+        content: wrapUntrustedToolResult(expanded.name, toolResultContent(call)),
+      };
+    })
+    .filter(Boolean);
+  const finalText = typeof message.content === "string" ? message.content.trim() : "";
+  if (finalText) {
+    return [assistantMessage, ...toolResults, { role: "assistant", content: message.content }];
+  }
+  return [assistantMessage, ...toolResults];
 }

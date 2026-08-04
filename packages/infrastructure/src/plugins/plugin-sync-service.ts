@@ -33,7 +33,21 @@ export class PluginSyncService {
         if (plugin) {
           const idStr = PluginId.toString(plugin.id);
           foundIds.add(idStr);
-          await this.repository.save(plugin);
+          // Preserve the user's enabled/disabled preference across syncs.
+          // Without this, a re-sync after install/update would silently
+          // re-enable a plugin the user explicitly disabled.
+          const existing = await this.repository.findById(plugin.id);
+          const pluginToSave = existing && !existing.enabled
+            ? Plugin.create({
+                id: plugin.id,
+                version: plugin.version,
+                manifest: plugin.manifest,
+                enabled: false,
+                installPath: plugin.installPath,
+                installedAt: plugin.installedAt,
+              })
+            : plugin;
+          await this.repository.save(pluginToSave);
           this.logger?.debug({ pluginId: idStr, path: dir.path }, "Synced plugin to repository");
         }
       }

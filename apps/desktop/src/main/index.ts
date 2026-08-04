@@ -46,6 +46,7 @@ import {
   registerShellIpc,
   type IpcContext,
 } from "./ipc/index.js";
+import { IpcRequestBridge, IpcEventBridge } from "./ipc-bridge.js";
 
 let backend: BootstrapResult | null = null;
 let updater: AppUpdater | null = null;
@@ -67,10 +68,10 @@ const aiRuntimeConfig = loadConfig().ai;
 const aiStubEnabled = app.isPackaged ? false : aiRuntimeConfig.stubEnabled;
 const MAIL_PLUGIN_ID = "nusashell.mail";
 
-// Resolve the WS port once and export it via env so the preload (renderer
-// process) and window-manager derive the same port from the same inputs.
+// WS port is still resolved for config compatibility (AppConfig.port), but
+// the server is no longer started in the desktop product path (Phase 3).
+// NUSASHELL_PORT is no longer exported to the renderer — preload uses IPC.
 const wsPort = resolveWsPort({ isDev, envPort: process.env.NUSASHELL_PORT });
-process.env.NUSASHELL_PORT = String(wsPort);
 process.env.NUSASHELL_IS_DEV = String(isDev);
 
 // Linux desktop entry registration must happen before any userData override so
@@ -178,6 +179,9 @@ async function startBackend(): Promise<BootstrapResult> {
     skillsRoot,
     memoryRoot,
     logFile: resolve(dataRoot, "logs", "nusashell.log"),
+    // Phase 3: desktop uses IPC, not the loopback WebSocket. Keep the WS
+    // server off the product path so there is no listening TCP socket.
+    startWsServer: false,
     resolvePluginRuntimeEnvironment: (pluginId) => ({
       NUSASHELL_USER_DATA: dataRoot,
       ...(pluginId === MAIL_PLUGIN_ID ? mailSettingsStore?.runtimeEnvironment() ?? {} : {}),
@@ -255,18 +259,6 @@ async function startBackend(): Promise<BootstrapResult> {
   return result;
 }
 
-async function waitForBackend(port: number, maxRetries = 30): Promise<void> {
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}`);
-      if (res.ok || res.status === 400 || res.status === 404) return;
-    } catch {
-      // backend not ready yet
-    }
-    await new Promise(r => setTimeout(r, 100));
-  }
-}
-
 function requireBackend(): BootstrapResult {
   if (!backend) throw new Error("Backend not ready");
   return backend;
@@ -315,6 +307,12 @@ app.whenReady().then(async () => {
   acpProviderStore = new AcpProviderStore(
     resolve(app.getPath("userData"), "acp-providers.json"),
     resolve(app.getPath("userData"), "acp-routing.json"),
+    {
+      info: (msg, ...args) => logTail.add("acp", "info", args.length ? `${msg} ${args.join(" ")}` : msg),
+      warn: (msg, ...args) => logTail.add("acp", "warn", args.length ? `${msg} ${args.join(" ")}` : msg),
+      error: (msg, ...args) => logTail.add("acp", "error", args.length ? `${msg} ${args.join(" ")}` : msg),
+      debug: (msg, ...args) => logTail.add("acp", "debug", args.length ? `${msg} ${args.join(" ")}` : msg),
+    },
   );
   appBehaviorStore = new AppBehaviorStore(resolve(app.getPath("userData"), "app-behavior.json"));
   appBehavior = await appBehaviorStore.load();
@@ -355,8 +353,7 @@ app.whenReady().then(async () => {
 
   try {
     backend = await startBackend();
-    await waitForBackend(backend.config.port);
-    logTail.add("backend", "info", `Backend ready on ${backend.config.host}:${backend.config.port}`);
+    logTail.add("backend", "info", "Backend ready (in-process, IPC only)");
 
     backend.container.eventDispatcher.on("plugin.uninstalled", {
       handle: (event) => {
@@ -378,6 +375,15 @@ app.whenReady().then(async () => {
   registerPluginsIpc(ctx);
   registerNativeMcpIpc(ctx);
   registerShellIpc(ctx);
+
+  // Phase 1: register the generic IPC request + event bridges so the
+  // renderer can talk to the bus without the loopback WebSocket.
+  if (backend) {
+    const ipcRequestBridge = new IpcRequestBridge(backend, backend.container.logger);
+    ipcRequestBridge.register();
+    const ipcEventBridge = new IpcEventBridge(backend, backend.container.logger);
+    ipcEventBridge.register();
+  }
 
   // Restore Connected badges from CLI file auth (no browser). Runs after the
   // command bus is up; failures stay silent and never downgrade a prior status.

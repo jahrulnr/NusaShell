@@ -1,4 +1,5 @@
 import type { ReasoningEffort } from "@nusashell/application";
+import { resolveModelContextDefaults } from "@nusashell/application";
 
 export interface ModelCapabilities {
   readonly contextWindow?: number;
@@ -58,10 +59,15 @@ export function resolveModelRuntimePolicy(input: {
       ? inputModes.includes("image")
       : heuristicModelSupportsVision(input.model);
 
+  const defaults = resolveModelContextDefaults(input.model);
   return {
     ...(effort ? { effort } : {}),
-    ...(positiveInteger(capabilities?.contextWindow) ? { contextWindow: capabilities?.contextWindow } : {}),
-    ...(positiveInteger(capabilities?.maxOutput) ? { maxOutput: capabilities?.maxOutput } : {}),
+    ...(positiveInteger(capabilities?.contextWindow)
+      ? { contextWindow: capabilities?.contextWindow }
+      : { contextWindow: defaults.contextWindow }),
+    ...(positiveInteger(capabilities?.maxOutput)
+      ? { maxOutput: capabilities?.maxOutput }
+      : { maxOutput: defaults.maxOutput }),
     supportsTools: capabilities?.supportsTools !== false,
     supportsVision,
   };

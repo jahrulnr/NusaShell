@@ -60,6 +60,7 @@ export class ToolCallTracker {
     });
 
     const timeoutMs = options.timeoutMs ?? this.deps.toolCallTimeoutMs ?? 30_000;
+    const signal = options.signal;
 
     return new Promise<unknown>((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -78,18 +79,39 @@ export class ToolCallTracker {
         toolCall,
         resolve: (value) => {
           if (timer) clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
           resolve(value);
         },
         reject: (error) => {
           if (timer) clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
           reject(error);
         },
         timer,
       };
       entry.pendingCalls.set(RequestId.toString(toolCall.requestId), pending);
 
+      const onAbort = () => {
+        this.cancelPendingCall(
+          entry,
+          RequestId.toString(toolCall.requestId),
+          "TOOL_CALL_CANCELLED",
+          "Tool call cancelled by abort signal",
+        );
+      };
+      if (signal) {
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+
       entry.mcpClient!
-        .callTool(options.toolName, options.args)
+        .callTool(options.toolName, options.args, {
+          ...(options.onProgress ? { onProgress: options.onProgress } : {}),
+          ...(signal ? { signal } : {}),
+        })
         .then((result) => {
           if (entry.pendingCalls.delete(RequestId.toString(toolCall.requestId))) {
             const completed = toolCall.withStatus("completed", result);
@@ -146,13 +168,24 @@ export class ToolCallTracker {
     entry: RuntimeEntry,
     toolCall: ToolCall,
   ): Promise<void> {
-    const event = ToolCallCompletedEvent.create(
-      entry.pluginId,
-      toolCall.requestId,
-      toolCall.toolName,
-      this.deps.clock.now(),
-    );
-    await this.deps.eventDispatcher.publish(event);
+    try {
+      const event = ToolCallCompletedEvent.create(
+        entry.pluginId,
+        toolCall.requestId,
+        toolCall.toolName,
+        this.deps.clock.now(),
+      );
+      await this.deps.eventDispatcher.publish(event);
+    } catch (error) {
+      // C5: log instead of silently swallowing via `void` — event publish
+      // failures should be observable, not invisible.
+      this.deps.logger?.error(
+        "publishToolCompleted failed plugin=%s tool=%s error=%s",
+        PluginId.toString(entry.pluginId),
+        ToolName.toString(toolCall.toolName),
+        error instanceof Error ? error.message : String(error),
+      );
+    }
   }
 
   private async loadPlugin(pluginId: PluginId): Promise<import("@nusashell/domain").Plugin> {

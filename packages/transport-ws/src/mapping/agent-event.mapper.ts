@@ -11,6 +11,10 @@ import type {
   AgentTurnSupersededEvent,
   AgentCancelRequestedEvent,
   AgentLearningUpdatedEvent,
+  AgentTodoUpdatedEvent,
+  AgentToolJobStartedEvent,
+  AgentToolJobUpdateEvent,
+  AgentToolJobEndedEvent,
   SubagentRunStartedEvent,
   SubagentRunEndedEvent,
   ApplicationEvent,
@@ -204,6 +208,75 @@ export function mapAgentEvent(
           ok: e.ok,
           ...(e.summary ? { summary: e.summary } : {}),
           ...(e.error ? { error: e.error } : {}),
+          timestamp,
+        },
+      };
+    }
+    case "agent.todo_updated": {
+      const e = event as AgentTodoUpdatedEvent;
+      return {
+        kind: "event",
+        event: "agent.todo_updated",
+        sequence,
+        payload: {
+          conversationId: e.conversationId,
+          items: e.items.map((item) => ({
+            id: item.id,
+            content: item.content,
+            status: item.status,
+          })),
+          timestamp,
+        },
+      };
+    }
+    case "agent.tool_job_started": {
+      const e = event as AgentToolJobStartedEvent;
+      return {
+        kind: "event",
+        event: "agent.tool_job_started",
+        sequence,
+        payload: {
+          handleId: e.handleId,
+          conversationId: e.conversationId,
+          kind: e.kind,
+          toolName: e.toolName,
+          argsSummary: e.argsSummary,
+          ...(e.pluginId ? { pluginId: e.pluginId } : {}),
+          ...(e.traceId ? { traceId: e.traceId } : {}),
+          timestamp,
+        },
+      };
+    }
+    case "agent.tool_job_update": {
+      const e = event as AgentToolJobUpdateEvent;
+      return {
+        kind: "event",
+        event: "agent.tool_job_update",
+        sequence,
+        payload: {
+          handleId: e.handleId,
+          conversationId: e.conversationId,
+          status: e.status,
+          tail: e.tail,
+          bytes: e.bytes,
+          streamSeq: e.streamSeq,
+          timestamp,
+        },
+      };
+    }
+    case "agent.tool_job_ended": {
+      const e = event as AgentToolJobEndedEvent;
+      return {
+        kind: "event",
+        event: "agent.tool_job_ended",
+        sequence,
+        payload: {
+          handleId: e.handleId,
+          conversationId: e.conversationId,
+          ok: e.ok,
+          reason: e.reason,
+          ...(e.error !== undefined ? { error: e.error } : {}),
+          ...(e.output !== undefined ? { output: e.output } : {}),
           timestamp,
         },
       };

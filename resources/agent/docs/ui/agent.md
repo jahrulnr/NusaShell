@@ -210,7 +210,7 @@ When the parent agent delegates work through the subagent tool, an in-chat Subag
 
 ## Composer
 
-A raised command dock at the bottom of the thread. Its message input starts at one row, grows with wrapped or explicit lines, and caps at ten rows before scrolling internally. Attach images, PDFs, or text files, choose a model, and send the turn without losing the conversation rail.
+A compact command dock at the bottom of the thread. Its message input starts at one row, grows with wrapped or explicit lines, and caps at ten rows before scrolling internally. Attachment, model, and workspace context stay grouped separately from context usage and turn actions; long labels truncate, and actions wrap below only at very narrow widths.
 
 - **Composer form** (`#agent-form`):
   - Section: Composer
@@ -281,7 +281,46 @@ A raised command dock at the bottom of the thread. Its message input starts at o
 - **Send turn** (`#agent-send-btn`):
   - Section: Composer
   - Type: submit button
-  - Action: Submits the composer form and starts the agent turn.
+  - Action: Submits the composer form and starts the agent turn. Shortcut is shown as a tooltip (Ctrl+Enter / ⌘↩).
+  - Shortcut: Ctrl+Enter or Cmd+Enter submits the turn.
+
+## Task strip
+
+A collapsible checklist above the composer that mirrors the agent-owned todo list. The agent writes it via the `todo` meta-tool; the user can delete individual items (which removes them from the runtime port so they do not reappear in the next prompt injection) and collapse the strip. It hides automatically when the list is empty.
+
+- **Task strip** (`.agent-todo-strip`):
+  - Section: Task strip
+  - Type: container
+  - Action: Collapsible checklist above the composer mirroring the agent-owned todo list. Hides when the list is empty.
+
+- **Collapse tasks** (`.agent-todo-strip-toggle`):
+  - Section: Task strip
+  - Type: button
+  - Action: Collapses or expands the task list.
+
+- **Task count** (`.agent-todo-strip-count`):
+  - Section: Task strip
+  - Type: text
+  - Action: Shows incomplete/total task counts.
+
+- **Task list** (`.agent-todo-strip-list`):
+  - Section: Task strip
+  - Type: list
+  - Action: Renders each task with a status glyph and a delete button. Clicking the delete button removes the item via agent.todos_delete.
+
+## Background jobs strip
+
+A strip above the composer (below the task strip) that shows running and recently finished async tool jobs started via `async_run`. Each card shows the tool name, status badge, live tail output, and a Stop button that calls `agent.tool_job_kill`. The strip rehydrates from `agent.tool_job_list` on conversation open and hides when no jobs are active.
+
+- **Background jobs strip** (`.agent-tool-job-strip`):
+  - Section: Background jobs strip
+  - Type: container
+  - Action: Shows running and recently finished async tool jobs. Hides when no jobs are active.
+
+- **Job cards** (`.agent-tool-job-list`):
+  - Section: Background jobs strip
+  - Type: list
+  - Action: Renders each job as a card with tool name, status badge, live tail, and a Stop button. Clicking Stop calls agent.tool_job_kill.
 
 ## Delete conversation dialog
 
@@ -340,6 +379,11 @@ A shell-owned canvas drawer over the agent workbench. Completed assistant messag
   - Section: Agent Canvas
   - Type: dialog
   - Action: Right-edge overlay drawer for the active canvas artifact. Slides over the agent workbench without resizing the chat column; closed via Close, overlay click, or Escape.
+
+- **Resize canvas drawer** (`#agent-canvas-resize`):
+  - Section: Agent Canvas
+  - Type: separator
+  - Action: Drag the left edge to resize the drawer. ArrowLeft/ArrowRight adjust it by keyboard; Home and End go to the widest and narrowest supported sizes.
 
 - **Canvas title** (`#agent-canvas-title`):
   - Section: Agent Canvas

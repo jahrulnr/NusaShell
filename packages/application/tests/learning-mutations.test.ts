@@ -68,6 +68,26 @@ function makeMutationDeps(overrides: Partial<LearningGraphDeps> = {}): LearningG
 }
 
 describe("LearningGraphService.deleteNode", () => {
+  it("archives a builtin skill and marks it deleted so it is not re-seeded", async () => {
+    const archiveSpy = vi.fn(async () => {});
+    const markBuiltinDeletedSpy = vi.fn(async () => {});
+    const deps = makeMutationDeps({
+      registry: {
+        list: async () => [fakeSummary("skill-creator")],
+        archive: archiveSpy,
+      } as unknown as SkillRegistryPort,
+      provenance: {
+        get: async () => "builtin",
+        markBuiltinDeleted: markBuiltinDeletedSpy,
+      } as unknown as SkillProvenancePort,
+    });
+    const result = await new LearningGraphService(deps).deleteNode("skill-creator");
+
+    expect(result).toEqual({ ok: true });
+    expect(archiveSpy).toHaveBeenCalledWith("skill-creator");
+    expect(markBuiltinDeletedSpy).toHaveBeenCalledWith("skill-creator");
+  });
+
   it("archives skill on delete (not permanent delete)", async () => {
     const archiveSpy = vi.fn(async () => {});
     const deps = makeMutationDeps({

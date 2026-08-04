@@ -19,8 +19,11 @@ Every turn starts with thirteen shell-owned meta-tools:
   bounded result set.
 - `tool_list` — list all tool names and descriptions from a running MCP plugin
   without a search query.
-- `tool_schema` — return one tool schema and grant that concrete tool to the
-  following round.
+- `tool_schema` — return one tool schema and advertise that concrete tool for
+  the current turn (optional when recalling a known `mcp_*` name on a running
+  plugin).
+- `tool_schemas` — advertise multiple tool schemas for the current turn in one
+  call (same optional rule as `tool_schema`).
 - `mcp_context` — access non-tool MCP context through an explicit action:
   `list_prompts`, `get_prompt`, `search_resources`,
   `list_resource_templates`, `complete`, or `read_resource`.
@@ -37,12 +40,19 @@ Every turn starts with thirteen shell-owned meta-tools:
   `agent.ask_answer` or cancels the turn. Background jobs and review turns
   never receive this tool.
 
-`tool_schema` is the bridge to execution: after discovery, the actual MCP tool
-is added to the next provider request and called through the normal typed
-broker path. Its grant is scoped by turn trace ID and is removed in a `finally`
-cleanup, so concurrent conversations cannot share tool permissions and the
-catalog cannot grow across turns. There is no untyped catch-all `tool_call`
-function.
+`tool_schema` / `tool_schemas` advertise a concrete MCP tool (with schema) for
+the rest of the current turn so the provider can call it through the typed
+broker path. Grants are scoped by turn trace ID and cleared in a `finally`
+cleanup, so concurrent conversations cannot share advertised catalogs and the
+catalog cannot grow across turns.
+
+The model may also call a previously used `mcp_<plugin>_<tool>` name **without**
+a prior grant when that plugin is already `running`. The gateway lazily resolves
+the name against running plugins, executes the matching tool, and auto-advertises
+it for the remainder of the turn. Idle/stopped plugins never match. Wrong names
+or stopped plugins return a normal tool error; the turn continues. Soft-reject
+still applies to clearly non-NusaShell names (for example `ReadFile`). There is
+no untyped catch-all `tool_call` function.
 
 `mcp_context` keeps prompts and resources out of the launcher UI and out of the
 initial prompt payload. Prompt arguments remain strings and required arguments

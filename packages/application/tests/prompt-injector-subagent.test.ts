@@ -3,6 +3,10 @@ import { injectPrompts, type PromptVars } from "../src/agent/services/prompt-inj
 import type { AgentPrompt } from "../src/agent/ports/prompt-loader.port.js";
 import type { AgentMessage } from "../src/agent/ports/agent-provider.port.js";
 
+function inject(...args: Parameters<typeof injectPrompts>): AgentMessage[] {
+  return injectPrompts(...args).messages;
+}
+
 describe("injectPrompts — subagent prompt", () => {
   const vars: PromptVars = {
     currentDate: "2026-08-03",
@@ -25,7 +29,7 @@ describe("injectPrompts — subagent prompt", () => {
 
   it("injects subagent prompt after static prompts when provided", () => {
     const messages: AgentMessage[] = [{ role: "user", content: "Hello" }];
-    const result = injectPrompts(
+    const result = inject(
       [...staticPrompts, developerPrompt],
       vars,
       messages,
@@ -43,14 +47,14 @@ describe("injectPrompts — subagent prompt", () => {
 
   it("does not inject subagent prompt when undefined", () => {
     const messages: AgentMessage[] = [{ role: "user", content: "Hello" }];
-    const result = injectPrompts([...staticPrompts, developerPrompt], vars, messages);
+    const result = inject([...staticPrompts, developerPrompt], vars, messages);
     const systemContents = result.filter((m) => m.role === "system").map((m) => m.content as string);
     expect(systemContents).not.toContain("Subagent delegation guide");
   });
 
   it("injects subagent prompt before user prompt", () => {
     const messages: AgentMessage[] = [{ role: "user", content: "Hello" }];
-    const result = injectPrompts(
+    const result = inject(
       staticPrompts,
       vars,
       messages,

@@ -1,9 +1,9 @@
 import type { ParsedRequest } from "@nusashell/contracts";
-import type { GetPromptQuery, GetPluginQuery, GetPluginStateQuery, ListPluginsQuery, ListPromptsQuery, ListResourcesQuery, ListResourceTemplatesQuery, ListToolsQuery, ReadResourceQuery, SystemPingQuery, SystemVersionQuery, ListJobsQuery, JobOutputQuery, ValidateScheduleQuery, GetAcpSessionInfoQuery, ListPipelinesQuery } from "@nusashell/application";
+import type { GetPromptQuery, GetPluginQuery, GetPluginStateQuery, ListPluginsQuery, ListPromptsQuery, ListResourcesQuery, ListResourceTemplatesQuery, ListToolsQuery, ReadResourceQuery, SystemPingQuery, SystemVersionQuery, ListJobsQuery, JobOutputQuery, ValidateScheduleQuery, GetAcpSessionInfoQuery, ListPipelinesQuery, GetActiveTurnQuery, ToolJobListQuery } from "@nusashell/application";
 
 export function mapToQuery(
   request: ParsedRequest,
-): ListPluginsQuery | GetPluginQuery | GetPluginStateQuery | ListToolsQuery | ListPromptsQuery | GetPromptQuery | ListResourcesQuery | ListResourceTemplatesQuery | ReadResourceQuery | SystemPingQuery | SystemVersionQuery | ListJobsQuery | JobOutputQuery | ValidateScheduleQuery | GetAcpSessionInfoQuery | ListPipelinesQuery | null {
+): ListPluginsQuery | GetPluginQuery | GetPluginStateQuery | ListToolsQuery | ListPromptsQuery | GetPromptQuery | ListResourcesQuery | ListResourceTemplatesQuery | ReadResourceQuery | SystemPingQuery | SystemVersionQuery | ListJobsQuery | JobOutputQuery | ValidateScheduleQuery | GetAcpSessionInfoQuery | ListPipelinesQuery | GetActiveTurnQuery | ToolJobListQuery | null {
   switch (request.method) {
     case "plugin.list":
       return { kind: "list-plugins" } as ListPluginsQuery;
@@ -51,6 +51,10 @@ export function mapToQuery(
       return { kind: "validate-schedule", schedule: request.payload.schedule } as ValidateScheduleQuery;
     case "acp.session_info":
       return { kind: "get-acp-session-info", conversationId: request.payload.conversationId } as GetAcpSessionInfoQuery;
+    case "agent.get_active_turn":
+      return { kind: "get-active-turn", conversationId: request.payload.conversationId } as GetActiveTurnQuery;
+    case "agent.tool_job_list":
+      return { kind: "tool-job-list", conversationId: request.payload.conversationId } as ToolJobListQuery;
     default:
       return null;
   }

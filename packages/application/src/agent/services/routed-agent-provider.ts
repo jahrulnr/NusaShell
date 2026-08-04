@@ -13,9 +13,13 @@ export interface RoutedAgentProviderOptions {
   readonly strategy: AgentProviderStrategy;
   readonly totalAttemptBudget: number;
   readonly logger?: LoggerPort;
+  /**
+   * Shared round-robin cursor across turns. When omitted, a per-instance
+   * cursor is used (each turn starts from 0). Pass a process-lifetime cursor
+   * from the composition root for true cross-turn rotation.
+   */
+  readonly roundRobinCursor?: { value: number };
 }
-
-let roundRobinCursor = 0;
 
 /**
  * Per-turn provider router. A successful provider is pinned for later tool
@@ -25,10 +29,12 @@ export class RoutedAgentProvider implements AgentProvider {
   readonly id: string;
   private pinned: AgentProvider | undefined;
   private readonly candidates: readonly AgentProvider[];
+  private readonly roundRobinCursor: { value: number };
 
   constructor(private readonly options: RoutedAgentProviderOptions) {
     this.id = options.preferredProviderId;
-    this.candidates = orderCandidates(options);
+    this.roundRobinCursor = options.roundRobinCursor ?? { value: 0 };
+    this.candidates = orderCandidates(options, this.roundRobinCursor);
   }
 
   async complete(request: AgentProviderRequest): Promise<AgentProviderResult> {
@@ -105,14 +111,14 @@ function omitSelectedModel(request: AgentProviderRequest): AgentProviderRequest 
   return portableRequest;
 }
 
-function orderCandidates(options: RoutedAgentProviderOptions): readonly AgentProvider[] {
+function orderCandidates(options: RoutedAgentProviderOptions, cursor: { value: number }): readonly AgentProvider[] {
   const preferred = options.providers.find((provider) => provider.id === options.preferredProviderId);
   const rest = options.providers.filter((provider) => provider.id !== options.preferredProviderId);
   const ordered = preferred ? [preferred, ...rest] : [...options.providers];
   if (options.strategy === "switch") return ordered.slice(0, 1);
   if (options.strategy !== "round-robin" || ordered.length < 2) return ordered;
-  const start = roundRobinCursor % ordered.length;
-  roundRobinCursor = (roundRobinCursor + 1) % ordered.length;
+  const start = cursor.value % ordered.length;
+  cursor.value = (cursor.value + 1) % ordered.length;
   return [...ordered.slice(start), ...ordered.slice(0, start)];
 }
 

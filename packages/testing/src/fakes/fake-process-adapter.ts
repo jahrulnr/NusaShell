@@ -22,6 +22,13 @@ export class FakeProcessHandle implements ProcessHandle {
     }
   }
 
+  async killGroup(_signal?: string): Promise<void> {
+    this.killed = true;
+    if (this.exitResolve) {
+      this.exitResolve(0);
+    }
+  }
+
   emitExit(code: number): void {
     if (this.exitResolve) {
       this.exitResolve(code);

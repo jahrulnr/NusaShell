@@ -1,8 +1,22 @@
 # Learning
 
-Visualizes the agent's learning journey as a timeline and constellation of skill and memory nodes, with a time scrubber and a detail pane for inspecting and editing individual nodes.
+Reviews saved learning data in two focused views: a table for timeline and node details, and a full-width Connections graph.
 
 **How to open:** Click the Learning item in the left sidebar.
+
+## View tabs
+
+Switches between the Table view for browsing and editing nodes and the Connections view for exploring relationships across the full available width.
+
+- **Table view** (`#learning-tab-table`):
+  - Section: View tabs
+  - Type: tab
+  - Action: Shows the learning timeline and selected node detail.
+
+- **Connections view** (`#learning-tab-connections`):
+  - Section: View tabs
+  - Type: tab
+  - Action: Shows the full-width learning connections graph.
 
 ## Stats
 
@@ -30,7 +44,7 @@ Summary cards showing the total number of learned skills, memory entries, agent-
 
 ## Timeline
 
-A chronological list of learning nodes grouped by day. Each row shows a colored dot indicating kind (skill or memory) and state (active, stale, archived), the node label, category, use count, and a pin indicator. Click a row to inspect it in the detail pane.
+The Table view contains a chronological list of learning nodes grouped by day. Each row shows a colored dot indicating kind (skill or memory) and state (active, stale, archived), the node label, category, use count, and a pin indicator. Click a row to inspect it in the detail pane.
 
 - **Learning timeline** (`#learning-timeline-list`):
   - Section: Timeline
@@ -49,17 +63,37 @@ A chronological list of learning nodes grouped by day. Each row shows a colored 
 
 ## Constellation
 
-An SVG graph that positions nodes by timestamp (horizontal) and cluster category (vertical) and draws edges between related skills. Node color reflects kind and state. Click a dot to select the node. A time scrubber below fades nodes that fall after the selected percentage of the timeline.
+The Connections view gives the graph the full panel width. It uses a compact force layout for related nodes and packs isolated nodes nearby, with edges between related skills. Node size reflects connection degree and labels become selective on larger graphs as the user zooms. Node color reflects kind and state. Click a dot to select the node and highlight its neighborhood. A time scrubber below fades nodes that fall after the selected percentage of the timeline.
 
-- **Constellation graph** (`#learning-constellation-svg`):
+- **Constellation graph** (`#learning-constellation-canvas`):
   - Section: Constellation
-  - Type: svg graph
-  - Action: Visualizes learning nodes as dots positioned by timestamp and cluster, with edges between related skills. Click a dot to select a node.
+  - Type: interactive graph
+  - Action: Visualizes learning nodes with Sigma.js and Graphology using a force-directed layout, curved edges, semantic zoom, and neighborhood selection.
 
 - **Constellation metadata** (`#learning-constellation-meta`):
   - Section: Constellation
   - Type: status text
   - Action: Shows the number of edges in the constellation graph.
+
+- **Zoom in connections** (`#learning-zoom-in`):
+  - Section: Constellation
+  - Type: button
+  - Action: Increases the connection graph scale.
+
+- **Zoom out connections** (`#learning-zoom-out`):
+  - Section: Constellation
+  - Type: button
+  - Action: Decreases the connection graph scale.
+
+- **Reset connection zoom** (`#learning-zoom-reset`):
+  - Section: Constellation
+  - Type: button
+  - Action: Returns the connection graph to 100% scale.
+
+- **Connection zoom value** (`#learning-zoom-value`):
+  - Section: Constellation
+  - Type: status text
+  - Action: Shows the current connection graph scale.
 
 - **Time scrubber** (`#learning-scrubber`):
   - Section: Constellation

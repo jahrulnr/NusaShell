@@ -199,11 +199,22 @@ export class FilesystemSkillRegistry implements SkillRegistryPort {
 
   async archive(skillId: string): Promise<void> {
     const source = this.skillRoot(skillId);
-    if (!await exists(resolve(source, "SKILL.md"))) throw new Error(`Skill not found: ${skillId}`);
     const archiveDir = resolve(this.root, ".archive");
-    await mkdir(archiveDir, { recursive: true });
     const destination = resolve(archiveDir, skillId);
-    if (await exists(destination)) throw new Error(`Skill already archived: ${skillId}`);
+    const sourceExists = await exists(resolve(source, "SKILL.md"));
+    const destinationExists = await exists(resolve(destination, "SKILL.md"));
+    if (!sourceExists) {
+      if (destinationExists) return;
+      throw new Error(`Skill not found: ${skillId}`);
+    }
+    await mkdir(archiveDir, { recursive: true });
+    if (destinationExists) {
+      // Archive is the Learning delete operation. If a stale active copy is
+      // recreated while the archived copy remains, remove only that active
+      // duplicate instead of blocking cleanup with an idempotency error.
+      await rm(source, { recursive: true, force: false });
+      return;
+    }
     await rename(source, destination);
   }
 

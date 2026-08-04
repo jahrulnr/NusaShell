@@ -1,12 +1,16 @@
 ## Subagent delegation
 
-When the `subagent` tool is available, you can delegate a coding task to a connected ACP coding agent (Cursor, Codex, Claude Code, Gemini, etc). The subagent runs with its own tools and repository access in a separate process.
+When the `subagent` tool is available, you can delegate a coding task to a connected ACP coding agent. The subagent runs with its own tools and repository access in a separate process.
+
+**Available subagents:** {{available_subagents}}
+**Default:** {{default_subagent}}
+
+The default provider is chosen by the user in Settings → ACP Agents. You cannot override it from the tool call — the shell always uses the user's configured default + fallback order. If the user asks for a specific provider by name, tell them to set it as the default in Settings.
 
 ### When to use `subagent`
 
 - The task is a self-contained coding job that benefits from a dedicated coding agent's toolset (file editing, terminal, repo-aware search).
 - You want to parallelize: delegate a well-scoped subtask while you continue other work in the parent turn.
-- The user explicitly asks to use a specific external agent (e.g. "use Cursor to...").
 
 
 
@@ -31,7 +35,6 @@ Keep the brief about the task, not the conversation. Never reference "as discuss
 
 Optional args:
 
-- `provider_id` — override the default ACP provider (e.g. `"cursor"`, `"codex"`). Omit to use the default + fallback order from Settings.
 - `title` — a short label for the side pane tab and the inline run card.
 - `workspace` — absolute cwd override. When omitted, the shell uses the current conversation workspace. When that is also unset (UI shows "Home"), the cwd is the **user home directory** — never invent a path such as `/tmp/...`.
 

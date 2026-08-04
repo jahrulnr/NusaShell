@@ -9,9 +9,12 @@ import type {
 import {
   assertTurnActive,
   cancelledExecution,
+  isLazyResolvableMcpToolName,
+  isToolAllowed,
   runPool,
   segmentToolBatch,
   serializeToolResult,
+  unknownToolExecution,
 } from "./agent-turn-utils.js";
 
 /**
@@ -42,6 +45,7 @@ export class ToolExecutionPolicy {
       readonly traceId: string;
       readonly round: number;
       readonly signal?: AbortSignal;
+      readonly toolsByName: ReadonlyMap<string, unknown>;
       readonly onToolCallStart?: (call: AgentToolCall) => void;
       readonly onToolCallEnd?: (execution: AgentToolExecution) => void;
     },
@@ -68,11 +72,21 @@ export class ToolExecutionPolicy {
     }
   }
 
-  private async executeTool(call: AgentToolCall, traceId: string, round: number): Promise<AgentToolExecution> {
+  private async executeTool(
+    call: AgentToolCall,
+    toolsByName: ReadonlyMap<string, unknown>,
+    traceId: string,
+    round: number,
+    signal?: AbortSignal,
+  ): Promise<AgentToolExecution> {
+    if (!isToolAllowed(call, toolsByName) && !isLazyResolvableMcpToolName(call.name)) {
+      this.logger?.warn("Agent MCP tool soft-rejected (unknown) traceId=%s tool=%s round=%d", traceId, call.name || "(missing)", round);
+      return unknownToolExecution(call, toolsByName);
+    }
     this.logger?.info("Agent MCP tool started traceId=%s tool=%s round=%d", traceId, call.name, round);
     const requestId = randomUUID();
     try {
-      const result = await this.toolGateway.execute(call.name, call.args, requestId, traceId, call.id);
+      const result = await this.toolGateway.execute(call.name, call.args, requestId, traceId, call.id, signal ? { signal } : undefined);
       this.logger?.info("Agent MCP tool completed traceId=%s tool=%s round=%d", traceId, call.name, round);
       return { id: call.id, name: call.name, ok: true, args: call.args, result };
     } catch (error) {
@@ -85,11 +99,12 @@ export class ToolExecutionPolicy {
   private async runOneTool(
     call: AgentToolCall,
     ctx: { readonly traceId: string; readonly round: number; readonly signal?: AbortSignal;
+      readonly toolsByName: ReadonlyMap<string, unknown>;
       readonly onToolCallStart?: (call: AgentToolCall) => void; readonly onToolCallEnd?: (execution: AgentToolExecution) => void; },
   ): Promise<AgentToolExecution> {
     assertTurnActive(ctx.signal, ctx.traceId);
     ctx.onToolCallStart?.(call);
-    const execution = await this.executeTool(call, ctx.traceId, ctx.round);
+    const execution = await this.executeTool(call, ctx.toolsByName, ctx.traceId, ctx.round, ctx.signal);
     ctx.onToolCallEnd?.(execution);
     return execution;
   }
@@ -97,6 +112,7 @@ export class ToolExecutionPolicy {
   private async runParallelSegment(
     calls: readonly AgentToolCall[],
     ctx: { readonly traceId: string; readonly round: number; readonly signal?: AbortSignal;
+      readonly toolsByName: ReadonlyMap<string, unknown>;
       readonly onToolCallStart?: (call: AgentToolCall) => void; readonly onToolCallEnd?: (execution: AgentToolExecution) => void; },
   ): Promise<(AgentToolExecution | undefined)[]> {
     for (const call of calls) {
@@ -108,7 +124,7 @@ export class ToolExecutionPolicy {
       } catch {
         return { index, execution: cancelledExecution(call) };
       }
-      const execution = await this.executeTool(call, ctx.traceId, ctx.round);
+      const execution = await this.executeTool(call, ctx.toolsByName, ctx.traceId, ctx.round, ctx.signal);
       ctx.onToolCallEnd?.(execution);
       return { index, execution };
     });

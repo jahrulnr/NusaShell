@@ -28,6 +28,12 @@ export type {
   SubagentRunResult,
   SubagentPort,
   AcpProviderResolverPort,
+  ActiveTurnOpenTool,
+  ActiveTurnStreaming,
+  ActiveTurnSnapshot,
+  ActiveTurnStartInput,
+  ActiveTurnProjectionPort,
+  ConversationTodoPort,
 } from "./ports/index.js";
 export {
   AgentTurnRunner,
@@ -38,6 +44,11 @@ export {
   RoutedAgentProvider,
   AgentTurnCoordinator,
   StreamSeqRegistry,
+  InMemoryActiveTurnProjection,
+  resolveModelContextDefaults,
+  DEFAULT_UNKNOWN_CONTEXT_WINDOW,
+  DEFAULT_UNKNOWN_MAX_OUTPUT,
+  MIN_AGENTIC_CONTEXT_WINDOW,
   type AgentTurnRunnerDeps,
   type RunAgentTurnInput,
   type AgentTurnResult,
@@ -58,6 +69,27 @@ export {
   detectRuntimeOs,
   type RuntimeOsProbe,
   formatMemoryPrompt,
+  formatTodoPrompt,
+  type AgentTodoItem,
+  type AgentTodoStatus,
+  type AgentTodoList,
+  type AgentTodoSummary,
+  summarizeTodos,
+  InMemoryConversationTodoPort,
+  AsyncToolRuntime,
+  type AsyncToolHandle,
+  type AsyncToolStatus,
+  type AsyncToolKind,
+  type AsyncToolEndReason,
+  type AsyncToolSpawnInput,
+  type AsyncToolPeekResult,
+  type AsyncToolWaitResult,
+  type AsyncToolRuntimeOptions,
+  execAsyncRun,
+  execAsyncWait,
+  execAsyncPeek,
+  execAsyncKill,
+  type AsyncRunContext,
   AskQuestionService,
   type AskAnswerVia,
   type AskQuestionAnswer,
@@ -73,8 +105,12 @@ export type {
   CancelAgentTurnCommand,
   CancelAgentTurnResult,
   AnswerAskQuestionCommand,
+  ManageTodosCommand,
+  KillToolJobCommand,
 } from "./commands/index.js";
-export { RunAgentTurnHandler, CancelAgentTurnHandler, AnswerAskQuestionHandler, type AgentRuntimeSettings } from "./commands/index.js";
+export { RunAgentTurnHandler, CancelAgentTurnHandler, AnswerAskQuestionHandler, ManageTodosHandler, KillToolJobHandler, type AgentRuntimeSettings, type ManageTodosResult } from "./commands/index.js";
+export type { GetActiveTurnQuery, GetActiveTurnResult, ToolJobListQuery } from "./queries/index.js";
+export { GetActiveTurnHandler, ToolJobListHandler } from "./queries/index.js";
 export type { SubagentRunStartedEvent } from "./events/subagent-run-started.event.js";
 export { createSubagentRunStartedEvent } from "./events/subagent-run-started.event.js";
 export type { SubagentRunEndedEvent } from "./events/subagent-run-ended.event.js";

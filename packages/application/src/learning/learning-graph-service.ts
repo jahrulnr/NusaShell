@@ -95,6 +95,9 @@ export class LearningGraphService {
       const state = usage?.state ?? "active";
       const pinned = usage?.pinned ?? false;
 
+      // Builtins are shell capabilities, not user learning. Usage activity
+      // must not pull them into this review surface (for example skill-creator).
+      if (origin === "builtin") continue;
       if (state === "archived") continue;
 
       const isAgent = origin === "agent";
@@ -340,6 +343,7 @@ export class LearningGraphService {
 
   private async deleteSkillNode(skillId: string): Promise<MutationResult> {
     try {
+      const origin = await this.deps.provenance.get(skillId);
       const usage = await this.deps.usage.getRecord(skillId);
       if (usage.pinned) {
         return {
@@ -347,6 +351,16 @@ export class LearningGraphService {
           error: "Cannot archive a pinned skill — unpin it first",
           code: "pinned",
         };
+      }
+      // Builtin skills are seeded from resources on every startup. Archiving
+      // alone is not enough — the seeder would resurrect the skill on the next
+      // launch. Mark it as intentionally deleted so the seeder skips it.
+      if (origin === "builtin") {
+        if (this.deps.provenance.markBuiltinDeleted) {
+          await this.deps.provenance.markBuiltinDeleted(skillId);
+        }
+        await this.deps.registry.archive(skillId);
+        return { ok: true };
       }
       await this.deps.registry.archive(skillId);
       return { ok: true };

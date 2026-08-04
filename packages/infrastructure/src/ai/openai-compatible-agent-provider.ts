@@ -226,7 +226,7 @@ export class OpenAiCompatibleAgentProvider implements AgentProvider {
         try {
           return await parseOpenAiSse(
             response,
-            api === "responses" ? "responses" : "chat",
+            this.strategy.sseMode,
             request.onTextDelta,
             request.onReasoningDelta,
             this.maxResponseBytes(),

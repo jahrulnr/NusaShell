@@ -1,5 +1,6 @@
 import { clipboard, contextBridge, ipcRenderer } from "electron";
 import type { PublicAiRegistry, ReasoningEffort, SaveAiProviderInput } from "../shared/ai-contract.js";
+import { checkEventSkew } from "../shared/event-skew-checker.js";
 import type {
   AgentCanvasArtifact,
   AgentConversation,
@@ -11,6 +12,7 @@ import type {
   AgentSubagentStreamStep,
 } from "../shared/agent-conversation-contract.js";
 import type {
+  AcpModelOption,
   AcpProviderPublic,
   AcpProviderSaveInput,
   AcpRoutingPublic,
@@ -31,10 +33,9 @@ import type {
 } from "../shared/mail-contract.js";
 import type { PluginWindowOptionsInput } from "../main/plugin-window-options.js";
 import type { NativeMcpInput } from "../main/ipc/native-mcp.js";
-import { resolveBuildLabel, resolveWsPort } from "../main/runtime-mode.js";
+import { resolveBuildLabel } from "../main/runtime-mode.js";
 
 export interface ShellApi {
-  readonly wsUrl: string;
   readonly build: "dev" | "production";
   callTool(pluginId: string, toolName: string, args: Record<string, unknown>): Promise<unknown>;
   listTools(pluginId: string): Promise<unknown>;
@@ -98,6 +99,9 @@ export interface ShellApi {
     probe(providerId: string, options?: { interactive?: boolean }): Promise<AcpProviderPublic | null>;
     getRouting(): Promise<AcpRoutingPublic>;
     saveRouting(settings: AcpRoutingSettings): Promise<AcpRoutingPublic>;
+    importModels(providerId: string): Promise<{ models: AcpModelOption[]; error?: string }>;
+    setDefaultModel(providerId: string, modelId: string): Promise<readonly AcpProviderPublic[]>;
+    setDefaultMode(providerId: string, mode: string): Promise<readonly AcpProviderPublic[]>;
   };
   readonly skills: {
     list(): Promise<readonly SkillSummary[]>;
@@ -135,6 +139,16 @@ export interface ShellApi {
     save(input: SaveMailAccountInput): Promise<PublicMailSettings>;
     delete(accountId: string): Promise<PublicMailSettings>;
   };
+  /**
+   * Generic host RPC bridge (Phase 1 of desktop-inprocess-ipc-plan).
+   * Replaces the loopback WebSocket for renderer → backend communication.
+   * Method strings and payloads match the former WS contract.
+   */
+  readonly backend: {
+    request(method: string, payload?: unknown, opts?: { timeoutMs?: number }): Promise<unknown>;
+    onEvent(eventType: string, handler: (payload: unknown, sequence?: number) => void): () => void;
+    whenReady(): Promise<void>;
+  };
 }
 
 export interface AppBehaviorPublic {
@@ -158,13 +172,10 @@ export interface ShellLogEntry {
 }
 
 const isDev = process.env.NUSASHELL_IS_DEV === "true";
-const wsUrl = `ws://127.0.0.1:${resolveWsPort({
-  isDev,
-  envPort: process.env.NUSASHELL_PORT,
-})}`;
+
+let lastSkewWarnAt = 0;
 
 const api: ShellApi = {
-  wsUrl,
   build: resolveBuildLabel(isDev),
   callTool(pluginId, toolName, args) {
     return ipcRenderer.invoke("tool:call", pluginId, toolName, args);
@@ -268,6 +279,9 @@ const api: ShellApi = {
     probe: (providerId, options) => ipcRenderer.invoke("acp-providers:probe", providerId, options),
     getRouting: () => ipcRenderer.invoke("acp-providers:get-routing"),
     saveRouting: (settings) => ipcRenderer.invoke("acp-providers:save-routing", settings),
+    importModels: (providerId) => ipcRenderer.invoke("acp-providers:import-models", providerId),
+    setDefaultModel: (providerId, modelId) => ipcRenderer.invoke("acp-providers:set-default-model", providerId, modelId),
+    setDefaultMode: (providerId, mode) => ipcRenderer.invoke("acp-providers:set-default-mode", providerId, mode),
   },
   skills: {
     list: () => ipcRenderer.invoke("skills:list"),
@@ -304,6 +318,28 @@ const api: ShellApi = {
     list: () => ipcRenderer.invoke("mail-accounts:list"),
     save: (input) => ipcRenderer.invoke("mail-accounts:save", input),
     delete: (accountId) => ipcRenderer.invoke("mail-accounts:delete", accountId),
+  },
+  backend: {
+    request(method, payload, opts) {
+      return ipcRenderer.invoke("shell:request", method, payload, opts);
+    },
+    onEvent(eventType, handler) {
+      const listener = (_event: Electron.IpcRendererEvent, frame: { event: string; payload: unknown; sequence: number; emittedAt?: number }) => {
+        const skew = checkEventSkew(frame, {
+          now: Date.now(),
+          warn: (msg) => console.warn(msg),
+          lastWarnAt: lastSkewWarnAt,
+        });
+        lastSkewWarnAt = skew.lastWarnAt;
+        if (frame.event === eventType) handler(frame.payload, frame.sequence);
+      };
+      ipcRenderer.on("shell:event", listener);
+      return () => ipcRenderer.removeListener("shell:event", listener);
+    },
+    whenReady() {
+      // Main is in-process; ready when preload is loaded. Resolve immediately.
+      return Promise.resolve();
+    },
   },
 };
 

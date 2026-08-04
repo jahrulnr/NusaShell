@@ -12,8 +12,10 @@ import fs from "node:fs/promises";
  *
  * The root must exist and be a directory.
  *
- * All file operations are sandboxed to this root. Paths that escape
- * the root (via absolute paths or ../ traversal) are rejected.
+ * Path resolution is predictable, not jailing: `/` and absolute paths resolve
+ * to OS-absolute paths; relative paths resolve against the root; `../`
+ * traversal is allowed (escape is permitted). Security is the user/AI
+ * provider's responsibility — see docs/architecture/security-boundary.md.
  *
  * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} environment
  */
@@ -46,22 +48,15 @@ export async function validateRoot(root) {
 /**
  * Resolves a path relative to the root directory.
  *
- * Absolute paths are accepted as-is — the agent is a trusted actor operating
- * on behalf of the user and may access any path the user can. The root is a
- * convenience for relative path resolution, not a jail. Relative paths that
- * escape the root via `../` traversal are still rejected as a safety net.
+ * `/` and absolute paths resolve to OS-absolute paths. Relative paths resolve
+ * against the root; `../` traversal is allowed (escape is permitted). The root
+ * is a convenience for relative path resolution, not a jail. Security is the
+ * user/AI provider's responsibility — see docs/architecture/security-boundary.md.
  *
  * @param {string} root
  * @param {string} input
  */
 export function resolvePath(root, input) {
-  if (!input || input === "/" || input === "") return root;
-  if (path.isAbsolute(input)) return path.resolve(input);
-  const resolved = path.resolve(root, input);
-  const normalizedRoot = path.resolve(root);
-  const relative = path.relative(normalizedRoot, resolved);
-  if (relative.startsWith("..")) {
-    throw new Error(`Path escapes files root: ${input}`);
-  }
-  return resolved;
+  if (!input || input === "") return root;
+  return path.resolve(root, input);
 }

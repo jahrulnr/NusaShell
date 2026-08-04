@@ -1,14 +1,18 @@
-import { delimiter as pathDelimiter } from "node:path";
+import { delimiter as pathDelimiter, join } from "node:path";
+import { homedir } from "node:os";
 import { describe, expect, it } from "vitest";
 import {
   commandDirForPath,
   enrichSpawnEnv,
+  expandTilde,
+  expandTildeInPath,
   formatSpawnEnoentHint,
   mergePathSegments,
 } from "../src/process/spawn-env.js";
 import { resolveStdioLaunch } from "../src/mcp/stdio-mcp-client.adapter.js";
 
 const d = pathDelimiter;
+const home = homedir();
 
 describe("mergePathSegments", () => {
   it("dedupes while preserving first-seen order", () => {
@@ -33,6 +37,49 @@ describe("commandDirForPath", () => {
   });
 });
 
+describe("expandTilde", () => {
+  it("expands ~/ to home directory", () => {
+    expect(expandTilde("~/.local/bin/messager-mcp")).toBe(join(home, ".local/bin/messager-mcp"));
+    expect(expandTilde("~/bin")).toBe(join(home, "bin"));
+  });
+
+  it("expands bare ~ to home directory", () => {
+    expect(expandTilde("~")).toBe(home);
+  });
+
+  it("leaves absolute paths unchanged", () => {
+    expect(expandTilde("/usr/bin/node")).toBe("/usr/bin/node");
+  });
+
+  it("leaves bare commands unchanged", () => {
+    expect(expandTilde("node")).toBe("node");
+    expect(expandTilde("npx")).toBe("npx");
+  });
+
+  it("leaves ~user/... as-is (Node can't resolve other users)", () => {
+    expect(expandTilde("~root/bin")).toBe("~root/bin");
+  });
+
+  it("returns undefined for undefined input", () => {
+    expect(expandTilde(undefined)).toBeUndefined();
+  });
+});
+
+describe("expandTildeInPath", () => {
+  it("expands ~ in every PATH segment", () => {
+    const result = expandTildeInPath(`~/.local/bin${d}/usr/bin${d}~/bin`);
+    expect(result).toBe(`${join(home, ".local/bin")}${d}/usr/bin${d}${join(home, "bin")}`);
+  });
+
+  it("leaves PATH without tilde unchanged", () => {
+    expect(expandTildeInPath(`/usr/bin${d}/bin`)).toBe(`/usr/bin${d}/bin`);
+  });
+
+  it("returns undefined for undefined input", () => {
+    expect(expandTildeInPath(undefined)).toBeUndefined();
+  });
+});
+
 describe("enrichSpawnEnv", () => {
   it("prepends absolute command dirname to PATH", () => {
     const env = enrichSpawnEnv("/opt/nvm/bin/npx", {
@@ -46,7 +93,48 @@ describe("enrichSpawnEnv", () => {
 
   it("leaves bare commands without forcing a dirname prepend", () => {
     const env = enrichSpawnEnv("npx", { PATH: "/usr/bin", KEEP: "1" });
-    expect(env).toEqual({ PATH: "/usr/bin", KEEP: "1" });
+    expect(env.KEEP).toBe("1");
+    expect(env.PATH).toContain("/usr/bin");
+  });
+
+  it("expands ~ in PATH entries from manifest env", () => {
+    const env = enrichSpawnEnv("messager-mcp", {
+      PATH: `~/.local/bin${d}/usr/bin`,
+    });
+    expect(env.PATH).toContain(join(home, ".local/bin"));
+    expect(env.PATH).not.toContain("~/.local/bin");
+  });
+});
+
+describe("resolveStdioLaunch tilde expansion", () => {
+  it("expands ~ in command path (the bug: ~/.local/bin/messager-mcp)", () => {
+    const launch = resolveStdioLaunch(
+      "~/.local/bin/messager-mcp",
+      { PATH: "/usr/bin" },
+      { execPath: "/opt/NusaShell/NusaShell" },
+    );
+    expect(launch.command).toBe(join(home, ".local/bin/messager-mcp"));
+    expect(launch.command).not.toContain("~");
+  });
+
+  it("expands ~ in command and also enriches PATH with the command dir", () => {
+    const launch = resolveStdioLaunch(
+      "~/.local/bin/messager-mcp",
+      { PATH: "/usr/bin" },
+      { execPath: "/opt/NusaShell/NusaShell" },
+    );
+    // After tilde expansion, command is absolute → dirname prepended to PATH
+    expect(launch.env.PATH).toContain(join(home, ".local/bin"));
+  });
+
+  it("leaves bare commands unchanged (no tilde to expand)", () => {
+    const launch = resolveStdioLaunch(
+      "node",
+      { PATH: "/usr/bin" },
+      { execPath: "/opt/NusaShell/NusaShell", electronVersion: "33.0.0" },
+    );
+    expect(launch.command).toBe("/opt/NusaShell/NusaShell");
+    expect(launch.env.ELECTRON_RUN_AS_NODE).toBe("1");
   });
 });
 

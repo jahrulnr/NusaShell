@@ -15,7 +15,14 @@ import {
   AskQuestionService,
   AgentTurnCoordinator,
   StreamSeqRegistry,
+  InMemoryActiveTurnProjection,
+  InMemoryConversationTodoPort,
+  AsyncToolRuntime,
   createAgentAskRequestEvent,
+  createAgentTodoUpdatedEvent,
+  createAgentToolJobStartedEvent,
+  createAgentToolJobUpdateEvent,
+  createAgentToolJobEndedEvent,
   type AgentRuntimeSettings,
   type AgentProvider,
   type EventDispatcher,
@@ -37,6 +44,9 @@ export interface AgentRuntimeParts {
   readonly aiRuntime: AgentRuntimeSettings & { stream: boolean; vision: "auto" | "on" | "off"; userPrompt: string };
   readonly withStreamSeq: <T extends { readonly aggregateId: string }>(event: T) => T & { streamSeq: number };
   readonly runtimeOsProbe: NodeRuntimeOsProbe;
+  readonly activeTurns: InMemoryActiveTurnProjection;
+  readonly conversationTodos: InMemoryConversationTodoPort;
+  readonly asyncToolRuntime: AsyncToolRuntime;
 }
 
 export function createAgentRuntime(
@@ -71,6 +81,45 @@ export function createAgentRuntime(
     skills.skillUsage,
     askQuestionService,
   );
+
+  const conversationTodos = new InMemoryConversationTodoPort();
+  agentToolGateway.bindTodos(conversationTodos, (conversationId, items) => {
+    void eventDispatcher.publish(createAgentTodoUpdatedEvent(conversationId, items));
+  });
+
+  const asyncToolRuntime = new AsyncToolRuntime({
+    onStarted: (handle) => {
+      void eventDispatcher.publish(withStreamSeq(createAgentToolJobStartedEvent(
+        handle.handleId,
+        handle.conversationId,
+        handle.kind,
+        handle.toolName,
+        JSON.stringify(handle.args).slice(0, 500),
+        { ...(handle.pluginId ? { pluginId: handle.pluginId } : {}), ...(handle.traceId ? { traceId: handle.traceId } : {}) },
+      )));
+    },
+    onProgress: (handle, tail, bytes) => {
+      void eventDispatcher.publish(withStreamSeq(createAgentToolJobUpdateEvent(
+        handle.handleId,
+        handle.conversationId,
+        handle.status,
+        tail.slice(-2000),
+        bytes,
+        0,
+      )));
+    },
+    onEnded: (handle) => {
+      const ok = handle.status === "ok";
+      void eventDispatcher.publish(withStreamSeq(createAgentToolJobEndedEvent(
+        handle.handleId,
+        handle.conversationId,
+        ok,
+        handle.endReason ?? (ok ? "completed" : "failed"),
+        { ...(handle.error ? { error: handle.error } : {}), ...(handle.result !== undefined ? { output: handle.result } : {}) },
+      )));
+    },
+  });
+  agentToolGateway.bindAsyncToolRuntime(asyncToolRuntime);
 
   const promptLoader = new FilesystemPromptLoader(
     options.promptsRoot ?? fileURLToPath(new URL("../../../resources/agent/prompts", import.meta.url)),
@@ -149,5 +198,8 @@ export function createAgentRuntime(
     agentToolGateway, agentProviderRegistry, agentTurnCoordinator, streamSeqRegistry,
     promptLoader, askQuestionService, reviewGateway, backgroundReviewScheduler,
     aiRuntime, withStreamSeq, runtimeOsProbe: new NodeRuntimeOsProbe(),
+    activeTurns: new InMemoryActiveTurnProjection(),
+    conversationTodos,
+    asyncToolRuntime,
   };
 }

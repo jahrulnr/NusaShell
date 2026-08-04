@@ -60,14 +60,16 @@ describe("FilesystemSkillRegistry archive/restore", () => {
     await expect(registry.restore("nope")).rejects.toThrow("Archived skill not found");
   });
 
-  it("archive throws if already archived", async () => {
+  it("cleans an active duplicate when the skill is already archived", async () => {
     const root = await mkdtemp(join(tmpdir(), "nusashell-archive-"));
     const registry = new FilesystemSkillRegistry(root);
     await createSkill(root, "test-skill");
     await registry.archive("test-skill");
 
     await createSkill(root, "test-skill");
-    await expect(registry.archive("test-skill")).rejects.toThrow("Skill already archived");
+    await expect(registry.archive("test-skill")).resolves.toBeUndefined();
+    expect(await registry.list()).toHaveLength(0);
+    expect(await registry.listArchived()).toHaveLength(1);
   });
 
   it("restore throws if skill already exists in active root", async () => {

@@ -868,4 +868,124 @@ describe("OpenAiCompatibleAgentProvider", () => {
     const body = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body));
     expect(body.tool_choice).toBe("auto");
   });
+
+  it("streams Messages API (Anthropic) text + thinking deltas live", async () => {
+    const textDeltas: string[] = [];
+    const reasoningDeltas: string[] = [];
+    const sse = [
+      'event: message_start',
+      'data: {"type":"message_start","message":{"model":"claude-sonnet-4","usage":{"input_tokens":10}}}',
+      "",
+      'event: content_block_start',
+      'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"Let me"}}',
+      "",
+      'event: content_block_delta',
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me"}}',
+      "",
+      'event: content_block_delta',
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" think"}}',
+      "",
+      'event: content_block_stop',
+      'data: {"type":"content_block_stop","index":0}',
+      "",
+      'event: content_block_start',
+      'data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}',
+      "",
+      'event: content_block_delta',
+      'data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hel"}}',
+      "",
+      'event: content_block_delta',
+      'data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"lo"}}',
+      "",
+      'event: content_block_stop',
+      'data: {"type":"content_block_stop","index":1}',
+      "",
+      'event: message_delta',
+      'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}',
+      "",
+      'event: message_stop',
+      'data: {"type":"message_stop"}',
+      "",
+    ].join("\n");
+    const provider = new OpenAiCompatibleAgentProvider({
+      id: "claude",
+      api: "messages",
+      baseUrl: "https://api.anthropic.com/v1",
+      apiKey: "key",
+      fetchFn: vi.fn<typeof fetch>().mockResolvedValue(new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })),
+      stream: true,
+    });
+
+    const result = await provider.complete({
+      traceId: "trace-messages-stream",
+      round: 1,
+      messages: [{ role: "user", content: "Hello" }],
+      tools: [],
+      model: "claude-sonnet-4",
+      onTextDelta: (delta) => { textDeltas.push(delta); },
+      onReasoningDelta: (delta) => { reasoningDeltas.push(delta); },
+    });
+
+    // Live deltas fire during streaming (the bug: previously no streaming
+    // for Messages API, so deltas never fired and thinking only appeared
+    // after the turn completed).
+    expect(reasoningDeltas).toEqual(["Let me", " think"]);
+    expect(textDeltas).toEqual(["Hel", "lo"]);
+    expect(result).toMatchObject({
+      text: "Hello",
+      reasoning: "Let me think",
+      model: "claude-sonnet-4",
+      api: "messages",
+    });
+  });
+
+  it("streams Messages API tool_use (input_json_delta)", async () => {
+    const sse = [
+      'event: message_start',
+      'data: {"type":"message_start","message":{"model":"m"}}',
+      "",
+      'event: content_block_start',
+      'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call_1","name":"search"}}',
+      "",
+      'event: content_block_delta',
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"q\\":"}}',
+      "",
+      'event: content_block_delta',
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\\"notes\\"}"}}',
+      "",
+      'event: content_block_stop',
+      'data: {"type":"content_block_stop","index":0}',
+      "",
+      'event: message_delta',
+      'data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}',
+      "",
+      'event: message_stop',
+      'data: {"type":"message_stop"}',
+      "",
+    ].join("\n");
+    const provider = new OpenAiCompatibleAgentProvider({
+      id: "p",
+      api: "messages",
+      baseUrl: "https://api.example/v1",
+      apiKey: "k",
+      fetchFn: vi.fn<typeof fetch>().mockResolvedValue(new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })),
+      stream: true,
+    });
+
+    const result = await provider.complete({
+      traceId: "trace-messages-tool-stream",
+      round: 1,
+      messages: [{ role: "user", content: "Search" }],
+      tools: [{ name: "search", inputSchema: { type: "object" } }],
+      model: "m",
+    });
+
+    expect(result.toolCalls).toEqual([{ id: "call_1", name: "search", args: { q: "notes" } }]);
+  });
 });

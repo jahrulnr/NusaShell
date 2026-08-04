@@ -111,6 +111,30 @@ export function launcherGridNeedsRebuild(previousPlugins, nextPlugins) {
   return JSON.stringify(snapshot(previousPlugins)) !== JSON.stringify(snapshot(nextPlugins));
 }
 
+export function launcherPluginTableNeedsRebuild(previousPlugins, nextPlugins) {
+  const snapshot = (plugins) => plugins.map((plugin) => ({
+    pluginId: plugin.pluginId ?? "",
+    name: plugin.name ?? "",
+    version: plugin.version ?? "",
+    source: plugin.source ?? "",
+    icon: plugin.icon || "🧩",
+    installPath: plugin.installPath ?? "",
+  }));
+
+  return JSON.stringify(snapshot(previousPlugins)) !== JSON.stringify(snapshot(nextPlugins));
+}
+
+export function launcherAutostartListNeedsRebuild(previousPlugins, nextPlugins) {
+  const snapshot = (plugins) => plugins.map((plugin) => ({
+    pluginId: plugin.pluginId ?? "",
+    name: plugin.name ?? "",
+    icon: plugin.icon || "🧩",
+    installPath: plugin.installPath ?? "",
+  }));
+
+  return JSON.stringify(snapshot(previousPlugins)) !== JSON.stringify(snapshot(nextPlugins));
+}
+
 export function positionContextMenu(point, menuSize, viewportSize) {
   const margin = 8;
   return {

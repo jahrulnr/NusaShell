@@ -6,6 +6,7 @@ import type {
   SubagentResolveResult,
   SubagentRunRequest,
   SubagentRunResult,
+  SubagentRoutingInfo,
   AcpProviderResolverPort,
   EventDispatcher,
   EventHandler,
@@ -27,11 +28,24 @@ export class SubagentPortImpl implements SubagentPort {
   ) {}
 
   async resolve(request: SubagentResolveRequest): Promise<SubagentResolveResult> {
-    return this.resolver.resolve(request.providerIdOverride);
+    return this.resolver.resolve();
+  }
+
+  async getRoutingInfo(): Promise<SubagentRoutingInfo | null> {
+    try {
+      const resolved = await this.resolver.resolve();
+      if (resolved.tryOrder.length === 0) return null;
+      return {
+        availableSubagents: resolved.tryOrder.join(", "),
+        defaultSubagent: resolved.tryOrder[0],
+      };
+    } catch {
+      return null;
+    }
   }
 
   async run(request: SubagentRunRequest): Promise<SubagentRunResult> {
-    const resolved = await this.resolver.resolve(request.providerId);
+    const resolved = await this.resolver.resolve();
     const candidate = resolved.candidates.get(request.providerId);
     if (!candidate) {
       return { ok: false, providerId: request.providerId, summary: "", error: `ACP provider "${request.providerId}" is not connected` };
@@ -79,22 +93,14 @@ export class SubagentPortImpl implements SubagentPort {
     try {
       fs.mkdirSync(request.workspace, { recursive: true });
 
-      // Ensure the ACP session exists before applying preferred config.
+      // Ensure the ACP session exists. preferredConfig is applied inside
+      // ensureSession/startTurn — no duplicate apply here. Config failures
+      // are collected and surfaced to the caller via configWarnings.
       await this.sessionService.ensureSession(
         request.conversationId,
         request.workspace,
         candidate.descriptor,
       );
-
-      if (request.preferredConfig) {
-        for (const [configId, value] of Object.entries(request.preferredConfig)) {
-          try {
-            await this.sessionService.setConfigOption(request.conversationId, configId, value as string | boolean);
-          } catch (error) {
-            this.logger?.warn("Subagent setConfigOption failed provider=%s configId=%s: %s", request.providerId, configId, error instanceof Error ? error.message : String(error));
-          }
-        }
-      }
 
       await this.sessionService.startTurn(
         request.runId,
@@ -104,12 +110,17 @@ export class SubagentPortImpl implements SubagentPort {
         request.prompt,
       );
 
+      // Collect any non-fatal config warnings from the session.
+      const sessionInfo = await this.sessionService.getSessionInfo(request.conversationId);
+      const configWarnings = sessionInfo?.configWarnings ?? [];
+
       const summary = textChunks.join("").trim() || "Subagent turn completed.";
       this.eventDispatcher.publish(createSubagentRunEndedEvent(request.runId, request.conversationId, request.providerId, true, { summary }));
       return {
         ok: true,
         providerId: request.providerId,
         summary,
+        ...(configWarnings.length > 0 ? { configWarnings } : {}),
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

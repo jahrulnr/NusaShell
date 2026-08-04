@@ -46,16 +46,18 @@ export async function execSubagent(
   }
   const prompt = requireString(args.prompt, "prompt").trim();
   if (!prompt) throw new ApplicationError("AGENT_INVALID_INPUT", "prompt must not be empty");
-  const providerIdOverride = optionalString(args.provider_id) || undefined;
   const title = optionalString(args.title) || undefined;
   const effectiveWorkspace = resolveAgentWorkspace(optionalString(args.workspace) || undefined, workspace);
 
-  const resolved = await port.resolve({ providerIdOverride, workspace: effectiveWorkspace });
+  // Do not pass provider_id from the LLM to the resolver. The user's ACP
+  // routing default (Settings → ACP Agents) is authoritative; letting the
+  // LLM override it causes the subagent to use whichever provider the LLM
+  // picks (often Cursor, since it's the first example in the tool description)
+  // instead of the user's configured default (e.g. Gemini).
+  const resolved = await port.resolve({ workspace: effectiveWorkspace });
   if (resolved.tryOrder.length === 0) {
-    const message = providerIdOverride
-      ? `ACP provider "${providerIdOverride}" is not connected. Connect it in Settings → ACP Agents.`
-      : "No ACP providers are connected. Connect one in Settings → ACP Agents.";
-    logger?.warn("Subagent rejected: no_acp_provider override=%s", providerIdOverride ?? "(none)");
+    const message = "No ACP providers are connected. Connect one in Settings → ACP Agents.";
+    logger?.warn("Subagent rejected: no_acp_provider");
     return {
       ok: false,
       code: "no_acp_provider",
@@ -67,6 +69,7 @@ export async function execSubagent(
   const runId = randomUUID();
   const conversationId = `subagent:${runId}`;
   const attempted: string[] = [];
+  const failures: Array<{ providerId: string; error: string }> = [];
   // Host-prefix the absolute cwd so the ACP agent cannot invent a different path.
   const promptBlocks = [{
     type: "text" as const,
@@ -98,8 +101,11 @@ export async function execSubagent(
           ...(attempted.length > 1 ? { attempted: attempted.slice(0, -1) } : {}),
           ...(title ? { title } : {}),
           summary: result.summary,
+          ...(result.configWarnings?.length ? { configWarnings: result.configWarnings } : {}),
         };
       }
+      const errorMsg = result.error ?? "Subagent turn failed";
+      failures.push({ providerId, error: errorMsg });
       if (!isRetryable(result.error)) {
         return {
           ok: false,
@@ -108,10 +114,13 @@ export async function execSubagent(
           workspace: effectiveWorkspace,
           ...(attempted.length > 1 ? { attempted: attempted.slice(0, -1) } : {}),
           ...(title ? { title } : {}),
-          error: result.error ?? "Subagent turn failed",
+          error: errorMsg,
+          ...(failures.length > 1 ? { failures: failures.slice(0, -1) } : {}),
         };
       }
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      failures.push({ providerId, error: errorMsg });
       if (!isRetryable(error)) {
         throw error;
       }
@@ -125,6 +134,7 @@ export async function execSubagent(
     ...(attempted.length > 0 ? { providerId: attempted[attempted.length - 1] } : {}),
     attempted,
     ...(title ? { title } : {}),
-    error: `All ACP providers failed: ${attempted.join(", ")}`,
+    error: `All ACP providers failed: ${failures.map((f) => `${f.providerId} (${f.error})`).join(", ")}`,
+    failures,
   };
 }

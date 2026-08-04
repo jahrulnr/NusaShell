@@ -12,9 +12,11 @@ The workspace above is the source of truth for agent tool I/O. When installed pl
 
 ## Tool availability
 
-The tool list above is authoritative for this turn. Meta-tools (`mcp_list`, `mcp_enable`, `mcp_disable`, `mcp_register`, `mcp_unregister`, `tool_list`, `tool_search`, `tool_schema`, `mcp_context`, `docs_search`, `docs_list`, `docs_read`, `skill_list`, `skill_search`, `skill_read`, `memory`, `skill_manage`, `job`, `pipeline`, and `ask_question` when this turn is interactive) are always present. Any other tool names listed here were granted for this turn only and will not be available in the next turn — including tools documented by conditionally injected guidance prompts, which only exist while their backing capability is connected.
+The tool list above is authoritative for this turn. Meta-tools (`mcp_list`, `mcp_enable`, `mcp_disable`, `mcp_register`, `mcp_unregister`, `tool_list`, `tool_search`, `tool_schema`, `mcp_context`, `docs_search`, `docs_list`, `docs_read`, `skill_list`, `skill_search`, `skill_read`, `memory`, `skill_manage`, `todo`, `job`, `pipeline`, and `ask_question` when this turn is interactive) are always present. Any other tool names listed here were advertised for this turn only (via `tool_schema` / `tool_schemas`, or after a successful lazy resolve) — including tools documented by conditionally injected guidance prompts, which only exist while their backing capability is connected.
 
-Use the progressive discovery workflow described in the `mcp-tools.md` prompt to find and call concrete plugin tools.
+Do not re-run discovery or `tool_schema` at the start of every turn by habit. When you already know a concrete `mcp_<plugin>_<tool>` name and that plugin is running, call it directly; fall back to the progressive discovery workflow in `mcp-tools.md` when the name is unknown, the plugin is stopped, or the call fails.
+
+Use the progressive discovery workflow described in the `mcp-tools.md` prompt to find and call concrete plugin tools when you need schema or discovery.
 
 ## Tool results
 

@@ -41,8 +41,8 @@ describe("callFilesTool", () => {
 
   it("files_list returns items array", async () => {
     await fs.writeFile(path.join(tmpDir, "test.txt"), "x");
-    const result = await callFilesTool(service, "files_list", { path: "/" });
-    expect(result.path).toBe("/");
+    const result = await callFilesTool(service, "files_list", { path: "" });
+    expect(result.path).toBe("");
     expect(result.items).toHaveLength(1);
     expect(result.items[0].name).toBe("test.txt");
   });
@@ -55,7 +55,7 @@ describe("callFilesTool", () => {
 
   it("files_tree returns tree structure", async () => {
     await fs.mkdir(path.join(tmpDir, "dir"));
-    const result = await callFilesTool(service, "files_tree", { path: "/" });
+    const result = await callFilesTool(service, "files_tree", { path: "" });
     expect(result.tree).toHaveLength(1);
     expect(result.tree[0].name).toBe("dir");
   });
@@ -103,7 +103,7 @@ describe("callFilesTool", () => {
     await fs.writeFile(path.join(tmpDir, "a.txt"), "x");
     await fs.writeFile(path.join(tmpDir, "b.md"), "x");
     const result = await callFilesTool(service, "files_search", {
-      path: "/",
+      path: "",
       pattern: "*.txt",
     });
     expect(result.results).toHaveLength(1);
@@ -123,7 +123,7 @@ describe("callFilesTool", () => {
 
   it("rejects invalid input (extra fields)", async () => {
     await expect(
-      callFilesTool(service, "files_list", { path: "/", extra: true }),
+      callFilesTool(service, "files_list", { path: "", extra: true }),
     ).rejects.toThrow();
   });
 });

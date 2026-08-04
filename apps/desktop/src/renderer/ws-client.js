@@ -1,93 +1,98 @@
-// Lightweight browser-native WebSocket client for the launcher renderer.
-// Extracted from launcher.js — now backed by NusaClient from @nusashell/plugin-sdk
-// with a BrowserWebSocketConnection adapter for the Electron renderer context.
+// Renderer host client — bridges to Electron main via IPC instead of the
+// loopback WebSocket (Phase 2 of desktop-inprocess-ipc-plan).
 //
-// This is a temporary compatibility shim that preserves the original
-// sendRequest/onEvent/subscribe/connectWs exports so launcher.js and
-// other renderer modules can use NusaClient without rewriting all
-// call sites. Eventually the renderer should use NusaClient directly.
+// Exports match the former ws-client.js surface so call sites
+// (agent-api.js, plugin-api.js, launcher.js, turn-event-helper.js, …)
+// do not need to change. The WebSocket/NusaClient dependency is gone.
 
-import { NusaClient, BrowserWebSocketConnection } from "@nusashell/plugin-sdk";
-
-let client = null;
-const pendingEventHandlers = [];
 let onOpenCallback = null;
 let onLogCallback = null;
-let wsUrl = null;
+let onConnectionChangeCallback = null;
+let ready = false;
 
 /**
- * Initialize the WebSocket client (creates NusaClient, registers callbacks).
- * Event handlers can be registered via onEvent() before connectWs() is called.
- * @param {{ url: string, onOpen?: (isOpen?: boolean) => void, onLog?: (level: string, message: string) => void }} config
+ * Initialize the host client. In the IPC model the backend is in-process in
+ * main, so there is no TCP connect step — "ready" is immediate once preload
+ * has exposed `window.shell.backend`.
+ *
+ * @param {{ url?: string, onOpen?: (isOpen?: boolean) => void, onConnectionChange?: (state: "open" | "closed" | "reconnecting" | "failed") => void, onLog?: (level: string, message: string) => void }} config
  */
 export function initWsClient(config) {
-  wsUrl = config.url;
   onOpenCallback = config.onOpen ?? null;
   onLogCallback = config.onLog ?? null;
-
-  client = new NusaClient({
-    url: wsUrl,
-    reconnect: { enabled: true, maxAttempts: Infinity, initialDelayMs: 1000, maxDelayMs: 1000, backoffFactor: 1, jitterMs: 0 },
-    connectionFactory: (url, callbacks) => new BrowserWebSocketConnection(url, callbacks),
-  });
-  for (const pending of pendingEventHandlers.splice(0)) {
-    pending.unsubscribe = client.on(pending.eventType, pending.handler);
-  }
-
-  client.onReconnect(() => {
-    log("info", `WebSocket reconnected to ${wsUrl}`);
+  onConnectionChangeCallback = config.onConnectionChange ?? null;
+  // IPC is always "connected" once preload is loaded. Fire onOpen on next
+  // microtask so launcher code that registers handlers before connectWs()
+  // still sees them.
+  ready = true;
+  Promise.resolve().then(() => {
+    onConnectionChangeCallback?.("open");
     onOpenCallback?.(true);
-  });
-
-  client.onReconnectFailed(() => {
-    log("error", "WebSocket reconnection failed");
-    onOpenCallback?.(false);
   });
 }
 
+/** No-op in IPC mode — the backend is in-process, no TCP connect needed. */
 export function connectWs() {
-  if (!client) return;
-  client.connect().then(() => {
-    log("info", `WebSocket connected to ${wsUrl}`);
+  if (!ready) {
+    ready = true;
+    onConnectionChangeCallback?.("open");
     onOpenCallback?.(true);
-  }).catch((error) => {
-    log("error", `WebSocket connection failed: ${error?.message ?? error}`);
+  }
+}
+
+/**
+ * Send a request to the backend via IPC.
+ * @param {string} method
+ * @param {unknown} payload
+ * @param {number} timeoutMs
+ * @returns {Promise<unknown>}
+ */
+export function sendRequest(method, payload, timeoutMs = 60000) {
+  if (!window.shell?.backend) {
+    return Promise.reject(new Error("Host backend bridge not available"));
+  }
+  log("debug", `IPC request ${method}`);
+  return window.shell.backend.request(method, payload, { timeoutMs }).then((envelope) => {
+    // The MessageRouter returns a ResponseEnvelope { kind, id, ok, result? | error? }.
+    // Unwrap it so callers get the result value directly, matching the old
+    // NusaClient.request behavior which returned the unwrapped result.
+    if (envelope && typeof envelope === "object" && "ok" in envelope) {
+      if (envelope.ok) return envelope.result;
+      const err = new Error(envelope.error?.message ?? "Request failed");
+      err.code = envelope.error?.code;
+      err.details = envelope.error?.details;
+      throw err;
+    }
+    // Some handlers may return raw values (e.g. legacy IPC paths); pass through.
+    return envelope;
   });
 }
 
-export function sendRequest(method, payload, timeoutMs = 60000) {
-  if (!client || !client.isConnected) {
-    return Promise.reject(new Error("Not connected"));
-  }
-  log("debug", `WebSocket request ${method}`);
-  return client.request(method, payload, timeoutMs);
-}
-
+/**
+ * Subscribe to a backend event type via IPC.
+ * @param {string} eventType
+ * @param {(payload: unknown, sequence?: number) => void} handler
+ * @returns {() => void} unsubscribe
+ */
 export function onEvent(eventType, handler) {
-  if (client) return client.on(eventType, (payload, sequence) => handler(payload, sequence));
-  const pending = {
-    eventType,
-    handler: (payload, sequence) => handler(payload, sequence),
-    unsubscribe: null,
-  };
-  pendingEventHandlers.push(pending);
-  return () => {
-    if (pending.unsubscribe) pending.unsubscribe();
-    else {
-      const index = pendingEventHandlers.indexOf(pending);
-      if (index >= 0) pendingEventHandlers.splice(index, 1);
-    }
-  };
+  if (!window.shell?.backend) {
+    log("warn", `onEvent("${eventType}") called before backend bridge ready — handler dropped`);
+    return () => {};
+  }
+  return window.shell.backend.onEvent(eventType, (payload, sequence) => handler(payload, sequence));
 }
 
-export async function subscribe(eventTypes) {
-  if (!client) return;
-  const types = eventTypes ?? ["*"];
-  await client.subscribe(types);
+/**
+ * No-op in IPC mode — IPC event fan-out is process-local; there is no
+ * subscription registry to sync. Kept for call-site compatibility.
+ */
+export async function subscribe(_eventTypes) {
+  // No-op: IpcEventBridge broadcasts to all windows automatically.
 }
 
+/** Always true in IPC mode once preload is loaded. */
 export function isConnected() {
-  return client?.isConnected ?? false;
+  return ready && Boolean(window.shell?.backend);
 }
 
 function log(level, message) {

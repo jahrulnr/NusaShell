@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   AgentTurnRunner,
+  resolveModelContextDefaults,
+  DEFAULT_UNKNOWN_CONTEXT_WINDOW,
   type AgentProvider,
   type AgentProviderRequest,
   type AgentProviderResult,
@@ -281,44 +283,95 @@ describe("AgentTurnRunner", () => {
     ]);
   });
 
-  it("does not execute a tool that is outside the MCP allowlist", async () => {
+  it("soft-rejects a tool outside the MCP allowlist and continues the turn", async () => {
     const provider = new ScriptedProvider([
       { toolCalls: [{ id: "call-1", name: "filesystem.delete", args: { path: "/tmp/a" } }] },
+      { text: "Done." },
     ]);
     const tools = new FakeToolGateway();
     const runner = new AgentTurnRunner({ provider, toolGateway: tools });
 
-    const error = await runner.run({
+    const result = await runner.run({
       messages: [{ role: "user", content: "Delete a file" }],
       pluginIds: ["notes"],
-    }).catch((e) => e);
+    });
 
-    expect(error).toMatchObject({ code: "AGENT_TOOL_NOT_ALLOWED" });
-    expect(error.details?.partial).toBeUndefined();
+    expect(result.text).toBe("Done.");
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0]).toMatchObject({ id: "call-1", name: "filesystem.delete", ok: false });
+    expect(result.toolCalls[0]?.error).toContain("filesystem.delete");
+    expect(result.toolCalls[0]?.error).toContain("not");
     expect(tools.calls).toEqual([]);
   });
 
-  it("attaches details.partial when allowlist rejects after prior tool progress", async () => {
+  it("soft-rejects an unknown tool after prior progress and continues", async () => {
     const provider = new ScriptedProvider([
       { toolCalls: [{ id: "call-1", name: "notes.create", args: { title: "Roadmap" } }] },
       { toolCalls: [{ id: "call-2", name: "filesystem.delete", args: { path: "/tmp/a" } }] },
+      { text: "Finished." },
     ]);
     const tools = new FakeToolGateway();
     const runner = new AgentTurnRunner({ provider, toolGateway: tools });
 
-    const error = await runner.run({
+    const result = await runner.run({
       messages: [{ role: "user", content: "Create then delete" }],
       pluginIds: ["notes"],
-    }).catch((e) => e);
+    });
 
-    expect(error).toMatchObject({ code: "AGENT_TOOL_NOT_ALLOWED" });
-    expect(error.details?.partial).toBeDefined();
-    expect(error.details.partial.rounds).toBe(1);
-    expect(error.details.partial.toolCalls).toHaveLength(1);
-    expect(error.details.partial.messages).toEqual(expect.arrayContaining([
-      expect.objectContaining({ role: "tool", toolCallId: "call-1" }),
-    ]));
+    expect(result.text).toBe("Finished.");
+    expect(result.toolCalls).toHaveLength(2);
+    expect(result.toolCalls[0]).toMatchObject({ id: "call-1", name: "notes.create", ok: true });
+    expect(result.toolCalls[1]).toMatchObject({ id: "call-2", name: "filesystem.delete", ok: false });
     expect(tools.calls).toEqual([{ name: "notes.create", args: { title: "Roadmap" } }]);
+  });
+
+  it("soft-rejects unknown tools in a mixed batch while running valid ones", async () => {
+    const provider = new ScriptedProvider([
+      { toolCalls: [
+        { id: "call-1", name: "ReadFile", args: { path: "/tmp/a" } },
+        { id: "call-2", name: "notes.create", args: { title: "Mixed" } },
+      ] },
+      { text: "Mixed done." },
+    ]);
+    const tools = new FakeToolGateway();
+    const runner = new AgentTurnRunner({ provider, toolGateway: tools });
+
+    const result = await runner.run({
+      messages: [{ role: "user", content: "Read and create" }],
+      pluginIds: ["notes"],
+    });
+
+    expect(result.text).toBe("Mixed done.");
+    expect(result.toolCalls).toHaveLength(2);
+    // Provider order preserved
+    expect(result.toolCalls[0]).toMatchObject({ id: "call-1", name: "ReadFile", ok: false });
+    expect(result.toolCalls[1]).toMatchObject({ id: "call-2", name: "notes.create", ok: true });
+    // Only the known tool was dispatched to the gateway
+    expect(tools.calls).toEqual([{ name: "notes.create", args: { title: "Mixed" } }]);
+  });
+
+  it("forwards an unadvertised mcp_* plugin tool name to the gateway for lazy resolve", async () => {
+    const provider = new ScriptedProvider([
+      { toolCalls: [{ id: "call-1", name: "mcp_nusashell_notes_createNote", args: { text: "hi" } }] },
+      { text: "Done." },
+    ]);
+    const tools = new FakeToolGateway();
+    tools.execute = async (name, args) => {
+      tools.calls.push({ name, args });
+      if (name === "mcp_nusashell_notes_createNote") return { ok: true };
+      throw new Error(`Unexpected tool ${name}`);
+    };
+    const runner = new AgentTurnRunner({ provider, toolGateway: tools });
+
+    const result = await runner.run({
+      messages: [{ role: "user", content: "Create a note" }],
+      pluginIds: ["notes"],
+    });
+
+    expect(result.text).toBe("Done.");
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0]).toMatchObject({ id: "call-1", name: "mcp_nusashell_notes_createNote", ok: true });
+    expect(tools.calls).toEqual([{ name: "mcp_nusashell_notes_createNote", args: { text: "hi" } }]);
   });
 
   it("returns a bounded runtime answer when the provider exceeds the tool-round limit", async () => {
@@ -830,5 +883,238 @@ describe("AgentTurnRunner", () => {
 
     const result = await turnPromise;
     expect(result.toolCalls.map((tc) => tc.id)).toEqual(["call-a", "call-b"]);
+  });
+
+  // --- Token-first context budget (Codex-aligned) ---
+
+  it("compacts fat few-user-turns conversations despite recentTurns veto (anti-veto)", async () => {
+    const fat = "x".repeat(5000);
+    const provider = new ScriptedProvider([
+      { text: "Anti-veto checkpoint" },
+      { text: "Final answer" },
+    ]);
+    const runner = new AgentTurnRunner({
+      provider,
+      toolGateway: new FakeToolGateway(),
+      context: {
+        compactionEnabled: true,
+        maxInputTokens: 1200,
+        reserveTokens: 200,
+        recentTurns: 4,
+        summaryMaxChars: 2000,
+      },
+    });
+
+    const result = await runner.run({
+      messages: [
+        { role: "user", content: fat },
+        { role: "assistant", content: "a" },
+        { role: "user", content: fat },
+        { role: "assistant", content: "b" },
+        { role: "user", content: fat },
+        { role: "assistant", content: "c" },
+        { role: "user", content: "latest" },
+      ],
+      pluginIds: [],
+    });
+
+    expect(result.compaction).toBeDefined();
+    expect(result.compaction?.summary).toBe("Anti-veto checkpoint");
+    expect(provider.requests).toHaveLength(2);
+    expect(provider.requests[0]?.tools).toEqual([]);
+  });
+
+  it("uses 90% window threshold with 10k free floor (32k window → 22k soft)", async () => {
+    const fat = "x".repeat(90000);
+    const provider = new ScriptedProvider([
+      { text: "90% checkpoint" },
+      { text: "Final answer" },
+    ]);
+    const runner = new AgentTurnRunner({
+      provider,
+      toolGateway: new FakeToolGateway(),
+      context: {
+        compactionEnabled: true,
+        maxInputTokens: 32000,
+        reserveTokens: 1000,
+        recentTurns: 1,
+        summaryMaxChars: 2000,
+      },
+    });
+
+    const result = await runner.run({
+      messages: [
+        { role: "user", content: fat },
+        { role: "assistant", content: "old" },
+        { role: "user", content: "latest" },
+      ],
+      pluginIds: [],
+      modelCapabilities: { contextWindow: 32000, maxOutput: 4000 },
+    });
+
+    expect(result.compaction).toBeDefined();
+    expect(result.compaction?.summary).toBe("90% checkpoint");
+  });
+
+  it("forces compaction at full window even with tiny context", async () => {
+    const fat = "x".repeat(8000);
+    const provider = new ScriptedProvider([
+      { text: "Hard force checkpoint" },
+      { text: "Final answer" },
+    ]);
+    const runner = new AgentTurnRunner({
+      provider,
+      toolGateway: new FakeToolGateway(),
+      context: {
+        compactionEnabled: true,
+        maxInputTokens: 1000,
+        reserveTokens: 0,
+        recentTurns: 1,
+        summaryMaxChars: 500,
+      },
+    });
+
+    const result = await runner.run({
+      messages: [
+        { role: "user", content: fat },
+        { role: "assistant", content: "old" },
+        { role: "user", content: "latest" },
+      ],
+      pluginIds: [],
+      modelCapabilities: { contextWindow: 1000, maxOutput: 0 },
+    });
+
+    expect(result.compaction).toBeDefined();
+  });
+
+  it("shrinks mid-turn tool results before the next provider complete", async () => {
+    const hugeOutput = "x".repeat(50000);
+    const provider = new ScriptedProvider([
+      { toolCalls: [{ id: "call-1", name: "notes.create", args: { title: "Big" } }] },
+      { text: "Done" },
+    ]);
+    const tools = new FakeToolGateway();
+    tools.execute = async () => ({ id: "note-big", output: hugeOutput });
+    const runner = new AgentTurnRunner({
+      provider,
+      toolGateway: tools,
+      context: {
+        compactionEnabled: true,
+        maxInputTokens: 2000,
+        reserveTokens: 200,
+        recentTurns: 4,
+        summaryMaxChars: 1000,
+      },
+    });
+
+    const result = await runner.run({
+      messages: [{ role: "user", content: "Create a note" }],
+      pluginIds: ["notes"],
+    });
+
+    expect(result.text).toBe("Done");
+    const secondRequest = provider.requests[1];
+    const toolMessage = secondRequest?.messages.find((m) => m.role === "tool");
+    expect(toolMessage).toBeDefined();
+    if (toolMessage && "content" in toolMessage) {
+      expect((toolMessage.content as string).length).toBeLessThan(50000);
+    }
+  });
+
+  // --- Dual-space: full transcript for UI, compact only for model send ---
+
+  it("does not mutate input messages after compaction (dual-space: store stays full)", async () => {
+    const fat = "x".repeat(5000);
+    const originalMessages = [
+      { role: "user" as const, content: fat },
+      { role: "assistant" as const, content: "a" },
+      { role: "user" as const, content: fat },
+      { role: "assistant" as const, content: "b" },
+      { role: "user" as const, content: fat },
+      { role: "assistant" as const, content: "c" },
+      { role: "user" as const, content: "latest" },
+    ];
+    const originalSnapshot = originalMessages.map((m) => ({ ...m }));
+    const provider = new ScriptedProvider([
+      { text: "Dual-space checkpoint" },
+      { text: "Final answer" },
+    ]);
+    const runner = new AgentTurnRunner({
+      provider,
+      toolGateway: new FakeToolGateway(),
+      context: {
+        compactionEnabled: true,
+        maxInputTokens: 1200,
+        reserveTokens: 200,
+        recentTurns: 4,
+        summaryMaxChars: 2000,
+      },
+    });
+
+    await runner.run({
+      messages: originalMessages,
+      pluginIds: [],
+    });
+
+    // Input messages array must be unchanged — the store transcript is SoT
+    // and must never be stripped by compaction (dual-space contract).
+    expect(originalMessages).toEqual(originalSnapshot);
+    expect(originalMessages.length).toBe(7);
+  });
+
+  // --- Family heuristic: default window when API hides context limits ---
+
+  it("resolveModelContextDefaults returns family-specific windows for known model ids", () => {
+    expect(resolveModelContextDefaults("deepseek/deepseek-chat").contextWindow).toBe(163_840);
+    expect(resolveModelContextDefaults("deepseek/deepseek-v4-flash").contextWindow).toBe(1_048_576);
+    expect(resolveModelContextDefaults("z-ai/glm-4.7-flash").contextWindow).toBe(200_000);
+    expect(resolveModelContextDefaults("minimax/m2.5").contextWindow).toBe(204_800);
+    expect(resolveModelContextDefaults("xiaomi/mimo-7b").contextWindow).toBe(1_000_000);
+    expect(resolveModelContextDefaults("moonshotai/kimi-k3").contextWindow).toBe(262_144);
+    expect(resolveModelContextDefaults("openai/gpt-5-nano").contextWindow).toBe(400_000);
+    expect(resolveModelContextDefaults("anthropic/claude-haiku-4").contextWindow).toBe(200_000);
+    expect(resolveModelContextDefaults("anthropic/claude-sonnet-4").contextWindow).toBe(1_000_000);
+    expect(resolveModelContextDefaults("google/gemini-2.5-pro").contextWindow).toBe(1_000_000);
+  });
+
+  it("resolveModelContextDefaults falls back to 200k for unknown model ids", () => {
+    expect(resolveModelContextDefaults("some-unknown-vendor/model-x").contextWindow).toBe(DEFAULT_UNKNOWN_CONTEXT_WINDOW);
+    expect(resolveModelContextDefaults(undefined).contextWindow).toBe(DEFAULT_UNKNOWN_CONTEXT_WINDOW);
+    expect(resolveModelContextDefaults("").contextWindow).toBe(DEFAULT_UNKNOWN_CONTEXT_WINDOW);
+  });
+
+  it("compacts using 200k fallback window when model contextWindow is unknown", async () => {
+    // Without the 200k fallback, maxInputTokens=12000 would be the window
+    // and a 15k-token conversation would compact. With 200k fallback,
+    // 15k < soft(180k) so NO compaction should trigger.
+    const fat = "x".repeat(50000); // ~12.5k tokens — under 12000 maxInputTokens ceiling
+    const provider = new ScriptedProvider([
+      { text: "Should not compact — under 200k window" },
+    ]);
+    const runner = new AgentTurnRunner({
+      provider,
+      toolGateway: new FakeToolGateway(),
+      context: {
+        compactionEnabled: true,
+        maxInputTokens: 200000,
+        reserveTokens: 1000,
+        recentTurns: 1,
+        summaryMaxChars: 2000,
+      },
+    });
+
+    const result = await runner.run({
+      messages: [
+        { role: "user", content: fat },
+        { role: "assistant", content: "ok" },
+        { role: "user", content: "latest" },
+      ],
+      pluginIds: [],
+      model: "unknown-vendor/unknown-model",
+      // No modelCapabilities — should use 200k family fallback
+    });
+
+    expect(result.compaction).toBeUndefined();
+    expect(result.text).toBe("Should not compact — under 200k window");
   });
 });
