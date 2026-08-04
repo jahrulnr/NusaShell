@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shows “Waiting for confirmation…” and logs `Agent ask pending` — previously
   the turn hung with no UI and no logs because only the bare
   `AskQuestionService` promise waited.
+- **Release build DTS.** `AskQuestionService.onAsk` allows explicit `undefined`
+  under `exactOptionalPropertyTypes` so `pnpm build` no longer fails packaging
+  on Linux/macOS (Windows had already passed).
 
 ## [0.3.3] - 2026-08-04
 

@@ -66,7 +66,7 @@ function pendingKey(turnId: string, callId: string): string {
  */
 export class AskQuestionService {
   private readonly pending = new Map<string, PendingAsk>();
-  private onAsk?: (pending: AskQuestionPendingNotice) => void;
+  private onAsk: ((pending: AskQuestionPendingNotice) => void) | undefined;
 
   constructor(options: AskQuestionServiceOptions = {}) {
     if (options.onAsk) this.onAsk = options.onAsk;
