@@ -26,7 +26,13 @@ export {
 } from "./routed-agent-provider.js";
 export { AgentTurnCoordinator } from "./agent-turn-coordinator.js";
 export { StreamSeqRegistry } from "./stream-seq-registry.js";
-export { injectPrompts, applyVars, type PromptVars } from "./prompt-injector.js";
+export {
+  injectPrompts,
+  applyVars,
+  type PromptVars,
+  type PromptInjectionSummary,
+  type InjectPromptsResult,
+} from "./prompt-injector.js";
 export { detectRuntimeOs, type RuntimeOsProbe } from "./runtime-os.js";
 export { formatMemoryPrompt } from "./memory-prompt-formatter.js";
 export { formatTodoPrompt } from "./todo-prompt-formatter.js";

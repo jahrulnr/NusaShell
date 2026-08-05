@@ -254,7 +254,6 @@ export {
   type AgentTodoSummary,
   summarizeTodos,
   InMemoryConversationTodoPort,
-  type ConversationTodoPort,
   AsyncToolRuntime,
   type AsyncToolHandle,
   type AsyncToolStatus,

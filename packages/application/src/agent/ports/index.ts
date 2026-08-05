@@ -27,6 +27,7 @@ export type {
   SubagentProviderCandidate,
   SubagentResolveRequest,
   SubagentResolveResult,
+  SubagentRoutingInfo,
   SubagentRunRequest,
   SubagentRunResult,
   SubagentPort,
