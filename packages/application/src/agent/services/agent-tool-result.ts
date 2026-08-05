@@ -271,7 +271,7 @@ function projectBody(result: AgentToolResult): string {
     const textPart = result.content.find((c) => c.type === "text");
     if (textPart && textPart.type === "text" && !result.structuredContent) {
       // Text/command path: labeled envelope.
-      return projectTextEnvelope(result.toolName, textPart.text, result.metadata);
+      return projectTextEnvelope(textPart.text, result.metadata);
     }
     // Structured path: deterministic JSON.
     const data = result.structuredContent ?? result.content.find((c) => c.type === "json")?.data;
@@ -291,7 +291,7 @@ function projectBody(result: AgentToolResult): string {
   })}}`;
 }
 
-function projectTextEnvelope(toolName: string, text: string, meta: AgentToolResultMeta): string {
+function projectTextEnvelope(text: string, meta: AgentToolResultMeta): string {
   const trimmed = text;
   const limited =
     trimmed.length > PROJECTED_TEXT_HEAD + PROJECTED_TEXT_TAIL

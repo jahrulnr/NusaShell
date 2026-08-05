@@ -172,7 +172,6 @@ export function unknownToolExecution(
  */
 const UNTRUSTED_TOOL_PREFIXES = ["mcp_"];
 const UNTRUSTED_WRAP_MIN_CHARS = 32;
-const DELIMITER_TOKEN_RE = /untrusted_tool_result/gi;
 /**
  * Matches the literal delimiter token in EITHER its canonical underscore form
  * or a hyphenated variant. A malicious tool payload can embed the hyphen form

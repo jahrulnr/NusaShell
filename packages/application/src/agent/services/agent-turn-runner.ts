@@ -370,6 +370,11 @@ export class AgentTurnRunner {
               toolCalls,
               steps,
               messages,
+              model,
+              providerId,
+              api,
+              reasoning,
+              usage,
             ),
           },
         );

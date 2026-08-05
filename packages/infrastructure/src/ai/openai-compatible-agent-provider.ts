@@ -61,7 +61,7 @@ export interface OpenAiCompatibleAgentProviderOptions {
       readonly attempt: number;
       readonly delayMs: number;
       readonly status: number;
-      readonly kind: "http_status" | "connect" | "sse_transport";
+      readonly kind: "http_status" | "connect" | "sse_transport" | "idle_timeout";
     }) => void;
   };
 }

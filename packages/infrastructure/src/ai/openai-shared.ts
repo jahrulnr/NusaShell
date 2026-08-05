@@ -14,7 +14,7 @@ export class AgentProviderHttpError extends Error {
     readonly status: number,
     readonly transient: boolean,
     readonly retryAfterMs: number,
-    readonly kind: "http_status" | "connect" | "sse_transport",
+    readonly kind: "http_status" | "connect" | "sse_transport" | "idle_timeout",
     override readonly cause?: unknown,
   ) {
     super(message, cause !== undefined ? { cause } : undefined);
