@@ -445,7 +445,8 @@ describe("FileService.grepFiles", () => {
 
     const { results } = await service.grepFiles("", "TODO");
     expect(results).toHaveLength(1);
-    expect(results[0].path).toBe(path.join("sub", "deep.js"));
+    // Agent-facing paths are always POSIX (stable across Windows/Unix).
+    expect(results[0].path).toBe("sub/deep.js");
     expect(results[0].line).toBe(1);
   });
 
