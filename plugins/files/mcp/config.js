@@ -58,5 +58,10 @@ export async function validateRoot(root) {
  */
 export function resolvePath(root, input) {
   if (!input || input === "") return root;
+  // Resolve absolute input without root so Windows does not inherit root's drive
+  // letter (path.resolve(root, "/foo") can differ from path.resolve("/foo")).
+  if (path.isAbsolute(input)) {
+    return path.resolve(input);
+  }
   return path.resolve(root, input);
 }

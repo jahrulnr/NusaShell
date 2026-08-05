@@ -24796,6 +24796,9 @@ async function validateRoot(root) {
 }
 function resolvePath(root, input) {
   if (!input || input === "") return root;
+  if (import_node_path.default.isAbsolute(input)) {
+    return import_node_path.default.resolve(input);
+  }
   return import_node_path.default.resolve(root, input);
 }
 
