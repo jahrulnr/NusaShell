@@ -127,7 +127,7 @@ function ensureTerminal() {
 
   term.onData((data) => {
     if (!sessionId) return;
-    callTool("terminal_write", { sessionId, data }).catch(() => {});
+    callTool("write", { sessionId, data }).catch(() => {});
   });
 }
 
@@ -135,7 +135,7 @@ function fitAndResize() {
   if (!term) return;
   if (fitAddon) fitAddon.fit();
   if (sessionId) {
-    callTool("terminal_resize", { sessionId, cols: term.cols, rows: term.rows }).catch(() => {});
+    callTool("resize", { sessionId, cols: term.cols, rows: term.rows }).catch(() => {});
   }
 }
 
@@ -149,7 +149,7 @@ async function openSession() {
   let lastErr = null;
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
-      const payload = await callTool("terminal_open", { cols, rows });
+      const payload = await callTool("open", { cols, rows });
       const info = parseToolJson(payload, null) || parseHostToolResult({ result: payload }, null);
       if (!info || !info.sessionId) {
         console.error("[terminal] unexpected open payload", payload);
@@ -185,7 +185,7 @@ function startPolling() {
     if (!sessionId || stopped || pollInFlight) return;
     pollInFlight = true;
     try {
-      const payload = await callTool("terminal_read", { sessionId, clear: true });
+      const payload = await callTool("read", { sessionId, clear: true });
       const data = parseToolJson(payload, null);
       if (!data) return;
       if (data.stdout) term.write(data.stdout);
@@ -222,7 +222,7 @@ async function newSession() {
   stopPolling();
   stopped = false;
   if (sessionId) {
-    callTool("terminal_close", { sessionId }).catch(() => {});
+    callTool("close", { sessionId }).catch(() => {});
     sessionId = null;
   }
   if (term) term.reset();
@@ -262,7 +262,7 @@ window.addEventListener("resize", fitAndResize);
 window.addEventListener("beforeunload", () => {
   if (sessionId) {
     try {
-      window.shell.callTool(pluginId, "terminal_close", { sessionId });
+      window.shell.callTool(pluginId, "close", { sessionId });
     } catch (_) {
       /* ignore */
     }

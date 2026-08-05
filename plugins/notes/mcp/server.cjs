@@ -24816,12 +24816,12 @@ function getNotesPrompt(name) {
           "Use the Notes plugin for persistent local notes.",
           "",
           "Main tools:",
-          "- notes_create: create a note with a title and body.",
-          "- notes_list: list saved notes.",
-          "- notes_get: read one note by id.",
-          "- notes_update: change a note's title or body.",
-          "- notes_delete: permanently remove a note.",
-          "- notes_search: find notes by text.",
+          "- create: create a note with a title and body.",
+          "- list: list saved notes.",
+          "- get: read one note by id.",
+          "- update: change a note's title or body.",
+          "- delete: permanently remove a note.",
+          "- search: find notes by text.",
           "",
           "Use tool_schema for the exact arguments and required fields. Notes are persisted by the plugin and are separate from the shell conversation history."
         ].join("\n")
@@ -24980,12 +24980,12 @@ var NoteService = class {
 
 // mcp/tool-catalog.js
 var NOTES_TOOL_NAMES = Object.freeze([
-  "notes_create",
-  "notes_list",
-  "notes_get",
-  "notes_update",
-  "notes_delete",
-  "notes_search"
+  "create",
+  "list",
+  "get",
+  "update",
+  "delete",
+  "search"
 ]);
 
 // mcp/tools.js
@@ -24996,20 +24996,20 @@ var searchQuery = external_exports.string().trim().min(1).max(500);
 var tagFilter = external_exports.string().trim().min(1).max(60).optional();
 var sortOption = external_exports.enum(["updated", "created"]).default("updated");
 var schemas = {
-  notes_create: external_exports.object({ text: noteText, tags }).strict(),
-  notes_list: external_exports.object({ tag: tagFilter, sort: sortOption }).strict(),
-  notes_get: external_exports.object({ id: noteId }).strict(),
-  notes_update: external_exports.object({
+  create: external_exports.object({ text: noteText, tags }).strict(),
+  list: external_exports.object({ tag: tagFilter, sort: sortOption }).strict(),
+  get: external_exports.object({ id: noteId }).strict(),
+  update: external_exports.object({
     id: noteId,
     text: noteText.optional(),
     tags: external_exports.array(external_exports.string().trim().min(1).max(60)).max(20).optional()
   }).strict(),
-  notes_delete: external_exports.object({ id: noteId }).strict(),
-  notes_search: external_exports.object({ query: searchQuery }).strict()
+  delete: external_exports.object({ id: noteId }).strict(),
+  search: external_exports.object({ query: searchQuery }).strict()
 };
 var NOTES_TOOLS = Object.freeze([
   descriptor(
-    "notes_create",
+    "create",
     "Create a new note with optional tags. Text supports markdown.",
     {
       text: { type: "string", description: "Note content (markdown supported, max 100 KB)." },
@@ -25019,7 +25019,7 @@ var NOTES_TOOLS = Object.freeze([
     false
   ),
   descriptor(
-    "notes_list",
+    "list",
     "List all notes, optionally filtered by tag. Results are sorted by updatedAt (default) or createdAt.",
     {
       tag: { type: "string", description: "Filter notes by tag name. Omit to list all." },
@@ -25028,7 +25028,7 @@ var NOTES_TOOLS = Object.freeze([
     []
   ),
   descriptor(
-    "notes_get",
+    "get",
     "Get a single note by its ID.",
     {
       id: { type: "integer", description: "Note ID (positive integer).", minimum: 1 }
@@ -25036,7 +25036,7 @@ var NOTES_TOOLS = Object.freeze([
     ["id"]
   ),
   descriptor(
-    "notes_update",
+    "update",
     "Update a note's text and/or tags. Only provided fields are changed.",
     {
       id: { type: "integer", description: "Note ID to update.", minimum: 1 },
@@ -25047,7 +25047,7 @@ var NOTES_TOOLS = Object.freeze([
     false
   ),
   descriptor(
-    "notes_delete",
+    "delete",
     "Delete a note by its ID. This is permanent and cannot be undone.",
     {
       id: { type: "integer", description: "Note ID to delete.", minimum: 1 }
@@ -25056,7 +25056,7 @@ var NOTES_TOOLS = Object.freeze([
     false
   ),
   descriptor(
-    "notes_search",
+    "search",
     "Search notes by text content using a regex pattern (case-insensitive).",
     {
       query: { type: "string", description: "Regex pattern to match against note text (case-insensitive)." }
@@ -25072,20 +25072,20 @@ async function callNotesTool(service, name, rawArguments = {}, { persist = true 
   if (!schema) throw new Error(`Unknown notes tool: ${name}`);
   const input = schema.parse(rawArguments ?? {});
   switch (name) {
-    case "notes_create": {
+    case "create": {
       const note = service.create(input.text, input.tags);
       if (persist) await service.save();
       return { note, totalNotes: service.notes.length };
     }
-    case "notes_list": {
+    case "list": {
       const notes = service.list(input.tag, input.sort);
       return { notes, total: notes.length, ...input.tag ? { tag: input.tag } : {}, sort: input.sort };
     }
-    case "notes_get": {
+    case "get": {
       const note = service.get(input.id);
       return { note };
     }
-    case "notes_update": {
+    case "update": {
       const note = service.update(input.id, {
         ...input.text !== void 0 ? { text: input.text } : {},
         ...input.tags !== void 0 ? { tags: input.tags } : {}
@@ -25093,12 +25093,12 @@ async function callNotesTool(service, name, rawArguments = {}, { persist = true 
       if (persist) await service.save();
       return { note };
     }
-    case "notes_delete": {
+    case "delete": {
       const deleted = service.delete(input.id);
       if (persist) await service.save();
       return { deleted, totalNotes: service.notes.length };
     }
-    case "notes_search": {
+    case "search": {
       const results = service.search(input.query);
       return { results, total: results.length, query: input.query };
     }
@@ -25113,8 +25113,8 @@ function descriptor(name, description, properties, required2 = [], readOnly = tr
     annotations: {
       title: name,
       readOnlyHint: readOnly,
-      destructiveHint: name === "notes_delete",
-      idempotentHint: readOnly || name === "notes_update",
+      destructiveHint: name === "delete",
+      idempotentHint: readOnly || name === "update",
       openWorldHint: false
     },
     inputSchema: {

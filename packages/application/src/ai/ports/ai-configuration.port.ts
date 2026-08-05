@@ -24,6 +24,7 @@ export interface AiConfigurationPort {
     maxRepeatedToolCalls?: number;
     softRecoverAttempts?: number;
     maxConcurrentToolCalls?: number;
+    maxAutoContinues?: number;
     compactionEnabled?: boolean;
     maxInputTokens?: number;
     reserveTokens?: number;

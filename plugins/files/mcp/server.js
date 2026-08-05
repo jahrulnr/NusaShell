@@ -109,14 +109,14 @@ void main().catch((error) => {
  */
 function emitAutomationForTool(server, toolName, args) {
   const notifications = {
-    files_write: () => ({ type: "files.modified", payload: { path: args.path, action: "write" } }),
-    files_patch: () => ({ type: "files.modified", payload: { path: args.path, action: "patch" } }),
-    files_append: () => ({ type: "files.modified", payload: { path: args.path, action: "append" } }),
-    files_mkdir: () => ({ type: "files.modified", payload: { path: args.path, action: "mkdir" } }),
-    files_touch: () => ({ type: "files.modified", payload: { path: args.path, action: "touch" } }),
-    files_delete: () => ({ type: "files.deleted", payload: { path: args.path, recursive: !!args.recursive } }),
-    files_move: () => ({ type: "files.moved", payload: { source: args.source, destination: args.destination } }),
-    files_copy: () => ({ type: "files.moved", payload: { source: args.source, destination: args.destination } }),
+    write: () => ({ type: "files.modified", payload: { path: args.path, action: "write" } }),
+    patch: () => ({ type: "files.modified", payload: { path: args.path, action: "patch" } }),
+    append: () => ({ type: "files.modified", payload: { path: args.path, action: "append" } }),
+    mkdir: () => ({ type: "files.modified", payload: { path: args.path, action: "mkdir" } }),
+    touch: () => ({ type: "files.modified", payload: { path: args.path, action: "touch" } }),
+    delete: () => ({ type: "files.deleted", payload: { path: args.path, recursive: !!args.recursive } }),
+    move: () => ({ type: "files.moved", payload: { source: args.source, destination: args.destination } }),
+    copy: () => ({ type: "files.moved", payload: { source: args.source, destination: args.destination } }),
   };
   const builder = notifications[toolName];
   if (!builder) return;

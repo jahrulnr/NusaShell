@@ -9,21 +9,21 @@ const tagFilter = z.string().trim().min(1).max(60).optional();
 const sortOption = z.enum(["updated", "created"]).default("updated");
 
 const schemas = {
-  notes_create: z.object({ text: noteText, tags }).strict(),
-  notes_list: z.object({ tag: tagFilter, sort: sortOption }).strict(),
-  notes_get: z.object({ id: noteId }).strict(),
-  notes_update: z.object({
+  create: z.object({ text: noteText, tags }).strict(),
+  list: z.object({ tag: tagFilter, sort: sortOption }).strict(),
+  get: z.object({ id: noteId }).strict(),
+  update: z.object({
     id: noteId,
     text: noteText.optional(),
     tags: z.array(z.string().trim().min(1).max(60)).max(20).optional(),
   }).strict(),
-  notes_delete: z.object({ id: noteId }).strict(),
-  notes_search: z.object({ query: searchQuery }).strict(),
+  delete: z.object({ id: noteId }).strict(),
+  search: z.object({ query: searchQuery }).strict(),
 };
 
 export const NOTES_TOOLS = Object.freeze([
   descriptor(
-    "notes_create",
+    "create",
     "Create a new note with optional tags. Text supports markdown.",
     {
       text: { type: "string", description: "Note content (markdown supported, max 100 KB)." },
@@ -33,7 +33,7 @@ export const NOTES_TOOLS = Object.freeze([
     false,
   ),
   descriptor(
-    "notes_list",
+    "list",
     "List all notes, optionally filtered by tag. Results are sorted by updatedAt (default) or createdAt.",
     {
       tag: { type: "string", description: "Filter notes by tag name. Omit to list all." },
@@ -42,7 +42,7 @@ export const NOTES_TOOLS = Object.freeze([
     [],
   ),
   descriptor(
-    "notes_get",
+    "get",
     "Get a single note by its ID.",
     {
       id: { type: "integer", description: "Note ID (positive integer).", minimum: 1 },
@@ -50,7 +50,7 @@ export const NOTES_TOOLS = Object.freeze([
     ["id"],
   ),
   descriptor(
-    "notes_update",
+    "update",
     "Update a note's text and/or tags. Only provided fields are changed.",
     {
       id: { type: "integer", description: "Note ID to update.", minimum: 1 },
@@ -61,7 +61,7 @@ export const NOTES_TOOLS = Object.freeze([
     false,
   ),
   descriptor(
-    "notes_delete",
+    "delete",
     "Delete a note by its ID. This is permanent and cannot be undone.",
     {
       id: { type: "integer", description: "Note ID to delete.", minimum: 1 },
@@ -70,7 +70,7 @@ export const NOTES_TOOLS = Object.freeze([
     false,
   ),
   descriptor(
-    "notes_search",
+    "search",
     "Search notes by text content using a regex pattern (case-insensitive).",
     {
       query: { type: "string", description: "Regex pattern to match against note text (case-insensitive)." },
@@ -89,20 +89,20 @@ export async function callNotesTool(service, name, rawArguments = {}, { persist 
   const input = schema.parse(rawArguments ?? {});
 
   switch (name) {
-    case "notes_create": {
+    case "create": {
       const note = service.create(input.text, input.tags);
       if (persist) await service.save();
       return { note, totalNotes: service.notes.length };
     }
-    case "notes_list": {
+    case "list": {
       const notes = service.list(input.tag, input.sort);
       return { notes, total: notes.length, ...(input.tag ? { tag: input.tag } : {}), sort: input.sort };
     }
-    case "notes_get": {
+    case "get": {
       const note = service.get(input.id);
       return { note };
     }
-    case "notes_update": {
+    case "update": {
       const note = service.update(input.id, {
         ...(input.text !== undefined ? { text: input.text } : {}),
         ...(input.tags !== undefined ? { tags: input.tags } : {}),
@@ -110,12 +110,12 @@ export async function callNotesTool(service, name, rawArguments = {}, { persist 
       if (persist) await service.save();
       return { note };
     }
-    case "notes_delete": {
+    case "delete": {
       const deleted = service.delete(input.id);
       if (persist) await service.save();
       return { deleted, totalNotes: service.notes.length };
     }
-    case "notes_search": {
+    case "search": {
       const results = service.search(input.query);
       return { results, total: results.length, query: input.query };
     }
@@ -131,8 +131,8 @@ function descriptor(name, description, properties, required = [], readOnly = tru
     annotations: {
       title: name,
       readOnlyHint: readOnly,
-      destructiveHint: name === "notes_delete",
-      idempotentHint: readOnly || name === "notes_update",
+      destructiveHint: name === "delete",
+      idempotentHint: readOnly || name === "update",
       openWorldHint: false,
     },
     inputSchema: {

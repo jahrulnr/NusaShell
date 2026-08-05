@@ -5,6 +5,75 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-06
+
+### Added
+
+- **Multi-turn auto-continue.** After a successful sealed turn, the shell
+  automatically starts the next turn when the conversation todo checklist still
+  has open items — no new user message required. Budget via
+  `NUSASHELL_AI_MAX_AUTO_CONTINUES` / configure-AI payload (`maxAutoContinues`,
+  default 10; `0` = unlimited; cap 10_000). Desktop shows
+  “Continuing tasks…” and **Stop** aborts the chain. New steering prompt
+  `resources/agent/prompts/continue.md` injects on chained turns
+  (`autoContinueIndex > 0`).
+- **Live MCP full catalog injection.** Running plugins publish a `## Live MCP
+  (runtime)` system block with name + description + `inputSchema`, and tools are
+  auto-advertised in the provider `tools[]` (capped). Progressive discovery is
+  for starting plugins and overflow/failure recovery, not the default every
+  turn.
+- **Skills catalog injection.** Every interactive turn gets a budgeted skills
+  catalog (name + description). Prompts steer the model to `skill_read` matches
+  before domain-heavy work; truncated catalogs point to `skill_list` /
+  `skill_search`.
+- **Codex-aligned compact history.** Compaction retains real user messages plus
+  one summary-prefixed user memento (`SUMMARY_PREFIX`), skips nested summaries,
+  reverse-fills to ~20k user tokens, and quality-gates short provider summaries.
+  Legacy `Conversation summary:` markers still count as summaries for migration.
+- **Typed agent tool results.** Dual representation preserves MCP
+  content / structuredContent / isError, projects a stable model-facing string,
+  and records truncation metadata (`truncated`, `dataIsUntrusted`) so mid-turn
+  shrink no longer strips untrusted envelopes.
+- **Sticky MCP grants across auto-continues.** Tool routes granted in a
+  conversation seed the next turn so the model does not re-pay discovery tax;
+  `endConversation` clears the store.
+- **Token-OR tool search.** `tool_search` ranks by whitespace-separated tokens
+  (any token matches), returns a structured envelope
+  `{ pluginId, query, matchMode, count, matches, hint? }`, and treats `count: 0`
+  as success with a hint (not a turn interrupt).
+- **Idempotent `mcp_enable` / `tool_schema` feedback.** Already-running plugins
+  and already-granted tools return `alreadyRunning` / `alreadyGranted` trust
+  signals plus a live-state line.
+- **Agent workspace layout/responsive polish.** Attention strip, drawer/subpane
+  layout, model picker accessibility, tool-job strip layout, and responsive
+  agent chrome (new layout tests). IPC timeouts surface as typed
+  `IpcRequestTimeoutError` with `TIMEOUT` code instead of opaque
+  `[object Object]`.
+
+### Changed
+
+- **Default context window.** Env-absent / fresh-install defaults for
+  `maxInputTokens` / `reserveTokens` rise to **200_000** / **16_000** to match the
+  desktop AI registry seed (was 12_000 / 3_000).
+- **`maxToolRounds` and auto-continue budgets accept `0` = unlimited** (finite
+  range otherwise capped at 10_000).
+- **MCP plugin prompt tiers and `mcp-creator` skill** advanced to skill VERSION
+  **2**; progressive MCP / runtime architecture docs updated for Live MCP,
+  skills catalog, auto-continue, and tool-result dual representation.
+- **Subagent briefs:** explicit capability boundary — no NusaShell MCP plugins,
+  meta-tools, or skills catalog cross into the ACP subagent; inline needed
+  content in `prompt`.
+- **Built-in plugin MCP tool/prompt naming** tightened (files/mail/notes/terminal)
+  for live-catalog friendliness and consistent `mcp_<plugin>_<tool>` names.
+
+### Fixed
+
+- IPC bridge timeout errors no longer render as `Turn failed: [object Object]`.
+- Discovery empty results (`tool_search` / `tool_list` with zero hits) no longer
+  confuse as interrupted tool failures.
+- Model picker keyboard/ARIA and narrow-viewport agent chrome regressions covered
+  by dedicated layout tests.
+
 ## [0.3.5] - 2026-08-05
 
 ### Fixed

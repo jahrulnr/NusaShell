@@ -83,6 +83,9 @@ describe("AgentToolJobStrip", () => {
     expect(card.dataset.status).toBe("running");
     expect(card.dataset.handleId).toBe("h1");
     expect((card.querySelector(".agent-tool-job-card-name") as HTMLElement).textContent).toBe("run_command");
+    expect(card.getAttribute("role")).toBe("listitem");
+    expect(card.querySelector(".agent-tool-job-card-actions")).toBeTruthy();
+    expect(document.querySelector(".agent-tool-job-strip-title")?.textContent).toContain("1 running");
     strip.dispose();
   });
 
@@ -102,8 +105,8 @@ describe("AgentToolJobStrip", () => {
     strip.mount();
     emit("agent.tool_job_started", { handleId: "h1", conversationId: "conv-1", toolName: "t" });
     emit("agent.tool_job_ended", { handleId: "h1", conversationId: "conv-1", ok: true, reason: "completed" });
-    const card = document.querySelector(".agent-tool-job-card") as HTMLElement;
-    expect(card.dataset.status).toBe("ok");
+    expect(document.querySelector(".agent-tool-job-card")).toBeNull();
+    expect((document.getElementById("agent-tool-job-strip") as HTMLElement).hidden).toBe(true);
     strip.dispose();
   });
 

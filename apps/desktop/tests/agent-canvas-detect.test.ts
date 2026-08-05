@@ -54,6 +54,12 @@ describe("extractCanvasCandidates", () => {
     const candidates = extractCanvasCandidates(md);
     expect(candidates).toHaveLength(1);
     expect(candidates[0].source).toBe("<svg/>\n");
+    expect(candidates[0].complete).toBe(false);
+  });
+
+  it("marks closed canvas fences as complete for live preview", () => {
+    const candidates = extractCanvasCandidates("```mermaid\nflowchart LR\n  A-->B\n```");
+    expect(candidates[0].complete).toBe(true);
   });
 
   it("ignores backticks that are not at line start", () => {

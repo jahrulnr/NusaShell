@@ -1,11 +1,14 @@
 import {
   buildAgentContext,
+  buildContinueContext,
+  hasToolResumeSnapshot,
   composerTextareaSize,
   formatMessageTimestamp,
   formatSubagentError,
   formatToolOutput,
   formatToolTerminalInput,
   formatTurnError,
+  getConversationRoomMetadata,
   mergeCompactionCheckpoint,
   renderAssistantMarkdown,
   renderReasoningMarkdown,
@@ -17,7 +20,7 @@ import {
 } from "./agent-conversation-ui.js";
 import { estimateContextTokens, formatContextUsage, resolveContextBadgeTokens, shouldApplyAcpUiUpdate } from "./ai-model-ui.js";
 import { inspectAttachmentContent, toDataUrl } from "./attachment-content.js";
-import { CANVAS_ARTIFACT_MAX_SOURCE_BYTES, canvasArtifactId, resolveCanvasFence } from "./agent-canvas-detect.js";
+import { CANVAS_ARTIFACT_MAX_SOURCE_BYTES, canvasArtifactId, extractCanvasCandidates, resolveCanvasFence } from "./agent-canvas-detect.js";
 import { clampCanvasDrawerWidth } from "./agent-canvas-layout.js";
 import { bindCanvasZoom, renderArtifact } from "./agent-canvas-render.js";
 import { subscribeSubagentEvents, subscribeSubagentStream } from "./subagent-event-helper.js";
@@ -55,6 +58,8 @@ export class AgentConversationController {
     this.activeId = "";
     this.pendingDeleteId = "";
     this.turnPending = false;
+    /** Set by stop() to break the auto-continue chain between turns. */
+    this.autoContinueAborted = false;
     /** Conversation that owns the in-flight parent submit() (paint gate). */
     this.turnOwnerConversationId = null;
     /** Live streamState reference so restoreActiveTurnUi can rebind the paint root. */
@@ -67,6 +72,14 @@ export class AgentConversationController {
     this.canvasEnabled = true;
     this.activeCanvasArtifact = null;
     this.canvasDrawerWidth = null;
+    this.canvasRenderCache = new Map();
+    this.canvasReturnFocus = null;
+    this.subpaneReturnFocus = null;
+    // Streaming may grow scrollHeight between user scroll events. Keep the
+    // follow state separately so a later delta cannot mistake that growth for
+    // the user leaving the bottom.
+    this.threadShouldStickToBottom = true;
+    this.subpaneShouldStickToBottom = true;
     this.subagentLifecycle = new SubagentRunLifecycle(log);
   }
 
@@ -133,7 +146,9 @@ export class AgentConversationController {
     this.activeId = this.conversation.id;
     this.resetComposerForConversation(this.conversation.id);
     this.renderThread();
+    this.mountTodoStrip(this.conversation.id);
     this.updateWorkspaceLabel();
+    this.updateRoomInfo();
     this.updateContextStatus();
     this.updateAcpStatus();
     await this.refresh();
@@ -141,6 +156,7 @@ export class AgentConversationController {
   }
 
   async submit({ retry = false } = {}) {
+    this.autoContinueAborted = false;
     const input = $("#agent-input");
     const sendButton = $("#agent-send-btn");
     const stopButton = $("#agent-stop-btn");
@@ -177,6 +193,7 @@ export class AgentConversationController {
     let turnEndResolve = null;
     const turnEndPromise = new Promise((resolve) => { turnEndResolve = resolve; });
     let turnEnded = false;
+    let sealedResult = null;
     try {
       this.turnOwnerConversationId = ownerConversationId;
       this.activeTraceId = crypto.randomUUID();
@@ -204,13 +221,30 @@ export class AgentConversationController {
       retryIsSafe = true;
 
       const lastDurable = ownerConversation.messages.at(-1);
-      const resumeFrom = retry && lastDurable?.status === "interrupted" && Array.isArray(lastDurable.resumeMessages)
+      const isInterrupted = retry && lastDurable?.status === "interrupted";
+      // Tool resume only when tools actually settled — inject-only resumeMessages
+      // after a pre-tool provider fail must not block text Continue.
+      const resumeFrom = isInterrupted
+        && hasToolResumeSnapshot(lastDurable)
+        && Array.isArray(lastDurable.resumeMessages)
+        && lastDurable.resumeMessages.length
+        ? lastDurable
+        : null;
+      // Text continue: interrupted with non-empty partial body, no tool graph.
+      const continueFrom = isInterrupted && !resumeFrom && typeof lastDurable.content === "string" && lastDurable.content.trim()
         ? lastDurable
         : null;
 
       pending = this.createStreamingMessage();
       selectedModel = this.getActiveModel();
-      const turnMessages = resumeFrom ? resumeFrom.resumeMessages : buildAgentContext(ownerConversation);
+      // Tool resume → resumeMessages + resume: true.
+      // Text continue → buildContinueContext (base + partial + steer), no resume.
+      // Normal → buildAgentContext.
+      const turnMessages = resumeFrom
+        ? resumeFrom.resumeMessages
+        : continueFrom
+          ? buildContinueContext(ownerConversation)
+          : buildAgentContext(ownerConversation);
       const baseTokens = estimateContextTokens(turnMessages);
       let liveTokens = baseTokens;
       const setContextStatus = (tokens) => {
@@ -229,6 +263,7 @@ export class AgentConversationController {
         streamedText: "",
         textRenderPending: false,
         reasoningRenderPending: false,
+        canvasRenderTimer: 0,
       };
       this.liveStreamState = streamState;
       const appendStreamChild = (node) => {
@@ -261,6 +296,7 @@ export class AgentConversationController {
               streamState.textRenderPending = false;
               if (streamState.textBubble && canPaint()) {
                 streamState.textBubble.innerHTML = renderAssistantMarkdown(streamState.streamedText);
+                this.scheduleStreamingCanvasEnhancement(streamState, ownerConversationId);
                 this.scrollToBottom();
               }
             });
@@ -417,6 +453,7 @@ export class AgentConversationController {
       // that is cumulative billing across tool rounds, not the current window
       // fill, and would inflate the badge ~N× after multi-round turns.
       this.log("info", `Agent turn completed trace=${result.traceId} rounds=${result.rounds}`);
+      sealedResult = result;
     } catch (error) {
       if (error.code === "AGENT_TURN_CANCELLED" && !turnEnded) {
         // Wait for the terminal turn_end event (published after in-flight
@@ -426,42 +463,83 @@ export class AgentConversationController {
       }
       const partial = error.details?.partial;
       const isCancel = error.code === "AGENT_TURN_CANCELLED";
+      const isMaxRounds = error.code === "AGENT_MAX_TOOL_ROUNDS";
+      const sealedByMain = error.details?.sealedInterrupted === true;
       if (partial) {
         this.sealStreamingToolCardsIncomplete(streamState);
         this.sealStreamingMessage(pending, { ...partial, status: "interrupted" });
         if (pending && isCancel) pending.classList.add("agent-message-stopped");
-        const interruptedMessage = {
-          role: "assistant",
-          content: isCancel
-            ? `Turn stopped after ${partial.rounds} tool round${partial.rounds === 1 ? "" : "s"}.`
-            : `Turn interrupted after ${partial.rounds} tool round${partial.rounds === 1 ? "" : "s"}.`,
-          status: "interrupted",
-          traceId: partial.traceId,
-          model: partial.model,
-          rounds: partial.rounds,
-          steps: sanitizeAssistantSteps(partial.steps),
-          ...(Array.isArray(partial.toolCalls) && partial.toolCalls.length
-            ? { toolCalls: partial.toolCalls.map(toConversationToolCall) }
-            : {}),
-          ...(Array.isArray(partial.messages) ? { resumeMessages: partial.messages } : {}),
-        };
+        // content = partial body first; never overwrite with stub when there
+        // is body. The stub is only a fallback when nothing was streamed.
+        const streamedText = partial.text?.trim() || streamState?.streamedText || "";
+        const hasTools = Array.isArray(partial.toolCalls) && partial.toolCalls.length > 0;
+        const stub = isCancel
+          ? `Turn stopped after ${partial.rounds} tool round${partial.rounds === 1 ? "" : "s"}.`
+          : isMaxRounds
+            ? `Tool-round limit reached after ${partial.rounds} round${partial.rounds === 1 ? "" : "s"}. Resume to continue the work.`
+            : `Turn interrupted after ${partial.rounds} tool round${partial.rounds === 1 ? "" : "s"}.`;
+        // Main process seals interrupted + resumeMessages off the renderer path
+        // (via sealAgentInterrupted). Prefer store; fall back to renderer append
+        // only when main did not seal (no conversationId or seal failure).
         try {
-          ownerConversation = resumeFrom
-            ? await this.shell.agentConversations.replaceLastInterrupted(ownerConversationId, interruptedMessage)
-            : await this.shell.agentConversations.append(ownerConversationId, interruptedMessage);
+          ownerConversation = await this.shell.agentConversations.get(ownerConversationId);
           if (this.conversation?.id === ownerConversationId) this.conversation = ownerConversation;
+          const lastDurableAfter = ownerConversation?.messages.at(-1);
+          const mainSealed =
+            sealedByMain
+            || (lastDurableAfter?.status === "interrupted" && lastDurableAfter?.traceId === partial.traceId);
+          if (!mainSealed) {
+            const interruptedMessage = {
+              role: "assistant",
+              content: streamedText || stub,
+              status: "interrupted",
+              interruptReason: isCancel ? "cancel" : isMaxRounds ? "max_rounds" : "provider",
+              traceId: partial.traceId,
+              model: partial.model,
+              rounds: partial.rounds,
+              steps: sanitizeAssistantSteps(partial.steps),
+              ...(hasTools
+                ? { toolCalls: partial.toolCalls.map(toConversationToolCall) }
+                : {}),
+              ...(hasTools && Array.isArray(partial.messages) && partial.messages.length
+                ? { resumeMessages: partial.messages }
+                : {}),
+            };
+            ownerConversation = resumeFrom
+              ? await this.shell.agentConversations.replaceLastInterrupted(ownerConversationId, interruptedMessage)
+              : await this.shell.agentConversations.append(ownerConversationId, interruptedMessage);
+            if (this.conversation?.id === ownerConversationId) this.conversation = ownerConversation;
+          }
         } catch (persistError) {
           this.log("error", `Interrupted assistant persistence failed: ${persistError.message || String(persistError)}`);
         }
+        // Status copy reflects whether Resume (tools) or Continue (text) applies.
+        const durableInterrupted = ownerConversation?.messages.at(-1);
+        const durableHasToolResume = hasToolResumeSnapshot(durableInterrupted);
+        const resumeLabel = hasTools || durableHasToolResume
+          ? "ready to resume"
+          : streamedText
+            ? "ready to continue"
+            : "ready to retry";
         this.failedMessage = this.appendMessage(
           "assistant",
-          isCancel ? "Turn stopped." : `Turn failed: ${formatTurnError(error)}`,
+          isCancel
+            ? "Turn stopped."
+            : isMaxRounds
+              ? "Tool-round limit reached · ready to resume"
+              : `Turn failed: ${formatTurnError(error)}`,
           { error: true, retry: true },
         );
-        status.textContent = isCancel ? "Turn stopped · ready to resume" : "Turn interrupted · ready to retry";
-        this.log(isCancel ? "info" : "error", isCancel
+        status.textContent = isCancel
+          ? `Turn stopped · ${resumeLabel}`
+          : isMaxRounds
+            ? "Tool-round limit · ready to resume"
+            : `Turn interrupted · ${resumeLabel}`;
+        this.log(isCancel || isMaxRounds ? "info" : "error", isCancel
           ? `Agent turn stopped trace=${this.activeTraceId}`
-          : `Agent turn failed: ${formatTurnError(error)}`);
+          : isMaxRounds
+            ? `Agent turn hit tool-round limit trace=${this.activeTraceId}`
+            : `Agent turn failed: ${formatTurnError(error)}`);
       } else if (isCancel) {
         this.sealStreamingToolCardsIncomplete(streamState);
         if (pending && streamState?.streamedText) {
@@ -475,26 +553,50 @@ export class AgentConversationController {
         this.log("info", `Agent turn stopped trace=${this.activeTraceId}`);
       } else {
         // Keep streamed UI visible even when the backend omitted a resume
-        // snapshot (e.g. failure before any tool progress).
+        // snapshot (e.g. failure before any tool progress). Main may still
+        // have sealed interrupted while IPC dropped details.partial.
+        try {
+          ownerConversation = await this.shell.agentConversations.get(ownerConversationId);
+          if (this.conversation?.id === ownerConversationId) this.conversation = ownerConversation;
+        } catch {
+          // ignore refresh failure
+        }
+        const mainInterrupted = ownerConversation?.messages.at(-1);
+        const hasMainInterrupt = mainInterrupted?.status === "interrupted";
         const hasStream = Boolean(
           streamState
           && (streamState.streamedText || streamState.reasoningText || streamState.toolCards.size > 0),
         );
-        if (pending && hasStream) {
+        if (pending && (hasStream || hasMainInterrupt)) {
           this.sealStreamingToolCardsIncomplete(streamState);
           this.sealStreamingMessage(pending, {
-            content: streamState.streamedText || "",
-            ...(streamState.reasoningText ? { reasoning: streamState.reasoningText } : {}),
+            content: streamState?.streamedText || mainInterrupted?.content || "",
+            status: hasMainInterrupt ? "interrupted" : undefined,
+            ...(streamState?.reasoningText ? { reasoning: streamState.reasoningText } : {}),
+            ...(mainInterrupted?.rounds !== undefined ? { rounds: mainInterrupted.rounds } : {}),
+            ...(mainInterrupted?.traceId ? { traceId: mainInterrupted.traceId } : {}),
           });
         } else {
           pending?.remove();
         }
+        const canToolResume = hasMainInterrupt && hasToolResumeSnapshot(mainInterrupted)
+          && Array.isArray(mainInterrupted.resumeMessages) && mainInterrupted.resumeMessages.length;
+        const canTextContinue = hasMainInterrupt
+          && typeof mainInterrupted.content === "string"
+          && mainInterrupted.content.trim();
+        const canResume = Boolean(canToolResume || canTextContinue);
         this.failedMessage = this.appendMessage(
           "assistant",
           `Turn failed: ${formatTurnError(error)}`,
-          { error: true, retry: retryIsSafe },
+          { error: true, retry: retryIsSafe || canResume },
         );
-        status.textContent = retryIsSafe ? "Turn failed · ready to retry" : "Local conversation error";
+        status.textContent = canToolResume
+          ? "Turn interrupted · ready to resume"
+          : canTextContinue
+            ? "Turn interrupted · ready to continue"
+            : retryIsSafe
+              ? "Turn failed · ready to retry"
+              : "Local conversation error";
         this.log("error", `Agent turn failed: ${formatTurnError(error)}`);
       }
     } finally {
@@ -509,6 +611,330 @@ export class AgentConversationController {
         stopButton.hidden = true;
         stopButton.classList.remove("is-stopping");
         input.focus();
+      }
+    }
+    // Outer multi-turn auto-continue: after a successful sealed turn, if the
+    // backend says there are still open todos and the chain budget has not
+    // been exhausted, start the next turn without a user message. The chain
+    // aborts on Stop, user input, or conversation switch.
+    if (sealedResult?.autoContinue?.shouldContinue && ownerConversationId) {
+      await this.runAutoContinueChain(
+        ownerConversationId,
+        sealedResult.autoContinue.continuesUsed + 1,
+        sealedResult.autoContinue.maxAutoContinues,
+      );
+    }
+  }
+
+  /**
+   * Run the auto-continue chain: successive turns with no user message, each
+   * carrying an incrementing autoContinueIndex. The backend injects the
+   * continue steering prompt and attaches a fresh autoContinue decision to
+   * each result. The chain stops when shouldContinue is false, the user
+   * interacts (Stop / new message / conversation switch), or a turn fails.
+   *
+   * @param {string} conversationId
+   * @param {number} startIndex - the autoContinueIndex for the first chained turn
+   * @param {number} maxAutoContinues - from the previous result's decision (0 = unlimited)
+   */
+  async runAutoContinueChain(conversationId, startIndex, maxAutoContinues = 10) {
+    let index = startIndex;
+    while (true) {
+      // Abort guards — checked before acquiring the mutex.
+      if (this.conversation?.id !== conversationId) return;
+      if (this.turnPending) return; // user started a new turn
+      if (this.autoContinueAborted) { this.autoContinueAborted = false; return; }
+
+      const input = $("#agent-input");
+      const sendButton = $("#agent-send-btn");
+      const stopButton = $("#agent-stop-btn");
+      const status = $("#agent-provider-status");
+      let pending = null;
+      let streamState = null;
+      let turnEnded = false;
+      let turnEndResolve = null;
+      const turnEndPromise = new Promise((resolve) => { turnEndResolve = resolve; });
+      let sealedResult = null;
+
+      this.turnPending = true;
+      this.turnOwnerConversationId = conversationId;
+      try {
+        let conv = await this.shell.agentConversations.get(conversationId);
+        if (this.conversation?.id !== conversationId) return;
+        this.conversation = conv;
+        if (!conv) return;
+
+        this.activeTraceId = crypto.randomUUID();
+        input.disabled = true;
+        sendButton.disabled = true;
+        stopButton.hidden = false;
+        const chainLabel = maxAutoContinues === 0
+          ? `Continuing tasks… (${index})`
+          : `Continuing tasks… (${index}/${maxAutoContinues})`;
+        status.textContent = chainLabel;
+
+        const selectedModel = this.getActiveModel();
+        const turnMessages = buildAgentContext(conv);
+        const baseTokens = estimateContextTokens(turnMessages);
+        let liveTokens = baseTokens;
+        const setContextStatus = (tokens) => {
+          liveTokens = Math.max(liveTokens, tokens);
+          if (selectedModel) status.textContent = `${formatContextUsage(liveTokens, selectedModel.contextWindow)} · ${chainLabel}`;
+        };
+        setContextStatus(baseTokens);
+        const canPaint = () => this.conversation?.id === conversationId && Boolean(streamState.message?.isConnected);
+        pending = this.createStreamingMessage();
+        streamState = {
+          message: pending,
+          lastKind: null,
+          reasoningEl: null,
+          reasoningText: "",
+          toolCards: new Map(),
+          textBubble: null,
+          streamedText: "",
+          textRenderPending: false,
+          reasoningRenderPending: false,
+          canvasRenderTimer: 0,
+        };
+        this.liveStreamState = streamState;
+        const appendStreamChild = (node) => {
+          if (!canPaint()) return;
+          streamState.message.appendChild(node);
+          this.scrollToBottom();
+        };
+
+        const result = await this.runTurn(turnMessages, {
+          traceId: this.activeTraceId,
+          workspace: conv.workspace,
+          conversationId,
+          autoContinueIndex: index,
+          onDelta: (delta) => {
+            if (!canPaint()) return;
+            if (streamState.lastKind !== "text") {
+              streamState.textBubble = element("div", "agent-bubble");
+              streamState.streamedText = "";
+              appendStreamChild(streamState.textBubble);
+              streamState.lastKind = "text";
+            }
+            streamState.streamedText += delta;
+            if (!streamState.textRenderPending) {
+              streamState.textRenderPending = true;
+              requestAnimationFrame(() => {
+                streamState.textRenderPending = false;
+                if (streamState.textBubble && canPaint()) {
+                  streamState.textBubble.innerHTML = renderAssistantMarkdown(streamState.streamedText);
+                  this.scheduleStreamingCanvasEnhancement(streamState, conversationId);
+                  this.scrollToBottom();
+                }
+              });
+            }
+            setContextStatus(liveTokens + Math.ceil(delta.length / 4));
+          },
+          onReasoningDelta: (delta) => {
+            if (!canPaint()) return;
+            if (streamState.lastKind !== "reasoning") {
+              streamState.reasoningEl = this.createStreamingReasoningBlock();
+              streamState.reasoningText = "";
+              appendStreamChild(streamState.reasoningEl);
+              streamState.lastKind = "reasoning";
+            }
+            streamState.reasoningText += delta;
+            if (!streamState.reasoningRenderPending) {
+              streamState.reasoningRenderPending = true;
+              requestAnimationFrame(() => {
+                streamState.reasoningRenderPending = false;
+                const content = streamState.reasoningEl?.querySelector(".agent-reasoning-content");
+                if (content && canPaint()) {
+                  content.innerHTML = renderReasoningMarkdown(streamState.reasoningText);
+                  this.scrollToBottom();
+                }
+              });
+            }
+            setContextStatus(liveTokens + Math.ceil(delta.length / 4));
+          },
+          onToolCallStart: (payload) => {
+            if (!canPaint()) return;
+            streamState.lastKind = "tool";
+            const card = this.createStreamingToolCard(payload.callId, payload.name, payload.args);
+            streamState.toolCards.set(payload.callId, card);
+            appendStreamChild(card);
+          },
+          onToolCallEnd: (payload) => {
+            if (!canPaint()) return;
+            const card = streamState.toolCards.get(payload.callId);
+            if (card) {
+              const next = this.updateStreamingToolCard(card, payload);
+              if (next) streamState.toolCards.set(payload.callId, next);
+            }
+          },
+          onAskRequest: (payload) => {
+            if (!canPaint()) return;
+            streamState.lastKind = "tool";
+            const callId = payload.callId;
+            const args = {
+              question: payload.question,
+              options: payload.options,
+              allow_free_text: payload.allowFreeText === true,
+              multi_select: payload.multiSelect === true,
+            };
+            const card = this.createAskCard(callId, args, { sealed: false });
+            const existing = streamState.toolCards.get(callId);
+            if (existing?.parentNode) existing.replaceWith(card);
+            else appendStreamChild(card);
+            streamState.toolCards.set(callId, card);
+            this.log("info", `Waiting for confirmation call=${callId}`);
+            status.textContent = "Waiting for confirmation…";
+            this.scrollToBottom();
+          },
+          onContextUpdate: (payload) => {
+            setContextStatus(resolveContextBadgeTokens({
+              estimatedTokens: Number(payload?.estimatedTokens) || 0,
+              inputTokens: Number(payload?.inputTokens) || 0,
+              liveTokens,
+            }));
+          },
+          onTurnEnd: () => {
+            this.sealStreamingToolCardsIncomplete(streamState);
+            turnEnded = true;
+            turnEndResolve?.();
+          },
+          onCancelRequested: () => {
+            if (!canPaint()) return;
+            const btn = $("#agent-stop-btn");
+            if (btn) btn.classList.add("is-stopping");
+          },
+          onStreamGap: (traceId, streamSeq) => {
+            if (!canPaint()) return;
+            this.log?.("warn", `Stream gap at streamSeq=${streamSeq} trace=${traceId} — refetching projection`);
+            this.surfaceStreamGap(traceId, streamSeq);
+            void this.restoreActiveTurnUi().then(() => this.clearStreamGapStatus());
+          },
+        });
+
+        // Seal the result — main process may have already persisted via
+        // sealAgentTurn, so refresh from the store first.
+        conv = await this.shell.agentConversations.get(conversationId);
+        if (this.conversation?.id === conversationId) this.conversation = conv;
+        const lastMessage = conv?.messages.at(-1);
+        const sealedByMain = lastMessage?.role === "assistant" && lastMessage?.traceId === result.traceId;
+        if (!sealedByMain) {
+          const toolCalls = Array.isArray(result.toolCalls)
+            ? result.toolCalls.map(toConversationToolCall)
+            : undefined;
+          const steps = sanitizeAssistantSteps(result.steps);
+          const assistantMessage = {
+            role: "assistant",
+            content: result.text,
+            traceId: result.traceId,
+            model: result.model,
+            rounds: result.rounds,
+            reasoning: result.reasoning,
+            ...(toolCalls?.length ? { toolCalls } : {}),
+            ...(steps?.length ? { steps } : {}),
+          };
+          conv = await this.shell.agentConversations.append(conversationId, assistantMessage);
+          if (this.conversation?.id === conversationId) this.conversation = conv;
+        }
+        const savedMessage = conv.messages.at(-1);
+        this.sealStreamingMessage(pending, savedMessage ?? result);
+        await this.refresh();
+        this.log("info", `Auto-continue ${index} completed trace=${result.traceId} rounds=${result.rounds}`);
+        sealedResult = result;
+
+        if (!result.autoContinue?.shouldContinue) {
+          this.log("info", `Auto-continue chain ended: ${result.autoContinue?.reason ?? "unknown"} after ${index} continuation(s)`);
+          status.textContent = "Idle";
+          break;
+        }
+        index++;
+      } catch (error) {
+        if (error.code === "AGENT_TURN_CANCELLED" && !turnEnded) {
+          await Promise.race([turnEndPromise, new Promise((r) => setTimeout(r, 2000))]);
+        }
+        const partial = error.details?.partial;
+        const isCancel = error.code === "AGENT_TURN_CANCELLED";
+        const sealedByMain = error.details?.sealedInterrupted === true;
+        if (partial) {
+          this.sealStreamingToolCardsIncomplete(streamState);
+          this.sealStreamingMessage(pending, { ...partial, status: "interrupted" });
+          if (pending && isCancel) pending.classList.add("agent-message-stopped");
+          const streamedText = partial.text?.trim() || streamState?.streamedText || "";
+          const hasTools = Array.isArray(partial.toolCalls) && partial.toolCalls.length > 0;
+          const stub = isCancel
+            ? `Auto-continue stopped after ${partial.rounds} tool round${partial.rounds === 1 ? "" : "s"}.`
+            : `Auto-continue interrupted after ${partial.rounds} tool round${partial.rounds === 1 ? "" : "s"}.`;
+          try {
+            let conv = await this.shell.agentConversations.get(conversationId);
+            const last = conv?.messages.at(-1);
+            const mainSealed = sealedByMain || (last?.status === "interrupted" && last?.traceId === partial.traceId);
+            if (!mainSealed) {
+              const interruptedMessage = {
+                role: "assistant",
+                content: streamedText || stub,
+                status: "interrupted",
+                interruptReason: isCancel ? "cancel" : "provider",
+                traceId: partial.traceId,
+                model: partial.model,
+                rounds: partial.rounds,
+                steps: sanitizeAssistantSteps(partial.steps),
+                ...(hasTools
+                  ? { toolCalls: partial.toolCalls.map(toConversationToolCall) }
+                  : {}),
+                ...(hasTools && Array.isArray(partial.messages) && partial.messages.length
+                  ? { resumeMessages: partial.messages }
+                  : {}),
+              };
+              conv = await this.shell.agentConversations.append(conversationId, interruptedMessage);
+            }
+            if (this.conversation?.id === conversationId) this.conversation = conv;
+          } catch (persistError) {
+            this.log("error", `Auto-continue interrupted persistence failed: ${persistError.message || String(persistError)}`);
+          }
+        } else if (isCancel) {
+          this.sealStreamingToolCardsIncomplete(streamState);
+          if (pending && streamState?.streamedText) {
+            this.sealStreamingMessage(pending, { content: streamState.streamedText });
+            pending.classList.add("agent-message-stopped");
+          } else {
+            pending?.remove();
+          }
+        } else {
+          const hasStream = Boolean(
+            streamState
+            && (streamState.streamedText || streamState.reasoningText || streamState.toolCards.size > 0),
+          );
+          if (pending && hasStream) {
+            this.sealStreamingToolCardsIncomplete(streamState);
+            this.sealStreamingMessage(pending, {
+              content: streamState.streamedText || "",
+              ...(streamState.reasoningText ? { reasoning: streamState.reasoningText } : {}),
+            });
+          } else {
+            pending?.remove();
+          }
+          this.failedMessage = this.appendMessage(
+            "assistant",
+            `Auto-continue failed: ${formatTurnError(error)}`,
+            { error: true, retry: true },
+          );
+        }
+        status.textContent = isCancel ? "Auto-continue stopped" : "Auto-continue failed · ready to retry";
+        this.log(isCancel ? "info" : "error", isCancel
+          ? `Auto-continue stopped at index=${index} trace=${this.activeTraceId}`
+          : `Auto-continue failed at index=${index}: ${formatTurnError(error)}`);
+        break;
+      } finally {
+        this.turnPending = false;
+        this.turnOwnerConversationId = null;
+        this.liveStreamState = null;
+        this.activeTraceId = "";
+        if (this.conversation?.id === conversationId) {
+          input.disabled = false;
+          sendButton.disabled = false;
+          stopButton.hidden = true;
+          stopButton.classList.remove("is-stopping");
+          input.focus();
+        }
       }
     }
   }
@@ -727,6 +1153,19 @@ export class AgentConversationController {
     });
     this.composerResizeObserver.observe(input);
     this.resizeComposerInput();
+    $("#agent-room-info-trigger")?.addEventListener("click", () => this.toggleRoomInfo());
+    $("#agent-room-info-close")?.addEventListener("click", () => this.toggleRoomInfo(false));
+    document.addEventListener("pointerdown", (event) => {
+      const info = $("#agent-room-info");
+      if (!info || info.hidden || !info.contains(event.target)) this.toggleRoomInfo(false, { focusTrigger: false });
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") this.toggleRoomInfo(false);
+    });
+    $("#agent-thread").addEventListener("scroll", (event) => {
+      const thread = event.currentTarget;
+      this.threadShouldStickToBottom = this.isThreadAtBottom(thread);
+    }, { passive: true });
     $("#agent-stop-btn").addEventListener("click", () => void this.stop());
     $("#agent-attach-btn").addEventListener("click", () => $("#agent-file-input").click());
     $("#agent-file-input").addEventListener("change", (event) => void this.addAttachments(event.target.files));
@@ -734,6 +1173,8 @@ export class AgentConversationController {
       this.create(undefined, { bypassTurnGuard: true }),
       "Could not create conversation",
     ));
+    $("#agent-mobile-conversations-btn")?.addEventListener("click", () => this.toggleMobileConversations());
+    $("#agent-mobile-conversations-overlay")?.addEventListener("click", () => this.toggleMobileConversations(false));
     $("#agent-conversation-search").addEventListener("input", () => this.renderList());
     $("#agent-delete-overlay").addEventListener("click", () => this.closeDeleteDialog());
     $("#agent-delete-close").addEventListener("click", () => this.closeDeleteDialog());
@@ -817,6 +1258,7 @@ export class AgentConversationController {
   }
 
   async stop() {
+    this.autoContinueAborted = true;
     const button = $("#agent-stop-btn");
     const activeSubagent = this.conversation?.subagentRuns?.find((r) => r.status === "running");
     let cancelPromise = null;
@@ -849,6 +1291,7 @@ export class AgentConversationController {
   async refresh() {
     this.conversations = [...await this.shell.agentConversations.list()];
     this.renderList();
+    this.updateRoomInfo();
   }
 
   async open(conversationId) {
@@ -866,6 +1309,7 @@ export class AgentConversationController {
     this.renderList();
     this.updateContextStatus();
     this.updateWorkspaceLabel();
+    this.updateRoomInfo();
     this.updateAcpStatus();
     this.mountTodoStrip(conversation.id);
     void this.restoreRunningTurnState();
@@ -995,6 +1439,38 @@ export class AgentConversationController {
     label.textContent = ws ? ws.split(/[\\/]/).pop() || ws : "Home";
     const btn = $("#agent-workspace-btn");
     if (btn) btn.title = ws || "Home (user home directory)";
+  }
+
+  updateRoomInfo() {
+    const info = $("#agent-room-info");
+    const title = $("#agent-room-info-title");
+    const toolCount = $("#agent-room-tool-count");
+    const compactionCount = $("#agent-room-compaction-count");
+    const id = $("#agent-room-id");
+    const copy = $("#agent-room-id-copy");
+    if (!info || !title || !toolCount || !compactionCount || !id || !copy) return;
+    const metadata = getConversationRoomMetadata(this.conversation);
+    const hasRoom = Boolean(metadata.conversationId);
+    info.hidden = !hasRoom;
+    title.textContent = this.conversation?.title || "Conversation details";
+    toolCount.textContent = String(metadata.toolCallCount);
+    compactionCount.textContent = String(metadata.compactionCount);
+    id.textContent = hasRoom ? metadata.conversationId : "—";
+    copy.disabled = !hasRoom;
+    copy.title = hasRoom ? "Copy conversation ID" : "No conversation selected";
+    copy.onclick = hasRoom ? () => void this.copyMessage(metadata.conversationId, copy) : null;
+    if (!hasRoom) this.toggleRoomInfo(false, { focusTrigger: false });
+  }
+
+  toggleRoomInfo(force, { focusTrigger = true } = {}) {
+    const info = $("#agent-room-info");
+    const trigger = $("#agent-room-info-trigger");
+    const popover = $("#agent-room-info-popover");
+    if (!info || !trigger || !popover) return;
+    const open = typeof force === "boolean" ? force : popover.hidden;
+    popover.hidden = !open;
+    trigger.setAttribute("aria-expanded", String(open));
+    if (!open && focusTrigger) trigger.focus({ preventScroll: true });
   }
 
   async updateAcpStatus() {
@@ -1170,7 +1646,10 @@ export class AgentConversationController {
     const time = element("span", "agent-conversation-time");
     time.textContent = `${formatTime(conversation.updatedAt)} · ${conversation.messageCount} message${conversation.messageCount === 1 ? "" : "s"}`;
     open.append(title, time);
-    open.addEventListener("click", () => this.runUiAction(this.open(conversation.id), "Could not open conversation"));
+    open.addEventListener("click", () => {
+      this.toggleMobileConversations(false);
+      this.runUiAction(this.open(conversation.id), "Could not open conversation");
+    });
     const remove = element("button", "agent-conversation-delete", "×");
     remove.type = "button";
     remove.setAttribute("aria-label", `Delete ${conversation.title}`);
@@ -1179,19 +1658,60 @@ export class AgentConversationController {
     return row;
   }
 
-  scrollToBottom() {
+  toggleMobileConversations(force) {
+    const shell = $("#agent-shell");
+    const button = $("#agent-mobile-conversations-btn");
+    const overlay = $("#agent-mobile-conversations-overlay");
+    if (!shell || !button || !overlay) return;
+    const open = typeof force === "boolean" ? force : !shell.classList.contains("is-conversations-open");
+    shell.classList.toggle("is-conversations-open", open);
+    button.setAttribute("aria-expanded", String(open));
+    overlay.hidden = !open;
+    if (open) $("#agent-conversation-search")?.focus();
+    else button.focus({ preventScroll: true });
+  }
+
+  isThreadAtBottom(thread = $("#agent-thread")) {
+    if (!thread) return true;
+    return thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 4;
+  }
+
+  isSubpaneAtBottom(body = $("#agent-subpane-body")) {
+    if (!body) return true;
+    return body.scrollHeight - body.scrollTop - body.clientHeight <= 4;
+  }
+
+  scrollSubpaneToBottom({ force = false } = {}) {
+    const body = $("#agent-subpane-body");
+    if (!body || (!force && !this.subpaneShouldStickToBottom)) return;
+    const apply = () => {
+      if (!force && !this.subpaneShouldStickToBottom) return;
+      body.scrollTop = body.scrollHeight;
+    };
+    apply();
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(apply);
+  }
+
+  scrollToBottom({ force = false } = {}) {
     const thread = $("#agent-thread");
-    if (!thread) return;
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        thread.scrollTop = thread.scrollHeight;
-      });
-    });
+    if (!thread || (!force && !this.threadShouldStickToBottom)) return;
+    const apply = () => {
+      if (!force && !this.threadShouldStickToBottom) return;
+      thread.scrollTop = thread.scrollHeight;
+    };
+    // Apply immediately so background-window frame throttling cannot make the
+    // reader fall behind. A single frame then settles any pending layout.
+    apply();
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(apply);
   }
 
   renderThread() {
     const thread = $("#agent-thread");
     if (!thread) return;
+    this.clearAcpAttentionStack();
+    // A room load/switch is an explicit navigation event: start at the latest
+    // message regardless of where the previous room was scrolled.
+    this.threadShouldStickToBottom = true;
     // Chat switches destroy the DOM; drop live card-stream references so a
     // later restore can re-attach to recreated nodes without writing to
     // detached ones. Also dispose subagent event subscriptions so handlers
@@ -1228,7 +1748,7 @@ export class AgentConversationController {
     });
     void this.restoreActiveTurnUi();
     this.restoreRunningSubagentUi();
-    this.scrollToBottom();
+    this.scrollToBottom({ force: true });
     this.restoreCanvas();
     this.restoreSubpane();
   }
@@ -1459,7 +1979,7 @@ export class AgentConversationController {
     message.appendChild(footer);
 
     thread.appendChild(message);
-    thread.scrollTop = thread.scrollHeight;
+    this.scrollToBottom();
     if (role === "assistant" && !meta.pending && !meta.error) {
       this.enhanceCodeFences(message, meta.canvasMessageIndex ?? this.currentMessageIndex());
     }
@@ -1483,17 +2003,28 @@ export class AgentConversationController {
     $("#agent-canvas-overlay")?.addEventListener("click", () => this.closeCanvasSidebar());
     this.bindCanvasResize();
     document.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape") return;
       const pane = $("#agent-canvas");
       if (!pane || pane.hidden || !pane.classList.contains("is-open")) return;
+      if (event.key === "Tab") {
+        this.trapDrawerFocus(event, pane);
+        return;
+      }
+      if (event.key !== "Escape") return;
       this.closeCanvasSidebar();
     });
     $("#agent-subpane-close")?.addEventListener("click", () => this.closeSubpaneSidebar());
     $("#agent-subpane-overlay")?.addEventListener("click", () => this.closeSubpaneSidebar());
+    $("#agent-subpane-body")?.addEventListener("scroll", (event) => {
+      this.subpaneShouldStickToBottom = this.isSubpaneAtBottom(event.currentTarget);
+    }, { passive: true });
     document.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape") return;
       const subpane = $("#agent-subpane");
       if (!subpane || subpane.hidden || !subpane.classList.contains("is-open")) return;
+      if (event.key === "Tab") {
+        this.trapDrawerFocus(event, subpane);
+        return;
+      }
+      if (event.key !== "Escape") return;
       this.closeSubpaneSidebar();
     });
   }
@@ -1698,20 +2229,12 @@ export class AgentConversationController {
       onPermissionRequest: (payload) => {
         if (!this.isViewingSubagentOwner()) return;
         const card = this.createAcpPermissionCard(payload);
-        const body = $("#agent-subpane-body");
-        if (card && body) {
-          body.appendChild(card);
-          body.scrollTop = body.scrollHeight;
-        }
+        if (card) this.mountAcpAttentionCard(card);
       },
       onAskRequest: (payload) => {
         if (!this.isViewingSubagentOwner()) return;
         const card = this.createAcpAskCard(payload);
-        const body = $("#agent-subpane-body");
-        if (card && body) {
-          body.appendChild(card);
-          body.scrollTop = body.scrollHeight;
-        }
+        if (card) this.mountAcpAttentionCard(card);
       },
     });
   }
@@ -1720,6 +2243,9 @@ export class AgentConversationController {
     const pane = $("#agent-canvas");
     const overlay = $("#agent-canvas-overlay");
     if (!pane) return;
+    this.canvasReturnFocus = document.activeElement instanceof HTMLElement && !pane.contains(document.activeElement)
+      ? document.activeElement
+      : this.canvasReturnFocus;
     pane.hidden = false;
     if (overlay) {
       overlay.hidden = false;
@@ -1738,6 +2264,8 @@ export class AgentConversationController {
     const pane = $("#agent-canvas");
     const body = $("#agent-canvas-body");
     const overlay = $("#agent-canvas-overlay");
+    const returnFocus = this.canvasReturnFocus;
+    this.canvasReturnFocus = null;
     pane?.classList.remove("is-open");
     overlay?.classList.remove("is-open");
     if (body) body.textContent = "";
@@ -1745,6 +2273,7 @@ export class AgentConversationController {
     const hide = () => {
       if (pane) pane.hidden = true;
       if (overlay) overlay.hidden = true;
+      if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
     };
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       hide();
@@ -1753,12 +2282,17 @@ export class AgentConversationController {
     window.setTimeout(hide, 260);
   }
 
-  enhanceCodeFences(messageEl, messageIndex) {
+  enhanceCodeFences(messageEl, messageIndex, { onlyCompleteCanvas = false, completeCanvasKeys = null } = {}) {
     if (!messageEl) return;
     const conversationId = this.conversation?.id;
     const blocks = messageEl.querySelectorAll("pre > code");
     if (!blocks.length) return;
     let canvasFenceIndex = 0;
+    const allowedCanvasKeys = onlyCompleteCanvas
+      ? (completeCanvasKeys ?? new Set(extractCanvasCandidates(messageEl.querySelector(".agent-bubble")?.textContent ?? "")
+        .filter((candidate) => candidate.complete)
+        .map((candidate) => `${candidate.kind}\u0000${candidate.source}`)))
+      : null;
     blocks.forEach((code) => {
       const pre = code.parentElement;
       if (!pre || pre.dataset.codeActionsBound === "true") return;
@@ -1766,7 +2300,8 @@ export class AgentConversationController {
       const lang = langClass ? langClass.slice("language-".length) : "";
       const rawSource = code.textContent ?? "";
       const resolved = this.canvasEnabled ? resolveCanvasFence(lang, rawSource) : null;
-      if (resolved && conversationId) {
+      const canvasKey = resolved ? `${resolved.kind}\u0000${resolved.source}` : "";
+      if (resolved && conversationId && (!allowedCanvasKeys || allowedCanvasKeys.has(canvasKey))) {
         const { kind, source } = resolved;
         const artifactId = canvasArtifactId(conversationId, String(messageIndex), canvasFenceIndex);
         const tooLarge = source.length > CANVAS_ARTIFACT_MAX_SOURCE_BYTES;
@@ -1867,7 +2402,7 @@ export class AgentConversationController {
   async mountInlineHtmlPreview(pre, card, ctx) {
     const existing = pre.parentElement?.querySelector(`.agent-canvas-inline-preview[data-artifact-id="${cssEscape(ctx.artifactId)}"]`);
     if (existing) return;
-    const result = await renderArtifact({ kind: ctx.kind, source: ctx.source });
+    const result = await this.renderCanvasArtifact(ctx);
     const container = element("div", "agent-canvas-inline-preview");
     container.setAttribute("data-artifact-id", ctx.artifactId);
     if (result.type === "html") {
@@ -1888,7 +2423,7 @@ export class AgentConversationController {
     const container = element("div", "agent-canvas-inline");
     container.setAttribute("aria-label", ctx.title);
     container.setAttribute("data-artifact-id", ctx.artifactId);
-    const result = await renderArtifact({ kind: ctx.kind, source: ctx.source });
+    const result = await this.renderCanvasArtifact(ctx);
     if (result.type === "svg" && result.svg) {
       container.innerHTML = result.svg;
       bindCanvasZoom(container);
@@ -1914,6 +2449,37 @@ export class AgentConversationController {
     }
     // Leave the original code block visible; do not crash on a bad diagram.
     return false;
+  }
+
+  /**
+   * Render a canvas artifact with a bounded source cache. Streaming markdown
+   * rebuilds the code fence DOM frequently; reusing the SVG keeps live preview
+   * responsive without invoking Mermaid for unchanged source.
+   */
+  async renderCanvasArtifact(ctx) {
+    const key = `${ctx.kind}\u0000${ctx.source}`;
+    const cached = this.canvasRenderCache.get(key);
+    if (cached) return cached;
+    const renderPromise = renderArtifact({ kind: ctx.kind, source: ctx.source });
+    this.canvasRenderCache.set(key, renderPromise);
+    while (this.canvasRenderCache.size > 24) {
+      this.canvasRenderCache.delete(this.canvasRenderCache.keys().next().value);
+    }
+    return renderPromise;
+  }
+
+  scheduleStreamingCanvasEnhancement(streamState, conversationId) {
+    if (!this.canvasEnabled || !conversationId || streamState.canvasRenderTimer) return;
+    const candidates = extractCanvasCandidates(streamState.streamedText);
+    const completeCanvasKeys = new Set(candidates
+      .filter((candidate) => candidate.complete && candidate.kind === "mermaid")
+      .map((candidate) => `${candidate.kind}\u0000${candidate.source}`));
+    if (!completeCanvasKeys.size) return;
+    streamState.canvasRenderTimer = window.setTimeout(() => {
+      streamState.canvasRenderTimer = 0;
+      if (this.conversation?.id !== conversationId || !streamState.message?.isConnected) return;
+      this.enhanceCodeFences(streamState.message, this.currentMessageIndex(), { onlyCompleteCanvas: true, completeCanvasKeys });
+    }, 350);
   }
 
   async openCanvasSidebar(ctx) {
@@ -2134,6 +2700,10 @@ export class AgentConversationController {
     const pane = $("#agent-subpane");
     const overlay = $("#agent-subpane-overlay");
     if (!pane) return;
+    this.subpaneReturnFocus = document.activeElement instanceof HTMLElement && !pane.contains(document.activeElement)
+      ? document.activeElement
+      : this.subpaneReturnFocus;
+    this.subpaneShouldStickToBottom = true;
     this.closeCanvasSidebar();
     pane.hidden = false;
     if (overlay) {
@@ -2151,17 +2721,35 @@ export class AgentConversationController {
   closeSubpaneDrawerUi() {
     const pane = $("#agent-subpane");
     const overlay = $("#agent-subpane-overlay");
+    const returnFocus = this.subpaneReturnFocus;
+    this.subpaneReturnFocus = null;
     pane?.classList.remove("is-open");
     overlay?.classList.remove("is-open");
     const hide = () => {
       if (pane) pane.hidden = true;
       if (overlay) overlay.hidden = true;
+      if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
     };
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       hide();
       return;
     }
     window.setTimeout(hide, 260);
+  }
+
+  trapDrawerFocus(event, pane) {
+    const focusable = [...pane.querySelectorAll("button, [href], input, textarea, select, [tabindex]:not([tabindex=\"-1\"])")]
+      .filter((node) => !node.disabled && !node.hidden && node.getClientRects().length > 0);
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 
   closeSubpaneSidebar() {
@@ -2315,7 +2903,7 @@ export class AgentConversationController {
       if (content) content.innerHTML = renderReasoningMarkdown(state.thoughtContent);
       body.appendChild(state.thoughtEl);
     }
-    body.scrollTop = body.scrollHeight;
+    this.scrollSubpaneToBottom({ force: true });
   }
 
   appendSubpaneThought(delta) {
@@ -2337,7 +2925,7 @@ export class AgentConversationController {
     }
     const content = state.thoughtEl.querySelector(".agent-reasoning-content");
     if (content) content.innerHTML = renderReasoningMarkdown(state.thoughtContent);
-    body.scrollTop = body.scrollHeight;
+    this.scrollSubpaneToBottom();
   }
 
   appendSubpaneText(delta) {
@@ -2358,7 +2946,7 @@ export class AgentConversationController {
       body.appendChild(state.textEl);
     }
     state.textEl.innerHTML = renderAssistantMarkdown(state.textContent);
-    body.scrollTop = body.scrollHeight;
+    this.scrollSubpaneToBottom();
   }
 
   appendSubpaneToolCall(call, options = {}) {
@@ -2397,7 +2985,7 @@ export class AgentConversationController {
     }
     terminal.dataset.callId = call.id;
     body.appendChild(terminal);
-    body.scrollTop = body.scrollHeight;
+    this.scrollSubpaneToBottom();
   }
 
   updateSubpaneToolCall(callId, status, summary) {
@@ -2789,6 +3377,7 @@ export class AgentConversationController {
     const providerId = result.providerId || toolCall.args?.provider_id || "—";
     const title = toolCall.args?.title || result.title || "Subagent run";
     const status = result.ok === true ? "ok" : result.ok === false ? "fail" : "running";
+    if (status === "ok") return null;
     const summary = result.summary || "";
     const error = formatSubagentError(result.error) || formatSubagentError(toolCall.error);
     const run = {
@@ -2858,7 +3447,7 @@ export class AgentConversationController {
     );
     message.appendChild(identity);
     thread.appendChild(message);
-    thread.scrollTop = thread.scrollHeight;
+    this.scrollToBottom();
     return message;
   }
 
@@ -2898,7 +3487,7 @@ export class AgentConversationController {
     }
     const card = this.toolTerminal(
       { id: callId, name, ok: true, args },
-      { open: true, running: true },
+      { open: false, running: true },
     );
     if (args && typeof args === "object") card._toolArgs = args;
     return card;
@@ -2907,6 +3496,7 @@ export class AgentConversationController {
   updateStreamingToolCard(card, payload) {
     if (card.classList.contains("agent-ask-card")) {
       this.sealAskCard(card, payload);
+      this.scrollToBottom();
       return card;
     }
     if (card.dataset.streamingSubagent === "1" || card.classList.contains("agent-subagent-card")) {
@@ -2920,9 +3510,12 @@ export class AgentConversationController {
       });
       if (sealed) {
         card.replaceWith(sealed);
+        this.scrollToBottom();
         return sealed;
       }
-      return card;
+      card.remove();
+      this.scrollToBottom();
+      return null;
     }
     card.classList.remove("is-running");
     card.classList.toggle("is-success", payload.ok !== false);
@@ -2949,6 +3542,7 @@ export class AgentConversationController {
           || (payload.ok === false ? "Tool failed." : "ok"),
       );
     }
+    this.scrollToBottom();
     return card;
   }
 
@@ -2990,6 +3584,37 @@ export class AgentConversationController {
         if (meta) meta.textContent = "Incomplete";
       }
     }
+    // Durable store: parent-turn end must not leave status=running subagents
+    // or a stuck activeSubagentRunId (seen after IPC TIMEOUT mid deep-dive).
+    void this.failStrandedSubagentRuns("Subagent run did not finish before the parent turn ended.");
+  }
+
+  /**
+   * Mark every still-running subagent on the owner conversation as failed and
+   * clear `activeSubagentRunId`. Safe to call multiple times (no-op when idle).
+   */
+  failStrandedSubagentRuns(reason = "Subagent run did not finish before the parent turn ended.") {
+    const ownerId = this.turnOwnerConversationId || this.conversation?.id;
+    const api = this.shell?.agentConversations;
+    if (!ownerId || !api?.updateSubagentRunStatus) return Promise.resolve();
+    const running = (this.conversation?.subagentRuns ?? []).filter((run) => run.status === "running");
+    const ops = running.map((run) =>
+      api.updateSubagentRunStatus(ownerId, run.runId, "fail", { error: reason }),
+    );
+    if (ops.length === 0 && !this.conversation?.activeSubagentRunId) {
+      return Promise.resolve();
+    }
+    return Promise.all(ops)
+      .then(async (results) => {
+        let conv = results.at(-1);
+        if (api.setActiveSubagentRun && (this.conversation?.activeSubagentRunId || running.length)) {
+          conv = await api.setActiveSubagentRun(ownerId, null);
+        }
+        if (conv && this.conversation?.id === ownerId) this.conversation = conv;
+      })
+      .catch((err) => {
+        this.log?.("error", `failStrandedSubagentRuns failed: ${err?.message || String(err)}`);
+      });
   }
 
   /**
@@ -3251,6 +3876,7 @@ export class AgentConversationController {
       custom?.classList.add("is-active");
       if (textarea) textarea.value = parsed.answer || "";
     }
+    this.updateAcpAttentionState();
   }
 
   createAcpPermissionCard(payload) {
@@ -3302,6 +3928,16 @@ export class AgentConversationController {
     return card;
   }
 
+  mountAcpAttentionCard(card) {
+    const list = $("#agent-attention-list");
+    const stack = $("#agent-attention-stack");
+    if (!list || !stack || !card) return;
+    const requestId = card.dataset.acpRequestId;
+    if (requestId && list.querySelector(`[data-acp-request-id="${CSS.escape(requestId)}"]`)) return;
+    list.appendChild(card);
+    this.updateAcpAttentionState();
+  }
+
   async submitAcpPermissionCard(card, traceId, conversationId, optionId) {
     if (!this.answerAcpPermission || card.classList.contains("is-submitting")) return;
     const requestId = card.dataset.acpRequestId;
@@ -3313,15 +3949,49 @@ export class AgentConversationController {
       card.classList.add("is-sealed");
       card.querySelectorAll("button").forEach((node) => { node.disabled = true; });
       const chosen = new Set([optionId]);
+      const selectedLabel = [...card.querySelectorAll(".agent-ask-option")]
+        .find((node) => node.dataset.optionId === optionId)
+        ?.querySelector(".agent-ask-option-label")?.textContent || optionId;
       card.querySelectorAll(".agent-ask-option").forEach((node) => {
         node.classList.toggle("is-selected", chosen.has(node.dataset.optionId));
       });
-      const answerEl = element("div", "agent-ask-answer", `Allowed: ${optionId}`);
+      const answerEl = element("div", "agent-ask-answer", `Decision: ${selectedLabel}`);
       card.querySelector(".agent-ask-body")?.appendChild(answerEl);
+      card.remove();
+      this.updateAcpAttentionState();
+      const nextAction = document.querySelector("#agent-attention-list .agent-ask-card.is-pending button, #agent-input");
+      nextAction?.focus({ preventScroll: true });
     } catch (error) {
       card.classList.remove("is-submitting");
       this.notify(error instanceof Error ? error.message : "Could not answer permission", "error");
     }
+  }
+
+  updateAcpAttentionState() {
+    const stack = $("#agent-attention-stack");
+    const list = $("#agent-attention-list");
+    const count = $("#agent-attention-count");
+    const title = stack?.querySelector(".agent-attention-title");
+    const copy = stack?.querySelector(".agent-attention-copy");
+    if (!stack || !list) return;
+    const pending = list.querySelectorAll(".agent-ask-card.is-pending").length;
+    if (count) count.textContent = String(pending);
+    if (count) count.hidden = pending === 0;
+    if (title) title.textContent = pending > 0 ? "Action required" : "Decisions recorded";
+    if (copy) copy.textContent = pending > 0
+      ? "The subagent is waiting for your permission or answer."
+      : "Your subagent permissions are recorded for this run.";
+    stack.hidden = list.children.length === 0;
+    stack.classList.toggle("has-pending", pending > 0);
+  }
+
+  clearAcpAttentionStack() {
+    const stack = $("#agent-attention-stack");
+    const list = $("#agent-attention-list");
+    if (!stack || !list) return;
+    list.textContent = "";
+    stack.hidden = true;
+    stack.classList.remove("has-pending");
   }
 
   createAcpAskCard(payload) {

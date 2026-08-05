@@ -14,6 +14,14 @@ export interface AgentConversationToolCall {
   readonly error?: string;
   readonly args?: Readonly<Record<string, unknown>>;
   readonly output?: string;
+  /** Exact mid-turn projection when available; rehydrate prefers this. */
+  readonly modelOutput?: string;
+  /** Canonical status from AgentToolResult. */
+  readonly status?: "success" | "error" | "cancelled" | "timeout";
+  /** Whether the projection was truncated. */
+  readonly truncated?: boolean;
+  /** Bounded structured content (omitted if oversized). */
+  readonly structuredContent?: Record<string, unknown>;
 }
 
 export type AgentConversationStep =
@@ -34,12 +42,16 @@ export interface AgentConversationMessage {
   readonly steps?: readonly AgentConversationStep[];
   readonly status?: "complete" | "interrupted";
   readonly resumeMessages?: readonly unknown[];
+  /** Why the turn was interrupted — used by the UI to pick Resume vs Continue. */
+  readonly interruptReason?: "cancel" | "provider" | "max_rounds";
 }
 
 export interface AgentConversationCheckpoint {
   readonly summary: string;
   readonly compactedMessageCount: number;
   readonly via: "provider" | "extractive";
+  /** Number of compaction events recorded for this room. Optional for legacy checkpoints. */
+  readonly compactionCount?: number;
 }
 
 export interface AgentConversationAcp {

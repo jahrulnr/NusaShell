@@ -90,16 +90,23 @@ export class AgentToolJobStrip {
     const strip = document.getElementById("agent-tool-job-strip");
     const list = document.getElementById("agent-tool-job-list");
     if (!strip || !list) return;
-    if (this.jobs.size === 0) {
+    const visibleJobs = [...this.jobs.values()].filter((job) => job.status === "running");
+    if (visibleJobs.length === 0) {
       strip.hidden = true;
       list.textContent = "";
       return;
     }
     strip.hidden = false;
+    const runningCount = visibleJobs.length;
+    const title = strip.querySelector(".agent-tool-job-strip-title");
+    if (title) title.textContent = runningCount > 0
+      ? `Background jobs · ${runningCount} running`
+      : `Background jobs · ${this.jobs.size}`;
     list.textContent = "";
-    for (const job of this.jobs.values()) {
+    for (const job of visibleJobs) {
       const card = document.createElement("div");
       card.className = "agent-tool-job-card";
+      card.setAttribute("role", "listitem");
       card.dataset.status = job.status;
       card.dataset.handleId = job.handleId;
 
@@ -114,7 +121,10 @@ export class AgentToolJobStrip {
       badge.className = "agent-tool-job-card-badge";
       badge.textContent = STATUS_LABEL[job.status] ?? job.status;
 
-      header.append(name, badge);
+      const actions = document.createElement("div");
+      actions.className = "agent-tool-job-card-actions";
+      actions.appendChild(badge);
+      header.append(name, actions);
 
       if (job.tail) {
         const tail = document.createElement("pre");
@@ -144,7 +154,7 @@ export class AgentToolJobStrip {
           stop.textContent = "Stopping…";
           void this.onKill(job.handleId);
         });
-        card.append(stop);
+        actions.appendChild(stop);
       }
 
       list.append(card);

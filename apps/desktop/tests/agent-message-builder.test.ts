@@ -10,7 +10,7 @@ describe("agent-message-builder", () => {
       rounds: 1,
       toolCalls: [
         { id: "call-1", name: "mcp_list", ok: true, args: {}, output: "[]" },
-        { id: "call-2", name: "files_read", ok: true, args: { path: "/a" }, output: "hi" },
+        { id: "call-2", name: "read", ok: true, args: { path: "/a" }, output: "hi" },
       ],
       steps: [
         { type: "text", content: "Done." },
@@ -38,23 +38,71 @@ describe("agent-message-builder", () => {
     expect(call.ok).toBe(true);
   });
 
-  it("builds an interrupted message from a partial", () => {
+  it("builds an interrupted message from a partial with live text and resumeMessages", () => {
+    const resume = [
+      { role: "user" as const, content: "go" },
+      { role: "assistant" as const, toolCalls: [{ id: "call-1", name: "read", args: { path: "/a" } }] },
+      { role: "tool" as const, toolCallId: "call-1", name: "read", content: "hi" },
+    ];
     const partial: AgentTurnPartial = {
       traceId: "trace-2",
       rounds: 2,
-      text: "partial",
-      toolCalls: [{ id: "call-1", name: "files_read", ok: true, args: { path: "/a" }, output: "hi" }],
-      steps: [{ type: "text", content: "partial" }],
-      messages: [],
+      text: "Halfway through the essay",
+      toolCalls: [{ id: "call-1", name: "read", ok: true, args: { path: "/a" }, output: "hi" }],
+      steps: [{ type: "text", content: "Halfway through the essay" }],
+      messages: resume as AgentTurnPartial["messages"],
     };
-    const message = buildInterruptedMessage(partial);
+    const message = buildInterruptedMessage(partial, { interruptReason: "provider" });
     expect(message.role).toBe("assistant");
     expect(message.status).toBe("interrupted");
+    expect(message.interruptReason).toBe("provider");
     expect(message.traceId).toBe("trace-2");
     expect(message.rounds).toBe(2);
-    expect(message.content).toContain("interrupted after 2 tool rounds");
+    // Prefer live body over stub so Retry can text-Continue.
+    expect(message.content).toBe("Halfway through the essay");
     expect(message.toolCalls).toHaveLength(1);
     expect(message.toolCalls?.[0].args).toEqual({ path: "/a" });
+    expect(message.resumeMessages).toEqual(resume);
+  });
+
+  it("falls back to interrupted stub when partial has no live text", () => {
+    const partial: AgentTurnPartial = {
+      traceId: "trace-2b",
+      rounds: 3,
+      text: "",
+      toolCalls: [{ id: "call-1", name: "read", ok: true, args: {}, output: "ok" }],
+      steps: [],
+      // Tool result must appear in the graph so resume is eligible (not inject-only).
+      messages: [
+        { role: "user", content: "go" },
+        { role: "assistant", toolCalls: [{ id: "call-1", name: "read", args: {} }] },
+        { role: "tool", toolCallId: "call-1", name: "read", content: "ok" },
+      ] as AgentTurnPartial["messages"],
+    };
+    const message = buildInterruptedMessage(partial, { interruptReason: "cancel" });
+    expect(message.content).toContain("interrupted after 3 tool rounds");
+    expect(message.interruptReason).toBe("cancel");
+    expect(message.resumeMessages).toHaveLength(3);
+  });
+
+  it("omits resumeMessages on pure-text / pre-tool partial (inject-only messages)", () => {
+    const partial: AgentTurnPartial = {
+      traceId: "trace-2c",
+      rounds: 0,
+      text: "Siap! Baca skill dulu.",
+      reasoning: "Matches codebase-review skill.",
+      toolCalls: [],
+      steps: [],
+      messages: [
+        { role: "system", content: "You are the NusaShell agent." },
+        { role: "user", content: "Hunt bugs" },
+      ],
+    };
+    const message = buildInterruptedMessage(partial, { interruptReason: "provider" });
+    expect(message.content).toBe("Siap! Baca skill dulu.");
+    expect(message.reasoning).toBe("Matches codebase-review skill.");
+    expect(message.resumeMessages).toBeUndefined();
+    expect(message.toolCalls).toBeUndefined();
   });
 
   it("omits toolCalls when empty", () => {
@@ -71,7 +119,7 @@ describe("agent-message-builder", () => {
 
   it("clamps huge args within the cap", () => {
     const huge = "z".repeat(20_000);
-    const call = buildToolCall({ id: "c1", name: "files_write", ok: true, args: { path: "/a.txt", content: huge } });
+    const call = buildToolCall({ id: "c1", name: "write", ok: true, args: { path: "/a.txt", content: huge } });
     expect(JSON.stringify(call.args).length).toBeLessThanOrEqual(8_000);
   });
 });

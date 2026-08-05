@@ -15,24 +15,24 @@ import path from "node:path";
 const TERMINAL_PLUGIN_ID = "nusashell.terminal";
 const FILES_PLUGIN_ID = "nusashell.files";
 
-const TERMINAL_CWD_TOOLS: ReadonlySet<string> = new Set(["terminal_exec", "terminal_open"]);
+const TERMINAL_CWD_TOOLS: ReadonlySet<string> = new Set(["exec", "open"]);
 
 const FILES_PATH_FIELDS: Readonly<Record<string, readonly string[]>> = {
-  files_list: ["path"],
-  files_tree: ["path"],
-  files_read: ["path"],
-  files_write: ["path"],
-  files_mkdir: ["path"],
-  files_delete: ["path"],
-  files_search: ["path"],
-  files_info: ["path"],
-  files_grep: ["path"],
-  files_patch: ["path"],
-  files_append: ["path"],
-  files_move: ["source", "destination"],
-  files_copy: ["source", "destination"],
-  files_exists: ["path"],
-  files_touch: ["path"],
+  list: ["path"],
+  tree: ["path"],
+  read: ["path"],
+  write: ["path"],
+  mkdir: ["path"],
+  delete: ["path"],
+  search: ["path"],
+  info: ["path"],
+  grep: ["path"],
+  patch: ["path"],
+  append: ["path"],
+  move: ["source", "destination"],
+  copy: ["source", "destination"],
+  exists: ["path"],
+  touch: ["path"],
 };
 
 export interface WorkspaceToolWrapResult {

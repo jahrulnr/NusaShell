@@ -53,7 +53,7 @@ export function registerAiIpc(ctx: IpcContext): void {
     return result;
   });
 
-  ipcMain.handle("ai-providers:update-runtime", async (_event, input: Pick<AiRegistrySettings, "strategy" | "totalAttemptBudget" | "stream" | "vision" | "userPrompt" | "maxToolRounds" | "maxRepeatedToolCalls" | "compactionEnabled" | "maxInputTokens" | "reserveTokens" | "recentTurns" | "summaryMaxChars">) => {
+  ipcMain.handle("ai-providers:update-runtime", async (_event, input: Pick<AiRegistrySettings, "strategy" | "totalAttemptBudget" | "stream" | "vision" | "userPrompt" | "maxToolRounds" | "maxRepeatedToolCalls" | "maxAutoContinues" | "compactionEnabled" | "maxInputTokens" | "reserveTokens" | "recentTurns" | "summaryMaxChars">) => {
     const store = ctx.getAiSettingsStore();
     const result = await store.updateRuntime(input);
     const aiSettings = await store.load();
@@ -66,6 +66,7 @@ export function registerAiIpc(ctx: IpcContext): void {
       userPrompt: aiSettings.userPrompt,
       maxToolRounds: aiSettings.maxToolRounds,
       maxRepeatedToolCalls: aiSettings.maxRepeatedToolCalls,
+      maxAutoContinues: aiSettings.maxAutoContinues,
       compactionEnabled: aiSettings.compactionEnabled,
       maxInputTokens: aiSettings.maxInputTokens,
       reserveTokens: aiSettings.reserveTokens,

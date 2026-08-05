@@ -204,7 +204,7 @@ function renderNotes() {
 
 async function refreshAll() {
   try {
-    const result = await window.shell.callTool(pluginId, "notes_list", { sort: "updated" });
+    const result = await window.shell.callTool(pluginId, "list", { sort: "updated" });
     const data = parseMcpResult(result);
     allNotes = data.notes || [];
 
@@ -254,10 +254,10 @@ async function saveNote() {
 
   try {
     if (editingNoteId) {
-      await window.shell.callTool(pluginId, "notes_update", { id: editingNoteId, text, tags });
+      await window.shell.callTool(pluginId, "update", { id: editingNoteId, text, tags });
       statusEl.textContent = `Note #${editingNoteId} updated`;
     } else {
-      const result = await window.shell.callTool(pluginId, "notes_create", { text, tags });
+      const result = await window.shell.callTool(pluginId, "create", { text, tags });
       const data = parseMcpResult(result);
       statusEl.textContent = `Note #${data.note.id} created`;
     }
@@ -272,7 +272,7 @@ async function deleteNote(id) {
   const confirmed = await showConfirm("Delete note?", "This action cannot be undone. The note will be permanently removed.");
   if (!confirmed) return;
   try {
-    await window.shell.callTool(pluginId, "notes_delete", { id });
+    await window.shell.callTool(pluginId, "delete", { id });
     statusEl.textContent = `Note #${id} deleted`;
     await refreshAll();
   } catch (err) {

@@ -101,7 +101,7 @@ name). No new capture APIs were invented for this mitigation.
 
 ## Verification
 
-1. **Escape:** with the rebuilt `server.cjs`, `files_read` / `files_list`
+1. **Escape:** with the rebuilt `server.cjs`, `read` / `list`
    with `../../…` or an absolute path outside root → reject
    `Path escapes files root`; a read inside root still works.
 2. **Kill:** start Files → kill the node MCP PID from a shell → status

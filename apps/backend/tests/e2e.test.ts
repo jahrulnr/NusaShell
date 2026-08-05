@@ -87,11 +87,11 @@ describe("E2E: notes plugin", () => {
     expect(received).toBe(true);
   });
 
-  it("calls notes_create tool", async () => {
+  it("calls create tool", async () => {
     const result = await client.tools.call(
       "nusashell.notes",
       "00000000-0000-1000-8000-000000000001",
-      "notes_create",
+      "create",
       { text: "Hello from E2E" },
     );
 
@@ -101,11 +101,11 @@ describe("E2E: notes plugin", () => {
     expect(parsed.totalNotes).toBeGreaterThanOrEqual(1);
   });
 
-  it("calls notes_list tool", async () => {
+  it("calls list tool", async () => {
     const result = await client.tools.call(
       "nusashell.notes",
       "00000000-0000-1000-8000-000000000002",
-      "notes_list",
+      "list",
       {},
     );
 
@@ -147,14 +147,14 @@ describe("E2E: notes plugin", () => {
     const result = await client.tools.list("nusashell.notes");
     expect(result.tools).toHaveLength(6);
     const names = result.tools.map((t) => t.name).sort();
-    expect(names).toEqual(["notes_create", "notes_delete", "notes_get", "notes_list", "notes_search", "notes_update"]);
+    expect(names).toEqual(["create", "delete", "get", "list", "search", "update"]);
   });
 
   it("lists plugin-authored prompts while resources remain unsupported", async () => {
     const result = await client.mcp.listPrompts("nusashell.notes");
     expect(result.prompts.map((prompt) => prompt.name)).toEqual(["howto"]);
     const prompt = await client.mcp.getPrompt("nusashell.notes", "howto");
-    expect(prompt.messages[0].content.text).toContain("notes_create");
+    expect(prompt.messages[0].content.text).toContain("create");
     await expect(client.mcp.listResources("nusashell.notes")).rejects.toThrow();
   });
 

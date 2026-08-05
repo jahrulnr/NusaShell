@@ -10,5 +10,6 @@ export interface PromptLoaderPort {
   loadPrompts(): Promise<readonly AgentPrompt[]>;
   loadCompactPrompt(): Promise<string | undefined>;
   loadSubagentPrompt(): Promise<string | undefined>;
+  loadContinuePrompt(): Promise<string | undefined>;
   loadReviewPrompt(kind: ReviewPromptKind): Promise<string>;
 }

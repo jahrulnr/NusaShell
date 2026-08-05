@@ -156,15 +156,23 @@ function parseField(field: string, min: number, max: number): number[] {
 
 function parseRange(token: string, min: number, max: number): [number, number] {
   if (token === "*") return [min, max];
+  const check = (v: number): number => {
+    if (v < min || v > max) throw new Error(`value out of range ${min}-${max}: ${v}`);
+    return v;
+  };
   if (token.includes("-")) {
     const [a, b] = token.split("-");
     const start = parseInt(a!, 10);
     const end = parseInt(b!, 10);
     if (!Number.isInteger(start) || !Number.isInteger(end)) throw new Error(`bad range: ${token}`);
+    check(start);
+    check(end);
+    if (start > end) throw new Error(`inverted range: ${token}`);
     return [start, end];
   }
   const v = parseInt(token, 10);
   if (!Number.isInteger(v)) throw new Error(`bad value: ${token}`);
+  check(v);
   return [v, v];
 }
 
@@ -185,13 +193,24 @@ function parseCron(expr: string): CronFields {
   };
 }
 
+const FULL_DOM_LEN = 31; // FIELD_RANGES dom: 1..31
+const FULL_DOW_LEN = 7; // FIELD_RANGES dow: 0..6
+
 function matchesCron(fields: CronFields, d: Date): boolean {
+  // Vixie/standard cron: when BOTH day-of-month and day-of-week are
+  // restricted (not "*"), a match on EITHER satisfies the day condition.
+  // When one is "*", the restricted field alone governs.
+  const domRestricted = fields.dom.length !== FULL_DOM_LEN;
+  const dowRestricted = fields.dow.length !== FULL_DOW_LEN;
+  const domHit = fields.dom.includes(d.getUTCDate());
+  const dowHit = fields.dow.includes(d.getUTCDay());
+  const dayOk =
+    domRestricted && dowRestricted ? domHit || dowHit : domHit && dowHit;
   return (
     fields.minute.includes(d.getUTCMinutes()) &&
     fields.hour.includes(d.getUTCHours()) &&
-    fields.dom.includes(d.getUTCDate()) &&
     fields.month.includes(d.getUTCMonth() + 1) &&
-    fields.dow.includes(d.getUTCDay())
+    dayOk
   );
 }
 

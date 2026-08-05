@@ -29,6 +29,7 @@ import {
   type AiConfigurationPort,
   type AcpProviderResolverPort,
   type AgentTurnResult,
+  type AgentTurnPartial,
 } from "@nusashell/application";
 import {
   MessageRouter,
@@ -85,6 +86,7 @@ export interface ContainerOptions {
     readonly maxRepeatedToolCalls?: number;
     readonly softRecoverAttempts?: number;
     readonly maxConcurrentToolCalls?: number;
+    readonly maxAutoContinues?: number;
     readonly strategy?: "failover" | "round-robin" | "switch";
     readonly totalAttemptBudget?: number;
     readonly stream?: boolean;
@@ -115,6 +117,16 @@ export interface ContainerOptions {
    * renderer restart mid-turn does not orphan the reply.
    */
   readonly sealAgentTurn?: (conversationId: string, result: AgentTurnResult, options: { resume: boolean }) => Promise<void>;
+  /**
+   * Durable seal when a turn fails/cancels with a runner partial snapshot.
+   * Desktop main writes an interrupted assistant + resumeMessages so Retry
+   * can tool-resume even if Electron IPC drops a large `details.partial`.
+   */
+  readonly sealAgentInterrupted?: (
+    conversationId: string,
+    partial: AgentTurnPartial,
+    options: { resume: boolean; interruptReason: "cancel" | "provider" | "max_rounds" },
+  ) => Promise<void>;
 }
 
 export interface Container {
@@ -138,6 +150,8 @@ export interface Container {
   readonly eventJobMatcher: EventJobMatcher;
   readonly learningGraph: LearningGraphService;
   readonly memoryStore: MemoryStorePort;
+  /** Shell-owned progressive MCP catalog gateway (grant/enable/live snapshot). */
+  readonly agentToolGateway: import("./composers/agent-runtime.js").AgentRuntimeParts["agentToolGateway"];
   readonly db?: SqliteDatabase | undefined;
   readonly logger: Logger;
   configureAi(settings: {
@@ -160,6 +174,7 @@ export interface Container {
     maxRepeatedToolCalls?: number;
     softRecoverAttempts?: number;
     maxConcurrentToolCalls?: number;
+    maxAutoContinues?: number;
     compactionEnabled?: boolean;
     maxInputTokens?: number;
     reserveTokens?: number;
@@ -234,6 +249,7 @@ export function createContainer(options: ContainerOptions): Container {
     eventJobMatcher: jobs.eventJobMatcher,
     learningGraph: skills.learningGraph,
     memoryStore: skills.memoryStore,
+    agentToolGateway: agent.agentToolGateway,
     db: plugin.db,
     logger,
     configureAi: (settings) => aiConfiguration.configureAi(settings),
@@ -302,6 +318,7 @@ function createAiConfiguration(
       if (typeof settings.maxRepeatedToolCalls === "number") aiRuntime.maxRepeatedToolCalls = settings.maxRepeatedToolCalls;
       if (typeof settings.softRecoverAttempts === "number") aiRuntime.softRecoverAttempts = settings.softRecoverAttempts;
       if (typeof settings.maxConcurrentToolCalls === "number") aiRuntime.maxConcurrentToolCalls = settings.maxConcurrentToolCalls;
+      if (typeof settings.maxAutoContinues === "number") aiRuntime.maxAutoContinues = settings.maxAutoContinues;
       if (typeof settings.compactionEnabled === "boolean" || typeof settings.maxInputTokens === "number" || typeof settings.reserveTokens === "number" || typeof settings.recentTurns === "number" || typeof settings.summaryMaxChars === "number") {
         aiRuntime.context = {
           compactionEnabled: typeof settings.compactionEnabled === "boolean" ? settings.compactionEnabled : aiRuntime.context?.compactionEnabled ?? true,

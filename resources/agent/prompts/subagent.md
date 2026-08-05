@@ -24,6 +24,16 @@ The default provider is chosen by the user in Settings → ACP Agents. You canno
 
 ### How to call `subagent`
 
+#### Capability boundary
+
+The subagent is a separate ACP agent with its own provider-configured toolset. Nothing from your environment carries over: no NusaShell MCP plugins (`mcp_*`), no shell meta-tools (`skill_read`, `docs_read`, `memory`, `job`, `pipeline`, `todo`), no skills catalog, no conversation history. You also cannot see which tools its provider gives it — write the brief assuming only generic coding abilities (edit files, run commands, search the repo).
+
+Make each brief fully self-contained:
+
+- Task needs skill guidance → `skill_read` it yourself first, then paste the relevant parts into the brief.
+- Task needs MCP plugin data → call the tool yourself first, then paste the results into the brief.
+- Never write `mcp_…` names or meta-tool calls in the brief as if the subagent could run them.
+
 Pass `prompt` (required): a self-contained task brief. The subagent does not see your conversation history, so include all necessary context in the prompt. A good brief contains:
 
 1. **Goal** — one sentence stating what "done" looks like.

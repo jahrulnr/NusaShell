@@ -24,7 +24,7 @@ Preserve an existing plugin's shape unless requirements justify changing it. Do 
 
 ## Design the shared capability
 
-- Define user-centered, namespaced tool names and bounded schemas before wiring adapters or UI.
+- Define user-centered tool names and bounded schemas before wiring adapters or UI. See **Tool naming (create vs convert)** below.
 - Make UI callers and agent callers share the same MCP names, validation, errors, and result semantics.
 - Separate service/domain behavior from `server.*`, tool descriptors/dispatch, persistence, and UI state.
 - Decide transport, lifecycle, persistence, workspace/root behavior, credentials, cancellation, concurrency, and output limits explicitly.
@@ -57,6 +57,35 @@ flow.
 Keep plugin-specific catalogs and howtos out of `resources/agent/docs/` so
 uninstalling a plugin removes its knowledge path. Use the shell corpus only for
 NusaShell platform behavior.
+
+## Tool naming (create vs convert)
+
+The shell expands MCP tool names to provider names as `mcp_<pluginId>_<tool>`.
+The plugin id's last segment (the domain) is already in the provider name, so
+repeating it in the tool name creates redundant strings like
+`mcp_nusashell_files_files_list`. The rules differ by authoring mode:
+
+**Create (greenfield plugin):**
+
+- Pick a stable `manifest.id` (`publisher.capability` / `nusashell.files` style).
+- Let `domain = last segment after '.'` (e.g. `files`, `terminal`).
+- MCP tool names must **not** start with `` `${domain}_` `` and must **not** equal `domain`.
+- Prefer verb / local action names: `list`, `read`, `write`, `exec`, `open`, or
+  multi-word verbs without the domain (`list_projects`, `create_ticket` — kanban
+  is the exemplar).
+- Global uniqueness for agents is the shell provider name: `mcp_<pluginIdSanitized>_<tool>`.
+- Within one MCP server, tool names must still be unique.
+
+**Convert / wrap existing MCP:**
+
+- **Do not rename** upstream tool names for "pretty" agent IDs.
+- Preserve the remote/local MCP tool catalog as-is; only package `manifest.json` + transport.
+- Document expected provider form `mcp_<pluginId>_<upstreamTool>` (may look
+  redundant if upstream already namespaced — that is OK for convert).
+
+Built-in repo plugins (`files`, `notes`, `mail`, `terminal`) follow the create
+rule. `kanban` is the convert-friendly / multi-word verb exemplar (no
+`kanban_` prefix).
 
 ## Implement the MCP boundary
 

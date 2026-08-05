@@ -179,13 +179,13 @@ describe("launcher UI helpers", () => {
 describe("describeToolsPanel (finding 3a — Tools=0 honesty)", () => {
   it("reports ready with a tool count when tools are listed", () => {
     const panel = describeToolsPanel(
-      { tools: [{ name: "files_read" }, { name: "files_write" }] },
+      { tools: [{ name: "read" }, { name: "write" }] },
       { state: "running" },
     );
     expect(panel).toEqual({
       status: "ready",
       count: 2,
-      tools: [{ name: "files_read" }, { name: "files_write" }],
+      tools: [{ name: "read" }, { name: "write" }],
       message: "2 tools",
     });
   });

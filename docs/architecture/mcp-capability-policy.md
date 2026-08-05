@@ -8,7 +8,7 @@ operators and agents a single capability vocabulary.
 
 | Capability | MCP operations | NusaShell direction |
 | --- | --- | --- |
-| Tools | `tools/list`, `tools/call` | Brokered only through `PluginRuntimeManager`. Agent uses progressive discovery to stay below provider tool limits. |
+| Tools | `tools/list`, `tools/call` | Brokered only through `PluginRuntimeManager`. Running plugins have their full tool catalog (name + description + `inputSchema`) injected into the Live MCP system block and auto-advertised in `tools[]` every turn; progressive discovery is for starting plugins and overflow/failure recovery (96-entry `tools[]` cap). |
 | Prompts | `prompts/list`, `prompts/get` | Expose progressively through `mcp_context`; retrieving a prompt provides context and never executes it as a tool. |
 | Resources | `resources/list`, `resources/templates/list`, `resources/read` | Expose as bounded shell-managed context through `mcp_context`; binary content is not injected into the model. |
 | Completion | `completion/complete` | Expose only after a prompt or resource template is discovered, with bounded completion results. |

@@ -21,6 +21,7 @@ export interface AiConfig {
   readonly maxRepeatedToolCalls: number;
   readonly softRecoverAttempts: number;
   readonly maxConcurrentToolCalls: number;
+  readonly maxAutoContinues: number;
   readonly strategy: "failover" | "round-robin" | "switch";
   readonly totalAttemptBudget: number;
   readonly stream: boolean;
@@ -60,6 +61,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       maxRepeatedToolCalls: integerInRange(env.NUSASHELL_AI_MAX_REPEATED_TOOL_CALLS, 1, 200, 50),
       softRecoverAttempts: integerInRange(env.NUSASHELL_AI_SOFT_RECOVER_ATTEMPTS, 0, 3, 1),
       maxConcurrentToolCalls: integerInRange(env.NUSASHELL_AI_MAX_CONCURRENT_TOOL_CALLS, 1, 32, 8),
+      maxAutoContinues: integerInRange(env.NUSASHELL_AI_MAX_AUTO_CONTINUES, 0, 10_000, 10),
       strategy: parseAiStrategy(env.NUSASHELL_AI_STRATEGY),
       totalAttemptBudget: integerInRange(env.NUSASHELL_AI_TOTAL_ATTEMPT_BUDGET, 1, 32, 4),
       stream: env.NUSASHELL_AI_STREAM !== "false",
@@ -76,8 +78,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       },
       context: {
         compactionEnabled: env.NUSASHELL_AI_CONTEXT_COMPACTION !== "false",
-        maxInputTokens: integerInRange(env.NUSASHELL_AI_CONTEXT_MAX_INPUT_TOKENS, 1000, 2_000_000, 12000),
-        reserveTokens: integerInRange(env.NUSASHELL_AI_CONTEXT_RESERVE_TOKENS, 0, 1_000_000, 3000),
+        // Fresh-install / env-absent defaults match the desktop registry seed
+        // (DEFAULT_MAX_INPUT_TOKENS / DEFAULT_RESERVE_TOKENS in
+        // ai-provider-registry.ts). Keep in sync when raising defaults.
+        maxInputTokens: integerInRange(env.NUSASHELL_AI_CONTEXT_MAX_INPUT_TOKENS, 1000, 2_000_000, 200_000),
+        reserveTokens: integerInRange(env.NUSASHELL_AI_CONTEXT_RESERVE_TOKENS, 0, 1_000_000, 16_000),
         recentTurns: integerInRange(env.NUSASHELL_AI_CONTEXT_RECENT_TURNS, 1, 100, 4),
         summaryMaxChars: integerInRange(env.NUSASHELL_AI_CONTEXT_SUMMARY_MAX_CHARS, 100, 1_000_000, 12000),
       },
@@ -96,7 +101,8 @@ function parseAiApi(value: string | undefined): AiConfig["api"] {
 }
 
 function parseMaxToolRounds(value: string | undefined): number {
-  return integerInRange(value, 1, 100, 50);
+  // 0 = unlimited; 1..10_000 = finite ceiling.
+  return integerInRange(value, 0, 10_000, 50);
 }
 
 function integerInRange(value: string | undefined, min: number, max: number, fallback: number): number {

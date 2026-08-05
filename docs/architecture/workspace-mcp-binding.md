@@ -34,7 +34,7 @@ flowchart LR
 dispatching a granted tool call, using the turn workspace from
 `AgentTurnContext.workspace`:
 
-- **Terminal** (`terminal_exec`, `terminal_open`): omitted or relative `cwd`
+- **Terminal** (`exec`, `open`): omitted or relative `cwd`
   becomes the absolute workspace. An explicit absolute `cwd` is preserved.
 - **Files**: relative `path`/`source`/`destination` arguments are rewritten to
   absolute paths under the workspace. Absolute paths, `/`, and empty are

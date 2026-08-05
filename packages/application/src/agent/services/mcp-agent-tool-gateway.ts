@@ -12,6 +12,14 @@ import type { PipelineScheduler } from "../../job/services/pipeline-scheduler.js
 import type { DocsIndexPort } from "../ports/docs-index.port.js";
 import type { AgentToolDefinition, ReasoningEffort } from "../ports/agent-provider.port.js";
 import type { AgentToolGateway, AgentTurnContext } from "../ports/agent-tool-gateway.port.js";
+import type { McpLiveSnapshot, McpLiveSnapshotTool } from "./mcp-live-prompt-formatter.js";
+import { MCP_LIVE_TOOLS_CAP } from "./mcp-live-prompt-formatter.js";
+import {
+  tokenizeQuery,
+  rankToolsByTokens,
+  TOOL_SEARCH_MAX_MATCHES,
+  TOOL_SEARCH_ZERO_HIT_HINT,
+} from "./tool-discovery-match.js";
 import type { ConversationTodoPort } from "../ports/conversation-todo.port.js";
 import type { SubagentPort } from "../ports/subagent-port.js";
 import type { LoggerPort } from "../../plugin/ports/logger.port.js";
@@ -57,6 +65,12 @@ const MAX_ASK_OPTIONS = 8;
  */
 export class McpAgentToolGateway implements AgentToolGateway {
   private readonly turnRoutes = new Map<string, Map<string, McpToolRoute>>();
+  /**
+   * Sticky grants per conversation. When a turn begins with a conversationId,
+   * its turnRoutes are seeded from this map so the model does not re-pay the
+   * discovery tax on every auto-continue. Cleared by `endConversation`.
+   */
+  private readonly conversationRoutes = new Map<string, Map<string, McpToolRoute>>();
   private readonly activeCalls = new Map<string, Map<string, string>>();
   private readonly turnInteractive = new Map<string, boolean>();
   private readonly turnWorkspace = new Map<string, string | undefined>();
@@ -128,7 +142,21 @@ export class McpAgentToolGateway implements AgentToolGateway {
   }
 
   beginTurn(turnId: string, context?: AgentTurnContext): void {
-    if (!this.turnRoutes.has(turnId)) this.turnRoutes.set(turnId, new Map());
+    if (!this.turnRoutes.has(turnId)) {
+      const turnMap = new Map<string, McpToolRoute>();
+      // Sticky grant seeding: copy routes from the conversation store so the
+      // model starts the turn with previously-granted tools advertised. We
+      // copy (not share) so endTurn for this turn does not mutate the
+      // conversation store.
+      const conversationId = context?.conversationId;
+      if (conversationId) {
+        const convMap = this.conversationRoutes.get(conversationId);
+        if (convMap) {
+          for (const [name, route] of convMap) turnMap.set(name, route);
+        }
+      }
+      this.turnRoutes.set(turnId, turnMap);
+    }
     if (!this.activeCalls.has(turnId)) this.activeCalls.set(turnId, new Map());
     // Merge only provided fields so a later beginTurn (e.g. AgentTurnRunner)
     // cannot wipe workspace / provider context set by RunAgentTurnHandler.
@@ -138,6 +166,15 @@ export class McpAgentToolGateway implements AgentToolGateway {
     if (context?.model !== undefined) this.turnModel.set(turnId, context.model);
     if (context?.effort !== undefined) this.turnEffort.set(turnId, context.effort);
     if (context?.conversationId !== undefined) this.turnConversationId.set(turnId, context.conversationId);
+  }
+
+  /**
+   * Clear sticky grants for a conversation. Called when the conversation is
+   * deleted or sealed permanently so a future turn with the same id (rare)
+   * does not inherit stale grants.
+   */
+  endConversation(conversationId: string): void {
+    this.conversationRoutes.delete(conversationId);
   }
 
   endTurn(turnId: string): void {
@@ -162,6 +199,10 @@ export class McpAgentToolGateway implements AgentToolGateway {
 
   async listTools(_pluginIds: readonly string[], turnId: string): Promise<readonly AgentToolDefinition[]> {
     const routes = this.routesFor(turnId);
+    // Auto-seed routes for every tool on currently running plugins so the
+    // model can call provider names directly without prior tool_schema.
+    // Fail-soft: enumeration errors do not block the turn.
+    await this.autoSeedRunningTools(turnId, routes);
     return [
       definition("mcp_list", "List MCP plugins, runtime state, autostart preference, and launch spec (command, args, env keys — values redacted)"),
       definition("mcp_enable", "Start a selected MCP plugin. Optional args/env override the launch spec (command is immutable); a different launchSpec while running triggers a respawn.", {
@@ -170,8 +211,8 @@ export class McpAgentToolGateway implements AgentToolGateway {
         env: { type: "object", additionalProperties: { type: "string" }, description: "Optional env overrides merged onto the manifest env (values are not echoed back)." },
       }),
       definition("mcp_disable", "Stop a selected MCP plugin", { pluginId: stringSchema() }),
-      definition("tool_search", "Search a running MCP plugin's tools by name or description", { pluginId: stringSchema(), query: stringSchema() }),
-      definition("tool_list", "List all tools from a running MCP plugin (names and descriptions only)", { pluginId: stringSchema() }),
+      definition("tool_search", "Search a running MCP plugin's tools by name or description (case-insensitive token match — any term matches; returns {pluginId, query, matchMode, count, matches, hint?}; count 0 is success with a hint, not a turn interrupt or failure)", { pluginId: stringSchema(), query: stringSchema() }),
+      definition("tool_list", "List all tools from a running MCP plugin (names and descriptions only; returns {pluginId, count, tools})", { pluginId: stringSchema() }),
       definition("tool_schema", "Load one MCP tool schema and advertise it for this turn (optional when recalling a known mcp_* name on a running plugin)", { pluginId: stringSchema(), toolName: stringSchema() }),
       definition("tool_schemas", "Load multiple MCP tool schemas and advertise them for this turn in one call (optional when recalling known mcp_* names on a running plugin)", {
         pluginId: stringSchema(),
@@ -323,17 +364,13 @@ export class McpAgentToolGateway implements AgentToolGateway {
         allow_free_text: { type: "boolean", description: "Whether the user may type a custom answer (default true)" },
         multi_select: { type: "boolean", description: "Whether the user may select multiple options (default false)" },
       }, ["question", "options"])] : []),
-      ...(this.subagentPort ? [definition("subagent", "Delegate a task to a connected ACP coding agent. The subagent runs with its own tools and repo access; its live stream appears in the side pane. Returns a summary when done. Provider, model, and mode are set in Settings → ACP Agents, not in the tool call. Pass `async: true` to run the subagent in the background (returns a handleId immediately; use async_wait/peek/kill to manage it).", {
+      ...(this.subagentPort ? [definition("subagent", "Delegate a task to a connected ACP coding agent. The subagent runs with its own tools and repo access; its live stream appears in the side pane. Returns a summary when done. The subagent has none of your MCP plugins, skills, or shell meta-tools — inline any needed skill content or MCP data into `prompt`. Provider, model, and mode are set in Settings → ACP Agents, not in the tool call. Pass `async: true` to run the subagent in the background (returns a handleId immediately; use async_wait/peek/kill to manage it).", {
         prompt: { type: "string", description: "The task brief for the subagent (required)" },
         title: { type: "string", description: "Optional label for the side pane and inline run card" },
         workspace: { type: "string", description: "Optional absolute cwd override; defaults to the conversation workspace, or the user home directory when unset. Never invent a path." },
         async: { type: "boolean", description: "If true, run the subagent in the background and return a handleId immediately (default false). Use async_wait/peek/kill to manage the background handle." },
       }, ["prompt"])] : []),
-      ...[...routes.entries()].map(([name, route]) => ({
-        name,
-        ...(route.description ? { description: route.description } : {}),
-        inputSchema: route.inputSchema,
-      })),
+      ...this.cappedRouteDefinitions(routes),
     ];
   }
 
@@ -483,6 +520,20 @@ export class McpAgentToolGateway implements AgentToolGateway {
     const pluginId = parsePluginId(args.pluginId);
     this.logger?.info("Agent MCP plugin %s via agent tool plugin=%s", start ? "start" : "stop", PluginId.toString(pluginId));
     if (start) {
+      // Idempotent enable: if the plugin is already running, return its state
+      // with an `alreadyRunning` trust signal so the model does not re-enable.
+      try {
+        const plugins = await this.runtimeManager.listPlugins();
+        const existing = plugins.find((p) => p.pluginId === PluginId.toString(pluginId));
+        if (existing?.state === "running") {
+          return { pluginId: existing.pluginId, state: "running", alreadyRunning: true, liveState: await this.buildLiveStateLine(turnId) };
+        }
+      } catch (error) {
+        this.logger?.warn(
+          "MCP enable pre-check listPlugins failed: %s",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
       const workspace = this.turnWorkspace.get(turnId);
       const overrides: { args?: readonly string[]; env?: Readonly<Record<string, string>>; workspace?: string } = {};
       // Ignore empty args arrays — they would wipe the manifest script path and
@@ -504,7 +555,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
       }
       if (workspace) overrides.workspace = workspace;
       const view = await this.runtimeManager.startPlugin(pluginId, Object.keys(overrides).length > 0 ? overrides : undefined);
-      return { pluginId: view.pluginId, state: view.state };
+      return { pluginId: view.pluginId, state: view.state, liveState: await this.buildLiveStateLine(turnId) };
     }
     const view = await this.runtimeManager.stopPlugin(pluginId);
     return { pluginId: view.pluginId, state: view.state };
@@ -513,28 +564,48 @@ export class McpAgentToolGateway implements AgentToolGateway {
   private async listAllTools(args: Readonly<Record<string, unknown>>): Promise<unknown> {
     const pluginIdValue = requireString(args.pluginId, "pluginId");
     const tools = await this.runtimeManager.listTools(parsePluginId(pluginIdValue));
-    return tools.map((tool) => ({ name: tool.name, ...(tool.description ? { description: tool.description } : {}) }));
+    const hits = tools.map((tool) => ({ name: tool.name, ...(tool.description ? { description: tool.description } : {}) }));
+    return { pluginId: pluginIdValue, count: hits.length, tools: hits };
   }
 
   private async searchTools(args: Readonly<Record<string, unknown>>): Promise<unknown> {
     const pluginIdValue = requireString(args.pluginId, "pluginId");
-    const query = requireString(args.query, "query").toLowerCase();
+    const query = requireString(args.query, "query");
     const tools = await this.runtimeManager.listTools(parsePluginId(pluginIdValue));
-    return tools
-      .filter((tool) => `${tool.name} ${tool.description ?? ""}`.toLowerCase().includes(query))
-      .slice(0, 20)
-      .map((tool) => ({ name: tool.name, ...(tool.description ? { description: tool.description } : {}) }));
+    const hits = tools.map((tool) => ({ name: tool.name, ...(tool.description ? { description: tool.description } : {}) }));
+    const tokens = tokenizeQuery(query);
+    const ranked = rankToolsByTokens(hits, tokens);
+    const totalMatches = ranked.length;
+    const matches = ranked.slice(0, TOOL_SEARCH_MAX_MATCHES).map(({ score: _score, ...rest }) => rest);
+    const result: { pluginId: string; query: string; matchMode: "token_or"; count: number; matches: typeof matches; hint?: string } = {
+      pluginId: pluginIdValue,
+      query,
+      matchMode: "token_or",
+      count: totalMatches,
+      matches,
+    };
+    if (totalMatches === 0) result.hint = TOOL_SEARCH_ZERO_HIT_HINT;
+    return result;
   }
 
   private async grantTool(args: Readonly<Record<string, unknown>>, turnId: string): Promise<unknown> {
     const pluginIdValue = requireString(args.pluginId, "pluginId");
     const toolName = requireString(args.toolName, "toolName");
+    const providerName = toProviderToolName(pluginIdValue, toolName);
+    // Idempotent grant: if the route already exists this turn, return it with
+    // an `alreadyGranted` trust signal so the model does not re-grant.
+    const routes = this.routesFor(turnId);
+    const existing = routes.get(providerName);
+    if (existing) {
+      return { name: providerName, ...(existing.description ? { description: existing.description } : {}), inputSchema: existing.inputSchema, alreadyGranted: true, liveState: await this.buildLiveStateLine(turnId) };
+    }
     const tool = (await this.runtimeManager.listTools(parsePluginId(pluginIdValue))).find((item) => item.name === toolName);
     if (!tool) throw new ApplicationError("TOOL_NOT_FOUND", `MCP tool not found: ${toolName}`);
-    const providerName = toProviderToolName(pluginIdValue, tool.name);
     const inputSchema = tool.inputSchema ?? emptySchema;
-    this.routesFor(turnId).set(providerName, { pluginId: pluginIdValue, toolName: tool.name, inputSchema, ...(tool.description ? { description: tool.description } : {}) });
-    return { name: providerName, ...(tool.description ? { description: tool.description } : {}), inputSchema };
+    const route: McpToolRoute = { pluginId: pluginIdValue, toolName: tool.name, inputSchema, ...(tool.description ? { description: tool.description } : {}) };
+    routes.set(providerName, route);
+    this.persistConversationRoute(turnId, providerName, route);
+    return { name: providerName, ...(tool.description ? { description: tool.description } : {}), inputSchema, liveState: await this.buildLiveStateLine(turnId) };
   }
 
   private async grantTools(args: Readonly<Record<string, unknown>>, turnId: string): Promise<unknown> {
@@ -547,25 +618,33 @@ export class McpAgentToolGateway implements AgentToolGateway {
     }
     const tools = await this.runtimeManager.listTools(parsePluginId(pluginIdValue));
     const byName = new Map(tools.map((tool) => [tool.name, tool]));
-    const granted: Array<{ name: string; description?: string; inputSchema: unknown }> = [];
+    const routes = this.routesFor(turnId);
+    const granted: Array<{ name: string; description?: string; inputSchema: unknown; alreadyGranted?: boolean }> = [];
     const missing: string[] = [];
     for (const rawName of names) {
+      const providerName = toProviderToolName(pluginIdValue, rawName);
+      const existing = routes.get(providerName);
+      if (existing) {
+        granted.push({ name: providerName, ...(existing.description ? { description: existing.description } : {}), inputSchema: existing.inputSchema, alreadyGranted: true });
+        continue;
+      }
       const tool = byName.get(rawName);
       if (!tool) {
         missing.push(rawName);
         continue;
       }
-      const providerName = toProviderToolName(pluginIdValue, tool.name);
       const inputSchema = tool.inputSchema ?? emptySchema;
-      this.routesFor(turnId).set(providerName, {
+      const route: McpToolRoute = {
         pluginId: pluginIdValue,
         toolName: tool.name,
         inputSchema,
         ...(tool.description ? { description: tool.description } : {}),
-      });
+      };
+      routes.set(providerName, route);
+      this.persistConversationRoute(turnId, providerName, route);
       granted.push({ name: providerName, ...(tool.description ? { description: tool.description } : {}), inputSchema });
     }
-    return { granted, ...(missing.length ? { missing } : {}) };
+    return { granted, ...(missing.length ? { missing } : {}), liveState: await this.buildLiveStateLine(turnId) };
   }
 
   private async context(args: Readonly<Record<string, unknown>>): Promise<unknown> {
@@ -660,6 +739,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
       if (route) {
         // Auto-grant for the rest of this turn so subsequent rounds advertise the schema.
         this.routesFor(turnId).set(name, route);
+        this.persistConversationRoute(turnId, name, route);
       }
     }
     if (!route) {
@@ -727,6 +807,174 @@ export class McpAgentToolGateway implements AgentToolGateway {
     return undefined;
   }
 
+  /**
+   * Build a Live MCP runtime snapshot for the Live MCP system-prompt block.
+   * Read-only: does not start plugins or mutate turnRoutes. `running` comes
+   * from `runtimeManager.listPlugins` (state === "running"); `tools` is the
+   * full catalog (name + description + inputSchema) for every tool on those
+   * running plugins, plus any sticky conversation grants still active this
+   * turn. Capped at `MCP_LIVE_TOOLS_CAP` entries; overflow names go to
+   * `toolsOverflow`. Fail-soft: on listPlugins / listTools error, log + skip
+   * the offending plugin (never fail the turn).
+   */
+  async getMcpLiveSnapshot(turnId: string): Promise<McpLiveSnapshot> {
+    const running = await this.listRunningPlugins();
+    const routes = this.turnRoutes.get(turnId) ?? new Map();
+    const stickyNames = new Set(routes.keys());
+    const catalog = await this.enumerateRunningTools(running);
+    // Merge: running tools first, then sticky extras not covered by running.
+    const seen = new Set<string>();
+    const merged: McpLiveSnapshotTool[] = [];
+    for (const tool of catalog) {
+      if (seen.has(tool.providerName)) continue;
+      seen.add(tool.providerName);
+      merged.push(tool);
+    }
+    for (const [name, route] of routes) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+      merged.push({
+        providerName: name,
+        pluginId: route.pluginId,
+        toolName: route.toolName,
+        inputSchema: route.inputSchema,
+        ...(route.description ? { description: route.description } : {}),
+      });
+    }
+    merged.sort((a, b) => a.providerName < b.providerName ? -1 : a.providerName > b.providerName ? 1 : 0);
+    const capped = merged.slice(0, MCP_LIVE_TOOLS_CAP);
+    const overflow = merged.slice(MCP_LIVE_TOOLS_CAP).map((t) => t.providerName);
+    // Drop sticky names that were already covered by running tools from overflow.
+    const overflowFiltered = overflow.filter((n) => !stickyNames.has(n) || !catalog.some((t) => t.providerName === n));
+    return {
+      running: running.map((pluginId) => ({ pluginId })),
+      tools: capped,
+      ...(overflowFiltered.length > 0 ? { toolsOverflow: overflowFiltered } : {}),
+    };
+  }
+
+  /**
+   * One-line trust signal for tool results (mcp_enable / tool_schema /
+   * tool_schemas). Shows running plugin ids + this-turn advertised tool
+   * names so the model can decide "ready to call" without re-enabling or
+   * re-granting. Fail-soft: returns a minimal line on error.
+   */
+  private async buildLiveStateLine(turnId: string): Promise<string> {
+    try {
+      const snap = await this.getMcpLiveSnapshot(turnId);
+      const running = snap.running.map((p) => p.pluginId).sort();
+      const advertised = snap.tools.map((t) => t.providerName).sort();
+      const parts: string[] = [];
+      if (running.length > 0) parts.push(`running: ${running.join(", ")}`);
+      if (advertised.length > 0) parts.push(`granted: ${advertised.join(", ")}`);
+      if (parts.length === 0) return "no plugins running; no tools granted";
+      return `${parts.join(" | ")} → ready to call`;
+    } catch (error) {
+      this.logger?.warn(
+        "buildLiveStateLine failed: %s",
+        error instanceof Error ? error.message : String(error),
+      );
+      return "live state unavailable";
+    }
+  }
+
+  /**
+   * List currently running plugin ids. Fail-soft: returns [] on error.
+   */
+  private async listRunningPlugins(): Promise<readonly string[]> {
+    try {
+      const plugins = await this.runtimeManager.listPlugins();
+      return plugins
+        .filter((p) => p.state === "running")
+        .map((p) => p.pluginId)
+        .sort();
+    } catch (error) {
+      this.logger?.warn(
+        "listRunningPlugins failed: %s",
+        error instanceof Error ? error.message : String(error),
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Enumerate the full tool catalog for every running plugin. Fail-soft per
+   * plugin: a `listTools` error on one plugin is logged and that plugin is
+   * skipped; other plugins still contribute. Returns tools sorted by
+   * `providerName` for prompt-cache stability.
+   */
+  private async enumerateRunningTools(
+    runningPluginIds: readonly string[],
+  ): Promise<McpLiveSnapshotTool[]> {
+    const catalog: McpLiveSnapshotTool[] = [];
+    for (const pluginId of runningPluginIds) {
+      try {
+        const tools = await this.runtimeManager.listTools(parsePluginId(pluginId));
+        for (const tool of tools) {
+          catalog.push({
+            providerName: toProviderToolName(pluginId, tool.name),
+            pluginId,
+            toolName: tool.name,
+            inputSchema: tool.inputSchema ?? emptySchema,
+            ...(tool.description ? { description: tool.description } : {}),
+          });
+        }
+      } catch (error) {
+        this.logger?.warn(
+          "enumerateRunningTools skipped plugin=%s: %s",
+          pluginId,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
+    catalog.sort((a, b) => a.providerName < b.providerName ? -1 : a.providerName > b.providerName ? 1 : 0);
+    return catalog;
+  }
+
+  /**
+   * Auto-seed turnRoutes for every tool on currently running plugins so the
+   * model can call provider names directly without prior `tool_schema`.
+   * Idempotent: tools already in the route map are not re-written. Fail-soft:
+   * enumeration errors do not block `listTools`.
+   */
+  private async autoSeedRunningTools(
+    turnId: string,
+    routes: Map<string, McpToolRoute>,
+  ): Promise<void> {
+    const running = await this.listRunningPlugins();
+    const catalog = await this.enumerateRunningTools(running);
+    for (const tool of catalog) {
+      if (routes.has(tool.providerName)) continue;
+      const route: McpToolRoute = {
+        pluginId: tool.pluginId,
+        toolName: tool.toolName,
+        inputSchema: tool.inputSchema,
+        ...(tool.description ? { description: tool.description } : {}),
+      };
+      routes.set(tool.providerName, route);
+      // Persist to conversation sticky store so auto-continue turns inherit.
+      this.persistConversationRoute(turnId, tool.providerName, route);
+    }
+  }
+
+  /**
+   * Build the capped list of route definitions for the provider `tools[]`
+   * array. Running-plugin tools win sort order; sticky extras fill remaining
+   * slots. Hard cap at `MCP_LIVE_TOOLS_CAP` entries beyond meta-tools.
+   */
+  private cappedRouteDefinitions(
+    routes: Map<string, McpToolRoute>,
+  ): AgentToolDefinition[] {
+    return [...routes.entries()]
+      .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+      .slice(0, MCP_LIVE_TOOLS_CAP)
+      .map(([name, route]) => ({
+        name,
+        ...(route.description ? { description: route.description } : {}),
+        inputSchema: route.inputSchema,
+      }));
+  }
+
   private routesFor(turnId: string): Map<string, McpToolRoute> {
     let routes = this.turnRoutes.get(turnId);
     if (!routes) {
@@ -734,6 +982,22 @@ export class McpAgentToolGateway implements AgentToolGateway {
       this.turnRoutes.set(turnId, routes);
     }
     return routes;
+  }
+
+  /**
+   * Persist a granted route to the conversation sticky store so subsequent
+   * turns in the same conversation seed it without re-granting. No-op when
+   * the turn has no bound conversationId.
+   */
+  private persistConversationRoute(turnId: string, providerName: string, route: McpToolRoute): void {
+    const conversationId = this.turnConversationId.get(turnId);
+    if (!conversationId) return;
+    let convMap = this.conversationRoutes.get(conversationId);
+    if (!convMap) {
+      convMap = new Map();
+      this.conversationRoutes.set(conversationId, convMap);
+    }
+    convMap.set(providerName, route);
   }
 
   private isInteractive(turnId: string): boolean {

@@ -1,6 +1,6 @@
 import { createContainer, type Container } from "./container.js";
 import { ShutdownCoordinator } from "./shutdown.js";
-import { loadConfig, type AppConfig, type BackgroundReviewSettings, type AcpProviderResolverPort, type AgentTurnResult } from "@nusashell/application";
+import { loadConfig, type AppConfig, type BackgroundReviewSettings, type AcpProviderResolverPort, type AgentTurnResult, type AgentTurnPartial } from "@nusashell/application";
 import type { LogObserver } from "@nusashell/infrastructure";
 
 export interface BootstrapOptions {
@@ -19,13 +19,19 @@ export interface BootstrapOptions {
   ) => Promise<Readonly<Record<string, string>>> | Readonly<Record<string, string>>;
   readonly acpProviderResolver?: AcpProviderResolverPort;
   /**
-   * Durable seal callback invoked from the agent turn handler when a turn
-   * completes (or is interrupted with partial work). The desktop main process
-   * implements this to write the assistant message to the conversation store
-   * off the renderer critical path, so a renderer restart mid-turn does not
-   * orphan the reply.
+   * Durable seal callback for successful agent turns. Desktop main writes the
+   * assistant message off the renderer path.
    */
   readonly sealAgentTurn?: (conversationId: string, result: AgentTurnResult, options: { resume: boolean }) => Promise<void>;
+  /**
+   * Durable seal when a turn is interrupted with partial progress. Desktop
+   * main writes interrupted + resumeMessages so Retry can continue tools.
+   */
+  readonly sealAgentInterrupted?: (
+    conversationId: string,
+    partial: AgentTurnPartial,
+    options: { resume: boolean; interruptReason: "cancel" | "provider" | "max_rounds" },
+  ) => Promise<void>;
   /**
    * When false, do not start the WebSocket server. Desktop sets this to false
    * since the renderer uses IPC. Default: true.
@@ -72,6 +78,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
       maxToolRounds: config.ai.maxToolRounds,
       softRecoverAttempts: config.ai.softRecoverAttempts,
       maxConcurrentToolCalls: config.ai.maxConcurrentToolCalls,
+      maxAutoContinues: config.ai.maxAutoContinues,
       strategy: config.ai.strategy,
       totalAttemptBudget: config.ai.totalAttemptBudget,
       stream: config.ai.stream,
@@ -85,6 +92,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     ...(options.backgroundReview ? { backgroundReview: options.backgroundReview } : {}),
     ...(options.acpProviderResolver ? { acpProviderResolver: options.acpProviderResolver } : {}),
     ...(options.sealAgentTurn ? { sealAgentTurn: options.sealAgentTurn } : {}),
+    ...(options.sealAgentInterrupted ? { sealAgentInterrupted: options.sealAgentInterrupted } : {}),
     ...(options.startWsServer === false ? { startWsServer: false } : {}),
   });
   const shutdown = new ShutdownCoordinator(container);

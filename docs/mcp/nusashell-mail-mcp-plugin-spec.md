@@ -644,14 +644,14 @@ Recommended initial implementation:
 
 | Tool | Risk | Purpose |
 | --- | --- | --- |
-| `mail_accounts` | read | List configured accounts and health state. |
-| `mail_account_get` | read | Read one account's non-secret configuration and capabilities. |
-| `mail_account_test` | network/read | Test incoming and outgoing connectivity without returning secrets. |
-| `mail_mailboxes` | read | List folders/mailboxes for an account. |
-| `mail_inbox` | read | List inbox messages, optionally across enabled accounts. |
-| `mail_messages` | read | List messages in a selected mailbox. |
-| `mail_search` | read | Search messages using a provider-neutral query. |
-| `mail_read` | read | Read one message and bounded body/attachment metadata. |
+| `accounts` | read | List configured accounts and health state. |
+| `account_get` | read | Read one account's non-secret configuration and capabilities. |
+| `account_test` | network/read | Test incoming and outgoing connectivity without returning secrets. |
+| `mailboxes` | read | List folders/mailboxes for an account. |
+| `inbox` | read | List inbox messages, optionally across enabled accounts. |
+| `messages` | read | List messages in a selected mailbox. |
+| `search` | read | Search messages using a provider-neutral query. |
+| `read` | read | Read one message and bounded body/attachment metadata. |
 | `mail_thread` | read | Return a bounded conversation/thread view when derivable. |
 | `mail_drafts` | read | List drafts. |
 | `mail_draft_get` | read | Read one draft. |
@@ -705,7 +705,7 @@ Therefore, the plugin UI owns full CRUD, while MCP exposes safe account inspecti
 
 The following schemas are conceptual JSON Schema contracts.
 
-## 10.1 `mail_accounts`
+## 10.1 `accounts`
 
 Lists configured accounts. It never returns credentials or OAuth tokens.
 
@@ -743,7 +743,7 @@ Response:
 }
 ```
 
-## 10.2 `mail_account_get`
+## 10.2 `account_get`
 
 ```json
 {
@@ -758,7 +758,7 @@ Response:
 
 Return masked server configuration and discovered capabilities.
 
-## 10.3 `mail_account_test`
+## 10.3 `account_test`
 
 ```json
 {
@@ -775,7 +775,7 @@ Return masked server configuration and discovered capabilities.
 
 The tool must not send a test email unless a separate explicit recipient and confirmation flow exists.
 
-## 10.4 `mail_mailboxes`
+## 10.4 `mailboxes`
 
 ```json
 {
@@ -790,7 +790,7 @@ The tool must not send a test email unless a separate explicit recipient and con
 }
 ```
 
-## 10.5 `mail_inbox`
+## 10.5 `inbox`
 
 A convenience read tool for the most common task.
 
@@ -813,7 +813,7 @@ A convenience read tool for the most common task.
 }
 ```
 
-## 10.6 `mail_messages`
+## 10.6 `messages`
 
 ```json
 {
@@ -830,7 +830,7 @@ A convenience read tool for the most common task.
 }
 ```
 
-## 10.7 `mail_search`
+## 10.7 `search`
 
 Use a structured provider-neutral query rather than passing raw IMAP search syntax.
 
@@ -864,7 +864,7 @@ Use a structured provider-neutral query rather than passing raw IMAP search synt
 }
 ```
 
-## 10.8 `mail_read`
+## 10.8 `read`
 
 ```json
 {
@@ -1331,14 +1331,14 @@ Client-facing events must be mapped and sanitized through the NusaShell applicat
 ### Phase 1 — Read-only mailbox
 
 - Account UI for custom IMAP and OAuth provider setup.
-- `mail_accounts`.
-- `mail_account_get`.
-- `mail_account_test`.
-- `mail_mailboxes`.
-- `mail_inbox`.
-- `mail_messages`.
-- `mail_search`.
-- `mail_read`.
+- `accounts`.
+- `account_get`.
+- `account_test`.
+- `mailboxes`.
+- `inbox`.
+- `messages`.
+- `search`.
+- `read`.
 - Local metadata cache.
 - HTML sanitization and blocked remote images.
 
@@ -1385,19 +1385,19 @@ Use this as the practical target catalog:
 
 ```text
 # Account discovery and health
-mail_accounts
-mail_account_get
-mail_account_test
+accounts
+account_get
+account_test
 mail_account_enable
 mail_account_disable
 mail_account_remove
 
 # Mailbox and read operations
-mail_mailboxes
-mail_inbox
-mail_messages
-mail_search
-mail_read
+mailboxes
+inbox
+messages
+search
+read
 mail_thread
 
 # Draft workflow
@@ -1431,7 +1431,7 @@ flowchart LR
   Update --> Send["mail_send"]
 ```
 
-Similarly, `mail_inbox` should be a convenience view, while `mail_messages` is the general folder-listing primitive.
+Similarly, `inbox` should be a convenience view, while `messages` is the general folder-listing primitive.
 
 ---
 

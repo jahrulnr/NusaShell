@@ -152,7 +152,7 @@ describe("pipeline tool handler", () => {
         {
           id: "sync",
           name: "Sync",
-          action: { type: "tool", pluginId: "nusashell.notes", toolName: "notes_create", args: { title: "test" } },
+          action: { type: "tool", pluginId: "nusashell.notes", toolName: "create", args: { title: "test" } },
         },
       ],
     });

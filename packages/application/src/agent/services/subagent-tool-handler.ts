@@ -71,9 +71,12 @@ export async function execSubagent(
   const attempted: string[] = [];
   const failures: Array<{ providerId: string; error: string }> = [];
   // Host-prefix the absolute cwd so the ACP agent cannot invent a different path.
+  // Role-frame the capability boundary so the subagent never simulates the
+  // parent's MCP plugins, skills, or meta-tools — none of them exist in the
+  // ACP process, and the parent brief may still reference them by mistake.
   const promptBlocks = [{
     type: "text" as const,
-    text: `Working directory (cwd): ${effectiveWorkspace}\n\n${prompt}`,
+    text: `Working directory (cwd): ${effectiveWorkspace}\n\nYou are a subagent delegated by NusaShell's parent agent. You have only your own tools — the parent's MCP plugins, skills, and meta-tools do not exist here. If the task references a capability you do not have, say so in your final message instead of simulating it.\n\n${prompt}`,
   }];
 
   logger?.info("Subagent workspace runId=%s cwd=%s", runId, effectiveWorkspace);

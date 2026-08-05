@@ -34,8 +34,15 @@ should use `.agents/skills/build-nusashell-plugin/` and write under the checkout
 3. Create `{userData}/plugins/{folder}/manifest.json` and the declared `mcp/`
    files using the templates and guides. Keep the folder name equal to the
    manifest `id` for predictable registration.
-4. Implement namespaced tools with strict bounded schemas, safe errors, and
-   structured results. Add `mcp/prompts.js` and advertise `capabilities.prompts`:
+4. Implement tools with strict bounded schemas, safe errors, and structured
+   results. Tool names must follow the **create** rule: let `domain` = last
+   segment of the plugin id; tool names must **not** start with `${domain}_`
+   and must **not** equal `domain`. Prefer short verbs (`list`, `read`,
+   `write`, `exec`) or multi-word verbs without the domain
+   (`list_projects`, `create_ticket`). The shell expands to
+   `mcp_<pluginId>_<tool>` for agent-facing uniqueness. **If wrapping an
+   existing MCP catalog, preserve tool names as-is** (no domain redesign).
+   Add `mcp/prompts.js` and advertise `capabilities.prompts`:
    domain/multi-step plugins must provide a `howto` or `workflow` prompt;
    native-like plugins should provide a short root/cwd/destructive-operations
    constraints prompt.

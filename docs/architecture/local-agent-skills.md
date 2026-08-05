@@ -34,6 +34,35 @@ agent turn:
   **agent-owned** skills only. User-installed skills are protected and cannot be
   mutated by the model.
 
+## Skills catalog injection (Layer 1)
+
+Pure "tools only + hope the model lists skills" underperforms: the model rarely
+calls `skill_list` spontaneously, so seeded domain skills stay invisible. To
+fix this, a budgeted **skills catalog** (name + description for every installed
+skill) is injected into the agent's system context every interactive turn,
+right after the `mcp-tools` prompt and before the subagent / developer prompts.
+
+- **Source:** `SkillRegistryPort.list()` summaries — the same data that powers
+  `skill_list`. Full `SKILL.md` bodies are never injected.
+- **Builder:** `buildSkillsCatalogPrompt(summaries, budget)` orders skills with
+  priority builtins (`mcp-creator`, `skill-creator`) first, then alphabetical.
+  Each description is clamped to ~400 chars; the total block is clamped to
+  ~3000 chars. When truncated, a tail note directs the model to `skill_list` /
+  `skill_search` for the rest.
+- **Injection:** `RunAgentTurnHandler.injectSystemPrompts` calls the builder and
+  passes the result to `injectPrompts` as the `skillsCatalogPrompt` parameter.
+  The catalog is skipped when there are no skills (no block injected), mirroring
+  the `formatMemoryPrompt` empty → undefined contract.
+- **Scope:** Interactive turns only. Jobs and background review turns do not
+  inject the catalog (jobs denylist skill tools; review turns already have a
+  restricted gateway). Subagent turns today have no skill tools → no catalog.
+- **Failure mode:** If the registry `list()` call throws, the catalog is
+  skipped and a warning is logged — the turn still runs.
+
+The body stays progressive (Layer 2): the model reads a full `SKILL.md` via
+`skill_read` only when the task matches a catalog entry. See the Skills workflow
+section in `resources/agent/prompts/mcp-tools.md` for the protocol text.
+
 ### Provenance
 
 A `SkillProvenancePort` sidecar (`.provenance.json` in the skills root) tracks

@@ -44,6 +44,8 @@ describe("execSubagent", () => {
     const run = vi.fn(async (request) => {
       expect(request.workspace).toBe(path.resolve("/tmp/profile"));
       expect(request.prompt[0]?.text).toContain("Working directory (cwd): " + path.resolve("/tmp/profile"));
+      expect(request.prompt[0]?.text).toContain("the parent's MCP plugins, skills, and meta-tools do not exist here");
+      expect(request.prompt[0]?.text).toContain("instead of simulating it");
       return { ok: true, providerId: "cursor", summary: "done" };
     });
     const port: SubagentPort = {

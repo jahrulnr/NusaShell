@@ -26,6 +26,10 @@ export class ReviewAgentToolGateway implements AgentToolGateway {
     this.inner.endTurn(turnId);
   }
 
+  endConversation(conversationId: string): void {
+    this.inner.endConversation(conversationId);
+  }
+
   cancelTurn(turnId: string): Promise<void> | void {
     return this.inner.cancelTurn(turnId);
   }

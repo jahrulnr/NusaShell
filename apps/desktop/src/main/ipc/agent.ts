@@ -20,7 +20,10 @@ export function registerAgentIpc(ctx: IpcContext): void {
     store().appendMessage(id, message));
   ipcMain.handle("agent-conversations:checkpoint", (_event, id: string, checkpoint: AgentConversationCheckpoint) =>
     store().saveCheckpoint(id, checkpoint));
-  ipcMain.handle("agent-conversations:delete", (_event, id: string) => store().delete(id));
+  ipcMain.handle("agent-conversations:delete", (_event, id: string) => {
+    ctx.agentToolGateway.endConversation?.(id);
+    return store().delete(id);
+  });
   ipcMain.handle("agent-conversations:replace-interrupted", (_event, id: string, message: AgentConversationMessage) =>
     store().replaceLastInterrupted(id, message));
   ipcMain.handle("agent-conversations:set-workspace", (_event, id: string, workspace: string) =>

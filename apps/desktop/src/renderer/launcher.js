@@ -1496,12 +1496,14 @@ document.addEventListener("DOMContentLoaded", () => {
     models.forEach((model) => {
       const row = el("div", `agent-model-row${model.key === aiSettings.activeModelKey ? " is-selected" : ""}`);
       const choose = el("button", "agent-model-choice"); choose.type = "button"; choose.setAttribute("role", "option");
+      choose.setAttribute("aria-selected", String(model.key === aiSettings.activeModelKey));
       const name = el("span", "agent-model-name"); name.textContent = model.label || model.id;
       const meta = el("span", "agent-model-meta");
       const provider = el("span", "agent-model-provider"); provider.textContent = model.providerName;
       meta.appendChild(provider);
       modelCompatibility(model).forEach((capability) => { const badge = el("span", "agent-model-capability"); badge.textContent = capability; meta.appendChild(badge); });
       choose.append(name, meta);
+      bindModelOptionKeyboard(choose);
       choose.addEventListener("click", () => void selectAgentModel(model.key, clampModelEffort(model, aiSettings.effort)));
       row.appendChild(choose);
       if (model.supportedEfforts.length > 0) {
@@ -1536,12 +1538,14 @@ document.addEventListener("DOMContentLoaded", () => {
         const isCurrent = String(opt.currentValue) === o.value;
         const row = el(`div`, `agent-model-row${isCurrent ? " is-selected" : ""}`);
         const choose = el("button", "agent-model-choice"); choose.type = "button"; choose.setAttribute("role", "option");
+        choose.setAttribute("aria-selected", String(isCurrent));
         const name = el("span", "agent-model-name"); name.textContent = o.name;
         const meta = el("span", "agent-model-meta");
         const tag = el("span", "agent-model-provider"); tag.textContent = opt.name;
         meta.appendChild(tag);
         if (o.description) { const desc = el("span", "agent-model-capability"); desc.textContent = o.description; meta.appendChild(desc); }
         choose.append(name, meta);
+        bindModelOptionKeyboard(choose);
         choose.addEventListener("click", () => {
           void agentConversationController?.selectAcpConfigOption(opt.id, o.value);
           $("#agent-model-menu").hidden = true;
@@ -1551,6 +1555,22 @@ document.addEventListener("DOMContentLoaded", () => {
         section.appendChild(row);
       });
       list.appendChild(section);
+    });
+  };
+
+  const bindModelOptionKeyboard = (option) => {
+    option.addEventListener("keydown", (event) => {
+      const options = [...document.querySelectorAll("#agent-model-list [role=\"option\"]")];
+      const index = options.indexOf(option);
+      if (index < 0) return;
+      let next = index;
+      if (event.key === "ArrowDown") next = Math.min(index + 1, options.length - 1);
+      else if (event.key === "ArrowUp") next = Math.max(index - 1, 0);
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = options.length - 1;
+      else return;
+      event.preventDefault();
+      options[next].focus();
     });
   };
 
@@ -1567,8 +1587,8 @@ document.addEventListener("DOMContentLoaded", () => {
     $("#settings-ai-max-tool-rounds").value = aiSettings.maxToolRounds ?? 50;
     $("#settings-ai-max-repeated-tool-calls").value = aiSettings.maxRepeatedToolCalls ?? 50;
     $("#settings-ai-compaction").checked = aiSettings.compactionEnabled !== false;
-    $("#settings-ai-max-input-tokens").value = aiSettings.maxInputTokens ?? 12000;
-    $("#settings-ai-reserve-tokens").value = aiSettings.reserveTokens ?? 3000;
+    $("#settings-ai-max-input-tokens").value = aiSettings.maxInputTokens ?? 200000;
+    $("#settings-ai-reserve-tokens").value = aiSettings.reserveTokens ?? 16000;
     $("#settings-ai-recent-turns").value = aiSettings.recentTurns ?? 4;
     $("#settings-ai-summary-max-chars").value = aiSettings.summaryMaxChars ?? 12000;
   };
@@ -1579,6 +1599,7 @@ document.addEventListener("DOMContentLoaded", () => {
       syncAiControls();
       $("#agent-model-menu").hidden = true;
       $("#agent-model-trigger").setAttribute("aria-expanded", "false");
+      $("#agent-model-trigger").focus({ preventScroll: true });
     } catch (error) {
       showToast(`Could not select model: ${error.message || error}`, "error");
     }
@@ -1837,6 +1858,14 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!menu.hidden) { renderAgentModelPicker(); $("#agent-model-search").focus(); }
   });
   $("#agent-model-search").addEventListener("input", renderAgentModelPicker);
+  $("#agent-model-search").addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    const first = $("#agent-model-list [role=\"option\"]");
+    if (!first) return;
+    event.preventDefault();
+    const options = [...document.querySelectorAll("#agent-model-list [role=\"option\"]")];
+    options[event.key === "ArrowUp" ? options.length - 1 : 0]?.focus();
+  });
   document.addEventListener("pointerdown", (event) => {
     if (!event.target.closest(".agent-model-control")) {
       $("#agent-model-menu").hidden = true;
@@ -1852,8 +1881,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!$("#job-delete-dialog").hidden) jobsController?.closeDeleteDialog();
     if ($("#job-modal")?.classList.contains("active")) jobsController?.closeModal();
     if ($("#job-output-modal")?.classList.contains("active")) jobsController?.closeOutput();
-    $("#agent-model-menu").hidden = true;
+    const modelMenu = $("#agent-model-menu");
+    const wasModelMenuOpen = modelMenu && !modelMenu.hidden;
+    modelMenu.hidden = true;
     $("#agent-model-trigger").setAttribute("aria-expanded", "false");
+    if (wasModelMenuOpen) $("#agent-model-trigger").focus({ preventScroll: true });
   });
 
   // Log source filters

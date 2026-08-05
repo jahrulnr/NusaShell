@@ -67,7 +67,7 @@ export function friendlyError(err, fallback) {
 }
 
 /**
- * Resolve a successful terminal_open / terminal_read payload from any host shape.
+ * Resolve a successful open / read payload from any host shape.
  */
 export function parseHostToolResult(raw, fallback = null) {
   const payload = unwrapToolPayload(raw);

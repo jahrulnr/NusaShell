@@ -153,6 +153,26 @@ export function registerBuses(
     undefined,
     subagentPort,
     agent.conversationTodos,
+    skills.skillRegistry,
+    options.sealAgentInterrupted
+      ? {
+          onTurnInterrupted: async (partial, context) => {
+            try {
+              await options.sealAgentInterrupted!(context.conversationId, partial, {
+                resume: context.resume === true,
+                interruptReason: context.interruptReason,
+              });
+            } catch (error) {
+              logger.error(
+                "sealAgentInterrupted failed for conversation %s: %s",
+                context.conversationId,
+                error instanceof Error ? error.message : String(error),
+              );
+              throw error;
+            }
+          },
+        }
+      : undefined,
   ));
   commandBus.register("cancel-agent-turn", new CancelAgentTurnHandler(
     agent.agentTurnCoordinator,

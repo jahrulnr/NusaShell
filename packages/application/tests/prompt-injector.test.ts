@@ -237,4 +237,48 @@ describe("injectPrompts", () => {
     const without = injectPrompts(prompts, vars, messages, undefined, undefined, undefined, undefined);
     expect(without.summary.hasTodo).toBe(false);
   });
+
+  // --- Live MCP snapshot (Cycle 2) ---
+
+  it("injects mcpLivePrompt after mcp-tools and before skills catalog", () => {
+    const messages: AgentMessage[] = [{ role: "user", content: "hi" }];
+    const mcpLive = "## Live MCP (runtime)\nRunning: plugin.a\nAdvertised this turn: mcp_a_foo";
+    const skills = "## Skills catalog\n- skill.x";
+    const result = injectPrompts(
+      prompts, vars, messages,
+      undefined, undefined, undefined, undefined,
+      skills, undefined, mcpLive,
+    );
+    const systemContents = result.messages
+      .filter((m) => m.role === "system")
+      .map((m) => String(m.content));
+    const mcpToolsIdx = systemContents.findIndex((c) => c === "Use tool_list to discover tools.");
+    const liveIdx = systemContents.findIndex((c) => c === mcpLive);
+    const skillsIdx = systemContents.findIndex((c) => c === skills);
+    expect(mcpToolsIdx).toBeGreaterThanOrEqual(0);
+    expect(liveIdx).toBeGreaterThan(mcpToolsIdx);
+    expect(skillsIdx).toBeGreaterThan(liveIdx);
+  });
+
+  it("reports hasMcpLive in the injection summary and toDebugLine", () => {
+    const messages: AgentMessage[] = [{ role: "user", content: "hi" }];
+    const withLive = injectPrompts(
+      prompts, vars, messages,
+      undefined, undefined, undefined, undefined,
+      undefined, undefined, "## Live MCP (runtime)\nRunning: plugin.a",
+    );
+    expect(withLive.summary.hasMcpLive).toBe(true);
+    expect(withLive.summary.toDebugLine("trace-x")).toContain("hasMcpLive=true");
+    const without = injectPrompts(prompts, vars, messages);
+    expect(without.summary.hasMcpLive).toBe(false);
+    expect(without.summary.toDebugLine("trace-x")).toContain("hasMcpLive=false");
+  });
+
+  it("skips mcpLive block when undefined or empty", () => {
+    const messages: AgentMessage[] = [{ role: "user", content: "hi" }];
+    const withUndefined = injectPrompts(prompts, vars, messages, undefined, undefined, undefined, undefined, undefined, undefined, undefined).messages;
+    const withEmpty = injectPrompts(prompts, vars, messages, undefined, undefined, undefined, undefined, undefined, undefined, "").messages;
+    expect(withUndefined).toEqual(withEmpty);
+    expect(withEmpty.some((m) => m.role === "system" && String(m.content).includes("Live MCP"))).toBe(false);
+  });
 });

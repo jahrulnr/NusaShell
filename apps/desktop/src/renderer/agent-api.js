@@ -30,6 +30,7 @@ export async function runAgentTurn(messages, options, aiSettings) {
       ...(options.resume ? { resume: true } : {}),
       ...(options.supersedeTraceId ? { supersedeTraceId: options.supersedeTraceId } : {}),
       ...(options.conversationId ? { conversationId: options.conversationId } : {}),
+      ...(options.autoContinueIndex ? { autoContinueIndex: options.autoContinueIndex } : {}),
       modelCapabilities: {
         contextWindow: selected.contextWindow,
         maxOutput: selected.maxOutput,

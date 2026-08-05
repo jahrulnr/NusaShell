@@ -25169,7 +25169,7 @@ var FileService = class {
     }
     const detected = await detectFileTypeByContent(filePath2);
     if (!detected.isText) {
-      throw new Error(`File is binary (type=${detected.type}); files_read only supports text. Use files_info to inspect.`);
+      throw new Error(`File is binary (type=${detected.type}); read only supports text. Use info to inspect.`);
     }
     const content = await import_promises2.default.readFile(filePath2, "utf8");
     const lines = content.split("\n");
@@ -25366,7 +25366,7 @@ var FileService = class {
     }
     const detected = await detectFileTypeByContent(filePath2);
     if (!detected.isText) {
-      throw new Error(`File is binary (type=${detected.type}); files_patch only supports text files.`);
+      throw new Error(`File is binary (type=${detected.type}); patch only supports text files.`);
     }
     let content = await import_promises2.default.readFile(filePath2, "utf8");
     const occurrences = [];
@@ -25492,21 +25492,21 @@ function shouldExclude(name, excludeGlobs2) {
 
 // mcp/tool-catalog.js
 var FILES_TOOL_NAMES = Object.freeze([
-  "files_list",
-  "files_tree",
-  "files_read",
-  "files_write",
-  "files_mkdir",
-  "files_move",
-  "files_copy",
-  "files_delete",
-  "files_search",
-  "files_info",
-  "files_grep",
-  "files_patch",
-  "files_append",
-  "files_exists",
-  "files_touch"
+  "list",
+  "tree",
+  "read",
+  "write",
+  "mkdir",
+  "move",
+  "copy",
+  "delete",
+  "search",
+  "info",
+  "grep",
+  "patch",
+  "append",
+  "exists",
+  "touch"
 ]);
 
 // mcp/tools.js
@@ -25526,18 +25526,18 @@ var excludeGlobs = external_exports.array(external_exports.string().trim().min(1
 var oldString = external_exports.string().min(1).max(1024 * 1024);
 var newString = external_exports.string().max(1024 * 1024);
 var schemas = {
-  files_list: external_exports.object({ path: rootPath }).strict(),
-  files_tree: external_exports.object({ path: rootPath, depth, exclude: excludeGlobs, includeFiles: external_exports.boolean().default(true) }).strict(),
-  files_read: external_exports.object({ path: filePath, head, tail, start: startLine, end: endLine, lineNumbers, maxBytes }).strict(),
-  files_write: external_exports.object({ path: filePath, content: external_exports.string().max(10 * 1024 * 1024) }).strict(),
-  files_mkdir: external_exports.object({ path: filePath }).strict(),
-  files_move: external_exports.object({ source: filePath, destination: filePath }).strict(),
-  files_copy: external_exports.object({ source: filePath, destination: filePath }).strict(),
-  files_delete: external_exports.object({ path: filePath, recursive }).strict(),
-  files_search: external_exports.object({ path: rootPath, pattern, exclude: excludeGlobs, type: external_exports.enum(["file", "dir", "any"]).default("any"), maxDepth: external_exports.number().int().min(1).max(20).default(10) }).strict(),
-  files_info: external_exports.object({ path: filePath }).strict(),
-  files_grep: external_exports.object({ path: rootPath, pattern, glob: grepGlob, before: external_exports.number().int().min(0).max(10).default(0), after: external_exports.number().int().min(0).max(10).default(0), ignoreCase: external_exports.boolean().default(false), exclude: excludeGlobs, maxResults: external_exports.number().int().min(1).max(1e3).default(500) }).strict(),
-  files_patch: external_exports.object({
+  list: external_exports.object({ path: rootPath }).strict(),
+  tree: external_exports.object({ path: rootPath, depth, exclude: excludeGlobs, includeFiles: external_exports.boolean().default(true) }).strict(),
+  read: external_exports.object({ path: filePath, head, tail, start: startLine, end: endLine, lineNumbers, maxBytes }).strict(),
+  write: external_exports.object({ path: filePath, content: external_exports.string().max(10 * 1024 * 1024) }).strict(),
+  mkdir: external_exports.object({ path: filePath }).strict(),
+  move: external_exports.object({ source: filePath, destination: filePath }).strict(),
+  copy: external_exports.object({ source: filePath, destination: filePath }).strict(),
+  delete: external_exports.object({ path: filePath, recursive }).strict(),
+  search: external_exports.object({ path: rootPath, pattern, exclude: excludeGlobs, type: external_exports.enum(["file", "dir", "any"]).default("any"), maxDepth: external_exports.number().int().min(1).max(20).default(10) }).strict(),
+  info: external_exports.object({ path: filePath }).strict(),
+  grep: external_exports.object({ path: rootPath, pattern, glob: grepGlob, before: external_exports.number().int().min(0).max(10).default(0), after: external_exports.number().int().min(0).max(10).default(0), ignoreCase: external_exports.boolean().default(false), exclude: excludeGlobs, maxResults: external_exports.number().int().min(1).max(1e3).default(500) }).strict(),
+  patch: external_exports.object({
     path: filePath,
     edits: external_exports.union([
       external_exports.object({ old_string: oldString, new_string: newString, replace_all: external_exports.boolean().default(false) }),
@@ -25545,21 +25545,21 @@ var schemas = {
     ]),
     preview: external_exports.boolean().default(false)
   }).strict(),
-  files_append: external_exports.object({ path: filePath, content: external_exports.string().max(10 * 1024 * 1024) }).strict(),
-  files_exists: external_exports.object({ path: filePath }).strict(),
-  files_touch: external_exports.object({ path: filePath, createParents: external_exports.boolean().default(true), updateOnly: external_exports.boolean().default(false) }).strict()
+  append: external_exports.object({ path: filePath, content: external_exports.string().max(10 * 1024 * 1024) }).strict(),
+  exists: external_exports.object({ path: filePath }).strict(),
+  touch: external_exports.object({ path: filePath, createParents: external_exports.boolean().default(true), updateOnly: external_exports.boolean().default(false) }).strict()
 };
 var FILES_TOOLS = Object.freeze([
-  descriptor("files_list", "List directory contents with file metadata (name, size, modified, type).", {
+  descriptor("list", "List directory contents with file metadata (name, size, modified, type).", {
     path: stringProperty('Directory path relative to the files plugin root (user home by default). Use empty string for root; "/" resolves to the OS filesystem root.', "")
   }),
-  descriptor("files_tree", "Recursive directory tree up to a depth limit. Supports exclude globs and includeFiles filter.", {
+  descriptor("tree", "Recursive directory tree up to a depth limit. Supports exclude globs and includeFiles filter.", {
     path: stringProperty('Directory path relative to the files plugin root (user home by default). Use empty string for root; "/" resolves to the OS filesystem root.', ""),
     depth: integerProperty(1, 10, 3, "Maximum tree depth (1-10)."),
     exclude: { type: "array", items: { type: "string" }, description: 'Glob patterns to exclude (e.g. ["node_modules", ".git"]). Max 20.' },
     includeFiles: { type: "boolean", description: "Include files in the tree (default true). Set false for dirs-only.", default: true }
   }),
-  descriptor("files_read", "Read a text file. Use start/end for a line range, or head/tail for first/last N lines. Binary files are rejected.", {
+  descriptor("read", "Read a text file. Use start/end for a line range, or head/tail for first/last N lines. Binary files are rejected.", {
     path: stringProperty("File path relative to the files plugin root (user home by default)."),
     head: integerProperty(1, 1e5, void 0, "Number of lines from the top (legacy, use start/end for ranges)."),
     tail: integerProperty(1, 1e5, void 0, "Number of lines from the bottom (legacy, use start/end for ranges)."),
@@ -25568,36 +25568,36 @@ var FILES_TOOLS = Object.freeze([
     lineNumbers: { type: "boolean", description: "Prefix each line with its 1-based line number (NNN|content).", default: false },
     maxBytes: integerProperty(1, 104857600, 10485760, "Maximum file size in bytes (default 10 MB).")
   }, ["path"]),
-  descriptor("files_write", "Create or overwrite a file. Parent directories are created automatically.", {
+  descriptor("write", "Create or overwrite a file. Parent directories are created automatically.", {
     path: stringProperty("File path relative to the files plugin root (user home by default)."),
     content: { type: "string", description: "File content (UTF-8 text, max 10 MB)." }
   }, ["path", "content"], false),
-  descriptor("files_mkdir", "Create an empty directory. Missing parent directories are created automatically.", {
+  descriptor("mkdir", "Create an empty directory. Missing parent directories are created automatically.", {
     path: stringProperty("Directory path relative to the files plugin root (user home by default).")
   }, ["path"], false),
-  descriptor("files_move", "Move or rename a file or directory.", {
+  descriptor("move", "Move or rename a file or directory.", {
     source: stringProperty("Current path relative to the files plugin root (user home by default)."),
     destination: stringProperty("New path relative to the files plugin root (user home by default).")
   }, ["source", "destination"], false),
-  descriptor("files_copy", "Copy a file or directory recursively. Destination parent directories are created automatically.", {
+  descriptor("copy", "Copy a file or directory recursively. Destination parent directories are created automatically.", {
     source: stringProperty("Path to copy from, relative to the files plugin root (user home by default)."),
     destination: stringProperty("Path to copy to, relative to the files plugin root (user home by default).")
   }, ["source", "destination"], false),
-  descriptor("files_delete", "Delete a file or directory. Directories require recursive=true if not empty.", {
+  descriptor("delete", "Delete a file or directory. Directories require recursive=true if not empty.", {
     path: stringProperty("Path to delete relative to the files plugin root (user home by default)."),
     recursive: { type: "boolean", description: "Allow deleting non-empty directories.", default: false }
   }, ["path"], false),
-  descriptor("files_search", "Search for files by name pattern (glob: * and ?). Supports exclude, type filter, and maxDepth.", {
+  descriptor("search", "Search for files by name pattern (glob: * and ?). Supports exclude, type filter, and maxDepth.", {
     path: stringProperty('Search root directory relative to the files plugin root. Use empty string for root; "/" resolves to the OS filesystem root.', ""),
     pattern: stringProperty("Glob pattern (e.g. *.txt, config.*, *.test.js)."),
     exclude: { type: "array", items: { type: "string" }, description: 'Glob patterns to exclude (e.g. ["node_modules", ".git"]). Max 20.' },
     type: { type: "string", enum: ["file", "dir", "any"], description: "Filter by entry type (default any).", default: "any" },
     maxDepth: integerProperty(1, 20, 10, "Maximum search depth (1-20).")
   }, ["pattern"]),
-  descriptor("files_info", "Get detailed file metadata (size, dates, permissions, type).", {
+  descriptor("info", "Get detailed file metadata (size, dates, permissions, type).", {
     path: stringProperty("File or directory path relative to the files plugin root (user home by default).")
   }, ["path"]),
-  descriptor("files_grep", "Search file contents for a regex pattern (like grep). Only text files are scanned. Supports context lines, ignoreCase, and exclude globs.", {
+  descriptor("grep", "Search file contents for a regex pattern (like grep). Only text files are scanned. Supports context lines, ignoreCase, and exclude globs.", {
     path: stringProperty('Directory to search in, relative to the files plugin root. Use empty string for root; "/" resolves to the OS filesystem root.', ""),
     pattern: stringProperty("Regular expression pattern to match against file contents (e.g. 'function\\s+\\w+', 'TODO.*')."),
     glob: stringProperty("Optional file name glob filter to narrow search (e.g. '*.js', '*.ts'). If omitted, all text files are scanned."),
@@ -25607,7 +25607,7 @@ var FILES_TOOLS = Object.freeze([
     exclude: { type: "array", items: { type: "string" }, description: 'Glob patterns to exclude (e.g. ["node_modules", ".git"]). Max 20.' },
     maxResults: integerProperty(1, 1e3, 500, "Maximum number of results (1-1000).")
   }, ["pattern"]),
-  descriptor("files_patch", "Replace one or more string occurrences in a file. Supports replace_all and preview mode. Safer than files_write for small edits.", {
+  descriptor("patch", "Replace one or more string occurrences in a file. Supports replace_all and preview mode. Safer than write for small edits.", {
     path: stringProperty("File path relative to the files plugin root (user home by default)."),
     edits: {
       type: "object",
@@ -25620,14 +25620,14 @@ var FILES_TOOLS = Object.freeze([
     },
     preview: { type: "boolean", description: "If true, return the patched content without writing to disk.", default: false }
   }, ["path", "edits"], false),
-  descriptor("files_append", "Append content to the end of a file. Creates the file if it does not exist.", {
+  descriptor("append", "Append content to the end of a file. Creates the file if it does not exist.", {
     path: stringProperty("File path relative to the files plugin root (user home by default)."),
     content: { type: "string", description: "Content to append (UTF-8 text, max 10 MB)." }
   }, ["path", "content"], false),
-  descriptor("files_exists", "Check if a path exists. Returns { exists, isFile, isDir }. Does NOT throw on missing paths.", {
+  descriptor("exists", "Check if a path exists. Returns { exists, isFile, isDir }. Does NOT throw on missing paths.", {
     path: stringProperty("File or directory path relative to the files plugin root (user home by default).")
   }, ["path"]),
-  descriptor("files_touch", "Create an empty file if it doesn't exist, or update its timestamps if it does.", {
+  descriptor("touch", "Create an empty file if it doesn't exist, or update its timestamps if it does.", {
     path: stringProperty("File path relative to the files plugin root (user home by default)."),
     createParents: { type: "boolean", description: "Create parent directories if needed (default true).", default: true },
     updateOnly: { type: "boolean", description: "Only update timestamps of an existing file; throw if it doesn't exist.", default: false }
@@ -25641,11 +25641,11 @@ async function callFilesTool(service, name, rawArguments = {}) {
   if (!schema) throw new Error(`Unknown files tool: ${name}`);
   const input = schema.parse(rawArguments ?? {});
   switch (name) {
-    case "files_list":
+    case "list":
       return { path: input.path, items: await service.listDir(input.path) };
-    case "files_tree":
+    case "tree":
       return { path: input.path, tree: await service.tree(input.path, input.depth, { exclude: input.exclude, includeFiles: input.includeFiles }) };
-    case "files_read":
+    case "read":
       return { path: input.path, ...await service.readFile(input.path, {
         head: input.head,
         tail: input.tail,
@@ -25654,21 +25654,21 @@ async function callFilesTool(service, name, rawArguments = {}) {
         lineNumbers: input.lineNumbers,
         maxBytes: input.maxBytes
       }) };
-    case "files_write":
+    case "write":
       return await service.writeFile(input.path, input.content);
-    case "files_mkdir":
+    case "mkdir":
       return await service.makeDir(input.path);
-    case "files_move":
+    case "move":
       return await service.moveFile(input.source, input.destination);
-    case "files_copy":
+    case "copy":
       return await service.copyFile(input.source, input.destination);
-    case "files_delete":
+    case "delete":
       return await service.deleteFile(input.path, input.recursive);
-    case "files_search": {
+    case "search": {
       const searchResult = await service.searchFiles(input.path, input.pattern, { exclude: input.exclude, type: input.type, maxDepth: input.maxDepth });
       return { path: input.path, pattern: input.pattern, results: searchResult.results, meta: searchResult.meta };
     }
-    case "files_grep": {
+    case "grep": {
       const grepResult = await service.grepFiles(input.path, input.pattern, {
         glob: input.glob,
         before: input.before,
@@ -25679,17 +25679,17 @@ async function callFilesTool(service, name, rawArguments = {}) {
       });
       return { path: input.path, pattern: input.pattern, ...input.glob ? { glob: input.glob } : {}, results: grepResult.results, meta: grepResult.meta };
     }
-    case "files_info":
+    case "info":
       return await service.fileInfo(input.path);
-    case "files_patch": {
+    case "patch": {
       const edits = Array.isArray(input.edits) ? input.edits : [input.edits];
       return await service.patchFile(input.path, edits, input.preview);
     }
-    case "files_append":
+    case "append":
       return await service.appendFile(input.path, input.content);
-    case "files_exists":
+    case "exists":
       return await service.existsFile(input.path);
-    case "files_touch":
+    case "touch":
       return await service.touchFile(input.path, { createParents: input.createParents, updateOnly: input.updateOnly });
     default:
       throw new Error(`Unknown files tool: ${name}`);
@@ -25702,8 +25702,8 @@ function descriptor(name, description, properties, required2 = [], readOnly = tr
     annotations: {
       title: name,
       readOnlyHint: readOnly,
-      destructiveHint: name === "files_delete",
-      idempotentHint: readOnly || name === "files_write" || name === "files_move",
+      destructiveHint: name === "delete",
+      idempotentHint: readOnly || name === "write" || name === "move",
       openWorldHint: false
     },
     inputSchema: {
@@ -25748,11 +25748,11 @@ var HOWTO_TEXT = [
   "Use the Files plugin for bounded filesystem operations.",
   "",
   "Main tools:",
-  "- files_list / files_tree: inspect directories. tree supports exclude globs and includeFiles=false for dirs-only.",
-  "- files_read: read text files. Use start/end for a line range, head/tail for first/last N lines, lineNumbers=true for line-prefixed output. Binary files are rejected with a helpful error.",
-  "- files_write / files_append / files_patch: change text files. files_patch accepts an edits array (with replace_all) and a preview mode that returns the patched content without writing.",
-  "- files_mkdir / files_move / files_copy / files_delete / files_touch: manage entries. files_touch creates an empty file or updates timestamps.",
-  "- files_search / files_grep / files_info / files_exists: locate and inspect entries. files_grep supports before/after context, ignoreCase, and exclude globs. files_search supports exclude, type filter, and maxDepth.",
+  "- list / tree: inspect directories. tree supports exclude globs and includeFiles=false for dirs-only.",
+  "- read: read text files. Use start/end for a line range, head/tail for first/last N lines, lineNumbers=true for line-prefixed output. Binary files are rejected with a helpful error.",
+  "- write / append / patch: change text files. patch accepts an edits array (with replace_all) and a preview mode that returns the patched content without writing.",
+  "- mkdir / move / copy / delete / touch: manage entries. touch creates an empty file or updates timestamps.",
+  "- search / grep / info / exists: locate and inspect entries. grep supports before/after context, ignoreCase, and exclude globs. search supports exclude, type filter, and maxDepth.",
   "",
   "Path resolution: empty path = the Files root; `/` and absolute paths resolve to the OS filesystem root; relative paths resolve against the Files root; `../` traversal is allowed (no containment jail). Security is the user/AI provider's responsibility.",
   "",
@@ -25761,15 +25761,15 @@ var HOWTO_TEXT = [
 var EXPLORE_WORKFLOW_TEXT = [
   "Recommended workflow for exploring and editing an unfamiliar codebase with the Files plugin:",
   "",
-  '1. Map the territory: call files_tree with exclude=["node_modules", ".git", "dist", "build"] and includeFiles=false to get a dirs-only overview.',
-  '2. Find candidates: call files_search with a glob pattern (e.g. "*.ts") and exclude globs to narrow the result set. Use type="file" to skip directories.',
-  "3. Inspect before editing: call files_read with start/end to read a specific line range, or lineNumbers=true to make follow-up patches unambiguous. Use files_info for metadata without reading the body.",
-  '4. Locate usages: call files_grep with a regex pattern, before=2 and after=2 for context, and exclude=["node_modules", ".git"] to skip noise. Use ignoreCase=true when the casing is uncertain.',
-  "5. Verify existence: call files_exists before reading or patching a path you are not sure about \u2014 it never throws on missing paths.",
-  "6. Patch safely: call files_patch with preview=true first to see the patched content, then call again with preview=false to apply. Pass an edits array for multiple replacements in one call; use replace_all=true only when you intentionally want every occurrence.",
-  "7. Confirm: re-read the patched region with files_read (start/end) to verify the change landed as expected.",
+  '1. Map the territory: call tree with exclude=["node_modules", ".git", "dist", "build"] and includeFiles=false to get a dirs-only overview.',
+  '2. Find candidates: call search with a glob pattern (e.g. "*.ts") and exclude globs to narrow the result set. Use type="file" to skip directories.',
+  "3. Inspect before editing: call read with start/end to read a specific line range, or lineNumbers=true to make follow-up patches unambiguous. Use info for metadata without reading the body.",
+  '4. Locate usages: call grep with a regex pattern, before=2 and after=2 for context, and exclude=["node_modules", ".git"] to skip noise. Use ignoreCase=true when the casing is uncertain.',
+  "5. Verify existence: call exists before reading or patching a path you are not sure about \u2014 it never throws on missing paths.",
+  "6. Patch safely: call patch with preview=true first to see the patched content, then call again with preview=false to apply. Pass an edits array for multiple replacements in one call; use replace_all=true only when you intentionally want every occurrence.",
+  "7. Confirm: re-read the patched region with read (start/end) to verify the change landed as expected.",
   "",
-  "Destructive operations (files_delete, files_move over an existing destination) are irreversible \u2014 confirm the path with files_exists or files_info first."
+  "Destructive operations (delete, move over an existing destination) are irreversible \u2014 confirm the path with exists or info first."
 ].join("\n");
 function getFilesPrompt(name) {
   if (name === "howto") {
@@ -25865,14 +25865,14 @@ void main().catch((error51) => {
 });
 function emitAutomationForTool(server, toolName, args) {
   const notifications = {
-    files_write: () => ({ type: "files.modified", payload: { path: args.path, action: "write" } }),
-    files_patch: () => ({ type: "files.modified", payload: { path: args.path, action: "patch" } }),
-    files_append: () => ({ type: "files.modified", payload: { path: args.path, action: "append" } }),
-    files_mkdir: () => ({ type: "files.modified", payload: { path: args.path, action: "mkdir" } }),
-    files_touch: () => ({ type: "files.modified", payload: { path: args.path, action: "touch" } }),
-    files_delete: () => ({ type: "files.deleted", payload: { path: args.path, recursive: !!args.recursive } }),
-    files_move: () => ({ type: "files.moved", payload: { source: args.source, destination: args.destination } }),
-    files_copy: () => ({ type: "files.moved", payload: { source: args.source, destination: args.destination } })
+    write: () => ({ type: "files.modified", payload: { path: args.path, action: "write" } }),
+    patch: () => ({ type: "files.modified", payload: { path: args.path, action: "patch" } }),
+    append: () => ({ type: "files.modified", payload: { path: args.path, action: "append" } }),
+    mkdir: () => ({ type: "files.modified", payload: { path: args.path, action: "mkdir" } }),
+    touch: () => ({ type: "files.modified", payload: { path: args.path, action: "touch" } }),
+    delete: () => ({ type: "files.deleted", payload: { path: args.path, recursive: !!args.recursive } }),
+    move: () => ({ type: "files.moved", payload: { source: args.source, destination: args.destination } }),
+    copy: () => ({ type: "files.moved", payload: { source: args.source, destination: args.destination } })
   };
   const builder = notifications[toolName];
   if (!builder) return;

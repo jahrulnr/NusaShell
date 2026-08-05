@@ -9,20 +9,20 @@ describe("Files MCP prompts", () => {
     ]);
     const prompt = getFilesPrompt("howto");
     const text = prompt.messages[0].content.text;
-    expect(text).toContain("files_read");
-    expect(text).toContain("files_patch");
-    expect(text).toContain("files_exists");
-    expect(text).toContain("files_touch");
+    expect(text).toContain("read");
+    expect(text).toContain("patch");
+    expect(text).toContain("exists");
+    expect(text).toContain("touch");
     expect(text).toContain("OS filesystem root");
   });
 
   it("publishes an explore-workflow prompt with the recommended sequence", () => {
     const prompt = getFilesPrompt("explore-workflow");
     const text = prompt.messages[0].content.text;
-    expect(text).toContain("files_tree");
-    expect(text).toContain("files_search");
-    expect(text).toContain("files_grep");
-    expect(text).toContain("files_patch");
+    expect(text).toContain("tree");
+    expect(text).toContain("search");
+    expect(text).toContain("grep");
+    expect(text).toContain("patch");
     expect(text).toContain("preview=true");
     expect(text).toContain("exclude");
   });

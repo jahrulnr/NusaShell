@@ -8,9 +8,12 @@ import type {
 import type { AgentToolGateway } from "../ports/agent-tool-gateway.port.js";
 import type { AgentProvider } from "../ports/agent-provider.port.js";
 import type { LoggerPort } from "../../plugin/ports/logger.port.js";
+import type { AutoContinueDecision } from "./auto-continue-policy.js";
 
 export const MAX_REPEATED_TOOL_CALLS = 50;
 export const DEFAULT_MAX_TOOL_ROUNDS = 50;
+/** Absolute ceiling for settings/env/API validation (complex agentic runs). */
+export const MAX_TOOL_ROUNDS_CAP = 10_000;
 export const DEFAULT_SOFT_RECOVER_ATTEMPTS = 1;
 export const MAX_SOFT_RECOVER_ATTEMPTS = 3;
 export const DEFAULT_MAX_CONCURRENT_TOOL_CALLS = 8;
@@ -64,6 +67,12 @@ export interface AgentToolExecution {
   readonly args?: Readonly<Record<string, unknown>>;
   readonly result?: unknown;
   readonly error?: string;
+  /**
+   * Canonical typed tool result (dual-rep). Populated by the execution policy
+   * after migration; legacy `ok`/`result`/`error` remain derived for consumers
+   * that have not yet switched.
+   */
+  readonly toolResult?: import("./agent-tool-result.js").AgentToolResult;
 }
 
 export type AgentTurnStep =
@@ -84,6 +93,12 @@ export interface AgentTurnResult {
   readonly usage?: AgentTokenUsage;
   readonly compaction?: AgentCompactionCheckpoint;
   readonly messages?: readonly AgentMessage[];
+  /**
+   * Outer multi-turn auto-continue decision. Attached only on a successful
+   * complete turn when a conversation is bound and a todo port is configured;
+   * omitted on failed/cancelled paths so the desktop never chains those.
+   */
+  readonly autoContinue?: AutoContinueDecision;
 }
 
 export interface AgentCompactionCheckpoint {
@@ -91,6 +106,13 @@ export interface AgentCompactionCheckpoint {
   readonly compactedMessageCount: number;
   readonly estimatedInputTokens: number;
   readonly via: "provider" | "extractive";
+  /**
+   * Codex-aligned retained user message texts (chronological) packed into the
+   * replacement history. Present when the compactor produced a memento
+   * replacement; absent for legacy checkpoints (migration falls back to
+   * `compactedMessageCount` slice).
+   */
+  readonly retainedUserMessages?: readonly string[];
 }
 
 /**

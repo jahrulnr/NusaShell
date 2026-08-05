@@ -12,11 +12,11 @@ The workspace above is the source of truth for agent tool I/O. When installed pl
 
 ## Tool availability
 
-The tool list above is authoritative for this turn. Meta-tools (`mcp_list`, `mcp_enable`, `mcp_disable`, `mcp_register`, `mcp_unregister`, `tool_list`, `tool_search`, `tool_schema`, `mcp_context`, `docs_search`, `docs_list`, `docs_read`, `skill_list`, `skill_search`, `skill_read`, `memory`, `skill_manage`, `todo`, `job`, `pipeline`, and `ask_question` when this turn is interactive) are always present. Any other tool names listed here were advertised for this turn only (via `tool_schema` / `tool_schemas`, or after a successful lazy resolve) — including tools documented by conditionally injected guidance prompts, which only exist while their backing capability is connected.
+The tool list above is authoritative for this turn. Meta-tools (`mcp_list`, `mcp_enable`, `mcp_disable`, `mcp_register`, `mcp_unregister`, `tool_list`, `tool_search`, `tool_schema`, `mcp_context`, `docs_search`, `docs_list`, `docs_read`, `skill_list`, `skill_search`, `skill_read`, `memory`, `skill_manage`, `todo`, `job`, `pipeline`, and `ask_question` when this turn is interactive) are always present. When MCP plugins are **running**, their full tool catalog is auto-advertised in the tool list every turn — those `mcp_<plugin>_<tool>` names are ready to call directly. Any other tool names listed here were advertised for this turn only (via `tool_schema` / `tool_schemas`, or after a successful lazy resolve) — including tools documented by conditionally injected guidance prompts, which only exist while their backing capability is connected.
 
-Do not re-run discovery or `tool_schema` at the start of every turn by habit. When you already know a concrete `mcp_<plugin>_<tool>` name and that plugin is running, call it directly; fall back to the progressive discovery workflow in `mcp-tools.md` when the name is unknown, the plugin is stopped, or the call fails.
+A **skills catalog** (name + description for every installed skill) is injected as a system message every interactive turn, after the MCP tool workflow prompt. Use it as a router: when the task matches a skill description, `skill_read` that skill's `SKILL.md` before domain actions. Do not freestyle a domain task the catalog covers.
 
-Use the progressive discovery workflow described in the `mcp-tools.md` prompt to find and call concrete plugin tools when you need schema or discovery.
+Running MCP plugins are fully catalogued in the Live MCP system block and in `tools[]` — call their `mcp_<plugin>_<tool>` names directly. Use the progressive discovery workflow in `mcp-tools.md` only to **start** idle plugins (`mcp_enable`), recover from overflow/truncation, or when a call fails and you need to re-discover.
 
 ## Tool results
 

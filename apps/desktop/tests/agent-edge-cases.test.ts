@@ -81,6 +81,16 @@ describe("BH-AGENT error mapping (human copy from backend shapes)", () => {
     expect(formatTurnError(null)).toBe("Unknown error");
   });
 
+  it("BH-AGENT-27b never shows [object Object] for IPC timeout shapes", () => {
+    expect(formatTurnError({ message: "[object Object]", code: "TIMEOUT" })).toBe("TIMEOUT");
+    expect(formatTurnError({
+      kind: "response",
+      ok: false,
+      error: { code: "TIMEOUT", message: "IPC request timed out after 1800000ms" },
+    })).toBe("IPC request timed out after 1800000ms");
+    expect(formatTurnError("[object Object]")).toBe("Unknown error");
+  });
+
   it("BH-AGENT-28 never stringifies subagent errors as [object Object]", () => {
     expect(formatSubagentError({ message: "quota exceeded" })).toBe("quota exceeded");
     expect(formatSubagentError("spawn failed")).toBe("spawn failed");

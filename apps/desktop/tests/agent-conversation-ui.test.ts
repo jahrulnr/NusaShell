@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAgentContext,
+  buildContinueContext,
+  CONTINUE_STEER,
   clampToolText,
   composerTextareaSize,
   describeToolActivity,
+  getConversationRoomMetadata,
   formatMessageTimestamp,
   formatToolOutput,
   formatToolTerminalInput,
@@ -42,7 +45,20 @@ describe("agent conversation UI helpers", () => {
       summary: "Updated",
       compactedMessageCount: 6,
       via: "extractive",
+      compactionCount: 2,
     });
+  });
+
+  it("summarizes durable room diagnostics without double-counting message steps", () => {
+    expect(getConversationRoomMetadata({
+      id: "conv-room",
+      messages: [
+        { role: "assistant", toolCalls: [{ id: "a", name: "todo", ok: true }], steps: [{ type: "tool_calls", calls: [{ id: "a", name: "todo", ok: true }] }] },
+        { role: "assistant", steps: [{ type: "tool_calls", calls: [{ id: "b", name: "shell", ok: true }, { id: "c", name: "shell", ok: false }] }] },
+      ],
+      checkpoint: { summary: "old", compactedMessageCount: 1, via: "provider", compactionCount: 3 },
+      subagentRuns: [{ steps: [{ type: "tool_calls", calls: [{ id: "d", name: "grep", ok: true }] }] }],
+    })).toEqual({ conversationId: "conv-room", compactionCount: 3, toolCallCount: 4 });
   });
 
   it("searches conversation titles without changing newest-first order", () => {
@@ -55,7 +71,7 @@ describe("agent conversation UI helpers", () => {
   });
 
   it("renders GFM tables and sanitizes dangerous HTML", () => {
-    expect(renderAssistantMarkdown("## Tools\n\n| Tool | Function |\n| --- | --- |\n| **createNote** | Create a note |\n\n<script>alert(1)</script>")).toContain("<table>");
+    expect(renderAssistantMarkdown("## Tools\n\n| Tool | Function |\n| --- | --- |\n| **createNote** | Create a note |\n\n<script>alert(1)</script>")).toContain("agent-markdown-table-scroll");
     expect(renderAssistantMarkdown("<script>alert(1)</script>")).not.toContain("<script>");
   });
 
@@ -105,12 +121,12 @@ describe("agent conversation UI helpers", () => {
     expect(clampToolText("x".repeat(100), 50)).toHaveLength(50);
     expect(clampToolText("short")).toBe("short");
 
-    const hugeOutput = toConversationToolCall({ id: "c1", name: "terminal_read", ok: true, output: "y".repeat(50_000) });
+    const hugeOutput = toConversationToolCall({ id: "c1", name: "read", ok: true, output: "y".repeat(50_000) });
     expect(hugeOutput.output).toHaveLength(12_000);
 
     const hugeArgs = toConversationToolCall({
       id: "c2",
-      name: "files_write",
+      name: "write",
       ok: true,
       args: { path: "/a.txt", content: "z".repeat(20_000) },
     });
@@ -231,8 +247,8 @@ describe("agent conversation UI helpers", () => {
           role: "assistant",
           content: "Done.",
           toolCalls: [
-            { id: "call-1", name: "files_write", ok: true, args: { path: "/a.txt", content: "hi" }, output: "wrote 2 bytes" },
-            { id: "call-2", name: "files_list", ok: false, args: { path: "/" }, error: "Permission denied" },
+            { id: "call-1", name: "write", ok: true, args: { path: "/a.txt", content: "hi" }, output: "wrote 2 bytes" },
+            { id: "call-2", name: "list", ok: false, args: { path: "/" }, error: "Permission denied" },
           ],
         },
       ],
@@ -241,11 +257,11 @@ describe("agent conversation UI helpers", () => {
     expect(result).toEqual([
       { role: "user", content: "Write a file then list the dir" },
       { role: "assistant", content: "", toolCalls: [
-        { id: "call-1", name: "files_write", args: { path: "/a.txt", content: "hi" } },
-        { id: "call-2", name: "files_list", args: { path: "/" } },
+        { id: "call-1", name: "write", args: { path: "/a.txt", content: "hi" } },
+        { id: "call-2", name: "list", args: { path: "/" } },
       ] },
-      { role: "tool", toolCallId: "call-1", name: "files_write", content: "wrote 2 bytes" },
-      { role: "tool", toolCallId: "call-2", name: "files_list", content: "[TOOL ERROR] Permission denied" },
+      { role: "tool", toolCallId: "call-1", name: "write", content: "wrote 2 bytes" },
+      { role: "tool", toolCallId: "call-2", name: "list", content: "[TOOL ERROR] Permission denied" },
       { role: "assistant", content: "Done." },
     ]);
   });
@@ -258,15 +274,15 @@ describe("agent conversation UI helpers", () => {
           role: "assistant",
           content: "I read go.mod and found no TODOs.",
           toolCalls: [
-            { id: "call-1", name: "files_read", ok: true, args: { path: "go.mod" }, output: "module example" },
-            { id: "call-2", name: "files_grep", ok: true, args: { pattern: "TODO" }, output: "no matches" },
+            { id: "call-1", name: "read", ok: true, args: { path: "go.mod" }, output: "module example" },
+            { id: "call-2", name: "grep", ok: true, args: { pattern: "TODO" }, output: "no matches" },
           ],
           steps: [
             { type: "tool_calls", calls: [
-              { id: "call-1", name: "files_read", ok: true, args: { path: "go.mod" }, output: "module example" },
+              { id: "call-1", name: "read", ok: true, args: { path: "go.mod" }, output: "module example" },
             ] },
             { type: "tool_calls", calls: [
-              { id: "call-2", name: "files_grep", ok: true, args: { pattern: "TODO" }, output: "no matches" },
+              { id: "call-2", name: "grep", ok: true, args: { pattern: "TODO" }, output: "no matches" },
             ] },
             { type: "text", content: "I read go.mod and found no TODOs." },
           ],
@@ -277,13 +293,13 @@ describe("agent conversation UI helpers", () => {
     expect(result).toEqual([
       { role: "user", content: "Read go.mod then grep for TODO" },
       { role: "assistant", content: "", toolCalls: [
-        { id: "call-1", name: "files_read", args: { path: "go.mod" } },
+        { id: "call-1", name: "read", args: { path: "go.mod" } },
       ] },
-      { role: "tool", toolCallId: "call-1", name: "files_read", content: "module example" },
+      { role: "tool", toolCallId: "call-1", name: "read", content: "module example" },
       { role: "assistant", content: "", toolCalls: [
-        { id: "call-2", name: "files_grep", args: { pattern: "TODO" } },
+        { id: "call-2", name: "grep", args: { pattern: "TODO" } },
       ] },
-      { role: "tool", toolCallId: "call-2", name: "files_grep", content: "no matches" },
+      { role: "tool", toolCallId: "call-2", name: "grep", content: "no matches" },
       { role: "assistant", content: "I read go.mod and found no TODOs." },
     ]);
   });
@@ -295,11 +311,11 @@ describe("agent conversation UI helpers", () => {
         {
           role: "assistant",
           content: "Done.",
-          toolCalls: [{ id: "call-1", name: "files_read", ok: true, args: { path: "/a" }, output: "hi" }],
+          toolCalls: [{ id: "call-1", name: "read", ok: true, args: { path: "/a" }, output: "hi" }],
           steps: [
             { type: "reasoning", content: "I should skip this tool because it failed before" },
             { type: "tool_calls", calls: [
-              { id: "call-1", name: "files_read", ok: true, args: { path: "/a" }, output: "hi" },
+              { id: "call-1", name: "read", ok: true, args: { path: "/a" }, output: "hi" },
             ] },
             { type: "text", content: "Done." },
           ],
@@ -310,9 +326,9 @@ describe("agent conversation UI helpers", () => {
     expect(result).toEqual([
       { role: "user", content: "go" },
       { role: "assistant", content: "", toolCalls: [
-        { id: "call-1", name: "files_read", args: { path: "/a" } },
+        { id: "call-1", name: "read", args: { path: "/a" } },
       ] },
-      { role: "tool", toolCallId: "call-1", name: "files_read", content: "hi" },
+      { role: "tool", toolCallId: "call-1", name: "read", content: "hi" },
       { role: "assistant", content: "Done." },
     ]);
   });
@@ -325,16 +341,16 @@ describe("agent conversation UI helpers", () => {
           role: "assistant",
           content: "Mid text\nFinal answer",
           toolCalls: [
-            { id: "call-1", name: "files_read", ok: true, args: { path: "/a" }, output: "a" },
-            { id: "call-2", name: "files_read", ok: true, args: { path: "/b" }, output: "b" },
+            { id: "call-1", name: "read", ok: true, args: { path: "/a" }, output: "a" },
+            { id: "call-2", name: "read", ok: true, args: { path: "/b" }, output: "b" },
           ],
           steps: [
             { type: "tool_calls", calls: [
-              { id: "call-1", name: "files_read", ok: true, args: { path: "/a" }, output: "a" },
+              { id: "call-1", name: "read", ok: true, args: { path: "/a" }, output: "a" },
             ] },
             { type: "text", content: "Mid text" },
             { type: "tool_calls", calls: [
-              { id: "call-2", name: "files_read", ok: true, args: { path: "/b" }, output: "b" },
+              { id: "call-2", name: "read", ok: true, args: { path: "/b" }, output: "b" },
             ] },
             { type: "text", content: "Final answer" },
           ],
@@ -345,14 +361,14 @@ describe("agent conversation UI helpers", () => {
     expect(result).toEqual([
       { role: "user", content: "go" },
       { role: "assistant", content: "", toolCalls: [
-        { id: "call-1", name: "files_read", args: { path: "/a" } },
+        { id: "call-1", name: "read", args: { path: "/a" } },
       ] },
-      { role: "tool", toolCallId: "call-1", name: "files_read", content: "a" },
+      { role: "tool", toolCallId: "call-1", name: "read", content: "a" },
       { role: "assistant", content: "Mid text" },
       { role: "assistant", content: "", toolCalls: [
-        { id: "call-2", name: "files_read", args: { path: "/b" } },
+        { id: "call-2", name: "read", args: { path: "/b" } },
       ] },
-      { role: "tool", toolCallId: "call-2", name: "files_read", content: "b" },
+      { role: "tool", toolCallId: "call-2", name: "read", content: "b" },
       { role: "assistant", content: "Final answer" },
     ]);
   });
@@ -365,18 +381,18 @@ describe("agent conversation UI helpers", () => {
           role: "assistant",
           content: "",
           toolCalls: [
-            { id: "call-1", name: "mcp_mail_search", ok: true, args: { query: "inbox" }, output: "Subject: hello\nBody: this is a long enough message body to trigger wrapping" },
-            { id: "call-2", name: "files_read", ok: true, args: { path: "/a.txt" }, output: "plain content body" },
+            { id: "call-1", name: "mcp_search", ok: true, args: { query: "inbox" }, output: "Subject: hello\nBody: this is a long enough message body to trigger wrapping" },
+            { id: "call-2", name: "read", ok: true, args: { path: "/a.txt" }, output: "plain content body" },
           ],
         },
       ],
     });
 
-    const mcpResult = result.find((m) => m.role === "tool" && m.name === "mcp_mail_search");
-    expect(mcpResult?.content).toContain("<untrusted_tool_result source=\"mcp_mail_search\">");
+    const mcpResult = result.find((m) => m.role === "tool" && m.name === "mcp_search");
+    expect(mcpResult?.content).toContain("<untrusted_tool_result source=\"mcp_search\">");
     expect(mcpResult?.content).toContain("Subject: hello");
 
-    const filesResult = result.find((m) => m.role === "tool" && m.name === "files_read");
+    const filesResult = result.find((m) => m.role === "tool" && m.name === "read");
     expect(filesResult?.content).toBe("plain content body");
     expect(filesResult?.content).not.toContain("untrusted_tool_result");
   });
@@ -385,14 +401,14 @@ describe("agent conversation UI helpers", () => {
     const result = buildAgentContext({
       messages: [
         { role: "user", content: "go" },
-        { role: "assistant", content: "", toolCalls: [{ id: "call-1", name: "files_read", ok: true, args: { path: "/a" } }] },
+        { role: "assistant", content: "", toolCalls: [{ id: "call-1", name: "read", ok: true, args: { path: "/a" } }] },
       ],
     });
 
     expect(result).toEqual([
       { role: "user", content: "go" },
-      { role: "assistant", content: "", toolCalls: [{ id: "call-1", name: "files_read", args: { path: "/a" } }] },
-      { role: "tool", toolCallId: "call-1", name: "files_read", content: "" },
+      { role: "assistant", content: "", toolCalls: [{ id: "call-1", name: "read", args: { path: "/a" } }] },
+      { role: "tool", toolCallId: "call-1", name: "read", content: "" },
     ]);
   });
 
@@ -404,10 +420,10 @@ describe("agent conversation UI helpers", () => {
           role: "assistant",
           content: "partial",
           toolCalls: [
-            { id: "call-1", name: "files_write", ok: true, args: { path: "/a" }, output: "ok" },
+            { id: "call-1", name: "write", ok: true, args: { path: "/a" }, output: "ok" },
             { name: "no-id", ok: true, output: "x" },
             { id: "call-3", ok: true, output: "y" },
-            { id: "call-4", name: "files_read", ok: true, args: { path: "/b" }, output: "b" },
+            { id: "call-4", name: "read", ok: true, args: { path: "/b" }, output: "b" },
           ],
         },
       ],
@@ -415,8 +431,8 @@ describe("agent conversation UI helpers", () => {
 
     expect(result.map((m) => m.role)).toEqual(["user", "assistant", "tool", "tool", "assistant"]);
     expect(result[1]).toMatchObject({ role: "assistant", toolCalls: [
-      { id: "call-1", name: "files_write" },
-      { id: "call-4", name: "files_read" },
+      { id: "call-1", name: "write" },
+      { id: "call-4", name: "read" },
     ] });
     expect(result[2]).toMatchObject({ role: "tool", toolCallId: "call-1" });
     expect(result[3]).toMatchObject({ role: "tool", toolCallId: "call-4" });
@@ -430,7 +446,7 @@ describe("agent conversation UI helpers", () => {
         {
           role: "assistant",
           content: "old answer",
-          toolCalls: [{ id: "call-1", name: "files_write", ok: true, args: { path: "/a" }, output: "wrote" }],
+          toolCalls: [{ id: "call-1", name: "write", ok: true, args: { path: "/a" }, output: "wrote" }],
         },
         { role: "user", content: "follow up" },
       ],
@@ -439,8 +455,8 @@ describe("agent conversation UI helpers", () => {
 
     expect(result).toEqual([
       { role: "system", content: "Conversation summary:\nEarlier file was written." },
-      { role: "assistant", content: "", toolCalls: [{ id: "call-1", name: "files_write", args: { path: "/a" } }] },
-      { role: "tool", toolCallId: "call-1", name: "files_write", content: "wrote" },
+      { role: "assistant", content: "", toolCalls: [{ id: "call-1", name: "write", args: { path: "/a" } }] },
+      { role: "tool", toolCallId: "call-1", name: "write", content: "wrote" },
       { role: "assistant", content: "old answer" },
       { role: "user", content: "follow up" },
     ]);
@@ -474,5 +490,103 @@ describe("agent conversation UI helpers", () => {
     const providerChars = JSON.stringify(providerContext).length;
     const fullChars = JSON.stringify(messages).length;
     expect(providerChars).toBeLessThan(fullChars / 3);
+  });
+
+  // --- buildContinueContext (Continue incomplete stream) ---
+
+  describe("buildContinueContext", () => {
+    it("text continue: interrupted with body → context ends with assistant partial + continue steer", () => {
+      const conversation = {
+        messages: [
+          { role: "user", content: "Write an essay" },
+          { role: "assistant", content: "Halfway through the essay", status: "interrupted", interruptReason: "provider" },
+        ],
+      };
+      const ctx = buildContinueContext(conversation);
+      // Interrupted is filtered from base, then re-added as assistant + steer.
+      expect(ctx).toEqual([
+        { role: "user", content: "Write an essay" },
+        { role: "assistant", content: "Halfway through the essay" },
+        { role: "user", content: CONTINUE_STEER },
+      ]);
+    });
+
+    it("text continue: interrupted is not duplicated from base", () => {
+      const conversation = {
+        messages: [
+          { role: "user", content: "Write an essay" },
+          { role: "assistant", content: "Halfway", status: "interrupted" },
+        ],
+      };
+      const ctx = buildContinueContext(conversation);
+      // Only one user "Write an essay" (base filters interrupted, then we add
+      // assistant + steer — no dup of the interrupted row).
+      const userWrites = ctx.filter((m) => m.role === "user" && m.content === "Write an essay");
+      expect(userWrites).toHaveLength(1);
+    });
+
+    it("tool resume: interrupted with resumeMessages → returns resumeMessages (tool path)", () => {
+      const resumeMessages = [
+        { role: "user", content: "Create a note" },
+        { role: "assistant", toolCalls: [{ id: "c1", name: "notes.create", args: {} }] },
+        { role: "tool", toolCallId: "c1", name: "notes.create", content: "ok" },
+      ];
+      const conversation = {
+        messages: [
+          { role: "user", content: "Create a note" },
+          { role: "assistant", content: "", status: "interrupted", resumeMessages, toolCalls: [{ id: "c1", name: "notes.create", args: {}, ok: true, output: "ok" }] },
+        ],
+      };
+      const ctx = buildContinueContext(conversation);
+      // Tool path: returns resumeMessages as-is (caller sets resume: true).
+      expect(ctx).toEqual(resumeMessages);
+    });
+
+    it("text continue: inject-only resumeMessages (no tools settled) does not take tool path", () => {
+      // Pre-tool provider fail seals inject+user as resumeMessages even with no tools.
+      // Retry must still text-continue so the model sees the partial bubble.
+      const conversation = {
+        messages: [
+          { role: "user", content: "Hunt bugs in NusaShell" },
+          {
+            role: "assistant",
+            content: "Siap! Task ini cocok banget dengan skill codebase-review.",
+            status: "interrupted",
+            interruptReason: "provider",
+            resumeMessages: [
+              { role: "system", content: "You are the NusaShell agent." },
+              { role: "user", content: "Hunt bugs in NusaShell" },
+            ],
+          },
+        ],
+      };
+      const ctx = buildContinueContext(conversation);
+      expect(ctx).toEqual([
+        { role: "user", content: "Hunt bugs in NusaShell" },
+        { role: "assistant", content: "Siap! Task ini cocok banget dengan skill codebase-review." },
+        { role: "user", content: CONTINUE_STEER },
+      ]);
+    });
+
+    it("noop: interrupted with no body and no resumeMessages → same as buildAgentContext", () => {
+      const conversation = {
+        messages: [
+          { role: "user", content: "Hello" },
+          { role: "assistant", content: "", status: "interrupted" },
+        ],
+      };
+      const ctx = buildContinueContext(conversation);
+      expect(ctx).toEqual([{ role: "user", content: "Hello" }]);
+    });
+
+    it("normal buildAgentContext still excludes interrupted", () => {
+      const conversation = {
+        messages: [
+          { role: "user", content: "Hello" },
+          { role: "assistant", content: "cut off", status: "interrupted" },
+        ],
+      };
+      expect(buildAgentContext(conversation)).toEqual([{ role: "user", content: "Hello" }]);
+    });
   });
 });

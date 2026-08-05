@@ -32,6 +32,12 @@ export type AgentMessage =
       readonly toolCallId: string;
       readonly name: string;
       readonly content: string;
+      /**
+       * When true, the tool result represents an execution error (not a
+       * successful result). Anthropic's Messages API maps this to
+       * `is_error: true` on the `tool_result` block. OpenAI adapters ignore it.
+       */
+      readonly toolIsError?: boolean;
     };
 
 export type ReasoningEffort = "auto" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";

@@ -113,26 +113,26 @@ describe("terminal MCP e2e", () => {
     const names = (await client.listTools()).map((tool) => tool.name);
     expect(names).toEqual(
       expect.arrayContaining([
-        "terminal_exec",
-        "terminal_open",
-        "terminal_write",
-        "terminal_read",
-        "terminal_resize",
-        "terminal_close",
-        "terminal_list",
+        "exec",
+        "open",
+        "write",
+        "read",
+        "resize",
+        "close",
+        "list",
       ]),
     );
   });
 
-  it("terminal_exec defaults cwd to the user home directory", async () => {
-    const result = await client.callTool("terminal_exec", { command: "pwd" });
+  it("exec defaults cwd to the user home directory", async () => {
+    const result = await client.callTool("exec", { command: "pwd" });
     expect(result.cwd).toBe(HOME);
     expect(String(result.stdout).trim()).toBe(HOME);
     expect(result.exitCode).toBe(0);
   });
 
   it("opens a PTY session with colored prompt / ls ANSI escapes", async () => {
-    const opened = await client.callTool("terminal_open", {});
+    const opened = await client.callTool("open", {});
     expect(opened.sessionId).toBeTruthy();
     expect(opened.cwd).toBe(HOME);
 
@@ -140,7 +140,7 @@ describe("terminal MCP e2e", () => {
     let boot = "";
     for (let i = 0; i < 40; i++) {
       await new Promise((resolve) => setTimeout(resolve, 50));
-      const read = await client.callTool("terminal_read", {
+      const read = await client.callTool("read", {
         sessionId: opened.sessionId,
         clear: true,
       });
@@ -149,7 +149,7 @@ describe("terminal MCP e2e", () => {
     }
     expect(boot).toMatch(/\x1b\[|\x1b\]/);
 
-    await client.callTool("terminal_write", {
+    await client.callTool("write", {
       sessionId: opened.sessionId,
       data: "ls --color=always\n",
     });
@@ -157,7 +157,7 @@ describe("terminal MCP e2e", () => {
     let out = "";
     for (let i = 0; i < 40; i++) {
       await new Promise((resolve) => setTimeout(resolve, 50));
-      const read = await client.callTool("terminal_read", {
+      const read = await client.callTool("read", {
         sessionId: opened.sessionId,
         clear: true,
       });
@@ -166,12 +166,12 @@ describe("terminal MCP e2e", () => {
     }
     expect(out).toContain("\x1b[");
 
-    await client.callTool("terminal_close", { sessionId: opened.sessionId });
+    await client.callTool("close", { sessionId: opened.sessionId });
   });
 
   it("rejects relative cwd", async () => {
     await expect(
-      client.callTool("terminal_exec", { command: "pwd", cwd: "relative/path" }),
+      client.callTool("exec", { command: "pwd", cwd: "relative/path" }),
     ).rejects.toThrow(/absolute path/i);
   });
 });

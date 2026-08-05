@@ -1,16 +1,24 @@
 # MCP Tool Discovery
 
-NusaShell uses a progressive MCP discovery flow.
+NusaShell uses a progressive MCP discovery flow for **starting** plugins and
+**overflow/failure recovery**. When a plugin is already **running**, its full
+tool catalog (name + description + `inputSchema`) is injected into the Live MCP
+system block and auto-advertised in the provider `tools[]` array every turn —
+call `mcp_<plugin>_<tool>` names directly without `tool_schema` first.
 
 ## Discover tools
 
+**Running plugins are fully catalogued.** When a plugin is running, you do not
+need to discover its tools — they are already in the Live MCP block and in
+`tools[]`. The flow below is for idle plugins and recovery.
+
 1. `mcp_list` shows installed plugins and whether each MCP server is running.
-2. Start the plugin with `mcp_enable` if needed.
-3. `tool_search` finds tools by name or description, or `tool_list` lists all tools.
-4. Prefer `tool_schema` / `tool_schemas` when you need the input schema (first use or unfamiliar args). Pass `pluginId` and `toolName` / `toolNames[]`. Prefer batch when you know you need more than one tool. This step is optional when recalling a known tool.
+2. Start the plugin with `mcp_enable` if needed. The full catalog appears on the next turn or after the next `listTools` refresh.
+3. `tool_search` finds tools by name or description, or `tool_list` lists all tools. `tool_search` matches when **any** whitespace-separated keyword in the query hits the tool name or description (case-insensitive) — "read file list directory terminal" matches `read`, `list`, `exec`. Both return an envelope (`{ pluginId, count, tools }` / `{ pluginId, query, matchMode, count, matches, hint? }`). `count: 0` is a valid success (no tools matched), not a turn interrupt or failure. On zero hits, try a shorter one-keyword query, `tool_list` the same plugin, or `mcp_list` if the plugin may be wrong or not running.
+4. Prefer `tool_schema` / `tool_schemas` when you need the input schema (first use or unfamiliar args). Pass `pluginId` and `toolName` / `toolNames[]`. Prefer batch when you know you need more than one tool. This step is optional when recalling a known tool on a running plugin (it is already auto-advertised).
 5. Call the tool. Provider names look like `mcp_<plugin>_<tool>`. If you already used that tool earlier and the plugin is still running, you may call the name directly without re-running `tool_schema`; the shell resolves it against the running plugin. If the plugin is stopped or the name is wrong, fall back to discovery.
 
-Do not re-discover or re-grant schemas at the start of every turn by habit.
+Do not re-discover or re-grant schemas at the start of every turn by habit. Running plugins are already fully catalogued.
 
 For a plugin's narrative howto, use `mcp_context` with `list_prompts` and then
 `get_prompt`. Prompt retrieval provides context only; it never executes a tool.

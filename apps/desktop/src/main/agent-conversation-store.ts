@@ -96,6 +96,9 @@ export class AgentConversationStore {
         checkpoint: {
           ...checkpoint,
           compactedMessageCount: Math.min(current.messages.length, Math.max(0, checkpoint.compactedMessageCount)),
+          ...(Number.isInteger(checkpoint.compactionCount) && checkpoint.compactionCount >= 0
+            ? { compactionCount: checkpoint.compactionCount }
+            : {}),
         },
       };
       return [replaceConversation(state, updated), updated];
@@ -240,7 +243,16 @@ export class AgentConversationStore {
         subagentRuns: updated,
         updatedAt: timestamp,
       };
-      return [replaceConversation(state, conversation), conversation];
+      // Terminal statuses clear the active pointer when it matches this run so a
+      // parent-turn abort does not leave activeSubagentRunId stuck on "running".
+      const active = current.activeSubagentRunId;
+      const terminal = status === "ok" || status === "fail" || status === "cancelled";
+      let next = conversation;
+      if (terminal && active === runId) {
+        const { activeSubagentRunId: _drop, ...rest } = conversation;
+        next = rest;
+      }
+      return [replaceConversation(state, next), next];
     });
   }
 
@@ -589,7 +601,8 @@ function isCheckpoint(value: unknown): value is AgentConversationCheckpoint {
   const checkpoint = value as Partial<AgentConversationCheckpoint>;
   return typeof checkpoint.summary === "string"
     && Number.isInteger(checkpoint.compactedMessageCount)
-    && (checkpoint.via === "provider" || checkpoint.via === "extractive");
+    && (checkpoint.via === "provider" || checkpoint.via === "extractive")
+    && (checkpoint.compactionCount === undefined || (Number.isInteger(checkpoint.compactionCount) && checkpoint.compactionCount >= 0));
 }
 
 function requireConversation(state: ConversationDocument, id: string): AgentConversation {

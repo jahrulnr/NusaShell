@@ -6,6 +6,7 @@ import {
   extractContentText,
   firstText,
   limitAttachments,
+  malformedResponseError,
   parseToolArguments,
   parseUsage,
   positiveInteger,
@@ -65,7 +66,7 @@ export class ResponsesApiStrategy implements ApiStrategy {
 
   parseResult(payload: unknown, fallbackModel: string): AgentProviderResult {
     const root = requireRecord(payload, "Provider response is not an object");
-    if (!Array.isArray(root.output)) throw new Error("Provider response does not contain Responses API output");
+    if (!Array.isArray(root.output)) throw malformedResponseError("Provider response does not contain Responses API output", payload);
     const text: string[] = [];
     const reasoning: string[] = [];
     const nativeCalls: AgentToolCall[] = [];

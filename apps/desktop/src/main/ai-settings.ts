@@ -198,6 +198,7 @@ export class AiSettingsStore {
     readonly userPrompt?: string;
     readonly maxToolRounds?: number;
     readonly maxRepeatedToolCalls?: number;
+    readonly maxAutoContinues?: number;
     readonly compactionEnabled?: boolean;
     readonly maxInputTokens?: number;
     readonly reserveTokens?: number;
@@ -214,8 +215,9 @@ export class AiSettingsStore {
       stream: input.stream !== false,
       vision: input.vision === "on" || input.vision === "off" ? input.vision : "auto",
       userPrompt,
-      maxToolRounds: integerInRange(input.maxToolRounds, 1, 100, current.maxToolRounds),
+      maxToolRounds: integerInRange(input.maxToolRounds, 0, 10_000, current.maxToolRounds),
       maxRepeatedToolCalls: integerInRange(input.maxRepeatedToolCalls, 1, 200, current.maxRepeatedToolCalls),
+      maxAutoContinues: integerInRange(input.maxAutoContinues, 0, 10_000, current.maxAutoContinues),
       compactionEnabled: typeof input.compactionEnabled === "boolean" ? input.compactionEnabled : current.compactionEnabled,
       maxInputTokens: integerInRange(input.maxInputTokens, 1000, 2_000_000, current.maxInputTokens),
       reserveTokens: integerInRange(input.reserveTokens, 0, 1_000_000, current.reserveTokens),
@@ -238,6 +240,7 @@ export class AiSettingsStore {
       userPrompt: settings.userPrompt,
       maxToolRounds: settings.maxToolRounds,
       maxRepeatedToolCalls: settings.maxRepeatedToolCalls,
+      maxAutoContinues: settings.maxAutoContinues,
       compactionEnabled: settings.compactionEnabled,
       maxInputTokens: settings.maxInputTokens,
       reserveTokens: settings.reserveTokens,

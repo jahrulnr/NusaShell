@@ -23,6 +23,9 @@ export interface PromptInjectionSummary {
   readonly hasMemory: boolean;
   readonly hasTodo: boolean;
   readonly hasUserPrompt: boolean;
+  readonly hasSkillsCatalog: boolean;
+  readonly hasContinue: boolean;
+  readonly hasMcpLive: boolean;
   readonly subagentVars: { readonly availableSubagents: boolean; readonly defaultSubagent: boolean };
   toDebugLine(traceId: string): string;
 }
@@ -50,6 +53,9 @@ export function injectPrompts(
   memoryPrompt?: string,
   subagentPrompt?: string,
   todoPrompt?: string,
+  skillsCatalogPrompt?: string,
+  continuePrompt?: string,
+  mcpLivePrompt?: string,
 ): InjectPromptsResult {
   const staticPrompts = prompts.filter(
     (prompt) => STATIC_PROMPT_NAMES.includes(prompt.name) && !prompt.isTemplate,
@@ -65,10 +71,31 @@ export function injectPrompts(
   let userPromptChars = 0;
   let memoryChars = 0;
   let todoChars = 0;
+  let skillsCatalogChars = 0;
+  let mcpLiveChars = 0;
 
   for (const prompt of staticPrompts) {
     out.push({ role: "system", content: prompt.content });
     staticChars += prompt.content.length;
+  }
+
+  // Live MCP (runtime) sits immediately after static mcp-tools so the model
+  // sees the authoritative running catalog (name + description + inputSchema)
+  // alongside the tool workflow doc. The same tools are auto-advertised in
+  // the provider tools[] array via listTools auto-seeding.
+  const hasMcpLive = Boolean(mcpLivePrompt);
+  if (mcpLivePrompt) {
+    out.push({ role: "system", content: mcpLivePrompt });
+    mcpLiveChars += mcpLivePrompt.length;
+  }
+
+  // Skills catalog (Layer 1) sits right after Live MCP so the model sees
+  // the skill inventory alongside the tool workflow. Body stays progressive
+  // (skill_read) — only name + description are injected here.
+  const hasSkillsCatalog = Boolean(skillsCatalogPrompt);
+  if (skillsCatalogPrompt) {
+    out.push({ role: "system", content: skillsCatalogPrompt });
+    skillsCatalogChars += skillsCatalogPrompt.length;
   }
 
   const hasSubagentPrompt = Boolean(subagentPrompt);
@@ -102,6 +129,16 @@ export function injectPrompts(
     todoChars += todoPrompt.length;
   }
 
+  // Continue steering (outer multi-turn auto-continue). Injected as an
+  // internal user message that exists only in the provider payload for this
+  // chained request — the desktop does not append a user row for it.
+  const hasContinue = Boolean(continuePrompt);
+  let continueChars = 0;
+  if (continuePrompt) {
+    out.push({ role: "user", content: continuePrompt });
+    continueChars += continuePrompt.length;
+  }
+
   for (const message of messages) {
     if (message.role === "system") {
       if (typeof message.content === "string" && message.content.startsWith("Conversation summary:")) {
@@ -113,7 +150,7 @@ export function injectPrompts(
   }
 
   const totalSystemMessages = out.filter((m) => m.role === "system").length;
-  const totalSystemChars = staticChars + developerChars + subagentChars + userPromptChars + memoryChars + todoChars;
+  const totalSystemChars = staticChars + developerChars + subagentChars + userPromptChars + memoryChars + todoChars + skillsCatalogChars + mcpLiveChars + continueChars;
   const availableSubagents = Boolean(vars.availableSubagents && vars.availableSubagents.trim());
   const defaultSubagent = Boolean(vars.defaultSubagent && vars.defaultSubagent.trim());
 
@@ -124,12 +161,16 @@ export function injectPrompts(
     hasMemory,
     hasTodo,
     hasUserPrompt,
+    hasSkillsCatalog,
+    hasContinue,
+    hasMcpLive,
     subagentVars: { availableSubagents, defaultSubagent },
     toDebugLine(traceId: string): string {
       return (
         `prompt.injection traceId=${traceId} systemMessages=${totalSystemMessages}` +
         ` systemChars=${totalSystemChars}` +
         ` hasSubagent=${hasSubagentPrompt} hasMemory=${hasMemory} hasTodo=${hasTodo} hasUserPrompt=${hasUserPrompt}` +
+        ` hasSkillsCatalog=${hasSkillsCatalog} hasContinue=${hasContinue} hasMcpLive=${hasMcpLive}` +
         ` subagentVars.available=${availableSubagents} subagentVars.default=${defaultSubagent}`
       );
     },

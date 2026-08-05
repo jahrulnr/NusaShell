@@ -48,6 +48,10 @@ export function buildToolCall(call: {
   args?: Record<string, unknown>;
   output?: string;
   result?: unknown;
+  modelOutput?: string;
+  status?: "success" | "error" | "cancelled" | "timeout";
+  truncated?: boolean;
+  structuredContent?: Record<string, unknown>;
 }): AgentConversationToolCall {
   const rawArgs = call.args && typeof call.args === "object" && !Array.isArray(call.args) ? call.args : undefined;
   let safeArgs: Record<string, unknown> = {};
@@ -90,6 +94,10 @@ export function buildToolCall(call: {
     ...(call.error ? { error: clampText(call.error, TOOL_ERROR_MAX_CHARS) } : {}),
     args: safeArgs,
     ...(output ? { output } : {}),
+    ...(call.modelOutput ? { modelOutput: clampText(call.modelOutput, TOOL_OUTPUT_MAX_CHARS) } : {}),
+    ...(call.status ? { status: call.status } : {}),
+    ...(call.truncated ? { truncated: call.truncated } : {}),
+    ...(call.structuredContent ? { structuredContent: call.structuredContent } : {}),
   };
 }
 
@@ -130,22 +138,56 @@ export function buildAssistantMessage(result: AgentTurnResult): AgentConversatio
 }
 
 /**
- * Build the interrupted assistant message from a partial turn result.
+ * True when partial messages contain settled tool traffic (assistant toolCalls
+ * and/or tool results) — not mere inject+user preamble before first tool.
  */
-export function buildInterruptedMessage(partial: AgentTurnPartial): AgentConversationMessage {
+function hasSettledToolGraph(partial: AgentTurnPartial): boolean {
+  if (Array.isArray(partial.toolCalls) && partial.toolCalls.length > 0) return true;
+  if (Array.isArray(partial.steps)
+    && partial.steps.some((step) => step.type === "tool_calls" && Array.isArray(step.calls) && step.calls.length > 0)) {
+    return true;
+  }
+  if (!Array.isArray(partial.messages)) return false;
+  return partial.messages.some((message) => {
+    if (message.role === "tool") return true;
+    if (message.role === "assistant" && Array.isArray(message.toolCalls) && message.toolCalls.length > 0) {
+      return true;
+    }
+    return false;
+  });
+}
+
+/**
+ * Build the interrupted assistant message from a partial turn result.
+ * Prefers live `partial.text` for Continue; attaches `resumeMessages` only when
+ * the tool graph has settled so Retry can tool-resume without blocking text Continue
+ * on pre-tool provider fails (inject-only snapshots).
+ */
+export function buildInterruptedMessage(
+  partial: AgentTurnPartial,
+  options?: { readonly interruptReason?: "cancel" | "provider" | "max_rounds" },
+): AgentConversationMessage {
   const toolCalls = Array.isArray(partial.toolCalls) && partial.toolCalls.length > 0
     ? partial.toolCalls.map(buildToolCall)
     : undefined;
   const steps = buildSteps(partial.steps as any);
+  const streamedText = typeof partial.text === "string" ? partial.text.trim() : "";
+  const stub = `Turn interrupted after ${partial.rounds} tool round${partial.rounds === 1 ? "" : "s"}.`;
+  const interruptReason = options?.interruptReason ?? "provider";
+  const attachResume = hasSettledToolGraph(partial)
+    && Array.isArray(partial.messages)
+    && partial.messages.length > 0;
   return {
     role: "assistant",
-    content: `Turn interrupted after ${partial.rounds} tool round${partial.rounds === 1 ? "" : "s"}.`,
+    content: streamedText || stub,
     status: "interrupted",
+    interruptReason,
     traceId: partial.traceId,
     ...(partial.model !== undefined ? { model: partial.model } : {}),
     rounds: partial.rounds,
     ...(partial.reasoning ? { reasoning: partial.reasoning } : {}),
     ...(toolCalls ? { toolCalls } : {}),
     ...(steps ? { steps } : {}),
+    ...(attachResume ? { resumeMessages: partial.messages } : {}),
   };
 }

@@ -18,6 +18,7 @@ export class ConfigureAiRuntimeHandler implements CommandHandler<ConfigureAiRunt
       ...(command.maxRepeatedToolCalls !== undefined ? { maxRepeatedToolCalls: command.maxRepeatedToolCalls } : {}),
       ...(command.softRecoverAttempts !== undefined ? { softRecoverAttempts: command.softRecoverAttempts } : {}),
       ...(command.maxConcurrentToolCalls !== undefined ? { maxConcurrentToolCalls: command.maxConcurrentToolCalls } : {}),
+      ...(command.maxAutoContinues !== undefined ? { maxAutoContinues: command.maxAutoContinues } : {}),
       ...(command.compactionEnabled !== undefined ? { compactionEnabled: command.compactionEnabled } : {}),
       ...(command.maxInputTokens !== undefined ? { maxInputTokens: command.maxInputTokens } : {}),
       ...(command.reserveTokens !== undefined ? { reserveTokens: command.reserveTokens } : {}),

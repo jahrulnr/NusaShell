@@ -246,7 +246,7 @@ function runExec({ command, cwd, timeoutMs }, extra) {
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
-      name: "terminal_exec",
+      name: "exec",
       description:
         "Run a one-shot shell command and return stdout/stderr/exitCode. cwd defaults to the user's home directory; the conversation workspace is not applied automatically, so pass an absolute cwd if you want a specific folder.",
       inputSchema: {
@@ -260,7 +260,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
-      name: "terminal_open",
+      name: "open",
       description:
         "Open a new interactive terminal session (PTY) in the user's shell. cwd defaults to the user's home directory; the conversation workspace is not applied automatically, so pass an absolute cwd to open elsewhere.",
       inputSchema: {
@@ -274,7 +274,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
-      name: "terminal_write",
+      name: "write",
       description: "Write input to a terminal session.",
       inputSchema: {
         type: "object",
@@ -286,7 +286,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
-      name: "terminal_read",
+      name: "read",
       description: "Read buffered output from a terminal session.",
       inputSchema: {
         type: "object",
@@ -298,7 +298,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
-      name: "terminal_resize",
+      name: "resize",
       description: "Resize a terminal session.",
       inputSchema: {
         type: "object",
@@ -311,7 +311,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
-      name: "terminal_close",
+      name: "close",
       description: "Close a terminal session.",
       inputSchema: {
         type: "object",
@@ -320,7 +320,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
-      name: "terminal_list",
+      name: "list",
       description: "List active terminal sessions.",
       inputSchema: { type: "object", properties: {} },
     },
@@ -331,12 +331,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
   const { name, arguments: args = {} } = request.params;
   try {
     switch (name) {
-      case "terminal_exec": {
+      case "exec": {
         const timeoutMs = Number.isFinite(args.timeoutMs) ? Math.max(0, Math.floor(args.timeoutMs)) : null;
         const result = await runExec({ command: args.command, cwd: args.cwd, timeoutMs }, extra);
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
-      case "terminal_open": {
+      case "open": {
         const session = createSession({
           shell: typeof args.shell === "string" ? args.shell : undefined,
           cwd: args.cwd,
@@ -350,13 +350,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
           }],
         };
       }
-      case "terminal_write": {
+      case "write": {
         const session = getSession(args.sessionId);
         if (session.exited) throw new Error("Session has exited");
         session.term.write(String(args.data ?? ""));
         return { content: [{ type: "text", text: "OK" }] };
       }
-      case "terminal_read": {
+      case "read": {
         const session = getSession(args.sessionId);
         const clear = args.clear === undefined ? true : Boolean(args.clear);
         const { stdout, stderr } = drainBuffer(session, clear);
@@ -367,7 +367,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
           }],
         };
       }
-      case "terminal_resize": {
+      case "resize": {
         const session = getSession(args.sessionId);
         const cols = Math.max(1, Math.floor(args.cols));
         const rows = Math.max(1, Math.floor(args.rows));
@@ -376,7 +376,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
         if (!session.exited) session.term.resize(cols, rows);
         return { content: [{ type: "text", text: "OK" }] };
       }
-      case "terminal_close": {
+      case "close": {
         const session = getSession(args.sessionId);
         if (!session.exited) {
           try { session.term.kill(); } catch (_) { /* ignore */ }
@@ -384,7 +384,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
         sessions.delete(args.sessionId);
         return { content: [{ type: "text", text: "OK" }] };
       }
-      case "terminal_list": {
+      case "list": {
         const list = Array.from(sessions.values()).map((session) => ({
           sessionId: session.id,
           shell: session.shell,

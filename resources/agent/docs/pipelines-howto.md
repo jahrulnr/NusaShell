@@ -14,8 +14,8 @@ graph (DAG) with dependencies, conditional branching, and context passing.
 ```
 pipeline action=add name="Email triage" trigger={kind:event,pattern:mail.new} steps=[
   { id:classify, name:Classify, action:{type:agent,prompt:"Classify as urgent or normal"}, outputKey:classification },
-  { id:notify, name:Notify, dependsOn:[classify], condition:{path:payload.classification,op:eq,value:urgent}, action:{type:tool,pluginId:nusashell.notes,toolName:notes_create,args:{title:URGENT}} },
-  { id:archive, name:Archive, dependsOn:[classify], condition:{path:payload.classification,op:eq,value:normal}, action:{type:tool,pluginId:nusashell.notes,toolName:notes_create,args:{title:Archived}} }
+  { id:notify, name:Notify, dependsOn:[classify], condition:{path:payload.classification,op:eq,value:urgent}, action:{type:tool,pluginId:nusashell.notes,toolName:create,args:{title:URGENT}} },
+  { id:archive, name:Archive, dependsOn:[classify], condition:{path:payload.classification,op:eq,value:normal}, action:{type:tool,pluginId:nusashell.notes,toolName:create,args:{title:Archived}} }
 ]
 ```
 

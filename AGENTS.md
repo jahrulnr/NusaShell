@@ -112,6 +112,27 @@ example plugin, and (once they exist) `packages/contracts` + `packages/plugin-sd
 - For UI: follow `.agents/skills/frontend-design/SKILL.md` - distinctive,
   subject-grounded design; avoid generic AI-default palettes and layouts.
 
+## Cross-platform support
+
+Linux, Windows, and macOS are first-class supported targets. GitHub Actions
+tests the frontend and backend independently on all three platforms, then
+builds the desktop distributable on the same platform matrix defined in
+`.github/workflows/ci.yml`. Every change must respect that contract.
+
+- Prefer Node.js and package APIs over shell-specific commands, syntax, or
+  environment variables. Keep reusable logic out of `bash`, PowerShell, and
+  POSIX-only utilities unless the workflow explicitly scopes it to one OS.
+- Use `node:path`, `node:os`, and `node:fs` APIs for paths, temporary files,
+  home directories, and filesystem operations. Never hardcode `/`, `\\`,
+  `/tmp`, `/home`, `C:\\`, or assume a case-sensitive filesystem.
+- Do not assume `process.cwd()` is a stable application or user workspace;
+  resolve paths from explicit configuration and platform-aware helpers.
+- Keep platform-specific behavior isolated behind a small adapter or guarded
+  branch, and add/adjust tests when the behavior differs by OS.
+- Validate changes with the root package scripts used by CI, especially
+  `pnpm test:frontend`, `pnpm test:backend`, and the desktop build path. Do not
+  weaken or skip a platform matrix job to make a change pass.
+
 ### UI knowledge docs (required)
 
 When changing launcher or plugin UI:

@@ -21,6 +21,7 @@ describe("AgentConversationStore", () => {
       summary: "The user asked to investigate MCP logs.",
       compactedMessageCount: 2,
       via: "provider",
+      compactionCount: 2,
     });
 
     const second = new AgentConversationStore(path);
@@ -35,6 +36,7 @@ describe("AgentConversationStore", () => {
       summary: "The user asked to investigate MCP logs.",
       compactedMessageCount: 2,
       via: "provider",
+      compactionCount: 2,
     });
   });
 
@@ -144,7 +146,7 @@ describe("AgentConversationStore", () => {
       role: "assistant",
       content: "Done.",
       steps: [
-        { type: "tool_calls", calls: [{ id: "call-1", name: "terminal_read", ok: true, output: `${"y".repeat(11_998)}\n…` }] },
+        { type: "tool_calls", calls: [{ id: "call-1", name: "read", ok: true, output: `${"y".repeat(11_998)}\n…` }] },
         { type: "text", content: "Done." },
       ],
     });
@@ -171,7 +173,7 @@ describe("AgentConversationStore", () => {
             role: "assistant",
             content: "Done.",
             steps: [
-              { type: "tool_calls", calls: [{ id: "call-9", name: "terminal_read", ok: true, output: legacyOutput }] },
+              { type: "tool_calls", calls: [{ id: "call-9", name: "read", ok: true, output: legacyOutput }] },
               { type: "text", content: "Done." },
             ],
           },

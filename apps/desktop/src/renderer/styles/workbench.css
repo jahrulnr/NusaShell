@@ -763,7 +763,18 @@ summary {
   background: #191c19;
 }
 
-.agent-composer::before { background: var(--accent); }
+.agent-composer-stack {
+  border-color: var(--border-strong);
+  background: #191c19;
+}
+
+.agent-composer-stack .agent-todo-strip,
+.agent-composer-stack .agent-tool-job-strip {
+  background: #151815;
+  border-bottom-color: var(--border);
+}
+
+.agent-composer::before { display: none; }
 
 .agent-tool-terminal,
 .agent-reasoning,

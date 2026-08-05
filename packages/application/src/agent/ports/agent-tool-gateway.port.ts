@@ -1,4 +1,5 @@
 import type { AgentToolDefinition, ReasoningEffort } from "./agent-provider.port.js";
+import type { McpLiveSnapshot } from "../services/mcp-live-prompt-formatter.js";
 
 export interface AgentTurnContext {
   readonly interactive?: boolean;
@@ -25,6 +26,12 @@ export interface AgentTurnContext {
 export interface AgentToolGateway {
   beginTurn?(turnId: string, context?: AgentTurnContext): void;
   endTurn?(turnId: string): void;
+  /**
+   * Clear sticky grants for a conversation. Called when the conversation is
+   * deleted or sealed permanently so future turns do not inherit stale grants.
+   * Optional: stub/review gateways may omit this.
+   */
+  endConversation?(conversationId: string): void;
   cancelTurn?(turnId: string): Promise<void> | void;
   listTools(pluginIds: readonly string[], turnId: string): Promise<readonly AgentToolDefinition[]>;
   execute(
@@ -35,4 +42,12 @@ export interface AgentToolGateway {
     callId?: string,
     options?: { readonly signal?: AbortSignal },
   ): Promise<unknown>;
+  /**
+   * Optional: build a Live MCP runtime snapshot (running plugin ids + full
+   * tool catalog for those plugins). Used by `RunAgentTurnHandler` to inject
+   * a runtime-authoritative system block per interactive turn with the
+   * complete tool name/description/inputSchema for every running MCP tool.
+   * Stub/review gateways may omit this; the handler duck-types before calling.
+   */
+  getMcpLiveSnapshot?(turnId: string): Promise<McpLiveSnapshot>;
 }

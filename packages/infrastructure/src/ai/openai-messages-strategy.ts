@@ -5,6 +5,7 @@ import {
   emptySchema,
   firstText,
   limitAttachments,
+  malformedResponseError,
   parseDataUrl,
   parseUsage,
   positiveInteger,
@@ -31,7 +32,7 @@ export class MessagesApiStrategy implements ApiStrategy {
       if (message.role === "system") {
         system.push(message.content);
       } else if (message.role === "tool") {
-        messages.push({ role: "user", content: [{ type: "tool_result", tool_use_id: message.toolCallId, content: message.content }] });
+        messages.push({ role: "user", content: [{ type: "tool_result", tool_use_id: message.toolCallId, content: message.content, ...(message.toolIsError ? { is_error: true } : {}) }] });
       } else if (message.role === "assistant") {
         const content: Record<string, unknown>[] = [];
         if (message.content) content.push({ type: "text", text: message.content });
@@ -63,7 +64,7 @@ export class MessagesApiStrategy implements ApiStrategy {
 
   parseResult(payload: unknown, fallbackModel: string): AgentProviderResult {
     const root = requireRecord(payload, "Provider response is not an object");
-    if (!Array.isArray(root.content)) throw new Error("Provider response does not contain Messages API content");
+    if (!Array.isArray(root.content)) throw malformedResponseError("Provider response does not contain Messages API content", payload);
     const text: string[] = [];
     const reasoning: string[] = [];
     const nativeCalls: AgentToolCall[] = [];

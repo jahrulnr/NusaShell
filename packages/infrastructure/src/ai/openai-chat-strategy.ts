@@ -5,6 +5,7 @@ import {
   emptySchema,
   extractContentText,
   firstText,
+  malformedResponseError,
   mapMessages,
   parseToolCall,
   parseUsage,
@@ -38,8 +39,11 @@ export class ChatApiStrategy implements ApiStrategy {
   parseResult(payload: unknown, fallbackModel: string): AgentProviderResult {
     const root = requireRecord(payload, "Provider response is not an object");
     const choices = Array.isArray(root.choices) ? root.choices : [];
-    const choice = requireRecord(choices[0], "Provider response does not contain a completion choice");
-    const message = requireRecord(choice.message, "Provider response does not contain a completion message");
+    const choice = choices[0];
+    if (!choice || typeof choice !== "object") {
+      throw malformedResponseError("Provider response does not contain a completion choice", payload);
+    }
+    const message = requireRecord((choice as Record<string, unknown>).message, "Provider response does not contain a completion message");
     const nativeCalls = Array.isArray(message.tool_calls) ? message.tool_calls.map(parseToolCall) : [];
     const merged = mergeTextToolCalls(nativeCalls, extractContentText(message.content));
     const reasoning = firstText(message.reasoning_content, message.reasoning, message.thinking, message.reasoning_text, message.thinking_content);

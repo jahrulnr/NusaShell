@@ -66,6 +66,7 @@ export function createAgentRuntime(
     maxRepeatedToolCalls: options.ai?.maxRepeatedToolCalls ?? 50,
     softRecoverAttempts: options.ai?.softRecoverAttempts ?? 1,
     maxConcurrentToolCalls: options.ai?.maxConcurrentToolCalls ?? 8,
+    maxAutoContinues: options.ai?.maxAutoContinues ?? 10,
     ...(options.ai?.context ? { context: options.ai.context } : {}),
   };
 

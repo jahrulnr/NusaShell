@@ -57,6 +57,7 @@ export interface AiRegistrySettings {
   readonly userPrompt: string;
   readonly maxToolRounds: number;
   readonly maxRepeatedToolCalls: number;
+  readonly maxAutoContinues: number;
   readonly compactionEnabled: boolean;
   readonly maxInputTokens: number;
   readonly reserveTokens: number;
@@ -101,6 +102,7 @@ export interface PublicAiRegistry {
   readonly userPrompt: string;
   readonly maxToolRounds: number;
   readonly maxRepeatedToolCalls: number;
+  readonly maxAutoContinues: number;
   readonly compactionEnabled: boolean;
   readonly maxInputTokens: number;
   readonly reserveTokens: number;

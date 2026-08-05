@@ -45,6 +45,7 @@ export interface IpcContext {
   readonly skillCuratorScheduler: BootstrapResult["container"]["skillCuratorScheduler"];
   readonly backgroundReviewScheduler: BootstrapResult["container"]["backgroundReviewScheduler"];
   readonly learningGraph: BootstrapResult["container"]["learningGraph"];
+  readonly agentToolGateway: BootstrapResult["container"]["agentToolGateway"];
   configureBackgroundReview: BootstrapResult["container"]["configureBackgroundReview"];
   configureCurator: BootstrapResult["container"]["configureCurator"];
   configureCuratorScheduler: BootstrapResult["container"]["configureCuratorScheduler"];

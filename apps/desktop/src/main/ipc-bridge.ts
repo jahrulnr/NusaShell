@@ -50,16 +50,13 @@ export class IpcRequestBridge {
         );
         return result;
       } catch (error) {
-        this.logger?.error("IPC shell:request failed method=%s: %s", method, error instanceof Error ? error.message : String(error));
-        return {
-          kind: "response" as const,
-          id: requestId,
-          ok: false,
-          error: {
-            code: "IPC_ERROR",
-            message: error instanceof Error ? error.message : String(error),
-          },
-        };
+        const response = mapIpcFailureToResponse(requestId, error);
+        this.logger?.error(
+          "IPC shell:request failed method=%s: %s",
+          method,
+          response.error.message,
+        );
+        return response;
       }
     });
   }
@@ -112,24 +109,129 @@ export class IpcEventBridge {
   }
 }
 
-/** Race a promise against a timeout, producing a ProtocolError-shaped reject. */
-function raceWithTimeout<T>(
+/** Rejected by {@link raceWithTimeout} when the IPC budget elapses. */
+export class IpcRequestTimeoutError extends Error {
+  readonly code = "TIMEOUT";
+
+  constructor(readonly timeoutMs: number) {
+    super(`IPC request timed out after ${timeoutMs}ms`);
+    this.name = "IpcRequestTimeoutError";
+  }
+}
+
+/**
+ * Map a thrown value from the IPC handler into a ResponseEnvelope the
+ * renderer can unwrap. Never uses `String(object)` (that produced the UI
+ * text "Turn failed: [object Object]" after IPC timeouts).
+ */
+export function mapIpcFailureToResponse(
+  requestId: string,
+  error: unknown,
+): {
+  readonly kind: "response";
+  readonly id: string;
+  readonly ok: false;
+  readonly error: { readonly code: string; readonly message: string; readonly details?: Readonly<Record<string, unknown>> };
+} {
+  // Already a full envelope from an older caller path.
+  if (
+    typeof error === "object"
+    && error !== null
+    && "kind" in error
+    && (error as { kind?: unknown }).kind === "response"
+    && "ok" in error
+    && (error as { ok?: unknown }).ok === false
+    && typeof (error as { error?: { code?: unknown; message?: unknown } }).error === "object"
+    && (error as { error?: { code?: unknown; message?: unknown } }).error
+  ) {
+    const nested = (error as {
+      error: { code?: unknown; message?: unknown; details?: Readonly<Record<string, unknown>> };
+    }).error;
+    const code = typeof nested.code === "string" && nested.code ? nested.code : "IPC_ERROR";
+    const message = typeof nested.message === "string" && nested.message.trim()
+      ? nested.message.trim()
+      : code === "TIMEOUT"
+        ? "IPC request timed out"
+        : "IPC request failed";
+    return {
+      kind: "response",
+      id: requestId,
+      ok: false,
+      error: {
+        code,
+        message,
+        ...(nested.details ? { details: nested.details } : {}),
+      },
+    };
+  }
+
+  if (error instanceof IpcRequestTimeoutError) {
+    return {
+      kind: "response",
+      id: requestId,
+      ok: false,
+      error: {
+        code: error.code,
+        message: error.message,
+        details: { timeoutMs: error.timeoutMs },
+      },
+    };
+  }
+
+  if (error instanceof Error) {
+    const code =
+      "code" in error && typeof (error as { code?: unknown }).code === "string" && (error as { code: string }).code
+        ? (error as { code: string }).code
+        : "IPC_ERROR";
+    const message = error.message.trim() || "IPC request failed";
+    return {
+      kind: "response",
+      id: requestId,
+      ok: false,
+      error: { code, message },
+    };
+  }
+
+  if (isProtocolErrorLike(error)) {
+    return {
+      kind: "response",
+      id: requestId,
+      ok: false,
+      error: {
+        code: error.code,
+        message: error.message,
+        ...(error.details ? { details: error.details } : {}),
+      },
+    };
+  }
+
+  if (typeof error === "string" && error.trim()) {
+    return {
+      kind: "response",
+      id: requestId,
+      ok: false,
+      error: { code: "IPC_ERROR", message: error.trim() },
+    };
+  }
+
+  return {
+    kind: "response",
+    id: requestId,
+    ok: false,
+    error: { code: "IPC_ERROR", message: "IPC request failed" },
+  };
+}
+
+/** Race a promise against a timeout, rejecting with {@link IpcRequestTimeoutError}. */
+export function raceWithTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
-  requestId: string,
+  _requestId: string,
 ): Promise<T> {
   if (timeoutMs <= 0) return promise;
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject({
-        kind: "response",
-        id: requestId,
-        ok: false,
-        error: {
-          code: "TIMEOUT",
-          message: `IPC request timed out after ${timeoutMs}ms`,
-        },
-      } as unknown as Error);
+      reject(new IpcRequestTimeoutError(timeoutMs));
     }, timeoutMs);
     promise.then(
       (value) => { clearTimeout(timer); resolve(value); },
@@ -138,7 +240,9 @@ function raceWithTimeout<T>(
   });
 }
 
-/** Re-throw a ProtocolError-shaped object as a real Error for the catch block. */
+/** Type guard for ProtocolError-shaped objects. */
 export function isProtocolErrorLike(value: unknown): value is ProtocolError {
-  return typeof value === "object" && value !== null && "code" in value && "message" in value;
+  return typeof value === "object" && value !== null && "code" in value && "message" in value
+    && typeof (value as ProtocolError).code === "string"
+    && typeof (value as ProtocolError).message === "string";
 }

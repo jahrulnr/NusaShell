@@ -8,8 +8,8 @@ describe("Terminal MCP prompts", () => {
     ]);
     const prompt = getTerminalPrompt("howto");
     const text = prompt.messages[0].content.text;
-    expect(text).toContain("terminal_exec");
-    expect(text).toContain("terminal_open");
+    expect(text).toContain("exec");
+    expect(text).toContain("open");
     expect(text).toContain("absolute cwd");
   });
 

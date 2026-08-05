@@ -35,13 +35,25 @@ Organize non-trivial Node plugins around these responsibilities:
 mcp/
 ├── server.js          # SDK transport, handlers, shutdown boundary
 ├── server.cjs         # bundled artifact when manifest declares it
-├── tool-catalog.js    # canonical names
+├── tool-catalog.js    # canonical names (create rule: no domain prefix)
 ├── prompts.js         # domain: strongly required; native-like: recommended
 ├── tools.js           # descriptors, strict validation, dispatch
 ├── service.js         # capability and I/O behavior
 ├── config.js          # bounded environment/config parsing
 └── errors.js          # safe public errors/redaction
 ```
+
+## Tool naming checklist
+
+- **Create:** tool names must not start with `${domain}_` or equal `domain`.
+  Use short verbs (`list`, `read`, `write`, `exec`) or multi-word verbs
+  without the domain (`list_projects`, `create_ticket`). See `SKILL.md` →
+  "Tool naming (create vs convert)".
+- **Convert:** preserve upstream MCP tool names as-is; do not strip prefixes
+  or redesign the catalog. Only package `manifest.json` + transport.
+- Exemplars: `plugins/files/` (`list`, `read`, `write` — create),
+  `plugins/kanban/` (`list_projects`, `create_ticket` — convert-friendly
+  multi-word verbs).
 
 Return structured and fallback representations:
 

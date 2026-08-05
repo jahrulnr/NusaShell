@@ -161,6 +161,105 @@ describe("RunAgentTurnHandler lifecycle callbacks", () => {
     expect(ended).toEqual([{ traceId: "trace-fail", reason: "failed" }]);
   });
 
+  it("seals interrupted via onTurnInterrupted then strips messages from wire partial", async () => {
+    // Tool round succeeds then provider fails → partial has messages/toolCalls.
+    // Handler must durable-seal before rethrow and slim messages for IPC.
+    class ToolThenFailProvider implements AgentProvider {
+      readonly id = "scripted";
+      private n = 0;
+      async complete(): Promise<AgentProviderResult> {
+        this.n += 1;
+        if (this.n === 1) {
+          return { toolCalls: [{ id: "c1", name: "notes.create", args: { title: "T" } }] };
+        }
+        throw new Error("provider boom");
+      }
+    }
+    class Tools implements AgentToolGateway {
+      beginTurn() {}
+      endTurn() {}
+      cancelTurn() {}
+      async listTools() {
+        return [{ name: "notes.create", description: "c", inputSchema: { type: "object" } }];
+      }
+      async execute() { return { id: "note-1" }; }
+    }
+    const seals: Array<{
+      conversationId: string;
+      resume?: boolean;
+      interruptReason: string;
+      messagesLen: number;
+      rounds: number;
+    }> = [];
+    const runtime = {
+      ...RUNTIME,
+      maxToolRounds: 4,
+      softRecoverAttempts: 0,
+      maxRepeatedToolCalls: 50,
+    };
+    const handler = new RunAgentTurnHandler(
+      makeRegistry(new ToolThenFailProvider()),
+      new Tools(),
+      "scripted",
+      runtime,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        onTurnInterrupted: async (partial, context) => {
+          seals.push({
+            conversationId: context.conversationId,
+            resume: context.resume,
+            interruptReason: context.interruptReason,
+            messagesLen: partial.messages.length,
+            rounds: partial.rounds,
+          });
+        },
+      },
+    );
+
+    const error = await handler.handle({
+      kind: "run-agent-turn",
+      traceId: "trace-interrupt-seal",
+      conversationId: "conv_test",
+      messages: [{ role: "user", content: "Create a note" }],
+      pluginIds: ["notes"],
+      maxToolRounds: 4,
+    }).catch((e) => e);
+
+    expect(seals).toHaveLength(1);
+    expect(seals[0]).toMatchObject({
+      conversationId: "conv_test",
+      interruptReason: "provider",
+      rounds: 1,
+    });
+    expect(seals[0]!.messagesLen).toBeGreaterThan(0);
+    expect(error).toMatchObject({ code: "AGENT_PROVIDER_FAILED" });
+    expect(error.details?.partial).toBeDefined();
+    expect(error.details.partial.toolCalls.length).toBeGreaterThan(0);
+    // Wire copy omits heavy resume payload (durable store already sealed).
+    expect(error.details.partial.messages).toEqual([]);
+    expect(error.details.sealedInterrupted).toBe(true);
+  });
+
+
   it("supersedes a previous traceId and emits onTurnSuperseded", async () => {
     const provider = new ScriptedProvider([{ text: "new" }]);
     const tools = new FakeToolGateway();
@@ -241,5 +340,109 @@ describe("RunAgentTurnHandler lifecycle callbacks", () => {
     // Cleared on finally after success.
     expect(activeTurns.get("conv-1")).toBeUndefined();
     expect(progress.some((p) => p.startsWith("trace-proj:"))).toBe(true);
+  });
+
+  // --- Live MCP snapshot inject (Cycle 4) ---
+
+  const fakePromptLoader = {
+    loadPrompts: async () => [
+      { name: "system", content: "You are the NusaShell agent.", isTemplate: false },
+      { name: "mcp-tools", content: "Use tool_list to discover tools.", isTemplate: false },
+      { name: "developer", content: "Date: {{current_date}} Env: {{environment}}", isTemplate: true },
+    ],
+    loadSubagentPrompt: async () => undefined,
+    loadContinuePrompt: async () => undefined,
+    loadCompactPrompt: async () => undefined,
+  };
+
+  it("injects Live MCP block on non-resume turn when gateway provides a non-empty snapshot", async () => {
+    const provider = new ScriptedProvider([{ text: "ok" }]);
+    class LiveSnapshotGateway extends FakeToolGateway {
+      override async getMcpLiveSnapshot() {
+        return {
+          running: [{ pluginId: "nusashell.notes" }],
+          tools: [{
+            providerName: "mcp_nusashell_notes_createNote",
+            pluginId: "nusashell.notes",
+            toolName: "createNote",
+            description: "Create a note",
+            inputSchema: { type: "object", properties: { text: { type: "string" } } },
+          }],
+        };
+      }
+    }
+    const tools = new LiveSnapshotGateway();
+    const handler = new RunAgentTurnHandler(
+      makeRegistry(provider), tools, "scripted", RUNTIME,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      fakePromptLoader, undefined, undefined, undefined, undefined, undefined, undefined,
+    );
+    const result = await handler.handle({
+      kind: "run-agent-turn",
+      traceId: "trace-live",
+      messages: [{ role: "user", content: "hi" }],
+      pluginIds: [],
+    });
+    expect(result.text).toBe("ok");
+    // The provider request must contain a system message with the Live MCP block.
+    const systemContent = provider.requests[0]?.messages
+      .filter((m) => m.role === "system")
+      .map((m) => String(m.content))
+      .find((c) => c.includes("## Live MCP (runtime)"));
+    expect(systemContent).toBeDefined();
+    expect(systemContent).toContain("Running: nusashell.notes");
+    expect(systemContent).toContain("mcp_nusashell_notes_createNote");
+    // Rich catalog: schema JSON is present in the block.
+    expect(systemContent).toContain("inputSchema:");
+    expect(systemContent).toContain('"type": "object"');
+  });
+
+  it("does not inject Live MCP block when snapshot is empty", async () => {
+    const provider = new ScriptedProvider([{ text: "ok" }]);
+    class EmptySnapshotGateway extends FakeToolGateway {
+      override async getMcpLiveSnapshot() {
+        return { running: [], tools: [] };
+      }
+    }
+    const tools = new EmptySnapshotGateway();
+    const handler = new RunAgentTurnHandler(
+      makeRegistry(provider), tools, "scripted", RUNTIME,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      fakePromptLoader, undefined, undefined, undefined, undefined, undefined, undefined,
+    );
+    await handler.handle({
+      kind: "run-agent-turn",
+      traceId: "trace-empty-live",
+      messages: [{ role: "user", content: "hi" }],
+      pluginIds: [],
+    });
+    const hasLive = provider.requests[0]?.messages
+      .some((m) => m.role === "system" && String(m.content).includes("## Live MCP (runtime)"));
+    expect(hasLive).toBe(false);
+  });
+
+  it("does not call getMcpLiveSnapshot on resume (existing behavior preserved)", async () => {
+    const provider = new ScriptedProvider([{ text: "ok" }]);
+    let snapshotCalls = 0;
+    class CountingSnapshotGateway extends FakeToolGateway {
+      override async getMcpLiveSnapshot() {
+        snapshotCalls += 1;
+        return { running: [{ pluginId: "x" }], tools: [] };
+      }
+    }
+    const tools = new CountingSnapshotGateway();
+    const handler = new RunAgentTurnHandler(
+      makeRegistry(provider), tools, "scripted", RUNTIME,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      fakePromptLoader, undefined, undefined, undefined, undefined, undefined, undefined,
+    );
+    await handler.handle({
+      kind: "run-agent-turn",
+      traceId: "trace-resume",
+      messages: [{ role: "user", content: "hi" }],
+      pluginIds: [],
+      resume: true,
+    });
+    expect(snapshotCalls).toBe(0);
   });
 });

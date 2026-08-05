@@ -16,6 +16,13 @@ import {
   serializeToolResult,
   unknownToolExecution,
 } from "./agent-turn-utils.js";
+import {
+  successToolResult,
+  errorToolResult,
+  fromThrownError,
+  projectModelToolResult,
+  type AgentToolResult,
+} from "./agent-tool-result.js";
 
 /**
  * Tool execution policy — dispatches a round's tool-call batch with
@@ -88,11 +95,13 @@ export class ToolExecutionPolicy {
     try {
       const result = await this.toolGateway.execute(call.name, call.args, requestId, traceId, call.id, signal ? { signal } : undefined);
       this.logger?.info("Agent MCP tool completed traceId=%s tool=%s round=%d", traceId, call.name, round);
-      return { id: call.id, name: call.name, ok: true, args: call.args, result };
+      const toolResult = successToolResult(call.id, call.name, result);
+      return { id: call.id, name: call.name, ok: true, args: call.args, result, toolResult };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Tool execution failed";
       this.logger?.warn("Agent MCP tool failed traceId=%s tool=%s round=%d", traceId, call.name, round);
-      return { id: call.id, name: call.name, ok: false, args: call.args, error: message };
+      const toolResult = fromThrownError(call, error);
+      return { id: call.id, name: call.name, ok: false, args: call.args, error: message, toolResult };
     }
   }
 
@@ -153,11 +162,18 @@ export class ToolExecutionPolicy {
   ): void {
     toolCalls.push(execution);
     roundExecutions.push(execution);
+    const content = execution.toolResult
+      ? projectModelToolResult(execution.toolResult)
+      : serializeToolResult(execution, call.name);
+    const toolIsError = execution.toolResult
+      ? execution.toolResult.status !== "success"
+      : !execution.ok;
     messages.push({
       role: "tool",
       toolCallId: call.id,
       name: call.name,
-      content: serializeToolResult(execution, call.name),
+      content,
+      ...(toolIsError ? { toolIsError: true } : {}),
     });
   }
 }

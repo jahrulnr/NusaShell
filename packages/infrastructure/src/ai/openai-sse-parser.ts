@@ -13,6 +13,8 @@ export async function parseOpenAiSse(
   onTextDelta: ((delta: string) => void) | undefined,
   onReasoningDelta: ((delta: string) => void) | undefined,
   maxBytes: number,
+  onChunk?: () => void,
+  idleSignal?: AbortSignal,
 ): Promise<unknown> {
   if (!response.body) throw new SseTransportError("SSE response has no body");
   const reader = response.body.getReader();
@@ -62,11 +64,33 @@ export async function parseOpenAiSse(
   while (true) {
     let chunk;
     try {
-      chunk = await reader.read();
+      // Race reader.read() against the idle abort signal so a stalled
+      // stream (no chunks for timeoutMs) rejects instead of hanging.
+      if (idleSignal) {
+        if (idleSignal.aborted) throw new SseTransportError("SSE read failed: Provider request timed out");
+        const onAbort = () => { rejectRef(new Error("Provider request timed out")); };
+        let rejectRef: (reason?: unknown) => void;
+        const abortPromise = new Promise<never>((_, reject) => {
+          rejectRef = reject;
+          idleSignal.addEventListener("abort", onAbort, { once: true });
+        });
+        try {
+          chunk = await Promise.race([reader.read(), abortPromise]);
+        } finally {
+          // Whether reader.read() won or the abort fired, detach the
+          // listener so repeated reads don't accumulate abort listeners
+          // on the shared idleSignal across iterations / turns.
+          idleSignal.removeEventListener("abort", onAbort);
+        }
+      } else {
+        chunk = await reader.read();
+      }
     } catch (error) {
       throw new SseTransportError(`SSE read failed: ${error instanceof Error ? error.message : String(error)}`);
     }
     if (chunk.done) break;
+    // Reset the idle timer on every successful chunk — the stream is alive.
+    onChunk?.();
     bytes += chunk.value.byteLength;
     if (bytes > maxBytes) throw new SseTransportError("SSE response exceeded the configured size limit");
     buffer += decoder.decode(chunk.value, { stream: true });

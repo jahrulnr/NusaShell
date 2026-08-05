@@ -21,4 +21,10 @@ export interface RunAgentTurnCommand extends Command {
   readonly resume?: boolean;
   readonly supersedeTraceId?: string;
   readonly conversationId?: string;
+  /**
+   * Outer multi-turn auto-continue index. 0 (or omitted) = user-started turn;
+   * N > 0 = the Nth chained turn started without a user message. When > 0 the
+   * handler injects the continue steering prompt.
+   */
+  readonly autoContinueIndex?: number;
 }

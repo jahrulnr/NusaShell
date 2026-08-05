@@ -94,11 +94,72 @@ executed once, nudged on its second appearance, and stops the loop on its third.
   accumulated `messages`, `steps`, `toolCalls`, `traceId`, `rounds`, and
   optional `model`/`providerId`/`usage`. Cancel still uses
   `AGENT_TURN_CANCELLED` and is never soft-retried; the partial is only for
-  durable resume. The desktop seals the streaming message, persists an
-  **interrupted** assistant message (`status: "interrupted"`) carrying
-  `resumeMessages`, and still shows the error footer with **Retry** / resume.
-  Progress is never discarded solely because the error code was cancel or was
-  not `AGENT_PROVIDER_FAILED`.
+  durable resume. The **main process seals interrupted first** via
+  `sealAgentInterrupted` (durable store + `resumeMessages`); the wire error
+  then carries a slim partial (`messages: []`, `sealedInterrupted: true`) so
+  Electron IPC cannot drop a multi-MB tool graph. The desktop seals the
+  streaming UI, refreshes the store, and still shows the error footer with
+  **Retry** / resume. Progress is never discarded solely because the error
+  code was cancel or was not `AGENT_PROVIDER_FAILED`.
+- **Soft recover is in-turn only.** `hasTurnProgress` counts only tool calls
+  and `tool_calls` steps from the **current turn** — history `role: "tool"`
+  messages from earlier turns do not trigger soft-recover. This prevents the
+  phantom "new turn" bug where a long pure-text reply after a tool-heavy turn
+  was cut mid-sentence and soft-recovered solely because the history carried
+  tool messages.
+- **Soft recover never rewrites painted stream.** If the failed sample already
+  painted live text or reasoning (`liveText` / `liveReasoning` non-empty), the
+  runner does **not** soft-recover even when in-turn tools exist. Re-sampling
+  would rewrite prose/thinking already shown to the user (common after long
+  tool turns + provider timeout mid-answer). Fail with `details.partial`
+  instead so Desktop seals interrupted and Retry can Resume tools or Continue
+  text. Soft recover only re-samples **blank** samples after tool progress
+  (no deltas yet), e.g. connect/timeout before first chunk.
+- **Stream timeout is idle, not wall-clock.** The OpenAI-compat provider uses
+  a one-shot `timeoutMs` for the connect + headers phase, then switches to an
+  **idle-reset** timer for the SSE body loop. Each successful `reader.read()`
+  chunk resets the timer. Long generations that keep sending chunks survive
+  even when total stream time exceeds `timeoutMs`; only a true stall (no chunks
+  for `timeoutMs`) fails. The error message stays `"Provider request timed
+  out"` for test stability; the `AgentProviderHttpError` phase is
+  `"idle_timeout"`.
+- **Parent turn IPC budget is hard wall-clock (desktop).** `agent.run` is
+  invoked over Electron IPC with a 30-minute upper bound. When that fires, the
+  bridge rejects with `IpcRequestTimeoutError` (`code: TIMEOUT`, message
+  `IPC request timed out after Nms`) — never `String(plainObject)` / UI text
+  `Turn failed: [object Object]`. A parent-turn abort seals in-flight tool and
+  subagent cards, marks durable `subagentRuns` still `running` as `fail` with
+  `"Subagent run did not finish before the parent turn ended."`, and clears
+  `activeSubagentRunId`.
+- **Streamed text is captured into partials.** The runner wraps
+  `onTextDelta` / `onReasoningDelta` to accumulate `liveText` /
+  `liveReasoning` even when the caller provides no delta callback. On
+  mid-stream failure, `buildTurnPartial` prefers these live buffers so the
+  already-painted paragraphs are preserved. The desktop interrupt seal
+  prefers `partial.text` (or `streamState.streamedText` as fallback) over
+  the generic interrupted template.
+- **Interrupted resume has two modes: tool vs text.** When a turn is
+  interrupted (cancel, provider fail, max rounds), the runner attaches
+  `details.partial` whenever there is resumable progress — in-turn tools
+  (`hasTurnProgress`) **or** already-streamed live text
+  (`hasResumableProgress`). The desktop persists an `interrupted` assistant
+  with `content` = the partial body (never the stub when body exists),
+  `interruptReason` (`cancel` / `provider` / `max_rounds`), and
+  `resumeMessages` **only when tools settled** (assistant toolCalls and/or
+  tool results in the graph — not the inject+user preamble after a pre-tool
+  provider fail). Retry then picks the mode:
+  - **Tool resume**: `hasToolResumeSnapshot` (toolCalls / tool graph in
+    `resumeMessages`) → `resume: true` + those messages.
+  - **Text continue**: non-empty `content`, no settled tools →
+    `buildContinueContext` injects `base + {role:"assistant", content:partial}
+    + {role:"user", content: CONTINUE_STEER}` (steer is a fixed English
+    line, not persisted as a user row). Inject-only `resumeMessages` (legacy
+    seals or stale data) do **not** take the tool path.
+  - **Noop**: empty body and no tools → normal `buildAgentContext`.
+  `buildAgentContext` still filters `interrupted` for normal user sends so
+  dead mid-cuts don't pollute history. Pure-text transport fail never
+  soft-recovers (no rewrite loop); it throws with partial so the UI can
+  offer Continue.
 - **Unknown tool names are soft-rejected, not hard-failed.** When a provider
   (especially OpenAI-compat proxies like 9router/OmniRoute) emits tool calls
   for names outside the current NusaShell allowlist (`ReadFile`, IDE terminal,
@@ -115,16 +176,20 @@ executed once, nudged on its second appearance, and stops the loop on its third.
   `callGrantedTool` when a name is missing from the per-turn route map — that
   path is caught by `executeTool`'s catch and converted to `ok: false`, so it
   acts as defense-in-depth, not the primary rejection path.
-- **Retry** on an interrupted message calls `agent.run` with `resume: true`
-  and the saved `resumeMessages`, skipping system-prompt injection so the
-  provider sees the exact mid-turn context. On success the interrupted
-  message is replaced with the completed assistant message; on a new
-  mid-turn failure the same interrupted message is updated with the new
-  partial. If `resumeMessages` was dropped (snapshot exceeded ~512 KiB),
-  Retry falls back to a full restart from durable history.
+- **Retry** on an interrupted message:
+  - **Tool graph**: `agent.run` with `resume: true` and saved
+    `resumeMessages` (skip system-prompt injection) so the provider sees
+    mid-turn tool context.
+  - **Pure text / pre-tool**: `buildContinueContext` + normal inject +
+    continue steer (no `resume: true`).
+  On success the interrupted message is replaced with the completed
+  assistant; on a new mid-turn failure the same interrupted message is
+  updated. If `resumeMessages` was dropped (snapshot exceeded ~512 KiB)
+  after tools, Retry falls back to history restart / text continue when a
+  partial body exists.
 - `buildAgentContext` skips `status: "interrupted"` messages when building
-  context for a new turn — interrupted progress lives only in
-  `resumeMessages` for the continue path.
+  context for a new turn — interrupted progress is reattached only via
+  tool `resumeMessages` or the text-continue builder.
 - Renderer-only working/error bubbles disappear after reload; durable user and
   assistant messages remain the source of truth.
 - SSE text deltas update the current working bubble only. `agent.cancel`
@@ -228,19 +293,50 @@ content are unacceptable. Size caps remain for flood control. The
 ## Context compaction
 
 Before a provider round, the runner estimates input size as `chars / 4`. When
-it exceeds `max input tokens - reserve tokens` (with a 1,000-token floor), it:
+it exceeds `max input tokens - reserve tokens` (with a 1,000-token floor), the
+`ContextCompactor` runs a **Codex-aligned memento replacement**:
 
-1. preserves the configured number of recent user turns, including the latest;
-2. asks the selected provider for a concise checkpoint of older messages;
-3. falls back to a bounded extractive checkpoint if that request fails;
-4. returns the checkpoint so Electron can persist its absolute message offset.
+1. **Summarize by replaying real history** — calls the provider with the full
+   live `input.messages` + a trailing user message containing the `compact.md`
+   instruction (`tools: []`, no mid-loop tools). The provider reply text
+   becomes the summary body. This is the Codex pattern: the summarizer sees
+   the full transcript with evidence, not a starved 12k-char excerpt.
+2. **Quality gate** — if the provider body is empty or below `MIN_SUMMARY_CHARS`
+   (80), the compactor appends an extractive excerpt from
+   `formatMessagesForSummary` so the next model still gets evidence (files,
+   tools, decisions). Never stores a solitary one-line ghost.
+3. **Build replacement history** — `summaryText = SUMMARY_PREFIX + "\n" + body`.
+   The replacement is **retained real user messages + one summary user
+   message**, mirroring Codex `build_compacted_history_with_limit`. User
+   messages are collected via `collectUserMessages` (skips prior
+   `SUMMARY_PREFIX`-shaped messages), then packed newest-first up to
+   `COMPACT_USER_MESSAGE_MAX_TOKENS` (20,000). Tools/assistant steps are **not**
+   the durable keep-set; the summarizer read them only during the compact turn.
+4. **Preserve leading system injects** — `splitLeadingSystemInjects` keeps the
+   leading stretch of `role:"system"` messages at the head of the replacement
+   (re-applied by `injectPrompts` at turn boundaries).
+5. **Drop oldest if still over** — if the packed replacement still exceeds the
+   soft threshold, the compactor drops the oldest retained user message
+   iteratively (Codex compact-retry spirit), then runs in-list tool shrink on
+   any remaining tool remnants.
+6. **Checkpoint** — `{ summary, retainedUserMessages, compactedMessageCount,
+   estimatedInputTokens, via }`. `compactedMessageCount` is the absolute store
+   offset (mapped at seal time on the desktop side). `retainedUserMessages` is
+   the packed user texts (chronological) so the desktop can reconstruct the
+   memento on the next turn.
+
+The summary is a `role:"user"` message with the `SUMMARY_PREFIX` marker, not a
+`role:"system"` blurb. This is the Codex invariant: the model treats the
+summary as durable context from "another language model," not a system
+instruction. `isSummaryMessage` detects both the Codex `SUMMARY_PREFIX` and
+the legacy `Conversation summary:` marker for one-release migration.
 
 The provider context for every turn carries reconstructed assistant
 `toolCalls` plus one `role: "tool"` result per call. `buildAgentContext` (in
 the renderer) expands each persisted assistant message that carries `toolCalls`
 into the assistant tool-call message followed by one `role: "tool"` result
 per call, using the persisted `output` (success) or `error` (failure, marked
-`[TOOL ERROR]`) as the result content. Calls missing `id` or `name` are
+`[TOOL_ERROR]`) as the result content. Calls missing `id` or `name` are
 skipped; order is preserved. Tool results from `mcp_*` tools are wrapped in
 the `untrusted_tool_result` envelope (mirrored from the application-layer
 `wrapUntrustedResult`) so the model treats plugin output as data, not
@@ -251,19 +347,147 @@ reconstruction the model would see an assistant
 claim with no tool-use record and no results, and could not verify what was
 actually done.
 
-The compaction summary preserves tool outcomes, not just tool names.
-`formatMessagesForSummary` includes each call's args (truncated to ~400 chars)
-alongside its name, appends the assistant `reasoning` (truncated to ~600 chars)
-when present, and gives each tool result a proportional slice of
-`summaryMaxChars` (floor 800, cap 4000) instead of a fixed 800-char budget.
-The `compact.md` prompt instructs the checkpoint LLM to preserve tool
-outcomes that changed durable state, the tool args that identify what was
-acted on, and the assistant's stated decisions — without copying raw tool
-output verbatim.
+### Tool-result dual representation
 
-Opening the conversation later sends the saved summary plus only messages
-after that offset. Recompaction replaces the previous summary and advances the
-absolute checkpoint without duplicating already-compacted messages.
+Tool results follow a **canonical typed model** (`AgentToolResult`) that
+preserves MCP structure on ingestion and projects a model-facing text string.
+The dual representation fixes early MCP flatten (which discarded
+`structuredContent` and threw on `isError`) and universal `JSON.stringify`
+(which made every result a flat string regardless of shape).
+
+**Canonical model** (`agent-tool-result.ts`):
+- `status`: `success` | `error` | `cancelled` | `timeout`
+- `content`: typed parts (`{type:"text"}` or `{type:"json"}`)
+- `structuredContent`: preserved from MCP when available
+- `metadata`: `truncated`, `dataIsUntrusted`, `exitCode`, `nextCursor`, etc.
+- `error`: `{code, message, retryable}` for non-success statuses
+- `modelOutput`: exact projection string cached after first projection
+
+**Ingestion** (`ingestMcpToolResult`): MCP `isError` no longer throws —
+execution errors become `{kind:"error"}` so the gateway builds a
+model-recoverable `AgentToolResult` with `ok:false`. Transport/protocol
+failures (RPC disconnect, timeout) still throw at the client adapter.
+
+**Projection** (`projectModelToolResult`): one serialization boundary only.
+- Structured path: `{"ok":true,"data":{...},"meta":{"truncated":false}}`
+- Text/command path: `Status: success\n\nOutput:\n...`
+- Error path: `{"ok":false,"error":{"code":"...","message":"...","retryable":...}}`
+- `wrapUntrustedResult` is the last step for `mcp_*` names (unchanged contract).
+
+**Truncation** (`truncateToolResultText`): head+tail with explicit
+`[omitted: N chars]` marker — never silent head-only slice on the new path.
+
+**Durable store**: `AgentConversationToolCall` carries optional `modelOutput`,
+`status`, `truncated`, and `structuredContent`. Rehydrate prefers `modelOutput`
+over `output` so the next turn sees the exact mid-turn projection.
+
+**Provider edge**: `AgentMessage.toolIsError` (optional boolean) is set when
+`toolResult.status !== "success"`. The Anthropic Messages adapter maps it to
+`is_error: true` on `tool_result` blocks. OpenAI adapters ignore it.
+
+### Dual-space checkpoint (desktop)
+
+The durable checkpoint is persisted by Electron main and reconstructed by
+`buildAgentContext` on the next turn:
+
+```text
+[re-injected system prompts via injectPrompts]
+… retained prior user messages (from retainedUserMessages[]) …
+user: <SUMMARY_PREFIX>
+<summary body>
+… residual store messages (after compactedMessageCount) …
+```
+
+When `retainedUserMessages` is present, `buildAgentContext` uses the memento
+shape (retained users + summary user + residual). When it is absent (legacy
+checkpoints from before the Codex alignment), the old shape is used
+(`system: Conversation summary:\n…` + residual slice) for one-release
+migration. `mergeCompactionCheckpoint` carries `retainedUserMessages` forward
+on recompaction.
+
+`formatMessagesForSummary` **excludes live injected system prompts** (system.md
+/ mcp-tools / skills catalog / memory / todos / Live MCP); those are re-applied every
+turn by `injectPrompts`. Only prior summary markers, user, assistant, and tool
+messages enter the handoff excerpt — otherwise a ~12k summary budget is
+exhausted by setup text and the checkpoint LLM invents a "fresh session / no
+user request" handoff (observed after max-round "lanjut" on fat tool turns).
+
+### Live MCP snapshot inject (full running catalog)
+
+When at least one MCP plugin is **running**, `RunAgentTurnHandler.injectSystemPrompts`
+builds a runtime-authoritative system block per interactive turn via
+`toolGateway.getMcpLiveSnapshot(traceId)` + `formatMcpLivePrompt`. The block
+carries the **full tool catalog** (name + description + `inputSchema`) for every
+tool on running plugins — IDE-style completeness so the model can call provider
+names directly without progressive discovery:
+
+```text
+## Live MCP (runtime)
+
+Running: plugin.a, plugin.b
+
+### mcp_plugin_a_foo
+description: ...
+inputSchema:
+```json
+{ ... }
+```
+
+### mcp_plugin_b_bar
+description: ...
+inputSchema:
+```json
+{ ... }
+```
+
+Prefer these tools; call provider names directly. Do not call mcp_list only to re-list running plugins.
+Idle plugins still need mcp_enable then appear here on a later turn.
+If a name is missing or args fail: tool_list / tool_schema as needed.
+```
+
+The same running tools are auto-advertised in the provider `tools[]` array via
+`listTools` auto-seeding (routes written for every running plugin tool, same
+shape as `grantTool`). Hard cap ~80_000 chars on the Live MCP block (high
+ceiling, mostly prompt-cacheable); provider `tools[]` is hard-capped at 96 MCP
+tool entries beyond meta-tools — overflow names are listed in the block as
+"present but not in tools[]." Sorted stable (plugin ids and tool names) for
+prompt-cache friendliness. Placement: immediately after static `mcp-tools`,
+before skills catalog. Built once per `agent.run` (pre-tool); mid-turn memento
+keeps leading systems, and `tools[]` updates via per-round `listTools` even if
+the prose snapshot is stale until the next turn. `command.resume` skips inject
+(unchanged) — resume uses mid-turn messages including prior injects + residual.
+Fail-soft: on `listPlugins` / `listTools` error, the offending plugin is logged
+and skipped (turn inject still proceeds with the rest).
+
+### Mid-turn memento (in-turn roll-over)
+
+After each **completed** tool batch (function call + tool results already on
+the live messages array), if the estimated context is still over the soft
+budget, the runner runs the **same memento `compact()`** used at turn start —
+not an endless in-place clamp of tool payloads:
+
+1. Tool pairs settle first (no compact between call and result).
+2. Memento replaces history with packed user messages + summary; **drops**
+   prior `assistant` toolCalls / `role:tool` messages.
+3. Next `provider.complete` is a clean sample: old `tool_call_id` values are
+   intentionally not re-sent (Codex “new room” for the API prefix). New tools
+   use new ids. Workspace/disk state is unchanged.
+4. Soft tool-content `shrink()` remains only as residual cleanup (or when
+   barely over before memento would fire) and for envelope-safe clamping when
+   tools are still present.
+
+This prevents long-task amnesia where mid-turn shrink repeatedly erased early
+tool evidence while keeping an invalid-looking “same chat” tool graph.
+
+Hitting `maxToolRounds` throws `AGENT_MAX_TOOL_ROUNDS` with a mid-turn
+`partial` (resumeMessages) so the UI seals an interrupted assistant and
+Resume continues from the exact message log — it must not seal a completed
+"reached maximum rounds" answer that forces a brand-new turn.
+
+Opening the conversation later sends the retained user messages + summary +
+only messages after `compactedMessageCount`. Recompaction replaces the
+previous summary and advances the absolute checkpoint without duplicating
+already-compacted messages.
 
 ## Provider retry
 
@@ -288,9 +512,10 @@ Environment is currently the process-level runtime boundary:
 | `NUSASHELL_AI_MODEL` | empty | Initial model ID |
 | `NUSASHELL_AI_BASE_URL` | empty | Initial provider base URL |
 | `NUSASHELL_AI_API_KEY` | empty | Initial API key; never returned or logged |
-| `NUSASHELL_AI_MAX_TOOL_ROUNDS` | `8` | Maximum provider/tool rounds |
+| `NUSASHELL_AI_MAX_TOOL_ROUNDS` | `50` (cap `10000`) | Maximum provider/tool rounds per turn (`0` = unlimited) |
 | `NUSASHELL_AI_SOFT_RECOVER_ATTEMPTS` | `1` | Mid-turn soft recover retries after a provider call fails with tool progress already accumulated (0–3) |
 | `NUSASHELL_AI_MAX_CONCURRENT_TOOL_CALLS` | `8` | Maximum concurrent tool executions within a parallel segment (1–32; 1 = sequential) |
+| `NUSASHELL_AI_MAX_AUTO_CONTINUES` | `10` (cap `10000`) | Outer multi-turn auto-continue budget — chained turns after a successful seal while open todos remain (`0` = unlimited) |
 | `NUSASHELL_AI_STRATEGY` | `failover` | `failover`, `round-robin`, or selected-provider `switch` |
 | `NUSASHELL_AI_TOTAL_ATTEMPT_BUDGET` | `4` | Shared retry/failover attempt ceiling per provider round |
 | `NUSASHELL_AI_STREAM` | `true` | Request SSE where the provider dialect supports it |
@@ -301,10 +526,24 @@ Environment is currently the process-level runtime boundary:
 | `NUSASHELL_AI_RETRY_MAX_DELAY_MS` | `5000` | Backoff and Retry-After ceiling |
 | `NUSASHELL_AI_RETRY_JITTER` | `0.2` | Backoff jitter fraction |
 | `NUSASHELL_AI_CONTEXT_COMPACTION` | `true` | Enable context compaction |
-| `NUSASHELL_AI_CONTEXT_MAX_INPUT_TOKENS` | `12000` | Estimated input ceiling |
-| `NUSASHELL_AI_CONTEXT_RESERVE_TOKENS` | `3000` | Output/tool reserve |
+| `NUSASHELL_AI_CONTEXT_MAX_INPUT_TOKENS` | `200000` | Hard cost ceiling on the compaction input estimate (see below) |
+| `NUSASHELL_AI_CONTEXT_RESERVE_TOKENS` | `16000` | Output/tool reserve |
 | `NUSASHELL_AI_CONTEXT_RECENT_TURNS` | `4` | Raw user turns retained |
 | `NUSASHELL_AI_CONTEXT_SUMMARY_MAX_CHARS` | `12000` | Checkpoint character bound |
+
+### Compaction ceiling: `min(maxInput, modelWindow)`
+
+The effective context window is `min(settings.maxInputTokens, model contextWindow ?? family heuristic ?? 200k)`.
+`maxInputTokens` is a **hard cost ceiling** — the 200k unknown-model default
+only fills a **missing** model window; it does **not** override an explicit
+`maxInputTokens`. With the fresh-install defaults (200k maxInput + 16k reserve
++ 200k model), `soft ≈ 180k`. With an explicit thrift budget (12k maxInput +
+3k reserve), `window = 12k` and `soft = 9k` — intentional, not a formula bug.
+
+Saved `ai-settings.json` values are preserved on upgrade; the fresh-install
+defaults only apply when the key is absent or invalid. Raising
+**Settings → Max input tokens** (e.g. 128000 or 200000) is the user-facing
+escape hatch when long tasks compact too aggressively.
 
 Provider connections, imported models, selected model, and effort are persisted
 through the dedicated Electron provider registry. API keys use Electron
@@ -322,6 +561,7 @@ runner. The injection point is the application layer (backend), not the renderer
 | `mcp-tools.md` | Progressive MCP tool workflow: discovery / recall → call | No |
 | `developer.md` | Runtime context: date, environment, available meta-tool names | Yes |
 | `compact.md` | Compaction instruction for the checkpoint LLM call | No |
+| `continue.md` | Outer auto-continue steering: pursue open CURRENT TASKS | No |
 
 `developer.md` is the single injection surface for `{{current_date}}`,
 `{{environment}}`, and `{{available_tools}}` template variables. Static prompts
@@ -460,6 +700,80 @@ events, debounces 500ms to coalesce multiple completions, checks
 `turnPending`, and calls `submit()` with a formatted summary. If the
 conversation has an active turn, the steer is skipped — the agent will see
 the completed jobs in the job strip on its next natural turn.
+
+## Multi-turn auto-continue (Codex-inspired outer loop)
+
+After a **successful sealed turn**, if the conversation task checklist still
+has open items (`pending` or `in_progress`), the desktop starts the next
+turn automatically — without a user message. This lets the agent work
+through a multi-step plan in one shot, guided by its own todo list, instead
+of requiring the user to say "continue" after each step.
+
+### Decision
+
+`decideAutoContinue` (application layer, pure function) is called from
+`RunAgentTurnHandler.withAutoContinue()` on every successful turn. It
+attaches an `autoContinue` decision to the `AgentTurnResult`:
+
+| Field | Meaning |
+| --- | --- |
+| `shouldContinue` | Whether the desktop should start the next chained turn |
+| `openTodoCount` | Items with status `pending` or `in_progress` |
+| `continuesUsed` | How many auto-continues have already run (0 = user turn) |
+| `maxAutoContinues` | Chain budget (env `NUSASHELL_AI_MAX_AUTO_CONTINUES`, default 10, cap 10,000; `0` = unlimited) |
+| `reason` | `continue` / `no-open-todos` / `max-reached` / `turn-not-ok` / `no-conversation` |
+
+The decision is **omitted** on failed, cancelled, or superseded paths — the
+desktop never chains those. It is also omitted when no `conversationId` is
+bound or no todo port is configured.
+
+### Continue steering prompt
+
+When `autoContinueIndex > 0`, the handler loads `continue.md` via
+`PromptLoaderPort.loadContinuePrompt()` and injects it as an internal `user`
+message before the durable conversation history. The desktop does **not**
+append a user row for this message — it exists only in the provider payload
+for that chained request. The prompt instructs the agent to pursue open
+CURRENT TASKS, verify before claiming done, keep the todo list accurate, and
+stop when everything is complete.
+
+### Desktop chain
+
+The `AgentConversationController` orchestrates the chain:
+
+1. After `submit()` seals a successful turn, it checks
+   `result.autoContinue.shouldContinue`.
+2. If true, `runAutoContinueChain(conversationId, continuesUsed + 1)` runs
+   successive turns in a `while` loop, each with an incrementing
+   `autoContinueIndex`.
+3. Each chained turn rebuilds context from the durable conversation (no new
+   user message), creates a fresh streaming message, and calls `runTurn`
+   with `autoContinueIndex` set.
+4. The chain **aborts** when:
+   - `shouldContinue` is false (no open todos, budget exhausted, etc.)
+   - The user clicks **Stop** (`autoContinueAborted` flag)
+   - The user sends a new message (`turnPending` guard at loop top)
+   - The user switches conversations (`conversation.id` guard)
+   - A chained turn fails or is cancelled (error handler breaks the loop)
+5. The status bar shows `Continuing tasks… (n/max)` (finite) or
+   `Continuing tasks… (n)` (unlimited, `maxAutoContinues === 0`) during each
+   chained turn, and `Idle` when the chain ends.
+
+### Ceiling semantics (0 = unlimited)
+
+Both the inner tool-round ceiling (`maxToolRounds`) and the outer
+auto-continue budget (`maxAutoContinues`) support **`0` = unlimited** as an
+opt-in escape hatch for long unattended agentic runs:
+
+- `maxToolRounds: 0` — the `AgentTurnRunner` loop never throws
+  `AGENT_MAX_TOOL_ROUNDS`; termination is via final answer, cancel/stop,
+  unrecoverable provider error, or the existing repeat tool-call guard.
+- `maxAutoContinues: 0` — `decideAutoContinue` never returns `max-reached`
+  from budget; the chain stops only when open todos = 0, the turn fails, or
+  the user clicks Stop.
+
+Stop always ends the active turn **and** the auto-continue chain.
+Unlimited is intentional opt-in, not a silent default.
 
 ### Async subagent sugar (Phase D)
 

@@ -8,6 +8,12 @@ function installDom() {
     <input id="agent-input">
     <button id="agent-send-btn"></button>
     <button id="agent-stop-btn"></button>
+    <section id="agent-attention-stack" hidden>
+      <div class="agent-attention-title"></div>
+      <div class="agent-attention-copy"></div>
+      <span id="agent-attention-count"></span>
+      <div id="agent-attention-list"></div>
+    </section>
     <aside id="agent-subpane" hidden>
       <div id="agent-subpane-overlay" hidden></div>
       <span id="agent-subpane-badge"></span>
@@ -70,6 +76,53 @@ describe("AgentConversationController — subagent stream pane", () => {
       "ok",
       expect.objectContaining({ summary: "Done", steps: [{ type: "text", content: "Completed output" }] }),
     );
+  });
+
+  it("failStrandedSubagentRuns marks running runs fail and clears active", async () => {
+    const updateSubagentRunStatus = vi.fn().mockImplementation(async (_id, runId, status, patch) => ({
+      id: "conv-1",
+      activeSubagentRunId: status === "fail" ? undefined : "run-live",
+      subagentRuns: [{
+        runId,
+        status,
+        error: patch?.error,
+      }],
+    }));
+    const setActiveSubagentRun = vi.fn().mockResolvedValue({
+      id: "conv-1",
+      subagentRuns: [{ runId: "run-live", status: "fail", error: "Subagent run did not finish before the parent turn ended." }],
+    });
+    const controller = new AgentConversationController({
+      shell: { agentConversations: { updateSubagentRunStatus, setActiveSubagentRun } },
+    } as never);
+    controller.conversation = {
+      id: "conv-1",
+      messages: [],
+      activeSubagentRunId: "run-live",
+      subagentRuns: [{
+        id: "s1",
+        conversationId: "conv-1",
+        sourceMessageId: "1",
+        runId: "run-live",
+        providerId: "devin",
+        title: "Deep-dive",
+        prompt: "x",
+        status: "running",
+        createdAt: "t",
+        updatedAt: "t",
+      }],
+    } as never;
+    controller.turnOwnerConversationId = "conv-1";
+
+    await controller.failStrandedSubagentRuns("Subagent run did not finish before the parent turn ended.");
+
+    expect(updateSubagentRunStatus).toHaveBeenCalledWith(
+      "conv-1",
+      "run-live",
+      "fail",
+      { error: "Subagent run did not finish before the parent turn ended." },
+    );
+    expect(setActiveSubagentRun).toHaveBeenCalledWith("conv-1", null);
   });
 });
 
@@ -150,6 +203,24 @@ describe("AgentConversationController — in-chat subagent mini stream", () => {
     expect(card.dataset.runId).toBe("run-a");
   });
 
+  it("keeps ordinary tool cards collapsed while the tool is running", () => {
+    const controller = new AgentConversationController({} as never);
+    const card = controller.createStreamingToolCard("call-tool", "shell", { command: "pwd" });
+
+    expect(card.tagName).toBe("DETAILS");
+    expect((card as HTMLDetailsElement).open).toBe(false);
+  });
+
+  it("requests a follow scroll when a tool card settles", () => {
+    const controller = new AgentConversationController({} as never);
+    const card = controller.createStreamingToolCard("call-tool", "shell", { command: "pwd" });
+    const scrollToBottom = vi.spyOn(controller, "scrollToBottom").mockImplementation(() => {});
+
+    controller.updateStreamingToolCard(card, { callId: "call-tool", name: "shell", ok: true, output: "done" });
+
+    expect(scrollToBottom).toHaveBeenCalled();
+  });
+
   it("omits the mini stream on sealed (non-running) cards", () => {
     const controller = new AgentConversationController({} as never);
     const card = controller.renderSubagentCard({
@@ -162,6 +233,68 @@ describe("AgentConversationController — in-chat subagent mini stream", () => {
 
     expect(card.querySelector(".agent-subagent-card-stream")).toBeNull();
     expect(card.querySelector(".agent-subagent-card-summary")).not.toBeNull();
+  });
+
+  it("does not pull a reader back to the bottom after they scroll up", () => {
+    const controller = new AgentConversationController({} as never);
+    const body = document.createElement("div");
+    body.id = "agent-subpane-body";
+    document.body.appendChild(body);
+    Object.defineProperties(body, {
+      scrollHeight: { configurable: true, value: 1000 },
+      clientHeight: { configurable: true, value: 200 },
+      scrollTop: { configurable: true, writable: true, value: 300 },
+    });
+    controller.subpaneShouldStickToBottom = false;
+
+    controller.scrollSubpaneToBottom();
+
+    expect(body.scrollTop).toBe(300);
+  });
+
+  it("keeps subagent permission decisions in the main attention stack", async () => {
+    const answerAcpPermission = vi.fn().mockResolvedValue(undefined);
+    const controller = new AgentConversationController({ answerAcpPermission } as never);
+    const card = controller.createAcpPermissionCard({
+      requestId: "permission-1",
+      conversationId: "subagent:run-a",
+      toolTitle: "Allow file edit",
+      detail: "The subagent wants to edit a file.",
+      options: [{ optionId: "allow_once", name: "Allow once" }, { optionId: "reject", name: "Reject" }],
+    });
+
+    controller.mountAcpAttentionCard(card!);
+    expect(document.querySelector("#agent-attention-stack")?.hidden).toBe(false);
+    expect(document.querySelector("#agent-attention-list .acp-permission-card")).toBe(card);
+
+    await controller.submitAcpPermissionCard(card!, "trace-a", "subagent:run-a", "allow_once");
+    controller.appendSubpaneText("More subagent output");
+
+    expect(card?.isConnected).toBe(false);
+    expect(document.querySelector("#agent-attention-list .acp-permission-card")).toBeNull();
+    expect(document.querySelector("#agent-attention-stack")?.hidden).toBe(true);
+    expect(answerAcpPermission).toHaveBeenCalledWith({
+      traceId: "trace-a",
+      conversationId: "subagent:run-a",
+      requestId: "permission-1",
+      optionId: "allow_once",
+    });
+  });
+
+  it("removes a completed successful subagent card from the active thread UI", () => {
+    const controller = new AgentConversationController({} as never);
+    const card = controller.createStreamingToolCard("call-subagent", "subagent", { title: "Done" });
+    document.body.appendChild(card);
+
+    const replacement = controller.updateStreamingToolCard(card, {
+      callId: "call-subagent",
+      name: "subagent",
+      ok: true,
+      output: JSON.stringify({ ok: true, runId: "run-done", summary: "Finished" }),
+    });
+
+    expect(replacement).toBeNull();
+    expect(card.isConnected).toBe(false);
   });
 
   it("attaches the mini stream to the in-chat card on run start and appends rows", () => {

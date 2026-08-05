@@ -11,6 +11,7 @@ export interface ConfigureAiRuntimeCommand extends Command {
   readonly maxRepeatedToolCalls?: number;
   readonly softRecoverAttempts?: number;
   readonly maxConcurrentToolCalls?: number;
+  readonly maxAutoContinues?: number;
   readonly compactionEnabled?: boolean;
   readonly maxInputTokens?: number;
   readonly reserveTokens?: number;

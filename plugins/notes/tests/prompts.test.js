@@ -8,8 +8,8 @@ describe("Notes MCP prompts", () => {
     ]);
     const prompt = getNotesPrompt("howto");
     const text = prompt.messages[0].content.text;
-    expect(text).toContain("notes_create");
-    expect(text).toContain("notes_search");
+    expect(text).toContain("create");
+    expect(text).toContain("search");
     expect(text).toContain("separate from the shell conversation history");
   });
 

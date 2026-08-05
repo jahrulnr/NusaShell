@@ -30,22 +30,22 @@ function service() {
 describe("Mail MCP tools", () => {
   it("publishes descriptors in the canonical catalog order", () => {
     expect(MAIL_TOOLS.map((tool) => tool.name)).toEqual([
-      "mail_accounts",
-      "mail_account_get",
-      "mail_account_test",
-      "mail_mailboxes",
-      "mail_inbox",
-      "mail_messages",
-      "mail_search",
-      "mail_read",
+      "accounts",
+      "account_get",
+      "account_test",
+      "mailboxes",
+      "inbox",
+      "messages",
+      "search",
+      "read",
     ]);
-    expect(MAIL_TOOLS.every((tool) => tool.name.startsWith("mail_"))).toBe(true);
+    expect(MAIL_TOOLS.every((tool) => !tool.name.startsWith("mail_"))).toBe(true);
   });
 
   it("builds a unified inbox across enabled accounts", async () => {
     const target = service();
 
-    const result = await callMailTool(target, "mail_inbox", { limit: 20 });
+    const result = await callMailTool(target, "inbox", { limit: 20 });
 
     expect(result.messages.map((message) => message.accountId)).toEqual(["work", "personal"]);
     expect(target.listMessages).toHaveBeenCalledTimes(2);
@@ -55,7 +55,7 @@ describe("Mail MCP tools", () => {
   it("validates tool input before opening a mail connection", async () => {
     const target = service();
 
-    await expect(callMailTool(target, "mail_read", {
+    await expect(callMailTool(target, "read", {
       account_id: "work",
       mailbox_id: "INBOX",
       uid: -1,
@@ -66,7 +66,7 @@ describe("Mail MCP tools", () => {
   it("tests only the requested connection scope", async () => {
     const target = service();
 
-    await callMailTool(target, "mail_account_test", {
+    await callMailTool(target, "account_test", {
       account_id: "work",
       scope: "incoming",
     });
@@ -110,12 +110,12 @@ describe("Mail MCP tools", () => {
       };
     });
 
-    const first = await callMailTool(target, "mail_inbox", { limit: 1 });
-    const second = await callMailTool(target, "mail_inbox", {
+    const first = await callMailTool(target, "inbox", { limit: 1 });
+    const second = await callMailTool(target, "inbox", {
       limit: 1,
       cursor: first.nextCursor,
     });
-    const third = await callMailTool(target, "mail_inbox", {
+    const third = await callMailTool(target, "inbox", {
       limit: 1,
       cursor: second.nextCursor,
     });

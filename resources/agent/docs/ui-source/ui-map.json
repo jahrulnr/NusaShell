@@ -182,11 +182,13 @@
         {
           "heading": "Conversation list",
           "paragraphs": [
-            "A fixed workbench rail listing local conversation threads. Click a thread to open it; use the \u00d7 button to delete. The rail remains visible beside a wider conversation surface at desktop widths."
+            "A fixed workbench rail listing local conversation threads. Click a thread to open it; use the \u00d7 button to delete. At narrow widths the rail becomes a focusable Rooms drawer opened from the Agent header, so room switching remains available without consuming chat width."
           ],
           "controls": [
             "agent-conversations-title",
             "agent-conversation-count",
+            "agent-mobile-conversations-btn",
+            "agent-mobile-conversations-overlay",
             "agent-new-conversation",
             "agent-conversation-search",
             "agent-conversation-list",
@@ -196,7 +198,7 @@
         {
           "heading": "Conversation thread",
           "paragraphs": [
-            "The full-height message runway separates compact user cards from editorial assistant responses. User attachments render as image previews or file cards. Provider reasoning is persisted and appears before the answer in a collapsed Thinking disclosure with sanitized Markdown; models that return no reasoning show no placeholder. Completed tool calls render as expandable terminal cards with the tool name in the header and full args/output in the body. Interactive ask_question calls render as Ask Question cards with selectable options and an optional free-text answer; after the user replies, the sealed card shows the chosen answer. Message footers expose timestamps, model/trace metadata, copy, and retry where applicable. Only this area scrolls."
+            "The full-height message runway separates compact user cards from editorial assistant responses. User attachments render as image previews or file cards. Provider reasoning is persisted and appears before the answer in a collapsed Thinking disclosure with sanitized Markdown; models that return no reasoning show no placeholder. Tool calls render as terminal cards that stay collapsed by default even while a tool is actively streaming, so live output never takes over the transcript; expand one deliberately to inspect args/output. Interactive ask_question calls render as Ask Question cards with selectable options and an optional free-text answer; after the user replies, the sealed card shows the chosen answer. Message footers expose timestamps, model/trace metadata, copy, and retry where applicable. Only this area scrolls, and the pinned reader follows content across reasoning, tool, and text transitions even when the window is unfocused."
           ],
           "controls": [
             "acp-status-bar",
@@ -217,9 +219,26 @@
           ]
         },
         {
+          "heading": "Room diagnostics",
+          "paragraphs": [
+            "A compact floating Room info control stays at the top-right of the conversation. Activating it opens a small diagnostics popover with the selected conversation title, total persisted tool calls (including nested subagent calls), total recorded compactions, and the full conversation ID. The ID is truncated visually and can be copied; the popover closes with its close button, Escape, or an outside click. Legacy rooms with a checkpoint but no historical count display one compaction as a safe lower-bound fallback."
+          ],
+          "controls": [
+            "agent-room-info",
+            "agent-room-info-trigger",
+            "agent-room-info-popover",
+            "agent-room-info-close",
+            "agent-room-info-title",
+            "agent-room-tool-count",
+            "agent-room-compaction-count",
+            "agent-room-id-copy",
+            "agent-room-id"
+          ]
+        },
+        {
           "heading": "Subagent activity",
           "paragraphs": [
-            "When the parent agent delegates work through the subagent tool, an in-chat Subagent run card appears in the message thread. While the subagent run is active, the card shows a compact mini activity stream (roughly ten monospace rows) that mirrors the full Subagent side pane: live reasoning, text snippets, tool calls with success/failure marks, and plan progress. The mini stream auto-scrolls to the bottom while the user is pinned to the tail; scrolling up pauses stickiness until the user returns to the bottom. Clicking the card head opens the full Subagent side pane, which preserves the complete live log with markdown rendering, expandable tool terminals, plan steps, and permission/ask cards. Clicks inside the mini stream do not toggle the drawer. When the run ends, the mini stream freezes in place until the parent turn seals the tool card; the side pane keeps the full frozen history for review."
+            "When the parent agent delegates work through the subagent tool, an in-chat Subagent run card appears in the message thread. While the subagent run is active, the card shows a compact mini activity stream (roughly ten monospace rows) that mirrors the full Subagent side pane: live reasoning, text snippets, tool calls with success/failure marks, and plan progress. Both streams auto-scroll to the bottom while the user is pinned to the tail; scrolling up pauses stickiness until the user returns to the bottom. Clicking the card head opens the full Subagent side pane, which preserves the complete live log with markdown rendering, expandable tool terminals, plan steps, and permission/ask cards. Clicks inside the mini stream do not toggle the drawer. When the run ends, the mini stream freezes in place until the parent turn seals the tool card; the side pane keeps the full frozen history for review."
           ],
           "controls": [
             "agent-subpane",
@@ -239,6 +258,17 @@
             "agent-subagent-card-stream-row",
             "agent-subagent-card-summary",
             "agent-subagent-card-error"
+          ]
+        },
+        {
+          "heading": "Subagent attention",
+          "paragraphs": [
+            "Permission and ask requests from a subagent are promoted into a persistent attention stack above the composer in the main room. This keeps the required action visible even when the user is not watching the side pane. Pending cards remain actionable; once a decision is accepted, its card is removed from the active stack so resolved work does not compete with new actions."
+          ],
+          "controls": [
+            "agent-attention-stack",
+            "agent-attention-count",
+            "agent-attention-list"
           ]
         },
         {
@@ -270,16 +300,18 @@
             "A collapsible checklist above the composer that mirrors the agent-owned todo list. The agent writes it via the `todo` meta-tool; the user can delete individual items (which removes them from the runtime port so they do not reappear in the next prompt injection) and collapse the strip. It hides automatically when the list is empty."
           ],
           "controls": [
+            "agent-composer-stack",
             "agent-todo-strip",
             "agent-todo-strip-toggle",
             "agent-todo-strip-count",
+            "agent-todo-strip-meta",
             "agent-todo-strip-list"
           ]
         },
         {
           "heading": "Background jobs strip",
           "paragraphs": [
-            "A strip above the composer (below the task strip) that shows running and recently finished async tool jobs started via `async_run`. Each card shows the tool name, status badge, live tail output, and a Stop button that calls `agent.tool_job_kill`. The strip rehydrates from `agent.tool_job_list` on conversation open and hides when no jobs are active."
+            "A compact strip above the composer (below the task strip) shows active async tool jobs started via `async_run`. Its header includes the active-job count; each card keeps the tool name, status badge, and Stop action on one row, with live tail or error output shown below only when present. The strip rehydrates from `agent.tool_job_list` on conversation open and hides as soon as no jobs are running."
           ],
           "controls": [
             "agent-tool-job-strip",
@@ -1100,6 +1132,78 @@
     }
   },
   "controls": {
+    "agent-attention-stack": {
+      "section": "Subagent attention",
+      "label": "Subagent attention stack",
+      "type": "action-required region",
+      "action": "Keeps subagent permission and ask cards visible above the composer in the main room. Hidden when no request has been received."
+    },
+    "agent-attention-count": {
+      "section": "Subagent attention",
+      "label": "Pending request count",
+      "type": "status text",
+      "action": "Shows how many subagent requests still need a user decision."
+    },
+    "agent-attention-list": {
+      "section": "Subagent attention",
+      "label": "Subagent request list",
+      "type": "list",
+      "action": "Contains actionable permission or ask cards; sealed decisions remain compact and the list collapses when no request is pending."
+    },
+    "agent-room-info": {
+      "section": "Room diagnostics",
+      "label": "Room diagnostics",
+      "type": "status region",
+      "action": "Owns the floating conversation diagnostics control. Hidden when no room is selected."
+    },
+    "agent-room-info-trigger": {
+      "section": "Room diagnostics",
+      "label": "Open room diagnostics",
+      "type": "button",
+      "action": "Opens or closes the compact conversation diagnostics popover."
+    },
+    "agent-room-info-popover": {
+      "section": "Room diagnostics",
+      "label": "Conversation diagnostics popover",
+      "type": "dialog",
+      "action": "Shows room title, tool-call total, compaction total, and conversation ID without taking space from the conversation thread."
+    },
+    "agent-room-info-close": {
+      "section": "Room diagnostics",
+      "label": "Close room diagnostics",
+      "type": "button",
+      "action": "Closes the conversation diagnostics popover."
+    },
+    "agent-room-info-title": {
+      "section": "Room diagnostics",
+      "label": "Room title",
+      "type": "text",
+      "action": "Shows the selected conversation title."
+    },
+    "agent-room-tool-count": {
+      "section": "Room diagnostics",
+      "label": "Tool-call total",
+      "type": "status text",
+      "action": "Shows the total persisted tool calls in the room, including nested subagent calls."
+    },
+    "agent-room-compaction-count": {
+      "section": "Room diagnostics",
+      "label": "Compaction total",
+      "type": "status text",
+      "action": "Shows the number of recorded context compactions for the room."
+    },
+    "agent-room-id-copy": {
+      "section": "Room diagnostics",
+      "label": "Copy conversation ID",
+      "type": "button",
+      "action": "Copies the full conversation ID while displaying a truncated version in the diagnostics popover."
+    },
+    "agent-room-id": {
+      "section": "Room diagnostics",
+      "label": "Conversation ID",
+      "type": "code text",
+      "action": "Displays the conversation ID in a compact, truncated diagnostic label inside the popover."
+    },
     "update-banner": {
       "section": "Update banner",
       "label": "Update banner",
@@ -1736,6 +1840,18 @@
       "type": "status text",
       "action": "Displays the number of conversation threads."
     },
+    "agent-mobile-conversations-btn": {
+      "section": "Conversation list",
+      "label": "Mobile conversations",
+      "type": "button",
+      "action": "Opens the conversation list as a compact drawer on narrow windows; focus returns here when the drawer closes."
+    },
+    "agent-mobile-conversations-overlay": {
+      "section": "Conversation list",
+      "label": "Mobile conversations backdrop",
+      "type": "overlay",
+      "action": "Dismisses the narrow-window conversation drawer when clicked."
+    },
     "agent-new-conversation": {
       "section": "Conversation list",
       "label": "New conversation",
@@ -1932,19 +2048,26 @@
       "type": "form",
       "action": "Wraps the message textarea, attachments, and send controls. Submit triggers the agent turn."
     },
+    "agent-composer-stack": {
+      "section": "Composer",
+      "label": "Composer stack",
+      "type": "container",
+      "selector": ".agent-composer-stack",
+      "action": "Floating card that stacks the task strip, background jobs strip, and message form as one surface."
+    },
     "agent-todo-strip": {
       "section": "Task strip",
       "label": "Task strip",
       "type": "container",
       "selector": ".agent-todo-strip",
-      "action": "Collapsible checklist above the composer mirroring the agent-owned todo list. Hides when the list is empty."
+      "action": "Top row of the composer stack: collapsible agent-owned todo checklist. Hides when the list is empty."
     },
     "agent-todo-strip-toggle": {
       "section": "Task strip",
       "label": "Collapse tasks",
       "type": "button",
       "selector": ".agent-todo-strip-toggle",
-      "action": "Collapses or expands the task list."
+      "action": "Collapses or expands the task list. Label shows total task count (e.g. 5 Tasks)."
     },
     "agent-todo-strip-count": {
       "section": "Task strip",
@@ -1952,7 +2075,15 @@
       "type": "text",
       "selector": ".agent-todo-strip-count",
       "generated": true,
-      "action": "Shows incomplete/total task counts."
+      "action": "Shows total task count as N Tasks."
+    },
+    "agent-todo-strip-meta": {
+      "section": "Task strip",
+      "label": "Task progress",
+      "type": "text",
+      "selector": ".agent-todo-strip-meta",
+      "generated": true,
+      "action": "Right-side pill showing remaining open tasks (or All done)."
     },
     "agent-todo-strip-list": {
       "section": "Task strip",
@@ -1966,14 +2097,14 @@
       "label": "Background jobs strip",
       "type": "container",
       "selector": ".agent-tool-job-strip",
-      "action": "Shows running and recently finished async tool jobs. Hides when no jobs are active."
+      "action": "Shows the compact background-job section and active-job count. Hides when no jobs are running."
     },
     "agent-tool-job-list": {
       "section": "Background jobs strip",
       "label": "Job cards",
       "type": "list",
       "selector": ".agent-tool-job-list",
-      "action": "Renders each job as a card with tool name, status badge, live tail, and a Stop button. Clicking Stop calls agent.tool_job_kill."
+      "action": "Renders each running job as a list item with tool name, inline status and Stop action, plus optional live tail or error output. Clicking Stop calls agent.tool_job_kill."
     },
     "agent-input": {
       "section": "Composer",
@@ -3270,7 +3401,7 @@
       "section": "Agent Canvas",
       "label": "Canvas overlay drawer",
       "type": "dialog",
-      "action": "Right-edge overlay drawer for the active canvas artifact. Slides over the agent workbench without resizing the chat column; closed via Close, overlay click, or Escape."
+      "action": "Right-edge overlay drawer for the active canvas artifact. It is contained below the NusaShell titlebar and slides over the agent workbench without resizing the chat column; closed via Close, overlay click, or Escape."
     },
     "agent-canvas-resize": {
       "section": "Agent Canvas",
@@ -3282,7 +3413,7 @@
       "section": "Agent Canvas",
       "label": "Canvas drawer overlay",
       "type": "overlay",
-      "action": "Dimmed backdrop behind the canvas drawer; click closes the drawer."
+      "action": "Dimmed backdrop below the NusaShell titlebar behind the canvas drawer; click closes the drawer."
     },
     "agent-canvas-title": {
       "section": "Agent Canvas",
@@ -3434,7 +3565,7 @@
       "type": "drawer",
       "selector": "#agent-subpane",
       "generated": true,
-      "action": "Full-height drawer that renders the complete live subagent stream with markdown, tool terminals, plans, and permission/ask cards."
+      "action": "Drawer below the NusaShell titlebar that renders the complete live subagent stream with markdown, tool terminals, plans, and permission/ask cards."
     },
     "agent-subpane-overlay": {
       "section": "Agent",
@@ -3442,7 +3573,7 @@
       "type": "overlay",
       "selector": "#agent-subpane-overlay",
       "generated": true,
-      "action": "Dimmed backdrop behind the Subagent side pane."
+      "action": "Dimmed backdrop below the NusaShell titlebar behind the Subagent side pane."
     },
     "agent-subpane-head": {
       "section": "Agent",
@@ -3490,7 +3621,7 @@
       "type": "scroll container",
       "selector": "#agent-subpane-body",
       "generated": true,
-      "action": "Scrollable log that renders the full subagent stream: reasoning disclosures, text bubbles, tool terminals, plan steps, and error blocks."
+      "action": "Scrollable log that renders the full subagent stream: reasoning disclosures, text bubbles, tool terminals, plan steps, and error blocks. It follows new deltas only while the reader is at the bottom; scrolling up pauses auto-follow until the reader returns to the tail."
     },
     "agent-subagent-card": {
       "section": "Agent",

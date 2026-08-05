@@ -233,26 +233,28 @@ export function matchGlob(pattern: string, eventType: string): boolean {
 }
 
 function globToRegex(pattern: string): RegExp {
+  // Tokenize on ".", then rebuild. "**" spans zero-or-more whole segments,
+  // "*" spans within a single segment. Building segment-wise lets "**"
+  // collapse cleanly so both "**.updated"→"updated" and "a.**"→"a" match.
+  const segs = pattern.split(".");
   let out = "^";
-  let i = 0;
-  while (i < pattern.length) {
-    const ch = pattern[i]!;
-    if (ch === "*") {
-      if (pattern[i + 1] === "*") {
-        out += ".*";
-        i += 2;
-        if (pattern[i] === ".") i++; // consume separator after **
-      } else {
-        out += "[^.]*";
-        i += 1;
-      }
-    } else if (".+?^${}()|[]\\".includes(ch)) {
-      out += "\\" + ch;
-      i += 1;
-    } else {
-      out += ch;
-      i += 1;
+  for (let idx = 0; idx < segs.length; idx += 1) {
+    const seg = segs[idx]!;
+    if (seg === "**") {
+      // Absorb the separator: zero segments means no dot is emitted.
+      out += "(?:[^.]+(?:\\.[^.]+)*)?";
+      if (idx < segs.length - 1) out += "\\.?";
+      continue;
     }
+    if (idx > 0 && segs[idx - 1] !== "**") out += "\\.";
+    // Single-segment body: "*" -> any run of non-dot chars.
+    let body = "";
+    for (const ch of seg) {
+      if (ch === "*") body += "[^.]*";
+      else if (".+?^${}()|[]\\".includes(ch)) body += "\\" + ch;
+      else body += ch;
+    }
+    out += body;
   }
   out += "$";
   return new RegExp(out);
@@ -275,11 +277,24 @@ export function evaluateCondition(cond: Condition, event: AutomationEvent): bool
     case "contains":
       return str.includes(cond.value);
     case "regex":
-      try {
-        return new RegExp(cond.value).test(str);
-      } catch {
-        return false;
-      }
+      return safeRegexTest(cond.value, str);
+  }
+}
+
+/**
+ * Guard against catastrophic backtracking (ReDoS). A condition's regex comes
+ * from job config and runs against attacker-influenced event payloads, so a
+ * nested-quantifier source like `(a+)+` could stall the matcher. We reject
+ * sources that apply a quantifier to a group that itself ends in a quantifier
+ * (the classic exponential shape); invalid regexes evaluate to no-match.
+ */
+const REDOS_LIKE_RE = /([+*}]\s*[\)\]])\s*[+*]/;
+function safeRegexTest(source: string, str: string): boolean {
+  if (REDOS_LIKE_RE.test(source)) return false;
+  try {
+    return new RegExp(source).test(str);
+  } catch {
+    return false;
   }
 }
 

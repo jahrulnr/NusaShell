@@ -8,34 +8,34 @@ const messageCursor = z.string().regex(/^\d+$/).optional();
 const unifiedCursor = z.string().max(4096).regex(/^[A-Za-z0-9_-]+$/).optional();
 
 const schemas = {
-  mail_accounts: z.object({}).strict(),
-  mail_account_get: z.object({ account_id: accountId }).strict(),
-  mail_account_test: z.object({
+  accounts: z.object({}).strict(),
+  account_get: z.object({ account_id: accountId }).strict(),
+  account_test: z.object({
     account_id: accountId,
     scope: z.enum(["incoming", "outgoing", "both"]).default("both"),
   }).strict(),
-  mail_mailboxes: z.object({ account_id: accountId }).strict(),
-  mail_inbox: z.object({
+  mailboxes: z.object({ account_id: accountId }).strict(),
+  inbox: z.object({
     account_ids: z.array(accountId).min(1).max(20).optional(),
     unread: z.boolean().optional(),
     limit,
     cursor: unifiedCursor,
   }).strict(),
-  mail_messages: z.object({
+  messages: z.object({
     account_id: accountId,
     mailbox_id: mailboxId,
     unread: z.boolean().optional(),
     limit,
     cursor: messageCursor,
   }).strict(),
-  mail_search: z.object({
+  search: z.object({
     query: z.string().trim().min(1).max(500),
     account_ids: z.array(accountId).min(1).max(20).optional(),
     mailbox_id: mailboxId,
     limit,
     cursor: unifiedCursor,
   }).strict(),
-  mail_read: z.object({
+  read: z.object({
     account_id: accountId,
     mailbox_id: mailboxId,
     uid: z.number().int().positive(),
@@ -43,22 +43,22 @@ const schemas = {
 };
 
 export const MAIL_TOOLS = Object.freeze([
-  descriptor("mail_accounts", "List configured mail accounts without returning credentials.", {}),
-  descriptor("mail_account_get", "Read one account's non-secret configuration and capabilities.", {
-    account_id: stringProperty("Account identifier from mail_accounts"),
+  descriptor("accounts", "List configured mail accounts without returning credentials.", {}),
+  descriptor("account_get", "Read one account's non-secret configuration and capabilities.", {
+    account_id: stringProperty("Account identifier from accounts"),
   }, ["account_id"]),
-  descriptor("mail_account_test", "Test incoming and outgoing connectivity for one configured account.", {
-    account_id: stringProperty("Account identifier from mail_accounts"),
+  descriptor("account_test", "Test incoming and outgoing connectivity for one configured account.", {
+    account_id: stringProperty("Account identifier from accounts"),
     scope: {
       type: "string",
       enum: ["incoming", "outgoing", "both"],
       default: "both",
     },
   }, ["account_id"]),
-  descriptor("mail_mailboxes", "List folders with total and unread counts for one account.", {
-    account_id: stringProperty("Account identifier from mail_accounts"),
+  descriptor("mailboxes", "List folders with total and unread counts for one account.", {
+    account_id: stringProperty("Account identifier from accounts"),
   }, ["account_id"]),
-  descriptor("mail_inbox", "List recent inbox messages across one or more enabled accounts.", {
+  descriptor("inbox", "List recent inbox messages across one or more enabled accounts.", {
     account_ids: {
       type: "array",
       items: stringProperty("Account identifier"),
@@ -68,14 +68,14 @@ export const MAIL_TOOLS = Object.freeze([
     limit: integerProperty(1, 50, 30),
     cursor: stringProperty("Opaque pagination cursor"),
   }),
-  descriptor("mail_messages", "List messages in a selected mailbox.", {
+  descriptor("messages", "List messages in a selected mailbox.", {
     account_id: stringProperty("Account identifier"),
-    mailbox_id: stringProperty("Mailbox path from mail_mailboxes", "INBOX"),
+    mailbox_id: stringProperty("Mailbox path from mailboxes", "INBOX"),
     unread: { type: "boolean" },
     limit: integerProperty(1, 50, 30),
     cursor: stringProperty("Opaque pagination cursor"),
   }, ["account_id"]),
-  descriptor("mail_search", "Search message subject, sender, and body using a provider-neutral query.", {
+  descriptor("search", "Search message subject, sender, and body using a provider-neutral query.", {
     query: stringProperty("Search text"),
     account_ids: {
       type: "array",
@@ -86,7 +86,7 @@ export const MAIL_TOOLS = Object.freeze([
     limit: integerProperty(1, 50, 30),
     cursor: stringProperty("Opaque pagination cursor"),
   }, ["query"]),
-  descriptor("mail_read", "Read one message with bounded body content and attachment metadata.", {
+  descriptor("read", "Read one message with bounded body content and attachment metadata.", {
     account_id: stringProperty("Account identifier"),
     mailbox_id: stringProperty("Mailbox path", "INBOX"),
     uid: integerProperty(1),
@@ -103,19 +103,19 @@ export async function callMailTool(service, name, rawArguments = {}) {
   const input = schema.parse(rawArguments ?? {});
 
   switch (name) {
-    case "mail_accounts":
+    case "accounts":
       return { accounts: service.listAccounts() };
-    case "mail_account_get":
+    case "account_get":
       return { account: service.getAccount(input.account_id) };
-    case "mail_account_test": {
+    case "account_test": {
       return service.testAccount(input.account_id, input.scope);
     }
-    case "mail_mailboxes":
+    case "mailboxes":
       return {
         accountId: input.account_id,
         ...await service.listMailboxes(input.account_id),
       };
-    case "mail_inbox": {
+    case "inbox": {
       const offsets = decodeUnifiedCursor(input.cursor);
       return combineMessagePages(await mapAccounts(service, input.account_ids, (id) =>
         service.listMessages({
@@ -126,7 +126,7 @@ export async function callMailTool(service, name, rawArguments = {}) {
           cursor: offsets[id] === undefined ? undefined : String(offsets[id]),
         })), input.limit, offsets);
     }
-    case "mail_messages": {
+    case "messages": {
       const page = await service.listMessages({
         accountId: input.account_id,
         mailboxId: input.mailbox_id,
@@ -144,7 +144,7 @@ export async function callMailTool(service, name, rawArguments = {}) {
         meta: messageMeta(page.truncated),
       };
     }
-    case "mail_search": {
+    case "search": {
       const offsets = decodeUnifiedCursor(input.cursor);
       return combineMessagePages(await mapAccounts(service, input.account_ids, (id) =>
         service.listMessages({
@@ -155,7 +155,7 @@ export async function callMailTool(service, name, rawArguments = {}) {
           cursor: offsets[id] === undefined ? undefined : String(offsets[id]),
         })), input.limit, offsets);
     }
-    case "mail_read": {
+    case "read": {
       const message = await service.readMessage({
         accountId: input.account_id,
         mailboxId: input.mailbox_id,
@@ -280,7 +280,7 @@ function descriptor(name, description, properties, required = []) {
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
-      openWorldHint: name === "mail_account_test",
+      openWorldHint: name === "account_test",
     },
     inputSchema: {
       type: "object",

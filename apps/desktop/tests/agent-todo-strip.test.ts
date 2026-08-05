@@ -39,13 +39,13 @@ function installDom() {
   document.body.innerHTML = `
     <div id="agent-todo-strip" hidden>
       <div class="agent-todo-strip-head">
-        <button id="agent-todo-strip-toggle" aria-expanded="true" aria-controls="agent-todo-strip-list">
-          <span class="agent-todo-strip-chevron"></span>
-          <span class="agent-todo-strip-title">Tasks</span>
+        <button id="agent-todo-strip-toggle" aria-expanded="false" aria-controls="agent-todo-strip-list">
+          <span class="agent-todo-strip-chevron">›</span>
           <span class="agent-todo-strip-count" id="agent-todo-strip-count"></span>
         </button>
+        <span class="agent-todo-strip-meta" id="agent-todo-strip-meta"></span>
       </div>
-      <ol id="agent-todo-strip-list"></ol>
+      <ol id="agent-todo-strip-list" hidden></ol>
     </div>
   `;
 }
@@ -82,12 +82,12 @@ describe("AgentTodoStrip", () => {
     const items = document.querySelectorAll(".agent-todo-item");
     expect(items).toHaveLength(3);
     expect((items[0] as HTMLElement).dataset.status).toBe("pending");
-    expect((items[0].querySelector(".agent-todo-glyph") as HTMLElement).textContent).toBe("[ ]");
-    expect((items[1].querySelector(".agent-todo-glyph") as HTMLElement).textContent).toBe("[~]");
-    expect((items[2].querySelector(".agent-todo-glyph") as HTMLElement).textContent).toBe("[x]");
+    expect((items[0].querySelector(".agent-todo-glyph") as HTMLElement).textContent).toBe("○");
+    expect((items[1].querySelector(".agent-todo-glyph") as HTMLElement).textContent).toBe("◐");
+    expect((items[2].querySelector(".agent-todo-glyph") as HTMLElement).textContent).toBe("●");
   });
 
-  it("shows incomplete/total count", () => {
+  it("shows total task count and open meta", () => {
     const strip = new AgentTodoStrip({ conversationId: "conv-1" });
     strip.mount();
     strip.render([
@@ -95,7 +95,9 @@ describe("AgentTodoStrip", () => {
       { id: "2", content: "done", status: "completed" },
     ]);
     const count = document.getElementById("agent-todo-strip-count") as HTMLElement;
-    expect(count.textContent).toBe("1/2");
+    const meta = document.getElementById("agent-todo-strip-meta") as HTMLElement;
+    expect(count.textContent).toBe("2 Tasks");
+    expect(meta.textContent).toBe("1 open");
   });
 
   it("calls onDelete when the delete button is clicked", () => {

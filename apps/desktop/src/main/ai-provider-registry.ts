@@ -18,6 +18,17 @@ export type {
 } from "../shared/ai-contract.js";
 
 const efforts: readonly ReasoningEffort[] = ["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/**
+ * Fresh-install / missing-key defaults for the compaction cost ceiling.
+ * Existing saved `ai-settings.json` values are preserved by `normalizeRegistryState`
+ * (the default only applies when the key is absent or invalid). These defaults
+ * match the cheap-agentic p10 model window (200k) so long tasks are usable
+ * out of the box without forcing every user to open Settings.
+ */
+export const DEFAULT_MAX_INPUT_TOKENS = 200_000;
+export const DEFAULT_RESERVE_TOKENS = 16_000;
+
 const nonChatTasks = new Set([
   "embedding", "embeddings", "text-to-speech", "speech-to-text", "tts", "stt",
   "transcription", "translation", "image-generation", "video-generation",
@@ -47,11 +58,12 @@ export function normalizeRegistryState(raw: unknown): AiRegistrySettings {
       stream: value.stream !== false,
       vision: normalizeVision(value.vision),
       userPrompt: text(value.userPrompt),
-      maxToolRounds: integerInRange(value.maxToolRounds, 1, 100, 50),
+      maxToolRounds: integerInRange(value.maxToolRounds, 0, 10_000, 50),
       maxRepeatedToolCalls: integerInRange(value.maxRepeatedToolCalls, 1, 200, 50),
+      maxAutoContinues: integerInRange(value.maxAutoContinues, 0, 10_000, 10),
       compactionEnabled: value.compactionEnabled !== false,
-      maxInputTokens: integerInRange(value.maxInputTokens, 1000, 2_000_000, 12000),
-      reserveTokens: integerInRange(value.reserveTokens, 0, 1_000_000, 3000),
+      maxInputTokens: integerInRange(value.maxInputTokens, 1000, 2_000_000, DEFAULT_MAX_INPUT_TOKENS),
+      reserveTokens: integerInRange(value.reserveTokens, 0, 1_000_000, DEFAULT_RESERVE_TOKENS),
       recentTurns: integerInRange(value.recentTurns, 1, 100, 4),
       summaryMaxChars: integerInRange(value.summaryMaxChars, 100, 1_000_000, 12000),
       providers,
@@ -69,11 +81,12 @@ export function normalizeRegistryState(raw: unknown): AiRegistrySettings {
       stream: true,
       vision: "auto",
       userPrompt: text(value.userPrompt),
-      maxToolRounds: integerInRange(value.maxToolRounds, 1, 100, 50),
+      maxToolRounds: integerInRange(value.maxToolRounds, 0, 10_000, 50),
       maxRepeatedToolCalls: integerInRange(value.maxRepeatedToolCalls, 1, 200, 50),
+      maxAutoContinues: integerInRange(value.maxAutoContinues, 0, 10_000, 10),
       compactionEnabled: value.compactionEnabled !== false,
-      maxInputTokens: integerInRange(value.maxInputTokens, 1000, 2_000_000, 12000),
-      reserveTokens: integerInRange(value.reserveTokens, 0, 1_000_000, 3000),
+      maxInputTokens: integerInRange(value.maxInputTokens, 1000, 2_000_000, DEFAULT_MAX_INPUT_TOKENS),
+      reserveTokens: integerInRange(value.reserveTokens, 0, 1_000_000, DEFAULT_RESERVE_TOKENS),
       recentTurns: integerInRange(value.recentTurns, 1, 100, 4),
       summaryMaxChars: integerInRange(value.summaryMaxChars, 100, 1_000_000, 12000),
       providers: [{
@@ -103,11 +116,12 @@ export function normalizeRegistryState(raw: unknown): AiRegistrySettings {
     stream: true,
     vision: "auto",
     userPrompt: text(value.userPrompt),
-    maxToolRounds: integerInRange(value.maxToolRounds, 1, 100, 50),
+    maxToolRounds: integerInRange(value.maxToolRounds, 0, 10_000, 50),
     maxRepeatedToolCalls: integerInRange(value.maxRepeatedToolCalls, 1, 200, 50),
+    maxAutoContinues: integerInRange(value.maxAutoContinues, 0, 10_000, 10),
     compactionEnabled: value.compactionEnabled !== false,
-    maxInputTokens: integerInRange(value.maxInputTokens, 1000, 2_000_000, 12000),
-    reserveTokens: integerInRange(value.reserveTokens, 0, 1_000_000, 3000),
+    maxInputTokens: integerInRange(value.maxInputTokens, 1000, 2_000_000, DEFAULT_MAX_INPUT_TOKENS),
+    reserveTokens: integerInRange(value.reserveTokens, 0, 1_000_000, DEFAULT_RESERVE_TOKENS),
     recentTurns: integerInRange(value.recentTurns, 1, 100, 4),
     summaryMaxChars: integerInRange(value.summaryMaxChars, 100, 1_000_000, 12000),
     providers: [],

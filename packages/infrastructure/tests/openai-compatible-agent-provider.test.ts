@@ -174,7 +174,7 @@ describe("OpenAiCompatibleAgentProvider", () => {
         tool_calls: [{
           id: "call-1",
           type: "function",
-          function: { name: "mcp_notes_create_123", arguments: '{"title":"Roadmap"}' },
+          function: { name: "mcp_create_123", arguments: '{"title":"Roadmap"}' },
         }],
       } }],
     }), { status: 200, headers: { "content-type": "application/json" } }));
@@ -190,7 +190,7 @@ describe("OpenAiCompatibleAgentProvider", () => {
       round: 1,
       messages: [{ role: "user", content: "Create a note" }],
       tools: [{
-        name: "mcp_notes_create_123",
+        name: "mcp_create_123",
         description: "Create a note",
         inputSchema: { type: "object", properties: { title: { type: "string" } } },
       }],
@@ -212,10 +212,10 @@ describe("OpenAiCompatibleAgentProvider", () => {
       reasoning_effort: "high",
       reasoning: { effort: "high" },
       tool_choice: "auto",
-      tools: [{ type: "function", function: { name: "mcp_notes_create_123" } }],
+      tools: [{ type: "function", function: { name: "mcp_create_123" } }],
     });
     expect(result).toEqual({
-      toolCalls: [{ id: "call-1", name: "mcp_notes_create_123", args: { title: "Roadmap" } }],
+      toolCalls: [{ id: "call-1", name: "mcp_create_123", args: { title: "Roadmap" } }],
       model: "picked-model",
       providerId: "openai-compatible",
       api: "chat",
@@ -229,7 +229,7 @@ describe("OpenAiCompatibleAgentProvider", () => {
       model: "gpt-test",
       fetchFn: vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
         choices: [{ message: {
-          tool_calls: [{ id: "call-1", function: { name: "mcp_notes_create_123", arguments: "not-json" } }],
+          tool_calls: [{ id: "call-1", function: { name: "mcp_create_123", arguments: "not-json" } }],
         } }],
       }), { status: 200 })),
     });
@@ -987,5 +987,138 @@ describe("OpenAiCompatibleAgentProvider", () => {
     });
 
     expect(result.toolCalls).toEqual([{ id: "call_1", name: "search", args: { q: "notes" } }]);
+  });
+
+  // --- Idle stream timeout (Cycle 3) ---
+
+  /** Build a ReadableStream that emits SSE chunks on a schedule. Each entry
+   * is { data, delayMs } — the stream waits delayMs before pushing data. */
+  function scheduledSseStream(chunks: readonly { data: string; delayMs: number }[]): ReadableStream<Uint8Array> {
+    const encoder = new TextEncoder();
+    return new ReadableStream({
+      async start(controller) {
+        for (const chunk of chunks) {
+          if (chunk.delayMs > 0) await new Promise((r) => setTimeout(r, chunk.delayMs));
+          controller.enqueue(encoder.encode(chunk.data));
+        }
+        controller.close();
+      },
+    });
+  }
+
+  it("idle timeout: stream stalls longer than timeoutMs → fails", async () => {
+    // Emit one chunk quickly, then stall > timeoutMs before the next.
+    const timeoutMs = 50;
+    const stream = scheduledSseStream([
+      { data: 'data: {"id":"c1","model":"m","choices":[{"delta":{"content":"Hi"}}]}\n\n', delayMs: 0 },
+      { data: 'data: {"id":"c1","model":"m","choices":[{"delta":{"content":"there"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', delayMs: timeoutMs * 4 },
+    ]);
+    const provider = new OpenAiCompatibleAgentProvider({
+      baseUrl: "https://provider.example/v1",
+      fetchFn: vi.fn<typeof fetch>().mockResolvedValue(new Response(stream, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })),
+      stream: true,
+      timeoutMs,
+    });
+
+    const error = await provider.complete({
+      traceId: "trace-idle",
+      round: 1,
+      messages: [{ role: "user", content: "Hi" }],
+      tools: [],
+      model: "m",
+    }).catch((e) => e);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(String(error.message ?? error)).toContain("timed out");
+  });
+
+  it("idle timeout: continuous chunks spanning > timeoutMs total still succeeds", async () => {
+    // Proves wall-clock was removed: total stream time > timeoutMs, but each
+    // chunk arrives well under the idle threshold.
+    const timeoutMs = 80;
+    const chunkData = 'data: {"id":"c1","model":"m","choices":[{"delta":{"content":"x"}}]}\n\n';
+    const doneData = 'data: {"id":"c1","model":"m","choices":[{"delta":{"content":""},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n';
+    // 5 chunks at 30ms each = 150ms total (> 80ms timeout), but each gap < 80ms.
+    const chunks = Array.from({ length: 5 }, () => ({ data: chunkData, delayMs: 30 }));
+    chunks.push({ data: doneData, delayMs: 30 });
+    const stream = scheduledSseStream(chunks);
+    const provider = new OpenAiCompatibleAgentProvider({
+      baseUrl: "https://provider.example/v1",
+      fetchFn: vi.fn<typeof fetch>().mockResolvedValue(new Response(stream, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })),
+      stream: true,
+      timeoutMs,
+    });
+
+    const result = await provider.complete({
+      traceId: "trace-long-stream",
+      round: 1,
+      messages: [{ role: "user", content: "Write" }],
+      tools: [],
+      model: "m",
+    });
+
+    expect(result.text).toBe("xxxxx");
+  });
+
+  // --- Malformed 200 response classification ---
+
+  it("classifies a 200 response with no choices as a non-transient AgentProviderHttpError with body snippet", async () => {
+    const malformedBody = JSON.stringify({ id: "x", model: "m", choices: [], error: { message: "model not available" } });
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(malformedBody, {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    const provider = new OpenAiCompatibleAgentProvider({
+      id: "blackbox",
+      baseUrl: "https://provider.example/v1",
+      apiKey: "k",
+      fetchFn,
+      stream: false,
+    });
+
+    const error = await provider.complete({
+      traceId: "trace-empty-choices",
+      round: 1,
+      messages: [{ role: "user", content: "Hi" }],
+      tools: [],
+      model: "m",
+    }).catch((e) => e);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toBe("AgentProviderHttpError");
+    expect(error.transient).toBe(false);
+    expect(String(error.message)).toContain("model not available");
+  });
+
+  it("classifies a 200 response with a non-array choices field as a non-transient AgentProviderHttpError", async () => {
+    const malformedBody = JSON.stringify({ id: "x", model: "m", choices: null });
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(malformedBody, {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    const provider = new OpenAiCompatibleAgentProvider({
+      id: "blackbox",
+      baseUrl: "https://provider.example/v1",
+      apiKey: "k",
+      fetchFn,
+      stream: false,
+    });
+
+    const error = await provider.complete({
+      traceId: "trace-null-choices",
+      round: 1,
+      messages: [{ role: "user", content: "Hi" }],
+      tools: [],
+      model: "m",
+    }).catch((e) => e);
+
+    expect(error.name).toBe("AgentProviderHttpError");
+    expect(error.transient).toBe(false);
   });
 });

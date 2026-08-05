@@ -28,7 +28,7 @@ class FakeInnerGateway implements AgentToolGateway {
       { name: "skill_read", description: "read skill" },
       { name: "skill_search", description: "search skills" },
       { name: "job", description: "manage jobs" },
-      { name: "mcp_notes_create", description: "granted plugin tool" },
+      { name: "mcp_create", description: "granted plugin tool" },
     ];
   }
 
@@ -46,7 +46,7 @@ describe("JobAgentToolGateway", () => {
     const names = tools.map((t) => t.name);
     expect(names).toContain("mcp_list");
     expect(names).toContain("docs_search");
-    expect(names).toContain("mcp_notes_create");
+    expect(names).toContain("mcp_create");
     expect(names).not.toContain("memory");
     expect(names).not.toContain("skill_manage");
     expect(names).not.toContain("skill_list");
@@ -72,7 +72,7 @@ describe("JobAgentToolGateway", () => {
     const gateway = new JobAgentToolGateway(inner as unknown as McpAgentToolGateway);
     await gateway.execute("mcp_list", {}, "r1", "t1");
     await gateway.execute("docs_search", { query: "x" }, "r2", "t1");
-    await gateway.execute("mcp_notes_create", { title: "a" }, "r3", "t1");
+    await gateway.execute("mcp_create", { title: "a" }, "r3", "t1");
     expect(inner.executed).toHaveLength(3);
   });
 

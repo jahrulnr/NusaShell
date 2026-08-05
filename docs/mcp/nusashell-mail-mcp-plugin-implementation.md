@@ -14,9 +14,9 @@ The first milestone deliberately stops at safe mailbox reading. It provides:
 - mailbox and unified-inbox listing;
 - message listing, search, MIME parsing, and reading;
 - a full-screen three-pane Mail UI;
-- the eight MCP tools `mail_accounts`, `mail_account_get`,
-  `mail_account_test`, `mail_mailboxes`, `mail_inbox`, `mail_messages`,
-  `mail_search`, and `mail_read`.
+- the eight MCP tools `accounts`, `account_get`,
+  `account_test`, `mailboxes`, `inbox`, `messages`,
+  `search`, and `read`.
 
 Sending, drafts, flag changes, move/delete operations, attachment downloads,
 background IDLE synchronization, OAuth, POP3, and JMAP are not implemented in

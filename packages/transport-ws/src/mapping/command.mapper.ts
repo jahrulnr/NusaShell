@@ -122,6 +122,7 @@ export function mapToCommand(request: ParsedRequest):
           ...(request.payload.resume !== undefined ? { resume: request.payload.resume } : {}),
           ...(request.payload.supersedeTraceId !== undefined ? { supersedeTraceId: request.payload.supersedeTraceId } : {}),
           ...(request.payload.conversationId !== undefined ? { conversationId: request.payload.conversationId } : {}),
+          ...(request.payload.autoContinueIndex !== undefined ? { autoContinueIndex: request.payload.autoContinueIndex } : {}),
         } as RunAgentTurnCommand,
       };
     case "agent.cancel":

@@ -3,6 +3,7 @@ import {
   AgentTurnRunner,
   resolveModelContextDefaults,
   DEFAULT_UNKNOWN_CONTEXT_WINDOW,
+  SUMMARY_PREFIX,
   type AgentProvider,
   type AgentProviderRequest,
   type AgentProviderResult,
@@ -242,7 +243,7 @@ describe("AgentTurnRunner", () => {
       role: "tool",
       toolCallId: "call-1",
       name: "notes.create",
-      content: JSON.stringify({ ok: true, result: { id: "note-1" } }),
+      content: JSON.stringify({ ok: true, data: { id: "note-1" }, meta: { truncated: false } }),
     });
   });
 
@@ -270,13 +271,13 @@ describe("AgentTurnRunner", () => {
       { type: "text", content: "Creating the roadmap note now." },
       {
         type: "tool_calls",
-        calls: [{
+        calls: [expect.objectContaining({
           id: "call-1",
           name: "notes.create",
           ok: true,
           args: { title: "Roadmap" },
           result: { id: "note-1" },
-        }],
+        })],
       },
       { type: "reasoning", content: "The tool succeeded." },
       { type: "text", content: "The note is ready." },
@@ -352,13 +353,13 @@ describe("AgentTurnRunner", () => {
 
   it("forwards an unadvertised mcp_* plugin tool name to the gateway for lazy resolve", async () => {
     const provider = new ScriptedProvider([
-      { toolCalls: [{ id: "call-1", name: "mcp_nusashell_notes_createNote", args: { text: "hi" } }] },
+      { toolCalls: [{ id: "call-1", name: "mcp_nusashell_createNote", args: { text: "hi" } }] },
       { text: "Done." },
     ]);
     const tools = new FakeToolGateway();
     tools.execute = async (name, args) => {
       tools.calls.push({ name, args });
-      if (name === "mcp_nusashell_notes_createNote") return { ok: true };
+      if (name === "mcp_nusashell_createNote") return { ok: true };
       throw new Error(`Unexpected tool ${name}`);
     };
     const runner = new AgentTurnRunner({ provider, toolGateway: tools });
@@ -370,8 +371,8 @@ describe("AgentTurnRunner", () => {
 
     expect(result.text).toBe("Done.");
     expect(result.toolCalls).toHaveLength(1);
-    expect(result.toolCalls[0]).toMatchObject({ id: "call-1", name: "mcp_nusashell_notes_createNote", ok: true });
-    expect(tools.calls).toEqual([{ name: "mcp_nusashell_notes_createNote", args: { text: "hi" } }]);
+    expect(result.toolCalls[0]).toMatchObject({ id: "call-1", name: "mcp_nusashell_createNote", ok: true });
+    expect(tools.calls).toEqual([{ name: "mcp_nusashell_createNote", args: { text: "hi" } }]);
   });
 
   it("returns a bounded runtime answer when the provider exceeds the tool-round limit", async () => {
@@ -381,20 +382,54 @@ describe("AgentTurnRunner", () => {
     ]);
     const runner = new AgentTurnRunner({ provider, toolGateway: new FakeToolGateway() });
 
+    let error: unknown;
+    try {
+      await runner.run({
+        messages: [{ role: "user", content: "Keep creating notes" }],
+        pluginIds: ["notes"],
+        maxToolRounds: 1,
+      });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toMatchObject({
+      code: "AGENT_MAX_TOOL_ROUNDS",
+      details: {
+        limit: 1,
+        partial: expect.objectContaining({
+          rounds: 1,
+          toolCalls: expect.any(Array),
+          messages: expect.any(Array),
+        }),
+      },
+    });
+    const partial = (error as { details: { partial: { toolCalls: unknown[] } } }).details.partial;
+    expect(partial.toolCalls.length).toBeGreaterThan(0);
+  });
+
+  it("does not throw AGENT_MAX_TOOL_ROUNDS when maxToolRounds is 0 (unlimited)", async () => {
+    // Provider does 3 tool rounds then a final answer. With maxToolRounds=0
+    // the loop must not hit a ceiling — it runs until the final answer.
+    const provider = new ScriptedProvider([
+      { toolCalls: [{ id: "call-1", name: "notes.create", args: { title: "One" } }] },
+      { toolCalls: [{ id: "call-2", name: "notes.create", args: { title: "Two" } }] },
+      { toolCalls: [{ id: "call-3", name: "notes.create", args: { title: "Three" } }] },
+      { text: "Done creating notes" },
+    ]);
+    const runner = new AgentTurnRunner({ provider, toolGateway: new FakeToolGateway() });
     const result = await runner.run({
       messages: [{ role: "user", content: "Keep creating notes" }],
       pluginIds: ["notes"],
-      maxToolRounds: 1,
+      maxToolRounds: 0,
     });
-
-    expect(result.text).toContain("maximum tool rounds");
-    expect(result.rounds).toBe(1);
+    expect(result.text).toBe("Done creating notes");
+    expect(result.rounds).toBe(4);
   });
 
   it("compacts old turns while preserving recent turns and returns a durable checkpoint", async () => {
     const old = "old context ".repeat(1200);
     const provider = new ScriptedProvider([
-      { text: "A concise checkpoint" },
+      { text: "A concise checkpoint summarizing the prior work and decisions for the next model." },
       { text: "Final answer" },
     ]);
     const runner = new AgentTurnRunner({
@@ -421,15 +456,20 @@ describe("AgentTurnRunner", () => {
 
     expect(provider.requests).toHaveLength(2);
     expect(provider.requests[0]?.tools).toEqual([]);
-    expect(provider.requests[1]?.messages).toEqual([
-      { role: "system", content: "Conversation summary:\nA concise checkpoint" },
-      { role: "user", content: "latest question" },
-    ]);
-    expect(result.compaction).toMatchObject({
-      summary: "A concise checkpoint",
-      compactedMessageCount: 2,
-      via: "provider",
-    });
+    // Codex-aligned: replacement history is retained user messages + one
+    // summary user message (SUMMARY_PREFIX + body), not a system summary.
+    const summaryPrefix = SUMMARY_PREFIX;
+    expect(result.compaction?.summary).toBe(`${summaryPrefix}\nA concise checkpoint summarizing the prior work and decisions for the next model.`);
+    expect(result.compaction?.via).toBe("provider");
+    // The second request (the actual turn) must contain the retained user
+    // message and the summary user message.
+    const turnMessages = provider.requests[1]?.messages ?? [];
+    const userContents = turnMessages.filter((m) => m.role === "user").map((m) => String(m.content));
+    expect(userContents).toContain("latest question");
+    expect(userContents.some((c) => c.startsWith(summaryPrefix))).toBe(true);
+    expect(userContents.some((c) => c.includes("A concise checkpoint summarizing the prior work"))).toBe(true);
+    // No system "Conversation summary:" marker anymore.
+    expect(turnMessages.some((m) => m.role === "system" && String(m.content).startsWith("Conversation summary:"))).toBe(false);
   });
 
   it("uses an extractive checkpoint when compaction provider request fails", async () => {
@@ -496,9 +536,9 @@ describe("AgentTurnRunner", () => {
           role: "assistant",
           content: "Done.",
           reasoning: "I chose /a.txt because the user asked for a scratch file.",
-          toolCalls: [{ id: "call-1", name: "files_write", args: { path: "/a.txt", content: "hi" } }],
+          toolCalls: [{ id: "call-1", name: "write", args: { path: "/a.txt", content: "hi" } }],
         },
-        { role: "tool", toolCallId: "call-1", name: "files_write", content: oldToolOutput },
+        { role: "tool", toolCallId: "call-1", name: "write", content: oldToolOutput },
         { role: "user", content: "latest question" },
       ],
       pluginIds: [],
@@ -506,7 +546,7 @@ describe("AgentTurnRunner", () => {
 
     expect(result.compaction?.via).toBe("extractive");
     const summary = result.compaction?.summary ?? "";
-    expect(summary).toContain("files_write(");
+    expect(summary).toContain("write(");
     expect(summary).toContain("/a.txt");
     expect(summary).toContain("Reasoning:");
     expect(summary).toContain("scratch file");
@@ -890,7 +930,7 @@ describe("AgentTurnRunner", () => {
   it("compacts fat few-user-turns conversations despite recentTurns veto (anti-veto)", async () => {
     const fat = "x".repeat(5000);
     const provider = new ScriptedProvider([
-      { text: "Anti-veto checkpoint" },
+      { text: "Anti-veto checkpoint summarizing the fat conversation for the next model to continue." },
       { text: "Final answer" },
     ]);
     const runner = new AgentTurnRunner({
@@ -919,7 +959,7 @@ describe("AgentTurnRunner", () => {
     });
 
     expect(result.compaction).toBeDefined();
-    expect(result.compaction?.summary).toBe("Anti-veto checkpoint");
+    expect(result.compaction?.summary).toBe(`${SUMMARY_PREFIX}\nAnti-veto checkpoint summarizing the fat conversation for the next model to continue.`);
     expect(provider.requests).toHaveLength(2);
     expect(provider.requests[0]?.tools).toEqual([]);
   });
@@ -927,7 +967,7 @@ describe("AgentTurnRunner", () => {
   it("uses 90% window threshold with 10k free floor (32k window → 22k soft)", async () => {
     const fat = "x".repeat(90000);
     const provider = new ScriptedProvider([
-      { text: "90% checkpoint" },
+      { text: "90% checkpoint summarizing the context window threshold test for the next model." },
       { text: "Final answer" },
     ]);
     const runner = new AgentTurnRunner({
@@ -953,7 +993,7 @@ describe("AgentTurnRunner", () => {
     });
 
     expect(result.compaction).toBeDefined();
-    expect(result.compaction?.summary).toBe("90% checkpoint");
+    expect(result.compaction?.summary).toBe(`${SUMMARY_PREFIX}\n90% checkpoint summarizing the context window threshold test for the next model.`);
   });
 
   it("forces compaction at full window even with tiny context", async () => {
@@ -987,10 +1027,16 @@ describe("AgentTurnRunner", () => {
     expect(result.compaction).toBeDefined();
   });
 
-  it("shrinks mid-turn tool results before the next provider complete", async () => {
+  it("mid-turn memento drops tool graph before the next provider complete", async () => {
+    // Codex post-tool roll-over: after a fat tool result, history is replaced
+    // with users + SUMMARY_PREFIX summary; tool_call ids from the prior pair
+    // are not re-sent (invalid by design for the next sample).
     const hugeOutput = "x".repeat(50000);
     const provider = new ScriptedProvider([
       { toolCalls: [{ id: "call-1", name: "notes.create", args: { title: "Big" } }] },
+      {
+        text: "Created a large note via notes.create. The durable outcome is that note content exists in the notes store and the user asked to create a note.",
+      },
       { text: "Done" },
     ]);
     const tools = new FakeToolGateway();
@@ -1013,18 +1059,26 @@ describe("AgentTurnRunner", () => {
     });
 
     expect(result.text).toBe("Done");
-    const secondRequest = provider.requests[1];
-    const toolMessage = secondRequest?.messages.find((m) => m.role === "tool");
-    expect(toolMessage).toBeDefined();
-    if (toolMessage && "content" in toolMessage) {
-      expect((toolMessage.content as string).length).toBeLessThan(50000);
-    }
+    expect(result.compaction?.summary.length).toBeGreaterThan(40);
+    // Second provider.complete for the turn is the post-memento final answer
+    // (request index: 0=tools, 1=compact summarizer, 2=final).
+    const postMemento = provider.requests[2];
+    expect(postMemento).toBeDefined();
+    expect(postMemento?.messages.some((m) => m.role === "tool")).toBe(false);
+    const summaryUser = postMemento?.messages.find(
+      (m) => m.role === "user" && typeof m.content === "string" && m.content.includes("Another language model"),
+    );
+    expect(summaryUser).toBeDefined();
+    expect(postMemento?.messages.some((m) => m.role === "user" && m.content === "Create a note")).toBe(true);
   });
 
-  it("preserves untrusted close tag when mid-turn shrink clamps mcp_ results", async () => {
+  it("mid-turn memento after mcp_ fat result does not keep untrusted tool envelopes for next sample", async () => {
     const hugeOutput = { entries: Array.from({ length: 80 }, (_, i) => ({ path: `docs/item-${i}.json`, blob: "z".repeat(200) })) };
     const provider = new ScriptedProvider([
-      { toolCalls: [{ id: "call-1", name: "mcp_nusashell_files_files_search", args: { query: "curl" } }] },
+      { toolCalls: [{ id: "call-1", name: "mcp_nusashell_files_search", args: { query: "curl" } }] },
+      {
+        text: "Searched files for curl helpers via MCP search. Found many matching paths under docs/; next answer the user with a short path list only.",
+      },
       { text: "Found curl helpers" },
     ]);
     const tools = new FakeToolGateway();
@@ -1046,16 +1100,14 @@ describe("AgentTurnRunner", () => {
       pluginIds: ["nusashell.files"],
     });
 
-    const secondRequest = provider.requests[1];
-    const toolMessage = secondRequest?.messages.find((m) => m.role === "tool");
-    expect(toolMessage).toBeDefined();
-    if (toolMessage && "content" in toolMessage) {
-      const content = toolMessage.content as string;
-      expect(content.startsWith("<untrusted_tool_result")).toBe(true);
-      expect(content).toContain('source="mcp_nusashell_files_files_search"');
-      expect(content.endsWith("</untrusted_tool_result>")).toBe(true);
-      expect(content.length).toBeLessThan(JSON.stringify({ ok: true, result: hugeOutput }).length);
-    }
+    const postMemento = provider.requests[2];
+    expect(postMemento).toBeDefined();
+    expect(postMemento?.messages.some((m) => m.role === "tool")).toBe(false);
+    expect(
+      postMemento?.messages.some(
+        (m) => m.role === "user" && typeof m.content === "string" && m.content.includes("</untrusted_tool_result>"),
+      ),
+    ).toBe(false);
   });
 
   // --- Dual-space: full transcript for UI, compact only for model send ---
@@ -1153,5 +1205,209 @@ describe("AgentTurnRunner", () => {
 
     expect(result.compaction).toBeUndefined();
     expect(result.text).toBe("Should not compact — under 200k window");
+  });
+
+  // --- Stream soft-recover fix (Cycle 2) ---
+
+  it("does not soft-recover on first sample when history has prior tool messages but no in-turn tools", async () => {
+    // Regression: history with role:tool from an earlier turn must NOT trigger
+    // soft-recover on the first provider call of a new turn.
+    const provider = new FlakyProvider([
+      new Error("transient boom"),
+      { text: "should not reach" },
+    ]);
+    const runner = new AgentTurnRunner({ provider, toolGateway: new FakeToolGateway(), softRecoverAttempts: 1 });
+
+    const error = await runner.run({
+      messages: [
+        { role: "user", content: "do something" },
+        { role: "assistant", content: "", toolCalls: [{ id: "c1", name: "notes.create", args: {} }] },
+        { role: "tool", toolCallId: "c1", name: "notes.create", content: "ok" },
+        { role: "user", content: "now answer" },
+      ],
+      pluginIds: [],
+    }).catch((e) => e);
+
+    // No soft-recover: only 1 provider request, then AGENT_PROVIDER_FAILED.
+    expect(provider.requests).toHaveLength(1);
+    expect(error).toMatchObject({ code: "AGENT_PROVIDER_FAILED" });
+  });
+
+  it("captures streamed text deltas into partial.text when provider fails mid-stream", async () => {
+    // Provider invokes onTextDelta with partial paragraphs, then throws.
+    // The partial must contain the already-streamed text.
+    const provider = new (class extends FlakyProvider {
+      constructor() {
+        super([]);
+      }
+      override async complete(request: AgentProviderRequest): Promise<AgentProviderResult> {
+        this.requests.push(request);
+        request.onTextDelta?.("Hello ");
+        request.onTextDelta?.("world, this is a ");
+        request.onTextDelta?.("partial essay that ");
+        throw new Error("stream cut");
+      }
+    })();
+    const tools = new FakeToolGateway();
+    // Need in-turn tool progress so partial is attached.
+    // Use a two-response provider: first gives a tool call, second streams then fails.
+    const providerWithTools = new FlakyProvider([
+      { toolCalls: [{ id: "call-1", name: "notes.create", args: { title: "Test" } }] },
+    ]);
+    // Override second call to stream then fail
+    const originalComplete = providerWithTools.complete.bind(providerWithTools);
+    providerWithTools.complete = async (request: AgentProviderRequest) => {
+      const index = providerWithTools.requests.length;
+      if (index === 1) {
+        providerWithTools.requests.push(request);
+        request.onTextDelta?.("Hello ");
+        request.onTextDelta?.("world, this is a ");
+        request.onTextDelta?.("partial essay that ");
+        throw new Error("stream cut");
+      }
+      return originalComplete(request);
+    };
+
+    const runner = new AgentTurnRunner({ provider: providerWithTools, toolGateway: tools, softRecoverAttempts: 0 });
+
+    const error = await runner.run({
+      messages: [{ role: "user", content: "Create a note then write an essay" }],
+      pluginIds: ["notes"],
+    }).catch((e) => e);
+
+    expect(error).toMatchObject({ code: "AGENT_PROVIDER_FAILED" });
+    expect(error.details?.partial).toBeDefined();
+    expect(error.details.partial.text).toContain("Hello");
+    expect(error.details.partial.text).toContain("partial essay");
+  });
+
+  // --- Continue incomplete stream (Cycle 1) ---
+
+  it("attaches partial.text on cancel mid pure-text stream (no tools)", async () => {
+    // Provider streams text via onTextDelta, then abort fires mid-stream.
+    // The cancel error must carry partial.text with the streamed chars even
+    // when no in-turn tools ran — so the UI can persist "interrupted" content.
+    const controller = new AbortController();
+    const provider = new FlakyProvider([]);
+    provider.complete = async (request: AgentProviderRequest) => {
+      provider.requests.push(request);
+      request.onTextDelta?.("Halfway through ");
+      request.onTextDelta?.("the essay and ");
+      controller.abort();
+      throw new Error("aborted");
+    };
+    const runner = new AgentTurnRunner({ provider, toolGateway: new FakeToolGateway(), softRecoverAttempts: 0 });
+
+    const error = await runner.run({
+      messages: [{ role: "user", content: "Write an essay" }],
+      pluginIds: [],
+      signal: controller.signal,
+    }).catch((e) => e);
+
+    expect(error).toMatchObject({ code: "AGENT_TURN_CANCELLED" });
+    expect(error.details?.partial).toBeDefined();
+    expect(error.details.partial.text).toContain("Halfway through");
+    expect(error.details.partial.text).toContain("the essay");
+    expect(error.details.partial.toolCalls).toHaveLength(0);
+  });
+
+  it("pure-text provider fail with softRecoverAttempts=1 and history tools → no soft recover, partial has live text", async () => {
+    // History has role:tool from a prior turn, but no in-turn tools.
+    // Provider streams text then fails. Soft-recover must NOT fire (no
+    // in-turn tools). One request only. Partial.text has streamed chars.
+    const providerWithTools = new FlakyProvider([]);
+    providerWithTools.complete = async (request: AgentProviderRequest) => {
+      providerWithTools.requests.push(request);
+      request.onTextDelta?.("Partial answer ");
+      request.onTextDelta?.("that got cut");
+      throw new Error("stream cut");
+    };
+    const runner = new AgentTurnRunner({ provider: providerWithTools, toolGateway: new FakeToolGateway(), softRecoverAttempts: 1 });
+
+    const error = await runner.run({
+      messages: [
+        { role: "user", content: "do something" },
+        { role: "assistant", content: "", toolCalls: [{ id: "c1", name: "notes.create", args: {} }] },
+        { role: "tool", toolCallId: "c1", name: "notes.create", content: "ok" },
+        { role: "user", content: "now write an essay" },
+      ],
+      pluginIds: [],
+    }).catch((e) => e);
+
+    // No soft-recover: only 1 provider request.
+    expect(providerWithTools.requests).toHaveLength(1);
+    expect(error).toMatchObject({ code: "AGENT_PROVIDER_FAILED" });
+    expect(error.details?.partial).toBeDefined();
+    expect(error.details.partial.text).toContain("Partial answer");
+    expect(error.details.partial.text).toContain("that got cut");
+  });
+
+  // --- Soft recover vs live stream (tool-round rewrite gap) ---
+
+  it("does not soft-recover when in-turn tools exist but provider already streamed live text", async () => {
+    // After a successful tool round, the next sample paints prose via
+    // onTextDelta then times out. Soft recover must NOT re-sample that
+    // round (rewrite loop); throw with partial so UI can Continue/Resume.
+    const provider = new FlakyProvider([
+      { toolCalls: [{ id: "call-1", name: "notes.create", args: { title: "Roadmap" } }] },
+    ]);
+    provider.complete = async (request: AgentProviderRequest) => {
+      const index = provider.requests.length;
+      provider.requests.push(request);
+      if (index === 0) {
+        return {
+          toolCalls: [{ id: "call-1", name: "notes.create", args: { title: "Roadmap" } }],
+        };
+      }
+      request.onTextDelta?.("Long answer that was already ");
+      request.onTextDelta?.("shown to the user before the cut");
+      throw new Error("Provider request timed out");
+    };
+    const tools = new FakeToolGateway();
+    const runner = new AgentTurnRunner({ provider, toolGateway: tools, softRecoverAttempts: 1 });
+
+    const error = await runner.run({
+      messages: [{ role: "user", content: "Create a note then write a long answer" }],
+      pluginIds: ["notes"],
+    }).catch((e) => e);
+
+    // Round 1 tool + one failed text sample only — no soft-recover third call.
+    expect(provider.requests).toHaveLength(2);
+    expect(error).toMatchObject({ code: "AGENT_PROVIDER_FAILED" });
+    expect(error.details?.partial).toBeDefined();
+    expect(error.details.partial.text).toContain("Long answer that was already");
+    expect(error.details.partial.text).toContain("shown to the user before the cut");
+    expect(error.details.partial.toolCalls).toHaveLength(1);
+    expect(error.details.partial.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "tool", toolCallId: "call-1" }),
+    ]));
+  });
+
+  it("does not soft-recover when in-turn tools exist but provider already streamed reasoning deltas", async () => {
+    const provider = new FlakyProvider([
+      { toolCalls: [{ id: "call-1", name: "notes.create", args: { title: "Roadmap" } }] },
+    ]);
+    provider.complete = async (request: AgentProviderRequest) => {
+      const index = provider.requests.length;
+      provider.requests.push(request);
+      if (index === 0) {
+        return {
+          toolCalls: [{ id: "call-1", name: "notes.create", args: { title: "Roadmap" } }],
+        };
+      }
+      request.onReasoningDelta?.("Thinking about the next step…");
+      throw new Error("SSE read failed: Provider request timed out");
+    };
+    const tools = new FakeToolGateway();
+    const runner = new AgentTurnRunner({ provider, toolGateway: tools, softRecoverAttempts: 1 });
+
+    const error = await runner.run({
+      messages: [{ role: "user", content: "Create a note then reason" }],
+      pluginIds: ["notes"],
+    }).catch((e) => e);
+
+    expect(provider.requests).toHaveLength(2);
+    expect(error).toMatchObject({ code: "AGENT_PROVIDER_FAILED" });
+    expect(error.details?.partial?.reasoning).toContain("Thinking about the next step");
   });
 });

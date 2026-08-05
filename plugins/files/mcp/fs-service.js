@@ -126,8 +126,8 @@ function detectByMagicBytes(buf) {
 
 /**
  * Detect file type by extension (fast path) and magic bytes (authoritative).
- * For files_read, the caller should use isTextFile() which reads the actual
- * content. This function is for files_info / files_list where reading content
+ * For read, the caller should use isTextFile() which reads the actual
+ * content. This function is for info / list where reading content
  * may be too expensive.
  * @param {string} name
  */
@@ -324,7 +324,7 @@ export class FileService {
     // and rejects actual binaries regardless of extension.
     const detected = await detectFileTypeByContent(filePath);
     if (!detected.isText) {
-      throw new Error(`File is binary (type=${detected.type}); files_read only supports text. Use files_info to inspect.`);
+      throw new Error(`File is binary (type=${detected.type}); read only supports text. Use info to inspect.`);
     }
     const content = await fs.readFile(filePath, "utf8");
     const lines = content.split("\n");
@@ -543,7 +543,7 @@ export class FileService {
     // Reject binary files — patching them as UTF-8 would corrupt the content.
     const detected = await detectFileTypeByContent(filePath);
     if (!detected.isText) {
-      throw new Error(`File is binary (type=${detected.type}); files_patch only supports text files.`);
+      throw new Error(`File is binary (type=${detected.type}); patch only supports text files.`);
     }
     let content = await fs.readFile(filePath, "utf8");
     const occurrences = [];

@@ -64,10 +64,12 @@ export function resolveCanvasFence(lang, source) {
  *
  * `fenceIndex` counts only canvas-tagged fences, in document order (0,1,2…).
  * Each candidate carries a `tooLarge` flag when its body exceeds the per-
- * artifact byte cap so the UI can toast instead of silently truncating.
+ * artifact byte cap so the UI can toast instead of silently truncating. The
+ * `complete` flag is false while the closing fence is still missing, allowing
+ * live preview to wait for a syntactically bounded source.
  *
  * @param {string} markdown
- * @returns {Array<{ lang: string, kind: "html"|"svg"|"mermaid", source: string, fenceIndex: number, title: string, tooLarge: boolean }>}
+ * @returns {Array<{ lang: string, kind: "html"|"svg"|"mermaid", source: string, fenceIndex: number, title: string, tooLarge: boolean, complete: boolean }>}
  */
 export function extractCanvasCandidates(markdown) {
   const text = String(markdown ?? "");
@@ -106,6 +108,7 @@ export function extractCanvasCandidates(markdown) {
       fenceIndex,
       title: titleForKind(resolved.kind, fenceIndex),
       tooLarge: resolved.source.length > CANVAS_ARTIFACT_MAX_SOURCE_BYTES,
+      complete: fenceEnd !== -1,
     });
     fenceIndex += 1;
     position = fenceEnd === -1 ? text.length : fenceEnd + fenceMarker.length;

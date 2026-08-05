@@ -6,7 +6,7 @@ The agent conversation workspace. Chat with the NusaShell agent, attach files, p
 
 ## Conversation list
 
-A fixed workbench rail listing local conversation threads. Click a thread to open it; use the × button to delete. The rail remains visible beside a wider conversation surface at desktop widths.
+A fixed workbench rail listing local conversation threads. Click a thread to open it; use the × button to delete. At narrow widths the rail becomes a focusable Rooms drawer opened from the Agent header, so room switching remains available without consuming chat width.
 
 - **Conversations heading** (`#agent-conversations-title`):
   - Section: Conversation list
@@ -17,6 +17,16 @@ A fixed workbench rail listing local conversation threads. Click a thread to ope
   - Section: Conversation list
   - Type: status text
   - Action: Displays the number of conversation threads.
+
+- **Mobile conversations** (`#agent-mobile-conversations-btn`):
+  - Section: Conversation list
+  - Type: button
+  - Action: Opens the conversation list as a compact drawer on narrow windows; focus returns here when the drawer closes.
+
+- **Mobile conversations backdrop** (`#agent-mobile-conversations-overlay`):
+  - Section: Conversation list
+  - Type: overlay
+  - Action: Dismisses the narrow-window conversation drawer when clicked.
 
 - **New conversation** (`#agent-new-conversation`):
   - Section: Conversation list
@@ -41,7 +51,7 @@ A fixed workbench rail listing local conversation threads. Click a thread to ope
 
 ## Conversation thread
 
-The full-height message runway separates compact user cards from editorial assistant responses. User attachments render as image previews or file cards. Provider reasoning is persisted and appears before the answer in a collapsed Thinking disclosure with sanitized Markdown; models that return no reasoning show no placeholder. Completed tool calls render as expandable terminal cards with the tool name in the header and full args/output in the body. Interactive ask_question calls render as Ask Question cards with selectable options and an optional free-text answer; after the user replies, the sealed card shows the chosen answer. Message footers expose timestamps, model/trace metadata, copy, and retry where applicable. Only this area scrolls.
+The full-height message runway separates compact user cards from editorial assistant responses. User attachments render as image previews or file cards. Provider reasoning is persisted and appears before the answer in a collapsed Thinking disclosure with sanitized Markdown; models that return no reasoning show no placeholder. Tool calls render as terminal cards that stay collapsed by default even while a tool is actively streaming, so live output never takes over the transcript; expand one deliberately to inspect args/output. Interactive ask_question calls render as Ask Question cards with selectable options and an optional free-text answer; after the user replies, the sealed card shows the chosen answer. Message footers expose timestamps, model/trace metadata, copy, and retry where applicable. Only this area scrolls, and the pinned reader follows content across reasoning, tool, and text transitions even when the window is unfocused.
 
 - **ACP status bar (legacy)** (`#acp-status-bar`):
   - Section: Conversation thread
@@ -119,19 +129,68 @@ The full-height message runway separates compact user cards from editorial assis
   - Type: button
   - Action: Appears on a failed assistant turn. Click to re-run the same turn.
 
+## Room diagnostics
+
+A compact floating Room info control stays at the top-right of the conversation. Activating it opens a small diagnostics popover with the selected conversation title, total persisted tool calls (including nested subagent calls), total recorded compactions, and the full conversation ID. The ID is truncated visually and can be copied; the popover closes with its close button, Escape, or an outside click. Legacy rooms with a checkpoint but no historical count display one compaction as a safe lower-bound fallback.
+
+- **Room diagnostics** (`#agent-room-info`):
+  - Section: Room diagnostics
+  - Type: status region
+  - Action: Owns the floating conversation diagnostics control. Hidden when no room is selected.
+
+- **Open room diagnostics** (`#agent-room-info-trigger`):
+  - Section: Room diagnostics
+  - Type: button
+  - Action: Opens or closes the compact conversation diagnostics popover.
+
+- **Conversation diagnostics popover** (`#agent-room-info-popover`):
+  - Section: Room diagnostics
+  - Type: dialog
+  - Action: Shows room title, tool-call total, compaction total, and conversation ID without taking space from the conversation thread.
+
+- **Close room diagnostics** (`#agent-room-info-close`):
+  - Section: Room diagnostics
+  - Type: button
+  - Action: Closes the conversation diagnostics popover.
+
+- **Room title** (`#agent-room-info-title`):
+  - Section: Room diagnostics
+  - Type: text
+  - Action: Shows the selected conversation title.
+
+- **Tool-call total** (`#agent-room-tool-count`):
+  - Section: Room diagnostics
+  - Type: status text
+  - Action: Shows the total persisted tool calls in the room, including nested subagent calls.
+
+- **Compaction total** (`#agent-room-compaction-count`):
+  - Section: Room diagnostics
+  - Type: status text
+  - Action: Shows the number of recorded context compactions for the room.
+
+- **Copy conversation ID** (`#agent-room-id-copy`):
+  - Section: Room diagnostics
+  - Type: button
+  - Action: Copies the full conversation ID while displaying a truncated version in the diagnostics popover.
+
+- **Conversation ID** (`#agent-room-id`):
+  - Section: Room diagnostics
+  - Type: code text
+  - Action: Displays the conversation ID in a compact, truncated diagnostic label inside the popover.
+
 ## Subagent activity
 
-When the parent agent delegates work through the subagent tool, an in-chat Subagent run card appears in the message thread. While the subagent run is active, the card shows a compact mini activity stream (roughly ten monospace rows) that mirrors the full Subagent side pane: live reasoning, text snippets, tool calls with success/failure marks, and plan progress. The mini stream auto-scrolls to the bottom while the user is pinned to the tail; scrolling up pauses stickiness until the user returns to the bottom. Clicking the card head opens the full Subagent side pane, which preserves the complete live log with markdown rendering, expandable tool terminals, plan steps, and permission/ask cards. Clicks inside the mini stream do not toggle the drawer. When the run ends, the mini stream freezes in place until the parent turn seals the tool card; the side pane keeps the full frozen history for review.
+When the parent agent delegates work through the subagent tool, an in-chat Subagent run card appears in the message thread. While the subagent run is active, the card shows a compact mini activity stream (roughly ten monospace rows) that mirrors the full Subagent side pane: live reasoning, text snippets, tool calls with success/failure marks, and plan progress. Both streams auto-scroll to the bottom while the user is pinned to the tail; scrolling up pauses stickiness until the user returns to the bottom. Clicking the card head opens the full Subagent side pane, which preserves the complete live log with markdown rendering, expandable tool terminals, plan steps, and permission/ask cards. Clicks inside the mini stream do not toggle the drawer. When the run ends, the mini stream freezes in place until the parent turn seals the tool card; the side pane keeps the full frozen history for review.
 
 - **Subagent side pane** (`#agent-subpane`):
   - Section: Agent
   - Type: drawer
-  - Action: Full-height drawer that renders the complete live subagent stream with markdown, tool terminals, plans, and permission/ask cards.
+  - Action: Drawer below the NusaShell titlebar that renders the complete live subagent stream with markdown, tool terminals, plans, and permission/ask cards.
 
 - **Subagent pane overlay** (`#agent-subpane-overlay`):
   - Section: Agent
   - Type: overlay
-  - Action: Dimmed backdrop behind the Subagent side pane.
+  - Action: Dimmed backdrop below the NusaShell titlebar behind the Subagent side pane.
 
 - **Subagent pane header** (`.agent-subpane-head`):
   - Section: Agent
@@ -161,7 +220,7 @@ When the parent agent delegates work through the subagent tool, an in-chat Subag
 - **Subagent pane body** (`#agent-subpane-body`):
   - Section: Agent
   - Type: scroll container
-  - Action: Scrollable log that renders the full subagent stream: reasoning disclosures, text bubbles, tool terminals, plan steps, and error blocks.
+  - Action: Scrollable log that renders the full subagent stream: reasoning disclosures, text bubbles, tool terminals, plan steps, and error blocks. It follows new deltas only while the reader is at the bottom; scrolling up pauses auto-follow until the reader returns to the tail.
 
 - **Subagent run card** (`.agent-subagent-card`):
   - Section: Agent
@@ -207,6 +266,25 @@ When the parent agent delegates work through the subagent tool, an in-chat Subag
   - Section: Agent
   - Type: text
   - Action: Error message shown on the subagent card when the run fails.
+
+## Subagent attention
+
+Permission and ask requests from a subagent are promoted into a persistent attention stack above the composer in the main room. This keeps the required action visible even when the user is not watching the side pane. Pending cards remain actionable; once a decision is accepted, its card is removed from the active stack so resolved work does not compete with new actions.
+
+- **Subagent attention stack** (`#agent-attention-stack`):
+  - Section: Subagent attention
+  - Type: action-required region
+  - Action: Keeps subagent permission and ask cards visible above the composer in the main room. Hidden when no request has been received.
+
+- **Pending request count** (`#agent-attention-count`):
+  - Section: Subagent attention
+  - Type: status text
+  - Action: Shows how many subagent requests still need a user decision.
+
+- **Subagent request list** (`#agent-attention-list`):
+  - Section: Subagent attention
+  - Type: list
+  - Action: Contains actionable permission or ask cards; sealed decisions remain compact and the list collapses when no request is pending.
 
 ## Composer
 
@@ -288,20 +366,30 @@ A compact command dock at the bottom of the thread. Its message input starts at 
 
 A collapsible checklist above the composer that mirrors the agent-owned todo list. The agent writes it via the `todo` meta-tool; the user can delete individual items (which removes them from the runtime port so they do not reappear in the next prompt injection) and collapse the strip. It hides automatically when the list is empty.
 
+- **Composer stack** (`.agent-composer-stack`):
+  - Section: Composer
+  - Type: container
+  - Action: Floating card that stacks the task strip, background jobs strip, and message form as one surface.
+
 - **Task strip** (`.agent-todo-strip`):
   - Section: Task strip
   - Type: container
-  - Action: Collapsible checklist above the composer mirroring the agent-owned todo list. Hides when the list is empty.
+  - Action: Top row of the composer stack: collapsible agent-owned todo checklist. Hides when the list is empty.
 
 - **Collapse tasks** (`.agent-todo-strip-toggle`):
   - Section: Task strip
   - Type: button
-  - Action: Collapses or expands the task list.
+  - Action: Collapses or expands the task list. Label shows total task count (e.g. 5 Tasks).
 
 - **Task count** (`.agent-todo-strip-count`):
   - Section: Task strip
   - Type: text
-  - Action: Shows incomplete/total task counts.
+  - Action: Shows total task count as N Tasks.
+
+- **Task progress** (`.agent-todo-strip-meta`):
+  - Section: Task strip
+  - Type: text
+  - Action: Right-side pill showing remaining open tasks (or All done).
 
 - **Task list** (`.agent-todo-strip-list`):
   - Section: Task strip
@@ -310,17 +398,17 @@ A collapsible checklist above the composer that mirrors the agent-owned todo lis
 
 ## Background jobs strip
 
-A strip above the composer (below the task strip) that shows running and recently finished async tool jobs started via `async_run`. Each card shows the tool name, status badge, live tail output, and a Stop button that calls `agent.tool_job_kill`. The strip rehydrates from `agent.tool_job_list` on conversation open and hides when no jobs are active.
+A compact strip above the composer (below the task strip) shows active async tool jobs started via `async_run`. Its header includes the active-job count; each card keeps the tool name, status badge, and Stop action on one row, with live tail or error output shown below only when present. The strip rehydrates from `agent.tool_job_list` on conversation open and hides as soon as no jobs are running.
 
 - **Background jobs strip** (`.agent-tool-job-strip`):
   - Section: Background jobs strip
   - Type: container
-  - Action: Shows running and recently finished async tool jobs. Hides when no jobs are active.
+  - Action: Shows the compact background-job section and active-job count. Hides when no jobs are running.
 
 - **Job cards** (`.agent-tool-job-list`):
   - Section: Background jobs strip
   - Type: list
-  - Action: Renders each job as a card with tool name, status badge, live tail, and a Stop button. Clicking Stop calls agent.tool_job_kill.
+  - Action: Renders each running job as a list item with tool name, inline status and Stop action, plus optional live tail or error output. Clicking Stop calls agent.tool_job_kill.
 
 ## Delete conversation dialog
 
@@ -373,12 +461,12 @@ A shell-owned canvas drawer over the agent workbench. Completed assistant messag
 - **Canvas drawer overlay** (`#agent-canvas-overlay`):
   - Section: Agent Canvas
   - Type: overlay
-  - Action: Dimmed backdrop behind the canvas drawer; click closes the drawer.
+  - Action: Dimmed backdrop below the NusaShell titlebar behind the canvas drawer; click closes the drawer.
 
 - **Canvas overlay drawer** (`#agent-canvas`):
   - Section: Agent Canvas
   - Type: dialog
-  - Action: Right-edge overlay drawer for the active canvas artifact. Slides over the agent workbench without resizing the chat column; closed via Close, overlay click, or Escape.
+  - Action: Right-edge overlay drawer for the active canvas artifact. It is contained below the NusaShell titlebar and slides over the agent workbench without resizing the chat column; closed via Close, overlay click, or Escape.
 
 - **Resize canvas drawer** (`#agent-canvas-resize`):
   - Section: Agent Canvas

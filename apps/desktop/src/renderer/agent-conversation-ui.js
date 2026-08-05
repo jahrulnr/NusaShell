@@ -22,14 +22,14 @@ const ASSISTANT_MARKDOWN_TAGS = [
 ];
 
 export function renderAssistantMarkdown(content) {
-  return DOMPurify.sanitize(assistantMarkdown.render(String(content ?? "")), {
+  return DOMPurify.sanitize(wrapMarkdownTables(assistantMarkdown.render(String(content ?? ""))), {
     ALLOWED_TAGS: ASSISTANT_MARKDOWN_TAGS,
     ALLOWED_ATTR: ["href", "title", "alt", "src", "class", "id", "target", "rel", "colspan", "rowspan"],
   });
 }
 
 export function renderJobOutputMarkdown(content) {
-  const raw = jobOutputMarkdown.render(String(content ?? ""));
+  const raw = wrapMarkdownTables(jobOutputMarkdown.render(String(content ?? "")));
   // Strip inter-block whitespace so copy-paste doesn't produce double newlines
   // (browsers ignore this whitespace for rendering, but it creates extra text
   // nodes that add blank lines when copied).
@@ -41,10 +41,17 @@ export function renderJobOutputMarkdown(content) {
 }
 
 export function renderReasoningMarkdown(content) {
-  return DOMPurify.sanitize(reasoningMarkdown.render(String(content ?? "")), {
+  return DOMPurify.sanitize(wrapMarkdownTables(reasoningMarkdown.render(String(content ?? ""))), {
     ALLOWED_TAGS: ASSISTANT_MARKDOWN_TAGS.filter((tag) => tag !== "img"),
     ALLOWED_ATTR: ["href", "title", "class", "id", "target", "rel", "colspan", "rowspan"],
   });
+}
+
+/** Give wide markdown tables a local scroll viewport without scrolling prose. */
+function wrapMarkdownTables(markup) {
+  return markup.replace(/<table>[\s\S]*?<\/table>/g, (table) => (
+    `<div class="agent-markdown-table-scroll">${table}</div>`
+  ));
 }
 
 export function formatMessageTimestamp(timestamp, locale, timeZone) {
@@ -70,12 +77,69 @@ export function describeToolActivity(toolCalls) {
 }
 
 /**
+ * Return the durable room-level diagnostics shown beside the conversation.
+ * Tool calls in a message are the canonical parent-room count; persisted
+ * subagent streams are added because their nested calls are also work done in
+ * this room and are not duplicated in the parent message payload.
+ */
+export function getConversationRoomMetadata(conversation) {
+  const messages = Array.isArray(conversation?.messages) ? conversation.messages : [];
+  const messageToolCalls = messages.reduce((total, message) => {
+    if (Array.isArray(message?.toolCalls)) return total + message.toolCalls.length;
+    const stepCalls = Array.isArray(message?.steps)
+      ? message.steps.reduce((count, step) => count + (step?.type === "tool_calls" && Array.isArray(step.calls) ? step.calls.length : 0), 0)
+      : 0;
+    return total + stepCalls;
+  }, 0);
+  const subagentToolCalls = Array.isArray(conversation?.subagentRuns)
+    ? conversation.subagentRuns.reduce((total, run) => total + (Array.isArray(run?.steps)
+      ? run.steps.reduce((count, step) => count + (step?.type === "tool_calls" && Array.isArray(step.calls) ? step.calls.length : 0), 0)
+      : 0), 0)
+    : 0;
+  const checkpoint = conversation?.checkpoint;
+  const compactionCount = Number.isInteger(checkpoint?.compactionCount) && checkpoint.compactionCount >= 0
+    ? checkpoint.compactionCount
+    : checkpoint?.summary ? 1 : 0;
+  return {
+    conversationId: typeof conversation?.id === "string" ? conversation.id : "",
+    compactionCount,
+    toolCallCount: messageToolCalls + subagentToolCalls,
+  };
+}
+
+/**
  * Human-readable turn failure from application/transport errors.
  * Backend often puts the real reason in `details.cause` while `message` is
  * a short code phrase — surface both when cause is not already embedded.
+ * Never returns the literal string "[object Object]".
  */
 export function formatTurnError(error) {
-  const message = error?.message || "Unknown error";
+  if (error == null) return "Unknown error";
+  if (typeof error === "string") {
+    const trimmed = error.trim();
+    return !trimmed || trimmed === "[object Object]" ? "Unknown error" : trimmed;
+  }
+  // Nested transport envelope: `{ ok:false, error:{ code, message } }` or
+  // `{ error: { message } }` that slipped past sendRequest unwrap.
+  if (typeof error === "object" && error.error != null && typeof error.error === "object") {
+    return formatTurnError(error.error);
+  }
+  let message = typeof error.message === "string" ? error.message.trim() : "";
+  if (!message || message === "[object Object]") {
+    if (typeof error.code === "string" && error.code.trim()) {
+      message = error.code.trim();
+    } else {
+      try {
+        const encoded = JSON.stringify(error);
+        if (encoded && encoded !== "{}" && encoded !== "null") {
+          return encoded.length > 400 ? `${encoded.slice(0, 397)}…` : encoded;
+        }
+      } catch {
+        // fall through
+      }
+      return "Unknown error";
+    }
+  }
   const cause = typeof error?.details?.cause === "string" ? error.details.cause.trim() : "";
   if (!cause || message.includes(cause)) return message;
   return `${message}: ${cause}`;
@@ -217,13 +281,15 @@ export function toConversationToolCall(call) {
       safeArgs = undefined;
     }
   }
-  const output = call?.output !== undefined
-    ? clampToolText(call.output, TOOL_OUTPUT_MAX_CHARS)
-    : call?.error
-      ? clampToolText(call.error, TOOL_OUTPUT_MAX_CHARS)
-      : call?.result !== undefined
-        ? formatToolOutput(call.result)
-        : undefined;
+  const output = call?.modelOutput !== undefined
+    ? clampToolText(call.modelOutput, TOOL_OUTPUT_MAX_CHARS)
+    : call?.output !== undefined
+      ? clampToolText(call.output, TOOL_OUTPUT_MAX_CHARS)
+      : call?.error
+        ? clampToolText(call.error, TOOL_OUTPUT_MAX_CHARS)
+        : call?.result !== undefined
+          ? formatToolOutput(call.result)
+          : undefined;
   return {
     id: call.id,
     name: call.name,
@@ -231,6 +297,10 @@ export function toConversationToolCall(call) {
     ...(call.error ? { error: clampToolText(call.error, 4_000) } : {}),
     args: safeArgs ?? {},
     ...(output ? { output } : {}),
+    ...(call?.modelOutput ? { modelOutput: clampToolText(call.modelOutput, TOOL_OUTPUT_MAX_CHARS) } : {}),
+    ...(call?.status ? { status: call.status } : {}),
+    ...(call?.truncated ? { truncated: call.truncated } : {}),
+    ...(call?.structuredContent ? { structuredContent: call.structuredContent } : {}),
   };
 }
 
@@ -265,6 +335,17 @@ export function composerTextareaSize({
  * Build the provider-visible context without restoring messages already covered
  * by a durable compaction checkpoint.
  *
+ * Codex-aligned (memento replacement): when the checkpoint has
+ * `retainedUserMessages`, the provider context is:
+ *   retained user messages (chronological) + summary user message + residual
+ *   store messages (everything after `compactedMessageCount`).
+ * The summary is a `role:"user"` message with the `SUMMARY_PREFIX` marker,
+ * not a `role:"system"` blurb, so the model treats it as durable context.
+ *
+ * Legacy fallback: when `retainedUserMessages` is absent (old checkpoints),
+ * the pre-Codex shape is used: `system: Conversation summary:\n…` + residual
+ * slice. This keeps existing chats working through one release.
+ *
  * Assistant messages that carry persisted `toolCalls` are reconstructed into
  * the provider shape the runner expects: one `{role:"assistant", toolCalls}`
  * message followed by one `{role:"tool"}` result per call. Without this the
@@ -276,28 +357,115 @@ export function buildAgentContext(conversation) {
   const messages = Array.isArray(conversation?.messages) ? conversation.messages : [];
   if (!checkpoint?.summary) return messages.filter((m) => m.status !== "interrupted").flatMap(toProviderMessages);
 
+  const residual = messages.slice(checkpoint.compactedMessageCount).filter((m) => m.status !== "interrupted").flatMap(toProviderMessages);
+
+  // Codex-aligned memento: retained user messages + summary user message.
+  if (Array.isArray(checkpoint.retainedUserMessages) && checkpoint.retainedUserMessages.length >= 0) {
+    const retainedUsers = checkpoint.retainedUserMessages.map((text) => ({ role: "user", content: text }));
+    return [
+      ...retainedUsers,
+      { role: "user", content: checkpoint.summary },
+      ...residual,
+    ];
+  }
+
+  // Legacy: system summary + residual slice.
   return [
     { role: "system", content: `Conversation summary:\n${checkpoint.summary}` },
-    ...messages.slice(checkpoint.compactedMessageCount).filter((m) => m.status !== "interrupted").flatMap(toProviderMessages),
+    ...residual,
+  ];
+}
+
+/**
+ * Fixed English steer injected as a one-shot user line when continuing an
+ * interrupted pure-text reply. Not persisted as a user row in the store.
+ */
+export const CONTINUE_STEER = "Your previous reply was interrupted. The incomplete assistant message above is already shown to the user. Continue exactly from where it ends — do not restate or rewrite earlier sections.";
+
+/**
+ * True when an interrupted assistant can tool-resume (in-turn tools settled),
+ * not merely when `resumeMessages` is a non-empty inject+user snapshot from a
+ * pre-tool provider fail.
+ */
+export function hasToolResumeSnapshot(message) {
+  if (!message || typeof message !== "object") return false;
+  if (Array.isArray(message.toolCalls) && message.toolCalls.length > 0) return true;
+  if (Array.isArray(message.steps)
+    && message.steps.some((step) => step?.type === "tool_calls" && Array.isArray(step.calls) && step.calls.length > 0)) {
+    return true;
+  }
+  if (!Array.isArray(message.resumeMessages) || message.resumeMessages.length === 0) return false;
+  return message.resumeMessages.some((entry) => {
+    if (!entry || typeof entry !== "object") return false;
+    if (entry.role === "tool") return true;
+    if (entry.role === "assistant" && Array.isArray(entry.toolCalls) && entry.toolCalls.length > 0) return true;
+    return false;
+  });
+}
+
+/**
+ * Build provider context for a Continue/Retry on the last interrupted
+ * assistant message. Two resume modes:
+ *
+ * - **tool**: resume graph has settled tools (`hasToolResumeSnapshot`) →
+ *   return `resumeMessages` as-is (caller sets `resume: true`).
+ * - **text**: non-empty partial `content`, no tool graph →
+ *   `buildAgentContext` base + incomplete assistant + `CONTINUE_STEER` user
+ *   line. The steer is not persisted as a user row.
+ * - **noop**: no body and no tool resume → same as `buildAgentContext`.
+ *
+ * `buildAgentContext` still filters `interrupted` for normal user sends so
+ * dead mid-cuts don't pollute history.
+ */
+export function buildContinueContext(conversation) {
+  const messages = Array.isArray(conversation?.messages) ? conversation.messages : [];
+  const last = messages.at(-1);
+  if (!last || last.status !== "interrupted") return buildAgentContext(conversation);
+
+  // Tool path: only when tools actually settled — not inject-only snapshots.
+  if (hasToolResumeSnapshot(last) && Array.isArray(last.resumeMessages) && last.resumeMessages.length > 0) {
+    return [...last.resumeMessages];
+  }
+
+  // Text path: non-empty partial body → base + assistant + steer.
+  const partialBody = typeof last.content === "string" ? last.content.trim() : "";
+  if (!partialBody) return buildAgentContext(conversation);
+
+  const base = buildAgentContext(conversation);
+  return [
+    ...base,
+    { role: "assistant", content: last.content },
+    { role: "user", content: CONTINUE_STEER },
   ];
 }
 
 /**
  * Runner checkpoints are relative to the context sent for this turn. Persist
  * them as an absolute offset into the full conversation.
+ *
+ * Codex-aligned: also carries `retainedUserMessages` forward so the desktop
+ * can reconstruct the memento replacement on the next turn.
  */
 export function mergeCompactionCheckpoint(previous, next, messageCount) {
   if (!next?.summary) return previous;
   const previousOffset = previous?.compactedMessageCount ?? 0;
   const summaryMessageCount = previous?.summary ? 1 : 0;
-  return {
+  const merged = {
     summary: next.summary,
     compactedMessageCount: Math.min(
       messageCount,
       previousOffset + Math.max(0, next.compactedMessageCount - summaryMessageCount),
     ),
     via: next.via,
+    compactionCount: (previous?.compactionCount ?? (previous?.summary ? 1 : 0)) + 1,
   };
+  if (Array.isArray(next.retainedUserMessages)) {
+    merged.retainedUserMessages = next.retainedUserMessages;
+  } else if (Array.isArray(previous?.retainedUserMessages)) {
+    // Carry forward from previous if the new checkpoint didn't include them.
+    merged.retainedUserMessages = previous.retainedUserMessages;
+  }
+  return merged;
 }
 
 export function searchConversations(conversations, query) {
@@ -343,6 +511,10 @@ function wrapUntrustedToolResult(toolName, content) {
 }
 
 function toolResultContent(call) {
+  // Prefer the exact mid-turn projection when available (dual-rep).
+  if (typeof call.modelOutput === "string" && call.modelOutput.length > 0) {
+    return clampToolText(call.modelOutput, TOOL_OUTPUT_MAX_CHARS);
+  }
   if (typeof call.output === "string" && call.output.length > 0) {
     return clampToolText(call.output, TOOL_OUTPUT_MAX_CHARS);
   }

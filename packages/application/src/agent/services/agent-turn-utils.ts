@@ -12,11 +12,16 @@ import {
   BARRIER_TOOLS,
   DEFAULT_MAX_CONCURRENT_TOOL_CALLS,
   DEFAULT_MAX_TOOL_ROUNDS,
+  MAX_TOOL_ROUNDS_CAP,
   DEFAULT_SOFT_RECOVER_ATTEMPTS,
   MAX_CONCURRENT_TOOL_CALLS_CAP,
   MAX_REPEATED_TOOL_CALLS,
   MAX_SOFT_RECOVER_ATTEMPTS,
 } from "./agent-turn-types.js";
+import {
+  cancelledToolResult,
+  errorToolResult,
+} from "./agent-tool-result.js";
 
 export function assertTurnActive(signal: AbortSignal | undefined, traceId: string): void {
   if (signal?.aborted) {
@@ -41,6 +46,10 @@ export function repeatedToolDecision(
 }
 
 export function stableJson(value: unknown): string {
+  // `undefined` must produce a distinct fingerprint from `null`/`NaN` (which
+  // JSON.stringify renders as "null"); otherwise the repeated-call guard
+  // conflates genuinely different arguments.
+  if (value === undefined) return '"\u0000undefined"';
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   if (typeof value === "object" && value !== null) {
     return `{${Object.entries(value).sort(([left], [right]) => left.localeCompare(right))
@@ -142,12 +151,14 @@ export function unknownToolExecution(
       : "Use advertised discovery tools to find available tools. You may also call a previously used mcp_<plugin>_<tool> name directly when that plugin is already running.",
   ];
   if (sampleList) parts.push(`Currently advertised: ${sampleList}.`);
+  const errorMessage = parts.join(" ");
   return {
     id: call.id,
     name: call.name,
     ok: false,
     args: call.args,
-    error: parts.join(" "),
+    error: errorMessage,
+    toolResult: errorToolResult(call.id, call.name, "TOOL_NOT_ALLOWED", errorMessage),
   };
 }
 
@@ -162,6 +173,13 @@ export function unknownToolExecution(
 const UNTRUSTED_TOOL_PREFIXES = ["mcp_"];
 const UNTRUSTED_WRAP_MIN_CHARS = 32;
 const DELIMITER_TOKEN_RE = /untrusted_tool_result/gi;
+/**
+ * Matches the literal delimiter token in EITHER its canonical underscore form
+ * or a hyphenated variant. A malicious tool payload can embed the hyphen form
+ * (e.g. `</untrusted-tool-result>`) to forge an early close tag and escape the
+ * envelope; neutralize both spellings to a safe, non-tag placeholder.
+ */
+const DELIMITER_VARIANT_RE = /untrusted[-_]tool[-_]result/gi;
 const UNTRUSTED_CLOSE_TAG = "</untrusted_tool_result>";
 const UNTRUSTED_OPEN_RE = /^<untrusted_tool_result\b([^>]*)>/;
 const UNTRUSTED_SOURCE_RE = /\bsource="([^"]*)"/;
@@ -177,7 +195,9 @@ function isUntrustedTool(name: string): boolean {
 }
 
 function neutralizeDelimiters(content: string): string {
-  return content.replace(DELIMITER_TOKEN_RE, "untrusted-tool-result");
+  // Collapse every delimiter spelling to a plain non-tag token so a payload
+  // cannot smuggle a forged open/close tag past the envelope.
+  return content.replace(DELIMITER_VARIANT_RE, "untrusted tool result");
 }
 
 /**
@@ -307,10 +327,23 @@ export function serializeToolResult(execution: AgentToolExecution, toolName?: st
   return toolName ? wrapUntrustedResult(toolName, raw) : raw;
 }
 
+/**
+ * Normalize the per-turn tool-round ceiling.
+ *
+ * - `undefined` → product default (50).
+ * - `0` → **unlimited** sentinel (kept as 0; the runner loop treats 0 as no
+ *   round ceiling). Opt-in escape hatch for long unattended agentic runs.
+ * - `1..CAP` → finite ceiling.
+ * - `> CAP` or non-integer / negative → throws `AGENT_INVALID_INPUT`.
+ */
 export function normalizeMaxRounds(value: number | undefined): number {
   if (value === undefined) return DEFAULT_MAX_TOOL_ROUNDS;
-  if (!Number.isInteger(value) || value < 1 || value > 100) {
-    throw new ApplicationError("AGENT_INVALID_INPUT", "maxToolRounds must be an integer between 1 and 100");
+  if (value === 0) return 0;
+  if (!Number.isInteger(value) || value < 1 || value > MAX_TOOL_ROUNDS_CAP) {
+    throw new ApplicationError(
+      "AGENT_INVALID_INPUT",
+      `maxToolRounds must be 0 (unlimited) or an integer between 1 and ${MAX_TOOL_ROUNDS_CAP}`,
+    );
   }
   return value;
 }
@@ -362,7 +395,14 @@ export function segmentToolBatch(calls: readonly AgentToolCall[]): readonly Tool
 }
 
 export function cancelledExecution(call: AgentToolCall): AgentToolExecution {
-  return { id: call.id, name: call.name, ok: false, args: call.args, error: "Tool call cancelled" };
+  return {
+    id: call.id,
+    name: call.name,
+    ok: false,
+    args: call.args,
+    error: "Tool call cancelled",
+    toolResult: cancelledToolResult(call.id, call.name),
+  };
 }
 
 /**
@@ -398,11 +438,27 @@ export async function runPool<T, R>(
 export function hasTurnProgress(
   toolCalls: readonly AgentToolExecution[],
   steps: readonly AgentTurnStep[],
-  messages: readonly AgentMessage[],
 ): boolean {
   if (toolCalls.length > 0) return true;
-  if (steps.some((step) => step.type === "tool_calls")) return true;
-  return messages.some((message) => message.role === "tool");
+  return steps.some((step) => step.type === "tool_calls");
+}
+
+/**
+ * Broader progress check for partial attachment: true if there are in-turn
+ * tools OR already-streamed live text/reasoning OR completed text steps.
+ * Used on cancel / provider fail / mid-turn catch so pure-text cuts still
+ * persist an interrupted assistant with the partial body.
+ */
+export function hasResumableProgress(
+  toolCalls: readonly AgentToolExecution[],
+  steps: readonly AgentTurnStep[],
+  liveText?: string,
+  liveReasoning?: string,
+): boolean {
+  if (hasTurnProgress(toolCalls, steps)) return true;
+  if (liveText && liveText.trim()) return true;
+  if (liveReasoning && liveReasoning.trim()) return true;
+  return steps.some((step) => step.type === "text");
 }
 
 export function buildTurnPartial(
@@ -416,18 +472,29 @@ export function buildTurnPartial(
   api: "chat" | "responses" | "messages" | undefined,
   reasoning: string | undefined,
   usage: AgentTokenUsage,
+  liveText?: string,
+  liveReasoning?: string,
 ): AgentTurnPartial {
+  // Prefer live-streamed text/reasoning over empty defaults so mid-stream
+  // failures preserve already-painted paragraphs. Fall back to completed text
+  // steps (if any), then "".
+  const textSteps = liveText ?? steps
+    .filter((step) => step.type === "text")
+    .map((step) => (step as { content: string }).content)
+    .join("");
+  const text = (liveText && liveText.trim()) ? liveText : textSteps;
+  const reasoningValue = (liveReasoning && liveReasoning.trim()) ? liveReasoning : reasoning;
   return {
     traceId,
     rounds: Math.max(0, completedRounds),
-    text: "",
+    text,
     toolCalls: [...toolCalls],
     steps: [...steps],
     messages: [...messages],
     ...(model ? { model } : {}),
     ...(providerId ? { providerId } : {}),
     ...(api ? { api } : {}),
-    ...(reasoning ? { reasoning } : {}),
+    ...(reasoningValue ? { reasoning: reasoningValue } : {}),
     ...(hasUsage(usage) ? { usage: { ...usage } } : {}),
   };
 }
@@ -472,21 +539,39 @@ export function formatMessagesForSummary(
   // large outcomes cannot starve the rest of the conversation. Floor at 800
   // (the previous fixed cap) and cap at 4000 so a single result never dominates.
   const toolBudget = Math.min(4_000, Math.max(800, Math.floor(summaryMaxChars / 8)));
-  return messages.map((message) => {
-    if (message.role === "tool") return `Tool ${message.name}: ${clampToolResultContent(message.content, toolBudget, message.name)}`;
+  // Injected system prompts (system.md, mcp-tools, skills catalog, memory, …)
+  // are re-applied every turn by injectPrompts. Including them in the handoff
+  // excerpt starves the 12k summary budget and produces "fresh session" ghosts.
+  // Keep only durable conversation content + prior compaction checkpoints.
+  const lines: string[] = [];
+  for (const message of messages) {
+    if (message.role === "system") {
+      if (typeof message.content === "string" && message.content.startsWith("Conversation summary:")) {
+        lines.push(`System: ${clampText(message.content, toolBudget)}`);
+      }
+      continue;
+    }
+    if (message.role === "tool") {
+      lines.push(`Tool ${message.name}: ${clampToolResultContent(message.content, toolBudget, message.name)}`);
+      continue;
+    }
     if (message.role === "assistant") {
       const calls = message.toolCalls?.map((call) => {
         const argsText = call.args ? clampText(JSON.stringify(call.args), 400) : "";
         return argsText ? `${call.name}(${argsText})` : call.name;
       }).join(", ");
       const reasoning = message.reasoning ? clampText(message.reasoning, 600) : "";
-      return `Assistant: ${message.content ?? ""}${calls ? `\nTool calls: ${calls}` : ""}${reasoning ? `\nReasoning: ${reasoning}` : ""}`.trim();
+      lines.push(
+        `Assistant: ${message.content ?? ""}${calls ? `\nTool calls: ${calls}` : ""}${reasoning ? `\nReasoning: ${reasoning}` : ""}`.trim(),
+      );
+      continue;
     }
     const content = typeof message.content === "string"
       ? message.content
       : message.content.map((part) => part.type === "text" ? part.text : `[${part.type}: ${part.name ?? "attachment"}]`).join("\n");
-    return `${message.role === "user" ? "User" : "System"}: ${content}`;
-  }).join("\n");
+    lines.push(`User: ${content}`);
+  }
+  return lines.join("\n");
 }
 
 export function positiveInteger(value: number | undefined): value is number {

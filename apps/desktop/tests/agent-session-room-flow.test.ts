@@ -127,6 +127,76 @@ function makeController(opts: {
 describe("BH-AGENT room / turn / drawer suite", () => {
   beforeEach(() => installDom());
 
+  it("mounts the todo strip for a newly created room", async () => {
+    const conversation = room("room-new");
+    const controller = new AgentConversationController({
+      shell: { agentConversations: { create: vi.fn(async () => conversation) } },
+      deleteTodos: vi.fn(),
+    } as never);
+    const mountTodoStrip = vi.spyOn(controller, "mountTodoStrip").mockImplementation(() => {});
+    controller.renderThread = vi.fn();
+    controller.updateWorkspaceLabel = vi.fn();
+    controller.updateContextStatus = vi.fn();
+    controller.updateAcpStatus = vi.fn();
+    controller.refresh = vi.fn(async () => {});
+
+    await controller.create();
+
+    expect(mountTodoStrip).toHaveBeenCalledWith("room-new");
+  });
+
+  it("keeps the reader's position while streaming away from the bottom", () => {
+    const controller = makeController().controller;
+    const thread = document.querySelector("#agent-thread") as HTMLElement;
+    Object.defineProperties(thread, {
+      clientHeight: { configurable: true, value: 400 },
+      scrollHeight: { configurable: true, writable: true, value: 1200 },
+    });
+    thread.scrollTop = 180;
+    controller.threadShouldStickToBottom = false;
+
+    controller.scrollToBottom();
+
+    expect(thread.scrollTop).toBe(180);
+  });
+
+  it("continues following streamed content when the reader is at the bottom", () => {
+    const controller = makeController().controller;
+    const thread = document.querySelector("#agent-thread") as HTMLElement;
+    Object.defineProperties(thread, {
+      clientHeight: { configurable: true, value: 400 },
+      scrollHeight: { configurable: true, writable: true, value: 1200 },
+    });
+    thread.scrollTop = 800;
+    controller.threadShouldStickToBottom = true;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 0;
+    });
+
+    controller.scrollToBottom();
+
+    expect(thread.scrollTop).toBe(1200);
+    vi.unstubAllGlobals();
+  });
+
+  it("follows immediately when animation frames are throttled", () => {
+    const controller = makeController().controller;
+    const thread = document.querySelector("#agent-thread") as HTMLElement;
+    Object.defineProperties(thread, {
+      clientHeight: { configurable: true, value: 400 },
+      scrollHeight: { configurable: true, writable: true, value: 1600 },
+    });
+    thread.scrollTop = 1200;
+    controller.threadShouldStickToBottom = true;
+    vi.stubGlobal("requestAnimationFrame", vi.fn());
+
+    controller.scrollToBottom();
+
+    expect(thread.scrollTop).toBe(1600);
+    vi.unstubAllGlobals();
+  });
+
   it("BH-AGENT-01 keeps other room composer free while a background room owns the turn", async () => {
     const { controller } = makeController();
     const input = document.querySelector<HTMLInputElement>("#agent-input")!;

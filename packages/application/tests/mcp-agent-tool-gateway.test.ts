@@ -42,9 +42,11 @@ describe("McpAgentToolGateway", () => {
       "skill_list", "skill_search", "skill_read",
       "memory", "skill_manage",
     ]);
-    await expect(gateway.execute("tool_list", { pluginId: "nusashell.notes" }, "call-tool-list", "turn-1")).resolves.toEqual([
-      { name: "createNote", description: "Create a note" },
-    ]);
+    await expect(gateway.execute("tool_list", { pluginId: "nusashell.notes" }, "call-tool-list", "turn-1")).resolves.toEqual({
+      pluginId: "nusashell.notes",
+      count: 1,
+      tools: [{ name: "createNote", description: "Create a note" }],
+    });
     await expect(gateway.execute("mcp_context", { pluginId: "nusashell.notes", action: "list_prompts", query: "daily" }, "call-prompt-list", "turn-1")).resolves.toEqual([
       { name: "daily", description: "Daily prompt" },
     ]);
@@ -82,6 +84,67 @@ describe("McpAgentToolGateway", () => {
     expect((await gateway.listTools([], "turn-1")).map((tool) => tool.name)).not.toContain(grant.name);
   });
 
+  it("auto-advertises all running plugin tools in listTools without prior tool_schema", async () => {
+    const runtime = {
+      ...fakeRuntime,
+      listPlugins: async () => [
+        { pluginId: "nusashell.notes", name: "Notes", state: "running", enabled: true },
+      ],
+      listTools: async () => [
+        { name: "createNote", description: "Create a note", inputSchema: { type: "object", properties: { text: { type: "string" } } } },
+        { name: "deleteNote", description: "Delete a note", inputSchema: { type: "object", properties: { id: { type: "string" } } } },
+      ],
+    };
+    const gateway = new McpAgentToolGateway(runtime as never);
+    gateway.beginTurn("turn-auto");
+
+    const names = (await gateway.listTools([], "turn-auto")).map((tool) => tool.name);
+    // Both running plugin tools are auto-advertised without tool_schema.
+    expect(names).toContain("mcp_nusashell_notes_createNote");
+    expect(names).toContain("mcp_nusashell_notes_deleteNote");
+    // Can call directly without prior grant.
+    await expect(gateway.execute("mcp_nusashell_notes_createNote", { text: "hello" }, "call-auto", "turn-auto")).resolves.toEqual({ ok: true });
+  });
+
+  it("does not auto-advertise tools from idle/stopped plugins", async () => {
+    const runtime = {
+      ...fakeRuntime,
+      listPlugins: async () => [
+        { pluginId: "nusashell.notes", name: "Notes", state: "idle", enabled: true },
+      ],
+      listTools: async () => [
+        { name: "createNote", description: "Create a note", inputSchema: { type: "object", properties: {} } },
+      ],
+    };
+    const gateway = new McpAgentToolGateway(runtime as never);
+    gateway.beginTurn("turn-idle-auto");
+
+    const names = (await gateway.listTools([], "turn-idle-auto")).map((tool) => tool.name);
+    expect(names).not.toContain("mcp_nusashell_notes_createNote");
+  });
+
+  it("caps advertised MCP tools at 96 entries in listTools", async () => {
+    const manyTools = Array.from({ length: 100 }, (_, i) => ({
+      name: `tool_${i}`,
+      description: `Tool ${i}`,
+      inputSchema: { type: "object", properties: {} },
+    }));
+    const runtime = {
+      ...fakeRuntime,
+      listPlugins: async () => [
+        { pluginId: "nusashell.big", name: "Big", state: "running", enabled: true },
+      ],
+      listTools: async () => manyTools,
+    };
+    const gateway = new McpAgentToolGateway(runtime as never);
+    gateway.beginTurn("turn-cap-96");
+
+    const tools = await gateway.listTools([], "turn-cap-96");
+    const mcpTools = tools.filter((t) => t.name.startsWith("mcp_nusashell_big_"));
+    // Meta-tools are not counted; MCP tools are capped at 96.
+    expect(mcpTools.length).toBe(96);
+  });
+
   it("lazily resolves an ungranted mcp_* tool when the plugin is already running", async () => {
     const callToolArgs: Array<{ toolName: string; args: Readonly<Record<string, unknown>> }> = [];
     const runtime = {
@@ -101,14 +164,13 @@ describe("McpAgentToolGateway", () => {
     gateway.beginTurn("turn-lazy");
 
     const providerName = "mcp_nusashell_notes_createNote";
-    expect((await gateway.listTools([], "turn-lazy")).map((tool) => tool.name)).not.toContain(providerName);
+    // With auto-advertise, the running tool is already in listTools.
+    expect((await gateway.listTools([], "turn-lazy")).map((tool) => tool.name)).toContain(providerName);
     await expect(gateway.execute(providerName, { text: "remembered" }, "call-lazy", "turn-lazy")).resolves.toEqual({
       ok: true,
       created: true,
     });
     expect(callToolArgs).toEqual([{ toolName: "createNote", args: { text: "remembered" } }]);
-    // Lazy resolve auto-grants for the rest of the turn.
-    expect((await gateway.listTools([], "turn-lazy")).map((tool) => tool.name)).toContain(providerName);
   });
 
   it("rejects an ungranted mcp_* tool when the matching plugin is not running", async () => {
@@ -125,7 +187,7 @@ describe("McpAgentToolGateway", () => {
     gateway.beginTurn("turn-idle");
 
     await expect(
-      gateway.execute("mcp_nusashell_notes_createNote", { text: "nope" }, "call-idle", "turn-idle"),
+      gateway.execute("mcp_nusashell_createNote", { text: "nope" }, "call-idle", "turn-idle"),
     ).rejects.toThrow("outside the MCP allowlist");
   });
 
@@ -380,6 +442,134 @@ describe("McpAgentToolGateway", () => {
       ok: false,
       error: { code: "memory_error", message: "Memory capacity exceeded for \"memory\": 2300/2200 chars (overflow 100). Remove or shorten entries first." },
       meta: {},
+    });
+  });
+
+  describe("tool_list / tool_search envelope", () => {
+    const searchRuntime = {
+      ...fakeRuntime,
+      listTools: async () => [
+        { name: "list", description: "List files in a directory", inputSchema: { type: "object", properties: {} } },
+        { name: "read", description: "Read a file; useful to list lines", inputSchema: { type: "object", properties: {} } },
+        { name: "write", description: "Write content to a file", inputSchema: { type: "object", properties: {} } },
+        { name: "exec", description: "Run a shell command in the terminal", inputSchema: { type: "object", properties: {} } },
+        { name: "create", description: "Create a note", inputSchema: { type: "object", properties: {} } },
+      ],
+    };
+
+    it("tool_list returns { pluginId, count, tools } envelope", async () => {
+      const gateway = new McpAgentToolGateway(searchRuntime as never);
+      gateway.beginTurn("turn-list-env");
+      const result = await gateway.execute("tool_list", { pluginId: "nusashell.notes" }, "r-list", "turn-list-env");
+      expect(result).toEqual({
+        pluginId: "nusashell.notes",
+        count: 5,
+        tools: [
+          { name: "list", description: "List files in a directory" },
+          { name: "read", description: "Read a file; useful to list lines" },
+          { name: "write", description: "Write content to a file" },
+          { name: "exec", description: "Run a shell command in the terminal" },
+          { name: "create", description: "Create a note" },
+        ],
+      });
+    });
+
+    it("tool_search multi-token query matches when any token hits (token-OR)", async () => {
+      const gateway = new McpAgentToolGateway(searchRuntime as never);
+      gateway.beginTurn("turn-multi");
+      // Incident query shape: "read file list directory terminal" — whole-string
+      // substring match returns zero; token-OR should hit read, list,
+      // exec.
+      const result = await gateway.execute(
+        "tool_search",
+        { pluginId: "nusashell.notes", query: "read file list directory terminal" },
+        "r-multi", "turn-multi",
+      ) as { count: number; matches: { name: string }[]; matchMode: string; query: string };
+      expect(result.matchMode).toBe("token_or");
+      expect(result.query).toBe("read file list directory terminal");
+      expect(result.count).toBeGreaterThan(0);
+      const names = result.matches.map((m) => m.name);
+      expect(names).toContain("read");
+      expect(names).toContain("list");
+      expect(names).toContain("exec");
+    });
+
+    it("tool_search zero matches → count 0, matches [], hint present, still resolves", async () => {
+      const gateway = new McpAgentToolGateway(searchRuntime as never);
+      gateway.beginTurn("turn-zero");
+      const result = await gateway.execute(
+        "tool_search",
+        { pluginId: "nusashell.notes", query: "xyznonexistent" },
+        "r-zero", "turn-zero",
+      ) as { count: number; matches: unknown[]; hint?: string; matchMode: string };
+      expect(result.count).toBe(0);
+      expect(result.matches).toEqual([]);
+      expect(typeof result.hint).toBe("string");
+      expect(result.hint!.length).toBeGreaterThan(0);
+      expect(result.hint).toContain("Empty matches are success");
+      expect(result.matchMode).toBe("token_or");
+    });
+
+    it("tool_search full-phrase-only regression: nonsense phrase → empty with hint", async () => {
+      const gateway = new McpAgentToolGateway(searchRuntime as never);
+      gateway.beginTurn("turn-phrase");
+      const result = await gateway.execute(
+        "tool_search",
+        { pluginId: "nusashell.notes", query: "quantum teleportation device" },
+        "r-phrase", "turn-phrase",
+      ) as { count: number; matches: unknown[]; hint?: string };
+      expect(result.count).toBe(0);
+      expect(result.matches).toEqual([]);
+      expect(result.hint).toBeDefined();
+    });
+
+    it("tool_search ranking: name hits rank above description-only hits", async () => {
+      const gateway = new McpAgentToolGateway(searchRuntime as never);
+      gateway.beginTurn("turn-rank");
+      // "list" appears in name of `list`; "list" also appears in descriptions
+      // of read ("List files...") and write. Name hit (+3) should rank above
+      // description-only hits (+1).
+      const result = await gateway.execute(
+        "tool_search",
+        { pluginId: "nusashell.notes", query: "list" },
+        "r-rank", "turn-rank",
+      ) as { matches: { name: string }[] };
+      const names = result.matches.map((m) => m.name);
+      // `list` has name+description hit (score 4), ranks first.
+      expect(names[0]).toBe("list");
+      // Other matches are description-only, sorted by name asc.
+      expect(names.indexOf("list")).toBeLessThan(names.indexOf("read"));
+    });
+
+    it("tool_search caps at 20 matches", async () => {
+      const manyTools = Array.from({ length: 30 }, (_, i) => ({
+        name: `search_${i}`,
+        description: "searchable tool",
+        inputSchema: { type: "object", properties: {} },
+      }));
+      const runtime = { ...searchRuntime, listTools: async () => manyTools };
+      const gateway = new McpAgentToolGateway(runtime as never);
+      gateway.beginTurn("turn-cap");
+      const result = await gateway.execute(
+        "tool_search",
+        { pluginId: "nusashell.notes", query: "search" },
+        "r-cap", "turn-cap",
+      ) as { count: number; matches: unknown[] };
+      expect(result.matches.length).toBe(20);
+      // count reflects total matches before cap, not the capped slice length.
+      expect(result.count).toBe(30);
+    });
+
+    it("tool_search preserves pluginId and query in the envelope", async () => {
+      const gateway = new McpAgentToolGateway(searchRuntime as never);
+      gateway.beginTurn("turn-fields");
+      const result = await gateway.execute(
+        "tool_search",
+        { pluginId: "nusashell.notes", query: "terminal" },
+        "r-fields", "turn-fields",
+      ) as { pluginId: string; query: string };
+      expect(result.pluginId).toBe("nusashell.notes");
+      expect(result.query).toBe("terminal");
     });
   });
 
@@ -704,8 +894,8 @@ describe("McpAgentToolGateway", () => {
         runtime: {
           listPlugins: async () => [{ pluginId: "nusashell.terminal", state: "running" }],
           listTools: async () => opts.tools ?? [
-            { name: "terminal_exec", description: "Run command", inputSchema: { type: "object" } },
-            { name: "files_read", description: "Read file", inputSchema: { type: "object" } },
+            { name: "exec", description: "Run command", inputSchema: { type: "object" } },
+            { name: "read", description: "Read file", inputSchema: { type: "object" } },
           ],
           startPlugin: async (pluginId: unknown, options?: unknown) => {
             await opts.startPlugin?.(pluginId, options);
@@ -726,7 +916,7 @@ describe("McpAgentToolGateway", () => {
       const { runtime, calls } = makeRuntime();
       const gateway = new McpAgentToolGateway(runtime as never);
       gateway.beginTurn("turn-ws", { workspace: WS });
-      const grant = await gateway.execute("tool_schemas", { pluginId: "nusashell.terminal", toolNames: ["terminal_exec"] }, "g", "turn-ws") as { granted: Array<{ name: string }> };
+      const grant = await gateway.execute("tool_schemas", { pluginId: "nusashell.terminal", toolNames: ["exec"] }, "g", "turn-ws") as { granted: Array<{ name: string }> };
       await gateway.execute(grant.granted[0]!.name, { command: "pwd" }, "req", "turn-ws");
       expect(calls[0]!.args).toEqual({ command: "pwd", cwd: WS });
       gateway.endTurn("turn-ws");
@@ -736,7 +926,7 @@ describe("McpAgentToolGateway", () => {
       const { runtime, calls } = makeRuntime();
       const gateway = new McpAgentToolGateway(runtime as never);
       gateway.beginTurn("turn-ws", { workspace: WS });
-      const grant = await gateway.execute("tool_schemas", { pluginId: "nusashell.files", toolNames: ["files_read"] }, "g", "turn-ws") as { granted: Array<{ name: string }> };
+      const grant = await gateway.execute("tool_schemas", { pluginId: "nusashell.files", toolNames: ["read"] }, "g", "turn-ws") as { granted: Array<{ name: string }> };
       await gateway.execute(grant.granted[0]!.name, { path: "src/foo.ts" }, "req", "turn-ws");
       const filePath = path.join(WS, "src/foo.ts");
       expect(calls[0]!.args).toEqual({ path: filePath });
@@ -747,7 +937,7 @@ describe("McpAgentToolGateway", () => {
       const { runtime, syncs } = makeRuntime({ syncWorkspace: async () => ({ mode: "roots", respawned: false }) });
       const gateway = new McpAgentToolGateway(runtime as never);
       gateway.beginTurn("turn-sync", { workspace: WS });
-      const grant = await gateway.execute("tool_schemas", { pluginId: "nusashell.files", toolNames: ["files_read"] }, "g", "turn-sync") as { granted: Array<{ name: string }> };
+      const grant = await gateway.execute("tool_schemas", { pluginId: "nusashell.files", toolNames: ["read"] }, "g", "turn-sync") as { granted: Array<{ name: string }> };
       await gateway.execute(grant.granted[0]!.name, { path: "x" }, "req", "turn-sync");
       expect(syncs).toEqual([{ pluginId: "nusashell.files", workspace: WS }]);
       gateway.endTurn("turn-sync");
@@ -757,7 +947,7 @@ describe("McpAgentToolGateway", () => {
       const { runtime, calls, syncs } = makeRuntime({ syncWorkspace: async () => ({ mode: "roots", respawned: false }) });
       const gateway = new McpAgentToolGateway(runtime as never);
       gateway.beginTurn("turn-nows");
-      const grant = await gateway.execute("tool_schemas", { pluginId: "nusashell.terminal", toolNames: ["terminal_exec"] }, "g", "turn-nows") as { granted: Array<{ name: string }> };
+      const grant = await gateway.execute("tool_schemas", { pluginId: "nusashell.terminal", toolNames: ["exec"] }, "g", "turn-nows") as { granted: Array<{ name: string }> };
       await gateway.execute(grant.granted[0]!.name, { command: "pwd" }, "req", "turn-nows");
       expect(calls[0]!.args).toEqual({ command: "pwd" });
       expect(syncs).toEqual([]);
@@ -770,7 +960,7 @@ describe("McpAgentToolGateway", () => {
       gateway.beginTurn("turn-merge", { workspace: WS });
       // Simulates RunAgentTurnHandler then AgentTurnRunner beginTurn(interactive only).
       gateway.beginTurn("turn-merge", { interactive: true });
-      const grant = await gateway.execute("tool_schemas", { pluginId: "nusashell.terminal", toolNames: ["terminal_exec"] }, "g", "turn-merge") as { granted: Array<{ name: string }> };
+      const grant = await gateway.execute("tool_schemas", { pluginId: "nusashell.terminal", toolNames: ["exec"] }, "g", "turn-merge") as { granted: Array<{ name: string }> };
       await gateway.execute(grant.granted[0]!.name, { command: "pwd" }, "req", "turn-merge");
       expect(calls[0]!.args).toEqual({ command: "pwd", cwd: WS });
       gateway.endTurn("turn-merge");

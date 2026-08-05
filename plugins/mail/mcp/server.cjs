@@ -92628,14 +92628,14 @@ function safeDate(value) {
 
 // mcp/tool-catalog.js
 var MAIL_TOOL_NAMES = Object.freeze([
-  "mail_accounts",
-  "mail_account_get",
-  "mail_account_test",
-  "mail_mailboxes",
-  "mail_inbox",
-  "mail_messages",
-  "mail_search",
-  "mail_read"
+  "accounts",
+  "account_get",
+  "account_test",
+  "mailboxes",
+  "inbox",
+  "messages",
+  "search",
+  "read"
 ]);
 
 // mcp/tools.js
@@ -92645,56 +92645,56 @@ var limit = external_exports.number().int().min(1).max(50).default(30);
 var messageCursor = external_exports.string().regex(/^\d+$/).optional();
 var unifiedCursor = external_exports.string().max(4096).regex(/^[A-Za-z0-9_-]+$/).optional();
 var schemas = {
-  mail_accounts: external_exports.object({}).strict(),
-  mail_account_get: external_exports.object({ account_id: accountId }).strict(),
-  mail_account_test: external_exports.object({
+  accounts: external_exports.object({}).strict(),
+  account_get: external_exports.object({ account_id: accountId }).strict(),
+  account_test: external_exports.object({
     account_id: accountId,
     scope: external_exports.enum(["incoming", "outgoing", "both"]).default("both")
   }).strict(),
-  mail_mailboxes: external_exports.object({ account_id: accountId }).strict(),
-  mail_inbox: external_exports.object({
+  mailboxes: external_exports.object({ account_id: accountId }).strict(),
+  inbox: external_exports.object({
     account_ids: external_exports.array(accountId).min(1).max(20).optional(),
     unread: external_exports.boolean().optional(),
     limit,
     cursor: unifiedCursor
   }).strict(),
-  mail_messages: external_exports.object({
+  messages: external_exports.object({
     account_id: accountId,
     mailbox_id: mailboxId,
     unread: external_exports.boolean().optional(),
     limit,
     cursor: messageCursor
   }).strict(),
-  mail_search: external_exports.object({
+  search: external_exports.object({
     query: external_exports.string().trim().min(1).max(500),
     account_ids: external_exports.array(accountId).min(1).max(20).optional(),
     mailbox_id: mailboxId,
     limit,
     cursor: unifiedCursor
   }).strict(),
-  mail_read: external_exports.object({
+  read: external_exports.object({
     account_id: accountId,
     mailbox_id: mailboxId,
     uid: external_exports.number().int().positive()
   }).strict()
 };
 var MAIL_TOOLS = Object.freeze([
-  descriptor("mail_accounts", "List configured mail accounts without returning credentials.", {}),
-  descriptor("mail_account_get", "Read one account's non-secret configuration and capabilities.", {
-    account_id: stringProperty("Account identifier from mail_accounts")
+  descriptor("accounts", "List configured mail accounts without returning credentials.", {}),
+  descriptor("account_get", "Read one account's non-secret configuration and capabilities.", {
+    account_id: stringProperty("Account identifier from accounts")
   }, ["account_id"]),
-  descriptor("mail_account_test", "Test incoming and outgoing connectivity for one configured account.", {
-    account_id: stringProperty("Account identifier from mail_accounts"),
+  descriptor("account_test", "Test incoming and outgoing connectivity for one configured account.", {
+    account_id: stringProperty("Account identifier from accounts"),
     scope: {
       type: "string",
       enum: ["incoming", "outgoing", "both"],
       default: "both"
     }
   }, ["account_id"]),
-  descriptor("mail_mailboxes", "List folders with total and unread counts for one account.", {
-    account_id: stringProperty("Account identifier from mail_accounts")
+  descriptor("mailboxes", "List folders with total and unread counts for one account.", {
+    account_id: stringProperty("Account identifier from accounts")
   }, ["account_id"]),
-  descriptor("mail_inbox", "List recent inbox messages across one or more enabled accounts.", {
+  descriptor("inbox", "List recent inbox messages across one or more enabled accounts.", {
     account_ids: {
       type: "array",
       items: stringProperty("Account identifier"),
@@ -92704,14 +92704,14 @@ var MAIL_TOOLS = Object.freeze([
     limit: integerProperty(1, 50, 30),
     cursor: stringProperty("Opaque pagination cursor")
   }),
-  descriptor("mail_messages", "List messages in a selected mailbox.", {
+  descriptor("messages", "List messages in a selected mailbox.", {
     account_id: stringProperty("Account identifier"),
-    mailbox_id: stringProperty("Mailbox path from mail_mailboxes", "INBOX"),
+    mailbox_id: stringProperty("Mailbox path from mailboxes", "INBOX"),
     unread: { type: "boolean" },
     limit: integerProperty(1, 50, 30),
     cursor: stringProperty("Opaque pagination cursor")
   }, ["account_id"]),
-  descriptor("mail_search", "Search message subject, sender, and body using a provider-neutral query.", {
+  descriptor("search", "Search message subject, sender, and body using a provider-neutral query.", {
     query: stringProperty("Search text"),
     account_ids: {
       type: "array",
@@ -92722,7 +92722,7 @@ var MAIL_TOOLS = Object.freeze([
     limit: integerProperty(1, 50, 30),
     cursor: stringProperty("Opaque pagination cursor")
   }, ["query"]),
-  descriptor("mail_read", "Read one message with bounded body content and attachment metadata.", {
+  descriptor("read", "Read one message with bounded body content and attachment metadata.", {
     account_id: stringProperty("Account identifier"),
     mailbox_id: stringProperty("Mailbox path", "INBOX"),
     uid: integerProperty(1)
@@ -92736,19 +92736,19 @@ async function callMailTool(service2, name, rawArguments = {}) {
   if (!schema) throw new Error(`Unknown mail tool: ${name}`);
   const input = schema.parse(rawArguments ?? {});
   switch (name) {
-    case "mail_accounts":
+    case "accounts":
       return { accounts: service2.listAccounts() };
-    case "mail_account_get":
+    case "account_get":
       return { account: service2.getAccount(input.account_id) };
-    case "mail_account_test": {
+    case "account_test": {
       return service2.testAccount(input.account_id, input.scope);
     }
-    case "mail_mailboxes":
+    case "mailboxes":
       return {
         accountId: input.account_id,
         ...await service2.listMailboxes(input.account_id)
       };
-    case "mail_inbox": {
+    case "inbox": {
       const offsets = decodeUnifiedCursor(input.cursor);
       return combineMessagePages(await mapAccounts(service2, input.account_ids, (id) => service2.listMessages({
         accountId: id,
@@ -92758,7 +92758,7 @@ async function callMailTool(service2, name, rawArguments = {}) {
         cursor: offsets[id] === void 0 ? void 0 : String(offsets[id])
       })), input.limit, offsets);
     }
-    case "mail_messages": {
+    case "messages": {
       const page = await service2.listMessages({
         accountId: input.account_id,
         mailboxId: input.mailbox_id,
@@ -92776,7 +92776,7 @@ async function callMailTool(service2, name, rawArguments = {}) {
         meta: messageMeta(page.truncated)
       };
     }
-    case "mail_search": {
+    case "search": {
       const offsets = decodeUnifiedCursor(input.cursor);
       return combineMessagePages(await mapAccounts(service2, input.account_ids, (id) => service2.listMessages({
         accountId: id,
@@ -92786,7 +92786,7 @@ async function callMailTool(service2, name, rawArguments = {}) {
         cursor: offsets[id] === void 0 ? void 0 : String(offsets[id])
       })), input.limit, offsets);
     }
-    case "mail_read": {
+    case "read": {
       const message = await service2.readMessage({
         accountId: input.account_id,
         mailboxId: input.mailbox_id,
@@ -92897,7 +92897,7 @@ function descriptor(name, description, properties, required2 = []) {
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
-      openWorldHint: name === "mail_account_test"
+      openWorldHint: name === "account_test"
     },
     inputSchema: {
       type: "object",
@@ -92943,11 +92943,11 @@ function getMailPrompt(name) {
           "Use the Mail plugin to inspect configured mail accounts and read mail.",
           "",
           "Main tools:",
-          "- mail_accounts / mail_account_get / mail_account_test: inspect and test configured accounts.",
-          "- mail_mailboxes: list folders for an account.",
-          "- mail_inbox / mail_messages: list messages with bounded result options.",
-          "- mail_search: search messages.",
-          "- mail_read: read one message.",
+          "- accounts / account_get / account_test: inspect and test configured accounts.",
+          "- mailboxes: list folders for an account.",
+          "- inbox / messages: list messages with bounded result options.",
+          "- search: search messages.",
+          "- read: read one message.",
           "",
           "Credentials and account configuration are host-owned and injected at runtime; do not ask the user to put secrets in tool arguments. Use tool_schema for exact account, mailbox, paging, and search fields. Mail operations can contact external servers and may expose message content, so confirm the intended account before acting."
         ].join("\n")

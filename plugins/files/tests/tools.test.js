@@ -39,35 +39,35 @@ describe("callFilesTool", () => {
     await expect(callFilesTool(service, "unknown_tool", {})).rejects.toThrow();
   });
 
-  it("files_list returns items array", async () => {
+  it("list returns items array", async () => {
     await fs.writeFile(path.join(tmpDir, "test.txt"), "x");
-    const result = await callFilesTool(service, "files_list", { path: "" });
+    const result = await callFilesTool(service, "list", { path: "" });
     expect(result.path).toBe("");
     expect(result.items).toHaveLength(1);
     expect(result.items[0].name).toBe("test.txt");
   });
 
-  it("files_list defaults to root when no path", async () => {
+  it("list defaults to root when no path", async () => {
     await fs.writeFile(path.join(tmpDir, "test.txt"), "x");
-    const result = await callFilesTool(service, "files_list", {});
+    const result = await callFilesTool(service, "list", {});
     expect(result.items).toHaveLength(1);
   });
 
-  it("files_tree returns tree structure", async () => {
+  it("tree returns tree structure", async () => {
     await fs.mkdir(path.join(tmpDir, "dir"));
-    const result = await callFilesTool(service, "files_tree", { path: "" });
+    const result = await callFilesTool(service, "tree", { path: "" });
     expect(result.tree).toHaveLength(1);
     expect(result.tree[0].name).toBe("dir");
   });
 
-  it("files_read returns content", async () => {
+  it("read returns content", async () => {
     await fs.writeFile(path.join(tmpDir, "test.txt"), "hello");
-    const result = await callFilesTool(service, "files_read", { path: "test.txt" });
+    const result = await callFilesTool(service, "read", { path: "test.txt" });
     expect(result.content).toBe("hello");
   });
 
-  it("files_write creates a file", async () => {
-    const result = await callFilesTool(service, "files_write", {
+  it("write creates a file", async () => {
+    const result = await callFilesTool(service, "write", {
       path: "new.txt",
       content: "data",
     });
@@ -75,34 +75,34 @@ describe("callFilesTool", () => {
     expect(await fs.readFile(path.join(tmpDir, "new.txt"), "utf8")).toBe("data");
   });
 
-  it("files_mkdir creates an empty directory", async () => {
-    const result = await callFilesTool(service, "files_mkdir", { path: "empty/nested" });
+  it("mkdir creates an empty directory", async () => {
+    const result = await callFilesTool(service, "mkdir", { path: "empty/nested" });
     expect(result.created).toBe(true);
     expect((await fs.stat(path.join(tmpDir, "empty", "nested"))).isDirectory()).toBe(true);
   });
 
-  it("files_move moves a file", async () => {
+  it("move moves a file", async () => {
     await fs.writeFile(path.join(tmpDir, "src.txt"), "x");
-    const result = await callFilesTool(service, "files_move", {
+    const result = await callFilesTool(service, "move", {
       source: "src.txt",
       destination: "dst.txt",
     });
     expect(result.moved).toBe(true);
   });
 
-  it("files_delete deletes a file", async () => {
+  it("delete deletes a file", async () => {
     await fs.writeFile(path.join(tmpDir, "file.txt"), "x");
-    const result = await callFilesTool(service, "files_delete", {
+    const result = await callFilesTool(service, "delete", {
       path: "file.txt",
       recursive: false,
     });
     expect(result.deleted).toBe(true);
   });
 
-  it("files_search finds matching files", async () => {
+  it("search finds matching files", async () => {
     await fs.writeFile(path.join(tmpDir, "a.txt"), "x");
     await fs.writeFile(path.join(tmpDir, "b.md"), "x");
-    const result = await callFilesTool(service, "files_search", {
+    const result = await callFilesTool(service, "search", {
       path: "",
       pattern: "*.txt",
     });
@@ -110,20 +110,20 @@ describe("callFilesTool", () => {
     expect(result.results[0].name).toBe("a.txt");
   });
 
-  it("files_info returns metadata", async () => {
+  it("info returns metadata", async () => {
     await fs.writeFile(path.join(tmpDir, "test.txt"), "hello");
-    const result = await callFilesTool(service, "files_info", { path: "test.txt" });
+    const result = await callFilesTool(service, "info", { path: "test.txt" });
     expect(result.name).toBe("test.txt");
     expect(result.size).toBe(5);
   });
 
   it("rejects invalid input (missing required path)", async () => {
-    await expect(callFilesTool(service, "files_read", {})).rejects.toThrow();
+    await expect(callFilesTool(service, "read", {})).rejects.toThrow();
   });
 
   it("rejects invalid input (extra fields)", async () => {
     await expect(
-      callFilesTool(service, "files_list", { path: "", extra: true }),
+      callFilesTool(service, "list", { path: "", extra: true }),
     ).rejects.toThrow();
   });
 });

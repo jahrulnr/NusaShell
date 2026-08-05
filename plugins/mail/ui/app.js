@@ -151,12 +151,12 @@ async function loadInbox() {
   setConnectionState("Loading inbox…", true);
   try {
     const data = state.selectedAccountId
-      ? await callTool("mail_messages", {
+      ? await callTool("messages", {
           account_id: state.selectedAccountId,
           mailbox_id: state.selectedMailboxId,
           limit: 50,
         })
-      : await callTool("mail_inbox", { limit: 50 });
+      : await callTool("inbox", { limit: 50 });
     state.messages = data.messages ?? [];
     renderMessages();
     elements["message-total"].textContent = `${data.total ?? state.messages.length} messages`;
@@ -173,7 +173,7 @@ async function loadMailboxes(accountId) {
   renderFolders();
   if (!accountId) return;
   try {
-    const result = await callTool("mail_mailboxes", { account_id: accountId });
+    const result = await callTool("mailboxes", { account_id: accountId });
     state.mailboxes = result.mailboxes ?? [];
     renderFolders();
   } catch (error) {
@@ -213,7 +213,7 @@ async function openMessage(message) {
   elements["detail-body"].textContent = "";
   elements["attachment-list"].replaceChildren();
   try {
-    const result = await callTool("mail_read", {
+    const result = await callTool("read", {
       account_id: message.accountId,
       mailbox_id: message.mailboxId,
       uid: message.uid,
@@ -230,7 +230,7 @@ async function searchMail(query) {
   elements["message-list-title"].textContent = "Search";
   elements["message-list-context"].textContent = `“${query.slice(0, 60)}”`;
   try {
-    const result = await callTool("mail_search", {
+    const result = await callTool("search", {
       query,
       ...(state.selectedAccountId ? { account_ids: [state.selectedAccountId] } : {}),
       mailbox_id: state.selectedMailboxId,

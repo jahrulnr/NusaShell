@@ -27,6 +27,7 @@ import {
   safeSnippet,
   shouldRetryWithoutImages,
   timeoutSignal,
+  createIdleTimeout,
   DEFAULT_MAX_RESPONSE_BYTES,
   DEFAULT_TIMEOUT_MS,
 } from "./openai-shared.js";
@@ -186,18 +187,20 @@ export class OpenAiCompatibleAgentProvider implements AgentProvider {
     const endpoint = overrideEndpoint ?? this.endpoint;
     const api = overrideApi ?? this.strategy.api;
     body.stream = stream;
-    const timeout = timeoutSignal(this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS, request.signal);
+    const timeoutMs = this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    // One-shot wall-clock timeout for the connect + headers phase only.
+    const connectTimeout = timeoutSignal(timeoutMs, request.signal);
     let response: Response;
     try {
       response = await this.fetchFn(endpoint, {
         method: "POST",
         headers: providerHeaders(api, this.options.apiKey, stream),
         body: JSON.stringify(body),
-        signal: timeout.signal,
+        signal: connectTimeout.signal,
       });
     } catch (error) {
-      timeout.dispose();
-      if (timeout.timedOut()) {
+      connectTimeout.dispose();
+      if (connectTimeout.timedOut()) {
         throw new AgentProviderHttpError(`Provider request timed out at ${endpoint}`, 0, true, 0, "connect", error);
       }
       if (request.signal?.aborted) {
@@ -205,6 +208,12 @@ export class OpenAiCompatibleAgentProvider implements AgentProvider {
       }
       throw new AgentProviderHttpError(`Provider connection failed at ${endpoint}`, 0, true, 0, "connect", error);
     }
+
+    // Connect succeeded — dispose the one-shot timer and switch to idle-reset
+    // timeout for the SSE body loop (long generations survive as long as
+    // chunks keep arriving within timeoutMs of each other).
+    connectTimeout.dispose();
+    const idleTimeout = createIdleTimeout(timeoutMs, request.signal);
 
     try {
       if (!response.ok) {
@@ -230,10 +239,20 @@ export class OpenAiCompatibleAgentProvider implements AgentProvider {
             request.onTextDelta,
             request.onReasoningDelta,
             this.maxResponseBytes(),
+            () => idleTimeout.reset(),
+            idleTimeout.signal,
           );
         } catch (error) {
           if (error instanceof SseTransportError) {
-            throw new AgentProviderHttpError(error.message, response.status, true, 0, "sse_transport", error);
+            const isIdle = idleTimeout.timedOut();
+            throw new AgentProviderHttpError(
+              isIdle ? `Provider request timed out at ${endpoint}` : error.message,
+              response.status,
+              true,
+              0,
+              isIdle ? "idle_timeout" : "sse_transport",
+              error,
+            );
           }
           throw error;
         }
@@ -251,6 +270,8 @@ export class OpenAiCompatibleAgentProvider implements AgentProvider {
           request.onTextDelta,
           request.onReasoningDelta,
           this.maxResponseBytes(),
+          () => idleTimeout.reset(),
+          idleTimeout.signal,
         );
       }
       let payload: unknown;
@@ -271,7 +292,7 @@ export class OpenAiCompatibleAgentProvider implements AgentProvider {
       }
       return payload;
     } finally {
-      timeout.dispose();
+      idleTimeout.dispose();
     }
   }
 

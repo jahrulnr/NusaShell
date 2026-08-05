@@ -8,8 +8,8 @@ describe("Mail MCP prompts", () => {
     ]);
     const prompt = getMailPrompt("howto");
     const text = prompt.messages[0].content.text;
-    expect(text).toContain("mail_accounts");
-    expect(text).toContain("mail_read");
+    expect(text).toContain("accounts");
+    expect(text).toContain("read");
     expect(text).toContain("host-owned");
   });
 

@@ -42,9 +42,9 @@ describe("NOTES_TOOLS", () => {
   });
 });
 
-describe("callNotesTool - notes_create", () => {
+describe("callNotesTool - create", () => {
   it("creates a note with text and tags", async () => {
-    const result = await callNotesTool(service, "notes_create", {
+    const result = await callNotesTool(service, "create", {
       text: "hello world",
       tags: ["work"],
     }, { persist: false });
@@ -55,54 +55,54 @@ describe("callNotesTool - notes_create", () => {
   });
 
   it("creates a note without tags (default)", async () => {
-    const result = await callNotesTool(service, "notes_create", {
+    const result = await callNotesTool(service, "create", {
       text: "no tags",
     }, { persist: false });
     expect(result.note.tags).toEqual([]);
   });
 
   it("rejects missing text", async () => {
-    await expect(callNotesTool(service, "notes_create", {}, { persist: false })).rejects.toThrow();
+    await expect(callNotesTool(service, "create", {}, { persist: false })).rejects.toThrow();
   });
 
   it("rejects extra fields", async () => {
     await expect(
-      callNotesTool(service, "notes_create", { text: "x", extra: true }, { persist: false }),
+      callNotesTool(service, "create", { text: "x", extra: true }, { persist: false }),
     ).rejects.toThrow();
   });
 });
 
-describe("callNotesTool - notes_list", () => {
+describe("callNotesTool - list", () => {
   it("lists all notes", async () => {
-    await callNotesTool(service, "notes_create", { text: "n1" }, { persist: false });
-    await callNotesTool(service, "notes_create", { text: "n2" }, { persist: false });
-    const result = await callNotesTool(service, "notes_list", {}, { persist: false });
+    await callNotesTool(service, "create", { text: "n1" }, { persist: false });
+    await callNotesTool(service, "create", { text: "n2" }, { persist: false });
+    const result = await callNotesTool(service, "list", {}, { persist: false });
     expect(result.notes).toHaveLength(2);
     expect(result.total).toBe(2);
   });
 
   it("filters by tag", async () => {
-    await callNotesTool(service, "notes_create", { text: "n1", tags: ["work"] }, { persist: false });
-    await callNotesTool(service, "notes_create", { text: "n2", tags: ["personal"] }, { persist: false });
-    const result = await callNotesTool(service, "notes_list", { tag: "work" }, { persist: false });
+    await callNotesTool(service, "create", { text: "n1", tags: ["work"] }, { persist: false });
+    await callNotesTool(service, "create", { text: "n2", tags: ["personal"] }, { persist: false });
+    const result = await callNotesTool(service, "list", { tag: "work" }, { persist: false });
     expect(result.notes).toHaveLength(1);
     expect(result.tag).toBe("work");
   });
 
   it("sorts by updated by default", async () => {
-    const r1 = await callNotesTool(service, "notes_create", { text: "first" }, { persist: false });
-    const r2 = await callNotesTool(service, "notes_create", { text: "second" }, { persist: false });
-    await callNotesTool(service, "notes_update", { id: r1.note.id, text: "updated first" }, { persist: false });
-    const result = await callNotesTool(service, "notes_list", {}, { persist: false });
+    const r1 = await callNotesTool(service, "create", { text: "first" }, { persist: false });
+    const r2 = await callNotesTool(service, "create", { text: "second" }, { persist: false });
+    await callNotesTool(service, "update", { id: r1.note.id, text: "updated first" }, { persist: false });
+    const result = await callNotesTool(service, "list", {}, { persist: false });
     expect(result.notes[0].id).toBe(r1.note.id);
     expect(result.sort).toBe("updated");
   });
 
   it("sorts by created when specified", async () => {
-    const r1 = await callNotesTool(service, "notes_create", { text: "first" }, { persist: false });
-    const r2 = await callNotesTool(service, "notes_create", { text: "second" }, { persist: false });
-    await callNotesTool(service, "notes_update", { id: r1.note.id, text: "updated first" }, { persist: false });
-    const result = await callNotesTool(service, "notes_list", { sort: "created" }, { persist: false });
+    const r1 = await callNotesTool(service, "create", { text: "first" }, { persist: false });
+    const r2 = await callNotesTool(service, "create", { text: "second" }, { persist: false });
+    await callNotesTool(service, "update", { id: r1.note.id, text: "updated first" }, { persist: false });
+    const result = await callNotesTool(service, "list", { sort: "created" }, { persist: false });
     expect(result.sort).toBe("created");
     expect(result.notes).toHaveLength(2);
     expect(result.notes.map((n) => n.id)).toContain(r1.note.id);
@@ -110,26 +110,26 @@ describe("callNotesTool - notes_list", () => {
   });
 });
 
-describe("callNotesTool - notes_get", () => {
+describe("callNotesTool - get", () => {
   it("returns a note by id", async () => {
-    const created = await callNotesTool(service, "notes_create", { text: "find me" }, { persist: false });
-    const result = await callNotesTool(service, "notes_get", { id: created.note.id }, { persist: false });
+    const created = await callNotesTool(service, "create", { text: "find me" }, { persist: false });
+    const result = await callNotesTool(service, "get", { id: created.note.id }, { persist: false });
     expect(result.note.text).toBe("find me");
   });
 
   it("rejects missing id", async () => {
-    await expect(callNotesTool(service, "notes_get", {}, { persist: false })).rejects.toThrow();
+    await expect(callNotesTool(service, "get", {}, { persist: false })).rejects.toThrow();
   });
 
   it("rejects non-existent id (service throws)", async () => {
-    await expect(callNotesTool(service, "notes_get", { id: 999 }, { persist: false })).rejects.toThrow("Note not found");
+    await expect(callNotesTool(service, "get", { id: 999 }, { persist: false })).rejects.toThrow("Note not found");
   });
 });
 
-describe("callNotesTool - notes_update", () => {
+describe("callNotesTool - update", () => {
   it("updates text", async () => {
-    const created = await callNotesTool(service, "notes_create", { text: "original", tags: ["t1"] }, { persist: false });
-    const result = await callNotesTool(service, "notes_update", {
+    const created = await callNotesTool(service, "create", { text: "original", tags: ["t1"] }, { persist: false });
+    const result = await callNotesTool(service, "update", {
       id: created.note.id,
       text: "updated",
     }, { persist: false });
@@ -138,8 +138,8 @@ describe("callNotesTool - notes_update", () => {
   });
 
   it("updates tags", async () => {
-    const created = await callNotesTool(service, "notes_create", { text: "original", tags: ["t1"] }, { persist: false });
-    const result = await callNotesTool(service, "notes_update", {
+    const created = await callNotesTool(service, "create", { text: "original", tags: ["t1"] }, { persist: false });
+    const result = await callNotesTool(service, "update", {
       id: created.note.id,
       tags: ["new"],
     }, { persist: false });
@@ -148,26 +148,26 @@ describe("callNotesTool - notes_update", () => {
   });
 });
 
-describe("callNotesTool - notes_delete", () => {
+describe("callNotesTool - delete", () => {
   it("deletes a note", async () => {
-    const created = await callNotesTool(service, "notes_create", { text: "delete me" }, { persist: false });
-    const result = await callNotesTool(service, "notes_delete", { id: created.note.id }, { persist: false });
+    const created = await callNotesTool(service, "create", { text: "delete me" }, { persist: false });
+    const result = await callNotesTool(service, "delete", { id: created.note.id }, { persist: false });
     expect(result.deleted.id).toBe(created.note.id);
     expect(result.totalNotes).toBe(0);
   });
 });
 
-describe("callNotesTool - notes_search", () => {
+describe("callNotesTool - search", () => {
   it("finds matching notes", async () => {
-    await callNotesTool(service, "notes_create", { text: "# Project meeting" }, { persist: false });
-    await callNotesTool(service, "notes_create", { text: "Shopping list" }, { persist: false });
-    const result = await callNotesTool(service, "notes_search", { query: "project" }, { persist: false });
+    await callNotesTool(service, "create", { text: "# Project meeting" }, { persist: false });
+    await callNotesTool(service, "create", { text: "Shopping list" }, { persist: false });
+    const result = await callNotesTool(service, "search", { query: "project" }, { persist: false });
     expect(result.results).toHaveLength(1);
     expect(result.total).toBe(1);
   });
 
   it("rejects missing query", async () => {
-    await expect(callNotesTool(service, "notes_search", {}, { persist: false })).rejects.toThrow();
+    await expect(callNotesTool(service, "search", {}, { persist: false })).rejects.toThrow();
   });
 });
 

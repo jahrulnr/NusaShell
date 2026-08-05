@@ -4,14 +4,14 @@ import { MAIL_TOOL_NAMES } from "../mcp/tool-catalog.js";
 describe("Mail MCP tool catalog", () => {
   it("exposes only the explicit read-only milestone tools", () => {
     expect(MAIL_TOOL_NAMES).toEqual([
-      "mail_accounts",
-      "mail_account_get",
-      "mail_account_test",
-      "mail_mailboxes",
-      "mail_inbox",
-      "mail_messages",
-      "mail_search",
-      "mail_read",
+      "accounts",
+      "account_get",
+      "account_test",
+      "mailboxes",
+      "inbox",
+      "messages",
+      "search",
+      "read",
     ]);
   });
 

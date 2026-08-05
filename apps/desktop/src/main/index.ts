@@ -23,7 +23,7 @@ import { AcpProviderResolverAdapter } from "./acp-provider-resolver-adapter.js";
 import { refreshAcpAuthStatuses } from "./acp-auth.js";
 import { flattenModelCatalog } from "./ai-provider-registry.js";
 import { AgentConversationStore } from "./agent-conversation-store.js";
-import { buildAssistantMessage } from "../shared/agent-message-builder.js";
+import { buildAssistantMessage, buildInterruptedMessage } from "../shared/agent-message-builder.js";
 import { MailSettingsStore } from "./mail-settings.js";
 import {
   AppBehaviorStore,
@@ -195,6 +195,7 @@ async function startBackend(): Promise<BootstrapResult> {
       apiKey: activeProvider?.apiKey,
       maxToolRounds: aiSettings.maxToolRounds,
       maxRepeatedToolCalls: aiSettings.maxRepeatedToolCalls,
+      maxAutoContinues: aiSettings.maxAutoContinues,
       softRecoverAttempts: aiRuntimeConfig.softRecoverAttempts,
       maxConcurrentToolCalls: aiRuntimeConfig.maxConcurrentToolCalls,
       strategy: aiSettings.strategy,
@@ -247,11 +248,39 @@ async function startBackend(): Promise<BootstrapResult> {
               previousOffset + Math.max(0, result.compaction.compactedMessageCount - summaryMessageCount),
             ),
             via: result.compaction.via,
+            compactionCount: (previous?.compactionCount ?? (previous?.summary ? 1 : 0)) + 1,
           });
         }
         logTail.add("main", "debug", `Sealed assistant turn for ${conversationId} trace=${result.traceId}`);
       } catch (error) {
         logTail.add("main", "error", `sealAgentTurn failed for ${conversationId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+    sealAgentInterrupted: async (conversationId, partial, options) => {
+      const store = agentConversationStore;
+      if (!store) {
+        logTail.add("main", "warn", `sealAgentInterrupted: store not ready for conversation ${conversationId}`);
+        return;
+      }
+      try {
+        const message = buildInterruptedMessage(partial, { interruptReason: options.interruptReason });
+        if (options.resume) {
+          await store.replaceLastInterrupted(conversationId, message);
+        } else {
+          await store.appendMessage(conversationId, message);
+        }
+        logTail.add(
+          "main",
+          "info",
+          `Sealed interrupted turn for ${conversationId} trace=${partial.traceId} reason=${options.interruptReason} rounds=${partial.rounds}`,
+        );
+      } catch (error) {
+        logTail.add(
+          "main",
+          "error",
+          `sealAgentInterrupted failed for ${conversationId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        throw error;
       }
     },
   });
@@ -292,6 +321,7 @@ function createIpcContext(): IpcContext {
     skillCuratorScheduler: c.skillCuratorScheduler,
     backgroundReviewScheduler: c.backgroundReviewScheduler,
     learningGraph: c.learningGraph,
+    agentToolGateway: c.agentToolGateway,
     configureBackgroundReview: (...args) => c.configureBackgroundReview(...args),
     configureCurator: (...args) => c.configureCurator(...args),
     configureCuratorScheduler: (...args) => c.configureCuratorScheduler(...args),

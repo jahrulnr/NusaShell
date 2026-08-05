@@ -15,6 +15,7 @@ import {
   addUsage,
   hasUsage,
   hasTurnProgress,
+  hasResumableProgress,
   estimateMessageTokens,
   normalizeMaxRounds,
   normalizeSoftRecover,
@@ -92,6 +93,8 @@ export class AgentTurnRunner {
     const maxToolRounds = normalizeMaxRounds(input.maxToolRounds ?? this.defaultMaxToolRounds);
     const compacted = await this.compactor.compact(input, traceId);
     const messages: AgentMessage[] = [...compacted.messages];
+    /** Latest memento checkpoint (pre-turn and/or mid-turn). */
+    let compactionCheckpoint = compacted.checkpoint;
     const toolCalls: AgentToolExecution[] = [];
     const repeatedCalls = new Map<string, number>();
     const usage = emptyUsage();
@@ -102,6 +105,12 @@ export class AgentTurnRunner {
     const steps: AgentTurnStep[] = [];
     let emptyResponseNudged = false;
     let softRecoverUsed = 0;
+    // Live-streamed text/reasoning buffers. Reset when a provider.complete
+    // attempt succeeds (full response accepted). On mid-stream failure, these
+    // carry already-painted paragraphs into buildTurnPartial so the UI/seal
+    // path does not lose them.
+    let liveText = "";
+    let liveReasoning = "";
 
     this.deps.logger?.info("Agent turn started traceId=%s provider=%s", traceId, this.deps.provider.id);
     const publishContext = () => {
@@ -115,16 +124,17 @@ export class AgentTurnRunner {
     // Tracks the in-flight provider/tool round so mid-turn failures (allowlist,
     // listTools, 4xx/5xx after soft recover, etc.) can attach a resume snapshot.
     let activeRound = 0;
+    const roundsUnlimited = maxToolRounds === 0;
     try {
-      for (let round = 1; round <= maxToolRounds; round += 1) {
+      for (let round = 1; roundsUnlimited || round <= maxToolRounds; round += 1) {
         activeRound = round;
         assertTurnActive(input.signal, traceId);
         const tools = await this.deps.toolGateway.listTools(input.pluginIds, traceId);
         assertTurnActive(input.signal, traceId);
         const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
-        // Pre-sample gate (Codex pre_sampling): re-estimate before each
-        // provider.complete and shrink if token budget exceeded. This catches
-        // growth from prior tool rounds without waiting for the next turn.
+        // Pre-sample gate: light shrink only (trim tool leftovers). Full
+        // mid-turn memento runs after tools settle so FC/FCO pairs are never
+        // half-open across a compact boundary.
         this.compactor.shrink(messages, input.modelCapabilities, input.model);
         let response;
         for (;;) {
@@ -138,18 +148,50 @@ export class AgentTurnRunner {
               ...(input.effort ? { effort: input.effort } : {}),
               ...(input.modelCapabilities ? { modelCapabilities: input.modelCapabilities } : {}),
               ...(input.signal ? { signal: input.signal } : {}),
-              ...(input.onTextDelta ? { onTextDelta: input.onTextDelta } : {}),
-              ...(input.onReasoningDelta ? { onReasoningDelta: input.onReasoningDelta } : {}),
+              // Always wrap onTextDelta/onReasoningDelta so live-streamed
+              // text is captured into liveText/liveReasoning even when the
+              // caller did not provide a delta callback. On success the
+              // buffers are cleared; on failure they feed buildTurnPartial.
+              onTextDelta: (delta: string) => {
+                liveText += delta;
+                input.onTextDelta?.(delta);
+              },
+              onReasoningDelta: (delta: string) => {
+                liveReasoning += delta;
+                input.onReasoningDelta?.(delta);
+              },
             });
+            // Success: clear live buffers for the next attempt/round.
+            liveText = "";
+            liveReasoning = "";
             break;
           } catch (error) {
             if (input.signal?.aborted) {
-              throw new ApplicationError("AGENT_TURN_CANCELLED", "Agent turn cancelled", { traceId });
+              const cancelDetails: Record<string, unknown> = { traceId };
+              if (hasResumableProgress(toolCalls, steps, liveText, liveReasoning)) {
+                cancelDetails.partial = buildTurnPartial(
+                  traceId, round - 1, toolCalls, steps, messages,
+                  model, providerId, api, reasoning, usage,
+                  liveText, liveReasoning,
+                );
+              }
+              throw new ApplicationError("AGENT_TURN_CANCELLED", "Agent turn cancelled", cancelDetails);
             }
             // Soft recover covers transient provider failures (incl. exhausted
-            // HTTP 5xx / retriable 4xx budgets) when tool work already exists.
-            if (softRecoverUsed < this.softRecoverAttempts && hasTurnProgress(toolCalls, steps, messages)) {
+            // HTTP 5xx / retriable 4xx budgets) when in-turn tool work exists
+            // and the failed sample painted no live text/reasoning yet.
+            // Pure-text fails and mid-stream cuts after paint do NOT soft-
+            // recover (avoids rewrite of already-shown prose); they throw
+            // with partial so the UI can offer Continue / Resume.
+            const paintedLive = Boolean(liveText.trim()) || Boolean(liveReasoning.trim());
+            if (
+              softRecoverUsed < this.softRecoverAttempts
+              && hasTurnProgress(toolCalls, steps)
+              && !paintedLive
+            ) {
               softRecoverUsed += 1;
+              liveText = "";
+              liveReasoning = "";
               this.deps.logger?.warn(
                 "Agent soft recover %d/%d traceId=%s provider=%s round=%d",
                 softRecoverUsed, this.softRecoverAttempts, traceId, this.deps.provider.id, round,
@@ -163,10 +205,11 @@ export class AgentTurnRunner {
               traceId,
               cause,
             };
-            if (hasTurnProgress(toolCalls, steps, messages)) {
+            if (hasResumableProgress(toolCalls, steps, liveText, liveReasoning)) {
               details.partial = buildTurnPartial(
                 traceId, round - 1, toolCalls, steps, messages,
                 model, providerId, api, reasoning, usage,
+                liveText, liveReasoning,
               );
             }
             throw new ApplicationError("AGENT_PROVIDER_FAILED", `AI provider request failed: ${cause}`, details);
@@ -190,7 +233,7 @@ export class AgentTurnRunner {
           let text = response.text?.trim();
           if (!text) {
             this.deps.logger?.warn("Agent provider returned an empty response traceId=%s provider=%s round=%d", traceId, this.deps.provider.id, round);
-            if (!emptyResponseNudged && round < maxToolRounds) {
+            if (!emptyResponseNudged && (roundsUnlimited || round < maxToolRounds)) {
               emptyResponseNudged = true;
               this.deps.logger?.info("Agent nudged: empty response, requesting text or tool call traceId=%s round=%d", traceId, round);
               const reasoningOnly = Boolean(response.reasoning?.trim());
@@ -222,7 +265,7 @@ export class AgentTurnRunner {
             ...(api ? { api } : {}),
             ...(reasoning ? { reasoning } : {}),
             ...(hasUsage(usage) ? { usage } : {}),
-            ...(compacted.checkpoint ? { compaction: compacted.checkpoint } : {}),
+            ...(compactionCheckpoint ? { compaction: compactionCheckpoint } : {}),
           };
         }
 
@@ -241,7 +284,7 @@ export class AgentTurnRunner {
             ...(api ? { api } : {}),
             ...(reasoning ? { reasoning } : {}),
             ...(hasUsage(usage) ? { usage } : {}),
-            ...(compacted.checkpoint ? { compaction: compacted.checkpoint } : {}),
+            ...(compactionCheckpoint ? { compaction: compactionCheckpoint } : {}),
           };
         }
         if (duplicate === "nudge") {
@@ -273,9 +316,36 @@ export class AgentTurnRunner {
           ...(input.onToolCallStart ? { onToolCallStart: input.onToolCallStart } : {}),
           ...(input.onToolCallEnd ? { onToolCallEnd: input.onToolCallEnd } : {}),
         }, toolCalls, roundExecutions, messages);
-        // MidTurn gate (Codex post_sampling roll-over): after tool results are
-        // appended, shrink if the live messages array exceeds the token budget
-        // so the next provider.complete payload stays under the window.
+        // MidTurn memento (Codex post-tool roll-over): after tool results settle,
+        // if still over budget, replace history with users + summary and drop
+        // the tool graph. Old tool_call ids are intentionally invalid for the
+        // next sample — the model continues from the handoff, not open pairs.
+        // Shrink remains a light residual clamp after memento (or when under
+        // the budget threshold so compact() no-ops).
+        if (this.compactor.isOverBudget(messages, input.modelCapabilities, input.model)) {
+          const midTurn = await this.compactor.compact(
+            {
+              messages,
+              pluginIds: input.pluginIds,
+              ...(input.model ? { model: input.model } : {}),
+              ...(input.effort ? { effort: input.effort } : {}),
+              ...(input.modelCapabilities ? { modelCapabilities: input.modelCapabilities } : {}),
+              ...(input.signal ? { signal: input.signal } : {}),
+            },
+            traceId,
+          );
+          if (midTurn.checkpoint) {
+            messages.splice(0, messages.length, ...midTurn.messages);
+            compactionCheckpoint = midTurn.checkpoint;
+            this.deps.logger?.info(
+              "Agent mid-turn memento compaction traceId=%s round=%d via=%s retainedUsers=%d",
+              traceId,
+              round,
+              midTurn.checkpoint.via,
+              midTurn.checkpoint.retainedUserMessages?.length ?? 0,
+            );
+          }
+        }
         this.compactor.shrink(messages, input.modelCapabilities, input.model);
         publishContext();
         if (roundExecutions.length > 0) {
@@ -284,27 +354,56 @@ export class AgentTurnRunner {
         }
       }
 
+      // When unlimited (maxToolRounds === 0) the for-loop never falls through
+      // here — it only exits via a final answer, cancel, or unrecoverable
+      // error inside the loop body. This guard is defense-in-depth.
+      if (roundsUnlimited) {
+        throw new ApplicationError(
+          "AGENT_MAX_TOOL_ROUNDS",
+          "Agent exited the unlimited tool-round loop without a final answer",
+          {
+            traceId,
+            limit: 0,
+            partial: buildTurnPartial(
+              traceId,
+              activeRound,
+              toolCalls,
+              steps,
+              messages,
+            ),
+          },
+        );
+      }
       this.deps.logger?.warn("Agent turn reached tool-round limit traceId=%s provider=%s limit=%d", traceId, this.deps.provider.id, maxToolRounds);
-      return {
-        traceId,
-        text: "The agent reached the maximum tool rounds before producing a final answer.",
-        rounds: maxToolRounds,
-        toolCalls,
-        steps,
-        messages,
-        ...(model ? { model } : {}),
-        ...(providerId ? { providerId } : {}),
-        ...(api ? { api } : {}),
-        ...(reasoning ? { reasoning } : {}),
-        ...(hasUsage(usage) ? { usage } : {}),
-        ...(compacted.checkpoint ? { compaction: compacted.checkpoint } : {}),
-      };
+      // Surface as interrupted + resumable: returning a success answer used to
+      // seal a completed assistant, so "lanjut" became a brand-new turn that
+      // compacted the work into an empty "fresh session" handoff.
+      throw new ApplicationError(
+        "AGENT_MAX_TOOL_ROUNDS",
+        `Agent reached the maximum tool rounds (${maxToolRounds}) before producing a final answer`,
+        {
+          traceId,
+          limit: maxToolRounds,
+          partial: buildTurnPartial(
+            traceId,
+            maxToolRounds,
+            toolCalls,
+            steps,
+            messages,
+            model,
+            providerId,
+            api,
+            reasoning,
+            usage,
+          ),
+        },
+      );
     } catch (error) {
       // Provider soft-recover exhaustion already attaches partial. This catch
       // covers allowlist rejection, listTools failures, user cancel after tool
-      // progress, and other mid-turn ApplicationErrors so Retry can resume
-      // instead of restarting from scratch.
-      if (!hasTurnProgress(toolCalls, steps, messages)) throw error;
+      // or text progress, and other mid-turn ApplicationErrors so Retry/Continue
+      // can resume instead of restarting from scratch.
+      if (!hasResumableProgress(toolCalls, steps, liveText, liveReasoning)) throw error;
       rethrowWithTurnPartial(
         error,
         buildTurnPartial(
@@ -318,6 +417,8 @@ export class AgentTurnRunner {
           api,
           reasoning,
           usage,
+          liveText,
+          liveReasoning,
         ),
       );
     }

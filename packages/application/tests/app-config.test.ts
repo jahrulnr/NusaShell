@@ -24,10 +24,11 @@ describe("loadConfig", () => {
       userPrompt: "",
       timeoutMs: 60000,
       maxRepeatedToolCalls: 50,
+      maxAutoContinues: 10,
       softRecoverAttempts: 1,
       maxConcurrentToolCalls: 8,
       retry: { attemptBudget: 4, baseDelayMs: 250, maxDelayMs: 5000, jitter: 0.2 },
-      context: { compactionEnabled: true, maxInputTokens: 12000, reserveTokens: 3000, recentTurns: 4, summaryMaxChars: 12000 },
+      context: { compactionEnabled: true, maxInputTokens: 200_000, reserveTokens: 16_000, recentTurns: 4, summaryMaxChars: 12000 },
     });
   });
 
@@ -101,6 +102,7 @@ describe("loadConfig", () => {
         userPrompt: "",
         timeoutMs: 60000,
         maxRepeatedToolCalls: 50,
+        maxAutoContinues: 10,
         softRecoverAttempts: 1,
         maxConcurrentToolCalls: 8,
         retry: { attemptBudget: 3, baseDelayMs: 100, maxDelayMs: 900, jitter: 0.1 },

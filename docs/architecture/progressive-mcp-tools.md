@@ -1,8 +1,14 @@
 # Progressive MCP tools
 
-The agent must not receive every MCP schema at the start of a turn. One server
-may expose hundreds of tools while providers commonly impose function-count
-and prompt-size limits.
+The agent must not receive every MCP schema at the start of a turn for **idle**
+plugins. One server may expose hundreds of tools while providers commonly impose
+function-count and prompt-size limits. However, when a plugin is **running**,
+its full tool catalog (name + description + `inputSchema`) is injected into the
+Live MCP system block and auto-advertised in the provider `tools[]` array —
+trading progressive discovery for IDE-style completeness on active plugins.
+Progressive discovery remains the path for **starting** plugins (`mcp_enable`)
+and for **overflow/failure recovery** when a running plugin exceeds the 96-entry
+`tools[]` cap or a `listTools` call fails.
 
 ## Initial tool set
 
@@ -16,9 +22,16 @@ Every turn starts with thirteen shell-owned meta-tools:
   and removal for user plugin folders directly under `{userData}/plugins/`; jobs
   and background turns are denied, and bundled plugins are protected.
 - `tool_search` — search a running plugin's MCP tool names/descriptions with a
-  bounded result set.
+  bounded result set. Match mode is **token-OR**: the query is split on
+  whitespace and a tool matches when **any** token hits the name (+3) or
+  description (+1); results are sorted by score desc then name asc, capped at
+  20. Returns an envelope `{ pluginId, query, matchMode: "token_or", count,
+  matches, hint? }` — `count: 0` with `matches: []` and a `hint` is a valid
+  success (no tools matched), not a turn interrupt or failure. Whole-phrase
+  substring match was replaced because multi-keyword queries like "read file
+  list directory terminal" silently returned zero hits.
 - `tool_list` — list all tool names and descriptions from a running MCP plugin
-  without a search query.
+  without a search query. Returns `{ pluginId, count, tools }`.
 - `tool_schema` — return one tool schema and advertise that concrete tool for
   the current turn (optional when recalling a known `mcp_*` name on a running
   plugin).
@@ -44,7 +57,13 @@ Every turn starts with thirteen shell-owned meta-tools:
 the rest of the current turn so the provider can call it through the typed
 broker path. Grants are scoped by turn trace ID and cleared in a `finally`
 cleanup, so concurrent conversations cannot share advertised catalogs and the
-catalog cannot grow across turns.
+catalog cannot grow across turns. When a plugin is **running**, `listTools`
+auto-seeds routes for every tool on that plugin (same shape as `grantTool`),
+so the provider `tools[]` array includes them without a prior `tool_schema`
+call. Auto-seeded routes are also persisted to the conversation sticky store
+so auto-continue turns inherit them. The provider `tools[]` array is hard-capped
+at 96 MCP tool entries beyond meta-tools; overflow names are listed in the Live
+MCP block as "present but not in tools[] — call via known name / `tool_schema`."
 
 The model may also call a previously used `mcp_<plugin>_<tool>` name **without**
 a prior grant when that plugin is already `running`. The gateway lazily resolves

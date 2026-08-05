@@ -6,6 +6,7 @@ const STATIC_PROMPT_FILES = ["system.md", "mcp-tools.md"] as const;
 const DEVELOPER_PROMPT_FILE = "developer.md";
 const COMPACT_PROMPT_FILE = "compact.md";
 const SUBAGENT_PROMPT_FILE = "subagent.md";
+const CONTINUE_PROMPT_FILE = "continue.md";
 const REVIEW_PROMPT_FILES: Record<ReviewPromptKind, string> = {
   memory: "memory-review.md",
   skill: "skill-review.md",
@@ -22,6 +23,7 @@ export class FilesystemPromptLoader implements PromptLoaderPort {
   private cachedPrompts: readonly AgentPrompt[] | undefined;
   private cachedCompact: string | undefined | null;
   private cachedSubagent: string | undefined | null;
+  private cachedContinue: string | undefined | null;
   private readonly cachedReview = new Map<ReviewPromptKind, string>();
 
   constructor(private readonly promptsRoot: string) {}
@@ -61,6 +63,19 @@ export class FilesystemPromptLoader implements PromptLoaderPort {
       return this.cachedSubagent;
     } catch {
       this.cachedSubagent = null;
+      return undefined;
+    }
+  }
+
+  async loadContinuePrompt(): Promise<string | undefined> {
+    if (this.cachedContinue !== undefined && this.cachedContinue !== null) {
+      return this.cachedContinue ?? undefined;
+    }
+    try {
+      this.cachedContinue = await readFile(join(this.promptsRoot, CONTINUE_PROMPT_FILE), "utf8");
+      return this.cachedContinue;
+    } catch {
+      this.cachedContinue = null;
       return undefined;
     }
   }

@@ -65,6 +65,43 @@ describe("injectPrompts summary (structural)", () => {
     expect(summary.hasUserPrompt).toBe(true);
   });
 
+  it("detects skills catalog from structural flag", () => {
+    const { summary } = injectPrompts(prompts, baseVars, [], undefined, undefined, undefined, undefined, "## Available skills\n- `mcp-creator`: authoring.");
+    expect(summary.hasSkillsCatalog).toBe(true);
+  });
+
+  it("reports hasSkillsCatalog false when no catalog is passed", () => {
+    const { summary } = injectPrompts(prompts, baseVars, []);
+    expect(summary.hasSkillsCatalog).toBe(false);
+  });
+
+  it("places skills catalog after mcp-tools and before subagent/developer", () => {
+    const { messages } = injectPrompts(
+      prompts,
+      baseVars,
+      [],
+      undefined,
+      undefined,
+      "Subagent rules.",
+      undefined,
+      "## Available skills\n- `mcp-creator`: authoring.",
+    );
+    const systemContents = messages.filter((m) => m.role === "system").map((m) => m.content as string);
+    const catalogIdx = systemContents.findIndex((c) => c.startsWith("## Available skills"));
+    const mcpToolsIdx = systemContents.findIndex((c) => c === "Use tool_list.");
+    const subagentIdx = systemContents.findIndex((c) => c === "Subagent rules.");
+    const developerIdx = systemContents.findIndex((c) => c.startsWith("Date:"));
+    expect(mcpToolsIdx).toBeLessThan(catalogIdx);
+    expect(catalogIdx).toBeLessThan(subagentIdx);
+    expect(catalogIdx).toBeLessThan(developerIdx);
+  });
+
+  it("includes hasSkillsCatalog in the debug line", () => {
+    const { summary } = injectPrompts(prompts, baseVars, [], undefined, undefined, undefined, undefined, "## Available skills");
+    const line = summary.toDebugLine("trace-xyz");
+    expect(line).toContain("hasSkillsCatalog=true");
+  });
+
   it("formats a debug line with all fields", () => {
     const vars: PromptVars = {
       ...baseVars,

@@ -58,7 +58,7 @@ window.shell = {
     delete: async () => ({ accounts: [], canPersistCredentials: true }),
   },
   callTool: async (_pluginId, name, args) => {
-    const data = name === "mail_mailboxes"
+    const data = name === "mailboxes"
       ? {
           accountId: "work",
           mailboxes: [
@@ -67,7 +67,7 @@ window.shell = {
             { id: "Sent", name: "Sent", specialUse: "\\Sent", total: 31, unread: 0 },
           ],
         }
-      : name === "mail_read"
+      : name === "read"
         ? {
             message: {
               ...messages.find((message) => message.uid === args.uid),

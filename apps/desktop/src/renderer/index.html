@@ -181,10 +181,14 @@
             <h1 class="page-title">Agent</h1>
             <p class="subtitle">Ask the shell to work with your files, plugins, and tools.</p>
           </div>
+          <button class="agent-mobile-conversations-btn" id="agent-mobile-conversations-btn" type="button" aria-expanded="false" aria-controls="agent-conversations" title="Browse conversations">
+            <span aria-hidden="true">☰</span><span>Rooms</span>
+          </button>
         </div>
 
         <div class="agent-shell" id="agent-shell">
-          <aside class="agent-conversations" aria-labelledby="agent-conversations-title">
+          <div class="agent-mobile-conversations-overlay" id="agent-mobile-conversations-overlay" hidden></div>
+          <aside class="agent-conversations" id="agent-conversations" aria-labelledby="agent-conversations-title">
             <div class="agent-conversations-head">
               <div>
                 <div class="agent-panel-label" id="agent-conversations-title">Conversations</div>
@@ -204,28 +208,61 @@
               <span class="acp-status-provider" id="acp-status-provider">—</span>
               <span class="acp-status-chip" id="acp-status-chip">● IDLE</span>
             </div>
-            <div class="agent-thread" id="agent-thread" role="log" aria-live="polite" aria-label="Agent conversation">
+            <section class="agent-room-info" id="agent-room-info" aria-label="Conversation diagnostics" hidden>
+              <button class="agent-room-info-trigger" id="agent-room-info-trigger" type="button" aria-label="Room info" aria-expanded="false" aria-controls="agent-room-info-popover" title="Room info">
+                <span class="agent-room-info-trigger-icon" aria-hidden="true">i</span>
+              </button>
+              <div class="agent-room-info-popover" id="agent-room-info-popover" role="dialog" aria-label="Conversation diagnostics" hidden>
+                <div class="agent-room-info-popover-head">
+                  <div>
+                    <span class="agent-room-info-eyebrow">ROOM</span>
+                    <div class="agent-room-info-title" id="agent-room-info-title">Conversation details</div>
+                  </div>
+                  <button class="agent-room-info-close" id="agent-room-info-close" type="button" aria-label="Close conversation diagnostics">×</button>
+                </div>
+                <div class="agent-room-info-metrics" aria-live="polite">
+                  <span class="agent-room-info-metric"><span class="agent-room-info-label">Tools</span><strong id="agent-room-tool-count">0</strong></span>
+                  <span class="agent-room-info-metric"><span class="agent-room-info-label">Compactions</span><strong id="agent-room-compaction-count">0</strong></span>
+                  <button class="agent-room-info-id" id="agent-room-id-copy" type="button" title="Copy conversation ID">
+                    <span class="agent-room-info-label">ID</span><code id="agent-room-id">—</code><span class="agent-room-info-copy" aria-hidden="true">⧉</span>
+                  </button>
+                </div>
+              </div>
+            </section>
+            <div class="agent-thread" id="agent-thread" role="log" aria-live="off" aria-label="Agent conversation">
               <div class="agent-empty" id="agent-empty">
                 <div class="agent-empty-mark">✦</div>
                 <h2>Start a conversation</h2>
                 <p>Choose a model, then tell the shell what you need.</p>
               </div>
             </div>
+            <div class="agent-composer-stack" id="agent-composer-stack">
+            <div class="agent-attention-stack" id="agent-attention-stack" hidden aria-label="Action required from you" aria-live="polite">
+              <div class="agent-attention-head">
+                <span class="agent-attention-mark" aria-hidden="true">!</span>
+                <div>
+                  <div class="agent-attention-title">Action required</div>
+                  <div class="agent-attention-copy">The subagent is waiting for your permission or answer.</div>
+                </div>
+                <span class="agent-attention-count" id="agent-attention-count">1</span>
+              </div>
+              <div class="agent-attention-list" id="agent-attention-list"></div>
+            </div>
             <div class="agent-todo-strip" id="agent-todo-strip" hidden aria-label="Agent task checklist">
               <div class="agent-todo-strip-head">
-                <button class="agent-todo-strip-toggle" id="agent-todo-strip-toggle" type="button" aria-expanded="true" aria-controls="agent-todo-strip-list" title="Collapse/expand tasks">
-                  <span class="agent-todo-strip-chevron" aria-hidden="true">▾</span>
-                  <span class="agent-todo-strip-title">Tasks</span>
-                  <span class="agent-todo-strip-count" id="agent-todo-strip-count"></span>
+                <button class="agent-todo-strip-toggle" id="agent-todo-strip-toggle" type="button" aria-expanded="false" aria-controls="agent-todo-strip-list" title="Collapse/expand tasks">
+                  <span class="agent-todo-strip-chevron" aria-hidden="true">›</span>
+                  <span class="agent-todo-strip-count" id="agent-todo-strip-count">0 Tasks</span>
                 </button>
+                <span class="agent-todo-strip-meta" id="agent-todo-strip-meta"></span>
               </div>
-              <ol class="agent-todo-strip-list" id="agent-todo-strip-list" role="list"></ol>
+              <ol class="agent-todo-strip-list" id="agent-todo-strip-list" role="list" hidden></ol>
             </div>
             <div class="agent-tool-job-strip" id="agent-tool-job-strip" hidden aria-label="Background tool jobs">
               <div class="agent-tool-job-strip-head">
                 <span class="agent-tool-job-strip-title">Background jobs</span>
               </div>
-              <div class="agent-tool-job-list" id="agent-tool-job-list"></div>
+              <div class="agent-tool-job-list" id="agent-tool-job-list" role="list" aria-live="off"></div>
             </div>
             <form class="agent-composer" id="agent-form">
               <label class="sr-only" for="agent-input">Message to the agent</label>
@@ -261,6 +298,7 @@
                 </div>
               </div>
             </form>
+            </div>
           </div>
         </div>
 
@@ -284,7 +322,7 @@
                 </button>
               </div>
             </div>
-            <div class="agent-canvas-body" id="agent-canvas-body" aria-live="polite"></div>
+            <div class="agent-canvas-body" id="agent-canvas-body" aria-live="off"></div>
             <p class="agent-canvas-hint" id="agent-canvas-hint" hidden></p>
         </aside>
 
@@ -302,7 +340,7 @@
                 </button>
               </div>
             </div>
-            <div class="agent-subpane-body" id="agent-subpane-body" aria-live="polite"></div>
+            <div class="agent-subpane-body" id="agent-subpane-body" aria-live="off"></div>
         </aside>
         <div class="agent-delete-overlay" id="agent-delete-overlay" hidden></div>
         <div class="agent-delete-dialog" id="agent-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="agent-delete-title" hidden>
@@ -862,7 +900,7 @@
 
           <form class="settings-card" id="ai-limits-form">
             <div class="settings-card-title">Usage limits</div>
-            <label class="settings-field">Max tool rounds<input id="settings-ai-max-tool-rounds" type="number" min="1" max="100" value="50"><span class="settings-field-help">Maximum tool-call rounds per task.</span></label>
+            <label class="settings-field">Max tool rounds<input id="settings-ai-max-tool-rounds" type="number" min="1" max="10000" value="50"><span class="settings-field-help">Maximum tool-call rounds per task (1–10000 for long agentic work).</span></label>
             <label class="settings-field">Max repeated tool calls<input id="settings-ai-max-repeated-tool-calls" type="number" min="1" max="200" value="50"><span class="settings-field-help">Stop if the same tool call repeats this many times.</span></label>
             <div class="settings-row"><span>Applies without restart</span><button class="mini-btn" type="submit">Save limits</button></div>
           </form>
@@ -870,8 +908,8 @@
           <form class="settings-card" id="ai-context-form">
             <div class="settings-card-title">Context compaction</div>
             <div class="settings-row"><span>Enable compaction</span><label class="toggle"><input id="settings-ai-compaction" type="checkbox" checked><span class="toggle-slider"></span></label></div>
-            <label class="settings-field">Max input tokens<input id="settings-ai-max-input-tokens" type="number" min="1000" max="2000000" step="1000" value="12000"><span class="settings-field-help">Cost ceiling on the input prompt. Compaction triggers at 90% of the model window or when this budget is reached, whichever is smaller.</span></label>
-            <label class="settings-field">Reserve tokens<input id="settings-ai-reserve-tokens" type="number" min="0" max="1000000" step="500" value="3000"><span class="settings-field-help">Free headroom kept below the threshold. The trigger fires earlier when this is large; 0 leaves the 90% / 10k-free floor in control.</span></label>
+            <label class="settings-field">Max input tokens<input id="settings-ai-max-input-tokens" type="number" min="1000" max="2000000" step="1000" value="200000"><span class="settings-field-help">Hard cost ceiling on the compaction input estimate. The effective window is <code>min(this, model context window)</code>; the 200k unknown-model default does NOT override it. Compaction triggers at 90% of that window (minus reserve).</span></label>
+            <label class="settings-field">Reserve tokens<input id="settings-ai-reserve-tokens" type="number" min="0" max="1000000" step="500" value="16000"><span class="settings-field-help">Free headroom kept below the threshold. The trigger fires earlier when this is large; 0 leaves the 90% / 10k-free floor in control.</span></label>
             <label class="settings-field">Recent turns to keep<input id="settings-ai-recent-turns" type="number" min="1" max="100" value="4"><span class="settings-field-help">Soft preference for how many recent user turns to keep verbatim. Compaction still runs when the token budget is exceeded regardless of this value.</span></label>
             <label class="settings-field">Summary max characters<input id="settings-ai-summary-max-chars" type="number" min="100" max="1000000" step="100" value="12000"><span class="settings-field-help">Maximum character length of the compacted summary.</span></label>
             <div class="settings-row"><span>Applies without restart</span><button class="mini-btn" type="submit">Save context</button></div>

@@ -54,6 +54,35 @@ describe("AgentConversationStore — subagent runs", () => {
     expect(updated.subagentRuns?.[0]).toMatchObject({ status: "ok", summary: "Done" });
   });
 
+  it("clears activeSubagentRunId when the active run goes terminal (fail)", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-subagent-"));
+    const store = new AgentConversationStore(join(root, "conversations.json"));
+    const conv = await store.create();
+
+    const run: AgentSubagentRun = {
+      id: "run-2b",
+      conversationId: conv.id,
+      sourceMessageId: "0",
+      runId: "trace-2b",
+      providerId: "devin",
+      prompt: "Deep dive",
+      status: "running",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await store.upsertSubagentRun(conv.id, run);
+    await store.setActiveSubagentRun(conv.id, "trace-2b");
+    const updated = await store.updateSubagentRunStatus(conv.id, "trace-2b", "fail", {
+      error: "Subagent run did not finish before the parent turn ended.",
+    });
+    expect(updated.subagentRuns?.[0]).toMatchObject({
+      status: "fail",
+      error: "Subagent run did not finish before the parent turn ended.",
+    });
+    expect(updated.activeSubagentRunId).toBeUndefined();
+  });
+
   it("clears active subagent run id", async () => {
     const root = await mkdtemp(join(tmpdir(), "nusashell-subagent-"));
     const store = new AgentConversationStore(join(root, "conversations.json"));

@@ -77,6 +77,28 @@ export function requireRecord(value: unknown, message: string): Record<string, u
   return value;
 }
 
+/**
+ * Builds a non-transient AgentProviderHttpError for a 200 response whose body
+ * is structurally invalid (missing choices/output/content). Includes a snippet
+ * of the parsed payload so the caller (and logs) can see what the provider
+ * actually returned instead of a generic "does not contain a completion choice".
+ */
+export function malformedResponseError(message: string, payload: unknown): AgentProviderHttpError {
+  let snippet: string;
+  try {
+    snippet = safeSnippet(JSON.stringify(payload));
+  } catch {
+    snippet = safeSnippet(String(payload));
+  }
+  return new AgentProviderHttpError(
+    `${message}: ${snippet}`,
+    200,
+    false,
+    0,
+    "http_status",
+  );
+}
+
 export function record(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {};
 }
@@ -212,6 +234,43 @@ export function timeoutSignal(timeoutMs: number, parent: AbortSignal | undefined
     timedOut: () => didTimeout,
     dispose: () => {
       clearTimeout(timer);
+      parent?.removeEventListener("abort", onParentAbort);
+    },
+  };
+}
+
+/**
+ * Idle-reset timeout for SSE streaming. Unlike `timeoutSignal` (wall-clock),
+ * this timer resets on every `reset()` call — ideally after each successful
+ * `reader.read()` chunk. Fires only when the stream stalls for `timeoutMs`
+ * with no data. Links to `parent` for user-cancel propagation.
+ */
+export function createIdleTimeout(timeoutMs: number, parent?: AbortSignal): {
+  readonly signal: AbortSignal;
+  readonly reset: () => void;
+  readonly dispose: () => void;
+  readonly timedOut: () => boolean;
+} {
+  const controller = new AbortController();
+  let didTimeout = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const onParentAbort = () => controller.abort(parent?.reason);
+  if (parent?.aborted) onParentAbort();
+  else parent?.addEventListener("abort", onParentAbort, { once: true });
+  const arm = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      didTimeout = true;
+      controller.abort(new Error("Provider request timed out"));
+    }, Math.max(1, timeoutMs));
+  };
+  arm();
+  return {
+    signal: controller.signal,
+    reset: arm,
+    timedOut: () => didTimeout,
+    dispose: () => {
+      if (timer) clearTimeout(timer);
       parent?.removeEventListener("abort", onParentAbort);
     },
   };
@@ -355,7 +414,12 @@ export function parseRetryAfterMs(value: string | null, now = Date.now()): numbe
 export async function abortableSleep(delayMs: number, signal?: AbortSignal): Promise<void> {
   if (delayMs <= 0) return;
   await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, delayMs);
-    signal?.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
+    const onAbort = () => { clearTimeout(timer); resolve(); };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    if (signal?.aborted) { clearTimeout(timer); resolve(); return; }
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
