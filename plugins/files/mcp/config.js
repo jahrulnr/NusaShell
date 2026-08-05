@@ -65,3 +65,35 @@ export function resolvePath(root, input) {
   }
   return path.resolve(root, input);
 }
+
+/**
+ * Normalize separators to `/` so agent-facing relative paths are stable on
+ * Windows (`\`) and Unix.
+ * @param {string} value
+ * @returns {string}
+ */
+export function toPosixPath(value) {
+  if (!value) return value;
+  return String(value).replace(/\\/g, "/");
+}
+
+/**
+ * Workspace-relative path with POSIX separators.
+ * @param {string} root
+ * @param {string} absolutePath
+ * @param {string} [fallback=""] used when `path.relative` is empty
+ * @returns {string}
+ */
+export function relativePosix(root, absolutePath, fallback = "") {
+  const rel = path.relative(root, absolutePath);
+  return toPosixPath(rel || fallback);
+}
+
+/**
+ * Split text into lines accepting both LF and CRLF without leaving trailing CR.
+ * @param {string} text
+ * @returns {string[]}
+ */
+export function splitLines(text) {
+  return text.split(/\r?\n/);
+}

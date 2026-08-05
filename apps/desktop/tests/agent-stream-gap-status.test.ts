@@ -41,7 +41,7 @@ describe("AgentConversationController — stream gap status surface", () => {
     const status = document.querySelector<HTMLSpanElement>("#agent-provider-status")!;
     const originalText = status.textContent;
     controller.activeTraceId = "trace-gap-1";
-    controller.turnPending = true;
+    controller.pendingTurnConversations.add("test-turn");
 
     // Invoke the agent-path onStreamGap handler directly.
     // We simulate the gap by calling the internal surface method.
@@ -56,7 +56,7 @@ describe("AgentConversationController — stream gap status surface", () => {
     controller.getActiveModel = () => ({ key: "m1", contextWindow: 8000 } as never);
     const status = document.querySelector<HTMLSpanElement>("#agent-provider-status")!;
     controller.activeTraceId = "trace-gap-2";
-    controller.turnPending = true;
+    controller.pendingTurnConversations.add("test-turn");
 
     controller.surfaceStreamGap("trace-gap-2", 3);
     expect(status.classList.contains("is-stream-gap")).toBe(true);
@@ -70,7 +70,7 @@ describe("AgentConversationController — stream gap status surface", () => {
     const controller = new AgentConversationController({} as never);
     const status = document.querySelector<HTMLSpanElement>("#agent-provider-status")!;
     controller.activeTraceId = "trace-active";
-    controller.turnPending = true;
+    controller.pendingTurnConversations.add("test-turn");
 
     controller.surfaceStreamGap("trace-other", 1);
     expect(status.classList.contains("is-stream-gap")).toBe(false);

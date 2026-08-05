@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { FILES_TOOL_NAMES } from "./tool-catalog.js";
+import { ContextEngine } from "./context-engine.js";
 
 const filePath = z.string().trim().min(1).max(4096);
 const rootPath = z.string().trim().min(0).max(4096).default("");
@@ -41,6 +42,20 @@ const schemas = {
   append: z.object({ path: filePath, content: z.string().max(10 * 1024 * 1024) }).strict(),
   exists: z.object({ path: filePath }).strict(),
   touch: z.object({ path: filePath, createParents: z.boolean().default(true), updateOnly: z.boolean().default(false) }).strict(),
+  context_map: z.object({
+    path: rootPath,
+    budget: z.number().int().min(64).max(8192).default(1024),
+    activeFile: z.string().trim().min(1).max(4096).optional(),
+    query: z.string().trim().min(1).max(500).optional(),
+    maxFiles: z.number().int().min(1).max(20000).optional(),
+    refresh: z.boolean().default(false),
+  }).strict(),
+  detect_stack: z.object({ path: rootPath }).strict(),
+  list_symbols: z.object({
+    path: filePath.optional(),
+    query: z.string().trim().min(1).max(500).optional(),
+    limit: z.number().int().min(1).max(100).default(20),
+  }).strict(),
 };
 
 export const FILES_TOOLS = Object.freeze([
@@ -126,16 +141,40 @@ export const FILES_TOOLS = Object.freeze([
     createParents: { type: "boolean", description: "Create parent directories if needed (default true).", default: true },
     updateOnly: { type: "boolean", description: "Only update timestamps of an existing file; throw if it doesn't exist.", default: false },
   }, ["path"], false),
+  descriptor("context_map", "Build a token-budgeted markdown map of the workspace: stack classification, the top files ranked by Personalized PageRank over the symbol reference graph, and elided signatures (bodies replaced with ⋮). Deterministic — no LLM calls. Call this first when orienting in an unfamiliar codebase or before planning edits. Symbol tags are cached by file mtime/size across calls; pass refresh=true only after large external changes. Returns { map, stack, ranks, stats }.", {
+    path: stringProperty("Directory to map, relative to the files plugin root. Empty string maps the whole root.", ""),
+    budget: integerProperty(64, 8192, 1024, "Approximate token budget for the markdown map (~4 chars/token). The top-ranked files are binary-searched to fit."),
+    activeFile: { type: "string", description: "Workspace-relative file currently in focus; boosted 50x in Personalized PageRank so its dependency neighborhood ranks higher." },
+    query: { type: "string", description: "Space-separated symbol-name terms; files defining matching symbols get a 10x rank boost." },
+    maxFiles: integerProperty(1, 20000, undefined, "Scan cap for walked code/doc files (default 20000). .gitignore/.ignore and common build dirs are always excluded."),
+    refresh: { type: "boolean", description: "Bypass the mtime/size symbol cache and re-extract every file.", default: false },
+  }),
+  descriptor("detect_stack", "Classify the workspace from manifest files (package.json, Cargo.toml, pyproject.toml, go.mod, ...): category (coding / documentation / hybrid-monorepo), languages, key framework dependencies, and package.json scripts. Fast — reads manifests only, no full tree walk. Use to learn which build/test commands exist before running anything.", {
+    path: stringProperty("Directory to classify, relative to the files plugin root. Empty string classifies the root.", ""),
+  }),
+  descriptor("list_symbols", "List symbol definitions (class/function/const/type with kind, line, and signature) for one file, or across the top-ranked files whose definitions match a query. Much cheaper than reading whole files — use it to locate definitions before targeted read/patch calls. Pass either path (single file) or query (workspace-wide search).", {
+    path: { type: "string", description: "Single file relative to the files plugin root. Omit to search by query instead." },
+    query: { type: "string", description: "Case-insensitive symbol-name filter; returns matching definitions from the top PageRanked files. Required when path is omitted." },
+    limit: integerProperty(1, 100, 20, "Maximum number of files returned in query mode."),
+  }),
 ]);
 
 if (FILES_TOOLS.map((tool) => tool.name).join(",") !== FILES_TOOL_NAMES.join(",")) {
   throw new Error("Files tool descriptors are out of sync with the canonical catalog");
 }
 
-export async function callFilesTool(service, name, rawArguments = {}) {
+export async function callFilesTool(service, name, rawArguments = {}, contextEngine = null) {
   const schema = schemas[name];
   if (!schema) throw new Error(`Unknown files tool: ${name}`);
   const input = schema.parse(rawArguments ?? {});
+
+  // The context engine is injected by the server so the tag cache persists
+  // across calls; the lazy fallback keeps the dispatcher usable without one.
+  let engine = contextEngine;
+  function getContextEngine() {
+    if (!engine) engine = new ContextEngine(service.root);
+    return engine;
+  }
 
   switch (name) {
     case "list":
@@ -188,6 +227,23 @@ export async function callFilesTool(service, name, rawArguments = {}) {
       return await service.existsFile(input.path);
     case "touch":
       return await service.touchFile(input.path, { createParents: input.createParents, updateOnly: input.updateOnly });
+    case "context_map":
+      return { path: input.path, ...(await getContextEngine().contextMap({
+        path: input.path,
+        budget: input.budget,
+        activeFile: input.activeFile,
+        query: input.query,
+        maxFiles: input.maxFiles,
+        refresh: input.refresh,
+      })) };
+    case "detect_stack":
+      return { path: input.path, ...(await getContextEngine().detectStack(input.path)) };
+    case "list_symbols":
+      return await getContextEngine().listSymbols({
+        path: input.path,
+        query: input.query,
+        limit: input.limit,
+      });
     default:
       throw new Error(`Unknown files tool: ${name}`);
   }

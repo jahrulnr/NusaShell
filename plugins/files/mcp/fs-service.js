@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { resolvePath, validateRoot } from "./config.js";
+import { resolvePath, validateRoot, relativePosix, splitLines } from "./config.js";
 
 const MAX_READ_BYTES = 10 * 1024 * 1024;
 const MAX_TREE_DEPTH = 10;
@@ -241,7 +241,7 @@ export class FileService {
         if (!stat) return null;
         return {
           name: entry.name,
-          path: path.relative(this.root, entryPath) || entry.name,
+          path: relativePosix(this.root, entryPath, entry.name),
           isDir: stat.isDirectory(),
           isFile: stat.isFile(),
           isSymlink: entry.isSymbolicLink(),
@@ -284,7 +284,7 @@ export class FileService {
         if (!includeFiles && !isDir) return null;
         const node = {
           name: entry.name,
-          path: path.relative(this.root, entryPath) || entry.name,
+          path: relativePosix(this.root, entryPath, entry.name),
           isDir,
           size: stat.isFile() ? stat.size : 0,
           modified: stat.mtime.toISOString(),
@@ -327,7 +327,7 @@ export class FileService {
       throw new Error(`File is binary (type=${detected.type}); read only supports text. Use info to inspect.`);
     }
     const content = await fs.readFile(filePath, "utf8");
-    const lines = content.split("\n");
+    const lines = splitLines(content);
 
     let selected;
     let truncatedReason = null;
@@ -366,7 +366,7 @@ export class FileService {
     const filePath = resolvePath(this.root, input);
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await this._atomicWrite(filePath, content);
-    return { path: path.relative(this.root, filePath) || path.basename(filePath), written: true };
+    return { path: relativePosix(this.root, filePath, path.basename(filePath)), written: true };
   }
 
   /**
@@ -376,7 +376,7 @@ export class FileService {
   async makeDir(input) {
     const dirPath = resolvePath(this.root, input);
     await fs.mkdir(dirPath, { recursive: true });
-    return { path: path.relative(this.root, dirPath) || path.basename(dirPath), created: true };
+    return { path: relativePosix(this.root, dirPath, path.basename(dirPath)), created: true };
   }
 
   /**
@@ -388,7 +388,7 @@ export class FileService {
     const dst = resolvePath(this.root, destination);
     await fs.mkdir(path.dirname(dst), { recursive: true });
     await fs.rename(src, dst);
-    return { from: path.relative(this.root, src), to: path.relative(this.root, dst), moved: true };
+    return { from: relativePosix(this.root, src), to: relativePosix(this.root, dst), moved: true };
   }
 
   /**
@@ -405,7 +405,7 @@ export class FileService {
       }
     }
     await fs.rm(target, { recursive });
-    return { path: path.relative(this.root, target) || path.basename(target), deleted: true };
+    return { path: relativePosix(this.root, target, path.basename(target)), deleted: true };
   }
 
   /**
@@ -442,7 +442,7 @@ export class FileService {
         if (type === "dir" && !isDir) continue;
         results.push({
           name: entry.name,
-          path: path.relative(this.root, entryPath) || entry.name,
+          path: relativePosix(this.root, entryPath, entry.name),
           isDir,
           size: stat.isFile() ? stat.size : 0,
           modified: stat.mtime.toISOString(),
@@ -508,7 +508,7 @@ export class FileService {
       if (!detected.isText) continue;
       const content = await fs.readFile(entryPath, "utf8").catch(() => null);
       if (!content) continue;
-      const lines = content.split("\n");
+      const lines = splitLines(content);
       for (let i = 0; i < lines.length; i++) {
         if (results.length >= cap) break;
         if (regex.test(lines[i])) {
@@ -517,7 +517,7 @@ export class FileService {
             ? rawLine.slice(0, MAX_GREP_LINE_LENGTH) + "…(truncated)"
             : rawLine;
           results.push({
-            path: path.relative(this.root, entryPath) || entry.name,
+            path: relativePosix(this.root, entryPath, entry.name),
             line: i + 1,
             content: lineContent,
             ...(before > 0 ? { before: lines.slice(Math.max(0, i - before), i) } : {}),
@@ -564,10 +564,10 @@ export class FileService {
       occurrences.push(count);
     }
     if (preview) {
-      return { path: path.relative(this.root, filePath) || path.basename(filePath), patched: false, applied: 0, occurrences, preview: content };
+      return { path: relativePosix(this.root, filePath, path.basename(filePath)), patched: false, applied: 0, occurrences, preview: content };
     }
     await this._atomicWrite(filePath, content);
-    return { path: path.relative(this.root, filePath) || path.basename(filePath), patched: true, applied: edits.length, occurrences };
+    return { path: relativePosix(this.root, filePath, path.basename(filePath)), patched: true, applied: edits.length, occurrences };
   }
 
   /**
@@ -580,7 +580,7 @@ export class FileService {
     const dst = resolvePath(this.root, destination);
     await this._wrap(fs.stat(src));
     await fs.cp(src, dst, { recursive: true });
-    return { from: path.relative(this.root, src) || path.basename(src), to: path.relative(this.root, dst) || path.basename(dst), copied: true };
+    return { from: relativePosix(this.root, src, path.basename(src)), to: relativePosix(this.root, dst, path.basename(dst)), copied: true };
   }
 
   /**
@@ -593,7 +593,7 @@ export class FileService {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     const existing = await fs.readFile(filePath, "utf8").catch(() => "");
     await this._atomicWrite(filePath, existing + content);
-    return { path: path.relative(this.root, filePath) || path.basename(filePath), appended: true };
+    return { path: relativePosix(this.root, filePath, path.basename(filePath)), appended: true };
   }
 
   /**
@@ -611,7 +611,7 @@ export class FileService {
     }
     return {
       name: path.basename(filePath),
-      path: path.relative(this.root, filePath) || path.basename(filePath),
+      path: relativePosix(this.root, filePath, path.basename(filePath)),
       isDir: stat.isDirectory(),
       isFile: stat.isFile(),
       isSymlink: stat.isSymbolicLink(),
@@ -632,7 +632,7 @@ export class FileService {
     const stat = await fs.stat(filePath).catch(() => null);
     if (!stat) return { path: input, exists: false, isFile: false, isDir: false };
     return {
-      path: path.relative(this.root, filePath) || path.basename(filePath),
+      path: relativePosix(this.root, filePath, path.basename(filePath)),
       exists: true,
       isFile: stat.isFile(),
       isDir: stat.isDirectory(),
@@ -658,11 +658,11 @@ export class FileService {
         await fs.mkdir(path.dirname(filePath), { recursive: true });
       }
       await this._atomicWrite(filePath, "");
-      return { path: path.relative(this.root, filePath) || path.basename(filePath), created: true, touched: false };
+      return { path: relativePosix(this.root, filePath, path.basename(filePath)), created: true, touched: false };
     }
     const now = new Date();
     await fs.utimes(filePath, now, now);
-    return { path: path.relative(this.root, filePath) || path.basename(filePath), created: false, touched: true };
+    return { path: relativePosix(this.root, filePath, path.basename(filePath)), created: false, touched: true };
   }
 }
 

@@ -144,6 +144,26 @@ NusaShell does **not** store OAuth tokens. Credentials stay with the external
 CLIs (`~/.config/cursor/auth.json`, `~/.codex/auth.json`). The shell only
 stores the connection status flag under its own userData.
 
+### Subagent capability boundary
+
+A subagent runs in a separate ACP provider process and only has that
+provider's own tools. The parent agent's NusaShell MCP plugins, skills
+catalog, and meta-tools (`mcp_*`, `skill_*`, `tool_search`, `tool_schema`,
+`subagent`, `async_*`, etc.) do **not** cross into the subagent process —
+they exist only in the parent's turn loop. The parent's brief may still
+reference them by name, so the shell prepends a role-frame block to every
+subagent prompt stating this boundary explicitly and instructing the
+subagent to report a missing capability in its final message instead of
+simulating it.
+
+Implementation lives in `execSubagent`
+(`packages/application/src/agent/services/subagent-tool-handler.ts`); the
+boundary is enforced by prompt
+framing, not by tool filtering, because the ACP provider already starts with
+its own toolset and never receives the parent's MCP/skill/meta-tool
+descriptors. The parent's workspace `cwd` is host-prefixed in the same block
+so the ACP agent cannot invent a different path.
+
 ## Provider registry
 
 The desktop owns the ACP provider catalog. `AcpProviderStore` in the main

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-08-06
+
+### Fixed
+
+- **Files plugin: stable POSIX relative paths.** Agent-facing results from
+  `listDir`, `search`, `grep`, writes, moves, and related tools now normalize
+  `path.relative` output with `/` (`relativePosix` / `toPosixPath` in
+  `plugins/files/mcp/config.js`), so Windows no longer returns backslash paths
+  that confuse tool chains and the context engine map.
+- **Files plugin: CRLF-safe line splitting.** `readFile` (line numbers),
+  `grep`, and context-engine symbol extraction use `splitLines` (`/\r?\n/`) so
+  Windows CRLF files no longer leave trailing `\r` on line bodies or definition
+  signatures.
+
 ## [0.4.0] - 2026-08-06
 
 ### Added

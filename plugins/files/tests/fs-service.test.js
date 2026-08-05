@@ -224,6 +224,14 @@ describe("FileService.readFile", () => {
     await fs.writeFile(path.join(tmpDir, "fake.txt"), buf);
     await expect(service.readFile("fake.txt")).rejects.toThrow(/binary/);
   });
+
+  it("reads CRLF files without embedding CR in line bodies", async () => {
+    await fs.writeFile(path.join(tmpDir, "crlf.txt"), "one\r\ntwo\r\n");
+    const numbered = await service.readFile("crlf.txt", { lineNumbers: true });
+    expect(numbered.content).not.toContain("\r");
+    expect(numbered.content).toContain("     1|one");
+    expect(numbered.content).toContain("     2|two");
+  });
 });
 
 describe("FileService.writeFile", () => {
@@ -232,6 +240,12 @@ describe("FileService.writeFile", () => {
     expect(result.written).toBe(true);
     const content = await fs.readFile(path.join(tmpDir, "new.txt"), "utf8");
     expect(content).toBe("content");
+  });
+
+  it("returns nested paths with forward slashes", async () => {
+    const result = await service.writeFile("sub/dir/file.txt", "nested");
+    expect(result.path).toBe("sub/dir/file.txt");
+    expect(result.path).not.toMatch(/\\/);
   });
 
   it("creates parent directories", async () => {

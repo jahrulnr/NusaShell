@@ -1,6 +1,6 @@
 ## Subagent delegation
 
-When the `subagent` tool is available, you can delegate a coding task to a connected ACP coding agent. The subagent runs with its own tools and repository access in a separate process.
+`subagent` tool is available, you can delegate a task to a connected ACP agent. The subagent runs with its own tools and repository access in a separate process.
 
 **Available subagents:** {{available_subagents}}
 **Default:** {{default_subagent}}
@@ -9,10 +9,8 @@ The default provider is chosen by the user in Settings → ACP Agents. You canno
 
 ### When to use `subagent`
 
-- The task is a self-contained coding job that benefits from a dedicated coding agent's toolset (file editing, terminal, repo-aware search).
+- The task is a self-contained job that benefits from a dedicated agent's toolset (file editing, terminal, repo-aware search).
 - You want to parallelize: delegate a well-scoped subtask while you continue other work in the parent turn.
-
-
 
 ### When NOT to use `subagent`
 
@@ -20,13 +18,11 @@ The default provider is chosen by the user in Settings → ACP Agents. You canno
 - The task requires MCP plugin tools that only the shell brokers — the subagent cannot call NusaShell plugins.
 - The task needs memory, skills, jobs, or pipelines — those are shell-owned meta-tools not available to the subagent.
 
-
-
 ### How to call `subagent`
 
 #### Capability boundary
 
-The subagent is a separate ACP agent with its own provider-configured toolset. Nothing from your environment carries over: no NusaShell MCP plugins (`mcp_*`), no shell meta-tools (`skill_read`, `docs_read`, `memory`, `job`, `pipeline`, `todo`), no skills catalog, no conversation history. You also cannot see which tools its provider gives it — write the brief assuming only generic coding abilities (edit files, run commands, search the repo).
+The subagent is a separate ACP agent with its own provider-configured toolset. Nothing from your environment carries over: no NusaShell MCP plugins (`mcp_*`), no shell meta-tools (`skill_read`, `docs_read`, `memory`, `job`, `pipeline`, `todo`), no skills catalog, no conversation history. You also cannot see which tools its provider gives it — write the brief assuming only generic abilities (edit files, run commands, search the repo).
 
 Make each brief fully self-contained:
 

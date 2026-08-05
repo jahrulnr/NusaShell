@@ -3225,8 +3225,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path3) {
-      let input = path3;
+    function removeDotSegments(path4) {
+      let input = path4;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3478,8 +3478,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path3, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path3 && path3 !== "/" ? path3 : void 0;
+        const [path4, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path4 && path4 !== "/" ? path4 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -6878,12 +6878,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs3, exportName) {
+    function addFormats(ajv, list, fs4, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs3[f]);
+        ajv.addFormat(f, fs4[f]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -7414,10 +7414,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path3) {
-  if (!path3)
+function getElementAtPath(obj, path4) {
+  if (!path4)
     return obj;
-  return path3.reduce((acc, key) => acc?.[key], obj);
+  return path4.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -7826,11 +7826,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path3, issues) {
+function prefixIssues(path4, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path3);
+    iss.path.unshift(path4);
     return iss;
   });
 }
@@ -7977,16 +7977,16 @@ function flattenError(error51, mapper = (issue2) => issue2.message) {
 }
 function formatError(error51, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error52, path3 = []) => {
+  const processError = (error52, path4 = []) => {
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path3, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path4, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path3, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path3, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
       } else {
-        const fullpath = [...path3, ...issue2.path];
+        const fullpath = [...path4, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -8013,17 +8013,17 @@ function formatError(error51, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error51, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error52, path3 = []) => {
+  const processError = (error52, path4 = []) => {
     var _a3, _b;
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path3, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path4, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path3, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path3, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
       } else {
-        const fullpath = [...path3, ...issue2.path];
+        const fullpath = [...path4, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -8055,8 +8055,8 @@ function treeifyError(error51, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path3 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path3) {
+  const path4 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path4) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -21054,13 +21054,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path3 = ref.slice(1).split("/").filter(Boolean);
-  if (path3.length === 0) {
+  const path4 = ref.slice(1).split("/").filter(Boolean);
+  if (path4.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path3[0] === defsKey) {
-    const key = path3[1];
+  if (path4[0] === defsKey) {
+    const key = path4[1];
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -24801,6 +24801,17 @@ function resolvePath(root, input) {
   }
   return import_node_path.default.resolve(root, input);
 }
+function toPosixPath(value) {
+  if (!value) return value;
+  return String(value).replace(/\\/g, "/");
+}
+function relativePosix(root, absolutePath, fallback = "") {
+  const rel = import_node_path.default.relative(root, absolutePath);
+  return toPosixPath(rel || fallback);
+}
+function splitLines(text) {
+  return text.split(/\r?\n/);
+}
 
 // mcp/errors.js
 function safeFilesError(error51) {
@@ -25092,7 +25103,7 @@ var FileService = class {
         if (!stat) return null;
         return {
           name: entry.name,
-          path: import_node_path2.default.relative(this.root, entryPath) || entry.name,
+          path: relativePosix(this.root, entryPath, entry.name),
           isDir: stat.isDirectory(),
           isFile: stat.isFile(),
           isSymlink: entry.isSymbolicLink(),
@@ -25133,7 +25144,7 @@ var FileService = class {
         if (!includeFiles && !isDir) return null;
         const node = {
           name: entry.name,
-          path: import_node_path2.default.relative(this.root, entryPath) || entry.name,
+          path: relativePosix(this.root, entryPath, entry.name),
           isDir,
           size: stat.isFile() ? stat.size : 0,
           modified: stat.mtime.toISOString(),
@@ -25172,7 +25183,7 @@ var FileService = class {
       throw new Error(`File is binary (type=${detected.type}); read only supports text. Use info to inspect.`);
     }
     const content = await import_promises2.default.readFile(filePath2, "utf8");
-    const lines = content.split("\n");
+    const lines = splitLines(content);
     let selected;
     let truncatedReason = null;
     if (start && end) {
@@ -25204,7 +25215,7 @@ var FileService = class {
     const filePath2 = resolvePath(this.root, input);
     await import_promises2.default.mkdir(import_node_path2.default.dirname(filePath2), { recursive: true });
     await this._atomicWrite(filePath2, content);
-    return { path: import_node_path2.default.relative(this.root, filePath2) || import_node_path2.default.basename(filePath2), written: true };
+    return { path: relativePosix(this.root, filePath2, import_node_path2.default.basename(filePath2)), written: true };
   }
   /**
    * Create an empty directory, including any missing parents.
@@ -25213,7 +25224,7 @@ var FileService = class {
   async makeDir(input) {
     const dirPath = resolvePath(this.root, input);
     await import_promises2.default.mkdir(dirPath, { recursive: true });
-    return { path: import_node_path2.default.relative(this.root, dirPath) || import_node_path2.default.basename(dirPath), created: true };
+    return { path: relativePosix(this.root, dirPath, import_node_path2.default.basename(dirPath)), created: true };
   }
   /**
    * @param {string} source
@@ -25224,7 +25235,7 @@ var FileService = class {
     const dst = resolvePath(this.root, destination);
     await import_promises2.default.mkdir(import_node_path2.default.dirname(dst), { recursive: true });
     await import_promises2.default.rename(src, dst);
-    return { from: import_node_path2.default.relative(this.root, src), to: import_node_path2.default.relative(this.root, dst), moved: true };
+    return { from: relativePosix(this.root, src), to: relativePosix(this.root, dst), moved: true };
   }
   /**
    * @param {string} input
@@ -25240,7 +25251,7 @@ var FileService = class {
       }
     }
     await import_promises2.default.rm(target, { recursive: recursive2 });
-    return { path: import_node_path2.default.relative(this.root, target) || import_node_path2.default.basename(target), deleted: true };
+    return { path: relativePosix(this.root, target, import_node_path2.default.basename(target)), deleted: true };
   }
   /**
    * @param {string} input
@@ -25275,7 +25286,7 @@ var FileService = class {
         if (type === "dir" && !isDir) continue;
         results.push({
           name: entry.name,
-          path: import_node_path2.default.relative(this.root, entryPath) || entry.name,
+          path: relativePosix(this.root, entryPath, entry.name),
           isDir,
           size: stat.isFile() ? stat.size : 0,
           modified: stat.mtime.toISOString(),
@@ -25335,14 +25346,14 @@ var FileService = class {
       if (!detected.isText) continue;
       const content = await import_promises2.default.readFile(entryPath, "utf8").catch(() => null);
       if (!content) continue;
-      const lines = content.split("\n");
+      const lines = splitLines(content);
       for (let i = 0; i < lines.length; i++) {
         if (results.length >= cap) break;
         if (regex.test(lines[i])) {
           const rawLine = lines[i];
           const lineContent = rawLine.length > MAX_GREP_LINE_LENGTH ? rawLine.slice(0, MAX_GREP_LINE_LENGTH) + "\u2026(truncated)" : rawLine;
           results.push({
-            path: import_node_path2.default.relative(this.root, entryPath) || entry.name,
+            path: relativePosix(this.root, entryPath, entry.name),
             line: i + 1,
             content: lineContent,
             ...before > 0 ? { before: lines.slice(Math.max(0, i - before), i) } : {},
@@ -25387,10 +25398,10 @@ var FileService = class {
       occurrences.push(count);
     }
     if (preview) {
-      return { path: import_node_path2.default.relative(this.root, filePath2) || import_node_path2.default.basename(filePath2), patched: false, applied: 0, occurrences, preview: content };
+      return { path: relativePosix(this.root, filePath2, import_node_path2.default.basename(filePath2)), patched: false, applied: 0, occurrences, preview: content };
     }
     await this._atomicWrite(filePath2, content);
-    return { path: import_node_path2.default.relative(this.root, filePath2) || import_node_path2.default.basename(filePath2), patched: true, applied: edits.length, occurrences };
+    return { path: relativePosix(this.root, filePath2, import_node_path2.default.basename(filePath2)), patched: true, applied: edits.length, occurrences };
   }
   /**
    * Copy a file or directory recursively.
@@ -25402,7 +25413,7 @@ var FileService = class {
     const dst = resolvePath(this.root, destination);
     await this._wrap(import_promises2.default.stat(src));
     await import_promises2.default.cp(src, dst, { recursive: true });
-    return { from: import_node_path2.default.relative(this.root, src) || import_node_path2.default.basename(src), to: import_node_path2.default.relative(this.root, dst) || import_node_path2.default.basename(dst), copied: true };
+    return { from: relativePosix(this.root, src, import_node_path2.default.basename(src)), to: relativePosix(this.root, dst, import_node_path2.default.basename(dst)), copied: true };
   }
   /**
    * Append content to the end of a file (creates it if it doesn't exist).
@@ -25414,7 +25425,7 @@ var FileService = class {
     await import_promises2.default.mkdir(import_node_path2.default.dirname(filePath2), { recursive: true });
     const existing = await import_promises2.default.readFile(filePath2, "utf8").catch(() => "");
     await this._atomicWrite(filePath2, existing + content);
-    return { path: import_node_path2.default.relative(this.root, filePath2) || import_node_path2.default.basename(filePath2), appended: true };
+    return { path: relativePosix(this.root, filePath2, import_node_path2.default.basename(filePath2)), appended: true };
   }
   /**
    * @param {string} input
@@ -25429,7 +25440,7 @@ var FileService = class {
     }
     return {
       name: import_node_path2.default.basename(filePath2),
-      path: import_node_path2.default.relative(this.root, filePath2) || import_node_path2.default.basename(filePath2),
+      path: relativePosix(this.root, filePath2, import_node_path2.default.basename(filePath2)),
       isDir: stat.isDirectory(),
       isFile: stat.isFile(),
       isSymlink: stat.isSymbolicLink(),
@@ -25449,7 +25460,7 @@ var FileService = class {
     const stat = await import_promises2.default.stat(filePath2).catch(() => null);
     if (!stat) return { path: input, exists: false, isFile: false, isDir: false };
     return {
-      path: import_node_path2.default.relative(this.root, filePath2) || import_node_path2.default.basename(filePath2),
+      path: relativePosix(this.root, filePath2, import_node_path2.default.basename(filePath2)),
       exists: true,
       isFile: stat.isFile(),
       isDir: stat.isDirectory()
@@ -25474,11 +25485,11 @@ var FileService = class {
         await import_promises2.default.mkdir(import_node_path2.default.dirname(filePath2), { recursive: true });
       }
       await this._atomicWrite(filePath2, "");
-      return { path: import_node_path2.default.relative(this.root, filePath2) || import_node_path2.default.basename(filePath2), created: true, touched: false };
+      return { path: relativePosix(this.root, filePath2, import_node_path2.default.basename(filePath2)), created: true, touched: false };
     }
     const now = /* @__PURE__ */ new Date();
     await import_promises2.default.utimes(filePath2, now, now);
-    return { path: import_node_path2.default.relative(this.root, filePath2) || import_node_path2.default.basename(filePath2), created: false, touched: true };
+    return { path: relativePosix(this.root, filePath2, import_node_path2.default.basename(filePath2)), created: false, touched: true };
   }
 };
 function globToRegex(pattern2) {
@@ -25489,6 +25500,752 @@ function shouldExclude(name, excludeGlobs2) {
   if (!excludeGlobs2 || excludeGlobs2.length === 0) return false;
   return excludeGlobs2.some((glob) => globToRegex(glob).test(name));
 }
+
+// mcp/context-engine.js
+var import_promises3 = __toESM(require("node:fs/promises"), 1);
+var import_node_path3 = __toESM(require("node:path"), 1);
+var MAX_EXTRACT_BYTES = 1024 * 1024;
+var MAX_DEFS_PER_FILE = 30;
+var MAX_SCAN_FILES = 2e4;
+var ACTIVE_FILE_BOOST = 50;
+var QUERY_MATCH_BOOST = 10;
+var MANIFESTS = {
+  "package.json": "node",
+  "pnpm-workspace.yaml": "node",
+  "Cargo.toml": "rust",
+  "pyproject.toml": "python",
+  "requirements.txt": "python",
+  "go.mod": "go",
+  "composer.json": "php",
+  "pom.xml": "java-maven",
+  "build.gradle": "java-gradle",
+  "mix.exs": "elixir",
+  Gemfile: "ruby"
+};
+var SUPPORTED_EXTS = {
+  ".ts": "typescript",
+  ".tsx": "typescript",
+  ".js": "javascript",
+  ".jsx": "javascript",
+  ".mjs": "javascript",
+  ".cjs": "javascript",
+  ".py": "python",
+  ".go": "go",
+  ".rs": "rust",
+  ".rb": "ruby",
+  ".php": "php",
+  ".java": "java",
+  ".kt": "kotlin",
+  ".ex": "elixir",
+  ".exs": "elixir",
+  ".cs": "csharp",
+  ".cpp": "cpp",
+  ".cc": "cpp",
+  ".cxx": "cpp",
+  ".h": "cpp",
+  ".hpp": "cpp",
+  ".c": "c"
+};
+var DOC_EXTS = /* @__PURE__ */ new Set([".md", ".mdx", ".txt", ".rst"]);
+var KEY_DEP_PREFIXES = [
+  "react",
+  "next",
+  "vue",
+  "nuxt",
+  "svelte",
+  "express",
+  "fastify",
+  "electron",
+  "vitest",
+  "jest",
+  "typescript",
+  "zod",
+  "fastapi",
+  "django",
+  "flask",
+  "axum",
+  "tokio"
+];
+var DEFAULT_IGNORE_DIRS = /* @__PURE__ */ new Set([
+  ".git",
+  ".hg",
+  ".svn",
+  "node_modules",
+  "target",
+  "dist",
+  "build",
+  ".next",
+  ".nuxt",
+  ".cache",
+  ".turbo",
+  "coverage",
+  ".vitest",
+  "out",
+  "__pycache__",
+  ".pytest_cache",
+  ".mypy_cache",
+  ".ruff_cache",
+  "vendor",
+  ".venv",
+  "venv",
+  "env",
+  ".idea",
+  ".vscode"
+]);
+var IGNORE_FILE_NAMES = [".gitignore", ".ignore"];
+var DEF_PATTERNS = {
+  typescript: [
+    { kind: "type", re: /^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?(?:class|interface|type|enum)\s+(?<name>[A-Za-z_$][\w$]*)/ },
+    { kind: "function", re: /^\s*(?:export\s+)?(?:async\s+)?function\s+(?<name>[A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\s*\(/ },
+    { kind: "function", re: /^\s*(?:export\s+)?(?:async\s+)?(?<name>[A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\s*\([^)]*\)\s*[:{]/ },
+    { kind: "const", re: /^\s*(?:export\s+)?(?:const|let|var)\s+(?<name>[A-Za-z_$][\w$]*)\s*=/ }
+  ],
+  javascript: [
+    { kind: "type", re: /^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+(?<name>[A-Za-z_$][\w$]*)/ },
+    { kind: "function", re: /^\s*(?:export\s+)?(?:async\s+)?function\s+(?<name>[A-Za-z_$][\w$]*)\s*\(/ },
+    { kind: "const", re: /^\s*(?:export\s+)?(?:const|let|var)\s+(?<name>[A-Za-z_$][\w$]*)\s*=/ }
+  ],
+  python: [
+    { kind: "type", re: /^\s*class\s+(?<name>[A-Za-z_]\w*)/ },
+    { kind: "function", re: /^\s*(?:async\s+)?def\s+(?<name>[A-Za-z_]\w*)/ },
+    { kind: "const", re: /^\s*(?<name>[A-Z_][A-Z0-9_]*)\s*=/ }
+  ],
+  go: [
+    { kind: "function", re: /^\s*func\s+(?:\([^)]*\)\s+)?(?<name>[A-Za-z_]\w*)\s*\(/ },
+    { kind: "type", re: /^\s*type\s+(?<name>[A-Za-z_]\w*)\s+/ },
+    { kind: "const", re: /^\s*const\s+(?<name>[A-Za-z_]\w*)\s*=/ }
+  ],
+  rust: [
+    { kind: "function", re: /^\s*(?:pub\s+)?(?:async\s+)?fn\s+(?<name>[A-Za-z_]\w*)/ },
+    { kind: "type", re: /^\s*(?:pub\s+)?(?:struct|enum|trait)\s+(?<name>[A-Za-z_]\w*)/ },
+    { kind: "const", re: /^\s*(?:pub\s+)?const\s+(?<name>[A-Za-z_]\w*)\s*:/ }
+  ],
+  php: [
+    { kind: "type", re: /^\s*(?:final\s+|abstract\s+)?class\s+(?<name>[A-Za-z_]\w*)/ },
+    { kind: "function", re: /^\s*function\s+(?<name>[A-Za-z_]\w*)\s*\(/ }
+  ],
+  ruby: [
+    { kind: "type", re: /^\s*(?:class|module)\s+(?<name>[A-Za-z_]\w*)/ },
+    { kind: "function", re: /^\s*def\s+(?<name>[A-Za-z_][\w]*)/ }
+  ],
+  java: [
+    { kind: "type", re: /^\s*(?:public|private|protected)?\s*(?:abstract\s+|final\s+)*class\s+(?<name>[A-Za-z_]\w*)/ },
+    { kind: "function", re: /^\s*(?:public|private|protected)\s+(?:static\s+)?(?:[\w<>[\]]+\s+)+(?<name>[A-Za-z_]\w*)\s*\(/ }
+  ],
+  csharp: [
+    { kind: "type", re: /^\s*(?:public|private|protected|internal)?\s*(?:class|interface|struct|enum)\s+(?<name>[A-Za-z_]\w*)/ }
+  ],
+  cpp: [
+    { kind: "type", re: /^\s*(?:class|struct|enum\s+class|enum)\s+(?<name>[A-Za-z_]\w*)/ }
+  ],
+  c: [
+    { kind: "type", re: /^\s*(?:struct|enum|union)\s+(?<name>[A-Za-z_]\w*)/ }
+  ],
+  elixir: [
+    { kind: "function", re: /^\s*defp?\s+(?<name>[a-z_]\w*)/ },
+    { kind: "type", re: /^\s*defmodule\s+(?<name>[A-Za-z_.\w]*)/ }
+  ],
+  kotlin: [
+    { kind: "function", re: /^\s*fun\s+(?<name>[A-Za-z_]\w*)/ },
+    { kind: "type", re: /^\s*(?:data\s+)?(?:class|object)\s+(?<name>[A-Za-z_]\w*)/ }
+  ]
+};
+var IDENT_RE = /\b[A-Za-z_$][A-Za-z0-9_$]*\b/g;
+var KEYWORDS = /* @__PURE__ */ new Set([
+  "if",
+  "else",
+  "for",
+  "while",
+  "return",
+  "break",
+  "continue",
+  "switch",
+  "case",
+  "default",
+  "try",
+  "catch",
+  "finally",
+  "throw",
+  "new",
+  "class",
+  "interface",
+  "type",
+  "enum",
+  "function",
+  "def",
+  "func",
+  "fn",
+  "const",
+  "let",
+  "var",
+  "import",
+  "from",
+  "export",
+  "async",
+  "await",
+  "public",
+  "private",
+  "protected",
+  "static",
+  "abstract",
+  "final",
+  "this",
+  "self",
+  "super",
+  "true",
+  "false",
+  "null",
+  "none",
+  "undefined",
+  "void",
+  "int",
+  "string",
+  "bool",
+  "boolean",
+  "number",
+  "any",
+  "unknown",
+  "never",
+  "struct",
+  "union",
+  "module",
+  "package",
+  "namespace",
+  "use",
+  "pub",
+  "mut",
+  "impl",
+  "trait",
+  "match",
+  "when",
+  "do",
+  "end",
+  "then",
+  "elif",
+  "and",
+  "or",
+  "not",
+  "is",
+  "in",
+  "as",
+  "with",
+  "yield",
+  "lambda",
+  "fun",
+  "data",
+  "object",
+  "val",
+  "by",
+  "companion"
+]);
+function estimateTokens(text) {
+  return Math.max(1, Math.floor(text.length / 4));
+}
+function personalizedPagerank(graph, personalization = {}, damping = 0.85, maxIter = 100, tol = 1e-6) {
+  const nodes = [...graph.nodes];
+  const n = nodes.length;
+  if (n === 0) return {};
+  const idx = new Map(nodes.map((f, i) => [f, i]));
+  let p = nodes.map((f) => personalization[f] ?? 1);
+  const psum = p.reduce((acc, v) => acc + v, 0);
+  p = psum > 0 ? p.map((v) => v / psum) : nodes.map(() => 1 / n);
+  let rank = nodes.map(() => 1 / n);
+  const outDeg = nodes.map((f) => graph.outEdges.get(f)?.size ?? 0);
+  for (let iter = 0; iter < maxIter; iter += 1) {
+    const next = p.map((pi) => (1 - damping) * pi);
+    let dangling = 0;
+    for (let i = 0; i < n; i += 1) {
+      if (outDeg[i] === 0) dangling += rank[i];
+    }
+    if (dangling > 0) {
+      for (let i = 0; i < n; i += 1) next[i] += damping * dangling * p[i];
+    }
+    for (let i = 0; i < n; i += 1) {
+      const deg = outDeg[i];
+      if (deg === 0) continue;
+      const share = damping * rank[i] / deg;
+      for (const target of graph.outEdges.get(nodes[i])) {
+        next[idx.get(target)] += share;
+      }
+    }
+    let delta = 0;
+    for (let i = 0; i < n; i += 1) delta += Math.abs(next[i] - rank[i]);
+    rank = next;
+    if (delta < tol) break;
+  }
+  return Object.fromEntries(nodes.map((f, i) => [f, rank[i]]));
+}
+async function pathExists(p) {
+  try {
+    await import_promises3.default.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function toPosix(rel) {
+  return toPosixPath(rel);
+}
+function escapeRegExp(text) {
+  return text.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+}
+function matchesIgnore(relPosix, patterns) {
+  const parts = relPosix.split("/");
+  const name = parts[parts.length - 1];
+  for (const raw of patterns) {
+    let pat = raw;
+    if (pat.endsWith("/")) pat = pat.slice(0, -1);
+    if (pat.startsWith("/")) {
+      pat = pat.slice(1);
+      if (relPosix === pat || relPosix.startsWith(`${pat}/`)) return true;
+      continue;
+    }
+    if (pat.includes("*")) {
+      const re = new RegExp(`^${pat.split("*").map(escapeRegExp).join(".*")}$`);
+      if (re.test(name) || re.test(relPosix)) return true;
+    } else if (name === pat || parts.includes(pat)) {
+      return true;
+    }
+  }
+  return false;
+}
+async function readIgnorePatterns(dir) {
+  const patterns = [];
+  for (const name of IGNORE_FILE_NAMES) {
+    let text;
+    try {
+      text = await import_promises3.default.readFile(import_node_path3.default.join(dir, name), "utf8");
+    } catch {
+      continue;
+    }
+    for (const line of text.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      patterns.push(trimmed);
+    }
+  }
+  return patterns;
+}
+var ContextEngine = class {
+  /** @param {string} root absolute workspace root */
+  constructor(root) {
+    this.root = import_node_path3.default.resolve(root);
+    this.cache = /* @__PURE__ */ new Map();
+  }
+  /** @param {string} newRoot */
+  async setRoot(newRoot) {
+    this.root = await validateRoot(newRoot);
+    this.cache.clear();
+  }
+  /**
+   * Phase 1: classify the workspace from manifests at root + one level deep.
+   * @param {string} [subPath] directory relative to the root (default: root)
+   */
+  async detectStack(subPath = "") {
+    const base = resolvePath(this.root, subPath);
+    const info = {
+      category: "documentation",
+      languages: /* @__PURE__ */ new Set(),
+      manifests: {},
+      projectName: "",
+      version: "",
+      keyDeps: [],
+      scripts: {},
+      isMonorepo: false
+    };
+    const rootManifests = {};
+    const nestedManifests = {};
+    for (const [name, kind] of Object.entries(MANIFESTS)) {
+      if (await pathExists(import_node_path3.default.join(base, name))) rootManifests[name] = kind;
+    }
+    let children = [];
+    try {
+      children = await import_promises3.default.readdir(base, { withFileTypes: true });
+    } catch {
+      children = [];
+    }
+    for (const child of children) {
+      if (!child.isDirectory() || child.name.startsWith(".")) continue;
+      for (const [name, kind] of Object.entries(MANIFESTS)) {
+        const rel = `${child.name}/${name}`;
+        if (await pathExists(import_node_path3.default.join(base, rel))) nestedManifests[rel] = kind;
+      }
+    }
+    info.manifests = { ...rootManifests, ...nestedManifests };
+    info.isMonorepo = Object.keys(nestedManifests).length > 0 || await pathExists(import_node_path3.default.join(base, "pnpm-workspace.yaml"));
+    try {
+      const data = JSON.parse(await import_promises3.default.readFile(import_node_path3.default.join(base, "package.json"), "utf8"));
+      info.projectName = data.name ?? "";
+      info.version = data.version ?? "";
+      const allDeps = { ...data.dependencies ?? {}, ...data.devDependencies ?? {} };
+      info.keyDeps = Object.keys(allDeps).filter((d) => KEY_DEP_PREFIXES.some((prefix) => d.startsWith(prefix))).sort().slice(0, 20);
+      info.scripts = Object.fromEntries(Object.entries(data.scripts ?? {}).slice(0, 10));
+    } catch {
+    }
+    const kindToLang = {
+      node: "typescript",
+      rust: "rust",
+      python: "python",
+      go: "go",
+      php: "php",
+      elixir: "elixir",
+      ruby: "ruby"
+    };
+    for (const kind of Object.values(info.manifests)) {
+      if (kind.startsWith("java")) info.languages.add("java");
+      else if (kindToLang[kind]) info.languages.add(kindToLang[kind]);
+    }
+    if (Object.keys(rootManifests).length > 0) {
+      info.category = info.isMonorepo ? "hybrid" : "coding";
+    } else if (Object.keys(nestedManifests).length > 0) {
+      info.category = "hybrid";
+    }
+    return { ...info, languages: [...info.languages].sort() };
+  }
+  /**
+   * Phase 2: walk the tree respecting default ignores + .gitignore/.ignore.
+   * @param {string} base absolute directory to walk
+   * @param {number} [maxFiles] scan cap
+   */
+  async walkWorkspace(base, maxFiles = MAX_SCAN_FILES) {
+    const files = [];
+    const stats = { visitedDirs: 0, consideredFiles: 0, ignoredFiles: 0, codeFiles: 0, docFiles: 0 };
+    const rootPatterns = await readIgnorePatterns(base);
+    const queue = [{ dir: base, patterns: rootPatterns }];
+    while (queue.length > 0 && files.length < maxFiles) {
+      const { dir, patterns } = queue.shift();
+      stats.visitedDirs += 1;
+      let entries;
+      try {
+        entries = await import_promises3.default.readdir(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      entries.sort((a, b) => a.name.localeCompare(b.name));
+      const localPatterns = patterns.concat(await readIgnorePatterns(dir));
+      for (const entry of entries) {
+        if (files.length >= maxFiles) break;
+        const abs = import_node_path3.default.join(dir, entry.name);
+        const rel = relativePosix(base, abs);
+        if (entry.isDirectory()) {
+          if (entry.name.startsWith(".") || DEFAULT_IGNORE_DIRS.has(entry.name)) continue;
+          if (matchesIgnore(rel, localPatterns)) continue;
+          queue.push({ dir: abs, patterns: localPatterns });
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        if (entry.name.startsWith(".") && !IGNORE_FILE_NAMES.includes(entry.name)) continue;
+        stats.consideredFiles += 1;
+        if (matchesIgnore(rel, localPatterns)) {
+          stats.ignoredFiles += 1;
+          continue;
+        }
+        const ext = import_node_path3.default.extname(entry.name).toLowerCase();
+        if (SUPPORTED_EXTS[ext]) {
+          files.push({ abs, rel, lang: SUPPORTED_EXTS[ext], doc: false });
+          stats.codeFiles += 1;
+        } else if (DOC_EXTS.has(ext)) {
+          files.push({ abs, rel, doc: true });
+          stats.docFiles += 1;
+        }
+      }
+    }
+    return { files, stats };
+  }
+  /**
+   * Phase 3: extract definition and reference tags from source text.
+   * @param {string} rel workspace-relative file path (posix)
+   * @param {string} text file contents
+   * @param {string} lang language key from SUPPORTED_EXTS
+   */
+  extractFromText(rel, text, lang) {
+    const defs = [];
+    const refs = [];
+    const seenDefs = /* @__PURE__ */ new Set();
+    const patterns = DEF_PATTERNS[lang] ?? [];
+    const lines = splitLines(text);
+    for (let lineno = 0; lineno < lines.length; lineno += 1) {
+      const line = lines[lineno];
+      for (const { re, kind } of patterns) {
+        const m2 = re.exec(line);
+        if (m2?.groups?.name && !seenDefs.has(m2.groups.name)) {
+          seenDefs.add(m2.groups.name);
+          let sig = line.trimEnd();
+          if (sig.length > 120) sig = `${sig.slice(0, 117)}...`;
+          defs.push({ rel, line: lineno + 1, name: m2.groups.name, kind, sig });
+          break;
+        }
+      }
+      IDENT_RE.lastIndex = 0;
+      let m;
+      while ((m = IDENT_RE.exec(line)) !== null) {
+        const tok = m[0];
+        if (tok.length < 2 || KEYWORDS.has(tok) || seenDefs.has(tok)) continue;
+        refs.push({ rel, line: lineno + 1, name: tok });
+      }
+    }
+    return { defs, refs };
+  }
+  /**
+   * Phases 3+6: extract symbols for walked files, using the mtime/size cache.
+   */
+  async extractAll(files, { refresh = false } = {}) {
+    const defsByFile = /* @__PURE__ */ new Map();
+    const refsByFile = /* @__PURE__ */ new Map();
+    let cacheHits = 0;
+    let cacheMisses = 0;
+    await Promise.all(files.map(async (file2) => {
+      if (file2.doc) {
+        defsByFile.set(file2.rel, []);
+        refsByFile.set(file2.rel, []);
+        return;
+      }
+      let stat;
+      try {
+        stat = await import_promises3.default.stat(file2.abs);
+      } catch {
+        return;
+      }
+      if (stat.size > MAX_EXTRACT_BYTES) return;
+      const cached2 = refresh ? null : this.cache.get(file2.rel);
+      if (cached2 && cached2.mtimeMs === stat.mtimeMs && cached2.size === stat.size) {
+        cacheHits += 1;
+        defsByFile.set(file2.rel, cached2.defs);
+        refsByFile.set(file2.rel, cached2.refs);
+        return;
+      }
+      cacheMisses += 1;
+      let text;
+      try {
+        text = await import_promises3.default.readFile(file2.abs, "utf8");
+      } catch {
+        return;
+      }
+      const { defs, refs } = this.extractFromText(file2.rel, text, file2.lang);
+      this.cache.set(file2.rel, { mtimeMs: stat.mtimeMs, size: stat.size, lang: file2.lang, defs, refs });
+      defsByFile.set(file2.rel, defs);
+      refsByFile.set(file2.rel, refs);
+    }));
+    return { defsByFile, refsByFile, cacheHits, cacheMisses };
+  }
+  /**
+   * Phase 4: build the directed graph and rank files with Personalized
+   * PageRank. Edges point from the referencing file to the defining file
+   * (B references a symbol defined in A  =>  B -> A), so rank flows toward
+   * foundational files whose symbols are widely used — Aider's repo-map
+   * behavior. This intentionally reverses the Python reference's edge
+   * direction, which left definers with no inbound rank.
+   * @param {Map<string, Array<object>>} defsByFile
+   * @param {Map<string, Array<object>>} refsByFile
+   * @param {object} [options]
+   * @param {string} [options.activeFile]
+   * @param {string} [options.query]
+   */
+  rankFiles(defsByFile, refsByFile, { activeFile, query } = {}) {
+    const symbolToDefiners = /* @__PURE__ */ new Map();
+    const nodes = /* @__PURE__ */ new Set();
+    for (const [rel, defs] of defsByFile) {
+      nodes.add(rel);
+      for (const def of defs) {
+        if (!symbolToDefiners.has(def.name)) symbolToDefiners.set(def.name, /* @__PURE__ */ new Set());
+        symbolToDefiners.get(def.name).add(rel);
+      }
+    }
+    const outEdges = /* @__PURE__ */ new Map();
+    for (const [rel, refs] of refsByFile) {
+      nodes.add(rel);
+      for (const ref of refs) {
+        const definers = symbolToDefiners.get(ref.name);
+        if (!definers) continue;
+        for (const definer of definers) {
+          if (definer === rel) continue;
+          if (!outEdges.has(rel)) outEdges.set(rel, /* @__PURE__ */ new Set());
+          outEdges.get(rel).add(definer);
+        }
+      }
+    }
+    const personalization = {};
+    if (activeFile) personalization[toPosix(activeFile)] = ACTIVE_FILE_BOOST;
+    const terms = (query ?? "").toLowerCase().split(/[^A-Za-z0-9_$]+/).filter((t) => t.length >= 2);
+    if (terms.length > 0) {
+      for (const [rel, defs] of defsByFile) {
+        if (defs.some((d) => terms.some((t) => d.name.toLowerCase().includes(t)))) {
+          personalization[rel] = (personalization[rel] ?? 1) * QUERY_MATCH_BOOST;
+        }
+      }
+    }
+    const graph = { nodes: [...nodes], outEdges };
+    const scores = personalizedPagerank(graph, personalization);
+    const ranked = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+    const edgeCount = [...outEdges.values()].reduce((acc, s) => acc + s.size, 0);
+    return { ranked, graphStats: { nodes: nodes.size, edges: edgeCount } };
+  }
+  /**
+   * Phase 5: render the markdown repo map within the token budget via binary
+   * search over the number of ranked files included.
+   * @param {Array<[string, number]>} ranked
+   * @param {Map<string, Array<object>>} defsByFile
+   * @param {number} budget
+   * @param {object} [options]
+   * @param {string} [options.activeFile]
+   */
+  buildRepoMap(ranked, defsByFile, budget, { activeFile } = {}) {
+    const rendered = ranked.map(([rel, score]) => ({
+      rel,
+      score,
+      sigs: (defsByFile.get(rel) ?? []).slice(0, MAX_DEFS_PER_FILE).map((d) => d.sig)
+    }));
+    const render = (k) => {
+      const lines = ["# Workspace Context Map", ""];
+      if (activeFile) lines.push(`_active file: \`${activeFile}\`_`, "");
+      let filesShown = 0;
+      let symbolsShown = 0;
+      for (const item of rendered.slice(0, k)) {
+        filesShown += 1;
+        lines.push(`## \`${item.rel}\`  (rank ${item.score.toFixed(4)})`);
+        if (item.sigs.length === 0) lines.push("_no top-level definitions_");
+        for (const sig of item.sigs) {
+          symbolsShown += 1;
+          lines.push(`- ${sig} \u22EE`);
+        }
+        lines.push("");
+      }
+      const md = lines.join("\n");
+      return { md, filesShown, symbolsShown, tokensUsed: estimateTokens(md) };
+    };
+    if (rendered.length === 0) {
+      return { ...render(0), elidedBodies: 0 };
+    }
+    let lo = 1;
+    let hi = rendered.length;
+    let best = render(lo);
+    if (best.tokensUsed > budget) {
+      return { ...best, elidedBodies: best.symbolsShown };
+    }
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi + 1) / 2);
+      const attempt = render(mid);
+      if (attempt.tokensUsed <= budget) {
+        best = attempt;
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return { ...best, elidedBodies: best.symbolsShown };
+  }
+  /**
+   * Full pipeline (phases 1-6): classify, walk, extract, rank, elide, fit.
+   * @param {object} [options]
+   * @param {string} [options.path] directory relative to the root
+   * @param {number} [options.budget] token budget for the map
+   * @param {string} [options.activeFile] file to boost (relative, 50x)
+   * @param {string} [options.query] symbol-name terms to boost (10x)
+   * @param {number} [options.maxFiles] scan cap
+   * @param {boolean} [options.refresh] bypass the tag cache
+   */
+  async contextMap(options = {}) {
+    const {
+      path: subPath = "",
+      budget = 1024,
+      activeFile,
+      query,
+      maxFiles = MAX_SCAN_FILES,
+      refresh = false
+    } = options;
+    const started = performance.now();
+    const base = resolvePath(this.root, subPath);
+    await validateRoot(base);
+    let t = performance.now();
+    const stack = await this.detectStack(subPath);
+    const classifyMs = performance.now() - t;
+    t = performance.now();
+    const { files, stats: walk } = await this.walkWorkspace(base, maxFiles);
+    const walkMs = performance.now() - t;
+    t = performance.now();
+    const { defsByFile, refsByFile, cacheHits, cacheMisses } = await this.extractAll(files, { refresh });
+    const extractMs = performance.now() - t;
+    t = performance.now();
+    const { ranked, graphStats } = this.rankFiles(defsByFile, refsByFile, { activeFile, query });
+    const graphMs = performance.now() - t;
+    t = performance.now();
+    const mapResult = this.buildRepoMap(ranked, defsByFile, budget, { activeFile });
+    const elideMs = performance.now() - t;
+    return {
+      map: mapResult.md,
+      stack,
+      ranks: ranked.slice(0, 20).map(([rel, score]) => [rel, Number(score.toFixed(6))]),
+      stats: {
+        tokensUsed: mapResult.tokensUsed,
+        filesShown: mapResult.filesShown,
+        symbolsShown: mapResult.symbolsShown,
+        filesScanned: walk.codeFiles + walk.docFiles,
+        cacheHits,
+        cacheMisses,
+        walk,
+        graph: graphStats,
+        timingMs: {
+          classify: Math.round(classifyMs * 100) / 100,
+          walk: Math.round(walkMs * 100) / 100,
+          extract: Math.round(extractMs * 100) / 100,
+          graph: Math.round(graphMs * 100) / 100,
+          elide: Math.round(elideMs * 100) / 100,
+          total: Math.round((performance.now() - started) * 100) / 100
+        }
+      }
+    };
+  }
+  /**
+   * Symbol listing: definitions for one file (`path`) or the top-ranked files
+   * whose definitions match `query`.
+   * @param {object} options
+   * @param {string} [options.path] single file relative to the root
+   * @param {string} [options.query] case-insensitive symbol-name filter
+   * @param {number} [options.limit] max files in query mode
+   */
+  async listSymbols(options = {}) {
+    const { path: filePath2, query, limit = 20 } = options;
+    if (filePath2) {
+      const abs = resolvePath(this.root, filePath2);
+      const lang = SUPPORTED_EXTS[import_node_path3.default.extname(abs).toLowerCase()];
+      if (!lang) {
+        throw new Error(`Unsupported file type for symbol extraction: ${filePath2}`);
+      }
+      const stat = await import_promises3.default.stat(abs);
+      if (!stat.isFile()) throw new Error(`Not a file: ${filePath2}`);
+      if (stat.size > MAX_EXTRACT_BYTES) {
+        throw new Error(`File too large for symbol extraction (max 1 MB): ${filePath2}`);
+      }
+      const text = await import_promises3.default.readFile(abs, "utf8");
+      const rel = relativePosix(this.root, abs);
+      const { defs } = this.extractFromText(rel, text, lang);
+      return {
+        path: filePath2,
+        language: lang,
+        symbols: defs.map(({ name, line, kind, sig }) => ({ name, line, kind, signature: sig }))
+      };
+    }
+    if (!query) {
+      throw new Error("list_symbols requires either a file path or a query");
+    }
+    const { files } = await this.walkWorkspace(this.root);
+    const { defsByFile, refsByFile } = await this.extractAll(files);
+    const { ranked } = this.rankFiles(defsByFile, refsByFile, { query });
+    const lowered = query.toLowerCase();
+    const matches = [];
+    for (const [rel, score] of ranked) {
+      if (matches.length >= limit) break;
+      const defs = (defsByFile.get(rel) ?? []).filter((d) => d.name.toLowerCase().includes(lowered));
+      if (defs.length === 0) continue;
+      matches.push({
+        path: rel,
+        rank: Number(score.toFixed(6)),
+        symbols: defs.map(({ name, line, kind, sig }) => ({ name, line, kind, signature: sig }))
+      });
+    }
+    return { query, limit, files: matches };
+  }
+};
 
 // mcp/tool-catalog.js
 var FILES_TOOL_NAMES = Object.freeze([
@@ -25506,7 +26263,10 @@ var FILES_TOOL_NAMES = Object.freeze([
   "patch",
   "append",
   "exists",
-  "touch"
+  "touch",
+  "context_map",
+  "detect_stack",
+  "list_symbols"
 ]);
 
 // mcp/tools.js
@@ -25547,7 +26307,21 @@ var schemas = {
   }).strict(),
   append: external_exports.object({ path: filePath, content: external_exports.string().max(10 * 1024 * 1024) }).strict(),
   exists: external_exports.object({ path: filePath }).strict(),
-  touch: external_exports.object({ path: filePath, createParents: external_exports.boolean().default(true), updateOnly: external_exports.boolean().default(false) }).strict()
+  touch: external_exports.object({ path: filePath, createParents: external_exports.boolean().default(true), updateOnly: external_exports.boolean().default(false) }).strict(),
+  context_map: external_exports.object({
+    path: rootPath,
+    budget: external_exports.number().int().min(64).max(8192).default(1024),
+    activeFile: external_exports.string().trim().min(1).max(4096).optional(),
+    query: external_exports.string().trim().min(1).max(500).optional(),
+    maxFiles: external_exports.number().int().min(1).max(2e4).optional(),
+    refresh: external_exports.boolean().default(false)
+  }).strict(),
+  detect_stack: external_exports.object({ path: rootPath }).strict(),
+  list_symbols: external_exports.object({
+    path: filePath.optional(),
+    query: external_exports.string().trim().min(1).max(500).optional(),
+    limit: external_exports.number().int().min(1).max(100).default(20)
+  }).strict()
 };
 var FILES_TOOLS = Object.freeze([
   descriptor("list", "List directory contents with file metadata (name, size, modified, type).", {
@@ -25631,15 +26405,36 @@ var FILES_TOOLS = Object.freeze([
     path: stringProperty("File path relative to the files plugin root (user home by default)."),
     createParents: { type: "boolean", description: "Create parent directories if needed (default true).", default: true },
     updateOnly: { type: "boolean", description: "Only update timestamps of an existing file; throw if it doesn't exist.", default: false }
-  }, ["path"], false)
+  }, ["path"], false),
+  descriptor("context_map", "Build a token-budgeted markdown map of the workspace: stack classification, the top files ranked by Personalized PageRank over the symbol reference graph, and elided signatures (bodies replaced with \u22EE). Deterministic \u2014 no LLM calls. Call this first when orienting in an unfamiliar codebase or before planning edits. Symbol tags are cached by file mtime/size across calls; pass refresh=true only after large external changes. Returns { map, stack, ranks, stats }.", {
+    path: stringProperty("Directory to map, relative to the files plugin root. Empty string maps the whole root.", ""),
+    budget: integerProperty(64, 8192, 1024, "Approximate token budget for the markdown map (~4 chars/token). The top-ranked files are binary-searched to fit."),
+    activeFile: { type: "string", description: "Workspace-relative file currently in focus; boosted 50x in Personalized PageRank so its dependency neighborhood ranks higher." },
+    query: { type: "string", description: "Space-separated symbol-name terms; files defining matching symbols get a 10x rank boost." },
+    maxFiles: integerProperty(1, 2e4, void 0, "Scan cap for walked code/doc files (default 20000). .gitignore/.ignore and common build dirs are always excluded."),
+    refresh: { type: "boolean", description: "Bypass the mtime/size symbol cache and re-extract every file.", default: false }
+  }),
+  descriptor("detect_stack", "Classify the workspace from manifest files (package.json, Cargo.toml, pyproject.toml, go.mod, ...): category (coding / documentation / hybrid-monorepo), languages, key framework dependencies, and package.json scripts. Fast \u2014 reads manifests only, no full tree walk. Use to learn which build/test commands exist before running anything.", {
+    path: stringProperty("Directory to classify, relative to the files plugin root. Empty string classifies the root.", "")
+  }),
+  descriptor("list_symbols", "List symbol definitions (class/function/const/type with kind, line, and signature) for one file, or across the top-ranked files whose definitions match a query. Much cheaper than reading whole files \u2014 use it to locate definitions before targeted read/patch calls. Pass either path (single file) or query (workspace-wide search).", {
+    path: { type: "string", description: "Single file relative to the files plugin root. Omit to search by query instead." },
+    query: { type: "string", description: "Case-insensitive symbol-name filter; returns matching definitions from the top PageRanked files. Required when path is omitted." },
+    limit: integerProperty(1, 100, 20, "Maximum number of files returned in query mode.")
+  })
 ]);
 if (FILES_TOOLS.map((tool) => tool.name).join(",") !== FILES_TOOL_NAMES.join(",")) {
   throw new Error("Files tool descriptors are out of sync with the canonical catalog");
 }
-async function callFilesTool(service, name, rawArguments = {}) {
+async function callFilesTool(service, name, rawArguments = {}, contextEngine = null) {
   const schema = schemas[name];
   if (!schema) throw new Error(`Unknown files tool: ${name}`);
   const input = schema.parse(rawArguments ?? {});
+  let engine = contextEngine;
+  function getContextEngine() {
+    if (!engine) engine = new ContextEngine(service.root);
+    return engine;
+  }
   switch (name) {
     case "list":
       return { path: input.path, items: await service.listDir(input.path) };
@@ -25691,6 +26486,23 @@ async function callFilesTool(service, name, rawArguments = {}) {
       return await service.existsFile(input.path);
     case "touch":
       return await service.touchFile(input.path, { createParents: input.createParents, updateOnly: input.updateOnly });
+    case "context_map":
+      return { path: input.path, ...await getContextEngine().contextMap({
+        path: input.path,
+        budget: input.budget,
+        activeFile: input.activeFile,
+        query: input.query,
+        maxFiles: input.maxFiles,
+        refresh: input.refresh
+      }) };
+    case "detect_stack":
+      return { path: input.path, ...await getContextEngine().detectStack(input.path) };
+    case "list_symbols":
+      return await getContextEngine().listSymbols({
+        path: input.path,
+        query: input.query,
+        limit: input.limit
+      });
     default:
       throw new Error(`Unknown files tool: ${name}`);
   }
@@ -25754,6 +26566,11 @@ var HOWTO_TEXT = [
   "- mkdir / move / copy / delete / touch: manage entries. touch creates an empty file or updates timestamps.",
   "- search / grep / info / exists: locate and inspect entries. grep supports before/after context, ignoreCase, and exclude globs. search supports exclude, type filter, and maxDepth.",
   "",
+  "Workspace context tools (deterministic, no LLM calls):",
+  "- context_map: token-budgeted markdown map of the workspace \u2014 stack classification, top files ranked by Personalized PageRank over the symbol reference graph, and elided signatures. Call it first when orienting in an unfamiliar codebase. Pass activeFile (50x boost) or query terms (10x boost) to focus the ranking, and budget to fit your context window. Symbol tags are cached by file mtime/size across calls; use refresh=true only after large external changes.",
+  "- detect_stack: fast manifest-only classification (coding / documentation / hybrid-monorepo) with languages, key dependencies, and package.json scripts. Use it to learn which build/test commands exist.",
+  "- list_symbols: definitions (class/function/const/type with kind, line, signature) for one file (path) or across top-ranked matching files (query). Cheaper than reading whole files; locate definitions before targeted read/patch calls.",
+  "",
   "Path resolution: empty path = the Files root; `/` and absolute paths resolve to the OS filesystem root; relative paths resolve against the Files root; `../` traversal is allowed (no containment jail). Security is the user/AI provider's responsibility.",
   "",
   "All mutating operations are atomic (write-to-temp-then-rename) so a crash never leaves a partial file. Search/grep results include a `meta.truncated` flag when the result cap is hit."
@@ -25761,9 +26578,10 @@ var HOWTO_TEXT = [
 var EXPLORE_WORKFLOW_TEXT = [
   "Recommended workflow for exploring and editing an unfamiliar codebase with the Files plugin:",
   "",
+  "0. Orient first: call context_map (optionally with activeFile or query terms) to get a token-budgeted repo map \u2014 stack, top files by Personalized PageRank, and elided signatures. Call detect_stack to learn the project type and its build/test scripts. Both are deterministic and cheap; context_map caches symbol tags by file mtime/size, so repeat calls are fast.",
   '1. Map the territory: call tree with exclude=["node_modules", ".git", "dist", "build"] and includeFiles=false to get a dirs-only overview.',
-  '2. Find candidates: call search with a glob pattern (e.g. "*.ts") and exclude globs to narrow the result set. Use type="file" to skip directories.',
-  "3. Inspect before editing: call read with start/end to read a specific line range, or lineNumbers=true to make follow-up patches unambiguous. Use info for metadata without reading the body.",
+  '2. Find candidates: call search with a glob pattern (e.g. "*.ts") and exclude globs to narrow the result set. Use type="file" to skip directories. Prefer list_symbols with a query to jump straight to files defining a symbol.',
+  "3. Inspect before editing: call list_symbols with path to see a file's definitions (line + signature) before reading bodies, then read with start/end for a specific line range, or lineNumbers=true to make follow-up patches unambiguous. Use info for metadata without reading the body.",
   '4. Locate usages: call grep with a regex pattern, before=2 and after=2 for context, and exclude=["node_modules", ".git"] to skip noise. Use ignoreCase=true when the casing is uncertain.',
   "5. Verify existence: call exists before reading or patching a path you are not sure about \u2014 it never throws on missing paths.",
   "6. Patch safely: call patch with preview=true first to see the patched content, then call again with preview=false to apply. Pass an edits array for multiple replacements in one call; use replace_all=true only when you intentionally want every occurrence.",
@@ -25791,6 +26609,7 @@ function getFilesPrompt(name) {
 async function main() {
   const root = await loadRootFromEnvironment();
   const service = new FileService(root);
+  const contextEngine = new ContextEngine(service.root);
   const server = new Server(
     { name: "nusashell-files", version: "0.1.0" },
     { capabilities: { tools: {}, prompts: {} } }
@@ -25806,6 +26625,7 @@ async function main() {
       if (fileRoot) {
         const fsPath = (0, import_node_url.fileURLToPath)(fileRoot.uri);
         await service.setRoot(fsPath);
+        await contextEngine.setRoot(fsPath);
         process.stderr.write(`[nusashell-files] root=${service.root} (via roots)
 `);
       }
@@ -25822,7 +26642,8 @@ async function main() {
       const result = await callFilesTool(
         service,
         request.params.name,
-        request.params.arguments ?? {}
+        request.params.arguments ?? {},
+        contextEngine
       );
       emitAutomationForTool(server, request.params.name, request.params.arguments ?? {});
       return {

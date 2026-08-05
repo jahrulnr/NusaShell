@@ -127,3 +127,50 @@ describe("callFilesTool", () => {
     ).rejects.toThrow();
   });
 });
+
+describe("workspace context tools", () => {
+  it("context_map returns map, stack, ranks, and stats", async () => {
+    await fs.writeFile(
+      path.join(tmpDir, "package.json"),
+      JSON.stringify({ name: "demo", version: "1.0.0" }),
+    );
+    await fs.writeFile(path.join(tmpDir, "index.ts"), "export function main() { return 1; }\n");
+    const result = await callFilesTool(service, "context_map", {});
+    expect(typeof result.map).toBe("string");
+    expect(result.map).toContain("index.ts");
+    expect(result.stack.category).toBe("coding");
+    expect(Array.isArray(result.ranks)).toBe(true);
+    expect(result.stats.tokensUsed).toBeGreaterThan(0);
+  });
+
+  it("context_map rejects over-limit budget and extra fields", async () => {
+    await expect(callFilesTool(service, "context_map", { budget: 99999 })).rejects.toThrow();
+    await expect(callFilesTool(service, "context_map", { nope: 1 })).rejects.toThrow();
+  });
+
+  it("detect_stack returns the workspace classification", async () => {
+    await fs.writeFile(path.join(tmpDir, "README.md"), "# docs\n");
+    const result = await callFilesTool(service, "detect_stack", {});
+    expect(result.category).toBe("documentation");
+    expect(result.isMonorepo).toBe(false);
+  });
+
+  it("list_symbols returns definitions for one file", async () => {
+    await fs.writeFile(path.join(tmpDir, "a.py"), "def start():\n    pass\n");
+    const result = await callFilesTool(service, "list_symbols", { path: "a.py" });
+    expect(result.symbols.map((s) => s.name)).toContain("start");
+  });
+
+  it("list_symbols requires either path or query", async () => {
+    await expect(callFilesTool(service, "list_symbols", {})).rejects.toThrow();
+  });
+
+  it("context tools are annotated read-only and non-destructive", async () => {
+    for (const tool of FILES_TOOLS) {
+      if (["context_map", "detect_stack", "list_symbols"].includes(tool.name)) {
+        expect(tool.annotations.readOnlyHint).toBe(true);
+        expect(tool.annotations.destructiveHint).toBe(false);
+      }
+    }
+  });
+});

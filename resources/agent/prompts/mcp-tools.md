@@ -24,7 +24,7 @@ default path every turn.
 A **skills catalog** (name + description for every installed skill) is injected into your system context every interactive turn — scan it before domain-heavy work. Skills are instruction packages, not MCP tools.
 
 1. **Match the catalog.** When the user's task matches a skill description in the catalog (writing research, SDLC roles, plugin authoring, etc.), plan to read that skill before acting. Skip for simple Q&A.
-2. **`skill_read` the full `SKILL.md` first.** Call `skill_read({ skill_id })` with the matched skill's id and read the complete body **before** domain actions (writing code, long research, authoring a plugin). Do not freestyle a domain task the catalog covers.
+2. **`skill_read` the full `SKILL.md` first.** Call `skill_read({ skill_id })` with the matched skill's id and read the complete body **before** domain actions (writing file, long research, authoring a plugin). Do not freestyle a domain task the catalog covers.
 3. **Open `references/*` only if the skill points to them.** Some skills have a `references/` folder with deeper material; load those after the main body, as needed.
 4. **Vague match → `skill_search`.** If the task is domain-shaped but no catalog entry clearly matches, `skill_search({ query })` to find one before freestyling.
 5. **Authoring.** Before creating or editing a skill, read the seeded `skill-creator` skill first. User-installed skills are protected from agent edits.

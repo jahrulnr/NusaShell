@@ -12,12 +12,14 @@ import { fileURLToPath } from "node:url";
 import { loadRootFromEnvironment } from "./config.js";
 import { safeFilesError } from "./errors.js";
 import { FileService } from "./fs-service.js";
+import { ContextEngine } from "./context-engine.js";
 import { callFilesTool, FILES_TOOLS } from "./tools.js";
 import { getFilesPrompt, FILES_PROMPTS } from "./prompts.js";
 
 async function main() {
   const root = await loadRootFromEnvironment();
   const service = new FileService(root);
+  const contextEngine = new ContextEngine(service.root);
   const server = new Server(
     { name: "nusashell-files", version: "0.1.0" },
     { capabilities: { tools: {}, prompts: {} } },
@@ -40,6 +42,7 @@ async function main() {
       if (fileRoot) {
         const fsPath = fileURLToPath(fileRoot.uri);
         await service.setRoot(fsPath);
+        await contextEngine.setRoot(fsPath);
         process.stderr.write(`[nusashell-files] root=${service.root} (via roots)\n`);
       }
     } catch (error) {
@@ -58,6 +61,7 @@ async function main() {
         service,
         request.params.name,
         request.params.arguments ?? {},
+        contextEngine,
       );
       // Emit automation notifications for mutating operations (Watch→Agent demo).
       emitAutomationForTool(server, request.params.name, request.params.arguments ?? {});

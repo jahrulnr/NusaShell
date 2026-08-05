@@ -2,7 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { loadRootFromEnvironment, resolvePath, validateRoot } from "../mcp/config.js";
+import {
+  loadRootFromEnvironment,
+  resolvePath,
+  validateRoot,
+  toPosixPath,
+  relativePosix,
+  splitLines,
+} from "../mcp/config.js";
 
 let tmpDir;
 
@@ -96,5 +103,31 @@ describe("resolvePath", () => {
 
   it("allows nested paths inside root", () => {
     expect(resolvePath(tmpDir, "sub/dir/file.txt")).toBe(path.resolve(tmpDir, "sub/dir/file.txt"));
+  });
+});
+
+describe("toPosixPath / relativePosix", () => {
+  it("normalizes Windows backslashes and leaves posix paths", () => {
+    expect(toPosixPath("src\\app\\file.ts")).toBe("src/app/file.ts");
+    expect(toPosixPath("src/app/file.ts")).toBe("src/app/file.ts");
+    expect(toPosixPath("")).toBe("");
+  });
+
+  it("returns nested relative paths with forward slashes", () => {
+    const abs = path.join(tmpDir, "nested", "dir", "file.txt");
+    expect(relativePosix(tmpDir, abs)).toBe("nested/dir/file.txt");
+    expect(relativePosix(tmpDir, abs)).not.toMatch(/\\/);
+  });
+
+  it("uses fallback when the absolute path is the root", () => {
+    expect(relativePosix(tmpDir, tmpDir, ".")).toBe(".");
+  });
+});
+
+describe("splitLines", () => {
+  it("splits LF and CRLF without leaving CR on line bodies", () => {
+    expect(splitLines("a\nb\n")).toEqual(["a", "b", ""]);
+    expect(splitLines("a\r\nb\r\n")).toEqual(["a", "b", ""]);
+    expect(splitLines("solo")).toEqual(["solo"]);
   });
 });

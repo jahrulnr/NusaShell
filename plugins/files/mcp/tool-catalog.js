@@ -14,4 +14,7 @@ export const FILES_TOOL_NAMES = Object.freeze([
   "append",
   "exists",
   "touch",
+  "context_map",
+  "detect_stack",
+  "list_symbols",
 ]);

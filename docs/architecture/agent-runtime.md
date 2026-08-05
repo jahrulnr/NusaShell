@@ -697,9 +697,11 @@ background results without the user having to manually prompt it.
 
 The `CompletionSteerer` (desktop renderer) subscribes to `tool_job_ended`
 events, debounces 500ms to coalesce multiple completions, checks
-`turnPending`, and calls `submit()` with a formatted summary. If the
-conversation has an active turn, the steer is skipped — the agent will see
-the completed jobs in the job strip on its next natural turn.
+`isConversationRunning(conversationId)`, and calls `submit()` with a formatted
+summary. If the conversation has an active turn, the steer is skipped — the
+agent will see the completed jobs in the job strip on its next natural turn.
+Turn tracking is per-conversation (`pendingTurnConversations` set), so a
+background turn in one room does not block steering or submitting in another.
 
 ## Multi-turn auto-continue (Codex-inspired outer loop)
 
@@ -752,7 +754,7 @@ The `AgentConversationController` orchestrates the chain:
 4. The chain **aborts** when:
    - `shouldContinue` is false (no open todos, budget exhausted, etc.)
    - The user clicks **Stop** (`autoContinueAborted` flag)
-   - The user sends a new message (`turnPending` guard at loop top)
+   - The user sends a new message (`isConversationRunning` guard at loop top)
    - The user switches conversations (`conversation.id` guard)
    - A chained turn fails or is cancelled (error handler breaks the loop)
 5. The status bar shows `Continuing tasks… (n/max)` (finite) or

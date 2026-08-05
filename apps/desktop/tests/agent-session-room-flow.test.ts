@@ -18,6 +18,7 @@ function installDom() {
     <input id="agent-conversation-search" value="">
     <div id="agent-thread"></div>
     <input id="agent-input">
+    <div id="agent-attachments"></div>
     <button id="agent-send-btn"></button>
     <button id="agent-stop-btn" hidden></button>
     <span id="agent-provider-status"></span>
@@ -203,7 +204,7 @@ describe("BH-AGENT room / turn / drawer suite", () => {
     const send = document.querySelector<HTMLButtonElement>("#agent-send-btn")!;
     const stop = document.querySelector<HTMLButtonElement>("#agent-stop-btn")!;
 
-    controller.turnPending = true;
+    controller.pendingTurnConversations.add("room-a");
     controller.turnOwnerConversationId = "room-a";
     controller.conversation = room("room-a") as never;
     controller.activeId = "room-a";
@@ -219,6 +220,69 @@ describe("BH-AGENT room / turn / drawer suite", () => {
     expect(input.disabled).toBe(false);
     expect(send.disabled).toBe(false);
     expect(stop.hidden).toBe(true);
+  });
+
+  it("BH-AGENT-15 allows submit in room B while room A owns a running turn", async () => {
+    const rooms = new Map([
+      ["room-a", room("room-a", { messages: [{ role: "user", content: "hi A" }] })],
+      ["room-b", room("room-b", { messages: [] })],
+    ]);
+    const append = vi.fn(async (id: string, msg: unknown) => {
+      const c = rooms.get(id);
+      if (!c) return null;
+      const next = { ...c, messages: [...c.messages, msg] };
+      rooms.set(id, next);
+      return next;
+    });
+    const get = vi.fn(async (id: string) => rooms.get(id) ?? null);
+    const list = vi.fn(async () =>
+      [...rooms.values()].map((c) => ({
+        id: c.id, title: c.title, createdAt: c.createdAt, updatedAt: c.updatedAt,
+        messageCount: c.messageCount, kind: c.kind,
+      })),
+    );
+    const runTurn = vi.fn(async () => ({
+      traceId: "trace-b",
+      text: "ok",
+      toolCalls: [],
+      steps: [],
+      rounds: 1,
+    }));
+    const controller = new AgentConversationController({
+      shell: { agentConversations: { get, list, append, create: vi.fn(async () => rooms.get("room-b")!) } },
+      runTurn,
+      getActiveModel: () => ({ key: "m1", contextWindow: 8000 } as never),
+      log: vi.fn(),
+    } as never);
+    controller.conversations = [...rooms.values()].map((c) => ({
+      id: c.id, title: c.title, createdAt: c.createdAt, updatedAt: c.updatedAt,
+      messageCount: c.messageCount,
+    })) as never;
+
+    // Simulate room A owning a running turn.
+    controller.pendingTurnConversations.add("room-a");
+    controller.turnOwnerConversationId = "room-a";
+
+    // Switch to room B and type a message.
+    await controller.open("room-b");
+    const input = document.querySelector<HTMLInputElement>("#agent-input")!;
+    input.value = "hello from B";
+
+    // Debug: verify state before submit
+    const convId = controller.conversation?.id;
+    const isRunning = controller.isConversationRunning(convId);
+    const inflight = controller._submitInFlight;
+    const textVal = document.querySelector<HTMLInputElement>("#agent-input")?.value;
+
+    // submit() must NOT bail because of room A's pending turn.
+    await controller.submit();
+
+    // runTurn was called — submit() proceeded past the guard.
+    expect(runTurn).toHaveBeenCalledTimes(1);
+    expect(runTurn.mock.calls[0]?.[1]?.conversationId).toBe("room-b");
+    // Room B's turn completed and was cleaned up; room A is still running.
+    expect(controller.pendingTurnConversations.has("room-b")).toBe(false);
+    expect(controller.pendingTurnConversations.has("room-a")).toBe(true);
   });
 
   it("BH-AGENT-02/03/04/05 rehydrate Working with reasoning, tool, and text after return", async () => {
@@ -240,7 +304,7 @@ describe("BH-AGENT room / turn / drawer suite", () => {
       };
     });
     const { controller } = makeController({ getActiveTurn });
-    controller.turnPending = false;
+    controller.pendingTurnConversations.clear();
     await controller.open("room-a");
     await controller.restoreActiveTurnUi();
 
@@ -331,7 +395,7 @@ describe("BH-AGENT room / turn / drawer suite", () => {
       })],
     ]);
     const { controller } = makeController({ rooms });
-    controller.turnPending = false;
+    controller.pendingTurnConversations.clear();
     await controller.open("room-b");
     await controller.restoreRunningTurnState();
     expect(document.querySelector("#agent-stop-btn")?.hidden).toBe(false);
@@ -373,7 +437,7 @@ describe("BH-AGENT room / turn / drawer suite", () => {
 
   it("BH-AGENT-11 paints incomplete turn when trailing user and no parent mutex", () => {
     const { controller } = makeController();
-    controller.turnPending = false;
+    controller.pendingTurnConversations.clear();
     controller.conversation = room("room-a", {
       messages: [{ role: "user", content: "only user left" }],
     }) as never;
@@ -394,7 +458,7 @@ describe("BH-AGENT room / turn / drawer suite", () => {
       updatedAt: new Date().toISOString(),
     }));
     const { controller } = makeController({ getActiveTurn });
-    controller.turnPending = false;
+    controller.pendingTurnConversations.clear();
     controller.conversation = room("room-a", {
       messages: [{ role: "user", content: "orphan shape" }],
     }) as never;
@@ -420,5 +484,41 @@ describe("BH-AGENT room / turn / drawer suite", () => {
     expect(summary.label).toMatch(/2 tool calls/);
     expect(summary.succeeded).toBe(1);
     expect(summary.failed).toBe(1);
+  });
+
+  // ── Per-conversation state isolation (BH-AGENT-16..21) ──
+  // Each test verifies that a field which should be scoped per-conversation
+  // does not leak from room A into room B when the user switches rooms.
+
+  it("BH-AGENT-16 isolates activeTraceId per conversation", async () => {
+    const { controller } = makeController();
+    await controller.open("room-a");
+    controller.turnOwnerConversationId = "room-a";
+    controller.activeTraceId = "trace-a";
+    await controller.open("room-b");
+    expect(controller.activeTraceId).toBe("");
+    // Switching back to room A should restore room A's traceId.
+    await controller.open("room-a");
+    expect(controller.activeTraceId).toBe("trace-a");
+  });
+
+  it("BH-AGENT-17 isolates liveStreamState per conversation", async () => {
+    const { controller } = makeController();
+    await controller.open("room-a");
+    controller.turnOwnerConversationId = "room-a";
+    const streamStateA = { message: {}, textBubble: null, streamedText: "A" };
+    controller.liveStreamState = streamStateA;
+    await controller.open("room-b");
+    expect(controller.liveStreamState).toBeNull();
+    await controller.open("room-a");
+    expect(controller.liveStreamState).toBe(streamStateA);
+  });
+
+  it("BH-AGENT-18 isolates autoContinueAborted per conversation", async () => {
+    const { controller } = makeController();
+    await controller.open("room-a");
+    controller.autoContinueAborted = true;
+    await controller.open("room-b");
+    expect(controller.autoContinueAborted).toBe(false);
   });
 });

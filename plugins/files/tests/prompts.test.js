@@ -27,6 +27,16 @@ describe("Files MCP prompts", () => {
     expect(text).toContain("exclude");
   });
 
+  it("mentions the workspace context tools in both prompts", () => {
+    const howto = getFilesPrompt("howto").messages[0].content.text;
+    expect(howto).toContain("context_map");
+    expect(howto).toContain("detect_stack");
+    expect(howto).toContain("list_symbols");
+    const workflow = getFilesPrompt("explore-workflow").messages[0].content.text;
+    expect(workflow).toContain("context_map");
+    expect(workflow).toContain("list_symbols");
+  });
+
   it("rejects unknown prompts", () => {
     expect(() => getFilesPrompt("missing")).toThrow("Unknown prompt");
   });

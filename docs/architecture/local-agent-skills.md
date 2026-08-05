@@ -83,6 +83,19 @@ whether each skill was created by the agent or installed by the user.
 - Support file creation via `write_file` is limited to `references/`,
   `templates/`, `scripts/`, and `assets/` subdirectories.
 
+### Skill VERSION file
+
+A skill package may carry a `VERSION` file (bare integer, e.g. `2`) at its
+package root alongside `SKILL.md`. The integer is the skill's own content
+revision number, independent of the NusaShell release version in the repo
+root `VERSION`. Bumping it signals that the skill's instructions, references,
+or templates changed in a way downstream consumers (catalog injection,
+`skill_read` callers, release notes) should notice. A skill without a
+`VERSION` file is accepted with no version gate. Built-in seeded skills
+(`resources/agent/skills/<name>/VERSION`) are the canonical examples:
+`mcp-creator` is at `2` after the 0.4.0 tool-naming (create vs convert)
+revision; `skill-creator` is at `1`.
+
 ### Write-approval staging
 
 When `skills.write_approval` is enabled in the desktop config, skill mutations

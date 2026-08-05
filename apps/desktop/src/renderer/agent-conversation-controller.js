@@ -57,14 +57,18 @@ export class AgentConversationController {
     this.conversations = [];
     this.activeId = "";
     this.pendingDeleteId = "";
-    this.turnPending = false;
-    /** Set by stop() to break the auto-continue chain between turns. */
-    this.autoContinueAborted = false;
+    /** Per-conversation set of conversation IDs with an in-flight turn. */
+    this.pendingTurnConversations = new Set();
+    /** Brief re-entry guard during submit() before the conversation ID is known. */
+    this._submitInFlight = false;
+    /** Per-conversation trace IDs for in-flight or recently active turns. */
+    this.activeTraceIds = new Map();
+    /** Per-conversation live stream state for in-flight streaming turns. */
+    this.liveStreamStates = new Map();
+    /** Per-conversation auto-continue abort flags. */
+    this.autoContinueAbortedConvs = new Set();
     /** Conversation that owns the in-flight parent submit() (paint gate). */
     this.turnOwnerConversationId = null;
-    /** Live streamState reference so restoreActiveTurnUi can rebind the paint root. */
-    this.liveStreamState = null;
-    this.activeTraceId = "";
     this.failedMessage = null;
     this.attachments = [];
     this.composerInputWidth = 0;
@@ -98,6 +102,62 @@ export class AgentConversationController {
   set subagentEventDisposer(v) { this.subagentLifecycle.eventDisposer = v; }
   get subagentOwnerConversationId() { return this.subagentLifecycle.ownerConversationId; }
   set subagentOwnerConversationId(v) { this.subagentLifecycle.ownerConversationId = v; }
+
+  /**
+   * Backwards-compatible boolean view of pendingTurnConversations.
+   * Returns true when ANY conversation has an in-flight turn. Prefer
+   * isConversationRunning(id) for per-conversation guards.
+   */
+  get turnPending() { return this.pendingTurnConversations.size > 0; }
+  set turnPending(value) {
+    if (value) {
+      const id = this.turnOwnerConversationId || this.conversation?.id;
+      if (id) this.pendingTurnConversations.add(id);
+    } else {
+      this.pendingTurnConversations.clear();
+    }
+  }
+  /** True when the given conversation has an in-flight turn. */
+  isConversationRunning(conversationId) {
+    return Boolean(conversationId) && this.pendingTurnConversations.has(conversationId);
+  }
+
+  /**
+   * Per-conversation traceId. Getter returns the traceId for the currently
+   * viewed conversation; setter stores under the turn owner (or active conv).
+   * Empty string clears the entry. Falls back to the "" bucket when no
+   * conversation is active (test/seed compatibility).
+   */
+  get activeTraceId() { return this.activeTraceIds.get(this.activeId) ?? ""; }
+  set activeTraceId(value) {
+    const key = this.turnOwnerConversationId || this.activeId || "";
+    if (value) this.activeTraceIds.set(key, value);
+    else this.activeTraceIds.delete(key);
+  }
+
+  /**
+   * Per-conversation live stream state. Getter returns the stream state for
+   * the currently viewed conversation; setter stores under the turn owner.
+   * Falls back to the "" bucket when no conversation is active.
+   */
+  get liveStreamState() { return this.liveStreamStates.get(this.activeId) ?? null; }
+  set liveStreamState(value) {
+    const key = this.turnOwnerConversationId || this.activeId || "";
+    if (value) this.liveStreamStates.set(key, value);
+    else this.liveStreamStates.delete(key);
+  }
+
+  /**
+   * Per-conversation auto-continue abort flag. Getter checks the currently
+   * viewed conversation; setter toggles the active conversation's entry.
+   * Falls back to the "" bucket when no conversation is active.
+   */
+  get autoContinueAborted() { return this.autoContinueAbortedConvs.has(this.activeId || ""); }
+  set autoContinueAborted(value) {
+    const key = this.activeId || "";
+    if (value) this.autoContinueAbortedConvs.add(key);
+    else this.autoContinueAbortedConvs.delete(key);
+  }
 
   async initialize() {
     if (!this.shell?.agentConversations) {
@@ -162,10 +222,11 @@ export class AgentConversationController {
     const stopButton = $("#agent-stop-btn");
     const status = $("#agent-provider-status");
     const text = input?.value.trim();
-    if ((!retry && !text && this.attachments.length === 0) || this.turnPending) return;
+    const currentConversationId = this.conversation?.id ?? "";
+    if ((!retry && !text && this.attachments.length === 0) || this.isConversationRunning(currentConversationId) || this._submitInFlight) return;
     // A1: acquire the submit mutex BEFORE any await so a second Ctrl+Enter
     // during `create()` / `append()` cannot start a parallel turn.
-    this.turnPending = true;
+    this._submitInFlight = true;
     let ownerConversationId = "";
     let ownerConversation = null;
     try {
@@ -175,14 +236,20 @@ export class AgentConversationController {
       // switch to, or create, another conversation while this turn streams.
       ownerConversationId = this.conversation?.id || "";
       ownerConversation = this.conversation;
-      if (!ownerConversationId || !ownerConversation) return;
+      if (!ownerConversationId || !ownerConversation) {
+        this._submitInFlight = false;
+        return;
+      }
 
       if (this.conversation?.kind === "acp") {
+        this.pendingTurnConversations.add(ownerConversationId);
+        this._submitInFlight = false;
         this.turnOwnerConversationId = ownerConversationId;
         return await this.submitAcp({ text, retry, ownerConversationId, ownerConversation });
       }
     } catch (error) {
-      this.turnPending = false;
+      this._submitInFlight = false;
+      if (ownerConversationId) this.pendingTurnConversations.delete(ownerConversationId);
       throw error;
     }
 
@@ -196,6 +263,8 @@ export class AgentConversationController {
     let sealedResult = null;
     try {
       this.turnOwnerConversationId = ownerConversationId;
+      this.pendingTurnConversations.add(ownerConversationId);
+      this._submitInFlight = false;
       this.activeTraceId = crypto.randomUUID();
       input.disabled = true;
       sendButton.disabled = true;
@@ -600,11 +669,16 @@ export class AgentConversationController {
         this.log("error", `Agent turn failed: ${formatTurnError(error)}`);
       }
     } finally {
-      const ownerConversationId = this.turnOwnerConversationId;
-      this.turnPending = false;
-      this.turnOwnerConversationId = null;
-      this.liveStreamState = null;
-      this.activeTraceId = "";
+      // Use the closure-captured ownerConversationId (from submit's local
+      // scope), not this.turnOwnerConversationId, so concurrent turns in
+      // other conversations don't clear each other's globals.
+      this.pendingTurnConversations.delete(ownerConversationId);
+      this.activeTraceIds.delete(ownerConversationId);
+      this.liveStreamStates.delete(ownerConversationId);
+      this._submitInFlight = false;
+      if (this.turnOwnerConversationId === ownerConversationId) {
+        this.turnOwnerConversationId = null;
+      }
       if (this.conversation?.id === ownerConversationId) {
         input.disabled = false;
         sendButton.disabled = false;
@@ -642,7 +716,7 @@ export class AgentConversationController {
     while (true) {
       // Abort guards — checked before acquiring the mutex.
       if (this.conversation?.id !== conversationId) return;
-      if (this.turnPending) return; // user started a new turn
+      if (this.isConversationRunning(conversationId)) return; // user started a new turn
       if (this.autoContinueAborted) { this.autoContinueAborted = false; return; }
 
       const input = $("#agent-input");
@@ -656,7 +730,7 @@ export class AgentConversationController {
       const turnEndPromise = new Promise((resolve) => { turnEndResolve = resolve; });
       let sealedResult = null;
 
-      this.turnPending = true;
+      this.pendingTurnConversations.add(conversationId);
       this.turnOwnerConversationId = conversationId;
       try {
         let conv = await this.shell.agentConversations.get(conversationId);
@@ -924,10 +998,12 @@ export class AgentConversationController {
           : `Auto-continue failed at index=${index}: ${formatTurnError(error)}`);
         break;
       } finally {
-        this.turnPending = false;
-        this.turnOwnerConversationId = null;
-        this.liveStreamState = null;
-        this.activeTraceId = "";
+        this.pendingTurnConversations.delete(conversationId);
+        this.activeTraceIds.delete(conversationId);
+        this.liveStreamStates.delete(conversationId);
+        if (this.turnOwnerConversationId === conversationId) {
+          this.turnOwnerConversationId = null;
+        }
         if (this.conversation?.id === conversationId) {
           input.disabled = false;
           sendButton.disabled = false;
@@ -944,9 +1020,10 @@ export class AgentConversationController {
     const sendButton = $("#agent-send-btn");
     const stopButton = $("#agent-stop-btn");
     const status = $("#agent-provider-status");
-    // A1: turnPending is acquired by submit() before calling us; only
-    // reject when called directly (should not happen, but guard for safety).
-    if (!this.turnPending || !ownerConversationId || !ownerConversation?.acp) return;
+    // A1: submit() adds the conversation to pendingTurnConversations before
+    // calling us; only reject when called directly (should not happen, but
+    // guard for safety).
+    if (!this.isConversationRunning(ownerConversationId) || !ownerConversationId || !ownerConversation?.acp) return;
 
     let pending = null;
     let retryIsSafe = false;
@@ -1110,10 +1187,13 @@ export class AgentConversationController {
       status.textContent = retryIsSafe ? "ACP turn failed · ready to retry" : "ACP turn error";
       this.log("error", `ACP turn failed: ${formatTurnError(error)}`);
     } finally {
-      const ownerConversationId = this.turnOwnerConversationId;
-      this.turnPending = false;
-      this.turnOwnerConversationId = null;
-      this.activeTraceId = "";
+      // Use the parameter ownerConversationId, not this.turnOwnerConversationId,
+      // so concurrent turns in other conversations don't clear each other's globals.
+      this.pendingTurnConversations.delete(ownerConversationId);
+      this.activeTraceIds.delete(ownerConversationId);
+      if (this.turnOwnerConversationId === ownerConversationId) {
+        this.turnOwnerConversationId = null;
+      }
       if (this.conversation?.id === ownerConversationId) {
         input.disabled = false;
         sendButton.disabled = false;
@@ -1335,7 +1415,7 @@ export class AgentConversationController {
       this.toolJobStrip.mount();
       this.completionSteerer = new CompletionSteerer({
         conversationId,
-        isIdle: () => !this.turnPending,
+        isIdle: () => !this.isConversationRunning(conversationId),
         startTurn: (message) => this.steerTurn(message),
         log: (msg) => this.log?.(msg),
       });
@@ -1359,7 +1439,7 @@ export class AgentConversationController {
    * Called by CompletionSteerer when a background job ends and the conversation is idle.
    */
   async steerTurn(message) {
-    if (this.turnPending) return;
+    if (this.isConversationRunning(this.conversation?.id)) return;
     if (!this.conversation) return;
     const input = $("#agent-input");
     if (input) {
@@ -1380,12 +1460,12 @@ export class AgentConversationController {
     if (!this.conversation || this.activeId !== this.conversation.id) return;
     const stopButton = $("#agent-stop-btn");
     const hasRunningSubagent = Boolean(this.conversation.subagentRuns?.some((r) => r.status === "running"));
-    if (this.conversation.kind === "acp" && this.getAcpSessionInfo && !this.turnPending) {
+    if (this.conversation.kind === "acp" && this.getAcpSessionInfo && !this.isConversationRunning(this.conversation.id)) {
       try {
         const info = await this.getAcpSessionInfo(this.conversation.id);
         if (this.activeId !== this.conversation.id) return;
         if (info?.state === "running" && info.traceId) {
-          this.turnPending = true;
+          this.pendingTurnConversations.add(this.conversation.id);
           this.activeTraceId = info.traceId;
           if (stopButton) stopButton.hidden = false;
           this.updateAcpStatus();
@@ -1406,7 +1486,7 @@ export class AgentConversationController {
    * renderer-wide turn mutex.
    */
   resetComposerForConversation(conversationId) {
-    const isOwner = this.turnPending && this.turnOwnerConversationId === conversationId;
+    const isOwner = this.isConversationRunning(conversationId) && this.turnOwnerConversationId === conversationId;
     const input = $("#agent-input");
     const sendButton = $("#agent-send-btn");
     const stopButton = $("#agent-stop-btn");
@@ -1485,8 +1565,9 @@ export class AgentConversationController {
       pill.hidden = false;
       const providerId = this.conversation.acp?.providerId ?? "unknown";
       provider.textContent = providerId;
-      chip.textContent = this.turnPending ? "● RUNNING" : "● IDLE";
-      chip.className = `acp-status-chip ${this.turnPending ? "is-running" : "is-idle"}`;
+      const isRunning = this.isConversationRunning(this.conversation.id);
+      chip.textContent = isRunning ? "● RUNNING" : "● IDLE";
+      chip.className = `acp-status-chip ${isRunning ? "is-running" : "is-idle"}`;
       const modelName = this.currentAcpModelName() ?? providerId;
       pillLabel.textContent = `ACP · ${modelName}`;
       await this.ensureAcpSessionIfNeeded();
@@ -1781,7 +1862,7 @@ export class AgentConversationController {
     }
 
     this.activeTraceId = snap.traceId;
-    this.turnPending = true;
+    this.pendingTurnConversations.add(conversationId);
     this.turnOwnerConversationId = conversationId;
     this.resetComposerForConversation(conversationId);
     const stopButton = $("#agent-stop-btn");

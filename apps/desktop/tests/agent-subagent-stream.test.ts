@@ -135,7 +135,7 @@ describe("AgentConversationController — conversation-scoped composer state", (
       shell: { agentConversations: { create: createConversation } },
     } as never);
     controller.conversation = { id: "conversation-a", messages: [{ role: "user", content: "Working" }] } as never;
-    controller.turnPending = true;
+    controller.pendingTurnConversations.add("conversation-a");
     controller.resetComposerForConversation = vi.fn();
     controller.renderThread = vi.fn();
     controller.updateWorkspaceLabel = vi.fn();
@@ -155,8 +155,8 @@ describe("AgentConversationController — conversation-scoped composer state", (
     const send = document.querySelector<HTMLButtonElement>("#agent-send-btn")!;
     const stop = document.querySelector<HTMLButtonElement>("#agent-stop-btn")!;
 
-    controller.turnPending = true;
     controller.turnOwnerConversationId = "conversation-a";
+    controller.pendingTurnConversations.add("conversation-a");
     input.disabled = true;
     send.disabled = true;
     stop.hidden = false;
@@ -177,8 +177,8 @@ describe("AgentConversationController — conversation-scoped composer state", (
     const send = document.querySelector<HTMLButtonElement>("#agent-send-btn")!;
     const stop = document.querySelector<HTMLButtonElement>("#agent-stop-btn")!;
 
-    controller.turnPending = true;
     controller.turnOwnerConversationId = "conversation-a";
+    controller.pendingTurnConversations.add("conversation-a");
     controller.resetComposerForConversation("conversation-a");
 
     expect(input.disabled).toBe(true);
