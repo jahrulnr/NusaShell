@@ -2,6 +2,7 @@ import type { LoggerPort } from "../../plugin/ports/logger.port.js";
 import type { AgentProvider, AgentMessage, AgentCompactionCheckpoint, AgentContextOptions, RunAgentTurnInput } from "./agent-turn-types.js";
 import {
   clampText,
+  clampToolResultContent,
   estimateMessageTokens,
   formatMessagesForSummary,
   resolveContextThreshold,
@@ -164,7 +165,7 @@ function shrinkToolContents(messages: AgentMessage[], threshold: { soft: number 
     if (!msg || msg.role !== "tool" || typeof msg.content !== "string") continue;
     if (msg.content.length <= 200) continue; // skip tiny results
     const maxKeep = Math.max(200, msg.content.length - remaining);
-    const clamped = clampText(msg.content, maxKeep);
+    const clamped = clampToolResultContent(msg.content, maxKeep, msg.name);
     remaining -= (msg.content.length - clamped.length);
     messages[idx] = { ...msg, content: clamped };
   }
@@ -177,7 +178,7 @@ function shrinkToolContents(messages: AgentMessage[], threshold: { soft: number 
       const msg = messages[idx];
       if (!msg || msg.role !== "tool" || typeof msg.content !== "string") continue;
       if (msg.content.length <= perToolBudget) continue;
-      messages[idx] = { ...msg, content: clampText(msg.content, perToolBudget) };
+      messages[idx] = { ...msg, content: clampToolResultContent(msg.content, perToolBudget, msg.name) };
     }
     // If STILL over after both passes, log so the stuck-over-budget state is
     // observable — there may be no shrinkable tool content left (all <200 chars

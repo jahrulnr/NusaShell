@@ -244,7 +244,10 @@ per call, using the persisted `output` (success) or `error` (failure, marked
 skipped; order is preserved. Tool results from `mcp_*` tools are wrapped in
 the `untrusted_tool_result` envelope (mirrored from the application-layer
 `wrapUntrustedResult`) so the model treats plugin output as data, not
-instructions. Without this reconstruction the model would see an assistant
+instructions. Mid-turn and in-list tool shrink unwrap the payload, clamp the raw body, then
+wrap once with `untrusted_tool_result` — never end-slice a finished envelope
+(that drops the close tag). Without this
+reconstruction the model would see an assistant
 claim with no tool-use record and no results, and could not verify what was
 actually done.
 

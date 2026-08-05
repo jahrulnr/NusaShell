@@ -1021,6 +1021,43 @@ describe("AgentTurnRunner", () => {
     }
   });
 
+  it("preserves untrusted close tag when mid-turn shrink clamps mcp_ results", async () => {
+    const hugeOutput = { entries: Array.from({ length: 80 }, (_, i) => ({ path: `docs/item-${i}.json`, blob: "z".repeat(200) })) };
+    const provider = new ScriptedProvider([
+      { toolCalls: [{ id: "call-1", name: "mcp_nusashell_files_files_search", args: { query: "curl" } }] },
+      { text: "Found curl helpers" },
+    ]);
+    const tools = new FakeToolGateway();
+    tools.execute = async () => hugeOutput;
+    const runner = new AgentTurnRunner({
+      provider,
+      toolGateway: tools,
+      context: {
+        compactionEnabled: true,
+        maxInputTokens: 2000,
+        reserveTokens: 200,
+        recentTurns: 4,
+        summaryMaxChars: 1000,
+      },
+    });
+
+    await runner.run({
+      messages: [{ role: "user", content: "Find curl-related files" }],
+      pluginIds: ["nusashell.files"],
+    });
+
+    const secondRequest = provider.requests[1];
+    const toolMessage = secondRequest?.messages.find((m) => m.role === "tool");
+    expect(toolMessage).toBeDefined();
+    if (toolMessage && "content" in toolMessage) {
+      const content = toolMessage.content as string;
+      expect(content.startsWith("<untrusted_tool_result")).toBe(true);
+      expect(content).toContain('source="mcp_nusashell_files_files_search"');
+      expect(content.endsWith("</untrusted_tool_result>")).toBe(true);
+      expect(content.length).toBeLessThan(JSON.stringify({ ok: true, result: hugeOutput }).length);
+    }
+  });
+
   // --- Dual-space: full transcript for UI, compact only for model send ---
 
   it("does not mutate input messages after compaction (dual-space: store stays full)", async () => {
