@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, mkdir, open, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -136,6 +136,14 @@ class TestJobFs implements JobFsPort {
       const path = resolve(dir, `${stamp}.md`);
       await writeFile(path, content, "utf8");
       return path;
+    } catch {
+      return null;
+    }
+  }
+
+  async readJobOutput(path: string): Promise<string | null> {
+    try {
+      return await readFile(path, "utf8");
     } catch {
       return null;
     }
@@ -386,6 +394,71 @@ describe("JobScheduler", () => {
     expect(result.ok).toBe(true);
     const job = await store.get("manual-1");
     expect(job!.lastStatus).toBe("ok");
+  });
+
+  it("startJobNow returns before the job finishes and runs in background", async () => {
+    const store = new FakeJobStore();
+    await store.create(makeJob({ id: "bg-1", nextRunAt: "2025-06-01T00:00:00.000Z" }));
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    const executor = {
+      runAgent: async () => {
+        await barrier;
+        return { traceId: "t", status: "ok", summary: "bg ok" };
+      },
+    };
+    const scheduler = new JobScheduler({
+      store,
+      executor: executor as never,
+      callToolHandler: new FakeCallToolHandler(),
+      eventDispatcher: new EventDispatcher(),
+      jobFs: new TestJobFs(tempDir),
+      executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
+      now: () => NOW,
+    });
+    const result = await scheduler.startJobNow("bg-1");
+    expect(result.ok).toBe(true);
+    // Returns before the job completes.
+    const jobAfterLaunch = await store.get("bg-1");
+    expect(jobAfterLaunch!.lastStatus).toBeNull();
+    release();
+    await vi.waitFor(() => expect(store.get("bg-1").then((j) => j!.lastStatus)).resolves.toBe("ok"));
+  });
+
+  it("startJobNow rejects a paused job", async () => {
+    const store = new FakeJobStore();
+    await store.create(makeJob({ id: "bg-paused", enabled: false }));
+    const scheduler = new JobScheduler({
+      store, executor: new ScriptedExecutor(() => ({ traceId: "t", status: "ok", summary: "" })),
+      callToolHandler: new FakeCallToolHandler(), eventDispatcher: new EventDispatcher(),
+      jobFs: new TestJobFs(tempDir), executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
+      now: () => NOW,
+    });
+    const result = await scheduler.startJobNow("bg-paused");
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/paused/);
+  });
+
+  it("releases the fire claim when dispatch throws mid-run", async () => {
+    const store = new FakeJobStore();
+    await store.create(makeJob({ id: "throwing-1", nextRunAt: "2025-06-01T00:00:00.000Z" }));
+    const executor = {
+      runAgent: async () => {
+        throw new Error("boom");
+      },
+    };
+    const scheduler = new JobScheduler({
+      store,
+      executor: executor as never,
+      callToolHandler: new FakeCallToolHandler(),
+      eventDispatcher: new EventDispatcher(),
+      jobFs: new TestJobFs(tempDir),
+      executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS as unknown as JobAgentExecutorSettings,
+      now: () => NOW,
+    });
+    await scheduler.startJobNow("throwing-1");
+    // Let the background dispatch settle and its finally run.
+    await vi.waitFor(() => expect(store.claims.has("throwing-1")).toBe(false));
   });
 
   it("runOneNow rejects a paused job", async () => {

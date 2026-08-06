@@ -1,6 +1,6 @@
 import { listPackage } from "@electron/asar";
 import { access, readdir } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { missingPackagedRuntimeFiles } from "./package-runtime-dependencies.js";
 
@@ -74,6 +74,33 @@ const nativeModules = await findFiles(
 );
 if (nativeModules.length === 0) {
   throw new Error(`No unpacked better-sqlite3 binary was found under ${unpackedPath}`);
+}
+
+// Never ship Notes runtime state written by local dev or E2E into installs.
+// That data must stay under Electron userData (e.g. ~/.config/nusashell), not
+// ride along `make install` into the binary tree.
+const packagedNotesData = join(resourcesPath, "plugins", "notes", "notes.json");
+try {
+  await access(packagedNotesData);
+  throw new Error(
+    `Packaged plugins must not include notes runtime state: ${packagedNotesData}`,
+  );
+} catch (error) {
+  if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+}
+
+// First-party plugin unit-test trees must not ship (bloat + accidental fixtures).
+const packagedPluginTestTrees = await findFiles(
+  join(resourcesPath, "plugins"),
+  (fileName) => fileName.endsWith(".test.js") || fileName.endsWith(".test.ts"),
+);
+const firstPartyPluginTests = packagedPluginTestTrees.filter((filePath) =>
+  !filePath.includes(`${sep}node_modules${sep}`),
+);
+if (firstPartyPluginTests.length > 0) {
+  throw new Error(
+    `Packaged plugins must not include first-party tests: ${firstPartyPluginTests.slice(0, 5).join(", ")}`,
+  );
 }
 
 // Verify Terminal plugin bundle and staged node-pty

@@ -59,6 +59,8 @@ export class PluginLifecycleCoordinator {
     entry.startPromise = this.doStart(entry, plugin);
     try {
       await entry.startPromise;
+      entry.restarting = false;
+      entry.lastCrashReason = undefined;
     } finally {
       entry.startPromise = null;
     }
@@ -127,6 +129,12 @@ export class PluginLifecycleCoordinator {
     }
     entry.startAborted = false;
 
+    if (entry.restartTimer) {
+      clearTimeout(entry.restartTimer);
+      entry.restartTimer = null;
+    }
+    entry.restarting = false;
+
     const stoppedEvent = PluginStoppedEvent.create(
       entry.pluginId,
       this.deps.clock.now(),
@@ -193,13 +201,113 @@ export class PluginLifecycleCoordinator {
       await this.sessions.publishPulled(entry.runtime);
     }
 
-    entry.restartCount += 1;
+    entry.lastCrashReason = reason;
+
     const crashedEvent = PluginCrashedEvent.create(
       entry.pluginId,
       reason,
       this.deps.clock.now(),
     );
     await this.deps.eventDispatcher.publish(crashedEvent);
+
+    // Auto-restart only when enabled and the plugin is still relevant: a
+    // crash during intentional shutdown (stopping/idle) never restarts.
+    if (!this.isAutoRestartEnabled(entry) || !entry.enabled) {
+      entry.restarting = false;
+      return;
+    }
+    if (entry.runtime.state !== "crashed") {
+      entry.restarting = false;
+      return;
+    }
+
+    // Circuit breaker: count restarts inside a rolling window. When the
+    // window rolls over, restart counting from the current crash.
+    const nowMs = this.deps.clock.now().getTime();
+    const windowMs = this.autoRestart.windowMs;
+    if (nowMs - entry.restartWindowStartAt > windowMs) {
+      entry.restartWindowStartAt = nowMs;
+      entry.restartCount = 0;
+    }
+    entry.restartCount += 1;
+    const maxRestarts = this.autoRestart.maxRestarts;
+    if (entry.restartCount > maxRestarts) {
+      entry.restarting = false;
+      this.deps.logger?.error(
+        "plugin %s crashed %d times in %dms — giving up (circuit open), stays crashed",
+        PluginId.toString(entry.pluginId),
+        entry.restartCount,
+        windowMs,
+      );
+      return;
+    }
+
+    entry.restarting = true;
+    const base = this.autoRestart.baseDelayMs;
+    const cap = this.autoRestart.maxDelayMs;
+    const delay = Math.min(cap, base * 2 ** (entry.restartCount - 1));
+    this.deps.logger?.warn(
+      "plugin %s crashed — scheduling auto-restart #%d in %dms",
+      PluginId.toString(entry.pluginId),
+      entry.restartCount,
+      delay,
+    );
+    if (entry.restartTimer) clearTimeout(entry.restartTimer);
+    entry.restartTimer = setTimeout(() => {
+      entry.restartTimer = null;
+      void this.attemptRestart(entry);
+    }, delay);
+  }
+
+  async attemptRestart(entry: RuntimeEntry): Promise<void> {
+    if (!entry.restarting || entry.restartTimer) return;
+    if (entry.runtime.state !== "crashed") {
+      entry.restarting = false;
+      return;
+    }
+    this.deps.logger?.info(
+      "plugin %s auto-restarting after crash",
+      PluginId.toString(entry.pluginId),
+    );
+    // Run the restart through the serial queue so it stays mutually
+    // exclusive with any concurrent lifecycle operation.
+    await entry.queue.enqueue(async () => {
+      if (entry.runtime.state !== "crashed") {
+        entry.restarting = false;
+        return;
+      }
+      try {
+        await this.startLocked(entry);
+      } catch (error) {
+        // startLocked already transitions to crashed on failure and throws;
+        // crash() will schedule the next backoff or give up.
+        this.deps.logger?.warn(
+          "plugin %s auto-restart attempt failed: %s",
+          PluginId.toString(entry.pluginId),
+          error instanceof Error ? error.message : String(error),
+        );
+      } finally {
+        entry.restarting = false;
+      }
+    });
+  }
+
+  private get autoRestart(): NonNullable<PluginRuntimeManagerDeps["autoRestart"]> {
+    const cfg = this.deps.autoRestart ?? {};
+    return {
+      enabled: cfg.enabled ?? true,
+      maxRestarts: cfg.maxRestarts ?? 5,
+      windowMs: cfg.windowMs ?? 60_000,
+      baseDelayMs: cfg.baseDelayMs ?? 1_000,
+      maxDelayMs: cfg.maxDelayMs ?? 30_000,
+    };
+  }
+
+  private isAutoRestartEnabled(entry: RuntimeEntry): boolean {
+    const cfg = this.autoRestart;
+    if (cfg.enabled === false) return false;
+    // Opt-out per plugin via manifest is not modeled; global config only.
+    return true;
   }
 
   view(entry: RuntimeEntry): PluginView {
@@ -215,6 +323,9 @@ export class PluginLifecycleCoordinator {
       state: entry.runtime.state,
       enabled: entry.enabled,
       autostart: entry.autostart,
+      restarting: entry.restarting,
+      ...(entry.restartCount > 0 ? { restartCount: entry.restartCount } : {}),
+      ...(entry.lastCrashReason !== undefined ? { lastCrashReason: entry.lastCrashReason } : {}),
       ui: entry.ui,
       keepAliveOnClose: entry.keepAliveOnClose,
       ...(entry.command !== undefined ? { command: entry.command } : {}),

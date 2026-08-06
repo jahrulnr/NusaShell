@@ -4,7 +4,7 @@ import { resolvePath, validateRoot, relativePosix, splitLines } from "./config.j
 
 const MAX_READ_BYTES = 10 * 1024 * 1024;
 const MAX_TREE_DEPTH = 10;
-const MAX_SEARCH_RESULTS = 500;
+const MAX_SEARCH_RESULTS = 1000;
 const MAX_GREP_LINE_LENGTH = 500;
 /** Number of bytes to sniff for magic-byte detection. */
 const MAGIC_BYTE_SAMPLE = 512;
@@ -457,10 +457,10 @@ export class FileService {
 
   /**
    * Search file contents for a regex pattern (like grep).
-   * @param {string} input - directory to search in
+   * @param {string} input - directory or single file to search
    * @param {string} pattern - regex pattern
    * @param {object} opts
-   * @param {string} [opts.glob] - optional file name glob filter
+   * @param {string} [opts.glob] - optional file name glob filter (directory mode only)
    * @param {number} [opts.before] - context lines before match
    * @param {number} [opts.after] - context lines after match
    * @param {boolean} [opts.ignoreCase] - case-insensitive matching
@@ -469,18 +469,64 @@ export class FileService {
    */
   async grepFiles(input, pattern, opts = {}) {
     const { glob, before = 0, after = 0, ignoreCase = false, exclude = [], maxResults = MAX_SEARCH_RESULTS } = opts;
-    const dir = resolvePath(this.root, input);
-    await this._wrap(fs.stat(dir));
+    const target = resolvePath(this.root, input);
+    const stat = await this._wrap(fs.stat(target));
     const regex = new RegExp(pattern, ignoreCase ? "i" : "");
     const globRegex = glob ? globToRegex(glob) : null;
     const cap = Math.min(maxResults, MAX_SEARCH_RESULTS);
     const results = [];
-    await this._grepRecursive(dir, regex, globRegex, results, { before, after, exclude, cap });
+    if (stat.isFile()) {
+      // Agents often pass a file path (like rg/path grep). Previously this fell
+      // through to readdir + empty catch → silent empty results while read still
+      // worked on the same path.
+      const name = path.basename(target);
+      if (!globRegex || globRegex.test(name)) {
+        await this._grepOneFile(target, name, regex, results, { before, after, cap });
+      }
+    } else if (stat.isDirectory()) {
+      await this._grepRecursive(target, regex, globRegex, results, { before, after, exclude, cap });
+    } else {
+      throw new Error(`Path is neither a file nor a directory: ${input || "."}`);
+    }
     const truncated = results.length > cap;
     return {
       results: results.slice(0, cap),
       meta: { truncated, count: Math.min(results.length, cap), cap },
     };
+  }
+
+  async _grepOneFile(entryPath, entryName, regex, results, opts) {
+    const { before, after, cap } = opts;
+    if (results.length >= cap) return;
+    // Skip files that are definitely binary by extension (fast path).
+    // For unknown extensions, fall through to content-based detection below.
+    const extType = detectFileType(entryName);
+    if (extType !== "text" && extType !== "binary") return;
+    const stat = await fs.stat(entryPath).catch(() => null);
+    if (!stat || !stat.isFile() || stat.size > MAX_READ_BYTES) return;
+    // Content-based detection: catches text files without standard extensions
+    // (go.mod, Makefile) and rejects binaries with text extensions.
+    const detected = await detectFileTypeByContent(entryPath);
+    if (!detected.isText) return;
+    const content = await fs.readFile(entryPath, "utf8").catch(() => null);
+    if (!content) return;
+    const lines = splitLines(content);
+    for (let i = 0; i < lines.length; i++) {
+      if (results.length >= cap) break;
+      if (regex.test(lines[i])) {
+        const rawLine = lines[i];
+        const lineContent = rawLine.length > MAX_GREP_LINE_LENGTH
+          ? rawLine.slice(0, MAX_GREP_LINE_LENGTH) + "…(truncated)"
+          : rawLine;
+        results.push({
+          path: relativePosix(this.root, entryPath, entryName),
+          line: i + 1,
+          content: lineContent,
+          ...(before > 0 ? { before: lines.slice(Math.max(0, i - before), i) } : {}),
+          ...(after > 0 ? { after: lines.slice(i + 1, i + 1 + after) } : {}),
+        });
+      }
+    }
   }
 
   async _grepRecursive(dir, regex, globRegex, results, opts) {
@@ -496,35 +542,7 @@ export class FileService {
         continue;
       }
       if (globRegex && !globRegex.test(entry.name)) continue;
-      // Skip files that are definitely binary by extension (fast path).
-      // For unknown extensions, fall through to content-based detection below.
-      const extType = detectFileType(entry.name);
-      if (extType !== "text" && extType !== "binary") continue;
-      const stat = await fs.stat(entryPath).catch(() => null);
-      if (!stat || stat.size > MAX_READ_BYTES) continue;
-      // Content-based detection: catches text files without standard extensions
-      // (go.mod, Makefile) and rejects binaries with text extensions.
-      const detected = await detectFileTypeByContent(entryPath);
-      if (!detected.isText) continue;
-      const content = await fs.readFile(entryPath, "utf8").catch(() => null);
-      if (!content) continue;
-      const lines = splitLines(content);
-      for (let i = 0; i < lines.length; i++) {
-        if (results.length >= cap) break;
-        if (regex.test(lines[i])) {
-          const rawLine = lines[i];
-          const lineContent = rawLine.length > MAX_GREP_LINE_LENGTH
-            ? rawLine.slice(0, MAX_GREP_LINE_LENGTH) + "…(truncated)"
-            : rawLine;
-          results.push({
-            path: relativePosix(this.root, entryPath, entry.name),
-            line: i + 1,
-            content: lineContent,
-            ...(before > 0 ? { before: lines.slice(Math.max(0, i - before), i) } : {}),
-            ...(after > 0 ? { after: lines.slice(i + 1, i + 1 + after) } : {}),
-          });
-        }
-      }
+      await this._grepOneFile(entryPath, entry.name, regex, results, { before, after, cap });
     }
   }
 

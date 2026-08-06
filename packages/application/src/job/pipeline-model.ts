@@ -1,23 +1,20 @@
 /**
- * Pipeline DAG model — multi-step orchestration (Phase E).
+ * Pipeline DAG model — multi-step orchestration.
  *
  * A Pipeline is a directed acyclic graph of steps. Each step runs an agent
  * turn or tool call, optionally conditioned on accumulated context from
  * prior steps. Steps declare `dependsOn` (step IDs that must complete first),
- * and the scheduler runs them in topological order.
+ * and the scheduler runs them in topological order (sequential; dependsOn is
+ * ordering only in v1).
  *
- * Unlike the v1.1 soft chain (onComplete.emitEvent), a Pipeline has:
- * - An explicit step graph (not just shared event-type strings).
- * - Accumulated context (`context[outputKey]` per step).
- * - Per-step conditions evaluated against that context.
- * - A single pipeline-level trigger (schedule or event).
- *
- * See tmp/plan/mcp-automation/03-job-pipeline.md for the full spec.
+ * Triggers: event, schedule (while NusaShell is open), and manual run.
  */
 
 import type { ReasoningEffort } from "../agent/ports/agent-provider.port.js";
-import type { ConditionNode } from "./job-model.js";
+import type { ConditionNode, JobSchedule } from "./job-model.js";
 import type { JobTrigger } from "./job-model.js";
+import { ONCE_GRACE_SECONDS } from "./job-model.js";
+import { computeNextRun } from "./schedule-parser.js";
 
 export type { JobTrigger };
 
@@ -36,8 +33,6 @@ export interface PipelineStep {
   readonly condition?: ConditionNode;
   /** Store this step's result as `context[outputKey]`. */
   readonly outputKey?: string;
-  /** Per-step timeout in ms (0 = use pipeline default). */
-  readonly timeoutMs?: number;
 }
 
 export type PipelineStepAction =
@@ -55,10 +50,8 @@ export type PipelineStepAction =
       readonly args: Readonly<Record<string, unknown>>;
     };
 
-/**
- * A pipeline's runtime status.
- */
-export type PipelineStatus = "ok" | "error" | "cancelled" | "running" | null;
+/** Denormalized last-run status on the pipeline definition. */
+export type PipelineStatus = "ok" | "error" | "cancelled" | "running" | "interrupted" | null;
 
 /**
  * A multi-step orchestration DAG.
@@ -68,20 +61,83 @@ export interface Pipeline {
   readonly name: string;
   readonly description?: string;
   readonly enabled: boolean;
-  /** What triggers this pipeline (schedule or event). */
+  /** What triggers this pipeline (event, schedule, or neither for manual-only). */
   readonly trigger: JobTrigger;
   readonly steps: readonly PipelineStep[];
+  /** Optional runtime settings. Only timeoutMs is honored today. */
   readonly settings?: PipelineSettings;
   readonly createdAt: string;
+  /** Next wall-clock fire for schedule triggers; null for event/manual/spent one-shot. */
+  readonly nextRunAt: string | null;
   readonly lastRunAt: string | null;
   readonly lastStatus: PipelineStatus;
   readonly lastError: string | null;
+  /** Last durable run id (if any). */
+  readonly lastRunId?: string | null;
 }
 
 export interface PipelineSettings {
-  readonly maxConcurrency?: number;
+  /** Soft wall timeout for the whole run in ms (0 or omit = none). */
   readonly timeoutMs?: number;
-  readonly maxRetries?: number;
+}
+
+/** Durable per-run status machine. Terminal states are irreversible by runId. */
+export type PipelineRunStatus =
+  | "claimed"
+  | "running"
+  | "ok"
+  | "error"
+  | "cancelled"
+  | "interrupted";
+
+export type PipelineStepRunStatus =
+  | "queued"
+  | "running"
+  | "ok"
+  | "error"
+  | "skipped"
+  | "cancelled";
+
+export type PipelineTriggerSource = "manual" | "event" | "schedule";
+
+export interface PipelineStepRun {
+  readonly stepId: string;
+  readonly status: PipelineStepRunStatus;
+  /** Bounded human-readable summary (persist-safe). */
+  readonly summary?: string;
+  readonly error?: string;
+  /** Bounded serialization of step output when present. */
+  readonly outputPreview?: string;
+  readonly outputTruncated?: boolean;
+  readonly startedAt?: string;
+  readonly completedAt?: string;
+}
+
+export interface PipelineRun {
+  readonly runId: string;
+  readonly pipelineId: string;
+  readonly traceId: string;
+  readonly status: PipelineRunStatus;
+  readonly triggerSource: PipelineTriggerSource;
+  readonly startedAt: string;
+  readonly completedAt: string | null;
+  readonly lastHeartbeatAt: string;
+  readonly leaseExpiresAt: string;
+  readonly currentStepId: string | null;
+  readonly errorCode: string | null;
+  readonly errorMessage: string | null;
+  readonly stepRuns: readonly PipelineStepRun[];
+}
+
+export const TERMINAL_PIPELINE_RUN_STATUSES: ReadonlySet<PipelineRunStatus> = new Set([
+  "ok",
+  "error",
+  "cancelled",
+  "interrupted",
+]);
+
+export function isTerminalPipelineRunStatus(status: PipelineRunStatus): boolean {
+  return TERMINAL_PIPELINE_RUN_STATUSES.has(status);
 }
 
 /**
@@ -92,11 +148,11 @@ export interface PipelineSettings {
 export type PipelineContext = Readonly<Record<string, unknown>>;
 
 /**
- * Result of a single step execution.
+ * Result of a single step execution (in-memory scheduler shape).
  */
 export interface PipelineStepResult {
   readonly stepId: string;
-  readonly status: "ok" | "error" | "skipped";
+  readonly status: "ok" | "error" | "skipped" | "cancelled";
   readonly summary: string;
   readonly output?: unknown;
   readonly error?: string;
@@ -105,16 +161,19 @@ export interface PipelineStepResult {
 }
 
 /**
- * Result of a full pipeline run.
+ * Result of a full pipeline run (returned to callers; also persisted).
  */
 export interface PipelineRunResult {
+  readonly runId: string;
   readonly pipelineId: string;
-  readonly status: PipelineStatus;
+  readonly traceId: string;
+  readonly status: Exclude<PipelineStatus, null>;
   readonly context: PipelineContext;
   readonly stepResults: readonly PipelineStepResult[];
   readonly startedAt: string;
   readonly completedAt: string;
   readonly error?: string;
+  readonly errorCode?: string;
 }
 
 /**
@@ -204,4 +263,80 @@ export function validatePipeline(steps: readonly PipelineStep[]): string | null 
   const cycle = detectCycle(steps);
   if (cycle) return `Cycle detected: ${cycle.join(" → ")}`;
   return null;
+}
+
+/** Validate pipeline trigger shape (event or schedule). Manual run is a separate command. */
+export function validatePipelineTrigger(trigger: JobTrigger): string | null {
+  if (trigger.kind === "schedule") {
+    const schedule = trigger.schedule;
+    if (!schedule || typeof schedule !== "object") {
+      return "Schedule trigger requires a schedule object";
+    }
+    if (schedule.kind === "once" && !schedule.runAt) {
+      return "One-shot schedule requires runAt";
+    }
+    if (schedule.kind === "once" && schedule.runAt) {
+      const runAtMs = new Date(schedule.runAt).getTime();
+      if (Number.isNaN(runAtMs)) {
+        return "One-shot runAt must be a valid ISO timestamp";
+      }
+      const ageSeconds = (Date.now() - runAtMs) / 1000;
+      if (ageSeconds > ONCE_GRACE_SECONDS) {
+        return `One-shot runAt is in the past beyond the ${ONCE_GRACE_SECONDS}s grace window`;
+      }
+    }
+    if (schedule.kind === "interval" && (!(schedule.minutes > 0))) {
+      return "Interval schedule requires positive minutes";
+    }
+    if (schedule.kind === "cron" && !schedule.expr?.trim()) {
+      return "Cron schedule requires expr";
+    }
+    return null;
+  }
+  if (trigger.kind !== "event") {
+    return "Pipeline trigger must be kind \"event\" or \"schedule\"";
+  }
+  if (!trigger.pattern?.trim()) {
+    return "Event trigger requires a pattern";
+  }
+  if (isPipelineSelfEventPattern(trigger.pattern)) {
+    return `Event pattern "${trigger.pattern}" is in the pipeline.* namespace; pipeline lifecycle events (pipeline.started/completed/failed/cancelled) are UI/telemetry events, not AutomationEvents, so a pipeline cannot trigger on them (self-trigger guard)`;
+  }
+  return null;
+}
+
+/**
+ * True when an event pattern matches a type in the `pipeline.*` namespace.
+ * Pipeline lifecycle events are published as domain events for UI/telemetry,
+ * never as AutomationEvents, so an event trigger on `pipeline.*` can never
+ * fire and would only enable a silent self-trigger loop. Reject them.
+ */
+export function isPipelineSelfEventPattern(pattern: string): boolean {
+  if (!pattern || !pattern.trim()) return false;
+  const trimmed = pattern.trim();
+  // Bare prefix or any segment under `pipeline.` (also `pipeline.**`).
+  return trimmed === "pipeline" || trimmed === "pipeline.*" || trimmed === "pipeline.**"
+    || trimmed.startsWith("pipeline.");
+}
+
+/**
+ * Initial or post-run next fire for a schedule trigger.
+ * One-shots use runAt until fired; after a run (lastRunAt set) next is null.
+ */
+export function nextRunAtForPipelineTrigger(
+  trigger: JobTrigger,
+  lastRunAt: string | null,
+  now: Date,
+  enabled: boolean,
+): string | null {
+  if (!enabled || trigger.kind !== "schedule") return null;
+  const schedule = trigger.schedule;
+  if (schedule.kind === "once") {
+    return lastRunAt ? null : schedule.runAt;
+  }
+  return computeNextRun(schedule, lastRunAt, now);
+}
+
+export function scheduleOfPipeline(trigger: JobTrigger): JobSchedule | null {
+  return trigger.kind === "schedule" ? trigger.schedule : null;
 }

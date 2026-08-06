@@ -50,6 +50,14 @@ export interface RuntimeEntry {
   mcpClient: McpClientPort | null;
   readonly pendingCalls: Map<string, PendingToolCall>;
   restartCount: number;
+  /** True while a scheduled auto-restart is waiting or running. */
+  restarting: boolean;
+  /** Ms timestamp of the first crash in the current circuit window. */
+  restartWindowStartAt: number;
+  /** Pending auto-restart timer (cancelled on stop). */
+  restartTimer: ReturnType<typeof setTimeout> | null;
+  /** Reason of the most recent crash (surfaced in PluginView). */
+  lastCrashReason: string | undefined;
   /** Last workspace bound to this plugin (for roots sync / spawn env). */
   workspace: string | undefined;
   /** Last workspace reported to the client via roots (to detect change). */
@@ -118,6 +126,9 @@ export interface PluginView {
   readonly state: PluginRuntimeState;
   readonly enabled: boolean;
   readonly autostart: boolean;
+  readonly restarting?: boolean;
+  readonly restartCount?: number;
+  readonly lastCrashReason?: string;
   readonly ui: RuntimeEntry["ui"];
   readonly source?: "native-mcp" | "package";
   readonly transport?: string;

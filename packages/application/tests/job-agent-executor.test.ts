@@ -29,6 +29,11 @@ class FakeInnerGateway implements AgentToolGateway {
       { name: "skill_search", description: "search skills" },
       { name: "job", description: "manage jobs" },
       { name: "mcp_create", description: "granted plugin tool" },
+      { name: "pipeline", description: "manage pipelines" },
+      { name: "subagent", description: "spawn ACP subagent" },
+      { name: "mcp_enable", description: "start a plugin" },
+      { name: "mcp_disable", description: "stop a plugin" },
+      { name: "mcp_unregister", description: "unregister a plugin" },
     ];
   }
 
@@ -53,6 +58,12 @@ describe("JobAgentToolGateway", () => {
     expect(names).not.toContain("skill_read");
     expect(names).not.toContain("skill_search");
     expect(names).not.toContain("job");
+    expect(names).not.toContain("pipeline");
+    expect(names).not.toContain("subagent");
+    expect(names).not.toContain("mcp_enable");
+    expect(names).not.toContain("mcp_disable");
+    expect(names).not.toContain("mcp_unregister");
+    expect(names).toContain("mcp_create");
   });
 
   it("denies executing memory, skill, and job tools", async () => {
@@ -64,6 +75,11 @@ describe("JobAgentToolGateway", () => {
     await expect(gateway.execute("skill_read", {}, "r1", "t1")).rejects.toThrow(/not allowed/);
     await expect(gateway.execute("skill_search", {}, "r1", "t1")).rejects.toThrow(/not allowed/);
     await expect(gateway.execute("job", { action: "list" }, "r1", "t1")).rejects.toThrow(/not allowed/);
+    await expect(gateway.execute("pipeline", { action: "list" }, "r1", "t1")).rejects.toThrow(/not allowed/);
+    await expect(gateway.execute("subagent", { prompt: "x" }, "r1", "t1")).rejects.toThrow(/not allowed/);
+    await expect(gateway.execute("mcp_enable", { pluginId: "nusashell.files" }, "r1", "t1")).rejects.toThrow(/not allowed/);
+    await expect(gateway.execute("mcp_disable", { pluginId: "nusashell.notes" }, "r1", "t1")).rejects.toThrow(/not allowed/);
+    await expect(gateway.execute("mcp_unregister", { pluginId: "x" }, "r1", "t1")).rejects.toThrow(/not allowed/);
     expect(inner.executed).toHaveLength(0);
   });
 

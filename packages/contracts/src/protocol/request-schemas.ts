@@ -457,6 +457,17 @@ export const JobValidateScheduleRequestSchema = z.object({
   }),
 });
 
+const PipelineTriggerSchema = JobTriggerSchema;
+
+const PipelineStepSchema = z.object({
+  id: z.string().min(1).max(100),
+  name: z.string().min(1).max(200),
+  action: JobModeSchema,
+  dependsOn: z.array(z.string().min(1).max(100)).optional(),
+  condition: z.unknown().optional(),
+  outputKey: z.string().min(1).max(100).optional(),
+});
+
 export const PipelineAddRequestSchema = z.object({
   kind: z.literal("request"),
   id: z.string().min(1),
@@ -465,20 +476,10 @@ export const PipelineAddRequestSchema = z.object({
   payload: z.object({
     name: z.string().min(1).max(200),
     description: z.string().max(2000).optional(),
-    trigger: JobTriggerSchema,
-    steps: z.array(z.object({
-      id: z.string().min(1).max(100),
-      name: z.string().min(1).max(200),
-      action: JobModeSchema,
-      dependsOn: z.array(z.string().min(1).max(100)).optional(),
-      condition: z.unknown().optional(),
-      outputKey: z.string().min(1).max(100).optional(),
-      timeoutMs: z.number().int().min(0).optional(),
-    })).min(1),
+    trigger: PipelineTriggerSchema,
+    steps: z.array(PipelineStepSchema).min(1),
     settings: z.object({
-      maxConcurrency: z.number().int().min(1).max(32).optional(),
       timeoutMs: z.number().int().min(0).optional(),
-      maxRetries: z.number().int().min(0).max(10).optional(),
     }).optional(),
   }),
 });
@@ -492,20 +493,10 @@ export const PipelineUpdateRequestSchema = z.object({
     id: z.string().min(1),
     name: z.string().min(1).max(200).optional(),
     description: z.string().max(2000).nullable().optional(),
-    trigger: JobTriggerSchema.optional(),
-    steps: z.array(z.object({
-      id: z.string().min(1).max(100),
-      name: z.string().min(1).max(200),
-      action: JobModeSchema,
-      dependsOn: z.array(z.string().min(1).max(100)).optional(),
-      condition: z.unknown().optional(),
-      outputKey: z.string().min(1).max(100).optional(),
-      timeoutMs: z.number().int().min(0).optional(),
-    })).min(1).optional(),
+    trigger: PipelineTriggerSchema.optional(),
+    steps: z.array(PipelineStepSchema).min(1).optional(),
     settings: z.object({
-      maxConcurrency: z.number().int().min(1).max(32).optional(),
       timeoutMs: z.number().int().min(0).optional(),
-      maxRetries: z.number().int().min(0).max(10).optional(),
     }).nullable().optional(),
     enabled: z.boolean().optional(),
   }),
@@ -531,12 +522,45 @@ export const PipelineRunRequestSchema = z.object({
   }),
 });
 
+export const PipelineCancelRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("pipeline.cancel"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    id: z.string().min(1),
+  }),
+});
+
 export const PipelineListRequestSchema = z.object({
   kind: z.literal("request"),
   id: z.string().min(1),
   method: z.literal("pipeline.list"),
   protocolVersion: z.string().optional(),
   payload: z.object({}),
+});
+
+export const PipelineRunsRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("pipeline.runs"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    id: z.string().min(1),
+    limit: z.number().int().min(1).max(100).optional(),
+    includeBody: z.boolean().optional(),
+  }),
+});
+
+export const PipelineRunGetRequestSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().min(1),
+  method: z.literal("pipeline.run-get"),
+  protocolVersion: z.string().optional(),
+  payload: z.object({
+    runId: z.string().min(1),
+    includeBody: z.boolean().optional(),
+  }),
 });
 
 const AcpContentBlockSchema = z.discriminatedUnion("type", [
@@ -725,7 +749,10 @@ export const RequestSchema = z.discriminatedUnion("method", [
   PipelineUpdateRequestSchema,
   PipelineRemoveRequestSchema,
   PipelineRunRequestSchema,
+  PipelineCancelRequestSchema,
   PipelineListRequestSchema,
+  PipelineRunsRequestSchema,
+  PipelineRunGetRequestSchema,
   AcpRunRequestSchema,
   AcpCancelRequestSchema,
   AcpPermissionAnswerRequestSchema,
@@ -777,7 +804,10 @@ export type PipelineAddRequest = z.infer<typeof PipelineAddRequestSchema>;
 export type PipelineUpdateRequest = z.infer<typeof PipelineUpdateRequestSchema>;
 export type PipelineRemoveRequest = z.infer<typeof PipelineRemoveRequestSchema>;
 export type PipelineRunRequest = z.infer<typeof PipelineRunRequestSchema>;
+export type PipelineCancelRequest = z.infer<typeof PipelineCancelRequestSchema>;
 export type PipelineListRequest = z.infer<typeof PipelineListRequestSchema>;
+export type PipelineRunsRequest = z.infer<typeof PipelineRunsRequestSchema>;
+export type PipelineRunGetRequest = z.infer<typeof PipelineRunGetRequestSchema>;
 export type AcpRunRequest = z.infer<typeof AcpRunRequestSchema>;
 export type AcpCancelRequest = z.infer<typeof AcpCancelRequestSchema>;
 export type AcpPermissionAnswerRequest = z.infer<typeof AcpPermissionAnswerRequestSchema>;

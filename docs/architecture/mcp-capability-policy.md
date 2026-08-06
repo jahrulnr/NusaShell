@@ -10,7 +10,7 @@ operators and agents a single capability vocabulary.
 | --- | --- | --- |
 | Tools | `tools/list`, `tools/call` | Brokered only through `PluginRuntimeManager`. Running plugins have their full tool catalog (name + description + `inputSchema`) injected into the Live MCP system block and auto-advertised in `tools[]` every turn; progressive discovery is for starting plugins and overflow/failure recovery (96-entry `tools[]` cap). |
 | Prompts | `prompts/list`, `prompts/get` | Expose progressively through `mcp_context`; retrieving a prompt provides context and never executes it as a tool. |
-| Resources | `resources/list`, `resources/templates/list`, `resources/read` | Expose as bounded shell-managed context through `mcp_context`; binary content is not injected into the model. |
+| Resources | `resources/list`, `resources/templates/list`, `resources/read` | Expose as bounded shell-managed context through `mcp_context`; binary content is not injected into the model. The bundled Files plugin publishes the configured workspace-root `AGENTS.md` as a bounded Markdown resource when present. |
 | Completion | `completion/complete` | Expose only after a prompt or resource template is discovered, with bounded completion results. |
 | Logging / progress | protocol notifications | Forward sanitized diagnostics to the shell log UI; progress is presentation only until task support is adopted. |
 | Roots | `roots/list`, `roots/list_changed` | Client advertises roots + `listChanged`; `PluginRuntimeManager.syncWorkspace` updates the workspace root and notifies. The bundled Files server consumes roots in-process. Roots are interoperability, not security (see `docs/RISK.md`). Full design in `docs/architecture/workspace-mcp-binding.md`. |

@@ -1,6 +1,8 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { execPipeline } from "../src/agent/services/pipeline-tool-handler.js";
-import type { PipelineStorePort, PipelineScheduler, Pipeline } from "../src/job/pipeline-model.js";
+import type { Pipeline, PipelineRun } from "../src/job/pipeline-model.js";
+import type { PipelineStorePort } from "../src/job/ports/pipeline-store.port.js";
+import type { PipelineScheduler } from "../src/job/services/pipeline-scheduler.js";
 
 class FakePipelineStore implements PipelineStorePort {
   pipelines = new Map<string, Pipeline>();
@@ -10,6 +12,14 @@ class FakePipelineStore implements PipelineStorePort {
   async get(id: string): Promise<Pipeline | null> { return this.pipelines.get(id) ?? null; }
   async list(): Promise<readonly Pipeline[]> { return [...this.pipelines.values()]; }
   async remove(id: string): Promise<void> { this.pipelines.delete(id); }
+  async claimRun(): Promise<PipelineRun | null> { return null; }
+  async updateRun(run: PipelineRun): Promise<PipelineRun | null> { return run; }
+  async finalizeRun(run: PipelineRun): Promise<PipelineRun | null> { return run; }
+  async getRun(): Promise<PipelineRun | null> { return null; }
+  async getActiveRun(): Promise<PipelineRun | null> { return null; }
+  async listRuns(): Promise<readonly PipelineRun[]> { return []; }
+  async listDueSchedules(): Promise<readonly Pipeline[]> { return []; }
+  async recoverExpiredLeases(): Promise<number> { return 0; }
   async markRun(id: string, status: "ok" | "error" | "cancelled", error: string | null, now: Date): Promise<Pipeline | null> {
     const existing = this.pipelines.get(id);
     if (!existing) return null;
@@ -26,7 +36,8 @@ describe("pipeline tool handler", () => {
   beforeEach(() => {
     store = new FakePipelineStore();
     scheduler = {
-      runPipeline: vi.fn().mockResolvedValue({ ok: true }),
+      launch: vi.fn().mockResolvedValue({ ok: true, runId: "r1" }),
+      cancel: vi.fn().mockResolvedValue({ ok: true }),
     } as unknown as PipelineScheduler;
   });
 
@@ -58,7 +69,7 @@ describe("pipeline tool handler", () => {
     expect(pipeline.steps.length).toBe(2);
   });
 
-  it("adds a pipeline with schedule trigger", async () => {
+  it("accepts schedule trigger", async () => {
     const result = await execPipeline(store, scheduler, {
       action: "add",
       name: "Scheduled pipeline",
@@ -66,10 +77,12 @@ describe("pipeline tool handler", () => {
       steps: [
         { id: "a", name: "Step A", action: { type: "agent", prompt: "test" } },
       ],
-    });
-    expect(result).toHaveProperty("ok", true);
+    }) as { ok: boolean; data?: { trigger?: string; nextRunAt?: string | null } };
+    expect(result.ok).toBe(true);
+    expect(store.pipelines.size).toBe(1);
     const pipeline = [...store.pipelines.values()][0]!;
     expect(pipeline.trigger.kind).toBe("schedule");
+    expect(pipeline.nextRunAt).toBeTruthy();
   });
 
   it("rejects empty steps", async () => {
@@ -135,7 +148,13 @@ describe("pipeline tool handler", () => {
     const id = (addResult as { data: { id: string } }).data.id;
     const result = await execPipeline(store, scheduler, { action: "run", id });
     expect(result).toHaveProperty("ok", true);
-    expect(scheduler.runPipeline).toHaveBeenCalledWith(id);
+    expect(scheduler.launch).toHaveBeenCalledWith(id, undefined, { source: "manual" });
+  });
+
+  it("cancels a pipeline", async () => {
+    const result = await execPipeline(store, scheduler, { action: "cancel", id: "p1" });
+    expect(result).toHaveProperty("ok", true);
+    expect(scheduler.cancel).toHaveBeenCalledWith("p1");
   });
 
   it("returns error for non-existent pipeline update", async () => {

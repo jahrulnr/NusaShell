@@ -78,7 +78,10 @@ fence, or until a conversation with a persisted `activeCanvasArtifactId` is
 reopened. Completed assistant messages auto-render `svg` and `mermaid` fences
 inline in a light, bounded container above the source block; mermaid is
 lazy-loaded via dynamic `import()` only when a mermaid fence is present, and
-runs with `securityLevel: 'strict'` so it compiles to static SVG. Each canvas
+runs with `securityLevel: 'strict'` so it compiles to static SVG. Before render,
+flowchart sources get a deterministic heal pass that quotes unquoted edge labels
+containing risky shape tokens (`[]`, `()`, `{}`, `#`) or HTML so common agent
+slips still draw; Show source keeps the original fence. Each canvas
 fence (`html`/`htm`/`svg`/`mermaid`) gains a Sidebar action; `html` fences also
 gain a Preview action that opens the pane with a sandboxed iframe
 (`sandbox="allow-scripts"`, no `allow-same-origin`, CSP with an empty external

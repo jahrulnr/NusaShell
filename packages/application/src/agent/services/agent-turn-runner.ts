@@ -147,6 +147,7 @@ export class AgentTurnRunner {
               ...(input.model ? { model: input.model } : {}),
               ...(input.effort ? { effort: input.effort } : {}),
               ...(input.modelCapabilities ? { modelCapabilities: input.modelCapabilities } : {}),
+              ...(input.promptCache ? { promptCache: input.promptCache } : {}),
               ...(input.signal ? { signal: input.signal } : {}),
               // Always wrap onTextDelta/onReasoningDelta so live-streamed
               // text is captured into liveText/liveReasoning even when the
@@ -226,6 +227,17 @@ export class AgentTurnRunner {
           input.onStepsChanged?.(steps);
         }
         addUsage(usage, response.usage);
+        if (response.usage && (response.usage.cachedInputTokens > 0 || response.usage.cacheWriteTokens > 0)) {
+          this.deps.logger?.info(
+            "Agent prompt cache traceId=%s provider=%s round=%d input=%d cached=%d write=%d",
+            traceId,
+            response.providerId ?? this.deps.provider.id,
+            round,
+            response.usage.inputTokens,
+            response.usage.cachedInputTokens,
+            response.usage.cacheWriteTokens,
+          );
+        }
         const requestedCalls = response.toolCalls ?? [];
         publishContext();
 

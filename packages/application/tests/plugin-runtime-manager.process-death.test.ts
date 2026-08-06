@@ -24,6 +24,9 @@ function setup() {
     eventDispatcher,
     clock,
     toolCallTimeoutMs: 1000,
+    // These tests pin crash SoT (finding 2) — keep auto-restart off so a
+    // crash stays "crashed" and does not schedule a recovery restart.
+    autoRestart: { enabled: false },
   });
   return { clock, eventDispatcher, pluginRepository, processAdapter, mcpClientFactory, manager };
 }

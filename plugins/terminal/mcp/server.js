@@ -4,7 +4,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { getTerminalPrompt, TERMINAL_PROMPTS } from "./prompts.js";
@@ -15,11 +14,12 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
-// In ESM (dev) use import.meta.url; in the esbuild CJS bundle __dirname is
-// available natively and this fallback is never reached.
-const __dirname = typeof __dirname !== "undefined"
-  ? __dirname
-  : path.dirname(fileURLToPath(import.meta.url));
+// Resolve from the launched entrypoint in both ESM dev mode and the bundled
+// CJS package. This avoids import.meta/`__dirname` format differences in esbuild
+// and keeps packaged resource lookup independent from the current working dir.
+const moduleDir = process.argv[1]
+  ? path.dirname(path.resolve(process.argv[1]))
+  : path.dirname(process.execPath);
 
 let pty;
 try {
@@ -33,7 +33,7 @@ const MAX_BUFFER_CHARS = 200 * 1024;
 const BOOTSTRAP_DIR = path.join(os.tmpdir(), "nusashell-terminal-bootstrap");
 const BASH_RC = path.join(BOOTSTRAP_DIR, "bashrc");
 const ZSH_RC = path.join(BOOTSTRAP_DIR, ".zshrc");
-const COLOR_BOOTSTRAP_SRC = path.join(__dirname, "color-bootstrap.sh");
+const COLOR_BOOTSTRAP_SRC = path.join(moduleDir, "color-bootstrap.sh");
 
 function ensureBootstrapFiles() {
   fs.mkdirSync(BOOTSTRAP_DIR, { recursive: true });
@@ -52,7 +52,7 @@ function shellSpawnArgs(shell) {
   const base = path.basename(shell || "");
   // Do not pass -i together with --rcfile: bash then errors with
   // "/bin/bash: --: invalid option" under node-pty.
-  if (base === "bash" || String(shell).endsWith("/bash")) {
+  if (base === "bash") {
     return ["--rcfile", BASH_RC];
   }
   if (base === "zsh" || String(shell).endsWith("/zsh")) {

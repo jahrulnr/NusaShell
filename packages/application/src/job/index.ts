@@ -18,19 +18,47 @@ export type {
   PipelineStepResult,
   PipelineRunResult,
   PipelineStatus,
+  PipelineRun,
+  PipelineStepRun,
+  PipelineRunStatus,
+  PipelineStepRunStatus,
+  PipelineTriggerSource,
 } from "./pipeline-model.js";
 export {
   detectCycle,
   topologicalSort,
   validatePipeline,
+  validatePipelineTrigger,
+  isPipelineSelfEventPattern,
+  nextRunAtForPipelineTrigger,
+  scheduleOfPipeline,
+  isTerminalPipelineRunStatus,
+  TERMINAL_PIPELINE_RUN_STATUSES,
 } from "./pipeline-model.js";
+export {
+  boundPipelineText,
+  boundContextValue,
+  serializePipelineValue,
+  DEFAULT_PIPELINE_SUMMARY_MAX_CHARS,
+  DEFAULT_PIPELINE_OUTPUT_PREVIEW_MAX_CHARS,
+  DEFAULT_PIPELINE_CONTEXT_VALUE_MAX_CHARS,
+  DEFAULT_PIPELINE_LIST_SUMMARY_MAX_CHARS,
+} from "./pipeline-output.js";
 export type { PipelineStorePort } from "./ports/pipeline-store.port.js";
 export {
   PipelineScheduler,
+  DEFAULT_PIPELINE_LEASE_TTL_MS,
   type PipelineExecutorPort,
   type PipelineCallToolPort,
   type PipelineSchedulerDeps,
+  type PipelineRunOutcome,
 } from "./services/pipeline-scheduler.js";
+export {
+  PipelineTriggerCoordinator,
+  DEFAULT_PIPELINE_TRIGGER_SETTINGS,
+  type PipelineTriggerCoordinatorSettings,
+  type PipelineTriggerCoordinatorDeps,
+} from "./services/pipeline-trigger-coordinator.js";
 export {
   ONCE_GRACE_SECONDS,
   recurringCatchupGraceSeconds,
@@ -111,16 +139,25 @@ export {
   ListPipelinesHandler,
   type ListPipelinesQuery,
   type ListPipelinesResult,
+  ListPipelineRunsHandler,
+  type ListPipelineRunsQuery,
+  type ListPipelineRunsResult,
+  GetPipelineRunHandler,
+  type GetPipelineRunQuery,
+  type GetPipelineRunResult,
 } from "./queries/index.js";
 export {
   AddPipelineHandler,
   UpdatePipelineHandler,
   RemovePipelineHandler,
   RunPipelineHandler,
+  CancelPipelineHandler,
   type AddPipelineCommand,
   type UpdatePipelineCommand,
   type RemovePipelineCommand,
   type RemovePipelineResult,
   type RunPipelineCommand,
   type RunPipelineResult,
+  type CancelPipelineCommand,
+  type CancelPipelineResult,
 } from "./commands/index.js";

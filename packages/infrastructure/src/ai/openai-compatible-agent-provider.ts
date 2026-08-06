@@ -2,6 +2,7 @@ import type {
   AgentProvider,
   AgentProviderRequest,
   AgentProviderResult,
+  AgentPromptCachePolicy,
 } from "@nusashell/application";
 import { resolveModelRuntimePolicy } from "./model-capability-policy.js";
 import { parseOpenAiSse, SseTransportError } from "./openai-sse-parser.js";
@@ -44,6 +45,8 @@ export interface OpenAiCompatibleAgentProviderOptions {
   readonly timeoutMs?: number;
   readonly maxOutputTokens?: number;
   readonly maxResponseBytes?: number;
+  /** Native prompt-cache translation policy for this provider instance. */
+  readonly promptCache?: AgentPromptCachePolicy;
   readonly omitToolChoice?: boolean;
   readonly logger?: {
     warn(msg: string, ...args: unknown[]): void;
@@ -132,6 +135,8 @@ export class OpenAiCompatibleAgentProvider implements AgentProvider {
       ...request,
       tools,
       ...(policy.effort ? { effort: policy.effort } : { effort: "auto" }),
+      ...(request.promptCache ?? this.options.promptCache
+        ? { promptCache: request.promptCache ?? this.options.promptCache } : {}),
     };
     const stream = this.strategy.supportsStream && (this.options.stream ?? true);
     const allowVision = this.options.vision !== "off";

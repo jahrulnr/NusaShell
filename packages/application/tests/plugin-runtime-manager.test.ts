@@ -313,6 +313,75 @@ describe("PluginRuntimeManager", () => {
         code: "TOOL_CALL_TIMEOUT",
       });
     });
+
+    it("runs concurrent tool calls against the same plugin in parallel (not serial)", async () => {
+      const { pluginRepository, manager, mcpClientFactory } = setup();
+      const plugin = makePlugin("nusashell.notes");
+      pluginRepository.add(plugin);
+
+      await manager.startPlugin(plugin.id);
+      const client = mcpClientFactory.created[0]!;
+      client.setToolDelay("tool_a", 60);
+      client.setToolResult("tool_a", { a: 1 });
+      client.setToolDelay("tool_b", 60);
+      client.setToolResult("tool_b", { b: 2 });
+
+      const start = Date.now();
+      const [ra, rb] = await Promise.all([
+        manager.callTool(plugin.id, {
+          requestId: "00000000-0000-1000-8000-000000000005",
+          toolName: "tool_a",
+          args: {},
+        }),
+        manager.callTool(plugin.id, {
+          requestId: "00000000-0000-1000-8000-000000000006",
+          toolName: "tool_b",
+          args: {},
+        }),
+      ]);
+      const elapsed = Date.now() - start;
+
+      expect(ra).toEqual({ a: 1 });
+      expect(rb).toEqual({ b: 2 });
+      // Parallel: combined wall time stays near one call's delay (~60ms),
+      // not the serialized sum (~120ms).
+      expect(elapsed).toBeLessThan(115);
+      // Both reached the MCP client concurrently.
+      expect(client.callLog.map((c) => c.name)).toEqual(["tool_a", "tool_b"]);
+    });
+
+    it("stop cancels in-flight concurrent tool calls (mutual exclusion with lifecycle)", async () => {
+      const { pluginRepository, manager, mcpClientFactory } = setup();
+      const plugin = makePlugin("nusashell.notes");
+      pluginRepository.add(plugin);
+
+      await manager.startPlugin(plugin.id);
+      mcpClientFactory.created[0]!.setToolDelay("slow_tool", 5000);
+
+      const callPromise = manager.callTool(plugin.id, {
+        requestId: "00000000-0000-1000-8000-000000000007",
+        toolName: "slow_tool",
+        args: {},
+        timeoutMs: 10000,
+      });
+      const callResult = callPromise.then(
+        () => ({ ok: true as const }),
+        (err: unknown) => ({ ok: false as const, error: err }),
+      );
+
+      // Give the call a beat to become in-flight (state running) before stop.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const stopped = await manager.stopPlugin(plugin.id);
+      expect(stopped.state).toBe("idle");
+
+      const result = await callResult;
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect((result.error as { code: string }).code).toBe("TOOL_CALL_CANCELLED");
+      }
+      expect(await manager.getPluginState(plugin.id)).toBe("idle");
+    });
   });
 
   describe("MCP prompts and resources", () => {

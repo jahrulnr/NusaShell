@@ -766,32 +766,42 @@
     },
     "pipelines": {
       "title": "Pipelines",
-      "purpose": "Multi-step DAG pipelines that chain multiple agent turns or tool calls with conditional branching and context passing.",
+      "purpose": "Beta multi-step DAG pipelines (manual Run now and event triggers while the app is open). Schedule triggers are not available; use Jobs for time-based work.",
       "howToOpen": "Click the Pipelines item in the left sidebar.",
       "sections": [
         {
           "heading": "Pipeline list",
           "paragraphs": [
-            "Lists all pipelines. Each card shows the pipeline name, status, trigger type (event or schedule), step count, and enabled/disabled state. Each card offers Edit, Run now, Enable/Disable, and Delete actions. An inline error panel appears when the list fails to load, and an empty state offers a New pipeline action."
+            "Lists all pipelines as compact execution rails. Each card shows the pipeline identity, status signal, trigger, step flow, enabled state, and primary Inspect/Run actions; edit, pause, and delete live behind the overflow menu. An inline error panel appears when the list fails to load, and an empty state offers a Create first pipeline action."
           ],
           "controls": [
             "pipelines-new-btn",
+            "pipelines-empty-new",
             "pipelines-list",
             "pipelines-empty",
             "pipelines-error"
+          ]
+        },
+        {
+          "heading": "Pipeline details",
+          "paragraphs": [
+            "Inspect opens a stable DAG view that keeps every configured step visible before, during, and after a run. Click any step node to inspect its action, dependencies, output key, timestamps, status, definition, and rendered Markdown output. Run output remains below the DAG and is grouped by step."
+          ],
+          "controls": [
+            "pipeline-details-cancel"
           ]
         }
       ]
     },
     "pipeline-modal": {
       "title": "Pipeline editor modal",
-      "purpose": "Form to create or edit a multi-step pipeline with a trigger, step list, and per-step configuration.",
+      "purpose": "Form to create or edit a multi-step pipeline with an event trigger, step list, and per-step configuration. Schedule is not offered in Beta.",
       "howToOpen": "Click the + New pipeline button in the Pipelines view, or Edit on a pipeline card.",
       "sections": [
         {
           "heading": "Pipeline form",
           "paragraphs": [
-            "The modal collects a pipeline name, optional description, trigger type (event or schedule with pattern/schedule fields), and a list of steps. Each step has an id, name, action type (agent prompt or plugin tool call), optional dependsOn (multi-select of other step IDs), and optional outputKey. Steps can be added or removed dynamically."
+            "The modal collects a pipeline name, optional description, event trigger (pattern and optional plugin scope), and a list of steps. Each step has an id, name, action type (agent prompt or plugin tool call), optional dependsOn (multi-select of other step IDs), and optional outputKey. Steps can be added or removed dynamically."
           ],
           "controls": [
             "pipeline-modal-save",
@@ -3326,6 +3336,13 @@
       "selector": "#pipelines-new-btn",
       "action": "Opens the New pipeline modal."
     },
+    "pipelines-empty-new": {
+      "section": "Pipeline list",
+      "label": "Create first pipeline",
+      "type": "button",
+      "selector": "[data-control=\"pipelines-empty-new\"]",
+      "action": "Opens the New pipeline modal from the empty state."
+    },
     "pipelines-list": {
       "section": "Pipeline list",
       "label": "Pipeline list",
@@ -3366,7 +3383,14 @@
       "label": "Trigger type",
       "type": "select",
       "selector": "#pipeline-field-trigger-kind",
-      "action": "Toggles between event and schedule trigger fields."
+      "action": "Event-only in Beta; schedule option is reserved and disabled."
+    },
+    "pipeline-details-cancel": {
+      "section": "Pipeline details",
+      "label": "Cancel run",
+      "type": "button",
+      "selector": "#pipeline-details-cancel",
+      "action": "Requests cancellation of the in-flight pipeline run via pipeline.cancel."
     },
     "pipeline-add-step-btn": {
       "section": "Pipeline form",

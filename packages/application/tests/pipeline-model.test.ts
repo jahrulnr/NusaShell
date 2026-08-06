@@ -3,8 +3,10 @@ import {
   detectCycle,
   topologicalSort,
   validatePipeline,
+  validatePipelineTrigger,
   type PipelineStep,
 } from "../src/job/pipeline-model.js";
+import { ONCE_GRACE_SECONDS } from "../src/job/job-model.js";
 
 function step(id: string, deps?: string[]): PipelineStep {
   return {
@@ -95,5 +97,61 @@ describe("validatePipeline", () => {
   it("returns error for cycle", () => {
     const steps = [step("a", ["b"]), step("b", ["a"])];
     expect(validatePipeline(steps)).toMatch(/cycle/i);
+  });
+});
+
+describe("validatePipelineTrigger", () => {
+  it("accepts an event trigger", () => {
+    expect(validatePipelineTrigger({ kind: "event", pattern: "mail.new" })).toBeNull();
+  });
+
+  it("rejects a one-shot runAt in the past beyond the grace window (trigger-object path)", () => {
+    const past = new Date(Date.now() - (ONCE_GRACE_SECONDS + 10) * 1000).toISOString();
+    const trigger = { kind: "schedule", schedule: { kind: "once", runAt: past } } as const;
+    const error = validatePipelineTrigger(trigger);
+    expect(error).toMatch(/past/i);
+  });
+
+  it("accepts a one-shot runAt within the grace window", () => {
+    const within = new Date(Date.now() - Math.floor(ONCE_GRACE_SECONDS / 2) * 1000).toISOString();
+    const trigger = { kind: "schedule", schedule: { kind: "once", runAt: within } } as const;
+    expect(validatePipelineTrigger(trigger)).toBeNull();
+  });
+
+  it("rejects a one-shot runAt that is not a valid ISO timestamp", () => {
+    const trigger = { kind: "schedule", schedule: { kind: "once", runAt: "not-a-date" } } as const;
+    expect(validatePipelineTrigger(trigger)).toMatch(/valid ISO/i);
+  });
+
+  it("rejects a missing one-shot runAt", () => {
+    const trigger = { kind: "schedule", schedule: { kind: "once", runAt: "" } };
+    expect(validatePipelineTrigger(trigger)).toMatch(/requires runAt/i);
+  });
+
+  it("rejects an interval with non-positive minutes", () => {
+    const trigger = { kind: "schedule", schedule: { kind: "interval", minutes: 0 } };
+    expect(validatePipelineTrigger(trigger)).toMatch(/positive minutes/i);
+  });
+
+  it("rejects an empty cron expr", () => {
+    const trigger = { kind: "schedule", schedule: { kind: "cron", expr: "" } };
+    expect(validatePipelineTrigger(trigger)).toMatch(/requires expr/i);
+  });
+
+  it("rejects unknown trigger kind", () => {
+    expect(validatePipelineTrigger("bogus" as never)).toMatch(/event/i);
+  });
+
+  it("rejects event patterns in the pipeline.* namespace (self-trigger guard)", () => {
+    for (const pattern of ["pipeline.completed", "pipeline.started", "pipeline.*", "pipeline.failed"]) {
+      const error = validatePipelineTrigger({ kind: "event", pattern });
+      expect(error).toMatch(/pipeline/i);
+    }
+  });
+
+  it("accepts event patterns outside the pipeline.* namespace", () => {
+    for (const pattern of ["mail.new", "resource.updated", "notes.created", "job.completed"]) {
+      expect(validatePipelineTrigger({ kind: "event", pattern })).toBeNull();
+    }
   });
 });

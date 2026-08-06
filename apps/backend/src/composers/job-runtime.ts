@@ -11,6 +11,7 @@ import {
   JobScheduler,
   EventJobMatcher,
   PipelineScheduler,
+  PipelineTriggerCoordinator,
   CallToolHandler,
   DEFAULT_JOB_EXECUTOR_SETTINGS,
   type EventDispatcher,
@@ -30,6 +31,7 @@ export interface JobRuntimeParts {
   readonly eventJobMatcher: EventJobMatcher;
   readonly pipelineStore?: PipelineStorePort;
   readonly pipelineScheduler?: PipelineScheduler;
+  readonly pipelineTriggerCoordinator?: PipelineTriggerCoordinator;
 }
 
 export function createJobRuntime(
@@ -54,13 +56,32 @@ export function createJobRuntime(
     logger,
   });
   const jobFs: JobFsPort = new FilesystemJobFs(jobsRoot);
+  // Resolve job/pipeline executor settings from config instead of the
+  // hardcoded default (maxToolRounds: 8) so scheduled/pipeline turns follow
+  // the same ceiling as interactive agent turns:
+  //   NUSASHELL_JOB_MAX_TOOL_ROUNDS → options.ai.maxToolRounds → default 8.
+  const executorSettings: typeof DEFAULT_JOB_EXECUTOR_SETTINGS = {
+    ...DEFAULT_JOB_EXECUTOR_SETTINGS,
+    ...(options.ai
+      ? {
+          maxToolRounds: options.ai.jobMaxToolRounds ?? options.ai.maxToolRounds,
+          ...(options.ai.maxRepeatedToolCalls !== undefined
+            ? { maxRepeatedToolCalls: options.ai.maxRepeatedToolCalls }
+            : {}),
+          ...(options.ai.strategy !== undefined ? { strategy: options.ai.strategy } : {}),
+          ...(options.ai.totalAttemptBudget !== undefined
+            ? { totalAttemptBudget: options.ai.totalAttemptBudget }
+            : {}),
+        }
+      : {}),
+  };
   const jobScheduler = new JobScheduler({
     store: jobStore,
     executor: jobExecutor,
     callToolHandler: new CallToolHandler(plugin.runtimeManager),
     eventDispatcher,
     jobFs,
-    executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS,
+    executorSettings,
     logger,
   });
   if (options.jobs) {
@@ -72,9 +93,27 @@ export function createJobRuntime(
     executor: jobExecutor,
     callToolHandler: new CallToolHandler(plugin.runtimeManager),
     eventDispatcher,
-    executorSettings: DEFAULT_JOB_EXECUTOR_SETTINGS,
+    executorSettings,
     logger,
   });
+  void pipelineScheduler.recoverOnStartup().catch((err) => {
+    logger.error(
+      "pipeline recovery failed: %s",
+      err instanceof Error ? err.message : String(err),
+    );
+  });
+  const pipelineTriggerCoordinator = new PipelineTriggerCoordinator({
+    store: pipelineStore,
+    scheduler: pipelineScheduler,
+    eventDispatcher,
+    logger,
+  });
+  if (options.jobs) {
+    pipelineTriggerCoordinator.configure({
+      enabled: options.jobs.enabled,
+      tickSeconds: options.jobs.tickSeconds,
+    });
+  }
   const eventJobMatcher = new EventJobMatcher({
     store: jobStore,
     scheduler: jobScheduler,
@@ -84,5 +123,13 @@ export function createJobRuntime(
     pipelineScheduler,
   });
   eventJobMatcher.start();
-  return { jobScheduler, jobStore, jobFs, eventJobMatcher, pipelineStore, pipelineScheduler };
+  return {
+    jobScheduler,
+    jobStore,
+    jobFs,
+    eventJobMatcher,
+    pipelineStore,
+    pipelineScheduler,
+    pipelineTriggerCoordinator,
+  };
 }

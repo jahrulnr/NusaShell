@@ -78,12 +78,13 @@ function room(id: string, patch: Record<string, unknown> = {}) {
 function makeController(opts: {
   rooms?: Map<string, ReturnType<typeof room>>;
   getActiveTurn?: (conversationId: string) => Promise<unknown>;
+  getConversation?: (conversationId: string) => Promise<ReturnType<typeof room> | null>;
 } = {}) {
   const rooms = opts.rooms ?? new Map([
     ["room-a", room("room-a", { messages: [{ role: "user", content: "hi A" }] })],
     ["room-b", room("room-b", { messages: [{ role: "user", content: "hi B" }] })],
   ]);
-  const get = vi.fn(async (id: string) => rooms.get(id) ?? null);
+  const get = vi.fn(opts.getConversation ?? (async (id: string) => rooms.get(id) ?? null));
   const list = vi.fn(async () =>
     [...rooms.values()].map((c) => ({
       id: c.id,
@@ -127,6 +128,22 @@ function makeController(opts: {
 
 describe("BH-AGENT room / turn / drawer suite", () => {
   beforeEach(() => installDom());
+
+  it("does not let a stale room load overwrite the latest room selection", async () => {
+    let resolveA!: (value: ReturnType<typeof room>) => void;
+    const roomA = new Promise<ReturnType<typeof room>>((resolve) => { resolveA = resolve; });
+    const { controller } = makeController({
+      getConversation: vi.fn((id: string) => id === "room-a" ? roomA : Promise.resolve(room("room-b"))),
+    });
+
+    const openingA = controller.open("room-a");
+    await controller.open("room-b");
+    resolveA(room("room-a"));
+    await openingA;
+
+    expect(controller.activeId).toBe("room-b");
+    expect(controller.conversation?.id).toBe("room-b");
+  });
 
   it("mounts the todo strip for a newly created room", async () => {
     const conversation = room("room-new");
@@ -512,6 +529,59 @@ describe("BH-AGENT room / turn / drawer suite", () => {
     expect(controller.liveStreamState).toBeNull();
     await controller.open("room-a");
     expect(controller.liveStreamState).toBe(streamStateA);
+  });
+
+  it("keeps background room deltas instead of dropping them during a room switch", async () => {
+    const rooms = new Map([
+      ["room-a", room("room-a", { messages: [] })],
+      ["room-b", room("room-b", { messages: [] })],
+    ]);
+    let streamOptions: Record<string, any> | null = null;
+    let finishTurn: ((result: unknown) => void) | null = null;
+    const runTurn = vi.fn(async (_messages: unknown, options: Record<string, any>) => {
+      streamOptions = options;
+      return await new Promise((resolve) => { finishTurn = resolve; });
+    });
+    const controller = new AgentConversationController({
+      shell: {
+        agentConversations: {
+          get: vi.fn(async (id: string) => rooms.get(id) ?? null),
+          append: vi.fn(async (id: string, message: unknown) => {
+            const current = rooms.get(id)!;
+            const next = { ...current, messages: [...current.messages, message] };
+            rooms.set(id, next);
+            return next;
+          }),
+          list: vi.fn(async () => []),
+        },
+      },
+      runTurn,
+      getActiveModel: () => null,
+      log: vi.fn(),
+    } as never);
+    controller.conversation = rooms.get("room-a") as never;
+    controller.activeId = "room-a";
+    const input = document.querySelector<HTMLInputElement>("#agent-input")!;
+    input.value = "start A";
+    controller.refresh = vi.fn(async () => {});
+
+    const submitPromise = controller.submit();
+    await vi.waitFor(() => expect(streamOptions).not.toBeNull());
+
+    // A continues to stream while B is the visible room.
+    controller.conversation = rooms.get("room-b") as never;
+    controller.activeId = "room-b";
+    document.querySelector("#agent-provider-status")!.textContent = "Room B status";
+    streamOptions!.onDelta("first");
+    streamOptions!.onDelta(" background");
+
+    const stateA = controller.liveStreamStates.get("room-a");
+    expect(stateA?.streamedText).toBe("first background");
+    expect(document.querySelector("#agent-provider-status")?.textContent).toBe("Room B status");
+    expect(document.querySelector("#agent-thread article.agent-pending .agent-bubble")).toBeNull();
+
+    finishTurn!({ traceId: streamOptions!.traceId, text: "first background", toolCalls: [], steps: [], rounds: 1 });
+    await submitPromise;
   });
 
   it("BH-AGENT-18 isolates autoContinueAborted per conversation", async () => {

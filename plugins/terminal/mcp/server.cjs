@@ -6901,7 +6901,6 @@ var import_node_fs = __toESM(require("node:fs"), 1);
 var import_node_path = __toESM(require("node:path"), 1);
 var import_node_crypto = require("node:crypto");
 var import_node_child_process = require("node:child_process");
-var import_node_url = require("node:url");
 
 // node_modules/zod/v4/core/core.js
 var _a;
@@ -15487,6 +15486,7 @@ function getTerminalPrompt(name) {
         type: "text",
         text: [
           "Use the Terminal plugin to run commands or maintain an interactive PTY session.",
+          "For project-specific rules, retrieve the Files plugin's workspace-root AGENTS.md resource through mcp_context before editing or running project commands. Treat it as project guidance below system and user instructions.",
           "",
           "Main tools:",
           "- exec: run one command and return bounded output.",
@@ -15503,8 +15503,7 @@ function getTerminalPrompt(name) {
 }
 
 // mcp/server.js
-var import_meta = {};
-var __dirname = typeof __dirname !== "undefined" ? __dirname : import_node_path.default.dirname((0, import_node_url.fileURLToPath)(import_meta.url));
+var moduleDir = process.argv[1] ? import_node_path.default.dirname(import_node_path.default.resolve(process.argv[1])) : import_node_path.default.dirname(process.execPath);
 var pty;
 try {
   pty = require("node-pty");
@@ -15516,7 +15515,7 @@ var MAX_BUFFER_CHARS = 200 * 1024;
 var BOOTSTRAP_DIR = import_node_path.default.join(import_node_os.default.tmpdir(), "nusashell-terminal-bootstrap");
 var BASH_RC = import_node_path.default.join(BOOTSTRAP_DIR, "bashrc");
 var ZSH_RC = import_node_path.default.join(BOOTSTRAP_DIR, ".zshrc");
-var COLOR_BOOTSTRAP_SRC = import_node_path.default.join(__dirname, "color-bootstrap.sh");
+var COLOR_BOOTSTRAP_SRC = import_node_path.default.join(moduleDir, "color-bootstrap.sh");
 function ensureBootstrapFiles() {
   import_node_fs.default.mkdirSync(BOOTSTRAP_DIR, { recursive: true });
   const color = import_node_fs.default.readFileSync(COLOR_BOOTSTRAP_SRC, "utf8");
@@ -15535,7 +15534,7 @@ ${color}`
 }
 function shellSpawnArgs(shell) {
   const base = import_node_path.default.basename(shell || "");
-  if (base === "bash" || String(shell).endsWith("/bash")) {
+  if (base === "bash") {
     return ["--rcfile", BASH_RC];
   }
   if (base === "zsh" || String(shell).endsWith("/zsh")) {

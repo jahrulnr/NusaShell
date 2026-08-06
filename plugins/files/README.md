@@ -3,7 +3,7 @@
 A bundled example plugin exposing a file-system MCP server (read, write, list,
 tree, search, grep, patch, move, copy, delete, info, append, exists, touch)
 plus deterministic workspace-context tools (context_map, detect_stack,
-list_symbols).
+list_symbols) and a bounded workspace resource for the root `AGENTS.md`.
 
 ## Workspace context tools
 
@@ -23,6 +23,13 @@ a token budget via binary search, and an in-memory tag cache invalidated by
 - `detect_stack` — manifest-only classification (fast, no tree walk).
 - `list_symbols` — definitions for one file (`path`) or top-ranked files
   matching a symbol-name `query`.
+
+The Files MCP also exposes `nusashell://workspace/AGENTS.md` through the MCP
+Resources capability when `AGENTS.md` exists at the configured workspace root.
+It is capped at 50 KiB and intentionally limited to the root file; nested
+instruction files require a target-path policy and are not mixed into the
+workspace-wide context. Agents can retrieve it with the shell's `mcp_context`
+tool. It is project guidance and remains below system and user instructions.
 
 ## Path resolution
 

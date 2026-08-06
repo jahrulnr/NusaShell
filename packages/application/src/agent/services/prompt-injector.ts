@@ -1,4 +1,4 @@
-import type { AgentMessage } from "../ports/agent-provider.port.js";
+import type { AgentMessage, AgentPromptCachePolicy } from "../ports/agent-provider.port.js";
 import type { AgentPrompt } from "../ports/prompt-loader.port.js";
 
 export interface PromptVars {
@@ -15,6 +15,31 @@ export interface PromptVars {
 }
 
 const STATIC_PROMPT_NAMES = ["system", "mcp-tools"];
+
+/**
+ * Cache-friendly system-prefix contract (#28).
+ *
+ * LLM prompt caches match the request prefix byte-for-byte, so anything
+ * volatile must live at the END of the system block, never in the middle.
+ * injectPrompts guarantees two segments:
+ *
+ * 1. Stable prefix (byte-identical per run, never passed through applyVars):
+ *    system.md -> mcp-tools.md -> Live MCP -> skills catalog
+ * 2. A constant marker (SYSTEM_PREFIX_END_MARKER) that anchors the boundary.
+ * 3. Dynamic tail (rendered/assembled per turn):
+ *    subagent -> user prompt -> developer (template + vars) -> memory -> todo
+ *
+ * Keep {{current_date}} / {{workspace}} / {{available_tools}} out of any block
+ * that belongs to the stable segment.
+ */
+export const SYSTEM_PREFIX_END_MARKER =
+  "=== STABLE SYSTEM PREFIX END / DYNAMIC TAIL BEGIN ===";
+
+/** Calendar date frozen once per process so {{current_date}} is not per-turn churn. */
+const PROCESS_START_DATE = new Date().toISOString().slice(0, 10);
+export function stableCurrentDate(): string {
+  return PROCESS_START_DATE;
+}
 
 export interface PromptInjectionSummary {
   readonly totalSystemMessages: number;
@@ -33,6 +58,8 @@ export interface PromptInjectionSummary {
 export interface InjectPromptsResult {
   readonly messages: AgentMessage[];
   readonly summary: PromptInjectionSummary;
+  /** Cache plan derived from assembly boundaries, not message text heuristics. */
+  readonly promptCache: AgentPromptCachePolicy;
 }
 
 /**
@@ -73,10 +100,12 @@ export function injectPrompts(
   let todoChars = 0;
   let skillsCatalogChars = 0;
   let mcpLiveChars = 0;
+  let stableSystemMessages = 0;
 
   for (const prompt of staticPrompts) {
     out.push({ role: "system", content: prompt.content });
     staticChars += prompt.content.length;
+    stableSystemMessages += 1;
   }
 
   // Live MCP (runtime) sits immediately after static mcp-tools so the model
@@ -87,6 +116,7 @@ export function injectPrompts(
   if (mcpLivePrompt) {
     out.push({ role: "system", content: mcpLivePrompt });
     mcpLiveChars += mcpLivePrompt.length;
+    stableSystemMessages += 1;
   }
 
   // Skills catalog (Layer 1) sits right after Live MCP so the model sees
@@ -96,6 +126,7 @@ export function injectPrompts(
   if (skillsCatalogPrompt) {
     out.push({ role: "system", content: skillsCatalogPrompt });
     skillsCatalogChars += skillsCatalogPrompt.length;
+    stableSystemMessages += 1;
   }
 
   const hasSubagentPrompt = Boolean(subagentPrompt);
@@ -176,7 +207,14 @@ export function injectPrompts(
     },
   };
 
-  return { messages: out, summary };
+  return {
+    messages: out,
+    summary,
+    promptCache: {
+      mode: "auto",
+      ...(stableSystemMessages > 0 ? { stableSystemMessages } : {}),
+    },
+  };
 }
 
 export function applyVars(text: string, vars: PromptVars): string {

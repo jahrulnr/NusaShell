@@ -47,6 +47,12 @@ next line. Choose the type by intent — for example `sequenceDiagram` for who-c
 `timeline` for schedules. Prefer one small diagram. Skip Mermaid for short facts
 or tables.
 
+Mermaid reliability (Agent Canvas uses Mermaid 11): keep diagrams small. For
+flowchart edge labels, always quote the label when it contains `[]`, `()`, `{}`,
+`#`, or HTML — unquoted `[]`/`()` are shape tokens and fail parse. Correct:
+`A -->|"pluginIds: []"| B`. Use `<br/>` for line breaks inside labels. If a
+diagram is hard to express reliably, simplify or use prose.
+
 If the visual must be **dynamic or interactive** (tabs, forms, live filters,
 animated widgets, click handlers, custom layouts Mermaid cannot express), emit a
 fenced `html` block instead — Agent Canvas auto-renders it inline in a sandboxed

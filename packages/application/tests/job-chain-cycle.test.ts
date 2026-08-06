@@ -58,16 +58,16 @@ class FakeJobStore implements JobStorePort {
 describe("EventJobMatcher — Phase D cycle guard", () => {
   let store: FakeJobStore;
   let dispatcher: EventDispatcher;
-  let runOneNowMock: ReturnType<typeof vi.fn>;
+  let startJobNowMock: ReturnType<typeof vi.fn>;
   let matcher: EventJobMatcher;
 
   beforeEach(() => {
     store = new FakeJobStore();
     dispatcher = new EventDispatcher();
-    runOneNowMock = vi.fn().mockResolvedValue({ ok: true });
+    startJobNowMock = vi.fn().mockResolvedValue({ ok: true });
     matcher = new EventJobMatcher({
       store,
-      scheduler: { runOneNow: runOneNowMock } as never,
+      scheduler: { startJobNow: startJobNowMock } as never,
       eventDispatcher: dispatcher,
     });
     matcher.start();
@@ -93,7 +93,7 @@ describe("EventJobMatcher — Phase D cycle guard", () => {
     );
     await dispatcher.publish(selfEvent);
     // The job should NOT fire on its own emission
-    expect(runOneNowMock).not.toHaveBeenCalledWith(job.id, expect.any(Object), expect.any(Object));
+    expect(startJobNowMock).not.toHaveBeenCalledWith(job.id, expect.any(Object), expect.any(Object));
   });
 
   it("allows chain: job A emits → job B fires", async () => {
@@ -114,7 +114,7 @@ describe("EventJobMatcher — Phase D cycle guard", () => {
     );
     await dispatcher.publish(chainEvent);
     // Job B should fire (it's a different job)
-    expect(runOneNowMock).toHaveBeenCalledWith(jobB.id, expect.any(Object), expect.any(Object));
+    expect(startJobNowMock).toHaveBeenCalledWith(jobB.id, expect.any(Object), expect.any(Object));
   });
 
   it("blocks chain exceeding MAX_CHAIN_DEPTH", async () => {
@@ -130,14 +130,14 @@ describe("EventJobMatcher — Phase D cycle guard", () => {
       { jobId: "other-job", chainDepth: MAX_CHAIN_DEPTH },
     );
     await dispatcher.publish(deepEvent);
-    expect(runOneNowMock).not.toHaveBeenCalled();
+    expect(startJobNowMock).not.toHaveBeenCalled();
   });
 
   it("allows plugin-emitted events (no origin) to fire event-jobs", async () => {
     const job = makeEventJob("mail.new");
     store.jobs.set(job.id, job);
     await dispatcher.publish(createAutomationEvent("mail.new", "mail", { subject: "Hi" }));
-    expect(runOneNowMock).toHaveBeenCalledWith(job.id, expect.any(Object), undefined);
+    expect(startJobNowMock).toHaveBeenCalledWith(job.id, expect.any(Object), undefined);
   });
 
   it("passes chainOrigin to runOneNow for chained events", async () => {
@@ -152,7 +152,7 @@ describe("EventJobMatcher — Phase D cycle guard", () => {
       { jobId: "job-a", chainDepth: 2 },
     );
     await dispatcher.publish(chainEvent);
-    expect(runOneNowMock).toHaveBeenCalledWith(
+    expect(startJobNowMock).toHaveBeenCalledWith(
       jobB.id,
       expect.any(Object),
       { originJobId: "job-a", chainDepth: 2 },

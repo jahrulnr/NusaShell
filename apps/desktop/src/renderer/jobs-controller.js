@@ -3,7 +3,7 @@ import { fetchPlugins, listTools, startPlugin } from "./plugin-api.js";
 import { renderJobOutputMarkdown } from "./agent-conversation-ui.js";
 import { serializeSchemaArgs } from "./jobs-form-helpers.js";
 
-const JOB_RUN_TIMEOUT_MS = 300_000;
+const JOB_RUN_TIMEOUT_MS = 10_000;
 
 function describeJobTrigger(trigger) {
   if (!trigger) return "—";

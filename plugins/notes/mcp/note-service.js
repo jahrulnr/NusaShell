@@ -1,6 +1,6 @@
 import path from "node:path";
 import fsp from "node:fs/promises";
-import { notesDataFile } from "./config.js";
+import { legacyNotesDataFile, notesDataFile } from "./config.js";
 
 const MAX_TEXT_LENGTH = 100 * 1024;
 const MAX_TAGS = 20;
@@ -14,6 +14,7 @@ export class NoteService {
 
   async load() {
     const file = notesDataFile();
+    await this.#migrateLegacyIfNeeded(file);
     try {
       const raw = await fsp.readFile(file, "utf8");
       const data = JSON.parse(raw);
@@ -25,6 +26,29 @@ export class NoteService {
     } catch (error) {
       if (error.code !== "ENOENT") {
         process.stderr.write(`[notes-mcp] failed to load notes: ${error.message}\n`);
+      }
+    }
+  }
+
+  async #migrateLegacyIfNeeded(targetFile) {
+    // Explicit test/override paths must stay empty until the service creates them.
+    if (process.env.NUSASHELL_NOTES_DATA_FILE) return;
+    const legacy = legacyNotesDataFile();
+    if (path.resolve(legacy) === path.resolve(targetFile)) return;
+    try {
+      await fsp.access(targetFile);
+      return;
+    } catch {
+      // Target missing — try one-time copy from plugin-adjacent legacy file.
+    }
+    try {
+      const raw = await fsp.readFile(legacy, "utf8");
+      await fsp.mkdir(path.dirname(targetFile), { recursive: true });
+      await fsp.writeFile(targetFile, raw, "utf8");
+      process.stderr.write(`[notes-mcp] migrated notes from legacy path to ${targetFile}\n`);
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        process.stderr.write(`[notes-mcp] legacy notes migration skipped: ${error.message}\n`);
       }
     }
   }

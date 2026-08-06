@@ -25,6 +25,9 @@ export interface JobAgentExecutorSettings {
 }
 
 export const DEFAULT_JOB_EXECUTOR_SETTINGS: JobAgentExecutorSettings = {
+  // Fallback only: the backend composer overrides `maxToolRounds` with
+  // `options.ai.jobMaxToolRounds ?? options.ai.maxToolRounds` (env:
+  // NUSASHELL_JOB_MAX_TOOL_ROUNDS, else NUSASHELL_AI_MAX_TOOL_ROUNDS, default 50).
   maxToolRounds: 8,
   maxRepeatedToolCalls: 50,
   strategy: "failover",

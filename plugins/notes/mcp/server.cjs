@@ -24848,6 +24848,13 @@ try {
 function notesDataFile() {
   const envFile = process.env.NUSASHELL_NOTES_DATA_FILE;
   if (envFile) return import_node_path.default.resolve(envFile);
+  const userData = process.env.NUSASHELL_USER_DATA || process.env.NUSASHELL_DATA_DIR;
+  if (userData) {
+    return import_node_path.default.join(import_node_path.default.resolve(userData), "plugins-data", "nusashell.notes", "notes.json");
+  }
+  return import_node_path.default.join(_dirname, "..", "notes.json");
+}
+function legacyNotesDataFile() {
   return import_node_path.default.join(_dirname, "..", "notes.json");
 }
 
@@ -24862,6 +24869,7 @@ var NoteService = class {
   }
   async load() {
     const file2 = notesDataFile();
+    await this.#migrateLegacyIfNeeded(file2);
     try {
       const raw = await import_promises.default.readFile(file2, "utf8");
       const data = JSON.parse(raw);
@@ -24873,6 +24881,28 @@ var NoteService = class {
     } catch (error51) {
       if (error51.code !== "ENOENT") {
         process.stderr.write(`[notes-mcp] failed to load notes: ${error51.message}
+`);
+      }
+    }
+  }
+  async #migrateLegacyIfNeeded(targetFile) {
+    if (process.env.NUSASHELL_NOTES_DATA_FILE) return;
+    const legacy = legacyNotesDataFile();
+    if (import_node_path2.default.resolve(legacy) === import_node_path2.default.resolve(targetFile)) return;
+    try {
+      await import_promises.default.access(targetFile);
+      return;
+    } catch {
+    }
+    try {
+      const raw = await import_promises.default.readFile(legacy, "utf8");
+      await import_promises.default.mkdir(import_node_path2.default.dirname(targetFile), { recursive: true });
+      await import_promises.default.writeFile(targetFile, raw, "utf8");
+      process.stderr.write(`[notes-mcp] migrated notes from legacy path to ${targetFile}
+`);
+    } catch (error51) {
+      if (error51.code !== "ENOENT") {
+        process.stderr.write(`[notes-mcp] legacy notes migration skipped: ${error51.message}
 `);
       }
     }

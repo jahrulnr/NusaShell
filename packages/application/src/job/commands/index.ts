@@ -23,3 +23,6 @@ export { RemovePipelineHandler } from "./remove-pipeline/remove-pipeline.handler
 export type { RunPipelineCommand } from "./run-pipeline/run-pipeline.command.js";
 export type { RunPipelineResult } from "./run-pipeline/run-pipeline.command.js";
 export { RunPipelineHandler } from "./run-pipeline/run-pipeline.handler.js";
+export type { CancelPipelineCommand } from "./cancel-pipeline/cancel-pipeline.command.js";
+export type { CancelPipelineResult } from "./cancel-pipeline/cancel-pipeline.command.js";
+export { CancelPipelineHandler } from "./cancel-pipeline/cancel-pipeline.handler.js";

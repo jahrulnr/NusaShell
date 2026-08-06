@@ -19,6 +19,7 @@ export {
   resolveModelRuntimePolicy,
   extractTextToolCalls,
   mergeTextToolCalls,
+  stripLeakedToolProtocol,
   type OpenAiCompatibleAgentProviderOptions,
   type ModelCapabilities,
   type ModelRuntimePolicy,

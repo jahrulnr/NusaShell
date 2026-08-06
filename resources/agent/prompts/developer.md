@@ -1,5 +1,11 @@
 ## Runtime context
 
+> This developer context block is part of the **dynamic tail** of the system
+> prefix (it carries `{{current_date}}`, `{{workspace}}`, and {{available_tools}})
+> and is re-rendered every turn. Do not rely on its exact bytes for caching
+> decisions — treat it as per-turn runtime context, not as a stable instruction
+> block.
+
 - Environment: {{environment}}
 - Host OS / runtime: {{runtime_os}}
 - Current date: {{current_date}}

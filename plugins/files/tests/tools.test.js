@@ -117,6 +117,28 @@ describe("callFilesTool", () => {
     expect(result.size).toBe(5);
   });
 
+  it("clamps grep after/before/maxResults past caps instead of rejecting", async () => {
+    await fs.writeFile(
+      path.join(tmpDir, "a.ts"),
+      "l0\nl1\nl2\nMATCH\nl4\nl5\nl6\nl7\nl8\nl9\nl10\nl11\nl12\n",
+    );
+    const result = await callFilesTool(service, "grep", {
+      path: "a.ts",
+      pattern: "MATCH",
+      after: 12,
+      before: -3,
+      maxResults: 5000,
+    });
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].line).toBe(4);
+    // before clamped to 0 → no before lines; after clamped to 10
+    expect(result.results[0].before ?? []).toEqual([]);
+    expect(result.results[0].after).toHaveLength(10);
+    // maxResults recovers (clamped); service also floors by internal search cap
+    expect(result.meta.cap).toBeGreaterThanOrEqual(1);
+    expect(result.meta.count).toBe(1);
+  });
+
   it("rejects invalid input (missing required path)", async () => {
     await expect(callFilesTool(service, "read", {})).rejects.toThrow();
   });
@@ -143,8 +165,11 @@ describe("workspace context tools", () => {
     expect(result.stats.tokensUsed).toBeGreaterThan(0);
   });
 
-  it("context_map rejects over-limit budget and extra fields", async () => {
-    await expect(callFilesTool(service, "context_map", { budget: 99999 })).rejects.toThrow();
+  it("context_map clamps over-limit budget and rejects extra fields", async () => {
+    await fs.writeFile(path.join(tmpDir, "README.md"), "# docs\n");
+    const result = await callFilesTool(service, "context_map", { budget: 99999 });
+    expect(typeof result.map).toBe("string");
+    expect(result.stats.tokensUsed).toBeLessThanOrEqual(8192);
     await expect(callFilesTool(service, "context_map", { nope: 1 })).rejects.toThrow();
   });
 

@@ -41,6 +41,40 @@ After`);
     ]);
   });
 
+  it("extracts DeepSeek V4 DSML tool_calls (unicode pipes normalized)", () => {
+    // Fullwidth pipes as DeepSeek special tokens emit (｜ = U+FF5C).
+    const raw = `Thinking done.
+<｜DSML｜tool_calls>
+<｜DSML｜invoke name="list_tickets">
+<｜DSML｜parameter name="project_id" string="true">proj-1</｜DSML｜parameter>
+<｜DSML｜parameter name="limit" string="false">25</｜DSML｜parameter>
+</｜DSML｜invoke>
+</｜DSML｜tool_calls>`;
+    const result = extractTextToolCalls(raw);
+    expect(result.calls).toEqual([expect.objectContaining({
+      name: "list_tickets",
+      args: { project_id: "proj-1", limit: 25 },
+    })]);
+    expect(result.text).toBe("Thinking done.");
+  });
+
+  it("strips leaked tool_result echoes and orphan DSML closers from assistant text", () => {
+    // Regression: DeepSeek-v4-flash sometimes echoes prior MCP envelopes +
+    // half-detokenized DSML into the user-visible assistant stream.
+    const leaked = `屋</tool_result>Bdy_S
+<tool_result>{"ok":true,"data":{"items":[{"id":"2ddb51ed-1de5-4df1-8f2b-ae63661275f7","title":"MCP parallel"}]}}</tool_result>
+</|DSML|parameter>
+</|DSML|invoke>
+</|DSML|tool_calls>
+Next steps for the user.`;
+    const result = extractTextToolCalls(leaked);
+    expect(result.calls).toEqual([]);
+    expect(result.text).toBe("Next steps for the user.");
+    expect(result.text).not.toContain("tool_result");
+    expect(result.text).not.toContain("DSML");
+    expect(result.text).not.toContain("2ddb51ed");
+  });
+
   it("fills empty native arguments without replacing valid native arguments", () => {
     const merged = mergeTextToolCalls(
       [

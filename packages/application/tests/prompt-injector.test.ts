@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { injectPrompts, applyVars, type PromptVars } from "../src/index.js";
+import { injectPrompts, applyVars, SYSTEM_PREFIX_END_MARKER, stableCurrentDate, type PromptVars } from "../src/index.js";
 import type { AgentPrompt } from "../src/index.js";
 import type { AgentMessage } from "../src/index.js";
 
@@ -280,5 +280,73 @@ describe("injectPrompts", () => {
     const withEmpty = injectPrompts(prompts, vars, messages, undefined, undefined, undefined, undefined, undefined, undefined, "").messages;
     expect(withUndefined).toEqual(withEmpty);
     expect(withEmpty.some((m) => m.role === "system" && String(m.content).includes("Live MCP"))).toBe(false);
+  });
+
+  it("reports only the leading static/session catalog as cacheable", () => {
+    const result = injectPrompts(
+      prompts,
+      vars,
+      [{ role: "user", content: "hello" }],
+      "user-specific instructions",
+      "turn memory",
+      "subagent rules",
+      "todo",
+      "skills",
+      undefined,
+      "live catalog",
+    );
+
+    expect(result.promptCache).toEqual({ mode: "auto", stableSystemMessages: 4 });
+    expect(result.messages.slice(0, 5).map((message) => message.content)).toEqual([
+      "You are the NusaShell agent.",
+      "Use tool_list to discover tools.",
+      "live catalog",
+      "skills",
+      "subagent rules",
+    ]);
+  });
+
+  it("keeps the leading stable system prefix byte-identical across turns", () => {
+    const richPrompts: AgentPrompt[] = [
+      ...prompts,
+      { name: "live", content: "LIVE: {{current_date}}", isTemplate: false },
+    ];
+    const turnA = injectPrompts(
+      richPrompts, vars, [{ role: "user", content: "msg A" }],
+      "instructions", "memory", "subagent", "todo", "skills", undefined, "live cat",
+    );
+    const turnB = injectPrompts(
+      richPrompts, vars, [{ role: "user", content: "msg B" }],
+      "instructions", "memory", "subagent", "todo", "skills", undefined, "live cat",
+    );
+    const stableCount = turnA.promptCache.stableSystemMessages ?? 0;
+    const stableA = turnA.messages.slice(0, stableCount);
+    const stableB = turnB.messages.slice(0, stableCount);
+    expect(stableA).toEqual(stableB);
+    expect(stableA.map((m) => m.content)).toEqual([
+      "You are the NusaShell agent.",
+      "Use tool_list to discover tools.",
+      "live cat",
+      "skills",
+    ]);
+    // Volatile developer/date block lives strictly after the stable segment.
+    // (system + mcp-tools are the stable set here; subagent comes right after.)
+    const devA = turnA.messages.slice(stableCount)[2] as { content: string };
+    expect(String(devA.content)).toContain("2026-07-29");
+  });
+
+  it("changing a volatile var does not touch the stable prefix", () => {
+    const turnA = injectPrompts(prompts, vars, [{ role: "user", content: "hi" }]);
+    const varsB: PromptVars = { ...vars, availableTools: "completely different tool set" };
+    const turnB = injectPrompts(prompts, varsB, [{ role: "user", content: "hi" }]);
+    const stableCount = turnA.promptCache.stableSystemMessages ?? 0;
+    expect(turnA.messages.slice(0, stableCount)).toEqual(turnB.messages.slice(0, stableCount));
+  });
+
+  it("freezes the calendar date once per process (stableCurrentDate)", () => {
+    const d1 = stableCurrentDate();
+    const d2 = stableCurrentDate();
+    expect(d1).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(d1).toBe(d2);
   });
 });

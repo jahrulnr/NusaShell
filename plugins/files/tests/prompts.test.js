@@ -32,9 +32,11 @@ describe("Files MCP prompts", () => {
     expect(howto).toContain("context_map");
     expect(howto).toContain("detect_stack");
     expect(howto).toContain("list_symbols");
+    expect(howto).toContain("AGENTS.md");
     const workflow = getFilesPrompt("explore-workflow").messages[0].content.text;
     expect(workflow).toContain("context_map");
     expect(workflow).toContain("list_symbols");
+    expect(workflow).toContain("AGENTS.md");
   });
 
   it("rejects unknown prompts", () => {

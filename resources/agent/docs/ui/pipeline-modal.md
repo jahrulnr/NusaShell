@@ -1,12 +1,12 @@
 # Pipeline editor modal
 
-Form to create or edit a multi-step pipeline with a trigger, step list, and per-step configuration.
+Form to create or edit a multi-step pipeline with an event trigger, step list, and per-step configuration. Schedule is not offered in Beta.
 
 **How to open:** Click the + New pipeline button in the Pipelines view, or Edit on a pipeline card.
 
 ## Pipeline form
 
-The modal collects a pipeline name, optional description, trigger type (event or schedule with pattern/schedule fields), and a list of steps. Each step has an id, name, action type (agent prompt or plugin tool call), optional dependsOn (multi-select of other step IDs), and optional outputKey. Steps can be added or removed dynamically.
+The modal collects a pipeline name, optional description, event trigger (pattern and optional plugin scope), and a list of steps. Each step has an id, name, action type (agent prompt or plugin tool call), optional dependsOn (multi-select of other step IDs), and optional outputKey. Steps can be added or removed dynamically.
 
 - **Save** (`#pipeline-modal-save`):
   - Section: Pipeline form
@@ -23,7 +23,7 @@ The modal collects a pipeline name, optional description, trigger type (event or
 - **Trigger type** (`#pipeline-field-trigger-kind`):
   - Section: Pipeline form
   - Type: select
-  - Action: Toggles between event and schedule trigger fields.
+  - Action: Event-only in Beta; schedule option is reserved and disabled.
 
 - **`#pipeline-field-schedule`** (missing map entry)
 

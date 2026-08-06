@@ -32,6 +32,8 @@ export class ChatApiStrategy implements ApiStrategy {
       messages: mapMessages(request.messages, (parts) => toChatContent(parts, allowVision)),
       ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
       ...(positiveInteger(maxOutputTokens) ? { max_tokens: maxOutputTokens } : {}),
+      ...(request.promptCache?.mode !== "off" && request.promptCache?.key
+        ? { prompt_cache_key: request.promptCache.key } : {}),
       ...chatEffort(request.effort),
     };
   }

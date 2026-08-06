@@ -24815,8 +24815,13 @@ function splitLines(text) {
 
 // mcp/errors.js
 function safeFilesError(error51) {
-  if (error51 && typeof error51 === "object" && "issues" in error51) {
-    return "Files tool input is invalid";
+  if (error51 && typeof error51 === "object" && "issues" in error51 && Array.isArray(error51.issues)) {
+    const detail = error51.issues.slice(0, 5).map((issue2) => {
+      const path4 = Array.isArray(issue2.path) && issue2.path.length > 0 ? issue2.path.join(".") : "(root)";
+      const message2 = typeof issue2.message === "string" ? issue2.message : "invalid";
+      return `${path4}: ${message2}`;
+    }).join("; ");
+    return detail ? `Files tool input is invalid (${detail})` : "Files tool input is invalid";
   }
   const message = error51 instanceof Error ? error51.message : String(error51);
   return message.replace(/[\u0000-\u001f\u007f]+/g, " ").slice(0, 1e3);
@@ -24827,7 +24832,7 @@ var import_promises2 = __toESM(require("node:fs/promises"), 1);
 var import_node_path2 = __toESM(require("node:path"), 1);
 var MAX_READ_BYTES = 10 * 1024 * 1024;
 var MAX_TREE_DEPTH = 10;
-var MAX_SEARCH_RESULTS = 500;
+var MAX_SEARCH_RESULTS = 1e3;
 var MAX_GREP_LINE_LENGTH = 500;
 var MAGIC_BYTE_SAMPLE = 512;
 var BINARY_NUL_RATIO = 0.3;
@@ -25300,10 +25305,10 @@ var FileService = class {
   }
   /**
    * Search file contents for a regex pattern (like grep).
-   * @param {string} input - directory to search in
+   * @param {string} input - directory or single file to search
    * @param {string} pattern - regex pattern
    * @param {object} opts
-   * @param {string} [opts.glob] - optional file name glob filter
+   * @param {string} [opts.glob] - optional file name glob filter (directory mode only)
    * @param {number} [opts.before] - context lines before match
    * @param {number} [opts.after] - context lines after match
    * @param {boolean} [opts.ignoreCase] - case-insensitive matching
@@ -25312,18 +25317,54 @@ var FileService = class {
    */
   async grepFiles(input, pattern2, opts = {}) {
     const { glob, before = 0, after = 0, ignoreCase = false, exclude = [], maxResults = MAX_SEARCH_RESULTS } = opts;
-    const dir = resolvePath(this.root, input);
-    await this._wrap(import_promises2.default.stat(dir));
+    const target = resolvePath(this.root, input);
+    const stat = await this._wrap(import_promises2.default.stat(target));
     const regex = new RegExp(pattern2, ignoreCase ? "i" : "");
     const globRegex = glob ? globToRegex(glob) : null;
     const cap = Math.min(maxResults, MAX_SEARCH_RESULTS);
     const results = [];
-    await this._grepRecursive(dir, regex, globRegex, results, { before, after, exclude, cap });
+    if (stat.isFile()) {
+      const name = import_node_path2.default.basename(target);
+      if (!globRegex || globRegex.test(name)) {
+        await this._grepOneFile(target, name, regex, results, { before, after, cap });
+      }
+    } else if (stat.isDirectory()) {
+      await this._grepRecursive(target, regex, globRegex, results, { before, after, exclude, cap });
+    } else {
+      throw new Error(`Path is neither a file nor a directory: ${input || "."}`);
+    }
     const truncated = results.length > cap;
     return {
       results: results.slice(0, cap),
       meta: { truncated, count: Math.min(results.length, cap), cap }
     };
+  }
+  async _grepOneFile(entryPath, entryName, regex, results, opts) {
+    const { before, after, cap } = opts;
+    if (results.length >= cap) return;
+    const extType = detectFileType(entryName);
+    if (extType !== "text" && extType !== "binary") return;
+    const stat = await import_promises2.default.stat(entryPath).catch(() => null);
+    if (!stat || !stat.isFile() || stat.size > MAX_READ_BYTES) return;
+    const detected = await detectFileTypeByContent(entryPath);
+    if (!detected.isText) return;
+    const content = await import_promises2.default.readFile(entryPath, "utf8").catch(() => null);
+    if (!content) return;
+    const lines = splitLines(content);
+    for (let i = 0; i < lines.length; i++) {
+      if (results.length >= cap) break;
+      if (regex.test(lines[i])) {
+        const rawLine = lines[i];
+        const lineContent = rawLine.length > MAX_GREP_LINE_LENGTH ? rawLine.slice(0, MAX_GREP_LINE_LENGTH) + "\u2026(truncated)" : rawLine;
+        results.push({
+          path: relativePosix(this.root, entryPath, entryName),
+          line: i + 1,
+          content: lineContent,
+          ...before > 0 ? { before: lines.slice(Math.max(0, i - before), i) } : {},
+          ...after > 0 ? { after: lines.slice(i + 1, i + 1 + after) } : {}
+        });
+      }
+    }
   }
   async _grepRecursive(dir, regex, globRegex, results, opts) {
     const { before, after, exclude, cap } = opts;
@@ -25338,29 +25379,7 @@ var FileService = class {
         continue;
       }
       if (globRegex && !globRegex.test(entry.name)) continue;
-      const extType = detectFileType(entry.name);
-      if (extType !== "text" && extType !== "binary") continue;
-      const stat = await import_promises2.default.stat(entryPath).catch(() => null);
-      if (!stat || stat.size > MAX_READ_BYTES) continue;
-      const detected = await detectFileTypeByContent(entryPath);
-      if (!detected.isText) continue;
-      const content = await import_promises2.default.readFile(entryPath, "utf8").catch(() => null);
-      if (!content) continue;
-      const lines = splitLines(content);
-      for (let i = 0; i < lines.length; i++) {
-        if (results.length >= cap) break;
-        if (regex.test(lines[i])) {
-          const rawLine = lines[i];
-          const lineContent = rawLine.length > MAX_GREP_LINE_LENGTH ? rawLine.slice(0, MAX_GREP_LINE_LENGTH) + "\u2026(truncated)" : rawLine;
-          results.push({
-            path: relativePosix(this.root, entryPath, entry.name),
-            line: i + 1,
-            content: lineContent,
-            ...before > 0 ? { before: lines.slice(Math.max(0, i - before), i) } : {},
-            ...after > 0 ? { after: lines.slice(i + 1, i + 1 + after) } : {}
-          });
-        }
-      }
+      await this._grepOneFile(entryPath, entry.name, regex, results, { before, after, cap });
     }
   }
   /**
@@ -25507,6 +25526,8 @@ var import_node_path3 = __toESM(require("node:path"), 1);
 var MAX_EXTRACT_BYTES = 1024 * 1024;
 var MAX_DEFS_PER_FILE = 30;
 var MAX_SCAN_FILES = 2e4;
+var MAX_WORKSPACE_INSTRUCTIONS_BYTES = 50 * 1024;
+var WORKSPACE_INSTRUCTIONS_URI = "nusashell://workspace/AGENTS.md";
 var ACTIVE_FILE_BOOST = 50;
 var QUERY_MATCH_BOOST = 10;
 var MANIFESTS = {
@@ -25836,6 +25857,34 @@ var ContextEngine = class {
   async setRoot(newRoot) {
     this.root = await validateRoot(newRoot);
     this.cache.clear();
+  }
+  /**
+   * Read only the workspace-root AGENTS.md as MCP resource context.
+   * Nested instruction files are intentionally excluded: without a target
+   * path they would mix unrelated package rules into one workspace context.
+   * @returns {Promise<{uri: string, name: string, description: string, mimeType: string, text: string}|null>}
+   */
+  async readWorkspaceInstructions() {
+    const filePath2 = import_node_path3.default.join(this.root, "AGENTS.md");
+    let stat;
+    try {
+      stat = await import_promises3.default.stat(filePath2);
+    } catch (error51) {
+      if (error51?.code === "ENOENT") return null;
+      throw error51;
+    }
+    if (!stat.isFile()) return null;
+    const raw = await import_promises3.default.readFile(filePath2, "utf8");
+    const clipped = Buffer.byteLength(raw, "utf8") > MAX_WORKSPACE_INSTRUCTIONS_BYTES ? `${Buffer.from(raw, "utf8").subarray(0, MAX_WORKSPACE_INSTRUCTIONS_BYTES).toString("utf8")}
+
+[AGENTS.md truncated by the Files MCP resource limit.]` : raw;
+    return {
+      uri: WORKSPACE_INSTRUCTIONS_URI,
+      name: "Workspace instructions",
+      description: "Workspace-root AGENTS.md project guidance.",
+      mimeType: "text/markdown",
+      text: clipped
+    };
   }
   /**
    * Phase 1: classify the workspace from manifests at root + one level deep.
@@ -26272,19 +26321,37 @@ var FILES_TOOL_NAMES = Object.freeze([
 // mcp/tools.js
 var filePath = external_exports.string().trim().min(1).max(4096);
 var rootPath = external_exports.string().trim().min(0).max(4096).default("");
-var depth = external_exports.number().int().min(1).max(10).default(3);
-var head = external_exports.number().int().min(1).max(1e5).optional();
-var tail = external_exports.number().int().min(1).max(1e5).optional();
-var startLine = external_exports.number().int().min(1).max(1e5).optional();
-var endLine = external_exports.number().int().min(1).max(1e5).optional();
+function clampedInt(min, max, defaultValue) {
+  const inner = external_exports.number().int().min(min).max(max);
+  const schema = external_exports.preprocess((value) => {
+    if (value === void 0 || value === null || value === "") {
+      return defaultValue;
+    }
+    const n = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(n)) return defaultValue;
+    return Math.trunc(Math.min(max, Math.max(min, n)));
+  }, defaultValue === void 0 ? inner.optional() : inner);
+  return defaultValue === void 0 ? schema : schema.default(defaultValue);
+}
+var depth = clampedInt(1, 10, 3);
+var head = clampedInt(1, 1e5);
+var tail = clampedInt(1, 1e5);
+var startLine = clampedInt(1, 1e5);
+var endLine = clampedInt(1, 1e5);
 var lineNumbers = external_exports.boolean().default(false);
-var maxBytes = external_exports.number().int().min(1).max(100 * 1024 * 1024).default(10 * 1024 * 1024);
+var maxBytes = clampedInt(1, 100 * 1024 * 1024, 10 * 1024 * 1024);
 var recursive = external_exports.boolean().default(false);
 var pattern = external_exports.string().trim().min(1).max(500);
 var grepGlob = external_exports.string().trim().min(1).max(500).optional();
 var excludeGlobs = external_exports.array(external_exports.string().trim().min(1).max(500)).max(20).optional();
 var oldString = external_exports.string().min(1).max(1024 * 1024);
 var newString = external_exports.string().max(1024 * 1024);
+var grepContext = clampedInt(0, 10, 0);
+var grepMaxResults = clampedInt(1, 1e3, 500);
+var searchMaxDepth = clampedInt(1, 20, 10);
+var contextBudget = clampedInt(64, 8192, 1024);
+var contextMaxFiles = clampedInt(1, 2e4);
+var listSymbolsLimit = clampedInt(1, 100, 20);
 var schemas = {
   list: external_exports.object({ path: rootPath }).strict(),
   tree: external_exports.object({ path: rootPath, depth, exclude: excludeGlobs, includeFiles: external_exports.boolean().default(true) }).strict(),
@@ -26294,9 +26361,18 @@ var schemas = {
   move: external_exports.object({ source: filePath, destination: filePath }).strict(),
   copy: external_exports.object({ source: filePath, destination: filePath }).strict(),
   delete: external_exports.object({ path: filePath, recursive }).strict(),
-  search: external_exports.object({ path: rootPath, pattern, exclude: excludeGlobs, type: external_exports.enum(["file", "dir", "any"]).default("any"), maxDepth: external_exports.number().int().min(1).max(20).default(10) }).strict(),
+  search: external_exports.object({ path: rootPath, pattern, exclude: excludeGlobs, type: external_exports.enum(["file", "dir", "any"]).default("any"), maxDepth: searchMaxDepth }).strict(),
   info: external_exports.object({ path: filePath }).strict(),
-  grep: external_exports.object({ path: rootPath, pattern, glob: grepGlob, before: external_exports.number().int().min(0).max(10).default(0), after: external_exports.number().int().min(0).max(10).default(0), ignoreCase: external_exports.boolean().default(false), exclude: excludeGlobs, maxResults: external_exports.number().int().min(1).max(1e3).default(500) }).strict(),
+  grep: external_exports.object({
+    path: rootPath,
+    pattern,
+    glob: grepGlob,
+    before: grepContext,
+    after: grepContext,
+    ignoreCase: external_exports.boolean().default(false),
+    exclude: excludeGlobs,
+    maxResults: grepMaxResults
+  }).strict(),
   patch: external_exports.object({
     path: filePath,
     edits: external_exports.union([
@@ -26310,17 +26386,17 @@ var schemas = {
   touch: external_exports.object({ path: filePath, createParents: external_exports.boolean().default(true), updateOnly: external_exports.boolean().default(false) }).strict(),
   context_map: external_exports.object({
     path: rootPath,
-    budget: external_exports.number().int().min(64).max(8192).default(1024),
+    budget: contextBudget,
     activeFile: external_exports.string().trim().min(1).max(4096).optional(),
     query: external_exports.string().trim().min(1).max(500).optional(),
-    maxFiles: external_exports.number().int().min(1).max(2e4).optional(),
+    maxFiles: contextMaxFiles,
     refresh: external_exports.boolean().default(false)
   }).strict(),
   detect_stack: external_exports.object({ path: rootPath }).strict(),
   list_symbols: external_exports.object({
     path: filePath.optional(),
     query: external_exports.string().trim().min(1).max(500).optional(),
-    limit: external_exports.number().int().min(1).max(100).default(20)
+    limit: listSymbolsLimit
   }).strict()
 };
 var FILES_TOOLS = Object.freeze([
@@ -26371,15 +26447,15 @@ var FILES_TOOLS = Object.freeze([
   descriptor("info", "Get detailed file metadata (size, dates, permissions, type).", {
     path: stringProperty("File or directory path relative to the files plugin root (user home by default).")
   }, ["path"]),
-  descriptor("grep", "Search file contents for a regex pattern (like grep). Only text files are scanned. Supports context lines, ignoreCase, and exclude globs.", {
-    path: stringProperty('Directory to search in, relative to the files plugin root. Use empty string for root; "/" resolves to the OS filesystem root.', ""),
+  descriptor("grep", "Search file contents for a regex pattern (like grep). path may be a directory (recursive) or a single file. Only text files are scanned. Supports context lines, ignoreCase, and exclude globs. Out-of-range before/after/maxResults are clamped (not rejected).", {
+    path: stringProperty('Directory or single file to search, relative to the files plugin root. Use empty string for root; "/" resolves to the OS filesystem root.', ""),
     pattern: stringProperty("Regular expression pattern to match against file contents (e.g. 'function\\s+\\w+', 'TODO.*')."),
-    glob: stringProperty("Optional file name glob filter to narrow search (e.g. '*.js', '*.ts'). If omitted, all text files are scanned."),
-    before: integerProperty(0, 10, 0, "Context lines before each match (0-10)."),
-    after: integerProperty(0, 10, 0, "Context lines after each match (0-10)."),
+    glob: stringProperty("Optional file name glob filter when path is a directory (e.g. '*.js', '*.ts'). Ignored when path is a single file. If omitted under a directory, all text files are scanned."),
+    before: integerProperty(0, 10, 0, "Context lines before each match (0-10; values outside this range are clamped)."),
+    after: integerProperty(0, 10, 0, "Context lines after each match (0-10; values outside this range are clamped)."),
     ignoreCase: { type: "boolean", description: "Case-insensitive matching.", default: false },
-    exclude: { type: "array", items: { type: "string" }, description: 'Glob patterns to exclude (e.g. ["node_modules", ".git"]). Max 20.' },
-    maxResults: integerProperty(1, 1e3, 500, "Maximum number of results (1-1000).")
+    exclude: { type: "array", items: { type: "string" }, description: 'Glob patterns to exclude under a directory path (e.g. ["node_modules", ".git"]). Max 20.' },
+    maxResults: integerProperty(1, 1e3, 500, "Maximum number of results (1-1000; values outside this range are clamped).")
   }, ["pattern"]),
   descriptor("patch", "Replace one or more string occurrences in a file. Supports replace_all and preview mode. Safer than write for small edits.", {
     path: stringProperty("File path relative to the files plugin root (user home by default)."),
@@ -26564,9 +26640,10 @@ var HOWTO_TEXT = [
   "- read: read text files. Use start/end for a line range, head/tail for first/last N lines, lineNumbers=true for line-prefixed output. Binary files are rejected with a helpful error.",
   "- write / append / patch: change text files. patch accepts an edits array (with replace_all) and a preview mode that returns the patched content without writing.",
   "- mkdir / move / copy / delete / touch: manage entries. touch creates an empty file or updates timestamps.",
-  "- search / grep / info / exists: locate and inspect entries. grep supports before/after context, ignoreCase, and exclude globs. search supports exclude, type filter, and maxDepth.",
+  "- search / grep / info / exists: locate and inspect entries. grep path may be a directory (recursive) or a single file; supports before/after context, ignoreCase, and exclude globs. search supports exclude, type filter, and maxDepth.",
   "",
   "Workspace context tools (deterministic, no LLM calls):",
+  "- The workspace-root AGENTS.md, when present, is exposed as a bounded Files MCP resource. Retrieve it through mcp_context before planning edits; treat it as project guidance, below system and user instructions.",
   "- context_map: token-budgeted markdown map of the workspace \u2014 stack classification, top files ranked by Personalized PageRank over the symbol reference graph, and elided signatures. Call it first when orienting in an unfamiliar codebase. Pass activeFile (50x boost) or query terms (10x boost) to focus the ranking, and budget to fit your context window. Symbol tags are cached by file mtime/size across calls; use refresh=true only after large external changes.",
   "- detect_stack: fast manifest-only classification (coding / documentation / hybrid-monorepo) with languages, key dependencies, and package.json scripts. Use it to learn which build/test commands exist.",
   "- list_symbols: definitions (class/function/const/type with kind, line, signature) for one file (path) or across top-ranked matching files (query). Cheaper than reading whole files; locate definitions before targeted read/patch calls.",
@@ -26579,6 +26656,7 @@ var EXPLORE_WORKFLOW_TEXT = [
   "Recommended workflow for exploring and editing an unfamiliar codebase with the Files plugin:",
   "",
   "0. Orient first: call context_map (optionally with activeFile or query terms) to get a token-budgeted repo map \u2014 stack, top files by Personalized PageRank, and elided signatures. Call detect_stack to learn the project type and its build/test scripts. Both are deterministic and cheap; context_map caches symbol tags by file mtime/size, so repeat calls are fast.",
+  "0a. Read the workspace-root AGENTS.md through mcp_context when the Files resource is available. Apply it as project guidance while keeping system and user instructions higher priority.",
   '1. Map the territory: call tree with exclude=["node_modules", ".git", "dist", "build"] and includeFiles=false to get a dirs-only overview.',
   '2. Find candidates: call search with a glob pattern (e.g. "*.ts") and exclude globs to narrow the result set. Use type="file" to skip directories. Prefer list_symbols with a query to jump straight to files defining a symbol.',
   "3. Inspect before editing: call list_symbols with path to see a file's definitions (line + signature) before reading bodies, then read with start/end for a specific line range, or lineNumbers=true to make follow-up patches unambiguous. Use info for metadata without reading the body.",
@@ -26612,12 +26690,36 @@ async function main() {
   const contextEngine = new ContextEngine(service.root);
   const server = new Server(
     { name: "nusashell-files", version: "0.1.0" },
-    { capabilities: { tools: {}, prompts: {} } }
+    { capabilities: { tools: {}, prompts: {}, resources: {} } }
   );
   server.setRequestHandler(ListPromptsRequestSchema, async () => ({
     prompts: FILES_PROMPTS
   }));
   server.setRequestHandler(GetPromptRequestSchema, async (request) => getFilesPrompt(request.params.name));
+  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+    const instructions = await contextEngine.readWorkspaceInstructions();
+    return {
+      resources: instructions ? [{
+        uri: instructions.uri,
+        name: instructions.name,
+        description: instructions.description,
+        mimeType: instructions.mimeType
+      }] : []
+    };
+  });
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    const instructions = await contextEngine.readWorkspaceInstructions();
+    if (!instructions || request.params.uri !== instructions.uri) {
+      throw new Error(`Unknown workspace resource: ${request.params.uri}`);
+    }
+    return {
+      contents: [{
+        uri: instructions.uri,
+        mimeType: instructions.mimeType,
+        text: instructions.text
+      }]
+    };
+  });
   async function refreshRoots() {
     try {
       const result = await server.listRoots();

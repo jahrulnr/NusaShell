@@ -2157,6 +2157,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // do not leak across renderer reloads.
   window.addEventListener("beforeunload", () => {
     agentConversationController?.destroy();
+    pipelinesController?.destroy();
   });
   void skillsController.initialize().catch((error) => {
     showToast(`Could not load skills: ${error.message || error}`, "error");

@@ -23,6 +23,7 @@ import type {
   UpdatePipelineCommand,
   RemovePipelineCommand,
   RunPipelineCommand,
+  CancelPipelineCommand,
   RunAcpTurnCommand,
   CancelAcpTurnCommand,
   AnswerAcpPermissionCommand,
@@ -34,7 +35,7 @@ import type {
 } from "@nusashell/application";
 
 export function mapToCommand(request: ParsedRequest):
-  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | SetPluginAutostartCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand | CancelAgentTurnCommand | AnswerAskQuestionCommand | ManageTodosCommand | KillToolJobCommand | AddJobCommand | UpdateJobCommand | SetJobEnabledCommand | RunJobNowCommand | CancelJobCommand | RemoveJobCommand | AddPipelineCommand | UpdatePipelineCommand | RemovePipelineCommand | RunPipelineCommand | RunAcpTurnCommand | CancelAcpTurnCommand | AnswerAcpPermissionCommand | AnswerAcpAskCommand | SetAcpConfigOptionCommand | EnsureAcpSessionCommand | ProbeAcpProviderCommand }
+  | { kind: "command"; command: StartPluginCommand | StopPluginCommand | RestartPluginCommand | InstallPluginCommand | UninstallPluginCommand | SetPluginAutostartCommand | CallToolCommand | CancelToolCallCommand | RunAgentTurnCommand | CancelAgentTurnCommand | AnswerAskQuestionCommand | ManageTodosCommand | KillToolJobCommand | AddJobCommand | UpdateJobCommand | SetJobEnabledCommand | RunJobNowCommand | CancelJobCommand | RemoveJobCommand | AddPipelineCommand | UpdatePipelineCommand | RemovePipelineCommand | RunPipelineCommand | CancelPipelineCommand | RunAcpTurnCommand | CancelAcpTurnCommand | AnswerAcpPermissionCommand | AnswerAcpAskCommand | SetAcpConfigOptionCommand | EnsureAcpSessionCommand | ProbeAcpProviderCommand }
   | { kind: "query"; query?: ToolJobListQuery } {
   switch (request.method) {
     case "plugin.start":
@@ -292,6 +293,14 @@ export function mapToCommand(request: ParsedRequest):
           kind: "run-pipeline",
           id: request.payload.id,
         } as RunPipelineCommand,
+      };
+    case "pipeline.cancel":
+      return {
+        kind: "command",
+        command: {
+          kind: "cancel-pipeline",
+          id: request.payload.id,
+        } as CancelPipelineCommand,
       };
     case "acp.run":
       return {

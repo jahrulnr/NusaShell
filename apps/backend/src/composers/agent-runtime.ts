@@ -28,6 +28,7 @@ import {
   type EventDispatcher,
 } from "@nusashell/application";
 import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
 import type { ContainerOptions } from "../container.js";
 import type { PluginRuntimeParts } from "./plugin-runtime.js";
 import type { SkillsRuntimeParts } from "./skills-runtime.js";
@@ -47,6 +48,14 @@ export interface AgentRuntimeParts {
   readonly activeTurns: InMemoryActiveTurnProjection;
   readonly conversationTodos: InMemoryConversationTodoPort;
   readonly asyncToolRuntime: AsyncToolRuntime;
+}
+
+function bundledResource(relativePath: string): string {
+  const candidates = [
+    new URL(`../../../../resources/${relativePath}`, import.meta.url),
+    new URL(`../../../resources/${relativePath}`, import.meta.url),
+  ].map((url) => fileURLToPath(url));
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!;
 }
 
 export function createAgentRuntime(
@@ -123,7 +132,7 @@ export function createAgentRuntime(
   agentToolGateway.bindAsyncToolRuntime(asyncToolRuntime);
 
   const promptLoader = new FilesystemPromptLoader(
-    options.promptsRoot ?? fileURLToPath(new URL("../../../resources/agent/prompts", import.meta.url)),
+    options.promptsRoot ?? bundledResource("agent/prompts"),
   );
 
   const agentProviders: AgentProvider[] = options.ai?.stubEnabled ? [new StaticAgentProvider()] : [];

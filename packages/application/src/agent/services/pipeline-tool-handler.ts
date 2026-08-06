@@ -7,14 +7,18 @@ import type {
   PipelineStep,
   PipelineStepAction,
 } from "../../job/pipeline-model.js";
+import {
+  nextRunAtForPipelineTrigger,
+  validatePipeline,
+  validatePipelineTrigger,
+} from "../../job/pipeline-model.js";
 import type { JobTrigger, ConditionNode, Condition } from "../../job/job-model.js";
 import { scheduleOf } from "../../job/job-model.js";
 import {
-  parseSchedule,
   describeSchedule,
+  parseSchedule,
   ScheduleParseError,
 } from "../../job/schedule-parser.js";
-import { validatePipeline } from "../../job/pipeline-model.js";
 import { clampInt, requireString, jobsNotConfigured } from "./gateway-utils.js";
 
 /**
@@ -36,6 +40,9 @@ export async function execPipeline(
       case "update": return await updatePipeline(store, args);
       case "remove": return await removePipeline(store, args);
       case "run": return await runPipeline(scheduler, args);
+      case "cancel": return await cancelPipeline(scheduler, args);
+      case "runs": return await listRuns(store, args);
+      case "run_get": return await getRun(store, args);
       default:
         throw new ApplicationError("AGENT_INVALID_INPUT", `Unsupported pipeline action: ${action}`);
     }
@@ -56,24 +63,32 @@ async function listPipelines(store: PipelineStorePort): Promise<unknown> {
 async function addPipeline(store: PipelineStorePort, args: Readonly<Record<string, unknown>>): Promise<unknown> {
   const name = requireString(args.name, "name");
   const trigger = parseTriggerFromArgs(args);
+  const triggerError = validatePipelineTrigger(trigger);
+  if (triggerError) {
+    throw new ApplicationError(
+      trigger.kind === "schedule" ? "JOB_INVALID_SCHEDULE" : "PIPELINE_INVALID",
+      triggerError,
+    );
+  }
   const steps = parseSteps(args.steps);
   const validationError = validatePipeline(steps);
   if (validationError) {
     throw new ApplicationError("PIPELINE_INVALID", validationError);
   }
-  const now = new Date().toISOString();
-  const pipeline = {
+  const now = new Date();
+  const pipeline: Pipeline = {
     id: randomUUID(),
     name,
     ...(typeof args.description === "string" ? { description: args.description } : {}),
     enabled: true,
     trigger,
     steps,
-    createdAt: now,
+    createdAt: now.toISOString(),
+    nextRunAt: nextRunAtForPipelineTrigger(trigger, null, now, true),
     lastRunAt: null,
     lastStatus: null,
     lastError: null,
-  } as unknown as Pipeline;
+  };
   const created = await store.create(pipeline);
   return { ok: true, data: compactPipeline(created), meta: {} };
 }
@@ -92,7 +107,19 @@ async function updatePipeline(store: PipelineStorePort, args: Readonly<Record<st
   const trigger = args.trigger !== undefined || args.schedule !== undefined
     ? parseTriggerFromArgs(args)
     : existing.trigger;
+  if (args.trigger !== undefined || args.schedule !== undefined) {
+    const triggerError = validatePipelineTrigger(trigger);
+    if (triggerError) {
+      throw new ApplicationError(
+        trigger.kind === "schedule" ? "JOB_INVALID_SCHEDULE" : "PIPELINE_INVALID",
+        triggerError,
+      );
+    }
+  }
   const enabled = args.enabled !== undefined ? parseBoolean(args.enabled, "enabled") : existing.enabled;
+  const now = new Date();
+  const recomputeNext =
+    args.trigger !== undefined || args.schedule !== undefined || args.enabled !== undefined;
   const updated: Pipeline = {
     ...existing,
     ...(args.name !== undefined ? { name: requireString(args.name, "name") } : {}),
@@ -100,7 +127,10 @@ async function updatePipeline(store: PipelineStorePort, args: Readonly<Record<st
     trigger,
     steps,
     enabled,
-  } as Pipeline;
+    ...(recomputeNext
+      ? { nextRunAt: nextRunAtForPipelineTrigger(trigger, existing.lastRunAt, now, enabled) }
+      : {}),
+  };
   const result = await store.update(updated);
   return { ok: true, data: compactPipeline(result), meta: {} };
 }
@@ -115,21 +145,65 @@ async function removePipeline(store: PipelineStorePort, args: Readonly<Record<st
 
 async function runPipeline(scheduler: PipelineScheduler, args: Readonly<Record<string, unknown>>): Promise<unknown> {
   const id = requireString(args.id, "id");
-  const result = await scheduler.runPipeline(id);
-  if (!result.ok && result.error?.includes("not found")) {
-    throw new ApplicationError("PIPELINE_NOT_FOUND", result.error);
+  // Fire-and-track: launch returns immediately with runId/traceId; progress
+  // is reported via pipeline.* events and run_get/runs queries.
+  const result = await scheduler.launch(id, undefined, { source: "manual" });
+  if (!result.ok && result.errorCode === "PIPELINE_NOT_FOUND") {
+    throw new ApplicationError("PIPELINE_NOT_FOUND", result.error ?? "pipeline not found");
   }
   return { ok: true, data: result, meta: {} };
 }
 
+async function cancelPipeline(scheduler: PipelineScheduler, args: Readonly<Record<string, unknown>>): Promise<unknown> {
+  const id = requireString(args.id, "id");
+  const result = await scheduler.cancel(id);
+  return { ok: result.ok, data: result, meta: {} };
+}
+
+async function listRuns(store: PipelineStorePort, args: Readonly<Record<string, unknown>>): Promise<unknown> {
+  const id = requireString(args.id, "id");
+  const existing = await store.get(id);
+  if (!existing) throw new ApplicationError("PIPELINE_NOT_FOUND", `Pipeline not found: ${id}`);
+  const limit = args.limit !== undefined ? clampInt(args.limit, 20, 1, 100) : 20;
+  const includeBody = args.include_body === true || args.includeBody === true;
+  const runs = await store.listRuns(id, limit);
+  const data = includeBody
+    ? runs
+    : runs.map((run) => ({
+        ...run,
+        stepRuns: run.stepRuns.map((sr) => {
+          const { outputPreview: _preview, ...rest } = sr;
+          return rest;
+        }),
+      }));
+  return { ok: true, data, meta: { count: data.length } };
+}
+
+async function getRun(store: PipelineStorePort, args: Readonly<Record<string, unknown>>): Promise<unknown> {
+  const runId = requireString(args.run_id ?? args.runId, "run_id");
+  const run = await store.getRun(runId);
+  if (!run) throw new ApplicationError("PIPELINE_RUN_NOT_FOUND", `Pipeline run not found: ${runId}`);
+  const includeBody = args.include_body === true || args.includeBody === true;
+  if (includeBody) return { ok: true, data: run, meta: {} };
+  const { stepRuns, ...rest } = run;
+  return {
+    ok: true,
+    data: {
+      ...rest,
+      stepRuns: stepRuns.map((sr) => {
+        const { outputPreview: _preview, ...srest } = sr;
+        return srest;
+      }),
+    },
+    meta: {},
+  };
+}
+
 function parseTriggerFromArgs(args: Readonly<Record<string, unknown>>): JobTrigger {
-  if (args.trigger !== undefined) {
-    return parseTriggerObject(args.trigger);
-  }
   if (args.schedule !== undefined) {
-    const scheduleInput = requireString(args.schedule, "schedule");
+    const input = requireString(args.schedule, "schedule");
     try {
-      const schedule = parseSchedule(scheduleInput);
+      const schedule = parseSchedule(input);
       return { kind: "schedule", schedule };
     } catch (error) {
       if (error instanceof ScheduleParseError) {
@@ -138,7 +212,10 @@ function parseTriggerFromArgs(args: Readonly<Record<string, unknown>>): JobTrigg
       throw error;
     }
   }
-  throw new ApplicationError("AGENT_INVALID_INPUT", "either `trigger` or `schedule` is required");
+  if (args.trigger !== undefined) {
+    return parseTriggerObject(args.trigger);
+  }
+  throw new ApplicationError("AGENT_INVALID_INPUT", "`trigger` or `schedule` is required");
 }
 
 function parseTriggerObject(raw: unknown): JobTrigger {
@@ -148,23 +225,42 @@ function parseTriggerObject(raw: unknown): JobTrigger {
   const obj = raw as Record<string, unknown>;
   const kind = obj.kind;
   if (kind === "schedule") {
-    if (obj.schedule === undefined) {
-      throw new ApplicationError("AGENT_INVALID_INPUT", "schedule trigger requires a `schedule` field");
-    }
-    const scheduleInput = typeof obj.schedule === "string" ? obj.schedule : JSON.stringify(obj.schedule);
-    try {
-      const schedule = parseSchedule(scheduleInput);
-      return { kind: "schedule", schedule };
-    } catch (error) {
-      if (error instanceof ScheduleParseError) {
-        throw new ApplicationError("JOB_INVALID_SCHEDULE", error.message);
+    if (typeof obj.schedule === "string") {
+      try {
+        return { kind: "schedule", schedule: parseSchedule(obj.schedule) };
+      } catch (error) {
+        if (error instanceof ScheduleParseError) {
+          throw new ApplicationError("JOB_INVALID_SCHEDULE", error.message);
+        }
+        throw error;
       }
-      throw error;
     }
+    if (typeof obj.schedule !== "object" || obj.schedule === null || Array.isArray(obj.schedule)) {
+      throw new ApplicationError("AGENT_INVALID_INPUT", "trigger.schedule must be an object or string");
+    }
+    const schedule = obj.schedule as Record<string, unknown>;
+    if (schedule.kind === "once") {
+      return { kind: "schedule", schedule: { kind: "once", runAt: requireString(schedule.runAt, "schedule.runAt") } };
+    }
+    if (schedule.kind === "interval") {
+      const minutes = clampInt(schedule.minutes, NaN, 1, 525600);
+      return { kind: "schedule", schedule: { kind: "interval", minutes } };
+    }
+    if (schedule.kind === "cron") {
+      return { kind: "schedule", schedule: { kind: "cron", expr: requireString(schedule.expr, "schedule.expr") } };
+    }
+    throw new ApplicationError("AGENT_INVALID_INPUT", "trigger.schedule.kind must be once, interval, or cron");
   }
   if (kind === "event") {
     const pattern = requireString(obj.pattern, "trigger.pattern");
-    const trigger: { kind: "event"; pattern: string; pluginId?: string; conditions?: Condition[]; throttleMs?: number; maxFiresPerHour?: number } = {
+    const trigger: {
+      kind: "event";
+      pattern: string;
+      pluginId?: string;
+      conditions?: Condition[];
+      throttleMs?: number;
+      maxFiresPerHour?: number;
+    } = {
       kind: "event",
       pattern,
     };
@@ -185,7 +281,7 @@ function parseTriggerObject(raw: unknown): JobTrigger {
     }
     return trigger;
   }
-  throw new ApplicationError("AGENT_INVALID_INPUT", `trigger.kind must be "schedule" or "event"`);
+  throw new ApplicationError("AGENT_INVALID_INPUT", `trigger.kind must be "event" or "schedule"`);
 }
 
 function parseCondition(raw: unknown): Condition {
@@ -238,9 +334,6 @@ function parseStep(raw: unknown, index: number): PipelineStep {
   const condition = obj.condition !== undefined && obj.condition !== null
     ? parseConditionNode(obj.condition, index)
     : undefined;
-  const timeoutMs = obj.timeoutMs !== undefined && obj.timeoutMs !== null
-    ? clampInt(obj.timeoutMs, NaN, 0, 86400000)
-    : undefined;
   return {
     id,
     name,
@@ -248,8 +341,7 @@ function parseStep(raw: unknown, index: number): PipelineStep {
     ...(dependsOn ? { dependsOn } : {}),
     ...(outputKey ? { outputKey } : {}),
     ...(condition ? { condition } : {}),
-    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
-  } as PipelineStep;
+  };
 }
 
 function parseStepAction(raw: unknown, index: number): PipelineStepAction {
@@ -296,7 +388,6 @@ function parseConditionNode(raw: unknown, index: number): ConditionNode {
     }
     return { op: "not", of: parseConditionNode(obj.of, index) };
   }
-  // Leaf condition
   return parseCondition(raw);
 }
 
@@ -317,6 +408,7 @@ function compactPipeline(p: Pipeline): unknown {
     trigger: triggerDesc,
     enabled: p.enabled,
     steps: p.steps.length,
+    nextRunAt: p.nextRunAt,
     lastRunAt: p.lastRunAt,
     lastStatus: p.lastStatus,
     ...(p.lastError ? { lastError: p.lastError } : {}),
@@ -329,9 +421,13 @@ function pipelineErrorEnvelope(error: unknown): unknown {
       ? "pipeline_not_found"
       : error.code === "PIPELINE_INVALID"
         ? "pipeline_invalid"
-        : error.code === "JOB_INVALID_SCHEDULE"
-          ? "job_invalid_schedule"
-          : "internal_error";
+        : error.code === "PIPELINE_SCHEDULE_UNSUPPORTED"
+          ? "pipeline_schedule_unsupported"
+          : error.code === "PIPELINE_RUN_NOT_FOUND"
+            ? "pipeline_run_not_found"
+          : error.code === "JOB_INVALID_SCHEDULE"
+            ? "job_invalid_schedule"
+            : "internal_error";
     return { ok: false, error: { code, message: error.message } };
   }
   return { ok: false, error: { code: "internal_error", message: String(error) } };

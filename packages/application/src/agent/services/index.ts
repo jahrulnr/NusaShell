@@ -49,6 +49,8 @@ export { StreamSeqRegistry } from "./stream-seq-registry.js";
 export {
   injectPrompts,
   applyVars,
+  SYSTEM_PREFIX_END_MARKER,
+  stableCurrentDate,
   type PromptVars,
   type PromptInjectionSummary,
   type InjectPromptsResult,

@@ -38,7 +38,10 @@ import {
   UpdatePipelineHandler,
   RemovePipelineHandler,
   RunPipelineHandler,
+  CancelPipelineHandler,
   ListPipelinesHandler,
+  ListPipelineRunsHandler,
+  GetPipelineRunHandler,
   RunAcpTurnHandler,
   CancelAcpTurnHandler,
   AnswerAcpPermissionHandler,
@@ -197,6 +200,7 @@ export function registerBuses(
     commandBus.register("update-pipeline", new UpdatePipelineHandler(jobs.pipelineStore));
     commandBus.register("remove-pipeline", new RemovePipelineHandler(jobs.pipelineStore));
     commandBus.register("run-pipeline", new RunPipelineHandler(jobs.pipelineScheduler));
+    commandBus.register("cancel-pipeline", new CancelPipelineHandler(jobs.pipelineScheduler));
   }
   commandBus.register("run-acp-turn", new RunAcpTurnHandler(acp.acpSessionService));
   commandBus.register("cancel-acp-turn", new CancelAcpTurnHandler(acp.acpSessionService));
@@ -229,7 +233,6 @@ export function registerBuses(
   let appVersion = providedVersion || "0.0.0";
   if (!providedVersion) {
     for (const candidate of [
-      resolve(process.cwd(), "VERSION"),
       resolve(__dirname, "../../../../../VERSION"),
       resolve(__dirname, "../../../../VERSION"),
     ]) {
@@ -242,6 +245,8 @@ export function registerBuses(
   queryBus.register("validate-schedule", new ValidateScheduleHandler());
   if (jobs.pipelineStore) {
     queryBus.register("list-pipelines", new ListPipelinesHandler(jobs.pipelineStore));
+    queryBus.register("list-pipeline-runs", new ListPipelineRunsHandler(jobs.pipelineStore));
+    queryBus.register("get-pipeline-run", new GetPipelineRunHandler(jobs.pipelineStore));
   }
   queryBus.register("get-acp-session-info", new GetAcpSessionInfoHandler(acp.acpSessionService));
   queryBus.register("get-active-turn", new GetActiveTurnHandler(agent.activeTurns));

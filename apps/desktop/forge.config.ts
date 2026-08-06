@@ -6,8 +6,12 @@ import { PublisherGithub } from "@electron-forge/publisher-github";
 import { resolve } from "node:path";
 import { readFileSync, writeFileSync } from "node:fs";
 import { stageRuntimeDependencies } from "./scripts/package-runtime-dependencies.js";
+import { stagePluginsResource } from "./scripts/stage-plugins-resource.js";
 
 const releaseVersion = readFileSync(resolve(__dirname, "..", "..", "VERSION"), "utf8").trim();
+const workspacePluginsRoot = resolve(__dirname, "..", "..", "plugins");
+/** Staging dir so package never ships plugin-local runtime state (e.g. notes.json). */
+const stagedPluginsRoot = resolve(__dirname, ".package-staging", "plugins");
 
 const config: ForgeConfig = {
   packagerConfig: {
@@ -18,12 +22,15 @@ const config: ForgeConfig = {
       unpack: "**/*.node",
     },
     extraResource: [
-      resolve(__dirname, "..", "..", "plugins"),
+      stagedPluginsRoot,
       resolve(__dirname, "..", "..", "resources", "agent"),
       resolve(__dirname, "assets", "nusashell.png"),
     ],
   },
   hooks: {
+    prePackage: async () => {
+      await stagePluginsResource(workspacePluginsRoot, stagedPluginsRoot);
+    },
     readPackageJson: async (_forgeConfig, packageJson) => ({
       ...packageJson,
       version: releaseVersion,

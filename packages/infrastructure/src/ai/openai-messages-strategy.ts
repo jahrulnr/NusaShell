@@ -47,11 +47,25 @@ export class MessagesApiStrategy implements ApiStrategy {
         });
       }
     }
+    const stableCount = Math.min(
+      Math.max(0, request.promptCache?.stableSystemMessages ?? 0),
+      system.length,
+    );
+    const useCacheMarker = request.promptCache?.mode !== "off" && stableCount > 0;
+    const systemContent = useCacheMarker
+      ? system.map((text, index) => ({
+          type: "text",
+          text,
+          ...(index === stableCount - 1
+            ? { cache_control: { type: "ephemeral", ...(request.promptCache?.ttl === "1h" ? { ttl: "1h" } : {}) } }
+            : {}),
+        }))
+      : system.join("\n\n");
     return {
       model,
       messages,
       max_tokens: positiveInteger(maxOutputTokens) ? maxOutputTokens : 8192,
-      ...(system.length > 0 ? { system: system.join("\n\n") } : {}),
+      ...(system.length > 0 ? { system: systemContent } : {}),
       ...(request.tools.length > 0 ? {
         tools: request.tools.map((tool) => ({
           name: tool.name,

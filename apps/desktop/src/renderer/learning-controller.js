@@ -94,6 +94,7 @@ export class LearningController {
       this.els.panelConnections.hidden = !connections;
       if (connections) {
         requestAnimationFrame(() => {
+          this._renderConstellation();
           this.sigmaGraph?.resize();
           this.sigmaGraph?.resetView();
         });
@@ -187,6 +188,15 @@ export class LearningController {
       const nodes = this.graph.nodes;
       if (nodes.length === 0) {
         this.els.constellationMeta.textContent = "No nodes";
+        this.sigmaGraph?.destroy();
+        return;
+      }
+
+      // Sigma measures its container during construction. The connections
+      // panel is hidden by default and the learning view itself can also be
+      // hidden during startup, so mounting here would give Sigma a zero-width
+      // container. Mount again when the tab becomes visible.
+      if (this.activeTab !== "connections") {
         this.sigmaGraph?.destroy();
         return;
       }

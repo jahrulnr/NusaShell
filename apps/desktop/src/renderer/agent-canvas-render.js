@@ -110,15 +110,97 @@ export function stripDangerousHtml(source) {
 }
 
 /**
+ * Characters / patterns that Mermaid flowchart treats as shape tokens when left
+ * unquoted inside `|edge label|`. Quoting turns them into plain text.
+ * Agents often paste code-like labels (`pluginIds: []`, `foo(bar)`, HTML breaks).
+ */
+const FLOWCHART_EDGE_RISKY = /[\[\](){}#]|<\/?[A-Za-z]/;
+
+/**
+ * True when the first real diagram keyword is flowchart/graph (not sequence/etc).
+ *
+ * @param {string} source
+ * @returns {boolean}
+ */
+function isFlowchartMermaidSource(source) {
+  for (const line of String(source ?? "").split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t || t.startsWith("%%")) continue;
+    if (t.startsWith("---")) continue;
+    if (t.startsWith("%%{")) continue;
+    return /^(flowchart|graph)(\b|\s)/i.test(t);
+  }
+  return false;
+}
+
+/**
+ * Deterministically quote unquoted flowchart edge labels that contain tokens
+ * Mermaid otherwise parses as shapes (`[]`, `()`, `{}`, `#`) or HTML tags.
+ * Leaves already-quoted labels and non-flowchart diagrams unchanged.
+ * Original fence source in the transcript is never rewritten — this is for render only.
+ *
+ * @param {string} source
+ * @returns {string}
+ */
+export function healMermaidFlowchartEdgeLabels(source) {
+  const text = String(source ?? "");
+  if (!isFlowchartMermaidSource(text)) return text;
+  return text.replace(/\|([^|\n]*)\|/g, (full, rawLabel) => {
+    const lead = rawLabel.match(/^[ \t]*/)?.[0] ?? "";
+    const trail = rawLabel.match(/[ \t]*$/)?.[0] ?? "";
+    const label = rawLabel.slice(lead.length, rawLabel.length - trail.length);
+    if (!label) return full;
+    const first = label[0];
+    const last = label[label.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) return full;
+    if (!FLOWCHART_EDGE_RISKY.test(label)) return full;
+    const escaped = label.replace(/\\/g, "\\\\").replace(/"/g, "'");
+    return `|${lead}"${escaped}"${trail}|`;
+  });
+}
+
+/**
+ * Source strings to try for Mermaid render: original (after sequence-rect soften),
+ * then a healed flowchart variant when it differs. Empty input → [].
+ *
+ * @param {string} source
+ * @returns {string[]}
+ */
+export function mermaidRenderCandidates(source) {
+  const text = softenMermaidSequenceRects(String(source ?? ""));
+  if (!text.trim()) return [];
+  const healed = healMermaidFlowchartEdgeLabels(text);
+  return healed === text ? [text] : [text, healed];
+}
+
+/**
  * Lazily import mermaid and render a diagram to a static SVG string. Mermaid is
  * initialized once with `securityLevel: 'strict'` and `startOnLoad: false`.
+ * On failure, retries once with {@link healMermaidFlowchartEdgeLabels} when that
+ * transform changes the source (common agent slip: unquoted `[]` in edge labels).
  *
  * @param {string} source
  * @returns {Promise<{ type: "svg", svg: string } | { type: "error", message: string }>}
  */
 async function renderMermaid(source) {
-  const text = softenMermaidSequenceRects(String(source ?? ""));
-  if (!text.trim()) return { type: "error", message: "Empty mermaid diagram" };
+  const candidates = mermaidRenderCandidates(source);
+  if (candidates.length === 0) return { type: "error", message: "Empty mermaid diagram" };
+
+  /** @type {{ type: "error", message: string }} */
+  let lastError = { type: "error", message: "Mermaid syntax error" };
+  for (const text of candidates) {
+    const result = await renderMermaidOnce(text);
+    if (result.type === "svg") return result;
+    lastError = result;
+  }
+  return lastError;
+}
+
+/**
+ * @param {string} text
+ * @returns {Promise<{ type: "svg", svg: string } | { type: "error", message: string }>}
+ */
+async function renderMermaidOnce(text) {
   const id = `mmd-${randomId()}`;
   // Host off-layout so any Mermaid temp nodes never reflow the shell UI. Mermaid
   // defaults to appending `#d{id}` under document.body; a parse failure without

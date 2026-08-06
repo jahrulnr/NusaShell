@@ -80,9 +80,24 @@ export class LearningSigmaGraph {
     this.scrubberValue = 100;
     this.cameraRatio = 1;
     this.hoveredNode = null;
+    this.pendingMount = null;
+    this.containerObserver = null;
+    // Sigma can synchronously emit an internal update while a setting or
+    // refresh is being applied. Prevent that callback from re-entering the
+    // reducer setup and recursively refreshing forever.
+    this.applyingReducers = false;
   }
 
   mount(nodes, edges) {
+    if (!this._containerHasDimensions()) {
+      this.pendingMount = { nodes, edges };
+      this._watchContainer();
+      return false;
+    }
+
+    this.pendingMount = null;
+    this.containerObserver?.disconnect();
+    this.containerObserver = null;
     this.destroy();
     this.graph = new Graph({ multi: false, type: "directed" });
     const nodeIds = new Set(nodes.map((node) => node.id));
@@ -157,6 +172,25 @@ export class LearningSigmaGraph {
     this._applyReducers();
     this.sigma.getCamera().animatedReset({ duration: 0 });
     this._emitZoom();
+    return true;
+  }
+
+  _containerHasDimensions() {
+    if (!this.container) return false;
+    const rect = this.container.getBoundingClientRect?.();
+    const width = rect?.width || this.container.clientWidth;
+    const height = rect?.height || this.container.clientHeight;
+    return width > 0 && height > 0;
+  }
+
+  _watchContainer() {
+    if (!this.container || this.containerObserver || typeof ResizeObserver === "undefined") return;
+    this.containerObserver = new ResizeObserver(() => {
+      if (!this.pendingMount || !this._containerHasDimensions()) return;
+      const { nodes, edges } = this.pendingMount;
+      this.mount(nodes, edges);
+    });
+    this.containerObserver.observe(this.container);
   }
 
   _bindEvents() {
@@ -192,37 +226,44 @@ export class LearningSigmaGraph {
 
   _applyReducers() {
     if (!this.sigma || !this.graph) return;
-    const active = this.selectedNodeId || this.hoveredNode;
-    const hood = neighborhood(this.graph, active);
-    const smallGraph = this.graph.order <= 12;
-    const cutoff = Math.max(...this.graph.mapNodes((_, attrs) => attrs.timestamp), 0) * (this.scrubberValue / 100);
-    this.sigma.setSetting("nodeReducer", (id, data) => {
-      const degree = this.graph.degree(id);
-      const next = { ...data };
-      if ((data.timestamp ?? 0) > cutoff) next.hidden = true;
-      if (active && !hood.nodes.has(id)) next.color = "#29313c";
-      if (active && hood.nodes.has(id)) next.zIndex = id === active ? 4 : 3;
-      if (!smallGraph && !active && this.cameraRatio > ZOOM_FAR && degree < 2) next.hidden = true;
-      if (!smallGraph && !active && this.cameraRatio > ZOOM_MID && degree < 1) next.hidden = true;
-      if (id === active) { next.forceLabel = true; next.highlighted = true; }
-      return next;
-    });
-    this.sigma.setSetting("edgeReducer", (edge, data) => {
-      const next = { ...data };
-      if (active) {
-        if (!hood.edges.has(edge)) next.hidden = true;
-        else { next.color = "#d7f59a"; next.size = 2; }
+    if (this.applyingReducers) return;
+    this.applyingReducers = true;
+
+    try {
+      const active = this.selectedNodeId || this.hoveredNode;
+      const hood = neighborhood(this.graph, active);
+      const smallGraph = this.graph.order <= 12;
+      const cutoff = Math.max(...this.graph.mapNodes((_, attrs) => attrs.timestamp), 0) * (this.scrubberValue / 100);
+      this.sigma.setSetting("nodeReducer", (id, data) => {
+        const degree = this.graph.degree(id);
+        const next = { ...data };
+        if ((data.timestamp ?? 0) > cutoff) next.hidden = true;
+        if (active && !hood.nodes.has(id)) next.color = "#29313c";
+        if (active && hood.nodes.has(id)) next.zIndex = id === active ? 4 : 3;
+        if (!smallGraph && !active && this.cameraRatio > ZOOM_FAR && degree < 2) next.hidden = true;
+        if (!smallGraph && !active && this.cameraRatio > ZOOM_MID && degree < 1) next.hidden = true;
+        if (id === active) { next.forceLabel = true; next.highlighted = true; }
         return next;
-      }
-      const source = this.graph.source(edge);
-      const target = this.graph.target(edge);
-      if (this.cameraRatio > ZOOM_FAR) next.hidden = true;
-      else if (this.cameraRatio > ZOOM_MID && (this.graph.degree(source) < 3 || this.graph.degree(target) < 3)) next.hidden = true;
-      return next;
-    });
-    this.sigma.setSetting("labelRenderedSizeThreshold", smallGraph ? 8 : this.cameraRatio > ZOOM_FAR ? 18 : this.cameraRatio > ZOOM_MID ? 12 : 6);
-    this.sigma.setSetting("labelDensity", smallGraph ? 0.3 : this.cameraRatio > ZOOM_FAR ? 0.02 : this.cameraRatio > ZOOM_MID ? 0.08 : 0.2);
-    this.sigma.refresh({ skipIndexation: true });
+      });
+      this.sigma.setSetting("edgeReducer", (edge, data) => {
+        const next = { ...data };
+        if (active) {
+          if (!hood.edges.has(edge)) next.hidden = true;
+          else { next.color = "#d7f59a"; next.size = 2; }
+          return next;
+        }
+        const source = this.graph.source(edge);
+        const target = this.graph.target(edge);
+        if (this.cameraRatio > ZOOM_FAR) next.hidden = true;
+        else if (this.cameraRatio > ZOOM_MID && (this.graph.degree(source) < 3 || this.graph.degree(target) < 3)) next.hidden = true;
+        return next;
+      });
+      this.sigma.setSetting("labelRenderedSizeThreshold", smallGraph ? 8 : this.cameraRatio > ZOOM_FAR ? 18 : this.cameraRatio > ZOOM_MID ? 12 : 6);
+      this.sigma.setSetting("labelDensity", smallGraph ? 0.3 : this.cameraRatio > ZOOM_FAR ? 0.02 : this.cameraRatio > ZOOM_MID ? 0.08 : 0.2);
+      this.sigma.refresh({ skipIndexation: true });
+    } finally {
+      this.applyingReducers = false;
+    }
   }
 
   nodeSize(degree) {
@@ -256,6 +297,9 @@ export class LearningSigmaGraph {
     this.sigma?.kill();
     this.sigma = null;
     this.graph = null;
+    this.pendingMount = null;
+    this.containerObserver?.disconnect();
+    this.containerObserver = null;
     if (this.container) this.container.textContent = "";
   }
 }

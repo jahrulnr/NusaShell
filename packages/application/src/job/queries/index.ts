@@ -6,3 +6,7 @@ export type { ValidateScheduleQuery, ValidateScheduleResult } from "./validate-s
 export { ValidateScheduleHandler } from "./validate-schedule/validate-schedule.handler.js";
 export type { ListPipelinesQuery, ListPipelinesResult } from "./list-pipelines/list-pipelines.query.js";
 export { ListPipelinesHandler } from "./list-pipelines/list-pipelines.handler.js";
+export type { ListPipelineRunsQuery, ListPipelineRunsResult } from "./list-pipeline-runs/list-pipeline-runs.query.js";
+export { ListPipelineRunsHandler } from "./list-pipeline-runs/list-pipeline-runs.handler.js";
+export type { GetPipelineRunQuery, GetPipelineRunResult } from "./get-pipeline-run/get-pipeline-run.query.js";
+export { GetPipelineRunHandler } from "./get-pipeline-run/get-pipeline-run.handler.js";

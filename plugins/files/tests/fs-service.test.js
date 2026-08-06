@@ -450,6 +450,19 @@ describe("FileService.grepFiles", () => {
     expect(results[0].line).toBe(1);
   });
 
+  it("greps a single file when path points at a file (not only directories)", async () => {
+    await fs.mkdir(path.join(tmpDir, "sub"), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, "sub", "target.ts"), "export const scheduler = true;\nother\n");
+    await fs.writeFile(path.join(tmpDir, "sub", "other.ts"), "scheduler should not match when path is one file\n");
+
+    const { results, meta } = await service.grepFiles("sub/target.ts", "scheduler");
+    expect(results).toHaveLength(1);
+    expect(results[0].path).toBe("sub/target.ts");
+    expect(results[0].line).toBe(1);
+    expect(results[0].content).toContain("scheduler");
+    expect(meta.count).toBe(1);
+  });
+
   it("includes root path hint on ENOENT", async () => {
     await expect(service.grepFiles("nonexistent", "pattern")).rejects.toThrow(/Files plugin root/);
   });

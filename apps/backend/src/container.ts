@@ -83,6 +83,8 @@ export interface ContainerOptions {
     readonly baseUrl?: string;
     readonly apiKey?: string;
     readonly maxToolRounds: number;
+    /** Override for job/pipeline agent turns; falls back to maxToolRounds. */
+    readonly jobMaxToolRounds?: number;
     readonly maxRepeatedToolCalls?: number;
     readonly softRecoverAttempts?: number;
     readonly maxConcurrentToolCalls?: number;
@@ -148,6 +150,7 @@ export interface Container {
   readonly backgroundReviewScheduler: BackgroundReviewScheduler;
   readonly jobScheduler: JobScheduler;
   readonly eventJobMatcher: EventJobMatcher;
+  readonly pipelineTriggerCoordinator?: import("@nusashell/application").PipelineTriggerCoordinator;
   readonly learningGraph: LearningGraphService;
   readonly memoryStore: MemoryStorePort;
   /** Shell-owned progressive MCP catalog gateway (grant/enable/live snapshot). */
@@ -247,6 +250,7 @@ export function createContainer(options: ContainerOptions): Container {
     backgroundReviewScheduler: agent.backgroundReviewScheduler,
     jobScheduler: jobs.jobScheduler,
     eventJobMatcher: jobs.eventJobMatcher,
+    pipelineTriggerCoordinator: jobs.pipelineTriggerCoordinator,
     learningGraph: skills.learningGraph,
     memoryStore: skills.memoryStore,
     agentToolGateway: agent.agentToolGateway,
@@ -266,6 +270,10 @@ export function createContainer(options: ContainerOptions): Container {
     },
     configureJobScheduler(settings: Partial<JobSchedulerSettings>) {
       jobs.jobScheduler.configure(settings);
+      jobs.pipelineTriggerCoordinator?.configure({
+        ...(settings.enabled !== undefined ? { enabled: settings.enabled } : {}),
+        ...(settings.tickSeconds !== undefined ? { tickSeconds: settings.tickSeconds } : {}),
+      });
     },
   };
 }

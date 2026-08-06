@@ -45,7 +45,11 @@ export async function runAgentTurn(messages, options, aiSettings) {
         supportsVision: selected.supportsVision,
       },
       ...(options.traceId ? { traceId: options.traceId } : {}),
-    }, 1800000);
+    // agent.run is a long-lived command. Its lifecycle is delivered through
+    // events and it has an explicit agent.cancel path, so a renderer-side
+    // wall-clock timeout would incorrectly fail valid long tool runs.
+    // `0` means no IPC race timeout; provider/tool timeouts remain active.
+    }, 0);
   } finally {
     disposers.forEach((dispose) => dispose());
     // Lifecycle handlers stay registered briefly after the run settles so a

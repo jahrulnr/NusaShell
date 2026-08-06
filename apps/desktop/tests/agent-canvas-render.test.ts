@@ -3,6 +3,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildHtmlSandboxDoc,
+  healMermaidFlowchartEdgeLabels,
+  mermaidRenderCandidates,
   renderArtifact,
   sanitizeSvgString,
   softenMermaidSequenceRects,
@@ -119,4 +121,64 @@ describe("agent canvas render pipeline", () => {
     // Body should not have grown with mermaid leftovers.
     expect(document.body.innerHTML.length).toBeLessThanOrEqual(before.length + 32);
   });
+
+  it("quotes unquoted flowchart edge labels that contain [] () {} # or HTML", () => {
+    expect(healMermaidFlowchartEdgeLabels("flowchart LR\nA -->|x: []| B\n")).toContain(
+      'A -->|"x: []"| B',
+    );
+    expect(healMermaidFlowchartEdgeLabels("flowchart LR\nA -->|foo(bar)| B\n")).toContain(
+      'A -->|"foo(bar)"| B',
+    );
+    expect(healMermaidFlowchartEdgeLabels("flowchart LR\nA -->|id {x}| B\n")).toContain(
+      'A -->|"id {x}"| B',
+    );
+    expect(healMermaidFlowchartEdgeLabels("flowchart LR\nA -->|#tag| B\n")).toContain(
+      'A -->|"#tag"| B',
+    );
+    expect(healMermaidFlowchartEdgeLabels("flowchart LR\nA -->|a<br/>b| B\n")).toContain(
+      'A -->|"a<br/>b"| B',
+    );
+    // leave safe / already-quoted labels alone
+    expect(healMermaidFlowchartEdgeLabels("flowchart LR\nA -->|ok path| B\n")).toBe(
+      "flowchart LR\nA -->|ok path| B\n",
+    );
+    expect(healMermaidFlowchartEdgeLabels('flowchart LR\nA -->|"x: []"| B\n')).toContain(
+      'A -->|"x: []"| B',
+    );
+    // non-flowchart diagrams are not touched
+    const seq = "sequenceDiagram\nA->>B: call(x)\n";
+    expect(healMermaidFlowchartEdgeLabels(seq)).toBe(seq);
+  });
+
+  it("offers a healed flowchart candidate after the original source", () => {
+    const raw = "flowchart LR\nD -->|pluginIds: []| E\n";
+    const candidates = mermaidRenderCandidates(raw);
+    expect(candidates).toHaveLength(2);
+    expect(candidates[0]).toContain("|pluginIds: []|");
+    expect(candidates[1]).toContain('|"pluginIds: []"|');
+  });
+
+  it("auto-heals [] edge labels enough to exit Mermaid parse failure", async () => {
+    // Turn 5e23d8bf pattern: unquoted [] in edge label → SQS parse error.
+    // After heal, Mermaid accepts the diagram. jsdom may still fail later on
+    // getBBox (layout), so assert we are past the parse stage.
+    const source = [
+      "flowchart LR",
+      "    A[pipeline step<br/>action: type=agent] --> B[PipelineScheduler.runStep]",
+      "    B --> C[JobAgentExecutor.runAgent]",
+      "    C --> D[worker.run]",
+      "    D -->|pluginIds: []<br/>traceId, signal...| E[AgentTurnRunner.run]",
+      "    E -->|input.workspace TIDAK di-set| F[beginTurn context]",
+      "    F -->|workspace: undefined| G[McpAgentToolGateway]",
+      "    G -->|wrapToolArgs tanpa base path| H[files/terminal tools<br/>fallback: home dir]",
+    ].join("\n");
+    const result = await renderArtifact({ kind: "mermaid", source });
+    if (result.type === "error") {
+      expect(result.message).not.toMatch(/Parse error/i);
+      expect(result.message).not.toMatch(/got 'SQS'/);
+    } else {
+      expect(result.type).toBe("svg");
+      expect(result.svg.length).toBeGreaterThan(0);
+    }
+  }, 30000);
 });

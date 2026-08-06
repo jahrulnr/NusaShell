@@ -644,26 +644,28 @@
       <section class="view jobs-view" data-view="pipelines">
         <div class="jobs-header">
           <div>
-            <div class="agent-kicker"><span class="agent-kicker-dot"></span> Multi-step tasks</div>
+            <div class="agent-kicker"><span class="agent-kicker-dot"></span> Orchestration / control plane</div>
             <h1 class="page-title">Pipelines</h1>
-            <p class="subtitle">Run several tasks in order, with optional conditions.</p>
+            <p class="subtitle">Chain agents and tools into visible, repeatable runs while NusaShell is open.</p>
           </div>
-          <button class="action-btn" id="pipelines-new-btn" type="button" data-control="pipelines-new-btn">+ New pipeline</button>
+          <button class="action-btn pipeline-new-btn" id="pipelines-new-btn" type="button" data-control="pipelines-new-btn"><span aria-hidden="true">＋</span> New pipeline</button>
         </div>
         <div class="jobs-error" id="pipelines-error" hidden>
           <strong>Could not load pipelines</strong>
           <span id="pipelines-error-message"></span>
         </div>
         <div class="jobs-list" id="pipelines-list" role="list" aria-label="Pipelines" aria-busy="false"></div>
-        <div class="jobs-empty" id="pipelines-empty" hidden>
-          <strong>No pipelines yet</strong>
-              <span>Create a pipeline to run tasks in sequence.</span>
+        <div class="jobs-empty pipeline-empty" id="pipelines-empty" hidden>
+          <div class="pipeline-empty-mark" aria-hidden="true"><span></span><i></i><b></b></div>
+          <strong>No pipelines in the control plane</strong>
+          <span>Create a pipeline to connect an event or schedule to a deliberate sequence of agent and tool steps.</span>
+          <button class="pipeline-empty-action" id="pipelines-empty-new" type="button" data-control="pipelines-empty-new">Create first pipeline</button>
         </div>
       </section>
 
       <!-- ===== Pipeline Modal ===== -->
       <div class="modal-overlay" id="pipeline-modal" role="dialog" aria-modal="true" aria-labelledby="pipeline-modal-title">
-        <div class="modal-card">
+        <div class="modal-card pipeline-modal-card">
           <div class="modal-header">
             <h2 id="pipeline-modal-title">New pipeline</h2>
             <button class="modal-close" id="pipeline-modal-close" type="button" aria-label="Close">&times;</button>
@@ -680,10 +682,10 @@
               </label>
             </div>
             <div id="pipeline-schedule-fields" hidden>
-              <label class="form-label">Schedule (e.g. "every 30m", "at 9am", "cron 0 */6 * * *")<input type="text" id="pipeline-field-schedule" placeholder="every 30m" data-control="pipeline-field-schedule"></label>
-              <p class="form-help" id="pipeline-schedule-help"></p>
+              <label class="form-label">Schedule<input type="text" id="pipeline-field-schedule" data-control="pipeline-field-schedule" placeholder="every 1h · 0 9 * * * · 2026-08-07T09:00:00Z"></label>
+              <p class="form-help" id="pipeline-schedule-help">Same grammar as Jobs. Fires only while NusaShell is open.</p>
             </div>
-            <div id="pipeline-event-fields" hidden>
+            <div id="pipeline-event-fields">
               <label class="form-label">Event pattern (glob, e.g. "mail.*", "files.modified")<input type="text" id="pipeline-field-event-pattern" placeholder="mail.new" data-control="pipeline-field-event-pattern"></label>
               <label class="form-label">Plugin scope (optional)<input type="text" id="pipeline-field-event-plugin" placeholder="nusashell.mail" data-control="pipeline-field-event-plugin"></label>
             </div>
@@ -694,6 +696,30 @@
           <div class="modal-footer">
             <button class="ghost-btn" id="pipeline-modal-cancel" type="button">Cancel</button>
             <button class="primary-btn" id="pipeline-modal-save" type="button" data-control="pipeline-modal-save">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== Pipeline Details Modal (DAG view, GitHub Actions style) ===== -->
+      <div class="modal-overlay" id="pipeline-details-modal" role="dialog" aria-modal="true" aria-labelledby="pipeline-details-title">
+        <div class="modal-card pipeline-details-card">
+          <div class="modal-header">
+            <div class="pipeline-details-heading">
+              <h2 id="pipeline-details-title">Pipeline</h2>
+              <span class="pipeline-status-pill" id="pipeline-details-status" data-status="—">—</span>
+            </div>
+            <button class="modal-close" id="pipeline-details-close" type="button" aria-label="Close">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="pipeline-details-meta" id="pipeline-details-meta"></div>
+            <div class="pipeline-details-dag" id="pipeline-details-dag" aria-label="Step graph"></div>
+            <div class="pipeline-details-output" id="pipeline-details-output" aria-live="polite" hidden></div>
+            <section class="pipeline-step-inspector" id="pipeline-details-step" aria-live="polite" hidden></section>
+          </div>
+          <div class="modal-footer">
+            <button class="ghost-btn" id="pipeline-details-run" type="button">▶ Run now</button>
+            <button class="ghost-btn danger" id="pipeline-details-cancel" type="button" data-control="pipeline-details-cancel" hidden>Cancel run</button>
+            <button class="ghost-btn" id="pipeline-details-ok" type="button">Close</button>
           </div>
         </div>
       </div>

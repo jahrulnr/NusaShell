@@ -14,6 +14,9 @@ import {
 import { PluginRuntimeManager, type PluginRepositoryPort } from "@nusashell/application";
 import type { EventDispatcher } from "@nusashell/application";
 import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
 import type { ContainerOptions } from "../container.js";
 
 export interface PluginRuntimeParts {
@@ -23,6 +26,14 @@ export interface PluginRuntimeParts {
   readonly syncPlugins: () => Promise<void>;
   readonly docsIndex: MarkdownDocsIndex;
   readonly db: SqliteDatabase | undefined;
+}
+
+function bundledResource(relativePath: string): string {
+  const candidates = [
+    new URL(`../../../../resources/${relativePath}`, import.meta.url),
+    new URL(`../../../resources/${relativePath}`, import.meta.url),
+  ].map((url) => fileURLToPath(url));
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!;
 }
 
 export function createPluginRuntime(
@@ -75,8 +86,8 @@ export function createPluginRuntime(
       : {}),
   });
 
-  const docsRoot = options.docsRoot ?? fileURLToPath(new URL("../../../resources/agent/docs", import.meta.url));
-  const docsIndexStorageRoot = options.docsIndexStorageRoot ?? fileURLToPath(new URL("../../../.nusashell/agent/docs-index", import.meta.url));
+  const docsRoot = options.docsRoot ?? bundledResource("agent/docs");
+  const docsIndexStorageRoot = options.docsIndexStorageRoot ?? resolve(homedir(), ".nusashell", "agent", "docs-index");
   const docsIndex = new MarkdownDocsIndex(docsRoot, docsIndexStorageRoot);
   void docsIndex.reindex().catch((err) => {
     logger.warn({ err }, "Docs index initial build failed; will retry on demand");

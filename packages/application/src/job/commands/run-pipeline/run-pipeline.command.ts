@@ -7,5 +7,9 @@ export interface RunPipelineCommand extends Command {
 
 export interface RunPipelineResult {
   readonly ok: boolean;
+  readonly runId?: string;
+  readonly traceId?: string;
+  readonly status?: string;
   readonly error?: string;
+  readonly errorCode?: string;
 }

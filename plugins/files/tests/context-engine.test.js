@@ -92,6 +92,28 @@ describe("detectStack (phase 1)", () => {
   });
 });
 
+describe("workspace instructions", () => {
+  it("reads the workspace-root AGENTS.md with bounded metadata", async () => {
+    await fs.writeFile(path.join(tmpDir, "AGENTS.md"), "# Project rules\nUse pnpm test.\n");
+    await fs.mkdir(path.join(tmpDir, "nested"));
+    await fs.writeFile(path.join(tmpDir, "nested", "AGENTS.md"), "nested rules\n");
+
+    const result = await engine.readWorkspaceInstructions();
+
+    expect(result).toEqual(expect.objectContaining({
+      uri: "nusashell://workspace/AGENTS.md",
+      name: "Workspace instructions",
+      mimeType: "text/markdown",
+      text: "# Project rules\nUse pnpm test.\n",
+    }));
+    expect(result.text).not.toContain("nested rules");
+  });
+
+  it("returns null when the workspace has no AGENTS.md", async () => {
+    await expect(engine.readWorkspaceInstructions()).resolves.toBeNull();
+  });
+});
+
 describe("walk + ignore handling (phase 2)", () => {
   it("skips default ignore dirs and gitignore patterns", async () => {
     await writeCodeWorkspace();

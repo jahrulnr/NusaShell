@@ -19,7 +19,9 @@ export interface AutomationEvent extends DomainEvent {
   readonly eventId: string;
   /** Phase D: set when this event was emitted by a job's onComplete hook. */
   readonly originJobId?: string;
-  /** Phase D: chain depth from the originating job (0 = plugin-emitted, 1+ = chain). */
+  /** Phase E: set when this event was emitted by a pipeline completion/failure. */
+  readonly originPipelineId?: string;
+  /** Phase D: chain depth from the originating job/pipeline (0 = plugin-emitted, 1+ = chain). */
   readonly chainDepth?: number;
 }
 
@@ -33,8 +35,15 @@ export function createAutomationEvent(
   payload: Readonly<Record<string, unknown>>,
   occurredAt: Date = new Date(),
   eventId: string = randomUUID(),
-  origin?: { readonly jobId: string; readonly chainDepth: number },
+  origin?:
+    | { readonly jobId: string; readonly chainDepth: number }
+    | { readonly pipelineId: string; readonly chainDepth: number },
 ): AutomationEvent {
+  const originFields = origin
+    ? "jobId" in origin
+      ? { originJobId: origin.jobId, chainDepth: origin.chainDepth }
+      : { originPipelineId: origin.pipelineId, chainDepth: origin.chainDepth }
+    : {};
   return {
     type: "automation.event",
     aggregateId: `automation:${eventId}`,
@@ -43,6 +52,6 @@ export function createAutomationEvent(
     ...(pluginId !== undefined ? { pluginId } : {}),
     payload,
     eventId,
-    ...(origin ? { originJobId: origin.jobId, chainDepth: origin.chainDepth } : {}),
+    ...originFields,
   };
 }

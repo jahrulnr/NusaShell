@@ -56,6 +56,8 @@ export class AgentConversationController {
     this.conversation = null;
     this.conversations = [];
     this.activeId = "";
+    // Invalidates stale conversation loads when the user clicks rooms quickly.
+    this.openGeneration = 0;
     this.pendingDeleteId = "";
     /** Per-conversation set of conversation IDs with an in-flight turn. */
     this.pendingTurnConversations = new Set();
@@ -346,20 +348,23 @@ export class AgentConversationController {
         conversationId: ownerConversationId,
         ...(resumeFrom ? { resume: true } : {}),
         onDelta: (delta) => {
-          if (!canPaint()) return;
-          // Append in arrival order. A new text segment starts after reasoning/tools.
+          // Reduce every delta even while this room is backgrounded. Only
+          // DOM painting is visibility-gated; dropping the delta here makes
+          // room switching look like the stream stopped.
           if (streamState.lastKind !== "text") {
-            streamState.textBubble = element("div", "agent-bubble");
             streamState.streamedText = "";
-            appendStreamChild(streamState.textBubble);
             streamState.lastKind = "text";
+            if (canPaint()) {
+              streamState.textBubble = element("div", "agent-bubble");
+              appendStreamChild(streamState.textBubble);
+            }
           }
           streamState.streamedText += delta;
           // Coalesce markdown re-render to one per animation frame.
           // Without this, renderAssistantMarkdown (markdown-it + DOMPurify)
           // runs on every token — O(n²) parsing that freezes the main thread
           // and makes streaming appear as "spawn per message".
-          if (!streamState.textRenderPending) {
+          if (canPaint() && !streamState.textRenderPending) {
             streamState.textRenderPending = true;
             requestAnimationFrame(() => {
               streamState.textRenderPending = false;
@@ -370,18 +375,19 @@ export class AgentConversationController {
               }
             });
           }
-          setContextStatus(liveTokens + Math.ceil(delta.length / 4));
+          if (canPaint()) setContextStatus(liveTokens + Math.ceil(delta.length / 4));
         },
         onReasoningDelta: (delta) => {
-          if (!canPaint()) return;
           if (streamState.lastKind !== "reasoning") {
-            streamState.reasoningEl = this.createStreamingReasoningBlock();
             streamState.reasoningText = "";
-            appendStreamChild(streamState.reasoningEl);
             streamState.lastKind = "reasoning";
+            if (canPaint()) {
+              streamState.reasoningEl = this.createStreamingReasoningBlock();
+              appendStreamChild(streamState.reasoningEl);
+            }
           }
           streamState.reasoningText += delta;
-          if (!streamState.reasoningRenderPending) {
+          if (canPaint() && !streamState.reasoningRenderPending) {
             streamState.reasoningRenderPending = true;
             requestAnimationFrame(() => {
               streamState.reasoningRenderPending = false;
@@ -392,11 +398,11 @@ export class AgentConversationController {
               }
             });
           }
-          setContextStatus(liveTokens + Math.ceil(delta.length / 4));
+          if (canPaint()) setContextStatus(liveTokens + Math.ceil(delta.length / 4));
         },
         onToolCallStart: (payload) => {
-          if (!canPaint()) return;
           streamState.lastKind = "tool";
+          if (!canPaint()) return;
           const card = this.createStreamingToolCard(payload.callId, payload.name, payload.args);
           streamState.toolCards.set(payload.callId, card);
           appendStreamChild(card);
@@ -429,6 +435,7 @@ export class AgentConversationController {
           this.scrollToBottom();
         },
         onContextUpdate: (payload) => {
+          if (!canPaint()) return;
           // Badge = approximate current prompt window fill, NOT cumulative
           // billing tokens. Pass the full event payload; the helper ignores
           // inputTokens (cumulative billing) so multi-round tool turns do not
@@ -452,10 +459,11 @@ export class AgentConversationController {
         onStreamGap: (traceId, streamSeq) => {
           // C2: a stream sequence gap means events were dropped. Rehydrate
           // from the backend projection rather than rendering with holes.
-          if (!canPaint()) return;
-          this.log?.("warn", `Stream gap at streamSeq=${streamSeq} trace=${traceId} — refetching projection`);
-          this.surfaceStreamGap(traceId, streamSeq);
-          void this.restoreActiveTurnUi().then(() => this.clearStreamGapStatus());
+          this.log?.("warn", `Stream gap at streamSeq=${streamSeq} trace=${traceId} — projection will reconcile on room focus`);
+          if (this.conversation?.id === ownerConversationId) {
+            this.surfaceStreamGap(traceId, streamSeq);
+            void this.restoreActiveTurnUi().then(() => this.clearStreamGapStatus());
+          }
         },
       });
       retryIsSafe = false;
@@ -783,15 +791,18 @@ export class AgentConversationController {
           conversationId,
           autoContinueIndex: index,
           onDelta: (delta) => {
-            if (!canPaint()) return;
+            // Keep reducing the background turn; only its DOM surface may be
+            // detached while another room is active.
             if (streamState.lastKind !== "text") {
-              streamState.textBubble = element("div", "agent-bubble");
               streamState.streamedText = "";
-              appendStreamChild(streamState.textBubble);
               streamState.lastKind = "text";
+              if (canPaint()) {
+                streamState.textBubble = element("div", "agent-bubble");
+                appendStreamChild(streamState.textBubble);
+              }
             }
             streamState.streamedText += delta;
-            if (!streamState.textRenderPending) {
+            if (canPaint() && !streamState.textRenderPending) {
               streamState.textRenderPending = true;
               requestAnimationFrame(() => {
                 streamState.textRenderPending = false;
@@ -802,18 +813,19 @@ export class AgentConversationController {
                 }
               });
             }
-            setContextStatus(liveTokens + Math.ceil(delta.length / 4));
+            if (canPaint()) setContextStatus(liveTokens + Math.ceil(delta.length / 4));
           },
           onReasoningDelta: (delta) => {
-            if (!canPaint()) return;
             if (streamState.lastKind !== "reasoning") {
-              streamState.reasoningEl = this.createStreamingReasoningBlock();
               streamState.reasoningText = "";
-              appendStreamChild(streamState.reasoningEl);
               streamState.lastKind = "reasoning";
+              if (canPaint()) {
+                streamState.reasoningEl = this.createStreamingReasoningBlock();
+                appendStreamChild(streamState.reasoningEl);
+              }
             }
             streamState.reasoningText += delta;
-            if (!streamState.reasoningRenderPending) {
+            if (canPaint() && !streamState.reasoningRenderPending) {
               streamState.reasoningRenderPending = true;
               requestAnimationFrame(() => {
                 streamState.reasoningRenderPending = false;
@@ -824,11 +836,11 @@ export class AgentConversationController {
                 }
               });
             }
-            setContextStatus(liveTokens + Math.ceil(delta.length / 4));
+            if (canPaint()) setContextStatus(liveTokens + Math.ceil(delta.length / 4));
           },
           onToolCallStart: (payload) => {
-            if (!canPaint()) return;
             streamState.lastKind = "tool";
+            if (!canPaint()) return;
             const card = this.createStreamingToolCard(payload.callId, payload.name, payload.args);
             streamState.toolCards.set(payload.callId, card);
             appendStreamChild(card);
@@ -861,6 +873,7 @@ export class AgentConversationController {
             this.scrollToBottom();
           },
           onContextUpdate: (payload) => {
+            if (!canPaint()) return;
             setContextStatus(resolveContextBadgeTokens({
               estimatedTokens: Number(payload?.estimatedTokens) || 0,
               inputTokens: Number(payload?.inputTokens) || 0,
@@ -878,10 +891,11 @@ export class AgentConversationController {
             if (btn) btn.classList.add("is-stopping");
           },
           onStreamGap: (traceId, streamSeq) => {
-            if (!canPaint()) return;
-            this.log?.("warn", `Stream gap at streamSeq=${streamSeq} trace=${traceId} — refetching projection`);
-            this.surfaceStreamGap(traceId, streamSeq);
-            void this.restoreActiveTurnUi().then(() => this.clearStreamGapStatus());
+            this.log?.("warn", `Stream gap at streamSeq=${streamSeq} trace=${traceId} — projection will reconcile on room focus`);
+            if (this.conversation?.id === conversationId) {
+              this.surfaceStreamGap(traceId, streamSeq);
+              void this.restoreActiveTurnUi().then(() => this.clearStreamGapStatus());
+            }
           },
         });
 
@@ -1375,8 +1389,10 @@ export class AgentConversationController {
   }
 
   async open(conversationId) {
+    const generation = ++this.openGeneration;
     if (conversationId === this.activeId && this.conversation) return;
     const conversation = await this.shell.agentConversations.get(conversationId);
+    if (generation !== this.openGeneration) return;
     if (!conversation) {
       await this.refresh();
       return;

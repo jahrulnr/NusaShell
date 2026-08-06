@@ -22,6 +22,12 @@ export interface AiConfig {
   readonly softRecoverAttempts: number;
   readonly maxConcurrentToolCalls: number;
   readonly maxAutoContinues: number;
+  /**
+   * Max tool rounds for headless job/pipeline agent turns. 0 = unlimited.
+   * Falls back to `maxToolRounds` when unset so jobs/pipelines follow the
+   * same ceiling as interactive turns instead of a hardcoded value.
+   */
+  readonly jobMaxToolRounds: number | undefined;
   readonly strategy: "failover" | "round-robin" | "switch";
   readonly totalAttemptBudget: number;
   readonly stream: boolean;
@@ -62,6 +68,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       softRecoverAttempts: integerInRange(env.NUSASHELL_AI_SOFT_RECOVER_ATTEMPTS, 0, 3, 1),
       maxConcurrentToolCalls: integerInRange(env.NUSASHELL_AI_MAX_CONCURRENT_TOOL_CALLS, 1, 32, 8),
       maxAutoContinues: integerInRange(env.NUSASHELL_AI_MAX_AUTO_CONTINUES, 0, 10_000, 10),
+      jobMaxToolRounds: parseOptionalMaxToolRounds(env.NUSASHELL_JOB_MAX_TOOL_ROUNDS),
       strategy: parseAiStrategy(env.NUSASHELL_AI_STRATEGY),
       totalAttemptBudget: integerInRange(env.NUSASHELL_AI_TOTAL_ATTEMPT_BUDGET, 1, 32, 4),
       stream: env.NUSASHELL_AI_STREAM !== "false",
@@ -103,6 +110,13 @@ function parseAiApi(value: string | undefined): AiConfig["api"] {
 function parseMaxToolRounds(value: string | undefined): number {
   // 0 = unlimited; 1..10_000 = finite ceiling.
   return integerInRange(value, 0, 10_000, 50);
+}
+
+function parseOptionalMaxToolRounds(value: string | undefined): number | undefined {
+  // Undefined stays undefined so callers can fall back to ai.maxToolRounds.
+  if (value === undefined) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) && parsed >= 0 && parsed <= 10_000 ? parsed : undefined;
 }
 
 function integerInRange(value: string | undefined, min: number, max: number, fallback: number): number {

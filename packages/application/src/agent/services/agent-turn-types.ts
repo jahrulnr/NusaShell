@@ -3,6 +3,7 @@ import type {
   AgentModelCapabilities,
   AgentTokenUsage,
   AgentToolCall,
+  AgentPromptCachePolicy,
   ReasoningEffort,
 } from "../ports/agent-provider.port.js";
 import type { AgentToolGateway } from "../ports/agent-tool-gateway.port.js";
@@ -38,6 +39,7 @@ export interface RunAgentTurnInput {
   readonly model?: string;
   readonly effort?: ReasoningEffort;
   readonly modelCapabilities?: AgentModelCapabilities;
+  readonly promptCache?: AgentPromptCachePolicy;
   readonly traceId?: string;
   readonly interactive?: boolean;
   /** Conversation workspace bound for tool I/O / subagent cwd. */

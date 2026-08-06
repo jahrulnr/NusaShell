@@ -52,6 +52,8 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
   private readonly streamingBuffers = new Map<string, { kind: "text" | "reasoning"; content: string }>();
   /** Process-lifetime round-robin cursor shared across all turns (A2). */
   private readonly roundRobinCursor = { value: 0 };
+  /** Date is session-stable; it must not churn the cacheable prompt prefix. */
+  private readonly promptSessionDate = new Date().toISOString().slice(0, 10);
 
   constructor(
     private readonly providers: AgentProviderRegistryPort,
@@ -138,9 +140,11 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
       ...(command.workspace ? { workspace: command.workspace } : {}),
       ...(conversationId ? { conversationId } : {}),
     });
-    const messages = command.resume
-      ? command.messages
+    const injected = command.resume
+      ? { messages: command.messages }
       : await this.injectSystemPrompts(command, traceId);
+    const messages = injected.messages;
+    const promptCache = "promptCache" in injected ? injected.promptCache : undefined;
     let turnEndReason: "completed" | "cancelled" | "failed" | "superseded" = "completed";
     try {
       const result = await this.coordinator.run(traceId, (signal) => worker.run({
@@ -150,6 +154,7 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
         signal,
         ...(command.interactive !== undefined ? { interactive: command.interactive } : {}),
         ...(command.workspace !== undefined ? { workspace: command.workspace } : {}),
+        ...(promptCache ? { promptCache } : {}),
         ...(this.onTextDelta || (conversationId && this.activeTurns)
           ? {
               onTextDelta: (delta: string) => {
@@ -296,7 +301,7 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
   }
 
   private async injectSystemPrompts(command: RunAgentTurnCommand, traceId: string) {
-    if (!this.promptLoader) return command.messages;
+    if (!this.promptLoader) return { messages: command.messages };
     try {
       const prompts = await this.promptLoader.loadPrompts();
       const tools = await this.toolGateway.listTools(command.pluginIds, traceId);
@@ -310,7 +315,7 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
         }
       }
       const vars: PromptVars = {
-        currentDate: new Date().toISOString().slice(0, 10),
+        currentDate: this.promptSessionDate,
         environment: process.env.NODE_ENV === "production" ? "production" : "development",
         runtimeOs: detectRuntimeOs(this.runtimeOsProbe),
         availableTools: tools.map((tool) => tool.name).join(", "),
@@ -355,12 +360,12 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
           this.logger?.warn("MCP live snapshot build failed: %s", error instanceof Error ? error.message : String(error));
         }
       }
-      const { messages: injected, summary } = injectPrompts(prompts, vars, command.messages, command.userPrompt ?? this.userPrompt, memoryPrompt, subagentPrompt, todoPrompt, skillsCatalogPrompt, continuePrompt, mcpLivePrompt);
+      const { messages: injected, summary, promptCache } = injectPrompts(prompts, vars, command.messages, command.userPrompt ?? this.userPrompt, memoryPrompt, subagentPrompt, todoPrompt, skillsCatalogPrompt, continuePrompt, mcpLivePrompt);
       this.logger?.debug(summary.toDebugLine(traceId));
-      return injected;
+      return { messages: injected, promptCache };
     } catch (error) {
       this.logger?.warn("Prompt injection failed, sending raw messages: %s", error instanceof Error ? error.message : String(error));
-      return command.messages;
+      return { messages: command.messages };
     }
   }
 

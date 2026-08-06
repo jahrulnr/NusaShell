@@ -162,7 +162,8 @@ async function setEnabled(store: JobStorePort, args: Readonly<Record<string, unk
 
 async function runNow(scheduler: JobScheduler, args: Readonly<Record<string, unknown>>): Promise<unknown> {
   const id = requireString(args.id, "id");
-  const result = await scheduler.runOneNow(id);
+  // Fire-and-track: startJobNow returns immediately; progress via job.* events.
+  const result = await scheduler.startJobNow(id);
   if (!result.ok && result.error?.includes("not found")) {
     throw new ApplicationError("JOB_NOT_FOUND", result.error);
   }

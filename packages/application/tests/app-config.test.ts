@@ -25,6 +25,7 @@ describe("loadConfig", () => {
       timeoutMs: 60000,
       maxRepeatedToolCalls: 50,
       maxAutoContinues: 10,
+      jobMaxToolRounds: undefined,
       softRecoverAttempts: 1,
       maxConcurrentToolCalls: 8,
       retry: { attemptBudget: 4, baseDelayMs: 250, maxDelayMs: 5000, jitter: 0.2 },
@@ -40,6 +41,17 @@ describe("loadConfig", () => {
   it("reads host from NUSASHELL_HOST", () => {
     const config = loadConfig({ NUSASHELL_HOST: "127.0.0.1" });
     expect(config.host).toBe("127.0.0.1");
+  });
+
+  it("reads jobMaxToolRounds from NUSASHELL_JOB_MAX_TOOL_ROUNDS", () => {
+    expect(loadConfig({ NUSASHELL_JOB_MAX_TOOL_ROUNDS: "24" }).ai.jobMaxToolRounds).toBe(24);
+    expect(loadConfig({ NUSASHELL_JOB_MAX_TOOL_ROUNDS: "0" }).ai.jobMaxToolRounds).toBe(0); // 0 = unlimited
+  });
+
+  it("jobMaxToolRounds is undefined when unset or invalid (caller falls back to ai.maxToolRounds)", () => {
+    expect(loadConfig({}).ai.jobMaxToolRounds).toBeUndefined();
+    expect(loadConfig({ NUSASHELL_JOB_MAX_TOOL_ROUNDS: "-5" }).ai.jobMaxToolRounds).toBeUndefined();
+    expect(loadConfig({ NUSASHELL_JOB_MAX_TOOL_ROUNDS: "abc" }).ai.jobMaxToolRounds).toBeUndefined();
   });
 
   it("reads pluginsRoot from NUSASHELL_PLUGINS_ROOT", () => {
@@ -103,6 +115,7 @@ describe("loadConfig", () => {
         timeoutMs: 60000,
         maxRepeatedToolCalls: 50,
         maxAutoContinues: 10,
+        jobMaxToolRounds: undefined,
         softRecoverAttempts: 1,
         maxConcurrentToolCalls: 8,
         retry: { attemptBudget: 3, baseDelayMs: 100, maxDelayMs: 900, jitter: 0.1 },

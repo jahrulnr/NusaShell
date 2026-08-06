@@ -196,13 +196,29 @@ Use only when numbers or relative shares are the point; otherwise prefer text.
 
 ## Reliability notes for Agent Canvas
 
-- Canvas runs Mermaid with `securityLevel: 'strict'` and compiles to static SVG.
+- Canvas runs **Mermaid 11** with `securityLevel: 'strict'` and compiles to static SVG.
 - Stick to stable types first: **flowchart, sequence, class, er, state, gantt,
   pie, journey, gitGraph, mindmap, timeline, C4, requirement, sankey, quadrant,
   xychart**. Beta gallery types (`architecture-beta`, `ishikawa-beta`,
   `venn-beta`, `wardley-beta`, `packet-beta`, `radar-beta`, `treemap-beta`,
   `treeView`, …) may fail to render; if they do, fall back to flowchart/sequence
   and keep the source visible via **Show source**.
+- **Flowchart edge labels:** quote any label that contains `[]`, `()`, `{}`, `#`,
+  or HTML, otherwise Mermaid treats those characters as shape tokens and fails:
+
+  ````markdown
+  ```mermaid
+  flowchart LR
+    A -->|"pluginIds: []"| B
+    B -->|"foo(bar)"| C
+    C -->|"a<br/>b"| D
+  ```
+  ````
+
+  Prefer `<br/>` for line breaks inside labels (not raw newlines).
+- Agent Canvas may **auto-quote** risky unquoted flowchart edge labels at render
+  time so a common slip still draws; **Show source** still shows the original
+  fence. Prefer correct quoted syntax in the first place.
 - One diagram per fence. Add a one-line caption in prose above or below the fence.
 - Do not put secrets, tokens, or absolute home paths with private usernames in
   diagrams.

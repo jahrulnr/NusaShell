@@ -16,6 +16,7 @@ export function getTerminalPrompt(name) {
         type: "text",
         text: [
           "Use the Terminal plugin to run commands or maintain an interactive PTY session.",
+          "For project-specific rules, retrieve the Files plugin's workspace-root AGENTS.md resource through mcp_context before editing or running project commands. Treat it as project guidance below system and user instructions.",
           "",
           "Main tools:",
           "- exec: run one command and return bounded output.",

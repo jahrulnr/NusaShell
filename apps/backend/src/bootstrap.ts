@@ -13,6 +13,7 @@ export interface BootstrapOptions {
   readonly docsIndexStorageRoot?: string;
   readonly skillsRoot?: string;
   readonly memoryRoot?: string;
+  readonly jobsRoot?: string;
   readonly backgroundReview?: Partial<BackgroundReviewSettings>;
   readonly resolvePluginRuntimeEnvironment?: (
     pluginId: string,
@@ -62,6 +63,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     ...(options.docsIndexStorageRoot !== undefined ? { docsIndexStorageRoot: options.docsIndexStorageRoot } : {}),
     ...(options.skillsRoot !== undefined ? { skillsRoot: options.skillsRoot } : {}),
     ...(options.memoryRoot !== undefined ? { memoryRoot: options.memoryRoot } : {}),
+    ...(options.jobsRoot !== undefined ? { jobsRoot: options.jobsRoot } : {}),
     ...(options.appVersion !== undefined ? { appVersion: options.appVersion } : {}),
     ...(options.resolvePluginRuntimeEnvironment !== undefined
       ? { resolvePluginRuntimeEnvironment: options.resolvePluginRuntimeEnvironment }
@@ -76,6 +78,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
       ...(config.ai.baseUrl !== undefined ? { baseUrl: config.ai.baseUrl } : {}),
       ...(config.ai.apiKey !== undefined ? { apiKey: config.ai.apiKey } : {}),
       maxToolRounds: config.ai.maxToolRounds,
+      ...(config.ai.jobMaxToolRounds !== undefined ? { jobMaxToolRounds: config.ai.jobMaxToolRounds } : {}),
       softRecoverAttempts: config.ai.softRecoverAttempts,
       maxConcurrentToolCalls: config.ai.maxConcurrentToolCalls,
       maxAutoContinues: config.ai.maxAutoContinues,
@@ -100,6 +103,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
   await container.runtimeManager.startAutostartPlugins();
 
   container.jobScheduler.start();
+  container.pipelineTriggerCoordinator?.start();
 
   if (options.startWsServer !== false) {
     await container.wsServer.start();

@@ -4,13 +4,36 @@ import { ContextEngine } from "./context-engine.js";
 
 const filePath = z.string().trim().min(1).max(4096);
 const rootPath = z.string().trim().min(0).max(4096).default("");
-const depth = z.number().int().min(1).max(10).default(3);
-const head = z.number().int().min(1).max(100000).optional();
-const tail = z.number().int().min(1).max(100000).optional();
-const startLine = z.number().int().min(1).max(100000).optional();
-const endLine = z.number().int().min(1).max(100000).optional();
+
+/**
+ * Coerce + clamp an integer into [min, max] instead of rejecting out-of-range
+ * values. Agents frequently ask past tool caps (e.g. after=12 when max is 10);
+ * auto-recovering is better than "Files tool input is invalid" dead-ends.
+ * Non-finite / missing values use defaultValue when provided, else undefined.
+ * @param {number} min
+ * @param {number} max
+ * @param {number} [defaultValue]
+ */
+function clampedInt(min, max, defaultValue) {
+  const inner = z.number().int().min(min).max(max);
+  const schema = z.preprocess((value) => {
+    if (value === undefined || value === null || value === "") {
+      return defaultValue;
+    }
+    const n = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(n)) return defaultValue;
+    return Math.trunc(Math.min(max, Math.max(min, n)));
+  }, defaultValue === undefined ? inner.optional() : inner);
+  return defaultValue === undefined ? schema : schema.default(defaultValue);
+}
+
+const depth = clampedInt(1, 10, 3);
+const head = clampedInt(1, 100000);
+const tail = clampedInt(1, 100000);
+const startLine = clampedInt(1, 100000);
+const endLine = clampedInt(1, 100000);
 const lineNumbers = z.boolean().default(false);
-const maxBytes = z.number().int().min(1).max(100 * 1024 * 1024).default(10 * 1024 * 1024);
+const maxBytes = clampedInt(1, 100 * 1024 * 1024, 10 * 1024 * 1024);
 const recursive = z.boolean().default(false);
 const pattern = z.string().trim().min(1).max(500);
 
@@ -18,6 +41,12 @@ const grepGlob = z.string().trim().min(1).max(500).optional();
 const excludeGlobs = z.array(z.string().trim().min(1).max(500)).max(20).optional();
 const oldString = z.string().min(1).max(1024 * 1024);
 const newString = z.string().max(1024 * 1024);
+const grepContext = clampedInt(0, 10, 0);
+const grepMaxResults = clampedInt(1, 1000, 500);
+const searchMaxDepth = clampedInt(1, 20, 10);
+const contextBudget = clampedInt(64, 8192, 1024);
+const contextMaxFiles = clampedInt(1, 20000);
+const listSymbolsLimit = clampedInt(1, 100, 20);
 
 const schemas = {
   list: z.object({ path: rootPath }).strict(),
@@ -28,9 +57,18 @@ const schemas = {
   move: z.object({ source: filePath, destination: filePath }).strict(),
   copy: z.object({ source: filePath, destination: filePath }).strict(),
   delete: z.object({ path: filePath, recursive }).strict(),
-  search: z.object({ path: rootPath, pattern, exclude: excludeGlobs, type: z.enum(["file", "dir", "any"]).default("any"), maxDepth: z.number().int().min(1).max(20).default(10) }).strict(),
+  search: z.object({ path: rootPath, pattern, exclude: excludeGlobs, type: z.enum(["file", "dir", "any"]).default("any"), maxDepth: searchMaxDepth }).strict(),
   info: z.object({ path: filePath }).strict(),
-  grep: z.object({ path: rootPath, pattern, glob: grepGlob, before: z.number().int().min(0).max(10).default(0), after: z.number().int().min(0).max(10).default(0), ignoreCase: z.boolean().default(false), exclude: excludeGlobs, maxResults: z.number().int().min(1).max(1000).default(500) }).strict(),
+  grep: z.object({
+    path: rootPath,
+    pattern,
+    glob: grepGlob,
+    before: grepContext,
+    after: grepContext,
+    ignoreCase: z.boolean().default(false),
+    exclude: excludeGlobs,
+    maxResults: grepMaxResults,
+  }).strict(),
   patch: z.object({
     path: filePath,
     edits: z.union([
@@ -44,17 +82,17 @@ const schemas = {
   touch: z.object({ path: filePath, createParents: z.boolean().default(true), updateOnly: z.boolean().default(false) }).strict(),
   context_map: z.object({
     path: rootPath,
-    budget: z.number().int().min(64).max(8192).default(1024),
+    budget: contextBudget,
     activeFile: z.string().trim().min(1).max(4096).optional(),
     query: z.string().trim().min(1).max(500).optional(),
-    maxFiles: z.number().int().min(1).max(20000).optional(),
+    maxFiles: contextMaxFiles,
     refresh: z.boolean().default(false),
   }).strict(),
   detect_stack: z.object({ path: rootPath }).strict(),
   list_symbols: z.object({
     path: filePath.optional(),
     query: z.string().trim().min(1).max(500).optional(),
-    limit: z.number().int().min(1).max(100).default(20),
+    limit: listSymbolsLimit,
   }).strict(),
 };
 
@@ -106,15 +144,15 @@ export const FILES_TOOLS = Object.freeze([
   descriptor("info", "Get detailed file metadata (size, dates, permissions, type).", {
     path: stringProperty("File or directory path relative to the files plugin root (user home by default)."),
   }, ["path"]),
-  descriptor("grep", "Search file contents for a regex pattern (like grep). Only text files are scanned. Supports context lines, ignoreCase, and exclude globs.", {
-    path: stringProperty("Directory to search in, relative to the files plugin root. Use empty string for root; \"/\" resolves to the OS filesystem root.", ""),
+  descriptor("grep", "Search file contents for a regex pattern (like grep). path may be a directory (recursive) or a single file. Only text files are scanned. Supports context lines, ignoreCase, and exclude globs. Out-of-range before/after/maxResults are clamped (not rejected).", {
+    path: stringProperty("Directory or single file to search, relative to the files plugin root. Use empty string for root; \"/\" resolves to the OS filesystem root.", ""),
     pattern: stringProperty("Regular expression pattern to match against file contents (e.g. 'function\\s+\\w+', 'TODO.*')."),
-    glob: stringProperty("Optional file name glob filter to narrow search (e.g. '*.js', '*.ts'). If omitted, all text files are scanned."),
-    before: integerProperty(0, 10, 0, "Context lines before each match (0-10)."),
-    after: integerProperty(0, 10, 0, "Context lines after each match (0-10)."),
+    glob: stringProperty("Optional file name glob filter when path is a directory (e.g. '*.js', '*.ts'). Ignored when path is a single file. If omitted under a directory, all text files are scanned."),
+    before: integerProperty(0, 10, 0, "Context lines before each match (0-10; values outside this range are clamped)."),
+    after: integerProperty(0, 10, 0, "Context lines after each match (0-10; values outside this range are clamped)."),
     ignoreCase: { type: "boolean", description: "Case-insensitive matching.", default: false },
-    exclude: { type: "array", items: { type: "string" }, description: "Glob patterns to exclude (e.g. [\"node_modules\", \".git\"]). Max 20." },
-    maxResults: integerProperty(1, 1000, 500, "Maximum number of results (1-1000)."),
+    exclude: { type: "array", items: { type: "string" }, description: "Glob patterns to exclude under a directory path (e.g. [\"node_modules\", \".git\"]). Max 20." },
+    maxResults: integerProperty(1, 1000, 500, "Maximum number of results (1-1000; values outside this range are clamped)."),
   }, ["pattern"]),
   descriptor("patch", "Replace one or more string occurrences in a file. Supports replace_all and preview mode. Safer than write for small edits.", {
     path: stringProperty("File path relative to the files plugin root (user home by default)."),

@@ -6,6 +6,9 @@ export type {
   AgentToolCall,
   AgentToolDefinition,
   AgentProviderRequest,
+  AgentPromptCachePolicy,
+  AgentPromptCacheMode,
+  AgentPromptCacheTtl,
   AgentProviderResult,
   AgentProvider,
   AgentProviderRegistryPort,
@@ -66,6 +69,8 @@ export {
   DEFAULT_REVIEW_SETTINGS,
   injectPrompts,
   applyVars,
+  SYSTEM_PREFIX_END_MARKER,
+  stableCurrentDate,
   // Tool-result dual representation (canonical model + projection).
   successToolResult,
   errorToolResult,

@@ -5,6 +5,75 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-08-07
+
+### Added
+
+- **Prompt cache hints.** Stable agent prompt prefixes now expose provider-neutral
+  cache metadata and provider strategies forward supported cache controls/keys,
+  reducing repeated prompt input across turns without caching dynamic MCP state.
+- **Long-turn IPC resilience.** Interactive `agent.run` requests no longer expire
+  at the renderer bridge's finite IPC deadline; cancellation remains explicit while
+  provider/tool operations retain their own bounded timeouts.
+- **Pipeline runs and history.** Persist and query pipeline run records
+  (`list-pipeline-runs`, `get-pipeline-run`), with WS protocol schemas/mappers
+  and a JSON pipeline store that keeps definitions and run history under the
+  durable jobs root.
+- **Cancel pipeline.** Command + agent/tool surface to cancel an in-flight
+  pipeline run with status/events through the existing automation bus.
+- **Event-triggered pipelines.** `PipelineTriggerCoordinator` and expanded
+  event-job matching start pipelines (not only jobs) from automation events.
+- **Pipeline step I/O helpers.** Shared pipeline output helpers for step-to-step
+  data hand-off, covered by unit tests.
+- **Pipelines UI depth.** Desktop pipelines workspace and modal refresh: run
+  history, cancel, richer job styling, UI map / howto docs updates.
+- **Package plugin staging.** monorepo `plugins/` is staged before electron-forge
+  package so first-party runtime and test artifacts never ship
+  (`notes.json`, `tests/`, vitest configs, `.vite` caches).
+- **Pre-package out-dir clean.** Rename-away of previous
+  `apps/desktop/out/NusaShell-*` so fuseblk/NTFS `.fuse_hidden*` tombstones
+  (open asar while NusaShell is running) no longer break
+  `electron-forge package` with `ENOTEMPTY`.
+- **`make test-install-safety`.** Fast gates for staging, installer userData
+  isolation, package clean, and files grep file-path behavior without a full
+  forge package.
+- **Notes userData path.** Notes MCP stores under
+  `NUSASHELL_USER_DATA/plugins-data/nusashell.notes/notes.json` (with one-time
+  migrate from the legacy plugin-adjacent file), so installs cannot overwrite
+  production notes with repo-local state.
+- Desktop jobs durable path: package bootstrap passes `jobsRoot` under
+  Electron userData (`agent/jobs`).
+
+### Fixed
+
+- **Live deltas after long turns and room switches.** Renderer listeners remain
+  attached for long-running turns, background-room deltas continue reducing into
+  per-room state, and stale asynchronous room loads can no longer replace the
+  latest selected room.
+- **Mermaid edge-label slips.** Flowchart fences with unquoted edge labels
+  containing `[]` / `()` / `{}` / `#` / HTML (common agent paste) now get a
+  render-time quote heal so Agent Canvas draws; system prompt + mermaid-workflow
+  docs state Mermaid 11 quote rules. Original fence source stays on Show source.
+- **Files `grep` file path.** Grepping a **file** path previously called
+  `readdir` on the file, swallowed `ENOTDIR`, and returned empty `results`
+  while `read` on the same path succeeded. Single-file paths now grep that file.
+- **Installer/userData isolation.** Local install scripts stay on
+  `~/.local/share/nusashell` (and macOS Applications); `make install` runs
+  `verify:package-runtime` after package so bundled plugins cannot include
+  notes runtime state or first-party plugin tests.
+- Notes E2E/dev isolation: notes persistence stays off the packaged plugin tree;
+  staged packaging and verify-packaged-runtime enforce the contract.
+- **Backend runtime resource paths.** Prompt/docs defaults now resolve from the
+  module location across source and built layouts, while the docs index cache
+  uses the platform home directory instead of the repository working directory.
+
+### Changed
+
+- Job/pipeline runtime settings respect configured job tool-round ceilings
+  (aligned with interactive agent max tool rounds where applicable).
+- Pipelines product docs (`pipelines-howto`, data-locations, UI map) document
+  userData/plugin-data boundaries and run/cancel behavior.
+
 ## [0.4.1] - 2026-08-06
 
 ### Fixed

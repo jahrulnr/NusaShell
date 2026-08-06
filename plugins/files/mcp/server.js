@@ -5,7 +5,9 @@ import {
   CallToolRequestSchema,
   GetPromptRequestSchema,
   ListPromptsRequestSchema,
+  ListResourcesRequestSchema,
   ListToolsRequestSchema,
+  ReadResourceRequestSchema,
   RootsListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { fileURLToPath } from "node:url";
@@ -22,7 +24,7 @@ async function main() {
   const contextEngine = new ContextEngine(service.root);
   const server = new Server(
     { name: "nusashell-files", version: "0.1.0" },
-    { capabilities: { tools: {}, prompts: {} } },
+    { capabilities: { tools: {}, prompts: {}, resources: {} } },
   );
 
   server.setRequestHandler(ListPromptsRequestSchema, async () => ({
@@ -31,6 +33,32 @@ async function main() {
 
   server.setRequestHandler(GetPromptRequestSchema, async (request) =>
     getFilesPrompt(request.params.name));
+
+  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+    const instructions = await contextEngine.readWorkspaceInstructions();
+    return {
+      resources: instructions ? [{
+        uri: instructions.uri,
+        name: instructions.name,
+        description: instructions.description,
+        mimeType: instructions.mimeType,
+      }] : [],
+    };
+  });
+
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    const instructions = await contextEngine.readWorkspaceInstructions();
+    if (!instructions || request.params.uri !== instructions.uri) {
+      throw new Error(`Unknown workspace resource: ${request.params.uri}`);
+    }
+    return {
+      contents: [{
+        uri: instructions.uri,
+        mimeType: instructions.mimeType,
+        text: instructions.text,
+      }],
+    };
+  });
 
   // MCP Roots: the shell client advertises roots and notifies on change.
   // Fetch the workspace root on connect and re-fetch on roots/list_changed,

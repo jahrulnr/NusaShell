@@ -291,6 +291,80 @@ export const JobCancelledEventSchema = z.object({
   }),
 });
 
+export const PipelineStartedEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("pipeline.started"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    pipelineId: z.string(),
+    name: z.string(),
+    runId: z.string(),
+    traceId: z.string(),
+    triggerSource: z.enum(["manual", "event", "schedule"]),
+    startedAt: z.string(),
+    timestamp: z.string(),
+  }),
+});
+
+export const PipelineCompletedEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("pipeline.completed"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    pipelineId: z.string(),
+    name: z.string(),
+    runId: z.string(),
+    traceId: z.string(),
+    summary: z.string(),
+    timestamp: z.string(),
+  }),
+});
+
+export const PipelineFailedEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("pipeline.failed"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    pipelineId: z.string(),
+    name: z.string(),
+    runId: z.string(),
+    traceId: z.string(),
+    error: z.string(),
+    errorCode: z.string().optional(),
+    timestamp: z.string(),
+  }),
+});
+
+export const PipelineCancelledEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("pipeline.cancelled"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    pipelineId: z.string(),
+    name: z.string(),
+    runId: z.string(),
+    traceId: z.string(),
+    timestamp: z.string(),
+  }),
+});
+
+export const PipelineStepUpdatedEventSchema = z.object({
+  kind: z.literal("event"),
+  event: z.literal("pipeline.step_updated"),
+  sequence: z.number().int().nonnegative(),
+  payload: z.object({
+    pipelineId: z.string(),
+    runId: z.string(),
+    traceId: z.string(),
+    stepId: z.string(),
+    status: z.string(),
+    runStatus: z.string(),
+    summary: z.string().optional(),
+    error: z.string().optional(),
+    timestamp: z.string(),
+  }),
+});
+
 export const AcpTextDeltaEventSchema = z.object({
   kind: z.literal("event"),
   event: z.literal("acp.text_delta"),
@@ -557,6 +631,11 @@ export const EventSchema = z.discriminatedUnion("event", [
   JobFailedEventSchema,
   JobStartedEventSchema,
   JobCancelledEventSchema,
+  PipelineStartedEventSchema,
+  PipelineCompletedEventSchema,
+  PipelineFailedEventSchema,
+  PipelineCancelledEventSchema,
+  PipelineStepUpdatedEventSchema,
   AcpTextDeltaEventSchema,
   AcpThoughtDeltaEventSchema,
   AcpToolCallEventSchema,
@@ -596,6 +675,11 @@ export type JobCompletedEvent = z.infer<typeof JobCompletedEventSchema>;
 export type JobFailedEvent = z.infer<typeof JobFailedEventSchema>;
 export type JobStartedEvent = z.infer<typeof JobStartedEventSchema>;
 export type JobCancelledEvent = z.infer<typeof JobCancelledEventSchema>;
+export type PipelineStartedEvent = z.infer<typeof PipelineStartedEventSchema>;
+export type PipelineCompletedEvent = z.infer<typeof PipelineCompletedEventSchema>;
+export type PipelineFailedEvent = z.infer<typeof PipelineFailedEventSchema>;
+export type PipelineCancelledEvent = z.infer<typeof PipelineCancelledEventSchema>;
+export type PipelineStepUpdatedEvent = z.infer<typeof PipelineStepUpdatedEventSchema>;
 export type AcpTextDeltaEvent = z.infer<typeof AcpTextDeltaEventSchema>;
 export type AcpThoughtDeltaEvent = z.infer<typeof AcpThoughtDeltaEventSchema>;
 export type AcpToolCallEvent = z.infer<typeof AcpToolCallEventSchema>;

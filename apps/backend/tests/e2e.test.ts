@@ -1,5 +1,7 @@
 import { describe, expect, it, afterAll, beforeAll } from "vitest";
-import { resolve, dirname } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createContainer } from "../src/container.js";
 import { NusaClient, WebSocketConnection } from "@nusashell/plugin-sdk";
@@ -7,12 +9,23 @@ import { NusaClient, WebSocketConnection } from "@nusashell/plugin-sdk";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLUGINS_ROOT = resolve(__dirname, "../../../plugins");
 const PORT = 9140;
+const NOTES_DATA_ENV = "NUSASHELL_NOTES_DATA_FILE";
 
 describe("E2E: notes plugin", () => {
   let container: ReturnType<typeof createContainer>;
   let client: NusaClient;
+  let notesDataDir: string;
+  let notesDataFile: string;
+  let originalNotesDataFile: string | undefined;
 
   beforeAll(async () => {
+    // Isolate Notes MCP persistence away from plugins/notes/notes.json so E2E
+    // never pollutes the repo copy that electron-forge packages into installs.
+    notesDataDir = await mkdtemp(join(tmpdir(), "nusashell-notes-e2e-"));
+    notesDataFile = join(notesDataDir, "notes.json");
+    originalNotesDataFile = process.env[NOTES_DATA_ENV];
+    process.env[NOTES_DATA_ENV] = notesDataFile;
+
     container = createContainer({
       port: PORT,
       host: "127.0.0.1",
@@ -27,8 +40,20 @@ describe("E2E: notes plugin", () => {
   });
 
   afterAll(async () => {
-    if (client) await client.disconnect();
-    if (container) await container.wsServer.stop();
+    try {
+      if (client) await client.disconnect();
+    } finally {
+      try {
+        if (container) {
+          await container.runtimeManager.stopAll();
+          await container.wsServer.stop();
+        }
+      } finally {
+        if (originalNotesDataFile === undefined) delete process.env[NOTES_DATA_ENV];
+        else process.env[NOTES_DATA_ENV] = originalNotesDataFile;
+        if (notesDataDir) await rm(notesDataDir, { recursive: true, force: true });
+      }
+    }
   });
 
   it("lists the notes plugin", async () => {
@@ -98,7 +123,8 @@ describe("E2E: notes plugin", () => {
     expect(result.requestId).toBe("00000000-0000-1000-8000-000000000001");
     const parsed = result.result as { note: { text: string }; totalNotes: number };
     expect(parsed.note.text).toBe("Hello from E2E");
-    expect(parsed.totalNotes).toBeGreaterThanOrEqual(1);
+    // Isolated temp store starts empty; proves create did not touch real data.
+    expect(parsed.totalNotes).toBe(1);
   });
 
   it("calls list tool", async () => {
@@ -110,9 +136,10 @@ describe("E2E: notes plugin", () => {
     );
 
     expect(result.requestId).toBe("00000000-0000-1000-8000-000000000002");
-    const parsed = result.result as { notes: unknown[]; total: number };
+    const parsed = result.result as { notes: Array<{ text: string }>; total: number };
     expect(parsed.notes).toBeInstanceOf(Array);
-    expect(parsed.notes.length).toBeGreaterThanOrEqual(1);
+    expect(parsed.total).toBe(1);
+    expect(parsed.notes.map((note) => note.text)).toEqual(["Hello from E2E"]);
   });
 
   it("stops the notes plugin", async () => {

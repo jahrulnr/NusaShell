@@ -1,8 +1,19 @@
 import type { EventEnvelope } from "@nusashell/contracts";
-import type { JobCompletedEvent, JobFailedEvent, JobStartedEvent, JobCancelledEvent, ApplicationEvent } from "@nusashell/application";
+import type {
+  ApplicationEvent,
+  JobCompletedEvent,
+  JobFailedEvent,
+  JobStartedEvent,
+  JobCancelledEvent,
+  PipelineStartedEvent,
+  PipelineCompletedEvent,
+  PipelineFailedEvent,
+  PipelineCancelledEvent,
+  PipelineStepUpdatedEvent,
+} from "@nusashell/application";
 
 /**
- * Maps job-domain events (started/completed/failed/cancelled) to WS event envelopes.
+ * Maps job and pipeline domain events to WS event envelopes.
  */
 export function mapJobEvent(
   event: ApplicationEvent,
@@ -66,6 +77,90 @@ export function mapJobEvent(
           name: e.name,
           traceId: e.traceId,
           timestamp,
+        },
+      };
+    }
+    case "pipeline.started": {
+      const e = event as PipelineStartedEvent;
+      return {
+        kind: "event",
+        event: "pipeline.started",
+        sequence,
+        payload: {
+          pipelineId: e.pipelineId,
+          name: e.name,
+          runId: e.runId,
+          traceId: e.traceId,
+          triggerSource: e.triggerSource,
+          startedAt: e.startedAt,
+          timestamp,
+        },
+      };
+    }
+    case "pipeline.completed": {
+      const e = event as PipelineCompletedEvent;
+      return {
+        kind: "event",
+        event: "pipeline.completed",
+        sequence,
+        payload: {
+          pipelineId: e.pipelineId,
+          name: e.name,
+          runId: e.runId,
+          traceId: e.traceId,
+          summary: e.summary,
+          timestamp,
+        },
+      };
+    }
+    case "pipeline.failed": {
+      const e = event as PipelineFailedEvent;
+      return {
+        kind: "event",
+        event: "pipeline.failed",
+        sequence,
+        payload: {
+          pipelineId: e.pipelineId,
+          name: e.name,
+          runId: e.runId,
+          traceId: e.traceId,
+          error: e.error,
+          timestamp,
+          ...(e.errorCode !== undefined ? { errorCode: e.errorCode } : {}),
+        },
+      };
+    }
+    case "pipeline.cancelled": {
+      const e = event as PipelineCancelledEvent;
+      return {
+        kind: "event",
+        event: "pipeline.cancelled",
+        sequence,
+        payload: {
+          pipelineId: e.pipelineId,
+          name: e.name,
+          runId: e.runId,
+          traceId: e.traceId,
+          timestamp,
+        },
+      };
+    }
+    case "pipeline.step_updated": {
+      const e = event as PipelineStepUpdatedEvent;
+      return {
+        kind: "event",
+        event: "pipeline.step_updated",
+        sequence,
+        payload: {
+          pipelineId: e.pipelineId,
+          runId: e.runId,
+          traceId: e.traceId,
+          stepId: e.stepId,
+          status: e.status,
+          runStatus: e.runStatus,
+          timestamp,
+          ...(e.summary !== undefined ? { summary: e.summary } : {}),
+          ...(e.error !== undefined ? { error: e.error } : {}),
         },
       };
     }

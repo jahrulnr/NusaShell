@@ -150,18 +150,18 @@ describe("evaluateCondition", () => {
 describe("EventJobMatcher", () => {
   let store: FakeJobStore;
   let dispatcher: EventDispatcher;
-  let runOneNowMock: ReturnType<typeof vi.fn>;
+  let startJobNowMock: ReturnType<typeof vi.fn>;
   let matcher: EventJobMatcher;
   let nowMs: number;
 
   beforeEach(() => {
     store = new FakeJobStore();
     dispatcher = new EventDispatcher();
-    runOneNowMock = vi.fn().mockResolvedValue({ ok: true });
+    startJobNowMock = vi.fn().mockResolvedValue({ ok: true });
     nowMs = Date.now();
     matcher = new EventJobMatcher({
       store,
-      scheduler: { runOneNow: runOneNowMock } as never,
+      scheduler: { startJobNow: startJobNowMock } as never,
       eventDispatcher: dispatcher,
       now: () => new Date(nowMs),
     });
@@ -176,44 +176,44 @@ describe("EventJobMatcher", () => {
     const job = makeEventJob("mail.new");
     store.jobs.set(job.id, job);
     await dispatcher.publish(createAutomationEvent("mail.new", "mail", { subject: "Hello" }));
-    expect(runOneNowMock).toHaveBeenCalledWith(job.id, expect.any(Object), undefined);
+    expect(startJobNowMock).toHaveBeenCalledWith(job.id, expect.any(Object), undefined);
   });
 
   it("does not fire a non-matching event-job", async () => {
     const job = makeEventJob("mail.new");
     store.jobs.set(job.id, job);
     await dispatcher.publish(createAutomationEvent("resource.updated", "files", { uri: "file:///x" }));
-    expect(runOneNowMock).not.toHaveBeenCalled();
+    expect(startJobNowMock).not.toHaveBeenCalled();
   });
 
   it("does not fire disabled event-jobs", async () => {
     const job = makeEventJob("mail.new", { enabled: false });
     store.jobs.set(job.id, job);
     await dispatcher.publish(createAutomationEvent("mail.new", "mail", {}));
-    expect(runOneNowMock).not.toHaveBeenCalled();
+    expect(startJobNowMock).not.toHaveBeenCalled();
   });
 
   it("does not fire schedule-trigger jobs", async () => {
     const job = makeScheduleJob();
     store.jobs.set(job.id, job);
     await dispatcher.publish(createAutomationEvent("mail.new", "mail", {}));
-    expect(runOneNowMock).not.toHaveBeenCalled();
+    expect(startJobNowMock).not.toHaveBeenCalled();
   });
 
   it("filters by pluginId when set", async () => {
     const job = makeEventJob("mail.new", { trigger: { kind: "event", pattern: "mail.new", pluginId: "mail" } });
     store.jobs.set(job.id, job);
     await dispatcher.publish(createAutomationEvent("mail.new", "other-plugin", {}));
-    expect(runOneNowMock).not.toHaveBeenCalled();
+    expect(startJobNowMock).not.toHaveBeenCalled();
     await dispatcher.publish(createAutomationEvent("mail.new", "mail", {}));
-    expect(runOneNowMock).toHaveBeenCalledWith(job.id, expect.any(Object), undefined);
+    expect(startJobNowMock).toHaveBeenCalledWith(job.id, expect.any(Object), undefined);
   });
 
   it("matches glob patterns", async () => {
     const job = makeEventJob("mail.*");
     store.jobs.set(job.id, job);
     await dispatcher.publish(createAutomationEvent("mail.sent", "mail", {}));
-    expect(runOneNowMock).toHaveBeenCalledWith(job.id, expect.any(Object), undefined);
+    expect(startJobNowMock).toHaveBeenCalledWith(job.id, expect.any(Object), undefined);
   });
 
   it("evaluates conditions (AND)", async () => {
@@ -229,9 +229,9 @@ describe("EventJobMatcher", () => {
     });
     store.jobs.set(job.id, job);
     await dispatcher.publish(createAutomationEvent("mail.new", "mail", { priority: "low", subject: "Re: Hello" }));
-    expect(runOneNowMock).not.toHaveBeenCalled();
+    expect(startJobNowMock).not.toHaveBeenCalled();
     await dispatcher.publish(createAutomationEvent("mail.new", "mail", { priority: "high", subject: "Re: Hello" }));
-    expect(runOneNowMock).toHaveBeenCalledWith(job.id, expect.any(Object), undefined);
+    expect(startJobNowMock).toHaveBeenCalledWith(job.id, expect.any(Object), undefined);
   });
 
   it("respects maxFiresPerHour cap", async () => {
@@ -242,7 +242,7 @@ describe("EventJobMatcher", () => {
     for (let i = 0; i < 5; i++) {
       await dispatcher.publish(createAutomationEvent("mail.new", "mail", { i }));
     }
-    expect(runOneNowMock).toHaveBeenCalledTimes(2);
+    expect(startJobNowMock).toHaveBeenCalledTimes(2);
   });
 
   it("coalesces events within throttleMs (latest wins)", async () => {
@@ -252,13 +252,13 @@ describe("EventJobMatcher", () => {
     });
     store.jobs.set(job.id, job);
     await dispatcher.publish(createAutomationEvent("mail.new", "mail", { seq: 1 }));
-    expect(runOneNowMock).toHaveBeenCalledTimes(1);
+    expect(startJobNowMock).toHaveBeenCalledTimes(1);
     // Within throttle window — should coalesce, not fire immediately
     await dispatcher.publish(createAutomationEvent("mail.new", "mail", { seq: 2 }));
-    expect(runOneNowMock).toHaveBeenCalledTimes(1);
+    expect(startJobNowMock).toHaveBeenCalledTimes(1);
     // Advance past throttle window
     vi.advanceTimersByTime(1100);
-    await vi.waitFor(() => expect(runOneNowMock).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(startJobNowMock).toHaveBeenCalledTimes(2));
     vi.useRealTimers();
   });
 });

@@ -53,6 +53,19 @@ export interface PluginRuntimeManagerDeps {
   readonly toolCallTimeoutMs?: number;
   readonly automationEmitRegistry?: AutomationEmitRegistry;
   readonly automationRateLimiter?: AutomationRateLimiterPort;
+  /**
+   * Auto-restart of a plugin that crashed unexpectedly (process exit / close
+   * outside the intentional stop path), with exponential backoff and a
+   * circuit breaker (max restarts within a window). Disable per-test or per
+   * product config by passing `{ enabled: false }`.
+   */
+  readonly autoRestart?: {
+    readonly enabled?: boolean;
+    readonly maxRestarts?: number;
+    readonly windowMs?: number;
+    readonly baseDelayMs?: number;
+    readonly maxDelayMs?: number;
+  };
 }
 
 export type {
@@ -150,12 +163,16 @@ export class PluginRuntimeManager {
   ): Promise<unknown> {
     const entry = await this.ensureEntry(pluginId);
     const mergedOptions = signal ? { ...options, signal } : options;
-    return entry.queue.enqueue(async () => this.tracker.callToolLocked(entry, mergedOptions));
+    // Tool calls are read-heavy and independent per requestId: run them
+    // concurrently so one slow call does not block another call to the same
+    // plugin (ticket #1). Lifecycle ops stay exclusive — runtime state + the
+    // tracker's cancel-on-stop keep them mutually exclusive.
+    return entry.queue.enqueueConcurrent(async () => this.tracker.callToolLocked(entry, mergedOptions));
   }
 
   async cancelTool(pluginId: PluginId, requestId: string): Promise<void> {
     const entry = await this.ensureEntry(pluginId);
-    return entry.queue.enqueue(async () => {
+    return entry.queue.enqueueConcurrent(async () => {
       this.tracker.cancelPendingCall(entry, requestId, "TOOL_CALL_CANCELLED", "Cancelled by client");
     });
   }
@@ -336,6 +353,10 @@ export class PluginRuntimeManager {
       mcpClient: null,
       pendingCalls: new Map(),
       restartCount: 0,
+      restarting: false,
+      restartWindowStartAt: 0,
+      restartTimer: null,
+      lastCrashReason: undefined,
       workspace: undefined,
       lastRootsWorkspace: undefined,
       launchArgs: undefined,

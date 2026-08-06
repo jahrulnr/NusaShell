@@ -83,6 +83,41 @@ describe("OpenAiCompatibleAgentProvider", () => {
     });
   });
 
+  it("marks only the stable system prefix for Anthropic prompt caching", async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      model: "claude-sonnet-4",
+      content: [{ type: "text", text: "ok" }],
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const provider = new OpenAiCompatibleAgentProvider({
+      id: "claude",
+      api: "messages",
+      baseUrl: "https://api.anthropic.com/v1",
+      apiKey: "anthropic-key",
+      fetchFn,
+    });
+
+    await provider.complete({
+      traceId: "trace-cache",
+      round: 1,
+      messages: [
+        { role: "system", content: "stable instructions" },
+        { role: "system", content: "stable tools" },
+        { role: "system", content: "dynamic workspace" },
+        { role: "user", content: "hello" },
+      ],
+      tools: [],
+      model: "claude-sonnet-4",
+      promptCache: { mode: "auto", ttl: "1h", stableSystemMessages: 2 },
+    });
+
+    const body = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body));
+    expect(body.system).toEqual([
+      { type: "text", text: "stable instructions" },
+      { type: "text", text: "stable tools", cache_control: { type: "ephemeral", ttl: "1h" } },
+      { type: "text", text: "dynamic workspace" },
+    ]);
+  });
+
   it("allows an omitted default model when each turn supplies one", async () => {
     const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       model: "turn-model",
@@ -105,6 +140,29 @@ describe("OpenAiCompatibleAgentProvider", () => {
     expect(JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body))).toMatchObject({
       model: "turn-model",
     });
+  });
+
+  it("does not send a cache routing key when caching is disabled", async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      model: "model",
+      choices: [{ message: { content: "ok" } }],
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const provider = new OpenAiCompatibleAgentProvider({
+      baseUrl: "https://provider.example/v1",
+      apiKey: "secret-key",
+      fetchFn,
+    });
+
+    await provider.complete({
+      traceId: "trace-cache-off",
+      round: 1,
+      messages: [{ role: "user", content: "Hello" }],
+      tools: [],
+      model: "model",
+      promptCache: { mode: "off", key: "conversation-key" },
+    });
+
+    expect(JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body))).not.toHaveProperty("prompt_cache_key");
   });
 
   it("omits authorization for local gateways that do not require a key", async () => {

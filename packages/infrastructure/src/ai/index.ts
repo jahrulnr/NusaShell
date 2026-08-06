@@ -11,5 +11,6 @@ export {
 export {
   extractTextToolCalls,
   mergeTextToolCalls,
+  stripLeakedToolProtocol,
   type TextToolCallParseResult,
 } from "./text-tool-call-parser.js";

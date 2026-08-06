@@ -112,24 +112,93 @@ export class EventJobMatcher {
     return true;
   }
 
-  /** Phase E: match event-triggered pipelines and run them. */
+  /** Phase E: match event-triggered pipelines and dispatch without blocking event intake. */
   private async matchPipelines(event: AutomationEvent): Promise<void> {
     if (!this.deps.pipelineStore || !this.deps.pipelineScheduler) return;
     const pipelines = await this.deps.pipelineStore.list();
+    const now = (this.deps.now ?? (() => new Date()))().getTime();
     const ctx = templateContextFromEvent(event);
+    const chainDepth = event.chainDepth ?? 0;
+
     for (const pipeline of pipelines) {
       if (!pipeline.enabled) continue;
       if (pipeline.trigger.kind !== "event") continue;
       if (!this.matches(pipeline.trigger, event)) continue;
+
+      // Cycle guard: block self-trigger and chains that crossed the max depth.
+      // We compare against the event's origin (job or pipeline) by aggregate id.
+      const originAggregate = event.originJobId ?? event.originPipelineId;
+      if (originAggregate === pipeline.id) {
+        this.deps.logger?.warn(
+          "pipeline %s blocked: self-trigger cycle (event origin = this pipeline)",
+          pipeline.id,
+        );
+        continue;
+      }
+      if (chainDepth >= MAX_CHAIN_DEPTH) {
+        this.deps.logger?.warn(
+          "pipeline %s blocked: chain depth %d exceeds max %d",
+          pipeline.id,
+          chainDepth,
+          MAX_CHAIN_DEPTH,
+        );
+        continue;
+      }
+
+      const trigger = pipeline.trigger;
+      if (trigger.maxFiresPerHour !== undefined) {
+        if (!this.withinHourlyCap(`pipeline:${pipeline.id}`, trigger.maxFiresPerHour, now)) {
+          this.deps.logger?.debug(
+            "pipeline %s dropped: maxFiresPerHour (%d) reached",
+            pipeline.id,
+            trigger.maxFiresPerHour,
+          );
+          continue;
+        }
+      }
+      if (trigger.throttleMs !== undefined && trigger.throttleMs > 0) {
+        const key = `pipeline:${pipeline.id}`;
+        const lastFire = this.lastFireAt.get(key) ?? 0;
+        if (now - lastFire < trigger.throttleMs) {
+          // Coalesce (latest wins) — schedule a single fire at window end,
+          // rather than dropping the event silently. Same semantics as jobs.
+          this.scheduleCoalesced(`pipeline:${pipeline.id}`, event, lastFire + trigger.throttleMs);
+          this.deps.logger?.debug(
+            "pipeline %s throttled: coalesced in %dms",
+            pipeline.id,
+            trigger.throttleMs - (now - lastFire),
+          );
+          continue;
+        }
+      }
+
+      this.lastFireAt.set(`pipeline:${pipeline.id}`, now);
+      this.recordFire(`pipeline:${pipeline.id}`, now);
       this.deps.logger?.info(
         "pipeline %s firing for event %s",
         pipeline.id,
         event.eventType,
       );
-      const result = await this.deps.pipelineScheduler.runPipeline(pipeline.id, ctx);
-      if (!result.ok) {
-        this.deps.logger?.debug("pipeline %s run failed: %s", pipeline.id, result.error ?? "unknown");
-      }
+
+      // Admit then dispatch asynchronously so a slow pipeline cannot block later events.
+      void this.deps.pipelineScheduler
+        .runPipeline(pipeline.id, ctx, { source: "event" })
+        .then((result) => {
+          if (!result.ok) {
+            this.deps.logger?.debug(
+              "pipeline %s run failed: %s",
+              pipeline.id,
+              result.error ?? "unknown",
+            );
+          }
+        })
+        .catch((error) => {
+          this.deps.logger?.error(
+            "pipeline %s dispatch error: %s",
+            pipeline.id,
+            error instanceof Error ? error.message : String(error),
+          );
+        });
     }
   }
 
@@ -175,31 +244,58 @@ export class EventJobMatcher {
     const chainOrigin = event.originJobId !== undefined
       ? { originJobId: event.originJobId, chainDepth: event.chainDepth ?? 0 }
       : undefined;
-    const result = await this.deps.scheduler.runOneNow(job.id, ctx, chainOrigin);
+    // Fire-and-track: startJobNow returns immediately and runs the job in the
+    // background, so a long-running event-job cannot block subsequent events.
+    const result = await this.deps.scheduler.startJobNow(job.id, ctx, chainOrigin);
     if (!result.ok) {
       this.deps.logger?.debug("event-job %s fire skipped: %s", job.id, result.error ?? "unknown");
     }
   }
 
-  private scheduleCoalesced(job: Job, event: AutomationEvent, fireAt: number): void {
-    // Replace any pending coalesced event for this job (latest wins).
-    this.pendingCoalesce.set(job.id, { event, fireAt });
-    const existing = this.coalesceTimers.get(job.id);
+  private scheduleCoalesced(jobOrKey: Job | string, event: AutomationEvent, fireAt: number): void {
+    // Accept a Job object (job path) or a string key (e.g. "pipeline:<id>").
+    // Latest event wins for the key.
+    const key = typeof jobOrKey === "string" ? jobOrKey : jobOrKey.id;
+    this.pendingCoalesce.set(key, { event, fireAt });
+    const existing = this.coalesceTimers.get(key);
     if (existing) clearTimeout(existing);
     const delay = Math.max(0, fireAt - (this.deps.now ?? (() => new Date()))().getTime());
     const timer = setTimeout(() => {
-      void this.flushCoalesced(job.id);
+      void this.flushCoalesced(key);
     }, delay);
-    this.coalesceTimers.set(job.id, timer);
+    this.coalesceTimers.set(key, timer);
   }
 
-  private async flushCoalesced(jobId: string): Promise<void> {
-    this.coalesceTimers.delete(jobId);
-    const pending = this.pendingCoalesce.get(jobId);
+  private async flushCoalesced(key: string): Promise<void> {
+    this.coalesceTimers.delete(key);
+    const pending = this.pendingCoalesce.get(key);
     if (!pending) return;
-    this.pendingCoalesce.delete(jobId);
+    this.pendingCoalesce.delete(key);
     const now = (this.deps.now ?? (() => new Date()))().getTime();
-    const job = await this.deps.store.get(jobId);
+    if (key.startsWith("pipeline:")) {
+      const pipelineId = key.slice("pipeline:".length);
+      const pipeline = this.deps.pipelineStore
+        ? await this.deps.pipelineStore.get(pipelineId)
+        : null;
+      if (!pipeline || !pipeline.enabled || !this.deps.pipelineScheduler) return;
+      this.lastFireAt.set(key, now);
+      this.recordFire(key, now);
+      void this.deps.pipelineScheduler
+        .runPipeline(
+          pipelineId,
+          templateContextFromEvent(pending.event),
+          { source: "event" },
+        )
+        .catch((error) => {
+          this.deps.logger?.error(
+            "pipeline %s coalesced dispatch error: %s",
+            pipelineId,
+            error instanceof Error ? error.message : String(error),
+          );
+        });
+      return;
+    }
+    const job = await this.deps.store.get(key);
     if (!job || !job.enabled) return;
     await this.fire(job, pending.event, now);
   }
@@ -306,6 +402,39 @@ export function evaluateConditionNode(node: ConditionNode, event: AutomationEven
   if ("path" in node) return evaluateCondition(node, event);
   if (node.op === "or") return node.any.some((child) => evaluateConditionNode(child, event));
   if (node.op === "not") return !evaluateConditionNode(node.of, event);
+  return false;
+}
+
+/**
+ * Evaluate a leaf condition directly against a root object (e.g. pipeline
+ * step context). Dotted paths traverse the object itself: `{ path: "a.b" }`
+ * on `{ a: { b: 1 } }` (not on a synthetic event envelope's payload). Use
+ * this overload for in-pipeline step conditions so `outputKey` references
+ * resolve naturally.
+ */
+export function evaluateConditionAgainstObject(cond: Condition, root: unknown): boolean {
+  const resolved = resolveDotPath(root, cond.path);
+  if (resolved === undefined) return false;
+  const str = String(resolved);
+  switch (cond.op) {
+    case "eq":
+      return str === cond.value;
+    case "ne":
+      return str !== cond.value;
+    case "contains":
+      return str.includes(cond.value);
+    case "regex":
+      return safeRegexTest(cond.value, str);
+  }
+}
+
+/**
+ * Evaluate a condition node against a plain root object (pipeline context).
+ */
+export function evaluateConditionNodeAgainstObject(node: ConditionNode, root: unknown): boolean {
+  if ("path" in node) return evaluateConditionAgainstObject(node, root);
+  if (node.op === "or") return node.any.some((child) => evaluateConditionNodeAgainstObject(child, root));
+  if (node.op === "not") return !evaluateConditionNodeAgainstObject(node.of, root);
   return false;
 }
 

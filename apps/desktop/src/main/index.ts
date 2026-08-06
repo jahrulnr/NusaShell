@@ -160,6 +160,7 @@ async function startBackend(): Promise<BootstrapResult> {
   const docsIndexStorageRoot = resolve(dataRoot, "agent", "docs-index");
   const skillsRoot = resolve(dataRoot, "skills");
   const memoryRoot = resolve(dataRoot, "memories");
+  const jobsRoot = resolve(dataRoot, "agent", "jobs");
   mailSettingsStore ??= new MailSettingsStore(resolve(dataRoot, "mail-settings.json"));
   await mailSettingsStore.load();
 
@@ -178,6 +179,7 @@ async function startBackend(): Promise<BootstrapResult> {
     docsIndexStorageRoot,
     skillsRoot,
     memoryRoot,
+    jobsRoot,
     logFile: resolve(dataRoot, "logs", "nusashell.log"),
     // Phase 3: desktop uses IPC, not the loopback WebSocket. Keep the WS
     // server off the product path so there is no listening TCP socket.

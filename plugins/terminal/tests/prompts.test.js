@@ -11,6 +11,7 @@ describe("Terminal MCP prompts", () => {
     expect(text).toContain("exec");
     expect(text).toContain("open");
     expect(text).toContain("absolute cwd");
+    expect(text).toContain("AGENTS.md");
   });
 
   it("rejects unknown prompts", () => {

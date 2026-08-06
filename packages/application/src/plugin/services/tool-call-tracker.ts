@@ -89,7 +89,22 @@ export class ToolCallTracker {
         },
         timer,
       };
-      entry.pendingCalls.set(RequestId.toString(toolCall.requestId), pending);
+      const idString = RequestId.toString(toolCall.requestId);
+      // Concurrent tool calls may race with a duplicate requestId (previously
+      // impossible because calls were serialized). Reject the duplicate
+      // deterministically instead of overwriting the pending entry, which
+      // would leave the first call's settle hanging (ticket #1).
+      if (entry.pendingCalls.has(idString)) {
+        reject(
+          new ApplicationError(
+            "INVALID_REQUEST_ID",
+            `duplicate request id: ${idString}`,
+            { pluginId: PluginId.toString(entry.pluginId) },
+          ),
+        );
+        return;
+      }
+      entry.pendingCalls.set(idString, pending);
 
       const onAbort = () => {
         this.cancelPendingCall(

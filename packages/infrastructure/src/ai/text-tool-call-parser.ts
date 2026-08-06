@@ -11,9 +11,24 @@ export interface TextToolCallParseResult {
   readonly text: string;
 }
 
+/**
+ * Recover tool calls that models embed in assistant text, and strip protocol
+ * leakage so it never reaches the user UI.
+ *
+ * Supported call dialects:
+ * - fenced `<function=name>…`
+ * - Anthropic invoke / tool_use XML
+ * - Kimi pipe markers
+ * - DeepSeek V3.2/V4 DSML (`<｜DSML｜tool_calls>` / invoke / parameter)
+ *
+ * Also strips echoed tool results (`<tool_result>…`) and orphan DSML tokens —
+ * DeepSeek-v4-flash sometimes regurgitates prior MCP envelopes + half-closed
+ * DSML tags into the free-text stream.
+ */
 export function extractTextToolCalls(rawText: string): TextToolCallParseResult {
-  const text = normalizeKimiText(rawText);
+  const text = normalizeSpecialTokenText(rawText);
   const located = [
+    ...extractDsmlCalls(text),
     ...extractFunctionCalls(text),
     ...extractAnthropicInvokes(text),
     ...extractToolUseCalls(text),
@@ -28,10 +43,10 @@ export function extractTextToolCalls(rawText: string): TextToolCallParseResult {
       cleaned += text.slice(cursor, item.start);
       cursor = item.end;
     }
-    calls.push(item.call);
+    if (item.call.name) calls.push(item.call);
   }
   cleaned += text.slice(cursor);
-  return { calls, text: cleaned.trim() };
+  return { calls, text: stripLeakedToolProtocol(cleaned).trim() };
 }
 
 export function mergeTextToolCalls(
@@ -53,6 +68,110 @@ export function mergeTextToolCalls(
     if (!consumed.has(index)) merged.push(call);
   });
   return { calls: merged, text: parsed.text };
+}
+
+/**
+ * DeepSeek V3.2/V4 DSML tool markup.
+ * Special tokens use fullwidth pipes (｜); normalizeSpecialTokenText folds them
+ * to `|` first so one regex covers both tokenized and ASCII-leak shapes.
+ *
+ * ```
+ * <|DSML|tool_calls>
+ * <|DSML|invoke name="fn">
+ * <|DSML|parameter name="x" string="true">val</|DSML|parameter>
+ * </|DSML|invoke>
+ * </|DSML|tool_calls>
+ * ```
+ * V3.2 may use `function_calls` as the wrapper name instead of `tool_calls`.
+ */
+function extractDsmlCalls(text: string): LocatedCall[] {
+  const out: LocatedCall[] = [];
+  const sectionPattern =
+    /<\|\s*DSML\s*\|\s*(?:tool_calls|function_calls)\s*>([\s\S]*?)<\/\|\s*DSML\s*\|\s*(?:tool_calls|function_calls)\s*>/gi;
+  for (const section of text.matchAll(sectionPattern)) {
+    const sectionBody = section[1] ?? "";
+    const sectionStart = section.index ?? 0;
+    const sectionEnd = sectionStart + (section[0]?.length ?? 0);
+    const invokePattern =
+      /<\|\s*DSML\s*\|\s*invoke\s+name\s*=\s*["']([^"']+)["']\s*>([\s\S]*?)<\/\|\s*DSML\s*\|\s*invoke\s*>/gi;
+    let anyInside = false;
+    for (const invoke of sectionBody.matchAll(invokePattern)) {
+      anyInside = true;
+      const name = (invoke[1] ?? "").trim();
+      const args = parseDsmlParameters(invoke[2] ?? "");
+      out.push({
+        start: sectionStart,
+        end: sectionEnd,
+        call: createCall(name, args, out.length),
+      });
+    }
+    if (!anyInside) {
+      // Empty or garbled wrapper — mark span so markup still leaves cleaned text.
+      out.push({
+        start: sectionStart,
+        end: sectionEnd,
+        call: createCall("", {}, out.length),
+      });
+    }
+  }
+
+  // Standalone invoke outside a wrapper (partial streams / proxy detokenizers).
+  const loneInvoke =
+    /<\|\s*DSML\s*\|\s*invoke\s+name\s*=\s*["']([^"']+)["']\s*>([\s\S]*?)<\/\|\s*DSML\s*\|\s*invoke\s*>/gi;
+  for (const invoke of text.matchAll(loneInvoke)) {
+    const start = invoke.index ?? 0;
+    const end = start + (invoke[0]?.length ?? 0);
+    if (out.some((item) => start >= item.start && end <= item.end)) continue;
+    out.push({
+      start,
+      end,
+      call: createCall((invoke[1] ?? "").trim(), parseDsmlParameters(invoke[2] ?? ""), out.length),
+    });
+  }
+  return out;
+}
+
+function parseDsmlParameters(body: string): Record<string, unknown> {
+  const args: Record<string, unknown> = {};
+  const parameterPattern =
+    /<\|\s*DSML\s*\|\s*parameter\s+name\s*=\s*["']([^"']+)["'](?:\s+string\s*=\s*["'](true|false)["'])?\s*>([\s\S]*?)<\/\|\s*DSML\s*\|\s*parameter\s*>/gi;
+  for (const match of body.matchAll(parameterPattern)) {
+    const name = match[1] ?? "";
+    const stringFlag = (match[2] ?? "true").toLowerCase() === "true";
+    const raw = match[3] ?? "";
+    if (!name) continue;
+    if (stringFlag) {
+      args[name] = raw;
+      continue;
+    }
+    try {
+      args[name] = JSON.parse(raw.trim()) as unknown;
+    } catch {
+      args[name] = coerceValue(raw);
+    }
+  }
+  return args;
+}
+
+/**
+ * Remove tool protocol that is not a recoverable call: echoed tool results,
+ * orphan DSML open/close tokens, and short pre-tag garbled detokenization.
+ */
+export function stripLeakedToolProtocol(text: string): string {
+  let next = text;
+  // Paired tool_result blocks (models echoing MCP envelopes as free text).
+  next = next.replace(/[^\s\n]{0,8}<tool_result\b[^>]*>[\s\S]*?<\/tool_result>/gi, "");
+  next = next.replace(/<tool_result\b[^>]*>[\s\S]*?<\/tool_result>/gi, "");
+  // Orphan opens/closes + short junk immediately before a stray closer.
+  next = next.replace(/[^\s\n]{0,8}<\/tool_result>/gi, "");
+  next = next.replace(/<\/?tool_result\b[^>]*>/gi, "");
+  // Orphan DSML tokens (partial or unmatched after extractDsmlCalls).
+  next = next.replace(/<\/?\|\s*DSML\s*\|[^>\n]{0,80}>/gi, "");
+  // Half-open DSML tool_calls that never closed.
+  next = next.replace(/<\|\s*DSML\s*\|\s*(?:tool_calls|function_calls)\s*>[\s\S]*$/gi, "");
+  // Control residue from broken special-token detokenizers (e.g. "Bdy_S").
+  next = next.replace(/(^|\n)\s*[A-Za-z]{1,4}_[A-Za-z0-9]{1,4}\s*(?=\n|$)/g, "$1");
+  return next.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function extractFunctionCalls(text: string): LocatedCall[] {
@@ -149,7 +268,11 @@ function parseKimiArguments(value: string): Record<string, unknown> {
   return Object.keys(args).length > 0 ? args : { input: value.trim() };
 }
 
-function normalizeKimiText(value: string): string {
+/**
+ * Fold DeepSeek/Kimi special-token presentation into a stable ASCII-ish form
+ * used by the extractors: fullwidth pipes → `|`, unusual underscores → `_`.
+ */
+function normalizeSpecialTokenText(value: string): string {
   return value
     .replace(/[｜│]/g, "|")
     .replace(/[▁‗]/g, "_")

@@ -5,6 +5,11 @@
 # local electron-forge package output instead of downloading a release tarball.
 # This is what `make install` runs after `pnpm desktop:make`.
 #
+# Durable application state (conversations, AI settings, notes, user plugins)
+# lives under Electron userData (prod appData/.../nusashell). This installer
+# never reads or writes that directory — only the app binary under
+# ~/.local/share/nusashell (Linux) or ~/Applications (macOS).
+#
 # Usage:
 #   make install                      # build + install
 #   bash scripts/install-local.sh     # install from an existing build

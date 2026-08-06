@@ -188,6 +188,43 @@ export class JobScheduler {
     templateContext?: TemplateContext,
     chainOrigin?: { readonly originJobId: string; readonly chainDepth: number },
   ): Promise<{ ok: boolean; error?: string }> {
+    const claim = await this.claimForRun(jobId);
+    if (!claim.ok) return claim;
+    try {
+      await this.dispatch(claim.job, claim.now, claim.claimId, templateContext, chainOrigin);
+      return { ok: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false, error: message };
+    }
+  }
+
+  /**
+   * Fire a job immediately WITHOUT waiting for it to finish (fire-and-track).
+   * Claims the job, then dispatches in the background. Used by the IPC/WS
+   * `job.run` request so a long-running job does not block the request or the
+   * renderer. Progress is published via job.* events.
+   */
+  async startJobNow(
+    jobId: string,
+    templateContext?: TemplateContext,
+    chainOrigin?: { readonly originJobId: string; readonly chainDepth: number },
+  ): Promise<{ ok: boolean; error?: string }> {
+    const claim = await this.claimForRun(jobId);
+    if (!claim.ok) return claim;
+    const { job, now, claimId } = claim;
+    void this.dispatch(job, now, claimId, templateContext, chainOrigin).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      this.deps.logger?.error("job %s background dispatch failed: %s", job.id, message);
+    });
+    return { ok: true };
+  }
+
+  /** Claim a job for a manual/event fire, or { ok: false, error } on failure. */
+  private async claimForRun(jobId: string): Promise<
+    | { ok: true; job: Job; now: Date; claimId: string }
+    | { ok: false; error: string }
+  > {
     const job = await this.deps.store.get(jobId);
     if (!job) return { ok: false, error: "job not found" };
     if (!job.enabled) return { ok: false, error: "job is paused" };
@@ -195,13 +232,7 @@ export class JobScheduler {
     const claimId = randomUUID();
     const claimed = await this.deps.store.claimFire(jobId, claimId, this.settings.claimTtlSeconds, now);
     if (!claimed) return { ok: false, error: "job is already running" };
-    try {
-      await this.dispatch(job, now, claimId, templateContext, chainOrigin);
-      return { ok: true };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { ok: false, error: message };
-    }
+    return { ok: true, job, now, claimId };
   }
 
   private async processJob(job: Job, now: Date): Promise<void> {
@@ -349,6 +380,17 @@ export class JobScheduler {
     } finally {
       this.activeJobIds.delete(job.id);
       this.activeRuns.delete(job.id);
+      // Best-effort release so a thrown dispatch never strands the claim until
+      // TTL. releaseFire is idempotent (claim may already be released).
+      try {
+        await this.deps.store.releaseFire(job.id, claimId);
+      } catch (error) {
+        this.deps.logger?.debug(
+          "job %s claim release in finally failed: %s",
+          job.id,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
     }
   }
 

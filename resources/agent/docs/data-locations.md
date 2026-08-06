@@ -39,10 +39,18 @@ Within the durable state root, the desktop app may create:
 | `skills/` | User-managed local skills |
 | `memories/` | Agent memory and user-profile data |
 | `plugins/` | Writable user-installed and in-app-agent-authored plugin folders |
+| `plugins-data/` | Plugin-owned durable data (e.g. Notes `nusashell.notes/notes.json`, Kanban DBs) |
+| `agent/jobs/` | Scheduled jobs and pipeline definitions / run history |
 
 Plugin metadata is stored in SQLite when `NUSASHELL_DB_PATH` is configured by
 the desktop composition root. `NUSASHELL_DB_PATH` is an explicit override, so
 do not infer its filename from the OS path alone.
+
+Notes are **not** stored inside the bundled/install plugin tree
+(`resources/plugins/notes/`). They live under
+`<userData>/plugins-data/nusashell.notes/notes.json` so `make install` and
+release upgrades cannot overwrite production notes with local-dev or test
+state left under the repository's `plugins/` tree.
 
 ## Bundled and installed plugins
 
@@ -52,7 +60,9 @@ User-installed and in-app-agent-authored plugin folders live under
 an already-valid folder; do not silently treat a folder on disk as installed.
 
 Packaged read-only plugin assets are shipped with the application, not copied to
-userData. For the Linux user-space installer, the bundled plugin tree is below:
+userData. Packaging excludes plugin runtime state (`notes.json`) and first-party
+`tests/` trees so local test data never rides into an install. For the Linux
+user-space installer, the bundled plugin tree is below:
 
 ```text
 ~/.local/share/nusashell/versions/<version>/resources/plugins/

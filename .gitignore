@@ -3,6 +3,7 @@ dist/
 build/
 out/
 tmp/
+.experimental
 .vite/
 .playwright-mcp/
 coverage/
@@ -11,3 +12,4 @@ coverage/
 .DS_Store
 .nusashell/
 plugins/notes/notes.json
+apps/desktop/.package-staging/

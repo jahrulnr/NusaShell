@@ -25,6 +25,8 @@ const MAX_EXTRACT_BYTES = 1024 * 1024;
 const MAX_DEFS_PER_FILE = 30;
 /** Absolute cap on files scanned in one pipeline run. */
 const MAX_SCAN_FILES = 20000;
+const MAX_WORKSPACE_INSTRUCTIONS_BYTES = 50 * 1024;
+export const WORKSPACE_INSTRUCTIONS_URI = "nusashell://workspace/AGENTS.md";
 /** Personalization multipliers (research doc: active 50x, mentioned 10x). */
 const ACTIVE_FILE_BOOST = 50;
 const QUERY_MATCH_BOOST = 10;
@@ -286,6 +288,36 @@ export class ContextEngine {
   async setRoot(newRoot) {
     this.root = await validateRoot(newRoot);
     this.cache.clear();
+  }
+
+  /**
+   * Read only the workspace-root AGENTS.md as MCP resource context.
+   * Nested instruction files are intentionally excluded: without a target
+   * path they would mix unrelated package rules into one workspace context.
+   * @returns {Promise<{uri: string, name: string, description: string, mimeType: string, text: string}|null>}
+   */
+  async readWorkspaceInstructions() {
+    const filePath = path.join(this.root, "AGENTS.md");
+    let stat;
+    try {
+      stat = await fs.stat(filePath);
+    } catch (error) {
+      if (error?.code === "ENOENT") return null;
+      throw error;
+    }
+    if (!stat.isFile()) return null;
+
+    const raw = await fs.readFile(filePath, "utf8");
+    const clipped = Buffer.byteLength(raw, "utf8") > MAX_WORKSPACE_INSTRUCTIONS_BYTES
+      ? `${Buffer.from(raw, "utf8").subarray(0, MAX_WORKSPACE_INSTRUCTIONS_BYTES).toString("utf8")}\n\n[AGENTS.md truncated by the Files MCP resource limit.]`
+      : raw;
+    return {
+      uri: WORKSPACE_INSTRUCTIONS_URI,
+      name: "Workspace instructions",
+      description: "Workspace-root AGENTS.md project guidance.",
+      mimeType: "text/markdown",
+      text: clipped,
+    };
   }
 
   /**

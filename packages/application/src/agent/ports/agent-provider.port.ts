@@ -62,11 +62,28 @@ export interface AgentProviderRequest {
   readonly model?: string;
   readonly effort?: ReasoningEffort;
   readonly modelCapabilities?: AgentModelCapabilities;
+  /**
+   * Provider-neutral prompt-cache intent. Adapters translate this to their
+   * native wire format; unsupported providers must ignore it safely.
+   */
+  readonly promptCache?: AgentPromptCachePolicy;
   readonly signal?: AbortSignal;
   readonly onTextDelta?: (delta: string) => void;
   readonly onReasoningDelta?: (delta: string) => void;
   /** Router-owned global HTTP-attempt budget. Providers consume before I/O. */
   readonly consumeAttempt?: () => boolean;
+}
+
+export type AgentPromptCacheMode = "auto" | "explicit" | "off";
+export type AgentPromptCacheTtl = "5m" | "1h";
+
+export interface AgentPromptCachePolicy {
+  readonly mode: AgentPromptCacheMode;
+  readonly ttl?: AgentPromptCacheTtl;
+  /** Stable provider routing key, when the upstream supports one. */
+  readonly key?: string;
+  /** Number of leading system messages proven stable by prompt assembly. */
+  readonly stableSystemMessages?: number;
 }
 
 export interface AgentModelCapabilities {

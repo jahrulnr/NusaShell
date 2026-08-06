@@ -60,6 +60,11 @@ export class ResponsesApiStrategy implements ApiStrategy {
       ...(instructions.length > 0 ? { instructions: instructions.join("\n\n") } : {}),
       ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
       ...(positiveInteger(maxOutputTokens) ? { max_output_tokens: maxOutputTokens } : {}),
+      ...(request.promptCache?.mode !== "off" && request.promptCache?.key
+        ? { prompt_cache_key: request.promptCache.key } : {}),
+      ...(request.promptCache?.mode === "explicit" ? {
+        prompt_cache_options: { mode: "explicit", ...(request.promptCache.ttl ? { ttl: request.promptCache.ttl } : {}) },
+      } : {}),
       ...responsesEffort(request.effort),
     };
   }

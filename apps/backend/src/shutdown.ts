@@ -28,6 +28,7 @@ export class ShutdownCoordinator {
     // 5. Stop the job scheduler tick loop and event matcher
     try {
       this.container.eventJobMatcher.stop();
+      this.container.pipelineTriggerCoordinator?.stop();
       this.container.jobScheduler.stop();
     } catch (err) {
       this.container.logger.warn({ err }, "Error stopping job scheduler");

@@ -16,6 +16,27 @@ afterEach(async () => {
   );
 });
 
+describe("installer user-data isolation", () => {
+  it("never targets Electron prod userData as an install destination", async () => {
+    const localInstaller = await readFile(new URL("./install-local.sh", import.meta.url), "utf8");
+    const releaseInstaller = await readFile(new URL("./install.sh", import.meta.url), "utf8");
+    const windowsInstaller = await readFile(new URL("./install.ps1", import.meta.url), "utf8");
+    for (const source of [localInstaller, releaseInstaller]) {
+      // No destination under XDG config / Electron appData.
+      expect(source).not.toMatch(/\$home_dir\/\.config\b/);
+      expect(source).not.toMatch(/\$HOME\/\.config\b/);
+      expect(source).not.toMatch(/Application Support\/nusashell/);
+      // App binary only.
+      expect(source).toMatch(/\.local\/share\/nusashell|Applications\/NusaShell\.app/);
+    }
+    // Windows install targets LOCALAPPDATA\Programs\NusaShell, not Electron
+    // userData (%APPDATA%\nusashell — lowercase product path).
+    expect(windowsInstaller).toMatch(/LOCALAPPDATA.*Programs.*NusaShell/s);
+    expect(windowsInstaller).not.toMatch(/\$env:APPDATA\s*['"]?\\?nusashell/i);
+    expect(windowsInstaller).not.toMatch(/\\AppData\\Roaming\\nusashell/i);
+  });
+});
+
 describe.runIf(process.platform === "linux")("Linux installer version activation", () => {
   it("keeps the installed version and exactly one previous version", async () => {
     const root = await mkdtemp(join(tmpdir(), "nusashell-installer-prune-"));
