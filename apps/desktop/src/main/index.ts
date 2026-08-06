@@ -181,6 +181,7 @@ async function startBackend(): Promise<BootstrapResult> {
     memoryRoot,
     jobsRoot,
     logFile: resolve(dataRoot, "logs", "nusashell.log"),
+    telemetryDir: resolve(dataRoot, "telemetry"),
     // Phase 3: desktop uses IPC, not the loopback WebSocket. Keep the WS
     // server off the product path so there is no listening TCP socket.
     startWsServer: false,

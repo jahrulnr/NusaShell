@@ -215,6 +215,7 @@ the host process; does not vet MCP/AI behavior — see security boundary above)
 | [`docs/architecture/mcp-capability-policy.md`](./docs/architecture/mcp-capability-policy.md) | Which MCP protocol capabilities NusaShell implements now vs. defers, and the adoption gate |
 | [`docs/architecture/progressive-mcp-tools.md`](./docs/architecture/progressive-mcp-tools.md) | Shell-owned meta-tools used to keep MCP tool discovery bounded per agent turn |
 | [`docs/architecture/job-automation.md`](./docs/architecture/job-automation.md) | Scheduled durable jobs (one-shot/recurring) that fire headless agent turns or plugin tool calls |
+| [`docs/architecture/token-telemetry.md`](./docs/architecture/token-telemetry.md) | Metadata-first token-efficiency telemetry: per-request + per-turn JSONL, `traceId` correlation, local report script |
 | [`docs/architecture/plugin-sandbox-readiness.md`](./docs/architecture/plugin-sandbox-readiness.md) | Files root-containment bundle guard, plugin process-death status SoT, and Tools=0 honesty mitigations |
 | [`docs/architecture/workspace-mcp-binding.md`](./docs/architecture/workspace-mcp-binding.md) | How `conversation.workspace` binds to MCP (wrap → Roots → respawn/enable overrides) |
 | [`docs/architecture/security-boundary.md`](./docs/architecture/security-boundary.md) | Explicit stance: NusaShell brokers MCP/AI; it does not vet plugin or model behavior |

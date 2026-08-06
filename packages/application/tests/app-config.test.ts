@@ -121,6 +121,18 @@ describe("loadConfig", () => {
         retry: { attemptBudget: 3, baseDelayMs: 100, maxDelayMs: 900, jitter: 0.1 },
         context: { compactionEnabled: false, maxInputTokens: 8000, reserveTokens: 2000, recentTurns: 2, summaryMaxChars: 6000 },
       },
+      telemetry: { enabled: true, retentionDays: 30 },
     });
+  });
+
+  it("defaults telemetry to enabled with 30-day retention", () => {
+    expect(loadConfig({}).telemetry).toEqual({ enabled: true, retentionDays: 30 });
+  });
+
+  it("reads telemetry toggles from NUSASHELL_TELEMETRY env vars", () => {
+    expect(loadConfig({ NUSASHELL_TELEMETRY: "false" }).telemetry.enabled).toBe(false);
+    expect(loadConfig({ NUSASHELL_TELEMETRY_RETENTION_DAYS: "7" }).telemetry.retentionDays).toBe(7);
+    // Out-of-range retention falls back to the default.
+    expect(loadConfig({ NUSASHELL_TELEMETRY_RETENTION_DAYS: "0" }).telemetry.retentionDays).toBe(30);
   });
 });

@@ -105,6 +105,31 @@ export function registerBuses(
   commandBus.register("call-tool", new CallToolHandler(plugin.runtimeManager));
   commandBus.register("cancel-tool-call", new CancelToolCallHandler(plugin.runtimeManager));
   commandBus.register("set-plugin-autostart", new SetPluginAutostartHandler(plugin.runtimeManager));
+  const runAgentTurnHooks = {
+    ...(options.sealAgentInterrupted
+      ? {
+          onTurnInterrupted: async (
+            partial: Parameters<NonNullable<typeof options.sealAgentInterrupted>>[1],
+            context: { conversationId: string; resume?: boolean; interruptReason: "cancel" | "provider" | "max_rounds" },
+          ) => {
+            try {
+              await options.sealAgentInterrupted!(context.conversationId, partial, {
+                resume: context.resume === true,
+                interruptReason: context.interruptReason,
+              });
+            } catch (error) {
+              logger.error(
+                "sealAgentInterrupted failed for conversation %s: %s",
+                context.conversationId,
+                error instanceof Error ? error.message : String(error),
+              );
+              throw error;
+            }
+          },
+        }
+      : {}),
+    ...(agent.telemetry ? { telemetry: agent.telemetry } : {}),
+  };
   commandBus.register("run-agent-turn", new RunAgentTurnHandler(
     agent.agentProviderRegistry,
     agent.agentToolGateway,
@@ -157,25 +182,7 @@ export function registerBuses(
     subagentPort,
     agent.conversationTodos,
     skills.skillRegistry,
-    options.sealAgentInterrupted
-      ? {
-          onTurnInterrupted: async (partial, context) => {
-            try {
-              await options.sealAgentInterrupted!(context.conversationId, partial, {
-                resume: context.resume === true,
-                interruptReason: context.interruptReason,
-              });
-            } catch (error) {
-              logger.error(
-                "sealAgentInterrupted failed for conversation %s: %s",
-                context.conversationId,
-                error instanceof Error ? error.message : String(error),
-              );
-              throw error;
-            }
-          },
-        }
-      : undefined,
+    Object.keys(runAgentTurnHooks).length > 0 ? runAgentTurnHooks : undefined,
   ));
   commandBus.register("cancel-agent-turn", new CancelAgentTurnHandler(
     agent.agentTurnCoordinator,

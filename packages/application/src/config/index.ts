@@ -1,1 +1,1 @@
-export { type AppConfig, loadConfig } from "./app-config.js";
+export { type AppConfig, type TelemetryConfig, loadConfig } from "./app-config.js";

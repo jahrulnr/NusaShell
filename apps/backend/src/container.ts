@@ -2,6 +2,7 @@ import {
   SystemClock,
   createLogger,
   OpenAiCompatibleAgentProvider,
+  JsonlTelemetryWriter,
   type Logger,
   type LogObserver,
   type SkillApprovalStaging,
@@ -30,6 +31,8 @@ import {
   type AcpProviderResolverPort,
   type AgentTurnResult,
   type AgentTurnPartial,
+  type TelemetryPort,
+  withTelemetry,
 } from "@nusashell/application";
 import {
   MessageRouter,
@@ -65,6 +68,16 @@ export interface ContainerOptions {
   readonly dbPath?: string;
   readonly logLevel?: string;
   readonly logFile?: string;
+  /**
+   * Directory for token-efficiency telemetry JSONL files (e.g.
+   * `{userData}/telemetry`). When absent, telemetry is disabled regardless of
+   * the enabled flag — there is nowhere to persist records.
+   */
+  readonly telemetryDir?: string;
+  readonly telemetry?: {
+    readonly enabled?: boolean;
+    readonly retentionDays?: number;
+  };
   /**
    * When false, the WebSocket server is created (for type compatibility) but
    * never started. Desktop uses IPC instead; WS is kept off the product path.
@@ -200,10 +213,11 @@ export function createContainer(options: ContainerOptions): Container {
   });
 
   const eventDispatcher = new EventDispatcher();
+  const telemetry = createTelemetry(options, logger);
 
   const plugin = createPluginRuntime(options, logger, eventDispatcher, clock);
   const skills = createSkillsRuntime(options, logger, eventDispatcher);
-  const agent = createAgentRuntime(options, logger, eventDispatcher, plugin, skills);
+  const agent = createAgentRuntime(options, logger, eventDispatcher, plugin, skills, telemetry);
   const jobs = createJobRuntime(options, logger, eventDispatcher, plugin, agent);
   agent.agentToolGateway.bindJobs(jobs.jobStore, jobs.jobScheduler);
   if (jobs.pipelineStore && jobs.pipelineScheduler) {
@@ -216,7 +230,7 @@ export function createContainer(options: ContainerOptions): Container {
     agent.agentToolGateway.bindSubagent(subagentPort);
   }
 
-  const aiConfiguration = createAiConfiguration(options, logger, agent);
+  const aiConfiguration = createAiConfiguration(options, logger, agent, telemetry);
   const buses = registerBuses(options, logger, eventDispatcher, clock, plugin, skills, agent, jobs, acp, aiConfiguration, subagentPort);
   if (plugin.pluginInstaller && options.userPluginsRoot) {
     agent.agentToolGateway.bindPluginRegistration({
@@ -278,15 +292,34 @@ export function createContainer(options: ContainerOptions): Container {
   };
 }
 
+/**
+ * Build the token-efficiency telemetry sink. Only writes when a directory is
+ * configured and telemetry is not explicitly disabled; otherwise a no-op sink
+ * keeps the runtime allocation-free and side-effect free (tests, non-desktop).
+ */
+function createTelemetry(options: ContainerOptions, logger: Logger): TelemetryPort | undefined {
+  if (options.telemetry?.enabled === false || !options.telemetryDir) {
+    return undefined;
+  }
+  return new JsonlTelemetryWriter({
+    dir: options.telemetryDir,
+    ...(options.telemetry?.retentionDays !== undefined ? { retentionDays: options.telemetry.retentionDays } : {}),
+    onError: (error) => {
+      logger.debug("telemetry write failed: %s", error instanceof Error ? error.message : String(error));
+    },
+  });
+}
+
 function createAiConfiguration(
   options: ContainerOptions,
   logger: Logger,
   agent: AgentRuntimeParts,
+  telemetry: TelemetryPort | undefined,
 ): AiConfigurationPort {
   return {
     configureAi(settings) {
       if (!settings.baseUrl) throw new Error("OpenAI-compatible provider requires a base URL");
-      agent.agentProviderRegistry.set(new OpenAiCompatibleAgentProvider({
+      agent.agentProviderRegistry.set(withTelemetry(new OpenAiCompatibleAgentProvider({
         id: settings.providerId,
         ...(settings.api ? { api: settings.api } : {}),
         baseUrl: settings.baseUrl,
@@ -310,7 +343,7 @@ function createAiConfiguration(
             ? { timeoutMs: options.ai.timeoutMs }
             : {}),
         ...(settings.omitToolChoice ? { omitToolChoice: true } : {}),
-      }));
+      }), telemetry));
     },
     removeAi(providerId) {
       agent.agentProviderRegistry.delete(providerId);

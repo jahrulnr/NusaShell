@@ -7,6 +7,7 @@
     "build": "pnpm -r --filter='./plugins/*' run build && pnpm -r --filter='./packages/*' run build",
     "prebuild": "pnpm scan:ui-docs",
     "scan:ui-docs": "node scripts/scan-ui-docs.mjs",
+    "telemetry:report": "node scripts/telemetry-report.mjs",
     "test": "vitest run",
     "test:frontend": "vitest run --project=@nusashell/desktop",
     "test:backend": "vitest run --project=!@nusashell/desktop",

@@ -32,6 +32,8 @@ import {
 } from "../../services/routed-agent-provider.js";
 import { AgentTurnCoordinator } from "../../services/agent-turn-coordinator.js";
 import { decideAutoContinue, normalizeMaxAutoContinues } from "../../services/auto-continue-policy.js";
+import type { TelemetryPort } from "../../../telemetry/telemetry.port.js";
+import { buildTurnTelemetry } from "../../../telemetry/build-turn-telemetry.js";
 import { randomUUID } from "node:crypto";
 
 export interface AgentRuntimeSettings {
@@ -93,6 +95,14 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
           readonly interruptReason: "cancel" | "provider" | "max_rounds";
         },
       ) => Promise<void> | void;
+      /**
+       * Optional token-efficiency telemetry sink. When present, one aggregate
+       * turn record is emitted per settled turn (completed/failed/cancelled/
+       * superseded). Recording is best-effort and never fails the turn.
+       */
+      readonly telemetry?: TelemetryPort;
+      /** Wall-clock seam for telemetry timing (defaults to `Date.now`). */
+      readonly now?: () => number;
     },
   ) {}
 
@@ -146,6 +156,7 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
     const messages = injected.messages;
     const promptCache = "promptCache" in injected ? injected.promptCache : undefined;
     let turnEndReason: "completed" | "cancelled" | "failed" | "superseded" = "completed";
+    const turnStartedAtMs = this.now();
     try {
       const result = await this.coordinator.run(traceId, (signal) => worker.run({
         messages,
@@ -221,6 +232,18 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
           this.logger?.error("onTurnComplete callback failed: %s", error instanceof Error ? error.message : String(error));
         }
       }
+      this.recordTurnTelemetry({
+        traceId,
+        ...(conversationId ? { conversationId } : {}),
+        status: "completed",
+        startedAtMs: turnStartedAtMs,
+        rounds: result.rounds,
+        toolCalls: result.toolCalls,
+        hasCompaction: result.compaction !== undefined,
+        ...(result.model ? { model: result.model } : {}),
+        ...(result.providerId ? { providerId: result.providerId } : {}),
+        ...(result.usage ? { usage: result.usage } : {}),
+      });
       return this.withAutoContinue(result, command);
     } catch (error) {
       if (this.supersededTraceIds.delete(traceId)) {
@@ -228,6 +251,13 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
       } else {
         turnEndReason = error instanceof ApplicationError && error.code === "AGENT_TURN_CANCELLED" ? "cancelled" : "failed";
       }
+      this.recordTurnTelemetry({
+        traceId,
+        ...(conversationId ? { conversationId } : {}),
+        status: turnEndReason,
+        startedAtMs: turnStartedAtMs,
+        partial: extractTurnPartial(error),
+      });
       throw await this.rethrowAfterInterruptSeal(error, conversationId, command.resume === true);
     } finally {
       if (conversationId) {
@@ -298,6 +328,55 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
     if (!this.onTurnProgress || !this.activeTurns) return;
     const snap = this.activeTurns.get(conversationId);
     if (snap) this.onTurnProgress(snap);
+  }
+
+  private now(): number {
+    return this.hooks?.now?.() ?? Date.now();
+  }
+
+  /**
+   * Emit one aggregate turn telemetry record. Best-effort: a missing sink or a
+   * throwing sink never affects the turn outcome. On success a full
+   * `AgentTurnResult` feeds the record; on failure the runner's mid-turn
+   * partial (when present) supplies rounds/tools/usage.
+   */
+  private recordTurnTelemetry(opts: {
+    traceId: string;
+    conversationId?: string;
+    status: "completed" | "failed" | "cancelled" | "superseded";
+    startedAtMs: number;
+    rounds?: number;
+    toolCalls?: readonly AgentToolExecution[];
+    hasCompaction?: boolean;
+    model?: string;
+    providerId?: string;
+    usage?: AgentTurnResult["usage"];
+    partial?: AgentTurnPartial | undefined;
+  }): void {
+    const telemetry = this.hooks?.telemetry;
+    if (!telemetry) return;
+    try {
+      const rounds = opts.rounds ?? opts.partial?.rounds ?? 0;
+      const toolCalls = opts.toolCalls ?? opts.partial?.toolCalls ?? [];
+      const model = opts.model ?? opts.partial?.model;
+      const providerId = opts.providerId ?? opts.partial?.providerId;
+      const usage = opts.usage ?? opts.partial?.usage;
+      telemetry.recordTurn(buildTurnTelemetry({
+        traceId: opts.traceId,
+        ...(opts.conversationId ? { conversationId: opts.conversationId } : {}),
+        status: opts.status,
+        startedAtMs: opts.startedAtMs,
+        completedAtMs: this.now(),
+        rounds,
+        toolCalls,
+        hasCompaction: opts.hasCompaction ?? false,
+        ...(model ? { model } : {}),
+        ...(providerId ? { providerId } : {}),
+        ...(usage ? { usage } : {}),
+      }));
+    } catch (error) {
+      this.logger?.debug("turn telemetry record failed: %s", error instanceof Error ? error.message : String(error));
+    }
   }
 
   private async injectSystemPrompts(command: RunAgentTurnCommand, traceId: string) {
