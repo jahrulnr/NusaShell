@@ -9,8 +9,6 @@ import {
   ingestMcpToolResult,
   projectModelToolResult,
   truncateToolResultText,
-  type AgentToolResult,
-  type AgentToolStatus,
 } from "../src/agent/services/agent-tool-result.js";
 
 describe("AgentToolResult canonical model", () => {

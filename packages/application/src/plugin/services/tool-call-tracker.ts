@@ -97,7 +97,7 @@ export class ToolCallTracker {
       if (entry.pendingCalls.has(idString)) {
         reject(
           new ApplicationError(
-            "INVALID_REQUEST_ID",
+            "OPERATION_CONFLICT",
             `duplicate request id: ${idString}`,
             { pluginId: PluginId.toString(entry.pluginId) },
           ),

@@ -92,7 +92,7 @@ describe("job template resolver", () => {
       const ctx = templateContextFromEvent(
         createAutomationEvent("test.event", undefined, { a: 1 }),
       );
-      expect(ctx.event.pluginId).toBe("");
+      expect(ctx.event!.pluginId).toBe("");
       expect(resolveTemplates("{{event.pluginId}}", ctx)).toBe("");
     });
 

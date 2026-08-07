@@ -8,12 +8,16 @@ import { subscribeAgentTurnEvents } from "./turn-event-helper.js";
  * Run an agent turn with streamSeq-gated event subscriptions.
  *
  * @param {readonly {role: string, content: any}[]} messages
- * @param {{ traceId?: string, workspace?: string, resume?: boolean, supersedeTraceId?: string, onDelta?: (delta: string) => void, onReasoningDelta?: (delta: string) => void, onToolCallStart?: (p: any) => void, onToolCallEnd?: (p: any) => void, onAskRequest?: (p: any) => void, onContextUpdate?: (p: any) => void, onTurnStarted?: (p: any) => void, onTurnEnd?: (p: any) => void, onCancelRequested?: (p: any) => void, onTurnSuperseded?: (p: any) => void, onStreamGap?: (traceId: string, streamSeq: number) => void, onLog?: (level: string, message: string) => void }} options
+ * @param {{ traceId?: string, workspace?: string, resume?: boolean, supersedeTraceId?: string, modelKey?: string, effort?: string, onDelta?: (delta: string) => void, onReasoningDelta?: (delta: string) => void, onToolCallStart?: (p: any) => void, onToolCallEnd?: (p: any) => void, onAskRequest?: (p: any) => void, onContextUpdate?: (p: any) => void, onTurnStarted?: (p: any) => void, onTurnEnd?: (p: any) => void, onCancelRequested?: (p: any) => void, onTurnSuperseded?: (p: any) => void, onStreamGap?: (traceId: string, streamSeq: number) => void, onLog?: (level: string, message: string) => void }} options
  * @param {{ models: any[], activeModelKey: string, effort: string, userPrompt?: string }} aiSettings
  * @returns {Promise<any>}
  */
 export async function runAgentTurn(messages, options, aiSettings) {
-  const selected = aiSettings.models.find((model) => model.key === aiSettings.activeModelKey);
+  // Ticket #38: prefer an explicit per-conversation model binding threaded from
+  // the caller (options.modelKey); fall back to the global active model.
+  const modelKey = options.modelKey || aiSettings.activeModelKey;
+  const effort = options.effort || aiSettings.effort;
+  const selected = aiSettings.models.find((model) => model.key === modelKey);
   if (!selected) throw new Error("Choose an imported AI model before sending a turn.");
 
   const { disposers, lifecycleDisposers } = subscribeAgentTurnEvents(options);
@@ -24,7 +28,7 @@ export async function runAgentTurn(messages, options, aiSettings) {
       pluginIds: [],
       providerId: selected.providerId,
       model: selected.id,
-      effort: aiSettings.effort,
+      effort,
       userPrompt: aiSettings.userPrompt,
       ...(options.workspace ? { workspace: options.workspace } : {}),
       ...(options.resume ? { resume: true } : {}),

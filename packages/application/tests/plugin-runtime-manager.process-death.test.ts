@@ -107,7 +107,7 @@ describe("PluginRuntimeManager process-death SoT (finding 2)", () => {
     eventDispatcher.onAny({
       handle: (event) => {
         if (event.type === "plugin.started") {
-          startedPid = (event as { pid: number | null }).pid;
+          startedPid = (event as unknown as { pid: number | null }).pid;
         }
       },
     });

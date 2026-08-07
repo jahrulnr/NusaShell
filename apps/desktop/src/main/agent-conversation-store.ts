@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
+import {
+  appendJsonlLine,
+  jsonlFileSize,
+  readJsonlLines,
+} from "./agent-conversation-jsonl.js";
 import type {
   AgentCanvasArtifact,
   AgentCanvasArtifactKind,
@@ -9,6 +14,7 @@ import type {
   AgentConversationCheckpoint,
   AgentConversationKind,
   AgentConversationMessage,
+  AgentConversationModelBinding,
   AgentConversationStep,
   AgentConversationToolCall,
   AgentConversationSummary,
@@ -17,134 +23,208 @@ import type {
   AgentSubagentStreamStep,
 } from "../shared/agent-conversation-contract.js";
 
-interface ConversationDocument {
-  readonly version: 2;
-  readonly conversations: readonly AgentConversation[];
-}
+/** Default per-conversation message JSONL cap (~8 MiB), Codex-style soft trim target. */
+const DEFAULT_MAX_BYTES = 8 * 1024 * 1024;
+const HISTORY_SOFT_CAP_RATIO = 0.8;
 
 const CANVAS_ARTIFACT_MAX_COUNT = 20;
 const CANVAS_ARTIFACT_MAX_TOTAL_BYTES = 3 * 1024 * 1024;
 const CANVAS_ARTIFACT_MAX_SOURCE_BYTES = 512 * 1024;
 const SUBAGENT_RUN_MAX_COUNT = 50;
 
+const LEGACY_LOCK = "__legacy__";
+const LIST_LOCK = "__list__";
+
+/** Small metadata object stored as `<id>.meta.json` (not the message history). */
+interface ConversationMeta {
+  readonly id: string;
+  readonly title: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly messageCount: number;
+  readonly kind?: AgentConversationKind;
+  readonly acp?: AgentConversationAcp;
+  readonly workspace?: string;
+  readonly model?: AgentConversationModelBinding;
+  readonly checkpoint?: AgentConversationCheckpoint;
+  readonly activeCanvasArtifactId?: string;
+  readonly activeSubagentRunId?: string;
+}
+
 export class AgentConversationStore {
-  private state: ConversationDocument | null = null;
-  private mutation = Promise.resolve();
+  private readonly conversationsDir: string;
+  private readonly locks = new Map<string, Promise<unknown>>();
+  private legacyReady = false;
 
   constructor(
     private readonly path: string,
     private readonly now: () => Date = () => new Date(),
     private readonly createId: () => string = () => `conv_${randomUUID()}`,
-  ) {}
+    /** Optional max JSONL size in bytes; default ~8 MiB. Used to trim oldest messages. */
+    private readonly maxBytes: number = DEFAULT_MAX_BYTES,
+  ) {
+    this.conversationsDir = join(dirname(path), "conversations");
+  }
 
   async list(): Promise<readonly AgentConversationSummary[]> {
-    const state = await this.load();
-    return [...state.conversations]
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-      .map(({ messages, checkpoint: _checkpoint, ...conversation }) => ({
-        ...conversation,
-        messageCount: messages.length,
-      }));
+    return this.withLock(LIST_LOCK, async () => {
+      await this.ensureLegacyMigrated();
+      const ids = await this.listConversationIds();
+      const summaries: AgentConversationSummary[] = [];
+      for (const id of ids) {
+        const meta = await this.readMeta(id);
+        if (!meta) continue;
+        summaries.push(metaToSummary(meta));
+      }
+      return summaries.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    });
   }
 
   async create(options?: { kind?: AgentConversationKind; acp?: AgentConversationAcp }): Promise<AgentConversation> {
-    return this.mutate(async (state) => {
+    await this.ensureLegacyMigrated();
+    const id = this.createId();
+    return this.withLock(id, async () => {
       const timestamp = this.now().toISOString();
       const title = options?.kind === "acp" ? "New ACP conversation" : "New conversation";
-      const conversation: AgentConversation = {
-        id: this.createId(),
+      const meta: ConversationMeta = {
+        id,
         title,
         createdAt: timestamp,
         updatedAt: timestamp,
-        messages: [],
+        messageCount: 0,
         ...(options?.kind ? { kind: options.kind } : {}),
         ...(options?.acp ? { acp: options.acp } : {}),
       };
-      return [{ ...state, conversations: [conversation, ...state.conversations] }, conversation];
+      await this.writeMeta(meta);
+      return assemblyConversation(meta, [], [], []);
     });
   }
 
   async get(id: string): Promise<AgentConversation | null> {
-    const state = await this.load();
-    return state.conversations.find((conversation) => conversation.id === id) ?? null;
+    await this.ensureLegacyMigrated();
+    return this.withLock(id, async () => this.loadConversation(id));
   }
 
   async appendMessage(id: string, message: AgentConversationMessage): Promise<AgentConversation> {
-    return this.mutate(async (state) => {
-      const current = requireConversation(state, id);
+    await this.ensureLegacyMigrated();
+    return this.withLock(id, async () => {
+      const meta = await this.requireMeta(id);
       const timestamp = this.now().toISOString();
       const savedMessage = { ...clampResumeMessages(message), createdAt: message.createdAt ?? timestamp };
-      const title = current.messages.length === 0 && message.role === "user"
+      const title = meta.messageCount === 0 && message.role === "user"
         ? conversationTitle(message.content)
-        : current.title;
-      const updated: AgentConversation = {
-        ...current,
+        : meta.title;
+      await appendJsonlLine(this.messagesPath(id), savedMessage);
+      let messageCount = meta.messageCount + 1;
+      const trimmed = await this.trimMessagesIfNeeded(id);
+      if (trimmed !== null) messageCount = trimmed;
+      const nextMeta: ConversationMeta = {
+        ...meta,
         title,
         updatedAt: timestamp,
-        messages: [...current.messages, savedMessage],
+        messageCount,
       };
-      return [replaceConversation(state, updated), updated];
+      await this.writeMeta(nextMeta);
+      return this.mustLoadConversation(id, nextMeta);
     });
   }
 
   async saveCheckpoint(id: string, checkpoint: AgentConversationCheckpoint): Promise<AgentConversation> {
-    return this.mutate(async (state) => {
-      const current = requireConversation(state, id);
-      const updated: AgentConversation = {
-        ...current,
+    await this.ensureLegacyMigrated();
+    return this.withLock(id, async () => {
+      const meta = await this.requireMeta(id);
+      const nextMeta: ConversationMeta = {
+        ...meta,
         updatedAt: this.now().toISOString(),
         checkpoint: {
           ...checkpoint,
-          compactedMessageCount: Math.min(current.messages.length, Math.max(0, checkpoint.compactedMessageCount)),
-          ...(Number.isInteger(checkpoint.compactionCount) && checkpoint.compactionCount >= 0
+          compactedMessageCount: Math.min(meta.messageCount, Math.max(0, checkpoint.compactedMessageCount)),
+          ...(Number.isInteger(checkpoint.compactionCount) && (checkpoint.compactionCount ?? -1) >= 0
             ? { compactionCount: checkpoint.compactionCount }
             : {}),
         },
       };
-      return [replaceConversation(state, updated), updated];
+      await this.writeMeta(nextMeta);
+      return this.mustLoadConversation(id, nextMeta);
     });
   }
 
   async replaceLastInterrupted(id: string, message: AgentConversationMessage): Promise<AgentConversation> {
-    return this.mutate(async (state) => {
-      const current = requireConversation(state, id);
-      const last = current.messages.at(-1);
+    await this.ensureLegacyMigrated();
+    return this.withLock(id, async () => {
+      const meta = await this.requireMeta(id);
+      const messages = await this.readMessages(id);
+      const last = messages.at(-1);
       if (!last || last.role !== "assistant" || last.status !== "interrupted") {
         throw new Error("Last message is not an interrupted assistant message");
       }
       const savedMessage = { ...clampResumeMessages(message), createdAt: message.createdAt ?? this.now().toISOString() };
-      const updated: AgentConversation = {
-        ...current,
+      const nextMessages = [...messages.slice(0, -1), savedMessage];
+      await this.rewriteMessages(id, nextMessages);
+      const nextMeta: ConversationMeta = {
+        ...meta,
         updatedAt: this.now().toISOString(),
-        messages: [...current.messages.slice(0, -1), savedMessage],
+        messageCount: nextMessages.length,
       };
-      return [replaceConversation(state, updated), updated];
+      await this.writeMeta(nextMeta);
+      return this.mustLoadConversation(id, nextMeta);
     });
   }
 
   async delete(id: string): Promise<void> {
-    await this.mutate(async (state) => [
-      { ...state, conversations: state.conversations.filter((conversation) => conversation.id !== id) },
-      undefined,
-    ]);
+    await this.ensureLegacyMigrated();
+    await this.withLock(id, async () => {
+      await Promise.all([
+        rm(this.metaPath(id), { force: true }),
+        rm(this.messagesPath(id), { force: true }),
+        rm(this.artifactsPath(id), { force: true }),
+        rm(this.subagentsPath(id), { force: true }),
+        rm(`${this.metaPath(id)}.tmp`, { force: true }),
+        rm(`${this.artifactsPath(id)}.tmp`, { force: true }),
+        rm(`${this.subagentsPath(id)}.tmp`, { force: true }),
+        rm(`${this.messagesPath(id)}.tmp`, { force: true }),
+      ]);
+    });
   }
 
   async setWorkspace(id: string, workspace: string): Promise<AgentConversation> {
-    return this.mutate(async (state) => {
-      const current = requireConversation(state, id);
-      const { workspace: _oldWs, ...rest } = current;
-      const updated: AgentConversation = {
+    await this.ensureLegacyMigrated();
+    return this.withLock(id, async () => {
+      const meta = await this.requireMeta(id);
+      const { workspace: _oldWs, ...rest } = meta;
+      const nextMeta: ConversationMeta = {
         ...rest,
         ...(workspace ? { workspace } : {}),
         updatedAt: this.now().toISOString(),
       };
-      return [replaceConversation(state, updated), updated];
+      await this.writeMeta(nextMeta);
+      return this.mustLoadConversation(id, nextMeta);
+    });
+  }
+
+  /**
+   * Set (or clear) the per-conversation model binding (ticket #38).
+   * Passing null clears the binding so the room falls back to the global model.
+   */
+  async setModel(id: string, model: AgentConversationModelBinding | null): Promise<AgentConversation> {
+    await this.ensureLegacyMigrated();
+    return this.withLock(id, async () => {
+      const meta = await this.requireMeta(id);
+      const { model: _oldModel, ...rest } = meta;
+      const nextMeta: ConversationMeta = {
+        ...rest,
+        ...(model ? { model } : {}),
+        updatedAt: this.now().toISOString(),
+      };
+      await this.writeMeta(nextMeta);
+      return this.mustLoadConversation(id, nextMeta);
     });
   }
 
   async upsertCanvasArtifact(id: string, artifact: AgentCanvasArtifact): Promise<AgentConversation> {
-    return this.mutate(async (state) => {
-      const current = requireConversation(state, id);
+    await this.ensureLegacyMigrated();
+    return this.withLock(id, async () => {
+      const meta = await this.requireMeta(id);
       if (artifact.conversationId !== id) {
         throw new Error("Canvas artifact conversationId does not match the conversation");
       }
@@ -152,64 +232,65 @@ export class AgentConversationStore {
         throw new Error(`Canvas artifact source exceeds the ${CANVAS_ARTIFACT_MAX_SOURCE_BYTES} byte cap`);
       }
       const timestamp = this.now().toISOString();
-      const existing = current.canvasArtifacts ?? [];
+      const existing = await this.readArtifacts(id);
       const without = existing.filter((item) => item.id !== artifact.id);
       const next = [...without, { ...artifact, updatedAt: timestamp }];
-      const evicted = evictCanvasArtifacts(next, current.activeCanvasArtifactId);
-      const updated: AgentConversation = {
-        ...current,
-        canvasArtifacts: evicted,
-        updatedAt: timestamp,
-      };
-      return [replaceConversation(state, updated), updated];
+      const evicted = evictCanvasArtifacts(next, meta.activeCanvasArtifactId);
+      await this.writeArtifacts(id, evicted);
+      const nextMeta: ConversationMeta = { ...meta, updatedAt: timestamp };
+      await this.writeMeta(nextMeta);
+      return this.mustLoadConversation(id, nextMeta);
     });
   }
 
   async setActiveCanvasArtifact(id: string, artifactId: string | null): Promise<AgentConversation> {
-    return this.mutate(async (state) => {
-      const current = requireConversation(state, id);
+    await this.ensureLegacyMigrated();
+    return this.withLock(id, async () => {
+      const meta = await this.requireMeta(id);
       const timestamp = this.now().toISOString();
-      const { activeCanvasArtifactId: _old, ...rest } = current;
-      const updated: AgentConversation = {
+      const { activeCanvasArtifactId: _old, ...rest } = meta;
+      const nextMeta: ConversationMeta = {
         ...rest,
         ...(artifactId ? { activeCanvasArtifactId: artifactId } : {}),
         updatedAt: timestamp,
       };
-      return [replaceConversation(state, updated), updated];
+      await this.writeMeta(nextMeta);
+      return this.mustLoadConversation(id, nextMeta);
     });
   }
 
   async upsertSubagentRun(id: string, run: AgentSubagentRun): Promise<AgentConversation> {
-    return this.mutate(async (state) => {
-      const current = requireConversation(state, id);
+    await this.ensureLegacyMigrated();
+    return this.withLock(id, async () => {
+      const meta = await this.requireMeta(id);
       if (run.conversationId !== id) {
         throw new Error("Subagent run conversationId does not match the conversation");
       }
       const timestamp = this.now().toISOString();
-      const existing = current.subagentRuns ?? [];
+      const existing = await this.readSubagents(id);
       const without = existing.filter((item) => item.id !== run.id);
       const next = [...without, { ...run, updatedAt: timestamp }];
       const evicted = next.slice(-SUBAGENT_RUN_MAX_COUNT);
-      const updated: AgentConversation = {
-        ...current,
-        subagentRuns: evicted,
-        updatedAt: timestamp,
-      };
-      return [replaceConversation(state, updated), updated];
+      await this.writeSubagents(id, evicted);
+      const nextMeta: ConversationMeta = { ...meta, updatedAt: timestamp };
+      await this.writeMeta(nextMeta);
+      return this.mustLoadConversation(id, nextMeta);
     });
   }
 
   async setActiveSubagentRun(id: string, runId: string | null): Promise<AgentConversation> {
-    return this.mutate(async (state) => {
-      const current = requireConversation(state, id);
+    await this.ensureLegacyMigrated();
+    return this.withLock(id, async () => {
+      const meta = await this.requireMeta(id);
       const timestamp = this.now().toISOString();
-      const { activeSubagentRunId: _old, ...rest } = current;
-      const updated: AgentConversation = {
+      const { activeSubagentRunId: _old, ...rest } = meta;
+      const nextMeta: ConversationMeta = {
         ...rest,
         ...(runId ? { activeSubagentRunId: runId } : {}),
         updatedAt: timestamp,
       };
-      return [replaceConversation(state, updated), updated];
+      await this.writeMeta(nextMeta);
+      return this.mustLoadConversation(id, nextMeta);
     });
   }
 
@@ -219,10 +300,11 @@ export class AgentConversationStore {
     status: AgentSubagentRunStatus,
     patch?: { summary?: string; error?: string; steps?: readonly AgentSubagentStreamStep[] },
   ): Promise<AgentConversation> {
-    return this.mutate(async (state) => {
-      const current = requireConversation(state, id);
+    await this.ensureLegacyMigrated();
+    return this.withLock(id, async () => {
+      const meta = await this.requireMeta(id);
       const timestamp = this.now().toISOString();
-      const runs = current.subagentRuns ?? [];
+      const runs = await this.readSubagents(id);
       const updated = runs.map((run) => {
         if (run.runId !== runId) return run;
         const { steps: _oldSteps, ...rest } = run;
@@ -238,63 +320,326 @@ export class AgentConversationStore {
           updatedAt: timestamp,
         };
       });
-      const conversation: AgentConversation = {
-        ...current,
-        subagentRuns: updated,
-        updatedAt: timestamp,
-      };
+      await this.writeSubagents(id, updated);
+      let nextMeta: ConversationMeta = { ...meta, updatedAt: timestamp };
       // Terminal statuses clear the active pointer when it matches this run so a
       // parent-turn abort does not leave activeSubagentRunId stuck on "running".
-      const active = current.activeSubagentRunId;
+      const active = meta.activeSubagentRunId;
       const terminal = status === "ok" || status === "fail" || status === "cancelled";
-      let next = conversation;
       if (terminal && active === runId) {
-        const { activeSubagentRunId: _drop, ...rest } = conversation;
-        next = rest;
+        const { activeSubagentRunId: _drop, ...rest } = nextMeta;
+        nextMeta = rest;
       }
-      return [replaceConversation(state, next), next];
+      await this.writeMeta(nextMeta);
+      return this.mustLoadConversation(id, nextMeta);
     });
   }
 
-  private async load(): Promise<ConversationDocument> {
-    if (this.state) return this.state;
-    try {
-      const parsed: unknown = JSON.parse(await readFile(this.path, "utf8"));
-      this.state = normalizeDocument(parsed);
-    } catch (error) {
-      if (isFileNotFound(error)) {
-        this.state = { version: 2, conversations: [] };
-      } else {
-        throw new Error("Could not load conversations", { cause: error });
-      }
-    }
-    return this.state;
-  }
-
-  private async mutate<T>(
-    operation: (state: ConversationDocument) => Promise<readonly [ConversationDocument, T]>,
-  ): Promise<T> {
+  /**
+   * Per-conversation write lock (Codex-style). Concurrent ops on different
+   * conversation ids do not wait on each other.
+   */
+  private async withLock<T>(key: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.locks.get(key) ?? Promise.resolve();
     let output!: T;
-    const run = this.mutation.then(async () => {
-      const [state, result] = await operation(await this.load());
-      await this.persist(state);
-      this.state = state;
-      output = result;
+    const run = previous.then(async () => {
+      output = await operation();
     });
-    this.mutation = run.catch(() => undefined);
+    this.locks.set(key, run.catch(() => undefined));
     await run;
     return output;
   }
 
-  private async persist(state: ConversationDocument): Promise<void> {
-    await mkdir(dirname(this.path), { recursive: true });
-    const temporaryPath = `${this.path}.tmp`;
-    await writeFile(temporaryPath, JSON.stringify(state, null, 2), { mode: 0o600 });
-    await rename(temporaryPath, this.path);
+  private async ensureLegacyMigrated(): Promise<void> {
+    if (this.legacyReady) return;
+    await this.withLock(LEGACY_LOCK, async () => {
+      if (this.legacyReady) return;
+      try {
+        const raw = await readFile(this.path, "utf8");
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(raw);
+        } catch (error) {
+          throw new Error("Could not load conversations", { cause: error });
+        }
+        let doc: { conversations: readonly AgentConversation[] };
+        try {
+          doc = normalizeDocument(parsed);
+        } catch (error) {
+          throw new Error("Could not load conversations", { cause: error });
+        }
+        await mkdir(this.conversationsDir, { recursive: true });
+        for (const conversation of doc.conversations) {
+          const existing = await this.readMeta(conversation.id);
+          if (existing) continue;
+          await this.materializeConversation(conversation);
+        }
+        await rename(this.path, `${this.path}.migrated`).catch((error) => {
+          if (!isFileNotFound(error)) throw error;
+        });
+      } catch (error) {
+        if (isFileNotFound(error)) {
+          // No legacy monofile — pure new layout (or empty install).
+        } else {
+          throw error instanceof Error && error.message === "Could not load conversations"
+            ? error
+            : new Error("Could not load conversations", { cause: error });
+        }
+      }
+      this.legacyReady = true;
+    });
+  }
+
+  private async materializeConversation(conversation: AgentConversation): Promise<void> {
+    const messageCount = conversation.messages.length;
+    const meta: ConversationMeta = {
+      id: conversation.id,
+      title: conversation.title,
+      createdAt: conversation.createdAt,
+      updatedAt: conversation.updatedAt,
+      messageCount,
+      ...(conversation.kind ? { kind: conversation.kind } : {}),
+      ...(conversation.acp ? { acp: conversation.acp } : {}),
+      ...(conversation.workspace ? { workspace: conversation.workspace } : {}),
+      ...(conversation.model ? { model: conversation.model } : {}),
+      ...(conversation.checkpoint ? { checkpoint: conversation.checkpoint } : {}),
+      ...(conversation.activeCanvasArtifactId ? { activeCanvasArtifactId: conversation.activeCanvasArtifactId } : {}),
+      ...(conversation.activeSubagentRunId ? { activeSubagentRunId: conversation.activeSubagentRunId } : {}),
+    };
+    await this.writeMeta(meta);
+    await this.rewriteMessages(conversation.id, conversation.messages);
+    if (conversation.canvasArtifacts?.length) {
+      await this.writeArtifacts(conversation.id, conversation.canvasArtifacts);
+    }
+    if (conversation.subagentRuns?.length) {
+      await this.writeSubagents(conversation.id, conversation.subagentRuns);
+    }
+  }
+
+  private async loadConversation(id: string): Promise<AgentConversation | null> {
+    const meta = await this.readMeta(id);
+    if (!meta) return null;
+    return this.mustLoadConversation(id, meta);
+  }
+
+  private async mustLoadConversation(id: string, meta: ConversationMeta): Promise<AgentConversation> {
+    const messages = await this.readMessages(id);
+    const canvasArtifacts = await this.readArtifacts(id);
+    const subagentRuns = await this.readSubagents(id);
+    return assemblyConversation(meta, messages, canvasArtifacts, subagentRuns);
+  }
+
+  private async requireMeta(id: string): Promise<ConversationMeta> {
+    const meta = await this.readMeta(id);
+    if (!meta) throw new Error(`Conversation not found: ${id}`);
+    return meta;
+  }
+
+  private async listConversationIds(): Promise<string[]> {
+    try {
+      const entries = await readdir(this.conversationsDir);
+      return entries
+        .filter((name) => name.endsWith(".meta.json") && !name.endsWith(".tmp"))
+        .map((name) => basename(name, ".meta.json"));
+    } catch (error) {
+      if (isFileNotFound(error)) return [];
+      throw error;
+    }
+  }
+
+  private metaPath(id: string): string {
+    return join(this.conversationsDir, `${id}.meta.json`);
+  }
+
+  private messagesPath(id: string): string {
+    return join(this.conversationsDir, `${id}.jsonl`);
+  }
+
+  private artifactsPath(id: string): string {
+    return join(this.conversationsDir, `${id}.artifacts.json`);
+  }
+
+  private subagentsPath(id: string): string {
+    return join(this.conversationsDir, `${id}.subagents.json`);
+  }
+
+  private async readMeta(id: string): Promise<ConversationMeta | null> {
+    try {
+      const parsed: unknown = JSON.parse(await readFile(this.metaPath(id), "utf8"));
+      return normalizeMeta(parsed, id);
+    } catch (error) {
+      if (isFileNotFound(error)) return null;
+      throw new Error("Could not load conversations", { cause: error });
+    }
+  }
+
+  private async writeMeta(meta: ConversationMeta): Promise<void> {
+    await writeJsonAtomic(this.metaPath(meta.id), meta);
+  }
+
+  private async readMessages(id: string): Promise<AgentConversationMessage[]> {
+    const lines = await readJsonlLines(this.messagesPath(id));
+    return lines.flatMap((item) => {
+      if (isConversationMessage(item)) return [item];
+      const repaired = repairConversationMessage(item);
+      return repaired ? [repaired] : [];
+    });
+  }
+
+  private async rewriteMessages(id: string, messages: readonly AgentConversationMessage[]): Promise<void> {
+    await mkdir(this.conversationsDir, { recursive: true });
+    const body = messages.length === 0
+      ? ""
+      : `${messages.map((message) => JSON.stringify(message)).join("\n")}\n`;
+    const target = this.messagesPath(id);
+    const temporaryPath = `${target}.tmp`;
+    await writeFile(temporaryPath, body, { mode: 0o600 });
+    await rename(temporaryPath, target);
+  }
+
+  /**
+   * Drop oldest messages until the JSONL is under the soft cap (0.8 * maxBytes).
+   * Returns the new message count when trim ran, otherwise null.
+   */
+  private async trimMessagesIfNeeded(id: string): Promise<number | null> {
+    if (this.maxBytes <= 0) return null;
+    const size = await jsonlFileSize(this.messagesPath(id));
+    if (size <= this.maxBytes) return null;
+    const messages = await this.readMessages(id);
+    if (messages.length <= 1) return messages.length;
+    const target = Math.floor(this.maxBytes * HISTORY_SOFT_CAP_RATIO);
+    let kept = [...messages];
+    while (kept.length > 1) {
+      const encoded = Buffer.byteLength(`${kept.map((m) => JSON.stringify(m)).join("\n")}\n`, "utf8");
+      if (encoded <= target) break;
+      kept.shift();
+    }
+    await this.rewriteMessages(id, kept);
+    return kept.length;
+  }
+
+  private async readArtifacts(id: string): Promise<AgentCanvasArtifact[]> {
+    try {
+      const parsed: unknown = JSON.parse(await readFile(this.artifactsPath(id), "utf8"));
+      if (!Array.isArray(parsed)) return [];
+      return parsed.flatMap((entry) => {
+        const artifact = normalizeCanvasArtifact(entry, id);
+        return artifact ? [artifact] : [];
+      });
+    } catch (error) {
+      if (isFileNotFound(error)) return [];
+      throw error;
+    }
+  }
+
+  private async writeArtifacts(id: string, artifacts: readonly AgentCanvasArtifact[]): Promise<void> {
+    if (artifacts.length === 0) {
+      await rm(this.artifactsPath(id), { force: true });
+      return;
+    }
+    await writeJsonAtomic(this.artifactsPath(id), artifacts);
+  }
+
+  private async readSubagents(id: string): Promise<AgentSubagentRun[]> {
+    try {
+      const parsed: unknown = JSON.parse(await readFile(this.subagentsPath(id), "utf8"));
+      if (!Array.isArray(parsed)) return [];
+      return parsed.flatMap((entry) => {
+        const run = normalizeSubagentRun(entry, id);
+        return run ? [run] : [];
+      });
+    } catch (error) {
+      if (isFileNotFound(error)) return [];
+      throw error;
+    }
+  }
+
+  private async writeSubagents(id: string, runs: readonly AgentSubagentRun[]): Promise<void> {
+    if (runs.length === 0) {
+      await rm(this.subagentsPath(id), { force: true });
+      return;
+    }
+    await writeJsonAtomic(this.subagentsPath(id), runs);
   }
 }
 
-function normalizeDocument(value: unknown): ConversationDocument {
+function assemblyConversation(
+  meta: ConversationMeta,
+  messages: readonly AgentConversationMessage[],
+  canvasArtifacts: readonly AgentCanvasArtifact[],
+  subagentRuns: readonly AgentSubagentRun[],
+): AgentConversation {
+  const activeCanvasArtifactId = meta.activeCanvasArtifactId
+    && canvasArtifacts.some((artifact) => artifact.id === meta.activeCanvasArtifactId)
+    ? meta.activeCanvasArtifactId
+    : undefined;
+  const activeSubagentRunId = meta.activeSubagentRunId
+    && subagentRuns.some((run) => run.runId === meta.activeSubagentRunId)
+    ? meta.activeSubagentRunId
+    : undefined;
+  return {
+    id: meta.id,
+    title: meta.title,
+    createdAt: meta.createdAt,
+    updatedAt: meta.updatedAt,
+    messages,
+    ...(meta.checkpoint ? { checkpoint: meta.checkpoint } : {}),
+    ...(meta.workspace ? { workspace: meta.workspace } : {}),
+    ...(meta.model ? { model: meta.model } : {}),
+    ...(meta.kind ? { kind: meta.kind } : {}),
+    ...(meta.acp ? { acp: meta.acp } : {}),
+    ...(canvasArtifacts.length ? { canvasArtifacts } : {}),
+    ...(activeCanvasArtifactId ? { activeCanvasArtifactId } : {}),
+    ...(subagentRuns.length ? { subagentRuns } : {}),
+    ...(activeSubagentRunId ? { activeSubagentRunId } : {}),
+  };
+}
+
+function metaToSummary(meta: ConversationMeta): AgentConversationSummary {
+  const {
+    messageCount,
+    checkpoint: _checkpoint,
+    ...rest
+  } = meta;
+  return {
+    ...rest,
+    messageCount,
+  };
+}
+
+function normalizeMeta(value: unknown, expectedId: string): ConversationMeta | null {
+  if (typeof value !== "object" || value === null) return null;
+  const candidate = value as Partial<ConversationMeta> & { id?: string };
+  if (typeof candidate.id !== "string" || candidate.id !== expectedId) return null;
+  if (typeof candidate.createdAt !== "string" || typeof candidate.updatedAt !== "string") return null;
+  const messageCount = Number.isInteger(candidate.messageCount) && (candidate.messageCount ?? -1) >= 0
+    ? (candidate.messageCount as number)
+    : 0;
+  return {
+    id: candidate.id,
+    title: typeof candidate.title === "string" ? candidate.title : "New conversation",
+    createdAt: candidate.createdAt,
+    updatedAt: candidate.updatedAt,
+    messageCount,
+    ...(isCheckpoint(candidate.checkpoint) ? { checkpoint: candidate.checkpoint } : {}),
+    ...(typeof candidate.workspace === "string" && candidate.workspace ? { workspace: candidate.workspace } : {}),
+    ...(isModelBinding(candidate.model) ? { model: candidate.model } : {}),
+    ...(candidate.kind === "acp" || candidate.kind === "agent" ? { kind: candidate.kind } : {}),
+    ...(isAcp(candidate.acp) ? { acp: candidate.acp } : {}),
+    ...(typeof candidate.activeCanvasArtifactId === "string" ? { activeCanvasArtifactId: candidate.activeCanvasArtifactId } : {}),
+    ...(typeof candidate.activeSubagentRunId === "string" ? { activeSubagentRunId: candidate.activeSubagentRunId } : {}),
+  };
+}
+
+async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const temporaryPath = `${path}.tmp`;
+  await writeFile(temporaryPath, JSON.stringify(value, null, 2), { mode: 0o600 });
+  await rename(temporaryPath, path);
+}
+
+/** Legacy monofile shape (version 1/2) — used only for one-time migration. */
+function normalizeDocument(value: unknown): { version: 2; conversations: readonly AgentConversation[] } {
   if (typeof value !== "object" || value === null || !Array.isArray((value as { conversations?: unknown }).conversations)) {
     throw new Error("Conversation file has an invalid shape");
   }
@@ -304,9 +649,9 @@ function normalizeDocument(value: unknown): ConversationDocument {
     if (typeof candidate.id !== "string" || typeof candidate.createdAt !== "string" || typeof candidate.updatedAt !== "string") return [];
     const conversationId = candidate.id;
     const messages = Array.isArray(candidate.messages)
-      ? candidate.messages.flatMap((item) => {
-          if (isConversationMessage(item)) return [item];
-          const repaired = repairConversationMessage(item);
+      ? candidate.messages.flatMap((entry) => {
+          if (isConversationMessage(entry)) return [entry];
+          const repaired = repairConversationMessage(entry);
           return repaired ? [repaired] : [];
         })
       : [];
@@ -338,6 +683,7 @@ function normalizeDocument(value: unknown): ConversationDocument {
       messages,
       ...(isCheckpoint(candidate.checkpoint) ? { checkpoint: candidate.checkpoint } : {}),
       ...(typeof candidate.workspace === "string" && candidate.workspace ? { workspace: candidate.workspace } : {}),
+      ...(isModelBinding(candidate.model) ? { model: candidate.model } : {}),
       ...(candidate.kind === "acp" || candidate.kind === "agent" ? { kind: candidate.kind } : {}),
       ...(isAcp(candidate.acp) ? { acp: candidate.acp } : {}),
       ...(canvasArtifacts.length ? { canvasArtifacts } : {}),
@@ -393,7 +739,7 @@ function normalizeSubagentRun(value: unknown, conversationId: string): AgentSuba
   const ownerConversationId = typeof record.conversationId === "string" ? record.conversationId : conversationId;
   if (ownerConversationId !== conversationId) return null;
   const attempted = Array.isArray(record.attempted)
-    ? record.attempted.filter((id): id is string => typeof id === "string")
+    ? record.attempted.filter((item): item is string => typeof item === "string")
     : undefined;
   const steps = Array.isArray(record.steps)
     ? sanitizeSubagentSteps(record.steps)
@@ -573,7 +919,8 @@ function repairToolCallRecord(call: unknown): void {
   }
 }
 
-function isConversationAttachment(value: unknown): boolean {  if (typeof value !== "object" || value === null) return false;
+function isConversationAttachment(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
   const attachment = value as Record<string, unknown>;
   const validBase = typeof attachment.name === "string"
     && attachment.name.length > 0
@@ -596,6 +943,14 @@ function isAcp(value: unknown): value is AgentConversationAcp {
   return typeof acp.providerId === "string" && acp.providerId.length > 0;
 }
 
+function isModelBinding(value: unknown): value is AgentConversationModelBinding {
+  if (typeof value !== "object" || value === null) return false;
+  const binding = value as Partial<AgentConversationModelBinding>;
+  return typeof binding.modelKey === "string" && binding.modelKey.length > 0
+    && typeof binding.effort === "string"
+    && (binding.explicit === undefined || typeof binding.explicit === "boolean");
+}
+
 function isCheckpoint(value: unknown): value is AgentConversationCheckpoint {
   if (typeof value !== "object" || value === null) return false;
   const checkpoint = value as Partial<AgentConversationCheckpoint>;
@@ -603,19 +958,6 @@ function isCheckpoint(value: unknown): value is AgentConversationCheckpoint {
     && Number.isInteger(checkpoint.compactedMessageCount)
     && (checkpoint.via === "provider" || checkpoint.via === "extractive")
     && (checkpoint.compactionCount === undefined || (Number.isInteger(checkpoint.compactionCount) && checkpoint.compactionCount >= 0));
-}
-
-function requireConversation(state: ConversationDocument, id: string): AgentConversation {
-  const conversation = state.conversations.find((item) => item.id === id);
-  if (!conversation) throw new Error(`Conversation not found: ${id}`);
-  return conversation;
-}
-
-function replaceConversation(state: ConversationDocument, updated: AgentConversation): ConversationDocument {
-  return {
-    ...state,
-    conversations: state.conversations.map((conversation) => conversation.id === updated.id ? updated : conversation),
-  };
 }
 
 function conversationTitle(content: string): string {

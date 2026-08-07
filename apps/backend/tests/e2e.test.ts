@@ -180,8 +180,10 @@ describe("E2E: notes plugin", () => {
   it("lists plugin-authored prompts while resources remain unsupported", async () => {
     const result = await client.mcp.listPrompts("nusashell.notes");
     expect(result.prompts.map((prompt) => prompt.name)).toEqual(["howto"]);
-    const prompt = await client.mcp.getPrompt("nusashell.notes", "howto");
-    expect(prompt.messages[0].content.text).toContain("create");
+    const prompt = (await client.mcp.getPrompt("nusashell.notes", "howto")) as {
+      messages: Array<{ content: { text?: string } }>;
+    };
+    expect(prompt.messages[0]?.content.text).toContain("create");
     await expect(client.mcp.listResources("nusashell.notes")).rejects.toThrow();
   });
 

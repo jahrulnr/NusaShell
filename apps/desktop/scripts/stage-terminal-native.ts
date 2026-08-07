@@ -15,7 +15,7 @@
  *
  * Usage: node --experimental-strip-types scripts/stage-terminal-native.ts
  */
-import { access, cp, mkdir, rm } from "node:fs/promises";
+import { access, cp, mkdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,7 +45,6 @@ async function main(): Promise<void> {
   }
 
   // Rebuild node-pty for the Electron ABI
-  const electronPath = join(workspaceRoot, "node_modules", "electron");
   console.log("[stage-terminal-native] running electron-rebuild for node-pty...");
   try {
     await execFileAsync(

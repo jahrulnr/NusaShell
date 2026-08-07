@@ -4,6 +4,7 @@ import type {
   AgentCanvasArtifact,
   AgentConversationCheckpoint,
   AgentConversationMessage,
+  AgentConversationModelBinding,
   AgentSubagentRun,
   AgentSubagentRunStatus,
 } from "../../shared/agent-conversation-contract.js";
@@ -28,6 +29,8 @@ export function registerAgentIpc(ctx: IpcContext): void {
     store().replaceLastInterrupted(id, message));
   ipcMain.handle("agent-conversations:set-workspace", (_event, id: string, workspace: string) =>
     store().setWorkspace(id, workspace));
+  ipcMain.handle("agent-conversations:set-model", (_event, id: string, model: AgentConversationModelBinding | null) =>
+    store().setModel(id, model));
   ipcMain.handle("agent-conversations:upsert-canvas-artifact", (_event, id: string, artifact: AgentCanvasArtifact) =>
     store().upsertCanvasArtifact(id, artifact));
   ipcMain.handle("agent-conversations:set-active-canvas-artifact", (_event, id: string, artifactId: string | null) =>

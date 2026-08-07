@@ -141,6 +141,29 @@ export function flattenModelCatalog(providers: readonly AiProviderSettings[]): r
       })));
 }
 
+/**
+ * Resolve the model that should drive backend fallbacks (ticket #39).
+ *
+ * The composer picker's global active model (`activeModelKey`) is the shell's
+ * single source of truth for "model the shell runs by default" — used by
+ * scheduled job/pipeline agent turns and their compaction summarizer, which
+ * otherwise fall back to the provider's own default (`ConfigureAiCommand.model`)
+ * set at bootstrap. Returns the provider id + model id for that active model so
+ * the IPC layer can re-configure the backend provider default whenever the
+ * global picker changes.
+ *
+ * @returns {{ providerId: string, model: string } | null} null when no active model is set.
+ */
+export function resolveActiveModelDefault(
+  providers: readonly AiProviderSettings[],
+  activeModelKey: string,
+): { providerId: string; model: string } | null {
+  if (!activeModelKey) return null;
+  const selected = flattenModelCatalog(providers).find((model) => model.key === activeModelKey);
+  if (!selected) return null;
+  return { providerId: selected.providerId, model: selected.id };
+}
+
 export async function importProviderModels(
   provider: AiProviderSettings,
   fetchFn: typeof fetch = fetch,

@@ -36,7 +36,8 @@ function setup() {
   return { clock, eventDispatcher, pluginRepository, processAdapter, mcpClientFactory, manager };
 }
 
-const FILES = PluginId.create("nusashell.files").ok ? PluginId.create("nusashell.files").value : (null as never);
+const FILES_ID_RESULT = PluginId.create("nusashell.files");
+const FILES = FILES_ID_RESULT.ok ? FILES_ID_RESULT.value : (null as never);
 
 describe("PluginRuntimeManager workspace binding", () => {
   it("injects NUSASHELL_WORKSPACE env at spawn when startPlugin is given a workspace", async () => {

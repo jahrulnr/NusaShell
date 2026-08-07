@@ -179,7 +179,26 @@ export class PluginRuntimeManager {
 
   async listTools(pluginId: PluginId): Promise<readonly ToolDescriptor[]> {
     const entry = await this.ensureEntry(pluginId);
-    return entry.queue.enqueue(async () => this.sessions.requireRunningClient(entry).listTools());
+    // Serve the cached catalog when available (round-trip JSON-RPC avoided).
+    // The cache is set lazily on first fetch and invalidated on restart /
+    // stop / crash / `notifications/tools/list_changed`.
+    if (entry.cachedTools !== null) {
+      return entry.cachedTools;
+    }
+    const tools = await entry.queue.enqueue(async () =>
+      this.sessions.requireRunningClient(entry).listTools());
+    entry.cachedTools = tools;
+    return tools;
+  }
+
+  /**
+   * Invalidate the cached tool catalog for a plugin so the next `listTools`
+   * re-fetches from the MCP server. Called on lifecycle transitions and on
+   * MCP `notifications/tools/list_changed`.
+   */
+  invalidateToolsCache(pluginId: PluginId): void {
+    const entry = this.runtimes.get(PluginId.toString(pluginId));
+    if (entry) entry.cachedTools = null;
   }
 
   async listPrompts(pluginId: PluginId): Promise<readonly PromptDescriptor[]> {
@@ -357,6 +376,7 @@ export class PluginRuntimeManager {
       restartWindowStartAt: 0,
       restartTimer: null,
       lastCrashReason: undefined,
+      cachedTools: null,
       workspace: undefined,
       lastRootsWorkspace: undefined,
       launchArgs: undefined,

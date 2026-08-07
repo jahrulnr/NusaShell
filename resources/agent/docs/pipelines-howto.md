@@ -53,6 +53,30 @@ Step A: outputKey="summary" → context.summary = "Meeting notes..."
 Step B: prompt="Translate: {{context.summary}}" → resolved to "Translate: Meeting notes..."
 ```
 
+### Template resolution by trigger mode
+
+Agent prompts and tool args support templates. Which ones resolve depends on
+how the run was triggered:
+
+- `{{context.*}}` — **always resolves**, in both event-triggered *and*
+  manual/schedule runs. Context is populated by earlier steps (`outputKey`).
+- `{{payload.*}}` and `{{event.*}}` — resolve **only** when the run was triggered
+  by a real automation event. In manual (`pipeline action=run`) or schedule
+  runs there is no event, so these stay **literal** (`{{payload.x}}` is passed
+  to the agent/tool unchanged — good for keeping literal braces in prompts).
+
+```text
+Manual / schedule run:
+  prompt: "Handle {{payload.category}}"  → passed through literally
+  prompt: "Use {{context.summary}}"      → resolved from earlier step output (if any)
+Event-triggered run (mail.new, payload.category="finance"):
+  prompt: "Handle {{payload.category}}"   → "Handle finance"
+```
+
+This avoids leaking a synthetic empty event (`type: ""`) into step templates on
+manual/schedule runs.
+
+
 ## Conditional branching
 
 Conditions evaluate against the event payload (`payload.*`) or accumulated

@@ -139,8 +139,8 @@ describe("SqlitePluginRepository", () => {
 
     const found = await repo.findById(idResult.value);
     expect(found).not.toBeNull();
-    expect(found!.manifest.ui.window?.mode).toBe("panel");
-    expect(found!.manifest.ui.window?.defaultSize?.width).toBe(480);
+    expect(found!.manifest.ui?.window?.mode).toBe("panel");
+    expect(found!.manifest.ui?.window?.defaultSize?.width).toBe(480);
     expect(found!.manifest.mcp.args).toEqual(["server.js"]);
     expect(found!.manifest.mcp.env).toEqual({ FOO: "bar" });
     expect(found!.manifest.mcp.autostart).toBe(true);

@@ -275,7 +275,7 @@
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="m21 11-8.5 8.5a5.25 5.25 0 0 1-7.4-7.4l8.5-8.5a3.5 3.5 0 0 1 4.95 4.95l-8.5 8.5a1.75 1.75 0 0 1-2.48-2.48l8-8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
                   </button>
                   <div class="agent-model-control">
-                    <button class="agent-model-trigger" id="agent-model-trigger" type="button" aria-haspopup="dialog" aria-expanded="false"><span id="agent-model-trigger-label">Model · auto</span><span aria-hidden="true">⌄</span></button>
+                    <button class="agent-model-trigger" id="agent-model-trigger" type="button" aria-haspopup="dialog" aria-controls="agent-model-menu" aria-expanded="false"><span id="agent-model-trigger-label">Model · auto</span><span aria-hidden="true">⌄</span></button>
                     <button class="agent-acp-pill" id="agent-acp-pill" type="button" hidden><span id="agent-acp-pill-label">—</span></button>
                     <div class="agent-model-menu" id="agent-model-menu" role="dialog" aria-label="Choose model and effort" hidden>
                       <label class="agent-model-search"><span aria-hidden="true">⌕</span><input id="agent-model-search" type="search" placeholder="Search models or providers…" autocomplete="off"></label>
@@ -922,6 +922,18 @@
             </label>
             <div class="settings-row"><span>Stream responses</span><label class="toggle"><input id="settings-ai-stream" type="checkbox" checked><span class="toggle-slider"></span></label></div>
             <div class="settings-row"><span>Applies without restart</span><button class="mini-btn" type="submit">Save runtime</button></div>
+          </form>
+
+          <form class="settings-card" id="ai-global-model-form">
+            <div class="settings-card-title">Global model</div>
+            <p class="settings-card-copy">The model the shell runs by default: scheduled job/pipeline agent turns, context compaction summarizer, and new rooms that haven't picked their own model.</p>
+            <label class="settings-field">Model<select id="settings-global-model"></select>
+              <span class="settings-field-help">"Automatic (provider default)" uses each provider's configured default model.</span>
+            </label>
+            <label class="settings-field">Effort<select id="settings-global-effort"><option value="auto">auto</option></select>
+              <span class="settings-field-help">Reasoning effort, when the selected model supports it.</span>
+            </label>
+            <div class="settings-row"><span>Used by: pipeline/job agent mode, compaction summarizer, new rooms</span><button class="mini-btn" type="submit">Save global model</button></div>
           </form>
 
           <form class="settings-card" id="ai-limits-form">

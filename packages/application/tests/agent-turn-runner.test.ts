@@ -73,7 +73,7 @@ class FakeToolGateway implements AgentToolGateway {
     }];
   }
 
-  async execute(name: string, args: Readonly<Record<string, unknown>>) {
+  async execute(name: string, args: Readonly<Record<string, unknown>>): Promise<unknown> {
     this.calls.push({ name, args });
     if (name === "notes.create") return { id: "note-1" };
     throw new Error(`Unexpected tool ${name}`);
@@ -112,7 +112,7 @@ class DeferredToolGateway implements AgentToolGateway {
     }));
   }
 
-  async execute(name: string, _args: Readonly<Record<string, unknown>>, _requestId: string, _turnId: string, callId: string): Promise<unknown> {
+  async execute(_name: string, _args: Readonly<Record<string, unknown>>, _requestId: string, _turnId: string, callId: string): Promise<unknown> {
     this.startOrder.push(callId);
     return new Promise((resolve, reject) => {
       this.pending.set(callId, { resolve, reject });
@@ -357,7 +357,7 @@ describe("AgentTurnRunner", () => {
       { text: "Done." },
     ]);
     const tools = new FakeToolGateway();
-    tools.execute = async (name, args) => {
+    tools.execute = async (name, args): Promise<unknown> => {
       tools.calls.push({ name, args });
       if (name === "mcp_nusashell_createNote") return { ok: true };
       throw new Error(`Unexpected tool ${name}`);
@@ -801,7 +801,7 @@ describe("AgentTurnRunner", () => {
     expect(result.text).toBe("Done");
     expect(result.toolCalls.map((tc) => tc.id)).toEqual(["call-a", "call-b"]);
     // Tool messages in messages array preserve call order.
-    const toolMessages = result.messages.filter((m) => m.role === "tool");
+    const toolMessages = result.messages!.filter((m) => m.role === "tool");
     expect(toolMessages.map((m) => m.toolCallId)).toEqual(["call-a", "call-b"]);
   });
 
@@ -826,7 +826,7 @@ describe("AgentTurnRunner", () => {
     tools.complete("first", "f");
 
     const result = await turnPromise;
-    const toolStep = result.steps.find((s) => s.type === "tool_calls");
+    const toolStep = result.steps!.find((s) => s.type === "tool_calls");
     expect(toolStep?.type).toBe("tool_calls");
     if (toolStep?.type === "tool_calls") {
       expect(toolStep.calls.map((c) => c.id)).toEqual(["first", "second"]);
@@ -1082,7 +1082,7 @@ describe("AgentTurnRunner", () => {
       { text: "Found curl helpers" },
     ]);
     const tools = new FakeToolGateway();
-    tools.execute = async () => hugeOutput;
+    tools.execute = async (): Promise<unknown> => hugeOutput;
     const runner = new AgentTurnRunner({
       provider,
       toolGateway: tools,
@@ -1236,18 +1236,6 @@ describe("AgentTurnRunner", () => {
   it("captures streamed text deltas into partial.text when provider fails mid-stream", async () => {
     // Provider invokes onTextDelta with partial paragraphs, then throws.
     // The partial must contain the already-streamed text.
-    const provider = new (class extends FlakyProvider {
-      constructor() {
-        super([]);
-      }
-      override async complete(request: AgentProviderRequest): Promise<AgentProviderResult> {
-        this.requests.push(request);
-        request.onTextDelta?.("Hello ");
-        request.onTextDelta?.("world, this is a ");
-        request.onTextDelta?.("partial essay that ");
-        throw new Error("stream cut");
-      }
-    })();
     const tools = new FakeToolGateway();
     // Need in-turn tool progress so partial is attached.
     // Use a two-response provider: first gives a tool call, second streams then fails.

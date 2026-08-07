@@ -2,8 +2,18 @@ import Graph from "graphology";
 import Sigma from "sigma";
 import { EdgeArrowProgram } from "sigma/rendering";
 import { EdgeCurvedArrowProgram } from "@sigma/edge-curve";
-import forceAtlas2 from "graphology-layout-forceatlas2";
-import noverlap from "graphology-layout-noverlap";
+import {
+  applyFaLayout,
+  applyNoverlapLayout,
+  computeFaLayoutSettings,
+  createFALayoutState,
+  createNoverlapState,
+  runNextFaChunk,
+  runNextNoverlapChunk,
+} from "./learning-sigma-graph.layout.js";
+
+// Re-export so callers/tests can build a persisted state in one call.
+export { layoutGraphChunked } from "./learning-sigma-graph.layout.js";
 
 const ZOOM_FAR = 0.6;
 const ZOOM_MID = 0.3;
@@ -47,8 +57,23 @@ function compactOrphans(graph) {
   });
 }
 
-function neighborhood(graph, active) {
-  const nodes = new Set(active ? [active] : []);
+/**
+ * Build the persisted chunked-layout state for a graph. Mirrors the old
+ * synchronous mount: FA2 iterations gated by graph order, then Noverlap.
+ */
+function createFaChunkedPlan(graph) {
+  const plan = computeFaLayoutSettings(graph);
+  const state = createFALayoutState(graph, {
+    iterations: plan.iterations,
+    settings: plan.settings,
+  });
+  const noverlapState = createNoverlapState(graph, {
+    maxIterations: plan.noverlapIterations,
+  });
+  return { state, noverlapState, plan };
+}
+
+function neighborhood(graph, active) {  const nodes = new Set(active ? [active] : []);
   const edges = new Set();
   if (!active || !graph.hasNode(active)) return { nodes, edges };
   let frontier = [active];
@@ -132,26 +157,6 @@ export class LearningSigmaGraph {
       this.graph.setNodeAttribute(id, "size", this.nodeSize(this.graph.degree(id)));
     });
 
-    if (this.graph.order > 1) {
-      forceAtlas2.assign(this.graph, {
-        iterations: this.graph.order < 200 ? 240 : 80,
-        settings: {
-          linLogMode: false,
-          outboundAttractionDistribution: true,
-          gravity: 0.8,
-          scalingRatio: this.graph.order < 200 ? 8 : 14,
-          strongGravityMode: false,
-          slowDown: 5,
-          barnesHutOptimize: this.graph.order > 50,
-          barnesHutTheta: 0.5,
-          edgeWeightInfluence: 0,
-          adjustSizes: true,
-        },
-      });
-      compactOrphans(this.graph);
-      noverlap.assign(this.graph, { maxIterations: 40, settings: { margin: 4, ratio: 1.1, speed: 3, gridSize: 20 } });
-    }
-
     this.sigma = new Sigma(this.graph, this.container, {
       renderLabels: true,
       labelRenderedSizeThreshold: 10,
@@ -172,7 +177,54 @@ export class LearningSigmaGraph {
     this._applyReducers();
     this.sigma.getCamera().animatedReset({ duration: 0 });
     this._emitZoom();
+
+    const { state, noverlapState } = createFaChunkedPlan(this.graph);
+    this._cancelLayoutChunks();
+    this.layoutPlan = { state, noverlapState };
+    this.layoutRaf = requestAnimationFrame(() => this._pumpLayoutChunked());
     return true;
+  }
+
+  _pumpLayoutChunked() {
+    this.layoutRaf = 0;
+    const { state, noverlapState } = this.layoutPlan ?? {};
+    if (!state || !this.sigma || !this.graph) {
+      this.layoutPlan = null;
+      return;
+    }
+    // FA2 in bounded chunks.
+    if (state.remaining > 0) {
+      runNextFaChunk(state, this.graph.order, 60);
+      this.layoutRaf = requestAnimationFrame(() => this._pumpLayoutChunked());
+      return;
+    }
+    if (!state.applied) {
+      applyFaLayout(this.graph, state);
+      compactOrphans(this.graph);
+    }
+    if (noverlapState && !noverlapState.applied) {
+      applyNoverlapLayout(this.graph, noverlapState);
+    }
+    // Noverlap anti-collision, chunked too.
+    if (noverlapState && noverlapState.remaining > 0) {
+      runNextNoverlapChunk(noverlapState, 20);
+      this.layoutRaf = requestAnimationFrame(() => this._pumpLayoutChunked());
+      return;
+    }
+    if (noverlapState && !noverlapState.applied) {
+      applyNoverlapLayout(this.graph, noverlapState);
+    }
+    this.layoutPlan = null;
+    this.sigma.refresh?.();
+    this._applyReducers();
+  }
+
+  _cancelLayoutChunks() {
+    if (this.layoutRaf) {
+      cancelAnimationFrame(this.layoutRaf);
+      this.layoutRaf = 0;
+    }
+    this.layoutPlan = null;
   }
 
   _containerHasDimensions() {
@@ -294,6 +346,7 @@ export class LearningSigmaGraph {
   resetView() { this.sigma?.getCamera().animatedReset({ duration: 300 }); }
 
   destroy() {
+    this._cancelLayoutChunks();
     this.sigma?.kill();
     this.sigma = null;
     this.graph = null;

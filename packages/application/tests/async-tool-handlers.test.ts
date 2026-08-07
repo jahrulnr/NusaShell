@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { AsyncToolRuntime } from "../src/index.js";
 import { execAsyncRun, execAsyncWait, execAsyncPeek, execAsyncKill } from "../src/index.js";
 
@@ -33,7 +33,7 @@ describe("async tool handlers", () => {
 
   it("execAsyncRun rejects when tool name is missing", async () => {
     const runtime = new AsyncToolRuntime();
-    await expect(execAsyncRun(runtime, {}, { conversationId: "conv-1", spawnWork: () => Promise.resolve() }))
+    await expect(execAsyncRun(runtime, {}, { conversationId: "conv-1", spawnWork: () => Promise.resolve(), kind: "mcp" }))
       .rejects.toThrow();
     runtime.dispose();
   });
@@ -51,6 +51,7 @@ describe("async tool handlers", () => {
     const spawned = await execAsyncRun(runtime, { tool: "t", args: {} }, {
       conversationId: "conv-1",
       spawnWork: () => work.promise,
+      kind: "mcp",
     });
     const peek = await execAsyncPeek(runtime, { handleId: spawned.handleId });
     expect(peek.status).toBe("running");
@@ -70,6 +71,7 @@ describe("async tool handlers", () => {
     const spawned = await execAsyncRun(runtime, { tool: "t", args: {} }, {
       conversationId: "conv-1",
       spawnWork: () => work.promise,
+      kind: "mcp",
     });
     setTimeout(() => work.resolve({ ok: true }), 5);
     const result = await execAsyncWait(runtime, { handleId: spawned.handleId, timeoutMs: 5000 });
@@ -83,6 +85,7 @@ describe("async tool handlers", () => {
     const spawned = await execAsyncRun(runtime, { tool: "t", args: {} }, {
       conversationId: "conv-1",
       spawnWork: () => work.promise,
+      kind: "mcp",
     });
     const result = await execAsyncWait(runtime, { handleId: spawned.handleId, timeoutMs: 1000 });
     expect(result.status).toBe("running");
@@ -101,6 +104,7 @@ describe("async tool handlers", () => {
     const spawned = await execAsyncRun(runtime, { tool: "t", args: {} }, {
       conversationId: "conv-1",
       spawnWork: () => work.promise,
+      kind: "mcp",
     });
     await expect(execAsyncWait(runtime, { handleId: spawned.handleId, timeoutMs: 0 })).rejects.toThrow();
     await expect(execAsyncWait(runtime, { handleId: spawned.handleId, timeoutMs: 600_000 })).rejects.toThrow();
@@ -113,6 +117,7 @@ describe("async tool handlers", () => {
     const spawned = await execAsyncRun(runtime, { tool: "t", args: {} }, {
       conversationId: "conv-1",
       spawnWork: () => work.promise,
+      kind: "mcp",
     });
     const result = await execAsyncKill(runtime, { handleId: spawned.handleId });
     expect(result.status).toBe("killed");

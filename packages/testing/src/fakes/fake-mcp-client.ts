@@ -19,6 +19,7 @@ export class FakeMcpClient implements McpClientPort {
   readonly resourceTemplates: ResourceTemplateDescriptor[] = [];
   private connected = false;
   private closeCallback: (() => void) | null = null;
+  private toolsListChangedCallback: (() => void) | null = null;
   /** True once onClose() registered a close watcher (test instrumentation). */
   onCloseRegistered = false;
   /** Artificial connect delay (ms); close() aborts an in-flight connect. */
@@ -28,6 +29,8 @@ export class FakeMcpClient implements McpClientPort {
     name: string;
     args: Readonly<Record<string, unknown>>;
   }> = [];
+  /** Number of times `listTools()` was invoked (cache instrumentation). */
+  listToolsCalls = 0;
   private readonly callResults = new Map<string, unknown>();
   private readonly callDelays = new Map<string, number>();
   private readonly promptResults = new Map<string, PromptResult>();
@@ -61,6 +64,17 @@ export class FakeMcpClient implements McpClientPort {
   onClose(callback: () => void): void {
     this.closeCallback = callback;
     this.onCloseRegistered = true;
+  }
+
+  onToolsListChanged(callback: () => void): void {
+    this.toolsListChangedCallback = callback;
+  }
+
+  /** Test helper: simulate the server emitting notifications/tools/list_changed. */
+  emitToolsListChanged(): void {
+    if (this.toolsListChangedCallback) {
+      this.toolsListChangedCallback();
+    }
   }
 
   emitClose(): void {
@@ -101,6 +115,7 @@ export class FakeMcpClient implements McpClientPort {
   }
 
   async listTools(): Promise<readonly ToolDescriptor[]> {
+    this.listToolsCalls += 1;
     return this.tools;
   }
 

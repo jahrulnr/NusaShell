@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   LearningGraphService,
   parseMemoryNodeId,
@@ -13,7 +13,7 @@ import type {
   SkillUsageRecord,
   SkillReadResult,
 } from "../src/index.js";
-import type { MemoryStorePort, MemorySnapshot, MemoryMutationResult } from "../src/index.js";
+import type { MemoryStorePort, MemorySnapshot } from "../src/index.js";
 
 function fakeSummary(id: string, overrides: Partial<SkillSummary> = {}): SkillSummary {
   return { id, name: id, description: "test", fileCount: 1, updatedAt: "2025-06-01T00:00:00Z", ...overrides };

@@ -186,7 +186,7 @@ describe("SkillCuratorService", () => {
 
     await curator.run(false);
     expect(eventDispatcher.publish).toHaveBeenCalledTimes(1);
-    const event = (eventDispatcher.publish as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const event = (eventDispatcher.publish as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(event.type).toBe("agent.learning_updated");
     expect(event.kinds).toContain("skill_curator");
   });

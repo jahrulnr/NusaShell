@@ -272,7 +272,7 @@ describe("formatMessagesForSummary", () => {
 describe("hasTurnProgress", () => {
   it("returns true when in-turn toolCalls exist", () => {
     expect(hasTurnProgress(
-      [{ toolCallId: "c1", name: "notes.create", ok: true, args: {}, result: "" }],
+      [{ id: "c1", name: "notes.create", ok: true, args: {}, result: "" }],
       [],
     )).toBe(true);
   });

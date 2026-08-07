@@ -103,7 +103,7 @@ describe("todo meta-tool", () => {
     gateway.beginTurn("turn-1", { conversationId: "conv-1" });
     await gateway.execute("todo", { items: [{ id: "1", content: "task", status: "pending" }] }, "call-1", "turn-1");
     expect(published).toHaveLength(1);
-    expect(published[0].conversationId).toBe("conv-1");
-    expect(published[0].items).toHaveLength(1);
+    expect(published[0]!.conversationId).toBe("conv-1");
+    expect(published[0]!.items).toHaveLength(1);
   });
 });

@@ -1,15 +1,22 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { CompletionReference, CompletionResult, McpClientPort, PromptDescriptor, PromptResult, ResourceDescriptor, ResourceReadResult, ResourceTemplateDescriptor, ToolDescriptor, AutomationClientDeps } from "@nusashell/application";
+import { ListRootsRequestSchema, ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
+import type { CompletionReference, CompletionResult, McpClientPort, PromptDescriptor, PromptResult, ResourceDescriptor, ResourceReadResult, ResourceTemplateDescriptor, RootDescriptor, ToolDescriptor, AutomationClientDeps } from "@nusashell/application";
 import type { Logger } from "pino";
 import { registerMcpLogging } from "./mcp-logging.js";
 import { registerMcpAutomation } from "./mcp-automation.js";
 import { unwrapMcpToolResult } from "./tool-result.js";
+import { connectWithTimeout } from "./remote-mcp-connect.js";
 
 export class HttpMcpClient implements McpClientPort {
   private client: Client | null = null;
   private transport: StreamableHTTPClientTransport | null = null;
   private closeCallback: (() => void) | null = null;
+  private toolsListChangedCallback: (() => void) | null = null;
+
+  private currentRoots: readonly RootDescriptor[] = [];
+  private rootsRequestedFlag = false;
+
 
   constructor(
     private readonly url: string,
@@ -24,6 +31,10 @@ export class HttpMcpClient implements McpClientPort {
 
   onClose(callback: () => void): void {
     this.closeCallback = callback;
+  }
+
+  onToolsListChanged(callback: () => void): void {
+    this.toolsListChangedCallback = callback;
   }
 
   async connect(): Promise<void> {
@@ -41,9 +52,24 @@ export class HttpMcpClient implements McpClientPort {
 
     this.client = new Client(
       { name: "nusashell-backend", version: "0.0.2" },
-      { capabilities: {} },
+      { capabilities: { roots: { listChanged: true } } },
     );
     registerMcpLogging(this.client, this.logger, this.url);
+    this.client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
+      if (this.toolsListChangedCallback) {
+        this.toolsListChangedCallback();
+      }
+    });
+
+    this.client.setRequestHandler(ListRootsRequestSchema, async () => {
+      this.rootsRequestedFlag = true;
+      return {
+        roots: this.currentRoots.map((root) => ({
+          uri: root.uri,
+          ...(root.name !== undefined ? { name: root.name } : {}),
+        })),
+      };
+    });
     if (this.automation) {
       registerMcpAutomation(this.client, this.automation.pluginId, {
         eventDispatcher: this.automation.eventDispatcher,
@@ -53,7 +79,18 @@ export class HttpMcpClient implements McpClientPort {
       });
     }
 
-    await this.client.connect(this.transport as never);
+    await connectWithTimeout(
+      this.url,
+      () => this.client!.connect(this.transport as never),
+      {
+        onTimeout: () => {
+          // Let the loser of the race settle instead of leaving a half-open
+          // transport stuck in reconnect-backoff.
+          void this.transport?.close().catch(() => {});
+        },
+        ...(this.logger ? { logger: this.logger } : {}),
+      },
+    );
   }
 
   async close(): Promise<void> {
@@ -145,6 +182,19 @@ export class HttpMcpClient implements McpClientPort {
       ...(typeof result.completion.total === "number" ? { total: result.completion.total } : {}),
       ...(typeof result.completion.hasMore === "boolean" ? { hasMore: result.completion.hasMore } : {}),
     };
+  }
+
+  setRoots(roots: readonly RootDescriptor[]): void {
+    this.currentRoots = roots;
+  }
+
+  async notifyRootsChanged(): Promise<void> {
+    if (!this.client) return;
+    await this.client.sendRootsListChanged();
+  }
+
+  rootsRequested(): boolean {
+    return this.rootsRequestedFlag;
   }
 
   private requireClient(): Client {

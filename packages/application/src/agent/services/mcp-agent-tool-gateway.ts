@@ -10,10 +10,9 @@ import type { PipelineStorePort } from "../../job/ports/pipeline-store.port.js";
 import type { JobScheduler } from "../../job/services/job-scheduler.js";
 import type { PipelineScheduler } from "../../job/services/pipeline-scheduler.js";
 import type { DocsIndexPort } from "../ports/docs-index.port.js";
-import type { AgentToolDefinition, ReasoningEffort } from "../ports/agent-provider.port.js";
+import type { AgentToolDefinition } from "../ports/agent-provider.port.js";
 import type { AgentToolGateway, AgentTurnContext } from "../ports/agent-tool-gateway.port.js";
-import type { McpLiveSnapshot, McpLiveSnapshotTool } from "./mcp-live-prompt-formatter.js";
-import { MCP_LIVE_TOOLS_CAP } from "./mcp-live-prompt-formatter.js";
+import type { McpLiveSnapshot } from "./mcp-live-prompt-formatter.js";
 import {
   tokenizeQuery,
   rankToolsByTokens,
@@ -26,7 +25,7 @@ import type { LoggerPort } from "../../plugin/ports/logger.port.js";
 import type { AskQuestionService } from "./ask-question-service.js";
 import { wrapToolArgs } from "./workspace-tool-wrap.js";
 import {
-  definition, stringSchema, requireString, optionalString, stringRecord, parsePluginId,
+  requireString, optionalString, stringRecord, parsePluginId,
   toProviderToolName,
 } from "./gateway-utils.js";
 import { execDocsSearch, execDocsList, execDocsRead } from "./docs-tool-handlers.js";
@@ -40,44 +39,29 @@ import { execTodo } from "./todo-tool-handler.js";
 import { execAsyncRun, execAsyncWait, execAsyncPeek, execAsyncKill } from "./async-tool-handlers.js";
 import type { AsyncToolRuntime } from "./async-tool-runtime.js";
 import { execMcpRegister, execMcpUnregister, type McpPluginRegistrationDeps } from "./mcp-plugin-tool-handlers.js";
+import { emptySchema, type McpToolRoute, type WriteOrigin, type SkillApprovalStagingPort } from "./gateway-types.js";
+import { GatewayRouteStore } from "./gateway-route-store.js";
+import { GatewayLiveSnapshot } from "./gateway-live-snapshot.js";
+import { buildMetaToolDefinitions, compact } from "./gateway-meta-tools.js";
 
-export type WriteOrigin = "foreground" | "background_review";
-
-export interface SkillApprovalStagingPort {
-  stage(skillId: string, action: "create" | "edit" | "write_file" | "delete", path: string, content: string): Promise<{ id: string }>;
-}
-
-interface McpToolRoute {
-  readonly pluginId: string;
-  readonly toolName: string;
-  readonly inputSchema: Readonly<Record<string, unknown>>;
-  readonly description?: string;
-}
-
-const emptySchema = { type: "object", properties: {} } as const;
-const MAX_ASK_OPTIONS = 8;
+export type { WriteOrigin, SkillApprovalStagingPort, McpToolRoute } from "./gateway-types.js";
 
 /**
  * Shell-owned progressive MCP catalog. The model starts with meta-tools, then
  * discovers servers and tools. Concrete MCP tools may be advertised via
  * `tool_schema`/`tool_schemas`, or lazily resolved when the model recalls a
  * previously used `mcp_<plugin>_<tool>` name and that plugin is already running.
+ *
+ * The class is a thin composition (#11) over focused modules:
+ * - `GatewayRouteStore` — per-turn / per-conversation grant + lifecycle state
+ * - `GatewayLiveSnapshot` — live MCP snapshot + running-plugin tool seeding
+ * - `buildMetaToolDefinitions` — the meta-tool `definition(...)` catalog
+ * The `execute()` dispatch + MCP plugin management / granted-call handlers stay
+ * here because they are tightly coupled to `runtimeManager` and both stores.
  */
 export class McpAgentToolGateway implements AgentToolGateway {
-  private readonly turnRoutes = new Map<string, Map<string, McpToolRoute>>();
-  /**
-   * Sticky grants per conversation. When a turn begins with a conversationId,
-   * its turnRoutes are seeded from this map so the model does not re-pay the
-   * discovery tax on every auto-continue. Cleared by `endConversation`.
-   */
-  private readonly conversationRoutes = new Map<string, Map<string, McpToolRoute>>();
-  private readonly activeCalls = new Map<string, Map<string, string>>();
-  private readonly turnInteractive = new Map<string, boolean>();
-  private readonly turnWorkspace = new Map<string, string | undefined>();
-  private readonly turnProviderId = new Map<string, string | undefined>();
-  private readonly turnModel = new Map<string, string | undefined>();
-  private readonly turnEffort = new Map<string, ReasoningEffort | undefined>();
-  private readonly turnConversationId = new Map<string, string | undefined>();
+  private readonly routes: GatewayRouteStore;
+  private readonly live: GatewayLiveSnapshot;
   private writeOrigin: WriteOrigin = "foreground";
   private writeApprovalEnabled = false;
   private jobStore?: JobStorePort;
@@ -100,7 +84,10 @@ export class McpAgentToolGateway implements AgentToolGateway {
     private readonly approvalStaging?: SkillApprovalStagingPort,
     private readonly skillUsage?: SkillUsagePort,
     private readonly askQuestions?: AskQuestionService,
-  ) {}
+  ) {
+    this.routes = new GatewayRouteStore();
+    this.live = new GatewayLiveSnapshot(runtimeManager, this.routes, this.logger);
+  }
 
   setWriteOrigin(origin: WriteOrigin): void { this.writeOrigin = origin; }
   getWriteOrigin(): WriteOrigin { return this.writeOrigin; }
@@ -142,235 +129,45 @@ export class McpAgentToolGateway implements AgentToolGateway {
   }
 
   beginTurn(turnId: string, context?: AgentTurnContext): void {
-    if (!this.turnRoutes.has(turnId)) {
-      const turnMap = new Map<string, McpToolRoute>();
-      // Sticky grant seeding: copy routes from the conversation store so the
-      // model starts the turn with previously-granted tools advertised. We
-      // copy (not share) so endTurn for this turn does not mutate the
-      // conversation store.
-      const conversationId = context?.conversationId;
-      if (conversationId) {
-        const convMap = this.conversationRoutes.get(conversationId);
-        if (convMap) {
-          for (const [name, route] of convMap) turnMap.set(name, route);
-        }
-      }
-      this.turnRoutes.set(turnId, turnMap);
-    }
-    if (!this.activeCalls.has(turnId)) this.activeCalls.set(turnId, new Map());
-    // Merge only provided fields so a later beginTurn (e.g. AgentTurnRunner)
-    // cannot wipe workspace / provider context set by RunAgentTurnHandler.
-    if (context?.interactive !== undefined) this.turnInteractive.set(turnId, context.interactive);
-    if (context?.workspace !== undefined) this.turnWorkspace.set(turnId, context.workspace);
-    if (context?.providerId !== undefined) this.turnProviderId.set(turnId, context.providerId);
-    if (context?.model !== undefined) this.turnModel.set(turnId, context.model);
-    if (context?.effort !== undefined) this.turnEffort.set(turnId, context.effort);
-    if (context?.conversationId !== undefined) this.turnConversationId.set(turnId, context.conversationId);
+    this.routes.beginTurn(turnId, context);
   }
 
-  /**
-   * Clear sticky grants for a conversation. Called when the conversation is
-   * deleted or sealed permanently so a future turn with the same id (rare)
-   * does not inherit stale grants.
-   */
   endConversation(conversationId: string): void {
-    this.conversationRoutes.delete(conversationId);
+    this.routes.endConversation(conversationId);
   }
 
   endTurn(turnId: string): void {
     this.askQuestions?.clearTurn(turnId);
-    this.turnRoutes.delete(turnId);
-    this.activeCalls.delete(turnId);
-    this.turnInteractive.delete(turnId);
-    this.turnWorkspace.delete(turnId);
-    this.turnProviderId.delete(turnId);
-    this.turnModel.delete(turnId);
-    this.turnEffort.delete(turnId);
-    this.turnConversationId.delete(turnId);
+    this.routes.endTurn(turnId);
   }
 
   async cancelTurn(turnId: string): Promise<void> {
     this.askQuestions?.rejectTurn(turnId);
-    const calls = [...(this.activeCalls.get(turnId)?.entries() ?? [])];
+    const calls = [...this.routes.activeCallsFor(turnId).entries()];
     await Promise.allSettled(calls.map(([requestId, pluginId]) =>
       this.runtimeManager.cancelTool(parsePluginId(pluginId), requestId),
     ));
   }
 
   async listTools(_pluginIds: readonly string[], turnId: string): Promise<readonly AgentToolDefinition[]> {
-    const routes = this.routesFor(turnId);
     // Auto-seed routes for every tool on currently running plugins so the
     // model can call provider names directly without prior tool_schema.
     // Fail-soft: enumeration errors do not block the turn.
-    await this.autoSeedRunningTools(turnId, routes);
+    await this.live.autoSeedRunningTools(turnId);
+    const routes = this.routes.routesFor(turnId);
     return [
-      definition("mcp_list", "List MCP plugins, runtime state, autostart preference, and launch spec (command, args, env keys — values redacted)"),
-      definition("mcp_enable", "Start a selected MCP plugin. Optional args/env override the launch spec (command is immutable); a different launchSpec while running triggers a respawn.", {
-        pluginId: stringSchema(),
-        args: { type: "array", items: { type: "string" }, description: "Optional full replacement for the manifest args array." },
-        env: { type: "object", additionalProperties: { type: "string" }, description: "Optional env overrides merged onto the manifest env (values are not echoed back)." },
-      }),
-      definition("mcp_disable", "Stop a selected MCP plugin", { pluginId: stringSchema() }),
-      definition("tool_search", "Search a running MCP plugin's tools by name or description (case-insensitive token match — any term matches; returns {pluginId, query, matchMode, count, matches, hint?}; count 0 is success with a hint, not a turn interrupt or failure)", { pluginId: stringSchema(), query: stringSchema() }),
-      definition("tool_list", "List all tools from a running MCP plugin (names and descriptions only; returns {pluginId, count, tools})", { pluginId: stringSchema() }),
-      definition("tool_schema", "Load one MCP tool schema and advertise it for this turn (optional when recalling a known mcp_* name on a running plugin)", { pluginId: stringSchema(), toolName: stringSchema() }),
-      definition("tool_schemas", "Load multiple MCP tool schemas and advertise them for this turn in one call (optional when recalling known mcp_* names on a running plugin)", {
-        pluginId: stringSchema(),
-        toolNames: { type: "array", items: { type: "string" }, minItems: 1, description: "Tool names to advertise for the current turn" },
-      }, ["pluginId", "toolNames"]),
-      definition("mcp_context", "Discover or load MCP prompts and text resources", {
-        pluginId: stringSchema(),
-        action: { type: "string", enum: ["list_prompts", "get_prompt", "search_resources", "list_resource_templates", "complete", "read_resource"] },
-        query: stringSchema(),
-        name: stringSchema(),
-        uri: stringSchema(),
-        refType: { type: "string", enum: ["prompt", "resource"] },
-        argumentName: stringSchema(),
-        argumentValue: stringSchema(),
-        arguments: { type: "object", additionalProperties: { type: "string" } },
-      }, ["pluginId", "action"]),
-      ...(this.pluginRegistration ? [
-        definition("mcp_register", "Register an existing valid MCP plugin folder under the writable user plugins root (interactive confirmation required)", {
-          folder: { type: "string", description: "One folder name under the user plugins root" },
-          path: { type: "string", description: "Absolute path to one folder under the user plugins root" },
-        }, []),
-        definition("mcp_unregister", "Unregister and remove a user-installed MCP plugin (interactive confirmation required)", {
-          pluginId: stringSchema(),
-        }),
-      ] : []),
-      definition("docs_search", "Search the internal NusaShell documentation corpus (how-to, feature, and UI guidance)", {
-        query: stringSchema(),
-        top_k: { type: "integer", minimum: 1, maximum: 10, description: "Maximum number of chunks to return" },
-      }, ["query"]),
-      definition("docs_list", "List all documents in the internal NusaShell docs corpus", {
-        limit: { type: "integer", minimum: 1, maximum: 100, description: "Maximum number of documents" },
-      }),
-      definition("docs_read", "Read the full content of one internal NusaShell documentation document by path", {
-        path: stringSchema(),
-        chunk_id: { type: "string", description: "Chunk ID from a docs_search hit" },
-        max_chars: { type: "integer", minimum: 0, maximum: 20000, description: "Maximum characters to return; 0 means no limit" },
-        offset: { type: "integer", minimum: 0, description: "Character offset for pagination" },
-      }, ["path"]),
-      definition("skill_list", "List installed agent skills and their descriptions", {
-        limit: { type: "integer", minimum: 1, maximum: 100, description: "Maximum number of skills" },
-      }),
-      definition("skill_search", "Search installed agent skills by name or description", {
-        query: stringSchema(),
-        limit: { type: "integer", minimum: 1, maximum: 50, description: "Maximum number of skills" },
-      }, ["query"]),
-      definition("skill_read", "Read SKILL.md or another text file inside an installed agent skill", {
-        skill_id: { type: "string", description: "Installed skill ID from skill_list or skill_search" },
-        path: { type: "string", description: "Relative file path; defaults to SKILL.md" },
-        offset: { type: "integer", minimum: 0, description: "Character offset for pagination" },
-        max_chars: { type: "integer", minimum: 1, maximum: 100000, description: "Maximum characters to return" },
-      }, ["skill_id"]),
-      definition("memory", "Save, update, or remove a personal memory or user-profile entry", {
-        action: { type: "string", enum: ["add", "replace", "remove"], description: "Mutation action" },
-        target: { type: "string", enum: ["memory", "user"], description: "\"memory\" for personal notes, \"user\" for user-profile facts" },
-        content: { type: "string", description: "New entry text (required for add and replace; omit or empty to delete via replace)" },
-        old_text: { type: "string", description: "Unique substring of the existing entry to match (required for replace and remove)" },
-      }, ["action", "target"]),
-      ...(this.todoPort ? [definition("todo", "Replace the conversation task checklist (full replace, Claude TodoWrite style). Empty items clears the list. The user can delete items from the UI — treat deleted items as gone and do not re-add them.", {
-        items: {
-          type: "array",
-          description: "Full replacement list of todo items (max 50)",
-          items: {
-            type: "object",
-            properties: {
-              id: { type: "string", description: "Stable item id (unique within the list)" },
-              content: { type: "string", description: "Short task description (max 500 chars)" },
-              status: { type: "string", enum: ["pending", "in_progress", "completed"], description: "Item status; prefer exactly one in_progress at a time" },
-            },
-            required: ["id", "content", "status"],
-          },
-        },
-      }, ["items"])] : []),
-      ...(this.asyncToolRuntime ? [
-        definition("async_run", "Start a granted MCP tool in the background and return immediately with a handleId. The handle survives turn end. Use for long-running commands (docker logs -f, builds, servers). The tool name must be in the current allowlist.", {
-          tool: { type: "string", description: "Granted MCP tool name to run in background" },
-          args: { type: "object", additionalProperties: true, description: "Arguments to pass to the tool" },
-          maxRuntimeMs: { type: "integer", minimum: 1000, description: "Optional max runtime before auto-fail (ms)" },
-        }, ["tool"]),
-        definition("async_wait", "Block this tool-call until the handle settles or timeoutMs elapses (1s–5min). Returns the final status if settled, or running if still in-flight. Prefer this over busy-loop peeking.", {
-          handleId: { type: "string", description: "Handle id from async_run" },
-          timeoutMs: { type: "integer", minimum: 1000, maximum: 300000, description: "Max time to wait in milliseconds (1s–5min)" },
-        }, ["handleId", "timeoutMs"]),
-        definition("async_peek", "Non-blocking read of a handle's buffered output and current status (running/ok/fail/killed). Does not mark the handle done.", {
-          handleId: { type: "string", description: "Handle id from async_run" },
-        }, ["handleId"]),
-        definition("async_kill", "Soft-cancel a running handle. Returns the final status. Use when the user asks to stop a background job.", {
-          handleId: { type: "string", description: "Handle id from async_run" },
-        }, ["handleId"]),
-      ] : []),
-      definition("skill_manage", "Create, edit, write a support file in, or delete an agent-owned skill", {
-        action: { type: "string", enum: ["create", "edit", "write_file", "delete"], description: "Mutation action" },
-        name: { type: "string", description: "Skill ID (lowercase slug); must match the frontmatter name in SKILL.md" },
-        content: { type: "string", description: "Full SKILL.md content (for create/edit) or file content (for write_file)" },
-        path: { type: "string", description: "Relative file path under the skill (for write_file only); must be under references/, templates/, scripts/, or assets/" },
-      }, ["action", "name"]),
-      ...(this.jobStore && this.jobScheduler ? [definition("job", "Manage scheduled automation jobs (run only while NusaShell is open; cron hours and bare timestamps are UTC — convert from the user's local timezone before scheduling; missed one-shots are not silently fired)", {
-        action: { type: "string", enum: ["list", "validate_schedule", "add", "update", "set_enabled", "run", "cancel", "remove", "output"], description: "Job operation" },
-        id: { type: "string", description: "Job ID (required for update, set_enabled, run, cancel, remove, output)" },
-        name: { type: "string", description: "Job name (required for add)" },
-        trigger: { type: "object", description: "Trigger object: { kind: 'schedule', schedule: '...' } or { kind: 'event', pattern: '...', pluginId?: '...', conditions?: [...], throttleMs?: N, maxFiresPerHour?: N }" },
-        schedule: { type: "string", description: "Schedule expression (legacy shorthand for trigger.kind=schedule): \"every 30m\", \"2h\", \"0 9 * * *\", or an ISO timestamp" },
-        mode: { type: "string", enum: ["agent", "tool"], description: "Job mode (required for add)" },
-        prompt: { type: "string", description: "Agent prompt (required when mode=agent)" },
-        pluginId: { type: "string", description: "Plugin ID (required when mode=tool)" },
-        toolName: { type: "string", description: "Tool name (required when mode=tool)" },
-        args: { type: "object", additionalProperties: true, description: "Static tool args (when mode=tool)" },
-        enabled: { type: "boolean", description: "Pause/resume flag (required for set_enabled)" },
-        repeat_times: { type: "integer", minimum: 1, maximum: 100000, description: "Optional finite repeat count (add only); omit for repeat forever" },
-        on_complete: { type: "object", description: "Emit an automation event on successful completion (soft chain): { type: '...', payload?: {...} }. Set null to clear." },
-        limit: { type: "integer", minimum: 1, maximum: 100, description: "Max output entries (output only; default 20)" },
-      }, ["action"])] : []),
-      ...(this.pipelineStore && this.pipelineScheduler ? [definition("pipeline", "Manage multi-step DAG pipelines (event/schedule triggered, step dependencies, conditional branching, context passing). Runs only while NusaShell is open; schedule cron/bare timestamps are UTC like jobs.", {
-        action: { type: "string", enum: ["list", "add", "update", "remove", "run"], description: "Pipeline operation" },
-        id: { type: "string", description: "Pipeline ID (required for update, remove, run)" },
-        name: { type: "string", description: "Pipeline name (required for add)" },
-        description: { type: "string", description: "Optional pipeline description" },
-        trigger: { type: "object", description: "Trigger object: { kind: 'schedule', schedule: '...' } or { kind: 'event', pattern: '...', pluginId?: '...' }" },
-        enabled: { type: "boolean", description: "Enable/disable pipeline (update only)" },
-        steps: { type: "array", description: "Pipeline steps in topological order", items: { type: "object", properties: {
-          id: { type: "string", description: "Unique step ID within pipeline" },
-          name: { type: "string", description: "Step display name" },
-          action: { type: "object", description: "Step action: { type: 'agent', prompt: '...' } or { type: 'tool', pluginId: '...', toolName: '...', args: {...} }" },
-          dependsOn: { type: "array", items: { type: "string" }, description: "Step IDs that must complete before this step" },
-          outputKey: { type: "string", description: "Store step output in context under this key for downstream steps" },
-          condition: { type: "object", description: "Skip step if condition is false: { path: 'payload.x', op: 'eq', value: '...' } or { or: [...] } / { not: ... }" },
-        } } },
-      }, ["action"])] : []),
-      ...(this.isInteractive(turnId) ? [definition("ask_question", "Pause and ask the user a structured clarifying question before continuing. Use only for genuine decisions the user must make.", {
-        question: { type: "string", description: "The question to show the user" },
-        options: {
-          type: "array",
-          minItems: 1,
-          maxItems: MAX_ASK_OPTIONS,
-          description: "Selectable choices (1-8). Mark one default when possible.",
-          items: {
-            type: "object",
-            properties: {
-              id: { type: "string", description: "Stable option id" },
-              label: { type: "string", description: "Short option label" },
-              description: { type: "string", description: "Optional one-line explanation" },
-              default: { type: "boolean", description: "Whether this option is the recommended default" },
-              icon: { type: "string", description: "Optional emoji or short icon glyph" },
-              image: { type: "string", description: "Optional image URL or compact data URI" },
-            },
-            required: ["id", "label"],
-            additionalProperties: false,
-          },
-        },
-        allow_free_text: { type: "boolean", description: "Whether the user may type a custom answer (default true)" },
-        multi_select: { type: "boolean", description: "Whether the user may select multiple options (default false)" },
-      }, ["question", "options"])] : []),
-      ...(this.subagentPort ? [definition("subagent", "Delegate a task to a connected ACP coding agent. The subagent runs with its own tools and repo access; its live stream appears in the side pane. Returns a summary when done. The subagent has none of your MCP plugins, skills, or shell meta-tools — inline any needed skill content or MCP data into `prompt`. Provider, model, and mode are set in Settings → ACP Agents, not in the tool call. Pass `async: true` to run the subagent in the background (returns a handleId immediately; use async_wait/peek/kill to manage it).", {
-        prompt: { type: "string", description: "The task brief for the subagent (required)" },
-        title: { type: "string", description: "Optional label for the side pane and inline run card" },
-        workspace: { type: "string", description: "Optional absolute cwd override; defaults to the conversation workspace, or the user home directory when unset. Never invent a path." },
-        async: { type: "boolean", description: "If true, run the subagent in the background and return a handleId immediately (default false). Use async_wait/peek/kill to manage the background handle." },
-      }, ["prompt"])] : []),
-      ...this.cappedRouteDefinitions(routes),
+      ...buildMetaToolDefinitions(compact({
+        pluginRegistration: this.pluginRegistration,
+        todoPort: this.todoPort,
+        asyncToolRuntime: this.asyncToolRuntime,
+        jobStore: this.jobStore,
+        jobScheduler: this.jobScheduler,
+        pipelineStore: this.pipelineStore,
+        pipelineScheduler: this.pipelineScheduler,
+        subagentPort: this.subagentPort,
+        interactive: this.isInteractive(turnId),
+      })),
+      ...this.live.cappedRouteDefinitions(routes),
     ];
   }
 
@@ -401,7 +198,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
       case "skill_read": return execSkillRead(this.skillRegistry, this.skillUsage, this.logger, args);
       case "memory": return execMemory(this.memoryStore, args);
       case "todo": {
-        const result = await execTodo(this.todoPort, args, turnId, this.turnConversationId.get(turnId));
+        const result = await execTodo(this.todoPort, args, turnId, this.routes.conversationIdOf(turnId));
         if (result && typeof result === "object" && "ok" in result && result.ok && "conversationId" in result && "items" in result) {
           const r = result as unknown as { conversationId: string; items: readonly import("./agent-todo.js").AgentTodoItem[] };
           this.todoEventPublisher?.(r.conversationId, r.items);
@@ -412,7 +209,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
         if (!this.asyncToolRuntime) {
           return { ok: false, error: { code: "async_not_configured", message: "Async tool runtime is not available." } };
         }
-        const conversationId = this.turnConversationId.get(turnId);
+        const conversationId = this.routes.conversationIdOf(turnId);
         if (!conversationId) {
           throw new ApplicationError("AGENT_INVALID_INPUT", "async_run requires a conversation context");
         }
@@ -423,11 +220,10 @@ export class McpAgentToolGateway implements AgentToolGateway {
         const toolArgs = (args.args && typeof args.args === "object" ? args.args : {}) as Readonly<Record<string, unknown>>;
         const turnSignal = options?.signal;
         const runtime = this.asyncToolRuntime;
-        // Spawn the granted tool call as background work.
-        // The handle's abort signal is combined with the turn's signal so
-        // either kill or turn cancel aborts the in-flight MCP call.
-        // Progress notifications from the MCP server are piped into the
-        // handle's tail buffer for streaming peek.
+        // Spawn the granted tool call as background work. The handle's abort
+        // signal is combined with the turn's signal so either kill or turn
+        // cancel aborts the in-flight MCP call. Progress notifications are
+        // piped into the handle's tail buffer for streaming peek.
         return execAsyncRun(this.asyncToolRuntime, args, {
           conversationId,
           ...(turnId ? { traceId: turnId } : {}),
@@ -462,9 +258,9 @@ export class McpAgentToolGateway implements AgentToolGateway {
       }
       case "skill_manage": return execSkillManage(this.skillRegistry, this.skillProvenance, this.skillUsage, this.approvalStaging, this.logger, this.writeOrigin, this.writeApprovalEnabled, args);
       case "job": {
-        const providerId = this.turnProviderId.get(turnId);
-        const model = this.turnModel.get(turnId);
-        const effort = this.turnEffort.get(turnId);
+        const providerId = this.routes.providerIdOf(turnId);
+        const model = this.routes.modelOf(turnId);
+        const effort = this.routes.effortOf(turnId);
         return execJob(this.jobStore, this.jobScheduler, args, {
           ...(providerId !== undefined ? { providerId } : {}),
           ...(model !== undefined ? { model } : {}),
@@ -476,12 +272,12 @@ export class McpAgentToolGateway implements AgentToolGateway {
       case "subagent": {
         const isAsync = args.async === true;
         if (isAsync && this.asyncToolRuntime) {
-          const conversationId = this.turnConversationId.get(turnId);
+          const conversationId = this.routes.conversationIdOf(turnId);
           if (!conversationId) {
             throw new ApplicationError("AGENT_INVALID_INPUT", "async subagent requires a conversation context");
           }
           const runtime = this.asyncToolRuntime;
-          const workspace = this.turnWorkspace.get(turnId);
+          const workspace = this.routes.workspaceOf(turnId);
           return execAsyncRun(runtime, args, {
             conversationId,
             ...(turnId ? { traceId: turnId } : {}),
@@ -495,10 +291,14 @@ export class McpAgentToolGateway implements AgentToolGateway {
             }),
           });
         }
-        return execSubagent(this.subagentPort, args, turnId, this.turnWorkspace.get(turnId), this.logger);
+        return execSubagent(this.subagentPort, args, turnId, this.routes.workspaceOf(turnId), this.logger);
       }
       default: return this.callGrantedTool(name, args, requestId, turnId, options?.signal);
     }
+  }
+
+  async getMcpLiveSnapshot(turnId: string): Promise<McpLiveSnapshot> {
+    return this.live.getMcpLiveSnapshot(turnId);
   }
 
   // --- MCP plugin management handlers (tightly coupled to gateway state) ---
@@ -526,7 +326,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
         const plugins = await this.runtimeManager.listPlugins();
         const existing = plugins.find((p) => p.pluginId === PluginId.toString(pluginId));
         if (existing?.state === "running") {
-          return { pluginId: existing.pluginId, state: "running", alreadyRunning: true, liveState: await this.buildLiveStateLine(turnId) };
+          return { pluginId: existing.pluginId, state: "running", alreadyRunning: true, liveState: await this.live.buildLiveStateLine(turnId) };
         }
       } catch (error) {
         this.logger?.warn(
@@ -534,7 +334,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
           error instanceof Error ? error.message : String(error),
         );
       }
-      const workspace = this.turnWorkspace.get(turnId);
+      const workspace = this.routes.workspaceOf(turnId);
       const overrides: { args?: readonly string[]; env?: Readonly<Record<string, string>>; workspace?: string } = {};
       // Ignore empty args arrays — they would wipe the manifest script path and
       // hang `node` on stdin eval of the MCP handshake (Bug C).
@@ -555,7 +355,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
       }
       if (workspace) overrides.workspace = workspace;
       const view = await this.runtimeManager.startPlugin(pluginId, Object.keys(overrides).length > 0 ? overrides : undefined);
-      return { pluginId: view.pluginId, state: view.state, liveState: await this.buildLiveStateLine(turnId) };
+      return { pluginId: view.pluginId, state: view.state, liveState: await this.live.buildLiveStateLine(turnId) };
     }
     const view = await this.runtimeManager.stopPlugin(pluginId);
     return { pluginId: view.pluginId, state: view.state };
@@ -594,18 +394,18 @@ export class McpAgentToolGateway implements AgentToolGateway {
     const providerName = toProviderToolName(pluginIdValue, toolName);
     // Idempotent grant: if the route already exists this turn, return it with
     // an `alreadyGranted` trust signal so the model does not re-grant.
-    const routes = this.routesFor(turnId);
+    const routes = this.routes.routesFor(turnId);
     const existing = routes.get(providerName);
     if (existing) {
-      return { name: providerName, ...(existing.description ? { description: existing.description } : {}), inputSchema: existing.inputSchema, alreadyGranted: true, liveState: await this.buildLiveStateLine(turnId) };
+      return { name: providerName, ...(existing.description ? { description: existing.description } : {}), inputSchema: existing.inputSchema, alreadyGranted: true, liveState: await this.live.buildLiveStateLine(turnId) };
     }
     const tool = (await this.runtimeManager.listTools(parsePluginId(pluginIdValue))).find((item) => item.name === toolName);
     if (!tool) throw new ApplicationError("TOOL_NOT_FOUND", `MCP tool not found: ${toolName}`);
     const inputSchema = tool.inputSchema ?? emptySchema;
     const route: McpToolRoute = { pluginId: pluginIdValue, toolName: tool.name, inputSchema, ...(tool.description ? { description: tool.description } : {}) };
     routes.set(providerName, route);
-    this.persistConversationRoute(turnId, providerName, route);
-    return { name: providerName, ...(tool.description ? { description: tool.description } : {}), inputSchema, liveState: await this.buildLiveStateLine(turnId) };
+    this.routes.persistConversationRoute(turnId, providerName, route);
+    return { name: providerName, ...(tool.description ? { description: tool.description } : {}), inputSchema, liveState: await this.live.buildLiveStateLine(turnId) };
   }
 
   private async grantTools(args: Readonly<Record<string, unknown>>, turnId: string): Promise<unknown> {
@@ -618,7 +418,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
     }
     const tools = await this.runtimeManager.listTools(parsePluginId(pluginIdValue));
     const byName = new Map(tools.map((tool) => [tool.name, tool]));
-    const routes = this.routesFor(turnId);
+    const routes = this.routes.routesFor(turnId);
     const granted: Array<{ name: string; description?: string; inputSchema: unknown; alreadyGranted?: boolean }> = [];
     const missing: string[] = [];
     for (const rawName of names) {
@@ -641,10 +441,10 @@ export class McpAgentToolGateway implements AgentToolGateway {
         ...(tool.description ? { description: tool.description } : {}),
       };
       routes.set(providerName, route);
-      this.persistConversationRoute(turnId, providerName, route);
+      this.routes.persistConversationRoute(turnId, providerName, route);
       granted.push({ name: providerName, ...(tool.description ? { description: tool.description } : {}), inputSchema });
     }
-    return { granted, ...(missing.length ? { missing } : {}), liveState: await this.buildLiveStateLine(turnId) };
+    return { granted, ...(missing.length ? { missing } : {}), liveState: await this.live.buildLiveStateLine(turnId) };
   }
 
   private async context(args: Readonly<Record<string, unknown>>): Promise<unknown> {
@@ -733,20 +533,20 @@ export class McpAgentToolGateway implements AgentToolGateway {
     signal?: AbortSignal,
     onProgress?: (progress: { progress: number; total?: number | undefined; message?: string | undefined }) => void,
   ): Promise<unknown> {
-    let route = this.routesFor(turnId).get(name);
+    let route = this.routes.routesFor(turnId).get(name);
     if (!route) {
       route = await this.resolveRunningToolRoute(name);
       if (route) {
         // Auto-grant for the rest of this turn so subsequent rounds advertise the schema.
-        this.routesFor(turnId).set(name, route);
-        this.persistConversationRoute(turnId, name, route);
+        this.routes.routesFor(turnId).set(name, route);
+        this.routes.persistConversationRoute(turnId, name, route);
       }
     }
     if (!route) {
       this.logger?.warn("Agent MCP tool rejected (not in allowlist) tool=%s turnId=%s", name, turnId);
       throw new ApplicationError("AGENT_TOOL_NOT_ALLOWED", "AI provider requested a tool outside the MCP allowlist", { name });
     }
-    const workspace = this.turnWorkspace.get(turnId);
+    const workspace = this.routes.workspaceOf(turnId);
     const wrappedArgs = wrapToolArgs(route.pluginId, route.toolName, args, workspace);
     if (workspace) {
       try {
@@ -763,8 +563,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
         });
       }
     }
-    const calls = this.activeCalls.get(turnId);
-    calls?.set(requestId, route.pluginId);
+    this.routes.registerActiveCall(turnId, requestId, route.pluginId);
     try {
       return await this.runtimeManager.callTool(
         parsePluginId(route.pluginId),
@@ -772,7 +571,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
         signal,
       );
     } finally {
-      calls?.delete(requestId);
+      this.routes.unregisterActiveCall(turnId, requestId);
     }
   }
 
@@ -807,201 +606,8 @@ export class McpAgentToolGateway implements AgentToolGateway {
     return undefined;
   }
 
-  /**
-   * Build a Live MCP runtime snapshot for the Live MCP system-prompt block.
-   * Read-only: does not start plugins or mutate turnRoutes. `running` comes
-   * from `runtimeManager.listPlugins` (state === "running"); `tools` is the
-   * full catalog (name + description + inputSchema) for every tool on those
-   * running plugins, plus any sticky conversation grants still active this
-   * turn. Capped at `MCP_LIVE_TOOLS_CAP` entries; overflow names go to
-   * `toolsOverflow`. Fail-soft: on listPlugins / listTools error, log + skip
-   * the offending plugin (never fail the turn).
-   */
-  async getMcpLiveSnapshot(turnId: string): Promise<McpLiveSnapshot> {
-    const running = await this.listRunningPlugins();
-    const routes = this.turnRoutes.get(turnId) ?? new Map();
-    const stickyNames = new Set(routes.keys());
-    const catalog = await this.enumerateRunningTools(running);
-    // Merge: running tools first, then sticky extras not covered by running.
-    const seen = new Set<string>();
-    const merged: McpLiveSnapshotTool[] = [];
-    for (const tool of catalog) {
-      if (seen.has(tool.providerName)) continue;
-      seen.add(tool.providerName);
-      merged.push(tool);
-    }
-    for (const [name, route] of routes) {
-      if (seen.has(name)) continue;
-      seen.add(name);
-      merged.push({
-        providerName: name,
-        pluginId: route.pluginId,
-        toolName: route.toolName,
-        inputSchema: route.inputSchema,
-        ...(route.description ? { description: route.description } : {}),
-      });
-    }
-    merged.sort((a, b) => a.providerName < b.providerName ? -1 : a.providerName > b.providerName ? 1 : 0);
-    const capped = merged.slice(0, MCP_LIVE_TOOLS_CAP);
-    const overflow = merged.slice(MCP_LIVE_TOOLS_CAP).map((t) => t.providerName);
-    // Drop sticky names that were already covered by running tools from overflow.
-    const overflowFiltered = overflow.filter((n) => !stickyNames.has(n) || !catalog.some((t) => t.providerName === n));
-    return {
-      running: running.map((pluginId) => ({ pluginId })),
-      tools: capped,
-      ...(overflowFiltered.length > 0 ? { toolsOverflow: overflowFiltered } : {}),
-    };
-  }
-
-  /**
-   * One-line trust signal for tool results (mcp_enable / tool_schema /
-   * tool_schemas). Shows running plugin ids + this-turn advertised tool
-   * names so the model can decide "ready to call" without re-enabling or
-   * re-granting. Fail-soft: returns a minimal line on error.
-   */
-  private async buildLiveStateLine(turnId: string): Promise<string> {
-    try {
-      const snap = await this.getMcpLiveSnapshot(turnId);
-      const running = snap.running.map((p) => p.pluginId).sort();
-      const advertised = snap.tools.map((t) => t.providerName).sort();
-      const parts: string[] = [];
-      if (running.length > 0) parts.push(`running: ${running.join(", ")}`);
-      if (advertised.length > 0) parts.push(`granted: ${advertised.join(", ")}`);
-      if (parts.length === 0) return "no plugins running; no tools granted";
-      return `${parts.join(" | ")} → ready to call`;
-    } catch (error) {
-      this.logger?.warn(
-        "buildLiveStateLine failed: %s",
-        error instanceof Error ? error.message : String(error),
-      );
-      return "live state unavailable";
-    }
-  }
-
-  /**
-   * List currently running plugin ids. Fail-soft: returns [] on error.
-   */
-  private async listRunningPlugins(): Promise<readonly string[]> {
-    try {
-      const plugins = await this.runtimeManager.listPlugins();
-      return plugins
-        .filter((p) => p.state === "running")
-        .map((p) => p.pluginId)
-        .sort();
-    } catch (error) {
-      this.logger?.warn(
-        "listRunningPlugins failed: %s",
-        error instanceof Error ? error.message : String(error),
-      );
-      return [];
-    }
-  }
-
-  /**
-   * Enumerate the full tool catalog for every running plugin. Fail-soft per
-   * plugin: a `listTools` error on one plugin is logged and that plugin is
-   * skipped; other plugins still contribute. Returns tools sorted by
-   * `providerName` for prompt-cache stability.
-   */
-  private async enumerateRunningTools(
-    runningPluginIds: readonly string[],
-  ): Promise<McpLiveSnapshotTool[]> {
-    const catalog: McpLiveSnapshotTool[] = [];
-    for (const pluginId of runningPluginIds) {
-      try {
-        const tools = await this.runtimeManager.listTools(parsePluginId(pluginId));
-        for (const tool of tools) {
-          catalog.push({
-            providerName: toProviderToolName(pluginId, tool.name),
-            pluginId,
-            toolName: tool.name,
-            inputSchema: tool.inputSchema ?? emptySchema,
-            ...(tool.description ? { description: tool.description } : {}),
-          });
-        }
-      } catch (error) {
-        this.logger?.warn(
-          "enumerateRunningTools skipped plugin=%s: %s",
-          pluginId,
-          error instanceof Error ? error.message : String(error),
-        );
-      }
-    }
-    catalog.sort((a, b) => a.providerName < b.providerName ? -1 : a.providerName > b.providerName ? 1 : 0);
-    return catalog;
-  }
-
-  /**
-   * Auto-seed turnRoutes for every tool on currently running plugins so the
-   * model can call provider names directly without prior `tool_schema`.
-   * Idempotent: tools already in the route map are not re-written. Fail-soft:
-   * enumeration errors do not block `listTools`.
-   */
-  private async autoSeedRunningTools(
-    turnId: string,
-    routes: Map<string, McpToolRoute>,
-  ): Promise<void> {
-    const running = await this.listRunningPlugins();
-    const catalog = await this.enumerateRunningTools(running);
-    for (const tool of catalog) {
-      if (routes.has(tool.providerName)) continue;
-      const route: McpToolRoute = {
-        pluginId: tool.pluginId,
-        toolName: tool.toolName,
-        inputSchema: tool.inputSchema,
-        ...(tool.description ? { description: tool.description } : {}),
-      };
-      routes.set(tool.providerName, route);
-      // Persist to conversation sticky store so auto-continue turns inherit.
-      this.persistConversationRoute(turnId, tool.providerName, route);
-    }
-  }
-
-  /**
-   * Build the capped list of route definitions for the provider `tools[]`
-   * array. Running-plugin tools win sort order; sticky extras fill remaining
-   * slots. Hard cap at `MCP_LIVE_TOOLS_CAP` entries beyond meta-tools.
-   */
-  private cappedRouteDefinitions(
-    routes: Map<string, McpToolRoute>,
-  ): AgentToolDefinition[] {
-    return [...routes.entries()]
-      .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
-      .slice(0, MCP_LIVE_TOOLS_CAP)
-      .map(([name, route]) => ({
-        name,
-        ...(route.description ? { description: route.description } : {}),
-        inputSchema: route.inputSchema,
-      }));
-  }
-
-  private routesFor(turnId: string): Map<string, McpToolRoute> {
-    let routes = this.turnRoutes.get(turnId);
-    if (!routes) {
-      routes = new Map();
-      this.turnRoutes.set(turnId, routes);
-    }
-    return routes;
-  }
-
-  /**
-   * Persist a granted route to the conversation sticky store so subsequent
-   * turns in the same conversation seed it without re-granting. No-op when
-   * the turn has no bound conversationId.
-   */
-  private persistConversationRoute(turnId: string, providerName: string, route: McpToolRoute): void {
-    const conversationId = this.turnConversationId.get(turnId);
-    if (!conversationId) return;
-    let convMap = this.conversationRoutes.get(conversationId);
-    if (!convMap) {
-      convMap = new Map();
-      this.conversationRoutes.set(conversationId, convMap);
-    }
-    convMap.set(providerName, route);
-  }
-
   private isInteractive(turnId: string): boolean {
-    return this.askQuestions !== undefined && this.turnInteractive.get(turnId) === true;
+    return this.askQuestions !== undefined && this.routes.isTurnInteractive(turnId);
   }
 }
 

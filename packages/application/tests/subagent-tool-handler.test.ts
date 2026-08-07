@@ -27,6 +27,7 @@ describe("execSubagent", () => {
       resolve: async () => ({ tryOrder: [], candidates: new Map() }),
       run: async () => ({ ok: true, providerId: "cursor", summary: "unused" }),
       cancel: async () => undefined,
+      getRoutingInfo: async () => null,
     };
 
     const result = await execSubagent(port, { prompt: "do a thing", title: "Test" }, "turn-1", "/tmp", { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() });
@@ -52,11 +53,12 @@ describe("execSubagent", () => {
       resolve: async () => ({
         tryOrder: ["cursor"],
         candidates: new Map([
-          ["cursor", { providerId: "cursor", descriptor: { providerId: "cursor", command: "cursor-agent", args: [] }, preferredConfig: undefined }],
+          ["cursor", { providerId: "cursor", descriptor: { providerId: "cursor", command: "cursor-agent", args: [] } }],
         ]),
       }),
       run,
       cancel: async () => undefined,
+      getRoutingInfo: async () => null,
     };
 
     const result = await execSubagent(
@@ -85,11 +87,12 @@ describe("execSubagent", () => {
       resolve: async () => ({
         tryOrder: ["cursor"],
         candidates: new Map([
-          ["cursor", { providerId: "cursor", descriptor: { providerId: "cursor", command: "cursor-agent", args: [] }, preferredConfig: undefined }],
+          ["cursor", { providerId: "cursor", descriptor: { providerId: "cursor", command: "cursor-agent", args: [] } }],
         ]),
       }),
       run,
       cancel: async () => undefined,
+      getRoutingInfo: async () => null,
     };
 
     const result = await execSubagent(port, { prompt: "noop" }, "turn-1", undefined);
@@ -110,12 +113,13 @@ describe("execSubagent", () => {
       }),
       run,
       cancel: async () => undefined,
+      getRoutingInfo: async () => null,
     };
 
     const result = await execSubagent(port, { prompt: "do it" }, "turn-1", "/tmp");
     expect(result).toMatchObject({ ok: true, providerId: "gemini" });
     expect(run).toHaveBeenCalledOnce();
-    expect(run.mock.calls[0][0].providerId).toBe("gemini");
+    expect(run.mock.calls[0]![0].providerId).toBe("gemini");
   });
 
   it("ignores provider_id from the LLM — Settings routing is authoritative", async () => {
@@ -129,7 +133,7 @@ describe("execSubagent", () => {
         ["cursor", { providerId: "cursor", descriptor: { providerId: "cursor", command: "agent", args: ["acp"] }, preferredConfig: { mode: "agent" } }],
       ]),
     }));
-    const port: SubagentPort = { resolve, run, cancel: async () => undefined };
+    const port: SubagentPort = { resolve, run, cancel: async () => undefined, getRoutingInfo: async () => null };
 
     // LLM passes provider_id: "cursor" but user set Gemini as default.
     // The handler does not forward provider_id to the resolver — Settings
@@ -137,6 +141,6 @@ describe("execSubagent", () => {
     const result = await execSubagent(port, { prompt: "do it", provider_id: "cursor" }, "turn-1", "/tmp");
 
     expect(result).toMatchObject({ ok: true, providerId: "gemini" });
-    expect(run.mock.calls[0][0].providerId).toBe("gemini");
+    expect(run.mock.calls[0]![0].providerId).toBe("gemini");
   });
 });

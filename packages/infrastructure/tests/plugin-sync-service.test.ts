@@ -25,6 +25,12 @@ async function makePluginDir(root: string, id: string, manifest: Record<string, 
   return dir;
 }
 
+function notesId(): PluginId {
+  const result = PluginId.create("nusashell.notes");
+  if (!result.ok) throw new Error("expected valid plugin id");
+  return result.value;
+}
+
 describe("PluginSyncService enabled-state preservation", () => {
   let tempDir: string;
   let pluginRoot: string;
@@ -50,7 +56,7 @@ describe("PluginSyncService enabled-state preservation", () => {
     await sync.sync();
 
     // Plugin starts enabled.
-    const afterFirstSync = await repo.findById(PluginId.create("nusashell.notes").value!);
+    const afterFirstSync = await repo.findById(notesId());
     expect(afterFirstSync?.enabled).toBe(true);
 
     // User disables the plugin.
@@ -63,12 +69,12 @@ describe("PluginSyncService enabled-state preservation", () => {
       installedAt: afterFirstSync!.installedAt,
     });
     await repo.save(disabled);
-    const afterDisable = await repo.findById(PluginId.create("nusashell.notes").value!);
+    const afterDisable = await repo.findById(notesId());
     expect(afterDisable?.enabled).toBe(false);
 
     // Re-sync (e.g. app restart) should NOT re-enable the plugin.
     await sync.sync();
-    const afterReSync = await repo.findById(PluginId.create("nusashell.notes").value!);
+    const afterReSync = await repo.findById(notesId());
     expect(afterReSync?.enabled).toBe(false);
   });
 
@@ -76,7 +82,7 @@ describe("PluginSyncService enabled-state preservation", () => {
     await makePluginDir(pluginRoot, "nusashell.notes");
     const sync = new PluginSyncService(pluginRoot, repo);
     await sync.sync();
-    const plugin = await repo.findById(PluginId.create("nusashell.notes").value!);
+    const plugin = await repo.findById(notesId());
     expect(plugin?.enabled).toBe(true);
   });
 

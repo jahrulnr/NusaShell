@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-08-07
+
+### Added
+
+- **Per-conversation conversation storage (Codex-aligned).** Agent conversation
+  history now lives as multiple small files per thread under
+  `conversations/`: an append-only `<id>.jsonl` message history, a small
+  `<id>.meta.json` metadata file, `<id>.artifacts.json`, and `<id>.subagents.json`
+  — instead of one large monofile that grew unbounded. The legacy single-file
+  `agent-conversations.json` is migrated once to the new layout and the old file
+  is renamed to `.migrated`. Message appends are O(1) atomic JSONL lines,
+  per-conversation locking keeps same-room writes serialized while different
+  rooms run parallel, and oversized histories trim oldest entries to a configured
+  soft cap. A corrupt monofile still surfaces as an explicit error.
+- **UI behavior hardening across the agent composer & turn lifecycle** (tickets
+  #42–#47):
+  - **Subagent result card persists.** A successful `subagent` run now leaves a
+    sealed `● OK` card with its summary in the thread instead of being removed
+    from the DOM, matching the status of other terminal tool cards.
+  - **Composer resize no longer forces full-page layout.** The textarea
+    autosize path measures an isolated hidden mirror element (cached computed
+    metrics) instead of reading `scrollHeight`/`getComputedStyle` on the live
+    textarea every keystroke, so typing in rooms with thousands of tool cards
+    stays smooth (no synchronous whole-document layout per frame).
+  - **Stop is immediate and idempotent.** Clicking Stop hard-stops painting of
+    any further deltas while the backend cancel settles (they are still
+    accumulated for consistent rehydrate), shows a “Stopping…” status right
+    away, and a second click returns the in-flight cancel without issuing a
+    duplicate request.
+  - **Retry distinguishes error classes.** Provider failures are classified
+    (rate-limit 429 with a countdown backoff on the Retry button, 401/403 auth
+    non-retryable, 5xx retryable, superseded turns surfaced with no misleading
+    Retry) and the primary button uses semantics matching the action
+    (Retry / **Resume** for interrupted tool graphs / **Continue** for text
+    partials).
+  - **IME-safe Send and Shift+Enter.** The composer no longer submits while an
+    IME composition is in progress (`isComposing` / keyCode 229), the Send
+    button disables when empty or composing, and plain Enter / Shift+Enter stay
+    newline (only Ctrl/Cmd+Enter submits).
+  - **No assistant message loss on rapid Ctrl+Enter.** Race-guarded assignment
+    of store snapshots to the in-memory conversation merges whatever is already
+    visible, so a stale snapshot from a not-yet-sealed prior turn cannot drop an
+    assistant reply from the thread until the next room switch.
+
+### Changed
+
+- Agent conversation persistence moved from the legacy single-file JSON store to
+  the per-conversation JSONL layout; the migration is automatic and idempotent.
+
+### Fixed
+
+- Subagent success card no longer disappears from the chat thread.
+- Composer typing no longer lags in large conversations (full-document layout on
+  the typing hot path removed).
+- Stop no longer lets trailing deltas keep painting after the click.
+- Retry no longer shows one generic “Retry” for auth/rate-limit/5xx/superseded
+  failures and no longer allows spamming a rate-limited turn.
+- Ctrl+Enter during IME composition no longer mis-submits a half-composed prompt.
+- A just-sealed assistant reply can no longer be dropped by a stale snapshot
+  when the next user message is submitted immediately.
+
 ## [0.5.0] - 2026-08-07
 
 ### Added

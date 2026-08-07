@@ -594,4 +594,82 @@ describe("PluginRuntimeManager", () => {
       expect(await manager.getPluginState(plugin.id)).toBe("crashed");
     });
   });
+
+  describe("tools catalog cache", () => {
+    it("serves the cached catalog without repeated JSON-RPC round-trips", async () => {
+      const { pluginRepository, manager, mcpClientFactory } = setup();
+      const plugin = makePlugin("example.cache");
+      pluginRepository.add(plugin);
+      await manager.startPlugin(plugin.id);
+      const client = mcpClientFactory.created[0]!;
+      client.tools.push(
+        { name: "tool_a", description: "A tool", inputSchema: { type: "object", properties: {} } },
+        { name: "tool_b", description: "B tool", inputSchema: { type: "object", properties: {} } },
+      );
+
+      const first = await manager.listTools(plugin.id);
+      const second = await manager.listTools(plugin.id);
+
+      expect(client.listToolsCalls).toBe(1);
+      expect(second).toEqual(first);
+      expect(second.map((t) => t.name)).toEqual(["tool_a", "tool_b"]);
+    });
+
+    it("invalidates cache on notifications/tools/list_changed", async () => {
+      const { pluginRepository, manager, mcpClientFactory } = setup();
+      const plugin = makePlugin("example.cache-notify");
+      pluginRepository.add(plugin);
+      await manager.startPlugin(plugin.id);
+      const client = mcpClientFactory.created[0]!;
+      client.tools.push({ name: "tool_a", description: "A tool", inputSchema: { type: "object", properties: {} } });
+
+      await manager.listTools(plugin.id);
+      expect(client.listToolsCalls).toBe(1);
+
+      client.emitToolsListChanged();
+      await manager.listTools(plugin.id);
+      expect(client.listToolsCalls).toBe(2);
+
+      // Re-populated after the refetch.
+      await manager.listTools(plugin.id);
+      expect(client.listToolsCalls).toBe(2);
+    });
+
+    it("invalidates cache on restart (fresh MCP session refetches)", async () => {
+      const { pluginRepository, manager, mcpClientFactory } = setup();
+      const plugin = makePlugin("example.cache-restart");
+      pluginRepository.add(plugin);
+      await manager.startPlugin(plugin.id);
+      const firstClient = mcpClientFactory.created[0]!;
+      firstClient.tools.push({ name: "tool_a", description: "A tool", inputSchema: { type: "object", properties: {} } });
+
+      await manager.listTools(plugin.id);
+      expect(firstClient.listToolsCalls).toBe(1);
+
+      await manager.restartPlugin(plugin.id);
+      const secondClient = mcpClientFactory.created[1]!;
+      secondClient.tools.push({ name: "tool_a", description: "A tool", inputSchema: { type: "object", properties: {} } });
+
+      await manager.listTools(plugin.id);
+      expect(secondClient.listToolsCalls).toBe(1);
+    });
+
+    it("invalidates cache on stop (next start refetches)", async () => {
+      const { pluginRepository, manager, mcpClientFactory } = setup();
+      const plugin = makePlugin("example.cache-stop");
+      pluginRepository.add(plugin);
+      await manager.startPlugin(plugin.id);
+      const firstClient = mcpClientFactory.created[0]!;
+      firstClient.tools.push({ name: "tool_a", description: "A tool", inputSchema: { type: "object", properties: {} } });
+      await manager.listTools(plugin.id);
+      expect(firstClient.listToolsCalls).toBe(1);
+
+      await manager.stopPlugin(plugin.id);
+      await manager.startPlugin(plugin.id);
+      const secondClient = mcpClientFactory.created[1]!;
+      secondClient.tools.push({ name: "tool_a", description: "A tool", inputSchema: { type: "object", properties: {} } });
+      await manager.listTools(plugin.id);
+      expect(secondClient.listToolsCalls).toBe(1);
+    });
+  });
 });

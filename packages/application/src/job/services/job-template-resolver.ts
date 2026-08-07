@@ -9,7 +9,12 @@ import { resolveDotPath } from "./event-job-matcher.js";
  * See tmp/plan/watch-to-agent/02-job-triggers.md §6.
  */
 export interface TemplateContext {
-  readonly event: {
+  /**
+   * Present only when the run was triggered by a real automation event.
+   * Manual / schedule runs have no event envelope; event templates
+   * ({{payload.*}}, {{event.*}}) stay literal in those modes.
+   */
+  readonly event?: {
     readonly type: string;
     readonly pluginId: string;
     readonly payload: Readonly<Record<string, unknown>>;
@@ -45,9 +50,10 @@ const TEMPLATE_RE = /\{\{(event\.(type|pluginId)|payload\.[a-zA-Z0-9_.]+|context
  */
 export function resolveTemplates(text: string, ctx: TemplateContext): string {
   return text.replace(TEMPLATE_RE, (match, expr: string) => {
-    if (expr === "event.type") return ctx.event.type;
-    if (expr === "event.pluginId") return ctx.event.pluginId;
+    if (expr === "event.type") return ctx.event ? ctx.event.type : match;
+    if (expr === "event.pluginId") return ctx.event ? ctx.event.pluginId : match;
     if (expr.startsWith("payload.")) {
+      if (!ctx.event) return match; // no event -> stay literal
       const path = expr.slice("payload.".length);
       const value = resolveDotPath(ctx.event.payload, path);
       if (value === undefined) return match; // leave literal

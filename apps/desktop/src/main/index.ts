@@ -199,6 +199,7 @@ async function startBackend(): Promise<BootstrapResult> {
       maxToolRounds: aiSettings.maxToolRounds,
       maxRepeatedToolCalls: aiSettings.maxRepeatedToolCalls,
       maxAutoContinues: aiSettings.maxAutoContinues,
+      jobMaxToolRounds: aiRuntimeConfig.jobMaxToolRounds,
       softRecoverAttempts: aiRuntimeConfig.softRecoverAttempts,
       maxConcurrentToolCalls: aiRuntimeConfig.maxConcurrentToolCalls,
       strategy: aiSettings.strategy,

@@ -182,7 +182,12 @@ describe("ListPluginsHandler via QueryBus", () => {
 
   it("omits ui for headless plugins and still returns keepAliveOnClose", async () => {
     const { queryBus, pluginRepository } = setupBus();
-    const headless = makePlugin("nusashell.indexer", { ui: undefined });
+    // `ui: undefined` is not assignable under exactOptionalPropertyTypes, so
+    // the cast keeps the runtime value undefined (i.e. a headless plugin) while
+    // satisfying the `Partial<PluginManifestInput>` overrides type.
+    const headless = makePlugin("nusashell.indexer", {
+      ui: undefined as unknown as { entry: string },
+    });
 
     pluginRepository.add(headless);
 

@@ -61,6 +61,9 @@ export class PluginLifecycleCoordinator {
       await entry.startPromise;
       entry.restarting = false;
       entry.lastCrashReason = undefined;
+      // New MCP session: tool catalog must be re-fetched, not inherited
+      // from a previous run of this plugin.
+      entry.cachedTools = null;
     } finally {
       entry.startPromise = null;
     }
@@ -134,6 +137,7 @@ export class PluginLifecycleCoordinator {
       entry.restartTimer = null;
     }
     entry.restarting = false;
+    entry.cachedTools = null;
 
     const stoppedEvent = PluginStoppedEvent.create(
       entry.pluginId,
@@ -185,6 +189,7 @@ export class PluginLifecycleCoordinator {
 
   async crash(entry: RuntimeEntry, reason: string): Promise<void> {
     this.tracker.cancelPendingCalls(entry, "PLUGIN_CRASHED", reason);
+    entry.cachedTools = null;
     entry.process = null;
     if (entry.mcpClient) {
       try {
@@ -212,7 +217,7 @@ export class PluginLifecycleCoordinator {
 
     // Auto-restart only when enabled and the plugin is still relevant: a
     // crash during intentional shutdown (stopping/idle) never restarts.
-    if (!this.isAutoRestartEnabled(entry) || !entry.enabled) {
+    if (!this.isAutoRestartEnabled() || !entry.enabled) {
       entry.restarting = false;
       return;
     }
@@ -221,16 +226,17 @@ export class PluginLifecycleCoordinator {
       return;
     }
 
-    // Circuit breaker: count restarts inside a rolling window. When the
-    // window rolls over, restart counting from the current crash.
+    // Normalize the auto-restart policy once so the circuit-breaker math is
+    // always against concrete numbers (deps.autoRestart is optional).
+    const autoRestart = this.autoRestart;
     const nowMs = this.deps.clock.now().getTime();
-    const windowMs = this.autoRestart.windowMs;
+    const windowMs = autoRestart.windowMs;
     if (nowMs - entry.restartWindowStartAt > windowMs) {
       entry.restartWindowStartAt = nowMs;
       entry.restartCount = 0;
     }
     entry.restartCount += 1;
-    const maxRestarts = this.autoRestart.maxRestarts;
+    const maxRestarts = autoRestart.maxRestarts;
     if (entry.restartCount > maxRestarts) {
       entry.restarting = false;
       this.deps.logger?.error(
@@ -243,8 +249,8 @@ export class PluginLifecycleCoordinator {
     }
 
     entry.restarting = true;
-    const base = this.autoRestart.baseDelayMs;
-    const cap = this.autoRestart.maxDelayMs;
+    const base = autoRestart.baseDelayMs;
+    const cap = autoRestart.maxDelayMs;
     const delay = Math.min(cap, base * 2 ** (entry.restartCount - 1));
     this.deps.logger?.warn(
       "plugin %s crashed — scheduling auto-restart #%d in %dms",
@@ -292,7 +298,13 @@ export class PluginLifecycleCoordinator {
     });
   }
 
-  private get autoRestart(): NonNullable<PluginRuntimeManagerDeps["autoRestart"]> {
+  private get autoRestart(): {
+    enabled: boolean;
+    maxRestarts: number;
+    windowMs: number;
+    baseDelayMs: number;
+    maxDelayMs: number;
+  } {
     const cfg = this.deps.autoRestart ?? {};
     return {
       enabled: cfg.enabled ?? true,
@@ -303,7 +315,7 @@ export class PluginLifecycleCoordinator {
     };
   }
 
-  private isAutoRestartEnabled(entry: RuntimeEntry): boolean {
+  private isAutoRestartEnabled(): boolean {
     const cfg = this.autoRestart;
     if (cfg.enabled === false) return false;
     // Opt-out per plugin via manifest is not modeled; global config only.
@@ -339,12 +351,15 @@ export class PluginLifecycleCoordinator {
 
   private async doStart(entry: RuntimeEntry, plugin: import("@nusashell/domain").Plugin): Promise<void> {
     try {
-      if (entry.startAborted || entry.runtime.state === "stopping" || entry.runtime.state === "idle") {
+      // `startAborted` is the single guard: after a successful transition to
+      // "starting" the state can no longer be "stopping"/"idle" (they are not
+      // in the starting-state union), so only the abort flag can change below.
+      if (entry.startAborted) {
         return;
       }
       // 1. Connect the MCP transport (stdio/http/sse)
       await this.sessions.connectTransport(entry, plugin);
-      if (entry.startAborted || entry.runtime.state === "stopping" || entry.runtime.state === "idle") {
+      if (entry.startAborted) {
         if (entry.mcpClient) {
           await entry.mcpClient.close().catch(() => {});
           entry.mcpClient = null;

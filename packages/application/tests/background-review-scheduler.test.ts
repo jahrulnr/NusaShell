@@ -35,6 +35,7 @@ function makeFakePromptLoader(): PromptLoaderPort {
     async loadPrompts() { return []; },
     async loadCompactPrompt() { return undefined; },
     async loadSubagentPrompt() { return undefined; },
+    async loadContinuePrompt() { return undefined; },
     async loadReviewPrompt(kind: ReviewPromptKind) { return prompts[kind]; },
   };
 }
@@ -43,8 +44,6 @@ function makeFakeProviderRegistry(provider?: AgentProvider): AgentProviderRegist
   return {
     get: vi.fn(() => provider),
     list: vi.fn(() => provider ? [provider] : []),
-    set: vi.fn(),
-    delete: vi.fn(),
   };
 }
 
@@ -79,7 +78,7 @@ describe("BackgroundReviewScheduler", () => {
 
     runnerFactory = vi.fn(() => makeFakeRunner(makeResult({
       toolCalls: [
-        { callId: "c1", name: "memory", args: {}, ok: true, result: "saved", durationMs: 10 },
+        { id: "c1", name: "memory", args: {}, ok: true, result: "saved" },
       ],
     })));
 
@@ -141,7 +140,7 @@ describe("BackgroundReviewScheduler", () => {
     // Wait for fire-and-forget spawn
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(eventDispatcher.publish).toHaveBeenCalledTimes(1);
-    const event = (eventDispatcher.publish as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const event = (eventDispatcher.publish as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(event.type).toBe("agent.learning_updated");
     expect(event.kinds).toContain("memory");
   });
@@ -224,7 +223,7 @@ describe("BackgroundReviewScheduler", () => {
     await scheduler.tick(makeResult({ rounds: 0, messages }));
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(runnerFactory).toHaveBeenCalledTimes(1);
-    const runArg = (runnerFactory.mock.calls[0][0] as { maxToolRounds: number }).maxToolRounds;
+    const runArg = (runnerFactory.mock.calls[0]![0] as { maxToolRounds: number }).maxToolRounds;
     expect(runArg).toBe(6);
   });
 });

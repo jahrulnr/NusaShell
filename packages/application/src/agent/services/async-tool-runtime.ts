@@ -42,6 +42,8 @@ export interface AsyncToolPeekResult {
   readonly endReason?: AsyncToolEndReason;
   readonly startedAt: string;
   readonly endedAt?: string;
+  /** True when a wait was cut short by an abort signal while still running. */
+  readonly interrupted?: boolean;
 }
 
 export interface AsyncToolWaitResult extends AsyncToolPeekResult {}

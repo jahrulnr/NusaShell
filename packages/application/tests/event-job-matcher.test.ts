@@ -10,8 +10,10 @@ import {
   type Job,
   type JobStorePort,
   type JobOutputEntry,
-  type JobFsPort,
   type JobSchedule,
+  type Pipeline,
+  type PipelineRun,
+  type PipelineStorePort,
 } from "../src/index.js";
 
 function makeEventJob(
@@ -81,6 +83,31 @@ class FakeJobStore implements JobStorePort {
   }
   async listOutputs(jobId: string, limit: number): Promise<readonly JobOutputEntry[]> {
     return (this.outputs.get(jobId) ?? []).slice(0, limit);
+  }
+}
+
+class FakePipelineStore implements PipelineStorePort {
+  pipelines = new Map<string, Pipeline>();
+
+  async create(p: Pipeline): Promise<Pipeline> { this.pipelines.set(p.id, p); return p; }
+  async update(p: Pipeline): Promise<Pipeline> { this.pipelines.set(p.id, p); return p; }
+  async get(id: string): Promise<Pipeline | null> { return this.pipelines.get(id) ?? null; }
+  async list(): Promise<readonly Pipeline[]> { return [...this.pipelines.values()]; }
+  async remove(id: string): Promise<void> { this.pipelines.delete(id); }
+  async claimRun(): Promise<PipelineRun | null> { return null; }
+  async updateRun(run: PipelineRun): Promise<PipelineRun | null> { return run; }
+  async finalizeRun(run: PipelineRun): Promise<PipelineRun | null> { return run; }
+  async getRun(): Promise<PipelineRun | null> { return null; }
+  async getActiveRun(): Promise<PipelineRun | null> { return null; }
+  async listRuns(): Promise<readonly PipelineRun[]> { return []; }
+  async listDueSchedules(): Promise<readonly Pipeline[]> { return []; }
+  async recoverExpiredLeases(): Promise<number> { return 0; }
+  async markRun(id: string, status: "ok" | "error" | "cancelled", error: string | null, now: Date): Promise<Pipeline | null> {
+    const existing = this.pipelines.get(id);
+    if (!existing) return null;
+    const updated: Pipeline = { ...existing, lastRunAt: now.toISOString(), lastStatus: status, lastError: error };
+    this.pipelines.set(id, updated);
+    return updated;
   }
 }
 
@@ -263,6 +290,114 @@ describe("EventJobMatcher", () => {
   });
 });
 
+describe("EventJobMatcher.matchPipelines (Phase E)", () => {
+  let pStore: FakePipelineStore;
+  let dispatcher: EventDispatcher;
+  let runPipelineMock: ReturnType<typeof vi.fn>;
+  let pMatcher: EventJobMatcher;
+  let pNowMs: number;
+  const PIPELINE_A = "pipe-a-123";
+  const PIPELINE_B = "pipe-b-123";
+
+  function makePipeline(id: string, pattern: string, overrides: Partial<Pipeline> = {}): Pipeline {
+    return {
+      id,
+      name: `Pipeline ${id}`,
+      enabled: true,
+      trigger: { kind: "event", pattern },
+      steps: [],
+      createdAt: "2025-01-01T00:00:00.000Z",
+      nextRunAt: null,
+      lastRunAt: null,
+      lastStatus: null,
+      lastError: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    pStore = new FakePipelineStore();
+    dispatcher = new EventDispatcher();
+    runPipelineMock = vi.fn().mockResolvedValue({ ok: true });
+    pNowMs = Date.now();
+    pMatcher = new EventJobMatcher({
+      store: new FakeJobStore(),
+      scheduler: { startJobNow: vi.fn().mockResolvedValue({ ok: true }) } as never,
+      eventDispatcher: dispatcher,
+      now: () => new Date(pNowMs),
+      pipelineStore: pStore,
+      pipelineScheduler: { runPipeline: runPipelineMock } as never,
+    });
+    pMatcher.start();
+  });
+
+  afterEach(() => {
+    pMatcher.stop();
+    vi.useRealTimers();
+  });
+
+  it("fires an event-triggered pipeline with the event context", async () => {
+    const pipeline = makePipeline(PIPELINE_A, "mail.new");
+    pStore.pipelines.set(pipeline.id, pipeline);
+    await dispatcher.publish(createAutomationEvent("mail.new", "mail", { subject: "Hi" }));
+    await vi.waitFor(() => expect(runPipelineMock).toHaveBeenCalledTimes(1));
+    expect(runPipelineMock).toHaveBeenCalledWith(
+      PIPELINE_A,
+      expect.objectContaining({ event: expect.objectContaining({ payload: { subject: "Hi" } }) }),
+      { source: "event" },
+    );
+  });
+
+  it("blocks self-trigger (event origin = this pipeline)", async () => {
+    const pipeline = makePipeline(PIPELINE_A, "mail.new");
+    pStore.pipelines.set(pipeline.id, pipeline);
+    // Event originates from pipeline A ITSELF -> must not re-trigger A.
+    await dispatcher.publish(
+      createAutomationEvent("mail.new", "mail", { subject: "Hi" }, new Date(), "evt-self", {
+        pipelineId: PIPELINE_A,
+        chainDepth: 0,
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    expect(runPipelineMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks a chain that crossed MAX_CHAIN_DEPTH (B at depth cap cannot trigger A)", async () => {
+    const a = makePipeline(PIPELINE_A, "b.done");
+    pStore.pipelines.set(a.id, a);
+    // Origin pipeline B at depth 8 (= MAX_CHAIN_DEPTH) must not trigger A.
+    await dispatcher.publish(
+      createAutomationEvent("b.done", "nusashell", { p: 1 }, new Date(), "evt-deep", {
+        pipelineId: PIPELINE_B,
+        chainDepth: 8,
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    expect(runPipelineMock).not.toHaveBeenCalled();
+  });
+
+  it("coalesces pipeline events within throttleMs (latest wins, single fire)", async () => {
+    vi.useFakeTimers();
+    const pipeline = makePipeline(PIPELINE_A, "mail.new", {
+      trigger: { kind: "event", pattern: "mail.new", throttleMs: 1000 },
+    });
+    pStore.pipelines.set(pipeline.id, pipeline);
+    await dispatcher.publish(createAutomationEvent("mail.new", "mail", { seq: 1 }));
+    expect(runPipelineMock).toHaveBeenCalledTimes(1);
+    // Within throttle window -> coalesce, do not fire a second time yet.
+    await dispatcher.publish(createAutomationEvent("mail.new", "mail", { seq: 2 }));
+    expect(runPipelineMock).toHaveBeenCalledTimes(1);
+    // Advance past window -> coalesced fire fires once with the latest payload.
+    vi.advanceTimersByTime(1100);
+    await vi.waitFor(() => expect(runPipelineMock).toHaveBeenCalledTimes(2));
+    expect(runPipelineMock).toHaveBeenLastCalledWith(
+      PIPELINE_A,
+      expect.objectContaining({ event: expect.objectContaining({ payload: { seq: 2 } }) }),
+      { source: "event" },
+    );
+  });
+});
+
 describe("normalizeTrigger (migration)", () => {
   it("wraps legacy schedule into trigger", () => {
     const schedule: JobSchedule = { kind: "interval", minutes: 30 };
@@ -271,7 +406,7 @@ describe("normalizeTrigger (migration)", () => {
   });
 
   it("passes through existing trigger", () => {
-    const trigger = { kind: "event", pattern: "mail.new" };
+    const trigger = { kind: "event", pattern: "mail.new" } as const;
     expect(normalizeTrigger({ trigger })).toBe(trigger);
   });
 

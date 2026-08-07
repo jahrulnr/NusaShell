@@ -91,6 +91,13 @@ export interface McpClientPort {
     },
   ): Promise<unknown>;
   onClose?: (callback: () => void) => void;
+  /**
+   * Optional hook for when the server emits `notifications/tools/list_changed`
+   * (tool catalog changed at runtime). The consumer should invalidate any
+   * cached tool catalog for this client. Adapters wire this to the SDK
+   * `ToolListChangedNotificationSchema` handler.
+   */
+  onToolsListChanged?: (callback: () => void) => void;
   readonly pid?: number | null;
   /**
    * Update the roots this client reports to a server via `roots/list`. The

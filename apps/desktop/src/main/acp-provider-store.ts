@@ -222,8 +222,8 @@ export class AcpProviderStore {
       .filter((p) => p.config.enabled && p.config.authStatus === "connected")
       .map((p) => p.manifest.id);
     const order = computeAcpTryOrder({
-      defaultProviderId: routing.defaultProviderId,
-      fallbackProviderIds: routing.fallbackProviderIds,
+      ...(routing.defaultProviderId ? { defaultProviderId: routing.defaultProviderId } : {}),
+      ...(routing.fallbackProviderIds ? { fallbackProviderIds: routing.fallbackProviderIds } : {}),
       connectedIds: connected,
     });
     return {

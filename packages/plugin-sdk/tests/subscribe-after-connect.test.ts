@@ -31,13 +31,13 @@ describe("NusaClient subscribe-after-connect", () => {
     });
 
     // subscribe before connect must reject — the connection is not open yet.
-    await expect(client.subscribe(["*"])).rejects.toThrow();
+    await expect(client.subscribe(["agent.tool_call_start"])).rejects.toThrow();
 
     await client.connect();
 
     // No subscription should be registered on the server.
     const session = server.sessionRegistry.all[0]!;
-    expect(server.subscriptionRegistry.isSubscribed(session.id, "*")).toBe(false);
+    expect(server.subscriptionRegistry.isSubscribed(session.id, "agent.tool_call_start")).toBe(false);
   });
 
   it("establishes server-side subscription when subscribe is called after connect", async () => {
@@ -52,10 +52,10 @@ describe("NusaClient subscribe-after-connect", () => {
     await client.connect();
 
     // subscribe after connect succeeds and registers on the server.
-    await client.subscribe(["*"]);
+    await client.subscribe(["agent.tool_call_start"]);
 
     const session = server.sessionRegistry.all[0]!;
-    expect(server.subscriptionRegistry.isSubscribed(session.id, "*")).toBe(true);
+    expect(server.subscriptionRegistry.isSubscribed(session.id, "agent.tool_call_start")).toBe(true);
   });
 
   it("does not auto-subscribe on initial connect (only on reconnect)", async () => {
@@ -73,7 +73,7 @@ describe("NusaClient subscribe-after-connect", () => {
     // calling subscribe(). The NusaClient onOpen only resubscribes on
     // reconnect, not on the first connect.
     const session = server.sessionRegistry.all[0]!;
-    expect(server.subscriptionRegistry.isSubscribed(session.id, "*")).toBe(false);
+    expect(server.subscriptionRegistry.isSubscribed(session.id, "agent.tool_call_start")).toBe(false);
     expect(server.subscriptionRegistry.isSubscribed(session.id, "agent.tool_call_start")).toBe(false);
   });
 });

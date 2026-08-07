@@ -161,10 +161,12 @@ describe("AgentConversationController — conversation-scoped composer state", (
     send.disabled = true;
     stop.hidden = false;
     stop.classList.add("is-stopping");
+    input.value = "draft";
 
     controller.resetComposerForConversation("conversation-b");
 
     expect(input.disabled).toBe(false);
+    // With content in the input the send button re-enables (#46).
     expect(send.disabled).toBe(false);
     expect(stop.hidden).toBe(true);
     expect(stop.disabled).toBe(false);
@@ -281,7 +283,7 @@ describe("AgentConversationController — in-chat subagent mini stream", () => {
     });
   });
 
-  it("removes a completed successful subagent card from the active thread UI", () => {
+  it("seals (not removes) a completed successful subagent card in the active thread UI", () => {
     const controller = new AgentConversationController({} as never);
     const card = controller.createStreamingToolCard("call-subagent", "subagent", { title: "Done" });
     document.body.appendChild(card);
@@ -293,8 +295,13 @@ describe("AgentConversationController — in-chat subagent mini stream", () => {
       output: JSON.stringify({ ok: true, runId: "run-done", summary: "Finished" }),
     });
 
-    expect(replacement).toBeNull();
+    // Ticket #42: success must keep a sealed card (replaces the streaming card),
+    // not remove it from the DOM.
+    expect(replacement).not.toBeNull();
     expect(card.isConnected).toBe(false);
+    expect(document.body.querySelector(".agent-subagent-card")).not.toBeNull();
+    expect(document.body.querySelector(".agent-subagent-card-status")?.textContent).toMatch(/OK/i);
+    expect(document.body.querySelector(".agent-subagent-card")?.textContent).toContain("Finished");
   });
 
   it("attaches the mini stream to the in-chat card on run start and appends rows", () => {
@@ -497,5 +504,49 @@ describe("AgentConversationController — in-chat subagent mini stream", () => {
     expect(card?.querySelector(".agent-subagent-card-status")?.textContent).toMatch(/RUNNING/i);
     // Rebuilt mini stream should show the live text snapshot.
     expect(card?.querySelector(".agent-subagent-card-stream-row.is-text")?.textContent).toContain("Rebuilt on return");
+  });
+
+  // Ticket #42: a successful subagent run must not remove the card from the
+  // thread — it becomes a sealed "● OK" card (like terminal tool cards).
+  it("createSubagentToolCard returns a non-null sealed card on success (ok)", () => {
+    const controller = new AgentConversationController({} as never);
+    const card = controller.createSubagentToolCard({
+      id: "call-ok",
+      name: "subagent",
+      ok: true,
+      args: { title: "Web audit" },
+      output: { ok: true, runId: "run-ok", providerId: "cursor", summary: "Fixed 3 issues." },
+    });
+
+    expect(card).not.toBeNull();
+    expect(card?.classList.contains("agent-subagent-card")).toBe(true);
+    expect(card?.querySelector(".agent-subagent-card-status")?.textContent).toMatch(/OK/i);
+    // Summary is rendered so the thread keeps a record of the run.
+    expect(card?.textContent).toContain("Fixed 3 issues.");
+  });
+
+  it("updateStreamingToolCard replaces (not removes) a successful subagent card", () => {
+    const controller = new AgentConversationController({} as never);
+    const parent = document.createElement("div");
+    document.body.appendChild(parent);
+    // Simulate a streaming subagent card in the DOM.
+    const live = document.createElement("div");
+    live.className = "agent-subagent-card";
+    live.dataset.streamingSubagent = "1";
+    live.dataset.callId = "call-x";
+    live._toolArgs = { title: "Web audit" };
+    parent.appendChild(live);
+
+    const replaced = controller.updateStreamingToolCard(live, {
+      callId: "call-x",
+      ok: true,
+      output: { ok: true, runId: "run-x", providerId: "cursor", summary: "Done." },
+    });
+
+    // The original streaming card was replaced by a sealed card, not removed.
+    expect(parent.contains(live)).toBe(false);
+    expect(parent.querySelector(".agent-subagent-card")).not.toBeNull();
+    expect(parent.querySelector(".agent-subagent-card-status")?.textContent).toMatch(/OK/i);
+    expect(replaced).not.toBeNull();
   });
 });

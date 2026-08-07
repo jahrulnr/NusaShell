@@ -18,10 +18,8 @@ import {
 } from "./agent-turn-utils.js";
 import {
   successToolResult,
-  errorToolResult,
   fromThrownError,
   projectModelToolResult,
-  type AgentToolResult,
 } from "./agent-tool-result.js";
 
 /**

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -23,8 +23,8 @@ describe("FilesystemSkillRegistry archive/restore", () => {
 
     const archived = await registry.listArchived();
     expect(archived).toHaveLength(1);
-    expect(archived[0].id).toBe("test-skill");
-    expect(archived[0].archivedAt).toBeTruthy();
+    expect(archived[0]!.id).toBe("test-skill");
+    expect(archived[0]!.archivedAt).toBeTruthy();
 
     const active = await registry.list();
     expect(active).toHaveLength(0);
@@ -40,7 +40,7 @@ describe("FilesystemSkillRegistry archive/restore", () => {
 
     const active = await registry.list();
     expect(active).toHaveLength(1);
-    expect(active[0].id).toBe("test-skill");
+    expect(active[0]!.id).toBe("test-skill");
 
     const archived = await registry.listArchived();
     expect(archived).toHaveLength(0);

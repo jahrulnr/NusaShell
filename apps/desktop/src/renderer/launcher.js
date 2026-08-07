@@ -1,7 +1,8 @@
 // NusaShell launcher renderer — connects to backend via WebSocket,
 // renders plugin grid, and handles plugin lifecycle actions.
 // Uses the native browser WebSocket (not the `ws` npm package).
-import { clampModelEffort, formatTokenCount, modelCompatibility, searchModels } from "./ai-model-ui.js";
+import { clampModelEffort, formatTokenCount, modelCompatibility, resolveRoomModel, searchModels } from "./ai-model-ui.js";
+import { computeAgentModelMenuPlacement } from "./agent-model-menu-placement.js";
 import { AgentConversationController } from "./agent-conversation-controller.js";
 import { SkillsController } from "./skills-controller.js";
 import { LearningController } from "./learning-controller.js";
@@ -1008,7 +1009,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const builtInProviderIds = new Set(Object.values(providerPresets).map((preset) => preset.id).filter(Boolean));
 
   const configuredProvider = (providerId) => aiSettings.providers.find((provider) => provider.id === providerId);
-  const activeModel = () => aiSettings.models.find((model) => model.key === aiSettings.activeModelKey);
+  // Ticket #38: the picker's "active model" must be room-scoped. A room can
+  // carry an explicit model binding; otherwise it falls back to the global
+  // active model. ACP conversations have no model picker (ACL governs).
+  const activeModel = () => {
+    const resolved = resolveRoomModel(agentConversationController?.conversation, aiSettings.models, aiSettings.activeModelKey);
+    return resolved?.model ?? null;
+  };
   const setProviderEnabled = async (provider, enabled) => {
     try {
       aiSettings = await window.shell.aiProviders.save({
@@ -1288,6 +1295,11 @@ document.addEventListener("DOMContentLoaded", () => {
     cancelTurn: cancelAgentTurn,
     answerAsk: answerAskQuestion,
     getActiveModel: activeModel,
+    getActiveEffort: () => {
+      const resolved = resolveRoomModel(agentConversationController?.conversation, aiSettings.models, aiSettings.activeModelKey);
+      return (resolved?.source === "room" ? resolved.effort : aiSettings.effort) || "auto";
+    },
+    getMaxInputTokens: () => aiSettings.maxInputTokens,
     getVisionMode: () => aiSettings.vision,
     notify: showToast,
     log: writeRendererLog,
@@ -1483,8 +1495,11 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     const selected = activeModel();
+    const roomResolved = resolveRoomModel(agentConversationController?.conversation, aiSettings.models, aiSettings.activeModelKey);
     const triggerLabel = $("#agent-model-trigger-label");
-    triggerLabel.textContent = `${selected?.id || "Choose model"} · ${aiSettings.effort || "auto"}`;
+    const effortLabel = roomResolved?.source === "room" ? roomResolved.effort : aiSettings.effort;
+    const sourceBadge = roomResolved?.source === "room" ? " · room" : "";
+    triggerLabel.textContent = `${selected?.id || "Choose model"} · ${effortLabel || "auto"}${sourceBadge}`;
     $("#agent-model-trigger").title = triggerLabel.textContent;
     if (selected) agentConversationController?.updateContextStatus();
     else $("#agent-provider-status").textContent = "Choose a model";
@@ -1493,10 +1508,12 @@ document.addEventListener("DOMContentLoaded", () => {
       list.appendChild(el("div", "agent-model-empty", aiSettings.models.length ? "No models match this search." : "No imported models. Open a provider and import its catalog."));
       return;
     }
+    const activeKey = roomResolved?.model?.key ?? aiSettings.activeModelKey;
+    const activeEffort = effortLabel;
     models.forEach((model) => {
-      const row = el("div", `agent-model-row${model.key === aiSettings.activeModelKey ? " is-selected" : ""}`);
+      const row = el("div", `agent-model-row${model.key === activeKey ? " is-selected" : ""}`);
       const choose = el("button", "agent-model-choice"); choose.type = "button"; choose.setAttribute("role", "option");
-      choose.setAttribute("aria-selected", String(model.key === aiSettings.activeModelKey));
+      choose.setAttribute("aria-selected", String(model.key === activeKey));
       const name = el("span", "agent-model-name"); name.textContent = model.label || model.id;
       const meta = el("span", "agent-model-meta");
       const provider = el("span", "agent-model-provider"); provider.textContent = model.providerName;
@@ -1504,12 +1521,12 @@ document.addEventListener("DOMContentLoaded", () => {
       modelCompatibility(model).forEach((capability) => { const badge = el("span", "agent-model-capability"); badge.textContent = capability; meta.appendChild(badge); });
       choose.append(name, meta);
       bindModelOptionKeyboard(choose);
-      choose.addEventListener("click", () => void selectAgentModel(model.key, clampModelEffort(model, aiSettings.effort)));
+      choose.addEventListener("click", () => void selectAgentModel(model.key, clampModelEffort(model, activeEffort)));
       row.appendChild(choose);
       if (model.supportedEfforts.length > 0) {
         const effortRow = el("div", "agent-model-efforts");
         ["auto", ...model.supportedEfforts.filter((effort) => effort !== "auto")].forEach((effort) => {
-          const button = el("button", `agent-effort-option${model.key === aiSettings.activeModelKey && effort === aiSettings.effort ? " is-selected" : ""}`, effort);
+          const button = el("button", `agent-effort-option${model.key === activeKey && effort === activeEffort ? " is-selected" : ""}`, effort);
           button.type = "button";
           button.addEventListener("click", () => void selectAgentModel(model.key, effort));
           effortRow.appendChild(button);
@@ -1548,8 +1565,7 @@ document.addEventListener("DOMContentLoaded", () => {
         bindModelOptionKeyboard(choose);
         choose.addEventListener("click", () => {
           void agentConversationController?.selectAcpConfigOption(opt.id, o.value);
-          $("#agent-model-menu").hidden = true;
-          $("#agent-model-trigger").setAttribute("aria-expanded", "false");
+          closeAgentModelMenu(false);
         });
         row.appendChild(choose);
         section.appendChild(row);
@@ -1574,10 +1590,41 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   };
 
+  const renderGlobalModelControls = () => {
+    const modelSelect = $("#settings-global-model");
+    const effortSelect = $("#settings-global-effort");
+    if (!modelSelect) return;
+    const activeKey = aiSettings.activeModelKey || "";
+    const current = modelSelect.value;
+    modelSelect.textContent = "";
+    const auto = document.createElement("option");
+    auto.value = "";
+    auto.textContent = "Automatic (provider default)";
+    modelSelect.appendChild(auto);
+    aiSettings.models.forEach((model) => {
+      const option = document.createElement("option");
+      option.value = model.key;
+      option.textContent = model.label + " (" + model.providerName + ")";
+      modelSelect.appendChild(option);
+    });
+    modelSelect.value = activeKey || current || "";
+    effortSelect.textContent = "";
+    const selectedModel = aiSettings.models.find((model) => model.key === (modelSelect.value || activeKey));
+    const efforts = ["auto", ...new Set([...(selectedModel?.supportedEfforts || []).filter((e) => e !== "auto")])];
+    efforts.forEach((effort) => {
+      const option = document.createElement("option");
+      option.value = effort;
+      option.textContent = effort;
+      effortSelect.appendChild(option);
+    });
+    effortSelect.value = aiSettings.effort || "auto";
+  };
+
   const syncAiControls = () => {
     renderProviderCards();
     void renderAcpProviderCards();
     renderAgentModelPicker();
+    renderGlobalModelControls();
     if (currentProviderDetailId) renderProviderDetail();
     $("#settings-ai-strategy").value = aiSettings.strategy || "failover";
     $("#settings-ai-budget").value = aiSettings.totalAttemptBudget || 4;
@@ -1597,9 +1644,21 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       aiSettings = await window.shell.aiProviders.select({ modelKey, effort });
       syncAiControls();
-      $("#agent-model-menu").hidden = true;
-      $("#agent-model-trigger").setAttribute("aria-expanded", "false");
-      $("#agent-model-trigger").focus({ preventScroll: true });
+      // Ticket #38: bind the picked model to the active room so it stays
+      // per-conversation (symmetric with workspace), not global.
+      const active = agentConversationController?.conversation;
+      if (active && active.kind !== "acp") {
+        try {
+          agentConversationController.conversation = await window.shell.agentConversations.setModel(
+            active.id,
+            { modelKey, effort, explicit: true },
+          );
+        } catch {
+          // Best-effort room binding; the global select still applied.
+        }
+      }
+      closeAgentModelMenu(true);
+      agentConversationController?.updateContextStatus();
     } catch (error) {
       showToast(`Could not select model: ${error.message || error}`, "error");
     }
@@ -1747,6 +1806,23 @@ document.addEventListener("DOMContentLoaded", () => {
       showToast(`Could not save agent runtime: ${error.message || error}`, "error");
     }
   });
+  $(`#ai-global-model-form`).addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      const modelKey = $(`#settings-global-model`).value || undefined;
+      const effort = $(`#settings-global-effort`).value || "auto";
+      // Ticket #39: use select() as the single source of truth for the global
+      // model (same path as the composer picker). select() also re-locks the
+      // backend provider default model so job/pipeline agent turns and the
+      // compaction summarizer inherit it. An empty modelKey clears the global
+      // selection back to "Automatic (provider default)".
+      aiSettings = await window.shell.aiProviders.select({ modelKey, effort });
+      syncAiControls();
+      showToast("Global model saved.", "success");
+    } catch (error) {
+      showToast(`Could not save global model: ${error.message || error}`, "error");
+    }
+  });
   wireAppBehaviorToggle("#settings-launch-at-login", "launchAtLogin");
   wireAppBehaviorToggle("#settings-start-hidden", "startHidden");
   wireAppBehaviorToggle("#settings-keep-in-background", "keepInBackground");
@@ -1851,11 +1927,72 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
   $("#provider-model-search").addEventListener("input", renderProviderDetail);
-  $("#agent-model-trigger").addEventListener("click", () => {
+
+  let modelMenuRafId = 0;
+  let disposeModelMenuPositioning = null;
+
+  const positionAgentModelMenu = () => {
     const menu = $("#agent-model-menu");
-    menu.hidden = !menu.hidden;
-    $("#agent-model-trigger").setAttribute("aria-expanded", String(!menu.hidden));
-    if (!menu.hidden) { renderAgentModelPicker(); $("#agent-model-search").focus(); }
+    const trigger = $("#agent-model-trigger");
+    if (!menu || !trigger || menu.hidden) return;
+    const triggerRect = trigger.getBoundingClientRect();
+    if (!triggerRect || (triggerRect.width === 0 && triggerRect.height === 0)) return;
+    const menuRect = menu.getBoundingClientRect();
+    const placement = computeAgentModelMenuPlacement({
+      trigger: triggerRect,
+      menu: { width: menuRect.width, height: menuRect.height },
+      viewport: { width: window.innerWidth, height: window.innerHeight }
+    });
+    menu.style.setProperty("--agent-model-menu-left", `${placement.left}px`);
+    menu.style.setProperty("--agent-model-menu-top", `${placement.top}px`);
+    menu.classList.toggle("is-above", placement.orientation === "above");
+    menu.classList.toggle("is-below", placement.orientation === "below");
+    menu.setAttribute("data-placement", placement.orientation);
+  };
+
+  const openAgentModelMenu = () => {
+    const menu = $("#agent-model-menu");
+    const trigger = $("#agent-model-trigger");
+    if (menu.hidden) {
+      menu.hidden = false;
+      renderAgentModelPicker();
+      positionAgentModelMenu();
+      $("#agent-model-search").focus({ preventScroll: true });
+    }
+    trigger.setAttribute("aria-expanded", "true");
+    if (!disposeModelMenuPositioning) {
+      const scheduleReposition = () => {
+        if (modelMenuRafId) return;
+        modelMenuRafId = requestAnimationFrame(() => {
+          modelMenuRafId = 0;
+          positionAgentModelMenu();
+        });
+      };
+      window.addEventListener("resize", scheduleReposition);
+      window.addEventListener("scroll", scheduleReposition, true);
+      disposeModelMenuPositioning = () => {
+        if (modelMenuRafId) cancelAnimationFrame(modelMenuRafId);
+        modelMenuRafId = 0;
+        window.removeEventListener("resize", scheduleReposition);
+        window.removeEventListener("scroll", scheduleReposition, true);
+        disposeModelMenuPositioning = null;
+      };
+    }
+  };
+
+  const closeAgentModelMenu = (restoreFocus = true) => {
+    const menu = $("#agent-model-menu");
+    if (!menu.hidden) {
+      menu.hidden = true;
+      if (restoreFocus) $("#agent-model-trigger").focus({ preventScroll: true });
+    }
+    $("#agent-model-trigger").setAttribute("aria-expanded", "false");
+    if (disposeModelMenuPositioning) disposeModelMenuPositioning();
+  };
+
+  $("#agent-model-trigger").addEventListener("click", () => {
+    if ($("#agent-model-menu").hidden) openAgentModelMenu();
+    else closeAgentModelMenu();
   });
   $("#agent-model-search").addEventListener("input", renderAgentModelPicker);
   $("#agent-model-search").addEventListener("keydown", (event) => {
@@ -1867,10 +2004,7 @@ document.addEventListener("DOMContentLoaded", () => {
     options[event.key === "ArrowUp" ? options.length - 1 : 0]?.focus();
   });
   document.addEventListener("pointerdown", (event) => {
-    if (!event.target.closest(".agent-model-control")) {
-      $("#agent-model-menu").hidden = true;
-      $("#agent-model-trigger").setAttribute("aria-expanded", "false");
-    }
+    if (!event.target.closest(".agent-model-control")) closeAgentModelMenu();
   });
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
@@ -1881,11 +2015,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!$("#job-delete-dialog").hidden) jobsController?.closeDeleteDialog();
     if ($("#job-modal")?.classList.contains("active")) jobsController?.closeModal();
     if ($("#job-output-modal")?.classList.contains("active")) jobsController?.closeOutput();
-    const modelMenu = $("#agent-model-menu");
-    const wasModelMenuOpen = modelMenu && !modelMenu.hidden;
-    modelMenu.hidden = true;
-    $("#agent-model-trigger").setAttribute("aria-expanded", "false");
-    if (wasModelMenuOpen) $("#agent-model-trigger").focus({ preventScroll: true });
+    const wasModelMenuOpen = $("#agent-model-menu") && !$("#agent-model-menu").hidden;
+    closeAgentModelMenu(wasModelMenuOpen);
   });
 
   // Log source filters

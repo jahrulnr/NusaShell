@@ -27,7 +27,7 @@ export class SubagentPortImpl implements SubagentPort {
     private readonly logger?: Logger,
   ) {}
 
-  async resolve(request: SubagentResolveRequest): Promise<SubagentResolveResult> {
+  async resolve(_request: SubagentResolveRequest): Promise<SubagentResolveResult> {
     return this.resolver.resolve();
   }
 
@@ -37,7 +37,7 @@ export class SubagentPortImpl implements SubagentPort {
       if (resolved.tryOrder.length === 0) return null;
       return {
         availableSubagents: resolved.tryOrder.join(", "),
-        defaultSubagent: resolved.tryOrder[0],
+        defaultSubagent: resolved.tryOrder[0] ?? "",
       };
     } catch {
       return null;

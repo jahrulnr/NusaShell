@@ -3,6 +3,7 @@ import {
   flattenModelCatalog,
   importProviderModels,
   normalizeRegistryState,
+  resolveActiveModelDefault,
   type AiProviderSettings,
 } from "../src/main/ai-provider-registry.js";
 
@@ -317,3 +318,27 @@ function provider(id: string, name: string, models: AiProviderSettings["models"]
     models,
   };
 }
+
+describe("resolveActiveModelDefault (ticket #39)", () => {
+  it("resolves providerId + model id for the global active model key", () => {
+    const p = provider("first", "First", [
+      { id: "a/model", label: "A", task: "chat", inputModes: ["text"], outputModes: ["text"], supportedEfforts: [], defaultEffort: "auto" },
+    ]);
+    expect(resolveActiveModelDefault([p], "first::a/model")).toEqual({ providerId: "first", model: "a/model" });
+  });
+
+  it("returns null when the active model key is empty", () => {
+    expect(resolveActiveModelDefault([provider("first", "First", [])], "")).toBeNull();
+  });
+
+  it("returns null when the active model key is not in the catalog", () => {
+    expect(resolveActiveModelDefault([provider("first", "First", [])], "nope::missing")).toBeNull();
+  });
+
+  it("ignores disabled providers and non-chat models", () => {
+    const disabled = { ...provider("off", "Off", [
+      { id: "m1", label: "M1", task: "chat", inputModes: ["text"], outputModes: ["text"], supportedEfforts: [], defaultEffort: "auto" },
+    ]), enabled: false };
+    expect(resolveActiveModelDefault([disabled], "off::m1")).toBeNull();
+  });
+});

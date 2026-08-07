@@ -108,10 +108,10 @@ export function createJobRuntime(
     eventDispatcher,
     logger,
   });
-  if (options.jobs) {
+  if (options.jobs && (options.jobs.enabled !== undefined || options.jobs.tickSeconds !== undefined)) {
     pipelineTriggerCoordinator.configure({
-      enabled: options.jobs.enabled,
-      tickSeconds: options.jobs.tickSeconds,
+      ...(options.jobs.enabled !== undefined ? { enabled: options.jobs.enabled } : {}),
+      ...(options.jobs.tickSeconds !== undefined ? { tickSeconds: options.jobs.tickSeconds } : {}),
     });
   }
   const eventJobMatcher = new EventJobMatcher({

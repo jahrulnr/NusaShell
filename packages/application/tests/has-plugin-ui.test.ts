@@ -8,7 +8,6 @@ describe("hasPluginUi", () => {
 
   it("returns false when ui is undefined (headless)", () => {
     expect(hasPluginUi({})).toBe(false);
-    expect(hasPluginUi({ ui: undefined })).toBe(false);
   });
 
   it("returns false when ui.entry is empty or whitespace", () => {

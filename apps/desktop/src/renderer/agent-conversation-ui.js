@@ -146,6 +146,62 @@ export function formatTurnError(error) {
 }
 
 /**
+ * Classify a turn failure for the Retry button + status copy (#45).
+ * Pure function — no DOM. Parses the transport error shape (code, details.cause,
+ * message) that the backend sends for provider/run failures and returns a small
+ * descriptor the renderer can act on.
+ *
+ * @param {unknown} error - the renderer-side turn error.
+ * @returns {{ category: string, message: string, retryable: boolean, label: string }}
+ *   - category: "rate_limited" | "auth" | "server_error" | "superseded" |
+ *     "cancelled" | "provider" | "unknown"
+ *   - message: user-facing copy
+ *   - retryable: whether an automatic/manual retry makes sense
+ *   - label: button label for the primary action ("Retry" | "Resume" | "Continue" | "")
+ */
+const HTTP_STATUS_RE = /\bHTTP\s+(\d{3})\b/i;
+export function classifyTurnError(error) {
+  if (error == null) {
+    return { category: "unknown", message: "Unknown error", retryable: false, label: "" };
+  }
+  const code = typeof error?.code === "string" ? error.code : "";
+  const cause = typeof error?.details?.cause === "string" ? error.details.cause : "";
+  const rawMessage = typeof error?.message === "string" ? error.message : "";
+  const text = `${rawMessage} ${cause}`.trim();
+
+  // Cancelled/interrupted handled by the caller (label already correct).
+  if (code === "AGENT_TURN_CANCELLED") {
+    return { category: "cancelled", message: "Turn stopped", retryable: false, label: "Continue" };
+  }
+  if (code === "AGENT_MAX_TOOL_ROUNDS") {
+    return { category: "max_rounds", message: "Tool-round limit reached", retryable: true, label: "Resume" };
+  }
+
+  // Auth (401/403) — not retryable without fixing credentials.
+  if (/\b401\b/.test(text) || /\b403\b/.test(text) || /auth/i.test(text)) {
+    return { category: "auth", message: "Authentication failed — check the API key / provider settings", retryable: false, label: "Retry" };
+  }
+  // Rate limit (429) — back off; retry only after a cooldown.
+  if (/\b429\b/.test(text) || /rate\s*limit/i.test(text)) {
+    return { category: "rate_limited", message: "Rate limited — wait a moment and try again", retryable: true, label: "Retry" };
+  }
+  // Superseded — the turn was intentionally replaced by a newer one.
+  if (code === "AGENT_TURN_SUPERSEDED" || /supersed/i.test(text)) {
+    return { category: "superseded", message: "Turn superseded by a newer turn", retryable: false, label: "" };
+  }
+  // Server error (5xx) — transient retryable.
+  const statusMatch = (cause || rawMessage).match(HTTP_STATUS_RE);
+  const status = statusMatch ? Number(statusMatch[1]) : 0;
+  if (status >= 500 && status <= 599 || /\b5\d{2}\b/.test(text)) {
+    return { category: "server_error", message: "Provider error (5xx) — try again", retryable: true, label: "Retry" };
+  }
+  if (code === "AGENT_PROVIDER_FAILED") {
+    return { category: "provider", message: formatTurnError(error), retryable: true, label: "Retry" };
+  }
+  return { category: "unknown", message: formatTurnError(error), retryable: false, label: "Retry" };
+}
+
+/**
  * Subagent tool/event error payloads may be a string or `{ message }`.
  * Never show `[object Object]` when the backend sent a structured error.
  */
@@ -472,6 +528,53 @@ export function searchConversations(conversations, query) {
   const normalized = String(query ?? "").trim().toLocaleLowerCase();
   if (!normalized) return conversations;
   return conversations.filter((conversation) => conversation.title.toLocaleLowerCase().includes(normalized));
+}
+
+/**
+ * Merge an incoming conversation-message snapshot into the currently-held
+ * in-memory messages, never dropping a message that is already visible.
+ *
+ * Ticket #47: while turn N's assistant reply is still being sealed by main,
+ * a user submitting turn N+1 calls store.append(user) and may receive a
+ * snapshot that has not yet included turn N's assistant message. Overwriting
+ * `this.conversation.messages` with that stale list would make the assistant
+ * message "disappear" from the thread until a later room switch re-reads the
+ * store (source of truth).
+ *
+ * Merge strategy (order-preserving):
+ *   - Start from `incoming` (the authoritative, store-backed list).
+ *   - Re-append any `current` message that is NOT present in `incoming`, as
+ *     long as it is not an interrupted slot that an incoming message replaced.
+ *   - Identity = `role + createdAt` (fall back to object equality when two
+ *     items share a slot). This avoids duplicating shared messages.
+ *
+ * @returns an array of messages, best-effort chronological.
+ */
+export function mergeConversationMessages(current, incoming) {
+  const list = Array.isArray(incoming) ? incoming : [];
+  const currentList = Array.isArray(current) ? current : [];
+  if (currentList.length === 0) return list;
+  const incomingKeys = new Set(list.map(messageKey));
+  // Preserve seen messages that the incoming snapshot lacks (e.g. a not-yet
+  // sealed assistant reply). Skip interrupted slots the incoming replaced.
+  const missing = currentList.filter((m) => !incomingKeys.has(messageKey(m)) && !(m?.status === "interrupted"));
+  if (missing.length === 0) return list;
+  // Stale-tail guard: only append the missing item when it belongs to the same
+  // (or earlier) chronological span than the incoming tail — avoids inserting
+  // a stale streak after a compaction that legitimately dropped old messages.
+  const merged = [...list];
+  for (const m of missing) {
+    if (!merged.some((x) => Object.is(x, m))) merged.push(m);
+  }
+  return merged;
+}
+
+function messageKey(message) {
+  if (!message || typeof message !== "object") return `${String(message)}`;
+  const role = message.role ?? "";
+  const createdAt = message.createdAt ?? "";
+  const traceId = message.traceId ?? "";
+  return `${role}|${createdAt}|${traceId}`;
 }
 
 /**

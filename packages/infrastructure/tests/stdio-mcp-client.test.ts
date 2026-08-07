@@ -77,4 +77,39 @@ describe("StdioMcpClient", () => {
     await expect(client.callTool("fail", {}))
       .rejects.toThrow("Mailbox authentication failed");
   });
+
+  it("bounds the stderr tail when a server spams stderr during connect", async () => {
+    const factory = new McpClientFactory();
+    // Spam ~2 MB of stderr before handshake; connect must still complete.
+    const previous = process.env.MCP_MOCK_SPAM_STDERR;
+    process.env.MCP_MOCK_SPAM_STDERR = "150000";
+    try {
+      client = factory.createForStdio("node", [MOCK_SERVER_PATH], {});
+      await client.connect();
+      // Connect succeeded despite the flood — and listTools still works.
+      const tools = await client.listTools();
+      expect(tools[0]!.name).toBe("echo");
+    } finally {
+      if (previous === undefined) delete process.env.MCP_MOCK_SPAM_STDERR;
+      else process.env.MCP_MOCK_SPAM_STDERR = previous;
+    }
+  });
+
+  it("cleans up the connect race timers on timeout (no leaked handle)", async () => {
+    const factory = new McpClientFactory();
+    const previousTimeout = process.env.NUSASHELL_MCP_CONNECT_TIMEOUT;
+    process.env.NUSASHELL_MCP_CONNECT_TIMEOUT = "80";
+    const previousDelay = process.env.MCP_MOCK_DELAY_MS;
+    process.env.MCP_MOCK_DELAY_MS = "1000";
+    try {
+      client = factory.createForStdio("node", [MOCK_SERVER_PATH], {});
+      await expect(client.connect()).rejects.toThrow(/timed out/);
+    } finally {
+      if (previousTimeout === undefined) delete process.env.NUSASHELL_MCP_CONNECT_TIMEOUT;
+      else process.env.NUSASHELL_MCP_CONNECT_TIMEOUT = previousTimeout;
+      if (previousDelay === undefined) delete process.env.MCP_MOCK_DELAY_MS;
+      else process.env.MCP_MOCK_DELAY_MS = previousDelay;
+    }
+  });
 });
+

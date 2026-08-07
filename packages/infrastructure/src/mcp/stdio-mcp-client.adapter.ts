@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { ListRootsRequestSchema, ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import type {
   CompletionReference,
   CompletionResult,
@@ -54,9 +54,11 @@ export class StdioMcpClient implements McpClientPort {
   private client: Client | null = null;
   private transport: StdioClientTransport | null = null;
   private closeCallback: (() => void) | null = null;
+  private toolsListChangedCallback: (() => void) | null = null;
   private currentRoots: readonly RootDescriptor[] = [];
   private rootsRequestedFlag = false;
   private stderrBuffer = "";
+  private static readonly STDERR_MAX_BYTES = 16 * 1024; // 16 KB tail for connect error enrichment
 
   constructor(
     private readonly command: string,
@@ -73,6 +75,10 @@ export class StdioMcpClient implements McpClientPort {
 
   onClose(callback: () => void): void {
     this.closeCallback = callback;
+  }
+
+  onToolsListChanged(callback: () => void): void {
+    this.toolsListChangedCallback = callback;
   }
 
   async connect(): Promise<void> {
@@ -100,11 +106,13 @@ export class StdioMcpClient implements McpClientPort {
     this.transport.stderr?.on("data", (chunk: Buffer | string) => {
       const message = String(chunk).trim();
       if (!message) return;
-      this.stderrBuffer += `${message}\n`;
+      this.appendStderr(message);
       this.logger?.warn({ command: launch.command, message: boundMcpStderr(message) }, "MCP stderr");
     });
 
     let closed = false;
+
+    // Ensure transport onclose also cleans up (below) once connect settles.
     this.transport.onclose = () => {
       closed = true;
       this.logger?.debug({ command: launch.command }, "Stdio MCP transport closed");
@@ -118,6 +126,11 @@ export class StdioMcpClient implements McpClientPort {
       { capabilities: { roots: { listChanged: true } } },
     );
     registerMcpLogging(this.client, this.logger, this.command);
+    this.client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
+      if (this.toolsListChangedCallback) {
+        this.toolsListChangedCallback();
+      }
+    });
     if (this.automation) {
       registerMcpAutomation(this.client, this.automation.pluginId, {
         eventDispatcher: this.automation.eventDispatcher,
@@ -143,29 +156,44 @@ export class StdioMcpClient implements McpClientPort {
     // packages) need to download dependencies on first run. Override with
     // NUSASHELL_MCP_CONNECT_TIMEOUT (milliseconds).
     const CONNECT_TIMEOUT_MS = Number(process.env.NUSASHELL_MCP_CONNECT_TIMEOUT) || 300_000;
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    let closePollHandle: ReturnType<typeof setInterval> | null = null;
     try {
       await Promise.race([
         this.client.connect(this.transport),
         new Promise<never>((_, reject) => {
-          const timer = setTimeout(() => {
+          timeoutHandle = setTimeout(() => {
             reject(new Error(`MCP connect timed out after ${CONNECT_TIMEOUT_MS}ms`));
           }, CONNECT_TIMEOUT_MS);
-          // If transport closes before connect completes, reject immediately
-          const checkClose = setInterval(() => {
+          // If transport closes before connect completes, reject immediately.
+          closePollHandle = setInterval(() => {
             if (closed) {
-              clearInterval(checkClose);
-              clearTimeout(timer);
               reject(new Error("MCP process exited before handshake completed"));
             }
           }, 100);
-          // Clean up interval when connect succeeds or times out
-          const origClear = clearInterval;
-          setTimeout(() => origClear(checkClose), CONNECT_TIMEOUT_MS + 100);
         }),
       ]);
     } catch (error) {
       throw this.enrichConnectError(error);
+    } finally {
+      // Always release the polling/abort timers once connect settles — no
+      // leaked interval even when the promise resolves or rejects first.
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (closePollHandle) clearInterval(closePollHandle);
     }
+  }
+
+  /**
+   * Append a single stderr line to the bounded tail buffer. Keeps the last
+   * `STDERR_MAX_BYTES` (16 KB) so `enrichConnectError` never reflects unbounded
+   * growth from a verbose server, while retaining enough context to debug.
+   */
+  private appendStderr(message: string): void {
+    this.stderrBuffer += `${message}\n`;
+    if (this.stderrBuffer.length <= StdioMcpClient.STDERR_MAX_BYTES) return;
+    // Trim from the front to the cap in one shot (rare path — only when we
+    // exceed 16 KB).
+    this.stderrBuffer = this.stderrBuffer.slice(-StdioMcpClient.STDERR_MAX_BYTES);
   }
 
   private enrichConnectError(error: unknown): Error {

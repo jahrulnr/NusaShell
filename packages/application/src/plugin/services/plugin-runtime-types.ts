@@ -58,6 +58,12 @@ export interface RuntimeEntry {
   restartTimer: ReturnType<typeof setTimeout> | null;
   /** Reason of the most recent crash (surfaced in PluginView). */
   lastCrashReason: string | undefined;
+  /**
+   * Cached tool catalog (populated lazily on first tools/list after start;
+   * null = not cached yet). Invalidated on start/restart/stop/crash and on
+   * MCP `notifications/tools/list_changed`.
+   */
+  cachedTools: readonly import("../ports/mcp-client.port.js").ToolDescriptor[] | null;
   /** Last workspace bound to this plugin (for roots sync / spawn env). */
   workspace: string | undefined;
   /** Last workspace reported to the client via roots (to detect change). */

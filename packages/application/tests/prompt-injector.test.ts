@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { injectPrompts, applyVars, SYSTEM_PREFIX_END_MARKER, stableCurrentDate, type PromptVars } from "../src/index.js";
+import { injectPrompts, applyVars, stableCurrentDate, type PromptVars } from "../src/index.js";
 import type { AgentPrompt } from "../src/index.js";
 import type { AgentMessage } from "../src/index.js";
 

@@ -73,9 +73,14 @@ export class ContextCompactor {
     // 1. Summarize by replaying real history + compact instruction as the
     //    last user message (Codex style: instruction is user text, not only
     //    system). Tools disabled so the model replies with the summary only.
+    //    On a resume path the live history may lack injected system prompts;
+    //    `input.systemContext` restores them so the summarizer sees the same
+    //    session context (Live MCP, skills, memory, todo) as a normal turn.
     const compactInstruction = this.compactPrompt
       ?? "Create a concise context checkpoint for another AI. Preserve goals, decisions, constraints, important tool results, and unfinished work. Reply with the checkpoint only.";
+    const systemContext = input.systemContext ?? [];
     const summarizerMessages: AgentMessage[] = [
+      ...systemContext,
       ...input.messages,
       { role: "user", content: compactInstruction },
     ];
@@ -119,8 +124,12 @@ export class ContextCompactor {
     //    newest-first up to the Codex user budget.
     const retainedUserMessages = collectUserMessages(input.messages);
 
-    // 4. Preserve leading system injects; recompact the rest.
-    const { leadingSystem, rest } = splitLeadingSystemInjects(input.messages);
+    // 4. Preserve leading system injects; recompact the rest. When a resume
+    //    turn supplied `systemContext`, use it as the replacement head so the
+    //    compacted history stays session-aware even though the live messages
+    //    skipped re-injection.
+    const { leadingSystem: leadingFromLive, rest } = splitLeadingSystemInjects(input.messages);
+    const leadingSystem = systemContext.length > 0 ? [...systemContext] : leadingFromLive;
     const compactedFromRest = buildCompactedHistory(
       collectUserMessages(rest),
       summaryText,

@@ -264,7 +264,7 @@ export function createContainer(options: ContainerOptions): Container {
     backgroundReviewScheduler: agent.backgroundReviewScheduler,
     jobScheduler: jobs.jobScheduler,
     eventJobMatcher: jobs.eventJobMatcher,
-    pipelineTriggerCoordinator: jobs.pipelineTriggerCoordinator,
+    ...(jobs.pipelineTriggerCoordinator ? { pipelineTriggerCoordinator: jobs.pipelineTriggerCoordinator } : {}),
     learningGraph: skills.learningGraph,
     memoryStore: skills.memoryStore,
     agentToolGateway: agent.agentToolGateway,

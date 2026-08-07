@@ -11,7 +11,8 @@ import {
   successToolResult,
 } from "../src/agent/services/agent-tool-result.js";
 import { matchGlob, evaluateConditionNode } from "../src/job/services/event-job-matcher.js";
-import { serializeToolResult, stableJson, type AgentToolExecution } from "../src/agent/services/agent-turn-utils.js";
+import { serializeToolResult, stableJson } from "../src/agent/services/agent-turn-utils.js";
+import type { AgentToolExecution } from "../src/agent/services/agent-turn-types.js";
 
 // F1 — cron numeric ranges are never bounds-checked.
 describe("F1: parseSchedule cron range validation", () => {

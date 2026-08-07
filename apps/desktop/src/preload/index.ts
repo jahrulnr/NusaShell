@@ -6,6 +6,7 @@ import type {
   AgentConversation,
   AgentConversationCheckpoint,
   AgentConversationMessage,
+  AgentConversationModelBinding,
   AgentConversationSummary,
   AgentSubagentRun,
   AgentSubagentRunStatus,
@@ -86,6 +87,7 @@ export interface ShellApi {
     replaceLastInterrupted(id: string, message: AgentConversationMessage): Promise<AgentConversation>;
     delete(id: string): Promise<void>;
     setWorkspace(id: string, workspace: string): Promise<AgentConversation>;
+    setModel(id: string, model: AgentConversationModelBinding | null): Promise<AgentConversation>;
     upsertCanvasArtifact(id: string, artifact: AgentCanvasArtifact): Promise<AgentConversation>;
     setActiveCanvasArtifact(id: string, artifactId: string | null): Promise<AgentConversation>;
     upsertSubagentRun(id: string, run: AgentSubagentRun): Promise<AgentConversation>;
@@ -266,6 +268,7 @@ const api: ShellApi = {
     replaceLastInterrupted: (id, message) => ipcRenderer.invoke("agent-conversations:replace-interrupted", id, message),
     delete: (id) => ipcRenderer.invoke("agent-conversations:delete", id),
     setWorkspace: (id, workspace) => ipcRenderer.invoke("agent-conversations:set-workspace", id, workspace),
+    setModel: (id, model) => ipcRenderer.invoke("agent-conversations:set-model", id, model),
     upsertCanvasArtifact: (id, artifact) => ipcRenderer.invoke("agent-conversations:upsert-canvas-artifact", id, artifact),
     setActiveCanvasArtifact: (id, artifactId) => ipcRenderer.invoke("agent-conversations:set-active-canvas-artifact", id, artifactId),
     upsertSubagentRun: (id, run) => ipcRenderer.invoke("agent-conversations:upsert-subagent-run", id, run),

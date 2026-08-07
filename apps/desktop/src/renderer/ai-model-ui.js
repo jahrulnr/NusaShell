@@ -43,6 +43,41 @@ export function clampModelEffort(model, effort) {
   return model.defaultEffort || supported[0] || "auto";
 }
 
+/**
+ * Resolve the effective model for a room (ticket #38).
+ *
+ * A conversation can carry an explicit per-conversation model binding
+ * (`conversation.model`). When present, the room keeps using that model even
+ * if the user later changes the global picker in another room. When absent,
+ * the room falls back to the global active model (`activeModelKey`).
+ *
+ * @param {{ kind?: string, model?: { modelKey?: string, effort?: string } }|null|undefined} conversation
+ * @param {readonly { key: string }[]} models - the full imported model catalog
+ * @param {string} activeModelKey - the global picker's active model key
+ * @returns {{ model: any|null, effort: string, source: "room"|"global", explicit: boolean }|null}
+ *   null for ACP conversations or when neither the room nor global has a resolvable model.
+ */
+export function resolveRoomModel(conversation, models, activeModelKey) {
+  if (!conversation || conversation.kind === "acp") return null;
+  const roomBinding = conversation.model;
+  if (roomBinding && roomBinding.modelKey) {
+    const model = (models || []).find((m) => m.key === roomBinding.modelKey) ?? null;
+    return {
+      model,
+      effort: roomBinding.effort || "auto",
+      source: "room",
+      explicit: roomBinding.explicit !== false,
+    };
+  }
+  const globalModel = (models || []).find((m) => m.key === activeModelKey) ?? null;
+  return {
+    model: globalModel,
+    effort: "auto",
+    source: "global",
+    explicit: false,
+  };
+}
+
 export function formatTokenCount(value) {
   if (!Number.isFinite(value) || value <= 0) return "0";
   if (value >= 1_000_000) return `${Number((value / 1_000_000).toFixed(1))}M`;
@@ -56,6 +91,27 @@ export function formatContextUsage(usedTokens, contextWindow) {
     return `${formatTokenCount(used)}/${formatTokenCount(contextWindow)} context`;
   }
   return `${formatTokenCount(used)} ctx`;
+}
+
+/**
+ * Resolve the context-window denominator shown to the user, matching the
+ * backend's compaction threshold (`resolveContextThreshold` uses
+ * `min(settings.maxInputTokens, effectiveModelWindow)`).
+ *
+ * A model may advertise a large window (e.g. 1M) while the global context
+ * cap bounds it (default 200k). The badge must show the *effective* window
+ * so idle and live numbers agree with when compaction actually fires
+ * (ticket #41).
+ *
+ * @param {number} modelWindow - model advertised contextWindow (0/NaN = unknown)
+ * @param {number|undefined} globalMaxInputTokens - global context cap
+ * @returns {number} effective window denominator (0 when unknown)
+ */
+export function effectiveContextWindow(modelWindow, globalMaxInputTokens) {
+  const windowValue = Number.isFinite(modelWindow) && modelWindow > 0 ? modelWindow : 0;
+  if (windowValue === 0) return 0;
+  const cap = Number.isFinite(globalMaxInputTokens) && globalMaxInputTokens > 0 ? globalMaxInputTokens : Infinity;
+  return Math.min(windowValue, cap);
 }
 
 /**

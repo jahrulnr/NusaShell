@@ -68,8 +68,8 @@ describe("rankToolsByTokens", () => {
     // "file" → list: desc+1 = 1; read: desc+1 = 1
     // Both score 1 → sorted by name asc: list, read
     const ranked = rankToolsByTokens(tools, ["file"]);
-    expect(ranked[0].name).toBe("list");
-    expect(ranked[1].name).toBe("read");
+    expect(ranked[0]!.name).toBe("list");
+    expect(ranked[1]!.name).toBe("read");
   });
 
   it("name-only hit ranks above description-only hit", () => {
@@ -78,8 +78,8 @@ describe("rankToolsByTokens", () => {
       { name: "files_y", description: "unrelated" }, // name only: +3
     ];
     const ranked = rankToolsByTokens(mixed, ["files"]);
-    expect(ranked[0].name).toBe("files_y"); // score 3 > 1
-    expect(ranked[1].name).toBe("x_tool");
+    expect(ranked[0]!.name).toBe("files_y"); // score 3 > 1
+    expect(ranked[1]!.name).toBe("x_tool");
   });
 
   it("returns [] for empty tokens", () => {

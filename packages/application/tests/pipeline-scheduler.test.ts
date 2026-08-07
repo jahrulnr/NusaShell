@@ -278,7 +278,57 @@ describe("PipelineScheduler", () => {
     const result = await scheduler.runPipeline(pipeline.id);
     expect(result.ok).toBe(true);
     const secondCall = runAgentMock.mock.calls[1];
-    expect(secondCall[0]).toBe("Use classification result");
+    expect(secondCall![0]).toBe("Use classification result");
+  });
+
+  it("keeps {{payload.*}} / {{event.*}} literal on manual runs (no fake event)", async () => {
+    const pipeline = makePipeline([
+      makeStep("a", {
+        action: { type: "agent", prompt: "Handle {{payload.category}} / {{event.type}}" },
+      }),
+    ]);
+    store.pipelines.set(pipeline.id, pipeline);
+    const result = await scheduler.runPipeline(pipeline.id);
+    expect(result.ok).toBe(true);
+    expect(runAgentMock).toHaveBeenCalledTimes(1);
+    expect(runAgentMock.mock.calls[0]![0]).toBe("Handle {{payload.category}} / {{event.type}}");
+  });
+
+  it("resolves {{context.*}} on manual runs (context always present)", async () => {
+    runAgentMock.mockResolvedValueOnce({ status: "ok", summary: "S1" });
+    const pipeline = makePipeline([
+      makeStep("a", { outputKey: "summary", action: { type: "agent", prompt: "first" } }),
+      makeStep("b", { dependsOn: ["a"], action: { type: "agent", prompt: "Use {{context.summary}}" } }),
+    ]);
+    store.pipelines.set(pipeline.id, pipeline);
+    const result = await scheduler.runPipeline(pipeline.id);
+    expect(result.ok).toBe(true);
+    expect(runAgentMock.mock.calls[1]![0]).toBe("Use S1");
+  });
+
+  it("resolves {{payload.*}} from a real event template context", async () => {
+    const pipeline = makePipeline([
+      makeStep("a", { action: { type: "agent", prompt: "Handle {{payload.category}}" } }),
+    ]);
+    store.pipelines.set(pipeline.id, pipeline);
+    const result = await scheduler.runPipeline(pipeline.id, {
+      event: { type: "test.event", pluginId: "test", payload: { category: "finance" } },
+    });
+    expect(result.ok).toBe(true);
+    expect(runAgentMock.mock.calls[0]![0]).toBe("Handle finance");
+  });
+
+  it("keeps {{payload.*}} literal in tool args on manual runs", async () => {
+    const pipeline = makePipeline([
+      makeStep("a", {
+        action: { type: "tool", pluginId: "files", toolName: "read", args: { path: "{{payload.path}}" } },
+      }),
+    ]);
+    store.pipelines.set(pipeline.id, pipeline);
+    const result = await scheduler.runPipeline(pipeline.id);
+    expect(result.ok).toBe(true);
+    const [cmd] = callToolMock.mock.calls[0]!;
+    expect(cmd.args).toEqual({ path: "{{payload.path}}" });
   });
 
   it("skips step when condition is false", async () => {
@@ -378,7 +428,7 @@ describe("PipelineScheduler", () => {
     const pipeline = makePipeline([makeStep("a")]);
     store.pipelines.set(pipeline.id, pipeline);
     await scheduler.runPipeline(pipeline.id);
-    expect(runAgentMock.mock.calls[0][2]).toBeInstanceOf(AbortSignal);
+    expect(runAgentMock.mock.calls[0]![2]).toBeInstanceOf(AbortSignal);
   });
 
   it("runs tool steps", async () => {

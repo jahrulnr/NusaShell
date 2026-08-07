@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { injectPrompts, type PromptVars } from "../src/agent/services/prompt-injector.js";
 import type { AgentPrompt } from "../src/agent/ports/prompt-loader.port.js";
-import type { AgentMessage } from "../src/agent/ports/agent-provider.port.js";
 
 const baseVars: PromptVars = {
   currentDate: "2026-01-01",

@@ -356,9 +356,13 @@ export class PipelineScheduler {
           ),
         );
 
-        const stepTemplateCtx = templateContext
+        // Explicit split: `context` (pipeline step context) is ALWAYS present;
+        // `event` only when the run was triggered by a real automation event.
+        // No fake event envelope {type:"",...} — in manual/schedule runs event
+        // templates ({{payload.*}}, {{event.*}}) must stay literal.
+        const stepTemplateCtx: import("./job-template-resolver.js").TemplateContext = templateContext
           ? { ...templateContext, context: { ...context } }
-          : { event: { type: "", pluginId: "", payload: {} }, context: { ...context } };
+          : { context: { ...context } };
 
         const stepResult = await this.runStep(step, context, stepTemplateCtx, pipeline, signal);
         const completedAt = this.now();

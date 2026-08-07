@@ -35,6 +35,7 @@ import { decideAutoContinue, normalizeMaxAutoContinues } from "../../services/au
 import type { TelemetryPort } from "../../../telemetry/telemetry.port.js";
 import { buildTurnTelemetry } from "../../../telemetry/build-turn-telemetry.js";
 import { randomUUID } from "node:crypto";
+import type { AgentMessage } from "../../ports/agent-provider.port.js";
 
 export interface AgentRuntimeSettings {
   maxToolRounds: number;
@@ -155,6 +156,12 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
       : await this.injectSystemPrompts(command, traceId);
     const messages = injected.messages;
     const promptCache = "promptCache" in injected ? injected.promptCache : undefined;
+    // On a resume path the live messages skip injectSystemPrompts for cost. The
+    // compactor still needs the injected system prefix so its summarizer sees
+    // the same session context as a normal turn; supply it separately.
+    const systemContext = command.resume
+      ? await this.injectedSystemMessages(command, traceId)
+      : undefined;
     let turnEndReason: "completed" | "cancelled" | "failed" | "superseded" = "completed";
     const turnStartedAtMs = this.now();
     try {
@@ -163,6 +170,7 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
         pluginIds: command.pluginIds,
         traceId,
         signal,
+        ...(systemContext ? { systemContext } : {}),
         ...(command.interactive !== undefined ? { interactive: command.interactive } : {}),
         ...(command.workspace !== undefined ? { workspace: command.workspace } : {}),
         ...(promptCache ? { promptCache } : {}),
@@ -377,6 +385,19 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
     } catch (error) {
       this.logger?.debug("turn telemetry record failed: %s", error instanceof Error ? error.message : String(error));
     }
+  }
+
+  /**
+   * Build ONLY the injected system messages for a resumed turn's compactor.
+   * Never mutates the turn messages themselves (resume skips full injection to
+   * save re-sealing cost); this prefix is consumed by `ContextCompactor` to
+   * keep the summarizer input equivalent to a normal turn.
+   */
+  private async injectedSystemMessages(command: RunAgentTurnCommand, traceId: string): Promise<AgentMessage[]> {
+    if (!this.promptLoader) return [];
+    const result = await this.injectSystemPrompts(command, traceId);
+    const messages = "messages" in result ? result.messages : [];
+    return messages.filter((m) => m.role === "system");
   }
 
   private async injectSystemPrompts(command: RunAgentTurnCommand, traceId: string) {

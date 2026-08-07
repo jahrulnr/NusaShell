@@ -524,7 +524,7 @@ describe("JobScheduler", () => {
     await scheduler.tick();
     const started = events.find((e) => e.type === "job.started");
     expect(started).toBeDefined();
-    expect((started as { jobId: string }).jobId).toBe("start-1");
+    expect((started as unknown as { jobId: string }).jobId).toBe("start-1");
   });
 
   it("cancel aborts an in-flight run and marks cancelled", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampModelEffort, estimateContextTokens, formatContextUsage, modelCompatibility, modelVisionStatus, resolveContextBadgeTokens, searchModels, shouldApplyAcpUiUpdate } from "../src/renderer/ai-model-ui.js";
+import { clampModelEffort, estimateContextTokens, formatContextUsage, modelCompatibility, modelVisionStatus, resolveContextBadgeTokens, resolveRoomModel, searchModels, shouldApplyAcpUiUpdate } from "../src/renderer/ai-model-ui.js";
 
 const visionModel = {
   id: "openai/gpt-5",
@@ -254,5 +254,58 @@ describe("shouldApplyAcpUiUpdate", () => {
   it("returns false when switched to a different ACP conversation", () => {
     // Even if still ACP, a different conversation id means the await is stale.
     expect(shouldApplyAcpUiUpdate({ activeId: "acp-b", activeKind: "acp", startedId: "acp-a" })).toBe(false);
+  });
+});
+
+describe("resolveRoomModel (ticket #38)", () => {
+  const globalModel = { key: "global/claude", id: "claude-3", label: "Claude" };
+  const roomModel = { key: "room/gpt", id: "gpt-5", label: "GPT" };
+
+  it("prefers the conversation's explicit model binding over the global default", () => {
+    expect(resolveRoomModel(
+      { kind: "agent", id: "c1", model: { modelKey: "room/gpt", effort: "high" } },
+      [globalModel, roomModel],
+      "global/claude",
+    )).toEqual({ model: roomModel, effort: "high", source: "room", explicit: true });
+  });
+
+  it("falls back to the global active model when the room has no binding", () => {
+    expect(resolveRoomModel(
+      { kind: "agent", id: "c1" },
+      [globalModel, roomModel],
+      "global/claude",
+    )).toEqual({ model: globalModel, effort: "auto", source: "global", explicit: false });
+  });
+
+  it("resolves the room model even when its key uses a bound cleanup (explicit flag)", () => {
+    expect(resolveRoomModel(
+      { kind: "agent", id: "c1", model: { modelKey: "room/gpt", effort: "auto" } },
+      [globalModel, roomModel],
+      "global/claude",
+    )).toEqual({ model: roomModel, effort: "auto", source: "room", explicit: true });
+  });
+
+  it("returns null when the resolved model is not found in the catalog", () => {
+    expect(resolveRoomModel(
+      { kind: "agent", id: "c1", model: { modelKey: "missing/key", effort: "auto" } },
+      [globalModel],
+      "global/claude",
+    )).toEqual({ model: null, effort: "auto", source: "room", explicit: true });
+  });
+
+  it("does not apply to ACP conversations (return null directly)", () => {
+    expect(resolveRoomModel(
+      { kind: "acp", id: "c1", acp: { providerId: "p" } },
+      [globalModel],
+      "global/claude",
+    )).toBeNull();
+  });
+
+  it("returns null when no global model is set and the room has no binding", () => {
+    expect(resolveRoomModel(
+      { kind: "agent", id: "c1" },
+      [globalModel],
+      "",
+    )).toEqual({ model: null, effort: "auto", source: "global", explicit: false });
   });
 });

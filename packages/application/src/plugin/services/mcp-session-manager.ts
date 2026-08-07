@@ -90,6 +90,7 @@ export class McpSessionManager {
       this.deps.logger?.info(`MCP client connected (stdio) for plugin ${PluginId.toString(entry.pluginId)}`);
       entry.runningArgs = args;
       entry.runningEnv = environment;
+      this.wireToolsListChanged(entry);
       if (entry.workspace) {
         try {
           await this.applyRoots(entry, entry.workspace);
@@ -108,6 +109,7 @@ export class McpSessionManager {
       const mcpClient = this.deps.mcpClientFactory.createForHttp(url, manifest.mcp.headers, automation);
       entry.mcpClient = mcpClient;
       await mcpClient.connect();
+      this.wireToolsListChanged(entry);
     } else if (manifest.mcp.transport === "sse") {
       const url = manifest.mcp.url;
       if (!url) {
@@ -119,7 +121,24 @@ export class McpSessionManager {
       const mcpClient = this.deps.mcpClientFactory.createForSse(url, manifest.mcp.headers, automation);
       entry.mcpClient = mcpClient;
       await mcpClient.connect();
+      this.wireToolsListChanged(entry);
     }
+  }
+
+  /**
+   * Wire the MCP client's `notifications/tools/list_changed` signal to cache
+   * invalidation so a runtime tool-catalog change is picked up on the next
+   * `listTools` (avoiding stale cached tools).
+   */
+  private wireToolsListChanged(entry: RuntimeEntry): void {
+    const client = entry.mcpClient;
+    if (!client?.onToolsListChanged) return;
+    client.onToolsListChanged(() => {
+      entry.cachedTools = null;
+      this.deps.logger?.debug(
+        `tools/list_changed for ${PluginId.toString(entry.pluginId)} — invalidated tool catalog cache`,
+      );
+    });
   }
 
   /**

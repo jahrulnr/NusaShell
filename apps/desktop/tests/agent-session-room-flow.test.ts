@@ -235,6 +235,10 @@ describe("BH-AGENT room / turn / drawer suite", () => {
     expect(controller.turnOwnerConversationId).toBe("room-a");
     expect(controller.turnPending).toBe(true);
     expect(input.disabled).toBe(false);
+    // Room B's composer is free to type; with an empty input the send button is
+    // disabled until there is content (#46).
+    input.value = "ready to send";
+    controller.updateSendAvailability();
     expect(send.disabled).toBe(false);
     expect(stop.hidden).toBe(true);
   });

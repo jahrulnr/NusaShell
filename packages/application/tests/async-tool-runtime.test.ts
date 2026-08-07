@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { AsyncToolRuntime, type AsyncToolHandle } from "../src/index.js";
+import { describe, expect, it } from "vitest";
+import { AsyncToolRuntime } from "../src/index.js";
 
 /**
  * Fake MCP-style work: returns a promise we can settle manually.
@@ -206,7 +206,7 @@ describe("AsyncToolRuntime", () => {
     work.resolve({ ok: true });
     await new Promise((r) => setTimeout(r, 0));
     expect(events.map((e) => e.type)).toEqual(["started", "ended"]);
-    expect(events[0].handleId).toBe(handle.handleId);
+    expect(events[0]!.handleId).toBe(handle.handleId);
     runtime.dispose();
   });
 
@@ -349,8 +349,8 @@ describe("AsyncToolRuntime", () => {
     });
     runtime.appendTail(handle.handleId, "hello\n");
     expect(progressCalls).toHaveLength(1);
-    expect(progressCalls[0].handleId).toBe(handle.handleId);
-    expect(progressCalls[0].bytes).toBe(6);
+    expect(progressCalls[0]!.handleId).toBe(handle.handleId);
+    expect(progressCalls[0]!.bytes).toBe(6);
     runtime.dispose();
   });
 

@@ -51,6 +51,13 @@ export interface RunAgentTurnInput {
   readonly onToolCallEnd?: (execution: AgentToolExecution) => void;
   readonly onContextUpdate?: (update: AgentContextUpdate) => void;
   /**
+   * Optional leading system messages for the summarizer only (compact path).
+   * On a resumed turn the live `messages` may skip `injectSystemPrompts` for
+   * cost; supplying the injected system prefix here keeps the summarizer's
+   * input identical to a normal turn without changing the whole turn.
+   */
+  readonly systemContext?: readonly AgentMessage[];
+  /**
    * Fired whenever the sealed step list grows (reasoning / text / tool_calls).
    * Used by ActiveTurnProjection — not every token.
    */

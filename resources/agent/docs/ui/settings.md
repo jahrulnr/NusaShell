@@ -125,6 +125,25 @@ Configures how the agent picks and retries models: provider strategy, attempt bu
   - Type: checkbox
   - Action: Enables streaming assistant responses when the provider supports it.
 
+## Global model
+
+Sets the model the shell runs by default for scheduled job/pipeline agent turns, the context compaction summarizer, and new rooms that have not picked their own model. Uses the same single source of truth as the composer picker.
+
+- **Global model form** (`#ai-global-model-form`):
+  - Section: Global model
+  - Type: form
+  - Action: Selects the global default model and effort. Submit saves and re-locks the backend provider default model.
+
+- **Global default model** (`#settings-global-model`):
+  - Section: Global model
+  - Type: select
+  - Action: Chooses the shell-wide default model, or Automatic (provider default) to leave it to each provider.
+
+- **Global default effort** (`#settings-global-effort`):
+  - Section: Global model
+  - Type: select
+  - Action: Reasoning effort for the global default model, when the selected model supports it.
+
 ## Agent limits
 
 Controls how many tool calls and rounds the agent can make per turn. Prevents runaway loops.

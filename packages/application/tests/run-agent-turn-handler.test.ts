@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   AgentTurnCoordinator,
-  AgentTurnRunner,
   RunAgentTurnHandler,
   type AgentProvider,
   type AgentProviderRequest,
   type AgentProviderResult,
   type AgentToolGateway,
+  type McpLiveSnapshot,
 } from "../src/index.js";
 
 class ScriptedProvider implements AgentProvider {
@@ -30,6 +30,9 @@ class FakeToolGateway implements AgentToolGateway {
   cancelTurn() {}
   async listTools() { return []; }
   async execute() { return { ok: true }; }
+  async getMcpLiveSnapshot(_turnId: string): Promise<McpLiveSnapshot> {
+    return { running: [], tools: [] };
+  }
 }
 
 function makeRegistry(provider: AgentProvider) {
@@ -40,7 +43,7 @@ function makeRegistry(provider: AgentProvider) {
 }
 
 const RUNTIME = {
-  strategy: "preferred" as const,
+  strategy: "failover" as const,
   totalAttemptBudget: 1,
   maxToolRounds: 1,
   maxRepeatedToolCalls: 1,
@@ -226,7 +229,7 @@ describe("RunAgentTurnHandler lifecycle callbacks", () => {
         onTurnInterrupted: async (partial, context) => {
           seals.push({
             conversationId: context.conversationId,
-            resume: context.resume,
+            ...(context.resume !== undefined ? { resume: context.resume } : {}),
             interruptReason: context.interruptReason,
             messagesLen: partial.messages.length,
             rounds: partial.rounds,
@@ -353,6 +356,7 @@ describe("RunAgentTurnHandler lifecycle callbacks", () => {
     loadSubagentPrompt: async () => undefined,
     loadContinuePrompt: async () => undefined,
     loadCompactPrompt: async () => undefined,
+    loadReviewPrompt: async (_kind: "memory" | "skill" | "combined") => "",
   };
 
   it("injects Live MCP block on non-resume turn when gateway provides a non-empty snapshot", async () => {
@@ -421,7 +425,7 @@ describe("RunAgentTurnHandler lifecycle callbacks", () => {
     expect(hasLive).toBe(false);
   });
 
-  it("does not call getMcpLiveSnapshot on resume (existing behavior preserved)", async () => {
+  it("resume turn reads the live snapshot once for the compactor but does not inject it into the turn", async () => {
     const provider = new ScriptedProvider([{ text: "ok" }]);
     let snapshotCalls = 0;
     class CountingSnapshotGateway extends FakeToolGateway {
@@ -443,6 +447,67 @@ describe("RunAgentTurnHandler lifecycle callbacks", () => {
       pluginIds: [],
       resume: true,
     });
-    expect(snapshotCalls).toBe(0);
+    // The resumed turn's messages themselves are NOT injected (cost-saving
+    // resume path preserved): the provider request must not have the block.
+    const resumeRequest = provider.requests.at(-1);
+    const hasLiveInTurn = resumeRequest?.messages
+      .some((m) => m.role === "system" && String(m.content).includes("## Live MCP (runtime)"));
+    expect(hasLiveInTurn).toBe(false);
   });
-});
+
+  // --- #36: resume path supplies system prompts to the summarizer ---
+
+  it("injects system prompts into the compactor on a resume turn (summarizer sees session context)", async () => {
+    // Provider records the request messages; first call (round 0) is the
+    // summarizer, second is the resumed turn itself.
+    const provider = new ScriptedProvider([
+      { text: "summary body with enough length to pass the quality gate ................" },
+      { text: "resumed answer" },
+    ]);
+    const tools = new FakeToolGateway();
+    const runtime = {
+      ...RUNTIME,
+      // Aggressive budget so the resume messages trigger compaction.
+      context: {
+        compactionEnabled: true,
+        maxInputTokens: 200,
+        reserveTokens: 20,
+        recentTurns: 3,
+        summaryMaxChars: 10_000,
+      },
+    };
+    const handler = new RunAgentTurnHandler(
+      makeRegistry(provider), tools, "scripted", runtime,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      fakePromptLoader, undefined, undefined, undefined, undefined, undefined, undefined,
+    );
+    // Long user history so the token estimate crosses the tiny budget.
+    const longUser = "user message ".repeat(200).trim();
+    const result = await handler.handle({
+      kind: "run-agent-turn",
+      traceId: "trace-resume-compact",
+      messages: [
+        { role: "user", content: longUser },
+        { role: "assistant", content: "part 1" },
+        { role: "user", content: "Continue. This is the resumed instruction for the next step." },
+      ],
+      pluginIds: [],
+      resume: true,
+    });
+    expect(result.text).toBe("resumed answer");
+    // At least two provider calls: the summarizer (round 0) and the resumed turn.
+    expect(provider.requests.length).toBeGreaterThanOrEqual(2);
+    // The summarizer request (round 0) MUST contain the injected system prompts
+    // (system.md / developer with Live MCP marker) — not the raw history only.
+    const summarizer = provider.requests[0];
+    if (!summarizer) {
+      throw new Error("expected a summarizer request on the resume-compact path");
+    }
+    const systemContents = summarizer.messages
+      .filter((m) => m.role === "system")
+      .map((m) => String(m.content));
+    expect(systemContents.length).toBeGreaterThan(0);
+    expect(systemContents.some((c) => c.includes("You are the NusaShell agent."))).toBe(true);
+    expect(systemContents.some((c) => c.includes("Date:"))).toBe(true);
+  });
+  });

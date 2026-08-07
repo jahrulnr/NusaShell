@@ -15,7 +15,7 @@ const MAX_CONTENT_CHARS = 500;
 export async function execTodo(
   todoPort: ConversationTodoPort | undefined,
   args: Readonly<Record<string, unknown>>,
-  turnId: string,
+  _turnId: string,
   conversationId: string | undefined,
 ): Promise<unknown> {
   if (!todoPort) {

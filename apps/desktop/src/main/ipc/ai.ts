@@ -1,6 +1,7 @@
 import { ipcMain } from "electron";
 import type { IpcContext } from "./ipc-context.js";
 import type { AiRegistrySettings, SaveAiProviderInput } from "../ai-settings.js";
+import { resolveActiveModelDefault } from "../ai-provider-registry.js";
 import type { ConfigureAiCommand, ConfigureAiRuntimeCommand, RemoveAiCommand } from "@nusashell/application";
 
 function normalizeProviderId(value: string): string {
@@ -49,7 +50,18 @@ export function registerAiIpc(ctx: IpcContext): void {
   ipcMain.handle("ai-providers:select", async (_event, input: { modelKey?: string; effort?: AiRegistrySettings["effort"] }) => {
     const store = ctx.getAiSettingsStore();
     const result = await store.select(input);
-    await store.load();
+    const aiSettings = await store.load();
+    // Ticket #39: keep the backend provider default model locked to the global
+    // active model so scheduled job/pipeline agent turns and their compaction
+    // summarizer inherit the picker's model (not a stale bootstrap default).
+    const active = resolveActiveModelDefault(aiSettings.providers, aiSettings.activeModelKey);
+    if (active) {
+      const provider = aiSettings.providers.find((item) => item.id === active.providerId);
+      if (provider) {
+        const cmd: ConfigureAiCommand = { kind: "configure-ai", providerId: active.providerId, model: active.model };
+        ctx.commandBus.execute(cmd);
+      }
+    }
     return result;
   });
 

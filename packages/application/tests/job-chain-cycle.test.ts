@@ -2,7 +2,8 @@ import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { EventJobMatcher, MAX_CHAIN_DEPTH } from "../src/job/services/event-job-matcher.js";
 import { EventDispatcher } from "../src/events/event-dispatcher.js";
 import { createAutomationEvent } from "../src/events/automation-event.js";
-import type { Job, JobOutputEntry, JobStorePort, JobTrigger } from "../src/job/job-model.js";
+import type { Job, JobOutputEntry, JobTrigger } from "../src/job/job-model.js";
+import type { JobStorePort } from "../src/job/index.js";
 
 function makeEventJob(
   pattern: string,

@@ -20,7 +20,7 @@ describe("ManageTodosHandler", () => {
     expect(result.total).toBe(2);
     expect(port.get("conv-1")).toHaveLength(2);
     expect(published).toHaveLength(1);
-    expect(published[0].items).toHaveLength(2);
+    expect(published[0]!.items).toHaveLength(2);
   });
 
   it("delete removes items by id and does not leave deleted ids in the port", async () => {
@@ -36,10 +36,10 @@ describe("ManageTodosHandler", () => {
     });
     expect(result.ok).toBe(true);
     expect(result.total).toBe(2);
-    const remaining = port.get("conv-1");
+    const remaining = port.get("conv-1")!;
     expect(remaining.map((i) => i.id)).toEqual(["1", "3"]);
     expect(published).toHaveLength(1);
-    expect(published[0].items.map((i) => i.id)).toEqual(["1", "3"]);
+    expect(published[0]!.items.map((i) => i.id)).toEqual(["1", "3"]);
   });
 
   it("delete with unknown ids is a no-op but still publishes", async () => {

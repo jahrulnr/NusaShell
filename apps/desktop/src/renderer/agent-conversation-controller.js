@@ -1,6 +1,7 @@
 import {
   buildAgentContext,
   buildContinueContext,
+  classifyTurnError,
   hasToolResumeSnapshot,
   composerTextareaSize,
   formatMessageTimestamp,
@@ -10,6 +11,7 @@ import {
   formatTurnError,
   getConversationRoomMetadata,
   mergeCompactionCheckpoint,
+  mergeConversationMessages,
   renderAssistantMarkdown,
   renderReasoningMarkdown,
   renderToolCodeHtml,
@@ -18,11 +20,12 @@ import {
   summarizeToolArgs,
   toConversationToolCall,
 } from "./agent-conversation-ui.js";
-import { estimateContextTokens, formatContextUsage, resolveContextBadgeTokens, shouldApplyAcpUiUpdate } from "./ai-model-ui.js";
+import { estimateContextTokens, effectiveContextWindow, formatContextUsage, resolveContextBadgeTokens, shouldApplyAcpUiUpdate } from "./ai-model-ui.js";
 import { inspectAttachmentContent, toDataUrl } from "./attachment-content.js";
 import { CANVAS_ARTIFACT_MAX_SOURCE_BYTES, canvasArtifactId, extractCanvasCandidates, resolveCanvasFence } from "./agent-canvas-detect.js";
 import { clampCanvasDrawerWidth } from "./agent-canvas-layout.js";
 import { bindCanvasZoom, renderArtifact } from "./agent-canvas-render.js";
+import { bindLazyCanvasReveal } from "./agent-canvas-lazy.js";
 import { subscribeSubagentEvents, subscribeSubagentStream } from "./subagent-event-helper.js";
 import { SubagentRunLifecycle } from "./subagent-run-lifecycle.js";
 import { AgentTodoStrip } from "./agent-todo-strip.js";
@@ -33,12 +36,14 @@ import { subscribeToolJobEvents } from "./turn-event-helper.js";
 const CANVAS_DRAWER_WIDTH_KEY = "nusashell.agent.canvas.drawer-width";
 
 export class AgentConversationController {
-  constructor({ shell, runTurn, cancelTurn, answerAsk, getActiveModel, getVisionMode, notify, log, runAcpTurn, cancelAcpTurn, answerAcpPermission, answerAcpAsk, getAcpSessionInfo, setAcpConfigOption, ensureAcpSession, refreshModelPicker, getActiveTurn, deleteTodos }) {
+  constructor({ shell, runTurn, cancelTurn, answerAsk, getActiveModel, getActiveEffort, getVisionMode, notify, log, runAcpTurn, cancelAcpTurn, answerAcpPermission, answerAcpAsk, getAcpSessionInfo, setAcpConfigOption, ensureAcpSession, refreshModelPicker, getActiveTurn, deleteTodos, getMaxInputTokens }) {
     this.shell = shell;
     this.runTurn = runTurn;
     this.cancelTurn = cancelTurn;
     this.answerAsk = answerAsk;
     this.getActiveModel = getActiveModel;
+    this.getActiveEffort = getActiveEffort || (() => "auto");
+    this.getMaxInputTokens = getMaxInputTokens;
     this.getVisionMode = getVisionMode;
     this.notify = notify;
     this.log = log;
@@ -69,12 +74,28 @@ export class AgentConversationController {
     this.liveStreamStates = new Map();
     /** Per-conversation auto-continue abort flags. */
     this.autoContinueAbortedConvs = new Set();
+    /** Per-conversation "user requested stop" flag — gates streaming paint so
+     *  deltas arriving while the backend cancel settles are not painted (#44). */
+    this.stopRequestedConvs = new Set();
+    /** Per-conversation in-flight cancel promises — makes repeated Stop clicks
+     *  idempotent (second click returns the same promise). */
+    this.stopInFlight = new Map();
     /** Conversation that owns the in-flight parent submit() (paint gate). */
     this.turnOwnerConversationId = null;
     this.failedMessage = null;
     this.attachments = [];
     this.composerInputWidth = 0;
     this.composerResizeObserver = null;
+    /** True while an IME composition is in progress on the composer (#46). */
+    this.inputComposing = false;
+    /** Cached computed text metrics (font/line-height/padding) for the composer. */
+    this.composerMetrics = null;
+    /** Hidden off-thread mirror used to measure wrapped height without a full-document layout. */
+    this._composerMirror = null;
+    this._composerResizeRaf = 0;
+    this._scrollSettledRaf = 0;
+    this._lastContextKey = "";
+    this._lastContextText = null;
     this.canvasEnabled = true;
     this.activeCanvasArtifact = null;
     this.canvasDrawerWidth = null;
@@ -125,6 +146,100 @@ export class AgentConversationController {
   }
 
   /**
+   * Assign a store-fresh conversation snapshot to `this.conversation` without
+   * dropping a message that is already visible (#47). While a turn is still
+   * being sealed asynchronously, a later append in the same conversation may
+   * return a snapshot that has not yet included the just-sealed assistant
+   * reply; blindly overwriting would make it disappear from the thread.
+   */
+  assignConversationFromStore(conversationId, fresh) {
+    if (!conversationId || !fresh) return;
+    if (this.conversation?.id !== conversationId) {
+      this.conversation = fresh;
+      return;
+    }
+    const mergedMessages = mergeConversationMessages(this.conversation.messages, fresh.messages);
+    if (mergedMessages !== fresh.messages) {
+      this.conversation = { ...fresh, messages: mergedMessages };
+    } else {
+      this.conversation = fresh;
+    }
+  }
+
+  /**
+   * Stream-cadence cleanup (ticket #34): rAF/text/reasoning renders and the
+   * streaming-canvas 350ms timer are scheduled from async turn callbacks. If a
+   * turn is cancelled or the room is switched while a frame/timer is pending,
+   * the stale callback would still run and touch a `streamState` (and DOM)
+   * that no longer belongs to the active room. These helpers store the ids on
+   * the streamState itself so callbacks can be cancelled on stop/switch.
+   */
+
+  /** Schedule a streaming paint, cancelling any previously pending paint of the same kind. */
+  scheduleStreamingPaint(streamState, kind, callback) {
+    const idKey = kind === "reasoning" ? "rafIdReasoning" : "rafIdText";
+    if (streamState[idKey]) cancelAnimationFrame(streamState[idKey]);
+    const paint = () => {
+      streamState[idKey] = requestAnimationFrame(() => {
+        streamState[idKey] = 0;
+        if (kind === "text") streamState.lastTextPaintAt = performance.now();
+        callback();
+      });
+    };
+    // Markdown rendering reparses the complete live answer. Keep a large
+    // answer from monopolizing the renderer when the provider emits tiny,
+    // high-frequency deltas; the final durable render still happens at turn
+    // completion. A room switch cancels this timer in cancelStreamingPaint.
+    if (kind === "text" && streamState.lastTextPaintAt) {
+      const wait = Math.max(0, 50 - (performance.now() - streamState.lastTextPaintAt));
+      if (wait > 0) {
+        streamState.textPaintTimer = window.setTimeout(() => {
+          streamState.textPaintTimer = 0;
+          paint();
+        }, wait);
+        return streamState.textPaintTimer;
+      }
+    }
+    paint();
+    return streamState[idKey];
+  }
+
+  /** Cancel a streaming paint of a given kind, if one is pending. */
+  cancelStreamingPaint(streamState, kind) {
+    const idKey = kind === "reasoning" ? "rafIdReasoning" : "rafIdText";
+    if (kind === "text" && streamState.textPaintTimer) {
+      window.clearTimeout(streamState.textPaintTimer);
+      streamState.textPaintTimer = 0;
+    }
+    if (streamState[idKey]) {
+      cancelAnimationFrame(streamState[idKey]);
+      streamState[idKey] = 0;
+    }
+  }
+
+  /** Cancel text+reasoning rAF and the streaming canvas timer on a streamState. */
+  disposeStreamingCadence(streamState) {
+    if (!streamState) return;
+    this.cancelStreamingPaint(streamState, "text");
+    this.cancelStreamingPaint(streamState, "reasoning");
+    // A cancelled rAF/timer will never execute the callback that clears these
+    // flags. Reset them here or the next delta after a room switch will be
+    // treated as already scheduled forever.
+    streamState.textRenderPending = false;
+    streamState.reasoningRenderPending = false;
+    if (streamState.canvasRenderTimer) {
+      window.clearTimeout(streamState.canvasRenderTimer);
+      streamState.canvasRenderTimer = 0;
+    }
+  }
+
+  /** Cancel timers for the currently stored live stream state (room switch / stop). */
+  disposeStreamTimersForRoom() {
+    const state = this.liveStreamState;
+    if (state) this.disposeStreamingCadence(state);
+  }
+
+  /**
    * Per-conversation traceId. Getter returns the traceId for the currently
    * viewed conversation; setter stores under the turn owner (or active conv).
    * Empty string clears the entry. Falls back to the "" bucket when no
@@ -159,6 +274,20 @@ export class AgentConversationController {
     const key = this.activeId || "";
     if (value) this.autoContinueAbortedConvs.add(key);
     else this.autoContinueAbortedConvs.delete(key);
+  }
+
+  /** True when a user-initiated stop has been requested for the conversation. */
+  isStopRequested(conversationId) {
+    return Boolean(conversationId) && this.stopRequestedConvs.has(conversationId);
+  }
+  requestStop(conversationId) {
+    if (conversationId) this.stopRequestedConvs.add(conversationId);
+  }
+  clearStop(conversationId) {
+    if (conversationId) {
+      this.stopRequestedConvs.delete(conversationId);
+      this.stopInFlight.delete(conversationId);
+    }
   }
 
   async initialize() {
@@ -280,7 +409,7 @@ export class AgentConversationController {
           content: text,
           ...(attachments.length ? { attachments } : {}),
         });
-        if (this.conversation?.id === ownerConversationId) this.conversation = ownerConversation;
+        if (this.conversation?.id === ownerConversationId) this.assignConversationFromStore(ownerConversationId, ownerConversation);
         const savedMessage = ownerConversation.messages.at(-1);
         this.appendMessage("user", text, savedMessage ?? { attachments });
         input.value = "";
@@ -318,14 +447,25 @@ export class AgentConversationController {
           : buildAgentContext(ownerConversation);
       const baseTokens = estimateContextTokens(turnMessages);
       let liveTokens = baseTokens;
+      // Ticket #41: live badge uses the same effective denominator as the
+      // backend compaction threshold (min(global cap, model window)).
+      const liveEffectiveWindow = effectiveContextWindow(
+        selectedModel?.contextWindow ?? 0,
+        this.getMaxInputTokens?.(),
+      );
       const setContextStatus = (tokens) => {
         liveTokens = Math.max(liveTokens, tokens);
-        if (selectedModel) status.textContent = formatContextUsage(liveTokens, selectedModel.contextWindow);
+        if (selectedModel) status.textContent = formatContextUsage(liveTokens, liveEffectiveWindow);
       };
       setContextStatus(baseTokens);
-      const canPaint = () => this.conversation?.id === ownerConversationId && Boolean(streamState.message?.isConnected);
+      // Ticket #40: bound the model + a user stop request must freeze painting.
+      const canPaint = () => this.conversation?.id === ownerConversationId && Boolean(streamState.message?.isConnected) && !this.isStopRequested(ownerConversationId);
       streamState = {
         message: pending,
+        // Ticket #40: bind the model that actually drives this turn so the
+        // badge (updateContextStatus) does not follow a global picker change.
+        modelKey: selectedModel?.key ?? null,
+        contextWindow: selectedModel?.contextWindow ?? 0,
         lastKind: null,
         reasoningEl: null,
         reasoningText: "",
@@ -334,6 +474,8 @@ export class AgentConversationController {
         streamedText: "",
         textRenderPending: false,
         reasoningRenderPending: false,
+        rafIdText: 0,
+        rafIdReasoning: 0,
         canvasRenderTimer: 0,
       };
       this.liveStreamState = streamState;
@@ -346,6 +488,10 @@ export class AgentConversationController {
         traceId: this.activeTraceId,
         workspace: ownerConversation.workspace,
         conversationId: ownerConversationId,
+        // Ticket #38: thread the room-bound model + effort so the actual turn
+        // uses the conversation's binding, not a stale global re-read.
+        modelKey: selectedModel?.key,
+        effort: this.getActiveEffort?.(),
         ...(resumeFrom ? { resume: true } : {}),
         onDelta: (delta) => {
           // Reduce every delta even while this room is backgrounded. Only
@@ -366,7 +512,7 @@ export class AgentConversationController {
           // and makes streaming appear as "spawn per message".
           if (canPaint() && !streamState.textRenderPending) {
             streamState.textRenderPending = true;
-            requestAnimationFrame(() => {
+            this.scheduleStreamingPaint(streamState, "text", () => {
               streamState.textRenderPending = false;
               if (streamState.textBubble && canPaint()) {
                 streamState.textBubble.innerHTML = renderAssistantMarkdown(streamState.streamedText);
@@ -389,7 +535,7 @@ export class AgentConversationController {
           streamState.reasoningText += delta;
           if (canPaint() && !streamState.reasoningRenderPending) {
             streamState.reasoningRenderPending = true;
-            requestAnimationFrame(() => {
+            this.scheduleStreamingPaint(streamState, "reasoning", () => {
               streamState.reasoningRenderPending = false;
               const content = streamState.reasoningEl?.querySelector(".agent-reasoning-content");
               if (content && canPaint()) {
@@ -475,7 +621,7 @@ export class AgentConversationController {
         // message is missing (seal failed or no conversationId), fall back to
         // renderer-side append.
         ownerConversation = await this.shell.agentConversations.get(ownerConversationId);
-        if (this.conversation?.id === ownerConversationId) this.conversation = ownerConversation;
+        if (this.conversation?.id === ownerConversationId) this.assignConversationFromStore(ownerConversationId, ownerConversation);
         const lastMessage = ownerConversation?.messages.at(-1);
         const sealedByMain = lastMessage?.role === "assistant" && lastMessage?.traceId === result.traceId;
         if (!sealedByMain) {
@@ -496,11 +642,11 @@ export class AgentConversationController {
           ownerConversation = resumeFrom
             ? await this.shell.agentConversations.replaceLastInterrupted(ownerConversationId, assistantMessage)
             : await this.shell.agentConversations.append(ownerConversationId, assistantMessage);
-          if (this.conversation?.id === ownerConversationId) this.conversation = ownerConversation;
+          if (this.conversation?.id === ownerConversationId) this.assignConversationFromStore(ownerConversationId, ownerConversation);
         } else if (result.compaction) {
           // Main already saved the checkpoint; just refresh into memory.
           ownerConversation = await this.shell.agentConversations.get(ownerConversationId);
-          if (this.conversation?.id === ownerConversationId) this.conversation = ownerConversation;
+          if (this.conversation?.id === ownerConversationId) this.assignConversationFromStore(ownerConversationId, ownerConversation);
         }
       } catch (error) {
         this.sealStreamingMessage(pending, result);
@@ -517,7 +663,7 @@ export class AgentConversationController {
             ownerConversation.messages.length,
           );
           ownerConversation = await this.shell.agentConversations.saveCheckpoint(ownerConversationId, checkpoint);
-          if (this.conversation?.id === ownerConversationId) this.conversation = ownerConversation;
+          if (this.conversation?.id === ownerConversationId) this.assignConversationFromStore(ownerConversationId, ownerConversation);
         } catch (error) {
           this.log("error", `Agent checkpoint persistence failed trace=${result.traceId}: ${error.message || String(error)}`);
         }
@@ -560,7 +706,7 @@ export class AgentConversationController {
         // only when main did not seal (no conversationId or seal failure).
         try {
           ownerConversation = await this.shell.agentConversations.get(ownerConversationId);
-          if (this.conversation?.id === ownerConversationId) this.conversation = ownerConversation;
+          if (this.conversation?.id === ownerConversationId) this.assignConversationFromStore(ownerConversationId, ownerConversation);
           const lastDurableAfter = ownerConversation?.messages.at(-1);
           const mainSealed =
             sealedByMain
@@ -585,7 +731,7 @@ export class AgentConversationController {
             ownerConversation = resumeFrom
               ? await this.shell.agentConversations.replaceLastInterrupted(ownerConversationId, interruptedMessage)
               : await this.shell.agentConversations.append(ownerConversationId, interruptedMessage);
-            if (this.conversation?.id === ownerConversationId) this.conversation = ownerConversation;
+            if (this.conversation?.id === ownerConversationId) this.assignConversationFromStore(ownerConversationId, ownerConversation);
           }
         } catch (persistError) {
           this.log("error", `Interrupted assistant persistence failed: ${persistError.message || String(persistError)}`);
@@ -598,6 +744,12 @@ export class AgentConversationController {
           : streamedText
             ? "ready to continue"
             : "ready to retry";
+        // Semantic primary-label to match the status copy (#45).
+        const retryLabel = hasTools || durableHasToolResume
+          ? "Resume"
+          : streamedText
+            ? "Continue"
+            : "Retry";
         this.failedMessage = this.appendMessage(
           "assistant",
           isCancel
@@ -605,7 +757,9 @@ export class AgentConversationController {
             : isMaxRounds
               ? "Tool-round limit reached · ready to resume"
               : `Turn failed: ${formatTurnError(error)}`,
-          { error: true, retry: true },
+          // Interrupted/cancel keeps a retry affordance; label follows the
+          // active class (Resume for tools, Continue for text) (#45).
+          { error: true, retry: true, retryLabel },
         );
         status.textContent = isCancel
           ? `Turn stopped · ${resumeLabel}`
@@ -634,7 +788,7 @@ export class AgentConversationController {
         // have sealed interrupted while IPC dropped details.partial.
         try {
           ownerConversation = await this.shell.agentConversations.get(ownerConversationId);
-          if (this.conversation?.id === ownerConversationId) this.conversation = ownerConversation;
+          if (this.conversation?.id === ownerConversationId) this.assignConversationFromStore(ownerConversationId, ownerConversation);
         } catch {
           // ignore refresh failure
         }
@@ -662,18 +816,41 @@ export class AgentConversationController {
           && typeof mainInterrupted.content === "string"
           && mainInterrupted.content.trim();
         const canResume = Boolean(canToolResume || canTextContinue);
+        // Classify provider/transport failures for copy + retry semantics (#45).
+        const cls = classifyTurnError(error);
+        const classification = cls.category;
+        const isSuperseded = classification === "superseded";
+        const isRateLimited = classification === "rate_limited";
+        // Semantic primary label: interrupted-with-tools → Resume,
+        // interrupted-text → Continue; otherwise default copy per classification.
+        const retryLabel = canToolResume ? "Resume" : canTextContinue ? "Continue" : (cls.label || "Retry");
+        const safeRetry = !isSuperseded && !cls.retryable
+          ? false
+          : (retryIsSafe || canResume) && !isSuperseded;
+        const cooldownMs = isRateLimited ? 8000 : 0;
+        // Keep the familiar failure copy; only superseded replaces it.
+        const failureCopy = isSuperseded ? cls.message : `Turn failed: ${formatTurnError(error)}`;
         this.failedMessage = this.appendMessage(
           "assistant",
-          `Turn failed: ${formatTurnError(error)}`,
-          { error: true, retry: retryIsSafe || canResume },
+          failureCopy,
+          {
+            error: true,
+            retry: safeRetry,
+            retryLabel,
+            retryCooldownMs: cooldownMs,
+          },
         );
         status.textContent = canToolResume
           ? "Turn interrupted · ready to resume"
           : canTextContinue
             ? "Turn interrupted · ready to continue"
-            : retryIsSafe
-              ? "Turn failed · ready to retry"
-              : "Local conversation error";
+            : isSuperseded
+              ? "Turn superseded by a newer turn"
+              : isRateLimited
+                ? "Rate limited · try again in a moment"
+                : safeRetry
+                  ? "Turn failed · ready to retry"
+                  : "Local conversation error";
         this.log("error", `Agent turn failed: ${formatTurnError(error)}`);
       }
     } finally {
@@ -683,13 +860,14 @@ export class AgentConversationController {
       this.pendingTurnConversations.delete(ownerConversationId);
       this.activeTraceIds.delete(ownerConversationId);
       this.liveStreamStates.delete(ownerConversationId);
+      this.clearStop(ownerConversationId);
       this._submitInFlight = false;
       if (this.turnOwnerConversationId === ownerConversationId) {
         this.turnOwnerConversationId = null;
       }
       if (this.conversation?.id === ownerConversationId) {
         input.disabled = false;
-        sendButton.disabled = false;
+        this.updateSendAvailability();
         stopButton.hidden = true;
         stopButton.classList.remove("is-stopping");
         input.focus();
@@ -721,6 +899,14 @@ export class AgentConversationController {
    */
   async runAutoContinueChain(conversationId, startIndex, maxAutoContinues = 10) {
     let index = startIndex;
+    // Ticket #40/room model: snapshot the model once at chain start. Reaching
+    // into the global picker per iteration lets a mid-chain model switch in
+    // another room silently re-target the remaining turns.
+    const chainModel = this.getActiveModel?.() || null;
+    const chainEffectiveWindow = effectiveContextWindow(
+      chainModel?.contextWindow ?? 0,
+      this.getMaxInputTokens?.(),
+    );
     while (true) {
       // Abort guards — checked before acquiring the mutex.
       if (this.conversation?.id !== conversationId) return;
@@ -755,19 +941,23 @@ export class AgentConversationController {
           : `Continuing tasks… (${index}/${maxAutoContinues})`;
         status.textContent = chainLabel;
 
-        const selectedModel = this.getActiveModel();
+        const selectedModel = chainModel;
         const turnMessages = buildAgentContext(conv);
         const baseTokens = estimateContextTokens(turnMessages);
         let liveTokens = baseTokens;
         const setContextStatus = (tokens) => {
           liveTokens = Math.max(liveTokens, tokens);
-          if (selectedModel) status.textContent = `${formatContextUsage(liveTokens, selectedModel.contextWindow)} · ${chainLabel}`;
+          if (selectedModel) status.textContent = `${formatContextUsage(liveTokens, chainEffectiveWindow)} · ${chainLabel}`;
         };
         setContextStatus(baseTokens);
-        const canPaint = () => this.conversation?.id === conversationId && Boolean(streamState.message?.isConnected);
+        const canPaint = () => this.conversation?.id === conversationId && Boolean(streamState.message?.isConnected) && !this.isStopRequested(conversationId);
         pending = this.createStreamingMessage();
         streamState = {
           message: pending,
+          // Ticket #40: snapshot the model at chain start; a global picker
+          // change mid-chain must not silently re-target later iterations.
+          modelKey: selectedModel?.key ?? null,
+          contextWindow: selectedModel?.contextWindow ?? 0,
           lastKind: null,
           reasoningEl: null,
           reasoningText: "",
@@ -776,6 +966,8 @@ export class AgentConversationController {
           streamedText: "",
           textRenderPending: false,
           reasoningRenderPending: false,
+          rafIdText: 0,
+          rafIdReasoning: 0,
           canvasRenderTimer: 0,
         };
         this.liveStreamState = streamState;
@@ -790,6 +982,8 @@ export class AgentConversationController {
           workspace: conv.workspace,
           conversationId,
           autoContinueIndex: index,
+          modelKey: chainModel?.key,
+          effort: this.getActiveEffort?.(),
           onDelta: (delta) => {
             // Keep reducing the background turn; only its DOM surface may be
             // detached while another room is active.
@@ -804,7 +998,7 @@ export class AgentConversationController {
             streamState.streamedText += delta;
             if (canPaint() && !streamState.textRenderPending) {
               streamState.textRenderPending = true;
-              requestAnimationFrame(() => {
+              this.scheduleStreamingPaint(streamState, "text", () => {
                 streamState.textRenderPending = false;
                 if (streamState.textBubble && canPaint()) {
                   streamState.textBubble.innerHTML = renderAssistantMarkdown(streamState.streamedText);
@@ -827,7 +1021,7 @@ export class AgentConversationController {
             streamState.reasoningText += delta;
             if (canPaint() && !streamState.reasoningRenderPending) {
               streamState.reasoningRenderPending = true;
-              requestAnimationFrame(() => {
+              this.scheduleStreamingPaint(streamState, "reasoning", () => {
                 streamState.reasoningRenderPending = false;
                 const content = streamState.reasoningEl?.querySelector(".agent-reasoning-content");
                 if (content && canPaint()) {
@@ -974,7 +1168,7 @@ export class AgentConversationController {
               };
               conv = await this.shell.agentConversations.append(conversationId, interruptedMessage);
             }
-            if (this.conversation?.id === conversationId) this.conversation = conv;
+            if (this.conversation?.id === conversationId) this.assignConversationFromStore(conversationId, conv);
           } catch (persistError) {
             this.log("error", `Auto-continue interrupted persistence failed: ${persistError.message || String(persistError)}`);
           }
@@ -1015,12 +1209,13 @@ export class AgentConversationController {
         this.pendingTurnConversations.delete(conversationId);
         this.activeTraceIds.delete(conversationId);
         this.liveStreamStates.delete(conversationId);
+        this.clearStop(conversationId);
         if (this.turnOwnerConversationId === conversationId) {
           this.turnOwnerConversationId = null;
         }
         if (this.conversation?.id === conversationId) {
           input.disabled = false;
-          sendButton.disabled = false;
+          this.updateSendAvailability();
           stopButton.hidden = true;
           stopButton.classList.remove("is-stopping");
           input.focus();
@@ -1053,7 +1248,7 @@ export class AgentConversationController {
           role: "user",
           content: text,
         });
-        if (this.conversation?.id === ownerConversationId) this.conversation = ownerConversation;
+        if (this.conversation?.id === ownerConversationId) this.assignConversationFromStore(ownerConversationId, ownerConversation);
         this.appendMessage("user", text);
         input.value = "";
         this.resizeComposerInput();
@@ -1062,8 +1257,8 @@ export class AgentConversationController {
       retryIsSafe = true;
 
       pending = this.createStreamingMessage();
-      const streamState = { message: pending, textBubble: null, streamedText: "", reasoningEl: null, reasoningText: "", lastKind: null, toolCards: new Map(), toolCalls: [], steps: [], textRenderPending: false, reasoningRenderPending: false };
-      const canPaint = () => this.conversation?.id === ownerConversationId;
+      const streamState = { message: pending, textBubble: null, streamedText: "", reasoningEl: null, reasoningText: "", lastKind: null, toolCards: new Map(), toolCalls: [], steps: [], textRenderPending: false, reasoningRenderPending: false, rafIdText: 0, rafIdReasoning: 0, canvasRenderTimer: 0 };
+      const canPaint = () => this.conversation?.id === ownerConversationId && !this.isStopRequested(ownerConversationId);
       const appendStreamChild = (node) => {
         if (!canPaint()) return;
         streamState.message?.appendChild(node);
@@ -1094,7 +1289,7 @@ export class AgentConversationController {
           streamState.streamedText += delta;
           if (!streamState.textRenderPending) {
             streamState.textRenderPending = true;
-            requestAnimationFrame(() => {
+            this.scheduleStreamingPaint(streamState, "text", () => {
               streamState.textRenderPending = false;
               if (streamState.textBubble && canPaint()) {
                 streamState.textBubble.innerHTML = renderAssistantMarkdown(streamState.streamedText);
@@ -1116,7 +1311,7 @@ export class AgentConversationController {
           streamState.reasoningText += delta;
           if (!streamState.reasoningRenderPending) {
             streamState.reasoningRenderPending = true;
-            requestAnimationFrame(() => {
+            this.scheduleStreamingPaint(streamState, "reasoning", () => {
               streamState.reasoningRenderPending = false;
               const content = streamState.reasoningEl?.querySelector(".agent-reasoning-content");
               if (content && canPaint()) {
@@ -1190,7 +1385,7 @@ export class AgentConversationController {
         ...(streamState.toolCalls.length ? { toolCalls: streamState.toolCalls } : {}),
         ...(streamState.steps.length ? { steps: streamState.steps } : {}),
       });
-      if (this.conversation?.id === ownerConversationId) this.conversation = ownerConversation;
+      if (this.conversation?.id === ownerConversationId) this.assignConversationFromStore(ownerConversationId, ownerConversation);
       const savedMessage = this.conversation.messages.at(-1);
       this.sealStreamingMessage(pending, savedMessage ?? { content: streamState.streamedText });
       await this.refresh();
@@ -1205,12 +1400,13 @@ export class AgentConversationController {
       // so concurrent turns in other conversations don't clear each other's globals.
       this.pendingTurnConversations.delete(ownerConversationId);
       this.activeTraceIds.delete(ownerConversationId);
+      this.clearStop(ownerConversationId);
       if (this.turnOwnerConversationId === ownerConversationId) {
         this.turnOwnerConversationId = null;
       }
       if (this.conversation?.id === ownerConversationId) {
         input.disabled = false;
-        sendButton.disabled = false;
+        this.updateSendAvailability();
         stopButton.hidden = true;
         stopButton.classList.remove("is-stopping");
         input.focus();
@@ -1233,8 +1429,20 @@ export class AgentConversationController {
       void this.submit();
     });
     const input = $("#agent-input");
-    input.addEventListener("input", () => this.resizeComposerInput());
+    input.addEventListener("input", () => {
+      this.scheduleComposerResize();
+      this.updateSendAvailability();
+    });
+    // Track IME composition so a candidate-confirm Enter (and the Send button)
+    // does not submit a half-composed prompt (#46). During composition the
+    // keydown handler must skip intercepting Enter.
+    input.addEventListener("compositionstart", () => { this.inputComposing = true; this.updateSendAvailability(); });
+    input.addEventListener("compositionend", () => { this.inputComposing = false; this.updateSendAvailability(); });
     input.addEventListener("keydown", (event) => {
+      // IME composition: Enter confirms a candidate — never intercept.
+      if (event.isComposing || event.keyCode === 229) return;
+      // Newline semantics: plain Enter and Shift+Enter keep the default
+      // textarea newline; only Ctrl/Cmd+Enter submits (#46).
       if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
         event.preventDefault();
         void this.submit();
@@ -1336,24 +1544,106 @@ export class AgentConversationController {
     });
   }
 
+  scheduleComposerResize() {
+    // Debounce the per-keystroke resize so typing does not force a layout
+    // (getComputedStyle + scrollHeight) on every input event (#33). One rAF
+    // per burst coalesces the work; resizes triggered by submit/observer call
+    // resizeComposerInput() directly and stay synchronous.
+    if (this._composerResizeRaf) return;
+    this._composerResizeRaf = requestAnimationFrame(() => {
+      this._composerResizeRaf = 0;
+      this.resizeComposerInput();
+    });
+  }
+
+  /**
+   * Reflect whether the composer can send on #agent-send-btn (#46). The button
+   * is disabled when the input is empty (nothing to send), during an active IME
+   * composition, or while a turn owns the room (kept separate from this flag).
+   */
+  updateSendAvailability() {
+    const input = $("#agent-input");
+    const sendButton = $("#agent-send-btn");
+    if (!input || !sendButton) return;
+    const hasContent = Boolean(input.value?.trim()) || this.attachments.length > 0;
+    sendButton.disabled = !hasContent || this.inputComposing;
+  }
+
   resizeComposerInput() {
     const input = $("#agent-input");
     if (!input) return;
-    input.style.height = "auto";
-    const style = window.getComputedStyle(input);
+
+    // Cache computed text metrics once (line-height/padding are static CSS),
+    // so the typing hot path never runs a synchronous style recalc. Re-read
+    // only when width/font changed (handled via the mirror re-init below).
+    if (!this.composerMetrics) {
+      const style = window.getComputedStyle(input);
+      this.composerMetrics = {
+        lineHeight: Number.parseFloat(style.lineHeight) || 19,
+        paddingTop: Number.parseFloat(style.paddingTop) || 0,
+        paddingBottom: Number.parseFloat(style.paddingBottom) || 0,
+      };
+    }
+    const { lineHeight, paddingTop, paddingBottom } = this.composerMetrics;
+
+    // Measure wrapped height on an isolated hidden mirror (same font + width),
+    // NOT on the live textarea. The live textarea lives inside the flex column
+    // that also holds the thread (1000+ tool cards), so reading its scrollHeight
+    // forces a full-document synchronous layout per burst. The mirror is an
+    // off-thread absolute element, so it only lays out a tiny subtree (#43).
+    let mirror = this._composerMirror;
+    if (!mirror) {
+      mirror = document.createElement("textarea");
+      mirror.setAttribute("aria-hidden", "true");
+      mirror.style.cssText =
+        "position:absolute;left:-9999px;top:0;visibility:hidden;height:auto;overflow:hidden;" +
+        "white-space:pre-wrap;word-wrap:break-word;resize:none;box-sizing:border-box;";
+      mirror.style.fontFamily = "inherit";
+      mirror.style.fontSize = "13px";
+      mirror.style.lineHeight = `${lineHeight}px`;
+      mirror.style.paddingTop = `${paddingTop}px`;
+      mirror.style.paddingBottom = `${paddingBottom}px`;
+      document.body.appendChild(mirror);
+      this._composerMirror = mirror;
+    }
+    // Keep the mirror width in sync with the composer (ResizeObserver updates
+    // composerInputWidth); width changes affect wrapping so re-measure always.
+    const width = this.composerInputWidth || input.clientWidth || 500;
+    if (mirror.style.width !== `${width}px`) mirror.style.width = `${width}px`;
+    mirror.value = input.value + "\n"; // trailing newline so the last line wraps
+
+    const currentScrollHeight = mirror.scrollHeight;
     const size = composerTextareaSize({
-      scrollHeight: input.scrollHeight,
-      lineHeight: Number.parseFloat(style.lineHeight) || 19,
-      paddingTop: Number.parseFloat(style.paddingTop) || 0,
-      paddingBottom: Number.parseFloat(style.paddingBottom) || 0,
+      scrollHeight: currentScrollHeight,
+      lineHeight,
+      paddingTop,
+      paddingBottom,
     });
-    input.style.height = `${size.height}px`;
-    input.style.overflowY = size.overflowY;
+    const heightPx = `${size.height}px`;
+    // Avoid DOM churn: only write when the resulting value actually changed.
+    if (input.style.height !== heightPx) input.style.height = heightPx;
+    if (input.style.overflowY !== size.overflowY) input.style.overflowY = size.overflowY;
   }
 
   async stop() {
+    // The conversation that owns the currently-streaming turn. Stop gates
+    // painting for this conversation, so deltas still arriving while the
+    // backend cancel settles are NOT painted (#44).
+    const stopConversationId = this.turnOwnerConversationId || this.activeId || this.conversation?.id || "";
+    this.requestStop(stopConversationId);
+
+    this.disposeStreamingCadence(this.liveStreamState);
     this.autoContinueAborted = true;
     const button = $("#agent-stop-btn");
+    const statusEl = $("#agent-provider-status");
+    // Immediate, synchronous feedback — do not wait for the async cancel.
+    if (statusEl) statusEl.textContent = "Stopping…";
+
+    // Idempotent Stop: if a cancel is already in flight for this conversation,
+    // a second click returns the same promise and issues no duplicate request.
+    const inFlight = this.stopInFlight.get(stopConversationId);
+    if (inFlight) return inFlight;
+
     const activeSubagent = this.conversation?.subagentRuns?.find((r) => r.status === "running");
     let cancelPromise = null;
     if (this.conversation?.kind === "acp" && this.activeTraceId && this.cancelAcpTurn) {
@@ -1365,21 +1655,35 @@ export class AgentConversationController {
     } else if (this.turnPending && this.activeTraceId && this.cancelTurn) {
       cancelPromise = this.cancelTurn(this.activeTraceId);
     }
-    if (!cancelPromise) return;
+    if (!cancelPromise) {
+      // Nothing cancellable — don't leave the stop flag/status stuck.
+      this.clearStop(stopConversationId);
+      if (statusEl) statusEl.textContent = "Idle";
+      return;
+    }
     if (button) {
       button.disabled = true;
       button.classList.add("is-stopping");
     }
-    try {
-      await cancelPromise;
-    } catch (error) {
-      this.notify(`Could not stop the turn: ${error.message || error}`, "error");
-    } finally {
-      if (button) {
-        button.disabled = false;
-        button.classList.remove("is-stopping");
+    const runCancel = (async () => {
+      try {
+        await cancelPromise;
+      } catch (error) {
+        this.notify(`Could not stop the turn: ${error.message || error}`, "error");
+      } finally {
+        // Cancel request settled. Reset the visual feedback (button + status).
+        // The paint gate (isStopRequested) stays armed until the owning turn's
+        // finally clears it, so late in-flight deltas are still not painted
+        // while the backend winds the stream down (#44).
+        if (statusEl) statusEl.textContent = "Idle";
+        if (button) {
+          button.disabled = false;
+          button.classList.remove("is-stopping");
+        }
       }
-    }
+    })();
+    this.stopInFlight.set(stopConversationId, runCancel);
+    return runCancel;
   }
 
   async refresh() {
@@ -1406,6 +1710,7 @@ export class AgentConversationController {
     this.updateContextStatus();
     this.updateWorkspaceLabel();
     this.updateRoomInfo();
+    this.refreshModelPicker?.();
     this.updateAcpStatus();
     this.mountTodoStrip(conversation.id);
     void this.restoreRunningTurnState();
@@ -1513,7 +1818,8 @@ export class AgentConversationController {
       return;
     }
     if (input) input.disabled = false;
-    if (sendButton) sendButton.disabled = false;
+    // Reflect empty/IME state rather than force-enable (#46).
+    this.updateSendAvailability();
     if (stopButton) {
       stopButton.hidden = true;
       stopButton.disabled = false;
@@ -1685,24 +1991,59 @@ export class AgentConversationController {
 
   updateContextStatus() {
     const status = $("#agent-provider-status");
-    const selectedModel = this.getActiveModel();
     if (!status) return;
     if (status.classList.contains("is-stream-gap")) return;
+
+    // Ticket #40: prefer the model bound to the in-flight turn (snapshot) so
+    // the badge denominator does not jump when the global picker changes
+    // mid-turn or right after Stop. Idle falls back to the active model.
+    const stream = this.liveStreamState;
+    const streamModelKey = stream?.modelKey || null;
+    const streamWindow = stream?.contextWindow;
+    const selectedModel = streamModelKey
+      ? { key: streamModelKey, contextWindow: streamWindow }
+      : this.getActiveModel?.() || null;
+
     if (!selectedModel) {
       status.textContent = "Choose a model";
+      return;
+    }
+    // Ticket #41: the badge must agree with the backend compaction threshold,
+    // which runs `min(settings.maxInputTokens, modelWindow)`. Expose the same
+    // effective denominator for both idle and live so it does not "1M vs 200k".
+    const globalCap = this.getMaxInputTokens?.();
+    const effectiveWindow = effectiveContextWindow(selectedModel.contextWindow, globalCap);
+    const modelKey = selectedModel.key ?? "";
+
+    // Cache the estimate keyed by (conversation, message count, checkpoint,
+    // model, phase, effective window). refresh() and open() call
+    // updateContextStatus() repeatedly after every turn with an unchanged
+    // thread; re-running buildAgentContext + token estimate each time is
+    // O(thread) wasted work (#33). Including the model key + phase means a
+    // model switch or stream start/end invalidates stale badge text even when
+    // the message count is unchanged (#40).
+    const conv = this.conversation;
+    const phase = streamModelKey ? "live" : "idle";
+    const cacheKey = conv
+      ? `${conv.id}:${conv.messages.length}:${conv.checkpoint?.compactedMessageCount ?? 0}:${modelKey}:${phase}:${effectiveWindow}`
+      : "";
+    if (cacheKey && this._lastContextKey === cacheKey && this._lastContextText !== null) {
+      status.textContent = this._lastContextText;
       return;
     }
     // Dual-space: badge reflects the model-facing context (buildAgentContext
     // with checkpoint applied), not the raw full transcript. Fall back to the
     // full thread estimate only when the provider path is empty (e.g. a fresh
     // conversation with no checkpoint and no messages yet).
-    const providerTokens = estimateContextTokens(buildAgentContext(this.conversation));
-    const threadTokens = estimateContextTokens(this.conversation?.messages || []);
+    const providerTokens = estimateContextTokens(buildAgentContext(conv));
+    const threadTokens = estimateContextTokens(conv?.messages || []);
     const tokens = providerTokens > 0 ? providerTokens : threadTokens;
     status.textContent = formatContextUsage(
       tokens,
-      selectedModel.contextWindow,
+      effectiveWindow,
     );
+    this._lastContextKey = cacheKey;
+    this._lastContextText = status.textContent;
   }
 
   /**
@@ -1797,9 +2138,15 @@ export class AgentConversationController {
       thread.scrollTop = thread.scrollHeight;
     };
     // Apply immediately so background-window frame throttling cannot make the
-    // reader fall behind. A single frame then settles any pending layout.
+    // reader fall behind. A single rAF then settles any pending layout; rapid
+    // calls within the same frame are coalesced (no per-call double rAF).
     apply();
-    if (typeof requestAnimationFrame === "function") requestAnimationFrame(apply);
+    if (typeof requestAnimationFrame === "function" && !this._scrollSettledRaf) {
+      this._scrollSettledRaf = requestAnimationFrame(() => {
+        this._scrollSettledRaf = 0;
+        apply();
+      });
+    }
   }
 
   renderThread() {
@@ -1812,11 +2159,11 @@ export class AgentConversationController {
     // Chat switches destroy the DOM; drop live card-stream references so a
     // later restore can re-attach to recreated nodes without writing to
     // detached ones. Also dispose subagent event subscriptions so handlers
-    // for the previous conversation do not fire into the new one (A3).
-    // Re-bind immediately so subagent.run_started/ended events for the new
-    // (or same) conversation are not silently dropped after a chat switch.
+    // for the previous conversation do not fire into the new one (A3) and
+    // cancel any pending streaming rAF/canvas timers for the old room (#34).
     this.disposeSubagentCardStream();
     this.rebindSubagentEvents();
+    this.disposeStreamTimersForRoom();
     thread.textContent = "";
     this.failedMessage = null;
     this.updateAcpStatus();
@@ -2067,9 +2414,16 @@ export class AgentConversationController {
     ));
     actions.appendChild(copy);
     if (meta.retry) {
-      const retry = element("button", "agent-retry-btn", "Retry");
+      const retryLabel = meta.retryLabel || "Retry";
+      const retry = element("button", "agent-retry-btn", retryLabel);
       retry.type = "button";
-      retry.addEventListener("click", () => void this.submit({ retry: true }));
+      if (meta.retryDisabled) retry.disabled = true;
+      // Rate-limit cooldown: keep the button disabled with a countdown (#45).
+      if (typeof meta.retryCooldownMs === "number" && meta.retryCooldownMs > 0) {
+        this.startRetryCooldown(retry, retryLabel, meta.retryCooldownMs);
+      } else {
+        retry.addEventListener("click", () => void this.submit({ retry: true }));
+      }
       actions.prepend(retry);
     }
     footer.appendChild(actions);
@@ -2081,6 +2435,25 @@ export class AgentConversationController {
       this.enhanceCodeFences(message, meta.canvasMessageIndex ?? this.currentMessageIndex());
     }
     return message;
+  }
+
+  startRetryCooldown(button, label, cooldownMs) {
+    // Simple countdown backoff so a rate-limited turn is not spammed. Re-enables
+    // with a countdown in the label, then restores the click handler (#45).
+    let remaining = Math.ceil(cooldownMs / 1000);
+    button.disabled = true;
+    const tick = () => {
+      if (remaining <= 0) {
+        button.disabled = false;
+        button.textContent = label;
+        button.addEventListener("click", () => void this.submit({ retry: true }));
+        return;
+      }
+      button.textContent = `${label} (${remaining}s)`;
+      remaining -= 1;
+      window.setTimeout(tick, 1000);
+    };
+    tick();
   }
 
   currentMessageIndex() {
@@ -2433,7 +2806,9 @@ export class AgentConversationController {
       this.decorateHtmlFence(pre, code, ctx);
       return;
     }
-    // svg / mermaid: auto-render inline; collapse the raw fence once render succeeds.
+    // svg / mermaid: lazy inline render — a placeholder is shown until the
+    // fence approaches the viewport, avoiding eager render of every diagram in
+    // a long thread. The raw fence collapses once the render succeeds.
     const actions = element("div", "agent-canvas-fence-actions");
     const download = iconButton("Download source", downloadIcon());
     download.classList.add("agent-code-action");
@@ -2448,14 +2823,25 @@ export class AgentConversationController {
     bindCanvasSourceToggle({ pre, showSource, getPreview });
     actions.append(download, sidebar, showSource);
     pre.dataset.codeActionsBound = "true";
-    // Hide source optimistically; restore if render fails.
-    pre.hidden = true;
+    // Do not hide the source until the lazy render actually happens; hide it
+    // inside the reveal so the fallback restores it on failure.
     pre.after(actions);
-    this.renderInlineCanvas(pre, code, ctx).then((ok) => {
-      if (!ok) setCanvasSourceVisible({ pre, showSource, getPreview, visible: true });
-    }).catch((error) => {
-      setCanvasSourceVisible({ pre, showSource, getPreview, visible: true });
-      this.log?.("error", `Canvas inline render failed: ${error.message || error}`);
+
+    const getContainer = () =>
+      pre.parentElement?.querySelector(`.agent-canvas-inline[data-artifact-id="${cssEscape(ctx.artifactId)}"]`) ?? null;
+    bindLazyCanvasReveal({
+      host: pre,
+      getContainer,
+      root: document.getElementById("agent-thread"),
+      onReveal: () => {
+        pre.hidden = true;
+        return this.renderInlineCanvas(pre, code, ctx).then((ok) => {
+          if (!ok) setCanvasSourceVisible({ pre, showSource, getPreview, visible: true });
+        }).catch((error) => {
+          setCanvasSourceVisible({ pre, showSource, getPreview, visible: true });
+          this.log?.("error", `Canvas inline render failed: ${error.message || error}`);
+        });
+      },
     });
   }
 
@@ -2487,12 +2873,21 @@ export class AgentConversationController {
     pre.dataset.codeActionsBound = "true";
 
     card.append(head, actions);
-    // Collapse the source by default; Show source reveals it (and hides the preview).
-    pre.hidden = true;
+    // The source stays visible until the artifact is revealed.
     pre.after(card);
-    void this.mountInlineHtmlPreview(pre, card, ctx).catch((error) => {
-      setCanvasSourceVisible({ pre, showSource, getPreview, visible: true });
-      this.log?.("error", `Inline HTML render failed: ${error.message || error}`);
+    const getPreviewAfter = () =>
+      pre.parentElement?.querySelector(`.agent-canvas-inline-preview[data-artifact-id="${cssEscape(ctx.artifactId)}"]`) ?? null;
+    bindLazyCanvasReveal({
+      host: pre,
+      getContainer: () => getPreviewAfter() ?? null,
+      root: document.getElementById("agent-thread"),
+      onReveal: () => {
+        pre.hidden = true;
+        return this.mountInlineHtmlPreview(pre, card, ctx).catch((error) => {
+          setCanvasSourceVisible({ pre, showSource, getPreview, visible: true });
+          this.log?.("error", `Inline HTML render failed: ${error.message || error}`);
+        });
+      },
     });
   }
 
@@ -2928,12 +3323,20 @@ export class AgentConversationController {
       thoughtContent: "",
       textEl: null,
       thoughtEl: null,
+      textRenderTimer: 0,
     };
   }
 
   sealSubagentStreamSegment() {
     const state = this.subagentStreamState;
     if (!state) return;
+    if (state.textRenderTimer) {
+      window.clearTimeout(state.textRenderTimer);
+      state.textRenderTimer = 0;
+    }
+    if (state.lastKind === "text" && state.textEl) {
+      state.textEl.innerHTML = renderAssistantMarkdown(state.textContent);
+    }
     if (state.lastKind === "text" && state.textContent.trim()) {
       state.steps.push({ type: "text", content: state.textContent });
     } else if (state.lastKind === "reasoning" && state.thoughtContent.trim()) {
@@ -3042,7 +3445,20 @@ export class AgentConversationController {
       state.textEl = element("div", "agent-subpane-text agent-bubble");
       body.appendChild(state.textEl);
     }
-    state.textEl.innerHTML = renderAssistantMarkdown(state.textContent);
+    // Keep short replies immediate for responsive feedback. Once a parallel
+    // subagent produces a large answer, avoid reparsing the full answer for
+    // every tiny delta; this callback runs synchronously on the IPC event
+    // fan-out path and can otherwise starve the parent turn's deltas.
+    if (state.textContent.length < 4096) {
+      state.textEl.innerHTML = renderAssistantMarkdown(state.textContent);
+    } else if (!state.textRenderTimer) {
+      state.textRenderTimer = window.setTimeout(() => {
+        state.textRenderTimer = 0;
+        if (state.lastKind === "text" && state.textEl) {
+          state.textEl.innerHTML = renderAssistantMarkdown(state.textContent);
+        }
+      }, 50);
+    }
     this.scrollSubpaneToBottom();
   }
 
@@ -3474,7 +3890,6 @@ export class AgentConversationController {
     const providerId = result.providerId || toolCall.args?.provider_id || "—";
     const title = toolCall.args?.title || result.title || "Subagent run";
     const status = result.ok === true ? "ok" : result.ok === false ? "fail" : "running";
-    if (status === "ok") return null;
     const summary = result.summary || "";
     const error = formatSubagentError(result.error) || formatSubagentError(toolCall.error);
     const run = {
@@ -3482,6 +3897,10 @@ export class AgentConversationController {
       providerId,
       title,
       status,
+      // Ticket #42: a successful subagent run must keep a sealed card in the
+      // thread (like terminal tools) instead of being removed. renderSubagentCard
+      // already supports status "ok" + summary; only the ok/null early-return was
+      // dropping the card from the DOM.
       ...(summary ? { summary } : {}),
       ...(error ? { error } : {}),
     };

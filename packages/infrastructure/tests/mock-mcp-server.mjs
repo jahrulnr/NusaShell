@@ -38,5 +38,26 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   return { content: [{ type: "text", text: "unknown tool" }] };
 });
 
+
 const transport = new StdioServerTransport();
+
+// Test hook: when MCP_MOCK_SPAM_STDERR is set, write a large volume of
+// stderr lines BEFORE the handshake completes, forcing the client's
+// stderrBuffer to exceed its cap. Useful for verifying the bounded tail.
+if (process.env.MCP_MOCK_SPAM_STDERR) {
+  const lines = Number(process.env.MCP_MOCK_SPAM_STDERR) || 10_000;
+  const chunk = "spam line content padding padding padding\n";
+  for (let i = 0; i < lines; i++) {
+    process.stderr.write(chunk);
+  }
+}
+
+
+if (process.env.MCP_MOCK_DELAY_MS) {
+  const ms = Number(process.env.MCP_MOCK_DELAY_MS) || 0;
+  if (ms > 0) {
+    await new Promise((r) => setTimeout(r, ms));
+  }
+}
+
 await server.connect(transport);

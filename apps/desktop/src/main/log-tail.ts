@@ -1,5 +1,5 @@
 export type ShellLogLevel = "debug" | "info" | "warn" | "error";
-export type ShellLogSource = "backend" | "ipc" | "main" | "mcp" | "renderer";
+export type ShellLogSource = "backend" | "ipc" | "main" | "mcp" | "renderer" | "acp";
 
 export interface ShellLogEntry {
   readonly id: number;

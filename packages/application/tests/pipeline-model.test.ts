@@ -124,17 +124,17 @@ describe("validatePipelineTrigger", () => {
   });
 
   it("rejects a missing one-shot runAt", () => {
-    const trigger = { kind: "schedule", schedule: { kind: "once", runAt: "" } };
+    const trigger = { kind: "schedule", schedule: { kind: "once", runAt: "" } } as const;
     expect(validatePipelineTrigger(trigger)).toMatch(/requires runAt/i);
   });
 
   it("rejects an interval with non-positive minutes", () => {
-    const trigger = { kind: "schedule", schedule: { kind: "interval", minutes: 0 } };
+    const trigger = { kind: "schedule", schedule: { kind: "interval", minutes: 0 } } as const;
     expect(validatePipelineTrigger(trigger)).toMatch(/positive minutes/i);
   });
 
   it("rejects an empty cron expr", () => {
-    const trigger = { kind: "schedule", schedule: { kind: "cron", expr: "" } };
+    const trigger = { kind: "schedule", schedule: { kind: "cron", expr: "" } } as const;
     expect(validatePipelineTrigger(trigger)).toMatch(/requires expr/i);
   });
 

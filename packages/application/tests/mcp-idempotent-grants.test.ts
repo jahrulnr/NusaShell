@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { McpAgentToolGateway } from "../src/index.js";
 
 /**
@@ -97,8 +97,8 @@ describe("tool_schemas idempotency", () => {
     };
 
     expect(result.granted).toHaveLength(1);
-    expect(result.granted[0].name).toBe(NAME_A);
-    expect(result.granted[0].alreadyGranted).toBe(true);
+    expect(result.granted[0]!.name).toBe(NAME_A);
+    expect(result.granted[0]!.alreadyGranted).toBe(true);
   });
 });
 

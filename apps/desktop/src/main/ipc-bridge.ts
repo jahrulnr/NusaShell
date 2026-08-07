@@ -144,9 +144,15 @@ export function mapIpcFailureToResponse(
     && typeof (error as { error?: { code?: unknown; message?: unknown } }).error === "object"
     && (error as { error?: { code?: unknown; message?: unknown } }).error
   ) {
-    const nested = (error as {
-      error: { code?: unknown; message?: unknown; details?: Readonly<Record<string, unknown>> };
-    }).error;
+    const rawNested = (error as { error?: unknown }).error;
+    if (typeof rawNested !== "object" || rawNested === null) {
+      return { kind: "response", id: "", ok: false, error: { code: "IPC_ERROR", message: "IPC request failed" } };
+    }
+    const nested = rawNested as {
+      code?: unknown;
+      message?: unknown;
+      details?: Readonly<Record<string, unknown>>;
+    };
     const code = typeof nested.code === "string" && nested.code ? nested.code : "IPC_ERROR";
     const message = typeof nested.message === "string" && nested.message.trim()
       ? nested.message.trim()

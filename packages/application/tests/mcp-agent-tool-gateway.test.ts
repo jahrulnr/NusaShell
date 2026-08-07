@@ -318,6 +318,9 @@ describe("McpAgentToolGateway", () => {
         truncated: false,
       }),
       delete: async () => {},
+      archive: async () => {},
+      restore: async () => {},
+      listArchived: async () => [],
     };
     const gateway = new McpAgentToolGateway(fakeRuntime as never, undefined, fakeSkills);
     gateway.beginTurn("turn-skills");
@@ -594,6 +597,9 @@ describe("McpAgentToolGateway", () => {
         create: async () => skillDetail,
         write: async (skillId, path) => ({ skillId, path, content: skillMd, sizeBytes: skillMd.length, editable: true, truncated: false }),
         delete: async () => {},
+        archive: async () => {},
+        restore: async () => {},
+        listArchived: async () => [],
         ...overrides,
       };
     }
@@ -636,17 +642,22 @@ describe("McpAgentToolGateway", () => {
     });
 
     it("rejects create with description > 1024 chars", async () => {
-      const longDesc = "x".repeat(1025);
+      const longDesc = `---\nname: my-skill\ndescription: ${`x`.repeat(1025)}\n---\n# Long\nBody.`;
       const registry = fakeRegistry({
-        create: async () => { throw new Error("SKILL.md description must be 1024 characters or fewer (got 1025)"); },
+        create: async (_skillId: string, skillMd: string) => {
+          if (String(skillMd).length > 1024) {
+            throw new Error("SKILL.md description must be 1024 characters or fewer");
+          }
+          return skillDetail;
+        },
       });
       const gateway = new McpAgentToolGateway(fakeRuntime as never, undefined, registry, undefined, undefined, fakeProvenance());
       gateway.beginTurn("turn-long");
 
-      const result = await gateway.execute("skill_manage", { action: "create", name: "my-skill", content: skillMd }, "call-long", "turn-long");
+      const result = await gateway.execute("skill_manage", { action: "create", name: "my-skill", content: longDesc }, "call-long", "turn-long");
       expect(result).toEqual({
         ok: false,
-        error: { code: "description_too_long", message: "SKILL.md description must be 1024 characters or fewer (got 1025)" },
+        error: { code: "description_too_long", message: "SKILL.md description must be 1024 characters or fewer" },
         meta: {},
       });
     });
@@ -1069,8 +1080,8 @@ describe("McpAgentToolGateway", () => {
         claimFire: async () => true,
         releaseFire: async () => {},
         listDue: async () => [],
-        appendOutput: async (jobId, entry) => { outputs.unshift(entry); },
-        listOutputs: async (jobId, limit) => outputs.slice(0, limit),
+        appendOutput: async (_jobId, entry) => { outputs.unshift(entry); },
+        listOutputs: async (_jobId, limit) => outputs.slice(0, limit),
       };
       return store;
     }
@@ -1298,12 +1309,12 @@ describe("McpAgentToolGateway", () => {
       gateway.bindJobs(store, fakeScheduler());
       gateway.beginTurn("turn-update");
 
-      const result = await gateway.execute(
+      const result = (await gateway.execute(
         "job",
         { action: "update", id: "job-1", name: "Weekly digest", schedule: "every 7d" },
         "c-upd",
         "turn-update",
-      );
+      )) as { ok: boolean; data?: Job };
       expect(result.ok).toBe(true);
       const updated = (result as { data: Job }).data;
       expect(updated.name).toBe("Weekly digest");
@@ -1342,12 +1353,12 @@ describe("McpAgentToolGateway", () => {
       gateway.bindJobs(store, fakeScheduler());
       gateway.beginTurn("turn-update-mode");
 
-      const result = await gateway.execute(
+      const result = (await gateway.execute(
         "job",
         { action: "update", id: "job-1", mode: "tool", pluginId: "nusashell.mail", toolName: "send", args: { to: "x@y.com" } },
         "c",
         "turn-update-mode",
-      );
+      )) as { ok: boolean; data?: Job };
       expect(result.ok).toBe(true);
       const updated = (result as { data: Job }).data;
       expect(updated.mode).toEqual({ type: "tool", pluginId: "nusashell.mail", toolName: "send", args: { to: "x@y.com" } });
@@ -1364,12 +1375,12 @@ describe("McpAgentToolGateway", () => {
         effort: "medium",
       });
 
-      const result = await gateway.execute(
+      const result = (await gateway.execute(
         "job",
         { action: "add", name: "Inherited", schedule: "every 1h", mode: "agent", prompt: "ping" },
         "c",
         "turn-inherit",
-      );
+      )) as { ok: boolean; data?: Job };
       expect(result.ok).toBe(true);
       const created = (result as { data: Job }).data;
       expect(created.mode).toEqual({ type: "agent", prompt: "ping", providerId: "openai", model: "gpt-4o", effort: "medium" });
@@ -1381,12 +1392,12 @@ describe("McpAgentToolGateway", () => {
       gateway.bindJobs(store, fakeScheduler());
       gateway.beginTurn("turn-override", { providerId: "openai", model: "gpt-4o" });
 
-      const result = await gateway.execute(
+      const result = (await gateway.execute(
         "job",
         { action: "add", name: "Override", schedule: "every 1h", mode: "agent", prompt: "ping", model: "o3-mini" },
         "c",
         "turn-override",
-      );
+      )) as { ok: boolean; data?: Job };
       expect(result.ok).toBe(true);
       const created = (result as { data: Job }).data;
       expect(created.mode).toEqual({ type: "agent", prompt: "ping", providerId: "openai", model: "o3-mini" });
@@ -1398,12 +1409,12 @@ describe("McpAgentToolGateway", () => {
       gateway.bindJobs(store, fakeScheduler());
       gateway.beginTurn("turn-no-model");
 
-      const result = await gateway.execute(
+      const result = (await gateway.execute(
         "job",
         { action: "add", name: "Plain", schedule: "every 1h", mode: "agent", prompt: "ping" },
         "c",
         "turn-no-model",
-      );
+      )) as { ok: boolean; data?: Job };
       expect(result.ok).toBe(true);
       const created = (result as { data: Job }).data;
       expect(created.mode).toEqual({ type: "agent", prompt: "ping" });
@@ -1415,12 +1426,12 @@ describe("McpAgentToolGateway", () => {
       gateway.bindJobs(store, fakeScheduler());
       gateway.beginTurn("turn-update-prompt");
 
-      const result = await gateway.execute(
+      const result = (await gateway.execute(
         "job",
         { action: "update", id: "job-1", prompt: "new prompt" },
         "c",
         "turn-update-prompt",
-      );
+      )) as { ok: boolean; data?: Job };
       expect(result.ok).toBe(true);
       const updated = (result as { data: Job }).data;
       expect(updated.mode).toEqual({ type: "agent", prompt: "new prompt", providerId: "openai", model: "gpt-4o", effort: "high" });

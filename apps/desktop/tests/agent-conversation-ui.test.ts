@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAgentContext,
   buildContinueContext,
+  classifyTurnError,
   CONTINUE_STEER,
   clampToolText,
   composerTextareaSize,
@@ -11,6 +12,7 @@ import {
   formatToolOutput,
   formatToolTerminalInput,
   mergeCompactionCheckpoint,
+  mergeConversationMessages,
   searchConversations,
   renderAssistantMarkdown,
   renderReasoningMarkdown,
@@ -588,5 +590,95 @@ describe("agent conversation UI helpers", () => {
       };
       expect(buildAgentContext(conversation)).toEqual([{ role: "user", content: "Hello" }]);
     });
+  });
+});
+
+describe("classifyTurnError (ticket #45)", () => {
+  it("classifies 429 rate limit as retryable with a backoff hint", () => {
+    const r = classifyTurnError({
+      code: "AGENT_PROVIDER_FAILED",
+      message: "AI provider request failed: Provider returned HTTP 429: rate limited",
+      details: { cause: "Provider returned HTTP 429: rate limited" },
+    });
+    expect(r.category).toBe("rate_limited");
+    expect(r.retryable).toBe(true);
+    expect(r.label).toBe("Retry");
+  });
+
+  it("classifies 401 as auth, not retryable", () => {
+    const r = classifyTurnError({
+      code: "AGENT_PROVIDER_FAILED",
+      message: "AI provider request failed: Provider returned HTTP 401: invalid key",
+      details: { cause: "Provider returned HTTP 401: invalid key" },
+    });
+    expect(r.category).toBe("auth");
+    expect(r.retryable).toBe(false);
+  });
+
+  it("classifies 5xx as retryable server error", () => {
+    const r = classifyTurnError({
+      code: "AGENT_PROVIDER_FAILED",
+      message: "AI provider request failed: Provider returned HTTP 503: overloaded",
+      details: { cause: "Provider returned HTTP 503: overloaded" },
+    });
+    expect(r.category).toBe("server_error");
+    expect(r.retryable).toBe(true);
+  });
+
+  it("maps AGENT_TURN_CANCELLED to cancelled", () => {
+    const r = classifyTurnError({ code: "AGENT_TURN_CANCELLED" });
+    expect(r.category).toBe("cancelled");
+    expect(r.label).toBe("Continue");
+  });
+
+  it("detects superseded turns and disables retry", () => {
+    const r = classifyTurnError({ code: "AGENT_TURN_SUPERSEDED", message: "superseded by a newer turn" });
+    expect(r.category).toBe("superseded");
+    expect(r.retryable).toBe(false);
+    expect(r.label).toBe("");
+  });
+
+  it("falls back to unknown for null / empty", () => {
+    expect(classifyTurnError(null).category).toBe("unknown");
+    expect(classifyTurnError({}).category).not.toBe("rate_limited");
+  });
+});
+
+describe("mergeConversationMessages (ticket #47 race guard)", () => {
+  it("does not drop a live/seen message when an incoming append snapshot is stale", () => {
+    const current = [
+      { role: "user", content: "1", createdAt: "t1" },
+      { role: "assistant", content: "a1", traceId: "tr-a", createdAt: "t2" },
+      { role: "user", content: "2", createdAt: "t3" },
+      { role: "assistant", content: "a2", traceId: "tr-b", createdAt: "t4" },
+    ];
+    // Incoming snapshot from a stale append: it lacks assistant a2 (turn 2's
+    // seal had not committed when turn 3's append read the store).
+    const incoming = [
+      { role: "user", content: "1", createdAt: "t1" },
+      { role: "assistant", content: "a1", traceId: "tr-a", createdAt: "t2" },
+      { role: "user", content: "2", createdAt: "t3" },
+      { role: "user", content: "3", createdAt: "t5" },
+    ];
+    const merged = mergeConversationMessages(current, incoming);
+    const contents = merged.map((m) => `${m.role}:${m.content}`);
+    // The stale incoming usermsg 3 is present, and assistant a2 is NOT lost.
+    expect(contents).toContain("user:3");
+    expect(contents).toContain("assistant:a2");
+  });
+
+  it("merges by identity (role+createdAt) without duplicating shared messages", () => {
+    const current = [
+      { role: "user", content: "1", createdAt: "t1" },
+      { role: "assistant", content: "a1", createdAt: "t2" },
+    ];
+    const incoming = [
+      { role: "user", content: "1", createdAt: "t1" },
+      { role: "assistant", content: "a1", createdAt: "t2" },
+      { role: "user", content: "2", createdAt: "t3" },
+    ];
+    const merged = mergeConversationMessages(current, incoming);
+    expect(merged.length).toBe(3);
+    expect(merged.map((m) => m.content)).toEqual(["1", "a1", "2"]);
   });
 });

@@ -59,6 +59,12 @@ export interface AgentConversationAcp {
   readonly sessionId?: string;
   readonly workspace?: string;
 }
+export interface AgentConversationModelBinding {
+  readonly modelKey: string;
+  readonly effort: string;
+  /** Whether the model was explicitly picked for this room (vs global default). */
+  readonly explicit?: boolean;
+}
 
 export type AgentConversationKind = "agent" | "acp";
 
@@ -112,6 +118,7 @@ export interface AgentConversation {
   readonly messages: readonly AgentConversationMessage[];
   readonly checkpoint?: AgentConversationCheckpoint;
   readonly workspace?: string;
+  readonly model?: AgentConversationModelBinding;
   readonly kind?: AgentConversationKind;
   readonly acp?: AgentConversationAcp;
   readonly canvasArtifacts?: readonly AgentCanvasArtifact[];

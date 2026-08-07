@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { execJob } from "../src/agent/services/job-tool-handler.js";
-import type { JobStorePort, Job, JobOutputEntry } from "../src/job/job-model.js";
+import { type Job } from "../src/job/job-model.js";
+import type { JobStorePort, JobOutputEntry } from "../src/job/index.js";
 
 class FakeJobStore implements JobStorePort {
   jobs = new Map<string, Job>();
@@ -11,13 +12,22 @@ class FakeJobStore implements JobStorePort {
   async get(id: string): Promise<Job | null> { return this.jobs.get(id) ?? null; }
   async list(): Promise<readonly Job[]> { return [...this.jobs.values()]; }
   async remove(id: string): Promise<void> { this.jobs.delete(id); }
-  async listOutputs(id: string, limit: number): Promise<JobOutputEntry[]> {
+  async listOutputs(id: string, limit: number): Promise<readonly JobOutputEntry[]> {
     return (this.outputs.get(id) ?? []).slice(0, limit);
   }
   async appendOutput(_id: string, _entry: JobOutputEntry): Promise<void> {}
-  async claim(_id: string, _claimId: string, _expiresAt: Date): Promise<boolean> { return true; }
-  async releaseClaim(_id: string, _claimId: string): Promise<void> {}
-  async reapStaleClaims(_now: Date): Promise<void> {}
+  async markRun(id: string, status: "ok" | "error" | "cancelled", error: string | null, nextRunAt: string | null): Promise<Job | null> {
+    const job = this.jobs.get(id);
+    if (!job) return null;
+    const updated = { ...job, lastStatus: status, lastError: error, nextRunAt };
+    this.jobs.set(id, updated);
+    return updated;
+  }
+  async claimFire(id: string, _claimId: string, _ttlSeconds: number): Promise<boolean> {
+    return this.jobs.has(id);
+  }
+  async releaseFire(_id: string, _claimId: string): Promise<void> {}
+  async listDue(): Promise<readonly Job[]> { return [...this.jobs.values()]; }
 }
 
 describe("job tool handler — on_complete", () => {
