@@ -23,9 +23,11 @@ import {
   createAgentToolJobStartedEvent,
   createAgentToolJobUpdateEvent,
   createAgentToolJobEndedEvent,
+  withTelemetry,
   type AgentRuntimeSettings,
   type AgentProvider,
   type EventDispatcher,
+  type TelemetryPort,
 } from "@nusashell/application";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
@@ -48,6 +50,8 @@ export interface AgentRuntimeParts {
   readonly activeTurns: InMemoryActiveTurnProjection;
   readonly conversationTodos: InMemoryConversationTodoPort;
   readonly asyncToolRuntime: AsyncToolRuntime;
+  /** Token-efficiency telemetry sink (undefined when disabled). */
+  readonly telemetry?: TelemetryPort;
 }
 
 function bundledResource(relativePath: string): string {
@@ -64,6 +68,7 @@ export function createAgentRuntime(
   eventDispatcher: EventDispatcher,
   plugin: PluginRuntimeParts,
   skills: SkillsRuntimeParts,
+  telemetry?: TelemetryPort,
 ): AgentRuntimeParts {
   const aiRuntime: AgentRuntimeParts["aiRuntime"] = {
     strategy: options.ai?.strategy ?? "failover" as "failover" | "round-robin" | "switch",
@@ -155,7 +160,12 @@ export function createAgentRuntime(
       ...(options.ai.timeoutMs !== undefined ? { timeoutMs: options.ai.timeoutMs } : {}),
     }));
   }
-  const agentProviderRegistry = new AgentProviderRegistry(agentProviders);
+  // Wrap each provider so every `complete()` call (including router failover
+  // candidates and the compaction summarizer's round-0 sample) emits a
+  // provider-request telemetry record. No-op when telemetry is disabled.
+  const agentProviderRegistry = new AgentProviderRegistry(
+    agentProviders.map((provider) => withTelemetry(provider, telemetry)),
+  );
   const agentTurnCoordinator = new AgentTurnCoordinator();
   const streamSeqRegistry = new StreamSeqRegistry();
   const withStreamSeq = <T extends { readonly aggregateId: string }>(event: T): T & { streamSeq: number } => ({
@@ -211,5 +221,6 @@ export function createAgentRuntime(
     activeTurns: new InMemoryActiveTurnProjection(),
     conversationTodos,
     asyncToolRuntime,
+    ...(telemetry ? { telemetry } : {}),
   };
 }

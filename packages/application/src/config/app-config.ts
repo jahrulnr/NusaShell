@@ -8,6 +8,14 @@ export interface AppConfig {
   readonly dbPath: string | undefined;
   readonly logLevel: string;
   readonly ai: AiConfig;
+  readonly telemetry: TelemetryConfig;
+}
+
+export interface TelemetryConfig {
+  /** Token-efficiency telemetry recording. Env: `NUSASHELL_TELEMETRY`. */
+  readonly enabled: boolean;
+  /** Daily JSONL retention window. Env: `NUSASHELL_TELEMETRY_RETENTION_DAYS`. */
+  readonly retentionDays: number;
 }
 
 export interface AiConfig {
@@ -93,6 +101,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
         recentTurns: integerInRange(env.NUSASHELL_AI_CONTEXT_RECENT_TURNS, 1, 100, 4),
         summaryMaxChars: integerInRange(env.NUSASHELL_AI_CONTEXT_SUMMARY_MAX_CHARS, 100, 1_000_000, 12000),
       },
+    },
+    telemetry: {
+      enabled: env.NUSASHELL_TELEMETRY !== "false",
+      retentionDays: integerInRange(env.NUSASHELL_TELEMETRY_RETENTION_DAYS, 1, 3650, 30),
     },
   };
 }

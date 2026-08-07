@@ -14,6 +14,8 @@ export interface BootstrapOptions {
   readonly skillsRoot?: string;
   readonly memoryRoot?: string;
   readonly jobsRoot?: string;
+  /** Directory for token-efficiency telemetry JSONL files. */
+  readonly telemetryDir?: string;
   readonly backgroundReview?: Partial<BackgroundReviewSettings>;
   readonly resolvePluginRuntimeEnvironment?: (
     pluginId: string,
@@ -70,6 +72,11 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
       : {}),
     logLevel: config.logLevel,
     ...(options.logFile !== undefined ? { logFile: options.logFile } : {}),
+    ...(options.telemetryDir !== undefined ? { telemetryDir: options.telemetryDir } : {}),
+    telemetry: {
+      enabled: config.telemetry.enabled,
+      retentionDays: config.telemetry.retentionDays,
+    },
     ai: {
       providerId: config.ai.providerId,
       stubEnabled: config.ai.stubEnabled,

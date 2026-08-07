@@ -334,7 +334,27 @@ export type {
 } from "./agent/index.js";
 
 // Config
-export { type AppConfig, loadConfig } from "./config/index.js";
+export { type AppConfig, type TelemetryConfig, loadConfig } from "./config/index.js";
+
+// Token-efficiency telemetry
+export type {
+  TelemetryTokenUsage,
+  ProviderRequestTelemetry,
+  AgentTurnTelemetry,
+  TelemetryRecord,
+  TelemetryPort,
+  BuildTurnTelemetryInput,
+  MillisClock,
+} from "./telemetry/index.js";
+export {
+  NullTelemetryPort,
+  toTelemetryUsage,
+  freshInputTokens,
+  cacheHitRate,
+  buildTurnTelemetry,
+  TelemetryAgentProvider,
+  withTelemetry,
+} from "./telemetry/index.js";
 
 // System queries
 export type { SystemPingQuery, SystemPingResult, SystemVersionQuery, SystemVersionResult } from "./system/index.js";

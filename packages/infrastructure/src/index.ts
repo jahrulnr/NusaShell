@@ -10,6 +10,7 @@ export {
 export { StdioMcpClient, resolveStdioLaunch, HttpMcpClient, SseMcpClient, McpClientFactory, AutomationRateLimiter, DEFAULT_AUTOMATION_RATE_LIMITS, type RateLimiterSettings, registerMcpAutomation, type RegisterMcpAutomationDeps } from "./mcp/index.js";
 export { scanPluginDirectories, resolveManifestPath, resolvePluginRoot, PluginInstaller, PluginSyncService } from "./plugins/index.js";
 export { createLogger, type Logger, type LogObserver, type LogRecord } from "./logging/index.js";
+export { JsonlTelemetryWriter, type JsonlTelemetryWriterOptions } from "./telemetry/index.js";
 export {
   AgentProviderRegistry,
   StaticAgentProvider,
