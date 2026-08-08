@@ -78,6 +78,21 @@ describe("AgentConversationController — subagent stream pane", () => {
     );
   });
 
+  it("renders a terminal summary in the drawer when no stream steps were persisted", () => {
+    const controller = new AgentConversationController({} as never);
+
+    controller.mountSubpane({
+      runId: "trace-summary-only",
+      providerId: "cursor",
+      prompt: "Say hello",
+      status: "ok",
+      summary: "Hello! Subagent reporting for duty.",
+    }, { open: true });
+
+    expect(document.querySelector("#agent-subpane-body")?.textContent)
+      .toContain("Hello! Subagent reporting for duty.");
+  });
+
   it("failStrandedSubagentRuns marks running runs fail and clears active", async () => {
     const updateSubagentRunStatus = vi.fn().mockImplementation(async (_id, runId, status, patch) => ({
       id: "conv-1",
@@ -656,5 +671,109 @@ describe("AgentConversationController — in-chat subagent mini stream", () => {
     expect(parent.querySelector(".agent-subagent-card")).not.toBeNull();
     expect(parent.querySelector(".agent-subagent-card-status")?.textContent).toMatch(/OK/i);
     expect(replaced).not.toBeNull();
+  });
+
+  it("keeps a lifecycle-sealed subagent card intact when the parent tool result arrives later", () => {
+    const controller = new AgentConversationController({} as never);
+    const card = controller.createStreamingToolCard("call-late-tool", "subagent", {
+      prompt: "Say hello",
+      title: "Greeting",
+      provider_id: "cursor",
+    });
+    card.dataset.runId = "run-lifecycle-first";
+    document.body.appendChild(card);
+
+    controller.sealInChatSubagentCard(
+      "run-lifecycle-first",
+      "ok",
+      "Hello! Subagent reporting for duty.",
+      undefined,
+    );
+    const sealed = controller.updateStreamingToolCard(card, {
+      callId: "call-late-tool",
+      name: "subagent",
+      ok: true,
+      output: "status=success\ntruncated=false\n\nsummary=Hello",
+    });
+
+    expect(sealed).toBe(card);
+    expect(card.dataset.runId).toBe("run-lifecycle-first");
+    expect(card.querySelector(".agent-subagent-card-summary")?.textContent)
+      .toContain("Hello! Subagent reporting for duty.");
+  });
+
+  it("keeps the real run id when parent tool completion precedes run_ended so persisted steps open in the drawer", async () => {
+    const persistedRun = {
+      id: "run-run-tool-first",
+      conversationId: "conv-tool-first",
+      sourceMessageId: "message-1",
+      runId: "run-tool-first",
+      providerId: "cursor",
+      title: "Greeting",
+      prompt: "Say hello",
+      status: "ok",
+      summary: "Hello from summary",
+      steps: [{ type: "text", content: "Hello! Subagent reporting for duty." }],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const updateSubagentRunStatus = vi.fn().mockResolvedValue({
+      id: "conv-tool-first",
+      messages: [],
+      subagentRuns: [persistedRun],
+    });
+    const controller = new AgentConversationController({
+      shell: {
+        agentConversations: {
+          updateSubagentRunStatus,
+          setActiveSubagentRun: vi.fn().mockResolvedValue({
+            id: "conv-tool-first",
+            messages: [],
+            subagentRuns: [persistedRun],
+          }),
+        },
+      },
+    } as never);
+    controller.conversation = { id: "conv-tool-first", messages: [] } as never;
+    controller.activeSubagentRun = {
+      runId: "run-tool-first",
+      providerId: "cursor",
+      title: "Greeting",
+      prompt: "Say hello",
+      status: "running",
+      steps: [],
+    } as never;
+    controller.subagentOwnerConversationId = "conv-tool-first";
+    controller.resetSubagentStreamState([], "run-tool-first");
+    controller.appendSubpaneText("Hello! Subagent reporting for duty.");
+
+    const live = controller.createStreamingToolCard("call-tool-first", "subagent", {
+      prompt: "Say hello",
+      title: "Greeting",
+      provider_id: "cursor",
+    });
+    live.dataset.runId = "run-tool-first";
+    document.body.appendChild(live);
+    const sealed = controller.updateStreamingToolCard(live, {
+      callId: "call-tool-first",
+      name: "subagent",
+      ok: true,
+      output: "status=success\ntruncated=false\n\nsummary=Hello",
+    });
+
+    expect(sealed?.dataset.runId).toBe("run-tool-first");
+    controller.handleSubagentRunEnded({
+      runId: "run-tool-first",
+      ok: true,
+      summary: "Hello from summary",
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    sealed?.querySelector(".agent-subagent-card-head")?.dispatchEvent(new Event("click"));
+
+    expect(document.querySelector("#agent-subpane-body")?.textContent)
+      .toContain("Hello! Subagent reporting for duty.");
+    expect(sealed?.querySelector(".agent-subagent-card-summary")?.textContent)
+      .toContain("Hello from summary");
   });
 });

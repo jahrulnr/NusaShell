@@ -3654,7 +3654,13 @@ export class AgentConversationController {
     } else {
       if (options.select === false) return;
       body.textContent = "";
-      if (effectiveRun.steps?.length) this.renderSubpaneSteps(effectiveRun.steps);
+      if (effectiveRun.steps?.length) {
+        this.renderSubpaneSteps(effectiveRun.steps);
+      } else if (effectiveRun.summary) {
+        const summaryEl = element("div", "agent-subpane-text agent-bubble");
+        summaryEl.innerHTML = renderAssistantMarkdown(effectiveRun.summary);
+        body.appendChild(summaryEl);
+      }
       if (effectiveRun.error) this.setSubpaneError(effectiveRun.error);
       this.subagentStreamState = null;
       this.subagentStreamDisposer?.();
@@ -4431,8 +4437,24 @@ export class AgentConversationController {
       return card;
     }
     if (card.dataset.streamingSubagent === "1" || card.classList.contains("agent-subagent-card")) {
+      const statusEl = card.querySelector(".agent-subagent-card-status");
+      const lifecycleAlreadySealed = card.dataset.streamingSubagent !== "1"
+        && !statusEl?.classList.contains("is-running");
+      // run_ended owns the complete subagent projection (real runId, summary,
+      // and persisted stream). A later parent tool_call_end may carry only a
+      // compact/non-JSON result; replacing the card here would discard that
+      // richer terminal state and make the drawer resolve the tool callId.
+      if (lifecycleAlreadySealed) {
+        this.scrollToBottom();
+        return card;
+      }
+      const parentCallId = payload.callId || card.dataset.callId;
+      const boundRunId = card.dataset.runId
+        && (card.dataset.streamBound === "true" || card.dataset.runId !== parentCallId)
+        ? card.dataset.runId
+        : null;
       const sealed = this.createSubagentToolCard({
-        id: payload.callId || card.dataset.callId,
+        id: parentCallId,
         name: "subagent",
         ok: payload.ok !== false,
         args: payload.args && typeof payload.args === "object" ? payload.args : card._toolArgs,
@@ -4440,6 +4462,13 @@ export class AgentConversationController {
         error: payload.error,
       });
       if (sealed) {
+        // If tool_call_end wins the event race, carry the run_started binding
+        // forward so the later run_ended event seals this exact card and its
+        // click resolves durable stream steps instead of an empty callId run.
+        if (boundRunId) {
+          sealed.dataset.runId = boundRunId;
+          sealed.dataset.streamBound = "true";
+        }
         card.replaceWith(sealed);
         this.scrollToBottom();
         return sealed;

@@ -7,6 +7,7 @@ import type {
   AgentConversationModelBinding,
   AgentSubagentRun,
   AgentSubagentRunStatus,
+  AgentSubagentStreamStep,
 } from "../../shared/agent-conversation-contract.js";
 
 /** Register agent conversation + background review IPC handlers. */
@@ -44,7 +45,7 @@ export function registerAgentIpc(ctx: IpcContext): void {
     store().upsertSubagentRun(id, run));
   ipcMain.handle("agent-conversations:set-active-subagent-run", (_event, id: string, runId: string | null) =>
     store().setActiveSubagentRun(id, runId));
-  ipcMain.handle("agent-conversations:update-subagent-run-status", (_event, id: string, runId: string, status: AgentSubagentRunStatus, patch?: { summary?: string; error?: string }) =>
+  ipcMain.handle("agent-conversations:update-subagent-run-status", (_event, id: string, runId: string, status: AgentSubagentRunStatus, patch?: { summary?: string; error?: string; steps?: readonly AgentSubagentStreamStep[] }) =>
     store().updateSubagentRunStatus(id, runId, status, patch));
 
   ipcMain.handle("background-review:configure", (_event, settings: Record<string, unknown>) => {

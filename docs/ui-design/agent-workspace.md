@@ -65,10 +65,14 @@ snippets, tool calls with success/failure marks, and plan progress). The mini
 stream auto-scrolls to the bottom while the user is pinned to the tail; scrolling
 up pauses stickiness until the user returns to the bottom, so the user can
 inspect earlier activity without the log jumping. Clicks inside the mini stream
-do not toggle the drawer. When the run ends, the mini stream freezes in place
-until the parent turn seals the tool card; the side pane keeps the full frozen
-history for review. The two surfaces share one event fan-out: the side pane is
-the authoritative full log, the in-chat mini stream is a bounded tail preview.
+do not toggle the drawer. When the run ends, its lifecycle event seals that
+exact card with the real run identity and summary; a later parent tool result
+must not replace or downgrade it. Complete stream steps and the terminal summary
+persist with the conversation, so clicking a sealed card after the turn or after
+reopening the room restores the full frozen history. If no stream steps were
+captured, the side pane shows the persisted summary instead of an empty waiting
+state. The two surfaces share one event fan-out: the side pane is the
+authoritative full log, the in-chat mini stream is a bounded tail preview.
 
 ### Agent Canvas
 

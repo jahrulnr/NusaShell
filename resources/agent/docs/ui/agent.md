@@ -180,12 +180,12 @@ A compact floating Room info control stays at the top-right of the conversation.
 
 ## Subagent activity
 
-When the parent agent delegates work through the subagent tool, an in-chat Subagent run card appears in the message thread. While the subagent run is active, the card shows a compact mini activity stream (roughly ten monospace rows) that mirrors the full Subagent side pane: live reasoning, text snippets, tool calls with success/failure marks, and plan progress. Both streams auto-scroll to the bottom while the user is pinned to the tail; scrolling up pauses stickiness until the user returns to the bottom. Clicking the card head opens the full Subagent side pane, which preserves the complete live log with markdown rendering, expandable tool terminals, plan steps, and permission/ask cards. Clicks inside the mini stream do not toggle the drawer. When the run ends, the mini stream freezes in place until the parent turn seals the tool card; the side pane keeps the full frozen history for review.
+When the parent agent delegates work through the subagent tool, an in-chat Subagent run card appears in the message thread. While the subagent run is active, the card shows a compact mini activity stream (roughly ten monospace rows) that mirrors the full Subagent side pane: live reasoning, text snippets, tool calls with success/failure marks, and plan progress. Both streams auto-scroll to the bottom while the user is pinned to the tail; scrolling up pauses stickiness until the user returns to the bottom. Clicking the card head opens the full Subagent side pane, which preserves the complete live log with markdown rendering, expandable tool terminals, plan steps, and permission/ask cards. Clicks inside the mini stream do not toggle the drawer. When the run ends, its lifecycle event seals the exact card with the real run identity and summary; later parent tool completion cannot replace that terminal content. Complete stream steps and the summary persist with the conversation for review after the turn or after reopening the room. If no steps were captured, the side pane shows the summary instead of an empty waiting state.
 
 - **Subagent side pane** (`#agent-subpane`):
   - Section: Agent
   - Type: drawer
-  - Action: Drawer below the NusaShell titlebar that renders the complete live subagent stream with markdown, tool terminals, plans, and permission/ask cards.
+  - Action: Drawer below the NusaShell titlebar that renders the complete live or persisted subagent stream with markdown, tool terminals, plans, and permission/ask cards; terminal runs fall back to their saved summary when no stream steps exist.
 
 - **Subagent pane overlay** (`#agent-subpane-overlay`):
   - Section: Agent
@@ -220,12 +220,12 @@ When the parent agent delegates work through the subagent tool, an in-chat Subag
 - **Subagent pane body** (`#agent-subpane-body`):
   - Section: Agent
   - Type: scroll container
-  - Action: Scrollable log that renders the full subagent stream: reasoning disclosures, text bubbles, tool terminals, plan steps, and error blocks. It follows new deltas only while the reader is at the bottom; scrolling up pauses auto-follow until the reader returns to the tail.
+  - Action: Scrollable log that renders the full live or persisted subagent stream: reasoning disclosures, text bubbles, tool terminals, plan steps, and error blocks. It follows new deltas only while the reader is at the bottom; scrolling up pauses auto-follow until the reader returns to the tail. A terminal run without captured steps renders its saved summary.
 
 - **Subagent run card** (`.agent-subagent-card`):
   - Section: Agent
   - Type: card
-  - Action: In-chat card representing a subagent run. The head opens the full Subagent side pane; while running, a mini activity stream is shown below the head.
+  - Action: In-chat card representing a subagent run. The head opens the full Subagent side pane; while running, a mini activity stream is shown below the head. Once terminal, the card retains its real run identity and summary even if the parent tool result arrives later.
 
 - **Subagent card head** (`.agent-subagent-card-head`):
   - Section: Agent
