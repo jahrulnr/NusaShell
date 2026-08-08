@@ -6,7 +6,7 @@ Choose which MCP server plugins start automatically when NusaShell launches.
 
 ## Autostart list
 
-One row per installed plugin with a toggle. The header shows how many plugins are enabled.
+One row per installed plugin with a toggle. The compact toolbar shows how many plugins are enabled.
 
 - **Enabled count** (`#autostart-count`):
   - Section: Autostart list

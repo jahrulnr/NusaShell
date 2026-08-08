@@ -1,10 +1,163 @@
-import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { AgentConversationStore } from "../src/main/agent-conversation-store.js";
 
 describe("AgentConversationStore", () => {
+  it("allocates immutable message identities and monotonic positions under an identical clock", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-positioning-"));
+    const path = join(root, "agent-conversations.json");
+    const messageIds = ["msg_user", "msg_assistant"];
+    const store = new AgentConversationStore(
+      path,
+      () => new Date("2026-08-08T10:00:00.000Z"),
+      () => "conv-positioning",
+      undefined,
+      () => messageIds.shift() ?? "msg_unexpected",
+    );
+    const conversation = await store.create();
+
+    await store.appendMessage(conversation.id, { role: "user", content: "Hello" });
+    const saved = await store.appendMessage(conversation.id, { role: "assistant", content: "Hi" });
+
+    expect(saved.messages.map(({ id, position, revision }) => ({ id, position, revision }))).toEqual([
+      { id: "msg_user", position: 1, revision: 1 },
+      { id: "msg_assistant", position: 2, revision: 1 },
+    ]);
+    const meta = JSON.parse(await readFile(join(root, "conversations", "conv-positioning.meta.json"), "utf8"));
+    expect(meta.nextMessagePosition).toBe(3);
+  });
+
+  it("normalizes legacy JSONL identity once and continues after its persisted high-water position", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-legacy-positioning-"));
+    const path = join(root, "agent-conversations.json");
+    const dir = join(root, "conversations");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "conv-legacy-positioning.meta.json"), JSON.stringify({
+      id: "conv-legacy-positioning",
+      title: "Legacy",
+      createdAt: "2026-08-08T09:00:00.000Z",
+      updatedAt: "2026-08-08T09:01:00.000Z",
+      messageCount: 2,
+    }), "utf8");
+    await writeFile(join(dir, "conv-legacy-positioning.jsonl"), [
+      JSON.stringify({ role: "user", content: "old user", createdAt: "same-clock" }),
+      JSON.stringify({ role: "assistant", content: "old assistant", createdAt: "same-clock" }),
+      "",
+    ].join("\n"), "utf8");
+
+    const first = new AgentConversationStore(path);
+    const migrated = await first.get("conv-legacy-positioning");
+    expect(migrated?.messages.map(({ id, position, revision }) => ({ id, position, revision }))).toEqual([
+      { id: expect.stringMatching(/^msg_legacy_/), position: 1, revision: 1 },
+      { id: expect.stringMatching(/^msg_legacy_/), position: 2, revision: 1 },
+    ]);
+
+    const stableIds = migrated?.messages.map((message) => message.id);
+    const second = new AgentConversationStore(
+      path,
+      () => new Date("2026-08-08T10:00:00.000Z"),
+      () => "unused-conversation-id",
+      undefined,
+      () => "msg_new",
+    );
+    const appended = await second.appendMessage("conv-legacy-positioning", { role: "user", content: "new user" });
+    expect(appended.messages.slice(0, 2).map((message) => message.id)).toEqual(stableIds);
+    expect(appended.messages.at(-1)).toMatchObject({ id: "msg_new", position: 3, revision: 1 });
+    const meta = JSON.parse(await readFile(join(dir, "conv-legacy-positioning.meta.json"), "utf8"));
+    expect(meta.nextMessagePosition).toBe(4);
+  });
+
+  it("seals a reserved assistant into its original position after a newer append", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-reservation-"));
+    const path = join(root, "agent-conversations.json");
+    const messageIds = ["msg_user_1", "msg_assistant_1", "msg_user_2"];
+    const store = new AgentConversationStore(
+      path,
+      () => new Date("2026-08-08T10:00:00.000Z"),
+      () => "conv-reservation",
+      undefined,
+      () => messageIds.shift() ?? "msg_unexpected",
+    );
+    const conversation = await store.create();
+    await store.appendMessage(conversation.id, { role: "user", content: "first" });
+    const slot = await store.reserveAssistant(conversation.id, "trace-first");
+    await store.appendMessage(conversation.id, { role: "user", content: "newer" });
+
+    const sealed = await store.sealAssistant(conversation.id, "trace-first", {
+      role: "assistant",
+      content: "answer to first",
+      traceId: "trace-first",
+    });
+
+    expect(slot).toEqual({ messageId: "msg_assistant_1", position: 2, revision: 0 });
+    expect(sealed.messages.map((message) => `${message.position}:${message.content}`)).toEqual([
+      "1:first",
+      "2:answer to first",
+      "3:newer",
+    ]);
+  });
+
+  it("reuses an interrupted assistant identity when retry reserves a replacement", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-resume-slot-"));
+    const path = join(root, "agent-conversations.json");
+    const messageIds = ["msg_user", "msg_interrupted"];
+    const store = new AgentConversationStore(
+      path,
+      () => new Date("2026-08-08T10:00:00.000Z"),
+      () => "conv-resume-slot",
+      undefined,
+      () => messageIds.shift() ?? "msg_unexpected",
+    );
+    const conversation = await store.create();
+    await store.appendMessage(conversation.id, { role: "user", content: "go" });
+    const interrupted = await store.appendMessage(conversation.id, {
+      role: "assistant",
+      content: "partial",
+      status: "interrupted",
+    });
+    const original = interrupted.messages.at(-1)!;
+
+    const slot = await store.reserveAssistant(conversation.id, "trace-resume", { replaceLastInterrupted: true });
+    const sealed = await store.sealAssistant(conversation.id, "trace-resume", {
+      role: "assistant",
+      content: "complete",
+      traceId: "trace-resume",
+    });
+
+    expect(slot).toEqual({ messageId: original.id, position: original.position, revision: original.revision });
+    expect(sealed.messages).toHaveLength(2);
+    expect(sealed.messages.at(-1)).toMatchObject({
+      id: original.id,
+      position: original.position,
+      revision: 2,
+      content: "complete",
+    });
+  });
+
+  it("treats a repeated seal for the same trace as idempotent", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-idempotent-seal-"));
+    const path = join(root, "agent-conversations.json");
+    const store = new AgentConversationStore(path);
+    const conversation = await store.create();
+    await store.appendMessage(conversation.id, { role: "user", content: "go" });
+    await store.reserveAssistant(conversation.id, "trace-once");
+    await store.sealAssistant(conversation.id, "trace-once", {
+      role: "assistant",
+      content: "done",
+      traceId: "trace-once",
+    });
+
+    const repeated = await store.sealAssistant(conversation.id, "trace-once", {
+      role: "assistant",
+      content: "done",
+      traceId: "trace-once",
+    });
+
+    expect(repeated.messages.filter((message) => message.traceId === "trace-once")).toHaveLength(1);
+  });
+
   it("persists conversations, messages, and compaction checkpoints across store instances", async () => {
     const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-"));
     const path = join(root, "agent-conversations.json");
@@ -35,6 +188,7 @@ describe("AgentConversationStore", () => {
     expect(loaded?.checkpoint).toEqual({
       summary: "The user asked to investigate MCP logs.",
       compactedMessageCount: 2,
+      compactedThroughPosition: 2,
       via: "provider",
       compactionCount: 2,
     });
@@ -104,11 +258,47 @@ describe("AgentConversationStore", () => {
 
     const loaded = await new AgentConversationStore(path).get(conversation.id);
     expect(loaded?.messages[1]?.steps).toEqual([
-      { type: "reasoning", content: "I should check what plugins are available." },
-      { type: "tool_calls", calls: [{ id: "call-1", name: "mcp_list", ok: true, args: { q: "plugins" }, output: '{"count":2}' }] },
-      { type: "reasoning", content: "There are 2 plugins: Mail and Notes." },
-      { type: "text", content: "There are 2 plugins." },
+      { type: "reasoning", stepPosition: 1, content: "I should check what plugins are available." },
+      { type: "tool_calls", stepPosition: 2, calls: [{ id: "call-1", callPosition: 1, name: "mcp_list", ok: true, args: { q: "plugins" }, output: '{"count":2}' }] },
+      { type: "reasoning", stepPosition: 3, content: "There are 2 plugins: Mail and Notes." },
+      { type: "text", stepPosition: 4, content: "There are 2 plugins." },
     ]);
+  });
+
+  it("keeps the interrupted reasoning and tool history when a tool resume completes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-"));
+    const store = new AgentConversationStore(join(root, "agent-conversations.json"));
+    const conversation = await store.create();
+    await store.appendMessage(conversation.id, {
+      role: "assistant",
+      content: "Working on it…",
+      status: "interrupted",
+      reasoning: "First I inspected the project structure.",
+      toolCalls: [{ id: "tool-1", name: "kanban.list", args: {}, ok: true, output: "old result" }],
+      steps: [
+        { type: "reasoning", content: "First I inspected the project structure." },
+        { type: "tool_calls", calls: [{ id: "tool-1", name: "kanban.list", args: {}, ok: true, output: "old result" }] },
+      ],
+    });
+
+    const resumed = await store.replaceLastInterrupted(conversation.id, {
+      role: "assistant",
+      content: "The tickets are ready.",
+      reasoning: "Now I created the remaining tickets.",
+      toolCalls: [{ id: "tool-2", name: "kanban.create", args: {}, ok: true, output: "created" }],
+      steps: [
+        { type: "reasoning", content: "Now I created the remaining tickets." },
+        { type: "tool_calls", calls: [{ id: "tool-2", name: "kanban.create", args: {}, ok: true, output: "created" }] },
+      ],
+    });
+
+    const message = resumed.messages.at(-1)!;
+    expect(message.content).toBe("The tickets are ready.");
+    expect(message.reasoning).toContain("First I inspected the project structure.");
+    expect(message.reasoning).toContain("Now I created the remaining tickets.");
+    expect(message.toolCalls).toHaveLength(2);
+    expect(message.steps).toHaveLength(4);
+    expect(message.status).toBeUndefined();
   });
 
   it("persists workspace across store instances", async () => {
@@ -265,6 +455,68 @@ describe("AgentConversationStore", () => {
     expect(updated.messages[1]?.resumeMessages).toBeUndefined();
   });
 
+  it("replaces an existing interrupted tail instead of stacking recovery failures", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-"));
+    const path = join(root, "agent-conversations.json");
+    const store = new AgentConversationStore(path, () => new Date("2026-08-01T10:00:00.000Z"), () => "conv-recovery-tail");
+    const conversation = await store.create();
+    await store.appendMessage(conversation.id, { role: "user", content: "Continue the work" });
+    await store.appendMessage(conversation.id, {
+      role: "assistant",
+      content: "Old provider failure",
+      status: "interrupted",
+    });
+    await store.appendMessage(conversation.id, {
+      role: "assistant",
+      content: "Newer provider failure",
+      status: "interrupted",
+    });
+
+    const first = await store.appendOrReplaceLastInterrupted(conversation.id, {
+      role: "assistant",
+      content: "First provider failure",
+      status: "interrupted",
+    });
+    const second = await store.appendOrReplaceLastInterrupted(conversation.id, {
+      role: "assistant",
+      content: "Second provider failure",
+      status: "interrupted",
+    });
+
+    expect(first.messages).toHaveLength(2);
+    expect(second.messages).toHaveLength(2);
+    expect(second.messages.at(-1)?.content).toBe("Second provider failure");
+  });
+
+  it("keeps sealed thinking when a later recovery failure replaces the interrupted tail", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-"));
+    const path = join(root, "agent-conversations.json");
+    const store = new AgentConversationStore(path, () => new Date("2026-08-08T10:00:00.000Z"), () => "conv-recovery-thinking");
+    const conversation = await store.create();
+    await store.appendMessage(conversation.id, { role: "user", content: "Continue the work" });
+    await store.appendMessage(conversation.id, {
+      role: "assistant",
+      content: "The provider stopped after planning.",
+      status: "interrupted",
+      reasoning: "I found the affected files and was about to apply the fix.",
+      steps: [{ type: "reasoning", content: "I found the affected files and was about to apply the fix." }],
+    });
+
+    const updated = await store.appendOrReplaceLastInterrupted(conversation.id, {
+      role: "assistant",
+      content: "The retry also failed before emitting a new reasoning delta.",
+      status: "interrupted",
+    });
+
+    const message = updated.messages.at(-1)!;
+    expect(updated.messages).toHaveLength(2);
+    expect(message.content).toBe("The retry also failed before emitting a new reasoning delta.");
+    expect(message.reasoning).toContain("I found the affected files");
+    expect(message.steps).toEqual([
+      { type: "reasoning", stepPosition: 1, content: "I found the affected files and was about to apply the fix." },
+    ]);
+  });
+
   it("rejects replaceLastInterrupted when the last message is not interrupted", async () => {
     const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-"));
     const path = join(root, "agent-conversations.json");
@@ -279,7 +531,7 @@ describe("AgentConversationStore", () => {
     })).rejects.toThrow("not an interrupted assistant message");
   });
 
-  it("drops resumeMessages when the serialized message exceeds the budget", async () => {
+  it("preserves resumeMessages larger than the former 512 KiB cap", async () => {
     const root = await mkdtemp(join(tmpdir(), "nusashell-conversations-"));
     const path = join(root, "agent-conversations.json");
     const store = new AgentConversationStore(path, () => new Date("2026-08-01T10:00:00.000Z"), () => "conv-large");
@@ -295,7 +547,7 @@ describe("AgentConversationStore", () => {
 
     const loaded = await new AgentConversationStore(path).get(conversation.id);
     expect(loaded?.messages[1]?.status).toBe("interrupted");
-    expect(loaded?.messages[1]?.resumeMessages).toBeUndefined();
+    expect(loaded?.messages[1]?.resumeMessages).toEqual(hugeResume);
   });
 
   it("normalizes a legacy version-1 document without canvas artifacts and fills empty", async () => {
@@ -528,6 +780,7 @@ describe("AgentConversationStore Codex-style 2-file layout", () => {
     expect(loaded?.checkpoint).toEqual({
       summary: "Summarized so far",
       compactedMessageCount: 1,
+      compactedThroughPosition: 1,
       via: "extractive",
       compactionCount: 1,
     });
@@ -674,4 +927,3 @@ describe("AgentConversationStore Codex-style 2-file layout", () => {
     expect(JSON.parse(lines[1]!).content).toBe("B complete");
   });
 });
-

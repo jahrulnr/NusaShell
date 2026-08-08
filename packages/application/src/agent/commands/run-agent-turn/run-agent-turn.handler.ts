@@ -14,12 +14,17 @@ import {
   type AgentContextUpdate,
   type AgentTurnStep,
 } from "../../services/agent-turn-runner.js";
-import { injectPrompts, type PromptVars } from "../../services/prompt-injector.js";
+import {
+  injectPrompts,
+  machineCurrentTime,
+  machineTimeZone,
+  stableCurrentDate,
+  type PromptVars,
+} from "../../services/prompt-injector.js";
 import { detectRuntimeOs, type RuntimeOsProbe } from "../../services/runtime-os.js";
 import { formatMemoryPrompt } from "../../services/memory-prompt-formatter.js";
 import { formatTodoPrompt } from "../../services/todo-prompt-formatter.js";
 import { buildSkillsCatalogPrompt } from "../../services/skills-catalog-formatter.js";
-import { formatMcpLivePrompt } from "../../services/mcp-live-prompt-formatter.js";
 import type { ConversationTodoPort } from "../../ports/conversation-todo.port.js";
 import type { MemoryStorePort } from "../../../memory/ports/memory-store.port.js";
 import type { SkillRegistryPort } from "../../../skill/ports/skill-registry.port.js";
@@ -36,6 +41,7 @@ import type { TelemetryPort } from "../../../telemetry/telemetry.port.js";
 import { buildTurnTelemetry } from "../../../telemetry/build-turn-telemetry.js";
 import { randomUUID } from "node:crypto";
 import type { AgentMessage } from "../../ports/agent-provider.port.js";
+import { RuntimeHydrationBuilder } from "../../services/runtime-hydration.js";
 
 export interface AgentRuntimeSettings {
   maxToolRounds: number;
@@ -55,9 +61,6 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
   private readonly streamingBuffers = new Map<string, { kind: "text" | "reasoning"; content: string }>();
   /** Process-lifetime round-robin cursor shared across all turns (A2). */
   private readonly roundRobinCursor = { value: 0 };
-  /** Date is session-stable; it must not churn the cacheable prompt prefix. */
-  private readonly promptSessionDate = new Date().toISOString().slice(0, 10);
-
   constructor(
     private readonly providers: AgentProviderRegistryPort,
     private readonly toolGateway: AgentToolGateway,
@@ -104,6 +107,8 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
       readonly telemetry?: TelemetryPort;
       /** Wall-clock seam for telemetry timing (defaults to `Date.now`). */
       readonly now?: () => number;
+      /** Prevent TODO-driven continuation from racing an async tool in this room. */
+      readonly hasRunningBackgroundJobs?: (conversationId: string) => boolean;
     },
   ) {}
 
@@ -143,7 +148,12 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
     }
     this.onTurnStarted?.(traceId);
     if (conversationId && this.activeTurns) {
-      this.activeTurns.start({ conversationId, traceId });
+      this.activeTurns.start({
+        conversationId,
+        traceId,
+        ...(command.messageId ? { messageId: command.messageId } : {}),
+        ...(command.messagePosition !== undefined ? { messagePosition: command.messagePosition } : {}),
+      });
       this.publishProgress(conversationId);
     }
     this.toolGateway.beginTurn?.(traceId, {
@@ -154,14 +164,39 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
     const injected = command.resume
       ? { messages: command.messages }
       : await this.injectSystemPrompts(command, traceId);
-    const messages = injected.messages;
     const promptCache = "promptCache" in injected ? injected.promptCache : undefined;
     // On a resume path the live messages skip injectSystemPrompts for cost. The
     // compactor still needs the injected system prefix so its summarizer sees
     // the same session context as a normal turn; supply it separately.
-    const systemContext = command.resume
-      ? await this.injectedSystemMessages(command, traceId)
+    const resumeInjected = command.resume
+      ? await this.injectSystemPrompts(command, traceId)
       : undefined;
+    const systemContext = resumeInjected?.messages.filter((message) => message.role === "system");
+    // Hydration is assembled once per boundary (fresh room / post-compaction)
+    // and appended ephemeral AFTER real history (Option B). On a resume path we
+    // do NOT rebuild a stale synthetic checkpoint: the runner re-hydrates after
+    // compaction only. A normal later turn (not resume, not fresh) stays as-is.
+    const hydrationFactory = this.hydrationFactory();
+    this.handlerWorkspace = command.workspace;
+    let messages = injected.messages;
+    if (!command.resume) {
+      // Fresh-room detection from durable conversation state is applied by the
+      // caller (conversationId present + no prior history). For a normal later
+      // turn the caller passes full history; here we only inject when the
+      // conversation is clearly brand-new (single user message, no assistant
+      // history). A fresh-room first request is identified by `messages` being
+      // exactly the injected system tail + one user message (no prior turns).
+      const hasPriorAssistant = injected.messages.some((m) => m.role === "assistant");
+      const isFreshRoom = !hasPriorAssistant && injected.messages.filter((m) => m.role === "user").length === 1;
+      if (isFreshRoom && hydrationFactory) {
+        try {
+          const transcript = await hydrationFactory();
+          if (transcript.length > 0) messages = [...messages, ...transcript];
+        } catch {
+          this.logger?.warn("Agent hydration build failed on fresh-room traceId=%s", traceId);
+        }
+      }
+    }
     let turnEndReason: "completed" | "cancelled" | "failed" | "superseded" = "completed";
     const turnStartedAtMs = this.now();
     try {
@@ -171,6 +206,15 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
         traceId,
         signal,
         ...(systemContext ? { systemContext } : {}),
+        ...(hydrationFactory ? { buildHydrationTranscript: hydrationFactory } : {}),
+        todoPromptForCompaction: () => {
+          if (!conversationId || !this.todoPort) return undefined;
+          try {
+            return formatTodoPrompt(this.todoPort.get(conversationId));
+          } catch {
+            return undefined;
+          }
+        },
         ...(command.interactive !== undefined ? { interactive: command.interactive } : {}),
         ...(command.workspace !== undefined ? { workspace: command.workspace } : {}),
         ...(promptCache ? { promptCache } : {}),
@@ -387,19 +431,6 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
     }
   }
 
-  /**
-   * Build ONLY the injected system messages for a resumed turn's compactor.
-   * Never mutates the turn messages themselves (resume skips full injection to
-   * save re-sealing cost); this prefix is consumed by `ContextCompactor` to
-   * keep the summarizer input equivalent to a normal turn.
-   */
-  private async injectedSystemMessages(command: RunAgentTurnCommand, traceId: string): Promise<AgentMessage[]> {
-    if (!this.promptLoader) return [];
-    const result = await this.injectSystemPrompts(command, traceId);
-    const messages = "messages" in result ? result.messages : [];
-    return messages.filter((m) => m.role === "system");
-  }
-
   private async injectSystemPrompts(command: RunAgentTurnCommand, traceId: string) {
     if (!this.promptLoader) return { messages: command.messages };
     try {
@@ -414,11 +445,17 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
           this.logger?.warn("Subagent routing info resolve failed: %s", error instanceof Error ? error.message : String(error));
         }
       }
+      const promptNow = new Date();
       const vars: PromptVars = {
-        currentDate: this.promptSessionDate,
+        currentDate: stableCurrentDate(promptNow),
+        currentTime: machineCurrentTime(promptNow),
+        timeZone: machineTimeZone(),
         environment: process.env.NODE_ENV === "production" ? "production" : "development",
         runtimeOs: detectRuntimeOs(this.runtimeOsProbe),
-        availableTools: tools.map((tool) => tool.name).join(", "),
+        // `tools[]` is delivered through the provider contract. Do not mirror
+        // this volatile list into the developer/system prompt: the runtime
+        // checkpoint carries catalog awareness without invalidating that prefix.
+        availableTools: "",
         ...(command.workspace ? { workspace: command.workspace } : {}),
         ...(subagentRouting?.availableSubagents ? { availableSubagents: subagentRouting.availableSubagents } : {}),
         ...(subagentRouting?.defaultSubagent ? { defaultSubagent: subagentRouting.defaultSubagent } : {}),
@@ -448,19 +485,7 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
       const continuePrompt = (command.autoContinueIndex ?? 0) > 0
         ? await this.loadContinuePrompt()
         : undefined;
-      // Live MCP runtime snapshot: full running catalog (name + description +
-      // inputSchema) for every tool on running plugins. Built once per
-      // agent.run (pre-tool). Duck-typed so stub/review gateways skip it.
-      let mcpLivePrompt: string | undefined;
-      if (typeof this.toolGateway.getMcpLiveSnapshot === "function") {
-        try {
-          const snapshot = await this.toolGateway.getMcpLiveSnapshot(traceId);
-          mcpLivePrompt = formatMcpLivePrompt(snapshot);
-        } catch (error) {
-          this.logger?.warn("MCP live snapshot build failed: %s", error instanceof Error ? error.message : String(error));
-        }
-      }
-      const { messages: injected, summary, promptCache } = injectPrompts(prompts, vars, command.messages, command.userPrompt ?? this.userPrompt, memoryPrompt, subagentPrompt, todoPrompt, skillsCatalogPrompt, continuePrompt, mcpLivePrompt);
+      const { messages: injected, summary, promptCache } = injectPrompts(prompts, vars, command.messages, command.userPrompt ?? this.userPrompt, memoryPrompt, subagentPrompt, todoPrompt, skillsCatalogPrompt, continuePrompt);
       this.logger?.debug(summary.toDebugLine(traceId));
       return { messages: injected, promptCache };
     } catch (error) {
@@ -468,6 +493,52 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
       return { messages: command.messages };
     }
   }
+
+  /**
+   * Factory for the ephemeral hydration transcript (Task 4). Called once for
+   * fresh-room and again post-compaction by the runner. Reuses the same
+   * read-only snapshot sources as prompt injection (memory/skills/MCP) — never
+   * executes the gateway and never mutates anything.
+   */
+  private hydrationFactory(_workspace?: string): (() => Promise<readonly AgentMessage[]>) | undefined {
+    const memoryStore = this.memoryStore;
+    const skillRegistry = this.skillRegistry;
+    const gatewayAuth = (this.toolGateway as { getMcpLiveSnapshot?: (turnId: string) => Promise<import("../../services/mcp-live-prompt-formatter.js").McpLiveSnapshot> }).getMcpLiveSnapshot;
+    if (!gatewayAuth && !memoryStore && !skillRegistry) return undefined;
+    const getMcpLiveSnapshot = gatewayAuth?.bind(this.toolGateway);
+    // Runtime context snapshot is assembled from the same session-stable
+    // sources as prompt injection vars (date/env/os/workspace/subagents).
+    const runtimeContext: import("../../services/runtime-hydration.js").RuntimeContextSnapshot = {
+      currentDate: stableCurrentDate(new Date()),
+      environment: process.env.NODE_ENV === "production" ? "production" : "development",
+      runtimeOs: detectRuntimeOs(this.runtimeOsProbe),
+      ...(this.handlerWorkspace ? { workspace: this.handlerWorkspace } : {}),
+    };
+    return async () => {
+      let mcpLive;
+      try {
+        mcpLive = getMcpLiveSnapshot
+          ? await getMcpLiveSnapshot("hydration")
+          : { running: [], tools: [] };
+      } catch {
+        mcpLive = { running: [], tools: [] };
+      }
+      const builder = new RuntimeHydrationBuilder({
+        ...(memoryStore ? { memory: memoryStore } : {}),
+        ...(skillRegistry ? { skills: skillRegistry } : {}),
+        mcpLive,
+        runtimeContext,
+      });
+      const { messages } = await builder.build();
+      return messages;
+    };
+  }
+
+  /**
+   * Conversation workspace captured at handle() so the hydration factory can
+   * include it in the runtime_context snapshot without re-reading state.
+   */
+  private handlerWorkspace: string | undefined = undefined;
 
   private async loadCompactPrompt(): Promise<string | undefined> {
     if (!this.promptLoader) return undefined;
@@ -500,6 +571,8 @@ export class RunAgentTurnHandler implements CommandHandler<RunAgentTurnCommand, 
       maxAutoContinues: normalizeMaxAutoContinues(this.runtime.maxAutoContinues),
       turnOk: true,
       hasConversation: true,
+      turnText: result.text,
+      hasRunningBackgroundJobs: this.hooks?.hasRunningBackgroundJobs?.(command.conversationId) === true,
     });
     return { ...result, autoContinue: decision };
   }

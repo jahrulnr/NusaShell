@@ -32,6 +32,7 @@ import {
   type AgentTurnResult,
   type AgentTurnPartial,
   type TelemetryPort,
+  type ConversationTodoPort,
   withTelemetry,
 } from "@nusashell/application";
 import {
@@ -57,6 +58,12 @@ export interface ContainerOptions {
   readonly pluginsRoot?: string;
   readonly bundledPluginsRoot?: string;
   readonly userPluginsRoot?: string;
+  /**
+   * When true (default) and bundledPluginsRoot differs from userPluginsRoot,
+   * bundled plugins are seeded/copied into the single writable user root at
+   * startup and reconciled by version (Decision #49 — option B, fully writable).
+   */
+  readonly seedBundledPlugins?: boolean;
   readonly promptsRoot?: string;
   readonly docsRoot?: string;
   readonly docsIndexStorageRoot?: string;
@@ -168,6 +175,8 @@ export interface Container {
   readonly memoryStore: MemoryStorePort;
   /** Shell-owned progressive MCP catalog gateway (grant/enable/live snapshot). */
   readonly agentToolGateway: import("./composers/agent-runtime.js").AgentRuntimeParts["agentToolGateway"];
+  readonly agentTurnCoordinator: import("./composers/agent-runtime.js").AgentRuntimeParts["agentTurnCoordinator"];
+  readonly conversationTodos: ConversationTodoPort;
   readonly db?: SqliteDatabase | undefined;
   readonly logger: Logger;
   configureAi(settings: {
@@ -268,6 +277,8 @@ export function createContainer(options: ContainerOptions): Container {
     learningGraph: skills.learningGraph,
     memoryStore: skills.memoryStore,
     agentToolGateway: agent.agentToolGateway,
+    agentTurnCoordinator: agent.agentTurnCoordinator,
+    conversationTodos: agent.conversationTodos,
     db: plugin.db,
     logger,
     configureAi: (settings) => aiConfiguration.configureAi(settings),

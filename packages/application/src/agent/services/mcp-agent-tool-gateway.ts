@@ -39,7 +39,7 @@ import { execTodo } from "./todo-tool-handler.js";
 import { execAsyncRun, execAsyncWait, execAsyncPeek, execAsyncKill } from "./async-tool-handlers.js";
 import type { AsyncToolRuntime } from "./async-tool-runtime.js";
 import { execMcpRegister, execMcpUnregister, type McpPluginRegistrationDeps } from "./mcp-plugin-tool-handlers.js";
-import { emptySchema, type McpToolRoute, type WriteOrigin, type SkillApprovalStagingPort } from "./gateway-types.js";
+import { emptySchema, type McpToolRoute, type SkillApprovalStagingPort } from "./gateway-types.js";
 import { GatewayRouteStore } from "./gateway-route-store.js";
 import { GatewayLiveSnapshot } from "./gateway-live-snapshot.js";
 import { buildMetaToolDefinitions, compact } from "./gateway-meta-tools.js";
@@ -62,7 +62,6 @@ export type { WriteOrigin, SkillApprovalStagingPort, McpToolRoute } from "./gate
 export class McpAgentToolGateway implements AgentToolGateway {
   private readonly routes: GatewayRouteStore;
   private readonly live: GatewayLiveSnapshot;
-  private writeOrigin: WriteOrigin = "foreground";
   private writeApprovalEnabled = false;
   private jobStore?: JobStorePort;
   private jobScheduler?: JobScheduler;
@@ -89,8 +88,6 @@ export class McpAgentToolGateway implements AgentToolGateway {
     this.live = new GatewayLiveSnapshot(runtimeManager, this.routes, this.logger);
   }
 
-  setWriteOrigin(origin: WriteOrigin): void { this.writeOrigin = origin; }
-  getWriteOrigin(): WriteOrigin { return this.writeOrigin; }
   setWriteApprovalEnabled(enabled: boolean): void { this.writeApprovalEnabled = enabled; }
 
   /** Late-bind job deps after construction (agent is built before jobs in the container). */
@@ -256,7 +253,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
         }
         return execAsyncKill(this.asyncToolRuntime, args);
       }
-      case "skill_manage": return execSkillManage(this.skillRegistry, this.skillProvenance, this.skillUsage, this.approvalStaging, this.logger, this.writeOrigin, this.writeApprovalEnabled, args);
+      case "skill_manage": return execSkillManage(this.skillRegistry, this.skillProvenance, this.skillUsage, this.approvalStaging, this.logger, this.routes.writeOriginOf(turnId), this.writeApprovalEnabled, args);
       case "job": {
         const providerId = this.routes.providerIdOf(turnId);
         const model = this.routes.modelOf(turnId);
@@ -278,11 +275,12 @@ export class McpAgentToolGateway implements AgentToolGateway {
           }
           const runtime = this.asyncToolRuntime;
           const workspace = this.routes.workspaceOf(turnId);
+          const parentConversationId = this.routes.conversationIdOf(turnId);
           return execAsyncRun(runtime, args, {
             conversationId,
             ...(turnId ? { traceId: turnId } : {}),
             kind: "subagent",
-            spawnWork: (_handleSignal, handleId) => execSubagent(this.subagentPort, args, turnId, workspace, this.logger).then((result) => {
+            spawnWork: (_handleSignal, handleId) => execSubagent(this.subagentPort, args, turnId, workspace, this.logger, parentConversationId).then((result) => {
               // Store the subagent result in the handle's tail for peek.
               if (result && typeof result === "object" && "summary" in result) {
                 runtime.appendTail(handleId, String((result as { summary?: unknown }).summary ?? ""));
@@ -291,7 +289,14 @@ export class McpAgentToolGateway implements AgentToolGateway {
             }),
           });
         }
-        return execSubagent(this.subagentPort, args, turnId, this.routes.workspaceOf(turnId), this.logger);
+        return execSubagent(
+          this.subagentPort,
+          args,
+          turnId,
+          this.routes.workspaceOf(turnId),
+          this.logger,
+          this.routes.conversationIdOf(turnId),
+        );
       }
       default: return this.callGrantedTool(name, args, requestId, turnId, options?.signal);
     }
@@ -362,6 +367,19 @@ export class McpAgentToolGateway implements AgentToolGateway {
   }
 
   private async listAllTools(args: Readonly<Record<string, unknown>>): Promise<unknown> {
+    // pluginId omitted: list tools across ALL running plugins using the read-only
+    // live snapshot (name + description + inputSchema, redacted).
+    if (args.pluginId === undefined) {
+      const snapshot = await this.live.getMcpLiveSnapshot("__hydration__");
+      const tools = snapshot.tools.map((t) => ({
+        name: t.providerName,
+        pluginId: t.pluginId,
+        toolName: t.toolName,
+        description: t.description,
+        inputSchema: t.inputSchema,
+      }));
+      return { pluginId: undefined, count: tools.length, tools, acrossAll: true, runningPlugins: snapshot.running.map((p) => p.pluginId) };
+    }
     const pluginIdValue = requireString(args.pluginId, "pluginId");
     const tools = await this.runtimeManager.listTools(parsePluginId(pluginIdValue));
     const hits = tools.map((tool) => ({ name: tool.name, ...(tool.description ? { description: tool.description } : {}) }));

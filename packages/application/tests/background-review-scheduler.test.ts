@@ -112,10 +112,22 @@ describe("BackgroundReviewScheduler", () => {
     expect(state.toolRoundsSinceSkill).toBe(3);
   });
 
+  it("serializes concurrent ticks so review counters are not lost", async () => {
+    scheduler.configure({ memoryEveryNTurns: 100, skillEveryNToolRounds: 100 });
+    await Promise.all([
+      scheduler.tick(makeResult({ rounds: 1 })),
+      scheduler.tick(makeResult({ rounds: 2 })),
+    ]);
+    const state = await stateStore.load();
+    expect(state.turnsSinceMemory).toBe(2);
+    expect(state.toolRoundsSinceSkill).toBe(3);
+  });
+
   it("spawns memory review when turnsSinceMemory crosses threshold", async () => {
     scheduler.configure({ memoryEveryNTurns: 1, skillEveryNToolRounds: 100 });
-    await scheduler.tick(makeResult({ rounds: 0 }));
+    await scheduler.tick(makeResult({ rounds: 0, providerId: "parent-provider" }));
     expect(runnerFactory).toHaveBeenCalledTimes(1);
+    expect(providerRegistry.get).toHaveBeenCalledWith("parent-provider");
     const state = await stateStore.load();
     expect(state.turnsSinceMemory).toBe(0);
   });

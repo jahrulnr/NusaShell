@@ -267,14 +267,32 @@ export class JobsController {
     const stopBtn = row.querySelector('[data-control="job-stop-btn"]');
     const runBtn = row.querySelector('[data-control="job-run-btn"]');
     const toggleBtn = row.querySelector('[data-control="job-toggle-btn"]');
+    const stripNext = row.querySelector(".job-strip-next");
+    const job = this.list.find((j) => j.id === jobId);
     if (running) {
       if (stopBtn) stopBtn.hidden = false;
       if (runBtn) runBtn.disabled = true;
       if (toggleBtn) toggleBtn.disabled = true;
+      if (stripNext) {
+        stripNext.textContent = "running…";
+        stripNext.title = "";
+      }
     } else {
       if (stopBtn) stopBtn.hidden = true;
       if (runBtn) runBtn.disabled = false;
       if (toggleBtn) toggleBtn.disabled = false;
+      if (stripNext) {
+        if (job?.enabled && job.nextRunAt) {
+          stripNext.textContent = `next ${humanizeNextRun(job.nextRunAt)}`;
+          stripNext.title = new Date(job.nextRunAt).toLocaleString();
+        } else if (job && !job.enabled) {
+          stripNext.textContent = "paused";
+          stripNext.title = "";
+        } else {
+          stripNext.textContent = "next —";
+          stripNext.title = "";
+        }
+      }
     }
   }
 
@@ -567,7 +585,7 @@ export class JobsController {
       for (const eff of efforts) {
         const opt = document.createElement("option");
         opt.value = eff;
-        opt.textContent = eff;
+        opt.textContent = eff === "auto" ? "Default" : eff;
         effortSelect.appendChild(opt);
       }
     } else {
@@ -577,7 +595,11 @@ export class JobsController {
   }
 
   async _loadPluginOptions() {
-    this._plugins = await fetchPlugins();
+    try {
+      this._plugins = await fetchPlugins();
+    } catch {
+      this._plugins = [];
+    }
     const select = this.els.fieldPluginId;
     select.textContent = "";
     const placeholder = document.createElement("option");

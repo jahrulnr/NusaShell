@@ -31,14 +31,15 @@ accepts:
 | `every 30m` / `30m` | interval every 30 minutes (timezone-independent) |
 | `every 2h` / `2h` | interval every 2 hours |
 | `every 1d` / `1d` | interval every 1 day |
-| `0 9 * * *` | 5-field cron (**UTC** hour/minute, not local wall clock) |
+| `0 9 * * *` | 5-field cron (host machine-local hour/minute) |
 | `2025-12-01T09:00:00Z` | one-shot at a specific UTC instant |
-| `2025-12-01 09:00` (no offset) | one-shot; parser appends `Z` so this is also UTC |
+| `2025-12-01 09:00` (no offset) | one-shot at that host machine-local wall-clock time |
 
-Agents and UI authors must convert the user's local time to UTC when writing
-cron or bare timestamps (e.g. 09:00 in UTC+7 → `0 2 * * *`). Intervals need
-no conversion. The Jobs UI may display `nextRunAt` in local time even though
-the stored schedule expression remains UTC.
+Cron and bare timestamps use the timezone configured on the host machine.
+Agents and UI authors must therefore treat `0 9 * * *` as 09:00 on that
+machine, matching the Jobs UI. Intervals need no conversion. Explicit `Z` or
+numeric-offset one-shots preserve a specified instant independently of the
+machine timezone.
 
 ### Grace rules
 
@@ -278,7 +279,7 @@ contract.
 
 - Jobs run only while the app is open. 
 - No cross-device sync. Jobs are local to the machine.
-- Cron is UTC-only.
+- Cron follows the host machine's local timezone.
 - No live token streaming into the Jobs UI; full output is available
   post-run via the output modal's "Show full output" button.
 

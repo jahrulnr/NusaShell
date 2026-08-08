@@ -21,16 +21,10 @@ describe("injectPrompts — subagent prompt", () => {
     { name: "mcp-tools", content: "MCP tools prompt", isTemplate: false },
   ];
 
-  const developerPrompt: AgentPrompt = {
-    name: "developer",
-    content: "Developer prompt with {{available_tools}}",
-    isTemplate: true,
-  };
-
   it("injects subagent prompt after static prompts when provided", () => {
     const messages: AgentMessage[] = [{ role: "user", content: "Hello" }];
     const result = inject(
-      [...staticPrompts, developerPrompt],
+      staticPrompts,
       vars,
       messages,
       undefined,
@@ -40,14 +34,12 @@ describe("injectPrompts — subagent prompt", () => {
     const systemContents = result.filter((m) => m.role === "system").map((m) => m.content as string);
     expect(systemContents).toContain("Subagent delegation guide");
     const subagentIdx = systemContents.indexOf("Subagent delegation guide");
-    const developerIdx = systemContents.indexOf("Developer prompt with mcp_list, subagent");
     expect(subagentIdx).toBeGreaterThan(-1);
-    expect(developerIdx).toBeGreaterThan(subagentIdx);
   });
 
   it("does not inject subagent prompt when undefined", () => {
     const messages: AgentMessage[] = [{ role: "user", content: "Hello" }];
-    const result = inject([...staticPrompts, developerPrompt], vars, messages);
+    const result = inject(staticPrompts, vars, messages);
     const systemContents = result.filter((m) => m.role === "system").map((m) => m.content as string);
     expect(systemContents).not.toContain("Subagent delegation guide");
   });

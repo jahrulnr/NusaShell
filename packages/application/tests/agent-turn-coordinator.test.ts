@@ -25,4 +25,15 @@ describe("AgentTurnCoordinator", () => {
     release();
     await first;
   });
+
+  it("cancels every active turn and waits until their cleanup hooks finish", async () => {
+    const coordinator = new AgentTurnCoordinator();
+    const running = ["trace-a", "trace-b"].map((traceId) => coordinator.run(traceId, (signal) =>
+      new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }))));
+
+    expect(coordinator.cancelAll()).toBe(2);
+    await coordinator.waitForIdle();
+    await Promise.all(running);
+    expect(coordinator.activeCount).toBe(0);
+  });
 });

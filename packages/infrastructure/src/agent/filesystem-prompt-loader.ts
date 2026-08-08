@@ -3,7 +3,6 @@ import { join } from "node:path";
 import type { AgentPrompt, PromptLoaderPort, ReviewPromptKind } from "@nusashell/application";
 
 const STATIC_PROMPT_FILES = ["system.md", "mcp-tools.md"] as const;
-const DEVELOPER_PROMPT_FILE = "developer.md";
 const COMPACT_PROMPT_FILE = "compact.md";
 const SUBAGENT_PROMPT_FILE = "subagent.md";
 const CONTINUE_PROMPT_FILE = "continue.md";
@@ -15,9 +14,10 @@ const REVIEW_PROMPT_FILES: Record<ReviewPromptKind, string> = {
 
 /**
  * Loads agent prompt files from a filesystem directory. Static prompts
- * (system.md, mcp-tools.md) are returned as-is; developer.md is flagged
- * as a template for {{var}} substitution. compact.md is loaded lazily
- * only when compaction runs. Review prompts are loaded on demand.
+ * (system.md, mcp-tools.md) are returned as the cache-stable prefix.
+ * Dynamic runtime facts arrive through the ephemeral hydration transcript;
+ * compact.md is loaded lazily only when compaction runs. Review prompts are
+ * loaded on demand.
  */
 export class FilesystemPromptLoader implements PromptLoaderPort {
   private cachedPrompts: readonly AgentPrompt[] | undefined;
@@ -35,8 +35,6 @@ export class FilesystemPromptLoader implements PromptLoaderPort {
       const content = await this.readPromptFile(file);
       prompts.push({ name: file.replace(/\.md$/, ""), content, isTemplate: false });
     }
-    const developerContent = await this.readPromptFile(DEVELOPER_PROMPT_FILE);
-    prompts.push({ name: "developer", content: developerContent, isTemplate: true });
     this.cachedPrompts = prompts;
     return prompts;
   }

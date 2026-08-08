@@ -1,4 +1,5 @@
 import type { AgentToolCall } from "@nusashell/application";
+import { extractReasoningText, stripKnownModelControlTokens } from "./text-tool-call-parser.js";
 
 export class SseTransportError extends Error {
   constructor(message: string) {
@@ -140,7 +141,7 @@ class ChatAccumulator {
     for (const rawChoice of choices) {
       const choice = record(rawChoice);
       const delta = record(choice.delta);
-      const text = textValue(delta.content);
+      const text = cleanTextDelta(delta.content);
       if (text) {
         this.text += text;
         this.onTextDelta?.(text);
@@ -238,7 +239,7 @@ class ResponsesAccumulator {
     if (typeof response.status === "string") this.status = response.status;
     if (response.usage !== undefined) this.usage = response.usage;
     if (type === "response.output_text.delta") {
-      const delta = textValue(event.delta);
+      const delta = cleanTextDelta(event.delta);
       this.text += delta;
       if (delta) this.onTextDelta?.(delta);
     }
@@ -360,7 +361,7 @@ class MessagesAccumulator {
       const block = this.contentBlocks.get(index) ?? { type: "" };
 
       if (deltaType === "text_delta") {
-        const text = textValue(delta.text);
+        const text = cleanTextDelta(delta.text);
         if (text) {
           this.text += text;
           block.text = (block.text ?? "") + text;
@@ -368,7 +369,7 @@ class MessagesAccumulator {
           this.onTextDelta?.(text);
         }
       } else if (deltaType === "thinking_delta") {
-        const thinking = textValue(delta.thinking);
+        const thinking = cleanTextDelta(delta.thinking);
         if (thinking) {
           this.reasoning += thinking;
           block.thinking = (block.thinking ?? "") + thinking;
@@ -453,18 +454,11 @@ function textValue(value: unknown): string {
  * with a `text` field. Returns "" for unrecognized shapes.
  */
 function reasoningTextValue(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) {
-    return value.map((raw) => {
-      const part = record(raw);
-      return textValue(part.text) || textValue(part.content) || textValue(part.thinking);
-    }).join("");
-  }
-  if (value && typeof value === "object") {
-    const obj = value as Record<string, unknown>;
-    return textValue(obj.text) || textValue(obj.content) || textValue(obj.thinking);
-  }
-  return "";
+  return extractReasoningText(value);
+}
+
+function cleanTextDelta(value: unknown): string {
+  return typeof value === "string" ? stripKnownModelControlTokens(value) : "";
 }
 
 function numberValue(value: unknown): number {

@@ -185,6 +185,11 @@ describe("AsyncToolRuntime", () => {
     const list2 = runtime.list("conv-2");
     expect(list1).toHaveLength(1);
     expect(list2).toHaveLength(1);
+    expect(list1[0]).toMatchObject({
+      kind: "mcp",
+      pluginId: "p",
+      toolName: "t",
+    });
     runtime.dispose();
   });
 

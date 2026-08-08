@@ -193,6 +193,8 @@ export const AgentRunRequestSchema = z.object({
     resume: z.boolean().optional(),
     supersedeTraceId: z.string().min(1).max(128).optional(),
     conversationId: z.string().min(1).max(128).optional(),
+    messageId: z.string().min(1).max(256).optional(),
+    messagePosition: z.number().int().positive().optional(),
     autoContinueIndex: z.number().int().min(0).max(100).optional(),
   }),
 });

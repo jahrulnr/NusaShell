@@ -5,6 +5,136 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-08-08
+
+### Added
+
+- **Room-scoped agent recovery.** Retry, Resume, Continue, cancellation, failed
+  turns, auto-continue errors, and stranded subagent cleanup now retain their
+  owning conversation instead of painting or mutating whichever room is
+  currently visible.
+- **Concurrent ACP subagent isolation.** Multiple subagents now keep separate
+  lifecycle state, stream disposers, drawer selection, and in-chat mini-card
+  streams. Switching rooms or selecting another subagent no longer causes the
+  latest event to replace unrelated UI.
+- **Durable conversation TODO storage.** TODO state is persisted per
+  conversation, survives installation and reloads, and is recovered without
+  allowing `make install` or a stale room snapshot to make the list disappear.
+- **Graceful desktop shutdown.** Soft quit waits for active agent work to reach
+  a safe idle boundary and preserves resumable state when shutdown cannot
+  complete immediately.
+
+### Changed
+
+- **Lean, cache-stable agent context.** Default turns now send only a compact
+  system and MCP workflow prefix. Runtime facts remain in the read-only
+  hydration transcript; detailed docs, skills, tool schemas, and delegation
+  guidance load progressively. The unused dynamic `developer.md` prompt was
+  removed.
+- **Machine-local scheduling and agent time.** Cron expressions and bare
+  one-shot timestamps now use the host machine's local clock, matching the
+  Jobs UI; explicit UTC/offset timestamps remain fixed instants. Agent runtime
+  context now receives the machine-local date, time, and IANA timezone for
+  each turn instead of a UTC date frozen at process start.
+- **Cache-stable runtime context checkpoints.** Live MCP catalogs (including
+  schemas), skills catalogs, and incomplete TODOs now travel in a hidden,
+  conversation-scoped runtime checkpoint rather than the volatile system
+  prefix. Compaction seals that checkpoint with its handoff summary and resume
+  refreshes it without rebuilding the full prompt. Full MCP awareness is no
+  longer limited by the provider's 96 typed-function working set.
+- Continuation follow-ups are injected after durable conversation history rather
+  than into the system prompt, preserving prompt-cache stability and avoiding
+  unnecessary provider cost. Failed continuation chains expose a room-local
+  Continue action.
+- TODO-driven auto-continuation now waits for a room's running background tool
+  jobs to settle, preventing a new turn from racing live output in the prior
+  turn; the room-scoped completion handoff resumes work with the final result.
+- Background review/learning and tool-job updates are filtered by conversation
+  ownership. Background job details are now collapsed by default and can be
+  expanded or collapsed like the task strip.
+- Agent/runtime and plugin infrastructure now uses safer per-room persistence,
+  bounded recovery paths, improved filesystem/plugin discovery, and explicit
+  error classification for provider and IPC failures.
+
+### Fixed
+
+- Interrupted tool turns no longer silently lose their durable provider
+  checkpoint when a message exceeds 512 KiB. NusaShell retains the one active
+  interrupted checkpoint per room, and only labels an action Resume when that
+  checkpoint is actually present, preventing restart recovery from rolling
+  back to older context and repeating already answered questions.
+- Late IPC events, stale room loads, provider 4xx/5xx errors, renderer/backend
+  restarts, and rapid room switching can no longer clear another room's
+  messages, TODOs, retry controls, Resume controls, drawer, or status.
+- ACP subagent drawer no longer behaves as a global singleton: two concurrent
+  subagents remain visible as two selectable cards, and background-room events
+  cannot overwrite the selected room's drawer.
+- TODO follow-up no longer silently stops after an error; the user can continue
+  the remaining chain from the persisted room state.
+- Agent conversation UI now handles interrupted turns, retry-only provider
+  failures, auto-continue failures, stale snapshots, and soft-kill recovery
+  without duplicate messages or misleading global actions.
+- Repeatedly failed recovery attempts no longer stack duplicate interrupted
+  cards in a room; the interrupted tail is replaced atomically, retaining its
+  previously sealed thinking, tool calls, and ordered steps when a later
+  Retry, Resume, or Continue attempt fails before producing new reasoning.
+- Provider failures now identify the full room-bound model and provider in the
+  error message, making 4xx/5xx diagnostics actionable when multiple providers
+  or models are configured.
+- Completion steering no longer overwrites an unsent composer draft or an active
+  IME composition when a background tool job finishes; the auto-continue wake is
+  skipped instead of silently replacing what the user was typing. An empty
+  composer auto-continues as before.
+- Conversation search is now honestly scoped: the sidebar search placeholder
+  reads "Search titles…" and the empty state distinguishes "no title matches"
+  from "no conversations yet", instead of implying that message content is
+  searched.
+- Paused pipelines can now be run manually from both the card **Run now** button
+  and the details modal, with a shared explanation that automatic triggers stay
+  paused; scheduled and event triggers still skip disabled pipelines
+  (`PIPELINE_DISABLED`). Previously the card allowed a manual run that the
+  backend then rejected, while the details modal disabled the button without
+  any explanation.
+- Toasts are announced to screen readers (polite live region, `role="alert"`
+  for errors), can be dismissed manually, and are capped at four visible toasts
+  so bursts of job failures no longer stack unbounded in the corner.
+- The task (TODO) strip announces progress to screen readers via a polite live
+  region on its count/status, keeps a stable "Task checklist" toggle name, and
+  stays visible with a "No tasks yet" placeholder while a turn is running so
+  the composer stack no longer jumps when the first task appears.
+- The sidebar is a labelled navigation landmark (`aria-label="Main"`) and
+  tracks the active view with `aria-current="page"`, so screen reader users
+  can tell which surface is open.
+- UI fonts (IBM Plex Sans, IBM Plex Mono, Space Grotesk) are now bundled
+  locally instead of fetched from Google Fonts at every startup, removing
+  startup FOUT, enabling proper typography offline, and eliminating the
+  external font request from the desktop app.
+- `make install` and first packaged launch no longer interpret a missing
+  production settings file as an explicit login-autostart disable; MCP
+  autostart and keep-alive preferences also survive plugin resyncs and bundled
+  plugin upgrades.
+- Linux installers now prefer the unprivileged Chromium user-namespace
+  sandbox, avoiding repeated root-password prompts on normal systems. The
+  installer now probes that capability directly and falls back to an explicit
+  `--no-sandbox` launch when kernel/AppArmor policy blocks both user namespaces
+  and a root-owned helper, so updates cannot leave the app unstartable.
+- Test runs now isolate all temporary artifacts under one per-run
+  `nusashell-test-*` parent and remove that parent on completion, preventing
+  thousands of test directories from accumulating directly under the system
+  temporary directory.
+- Terminal shell bootstrap files now live under NusaShell runtime data instead
+  of a persistent `/tmp/nusashell-terminal-bootstrap` directory when launched
+  through the shell broker.
+- Resuming a tool-backed interrupted turn now preserves the earlier reasoning,
+  tool calls, steps, and round count in the same assistant message instead of
+  showing the resumed segment alone until the room is reopened.
+- Thinking streamed only as provider reasoning deltas is now retained in the
+  completed assistant result and its ordered steps, so it remains visible when
+  the live message is sealed instead of disappearing after a successful turn.
+- Model picker changes made during a live turn now remain visible as the
+  selected model for the next turn, with an explicit `next turn` label; the
+  already-running turn remains bound to its original model.
+
 ## [0.6.0] - 2026-08-07
 
 ### Added

@@ -128,6 +128,90 @@ describe("ContextCompactor (Codex-aligned memento)", () => {
     expect(retained).toContain("new question after compaction");
   });
 
+  it("appends an ephemeral hydration transcript after the compacted summary instead of sealing runtime text into it", async () => {
+    const messages: AgentMessage[] = [
+      user("Deploy the release, then run the QA checks"),
+      assistant("Starting deployment"),
+      tool("mcp_ops_deploy", "x".repeat(10_000)),
+    ];
+    const provider = new ScriptedProvider([
+      { text: "Deployment completed. QA remains unfinished." },
+    ]);
+    const compactor = new ContextCompactor(provider, {
+      compactionEnabled: true,
+      maxInputTokens: 500,
+      reserveTokens: 50,
+      recentTurns: 1,
+      summaryMaxChars: 2000,
+    }, undefined);
+
+    const result = await compactor.compact(
+      {
+        messages,
+        pluginIds: [],
+        model: "test",
+        buildHydrationTranscript: async () => [
+          {
+            role: "assistant",
+            content: "",
+            toolCalls: [{ id: "hydrate:n:0", name: "mcp_list", args: {} }],
+          },
+          { role: "tool", toolCallId: "hydrate:n:0", name: "mcp_list", content: "{\"running\":[\"ops\"]}" },
+        ],
+      },
+      "trace-runtime-context",
+    );
+
+    // Summary stays pure (no runtime text folded in).
+    expect(result.checkpoint?.summary).not.toContain("[NUSASHELL RUNTIME CONTEXT]");
+    // The hydration transcript is appended AFTER the compacted history.
+    const messagesList = result.messages;
+    const last = messagesList[messagesList.length - 1];
+    expect(last?.role).toBe("tool");
+    expect(result.messages.some((m) =>
+      m.role === "assistant" && Array.isArray(m.toolCalls) && m.toolCalls.length > 0,
+    )).toBe(true);
+  });
+
+  it("builds a fresh hydration transcript at the compaction boundary so an MCP change mid-turn is not sealed stale", async () => {
+    const provider = new ScriptedProvider([
+      { text: "The agent enabled QA and should run the remaining check." },
+    ]);
+    const compactor = new ContextCompactor(provider, {
+      compactionEnabled: true,
+      maxInputTokens: 500,
+      reserveTokens: 50,
+      recentTurns: 1,
+      summaryMaxChars: 2000,
+    }, undefined);
+    let refreshed = 0;
+
+    const result = await compactor.compact({
+      messages: [user("enable QA"), tool("mcp_enable", "x".repeat(10_000))],
+      pluginIds: [],
+      model: "test",
+      buildHydrationTranscript: async () => {
+        refreshed += 1;
+        return [
+          {
+            role: "assistant",
+            content: "",
+            toolCalls: [{ id: "hydrate:n:0", name: "tool_list", args: {} }],
+          },
+          { role: "tool", toolCallId: "hydrate:n:0", name: "tool_list", content: "{\"running\":[\"ops\",\"qa\"]}" },
+        ];
+      },
+    }, "trace-runtime-refresh");
+
+    expect(refreshed).toBe(1);
+    // The fresh hydration transcript (with the new MCP state) sits after summary.
+    const last = result.messages[result.messages.length - 1];
+    expect(last?.role).toBe("tool");
+    expect(result.messages.some((m) =>
+      m.role === "tool" && String(m.content).includes("\"qa\""),
+    )).toBe(true);
+  });
+
   it("preserves leading system injects at the head of the replacement", async () => {
     const messages: AgentMessage[] = [
       { role: "system", content: "system.md" },
@@ -182,5 +266,54 @@ describe("ContextCompactor (Codex-aligned memento)", () => {
     expect(result.messages).toBe(messages);
     expect(result.checkpoint).toBeUndefined();
     expect(provider.requests).toHaveLength(0);
+  });
+
+  it("seals TODO into the same user message as the compaction summary, before the hydration tool transcript", async () => {
+    const messages: AgentMessage[] = [
+      user("Deploy the release, then run the QA checks"),
+      assistant("Setting up deployment"),
+      tool("mcp_ops_deploy", "x".repeat(10_000)),
+      tool("todo", "{ ok: true, items: [] }"),
+    ];
+    const provider = new ScriptedProvider([
+      { text: "Deployment started. QA still pending because the queue is empty." },
+    ]);
+    const compactor = new ContextCompactor(provider, {
+      compactionEnabled: true,
+      maxInputTokens: 500,
+      reserveTokens: 50,
+      recentTurns: 1,
+      summaryMaxChars: 2000,
+    }, undefined);
+
+    const result = await compactor.compact({
+      messages,
+      pluginIds: [],
+      model: "test",
+      todoPromptForCompaction: () =>
+        "CURRENT TASKS (agent-owned checklist — user may delete items)\n[~] run QA after deployment",
+      buildHydrationTranscript: async () => [
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{ id: "hydrate:n:0", name: "mcp_list", args: {} }],
+        },
+        { role: "tool", toolCallId: "hydrate:n:0", name: "mcp_list", content: "{}" },
+      ],
+    }, "trace-todo-compact");
+
+    // The summary user message contains BOTH the summary prefix and the TODO.
+    const summaryMsg = result.messages.find((m) =>
+      m.role === "user" && String(m.content).startsWith(SUMMARY_PREFIX),
+    );
+    expect(summaryMsg).toBeDefined();
+    expect(String(summaryMsg?.content)).toContain("CURRENT TASKS");
+    // Order: summary (with todo) -> hydration assistant -> hydration tool result.
+    const summaryIdx = result.messages.findIndex((m) => m.role === "user" && String(m.content).startsWith(SUMMARY_PREFIX));
+    expect(result.messages[summaryIdx + 1]?.role).toBe("assistant");
+    expect((result.messages[summaryIdx + 1] as { toolCalls?: unknown }).toolCalls).toBeDefined();
+    expect(result.messages[summaryIdx + 2]?.role).toBe("tool");
+    // Summary checkpoint also carries the TODO.
+    expect(result.checkpoint?.summary).toContain("CURRENT TASKS");
   });
 });

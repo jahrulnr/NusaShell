@@ -53,6 +53,7 @@ describe("AppBehaviorStore", () => {
     const directory = await mkdtemp(join(tmpdir(), "nusashell-app-behavior-"));
     const store = new AppBehaviorStore(join(directory, "app-behavior.json"));
     expect(await store.load()).toEqual(DEFAULT_APP_BEHAVIOR);
+    expect(await store.hasPersistedSettings()).toBe(false);
   });
 
   it("merges patches and persists via tmp+rename", async () => {
@@ -80,6 +81,7 @@ describe("AppBehaviorStore", () => {
 
     const reloaded = new AppBehaviorStore(path);
     expect(await reloaded.load()).toEqual(result);
+    expect(await reloaded.hasPersistedSettings()).toBe(true);
   });
 
   it("drops unknown keys from a corrupt/partial file on load", async () => {

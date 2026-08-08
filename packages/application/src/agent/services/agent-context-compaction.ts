@@ -118,7 +118,32 @@ export class ContextCompactor {
       via = "extractive";
     }
 
-    const summaryText = `${SUMMARY_PREFIX}\n${body}`;
+    // REV2 hydration: the runtime capability snapshot is delivered as an
+    // ephemeral synthetic tool transcript appended AFTER the compacted history
+    // (Option B: user summary -> assistant toolCalls -> tool results -> model
+    // continues). TODO is task state, not capability: it is sealed into the
+    // SAME user message as the summary (the tool graph that carried it is being
+    // discarded), then the hydration transcript still follows.
+    let summaryText = `${SUMMARY_PREFIX}\n${body}`;
+    let todoBlock: string | undefined;
+    if (input.todoPromptForCompaction) {
+      try {
+        todoBlock = input.todoPromptForCompaction();
+      } catch {
+        this.logger?.warn("Agent todo block build failed before compaction traceId=%s", traceId);
+      }
+    }
+    if (todoBlock) summaryText = `${summaryText}\n\n${todoBlock}`;
+    const summarized = summaryText;
+    const hydrationMessages: AgentMessage[] = [];
+    if (input.buildHydrationTranscript) {
+      try {
+        const transcript = await input.buildHydrationTranscript();
+        hydrationMessages.push(...transcript);
+      } catch {
+        this.logger?.warn("Agent hydration build failed before compaction traceId=%s", traceId);
+      }
+    }
 
     // 3. Collect durable user messages (skips prior summary markers) and pack
     //    newest-first up to the Codex user budget.
@@ -132,7 +157,7 @@ export class ContextCompactor {
     const leadingSystem = systemContext.length > 0 ? [...systemContext] : leadingFromLive;
     const compactedFromRest = buildCompactedHistory(
       collectUserMessages(rest),
-      summaryText,
+      summarized,
     );
     let compactedMessages: AgentMessage[] = [...leadingSystem, ...compactedFromRest];
 
@@ -161,6 +186,13 @@ export class ContextCompactor {
     }
     if (stillOver) {
       shrinkToolContents(compactedMessages, threshold, this.logger);
+    }
+
+    // REV2: append the ephemeral hydration transcript LAST, so the drop-oldest
+    // loop and shrink above can never discard it (it must always sit directly
+    // after the compacted summary, before continued generation).
+    if (hydrationMessages.length > 0) {
+      compactedMessages = [...compactedMessages, ...hydrationMessages];
     }
 
     // 6. Checkpoint: `compactedMessageCount` is the absolute store offset

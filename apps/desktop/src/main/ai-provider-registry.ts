@@ -530,7 +530,7 @@ function normalizeImportedModel(value: unknown): AiModelSettings | null {
     defaultEffort: supportedEfforts.includes(defaultEffort)
       ? defaultEffort
       : reasoningAdvertised
-        ? supportedEfforts[0] ?? "medium"
+        ? supportedEfforts[0] ?? "auto"
         : "auto",
     reasoningSupported: reasoningAdvertised,
     reasoningMandatory: reasoning.mandatory === true,
@@ -638,6 +638,8 @@ function normalizeEffort(value: unknown): ReasoningEffort {
     "x-high": "xhigh",
     extra: "xhigh",
     maximum: "max",
+    // UI says "default"; catalogs sometimes use the same word.
+    default: "auto",
   };
   const raw = text(value).toLowerCase();
   const normalized = (aliases[raw] ?? raw) as ReasoningEffort;

@@ -17,11 +17,13 @@ import { FileService } from "./fs-service.js";
 import { ContextEngine } from "./context-engine.js";
 import { callFilesTool, FILES_TOOLS } from "./tools.js";
 import { getFilesPrompt, FILES_PROMPTS } from "./prompts.js";
+import { RetrievalEngine } from "./search-relevant.js";
 
 async function main() {
   const root = await loadRootFromEnvironment();
   const service = new FileService(root);
   const contextEngine = new ContextEngine(service.root);
+  const retrievalEngine = new RetrievalEngine(service.root);
   const server = new Server(
     { name: "nusashell-files", version: "0.1.0" },
     { capabilities: { tools: {}, prompts: {}, resources: {} } },
@@ -71,6 +73,7 @@ async function main() {
         const fsPath = fileURLToPath(fileRoot.uri);
         await service.setRoot(fsPath);
         await contextEngine.setRoot(fsPath);
+        retrievalEngine.setRoot(fsPath);
         process.stderr.write(`[nusashell-files] root=${service.root} (via roots)\n`);
       }
     } catch (error) {
@@ -90,6 +93,7 @@ async function main() {
         request.params.name,
         request.params.arguments ?? {},
         contextEngine,
+        retrievalEngine,
       );
       // Emit automation notifications for mutating operations (Watch→Agent demo).
       emitAutomationForTool(server, request.params.name, request.params.arguments ?? {});

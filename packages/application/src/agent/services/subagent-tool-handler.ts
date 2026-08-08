@@ -31,9 +31,10 @@ function isRetryable(error: unknown): boolean {
 export async function execSubagent(
   port: SubagentPort | undefined,
   args: Readonly<Record<string, unknown>>,
-  _turnId: string,
+  turnId: string,
   workspace: string | undefined,
   logger?: LoggerPort,
+  parentConversationId?: string,
 ): Promise<unknown> {
   if (!port) {
     const message = "No ACP providers are connected";
@@ -89,6 +90,8 @@ export async function execSubagent(
       const result = await port.run({
         runId,
         conversationId,
+        ...(parentConversationId ? { parentConversationId } : {}),
+        ...(turnId ? { parentTraceId: turnId } : {}),
         providerId,
         workspace: effectiveWorkspace,
         prompt: promptBlocks,

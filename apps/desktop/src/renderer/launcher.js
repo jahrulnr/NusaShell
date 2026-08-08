@@ -1,7 +1,7 @@
 // NusaShell launcher renderer — connects to backend via WebSocket,
 // renders plugin grid, and handles plugin lifecycle actions.
 // Uses the native browser WebSocket (not the `ws` npm package).
-import { clampModelEffort, formatTokenCount, modelCompatibility, resolveRoomModel, searchModels } from "./ai-model-ui.js";
+import { clampModelEffort, formatEffortLabel, formatModelPickerLabel, formatTokenCount, modelCompatibility, modelEffortOptions, resolveRoomEffort, resolveRoomModel, searchModels } from "./ai-model-ui.js";
 import { computeAgentModelMenuPlacement } from "./agent-model-menu-placement.js";
 import { AgentConversationController } from "./agent-conversation-controller.js";
 import { SkillsController } from "./skills-controller.js";
@@ -21,16 +21,19 @@ import {
   pluginIconPresentation,
   positionContextMenu,
   providerApiModes,
+  setSidebarNavCurrent,
 } from "./launcher-ui.js";
 import { initWsClient, connectWs, sendRequest, onEvent, subscribe, isConnected } from "./ws-client.js";
 import { fetchPlugins, startPlugin, stopPlugin, restartPlugin, getPluginDetail, listTools, callTool, pingSystem, getVersion, installPlugin, uninstallPlugin, setPluginAutostart } from "./plugin-api.js";
 import { runAgentTurn, cancelAgentTurn, answerAskQuestion, getActiveTurn, deleteTodos } from "./agent-api.js";
 import { runAcpTurn, cancelAcpTurn, getAcpSessionInfo, setAcpConfigOption, ensureAcpSession, answerAcpPermission, answerAcpAsk } from "./acp-api.js";
 import { confirmDialog, promptDialog } from "./ui-dialogs.js";
+import { showToast } from "./toast.js";
 
 // ============ State ============
 
 let plugins = [];
+let pluginLoadError = false;
 let currentPlugin = null;
 let selectedPluginId = "";
 let nativeMcpEditId = "";
@@ -51,6 +54,7 @@ let currentAcpProviderDetailId = "";
 let pendingProviderDeleteId = "";
 let editContextTarget = null;
 let drawerReturnFocus = null;
+let addPluginReturnFocus = null;
 
 // ============ Helpers ============
 
@@ -218,7 +222,7 @@ function switchView(viewName) {
   $$("[data-view]").forEach(v => {
     if (v.tagName === "SECTION") v.classList.toggle("active", v.dataset.view === viewName);
   });
-  $$("[data-nav]").forEach(n => n.classList.toggle("active", n.dataset.view === viewName));
+  setSidebarNavCurrent($$("[data-nav]"), viewName);
   closeDrawer();
   hideContextMenu();
   if (viewName === "agent") {
@@ -355,7 +359,13 @@ function renderAppGrid() {
   grid.innerHTML = "";
   const uiPlugins = plugins.filter(hasPluginUi);
   if (plugins.length === 0) {
-    grid.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:20px 0">No plugins installed. Add a plugin folder to plugins/.</div>';
+    if (pluginLoadError) {
+      // A failed plugin.list is an error state, not an empty state (#61):
+      // the banner above carries the retry affordance; render a matching hint.
+      grid.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:20px 0">Could not load plugins. Use Retry above.</div>';
+    } else {
+      grid.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:20px 0">No plugins installed. Add a plugin folder to plugins/.</div>';
+    }
     return;
   }
   if (uiPlugins.length === 0) {
@@ -443,7 +453,11 @@ function renderInstalledTable() {
   const table = $("#plugin-table");
   table.innerHTML = "";
   if (plugins.length === 0) {
-    table.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:20px 0">No plugins installed.</div>';
+    if (pluginLoadError) {
+      table.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:20px 0">Could not load plugins. Use Retry above.</div>';
+    } else {
+      table.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:20px 0">No plugins installed.</div>';
+    }
     return;
   }
   plugins.forEach(p => {
@@ -559,15 +573,19 @@ function closeDrawer() {
 // ============ Plugin Window (opens in separate BrowserWindow via IPC) ============
 
 async function openPluginWindow(plugin) {
+  if (!hasPluginUi(plugin)) {
+    console.warn("[openPluginWindow] plugin has no UI; ignoring open request", plugin.pluginId);
+    return;
+  }
+  if (plugin.state === "idle") {
+    // Surface start failures as a toast and abort opening a dead window (#60).
+    if (!(await runPluginLifecycle("start", plugin.pluginId))) return;
+  } else if (plugin.state === "crashed") {
+    // A crashed plugin shouldn't open a dead window: recover via restart first (#57/#60).
+    if (!(await runPluginLifecycle("restart", plugin.pluginId))) return;
+  }
+  const installPath = plugin.installPath || "";
   try {
-    if (!hasPluginUi(plugin)) {
-      console.warn("[openPluginWindow] plugin has no UI; ignoring open request", plugin.pluginId);
-      return;
-    }
-    if (plugin.state === "idle") {
-      await sendRequest("plugin.start", { pluginId: plugin.pluginId });
-    }
-    const installPath = plugin.installPath || "";
     if (window.shell?.openPlugin) {
       await window.shell.openPlugin(
         plugin.pluginId,
@@ -582,6 +600,7 @@ async function openPluginWindow(plugin) {
     }
   } catch (err) {
     console.error("[openPluginWindow] error:", err);
+    showToast(`Could not open ${plugin.name}: ${err?.message || err}`, "error");
   }
 }
 
@@ -689,6 +708,10 @@ function handlePluginEvent(payload, eventType) {
       plugins[idx] = { ...plugins[idx], state: newState };
     }
   }
+  if (eventType === "plugin.crashed") {
+    const name = payload.pluginName || payload.pluginId || "Plugin";
+    showToast(`${name} crashed. Use Restart to bring it back.`, "error");
+  }
   if (eventType === "plugin.installed" || eventType === "plugin.uninstalled") {
     void refreshAll();
     return;
@@ -705,27 +728,25 @@ function handlePluginEvent(payload, eventType) {
 }
 
 // ============ Toast ============
+// Accessible showToast lives in toast.js (live region, dismiss, cap) (#63).
 
-const TOAST_MAX_CHARS = 140;
-
-function showToast(message, type = "info") {
-  const container = $("#toast-container");
-  const toast = el("div", `toast toast-${type}`);
-  const full = String(message ?? "").replace(/\s+/g, " ").trim();
-  const clipped = full.length > TOAST_MAX_CHARS ? `${full.slice(0, TOAST_MAX_CHARS - 1)}…` : full;
-  toast.textContent = clipped;
-  if (clipped !== full) toast.title = full;
-  container.appendChild(toast);
-  setTimeout(() => { toast.classList.add("toast-show"); }, 10);
-  setTimeout(() => {
-    toast.classList.remove("toast-show");
-    setTimeout(() => toast.remove(), 300);
-  }, 4000);
+// Run a plugin lifecycle action, surfacing failures as an error toast (#60).
+// Returns true on success, false on failure.
+async function runPluginLifecycle(action, pluginId) {
+  const verb = { start: "start", stop: "stop", restart: "restart" }[action] || action;
+  try {
+    await ({ start: startPlugin, stop: stopPlugin, restart: restartPlugin })[action](pluginId);
+    return true;
+  } catch (error) {
+    showToast(`Could not ${verb} ${pluginId}: ${error?.message || error}`, "error");
+    return false;
+  }
 }
 
 // ============ Add Plugin Modal ============
 
 async function openAddPluginModal(tab = "custom", plugin = null) {
+  addPluginReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   $("#add-plugin-modal").style.display = "flex";
   $("#install-url-input").value = "";
   $("#install-local-input").value = "";
@@ -830,6 +851,8 @@ async function saveNativeMcp() {
 function closeAddPluginModal() {
   $("#add-plugin-modal").style.display = "none";
   $("#native-mcp-id").disabled = false;
+  if (addPluginReturnFocus?.isConnected) addPluginReturnFocus.focus();
+  addPluginReturnFocus = null;
 }
 
 function showInstallStatus(message, isError) {
@@ -920,13 +943,36 @@ function initUpdater() {
 
 async function refreshAll() {
   const previousPlugins = plugins;
-  plugins = await fetchPlugins();
+  try {
+    plugins = await fetchPlugins();
+    setPluginLoadError(false);
+  } catch (error) {
+    // Keep the last-known plugins so the grid isn't wiped on a transient
+    // failure, and surface a retryable error banner (#61).
+    setPluginLoadError(true, error?.message || error);
+    if (plugins.length === 0) {
+      // No known plugins yet: render the error state so the grid doesn't
+      // keep showing a stale "No plugins installed" empty message (#61).
+      renderAppGrid();
+      renderInstalledTable();
+    }
+    return;
+  }
   if (selectedPluginId && !plugins.some((plugin) => plugin.pluginId === selectedPluginId)) selectedPluginId = "";
   syncAppGrid(previousPlugins);
   if (launcherPluginTableNeedsRebuild(previousPlugins, plugins)) renderInstalledTable();
   else updateInstalledTableStates();
   if (launcherAutostartListNeedsRebuild(previousPlugins, plugins)) renderAutostartList();
   else updateAutostartListStates();
+}
+
+function setPluginLoadError(visible, message) {
+  pluginLoadError = visible;
+  const banner = $("#plugin-load-error");
+  if (!banner) return;
+  banner.hidden = !visible;
+  const text = $("#plugin-load-error-text");
+  if (text && message != null) text.textContent = `Could not load plugins: ${String(message).replace(/^Error: /, "")}`;
 }
 
 // ============ Init ============
@@ -1295,10 +1341,12 @@ document.addEventListener("DOMContentLoaded", () => {
     cancelTurn: cancelAgentTurn,
     answerAsk: answerAskQuestion,
     getActiveModel: activeModel,
-    getActiveEffort: () => {
-      const resolved = resolveRoomModel(agentConversationController?.conversation, aiSettings.models, aiSettings.activeModelKey);
-      return (resolved?.source === "room" ? resolved.effort : aiSettings.effort) || "auto";
-    },
+    getActiveEffort: () => resolveRoomEffort(
+      agentConversationController?.conversation,
+      aiSettings.models,
+      aiSettings.activeModelKey,
+      aiSettings.effort,
+    ),
     getMaxInputTokens: () => aiSettings.maxInputTokens,
     getVisionMode: () => aiSettings.vision,
     notify: showToast,
@@ -1497,9 +1545,21 @@ document.addEventListener("DOMContentLoaded", () => {
     const selected = activeModel();
     const roomResolved = resolveRoomModel(agentConversationController?.conversation, aiSettings.models, aiSettings.activeModelKey);
     const triggerLabel = $("#agent-model-trigger-label");
-    const effortLabel = roomResolved?.source === "room" ? roomResolved.effort : aiSettings.effort;
-    const sourceBadge = roomResolved?.source === "room" ? " · room" : "";
-    triggerLabel.textContent = `${selected?.id || "Choose model"} · ${effortLabel || "auto"}${sourceBadge}`;
+    // Effort is room-scoped (resolveRoomEffort), never the settings global.
+    const effortLabel = resolveRoomEffort(
+      agentConversationController?.conversation,
+      aiSettings.models,
+      aiSettings.activeModelKey,
+      aiSettings.effort,
+    );
+    const activeConversation = agentConversationController?.conversation;
+    triggerLabel.textContent = formatModelPickerLabel({
+      model: selected,
+      effort: effortLabel,
+      source: roomResolved?.source,
+      isRunning: Boolean(activeConversation?.id && agentConversationController?.isConversationRunning(activeConversation.id)),
+      liveModelKey: agentConversationController?.liveStreamState?.modelKey || "",
+    });
     $("#agent-model-trigger").title = triggerLabel.textContent;
     if (selected) agentConversationController?.updateContextStatus();
     else $("#agent-provider-status").textContent = "Choose a model";
@@ -1523,10 +1583,11 @@ document.addEventListener("DOMContentLoaded", () => {
       bindModelOptionKeyboard(choose);
       choose.addEventListener("click", () => void selectAgentModel(model.key, clampModelEffort(model, activeEffort)));
       row.appendChild(choose);
-      if (model.supportedEfforts.length > 0) {
+      const efforts = modelEffortOptions(model);
+      if (efforts.length > 0) {
         const effortRow = el("div", "agent-model-efforts");
-        ["auto", ...model.supportedEfforts.filter((effort) => effort !== "auto")].forEach((effort) => {
-          const button = el("button", `agent-effort-option${model.key === activeKey && effort === activeEffort ? " is-selected" : ""}`, effort);
+        ["auto", ...efforts.filter((effort) => effort !== "auto")].forEach((effort) => {
+          const button = el("button", `agent-effort-option${model.key === activeKey && effort === activeEffort ? " is-selected" : ""}`, formatEffortLabel(effort));
           button.type = "button";
           button.addEventListener("click", () => void selectAgentModel(model.key, effort));
           effortRow.appendChild(button);
@@ -1614,7 +1675,7 @@ document.addEventListener("DOMContentLoaded", () => {
     efforts.forEach((effort) => {
       const option = document.createElement("option");
       option.value = effort;
-      option.textContent = effort;
+      option.textContent = formatEffortLabel(effort);
       effortSelect.appendChild(option);
     });
     effortSelect.value = aiSettings.effort || "auto";
@@ -1653,6 +1714,10 @@ document.addEventListener("DOMContentLoaded", () => {
             active.id,
             { modelKey, effort, explicit: true },
           );
+          // The room binding is authoritative for the picker. Re-render after
+          // it completes so a live turn cannot paint the previous model back
+          // over the user's newly selected next-turn model.
+          renderAgentModelPicker();
         } catch {
           // Best-effort room binding; the global select still applied.
         }
@@ -2015,6 +2080,10 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!$("#job-delete-dialog").hidden) jobsController?.closeDeleteDialog();
     if ($("#job-modal")?.classList.contains("active")) jobsController?.closeModal();
     if ($("#job-output-modal")?.classList.contains("active")) jobsController?.closeOutput();
+    if ($("#pipeline-modal")?.classList.contains("active")) pipelinesController?.closeModal();
+    if ($("#pipeline-details-modal")?.classList.contains("active")) pipelinesController?.closeDetails();
+    if ($("#add-plugin-modal")?.style.display === "flex") closeAddPluginModal();
+    if ($("#plugin-drawer")?.classList.contains("active")) closeDrawer();
     const wasModelMenuOpen = $("#agent-model-menu") && !$("#agent-model-menu").hidden;
     closeAgentModelMenu(wasModelMenuOpen);
   });
@@ -2027,14 +2096,17 @@ document.addEventListener("DOMContentLoaded", () => {
     renderLogTail();
   }));
 
+  // Plugin grid retry (#61)
+  $("#plugin-load-retry")?.addEventListener("click", () => { void refreshAll(); $("#plugin-load-error").hidden = true; });
+
   // Drawer
   $("#drawer-close").addEventListener("click", closeDrawer);
   $("#drawer-overlay").addEventListener("click", closeDrawer);
 
   // Drawer actions
-  $("#btn-start").addEventListener("click", () => { if (currentPlugin) startPlugin(currentPlugin.pluginId); });
-  $("#btn-stop").addEventListener("click", () => { if (currentPlugin) stopPlugin(currentPlugin.pluginId); });
-  $("#btn-restart").addEventListener("click", () => { if (currentPlugin) restartPlugin(currentPlugin.pluginId); });
+  $("#btn-start").addEventListener("click", () => { if (currentPlugin) void runPluginLifecycle("start", currentPlugin.pluginId); });
+  $("#btn-stop").addEventListener("click", () => { if (currentPlugin) void runPluginLifecycle("stop", currentPlugin.pluginId); });
+  $("#btn-restart").addEventListener("click", () => { if (currentPlugin) void runPluginLifecycle("restart", currentPlugin.pluginId); });
 
   // Context menu
   document.addEventListener("click", hideContextMenu);
@@ -2059,9 +2131,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!p && action !== "uninstall") return;
     switch (action) {
       case "open": openPluginWindow(p); break;
-      case "start": startPlugin(id); break;
-      case "stop": stopPlugin(id); break;
-      case "restart": restartPlugin(id); break;
+      case "start": void runPluginLifecycle("start", id); break;
+      case "stop": void runPluginLifecycle("stop", id); break;
+      case "restart": void runPluginLifecycle("restart", id); break;
       case "detail": openDrawer(p); break;
       case "uninstall": doUninstall(id, p?.name); break;
     }

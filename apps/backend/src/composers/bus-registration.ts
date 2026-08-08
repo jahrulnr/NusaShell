@@ -106,6 +106,8 @@ export function registerBuses(
   commandBus.register("cancel-tool-call", new CancelToolCallHandler(plugin.runtimeManager));
   commandBus.register("set-plugin-autostart", new SetPluginAutostartHandler(plugin.runtimeManager));
   const runAgentTurnHooks = {
+    hasRunningBackgroundJobs: (conversationId: string) =>
+      agent.asyncToolRuntime.list(conversationId).some((handle) => handle.status === "running"),
     ...(options.sealAgentInterrupted
       ? {
           onTurnInterrupted: async (

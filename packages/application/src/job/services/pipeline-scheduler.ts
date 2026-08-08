@@ -128,7 +128,11 @@ export class PipelineScheduler {
   ): Promise<PipelineRunOutcome> {
     const pipeline = await this.deps.store.get(pipelineId);
     if (!pipeline) return { ok: false, error: "pipeline not found", errorCode: "PIPELINE_NOT_FOUND" };
-    if (!pipeline.enabled) return { ok: false, error: "pipeline is disabled", errorCode: "PIPELINE_DISABLED" };
+    // Manual runs may ignore pause; schedule/event still respect enabled === false.
+    const source = options?.source ?? "manual";
+    if (!pipeline.enabled && source !== "manual") {
+      return { ok: false, error: "pipeline is disabled", errorCode: "PIPELINE_DISABLED" };
+    }
 
     const validationError = validatePipeline(pipeline.steps);
     if (validationError) return { ok: false, error: validationError, errorCode: "PIPELINE_INVALID" };
@@ -138,7 +142,6 @@ export class PipelineScheduler {
     const traceId = randomUUID();
     const startedAt = now.toISOString();
     const leaseExpiresAt = new Date(now.getTime() + this.leaseTtlMs()).toISOString();
-    const source = options?.source ?? "manual";
 
     const stepRuns: PipelineStepRun[] = pipeline.steps.map((step) => ({
       stepId: step.id,
@@ -233,7 +236,11 @@ export class PipelineScheduler {
   ): Promise<PipelineRunOutcome> {
     const pipeline = await this.deps.store.get(pipelineId);
     if (!pipeline) return { ok: false, error: "pipeline not found", errorCode: "PIPELINE_NOT_FOUND" };
-    if (!pipeline.enabled) return { ok: false, error: "pipeline is disabled", errorCode: "PIPELINE_DISABLED" };
+    // Manual runs may ignore pause; schedule/event still respect enabled === false.
+    const source = options?.source ?? "manual";
+    if (!pipeline.enabled && source !== "manual") {
+      return { ok: false, error: "pipeline is disabled", errorCode: "PIPELINE_DISABLED" };
+    }
 
     const validationError = validatePipeline(pipeline.steps);
     if (validationError) return { ok: false, error: validationError, errorCode: "PIPELINE_INVALID" };
@@ -243,7 +250,6 @@ export class PipelineScheduler {
     const traceId = randomUUID();
     const startedAt = now.toISOString();
     const leaseExpiresAt = new Date(now.getTime() + this.leaseTtlMs()).toISOString();
-    const source = options?.source ?? "manual";
 
     const stepRuns: PipelineStepRun[] = pipeline.steps.map((step) => ({
       stepId: step.id,

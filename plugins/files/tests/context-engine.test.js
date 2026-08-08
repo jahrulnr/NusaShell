@@ -6,6 +6,9 @@ import {
   ContextEngine,
   estimateTokens,
   personalizedPagerank,
+  allocateRoleBudget,
+  roleMatchMultiplier,
+  recencyDecay,
 } from "../mcp/context-engine.js";
 
 let tmpDir;
@@ -249,5 +252,228 @@ describe("contextMap orchestration", () => {
     const result = await engine.contextMap({});
     expect(result.stack.category).toBe("documentation");
     expect(typeof result.map).toBe("string");
+  });
+});
+
+/**
+ * Mixed workspace for role-aware ranking: docs, implementation code, tests.
+ * All files touch so mtime differences can be controlled via utimes in tests.
+ */
+async function writeRoleWorkspace() {
+  await fs.writeFile(
+    path.join(tmpDir, "package.json"),
+    JSON.stringify({ name: "role-demo", version: "0.0.1", scripts: { test: "vitest" } }),
+  );
+  await fs.mkdir(path.join(tmpDir, "src"), { recursive: true });
+  await fs.mkdir(path.join(tmpDir, "docs"), { recursive: true });
+  await fs.writeFile(
+    path.join(tmpDir, "src", "service.ts"),
+    [
+      "export class Service {",
+      "  run() { return compute(); }",
+      "}",
+      "export function compute() { return 42; }",
+      "",
+    ].join("\n"),
+  );
+  await fs.writeFile(
+    path.join(tmpDir, "src", "handler.ts"),
+    [
+      "import { Service } from \"./service\";",
+      "export function handle() {",
+      "  return new Service().run();",
+      "}",
+      "",
+    ].join("\n"),
+  );
+  await fs.writeFile(
+    path.join(tmpDir, "src", "service.test.ts"),
+    [
+      "import { compute } from \"./service\";",
+      "export function testCompute() { return compute() === 42; }",
+      "",
+    ].join("\n"),
+  );
+  await fs.writeFile(path.join(tmpDir, "AGENTS.md"), "# Workspace rules\nPrefer small changes.\n");
+  await fs.writeFile(path.join(tmpDir, "docs", "guide.md"), "# Guide\nHow the service works.\n");
+}
+
+describe("role-aware token budget (RCR)", () => {
+  it("allocateRoleBudget equals base when role is absent or unknown", () => {
+    expect(allocateRoleBudget(1024)).toBe(1024);
+    expect(allocateRoleBudget(1024, undefined)).toBe(1024);
+    expect(allocateRoleBudget(1024, "bogus")).toBe(1024);
+  });
+
+  it("allocateRoleBudget differs from base and across roles when role is set", () => {
+    const base = 1024;
+    const planner = allocateRoleBudget(base, "planner");
+    const executor = allocateRoleBudget(base, "executor");
+    const reviewer = allocateRoleBudget(base, "reviewer");
+    expect(planner).not.toBe(base);
+    expect(executor).not.toBe(base);
+    expect(reviewer).not.toBe(base);
+    expect(new Set([planner, executor, reviewer]).size).toBe(3);
+    expect(planner).toBeGreaterThan(0);
+    expect(executor).toBeGreaterThan(0);
+    expect(reviewer).toBeGreaterThan(0);
+  });
+
+  it("roleMatchMultiplier prefers docs for planner, code for executor, tests for reviewer", () => {
+    expect(roleMatchMultiplier("docs/guide.md", "planner")).toBeGreaterThan(
+      roleMatchMultiplier("src/service.ts", "planner"),
+    );
+    expect(roleMatchMultiplier("AGENTS.md", "planner")).toBeGreaterThan(1);
+    expect(roleMatchMultiplier("src/service.ts", "executor")).toBeGreaterThan(
+      roleMatchMultiplier("src/service.test.ts", "executor"),
+    );
+    expect(roleMatchMultiplier("src/service.ts", "executor")).toBeGreaterThan(
+      roleMatchMultiplier("docs/guide.md", "executor"),
+    );
+    expect(roleMatchMultiplier("src/service.test.ts", "reviewer")).toBeGreaterThan(
+      roleMatchMultiplier("src/service.ts", "reviewer"),
+    );
+    expect(roleMatchMultiplier("AGENTS.md", "reviewer")).toBeGreaterThan(1);
+    expect(roleMatchMultiplier("src/service.ts")).toBe(1);
+  });
+
+  it("recencyDecay is 1 for now and lower for stale mtimes (deterministic half-life)", () => {
+    const now = 1_700_000_000_000;
+    expect(recencyDecay(now, now)).toBeCloseTo(1, 5);
+    const thirtyDays = 30 * 86400 * 1000;
+    expect(recencyDecay(now - thirtyDays, now)).toBeCloseTo(0.5, 2);
+    expect(recencyDecay(now - thirtyDays * 2, now)).toBeLessThan(0.3);
+    expect(recencyDecay(now - 1000, now)).toBeGreaterThan(recencyDecay(now - thirtyDays, now));
+  });
+
+  it("without role, context_map is byte-identical to the legacy map output", async () => {
+    await writeRoleWorkspace();
+    const a = await engine.contextMap({ budget: 512 });
+    const b = await engine.contextMap({ budget: 512 });
+    expect(a.map).toBe(b.map);
+    expect(a.ranks).toEqual(b.ranks);
+    expect(a.stats.tokensUsed).toBe(b.stats.tokensUsed);
+    expect(a.stats.filesShown).toBe(b.stats.filesShown);
+    expect(a).not.toHaveProperty("roleScores");
+    expect(a.stats.role).toBeUndefined();
+    expect(a.stats.effectiveBudget).toBeUndefined();
+  });
+
+  it("context_map is deterministic across repeated calls even when scores tie", async () => {
+    // Regression: extractAll populated Maps in async completion order, so two
+    // files with identical PPR scores could flip their order between calls
+    // (stable sort preserves Map insertion order). Files here are structurally
+    // identical and unconnected → exactly equal scores → order must be pinned
+    // by a deterministic rule (relative path), never by Promise.all completion.
+    await fs.mkdir(path.join(tmpDir, "src"), { recursive: true });
+    for (const name of ["zeta.ts", "alpha.ts", "mid.ts"]) {
+      await fs.writeFile(
+        path.join(tmpDir, "src", name),
+        `export function ${name.replace(".", "")}Fn() { return 1; }\n`,
+      );
+    }
+    const first = await engine.contextMap({ budget: 512 });
+    for (let i = 0; i < 8; i += 1) {
+      const again = await engine.contextMap({ budget: 512 });
+      expect(again.map).toBe(first.map);
+      expect(again.ranks).toEqual(first.ranks);
+    }
+    const ranks = new Map(first.ranks);
+    const scores = [...first.ranks];
+    // Tied files must be ordered deterministically (path ascending), and all
+    // three files must actually be present in the map.
+    expect(scores[0][1]).toBeGreaterThan(0);
+    expect([...ranks.keys()].sort()).toEqual(["src/alpha.ts", "src/mid.ts", "src/zeta.ts"]);
+  });
+
+  it("reviewer ranks test/convention files higher relative to executor, both within budget", async () => {
+    await writeRoleWorkspace();
+    const budget = 400;
+    const now = Date.now();
+    // Align mtimes so recency does not dominate role match.
+    for (const rel of [
+      "src/service.ts",
+      "src/handler.ts",
+      "src/service.test.ts",
+      "AGENTS.md",
+      "docs/guide.md",
+    ]) {
+      await fs.utimes(path.join(tmpDir, rel), new Date(now), new Date(now));
+    }
+
+    const reviewer = await engine.contextMap({ budget, role: "reviewer", now });
+    const executor = await engine.contextMap({ budget, role: "executor", now });
+    expect(reviewer.stats.tokensUsed).toBeLessThanOrEqual(reviewer.stats.effectiveBudget);
+    expect(executor.stats.tokensUsed).toBeLessThanOrEqual(executor.stats.effectiveBudget);
+    expect(reviewer.stats.effectiveBudget).toBe(allocateRoleBudget(budget, "reviewer"));
+    expect(executor.stats.effectiveBudget).toBe(allocateRoleBudget(budget, "executor"));
+
+    const revRanks = new Map(reviewer.ranks);
+    const execRanks = new Map(executor.ranks);
+    const testPath = "src/service.test.ts";
+    const implPath = "src/service.ts";
+    // Relative preference: ratio of test/impl or absolute order under each role.
+    const revTest = revRanks.get(testPath) ?? 0;
+    const revImpl = revRanks.get(implPath) ?? 0;
+    const execTest = execRanks.get(testPath) ?? 0;
+    const execImpl = execRanks.get(implPath) ?? 0;
+    expect(revTest / Math.max(revImpl, 1e-12)).toBeGreaterThan(
+      execTest / Math.max(execImpl, 1e-12),
+    );
+    expect(execImpl / Math.max(execTest, 1e-12)).toBeGreaterThan(
+      revImpl / Math.max(revTest, 1e-12),
+    );
+  });
+
+  it("planner ranks docs/rules higher than executor does", async () => {
+    await writeRoleWorkspace();
+    const budget = 400;
+    const now = Date.now();
+    for (const rel of [
+      "src/service.ts",
+      "src/handler.ts",
+      "src/service.test.ts",
+      "AGENTS.md",
+      "docs/guide.md",
+    ]) {
+      await fs.utimes(path.join(tmpDir, rel), new Date(now), new Date(now));
+    }
+    const planner = await engine.contextMap({ budget, role: "planner", now });
+    const executor = await engine.contextMap({ budget, role: "executor", now });
+    const planRanks = new Map(planner.ranks);
+    const execRanks = new Map(executor.ranks);
+    const docPath = "docs/guide.md";
+    const implPath = "src/service.ts";
+    const planDoc = planRanks.get(docPath) ?? 0;
+    const planImpl = planRanks.get(implPath) ?? 0;
+    const execDoc = execRanks.get(docPath) ?? 0;
+    const execImpl = execRanks.get(implPath) ?? 0;
+    expect(planDoc / Math.max(planImpl, 1e-12)).toBeGreaterThan(
+      execDoc / Math.max(execImpl, 1e-12),
+    );
+    expect(planner.stats.tokensUsed).toBeLessThanOrEqual(planner.stats.effectiveBudget);
+  });
+
+  it("stale files receive a lower role-aware score than recent ones, all else equal", async () => {
+    await writeRoleWorkspace();
+    const now = 1_700_000_000_000;
+    const fresh = now;
+    const stale = now - 90 * 86400 * 1000; // 90 days older
+    await fs.utimes(path.join(tmpDir, "src", "service.ts"), new Date(fresh), new Date(fresh));
+    await fs.utimes(path.join(tmpDir, "src", "handler.ts"), new Date(stale), new Date(stale));
+    // Both are executor-side implementation files (no test suffix).
+    const result = await engine.contextMap({
+      budget: 1024,
+      role: "executor",
+      now,
+      refresh: true,
+    });
+    const ranks = new Map(result.ranks);
+    expect(ranks.get("src/service.ts")).toBeGreaterThan(ranks.get("src/handler.ts"));
+    if (result.roleScores) {
+      const byPath = Object.fromEntries(result.roleScores.map((s) => [s.path, s]));
+      expect(byPath["src/service.ts"].recency).toBeGreaterThan(byPath["src/handler.ts"].recency);
+      expect(byPath["src/service.ts"].score).toBeGreaterThan(byPath["src/handler.ts"].score);
+    }
   });
 });

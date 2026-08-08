@@ -44,7 +44,7 @@ export function buildMetaToolDefinitions(ctx: MetaToolContext): AgentToolDefinit
     }),
     definition("mcp_disable", "Stop a selected MCP plugin", { pluginId: stringSchema() }),
     definition("tool_search", "Search a running MCP plugin's tools by name or description (case-insensitive token match — any term matches; returns {pluginId, query, matchMode, count, matches, hint?}; count 0 is success with a hint, not a turn interrupt or failure)", { pluginId: stringSchema(), query: stringSchema() }),
-    definition("tool_list", "List all tools from a running MCP plugin (names and descriptions only; returns {pluginId, count, tools})", { pluginId: stringSchema() }),
+    definition("tool_list", "List tools from a running MCP plugin (names and descriptions only), or from ALL running plugins when pluginId is omitted (includes provider names and optional schemas)", { pluginId: { type: "string", description: "Optional plugin id; when omitted, lists tools across all running plugins" } }),
     definition("tool_schema", "Load one MCP tool schema and advertise it for this turn (optional when recalling a known mcp_* name on a running plugin)", { pluginId: stringSchema(), toolName: stringSchema() }),
     definition("tool_schemas", "Load multiple MCP tool schemas and advertise them for this turn in one call (optional when recalling known mcp_* names on a running plugin)", {
       pluginId: stringSchema(),
@@ -96,9 +96,9 @@ export function buildMetaToolDefinitions(ctx: MetaToolContext): AgentToolDefinit
       offset: { type: "integer", minimum: 0, description: "Character offset for pagination" },
       max_chars: { type: "integer", minimum: 1, maximum: 100000, description: "Maximum characters to return" },
     }, ["skill_id"]),
-    definition("memory", "Save, update, or remove a personal memory or user-profile entry", {
-      action: { type: "string", enum: ["add", "replace", "remove"], description: "Mutation action" },
-      target: { type: "string", enum: ["memory", "user"], description: "\"memory\" for personal notes, \"user\" for user-profile facts" },
+    definition("memory", "Save, update, or remove a personal memory or user-profile entry, or read the current memory snapshot with action=list (read-only)", {
+      action: { type: "string", enum: ["add", "replace", "remove", "list"], description: "Mutation action, or `list` for read-only snapshot" },
+      target: { type: "string", enum: ["memory", "user"], description: "\"memory\" for personal notes, \"user\" for user-profile facts (not used by list)" },
       content: { type: "string", description: "New entry text (required for add and replace; omit or empty to delete via replace)" },
       old_text: { type: "string", description: "Unique substring of the existing entry to match (required for replace and remove)" },
     }, ["action", "target"]),
@@ -140,7 +140,7 @@ export function buildMetaToolDefinitions(ctx: MetaToolContext): AgentToolDefinit
       content: { type: "string", description: "Full SKILL.md content (for create/edit) or file content (for write_file)" },
       path: { type: "string", description: "Relative file path under the skill (for write_file only); must be under references/, templates/, scripts/, or assets/" },
     }, ["action", "name"]),
-    ...(ctx.jobStore && ctx.jobScheduler ? [definition("job", "Manage scheduled automation jobs (run only while NusaShell is open; cron hours and bare timestamps are UTC — convert from the user's local timezone before scheduling; missed one-shots are not silently fired)", {
+    ...(ctx.jobStore && ctx.jobScheduler ? [definition("job", "Manage scheduled automation jobs (run only while NusaShell is open; cron hours and bare timestamps use the host machine's local clock; explicit offsets identify an instant; missed one-shots are not silently fired)", {
       action: { type: "string", enum: ["list", "validate_schedule", "add", "update", "set_enabled", "run", "cancel", "remove", "output"], description: "Job operation" },
       id: { type: "string", description: "Job ID (required for update, set_enabled, run, cancel, remove, output)" },
       name: { type: "string", description: "Job name (required for add)" },
@@ -156,7 +156,7 @@ export function buildMetaToolDefinitions(ctx: MetaToolContext): AgentToolDefinit
       on_complete: { type: "object", description: "Emit an automation event on successful completion (soft chain): { type: '...', payload?: {...} }. Set null to clear." },
       limit: { type: "integer", minimum: 1, maximum: 100, description: "Max output entries (output only; default 20)" },
     }, ["action"])] : []),
-    ...(ctx.pipelineStore && ctx.pipelineScheduler ? [definition("pipeline", "Manage multi-step DAG pipelines (event/schedule triggered, step dependencies, conditional branching, context passing). Runs only while NusaShell is open; schedule cron/bare timestamps are UTC like jobs.", {
+    ...(ctx.pipelineStore && ctx.pipelineScheduler ? [definition("pipeline", "Manage multi-step DAG pipelines (event/schedule triggered, step dependencies, conditional branching, context passing). Runs only while NusaShell is open; schedule cron/bare timestamps use the host machine's local clock like jobs.", {
       action: { type: "string", enum: ["list", "add", "update", "remove", "run"], description: "Pipeline operation" },
       id: { type: "string", description: "Pipeline ID (required for update, remove, run)" },
       name: { type: "string", description: "Pipeline name (required for add)" },

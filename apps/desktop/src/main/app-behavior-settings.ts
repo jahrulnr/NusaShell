@@ -46,6 +46,7 @@ export function shouldQuitOnAllWindowsClosed(input: {
 
 export class AppBehaviorStore {
   private state: AppBehaviorSettings | null = null;
+  private persisted = false;
 
   constructor(private readonly path: string) {}
 
@@ -54,6 +55,7 @@ export class AppBehaviorStore {
     try {
       const raw = JSON.parse(await readFile(this.path, "utf8")) as unknown;
       this.state = normalizeAppBehavior(raw);
+      this.persisted = true;
     } catch (error) {
       if (isFileNotFound(error)) {
         this.state = { ...DEFAULT_APP_BEHAVIOR };
@@ -62,6 +64,11 @@ export class AppBehaviorStore {
       }
     }
     return this.state;
+  }
+
+  async hasPersistedSettings(): Promise<boolean> {
+    await this.load();
+    return this.persisted;
   }
 
   async set(patch: AppBehaviorPatch): Promise<AppBehaviorSettings> {

@@ -34,4 +34,11 @@ describe("agent model picker accessibility", () => {
     expect(launcher).toMatch(/disposeModelMenuPositioning/);
     expect(launcher).toMatch(/requestAnimationFrame/);
   });
+
+  it("rerenders the room-bound selection after changing it", () => {
+    const bind = launcher.indexOf("window.shell.agentConversations.setModel");
+    const rerender = launcher.indexOf("renderAgentModelPicker();", bind);
+    expect(bind).toBeGreaterThanOrEqual(0);
+    expect(rerender).toBeGreaterThan(bind);
+  });
 });

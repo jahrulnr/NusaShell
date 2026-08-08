@@ -67,6 +67,7 @@ describe("execSubagent", () => {
       "turn-1",
       "/tmp/profile",
       { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
+      "conversation-1",
     );
 
     expect(result).toMatchObject({
@@ -76,6 +77,7 @@ describe("execSubagent", () => {
       summary: "done",
     });
     expect(run).toHaveBeenCalledOnce();
+    expect(run.mock.calls[0]![0]).toMatchObject({ parentConversationId: "conversation-1", parentTraceId: "turn-1" });
   });
 
   it("uses homedir when neither arg nor turn workspace is set", async () => {

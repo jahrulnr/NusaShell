@@ -67,8 +67,13 @@ executed once, nudged on its second appearance, and stops the loop on its third.
 
 ## Conversations and failure recovery
 
-- Conversations are stored in Electron `userData/agent-conversations.json`
-  using serialized mutations and atomic rename.
+- Conversations use per-room metadata plus JSONL under Electron `userData`.
+  Every materialized bubble has an immutable `messageId`, a monotonic room-local
+  `position`, and a monotonic `revision`; legacy rows are normalized atomically
+  in their original file order. Before a provider turn starts, Electron main
+  reserves the assistant slot in metadata. Completion, interruption, retry,
+  resume, and Continue seal or revise that exact slot instead of mutating the
+  current JSONL tail.
 - System logs (backend, agent, plugin, MCP) are persisted to
   `userData/logs/nusashell.log` via Pino multistream (stdout + file).
   The file is appended to across restarts and is safe to inspect after a crash.
@@ -184,9 +189,11 @@ executed once, nudged on its second appearance, and stops the loop on its third.
     continue steer (no `resume: true`).
   On success the interrupted message is replaced with the completed
   assistant; on a new mid-turn failure the same interrupted message is
-  updated. If `resumeMessages` was dropped (snapshot exceeded ~512 KiB)
-  after tools, Retry falls back to history restart / text continue when a
-  partial body exists.
+  updated. The active interrupted `resumeMessages` checkpoint is retained in
+  full until that turn completes or is replaced; the store already limits a
+  room to one interrupted tail. Display-only `toolCalls` / `steps` are not a
+  resumable checkpoint, so legacy or damaged rows without `resumeMessages`
+  must never expose a misleading Resume action.
 - `buildAgentContext` skips `status: "interrupted"` messages when building
   context for a new turn — interrupted progress is reattached only via
   tool `resumeMessages` or the text-continue builder.
@@ -234,6 +241,10 @@ monotonic integer starting at 1, assigned at the application publish site
 (`StreamSeqRegistry` in `container.ts` / `AcpSessionService`). The WS
 transport stays a dumb broadcaster; it copies `streamSeq` into the event
 payload but does not generate it. The counter is cleared when a turn ends.
+For Agent turns, the request and application-owned active-turn projection also
+carry the reserved assistant `messageId` and `messagePosition`. Room restore
+therefore reattaches the Working draft to the same durable slot; a stale room or
+retry trace cannot claim a different bubble merely because it arrives later.
 
 ### Turn lifecycle events
 
@@ -335,13 +346,13 @@ The provider context for every turn carries reconstructed assistant
 `toolCalls` plus one `role: "tool"` result per call. `buildAgentContext` (in
 the renderer) expands each persisted assistant message that carries `toolCalls`
 into the assistant tool-call message followed by one `role: "tool"` result
-per call, using the persisted `output` (success) or `error` (failure, marked
-`[TOOL_ERROR]`) as the result content. Calls missing `id` or `name` are
-skipped; order is preserved. Tool results from `mcp_*` tools are wrapped in
-the `untrusted_tool_result` envelope (mirrored from the application-layer
-`wrapUntrustedResult`) so the model treats plugin output as data, not
-instructions. Mid-turn and in-list tool shrink unwrap the payload, clamp the raw body, then
-wrap once with `untrusted_tool_result` — never end-slice a finished envelope
+per call, preferring the persisted canonical `modelOutput` for result content.
+That exact string is also what the UI tool card renders, so transcript display,
+rehydration, and the live provider turn cannot drift. Calls missing `id` or
+`name` are skipped; order is preserved. Tool results from `mcp_*` tools are
+wrapped in a compact `<untrusted_tool_result …>` XML boundary so the model can
+identify both start and end of untrusted plugin data. Mid-turn and in-list tool
+shrink unwrap the payload, clamp the raw body, then wrap once — never end-slice a finished envelope
 (that drops the close tag). Without this
 reconstruction the model would see an assistant
 claim with no tool-use record and no results, and could not verify what was
@@ -369,10 +380,14 @@ model-recoverable `AgentToolResult` with `ok:false`. Transport/protocol
 failures (RPC disconnect, timeout) still throw at the client adapter.
 
 **Projection** (`projectModelToolResult`): one serialization boundary only.
-- Structured path: `{"ok":true,"data":{...},"meta":{"truncated":false}}`
-- Text/command path: `Status: success\n\nOutput:\n...`
-- Error path: `{"ok":false,"error":{"code":"...","message":"...","retryable":...}}`
-- `wrapUntrustedResult` is the last step for `mcp_*` names (unchanged contract).
+- Structured path: compact terminal-style `key=value` lines; homogeneous
+  records become TSV tables.
+- Text/command path: `status=success\n\nstdout:\n...`.
+- Error path: `status=error\ncode=…\n\nstderr:\n…`.
+- Every `mcp_*` result is enclosed by the compact XML boundary
+  `<untrusted_tool_result source="…" format="terminal">` …
+  `</untrusted_tool_result>`. The brief line inside states that its contents
+  are data, never instructions.
 
 **Truncation** (`truncateToolResultText`): head+tail with explicit
 `[omitted: N chars]` marker — never silent head-only slice on the new path.
@@ -405,59 +420,33 @@ checkpoints from before the Codex alignment), the old shape is used
 migration. `mergeCompactionCheckpoint` carries `retainedUserMessages` forward
 on recompaction.
 
-`formatMessagesForSummary` **excludes live injected system prompts** (system.md
-/ mcp-tools / skills catalog / memory / todos / Live MCP); those are re-applied every
-turn by `injectPrompts`. Only prior summary markers, user, assistant, and tool
+New checkpoints also persist `compactedThroughPosition`. The renderer anchors
+the visible compaction marker to that immutable boundary; the legacy
+`compactedMessageCount` remains available for context reconstruction and old
+rooms, but array indexes no longer decide where the marker appears.
+
+`formatMessagesForSummary` **excludes injected system prompts** (`system.md` /
+`mcp-tools`). The runtime snapshot is an ephemeral synthetic tool transcript,
+never durable conversation history or summary input. Only prior summary markers, user, assistant, and tool
 messages enter the handoff excerpt — otherwise a ~12k summary budget is
 exhausted by setup text and the checkpoint LLM invents a "fresh session / no
 user request" handoff (observed after max-round "lanjut" on fat tool turns).
 
-### Live MCP snapshot inject (full running catalog)
+### Runtime hydration (full running catalog)
 
-When at least one MCP plugin is **running**, `RunAgentTurnHandler.injectSystemPrompts`
-builds a runtime-authoritative system block per interactive turn via
-`toolGateway.getMcpLiveSnapshot(traceId)` + `formatMcpLivePrompt`. The block
-carries the **full tool catalog** (name + description + `inputSchema`) for every
-tool on running plugins — IDE-style completeness so the model can call provider
-names directly without progressive discovery:
+On a fresh room and after compaction, `RuntimeHydrationBuilder` creates one
+ephemeral synthetic tool transcript: `runtime_context`, `memory`, `skill_list`,
+`mcp_list`, and `tool_list`. The last two carry the runtime-authoritative
+running-plugin catalog (tool name, description, and `inputSchema`) without
+placing volatile state in the system prefix. The transcript is never persisted
+into conversation history or summaries.
 
-```text
-## Live MCP (runtime)
-
-Running: plugin.a, plugin.b
-
-### mcp_plugin_a_foo
-description: ...
-inputSchema:
-```json
-{ ... }
-```
-
-### mcp_plugin_b_bar
-description: ...
-inputSchema:
-```json
-{ ... }
-```
-
-Prefer these tools; call provider names directly. Do not call mcp_list only to re-list running plugins.
-Idle plugins still need mcp_enable then appear here on a later turn.
-If a name is missing or args fail: tool_list / tool_schema as needed.
-```
-
-The same running tools are auto-advertised in the provider `tools[]` array via
-`listTools` auto-seeding (routes written for every running plugin tool, same
-shape as `grantTool`). Hard cap ~80_000 chars on the Live MCP block (high
-ceiling, mostly prompt-cacheable); provider `tools[]` is hard-capped at 96 MCP
-tool entries beyond meta-tools — overflow names are listed in the block as
-"present but not in tools[]." Sorted stable (plugin ids and tool names) for
-prompt-cache friendliness. Placement: immediately after static `mcp-tools`,
-before skills catalog. Built once per `agent.run` (pre-tool); mid-turn memento
-keeps leading systems, and `tools[]` updates via per-round `listTools` even if
-the prose snapshot is stale until the next turn. `command.resume` skips inject
-(unchanged) — resume uses mid-turn messages including prior injects + residual.
-Fail-soft: on `listPlugins` / `listTools` error, the offending plugin is logged
-and skipped (turn inject still proceeds with the rest).
+Running tools are also auto-advertised in provider `tools[]` via `listTools`
+auto-seeding. This array is capped at 96 MCP tool entries beyond shell
+meta-tools and is refreshed per provider round. The synthetic `tool_list` is
+the larger read-only catalog used to recover context after a fresh-room start
+or compaction. `command.resume` does not rebuild hydration until a compaction
+boundary. Snapshot retrieval is fail-soft and bound to the gateway instance.
 
 ### Mid-turn memento (in-turn roll-over)
 
@@ -557,17 +546,19 @@ runner. The injection point is the application layer (backend), not the renderer
 
 | File | Role | Template vars |
 | --- | --- | --- |
-| `system.md` | Agent identity, product context, what the agent can do | No |
-| `mcp-tools.md` | Progressive MCP tool workflow: discovery / recall → call | No |
-| `developer.md` | Runtime context: date, environment, available meta-tool names | Yes |
+| `system.md` | Stable agent identity and cross-cutting operating rules | No |
+| `mcp-tools.md` | Stable progressive tool/disclosure protocol | No |
+| `subagent.md` | Delegation boundary and brief guidance, only when available | Yes |
 | `compact.md` | Compaction instruction for the checkpoint LLM call | No |
 | `continue.md` | Outer auto-continue steering: pursue open CURRENT TASKS | No |
 
-`developer.md` is the single injection surface for `{{current_date}}`,
-`{{environment}}`, and `{{available_tools}}` template variables. Static prompts
-are injected as-is. Compaction summary messages from prior turns are preserved
-between the developer prompt and user messages. Non-summary system messages from
-the conversation are dropped to avoid duplicate or stale instructions.
+`system.md` and `mcp-tools.md` are the whole cache-stable system prefix.
+Runtime facts (date, environment, OS, workspace, memory, skills, MCP catalog,
+and TODO state) arrive as an ephemeral read-only hydration transcript after the
+durable user history, not as a dynamic developer prompt. `subagent.md` is added
+only when that tool is available. Compaction summary messages from prior turns
+are preserved; non-summary system messages from the conversation are dropped to
+avoid duplicate or stale instructions.
 
 If the prompt loader fails (missing files, I/O error), the handler logs a
 warning and sends the raw conversation messages without injected prompts.

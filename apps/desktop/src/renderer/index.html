@@ -5,8 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>NusaShell</title>
 <link rel="icon" href="./nusashell-mark.png" type="image/png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="fonts/fonts.css">
 <link rel="stylesheet" href="styles/global.css">
 <link rel="stylesheet" href="styles/layout.css">
 <link rel="stylesheet" href="styles/home.css">
@@ -77,13 +76,13 @@
   <div class="body">
 
     <aside class="sidebar" id="sidebar">
-      <nav class="nav-main">
-        <button class="nav-item active" type="button" data-view="home" data-nav title="Home">
+      <nav class="nav-main" aria-label="Main">
+        <button class="nav-item active" type="button" data-view="home" data-nav title="Home" aria-current="page">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M3 11l9-8 9 8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 10v10h14V10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span class="nav-label">Home</span>
         </button>
         <button class="nav-item" type="button" data-view="agent" data-nav title="Agent">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 3v3M12 18v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M3 12h3M18 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="12" r="4.5" stroke="currentColor" stroke-width="1.7"/></svg>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M6 4.5h12A2.5 2.5 0 0 1 20.5 7v7A2.5 2.5 0 0 1 18 16.5H10l-4.5 3v-12A2.5 2.5 0 0 1 8 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 10.5h.01M12 10.5h.01M15 10.5h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
           <span class="nav-label">Agent</span>
         </button>
         <button class="nav-item" type="button" data-view="skills" data-nav title="Skills">
@@ -98,17 +97,13 @@
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/></svg>
           <span class="nav-label">Plugins</span>
         </button>
-        <button class="nav-item" type="button" data-view="ai-providers" data-nav title="Providers">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM4.5 21a7.5 7.5 0 0 1 15 0M19 5v4M21 7h-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-          <span class="nav-label">Providers</span>
-        </button>
         <button class="nav-item" type="button" data-view="autostart" data-nav title="Autostart">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 3v4M6.34 6.34l2.83 2.83M3 12h4M6.34 17.66l2.83-2.83M12 17v4M17.66 17.66l-2.83-2.83M17 12h4M17.66 6.34l-2.83 2.83" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.6"/></svg>
           <span class="nav-label">Autostart</span>
         </button>
-        <button class="nav-item" type="button" data-view="logs" data-nav title="Logs">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M4 5h16M4 12h10M4 19h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="17" cy="12" r="1.5" fill="currentColor"/></svg>
-          <span class="nav-label">Logs</span>
+        <button class="nav-item" type="button" data-view="ai-providers" data-nav title="Providers">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><rect x="7" y="7" width="10" height="10" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M9 2.5v3M12 2.5v3M15 2.5v3M9 18.5v3M12 18.5v3M15 18.5v3M2.5 9h3M2.5 12h3M2.5 15h3M18.5 9h3M18.5 12h3M18.5 15h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M10.25 10.25h3.5v3.5h-3.5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+          <span class="nav-label">Providers</span>
         </button>
         <button class="nav-item" type="button" data-view="jobs" data-nav title="Jobs">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v4l2.5 2.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -117,6 +112,10 @@
         <button class="nav-item" type="button" data-view="pipelines" data-nav title="Pipelines">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><circle cx="6" cy="6" r="3" stroke="currentColor" stroke-width="1.6"/><circle cx="18" cy="6" r="3" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="18" r="3" stroke="currentColor" stroke-width="1.6"/><path d="M7.5 8L11 15M16.5 8L13 15M9 6h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           <span class="nav-label">Pipelines</span>
+        </button>
+        <button class="nav-item" type="button" data-view="logs" data-nav title="Logs">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M4 5h16M4 12h10M4 19h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="17" cy="12" r="1.5" fill="currentColor"/></svg>
+          <span class="nav-label">Logs</span>
         </button>
       </nav>
 
@@ -137,14 +136,6 @@
 
       <!-- ===== View: Home (launcher) ===== -->
       <section class="view active" data-view="home">
-        <div class="greeting-row">
-          <div>
-            <div class="home-kicker" aria-hidden="true">LOCAL WORKBENCH</div>
-            <h1 class="greeting">NusaShell</h1>
-            <p class="subtitle">Your plugins, in one place.</p>
-          </div>
-        </div>
-
         <div class="filter-row">
           <div class="search home-search">
             <svg class="search-icon" viewBox="0 0 24 24" width="15" height="15" fill="none">
@@ -162,6 +153,12 @@
           </div>
         </div>
 
+        <div class="plugin-load-error" id="plugin-load-error" hidden role="alert">
+          <span class="plugin-load-error-icon">⚠</span>
+          <span id="plugin-load-error-text">Could not load plugins.</span>
+          <button type="button" class="mini-btn" id="plugin-load-retry">Retry</button>
+        </div>
+
         <div class="app-grid" id="app-grid">
           <div class="app-cell" style="cursor:default;opacity:0.5">
             <div class="app-icon bg-dashed">
@@ -176,11 +173,6 @@
       <!-- ===== View: Agent ===== -->
       <section class="view agent-view" data-view="agent">
         <div class="agent-header">
-          <div>
-            <div class="agent-kicker"><span class="agent-kicker-dot"></span> Conversation</div>
-            <h1 class="page-title">Agent</h1>
-            <p class="subtitle">Ask the shell to work with your files, plugins, and tools.</p>
-          </div>
           <button class="agent-mobile-conversations-btn" id="agent-mobile-conversations-btn" type="button" aria-expanded="false" aria-controls="agent-conversations" title="Browse conversations">
             <span aria-hidden="true">☰</span><span>Rooms</span>
           </button>
@@ -198,7 +190,7 @@
                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
               </button>
             </div>
-            <label class="agent-conversation-search"><span aria-hidden="true">⌕</span><input id="agent-conversation-search" type="search" placeholder="Search conversations…" autocomplete="off"></label>
+            <label class="agent-conversation-search"><span aria-hidden="true">⌕</span><input id="agent-conversation-search" type="search" placeholder="Search titles…" autocomplete="off"></label>
             <div class="agent-conversation-list" id="agent-conversation-list" role="list"></div>
           </aside>
 
@@ -250,19 +242,23 @@
             </div>
             <div class="agent-todo-strip" id="agent-todo-strip" hidden aria-label="Agent task checklist">
               <div class="agent-todo-strip-head">
-                <button class="agent-todo-strip-toggle" id="agent-todo-strip-toggle" type="button" aria-expanded="false" aria-controls="agent-todo-strip-list" title="Collapse/expand tasks">
+                <button class="agent-todo-strip-toggle" id="agent-todo-strip-toggle" type="button" aria-label="Task checklist" aria-expanded="false" aria-controls="agent-todo-strip-list" title="Collapse/expand tasks">
                   <span class="agent-todo-strip-chevron" aria-hidden="true">›</span>
-                  <span class="agent-todo-strip-count" id="agent-todo-strip-count">0 Tasks</span>
+                  <span class="agent-todo-strip-count" id="agent-todo-strip-count" aria-live="polite" aria-atomic="true">0 Tasks</span>
                 </button>
-                <span class="agent-todo-strip-meta" id="agent-todo-strip-meta"></span>
+                <span class="agent-todo-strip-meta" id="agent-todo-strip-meta" aria-live="polite" aria-atomic="true"></span>
               </div>
               <ol class="agent-todo-strip-list" id="agent-todo-strip-list" role="list" hidden></ol>
             </div>
-            <div class="agent-tool-job-strip" id="agent-tool-job-strip" hidden aria-label="Background tool jobs">
+            <div class="agent-tool-job-strip" id="agent-tool-job-strip" hidden aria-label="Background tool runs">
               <div class="agent-tool-job-strip-head">
-                <span class="agent-tool-job-strip-title">Background jobs</span>
+                <button class="agent-tool-job-strip-toggle" id="agent-tool-job-strip-toggle" type="button" aria-label="Background tool runs" aria-expanded="false" aria-controls="agent-tool-job-list" title="Collapse/expand tool runs">
+                  <span class="agent-tool-job-strip-chevron" aria-hidden="true">›</span>
+                  <span class="agent-tool-job-strip-title" id="agent-tool-job-strip-title" aria-live="polite" aria-atomic="true">0 tool runs</span>
+                </button>
+                <span class="agent-tool-job-strip-meta" id="agent-tool-job-strip-meta" aria-live="polite" aria-atomic="true"></span>
               </div>
-              <div class="agent-tool-job-list" id="agent-tool-job-list" role="list" aria-live="off"></div>
+              <div class="agent-tool-job-list" id="agent-tool-job-list" role="list" aria-live="off" hidden></div>
             </div>
             <form class="agent-composer" id="agent-form">
               <label class="sr-only" for="agent-input">Message to the agent</label>
@@ -355,11 +351,6 @@
       <!-- ===== View: Skills ===== -->
       <section class="view skills-view" data-view="skills">
         <div class="skills-header">
-          <div>
-            <div class="agent-kicker"><span class="agent-kicker-dot"></span> Instruction library</div>
-            <h1 class="page-title">Skills</h1>
-            <p class="subtitle">Manage the instructions available to your conversations.</p>
-          </div>
           <button class="action-btn skills-install-btn" id="skills-install-btn" type="button">Install package</button>
         </div>
 
@@ -435,11 +426,6 @@
       <!-- ===== View: Learning ===== -->
       <section class="view learning-view" data-view="learning">
         <div class="learning-header">
-          <div>
-            <div class="agent-kicker"><span class="agent-kicker-dot"></span> History</div>
-            <h1 class="page-title">Learning</h1>
-            <p class="subtitle">Review saved memory and skills created here. Built-in skills stay in Skills.</p>
-          </div>
           <button class="mini-btn" id="learning-refresh-btn" type="button">Refresh</button>
         </div>
 
@@ -513,7 +499,6 @@
       <!-- ===== View: Plugins ===== -->
       <section class="view" data-view="plugins">
         <div class="agent-header">
-          <div><h1 class="page-title">Plugins</h1><p class="subtitle">Installed plugins and their current status.</p></div>
           <div class="plugins-toolbar">
             <button class="mini-btn" id="plugins-add-mcp" type="button">+ Add MCP</button>
             <button class="mini-btn" id="plugins-install-plugin" type="button">Install plugin</button>
@@ -524,17 +509,13 @@
 
       <section class="view" data-view="autostart">
         <div class="autostart-header">
-          <div>
-            <h1 class="page-title">Autostart</h1>
-            <p class="subtitle">Choose which plugins start when NusaShell opens.</p>
-          </div>
           <span class="autostart-count" id="autostart-count">0 enabled</span>
         </div>
         <div class="autostart-list" id="autostart-list" aria-live="polite"></div>
       </section>
 
       <section class="view" data-view="ai-providers">
-        <div class="agent-header"><div><div class="agent-kicker"><span class="agent-kicker-dot"></span> Provider registry</div><h1 class="page-title">Providers</h1><p class="subtitle">Connect model providers and local gateways. Keys stay private.</p></div><button class="mini-btn provider-add-btn" id="add-custom-provider" type="button">+ Custom provider</button></div>
+        <div class="agent-header"><button class="mini-btn provider-add-btn" id="add-custom-provider" type="button">+ Custom provider</button></div>
         <div class="provider-registry" id="provider-registry" role="list">
           <article class="provider-registry-card accent-or" data-provider-preset="openrouter"><div class="provider-card-head"><span class="provider-mark">OR</span><div><h2>OpenRouter</h2><p>API KEY · CHAT</p></div><button type="button" class="provider-toggle" aria-label="Enable OpenRouter" disabled>●</button></div><p>One API for models from many upstream providers.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
           <article class="provider-registry-card accent-om" data-provider-preset="omniroute"><div class="provider-card-head"><span class="provider-mark">OM</span><div><h2>OmniRoute</h2><p>LOCAL · RESPONSES</p></div><button type="button" class="provider-toggle" aria-label="Enable OmniRoute" disabled>●</button></div><p>Local multi-provider gateway with OpenAI-compatible endpoints.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
@@ -544,7 +525,7 @@
           <article class="provider-registry-card accent-ol" data-provider-preset="ollama"><div class="provider-card-head"><span class="provider-mark">OL</span><div><h2>Ollama</h2><p>LOCAL · CHAT</p></div><button type="button" class="provider-toggle" aria-label="Enable Ollama" disabled>●</button></div><p>Local Ollama OpenAI-compatible API. Start <code>ollama serve</code> then Import models.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
           <article class="provider-registry-card accent-lc" data-provider-preset="llamacpp"><div class="provider-card-head"><span class="provider-mark">LC</span><div><h2>llama.cpp</h2><p>LOCAL · CHAT</p></div><button type="button" class="provider-toggle" aria-label="Enable llama.cpp" disabled>●</button></div><p>Local llama-server OpenAI-compatible API. Start <code>llama-server -m model.gguf --port 8080 --jinja</code> then Import models.</p><div class="provider-card-footer"><span class="provider-status">● Not configured</span><button type="button" class="mini-btn provider-card-action">Configure</button></div></article>
         </div>
-        <div class="acp-agents-header"><div><div class="agent-kicker"><span class="agent-kicker-dot"></span> External providers</div><p class="subtitle">Connect tools that use the Agent Client Protocol.</p></div><button class="mini-btn" id="acp-routing-settings" type="button" aria-haspopup="dialog" aria-controls="acp-routing-dialog">Settings</button></div>
+        <div class="acp-agents-header"><button class="mini-btn" id="acp-routing-settings" type="button" aria-haspopup="dialog" aria-controls="acp-routing-dialog">Settings</button></div>
         <div class="provider-registry" id="acp-provider-registry" role="list"></div>
       </section>
 
@@ -602,10 +583,6 @@
       <!-- ===== View: Central log tail ===== -->
       <section class="view logs-view" data-view="logs">
         <div class="log-header">
-          <div>
-            <h1 class="page-title">Logs</h1>
-            <p class="subtitle">Live output from NusaShell and its plugins.</p>
-          </div>
           <span class="log-count" id="log-count">0 / 1000</span>
         </div>
         <div class="log-filters" aria-label="Filter logs by source">
@@ -622,11 +599,6 @@
       <!-- ===== View: Jobs ===== -->
       <section class="view jobs-view" data-view="jobs">
         <div class="jobs-header">
-          <div>
-            <div class="agent-kicker"><span class="agent-kicker-dot"></span> Scheduled automation</div>
-            <h1 class="page-title">Jobs</h1>
-            <p class="subtitle">Run a task or plugin action on a schedule while NusaShell is open.</p>
-          </div>
           <button class="action-btn" id="jobs-new-btn" type="button" data-control="jobs-new-btn">+ New job</button>
         </div>
         <div class="jobs-error" id="jobs-error" hidden>
@@ -643,11 +615,6 @@
       <!-- ===== Pipelines View ===== -->
       <section class="view jobs-view" data-view="pipelines">
         <div class="jobs-header">
-          <div>
-            <div class="agent-kicker"><span class="agent-kicker-dot"></span> Orchestration / control plane</div>
-            <h1 class="page-title">Pipelines</h1>
-            <p class="subtitle">Chain agents and tools into visible, repeatable runs while NusaShell is open.</p>
-          </div>
           <button class="action-btn pipeline-new-btn" id="pipelines-new-btn" type="button" data-control="pipelines-new-btn"><span aria-hidden="true">＋</span> New pipeline</button>
         </div>
         <div class="jobs-error" id="pipelines-error" hidden>
@@ -717,7 +684,7 @@
             <section class="pipeline-step-inspector" id="pipeline-details-step" aria-live="polite" hidden></section>
           </div>
           <div class="modal-footer">
-            <button class="ghost-btn" id="pipeline-details-run" type="button">▶ Run now</button>
+            <button class="ghost-btn" id="pipeline-details-run" type="button" data-control="pipeline-details-run">▶ Run now</button>
             <button class="ghost-btn danger" id="pipeline-details-cancel" type="button" data-control="pipeline-details-cancel" hidden>Cancel run</button>
             <button class="ghost-btn" id="pipeline-details-ok" type="button">Close</button>
           </div>
@@ -857,11 +824,6 @@
         <button id="job-remove-btn" type="button" hidden>Remove</button>
       </template>
       <section class="view" data-view="settings">
-        <div class="settings-header">
-          <h1 class="page-title">Settings</h1>
-          <p class="subtitle">System configuration and preferences.</p>
-        </div>
-
         <div class="settings-grid">
           <div class="settings-card">
             <div class="settings-card-title">System</div>
@@ -930,7 +892,7 @@
             <label class="settings-field">Model<select id="settings-global-model"></select>
               <span class="settings-field-help">"Automatic (provider default)" uses each provider's configured default model.</span>
             </label>
-            <label class="settings-field">Effort<select id="settings-global-effort"><option value="auto">auto</option></select>
+            <label class="settings-field">Effort<select id="settings-global-effort"><option value="auto">default</option></select>
               <span class="settings-field-help">Reasoning effort, when the selected model supports it.</span>
             </label>
             <div class="settings-row"><span>Used by: pipeline/job agent mode, compaction summarizer, new rooms</span><button class="mini-btn" type="submit">Save global model</button></div>
@@ -1148,7 +1110,7 @@
   </section>
 
   <!-- ===== Toast container ===== -->
-  <div class="toast-container" id="toast-container"></div>
+  <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="false"></div>
 
 </div>
 

@@ -5,6 +5,7 @@ import {
   StaticAgentProvider,
   OpenAiCompatibleAgentProvider,
   NodeRuntimeOsProbe,
+  FilesystemConversationTodoPort,
   type Logger,
 } from "@nusashell/infrastructure";
 import {
@@ -16,7 +17,7 @@ import {
   AgentTurnCoordinator,
   StreamSeqRegistry,
   InMemoryActiveTurnProjection,
-  InMemoryConversationTodoPort,
+  type ConversationTodoPort,
   AsyncToolRuntime,
   createAgentAskRequestEvent,
   createAgentTodoUpdatedEvent,
@@ -48,7 +49,7 @@ export interface AgentRuntimeParts {
   readonly withStreamSeq: <T extends { readonly aggregateId: string }>(event: T) => T & { streamSeq: number };
   readonly runtimeOsProbe: NodeRuntimeOsProbe;
   readonly activeTurns: InMemoryActiveTurnProjection;
-  readonly conversationTodos: InMemoryConversationTodoPort;
+  readonly conversationTodos: ConversationTodoPort;
   readonly asyncToolRuntime: AsyncToolRuntime;
   /** Token-efficiency telemetry sink (undefined when disabled). */
   readonly telemetry?: TelemetryPort;
@@ -97,7 +98,9 @@ export function createAgentRuntime(
     askQuestionService,
   );
 
-  const conversationTodos = new InMemoryConversationTodoPort();
+  const conversationTodos = new FilesystemConversationTodoPort(
+    options.memoryRoot ?? fileURLToPath(new URL("../../../.nusashell/agent/memory", import.meta.url)),
+  );
   agentToolGateway.bindTodos(conversationTodos, (conversationId, items) => {
     void eventDispatcher.publish(createAgentTodoUpdatedEvent(conversationId, items));
   });

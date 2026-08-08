@@ -6,7 +6,7 @@ The agent conversation workspace. Chat with the NusaShell agent, attach files, p
 
 ## Conversation list
 
-A fixed workbench rail listing local conversation threads. Click a thread to open it; use the × button to delete. At narrow widths the rail becomes a focusable Rooms drawer opened from the Agent header, so room switching remains available without consuming chat width.
+A fixed workbench rail listing local conversation threads. Click a thread to open it; use the × button to delete. At narrow widths the rail becomes a focusable Rooms drawer opened from the compact Agent toolbar, so room switching remains available without consuming chat width.
 
 - **Conversations heading** (`#agent-conversations-title`):
   - Section: Conversation list
@@ -34,10 +34,10 @@ A fixed workbench rail listing local conversation threads. Click a thread to ope
   - Action: Creates a new empty conversation thread and focuses the composer.
   - Related: Message input (`#agent-input`)
 
-- **Search conversations** (`#agent-conversation-search`):
+- **Search titles** (`#agent-conversation-search`):
   - Section: Conversation list
   - Type: search input
-  - Action: Filters the conversation list by thread title as you type.
+  - Action: Filters the conversation list by thread title as you type (does not search message content).
 
 - **Conversation list** (`#agent-conversation-list`):
   - Section: Conversation list
@@ -124,10 +124,10 @@ The full-height message runway separates compact user cards from editorial assis
   - Type: icon button
   - Action: Copies the message text through the Electron clipboard bridge and briefly confirms success.
 
-- **Retry turn** (`.agent-retry-btn`):
+- **Recover turn** (`.agent-retry-btn`):
   - Section: Conversation thread
   - Type: button
-  - Action: Appears on a failed assistant turn. Click to re-run the same turn.
+  - Action: Appears on a failed or interrupted assistant turn. Resume is shown only when a durable provider transcript with settled tool calls exists; Continue extends saved partial text, while Retry re-runs a retry-only failure.
 
 ## Room diagnostics
 
@@ -374,22 +374,22 @@ A collapsible checklist above the composer that mirrors the agent-owned todo lis
 - **Task strip** (`.agent-todo-strip`):
   - Section: Task strip
   - Type: container
-  - Action: Top row of the composer stack: collapsible agent-owned todo checklist. Hides when the list is empty.
+  - Action: Top row of the composer stack: collapsible agent-owned todo checklist. Hides when idle and empty; reserves space with No tasks yet while a turn is active.
 
-- **Collapse tasks** (`.agent-todo-strip-toggle`):
+- **Task checklist** (`.agent-todo-strip-toggle`):
   - Section: Task strip
   - Type: button
-  - Action: Collapses or expands the task list. Label shows total task count (e.g. 5 Tasks).
+  - Action: Collapses or expands the task list. Accessible name is Task checklist; visible label shows total task count (e.g. 5 Tasks).
 
 - **Task count** (`.agent-todo-strip-count`):
   - Section: Task strip
   - Type: text
-  - Action: Shows total task count as N Tasks.
+  - Action: Polite live region showing total task count as N Tasks.
 
 - **Task progress** (`.agent-todo-strip-meta`):
   - Section: Task strip
   - Type: text
-  - Action: Right-side pill showing remaining open tasks (or All done).
+  - Action: Polite live region with open progress (N open / All done) or No tasks yet while a turn is active with an empty list.
 
 - **Task list** (`.agent-todo-strip-list`):
   - Section: Task strip
@@ -398,12 +398,17 @@ A collapsible checklist above the composer that mirrors the agent-owned todo lis
 
 ## Background jobs strip
 
-A compact strip above the composer (below the task strip) shows active async tool jobs started via `async_run`. Its header includes the active-job count; each card keeps the tool name, status badge, and Stop action on one row, with live tail or error output shown below only when present. The strip rehydrates from `agent.tool_job_list` on conversation open and hides as soon as no jobs are running.
+A compact, collapsed-by-default strip above the composer (below the task strip) shows active async tool jobs started via `async_run`. Its collapsible header includes the active-job count; each card keeps the tool name, status badge, and Stop action on one row, with live tail or error output shown below only when present. The strip rehydrates from `agent.tool_job_list` on conversation open and hides as soon as no jobs are running.
 
 - **Background jobs strip** (`.agent-tool-job-strip`):
   - Section: Background jobs strip
   - Type: container
   - Action: Shows the compact background-job section and active-job count. Hides when no jobs are running.
+
+- **Collapse background jobs** (`.agent-tool-job-strip-toggle`):
+  - Section: Background jobs strip
+  - Type: button
+  - Action: Collapses or expands the active background-job list. The strip starts collapsed; job execution and Stop actions continue independently.
 
 - **Job cards** (`.agent-tool-job-list`):
   - Section: Background jobs strip

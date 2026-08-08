@@ -63,13 +63,35 @@ describe("MCP plugin registration handlers", () => {
     expect(result).toMatchObject({ ok: true, data: { pluginId: "example.plugin" } });
   });
 
-  it("blocks unregistering a bundled plugin path", async () => {
+  // Decision #49-B: bundled plugins are fully writable (seeded into the user
+  // root). A previously-bundled plugin whose install path lives under the user
+  // root may now be unregistered like any user plugin.
+  it("allows unregistering a bundled-seeded plugin when it lives in the user root", async () => {
+    const root = await mkdtemp(join(tmpdir(), "nusashell-mcp-register-"));
+    const bundled = await mkdtemp(join(tmpdir(), "nusashell-mcp-bundled-"));
+    roots.push(root, bundled);
+    await mkdir(join(root, "example.plugin"));
+    const registrationDeps = deps(root, {
+      bundledPluginsRoot: bundled,
+      installer: { uninstall: async () => {} },
+      repository: {
+        findById: async () => ({ id: { value: "example.plugin" }, installPath: join(root, "example.plugin") }),
+        remove: async () => {},
+      },
+    });
+    const askQuestions = new AskQuestionService();
+    Object.assign(registrationDeps, { askQuestions });
+    const result = await confirm(askQuestions, execMcpUnregister(registrationDeps, { pluginId: "example.plugin" }, "turn", "call", true), "turn", "call");
+    expect(result).toMatchObject({ ok: true, data: { pluginId: "example.plugin" } });
+  });
+
+  it("blocks unregistering a plugin whose install path is outside the user root", async () => {
     const root = await mkdtemp(join(tmpdir(), "nusashell-mcp-register-"));
     const bundled = await mkdtemp(join(tmpdir(), "nusashell-mcp-bundled-"));
     roots.push(root, bundled);
     const registrationDeps = deps(root, {
       repository: { findById: async () => ({ id: { value: "example.plugin" }, installPath: join(bundled, "example.plugin") }) },
     });
-    await expect(execMcpUnregister(registrationDeps, { pluginId: "example.plugin" }, "turn", "call", true)).rejects.toThrow("Bundled");
+    await expect(execMcpUnregister(registrationDeps, { pluginId: "example.plugin" }, "turn", "call", true)).rejects.toThrow("user plugins root");
   });
 });

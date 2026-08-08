@@ -173,6 +173,14 @@ describe("workspace context tools", () => {
     await expect(callFilesTool(service, "context_map", { nope: 1 })).rejects.toThrow();
   });
 
+  it("context_map accepts optional role and rejects unknown roles", async () => {
+    await fs.writeFile(path.join(tmpDir, "README.md"), "# docs\n");
+    const withRole = await callFilesTool(service, "context_map", { role: "planner" });
+    expect(withRole.stats.role).toBe("planner");
+    expect(withRole.stats.effectiveBudget).toBeGreaterThan(1024);
+    await expect(callFilesTool(service, "context_map", { role: "intern" })).rejects.toThrow();
+  });
+
   it("detect_stack returns the workspace classification", async () => {
     await fs.writeFile(path.join(tmpDir, "README.md"), "# docs\n");
     const result = await callFilesTool(service, "detect_stack", {});
@@ -192,10 +200,98 @@ describe("workspace context tools", () => {
 
   it("context tools are annotated read-only and non-destructive", async () => {
     for (const tool of FILES_TOOLS) {
-      if (["context_map", "detect_stack", "list_symbols"].includes(tool.name)) {
+      if (["context_map", "detect_stack", "list_symbols", "search_relevant"].includes(tool.name)) {
         expect(tool.annotations.readOnlyHint).toBe(true);
         expect(tool.annotations.destructiveHint).toBe(false);
       }
     }
+  });
+});
+
+describe("search_relevant tool", () => {
+  it("is part of the canonical tool catalog", () => {
+    expect(FILES_TOOL_NAMES).toContain("search_relevant");
+  });
+
+  async function writeSemanticWorkspace() {
+    await fs.mkdir(path.join(tmpDir, "src"));
+    await fs.mkdir(path.join(tmpDir, "docs"));
+    await fs.writeFile(
+      path.join(tmpDir, "src", "core.ts"),
+      [
+        "export class PluginRuntime {",
+        "  start() { return this.lifecycle('start'); }",
+        "  stop() { return this.lifecycle('stop'); }",
+        "  lifecycle(mode) { return mode; }",
+        "}",
+        "// the plugin runtime lifecycle is managed here",
+      ].join("\n"),
+    );
+    await fs.writeFile(
+      path.join(tmpDir, "src", "ui.ts"),
+      [
+        "export function renderTheme() {",
+        "  return { color: 'red', padding: 8 };",
+        "}",
+      ].join("\n"),
+    );
+    await fs.writeFile(
+      path.join(tmpDir, "docs", "lifecycle.md"),
+      "# Plugin lifecycle\n\nPlugins are started and stopped through the runtime lifecycle coordinator.\n",
+    );
+  }
+
+  it("returns semantic retrieval results with the documented shape", async () => {
+    await writeSemanticWorkspace();
+    const result = await callFilesTool(service, "search_relevant", {
+      query: "plugin runtime lifecycle",
+      topK: 3,
+    });
+    expect(result.query).toBe("plugin runtime lifecycle");
+    // unrelated files (src/ui.ts) are filtered out, so only the 2 relevant
+    // chunks are returned even when topK is larger
+    expect(result.results).toHaveLength(2);
+    const paths = result.results.map((r) => r.path);
+    expect(paths).not.toContain("src/ui.ts");
+    expect(paths.some((p) => p === "src/core.ts" || p === "docs/lifecycle.md")).toBe(true);
+    for (const r of result.results) {
+      expect(typeof r.path).toBe("string");
+      expect(Number.isInteger(r.line)).toBe(true);
+      expect(Number.isInteger(r.lineEnd)).toBe(true);
+      expect(typeof r.score).toBe("number");
+      expect(typeof r.snippet).toBe("string");
+    }
+    expect(result.meta.filesScanned).toBeGreaterThanOrEqual(3);
+    expect(result.meta.chunks).toBeGreaterThanOrEqual(1);
+    expect(result.meta.timingMs.total).toBeGreaterThanOrEqual(0);
+  });
+
+  it("scopes retrieval to a subdirectory via path", async () => {
+    await writeSemanticWorkspace();
+    const result = await callFilesTool(service, "search_relevant", {
+      query: "plugin runtime lifecycle",
+      topK: 5,
+      path: "src",
+    });
+    expect(result.results.length).toBeGreaterThan(0);
+    for (const r of result.results) {
+      expect(r.path.startsWith("src/")).toBe(true);
+    }
+  });
+
+  it("is deterministic across repeat calls and clamps topK", async () => {
+    await writeSemanticWorkspace();
+    const a = await callFilesTool(service, "search_relevant", { query: "plugin runtime lifecycle", topK: 5 });
+    const b = await callFilesTool(service, "search_relevant", { query: "plugin runtime lifecycle", topK: 5 });
+    expect(b.results).toEqual(a.results);
+    const clamped = await callFilesTool(service, "search_relevant", { query: "plugin runtime lifecycle", topK: 999 });
+    expect(clamped.results.length).toBeLessThanOrEqual(20);
+  });
+
+  it("rejects empty query and extra fields", async () => {
+    await writeSemanticWorkspace();
+    await expect(callFilesTool(service, "search_relevant", {})).rejects.toThrow(/query/i);
+    await expect(callFilesTool(service, "search_relevant", { query: "   " })).rejects.toThrow(/query/i);
+    await expect(callFilesTool(service, "search_relevant", { query: "x", nope: 1 })).rejects.toThrow();
   });
 });

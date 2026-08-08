@@ -7,6 +7,7 @@ import {
   SqlitePluginRepository,
   PluginInstaller,
   PluginSyncService,
+  BundledPluginSeeder,
   MarkdownDocsIndex,
   SystemClock,
   type Logger,
@@ -48,10 +49,20 @@ export function createPluginRuntime(
 
   const bundledPluginsRoot = options.bundledPluginsRoot;
   const userPluginsRoot = options.userPluginsRoot ?? options.pluginsRoot;
-  const pluginRoots = [
-    ...(bundledPluginsRoot ? [bundledPluginsRoot] : []),
-    ...(userPluginsRoot && userPluginsRoot !== bundledPluginsRoot ? [userPluginsRoot] : []),
-  ];
+  // #49 single writable root: when bundled seeding is enabled and the bundled
+  // root differs from the user root, bundled plugins are copied into the user
+  // root at startup (seed + version reconcile) and the user root becomes the
+  // ONLY scanned root. The bundled root then serves as seed source only.
+  const seedBundled = options.seedBundledPlugins !== false
+    && !!bundledPluginsRoot
+    && !!userPluginsRoot
+    && bundledPluginsRoot !== userPluginsRoot;
+  const pluginRoots = seedBundled
+    ? [userPluginsRoot!]
+    : [
+        ...(bundledPluginsRoot ? [bundledPluginsRoot] : []),
+        ...(userPluginsRoot && userPluginsRoot !== bundledPluginsRoot ? [userPluginsRoot] : []),
+      ];
 
   if (options.dbPath) {
     db = new SqliteDatabase(options.dbPath);
@@ -59,14 +70,34 @@ export function createPluginRuntime(
     if (pluginRoots.length > 0) {
       const syncService = new PluginSyncService(pluginRoots, pluginRepository, logger);
       syncPlugins = () => syncService.sync();
-      syncService.sync().catch((err) => {
-        logger.warn({ err }, "Plugin sync failed during startup");
-      });
+      // Seed bundled → user root before the first sync so a fresh install
+      // resolves every bundled plugin from the single writable root.
+      const prepare = seedBundled
+        ? new BundledPluginSeeder({ bundledRoot: bundledPluginsRoot!, userRoot: userPluginsRoot!, logger }).seed()
+        : Promise.resolve();
+      prepare
+        .then(() => syncService.sync())
+        .catch((err) => {
+          logger.warn({ err }, "Plugin sync failed during startup");
+        });
     }
   } else if (pluginRoots.length > 0) {
     const filesystemRepository = new FilesystemPluginRegistry(pluginRoots, logger);
     pluginRepository = filesystemRepository;
-    syncPlugins = () => filesystemRepository.refresh();
+    syncPlugins = seedBundled
+      ? async () => {
+          await new BundledPluginSeeder({ bundledRoot: bundledPluginsRoot!, userRoot: userPluginsRoot!, logger }).seed();
+          await filesystemRepository.refresh();
+        }
+      : () => filesystemRepository.refresh();
+    if (seedBundled) {
+      new BundledPluginSeeder({ bundledRoot: bundledPluginsRoot!, userRoot: userPluginsRoot!, logger })
+        .seed()
+        .then(() => filesystemRepository.refresh())
+        .catch((err) => {
+          logger.warn({ err }, "Bundled plugin seed + refresh failed during startup");
+        });
+    }
   } else {
     pluginRepository = new InMemoryPluginRepository();
   }

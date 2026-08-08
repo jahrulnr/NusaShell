@@ -161,7 +161,10 @@ async function startBackend(): Promise<BootstrapResult> {
   const skillsRoot = resolve(dataRoot, "skills");
   const memoryRoot = resolve(dataRoot, "memories");
   const jobsRoot = resolve(dataRoot, "agent", "jobs");
-  mailSettingsStore ??= new MailSettingsStore(resolve(dataRoot, "mail-settings.json"));
+  const mailSettingsPath = resolve(dataRoot, "plugins-data", "nusashell.mail", "mail-settings.json");
+  const legacyMailSettingsPath = resolve(dataRoot, "mail-settings.json");
+  mailSettingsStore ??= new MailSettingsStore(mailSettingsPath);
+  await mailSettingsStore.migrateFrom(legacyMailSettingsPath);
   await mailSettingsStore.load();
 
   const dbPath = process.env.NUSASHELL_DB_PATH || undefined;
@@ -226,7 +229,7 @@ async function startBackend(): Promise<BootstrapResult> {
       logTail.add(source, toShellLogLevel(level), message);
     },
     acpProviderResolver: new AcpProviderResolverAdapter(acpProviderStore!),
-    sealAgentTurn: async (conversationId, result, options) => {
+    sealAgentTurn: async (conversationId, result, _options) => {
       const store = agentConversationStore;
       if (!store) {
         logTail.add("main", "warn", `sealAgentTurn: store not ready for conversation ${conversationId}`);
@@ -234,11 +237,7 @@ async function startBackend(): Promise<BootstrapResult> {
       }
       try {
         const message = buildAssistantMessage(result);
-        if (options.resume) {
-          await store.replaceLastInterrupted(conversationId, message);
-        } else {
-          await store.appendMessage(conversationId, message);
-        }
+        await store.sealAssistant(conversationId, result.traceId, message);
         if (result.compaction?.summary) {
           const updated = await store.get(conversationId);
           const previous = updated?.checkpoint;
@@ -268,11 +267,7 @@ async function startBackend(): Promise<BootstrapResult> {
       }
       try {
         const message = buildInterruptedMessage(partial, { interruptReason: options.interruptReason });
-        if (options.resume) {
-          await store.replaceLastInterrupted(conversationId, message);
-        } else {
-          await store.appendMessage(conversationId, message);
-        }
+        await store.sealAssistant(conversationId, partial.traceId, message);
         logTail.add(
           "main",
           "info",
@@ -326,6 +321,7 @@ function createIpcContext(): IpcContext {
     backgroundReviewScheduler: c.backgroundReviewScheduler,
     learningGraph: c.learningGraph,
     agentToolGateway: c.agentToolGateway,
+    conversationTodos: c.conversationTodos,
     configureBackgroundReview: (...args) => c.configureBackgroundReview(...args),
     configureCurator: (...args) => c.configureCurator(...args),
     configureCuratorScheduler: (...args) => c.configureCuratorScheduler(...args),
@@ -360,6 +356,12 @@ app.whenReady().then(async () => {
     getLoginItemSettings: () => app.getLoginItemSettings(),
     log: (message) => logTail.add("main", "info", message),
   });
+  // A packaged install has a separate userData root from --dev. On first
+  // launch, preserve an existing OS login entry instead of interpreting the
+  // missing prod app-behavior file as an explicit user disable.
+  if (app.isPackaged && !(await appBehaviorStore.hasPersistedSettings()) && await loginAutostart.get()) {
+    appBehavior = await appBehaviorStore.set({ launchAtLogin: true });
+  }
   await loginAutostart.reconcile(appBehavior);
   setLauncherClosePolicy({
     shouldHide: () => shouldHideOnClose({

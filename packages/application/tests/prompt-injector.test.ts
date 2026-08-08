@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { injectPrompts, applyVars, stableCurrentDate, type PromptVars } from "../src/index.js";
+import {
+  injectPrompts,
+  applyVars,
+  machineCurrentTime,
+  stableCurrentDate,
+  type PromptVars,
+} from "../src/index.js";
 import type { AgentPrompt } from "../src/index.js";
 import type { AgentMessage } from "../src/index.js";
 
@@ -23,13 +29,21 @@ const varsWithWorkspace: PromptVars = {
 const prompts: AgentPrompt[] = [
   { name: "system", content: "You are the NusaShell agent.", isTemplate: false },
   { name: "mcp-tools", content: "Use tool_list to discover tools.", isTemplate: false },
-  { name: "developer", content: "Date: {{current_date}} Env: {{environment}} OS: {{runtime_os}} Tools: {{available_tools}}", isTemplate: true },
 ];
 
 describe("applyVars", () => {
   it("replaces all template variables", () => {
     const result = applyVars("{{current_date}} {{environment}} {{runtime_os}} {{available_tools}}", vars);
     expect(result).toBe("2026-07-29 development linux (ubuntu) mcp_list, tool_list, tool_search, tool_schema");
+  });
+
+  it("substitutes the local machine time and timezone when supplied", () => {
+    const result = applyVars("{{current_date}} {{current_time}} {{time_zone}}", {
+      ...vars,
+      currentTime: "09:30:15",
+      timeZone: "Asia/Jakarta",
+    });
+    expect(result).toBe("2026-07-29 09:30:15 Asia/Jakarta");
   });
 
   it("leaves unknown variables as-is", () => {
@@ -67,26 +81,31 @@ describe("applyVars", () => {
 });
 
 describe("injectPrompts", () => {
-  it("prepends static and developer prompts before conversation messages", () => {
+  it("does not inject a legacy developer prompt into the default request", () => {
+    const messages: AgentMessage[] = [{ role: "user", content: "hello" }];
+    const result = injectPrompts([
+      { name: "system", content: "Stable system", isTemplate: false },
+      { name: "mcp-tools", content: "Stable MCP workflow", isTemplate: false },
+      { name: "developer", content: "Legacy dynamic prompt: {{current_date}}", isTemplate: true },
+    ], vars, messages);
+
+    expect(result.messages).toEqual([
+      { role: "system", content: "Stable system" },
+      { role: "system", content: "Stable MCP workflow" },
+      { role: "user", content: "hello" },
+    ]);
+    expect(result.promptCache).toEqual({ mode: "auto", stableSystemMessages: 2 });
+  });
+
+  it("prepends only the stable prompt pair before conversation messages", () => {
     const messages: AgentMessage[] = [
       { role: "user", content: "hello" },
     ];
     const result = inject(prompts, vars, messages);
-    expect(result).toHaveLength(4);
+    expect(result).toHaveLength(3);
     expect(result[0]).toEqual({ role: "system", content: "You are the NusaShell agent." });
     expect(result[1]).toEqual({ role: "system", content: "Use tool_list to discover tools." });
-    expect(result[2]).toEqual({ role: "system", content: "Date: 2026-07-29 Env: development OS: linux (ubuntu) Tools: mcp_list, tool_list, tool_search, tool_schema" });
-    expect(result[3]).toEqual({ role: "user", content: "hello" });
-  });
-
-  it("applies template substitution only to developer prompt", () => {
-    const messages: AgentMessage[] = [{ role: "user", content: "hi" }];
-    const result = inject(prompts, vars, messages);
-    const systemContent = result[0] as { content: string };
-    expect(systemContent.content).not.toContain("2026-07-29");
-    const devContent = result[2] as { content: string };
-    expect(devContent.content).toContain("2026-07-29");
-    expect(devContent.content).not.toContain("{{current_date}}");
+    expect(result[2]).toEqual({ role: "user", content: "hello" });
   });
 
   it("preserves compaction summary messages", () => {
@@ -95,11 +114,11 @@ describe("injectPrompts", () => {
       { role: "user", content: "continue" },
     ];
     const result = inject(prompts, vars, messages);
-    expect(result).toHaveLength(5);
-    const summary = result[3] as { role: string; content: string };
+    expect(result).toHaveLength(4);
+    const summary = result[2] as { role: string; content: string };
     expect(summary.role).toBe("system");
     expect(summary.content).toContain("Conversation summary:");
-    expect(result[4]).toEqual({ role: "user", content: "continue" });
+    expect(result[3]).toEqual({ role: "user", content: "continue" });
   });
 
   it("drops non-summary system messages from conversation", () => {
@@ -108,8 +127,8 @@ describe("injectPrompts", () => {
       { role: "user", content: "hello" },
     ];
     const result = inject(prompts, vars, messages);
-    expect(result).toHaveLength(4);
-    expect(result[3]).toEqual({ role: "user", content: "hello" });
+    expect(result).toHaveLength(3);
+    expect(result[2]).toEqual({ role: "user", content: "hello" });
   });
 
   it("passes through assistant and tool messages", () => {
@@ -119,17 +138,17 @@ describe("injectPrompts", () => {
       { role: "tool", toolCallId: "1", name: "tool_list", content: '{"tools":[]}' },
     ];
     const result = inject(prompts, vars, messages);
-    expect(result).toHaveLength(6);
-    expect(result[3]).toEqual({ role: "user", content: "do something" });
-    expect(result[4]).toMatchObject({ role: "assistant" });
-    expect(result[5]).toMatchObject({ role: "tool" });
+    expect(result).toHaveLength(5);
+    expect(result[2]).toEqual({ role: "user", content: "do something" });
+    expect(result[3]).toMatchObject({ role: "assistant" });
+    expect(result[4]).toMatchObject({ role: "tool" });
   });
 
   it("works with empty conversation messages", () => {
     const result = inject(prompts, vars, []);
-    expect(result).toHaveLength(3);
+    expect(result).toHaveLength(2);
     expect(result[0]).toMatchObject({ role: "system" });
-    expect(result[2]).toMatchObject({ role: "system" });
+    expect(result[1]).toMatchObject({ role: "system" });
   });
 
   it("works with empty prompts", () => {
@@ -138,16 +157,14 @@ describe("injectPrompts", () => {
     expect(result).toEqual(messages);
   });
 
-  it("injects user prompt after static prompts and before developer prompt", () => {
+  it("injects user prompt after the stable prefix", () => {
     const messages: AgentMessage[] = [{ role: "user", content: "hi" }];
     const result = inject(prompts, vars, messages, "Be concise.");
-    expect(result).toHaveLength(5);
+    expect(result).toHaveLength(4);
     expect(result[0]).toEqual({ role: "system", content: "You are the NusaShell agent." });
     expect(result[1]).toEqual({ role: "system", content: "Use tool_list to discover tools." });
     expect(result[2]).toEqual({ role: "system", content: "Be concise." });
-    expect(result[3]).toMatchObject({ role: "system" });
-    expect((result[3] as { content: string }).content).toContain("2026-07-29");
-    expect(result[4]).toEqual({ role: "user", content: "hi" });
+    expect(result[3]).toEqual({ role: "user", content: "hi" });
   });
 
   it("skips user prompt when it is empty or undefined", () => {
@@ -155,27 +172,26 @@ describe("injectPrompts", () => {
     const withUndefined = inject(prompts, vars, messages);
     const withEmpty = inject(prompts, vars, messages, "");
     expect(withUndefined).toEqual(withEmpty);
-    expect(withEmpty).toHaveLength(4);
+    expect(withEmpty).toHaveLength(3);
   });
 
-  it("injects memory block after developer prompt and before conversation messages", () => {
+  it("does not inject memory into the system prompt (memory moves to hydration tool per REV2)", () => {
     const messages: AgentMessage[] = [{ role: "user", content: "hi" }];
     const result = inject(prompts, vars, messages, undefined, "MEMORY (personal notes) [10% — 220/2200 chars]\nremember to be concise");
-    expect(result).toHaveLength(5);
+    expect(result).toHaveLength(3);
     expect(result[0]).toEqual({ role: "system", content: "You are the NusaShell agent." });
     expect(result[1]).toEqual({ role: "system", content: "Use tool_list to discover tools." });
-    expect(result[2]).toMatchObject({ role: "system" });
-    expect((result[2] as { content: string }).content).toContain("2026-07-29");
-    expect(result[3]).toEqual({ role: "system", content: "MEMORY (personal notes) [10% — 220/2200 chars]\nremember to be concise" });
-    expect(result[4]).toEqual({ role: "user", content: "hi" });
+    // Memory content no longer appears in a system message — hydration carries it.
+    expect(result.some((m) => m.role === "system" && String(m.content).includes("MEMORY (personal notes)"))).toBe(false);
+    expect(result[2]).toEqual({ role: "user", content: "hi" });
   });
 
-  it("skips memory block when memoryPrompt is undefined or empty", () => {
+  it("skips memory block when memoryPrompt is undefined or empty (memory not rendered anyway)", () => {
     const messages: AgentMessage[] = [{ role: "user", content: "hi" }];
     const without = inject(prompts, vars, messages);
     const withEmpty = inject(prompts, vars, messages, undefined, "");
     expect(without).toEqual(withEmpty);
-    expect(withEmpty).toHaveLength(4);
+    expect(withEmpty).toHaveLength(3);
   });
 
   it("applies template substitution to the subagent prompt", () => {
@@ -199,27 +215,25 @@ describe("injectPrompts", () => {
     const messages: AgentMessage[] = [{ role: "user", content: "hi" }];
     const subagentPrompt = "Subagent delegation rules.";
     const result = inject(prompts, vars, messages, undefined, undefined, subagentPrompt);
-    expect(result).toHaveLength(5);
+    expect(result).toHaveLength(4);
     expect(result[0]).toEqual({ role: "system", content: "You are the NusaShell agent." });
     expect(result[1]).toEqual({ role: "system", content: "Use tool_list to discover tools." });
     expect(result[2]).toEqual({ role: "system", content: "Subagent delegation rules." });
   });
 
-  it("injects todo block after memory block and before conversation messages", () => {
+  it("does not inject TODO into any user message (todo stays a normal injected flag per REV2)", () => {
     const messages: AgentMessage[] = [{ role: "user", content: "hi" }];
     const memoryPrompt = "MEMORY (personal notes)\nremember to be concise";
     const todoPrompt = "CURRENT TASKS (agent-owned checklist)\n[ ] do the thing";
     const result = injectPrompts(prompts, vars, messages, undefined, memoryPrompt, undefined, todoPrompt).messages;
-    expect(result).toHaveLength(6);
+    // Memory and TODO are no longer rendered into the prompt (hydration carries them).
+    expect(result).toHaveLength(3);
     expect(result[0]).toEqual({ role: "system", content: "You are the NusaShell agent." });
     expect(result[1]).toEqual({ role: "system", content: "Use tool_list to discover tools." });
-    const dev = result[2] as { content: string };
-    expect(dev.content).toContain("2026-07-29");
-    const mem = result[3] as { content: string };
-    expect(mem.content).toBe(memoryPrompt);
-    const todo = result[4] as { content: string };
-    expect(todo.content).toBe(todoPrompt);
-    expect(result[5]).toEqual({ role: "user", content: "hi" });
+    expect(result[2]).toEqual({ role: "user", content: "hi" });
+    expect(result.some((m) => m.role === "system" && String(m.content).includes("MEMORY"))).toBe(false);
+    expect(result.some((m) => m.role === "user" && String(m.content).includes("CURRENT TASKS"))).toBe(false);
+    expect(result.some((m) => m.role === "user" && String(m.content).includes("[NUSASHELL RUNTIME CONTEXT]"))).toBe(false);
   });
 
   it("skips todo block when todoPrompt is undefined or empty", () => {
@@ -227,7 +241,7 @@ describe("injectPrompts", () => {
     const without = injectPrompts(prompts, vars, messages, undefined, undefined, undefined, undefined).messages;
     const withEmpty = injectPrompts(prompts, vars, messages, undefined, undefined, undefined, "").messages;
     expect(without).toEqual(withEmpty);
-    expect(withEmpty).toHaveLength(4);
+    expect(withEmpty).toHaveLength(3);
   });
 
   it("reports hasTodo in the injection summary", () => {
@@ -238,51 +252,22 @@ describe("injectPrompts", () => {
     expect(without.summary.hasTodo).toBe(false);
   });
 
-  // --- Live MCP snapshot (Cycle 2) ---
-
-  it("injects mcpLivePrompt after mcp-tools and before skills catalog", () => {
+  it("does not render skills or TODO into any system or user message (REV2)", () => {
     const messages: AgentMessage[] = [{ role: "user", content: "hi" }];
-    const mcpLive = "## Live MCP (runtime)\nRunning: plugin.a\nAdvertised this turn: mcp_a_foo";
     const skills = "## Skills catalog\n- skill.x";
+    const todo = "CURRENT TASKS\n[ ] finish the migration";
     const result = injectPrompts(
       prompts, vars, messages,
-      undefined, undefined, undefined, undefined,
-      skills, undefined, mcpLive,
+      undefined, undefined, undefined, todo,
+      skills,
     );
-    const systemContents = result.messages
-      .filter((m) => m.role === "system")
-      .map((m) => String(m.content));
-    const mcpToolsIdx = systemContents.findIndex((c) => c === "Use tool_list to discover tools.");
-    const liveIdx = systemContents.findIndex((c) => c === mcpLive);
-    const skillsIdx = systemContents.findIndex((c) => c === skills);
-    expect(mcpToolsIdx).toBeGreaterThanOrEqual(0);
-    expect(liveIdx).toBeGreaterThan(mcpToolsIdx);
-    expect(skillsIdx).toBeGreaterThan(liveIdx);
+    const allContents = result.messages.map((m) => String(m.content));
+    expect(allContents).not.toContain(skills);
+    expect(allContents).not.toContain(todo);
+    expect(result.messages.some((m) => m.role === "user" && String(m.content).startsWith("[NUSASHELL RUNTIME CONTEXT]"))).toBe(false);
   });
 
-  it("reports hasMcpLive in the injection summary and toDebugLine", () => {
-    const messages: AgentMessage[] = [{ role: "user", content: "hi" }];
-    const withLive = injectPrompts(
-      prompts, vars, messages,
-      undefined, undefined, undefined, undefined,
-      undefined, undefined, "## Live MCP (runtime)\nRunning: plugin.a",
-    );
-    expect(withLive.summary.hasMcpLive).toBe(true);
-    expect(withLive.summary.toDebugLine("trace-x")).toContain("hasMcpLive=true");
-    const without = injectPrompts(prompts, vars, messages);
-    expect(without.summary.hasMcpLive).toBe(false);
-    expect(without.summary.toDebugLine("trace-x")).toContain("hasMcpLive=false");
-  });
-
-  it("skips mcpLive block when undefined or empty", () => {
-    const messages: AgentMessage[] = [{ role: "user", content: "hi" }];
-    const withUndefined = injectPrompts(prompts, vars, messages, undefined, undefined, undefined, undefined, undefined, undefined, undefined).messages;
-    const withEmpty = injectPrompts(prompts, vars, messages, undefined, undefined, undefined, undefined, undefined, undefined, "").messages;
-    expect(withUndefined).toEqual(withEmpty);
-    expect(withEmpty.some((m) => m.role === "system" && String(m.content).includes("Live MCP"))).toBe(false);
-  });
-
-  it("reports only the leading static/session catalog as cacheable", () => {
+  it("reports only the static protocol prompts as cacheable (no runtime user checkpoint), stable prefix stays 2", () => {
     const result = injectPrompts(
       prompts,
       vars,
@@ -293,16 +278,16 @@ describe("injectPrompts", () => {
       "todo",
       "skills",
       undefined,
-      "live catalog",
     );
 
-    expect(result.promptCache).toEqual({ mode: "auto", stableSystemMessages: 4 });
-    expect(result.messages.slice(0, 5).map((message) => message.content)).toEqual([
+    expect(result.promptCache).toEqual({ mode: "auto", stableSystemMessages: 2 });
+    // Memory/todo/skills/mcp-live are no longer rendered; only static + subagent +
+    // user-instructions + developer.
+    expect(result.messages.slice(0, 4).map((message) => message.content)).toEqual([
       "You are the NusaShell agent.",
       "Use tool_list to discover tools.",
-      "live catalog",
-      "skills",
       "subagent rules",
+      "user-specific instructions",
     ]);
   });
 
@@ -313,11 +298,11 @@ describe("injectPrompts", () => {
     ];
     const turnA = injectPrompts(
       richPrompts, vars, [{ role: "user", content: "msg A" }],
-      "instructions", "memory", "subagent", "todo", "skills", undefined, "live cat",
+      "instructions", "memory", "subagent", "todo", "skills",
     );
     const turnB = injectPrompts(
       richPrompts, vars, [{ role: "user", content: "msg B" }],
-      "instructions", "memory", "subagent", "todo", "skills", undefined, "live cat",
+      "instructions", "memory", "subagent", "todo", "skills",
     );
     const stableCount = turnA.promptCache.stableSystemMessages ?? 0;
     const stableA = turnA.messages.slice(0, stableCount);
@@ -326,13 +311,8 @@ describe("injectPrompts", () => {
     expect(stableA.map((m) => m.content)).toEqual([
       "You are the NusaShell agent.",
       "Use tool_list to discover tools.",
-      "live cat",
-      "skills",
     ]);
-    // Volatile developer/date block lives strictly after the stable segment.
-    // (system + mcp-tools are the stable set here; subagent comes right after.)
-    const devA = turnA.messages.slice(stableCount)[2] as { content: string };
-    expect(String(devA.content)).toContain("2026-07-29");
+    expect(turnA.messages.slice(stableCount)[0]).toMatchObject({ role: "system", content: "subagent" });
   });
 
   it("changing a volatile var does not touch the stable prefix", () => {
@@ -343,10 +323,15 @@ describe("injectPrompts", () => {
     expect(turnA.messages.slice(0, stableCount)).toEqual(turnB.messages.slice(0, stableCount));
   });
 
-  it("freezes the calendar date once per process (stableCurrentDate)", () => {
-    const d1 = stableCurrentDate();
-    const d2 = stableCurrentDate();
-    expect(d1).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(d1).toBe(d2);
+  it("uses the local machine calendar date for the supplied instant", () => {
+    const originalTimeZone = process.env.TZ;
+    process.env.TZ = "Asia/Jakarta";
+    try {
+      expect(stableCurrentDate(new Date("2026-01-01T20:00:00.000Z"))).toBe("2026-01-02");
+      expect(machineCurrentTime(new Date("2026-01-01T20:00:00.000Z"))).toBe("03:00:00");
+    } finally {
+      if (originalTimeZone === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTimeZone;
+    }
   });
 });

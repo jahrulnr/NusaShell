@@ -11,8 +11,10 @@ import {
   formatMessageTimestamp,
   formatToolOutput,
   formatToolTerminalInput,
+  hasToolResumeSnapshot,
   mergeCompactionCheckpoint,
   mergeConversationMessages,
+  conversationSearchEmptyCopy,
   searchConversations,
   renderAssistantMarkdown,
   renderReasoningMarkdown,
@@ -22,6 +24,26 @@ import {
 } from "../src/renderer/agent-conversation-ui.js";
 
 describe("agent conversation UI helpers", () => {
+  it("does not claim a tool turn is resumable from display history alone", () => {
+    expect(hasToolResumeSnapshot({
+      role: "assistant",
+      status: "interrupted",
+      toolCalls: [{ id: "call-1", name: "read", ok: true }],
+      steps: [{ type: "tool_calls", calls: [{ id: "call-1", name: "read", ok: true }] }],
+    })).toBe(false);
+  });
+
+  it("recognizes a durable provider transcript containing settled tools", () => {
+    expect(hasToolResumeSnapshot({
+      role: "assistant",
+      status: "interrupted",
+      resumeMessages: [
+        { role: "assistant", content: "", toolCalls: [{ id: "call-1", name: "read", args: {} }] },
+        { role: "tool", toolCallId: "call-1", name: "read", content: "status=success" },
+      ],
+    })).toBe(true);
+  });
+
   it("rebuilds provider context from the saved compaction checkpoint", () => {
     const messages = [
       { role: "user" as const, content: "old question" },
@@ -70,6 +92,46 @@ describe("agent conversation UI helpers", () => {
     ];
 
     expect(searchConversations(conversations, "mcp").map((item) => item.id)).toEqual(["1"]);
+  });
+
+  it("does not match phrases that only appear in message content (title-only search scope)", () => {
+    // List payloads are AgentConversationSummary: title + counts, no thread body.
+    // A phrase from the thread must not invent a hit when only titles are searchable.
+    const conversations = [
+      {
+        id: "content-only",
+        title: "Planning session",
+        createdAt: "",
+        updatedAt: "2",
+        messageCount: 3,
+        messages: [
+          { role: "user", content: "remember the phrase unique-mcp-token-xyz" },
+          { role: "assistant", content: "Noted the unique-mcp-token-xyz requirement." },
+        ],
+      },
+      {
+        id: "title-hit",
+        title: "unique-mcp-token-xyz follow-up",
+        createdAt: "",
+        updatedAt: "1",
+        messageCount: 1,
+      },
+    ];
+
+    expect(searchConversations(conversations, "unique-mcp-token-xyz").map((item) => item.id)).toEqual(["title-hit"]);
+    expect(searchConversations(conversations, "Planning")).toHaveLength(1);
+  });
+
+  it("returns no rows for a non-matching title query (empty results, not emptied list)", () => {
+    const conversations = [
+      { id: "1", title: "Deploy notes", createdAt: "", updatedAt: "1", messageCount: 1 },
+    ];
+    expect(searchConversations(conversations, "mcp")).toEqual([]);
+  });
+
+  it("uses honest empty-state copy for title-scoped search vs no conversations", () => {
+    expect(conversationSearchEmptyCopy(true)).toBe("No conversations with this title.");
+    expect(conversationSearchEmptyCopy(false)).toBe("No conversations yet.");
   });
 
   it("renders GFM tables and sanitizes dangerous HTML", () => {
@@ -140,6 +202,22 @@ describe("agent conversation UI helpers", () => {
     expect(call.args).toEqual({});
     expect(call.id).toBe("c1");
     expect(call.name).toBe("mcp_list");
+  });
+
+  it("uses the nested canonical projection so the rendered card matches the provider result", () => {
+    const providerContent = '<untrusted_tool_result source="mcp_files_list" format="terminal">\n' +
+      "\nstatus=success\ntruncated=false\n\nentries=[]\n" +
+      "</untrusted_tool_result>";
+    const call = toConversationToolCall({
+      id: "c-terminal",
+      name: "mcp_files_list",
+      ok: true,
+      args: {},
+      result: { entries: [] },
+      toolResult: { modelOutput: providerContent },
+    });
+    expect(call.modelOutput).toBe(providerContent);
+    expect(call.output).toBe(providerContent);
   });
 
   it("defaults missing args to {} in toProviderToolCall via buildAgentContext", () => {
@@ -391,7 +469,7 @@ describe("agent conversation UI helpers", () => {
     });
 
     const mcpResult = result.find((m) => m.role === "tool" && m.name === "mcp_search");
-    expect(mcpResult?.content).toContain("<untrusted_tool_result source=\"mcp_search\">");
+    expect(mcpResult?.content).toContain("<untrusted_tool_result source=\"mcp_search\" format=\"terminal\">");
     expect(mcpResult?.content).toContain("Subject: hello");
 
     const filesResult = result.find((m) => m.role === "tool" && m.name === "read");
@@ -645,6 +723,34 @@ describe("classifyTurnError (ticket #45)", () => {
 });
 
 describe("mergeConversationMessages (ticket #47 race guard)", () => {
+  it("merges positioned snapshots deterministically regardless of arrival order", () => {
+    const first = { id: "msg-1", position: 1, revision: 1, role: "user", content: "first" };
+    const second = { id: "msg-2", position: 2, revision: 1, role: "assistant", content: "second" };
+
+    expect(mergeConversationMessages([second], [first]).map((message) => message.id)).toEqual(["msg-1", "msg-2"]);
+    expect(mergeConversationMessages([first], [second]).map((message) => message.id)).toEqual(["msg-1", "msg-2"]);
+  });
+
+  it("keeps the highest revision for one message identity at its original position", () => {
+    const current = [{
+      id: "msg-assistant",
+      position: 2,
+      revision: 3,
+      role: "assistant",
+      content: "complete answer",
+      reasoning: "kept reasoning",
+    }];
+    const stale = [{
+      id: "msg-assistant",
+      position: 2,
+      revision: 1,
+      role: "assistant",
+      content: "",
+    }];
+
+    expect(mergeConversationMessages(current, stale)).toEqual(current);
+  });
+
   it("does not drop a live/seen message when an incoming append snapshot is stale", () => {
     const current = [
       { role: "user", content: "1", createdAt: "t1" },

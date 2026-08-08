@@ -168,6 +168,29 @@ describe("FileService.readFile", () => {
     expect(result.truncated).toBe(false);
   });
 
+  it("truncates oversized text at maxBytes instead of failing", async () => {
+    await fs.writeFile(path.join(tmpDir, "large.txt"), "first line\nsecond line\n");
+
+    const result = await service.readFile("large.txt", { maxBytes: 8 });
+
+    expect(result.content).toBe("first li");
+    expect(Buffer.byteLength(result.content, "utf8")).toBeLessThanOrEqual(8);
+    expect(result.totalLines).toBe(3);
+    expect(result.totalBytes).toBe(23);
+    expect(result.truncated).toBe(true);
+    expect(result.truncatedReason).toBe("maxBytes");
+  });
+
+  it("does not split a UTF-8 character when truncating at maxBytes", async () => {
+    await fs.writeFile(path.join(tmpDir, "unicode.txt"), "a😀b");
+
+    const result = await service.readFile("unicode.txt", { maxBytes: 4 });
+
+    expect(result.content).toBe("a");
+    expect(Buffer.byteLength(result.content, "utf8")).toBeLessThanOrEqual(4);
+    expect(result.truncated).toBe(true);
+  });
+
   it("reads head lines", async () => {
     await fs.writeFile(path.join(tmpDir, "test.txt"), "line1\nline2\nline3");
     const result = await service.readFile("test.txt", { head: 2 });

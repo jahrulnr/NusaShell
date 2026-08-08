@@ -46,6 +46,18 @@ export interface AgentToolCall {
   readonly id: string;
   readonly name: string;
   readonly args: Readonly<Record<string, unknown>>;
+  /**
+   * The provider emitted a tool call but its native argument string could not
+   * be parsed safely. The runner records a matching error tool result instead
+   * of executing an invented payload, giving the model one more chance to
+   * re-issue the call with valid JSON.
+   */
+  readonly argumentError?: AgentToolArgumentError;
+}
+
+export interface AgentToolArgumentError {
+  readonly code: "TOOL_ARGUMENTS_INVALID_JSON";
+  readonly message: string;
 }
 
 export interface AgentToolDefinition {

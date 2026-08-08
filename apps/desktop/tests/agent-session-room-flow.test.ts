@@ -315,6 +315,17 @@ describe("BH-AGENT room / turn / drawer suite", () => {
         status: "running",
         steps: [
           { type: "reasoning", content: "Plan the fix carefully." },
+          {
+            type: "tool_calls",
+            calls: [{
+              id: "call-complete",
+              name: "todo",
+              ok: true,
+              args: { action: "get" },
+              result: { ok: true, items: [{ id: "raw-task" }] },
+              modelOutput: "status=success\n\nok=true\nitems[1]",
+            }],
+          },
           { type: "text", content: "Starting work." },
         ],
         openTools: [
@@ -340,6 +351,8 @@ describe("BH-AGENT room / turn / drawer suite", () => {
     expect(host?.querySelector(".agent-reasoning-content")?.innerHTML).toMatch(/Plan the fix/);
     expect(host?.textContent).toContain("Starting work.");
     expect(host?.textContent).toContain("more tokens");
+    expect(host?.textContent).toContain("status=success");
+    expect(host?.textContent).not.toContain('"raw-task"');
     // Tool terminal card for open tool
     const toolCard = host?.querySelector("[data-call-id=\"call-1\"]");
     expect(toolCard).not.toBeNull();
@@ -420,6 +433,40 @@ describe("BH-AGENT room / turn / drawer suite", () => {
     await controller.open("room-b");
     await controller.restoreRunningTurnState();
     expect(document.querySelector("#agent-stop-btn")?.hidden).toBe(false);
+  });
+
+  it("keeps concurrent subagent runs bound to their room and drawer selection", async () => {
+    const rooms = new Map([
+      ["room-a", room("room-a", {
+        messages: [{ role: "user", content: "A" }],
+        activeSubagentRunId: "sub-a1",
+        subagentRuns: [
+          { runId: "sub-a1", providerId: "cursor", prompt: "one", status: "running", title: "Sub One", steps: [] },
+          { runId: "sub-a2", providerId: "codex", prompt: "two", status: "running", title: "Sub Two", steps: [] },
+        ],
+      })],
+      ["room-b", room("room-b", { messages: [{ role: "user", content: "B" }] })],
+    ]);
+    const { controller } = makeController({ rooms });
+
+    await controller.open("room-a");
+    expect(document.querySelectorAll(".agent-subagent-card")).toHaveLength(2);
+    document.querySelector<HTMLElement>('[data-run-id="sub-a2"] .agent-subagent-card-head')?.click();
+    expect(document.querySelector("#agent-subpane-title")?.textContent).toBe("Sub Two");
+    document.querySelector<HTMLElement>('[data-run-id="sub-a1"] .agent-subagent-card-head')?.click();
+    expect(document.querySelector("#agent-subpane-title")?.textContent).toBe("Sub One");
+
+    await controller.open("room-b");
+    controller.handleSubagentRunStarted({
+      runId: "sub-a3",
+      conversationId: "room-a",
+      providerId: "gemini",
+      prompt: "background A",
+      title: "Background A",
+    });
+    await Promise.resolve();
+    expect(document.querySelector("#agent-subpane-title")?.textContent).not.toBe("Background A");
+    expect(rooms.get("room-a")?.subagentRuns?.some((run: { runId: string }) => run.runId === "sub-a3")).toBe(true);
   });
 
   it("BH-AGENT-09/10 open and close canvas drawer without leaving body junk", async () => {
@@ -586,6 +633,158 @@ describe("BH-AGENT room / turn / drawer suite", () => {
 
     finishTurn!({ traceId: streamOptions!.traceId, text: "first background", toolCalls: [], steps: [], rounds: 1 });
     await submitPromise;
+  });
+
+  it("keeps background turn errors out of the room currently on screen", async () => {
+    const rooms = new Map([
+      ["room-a", room("room-a", { messages: [] })],
+      ["room-b", room("room-b", { messages: [] })],
+    ]);
+    let rejectTurn!: (error: Error) => void;
+    let streamOptions: Record<string, any> | null = null;
+    const runTurn = vi.fn(async (_messages: unknown, options: Record<string, any>) => {
+      streamOptions = options;
+      return await new Promise((_resolve, reject) => { rejectTurn = reject; });
+    });
+    const controller = new AgentConversationController({
+      shell: {
+        agentConversations: {
+          get: vi.fn(async (id: string) => rooms.get(id) ?? null),
+          append: vi.fn(async (id: string, message: unknown) => {
+            const current = rooms.get(id)!;
+            const next = { ...current, messages: [...current.messages, message] };
+            rooms.set(id, next);
+            return next;
+          }),
+          list: vi.fn(async () => []),
+        },
+      },
+      runTurn,
+      getActiveModel: () => null,
+      log: vi.fn(),
+    } as never);
+    controller.conversation = rooms.get("room-a") as never;
+    controller.activeId = "room-a";
+    controller.refresh = vi.fn(async () => {});
+    document.querySelector<HTMLInputElement>("#agent-input")!.value = "start A";
+
+    const submitPromise = controller.submit();
+    await vi.waitFor(() => expect(streamOptions).not.toBeNull());
+    await controller.open("room-b");
+    document.querySelector("#agent-provider-status")!.textContent = "Room B status";
+
+    rejectTurn(new Error("provider unavailable"));
+    await submitPromise;
+
+    expect(document.querySelector("#agent-thread .agent-message-error")).toBeNull();
+    expect(document.querySelector("#agent-provider-status")?.textContent).toBe("Room B status");
+  });
+
+  it("does not paint or clear Room B while Room A is still appending its user message", async () => {
+    const rooms = new Map([
+      ["room-a", room("room-a", { messages: [] })],
+      ["room-b", room("room-b", { messages: [] })],
+    ]);
+    let resolveAppend!: (conversation: ReturnType<typeof room>) => void;
+    let appendStarted = false;
+    const append = vi.fn(async (id: string, message: unknown) => {
+      const current = rooms.get(id)!;
+      const next = { ...current, messages: [...current.messages, message] };
+      appendStarted = true;
+      if ((message as { role?: string }).role === "user") {
+        await new Promise<void>((resolve) => {
+          resolveAppend = () => resolve();
+        });
+      }
+      rooms.set(id, next);
+      return next;
+    });
+    const controller = new AgentConversationController({
+      shell: {
+        agentConversations: {
+          get: vi.fn(async (id: string) => rooms.get(id) ?? null),
+          append,
+          list: vi.fn(async () => []),
+        },
+      },
+      runTurn: vi.fn(async () => ({ traceId: "trace-a", text: "done", rounds: 1 })),
+      getActiveModel: () => null,
+      log: vi.fn(),
+    } as never);
+    controller.conversation = rooms.get("room-a") as never;
+    controller.activeId = "room-a";
+    controller.refresh = vi.fn(async () => {});
+    document.querySelector<HTMLInputElement>("#agent-input")!.value = "message A";
+
+    const submitPromise = controller.submit();
+    await Promise.resolve();
+    expect(appendStarted).toBe(true);
+    await controller.open("room-b");
+    const input = document.querySelector<HTMLInputElement>("#agent-input")!;
+    input.value = "draft B";
+    resolveAppend(rooms.get("room-a")!);
+    await submitPromise;
+
+    expect(document.querySelector("#agent-thread .agent-message.user")).toBeNull();
+    expect(input.value).toBe("draft B");
+  });
+
+  it("keeps Stop scoped to the visible room when two rooms are running", async () => {
+    const { controller } = makeController();
+    await controller.open("room-a");
+    controller.pendingTurnConversations.add("room-a");
+    controller.pendingTurnConversations.add("room-b");
+    controller.turnOwnerConversationId = "room-b";
+    controller.activeTraceIds.set("room-a", "trace-a");
+    controller.activeTraceIds.set("room-b", "trace-b");
+    controller.cancelTurn = vi.fn(async () => undefined);
+
+    await controller.stop();
+
+    expect(controller.isStopRequested("room-a")).toBe(true);
+    expect(controller.isStopRequested("room-b")).toBe(false);
+    expect(controller.cancelTurn).toHaveBeenCalledWith("trace-a");
+  });
+
+  it("renders a recovery action for interrupted turns restored from storage", async () => {
+    const { controller } = makeController();
+    await controller.open("room-a");
+    controller.appendMessage("assistant", "partial answer", {
+      status: "interrupted",
+      toolCalls: [{ id: "tool-1", name: "read", ok: true }],
+      resumeMessages: [
+        { role: "assistant", content: "", toolCalls: [{ id: "tool-1", name: "read", args: {} }] },
+        { role: "tool", toolCallId: "tool-1", name: "read", content: "status=success" },
+      ],
+    });
+
+    const recoveryActions = document.querySelectorAll(".agent-retry-btn");
+    expect(recoveryActions[recoveryActions.length - 1]?.textContent).toBe("Resume");
+  });
+
+  it("offers Continue that resumes the todo follow-up chain after an auto-continue error", async () => {
+    const runTurn = vi.fn(async () => { throw new Error("provider unavailable"); });
+    const controller = new AgentConversationController({
+      shell: {
+        agentConversations: {
+          get: vi.fn(async () => room("room-a", { messages: [{ role: "assistant", content: "previous" }] })),
+          list: vi.fn(async () => []),
+        },
+      },
+      runTurn,
+      getActiveModel: () => null,
+      log: vi.fn(),
+    } as never);
+    controller.conversation = room("room-a", { messages: [{ role: "assistant", content: "previous" }] }) as never;
+    controller.activeId = "room-a";
+    controller.refresh = vi.fn(async () => {});
+    await controller.runAutoContinueChain("room-a", 2, 4);
+
+    const continueButton = document.querySelector<HTMLButtonElement>(".agent-retry-btn");
+    expect(continueButton?.textContent).toBe("Continue");
+    const chain = vi.spyOn(controller, "runAutoContinueChain").mockResolvedValue();
+    continueButton?.click();
+    expect(chain).toHaveBeenCalledWith("room-a", 2, 4);
   });
 
   it("BH-AGENT-18 isolates autoContinueAborted per conversation", async () => {

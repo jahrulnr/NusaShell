@@ -706,15 +706,27 @@ summary {
   background: transparent;
 }
 
-.agent-view .agent-header,
+.agent-header,
 .skills-header,
 .learning-header,
 .jobs-header,
 .log-header {
-  min-height: 86px;
-  padding: var(--space-4) var(--space-6);
+  min-height: 48px;
+  padding: var(--space-2) var(--space-5);
   border-bottom: 1px solid var(--border);
   background: rgba(17,19,17,.82);
+}
+
+.agent-header,
+.skills-header,
+.learning-header,
+.jobs-header,
+.log-header,
+.autostart-header,
+.acp-agents-header {
+  align-items: center;
+  justify-content: flex-end;
+  margin-bottom: 0;
 }
 
 .jobs-header .action-btn {

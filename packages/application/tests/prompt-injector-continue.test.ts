@@ -16,7 +16,7 @@ const staticPrompts: AgentPrompt[] = [
 ];
 
 describe("injectPrompts — continue steering", () => {
-  it("injects the continue prompt as a user message before conversation messages", () => {
+  it("injects a hidden synthetic user follow-up after conversation messages", () => {
     const messages: AgentMessage[] = [{ role: "user", content: "earlier" }, { role: "assistant", content: "ok" }];
     const { messages: out, summary } = injectPrompts(
       staticPrompts,
@@ -29,14 +29,32 @@ describe("injectPrompts — continue steering", () => {
       undefined,
       "Continue pursuing open CURRENT TASKS.",
     );
-    const userMessages = out.filter((m) => m.role === "user");
-    // First user message is the continue steering, before the durable history.
-    expect(userMessages[0]?.content).toBe("Continue pursuing open CURRENT TASKS.");
     const continueIdx = out.findIndex((m) => m.role === "user" && m.content === "Continue pursuing open CURRENT TASKS.");
     const historyIdx = out.findIndex((m) => m.role === "user" && m.content === "earlier");
     expect(continueIdx).toBeGreaterThanOrEqual(0);
-    expect(historyIdx).toBeGreaterThan(continueIdx);
+    expect(continueIdx).toBeGreaterThan(historyIdx);
+    expect(out[continueIdx]?.role).toBe("user");
     expect(summary.hasContinue).toBe(true);
+  });
+
+  it("keeps synthetic continuation outside the stable system cache prefix", () => {
+    const result = injectPrompts(
+      staticPrompts,
+      vars,
+      [{ role: "user", content: "earlier" }],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "Continue pursuing open CURRENT TASKS.",
+    );
+    const stableCount = result.promptCache.stableSystemMessages ?? 0;
+    expect(result.messages.slice(0, stableCount).every((message) => message.role === "system")).toBe(true);
+    expect(result.messages[stableCount]?.role).toBe("user");
+    expect(result.messages.at(-1)?.content).toBe("Continue pursuing open CURRENT TASKS.");
+    const withoutContinue = injectPrompts(staticPrompts, vars, [{ role: "user", content: "earlier" }]);
+    expect(result.summary.totalSystemChars).toBe(withoutContinue.summary.totalSystemChars);
   });
 
   it("does not inject a continue message when the prompt is undefined", () => {

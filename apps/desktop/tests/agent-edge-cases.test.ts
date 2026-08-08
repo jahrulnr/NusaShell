@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentConversationController } from "../src/renderer/agent-conversation-controller.js";
 import {
   formatSubagentError,
+  formatTurnFailure,
   formatTurnError,
 } from "../src/renderer/agent-conversation-ui.js";
 import { inspectAttachmentContent } from "../src/renderer/attachment-content.js";
@@ -291,7 +292,16 @@ describe("BH-AGENT workspace edges", () => {
 describe("BH-AGENT submit failure mapping (backend error on screen)", () => {
   beforeEach(() => installDom());
 
-  it("BH-AGENT-29 shows Turn failed + cause and leaves Retry when provider dies before stream", async () => {
+  it("includes the full model and provider identity in a visible turn failure", () => {
+    const text = formatTurnFailure(
+      { message: "Provider call failed", details: { cause: "HTTP 500" } },
+      { label: "DeepSeek V4 Flash", providerName: "TokenRouter" },
+    );
+
+    expect(text).toBe("Turn failed [DeepSeek V4 Flash · TokenRouter]: Provider call failed: HTTP 500");
+  });
+
+  it("BH-AGENT-29 shows Turn failed + cause without retry for a non-transient 4xx", async () => {
     const runTurn = vi.fn(async () => {
       const error = new Error("Provider call failed");
       (error as Error & { code?: string; details?: unknown }).code = "AGENT_PROVIDER_FAILED";
@@ -319,7 +329,9 @@ describe("BH-AGENT submit failure mapping (backend error on screen)", () => {
       getActiveModel: () => ({
         id: "m",
         key: "m",
+        label: "DeepSeek V4 Flash",
         providerId: "p",
+        providerName: "TokenRouter",
         contextWindow: 8_000,
         inputModes: ["text"],
       }),
@@ -332,11 +344,11 @@ describe("BH-AGENT submit failure mapping (backend error on screen)", () => {
     await controller.submit();
 
     const failed = document.querySelector("#agent-thread article.agent-message-error");
-    expect(failed?.textContent).toMatch(/Turn failed:.*Provider call failed.*HTTP 402/i);
-    expect(failed?.querySelector(".agent-retry-btn")).not.toBeNull();
+    expect(failed?.textContent).toMatch(/Turn failed \[DeepSeek V4 Flash · TokenRouter\]:.*Provider call failed.*HTTP 402/i);
+    expect(failed?.querySelector(".agent-retry-btn")).toBeNull();
     expect(controller.turnPending).toBe(false);
     expect(input.disabled).toBe(false);
-    expect(document.querySelector("#agent-provider-status")?.textContent).toMatch(/ready to retry/i);
+    expect(document.querySelector("#agent-provider-status")?.textContent).toMatch(/local conversation error/i);
   });
 
   it("BH-AGENT-30 tells the user when the reply completed but local save failed", async () => {
@@ -407,6 +419,48 @@ describe("BH-AGENT submit failure mapping (backend error on screen)", () => {
     await controller.open("room-b");
     expect(controller.attachments).toHaveLength(1);
     expect(controller.attachments[0]?.name).toBe("a.txt");
+  });
+});
+
+describe("BH-AGENT conversation dialog and clipboard edges", () => {
+  beforeEach(() => installDom());
+
+  it("does not claim a conversation ID was copied when the shell clipboard rejects", async () => {
+    document.body.insertAdjacentHTML("beforeend", `
+      <button id="agent-room-id-copy" aria-label="Copy conversation ID"></button>
+      <div id="agent-delete-overlay" hidden></div>
+      <div id="agent-delete-dialog" hidden></div>
+      <button id="agent-delete-confirm"></button>
+    `);
+    const notify = vi.fn();
+    const button = document.querySelector<HTMLButtonElement>("#agent-room-id-copy")!;
+    const controller = new AgentConversationController({
+      shell: { clipboard: { writeText: vi.fn().mockRejectedValue(new Error("clipboard locked")) } },
+      notify,
+      log: vi.fn(),
+    } as never);
+
+    await controller.copyMessage("room-a", button);
+
+    expect(button.classList.contains("is-confirmed")).toBe(false);
+    expect(notify).toHaveBeenCalledWith("Could not copy message: clipboard locked", "error");
+  });
+
+  it("returns focus to the conversation delete trigger after closing the dialog", () => {
+    document.body.insertAdjacentHTML("beforeend", `
+      <button class="agent-conversation-delete" id="delete-room-a" aria-label="Delete Room A"></button>
+      <div id="agent-delete-overlay" hidden></div>
+      <div id="agent-delete-dialog" hidden></div>
+      <span id="agent-delete-copy"></span>
+      <button id="agent-delete-confirm"></button>
+    `);
+    const controller = new AgentConversationController({ notify: vi.fn() } as never);
+    controller.conversations = [{ id: "room-a", title: "Room A" }] as never;
+
+    controller.openDeleteDialog("room-a");
+    controller.closeDeleteDialog();
+
+    expect(document.activeElement).toBe(document.querySelector("#delete-room-a"));
   });
 });
 

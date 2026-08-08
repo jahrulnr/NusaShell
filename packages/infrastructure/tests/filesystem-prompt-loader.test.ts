@@ -11,6 +11,15 @@ const fixturesRoot = join(
 );
 
 describe("FilesystemPromptLoader", () => {
+  it("loads only the cache-stable default prompt pair", async () => {
+    const loader = new FilesystemPromptLoader(fixturesRoot);
+
+    await expect(loader.loadPrompts()).resolves.toMatchObject([
+      { name: "system", isTemplate: false },
+      { name: "mcp-tools", isTemplate: false },
+    ]);
+  });
+
   it("loads static prompts (system, mcp-tools) as non-template", async () => {
     const loader = new FilesystemPromptLoader(fixturesRoot);
     const prompts = await loader.loadPrompts();
@@ -23,16 +32,6 @@ describe("FilesystemPromptLoader", () => {
     const mcpTools = prompts.find((p) => p.name === "mcp-tools");
     expect(mcpTools).toBeDefined();
     expect(mcpTools!.isTemplate).toBe(false);
-  });
-
-  it("loads developer prompt as a template", async () => {
-    const loader = new FilesystemPromptLoader(fixturesRoot);
-    const prompts = await loader.loadPrompts();
-
-    const developer = prompts.find((p) => p.name === "developer");
-    expect(developer).toBeDefined();
-    expect(developer!.isTemplate).toBe(true);
-    expect(developer!.content).toContain("{{current_date}}");
   });
 
   it("caches prompts after the first load", async () => {

@@ -291,6 +291,7 @@ function hasArgs(args: Readonly<Record<string, unknown>> | undefined): args is R
 }
 
 function formatToolEventOutput(execution: AgentToolCallEndEvent["execution"]): string | undefined {
+  if (execution.modelOutput !== undefined) return clampToolText(execution.modelOutput, 12_000);
   if (execution.error) return clampToolText(execution.error, 12_000);
   if (execution.result === undefined) return undefined;
   if (typeof execution.result === "string") return clampToolText(execution.result, 12_000);

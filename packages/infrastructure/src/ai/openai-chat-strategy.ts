@@ -1,10 +1,9 @@
 import type { AgentContentPart, AgentProviderRequest, AgentProviderResult } from "@nusashell/application";
-import { mergeTextToolCalls } from "./text-tool-call-parser.js";
+import { extractReasoningText, mergeTextToolCalls } from "./text-tool-call-parser.js";
 import type { ApiStrategy } from "./openai-api-strategy.js";
 import {
   emptySchema,
   extractContentText,
-  firstText,
   malformedResponseError,
   mapMessages,
   parseToolCall,
@@ -48,7 +47,12 @@ export class ChatApiStrategy implements ApiStrategy {
     const message = requireRecord((choice as Record<string, unknown>).message, "Provider response does not contain a completion message");
     const nativeCalls = Array.isArray(message.tool_calls) ? message.tool_calls.map(parseToolCall) : [];
     const merged = mergeTextToolCalls(nativeCalls, extractContentText(message.content));
-    const reasoning = firstText(message.reasoning_content, message.reasoning, message.thinking, message.reasoning_text, message.thinking_content);
+    const reasoning = extractReasoningText(message.reasoning_content)
+      || extractReasoningText(message.reasoning)
+      || extractReasoningText(message.thinking)
+      || extractReasoningText(message.reasoning_text)
+      || extractReasoningText(message.thinking_content)
+      || extractReasoningText(message.reasoning_details);
     const usage = parseUsage(root.usage);
     return {
       ...(merged.text ? { text: merged.text } : {}),

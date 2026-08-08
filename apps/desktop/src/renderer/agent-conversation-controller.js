@@ -8,6 +8,7 @@ import {
   formatSubagentError,
   formatToolOutput,
   formatToolTerminalInput,
+  formatTurnFailure,
   formatTurnError,
   getConversationRoomMetadata,
   mergeCompactionCheckpoint,
@@ -16,6 +17,7 @@ import {
   renderReasoningMarkdown,
   renderToolCodeHtml,
   sanitizeAssistantSteps,
+  conversationSearchEmptyCopy,
   searchConversations,
   summarizeToolArgs,
   toConversationToolCall,
@@ -64,6 +66,7 @@ export class AgentConversationController {
     // Invalidates stale conversation loads when the user clicks rooms quickly.
     this.openGeneration = 0;
     this.pendingDeleteId = "";
+    this.pendingDeleteTrigger = null;
     /** Per-conversation set of conversation IDs with an in-flight turn. */
     this.pendingTurnConversations = new Set();
     /** Brief re-entry guard during submit() before the conversation ID is known. */
@@ -83,6 +86,7 @@ export class AgentConversationController {
     /** Conversation that owns the in-flight parent submit() (paint gate). */
     this.turnOwnerConversationId = null;
     this.failedMessage = null;
+    this.orphanRepairInFlight = new Set();
     this.attachments = [];
     this.composerInputWidth = 0;
     this.composerResizeObserver = null;
@@ -108,13 +112,19 @@ export class AgentConversationController {
     this.threadShouldStickToBottom = true;
     this.subpaneShouldStickToBottom = true;
     this.subagentLifecycle = new SubagentRunLifecycle(log);
+    /** Run selected in the shared drawer; run streams remain per-run in lifecycle. */
+    this.subagentSelectedRunId = null;
+    this.subagentEventRunId = null;
   }
 
   // Proxy subagent lifecycle fields for backward-compatible access.
   // Reads and writes go through the lifecycle object so state transitions
   // are centralized, while rendering methods can still access fields directly.
   get activeSubagentRun() { return this.subagentLifecycle.activeRun; }
-  set activeSubagentRun(v) { this.subagentLifecycle.activeRun = v; }
+  set activeSubagentRun(v) {
+    if (v?.runId && !this.subagentSelectedRunId) this.subagentSelectedRunId = v.runId;
+    this.subagentLifecycle.activeRun = v;
+  }
   get subagentStreamState() { return this.subagentLifecycle.streamState; }
   set subagentStreamState(v) { this.subagentLifecycle.streamState = v; }
   get subagentStreamDisposer() { return this.subagentLifecycle.streamDisposer; }
@@ -126,6 +136,24 @@ export class AgentConversationController {
   get subagentOwnerConversationId() { return this.subagentLifecycle.ownerConversationId; }
   set subagentOwnerConversationId(v) { this.subagentLifecycle.ownerConversationId = v; }
 
+  selectSubagentRun(runId) {
+    this.subagentSelectedRunId = runId || null;
+    this.subagentLifecycle.selectRun(runId || null);
+  }
+
+  withSubagentEventRun(runId, callback) {
+    const previousRunId = this.subagentSelectedRunId;
+    this.subagentEventRunId = runId;
+    this.subagentLifecycle.selectRun(runId);
+    try {
+      return callback();
+    } finally {
+      this.subagentEventRunId = null;
+      this.subagentSelectedRunId = previousRunId || null;
+      this.subagentLifecycle.selectRun(previousRunId || null);
+    }
+  }
+
   /**
    * Backwards-compatible boolean view of pendingTurnConversations.
    * Returns true when ANY conversation has an in-flight turn. Prefer
@@ -135,14 +163,35 @@ export class AgentConversationController {
   set turnPending(value) {
     if (value) {
       const id = this.turnOwnerConversationId || this.conversation?.id;
-      if (id) this.pendingTurnConversations.add(id);
+      if (id) this.markTurnRunning(id);
     } else {
-      this.pendingTurnConversations.clear();
+      this.clearAllTurnsRunning();
     }
   }
   /** True when the given conversation has an in-flight turn. */
   isConversationRunning(conversationId) {
     return Boolean(conversationId) && this.pendingTurnConversations.has(conversationId);
+  }
+
+  /** Track a running turn and keep the task strip reserved during empty mid-turn (#63). */
+  markTurnRunning(conversationId) {
+    if (conversationId) this.pendingTurnConversations.add(conversationId);
+    this.syncTodoStripTurnActive();
+  }
+
+  clearTurnRunning(conversationId) {
+    if (conversationId) this.pendingTurnConversations.delete(conversationId);
+    this.syncTodoStripTurnActive();
+  }
+
+  clearAllTurnsRunning() {
+    this.pendingTurnConversations.clear();
+    this.syncTodoStripTurnActive();
+  }
+
+  syncTodoStripTurnActive() {
+    if (!this.todoStrip) return;
+    this.todoStrip.setTurnActive(this.isConversationRunning(this.todoStrip.conversationId));
   }
 
   /**
@@ -321,7 +370,7 @@ export class AgentConversationController {
     list.textContent = "";
     const visible = searchConversations(this.conversations, $("#agent-conversation-search")?.value);
     if (visible.length === 0) {
-      list.appendChild(element("div", "agent-conversation-empty", this.conversations.length ? "No conversations match this search." : "No conversations yet."));
+      list.appendChild(element("div", "agent-conversation-empty", conversationSearchEmptyCopy(this.conversations.length > 0)));
       return;
     }
     visible.forEach((conversation) => list.appendChild(this.conversationRow(conversation)));
@@ -373,14 +422,14 @@ export class AgentConversationController {
       }
 
       if (this.conversation?.kind === "acp") {
-        this.pendingTurnConversations.add(ownerConversationId);
+        this.markTurnRunning(ownerConversationId);
         this._submitInFlight = false;
         this.turnOwnerConversationId = ownerConversationId;
         return await this.submitAcp({ text, retry, ownerConversationId, ownerConversation });
       }
     } catch (error) {
       this._submitInFlight = false;
-      if (ownerConversationId) this.pendingTurnConversations.delete(ownerConversationId);
+      if (ownerConversationId) this.clearTurnRunning(ownerConversationId);
       throw error;
     }
 
@@ -388,20 +437,20 @@ export class AgentConversationController {
     let selectedModel = null;
     let retryIsSafe = false;
     let streamState = null;
+    let assistantReservation = null;
     let turnEndResolve = null;
     const turnEndPromise = new Promise((resolve) => { turnEndResolve = resolve; });
     let turnEnded = false;
     let sealedResult = null;
     try {
       this.turnOwnerConversationId = ownerConversationId;
-      this.pendingTurnConversations.add(ownerConversationId);
+      this.markTurnRunning(ownerConversationId);
       this._submitInFlight = false;
       this.activeTraceId = crypto.randomUUID();
       input.disabled = true;
       sendButton.disabled = true;
       stopButton.hidden = false;
-      this.failedMessage?.remove();
-      this.failedMessage = null;
+      this.clearVisibleFailureMessage(ownerConversationId, { includeInterrupted: retry });
       if (!retry) {
         const attachments = [...this.attachments];
         ownerConversation = await this.shell.agentConversations.append(ownerConversationId, {
@@ -409,13 +458,15 @@ export class AgentConversationController {
           content: text,
           ...(attachments.length ? { attachments } : {}),
         });
-        if (this.conversation?.id === ownerConversationId) this.assignConversationFromStore(ownerConversationId, ownerConversation);
-        const savedMessage = ownerConversation.messages.at(-1);
-        this.appendMessage("user", text, savedMessage ?? { attachments });
-        input.value = "";
-        this.resizeComposerInput();
-        this.attachments = [];
-        this.renderAttachments();
+        if (this.conversation?.id === ownerConversationId) {
+          this.assignConversationFromStore(ownerConversationId, ownerConversation);
+          const savedMessage = ownerConversation.messages.at(-1);
+          this.appendMessage("user", text, savedMessage ?? { attachments });
+          input.value = "";
+          this.resizeComposerInput();
+          this.attachments = [];
+          this.renderAttachments();
+        }
         await this.refresh();
       }
       retryIsSafe = true;
@@ -430,17 +481,28 @@ export class AgentConversationController {
         && lastDurable.resumeMessages.length
         ? lastDurable
         : null;
+      const retryOnlyFrom = isInterrupted && lastDurable?.retryOnly === true
+        ? lastDurable
+        : null;
       // Text continue: interrupted with non-empty partial body, no tool graph.
-      const continueFrom = isInterrupted && !resumeFrom && typeof lastDurable.content === "string" && lastDurable.content.trim()
+      const continueFrom = isInterrupted && !resumeFrom && !retryOnlyFrom && typeof lastDurable.content === "string" && lastDurable.content.trim()
         ? lastDurable
         : null;
 
-      pending = this.createStreamingMessage();
+      if (typeof this.shell.agentConversations.reserveAssistant === "function") {
+        assistantReservation = await this.shell.agentConversations.reserveAssistant(
+          ownerConversationId,
+          this.activeTraceId,
+          { replaceLastInterrupted: Boolean(resumeFrom || retryOnlyFrom || continueFrom) },
+        );
+      }
+
+      pending = this.createStreamingMessage(assistantReservation);
       selectedModel = this.getActiveModel();
       // Tool resume → resumeMessages + resume: true.
       // Text continue → buildContinueContext (base + partial + steer), no resume.
       // Normal → buildAgentContext.
-      const turnMessages = resumeFrom
+        const turnMessages = resumeFrom
         ? resumeFrom.resumeMessages
         : continueFrom
           ? buildContinueContext(ownerConversation)
@@ -461,6 +523,10 @@ export class AgentConversationController {
       // Ticket #40: bound the model + a user stop request must freeze painting.
       const canPaint = () => this.conversation?.id === ownerConversationId && Boolean(streamState.message?.isConnected) && !this.isStopRequested(ownerConversationId);
       streamState = {
+        conversationId: ownerConversationId,
+        ...(assistantReservation
+          ? { messageId: assistantReservation.messageId, messagePosition: assistantReservation.position }
+          : {}),
         message: pending,
         // Ticket #40: bind the model that actually drives this turn so the
         // badge (updateContextStatus) does not follow a global picker change.
@@ -592,10 +658,15 @@ export class AgentConversationController {
             liveTokens,
           }));
         },
-        onTurnEnd: () => {
+        onTurnEnd: (payload) => {
           this.sealStreamingToolCardsIncomplete(streamState);
           turnEnded = true;
           turnEndResolve?.();
+          // Main seals the durable assistant before publishing turn_end. If
+          // the IPC response is delayed while another turn begins, reconcile
+          // that durable state now so its old Working placeholder cannot
+          // survive beside the newer turn's placeholder.
+          void this.reconcileTerminalTurn(ownerConversationId, payload.traceId);
         },
         onCancelRequested: () => {
           if (!canPaint()) return;
@@ -622,8 +693,10 @@ export class AgentConversationController {
         // renderer-side append.
         ownerConversation = await this.shell.agentConversations.get(ownerConversationId);
         if (this.conversation?.id === ownerConversationId) this.assignConversationFromStore(ownerConversationId, ownerConversation);
-        const lastMessage = ownerConversation?.messages.at(-1);
-        const sealedByMain = lastMessage?.role === "assistant" && lastMessage?.traceId === result.traceId;
+        const sealedMessage = assistantReservation
+          ? ownerConversation?.messages.find((message) => message.id === assistantReservation.messageId)
+          : ownerConversation?.messages.find((message) => message.role === "assistant" && message.traceId === result.traceId);
+        const sealedByMain = sealedMessage?.role === "assistant" && sealedMessage?.traceId === result.traceId;
         if (!sealedByMain) {
           const toolCalls = Array.isArray(result.toolCalls)
             ? result.toolCalls.map(toConversationToolCall)
@@ -639,9 +712,11 @@ export class AgentConversationController {
             ...(toolCalls?.length ? { toolCalls } : {}),
             ...(steps?.length ? { steps } : {}),
           };
-          ownerConversation = resumeFrom
-            ? await this.shell.agentConversations.replaceLastInterrupted(ownerConversationId, assistantMessage)
-            : await this.shell.agentConversations.append(ownerConversationId, assistantMessage);
+          ownerConversation = assistantReservation && typeof this.shell.agentConversations.sealAssistant === "function"
+            ? await this.shell.agentConversations.sealAssistant(ownerConversationId, result.traceId, assistantMessage)
+            : resumeFrom || retryOnlyFrom || continueFrom
+              ? await this.shell.agentConversations.replaceLastInterrupted(ownerConversationId, assistantMessage)
+              : await this.shell.agentConversations.append(ownerConversationId, assistantMessage);
           if (this.conversation?.id === ownerConversationId) this.assignConversationFromStore(ownerConversationId, ownerConversation);
         } else if (result.compaction) {
           // Main already saved the checkpoint; just refresh into memory.
@@ -668,7 +743,9 @@ export class AgentConversationController {
           this.log("error", `Agent checkpoint persistence failed trace=${result.traceId}: ${error.message || String(error)}`);
         }
       }
-      const savedMessage = ownerConversation.messages.at(-1);
+      const savedMessage = assistantReservation
+        ? ownerConversation.messages.find((message) => message.id === assistantReservation.messageId)
+        : ownerConversation.messages.find((message) => message.role === "assistant" && message.traceId === result.traceId);
       this.sealStreamingMessage(pending, savedMessage ?? result);
       await this.refresh();
       // refresh() already calls updateContextStatus() with an estimate from
@@ -707,7 +784,9 @@ export class AgentConversationController {
         try {
           ownerConversation = await this.shell.agentConversations.get(ownerConversationId);
           if (this.conversation?.id === ownerConversationId) this.assignConversationFromStore(ownerConversationId, ownerConversation);
-          const lastDurableAfter = ownerConversation?.messages.at(-1);
+          const lastDurableAfter = assistantReservation
+            ? ownerConversation?.messages.find((message) => message.id === assistantReservation.messageId)
+            : ownerConversation?.messages.find((message) => message.role === "assistant" && message.traceId === partial.traceId);
           const mainSealed =
             sealedByMain
             || (lastDurableAfter?.status === "interrupted" && lastDurableAfter?.traceId === partial.traceId);
@@ -728,44 +807,52 @@ export class AgentConversationController {
                 ? { resumeMessages: partial.messages }
                 : {}),
             };
-            ownerConversation = resumeFrom
-              ? await this.shell.agentConversations.replaceLastInterrupted(ownerConversationId, interruptedMessage)
-              : await this.shell.agentConversations.append(ownerConversationId, interruptedMessage);
+            ownerConversation = assistantReservation && typeof this.shell.agentConversations.sealAssistant === "function"
+              ? await this.shell.agentConversations.sealAssistant(ownerConversationId, partial.traceId, interruptedMessage)
+              : resumeFrom || retryOnlyFrom || continueFrom
+                ? await this.shell.agentConversations.replaceLastInterrupted(ownerConversationId, interruptedMessage)
+                : await this.shell.agentConversations.append(ownerConversationId, interruptedMessage);
             if (this.conversation?.id === ownerConversationId) this.assignConversationFromStore(ownerConversationId, ownerConversation);
           }
         } catch (persistError) {
           this.log("error", `Interrupted assistant persistence failed: ${persistError.message || String(persistError)}`);
         }
         // Status copy reflects whether Resume (tools) or Continue (text) applies.
-        const durableInterrupted = ownerConversation?.messages.at(-1);
+        const durableInterrupted = assistantReservation
+          ? ownerConversation?.messages.find((message) => message.id === assistantReservation.messageId)
+          : ownerConversation?.messages.find((message) => message.status === "interrupted" && message.traceId === partial.traceId);
         const durableHasToolResume = hasToolResumeSnapshot(durableInterrupted);
-        const resumeLabel = hasTools || durableHasToolResume
+        const resumeLabel = durableHasToolResume
           ? "ready to resume"
           : streamedText
             ? "ready to continue"
             : "ready to retry";
         // Semantic primary-label to match the status copy (#45).
-        const retryLabel = hasTools || durableHasToolResume
+        const retryLabel = durableHasToolResume
           ? "Resume"
           : streamedText
             ? "Continue"
             : "Retry";
-        this.failedMessage = this.appendMessage(
-          "assistant",
-          isCancel
-            ? "Turn stopped."
+        if (this.conversation?.id === ownerConversationId) {
+          this.failedMessage = this.appendMessage(
+            "assistant",
+            isCancel
+              ? "Turn stopped."
+              : isMaxRounds
+                ? `Tool-round limit reached · ${resumeLabel}`
+                : formatTurnFailure(error, selectedModel),
+            // Interrupted/cancel keeps a retry affordance; label follows the
+            // active class (Resume for tools, Continue for text) (#45).
+            { error: true, retry: true, retryLabel },
+          );
+        }
+        if (this.conversation?.id === ownerConversationId) {
+          status.textContent = isCancel
+            ? `Turn stopped · ${resumeLabel}`
             : isMaxRounds
-              ? "Tool-round limit reached · ready to resume"
-              : `Turn failed: ${formatTurnError(error)}`,
-          // Interrupted/cancel keeps a retry affordance; label follows the
-          // active class (Resume for tools, Continue for text) (#45).
-          { error: true, retry: true, retryLabel },
-        );
-        status.textContent = isCancel
-          ? `Turn stopped · ${resumeLabel}`
-          : isMaxRounds
-            ? "Tool-round limit · ready to resume"
-            : `Turn interrupted · ${resumeLabel}`;
+              ? "Tool-round limit · ready to resume"
+              : `Turn interrupted · ${resumeLabel}`;
+        }
         this.log(isCancel || isMaxRounds ? "info" : "error", isCancel
           ? `Agent turn stopped trace=${this.activeTraceId}`
           : isMaxRounds
@@ -779,8 +866,10 @@ export class AgentConversationController {
         } else {
           pending?.remove();
         }
-        this.appendMessage("assistant", "Turn stopped.", { error: true });
-        status.textContent = "Turn stopped";
+        if (this.conversation?.id === ownerConversationId) {
+          this.appendMessage("assistant", "Turn stopped.", { error: true });
+        }
+        if (this.conversation?.id === ownerConversationId) status.textContent = "Turn stopped";
         this.log("info", `Agent turn stopped trace=${this.activeTraceId}`);
       } else {
         // Keep streamed UI visible even when the backend omitted a resume
@@ -829,35 +918,55 @@ export class AgentConversationController {
           : (retryIsSafe || canResume) && !isSuperseded;
         const cooldownMs = isRateLimited ? 8000 : 0;
         // Keep the familiar failure copy; only superseded replaces it.
-        const failureCopy = isSuperseded ? cls.message : `Turn failed: ${formatTurnError(error)}`;
-        this.failedMessage = this.appendMessage(
-          "assistant",
-          failureCopy,
-          {
-            error: true,
-            retry: safeRetry,
-            retryLabel,
-            retryCooldownMs: cooldownMs,
-          },
-        );
-        status.textContent = canToolResume
-          ? "Turn interrupted · ready to resume"
-          : canTextContinue
-            ? "Turn interrupted · ready to continue"
-            : isSuperseded
-              ? "Turn superseded by a newer turn"
-              : isRateLimited
-                ? "Rate limited · try again in a moment"
-                : safeRetry
-                  ? "Turn failed · ready to retry"
-                  : "Local conversation error";
+        const failureCopy = isSuperseded ? cls.message : formatTurnFailure(error, selectedModel);
+        if (safeRetry && !hasMainInterrupt) {
+          const retryMessage = {
+            role: "assistant",
+            content: failureCopy,
+            status: "interrupted",
+            interruptReason: "provider",
+            retryOnly: true,
+            traceId: this.activeTraceId,
+          };
+          try {
+            ownerConversation = await this.shell.agentConversations.append(ownerConversationId, retryMessage);
+            if (this.conversation?.id === ownerConversationId) this.assignConversationFromStore(ownerConversationId, ownerConversation);
+          } catch (persistError) {
+            this.log("warn", `Retry action persistence failed: ${persistError.message || String(persistError)}`);
+          }
+        }
+        if (this.conversation?.id === ownerConversationId) {
+          this.failedMessage = this.appendMessage(
+            "assistant",
+            failureCopy,
+            {
+              error: true,
+              retry: safeRetry,
+              retryLabel,
+              retryCooldownMs: cooldownMs,
+            },
+          );
+        }
+        if (this.conversation?.id === ownerConversationId) {
+          status.textContent = canToolResume
+            ? "Turn interrupted · ready to resume"
+            : canTextContinue
+              ? "Turn interrupted · ready to continue"
+              : isSuperseded
+                ? "Turn superseded by a newer turn"
+                : isRateLimited
+                  ? "Rate limited · try again in a moment"
+                  : safeRetry
+                    ? "Turn failed · ready to retry"
+                    : "Local conversation error";
+        }
         this.log("error", `Agent turn failed: ${formatTurnError(error)}`);
       }
     } finally {
       // Use the closure-captured ownerConversationId (from submit's local
       // scope), not this.turnOwnerConversationId, so concurrent turns in
       // other conversations don't clear each other's globals.
-      this.pendingTurnConversations.delete(ownerConversationId);
+      this.clearTurnRunning(ownerConversationId);
       this.activeTraceIds.delete(ownerConversationId);
       this.liveStreamStates.delete(ownerConversationId);
       this.clearStop(ownerConversationId);
@@ -923,8 +1032,9 @@ export class AgentConversationController {
       let turnEndResolve = null;
       const turnEndPromise = new Promise((resolve) => { turnEndResolve = resolve; });
       let sealedResult = null;
+      let assistantReservation = null;
 
-      this.pendingTurnConversations.add(conversationId);
+      this.markTurnRunning(conversationId);
       this.turnOwnerConversationId = conversationId;
       try {
         let conv = await this.shell.agentConversations.get(conversationId);
@@ -943,6 +1053,13 @@ export class AgentConversationController {
 
         const selectedModel = chainModel;
         const turnMessages = buildAgentContext(conv);
+        if (typeof this.shell.agentConversations.reserveAssistant === "function") {
+          assistantReservation = await this.shell.agentConversations.reserveAssistant(
+            conversationId,
+            this.activeTraceId,
+            { replaceLastInterrupted: false },
+          );
+        }
         const baseTokens = estimateContextTokens(turnMessages);
         let liveTokens = baseTokens;
         const setContextStatus = (tokens) => {
@@ -951,7 +1068,7 @@ export class AgentConversationController {
         };
         setContextStatus(baseTokens);
         const canPaint = () => this.conversation?.id === conversationId && Boolean(streamState.message?.isConnected) && !this.isStopRequested(conversationId);
-        pending = this.createStreamingMessage();
+        pending = this.createStreamingMessage(assistantReservation);
         streamState = {
           message: pending,
           // Ticket #40: snapshot the model at chain start; a global picker
@@ -981,6 +1098,9 @@ export class AgentConversationController {
           traceId: this.activeTraceId,
           workspace: conv.workspace,
           conversationId,
+          ...(assistantReservation
+            ? { messageId: assistantReservation.messageId, messagePosition: assistantReservation.position }
+            : {}),
           autoContinueIndex: index,
           modelKey: chainModel?.key,
           effort: this.getActiveEffort?.(),
@@ -1097,8 +1217,10 @@ export class AgentConversationController {
         // sealAgentTurn, so refresh from the store first.
         conv = await this.shell.agentConversations.get(conversationId);
         if (this.conversation?.id === conversationId) this.conversation = conv;
-        const lastMessage = conv?.messages.at(-1);
-        const sealedByMain = lastMessage?.role === "assistant" && lastMessage?.traceId === result.traceId;
+        const sealedMessage = assistantReservation
+          ? conv?.messages.find((message) => message.id === assistantReservation.messageId)
+          : conv?.messages.find((message) => message.role === "assistant" && message.traceId === result.traceId);
+        const sealedByMain = sealedMessage?.role === "assistant" && sealedMessage?.traceId === result.traceId;
         if (!sealedByMain) {
           const toolCalls = Array.isArray(result.toolCalls)
             ? result.toolCalls.map(toConversationToolCall)
@@ -1114,10 +1236,14 @@ export class AgentConversationController {
             ...(toolCalls?.length ? { toolCalls } : {}),
             ...(steps?.length ? { steps } : {}),
           };
-          conv = await this.shell.agentConversations.append(conversationId, assistantMessage);
+          conv = assistantReservation && typeof this.shell.agentConversations.sealAssistant === "function"
+            ? await this.shell.agentConversations.sealAssistant(conversationId, result.traceId, assistantMessage)
+            : await this.shell.agentConversations.append(conversationId, assistantMessage);
           if (this.conversation?.id === conversationId) this.conversation = conv;
         }
-        const savedMessage = conv.messages.at(-1);
+        const savedMessage = assistantReservation
+          ? conv.messages.find((message) => message.id === assistantReservation.messageId)
+          : conv.messages.find((message) => message.role === "assistant" && message.traceId === result.traceId);
         this.sealStreamingMessage(pending, savedMessage ?? result);
         await this.refresh();
         this.log("info", `Auto-continue ${index} completed trace=${result.traceId} rounds=${result.rounds}`);
@@ -1147,7 +1273,9 @@ export class AgentConversationController {
             : `Auto-continue interrupted after ${partial.rounds} tool round${partial.rounds === 1 ? "" : "s"}.`;
           try {
             let conv = await this.shell.agentConversations.get(conversationId);
-            const last = conv?.messages.at(-1);
+            const last = assistantReservation
+              ? conv?.messages.find((message) => message.id === assistantReservation.messageId)
+              : conv?.messages.find((message) => message.status === "interrupted" && message.traceId === partial.traceId);
             const mainSealed = sealedByMain || (last?.status === "interrupted" && last?.traceId === partial.traceId);
             if (!mainSealed) {
               const interruptedMessage = {
@@ -1166,11 +1294,27 @@ export class AgentConversationController {
                   ? { resumeMessages: partial.messages }
                   : {}),
               };
-              conv = await this.shell.agentConversations.append(conversationId, interruptedMessage);
+              conv = assistantReservation && typeof this.shell.agentConversations.sealAssistant === "function"
+                ? await this.shell.agentConversations.sealAssistant(conversationId, partial.traceId, interruptedMessage)
+                : await this.shell.agentConversations.append(conversationId, interruptedMessage);
             }
             if (this.conversation?.id === conversationId) this.assignConversationFromStore(conversationId, conv);
           } catch (persistError) {
             this.log("error", `Auto-continue interrupted persistence failed: ${persistError.message || String(persistError)}`);
+          }
+          const durableInterrupted = conv?.messages.find(
+            (message) => message.status === "interrupted" && message.traceId === partial.traceId,
+          );
+          if (this.conversation?.id === conversationId) {
+            this.failedMessage = this.appendMessage(
+              "assistant",
+              isCancel ? "Auto-continue stopped." : "Auto-continue interrupted.",
+              {
+                error: true,
+                retry: true,
+                retryLabel: hasToolResumeSnapshot(durableInterrupted) ? "Resume" : streamedText ? "Continue" : "Retry",
+              },
+            );
           }
         } else if (isCancel) {
           this.sealStreamingToolCardsIncomplete(streamState);
@@ -1194,19 +1338,28 @@ export class AgentConversationController {
           } else {
             pending?.remove();
           }
-          this.failedMessage = this.appendMessage(
-            "assistant",
-            `Auto-continue failed: ${formatTurnError(error)}`,
-            { error: true, retry: true },
-          );
+          if (this.conversation?.id === conversationId) {
+            this.failedMessage = this.appendMessage(
+              "assistant",
+                `Auto-continue failed: ${formatTurnFailure(error, chainModel).replace(/^Turn failed /, "")}`,
+              {
+                error: true,
+                retry: true,
+                retryLabel: "Continue",
+                retryAction: () => this.runAutoContinueChain(conversationId, index, maxAutoContinues),
+              },
+            );
+          }
         }
-        status.textContent = isCancel ? "Auto-continue stopped" : "Auto-continue failed · ready to retry";
+        if (this.conversation?.id === conversationId) {
+          status.textContent = isCancel ? "Auto-continue stopped" : "Auto-continue failed · ready to continue";
+        }
         this.log(isCancel ? "info" : "error", isCancel
           ? `Auto-continue stopped at index=${index} trace=${this.activeTraceId}`
           : `Auto-continue failed at index=${index}: ${formatTurnError(error)}`);
         break;
       } finally {
-        this.pendingTurnConversations.delete(conversationId);
+        this.clearTurnRunning(conversationId);
         this.activeTraceIds.delete(conversationId);
         this.liveStreamStates.delete(conversationId);
         this.clearStop(conversationId);
@@ -1241,23 +1394,24 @@ export class AgentConversationController {
       input.disabled = true;
       sendButton.disabled = true;
       stopButton.hidden = false;
-      this.failedMessage?.remove();
-      this.failedMessage = null;
+      this.clearVisibleFailureMessage(ownerConversationId, { includeInterrupted: retry });
       if (!retry) {
         ownerConversation = await this.shell.agentConversations.append(ownerConversationId, {
           role: "user",
           content: text,
         });
-        if (this.conversation?.id === ownerConversationId) this.assignConversationFromStore(ownerConversationId, ownerConversation);
-        this.appendMessage("user", text);
-        input.value = "";
-        this.resizeComposerInput();
+        if (this.conversation?.id === ownerConversationId) {
+          this.assignConversationFromStore(ownerConversationId, ownerConversation);
+          this.appendMessage("user", text);
+          input.value = "";
+          this.resizeComposerInput();
+        }
         await this.refresh();
       }
       retryIsSafe = true;
 
       pending = this.createStreamingMessage();
-      const streamState = { message: pending, textBubble: null, streamedText: "", reasoningEl: null, reasoningText: "", lastKind: null, toolCards: new Map(), toolCalls: [], steps: [], textRenderPending: false, reasoningRenderPending: false, rafIdText: 0, rafIdReasoning: 0, canvasRenderTimer: 0 };
+      const streamState = { conversationId, message: pending, textBubble: null, streamedText: "", reasoningEl: null, reasoningText: "", lastKind: null, toolCards: new Map(), toolCalls: [], steps: [], textRenderPending: false, reasoningRenderPending: false, rafIdText: 0, rafIdReasoning: 0, canvasRenderTimer: 0 };
       const canPaint = () => this.conversation?.id === ownerConversationId && !this.isStopRequested(ownerConversationId);
       const appendStreamChild = (node) => {
         if (!canPaint()) return;
@@ -1386,19 +1540,54 @@ export class AgentConversationController {
         ...(streamState.steps.length ? { steps: streamState.steps } : {}),
       });
       if (this.conversation?.id === ownerConversationId) this.assignConversationFromStore(ownerConversationId, ownerConversation);
-      const savedMessage = this.conversation.messages.at(-1);
+      const savedMessage = ownerConversation.messages.at(-1);
       this.sealStreamingMessage(pending, savedMessage ?? { content: streamState.streamedText });
       await this.refresh();
-      status.textContent = `ACP · ${this.conversation.acp.providerId}`;
+      if (this.conversation?.id === ownerConversationId && this.conversation.kind === "acp") {
+        status.textContent = `ACP · ${this.conversation.acp.providerId}`;
+      }
     } catch (error) {
       pending?.remove();
-      this.failedMessage = this.appendMessage("assistant", `Turn failed: ${formatTurnError(error)}`, { error: true, retry: retryIsSafe });
-      status.textContent = retryIsSafe ? "ACP turn failed · ready to retry" : "ACP turn error";
+      const classification = classifyTurnError(error);
+      const safeRetry = retryIsSafe && classification.retryable;
+      const failureCopy = formatTurnFailure(error, {
+        label: this.currentAcpModelName() || ownerConversation.acp.providerId,
+        providerName: ownerConversation.acp.providerId,
+      });
+      if (safeRetry) {
+        try {
+          const latest = await this.shell.agentConversations.get(ownerConversationId);
+          if (latest?.messages?.at(-1)?.role === "user") {
+            ownerConversation = await this.shell.agentConversations.append(ownerConversationId, {
+              role: "assistant",
+              content: failureCopy,
+              status: "interrupted",
+              interruptReason: "provider",
+              retryOnly: true,
+              traceId: this.activeTraceId,
+            });
+            if (this.conversation?.id === ownerConversationId) this.assignConversationFromStore(ownerConversationId, ownerConversation);
+          }
+        } catch (persistError) {
+          this.log("warn", `ACP retry action persistence failed: ${persistError.message || String(persistError)}`);
+        }
+      }
+      if (this.conversation?.id === ownerConversationId) {
+        this.failedMessage = this.appendMessage("assistant", failureCopy, {
+          error: true,
+          retry: safeRetry,
+          retryLabel: classification.label || "Retry",
+          retryCooldownMs: classification.category === "rate_limited" ? 8000 : 0,
+        });
+      }
+      if (this.conversation?.id === ownerConversationId) {
+        status.textContent = safeRetry ? "ACP turn failed · ready to retry" : "ACP turn error";
+      }
       this.log("error", `ACP turn failed: ${formatTurnError(error)}`);
     } finally {
       // Use the parameter ownerConversationId, not this.turnOwnerConversationId,
       // so concurrent turns in other conversations don't clear each other's globals.
-      this.pendingTurnConversations.delete(ownerConversationId);
+      this.clearTurnRunning(ownerConversationId);
       this.activeTraceIds.delete(ownerConversationId);
       this.clearStop(ownerConversationId);
       if (this.turnOwnerConversationId === ownerConversationId) {
@@ -1418,9 +1607,12 @@ export class AgentConversationController {
   }
 
   closeDeleteDialog() {
+    const trigger = this.pendingDeleteTrigger;
     this.pendingDeleteId = "";
+    this.pendingDeleteTrigger = null;
     $("#agent-delete-overlay").hidden = true;
     $("#agent-delete-dialog").hidden = true;
+    if (trigger?.isConnected) trigger.focus({ preventScroll: true });
   }
 
   bindEvents() {
@@ -1629,7 +1821,7 @@ export class AgentConversationController {
     // The conversation that owns the currently-streaming turn. Stop gates
     // painting for this conversation, so deltas still arriving while the
     // backend cancel settles are NOT painted (#44).
-    const stopConversationId = this.turnOwnerConversationId || this.activeId || this.conversation?.id || "";
+    const stopConversationId = this.activeId || this.conversation?.id || this.turnOwnerConversationId || "";
     this.requestStop(stopConversationId);
 
     this.disposeStreamingCadence(this.liveStreamState);
@@ -1724,6 +1916,7 @@ export class AgentConversationController {
         onDelete: (id) => this.deleteTodos(conversationId, [id]),
       });
       this.todoStrip.mount();
+      this.syncTodoStripTurnActive();
     } else {
       this.todoStrip = null;
       const strip = document.getElementById("agent-todo-strip");
@@ -1736,7 +1929,10 @@ export class AgentConversationController {
       this.toolJobStrip.mount();
       this.completionSteerer = new CompletionSteerer({
         conversationId,
-        isIdle: () => !this.isConversationRunning(conversationId),
+        // Idle only when no active turn and the composer is free to receive a
+        // synthetic wake message — never steal a user draft or IME composition (#69).
+        isIdle: () =>
+          !this.isConversationRunning(conversationId) && !this.isComposerBlockingSteer(),
         startTurn: (message) => this.steerTurn(message),
         log: (msg) => this.log?.(msg),
       });
@@ -1756,12 +1952,27 @@ export class AgentConversationController {
   }
 
   /**
+   * True when the composer has unsent content or an IME composition in progress.
+   * Completion steering must not overwrite the draft in that case (#69).
+   */
+  isComposerBlockingSteer() {
+    if (this.inputComposing) return true;
+    const input = $("#agent-input");
+    return Boolean(input?.value?.trim());
+  }
+
+  /**
    * Auto-start a follow-up turn with a synthetic system message (completion steering).
    * Called by CompletionSteerer when a background job ends and the conversation is idle.
+   * Never overwrites a user draft or steals focus during IME composition (#69).
    */
   async steerTurn(message) {
     if (this.isConversationRunning(this.conversation?.id)) return;
     if (!this.conversation) return;
+    if (this.isComposerBlockingSteer()) {
+      this.log?.("completion steer cancelled — composer has unsent draft or IME composition");
+      return;
+    }
     const input = $("#agent-input");
     if (input) {
       input.value = message;
@@ -1786,7 +1997,7 @@ export class AgentConversationController {
         const info = await this.getAcpSessionInfo(this.conversation.id);
         if (this.activeId !== this.conversation.id) return;
         if (info?.state === "running" && info.traceId) {
-          this.pendingTurnConversations.add(this.conversation.id);
+          this.markTurnRunning(this.conversation.id);
           this.activeTraceId = info.traceId;
           if (stopButton) stopButton.hidden = false;
           this.updateAcpStatus();
@@ -1807,7 +2018,7 @@ export class AgentConversationController {
    * renderer-wide turn mutex.
    */
   resetComposerForConversation(conversationId) {
-    const isOwner = this.isConversationRunning(conversationId) && this.turnOwnerConversationId === conversationId;
+    const isOwner = this.isConversationRunning(conversationId);
     const input = $("#agent-input");
     const sendButton = $("#agent-send-btn");
     const stopButton = $("#agent-stop-btn");
@@ -2181,14 +2392,28 @@ export class AgentConversationController {
       this.restoreSubpane();
       return;
     }
+    let compactionMarkerInserted = false;
     this.conversation.messages.forEach((message, index) => {
       // Insert a Codex-style "Context compacted" marker at the checkpoint
       // boundary so the user knows older turns were summarized for the model
       // but are still visible in the transcript (dual-space contract).
-      if (this.conversation?.checkpoint?.summary && index === this.conversation.checkpoint.compactedMessageCount) {
+      const checkpoint = this.conversation?.checkpoint;
+      const crossesPositionBoundary = checkpoint?.compactedThroughPosition !== undefined
+        && (message.position ?? 0) > checkpoint.compactedThroughPosition;
+      const crossesLegacyBoundary = checkpoint?.compactedThroughPosition === undefined
+        && index === checkpoint?.compactedMessageCount;
+      if (!compactionMarkerInserted && checkpoint?.summary && (crossesPositionBoundary || crossesLegacyBoundary)) {
         this.appendCompactionMarker(this.conversation.checkpoint);
+        compactionMarkerInserted = true;
       }
-      this.appendMessage(message.role, message.content, { ...message, canvasMessageIndex: index });
+      this.appendMessage(message.role, message.content, {
+        ...message,
+        canvasMessageId: message.id ?? String(index),
+        // A retry/resume action is valid only for the latest interrupted
+        // message. Older actions would otherwise retry against a newer room
+        // tail after the user has continued the conversation.
+        isLatestAction: index === this.conversation.messages.length - 1,
+      });
     });
     void this.restoreActiveTurnUi();
     this.restoreRunningSubagentUi();
@@ -2225,7 +2450,7 @@ export class AgentConversationController {
     }
 
     this.activeTraceId = snap.traceId;
-    this.pendingTurnConversations.add(conversationId);
+    this.markTurnRunning(conversationId);
     this.turnOwnerConversationId = conversationId;
     this.resetComposerForConversation(conversationId);
     const stopButton = $("#agent-stop-btn");
@@ -2233,8 +2458,12 @@ export class AgentConversationController {
 
     // Prefer reusing an already-built pending message (live turn still painting).
     let host = document.querySelector("#agent-thread article.agent-message.agent-pending");
+    if (host && snap.messageId && host.dataset.messageId && host.dataset.messageId !== snap.messageId) {
+      host.remove();
+      host = null;
+    }
     if (!host) {
-      host = this.createStreamingMessage();
+      host = this.createStreamingMessage(snap);
     }
     if (!host) return;
 
@@ -2256,7 +2485,7 @@ export class AgentConversationController {
           name: call.name,
           ok: call.ok !== false,
           ...(call.args ? { args: call.args } : {}),
-          ...(call.output ? { output: call.output } : {}),
+          ...(call.modelOutput ? { output: call.modelOutput } : call.output ? { output: call.output } : {}),
           ...(call.result !== undefined ? { result: call.result } : {}),
           ...(call.error ? { error: call.error } : {}),
         }))));
@@ -2270,46 +2499,68 @@ export class AgentConversationController {
           name: tool.name,
           ok: tool.status !== "fail",
           args: tool.args,
+          modelOutput: tool.modelOutput,
           output: tool.output,
           error: tool.error,
         });
       }
       host.appendChild(card);
     }
+    const liveStream = this.liveStreamStates.get(conversationId);
     if (snap.streaming?.content) {
       if (snap.streaming.kind === "reasoning") {
         const el = this.createStreamingReasoningBlock();
         const content = el.querySelector(".agent-reasoning-content");
         if (content) content.innerHTML = renderReasoningMarkdown(snap.streaming.content);
         host.appendChild(el);
-        if (this.liveStreamState?.message && this.turnOwnerConversationId === conversationId) {
-          this.liveStreamState.reasoningEl = el;
-          this.liveStreamState.reasoningText = snap.streaming.content;
-          this.liveStreamState.lastKind = "reasoning";
+        if (liveStream?.message) {
+          liveStream.reasoningEl = el;
+          liveStream.reasoningText = snap.streaming.content;
+          liveStream.lastKind = "reasoning";
         }
       } else {
         const bubble = element("div", "agent-bubble");
         bubble.innerHTML = renderAssistantMarkdown(snap.streaming.content);
         host.appendChild(bubble);
-        if (this.liveStreamState?.message && this.turnOwnerConversationId === conversationId) {
-          this.liveStreamState.textBubble = bubble;
-          this.liveStreamState.streamedText = snap.streaming.content;
-          this.liveStreamState.lastKind = "text";
+        if (liveStream?.message) {
+          liveStream.textBubble = bubble;
+          liveStream.streamedText = snap.streaming.content;
+          liveStream.lastKind = "text";
         }
       }
     }
 
     // Rebind the still-running submit() painter to the recreated host so live
     // deltas paint again after a chat switch (DOM was wiped by renderThread).
-    if (this.liveStreamState && this.turnOwnerConversationId === conversationId && this.activeTraceId === snap.traceId) {
-      this.liveStreamState.message = host;
-      this.liveStreamState.toolCards = new Map();
+    if (liveStream && this.activeTraceId === snap.traceId) {
+      liveStream.message = host;
+      liveStream.toolCards = new Map();
       host.querySelectorAll("[data-call-id], [data-streaming-subagent]").forEach((card) => {
         const callId = card.dataset.callId || card.dataset.runId;
-        if (callId) this.liveStreamState.toolCards.set(callId, card);
+        if (callId) liveStream.toolCards.set(callId, card);
       });
     }
     this.scrollToBottom();
+  }
+
+  /**
+   * Reconcile a terminal turn from the durable conversation store. `agent.run`
+   * is the normal completion path, but its IPC response can arrive after the
+   * terminal event and after a newer turn has started. In that window, the
+   * old DOM-only Working draft must not outlive its sealed assistant message.
+   */
+  async reconcileTerminalTurn(conversationId, traceId) {
+    if (!conversationId || !traceId || this.conversation?.id !== conversationId) return;
+    try {
+      const stored = await this.shell.agentConversations.get(conversationId);
+      if (this.conversation?.id !== conversationId || !stored?.messages?.some(
+        (message) => message.role === "assistant" && message.traceId === traceId,
+      )) return;
+      this.assignConversationFromStore(conversationId, stored);
+      this.renderThread();
+    } catch (error) {
+      this.log?.("warn", `Terminal turn reconciliation failed: ${error.message || error}`);
+    }
   }
 
   /**
@@ -2318,17 +2569,37 @@ export class AgentConversationController {
    * before the main-side seal shipped; the user message is on disk but the
    * assistant reply was lost.
    */
-  detectOrphanedTurn() {
+  async detectOrphanedTurn() {
     if (!this.conversation?.messages?.length) return;
+    const conversationId = this.conversation.id;
     const last = this.conversation.messages.at(-1);
     if (last?.role !== "user") return;
     if (this.turnPending) return;
-    this.failedMessage?.remove();
+    if (this.orphanRepairInFlight.has(conversationId)) return;
+    this.orphanRepairInFlight.add(conversationId);
+    const content = "Incomplete turn — the previous reply was lost when the app restarted. Retry to continue.";
+    this.clearVisibleFailureMessage(conversationId);
     this.failedMessage = this.appendMessage(
       "assistant",
-      "Incomplete turn — the previous reply was lost when the app restarted. Retry to continue.",
-      { error: true, retry: true },
+      content,
+      { error: true, retry: true, retryLabel: "Retry", retryOnly: true },
     );
+    try {
+      const stored = await this.shell.agentConversations.get(conversationId);
+      if (stored?.messages?.at(-1)?.role !== "user") return;
+      const repaired = await this.shell.agentConversations.append(conversationId, {
+        role: "assistant",
+        content,
+        status: "interrupted",
+        interruptReason: "provider",
+        retryOnly: true,
+      });
+      if (this.conversation?.id === conversationId) this.assignConversationFromStore(conversationId, repaired);
+    } catch (error) {
+      this.log?.("warn", `Orphaned turn repair failed: ${error.message || error}`);
+    } finally {
+      this.orphanRepairInFlight.delete(conversationId);
+    }
   }
 
   appendCompactionMarker(checkpoint) {
@@ -2341,11 +2612,27 @@ export class AgentConversationController {
     thread.appendChild(marker);
   }
 
+  clearVisibleFailureMessage(conversationId = this.conversation?.id, { includeInterrupted = false } = {}) {
+    const thread = $("#agent-thread");
+    if (!thread || !conversationId) return;
+    const selector = includeInterrupted
+      ? "article.agent-message-error, article.agent-message-interrupted"
+      : "article.agent-message-error";
+    thread.querySelectorAll(selector).forEach((message) => {
+      if (message.dataset.conversationId === conversationId) message.remove();
+    });
+    if (this.failedMessage?.isConnected && this.failedMessage.dataset.conversationId === conversationId) {
+      this.failedMessage.remove();
+      this.failedMessage = null;
+    }
+  }
+
   appendMessage(role, content, meta = {}) {
     const thread = $("#agent-thread");
     if (!thread) return null;
     $("#agent-empty")?.remove();
     const message = element("article", `agent-message ${role}${meta.pending ? " agent-pending" : ""}${meta.error ? " agent-message-error" : ""}${meta.status === "interrupted" ? " agent-message-interrupted" : ""}`);
+    if (this.conversation?.id) message.dataset.conversationId = this.conversation.id;
     message.setAttribute("aria-label", role === "user" ? "Your message" : "NusaShell Agent response");
 
     if (role === "assistant") {
@@ -2413,8 +2700,18 @@ export class AgentConversationController {
       copy,
     ));
     actions.appendChild(copy);
-    if (meta.retry) {
-      const retryLabel = meta.retryLabel || "Retry";
+    const restoredInterrupted = meta.status === "interrupted" && meta.isLatestAction !== false;
+    if (meta.retry || restoredInterrupted) {
+      const retryLabel = meta.retryLabel
+        || (restoredInterrupted
+          ? hasToolResumeSnapshot(meta)
+            ? "Resume"
+            : meta.retryOnly
+              ? "Retry"
+            : typeof content === "string" && content.trim()
+              ? "Continue"
+              : "Retry"
+          : "Retry");
       const retry = element("button", "agent-retry-btn", retryLabel);
       retry.type = "button";
       if (meta.retryDisabled) retry.disabled = true;
@@ -2422,7 +2719,9 @@ export class AgentConversationController {
       if (typeof meta.retryCooldownMs === "number" && meta.retryCooldownMs > 0) {
         this.startRetryCooldown(retry, retryLabel, meta.retryCooldownMs);
       } else {
-        retry.addEventListener("click", () => void this.submit({ retry: true }));
+        retry.addEventListener("click", () => void (meta.retryAction
+          ? meta.retryAction()
+          : this.submit({ retry: true })));
       }
       actions.prepend(retry);
     }
@@ -2432,7 +2731,7 @@ export class AgentConversationController {
     thread.appendChild(message);
     this.scrollToBottom();
     if (role === "assistant" && !meta.pending && !meta.error) {
-      this.enhanceCodeFences(message, meta.canvasMessageIndex ?? this.currentMessageIndex());
+      this.enhanceCodeFences(message, meta.canvasMessageId ?? this.currentMessageIndex());
     }
     return message;
   }
@@ -2564,6 +2863,8 @@ export class AgentConversationController {
 
   bindSubagentEvents() {
     this.subagentLifecycle.reset();
+    this.subagentSelectedRunId = null;
+    this.subagentEventRunId = null;
     this.rebindSubagentEvents();
   }
 
@@ -2586,18 +2887,41 @@ export class AgentConversationController {
   isViewingSubagentOwner() {
     // When no owner is tracked (unit tests / early path), keep painting the
     // shared subpane so callers don't need to mock conversation ownership.
+    if (this.subagentEventRunId && this.subagentEventRunId !== this.subagentSelectedRunId) return false;
     if (!this.subagentOwnerConversationId) return true;
     return Boolean(this.conversation?.id && this.conversation.id === this.subagentOwnerConversationId);
   }
 
+  isViewingSubagentConversation() {
+    return Boolean(this.conversation?.id && this.conversation.id === this.subagentOwnerConversationId);
+  }
+
   handleSubagentRunStarted(p) {
-    if (!this.conversation) return;
-    const ownerId = this.conversation.id;
+    if (!p?.runId) return;
+    const ownerId = p.parentConversationId
+      || (p.conversationId?.startsWith("subagent:") ? this.conversation?.id : p.conversationId)
+      || this.conversation?.id;
+    const shouldSelect = this.conversation?.id === ownerId
+      && (!this.subagentSelectedRunId || this.subagentSelectedRunId === p.runId);
+    const result = this.withSubagentEventRun(p.runId, () => this.handleSubagentRunStartedInContext(p));
+    if (shouldSelect) this.selectSubagentRun(p.runId);
+    return result;
+  }
+
+  handleSubagentRunStartedInContext(p) {
+    const ownerId = p.parentConversationId
+      || (p.conversationId?.startsWith("subagent:") ? this.conversation?.id : p.conversationId)
+      || this.conversation?.id;
+    if (!ownerId) return;
     this.subagentOwnerConversationId = ownerId;
     const run = {
       id: `run-${p.runId}`,
       conversationId: ownerId,
-      sourceMessageId: String(this.conversation.messages?.length ?? 0),
+      sourceMessageId: this.conversation?.id === ownerId
+        ? document.querySelector("#agent-thread article.agent-message.agent-pending")?.dataset.messageId
+          ?? this.conversation.messages?.at(-1)?.id
+          ?? "0"
+        : "0",
       runId: p.runId,
       providerId: p.providerId,
       ...(p.title ? { title: p.title } : {}),
@@ -2616,7 +2940,12 @@ export class AgentConversationController {
       if (this.conversation?.id === ownerId) this.conversation = conv;
     }).catch((err) => this.log?.("error", `Subagent run start persist failed: ${err}`));
 
-    this.mountSubpane(run, { resumeStream: false, open: false });
+    // A shared drawer may already be showing another concurrent run. Prepare
+    // this run's state without replacing the selected drawer contents.
+    const shouldSelect = this.conversation?.id === ownerId
+      && (!this.subagentSelectedRunId || this.subagentSelectedRunId === run.runId);
+    if (shouldSelect) this.selectSubagentRun(run.runId);
+    this.mountSubpane(run, { resumeStream: false, open: false, select: shouldSelect });
 
     this.attachSubagentCardStream(p.runId);
 
@@ -2624,6 +2953,9 @@ export class AgentConversationController {
   }
 
   handleSubagentRunEnded(p) {
+    if (p?.runId && this.subagentEventRunId !== p.runId) {
+      return this.withSubagentEventRun(p.runId, () => this.handleSubagentRunEnded(p));
+    }
     this.subagentLifecycle.endRunDisposeStream();
 
     const status = p.ok ? "ok" : "fail";
@@ -2639,6 +2971,10 @@ export class AgentConversationController {
     if (this.activeSubagentRun) {
       this.activeSubagentRun = { ...this.activeSubagentRun, status, ...(p.summary ? { summary: p.summary } : {}), ...(p.error ? { error: p.error } : {}), ...(steps?.length ? { steps } : {}) };
     }
+    // `subagent.run_ended` can arrive before the parent tool_call_end. Seal
+    // the in-chat card here so an already-finished run never keeps showing a
+    // blank RUNNING viewport while the parent provider finishes its round.
+    this.sealInChatSubagentCard(p.runId, status, p.summary, p.error);
     if (this.isViewingSubagentOwner()) {
       this.renderSubagentStreamState();
     }
@@ -2667,15 +3003,15 @@ export class AgentConversationController {
 
   bindLiveSubagentStream(runId) {
     return subscribeSubagentStream(runId, {
-      onDelta: (delta) => {
+      onDelta: (delta) => this.withSubagentEventRun(runId, () => {
         this.appendSubpaneText(delta);
-        if (this.isViewingSubagentOwner()) this.appendCardStreamText(delta);
-      },
-      onReasoningDelta: (delta) => {
+        if (this.isViewingSubagentConversation()) this.appendCardStreamText(delta);
+      }),
+      onReasoningDelta: (delta) => this.withSubagentEventRun(runId, () => {
         this.appendSubpaneThought(delta);
-        if (this.isViewingSubagentOwner()) this.appendCardStreamThought(delta);
-      },
-      onToolCallStart: (params) => {
+        if (this.isViewingSubagentConversation()) this.appendCardStreamThought(delta);
+      }),
+      onToolCallStart: (params) => this.withSubagentEventRun(runId, () => {
         const call = {
           id: params.callId,
           title: params.name,
@@ -2685,27 +3021,27 @@ export class AgentConversationController {
           summary: summarizeToolArgs(params.args),
         };
         this.appendSubpaneToolCall(call, { persist: true });
-        if (this.isViewingSubagentOwner()) this.appendCardStreamToolCall(call);
-      },
-      onToolCallEnd: (params) => {
+        if (this.isViewingSubagentConversation()) this.appendCardStreamToolCall(call);
+      }),
+      onToolCallEnd: (params) => this.withSubagentEventRun(runId, () => {
         const status = params.ok ? "ok" : "fail";
         this.updateSubpaneToolCall(params.callId, status, params.summary);
-        if (this.isViewingSubagentOwner()) this.updateCardStreamToolCall(params.callId, status, params.summary);
-      },
-      onPlan: (steps) => {
+        if (this.isViewingSubagentConversation()) this.updateCardStreamToolCall(params.callId, status, params.summary);
+      }),
+      onPlan: (steps) => this.withSubagentEventRun(runId, () => {
         this.appendSubpanePlan(steps, { persist: true });
-        if (this.isViewingSubagentOwner()) this.appendCardStreamPlan(steps);
-      },
-      onPermissionRequest: (payload) => {
+        if (this.isViewingSubagentConversation()) this.appendCardStreamPlan(steps);
+      }),
+      onPermissionRequest: (payload) => this.withSubagentEventRun(runId, () => {
         if (!this.isViewingSubagentOwner()) return;
         const card = this.createAcpPermissionCard(payload);
         if (card) this.mountAcpAttentionCard(card);
-      },
-      onAskRequest: (payload) => {
+      }),
+      onAskRequest: (payload) => this.withSubagentEventRun(runId, () => {
         if (!this.isViewingSubagentOwner()) return;
         const card = this.createAcpAskCard(payload);
         if (card) this.mountAcpAttentionCard(card);
-      },
+      }),
     });
   }
 
@@ -3029,6 +3365,7 @@ export class AgentConversationController {
       if (!this.isViewingSubagentOwner()) {
         this.closeSubpaneDrawerUi();
       }
+      this.selectSubagentRun(null);
       return;
     }
     // Keep stream subscription for an in-flight run, but do not auto-open the drawer.
@@ -3264,9 +3601,11 @@ export class AgentConversationController {
     // Prefer the live ACP runId when a still-running stream is bound. Streaming
     // cards initially close over the parent tool callId; remounting with that
     // synthetic id used to reset the real stream and leave the sidebar empty.
+    const isPersistedRun = this.conversation?.subagentRuns?.some((item) => item.runId === run?.runId);
     let effectiveRun = run;
     if (
       run?.status === "running"
+      && !isPersistedRun
       && this.subagentStreamState?.runId
       && this.subagentStreamState.runId !== run.runId
       && this.subagentStreamDisposer
@@ -3280,6 +3619,19 @@ export class AgentConversationController {
       };
     }
 
+    if (options.select !== false) this.selectSubagentRun(effectiveRun.runId);
+    this.activeSubagentRun = effectiveRun;
+    if (options.select === false) {
+      if (effectiveRun.status === "running") {
+        if (!this.subagentStreamState || this.subagentStreamState.runId !== effectiveRun.runId) {
+          this.resetSubagentStreamState(effectiveRun.steps ?? [], effectiveRun.runId);
+        }
+        if (options.resumeStream && !this.subagentStreamDisposer) {
+          this.subagentStreamDisposer = this.bindLiveSubagentStream(effectiveRun.runId);
+        }
+      }
+      return;
+    }
     if (badge) badge.textContent = (effectiveRun.providerId || "—").slice(0, 6).toUpperCase();
     if (title) title.textContent = effectiveRun.title || "Subagent";
     if (status) {
@@ -3289,18 +3641,18 @@ export class AgentConversationController {
       else if (effectiveRun.status === "ok") status.classList.add("is-ok");
       else if (effectiveRun.status === "fail" || effectiveRun.status === "cancelled") status.classList.add("is-fail");
     }
-    this.activeSubagentRun = effectiveRun;
     if (effectiveRun.status === "running") {
       if (!this.subagentStreamState || this.subagentStreamState.runId !== effectiveRun.runId) {
         this.resetSubagentStreamState(effectiveRun.steps ?? [], effectiveRun.runId);
       }
       // Live DOM nodes (textEl/thoughtEl/tool terminals) may be detached after a
       // thread re-render; always rebuild from the durable snapshot before show.
-      this.renderSubagentStreamState();
+      if (options.select !== false) this.renderSubagentStreamState();
       if (options.resumeStream && !this.subagentStreamDisposer) {
         this.subagentStreamDisposer = this.bindLiveSubagentStream(effectiveRun.runId);
       }
     } else {
+      if (options.select === false) return;
       body.textContent = "";
       if (effectiveRun.steps?.length) this.renderSubpaneSteps(effectiveRun.steps);
       if (effectiveRun.error) this.setSubpaneError(effectiveRun.error);
@@ -3595,10 +3947,16 @@ export class AgentConversationController {
   // the running subagent card. One event fan-out, two views (subpane + card).
 
   attachSubagentCardStream(runId) {
-    const card = document.querySelector(`.agent-subagent-card[data-streaming-subagent="1"]`)
-      || document.querySelector(`.agent-subagent-card[data-run-id="${CSS.escape(runId)}"]`);
+    if (!this.subagentSelectedRunId) this.selectSubagentRun(runId);
+    const exact = document.querySelector(`.agent-subagent-card[data-run-id="${CSS.escape(runId)}"]`);
+    const streamingCards = [...document.querySelectorAll('.agent-subagent-card[data-streaming-subagent="1"]')];
+    // Prefer a durable run-id match. For the initial parent tool cards, the
+    // backend run id is not known yet; the latest unbound streaming card maps
+    // to the latest run_started event, preserving concurrent card ownership.
+    const card = exact || streamingCards.find((candidate) => candidate.dataset.streamBound !== "true");
     if (!card) return null;
     card.dataset.runId = runId;
+    card.dataset.streamBound = "true";
     let stream = card.querySelector(".agent-subagent-card-stream");
     if (!stream) {
       stream = element("div", "agent-subagent-card-stream");
@@ -3746,6 +4104,42 @@ export class AgentConversationController {
 
   disposeSubagentCardStream() {
     this.activeSubagentCardStream = null;
+    // Keep the selected lifecycle state explicit; concurrent run event
+    // handlers may temporarily select another state while this callback runs.
+    const selected = this.subagentSelectedRunId;
+    if (selected) this.subagentLifecycle.selectRun(selected).cardStream = null;
+  }
+
+  /** Replace a live subagent card's transient viewport with its terminal state. */
+  sealInChatSubagentCard(runId, status, summary, error) {
+    if (!runId) return;
+    const card = document.querySelector(`.agent-subagent-card[data-run-id="${CSS.escape(runId)}"]`);
+    if (!card) return;
+
+    const statusEl = card.querySelector(".agent-subagent-card-status");
+    if (statusEl) {
+      statusEl.textContent = `● ${status.toUpperCase()}`;
+      statusEl.className = `agent-subagent-card-status ${status === "ok" ? "is-ok" : "is-fail"}`;
+    }
+    card.querySelector(".agent-subagent-card-stream")?.remove();
+    delete card.dataset.streamingSubagent;
+
+    if (summary) {
+      let summaryEl = card.querySelector(".agent-subagent-card-summary");
+      if (!summaryEl) {
+        summaryEl = element("div", "agent-subagent-card-summary");
+        card.append(summaryEl);
+      }
+      summaryEl.innerHTML = renderAssistantMarkdown(summary);
+    }
+    if (error) {
+      let errorEl = card.querySelector(".agent-subagent-card-error");
+      if (!errorEl) {
+        errorEl = element("div", "agent-subagent-card-error");
+        card.append(errorEl);
+      }
+      errorEl.textContent = error;
+    }
   }
 
   renderSubagentCard(run) {
@@ -3781,6 +4175,17 @@ export class AgentConversationController {
     const statusEl = element("span", `agent-subagent-card-status ${run.status === "running" ? "is-running" : run.status === "ok" ? "is-ok" : run.status === "fail" || run.status === "cancelled" ? "is-fail" : ""}`, `● ${run.status.toUpperCase()}`);
     head.append(meta, statusEl);
     card.appendChild(head);
+    if (typeof run.prompt === "string" && run.prompt.trim()) {
+      const prompt = element("div", "agent-subagent-card-prompt");
+      prompt.setAttribute("aria-label", "Subagent prompt");
+      const promptText = element("div", "agent-subagent-card-prompt-text", run.prompt.trim());
+      promptText.title = run.prompt.trim();
+      prompt.append(
+        element("span", "agent-subagent-card-prompt-label", "TASK"),
+        promptText,
+      );
+      card.append(prompt);
+    }
     if (run.status === "running") {
       const stream = element("div", "agent-subagent-card-stream");
       stream.setAttribute("aria-label", "Subagent live activity");
@@ -3889,7 +4294,10 @@ export class AgentConversationController {
     const runId = result.runId;
     const providerId = result.providerId || toolCall.args?.provider_id || "—";
     const title = toolCall.args?.title || result.title || "Subagent run";
-    const status = result.ok === true ? "ok" : result.ok === false ? "fail" : "running";
+    // The parent tool call is also authoritative. Some providers return a
+    // compact payload without `ok`; retaining "running" after a successful
+    // tool_call_end leaves a permanently stale card.
+    const status = result.ok === true ? "ok" : result.ok === false ? "fail" : toolCall.ok === false ? "fail" : "ok";
     const summary = result.summary || "";
     const error = formatSubagentError(result.error) || formatSubagentError(toolCall.error);
     const run = {
@@ -3897,6 +4305,11 @@ export class AgentConversationController {
       providerId,
       title,
       status,
+      ...(typeof result.prompt === "string" && result.prompt.trim()
+        ? { prompt: result.prompt }
+        : typeof toolCall.args?.prompt === "string" && toolCall.args.prompt.trim()
+          ? { prompt: toolCall.args.prompt }
+          : {}),
       // Ticket #42: a successful subagent run must keep a sealed card in the
       // thread (like terminal tools) instead of being removed. renderSubagentCard
       // already supports status "ok" + summary; only the ok/null early-return was
@@ -3950,11 +4363,12 @@ export class AgentConversationController {
     return terminal;
   }
 
-  createStreamingMessage() {
+  createStreamingMessage(reservation = null) {
     const thread = $("#agent-thread");
     if (!thread) return null;
     $("#agent-empty")?.remove();
     const message = element("article", "agent-message assistant agent-pending");
+    if (reservation?.messageId) message.dataset.messageId = reservation.messageId;
     message.setAttribute("aria-label", "NusaShell Agent response");
     const identity = element("div", "agent-message-identity");
     identity.append(
@@ -3994,6 +4408,7 @@ export class AgentConversationController {
         runId: callId,
         providerId,
         title,
+        ...(typeof args?.prompt === "string" && args.prompt.trim() ? { prompt: args.prompt } : {}),
         status: "running",
       });
       card.dataset.callId = callId;
@@ -4102,35 +4517,46 @@ export class AgentConversationController {
     }
     // Durable store: parent-turn end must not leave status=running subagents
     // or a stuck activeSubagentRunId (seen after IPC TIMEOUT mid deep-dive).
-    void this.failStrandedSubagentRuns("Subagent run did not finish before the parent turn ended.");
+    void this.failStrandedSubagentRuns(
+      "Subagent run did not finish before the parent turn ended.",
+      streamState.conversationId,
+    );
   }
 
   /**
    * Mark every still-running subagent on the owner conversation as failed and
    * clear `activeSubagentRunId`. Safe to call multiple times (no-op when idle).
    */
-  failStrandedSubagentRuns(reason = "Subagent run did not finish before the parent turn ended.") {
-    const ownerId = this.turnOwnerConversationId || this.conversation?.id;
+  async failStrandedSubagentRuns(
+    reason = "Subagent run did not finish before the parent turn ended.",
+    conversationId = this.conversation?.id,
+  ) {
+    const ownerId = conversationId;
     const api = this.shell?.agentConversations;
-    if (!ownerId || !api?.updateSubagentRunStatus) return Promise.resolve();
-    const running = (this.conversation?.subagentRuns ?? []).filter((run) => run.status === "running");
+    if (!ownerId || !api?.updateSubagentRunStatus) return;
+    let current = this.conversation?.id === ownerId ? this.conversation : null;
+    if (!current && api.get) {
+      try {
+        current = await api.get(ownerId);
+      } catch (err) {
+        this.log?.("error", `Could not load conversation for stranded subagents: ${err?.message || String(err)}`);
+        return;
+      }
+    }
+    const running = (current?.subagentRuns ?? []).filter((run) => run.status === "running");
     const ops = running.map((run) =>
       api.updateSubagentRunStatus(ownerId, run.runId, "fail", { error: reason }),
     );
-    if (ops.length === 0 && !this.conversation?.activeSubagentRunId) {
-      return Promise.resolve();
+    if (ops.length === 0 && !current?.activeSubagentRunId) return;
+    try {
+      let conv = (await Promise.all(ops)).at(-1);
+      if (api.setActiveSubagentRun && (current?.activeSubagentRunId || running.length)) {
+        conv = await api.setActiveSubagentRun(ownerId, null);
+      }
+      if (conv && this.conversation?.id === ownerId) this.conversation = conv;
+    } catch (err) {
+      this.log?.("error", `failStrandedSubagentRuns failed: ${err?.message || String(err)}`);
     }
-    return Promise.all(ops)
-      .then(async (results) => {
-        let conv = results.at(-1);
-        if (api.setActiveSubagentRun && (this.conversation?.activeSubagentRunId || running.length)) {
-          conv = await api.setActiveSubagentRun(ownerId, null);
-        }
-        if (conv && this.conversation?.id === ownerId) this.conversation = conv;
-      })
-      .catch((err) => {
-        this.log?.("error", `failStrandedSubagentRuns failed: ${err?.message || String(err)}`);
-      });
   }
 
   /**
@@ -4139,7 +4565,8 @@ export class AgentConversationController {
    */
   handleConnectionLost() {
     if (!this.turnPending) return;
-    this.sealStreamingToolCardsIncomplete(this.liveStreamState);
+    const streamState = this.liveStreamState;
+    this.sealStreamingToolCardsIncomplete(streamState);
     const status = $("#agent-provider-status");
     if (status) status.textContent = "Connection lost · reconnecting…";
     this.log?.("warn", "WebSocket connection lost during turn");
@@ -4666,6 +5093,7 @@ export class AgentConversationController {
 
   sealStreamingMessage(message, meta) {
     if (!message) return;
+    if (meta.id) message.dataset.messageId = meta.id;
     message.classList.remove("agent-pending");
     if (meta.status === "interrupted") message.classList.add("agent-message-interrupted");
     const mark = message.querySelector(".agent-message-mark");
@@ -4741,13 +5169,13 @@ export class AgentConversationController {
     footer.appendChild(actions);
     message.appendChild(footer);
     if (meta.status !== "interrupted") {
-      this.enhanceCodeFences(message, this.currentMessageIndex());
+      this.enhanceCodeFences(message, meta.id ?? message.dataset.messageId ?? this.currentMessageIndex());
     }
   }
 
   async copyMessage(content, button) {
     try {
-      if (this.shell?.clipboard?.writeText) this.shell.clipboard.writeText(content);
+      if (this.shell?.clipboard?.writeText) await this.shell.clipboard.writeText(content);
       else if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(content);
       else throw new Error("Clipboard is unavailable");
       button.classList.add("is-confirmed");
@@ -4767,6 +5195,11 @@ export class AgentConversationController {
     const conversation = this.conversations.find((item) => item.id === conversationId);
     if (!conversation) return;
     this.pendingDeleteId = conversationId;
+    const focused = document.activeElement;
+    this.pendingDeleteTrigger = focused?.classList?.contains("agent-conversation-delete")
+      ? focused
+      : [...document.querySelectorAll(".agent-conversation-delete")]
+        .find((trigger) => trigger.getAttribute("aria-label") === `Delete ${conversation.title}`);
     $("#agent-delete-copy").textContent = `“${conversation.title}” will be permanently removed from this device.`;
     $("#agent-delete-overlay").hidden = false;
     $("#agent-delete-dialog").hidden = false;

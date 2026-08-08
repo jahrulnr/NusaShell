@@ -1,6 +1,7 @@
 import type { AgentTurnContext } from "../ports/agent-tool-gateway.port.js";
 import type { ReasoningEffort } from "../ports/agent-provider.port.js";
 import type { McpToolRoute } from "./gateway-types.js";
+import type { WriteOrigin } from "./gateway-types.js";
 
 /**
  * Per-turn / per-conversation state for the agent tool gateway: the granted
@@ -23,6 +24,7 @@ export class GatewayRouteStore {
   private readonly turnModel = new Map<string, string | undefined>();
   private readonly turnEffort = new Map<string, ReasoningEffort | undefined>();
   private readonly turnConversationId = new Map<string, string | undefined>();
+  private readonly turnWriteOrigin = new Map<string, WriteOrigin | undefined>();
 
   beginTurn(turnId: string, context?: AgentTurnContext): void {
     if (!this.turnRoutes.has(turnId)) {
@@ -49,6 +51,7 @@ export class GatewayRouteStore {
     if (context?.model !== undefined) this.turnModel.set(turnId, context.model);
     if (context?.effort !== undefined) this.turnEffort.set(turnId, context.effort);
     if (context?.conversationId !== undefined) this.turnConversationId.set(turnId, context.conversationId);
+    if (context?.writeOrigin !== undefined) this.turnWriteOrigin.set(turnId, context.writeOrigin);
   }
 
   /**
@@ -69,6 +72,7 @@ export class GatewayRouteStore {
     this.turnModel.delete(turnId);
     this.turnEffort.delete(turnId);
     this.turnConversationId.delete(turnId);
+    this.turnWriteOrigin.delete(turnId);
   }
 
   /** Get (creating if needed) the turn's route map. */
@@ -124,6 +128,10 @@ export class GatewayRouteStore {
 
   effortOf(turnId: string): ReasoningEffort | undefined {
     return this.turnEffort.get(turnId);
+  }
+
+  writeOriginOf(turnId: string): WriteOrigin {
+    return this.turnWriteOrigin.get(turnId) ?? "foreground";
   }
 
   /** In-flight calls for a turn (requestId -> pluginId). Creates an empty map. */

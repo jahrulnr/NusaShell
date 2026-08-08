@@ -21,6 +21,34 @@ describe("auto-continue policy", () => {
     expect(decision).toMatchObject({ shouldContinue: true, openTodoCount: 2, continuesUsed: 0, reason: "continue" });
   });
 
+  it("waits for the user when the completed turn ends with a question", () => {
+    const decision = decideAutoContinue({
+      items: [{ id: "1", content: "open", status: "pending" }],
+      autoContinueIndex: 0,
+      maxAutoContinues: 10,
+      turnOk: true,
+      hasConversation: true,
+      turnText: "I need your confirmation first?",
+    });
+    expect(decision).toMatchObject({ shouldContinue: false, reason: "awaiting-user" });
+  });
+
+  it("waits for running background jobs before continuing remaining todos", () => {
+    const decision = decideAutoContinue({
+      items: [item("1", "in_progress")],
+      autoContinueIndex: 0,
+      maxAutoContinues: 10,
+      turnOk: true,
+      hasConversation: true,
+      hasRunningBackgroundJobs: true,
+    });
+    expect(decision).toMatchObject({
+      shouldContinue: false,
+      openTodoCount: 1,
+      reason: "awaiting-background-jobs",
+    });
+  });
+
   it("stops with no-open-todos when every item is completed", () => {
     const decision = decideAutoContinue({
       items: [item("1", "completed"), item("2", "completed")],

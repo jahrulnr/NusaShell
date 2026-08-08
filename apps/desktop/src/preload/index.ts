@@ -2,6 +2,7 @@ import { clipboard, contextBridge, ipcRenderer } from "electron";
 import type { PublicAiRegistry, ReasoningEffort, SaveAiProviderInput } from "../shared/ai-contract.js";
 import { checkEventSkew } from "../shared/event-skew-checker.js";
 import type {
+  AgentAssistantReservation,
   AgentCanvasArtifact,
   AgentConversation,
   AgentConversationCheckpoint,
@@ -83,6 +84,8 @@ export interface ShellApi {
     create(options?: { kind?: "agent" | "acp"; acp?: { providerId: string; sessionId?: string; workspace?: string } }): Promise<AgentConversation>;
     get(id: string): Promise<AgentConversation | null>;
     append(id: string, message: AgentConversationMessage): Promise<AgentConversation>;
+    reserveAssistant(id: string, traceId: string, options?: { replaceLastInterrupted?: boolean }): Promise<AgentAssistantReservation>;
+    sealAssistant(id: string, traceId: string, message: AgentConversationMessage): Promise<AgentConversation>;
     saveCheckpoint(id: string, checkpoint: AgentConversationCheckpoint): Promise<AgentConversation>;
     replaceLastInterrupted(id: string, message: AgentConversationMessage): Promise<AgentConversation>;
     delete(id: string): Promise<void>;
@@ -264,6 +267,8 @@ const api: ShellApi = {
     create: (options) => ipcRenderer.invoke("agent-conversations:create", options),
     get: (id) => ipcRenderer.invoke("agent-conversations:get", id),
     append: (id, message) => ipcRenderer.invoke("agent-conversations:append", id, message),
+    reserveAssistant: (id, traceId, options) => ipcRenderer.invoke("agent-conversations:reserve-assistant", id, traceId, options),
+    sealAssistant: (id, traceId, message) => ipcRenderer.invoke("agent-conversations:seal-assistant", id, traceId, message),
     saveCheckpoint: (id, checkpoint) => ipcRenderer.invoke("agent-conversations:checkpoint", id, checkpoint),
     replaceLastInterrupted: (id, message) => ipcRenderer.invoke("agent-conversations:replace-interrupted", id, message),
     delete: (id) => ipcRenderer.invoke("agent-conversations:delete", id),

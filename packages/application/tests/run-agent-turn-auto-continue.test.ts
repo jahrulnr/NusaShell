@@ -64,7 +64,12 @@ const RUNTIME = {
  * optional prompt loader). All other positional ctor params default to
  * undefined so the count stays correct.
  */
-function buildHandler(opts: { provider: AgentProvider; todos: InMemoryConversationTodoPort; promptLoader?: PromptLoaderPort }) {
+function buildHandler(opts: {
+  provider: AgentProvider;
+  todos: InMemoryConversationTodoPort;
+  promptLoader?: PromptLoaderPort;
+  hasRunningBackgroundJobs?: (conversationId: string) => boolean;
+}) {
   // Positions: providers, toolGateway, defaultProviderId, runtime, logger,
   // coordinator, onTextDelta, onReasoningDelta, onToolCallStart, onToolCallEnd,
   // onContextUpdate, promptLoader, userPrompt, memoryStore, onTurnComplete,
@@ -94,6 +99,8 @@ function buildHandler(opts: { provider: AgentProvider; todos: InMemoryConversati
     undefined,                   // 21 onTurnProgress
     undefined,                   // 22 subagentPort
     opts.todos,                  // 23 todoPort
+    undefined,                   // 24 skillRegistry
+    opts.hasRunningBackgroundJobs ? { hasRunningBackgroundJobs: opts.hasRunningBackgroundJobs } : undefined, // 25 hooks
   );
 }
 
@@ -114,6 +121,30 @@ describe("RunAgentTurnHandler auto-continue", () => {
       pluginIds: [],
     });
     expect(result.autoContinue).toMatchObject({ shouldContinue: true, openTodoCount: 1, continuesUsed: 0, reason: "continue" });
+  });
+
+  it("does not auto-continue while this conversation has a running background job", async () => {
+    const provider = new ScriptedProvider([{ text: "tests are still running" }]);
+    const todos = new InMemoryConversationTodoPort();
+    todos.set("conv-background", [{ id: "1", content: "verify tests", status: "in_progress" }]);
+    const handler = buildHandler({
+      provider,
+      todos,
+      hasRunningBackgroundJobs: (conversationId) => conversationId === "conv-background",
+    });
+
+    const result = await handler.handle({
+      kind: "run-agent-turn",
+      traceId: "trace-background",
+      conversationId: "conv-background",
+      messages: [{ role: "user", content: "run tests" }],
+      pluginIds: [],
+    });
+
+    expect(result.autoContinue).toMatchObject({
+      shouldContinue: false,
+      reason: "awaiting-background-jobs",
+    });
   });
 
   it("omits autoContinue when no conversation is bound", async () => {

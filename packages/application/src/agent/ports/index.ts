@@ -11,6 +11,7 @@ export type {
   AgentModelCapabilities,
   AgentTokenUsage,
   AgentToolCall,
+  AgentToolArgumentError,
   AgentToolDefinition,
   AgentProviderRequest,
   AgentPromptCachePolicy,

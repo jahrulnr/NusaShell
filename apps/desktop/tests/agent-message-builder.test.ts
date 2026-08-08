@@ -28,6 +28,9 @@ describe("agent-message-builder", () => {
     expect(message.toolCalls?.[0].args).toEqual({});
     expect(message.toolCalls?.[1].args).toEqual({ path: "/a" });
     expect(message.steps).toHaveLength(2);
+    expect(message.steps?.map((step) => step.stepPosition)).toEqual([1, 2]);
+    const toolStep = message.steps?.find((step) => step.type === "tool_calls");
+    expect(toolStep?.type === "tool_calls" ? toolStep.calls.map((call) => call.callPosition) : []).toEqual([1]);
   });
 
   it("defaults missing args to {} in buildToolCall", () => {
@@ -36,6 +39,24 @@ describe("agent-message-builder", () => {
     expect(call.id).toBe("c1");
     expect(call.name).toBe("mcp_list");
     expect(call.ok).toBe(true);
+  });
+
+  it("persists the exact provider-facing tool projection for the UI", () => {
+    const modelOutput = '<untrusted_tool_result source="mcp_files_list" format="terminal">\n' +
+      "status=success\ntruncated=false\n\nentries[1]\npath\tkind\ndocs/a.md\tfile\n" +
+      "</untrusted_tool_result>";
+    const result: AgentTurnResult = {
+      traceId: "trace-terminal",
+      text: "Done.",
+      rounds: 1,
+      toolCalls: [{ id: "c-terminal", name: "mcp_files_list", ok: true, args: {}, result: { ignored: true }, modelOutput }],
+    };
+
+    const message = buildAssistantMessage(result);
+    const call = message.toolCalls?.[0];
+    expect(call?.modelOutput).toContain("status=success");
+    expect(call?.output).toBe(call?.modelOutput);
+    expect(call?.output).toContain("<untrusted_tool_result source=\"mcp_files_list\" format=\"terminal\">");
   });
 
   it("builds an interrupted message from a partial with live text and resumeMessages", () => {

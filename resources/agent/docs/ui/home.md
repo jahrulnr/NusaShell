@@ -4,10 +4,6 @@ The default view and app launcher. Shows windowed (UI) plugins as a searchable g
 
 **How to open:** Open NusaShell, or click the Home item in the left sidebar.
 
-## Greeting
-
-Displays a compact local-workbench kicker, the product name, and the tagline 'Your AI tool shell — plugins with real UIs.'
-
 ## Search and filters
 
 The Home search filters installed plugin cards by name, id, or description in real time. It spans the launcher above a compact, horizontally scrollable category rail so both filters read as one deliberate sequence.

@@ -5,7 +5,7 @@
  *   - "every 30m" / "every 2h" / "every 1d"
  *   - "30m" / "2h" / "1d"
  *   - "0 9 * * *"  (5-field cron)
- *   - ISO timestamp  -> once
+ *   - ISO timestamp  -> once (bare values use the host machine's local clock)
  *
  * A `once` schedule whose runAt is in the past beyond the 120s grace window
  * is rejected at parse time.
@@ -31,10 +31,10 @@ export function parseSchedule(
   const trimmed = input.trim();
   if (trimmed.length === 0) throw new ScheduleParseError("schedule is empty");
 
-  // ISO timestamp -> once (accepts date-only, with/without time, with/without ms, with/without Z)
-  if (/^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?(\.\d{1,3})?Z?)?$/i.test(trimmed)) {
-    const iso = normalizeIso(trimmed);
-    const parsed = new Date(iso);
+  // ISO timestamp -> once. Explicit offsets identify an instant; bare values
+  // intentionally follow the host machine's local wall clock.
+  if (/^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})?)?$/i.test(trimmed)) {
+    const parsed = parseTimestamp(trimmed);
     if (Number.isNaN(parsed.getTime())) {
       throw new ScheduleParseError(`invalid timestamp: ${trimmed}`);
     }
@@ -66,14 +66,23 @@ export function parseSchedule(
   throw new ScheduleParseError(`unrecognized schedule: ${trimmed}`);
 }
 
-function normalizeIso(value: string): string {
-  // Accept "2025-01-01" or "2025-01-01 09:00" -> ISO (with optional ms/Z)
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return `${value}T00:00:00Z`;
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(value)) return `${value.replace(" ", "T")}:00Z`;
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)) return `${value.replace(" ", "T")}Z`;
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return `${value}:00Z`;
-  // Already full ISO (with or without ms/Z) — Date parses it natively.
-  return value;
+function parseTimestamp(value: string): Date {
+  const normalized = value.replace(" ", "T");
+  if (/(?:Z|[+-]\d{2}:\d{2})$/i.test(normalized)) return new Date(normalized);
+
+  const match = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.(\d{1,3}))?)?$/.exec(normalized);
+  if (!match) return new Date(Number.NaN);
+
+  const [, year, month, day, hour = "0", minute = "0", second = "0", milliseconds = "0"] = match;
+  return new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second),
+    Number(milliseconds.padEnd(3, "0")),
+  );
 }
 
 /**
@@ -202,14 +211,14 @@ function matchesCron(fields: CronFields, d: Date): boolean {
   // When one is "*", the restricted field alone governs.
   const domRestricted = fields.dom.length !== FULL_DOM_LEN;
   const dowRestricted = fields.dow.length !== FULL_DOW_LEN;
-  const domHit = fields.dom.includes(d.getUTCDate());
-  const dowHit = fields.dow.includes(d.getUTCDay());
+  const domHit = fields.dom.includes(d.getDate());
+  const dowHit = fields.dow.includes(d.getDay());
   const dayOk =
     domRestricted && dowRestricted ? domHit || dowHit : domHit && dowHit;
   return (
-    fields.minute.includes(d.getUTCMinutes()) &&
-    fields.hour.includes(d.getUTCHours()) &&
-    fields.month.includes(d.getUTCMonth() + 1) &&
+    fields.minute.includes(d.getMinutes()) &&
+    fields.hour.includes(d.getHours()) &&
+    fields.month.includes(d.getMonth() + 1) &&
     dayOk
   );
 }

@@ -25,14 +25,15 @@ export class GatewayLiveSnapshot {
    * from `runtimeManager.listPlugins` (state === "running"); `tools` is the
    * full catalog (name + description + inputSchema) for every tool on those
    * running plugins, plus any sticky conversation grants still active this
-   * turn. Capped at `MCP_LIVE_TOOLS_CAP` entries; overflow names go to
-   * `toolsOverflow`. Fail-soft: on listPlugins / listTools error, log + skip
-   * the offending plugin (never fail the turn).
+   * turn. This checkpoint catalog is intentionally not limited by the
+   * provider `tools[]` cap; the formatter owns its character budget while
+   * `cappedRouteDefinitions` separately bounds typed function definitions.
+   * Fail-soft: on listPlugins / listTools error, log + skip the offending
+   * plugin (never fail the turn).
    */
   async getMcpLiveSnapshot(turnId: string): Promise<McpLiveSnapshot> {
     const running = await this.listRunningPlugins();
     const routes = this.routeStore.turnRouteMap(turnId) ?? new Map<string, McpToolRoute>();
-    const stickyNames = new Set(routes.keys());
     const catalog = await this.enumerateRunningTools(running);
     // Merge: running tools first, then sticky extras not covered by running.
     const seen = new Set<string>();
@@ -54,14 +55,9 @@ export class GatewayLiveSnapshot {
       });
     }
     merged.sort((a, b) => a.providerName < b.providerName ? -1 : a.providerName > b.providerName ? 1 : 0);
-    const capped = merged.slice(0, MCP_LIVE_TOOLS_CAP);
-    const overflow = merged.slice(MCP_LIVE_TOOLS_CAP).map((t) => t.providerName);
-    // Drop sticky names that were already covered by running tools from overflow.
-    const overflowFiltered = overflow.filter((n) => !stickyNames.has(n) || !catalog.some((t) => t.providerName === n));
     return {
       running: running.map((pluginId) => ({ pluginId })),
-      tools: capped,
-      ...(overflowFiltered.length > 0 ? { toolsOverflow: overflowFiltered } : {}),
+      tools: merged,
     };
   }
 

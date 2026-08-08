@@ -449,12 +449,32 @@ describe("PipelineScheduler", () => {
     expect(result.errorCode).toBe("PIPELINE_NOT_FOUND");
   });
 
-  it("refuses disabled pipelines", async () => {
+  it("refuses non-manual triggers for disabled pipelines", async () => {
     const pipeline = makePipeline([makeStep("a")], { enabled: false });
     store.pipelines.set(pipeline.id, pipeline);
-    const result = await scheduler.runPipeline(pipeline.id);
-    expect(result.ok).toBe(false);
-    expect(result.errorCode).toBe("PIPELINE_DISABLED");
+
+    const scheduleResult = await scheduler.runPipeline(pipeline.id, undefined, { source: "schedule" });
+    expect(scheduleResult.ok).toBe(false);
+    expect(scheduleResult.errorCode).toBe("PIPELINE_DISABLED");
+
+    const eventResult = await scheduler.launch(pipeline.id, undefined, { source: "event" });
+    expect(eventResult.ok).toBe(false);
+    expect(eventResult.errorCode).toBe("PIPELINE_DISABLED");
+  });
+
+  it("allows manual run of disabled (paused) pipelines", async () => {
+    const pipeline = makePipeline([makeStep("a")], { enabled: false });
+    store.pipelines.set(pipeline.id, pipeline);
+
+    const runResult = await scheduler.runPipeline(pipeline.id);
+    expect(runResult.ok).toBe(true);
+    expect(runResult.runId).toBeTruthy();
+
+    const pipeline2 = makePipeline([makeStep("b")], { enabled: false });
+    store.pipelines.set(pipeline2.id, pipeline2);
+    const launchResult = await scheduler.launch(pipeline2.id, undefined, { source: "manual" });
+    expect(launchResult.ok).toBe(true);
+    expect(launchResult.runId).toBeTruthy();
   });
 
   it("recovers expired leases on startup", async () => {

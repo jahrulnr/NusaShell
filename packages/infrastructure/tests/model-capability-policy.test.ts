@@ -6,7 +6,7 @@ import {
 } from "../src/index.js";
 
 describe("model capability policy", () => {
-  it("resolves auto effort from advertised catalog metadata", () => {
+  it("omits auto effort even when the catalog advertises a default", () => {
     expect(resolveModelRuntimePolicy({
       model: "openai/gpt-5",
       requestedEffort: "auto",
@@ -22,12 +22,32 @@ describe("model capability policy", () => {
         supportsTools: true,
       },
     })).toMatchObject({
-      effort: "medium",
       contextWindow: 400_000,
       maxOutput: 32_000,
       supportsTools: true,
       supportsVision: true,
     });
+    expect(resolveModelRuntimePolicy({
+      model: "openai/gpt-5",
+      requestedEffort: "auto",
+      capabilities: {
+        supportedEfforts: ["low", "medium", "high"],
+        defaultEffort: "medium",
+        reasoningSupported: true,
+      },
+    }).effort).toBeUndefined();
+  });
+
+  it("sends an explicit picker effort that is in the catalog allow-list", () => {
+    expect(resolveModelRuntimePolicy({
+      model: "openai/gpt-5",
+      requestedEffort: "medium",
+      capabilities: {
+        supportedEfforts: ["low", "medium", "high"],
+        defaultEffort: "medium",
+        reasoningSupported: true,
+      },
+    }).effort).toBe("medium");
   });
 
   it("clamps explicit effort to the nearest advertised level", () => {
@@ -55,26 +75,34 @@ describe("model capability policy", () => {
     }).effort).toBe("low");
   });
 
-  it("omits unsupported effort and uses heuristics even when catalog omitted reasoning fields", () => {
+  it("omits reasoning_effort when catalog has no effort levels (auto compatibility)", () => {
     expect(resolveModelRuntimePolicy({
       model: "gpt-4o-mini",
       requestedEffort: "high",
       capabilities: { reasoningSupported: false },
     }).effort).toBeUndefined();
+    // Auto without a catalog allow-list never invents a level (tokenrouter 400ed
+    // on the old medium default). Leave reasoning_effort off the wire.
     expect(resolveModelRuntimePolicy({
       model: "deepseek-r1",
       requestedEffort: "auto",
-    }).effort).toBe("medium");
+    }).effort).toBeUndefined();
     expect(resolveModelRuntimePolicy({
       model: "z-ai/glm-5.2",
       requestedEffort: "auto",
       capabilities: { reasoningSupported: false, supportedEfforts: [], defaultEffort: "auto" },
-    }).effort).toBe("medium");
+    }).effort).toBeUndefined();
     expect(resolveModelRuntimePolicy({
       model: "blackbox/kimi-k3",
       requestedEffort: "auto",
       capabilities: { reasoningSupported: false },
-    }).effort).toBe("medium");
+    }).effort).toBeUndefined();
+    // Explicit pick also omitted when the catalog lists no levels.
+    expect(resolveModelRuntimePolicy({
+      model: "reasoner",
+      requestedEffort: "medium",
+      capabilities: { reasoningSupported: true, supportedEfforts: [], defaultEffort: "auto" },
+    }).effort).toBeUndefined();
   });
 
   it("keeps tools enabled when catalog support is unknown and disables only explicit false", () => {

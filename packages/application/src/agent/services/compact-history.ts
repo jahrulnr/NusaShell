@@ -28,6 +28,9 @@ import type { AgentMessage } from "../ports/agent-provider.port.js";
 export const SUMMARY_PREFIX =
   "Another language model started to solve this problem and produced a summary of its thinking process. You also have access to the state of the tools that were used by that language model. Use this to build on the work that has already been done and avoid duplicating work. Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:";
 
+/** Marker for shell-generated dynamic state attached as a hidden user message. */
+export const RUNTIME_CONTEXT_PREFIX = "[NUSASHELL RUNTIME CONTEXT]";
+
 /** Legacy NusaShell prefix — accepted by `isSummaryMessage` for one release. */
 const LEGACY_SUMMARY_PREFIX = "Conversation summary:";
 
@@ -47,6 +50,11 @@ export function isSummaryMessage(content: string): boolean {
   if (content.startsWith(SUMMARY_PREFIX)) return true;
   if (content.startsWith(LEGACY_SUMMARY_PREFIX)) return true;
   return false;
+}
+
+/** Runtime bootstrap is state, never a real user request to retain verbatim. */
+export function isRuntimeContextMessage(content: string): boolean {
+  return content.startsWith(RUNTIME_CONTEXT_PREFIX);
 }
 
 /**
@@ -73,7 +81,7 @@ export function collectUserMessages(messages: readonly AgentMessage[]): string[]
     if (message.role !== "user") continue;
     const text = userMessageText(message);
     if (text === undefined) continue;
-    if (isSummaryMessage(text)) continue;
+    if (isSummaryMessage(text) || isRuntimeContextMessage(text)) continue;
     collected.push(text);
   }
   return collected;

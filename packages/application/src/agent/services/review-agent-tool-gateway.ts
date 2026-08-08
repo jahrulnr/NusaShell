@@ -12,14 +12,15 @@ const REVIEW_WHITELIST = new Set([
 
 /**
  * Restricted gateway for background review turns. Only allows the memory and
- * skill meta-tools; all MCP/plugin tools are denied. Sets writeOrigin to
- * background_review for the duration of each execute call.
+ * skill meta-tools; all MCP/plugin tools are denied. Marks the entire turn as
+ * background_review using turn-scoped context, so concurrent foreground turns
+ * cannot inherit a mutable global write origin.
  */
 export class ReviewAgentToolGateway implements AgentToolGateway {
   constructor(private readonly inner: McpAgentToolGateway) {}
 
   beginTurn(turnId: string, context?: AgentTurnContext): void {
-    this.inner.beginTurn(turnId, context);
+    this.inner.beginTurn(turnId, { ...context, writeOrigin: "background_review" });
   }
 
   endTurn(turnId: string): void {
@@ -49,12 +50,6 @@ export class ReviewAgentToolGateway implements AgentToolGateway {
     if (!REVIEW_WHITELIST.has(name)) {
       throw new Error(`Tool "${name}" is not allowed in background review`);
     }
-    const prev = this.inner.getWriteOrigin();
-    this.inner.setWriteOrigin("background_review");
-    try {
-      return await this.inner.execute(name, args, requestId, turnId, callId);
-    } finally {
-      this.inner.setWriteOrigin(prev);
-    }
+    return this.inner.execute(name, args, requestId, turnId, callId);
   }
 }

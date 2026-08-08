@@ -19,10 +19,15 @@ export function registerAgentIpc(ctx: IpcContext): void {
   ipcMain.handle("agent-conversations:get", (_event, id: string) => store().get(id));
   ipcMain.handle("agent-conversations:append", (_event, id: string, message: AgentConversationMessage) =>
     store().appendMessage(id, message));
+  ipcMain.handle("agent-conversations:reserve-assistant", (_event, id: string, traceId: string, options?: { replaceLastInterrupted?: boolean }) =>
+    store().reserveAssistant(id, traceId, options));
+  ipcMain.handle("agent-conversations:seal-assistant", (_event, id: string, traceId: string, message: AgentConversationMessage) =>
+    store().sealAssistant(id, traceId, message));
   ipcMain.handle("agent-conversations:checkpoint", (_event, id: string, checkpoint: AgentConversationCheckpoint) =>
     store().saveCheckpoint(id, checkpoint));
   ipcMain.handle("agent-conversations:delete", (_event, id: string) => {
     ctx.agentToolGateway.endConversation?.(id);
+    ctx.conversationTodos?.clear(id);
     return store().delete(id);
   });
   ipcMain.handle("agent-conversations:replace-interrupted", (_event, id: string, message: AgentConversationMessage) =>

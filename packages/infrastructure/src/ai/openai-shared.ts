@@ -1,4 +1,4 @@
-import type { AgentContentPart, AgentMessage, AgentTokenUsage, AgentToolCall } from "@nusashell/application";
+import type { AgentContentPart, AgentMessage, AgentTokenUsage, AgentToolArgumentError, AgentToolCall } from "@nusashell/application";
 import type { ProviderApi } from "./openai-api-strategy.js";
 
 export const transientStatuses = new Set([408, 409, 413, 425, 429, 500, 501, 502, 503, 504]);
@@ -113,24 +113,113 @@ export function parseToolCall(value: unknown): AgentToolCall {
   const call = requireRecord(value, "Provider returned an invalid tool call");
   const fn = requireRecord(call.function, "Provider returned an invalid tool call");
   if (typeof fn.name !== "string") throw new Error("Provider returned an invalid tool call");
+  const argumentsResult = parseToolArgumentsWithRecovery(fn.arguments);
   return {
     id: typeof call.id === "string" ? call.id : `call_chat_${Math.random().toString(36).slice(2)}`,
     name: fn.name,
-    args: parseToolArguments(fn.arguments),
+    args: argumentsResult.args,
+    ...(argumentsResult.argumentError ? { argumentError: argumentsResult.argumentError } : {}),
   };
 }
 
 export function parseToolArguments(value: unknown): Record<string, unknown> {
-  if (isRecord(value)) return value;
-  if (typeof value !== "string" || !value.trim()) return {};
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    throw new Error("Provider returned invalid JSON tool arguments");
+  const result = parseToolArgumentsWithRecovery(value);
+  if (result.argumentError) throw new Error("Provider returned invalid JSON tool arguments");
+  return result.args;
+}
+
+export function parseToolArgumentsWithRecovery(value: unknown): {
+  readonly args: Record<string, unknown>;
+  readonly argumentError?: AgentToolArgumentError;
+} {
+  if (isRecord(value)) return { args: value };
+  if (value === undefined || value === null) return { args: {} };
+  if (typeof value !== "string") {
+    return {
+      args: {},
+      argumentError: {
+        code: "TOOL_ARGUMENTS_INVALID_JSON",
+        message: "Tool call arguments were not a JSON object and were not executed. Re-issue this same tool call with exactly one JSON object matching its input schema.",
+      },
+    };
   }
-  if (!isRecord(parsed)) throw new Error("Provider tool arguments must be an object");
-  return parsed;
+  if (!value.trim()) return { args: {} };
+
+  const direct = parseObject(value);
+  if (direct) return { args: direct };
+
+  for (const candidate of repairableJsonCandidates(value)) {
+    const repaired = parseObject(candidate);
+    if (repaired) return { args: repaired };
+  }
+
+  return {
+    args: {},
+    argumentError: {
+      code: "TOOL_ARGUMENTS_INVALID_JSON",
+      message: "Tool call arguments were not valid JSON and were not executed. Re-issue this same tool call with exactly one JSON object matching its input schema; do not include markdown fences, comments, or prose.",
+    },
+  };
+}
+
+function parseObject(value: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(value);
+    return isRecord(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Repairs only syntax wrappers; it never inserts missing values or brackets. */
+function repairableJsonCandidates(value: string): readonly string[] {
+  const trimmed = value.trim();
+  const candidates = new Set<string>();
+  const add = (candidate: string) => {
+    const normalized = candidate.trim();
+    if (normalized && normalized !== trimmed) candidates.add(normalized);
+  };
+
+  const fenced = trimmed.match(/^```(?:json)?\s*\n([\s\S]*?)\n?```$/i);
+  if (fenced?.[1]) add(fenced[1]);
+  try {
+    const decoded = JSON.parse(trimmed);
+    if (typeof decoded === "string") add(decoded);
+  } catch {
+    // The direct parse above already establishes that this is malformed.
+  }
+  for (const candidate of [...candidates, trimmed]) {
+    add(stripTrailingCommas(candidate));
+  }
+  return [...candidates];
+}
+
+function stripTrailingCommas(value: string): string {
+  let output = "";
+  let quoted = false;
+  let escaped = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index]!;
+    if (quoted) {
+      output += char;
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+      continue;
+    }
+    if (char === '"') {
+      quoted = true;
+      output += char;
+      continue;
+    }
+    if (char === ",") {
+      let next = index + 1;
+      while (next < value.length && /\s/.test(value[next]!)) next += 1;
+      if (value[next] === "}" || value[next] === "]") continue;
+    }
+    output += char;
+  }
+  return output;
 }
 
 export function parseUsage(value: unknown): AgentTokenUsage | undefined {

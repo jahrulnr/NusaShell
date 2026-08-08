@@ -7,6 +7,10 @@ import { sendRequest, onEvent } from "./ws-client.js";
 import { confirmDialog } from "./ui-dialogs.js";
 import { renderJobOutputMarkdown } from "./agent-conversation-ui.js";
 
+/** Tooltip for paused pipelines that remain manually runnable. */
+const PAUSED_MANUAL_RUN_HINT =
+  "Paused — runs won't fire automatically, but you can run it now";
+
 function describeScheduleKey(schedule) {
   if (!schedule || typeof schedule !== "object") return "";
   if (schedule.kind === "interval") {
@@ -134,6 +138,9 @@ export class PipelinesController {
     this.els.modalClose?.addEventListener("click", () => this.closeModal());
     this.els.modalCancel?.addEventListener("click", () => this.closeModal());
     this.els.modalSave?.addEventListener("click", () => this.savePipeline());
+    this.els.modal?.addEventListener("click", (event) => {
+      if (event.target === this.els.modal) this.closeModal();
+    });
     this.els.fieldTriggerKind?.addEventListener("change", () => this._toggleTriggerFields());
     this.els.addStepBtn?.addEventListener("click", () => this._addStepRow());
     this.els.detailsClose?.addEventListener("click", () => this.closeDetails());
@@ -208,6 +215,26 @@ export class PipelinesController {
     if (this.els.detailsRun) {
       this.els.detailsRun.textContent = "▶ Run now";
       this.els.detailsRun.disabled = false;
+      this._applyPausedRunAffordance(this.els.detailsRun, this._detailsPipeline?.enabled !== false);
+    }
+  }
+
+  /**
+   * Shared Run-now affordance: always enabled unless a run is in progress.
+   * When paused (enabled === false), explain that manual run still works.
+   * @param {HTMLButtonElement | null | undefined} button
+   * @param {boolean} enabled pipeline.enabled
+   * @param {boolean} [running]
+   */
+  _applyPausedRunAffordance(button, enabled, running = false) {
+    if (!button) return;
+    button.disabled = Boolean(running);
+    if (!enabled && !running) {
+      button.title = PAUSED_MANUAL_RUN_HINT;
+      button.setAttribute("aria-description", PAUSED_MANUAL_RUN_HINT);
+    } else {
+      button.removeAttribute("title");
+      button.removeAttribute("aria-description");
     }
   }
 
@@ -297,8 +324,10 @@ export class PipelinesController {
         </div>
       </div>
     `;
+    const runBtn = card.querySelector('[data-action="run"]');
+    this._applyPausedRunAffordance(runBtn, pipeline.enabled !== false);
     card.querySelector('[data-action="details"]').addEventListener("click", () => this.openDetails(pipeline));
-    card.querySelector('[data-action="run"]').addEventListener("click", () => this._runPipeline(pipeline.id));
+    runBtn.addEventListener("click", () => this._runPipeline(pipeline.id));
     card.querySelector('[data-action="more"]').addEventListener("click", (event) => this._openCardMenu(event, pipeline));
     return card;
   }
@@ -323,12 +352,13 @@ export class PipelinesController {
   }
 
   openModal(pipeline = null) {
+    this._lastFocus = document.activeElement;
     this.editingPipeline = pipeline;
     this.steps = pipeline ? JSON.parse(JSON.stringify(pipeline.steps)) : [];
     this.els.modalTitle.textContent = pipeline ? "Edit pipeline" : "New pipeline";
     this.els.fieldName.value = pipeline?.name ?? "";
     this.els.fieldDescription.value = pipeline?.description ?? "";
-    const kind = pipeline?.trigger?.kind === "schedule" ? "schedule" : "event";
+    const kind = pipeline?.trigger?.kind === "event" ? "event" : "schedule";
     this.els.fieldTriggerKind.value = kind;
     this._toggleTriggerFields();
     this.els.fieldSchedule.value = kind === "schedule" && pipeline?.trigger?.schedule
@@ -342,12 +372,14 @@ export class PipelinesController {
       : "";
     this._renderSteps();
     this.els.modal.classList.add("active");
+    this.els.fieldName?.focus();
   }
 
   closeModal() {
     this.els.modal.classList.remove("active");
     this.editingPipeline = null;
     this.steps = [];
+    this._restoreFocus();
   }
 
   _renderSteps() {
@@ -383,7 +415,7 @@ export class PipelinesController {
       <div class="pipeline-step-tool" ${step.action?.type !== "tool" ? "hidden" : ""}>
         <label class="form-label">Plugin ID<input type="text" data-field="tool-plugin" value="${this._escapeAttr(step.action?.pluginId ?? "")}" placeholder="nusashell.mail"></label>
         <label class="form-label">Tool name<input type="text" data-field="tool-name" value="${this._escapeAttr(step.action?.toolName ?? "")}" placeholder="mail_send"></label>
-        <label class="form-label">Args (JSON)<textarea rows="2" data-field="tool-args" placeholder='{"to":"x@y.com"}'>${this._escape(step.action?.args ? JSON.stringify(step.action.args, null, 2) : "")}</textarea></label>
+        <label class="form-label">Args (JSON)<textarea rows="2" data-field="tool-args" placeholder='{"to":"x@y.com"}'>${this._escape(step._toolArgsRaw ?? (step.action?.args ? JSON.stringify(step.action.args, null, 2) : ""))}</textarea></label>
       </div>
       <label class="form-label">Depends on (step IDs)
         <select multiple data-field="depends-on">${depOptions}</select>
@@ -647,7 +679,7 @@ export class PipelinesController {
       lines.push(`Next run — ${new Date(pipeline.nextRunAt).toLocaleString()}`);
     }
     if (this._detailsRunId) lines.push(`Run id — ${this._detailsRunId}`);
-    if (!pipeline.enabled) lines.push("disabled");
+    if (!pipeline.enabled) lines.push(PAUSED_MANUAL_RUN_HINT);
     this.els.detailsMeta.replaceChildren();
     for (const line of lines) {
       const span = document.createElement("span");
@@ -665,7 +697,8 @@ export class PipelinesController {
 
     this.els.detailsRun.textContent = "▶ Run now";
     const running = pipeline.lastStatus === "running" || this._activeRunByPipeline.has(pipeline.id);
-    this.els.detailsRun.disabled = running || !pipeline.enabled;
+    // Paused pipelines stay manually runnable; only block while a run is in flight.
+    this._applyPausedRunAffordance(this.els.detailsRun, pipeline.enabled !== false, running);
     if (this.els.detailsCancel) this.els.detailsCancel.hidden = !running;
     this.els.detailsModal.classList.add("active");
   }
@@ -813,6 +846,7 @@ export class PipelinesController {
     this._detailsLatestRun = null;
     this._detailsStepId = null;
     this._liveStepStatus.clear();
+    this._restoreFocus();
     if (this.els.detailsRun) this.els.detailsRun.disabled = false;
     if (this._runRefreshTimer) {
       clearTimeout(this._runRefreshTimer);
@@ -904,5 +938,12 @@ export class PipelinesController {
 
   _escapeAttr(str) {
     return this._escape(str).replace(/"/g, "&quot;");
+  }
+
+  _restoreFocus() {
+    if (this._lastFocus && typeof this._lastFocus.focus === "function") {
+      this._lastFocus.focus();
+      this._lastFocus = null;
+    }
   }
 }

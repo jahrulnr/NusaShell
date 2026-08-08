@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { FILES_TOOL_NAMES } from "./tool-catalog.js";
 import { ContextEngine } from "./context-engine.js";
+import { RetrievalEngine } from "./search-relevant.js";
 
 const filePath = z.string().trim().min(1).max(4096);
 const rootPath = z.string().trim().min(0).max(4096).default("");
@@ -85,6 +86,7 @@ const schemas = {
     budget: contextBudget,
     activeFile: z.string().trim().min(1).max(4096).optional(),
     query: z.string().trim().min(1).max(500).optional(),
+    role: z.enum(["planner", "executor", "reviewer"]).optional(),
     maxFiles: contextMaxFiles,
     refresh: z.boolean().default(false),
   }).strict(),
@@ -93,6 +95,12 @@ const schemas = {
     path: filePath.optional(),
     query: z.string().trim().min(1).max(500).optional(),
     limit: listSymbolsLimit,
+  }).strict(),
+  search_relevant: z.object({
+    query: z.string().trim().min(1).max(500),
+    topK: clampedInt(1, 20, 5),
+    path: rootPath,
+    refresh: z.boolean().default(false),
   }).strict(),
 };
 
@@ -113,7 +121,7 @@ export const FILES_TOOLS = Object.freeze([
     start: integerProperty(1, 100000, undefined, "1-based start line (inclusive). Takes priority over head/tail."),
     end: integerProperty(1, 100000, undefined, "1-based end line (inclusive). Takes priority over head/tail."),
     lineNumbers: { type: "boolean", description: "Prefix each line with its 1-based line number (NNN|content).", default: false },
-    maxBytes: integerProperty(1, 104857600, 10485760, "Maximum file size in bytes (default 10 MB)."),
+    maxBytes: integerProperty(1, 104857600, 10485760, "Maximum UTF-8 bytes returned in content; larger text files are truncated (default 10 MB)."),
   }, ["path"]),
   descriptor("write", "Create or overwrite a file. Parent directories are created automatically.", {
     path: stringProperty("File path relative to the files plugin root (user home by default)."),
@@ -179,11 +187,16 @@ export const FILES_TOOLS = Object.freeze([
     createParents: { type: "boolean", description: "Create parent directories if needed (default true).", default: true },
     updateOnly: { type: "boolean", description: "Only update timestamps of an existing file; throw if it doesn't exist.", default: false },
   }, ["path"], false),
-  descriptor("context_map", "Build a token-budgeted markdown map of the workspace: stack classification, the top files ranked by Personalized PageRank over the symbol reference graph, and elided signatures (bodies replaced with ⋮). Deterministic — no LLM calls. Call this first when orienting in an unfamiliar codebase or before planning edits. Symbol tags are cached by file mtime/size across calls; pass refresh=true only after large external changes. Returns { map, stack, ranks, stats }.", {
+  descriptor("context_map", "Build a token-budgeted markdown map of the workspace: stack classification, the top files ranked by Personalized PageRank over the symbol reference graph, and elided signatures (bodies replaced with ⋮). Deterministic — no LLM calls. Optional role (planner|executor|reviewer) enables role-aware token budgeting and ranking (docs for planner, implementation for executor, tests/conventions for reviewer); omit role for legacy behavior. Symbol tags are cached by file mtime/size across calls; pass refresh=true only after large external changes. Returns { map, stack, ranks, stats } and roleScores when role is set.", {
     path: stringProperty("Directory to map, relative to the files plugin root. Empty string maps the whole root.", ""),
-    budget: integerProperty(64, 8192, 1024, "Approximate token budget for the markdown map (~4 chars/token). The top-ranked files are binary-searched to fit."),
+    budget: integerProperty(64, 8192, 1024, "Approximate token budget for the markdown map (~4 chars/token). The top-ranked files are binary-searched to fit. When role is set, an effective budget is derived from this base without changing the public budget argument."),
     activeFile: { type: "string", description: "Workspace-relative file currently in focus; boosted 50x in Personalized PageRank so its dependency neighborhood ranks higher." },
     query: { type: "string", description: "Space-separated symbol-name terms; files defining matching symbols get a 10x rank boost." },
+    role: {
+      type: "string",
+      enum: ["planner", "executor", "reviewer"],
+      description: "Optional agent role for RCR-style budgeting and ranking. planner favors docs/AGENTS; executor favors non-test source; reviewer favors tests and conventions. Omit for legacy maps.",
+    },
     maxFiles: integerProperty(1, 20000, undefined, "Scan cap for walked code/doc files (default 20000). .gitignore/.ignore and common build dirs are always excluded."),
     refresh: { type: "boolean", description: "Bypass the mtime/size symbol cache and re-extract every file.", default: false },
   }),
@@ -195,13 +208,19 @@ export const FILES_TOOLS = Object.freeze([
     query: { type: "string", description: "Case-insensitive symbol-name filter; returns matching definitions from the top PageRanked files. Required when path is omitted." },
     limit: integerProperty(1, 100, 20, "Maximum number of files returned in query mode."),
   }),
+  descriptor("search_relevant", "Semantic code search: retrieve the most relevant files/chunks for a query using hybrid retrieval (BM25 + TF-IDF dense proxy fused with Reciprocal Rank Fusion, reranked by a cross-encoder proxy). Deterministic and cached by file mtime+size; pass refresh=true to bypass the chunk cache. Returns { query, results: [{ path, line, lineEnd, score, snippet }], meta }.", {
+    query: stringProperty("Search query — plain-text description of the code/symbols you are looking for (e.g. \"plugin runtime lifecycle\")."),
+    topK: integerProperty(1, 20, 5, "Maximum number of results to return (1-20)."),
+    path: stringProperty("Directory to scope the search to, relative to the files plugin root. Empty string searches the whole root.", ""),
+    refresh: { type: "boolean", description: "Bypass the mtime/size chunk cache and re-index the workspace.", default: false },
+  }, ["query"]),
 ]);
 
 if (FILES_TOOLS.map((tool) => tool.name).join(",") !== FILES_TOOL_NAMES.join(",")) {
   throw new Error("Files tool descriptors are out of sync with the canonical catalog");
 }
 
-export async function callFilesTool(service, name, rawArguments = {}, contextEngine = null) {
+export async function callFilesTool(service, name, rawArguments = {}, contextEngine = null, retrievalEngine = null) {
   const schema = schemas[name];
   if (!schema) throw new Error(`Unknown files tool: ${name}`);
   const input = schema.parse(rawArguments ?? {});
@@ -212,6 +231,14 @@ export async function callFilesTool(service, name, rawArguments = {}, contextEng
   function getContextEngine() {
     if (!engine) engine = new ContextEngine(service.root);
     return engine;
+  }
+
+  // Same pattern for the retrieval engine: the server injects one so the
+  // mtime chunk cache survives across search_relevant calls.
+  let retrieval = retrievalEngine;
+  function getRetrievalEngine() {
+    if (!retrieval) retrieval = new RetrievalEngine(service.root);
+    return retrieval;
   }
 
   switch (name) {
@@ -271,6 +298,7 @@ export async function callFilesTool(service, name, rawArguments = {}, contextEng
         budget: input.budget,
         activeFile: input.activeFile,
         query: input.query,
+        role: input.role,
         maxFiles: input.maxFiles,
         refresh: input.refresh,
       })) };
@@ -281,6 +309,13 @@ export async function callFilesTool(service, name, rawArguments = {}, contextEng
         path: input.path,
         query: input.query,
         limit: input.limit,
+      });
+    case "search_relevant":
+      return await getRetrievalEngine().searchRelevant({
+        query: input.query,
+        topK: input.topK,
+        path: input.path,
+        refresh: input.refresh,
       });
     default:
       throw new Error(`Unknown files tool: ${name}`);

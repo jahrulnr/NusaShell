@@ -1,7 +1,7 @@
 {
   "name": "@nusashell/desktop",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.6.1",
   "author": "Jahrulnr",
   "type": "module",
   "main": ".vite/build/main.cjs",

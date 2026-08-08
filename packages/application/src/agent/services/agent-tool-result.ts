@@ -88,6 +88,25 @@ function defaultMeta(name: string, truncated = false): AgentToolResultMeta {
   return { truncated, dataIsUntrusted: isMcpToolName(name) };
 }
 
+const UNTRUSTED_RESULT_OPEN = "<untrusted_tool_result";
+const UNTRUSTED_RESULT_CLOSE = "</untrusted_tool_result>";
+const UNTRUSTED_DELIMITER_RE = /untrusted[-_]tool[-_]result/gi;
+
+/**
+ * The provider receives tool output as text, so keep the trust boundary in
+ * that same text. This is intentionally compact: every MCP result gets clear
+ * start/end tags without spending a paragraph of prompt budget per call.
+ */
+function wrapUntrustedToolResult(toolName: string, status: AgentToolStatus, body: string): string {
+  if (!isMcpToolName(toolName)) return body;
+  const safe = body.replace(UNTRUSTED_DELIMITER_RE, "untrusted tool result");
+  return [
+    `${UNTRUSTED_RESULT_OPEN} source="${toolName}" status="${status}">`,
+    safe,
+    UNTRUSTED_RESULT_CLOSE,
+  ].join("\n");
+}
+
 // ---------------------------------------------------------------------------
 // Factories
 // ---------------------------------------------------------------------------
@@ -252,60 +271,139 @@ export function fromIngestedMcp(
 // projectModelToolResult — canonical → model-facing text string
 // ---------------------------------------------------------------------------
 
-const PROJECTED_TEXT_HEAD = 4000;
-const PROJECTED_TEXT_TAIL = 4000;
 const PROJECTED_STRUCTURED_MAX = 50_000;
+/** Shared with the durable conversation card cap in desktop. */
+export const MODEL_TOOL_OUTPUT_MAX_CHARS = 12_000;
 
 export function projectModelToolResult(result: AgentToolResult): string {
   // If already projected, reuse exact string (idempotent).
   if (result.modelOutput !== undefined) return result.modelOutput;
 
   const body = projectBody(result);
-  const projected = result.metadata.dataIsUntrusted ? body : body;
+  const projected = projectWithinOutputCap(result.toolName, result.status, body, result.metadata.dataIsUntrusted);
   result.modelOutput = projected; // cache on first projection
   return projected;
+}
+
+function projectWithinOutputCap(toolName: string, status: AgentToolStatus, body: string, untrusted: boolean): string {
+  const wrap = (value: string) => untrusted ? wrapUntrustedToolResult(toolName, status, value) : value;
+  const full = wrap(body);
+  if (full.length <= MODEL_TOOL_OUTPUT_MAX_CHARS) return full;
+
+  // Clamp the raw body first, then rebuild the XML boundary. This keeps the
+  // close tag intact and makes the capped string safe to persist verbatim.
+  const overhead = wrap("").length;
+  const bodyBudget = Math.max(0, MODEL_TOOL_OUTPUT_MAX_CHARS - overhead);
+  const limited = truncateToolResultText(body, bodyBudget);
+  const projected = wrap(limited);
+  return projected.length <= MODEL_TOOL_OUTPUT_MAX_CHARS
+    ? projected
+    : wrap(truncateToolResultText(limited, Math.max(0, bodyBudget - (projected.length - MODEL_TOOL_OUTPUT_MAX_CHARS))));
 }
 
 function projectBody(result: AgentToolResult): string {
   if (result.status === "success") {
     const textPart = result.content.find((c) => c.type === "text");
     if (textPart && textPart.type === "text" && !result.structuredContent) {
-      // Text/command path: labeled envelope.
-      return projectTextEnvelope(textPart.text, result.metadata);
+      // Text/command path: the MCP text part is already the actual terminal
+      // result. Preserve it verbatim; the untrusted envelope is the only
+      // model-facing framing it needs.
+      return textPart.text;
     }
-    // Structured path: deterministic JSON.
+    // Structured path: compact terminal-like key/value and table output.
     const data = result.structuredContent ?? result.content.find((c) => c.type === "json")?.data;
-    const serialized = safeJsonStringify(data, PROJECTED_STRUCTURED_MAX);
-    return `{"ok":true,"data":${serialized},"meta":${JSON.stringify({
-      truncated: result.metadata.truncated,
-      ...(result.metadata.exitCode !== undefined ? { exitCode: result.metadata.exitCode } : {}),
-      ...(result.metadata.nextCursor ? { nextCursor: result.metadata.nextCursor } : {}),
-    })}}`;
+    return projectStructuredEnvelope(data, result.metadata, result.metadata.dataIsUntrusted);
   }
-  // Error / cancelled / timeout → structured error envelope.
+  // Status lives on untrusted envelopes. Their body stays the real error text.
   const err = result.error ?? { code: "TOOL_FAILED", message: "Unknown error", retryable: false };
-  return `{"ok":false,"error":${JSON.stringify({
-    code: err.code,
-    message: err.message,
-    retryable: err.retryable,
-  })}}`;
+  if (result.metadata.dataIsUntrusted) return err.message;
+  return [
+    `status=${result.status}`,
+    `code=${terminalValue(err.code)}`,
+    `retryable=${err.retryable}`,
+    "",
+    "stderr:",
+    err.message,
+  ].join("\n");
 }
 
-function projectTextEnvelope(text: string, meta: AgentToolResultMeta): string {
-  const trimmed = text;
-  const limited =
-    trimmed.length > PROJECTED_TEXT_HEAD + PROJECTED_TEXT_TAIL
-      ? truncateToolResultText(trimmed, PROJECTED_TEXT_HEAD + PROJECTED_TEXT_TAIL + 100)
-      : trimmed;
-  const lines: string[] = ["Status: success"];
-  if (meta.exitCode !== undefined && meta.exitCode !== null) {
-    lines.push(`Exit code: ${meta.exitCode}`);
-  }
-  lines.push("", "Output:", limited);
-  if (meta.truncated) {
-    lines.push(`[truncated: ${meta.originalChars ?? "?"} → ${meta.returnedChars ?? limited.length} chars]`);
-  }
+function projectStructuredEnvelope(data: unknown, meta: AgentToolResultMeta, untrusted: boolean): string {
+  const lines: string[] = untrusted ? [] : ["status=success", `truncated=${meta.truncated}`];
+  if (untrusted && meta.truncated) lines.push("truncated=true");
+  if (meta.exitCode !== undefined && meta.exitCode !== null) lines.push(`exit_code=${meta.exitCode}`);
+  if (meta.nextCursor) lines.push(`next_cursor=${terminalValue(meta.nextCursor)}`);
+  const rendered = formatTerminalData(data);
+  if (!rendered) return lines.join("\n");
+  return lines.length > 0 ? [...lines, "", rendered].join("\n") : rendered;
+}
+
+function formatTerminalData(data: unknown): string {
+  const lines: string[] = [];
+  appendTerminalValue(lines, data, "data");
   return lines.join("\n");
+}
+
+function appendTerminalValue(lines: string[], value: unknown, path: string): void {
+  if (value === null || typeof value !== "object") {
+    lines.push(`${path}=${terminalValue(value)}`);
+    return;
+  }
+  if (Array.isArray(value)) {
+    appendTerminalArray(lines, value, path);
+    return;
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length === 0) {
+    lines.push(`${path}={}`);
+    return;
+  }
+  for (const [key, entry] of entries) {
+    appendTerminalValue(lines, entry, path === "data" ? terminalKey(key) : `${path}.${terminalKey(key)}`);
+  }
+}
+
+function appendTerminalArray(lines: string[], values: readonly unknown[], path: string): void {
+  if (values.length === 0) {
+    lines.push(`${path}=[]`);
+    return;
+  }
+  if (values.every((value) => value === null || typeof value !== "object")) {
+    lines.push(`${path}[${values.length}]`);
+    for (const value of values) lines.push(`- ${terminalValue(value)}`);
+    return;
+  }
+  const table = terminalTable(values);
+  if (table) {
+    lines.push(`${path}[${values.length}]`, table.header, ...table.rows);
+    return;
+  }
+  const serialized = safeJsonStringify(values, PROJECTED_STRUCTURED_MAX);
+  lines.push(`${path}=${serialized}`);
+}
+
+function terminalTable(values: readonly unknown[]): { readonly header: string; readonly rows: readonly string[] } | undefined {
+  if (!values.every((value) => value && typeof value === "object" && !Array.isArray(value))) return undefined;
+  const records = values as readonly Record<string, unknown>[];
+  const columns = Object.keys(records[0] ?? {});
+  if (columns.length === 0 || !records.every((record) => Object.keys(record).length === columns.length && columns.every((key) => key in record))) return undefined;
+  if (!records.every((record) => columns.every((key) => record[key] === null || typeof record[key] !== "object"))) return undefined;
+  return {
+    header: columns.map(terminalKey).join("\t"),
+    rows: records.map((record) => columns.map((key) => terminalValue(record[key])).join("\t")),
+  };
+}
+
+function terminalKey(key: string): string {
+  return /^[A-Za-z_][A-Za-z0-9_.-]*$/.test(key) ? key : JSON.stringify(key);
+}
+
+function terminalValue(value: unknown): string {
+  if (typeof value === "string") {
+    return /^[A-Za-z0-9_./:@%+=,-]+$/.test(value) ? value : JSON.stringify(value);
+  }
+  if (value === undefined) return "undefined";
+  if (typeof value === "number" || typeof value === "boolean" || value === null) return String(value);
+  return safeJsonStringify(value, PROJECTED_STRUCTURED_MAX);
 }
 
 function safeJsonStringify(data: unknown, maxChars: number): string {

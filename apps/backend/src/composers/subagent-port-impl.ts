@@ -59,7 +59,11 @@ export class SubagentPortImpl implements SubagentPort {
       request.conversationId,
       request.providerId,
       promptText,
-      { ...(request.title ? { title: request.title } : {}) },
+      {
+        ...(request.title ? { title: request.title } : {}),
+        ...(request.parentConversationId ? { parentConversationId: request.parentConversationId } : {}),
+        ...(request.parentTraceId ? { parentTraceId: request.parentTraceId } : {}),
+      },
     ));
 
     const textChunks: string[] = [];

@@ -16,7 +16,10 @@ export async function runAgentTurn(messages, options, aiSettings) {
   // Ticket #38: prefer an explicit per-conversation model binding threaded from
   // the caller (options.modelKey); fall back to the global active model.
   const modelKey = options.modelKey || aiSettings.activeModelKey;
-  const effort = options.effort || aiSettings.effort;
+  // Effort is room-threaded by the conversation controller. Do not fall back to
+  // aiSettings.effort — that is a settings-page default and must not leak across
+  // rooms (symmetric with resolveRoomEffort / ticket #38).
+  const effort = options.effort || "auto";
   const selected = aiSettings.models.find((model) => model.key === modelKey);
   if (!selected) throw new Error("Choose an imported AI model before sending a turn.");
 
@@ -34,6 +37,8 @@ export async function runAgentTurn(messages, options, aiSettings) {
       ...(options.resume ? { resume: true } : {}),
       ...(options.supersedeTraceId ? { supersedeTraceId: options.supersedeTraceId } : {}),
       ...(options.conversationId ? { conversationId: options.conversationId } : {}),
+      ...(options.messageId ? { messageId: options.messageId } : {}),
+      ...(options.messagePosition ? { messagePosition: options.messagePosition } : {}),
       ...(options.autoContinueIndex ? { autoContinueIndex: options.autoContinueIndex } : {}),
       modelCapabilities: {
         contextWindow: selected.contextWindow,

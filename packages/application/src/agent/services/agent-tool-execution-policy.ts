@@ -17,10 +17,22 @@ import {
   unknownToolExecution,
 } from "./agent-turn-utils.js";
 import {
+  errorToolResult,
+  fromIngestedMcp,
   successToolResult,
   fromThrownError,
+  ingestMcpToolResult,
   projectModelToolResult,
+  type McpRawResult,
 } from "./agent-tool-result.js";
+
+function isMcpRawResult(value: unknown): value is McpRawResult {
+  if (!value || typeof value !== "object") return false;
+  const raw = value as Record<string, unknown>;
+  return Array.isArray(raw.content)
+    || typeof raw.isError === "boolean"
+    || Object.prototype.hasOwnProperty.call(raw, "structuredContent");
+}
 
 /**
  * Tool execution policy — dispatches a round's tool-call batch with
@@ -84,6 +96,17 @@ export class ToolExecutionPolicy {
     round: number,
     signal?: AbortSignal,
   ): Promise<AgentToolExecution> {
+    if (call.argumentError) {
+      this.logger?.warn("Agent tool call arguments rejected traceId=%s tool=%s round=%d code=%s", traceId, call.name, round, call.argumentError.code);
+      const toolResult = errorToolResult(
+        call.id,
+        call.name,
+        call.argumentError.code,
+        call.argumentError.message,
+        true,
+      );
+      return { id: call.id, name: call.name, ok: false, args: call.args, error: call.argumentError.message, toolResult };
+    }
     if (!isToolAllowed(call, toolsByName) && !isLazyResolvableMcpToolName(call.name)) {
       this.logger?.warn("Agent MCP tool soft-rejected (unknown) traceId=%s tool=%s round=%d", traceId, call.name || "(missing)", round);
       return unknownToolExecution(call, toolsByName);
@@ -93,7 +116,12 @@ export class ToolExecutionPolicy {
     try {
       const result = await this.toolGateway.execute(call.name, call.args, requestId, traceId, call.id, signal ? { signal } : undefined);
       this.logger?.info("Agent MCP tool completed traceId=%s tool=%s round=%d", traceId, call.name, round);
-      const toolResult = successToolResult(call.id, call.name, result);
+      // Plugin MCP calls return the protocol's CallToolResult shape. Ingest
+      // its text content before projection so terminal output is not treated
+      // as a generic object and rendered again as `content[1] type text`.
+      const toolResult = isMcpRawResult(result)
+        ? fromIngestedMcp(call.id, call.name, ingestMcpToolResult(result))
+        : successToolResult(call.id, call.name, result);
       return { id: call.id, name: call.name, ok: true, args: call.args, result, toolResult };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Tool execution failed";
@@ -111,7 +139,10 @@ export class ToolExecutionPolicy {
   ): Promise<AgentToolExecution> {
     assertTurnActive(ctx.signal, ctx.traceId);
     ctx.onToolCallStart?.(call);
-    const execution = await this.executeTool(call, ctx.toolsByName, ctx.traceId, ctx.round, ctx.signal);
+    const execution = this.withModelOutput(
+      await this.executeTool(call, ctx.toolsByName, ctx.traceId, ctx.round, ctx.signal),
+      call,
+    );
     ctx.onToolCallEnd?.(execution);
     return execution;
   }
@@ -129,9 +160,14 @@ export class ToolExecutionPolicy {
       try {
         assertTurnActive(ctx.signal, ctx.traceId);
       } catch {
-        return { index, execution: cancelledExecution(call) };
+        const execution = this.withModelOutput(cancelledExecution(call), call);
+        ctx.onToolCallEnd?.(execution);
+        return { index, execution };
       }
-      const execution = await this.executeTool(call, ctx.toolsByName, ctx.traceId, ctx.round, ctx.signal);
+      const execution = this.withModelOutput(
+        await this.executeTool(call, ctx.toolsByName, ctx.traceId, ctx.round, ctx.signal),
+        call,
+      );
       ctx.onToolCallEnd?.(execution);
       return { index, execution };
     });
@@ -143,7 +179,7 @@ export class ToolExecutionPolicy {
       if (!ordered[i]) {
         const call = calls[i];
         if (!call) continue;
-        const stub = cancelledExecution(call);
+        const stub = this.withModelOutput(cancelledExecution(call), call);
         ordered[i] = stub;
         ctx.onToolCallEnd?.(stub);
       }
@@ -158,11 +194,15 @@ export class ToolExecutionPolicy {
     roundExecutions: AgentToolExecution[],
     messages: AgentMessage[],
   ): void {
-    toolCalls.push(execution);
-    roundExecutions.push(execution);
-    const content = execution.toolResult
+    const content = execution.modelOutput ?? (execution.toolResult
       ? projectModelToolResult(execution.toolResult)
-      : serializeToolResult(execution, call.name);
+      : serializeToolResult(execution, call.name));
+    // The final transcript must retain exactly the string that becomes the
+    // provider's role:"tool" message; this keeps UI and rehydrated context in
+    // lockstep with the live round.
+    const persistedExecution = { ...execution, modelOutput: content };
+    toolCalls.push(persistedExecution);
+    roundExecutions.push(persistedExecution);
     const toolIsError = execution.toolResult
       ? execution.toolResult.status !== "success"
       : !execution.ok;
@@ -173,5 +213,17 @@ export class ToolExecutionPolicy {
       content,
       ...(toolIsError ? { toolIsError: true } : {}),
     });
+  }
+
+  /**
+   * Produce the provider-facing representation before live observers run.
+   * This keeps event cards, active-turn recovery, persisted history, and the
+   * next provider round on one byte-identical output contract.
+   */
+  private withModelOutput(execution: AgentToolExecution, call: AgentToolCall): AgentToolExecution {
+    const modelOutput = execution.modelOutput ?? (execution.toolResult
+      ? projectModelToolResult(execution.toolResult)
+      : serializeToolResult(execution, call.name));
+    return { ...execution, modelOutput };
   }
 }

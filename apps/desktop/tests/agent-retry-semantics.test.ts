@@ -92,6 +92,76 @@ describe("AgentConversationController — Retry semantics (ticket #45)", () => {
     expect(cls.retryable).toBe(true);
   });
 
+  it("does not offer retry for non-transient provider 4xx responses", () => {
+    const cls = classifyTurnError({
+      code: "AGENT_PROVIDER_FAILED",
+      message: "AI provider request failed: Provider returned HTTP 402: payment required",
+      details: { cause: "Provider returned HTTP 402: payment required" },
+    });
+    expect(cls.category).toBe("client_error");
+    expect(cls.retryable).toBe(false);
+    expect(cls.label).toBe("");
+  });
+
+  it("clears only the visible room failure action", () => {
+    const { controller } = makeController();
+    controller.conversation = { id: "room-a", messages: [{ role: "user", content: "a" }] } as never;
+    const roomA = controller.appendMessage("assistant", "A failed", { error: true, retry: true });
+    controller.conversation = { id: "room-b", messages: [{ role: "user", content: "b" }] } as never;
+    const roomB = controller.appendMessage("assistant", "B failed", { error: true, retry: true });
+
+    controller.clearVisibleFailureMessage("room-b");
+
+    expect(roomA?.isConnected).toBe(true);
+    expect(roomB?.isConnected).toBe(false);
+  });
+
+  it("durably repairs a trailing user message after a renderer restart", async () => {
+    const append = vi.fn(async (_conversationId: string, message: unknown) => ({
+      id: "room-a",
+      messages: [
+        { role: "user", content: "unfinished" },
+        message,
+      ],
+    }));
+    const controller = makeController({
+      shell: {
+        agentConversations: {
+          get: vi.fn(async () => ({ id: "room-a", messages: [{ role: "user", content: "unfinished" }] })),
+          append,
+        },
+      },
+    }).controller;
+    controller.conversation = { id: "room-a", messages: [{ role: "user", content: "unfinished" }] } as never;
+
+    controller.detectOrphanedTurn();
+    await vi.waitFor(() => expect(append).toHaveBeenCalled());
+
+    expect(append.mock.calls[0][1]).toMatchObject({
+      status: "interrupted",
+      retryOnly: true,
+      interruptReason: "provider",
+    });
+    expect(document.querySelector(".agent-retry-btn")?.textContent).toBe("Retry");
+  });
+
+  it("does not keep an actionable button on an old interrupted message", () => {
+    const { controller } = makeController();
+    controller.conversation = {
+      id: "room-a",
+      messages: [
+        { role: "user", content: "first" },
+        { role: "assistant", content: "failed", status: "interrupted", retryOnly: true },
+        { role: "user", content: "second" },
+      ],
+    } as never;
+
+    controller.renderThread();
+
+    const interrupted = document.querySelector(".agent-message-interrupted");
+    expect(interrupted?.querySelector(".agent-retry-btn")).toBeNull();
+  });
+
   it("surfaces superseded turns without a misleading retry", async () => {
     const { controller } = makeController();
     controller.conversation = { id: "c1", messages: [{ role: "user", content: "hi" }] } as never;

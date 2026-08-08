@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { OpenAiCompatibleAgentProvider } from "../src/index.js";
+import { RuntimeHydrationBuilder } from "@nusashell/application";
 
 describe("OpenAiCompatibleAgentProvider", () => {
   it("maps tool calls through the OpenAI Responses API", async () => {
@@ -25,6 +26,10 @@ describe("OpenAiCompatibleAgentProvider", () => {
       tools: [{ name: "tool_search", inputSchema: { type: "object" } }],
       model: "gpt-5",
       effort: "high",
+      modelCapabilities: {
+        supportedEfforts: ["low", "medium", "high"],
+        reasoningSupported: true,
+      },
     });
 
     expect(fetchFn).toHaveBeenCalledWith("https://api.openai.com/v1/responses", expect.anything());
@@ -280,7 +285,29 @@ describe("OpenAiCompatibleAgentProvider", () => {
     });
   });
 
-  it("rejects malformed tool arguments before they can reach the MCP gateway", async () => {
+  it("recovers fenced tool arguments with a trailing comma", async () => {
+    const provider = new OpenAiCompatibleAgentProvider({
+      baseUrl: "https://provider.example/v1",
+      apiKey: "secret-key",
+      model: "gpt-test",
+      fetchFn: vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+        choices: [{ message: {
+          tool_calls: [{ id: "call-1", function: { name: "mcp_create_123", arguments: "```json\n{\"title\":\"Roadmap\",}\n```" } }],
+        } }],
+      }), { status: 200 })),
+    });
+
+    await expect(provider.complete({
+      traceId: "trace-1",
+      round: 1,
+      messages: [{ role: "user", content: "Create a note" }],
+      tools: [],
+    })).resolves.toMatchObject({
+      toolCalls: [{ id: "call-1", name: "mcp_create_123", args: { title: "Roadmap" } }],
+    });
+  });
+
+  it("returns an invalid tool-call marker instead of failing the whole provider response", async () => {
     const provider = new OpenAiCompatibleAgentProvider({
       baseUrl: "https://provider.example/v1",
       apiKey: "secret-key",
@@ -297,7 +324,73 @@ describe("OpenAiCompatibleAgentProvider", () => {
       round: 1,
       messages: [{ role: "user", content: "Create a note" }],
       tools: [],
-    })).rejects.toThrow("invalid JSON tool arguments");
+    })).resolves.toMatchObject({
+      toolCalls: [{
+        id: "call-1",
+        name: "mcp_create_123",
+        args: {},
+        argumentError: {
+          code: "TOOL_ARGUMENTS_INVALID_JSON",
+        },
+      }],
+    });
+  });
+
+  it("returns an invalid tool-call marker from the Responses API too", async () => {
+    const provider = new OpenAiCompatibleAgentProvider({
+      api: "responses",
+      baseUrl: "https://provider.example/v1",
+      apiKey: "secret-key",
+      model: "gpt-test",
+      fetchFn: vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+        output: [{
+          type: "function_call",
+          call_id: "call-response-invalid",
+          name: "mcp_create_123",
+          arguments: "{title: 'Roadmap'}",
+        }],
+      }), { status: 200 })),
+    });
+
+    await expect(provider.complete({
+      traceId: "trace-1",
+      round: 1,
+      messages: [{ role: "user", content: "Create a note" }],
+      tools: [],
+    })).resolves.toMatchObject({
+      toolCalls: [{
+        id: "call-response-invalid",
+        name: "mcp_create_123",
+        args: {},
+        argumentError: { code: "TOOL_ARGUMENTS_INVALID_JSON" },
+      }],
+    });
+  });
+
+  it("returns an invalid tool-call marker from the Messages API", async () => {
+    const provider = new OpenAiCompatibleAgentProvider({
+      api: "messages",
+      baseUrl: "https://provider.example/v1",
+      apiKey: "secret-key",
+      model: "claude-test",
+      fetchFn: vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+        content: [{ type: "tool_use", id: "call-message-invalid", name: "mcp_create_123", input: ["not-an-object"] }],
+      }), { status: 200 })),
+    });
+
+    await expect(provider.complete({
+      traceId: "trace-1",
+      round: 1,
+      messages: [{ role: "user", content: "Create a note" }],
+      tools: [],
+    })).resolves.toMatchObject({
+      toolCalls: [{
+        id: "call-message-invalid",
+        name: "mcp_create_123",
+        args: {},
+        argumentError: { code: "TOOL_ARGUMENTS_INVALID_JSON" },
+      }],
+    });
   });
 
   it("retries transient HTTP failures with Retry-After inside a bounded attempt budget", async () => {
@@ -456,7 +549,7 @@ describe("OpenAiCompatibleAgentProvider", () => {
     expect(body).not.toHaveProperty("tool_choice");
   });
 
-  it("enables thinking for glm even when catalog marked reasoning unsupported", async () => {
+  it("omits thinking/reasoning_effort in auto when catalog has no effort levels", async () => {
     const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       model: "glm-5.2",
       choices: [{ message: { content: "ok", reasoning_content: "plan" } }],
@@ -481,11 +574,12 @@ describe("OpenAiCompatibleAgentProvider", () => {
       },
     });
 
-    expect(JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body))).toMatchObject({
-      thinking: { type: "enabled" },
-      reasoning_effort: "medium",
-    });
-    expect(result).toMatchObject({ reasoning: "plan" });
+    const body = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body));
+    expect(body).not.toHaveProperty("thinking");
+    expect(body).not.toHaveProperty("reasoning_effort");
+    expect(body).not.toHaveProperty("reasoning");
+    // Provider may still stream reasoning_content even when we did not request effort.
+    expect(result).toMatchObject({ text: "ok", reasoning: "plan" });
   });
 
   it("maps image data URLs to Chat and Responses content parts", async () => {
@@ -800,6 +894,107 @@ describe("OpenAiCompatibleAgentProvider", () => {
 
     expect(reasoningDeltas).toEqual(["block ", "thinking"]);
     expect(result).toMatchObject({ reasoning: "block thinking" });
+  });
+
+  it("streams OpenRouter reasoning_details summaries as reasoning, not assistant text", async () => {
+    const reasoningDeltas: string[] = [];
+    const textDeltas: string[] = [];
+    const sse = [
+      'data: {"model":"m","choices":[{"delta":{"reasoning_details":[{"type":"reasoning.summary","summary":"Inspecting the tool result. "}]}}]}',
+      "",
+      'data: {"model":"m","choices":[{"delta":{"reasoning_details":[{"type":"reasoning.text","text":"I need one more check."}]}}]}',
+      "",
+      'data: {"model":"m","choices":[{"delta":{"content":"Done."},"finish_reason":"stop"}]}',
+      "",
+      "data: [DONE]",
+      "",
+    ].join("\n");
+    const provider = new OpenAiCompatibleAgentProvider({
+      baseUrl: "https://provider.example/v1",
+      fetchFn: vi.fn<typeof fetch>().mockResolvedValue(new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })),
+      stream: true,
+    });
+
+    const result = await provider.complete({
+      traceId: "trace-reasoning-details",
+      round: 1,
+      messages: [{ role: "user", content: "Hello" }],
+      tools: [],
+      model: "m",
+      onTextDelta: (delta) => { textDeltas.push(delta); },
+      onReasoningDelta: (delta) => { reasoningDeltas.push(delta); },
+    });
+
+    expect(reasoningDeltas).toEqual(["Inspecting the tool result. ", "I need one more check."]);
+    expect(textDeltas).toEqual(["Done."]);
+    expect(result).toMatchObject({ reasoning: "Inspecting the tool result. I need one more check.", text: "Done." });
+  });
+
+  it("maps non-stream OpenRouter reasoning_details without exposing encrypted blocks", async () => {
+    const provider = new OpenAiCompatibleAgentProvider({
+      baseUrl: "https://provider.example/v1",
+      fetchFn: vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+        model: "m",
+        choices: [{
+          message: {
+            content: "Done.",
+            reasoning_details: [
+              { type: "reasoning.summary", summary: "Checked the result. " },
+              { type: "reasoning.text", text: "The path is valid." },
+              { type: "reasoning.encrypted", data: "opaque" },
+            ],
+          },
+          finish_reason: "stop",
+        }],
+      }), { status: 200 })),
+      stream: false,
+    });
+
+    const result = await provider.complete({
+      traceId: "trace-non-stream-reasoning-details",
+      round: 1,
+      messages: [{ role: "user", content: "Hello" }],
+      tools: [],
+      model: "m",
+    });
+
+    expect(result).toMatchObject({ reasoning: "Checked the result. The path is valid.", text: "Done." });
+    expect(result.reasoning).not.toContain("opaque");
+  });
+
+  it("removes known model control tokens from streamed and final assistant text", async () => {
+    const textDeltas: string[] = [];
+    const sse = [
+      'data: {"model":"m","choices":[{"delta":{"content":"<|begin_of_sentence|>Visible"}}]}',
+      "",
+      'data: {"model":"m","choices":[{"delta":{"content":" answer<|end_of_sentence|>"},"finish_reason":"stop"}]}',
+      "",
+      "data: [DONE]",
+      "",
+    ].join("\n");
+    const provider = new OpenAiCompatibleAgentProvider({
+      baseUrl: "https://provider.example/v1",
+      fetchFn: vi.fn<typeof fetch>().mockResolvedValue(new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })),
+      stream: true,
+    });
+
+    const result = await provider.complete({
+      traceId: "trace-control-token",
+      round: 1,
+      messages: [{ role: "user", content: "Hello" }],
+      tools: [],
+      model: "m",
+      onTextDelta: (delta) => { textDeltas.push(delta); },
+    });
+
+    expect(textDeltas).toEqual(["Visible", " answer"]);
+    expect(result).toMatchObject({ text: "Visible answer" });
   });
 
   it("falls back once to JSON when a provider rejects streaming", async () => {
@@ -1178,5 +1373,101 @@ describe("OpenAiCompatibleAgentProvider", () => {
 
     expect(error.name).toBe("AgentProviderHttpError");
     expect(error.transient).toBe(false);
+  });
+});
+
+describe("RuntimeHydrationBuilder serializes the synthetic transcript on every wire strategy (REV2)", () => {
+  async function buildTranscript() {
+    const builder = new RuntimeHydrationBuilder({
+      mcpLive: {
+        running: [{ pluginId: "nusashell.files" }],
+        tools: [{
+          providerName: "mcp_nusashell_files_read",
+          pluginId: "nusashell.files",
+          toolName: "read",
+          description: "Read a file",
+          inputSchema: { type: "object", properties: { path: { type: "string" } } },
+        }],
+      },
+    });
+    return builder.build({ nonce: "test" });
+  }
+
+  it("chat: keeps 4 tool_calls + 4 tool results, user first (Option B)", async () => {
+    const { messages } = await buildTranscript();
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      model: "gpt",
+      choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const provider = new OpenAiCompatibleAgentProvider({
+      id: "chat", api: "chat", baseUrl: "https://x/v1", apiKey: "k", fetchFn, stream: false,
+    });
+    await provider.complete({
+      traceId: "t", round: 1,
+      messages: [{ role: "user", content: "hi" }, ...messages],
+      tools: [{ name: "mcp_list", inputSchema: { type: "object" } }],
+      model: "gpt",
+    });
+    const body = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body));
+    const wireMessages = body.messages;
+    expect(wireMessages[0].role).toBe("user");
+    const assistant = wireMessages.find((m: { role: string }) => m.role === "assistant");
+    expect(assistant.tool_calls.length).toBe(5);
+    const toolResults = wireMessages.filter((m: { role: string }) => m.role === "tool");
+    expect(toolResults.length).toBe(5);
+    expect(toolResults.every((r: { tool_call_id: string }) => r.tool_call_id.startsWith("hydrate:test:"))).toBe(true);
+  });
+
+  it("responses: keeps 4 function_call + 4 function_call_output, user first (Option B)", async () => {
+    const { messages } = await buildTranscript();
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      model: "gpt", output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }],
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const provider = new OpenAiCompatibleAgentProvider({
+      id: "responses", api: "responses", baseUrl: "https://x/v1", apiKey: "k", fetchFn, stream: false,
+    });
+    await provider.complete({
+      traceId: "t", round: 1,
+      messages: [{ role: "user", content: "hi" }, ...messages],
+      tools: [{ name: "mcp_list", inputSchema: { type: "object" } }],
+      model: "gpt",
+    });
+    const body = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body));
+    const input = body.input;
+    const fnCalls = input.filter((i: { type: string }) => i.type === "function_call");
+    const fnOutputs = input.filter((i: { type: string }) => i.type === "function_call_output");
+    expect(input[0].role).toBe("user");
+    expect(fnCalls.length).toBe(5);
+    expect(fnOutputs.length).toBe(5);
+    expect(fnCalls.every((c: { call_id: string }) => c.call_id.startsWith("hydrate:test:"))).toBe(true);
+  });
+
+  it("messages: keeps 4 tool_use + 4 tool_result, user first (Option B)", async () => {
+    const { messages } = await buildTranscript();
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      model: "claude", content: [{ type: "text", text: "ok" }],
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const provider = new OpenAiCompatibleAgentProvider({
+      id: "claude", api: "messages", baseUrl: "https://anthropic/v1", apiKey: "k", fetchFn, stream: false,
+    });
+    await provider.complete({
+      traceId: "t", round: 1,
+      messages: [{ role: "user", content: "hi" }, ...messages],
+      tools: [{ name: "mcp_list", inputSchema: { type: "object" } }],
+      model: "claude",
+    });
+    const body = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body));
+    const wireMessages: Array<{ role: string; content?: unknown }> = body.messages;
+    // Option B: first real user message carries the initial user turn.
+    const first = wireMessages[0];
+    expect(first?.role).toBe("user");
+    const assistant = wireMessages.find((m) => m.role === "assistant") as { content: Array<{ type: string; id?: string }> } | undefined;
+    const toolUses = (assistant?.content ?? []).filter((b) => b.type === "tool_use");
+    expect(toolUses.length).toBe(5);
+    const toolResults = wireMessages.filter((m) =>
+      m.role === "user" && m.content && Array.isArray(m.content) && (m.content as Array<{ type: string }>).some((b) => b.type === "tool_result"),
+    );
+    expect(toolResults.length).toBe(5);
+    expect(toolUses.every((u) => u.id ? u.id.startsWith("hydrate:test:") : false)).toBe(true);
   });
 });

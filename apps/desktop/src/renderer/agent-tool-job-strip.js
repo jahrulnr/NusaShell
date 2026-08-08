@@ -13,38 +13,77 @@ const STATUS_LABEL = {
   fail: "fail",
   killed: "killed",
 };
+const SUCCESS_VISIBILITY_MS = 8_000;
 
 export class AgentToolJobStrip {
   constructor({ conversationId, onKill }) {
     this.conversationId = conversationId;
     this.onKill = onKill ?? ((handleId) => killToolJob(handleId));
     this.jobs = new Map();
+    this.collapsed = true;
+    this.disposed = false;
     this.disposer = null;
+    this.toggleButton = null;
+    this.toggleHandler = null;
+    this.okExpiryTimers = new Map();
   }
 
   mount() {
+    this.disposed = false;
     this.disposer = subscribeToolJobEvents({
       conversationId: this.conversationId,
       onJobStarted: (p) => this.onStarted(p),
       onJobUpdate: (p) => this.onUpdate(p),
       onJobEnded: (p) => this.onEnded(p),
     });
+    this.bindToggle();
     void this.rehydrate();
   }
 
   dispose() {
+    this.disposed = true;
     this.disposer?.();
     this.disposer = null;
+    this.toggleButton?.removeEventListener("click", this.toggleHandler);
+    this.toggleButton = null;
+    this.toggleHandler = null;
+    for (const timer of this.okExpiryTimers.values()) clearTimeout(timer);
+    this.okExpiryTimers.clear();
     this.jobs.clear();
+  }
+
+  bindToggle() {
+    const toggle = document.getElementById("agent-tool-job-strip-toggle");
+    if (!toggle) return;
+    this.toggleButton = toggle;
+    this.syncCollapsedUi();
+    this.toggleHandler = () => {
+      this.collapsed = !this.collapsed;
+      this.syncCollapsedUi();
+    };
+    toggle.addEventListener("click", this.toggleHandler);
+  }
+
+  syncCollapsedUi() {
+    const toggle = document.getElementById("agent-tool-job-strip-toggle");
+    const list = document.getElementById("agent-tool-job-list");
+    const strip = document.getElementById("agent-tool-job-strip");
+    if (toggle) toggle.setAttribute("aria-expanded", String(!this.collapsed));
+    if (list) list.hidden = this.collapsed;
+    if (strip) strip.dataset.expanded = this.collapsed ? "false" : "true";
   }
 
   async rehydrate() {
     try {
       const result = await listToolJobs(this.conversationId);
+      if (this.disposed) return;
       const jobs = Array.isArray(result) ? result : (result?.jobs ?? []);
-      this.jobs.clear();
       for (const job of jobs) {
-        this.jobs.set(job.handleId, job);
+        const liveJob = this.jobs.get(job.handleId);
+        // Events received while the request was in flight are newer than the
+        // snapshot, so preserve their status/tail rather than replacing them.
+        this.jobs.set(job.handleId, liveJob ? { ...job, ...liveJob } : job);
+        if ((liveJob ?? job).status === "ok") this.scheduleOkExpiry(liveJob ?? job);
       }
       this.render();
     } catch {
@@ -53,6 +92,8 @@ export class AgentToolJobStrip {
   }
 
   onStarted(payload) {
+    if (this.disposed) return;
+    this.clearOkExpiry(payload.handleId);
     this.jobs.set(payload.handleId, {
       handleId: payload.handleId,
       toolName: payload.toolName,
@@ -64,6 +105,7 @@ export class AgentToolJobStrip {
   }
 
   onUpdate(payload) {
+    if (this.disposed) return;
     const job = this.jobs.get(payload.handleId);
     if (!job) return;
     job.status = payload.status;
@@ -72,38 +114,62 @@ export class AgentToolJobStrip {
   }
 
   onEnded(payload) {
+    if (this.disposed) return;
     const job = this.jobs.get(payload.handleId);
     if (!job) return;
     job.status = payload.ok ? "ok" : payload.reason === "killed" ? "killed" : "fail";
     if (payload.error) job.error = payload.error;
     this.render();
-    // Auto-remove ended jobs after a short delay so the user sees the final state.
-    setTimeout(() => {
-      if (this.jobs.get(payload.handleId)?.status === job.status) {
-        this.jobs.delete(payload.handleId);
+    // Successful jobs auto-remove after a short delay so the user sees the
+    // final "ok" state; failed/killed jobs persist until dismissed (#68).
+    if (job.status === "ok") this.scheduleOkExpiry(job);
+  }
+
+  clearOkExpiry(handleId) {
+    const timer = this.okExpiryTimers.get(handleId);
+    if (timer) clearTimeout(timer);
+    this.okExpiryTimers.delete(handleId);
+  }
+
+  scheduleOkExpiry(job) {
+    if (this.okExpiryTimers.has(job.handleId)) return;
+    const endedAt = Date.parse(job.endedAt ?? "");
+    const elapsed = Number.isNaN(endedAt) ? 0 : Math.max(0, Date.now() - endedAt);
+    const timer = setTimeout(() => {
+      this.okExpiryTimers.delete(job.handleId);
+      if (!this.disposed && this.jobs.get(job.handleId)?.status === "ok") {
+        this.jobs.delete(job.handleId);
         this.render();
       }
-    }, 8000);
+    }, Math.max(0, SUCCESS_VISIBILITY_MS - elapsed));
+    this.okExpiryTimers.set(job.handleId, timer);
   }
 
   render() {
     const strip = document.getElementById("agent-tool-job-strip");
     const list = document.getElementById("agent-tool-job-list");
     if (!strip || !list) return;
-    const visibleJobs = [...this.jobs.values()].filter((job) => job.status === "running");
-    if (visibleJobs.length === 0) {
+    const jobs = [...this.jobs.values()];
+    if (jobs.length === 0) {
       strip.hidden = true;
       list.textContent = "";
       return;
     }
     strip.hidden = false;
-    const runningCount = visibleJobs.length;
+    this.syncCollapsedUi();
+    const runningCount = jobs.filter((job) => job.status === "running").length;
     const title = strip.querySelector(".agent-tool-job-strip-title");
-    if (title) title.textContent = runningCount > 0
-      ? `Background jobs · ${runningCount} running`
-      : `Background jobs · ${this.jobs.size}`;
+    const meta = document.getElementById("agent-tool-job-strip-meta");
+    if (title) title.textContent = `${jobs.length} tool run${jobs.length === 1 ? "" : "s"}`;
+    if (meta) {
+      const failedCount = jobs.filter((job) => job.status === "fail" || job.status === "killed").length;
+      meta.textContent = runningCount > 0
+        ? `${runningCount} running`
+        : failedCount > 0 ? `${failedCount} need attention` : "All done";
+      meta.dataset.done = runningCount === 0 && failedCount === 0 ? "true" : "false";
+    }
     list.textContent = "";
-    for (const job of visibleJobs) {
+    for (const job of jobs) {
       const card = document.createElement("div");
       card.className = "agent-tool-job-card";
       card.setAttribute("role", "listitem");
@@ -155,6 +221,21 @@ export class AgentToolJobStrip {
           void this.onKill(job.handleId);
         });
         actions.appendChild(stop);
+      } else if (job.status === "fail" || job.status === "killed") {
+        // Failed/killed jobs persist with their error until the user dismisses
+        // them (#68): an error must not vanish silently.
+        const dismiss = document.createElement("button");
+        dismiss.className = "agent-tool-job-card-dismiss";
+        dismiss.type = "button";
+        dismiss.textContent = "Dismiss";
+        dismiss.setAttribute("aria-label", `Dismiss finished job: ${job.toolName}`);
+        dismiss.addEventListener("click", (event) => {
+          event.stopPropagation();
+          this.clearOkExpiry(job.handleId);
+          this.jobs.delete(job.handleId);
+          this.render();
+        });
+        actions.appendChild(dismiss);
       }
 
       list.append(card);

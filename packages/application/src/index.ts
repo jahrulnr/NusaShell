@@ -170,6 +170,7 @@ export type {
   AgentModelCapabilities,
   AgentTokenUsage,
   AgentToolCall,
+  AgentToolArgumentError,
   AgentToolDefinition,
   AgentProviderRequest,
   AgentPromptCachePolicy,
@@ -276,6 +277,8 @@ export {
   applyVars,
   SYSTEM_PREFIX_END_MARKER,
   stableCurrentDate,
+  machineCurrentTime,
+  machineTimeZone,
   type PromptInjectionSummary,
   type InjectPromptsResult,
   detectRuntimeOs,
@@ -314,8 +317,6 @@ export {
   isSummaryMessage,
   collectUserMessages,
   buildCompactedHistory,
-  formatMcpLivePrompt,
-  MCP_LIVE_PROMPT_BUDGET_CHARS,
   MCP_LIVE_TOOLS_CAP,
   type McpLiveSnapshot,
   type McpLiveSnapshotTool,
@@ -403,6 +404,13 @@ export {
   SKILLS_CATALOG_BUDGET_CHARS,
   SKILLS_CATALOG_DESC_CAP,
 } from "./agent/services/skills-catalog-formatter.js";
+
+// Runtime hydration (ephemeral synthetic transcript)
+export {
+  RuntimeHydrationBuilder,
+  HYDRATE_ID_PREFIX,
+  type RuntimeContextSnapshot,
+} from "./agent/services/runtime-hydration.js";
 
 // Agent Memory
 export type {

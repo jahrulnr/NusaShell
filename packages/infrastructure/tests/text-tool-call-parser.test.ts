@@ -75,6 +75,12 @@ Next steps for the user.`;
     expect(result.text).not.toContain("2ddb51ed");
   });
 
+  it("strips known model sentence control tokens without removing visible prose", () => {
+    const result = extractTextToolCalls("<|begin_of_sentence|>Answer<｜end_of_sentence｜>");
+    expect(result.calls).toEqual([]);
+    expect(result.text).toBe("Answer");
+  });
+
   it("fills empty native arguments without replacing valid native arguments", () => {
     const merged = mergeTextToolCalls(
       [

@@ -71,6 +71,59 @@ describe("PipelinesController", () => {
     }
   });
 
+  it("defaults the trigger kind to schedule for a new pipeline (consistent with Jobs)", () => {
+    const controller = new PipelinesController({ notify: vi.fn() });
+    controller.openModal();
+    expect(document.getElementById("pipeline-field-trigger-kind").value).toBe("schedule");
+    expect(document.getElementById("pipeline-schedule-fields").hidden).toBe(false);
+  });
+
+  it("autofocuses the name field and restores focus when the modal closes", () => {
+    const trigger = document.createElement("button");
+    trigger.id = "pipeline-new-trigger";
+    document.body.appendChild(trigger);
+    trigger.focus();
+    const controller = new PipelinesController({ notify: vi.fn() });
+    controller.openModal();
+    expect(document.activeElement).toBe(document.getElementById("pipeline-field-name"));
+    controller.closeModal();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("closes the modal when the overlay backdrop is clicked (click-outside)", () => {
+    const controller = new PipelinesController({ notify: vi.fn() });
+    controller.openModal();
+    const modal = document.getElementById("pipeline-modal");
+    expect(modal.classList.contains("active")).toBe(true);
+    const card = document.createElement("div");
+    card.className = "modal-card";
+    modal.appendChild(card);
+    modal.dispatchEvent(new MouseEvent("click", { bubbles: true, target: modal }));
+    expect(modal.classList.contains("active")).toBe(false);
+    // Click inside the card must NOT close.
+    controller.openModal();
+    card.dispatchEvent(new MouseEvent("click", { bubbles: true, target: card }));
+    expect(modal.classList.contains("active")).toBe(true);
+  });
+
+  it("keeps the tool args draft when another step is removed (ticket #55)", () => {
+    const controller = new PipelinesController({ notify: vi.fn() });
+    controller.openModal();
+    // Build two steps via the DOM (add step twice, fill first step's args).
+    controller.els.addStepBtn?.click();
+    controller.els.addStepBtn?.click();
+    const rows = document.querySelectorAll(".pipeline-step-row");
+    expect(rows.length).toBe(2);
+    const args = rows[0].querySelector('[data-field="tool-args"]');
+    args.value = '{"to":"x@y.com"}';
+    args.dispatchEvent(new Event("input", { bubbles: true }));
+    // Remove the SECOND step — the first row must keep its raw draft.
+    rows[1].querySelector('[data-action="remove-step"]').click();
+    const remaining = document.querySelectorAll(".pipeline-step-row");
+    expect(remaining.length).toBe(1);
+    expect(remaining[0].querySelector('[data-field="tool-args"]').value).toBe('{"to":"x@y.com"}');
+  });
+
   it("keeps details Run disabled while a run is active and resets on completion", async () => {
     const notify = vi.fn();
     const controller = new PipelinesController({ notify });
@@ -131,10 +184,72 @@ describe("PipelinesController", () => {
     expect(card.querySelectorAll(".pipeline-flow-step")).toHaveLength(2);
     expect(card.querySelector('[data-action="details"]')?.textContent).toBe("Inspect");
     expect(card.querySelector('[data-action="edit"]')).toBeNull();
+    const runBtn = card.querySelector<HTMLButtonElement>('[data-action="run"]')!;
+    expect(runBtn.disabled).toBe(false);
+    expect(runBtn.title).toBe("");
+    expect(runBtn.getAttribute("aria-description")).toBeNull();
 
     document.body.appendChild(card);
     card.querySelector<HTMLButtonElement>('[data-action="more"]')!.click();
     expect(card.querySelectorAll(".pipeline-card-menu button")).toHaveLength(3);
+  });
+
+  it("keeps Run now enabled on a paused pipeline card with a manual-run affordance", () => {
+    const controller = new PipelinesController({ notify: vi.fn() });
+    const card = controller._renderCard({
+      id: "paused-p",
+      name: "Paused pipeline",
+      description: "Scheduled but paused",
+      enabled: false,
+      lastStatus: null,
+      trigger: { kind: "schedule", schedule: { kind: "interval", minutes: 60 } },
+      steps: [{ id: "a", name: "Step A", action: { type: "agent" } }],
+    });
+
+    const runBtn = card.querySelector<HTMLButtonElement>('[data-action="run"]')!;
+    expect(runBtn.disabled).toBe(false);
+    expect(runBtn.title).toMatch(/Paused/i);
+    expect(runBtn.title).toMatch(/automatically/i);
+    expect(runBtn.getAttribute("aria-description")).toBe(runBtn.title);
+    expect(card.querySelector(".pipeline-disabled")?.textContent).toMatch(/paused/i);
+  });
+
+  it("keeps details Run now enabled for paused pipelines with the same affordance", () => {
+    const controller = new PipelinesController({ notify: vi.fn() });
+    const runBtn = document.getElementById("pipeline-details-run") as HTMLButtonElement;
+    controller.openDetails({
+      id: "paused-p",
+      name: "Paused pipeline",
+      enabled: false,
+      lastStatus: null,
+      trigger: { kind: "event", pattern: "test.*" },
+      steps: [],
+      lastRunId: null,
+    });
+
+    expect(runBtn.disabled).toBe(false);
+    expect(runBtn.title).toMatch(/Paused/i);
+    expect(runBtn.title).toMatch(/automatically/i);
+    expect(runBtn.getAttribute("aria-description")).toBe(runBtn.title);
+    expect(document.getElementById("pipeline-details-meta")?.textContent).toMatch(/Paused/i);
+  });
+
+  it("does not put a paused affordance on Run for an armed enabled pipeline in details", () => {
+    const controller = new PipelinesController({ notify: vi.fn() });
+    const runBtn = document.getElementById("pipeline-details-run") as HTMLButtonElement;
+    controller.openDetails({
+      id: "armed-p",
+      name: "Armed pipeline",
+      enabled: true,
+      lastStatus: null,
+      trigger: { kind: "event", pattern: "test.*" },
+      steps: [],
+      lastRunId: null,
+    });
+
+    expect(runBtn.disabled).toBe(false);
+    expect(runBtn.title).toBe("");
+    expect(runBtn.getAttribute("aria-description")).toBeNull();
   });
 
   it("keeps the full DAG visible and renders run output as Markdown", async () => {

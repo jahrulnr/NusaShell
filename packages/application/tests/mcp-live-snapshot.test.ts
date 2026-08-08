@@ -124,7 +124,7 @@ describe("McpAgentToolGateway.getMcpLiveSnapshot", () => {
     expect(startCalled).toBe(false);
   });
 
-  it("caps tools at 96 and puts the rest in toolsOverflow", async () => {
+  it("keeps the full running catalog for the context checkpoint even when provider tools[] is capped", async () => {
     const manyTools = Array.from({ length: 100 }, (_, i) => ({
       name: `tool_${i}`,
       description: `Tool ${i}`,
@@ -138,12 +138,7 @@ describe("McpAgentToolGateway.getMcpLiveSnapshot", () => {
     gateway.beginTurn("turn-cap");
 
     const snap = await gateway.getMcpLiveSnapshot("turn-cap");
-    expect(snap.tools.length).toBe(96);
-    expect(snap.toolsOverflow!.length).toBe(4);
-    // Overflow names are the ones not in tools[].
-    const toolNames = new Set(snap.tools.map((t) => t.providerName));
-    for (const name of snap.toolsOverflow!) {
-      expect(toolNames.has(name)).toBe(false);
-    }
+    expect(snap.tools.length).toBe(100);
+    expect(snap.toolsOverflow ?? []).toEqual([]);
   });
 });

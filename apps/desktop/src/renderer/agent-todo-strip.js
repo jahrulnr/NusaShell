@@ -12,17 +12,25 @@ const STATUS_GLYPH = {
   completed: "●",
 };
 
+const TOGGLE_ARIA_LABEL = "Task checklist";
+
 export class AgentTodoStrip {
   constructor({ conversationId, onDelete }) {
     this.conversationId = conversationId;
     this.onDelete = onDelete ?? ((id) => deleteTodos(conversationId, [id]));
     this.items = [];
     this.collapsed = true;
+    /** When true and the checklist is empty, keep a reserved strip (no layout jump mid-turn). */
+    this.turnActive = false;
     this.receivedLiveUpdate = false;
+    this.disposed = false;
     this.disposer = null;
+    this.toggleButton = null;
+    this.toggleHandler = null;
   }
 
   mount() {
+    this.disposed = false;
     this.disposer = subscribeTodoEvents({
       conversationId: this.conversationId,
       onTodoUpdated: (items) => {
@@ -33,7 +41,7 @@ export class AgentTodoStrip {
     this.bindToggle();
     void getTodos(this.conversationId)
       .then((items) => {
-        if (!this.receivedLiveUpdate) this.render(items);
+        if (!this.disposed && !this.receivedLiveUpdate) this.render(items);
       })
       .catch(() => {
         // The event subscription remains authoritative when the backend query
@@ -42,26 +50,54 @@ export class AgentTodoStrip {
   }
 
   dispose() {
+    this.disposed = true;
     this.disposer?.();
     this.disposer = null;
+    this.toggleButton?.removeEventListener("click", this.toggleHandler);
+    this.toggleButton = null;
+    this.toggleHandler = null;
+  }
+
+  /**
+   * Reflect whether this conversation has an in-flight agent turn so an empty
+   * checklist can reserve space instead of collapsing the composer stack.
+   * @param {boolean} active
+   */
+  setTurnActive(active) {
+    const next = Boolean(active);
+    if (this.turnActive === next) return;
+    this.turnActive = next;
+    this.render(this.items);
   }
 
   bindToggle() {
     const toggle = document.getElementById("agent-todo-strip-toggle");
-    if (!toggle || toggle.dataset.bound === "1") return;
-    toggle.dataset.bound = "1";
+    if (!toggle) return;
+    this.toggleButton = toggle;
+    this.syncToggleName();
     this.syncCollapsedUi();
-    toggle.addEventListener("click", () => {
+    this.toggleHandler = () => {
       this.collapsed = !this.collapsed;
       this.syncCollapsedUi();
-    });
+    };
+    toggle.addEventListener("click", this.toggleHandler);
+  }
+
+  syncToggleName() {
+    const toggle = document.getElementById("agent-todo-strip-toggle");
+    if (!toggle) return;
+    // Stable accessible name — count lives in visible text only (#63).
+    toggle.setAttribute("aria-label", TOGGLE_ARIA_LABEL);
   }
 
   syncCollapsedUi() {
     const toggle = document.getElementById("agent-todo-strip-toggle");
     const list = document.getElementById("agent-todo-strip-list");
     const strip = document.getElementById("agent-todo-strip");
-    if (toggle) toggle.setAttribute("aria-expanded", String(!this.collapsed));
+    if (toggle) {
+      this.syncToggleName();
+      toggle.setAttribute("aria-expanded", String(!this.collapsed));
+    }
     if (list) list.hidden = this.collapsed;
     if (strip) strip.dataset.expanded = this.collapsed ? "false" : "true";
   }
@@ -73,13 +109,23 @@ export class AgentTodoStrip {
     const count = document.getElementById("agent-todo-strip-count");
     const meta = document.getElementById("agent-todo-strip-meta");
     if (!strip || !list) return;
+
+    this.syncToggleName();
+    this.ensureLiveRegions(count, meta);
+
     if (this.items.length === 0) {
-      strip.hidden = true;
       list.textContent = "";
       if (count) count.textContent = "0 Tasks";
-      if (meta) meta.textContent = "";
+      if (meta) {
+        meta.textContent = this.turnActive ? "No tasks yet" : "";
+        delete meta.dataset.done;
+      }
+      // Idle + empty: hide. Active turn + empty: reserve space (#63).
+      strip.hidden = !this.turnActive;
+      this.syncCollapsedUi();
       return;
     }
+
     strip.hidden = false;
     this.syncCollapsedUi();
     const incomplete = this.items.filter((i) => i.status !== "completed").length;
@@ -114,6 +160,21 @@ export class AgentTodoStrip {
       });
       li.append(glyph, content, del);
       list.append(li);
+    }
+  }
+
+  ensureLiveRegions(count, meta) {
+    if (count) {
+      count.setAttribute("aria-live", "polite");
+      count.setAttribute("aria-atomic", "true");
+    }
+    if (meta) {
+      meta.setAttribute("aria-live", "polite");
+      meta.setAttribute("aria-atomic", "true");
+    }
+    const list = document.getElementById("agent-todo-strip-list");
+    if (list) {
+      list.removeAttribute("aria-live");
     }
   }
 }

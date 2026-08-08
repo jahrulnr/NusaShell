@@ -62,9 +62,10 @@ limit throw an error.
 
 At the start of each agent turn, `RunAgentTurnHandler` loads a memory
 snapshot via `MemoryStorePort`, formats it with `formatMemoryPrompt`, and
-injects it as a frozen system message after the developer prompt and before
-conversation messages. The snapshot is **frozen for the turn** — the agent
-sees the entries that existed when the turn started, not live mutations.
+places it in the ephemeral read-only runtime hydration transcript. The snapshot
+is **frozen for the turn** — the agent sees the entries that existed when the
+turn started, not live mutations—and it is never persisted into conversation
+history or the cache-stable system prefix.
 
 When both targets are empty, no memory block is injected.
 

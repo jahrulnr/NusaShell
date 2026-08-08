@@ -37,16 +37,26 @@ export class PluginSyncService {
           // Without this, a re-sync after install/update would silently
           // re-enable a plugin the user explicitly disabled.
           const existing = await this.repository.findById(plugin.id);
-          const pluginToSave = existing && !existing.enabled
-            ? Plugin.create({
-                id: plugin.id,
-                version: plugin.version,
-                manifest: plugin.manifest,
-                enabled: false,
-                installPath: plugin.installPath,
-                installedAt: plugin.installedAt,
-              })
-            : plugin;
+          let manifest = plugin.manifest;
+          if (existing) {
+            const merged = PluginManifest.create({
+              ...plugin.manifest.toInput(),
+              mcp: {
+                ...plugin.manifest.toInput().mcp,
+                autostart: existing.manifest.mcp.autostart,
+                keepAliveOnClose: existing.manifest.mcp.keepAliveOnClose,
+              },
+            });
+            if (merged.ok) manifest = merged.value;
+          }
+          const pluginToSave = existing ? Plugin.create({
+              id: plugin.id,
+              version: plugin.version,
+              manifest,
+              enabled: existing.enabled,
+              installPath: plugin.installPath,
+              installedAt: plugin.installedAt,
+            }) : plugin;
           await this.repository.save(pluginToSave);
           this.logger?.debug({ pluginId: idStr, path: dir.path }, "Synced plugin to repository");
         }

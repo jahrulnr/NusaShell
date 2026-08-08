@@ -1,12 +1,12 @@
 import type { AgentContentPart, AgentProviderRequest, AgentProviderResult, AgentToolCall } from "@nusashell/application";
-import { mergeTextToolCalls } from "./text-tool-call-parser.js";
+import { extractReasoningText, mergeTextToolCalls } from "./text-tool-call-parser.js";
 import type { ApiStrategy } from "./openai-api-strategy.js";
 import {
   emptySchema,
-  firstText,
   limitAttachments,
   malformedResponseError,
   parseDataUrl,
+  parseToolArgumentsWithRecovery,
   parseUsage,
   positiveInteger,
   record,
@@ -86,14 +86,18 @@ export class MessagesApiStrategy implements ApiStrategy {
       const item = record(raw);
       if (item.type === "text" && typeof item.text === "string") text.push(item.text);
       if (item.type === "thinking" || item.type === "reasoning") {
-        const thought = firstText(item.thinking, item.text, item.reasoning);
+        const thought = extractReasoningText(item.thinking)
+          || extractReasoningText(item.text)
+          || extractReasoningText(item.reasoning);
         if (thought) reasoning.push(thought);
       }
       if (item.type === "tool_use" && typeof item.name === "string") {
+        const argumentsResult = parseToolArgumentsWithRecovery(item.input);
         nativeCalls.push({
           id: typeof item.id === "string" ? item.id : `call_message_${nativeCalls.length + 1}`,
           name: item.name,
-          args: record(item.input),
+          args: argumentsResult.args,
+          ...(argumentsResult.argumentError ? { argumentError: argumentsResult.argumentError } : {}),
         });
       }
     }

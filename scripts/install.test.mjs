@@ -101,6 +101,12 @@ describe.runIf(process.platform === "linux")("Linux installer version activation
     expect(installer).toContain(
       'mv -Tf "$root/.current-$resolved_version" "$current"',
     );
+    expect(installer).toContain('userns_ok=0');
+    expect(installer).toContain('unshare -Ur true');
+    expect(installer).toContain('mv -f "$sandbox" "$sandbox.disabled"');
+    expect(installer).not.toContain(
+      'even when unprivileged user namespaces are enabled. Handle this before success.',
+    );
     expect(installer).toContain('previous_version="$(basename "$previous_target")"');
     expect(installer).toContain('rm -rf "$candidate"');
     const windowsInstaller = await readFile(new URL("./install.ps1", import.meta.url), "utf8");

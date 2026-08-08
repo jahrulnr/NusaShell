@@ -9,7 +9,7 @@
  * Mirrors the clamping logic in `agent-conversation-ui.js` so persisted
  * messages stay within the store validator's size caps.
  */
-import type { AgentTurnResult, AgentTurnPartial } from "@nusashell/application";
+import type { AgentToolResult, AgentTurnResult, AgentTurnPartial } from "@nusashell/application";
 import type {
   AgentConversationMessage,
   AgentConversationToolCall,
@@ -49,10 +49,11 @@ export function buildToolCall(call: {
   output?: string;
   result?: unknown;
   modelOutput?: string;
+  toolResult?: AgentToolResult;
   status?: "success" | "error" | "cancelled" | "timeout";
   truncated?: boolean;
   structuredContent?: Record<string, unknown>;
-}): AgentConversationToolCall {
+}, callPosition?: number): AgentConversationToolCall {
   const rawArgs = call.args && typeof call.args === "object" && !Array.isArray(call.args) ? call.args : undefined;
   let safeArgs: Record<string, unknown> = {};
   if (rawArgs && Object.keys(rawArgs).length > 0) {
@@ -78,8 +79,13 @@ export function buildToolCall(call: {
     }
   }
 
+  // The persisted card is the same canonical string sent as role:"tool" to
+  // the provider. Never rebuild a prettier-but-different view from `result`.
+  const modelOutput = call.modelOutput;
   const output =
-    call.output !== undefined
+    modelOutput !== undefined
+      ? clampText(modelOutput, TOOL_OUTPUT_MAX_CHARS)
+      : call.output !== undefined
       ? clampText(call.output, TOOL_OUTPUT_MAX_CHARS)
       : call.error
         ? clampText(call.error, TOOL_OUTPUT_MAX_CHARS)
@@ -89,12 +95,13 @@ export function buildToolCall(call: {
 
   return {
     id: call.id,
+    ...(callPosition !== undefined ? { callPosition } : {}),
     name: call.name,
     ok: call.ok !== false,
     ...(call.error ? { error: clampText(call.error, TOOL_ERROR_MAX_CHARS) } : {}),
     args: safeArgs,
     ...(output ? { output } : {}),
-    ...(call.modelOutput ? { modelOutput: clampText(call.modelOutput, TOOL_OUTPUT_MAX_CHARS) } : {}),
+    ...(modelOutput ? { modelOutput: clampText(modelOutput, TOOL_OUTPUT_MAX_CHARS) } : {}),
     ...(call.status ? { status: call.status } : {}),
     ...(call.truncated ? { truncated: call.truncated } : {}),
     ...(call.structuredContent ? { structuredContent: call.structuredContent } : {}),
@@ -105,13 +112,14 @@ function buildSteps(steps: readonly { type: string; content?: string; calls?: re
   if (!Array.isArray(steps) || steps.length === 0) return undefined;
   const result: AgentConversationStep[] = [];
   for (const step of steps) {
+    const stepPosition = result.length + 1;
     if (step.type === "text" && typeof step.content === "string") {
-      result.push({ type: "text", content: step.content });
+      result.push({ type: "text", stepPosition, content: step.content });
     } else if (step.type === "reasoning" && typeof step.content === "string") {
-      result.push({ type: "reasoning", content: step.content });
+      result.push({ type: "reasoning", stepPosition, content: step.content });
     } else if (step.type === "tool_calls" && Array.isArray(step.calls)) {
-      const calls = step.calls.map(buildToolCall);
-      if (calls.length > 0) result.push({ type: "tool_calls", calls });
+      const calls = step.calls.map((call: any, index: number) => buildToolCall(call, index + 1));
+      if (calls.length > 0) result.push({ type: "tool_calls", stepPosition, calls });
     }
   }
   return result.length > 0 ? result : undefined;
@@ -122,7 +130,7 @@ function buildSteps(steps: readonly { type: string; content?: string; calls?: re
  */
 export function buildAssistantMessage(result: AgentTurnResult): AgentConversationMessage {
   const toolCalls = Array.isArray(result.toolCalls) && result.toolCalls.length > 0
-    ? result.toolCalls.map(buildToolCall)
+    ? result.toolCalls.map((call, index) => buildToolCall(call, index + 1))
     : undefined;
   const steps = buildSteps(result.steps as any);
   return {
@@ -168,7 +176,7 @@ export function buildInterruptedMessage(
   options?: { readonly interruptReason?: "cancel" | "provider" | "max_rounds" },
 ): AgentConversationMessage {
   const toolCalls = Array.isArray(partial.toolCalls) && partial.toolCalls.length > 0
-    ? partial.toolCalls.map(buildToolCall)
+    ? partial.toolCalls.map((call, index) => buildToolCall(call, index + 1))
     : undefined;
   const steps = buildSteps(partial.steps as any);
   const streamedText = typeof partial.text === "string" ? partial.text.trim() : "";

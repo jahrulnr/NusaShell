@@ -30,7 +30,13 @@ try {
 
 const HOME = os.homedir();
 const MAX_BUFFER_CHARS = 200 * 1024;
-const BOOTSTRAP_DIR = path.join(os.tmpdir(), "nusashell-terminal-bootstrap");
+// Keep shell bootstrap files with the host-owned runtime data. Falling back to
+// the OS temp directory is only for running the plugin standalone outside the
+// NusaShell broker.
+const BOOTSTRAP_ROOT = process.env.NUSASHELL_USER_DATA
+  ? path.join(path.resolve(process.env.NUSASHELL_USER_DATA), "runtime")
+  : os.tmpdir();
+const BOOTSTRAP_DIR = path.join(BOOTSTRAP_ROOT, "terminal-bootstrap");
 const BASH_RC = path.join(BOOTSTRAP_DIR, "bashrc");
 const ZSH_RC = path.join(BOOTSTRAP_DIR, ".zshrc");
 const COLOR_BOOTSTRAP_SRC = path.join(moduleDir, "color-bootstrap.sh");

@@ -31,8 +31,8 @@ compact utility typography rather than stacked cards or large shadows.
 │ Home                 │                                                     │
 │ Agent                │  active workspace                                  │
 │ Skills               │                                                     │
-│ Learning             │  Home: title → scoped search → launch plates        │
-│ Plugins              │  Workbench: fixed header → bounded working panes    │
+│ Learning             │  Home: scoped search → launch plates                 │
+│ Plugins              │  Workbench: compact action rail → working panes      │
 │ AI Providers         │                                                     │
 │ Autostart            │                                                     │
 │ Logs / Jobs          │                                                     │
@@ -51,9 +51,12 @@ state.
 
 ## Home launcher
 
-Home is an app launcher, not an analytics overview. It opens with product
-identity and a single scoped search, then a compact labelled category rail,
-followed by windowed plugin launch plates. The category rail stays left-aligned,
+Home is an app launcher, not an analytics overview. It opens directly into a
+single scoped search, then a compact labelled category rail, followed by
+windowed plugin launch plates. Overview pages rely on the active sidebar item
+for identity rather than repeating large page titles. Pages with actions retain
+only a compact action rail, keeping controls such as Install, Refresh, and New
+within reach without consuming the workspace. The category rail stays left-aligned,
 scrolls horizontally when space is constrained, and marks the active filter
 with the same restrained phosphor selection treatment used elsewhere in the
 shell. Each plate gives mixed plugin artwork equal visual weight, exposes a

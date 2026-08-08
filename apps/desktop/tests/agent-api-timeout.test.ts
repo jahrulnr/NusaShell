@@ -73,6 +73,28 @@ describe("runAgentTurn per-conversation model (ticket #38)", () => {
     );
   });
 
+  it("does not apply Settings-page global effort when the caller omitted room effort", async () => {
+    // Effort is per-room (threaded by the conversation controller). A missing
+    // options.effort must stay "auto" so a stale settings/global value cannot
+    // leak across rooms when the room binding is not yet stamped.
+    await runAgentTurn(
+      [{ role: "user", content: "hi" }],
+      { modelKey: "global/claude" },
+      {
+        models: [{ key: "global/claude", providerId: "p1", id: "claude-3" }],
+        activeModelKey: "global/claude",
+        effort: "medium",
+        userPrompt: "",
+      },
+    );
+
+    expect(sendRequest).toHaveBeenCalledWith(
+      "agent.run",
+      expect.objectContaining({ model: "claude-3", effort: "auto" }),
+      0,
+    );
+  });
+
   it("throws when the threaded room modelKey is not in the catalog", async () => {
     await expect(runAgentTurn(
       [{ role: "user", content: "hi" }],

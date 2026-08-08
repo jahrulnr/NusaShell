@@ -659,16 +659,12 @@
    A quiet execution-rail treatment: the lime signal is reserved for state
    and action, while graphite surfaces keep the DAG readable at a glance. */
 [data-view="pipelines"] .jobs-header {
-  min-height: 104px;
+  min-height: 48px;
   align-items: center;
-  padding-top: 20px;
-  padding-bottom: 20px;
-  background:
-    linear-gradient(90deg, rgba(197, 244, 93, .035), transparent 34%),
-    rgba(17, 19, 17, .88);
+  padding-top: 8px;
+  padding-bottom: 8px;
+  background: rgba(17, 19, 17, .88);
 }
-[data-view="pipelines"] .jobs-header .agent-kicker { margin-bottom: 7px; }
-[data-view="pipelines"] .jobs-header .subtitle { max-width: 620px; }
 [data-view="pipelines"] .pipeline-new-btn { display: inline-flex; align-items: center; gap: 7px; min-height: 38px; }
 [data-view="pipelines"] .pipeline-new-btn span { font-size: 17px; line-height: 0; }
 [data-view="pipelines"] .jobs-list {
@@ -679,7 +675,7 @@
     linear-gradient(90deg, rgba(197, 244, 93, .018) 1px, transparent 1px),
     #0b0e0c;
   background-size: 32px 32px;
-  min-height: calc(100% - 104px);
+  min-height: calc(100% - 48px);
 }
 
 .pipeline-card {

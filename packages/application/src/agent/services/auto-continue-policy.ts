@@ -6,6 +6,8 @@ export const DEFAULT_MAX_AUTO_CONTINUES = 10;
 
 export type AutoContinueReason =
   | "continue"
+  | "awaiting-background-jobs"
+  | "awaiting-user"
   | "no-open-todos"
   | "max-reached"
   | "turn-not-ok"
@@ -27,6 +29,10 @@ export interface AutoContinuePolicyInput {
   readonly turnOk: boolean;
   /** Without a conversation the chain has no todo SoT to read. */
   readonly hasConversation: boolean;
+  /** Final visible text; a question means the agent is waiting for the user. */
+  readonly turnText?: string;
+  /** A long-running async tool owns the next useful state transition. */
+  readonly hasRunningBackgroundJobs?: boolean;
 }
 
 /**
@@ -52,14 +58,24 @@ export function decideAutoContinue(input: AutoContinuePolicyInput): AutoContinue
   if (!input.turnOk) {
     return { shouldContinue: false, openTodoCount, continuesUsed, maxAutoContinues, reason: "turn-not-ok" };
   }
+  if (endsWithQuestion(input.turnText)) {
+    return { shouldContinue: false, openTodoCount, continuesUsed, maxAutoContinues, reason: "awaiting-user" };
+  }
   if (openTodoCount === 0) {
     return { shouldContinue: false, openTodoCount, continuesUsed, maxAutoContinues, reason: "no-open-todos" };
+  }
+  if (input.hasRunningBackgroundJobs) {
+    return { shouldContinue: false, openTodoCount, continuesUsed, maxAutoContinues, reason: "awaiting-background-jobs" };
   }
   // 0 = unlimited: skip the budget check entirely.
   if (maxAutoContinues > 0 && continuesUsed >= maxAutoContinues) {
     return { shouldContinue: false, openTodoCount, continuesUsed, maxAutoContinues, reason: "max-reached" };
   }
   return { shouldContinue: true, openTodoCount, continuesUsed, maxAutoContinues, reason: "continue" };
+}
+
+function endsWithQuestion(text: string | undefined): boolean {
+  return typeof text === "string" && /[?？]\s*$/.test(text.trim());
 }
 
 /**

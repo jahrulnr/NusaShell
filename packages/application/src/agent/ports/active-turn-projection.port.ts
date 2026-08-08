@@ -26,6 +26,8 @@ export interface ActiveTurnStreaming {
 export interface ActiveTurnSnapshot {
   readonly conversationId: string;
   readonly traceId: string;
+  readonly messageId?: string;
+  readonly messagePosition?: number;
   readonly status: "running" | "awaiting_input";
   readonly steps: readonly AgentTurnStep[];
   readonly streaming?: ActiveTurnStreaming;
@@ -38,6 +40,8 @@ export interface ActiveTurnSnapshot {
 export interface ActiveTurnStartInput {
   readonly conversationId: string;
   readonly traceId: string;
+  readonly messageId?: string;
+  readonly messagePosition?: number;
   readonly model?: string;
   readonly providerId?: string;
 }

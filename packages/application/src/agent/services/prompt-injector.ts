@@ -3,6 +3,10 @@ import type { AgentPrompt } from "../ports/prompt-loader.port.js";
 
 export interface PromptVars {
   readonly currentDate: string;
+  /** Local wall-clock time of the host machine, captured for this turn. */
+  readonly currentTime?: string;
+  /** IANA timezone resolved from the host machine, e.g. `Asia/Jakarta`. */
+  readonly timeZone?: string;
   readonly environment: string;
   /** Host OS/runtime, e.g. `linux (ubuntu)`, `docker (debian)`, `windows`, `macos`. */
   readonly runtimeOs: string;
@@ -24,21 +28,30 @@ const STATIC_PROMPT_NAMES = ["system", "mcp-tools"];
  * injectPrompts guarantees two segments:
  *
  * 1. Stable prefix (byte-identical per run, never passed through applyVars):
- *    system.md -> mcp-tools.md -> Live MCP -> skills catalog
+ *    system.md -> mcp-tools.md
  * 2. A constant marker (SYSTEM_PREFIX_END_MARKER) that anchors the boundary.
- * 3. Dynamic tail (rendered/assembled per turn):
- *    subagent -> user prompt -> developer (template + vars) -> memory -> todo
+ * 3. Dynamic tail (assembled per turn):
+ *    subagent -> user prompt -> hidden runtime-context checkpoint
+ *    (MCP, skills, TODO).
  *
- * Keep {{current_date}} / {{workspace}} / {{available_tools}} out of any block
- * that belongs to the stable segment.
+ * Runtime facts such as date, workspace, memory, skills, and MCP catalog are
+ * supplied by the ephemeral hydration transcript, never copied into the
+ * stable prefix.
  */
 export const SYSTEM_PREFIX_END_MARKER =
   "=== STABLE SYSTEM PREFIX END / DYNAMIC TAIL BEGIN ===";
 
-/** Calendar date frozen once per process so {{current_date}} is not per-turn churn. */
-const PROCESS_START_DATE = new Date().toISOString().slice(0, 10);
-export function stableCurrentDate(): string {
-  return PROCESS_START_DATE;
+/** Calendar date on the host machine for this turn's instant. */
+export function stableCurrentDate(now: Date = new Date()): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+export function machineCurrentTime(now: Date = new Date()): string {
+  return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
+}
+
+export function machineTimeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "local machine time";
 }
 
 export interface PromptInjectionSummary {
@@ -50,7 +63,6 @@ export interface PromptInjectionSummary {
   readonly hasUserPrompt: boolean;
   readonly hasSkillsCatalog: boolean;
   readonly hasContinue: boolean;
-  readonly hasMcpLive: boolean;
   readonly subagentVars: { readonly availableSubagents: boolean; readonly defaultSubagent: boolean };
   toDebugLine(traceId: string): string;
 }
@@ -63,11 +75,9 @@ export interface InjectPromptsResult {
 }
 
 /**
- * Prepend system and developer prompts before conversation messages.
- * Static prompts are injected as-is; the developer prompt gets {{var}}
- * substitution. A user-supplied prompt is injected after the static prompts
- * and before the developer prompt. Compaction summary messages from the
- * conversation are preserved between the developer prompt and user messages.
+ * Prepend the cache-stable system prompts before conversation messages.
+ * A user-supplied prompt is injected after the static prefix. Compaction
+ * summary messages from the conversation stay before durable user messages.
  *
  * Returns `{ messages, summary }` where `summary` is built from the structural
  * decisions made during assembly — no string heuristics on the output.
@@ -82,24 +92,15 @@ export function injectPrompts(
   todoPrompt?: string,
   skillsCatalogPrompt?: string,
   continuePrompt?: string,
-  mcpLivePrompt?: string,
 ): InjectPromptsResult {
   const staticPrompts = prompts.filter(
     (prompt) => STATIC_PROMPT_NAMES.includes(prompt.name) && !prompt.isTemplate,
   );
-  const developerPrompt = prompts.find(
-    (prompt) => prompt.name === "developer" && prompt.isTemplate,
-  );
-
   const out: AgentMessage[] = [];
   let staticChars = 0;
-  let developerChars = 0;
   let subagentChars = 0;
   let userPromptChars = 0;
   let memoryChars = 0;
-  let todoChars = 0;
-  let skillsCatalogChars = 0;
-  let mcpLiveChars = 0;
   let stableSystemMessages = 0;
 
   for (const prompt of staticPrompts) {
@@ -108,26 +109,9 @@ export function injectPrompts(
     stableSystemMessages += 1;
   }
 
-  // Live MCP (runtime) sits immediately after static mcp-tools so the model
-  // sees the authoritative running catalog (name + description + inputSchema)
-  // alongside the tool workflow doc. The same tools are auto-advertised in
-  // the provider tools[] array via listTools auto-seeding.
-  const hasMcpLive = Boolean(mcpLivePrompt);
-  if (mcpLivePrompt) {
-    out.push({ role: "system", content: mcpLivePrompt });
-    mcpLiveChars += mcpLivePrompt.length;
-    stableSystemMessages += 1;
-  }
-
-  // Skills catalog (Layer 1) sits right after Live MCP so the model sees
-  // the skill inventory alongside the tool workflow. Body stays progressive
-  // (skill_read) — only name + description are injected here.
+  // Runtime state must not poison the cacheable system prefix. It is attached
+  // as one hidden user checkpoint below after the dynamic system tail.
   const hasSkillsCatalog = Boolean(skillsCatalogPrompt);
-  if (skillsCatalogPrompt) {
-    out.push({ role: "system", content: skillsCatalogPrompt });
-    skillsCatalogChars += skillsCatalogPrompt.length;
-    stableSystemMessages += 1;
-  }
 
   const hasSubagentPrompt = Boolean(subagentPrompt);
   if (subagentPrompt) {
@@ -142,33 +126,9 @@ export function injectPrompts(
     userPromptChars += userPrompt.length;
   }
 
-  if (developerPrompt) {
-    const rendered = applyVars(developerPrompt.content, vars);
-    out.push({ role: "system", content: rendered });
-    developerChars += rendered.length;
-  }
-
   const hasMemory = Boolean(memoryPrompt);
-  if (memoryPrompt) {
-    out.push({ role: "system", content: memoryPrompt });
-    memoryChars += memoryPrompt.length;
-  }
 
   const hasTodo = Boolean(todoPrompt);
-  if (todoPrompt) {
-    out.push({ role: "system", content: todoPrompt });
-    todoChars += todoPrompt.length;
-  }
-
-  // Continue steering (outer multi-turn auto-continue). Injected as an
-  // internal user message that exists only in the provider payload for this
-  // chained request — the desktop does not append a user row for it.
-  const hasContinue = Boolean(continuePrompt);
-  let continueChars = 0;
-  if (continuePrompt) {
-    out.push({ role: "user", content: continuePrompt });
-    continueChars += continuePrompt.length;
-  }
 
   for (const message of messages) {
     if (message.role === "system") {
@@ -180,8 +140,20 @@ export function injectPrompts(
     out.push(message);
   }
 
+  // Continue steering is a synthetic follow-up user message. It must come
+  // after the durable conversation history: placing it before history makes
+  // the model interpret the old user request as a later instruction and can
+  // produce context-free fragments (for example `Input:` or raw code). It is
+  // sent only to this provider request; the desktop never persists it, so it
+  // stays hidden from the room UI. Keeping it outside the system block also
+  // preserves the stable system-prefix cache boundary.
+  const hasContinue = Boolean(continuePrompt);
+  if (continuePrompt) {
+    out.push({ role: "user", content: continuePrompt });
+  }
+
   const totalSystemMessages = out.filter((m) => m.role === "system").length;
-  const totalSystemChars = staticChars + developerChars + subagentChars + userPromptChars + memoryChars + todoChars + skillsCatalogChars + mcpLiveChars + continueChars;
+  const totalSystemChars = staticChars + subagentChars + userPromptChars + memoryChars;
   const availableSubagents = Boolean(vars.availableSubagents && vars.availableSubagents.trim());
   const defaultSubagent = Boolean(vars.defaultSubagent && vars.defaultSubagent.trim());
 
@@ -194,14 +166,13 @@ export function injectPrompts(
     hasUserPrompt,
     hasSkillsCatalog,
     hasContinue,
-    hasMcpLive,
     subagentVars: { availableSubagents, defaultSubagent },
     toDebugLine(traceId: string): string {
       return (
         `prompt.injection traceId=${traceId} systemMessages=${totalSystemMessages}` +
         ` systemChars=${totalSystemChars}` +
         ` hasSubagent=${hasSubagentPrompt} hasMemory=${hasMemory} hasTodo=${hasTodo} hasUserPrompt=${hasUserPrompt}` +
-        ` hasSkillsCatalog=${hasSkillsCatalog} hasContinue=${hasContinue} hasMcpLive=${hasMcpLive}` +
+        ` hasSkillsCatalog=${hasSkillsCatalog} hasContinue=${hasContinue}` +
         ` subagentVars.available=${availableSubagents} subagentVars.default=${defaultSubagent}`
       );
     },
@@ -220,6 +191,8 @@ export function injectPrompts(
 export function applyVars(text: string, vars: PromptVars): string {
   return text
     .replace(/\{\{current_date\}\}/g, vars.currentDate)
+    .replace(/\{\{current_time\}\}/g, vars.currentTime ?? "")
+    .replace(/\{\{time_zone\}\}/g, vars.timeZone ?? "local machine time")
     .replace(/\{\{environment\}\}/g, vars.environment)
     .replace(/\{\{runtime_os\}\}/g, vars.runtimeOs)
     .replace(/\{\{available_tools\}\}/g, vars.availableTools)

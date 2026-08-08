@@ -351,7 +351,6 @@ describe("RunAgentTurnHandler lifecycle callbacks", () => {
     loadPrompts: async () => [
       { name: "system", content: "You are the NusaShell agent.", isTemplate: false },
       { name: "mcp-tools", content: "Use tool_list to discover tools.", isTemplate: false },
-      { name: "developer", content: "Date: {{current_date}} Env: {{environment}}", isTemplate: true },
     ],
     loadSubagentPrompt: async () => undefined,
     loadContinuePrompt: async () => undefined,
@@ -359,10 +358,12 @@ describe("RunAgentTurnHandler lifecycle callbacks", () => {
     loadReviewPrompt: async (_kind: "memory" | "skill" | "combined") => "",
   };
 
-  it("injects Live MCP block on non-resume turn when gateway provides a non-empty snapshot", async () => {
+  it("injects Live MCP catalog in a hidden runtime checkpoint on non-resume turns", async () => {
     const provider = new ScriptedProvider([{ text: "ok" }]);
     class LiveSnapshotGateway extends FakeToolGateway {
+      snapshotCalls = 0;
       override async getMcpLiveSnapshot() {
+        this.snapshotCalls += 1;
         return {
           running: [{ pluginId: "nusashell.notes" }],
           tools: [{
@@ -388,17 +389,27 @@ describe("RunAgentTurnHandler lifecycle callbacks", () => {
       pluginIds: [],
     });
     expect(result.text).toBe("ok");
-    // The provider request must contain a system message with the Live MCP block.
-    const systemContent = provider.requests[0]?.messages
-      .filter((m) => m.role === "system")
+    // REV2: no hidden user runtime checkpoint anymore. The Live MCP catalog is
+    // recovered via the ephemeral hydration transcript instead.
+    const legacyCheckpoint = provider.requests[0]?.messages
+      .filter((m) => m.role === "user")
       .map((m) => String(m.content))
-      .find((c) => c.includes("## Live MCP (runtime)"));
-    expect(systemContent).toBeDefined();
-    expect(systemContent).toContain("Running: nusashell.notes");
-    expect(systemContent).toContain("mcp_nusashell_notes_createNote");
-    // Rich catalog: schema JSON is present in the block.
-    expect(systemContent).toContain("inputSchema:");
-    expect(systemContent).toContain('"type": "object"');
+      .find((c) => c.startsWith("[NUSASHELL RUNTIME CONTEXT]"));
+    expect(legacyCheckpoint).toBeUndefined();
+    // Fresh room still carries the catalog through the synthetic hydration
+    // tool results (tool_list result contains the running plugin + schema).
+    const toolResults = provider.requests[0]?.messages
+      .filter((m) => m.role === "tool")
+      .map((m) => String(m.content))
+      .join("\n");
+    expect(toolResults).toContain("nusashell.notes");
+    expect(toolResults).toContain("mcp_nusashell_notes_createNote");
+    // Schema is JSON-serialized compactly in the tool_list result.
+    expect(toolResults).toContain('"inputSchema"');
+    expect(toolResults).toContain('"type":"object"');
+    // The synthetic hydration transcript is the sole runtime-context path.
+    // Do not rebuild an unused legacy system-prompt catalog first.
+    expect(tools.snapshotCalls).toBe(1);
   });
 
   it("does not inject Live MCP block when snapshot is empty", async () => {
@@ -425,7 +436,7 @@ describe("RunAgentTurnHandler lifecycle callbacks", () => {
     expect(hasLive).toBe(false);
   });
 
-  it("resume turn reads the live snapshot once for the compactor but does not inject it into the turn", async () => {
+  it("resume refreshes only the hidden runtime checkpoint, not the full system tail", async () => {
     const provider = new ScriptedProvider([{ text: "ok" }]);
     let snapshotCalls = 0;
     class CountingSnapshotGateway extends FakeToolGateway {
@@ -447,12 +458,20 @@ describe("RunAgentTurnHandler lifecycle callbacks", () => {
       pluginIds: [],
       resume: true,
     });
-    // The resumed turn's messages themselves are NOT injected (cost-saving
-    // resume path preserved): the provider request must not have the block.
+    // The cost-saving resume path still avoids system/developer re-injection.
+    // REV2: resume does NOT rebuild a hidden runtime checkpoint; the resumed
+    // loop re-hydrates after compaction only. So no Live MCP block and no
+    // `[NUSASHELL RUNTIME CONTEXT]` appear on resume.
     const resumeRequest = provider.requests.at(-1);
-    const hasLiveInTurn = resumeRequest?.messages
+    const hasLiveSystem = resumeRequest?.messages
       .some((m) => m.role === "system" && String(m.content).includes("## Live MCP (runtime)"));
-    expect(hasLiveInTurn).toBe(false);
+    expect(hasLiveSystem).toBe(false);
+    const hasLegacyCheckpoint = resumeRequest?.messages.some((m) =>
+      m.role === "user"
+      && String(m.content).startsWith("[NUSASHELL RUNTIME CONTEXT]"),
+    );
+    expect(hasLegacyCheckpoint).toBe(false);
+    expect(snapshotCalls).toBe(0);
   });
 
   // --- #36: resume path supplies system prompts to the summarizer ---
@@ -498,7 +517,7 @@ describe("RunAgentTurnHandler lifecycle callbacks", () => {
     // At least two provider calls: the summarizer (round 0) and the resumed turn.
     expect(provider.requests.length).toBeGreaterThanOrEqual(2);
     // The summarizer request (round 0) MUST contain the injected system prompts
-    // (system.md / developer with Live MCP marker) — not the raw history only.
+    // (the stable system prefix) — not the raw history only.
     const summarizer = provider.requests[0];
     if (!summarizer) {
       throw new Error("expected a summarizer request on the resume-compact path");
@@ -508,6 +527,6 @@ describe("RunAgentTurnHandler lifecycle callbacks", () => {
       .map((m) => String(m.content));
     expect(systemContents.length).toBeGreaterThan(0);
     expect(systemContents.some((c) => c.includes("You are the NusaShell agent."))).toBe(true);
-    expect(systemContents.some((c) => c.includes("Date:"))).toBe(true);
+    expect(systemContents.some((c) => c.includes("Use tool_list to discover tools."))).toBe(true);
   });
   });

@@ -102,6 +102,8 @@ describe("mapToCommand", () => {
       messages: [{ role: "user", content: "hi" }],
       pluginIds: [],
       traceId: "trace-run",
+      messageId: "msg-assistant",
+      messagePosition: 2,
     }));
     expect(result.kind).toBe("command");
     if (result.kind === "command") {
@@ -109,6 +111,8 @@ describe("mapToCommand", () => {
         kind: "run-agent-turn",
         interactive: true,
         traceId: "trace-run",
+        messageId: "msg-assistant",
+        messagePosition: 2,
       });
     }
   });

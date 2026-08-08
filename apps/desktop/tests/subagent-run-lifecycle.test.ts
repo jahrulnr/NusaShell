@@ -116,4 +116,26 @@ describe("SubagentRunLifecycle", () => {
     expect(lc.isViewingOwner("conv-1")).toBe(true);
     expect(lc.isViewingOwner("conv-2")).toBe(false);
   });
+
+  it("keeps stream state and disposers independent for concurrent runs", () => {
+    const lc = new SubagentRunLifecycle();
+    lc.selectRun("r1");
+    lc.activeRun = { runId: "r1" };
+    lc.streamState = { runId: "r1", steps: [{ type: "text", content: "one" }] };
+    const disposeOne = vi.fn();
+    lc.startRun(() => disposeOne);
+
+    lc.selectRun("r2");
+    lc.activeRun = { runId: "r2" };
+    lc.streamState = { runId: "r2", steps: [{ type: "text", content: "two" }] };
+    const disposeTwo = vi.fn();
+    lc.startRun(() => disposeTwo);
+
+    lc.selectRun("r1");
+    expect(lc.activeRun?.runId).toBe("r1");
+    expect(lc.streamState?.steps[0]?.content).toBe("one");
+    expect(lc.streamDisposer).toBe(disposeOne);
+    expect(disposeOne).not.toHaveBeenCalled();
+    expect(disposeTwo).not.toHaveBeenCalled();
+  });
 });

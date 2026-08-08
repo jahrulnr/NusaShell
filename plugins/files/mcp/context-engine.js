@@ -30,6 +30,96 @@ export const WORKSPACE_INSTRUCTIONS_URI = "nusashell://workspace/AGENTS.md";
 /** Personalization multipliers (research doc: active 50x, mentioned 10x). */
 const ACTIVE_FILE_BOOST = 50;
 const QUERY_MATCH_BOOST = 10;
+/** Role-match boost folded into Personalized PageRank personalization (like query 10x). */
+const ROLE_MATCH_BOOST = 8;
+/** Recency half-life for role-aware scores (matches experimental rcr_router.py). */
+const RECENCY_HALF_LIFE_MS = 30 * 86400 * 1000;
+
+/**
+ * Descending rank comparator with a deterministic path tie-break, so files
+ * with exactly equal scores keep a stable order across calls (Map insertion
+ * order alone is not a reliable tie-break for byte-identical map output).
+ * @param {[string, number]} a
+ * @param {[string, number]} b
+ */
+function compareRankedDesc(a, b) {
+  return b[1] - a[1] || a[0].localeCompare(b[0]);
+}
+
+/**
+ * Role-specific token budget: B(role) = floor(base * multiplier + offset).
+ * Absent/unknown role leaves the caller's budget unchanged (legacy).
+ * Planner gets more room for docs; executor is near-base for code; reviewer mid for tests/conventions.
+ */
+export const ROLE_BUDGET_PARAMS = Object.freeze({
+  planner: { multiplier: 1.2, offset: 256 },
+  executor: { multiplier: 1.05, offset: 64 },
+  reviewer: { multiplier: 1.12, offset: 128 },
+});
+
+export const CONTEXT_MAP_ROLES = Object.freeze(Object.keys(ROLE_BUDGET_PARAMS));
+
+/**
+ * @param {number} baseBudget caller token budget (unchanged semantics)
+ * @param {string} [role] planner | executor | reviewer
+ * @returns {number}
+ */
+export function allocateRoleBudget(baseBudget, role) {
+  const params = role ? ROLE_BUDGET_PARAMS[role] : null;
+  if (!params) return baseBudget;
+  return Math.max(1, Math.floor(baseBudget * params.multiplier + params.offset));
+}
+
+/**
+ * Exponential recency decay: 1 at now, ~0.5 at one half-life, etc.
+ * @param {number} mtimeMs file mtime
+ * @param {number} [nowMs]
+ */
+export function recencyDecay(mtimeMs, nowMs = Date.now()) {
+  if (!Number.isFinite(mtimeMs) || mtimeMs <= 0) return 1;
+  const age = Math.max(0, nowMs - mtimeMs);
+  return Math.exp((-Math.LN2 * age) / RECENCY_HALF_LIFE_MS);
+}
+
+/**
+ * Deterministic role × path affinity used as a PageRank personalization multiplier.
+ * planner → docs / markdown / AGENTS / RULES; executor → non-test source; reviewer → tests + conventions.
+ * @param {string} rel workspace-relative posix path
+ * @param {string} [role]
+ * @returns {number} >= 1
+ */
+export function roleMatchMultiplier(rel, role) {
+  if (!role || !ROLE_BUDGET_PARAMS[role]) return 1;
+  const p = toPosixPath(rel);
+  const base = p.includes("/") ? p.slice(p.lastIndexOf("/") + 1) : p;
+  const ext = (() => {
+    const i = base.lastIndexOf(".");
+    return i >= 0 ? base.slice(i).toLowerCase() : "";
+  })();
+  const isTest =
+    /(?:^|\/)(?:tests?|__tests__)\//i.test(p) ||
+    /\.(?:test|spec)\.[^.]+$/i.test(p);
+  const isConvention =
+    /^AGENTS\.md$/i.test(base) ||
+    /^RULES(?:\.[^.]+)?$/i.test(base) ||
+    /(?:^|\/)docs\//i.test(p);
+  const isDoc = DOC_EXTS.has(ext) || isConvention;
+  const isCode = Boolean(SUPPORTED_EXTS[ext]);
+
+  switch (role) {
+    case "planner":
+      return isDoc || isConvention ? ROLE_MATCH_BOOST : 1;
+    case "executor":
+      return isCode && !isTest ? ROLE_MATCH_BOOST : 1;
+    case "reviewer":
+      if (isTest) return ROLE_MATCH_BOOST;
+      if (isConvention || /^AGENTS\.md$/i.test(base)) return ROLE_MATCH_BOOST;
+      if (isDoc) return Math.max(2, ROLE_MATCH_BOOST / 2);
+      return 1;
+    default:
+      return 1;
+  }
+}
 
 const MANIFESTS = {
   "package.json": "node",
@@ -482,6 +572,9 @@ export class ContextEngine {
 
   /**
    * Phases 3+6: extract symbols for walked files, using the mtime/size cache.
+   * Populates the result Maps in `files` order (not async completion order) so
+   * downstream stable sorts see a deterministic insertion order — required for
+   * context_map determinism when PPR scores tie.
    */
   async extractAll(files, { refresh = false } = {}) {
     const defsByFile = new Map();
@@ -489,39 +582,55 @@ export class ContextEngine {
     let cacheHits = 0;
     let cacheMisses = 0;
 
-    await Promise.all(files.map(async (file) => {
-      if (file.doc) {
-        defsByFile.set(file.rel, []);
-        refsByFile.set(file.rel, []);
-        return;
-      }
+    const results = await Promise.all(files.map(async (file) => {
       let stat;
       try {
         stat = await fs.stat(file.abs);
       } catch {
-        return;
+        return null;
       }
-      if (stat.size > MAX_EXTRACT_BYTES) return;
+      if (file.doc) {
+        const cached = refresh ? null : this.cache.get(file.rel);
+        if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+          cacheHits += 1;
+        } else {
+          cacheMisses += 1;
+          this.cache.set(file.rel, {
+            mtimeMs: stat.mtimeMs,
+            size: stat.size,
+            lang: "doc",
+            defs: [],
+            refs: [],
+          });
+        }
+        return { rel: file.rel, defs: [], refs: [] };
+      }
+      if (stat.size > MAX_EXTRACT_BYTES) return null;
 
       const cached = refresh ? null : this.cache.get(file.rel);
       if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
         cacheHits += 1;
-        defsByFile.set(file.rel, cached.defs);
-        refsByFile.set(file.rel, cached.refs);
-        return;
+        return { rel: file.rel, defs: cached.defs, refs: cached.refs };
       }
       cacheMisses += 1;
       let text;
       try {
         text = await fs.readFile(file.abs, "utf8");
       } catch {
-        return;
+        return null;
       }
       const { defs, refs } = this.extractFromText(file.rel, text, file.lang);
       this.cache.set(file.rel, { mtimeMs: stat.mtimeMs, size: stat.size, lang: file.lang, defs, refs });
-      defsByFile.set(file.rel, defs);
-      refsByFile.set(file.rel, refs);
+      return { rel: file.rel, defs, refs };
     }));
+
+    // Insert in walk order (results keep `files` order because Promise.all
+    // preserves array order), so Map iteration order is deterministic.
+    for (const result of results) {
+      if (!result) continue;
+      defsByFile.set(result.rel, result.defs);
+      refsByFile.set(result.rel, result.refs);
+    }
 
     return { defsByFile, refsByFile, cacheHits, cacheMisses };
   }
@@ -538,8 +647,11 @@ export class ContextEngine {
    * @param {object} [options]
    * @param {string} [options.activeFile]
    * @param {string} [options.query]
+   * @param {string} [options.role] planner | executor | reviewer — omit for legacy ranks
+   * @param {Map<string, number>} [options.mtimes] rel → mtimeMs for recency decay
+   * @param {number} [options.now] clock ms (injectable for tests)
    */
-  rankFiles(defsByFile, refsByFile, { activeFile, query } = {}) {
+  rankFiles(defsByFile, refsByFile, { activeFile, query, role, mtimes, now } = {}) {
     const symbolToDefiners = new Map();
     const nodes = new Set();
     for (const [rel, defs] of defsByFile) {
@@ -564,6 +676,8 @@ export class ContextEngine {
       }
     }
 
+    const useRole = Boolean(role && ROLE_BUDGET_PARAMS[role]);
+
     /** @type {Record<string, number>} */
     const personalization = {};
     if (activeFile) personalization[toPosix(activeFile)] = ACTIVE_FILE_BOOST;
@@ -578,12 +692,52 @@ export class ContextEngine {
         }
       }
     }
+    if (useRole) {
+      for (const rel of nodes) {
+        const mult = roleMatchMultiplier(rel, role);
+        if (mult !== 1) {
+          personalization[rel] = (personalization[rel] ?? 1) * mult;
+        }
+      }
+    }
 
     const graph = { nodes: [...nodes], outEdges };
     const scores = personalizedPagerank(graph, personalization);
-    const ranked = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+    const clock = Number.isFinite(now) ? now : Date.now();
+    /** @type {Array<{ path: string, score: number, cost: number, roleMatch: number, recency: number }>} */
+    const roleScores = [];
+    let ranked;
+    if (useRole) {
+      ranked = Object.entries(scores).map(([rel, baseScore]) => {
+        const mtimeMs = mtimes?.get(rel) ?? clock;
+        const recency = recencyDecay(mtimeMs, clock);
+        const roleMatch = roleMatchMultiplier(rel, role);
+        const score = baseScore * recency;
+        const defCost = Math.max(
+          1,
+          (defsByFile.get(rel) ?? []).slice(0, MAX_DEFS_PER_FILE)
+            .reduce((acc, d) => acc + estimateTokens(d.sig ?? ""), 0),
+        );
+        roleScores.push({
+          path: rel,
+          score: Number(score.toFixed(6)),
+          cost: defCost,
+          roleMatch,
+          recency: Number(recency.toFixed(6)),
+        });
+        return [rel, score];
+      });
+      ranked.sort(compareRankedDesc);
+      roleScores.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
+    } else {
+      ranked = Object.entries(scores).sort(compareRankedDesc);
+    }
     const edgeCount = [...outEdges.values()].reduce((acc, s) => acc + s.size, 0);
-    return { ranked, graphStats: { nodes: nodes.size, edges: edgeCount } };
+    return {
+      ranked,
+      graphStats: { nodes: nodes.size, edges: edgeCount },
+      ...(useRole ? { roleScores } : {}),
+    };
   }
 
   /**
@@ -650,6 +804,9 @@ export class ContextEngine {
    * @param {number} [options.budget] token budget for the map
    * @param {string} [options.activeFile] file to boost (relative, 50x)
    * @param {string} [options.query] symbol-name terms to boost (10x)
+   * @param {string} [options.role] planner | executor | reviewer — role-aware
+   *   budget + ranking; omit for legacy byte-identical behavior
+   * @param {number} [options.now] injectable clock for recency (tests)
    * @param {number} [options.maxFiles] scan cap
    * @param {boolean} [options.refresh] bypass the tag cache
    */
@@ -659,9 +816,13 @@ export class ContextEngine {
       budget = 1024,
       activeFile,
       query,
+      role,
+      now,
       maxFiles = MAX_SCAN_FILES,
       refresh = false,
     } = options;
+    const useRole = Boolean(role && ROLE_BUDGET_PARAMS[role]);
+    const effectiveBudget = useRole ? allocateRoleBudget(budget, role) : budget;
     const started = performance.now();
     const base = resolvePath(this.root, subPath);
     await validateRoot(base);
@@ -678,18 +839,33 @@ export class ContextEngine {
     const { defsByFile, refsByFile, cacheHits, cacheMisses } = await this.extractAll(files, { refresh });
     const extractMs = performance.now() - t;
 
+    /** @type {Map<string, number>|undefined} */
+    let mtimes;
+    if (useRole) {
+      mtimes = new Map();
+      for (const file of files) {
+        const cached = this.cache.get(file.rel);
+        if (cached) mtimes.set(file.rel, cached.mtimeMs);
+      }
+    }
+
     t = performance.now();
-    const { ranked, graphStats } = this.rankFiles(defsByFile, refsByFile, { activeFile, query });
+    const { ranked, graphStats, roleScores } = this.rankFiles(defsByFile, refsByFile, {
+      activeFile,
+      query,
+      ...(useRole ? { role, mtimes, now } : {}),
+    });
     const graphMs = performance.now() - t;
 
     t = performance.now();
-    const mapResult = this.buildRepoMap(ranked, defsByFile, budget, { activeFile });
+    const mapResult = this.buildRepoMap(ranked, defsByFile, effectiveBudget, { activeFile });
     const elideMs = performance.now() - t;
 
     return {
       map: mapResult.md,
       stack,
       ranks: ranked.slice(0, 20).map(([rel, score]) => [rel, Number(score.toFixed(6))]),
+      ...(useRole && roleScores ? { roleScores: roleScores.slice(0, 20) } : {}),
       stats: {
         tokensUsed: mapResult.tokensUsed,
         filesShown: mapResult.filesShown,
@@ -699,6 +875,7 @@ export class ContextEngine {
         cacheMisses,
         walk,
         graph: graphStats,
+        ...(useRole ? { role, effectiveBudget } : {}),
         timingMs: {
           classify: Math.round(classifyMs * 100) / 100,
           walk: Math.round(walkMs * 100) / 100,

@@ -20,13 +20,13 @@ The installer downloads the release manifest and payload, verifies SHA-256 befor
 
 On Linux, releases live in `~/.local/share/nusashell/versions/`; `current` points to the active version and `~/.local/bin/nusashell` launches it. A desktop-menu entry is written under `~/.local/share/applications`. Updates download a new version, verify it, and switch `current`; the installer keeps only the newly installed version and exactly one previous version. For example, `0.1.6` → `0.1.7` keeps both, then `0.1.7` → `0.1.9` removes `0.1.6` and keeps `{0.1.7, 0.1.9}`. AppImage builds continue to use Electron's updater; system packages should be updated through the system package manager.
 
-Electron ships a `chrome-sandbox` helper that must be owned by root with mode
-`4755`. Without that, Chromium aborts even when user namespaces are enabled.
-The installer detects this before claiming success: it prompts (via `/dev/tty`,
-so `curl | bash` still works) to run a one-time `sudo chown`/`chmod`. If you
-decline, sudo fails, or `NUSASHELL_NON_INTERACTIVE=1` is set, it renames the
-helper and launches with `--no-sandbox` instead. To restore the real sandbox
-later, fix the renamed helper and re-run the installer.
+The installer probes Chromium's unprivileged user-namespace sandbox directly;
+it does not rely only on sysctl values because AppArmor can still reject the
+operation. Normal Linux installations therefore do not need `sudo`, and the
+per-version `chrome-sandbox` copy is moved aside. If the probe fails and no
+root-owned helper (`root:root`, mode `4755`) is already available, the
+installer removes the unusable helper and launches with `--no-sandbox` so an
+update cannot leave the app unstartable.
 
 macOS installs to `~/Applications/NusaShell.app`; the installer removes the quarantine attribute when present. If `~/.local/bin` is not on Linux's PATH, add the exact line printed by the installer to your shell profile.
 

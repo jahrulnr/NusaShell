@@ -47,29 +47,22 @@ NusaShell scheduled jobs have two modes. Pick the right one for the task.
 | Input | Meaning |
 | --- | --- |
 | `every 30m` / `2h` / `1d` | Relative interval from now — timezone does not matter |
-| `0 9 * * *` | 5-field cron — **hour/minute are UTC**, not the user's local clock |
+| `0 9 * * *` | 5-field cron — hour/minute use the host machine's local clock |
 | `2025-12-01T09:00:00Z` | One-shot at that instant (UTC) |
-| `2025-12-01 09:00` (no offset) | Also treated as **UTC** — the shell appends `Z` |
+| `2025-12-01 09:00` (no offset) | One-shot at 09:00 on the host machine's local clock |
 
 Jobs run only while NusaShell is open. A one-shot missed while the app was
 closed is marked errored, not silently fired.
 
 ### Timezone rules (important)
 
-Cron and bare timestamps are **UTC**. The Jobs UI may show `nextRunAt` in the
-user's local timezone, but the schedule expression itself is always UTC.
+Cron and bare timestamps use the **host machine's local timezone**. The Jobs UI
+and scheduler therefore agree on `0 9 * * *` meaning 09:00 on the machine
+running NusaShell. Intervals (`every 30m`) are timezone-independent.
 
-When the user says a local clock time (e.g. "9am" in Indonesia / WIB = UTC+7):
-
-1. Convert to UTC before writing the cron or ISO string.
-   Example: 09:00 WIB → 02:00 UTC → cron `0 2 * * *`.
-2. Prefer an explicit `Z` (or a numeric offset like `+07:00`) on one-shots so
-   the intent is unambiguous.
-3. Tell the user both times when confirming ("fires at 09:00 WIB / 02:00 UTC").
-4. Intervals (`every 30m`) need no conversion.
-
-Do not assume the host `runtime_os` implies a timezone — ask or use a known
-user preference if the offset is unclear.
+For a one-shot that must preserve an external timezone or a specific instant,
+use an explicit `Z` or numeric offset such as `2025-12-01T09:00:00+07:00`.
+Confirm the machine-local time when the user is scheduling across locations.
 
 ## Monitoring
 

@@ -57,16 +57,9 @@ export async function execMcpUnregister(
   if (!plugin) throw new ApplicationError("PLUGIN_NOT_FOUND", `Plugin not found: ${pluginIdValue}`);
 
   const userRoot = await realpath(deps.userPluginsRoot!);
-  if (deps.bundledPluginsRoot) {
-    const bundledRoot = await realpath(deps.bundledPluginsRoot).catch(() => "");
-    const bundledPath = bundledRoot ? await realpath(resolve(bundledRoot, pluginIdValue)).catch(() => "") : "";
-    if (bundledPath && isDirectChild(bundledRoot, bundledPath)) {
-      throw new ApplicationError("AGENT_INVALID_INPUT", "Bundled plugins cannot be unregistered by the agent");
-    }
-  }
   const installPath = await realpath(plugin.installPath).catch(() => "");
   if (!isDirectChild(userRoot, installPath)) {
-    throw new ApplicationError("AGENT_INVALID_INPUT", "Bundled plugins cannot be unregistered by the agent");
+    throw new ApplicationError("AGENT_INVALID_INPUT", "Plugin is not inside the user plugins root; cannot be unregistered");
   }
   if (basename(installPath) !== pluginIdValue) {
     throw new ApplicationError("AGENT_INVALID_INPUT", "Plugin folder does not match the requested plugin id");

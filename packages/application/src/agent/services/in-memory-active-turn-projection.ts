@@ -23,6 +23,8 @@ export class InMemoryActiveTurnProjection implements ActiveTurnProjectionPort {
     const snap: ActiveTurnSnapshot = {
       conversationId: input.conversationId,
       traceId: input.traceId,
+      ...(input.messageId ? { messageId: input.messageId } : {}),
+      ...(input.messagePosition !== undefined ? { messagePosition: input.messagePosition } : {}),
       status: "running",
       steps: [],
       openTools: [],
@@ -92,7 +94,9 @@ export class InMemoryActiveTurnProjection implements ActiveTurnProjectionPort {
             ...t,
             status: execution.ok ? "ok" as const : "fail" as const,
             ...(execution.error ? { error: execution.error } : {}),
-            ...(execution.result !== undefined
+            ...(execution.modelOutput !== undefined
+              ? { output: execution.modelOutput }
+              : execution.result !== undefined
               ? { output: typeof execution.result === "string" ? execution.result : JSON.stringify(execution.result) }
               : {}),
           }

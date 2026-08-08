@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampModelEffort, estimateContextTokens, formatContextUsage, modelCompatibility, modelVisionStatus, resolveContextBadgeTokens, resolveRoomModel, searchModels, shouldApplyAcpUiUpdate } from "../src/renderer/ai-model-ui.js";
+import { clampModelEffort, estimateContextTokens, formatContextUsage, formatEffortLabel, formatModelPickerLabel, modelCompatibility, modelEffortOptions, modelVisionStatus, resolveContextBadgeTokens, resolveRoomEffort, resolveRoomModel, searchModels, shouldApplyAcpUiUpdate } from "../src/renderer/ai-model-ui.js";
 
 const visionModel = {
   id: "openai/gpt-5",
@@ -13,6 +13,25 @@ const visionModel = {
 };
 
 describe("agent model UI projections", () => {
+  it("labels a changed model as next-turn while another model is running", () => {
+    expect(formatModelPickerLabel({
+      model: { id: "claude-sonnet", key: "claude:sonnet" },
+      effort: "high",
+      source: "room",
+      isRunning: true,
+      liveModelKey: "openai:gpt-5",
+    })).toBe("claude-sonnet · high · room · next turn");
+  });
+
+  it("shows the omit-effort sentinel as default, not auto", () => {
+    expect(formatEffortLabel("auto")).toBe("default");
+    expect(formatEffortLabel("high")).toBe("high");
+    expect(formatModelPickerLabel({
+      model: { id: "gpt-5" },
+      effort: "auto",
+    })).toBe("gpt-5 · default");
+  });
+
   it("shows provider compatibility independently from effort", () => {
     expect(modelCompatibility(visionModel)).toEqual(["vision", "document", "tools", "reasoning"]);
   });
@@ -131,7 +150,15 @@ describe("agent model UI projections", () => {
     expect(clampModelEffort(visionModel, "auto")).toBe("auto");
     expect(clampModelEffort(visionModel, "max")).toBe("medium");
     expect(clampModelEffort(visionModel, "xhigh")).toBe("xhigh");
-    expect(clampModelEffort({ ...visionModel, supportedEfforts: [] }, "high")).toBe("auto");
+    // Empty catalog → auto only (no invented portable levels).
+    expect(clampModelEffort({ ...visionModel, supportedEfforts: [], reasoningSupported: true }, "medium")).toBe("auto");
+    expect(clampModelEffort({ ...visionModel, supportedEfforts: [], reasoningSupported: false }, "high")).toBe("auto");
+  });
+
+  it("exposes only catalog effort options in the picker", () => {
+    expect(modelEffortOptions({ ...visionModel, supportedEfforts: [], reasoningSupported: true }))
+      .toEqual([]);
+    expect(modelEffortOptions(visionModel)).toEqual(["minimal", "low", "medium", "high", "xhigh"]);
   });
 });
 
@@ -259,7 +286,13 @@ describe("shouldApplyAcpUiUpdate", () => {
 
 describe("resolveRoomModel (ticket #38)", () => {
   const globalModel = { key: "global/claude", id: "claude-3", label: "Claude" };
-  const roomModel = { key: "room/gpt", id: "gpt-5", label: "GPT" };
+  const roomModel = {
+    key: "room/gpt",
+    id: "gpt-5",
+    label: "GPT",
+    supportedEfforts: ["low", "medium", "high"],
+    defaultEffort: "medium",
+  };
 
   it("prefers the conversation's explicit model binding over the global default", () => {
     expect(resolveRoomModel(
@@ -275,6 +308,37 @@ describe("resolveRoomModel (ticket #38)", () => {
       [globalModel, roomModel],
       "global/claude",
     )).toEqual({ model: globalModel, effort: "auto", source: "global", explicit: false });
+  });
+
+  it("never inherits the Settings-page global effort into an unbound room", () => {
+    // Room effort is independent of the settings/global effort. Unbound rooms
+    // stay on "auto" so picking effort in another room (which also stamps the
+    // settings default) cannot leak across conversations.
+    expect(resolveRoomEffort(
+      { kind: "agent", id: "c1" },
+      [globalModel, roomModel],
+      "global/claude",
+      "high",
+    )).toBe("auto");
+    expect(resolveRoomEffort(
+      { kind: "agent", id: "c1", model: { modelKey: "room/gpt", effort: "low" } },
+      [globalModel, roomModel],
+      "global/claude",
+      "high",
+    )).toBe("low");
+  });
+
+  it("forces auto when the bound model has no catalog effort levels", () => {
+    expect(resolveRoomModel(
+      { kind: "agent", id: "c1", model: { modelKey: "empty/key", effort: "medium" } },
+      [{ key: "empty/key", id: "empty", supportedEfforts: [] }],
+      "global/claude",
+    )).toEqual({
+      model: { key: "empty/key", id: "empty", supportedEfforts: [] },
+      effort: "auto",
+      source: "room",
+      explicit: true,
+    });
   });
 
   it("resolves the room model even when its key uses a bound cleanup (explicit flag)", () => {

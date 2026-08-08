@@ -15512,7 +15512,8 @@ try {
 }
 var HOME = import_node_os.default.homedir();
 var MAX_BUFFER_CHARS = 200 * 1024;
-var BOOTSTRAP_DIR = import_node_path.default.join(import_node_os.default.tmpdir(), "nusashell-terminal-bootstrap");
+var BOOTSTRAP_ROOT = process.env.NUSASHELL_USER_DATA ? import_node_path.default.join(import_node_path.default.resolve(process.env.NUSASHELL_USER_DATA), "runtime") : import_node_os.default.tmpdir();
+var BOOTSTRAP_DIR = import_node_path.default.join(BOOTSTRAP_ROOT, "terminal-bootstrap");
 var BASH_RC = import_node_path.default.join(BOOTSTRAP_DIR, "bashrc");
 var ZSH_RC = import_node_path.default.join(BOOTSTRAP_DIR, ".zshrc");
 var COLOR_BOOTSTRAP_SRC = import_node_path.default.join(moduleDir, "color-bootstrap.sh");

@@ -118,24 +118,11 @@
   background: #090e16;
 }
 .agent-view .agent-header {
-  flex: none;
-  align-items: center;
-  min-height: 78px;
+  display: none;
+  min-height: 0;
   margin: 0;
-  padding: 13px 24px 12px;
-  border-bottom: 1px solid var(--border-soft);
-  background: #0b111a;
-}
-.agent-view .agent-header .page-title {
-  font-size: 20px;
-}
-.agent-view .agent-header .subtitle {
-  max-width: 760px;
-}
-.agent-view .agent-kicker {
-  margin-bottom: 4px;
-  color: #91a0b8;
-  font-size: 9.5px;
+  padding: 0;
+  border: 0;
 }
 .agent-shell {
   grid-template-columns: 242px minmax(0, 1fr);
@@ -1188,25 +1175,84 @@
   border: 0;
   border-bottom: 1px solid #243246;
   background: #0b131c;
-  padding: 8px 10px 9px;
+  padding: 0;
 }
 .agent-tool-job-strip-head {
   display: flex;
   align-items: center;
-  min-height: 20px;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 36px;
+  padding: 0 4px 0 0;
+}
+.agent-tool-job-strip-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+  margin: 0;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: transparent;
+  color: #c4cfdd;
+  cursor: pointer;
+  font: 12.5px/1.2 "IBM Plex Sans", system-ui, sans-serif;
+  text-align: left;
+}
+.agent-tool-job-strip-toggle:hover,
+.agent-tool-job-strip-toggle:focus-visible {
+  color: #edf2f8;
+  background: rgba(255, 255, 255, .03);
+  outline: none;
+}
+.agent-tool-job-strip-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  flex: none;
+  color: #8fa4ba;
+  font-size: 14px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform .14s ease;
+}
+.agent-tool-job-strip[data-expanded="true"] .agent-tool-job-strip-chevron {
+  transform: rotate(90deg);
 }
 .agent-tool-job-strip-title {
-  color: #7f91a8;
-  font: 10px "IBM Plex Sans", system-ui, sans-serif;
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font: 12.5px/1.2 "IBM Plex Sans", system-ui, sans-serif;
   letter-spacing: 0;
   text-transform: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-tool-job-strip-meta {
+  flex: none;
+  margin-right: 10px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #141e2b;
+  color: #8fa0b6;
+  font: 11px/1.2 "JetBrains Mono", monospace;
+  white-space: nowrap;
+}
+.agent-tool-job-strip-meta[data-done="true"] {
+  color: #8fd;
+  background: rgba(120, 200, 120, .1);
 }
 .agent-tool-job-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
   max-height: 180px;
-  margin-top: 7px;
+  margin-top: 0;
+  padding: 0 10px 8px;
   overflow-y: auto;
 }
 .agent-tool-job-card {
@@ -1538,6 +1584,16 @@ button { min-width: 0; }
 }
 
 @media (max-width: 760px) {
+  .agent-view .agent-header {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: flex-end;
+    min-height: 48px;
+    padding: 8px 18px;
+    border-bottom: 1px solid var(--border-soft);
+    background: #0b111a;
+  }
   .agent-mobile-conversations-btn { display: inline-flex; }
   .agent-shell { grid-template-columns: 1fr; }
   .agent-conversations { display: none; }

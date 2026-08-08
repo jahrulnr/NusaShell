@@ -1,5 +1,5 @@
 import { safeStorage } from "electron";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type {
   MailServerSettings,
@@ -22,6 +22,36 @@ export class MailSettingsStore {
   private mutationQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly path: string) {}
+
+  /**
+   * One-way move of legacy `{userData}/mail-settings.json` into this store's
+   * path (plugins-data/nusashell.mail/...). Copies bytes verbatim so base64
+   * credential fields are never decrypted or re-encrypted. No-op when the
+   * target already exists or the legacy file is missing.
+   */
+  async migrateFrom(legacyPath: string): Promise<void> {
+    if (legacyPath === this.path) return;
+    if (await pathExists(this.path)) return;
+    if (!(await pathExists(legacyPath))) return;
+
+    await mkdir(dirname(this.path), { recursive: true });
+    try {
+      // Prefer atomic rename so credentials never exist in two durable places
+      // mid-migration on the same filesystem.
+      await rename(legacyPath, this.path);
+    } catch (error) {
+      if (!isCrossDeviceError(error)) {
+        throw new Error("Could not migrate mail settings", { cause: error });
+      }
+      // Cross-device: copy bytes then remove the legacy file only after the
+      // target write succeeds (still one-way; no re-encode of password fields).
+      const raw = await readFile(legacyPath);
+      const temporaryPath = `${this.path}.tmp`;
+      await writeFile(temporaryPath, raw, { mode: 0o600 });
+      await rename(temporaryPath, this.path);
+      await unlink(legacyPath);
+    }
+  }
 
   async load(): Promise<readonly MailAccountSettings[]> {
     if (this.accounts) return this.accounts;
@@ -259,4 +289,17 @@ function text(value: unknown): string {
 
 function isFileNotFound(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+
+function isCrossDeviceError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "EXDEV";
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }

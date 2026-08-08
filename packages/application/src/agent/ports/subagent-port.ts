@@ -19,6 +19,11 @@ export interface SubagentRoutingInfo {
 
 export interface SubagentRunRequest {
   readonly runId: string;
+  /** Parent NusaShell chat that owns the persisted run record. */
+  readonly parentConversationId?: string;
+  /** Parent agent-turn trace for correlating lifecycle events. */
+  readonly parentTraceId?: string;
+  /** ACP session identifier; distinct from parentConversationId. */
   readonly conversationId: string;
   readonly providerId: string;
   readonly workspace: string;

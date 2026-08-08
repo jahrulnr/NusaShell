@@ -62,6 +62,17 @@ describe("CompletionSteerer", () => {
     steerer.dispose();
   });
 
+  it("does not start a turn when isIdle is false due to composer draft/IME (#69)", async () => {
+    // Caller wires isIdle to include composer busy; steerer must cancel, not overwrite.
+    idleState = false;
+    const steerer = makeSteerer();
+    steerer.onJobEnded({ handleId: "h1", conversationId: "conv-1", ok: true, reason: "completed", toolName: "t" });
+    await new Promise((r) => setTimeout(r, 600));
+    expect(startedTurns).toHaveLength(0);
+    expect(logs.some((l) => l.includes("composer busy") || l.includes("not idle"))).toBe(true);
+    steerer.dispose();
+  });
+
   it("ignores events for other conversations", async () => {
     const steerer = makeSteerer();
     steerer.onJobEnded({ handleId: "h1", conversationId: "conv-other", ok: true, reason: "completed", toolName: "t" });

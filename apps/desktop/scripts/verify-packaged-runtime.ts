@@ -40,7 +40,7 @@ const archivePath = archives[0]!;
 const resourcesPath = dirname(archivePath);
 const requiredAgentResources = [
   join(resourcesPath, "agent", "prompts", "system.md"),
-  join(resourcesPath, "agent", "prompts", "developer.md"),
+  join(resourcesPath, "agent", "prompts", "mcp-tools.md"),
   join(resourcesPath, "agent", "docs", "getting-started.md"),
 ];
 const missingAgentResources = (

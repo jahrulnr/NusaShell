@@ -35,7 +35,7 @@
         {
           "heading": "Sidebar",
           "paragraphs": [
-            "Vertical navigation on the left, ordered Home, Agent, Skills, Learning, Plugins, AI Providers, Autostart, and Logs. It can show icons with labels or icons only, remembers that choice locally, and links to the project documentation on GitHub from its footer."
+            "Vertical navigation on the left, ordered Home, Agent, Skills, Learning, Plugins, Autostart, AI Providers, Jobs, Pipelines, and Logs. It can show icons with labels or icons only, remembers that choice locally, and links to the project documentation on GitHub from its footer."
           ],
           "controls": [
             "nav-home",
@@ -43,8 +43,10 @@
             "nav-skills",
             "nav-learning",
             "nav-plugins",
-            "nav-ai-providers",
             "nav-autostart",
+            "nav-ai-providers",
+            "nav-jobs",
+            "nav-pipelines",
             "nav-logs",
             "open-docs",
             "sidebar-mode-toggle"
@@ -57,13 +59,6 @@
       "purpose": "The default view and app launcher. Shows windowed (UI) plugins as a searchable grid of app tiles. Headless MCP-only plugins do not appear here \u2014 manage them from the Plugins view.",
       "howToOpen": "Open NusaShell, or click the Home item in the left sidebar.",
       "sections": [
-        {
-          "heading": "Greeting",
-          "paragraphs": [
-            "Displays a compact local-workbench kicker, the product name, and the tagline 'Your AI tool shell \u2014 plugins with real UIs.'"
-          ],
-          "controls": []
-        },
         {
           "heading": "Search and filters",
           "paragraphs": [
@@ -182,7 +177,7 @@
         {
           "heading": "Conversation list",
           "paragraphs": [
-            "A fixed workbench rail listing local conversation threads. Click a thread to open it; use the \u00d7 button to delete. At narrow widths the rail becomes a focusable Rooms drawer opened from the Agent header, so room switching remains available without consuming chat width."
+            "A fixed workbench rail listing local conversation threads. Click a thread to open it; use the \u00d7 button to delete. At narrow widths the rail becomes a focusable Rooms drawer opened from the compact Agent toolbar, so room switching remains available without consuming chat width."
           ],
           "controls": [
             "agent-conversations-title",
@@ -311,10 +306,11 @@
         {
           "heading": "Background jobs strip",
           "paragraphs": [
-            "A compact strip above the composer (below the task strip) shows active async tool jobs started via `async_run`. Its header includes the active-job count; each card keeps the tool name, status badge, and Stop action on one row, with live tail or error output shown below only when present. The strip rehydrates from `agent.tool_job_list` on conversation open and hides as soon as no jobs are running."
+            "A compact, collapsed-by-default strip above the composer (below the task strip) shows active async tool jobs started via `async_run`. Its collapsible header includes the active-job count; each card keeps the tool name, status badge, and Stop action on one row, with live tail or error output shown below only when present. The strip rehydrates from `agent.tool_job_list` on conversation open and hides as soon as no jobs are running."
           ],
           "controls": [
             "agent-tool-job-strip",
+            "agent-tool-job-strip-toggle",
             "agent-tool-job-list"
           ]
         },
@@ -637,7 +633,7 @@
         {
           "heading": "Autostart list",
           "paragraphs": [
-            "One row per installed plugin with a toggle. The header shows how many plugins are enabled."
+            "One row per installed plugin with a toggle. The compact toolbar shows how many plugins are enabled."
           ],
           "controls": [
             "autostart-count",
@@ -766,13 +762,13 @@
     },
     "pipelines": {
       "title": "Pipelines",
-      "purpose": "Beta multi-step DAG pipelines (manual Run now and event triggers while the app is open). Schedule triggers are not available; use Jobs for time-based work.",
+      "purpose": "Multi-step DAG pipelines with manual Run now, schedule, and event triggers while the app is open. Paused pipelines still allow manual runs; automatic schedule/event fires stay suppressed while paused.",
       "howToOpen": "Click the Pipelines item in the left sidebar.",
       "sections": [
         {
           "heading": "Pipeline list",
           "paragraphs": [
-            "Lists all pipelines as compact execution rails. Each card shows the pipeline identity, status signal, trigger, step flow, enabled state, and primary Inspect/Run actions; edit, pause, and delete live behind the overflow menu. An inline error panel appears when the list fails to load, and an empty state offers a Create first pipeline action."
+            "Lists all pipelines as compact execution rails. Each card shows the pipeline identity, status signal, trigger, step flow, enabled state, and primary Inspect/Run actions; edit, pause, and delete live behind the overflow menu. Paused pipelines keep Run now enabled with a tooltip that manual runs still work while automatic triggers do not. An inline error panel appears when the list fails to load, and an empty state offers a Create first pipeline action."
           ],
           "controls": [
             "pipelines-new-btn",
@@ -785,10 +781,11 @@
         {
           "heading": "Pipeline details",
           "paragraphs": [
-            "Inspect opens a stable DAG view that keeps every configured step visible before, during, and after a run. Click any step node to inspect its action, dependencies, output key, timestamps, status, definition, and rendered Markdown output. Run output remains below the DAG and is grouped by step."
+            "Inspect opens a stable DAG view that keeps every configured step visible before, during, and after a run. Click any step node to inspect its action, dependencies, output key, timestamps, status, definition, and rendered Markdown output. Run now stays enabled for paused pipelines (with the same manual-run explanation); it disables only while a run is in flight. Run output remains below the DAG and is grouped by step."
           ],
           "controls": [
-            "pipeline-details-cancel"
+            "pipeline-details-cancel",
+            "pipeline-details-run"
           ]
         }
       ]
@@ -1884,9 +1881,9 @@
     },
     "agent-conversation-search": {
       "section": "Conversation list",
-      "label": "Search conversations",
+      "label": "Search titles",
       "type": "search input",
-      "action": "Filters the conversation list by thread title as you type."
+      "action": "Filters the conversation list by thread title as you type (does not search message content)."
     },
     "agent-conversation-list": {
       "section": "Conversation list",
@@ -2057,11 +2054,11 @@
     },
     "agent-retry-btn": {
       "section": "Conversation thread",
-      "label": "Retry turn",
+      "label": "Recover turn",
       "type": "button",
       "selector": ".agent-retry-btn",
       "generated": true,
-      "action": "Appears on a failed assistant turn. Click to re-run the same turn."
+      "action": "Appears on a failed or interrupted assistant turn. Resume is shown only when a durable provider transcript with settled tool calls exists; Continue extends saved partial text, while Retry re-runs a retry-only failure."
     },
     "agent-form": {
       "section": "Composer",
@@ -2081,14 +2078,14 @@
       "label": "Task strip",
       "type": "container",
       "selector": ".agent-todo-strip",
-      "action": "Top row of the composer stack: collapsible agent-owned todo checklist. Hides when the list is empty."
+      "action": "Top row of the composer stack: collapsible agent-owned todo checklist. Hides when idle and empty; reserves space with No tasks yet while a turn is active."
     },
     "agent-todo-strip-toggle": {
       "section": "Task strip",
-      "label": "Collapse tasks",
+      "label": "Task checklist",
       "type": "button",
       "selector": ".agent-todo-strip-toggle",
-      "action": "Collapses or expands the task list. Label shows total task count (e.g. 5 Tasks)."
+      "action": "Collapses or expands the task list. Accessible name is Task checklist; visible label shows total task count (e.g. 5 Tasks)."
     },
     "agent-todo-strip-count": {
       "section": "Task strip",
@@ -2096,7 +2093,7 @@
       "type": "text",
       "selector": ".agent-todo-strip-count",
       "generated": true,
-      "action": "Shows total task count as N Tasks."
+      "action": "Polite live region showing total task count as N Tasks."
     },
     "agent-todo-strip-meta": {
       "section": "Task strip",
@@ -2104,7 +2101,7 @@
       "type": "text",
       "selector": ".agent-todo-strip-meta",
       "generated": true,
-      "action": "Right-side pill showing remaining open tasks (or All done)."
+      "action": "Polite live region with open progress (N open / All done) or No tasks yet while a turn is active with an empty list."
     },
     "agent-todo-strip-list": {
       "section": "Task strip",
@@ -2119,6 +2116,13 @@
       "type": "container",
       "selector": ".agent-tool-job-strip",
       "action": "Shows the compact background-job section and active-job count. Hides when no jobs are running."
+    },
+    "agent-tool-job-strip-toggle": {
+      "section": "Background jobs strip",
+      "label": "Collapse background jobs",
+      "type": "button",
+      "selector": ".agent-tool-job-strip-toggle",
+      "action": "Collapses or expands the active background-job list. The strip starts collapsed; job execution and Stop actions continue independently."
     },
     "agent-tool-job-list": {
       "section": "Background jobs strip",

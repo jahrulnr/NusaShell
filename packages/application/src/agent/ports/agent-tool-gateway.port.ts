@@ -1,5 +1,6 @@
 import type { AgentToolDefinition, ReasoningEffort } from "./agent-provider.port.js";
 import type { McpLiveSnapshot } from "../services/mcp-live-prompt-formatter.js";
+import type { WriteOrigin } from "../services/gateway-types.js";
 
 export interface AgentTurnContext {
   readonly interactive?: boolean;
@@ -21,6 +22,8 @@ export interface AgentTurnContext {
   readonly model?: string;
   /** Caller turn's reasoning effort — inherited by agent-mode jobs created via the `job` tool. */
   readonly effort?: ReasoningEffort;
+  /** Origin used by write-capable meta-tools; scoped to this turn only. */
+  readonly writeOrigin?: WriteOrigin;
 }
 
 export interface AgentToolGateway {
@@ -44,9 +47,9 @@ export interface AgentToolGateway {
   ): Promise<unknown>;
   /**
    * Optional: build a Live MCP runtime snapshot (running plugin ids + full
-   * tool catalog for those plugins). Used by `RunAgentTurnHandler` to inject
-   * a runtime-authoritative system block per interactive turn with the
-   * complete tool name/description/inputSchema for every running MCP tool.
+   * tool catalog for those plugins). Used by `RunAgentTurnHandler` to build a
+   * hidden, conversation-scoped runtime checkpoint with the complete
+   * tool name/description/inputSchema for every running MCP tool.
    * Stub/review gateways may omit this; the handler duck-types before calling.
    */
   getMcpLiveSnapshot?(turnId: string): Promise<McpLiveSnapshot>;

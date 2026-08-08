@@ -87,4 +87,80 @@ describe("AgentConversationController — stale-snapshot race (ticket #47)", () 
     expect(contents).toContain("user:3");
     expect(contents).toContain("assistant:answer 2");
   });
+
+  it("reserves the assistant slot before running and seals the response by that identity", async () => {
+    const order: string[] = [];
+    const user = { id: "msg-user", position: 1, revision: 1, role: "user", content: "hello", createdAt: "t1" };
+    const assistant = { id: "msg-assistant", position: 2, revision: 1, role: "assistant", content: "answer", traceId: "trace-1", createdAt: "t2" };
+    const append = vi.fn(async () => ({ id: "c1", kind: "agent", messages: [user] }));
+    const reserveAssistant = vi.fn(async () => {
+      order.push("reserve");
+      return { messageId: "msg-assistant", position: 2, revision: 0 };
+    });
+    const sealAssistant = vi.fn(async () => ({ id: "c1", kind: "agent", messages: [user, assistant] }));
+    const runTurn = vi.fn(async () => {
+      order.push("run");
+      return { traceId: "trace-1", text: "answer", toolCalls: [], rounds: 1 };
+    });
+    const get = vi.fn(async () => ({ id: "c1", kind: "agent", messages: [user, assistant] }));
+    const controller = new AgentConversationController({
+      shell: {
+        agentConversations: {
+          append,
+          reserveAssistant,
+          sealAssistant,
+          get,
+          list: vi.fn(async () => []),
+        },
+      },
+      runTurn,
+      getActiveModel: () => null,
+      log: vi.fn(),
+    } as never);
+    controller.conversation = { id: "c1", kind: "agent", messages: [] } as never;
+    controller.activeId = "c1";
+    controller.refresh = vi.fn(async () => {});
+    document.querySelector<HTMLInputElement>("#agent-input")!.value = "hello";
+
+    await controller.submit();
+
+    expect(order).toEqual(["reserve", "run"]);
+    expect(reserveAssistant).toHaveBeenCalledWith("c1", expect.any(String), { replaceLastInterrupted: false });
+    expect(sealAssistant).not.toHaveBeenCalled();
+    expect(controller.conversation?.messages.find((message) => message.id === "msg-assistant")?.content).toBe("answer");
+  });
+
+  it("replaces a stale Working draft with the durable assistant after its terminal event", async () => {
+    const durable = {
+      id: "c1",
+      kind: "agent",
+      messages: [
+        { id: "msg-user", role: "user", content: "first", createdAt: "t1" },
+        { id: "msg-old", role: "assistant", content: "completed answer", traceId: "trace-old", createdAt: "t2" },
+        { id: "msg-next", role: "user", content: "next", createdAt: "t3" },
+      ],
+    };
+    const controller = new AgentConversationController({
+      shell: {
+        agentConversations: {
+          get: vi.fn(async () => durable),
+          list: vi.fn(async () => []),
+        },
+      },
+      getActiveModel: () => null,
+      log: vi.fn(),
+    } as never);
+    controller.conversation = {
+      id: "c1",
+      kind: "agent",
+      messages: [durable.messages[0], durable.messages[2]],
+    } as never;
+    controller.activeId = "c1";
+    controller.createStreamingMessage({ messageId: "msg-old" });
+
+    await controller.reconcileTerminalTurn("c1", "trace-old");
+
+    expect(document.querySelectorAll("#agent-thread .agent-pending")).toHaveLength(0);
+    expect(document.querySelector("#agent-thread")?.textContent).toContain("completed answer");
+  });
 });

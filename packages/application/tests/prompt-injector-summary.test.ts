@@ -12,7 +12,6 @@ const baseVars: PromptVars = {
 const prompts: AgentPrompt[] = [
   { name: "system", content: "You are the agent.", isTemplate: false },
   { name: "mcp-tools", content: "Use tool_list.", isTemplate: false },
-  { name: "developer", content: "Date: {{current_date}}", isTemplate: true },
 ];
 
 describe("injectPrompts summary (structural)", () => {
@@ -26,10 +25,10 @@ describe("injectPrompts summary (structural)", () => {
     expect(summary.subagentVars).toEqual({ availableSubagents: false, defaultSubagent: false });
   });
 
-  it("counts static + developer system messages and chars", () => {
+  it("counts only the cache-stable system messages and chars", () => {
     const { summary } = injectPrompts(prompts, baseVars, []);
-    expect(summary.totalSystemMessages).toBe(3);
-    expect(summary.totalSystemChars).toBe("You are the agent.".length + "Use tool_list.".length + "Date: 2026-01-01".length);
+    expect(summary.totalSystemMessages).toBe(2);
+    expect(summary.totalSystemChars).toBe("You are the agent.".length + "Use tool_list.".length);
   });
 
   it("detects subagent prompt from structural flag, not string sniffing", () => {
@@ -74,7 +73,7 @@ describe("injectPrompts summary (structural)", () => {
     expect(summary.hasSkillsCatalog).toBe(false);
   });
 
-  it("places skills catalog after mcp-tools and before subagent/developer", () => {
+  it("does not place dynamic catalog state into any user message (REV2: recovery via hydration transcript)", () => {
     const { messages } = injectPrompts(
       prompts,
       baseVars,
@@ -85,14 +84,15 @@ describe("injectPrompts summary (structural)", () => {
       undefined,
       "## Available skills\n- `mcp-creator`: authoring.",
     );
+    // Injector is pure prompt assembly — no hidden runtime checkpoint.
+    const hasRuntimeCheckpoint = messages.some((m) => m.role === "user" && String(m.content).startsWith("[NUSASHELL RUNTIME CONTEXT]"));
+    expect(hasRuntimeCheckpoint).toBe(false);
     const systemContents = messages.filter((m) => m.role === "system").map((m) => m.content as string);
-    const catalogIdx = systemContents.findIndex((c) => c.startsWith("## Available skills"));
     const mcpToolsIdx = systemContents.findIndex((c) => c === "Use tool_list.");
     const subagentIdx = systemContents.findIndex((c) => c === "Subagent rules.");
-    const developerIdx = systemContents.findIndex((c) => c.startsWith("Date:"));
-    expect(mcpToolsIdx).toBeLessThan(catalogIdx);
-    expect(catalogIdx).toBeLessThan(subagentIdx);
-    expect(catalogIdx).toBeLessThan(developerIdx);
+    expect(mcpToolsIdx).toBeLessThan(subagentIdx);
+    // The catalog itself does not leak into the request as a user message.
+    expect(messages.some((m) => m.role === "user" && String(m.content).includes("## Available skills"))).toBe(false);
   });
 
   it("includes hasSkillsCatalog in the debug line", () => {

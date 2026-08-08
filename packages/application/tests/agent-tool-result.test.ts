@@ -173,37 +173,43 @@ describe("AgentToolResult canonical model", () => {
   // --- projectModelToolResult ---
 
   describe("projectModelToolResult", () => {
-    it("projects structured content as deterministic JSON", () => {
+    it("projects structured content as compact terminal-style output inside an untrusted boundary", () => {
       const result = successToolResult("call-1", "mcp_nusashell_files_read", { path: "/a", content: "hi" });
       const projected = projectModelToolResult(result);
-      expect(projected).toContain('"ok":true');
-      expect(projected).toContain('"data"');
-      expect(projected).toContain('"path":"/a"');
-      expect(projected).toContain('"meta"');
-      expect(projected).toContain('"truncated":false');
+      expect(projected).toContain('<untrusted_tool_result source="mcp_nusashell_files_read" status="success">');
+      expect(projected).toContain("path=/a");
+      expect(projected).toContain("content=hi");
+      expect(projected).toContain("</untrusted_tool_result>");
     });
 
-    it("projects error as JSON error envelope", () => {
+    it("projects errors as stderr-style output", () => {
       const result = errorToolResult("call-1", "mcp_nusashell_files_read", "ENOENT", "File not found");
       const projected = projectModelToolResult(result);
-      expect(projected).toContain('"ok":false');
-      expect(projected).toContain('"error"');
-      expect(projected).toContain('"code":"ENOENT"');
-      expect(projected).toContain('"message":"File not found"');
+      expect(projected).toBe(
+        '<untrusted_tool_result source="mcp_nusashell_files_read" status="error">\n' +
+        "File not found\n" +
+        "</untrusted_tool_result>",
+      );
     });
 
-    it("projects text content as labeled text envelope", () => {
-      const result = successToolResult("call-1", "mcp_nusashell_terminal_exec", "hello\nworld\n");
+    it("keeps terminal text as the raw body inside the untrusted boundary", () => {
+      const result = successToolResult("call-1", "mcp_nusashell_terminal_exec", "hello\nworld");
       const projected = projectModelToolResult(result);
-      expect(projected).toContain("Status: success");
-      expect(projected).toContain("hello\nworld");
+      expect(projected).toBe(
+        '<untrusted_tool_result source="mcp_nusashell_terminal_exec" status="success">\n' +
+        "hello\nworld\n" +
+        "</untrusted_tool_result>",
+      );
     });
 
-    it("projects cancelled as error envelope with TOOL_CANCELLED code", () => {
+    it("projects cancelled calls as stderr-style output with TOOL_CANCELLED code", () => {
       const result = cancelledToolResult("call-1", "mcp_nusashell_terminal_exec");
       const projected = projectModelToolResult(result);
-      expect(projected).toContain('"ok":false');
-      expect(projected).toContain('"TOOL_CANCELLED"');
+      expect(projected).toBe(
+        '<untrusted_tool_result source="mcp_nusashell_terminal_exec" status="cancelled">\n' +
+        "Tool call was cancelled\n" +
+        "</untrusted_tool_result>",
+      );
     });
 
     it("stores modelOutput on result after projection", () => {
@@ -244,48 +250,68 @@ describe("AgentToolResult canonical model", () => {
     it("structured success projection is stable", () => {
       const result = successToolResult("call-1", "mcp_nusashell_files_read", { path: "/a.txt", content: "hi" });
       expect(projectModelToolResult(result)).toBe(
-        '{"ok":true,"data":{"path":"/a.txt","content":"hi"},"meta":{"truncated":false}}',
+        '<untrusted_tool_result source="mcp_nusashell_files_read" status="success">\n' +
+        "path=/a.txt\ncontent=hi\n" +
+        "</untrusted_tool_result>",
       );
     });
 
     it("error projection is stable", () => {
       const result = errorToolResult("call-1", "mcp_nusashell_files_read", "ENOENT", "File not found");
       expect(projectModelToolResult(result)).toBe(
-        '{"ok":false,"error":{"code":"ENOENT","message":"File not found","retryable":false}}',
+        '<untrusted_tool_result source="mcp_nusashell_files_read" status="error">\n' +
+        "File not found\n" +
+        "</untrusted_tool_result>",
       );
     });
 
     it("cancelled projection is stable", () => {
       const result = cancelledToolResult("call-1", "mcp_nusashell_terminal_exec");
       expect(projectModelToolResult(result)).toBe(
-        '{"ok":false,"error":{"code":"TOOL_CANCELLED","message":"Tool call was cancelled","retryable":false}}',
+        '<untrusted_tool_result source="mcp_nusashell_terminal_exec" status="cancelled">\n' +
+        "Tool call was cancelled\n" +
+        "</untrusted_tool_result>",
       );
     });
 
     it("timeout projection is stable", () => {
       const result = timeoutToolResult("call-1", "mcp_nusashell_terminal_exec");
       expect(projectModelToolResult(result)).toBe(
-        '{"ok":false,"error":{"code":"TOOL_TIMEOUT","message":"Tool call timed out","retryable":true}}',
+        '<untrusted_tool_result source="mcp_nusashell_terminal_exec" status="timeout">\n' +
+        "Tool call timed out\n" +
+        "</untrusted_tool_result>",
       );
     });
 
-    it("text/command projection is stable", () => {
+    it("text/command projection keeps the MCP text body unchanged", () => {
       const result = successToolResult("call-1", "mcp_nusashell_terminal_exec", "hello\nworld\n");
       const projected = projectModelToolResult(result);
-      expect(projected).toBe("Status: success\n\nOutput:\nhello\nworld\n");
+      expect(projected).toBe(
+        '<untrusted_tool_result source="mcp_nusashell_terminal_exec" status="success">\n' +
+        "hello\nworld\n\n</untrusted_tool_result>",
+      );
     });
   });
 
   // --- Size regression: projection vs raw ---
 
   describe("size regression", () => {
-    it("structured projection is smaller than raw JSON.stringify for fat payloads", () => {
+    it("caps large terminal projections without severing the untrusted XML boundary", () => {
+      const result = successToolResult("call-large", "mcp_nusashell_files_list", {
+        entries: Array.from({ length: 2_000 }, (_, index) => ({ path: `docs/${index}.md`, kind: "file" })),
+      });
+      const projected = projectModelToolResult(result);
+      expect(projected.length).toBeLessThanOrEqual(12_000);
+      expect(projected).toContain("[omitted:");
+      expect(projected.endsWith("</untrusted_tool_result>")).toBe(true);
+    });
+
+    it("terminal table projection is smaller than raw JSON for repeated records", () => {
       const fat = { entries: Array.from({ length: 200 }, (_, i) => ({ path: `docs/item-${i}.json`, blob: "x".repeat(40) })) };
       const result = successToolResult("call-1", "mcp_nusashell_files_read", fat);
       const projected = projectModelToolResult(result);
       const raw = JSON.stringify({ ok: true, result: fat });
-      // Projection includes meta overhead but should be in the same ballpark.
-      expect(projected.length).toBeLessThan(raw.length + 100);
+      expect(projected.length).toBeLessThan(raw.length);
     });
   });
 });

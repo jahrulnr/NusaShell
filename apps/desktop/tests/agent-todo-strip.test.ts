@@ -61,12 +61,57 @@ describe("AgentTodoStrip", () => {
     eventHandlers.clear();
   });
 
-  it("hides the strip when items is empty", () => {
+  it("hides the strip when items is empty and no turn is active", () => {
     const strip = new AgentTodoStrip({ conversationId: "conv-1" });
     strip.mount();
     strip.render([]);
     const el = document.getElementById("agent-todo-strip") as HTMLElement;
     expect(el.hidden).toBe(true);
+  });
+
+  it("keeps a reserved empty strip while a turn is active (#63)", () => {
+    const strip = new AgentTodoStrip({ conversationId: "conv-1" });
+    strip.mount();
+    strip.setTurnActive(true);
+    strip.render([]);
+    const el = document.getElementById("agent-todo-strip") as HTMLElement;
+    const meta = document.getElementById("agent-todo-strip-meta") as HTMLElement;
+    expect(el.hidden).toBe(false);
+    expect(meta.textContent).toBe("No tasks yet");
+  });
+
+  it("exposes polite live regions on count/meta, not on the list (#63)", () => {
+    const strip = new AgentTodoStrip({ conversationId: "conv-1" });
+    strip.mount();
+    strip.render([{ id: "1", content: "task", status: "pending" }]);
+    const count = document.getElementById("agent-todo-strip-count") as HTMLElement;
+    const meta = document.getElementById("agent-todo-strip-meta") as HTMLElement;
+    const list = document.getElementById("agent-todo-strip-list") as HTMLElement;
+    expect(count.getAttribute("aria-live")).toBe("polite");
+    expect(meta.getAttribute("aria-live")).toBe("polite");
+    expect(list.getAttribute("aria-live")).toBeNull();
+  });
+
+  it("keeps a stable toggle accessible name while aria-expanded toggles (#63/#66)", () => {
+    const strip = new AgentTodoStrip({ conversationId: "conv-1" });
+    strip.mount();
+    strip.render([
+      { id: "1", content: "first", status: "pending" },
+      { id: "2", content: "second", status: "pending" },
+    ]);
+    const toggle = document.getElementById("agent-todo-strip-toggle") as HTMLButtonElement;
+    expect(toggle.getAttribute("aria-label")).toBe("Task checklist");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    toggle.click();
+    expect(toggle.getAttribute("aria-label")).toBe("Task checklist");
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    strip.render([
+      { id: "1", content: "first", status: "completed" },
+      { id: "2", content: "second", status: "pending" },
+      { id: "3", content: "third", status: "pending" },
+    ]);
+    expect(toggle.getAttribute("aria-label")).toBe("Task checklist");
+    expect(document.getElementById("agent-todo-strip-count")?.textContent).toBe("3 Tasks");
   });
 
   it("renders items with status glyphs and shows the strip", () => {
@@ -148,6 +193,28 @@ describe("AgentTodoStrip", () => {
     expect(document.querySelector(".agent-todo-content")?.textContent).toBe("live task");
   });
 
+  it("does not let hydration from a previous room overwrite the new room", async () => {
+    const { getTodos } = await import("../src/renderer/agent-api.js");
+    let resolveHydration: (items: unknown[]) => void = () => {};
+    vi.mocked(getTodos).mockReturnValueOnce(new Promise((resolve) => {
+      resolveHydration = resolve;
+    }) as never);
+    const first = new AgentTodoStrip({ conversationId: "conv-1" });
+    first.mount();
+    first.dispose();
+
+    vi.mocked(getTodos).mockResolvedValueOnce([
+      { id: "2", content: "room two", status: "pending" },
+    ]);
+    const second = new AgentTodoStrip({ conversationId: "conv-2" });
+    second.mount();
+    second.render([{ id: "2", content: "room two", status: "pending" }]);
+    resolveHydration([{ id: "1", content: "stale room one", status: "pending" }]);
+    await Promise.resolve();
+
+    expect(document.querySelector(".agent-todo-content")?.textContent).toBe("room two");
+  });
+
   it("ignores todo_updated events for other conversations", () => {
     const strip = new AgentTodoStrip({ conversationId: "conv-1" });
     strip.mount();
@@ -178,5 +245,40 @@ describe("AgentTodoStrip", () => {
     expect(eventHandlers.get("agent.todo_updated")?.length ?? 0).toBe(1);
     strip.dispose();
     expect(eventHandlers.get("agent.todo_updated")?.length ?? 0).toBe(0);
+  });
+
+  it("keeps the strip expanded across a live update render (#66)", () => {
+    const strip = new AgentTodoStrip({ conversationId: "conv-1" });
+    strip.mount();
+    strip.render([{ id: "1", content: "task", status: "pending" }]);
+    const toggle = document.getElementById("agent-todo-strip-toggle") as HTMLButtonElement;
+    const list = document.getElementById("agent-todo-strip-list") as HTMLElement;
+    toggle.click(); // expand
+    expect(list.hidden).toBe(false);
+
+    // A live todo update triggers render(); it must not collapse the user's expansion.
+    emitTodoUpdated("conv-1", [
+      { id: "1", content: "task", status: "pending" },
+      { id: "2", content: "task 2", status: "in_progress" },
+    ]);
+
+    expect(list.hidden).toBe(false);
+    expect(document.querySelectorAll(".agent-todo-item")).toHaveLength(2);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("rebinds the collapse toggle after switching rooms", () => {
+    const first = new AgentTodoStrip({ conversationId: "conv-1" });
+    first.mount();
+    first.render([{ id: "1", content: "room one", status: "pending" }]);
+    first.dispose();
+
+    const second = new AgentTodoStrip({ conversationId: "conv-2" });
+    second.mount();
+    second.render([{ id: "2", content: "room two", status: "pending" }]);
+    (document.getElementById("agent-todo-strip-toggle") as HTMLButtonElement).click();
+
+    expect(second.collapsed).toBe(false);
+    expect(document.getElementById("agent-todo-strip-list")?.hidden).toBe(false);
   });
 });

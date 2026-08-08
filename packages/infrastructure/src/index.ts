@@ -8,7 +8,7 @@ export {
   formatSpawnEnoentHint,
 } from "./process/index.js";
 export { StdioMcpClient, resolveStdioLaunch, HttpMcpClient, SseMcpClient, McpClientFactory, AutomationRateLimiter, DEFAULT_AUTOMATION_RATE_LIMITS, type RateLimiterSettings, registerMcpAutomation, type RegisterMcpAutomationDeps } from "./mcp/index.js";
-export { scanPluginDirectories, resolveManifestPath, resolvePluginRoot, PluginInstaller, PluginSyncService } from "./plugins/index.js";
+export { scanPluginDirectories, resolveManifestPath, resolvePluginRoot, PluginInstaller, PluginSyncService, BundledPluginSeeder, compareSemver, BUNDLED_SEED_STATE_FILE } from "./plugins/index.js";
 export { createLogger, type Logger, type LogObserver, type LogRecord } from "./logging/index.js";
 export { JsonlTelemetryWriter, type JsonlTelemetryWriterOptions } from "./telemetry/index.js";
 export {
@@ -26,7 +26,7 @@ export {
   type ModelRuntimePolicy,
   type TextToolCallParseResult,
 } from "./ai/index.js";
-export { FilesystemPromptLoader, FilesystemReviewStateStore, MarkdownDocsIndex } from "./agent/index.js";
+export { FilesystemPromptLoader, FilesystemReviewStateStore, FilesystemConversationTodoPort, MarkdownDocsIndex } from "./agent/index.js";
 export { FilesystemSkillRegistry, FilesystemSkillProvenance, FilesystemSkillUsage, FilesystemCuratorStateStore, SkillApprovalStaging, type PendingSkillWrite } from "./skills/index.js";
 export { FilesystemMemoryStore } from "./memory/index.js";
 export { AcpJsonRpcClient } from "./acp/index.js";

@@ -45,8 +45,9 @@ export class CompletionSteerer {
   fireWake() {
     if (this.pending.length === 0) return;
     if (!this.isIdle()) {
-      this.log("completion steer skipped — conversation has active turn");
-      // Clear pending; the agent will see the completed jobs in the job strip.
+      // Active turn, unsent composer draft, or IME composition — do not steal
+      // the textarea. Drop the wake; jobs remain visible on the job strip (#69).
+      this.log("completion steer skipped — conversation not idle (active turn or composer busy)");
       this.pending = [];
       return;
     }

@@ -26,7 +26,7 @@ export interface TextToolCallParseResult {
  * DSML tags into the free-text stream.
  */
 export function extractTextToolCalls(rawText: string): TextToolCallParseResult {
-  const text = normalizeSpecialTokenText(rawText);
+  const text = stripKnownModelControlTokens(normalizeSpecialTokenText(rawText));
   const located = [
     ...extractDsmlCalls(text),
     ...extractFunctionCalls(text),
@@ -47,6 +47,35 @@ export function extractTextToolCalls(rawText: string): TextToolCallParseResult {
   }
   cleaned += text.slice(cursor);
   return { calls, text: stripLeakedToolProtocol(cleaned).trim() };
+}
+
+/**
+ * Remove non-semantic generation sentinels that occasionally escape an
+ * OpenAI-compatible provider's tokenizer. This intentionally has a narrow
+ * allowlist: prose is never classified as reasoning from its wording.
+ */
+export function stripKnownModelControlTokens(value: string): string {
+  return value
+    .replace(/[｜│]/g, "|")
+    .replace(/[▁‗]/g, "_")
+    .replace(/<\|\s*(?:begin|end)_(?:of_)?(?:sentence|text|turn|message)\s*\|>/gi, "");
+}
+
+/**
+ * Project a provider reasoning payload to displayable text. Opaque encrypted
+ * and redacted blocks deliberately remain out of the UI and transcript.
+ */
+export function extractReasoningText(value: unknown): string {
+  if (typeof value === "string") return stripKnownModelControlTokens(value);
+  if (Array.isArray(value)) return value.map(extractReasoningText).join("");
+  if (!isRecord(value)) return "";
+  const type = typeof value.type === "string" ? value.type.toLowerCase() : "";
+  if (type.includes("encrypted") || type.includes("redacted")) return "";
+  return extractReasoningText(value.text)
+    || extractReasoningText(value.content)
+    || extractReasoningText(value.thinking)
+    || extractReasoningText(value.reasoning)
+    || extractReasoningText(value.summary);
 }
 
 export function mergeTextToolCalls(

@@ -9,6 +9,8 @@ export type AgentConversationAttachment =
 
 export interface AgentConversationToolCall {
   readonly id: string;
+  /** Stable display order inside one tool-call step. */
+  readonly callPosition?: number;
   readonly name: string;
   readonly ok: boolean;
   readonly error?: string;
@@ -25,15 +27,22 @@ export interface AgentConversationToolCall {
 }
 
 export type AgentConversationStep =
-  | { readonly type: "reasoning"; readonly content: string }
-  | { readonly type: "tool_calls"; readonly calls: readonly AgentConversationToolCall[] }
-  | { readonly type: "text"; readonly content: string };
+  | { readonly type: "reasoning"; readonly stepPosition?: number; readonly content: string }
+  | { readonly type: "tool_calls"; readonly stepPosition?: number; readonly calls: readonly AgentConversationToolCall[] }
+  | { readonly type: "text"; readonly stepPosition?: number; readonly content: string };
 
 export interface AgentConversationMessage {
+  /** Immutable durable bubble identity. Optional only on legacy/input drafts. */
+  readonly id?: string;
+  /** Strictly increasing durable order within one conversation. */
+  readonly position?: number;
+  /** Monotonic durable replacement version for this message identity. */
+  readonly revision?: number;
   readonly role: "user" | "assistant";
   readonly content: string;
   readonly attachments?: readonly AgentConversationAttachment[];
   readonly createdAt?: string;
+  readonly updatedAt?: string;
   readonly traceId?: string;
   readonly model?: string;
   readonly rounds?: number;
@@ -44,11 +53,22 @@ export interface AgentConversationMessage {
   readonly resumeMessages?: readonly unknown[];
   /** Why the turn was interrupted — used by the UI to pick Resume vs Continue. */
   readonly interruptReason?: "cancel" | "provider" | "max_rounds";
+  /** Durable provider failure with no partial output; Retry restarts the turn. */
+  readonly retryOnly?: boolean;
+}
+
+export interface AgentAssistantReservation {
+  readonly messageId: string;
+  readonly position: number;
+  /** Current durable revision; zero means the slot has not materialized yet. */
+  readonly revision: number;
 }
 
 export interface AgentConversationCheckpoint {
   readonly summary: string;
   readonly compactedMessageCount: number;
+  /** Immutable transcript boundary; preferred over the legacy array count. */
+  readonly compactedThroughPosition?: number;
   readonly via: "provider" | "extractive";
   /** Number of compaction events recorded for this room. Optional for legacy checkpoints. */
   readonly compactionCount?: number;

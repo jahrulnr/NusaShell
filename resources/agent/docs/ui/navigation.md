@@ -71,7 +71,7 @@ The top bar identifies NusaShell with its tile-and-wave brand mark and wordmark,
 
 ## Sidebar
 
-Vertical navigation on the left, ordered Home, Agent, Skills, Learning, Plugins, AI Providers, Autostart, and Logs. It can show icons with labels or icons only, remembers that choice locally, and links to the project documentation on GitHub from its footer.
+Vertical navigation on the left, ordered Home, Agent, Skills, Learning, Plugins, Autostart, AI Providers, Jobs, Pipelines, and Logs. It can show icons with labels or icons only, remembers that choice locally, and links to the project documentation on GitHub from its footer.
 
 - **Home navigation** (`[data-view="home"].nav-item`):
   - Section: Sidebar
@@ -103,17 +103,29 @@ Vertical navigation on the left, ordered Home, Agent, Skills, Learning, Plugins,
   - Action: Switches the main content to the Plugins list view.
   - Related: Installed plugin table (`#plugin-table`)
 
+- **Autostart navigation** (`[data-view="autostart"].nav-item`):
+  - Section: Sidebar
+  - Type: nav item
+  - Action: Switches the main content to the Autostart view.
+  - Related: Autostart list (`#autostart-list`)
+
 - **AI Providers navigation** (`[data-view="ai-providers"].nav-item`):
   - Section: Sidebar
   - Type: nav item
   - Action: Switches the main content to the AI Providers registry view.
   - Related: Provider registry (`#provider-registry`)
 
-- **Autostart navigation** (`[data-view="autostart"].nav-item`):
+- **Jobs navigation** (`[data-view="jobs"].nav-item`):
   - Section: Sidebar
   - Type: nav item
-  - Action: Switches the main content to the Autostart view.
-  - Related: Autostart list (`#autostart-list`)
+  - Action: Switches the main content to the Jobs view.
+  - Related: Jobs list (`#jobs-list`)
+
+- **Pipelines navigation** (`[data-view="pipelines"].nav-item`):
+  - Section: Sidebar
+  - Type: nav item
+  - Action: Switches the main content to the Pipelines view.
+  - Related: Pipeline list (`#pipelines-list`)
 
 - **Logs navigation** (`[data-view="logs"].nav-item`):
   - Section: Sidebar

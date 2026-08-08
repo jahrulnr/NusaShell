@@ -74,7 +74,7 @@ describe("AgentConversationController — subagent stream pane", () => {
       "conv-1",
       "trace-2",
       "ok",
-      expect.objectContaining({ summary: "Done", steps: [{ type: "text", content: "Completed output" }] }),
+      expect.objectContaining({ summary: "Done", steps: [{ type: "text", stepPosition: 1, content: "Completed output" }] }),
     );
   });
 
@@ -203,6 +203,23 @@ describe("AgentConversationController — in-chat subagent mini stream", () => {
 
     expect(card.querySelector(".agent-subagent-card-stream")).not.toBeNull();
     expect(card.dataset.runId).toBe("run-a");
+  });
+
+  it("shows the dispatched prompt in a compact task strip", () => {
+    const controller = new AgentConversationController({} as never);
+    const prompt = "Inspect the conversation list and report why previews are missing.";
+    const card = controller.renderSubagentCard({
+      runId: "run-prompt",
+      providerId: "cursor",
+      title: "Audit conversations",
+      prompt,
+      status: "running",
+    });
+
+    const task = card.querySelector(".agent-subagent-card-prompt");
+    expect(task?.textContent).toContain("TASK");
+    expect(task?.textContent).toContain(prompt);
+    expect(task?.querySelector(".agent-subagent-card-prompt-text")?.getAttribute("title")).toBe(prompt);
   });
 
   it("keeps ordinary tool cards collapsed while the tool is running", () => {
@@ -336,6 +353,69 @@ describe("AgentConversationController — in-chat subagent mini stream", () => {
     expect(card.querySelector(".agent-subagent-card-stream-row.is-tool.is-ok")?.textContent).toContain("edit_file");
   });
 
+  it("persists a subagent run on its parent conversation, not its ACP session", async () => {
+    const upsertSubagentRun = vi.fn().mockResolvedValue({ id: "parent-conversation", messages: [] });
+    const setActiveSubagentRun = vi.fn().mockResolvedValue({ id: "parent-conversation", messages: [] });
+    const controller = new AgentConversationController({
+      shell: { agentConversations: { upsertSubagentRun, setActiveSubagentRun } },
+    } as never);
+    controller.conversation = { id: "other-conversation", messages: [] } as never;
+
+    controller.handleSubagentRunStarted({
+      runId: "run-parented",
+      conversationId: "subagent:run-parented",
+      parentConversationId: "parent-conversation",
+      providerId: "cursor",
+      prompt: "Fix the regression",
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(upsertSubagentRun).toHaveBeenCalledWith(
+      "parent-conversation",
+      expect.objectContaining({ conversationId: "parent-conversation", runId: "run-parented" }),
+    );
+    expect(setActiveSubagentRun).toHaveBeenCalledWith("parent-conversation", "run-parented");
+  });
+
+  it("uses the active chat for a legacy event that only has an ACP session id", async () => {
+    const upsertSubagentRun = vi.fn().mockResolvedValue({ id: "parent-conversation", messages: [] });
+    const setActiveSubagentRun = vi.fn().mockResolvedValue({ id: "parent-conversation", messages: [] });
+    const controller = new AgentConversationController({
+      shell: { agentConversations: { upsertSubagentRun, setActiveSubagentRun } },
+    } as never);
+    controller.conversation = { id: "parent-conversation", messages: [] } as never;
+
+    controller.handleSubagentRunStarted({
+      runId: "legacy-run",
+      conversationId: "subagent:legacy-run",
+      providerId: "cursor",
+      prompt: "Fix the regression",
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(upsertSubagentRun).toHaveBeenCalledWith(
+      "parent-conversation",
+      expect.objectContaining({ conversationId: "parent-conversation", runId: "legacy-run" }),
+    );
+  });
+
+  it("keeps mini streams on separate cards for two concurrent subagents", () => {
+    const controller = new AgentConversationController({} as never);
+    const first = controller.renderSubagentCard({ runId: "call-one", providerId: "cursor", title: "One", status: "running" });
+    first.dataset.streamingSubagent = "1";
+    const second = controller.renderSubagentCard({ runId: "call-two", providerId: "gemini", title: "Two", status: "running" });
+    second.dataset.streamingSubagent = "1";
+    document.body.append(first, second);
+
+    controller.attachSubagentCardStream("run-one");
+    controller.attachSubagentCardStream("run-two");
+
+    expect(first.dataset.runId).toBe("run-one");
+    expect(second.dataset.runId).toBe("run-two");
+  });
+
   it("auto-scrolls the mini stream to the bottom while pinned", () => {
     const controller = new AgentConversationController({} as never);
     const card = controller.renderSubagentCard({ runId: "run-d", providerId: "cursor", title: "T", status: "running" });
@@ -381,7 +461,7 @@ describe("AgentConversationController — in-chat subagent mini stream", () => {
     expect(stream.scrollTop).toBe(1000);
   });
 
-  it("disposes the mini stream state on run end without removing the frozen tail", () => {
+  it("disposes the mini stream state and seals the card on run end", () => {
     const controller = new AgentConversationController({} as never);
     const card = controller.renderSubagentCard({ runId: "run-f", providerId: "cursor", title: "T", status: "running" });
     document.body.appendChild(card);
@@ -391,8 +471,23 @@ describe("AgentConversationController — in-chat subagent mini stream", () => {
     controller.handleSubagentRunEnded({ runId: "run-f", ok: true, summary: "Done" });
 
     expect(controller.activeSubagentCardStream).toBeNull();
-    // The frozen rows remain in the DOM until the parent turn replaces the card.
-    expect(card.querySelector(".agent-subagent-card-stream-row")?.textContent).toContain("frozen tail");
+    expect(card.querySelector(".agent-subagent-card-status")?.textContent).toBe("● OK");
+    expect(card.querySelector(".agent-subagent-card-stream")).toBeNull();
+    expect(card.querySelector(".agent-subagent-card-summary")?.textContent).toContain("Done");
+  });
+
+  it("seals the in-chat card when the subagent lifecycle reports completion", () => {
+    const controller = new AgentConversationController({} as never);
+    const card = controller.renderSubagentCard({ runId: "run-ended", providerId: "cursor", title: "Audit", status: "running" });
+    card.dataset.streamingSubagent = "1";
+    document.body.appendChild(card);
+
+    controller.handleSubagentRunEnded({ runId: "run-ended", ok: true, summary: "Audit complete" });
+
+    expect(card.querySelector(".agent-subagent-card-status")?.textContent).toBe("● OK");
+    expect(card.querySelector(".agent-subagent-card-status")?.classList.contains("is-ok")).toBe(true);
+    expect(card.querySelector(".agent-subagent-card-stream")).toBeNull();
+    expect(card.querySelector(".agent-subagent-card-summary")?.textContent).toContain("Audit complete");
   });
 
   it("prunes the mini stream to the last 50 rows", () => {
@@ -523,6 +618,19 @@ describe("AgentConversationController — in-chat subagent mini stream", () => {
     expect(card?.querySelector(".agent-subagent-card-status")?.textContent).toMatch(/OK/i);
     // Summary is rendered so the thread keeps a record of the run.
     expect(card?.textContent).toContain("Fixed 3 issues.");
+  });
+
+  it("uses the successful parent tool result when a subagent payload omits ok", () => {
+    const controller = new AgentConversationController({} as never);
+    const card = controller.createSubagentToolCard({
+      id: "call-parent-ok",
+      name: "subagent",
+      ok: true,
+      args: { title: "Web audit" },
+      output: { runId: "run-parent-ok", providerId: "cursor" },
+    });
+
+    expect(card?.querySelector(".agent-subagent-card-status")?.textContent).toBe("● OK");
   });
 
   it("updateStreamingToolCard replaces (not removes) a successful subagent card", () => {

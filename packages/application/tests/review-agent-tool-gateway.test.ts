@@ -19,8 +19,6 @@ function makeFakeInner(): McpAgentToolGateway {
     cancelTurn: vi.fn(),
     listTools: vi.fn(async () => allTools),
     execute: vi.fn(async (name: string) => ({ ok: true, name })),
-    getWriteOrigin: vi.fn(() => "foreground"),
-    setWriteOrigin: vi.fn(),
   } as unknown as McpAgentToolGateway;
 }
 
@@ -54,13 +52,11 @@ describe("ReviewAgentToolGateway", () => {
     );
   });
 
-  it("execute sets writeOrigin to background_review during call", async () => {
+  it("marks the review turn with a background write origin", () => {
     const inner = makeFakeInner();
-    (inner as unknown as { getWriteOrigin: ReturnType<typeof vi.fn> }).getWriteOrigin.mockReturnValue("foreground");
     const gateway = new ReviewAgentToolGateway(inner);
-    await gateway.execute("memory", {}, "req-1", "turn-1");
-    expect(inner.setWriteOrigin).toHaveBeenCalledWith("background_review");
-    expect(inner.setWriteOrigin).toHaveBeenCalledWith("foreground");
+    gateway.beginTurn("turn-1");
+    expect(inner.beginTurn).toHaveBeenCalledWith("turn-1", { writeOrigin: "background_review" });
   });
 
   it("delegates beginTurn/endTurn/cancelTurn to inner", () => {
@@ -69,7 +65,7 @@ describe("ReviewAgentToolGateway", () => {
     gateway.beginTurn("turn-1");
     gateway.endTurn("turn-1");
     void gateway.cancelTurn("turn-1");
-    expect(inner.beginTurn).toHaveBeenCalledWith("turn-1", undefined);
+    expect(inner.beginTurn).toHaveBeenCalledWith("turn-1", { writeOrigin: "background_review" });
     expect(inner.endTurn).toHaveBeenCalledWith("turn-1");
     expect(inner.cancelTurn).toHaveBeenCalledWith("turn-1");
   });

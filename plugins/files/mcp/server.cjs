@@ -3225,8 +3225,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path4) {
-      let input = path4;
+    function removeDotSegments(path5) {
+      let input = path5;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3478,8 +3478,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path4, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path4 && path4 !== "/" ? path4 : void 0;
+        const [path5, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path5 && path5 !== "/" ? path5 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -6878,12 +6878,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs4, exportName) {
+    function addFormats(ajv, list, fs5, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs4[f]);
+        ajv.addFormat(f, fs5[f]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -7414,10 +7414,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path4) {
-  if (!path4)
+function getElementAtPath(obj, path5) {
+  if (!path5)
     return obj;
-  return path4.reduce((acc, key) => acc?.[key], obj);
+  return path5.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -7826,11 +7826,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path4, issues) {
+function prefixIssues(path5, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path4);
+    iss.path.unshift(path5);
     return iss;
   });
 }
@@ -7977,16 +7977,16 @@ function flattenError(error51, mapper = (issue2) => issue2.message) {
 }
 function formatError(error51, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error52, path4 = []) => {
+  const processError = (error52, path5 = []) => {
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path4, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path5, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
       } else {
-        const fullpath = [...path4, ...issue2.path];
+        const fullpath = [...path5, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -8013,17 +8013,17 @@ function formatError(error51, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error51, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error52, path4 = []) => {
+  const processError = (error52, path5 = []) => {
     var _a3, _b;
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path4, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path5, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
       } else {
-        const fullpath = [...path4, ...issue2.path];
+        const fullpath = [...path5, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -8055,8 +8055,8 @@ function treeifyError(error51, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path4 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path4) {
+  const path5 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path5) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -21054,13 +21054,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path4 = ref.slice(1).split("/").filter(Boolean);
-  if (path4.length === 0) {
+  const path5 = ref.slice(1).split("/").filter(Boolean);
+  if (path5.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path4[0] === defsKey) {
-    const key = path4[1];
+  if (path5[0] === defsKey) {
+    const key = path5[1];
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -24817,9 +24817,9 @@ function splitLines(text) {
 function safeFilesError(error51) {
   if (error51 && typeof error51 === "object" && "issues" in error51 && Array.isArray(error51.issues)) {
     const detail = error51.issues.slice(0, 5).map((issue2) => {
-      const path4 = Array.isArray(issue2.path) && issue2.path.length > 0 ? issue2.path.join(".") : "(root)";
+      const path5 = Array.isArray(issue2.path) && issue2.path.length > 0 ? issue2.path.join(".") : "(root)";
       const message2 = typeof issue2.message === "string" ? issue2.message : "invalid";
-      return `${path4}: ${message2}`;
+      return `${path5}: ${message2}`;
     }).join("; ");
     return detail ? `Files tool input is invalid (${detail})` : "Files tool input is invalid";
   }
@@ -25050,6 +25050,18 @@ function formatFileSize(bytes) {
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
+function truncateUtf8(content, maxBytes2) {
+  if (Buffer.byteLength(content, "utf8") <= maxBytes2) return { content, truncated: false };
+  const parts = [];
+  let bytes = 0;
+  for (const character of content) {
+    const characterBytes = Buffer.byteLength(character, "utf8");
+    if (bytes + characterBytes > maxBytes2) break;
+    parts.push(character);
+    bytes += characterBytes;
+  }
+  return { content: parts.join(""), truncated: true };
+}
 var FileService = class {
   /**
    * @param {string} root
@@ -25174,15 +25186,12 @@ var FileService = class {
    * @param {number} [opts.start] 1-based start line
    * @param {number} [opts.end] 1-based end line (inclusive)
    * @param {boolean} [opts.lineNumbers] prefix each line with `NNN|`
-   * @param {number} [opts.maxBytes] override max read size
+   * @param {number} [opts.maxBytes] maximum UTF-8 bytes returned in content
    */
   async readFile(input, opts = {}) {
     const { head: head2, tail: tail2, start, end, lineNumbers: lineNumbers2 = false, maxBytes: maxBytes2 = MAX_READ_BYTES } = opts;
     const filePath2 = resolvePath(this.root, input);
     const stat = await this._wrap(import_promises2.default.stat(filePath2));
-    if (stat.size > maxBytes2) {
-      throw new Error(`File too large (${formatFileSize(stat.size)}), max ${formatFileSize(maxBytes2)}`);
-    }
     const detected = await detectFileTypeByContent(filePath2);
     if (!detected.isText) {
       throw new Error(`File is binary (type=${detected.type}); read only supports text. Use info to inspect.`);
@@ -25205,12 +25214,20 @@ var FileService = class {
     } else {
       selected = lines;
     }
-    const truncated = truncatedReason !== null;
-    const output = lineNumbers2 ? selected.map((line, i) => {
+    const rangeTruncated = truncatedReason !== null;
+    const selectedOutput = lineNumbers2 ? selected.map((line, i) => {
       const lineNo = truncatedReason === "startEnd" ? start + i : truncatedReason === "tail" ? lines.length - selected.length + i + 1 : i + 1;
       return `${String(lineNo).padStart(6, " ")}|${line}`;
     }).join("\n") : selected.join("\n");
-    return { content: output, totalLines: lines.length, truncated, ...truncatedReason ? { truncatedReason } : {} };
+    const { content: output, truncated: byteTruncated } = truncateUtf8(selectedOutput, maxBytes2);
+    const reason = byteTruncated ? "maxBytes" : truncatedReason;
+    return {
+      content: output,
+      totalLines: lines.length,
+      totalBytes: stat.size,
+      truncated: rangeTruncated || byteTruncated,
+      ...reason ? { truncatedReason: reason } : {}
+    };
   }
   /**
    * @param {string} input
@@ -25530,6 +25547,53 @@ var MAX_WORKSPACE_INSTRUCTIONS_BYTES = 50 * 1024;
 var WORKSPACE_INSTRUCTIONS_URI = "nusashell://workspace/AGENTS.md";
 var ACTIVE_FILE_BOOST = 50;
 var QUERY_MATCH_BOOST = 10;
+var ROLE_MATCH_BOOST = 8;
+var RECENCY_HALF_LIFE_MS = 30 * 86400 * 1e3;
+function compareRankedDesc(a, b) {
+  return b[1] - a[1] || a[0].localeCompare(b[0]);
+}
+var ROLE_BUDGET_PARAMS = Object.freeze({
+  planner: { multiplier: 1.2, offset: 256 },
+  executor: { multiplier: 1.05, offset: 64 },
+  reviewer: { multiplier: 1.12, offset: 128 }
+});
+var CONTEXT_MAP_ROLES = Object.freeze(Object.keys(ROLE_BUDGET_PARAMS));
+function allocateRoleBudget(baseBudget, role) {
+  const params = role ? ROLE_BUDGET_PARAMS[role] : null;
+  if (!params) return baseBudget;
+  return Math.max(1, Math.floor(baseBudget * params.multiplier + params.offset));
+}
+function recencyDecay(mtimeMs, nowMs = Date.now()) {
+  if (!Number.isFinite(mtimeMs) || mtimeMs <= 0) return 1;
+  const age = Math.max(0, nowMs - mtimeMs);
+  return Math.exp(-Math.LN2 * age / RECENCY_HALF_LIFE_MS);
+}
+function roleMatchMultiplier(rel, role) {
+  if (!role || !ROLE_BUDGET_PARAMS[role]) return 1;
+  const p = toPosixPath(rel);
+  const base = p.includes("/") ? p.slice(p.lastIndexOf("/") + 1) : p;
+  const ext = (() => {
+    const i = base.lastIndexOf(".");
+    return i >= 0 ? base.slice(i).toLowerCase() : "";
+  })();
+  const isTest = /(?:^|\/)(?:tests?|__tests__)\//i.test(p) || /\.(?:test|spec)\.[^.]+$/i.test(p);
+  const isConvention = /^AGENTS\.md$/i.test(base) || /^RULES(?:\.[^.]+)?$/i.test(base) || /(?:^|\/)docs\//i.test(p);
+  const isDoc = DOC_EXTS.has(ext) || isConvention;
+  const isCode = Boolean(SUPPORTED_EXTS[ext]);
+  switch (role) {
+    case "planner":
+      return isDoc || isConvention ? ROLE_MATCH_BOOST : 1;
+    case "executor":
+      return isCode && !isTest ? ROLE_MATCH_BOOST : 1;
+    case "reviewer":
+      if (isTest) return ROLE_MATCH_BOOST;
+      if (isConvention || /^AGENTS\.md$/i.test(base)) return ROLE_MATCH_BOOST;
+      if (isDoc) return Math.max(2, ROLE_MATCH_BOOST / 2);
+      return 1;
+    default:
+      return 1;
+  }
+}
 var MANIFESTS = {
   "package.json": "node",
   "pnpm-workspace.yaml": "node",
@@ -26037,44 +26101,60 @@ var ContextEngine = class {
   }
   /**
    * Phases 3+6: extract symbols for walked files, using the mtime/size cache.
+   * Populates the result Maps in `files` order (not async completion order) so
+   * downstream stable sorts see a deterministic insertion order — required for
+   * context_map determinism when PPR scores tie.
    */
   async extractAll(files, { refresh = false } = {}) {
     const defsByFile = /* @__PURE__ */ new Map();
     const refsByFile = /* @__PURE__ */ new Map();
     let cacheHits = 0;
     let cacheMisses = 0;
-    await Promise.all(files.map(async (file2) => {
-      if (file2.doc) {
-        defsByFile.set(file2.rel, []);
-        refsByFile.set(file2.rel, []);
-        return;
-      }
+    const results = await Promise.all(files.map(async (file2) => {
       let stat;
       try {
         stat = await import_promises3.default.stat(file2.abs);
       } catch {
-        return;
+        return null;
       }
-      if (stat.size > MAX_EXTRACT_BYTES) return;
+      if (file2.doc) {
+        const cached3 = refresh ? null : this.cache.get(file2.rel);
+        if (cached3 && cached3.mtimeMs === stat.mtimeMs && cached3.size === stat.size) {
+          cacheHits += 1;
+        } else {
+          cacheMisses += 1;
+          this.cache.set(file2.rel, {
+            mtimeMs: stat.mtimeMs,
+            size: stat.size,
+            lang: "doc",
+            defs: [],
+            refs: []
+          });
+        }
+        return { rel: file2.rel, defs: [], refs: [] };
+      }
+      if (stat.size > MAX_EXTRACT_BYTES) return null;
       const cached2 = refresh ? null : this.cache.get(file2.rel);
       if (cached2 && cached2.mtimeMs === stat.mtimeMs && cached2.size === stat.size) {
         cacheHits += 1;
-        defsByFile.set(file2.rel, cached2.defs);
-        refsByFile.set(file2.rel, cached2.refs);
-        return;
+        return { rel: file2.rel, defs: cached2.defs, refs: cached2.refs };
       }
       cacheMisses += 1;
       let text;
       try {
         text = await import_promises3.default.readFile(file2.abs, "utf8");
       } catch {
-        return;
+        return null;
       }
       const { defs, refs } = this.extractFromText(file2.rel, text, file2.lang);
       this.cache.set(file2.rel, { mtimeMs: stat.mtimeMs, size: stat.size, lang: file2.lang, defs, refs });
-      defsByFile.set(file2.rel, defs);
-      refsByFile.set(file2.rel, refs);
+      return { rel: file2.rel, defs, refs };
     }));
+    for (const result of results) {
+      if (!result) continue;
+      defsByFile.set(result.rel, result.defs);
+      refsByFile.set(result.rel, result.refs);
+    }
     return { defsByFile, refsByFile, cacheHits, cacheMisses };
   }
   /**
@@ -26089,8 +26169,11 @@ var ContextEngine = class {
    * @param {object} [options]
    * @param {string} [options.activeFile]
    * @param {string} [options.query]
+   * @param {string} [options.role] planner | executor | reviewer — omit for legacy ranks
+   * @param {Map<string, number>} [options.mtimes] rel → mtimeMs for recency decay
+   * @param {number} [options.now] clock ms (injectable for tests)
    */
-  rankFiles(defsByFile, refsByFile, { activeFile, query } = {}) {
+  rankFiles(defsByFile, refsByFile, { activeFile, query, role, mtimes, now } = {}) {
     const symbolToDefiners = /* @__PURE__ */ new Map();
     const nodes = /* @__PURE__ */ new Set();
     for (const [rel, defs] of defsByFile) {
@@ -26113,6 +26196,7 @@ var ContextEngine = class {
         }
       }
     }
+    const useRole = Boolean(role && ROLE_BUDGET_PARAMS[role]);
     const personalization = {};
     if (activeFile) personalization[toPosix(activeFile)] = ACTIVE_FILE_BOOST;
     const terms = (query ?? "").toLowerCase().split(/[^A-Za-z0-9_$]+/).filter((t) => t.length >= 2);
@@ -26123,11 +26207,49 @@ var ContextEngine = class {
         }
       }
     }
+    if (useRole) {
+      for (const rel of nodes) {
+        const mult = roleMatchMultiplier(rel, role);
+        if (mult !== 1) {
+          personalization[rel] = (personalization[rel] ?? 1) * mult;
+        }
+      }
+    }
     const graph = { nodes: [...nodes], outEdges };
     const scores = personalizedPagerank(graph, personalization);
-    const ranked = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+    const clock = Number.isFinite(now) ? now : Date.now();
+    const roleScores = [];
+    let ranked;
+    if (useRole) {
+      ranked = Object.entries(scores).map(([rel, baseScore]) => {
+        const mtimeMs = mtimes?.get(rel) ?? clock;
+        const recency = recencyDecay(mtimeMs, clock);
+        const roleMatch = roleMatchMultiplier(rel, role);
+        const score = baseScore * recency;
+        const defCost = Math.max(
+          1,
+          (defsByFile.get(rel) ?? []).slice(0, MAX_DEFS_PER_FILE).reduce((acc, d) => acc + estimateTokens(d.sig ?? ""), 0)
+        );
+        roleScores.push({
+          path: rel,
+          score: Number(score.toFixed(6)),
+          cost: defCost,
+          roleMatch,
+          recency: Number(recency.toFixed(6))
+        });
+        return [rel, score];
+      });
+      ranked.sort(compareRankedDesc);
+      roleScores.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
+    } else {
+      ranked = Object.entries(scores).sort(compareRankedDesc);
+    }
     const edgeCount = [...outEdges.values()].reduce((acc, s) => acc + s.size, 0);
-    return { ranked, graphStats: { nodes: nodes.size, edges: edgeCount } };
+    return {
+      ranked,
+      graphStats: { nodes: nodes.size, edges: edgeCount },
+      ...useRole ? { roleScores } : {}
+    };
   }
   /**
    * Phase 5: render the markdown repo map within the token budget via binary
@@ -26190,6 +26312,9 @@ var ContextEngine = class {
    * @param {number} [options.budget] token budget for the map
    * @param {string} [options.activeFile] file to boost (relative, 50x)
    * @param {string} [options.query] symbol-name terms to boost (10x)
+   * @param {string} [options.role] planner | executor | reviewer — role-aware
+   *   budget + ranking; omit for legacy byte-identical behavior
+   * @param {number} [options.now] injectable clock for recency (tests)
    * @param {number} [options.maxFiles] scan cap
    * @param {boolean} [options.refresh] bypass the tag cache
    */
@@ -26199,9 +26324,13 @@ var ContextEngine = class {
       budget = 1024,
       activeFile,
       query,
+      role,
+      now,
       maxFiles = MAX_SCAN_FILES,
       refresh = false
     } = options;
+    const useRole = Boolean(role && ROLE_BUDGET_PARAMS[role]);
+    const effectiveBudget = useRole ? allocateRoleBudget(budget, role) : budget;
     const started = performance.now();
     const base = resolvePath(this.root, subPath);
     await validateRoot(base);
@@ -26214,16 +26343,29 @@ var ContextEngine = class {
     t = performance.now();
     const { defsByFile, refsByFile, cacheHits, cacheMisses } = await this.extractAll(files, { refresh });
     const extractMs = performance.now() - t;
+    let mtimes;
+    if (useRole) {
+      mtimes = /* @__PURE__ */ new Map();
+      for (const file2 of files) {
+        const cached2 = this.cache.get(file2.rel);
+        if (cached2) mtimes.set(file2.rel, cached2.mtimeMs);
+      }
+    }
     t = performance.now();
-    const { ranked, graphStats } = this.rankFiles(defsByFile, refsByFile, { activeFile, query });
+    const { ranked, graphStats, roleScores } = this.rankFiles(defsByFile, refsByFile, {
+      activeFile,
+      query,
+      ...useRole ? { role, mtimes, now } : {}
+    });
     const graphMs = performance.now() - t;
     t = performance.now();
-    const mapResult = this.buildRepoMap(ranked, defsByFile, budget, { activeFile });
+    const mapResult = this.buildRepoMap(ranked, defsByFile, effectiveBudget, { activeFile });
     const elideMs = performance.now() - t;
     return {
       map: mapResult.md,
       stack,
       ranks: ranked.slice(0, 20).map(([rel, score]) => [rel, Number(score.toFixed(6))]),
+      ...useRole && roleScores ? { roleScores: roleScores.slice(0, 20) } : {},
       stats: {
         tokensUsed: mapResult.tokensUsed,
         filesShown: mapResult.filesShown,
@@ -26233,6 +26375,7 @@ var ContextEngine = class {
         cacheMisses,
         walk,
         graph: graphStats,
+        ...useRole ? { role, effectiveBudget } : {},
         timingMs: {
           classify: Math.round(classifyMs * 100) / 100,
           walk: Math.round(walkMs * 100) / 100,
@@ -26315,8 +26458,393 @@ var FILES_TOOL_NAMES = Object.freeze([
   "touch",
   "context_map",
   "detect_stack",
-  "list_symbols"
+  "list_symbols",
+  "search_relevant"
 ]);
+
+// mcp/search-relevant.js
+var import_promises4 = __toESM(require("node:fs/promises"), 1);
+var import_node_path4 = __toESM(require("node:path"), 1);
+var SKIP_DIRS = /* @__PURE__ */ new Set([
+  "node_modules",
+  "dist",
+  "build",
+  ".git",
+  ".next",
+  "out",
+  "coverage",
+  ".cache",
+  ".turbo",
+  "tmp",
+  "vendor",
+  "assets",
+  "fixtures",
+  "snapshots"
+]);
+var EXTS = /* @__PURE__ */ new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".md"]);
+var JUNK_PAT = /(\.min\.js$|\.bundle\.js$|-bundle\.|index-[A-Za-z0-9_-]{6,}\.js$|\.umd\.js$|vendor\.)/i;
+var MAX_FILE_BYTES = 256 * 1024;
+var CHUNK_LINES = 60;
+var CHUNK_OVERLAP = 10;
+var RRF_K = 60;
+var SNIPPET_LIMIT = 1200;
+function tokenize(text) {
+  if (typeof text !== "string" || text.length === 0) return [];
+  const out = [];
+  for (const word of text.split(/[^A-Za-z0-9_]+/)) {
+    if (!word) continue;
+    const pieces = word.split(/_+/);
+    for (let i = 0; i < pieces.length; i += 1) {
+      let t = pieces[i].toLowerCase();
+      if (t.length === 0) continue;
+      if (i > 0 && pieces[i - 1] === "" && t[0] !== "_") {
+        t = `_${t}`;
+      }
+      if (t.length >= 2 && /^[A-Za-z_]/.test(t)) out.push(t);
+    }
+  }
+  return out;
+}
+function chunkLines(lines, options = {}) {
+  const chunkSize = options.chunkLines ?? CHUNK_LINES;
+  const overlap = options.overlap ?? CHUNK_OVERLAP;
+  const step = Math.max(1, chunkSize - overlap);
+  const chunks = [];
+  let i = 0;
+  while (i < lines.length) {
+    const end = Math.min(i + chunkSize, lines.length);
+    let text = lines.slice(i, end).join("\n");
+    if (text.trim()) {
+      text = text.replace(/^\s+/, "");
+      chunks.push({ lineStart: i + 1, lineEnd: end, text });
+    }
+    i += step;
+  }
+  return chunks;
+}
+var BM25 = class {
+  /**
+   * @param {string[][]} corpusTokens
+   * @param {number} [k1]
+   * @param {number} [b]
+   */
+  constructor(corpusTokens, k1 = 1.5, b = 0.75) {
+    this.k1 = k1;
+    this.b = b;
+    this.nDocs = corpusTokens.length;
+    this.docLens = corpusTokens.map((d) => d.length);
+    this.avgdl = this.nDocs ? this.docLens.reduce((a, n) => a + n, 0) / this.nDocs : 0;
+    this.tf = [];
+    const df = /* @__PURE__ */ new Map();
+    for (const tokens of corpusTokens) {
+      const freq = /* @__PURE__ */ new Map();
+      for (const t of tokens) freq.set(t, (freq.get(t) ?? 0) + 1);
+      this.tf.push(freq);
+      for (const term of freq.keys()) df.set(term, (df.get(term) ?? 0) + 1);
+    }
+    this.idf = /* @__PURE__ */ new Map();
+    for (const [term, d] of df) {
+      this.idf.set(term, Math.log(1 + (this.nDocs - d + 0.5) / (d + 0.5)));
+    }
+  }
+  /**
+   * @param {string[]} queryTokens
+   * @returns {number[]}
+   */
+  score(queryTokens) {
+    const scores = new Array(this.nDocs).fill(0);
+    for (let i = 0; i < this.nDocs; i += 1) {
+      const dl = this.docLens[i];
+      const denomNorm = 1 - this.b + this.b * (this.avgdl ? dl / this.avgdl : 0);
+      const freq = this.tf[i];
+      let s = 0;
+      for (const qt of queryTokens) {
+        const f = freq.get(qt) ?? 0;
+        if (f === 0) continue;
+        const idf = this.idf.get(qt) ?? 0;
+        s += idf * (f * (this.k1 + 1)) / (f + this.k1 * denomNorm);
+      }
+      scores[i] = s;
+    }
+    return scores;
+  }
+};
+function tfidfDenseScores(corpusTexts, query, docTokens) {
+  if (!Array.isArray(corpusTexts) || corpusTexts.length === 0) return [];
+  const qTokens = tokenize(query);
+  if (qTokens.length === 0) return corpusTexts.map(() => 0);
+  const toNgrams = (tokens) => {
+    const ngrams = tokens.slice();
+    for (let i = 0; i + 1 < tokens.length; i += 1) {
+      ngrams.push(`${tokens[i]} ${tokens[i + 1]}`);
+    }
+    return ngrams;
+  };
+  const docTokenLists = docTokens ?? corpusTexts.map((text) => tokenize(text));
+  const docNgrams = docTokenLists.map(toNgrams);
+  const queryNgrams = toNgrams(qTokens);
+  const df = /* @__PURE__ */ new Map();
+  for (const ngrams of docNgrams) {
+    for (const term of new Set(ngrams)) df.set(term, (df.get(term) ?? 0) + 1);
+  }
+  const n = docNgrams.length;
+  const idf = /* @__PURE__ */ new Map();
+  for (const [term, d] of df) idf.set(term, Math.log((1 + n) / (1 + d)) + 1);
+  const buildVector = (ngrams) => {
+    const tf = /* @__PURE__ */ new Map();
+    for (const term of ngrams) tf.set(term, (tf.get(term) ?? 0) + 1);
+    const vec = /* @__PURE__ */ new Map();
+    for (const [term, count] of tf) {
+      vec.set(term, (1 + Math.log(count)) * (idf.get(term) ?? 0));
+    }
+    let norm = 0;
+    for (const w of vec.values()) norm += w * w;
+    norm = Math.sqrt(norm);
+    if (norm > 0) {
+      for (const [term, w] of vec) vec.set(term, w / norm);
+    }
+    return vec;
+  };
+  const docVectors = docNgrams.map(buildVector);
+  const queryVector = buildVector(queryNgrams);
+  let qNorm = 0;
+  for (const w of queryVector.values()) qNorm += w * w;
+  qNorm = Math.sqrt(qNorm);
+  return docVectors.map((vec) => {
+    if (qNorm === 0 || vec.size === 0) return 0;
+    let dot = 0;
+    for (const [term, w] of vec) {
+      const qw = queryVector.get(term);
+      if (qw !== void 0) dot += w * qw;
+    }
+    return dot;
+  });
+}
+function reciprocalRankFusion(bm25Ranked, denseRanked, nDocs, k = RRF_K) {
+  const rrf = new Array(nDocs).fill(0);
+  bm25Ranked.forEach((docIdx, rank) => {
+    rrf[docIdx] += 1 / (k + rank + 1);
+  });
+  denseRanked.forEach((docIdx, rank) => {
+    rrf[docIdx] += 1 / (k + rank + 1);
+  });
+  return rrf.map((score, index) => ({ index, score })).filter((x) => x.score > 0).sort((a, b) => b.score - a.score || a.index - b.index);
+}
+var NEG_WORDS = /* @__PURE__ */ new Set([
+  "not",
+  "never",
+  "deprecated",
+  "avoid",
+  "removed",
+  "deleted",
+  "disabled"
+]);
+function crossEncoderScore(query, docText) {
+  const qTokens = tokenize(query);
+  const dTokens = tokenize(docText);
+  if (qTokens.length === 0 || dTokens.length === 0) return 0;
+  const dSet = new Set(dTokens);
+  const uni = qTokens.reduce((acc, t) => acc + (dSet.has(t) ? 1 : 0), 0) / qTokens.length;
+  const qBigrams = /* @__PURE__ */ new Set();
+  for (let i = 0; i + 1 < qTokens.length; i += 1) {
+    qBigrams.add(`${qTokens[i]} ${qTokens[i + 1]}`);
+  }
+  const dBigrams = /* @__PURE__ */ new Set();
+  for (let i = 0; i + 1 < dTokens.length; i += 1) {
+    dBigrams.add(`${dTokens[i]} ${dTokens[i + 1]}`);
+  }
+  let bi = 0;
+  if (qBigrams.size > 0) {
+    let inter = 0;
+    for (const bg of qBigrams) if (dBigrams.has(bg)) inter += 1;
+    bi = inter / qBigrams.size;
+  }
+  const earlyThreshold = Math.max(1, Math.floor(dTokens.length / 3));
+  const earlyTokens = new Set(dTokens.slice(0, earlyThreshold));
+  const earlyBoost = qTokens.reduce((acc, t) => acc + (earlyTokens.has(t) ? 1 : 0), 0) / qTokens.length;
+  let negPenalty = 0;
+  const windowSize = 8;
+  for (let i = 0; i < dTokens.length; i += 1) {
+    if (!NEG_WORDS.has(dTokens[i])) continue;
+    const lo = Math.max(0, i - windowSize);
+    const hi = Math.min(dTokens.length, i + windowSize);
+    let nearbyQ = 0;
+    for (const qt of qTokens) {
+      for (let j = lo; j < hi; j += 1) {
+        if (dTokens[j] === qt) {
+          nearbyQ += 1;
+          break;
+        }
+      }
+    }
+    if (nearbyQ > 0) negPenalty += 0.05 * nearbyQ;
+  }
+  negPenalty = Math.min(0.3, negPenalty);
+  const density = qTokens.reduce((acc, t) => acc + (dSet.has(t) ? 1 : 0), 0) / Math.max(1, Math.sqrt(dTokens.length));
+  const score = 0.45 * uni + 0.25 * bi + 0.2 * earlyBoost - negPenalty + 0.1 * density;
+  return Math.max(0, score);
+}
+function argSortDesc(scores) {
+  return scores.map((s, i) => [s, i]).sort((a, b) => b[0] - a[0] || a[1] - b[1]).map((pair) => pair[1]);
+}
+function runRetrieval(chunks, query, options = {}) {
+  const topK = Math.max(1, Math.min(20, options.topK ?? 5));
+  const candidatePool = options.candidatePool ?? 100;
+  if (chunks.length === 0) return [];
+  const qTokens = tokenize(query);
+  if (qTokens.length === 0) return [];
+  const corpusTokens = chunks.map((c) => c.tokens ?? tokenize(c.text));
+  const bm25 = new BM25(corpusTokens);
+  const bm25Scores = bm25.score(qTokens);
+  const denseScores = tfidfDenseScores(chunks.map((c) => c.text), query, corpusTokens);
+  const rrf = reciprocalRankFusion(
+    argSortDesc(bm25Scores),
+    argSortDesc(denseScores),
+    chunks.length,
+    RRF_K
+  );
+  const pool = rrf.slice(0, candidatePool);
+  const reranked = pool.map((item) => ({
+    chunk: chunks[item.index],
+    rrfScore: item.score,
+    ceScore: crossEncoderScore(query, chunks[item.index].text)
+  })).filter((r) => r.ceScore > 0).sort((a, b) => b.ceScore - a.ceScore || b.rrfScore - a.rrfScore || a.chunk.cid.localeCompare(b.chunk.cid));
+  return reranked.slice(0, topK).map((r, i) => {
+    const text = r.chunk.text;
+    const snippet = text.length > SNIPPET_LIMIT ? `${text.slice(0, SNIPPET_LIMIT)}
+\u2026 [truncated]` : text;
+    return {
+      file: r.chunk.file,
+      lineStart: r.chunk.lineStart,
+      lineEnd: r.chunk.lineEnd,
+      ceScore: r.ceScore,
+      rrfScore: r.rrfScore,
+      finalRank: i + 1,
+      snippet
+    };
+  });
+}
+var RetrievalEngine = class {
+  /**
+   * @param {string} root absolute workspace root
+   */
+  constructor(root) {
+    this.root = root;
+    this.cache = /* @__PURE__ */ new Map();
+  }
+  /** Re-point the engine at a new root and drop the chunk cache. */
+  setRoot(root) {
+    this.root = root;
+    this.cache.clear();
+  }
+  /**
+   * Search the workspace for the most relevant files/chunks for a query.
+   * @param {{ query: string, topK?: number, path?: string, refresh?: boolean }} options
+   * @returns {Promise<{ query: string, results: Array<{ path: string, line: number, lineEnd: number, score: number, snippet: string }>, meta: { filesScanned: number, chunks: number, cacheHits: number, cacheMisses: number, timingMs: { total: number } } }>}
+   */
+  async searchRelevant({ query, topK = 5, path: scope = "", refresh = false }) {
+    const t0 = performance.now();
+    const q = typeof query === "string" ? query.trim() : "";
+    if (!q) throw new Error("searchRelevant requires a non-empty query");
+    const k = Math.max(1, Math.min(20, Number.isFinite(topK) ? topK : 5));
+    const searchRoot = scope ? import_node_path4.default.resolve(this.root, scope) : this.root;
+    const { chunks, filesScanned, cacheHits, cacheMisses } = await this.#loadChunks(searchRoot, scope, refresh);
+    const results = runRetrieval(chunks, q, {
+      topK: k,
+      candidatePool: Math.max(1, Math.min(100, chunks.length))
+    }).map((r) => ({
+      path: r.file,
+      line: r.lineStart,
+      lineEnd: r.lineEnd,
+      score: r.ceScore,
+      snippet: r.snippet
+    }));
+    return {
+      query: q,
+      results,
+      meta: {
+        filesScanned,
+        chunks: chunks.length,
+        cacheHits,
+        cacheMisses,
+        timingMs: { total: Math.max(0, performance.now() - t0) }
+      }
+    };
+  }
+  /**
+   * Walk `dir`, chunk each eligible file, and serve chunks from the
+   * mtime+size cache when a file is unchanged.
+   * @param {string} dir
+   * @param {string} scope
+   * @param {boolean} refresh
+   * @returns {Promise<{ chunks: Array<{ cid: string, file: string, lineStart: number, lineEnd: number, text: string }>, filesScanned: number, cacheHits: number, cacheMisses: number }>}
+   */
+  async #loadChunks(dir, scope, refresh) {
+    if (refresh) this.cache.clear();
+    const chunks = [];
+    let filesScanned = 0;
+    let cacheHits = 0;
+    let cacheMisses = 0;
+    const walk = async (currentDir) => {
+      let entries;
+      try {
+        entries = await import_promises4.default.readdir(currentDir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          if (entry.name.startsWith(".") || SKIP_DIRS.has(entry.name)) continue;
+          await walk(import_node_path4.default.join(currentDir, entry.name));
+        } else if (entry.isFile()) {
+          const ext = import_node_path4.default.extname(entry.name).toLowerCase();
+          if (!EXTS.has(ext)) continue;
+          if (JUNK_PAT.test(entry.name)) continue;
+          const full = import_node_path4.default.join(currentDir, entry.name);
+          const rel = import_node_path4.default.relative(this.root, full);
+          filesScanned += 1;
+          let stat;
+          try {
+            stat = await import_promises4.default.stat(full);
+          } catch {
+            continue;
+          }
+          if (stat.size > MAX_FILE_BYTES) continue;
+          const cached2 = this.cache.get(rel);
+          if (!refresh && cached2 && cached2.mtimeMs === stat.mtimeMs && cached2.size === stat.size) {
+            cacheHits += 1;
+            chunks.push(...cached2.chunks);
+            continue;
+          }
+          cacheMisses += 1;
+          let text;
+          try {
+            text = await import_promises4.default.readFile(full, "utf8");
+          } catch {
+            continue;
+          }
+          const fileChunks = chunkLines(text.split("\n"), {
+            chunkLines: CHUNK_LINES,
+            overlap: CHUNK_OVERLAP
+          }).map((c) => ({
+            cid: `${rel}#L${c.lineStart}-${c.lineEnd}`,
+            file: rel,
+            lineStart: c.lineStart,
+            lineEnd: c.lineEnd,
+            text: c.text,
+            // Pre-tokenize once at index time so repeat queries skip the
+            // full-corpus regex pass (BM25 + dense both consume this).
+            tokens: tokenize(c.text)
+          }));
+          this.cache.set(rel, { mtimeMs: stat.mtimeMs, size: stat.size, chunks: fileChunks });
+          chunks.push(...fileChunks);
+        }
+      }
+    };
+    await walk(dir);
+    return { chunks, filesScanned, cacheHits, cacheMisses };
+  }
+};
 
 // mcp/tools.js
 var filePath = external_exports.string().trim().min(1).max(4096);
@@ -26389,6 +26917,7 @@ var schemas = {
     budget: contextBudget,
     activeFile: external_exports.string().trim().min(1).max(4096).optional(),
     query: external_exports.string().trim().min(1).max(500).optional(),
+    role: external_exports.enum(["planner", "executor", "reviewer"]).optional(),
     maxFiles: contextMaxFiles,
     refresh: external_exports.boolean().default(false)
   }).strict(),
@@ -26397,6 +26926,12 @@ var schemas = {
     path: filePath.optional(),
     query: external_exports.string().trim().min(1).max(500).optional(),
     limit: listSymbolsLimit
+  }).strict(),
+  search_relevant: external_exports.object({
+    query: external_exports.string().trim().min(1).max(500),
+    topK: clampedInt(1, 20, 5),
+    path: rootPath,
+    refresh: external_exports.boolean().default(false)
   }).strict()
 };
 var FILES_TOOLS = Object.freeze([
@@ -26416,7 +26951,7 @@ var FILES_TOOLS = Object.freeze([
     start: integerProperty(1, 1e5, void 0, "1-based start line (inclusive). Takes priority over head/tail."),
     end: integerProperty(1, 1e5, void 0, "1-based end line (inclusive). Takes priority over head/tail."),
     lineNumbers: { type: "boolean", description: "Prefix each line with its 1-based line number (NNN|content).", default: false },
-    maxBytes: integerProperty(1, 104857600, 10485760, "Maximum file size in bytes (default 10 MB).")
+    maxBytes: integerProperty(1, 104857600, 10485760, "Maximum UTF-8 bytes returned in content; larger text files are truncated (default 10 MB).")
   }, ["path"]),
   descriptor("write", "Create or overwrite a file. Parent directories are created automatically.", {
     path: stringProperty("File path relative to the files plugin root (user home by default)."),
@@ -26482,11 +27017,16 @@ var FILES_TOOLS = Object.freeze([
     createParents: { type: "boolean", description: "Create parent directories if needed (default true).", default: true },
     updateOnly: { type: "boolean", description: "Only update timestamps of an existing file; throw if it doesn't exist.", default: false }
   }, ["path"], false),
-  descriptor("context_map", "Build a token-budgeted markdown map of the workspace: stack classification, the top files ranked by Personalized PageRank over the symbol reference graph, and elided signatures (bodies replaced with \u22EE). Deterministic \u2014 no LLM calls. Call this first when orienting in an unfamiliar codebase or before planning edits. Symbol tags are cached by file mtime/size across calls; pass refresh=true only after large external changes. Returns { map, stack, ranks, stats }.", {
+  descriptor("context_map", "Build a token-budgeted markdown map of the workspace: stack classification, the top files ranked by Personalized PageRank over the symbol reference graph, and elided signatures (bodies replaced with \u22EE). Deterministic \u2014 no LLM calls. Optional role (planner|executor|reviewer) enables role-aware token budgeting and ranking (docs for planner, implementation for executor, tests/conventions for reviewer); omit role for legacy behavior. Symbol tags are cached by file mtime/size across calls; pass refresh=true only after large external changes. Returns { map, stack, ranks, stats } and roleScores when role is set.", {
     path: stringProperty("Directory to map, relative to the files plugin root. Empty string maps the whole root.", ""),
-    budget: integerProperty(64, 8192, 1024, "Approximate token budget for the markdown map (~4 chars/token). The top-ranked files are binary-searched to fit."),
+    budget: integerProperty(64, 8192, 1024, "Approximate token budget for the markdown map (~4 chars/token). The top-ranked files are binary-searched to fit. When role is set, an effective budget is derived from this base without changing the public budget argument."),
     activeFile: { type: "string", description: "Workspace-relative file currently in focus; boosted 50x in Personalized PageRank so its dependency neighborhood ranks higher." },
     query: { type: "string", description: "Space-separated symbol-name terms; files defining matching symbols get a 10x rank boost." },
+    role: {
+      type: "string",
+      enum: ["planner", "executor", "reviewer"],
+      description: "Optional agent role for RCR-style budgeting and ranking. planner favors docs/AGENTS; executor favors non-test source; reviewer favors tests and conventions. Omit for legacy maps."
+    },
     maxFiles: integerProperty(1, 2e4, void 0, "Scan cap for walked code/doc files (default 20000). .gitignore/.ignore and common build dirs are always excluded."),
     refresh: { type: "boolean", description: "Bypass the mtime/size symbol cache and re-extract every file.", default: false }
   }),
@@ -26497,12 +27037,18 @@ var FILES_TOOLS = Object.freeze([
     path: { type: "string", description: "Single file relative to the files plugin root. Omit to search by query instead." },
     query: { type: "string", description: "Case-insensitive symbol-name filter; returns matching definitions from the top PageRanked files. Required when path is omitted." },
     limit: integerProperty(1, 100, 20, "Maximum number of files returned in query mode.")
-  })
+  }),
+  descriptor("search_relevant", "Semantic code search: retrieve the most relevant files/chunks for a query using hybrid retrieval (BM25 + TF-IDF dense proxy fused with Reciprocal Rank Fusion, reranked by a cross-encoder proxy). Deterministic and cached by file mtime+size; pass refresh=true to bypass the chunk cache. Returns { query, results: [{ path, line, lineEnd, score, snippet }], meta }.", {
+    query: stringProperty('Search query \u2014 plain-text description of the code/symbols you are looking for (e.g. "plugin runtime lifecycle").'),
+    topK: integerProperty(1, 20, 5, "Maximum number of results to return (1-20)."),
+    path: stringProperty("Directory to scope the search to, relative to the files plugin root. Empty string searches the whole root.", ""),
+    refresh: { type: "boolean", description: "Bypass the mtime/size chunk cache and re-index the workspace.", default: false }
+  }, ["query"])
 ]);
 if (FILES_TOOLS.map((tool) => tool.name).join(",") !== FILES_TOOL_NAMES.join(",")) {
   throw new Error("Files tool descriptors are out of sync with the canonical catalog");
 }
-async function callFilesTool(service, name, rawArguments = {}, contextEngine = null) {
+async function callFilesTool(service, name, rawArguments = {}, contextEngine = null, retrievalEngine = null) {
   const schema = schemas[name];
   if (!schema) throw new Error(`Unknown files tool: ${name}`);
   const input = schema.parse(rawArguments ?? {});
@@ -26510,6 +27056,11 @@ async function callFilesTool(service, name, rawArguments = {}, contextEngine = n
   function getContextEngine() {
     if (!engine) engine = new ContextEngine(service.root);
     return engine;
+  }
+  let retrieval = retrievalEngine;
+  function getRetrievalEngine() {
+    if (!retrieval) retrieval = new RetrievalEngine(service.root);
+    return retrieval;
   }
   switch (name) {
     case "list":
@@ -26568,6 +27119,7 @@ async function callFilesTool(service, name, rawArguments = {}, contextEngine = n
         budget: input.budget,
         activeFile: input.activeFile,
         query: input.query,
+        role: input.role,
         maxFiles: input.maxFiles,
         refresh: input.refresh
       }) };
@@ -26578,6 +27130,13 @@ async function callFilesTool(service, name, rawArguments = {}, contextEngine = n
         path: input.path,
         query: input.query,
         limit: input.limit
+      });
+    case "search_relevant":
+      return await getRetrievalEngine().searchRelevant({
+        query: input.query,
+        topK: input.topK,
+        path: input.path,
+        refresh: input.refresh
       });
     default:
       throw new Error(`Unknown files tool: ${name}`);
@@ -26688,6 +27247,7 @@ async function main() {
   const root = await loadRootFromEnvironment();
   const service = new FileService(root);
   const contextEngine = new ContextEngine(service.root);
+  const retrievalEngine = new RetrievalEngine(service.root);
   const server = new Server(
     { name: "nusashell-files", version: "0.1.0" },
     { capabilities: { tools: {}, prompts: {}, resources: {} } }
@@ -26728,6 +27288,7 @@ async function main() {
         const fsPath = (0, import_node_url.fileURLToPath)(fileRoot.uri);
         await service.setRoot(fsPath);
         await contextEngine.setRoot(fsPath);
+        retrievalEngine.setRoot(fsPath);
         process.stderr.write(`[nusashell-files] root=${service.root} (via roots)
 `);
       }
@@ -26745,7 +27306,8 @@ async function main() {
         service,
         request.params.name,
         request.params.arguments ?? {},
-        contextEngine
+        contextEngine,
+        retrievalEngine
       );
       emitAutomationForTool(server, request.params.name, request.params.arguments ?? {});
       return {

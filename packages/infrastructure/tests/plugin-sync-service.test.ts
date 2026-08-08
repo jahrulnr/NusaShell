@@ -78,6 +78,18 @@ describe("PluginSyncService enabled-state preservation", () => {
     expect(afterReSync?.enabled).toBe(false);
   });
 
+  it("preserves MCP autostart preference across re-syncs", async () => {
+    await makePluginDir(pluginRoot, "nusashell.notes");
+    const sync = new PluginSyncService(pluginRoot, repo);
+    await sync.sync();
+
+    const installed = await repo.findById(notesId());
+    await repo.save(installed!.withMcpAutostart(true));
+    await sync.sync();
+
+    expect((await repo.findById(notesId()))?.manifest.mcp.autostart).toBe(true);
+  });
+
   it("enables a new plugin on first sync", async () => {
     await makePluginDir(pluginRoot, "nusashell.notes");
     const sync = new PluginSyncService(pluginRoot, repo);

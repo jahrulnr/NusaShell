@@ -35,6 +35,9 @@ export interface AsyncToolSpawnInput {
 
 export interface AsyncToolPeekResult {
   readonly handleId: string;
+  readonly kind: AsyncToolKind;
+  readonly pluginId?: string;
+  readonly toolName: string;
   readonly status: AsyncToolStatus;
   readonly tail: string;
   readonly result?: unknown;
@@ -257,6 +260,9 @@ export class AsyncToolRuntime {
   private toPeekResult(h: AsyncToolHandle): AsyncToolPeekResult {
     return {
       handleId: h.handleId,
+      kind: h.kind,
+      ...(h.pluginId ? { pluginId: h.pluginId } : {}),
+      toolName: h.toolName,
       status: h.status,
       tail: h.tail,
       ...(h.result !== undefined ? { result: h.result } : {}),

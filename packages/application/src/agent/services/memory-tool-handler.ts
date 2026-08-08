@@ -8,6 +8,17 @@ export async function execMemory(
 ): Promise<unknown> {
   if (!store) return memoryNotConfigured();
   const action = requireString(args.action, "action");
+  // Read-only snapshot: list/loadAction returns the current memory state without
+  // mutating anything. backed by the same `loadSnapshot` source used by
+  // `formatMemoryPrompt` for the system tail.
+  if (action === "list" || action === "read") {
+    const snapshot = await store.loadSnapshot();
+    return {
+      ok: true,
+      data: { memory: snapshot.memory, user: snapshot.user, usage: snapshot.usage },
+      meta: { readOnly: true, source: "loadSnapshot" },
+    };
+  }
   const target = requireString(args.target, "target") as MemoryTarget;
   if (target !== "memory" && target !== "user") {
     throw new ApplicationError("AGENT_INVALID_INPUT", `target must be "memory" or "user"`);

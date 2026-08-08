@@ -3,25 +3,25 @@
 import { sendRequest } from "./ws-client.js";
 
 export async function fetchPlugins() {
-  try {
-    const result = await sendRequest("plugin.list", {});
-    return [...result.plugins];
-  } catch (e) {
-    console.error("Failed to fetch plugins:", e);
-    return [];
-  }
+  // Do NOT swallow errors to an empty list (#61): the launchpad must be able
+  // to distinguish "no plugins installed" from "plugin.list failed" and show
+  // an error banner with a retry affordance.
+  const result = await sendRequest("plugin.list", {});
+  return [...result.plugins];
 }
 
 export async function startPlugin(pluginId) {
-  try { await sendRequest("plugin.start", { pluginId }, 310000); } catch (e) { console.error(e); }
+  // Do NOT swallow errors (#60): the caller must know whether the lifecycle
+  // action succeeded so it can surface a failure toast and update UI state.
+  await sendRequest("plugin.start", { pluginId }, 310000);
 }
 
 export async function stopPlugin(pluginId) {
-  try { await sendRequest("plugin.stop", { pluginId }); } catch (e) { console.error(e); }
+  await sendRequest("plugin.stop", { pluginId });
 }
 
 export async function restartPlugin(pluginId) {
-  try { await sendRequest("plugin.restart", { pluginId }); } catch (e) { console.error(e); }
+  await sendRequest("plugin.restart", { pluginId });
 }
 
 export async function getPluginDetail(pluginId) {

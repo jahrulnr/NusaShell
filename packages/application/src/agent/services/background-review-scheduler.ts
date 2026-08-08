@@ -47,6 +47,7 @@ export interface BackgroundReviewSchedulerDeps {
 export class BackgroundReviewScheduler {
   private settings: BackgroundReviewSettings = DEFAULT_REVIEW_SETTINGS;
   private reviewInFlight = false;
+  private tickQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly deps: BackgroundReviewSchedulerDeps) {}
 
@@ -59,6 +60,12 @@ export class BackgroundReviewScheduler {
   }
 
   async tick(parentResult: AgentTurnResult): Promise<void> {
+    const next = this.tickQueue.then(() => this.tickOnce(parentResult));
+    this.tickQueue = next.catch(() => {});
+    return next;
+  }
+
+  private async tickOnce(parentResult: AgentTurnResult): Promise<void> {
     if (!this.settings.enabled) return;
     if (this.reviewInFlight) return;
 
@@ -91,10 +98,15 @@ export class BackgroundReviewScheduler {
     reviewSkills: boolean,
   ): Promise<void> {
     this.reviewInFlight = true;
+    const providerId = parentResult.providerId ?? this.deps.defaultProviderId;
+    let reviewTraceId = "";
     try {
-      const provider = this.deps.providerRegistry.get(this.deps.defaultProviderId);
+      // Review the same provider family that completed the parent turn when
+      // available. A stale bootstrap default can otherwise route background
+      // work to a provider the user no longer selected.
+      const provider = this.deps.providerRegistry.get(providerId);
       if (!provider) {
-        this.deps.logger?.warn("Background review skipped: provider not found");
+        this.deps.logger?.warn("Background review skipped: provider not found provider=%s parentTraceId=%s", providerId, parentResult.traceId);
         return;
       }
 
@@ -113,8 +125,8 @@ export class BackgroundReviewScheduler {
         maxToolRounds: this.settings.maxToolRounds,
       });
 
-      const reviewTraceId = randomUUID();
-      this.deps.logger?.info("Background review spawned traceId=%s kind=%s", reviewTraceId, kind);
+      reviewTraceId = randomUUID();
+      this.deps.logger?.info("Background review spawned traceId=%s parentTraceId=%s provider=%s kind=%s", reviewTraceId, parentResult.traceId, provider.id, kind);
 
       const result = await runner.run({
         messages: [
@@ -139,7 +151,7 @@ export class BackgroundReviewScheduler {
         this.deps.logger?.info("Background review completed traceId=%s no mutations", reviewTraceId);
       }
     } catch (error) {
-      this.deps.logger?.error("Background review failed: %s", error instanceof Error ? error.message : String(error));
+      this.deps.logger?.error("Background review failed traceId=%s parentTraceId=%s provider=%s: %s", reviewTraceId || "unknown", parentResult.traceId, providerId, error instanceof Error ? error.message : String(error));
     } finally {
       this.reviewInFlight = false;
     }

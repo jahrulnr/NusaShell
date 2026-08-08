@@ -223,3 +223,23 @@ export function describeToolsPanel(result, plugin) {
   }
   return { status: "empty", count: 0, tools, message: "No tools available. Start the plugin to discover tools." };
 }
+
+/**
+ * Sync sidebar nav active class + aria-current so screen readers know the current view.
+ * Exactly one [data-nav] item is current when viewName matches a nav button; none for
+ * views outside the main nav (e.g. settings).
+ *
+ * @param {Iterable<Element>} navItems
+ * @param {string} viewName
+ */
+export function setSidebarNavCurrent(navItems, viewName) {
+  for (const item of navItems) {
+    const isCurrent = item.getAttribute("data-view") === viewName;
+    item.classList.toggle("active", isCurrent);
+    if (isCurrent) {
+      item.setAttribute("aria-current", "page");
+    } else {
+      item.removeAttribute("aria-current");
+    }
+  }
+}

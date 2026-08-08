@@ -58,6 +58,19 @@ export interface RunAgentTurnInput {
    */
   readonly systemContext?: readonly AgentMessage[];
   /**
+   * Build an ephemeral synthetic hydration transcript (assistant toolCalls +
+   * tool results) for post-compaction continuation. Assembled by the handler
+   * from read-only runtime snapshots; never executes the gateway.
+   */
+  readonly buildHydrationTranscript?: () => Promise<readonly AgentMessage[]>;
+  /**
+   * Builds the TODO block to seal into the compaction summary user message
+   * (Option B: user summary + todo -> assistant toolCalls -> tool results).
+   * Only invoked at the compaction boundary; returns undefined when there is no
+   * active TODO so the summary stays clean.
+   */
+  readonly todoPromptForCompaction?: () => string | undefined;
+  /**
    * Fired whenever the sealed step list grows (reasoning / text / tool_calls).
    * Used by ActiveTurnProjection — not every token.
    */
@@ -76,6 +89,8 @@ export interface AgentToolExecution {
   readonly args?: Readonly<Record<string, unknown>>;
   readonly result?: unknown;
   readonly error?: string;
+  /** Exact role:"tool" content sent to the provider; reused by the UI. */
+  readonly modelOutput?: string;
   /**
    * Canonical typed tool result (dual-rep). Populated by the execution policy
    * after migration; legacy `ok`/`result`/`error` remain derived for consumers

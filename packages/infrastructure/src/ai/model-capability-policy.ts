@@ -41,7 +41,8 @@ export function resolveModelRuntimePolicy(input: {
   const capabilities = input.capabilities;
   // Catalog often stores reasoningSupported:false when the provider listing
   // omitted reasoning fields. Known reasoner families still take the heuristic
-  // so effort/thinking params are not silently dropped (e.g. glm-5.2, kimi).
+  // so capability flags stay truthful for UI/tooling — but effort values are
+  // never invented: without a catalog allow-list we omit reasoning_effort.
   const supportsReasoning =
     capabilities?.reasoningSupported === true
     || Boolean(capabilities?.reasoningMandatory)
@@ -79,30 +80,34 @@ function resolveEffort(
   capabilities: ModelCapabilities | undefined,
 ): Exclude<ReasoningEffort, "auto"> | undefined {
   if (!supported) return undefined;
-  let wanted: Exclude<ReasoningEffort, "auto"> | undefined;
-  if (requested === "auto") {
-    const defaultEffort = capabilities?.defaultEffort;
-    if (defaultEffort === "none" || defaultEffort === "auto") return defaultEffort === "none" ? undefined : "medium";
-    wanted = defaultEffort ?? "medium";
-  } else {
-    wanted = requested;
-  }
 
   const advertised = (capabilities?.supportedEfforts ?? [])
     .filter((effort): effort is Exclude<ReasoningEffort, "auto"> => effort !== "auto");
+  // No catalog effort levels → stay in auto (omit reasoning_effort entirely).
+  // Inventing medium/high breaks gateways that only accept a subset (e.g. tokenrouter).
+  if (advertised.length === 0) return undefined;
+
+  // Auto: never send reasoning_effort — leave the provider's native default.
+  // Compatibility over inventing medium/high when the user did not pick a level.
+  if (requested === "auto") return undefined;
+
+  const wanted: Exclude<ReasoningEffort, "auto"> = requested;
+
   if (wanted === "none" && capabilities?.reasoningMandatory) {
     const fallback = advertised.find((effort) => effort !== "none");
     return fallback ?? (capabilities.defaultEffort !== "none" && capabilities.defaultEffort !== "auto"
-      ? capabilities.defaultEffort
+      && advertised.includes(capabilities.defaultEffort as Exclude<ReasoningEffort, "auto">)
+      ? capabilities.defaultEffort as Exclude<ReasoningEffort, "auto">
       : undefined);
   }
-  if (advertised.length === 0 || advertised.includes(wanted)) return wanted;
+  if (advertised.includes(wanted)) return wanted;
 
   const target = effortOrder.indexOf(wanted);
   return [...advertised].sort((left, right) => {
     const leftDistance = Math.abs(effortOrder.indexOf(left) - target);
     const rightDistance = Math.abs(effortOrder.indexOf(right) - target);
-    return leftDistance - rightDistance;
+    if (leftDistance !== rightDistance) return leftDistance - rightDistance;
+    return effortOrder.indexOf(right) - effortOrder.indexOf(left);
   })[0];
 }
 

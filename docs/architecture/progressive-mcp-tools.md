@@ -2,13 +2,13 @@
 
 The agent must not receive every MCP schema at the start of a turn for **idle**
 plugins. One server may expose hundreds of tools while providers commonly impose
-function-count and prompt-size limits. However, when a plugin is **running**,
-its full tool catalog (name + description + `inputSchema`) is injected into the
-Live MCP system block and auto-advertised in the provider `tools[]` array —
-trading progressive discovery for IDE-style completeness on active plugins.
-Progressive discovery remains the path for **starting** plugins (`mcp_enable`)
-and for **overflow/failure recovery** when a running plugin exceeds the 96-entry
-`tools[]` cap or a `listTools` call fails.
+function-count and prompt-size limits. When a plugin is **running**, its full
+tool catalog (name + description + `inputSchema`) is carried in the hidden
+per-conversation runtime checkpoint, not the system prompt. Provider `tools[]`
+remains bounded to callable routes; the checkpoint supplies complete awareness
+while `tool_schema` is the escape hatch for a known tool outside that typed
+working set. Progressive discovery remains the path for **starting** plugins
+(`mcp_enable`) and for stale, truncated, or failed capability lookup.
 
 ## Initial tool set
 
@@ -56,14 +56,12 @@ Every turn starts with thirteen shell-owned meta-tools:
 `tool_schema` / `tool_schemas` advertise a concrete MCP tool (with schema) for
 the rest of the current turn so the provider can call it through the typed
 broker path. Grants are scoped by turn trace ID and cleared in a `finally`
-cleanup, so concurrent conversations cannot share advertised catalogs and the
-catalog cannot grow across turns. When a plugin is **running**, `listTools`
-auto-seeds routes for every tool on that plugin (same shape as `grantTool`),
-so the provider `tools[]` array includes them without a prior `tool_schema`
-call. Auto-seeded routes are also persisted to the conversation sticky store
-so auto-continue turns inherit them. The provider `tools[]` array is hard-capped
-at 96 MCP tool entries beyond meta-tools; overflow names are listed in the Live
-MCP block as "present but not in tools[] — call via known name / `tool_schema`."
+cleanup, so concurrent conversations cannot share advertised catalogs. Running
+plugin routes are seeded into the conversation-local callable working set for
+direct continuation; the provider `tools[]` array is hard-capped at 96 MCP
+entries beyond meta-tools. The full catalog is separately retained in the
+runtime checkpoint, so tools beyond that cap remain known and can be selected
+with one `tool_schema` call instead of broad rediscovery.
 
 The model may also call a previously used `mcp_<plugin>_<tool>` name **without**
 a prior grant when that plugin is already `running`. The gateway lazily resolves

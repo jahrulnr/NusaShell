@@ -1,6 +1,6 @@
-// SubagentRunLifecycle — owns the 6 subagent run state fields and their
-// transitions. The controller delegates lifecycle changes here so the
-// order-sensitive dispose/null logic lives in one place.
+// SubagentRunLifecycle — owns the per-run subagent state and transitions.
+// The controller delegates lifecycle changes here so the order-sensitive
+// dispose/null logic lives in one place without sharing state between runs.
 //
 // State machine (implicit phases):
 //   idle → run_started → streaming → run_ended → sealed
@@ -22,12 +22,64 @@ export class SubagentRunLifecycle {
   }
 
   reset() {
-    this.activeRun = null;
-    this.streamState = null;
-    this.streamDisposer = null;
-    this.cardStream = null;
+    this.states = new Map();
+    this.selectedRunId = null;
+    this.legacyState = this.createState();
     this.eventDisposer = null;
-    this.ownerConversationId = null;
+  }
+
+  createState() {
+    return {
+      activeRun: null,
+      streamState: null,
+      streamDisposer: null,
+      cardStream: null,
+      ownerConversationId: null,
+    };
+  }
+
+  currentState() {
+    if (!this.selectedRunId) return this.legacyState;
+    let state = this.states.get(this.selectedRunId);
+    if (!state) {
+      state = this.createState();
+      this.states.set(this.selectedRunId, state);
+    }
+    return state;
+  }
+
+  /** Select the run whose state is currently projected into the drawer. */
+  selectRun(runId) {
+    this.selectedRunId = runId || null;
+    if (this.selectedRunId && !this.states.has(this.selectedRunId)) {
+      const legacyRunId = this.legacyState.streamState?.runId || this.legacyState.activeRun?.runId;
+      if (legacyRunId === this.selectedRunId) {
+        this.states.set(this.selectedRunId, this.legacyState);
+        this.legacyState = this.createState();
+      }
+    }
+    return this.currentState();
+  }
+
+  get activeRun() { return this.currentState().activeRun; }
+  set activeRun(value) {
+    // Preserve the old direct-assignment API used by tests and callers that
+    // create one run without explicitly selecting it first.
+    if (!this.selectedRunId && value?.runId) this.selectRun(value.runId);
+    this.currentState().activeRun = value;
+  }
+  get streamState() { return this.currentState().streamState; }
+  set streamState(value) { this.currentState().streamState = value; }
+  get streamDisposer() { return this.currentState().streamDisposer; }
+  set streamDisposer(value) { this.currentState().streamDisposer = value; }
+  get cardStream() { return this.currentState().cardStream; }
+  set cardStream(value) { this.currentState().cardStream = value; }
+  get ownerConversationId() { return this.currentState().ownerConversationId; }
+  set ownerConversationId(value) { this.currentState().ownerConversationId = value; }
+
+  forEachState(callback) {
+    callback(this.legacyState);
+    for (const state of this.states.values()) callback(state);
   }
 
   rebindEvents(subscribeFn) {
@@ -61,12 +113,17 @@ export class SubagentRunLifecycle {
   dispose() {
     this.eventDisposer?.();
     this.eventDisposer = null;
-    this.streamDisposer?.();
-    this.streamDisposer = null;
-    this.cardStream = null;
-    this.streamState = null;
-    this.activeRun = null;
-    this.ownerConversationId = null;
+    this.forEachState((state) => {
+      state.streamDisposer?.();
+      state.streamDisposer = null;
+      state.cardStream = null;
+      state.streamState = null;
+      state.activeRun = null;
+      state.ownerConversationId = null;
+    });
+    this.states.clear();
+    this.selectedRunId = null;
+    this.legacyState = this.createState();
   }
 
   isViewingOwner(conversationId) {

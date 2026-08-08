@@ -183,7 +183,8 @@ describe("AI provider registry", () => {
     expect(models[0]).toMatchObject({
       reasoningSupported: true,
       supportedEfforts: [],
-      defaultEffort: "medium",
+      // No concrete levels in the catalog → stay on auto (omit reasoning_effort).
+      defaultEffort: "auto",
       supportsTools: true,
     });
   });

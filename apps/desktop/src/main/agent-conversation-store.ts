@@ -7,6 +7,7 @@ import {
   readJsonlLines,
 } from "./agent-conversation-jsonl.js";
 import type {
+  AgentAssistantReservation,
   AgentCanvasArtifact,
   AgentCanvasArtifactKind,
   AgentConversation,
@@ -42,6 +43,11 @@ interface ConversationMeta {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly messageCount: number;
+  readonly nextMessagePosition: number;
+  readonly pendingAssistant?: AgentAssistantReservation & {
+    readonly traceId: string;
+    readonly createdAt: string;
+  };
   readonly kind?: AgentConversationKind;
   readonly acp?: AgentConversationAcp;
   readonly workspace?: string;
@@ -62,6 +68,7 @@ export class AgentConversationStore {
     private readonly createId: () => string = () => `conv_${randomUUID()}`,
     /** Optional max JSONL size in bytes; default ~8 MiB. Used to trim oldest messages. */
     private readonly maxBytes: number = DEFAULT_MAX_BYTES,
+    private readonly createMessageId: () => string = () => `msg_${randomUUID()}`,
   ) {
     this.conversationsDir = join(dirname(path), "conversations");
   }
@@ -92,6 +99,7 @@ export class AgentConversationStore {
         createdAt: timestamp,
         updatedAt: timestamp,
         messageCount: 0,
+        nextMessagePosition: 1,
         ...(options?.kind ? { kind: options.kind } : {}),
         ...(options?.acp ? { acp: options.acp } : {}),
       };
@@ -109,8 +117,16 @@ export class AgentConversationStore {
     await this.ensureLegacyMigrated();
     return this.withLock(id, async () => {
       const meta = await this.requireMeta(id);
+      const messages = await this.readMessages(id);
       const timestamp = this.now().toISOString();
-      const savedMessage = { ...clampResumeMessages(message), createdAt: message.createdAt ?? timestamp };
+      const position = Math.max(meta.nextMessagePosition, maxMessagePosition(messages) + 1);
+      const savedMessage = {
+        ...message,
+        id: this.allocateMessageId(messages),
+        position,
+        revision: 1,
+        createdAt: message.createdAt ?? timestamp,
+      };
       const title = meta.messageCount === 0 && message.role === "user"
         ? conversationTitle(message.content)
         : meta.title;
@@ -123,6 +139,99 @@ export class AgentConversationStore {
         title,
         updatedAt: timestamp,
         messageCount,
+        nextMessagePosition: position + 1,
+      };
+      await this.writeMeta(nextMeta);
+      return this.mustLoadConversation(id, nextMeta);
+    });
+  }
+
+  async reserveAssistant(
+    id: string,
+    traceId: string,
+    options?: { replaceLastInterrupted?: boolean },
+  ): Promise<AgentAssistantReservation> {
+    await this.ensureLegacyMigrated();
+    return this.withLock(id, async () => {
+      const meta = await this.requireMeta(id);
+      const messages = await this.readMessages(id);
+      const timestamp = this.now().toISOString();
+      const interrupted = options?.replaceLastInterrupted === true
+        ? messages.at(-1)
+        : undefined;
+      if (options?.replaceLastInterrupted === true
+        && (!interrupted || interrupted.role !== "assistant" || interrupted.status !== "interrupted")) {
+        throw new Error("Last message is not an interrupted assistant message");
+      }
+      const reservation: AgentAssistantReservation = interrupted
+        ? {
+            messageId: interrupted.id!,
+            position: interrupted.position!,
+            revision: interrupted.revision ?? 1,
+          }
+        : {
+            messageId: this.allocateMessageId(messages),
+            position: Math.max(meta.nextMessagePosition, maxMessagePosition(messages) + 1),
+            revision: 0,
+          };
+      const nextMeta: ConversationMeta = {
+        ...meta,
+        updatedAt: timestamp,
+        nextMessagePosition: Math.max(meta.nextMessagePosition, reservation.position + 1),
+        pendingAssistant: { ...reservation, traceId, createdAt: timestamp },
+      };
+      await this.writeMeta(nextMeta);
+      return reservation;
+    });
+  }
+
+  async sealAssistant(
+    id: string,
+    traceId: string,
+    message: AgentConversationMessage,
+  ): Promise<AgentConversation> {
+    await this.ensureLegacyMigrated();
+    return this.withLock(id, async () => {
+      const meta = await this.requireMeta(id);
+      const messages = await this.readMessages(id);
+      const timestamp = this.now().toISOString();
+      const pending = meta.pendingAssistant;
+      if (message.role !== "assistant") throw new Error("Only assistant messages can seal an assistant reservation");
+      if (pending && pending.traceId !== traceId) {
+        throw new Error(`Assistant reservation belongs to another trace: ${pending.traceId}`);
+      }
+      if (!pending && messages.some((candidate) => candidate.role === "assistant" && candidate.traceId === traceId)) {
+        return this.mustLoadConversation(id, meta);
+      }
+      const reservation: AgentAssistantReservation = pending ?? {
+        messageId: this.allocateMessageId(messages),
+        position: Math.max(meta.nextMessagePosition, maxMessagePosition(messages) + 1),
+        revision: 0,
+      };
+      const existingIndex = messages.findIndex((candidate) => candidate.id === reservation.messageId);
+      const existing = existingIndex >= 0 ? messages[existingIndex] : undefined;
+      const merged = existing?.status === "interrupted"
+        ? mergeResumedAssistantMessage(existing, message)
+        : message;
+      const savedMessage: AgentConversationMessage = {
+        ...merged,
+        id: reservation.messageId,
+        position: reservation.position,
+        revision: Math.max(reservation.revision, existing?.revision ?? 0) + 1,
+        createdAt: existing?.createdAt ?? message.createdAt ?? pending?.createdAt ?? timestamp,
+        ...(existing ? { updatedAt: timestamp } : {}),
+      };
+      const nextMessages = existingIndex >= 0
+        ? [...messages.slice(0, existingIndex), savedMessage, ...messages.slice(existingIndex + 1)]
+        : [...messages, savedMessage];
+      const normalized = normalizeMessageSequence(id, nextMessages).messages;
+      await this.rewriteMessages(id, normalized);
+      const { pendingAssistant: _pendingAssistant, ...rest } = meta;
+      const nextMeta: ConversationMeta = {
+        ...rest,
+        updatedAt: timestamp,
+        messageCount: normalized.length,
+        nextMessagePosition: Math.max(meta.nextMessagePosition, reservation.position + 1),
       };
       await this.writeMeta(nextMeta);
       return this.mustLoadConversation(id, nextMeta);
@@ -133,12 +242,19 @@ export class AgentConversationStore {
     await this.ensureLegacyMigrated();
     return this.withLock(id, async () => {
       const meta = await this.requireMeta(id);
+      const messages = await this.readMessages(id);
+      const compactedMessageCount = Math.min(meta.messageCount, Math.max(0, checkpoint.compactedMessageCount));
+      const compactedThroughPosition = Number.isInteger(checkpoint.compactedThroughPosition)
+        && (checkpoint.compactedThroughPosition ?? 0) > 0
+        ? checkpoint.compactedThroughPosition
+        : messages[Math.min(messages.length, compactedMessageCount) - 1]?.position;
       const nextMeta: ConversationMeta = {
         ...meta,
         updatedAt: this.now().toISOString(),
         checkpoint: {
           ...checkpoint,
-          compactedMessageCount: Math.min(meta.messageCount, Math.max(0, checkpoint.compactedMessageCount)),
+          compactedMessageCount,
+          ...(compactedThroughPosition ? { compactedThroughPosition } : {}),
           ...(Number.isInteger(checkpoint.compactionCount) && (checkpoint.compactionCount ?? -1) >= 0
             ? { compactionCount: checkpoint.compactionCount }
             : {}),
@@ -158,13 +274,76 @@ export class AgentConversationStore {
       if (!last || last.role !== "assistant" || last.status !== "interrupted") {
         throw new Error("Last message is not an interrupted assistant message");
       }
-      const savedMessage = { ...clampResumeMessages(message), createdAt: message.createdAt ?? this.now().toISOString() };
+      const savedMessage = {
+        ...mergeResumedAssistantMessage(last, message),
+        id: last.id!,
+        position: last.position!,
+        revision: (last.revision ?? 1) + 1,
+        createdAt: last.createdAt ?? message.createdAt ?? this.now().toISOString(),
+        updatedAt: this.now().toISOString(),
+      };
       const nextMessages = [...messages.slice(0, -1), savedMessage];
       await this.rewriteMessages(id, nextMessages);
       const nextMeta: ConversationMeta = {
         ...meta,
         updatedAt: this.now().toISOString(),
         messageCount: nextMessages.length,
+      };
+      await this.writeMeta(nextMeta);
+      return this.mustLoadConversation(id, nextMeta);
+    });
+  }
+
+  /**
+   * Persist an interrupted turn without creating a recovery-message stack.
+   * A retry/continue/resume may fail repeatedly; the latest failure replaces
+   * the previous interrupted tail, while a fresh user turn still appends.
+   */
+  async appendOrReplaceLastInterrupted(id: string, message: AgentConversationMessage): Promise<AgentConversation> {
+    await this.ensureLegacyMigrated();
+    return this.withLock(id, async () => {
+      const meta = await this.requireMeta(id);
+      const messages = await this.readMessages(id);
+      const timestamp = this.now().toISOString();
+      let prefix = messages;
+      while (prefix.at(-1)?.role === "assistant" && prefix.at(-1)?.status === "interrupted") {
+        prefix = prefix.slice(0, -1);
+      }
+      const interruptedTail = messages.slice(prefix.length);
+      const priorInterrupted = interruptedTail.reduce<AgentConversationMessage | undefined>(
+        (merged, interrupted) => merged
+          ? mergeResumedAssistantMessage(merged, interrupted)
+          : interrupted,
+        undefined,
+      );
+      const savedMessage = {
+        ...(priorInterrupted
+          ? mergeResumedAssistantMessage(priorInterrupted, message)
+          : message),
+        ...(priorInterrupted
+          ? {
+              id: priorInterrupted.id!,
+              position: priorInterrupted.position!,
+              revision: (priorInterrupted.revision ?? 1) + 1,
+              createdAt: priorInterrupted.createdAt ?? message.createdAt ?? timestamp,
+              updatedAt: timestamp,
+            }
+          : {
+              id: this.allocateMessageId(messages),
+              position: Math.max(meta.nextMessagePosition, maxMessagePosition(messages) + 1),
+              revision: 1,
+              createdAt: message.createdAt ?? timestamp,
+            }),
+      };
+      const nextMessages = [...prefix, savedMessage];
+      await this.rewriteMessages(id, nextMessages);
+      const nextMeta: ConversationMeta = {
+        ...meta,
+        updatedAt: timestamp,
+        messageCount: nextMessages.length,
+        nextMessagePosition: priorInterrupted
+          ? meta.nextMessagePosition
+          : Math.max(meta.nextMessagePosition, (savedMessage.position ?? 0) + 1),
       };
       await this.writeMeta(nextMeta);
       return this.mustLoadConversation(id, nextMeta);
@@ -391,13 +570,15 @@ export class AgentConversationStore {
   }
 
   private async materializeConversation(conversation: AgentConversation): Promise<void> {
-    const messageCount = conversation.messages.length;
+    const normalized = normalizeMessageSequence(conversation.id, conversation.messages);
+    const messageCount = normalized.messages.length;
     const meta: ConversationMeta = {
       id: conversation.id,
       title: conversation.title,
       createdAt: conversation.createdAt,
       updatedAt: conversation.updatedAt,
       messageCount,
+      nextMessagePosition: maxMessagePosition(normalized.messages) + 1,
       ...(conversation.kind ? { kind: conversation.kind } : {}),
       ...(conversation.acp ? { acp: conversation.acp } : {}),
       ...(conversation.workspace ? { workspace: conversation.workspace } : {}),
@@ -407,7 +588,7 @@ export class AgentConversationStore {
       ...(conversation.activeSubagentRunId ? { activeSubagentRunId: conversation.activeSubagentRunId } : {}),
     };
     await this.writeMeta(meta);
-    await this.rewriteMessages(conversation.id, conversation.messages);
+    await this.rewriteMessages(conversation.id, normalized.messages);
     if (conversation.canvasArtifacts?.length) {
       await this.writeArtifacts(conversation.id, conversation.canvasArtifacts);
     }
@@ -424,9 +605,28 @@ export class AgentConversationStore {
 
   private async mustLoadConversation(id: string, meta: ConversationMeta): Promise<AgentConversation> {
     const messages = await this.readMessages(id);
+    const nextMessagePosition = Math.max(meta.nextMessagePosition, maxMessagePosition(messages) + 1);
+    const legacyBoundaryPosition = meta.checkpoint?.compactedThroughPosition === undefined
+      && (meta.checkpoint?.compactedMessageCount ?? 0) > 0
+      ? messages[Math.min(messages.length, meta.checkpoint!.compactedMessageCount) - 1]?.position
+      : undefined;
+    const checkpoint: AgentConversationCheckpoint | undefined = meta.checkpoint && legacyBoundaryPosition
+      ? { ...meta.checkpoint, compactedThroughPosition: legacyBoundaryPosition }
+      : meta.checkpoint;
+    const currentMeta = nextMessagePosition !== meta.nextMessagePosition
+      || meta.messageCount !== messages.length
+      || checkpoint !== meta.checkpoint
+      ? {
+          ...meta,
+          messageCount: messages.length,
+          nextMessagePosition,
+          ...(checkpoint ? { checkpoint } : {}),
+        }
+      : meta;
+    if (currentMeta !== meta) await this.writeMeta(currentMeta);
     const canvasArtifacts = await this.readArtifacts(id);
     const subagentRuns = await this.readSubagents(id);
-    return assemblyConversation(meta, messages, canvasArtifacts, subagentRuns);
+    return assemblyConversation(currentMeta, messages, canvasArtifacts, subagentRuns);
   }
 
   private async requireMeta(id: string): Promise<ConversationMeta> {
@@ -479,11 +679,23 @@ export class AgentConversationStore {
 
   private async readMessages(id: string): Promise<AgentConversationMessage[]> {
     const lines = await readJsonlLines(this.messagesPath(id));
-    return lines.flatMap((item) => {
+    const repaired = lines.flatMap((item) => {
       if (isConversationMessage(item)) return [item];
-      const repaired = repairConversationMessage(item);
-      return repaired ? [repaired] : [];
+      const message = repairConversationMessage(item);
+      return message ? [message] : [];
     });
+    const normalized = normalizeMessageSequence(id, repaired);
+    if (normalized.changed) await this.rewriteMessages(id, normalized.messages);
+    return normalized.messages;
+  }
+
+  private allocateMessageId(messages: readonly AgentConversationMessage[]): string {
+    const existing = new Set(messages.flatMap((message) => message.id ? [message.id] : []));
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const id = this.createMessageId();
+      if (typeof id === "string" && id.length > 0 && !existing.has(id)) return id;
+    }
+    throw new Error("Could not allocate a unique conversation message ID");
   }
 
   private async rewriteMessages(id: string, messages: readonly AgentConversationMessage[]): Promise<void> {
@@ -595,9 +807,123 @@ function assemblyConversation(
   };
 }
 
+function maxMessagePosition(messages: readonly AgentConversationMessage[]): number {
+  return messages.reduce((highest, message) => (
+    Number.isInteger(message.position) && (message.position ?? 0) > highest
+      ? message.position as number
+      : highest
+  ), 0);
+}
+
+function normalizeMessageSequence(
+  conversationId: string,
+  messages: readonly AgentConversationMessage[],
+): { messages: AgentConversationMessage[]; changed: boolean } {
+  const reservedPositions = new Set(messages.flatMap((message) => (
+    Number.isInteger(message.position) && (message.position ?? 0) > 0
+      ? [message.position as number]
+      : []
+  )));
+  const seenIds = new Set<string>();
+  const seenPositions = new Set<number>();
+  const safeConversationId = conversationId.replace(/[^a-zA-Z0-9_-]/g, "_");
+  let nextLegacyPosition = 1;
+  let changed = false;
+
+  const normalized = messages.map((message, index) => {
+    let messageId = typeof message.id === "string" && message.id.length > 0 && !seenIds.has(message.id)
+      ? message.id
+      : "";
+    if (!messageId) {
+      const base = `msg_legacy_${safeConversationId}_${index + 1}`;
+      messageId = base;
+      let suffix = 1;
+      while (seenIds.has(messageId)) messageId = `${base}_${suffix++}`;
+      changed = true;
+    }
+    seenIds.add(messageId);
+
+    let position = Number.isInteger(message.position)
+      && (message.position ?? 0) > 0
+      && !seenPositions.has(message.position as number)
+      ? message.position as number
+      : 0;
+    if (!position) {
+      while (reservedPositions.has(nextLegacyPosition) || seenPositions.has(nextLegacyPosition)) {
+        nextLegacyPosition += 1;
+      }
+      position = nextLegacyPosition;
+      nextLegacyPosition += 1;
+      changed = true;
+    }
+    seenPositions.add(position);
+
+    const revision = Number.isInteger(message.revision) && (message.revision ?? 0) >= 1
+      ? message.revision as number
+      : 1;
+    if (revision !== message.revision) changed = true;
+    const nested = normalizeAssistantMessageOrder(message);
+    if (nested.changed) changed = true;
+
+    if (!nested.changed && messageId === message.id && position === message.position && revision === message.revision) {
+      return message;
+    }
+    return { ...nested.message, id: messageId, position, revision };
+  });
+
+  const ordered = [...normalized].sort((left, right) => {
+    const positionOrder = (left.position ?? 0) - (right.position ?? 0);
+    if (positionOrder !== 0) return positionOrder;
+    return (left.id ?? "").localeCompare(right.id ?? "");
+  });
+  if (!changed && ordered.some((message, index) => message !== normalized[index])) changed = true;
+  return { messages: ordered, changed };
+}
+
+function normalizeAssistantMessageOrder(
+  message: AgentConversationMessage,
+): { message: AgentConversationMessage; changed: boolean } {
+  if (message.role !== "assistant") return { message, changed: false };
+  let changed = false;
+  const normalizeCalls = (calls: readonly AgentConversationToolCall[]) => calls.map((call, index) => {
+    const callPosition = index + 1;
+    if (call.callPosition === callPosition) return call;
+    changed = true;
+    return { ...call, callPosition };
+  });
+  const toolCalls = Array.isArray(message.toolCalls) ? normalizeCalls(message.toolCalls) : undefined;
+  const steps = Array.isArray(message.steps)
+    ? message.steps.map((step, index) => {
+        const stepPosition = index + 1;
+        if (step.type === "tool_calls") {
+          const calls = normalizeCalls(step.calls);
+          if (step.stepPosition === stepPosition && calls.every((call, callIndex) => call === step.calls[callIndex])) {
+            return step;
+          }
+          changed = true;
+          return { ...step, stepPosition, calls };
+        }
+        if (step.stepPosition === stepPosition) return step;
+        changed = true;
+        return { ...step, stepPosition };
+      })
+    : undefined;
+  if (!changed) return { message, changed: false };
+  return {
+    message: {
+      ...message,
+      ...(toolCalls ? { toolCalls } : {}),
+      ...(steps ? { steps } : {}),
+    },
+    changed: true,
+  };
+}
+
 function metaToSummary(meta: ConversationMeta): AgentConversationSummary {
   const {
     messageCount,
+    nextMessagePosition: _nextMessagePosition,
+    pendingAssistant: _pendingAssistant,
     checkpoint: _checkpoint,
     ...rest
   } = meta;
@@ -615,12 +941,17 @@ function normalizeMeta(value: unknown, expectedId: string): ConversationMeta | n
   const messageCount = Number.isInteger(candidate.messageCount) && (candidate.messageCount ?? -1) >= 0
     ? (candidate.messageCount as number)
     : 0;
+  const nextMessagePosition = Number.isInteger(candidate.nextMessagePosition) && (candidate.nextMessagePosition ?? 0) > 0
+    ? candidate.nextMessagePosition as number
+    : 1;
   return {
     id: candidate.id,
     title: typeof candidate.title === "string" ? candidate.title : "New conversation",
     createdAt: candidate.createdAt,
     updatedAt: candidate.updatedAt,
     messageCount,
+    nextMessagePosition,
+    ...(isAssistantReservation(candidate.pendingAssistant) ? { pendingAssistant: candidate.pendingAssistant } : {}),
     ...(isCheckpoint(candidate.checkpoint) ? { checkpoint: candidate.checkpoint } : {}),
     ...(typeof candidate.workspace === "string" && candidate.workspace ? { workspace: candidate.workspace } : {}),
     ...(isModelBinding(candidate.model) ? { model: candidate.model } : {}),
@@ -629,6 +960,16 @@ function normalizeMeta(value: unknown, expectedId: string): ConversationMeta | n
     ...(typeof candidate.activeCanvasArtifactId === "string" ? { activeCanvasArtifactId: candidate.activeCanvasArtifactId } : {}),
     ...(typeof candidate.activeSubagentRunId === "string" ? { activeSubagentRunId: candidate.activeSubagentRunId } : {}),
   };
+}
+
+function isAssistantReservation(value: unknown): value is NonNullable<ConversationMeta["pendingAssistant"]> {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.messageId === "string" && candidate.messageId.length > 0
+    && Number.isInteger(candidate.position) && (candidate.position as number) > 0
+    && Number.isInteger(candidate.revision) && (candidate.revision as number) >= 0
+    && typeof candidate.traceId === "string" && candidate.traceId.length > 0
+    && typeof candidate.createdAt === "string";
 }
 
 async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
@@ -817,6 +1158,10 @@ function isConversationMessage(value: unknown): value is AgentConversationMessag
   const message = value as Partial<AgentConversationMessage>;
   return (message.role === "user" || message.role === "assistant")
     && typeof message.content === "string"
+    && (message.id === undefined || (typeof message.id === "string" && message.id.length > 0))
+    && (message.position === undefined || (Number.isInteger(message.position) && message.position > 0))
+    && (message.revision === undefined || (Number.isInteger(message.revision) && message.revision >= 0))
+    && (message.updatedAt === undefined || typeof message.updatedAt === "string")
     && (message.reasoning === undefined || (
       message.role === "assistant"
       && typeof message.reasoning === "string"
@@ -840,6 +1185,13 @@ function isConversationMessage(value: unknown): value is AgentConversationMessag
     && (message.resumeMessages === undefined || (
       message.role === "assistant"
       && Array.isArray(message.resumeMessages)
+    ))
+    && (message.interruptReason === undefined || (
+      message.role === "assistant"
+      && (message.interruptReason === "cancel" || message.interruptReason === "provider" || message.interruptReason === "max_rounds")
+    ))
+    && (message.retryOnly === undefined || (
+      message.role === "assistant" && typeof message.retryOnly === "boolean"
     ));
 }
 
@@ -956,6 +1308,8 @@ function isCheckpoint(value: unknown): value is AgentConversationCheckpoint {
   const checkpoint = value as Partial<AgentConversationCheckpoint>;
   return typeof checkpoint.summary === "string"
     && Number.isInteger(checkpoint.compactedMessageCount)
+    && (checkpoint.compactedThroughPosition === undefined
+      || (Number.isInteger(checkpoint.compactedThroughPosition) && checkpoint.compactedThroughPosition > 0))
     && (checkpoint.via === "provider" || checkpoint.via === "extractive")
     && (checkpoint.compactionCount === undefined || (Number.isInteger(checkpoint.compactionCount) && checkpoint.compactionCount >= 0));
 }
@@ -966,21 +1320,36 @@ function conversationTitle(content: string): string {
   return normalized.length <= 60 ? normalized : `${normalized.slice(0, 57)}…`;
 }
 
-const RESUME_MESSAGES_MAX_BYTES = 512 * 1024;
-
 /**
- * Drop `resumeMessages` when the serialized message exceeds the resume budget.
- * The interrupted assistant message keeps its `steps`/`toolCalls` for display,
- * but Retry falls back to a restart when the snapshot was too large to persist.
+ * A tool resume replaces the interrupted shell row with the new completed
+ * result. The resumed provider result only contains the new segment, so keep
+ * the interrupted segment's reasoning/tool graph for transcript replay.
  */
-function clampResumeMessages(message: AgentConversationMessage): AgentConversationMessage {
-  if (!message.resumeMessages) return message;
-  try {
-    const serialized = JSON.stringify(message);
-    if (serialized.length <= RESUME_MESSAGES_MAX_BYTES) return message;
-  } catch {
-    // fall through to drop
-  }
-  const { resumeMessages: _drop, ...rest } = message;
-  return rest;
+function mergeResumedAssistantMessage(
+  previous: AgentConversationMessage,
+  next: AgentConversationMessage,
+): AgentConversationMessage {
+  const previousReasoning = typeof previous.reasoning === "string" ? previous.reasoning : "";
+  const nextReasoning = typeof next.reasoning === "string" ? next.reasoning : "";
+  const reasoning = previousReasoning && nextReasoning && previousReasoning !== nextReasoning
+    ? `${previousReasoning}\n\n${nextReasoning}`
+    : nextReasoning || previousReasoning;
+  const previousToolCalls = Array.isArray(previous.toolCalls) ? previous.toolCalls : [];
+  const nextToolCalls = Array.isArray(next.toolCalls) ? next.toolCalls : [];
+  const previousSteps = Array.isArray(previous.steps) ? previous.steps : [];
+  const nextSteps = Array.isArray(next.steps) ? next.steps : [];
+
+  return {
+    ...next,
+    ...(reasoning ? { reasoning } : {}),
+    ...(previousToolCalls.length || nextToolCalls.length
+      ? { toolCalls: [...previousToolCalls, ...nextToolCalls] }
+      : {}),
+    ...(previousSteps.length || nextSteps.length
+      ? { steps: [...previousSteps, ...nextSteps] }
+      : {}),
+    ...(previous.rounds !== undefined && next.rounds !== undefined
+      ? { rounds: previous.rounds + next.rounds }
+      : {}),
+  };
 }

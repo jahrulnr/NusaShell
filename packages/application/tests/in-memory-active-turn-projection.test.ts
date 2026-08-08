@@ -31,6 +31,21 @@ describe("InMemoryActiveTurnProjection", () => {
     expect(proj.getByTraceId("t2")?.conversationId).toBe("c1");
   });
 
+  it("keeps the reserved assistant identity in the active snapshot", () => {
+    const proj = new InMemoryActiveTurnProjection();
+    proj.start({
+      conversationId: "c1",
+      traceId: "t1",
+      messageId: "msg-assistant",
+      messagePosition: 2,
+    });
+
+    expect(proj.get("c1")).toMatchObject({
+      messageId: "msg-assistant",
+      messagePosition: 2,
+    });
+  });
+
   it("tracks open tools until the next sealed step replace", () => {
     const proj = new InMemoryActiveTurnProjection();
     proj.start({ conversationId: "c1", traceId: "t1" });
@@ -39,6 +54,22 @@ describe("InMemoryActiveTurnProjection", () => {
     expect(proj.get("c1")?.openTools[0]).toMatchObject({ id: "call-1", status: "ok" });
     proj.setSteps("c1", [{ type: "tool_calls", calls: [{ id: "call-1", name: "ask_question", ok: true }] }]);
     expect(proj.get("c1")?.openTools).toHaveLength(0);
+  });
+
+  it("keeps the provider-facing terminal projection for a completed live tool", () => {
+    const proj = new InMemoryActiveTurnProjection();
+    proj.start({ conversationId: "c1", traceId: "t1" });
+    proj.openTool("c1", { id: "call-1", name: "todo", args: { action: "get" } });
+
+    proj.endTool("c1", {
+      id: "call-1",
+      name: "todo",
+      ok: true,
+      result: { ok: true, items: [{ id: "task-1" }] },
+      modelOutput: "status=success\n\nok=true\nitems[1]",
+    });
+
+    expect(proj.get("c1")?.openTools[0]?.output).toBe("status=success\n\nok=true\nitems[1]");
   });
 
   it("BH-AGENT-15 keeps independent mid-turn projections per conversation room", () => {

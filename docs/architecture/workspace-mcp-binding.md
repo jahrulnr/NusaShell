@@ -113,5 +113,5 @@ launch overrides.
 | Runtime sync + launchSpec + respawn | `packages/application/src/plugin/services/plugin-runtime-manager.ts` |
 | MCP client Roots | `packages/infrastructure/src/mcp/stdio-mcp-client.adapter.ts` |
 | Files roots consumption + `NUSASHELL_WORKSPACE` | `plugins/files/mcp/{server,config,fs-service}.js` + rebuilt `server.cjs` |
-| Prompts | `resources/agent/prompts/{developer,mcp-tools}.md` |
+| Prompts | `resources/agent/prompts/{system,mcp-tools}.md` plus runtime hydration |
 | Risk | `docs/RISK.md` |

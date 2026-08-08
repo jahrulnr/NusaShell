@@ -230,11 +230,13 @@ describe("AgentTurnRunner", () => {
       { text: "The note is ready." },
     ]);
     const tools = new FakeToolGateway();
+    const completedTools: Array<{ modelOutput?: string }> = [];
     const runner = new AgentTurnRunner({ provider, toolGateway: tools });
 
     const result = await runner.run({
       messages: [{ role: "user", content: "Create a roadmap note" }],
       pluginIds: ["notes"],
+      onToolCallEnd: (execution) => completedTools.push(execution),
     });
 
     expect(result.text).toBe("The note is ready.");
@@ -243,7 +245,47 @@ describe("AgentTurnRunner", () => {
       role: "tool",
       toolCallId: "call-1",
       name: "notes.create",
-      content: JSON.stringify({ ok: true, data: { id: "note-1" }, meta: { truncated: false } }),
+      content: "status=success\ntruncated=false\n\nid=note-1",
+    });
+    expect(result.toolCalls[0]?.modelOutput).toBe(provider.requests[1]?.messages.at(-1)?.content);
+    expect(completedTools[0]?.modelOutput).toBe(provider.requests[1]?.messages.at(-1)?.content);
+  });
+
+  it("returns malformed tool arguments to the model without executing the tool", async () => {
+    const provider = new ScriptedProvider([
+      {
+        toolCalls: [{
+          id: "call-invalid",
+          name: "notes.create",
+          args: {},
+          argumentError: {
+            code: "TOOL_ARGUMENTS_INVALID_JSON",
+            message: "Tool call arguments were not valid JSON.",
+          },
+        }],
+      } as unknown as AgentProviderResult,
+      { text: "I re-issued the call correctly." },
+    ]);
+    const tools = new FakeToolGateway();
+    const runner = new AgentTurnRunner({ provider, toolGateway: tools });
+
+    const result = await runner.run({
+      messages: [{ role: "user", content: "Create a roadmap note" }],
+      pluginIds: ["notes"],
+    });
+
+    expect(tools.calls).toEqual([]);
+    expect(provider.requests[1]?.messages.at(-1)).toMatchObject({
+      role: "tool",
+      toolCallId: "call-invalid",
+      name: "notes.create",
+      toolIsError: true,
+      content: expect.stringContaining("TOOL_ARGUMENTS_INVALID_JSON"),
+    });
+    expect(result.toolCalls[0]).toMatchObject({
+      id: "call-invalid",
+      ok: false,
+      error: expect.stringContaining("valid JSON"),
     });
   });
 
@@ -281,6 +323,31 @@ describe("AgentTurnRunner", () => {
       },
       { type: "reasoning", content: "The tool succeeded." },
       { type: "text", content: "The note is ready." },
+    ]);
+  });
+
+  it("persists streamed reasoning when a successful provider result omits its aggregate reasoning", async () => {
+    // Some OpenAI-compatible streams expose reasoning only in delta events.
+    // The final completion can still contain normal text but no `reasoning`
+    // field; losing the delta here makes Thinking disappear when the renderer
+    // seals the successful message.
+    const provider = new ScriptedProvider([]);
+    provider.complete = async (request: AgentProviderRequest) => {
+      provider.requests.push(request);
+      request.onReasoningDelta?.("I should greet the user concisely.");
+      return { text: "Hai! 👋 Siap bantu." };
+    };
+    const runner = new AgentTurnRunner({ provider, toolGateway: new FakeToolGateway() });
+
+    const result = await runner.run({
+      messages: [{ role: "user", content: "hai" }],
+      pluginIds: [],
+    });
+
+    expect(result.reasoning).toBe("I should greet the user concisely.");
+    expect(result.steps).toEqual([
+      { type: "reasoning", content: "I should greet the user concisely." },
+      { type: "text", content: "Hai! 👋 Siap bantu." },
     ]);
   });
 
@@ -373,6 +440,37 @@ describe("AgentTurnRunner", () => {
     expect(result.toolCalls).toHaveLength(1);
     expect(result.toolCalls[0]).toMatchObject({ id: "call-1", name: "mcp_nusashell_createNote", ok: true });
     expect(tools.calls).toEqual([{ name: "mcp_nusashell_createNote", args: { text: "hi" } }]);
+  });
+
+  it("passes raw MCP terminal text through the untrusted envelope without re-projecting it", async () => {
+    const provider = new ScriptedProvider([
+      { toolCalls: [{ id: "call-terminal", name: "mcp_nusashell_terminal_exec", args: { cmd: "pwd" } }] },
+      { text: "Done." },
+    ]);
+    const tools = new FakeToolGateway();
+    tools.execute = async (name, args): Promise<unknown> => {
+      tools.calls.push({ name, args });
+      if (name === "mcp_nusashell_terminal_exec") {
+        return { content: [{ type: "text", text: '{"stdout":"/workspace"}' }] };
+      }
+      throw new Error(`Unexpected tool ${name}`);
+    };
+    const runner = new AgentTurnRunner({ provider, toolGateway: tools });
+
+    await runner.run({
+      messages: [{ role: "user", content: "Show the current directory" }],
+      pluginIds: ["nusashell.terminal"],
+    });
+
+    expect(provider.requests[1]?.messages.at(-1)).toEqual({
+      role: "tool",
+      toolCallId: "call-terminal",
+      name: "mcp_nusashell_terminal_exec",
+      content:
+        '<untrusted_tool_result source="mcp_nusashell_terminal_exec" status="success">\n' +
+        '{"stdout":"/workspace"}\n' +
+        "</untrusted_tool_result>",
+    });
   });
 
   it("returns a bounded runtime answer when the provider exceeds the tool-round limit", async () => {

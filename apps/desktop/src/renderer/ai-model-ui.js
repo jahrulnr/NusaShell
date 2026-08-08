@@ -11,7 +11,7 @@ export function modelCompatibility(model) {
     if (inputModes.has(mode) || outputModes.has(mode)) labels.push(mode);
   });
   if (model?.supportsTools) labels.push("tools");
-  if ((model?.supportedEfforts || []).length > 0) labels.push("reasoning");
+  if (modelEffortOptions(model).length > 0 || model?.reasoningSupported) labels.push("reasoning");
   return [...new Set(labels)];
 }
 
@@ -34,13 +34,34 @@ export function searchModels(models, query) {
   ].some((value) => normalize(value).includes(needle)));
 }
 
+/**
+ * User-facing label for a reasoning effort level.
+ * Internal sentinel stays "auto" (omit on the wire); the UI says "default"
+ * so it is not confused with automatic model selection.
+ */
+export function formatEffortLabel(effort) {
+  const level = normalize(effort) || "auto";
+  return level === "auto" ? "default" : level;
+}
+
+/**
+ * Effort levels shown in the agent model picker.
+ * Catalog-only: no invented levels when the provider omitted supported_efforts.
+ */
+export function modelEffortOptions(model) {
+  return (model?.supportedEfforts || []).filter((effort) => effort && effort !== "auto");
+}
+
 export function clampModelEffort(model, effort) {
   const wanted = normalize(effort) || "auto";
   if (wanted === "auto") return "auto";
-  const supported = model?.supportedEfforts || [];
+  const supported = modelEffortOptions(model);
+  // No catalog options → force auto (omit reasoning_effort on the wire).
   if (supported.length === 0) return "auto";
   if (supported.includes(wanted)) return wanted;
-  return model.defaultEffort || supported[0] || "auto";
+  return model.defaultEffort && supported.includes(model.defaultEffort)
+    ? model.defaultEffort
+    : supported[0] || "auto";
 }
 
 /**
@@ -50,6 +71,10 @@ export function clampModelEffort(model, effort) {
  * (`conversation.model`). When present, the room keeps using that model even
  * if the user later changes the global picker in another room. When absent,
  * the room falls back to the global active model (`activeModelKey`).
+ *
+ * Effort is always room-scoped when bound. Unbound rooms use "auto" and never
+ * inherit the Settings-page global effort, so picking effort in one room cannot
+ * leak into another.
  *
  * @param {{ kind?: string, model?: { modelKey?: string, effort?: string } }|null|undefined} conversation
  * @param {readonly { key: string }[]} models - the full imported model catalog
@@ -62,9 +87,11 @@ export function resolveRoomModel(conversation, models, activeModelKey) {
   const roomBinding = conversation.model;
   if (roomBinding && roomBinding.modelKey) {
     const model = (models || []).find((m) => m.key === roomBinding.modelKey) ?? null;
+    const rawEffort = roomBinding.effort || "auto";
     return {
       model,
-      effort: roomBinding.effort || "auto",
+      // Keep effort valid for this model's catalog; empty allow-list → auto.
+      effort: clampModelEffort(model, rawEffort),
       source: "room",
       explicit: roomBinding.explicit !== false,
     };
@@ -76,6 +103,27 @@ export function resolveRoomModel(conversation, models, activeModelKey) {
     source: "global",
     explicit: false,
   };
+}
+
+/**
+ * Effective reasoning effort for a room turn. Never falls back to the
+ * Settings-page global effort (see resolveRoomModel).
+ */
+export function resolveRoomEffort(conversation, models, activeModelKey, _globalEffortIgnored) {
+  const resolved = resolveRoomModel(conversation, models, activeModelKey);
+  return resolved?.effort || "auto";
+}
+
+/**
+ * Explain whether the picker value is for the current turn or queued for the
+ * next turn. A running stream remains bound to its original model.
+ */
+export function formatModelPickerLabel({ model, effort = "auto", source = "global", isRunning = false, liveModelKey = "" } = {}) {
+  const label = model?.id || "Choose model";
+  const parts = [label, formatEffortLabel(effort)];
+  if (source === "room") parts.push("room");
+  if (isRunning && liveModelKey && model?.key && liveModelKey !== model.key) parts.push("next turn");
+  return parts.join(" · ");
 }
 
 export function formatTokenCount(value) {

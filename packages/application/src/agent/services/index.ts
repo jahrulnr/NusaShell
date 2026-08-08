@@ -51,6 +51,8 @@ export {
   applyVars,
   SYSTEM_PREFIX_END_MARKER,
   stableCurrentDate,
+  machineCurrentTime,
+  machineTimeZone,
   type PromptVars,
   type PromptInjectionSummary,
   type InjectPromptsResult,
@@ -77,9 +79,11 @@ export {
 } from "./auto-continue-policy.js";
 export {
   SUMMARY_PREFIX,
+  RUNTIME_CONTEXT_PREFIX,
   COMPACT_USER_MESSAGE_MAX_TOKENS,
   MIN_SUMMARY_CHARS,
   isSummaryMessage,
+  isRuntimeContextMessage,
   userMessageText,
   collectUserMessages,
   buildCompactedHistory,
@@ -87,8 +91,6 @@ export {
   approxTokenCount as approxCompactTokenCount,
 } from "./compact-history.js";
 export {
-  formatMcpLivePrompt,
-  MCP_LIVE_PROMPT_BUDGET_CHARS,
   MCP_LIVE_TOOLS_CAP,
   type McpLiveSnapshot,
   type McpLiveSnapshotTool,

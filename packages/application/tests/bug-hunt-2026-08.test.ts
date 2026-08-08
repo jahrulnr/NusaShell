@@ -30,10 +30,10 @@ describe("F1: parseSchedule cron range validation", () => {
 // F2 — cron DOM/DOW uses AND; standard (Vixie) cron uses OR when both are
 // restricted, so '0 9 13 * 5' should fire on the 13th AND every Friday.
 describe("F2: cron DOM/DOW OR-semantics", () => {
-  it("'0 9 13 * 5' fires Fri 2025-08-08 09:00Z (nearest of dom=13 / dow=Fri)", () => {
+  it("'0 9 13 * 5' fires Fri 2025-08-08 at 09:00 local time (nearest of dom=13 / dow=Fri)", () => {
     const sched = parseSchedule("0 9 13 * 5", new Date("2025-08-06T00:00:00Z"));
     const next = computeNextRun(sched, null, new Date("2025-08-06T00:00:00Z"));
-    expect(next).toBe("2025-08-08T09:00:00.000Z"); // actual: 2026-02-13 (next Fri-the-13th)
+    expect(next).toBe(new Date(2025, 7, 8, 9, 0, 0).toISOString()); // not only the next Fri-the-13th
   });
 });
 

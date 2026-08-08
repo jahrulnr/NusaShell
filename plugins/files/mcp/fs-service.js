@@ -179,6 +179,27 @@ export function formatFileSize(bytes) {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
+/**
+ * Return a UTF-8-safe prefix whose encoded size stays within `maxBytes`.
+ * Iterating code points avoids splitting a multibyte character at the limit.
+ * @param {string} content
+ * @param {number} maxBytes
+ * @returns {{ content: string, truncated: boolean }}
+ */
+function truncateUtf8(content, maxBytes) {
+  if (Buffer.byteLength(content, "utf8") <= maxBytes) return { content, truncated: false };
+
+  const parts = [];
+  let bytes = 0;
+  for (const character of content) {
+    const characterBytes = Buffer.byteLength(character, "utf8");
+    if (bytes + characterBytes > maxBytes) break;
+    parts.push(character);
+    bytes += characterBytes;
+  }
+  return { content: parts.join(""), truncated: true };
+}
+
 export class FileService {
   /**
    * @param {string} root
@@ -310,15 +331,12 @@ export class FileService {
    * @param {number} [opts.start] 1-based start line
    * @param {number} [opts.end] 1-based end line (inclusive)
    * @param {boolean} [opts.lineNumbers] prefix each line with `NNN|`
-   * @param {number} [opts.maxBytes] override max read size
+   * @param {number} [opts.maxBytes] maximum UTF-8 bytes returned in content
    */
   async readFile(input, opts = {}) {
     const { head, tail, start, end, lineNumbers = false, maxBytes = MAX_READ_BYTES } = opts;
     const filePath = resolvePath(this.root, input);
     const stat = await this._wrap(fs.stat(filePath));
-    if (stat.size > maxBytes) {
-      throw new Error(`File too large (${formatFileSize(stat.size)}), max ${formatFileSize(maxBytes)}`);
-    }
     // Authoritative binary detection: sniff magic bytes + NUL/control char ratio.
     // This catches text files without standard extensions (go.mod, Makefile, etc.)
     // and rejects actual binaries regardless of extension.
@@ -347,15 +365,23 @@ export class FileService {
       selected = lines;
     }
 
-    const truncated = truncatedReason !== null;
-    const output = lineNumbers
+    const rangeTruncated = truncatedReason !== null;
+    const selectedOutput = lineNumbers
       ? selected.map((line, i) => {
           const lineNo = truncatedReason === "startEnd" ? start + i : (truncatedReason === "tail" ? lines.length - selected.length + i + 1 : i + 1);
           return `${String(lineNo).padStart(6, " ")}|${line}`;
         }).join("\n")
       : selected.join("\n");
+    const { content: output, truncated: byteTruncated } = truncateUtf8(selectedOutput, maxBytes);
+    const reason = byteTruncated ? "maxBytes" : truncatedReason;
 
-    return { content: output, totalLines: lines.length, truncated, ...(truncatedReason ? { truncatedReason } : {}) };
+    return {
+      content: output,
+      totalLines: lines.length,
+      totalBytes: stat.size,
+      truncated: rangeTruncated || byteTruncated,
+      ...(reason ? { truncatedReason: reason } : {}),
+    };
   }
 
   /**

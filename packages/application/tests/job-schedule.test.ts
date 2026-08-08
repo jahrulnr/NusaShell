@@ -35,9 +35,26 @@ describe("parseSchedule", () => {
     expect(parseSchedule(future, NOW)).toEqual({ kind: "once", runAt: future });
   });
 
-  it("parses date-only as once at 00:00Z", () => {
+  it("parses date-only as once at local midnight", () => {
     const future = "2025-01-02";
-    expect(parseSchedule(future, NOW)).toEqual({ kind: "once", runAt: "2025-01-02T00:00:00.000Z" });
+    expect(parseSchedule(future, NOW)).toEqual({
+      kind: "once",
+      runAt: new Date(2025, 0, 2, 0, 0, 0).toISOString(),
+    });
+  });
+
+  it("interprets bare timestamps as the host machine's local wall-clock time", () => {
+    const originalTimeZone = process.env.TZ;
+    process.env.TZ = "Asia/Jakarta";
+    try {
+      expect(parseSchedule("2025-01-02 09:00", NOW)).toEqual({
+        kind: "once",
+        runAt: "2025-01-02T02:00:00.000Z",
+      });
+    } finally {
+      if (originalTimeZone === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTimeZone;
+    }
   });
 
   it("rejects past one-shot beyond grace", () => {
@@ -88,15 +105,31 @@ describe("computeNextRun", () => {
   });
 
   it("cron finds next hit after now", () => {
-    // 0 9 * * * -> next 09:00 UTC on 2025-01-01
+    // 0 9 * * * -> next 09:00 on the host machine's local clock.
     const next = computeNextRun({ kind: "cron", expr: "0 9 * * *" }, null, NOW);
-    expect(next).toBe("2025-01-01T09:00:00.000Z");
+    expect(next).toBe(new Date(2025, 0, 1, 9, 0, 0).toISOString());
   });
 
   it("cron anchored on lastRunAt finds the following hit", () => {
-    const lastRun = new Date("2025-01-01T09:00:00Z").toISOString();
+    const lastRun = new Date(2025, 0, 1, 9, 0, 0).toISOString();
     const next = computeNextRun({ kind: "cron", expr: "0 9 * * *" }, lastRun, NOW);
-    expect(next).toBe("2025-01-02T09:00:00.000Z");
+    expect(next).toBe(new Date(2025, 0, 2, 9, 0, 0).toISOString());
+  });
+
+  it("matches cron hour and minute against the host machine's local clock", () => {
+    const originalTimeZone = process.env.TZ;
+    process.env.TZ = "Asia/Jakarta";
+    try {
+      const next = computeNextRun(
+        { kind: "cron", expr: "0 9 * * *" },
+        null,
+        new Date("2025-01-01T00:00:00.000Z"),
+      );
+      expect(next).toBe("2025-01-01T02:00:00.000Z");
+    } finally {
+      if (originalTimeZone === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTimeZone;
+    }
   });
 });
 
