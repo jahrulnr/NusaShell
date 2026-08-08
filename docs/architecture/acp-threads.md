@@ -151,15 +151,15 @@ provider's own tools. The parent agent's NusaShell MCP plugins, skills
 catalog, and meta-tools (`mcp_*`, `skill_*`, `tool_search`, `tool_schema`,
 `subagent`, `async_*`, etc.) do **not** cross into the subagent process —
 they exist only in the parent's turn loop. The parent's brief may still
-reference them by name, so the shell prepends a role-frame block to every
-subagent prompt stating this boundary explicitly and instructing the
-subagent to report a missing capability in its final message instead of
-simulating it.
+reference them by name, so the shell prepends the managed
+`resources/agent/prompts/subagent.md` execution contract to every ACP
+subagent prompt. It states this boundary explicitly, directs narrowly scoped
+execution, and instructs the subagent to report a missing capability rather
+than simulating it.
 
 Implementation lives in `execSubagent`
 (`packages/application/src/agent/services/subagent-tool-handler.ts`); the
-boundary is enforced by prompt
-framing, not by tool filtering, because the ACP provider already starts with
+boundary is enforced by managed prompt framing, not by tool filtering, because the ACP provider already starts with
 its own toolset and never receives the parent's MCP/skill/meta-tool
 descriptors. The parent's workspace `cwd` is host-prefixed in the same block
 so the ACP agent cannot invent a different path.

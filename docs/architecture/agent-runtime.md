@@ -548,15 +548,18 @@ runner. The injection point is the application layer (backend), not the renderer
 | --- | --- | --- |
 | `system.md` | Stable agent identity and cross-cutting operating rules | No |
 | `mcp-tools.md` | Stable progressive tool/disclosure protocol | No |
-| `subagent.md` | Delegation boundary and brief guidance, only when available | Yes |
+| `subagent-delegation.md` | Parent-agent delegation boundary and brief guidance, only when available | Yes |
+| `subagent.md` | ACP subagent execution contract, prepended to each delegated task | No (ACP only) |
 | `compact.md` | Compaction instruction for the checkpoint LLM call | No |
 | `continue.md` | Outer auto-continue steering: pursue open CURRENT TASKS | No |
 
 `system.md` and `mcp-tools.md` are the whole cache-stable system prefix.
 Runtime facts (date, environment, OS, workspace, memory, skills, MCP catalog,
 and TODO state) arrive as an ephemeral read-only hydration transcript after the
-durable user history, not as a dynamic developer prompt. `subagent.md` is added
-only when that tool is available. Compaction summary messages from prior turns
+durable user history, not as a dynamic developer prompt. `subagent-delegation.md`
+is added only when that tool is available. `subagent.md` is loaded separately
+and prepended only to ACP subagent tasks, never injected into the parent-agent
+turn. Compaction summary messages from prior turns
 are preserved; non-summary system messages from the conversation are dropped to
 avoid duplicate or stale instructions.
 

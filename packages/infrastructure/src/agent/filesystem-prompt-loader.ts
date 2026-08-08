@@ -4,7 +4,8 @@ import type { AgentPrompt, PromptLoaderPort, ReviewPromptKind } from "@nusashell
 
 const STATIC_PROMPT_FILES = ["system.md", "mcp-tools.md"] as const;
 const COMPACT_PROMPT_FILE = "compact.md";
-const SUBAGENT_PROMPT_FILE = "subagent.md";
+const SUBAGENT_EXECUTION_PROMPT_FILE = "subagent.md";
+const SUBAGENT_DELEGATION_PROMPT_FILE = "subagent-delegation.md";
 const CONTINUE_PROMPT_FILE = "continue.md";
 const REVIEW_PROMPT_FILES: Record<ReviewPromptKind, string> = {
   memory: "memory-review.md",
@@ -23,6 +24,7 @@ export class FilesystemPromptLoader implements PromptLoaderPort {
   private cachedPrompts: readonly AgentPrompt[] | undefined;
   private cachedCompact: string | undefined | null;
   private cachedSubagent: string | undefined | null;
+  private cachedSubagentExecution: string | undefined | null;
   private cachedContinue: string | undefined | null;
   private readonly cachedReview = new Map<ReviewPromptKind, string>();
 
@@ -57,10 +59,23 @@ export class FilesystemPromptLoader implements PromptLoaderPort {
       return this.cachedSubagent ?? undefined;
     }
     try {
-      this.cachedSubagent = await readFile(join(this.promptsRoot, SUBAGENT_PROMPT_FILE), "utf8");
+      this.cachedSubagent = await readFile(join(this.promptsRoot, SUBAGENT_DELEGATION_PROMPT_FILE), "utf8");
       return this.cachedSubagent;
     } catch {
       this.cachedSubagent = null;
+      return undefined;
+    }
+  }
+
+  async loadSubagentExecutionPrompt(): Promise<string | undefined> {
+    if (this.cachedSubagentExecution !== undefined && this.cachedSubagentExecution !== null) {
+      return this.cachedSubagentExecution ?? undefined;
+    }
+    try {
+      this.cachedSubagentExecution = await readFile(join(this.promptsRoot, SUBAGENT_EXECUTION_PROMPT_FILE), "utf8");
+      return this.cachedSubagentExecution;
+    } catch {
+      this.cachedSubagentExecution = null;
       return undefined;
     }
   }

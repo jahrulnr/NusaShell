@@ -92,6 +92,11 @@ export function buildToolCall(call: {
         : call.result !== undefined
           ? clampText(formatToolOutput(call.result), TOOL_OUTPUT_MAX_CHARS)
           : undefined;
+  const status = call.status ?? call.toolResult?.status;
+  const truncated = call.truncated ?? call.toolResult?.metadata.truncated;
+  const structuredContent = boundedStructuredContent(
+    call.structuredContent ?? call.toolResult?.structuredContent,
+  );
 
   return {
     id: call.id,
@@ -102,10 +107,21 @@ export function buildToolCall(call: {
     args: safeArgs,
     ...(output ? { output } : {}),
     ...(modelOutput ? { modelOutput: clampText(modelOutput, TOOL_OUTPUT_MAX_CHARS) } : {}),
-    ...(call.status ? { status: call.status } : {}),
-    ...(call.truncated ? { truncated: call.truncated } : {}),
-    ...(call.structuredContent ? { structuredContent: call.structuredContent } : {}),
+    ...(status ? { status } : {}),
+    ...(truncated !== undefined ? { truncated } : {}),
+    ...(structuredContent ? { structuredContent } : {}),
   };
+}
+
+function boundedStructuredContent(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  try {
+    return JSON.stringify(value).length <= TOOL_OUTPUT_MAX_CHARS
+      ? value as Record<string, unknown>
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function buildSteps(steps: readonly { type: string; content?: string; calls?: readonly any[]; model?: string; providerId?: string }[] | undefined): AgentConversationStep[] | undefined {

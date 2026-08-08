@@ -28,6 +28,10 @@ function isRetryable(error: unknown): boolean {
   return RETRYABLE_PATTERNS.some((pattern) => pattern.test(message));
 }
 
+export type SubagentExecutionPromptLoader = () => Promise<string | undefined>;
+
+const DEFAULT_SUBAGENT_EXECUTION_PROMPT = "You are a subagent delegated by NusaShell's parent agent. You have only your own tools — the parent's MCP plugins, skills, and meta-tools do not exist here. If the task references a capability you do not have, say so in your final message instead of simulating it.";
+
 export async function execSubagent(
   port: SubagentPort | undefined,
   args: Readonly<Record<string, unknown>>,
@@ -35,6 +39,7 @@ export async function execSubagent(
   workspace: string | undefined,
   logger?: LoggerPort,
   parentConversationId?: string,
+  loadExecutionPrompt?: SubagentExecutionPromptLoader,
 ): Promise<unknown> {
   if (!port) {
     const message = "No ACP providers are connected";
@@ -71,13 +76,19 @@ export async function execSubagent(
   const conversationId = `subagent:${runId}`;
   const attempted: string[] = [];
   const failures: Array<{ providerId: string; error: string }> = [];
-  // Host-prefix the absolute cwd so the ACP agent cannot invent a different path.
-  // Role-frame the capability boundary so the subagent never simulates the
-  // parent's MCP plugins, skills, or meta-tools — none of them exist in the
-  // ACP process, and the parent brief may still reference them by mistake.
+  let executionPrompt = DEFAULT_SUBAGENT_EXECUTION_PROMPT;
+  if (loadExecutionPrompt) {
+    try {
+      executionPrompt = (await loadExecutionPrompt())?.trim() || executionPrompt;
+    } catch (error) {
+      logger?.warn("Subagent execution prompt load failed: %s", error instanceof Error ? error.message : String(error));
+    }
+  }
+  // Host-prefix the absolute cwd and prepend the managed execution contract
+  // before the parent task. The displayed run prompt remains the parent brief.
   const promptBlocks = [{
     type: "text" as const,
-    text: `Working directory (cwd): ${effectiveWorkspace}\n\nYou are a subagent delegated by NusaShell's parent agent. You have only your own tools — the parent's MCP plugins, skills, and meta-tools do not exist here. If the task references a capability you do not have, say so in your final message instead of simulating it.\n\n${prompt}`,
+    text: `Working directory (cwd): ${effectiveWorkspace}\n\n${executionPrompt}\n\nTASK:\n${prompt}`,
   }];
 
   logger?.info("Subagent workspace runId=%s cwd=%s", runId, effectiveWorkspace);

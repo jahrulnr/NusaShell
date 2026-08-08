@@ -220,6 +220,26 @@ describe("agent conversation UI helpers", () => {
     expect(call.output).toBe(providerContent);
   });
 
+  it("keeps nested structured content for renderer-side transcript persistence", () => {
+    const structuredContent = { ok: true, runId: "run-renderer", summary: "Done" };
+    const call = toConversationToolCall({
+      id: "subagent:0",
+      name: "subagent",
+      ok: true,
+      args: {},
+      toolResult: {
+        modelOutput: "status=success\ntruncated=false\n\nrunId=run-renderer",
+        status: "success",
+        structuredContent,
+        metadata: { truncated: false },
+      },
+    });
+
+    expect(call.structuredContent).toEqual(structuredContent);
+    expect(call.status).toBe("success");
+    expect(call.truncated).toBe(false);
+  });
+
   it("defaults missing args to {} in toProviderToolCall via buildAgentContext", () => {
     const messages = [
       { role: "user" as const, content: "List plugins" },

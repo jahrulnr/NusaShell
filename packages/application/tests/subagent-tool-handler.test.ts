@@ -80,6 +80,39 @@ describe("execSubagent", () => {
     expect(run.mock.calls[0]![0]).toMatchObject({ parentConversationId: "conversation-1", parentTraceId: "turn-1" });
   });
 
+  it("prepends the managed ACP execution prompt ahead of the delegated task", async () => {
+    let receivedPrompt = "";
+    const run = vi.fn(async (request: Parameters<SubagentPort["run"]>[0]) => {
+      const firstBlock = request.prompt[0];
+      receivedPrompt = firstBlock?.type === "text" ? firstBlock.text : "";
+      return { ok: true as const, providerId: "cursor", summary: "done" };
+    });
+    const port: SubagentPort = {
+      resolve: async () => ({
+        tryOrder: ["cursor"],
+        candidates: new Map([["cursor", { providerId: "cursor", descriptor: { providerId: "cursor", command: "cursor-agent", args: [] } }]]),
+      }),
+      run,
+      cancel: async () => undefined,
+      getRoutingInfo: async () => null,
+    };
+
+    await execSubagent(
+      port,
+      { prompt: "Change only src/widget.ts" },
+      "turn-1",
+      path.join(os.tmpdir(), "project"),
+      undefined,
+      undefined,
+      async () => "You are a dumb pipe. Do exactly what you are told, literally and narrowly.",
+    );
+
+    expect(receivedPrompt).toContain(
+      "You are a dumb pipe. Do exactly what you are told, literally and narrowly.",
+    );
+    expect(receivedPrompt).toContain("TASK:\nChange only src/widget.ts");
+  });
+
   it("uses homedir when neither arg nor turn workspace is set", async () => {
     const run = vi.fn(async (request) => {
       expect(request.workspace).toBe(os.homedir());

@@ -50,6 +50,12 @@ describe("FilesystemPromptLoader", () => {
     expect(subagent).toContain("{{default_subagent}}");
   });
 
+  it("loads the ACP execution contract separately from parent delegation guidance", async () => {
+    const loader = new FilesystemPromptLoader(fixturesRoot);
+
+    await expect(loader.loadSubagentExecutionPrompt()).resolves.toContain("You are a dumb pipe.");
+  });
+
   it("returns undefined when subagent prompt file is missing", async () => {
     const loader = new FilesystemPromptLoader(join(fixturesRoot, "..", "no-such-dir"));
     await expect(loader.loadSubagentPrompt()).resolves.toBeUndefined();

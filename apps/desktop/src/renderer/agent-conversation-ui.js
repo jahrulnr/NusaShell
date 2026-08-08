@@ -366,6 +366,11 @@ export function toConversationToolCall(call, callPosition) {
         : call?.result !== undefined
           ? formatToolOutput(call.result)
           : undefined;
+  const status = call?.status ?? call?.toolResult?.status;
+  const truncated = call?.truncated ?? call?.toolResult?.metadata?.truncated;
+  const structuredContent = boundedStructuredContent(
+    call?.structuredContent ?? call?.toolResult?.structuredContent,
+  );
   return {
     id: call.id,
     ...(Number.isInteger(call?.callPosition) && call.callPosition > 0
@@ -379,10 +384,19 @@ export function toConversationToolCall(call, callPosition) {
     args: safeArgs ?? {},
     ...(output ? { output } : {}),
     ...(modelOutput ? { modelOutput: clampToolText(modelOutput, TOOL_OUTPUT_MAX_CHARS) } : {}),
-    ...(call?.status ? { status: call.status } : {}),
-    ...(call?.truncated ? { truncated: call.truncated } : {}),
-    ...(call?.structuredContent ? { structuredContent: call.structuredContent } : {}),
+    ...(status ? { status } : {}),
+    ...(truncated !== undefined ? { truncated } : {}),
+    ...(structuredContent ? { structuredContent } : {}),
   };
+}
+
+function boundedStructuredContent(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  try {
+    return JSON.stringify(value).length <= TOOL_OUTPUT_MAX_CHARS ? value : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function sanitizeAssistantSteps(steps) {

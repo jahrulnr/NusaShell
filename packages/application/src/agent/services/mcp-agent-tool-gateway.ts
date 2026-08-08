@@ -35,6 +35,7 @@ import { execJob } from "./job-tool-handler.js";
 import { execPipeline } from "./pipeline-tool-handler.js";
 import { execAskQuestion } from "./ask-question-tool-handler.js";
 import { execSubagent } from "./subagent-tool-handler.js";
+import type { SubagentExecutionPromptLoader } from "./subagent-tool-handler.js";
 import { execTodo } from "./todo-tool-handler.js";
 import { execAsyncRun, execAsyncWait, execAsyncPeek, execAsyncKill } from "./async-tool-handlers.js";
 import type { AsyncToolRuntime } from "./async-tool-runtime.js";
@@ -69,6 +70,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
   private pipelineScheduler?: PipelineScheduler;
   private pluginRegistration?: McpPluginRegistrationDeps;
   private subagentPort?: SubagentPort;
+  private subagentExecutionPromptLoader: SubagentExecutionPromptLoader | undefined;
   private todoPort?: ConversationTodoPort | undefined;
   private todoEventPublisher?: ((conversationId: string, items: readonly import("./agent-todo.js").AgentTodoItem[]) => void) | undefined;
   private asyncToolRuntime?: AsyncToolRuntime | undefined;
@@ -116,8 +118,9 @@ export class McpAgentToolGateway implements AgentToolGateway {
   }
 
   /** Late-bind subagent port (ACP provider resolver + session runner). */
-  bindSubagent(port: SubagentPort): void {
+  bindSubagent(port: SubagentPort, loadExecutionPrompt?: SubagentExecutionPromptLoader): void {
     this.subagentPort = port;
+    this.subagentExecutionPromptLoader = loadExecutionPrompt;
   }
 
   /** Late-bind the async tool runtime (background handle registry). */
@@ -280,7 +283,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
             conversationId,
             ...(turnId ? { traceId: turnId } : {}),
             kind: "subagent",
-            spawnWork: (_handleSignal, handleId) => execSubagent(this.subagentPort, args, turnId, workspace, this.logger, parentConversationId).then((result) => {
+            spawnWork: (_handleSignal, handleId) => execSubagent(this.subagentPort, args, turnId, workspace, this.logger, parentConversationId, this.subagentExecutionPromptLoader).then((result) => {
               // Store the subagent result in the handle's tail for peek.
               if (result && typeof result === "object" && "summary" in result) {
                 runtime.appendTail(handleId, String((result as { summary?: unknown }).summary ?? ""));
@@ -296,6 +299,7 @@ export class McpAgentToolGateway implements AgentToolGateway {
           this.routes.workspaceOf(turnId),
           this.logger,
           this.routes.conversationIdOf(turnId),
+          this.subagentExecutionPromptLoader,
         );
       }
       default: return this.callGrantedTool(name, args, requestId, turnId, options?.signal);

@@ -9,6 +9,9 @@ export type ReviewPromptKind = "memory" | "skill" | "combined";
 export interface PromptLoaderPort {
   loadPrompts(): Promise<readonly AgentPrompt[]>;
   loadCompactPrompt(): Promise<string | undefined>;
+  /** Execution contract prepended to ACP subagent tasks. */
+  loadSubagentExecutionPrompt?(): Promise<string | undefined>;
+  /** Guidance for the parent agent when it decides to delegate. */
   loadSubagentPrompt(): Promise<string | undefined>;
   loadContinuePrompt(): Promise<string | undefined>;
   loadReviewPrompt(kind: ReviewPromptKind): Promise<string>;

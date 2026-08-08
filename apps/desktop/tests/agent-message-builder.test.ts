@@ -59,6 +59,33 @@ describe("agent-message-builder", () => {
     expect(call?.output).toContain("<untrusted_tool_result source=\"mcp_files_list\" format=\"terminal\">");
   });
 
+  it("preserves typed structured content from the canonical tool result", () => {
+    const structuredContent = {
+      ok: true,
+      runId: "run-structured",
+      providerId: "cursor",
+      summary: "Complete response",
+    };
+    const call = buildToolCall({
+      id: "subagent:0",
+      name: "subagent",
+      ok: true,
+      modelOutput: "status=success\ntruncated=false\n\nrunId=run-structured",
+      toolResult: {
+        callId: "subagent:0",
+        toolName: "subagent",
+        status: "success",
+        content: [{ type: "json", data: structuredContent }],
+        structuredContent,
+        metadata: { truncated: false, dataIsUntrusted: false },
+      },
+    });
+
+    expect(call.structuredContent).toEqual(structuredContent);
+    expect(call.status).toBe("success");
+    expect(call.truncated).toBe(false);
+  });
+
   it("builds an interrupted message from a partial with live text and resumeMessages", () => {
     const resume = [
       { role: "user" as const, content: "go" },

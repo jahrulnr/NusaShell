@@ -236,7 +236,10 @@ export function createContainer(options: ContainerOptions): Container {
   let subagentPort: SubagentPortImpl | undefined;
   if (options.acpProviderResolver) {
     subagentPort = new SubagentPortImpl(options.acpProviderResolver, acp.acpSessionService, eventDispatcher, logger);
-    agent.agentToolGateway.bindSubagent(subagentPort);
+    agent.agentToolGateway.bindSubagent(
+      subagentPort,
+      () => agent.promptLoader.loadSubagentExecutionPrompt?.(),
+    );
   }
 
   const aiConfiguration = createAiConfiguration(options, logger, agent, telemetry);

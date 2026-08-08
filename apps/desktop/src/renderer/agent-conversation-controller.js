@@ -4292,26 +4292,37 @@ export class AgentConversationController {
   }
 
   createSubagentToolCard(toolCall) {
-    let result = {};
-    try {
-      result = typeof toolCall.output === "string" ? JSON.parse(toolCall.output) : (toolCall.output ?? {});
-    } catch { /* not JSON */ }
-    if (!result || typeof result !== "object") result = {};
+    const result = parseSubagentToolResult(
+      toolCall.structuredContent
+        ?? toolCall.toolResult?.structuredContent
+        ?? toolCall.output,
+    );
     const runId = result.runId;
-    const providerId = result.providerId || toolCall.args?.provider_id || "—";
-    const title = toolCall.args?.title || result.title || "Subagent run";
+    // A terminal conversation re-render reconstructs cards from the parent
+    // tool call. Resolve that projection back to the durable ACP run so the
+    // card and drawer retain the captured summary/steps after reload.
+    const persistedRun = typeof runId === "string"
+      ? this.conversation?.subagentRuns?.find((item) => item.runId === runId)
+      : undefined;
+    const providerId = persistedRun?.providerId || result.providerId || toolCall.args?.provider_id || "—";
+    const title = persistedRun?.title || toolCall.args?.title || result.title || "Subagent run";
     // The parent tool call is also authoritative. Some providers return a
     // compact payload without `ok`; retaining "running" after a successful
     // tool_call_end leaves a permanently stale card.
-    const status = result.ok === true ? "ok" : result.ok === false ? "fail" : toolCall.ok === false ? "fail" : "ok";
-    const summary = result.summary || "";
-    const error = formatSubagentError(result.error) || formatSubagentError(toolCall.error);
+    const status = persistedRun?.status
+      || (result.ok === true ? "ok" : result.ok === false ? "fail" : toolCall.ok === false ? "fail" : "ok");
+    const summary = persistedRun?.summary || result.summary || "";
+    const error = formatSubagentError(persistedRun?.error)
+      || formatSubagentError(result.error)
+      || formatSubagentError(toolCall.error);
     const run = {
-      runId: runId || toolCall.id,
+      runId: persistedRun?.runId || runId || toolCall.id,
       providerId,
       title,
       status,
-      ...(typeof result.prompt === "string" && result.prompt.trim()
+      ...(typeof persistedRun?.prompt === "string" && persistedRun.prompt.trim()
+        ? { prompt: persistedRun.prompt }
+        : typeof result.prompt === "string" && result.prompt.trim()
         ? { prompt: result.prompt }
         : typeof toolCall.args?.prompt === "string" && toolCall.args.prompt.trim()
           ? { prompt: toolCall.args.prompt }
@@ -4322,6 +4333,7 @@ export class AgentConversationController {
       // dropping the card from the DOM.
       ...(summary ? { summary } : {}),
       ...(error ? { error } : {}),
+      ...(persistedRun?.steps?.length ? { steps: persistedRun.steps } : {}),
     };
     return this.renderSubagentCard(run);
   }
@@ -5342,6 +5354,38 @@ function parseAskAnswer(output) {
   } catch {
     return { via: "text", answer: output, optionIds: [], text: "" };
   }
+}
+
+/**
+ * Read the canonical subagent result from either its structured form or the
+ * compact terminal projection persisted in an assistant tool-call step.
+ */
+function parseSubagentToolResult(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value !== "string" || !value.trim()) return {};
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+  } catch { /* terminal projection */ }
+
+  const result = {};
+  for (const key of ["ok", "runId", "providerId", "workspace", "title", "prompt", "summary", "error"]) {
+    const match = value.match(new RegExp(`^${key}=(.*)$`, "m"));
+    if (!match) continue;
+    const raw = match[1].trim();
+    if (raw === "true" || raw === "false") {
+      result[key] = raw === "true";
+      continue;
+    }
+    if (raw.startsWith('"')) {
+      try {
+        result[key] = JSON.parse(raw);
+        continue;
+      } catch { /* preserve malformed scalar below */ }
+    }
+    result[key] = raw;
+  }
+  return result;
 }
 
 function messageDetail(content) {

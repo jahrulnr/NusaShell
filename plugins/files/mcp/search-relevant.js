@@ -21,6 +21,7 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
+import { relativePosix } from "./config.js";
 
 const SKIP_DIRS = new Set([
   "node_modules", "dist", "build", ".git", ".next", "out", "coverage",
@@ -460,7 +461,9 @@ export class RetrievalEngine {
           if (!EXTS.has(ext)) continue;
           if (JUNK_PAT.test(entry.name)) continue;
           const full = path.join(currentDir, entry.name);
-          const rel = path.relative(this.root, full);
+          // Workspace-relative paths are POSIX for agent/tool consumers (Windows
+          // path.relative would otherwise emit backslashes and break filters).
+          const rel = relativePosix(this.root, full);
           filesScanned += 1;
           let stat;
           try {

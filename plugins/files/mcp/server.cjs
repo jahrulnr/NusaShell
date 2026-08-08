@@ -26801,7 +26801,7 @@ var RetrievalEngine = class {
           if (!EXTS.has(ext)) continue;
           if (JUNK_PAT.test(entry.name)) continue;
           const full = import_node_path4.default.join(currentDir, entry.name);
-          const rel = import_node_path4.default.relative(this.root, full);
+          const rel = relativePosix(this.root, full);
           filesScanned += 1;
           let stat;
           try {

@@ -269,6 +269,54 @@ describe("AgentConversationController — in-chat subagent mini stream", () => {
     expect(card.querySelector(".agent-subagent-card-summary")).not.toBeNull();
   });
 
+  it("rehydrates a sealed card and drawer from the durable run when tool output uses terminal projection", () => {
+    const controller = new AgentConversationController({
+      shell: { agentConversations: { setActiveSubagentRun: vi.fn().mockResolvedValue(undefined) } },
+    } as never);
+    controller.conversation = {
+      id: "conv-terminal",
+      messages: [],
+      subagentRuns: [{
+        id: "run-real",
+        conversationId: "conv-terminal",
+        sourceMessageId: "message-1",
+        runId: "182c7f25-9eee-4e6e-b927-42436a0c1389",
+        providerId: "cursor",
+        title: "Test 2: sub agent halo check",
+        prompt: "Say hello",
+        status: "ok",
+        summary: "Halo! Sub agent reporting for duty.",
+        steps: [{ type: "text", stepPosition: 1, content: "Full durable ACP response." }],
+        createdAt: "2026-08-09T00:00:00.000Z",
+        updatedAt: "2026-08-09T00:00:01.000Z",
+      }],
+    } as never;
+
+    const card = controller.createSubagentToolCard({
+      id: "subagent:0",
+      name: "subagent",
+      ok: true,
+      args: { title: "Test 2: sub agent halo check", prompt: "Say hello" },
+      output: [
+        "status=success",
+        "truncated=false",
+        "",
+        "ok=true",
+        "runId=182c7f25-9eee-4e6e-b927-42436a0c1389",
+        "providerId=cursor",
+        "summary=\"Halo! Sub agent reporting for duty.\"",
+      ].join("\n"),
+    });
+    document.body.appendChild(card);
+
+    expect(card.dataset.runId).toBe("182c7f25-9eee-4e6e-b927-42436a0c1389");
+    expect(card.textContent).toContain("Halo! Sub agent reporting for duty.");
+
+    card.querySelector(".agent-subagent-card-head")?.dispatchEvent(new Event("click"));
+
+    expect(document.querySelector("#agent-subpane-body")?.textContent).toContain("Full durable ACP response.");
+  });
+
   it("does not pull a reader back to the bottom after they scroll up", () => {
     const controller = new AgentConversationController({} as never);
     const body = document.createElement("div");
