@@ -1,4 +1,6 @@
 /* ============ Skills workspace ============ */
+.skills-header .action-btn { margin: auto 0; }
+.skills-view .view-body { margin-top: 1rem; }
 .skills-workspace {
   display: grid;
   grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);

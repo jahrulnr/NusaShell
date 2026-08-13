@@ -3,7 +3,21 @@
 import { rpc, on, emit } from '../rpc.js';
 import { el, fmtTime, toast, confirmDialog, debounce } from '../ui.js';
 import { renderMarkdown } from '../markdown.js';
-import { estimateContextTokens, formatContextUsage, inspectAttachmentContent, toDataURL } from '../agent-ui.js';
+import { estimateContextTokens, formatContextUsage, effectiveContextWindow } from '../agent-ui.js';
+import { bindComposer, updateSendAvailability } from './agent/composer.js';
+import { bindModelPicker } from './agent/model-picker.js';
+import {
+  attachmentChip,
+  reasoningDisclosure,
+  renderEmptyThread,
+  renderConversation,
+  renderMessage,
+  renderToolJob,
+  setAgentOfflineState,
+  setToolTerminalStatus,
+  toolTerminalMeta,
+  toolTerminalOutput,
+} from './agent/render.js';
 
 const state = {
   conversations: [],
@@ -13,28 +27,96 @@ const state = {
   attachments: [],
   settings: {},
   model: localStorage.getItem('nusashell.model') || '',
-  runs: new Map(), // run_id -> {messageEl, toolStripEl, toolJobs}
+  effort: 'auto', // reasoning effort: "auto" (omit) or a level from the model's supported_efforts
+  runs: new Map(), // run_id -> {messageEl, toolStripEl, toolJobs, conversationId, runId}
   pendingEvents: new Map(), // run_id -> events that won the start race
-  running: false,
+  get running() { return runForConversation(this.activeId) !== null; },
+  pinned: true, // auto-scroll only when the user is at the bottom (per-room, saved/restored)
+  steerNode: null, // DOM node for the pending steer bubble (per-room, saved/restored)
+  steerDraft: '', // text of pending steer (per-room, saved/restored)
 };
 
-const icons = {
-  trash: ['M4 7h16M9 7V5h6v2M6.5 7l1 13h9l1-13M10 11v5M14 11v5'],
-  send: ['M4 12l16-8-6 16-2.5-6.5L4 12Z'],
-  stop: [],
-};
+// Per-room state that survives conversation switches. When the user switches
+// away from a conversation, its per-room state is saved here. When they switch
+// back, it's restored. This prevents state from one room leaking into another.
+const savedRooms = new Map(); // conversationId -> { pinned, steerDraft, attachments, model }
+
+let agentDataLoading = false;
 
 export async function initAgent() {
-  bindComposer();
+  bindComposer({
+    state,
+    createConversation,
+    beginTurn,
+    refreshConversations,
+    renderAttachments,
+    updateComposerStatus,
+    showSteerQueued,
+    clearSteerQueue,
+    promoteSteerToTranscript,
+    stopActiveRun,
+  });
   bindConversations();
-  bindModelPicker();
+  bindModelPicker({
+    getModels: () => models,
+    getSelectedModel: () => state.model,
+    getSelectedEffort: () => state.effort,
+    selectModel,
+    selectEffort,
+    refreshModels,
+  });
   bindEvents();
-  await refreshConversations();
-  await refreshModels();
-  await refreshStatus();
-  const first = state.conversations[0];
-  if (first) await openConversation(first.id);
-  else updateComposerStatus();
+  bindScrollPin();
+  window.addEventListener('nusashell:preferred-model', (event) => {
+    selectModel(event.detail?.model || '');
+  });
+  bindBackendAvailability();
+  if (backendIsOffline()) {
+    setAgentOfflineState(true);
+    return;
+  }
+  await loadAgentData();
+}
+
+function bindBackendAvailability() {
+  window.addEventListener('nusashell:connection-status', (event) => {
+    const status = event.detail?.status;
+    if (isOfflineStatus(status)) {
+      setAgentOfflineState(true);
+      return;
+    }
+    if (status === 'open') {
+      setAgentOfflineState(false);
+      void loadAgentData();
+    }
+  });
+}
+
+function backendIsOffline() {
+  return isOfflineStatus(document.documentElement.dataset.backendStatus);
+}
+
+function isOfflineStatus(status) {
+  return status === 'offline' || status === 'closed' || status === 'error';
+}
+
+async function loadAgentData() {
+  if (agentDataLoading) return;
+  agentDataLoading = true;
+  try {
+    await refreshConversations();
+    await refreshModels();
+    await refreshStatus();
+    const active = state.conversations.find((conversation) => conversation.id === state.activeId);
+    const first = active ?? state.conversations[0];
+    if (first) await openConversation(first.id);
+    else updateComposerStatus();
+    setAgentOfflineState(false);
+  } catch {
+    setAgentOfflineState(true);
+  } finally {
+    agentDataLoading = false;
+  }
 }
 
 // ---------- conversations ----------
@@ -49,19 +131,25 @@ async function refreshConversations() {
 
 function bindConversations() {
   document.getElementById('conversation-search').addEventListener('input', debounce(renderConversationList, 150));
-  document.getElementById('new-conversation-btn').addEventListener('click', createConversation);
+  document.getElementById('new-conversation-btn').addEventListener('click', () => createConversation());
 }
 
-async function createConversation() {
-  if (state.running) return;
+async function createConversation(title = '') {
   try {
-    const { conversation } = await rpc('agent.conversations.create', {});
+    saveRoomState(state.activeId);
+    const { conversation } = await rpc('agent.conversations.create', title ? { title } : {});
     state.activeId = conversation.id;
     state.conversation = conversation;
     state.messages = [];
+    state.pinned = true;
+    state.steerNode = null;
+    state.steerDraft = '';
+    state.attachments = [];
     await refreshConversations();
     renderEmptyThread();
+    renderAttachments();
     updateComposerStatus();
+    updateSendAvailability(state);
     document.getElementById('composer-input').focus();
   } catch (err) {
     toast(err.message, 'error');
@@ -95,12 +183,18 @@ function renderConversationList() {
       if (!ok) return;
       try {
         await rpc('agent.conversations.delete', { id: c.id });
+        savedRooms.delete(c.id);
         if (state.activeId === c.id) {
           state.activeId = null;
           state.conversation = null;
           state.messages = [];
+          state.attachments = [];
+          state.steerNode = null;
+          state.steerDraft = '';
           renderEmptyThread();
+          renderAttachments();
           updateComposerStatus();
+          updateSendAvailability(state);
         }
         await refreshConversations();
         toast('Conversation deleted', 'success');
@@ -112,217 +206,90 @@ function renderConversationList() {
   }
 }
 
-function renderEmptyThread() {
-  const thread = document.getElementById('agent-thread');
-  thread.innerHTML = '';
-  thread.append(el('div', { class: 'agent-empty' },
-    el('div', { class: 'agent-empty-mark', text: '✦' }),
-    el('h2', { text: 'Start a conversation' }),
-    el('p', { text: 'Ask anything. The agent can use skills, memory, docs and your MCP servers as tools.' }),
-  ));
-  document.getElementById('tool-job-strip').hidden = true;
-}
-
 async function openConversation(id) {
+  // Save per-room state for the current conversation before switching.
+  saveRoomState(state.activeId);
   state.activeId = id;
   // the backend returns messages as a sibling of conversation
   const { conversation, messages } = await rpc('agent.conversations.get', { id });
   state.conversation = conversation;
   state.messages = messages ?? [];
+  // Restore per-room state (pinned, steerDraft, attachments, model).
+  // If no saved state exists, defaults are applied.
+  const hasSaved = loadRoomState(id);
+  if (!hasSaved) {
+    const requestedModel = conversation.model || localStorage.getItem('nusashell.model') || '';
+    state.model = models.length && requestedModel && !models.some((model) => model.id === requestedModel) ? '' : requestedModel;
+    state.effort = conversation.effort || 'auto';
+  }
   renderConversationList();
   renderThread(state.messages);
-  const requestedModel = conversation.model || localStorage.getItem('nusashell.model') || '';
-  state.model = models.length && requestedModel && !models.some((model) => model.id === requestedModel) ? '' : requestedModel;
+  // Re-wire steer cancel button if there's a pending steer in the rendered thread.
+  const steerWaiting = state.messages.find((m) => m.steerWaiting);
+  if (steerWaiting) {
+    const userMessages = document.getElementById('agent-thread').querySelectorAll('.agent-message.user.agent-steer');
+    state.steerNode = userMessages[userMessages.length - 1] ?? null;
+    wireSteerCancel(state.steerNode);
+  }
+  // If there's an active run for this conversation (e.g. user switched away
+  // and came back), re-attach the streaming UI to the rendered thread so
+  // live deltas continue updating the visible DOM.
+  reattachActiveRun();
+  // Re-render attachment chips for the restored attachments.
+  renderAttachments();
   updateModelTrigger();
   updateComposerStatus();
+  updateSendAvailability(state);
+}
+
+// reattachActiveRun checks if there's an active run for the current
+// conversation. If so, it replaces the last assistant message node (which
+// renderThread created from persisted state) with a fresh streaming
+// placeholder and wires the run's DOM references to it. Accumulated raw
+// text is re-rendered so the user sees the latest streamed content.
+function reattachActiveRun() {
+  const run = runForConversation(state.activeId);
+  if (!run) return;
+  const thread = document.getElementById('agent-thread');
+  // Find the last assistant message node in the rendered thread.
+  const assistantNodes = thread.querySelectorAll('.agent-message.assistant');
+  const lastAssistant = assistantNodes[assistantNodes.length - 1];
+  if (!lastAssistant) return;
+  // Replace it with a fresh streaming placeholder.
+  const bubble = el('div', { class: 'agent-bubble' });
+  const msgNode = el('div', { class: 'agent-message assistant agent-pending' }, bubble);
+  lastAssistant.replaceWith(msgNode);
+  // Re-create streaming elements for the current round.
+  const reasoningEl = reasoningDisclosure('');
+  reasoningEl.hidden = !run.rawReasoning;
+  const textBox = el('div', { class: 'agent-bubble-text' });
+  const strip = el('div', { class: 'agent-tool-stack' });
+  strip.hidden = true;
+  bubble.append(reasoningEl, textBox, strip);
+  // Re-render accumulated content.
+  if (run.rawReasoning) {
+    const content = reasoningEl.querySelector('.agent-reasoning-content');
+    if (content) content.innerHTML = renderMarkdown(run.rawReasoning);
+  }
+  if (run.raw) textBox.innerHTML = renderMarkdown(run.raw);
+  // Update the run entry with fresh DOM references.
+  run.msgNode = msgNode;
+  run.bubble = bubble;
+  run.reasoningEl = reasoningEl;
+  run.textBox = textBox;
+  run.strip = strip;
+  run.toolJobs = new Map();
+  scrollToBottom(true);
 }
 
 function renderThread(messages) {
   const thread = document.getElementById('agent-thread');
-  thread.innerHTML = '';
   if (!messages.length) {
     renderEmptyThread();
     return;
   }
-  for (const msg of messages) thread.append(renderMessage(msg));
-  thread.scrollTop = thread.scrollHeight;
-}
-
-function reasoningDisclosure(reasoning) {
-  const content = el('div', { class: 'agent-reasoning-content' });
-  content.innerHTML = renderMarkdown(reasoning);
-  const details = el('details', { class: 'agent-reasoning' },
-    el('summary', {},
-      el('span', { class: 'agent-reasoning-mark', text: '⌁' }),
-      el('span', { class: 'agent-reasoning-title', text: 'Thinking' }),
-      el('span', { class: 'agent-reasoning-hint', text: 'Show reasoning' }),
-      el('span', { class: 'agent-reasoning-chevron', text: '⌄' }),
-    ),
-    content,
-  );
-  details.addEventListener('toggle', () => {
-    const hint = details.querySelector('.agent-reasoning-hint');
-    if (hint) hint.textContent = details.open ? 'Hide reasoning' : 'Show reasoning';
-  });
-  return details;
-}
-
-function renderMessage(msg) {
-  if (msg.role === 'system') {
-    return el('div', { class: 'agent-compaction-marker', text: msg.content });
-  }
-  const node = el('div', {
-    class: `agent-message ${msg.role === 'user' ? 'user' : 'assistant'}${msg.status === 'error' ? ' agent-message-error' : ''}`,
-  });
-  if (msg.role === 'user') {
-    const bubble = el('div', { class: 'agent-bubble' });
-    bubble.append(el('div', { text: msg.content || (msg.attachments?.length ? 'Attached files' : '') }));
-    if (msg.attachments?.length) bubble.append(renderMessageAttachments(msg.attachments));
-    node.append(bubble);
-    node.append(el('div', { class: 'agent-message-meta', text: fmtTime(msg.created_at) }));
-    return node;
-  }
-  // assistant: prefer steps (temporal order) when available; fall back to
-  // flat fields for older persisted messages
-  const bubble = el('div', { class: 'agent-bubble' });
-  if (msg.steps?.length) {
-    for (const step of msg.steps) {
-      if (step.type === 'reasoning' && step.content?.trim()) {
-        bubble.append(reasoningDisclosure(step.content));
-      } else if (step.type === 'text' && step.content) {
-        const textBox = el('div', { class: 'agent-bubble-text' });
-        textBox.innerHTML = renderMarkdown(step.content);
-        bubble.append(textBox);
-      } else if (step.type === 'tool_calls' && step.tool_calls?.length) {
-        bubble.append(el('div', { class: 'agent-tool-stack' }, step.tool_calls.map(renderToolJob)));
-      }
-    }
-  } else {
-    if (msg.reasoning?.trim()) bubble.append(reasoningDisclosure(msg.reasoning));
-    const textBox = el('div', { class: 'agent-bubble-text' });
-    if (msg.content) textBox.innerHTML = renderMarkdown(msg.content);
-    if (textBox.innerHTML) bubble.append(textBox);
-    if (msg.tool_calls?.length) {
-      bubble.append(el('div', { class: 'agent-tool-stack' }, msg.tool_calls.map(renderToolJob)));
-    }
-  }
-  if (bubble.children.length) node.append(bubble);
-  const meta = el('div', { class: 'agent-turn-meta' });
-  if (msg.model) meta.append(el('span', { class: 'agent-turn-tag', text: msg.model }));
-  if (msg.usage) {
-    meta.append(el('span', { class: 'agent-turn-tag', text: `↑${msg.usage.input_tokens ?? 0} ↓${msg.usage.output_tokens ?? 0}` }));
-    if (msg.usage.cache_read) meta.append(el('span', { class: 'agent-turn-tag', text: `cache ${msg.usage.cache_read}` }));
-  }
-  meta.append(el('span', { class: 'agent-message-meta', text: fmtTime(msg.created_at) }));
-  node.append(meta);
-  if (msg.status === 'error' && msg.error) {
-    node.append(el('div', { class: 'agent-message-meta', text: msg.error }));
-  }
-  return node;
-}
-
-function renderToolJob(tc) {
-  const card = el('details', { class: 'agent-tool-terminal' });
-  const summary = el('summary', {},
-    el('span', { class: 'agent-tool-terminal-prompt', text: '›_' }),
-    el('span', { class: 'agent-tool-terminal-title', text: tc.name || 'tool' }),
-    el('span', { class: 'agent-tool-terminal-meta', text: toolTerminalMeta(tc) }),
-    el('span', { class: 'agent-tool-terminal-chevron', text: '⌄' }),
-  );
-  const body = el('div', { class: 'agent-tool-terminal-body' },
-    toolTerminalPanel('tool', 'agent-tool-terminal-input', formatToolTerminalInput(tc.name, tc.args)),
-    toolTerminalPanel('Output', 'agent-tool-terminal-output', toolTerminalOutput(tc)),
-  );
-  card._toolArgs = tc.args;
-  card.append(summary, body);
-  setToolTerminalStatus(card, tc.status || 'running');
-  return card;
-}
-
-function toolTerminalPanel(label, codeClass, text) {
-  return el('div', { class: 'agent-tool-terminal-panel' },
-    el('div', { class: 'agent-tool-terminal-panel-label', text: label }),
-    el('pre', { class: codeClass, text }),
-  );
-}
-
-function summarizeToolArgs(args) {
-  if (!args || typeof args !== 'object' || Array.isArray(args)) return '';
-  const entries = Object.entries(args);
-  if (!entries.length) return '';
-  if (entries.length === 1) {
-    const value = JSON.stringify(entries[0][1]);
-    return value.length > 42 ? `${value.slice(0, 42)}…` : value;
-  }
-  return `${entries.length} args`;
-}
-
-function formatToolTerminalInput(name, args) {
-  const tool = String(name || 'tool');
-  const input = args && typeof args === 'object' ? truncate(JSON.stringify(args, null, 2), 8000) : '';
-  return input ? `${tool}(${input})` : `${tool}()`;
-}
-
-function toolTerminalMeta(tc) {
-  const status = tc.status || 'running';
-  return status === 'running' ? 'Running' : summarizeToolArgs(tc.args) || (status === 'fail' ? 'Failed' : 'Completed');
-}
-
-function toolTerminalOutput(tc) {
-  if (tc.output !== undefined && tc.output !== null && tc.output !== '') return truncate(String(tc.output), 12000);
-  return tc.status === 'running' ? '…' : tc.status === 'fail' ? 'Tool failed.' : 'ok';
-}
-
-function setToolTerminalStatus(card, status) {
-  const normalized = status || 'running';
-  card.classList.toggle('is-running', normalized === 'running');
-  card.classList.toggle('is-success', normalized === 'ok');
-  card.classList.toggle('is-error', normalized === 'fail');
-  card.dataset.status = normalized;
-}
-
-function truncate(s, n) {
-  return s.length > n ? s.slice(0, n) + '\n… (truncated)' : s;
-}
-
-function attachmentIcon(attachment) {
-  if (attachment.type === 'image') return 'IMG';
-  if (attachment.type === 'file') return 'PDF';
-  return 'TXT';
-}
-
-function attachmentChip(attachment, onRemove) {
-  const chip = el('span', { class: 'agent-attachment' },
-    el('span', { class: 'agent-attachment-name', text: `${attachmentIcon(attachment)} · ${attachment.name || 'Attachment'}` }),
-  );
-  if (onRemove) {
-    const remove = el('button', { class: 'agent-attachment-remove', type: 'button', title: `Remove ${attachment.name || 'attachment'}`, 'aria-label': `Remove ${attachment.name || 'attachment'}` }, '×');
-    remove.addEventListener('click', onRemove);
-    chip.append(remove);
-  }
-  return chip;
-}
-
-function renderMessageAttachments(attachments) {
-  const gallery = el('div', {
-    class: 'agent-message-attachments',
-    'aria-label': `${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`,
-  });
-  for (const attachment of attachments) {
-    if (attachment.type === 'image') {
-      const image = el('img', { src: attachment.data_url, alt: attachment.name, loading: 'lazy' });
-      gallery.append(el('figure', { class: 'agent-message-attachment agent-message-image' },
-        image,
-        el('figcaption', { text: attachment.name }),
-      ));
-      continue;
-    }
-    gallery.append(el('div', { class: 'agent-message-attachment agent-message-file' },
-      el('span', { class: 'agent-message-file-kind', text: attachment.type === 'file' ? 'PDF' : 'TXT' }),
-      el('span', { class: 'agent-message-file-name', text: attachment.name }),
-    ));
-  }
-  return gallery;
+  thread.replaceChildren(renderConversation(messages, retryTurn));
+  scrollToBottom(true);
 }
 
 function renderAttachments() {
@@ -332,142 +299,14 @@ function renderAttachments() {
     container.append(attachmentChip(attachment, () => {
       state.attachments.splice(index, 1);
       renderAttachments();
-      updateSendAvailability();
+      updateSendAvailability(state);
     }));
   }
 }
 
-// ---------- composer / turns ----------
-
-function bindComposer() {
-  const form = document.getElementById('agent-form');
-  const input = document.getElementById('composer-input');
-  const stopBtn = document.getElementById('stop-btn');
-  const attachBtn = document.getElementById('agent-attach-btn');
-  const fileInput = document.getElementById('agent-file-input');
-  const workspaceBtn = document.getElementById('agent-workspace-btn');
-
-  const autosize = () => {
-    input.style.height = 'auto';
-    input.style.height = Math.min(input.scrollHeight, 180) + 'px';
-  };
-  input.addEventListener('input', () => {
-    autosize();
-    updateSendAvailability();
-  });
-  input.addEventListener('keydown', (e) => {
-    if (e.isComposing || e.keyCode === 229) return;
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      send();
-    }
-  });
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    send();
-  });
-  attachBtn.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', async () => {
-    await addAttachments(fileInput.files);
-    fileInput.value = '';
-  });
-  form.addEventListener('dragover', (e) => e.preventDefault());
-  form.addEventListener('drop', async (e) => {
-    e.preventDefault();
-    await addAttachments(e.dataTransfer?.files);
-  });
-  workspaceBtn.addEventListener('click', chooseWorkspace);
-  stopBtn.addEventListener('click', async () => {
-    for (const runId of state.runs.keys()) {
-      try { await rpc('agent.turns.stop', { run_id: runId }); } catch { /* ignore */ }
-    }
-    stopBtn.hidden = true;
-  });
-
-  async function send() {
-    const text = input.value.trim();
-    if ((!text && !state.attachments.length) || state.running) return;
-    if (!state.model) {
-      toast('Choose a model first (Models with a provider must be imported in Providers).', 'error');
-      return;
-    }
-    try {
-      if (!state.activeId) {
-        const { conversation } = await rpc('agent.conversations.create', { title: text.slice(0, 48) });
-        state.activeId = conversation.id;
-        state.conversation = conversation;
-        state.messages = [];
-        await refreshConversations();
-      }
-      const attachments = [...state.attachments];
-      const { run_id } = await rpc('agent.turns.start', {
-        conversation_id: state.activeId,
-        text,
-        model: state.model,
-        attachments,
-      });
-      input.value = '';
-      autosize();
-      state.attachments = [];
-      renderAttachments();
-      beginTurn(run_id, text, attachments);
-    } catch (err) {
-      toast(err.message, 'error');
-    }
-  }
-}
-
-async function addAttachments(fileList) {
-  const files = [...(fileList ?? [])];
-  if (!files.length) return;
-  for (const file of files) {
-    if (state.attachments.length >= 4) {
-      toast('A turn can include up to 4 attachments.', 'error');
-      break;
-    }
-    if (file.size > 4 * 1024 * 1024) {
-      toast(`${file.name} is larger than the 4 MiB limit.`, 'error');
-      continue;
-    }
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const detected = inspectAttachmentContent(bytes);
-    if (!detected) {
-      toast(`${file.name} is not a supported image, PDF, or UTF-8 text file.`, 'error');
-      continue;
-    }
-    state.attachments.push({
-      type: detected.type,
-      name: file.name || 'Attachment',
-      media_type: detected.mediaType,
-      ...(detected.type === 'text'
-        ? { content: detected.content }
-        : { data_url: toDataURL(bytes, detected.mediaType) }),
-    });
-  }
-  renderAttachments();
-  updateSendAvailability();
-}
-
-async function chooseWorkspace() {
-  if (!state.activeId) {
-    toast('Start or select a conversation first.', 'error');
-    return;
-  }
-  try {
-    const { conversation } = await rpc('agent.conversations.pick-workspace', { id: state.activeId });
-    state.conversation = conversation;
-    updateComposerStatus();
-    await refreshConversations();
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-}
-
 function beginTurn(runId, userText, attachments = []) {
-  state.running = true;
-  document.getElementById('composer-input').disabled = true;
   document.getElementById('stop-btn').hidden = false;
-  updateSendAvailability();
+  updateSendAvailability(state);
 
   const thread = document.getElementById('agent-thread');
   // remove empty state
@@ -492,11 +331,51 @@ function beginTurn(runId, userText, attachments = []) {
   state.runs.set(runId, {
     msgNode, bubble, strip, textBox, reasoningEl,
     toolJobs: new Map(), raw: '', rawReasoning: '',
-    round: 1,
+    round: 1, conversationId: state.activeId, runId,
   });
   flushPendingEvents(runId);
   updateComposerStatus();
-  thread.scrollTop = thread.scrollHeight;
+  scrollToBottom(true);
+}
+
+async function retryTurn(failedNode) {
+  if (state.running) return;
+  if (!state.activeId) return;
+  const model = state.model;
+  if (!model) {
+    toast('Choose a model first (Models with a provider must be imported in Providers).', 'error');
+    return;
+  }
+  let runId;
+  try {
+    const res = await rpc('agent.turns.retry', { conversation_id: state.activeId, model, effort: state.effort && state.effort !== 'auto' ? state.effort : undefined });
+    runId = res.run_id;
+  } catch (err) {
+    toast(err.message, 'error');
+    return;
+  }
+  document.getElementById('stop-btn').hidden = false;
+  updateSendAvailability(state);
+
+  const thread = document.getElementById('agent-thread');
+  failedNode.remove();
+  const bubble = el('div', { class: 'agent-bubble' });
+  const msgNode = el('div', { class: 'agent-message assistant agent-pending' }, bubble);
+  thread.append(msgNode);
+  const reasoningEl = reasoningDisclosure('');
+  reasoningEl.hidden = true;
+  const textBox = el('div', { class: 'agent-bubble-text', text: '…' });
+  const strip = el('div', { class: 'agent-tool-stack' });
+  strip.hidden = true;
+  bubble.append(reasoningEl, textBox, strip);
+  state.runs.set(runId, {
+    msgNode, bubble, strip, textBox, reasoningEl,
+    toolJobs: new Map(), raw: '', rawReasoning: '',
+    round: 1, conversationId: state.activeId, runId,
+  });
+  flushPendingEvents(runId);
+  updateComposerStatus();
+  scrollToBottom(true);
 }
 
 function getRunOrQueue(type, payload) {
@@ -511,6 +390,90 @@ function getRunOrQueue(type, payload) {
   return null;
 }
 
+// runForConversation returns the active run for a conversation, if any.
+function runForConversation(convId) {
+  for (const run of state.runs.values()) {
+    if (run.conversationId === convId) return run;
+  }
+  return null;
+}
+
+// saveRoomState persists the per-room state for a conversation so it survives
+// room switches. DOM references (steerNode) are NOT saved — they will be
+// stale after renderThread. Only serializable/primitive state is saved.
+function saveRoomState(id) {
+  if (!id) return;
+  savedRooms.set(id, {
+    pinned: state.pinned,
+    steerDraft: state.steerDraft,
+    attachments: state.attachments,
+    model: state.model,
+    effort: state.effort,
+  });
+}
+
+// loadRoomState restores per-room state for a conversation. Returns true if
+// saved state was found and restored. If no saved state exists, model is set
+// from the conversation's persisted model or localStorage fallback.
+function loadRoomState(id) {
+  const saved = savedRooms.get(id);
+  state.steerNode = null; // always reset; re-wired after renderThread if needed
+  if (saved) {
+    state.pinned = saved.pinned;
+    state.steerDraft = saved.steerDraft;
+    state.attachments = saved.attachments;
+    state.model = saved.model;
+    state.effort = saved.effort || 'auto';
+    return true;
+  }
+  state.pinned = true;
+  state.steerDraft = '';
+  state.attachments = [];
+  state.effort = 'auto';
+  // Model will be set by openConversation from conversation.model
+  return false;
+}
+
+// clearSavedSteerQueue clears the steer state for a non-active conversation
+// (e.g. when its turn ends while the user is viewing another room).
+function clearSavedSteerQueue(convId) {
+  const saved = savedRooms.get(convId);
+  if (saved) {
+    saved.steerDraft = '';
+  }
+}
+
+// wireSteerCancel attaches the click handler to a steer bubble's cancel button.
+// Used both by showSteerQueued (live) and after renderThread (room switch).
+function wireSteerCancel(node) {
+  if (!node) return;
+  const cancelBtn = node.querySelector('.agent-steer-cancel-inline');
+  if (!cancelBtn) return;
+  cancelBtn.addEventListener('click', async () => {
+    if (!state.activeId) return;
+    try {
+      await rpc('agent.turns.cancel-steer', { conversation_id: state.activeId });
+      clearSteerQueue();
+      const input = document.getElementById('composer-input');
+      if (input && !input.value.trim()) {
+        input.value = state.steerDraft ?? '';
+        state.steerDraft = '';
+        input.dispatchEvent(new Event('input'));
+      }
+      updateSendAvailability(state);
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  });
+}
+
+// stopActiveRun stops only the run for the active conversation, not all runs.
+async function stopActiveRun() {
+  const run = runForConversation(state.activeId);
+  if (!run || !run.runId) return;
+  try { await rpc('agent.turns.stop', { run_id: run.runId }); } catch { /* ignore */ }
+}
+
 function flushPendingEvents(runId) {
   const events = state.pendingEvents.get(runId);
   if (!events?.length) return;
@@ -523,32 +486,67 @@ function flushPendingEvents(runId) {
 function endTurn(runId) {
   const run = state.runs.get(runId);
   if (!run) return;
+  const convId = run.conversationId;
   run.msgNode.classList.remove('agent-pending');
   state.runs.delete(runId);
-  if (!state.runs.size) {
-    state.running = false;
-    document.getElementById('composer-input').disabled = false;
-    document.getElementById('stop-btn').hidden = true;
-    updateSendAvailability();
+  // Clear steer for this conversation (turn ended, unapplied steer is cancelled).
+  if (convId === state.activeId) {
+    clearSteerQueue();
+    if (!state.running) {
+      document.getElementById('stop-btn').hidden = true;
+    }
+    updateSendAvailability(state);
     updateComposerStatus();
+  } else {
+    clearSavedSteerQueue(convId);
   }
+}
+
+// ---------- scroll pinning ----------
+
+// Track whether the user is at the bottom of the thread. While pinned,
+// streaming deltas auto-scroll to keep the latest content visible. When the
+// user scrolls up, pinning is released so they can read history without being
+// yanked back down. Scrolling back to the bottom re-pins.
+function bindScrollPin() {
+  const thread = document.getElementById('agent-thread');
+  if (!thread) return;
+  thread.addEventListener('scroll', () => {
+    state.pinned = isAtBottom(thread);
+  }, { passive: true });
+}
+
+function isAtBottom(el) {
+  if (!el) return true;
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= 4;
+}
+
+function scrollToBottom(force = false) {
+  const thread = document.getElementById('agent-thread');
+  if (!thread || (!force && !state.pinned)) return;
+  thread.scrollTop = thread.scrollHeight;
 }
 
 function bindEvents() {
   on('agent.turn.started', (payload) => {
-    const { run_id, message_id, round } = payload;
+    const { run_id, message_id, round, conversation_id } = payload;
     const run = getRunOrQueue('agent.turn.started', payload);
     if (!run) return;
     run.messageId = message_id;
     // round 1: clear the placeholder; round 2+: append new step elements
     // after the previous round's tool strip, preserving temporal order
     if (!round || round <= 1) {
-      if (run.textBox) run.textBox.textContent = '';
       run.raw = '';
       run.rawReasoning = '';
       run.round = 1;
+      if (conversation_id === state.activeId && run.textBox) run.textBox.textContent = '';
       return;
     }
+    // Track round even when not active so re-attach knows the current round.
+    run.round = round;
+    run.raw = '';
+    run.rawReasoning = '';
+    if (conversation_id !== state.activeId) return;
     // seal previous round: hide its tool strip if empty
     if (run.strip && run.strip.hidden) run.strip.remove();
     // create new reasoning + text + strip for this round
@@ -562,48 +560,46 @@ function bindEvents() {
     run.textBox = textBox;
     run.strip = strip;
     run.toolJobs = new Map();
-    run.raw = '';
-    run.rawReasoning = '';
-    run.round = round;
   });
   on('agent.message.delta', (payload) => {
-    const { text } = payload;
+    const { text, conversation_id } = payload;
     const run = getRunOrQueue('agent.message.delta', payload);
-    if (!run || !run.textBox) return;
-    // accumulate the RAW markdown, never re-read the rendered DOM: the
-    // rendered textContent loses newlines and already-consumed markers, so
-    // re-rendering from it would collapse paragraphs and break bold/lists
+    if (!run) return;
+    // Always accumulate raw text so we can re-render on room switch.
     run.raw += text;
+    // Only update DOM if this conversation is the active one.
+    if (conversation_id !== state.activeId || !run.textBox) return;
     run.textBox.innerHTML = renderMarkdown(run.raw);
-    const thread = document.getElementById('agent-thread');
-    thread.scrollTop = thread.scrollHeight;
+    scrollToBottom();
   });
   on('agent.reasoning.delta', (payload) => {
-    const { text } = payload;
+    const { text, conversation_id } = payload;
     const run = getRunOrQueue('agent.reasoning.delta', payload);
     if (!run) return;
     run.rawReasoning += text;
+    if (conversation_id !== state.activeId) return;
     if (run.reasoningEl) {
       run.reasoningEl.hidden = false;
       const content = run.reasoningEl.querySelector('.agent-reasoning-content');
       if (content) content.innerHTML = renderMarkdown(run.rawReasoning);
-      const thread = document.getElementById('agent-thread');
-      thread.scrollTop = thread.scrollHeight;
+      scrollToBottom();
     }
   });
   on('agent.tool.started', (payload) => {
-    const { tool_call_id, name, args } = payload;
+    const { tool_call_id, name, args, conversation_id } = payload;
     const run = getRunOrQueue('agent.tool.started', payload);
     if (!run) return;
+    if (conversation_id !== state.activeId) return;
     run.strip.hidden = false;
     const job = renderToolJob({ name, args: args ?? {}, status: 'running' });
     run.toolJobs.set(tool_call_id, job);
     run.strip.append(job);
   });
   on('agent.tool.completed', (payload) => {
-    const { tool_call_id, status, output } = payload;
+    const { tool_call_id, status, output, conversation_id } = payload;
     const run = getRunOrQueue('agent.tool.completed', payload);
     if (!run) return;
+    if (conversation_id !== state.activeId) return;
     const job = run.toolJobs.get(tool_call_id);
     if (!job) return;
     const next = { name: job.querySelector('.agent-tool-terminal-title')?.textContent, args: job._toolArgs, status: status || 'ok', output };
@@ -618,7 +614,7 @@ function bindEvents() {
     }
   });
   on('agent.turn.done', (payload) => {
-    const { run_id, message_id, model, usage, error } = payload;
+    const { run_id, message_id, model, usage, error, conversation_id } = payload;
     const run = getRunOrQueue('agent.turn.done', payload);
     if (run && message_id) {
       // refresh the message node with final metadata
@@ -634,27 +630,93 @@ function bindEvents() {
     }
     endTurn(run_id);
     if (error) toast(error, 'error');
-    refreshActiveConversation();
+    if (conversation_id === state.activeId) refreshActiveConversation();
     refreshConversations();
   });
   on('agent.turn.error', (payload) => {
-    const { run_id, message } = payload;
+    const { run_id, message, conversation_id } = payload;
     const run = getRunOrQueue('agent.turn.error', payload);
     if (run) {
       const bubble = run.msgNode.querySelector('.agent-bubble');
       if (bubble) bubble.textContent = message || 'Turn failed';
       run.msgNode.classList.add('agent-message-error');
+      // Add retry button directly to the error node so the user can retry
+      // without waiting for refreshActiveConversation to re-render.
+      const existingRetry = run.msgNode.querySelector('.agent-retry-btn');
+      if (!existingRetry) {
+        const retryBtn = el('button', { class: 'agent-retry-btn', type: 'button', text: '↻ Retry with model' });
+        retryBtn.addEventListener('click', () => retryTurn(run.msgNode));
+        run.msgNode.append(retryBtn);
+      }
     }
     endTurn(run_id);
     toast(message || 'Turn failed', 'error');
+    if (conversation_id === state.activeId) refreshActiveConversation();
   });
   on('agent.compacted', ({ conversation_id, summary }) => {
     if (conversation_id !== state.activeId) return;
     const thread = document.getElementById('agent-thread');
     thread.append(el('div', { class: 'agent-compaction-marker', text: `Compacted · ${summary ? 'context summarized' : 'history trimmed'}` }));
-    thread.scrollTop = thread.scrollHeight;
+    scrollToBottom();
     refreshActiveConversation();
   });
+  on('agent.steer.queued', ({ conversation_id, steer_id, text }) => {
+    if (conversation_id !== state.activeId) return;
+    showSteerQueued(text, steer_id);
+  });
+  on('agent.steer.applied', ({ conversation_id, steer_id, text }) => {
+    if (conversation_id !== state.activeId) return;
+    promoteSteerToTranscript(text);
+  });
+  on('agent.steer.cancelled', ({ conversation_id }) => {
+    if (conversation_id !== state.activeId) return;
+    clearSteerQueue();
+  });
+}
+
+function showSteerQueued(text, steerId) {
+  const thread = document.getElementById('agent-thread');
+  const steerMessage = { role: 'user', content: text, steer: true, steerWaiting: true, created_at: new Date().toISOString() };
+  state.messages.push(steerMessage);
+  const node = renderMessage(steerMessage);
+  state.steerNode = node;
+  thread.append(node);
+  wireSteerCancel(node);
+  scrollToBottom(true);
+}
+
+function clearSteerQueue() {
+  if (state.steerNode) {
+    state.steerNode.remove();
+    state.steerNode = null;
+  }
+  // remove from state.messages
+  const idx = state.messages.findIndex((m) => m.steerWaiting);
+  if (idx >= 0) state.messages.splice(idx, 1);
+  state.steerDraft = '';
+}
+
+function promoteSteerToTranscript(text) {
+  if (state.steerNode) {
+    // Replace the waiting bubble with a normal steer message
+    const thread = document.getElementById('agent-thread');
+    const steerMessage = { role: 'user', content: text, steer: true, created_at: new Date().toISOString() };
+    // update state.messages: replace the waiting entry
+    const idx = state.messages.findIndex((m) => m.steerWaiting);
+    if (idx >= 0) state.messages[idx] = steerMessage;
+    else state.messages.push(steerMessage);
+    const newNode = renderMessage(steerMessage);
+    state.steerNode.replaceWith(newNode);
+    state.steerNode = null;
+    scrollToBottom(true);
+  } else {
+    // Steer was applied but we don't have a pending node (e.g. page refresh)
+    const thread = document.getElementById('agent-thread');
+    const steerMessage = { role: 'user', content: text, steer: true, created_at: new Date().toISOString() };
+    state.messages.push(steerMessage);
+    thread.append(renderMessage(steerMessage));
+    scrollToBottom(true);
+  }
 }
 
 async function refreshActiveConversation() {
@@ -665,8 +727,9 @@ async function refreshActiveConversation() {
     state.messages = messages ?? [];
     renderThread(state.messages);
     updateComposerStatus();
-  } catch {
+  } catch (err) {
     // The list refresh will surface a deleted conversation if it raced a turn.
+    console.warn('refreshActiveConversation failed:', err?.message || err);
   }
 }
 
@@ -691,122 +754,36 @@ async function refreshModels() {
 function updateModelTrigger() {
   const label = document.getElementById('model-trigger-label');
   const chosen = models.find((m) => m.id === state.model);
-  label.textContent = chosen ? chosen.id : (state.model || 'No model');
-  label.title = chosen ? `${chosen.id} · ${chosen.provider_name}` : '';
+  const parts = [chosen ? chosen.id : (state.model || 'No model')];
+  if (state.effort && state.effort !== 'auto') parts.push(state.effort);
+  label.textContent = parts.join(' · ');
+  label.title = chosen ? `${chosen.id} · ${chosen.provider_name}${state.effort && state.effort !== 'auto' ? ` · ${state.effort}` : ''}` : '';
   updateComposerStatus();
 }
 
-export function bindModelPicker() {
-  const trigger = document.getElementById('model-trigger');
-  const menu = document.getElementById('model-menu');
-  const closeMenu = () => {
-    menu.hidden = true;
-    trigger.setAttribute('aria-expanded', 'false');
-  };
-
-  const openMenu = () => {
-    try {
-      renderModelMenu();
-      menu.hidden = false;
-      const rect = trigger.getBoundingClientRect();
-      const menuH = menu.offsetHeight || 320;
-      const spaceBelow = window.innerHeight - rect.bottom;
-      const spaceAbove = rect.top;
-      const menuWidth = menu.offsetWidth || 560;
-      menu.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - menuWidth - 8)) + 'px';
-      if (spaceBelow < menuH + 6 && spaceAbove > spaceBelow) {
-        // the composer sits at the bottom edge: open upward instead of
-        // overflowing past the viewport
-        menu.style.top = Math.max(8, rect.top - menuH - 6) + 'px';
-      } else {
-        menu.style.top = rect.bottom + 6 + 'px';
-      }
-      trigger.setAttribute('aria-expanded', 'true');
-      const input = menu.querySelector('input');
-      if (input) input.focus();
-    } catch (err) {
-      console.error('model picker:', err);
+function selectModel(modelID) {
+  state.model = modelID;
+  localStorage.setItem('nusashell.model', modelID);
+  // Clamp effort to the new model's supported efforts; reset to auto if unsupported.
+  const chosen = models.find((m) => m.id === modelID);
+  if (chosen) {
+    const supported = chosen.supported_efforts || [];
+    if (state.effort !== 'auto' && supported.length && !supported.includes(state.effort)) {
+      state.effort = chosen.default_effort && supported.includes(chosen.default_effort) ? chosen.default_effort : 'auto';
+    } else if (state.effort !== 'auto' && !supported.length) {
+      state.effort = 'auto';
     }
-  };
-
-  trigger.addEventListener('click', () => {
-    if (!menu.hidden) {
-      closeMenu();
-      return;
-    }
-    // open immediately with the current list, then refresh in the
-    // background so models imported elsewhere appear without a reload
-    openMenu();
-    refreshModels().then(() => {
-      if (!menu.hidden) openMenu();
-    }).catch((err) => console.error('model refresh:', err));
-  });
-  // keep the picker fresh when the Agent view becomes active again
-  window.addEventListener('hashchange', () => {
-    if (location.hash === '' || location.hash === '#agent') refreshModels();
-  });
-  document.addEventListener('mousedown', (e) => {
-    if (!menu.hidden && !menu.contains(e.target) && e.target !== trigger) closeMenu();
-  });
+  }
+  updateModelTrigger();
 }
 
-function renderModelMenu() {
-  const menu = document.getElementById('model-menu');
-  menu.innerHTML = '';
-  menu.append(el('div', { class: 'agent-model-search' },
-    el('input', { type: 'text', placeholder: 'Search models…', autocomplete: 'off' }),
-  ));
-  const list = el('div', { class: 'agent-model-list' });
-  const byProvider = new Map();
-  for (const m of models) {
-    if (!byProvider.has(m.provider_name)) byProvider.set(m.provider_name, []);
-    byProvider.get(m.provider_name).push(m);
-  }
-  if (!models.length) {
-    list.append(el('div', { class: 'agent-model-empty', text: 'No models yet. Configure a provider and import its models first.' }));
-  }
-  for (const [provider, ms] of byProvider) {
-    const section = el('div', { class: 'agent-model-section' },
-      el('div', { class: 'agent-model-section-title', text: provider }),
-    );
-    for (const m of ms) {
-      const row = el('div', {
-        class: `agent-model-row${m.id === state.model ? ' is-selected' : ''}`,
-      },
-        el('button', { class: 'agent-model-choice', type: 'button' },
-          el('span', { class: 'agent-model-name', text: m.id }),
-          el('span', { class: 'agent-model-meta' },
-            el('span', { class: 'agent-model-provider', text: m.provider_name }),
-          ),
-        ),
-      );
-      row.querySelector('button').addEventListener('click', () => {
-        state.model = m.id;
-        localStorage.setItem('nusashell.model', m.id);
-        updateModelTrigger();
-        menu.hidden = true;
-        trigger.setAttribute('aria-expanded', 'false');
-      });
-      section.append(row);
-    }
-    list.append(section);
-  }
-  const search = menu.querySelector('input');
-  search.addEventListener('input', debounce(() => {
-    const q = search.value.toLowerCase();
-    for (const section of list.querySelectorAll('.agent-model-section')) {
-      const name = section.querySelector('.agent-model-section-title').textContent;
-      const rows = [...section.querySelectorAll('.agent-model-row')];
-      for (const row of rows) {
-        const id = row.querySelector('.agent-model-name').textContent;
-        row.hidden = !(id.toLowerCase().includes(q) || name.toLowerCase().includes(q));
-      }
-    }
-  }, 120));
-  menu.append(list);
+function selectEffort(effort) {
+  state.effort = effort || 'auto';
+  updateModelTrigger();
 }
 
 export async function openConversationExternal(id) {
+  if (backendIsOffline()) return;
   await refreshConversations();
   await openConversation(id);
 }
@@ -821,12 +798,6 @@ async function refreshStatus() {
     /* app not ready */
   }
   updateComposerStatus();
-}
-
-function updateSendAvailability() {
-  const input = document.getElementById('composer-input');
-  const send = document.getElementById('send-btn');
-  send.disabled = state.running || (!input.value.trim() && !state.attachments.length);
 }
 
 function updateComposerStatus() {
@@ -846,6 +817,6 @@ function updateComposerStatus() {
     status.textContent = 'Choose a model';
     return;
   }
-  const contextWindow = Number(chosen.context) || Number(state.settings.compaction_threshold) || 0;
+  const contextWindow = effectiveContextWindow(Number(chosen.context) || 0, Number(state.settings.max_input_tokens) || 0);
   status.textContent = formatContextUsage(estimateContextTokens(state.messages), contextWindow);
 }

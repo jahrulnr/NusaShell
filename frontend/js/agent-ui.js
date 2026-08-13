@@ -10,6 +10,21 @@ export function formatContextUsage(usedTokens, contextWindow) {
   return `${formatTokenCount(used)} ctx`;
 }
 
+/**
+ * Resolve the effective context window denominator shown to the user.
+ * When the model advertises its own context window (e.g. OpenRouter
+ * context_length: 1000000), that value is used as-is. When the provider
+ * does not return a context window (e.g. OpenAI /models), the global
+ * max_input_tokens setting (default 200k) is used as a fallback. When
+ * neither is known, returns 0 (badge shows "X ctx" without denominator).
+ */
+export function effectiveContextWindow(modelWindow, globalMaxInputTokens) {
+  const windowValue = Number.isFinite(modelWindow) && modelWindow > 0 ? modelWindow : 0;
+  if (windowValue > 0) return windowValue;
+  const fallback = Number.isFinite(globalMaxInputTokens) && globalMaxInputTokens > 0 ? globalMaxInputTokens : 0;
+  return fallback;
+}
+
 export function estimateContextTokens(messages = []) {
   return Math.ceil(messages.reduce((total, message) => total + estimateMessageChars(message), 0) / 4);
 }

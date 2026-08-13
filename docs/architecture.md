@@ -45,7 +45,7 @@ transports speak the same event vocabulary (`contracts`).
    persists the user message and an assistant placeholder.
 2. A goroutine runs the turn: compaction check → tool list refresh → stream
    rounds. Each round streams into its own assistant message and executes
-   any requested tool calls (up to 8 rounds).
+   any requested tool calls, capped by `settings.max_tool_rounds` (default 8).
 3. Deltas and tool lifecycles are pushed as `agent.message.delta`,
    `agent.tool.started`, `agent.tool.completed`, then `agent.turn.done` (or
    `agent.turn.error` / interrupted state).
@@ -78,6 +78,33 @@ When the conversation's estimated tokens exceed
 `settings.compaction_threshold` (default 40000), the provider summarizes the
 history non-streaming, the summary replaces the oldest messages behind a
 marker, and `agent.compacted` is emitted.
+
+### Upstream recovery
+
+Before a provider stream has emitted content or reasoning, transient upstream
+failures are retried against the same provider up to three total attempts.
+Retryable failures are HTTP `408`, `409`, `425`, `429`, and `5xx`, as well as
+temporary transport failures. Permanent `4xx` responses (such as invalid
+credentials or an invalid request) fail the turn immediately. Backoff starts
+at 250 ms, doubles up to four seconds with a small jitter, and never retries
+before a provider-supplied `Retry-After` value. Conversation compaction uses
+the same policy.
+
+Once a stream has emitted visible content or reasoning, NusaShell saves that
+partial assistant message instead of replaying it. It performs at most one
+continuation request with the saved history and a prompt to continue without
+repeating text. Tool calls are executed only after a complete provider round,
+so recovery never reruns a tool; a continuation also does not consume the
+configured tool-round budget. When the continuation cannot complete, the
+partial message remains visible and is marked as failed.
+
+### Runtime settings
+
+`settings.get` and `settings.set` expose the persisted agent runtime knobs:
+compaction, prompt caching, and `max_tool_rounds` (1–10000). Browser-only
+preferences such as the default model, icon-only sidebar, and automatic
+WebSocket reconnect stay in local storage because they describe one browser
+client rather than the local agent process.
 
 ### Prompt caching
 
@@ -115,3 +142,9 @@ Handler-level tests in `transport/` drive the real HTTP/WS/SSE handlers
 against a scripted fake LLM server and a fake stdio MCP binary
 (`testdata/fakemcp`), covering the full turn lifecycle, tool calls,
 compaction, stop, and both provider wire formats.
+
+## Proposed PWA and offline-first design
+
+The current application requires a running Go backend. The proposed, not yet
+implemented PWA shell, local offline data, and backend-recovery design is
+recorded in [`decisions/001-pwa-offline-first.md`](decisions/001-pwa-offline-first.md).

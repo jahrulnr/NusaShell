@@ -100,6 +100,7 @@ func (s *Store) load() error {
 	if err := s.loadJSON("settings.json", &s.settings); err != nil {
 		return err
 	}
+	s.settings = domain.NormalizeSettings(s.settings)
 	// memories: JSONL
 	if b, err := os.ReadFile(filepath.Join(s.dir, "memories.jsonl")); err == nil {
 		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {

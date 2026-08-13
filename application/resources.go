@@ -344,6 +344,24 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	if req.PromptCaching != nil {
 		s.PromptCaching = *req.PromptCaching
 	}
+	if req.MaxToolRounds != nil {
+		if *req.MaxToolRounds < 1 || *req.MaxToolRounds > 10000 {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "max tool rounds must be between 1 and 10000"}
+		}
+		s.MaxToolRounds = *req.MaxToolRounds
+	}
+	if req.MaxInputTokens != nil {
+		if *req.MaxInputTokens < 1000 || *req.MaxInputTokens > 2000000 {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "max input tokens must be between 1000 and 2000000"}
+		}
+		s.MaxInputTokens = *req.MaxInputTokens
+	}
+	if req.MaxOutputTokens != nil {
+		if *req.MaxOutputTokens < 256 || *req.MaxOutputTokens > 1000000 {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "max output tokens must be between 256 and 1000000"}
+		}
+		s.MaxOutputTokens = *req.MaxOutputTokens
+	}
 	if err := a.Settings.Set(s); err != nil {
 		return nil, rpcInternal(err)
 	}
@@ -355,5 +373,8 @@ func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 		CompactionEnabled:   s.CompactionEnabled,
 		CompactionThreshold: s.CompactionThreshold,
 		PromptCaching:       s.PromptCaching,
+		MaxToolRounds:       s.MaxToolRounds,
+		MaxInputTokens:      s.MaxInputTokens,
+		MaxOutputTokens:     s.MaxOutputTokens,
 	}
 }

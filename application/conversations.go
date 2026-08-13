@@ -17,6 +17,7 @@ func convDTO(c *domain.Conversation) contracts.ConversationDTO {
 		UpdatedAt:    c.UpdatedAt.Format(timeRFC3339),
 		MessageCount: len(c.Messages),
 		Model:        c.Model,
+		Effort:       c.Effort,
 		Status:       c.Status,
 		Workspace:    c.Workspace,
 	}
@@ -34,6 +35,7 @@ func msgDTO(m domain.Message) contracts.MessageDTO {
 		CreatedAt: m.CreatedAt.Format(timeRFC3339),
 		Status:    string(m.Status),
 		Error:     m.Error,
+		Steer:     m.Steer,
 	}
 	if m.Usage != nil {
 		dto.Usage = &contracts.UsageDTO{

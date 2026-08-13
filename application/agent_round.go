@@ -1,0 +1,231 @@
+package application
+
+import (
+	"context"
+	"strings"
+	"time"
+
+	"nusashell/contracts"
+	"nusashell/domain"
+)
+
+type streamedTurnRound struct {
+	Content   string
+	Reasoning string
+	Response  ChatResponse
+}
+
+func (a *App) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, model string) (AIProvider, *domain.Conversation, domain.Settings, error) {
+	adapter, err := a.Factory(run.Ctx, provider, apiKey)
+	if err != nil {
+		return nil, nil, domain.Settings{}, err
+	}
+
+	conversation, err := a.Conversations.Get(run.ConversationID)
+	if err != nil {
+		return nil, nil, domain.Settings{}, err
+	}
+	settings := a.Settings.Get()
+	contextWindow := resolveContextWindow(provider, model, settings)
+	// Auto-trigger compaction when the conversation reaches 80% of the
+	// effective context window, leaving room for the next turn's output.
+	compactionTrigger := contextWindow * 4 / 5
+	if !settings.CompactionEnabled || conversation.EstimateTokens() <= compactionTrigger {
+		return adapter, conversation, settings, nil
+	}
+
+	summary, err := a.compactConversation(run.Ctx, adapter, conversation, model, contextWindow)
+	if err != nil {
+		a.log("warn", "agent", "compaction failed for %s: %v", conversation.ID, err)
+	} else {
+		a.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{ConversationID: conversation.ID, Summary: summary})
+		a.log("info", "agent", "compacted conversation %s", conversation.ID)
+	}
+	conversation, err = a.Conversations.Get(run.ConversationID)
+	return adapter, conversation, settings, err
+}
+
+func (a *App) toolDefinitions() []ToolDef {
+	tools := a.Toolbox.ListTools()
+	definitions := make([]ToolDef, 0, len(tools))
+	for _, tool := range tools {
+		definitions = append(definitions, ToolDef{
+			Name:        tool.Name,
+			Description: tool.Description,
+			InputSchema: tool.InputSchema,
+		})
+	}
+	return definitions
+}
+
+func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int) (streamedTurnRound, error) {
+	for retry := 1; ; retry++ {
+		round, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, maxTokens)
+		if err == nil || retry >= maxProviderAttempts || round.Content != "" || round.Reasoning != "" {
+			return round, err
+		}
+		delay, retryable := providerRetryDelay(err, retry)
+		if !retryable {
+			return round, err
+		}
+		a.log("warn", "ai", "retrying provider stream for turn %s (%d/%d) after %s: %v", run.ID, retry, maxProviderAttempts, delay.Round(time.Millisecond), err)
+		if err := a.retrySleeper(run.Ctx, delay); err != nil {
+			return round, err
+		}
+	}
+}
+
+func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int) (streamedTurnRound, error) {
+	var content strings.Builder
+	var reasoning strings.Builder
+	system := buildSystemPrompt(conversation)
+	if continuation {
+		system += "\n\nThe immediately preceding assistant response was interrupted by a transient upstream failure. Continue it from exactly where it stopped. Do not repeat prior text."
+	}
+	response, err := adapter.Stream(run.Ctx, ChatRequest{
+		Model:         model,
+		System:        system,
+		Messages:      chatMessages(conversation, messageID),
+		Tools:         tools,
+		PromptCaching: settings.PromptCaching,
+		MaxTokens:     maxTokens,
+		Effort:        effort,
+	}, func(delta string) {
+		content.WriteString(delta)
+		a.Bus.Emit(contracts.EventMessageDelta, contracts.MessageDeltaEvent{
+			RunID: run.ID, ConversationID: run.ConversationID, MessageID: messageID, Text: delta,
+		})
+	}, func(delta string) {
+		reasoning.WriteString(delta)
+		a.Bus.Emit(contracts.EventReasoningDelta, contracts.ReasoningDeltaEvent{
+			RunID: run.ID, ConversationID: run.ConversationID, MessageID: messageID, Text: delta,
+		})
+	})
+	return streamedTurnRound{Content: content.String(), Reasoning: reasoning.String(), Response: response}, err
+}
+
+func (a *App) completeWithRetry(ctx context.Context, adapter AIProvider, request ChatRequest) (ChatResponse, error) {
+	for retry := 1; ; retry++ {
+		response, err := adapter.Complete(ctx, request)
+		if err == nil || retry >= maxProviderAttempts {
+			return response, err
+		}
+		delay, retryable := providerRetryDelay(err, retry)
+		if !retryable {
+			return response, err
+		}
+		a.log("warn", "ai", "retrying provider completion (%d/%d) after %s: %v", retry, maxProviderAttempts, delay.Round(time.Millisecond), err)
+		if err := a.retrySleeper(ctx, delay); err != nil {
+			return ChatResponse{}, err
+		}
+	}
+}
+
+func (a *App) persistTurnRound(conversationID, messageID, model string, round streamedTurnRound) error {
+	conversation, err := a.Conversations.Get(conversationID)
+	if err != nil {
+		return err
+	}
+
+	a.updateMessage(conversation, messageID, func(message *domain.Message) {
+		applyStreamRound(message, model, round)
+		message.Status = domain.StatusDone
+	})
+
+	newToolCalls := make([]domain.ToolCall, 0, len(round.Response.ToolCalls))
+	for _, toolCall := range round.Response.ToolCalls {
+		if !a.hasToolCall(conversation, messageID, toolCall.ID) {
+			conversation = a.appendToolCall(conversation, messageID, toolCall)
+			newToolCalls = append(newToolCalls, toolCall)
+		}
+	}
+	if len(newToolCalls) > 0 {
+		a.updateMessage(conversation, messageID, func(message *domain.Message) {
+			message.Steps = append(message.Steps, domain.MessageStep{Type: domain.StepToolCalls, ToolCalls: newToolCalls})
+		})
+	}
+	return a.Conversations.Save(conversation)
+}
+
+func (a *App) persistPartialTurnRound(conversationID, messageID, model string, round streamedTurnRound) error {
+	// A partial stream must never carry an unconfirmed tool call into the next
+	// continuation request. Tools run only after a fully completed round.
+	round.Response.ToolCalls = nil
+	return a.persistTurnRound(conversationID, messageID, model, round)
+}
+
+func applyStreamRound(message *domain.Message, model string, round streamedTurnRound) {
+	if round.Reasoning != "" {
+		message.Steps = append(message.Steps, domain.MessageStep{Type: domain.StepReasoning, Content: round.Reasoning})
+		message.Reasoning = round.Reasoning
+	}
+	if round.Content != "" {
+		message.Steps = append(message.Steps, domain.MessageStep{Type: domain.StepText, Content: round.Content})
+		message.Content = round.Content
+	}
+	message.Model = model
+	message.Usage = toDomainUsage(round.Response.Usage)
+}
+
+func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domain.ToolCall) error {
+	for _, toolCall := range toolCalls {
+		a.Bus.Emit(contracts.EventToolStarted, contracts.ToolStartedEvent{
+			RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID, Name: toolCall.Name, Args: []byte(toolCall.Args),
+		})
+		a.log("info", "tools", "tool call: %s", toolCall.Name)
+		output, err := a.Toolbox.Execute(run.Ctx, toolCall.Name, []byte(toolCall.Args))
+		status := domain.ToolOK
+		if err != nil {
+			status = domain.ToolFailed
+			output = "error: " + err.Error()
+		}
+		a.Bus.Emit(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
+			RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID,
+			Name: toolCall.Name, Status: string(status), Output: output,
+		})
+
+		conversation, err := a.Conversations.Get(run.ConversationID)
+		if err != nil {
+			return err
+		}
+		conversation = a.updateToolResult(conversation, messageID, toolCall.ID, status, output)
+		if err := a.Conversations.Save(conversation); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *App) appendTurnAssistant(conversationID string) (*domain.Conversation, string, error) {
+	conversation, err := a.Conversations.Get(conversationID)
+	if err != nil {
+		return nil, "", err
+	}
+	next := domain.Message{ID: domain.NewID("msg"), Role: domain.RoleAssistant, CreatedAt: time.Now().UTC()}
+	conversation.AddMessage(next)
+	if err := a.Conversations.Save(conversation); err != nil {
+		return nil, "", err
+	}
+	return conversation, next.ID, nil
+}
+
+func (a *App) finishTurn(run *TurnRun, messageID, model string, usage ChatUsage) error {
+	conversation, err := a.Conversations.Get(run.ConversationID)
+	if err != nil {
+		return err
+	}
+	conversation.Status = "idle"
+	conversation.Touch()
+	if err := a.Conversations.Save(conversation); err != nil {
+		return err
+	}
+	a.Bus.Emit(contracts.EventTurnDone, contracts.TurnDoneEvent{
+		RunID: run.ID, ConversationID: run.ConversationID, MessageID: messageID, Model: model,
+		Usage: &contracts.UsageDTO{
+			InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
+			CacheRead: usage.CacheRead, CacheWrite: usage.CacheWrite,
+		},
+	})
+	a.log("info", "agent", "turn finished: %s (in %d / out %d)", run.ID, usage.InputTokens, usage.OutputTokens)
+	return nil
+}

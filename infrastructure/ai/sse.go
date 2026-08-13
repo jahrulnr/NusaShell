@@ -7,10 +7,16 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
+
+	"nusashell/application"
 )
 
 // sseEvent is one Server-Sent Event frame.
@@ -107,6 +113,30 @@ func jsonReq(ctx context.Context, method, url string, headers map[string]string,
 	return req, nil
 }
 
+// openSSE creates an SSE request and validates the HTTP response before a
+// provider-specific stream decoder reads its frames. Wire decoding stays in
+// each adapter because the event shapes differ by provider protocol.
+func openSSE(ctx context.Context, client *http.Client, url string, headers map[string]string, body any) (*http.Response, error) {
+	req, err := jsonReq(ctx, http.MethodPost, url, headers, body)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, &application.UpstreamError{Temporary: true, Err: err}
+	}
+	if resp.StatusCode < 400 {
+		return resp, nil
+	}
+	defer resp.Body.Close()
+	message, _ := readAllLimit(resp.Body, 4096)
+	return nil, &application.UpstreamError{
+		StatusCode: resp.StatusCode,
+		RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+		Err:        fmt.Errorf("provider returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(message)),
+	}
+}
+
 func readAllLimit(r io.Reader, n int64) (string, error) {
 	b, err := io.ReadAll(io.LimitReader(r, n))
 	return string(b), err
@@ -132,15 +162,45 @@ func doJSON(ctx context.Context, client *http.Client, method, url string, header
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return &application.UpstreamError{Temporary: true, Err: err}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("provider returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+		return &application.UpstreamError{
+			StatusCode: resp.StatusCode,
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+			Err:        fmt.Errorf("provider returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(msg))),
+		}
 	}
 	if out == nil {
 		return nil
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+func parseRetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if seconds, err := strconv.Atoi(value); err == nil && seconds >= 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	if when, err := http.ParseTime(value); err == nil && when.After(now) {
+		return when.Sub(now)
+	}
+	return 0
+}
+
+func incompleteSSEError() error {
+	return &application.UpstreamError{Temporary: true, Err: io.ErrUnexpectedEOF}
+}
+
+func retryableSSEReadError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var networkErr net.Error
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.As(err, &networkErr) {
+		return &application.UpstreamError{Temporary: true, Err: err}
+	}
+	return err
 }

@@ -293,20 +293,24 @@ func TestAgentTurnCompaction(t *testing.T) {
 	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
 	convID := h.newConversation(t)
 
-	// tiny threshold forces compaction on the next turn
-	threshold := 1000
-	h.rpcOK(t, "settings.set", map[string]any{"compaction_threshold": threshold})
+	// Seed history with compaction disabled, then enable it with a small
+	// context window so the next turn triggers compaction.
+	h.rpcOK(t, "settings.set", map[string]any{"compaction_enabled": false})
 	h.llm.setComplete(llmStep{Text: "SUMMARY: the user likes Go."})
 
-	// seed a long conversation; each message is large enough that every
-	// subsequent turn stays over the threshold
+	// seed a long conversation; each message is large enough to exceed the
+	// trigger once compaction is enabled.
 	for i := 0; i < 4; i++ {
-		h.llm.setScript([]llmStep{{Text: strings.Repeat("x", 2000)}})
+		h.llm.setScript([]llmStep{{Text: strings.Repeat("x", 4000)}})
 		h.rpcOK(t, "agent.turns.start", map[string]any{
-			"conversation_id": convID, "text": strings.Repeat("y", 2000), "model": "fake-model-1",
+			"conversation_id": convID, "text": strings.Repeat("y", 4000), "model": "fake-model-1",
 		})
 		waitTurnDone(t, h, convID)
 	}
+
+	// Enable compaction with a small context window (trigger = 800 tokens).
+	// The seeded history (~16000 tokens) is well above the trigger.
+	h.rpcOK(t, "settings.set", map[string]any{"compaction_enabled": true, "max_input_tokens": 1000})
 
 	// capture the compaction event on the next turn
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -359,13 +363,221 @@ func TestAgentTurnCompaction(t *testing.T) {
 	}
 	markers := 0
 	for _, m := range conv.Messages {
-		if m.Role == "system" && strings.Contains(m.Content, "compacted") {
+		if m.Role == "system" && strings.Contains(strings.ToLower(m.Content), "compacted") {
 			markers++
 		}
 	}
 	if markers == 0 {
 		t.Fatalf("no compaction marker in %d messages", len(conv.Messages))
 	}
+}
+
+// TestAgentTurnMultiPassCompaction verifies that a conversation larger than the
+// model's context window is compacted via multiple rolling passes, with no
+// messages dropped. The conversation is seeded with enough content to require
+// at least 2 compaction passes.
+func TestAgentTurnMultiPassCompaction(t *testing.T) {
+	h := newHarness(t, nil)
+	pid := h.addOpenAIProvider(t, "Fake")
+	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
+	convID := h.newConversation(t)
+
+	// Small context window so compaction auto-triggers at 80% (4000 tokens)
+	// and must multi-pass to fit the history.
+	h.rpcOK(t, "settings.set", map[string]any{
+		"max_input_tokens": 5000,
+	})
+
+	// Seed 4 turns with large messages: 8 messages × ~2000 tokens = ~16000 tokens.
+	// keep budget = min(64000, 5000*0.3) = 1500 → splitIdx keeps ~1 message.
+	// toCompact = ~7 messages × ~2000 = ~14000 tokens.
+	// available = 5000 - 300 - 2000 - 800 = 1900 → ~7 chunks → 7 passes.
+	bigMsg := strings.Repeat("x", 8000)
+	for i := 0; i < 4; i++ {
+		h.llm.setScript([]llmStep{{Text: bigMsg}})
+		h.rpcOK(t, "agent.turns.start", map[string]any{
+			"conversation_id": convID, "text": bigMsg, "model": "fake-model-1",
+		})
+		waitTurnDone(t, h, convID)
+	}
+
+	// Set up the compaction summary response and the final turn response.
+	h.llm.setComplete(llmStep{Text: "SUMMARY: compacted pass."})
+	h.llm.setScript([]llmStep{{Text: "ok"}})
+
+	// Count non-streaming requests before the triggering turn.
+	completeBefore := h.llm.completeRequestCount()
+
+	// Trigger compaction with a new user message.
+	h.rpcOK(t, "agent.turns.start", map[string]any{
+		"conversation_id": convID, "text": "continue", "model": "fake-model-1",
+	})
+	waitTurnDone(t, h, convID)
+
+	// Count non-streaming requests after — each compaction pass is one.
+	compactionPasses := h.llm.completeRequestCount() - completeBefore
+	if compactionPasses < 2 {
+		t.Fatalf("expected at least 2 multi-pass compaction requests, got %d", compactionPasses)
+	}
+
+	// Verify the conversation has a compaction marker with the summary.
+	gotten := h.rpcOK(t, "agent.conversations.get", map[string]any{"id": convID})
+	var conv struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(gotten.Result, &conv); err != nil {
+		t.Fatal(err)
+	}
+	hasMarker := false
+	for _, m := range conv.Messages {
+		if m.Role == "system" && strings.Contains(strings.ToLower(m.Content), "compacted") {
+			hasMarker = true
+			if !strings.Contains(m.Content, "SUMMARY") {
+				t.Fatalf("compaction marker missing summary: %q", m.Content)
+			}
+		}
+	}
+	if !hasMarker {
+		t.Fatalf("no compaction marker in %d messages", len(conv.Messages))
+	}
+}
+
+// TestAgentTurnSteer verifies that a user message queued mid-turn via
+// agent.turns.steer is injected at the next tool round boundary and appears
+// in the persisted conversation with the steer flag.
+func TestAgentTurnSteer(t *testing.T) {
+	h := newHarness(t, nil)
+	pid := h.addOpenAIProvider(t, "Fake")
+	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
+	convID := h.newConversation(t)
+
+	// Round 1: make a tool call (keeps the turn alive so we can steer).
+	// Round 2: final text response (after steer is injected).
+	// Round 3: final text response (in case the steer triggers another tool round).
+	h.llm.setRounds([][]llmStep{
+		{{Tool: &llmToolCall{ID: "call_1", Name: "docs_search", Args: map[string]any{"query": "test"}}}},
+		{{Text: "Done after steer."}},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// Start listening for steer events before starting the turn.
+	steerApplied := make(chan map[string]any, 1)
+	go func() {
+		frames, err := readSSEUntil(t, ctx, h.server.URL+"/events", contracts.EventSteerApplied)
+		if err != nil {
+			steerApplied <- nil
+			return
+		}
+		for _, f := range frames {
+			if f["type"] == contracts.EventSteerApplied {
+				steerApplied <- f
+				return
+			}
+		}
+		steerApplied <- nil
+	}()
+	time.Sleep(100 * time.Millisecond)
+
+	// Start the turn (round 1 will make a tool call, keeping the turn alive).
+	h.rpcOK(t, "agent.turns.start", map[string]any{
+		"conversation_id": convID, "text": "search for test", "model": "fake-model-1",
+	})
+
+	// Wait for the turn to be running (tool call in progress).
+	waitTurnRunning(t, h, convID)
+
+	// Queue a steer message while the turn is running.
+	steerRes := h.rpcOK(t, "agent.turns.steer", map[string]any{
+		"conversation_id": convID, "text": "Actually, focus on the API docs.",
+	})
+	var steerResp struct {
+		SteerID  string `json:"steer_id"`
+		Accepted bool   `json:"accepted"`
+	}
+	if err := json.Unmarshal(steerRes.Result, &steerResp); err != nil {
+		t.Fatal(err)
+	}
+	if !steerResp.Accepted || steerResp.SteerID == "" {
+		t.Fatalf("steer not accepted: %+v", steerResp)
+	}
+
+	// Wait for the steer to be applied (emitted at the tool round boundary).
+	select {
+	case f := <-steerApplied:
+		if f == nil {
+			t.Fatal("steer applied event not received")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for steer applied event")
+	}
+
+	// Wait for the turn to finish.
+	waitTurnDone(t, h, convID)
+
+	// Verify the steer message is in the conversation with the steer flag.
+	gotten := h.rpcOK(t, "agent.conversations.get", map[string]any{"id": convID})
+	var conv struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+			Steer   bool   `json:"steer"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(gotten.Result, &conv); err != nil {
+		t.Fatal(err)
+	}
+	foundSteer := false
+	for _, m := range conv.Messages {
+		if m.Role == "user" && m.Steer && strings.Contains(m.Content, "focus on the API docs") {
+			foundSteer = true
+		}
+	}
+	if !foundSteer {
+		t.Fatalf("steer message not found in conversation: %+v", conv.Messages)
+	}
+}
+
+// TestAgentTurnSteerRejectedWhenIdle verifies that steering a conversation
+// with no active turn returns a conflict error.
+func TestAgentTurnSteerRejectedWhenIdle(t *testing.T) {
+	h := newHarness(t, nil)
+	pid := h.addOpenAIProvider(t, "Fake")
+	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
+	convID := h.newConversation(t)
+
+	res := h.rpc(t, "agent.turns.steer", map[string]any{
+		"conversation_id": convID, "text": "steer when idle",
+	})
+	if res.OK {
+		t.Fatal("expected conflict error for steer on idle conversation")
+	}
+	if res.Error == nil || res.Error.Code != string(contracts.CodeConflict) {
+		t.Fatalf("expected conflict error, got %+v", res)
+	}
+}
+
+func waitTurnRunning(t *testing.T, h *harness, convID string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		gotten := h.rpcOK(t, "agent.conversations.get", map[string]any{"id": convID})
+		var conv struct {
+			Conversation struct {
+				Status string `json:"status"`
+			} `json:"conversation"`
+		}
+		_ = json.Unmarshal(gotten.Result, &conv)
+		if conv.Conversation.Status == "running" {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("turn did not reach running state")
 }
 
 func waitTurnDone(t *testing.T, h *harness, convID string) {
@@ -737,13 +949,15 @@ func TestAgentTurnMaxToolRounds(t *testing.T) {
 	pid := h.addOpenAIProvider(t, "Fake")
 	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
 	convID := h.newConversation(t)
+	h.rpcOK(t, "settings.set", map[string]any{"max_tool_rounds": 2})
 
-	rounds := make([][]llmStep, 0, 10)
-	for i := 0; i < 10; i++ {
+	rounds := make([][]llmStep, 0, 3)
+	for i := 0; i < 2; i++ {
 		rounds = append(rounds, []llmStep{{
 			Tool: &llmToolCall{ID: fmt.Sprintf("call_%d", i), Name: "docs_search", Args: map[string]any{"query": "mcp"}},
 		}})
 	}
+	rounds = append(rounds, []llmStep{{Text: "Tool limit reached; here is the final answer."}})
 	h.llm.setRounds(rounds)
 	h.rpcOK(t, "agent.turns.start", map[string]any{
 		"conversation_id": convID, "text": "loop", "model": "fake-model-1",
@@ -755,7 +969,9 @@ func TestAgentTurnMaxToolRounds(t *testing.T) {
 		Conversation struct {
 			Status string `json:"status"`
 		} `json:"conversation"`
-		Messages []json.RawMessage `json:"messages"`
+		Messages []struct {
+			Content string `json:"content"`
+		} `json:"messages"`
 	}
 	if err := json.Unmarshal(gotten.Result, &conv); err != nil {
 		t.Fatal(err)
@@ -763,11 +979,186 @@ func TestAgentTurnMaxToolRounds(t *testing.T) {
 	if conv.Conversation.Status != "idle" {
 		t.Fatalf("status = %q", conv.Conversation.Status)
 	}
-	// user + one assistant message per round, capped at the runner's
-	// maxToolRounds (application/agent_runner.go)
-	const maxRounds = 8
-	if len(conv.Messages) != 1+maxRounds {
-		t.Fatalf("messages = %d, want %d", len(conv.Messages), 1+maxRounds)
+	// The agent executes exactly the stored number of tool rounds, then asks
+	// the provider for a final answer with tools withheld.
+	const maxRounds = 2
+	if len(conv.Messages) != 1+maxRounds+1 {
+		t.Fatalf("messages = %d, want %d", len(conv.Messages), 1+maxRounds+1)
+	}
+	if got := conv.Messages[len(conv.Messages)-1].Content; got != "Tool limit reached; here is the final answer." {
+		t.Fatalf("final answer = %q", got)
+	}
+}
+
+func TestAgentTurnRetriesTransientUpstreamFailureWithoutResettingTheTurn(t *testing.T) {
+	h := newHarness(t, nil)
+	pid := h.addOpenAIProvider(t, "Fake")
+	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
+	convID := h.newConversation(t)
+	h.llm.failOnce(http.StatusServiceUnavailable, http.Header{"Retry-After": []string{"0"}})
+	h.llm.setScript([]llmStep{{Text: "Recovered after retry."}})
+	requestsBefore := h.llm.requestCount()
+
+	h.rpcOK(t, "agent.turns.start", map[string]any{
+		"conversation_id": convID, "text": "retry this", "model": "fake-model-1",
+	})
+	waitTurnDone(t, h, convID)
+
+	if got := h.llm.requestCount(); got != requestsBefore+2 {
+		t.Fatalf("provider requests = %d, want %d", got, requestsBefore+2)
+	}
+	gotten := h.rpcOK(t, "agent.conversations.get", map[string]any{"id": convID})
+	var conv struct {
+		Messages []struct {
+			Content string `json:"content"`
+			Status  string `json:"status"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(gotten.Result, &conv); err != nil {
+		t.Fatal(err)
+	}
+	if len(conv.Messages) != 2 || conv.Messages[1].Status != "done" || conv.Messages[1].Content != "Recovered after retry." {
+		t.Fatalf("conversation after retry = %+v", conv.Messages)
+	}
+}
+
+func TestAgentTurnRetriesTransientCompactionFailure(t *testing.T) {
+	h := newHarness(t, nil)
+	pid := h.addOpenAIProvider(t, "Fake")
+	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
+	convID := h.newConversation(t)
+
+	// Seed enough history while compaction is disabled, then enable it with
+	// a small context window so the next turn must call Complete for a summary.
+	h.rpcOK(t, "settings.set", map[string]any{"compaction_enabled": false})
+	h.llm.setScript([]llmStep{{Text: strings.Repeat("x", 2000)}})
+	h.rpcOK(t, "agent.turns.start", map[string]any{
+		"conversation_id": convID, "text": strings.Repeat("y", 2000), "model": "fake-model-1",
+	})
+	waitTurnDone(t, h, convID)
+	h.rpcOK(t, "settings.set", map[string]any{"compaction_enabled": true, "max_input_tokens": 1000})
+	h.llm.failOnce(http.StatusServiceUnavailable, nil)
+	h.llm.setComplete(llmStep{Text: "Recovered compaction summary."})
+	h.llm.setScript([]llmStep{{Text: "Turn completed after compaction retry."}})
+	requestsBefore := h.llm.requestCount()
+
+	h.rpcOK(t, "agent.turns.start", map[string]any{
+		"conversation_id": convID, "text": "continue", "model": "fake-model-1",
+	})
+	waitTurnDone(t, h, convID)
+
+	if got := h.llm.requestCount(); got != requestsBefore+3 {
+		t.Fatalf("provider requests = %d, want %d", got, requestsBefore+3)
+	}
+}
+
+func TestAgentTurnDoesNotRetryPermanentUpstreamFailure(t *testing.T) {
+	h := newHarness(t, nil)
+	pid := h.addOpenAIProvider(t, "Fake")
+	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
+	convID := h.newConversation(t)
+	h.llm.failOnce(http.StatusBadRequest, nil)
+	requestsBefore := h.llm.requestCount()
+
+	h.rpcOK(t, "agent.turns.start", map[string]any{
+		"conversation_id": convID, "text": "do not retry", "model": "fake-model-1",
+	})
+	waitTurnDone(t, h, convID)
+
+	if got := h.llm.requestCount(); got != requestsBefore+1 {
+		t.Fatalf("provider requests = %d, want %d", got, requestsBefore+1)
+	}
+	gotten := h.rpcOK(t, "agent.conversations.get", map[string]any{"id": convID})
+	var conv struct {
+		Messages []struct {
+			Status string `json:"status"`
+			Error  string `json:"error"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(gotten.Result, &conv); err != nil {
+		t.Fatal(err)
+	}
+	if len(conv.Messages) != 2 || conv.Messages[1].Status != "error" || !strings.Contains(conv.Messages[1].Error, "HTTP 400") {
+		t.Fatalf("conversation after permanent failure = %+v", conv.Messages)
+	}
+}
+
+func TestAgentTurnContinuesAfterPartialTransientStreamFailure(t *testing.T) {
+	h := newHarness(t, nil)
+	pid := h.addOpenAIProvider(t, "Fake")
+	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
+	convID := h.newConversation(t)
+	h.llm.truncateNextOpenAIStream()
+	h.llm.setRounds([][]llmStep{
+		{{Text: "The answer starts here. "}},
+		{{Text: "And continues after reconnecting."}},
+	})
+	requestsBefore := h.llm.requestCount()
+
+	h.rpcOK(t, "agent.turns.start", map[string]any{
+		"conversation_id": convID, "text": "continue safely", "model": "fake-model-1",
+	})
+	waitTurnDone(t, h, convID)
+
+	if got := h.llm.requestCount(); got != requestsBefore+2 {
+		t.Fatalf("provider requests = %d, want %d", got, requestsBefore+2)
+	}
+	gotten := h.rpcOK(t, "agent.conversations.get", map[string]any{"id": convID})
+	var conv struct {
+		Messages []struct {
+			Content string `json:"content"`
+			Status  string `json:"status"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(gotten.Result, &conv); err != nil {
+		t.Fatal(err)
+	}
+	if len(conv.Messages) != 3 || conv.Messages[1].Content != "The answer starts here. " || conv.Messages[2].Content != "And continues after reconnecting." {
+		t.Fatalf("partial stream was not continued: %+v", conv.Messages)
+	}
+}
+
+func TestAgentTurnPartialStreamContinuationDoesNotConsumeToolRound(t *testing.T) {
+	h := newHarness(t, nil)
+	pid := h.addOpenAIProvider(t, "Fake")
+	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
+	convID := h.newConversation(t)
+	h.rpcOK(t, "settings.set", map[string]any{"max_tool_rounds": 1})
+	h.llm.truncateNextOpenAIStream()
+	h.llm.setRounds([][]llmStep{
+		{{Text: "The answer starts here. "}},
+		{{Tool: &llmToolCall{ID: "call_after_recovery", Name: "docs_search", Args: map[string]any{"query": "mcp"}}}},
+		{{Text: "The tool result completes the answer."}},
+	})
+	requestsBefore := h.llm.requestCount()
+
+	h.rpcOK(t, "agent.turns.start", map[string]any{
+		"conversation_id": convID, "text": "continue safely with a tool", "model": "fake-model-1",
+	})
+	waitTurnDone(t, h, convID)
+
+	if got := h.llm.requestCount(); got != requestsBefore+3 {
+		t.Fatalf("provider requests = %d, want %d", got, requestsBefore+3)
+	}
+	gotten := h.rpcOK(t, "agent.conversations.get", map[string]any{"id": convID})
+	var conv struct {
+		Messages []struct {
+			Content   string `json:"content"`
+			Status    string `json:"status"`
+			ToolCalls []struct {
+				Name   string `json:"name"`
+				Status string `json:"status"`
+			} `json:"tool_calls"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(gotten.Result, &conv); err != nil {
+		t.Fatal(err)
+	}
+	if len(conv.Messages) != 4 || conv.Messages[3].Content != "The tool result completes the answer." || conv.Messages[3].Status != "done" {
+		t.Fatalf("continued tool round = %+v", conv.Messages)
+	}
+	if len(conv.Messages[2].ToolCalls) != 1 || conv.Messages[2].ToolCalls[0].Name != "docs_search" || conv.Messages[2].ToolCalls[0].Status != "ok" {
+		t.Fatalf("tool after recovery = %+v", conv.Messages[2].ToolCalls)
 	}
 }
 
@@ -962,5 +1353,162 @@ func TestAgentTurnReasoningInterleaved(t *testing.T) {
 	}
 	if len(allSteps[3].ToolCalls) != 1 || allSteps[3].ToolCalls[0].Name != "skill_list" {
 		t.Fatalf("step 3 tool_calls mismatch: %+v", allSteps[3].ToolCalls)
+	}
+}
+
+// TestAgentTurnRetryWithDifferentModel: a turn that fails with a non-retryable
+// 4xx can be retried with a different model picked by the user. The failed
+// assistant message is re-run from scratch with the new model and completes.
+func TestAgentTurnRetryWithDifferentModel(t *testing.T) {
+	h := newHarness(t, nil)
+	pid := h.addOpenAIProvider(t, "Fake")
+	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
+	convID := h.newConversation(t)
+
+	h.llm.failOnce(http.StatusBadRequest, nil)
+	h.rpcOK(t, "agent.turns.start", map[string]any{
+		"conversation_id": convID, "text": "hello", "model": "fake-model-1",
+	})
+	waitTurnDone(t, h, convID)
+
+	gotten := h.rpcOK(t, "agent.conversations.get", map[string]any{"id": convID})
+	var conv struct {
+		Messages []struct {
+			Status string `json:"status"`
+			Error  string `json:"error"`
+			Model  string `json:"model"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(gotten.Result, &conv); err != nil {
+		t.Fatal(err)
+	}
+	if len(conv.Messages) != 2 || conv.Messages[1].Status != "error" || !strings.Contains(conv.Messages[1].Error, "HTTP 400") {
+		t.Fatalf("expected failed assistant message, got %+v", conv.Messages)
+	}
+
+	h.llm.setScript([]llmStep{{Text: "Recovered with model 2."}})
+	h.rpcOK(t, "agent.turns.retry", map[string]any{
+		"conversation_id": convID, "model": "fake-model-2",
+	})
+	waitTurnDone(t, h, convID)
+
+	gotten = h.rpcOK(t, "agent.conversations.get", map[string]any{"id": convID})
+	conv = struct {
+		Messages []struct {
+			Status string `json:"status"`
+			Error  string `json:"error"`
+			Model  string `json:"model"`
+		} `json:"messages"`
+	}{}
+	if err := json.Unmarshal(gotten.Result, &conv); err != nil {
+		t.Fatal(err)
+	}
+	if len(conv.Messages) != 2 || conv.Messages[1].Status != "done" {
+		t.Fatalf("expected done after retry, got %+v", conv.Messages)
+	}
+	if conv.Messages[1].Model != "fake-model-2" {
+		t.Fatalf("expected model fake-model-2, got %q", conv.Messages[1].Model)
+	}
+}
+
+// TestAgentTurnRetryRejectsWhenNoFailedTurn: retrying a conversation whose last
+// turn succeeded returns a NOT_FOUND error instead of silently re-running.
+func TestAgentTurnRetryRejectsWhenNoFailedTurn(t *testing.T) {
+	h := newHarness(t, nil)
+	pid := h.addOpenAIProvider(t, "Fake")
+	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
+	convID := h.newConversation(t)
+
+	h.llm.setScript([]llmStep{{Text: "All good."}})
+	h.rpcOK(t, "agent.turns.start", map[string]any{
+		"conversation_id": convID, "text": "hello", "model": "fake-model-1",
+	})
+	waitTurnDone(t, h, convID)
+
+	res := h.rpc(t, "agent.turns.retry", map[string]any{
+		"conversation_id": convID, "model": "fake-model-2",
+	})
+	if res.OK {
+		t.Fatalf("retry should fail when no failed turn exists, got result: %s", res.Result)
+	}
+	if res.Error == nil || res.Error.Code != string(contracts.CodeNotFound) {
+		t.Fatalf("expected NOT_FOUND error, got %+v", res.Error)
+	}
+}
+
+// TestAgentTurnRetryThenError verifies that when a retry also fails, the
+// resulting assistant message has status "error" so the frontend can show
+// the retry button again.
+func TestAgentTurnRetryThenError(t *testing.T) {
+	h := newHarness(t, nil)
+	pid := h.addOpenAIProvider(t, "Fake")
+	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
+	convID := h.newConversation(t)
+
+	// First turn: fail with 429 (all 3 auto-retry attempts)
+	for i := 0; i < 3; i++ {
+		h.llm.failOnce(http.StatusTooManyRequests, nil)
+	}
+	h.rpcOK(t, "agent.turns.start", map[string]any{
+		"conversation_id": convID, "text": "hello", "model": "fake-model-1",
+	})
+	waitTurnDone(t, h, convID)
+
+	// Verify first failure
+	gotten := h.rpcOK(t, "agent.conversations.get", map[string]any{"id": convID})
+	var conv struct {
+		Messages []struct {
+			Role   string `json:"role"`
+			Status string `json:"status"`
+			Error  string `json:"error"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(gotten.Result, &conv); err != nil {
+		t.Fatal(err)
+	}
+	if len(conv.Messages) != 2 || conv.Messages[1].Status != "error" {
+		t.Fatalf("expected failed assistant message after first error, got %+v", conv.Messages)
+	}
+
+	// Retry: also fail with 429 (all 3 auto-retry attempts)
+	for i := 0; i < 3; i++ {
+		h.llm.failOnce(http.StatusTooManyRequests, nil)
+	}
+	h.rpcOK(t, "agent.turns.retry", map[string]any{
+		"conversation_id": convID, "model": "fake-model-1",
+	})
+	waitTurnDone(t, h, convID)
+
+	// Verify retry failure: last assistant message should have status "error"
+	gotten = h.rpcOK(t, "agent.conversations.get", map[string]any{"id": convID})
+	conv = struct {
+		Messages []struct {
+			Role   string `json:"role"`
+			Status string `json:"status"`
+			Error  string `json:"error"`
+		} `json:"messages"`
+	}{}
+	if err := json.Unmarshal(gotten.Result, &conv); err != nil {
+		t.Fatal(err)
+	}
+	// Find the last assistant message
+	var lastAssistant *struct {
+		Role   string `json:"role"`
+		Status string `json:"status"`
+		Error  string `json:"error"`
+	}
+	for i := range conv.Messages {
+		if conv.Messages[i].Role == "assistant" {
+			lastAssistant = &conv.Messages[i]
+		}
+	}
+	if lastAssistant == nil {
+		t.Fatal("no assistant message found")
+	}
+	if lastAssistant.Status != "error" {
+		t.Fatalf("expected status 'error' after retry failure, got %q (messages: %+v)", lastAssistant.Status, conv.Messages)
+	}
+	if !strings.Contains(lastAssistant.Error, "429") {
+		t.Fatalf("expected error to contain 429, got %q", lastAssistant.Error)
 	}
 }

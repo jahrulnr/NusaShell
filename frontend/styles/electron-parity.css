@@ -428,7 +428,7 @@ summary { outline: none; }
 .agent-tool-terminal.is-running .agent-tool-terminal-meta { color: #7ab5d9; }
 .agent-tool-terminal-chevron { color: #66768a; transition: transform .15s ease; }
 .agent-tool-terminal[open] .agent-tool-terminal-chevron { transform: rotate(180deg); }
-.agent-tool-terminal-body { display: grid; gap: 8px; margin: 2px 0 8px; padding: 0 0 2px 14px; }
+.agent-tool-terminal-body { display: grid; gap: 8px; margin: 2px 0 8px; padding: 0 0 2px 14px; font-size: 11px; }
 .agent-tool-terminal:not([open]) > .agent-tool-terminal-body { display: none; }
 .agent-tool-terminal-panel { border: 1px solid #263b52; border-radius: 10px; padding: 8px 10px 10px; background: #09111d; }
 .agent-tool-terminal-panel-label { margin-bottom: 6px; color: #6d7d90; font: 10px/1 var(--font-sans); letter-spacing: .02em; }

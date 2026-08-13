@@ -37,7 +37,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					continue
 				}
-				writeCtx, cancel := contextWithTimeout(ctx, 5*time.Second)
+				writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 				_ = conn.Write(writeCtx, websocket.MessageText, b)
 				cancel()
 			}
@@ -84,8 +84,4 @@ func (s *Server) writeWSError(conn *websocket.Conn, ctx context.Context, id int,
 		Error: &contracts.RPCError{Code: code, Message: msg},
 	})
 	_ = conn.Write(ctx, websocket.MessageText, b)
-}
-
-func contextWithTimeout(parent context.Context, d time.Duration) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(parent, d)
 }

@@ -251,22 +251,15 @@ func (a *AnthropicAdapter) Complete(ctx context.Context, req application.ChatReq
 }
 
 func (a *AnthropicAdapter) Stream(ctx context.Context, req application.ChatRequest, onDelta, onReasoning func(string)) (application.ChatResponse, error) {
-	httpReq, err := jsonReq(ctx, http.MethodPost, a.messagesURL(), a.headers(), buildAnthropicRequest(req, true))
-	if err != nil {
-		return application.ChatResponse{}, err
-	}
-	resp, err := a.Client.Do(httpReq)
+	resp, err := openSSE(ctx, a.Client, a.messagesURL(), a.headers(), buildAnthropicRequest(req, true))
 	if err != nil {
 		return application.ChatResponse{}, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		msg, _ := readAllLimit(resp.Body, 4096)
-		return application.ChatResponse{}, fmt.Errorf("provider returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(msg))
-	}
 
 	var result application.ChatResponse
 	toolByIndex := map[int]*domain.ToolCall{}
+	completed := false
 	err = readSSE(ctx, resp.Body, func(ev sseEvent) error {
 		if ev.Event == "ping" {
 			return nil
@@ -319,13 +312,18 @@ func (a *AnthropicAdapter) Stream(ctx context.Context, req application.ChatReque
 			}
 		case "message_delta":
 			// usage deltas arrive here; keep the message_start baseline
+		case "message_stop":
+			completed = true
 		case "error":
 			return fmt.Errorf("provider stream error: %s", ev.Data)
 		}
 		return nil
 	})
 	if err != nil {
-		return result, err
+		return result, retryableSSEReadError(err)
+	}
+	if !completed {
+		return result, incompleteSSEError()
 	}
 	seen := map[string]bool{}
 	for _, tc := range toolByIndex {

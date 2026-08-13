@@ -27,6 +27,7 @@ func (a *App) providerDTO(p *domain.Provider) contracts.ProviderDTO {
 			ProviderID:   p.ID,
 			ProviderName: p.Name,
 			Context:      m.Context,
+			MaxOutput:    m.MaxOutput,
 			InputCost:    m.InputCost,
 			Description:  m.Description,
 		})
@@ -212,12 +213,15 @@ func modelsDTO(p *domain.Provider) []contracts.ModelDTO {
 	var out []contracts.ModelDTO
 	for _, m := range p.Models {
 		out = append(out, contracts.ModelDTO{
-			ID:           m.ID,
-			ProviderID:   p.ID,
-			ProviderName: p.Name,
-			Context:      m.Context,
-			InputCost:    m.InputCost,
-			Description:  m.Description,
+			ID:              m.ID,
+			ProviderID:      p.ID,
+			ProviderName:    p.Name,
+			Context:         m.Context,
+			MaxOutput:       m.MaxOutput,
+			InputCost:       m.InputCost,
+			Description:     m.Description,
+			SupportedEfforts: m.SupportedEfforts,
+			DefaultEffort:   m.DefaultEffort,
 		})
 	}
 	return out

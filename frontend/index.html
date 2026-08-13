@@ -101,6 +101,13 @@
           </aside>
 
           <div class="agent-conversation" id="agent-conversation">
+            <section class="agent-offline-state" id="agent-offline-state" role="status" aria-live="polite" hidden>
+              <img class="agent-offline-mascot" src="./agent-offline-mascot.png" alt="" aria-hidden="true" width="1254" height="1254">
+              <h2>Sorry, it looks like your agent is offline.</h2>
+              <p>Start NusaShell again, then keep this page open. We’ll reconnect automatically.</p>
+              <span class="agent-offline-note">Your visible conversation stays on this device.</span>
+            </section>
+
             <div class="agent-thread" id="agent-thread" role="log" aria-live="off" aria-label="Agent conversation">
               <div class="agent-empty">
                 <div class="agent-empty-mark">✦</div>
@@ -252,10 +259,6 @@
             <h1>Activity log</h1>
             <p>Runtime events streamed live from the shell.</p>
           </div>
-          <div class="log-header">
-            <label class="log-auto-scroll"><input type="checkbox" id="log-follow" checked> Follow</label>
-            <button class="mini-btn ghost" id="logs-clear-btn" type="button">Clear</button>
-          </div>
         </div>
         <div class="view-body" style="display:flex;flex-direction:column;min-height:0;">
           <div class="log-filters">
@@ -267,6 +270,8 @@
               <option value="error">error</option>
             </select>
             <span class="log-count" id="log-count">0 entries</span>
+            <label class="log-auto-scroll"><input type="checkbox" id="log-follow" checked> Follow</label>
+            <button class="mini-btn ghost" id="logs-clear-btn" type="button">Clear</button>
           </div>
           <div class="log-tail" id="log-tail"></div>
         </div>
@@ -277,21 +282,42 @@
         <div class="view-header">
           <div>
             <div class="view-kicker"><span class="view-kicker-dot"></span>Settings</div>
-            <h1>Runtime settings</h1>
-            <p>Conversation behavior is stored locally with NusaShell Light.</p>
+            <h1>Settings</h1>
+            <p>Control how this local NusaShell instance connects, runs agent turns, and presents the workspace.</p>
           </div>
         </div>
         <div class="view-body settings-body">
-          <div class="settings-card">
+          <section class="settings-card settings-runtime-card" aria-labelledby="settings-runtime-title">
             <div class="settings-card-title">Agent runtime</div>
+            <h2 id="settings-runtime-title" class="sr-only">Agent runtime</h2>
+            <p class="settings-card-copy">Choose the default model and guard how much work one agent turn can perform.</p>
+            <label class="settings-field" for="settings-preferred-model">Default model
+              <select id="settings-preferred-model">
+                <option value="">Automatic — choose in each conversation</option>
+              </select>
+              <small>Used by new conversations. Existing conversations keep their selected model.</small>
+            </label>
+            <label class="settings-field" for="settings-max-tool-rounds">Maximum tool rounds per turn
+              <input id="settings-max-tool-rounds" type="number" min="1" max="10000" step="1" inputmode="numeric">
+              <small>Stops a turn that keeps requesting more tool work. The default is 8.</small>
+            </label>
+          </section>
+          <section class="settings-card" aria-labelledby="settings-context-title">
+            <div class="settings-card-title">Context compaction</div>
+            <h2 id="settings-context-title" class="sr-only">Context compaction</h2>
             <p class="settings-card-copy">Tune context compaction and provider prompt caching.</p>
             <label class="settings-toggle" for="settings-compaction-enabled">
               <span><strong>Compact long conversations</strong><small>Summarize older messages before the context window fills.</small></span>
               <input id="settings-compaction-enabled" type="checkbox">
               <span class="toggle-slider" aria-hidden="true"></span>
             </label>
-            <label class="settings-field" for="settings-compaction-threshold">Compaction threshold (tokens)
-              <input id="settings-compaction-threshold" type="number" min="1000" step="1000" inputmode="numeric">
+            <label class="settings-field" for="settings-max-input-tokens">Max input tokens (fallback context window)
+              <input id="settings-max-input-tokens" type="number" min="1000" max="2000000" step="1000" inputmode="numeric">
+              <small>Fallback context window when a provider does not advertise one (default 200,000). Models that report their own window use that value instead.</small>
+            </label>
+            <label class="settings-field" for="settings-max-output-tokens">Max output tokens (default completion limit)
+              <input id="settings-max-output-tokens" type="number" min="256" max="1000000" step="256" inputmode="numeric">
+              <small>Default max completion tokens per turn (default 65,536). Models that advertise their own limit use that instead.</small>
             </label>
             <label class="settings-toggle" for="settings-prompt-caching">
               <span><strong>Prompt caching</strong><small>Use provider-side ephemeral prompt caching when supported.</small></span>
@@ -302,12 +328,42 @@
               <span class="settings-save-status" id="settings-save-status" role="status" aria-live="polite"></span>
               <button class="action-btn" id="settings-save-btn" type="button">Save settings</button>
             </div>
-          </div>
-          <div class="settings-card settings-about-card">
+          </section>
+          <section class="settings-card" aria-labelledby="settings-appearance-title">
+            <div class="settings-card-title">Appearance</div>
+            <h2 id="settings-appearance-title" class="sr-only">Appearance</h2>
+            <p class="settings-card-copy">These preferences are stored in this browser, not sent to your agent.</p>
+            <label class="settings-toggle" for="settings-sidebar-compact">
+              <span><strong>Use icon-only sidebar</strong><small>Keep more room for conversations on this device.</small></span>
+              <input id="settings-sidebar-compact" type="checkbox">
+              <span class="toggle-slider" aria-hidden="true"></span>
+            </label>
+          </section>
+          <section class="settings-card" aria-labelledby="settings-connection-title">
             <div class="settings-card-title">Connection</div>
+            <h2 id="settings-connection-title" class="sr-only">Connection</h2>
             <p class="settings-card-copy">The Go shell uses HTTP RPC for commands and WebSocket for live events.</p>
-            <div class="settings-connection"><span class="connection-orb" id="settings-conn-fill"></span><span id="settings-conn-label">Connected</span></div>
-          </div>
+            <div class="settings-row"><span>Backend status</span><span class="settings-connection"><span class="connection-orb" id="settings-conn-fill"></span><span id="settings-conn-label">Connecting…</span></span></div>
+            <label class="settings-toggle" for="settings-auto-reconnect">
+              <span><strong>Reconnect automatically</strong><small>Try again after the local backend or network is temporarily unavailable.</small></span>
+              <input id="settings-auto-reconnect" type="checkbox">
+              <span class="toggle-slider" aria-hidden="true"></span>
+            </label>
+            <div class="settings-actions settings-inline-action">
+              <span class="settings-save-status" id="settings-connection-status" role="status" aria-live="polite"></span>
+              <button class="mini-btn" id="settings-check-connection-btn" type="button">Check connection</button>
+            </div>
+          </section>
+          <section class="settings-card settings-system-card" aria-labelledby="settings-system-title">
+            <div class="settings-card-title">System</div>
+            <h2 id="settings-system-title" class="sr-only">System</h2>
+            <p class="settings-card-copy">Useful local diagnostics. This browser version does not manage desktop tray or login startup.</p>
+            <dl class="settings-definition-list">
+              <div><dt>Version</dt><dd id="settings-version">—</dd></div>
+              <div><dt>Data directory</dt><dd><code id="settings-data-dir">—</code></dd></div>
+              <div><dt>Transport</dt><dd id="settings-transports">—</dd></div>
+            </dl>
+          </section>
         </div>
       </section>
 

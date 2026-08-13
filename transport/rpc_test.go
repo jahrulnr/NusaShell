@@ -765,31 +765,38 @@ func TestSettingsHandlers(t *testing.T) {
 			CompactionEnabled   bool `json:"compaction_enabled"`
 			CompactionThreshold int  `json:"compaction_threshold"`
 			PromptCaching       bool `json:"prompt_caching"`
+			MaxToolRounds       int  `json:"max_tool_rounds"`
 		} `json:"settings"`
 	}
 	if err := json.Unmarshal(gotten.Result, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !out.Settings.CompactionEnabled || out.Settings.CompactionThreshold != 40000 || !out.Settings.PromptCaching {
+	if !out.Settings.CompactionEnabled || out.Settings.CompactionThreshold != 40000 || !out.Settings.PromptCaching || out.Settings.MaxToolRounds != 8 {
 		t.Fatalf("defaults = %+v", out.Settings)
 	}
 
 	threshold := 5000
 	promptCaching := false
+	maxToolRounds := 24
 	settled := h.rpcOK(t, "settings.set", map[string]any{
 		"compaction_threshold": threshold,
 		"prompt_caching":       promptCaching,
+		"max_tool_rounds":      maxToolRounds,
 	})
 	if err := json.Unmarshal(settled.Result, &out); err != nil {
 		t.Fatal(err)
 	}
-	if out.Settings.CompactionThreshold != 5000 || out.Settings.PromptCaching {
+	if out.Settings.CompactionThreshold != 5000 || out.Settings.PromptCaching || out.Settings.MaxToolRounds != maxToolRounds {
 		t.Fatalf("after set = %+v", out.Settings)
 	}
 
 	res := h.rpc(t, "settings.set", map[string]any{"compaction_threshold": 10})
 	if res.OK || res.Error == nil || res.Error.Code != "VALIDATION_ERROR" {
 		t.Fatalf("tiny threshold must fail validation, got %+v", res)
+	}
+	res = h.rpc(t, "settings.set", map[string]any{"max_tool_rounds": 0})
+	if res.OK || res.Error == nil || res.Error.Code != "VALIDATION_ERROR" {
+		t.Fatalf("zero max tool rounds must fail validation, got %+v", res)
 	}
 }
 

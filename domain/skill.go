@@ -38,6 +38,9 @@ type Settings struct {
 	CompactionEnabled   bool
 	CompactionThreshold int
 	PromptCaching       bool
+	MaxToolRounds       int
+	MaxInputTokens      int // global context window cap (default 200k)
+	MaxOutputTokens     int // default max completion tokens (default 64k)
 }
 
 // DefaultSettings returns the factory defaults.
@@ -46,5 +49,23 @@ func DefaultSettings() Settings {
 		CompactionEnabled:   true,
 		CompactionThreshold: 40000,
 		PromptCaching:       true,
+		MaxToolRounds:       8,
+		MaxInputTokens:      200000,
+		MaxOutputTokens:     65536,
 	}
+}
+
+// NormalizeSettings fills values introduced after an existing local settings
+// file was written. It preserves intentional false values for toggles.
+func NormalizeSettings(settings Settings) Settings {
+	if settings.MaxToolRounds < 1 {
+		settings.MaxToolRounds = DefaultSettings().MaxToolRounds
+	}
+	if settings.MaxInputTokens < 1000 {
+		settings.MaxInputTokens = DefaultSettings().MaxInputTokens
+	}
+	if settings.MaxOutputTokens < 256 {
+		settings.MaxOutputTokens = DefaultSettings().MaxOutputTokens
+	}
+	return settings
 }

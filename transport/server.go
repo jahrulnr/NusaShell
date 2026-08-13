@@ -3,7 +3,6 @@
 package transport
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -118,5 +117,3 @@ func logRequests(logger *slog.Logger, next http.Handler) http.Handler {
 		logger.Debug("http", "method", r.Method, "path", r.URL.Path, "elapsed_ms", time.Since(start).Milliseconds())
 	})
 }
-
-var _ = context.Background

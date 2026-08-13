@@ -10,6 +10,8 @@ import { initSettings } from './views/settings.js';
 import { toast } from './ui.js';
 
 function setConnection(status) {
+  document.documentElement.dataset.backendStatus = status;
+  window.dispatchEvent(new CustomEvent('nusashell:connection-status', { detail: { status } }));
   const orb = document.getElementById('conn-fill');
   const label = document.getElementById('conn-status');
   const settingsOrb = document.getElementById('settings-conn-fill');
@@ -77,6 +79,7 @@ async function boot() {
   };
   sidebarToggle.addEventListener('click', () => setSidebarCompact(!sidebar.classList.contains('is-compact')));
   setSidebarCompact(compact, false);
+  window.nusashell = { ...(window.nusashell || {}), setSidebarCompact };
   window.addEventListener('hashchange', route);
 
   setConnection('connecting');
@@ -93,11 +96,11 @@ async function boot() {
   });
 
   try {
-    const info = await rpc('app.info');
+    const info = await rpc('app.info', {}, { timeoutMs: 4000 });
     document.getElementById('storage-path').textContent = info.data_dir || '';
     document.title = `NusaShell Light ${info.version ?? ''}`.trim();
   } catch (err) {
-    toast(`Backend unreachable: ${err.message}`, 'error', 8000);
+    setConnection('offline');
   }
 
   const results = await Promise.allSettled([
@@ -112,7 +115,10 @@ async function boot() {
   for (const r of results) {
     if (r.status === 'rejected') {
       console.error('view init failed:', r.reason);
-      toast(`View init failed: ${r.reason?.message ?? r.reason}`, 'error', 6000);
+      const status = document.documentElement.dataset.backendStatus;
+      if (status !== 'offline' && status !== 'closed' && status !== 'error') {
+        toast(`View init failed: ${r.reason?.message ?? r.reason}`, 'error', 6000);
+      }
     }
   }
 

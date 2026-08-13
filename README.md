@@ -37,7 +37,8 @@ Requirements:
 
 - Go 1.26.5 or newer
 - Node.js 24 or newer only for the frontend E2E test
-- `zenity` on Linux when using the native workspace folder picker
+- A desktop folder-dialog provider on Linux (install `zenity` if no compatible
+  provider is already available). Windows and macOS use their system dialogs.
 
 ```bash
 git clone git@github.com:jahrulnr/NusaShell-agent.git

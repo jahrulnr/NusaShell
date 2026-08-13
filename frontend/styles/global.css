@@ -83,6 +83,7 @@ body {
 .view.active.logs-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .view.active.providers-view, .view.active.mcp-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .view.active.settings-view { display: flex; flex-direction: column; min-height: 100%; }
+.view.active.settings-view .settings-body { margin-top: 1rem; }
 
 /* ============ Shared view header ============ */
 .view-header {

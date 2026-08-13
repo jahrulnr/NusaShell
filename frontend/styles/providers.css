@@ -1,5 +1,6 @@
 /* ============ Providers workspace ============ */
-.provider-registry { display: grid; grid-template-columns: repeat(auto-fill, minmax(235px, 1fr)); gap: 13px; }
+.providers-view .view-header .action-btn { margin: auto 0; }
+.provider-registry { margin-top: 1rem; display: grid; grid-template-columns: repeat(auto-fill, minmax(235px, 1fr)); gap: 13px; }
 .provider-registry-card {
   min-height: 162px;
   border: 1px solid #243341;
@@ -60,6 +61,7 @@
 .provider-model-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
 .model-badge { border-radius: 4px; padding: 3px 5px; background: #142238; color: #63a5ff; font: 8.5px var(--font-mono); }
 .model-badge-context { background: #14323a; color: #53c9d8; }
+.model-badge-output { background: #2a2a14; color: #d8c953; }
 .model-badge-input { background: #123226; color: #56cf91; }
 .provider-model-empty { padding: 32px; border-top: 1px solid var(--border-soft); color: var(--text-faint); font-size: 11px; text-align: center; }
 

@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Focused agent modules.** The agent view now separates transcript rendering,
+  composer interaction, and model selection while keeping the existing browser
+  API and UI behavior intact.
+- **Cross-platform workspace picker.** Folder selection now uses the native
+  system dialog on Windows and macOS as well as supported Linux desktop
+  dialogs.
+
+### Fixed
+
+- **Static JavaScript MIME compatibility.** The asset check accepts either
+  standard JavaScript media type returned by the operating system, preventing
+  a Windows-only CI failure.
+- **Resilient upstream recovery.** Transient provider failures now retry with
+  bounded backoff and `Retry-After` support; interrupted streaming output is
+  preserved and continued once without repeating completed tool work.
+
 ## [0.1.0] - 2026-08-13
 
 ### Added

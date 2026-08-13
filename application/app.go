@@ -32,6 +32,7 @@ type App struct {
 	MCPToolbox      MCPToolbox
 	Factory         ProviderFactory
 	WorkspacePicker WorkspacePicker
+	retrySleeper    RetrySleeper
 
 	runsMu sync.Mutex
 	runs   map[string]*TurnRun
@@ -76,6 +77,67 @@ type TurnRun struct {
 	MessageID      string
 	Ctx            context.Context
 	Cancel         context.CancelFunc
+
+	steerMu     sync.Mutex
+	steerQueued *SteerEntry
+}
+
+// SteerEntry is a user message queued for injection at the next tool round
+// boundary while a turn is running.
+type SteerEntry struct {
+	ID      string
+	Text    string
+	Status  string // "queued" | "applied" | "cancelled"
+	Message domain.Message
+}
+
+// queueSteer stores a steer entry for this run. Returns false if a steer is
+// already queued (only one at a time).
+func (r *TurnRun) queueSteer(entry *SteerEntry) bool {
+	r.steerMu.Lock()
+	defer r.steerMu.Unlock()
+	if r.steerQueued != nil {
+		return false
+	}
+	r.steerQueued = entry
+	return true
+}
+
+// cancelSteer removes a queued steer. Returns false if no queued steer exists
+// or it has already been applied.
+func (r *TurnRun) cancelSteer() bool {
+	r.steerMu.Lock()
+	defer r.steerMu.Unlock()
+	if r.steerQueued == nil || r.steerQueued.Status != "queued" {
+		return false
+	}
+	r.steerQueued.Status = "cancelled"
+	r.steerQueued = nil
+	return true
+}
+
+// drainSteer returns the queued steer entry and marks it applied, or nil if
+// no steer is queued. Called by the agent loop at a safe boundary.
+func (r *TurnRun) drainSteer() *SteerEntry {
+	r.steerMu.Lock()
+	defer r.steerMu.Unlock()
+	if r.steerQueued == nil || r.steerQueued.Status != "queued" {
+		return nil
+	}
+	r.steerQueued.Status = "applied"
+	entry := r.steerQueued
+	r.steerQueued = nil
+	return entry
+}
+
+// queuedSteer returns the current queued steer without consuming it.
+func (r *TurnRun) queuedSteer() *SteerEntry {
+	r.steerMu.Lock()
+	defer r.steerMu.Unlock()
+	if r.steerQueued == nil || r.steerQueued.Status != "queued" {
+		return nil
+	}
+	return r.steerQueued
 }
 
 // Deps is the wiring for NewApp.
@@ -96,11 +158,15 @@ type Deps struct {
 	MCPToolbox      MCPToolbox
 	Factory         ProviderFactory
 	WorkspacePicker WorkspacePicker
+	RetrySleeper    RetrySleeper
 }
 
 func NewApp(deps Deps) *App {
 	if deps.Bus == nil {
 		deps.Bus = NewBus()
+	}
+	if deps.RetrySleeper == nil {
+		deps.RetrySleeper = sleepForRetry
 	}
 	return &App{
 		Version:         deps.Version,
@@ -119,6 +185,7 @@ func NewApp(deps Deps) *App {
 		MCPToolbox:      deps.MCPToolbox,
 		Factory:         deps.Factory,
 		WorkspacePicker: deps.WorkspacePicker,
+		retrySleeper:    deps.RetrySleeper,
 		runs:            map[string]*TurnRun{},
 	}
 }
@@ -187,6 +254,24 @@ func (a *App) Dispatch(method string, payload json.RawMessage) (any, *contracts.
 			return nil, rpcErr
 		}
 		return a.handleTurnsStop(req)
+	case contracts.MethodTurnsRetry:
+		var req contracts.TurnRetryRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleTurnsRetry(req)
+	case contracts.MethodTurnsSteer:
+		var req contracts.TurnSteerRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleTurnsSteer(req)
+	case contracts.MethodTurnsCancelSteer:
+		var req contracts.TurnCancelSteerRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleTurnsCancelSteer(req)
 	case contracts.MethodProvidersList:
 		return a.handleProvidersList()
 	case contracts.MethodProvidersSave:

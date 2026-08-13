@@ -16,6 +16,9 @@ const (
 	MethodConversationsPickWorkspace = "agent.conversations.pick-workspace"
 	MethodTurnsStart                 = "agent.turns.start"
 	MethodTurnsStop                  = "agent.turns.stop"
+	MethodTurnsRetry                 = "agent.turns.retry"
+	MethodTurnsSteer                 = "agent.turns.steer"
+	MethodTurnsCancelSteer           = "agent.turns.cancel-steer"
 
 	MethodProvidersList   = "ai.providers.list"
 	MethodProvidersSave   = "ai.providers.save"
@@ -62,6 +65,9 @@ const (
 	EventTurnDone       = "agent.turn.done"
 	EventTurnError      = "agent.turn.error"
 	EventCompacted      = "agent.compacted"
+	EventSteerQueued    = "agent.steer.queued"
+	EventSteerApplied   = "agent.steer.applied"
+	EventSteerCancelled = "agent.steer.cancelled"
 	EventLogAppend      = "logs.append"
 )
 
@@ -92,6 +98,7 @@ type ConversationDTO struct {
 	UpdatedAt    string `json:"updated_at"`
 	MessageCount int    `json:"message_count"`
 	Model        string `json:"model,omitempty"`
+	Effort       string `json:"effort,omitempty"`
 	Status       string `json:"status,omitempty"`
 	Workspace    string `json:"workspace,omitempty"`
 }
@@ -130,6 +137,7 @@ type MessageDTO struct {
 	Error       string           `json:"error,omitempty"`
 	ToolCalls   []ToolCallDTO    `json:"tool_calls,omitempty"`
 	Attachments []AttachmentDTO  `json:"attachments,omitempty"`
+	Steer       bool             `json:"steer,omitempty"`
 }
 
 type AttachmentDTO struct {
@@ -168,7 +176,19 @@ type TurnStartRequest struct {
 	ConversationID string          `json:"conversation_id"`
 	Text           string          `json:"text"`
 	Model          string          `json:"model"`
+	Effort         string          `json:"effort,omitempty"`
 	Attachments    []AttachmentDTO `json:"attachments,omitempty"`
+}
+
+// TurnRetryRequest re-runs the last failed assistant message in a conversation
+// with a different model picked by the user. When the failed message has
+// partial content (and no tool calls), the partial is frozen as a completed
+// step and the new model is asked to continue from where it stopped; otherwise
+// the failed message is re-run from scratch.
+type TurnRetryRequest struct {
+	ConversationID string `json:"conversation_id"`
+	Model          string `json:"model"`
+	Effort         string `json:"effort,omitempty"`
 }
 
 type TurnStartResult struct {
@@ -177,6 +197,16 @@ type TurnStartResult struct {
 
 type TurnStopRequest struct {
 	RunID string `json:"run_id"`
+}
+
+type TurnSteerRequest struct {
+	ConversationID string          `json:"conversation_id"`
+	Text           string          `json:"text"`
+	Attachments    []AttachmentDTO `json:"attachments,omitempty"`
+}
+
+type TurnCancelSteerRequest struct {
+	ConversationID string `json:"conversation_id"`
 }
 
 type TurnStartedEvent struct {
@@ -237,15 +267,25 @@ type CompactedEvent struct {
 	Summary        string `json:"summary"`
 }
 
+type SteerEvent struct {
+	ConversationID string `json:"conversation_id"`
+	SteerID        string `json:"steer_id,omitempty"`
+	Text           string `json:"text,omitempty"`
+	Status         string `json:"status"`
+}
+
 // ---- providers / models ----
 
 type ModelDTO struct {
-	ID           string  `json:"id"`
-	ProviderID   string  `json:"provider_id"`
-	ProviderName string  `json:"provider_name"`
-	Context      int     `json:"context,omitempty"`
-	InputCost    float64 `json:"input_cost,omitempty"`
-	Description  string  `json:"description,omitempty"`
+	ID              string   `json:"id"`
+	ProviderID      string   `json:"provider_id"`
+	ProviderName    string   `json:"provider_name"`
+	Context         int      `json:"context,omitempty"`
+	MaxOutput       int      `json:"max_output,omitempty"`
+	InputCost       float64  `json:"input_cost,omitempty"`
+	Description     string   `json:"description,omitempty"`
+	SupportedEfforts []string `json:"supported_efforts,omitempty"`
+	DefaultEffort   string   `json:"default_effort,omitempty"`
 }
 
 type ProviderDTO struct {
@@ -461,6 +501,9 @@ type SettingsDTO struct {
 	CompactionEnabled   bool `json:"compaction_enabled"`
 	CompactionThreshold int  `json:"compaction_threshold"`
 	PromptCaching       bool `json:"prompt_caching"`
+	MaxToolRounds       int  `json:"max_tool_rounds"`
+	MaxInputTokens      int  `json:"max_input_tokens"`
+	MaxOutputTokens     int  `json:"max_output_tokens"`
 }
 
 type SettingsGetResult struct {
@@ -471,4 +514,7 @@ type SettingsSetRequest struct {
 	CompactionEnabled   *bool `json:"compaction_enabled,omitempty"`
 	CompactionThreshold *int  `json:"compaction_threshold,omitempty"`
 	PromptCaching       *bool `json:"prompt_caching,omitempty"`
+	MaxToolRounds       *int  `json:"max_tool_rounds,omitempty"`
+	MaxInputTokens      *int  `json:"max_input_tokens,omitempty"`
+	MaxOutputTokens     *int  `json:"max_output_tokens,omitempty"`
 }

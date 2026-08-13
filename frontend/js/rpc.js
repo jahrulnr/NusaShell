@@ -30,9 +30,9 @@ function toError(res) {
   return null;
 }
 
-export async function rpc(method, payload = {}) {
+export async function rpc(method, payload = {}, { timeoutMs = 60000 } = {}) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 60000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let res;
   try {
     res = await fetch('/rpc', {
@@ -66,6 +66,7 @@ const wsPending = new Map();
 let wsOptions = {};
 let reconnectTimer = null;
 let reconnectDelay = 500;
+let autoReconnect = localStorage.getItem('nusashell.autoReconnect') !== 'false';
 
 function rejectPending(message) {
   const error = new Error(message);
@@ -74,7 +75,7 @@ function rejectPending(message) {
 }
 
 function scheduleReconnect() {
-  if (reconnectTimer || !wsOptions.onStatus) return;
+  if (!autoReconnect || reconnectTimer || !wsOptions.onStatus) return;
   wsOptions.onStatus('reconnecting');
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
@@ -137,6 +138,20 @@ export function connectWS(options = {}) {
   }
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return ws;
   return openWS();
+}
+
+export function autoReconnectEnabled() {
+  return autoReconnect;
+}
+
+export function setAutoReconnect(enabled) {
+  autoReconnect = Boolean(enabled);
+  localStorage.setItem('nusashell.autoReconnect', String(autoReconnect));
+  if (!autoReconnect && reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  if (autoReconnect && !ws) connectWS();
 }
 
 export function wsRpc(method, payload = {}, timeoutMs = 30000) {

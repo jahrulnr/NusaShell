@@ -55,11 +55,12 @@ type openAITool struct {
 }
 
 type openAIRequest struct {
-	Model     string          `json:"model"`
-	Messages  []openAIMessage `json:"messages"`
-	Tools     []openAITool    `json:"tools,omitempty"`
-	Stream    bool            `json:"stream"`
-	MaxTokens int             `json:"max_tokens,omitempty"`
+	Model           string          `json:"model"`
+	Messages        []openAIMessage `json:"messages"`
+	Tools           []openAITool    `json:"tools,omitempty"`
+	Stream          bool            `json:"stream"`
+	MaxTokens       int             `json:"max_tokens,omitempty"`
+	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
 }
 
 type openAIChunk struct {
@@ -166,13 +167,17 @@ func openAITools(tools []application.ToolDef) []openAITool {
 }
 
 func buildRequest(req application.ChatRequest, stream bool) openAIRequest {
-	return openAIRequest{
+	r := openAIRequest{
 		Model:     req.Model,
 		Messages:  toOpenAIMessages(req),
 		Tools:     openAITools(req.Tools),
 		Stream:    stream,
 		MaxTokens: req.MaxTokens,
 	}
+	if req.Effort != "" && req.Effort != "auto" {
+		r.ReasoningEffort = req.Effort
+	}
+	return r
 }
 
 func (o *OpenAIAdapter) Complete(ctx context.Context, req application.ChatRequest) (application.ChatResponse, error) {
@@ -191,24 +196,18 @@ func (o *OpenAIAdapter) Complete(ctx context.Context, req application.ChatReques
 }
 
 func (o *OpenAIAdapter) Stream(ctx context.Context, req application.ChatRequest, onDelta, onReasoning func(string)) (application.ChatResponse, error) {
-	httpReq, err := jsonReq(ctx, http.MethodPost, o.chatURL(), o.headers(), buildRequest(req, true))
-	if err != nil {
-		return application.ChatResponse{}, err
-	}
-	resp, err := o.Client.Do(httpReq)
+	resp, err := openSSE(ctx, o.Client, o.chatURL(), o.headers(), buildRequest(req, true))
 	if err != nil {
 		return application.ChatResponse{}, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		msg, _ := readAllLimit(resp.Body, 4096)
-		return application.ChatResponse{}, fmt.Errorf("provider returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(msg))
-	}
 
 	var result application.ChatResponse
 	toolAcc := map[int]*domain.ToolCall{}
+	completed := false
 	err = readSSE(ctx, resp.Body, func(ev sseEvent) error {
 		if ev.Data == "[DONE]" {
+			completed = true
 			return nil
 		}
 		var chunk openAIChunk
@@ -252,7 +251,10 @@ func (o *OpenAIAdapter) Stream(ctx context.Context, req application.ChatRequest,
 		return nil
 	})
 	if err != nil {
-		return result, err
+		return result, retryableSSEReadError(err)
+	}
+	if !completed {
+		return result, incompleteSSEError()
 	}
 	for _, tc := range toolAcc {
 		result.ToolCalls = append(result.ToolCalls, *tc)
@@ -269,7 +271,18 @@ func (o *OpenAIAdapter) ListModels(ctx context.Context, apiKey string) ([]domain
 	}
 	var out struct {
 		Data []struct {
-			ID string `json:"id"`
+			ID            string `json:"id"`
+			ContextLength int    `json:"context_length"`
+			MaxTokens     int    `json:"max_tokens"`
+			Description   string `json:"description"`
+			Pricing       struct {
+				Prompt     string `json:"prompt"`
+				Completion string `json:"completion"`
+			} `json:"pricing"`
+			Reasoning struct {
+				SupportedEfforts []string `json:"supported_efforts"`
+				DefaultEffort    string   `json:"default_effort"`
+			} `json:"reasoning"`
 		} `json:"data"`
 	}
 	if err := doJSON(ctx, o.Client, http.MethodGet, url, headers, nil, &out); err != nil {
@@ -277,9 +290,14 @@ func (o *OpenAIAdapter) ListModels(ctx context.Context, apiKey string) ([]domain
 	}
 	models := make([]domain.Model, 0, len(out.Data))
 	for _, m := range out.Data {
-		if m.ID != "" {
-			models = append(models, domain.Model{ID: m.ID})
+		if m.ID == "" {
+			continue
 		}
+		model := domain.Model{ID: m.ID, Context: m.ContextLength, MaxOutput: m.MaxTokens, Description: m.Description, SupportedEfforts: normalizeEfforts(m.Reasoning.SupportedEfforts), DefaultEffort: normalizeEffort(m.Reasoning.DefaultEffort)}
+		if v, err := parseFloat(m.Pricing.Prompt); err == nil {
+			model.InputCost = v * 1_000_000
+		}
+		models = append(models, model)
 	}
 	return models, nil
 }

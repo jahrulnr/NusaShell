@@ -45,6 +45,12 @@ type llmToolCall struct {
 	Args map[string]any
 }
 
+type fakeFailure struct {
+	Status  int
+	Body    string
+	Headers http.Header
+}
+
 // fakeLLM serves both OpenAI-compatible and Anthropic wire formats from one
 // server, switching on the request path. Streaming requests consume one
 // round from the scripts queue; when the queue is empty the provider returns
@@ -62,6 +68,8 @@ type fakeLLM struct {
 	failStatus       int
 	failBody         string
 	failModelsStatus int
+	failures         []fakeFailure
+	truncateOpenAI   bool
 }
 
 func newFakeLLM(t *testing.T) *fakeLLM {
@@ -109,6 +117,38 @@ func (f *fakeLLM) setComplete(step llmStep) {
 	f.complete = step
 }
 
+func (f *fakeLLM) failOnce(status int, headers http.Header) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failures = append(f.failures, fakeFailure{Status: status, Headers: headers})
+}
+
+func (f *fakeLLM) truncateNextOpenAIStream() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.truncateOpenAI = true
+}
+
+func (f *fakeLLM) requestCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.seen)
+}
+
+// completeRequestCount returns the number of non-streaming (Complete) requests
+// received so far, safe to call from test goroutines.
+func (f *fakeLLM) completeRequestCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	count := 0
+	for _, body := range f.seenBodies {
+		if body != nil && body["stream"] != true {
+			count++
+		}
+	}
+	return count
+}
+
 func (f *fakeLLM) lastSeenPath() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -137,13 +177,23 @@ func (f *fakeLLM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var parsed map[string]any
 	_ = json.Unmarshal(body, &parsed)
 	f.seenBodies = append(f.seenBodies, parsed)
-	if f.failStatus != 0 {
-		status := f.failStatus
-		body := f.failBody
+	var failure fakeFailure
+	if len(f.failures) > 0 {
+		failure = f.failures[0]
+		f.failures = f.failures[1:]
+	} else if f.failStatus != 0 {
+		failure = fakeFailure{Status: f.failStatus, Body: f.failBody}
+	}
+	if failure.Status != 0 {
 		f.mu.Unlock()
-		w.WriteHeader(status)
-		if body != "" {
-			fmt.Fprint(w, body)
+		for key, values := range failure.Headers {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(failure.Status)
+		if failure.Body != "" {
+			fmt.Fprint(w, failure.Body)
 		} else {
 			fmt.Fprint(w, `{"error":{"message":"simulated failure"}}`)
 		}
@@ -172,6 +222,13 @@ func (f *fakeLLM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(body, &probe)
 		streaming = probe.Stream
 	}
+	truncateOpenAI := false
+	if streaming && strings.HasSuffix(r.URL.Path, "/chat/completions") {
+		f.mu.Lock()
+		truncateOpenAI = f.truncateOpenAI
+		f.truncateOpenAI = false
+		f.mu.Unlock()
+	}
 
 	var script []llmStep
 	if streaming {
@@ -193,7 +250,7 @@ func (f *fakeLLM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(r.URL.Path, "/responses"):
 		f.serveResponses(w, r, body, script, complete)
 	case strings.HasSuffix(r.URL.Path, "/chat/completions"):
-		f.serveOpenAI(w, r, body, script, complete)
+		f.serveOpenAI(w, r, body, script, complete, truncateOpenAI)
 	case strings.HasSuffix(r.URL.Path, "/v1/messages"):
 		f.serveAnthropic(w, r, body, script, complete)
 	default:
@@ -211,7 +268,7 @@ func mapModels(models []string) []map[string]any {
 
 // ---- OpenAI-compatible wire ----
 
-func (f *fakeLLM) serveOpenAI(w http.ResponseWriter, r *http.Request, body []byte, script []llmStep, complete llmStep) {
+func (f *fakeLLM) serveOpenAI(w http.ResponseWriter, r *http.Request, body []byte, script []llmStep, complete llmStep, truncate bool) {
 	var req struct {
 		Stream bool `json:"stream"`
 	}
@@ -256,6 +313,9 @@ func (f *fakeLLM) serveOpenAI(w http.ResponseWriter, r *http.Request, body []byt
 			}
 		}
 		writeSSEFrame(chunk)
+		if truncate {
+			return
+		}
 	}
 	writeSSEFrame(map[string]any{
 		"choices": []any{map[string]any{"delta": map[string]any{}, "finish_reason": "stop"}},
@@ -534,6 +594,9 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 		},
 		MCPToolbox: mcpManager,
 		Factory:    ai.Factory,
+		RetrySleeper: func(context.Context, time.Duration) error {
+			return nil
+		},
 	})
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := New(app, logger, StaticHandler(frontend.FS, false), false)

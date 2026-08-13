@@ -103,6 +103,7 @@ type ChatRequest struct {
 	Tools         []ToolDef
 	PromptCaching bool
 	MaxTokens     int
+	Effort        string // reasoning effort: "auto" (omit) or a level from the model's SupportedEfforts
 }
 
 type ChatUsage struct {

@@ -200,6 +200,7 @@ function renderModels(p) {
       el('span', { class: 'provider-model-id', text: m.id }),
       el('div', { class: 'provider-model-badges' },
         ...(m.context ? [el('span', { class: 'model-badge model-badge-context', text: `${m.context}` })] : []),
+        ...(m.max_output ? [el('span', { class: 'model-badge model-badge-output', text: `out ${m.max_output}` })] : []),
         ...(m.input_cost ? [el('span', { class: 'model-badge model-badge-input', text: `$${m.input_cost}/M in` })] : []),
       ),
     ),

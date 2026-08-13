@@ -2,16 +2,12 @@ package application
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	"nusashell/contracts"
 	"nusashell/domain"
 )
-
-const maxToolRounds = 8
 
 func (a *App) handleTurnsStart(req contracts.TurnStartRequest) (any, *contracts.RPCError) {
 	c, rpcErr := a.getConversation(req.ConversationID)
@@ -55,6 +51,7 @@ func (a *App) handleTurnsStart(req contracts.TurnStartRequest) (any, *contracts.
 	c.AddMessage(userMsg)
 	c.AddMessage(asstMsg)
 	c.Model = model
+	c.Effort = req.Effort
 	c.Status = "running"
 	if err := a.Conversations.Save(c); err != nil {
 		return nil, rpcInternal(err)
@@ -66,8 +63,79 @@ func (a *App) handleTurnsStart(req contracts.TurnStartRequest) (any, *contracts.
 	a.runs[run.ID] = run
 	a.runsMu.Unlock()
 
-	go a.runTurn(run, provider, apiKey, model, userMsg.ID, asstMsg.ID)
+	go a.runTurn(run, provider, apiKey, model, req.Effort, asstMsg.ID, false)
 	a.log("info", "agent", "turn started: %s (model %s)", run.ID, model)
+	return contracts.TurnStartResult{RunID: run.ID}, nil
+}
+
+// handleTurnsRetry re-runs the last failed assistant message with a different
+// model picked by the user. When the failed message has partial content (and
+// no tool calls), the partial is frozen as a completed step and the new model
+// is asked to continue from where it stopped; otherwise the failed message is
+// cleared and re-run from scratch.
+func (a *App) handleTurnsRetry(req contracts.TurnRetryRequest) (any, *contracts.RPCError) {
+	c, rpcErr := a.getConversation(req.ConversationID)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	model := strings.TrimSpace(req.Model)
+	if model == "" {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "model is required"}
+	}
+	if c.Status == "running" {
+		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "conversation is busy; stop the running turn first"}
+	}
+
+	failedIdx := -1
+	for i := len(c.Messages) - 1; i >= 0; i-- {
+		if c.Messages[i].Role == domain.RoleAssistant && c.Messages[i].Status == domain.StatusError {
+			failedIdx = i
+			break
+		}
+	}
+	if failedIdx < 0 {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "no failed assistant turn to retry"}
+	}
+
+	provider, apiKey, rpcErr := a.resolveModel(model)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+
+	failed := &c.Messages[failedIdx]
+	continuation := failed.Content != "" || failed.Reasoning != ""
+	var targetMsgID string
+	if continuation && len(failed.ToolCalls) == 0 {
+		failed.Status = domain.StatusDone
+		failed.Error = ""
+		next := domain.Message{ID: domain.NewID("msg"), Role: domain.RoleAssistant, CreatedAt: time.Now().UTC()}
+		c.AddMessage(next)
+		targetMsgID = next.ID
+	} else {
+		failed.Status = domain.StatusDone
+		failed.Error = ""
+		failed.Content = ""
+		failed.Reasoning = ""
+		failed.Steps = nil
+		failed.ToolCalls = nil
+		failed.Usage = nil
+		targetMsgID = failed.ID
+	}
+	c.Model = model
+	c.Effort = req.Effort
+	c.Status = "running"
+	if err := a.Conversations.Save(c); err != nil {
+		return nil, rpcInternal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	run := &TurnRun{ID: domain.NewID("run"), ConversationID: c.ID, MessageID: targetMsgID, Ctx: ctx, Cancel: cancel}
+	a.runsMu.Lock()
+	a.runs[run.ID] = run
+	a.runsMu.Unlock()
+
+	go a.runTurn(run, provider, apiKey, model, req.Effort, targetMsgID, continuation)
+	a.log("info", "agent", "turn retried: %s (model %s)", run.ID, model)
 	return contracts.TurnStartResult{RunID: run.ID}, nil
 }
 
@@ -83,42 +151,87 @@ func (a *App) handleTurnsStop(req contracts.TurnStopRequest) (any, *contracts.RP
 	return map[string]bool{"ok": true}, nil
 }
 
-func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, userMsgID, asstMsgID string) {
+// activeRunForConversation returns the running TurnRun for the given
+// conversation, or nil if none is active.
+func (a *App) activeRunForConversation(convID string) *TurnRun {
+	a.runsMu.Lock()
+	defer a.runsMu.Unlock()
+	for _, run := range a.runs {
+		if run.ConversationID == convID {
+			return run
+		}
+	}
+	return nil
+}
+
+func (a *App) handleTurnsSteer(req contracts.TurnSteerRequest) (any, *contracts.RPCError) {
+	text := strings.TrimSpace(req.Text)
+	if text == "" {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "steer text is required"}
+	}
+	run := a.activeRunForConversation(req.ConversationID)
+	if run == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "no active turn for this conversation"}
+	}
+	attachments, rpcErr := attachmentsFromDTO(req.Attachments)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	now := time.Now().UTC()
+	steerMsg := domain.Message{
+		ID:          domain.NewID("msg"),
+		Role:        domain.RoleUser,
+		Content:     text,
+		Attachments: attachments,
+		CreatedAt:   now,
+		Status:      domain.StatusDone,
+		Steer:       true,
+	}
+	entry := &SteerEntry{
+		ID:      domain.NewID("steer"),
+		Text:    text,
+		Status:  "queued",
+		Message: steerMsg,
+	}
+	if !run.queueSteer(entry) {
+		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "a steer is already queued for this turn"}
+	}
+	a.Bus.Emit(contracts.EventSteerQueued, contracts.SteerEvent{
+		ConversationID: req.ConversationID, SteerID: entry.ID, Text: text, Status: "queued",
+	})
+	a.log("info", "agent", "steer queued for %s: %s", req.ConversationID, entry.ID)
+	return map[string]any{"ok": true, "steer_id": entry.ID, "accepted": true}, nil
+}
+
+func (a *App) handleTurnsCancelSteer(req contracts.TurnCancelSteerRequest) (any, *contracts.RPCError) {
+	run := a.activeRunForConversation(req.ConversationID)
+	if run == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "no active turn for this conversation"}
+	}
+	if !run.cancelSteer() {
+		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "no queued steer to cancel"}
+	}
+	a.Bus.Emit(contracts.EventSteerCancelled, contracts.SteerEvent{
+		ConversationID: req.ConversationID, Status: "cancelled",
+	})
+	a.log("info", "agent", "steer cancelled for %s", req.ConversationID)
+	return map[string]any{"ok": true, "accepted": true}, nil
+}
+
+func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool) {
 	defer func() {
 		a.runsMu.Lock()
 		delete(a.runs, run.ID)
 		a.runsMu.Unlock()
 	}()
 
-	adapter, err := a.Factory(run.Ctx, provider, apiKey)
+	adapter, conversation, settings, err := a.initializeTurn(run, provider, apiKey, model)
 	if err != nil {
 		a.failTurn(run, asstMsgID, err)
 		return
 	}
-
-	c, err := a.Conversations.Get(run.ConversationID)
-	if err != nil {
-		a.failTurn(run, asstMsgID, err)
-		return
-	}
-
-	settings := a.Settings.Get()
-	if settings.CompactionEnabled && c.EstimateTokens() > settings.CompactionThreshold {
-		summary, compErr := a.compactConversation(run.Ctx, adapter, c, model)
-		if compErr != nil {
-			a.log("warn", "agent", "compaction failed for %s: %v", c.ID, compErr)
-		} else {
-			a.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{ConversationID: c.ID, Summary: summary})
-			a.log("info", "agent", "compacted conversation %s", c.ID)
-		}
-		c, _ = a.Conversations.Get(run.ConversationID)
-	}
-
-	tools := a.Toolbox.ListTools()
-	toolDefs := make([]ToolDef, 0, len(tools))
-	for _, t := range tools {
-		toolDefs = append(toolDefs, ToolDef{Name: t.Name, Description: t.Description, InputSchema: t.InputSchema})
-	}
+	toolDefs := a.toolDefinitions()
+	maxTokens := resolveMaxOutput(provider, model, settings)
 
 	a.Bus.Emit(contracts.EventTurnStarted, contracts.TurnStartedEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, MessageID: asstMsgID, Round: 0,
@@ -127,185 +240,278 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, us
 	var totalUsage ChatUsage
 	currentMsgID := asstMsgID
 	round := 0
+	toolRounds := 0
+	continuation := initialContinuation
+	continuedPartialStream := initialContinuation
 	for {
 		round++
+		toolsForRound := toolDefs
+		if toolRounds >= settings.MaxToolRounds {
+			// One final provider response after the last tool result lets the
+			// model answer the user without being able to start another tool
+			// round.
+			toolsForRound = nil
+		}
 		a.Bus.Emit(contracts.EventTurnStarted, contracts.TurnStartedEvent{
 			RunID: run.ID, ConversationID: run.ConversationID, MessageID: currentMsgID, Round: round,
 		})
-		var content strings.Builder
-		var reasoning strings.Builder
-		req := ChatRequest{
-			Model:         model,
-			System:        buildSystemPrompt(c),
-			Messages:      chatMessages(c, currentMsgID),
-			Tools:         toolDefs,
-			PromptCaching: settings.PromptCaching,
-			MaxTokens:     4096,
-		}
-		resp, streamErr := adapter.Stream(run.Ctx, req,
-			func(delta string) {
-				content.WriteString(delta)
-				a.Bus.Emit(contracts.EventMessageDelta, contracts.MessageDeltaEvent{
-					RunID: run.ID, ConversationID: run.ConversationID, MessageID: currentMsgID, Text: delta,
-				})
-			},
-			func(delta string) {
-				reasoning.WriteString(delta)
-				a.Bus.Emit(contracts.EventReasoningDelta, contracts.ReasoningDeltaEvent{
-					RunID: run.ID, ConversationID: run.ConversationID, MessageID: currentMsgID, Text: delta,
-				})
-			},
-		)
-		totalUsage = mergeUsage(totalUsage, resp.Usage)
+		roundResult, streamErr := a.streamTurnRound(run, adapter, conversation, currentMsgID, model, effort, toolsForRound, settings, continuation, maxTokens)
+		continuation = false
+		totalUsage = mergeUsage(totalUsage, roundResult.Response.Usage)
 		if streamErr != nil {
 			if run.Ctx.Err() != nil {
-				a.interruptTurn(run, currentMsgID, content.String(), totalUsage, model)
+				a.interruptTurn(run, currentMsgID, roundResult.Content, totalUsage, model)
+			} else if !continuedPartialStream && canContinuePartialStream(streamErr, roundResult) {
+				if err := a.persistPartialTurnRound(run.ConversationID, currentMsgID, model, roundResult); err != nil {
+					a.failTurn(run, currentMsgID, err)
+					return
+				}
+				a.log("warn", "ai", "continuing partial provider stream for turn %s", run.ID)
+				conversation, currentMsgID, err = a.appendTurnAssistant(run.ConversationID)
+				if err != nil {
+					a.failTurn(run, currentMsgID, err)
+					return
+				}
+				continuation = true
+				continuedPartialStream = true
+				// This replaces the interrupted provider attempt; it is not an
+				// additional tool round and must not reduce the user's tool budget.
+				round--
+				continue
 			} else {
-				a.failTurn(run, currentMsgID, streamErr)
+				a.failStreamTurn(run, currentMsgID, model, roundResult, streamErr)
 			}
 			return
 		}
 
-		c, _ = a.Conversations.Get(run.ConversationID)
-		// DEBUG: check steps loaded from store
-		for i := range c.Messages {
-			if c.Messages[i].ID == currentMsgID {
-			}
+		if toolRounds >= settings.MaxToolRounds && len(roundResult.Response.ToolCalls) > 0 {
+			a.log("warn", "agent", "turn %s requested a tool after reaching the %d-round limit", run.ID, settings.MaxToolRounds)
+			roundResult.Response.ToolCalls = nil
 		}
-		// append steps in temporal order: reasoning → text → tool_calls
-		a.updateMessage(c, currentMsgID, func(m *domain.Message) {
-			if reasoning.Len() > 0 {
-				m.Steps = append(m.Steps, domain.MessageStep{
-					Type:    domain.StepReasoning,
-					Content: reasoning.String(),
-				})
-				m.Reasoning = reasoning.String()
-			}
-			if content.Len() > 0 {
-				m.Steps = append(m.Steps, domain.MessageStep{
-					Type:    domain.StepText,
-					Content: content.String(),
-				})
-				m.Content = content.String()
-			}
-			m.Model = model
-			m.Usage = toDomainUsage(resp.Usage)
-			m.Status = domain.StatusDone
-		})
-		var roundToolCalls []domain.ToolCall
-		for _, tc := range resp.ToolCalls {
-			if !a.hasToolCall(c, currentMsgID, tc.ID) {
-				c = a.appendToolCall(c, currentMsgID, tc)
-				roundToolCalls = append(roundToolCalls, tc)
-			}
-		}
-		if len(roundToolCalls) > 0 {
-			a.updateMessage(c, currentMsgID, func(m *domain.Message) {
-				m.Steps = append(m.Steps, domain.MessageStep{
-					Type:      domain.StepToolCalls,
-					ToolCalls: roundToolCalls,
-				})
-			})
-		}
-		if err := a.Conversations.Save(c); err != nil {
+		if err := a.persistTurnRound(run.ConversationID, currentMsgID, model, roundResult); err != nil {
 			a.failTurn(run, currentMsgID, err)
 			return
 		}
-		c2, _ := a.Conversations.Get(run.ConversationID)
-		for i := range c2.Messages {
-			if c2.Messages[i].ID == currentMsgID {
-			}
-		}
-		for i := range c.Messages {
-			if c.Messages[i].ID == currentMsgID {
-				for j, s := range c.Messages[i].Steps {
-					fmt.Fprintf(os.Stderr, "  step %d: type=%s content=%q toolCalls=%d\n", j, s.Type, s.Content, len(s.ToolCalls))
-				}
-			}
-		}
 
-		if len(resp.ToolCalls) == 0 {
-			break
-		}
-		if round >= maxToolRounds {
-			a.log("warn", "agent", "turn %s reached %d tool rounds; stopping", run.ID, maxToolRounds)
+		if len(roundResult.Response.ToolCalls) == 0 {
 			break
 		}
 
-		for _, tc := range resp.ToolCalls {
-			a.Bus.Emit(contracts.EventToolStarted, contracts.ToolStartedEvent{
-				RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: tc.ID, Name: tc.Name, Args: []byte(tc.Args),
-			})
-			a.log("info", "tools", "tool call: %s", tc.Name)
-			output, toolErr := a.Toolbox.Execute(run.Ctx, tc.Name, []byte(tc.Args))
-			status := domain.ToolOK
-			if toolErr != nil {
-				status = domain.ToolFailed
-				output = "error: " + toolErr.Error()
+		if err := a.executeTurnTools(run, currentMsgID, roundResult.Response.ToolCalls); err != nil {
+			a.failTurn(run, currentMsgID, err)
+			return
+		}
+		toolRounds++
+
+		// Drain any queued steer message at this safe boundary (between tool
+		// completion and the next provider round). The steer is appended as a
+		// real user message so the provider sees it in the next round's context.
+		if entry := run.drainSteer(); entry != nil {
+			c, steerErr := a.Conversations.Get(run.ConversationID)
+			if steerErr != nil {
+				a.failTurn(run, currentMsgID, steerErr)
+				return
 			}
-			a.Bus.Emit(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
-				RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: tc.ID,
-				Name: tc.Name, Status: string(status), Output: output,
-			})
-			c, _ = a.Conversations.Get(run.ConversationID)
-			c = a.updateToolResult(c, currentMsgID, tc.ID, status, output)
+			c.AddMessage(entry.Message)
 			if err := a.Conversations.Save(c); err != nil {
 				a.failTurn(run, currentMsgID, err)
 				return
 			}
+			a.Bus.Emit(contracts.EventSteerApplied, contracts.SteerEvent{
+				ConversationID: run.ConversationID, SteerID: entry.ID, Text: entry.Text, Status: "applied",
+			})
+			a.log("info", "agent", "steer applied for %s: %s", run.ConversationID, entry.ID)
+			conversation = c
 		}
 
-		// next round streams into a fresh assistant message
-		next := domain.Message{
-			ID:        domain.NewID("msg"),
-			Role:      domain.RoleAssistant,
-			CreatedAt: time.Now().UTC(),
-		}
-		c, _ = a.Conversations.Get(run.ConversationID)
-		c.AddMessage(next)
-		if err := a.Conversations.Save(c); err != nil {
+		conversation, currentMsgID, err = a.appendTurnAssistant(run.ConversationID)
+		if err != nil {
 			a.failTurn(run, currentMsgID, err)
 			return
 		}
-		currentMsgID = next.ID
 	}
 
-	c, _ = a.Conversations.Get(run.ConversationID)
-	c.Status = "idle"
-	c.Touch()
-	if err := a.Conversations.Save(c); err != nil {
+	if err := a.finishTurn(run, asstMsgID, model, totalUsage); err != nil {
 		a.failTurn(run, asstMsgID, err)
-		return
 	}
-
-	usage := &contracts.UsageDTO{
-		InputTokens:  totalUsage.InputTokens,
-		OutputTokens: totalUsage.OutputTokens,
-		CacheRead:    totalUsage.CacheRead,
-		CacheWrite:   totalUsage.CacheWrite,
+	// If a steer was queued but never applied (turn ended without a tool round
+	// boundary), cancel it so the frontend clears the queued steer card.
+	if run.queuedSteer() != nil {
+		run.cancelSteer()
+		a.Bus.Emit(contracts.EventSteerCancelled, contracts.SteerEvent{
+			ConversationID: run.ConversationID, Status: "cancelled",
+		})
 	}
-	a.Bus.Emit(contracts.EventTurnDone, contracts.TurnDoneEvent{
-		RunID: run.ID, ConversationID: run.ConversationID, MessageID: asstMsgID, Model: model, Usage: usage,
-	})
-	a.log("info", "agent", "turn finished: %s (in %d / out %d)", run.ID, totalUsage.InputTokens, totalUsage.OutputTokens)
 }
 
-// compactConversation asks the provider to summarize the history and folds it
-// into the conversation, keeping the most recent messages intact.
-func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *domain.Conversation, model string) (string, error) {
-	summaryReq := ChatRequest{
-		Model: model,
-		System: "You summarize chat history for a local AI agent. " +
-			"Write a dense bullet summary preserving decisions, facts, code context and open tasks. Keep it under 400 words.",
-		Messages:  chatMessages(c, ""),
-		MaxTokens: 800,
+func canContinuePartialStream(err error, round streamedTurnRound) bool {
+	return isRetryableProviderError(err) && len(round.Response.ToolCalls) == 0 && (round.Content != "" || round.Reasoning != "")
+}
+
+// resolveMaxOutput picks the per-turn completion token ceiling: the model's
+// advertised max output when known, otherwise the global settings default.
+func resolveMaxOutput(provider *domain.Provider, model string, settings domain.Settings) int {
+	for _, m := range provider.Models {
+		if m.ID == model && m.MaxOutput > 0 {
+			return m.MaxOutput
+		}
 	}
-	resp, err := adapter.Complete(ctx, summaryReq)
-	if err != nil {
-		return "", err
+	return settings.MaxOutputTokens
+}
+
+// resolveContextWindow picks the effective context window for compaction
+// decisions: the model's advertised context when known, otherwise the global
+// max_input_tokens fallback.
+func resolveContextWindow(provider *domain.Provider, model string, settings domain.Settings) int {
+	for _, m := range provider.Models {
+		if m.ID == model && m.Context > 0 {
+			return m.Context
+		}
 	}
-	c.Compact(resp.Content, 6)
-	return resp.Content, a.Conversations.Save(c)
+	return settings.MaxInputTokens
+}
+
+// compactConversation summarizes the conversation history via multi-pass
+// rolling compaction so that conversations larger than the model's context
+// window are still fully summarized without dropping any messages.
+//
+// The conversation is split into chunks that fit within the model's context
+// window. Each chunk is summarized together with the running summary from the
+// previous pass, producing a progressively folded summary that preserves all
+// prior context. The most recent messages are kept intact.
+func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *domain.Conversation, model string, contextWindow int) (string, error) {
+	const (
+		keepTokenBudget = 64000 // retained recent messages token budget
+		summaryMaxOut   = 800
+		systemReserve   = 300  // system prompt + framing overhead
+		summaryReserve  = 2000 // running summary from previous pass
+	)
+
+	if len(c.Messages) <= 1 {
+		return "", nil
+	}
+
+	// Cap the keep budget to 30% of the context window so that compaction
+	// always has something to summarize and the retained messages leave room
+	// for the next turn's output.
+	effectiveKeepBudget := keepTokenBudget
+	if cap := contextWindow * 3 / 10; cap < effectiveKeepBudget {
+		effectiveKeepBudget = cap
+	}
+	if effectiveKeepBudget < 1000 {
+		effectiveKeepBudget = 1000
+	}
+
+	// Calculate the split point: iterate backward from the most recent message,
+	// counting tokens of stripped messages until the keep budget is exhausted.
+	// Everything before the split point gets summarized; everything after is
+	// retained by Compact.
+	remaining := effectiveKeepBudget
+	splitIdx := 0
+	for i := len(c.Messages) - 1; i >= 0; i-- {
+		m := c.Messages[i]
+		// Use stripped token count (no tool calls/reasoning) to match what
+		// Compact will actually retain.
+		tokens := domain.EstimateTokens(m.Content)
+		for _, att := range m.Attachments {
+			tokens += domain.EstimateTokens(att.Name) + domain.EstimateTokens(att.Content) + domain.EstimateTokens(att.DataURL)
+		}
+		if tokens > remaining {
+			splitIdx = i + 1
+			break
+		}
+		remaining -= tokens
+		splitIdx = i
+	}
+	if splitIdx < 0 {
+		splitIdx = 0
+	}
+
+	toCompact := c.Messages[:splitIdx]
+	runningSummary := c.Summary
+
+	// Available token budget per pass for message content.
+	available := contextWindow - systemReserve - summaryReserve - summaryMaxOut
+	if available < 1000 {
+		available = 1000
+	}
+
+	// Split messages into chunks that fit the per-pass budget. System markers
+	// are skipped — their content is already captured in the running summary.
+	var chunks [][]domain.Message
+	var current []domain.Message
+	currentTokens := 0
+	for _, m := range toCompact {
+		if m.Role == domain.RoleSystem {
+			continue
+		}
+		mt := m.EstimateTokens()
+		if currentTokens+mt > available && len(current) > 0 {
+			chunks = append(chunks, current)
+			current = nil
+			currentTokens = 0
+		}
+		current = append(current, m)
+		currentTokens += mt
+	}
+	if len(current) > 0 {
+		chunks = append(chunks, current)
+	}
+
+	// If there's nothing to compact (e.g. only system markers), bail out.
+	if len(chunks) == 0 {
+		return "", nil
+	}
+
+	systemPrompt := "Create a concise handoff checkpoint for the next LLM. Reply with the summary " +
+		"only; do not call tools.\n\n" +
+		"Capture the user's goal, completed work and decisions, remaining steps and TODO " +
+		"status, durable tool effects (what changed and identifying args), relevant " +
+		"absolute paths, and any confirmed root cause or constraint. Keep only evidence " +
+		"needed to continue safely. Do not copy raw tool output or restate the full " +
+		"conversation."
+
+	for _, chunk := range chunks {
+		var msgs []ChatMessage
+		if runningSummary != "" {
+			msgs = append(msgs, ChatMessage{
+				Role:    "user",
+				Content: "Previous summary of earlier conversation:\n" + runningSummary,
+			})
+		}
+		for _, m := range chunk {
+			switch m.Role {
+			case domain.RoleUser:
+				msgs = append(msgs, ChatMessage{Role: "user", Content: m.Content, Attachments: m.Attachments})
+			case domain.RoleAssistant:
+				if m.Content == "" && len(m.ToolCalls) == 0 {
+					continue
+				}
+				msgs = append(msgs, ChatMessage{Role: "assistant", Content: m.Content, Reasoning: m.Reasoning, ToolCalls: m.ToolCalls})
+				for _, tc := range m.ToolCalls {
+					msgs = append(msgs, ChatMessage{Role: "tool", ToolResult: &ToolResult{
+						ToolCallID: tc.ID, Name: tc.Name, Content: tc.Output,
+					}})
+				}
+			}
+		}
+		resp, err := a.completeWithRetry(ctx, adapter, ChatRequest{
+			Model:     model,
+			System:    systemPrompt,
+			Messages:  msgs,
+			MaxTokens: summaryMaxOut,
+		})
+		if err != nil {
+			return "", err
+		}
+		runningSummary = resp.Content
+	}
+
+	// Replace the conversation with the final summary marker + recent messages.
+	// Clear the old summary first so Compact sets rather than appends.
+	c.Summary = ""
+	c.Compact(runningSummary, effectiveKeepBudget)
+	return runningSummary, a.Conversations.Save(c)
 }
 
 func (a *App) updateMessage(c *domain.Conversation, msgID string, fn func(*domain.Message)) {
@@ -383,6 +589,22 @@ func (a *App) failTurn(run *TurnRun, msgID string, err error) {
 		a.updateMessage(c, msgID, func(m *domain.Message) {
 			m.Status = domain.StatusError
 			m.Error = err.Error()
+		})
+		c.Status = "idle"
+		_ = a.Conversations.Save(c)
+	}
+	a.Bus.Emit(contracts.EventTurnError, contracts.TurnErrorEvent{
+		RunID: run.ID, ConversationID: run.ConversationID, Message: err.Error(),
+	})
+}
+
+func (a *App) failStreamTurn(run *TurnRun, msgID, model string, round streamedTurnRound, err error) {
+	a.log("error", "agent", "turn failed: %s: %v", run.ID, err)
+	if c, getErr := a.Conversations.Get(run.ConversationID); getErr == nil {
+		a.updateMessage(c, msgID, func(message *domain.Message) {
+			applyStreamRound(message, model, round)
+			message.Status = domain.StatusError
+			message.Error = err.Error()
 		})
 		c.Status = "idle"
 		_ = a.Conversations.Save(c)

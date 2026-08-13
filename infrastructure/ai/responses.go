@@ -59,6 +59,11 @@ type responsesRequest struct {
 	Tools           []responsesToolDef   `json:"tools,omitempty"`
 	Stream          bool                 `json:"stream"`
 	MaxOutputTokens int                  `json:"max_output_tokens,omitempty"`
+	Reasoning       *responsesReasoning  `json:"reasoning,omitempty"`
+}
+
+type responsesReasoning struct {
+	Effort string `json:"effort,omitempty"`
 }
 
 type responsesToolDef struct {
@@ -144,6 +149,9 @@ func buildResponsesRequest(req application.ChatRequest, stream bool) responsesRe
 		Stream:          stream,
 		MaxOutputTokens: req.MaxTokens,
 	}
+	if req.Effort != "" && req.Effort != "auto" {
+		out.Reasoning = &responsesReasoning{Effort: req.Effort}
+	}
 	for _, t := range req.Tools {
 		out.Tools = append(out.Tools, responsesToolDef{
 			Type: "function", Name: t.Name, Description: t.Description, Parameters: t.InputSchema,
@@ -210,27 +218,21 @@ func (r *ResponsesAdapter) Complete(ctx context.Context, req application.ChatReq
 }
 
 func (r *ResponsesAdapter) Stream(ctx context.Context, req application.ChatRequest, onDelta, onReasoning func(string)) (application.ChatResponse, error) {
-	httpReq, err := jsonReq(ctx, http.MethodPost, r.responsesURL(), r.headers(), buildResponsesRequest(req, true))
-	if err != nil {
-		return application.ChatResponse{}, err
-	}
-	resp, err := r.Client.Do(httpReq)
+	resp, err := openSSE(ctx, r.Client, r.responsesURL(), r.headers(), buildResponsesRequest(req, true))
 	if err != nil {
 		return application.ChatResponse{}, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		msg, _ := readAllLimit(resp.Body, 4096)
-		return application.ChatResponse{}, fmt.Errorf("provider returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(msg))
-	}
 
 	var result application.ChatResponse
 	toolByIndex := map[int]*domain.ToolCall{}
 	streamErr := error(nil)
+	completed := false
 	readErr := readSSE(ctx, resp.Body, func(ev sseEvent) error {
 		// gateways (OpenRouter) terminate Responses streams with the chat
 		// completions sentinel
 		if ev.Data == "[DONE]" {
+			completed = true
 			return nil
 		}
 		var frame struct {
@@ -270,6 +272,7 @@ func (r *ResponsesAdapter) Stream(ctx context.Context, req application.ChatReque
 				acc.Args += frame.Delta
 			}
 		case "response.completed":
+			completed = true
 			if frame.Response != nil {
 				result.Usage = application.ChatUsage{
 					InputTokens:  frame.Response.Usage.InputTokens,
@@ -288,10 +291,13 @@ func (r *ResponsesAdapter) Stream(ctx context.Context, req application.ChatReque
 		return nil
 	})
 	if readErr != nil {
-		return result, readErr
+		return result, retryableSSEReadError(readErr)
 	}
 	if streamErr != nil {
 		return result, streamErr
+	}
+	if !completed {
+		return result, incompleteSSEError()
 	}
 	seen := map[string]bool{}
 	for _, tc := range toolByIndex {
@@ -313,7 +319,18 @@ func (r *ResponsesAdapter) ListModels(ctx context.Context, apiKey string) ([]dom
 	}
 	var out struct {
 		Data []struct {
-			ID string `json:"id"`
+			ID            string `json:"id"`
+			ContextLength int    `json:"context_length"`
+			MaxTokens     int    `json:"max_tokens"`
+			Description   string `json:"description"`
+			Pricing       struct {
+				Prompt     string `json:"prompt"`
+				Completion string `json:"completion"`
+			} `json:"pricing"`
+			Reasoning struct {
+				SupportedEfforts []string `json:"supported_efforts"`
+				DefaultEffort    string   `json:"default_effort"`
+			} `json:"reasoning"`
 		} `json:"data"`
 	}
 	if err := doJSON(ctx, r.Client, http.MethodGet, url, headers, nil, &out); err != nil {
@@ -321,9 +338,14 @@ func (r *ResponsesAdapter) ListModels(ctx context.Context, apiKey string) ([]dom
 	}
 	models := make([]domain.Model, 0, len(out.Data))
 	for _, m := range out.Data {
-		if m.ID != "" {
-			models = append(models, domain.Model{ID: m.ID})
+		if m.ID == "" {
+			continue
 		}
+		model := domain.Model{ID: m.ID, Context: m.ContextLength, MaxOutput: m.MaxTokens, Description: m.Description, SupportedEfforts: normalizeEfforts(m.Reasoning.SupportedEfforts), DefaultEffort: normalizeEffort(m.Reasoning.DefaultEffort)}
+		if v, err := parseFloat(m.Pricing.Prompt); err == nil {
+			model.InputCost = v * 1_000_000
+		}
+		models = append(models, model)
 	}
 	return models, nil
 }

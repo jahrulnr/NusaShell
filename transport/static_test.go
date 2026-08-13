@@ -37,11 +37,12 @@ func TestFrontendServed(t *testing.T) {
 func TestFrontendAssets(t *testing.T) {
 	h := newHarness(t, nil)
 
-	checks := map[string]string{
-		"/js/app.js":                  "text/javascript",
-		"/styles/global.css":          "text/css",
-		"/styles/electron-parity.css": "text/css",
-		"/nusashell-mark.png":         "image/png",
+	checks := map[string][]string{
+		"/js/app.js":                  {"text/javascript", "application/javascript"},
+		"/styles/global.css":          {"text/css"},
+		"/styles/electron-parity.css": {"text/css"},
+		"/nusashell-mark.png":         {"image/png"},
+		"/agent-offline-mascot.png":   {"image/png"},
 	}
 	for path, wantCT := range checks {
 		resp, err := http.Get(h.server.URL + path)
@@ -52,8 +53,13 @@ func TestFrontendAssets(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("GET %s = %d", path, resp.StatusCode)
 		}
-		if !strings.HasPrefix(resp.Header.Get("Content-Type"), wantCT) {
-			t.Fatalf("GET %s content type = %q, want %q", path, resp.Header.Get("Content-Type"), wantCT)
+		contentType := resp.Header.Get("Content-Type")
+		matchesContentType := false
+		for _, acceptedType := range wantCT {
+			matchesContentType = matchesContentType || strings.HasPrefix(contentType, acceptedType)
+		}
+		if !matchesContentType {
+			t.Fatalf("GET %s content type = %q, want one of %q", path, contentType, wantCT)
 		}
 	}
 
@@ -61,7 +67,10 @@ func TestFrontendAssets(t *testing.T) {
 	app, _ := http.Get(h.server.URL + "/js/app.js")
 	appBody, _ := io.ReadAll(app.Body)
 	app.Body.Close()
-	for _, mod := range []string{"./rpc.js", "./views/agent.js", "./views/skills.js", "./views/mcp.js", "./views/providers.js", "./views/logs.js", "./views/settings.js", "./ui.js", "./markdown.js"} {
+	for _, mod := range []string{
+		"./rpc.js", "./views/agent.js", "./views/agent/render.js", "./views/agent/composer.js", "./views/agent/model-picker.js",
+		"./views/skills.js", "./views/mcp.js", "./views/providers.js", "./views/logs.js", "./views/settings.js", "./ui.js", "./markdown.js",
+	} {
 		ref := strings.TrimPrefix(mod, "./")
 		resp, err := http.Get(h.server.URL + "/js/" + ref)
 		if err != nil || resp.StatusCode != http.StatusOK {

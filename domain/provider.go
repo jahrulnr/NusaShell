@@ -14,10 +14,13 @@ const (
 )
 
 type Model struct {
-	ID          string
-	Context     int
-	InputCost   float64 // USD per 1M input tokens, when known
-	Description string
+	ID              string
+	Context         int
+	MaxOutput       int     // max completion tokens, when known
+	InputCost       float64 // USD per 1M input tokens, when known
+	Description     string
+	SupportedEfforts []string // reasoning effort levels the provider advertises (e.g. "low","medium","high","xhigh"); empty when unsupported
+	DefaultEffort   string  // provider-advertised default effort, "" when none
 }
 
 type Provider struct {
