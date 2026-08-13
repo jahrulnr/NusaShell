@@ -34,3 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Timeline alignment and readability.** Reasoning entries line up with tool
   entries, and Markdown content in reasoning is rendered as formatted HTML
   instead of raw source text.
+- **Windows CI formatting check.** Source checkouts now preserve LF line
+  endings, so `gofmt` evaluates the repository content consistently on every
+  supported operating system.

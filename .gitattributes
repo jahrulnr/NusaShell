@@ -1,0 +1,3 @@
+# Keep source checkouts stable across platforms. In particular, Go's formatter
+# emits LF and would otherwise report a Windows CRLF checkout as unformatted.
+* text=auto eol=lf
