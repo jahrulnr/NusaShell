@@ -1,0 +1,11 @@
+{
+  "name": "nusashell-light-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:frontend:e2e": "node --test frontend/e2e.test.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^30.0.1"
+  }
+}

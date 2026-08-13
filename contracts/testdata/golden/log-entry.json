@@ -1,0 +1,7 @@
+{
+  "id": "log_1",
+  "time": "2026-08-12T00:00:00Z",
+  "level": "info",
+  "source": "agent",
+  "message": "turn started"
+}

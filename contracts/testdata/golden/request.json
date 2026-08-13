@@ -1,0 +1,6 @@
+{
+  "method": "agent.conversations.create",
+  "payload": {
+    "title": "hello"
+  }
+}

@@ -1,0 +1,53 @@
+/* Responsive shell behavior mirrors the Electron workbench breakpoints. */
+
+@media (max-width: 900px) {
+  .sidebar {
+    width: 64px;
+    min-width: 64px;
+    padding-inline: 10px;
+  }
+  .sidebar .nav-label,
+  .sidebar .storage { display: none; }
+  .sidebar .nav-item { justify-content: center; padding-inline: 9px; }
+  .sidebar-mode-toggle { justify-content: center; margin-inline: 0; }
+  .sidebar-mode-toggle .nav-label { display: none; }
+  .agent-shell { grid-template-columns: minmax(190px, 230px) minmax(0, 1fr); margin-inline: 16px; }
+  .agent-header { padding-inline: 16px; }
+}
+
+@media (max-width: 680px) {
+  .sidebar { display: none; }
+  .titlebar { padding-inline: 13px; }
+  .content { overflow-y: auto; }
+  .agent-header { padding: 16px 12px 0; }
+  .agent-header p { max-width: 35ch; }
+  .agent-shell { grid-template-columns: 1fr; margin: 0 12px 12px; }
+  .agent-conversations { display: none; }
+  .agent-thread { padding: 16px 12px; }
+  .agent-message { max-width: 92%; }
+  .view-header { padding: 16px 12px 12px; }
+  .view-body { padding-inline: 12px; }
+  .mcp-row { align-items: flex-start; flex-wrap: wrap; }
+  .mcp-row-info { min-width: calc(100% - 54px); }
+  .mcp-row-state { margin-left: 54px; }
+  .mcp-row-actions { margin-left: auto; }
+  .settings-body { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 480px) {
+  .brand { font-size: 13px; }
+  .connection-state { margin-left: 2px; }
+  .agent-header-actions { display: none; }
+  .agent-composer { padding-inline: 9px; }
+  .agent-composer-footer { flex-wrap: wrap; }
+  .agent-model-trigger { min-width: 0; max-width: calc(100vw - 92px); }
+  .agent-provider-status { order: 3; width: 100%; margin-left: 0; }
+  .provider-detail-grid { grid-template-columns: 1fr; gap: 12px; }
+  .provider-detail-actions { flex-wrap: wrap; }
+  .log-line { grid-template-columns: 76px 45px minmax(0, 1fr); }
+  .log-source { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}

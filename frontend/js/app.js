@@ -1,0 +1,128 @@
+// NusaShell Light — application shell. Router + transport wiring.
+
+import { rpc, on, connectWS } from './rpc.js';
+import { initAgent } from './views/agent.js';
+import { initSkills } from './views/skills.js';
+import { initMcp } from './views/mcp.js';
+import { initProviders } from './views/providers.js';
+import { initLogs } from './views/logs.js';
+import { initSettings } from './views/settings.js';
+import { toast } from './ui.js';
+
+function setConnection(status) {
+  const orb = document.getElementById('conn-fill');
+  const label = document.getElementById('conn-status');
+  const settingsOrb = document.getElementById('settings-conn-fill');
+  const settingsLabel = document.getElementById('settings-conn-label');
+  orb.className = 'connection-orb';
+  if (status === 'open') {
+    orb.classList.add('online');
+    label.textContent = 'Connected';
+  } else if (status === 'connecting') {
+    orb.classList.add('connecting');
+    label.textContent = 'Connecting…';
+  } else if (status === 'reconnecting') {
+    orb.classList.add('connecting');
+    label.textContent = 'Reconnecting…';
+  } else {
+    orb.classList.add('offline');
+    label.textContent = 'Offline';
+  }
+  if (settingsOrb && settingsLabel) {
+    settingsOrb.className = 'connection-orb';
+    if (status === 'open') {
+      settingsOrb.classList.add('online');
+      settingsLabel.textContent = 'Connected';
+    } else if (status === 'connecting' || status === 'reconnecting') {
+      settingsOrb.classList.add('connecting');
+      settingsLabel.textContent = status === 'reconnecting' ? 'Reconnecting…' : 'Connecting…';
+    } else {
+      settingsOrb.classList.add('offline');
+      settingsLabel.textContent = 'Disconnected';
+    }
+  }
+}
+
+function route() {
+  const requested = location.hash.slice(1) || 'agent';
+  const known = [...document.querySelectorAll('.view')].some((view) => view.dataset.view === requested);
+  const target = known ? requested : 'agent';
+  if (target !== requested) history.replaceState(null, '', '#agent');
+  const items = document.querySelectorAll('[data-nav]');
+  items.forEach((item) => {
+    const active = item.dataset.view === target;
+    item.classList.toggle('active', active);
+    if (active) item.setAttribute('aria-current', 'page');
+    else item.removeAttribute('aria-current');
+  });
+  document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.dataset.view === target));
+  if (target === 'logs') document.getElementById('log-tail').scrollTop = document.getElementById('log-tail').scrollHeight;
+}
+
+async function boot() {
+  document.querySelectorAll('[data-nav]').forEach((item) => {
+    item.addEventListener('click', () => { location.hash = item.dataset.view; });
+  });
+  document.getElementById('nav-settings-btn').addEventListener('click', () => { location.hash = '#settings'; });
+  const sidebar = document.getElementById('sidebar');
+  const compact = localStorage.getItem('nusashell.sidebarMode') === 'icons';
+  const sidebarToggle = document.getElementById('sidebar-mode-toggle');
+  const setSidebarCompact = (value, persist = true) => {
+    sidebar.classList.toggle('is-compact', value);
+    sidebarToggle.setAttribute('aria-pressed', String(value));
+    sidebarToggle.setAttribute('aria-label', value ? 'Expand sidebar' : 'Collapse sidebar');
+    sidebarToggle.title = value ? 'Show icons and text' : 'Use icon-only sidebar';
+    sidebarToggle.querySelector('.nav-label').textContent = value ? 'Show labels' : 'Collapse sidebar';
+    if (persist) localStorage.setItem('nusashell.sidebarMode', value ? 'icons' : 'full');
+  };
+  sidebarToggle.addEventListener('click', () => setSidebarCompact(!sidebar.classList.contains('is-compact')));
+  setSidebarCompact(compact, false);
+  window.addEventListener('hashchange', route);
+
+  setConnection('connecting');
+  // one transport per function: WS carries BE -> FE event triggers; the FE
+  // talks to the BE over HTTP /rpc
+  connectWS({
+    onStatus: setConnection,
+  });
+
+  // surface backend events as toasts where useful
+  on('logs.append', (payload) => {
+    const entry = payload?.entry ?? payload;
+    if (entry?.level === 'error') toast(entry.message, 'error', 5000);
+  });
+
+  try {
+    const info = await rpc('app.info');
+    document.getElementById('storage-path').textContent = info.data_dir || '';
+    document.title = `NusaShell Light ${info.version ?? ''}`.trim();
+  } catch (err) {
+    toast(`Backend unreachable: ${err.message}`, 'error', 8000);
+  }
+
+  const results = await Promise.allSettled([
+    initAgent(),
+    initSkills(),
+    initMcp(),
+    initProviders(),
+    initLogs(),
+    initSettings(),
+  ]);
+  // never swallow init failures silently: a dead view is a bug, not a state
+  for (const r of results) {
+    if (r.status === 'rejected') {
+      console.error('view init failed:', r.reason);
+      toast(`View init failed: ${r.reason?.message ?? r.reason}`, 'error', 6000);
+    }
+  }
+
+  // cross-view: skill run opens a conversation in the Agent view
+  document.addEventListener('nusashell:open-conversation', async (e) => {
+    const mod = await import('./views/agent.js');
+    mod.openConversationExternal?.(e.detail);
+  });
+
+  route();
+}
+
+boot();

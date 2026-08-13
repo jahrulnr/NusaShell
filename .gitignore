@@ -1,0 +1,22 @@
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+# Test binaries
+/bin/
+# Editor/OS
+.DS_Store
+.idea/
+.vscode/
+.experimental/
+*.swp
+# Local env
+.env
+.env.local
+
+# Frontend E2E dependencies
+node_modules/

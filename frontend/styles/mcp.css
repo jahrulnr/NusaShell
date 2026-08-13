@@ -1,0 +1,52 @@
+/* ============ MCP workspace ============ */
+.mcp-list { display: flex; flex-direction: column; gap: 8px; }
+.mcp-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  transition: border-color .15s;
+}
+.mcp-row:hover { border-color: var(--border); }
+.mcp-row-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: 600 15px var(--font-mono);
+}
+.mcp-row-info { flex: 1; min-width: 0; }
+.mcp-row-name { font-size: 14px; font-weight: 600; }
+.mcp-row-meta { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; font-family: var(--font-mono); }
+.mcp-row-tools { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+.mcp-tool-chip { border-radius: 4px; padding: 2px 6px; background: #142238; color: #63a5ff; font: 8.5px var(--font-mono); }
+.mcp-row-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.mcp-row-state.connected { color: var(--green); background: rgba(47,191,113,0.1); }
+.mcp-row-state.error { color: var(--red); background: rgba(239,75,95,0.1); }
+.mcp-row-state.idle { color: var(--text-faint); background: var(--panel-alt); }
+.mcp-row-actions { display: flex; gap: 6px; align-items: center; }
+.mcp-test-result { margin-top: 8px; border-left: 2px solid var(--green); padding: 8px 10px; background: rgba(47,191,113,.06); color: var(--text-dim); font-size: 11.5px; }
+.mcp-test-result.error { border-left-color: var(--red); background: rgba(245,91,104,.08); color: #ff9ca5; }
+.mcp-detail { border-top: 1px solid var(--border-soft); margin-top: 10px; padding-top: 10px; display: none; }
+.mcp-row.is-open .mcp-detail { display: block; }
+.mcp-tools-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.mcp-tools-table th, .mcp-tools-table td { padding: 6px 8px; border: 1px solid var(--border-soft); text-align: left; vertical-align: top; }
+.mcp-tools-table th { background: var(--panel-alt); font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+.mcp-tools-table code { font-family: var(--font-mono); color: var(--accent); }

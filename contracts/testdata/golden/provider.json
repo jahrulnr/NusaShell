@@ -1,0 +1,17 @@
+{
+  "id": "prov_1",
+  "kind": "chat",
+  "name": "Local",
+  "base_url": "http://127.0.0.1:11434/v1",
+  "enabled": true,
+  "configured": true,
+  "has_api_key": false,
+  "models": [
+    {
+      "id": "llama3.1",
+      "provider_id": "prov_1",
+      "provider_name": "Local",
+      "context": 128000
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "ok": false,
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "conversation id is required"
+  }
+}

@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NusaShell</title>
+<link rel="icon" href="./nusashell-mark.png" type="image/png">
+<link rel="stylesheet" href="fonts/fonts.css">
+<link rel="stylesheet" href="styles/global.css">
+<link rel="stylesheet" href="styles/layout.css">
+<link rel="stylesheet" href="styles/agent.css">
+<link rel="stylesheet" href="styles/skills.css">
+<link rel="stylesheet" href="styles/mcp.css">
+<link rel="stylesheet" href="styles/providers.css">
+<link rel="stylesheet" href="styles/logs.css">
+<link rel="stylesheet" href="styles/modals.css">
+<link rel="stylesheet" href="styles/responsive.css">
+<link rel="stylesheet" href="styles/electron-parity.css">
+</head>
+<body>
+
+<div class="window">
+
+  <!-- ===== Title bar ===== -->
+  <div class="titlebar">
+    <div class="brand">
+      <span class="brand-logo">
+        <img src="./nusashell-mark.png" alt="" width="24" height="24">
+      </span>
+      NusaShell
+      <span class="connection-state" title="Backend connection status">
+        <span class="connection-orb" id="conn-fill"></span>
+        <span id="conn-status">Connecting…</span>
+      </span>
+    </div>
+    <div class="titlebar-actions">
+      <button class="icon-btn" id="nav-settings-btn" type="button" aria-label="Settings" title="Settings">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><path d="M19.4 13a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55v.09a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 17.76a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.64 13a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.64 7a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 3.13 1.7 1.7 0 0 0 10 1.6v-.09a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 3.13a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.36 7a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z" stroke="currentColor" stroke-width="1.2"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ===== Body: sidebar + content ===== -->
+  <div class="body">
+
+    <aside class="sidebar" id="sidebar">
+      <nav class="nav-main" aria-label="Main">
+        <button class="nav-item active" type="button" data-view="agent" data-nav title="Agent" aria-current="page">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M6 4.5h12A2.5 2.5 0 0 1 20.5 7v7A2.5 2.5 0 0 1 18 16.5H10l-4.5 3v-12A2.5 2.5 0 0 1 8 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 10.5h.01M12 10.5h.01M15 10.5h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <span class="nav-label">Agent</span>
+        </button>
+        <button class="nav-item" type="button" data-view="skills" data-nav title="Skills">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5v-16Z" stroke="currentColor" stroke-width="1.6"/><path d="M4 21.5A2.5 2.5 0 0 1 6.5 19H20M9 7h6M9 11h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <span class="nav-label">Skills</span>
+        </button>
+        <button class="nav-item" type="button" data-view="mcp" data-nav title="MCP">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/></svg>
+          <span class="nav-label">MCP</span>
+        </button>
+        <button class="nav-item" type="button" data-view="providers" data-nav title="Providers">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><rect x="2.5" y="8" width="14" height="8" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M6.5 12h.01M10 12h.01M13.5 12h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M19.5 12H21M19.5 10.5V12M17.5 12h.01" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <span class="nav-label">Providers</span>
+        </button>
+        <button class="nav-item" type="button" data-view="logs" data-nav title="Logs">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="M4 4h16v16H4V4Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M4 9.5h16M8.5 4v5.5M4 14.5h16M12 9.5v5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          <span class="nav-label">Logs</span>
+        </button>
+      </nav>
+
+      <div class="storage">
+        <div class="storage-row">
+          <span>Data</span>
+          <span class="storage-text" id="storage-path">…</span>
+        </div>
+        <div class="storage-bar"><div class="storage-fill" id="storage-fill"></div></div>
+      </div>
+      <button class="sidebar-mode-toggle" id="sidebar-mode-toggle" type="button" aria-label="Collapse sidebar" aria-pressed="false" title="Use icon-only sidebar">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true"><path d="M4 5h16M4 12h16M4 19h16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span class="nav-label">Collapse sidebar</span>
+      </button>
+    </aside>
+
+    <main class="content" id="content">
+
+      <!-- ===== Agent ===== -->
+      <section class="view agent-view active" data-view="agent">
+        <div class="agent-shell" id="agent-shell">
+          <aside class="agent-conversations" id="agent-conversations" aria-labelledby="conversations-title">
+            <div class="agent-conversations-head">
+              <div>
+                <span class="agent-panel-label" id="conversations-title">Conversations</span>
+                <span class="agent-conversation-count" id="conversation-count">0 threads</span>
+              </div>
+              <button class="agent-new-conversation" id="new-conversation-btn" type="button" title="New conversation" aria-label="New conversation">+</button>
+            </div>
+            <div class="agent-conversation-search">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              <input type="search" id="conversation-search" placeholder="Search titles…" autocomplete="off">
+            </div>
+            <div class="agent-conversation-list" id="conversation-list" role="list"></div>
+          </aside>
+
+          <div class="agent-conversation" id="agent-conversation">
+            <div class="agent-thread" id="agent-thread" role="log" aria-live="off" aria-label="Agent conversation">
+              <div class="agent-empty">
+                <div class="agent-empty-mark">✦</div>
+                <h2>Start a conversation</h2>
+                <p>Ask anything. The agent can use skills, memory, docs and your MCP servers as tools.</p>
+              </div>
+            </div>
+
+            <div class="agent-composer-stack" id="agent-composer-stack">
+              <div class="agent-tool-job-strip" id="tool-job-strip" hidden>
+                <div class="agent-tool-job-strip-head">
+                  <span class="agent-tool-job-strip-title">Tool calls</span>
+                </div>
+                <div class="agent-tool-job-list" id="tool-job-list"></div>
+              </div>
+
+              <form class="agent-composer" id="agent-form">
+                <label class="sr-only" for="composer-input">Message to the agent</label>
+                <textarea id="composer-input" rows="1" placeholder="Describe what you want the shell to do…" title="Ctrl+Enter or ⌘↩ to send" autocomplete="off"></textarea>
+                <div class="agent-attachments" id="agent-attachments" aria-live="polite"></div>
+                <input class="sr-only" id="agent-file-input" type="file" multiple>
+                <div class="agent-composer-footer">
+                  <div class="agent-composer-context">
+                    <button class="agent-attach-btn" id="agent-attach-btn" type="button" aria-label="Attach images, PDFs, or text files" title="Attach images, PDFs, or text files">
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="m21 11-8.5 8.5a5.25 5.25 0 0 1-7.4-7.4l8.5-8.5a3.5 3.5 0 0 1 4.95 4.95l-8.5 8.5a1.75 1.75 0 0 1-2.48-2.48l8-8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                    <button class="agent-model-trigger" id="model-trigger" type="button" title="Choose model" aria-haspopup="dialog" aria-controls="model-menu" aria-expanded="false">
+                      <span id="model-trigger-label">Model · auto</span>
+                      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                    <button class="agent-workspace-btn" id="agent-workspace-btn" type="button" aria-label="Choose workspace folder" title="Home (user home directory)">
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                      <span id="agent-workspace-label">Home</span>
+                    </button>
+                  </div>
+                  <div class="agent-composer-actions">
+                    <span class="agent-provider-status" id="agent-provider-status">Choose a model</span>
+                    <button class="agent-stop-btn" id="stop-btn" type="button" title="Stop" aria-label="Stop" hidden>
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>
+                    </button>
+                    <button class="agent-send-btn" id="send-btn" type="submit" title="Send · Ctrl+Enter (⌘↩ on Mac)" aria-label="Send" aria-keyshortcuts="Control+Enter Meta+Enter">
+                      <svg viewBox="0 0 24 24" width="15" height="15" fill="none"><path d="M5 12h13M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <div class="agent-model-menu" id="model-menu" role="dialog" aria-label="Choose model" hidden></div>
+      </section>
+
+      <!-- ===== Skills ===== -->
+      <section class="view skills-view" data-view="skills">
+        <div class="view-header skills-header">
+          <div>
+            <div class="view-kicker"><span class="view-kicker-dot"></span>Skills</div>
+            <h1>Skill library</h1>
+            <p>Reusable instruction packs the agent can load via <code>skill_run</code>.</p>
+          </div>
+          <button class="action-btn" id="new-skill-btn" type="button">+ New skill</button>
+        </div>
+        <div class="view-body" style="display:flex;flex-direction:column;min-height:0;padding-bottom:22px;">
+          <div class="skills-workspace">
+            <div class="skills-catalog">
+              <div class="skills-pane-head">
+                <div>
+                  <h2>Catalog</h2>
+                  <span id="skills-count">0 skills</span>
+                </div>
+              </div>
+              <div class="skills-search">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                <input type="text" id="skills-search" placeholder="Search skills…" autocomplete="off">
+              </div>
+              <div class="skills-list" id="skills-list"></div>
+            </div>
+            <div class="skills-editor-pane">
+              <div class="skills-pane-head skills-editor-head">
+                <div>
+                  <h2 id="skill-editor-title">No skill selected</h2>
+                  <span id="skill-editor-meta"></span>
+                </div>
+                <div class="skills-editor-actions">
+                  <button class="mini-btn ghost" id="skill-run-btn" type="button" title="Open this skill in a new Agent conversation" hidden>Run</button>
+                  <button class="mini-btn" id="skill-save-btn" type="button" hidden>Save</button>
+                  <button class="mini-btn danger" id="skill-delete-btn" type="button" hidden>Delete</button>
+                </div>
+              </div>
+              <div class="skills-editor-form" id="skill-editor-form" hidden>
+                <div class="skill-fields">
+                  <div class="settings-field">
+                    <label for="skill-name">Name</label>
+                    <input id="skill-name" type="text" placeholder="e.g. code-review" autocomplete="off">
+                  </div>
+                  <div class="settings-field">
+                    <label for="skill-description">Description</label>
+                    <input id="skill-description" type="text" placeholder="What this skill does" autocomplete="off">
+                  </div>
+                </div>
+                <textarea class="skill-editor" id="skill-content" placeholder="# Skill instructions&#10;&#10;Write the markdown instructions the agent should follow when this skill is loaded." spellcheck="false"></textarea>
+              </div>
+              <div class="skills-editor-empty" id="skill-editor-empty">
+                <strong>Select a skill</strong>
+                <span>Pick a skill from the catalog or create a new one.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== MCP ===== -->
+      <section class="view mcp-view" data-view="mcp">
+        <div class="view-header">
+          <div>
+            <div class="view-kicker"><span class="view-kicker-dot"></span>MCP</div>
+            <h1>MCP servers</h1>
+            <p>Model Context Protocol servers exposed to the agent as <code>mcp_call</code> tools.</p>
+          </div>
+          <button class="action-btn" id="add-mcp-btn" type="button">+ Add MCP</button>
+        </div>
+        <div class="view-body">
+          <div class="mcp-list" id="mcp-list"></div>
+        </div>
+      </section>
+
+      <!-- ===== Providers ===== -->
+      <section class="view providers-view" data-view="providers">
+        <div class="view-header">
+          <div>
+            <div class="view-kicker"><span class="view-kicker-dot"></span>Providers</div>
+            <h1>AI providers</h1>
+            <p>Anthropic and OpenAI-compatible endpoints. API keys are kept in the local credential store.</p>
+          </div>
+          <button class="action-btn" id="add-provider-btn" type="button">+ Add provider</button>
+        </div>
+        <div class="view-body">
+          <div id="provider-registry" class="provider-registry"></div>
+          <div id="provider-detail" hidden></div>
+        </div>
+      </section>
+
+      <!-- ===== Logs ===== -->
+      <section class="view logs-view" data-view="logs">
+        <div class="view-header">
+          <div>
+            <div class="view-kicker"><span class="view-kicker-dot"></span>Logs</div>
+            <h1>Activity log</h1>
+            <p>Runtime events streamed live from the shell.</p>
+          </div>
+          <div class="log-header">
+            <label class="log-auto-scroll"><input type="checkbox" id="log-follow" checked> Follow</label>
+            <button class="mini-btn ghost" id="logs-clear-btn" type="button">Clear</button>
+          </div>
+        </div>
+        <div class="view-body" style="display:flex;flex-direction:column;min-height:0;">
+          <div class="log-filters">
+            <select class="select" id="log-level-filter">
+              <option value="">All levels</option>
+              <option value="debug">debug</option>
+              <option value="info">info</option>
+              <option value="warn">warn</option>
+              <option value="error">error</option>
+            </select>
+            <span class="log-count" id="log-count">0 entries</span>
+          </div>
+          <div class="log-tail" id="log-tail"></div>
+        </div>
+      </section>
+
+      <!-- ===== Settings ===== -->
+      <section class="view settings-view" data-view="settings">
+        <div class="view-header">
+          <div>
+            <div class="view-kicker"><span class="view-kicker-dot"></span>Settings</div>
+            <h1>Runtime settings</h1>
+            <p>Conversation behavior is stored locally with NusaShell Light.</p>
+          </div>
+        </div>
+        <div class="view-body settings-body">
+          <div class="settings-card">
+            <div class="settings-card-title">Agent runtime</div>
+            <p class="settings-card-copy">Tune context compaction and provider prompt caching.</p>
+            <label class="settings-toggle" for="settings-compaction-enabled">
+              <span><strong>Compact long conversations</strong><small>Summarize older messages before the context window fills.</small></span>
+              <input id="settings-compaction-enabled" type="checkbox">
+              <span class="toggle-slider" aria-hidden="true"></span>
+            </label>
+            <label class="settings-field" for="settings-compaction-threshold">Compaction threshold (tokens)
+              <input id="settings-compaction-threshold" type="number" min="1000" step="1000" inputmode="numeric">
+            </label>
+            <label class="settings-toggle" for="settings-prompt-caching">
+              <span><strong>Prompt caching</strong><small>Use provider-side ephemeral prompt caching when supported.</small></span>
+              <input id="settings-prompt-caching" type="checkbox">
+              <span class="toggle-slider" aria-hidden="true"></span>
+            </label>
+            <div class="settings-actions">
+              <span class="settings-save-status" id="settings-save-status" role="status" aria-live="polite"></span>
+              <button class="action-btn" id="settings-save-btn" type="button">Save settings</button>
+            </div>
+          </div>
+          <div class="settings-card settings-about-card">
+            <div class="settings-card-title">Connection</div>
+            <p class="settings-card-copy">The Go shell uses HTTP RPC for commands and WebSocket for live events.</p>
+            <div class="settings-connection"><span class="connection-orb" id="settings-conn-fill"></span><span id="settings-conn-label">Connected</span></div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

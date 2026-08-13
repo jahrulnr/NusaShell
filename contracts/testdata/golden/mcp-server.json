@@ -1,0 +1,17 @@
+{
+  "id": "mcp_1",
+  "name": "files",
+  "command": "npx",
+  "args": [
+    "-y",
+    "@modelcontextprotocol/server-filesystem"
+  ],
+  "enabled": true,
+  "status": "connected",
+  "tools": [
+    {
+      "name": "read_file",
+      "description": "Read a file"
+    }
+  ]
+}

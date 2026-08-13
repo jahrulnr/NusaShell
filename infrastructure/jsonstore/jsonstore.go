@@ -1,0 +1,515 @@
+// Package jsonstore implements the application persistence ports on JSON /
+// JSONL files. Credentials never live here; they go to the SQLite store.
+package jsonstore
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+
+	"nusashell/domain"
+)
+
+// clone deep-copies an entity so stored objects are private snapshots:
+// application code mutates its own copy and Save() publishes a fresh one,
+// while concurrent readers never observe in-flight writes (race-safe).
+func clone[T any](v *T) *T {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return v
+	}
+	var out T
+	if err := json.Unmarshal(b, &out); err != nil {
+		return v
+	}
+	return &out
+}
+
+// Store is a file-backed store rooted at dir. It satisfies the
+// application persistence ports.
+type Store struct {
+	dir string
+
+	mu            sync.RWMutex
+	conversations map[string]*domain.Conversation
+	providers     []*domain.Provider
+	skills        []*domain.Skill
+	mcpServers    []*domain.MCPServer
+	memories      []*domain.MemoryEntry
+	settings      domain.Settings
+
+	logMu sync.Mutex
+}
+
+var ErrNotFound = errors.New("not found")
+
+func New(dir string) (*Store, error) {
+	s := &Store{
+		dir:           dir,
+		conversations: map[string]*domain.Conversation{},
+		settings:      domain.DefaultSettings(),
+	}
+	for _, sub := range []string{"conversations"} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.load(); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+func (s *Store) load() error {
+	// conversations: one JSON file per conversation
+	convDir := filepath.Join(s.dir, "conversations")
+	entries, err := os.ReadDir(convDir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(convDir, e.Name()))
+		if err != nil {
+			return err
+		}
+		var c domain.Conversation
+		if err := json.Unmarshal(b, &c); err != nil {
+			return fmt.Errorf("conversation %s: %w", e.Name(), err)
+		}
+		s.conversations[c.ID] = &c
+	}
+
+	if err := s.loadJSON("providers.json", &s.providers); err != nil {
+		return err
+	}
+	s.migrateProviderKinds()
+	if err := s.loadJSON("skills.json", &s.skills); err != nil {
+		return err
+	}
+	if err := s.loadJSON("mcp-servers.json", &s.mcpServers); err != nil {
+		return err
+	}
+	if err := s.loadJSON("settings.json", &s.settings); err != nil {
+		return err
+	}
+	// memories: JSONL
+	if b, err := os.ReadFile(filepath.Join(s.dir, "memories.jsonl")); err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			if line == "" {
+				continue
+			}
+			var e domain.MemoryEntry
+			if err := json.Unmarshal([]byte(line), &e); err == nil {
+				s.memories = append(s.memories, &e)
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) loadJSON(name string, dst any) error {
+	b, err := os.ReadFile(filepath.Join(s.dir, name))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(b, dst)
+}
+
+func (s *Store) writeJSON(name string, v any) error {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	return atomicWrite(filepath.Join(s.dir, name), b)
+}
+
+// atomicWrite writes via a temp file + rename so readers never see torn files.
+func atomicWrite(path string, b []byte) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// ---- conversations ----
+
+func (s *Store) List() []*domain.Conversation {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*domain.Conversation, 0, len(s.conversations))
+	for _, c := range s.conversations {
+		out = append(out, clone(c))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
+	return out
+}
+
+func (s *Store) Get(id string) (*domain.Conversation, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	c, ok := s.conversations[id]
+	if !ok {
+		return nil, fmt.Errorf("%w: conversation %s", ErrNotFound, id)
+	}
+	return clone(c), nil
+}
+
+func (s *Store) Save(c *domain.Conversation) error {
+	stored := clone(c)
+	b, err := json.Marshal(stored)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(s.dir, "conversations", c.ID+".json")
+	if err := atomicWrite(path, b); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.conversations[c.ID] = stored
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Store) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.conversations[id]; !ok {
+		return fmt.Errorf("%w: conversation %s", ErrNotFound, id)
+	}
+	delete(s.conversations, id)
+	return os.Remove(filepath.Join(s.dir, "conversations", id+".json"))
+}
+
+// migrateProviderKinds maps the pre-universal kind values (anthropic,
+// openai, compatible) onto the current API-shape kinds and persists when
+// anything changed.
+func (s *Store) migrateProviderKinds() {
+	changed := false
+	for _, p := range s.providers {
+		switch p.Kind {
+		case "anthropic":
+			p.Kind = domain.ProviderMessages
+			changed = true
+		case "openai", "compatible":
+			p.Kind = domain.ProviderChat
+			changed = true
+		}
+	}
+	if changed {
+		_ = s.writeJSON("providers.json", s.providers)
+	}
+}
+
+// ---- providers ----
+
+func (s *Store) ListProviders() []*domain.Provider {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*domain.Provider, len(s.providers))
+	for i, p := range s.providers {
+		out[i] = clone(p)
+	}
+	return out
+}
+
+func (s *Store) GetProvider(id string) (*domain.Provider, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, p := range s.providers {
+		if p.ID == id {
+			return clone(p), nil
+		}
+	}
+	return nil, fmt.Errorf("%w: provider %s", ErrNotFound, id)
+}
+
+func (s *Store) SaveProvider(p *domain.Provider) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stored := clone(p)
+	for i, existing := range s.providers {
+		if existing.ID == p.ID {
+			s.providers[i] = stored
+			return s.writeJSON("providers.json", s.providers)
+		}
+	}
+	s.providers = append(s.providers, stored)
+	return s.writeJSON("providers.json", s.providers)
+}
+
+func (s *Store) DeleteProvider(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, p := range s.providers {
+		if p.ID == id {
+			s.providers = append(s.providers[:i], s.providers[i+1:]...)
+			return s.writeJSON("providers.json", s.providers)
+		}
+	}
+	return fmt.Errorf("%w: provider %s", ErrNotFound, id)
+}
+
+// ---- skills ----
+
+func (s *Store) ListSkills() []*domain.Skill {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*domain.Skill, len(s.skills))
+	for i, sk := range s.skills {
+		out[i] = clone(sk)
+	}
+	return out
+}
+
+func (s *Store) GetSkill(id string) (*domain.Skill, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, sk := range s.skills {
+		if sk.ID == id {
+			return clone(sk), nil
+		}
+	}
+	return nil, fmt.Errorf("%w: skill %s", ErrNotFound, id)
+}
+
+func (s *Store) SaveSkill(sk *domain.Skill) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stored := clone(sk)
+	for i, existing := range s.skills {
+		if existing.ID == sk.ID {
+			s.skills[i] = stored
+			return s.writeJSON("skills.json", s.skills)
+		}
+	}
+	s.skills = append(s.skills, stored)
+	return s.writeJSON("skills.json", s.skills)
+}
+
+func (s *Store) DeleteSkill(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, sk := range s.skills {
+		if sk.ID == id {
+			s.skills = append(s.skills[:i], s.skills[i+1:]...)
+			return s.writeJSON("skills.json", s.skills)
+		}
+	}
+	return fmt.Errorf("%w: skill %s", ErrNotFound, id)
+}
+
+// ---- mcp servers ----
+
+func (s *Store) ListMCP() []*domain.MCPServer {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*domain.MCPServer, len(s.mcpServers))
+	for i, m := range s.mcpServers {
+		out[i] = clone(m)
+	}
+	return out
+}
+
+func (s *Store) GetMCP(id string) (*domain.MCPServer, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, m := range s.mcpServers {
+		if m.ID == id {
+			return clone(m), nil
+		}
+	}
+	return nil, fmt.Errorf("%w: mcp server %s", ErrNotFound, id)
+}
+
+func (s *Store) SaveMCP(m *domain.MCPServer) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stored := clone(m)
+	for i, existing := range s.mcpServers {
+		if existing.ID == m.ID {
+			s.mcpServers[i] = stored
+			return s.writeJSON("mcp-servers.json", s.mcpServers)
+		}
+	}
+	s.mcpServers = append(s.mcpServers, stored)
+	return s.writeJSON("mcp-servers.json", s.mcpServers)
+}
+
+func (s *Store) DeleteMCP(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, m := range s.mcpServers {
+		if m.ID == id {
+			s.mcpServers = append(s.mcpServers[:i], s.mcpServers[i+1:]...)
+			return s.writeJSON("mcp-servers.json", s.mcpServers)
+		}
+	}
+	return fmt.Errorf("%w: mcp server %s", ErrNotFound, id)
+}
+
+// ---- memory ----
+
+func (s *Store) ListMemories() []*domain.MemoryEntry {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*domain.MemoryEntry, len(s.memories))
+	for i, e := range s.memories {
+		out[i] = clone(e)
+	}
+	return out
+}
+
+func (s *Store) SaveMemory(e *domain.MemoryEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stored := clone(e)
+	s.memories = append(s.memories, stored)
+	return s.appendJSONL("memories.jsonl", stored)
+}
+
+func (s *Store) DeleteMemory(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, e := range s.memories {
+		if e.ID == id {
+			s.memories = append(s.memories[:i], s.memories[i+1:]...)
+			return s.writeJSONL("memories.jsonl", s.memories)
+		}
+	}
+	return fmt.Errorf("%w: memory %s", ErrNotFound, id)
+}
+
+func (s *Store) appendJSONL(name string, v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filepath.Join(s.dir, name), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(append(b, '\n'))
+	return err
+}
+
+func (s *Store) writeJSONL(name string, v any) error {
+	var sb strings.Builder
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	var arr []json.RawMessage
+	if err := json.Unmarshal(b, &arr); err != nil {
+		return err
+	}
+	for _, item := range arr {
+		sb.Write(item)
+		sb.WriteByte('\n')
+	}
+	return atomicWrite(filepath.Join(s.dir, name), []byte(sb.String()))
+}
+
+// ---- logs ----
+
+const maxLogEntries = 2000
+
+func (s *Store) AppendLog(e *domain.LogEntry) {
+	s.logMu.Lock()
+	defer s.logMu.Unlock()
+	line, _ := json.Marshal(e)
+	f, err := os.OpenFile(filepath.Join(s.dir, "logs.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.Write(append(line, '\n'))
+	// keep the file bounded: when it exceeds maxLogEntries * 2 lines, rewrite
+	// with only the tail. Cheap enough for a personal shell.
+	if fi, err := f.Stat(); err == nil && fi.Size() > maxLogEntries*300 {
+		s.rewriteLogTailLocked()
+	}
+}
+
+func (s *Store) rewriteLogTailLocked() {
+	entries := s.readLogsLocked()
+	if len(entries) > maxLogEntries {
+		entries = entries[len(entries)-maxLogEntries:]
+	}
+	var sb strings.Builder
+	for _, e := range entries {
+		b, _ := json.Marshal(e)
+		sb.Write(b)
+		sb.WriteByte('\n')
+	}
+	_ = atomicWrite(filepath.Join(s.dir, "logs.jsonl"), []byte(sb.String()))
+}
+
+func (s *Store) readLogsLocked() []*domain.LogEntry {
+	b, err := os.ReadFile(filepath.Join(s.dir, "logs.jsonl"))
+	if err != nil {
+		return nil
+	}
+	var out []*domain.LogEntry
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var e domain.LogEntry
+		if json.Unmarshal([]byte(line), &e) == nil {
+			out = append(out, &e)
+		}
+	}
+	return out
+}
+
+func (s *Store) ListLogs(level string, limit int) []*domain.LogEntry {
+	s.logMu.Lock()
+	defer s.logMu.Unlock()
+	entries := s.readLogsLocked()
+	var out []*domain.LogEntry
+	for i := len(entries) - 1; i >= 0 && len(out) < limit; i-- {
+		e := entries[i]
+		if level != "" && e.Level != level {
+			continue
+		}
+		out = append(out, e)
+	}
+	// newest first, matching the UI expectation
+	return out
+}
+
+func (s *Store) ClearLogs() {
+	s.logMu.Lock()
+	defer s.logMu.Unlock()
+	_ = os.Remove(filepath.Join(s.dir, "logs.jsonl"))
+}
+
+// ---- settings ----
+
+func (s *Store) GetSettings() domain.Settings {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.settings
+}
+
+func (s *Store) SetSettings(settings domain.Settings) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.settings = settings
+	return s.writeJSON("settings.json", settings)
+}

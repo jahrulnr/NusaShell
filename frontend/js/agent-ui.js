@@ -1,0 +1,76 @@
+// Small pure helpers shared by the Agent composer and its unit tests.
+
+const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
+
+export function formatContextUsage(usedTokens, contextWindow) {
+  const used = Number.isFinite(usedTokens) && usedTokens > 0 ? usedTokens : 0;
+  if (Number.isFinite(contextWindow) && contextWindow > 0) {
+    return `${formatTokenCount(used)}/${formatTokenCount(contextWindow)} context`;
+  }
+  return `${formatTokenCount(used)} ctx`;
+}
+
+export function estimateContextTokens(messages = []) {
+  return Math.ceil(messages.reduce((total, message) => total + estimateMessageChars(message), 0) / 4);
+}
+
+export function inspectAttachmentContent(bytes) {
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  if (startsWith(data, PNG_SIGNATURE)) return { type: 'image', mediaType: 'image/png' };
+  if (startsWith(data, [255, 216, 255])) return { type: 'image', mediaType: 'image/jpeg' };
+  if (startsWith(data, [71, 73, 70, 56])) return { type: 'image', mediaType: 'image/gif' };
+  if (startsWith(data, [37, 80, 68, 70, 45])) return { type: 'file', mediaType: 'application/pdf' };
+  if (startsWith(data, [82, 73, 70, 70]) && startsWith(data.slice(8), [87, 69, 66, 80])) return { type: 'image', mediaType: 'image/webp' };
+  try {
+    const content = new TextDecoder('utf-8', { fatal: true }).decode(data);
+    if (/[\u0000-\u0008\u000E-\u001F]/.test(content)) return null;
+    return { type: 'text', mediaType: 'text/plain', content };
+  } catch {
+    return null;
+  }
+}
+
+export function toDataURL(bytes, mediaType) {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `data:${mediaType};base64,${btoa(binary)}`;
+}
+
+function formatTokenCount(value) {
+  if (!Number.isFinite(value) || value <= 0) return '0';
+  if (value >= 1_000_000) return `${Number((value / 1_000_000).toFixed(1))}M`;
+  if (value >= 1_000) return `${Math.round(value / 1_000)}k`;
+  return String(value);
+}
+
+function estimateMessageChars(message) {
+  if (!message || typeof message !== 'object') return 0;
+  let chars = 0;
+  // Durable assistant messages mirror content, reasoning, and tool calls in
+  // steps. This is the same no-double-counting rule used by Electron.
+  if (Array.isArray(message.steps) && message.steps.length > 0) {
+    chars += estimateTokenChars(message.steps);
+    if (message.attachments) chars += estimateTokenChars(message.attachments);
+    return chars;
+  }
+  if (typeof message.content === 'string') chars += message.content.length;
+  else if (message.content != null) chars += estimateTokenChars(message.content);
+  if (typeof message.reasoning === 'string') chars += message.reasoning.length;
+  if (message.tool_calls) chars += estimateTokenChars(message.tool_calls);
+  if (message.attachments) chars += estimateTokenChars(message.attachments);
+  return chars;
+}
+
+function estimateTokenChars(value) {
+  if (value == null) return 0;
+  if (typeof value === 'string') return value.length;
+  try {
+    return JSON.stringify(value).length;
+  } catch {
+    return String(value).length;
+  }
+}
+
+function startsWith(data, signature) {
+  return data.length >= signature.length && signature.every((byte, index) => data[index] === byte);
+}
