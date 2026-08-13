@@ -21,20 +21,27 @@ type Toolbox struct {
 	MCPServers application.MCPServerStore
 	MCP        interface {
 		Connect(ctx context.Context, s *domain.MCPServer) ([]contracts.MCPToolDTO, error)
+		ToolsFor(serverID string) ([]contracts.MCPToolDTO, bool)
 		CallTool(ctx context.Context, serverID, toolName string, args map[string]any) (string, error)
 	}
 }
 
 func (t *Toolbox) ListTools() []application.ToolInfo {
 	tools := []application.ToolInfo{
-		{Name: "skill_list", Description: "List available skills with their names and descriptions.", InputSchema: obj("object", nil)},
-		{Name: "skill_run", Description: "Load a skill's markdown instructions by skill name so you can follow them.", InputSchema: obj("object", props("name", str("Skill name to load")))},
-		{Name: "memory_save", Description: "Save a fact to long-term memory with optional tags.", InputSchema: obj("object", props("content", str("Fact to remember"), "tags", arr("Optional tags")))},
-		{Name: "memory_search", Description: "Search memory entries by substring match over content and tags.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 10")))},
+		{Name: "skill_list", Description: "List available skills with their names and descriptions.", InputSchema: obj("object", props("limit", intSchema("Max results, default 100")))},
+		{Name: "skill_search", Description: "Search installed skills by name or description (case-insensitive substring match).", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 50")), "query")},
+		{Name: "skill_read", Description: "Read a skill's full markdown content by name so you can follow its instructions.", InputSchema: obj("object", props("name", str("Skill name (from skill_list or skill_search)")), "name")},
+		{Name: "skill_run", Description: "Load a skill's markdown instructions by skill name so you can follow them.", InputSchema: obj("object", props("name", str("Skill name to load")), "name")},
+		{Name: "memory_save", Description: "Save a fact to long-term memory with optional tags.", InputSchema: obj("object", props("content", str("Fact to remember"), "tags", arr("Optional tags")), "content")},
+		{Name: "memory_search", Description: "Search memory entries by substring match over content and tags.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 10")), "query")},
 		{Name: "memory_list", Description: "List all memory entries.", InputSchema: obj("object", nil)},
-		{Name: "memory_delete", Description: "Delete a memory entry by id.", InputSchema: obj("object", props("id", str("Memory entry id")))},
-		{Name: "docs_search", Description: "Search the NusaShell Light documentation corpus.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 10")))},
-		{Name: "docs_read", Description: "Read a documentation page by id (see docs_search results).", InputSchema: obj("object", props("id", str("Documentation page id")))},
+		{Name: "memory_delete", Description: "Delete a memory entry by id.", InputSchema: obj("object", props("id", str("Memory entry id")), "id")},
+		{Name: "docs_search", Description: "Search the NusaShell Light documentation corpus.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 10")), "query")},
+		{Name: "docs_read", Description: "Read a documentation page by id (see docs_search results).", InputSchema: obj("object", props("id", str("Documentation page id")), "id")},
+		{Name: "mcp_list", Description: "List configured MCP servers with their enabled status and runtime state (running/stopped).", InputSchema: obj("object", nil)},
+		{Name: "tool_list", Description: "List tools from a running MCP server by name (names and descriptions, plus optional input schemas). When the server is omitted, lists tools across all running MCP servers.", InputSchema: obj("object", props("server", str("Optional MCP server name; when omitted, lists tools across all running servers")))},
+		{Name: "tool_search", Description: "Search a running MCP server's tools by name or description (case-insensitive token match — any term matches). Returns matching tool names and descriptions.", InputSchema: obj("object", props("server", str("MCP server name"), "query", str("Search query")), "server", "query")},
+		{Name: "tool_schema", Description: "Load one MCP tool's input schema by server and tool name. Useful when you need the exact argument shape before calling an mcp__<server>__<tool> tool.", InputSchema: obj("object", props("server", str("MCP server name"), "tool", str("Tool name within the server")), "server", "tool")},
 	}
 	for _, s := range t.MCPServers.List() {
 		if !s.Enabled {
@@ -67,8 +74,20 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (string, error) {
 	switch {
 	case name == "skill_list":
+		var args struct {
+			Limit int `json:"limit"`
+		}
+		_ = json.Unmarshal(argsJSON, &args)
+		limit := args.Limit
+		if limit <= 0 {
+			limit = 100
+		}
+		skills := t.Skills.List()
+		if limit < len(skills) {
+			skills = skills[:limit]
+		}
 		var sb strings.Builder
-		for _, s := range t.Skills.List() {
+		for _, s := range skills {
 			sb.WriteString("- ")
 			sb.WriteString(s.Name)
 			if s.Description != "" {
@@ -81,6 +100,58 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "No skills in the library.", nil
 		}
 		return strings.TrimSpace(sb.String()), nil
+
+	case name == "skill_search":
+		var args struct {
+			Query string `json:"query"`
+			Limit int    `json:"limit"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if strings.TrimSpace(args.Query) == "" {
+			return "", fmt.Errorf("query is required")
+		}
+		limit := args.Limit
+		if limit <= 0 {
+			limit = 50
+		}
+		q := strings.ToLower(args.Query)
+		var sb strings.Builder
+		found := 0
+		for _, s := range t.Skills.List() {
+			if !strings.Contains(strings.ToLower(s.Name+" "+s.Description), q) {
+				continue
+			}
+			sb.WriteString(fmt.Sprintf("- %s", s.Name))
+			if s.Description != "" {
+				sb.WriteString(": ")
+				sb.WriteString(s.Description)
+			}
+			sb.WriteString("\n")
+			found++
+			if found >= limit {
+				break
+			}
+		}
+		if found == 0 {
+			return "No skills matched.", nil
+		}
+		return strings.TrimSpace(sb.String()), nil
+
+	case name == "skill_read":
+		var args struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		for _, s := range t.Skills.List() {
+			if s.Name == args.Name {
+				return s.Content, nil
+			}
+		}
+		return "", fmt.Errorf("skill %q not found; use skill_list or skill_search to see available skills", args.Name)
 
 	case name == "skill_run":
 		var args struct {
@@ -199,6 +270,159 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", fmt.Errorf("document %q not found; use docs_search first", args.ID)
 		}
 		return doc.Content, nil
+
+	case name == "mcp_list":
+		servers := t.MCPServers.List()
+		type srvInfo struct {
+			ID      string `json:"id"`
+			Name    string `json:"name"`
+			Command string `json:"command"`
+			Enabled bool   `json:"enabled"`
+			Running bool   `json:"running"`
+			Tools   int    `json:"tools"`
+		}
+		out := make([]srvInfo, 0, len(servers))
+		for _, s := range servers {
+			toolCount := 0
+			running := false
+			if tools, ok := t.MCP.ToolsFor(s.ID); ok {
+				running = true
+				toolCount = len(tools)
+			}
+			out = append(out, srvInfo{
+				ID: s.ID, Name: s.Name, Command: s.Command,
+				Enabled: s.Enabled, Running: running, Tools: toolCount,
+			})
+		}
+		b, _ := json.Marshal(map[string]any{"count": len(out), "servers": out})
+		return string(b), nil
+
+	case name == "tool_list":
+		var args struct {
+			Server string `json:"server"`
+		}
+		_ = json.Unmarshal(argsJSON, &args)
+		type toolEntry struct {
+			Name        string         `json:"name"`
+			Server      string         `json:"server"`
+			Description string         `json:"description,omitempty"`
+			InputSchema map[string]any `json:"input_schema,omitempty"`
+		}
+		var entries []toolEntry
+		for _, s := range t.MCPServers.List() {
+			if args.Server != "" && s.Name != args.Server {
+				continue
+			}
+			tools, ok := t.MCP.ToolsFor(s.ID)
+			if !ok {
+				continue
+			}
+			for _, tool := range tools {
+				var schema map[string]any
+				if len(tool.InputSchema) > 0 {
+					_ = json.Unmarshal(tool.InputSchema, &schema)
+				}
+				entries = append(entries, toolEntry{
+					Name:   "mcp__" + s.Name + "__" + tool.Name,
+					Server: s.Name, Description: tool.Description, InputSchema: schema,
+				})
+			}
+		}
+		if entries == nil {
+			entries = []toolEntry{}
+		}
+		b, _ := json.Marshal(map[string]any{"count": len(entries), "tools": entries})
+		return string(b), nil
+
+	case name == "tool_search":
+		var args struct {
+			Server string `json:"server"`
+			Query  string `json:"query"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if strings.TrimSpace(args.Query) == "" {
+			return "", fmt.Errorf("query is required")
+		}
+		type match struct {
+			Name        string `json:"name"`
+			Server      string `json:"server"`
+			Description string `json:"description,omitempty"`
+		}
+		tokens := strings.Fields(strings.ToLower(args.Query))
+		var matches []match
+		for _, s := range t.MCPServers.List() {
+			if args.Server != "" && s.Name != args.Server {
+				continue
+			}
+			tools, ok := t.MCP.ToolsFor(s.ID)
+			if !ok {
+				continue
+			}
+			for _, tool := range tools {
+				hay := strings.ToLower(tool.Name + " " + tool.Description)
+				hit := false
+				for _, tok := range tokens {
+					if strings.Contains(hay, tok) {
+						hit = true
+						break
+					}
+				}
+				if !hit {
+					continue
+				}
+				matches = append(matches, match{
+					Name:   "mcp__" + s.Name + "__" + tool.Name,
+					Server: s.Name, Description: tool.Description,
+				})
+			}
+		}
+		if matches == nil {
+			matches = []match{}
+		}
+		b, _ := json.Marshal(map[string]any{
+			"server": args.Server, "query": args.Query,
+			"count": len(matches), "matches": matches,
+		})
+		return string(b), nil
+
+	case name == "tool_schema":
+		var args struct {
+			Server string `json:"server"`
+			Tool   string `json:"tool"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		for _, s := range t.MCPServers.List() {
+			if s.Name != args.Server {
+				continue
+			}
+			tools, ok := t.MCP.ToolsFor(s.ID)
+			if !ok {
+				return "", fmt.Errorf("server %q is not running; call mcp_list to see running servers", args.Server)
+			}
+			for _, tool := range tools {
+				if tool.Name != args.Tool {
+					continue
+				}
+				var schema map[string]any
+				if len(tool.InputSchema) > 0 {
+					_ = json.Unmarshal(tool.InputSchema, &schema)
+				}
+				if schema == nil {
+					schema = obj("object", nil)
+				}
+				b, _ := json.Marshal(map[string]any{
+					"server": args.Server, "tool": args.Tool,
+					"input_schema": schema,
+				})
+				return string(b), nil
+			}
+			return "", fmt.Errorf("tool %q not found on server %q; use tool_list or tool_search to see available tools", args.Tool, args.Server)
+		}
+		return "", fmt.Errorf("server %q not found; use mcp_list to see configured servers", args.Server)
 	}
 
 	// dynamic MCP tools: mcp__<server>__<tool>

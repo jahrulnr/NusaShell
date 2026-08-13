@@ -17,13 +17,13 @@ var validEfforts = map[string]bool{
 
 // effortAliases maps provider-specific spellings to the canonical set.
 var effortAliases = map[string]string{
-	"off":      "none",
-	"min":      "minimal",
-	"med":      "medium",
-	"x-high":   "xhigh",
-	"extra":    "xhigh",
-	"maximum":  "max",
-	"default":  "auto",
+	"off":     "none",
+	"min":     "minimal",
+	"med":     "medium",
+	"x-high":  "xhigh",
+	"extra":   "xhigh",
+	"maximum": "max",
+	"default": "auto",
 }
 
 // normalizeEffort canonicalizes a single effort level. Unknown values map to

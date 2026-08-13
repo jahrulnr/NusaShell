@@ -82,10 +82,20 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 	if continuation {
 		system += "\n\nThe immediately preceding assistant response was interrupted by a transient upstream failure. Continue it from exactly where it stopped. Do not repeat prior text."
 	}
+	messages := chatMessages(conversation, messageID)
+	// Inject the synthetic runtime-hydration transcript (runtime_context,
+	// memory, skill_list, mcp_list, tool_list) as an ephemeral assistant
+	// toolCalls + tool results exchange, placed AFTER the durable history and
+	// BEFORE the model's own output. This gives the model fresh runtime facts
+	// (date, workspace, memory, skills, MCP catalog, tool catalog) without
+	// baking volatile values into the stable system prompt prefix (which would
+	// break prompt-cache hits). The transcript is never persisted in the
+	// conversation store.
+	messages = append(messages, a.buildHydration(conversation)...)
 	response, err := adapter.Stream(run.Ctx, ChatRequest{
 		Model:         model,
 		System:        system,
-		Messages:      chatMessages(conversation, messageID),
+		Messages:      messages,
 		Tools:         tools,
 		PromptCaching: settings.PromptCaching,
 		MaxTokens:     maxTokens,
@@ -102,6 +112,33 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 		})
 	})
 	return streamedTurnRound{Content: content.String(), Reasoning: reasoning.String(), Response: response}, err
+}
+
+// buildHydration assembles the synthetic runtime-hydration transcript from the
+// App's read-only stores. The transcript is ephemeral — never persisted in the
+// conversation — and is rebuilt fresh for each provider request so runtime
+// facts (date, workspace, memory, skills, MCP catalog, tool catalog) stay
+// current.
+func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
+	source := HydrationSource{
+		RuntimeContext: DefaultRuntimeContext(c.Workspace),
+	}
+	if a.Memory != nil {
+		source.Memory = a.Memory
+	}
+	if a.Skills != nil {
+		source.Skills = a.Skills
+	}
+	if a.MCP != nil {
+		source.MCPServers = a.MCP
+	}
+	if a.MCPToolbox != nil {
+		source.MCP = a.MCPToolbox
+	}
+	if a.Toolbox != nil {
+		source.Tools = a.Toolbox.ListTools()
+	}
+	return NewHydrationBuilder(source).Build().Messages
 }
 
 func (a *App) completeWithRetry(ctx context.Context, adapter AIProvider, request ChatRequest) (ChatResponse, error) {

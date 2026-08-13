@@ -277,15 +277,15 @@ type SteerEvent struct {
 // ---- providers / models ----
 
 type ModelDTO struct {
-	ID              string   `json:"id"`
-	ProviderID      string   `json:"provider_id"`
-	ProviderName    string   `json:"provider_name"`
-	Context         int      `json:"context,omitempty"`
-	MaxOutput       int      `json:"max_output,omitempty"`
-	InputCost       float64  `json:"input_cost,omitempty"`
-	Description     string   `json:"description,omitempty"`
+	ID               string   `json:"id"`
+	ProviderID       string   `json:"provider_id"`
+	ProviderName     string   `json:"provider_name"`
+	Context          int      `json:"context,omitempty"`
+	MaxOutput        int      `json:"max_output,omitempty"`
+	InputCost        float64  `json:"input_cost,omitempty"`
+	Description      string   `json:"description,omitempty"`
 	SupportedEfforts []string `json:"supported_efforts,omitempty"`
-	DefaultEffort   string   `json:"default_effort,omitempty"`
+	DefaultEffort    string   `json:"default_effort,omitempty"`
 }
 
 type ProviderDTO struct {
