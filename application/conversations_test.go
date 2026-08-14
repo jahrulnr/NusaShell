@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"nusashell/contracts"
@@ -135,5 +136,48 @@ func TestHandleConversationsDeleteCancelsActiveRun(t *testing.T) {
 	}
 	if ctx.Err() == nil {
 		t.Fatal("expected active run to be cancelled")
+	}
+}
+
+func TestHandleConversationsPickWorkspaceRejectsRelativePath(t *testing.T) {
+	convStore := &fakeConvStore{convs: map[string]*domain.Conversation{
+		"conv_1": {ID: "conv_1", Title: "Test"},
+	}}
+	app := &App{
+		Conversations: convStore,
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		WorkspacePicker: WorkspacePickerFunc(func(context.Context) (string, error) {
+			return filepath.Join("rel", "workspace"), nil
+		}),
+	}
+
+	_, rpcErr := app.handleConversationsPickWorkspace(contracts.ConversationIDRequest{ID: "conv_1"})
+	if rpcErr == nil || rpcErr.Code != contracts.CodeValidation {
+		t.Fatalf("want VALIDATION_ERROR for a relative workspace, got %+v", rpcErr)
+	}
+}
+
+func TestHandleConversationsPickWorkspaceAcceptsAbsolutePath(t *testing.T) {
+	convStore := &fakeConvStore{convs: map[string]*domain.Conversation{
+		"conv_1": {ID: "conv_1", Title: "Test"},
+	}}
+	workspace := t.TempDir()
+	app := &App{
+		Conversations: convStore,
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		WorkspacePicker: WorkspacePickerFunc(func(context.Context) (string, error) {
+			return workspace, nil
+		}),
+	}
+
+	resp, rpcErr := app.handleConversationsPickWorkspace(contracts.ConversationIDRequest{ID: "conv_1"})
+	if rpcErr != nil {
+		t.Fatalf("absolute workspace rejected: %v", rpcErr)
+	}
+	got, ok := resp.(contracts.ConversationGetResult)
+	if !ok || got.Conversation.Workspace != workspace {
+		t.Fatalf("workspace = %+v, want %q", resp, workspace)
 	}
 }
