@@ -23,6 +23,7 @@ func NewCredentials(path string) (*CredentialStore, error) {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, err
 		}
+		_ = os.Chmod(dir, 0o700)
 	}
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -42,6 +43,7 @@ func NewCredentials(path string) (*CredentialStore, error) {
 		db.Close()
 		return nil, err
 	}
+	_ = os.Chmod(path, 0o600)
 	return &CredentialStore{db: db}, nil
 }
 

@@ -150,6 +150,7 @@ function renderDetail(p) {
   ));
 
   const [editBtn, testBtn, importBtn, delBtn] = detail.querySelectorAll('.provider-detail-actions button');
+  detail.querySelector('.provider-back')?.addEventListener('click', backToRegistry);
   editBtn.addEventListener('click', () => addProvider(p));
   testBtn.addEventListener('click', async () => {
     testBtn.disabled = true;

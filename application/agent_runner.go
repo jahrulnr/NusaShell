@@ -26,12 +26,19 @@ func (a *App) handleTurnsStart(req contracts.TurnStartRequest) (any, *contracts.
 	if model == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "model is required"}
 	}
-	if c.Status == "running" {
-		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "conversation is busy; stop the running turn first"}
-	}
 	provider, apiKey, rpcErr := a.resolveModel(model)
 	if rpcErr != nil {
 		return nil, rpcErr
+	}
+
+	a.startMu.Lock()
+	defer a.startMu.Unlock()
+	c, rpcErr = a.getConversation(req.ConversationID)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	if c.Status == "running" || a.activeRunForConversation(c.ID) != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "conversation is busy; stop the running turn first"}
 	}
 
 	now := time.Now().UTC()
@@ -82,7 +89,14 @@ func (a *App) handleTurnsRetry(req contracts.TurnRetryRequest) (any, *contracts.
 	if model == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "model is required"}
 	}
-	if c.Status == "running" {
+
+	a.startMu.Lock()
+	defer a.startMu.Unlock()
+	c, rpcErr = a.getConversation(req.ConversationID)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	if c.Status == "running" || a.activeRunForConversation(c.ID) != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "conversation is busy; stop the running turn first"}
 	}
 
@@ -103,9 +117,9 @@ func (a *App) handleTurnsRetry(req contracts.TurnRetryRequest) (any, *contracts.
 	}
 
 	failed := &c.Messages[failedIdx]
-	continuation := failed.Content != "" || failed.Reasoning != ""
+	continuation := shouldContinueFailedTurn(*failed)
 	var targetMsgID string
-	if continuation && len(failed.ToolCalls) == 0 {
+	if continuation {
 		failed.Status = domain.StatusDone
 		failed.Error = ""
 		next := domain.Message{ID: domain.NewID("msg"), Role: domain.RoleAssistant, CreatedAt: time.Now().UTC()}
@@ -239,6 +253,7 @@ func (a *App) handleTurnsCancelSteer(req contracts.TurnCancelSteerRequest) (any,
 
 func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool) {
 	defer func() {
+		run.Cancel()
 		a.runsMu.Lock()
 		delete(a.runs, run.ID)
 		a.runsMu.Unlock()
@@ -285,7 +300,7 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 		totalUsage = mergeUsage(totalUsage, roundResult.Response.Usage)
 		if streamErr != nil {
 			if run.Ctx.Err() != nil {
-				a.interruptTurn(run, currentMsgID, roundResult.Content, totalUsage, model)
+				a.interruptTurn(run, currentMsgID, roundResult, totalUsage, model)
 			} else if !continuedPartialStream && canContinuePartialStream(streamErr, roundResult) {
 				if err := a.persistPartialTurnRound(run.ConversationID, currentMsgID, model, roundResult); err != nil {
 					a.failTurn(run, currentMsgID, err)
@@ -342,6 +357,10 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 		}
 
 		if err := a.executeTurnTools(run, currentMsgID, roundResult.Response.ToolCalls); err != nil {
+			if run.Ctx.Err() != nil {
+				a.interruptTurn(run, currentMsgID, roundResult, totalUsage, model)
+				return
+			}
 			a.failTurn(run, currentMsgID, err)
 			return
 		}
@@ -370,15 +389,7 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 	if err := a.finishTurn(run, asstMsgID, model, totalUsage); err != nil {
 		a.failTurn(run, asstMsgID, err)
 	}
-	// If a steer was queued but never applied (turn ended without a safe
-	// boundary to inject it), cancel it so the frontend clears the queued
-	// steer card and restores the draft to the composer.
-	if run.queuedSteer() != nil {
-		entry := run.cancelSteerEntry()
-		a.Bus.Emit(contracts.EventSteerCancelled, contracts.SteerEvent{
-			ConversationID: run.ConversationID, Status: "cancelled", Text: entry.Text,
-		})
-	}
+	a.discardQueuedSteer(run)
 }
 
 // applyQueuedSteer drains a queued steer and appends it as a real user message
@@ -406,6 +417,29 @@ func (a *App) applyQueuedSteer(run *TurnRun, currentMsgID string) (bool, *domain
 
 func canContinuePartialStream(err error, round streamedTurnRound) bool {
 	return isRetryableProviderError(err) && len(round.Response.ToolCalls) == 0 && (round.Content != "" || round.Reasoning != "")
+}
+
+// shouldContinueFailedTurn reports whether a retry should freeze partial
+// output and ask the new model to continue. Tool-bearing failures are always
+// restarted from scratch so a leftover continuation flag cannot skip tool
+// work or consume the mid-stream continuation budget.
+func shouldContinueFailedTurn(failed domain.Message) bool {
+	return (failed.Content != "" || failed.Reasoning != "") && len(failed.ToolCalls) == 0
+}
+
+// compactionTriggerTokens is the estimated-token watermark that starts
+// compaction: the configured threshold, capped at 80% of the model window so
+// a high threshold cannot wait until the next turn already overflows.
+func compactionTriggerTokens(contextWindow int, settings domain.Settings) int {
+	trigger := settings.CompactionThreshold
+	if trigger < 1000 {
+		trigger = domain.DefaultSettings().CompactionThreshold
+	}
+	windowCap := contextWindow * 4 / 5
+	if windowCap > 0 && windowCap < trigger {
+		return windowCap
+	}
+	return trigger
 }
 
 // resolveMaxOutput picks the per-turn completion token ceiling: the model's
@@ -469,13 +503,9 @@ func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *do
 	remaining := effectiveKeepBudget
 	splitIdx := 0
 	for i := len(c.Messages) - 1; i >= 0; i-- {
-		m := c.Messages[i]
-		// Use stripped token count (no tool calls/reasoning) to match what
-		// Compact will actually retain.
-		tokens := domain.EstimateTokens(m.Content)
-		for _, att := range m.Attachments {
-			tokens += domain.EstimateTokens(att.Name) + domain.EstimateTokens(att.Content) + domain.EstimateTokens(att.DataURL)
-		}
+		// Match Compact/ArchiveMessages: stripped token count (no tool
+		// calls/reasoning/steps/usage) is what will actually be retained.
+		tokens := domain.StripForRetention(c.Messages[i]).EstimateTokens()
 		if tokens > remaining {
 			splitIdx = i + 1
 			break
@@ -665,6 +695,7 @@ func (a *App) failTurn(run *TurnRun, msgID string, err error) {
 		c.Status = "idle"
 		_ = a.Conversations.Save(c)
 	}
+	a.discardQueuedSteer(run)
 	a.Bus.Emit(contracts.EventTurnError, contracts.TurnErrorEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, Message: err.Error(),
 	})
@@ -681,17 +712,21 @@ func (a *App) failStreamTurn(run *TurnRun, msgID, model string, round streamedTu
 		c.Status = "idle"
 		_ = a.Conversations.Save(c)
 	}
+	a.discardQueuedSteer(run)
 	a.Bus.Emit(contracts.EventTurnError, contracts.TurnErrorEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, Message: err.Error(),
 	})
 }
 
-func (a *App) interruptTurn(run *TurnRun, msgID, content string, usage ChatUsage, model string) {
+func (a *App) interruptTurn(run *TurnRun, msgID string, round streamedTurnRound, usage ChatUsage, model string) {
 	a.log("warn", "agent", "turn interrupted: %s", run.ID)
 	if c, e := a.Conversations.Get(run.ConversationID); e == nil {
 		a.updateMessage(c, msgID, func(m *domain.Message) {
-			m.Content = content
-			m.Model = model
+			if m.Content == "" && m.Reasoning == "" && len(m.Steps) == 0 {
+				applyStreamRound(m, model, round)
+			} else if model != "" {
+				m.Model = model
+			}
 			m.Status = domain.StatusInterrupted
 			if usage != (ChatUsage{}) {
 				m.Usage = toDomainUsage(usage)
@@ -700,9 +735,20 @@ func (a *App) interruptTurn(run *TurnRun, msgID, content string, usage ChatUsage
 		c.Status = "idle"
 		_ = a.Conversations.Save(c)
 	}
+	a.discardQueuedSteer(run)
 	a.Bus.Emit(contracts.EventTurnDone, contracts.TurnDoneEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, MessageID: msgID, Model: model,
 		Usage: &contracts.UsageDTO{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens},
+	})
+}
+
+func (a *App) discardQueuedSteer(run *TurnRun) {
+	entry := run.cancelSteerEntry()
+	if entry == nil {
+		return
+	}
+	a.Bus.Emit(contracts.EventSteerCancelled, contracts.SteerEvent{
+		ConversationID: run.ConversationID, Status: "cancelled", Text: entry.Text,
 	})
 }
 
@@ -736,10 +782,10 @@ func chatMessages(c *domain.Conversation, pendingMsgID string) []ChatMessage {
 		case domain.RoleUser:
 			out = append(out, ChatMessage{Role: "user", Content: m.Content, Attachments: m.Attachments})
 		case domain.RoleAssistant:
-			if m.ID == pendingMsgID && m.Content == "" && len(m.ToolCalls) == 0 {
+			if m.ID == pendingMsgID && m.Content == "" && m.Reasoning == "" && len(m.ToolCalls) == 0 {
 				continue
 			}
-			if m.Content == "" && len(m.ToolCalls) == 0 {
+			if m.Content == "" && m.Reasoning == "" && len(m.ToolCalls) == 0 {
 				continue
 			}
 			cm := ChatMessage{Role: "assistant", Content: m.Content, Reasoning: m.Reasoning, ToolCalls: m.ToolCalls}

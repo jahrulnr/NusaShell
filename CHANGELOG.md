@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Loopback by default.** The HTTP server now listens on `127.0.0.1` unless
+  `NUSASHELL_HOST` is set, matching the documented personal-shell threat model.
+- **Larger RPC bodies.** `/rpc` accepts up to 24 MiB so the documented four
+  4 MiB attachments can actually be posted from the frontend.
+- **Streaming HTTP client.** Provider adapters no longer apply a 60s client
+  timeout to the entire SSE body; dial and response-header timeouts remain.
+- **Compaction watermark.** Compaction uses `settings.compaction_threshold`,
+  capped at 80% of the model context window.
 - **Focused agent modules.** The agent view now separates transcript rendering,
   composer interaction, and model selection while keeping the existing browser
   API and UI behavior intact.
@@ -18,6 +26,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Token estimates.** Conversation size no longer includes provider usage
+  totals or double-counts chronological steps, so compaction triggers on the
+  stored transcript rather than last-request accounting.
+- **Retry continuation.** A failed turn that already has tool calls restarts
+  from scratch instead of injecting a continue prompt against an empty message.
+- **Stop during tools.** Cancelled turns skip remaining tool calls and keep
+  streamed reasoning on the interrupted message.
+- **WebSocket writer.** The event writer exits when the bus subscription
+  closes instead of spinning on a closed channel.
+- **Logs live tail.** Appended log events no longer replay the whole history.
+- **Conversation switch races.** Stale conversation, chunk, and active-run
+  RPCs are ignored after the user switches rooms.
+- **Credential file mode.** The SQLite credential store is created `0600`.
 - **Static JavaScript MIME compatibility.** The asset check accepts either
   standard JavaScript media type returned by the operating system, preventing
   a Windows-only CI failure.

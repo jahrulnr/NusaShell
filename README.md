@@ -81,7 +81,7 @@ through RPC, WebSocket events, application services, and local persistence.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `NUSASHELL_HOST` | `0.0.0.0` | HTTP listen host |
+| `NUSASHELL_HOST` | `127.0.0.1` | HTTP listen host |
 | `NUSASHELL_PORT` | `9999` | HTTP listen port |
 | `NUSASHELL_DATA_DIR` | platform config directory plus `nusashell-go` | Local data directory |
 | `NUSASHELL_DEV` | unset | Serve `frontend/` directly from disk for development |

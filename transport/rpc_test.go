@@ -39,6 +39,31 @@ func TestRPCMalformedBody(t *testing.T) {
 	}
 }
 
+func TestRPCBodyLimitFitsAttachmentContract(t *testing.T) {
+	if maxRPCBodyBytes < 24<<20 {
+		t.Fatalf("maxRPCBodyBytes = %d, want at least 24MiB for 4x4MiB attachments", maxRPCBodyBytes)
+	}
+	h := newHarness(t, nil)
+	// A payload larger than the old 1MiB cap must still be parsed as JSON.
+	payload := strings.Repeat("a", 3<<20/2)
+	body := fmt.Sprintf(`{"method":"no.such.method","payload":{"x":%q}}`, payload)
+	resp, err := http.Post(h.server.URL+"/rpc", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (unknown method after a large but valid body)", resp.StatusCode)
+	}
+	var res contracts.Response
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		t.Fatal(err)
+	}
+	if res.OK || res.Error == nil || res.Error.Code != "VALIDATION_ERROR" {
+		t.Fatalf("want VALIDATION_ERROR for unknown method, got %+v", res)
+	}
+}
+
 func TestRPCAppInfo(t *testing.T) {
 	h := newHarness(t, nil)
 	res := h.rpcOK(t, "app.info", map[string]any{})

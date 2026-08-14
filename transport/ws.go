@@ -21,18 +21,23 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "bye")
+	conn.SetReadLimit(maxRPCBodyBytes)
 
 	ctx := r.Context()
 	_, events, unsubscribe := s.App.Bus.Subscribe()
 	defer unsubscribe()
 
-	// writer: forward bus events to the socket
+	// writer: forward bus events to the socket until the subscription
+	// closes or the request context is cancelled.
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case ev := <-events:
+			case ev, ok := <-events:
+				if !ok {
+					return
+				}
 				b, err := json.Marshal(ev)
 				if err != nil {
 					continue

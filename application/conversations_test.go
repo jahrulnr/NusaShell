@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -117,5 +118,22 @@ func TestHandleConversationsDeleteNilTodos(t *testing.T) {
 	}
 	if m, ok := resp.(map[string]bool); !ok || !m["ok"] {
 		t.Errorf("expected {ok:true}, got %+v", resp)
+	}
+}
+
+func TestHandleConversationsDeleteCancelsActiveRun(t *testing.T) {
+	convStore := &fakeConvStore{convs: map[string]*domain.Conversation{
+		"conv_1": {ID: "conv_1", Title: "Test"},
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	app := NewApp(Deps{Conversations: convStore, Logs: &fakeLogStore{}, Bus: NewBus()})
+	app.runs["run_1"] = &TurnRun{ID: "run_1", ConversationID: "conv_1", Ctx: ctx, Cancel: cancel}
+
+	if _, rpcErr := app.handleConversationsDelete(contracts.ConversationIDRequest{ID: "conv_1"}); rpcErr != nil {
+		t.Fatalf("delete: %v", rpcErr)
+	}
+	if ctx.Err() == nil {
+		t.Fatal("expected active run to be cancelled")
 	}
 }

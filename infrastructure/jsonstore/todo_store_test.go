@@ -70,6 +70,36 @@ func TestTodoStoreSetReplacesNotAppends(t *testing.T) {
 	}
 }
 
+func TestTodoStoreConcurrentSetLastWriteWins(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "todos.json")
+	store := NewTodoStore(path)
+
+	done := make(chan struct{}, 2)
+	go func() {
+		store.Set("conv_1", []domain.TodoItem{{ID: "a", Content: "A", Status: domain.TodoPending}})
+		done <- struct{}{}
+	}()
+	go func() {
+		store.Set("conv_1", []domain.TodoItem{{ID: "b", Content: "B", Status: domain.TodoCompleted}})
+		done <- struct{}{}
+	}()
+	<-done
+	<-done
+
+	reloaded := NewTodoStore(path)
+	items := reloaded.Get("conv_1")
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item after concurrent sets, got %d", len(items))
+	}
+	if items[0].ID != "a" && items[0].ID != "b" {
+		t.Fatalf("unexpected item %+v", items[0])
+	}
+	if got := store.Get("conv_1"); len(got) != 1 || got[0].ID != items[0].ID {
+		t.Fatalf("memory/disk mismatch: mem=%+v disk=%+v", got, items)
+	}
+}
+
 func TestTodoStoreMissingFile(t *testing.T) {
 	dir := t.TempDir()
 	store := NewTodoStore(filepath.Join(dir, "nonexistent.json"))

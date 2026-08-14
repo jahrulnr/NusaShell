@@ -33,7 +33,7 @@ type TodoItem struct {
 }
 
 // TodoSummary holds aggregate counts derived from a todo list. Used by the
-// tool result, the RPC result, and the auto-continue policy.
+// tool result and the RPC result.
 type TodoSummary struct {
 	Total      int `json:"total"`
 	Pending    int `json:"pending"`
@@ -59,8 +59,7 @@ func SummarizeTodos(items []TodoItem) TodoSummary {
 }
 
 // CountOpenTodos returns the number of items that are not yet completed
-// (pending or in_progress). Used by the auto-continue policy to decide
-// whether the agent still has unfinished checklist work.
+// (pending or in_progress).
 func CountOpenTodos(items []TodoItem) int {
 	n := 0
 	for _, item := range items {

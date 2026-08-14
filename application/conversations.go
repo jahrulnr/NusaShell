@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 
 	"nusashell/contracts"
@@ -146,6 +147,9 @@ func (a *App) handleConversationsDelete(req contracts.ConversationIDRequest) (an
 	if _, rpcErr := a.getConversation(req.ID); rpcErr != nil {
 		return nil, rpcErr
 	}
+	if run := a.activeRunForConversation(req.ID); run != nil {
+		run.Cancel()
+	}
 	if err := a.Conversations.Delete(req.ID); err != nil {
 		return nil, rpcInternal(err)
 	}
@@ -174,6 +178,9 @@ func (a *App) handleConversationsPickWorkspace(req contracts.ConversationIDReque
 	workspace = strings.TrimSpace(workspace)
 	if workspace == "" {
 		return contracts.ConversationGetResult{Conversation: convDTO(c)}, nil
+	}
+	if !filepath.IsAbs(workspace) {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "workspace path must be absolute"}
 	}
 	c.Workspace = workspace
 	c.Touch()

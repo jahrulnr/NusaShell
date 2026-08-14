@@ -38,7 +38,7 @@ func main() {
 }
 
 func run() error {
-	host := envOr("NUSASHELL_HOST", "0.0.0.0")
+	host := envOr("NUSASHELL_HOST", "127.0.0.1")
 	port := envOr("NUSASHELL_PORT", "9999")
 	dataDir := envOr("NUSASHELL_DATA_DIR", defaultDataDir())
 	dev := os.Getenv("NUSASHELL_DEV") != ""
@@ -49,9 +49,10 @@ func run() error {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return err
 	}
+	_ = os.Chmod(dataDir, 0o700)
 
 	store, err := jsonstore.New(dataDir)
 	if err != nil {

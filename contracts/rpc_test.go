@@ -47,13 +47,16 @@ func TestRosterUniqueness(t *testing.T) {
 	methods := []string{
 		MethodAppInfo,
 		MethodConversationsList, MethodConversationsCreate, MethodConversationsGet,
-		MethodConversationsRename, MethodConversationsDelete, MethodConversationsPickWorkspace, MethodTurnsStart, MethodTurnsStop,
+		MethodConversationsRename, MethodConversationsDelete, MethodConversationsPickWorkspace,
+		MethodConversationsChunk, MethodTurnsStart, MethodTurnsStop,
+		MethodTurnsRetry, MethodTurnsSteer, MethodTurnsCancelSteer, MethodTurnsActive,
 		MethodProvidersList, MethodProvidersSave, MethodProvidersDelete, MethodProvidersTest,
 		MethodProvidersImport, MethodModelsList,
 		MethodSkillsList, MethodSkillsRead, MethodSkillsSave, MethodSkillsDelete, MethodSkillsRun,
 		MethodMCPServersList, MethodMCPServersSave, MethodMCPServersDelete, MethodMCPServersTest,
 		MethodMCPToolsList,
 		MethodMemoryList, MethodMemorySave, MethodMemorySearch, MethodMemoryDelete,
+		MethodTodosGet, MethodTodosDelete,
 		MethodDocsList, MethodDocsSearch, MethodDocsRead,
 		MethodLogsList, MethodLogsClear,
 		MethodSettingsGet, MethodSettingsSet,
@@ -70,8 +73,9 @@ func TestRosterUniqueness(t *testing.T) {
 	}
 
 	events := []string{
-		EventTurnStarted, EventMessageDelta, EventToolStarted, EventToolCompleted,
-		EventTurnDone, EventTurnError, EventCompacted, EventLogAppend,
+		EventTurnStarted, EventMessageDelta, EventReasoningDelta, EventToolStarted, EventToolCompleted,
+		EventTurnDone, EventTurnError, EventCompacted, EventSteerQueued, EventSteerApplied,
+		EventSteerCancelled, EventProviderRetry, EventLogAppend, EventTodoUpdated,
 	}
 	seenEv := map[string]bool{}
 	for _, e := range events {
