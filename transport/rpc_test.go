@@ -172,8 +172,9 @@ func TestConversationWorkspacePickerPersistsPerConversation(t *testing.T) {
 	h := newHarness(t, nil)
 	firstID := h.newConversation(t)
 	secondID := h.newConversation(t)
+	workspace := t.TempDir()
 	h.app.WorkspacePicker = application.WorkspacePickerFunc(func(context.Context) (string, error) {
-		return "/home/jahrulnr/projects/nusashell", nil
+		return workspace, nil
 	})
 
 	picked := h.rpcOK(t, "agent.conversations.pick-workspace", map[string]any{"id": firstID})
@@ -186,7 +187,7 @@ func TestConversationWorkspacePickerPersistsPerConversation(t *testing.T) {
 	if err := json.Unmarshal(picked.Result, &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Conversation.ID != firstID || result.Conversation.Workspace != "/home/jahrulnr/projects/nusashell" {
+	if result.Conversation.ID != firstID || result.Conversation.Workspace != workspace {
 		t.Fatalf("picked workspace = %+v", result.Conversation)
 	}
 
