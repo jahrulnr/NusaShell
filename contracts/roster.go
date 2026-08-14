@@ -46,6 +46,9 @@ const (
 	MethodMemorySearch = "memory.search"
 	MethodMemoryDelete = "memory.delete"
 
+	MethodTodosGet    = "agent.todos.get"
+	MethodTodosDelete = "agent.todos.delete"
+
 	MethodDocsList   = "docs.list"
 	MethodDocsSearch = "docs.search"
 	MethodDocsRead   = "docs.read"
@@ -72,6 +75,7 @@ const (
 	EventSteerCancelled = "agent.steer.cancelled"
 	EventProviderRetry  = "agent.provider.retry"
 	EventLogAppend      = "logs.append"
+	EventTodoUpdated    = "agent.todo.updated"
 )
 
 // ---- app ----
@@ -273,6 +277,12 @@ type ToolCompletedEvent struct {
 	Output         string `json:"output,omitempty"`
 }
 
+type TodoUpdatedEvent struct {
+	ConversationID string         `json:"conversation_id"`
+	Items          []TodoItemDTO  `json:"items"`
+	Summary        TodoSummaryDTO `json:"summary"`
+}
+
 type TurnDoneEvent struct {
 	RunID          string    `json:"run_id"`
 	ConversationID string    `json:"conversation_id"`
@@ -471,6 +481,36 @@ type MemorySearchRequest struct {
 
 type MemoryIDRequest struct {
 	ID string `json:"id"`
+}
+
+// ---- todos ----
+
+type TodoItemDTO struct {
+	ID      string `json:"id"`
+	Content string `json:"content"`
+	Status  string `json:"status"`
+}
+
+type TodoSummaryDTO struct {
+	Total      int `json:"total"`
+	Pending    int `json:"pending"`
+	InProgress int `json:"in_progress"`
+	Completed  int `json:"completed"`
+}
+
+type TodosGetRequest struct {
+	ConversationID string `json:"conversation_id"`
+}
+
+type TodosGetResult struct {
+	ConversationID string         `json:"conversation_id"`
+	Items          []TodoItemDTO  `json:"items"`
+	Summary        TodoSummaryDTO `json:"summary"`
+}
+
+type TodosDeleteRequest struct {
+	ConversationID string   `json:"conversation_id"`
+	IDs            []string `json:"ids"`
 }
 
 // ---- docs ----

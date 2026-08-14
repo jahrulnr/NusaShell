@@ -57,18 +57,18 @@ func TestHydrationBuildBasic(t *testing.T) {
 		},
 	})
 	result := b.Build()
-	if result.CallCount != 5 {
-		t.Fatalf("expected 5 hydration calls, got %d", result.CallCount)
+	if result.CallCount != 6 {
+		t.Fatalf("expected 6 hydration calls, got %d", result.CallCount)
 	}
-	if len(result.Messages) != 6 { // 1 assistant + 5 tool results
-		t.Fatalf("expected 6 messages, got %d", len(result.Messages))
+	if len(result.Messages) != 7 { // 1 assistant + 6 tool results
+		t.Fatalf("expected 7 messages, got %d", len(result.Messages))
 	}
 	// First message: assistant with toolCalls
 	if result.Messages[0].Role != "assistant" {
 		t.Errorf("expected first message role=assistant, got %s", result.Messages[0].Role)
 	}
-	if len(result.Messages[0].ToolCalls) != 5 {
-		t.Errorf("expected 5 toolCalls, got %d", len(result.Messages[0].ToolCalls))
+	if len(result.Messages[0].ToolCalls) != 6 {
+		t.Errorf("expected 6 toolCalls, got %d", len(result.Messages[0].ToolCalls))
 	}
 	// All call IDs must have hydrate: prefix
 	for _, c := range result.Messages[0].ToolCalls {
@@ -230,6 +230,73 @@ func TestHydrationToolList(t *testing.T) {
 	if tl.Tools[0].Name != "memory_save" || tl.Tools[1].Name != "skill_list" {
 		t.Errorf("expected sorted tools, got %s %s", tl.Tools[0].Name, tl.Tools[1].Name)
 	}
+}
+
+func TestHydrationTodoList(t *testing.T) {
+	// In-memory todo port for testing
+	port := &fakeTodoPort{items: map[string][]domain.TodoItem{
+		"conv_1": {
+			{ID: "1", Content: "Create CLI", Status: domain.TodoCompleted},
+			{ID: "2", Content: "Add parser", Status: domain.TodoInProgress},
+			{ID: "3", Content: "Write tests", Status: domain.TodoPending},
+		},
+	}}
+	b := NewHydrationBuilder(HydrationSource{Todos: port, ConvID: "conv_1"})
+	result := b.Build()
+	// todo_list is the 6th slot (index 6 in messages: 0=assistant, 1-6=results)
+	todoContent := result.Messages[6].ToolResult.Content
+	if !strings.Contains(todoContent, "CURRENT TASKS") {
+		t.Errorf("expected CURRENT TASKS header, got: %s", todoContent)
+	}
+	if !strings.Contains(todoContent, "[~] Add parser") {
+		t.Errorf("expected in_progress item, got: %s", todoContent)
+	}
+	if !strings.Contains(todoContent, "[ ] Write tests") {
+		t.Errorf("expected pending item, got: %s", todoContent)
+	}
+	// Completed items should be filtered out
+	if strings.Contains(todoContent, "Create CLI") {
+		t.Errorf("completed item should not appear, got: %s", todoContent)
+	}
+}
+
+func TestHydrationTodoListEmpty(t *testing.T) {
+	port := &fakeTodoPort{items: map[string][]domain.TodoItem{}}
+	b := NewHydrationBuilder(HydrationSource{Todos: port, ConvID: "conv_1"})
+	result := b.Build()
+	todoContent := result.Messages[6].ToolResult.Content
+	if todoContent != "" {
+		t.Errorf("expected empty content for no todos, got: %s", todoContent)
+	}
+}
+
+func TestHydrationTodoListNilPort(t *testing.T) {
+	b := NewHydrationBuilder(HydrationSource{})
+	result := b.Build()
+	todoContent := result.Messages[6].ToolResult.Content
+	if todoContent != "" {
+		t.Errorf("expected empty content for nil todo port, got: %s", todoContent)
+	}
+}
+
+// fakeTodoPort is a minimal in-memory ConversationTodoPort for testing.
+type fakeTodoPort struct {
+	items map[string][]domain.TodoItem
+}
+
+func (f *fakeTodoPort) Get(convID string) []domain.TodoItem {
+	return f.items[convID]
+}
+
+func (f *fakeTodoPort) Set(convID string, items []domain.TodoItem) {
+	if f.items == nil {
+		f.items = map[string][]domain.TodoItem{}
+	}
+	f.items[convID] = items
+}
+
+func (f *fakeTodoPort) Clear(convID string) {
+	delete(f.items, convID)
 }
 
 func TestFilterHydrationRemovesAll(t *testing.T) {

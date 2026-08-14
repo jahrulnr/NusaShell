@@ -19,6 +19,7 @@ type Toolbox struct {
 	Memory     application.MemoryStore
 	Docs       application.DocsSource
 	MCPServers application.MCPServerStore
+	Todos      application.ConversationTodoPort
 	MCP        interface {
 		Connect(ctx context.Context, s *domain.MCPServer) ([]contracts.MCPToolDTO, error)
 		ToolsFor(serverID string) ([]contracts.MCPToolDTO, bool)
@@ -36,6 +37,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "memory_search", Description: "Search memory entries by substring match over content and tags.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 10")), "query")},
 		{Name: "memory_list", Description: "List all memory entries.", InputSchema: obj("object", nil)},
 		{Name: "memory_delete", Description: "Delete a memory entry by id.", InputSchema: obj("object", props("id", str("Memory entry id")), "id")},
+		{Name: "todo", Description: "Replace the conversation task checklist (full replace, Claude TodoWrite style). Empty items clears the list. The user can delete items from the UI — treat deleted items as gone and do not re-add them.", InputSchema: obj("object", props("items", arrObj("Full replacement list of todo items (max 50)", props("id", str("Stable item id (unique within the list)"), "content", str("Short task description (max 500 chars)"), "status", strEnum("Item status; prefer exactly one in_progress at a time", "pending", "in_progress", "completed")), "id", "content", "status")), "items")},
 		{Name: "docs_search", Description: "Search the NusaShell Light documentation corpus.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 10")), "query")},
 		{Name: "docs_read", Description: "Read a documentation page by id (see docs_search results).", InputSchema: obj("object", props("id", str("Documentation page id")), "id")},
 		{Name: "mcp_list", Description: "List configured MCP servers with their enabled status and runtime state (running/stopped).", InputSchema: obj("object", nil)},
@@ -235,6 +237,9 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", err
 		}
 		return fmt.Sprintf("Deleted memory entry %s.", args.ID), nil
+
+	case name == "todo":
+		return t.execTodo(ctx, argsJSON)
 
 	case name == "docs_search":
 		var args struct {
@@ -449,12 +454,85 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 	return "", fmt.Errorf("unknown tool: %s", name)
 }
 
+// execTodo replaces the conversation todo checklist (full-replace, Claude
+// TodoWrite style). Empty items clears the list. Requires a conversation id
+// in the context (set via WithConversationID by the turn runner).
+const (
+	todoMaxItems        = 50
+	todoMaxContentChars = 500
+)
+
+func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error) {
+	if t.Todos == nil {
+		return "", fmt.Errorf("todo tracking is not available")
+	}
+	conversationID := application.ConversationIDFromContext(ctx)
+	if conversationID == "" {
+		return "", fmt.Errorf("todo tool requires a conversation context")
+	}
+	var args struct {
+		Items []struct {
+			ID      string `json:"id"`
+			Content string `json:"content"`
+			Status  string `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(argsJSON, &args); err != nil {
+		return "", fmt.Errorf("invalid args: %w", err)
+	}
+	if len(args.Items) > todoMaxItems {
+		return "", fmt.Errorf("items must have at most %d entries", todoMaxItems)
+	}
+	items := make([]domain.TodoItem, 0, len(args.Items))
+	seenIDs := make(map[string]bool, len(args.Items))
+	for _, raw := range args.Items {
+		id := strings.TrimSpace(raw.ID)
+		content := strings.TrimSpace(raw.Content)
+		status := domain.TodoStatus(raw.Status)
+		if id == "" {
+			return "", fmt.Errorf("each item requires a non-empty id")
+		}
+		if seenIDs[id] {
+			return "", fmt.Errorf("duplicate item id: %s", id)
+		}
+		seenIDs[id] = true
+		if content == "" {
+			return "", fmt.Errorf("each item requires non-empty content")
+		}
+		if len(content) > todoMaxContentChars {
+			return "", fmt.Errorf("item content exceeds %d chars", todoMaxContentChars)
+		}
+		if !domain.IsValidTodoStatus(status) {
+			return "", fmt.Errorf("item status must be pending, in_progress, or completed")
+		}
+		items = append(items, domain.TodoItem{ID: id, Content: content, Status: status})
+	}
+	t.Todos.Set(conversationID, items)
+	current := t.Todos.Get(conversationID)
+	summary := domain.SummarizeTodos(current)
+	out := map[string]any{
+		"ok":           true,
+		"conversation": conversationID,
+		"total":        summary.Total,
+		"pending":      summary.Pending,
+		"in_progress":  summary.InProgress,
+		"completed":    summary.Completed,
+		"items":        current,
+	}
+	b, _ := json.Marshal(out)
+	return string(b), nil
+}
+
 // ---- json schema helpers ----
 
 func obj(typ string, properties map[string]any, required ...string) map[string]any {
 	m := map[string]any{"type": typ}
 	if len(properties) > 0 {
 		m["properties"] = properties
+	} else if typ == "object" {
+		// Some providers (e.g. Bedrock) reject object schemas without a
+		// "properties" key. Emit an empty object to stay OpenAI-compatible.
+		m["properties"] = map[string]any{}
 	}
 	if len(required) > 0 {
 		m["required"] = required
@@ -481,4 +559,23 @@ func intSchema(desc string) map[string]any {
 
 func arr(desc string) map[string]any {
 	return map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": desc}
+}
+
+// arrObj builds an array-of-objects JSON schema with the given item
+// properties, required fields, and description.
+func arrObj(desc string, properties map[string]any, required ...string) map[string]any {
+	return map[string]any{
+		"type":        "array",
+		"description": desc,
+		"items":       obj("object", properties, required...),
+	}
+}
+
+// strEnum builds a string schema restricted to the given enum values.
+func strEnum(desc string, values ...string) map[string]any {
+	enums := make([]any, len(values))
+	for i, v := range values {
+		enums[i] = v
+	}
+	return map[string]any{"type": "string", "description": desc, "enum": enums}
 }

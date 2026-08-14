@@ -149,6 +149,9 @@ func (a *App) handleConversationsDelete(req contracts.ConversationIDRequest) (an
 	if err := a.Conversations.Delete(req.ID); err != nil {
 		return nil, rpcInternal(err)
 	}
+	if a.Todos != nil {
+		a.Todos.Clear(req.ID)
+	}
 	a.log("info", "agent", "conversation deleted: %s", req.ID)
 	return map[string]bool{"ok": true}, nil
 }

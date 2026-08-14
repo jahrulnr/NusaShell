@@ -16,6 +16,10 @@ test('Agent uses the Electron workspace shell without unsupported Todo UI', () =
   assert.match(html, /class="agent-thread" id="agent-thread" role="log"/);
   assert.doesNotMatch(html, /class="agent-header"/);
   assert.doesNotMatch(html, /agent-task-strip/);
+  // The todo checklist strip uses a distinct class name (agent-todo-strip).
+  assert.match(html, /class="agent-todo-strip" id="agent-todo-strip"/);
+  assert.match(html, /id="agent-todo-strip-list"/);
+  assert.match(html, /id="agent-todo-strip-summary"/);
   const tabletRules = parityCSS.slice(
     parityCSS.indexOf('@media (max-width: 900px)'),
     parityCSS.indexOf('@media (max-width: 760px)'),
@@ -46,4 +50,23 @@ test('Thinking and tool markers share the same conversation rail', () => {
 
 test('Agent surfaces an unavailable backend promptly instead of waiting for a normal RPC timeout', () => {
   assert.match(appShell, /rpc\('app\.info', \{\}, \{ timeoutMs: 4000 \}\)/);
+});
+
+test('Agent todo strip has race protection via render token and event filtering', () => {
+  // Render token guards against stale async fetches (room switch during fetch)
+  assert.match(agentView, /todoRenderToken/);
+  assert.match(agentView, /token !== state\.todoRenderToken/);
+  // Event handler filters by active conversation to prevent cross-room leaks
+  assert.match(agentView, /on\('agent\.todo\.updated'/);
+  assert.match(agentView, /conversation_id !== state\.activeId/);
+  // Delete button is disabled during RPC to prevent double-clicks
+  assert.match(agentView, /btn\.disabled = true/);
+  assert.match(agentView, /btn\.disabled = false/);
+  // Todos are cleared on conversation delete and create
+  assert.match(agentView, /state\.todos = \{ items: \[\], summary/);
+});
+
+test('Agent todo strip render function is exported from render module', () => {
+  assert.match(agentRender, /export function renderTodoItem/);
+  assert.match(agentView, /renderTodoItem/);
 });

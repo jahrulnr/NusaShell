@@ -70,6 +70,7 @@ func run() error {
 
 	mcpManager := mcpclient.NewManager()
 	bus := application.NewBus()
+	todoStore := jsonstore.NewTodoStore(filepath.Join(dataDir, "conversation-todos.json"))
 	app := application.NewApp(application.Deps{
 		Version:       version,
 		DataDir:       dataDir,
@@ -78,6 +79,7 @@ func run() error {
 		Credentials:   credentials,
 		Skills:        &jsonstore.Skills{S: store},
 		Memory:        &jsonstore.Memory{S: store},
+		Todos:         todoStore,
 		MCP:           &jsonstore.MCP{S: store},
 		Logs:          &jsonstore.Logs{S: store},
 		Settings:      &jsonstore.Settings{S: store},
@@ -88,6 +90,7 @@ func run() error {
 			Memory:     &jsonstore.Memory{S: store},
 			Docs:       docSource,
 			MCPServers: &jsonstore.MCP{S: store},
+			Todos:      todoStore,
 			MCP:        mcpManager,
 		},
 		MCPToolbox:      mcpManager,

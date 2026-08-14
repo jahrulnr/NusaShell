@@ -13,6 +13,7 @@ import {
   renderConversation,
   renderMessage,
   renderToolJob,
+  renderTodoItem,
   setAgentOfflineState,
   setToolTerminalStatus,
   toolTerminalMeta,
@@ -41,6 +42,11 @@ const state = {
   nextChunkIndex: -1,
   loadedChunks: new Set(),
   loadingChunk: false,
+  // Todo checklist: server-authoritative via agent.todo.updated events and
+  // agent.todos.get RPC. todoRenderToken guards against stale async renders
+  // (e.g. a fetch that resolves after the user switched to another room).
+  todos: { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 } },
+  todoRenderToken: 0,
 };
 
 // Per-room state that survives conversation switches. When the user switches
@@ -152,9 +158,12 @@ async function createConversation(title = '') {
     state.steerId = null;
     state.steerDraft = '';
     state.attachments = [];
+    state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 } };
+    state.todoRenderToken++;
     await refreshConversations();
     renderEmptyThread();
     renderAttachments();
+    renderTodoStrip();
     updateComposerStatus();
     updateSendAvailability(state);
     document.getElementById('composer-input').focus();
@@ -198,9 +207,12 @@ function renderConversationList() {
           state.attachments = [];
           state.steerId = null;
           state.steerDraft = '';
+          state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 } };
+          state.todoRenderToken++;
           clearSteerQueue();
           renderEmptyThread();
           renderAttachments();
+          renderTodoStrip();
           updateComposerStatus();
           updateSendAvailability(state);
         }
@@ -259,6 +271,10 @@ async function openConversation(id) {
   }
   // Re-render attachment chips for the restored attachments.
   renderAttachments();
+  // Fetch the todo checklist for this conversation. The render token ensures
+  // that if the user switches rooms while the fetch is in-flight, the stale
+  // response is discarded.
+  fetchTodos();
   updateModelTrigger();
   updateComposerStatus();
   updateSendAvailability(state);
@@ -352,6 +368,73 @@ function renderAttachments() {
       renderAttachments();
       updateSendAvailability(state);
     }));
+  }
+}
+
+// ---------- todo checklist strip ----------
+
+// fetchTodos loads the todo checklist for the active conversation from the
+// backend. A render token is captured so that if the user switches rooms
+// while the fetch is in-flight, the stale response is discarded.
+async function fetchTodos() {
+  if (!state.activeId) {
+    state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 } };
+    renderTodoStrip();
+    return;
+  }
+  const token = ++state.todoRenderToken;
+  try {
+    const result = await rpc('agent.todos.get', { conversation_id: state.activeId });
+    if (token !== state.todoRenderToken) return; // stale — a newer fetch or room switch won
+    state.todos = { items: result.items ?? [], summary: result.summary ?? { total: 0, pending: 0, in_progress: 0, completed: 0 } };
+    renderTodoStrip();
+  } catch (err) {
+    if (token !== state.todoRenderToken) return;
+    // Fail-soft: hide the strip rather than crash. The backend may not support
+    // todos yet (older version), or the conversation may have been deleted.
+    state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 } };
+    renderTodoStrip();
+  }
+}
+
+// renderTodoStrip renders the todo checklist strip from state.todos. It is
+// idempotent — safe to call multiple times. The strip is hidden when there
+// are no items. Each item gets a status glyph and a delete button. Delete
+// buttons are created fresh on each render, so no stale listeners.
+function renderTodoStrip() {
+  const strip = document.getElementById('agent-todo-strip');
+  if (!strip) return;
+  const { items, summary } = state.todos;
+  if (!items || items.length === 0) {
+    strip.hidden = true;
+    return;
+  }
+  strip.hidden = false;
+  const summaryEl = document.getElementById('agent-todo-strip-summary');
+  if (summaryEl) {
+    const done = summary.completed ?? 0;
+    const total = summary.total ?? items.length;
+    summaryEl.textContent = `${done}/${total} done`;
+  }
+  const list = document.getElementById('agent-todo-strip-list');
+  if (!list) return;
+  list.replaceChildren(...items.map((item) => renderTodoItem(item, handleTodoDelete)));
+}
+
+// handleTodoDelete removes a single todo item by ID. The button is disabled
+// during the RPC call to prevent double-clicks. On success, the response
+// contains the updated items + summary, so we render directly from it without
+// a refetch. On error, the button is re-enabled and a toast is shown.
+async function handleTodoDelete(itemId, btn) {
+  if (!state.activeId || !itemId) return;
+  btn.disabled = true;
+  try {
+    const result = await rpc('agent.todos.delete', { conversation_id: state.activeId, ids: [itemId] });
+    state.todos = { items: result.items ?? [], summary: result.summary ?? { total: 0, pending: 0, in_progress: 0, completed: 0 } };
+    renderTodoStrip();
+  } catch (err) {
+    btn.disabled = false;
+    toast(err.message || 'Failed to delete task', 'error');
   }
 }
 
@@ -861,6 +944,15 @@ function bindEvents() {
       }
       toast('Steer was not applied (turn ended before a safe boundary). Text restored to composer.', 'info');
     }
+  });
+  on('agent.todo.updated', (payload) => {
+    const { conversation_id, items, summary } = payload;
+    // Only update the DOM if this event is for the active conversation.
+    // Events for other conversations are dropped — their todos will be
+    // fetched fresh when the user switches to them.
+    if (conversation_id !== state.activeId) return;
+    state.todos = { items: items ?? [], summary: summary ?? { total: 0, pending: 0, in_progress: 0, completed: 0 } };
+    renderTodoStrip();
   });
 }
 

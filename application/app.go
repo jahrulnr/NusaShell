@@ -22,6 +22,7 @@ type App struct {
 	Credentials   CredentialStore
 	Skills        SkillStore
 	Memory        MemoryStore
+	Todos         ConversationTodoPort
 	MCP           MCPServerStore
 	Logs          LogStore
 	Settings      SettingsStore
@@ -164,6 +165,7 @@ type Deps struct {
 	Credentials     CredentialStore
 	Skills          SkillStore
 	Memory          MemoryStore
+	Todos           ConversationTodoPort
 	MCP             MCPServerStore
 	Logs            LogStore
 	Settings        SettingsStore
@@ -191,6 +193,7 @@ func NewApp(deps Deps) *App {
 		Credentials:     deps.Credentials,
 		Skills:          deps.Skills,
 		Memory:          deps.Memory,
+		Todos:           deps.Todos,
 		MCP:             deps.MCP,
 		Logs:            deps.Logs,
 		Settings:        deps.Settings,
@@ -395,6 +398,18 @@ func (a *App) Dispatch(method string, payload json.RawMessage) (any, *contracts.
 			return nil, rpcErr
 		}
 		return a.handleMemoryDelete(req)
+	case contracts.MethodTodosGet:
+		var req contracts.TodosGetRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleTodosGet(req)
+	case contracts.MethodTodosDelete:
+		var req contracts.TodosDeleteRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleTodosDelete(req)
 	case contracts.MethodDocsList:
 		return a.handleDocsList()
 	case contracts.MethodDocsSearch:

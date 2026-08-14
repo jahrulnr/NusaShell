@@ -156,6 +156,10 @@ func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
 	if a.Toolbox != nil {
 		source.Tools = a.Toolbox.ListTools()
 	}
+	if a.Todos != nil {
+		source.Todos = a.Todos
+		source.ConvID = c.ID
+	}
 	return NewHydrationBuilder(source).Build().Messages
 }
 
@@ -228,7 +232,7 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 			RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID, Name: toolCall.Name, Args: []byte(toolCall.Args),
 		})
 		a.log("info", "tools", "tool call: %s", toolCall.Name)
-		output, err := a.Toolbox.Execute(run.Ctx, toolCall.Name, []byte(toolCall.Args))
+		output, err := a.Toolbox.Execute(WithConversationID(run.Ctx, run.ConversationID), toolCall.Name, []byte(toolCall.Args))
 		status := domain.ToolOK
 		if err != nil {
 			status = domain.ToolFailed
@@ -238,6 +242,21 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 			RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID,
 			Name: toolCall.Name, Status: string(status), Output: output,
 		})
+		// When the model updates the todo checklist, emit a dedicated event so
+		// the UI can re-render the strip without polling agent.todos.get.
+		if toolCall.Name == "todo" && status == domain.ToolOK && a.Todos != nil {
+			items := a.Todos.Get(run.ConversationID)
+			dtos := make([]contracts.TodoItemDTO, 0, len(items))
+			for _, item := range items {
+				dtos = append(dtos, contracts.TodoItemDTO{ID: item.ID, Content: item.Content, Status: string(item.Status)})
+			}
+			summary := domain.SummarizeTodos(items)
+			a.Bus.Emit(contracts.EventTodoUpdated, contracts.TodoUpdatedEvent{
+				ConversationID: run.ConversationID,
+				Items:          dtos,
+				Summary:        contracts.TodoSummaryDTO{Total: summary.Total, Pending: summary.Pending, InProgress: summary.InProgress, Completed: summary.Completed},
+			})
+		}
 
 		conversation, err := a.Conversations.Get(run.ConversationID)
 		if err != nil {

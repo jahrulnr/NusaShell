@@ -40,6 +40,10 @@ type HydrationSource struct {
 	RuntimeContext RuntimeContextSnapshot
 	// Tools is the full tool catalog (built-in + MCP) from Toolbox.ListTools().
 	Tools []ToolInfo
+	// Todos is the per-conversation todo checklist. When nil, no todo_list
+	// slot is injected.
+	Todos  ConversationTodoPort
+	ConvID string
 }
 
 // HydrationBuilder produces an ephemeral synthetic tool transcript
@@ -113,6 +117,7 @@ func (b *HydrationBuilder) collectSlots() []hydrationSlot {
 	slots = append(slots, b.readSkills())
 	slots = append(slots, b.readMcpList())
 	slots = append(slots, b.readToolList())
+	slots = append(slots, b.readTodoList())
 	return slots
 }
 
@@ -215,6 +220,34 @@ func (b *HydrationBuilder) readToolList() hydrationSlot {
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	content, _ := json.Marshal(map[string]any{"count": len(out), "tools": out})
 	return hydrationSlot{name: "tool_list", content: string(content)}
+}
+
+// readTodoList injects the current conversation's todo checklist as a
+// synthetic `todo_list` tool result. Only incomplete items are included
+// (completed items are noise for the model — the UI strip still shows them).
+// Returns an empty-content slot when no todo port or no conversation id is
+// configured so the slot is harmless but present for call-ID alignment.
+func (b *HydrationBuilder) readTodoList() hydrationSlot {
+	if b.source.Todos == nil || b.source.ConvID == "" {
+		return hydrationSlot{name: "todo_list", content: ""}
+	}
+	items := b.source.Todos.Get(b.source.ConvID)
+	var lines []string
+	for _, item := range items {
+		if item.Status == domain.TodoCompleted {
+			continue
+		}
+		glyph := "[ ]"
+		if item.Status == domain.TodoInProgress {
+			glyph = "[~]"
+		}
+		lines = append(lines, glyph+" "+item.Content)
+	}
+	if len(lines) == 0 {
+		return hydrationSlot{name: "todo_list", content: ""}
+	}
+	content := "CURRENT TASKS (agent-owned checklist — user may delete items)\n" + strings.Join(lines, "\n")
+	return hydrationSlot{name: "todo_list", content: content}
 }
 
 // FilterHydration drops the synthetic runtime-hydration exchange (assistant

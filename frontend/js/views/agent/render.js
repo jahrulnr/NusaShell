@@ -10,6 +10,31 @@ export function renderEmptyThread() {
     el('p', { text: 'Ask anything. The agent can use skills, memory, docs and your MCP servers as tools.' }),
   ));
   document.getElementById('tool-job-strip').hidden = true;
+  const todoStrip = document.getElementById('agent-todo-strip');
+  if (todoStrip) todoStrip.hidden = true;
+}
+
+// renderTodoItem creates a single todo item row with a status glyph, content,
+// and a delete button. The onDelete callback is invoked when the button is
+// clicked; the button is passed so the caller can disable it during async.
+export function renderTodoItem(item, onDelete) {
+  const status = item.status || 'pending';
+  const glyphClass = status === 'completed' ? 'is-completed' : status === 'in_progress' ? 'is-in-progress' : 'is-pending';
+  const glyph = status === 'completed' ? '✓' : status === 'in_progress' ? '◐' : '☐';
+  const deleteBtn = el('button', {
+    class: 'agent-todo-item-delete',
+    type: 'button',
+    title: 'Remove task',
+    'aria-label': `Remove task: ${item.content || ''}`,
+  }, '×');
+  if (typeof onDelete === 'function') {
+    deleteBtn.addEventListener('click', () => onDelete(item.id, deleteBtn));
+  }
+  return el('li', { class: `agent-todo-item is-${status}`, role: 'listitem' },
+    el('span', { class: `agent-todo-item-glyph ${glyphClass}`, text: glyph, 'aria-hidden': 'true' }),
+    el('span', { class: 'agent-todo-item-content', text: item.content || '' }),
+    deleteBtn,
+  );
 }
 
 export function setAgentOfflineState(isOffline) {

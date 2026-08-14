@@ -51,6 +51,15 @@ type MemoryStore interface {
 	Delete(id string) error
 }
 
+// ConversationTodoPort is the per-conversation todo checklist store. The
+// model owns the list (full-replace via the `todo` tool); the user can
+// delete items from the UI. Implementations must be safe for concurrent use.
+type ConversationTodoPort interface {
+	Get(conversationID string) []domain.TodoItem
+	Set(conversationID string, items []domain.TodoItem)
+	Clear(conversationID string)
+}
+
 type MCPServerStore interface {
 	List() []*domain.MCPServer
 	Get(id string) (*domain.MCPServer, error)
