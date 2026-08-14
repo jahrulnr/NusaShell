@@ -24,10 +24,16 @@ func (o *OpenAIAdapter) chatURL() string {
 }
 
 func (o *OpenAIAdapter) headers() map[string]string {
-	if o.APIKey == "" {
-		return nil
+	h := map[string]string{}
+	if o.APIKey != "" {
+		h["Authorization"] = "Bearer " + o.APIKey
 	}
-	return map[string]string{"Authorization": "Bearer " + o.APIKey}
+	if isOpenRouterURL(o.BaseURL) {
+		for k, v := range openRouterAttributionHeaders() {
+			h[k] = v
+		}
+	}
+	return h
 }
 
 type openAIMessage struct {
@@ -198,6 +204,14 @@ func (o *OpenAIAdapter) Complete(ctx context.Context, req application.ChatReques
 func (o *OpenAIAdapter) Stream(ctx context.Context, req application.ChatRequest, onDelta, onReasoning func(string)) (application.ChatResponse, error) {
 	resp, err := openSSE(ctx, o.Client, o.chatURL(), o.headers(), buildRequest(req, true))
 	if err != nil {
+		if isStreamUnsupportedError(err) {
+			return streamFallbackToComplete(ctx, o, req, onDelta, onReasoning)
+		}
+		if shouldRetryWithoutImages(err, req.Messages, ctx) {
+			stripped := req
+			stripped.Messages = stripImages(req.Messages)
+			return o.Stream(ctx, stripped, onDelta, onReasoning)
+		}
 		return application.ChatResponse{}, err
 	}
 	defer resp.Body.Close()
@@ -205,7 +219,7 @@ func (o *OpenAIAdapter) Stream(ctx context.Context, req application.ChatRequest,
 	var result application.ChatResponse
 	toolAcc := map[int]*domain.ToolCall{}
 	completed := false
-	err = readSSE(ctx, resp.Body, func(ev sseEvent) error {
+	err = readSSE(ctx, resp.Body, defaultIdleTimeout, func(ev sseEvent) error {
 		if ev.Data == "[DONE]" {
 			completed = true
 			return nil
@@ -254,9 +268,14 @@ func (o *OpenAIAdapter) Stream(ctx context.Context, req application.ChatRequest,
 		return result, retryableSSEReadError(err)
 	}
 	if !completed {
-		return result, incompleteSSEError()
+		emptyErr := incompleteSSEError()
+		if isIncompleteEmptyStream(emptyErr, result) {
+			return streamFallbackToComplete(ctx, o, req, onDelta, onReasoning)
+		}
+		return result, emptyErr
 	}
 	for _, tc := range toolAcc {
+		tc.Args = repairToolCallArguments(tc.Args)
 		result.ToolCalls = append(result.ToolCalls, *tc)
 	}
 	return result, nil
@@ -321,7 +340,7 @@ func (o *OpenAIAdapter) responseFromOpenAI(out openAIResponse) (application.Chat
 		resp.ToolCalls = append(resp.ToolCalls, domain.ToolCall{
 			ID:   tc.ID,
 			Name: tc.Function.Name,
-			Args: tc.Function.Arguments,
+			Args: repairToolCallArguments(tc.Function.Arguments),
 		})
 	}
 	return resp, nil

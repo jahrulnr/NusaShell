@@ -40,10 +40,16 @@ func (a *AnthropicAdapter) messagesURL() string {
 }
 
 func (a *AnthropicAdapter) headers() map[string]string {
-	return map[string]string{
+	h := map[string]string{
 		"x-api-key":         a.APIKey,
 		"anthropic-version": anthropicVersion,
 	}
+	if isOpenRouterURL(a.BaseURL) {
+		for k, v := range openRouterAttributionHeaders() {
+			h[k] = v
+		}
+	}
+	return h
 }
 
 type anthropicContentBlock struct {
@@ -243,7 +249,7 @@ func (a *AnthropicAdapter) Complete(ctx context.Context, req application.ChatReq
 			resp.Reasoning += block.Thinking
 		case "tool_use":
 			resp.ToolCalls = append(resp.ToolCalls, domain.ToolCall{
-				ID: block.ID, Name: block.Name, Args: string(block.Input),
+				ID: block.ID, Name: block.Name, Args: repairToolCallArguments(string(block.Input)),
 			})
 		}
 	}
@@ -253,6 +259,14 @@ func (a *AnthropicAdapter) Complete(ctx context.Context, req application.ChatReq
 func (a *AnthropicAdapter) Stream(ctx context.Context, req application.ChatRequest, onDelta, onReasoning func(string)) (application.ChatResponse, error) {
 	resp, err := openSSE(ctx, a.Client, a.messagesURL(), a.headers(), buildAnthropicRequest(req, true))
 	if err != nil {
+		if isStreamUnsupportedError(err) {
+			return streamFallbackToComplete(ctx, a, req, onDelta, onReasoning)
+		}
+		if shouldRetryWithoutImages(err, req.Messages, ctx) {
+			stripped := req
+			stripped.Messages = stripImages(req.Messages)
+			return a.Stream(ctx, stripped, onDelta, onReasoning)
+		}
 		return application.ChatResponse{}, err
 	}
 	defer resp.Body.Close()
@@ -260,7 +274,7 @@ func (a *AnthropicAdapter) Stream(ctx context.Context, req application.ChatReque
 	var result application.ChatResponse
 	toolByIndex := map[int]*domain.ToolCall{}
 	completed := false
-	err = readSSE(ctx, resp.Body, func(ev sseEvent) error {
+	err = readSSE(ctx, resp.Body, defaultIdleTimeout, func(ev sseEvent) error {
 		if ev.Event == "ping" {
 			return nil
 		}
@@ -323,7 +337,11 @@ func (a *AnthropicAdapter) Stream(ctx context.Context, req application.ChatReque
 		return result, retryableSSEReadError(err)
 	}
 	if !completed {
-		return result, incompleteSSEError()
+		emptyErr := incompleteSSEError()
+		if isIncompleteEmptyStream(emptyErr, result) {
+			return streamFallbackToComplete(ctx, a, req, onDelta, onReasoning)
+		}
+		return result, emptyErr
 	}
 	seen := map[string]bool{}
 	for _, tc := range toolByIndex {
@@ -331,6 +349,7 @@ func (a *AnthropicAdapter) Stream(ctx context.Context, req application.ChatReque
 			continue
 		}
 		seen[tc.ID] = true
+		tc.Args = repairToolCallArguments(tc.Args)
 		result.ToolCalls = append(result.ToolCalls, *tc)
 	}
 	return result, nil

@@ -322,6 +322,10 @@ type ProviderRetryEvent struct {
 	MaxAttempts    int    `json:"max_attempts"`
 	DelayMS        int64  `json:"delay_ms"`
 	Error          string `json:"error"`
+	// Kind classifies the failure mode (http_status, connect, sse_transport,
+	// idle_timeout) so the frontend can show a specific retry reason.
+	Kind   string `json:"kind,omitempty"`
+	Status int    `json:"status,omitempty"`
 }
 
 // ---- providers / models ----

@@ -25,11 +25,24 @@ func (r *ResponsesAdapter) responsesURL() string {
 	return joinEndpoint(r.BaseURL, "/responses")
 }
 
+// chatFallback returns an OpenAI chat-completions adapter sharing this
+// adapter's base URL, API key, and HTTP client. Used when the Responses API
+// is not available (404/405/unsupported), falling back to /chat/completions.
+func (r *ResponsesAdapter) chatFallback() *OpenAIAdapter {
+	return &OpenAIAdapter{BaseURL: r.BaseURL, APIKey: r.APIKey, Client: r.Client}
+}
+
 func (r *ResponsesAdapter) headers() map[string]string {
-	if r.APIKey == "" {
-		return nil
+	h := map[string]string{}
+	if r.APIKey != "" {
+		h["Authorization"] = "Bearer " + r.APIKey
 	}
-	return map[string]string{"Authorization": "Bearer " + r.APIKey}
+	if isOpenRouterURL(r.BaseURL) {
+		for k, v := range openRouterAttributionHeaders() {
+			h[k] = v
+		}
+	}
+	return h
 }
 
 // ---- wire types ----
@@ -184,6 +197,9 @@ type responsesNonStreamResponse struct {
 func (r *ResponsesAdapter) Complete(ctx context.Context, req application.ChatRequest) (application.ChatResponse, error) {
 	var out responsesNonStreamResponse
 	if err := doJSON(ctx, r.Client, http.MethodPost, r.responsesURL(), r.headers(), buildResponsesRequest(req, false), &out); err != nil {
+		if isResponsesUnsupported(err) {
+			return r.chatFallback().Complete(ctx, req)
+		}
 		return application.ChatResponse{}, err
 	}
 	if out.Error != nil {
@@ -210,7 +226,7 @@ func (r *ResponsesAdapter) Complete(ctx context.Context, req application.ChatReq
 			}
 		case "function_call":
 			resp.ToolCalls = append(resp.ToolCalls, domain.ToolCall{
-				ID: item.CallID, Name: item.Name, Args: item.Args,
+				ID: item.CallID, Name: item.Name, Args: repairToolCallArguments(item.Args),
 			})
 		}
 	}
@@ -220,6 +236,17 @@ func (r *ResponsesAdapter) Complete(ctx context.Context, req application.ChatReq
 func (r *ResponsesAdapter) Stream(ctx context.Context, req application.ChatRequest, onDelta, onReasoning func(string)) (application.ChatResponse, error) {
 	resp, err := openSSE(ctx, r.Client, r.responsesURL(), r.headers(), buildResponsesRequest(req, true))
 	if err != nil {
+		if isResponsesUnsupported(err) {
+			return r.chatFallback().Stream(ctx, req, onDelta, onReasoning)
+		}
+		if isStreamUnsupportedError(err) {
+			return streamFallbackToComplete(ctx, r, req, onDelta, onReasoning)
+		}
+		if shouldRetryWithoutImages(err, req.Messages, ctx) {
+			stripped := req
+			stripped.Messages = stripImages(req.Messages)
+			return r.Stream(ctx, stripped, onDelta, onReasoning)
+		}
 		return application.ChatResponse{}, err
 	}
 	defer resp.Body.Close()
@@ -228,7 +255,7 @@ func (r *ResponsesAdapter) Stream(ctx context.Context, req application.ChatReque
 	toolByIndex := map[int]*domain.ToolCall{}
 	streamErr := error(nil)
 	completed := false
-	readErr := readSSE(ctx, resp.Body, func(ev sseEvent) error {
+	readErr := readSSE(ctx, resp.Body, defaultIdleTimeout, func(ev sseEvent) error {
 		// gateways (OpenRouter) terminate Responses streams with the chat
 		// completions sentinel
 		if ev.Data == "[DONE]" {
@@ -297,7 +324,11 @@ func (r *ResponsesAdapter) Stream(ctx context.Context, req application.ChatReque
 		return result, streamErr
 	}
 	if !completed {
-		return result, incompleteSSEError()
+		emptyErr := incompleteSSEError()
+		if isIncompleteEmptyStream(emptyErr, result) {
+			return streamFallbackToComplete(ctx, r, req, onDelta, onReasoning)
+		}
+		return result, emptyErr
 	}
 	seen := map[string]bool{}
 	for _, tc := range toolByIndex {
@@ -305,6 +336,7 @@ func (r *ResponsesAdapter) Stream(ctx context.Context, req application.ChatReque
 			continue
 		}
 		seen[tc.ID] = true
+		tc.Args = repairToolCallArguments(tc.Args)
 		result.ToolCalls = append(result.ToolCalls, *tc)
 	}
 	return result, nil

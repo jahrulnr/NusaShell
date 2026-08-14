@@ -3,7 +3,9 @@ package application
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
+	"strings"
 	"time"
 )
 
@@ -22,11 +24,33 @@ const (
 // UpstreamError carries retry metadata from a provider adapter without making
 // the application layer depend on a concrete HTTP client.
 type UpstreamError struct {
+	// Kind classifies the failure mode so operators can distinguish an HTTP
+	// status rejection from a connect failure, an SSE transport error, or an
+	// idle stream stall — without parsing the error message.
+	Kind       UpstreamErrorKind
 	StatusCode int
 	RetryAfter time.Duration
 	Temporary  bool
 	Err        error
 }
+
+// UpstreamErrorKind discriminates provider failure modes for logging and
+// retry decisions. Mirrors the TS AgentProviderHttpError.kind field.
+type UpstreamErrorKind string
+
+const (
+	// KindHTTPStatus: provider returned a non-2xx HTTP status (429, 5xx, …).
+	KindHTTPStatus UpstreamErrorKind = "http_status"
+	// KindConnect: transport-level failure before/during the request (DNS,
+	// TLS, TCP reset, context deadline at connect time).
+	KindConnect UpstreamErrorKind = "connect"
+	// KindSSETransport: the SSE stream opened (2xx) but failed mid-stream —
+	// either a read error (mid-frame cut) or a missing terminator.
+	KindSSETransport UpstreamErrorKind = "sse_transport"
+	// KindIdleTimeout: the stream stalled for the configured idle window
+	// with no data chunks, indicating a hung provider.
+	KindIdleTimeout UpstreamErrorKind = "idle_timeout"
+)
 
 func (e *UpstreamError) Error() string {
 	if e == nil || e.Err == nil {
@@ -101,8 +125,21 @@ func isRetryableUpstream(err *UpstreamError) bool {
 	if err == nil {
 		return false
 	}
+	body := ""
+	if err.Err != nil {
+		body = err.Err.Error()
+	}
 	if err.Temporary {
+		// Even temporary errors can be permanent provider failures (e.g.
+		// 503 with "insufficient balance" body). Check the message before
+		// declaring retryability.
+		if isPermanentProviderFailure(err.StatusCode, body) {
+			return false
+		}
 		return true
+	}
+	if isPermanentProviderFailure(err.StatusCode, body) {
+		return false
 	}
 	switch err.StatusCode {
 	case 408, 409, 425, 429:
@@ -110,4 +147,65 @@ func isRetryableUpstream(err *UpstreamError) bool {
 	default:
 		return err.StatusCode >= 500 && err.StatusCode <= 599
 	}
+}
+
+// permanentFailurePhrases are body substrings that indicate a billing/credit
+// failure rather than a transient server issue. Matched case-insensitively.
+// Mirrors the TS isPermanentProviderFailure phrase list.
+var permanentFailurePhrases = []string{
+	"insufficient balance",
+	"no resource package",
+	"please recharge",
+	"payment required",
+	"out of credits",
+	"credit balance",
+	"billing",
+	"top up",
+	"top-up",
+	"topup",
+	"account suspended",
+	`"code":"1113"`,
+	`"code":1113`,
+}
+
+// isPermanentProviderFailure reports whether the HTTP status + body indicate
+// a billing/credit exhaustion that will not resolve on retry. A 503 with
+// "insufficient balance" is permanent; a 503 with "internal server error" is
+// not. Status 402 is always permanent.
+func isPermanentProviderFailure(status int, body string) bool {
+	if status == 402 {
+		return true
+	}
+	normalized := strings.ToLower(body)
+	for _, phrase := range permanentFailurePhrases {
+		if strings.Contains(normalized, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+// describeProviderError renders a provider error for the retry log so
+// operators can tell a 429 rate limit from a mid-stream EOF without digging
+// through wrapped layers. Non-UpstreamError values pass through as their plain
+// Error() string.
+func describeProviderError(err error) string {
+	if err == nil {
+		return ""
+	}
+	var upstream *UpstreamError
+	if !errors.As(err, &upstream) {
+		return err.Error()
+	}
+	parts := []string{upstream.Err.Error()}
+	if upstream.Kind != "" {
+		parts = append(parts, fmt.Sprintf("kind=%s", upstream.Kind))
+	}
+	if upstream.StatusCode != 0 {
+		parts = append(parts, fmt.Sprintf("status=%d", upstream.StatusCode))
+	}
+	if upstream.RetryAfter > 0 {
+		parts = append(parts, fmt.Sprintf("retry_after=%s", upstream.RetryAfter.Round(time.Second)))
+	}
+	return strings.Join(parts, " ")
 }

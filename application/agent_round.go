@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -68,8 +69,8 @@ func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *do
 		if !retryable {
 			return roundResult, err
 		}
-		a.log("warn", "ai", "retrying provider stream for turn %s (%d/%d) after %s: %v", run.ID, retry, maxProviderAttempts, delay.Round(time.Millisecond), err)
-		a.Bus.Emit(contracts.EventProviderRetry, contracts.ProviderRetryEvent{
+		a.log("warn", "ai", "retrying provider stream for turn %s (%d/%d) after %s: %s", run.ID, retry, maxProviderAttempts, delay.Round(time.Millisecond), describeProviderError(err))
+		retryEvt := contracts.ProviderRetryEvent{
 			RunID:          run.ID,
 			ConversationID: run.ConversationID,
 			MessageID:      messageID,
@@ -77,7 +78,13 @@ func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *do
 			MaxAttempts:    maxProviderAttempts,
 			DelayMS:        delay.Milliseconds(),
 			Error:          err.Error(),
-		})
+		}
+		var upstream *UpstreamError
+		if errors.As(err, &upstream) {
+			retryEvt.Kind = string(upstream.Kind)
+			retryEvt.Status = upstream.StatusCode
+		}
+		a.Bus.Emit(contracts.EventProviderRetry, retryEvt)
 		if err := a.retrySleeper(run.Ctx, delay); err != nil {
 			return roundResult, err
 		}
