@@ -124,6 +124,18 @@
                 <div class="agent-tool-job-list" id="tool-job-list"></div>
               </div>
 
+              <section class="agent-steer-queue" id="agent-steer-queue" hidden aria-label="Pending steer" aria-live="polite">
+                <div class="agent-steer-queue-head">
+                  <span class="agent-steer-queue-dot" aria-hidden="true"></span>
+                  <span class="agent-steer-queue-title" id="agent-steer-queue-title">1 steer queued</span>
+                  <span class="agent-steer-queue-state" id="agent-steer-queue-state">Waiting for a safe boundary</span>
+                </div>
+                <div class="agent-steer-queue-item" id="agent-steer-queue-list" role="list">
+                  <span class="agent-steer-queue-text" id="agent-steer-queue-text"></span>
+                  <button class="agent-steer-cancel" id="agent-steer-cancel" type="button" aria-label="Cancel queued steer" title="Cancel queued steer" hidden>×</button>
+                </div>
+              </section>
+
               <form class="agent-composer" id="agent-form">
                 <label class="sr-only" for="composer-input">Message to the agent</label>
                 <textarea id="composer-input" rows="1" placeholder="Describe what you want the shell to do…" title="Ctrl+Enter or ⌘↩ to send" autocomplete="off"></textarea>

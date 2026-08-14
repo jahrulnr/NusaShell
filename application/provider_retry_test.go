@@ -48,3 +48,61 @@ func TestIsRetryableProviderError(t *testing.T) {
 		})
 	}
 }
+
+// TestProviderRetryDelayRejectsLongRetryAfter verifies that a 429 with a
+// Retry-After exceeding the cutoff (e.g. OpenRouter proxying an upstream with
+// an 81-hour rate-limit reset) is NOT retried — the turn should fail fast so
+// the user sees the error instead of waiting hours inside a retry sleep.
+func TestProviderRetryDelayRejectsLongRetryAfter(t *testing.T) {
+	delay, retryable := providerRetryDelay(&UpstreamError{
+		StatusCode: 429,
+		RetryAfter: 81 * time.Hour,
+		Err:        errors.New("rate limited (reset after 81h 38m 41s)"),
+	}, 1)
+	if retryable {
+		t.Fatalf("expected retryable=false for RetryAfter=81h, got delay=%s", delay)
+	}
+	if delay != 0 {
+		t.Fatalf("expected delay=0 for non-retryable, got %s", delay)
+	}
+}
+
+// TestProviderRetryDelayAcceptsShortRetryAfter verifies that a 429 with a
+// Retry-After within the cutoff is still retried with the provider's delay.
+func TestProviderRetryDelayAcceptsShortRetryAfter(t *testing.T) {
+	delay, retryable := providerRetryDelay(&UpstreamError{
+		StatusCode: 429,
+		RetryAfter: 30 * time.Second,
+		Err:        errors.New("rate limited"),
+	}, 1)
+	if !retryable {
+		t.Fatal("expected retryable=true for RetryAfter=30s (within cutoff)")
+	}
+	if delay < 30*time.Second {
+		t.Fatalf("retry delay = %s, want at least Retry-After (30s)", delay)
+	}
+}
+
+// TestProviderRetryDelayAtCutoffBoundary verifies the boundary behavior:
+// exactly at the cutoff is retryable, just above is not.
+func TestProviderRetryDelayAtCutoffBoundary(t *testing.T) {
+	// Exactly at cutoff — retryable
+	_, retryable := providerRetryDelay(&UpstreamError{
+		StatusCode: 429,
+		RetryAfter: retryAfterCutoff,
+		Err:        errors.New("rate limited"),
+	}, 1)
+	if !retryable {
+		t.Fatalf("expected retryable=true at cutoff (%s)", retryAfterCutoff)
+	}
+
+	// Just above cutoff — not retryable
+	_, retryable = providerRetryDelay(&UpstreamError{
+		StatusCode: 429,
+		RetryAfter: retryAfterCutoff + 1*time.Second,
+		Err:        errors.New("rate limited"),
+	}, 1)
+	if retryable {
+		t.Fatalf("expected retryable=false just above cutoff (%s+1s)", retryAfterCutoff)
+	}
+}

@@ -20,6 +20,7 @@ func convDTO(c *domain.Conversation) contracts.ConversationDTO {
 		Effort:       c.Effort,
 		Status:       c.Status,
 		Workspace:    c.Workspace,
+		ChunkCount:   c.ChunkCount,
 	}
 }
 
@@ -110,6 +111,18 @@ func (a *App) handleConversationsGet(req contracts.ConversationIDRequest) (any, 
 		msgs = append(msgs, msgDTO(m))
 	}
 	return contracts.ConversationGetResult{Conversation: convDTO(c), Messages: msgs}, nil
+}
+
+func (a *App) handleConversationsChunk(req contracts.ConversationChunkRequest) (any, *contracts.RPCError) {
+	msgs, err := a.Conversations.GetChunk(req.ID, req.Index)
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
+	}
+	out := make([]contracts.MessageDTO, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, msgDTO(m))
+	}
+	return contracts.ConversationChunkResult{Messages: out}, nil
 }
 
 func (a *App) handleConversationsRename(req contracts.ConversationRenameRequest) (any, *contracts.RPCError) {

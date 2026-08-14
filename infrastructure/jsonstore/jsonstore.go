@@ -192,7 +192,71 @@ func (s *Store) Delete(id string) error {
 		return fmt.Errorf("%w: conversation %s", ErrNotFound, id)
 	}
 	delete(s.conversations, id)
-	return os.Remove(filepath.Join(s.dir, "conversations", id+".json"))
+	if err := os.Remove(filepath.Join(s.dir, "conversations", id+".json")); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	// Remove any archived chunks for this conversation.
+	chunkDir := filepath.Join(s.dir, "conversations", id+".chunks")
+	if entries, err := os.ReadDir(chunkDir); err == nil {
+		for _, e := range entries {
+			_ = os.Remove(filepath.Join(chunkDir, e.Name()))
+		}
+		_ = os.Remove(chunkDir)
+	}
+	return nil
+}
+
+// ArchiveChunk persists a slice of messages as an archived pre-compaction
+// chunk. The chunk index is sequential (0, 1, 2, ...) and returned to the
+// caller so the conversation can track ChunkCount.
+func (s *Store) ArchiveChunk(id string, messages []domain.Message) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	chunkDir := filepath.Join(s.dir, "conversations", id+".chunks")
+	if err := os.MkdirAll(chunkDir, 0o755); err != nil {
+		return 0, err
+	}
+	// Determine the next chunk index by scanning existing files.
+	entries, err := os.ReadDir(chunkDir)
+	if err != nil {
+		return 0, err
+	}
+	nextIndex := 0
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		nextIndex++
+	}
+	path := filepath.Join(chunkDir, fmt.Sprintf("chunk-%d.json", nextIndex))
+	b, err := json.MarshalIndent(messages, "", "  ")
+	if err != nil {
+		return 0, err
+	}
+	if err := atomicWrite(path, b); err != nil {
+		return 0, err
+	}
+	return nextIndex, nil
+}
+
+// GetChunk retrieves an archived chunk by index. Returns ErrNotFound if the
+// chunk file does not exist.
+func (s *Store) GetChunk(id string, index int) ([]domain.Message, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	path := filepath.Join(s.dir, "conversations", id+".chunks", fmt.Sprintf("chunk-%d.json", index))
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%w: chunk %d for conversation %s", ErrNotFound, index, id)
+		}
+		return nil, err
+	}
+	var msgs []domain.Message
+	if err := json.Unmarshal(b, &msgs); err != nil {
+		return nil, fmt.Errorf("chunk %d for %s: %w", index, id, err)
+	}
+	return msgs, nil
 }
 
 // migrateProviderKinds maps the pre-universal kind values (anthropic,

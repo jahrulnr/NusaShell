@@ -52,7 +52,11 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
       toast('Choose a model first (Models with a provider must be imported in Providers).', 'error');
       return;
     }
-    if (state.running) {
+    // Route to steering when a turn is running. Check both the in-memory run
+    // map (state.running) and the persisted conversation status — after a page
+    // refresh, state.runs may still be empty even though a turn is active
+    // server-side, and openConversation may not have finished re-attaching.
+    if (state.running || state.conversation?.status === 'running') {
       await sendSteer(text);
       return;
     }
@@ -72,6 +76,13 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
       renderAttachments();
       beginTurn(runID, text, attachments);
     } catch (error) {
+      // If the conversation is busy (a turn is already running server-side but
+      // the frontend hasn't re-attached yet), fall back to steering instead of
+      // showing a hard error.
+      if (error.message?.includes('conversation is busy')) {
+        await sendSteer(text);
+        return;
+      }
       toast(error.message, 'error');
     }
   }
@@ -81,7 +92,7 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
     try {
       state.steerDraft = text;
       const attachments = [...state.attachments];
-      const res = await rpc('agent.turns.steer', {
+      await rpc('agent.turns.steer', {
         conversation_id: state.activeId,
         text,
         attachments,
@@ -90,7 +101,9 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
       autosize();
       state.attachments = [];
       renderAttachments();
-      showSteerQueued(text, res.steer_id);
+      // showSteerQueued is handled by the agent.steer.queued event handler,
+      // not here — calling it explicitly would double-render the steer bubble
+      // (once from the RPC response, once from the event).
       updateSendAvailability(state);
     } catch (error) {
       toast(error.message, 'error');
@@ -146,7 +159,11 @@ export function updateSendAvailability(state) {
   const input = document.getElementById('composer-input');
   const send = document.getElementById('send-btn');
   const hasContent = input.value.trim() || state.attachments.length;
-  if (state.running) {
+  // Show steer mode when a turn is running — check both the in-memory run map
+  // and the persisted conversation status (after refresh, state.runs may be
+  // empty until reattachActiveRunFromBackend completes).
+  const running = state.running || state.conversation?.status === 'running';
+  if (running) {
     send.disabled = !hasContent;
     send.title = hasContent ? 'Steer · Ctrl+Enter (⌘↩ on Mac)' : 'Type a message to steer the agent';
   } else {

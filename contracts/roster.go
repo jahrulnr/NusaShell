@@ -14,11 +14,13 @@ const (
 	MethodConversationsRename        = "agent.conversations.rename"
 	MethodConversationsDelete        = "agent.conversations.delete"
 	MethodConversationsPickWorkspace = "agent.conversations.pick-workspace"
+	MethodConversationsChunk         = "agent.conversations.chunk"
 	MethodTurnsStart                 = "agent.turns.start"
 	MethodTurnsStop                  = "agent.turns.stop"
 	MethodTurnsRetry                 = "agent.turns.retry"
 	MethodTurnsSteer                 = "agent.turns.steer"
 	MethodTurnsCancelSteer           = "agent.turns.cancel-steer"
+	MethodTurnsActive                = "agent.turns.active"
 
 	MethodProvidersList   = "ai.providers.list"
 	MethodProvidersSave   = "ai.providers.save"
@@ -68,6 +70,7 @@ const (
 	EventSteerQueued    = "agent.steer.queued"
 	EventSteerApplied   = "agent.steer.applied"
 	EventSteerCancelled = "agent.steer.cancelled"
+	EventProviderRetry  = "agent.provider.retry"
 	EventLogAppend      = "logs.append"
 )
 
@@ -101,6 +104,7 @@ type ConversationDTO struct {
 	Effort       string `json:"effort,omitempty"`
 	Status       string `json:"status,omitempty"`
 	Workspace    string `json:"workspace,omitempty"`
+	ChunkCount   int    `json:"chunk_count,omitempty"`
 }
 
 type UsageDTO struct {
@@ -165,6 +169,18 @@ type ConversationIDRequest struct {
 	ID string `json:"id"`
 }
 
+// ConversationChunkRequest loads an archived pre-compaction chunk by index.
+// Chunks are indexed from 0 (oldest) to ChunkCount-1 (newest). The frontend
+// loads them in reverse order (newest chunk first) when the user scrolls up.
+type ConversationChunkRequest struct {
+	ID    string `json:"id"`
+	Index int    `json:"index"`
+}
+
+type ConversationChunkResult struct {
+	Messages []MessageDTO `json:"messages"`
+}
+
 type ConversationRenameRequest struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
@@ -207,6 +223,16 @@ type TurnSteerRequest struct {
 
 type TurnCancelSteerRequest struct {
 	ConversationID string `json:"conversation_id"`
+}
+
+// TurnActiveResult describes the currently running turn for a conversation.
+// Returned by agent.turns.active so a refreshed frontend can re-attach its
+// streaming UI and route new messages to steering instead of start.
+type TurnActiveResult struct {
+	RunID          string `json:"run_id"`
+	ConversationID string `json:"conversation_id"`
+	MessageID      string `json:"message_id"`
+	Active         bool   `json:"active"`
 }
 
 type TurnStartedEvent struct {
@@ -272,6 +298,20 @@ type SteerEvent struct {
 	SteerID        string `json:"steer_id,omitempty"`
 	Text           string `json:"text,omitempty"`
 	Status         string `json:"status"`
+}
+
+// ProviderRetryEvent is emitted when the agent retries a provider request
+// after a retryable error (429, 5xx, transient network). The frontend uses
+// this to show a "Retrying (2/3)…" banner so the user knows the agent is
+// not stuck.
+type ProviderRetryEvent struct {
+	RunID          string `json:"run_id"`
+	ConversationID string `json:"conversation_id"`
+	MessageID      string `json:"message_id"`
+	Attempt        int    `json:"attempt"`
+	MaxAttempts    int    `json:"max_attempts"`
+	DelayMS        int64  `json:"delay_ms"`
+	Error          string `json:"error"`
 }
 
 // ---- providers / models ----

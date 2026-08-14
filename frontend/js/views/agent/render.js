@@ -42,18 +42,13 @@ export function renderMessage(message) {
     return el('div', { class: 'agent-compaction-marker', text: message.content });
   }
   if (message.role === 'user') {
-    const waiting = message.steerWaiting;
     const node = el('div', { class: `agent-message user${message.steer ? ' agent-steer' : ''}` });
     const bubble = el('div', { class: 'agent-bubble' });
     bubble.append(el('div', { text: message.content || (message.attachments?.length ? 'Attached files' : '') }));
     if (message.attachments?.length) bubble.append(renderMessageAttachments(message.attachments));
     node.append(bubble);
     const meta = el('div', { class: 'agent-message-meta' });
-    if (waiting) {
-      meta.append(el('span', { class: 'agent-steer-waiting-flag', text: 'Waiting for agent…' }));
-      const cancelBtn = el('button', { class: 'agent-steer-cancel-inline', type: 'button', 'aria-label': 'Cancel queued steer', title: 'Cancel queued steer', text: 'Cancel' });
-      meta.append(cancelBtn);
-    } else if (message.steer) {
+    if (message.steer) {
       meta.append(el('span', { class: 'agent-message-steer-flag', text: 'Steer message' }));
     }
     meta.append(el('span', { text: fmtTime(message.created_at) }));

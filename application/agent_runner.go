@@ -164,6 +164,25 @@ func (a *App) activeRunForConversation(convID string) *TurnRun {
 	return nil
 }
 
+// handleTurnsActive returns the active run for a conversation, if any. Used by
+// a refreshed frontend to re-attach its streaming UI and route new messages to
+// steering instead of start when a turn is still running.
+func (a *App) handleTurnsActive(req contracts.ConversationIDRequest) (any, *contracts.RPCError) {
+	if strings.TrimSpace(req.ID) == "" {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "id is required"}
+	}
+	run := a.activeRunForConversation(req.ID)
+	if run == nil {
+		return contracts.TurnActiveResult{Active: false}, nil
+	}
+	return contracts.TurnActiveResult{
+		RunID:          run.ID,
+		ConversationID: run.ConversationID,
+		MessageID:      run.MessageID,
+		Active:         true,
+	}, nil
+}
+
 func (a *App) handleTurnsSteer(req contracts.TurnSteerRequest) (any, *contracts.RPCError) {
 	text := strings.TrimSpace(req.Text)
 	if text == "" {
@@ -243,6 +262,11 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 	toolRounds := 0
 	continuation := initialContinuation
 	continuedPartialStream := initialContinuation
+	// injectHydration is true on the first round of a turn (after the initial
+	// user message or post-compaction) and whenever a steer is applied (a new
+	// user message mid-turn). It is reset to false after the first round so
+	// subsequent tool rounds do not re-inject the synthetic transcript.
+	injectHydration := true
 	for {
 		round++
 		toolsForRound := toolDefs
@@ -255,7 +279,8 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 		a.Bus.Emit(contracts.EventTurnStarted, contracts.TurnStartedEvent{
 			RunID: run.ID, ConversationID: run.ConversationID, MessageID: currentMsgID, Round: round,
 		})
-		roundResult, streamErr := a.streamTurnRound(run, adapter, conversation, currentMsgID, model, effort, toolsForRound, settings, continuation, maxTokens)
+		roundResult, streamErr := a.streamTurnRound(run, adapter, conversation, currentMsgID, model, effort, toolsForRound, settings, continuation, maxTokens, injectHydration)
+		injectHydration = false // only the first round after a user message gets hydration
 		continuation = false
 		totalUsage = mergeUsage(totalUsage, roundResult.Response.Usage)
 		if streamErr != nil {
@@ -294,6 +319,25 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 		}
 
 		if len(roundResult.Response.ToolCalls) == 0 {
+			// The model finished without requesting tools. Before exiting the
+			// turn, drain any queued steer — if one is pending, inject it and
+			// continue the loop so the model gets a new round to respond to it
+			// instead of silently dropping the steer.
+			applied, steerConv, steerErr := a.applyQueuedSteer(run, currentMsgID)
+			if steerErr != nil {
+				a.failTurn(run, currentMsgID, steerErr)
+				return
+			}
+			if applied {
+				conversation = steerConv
+				conversation, currentMsgID, err = a.appendTurnAssistant(run.ConversationID)
+				if err != nil {
+					a.failTurn(run, currentMsgID, err)
+					return
+				}
+				injectHydration = true // steer is a new user message — re-hydrate
+				continue
+			}
 			break
 		}
 
@@ -306,22 +350,14 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 		// Drain any queued steer message at this safe boundary (between tool
 		// completion and the next provider round). The steer is appended as a
 		// real user message so the provider sees it in the next round's context.
-		if entry := run.drainSteer(); entry != nil {
-			c, steerErr := a.Conversations.Get(run.ConversationID)
-			if steerErr != nil {
-				a.failTurn(run, currentMsgID, steerErr)
-				return
-			}
-			c.AddMessage(entry.Message)
-			if err := a.Conversations.Save(c); err != nil {
-				a.failTurn(run, currentMsgID, err)
-				return
-			}
-			a.Bus.Emit(contracts.EventSteerApplied, contracts.SteerEvent{
-				ConversationID: run.ConversationID, SteerID: entry.ID, Text: entry.Text, Status: "applied",
-			})
-			a.log("info", "agent", "steer applied for %s: %s", run.ConversationID, entry.ID)
-			conversation = c
+		applied, steerConv, steerErr := a.applyQueuedSteer(run, currentMsgID)
+		if steerErr != nil {
+			a.failTurn(run, currentMsgID, steerErr)
+			return
+		}
+		if applied {
+			conversation = steerConv
+			injectHydration = true // steer is a new user message — re-hydrate
 		}
 
 		conversation, currentMsgID, err = a.appendTurnAssistant(run.ConversationID)
@@ -334,14 +370,38 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 	if err := a.finishTurn(run, asstMsgID, model, totalUsage); err != nil {
 		a.failTurn(run, asstMsgID, err)
 	}
-	// If a steer was queued but never applied (turn ended without a tool round
-	// boundary), cancel it so the frontend clears the queued steer card.
+	// If a steer was queued but never applied (turn ended without a safe
+	// boundary to inject it), cancel it so the frontend clears the queued
+	// steer card and restores the draft to the composer.
 	if run.queuedSteer() != nil {
-		run.cancelSteer()
+		entry := run.cancelSteerEntry()
 		a.Bus.Emit(contracts.EventSteerCancelled, contracts.SteerEvent{
-			ConversationID: run.ConversationID, Status: "cancelled",
+			ConversationID: run.ConversationID, Status: "cancelled", Text: entry.Text,
 		})
 	}
+}
+
+// applyQueuedSteer drains a queued steer and appends it as a real user message
+// at the current safe boundary. Returns (true, updatedConversation, nil) when a
+// steer was applied, (false, nil, nil) when no steer was queued.
+func (a *App) applyQueuedSteer(run *TurnRun, currentMsgID string) (bool, *domain.Conversation, error) {
+	entry := run.drainSteer()
+	if entry == nil {
+		return false, nil, nil
+	}
+	c, err := a.Conversations.Get(run.ConversationID)
+	if err != nil {
+		return false, nil, err
+	}
+	c.AddMessage(entry.Message)
+	if err := a.Conversations.Save(c); err != nil {
+		return false, nil, err
+	}
+	a.Bus.Emit(contracts.EventSteerApplied, contracts.SteerEvent{
+		ConversationID: run.ConversationID, SteerID: entry.ID, Text: entry.Text, Status: "applied",
+	})
+	a.log("info", "agent", "steer applied for %s: %s", run.ConversationID, entry.ID)
+	return true, c, nil
 }
 
 func canContinuePartialStream(err error, round streamedTurnRound) bool {
@@ -490,7 +550,7 @@ func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *do
 				msgs = append(msgs, ChatMessage{Role: "assistant", Content: m.Content, Reasoning: m.Reasoning, ToolCalls: m.ToolCalls})
 				for _, tc := range m.ToolCalls {
 					msgs = append(msgs, ChatMessage{Role: "tool", ToolResult: &ToolResult{
-						ToolCallID: tc.ID, Name: tc.Name, Content: tc.Output,
+						ToolCallID: tc.ID, Name: tc.Name, Content: wrapToolOutput(tc.Name, tc.Output),
 					}})
 				}
 			}
@@ -507,6 +567,18 @@ func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *do
 		runningSummary = resp.Content
 	}
 
+	// Archive the messages that will be dropped by compaction, then compact.
+	// Archived chunks preserve full message content (tool calls, reasoning,
+	// steps) for scroll-back retrieval in the UI.
+	toArchive := c.ArchiveMessages(effectiveKeepBudget)
+	if len(toArchive) > 0 {
+		idx, err := a.Conversations.ArchiveChunk(c.ID, toArchive)
+		if err != nil {
+			a.log("warn", "agent", "failed to archive chunk for %s: %v", c.ID, err)
+		} else {
+			c.ChunkCount = idx + 1
+		}
+	}
 	// Replace the conversation with the final summary marker + recent messages.
 	// Clear the old summary first so Compact sets rather than appends.
 	c.Summary = ""
@@ -674,7 +746,7 @@ func chatMessages(c *domain.Conversation, pendingMsgID string) []ChatMessage {
 			out = append(out, cm)
 			for _, tc := range m.ToolCalls {
 				out = append(out, ChatMessage{Role: "tool", ToolResult: &ToolResult{
-					ToolCallID: tc.ID, Name: tc.Name, Content: tc.Output,
+					ToolCallID: tc.ID, Name: tc.Name, Content: wrapToolOutput(tc.Name, tc.Output),
 				}})
 			}
 		case domain.RoleSystem:

@@ -78,7 +78,7 @@ func (b *HydrationBuilder) Build() HydrationResult {
 	calls := make([]domain.ToolCall, 0, len(slots))
 	for i, slot := range slots {
 		calls = append(calls, domain.ToolCall{
-			ID:   fmt.Sprintf("%s%s:%d", domain.HydrateToolCallPrefix, nonce, i),
+			ID:   fmt.Sprintf("%s%s_%d", domain.HydrateToolCallPrefix, nonce, i),
 			Name: slot.name,
 			Args: "{}",
 		})
@@ -218,7 +218,7 @@ func (b *HydrationBuilder) readToolList() hydrationSlot {
 }
 
 // FilterHydration drops the synthetic runtime-hydration exchange (assistant
-// toolCalls + tool results with "hydrate:" ids) from a message list before
+// toolCalls + tool results with "hydrate-" ids) from a message list before
 // summarization so the summary only reflects durable conversation content.
 // It also strips hydration tool calls from assistant messages that have both
 // real and hydration calls.

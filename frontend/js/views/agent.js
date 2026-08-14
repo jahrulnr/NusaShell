@@ -32,8 +32,15 @@ const state = {
   pendingEvents: new Map(), // run_id -> events that won the start race
   get running() { return runForConversation(this.activeId) !== null; },
   pinned: true, // auto-scroll only when the user is at the bottom (per-room, saved/restored)
-  steerNode: null, // DOM node for the pending steer bubble (per-room, saved/restored)
+  steerId: null, // id of the queued steer shown in the strip (per-room, saved/restored)
   steerDraft: '', // text of pending steer (per-room, saved/restored)
+  // Chunk-based lazy load: track how many pre-compaction chunks are available
+  // (from the backend) and which chunk index to load next (descending from
+  // ChunkCount-1 toward 0). loadedChunks prevents duplicate loads.
+  chunkCount: 0,
+  nextChunkIndex: -1,
+  loadedChunks: new Set(),
+  loadingChunk: false,
 };
 
 // Per-room state that survives conversation switches. When the user switches
@@ -142,7 +149,7 @@ async function createConversation(title = '') {
     state.conversation = conversation;
     state.messages = [];
     state.pinned = true;
-    state.steerNode = null;
+    state.steerId = null;
     state.steerDraft = '';
     state.attachments = [];
     await refreshConversations();
@@ -189,8 +196,9 @@ function renderConversationList() {
           state.conversation = null;
           state.messages = [];
           state.attachments = [];
-          state.steerNode = null;
+          state.steerId = null;
           state.steerDraft = '';
+          clearSteerQueue();
           renderEmptyThread();
           renderAttachments();
           updateComposerStatus();
@@ -214,6 +222,11 @@ async function openConversation(id) {
   const { conversation, messages } = await rpc('agent.conversations.get', { id });
   state.conversation = conversation;
   state.messages = messages ?? [];
+  // Reset chunk lazy-load state for the new conversation.
+  state.chunkCount = conversation?.chunk_count ?? 0;
+  state.nextChunkIndex = state.chunkCount - 1;
+  state.loadedChunks = new Set();
+  state.loadingChunk = false;
   // Restore per-room state (pinned, steerDraft, attachments, model).
   // If no saved state exists, defaults are applied.
   const hasSaved = loadRoomState(id);
@@ -224,21 +237,59 @@ async function openConversation(id) {
   }
   renderConversationList();
   renderThread(state.messages);
-  // Re-wire steer cancel button if there's a pending steer in the rendered thread.
-  const steerWaiting = state.messages.find((m) => m.steerWaiting);
-  if (steerWaiting) {
-    const userMessages = document.getElementById('agent-thread').querySelectorAll('.agent-message.user.agent-steer');
-    state.steerNode = userMessages[userMessages.length - 1] ?? null;
-    wireSteerCancel(state.steerNode);
-  }
+  // If the active conversation has very few bubbles (e.g. after compaction
+  // the active slice is just a marker + a handful of retained messages),
+  // proactively load the newest archived chunk so the user sees history
+  // immediately without having to scroll up.
+  maybeLoadOlderChunk();
   // If there's an active run for this conversation (e.g. user switched away
-  // and came back), re-attach the streaming UI to the rendered thread so
-  // live deltas continue updating the visible DOM.
+  // and came back, or page was refreshed while a turn was running), re-attach
+  // the streaming UI to the rendered thread so live deltas continue updating
+  // the visible DOM. After a page refresh, state.runs is empty, so query the
+  // backend for the active run first.
+  await reattachActiveRunFromBackend();
   reattachActiveRun();
+  // Restore the steer queue strip if a steer is still pending for this room.
+  // The strip is composer chrome, not part of the thread — it is re-shown
+  // from saved per-room state rather than re-rendered from messages.
+  if (state.steerDraft && state.running) {
+    showSteerQueued(state.steerDraft, state.steerId);
+  } else {
+    clearSteerQueue();
+  }
   // Re-render attachment chips for the restored attachments.
   renderAttachments();
   updateModelTrigger();
   updateComposerStatus();
+  updateSendAvailability(state);
+}
+
+// reattachActiveRunFromBackend queries the backend for the active run of the
+// current conversation. After a page refresh, state.runs is empty even though
+// a turn may still be running server-side. If a run is found, it is registered
+// into state.runs so that reattachActiveRun can wire the DOM and send() routes
+// to steering instead of start.
+async function reattachActiveRunFromBackend() {
+  if (!state.activeId) return;
+  if (runForConversation(state.activeId)) return; // already attached
+  if (state.conversation?.status !== 'running') return;
+  let active;
+  try {
+    active = await rpc('agent.turns.active', { id: state.activeId });
+  } catch {
+    return; // backend may not support the method yet; fail silently
+  }
+  if (!active?.active || !active.run_id) return;
+  // Register a minimal run entry. reattachActiveRun will populate the DOM
+  // references by replacing the last assistant message node.
+  state.runs.set(active.run_id, {
+    msgNode: null, bubble: null, strip: null, textBox: null, reasoningEl: null,
+    toolJobs: new Map(), raw: '', rawReasoning: '',
+    round: 1, conversationId: state.activeId, runId: active.run_id,
+    messageId: active.message_id,
+  });
+  flushPendingEvents(active.run_id);
+  document.getElementById('stop-btn').hidden = false;
   updateSendAvailability(state);
 }
 
@@ -324,7 +375,9 @@ function beginTurn(runId, userText, attachments = []) {
   // first round elements
   const reasoningEl = reasoningDisclosure('');
   reasoningEl.hidden = true;
-  const textBox = el('div', { class: 'agent-bubble-text', text: '…' });
+  const textBox = el('div', { class: 'agent-bubble-text' });
+  textBox.append(el('span', { class: 'agent-thinking-dots' },
+    el('span'), el('span'), el('span')));
   const strip = el('div', { class: 'agent-tool-stack' });
   strip.hidden = true;
   bubble.append(reasoningEl, textBox, strip);
@@ -399,12 +452,13 @@ function runForConversation(convId) {
 }
 
 // saveRoomState persists the per-room state for a conversation so it survives
-// room switches. DOM references (steerNode) are NOT saved — they will be
-// stale after renderThread. Only serializable/primitive state is saved.
+// room switches. DOM references are NOT saved — they will be stale after
+// renderThread. Only serializable/primitive state is saved.
 function saveRoomState(id) {
   if (!id) return;
   savedRooms.set(id, {
     pinned: state.pinned,
+    steerId: state.steerId,
     steerDraft: state.steerDraft,
     attachments: state.attachments,
     model: state.model,
@@ -417,9 +471,10 @@ function saveRoomState(id) {
 // from the conversation's persisted model or localStorage fallback.
 function loadRoomState(id) {
   const saved = savedRooms.get(id);
-  state.steerNode = null; // always reset; re-wired after renderThread if needed
+  state.steerId = null; // always reset; re-shown from saved state if pending
   if (saved) {
     state.pinned = saved.pinned;
+    state.steerId = saved.steerId ?? null;
     state.steerDraft = saved.steerDraft;
     state.attachments = saved.attachments;
     state.model = saved.model;
@@ -427,6 +482,7 @@ function loadRoomState(id) {
     return true;
   }
   state.pinned = true;
+  state.steerId = null;
   state.steerDraft = '';
   state.attachments = [];
   state.effort = 'auto';
@@ -443,12 +499,12 @@ function clearSavedSteerQueue(convId) {
   }
 }
 
-// wireSteerCancel attaches the click handler to a steer bubble's cancel button.
-// Used both by showSteerQueued (live) and after renderThread (room switch).
-function wireSteerCancel(node) {
-  if (!node) return;
-  const cancelBtn = node.querySelector('.agent-steer-cancel-inline');
-  if (!cancelBtn) return;
+// wireSteerCancelStrip attaches the click handler to the steer queue strip's
+// cancel button. Idempotent — safe to call multiple times.
+function wireSteerCancelStrip() {
+  const cancelBtn = document.getElementById('agent-steer-cancel');
+  if (!cancelBtn || cancelBtn.dataset.wired === '1') return;
+  cancelBtn.dataset.wired = '1';
   cancelBtn.addEventListener('click', async () => {
     if (!state.activeId) return;
     try {
@@ -488,6 +544,12 @@ function endTurn(runId) {
   if (!run) return;
   const convId = run.conversationId;
   run.msgNode.classList.remove('agent-pending');
+  // Clean up transient UI elements (thinking dots, retry banner, tool timers).
+  run.textBox?.querySelector('.agent-thinking-dots')?.remove();
+  run.bubble?.querySelector('.agent-retry-banner')?.remove();
+  for (const job of run.toolJobs?.values() ?? []) {
+    if (job._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
+  }
   state.runs.delete(runId);
   // Clear steer for this conversation (turn ended, unapplied steer is cancelled).
   if (convId === state.activeId) {
@@ -513,6 +575,8 @@ function bindScrollPin() {
   if (!thread) return;
   thread.addEventListener('scroll', () => {
     state.pinned = isAtBottom(thread);
+    // Lazy-load older chunks when the user scrolls to the top.
+    if (thread.scrollTop <= 4) maybeLoadOlderChunk();
   }, { passive: true });
 }
 
@@ -527,6 +591,74 @@ function scrollToBottom(force = false) {
   thread.scrollTop = thread.scrollHeight;
 }
 
+// ---- chunk-based lazy load ----
+
+// Count visible "bubbles" in the thread: user messages, assistant messages,
+// tool jobs, and reasoning blocks. Used to decide whether the active slice
+// is too sparse and an older chunk should be proactively loaded.
+function countThreadBubbles() {
+  const thread = document.getElementById('agent-thread');
+  if (!thread) return 0;
+  return thread.querySelectorAll(
+    '.agent-message.user, .agent-message.assistant, .agent-tool-terminal, .agent-reasoning',
+  ).length;
+}
+
+// maybeLoadOlderChunk triggers a chunk load when:
+// 1. There are chunks available (nextChunkIndex >= 0)
+// 2. No chunk is currently loading
+// 3. The thread has fewer than MIN_BUBBLES_FOR_PROACTIVE_LOAD bubbles OR the
+//    user has scrolled to the top (handled by the scroll listener)
+const MIN_BUBBLES_FOR_PROACTIVE_LOAD = 20;
+
+function maybeLoadOlderChunk() {
+  if (state.loadingChunk || state.nextChunkIndex < 0) return;
+  if (countThreadBubbles() >= MIN_BUBBLES_FOR_PROACTIVE_LOAD) return;
+  loadOlderChunk();
+}
+
+async function loadOlderChunk() {
+  if (state.loadingChunk || state.nextChunkIndex < 0 || !state.activeId) return;
+  state.loadingChunk = true;
+  const chunkIndex = state.nextChunkIndex;
+  const thread = document.getElementById('agent-thread');
+  // Save scroll anchor so we can restore position after prepending.
+  const prevHeight = thread?.scrollHeight ?? 0;
+  const prevScroll = thread?.scrollTop ?? 0;
+  try {
+    const result = await rpc('agent.conversations.chunk', { id: state.activeId, index: chunkIndex });
+    const chunkMsgs = result?.messages ?? [];
+    if (!chunkMsgs.length) {
+      // Empty chunk — treat as no more data.
+      state.nextChunkIndex = -1;
+      return;
+    }
+    state.loadedChunks.add(chunkIndex);
+    state.nextChunkIndex = chunkIndex - 1;
+    // Prepend chunk messages to state.messages and to the DOM thread.
+    state.messages = [...chunkMsgs, ...state.messages];
+    const fragment = renderConversation(chunkMsgs, retryTurn);
+    // Insert a "Load older" sentinel above the chunk so the user can manually
+    // trigger the next load if the proactive threshold is not met.
+    thread?.insertBefore(fragment, thread.firstChild);
+    // Restore scroll position so the user doesn't jump.
+    if (thread) {
+      const newHeight = thread.scrollHeight;
+      thread.scrollTop = prevScroll + (newHeight - prevHeight);
+    }
+  } catch (err) {
+    // 404 / no more chunks — stop trying.
+    state.nextChunkIndex = -1;
+  } finally {
+    state.loadingChunk = false;
+    // If the thread is still sparse after loading, keep going until we hit
+    // the threshold or run out of chunks.
+    if (state.nextChunkIndex >= 0 && countThreadBubbles() < MIN_BUBBLES_FOR_PROACTIVE_LOAD) {
+      loadOlderChunk();
+    }
+  }
+}
+
 function bindEvents() {
   on('agent.turn.started', (payload) => {
     const { run_id, message_id, round, conversation_id } = payload;
@@ -539,7 +671,11 @@ function bindEvents() {
       run.raw = '';
       run.rawReasoning = '';
       run.round = 1;
-      if (conversation_id === state.activeId && run.textBox) run.textBox.textContent = '';
+      if (conversation_id === state.activeId && run.textBox) {
+        run.textBox.textContent = '';
+        run.textBox.append(el('span', { class: 'agent-thinking-dots' },
+          el('span'), el('span'), el('span')));
+      }
       return;
     }
     // Track round even when not active so re-attach knows the current round.
@@ -553,6 +689,8 @@ function bindEvents() {
     const reasoningEl = reasoningDisclosure('');
     reasoningEl.hidden = true;
     const textBox = el('div', { class: 'agent-bubble-text' });
+    textBox.append(el('span', { class: 'agent-thinking-dots' },
+      el('span'), el('span'), el('span')));
     const strip = el('div', { class: 'agent-tool-stack' });
     strip.hidden = true;
     run.bubble.append(reasoningEl, textBox, strip);
@@ -569,6 +707,10 @@ function bindEvents() {
     run.raw += text;
     // Only update DOM if this conversation is the active one.
     if (conversation_id !== state.activeId || !run.textBox) return;
+    // Remove thinking dots / retry banner on first delta.
+    run.textBox.querySelector('.agent-thinking-dots')?.remove();
+    const banner = run.bubble.querySelector('.agent-retry-banner');
+    if (banner && run.raw) banner.remove();
     run.textBox.innerHTML = renderMarkdown(run.raw);
     scrollToBottom();
   });
@@ -580,10 +722,33 @@ function bindEvents() {
     if (conversation_id !== state.activeId) return;
     if (run.reasoningEl) {
       run.reasoningEl.hidden = false;
+      // Remove thinking dots when reasoning starts arriving.
+      run.textBox?.querySelector('.agent-thinking-dots')?.remove();
       const content = run.reasoningEl.querySelector('.agent-reasoning-content');
       if (content) content.innerHTML = renderMarkdown(run.rawReasoning);
       scrollToBottom();
     }
+  });
+  on('agent.provider.retry', (payload) => {
+    const { attempt, max_attempts, delay_ms, error, conversation_id } = payload;
+    const run = getRunOrQueue('agent.provider.retry', payload);
+    if (!run) return;
+    if (conversation_id !== state.activeId) return;
+    // Remove any previous retry banner, then show a new one at the top of the
+    // bubble so the user sees the agent is retrying, not stuck.
+    run.bubble.querySelector('.agent-retry-banner')?.remove();
+    const delaySec = Math.round((delay_ms || 0) / 100) / 10;
+    const shortErr = (error || '').replace(/^provider returned HTTP \d+: /, '').slice(0, 120);
+    const banner = el('div', { class: 'agent-retry-banner' });
+    banner.append(
+      el('span', { class: 'agent-retry-banner-icon' }),
+      el('span', { text: `Retrying (${attempt}/${max_attempts})${delaySec > 0 ? ` in ${delaySec}s` : ''} — ${shortErr}` }),
+    );
+    // Insert at the top of the bubble, before reasoning/text/strip.
+    run.bubble.prepend(banner);
+    // Also clear thinking dots since we're now in retry state, not initial wait.
+    run.textBox?.querySelector('.agent-thinking-dots')?.remove();
+    scrollToBottom();
   });
   on('agent.tool.started', (payload) => {
     const { tool_call_id, name, args, conversation_id } = payload;
@@ -594,6 +759,18 @@ function bindEvents() {
     const job = renderToolJob({ name, args: args ?? {}, status: 'running' });
     run.toolJobs.set(tool_call_id, job);
     run.strip.append(job);
+    // Start an elapsed timer so the user can see how long the tool has been
+    // running. The timer is stored on the job element and cleared on complete.
+    const startTime = Date.now();
+    const elapsedEl = job.querySelector('.agent-tool-elapsed') || el('span', { class: 'agent-tool-elapsed', text: '0s' });
+    if (!elapsedEl.parentElement) {
+      const head = job.querySelector('.agent-tool-job-card-head') || job;
+      head.append(elapsedEl);
+    }
+    job._elapsedTimer = setInterval(() => {
+      const secs = Math.floor((Date.now() - startTime) / 1000);
+      elapsedEl.textContent = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
+    }, 1000);
   });
   on('agent.tool.completed', (payload) => {
     const { tool_call_id, status, output, conversation_id } = payload;
@@ -602,6 +779,8 @@ function bindEvents() {
     if (conversation_id !== state.activeId) return;
     const job = run.toolJobs.get(tool_call_id);
     if (!job) return;
+    // Clear the elapsed timer — the final duration stays displayed.
+    if (job._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
     const next = { name: job.querySelector('.agent-tool-terminal-title')?.textContent, args: job._toolArgs, status: status || 'ok', output };
     setToolTerminalStatus(job, next.status);
     job.open = false;
@@ -668,55 +847,89 @@ function bindEvents() {
     if (conversation_id !== state.activeId) return;
     promoteSteerToTranscript(text);
   });
-  on('agent.steer.cancelled', ({ conversation_id }) => {
+  on('agent.steer.cancelled', ({ conversation_id, text }) => {
     if (conversation_id !== state.activeId) return;
     clearSteerQueue();
+    // Restore the steer text to the composer so the user can re-send it as a
+    // new message. The steer was never applied — it was cancelled because the
+    // turn ended without reaching a safe boundary to inject it.
+    if (text) {
+      const input = document.getElementById('composer-input');
+      if (input && !input.value.trim()) {
+        input.value = text;
+        input.dispatchEvent(new Event('input'));
+      }
+      toast('Steer was not applied (turn ended before a safe boundary). Text restored to composer.', 'info');
+    }
   });
 }
 
 function showSteerQueued(text, steerId) {
-  const thread = document.getElementById('agent-thread');
-  const steerMessage = { role: 'user', content: text, steer: true, steerWaiting: true, created_at: new Date().toISOString() };
-  state.messages.push(steerMessage);
-  const node = renderMessage(steerMessage);
-  state.steerNode = node;
-  thread.append(node);
-  wireSteerCancel(node);
-  scrollToBottom(true);
+  // Render the steer as a queue strip above the composer, NOT a bubble in the
+  // thread. The steer only becomes a thread bubble once the runner applies it
+  // at a safe boundary (promoteSteerToTranscript). Mirrors Electron.
+  state.steerDraft = text;
+  state.steerId = steerId;
+  const root = document.getElementById('agent-steer-queue');
+  if (!root) return;
+  document.getElementById('agent-steer-queue-text').textContent = text;
+  document.getElementById('agent-steer-queue-title').textContent = '1 steer queued';
+  document.getElementById('agent-steer-queue-state').textContent = 'Waiting for a safe boundary';
+  const cancelBtn = document.getElementById('agent-steer-cancel');
+  cancelBtn.hidden = false;
+  root.hidden = false;
+  wireSteerCancelStrip();
 }
 
 function clearSteerQueue() {
-  if (state.steerNode) {
-    state.steerNode.remove();
-    state.steerNode = null;
-  }
-  // remove from state.messages
-  const idx = state.messages.findIndex((m) => m.steerWaiting);
-  if (idx >= 0) state.messages.splice(idx, 1);
+  state.steerId = null;
   state.steerDraft = '';
+  const root = document.getElementById('agent-steer-queue');
+  if (root) root.hidden = true;
+  const cancelBtn = document.getElementById('agent-steer-cancel');
+  if (cancelBtn) cancelBtn.hidden = true;
 }
 
 function promoteSteerToTranscript(text) {
-  if (state.steerNode) {
-    // Replace the waiting bubble with a normal steer message
-    const thread = document.getElementById('agent-thread');
-    const steerMessage = { role: 'user', content: text, steer: true, created_at: new Date().toISOString() };
-    // update state.messages: replace the waiting entry
-    const idx = state.messages.findIndex((m) => m.steerWaiting);
-    if (idx >= 0) state.messages[idx] = steerMessage;
-    else state.messages.push(steerMessage);
-    const newNode = renderMessage(steerMessage);
-    state.steerNode.replaceWith(newNode);
-    state.steerNode = null;
-    scrollToBottom(true);
+  // The queued steer was applied at a safe boundary — clear the strip and
+  // insert the steer as a real user message in the thread, BETWEEN the
+  // current assistant bubble (round 1) and the next assistant bubble
+  // (round 2+). A new assistant placeholder is created after the steer so
+  // the agent.turn.started round 2+ handler appends streaming elements to
+  // the new bubble, not the sealed one. Without this, the steer would be
+  // appended at the end of the thread (after the streaming assistant) and
+  // appear pushed down during live streaming.
+  clearSteerQueue();
+  const thread = document.getElementById('agent-thread');
+  if (!thread) return;
+  const steerMessage = { role: 'user', content: text, steer: true, created_at: new Date().toISOString() };
+  state.messages.push(steerMessage);
+  const steerNode = renderMessage(steerMessage);
+  // Find the active run's assistant node. Insert the steer after it, then
+  // create a fresh assistant placeholder after the steer for round 2+.
+  const run = runForConversation(state.activeId);
+  if (run?.msgNode) {
+    run.msgNode.after(steerNode);
+    // Seal the old bubble: remove empty tool strip, clear pending state.
+    run.msgNode.classList.remove('agent-pending');
+    if (run.strip && run.strip.hidden) run.strip.remove();
+    // Create a new assistant placeholder for the next round.
+    const newBubble = el('div', { class: 'agent-bubble' });
+    const newMsgNode = el('div', { class: 'agent-message assistant agent-pending' }, newBubble);
+    steerNode.after(newMsgNode);
+    // Update run references so agent.turn.started round 2+ appends to the
+    // new bubble. textBox/reasoningEl/strip will be set by the round 2+
+    // handler; clear them here so stale references are not used.
+    run.msgNode = newMsgNode;
+    run.bubble = newBubble;
+    run.textBox = null;
+    run.reasoningEl = null;
+    run.strip = null;
+    run.toolJobs = new Map();
   } else {
-    // Steer was applied but we don't have a pending node (e.g. page refresh)
-    const thread = document.getElementById('agent-thread');
-    const steerMessage = { role: 'user', content: text, steer: true, created_at: new Date().toISOString() };
-    state.messages.push(steerMessage);
-    thread.append(renderMessage(steerMessage));
-    scrollToBottom(true);
+    thread.append(steerNode);
   }
+  scrollToBottom(true);
 }
 
 async function refreshActiveConversation() {
@@ -725,7 +938,13 @@ async function refreshActiveConversation() {
     const { conversation, messages } = await rpc('agent.conversations.get', { id: state.activeId });
     state.conversation = conversation;
     state.messages = messages ?? [];
+    // Reset chunk state — compaction may have created new chunks.
+    state.chunkCount = conversation?.chunk_count ?? 0;
+    state.nextChunkIndex = state.chunkCount - 1;
+    state.loadedChunks = new Set();
+    state.loadingChunk = false;
     renderThread(state.messages);
+    maybeLoadOlderChunk();
     updateComposerStatus();
   } catch (err) {
     // The list refresh will surface a deleted conversation if it raced a turn.
@@ -808,10 +1027,13 @@ function updateComposerStatus() {
   workspaceButton.title = workspace || 'Home (user home directory)';
 
   const status = document.getElementById('agent-provider-status');
-  if (state.running) {
+  if (state.running || state.conversation?.status === 'running') {
     status.textContent = 'Running…';
+    status.classList.add('is-running');
+    document.getElementById('stop-btn').hidden = false;
     return;
   }
+  status.classList.remove('is-running');
   const chosen = models.find((model) => model.id === state.model);
   if (!chosen) {
     status.textContent = 'Choose a model';

@@ -11,6 +11,12 @@ const (
 	maxProviderAttempts = 3
 	retryBaseDelay      = 250 * time.Millisecond
 	retryMaxDelay       = 4 * time.Second
+	// retryAfterCutoff is the maximum Retry-After the agent will honor. If a
+	// provider advertises a longer reset window (e.g. OpenRouter proxying an
+	// upstream with an 81-hour rate-limit reset), the error is not retried —
+	// the turn fails immediately so the user sees the error and can retry
+	// manually when the rate limit clears.
+	retryAfterCutoff = 5 * time.Minute
 )
 
 // UpstreamError carries retry metadata from a provider adapter without making
@@ -57,6 +63,13 @@ func providerRetryDelay(err error, retry int) (time.Duration, bool) {
 	}
 	var upstream *UpstreamError
 	_ = errors.As(err, &upstream)
+
+	// If the provider advertises a Retry-After longer than the cutoff, do not
+	// retry — the rate-limit window is too long to wait inside a turn. Fail
+	// fast so the user sees the error and can retry manually later.
+	if upstream != nil && upstream.RetryAfter > retryAfterCutoff {
+		return 0, false
+	}
 
 	delay := retryBaseDelay
 	for i := 1; i < retry && delay < retryMaxDelay; i++ {

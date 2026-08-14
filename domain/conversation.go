@@ -89,16 +89,17 @@ type Message struct {
 }
 
 type Conversation struct {
-	ID        string
-	Title     string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	Model     string
-	Effort    string // reasoning effort: "auto" (omit) or a level from the model's SupportedEfforts
-	Status    string // idle | running
-	Summary   string // compaction summary, "" when never compacted
-	Workspace string // optional absolute working directory selected for this conversation
-	Messages  []Message
+	ID         string
+	Title      string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	Model      string
+	Effort     string // reasoning effort: "auto" (omit) or a level from the model's SupportedEfforts
+	Status     string // idle | running
+	Summary    string // compaction summary, "" when never compacted
+	Workspace  string // optional absolute working directory selected for this conversation
+	Messages   []Message
+	ChunkCount int // number of archived pre-compaction chunks available for scroll-back
 }
 
 // NewConversation creates an empty conversation.
@@ -219,6 +220,36 @@ func (c *Conversation) Compact(summary string, keepTokenBudget int) {
 
 	c.Messages = append([]Message{marker}, retained...)
 	c.Touch()
+}
+
+// ArchiveMessages returns the messages that would be dropped by a compaction
+// with the given keep-token budget. The returned slice preserves full message
+// content (tool calls, reasoning, steps) so it can be archived for later
+// scroll-back retrieval. Call this before Compact to capture what will be
+// dropped. Returns nil if nothing would be archived (everything fits).
+func (c *Conversation) ArchiveMessages(keepTokenBudget int) []Message {
+	remaining := keepTokenBudget
+	retainedCount := 0
+	for i := len(c.Messages) - 1; i >= 0; i-- {
+		if remaining <= 0 {
+			break
+		}
+		msg := stripForRetention(c.Messages[i])
+		tokens := msg.EstimateTokens()
+		if tokens <= remaining {
+			retainedCount++
+			remaining -= tokens
+		} else {
+			retainedCount++ // truncated but still retained
+			remaining = 0
+		}
+	}
+	if retainedCount >= len(c.Messages) {
+		return nil
+	}
+	archived := make([]Message, len(c.Messages)-retainedCount)
+	copy(archived, c.Messages[:len(c.Messages)-retainedCount])
+	return archived
 }
 
 // stripForRetention returns a copy of the message with tool calls, reasoning,

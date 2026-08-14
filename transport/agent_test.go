@@ -561,6 +561,91 @@ func TestAgentTurnSteerRejectedWhenIdle(t *testing.T) {
 	}
 }
 
+// TestAgentTurnSteerAppliedOnNoToolCallExit verifies that a steer queued while
+// the model is producing a text-only response (no tool calls) is still applied
+// before the turn ends. Previously the steer was silently cancelled because
+// drainSteer was only called after tool execution, not before the no-tool-calls
+// break.
+func TestAgentTurnSteerAppliedOnNoToolCallExit(t *testing.T) {
+	h := newHarness(t, nil)
+	pid := h.addOpenAIProvider(t, "Fake")
+	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
+	convID := h.newConversation(t)
+
+	// Round 1: text-only response (no tool calls). The turn would normally
+	// end here, but a queued steer should be drained and the model given a
+	// new round to respond to it.
+	// Round 2: text-only response to the steer.
+	h.llm.setRounds([][]llmStep{
+		{{Text: "Here is your answer."}},
+		{{Text: "Acknowledged the steer."}},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	steerApplied := make(chan map[string]any, 1)
+	go func() {
+		frames, err := readSSEUntil(t, ctx, h.server.URL+"/events", contracts.EventSteerApplied)
+		if err != nil {
+			steerApplied <- nil
+			return
+		}
+		for _, f := range frames {
+			if f["type"] == contracts.EventSteerApplied {
+				steerApplied <- f
+				return
+			}
+		}
+		steerApplied <- nil
+	}()
+	time.Sleep(100 * time.Millisecond)
+
+	h.rpcOK(t, "agent.turns.start", map[string]any{
+		"conversation_id": convID, "text": "tell me something", "model": "fake-model-1",
+	})
+
+	// Wait for the turn to be running, then queue a steer.
+	waitTurnRunning(t, h, convID)
+	h.rpcOK(t, "agent.turns.steer", map[string]any{
+		"conversation_id": convID, "text": "Wait, actually tell me about cats.",
+	})
+
+	// The steer should be applied even though round 1 had no tool calls.
+	select {
+	case f := <-steerApplied:
+		if f == nil {
+			t.Fatal("steer applied event not received")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for steer applied event (steer was not drained on no-tool-call exit)")
+	}
+
+	waitTurnDone(t, h, convID)
+
+	// Verify the steer message is in the conversation.
+	gotten := h.rpcOK(t, "agent.conversations.get", map[string]any{"id": convID})
+	var conv struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+			Steer   bool   `json:"steer"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(gotten.Result, &conv); err != nil {
+		t.Fatal(err)
+	}
+	foundSteer := false
+	for _, m := range conv.Messages {
+		if m.Role == "user" && m.Steer && strings.Contains(m.Content, "tell me about cats") {
+			foundSteer = true
+		}
+	}
+	if !foundSteer {
+		t.Fatalf("steer message not found in conversation: %+v", conv.Messages)
+	}
+}
+
 func waitTurnRunning(t *testing.T, h *harness, convID string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

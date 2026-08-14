@@ -15,6 +15,13 @@ type ConversationStore interface {
 	Get(id string) (*domain.Conversation, error)
 	Save(c *domain.Conversation) error
 	Delete(id string) error
+	// ArchiveChunk persists a slice of messages as an archived pre-compaction
+	// chunk for later scroll-back retrieval. The chunk index is assigned by
+	// the store (sequential, starting from 0).
+	ArchiveChunk(id string, messages []domain.Message) (int, error)
+	// GetChunk retrieves an archived chunk by index. Returns ErrNotFound if
+	// the chunk does not exist.
+	GetChunk(id string, index int) ([]domain.Message, error)
 }
 
 type ProviderStore interface {

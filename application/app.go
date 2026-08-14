@@ -116,6 +116,21 @@ func (r *TurnRun) cancelSteer() bool {
 	return true
 }
 
+// cancelSteerEntry removes a queued steer and returns it (with its text) so the
+// caller can emit a cancel event that lets the frontend restore the draft to
+// the composer. Returns nil if no queued steer exists.
+func (r *TurnRun) cancelSteerEntry() *SteerEntry {
+	r.steerMu.Lock()
+	defer r.steerMu.Unlock()
+	if r.steerQueued == nil || r.steerQueued.Status != "queued" {
+		return nil
+	}
+	r.steerQueued.Status = "cancelled"
+	entry := r.steerQueued
+	r.steerQueued = nil
+	return entry
+}
+
 // drainSteer returns the queued steer entry and marks it applied, or nil if
 // no steer is queued. Called by the agent loop at a safe boundary.
 func (r *TurnRun) drainSteer() *SteerEntry {
@@ -224,6 +239,12 @@ func (a *App) Dispatch(method string, payload json.RawMessage) (any, *contracts.
 			return nil, rpcErr
 		}
 		return a.handleConversationsGet(req)
+	case contracts.MethodConversationsChunk:
+		var req contracts.ConversationChunkRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleConversationsChunk(req)
 	case contracts.MethodConversationsRename:
 		var req contracts.ConversationRenameRequest
 		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
@@ -272,6 +293,12 @@ func (a *App) Dispatch(method string, payload json.RawMessage) (any, *contracts.
 			return nil, rpcErr
 		}
 		return a.handleTurnsCancelSteer(req)
+	case contracts.MethodTurnsActive:
+		var req contracts.ConversationIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleTurnsActive(req)
 	case contracts.MethodProvidersList:
 		return a.handleProvidersList()
 	case contracts.MethodProvidersSave:

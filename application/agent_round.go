@@ -58,24 +58,33 @@ func (a *App) toolDefinitions() []ToolDef {
 	return definitions
 }
 
-func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int) (streamedTurnRound, error) {
+func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool) (streamedTurnRound, error) {
 	for retry := 1; ; retry++ {
-		round, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, maxTokens)
-		if err == nil || retry >= maxProviderAttempts || round.Content != "" || round.Reasoning != "" {
-			return round, err
+		roundResult, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, maxTokens, injectHydration)
+		if err == nil || retry >= maxProviderAttempts || roundResult.Content != "" || roundResult.Reasoning != "" {
+			return roundResult, err
 		}
 		delay, retryable := providerRetryDelay(err, retry)
 		if !retryable {
-			return round, err
+			return roundResult, err
 		}
 		a.log("warn", "ai", "retrying provider stream for turn %s (%d/%d) after %s: %v", run.ID, retry, maxProviderAttempts, delay.Round(time.Millisecond), err)
+		a.Bus.Emit(contracts.EventProviderRetry, contracts.ProviderRetryEvent{
+			RunID:          run.ID,
+			ConversationID: run.ConversationID,
+			MessageID:      messageID,
+			Attempt:        retry + 1,
+			MaxAttempts:    maxProviderAttempts,
+			DelayMS:        delay.Milliseconds(),
+			Error:          err.Error(),
+		})
 		if err := a.retrySleeper(run.Ctx, delay); err != nil {
-			return round, err
+			return roundResult, err
 		}
 	}
 }
 
-func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int) (streamedTurnRound, error) {
+func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool) (streamedTurnRound, error) {
 	var content strings.Builder
 	var reasoning strings.Builder
 	system := buildSystemPrompt(conversation)
@@ -91,7 +100,16 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 	// baking volatile values into the stable system prompt prefix (which would
 	// break prompt-cache hits). The transcript is never persisted in the
 	// conversation store.
-	messages = append(messages, a.buildHydration(conversation)...)
+	//
+	// Hydration is injected exactly once per user message: on the first round
+	// of a turn (after the initial user message or post-compaction), and once
+	// more when a steer is applied (a new user message mid-turn). Re-injecting
+	// every tool round causes smaller models to misinterpret the synthetic
+	// tool calls as a pattern to repeat ("call all tools in parallel every
+	// round"), leading to redundant parallel tool calls.
+	if injectHydration {
+		messages = append(messages, a.buildHydration(conversation)...)
+	}
 	response, err := adapter.Stream(run.Ctx, ChatRequest{
 		Model:         model,
 		System:        system,

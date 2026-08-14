@@ -325,9 +325,9 @@ func TestHasHydrationFalseIncomplete(t *testing.T) {
 	messages := []ChatMessage{
 		{Role: "user", Content: "hello"},
 		{Role: "assistant", ToolCalls: []domain.ToolCall{
-			{ID: "hydrate:abc:0", Name: "runtime_context", Args: "{}"},
+			{ID: "hydrate-abc_0", Name: "runtime_context", Args: "{}"},
 		}},
-		// No tool result for hydrate:abc:0
+		// No tool result for hydrate-abc_0
 		{Role: "assistant", Content: "hi"},
 	}
 	if HasHydration(messages) {

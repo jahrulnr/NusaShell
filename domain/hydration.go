@@ -5,10 +5,14 @@ package domain
 // precomputed snapshots (runtime_context, memory, skill_list, mcp_list,
 // tool_list), never real gateway executions. They are filtered from compaction
 // summaries and UI rendering.
-const HydrateToolCallPrefix = "hydrate:"
+//
+// The prefix uses only characters allowed by strict provider ID patterns
+// (e.g. Bedrock requires ^[a-zA-Z0-9_-]+$). The previous "hydrate:" prefix
+// contained a colon which Bedrock rejected.
+const HydrateToolCallPrefix = "hydrate-"
 
 // IsHydrationCallID returns true when a tool call ID belongs to the hidden
-// hydration transcript (prefix "hydrate:").
+// hydration transcript (prefix "hydrate-").
 func IsHydrationCallID(id string) bool {
 	return len(id) >= len(HydrateToolCallPrefix) && id[:len(HydrateToolCallPrefix)] == HydrateToolCallPrefix
 }
