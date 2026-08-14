@@ -35,8 +35,9 @@ type App struct {
 	WorkspacePicker WorkspacePicker
 	retrySleeper    RetrySleeper
 
-	runsMu sync.Mutex
-	runs   map[string]*TurnRun
+	runsMu  sync.Mutex
+	runs    map[string]*TurnRun
+	startMu sync.Mutex
 }
 
 // MCPToolbox gives use cases access to connected MCP servers and their tools.

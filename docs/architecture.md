@@ -4,7 +4,8 @@ NusaShell Light is a local, personal AI shell: a Go binary that serves an
 embedded vanilla JS/HTML/CSS frontend and brokers conversations with
 Messages / Responses / Chat format providers, skills, memory, docs and MCP
 servers. There is no security layer by design (no auth, no rate limiting);
-run it on localhost or a trusted network only.
+the process listens on `127.0.0.1` by default. Bind it to another address
+only on a trusted network (`NUSASHELL_HOST`).
 
 ## Layers
 
@@ -64,20 +65,24 @@ unchanged.
 to four attachments per turn, each at most 4 MiB: UTF-8 text (`text/plain`),
 PNG/JPEG/GIF/WebP images, and PDF documents. Text is sent as text; binary
 attachments are persisted and mapped to each provider's native multimodal
-wire format. Attachment byte signatures and data URL media types are
-validated at the application boundary.
+wire format. Attachment UTF-8 validity, byte signatures, and data URL media
+types are validated at the application boundary. HTTP `/rpc` accepts bodies
+up to 24 MiB so four encoded attachments fit the envelope.
 
 The composer presents an estimated context counter based on the persisted
 conversation and the selected model's `context` window. It is a UI estimate,
 not provider-reported token accounting; the exact request usage remains in
-the assistant turn metadata.
+the assistant turn metadata. Message size estimates ignore provider usage
+totals and do not double-count chronological `steps` against mirrored
+content, reasoning, or tool-call fields.
 
 ### Compaction
 
-When the conversation's estimated tokens exceed
-`settings.compaction_threshold` (default 40000), the provider summarizes the
-history non-streaming, the summary replaces the oldest messages behind a
-marker, and `agent.compacted` is emitted.
+When the conversation's estimated tokens exceed the lesser of
+`settings.compaction_threshold` (default 40000) and 80% of the model's
+context window, the provider summarizes the history non-streaming, the
+summary replaces the oldest messages behind a marker, and `agent.compacted`
+is emitted.
 
 ### Upstream recovery
 

@@ -282,6 +282,7 @@ func (a *AnthropicAdapter) Stream(ctx context.Context, req application.ChatReque
 			Message *struct {
 				Usage anthropicUsage `json:"usage"`
 			} `json:"message"`
+			Usage *anthropicUsage `json:"usage"`
 		}
 		if err := decodeData(ev, &frame); err != nil {
 			return err
@@ -311,7 +312,9 @@ func (a *AnthropicAdapter) Stream(ctx context.Context, req application.ChatReque
 				}
 			}
 		case "message_delta":
-			// usage deltas arrive here; keep the message_start baseline
+			if frame.Usage != nil {
+				result.Usage = mergeAnthropicUsage(result.Usage, *frame.Usage)
+			}
 		case "message_stop":
 			completed = true
 		case "error":
@@ -391,4 +394,21 @@ func anthropicUsageToChat(u anthropicUsage) application.ChatUsage {
 		CacheRead:    u.CacheReadInputTokens,
 		CacheWrite:   u.CacheCreationInputTokens,
 	}
+}
+
+func mergeAnthropicUsage(current application.ChatUsage, delta anthropicUsage) application.ChatUsage {
+	merged := anthropicUsageToChat(delta)
+	if merged.InputTokens == 0 {
+		merged.InputTokens = current.InputTokens
+	}
+	if merged.CacheRead == 0 {
+		merged.CacheRead = current.CacheRead
+	}
+	if merged.CacheWrite == 0 {
+		merged.CacheWrite = current.CacheWrite
+	}
+	if merged.OutputTokens == 0 {
+		merged.OutputTokens = current.OutputTokens
+	}
+	return merged
 }

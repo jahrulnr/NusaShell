@@ -47,6 +47,7 @@ const state = {
   // (e.g. a fetch that resolves after the user switched to another room).
   todos: { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 } },
   todoRenderToken: 0,
+  conversationLoadToken: 0,
 };
 
 // Per-room state that survives conversation switches. When the user switches
@@ -229,9 +230,11 @@ function renderConversationList() {
 async function openConversation(id) {
   // Save per-room state for the current conversation before switching.
   saveRoomState(state.activeId);
+  const token = ++state.conversationLoadToken;
   state.activeId = id;
   // the backend returns messages as a sibling of conversation
   const { conversation, messages } = await rpc('agent.conversations.get', { id });
+  if (token !== state.conversationLoadToken) return;
   state.conversation = conversation;
   state.messages = messages ?? [];
   // Reset chunk lazy-load state for the new conversation.
@@ -260,6 +263,7 @@ async function openConversation(id) {
   // the visible DOM. After a page refresh, state.runs is empty, so query the
   // backend for the active run first.
   await reattachActiveRunFromBackend();
+  if (token !== state.conversationLoadToken) return;
   reattachActiveRun();
   // Restore the steer queue strip if a steer is still pending for this room.
   // The strip is composer chrome, not part of the thread — it is re-shown
@@ -286,22 +290,24 @@ async function openConversation(id) {
 // into state.runs so that reattachActiveRun can wire the DOM and send() routes
 // to steering instead of start.
 async function reattachActiveRunFromBackend() {
-  if (!state.activeId) return;
-  if (runForConversation(state.activeId)) return; // already attached
+  const conversationId = state.activeId;
+  if (!conversationId) return;
+  if (runForConversation(conversationId)) return; // already attached
   if (state.conversation?.status !== 'running') return;
   let active;
   try {
-    active = await rpc('agent.turns.active', { id: state.activeId });
+    active = await rpc('agent.turns.active', { id: conversationId });
   } catch {
     return; // backend may not support the method yet; fail silently
   }
+  if (state.activeId !== conversationId) return;
   if (!active?.active || !active.run_id) return;
   // Register a minimal run entry. reattachActiveRun will populate the DOM
   // references by replacing the last assistant message node.
   state.runs.set(active.run_id, {
     msgNode: null, bubble: null, strip: null, textBox: null, reasoningEl: null,
     toolJobs: new Map(), raw: '', rawReasoning: '',
-    round: 1, conversationId: state.activeId, runId: active.run_id,
+    round: 1, conversationId: conversationId, runId: active.run_id,
     messageId: active.message_id,
   });
   flushPendingEvents(active.run_id);
@@ -345,6 +351,7 @@ function reattachActiveRun() {
   run.reasoningEl = reasoningEl;
   run.textBox = textBox;
   run.strip = strip;
+  clearToolTimers(run);
   run.toolJobs = new Map();
   scrollToBottom(true);
 }
@@ -622,6 +629,16 @@ function flushPendingEvents(runId) {
   }
 }
 
+function clearToolTimers(run) {
+  if (!run?.toolJobs) return;
+  for (const job of run.toolJobs.values()) {
+    if (job._elapsedTimer) {
+      clearInterval(job._elapsedTimer);
+      job._elapsedTimer = null;
+    }
+  }
+}
+
 function endTurn(runId) {
   const run = state.runs.get(runId);
   if (!run) return;
@@ -630,9 +647,7 @@ function endTurn(runId) {
   // Clean up transient UI elements (thinking dots, retry banner, tool timers).
   run.textBox?.querySelector('.agent-thinking-dots')?.remove();
   run.bubble?.querySelector('.agent-retry-banner')?.remove();
-  for (const job of run.toolJobs?.values() ?? []) {
-    if (job._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
-  }
+  clearToolTimers(run);
   state.runs.delete(runId);
   // Clear steer for this conversation (turn ended, unapplied steer is cancelled).
   if (convId === state.activeId) {
@@ -704,12 +719,15 @@ async function loadOlderChunk() {
   if (state.loadingChunk || state.nextChunkIndex < 0 || !state.activeId) return;
   state.loadingChunk = true;
   const chunkIndex = state.nextChunkIndex;
+  const conversationId = state.activeId;
+  const token = state.conversationLoadToken;
   const thread = document.getElementById('agent-thread');
   // Save scroll anchor so we can restore position after prepending.
   const prevHeight = thread?.scrollHeight ?? 0;
   const prevScroll = thread?.scrollTop ?? 0;
   try {
-    const result = await rpc('agent.conversations.chunk', { id: state.activeId, index: chunkIndex });
+    const result = await rpc('agent.conversations.chunk', { id: conversationId, index: chunkIndex });
+    if (token !== state.conversationLoadToken || state.activeId !== conversationId) return;
     const chunkMsgs = result?.messages ?? [];
     if (!chunkMsgs.length) {
       // Empty chunk — treat as no more data.
@@ -730,9 +748,14 @@ async function loadOlderChunk() {
       thread.scrollTop = prevScroll + (newHeight - prevHeight);
     }
   } catch (err) {
-    // 404 / no more chunks — stop trying.
-    state.nextChunkIndex = -1;
+    if (token === state.conversationLoadToken && state.activeId === conversationId) {
+      // 404 / no more chunks — stop trying.
+      state.nextChunkIndex = -1;
+    }
   } finally {
+    if (token !== state.conversationLoadToken) {
+      return;
+    }
     state.loadingChunk = false;
     // If the thread is still sparse after loading, keep going until we hit
     // the threshold or run out of chunks.
@@ -780,6 +803,7 @@ function bindEvents() {
     run.reasoningEl = reasoningEl;
     run.textBox = textBox;
     run.strip = strip;
+    clearToolTimers(run);
     run.toolJobs = new Map();
   });
   on('agent.message.delta', (payload) => {
@@ -1017,6 +1041,7 @@ function promoteSteerToTranscript(text) {
     run.textBox = null;
     run.reasoningEl = null;
     run.strip = null;
+    clearToolTimers(run);
     run.toolJobs = new Map();
   } else {
     thread.append(steerNode);
@@ -1026,8 +1051,11 @@ function promoteSteerToTranscript(text) {
 
 async function refreshActiveConversation() {
   if (!state.activeId) return;
+  const conversationId = state.activeId;
+  const token = state.conversationLoadToken;
   try {
-    const { conversation, messages } = await rpc('agent.conversations.get', { id: state.activeId });
+    const { conversation, messages } = await rpc('agent.conversations.get', { id: conversationId });
+    if (token !== state.conversationLoadToken || state.activeId !== conversationId) return;
     state.conversation = conversation;
     state.messages = messages ?? [];
     // Reset chunk state — compaction may have created new chunks.

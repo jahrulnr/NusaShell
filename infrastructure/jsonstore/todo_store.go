@@ -44,23 +44,22 @@ func (t *TodoStore) Get(conversationID string) []domain.TodoItem {
 // Set replaces the todo items for the given conversation and persists to disk.
 func (t *TodoStore) Set(conversationID string, items []domain.TodoItem) {
 	t.mu.Lock()
+	defer t.mu.Unlock()
 	cp := make([]domain.TodoItem, len(items))
 	copy(cp, items)
 	t.store[conversationID] = cp
-	t.mu.Unlock()
-	t.persist()
+	t.persistLocked()
 }
 
 // Clear removes the todo items for the given conversation and persists.
 func (t *TodoStore) Clear(conversationID string) {
 	t.mu.Lock()
+	defer t.mu.Unlock()
 	if _, ok := t.store[conversationID]; !ok {
-		t.mu.Unlock()
 		return
 	}
 	delete(t.store, conversationID)
-	t.mu.Unlock()
-	t.persist()
+	t.persistLocked()
 }
 
 func (t *TodoStore) load() {
@@ -77,10 +76,8 @@ func (t *TodoStore) load() {
 	t.mu.Unlock()
 }
 
-func (t *TodoStore) persist() {
-	t.mu.RLock()
+func (t *TodoStore) persistLocked() {
 	b, err := json.MarshalIndent(t.store, "", "  ")
-	t.mu.RUnlock()
 	if err != nil {
 		return
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 
 	"nusashell/application"
@@ -256,8 +257,13 @@ func (o *OpenAIAdapter) Stream(ctx context.Context, req application.ChatRequest,
 	if !completed {
 		return result, incompleteSSEError()
 	}
-	for _, tc := range toolAcc {
-		result.ToolCalls = append(result.ToolCalls, *tc)
+	indexes := make([]int, 0, len(toolAcc))
+	for index := range toolAcc {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+	for _, index := range indexes {
+		result.ToolCalls = append(result.ToolCalls, *toolAcc[index])
 	}
 	return result, nil
 }

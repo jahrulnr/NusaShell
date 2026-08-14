@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"time"
+	"unicode/utf8"
+)
 
 type MessageRole string
 
@@ -120,11 +123,7 @@ func (c *Conversation) Touch() { c.UpdatedAt = time.Now().UTC() }
 func (c *Conversation) DefaultTitle() string {
 	for _, m := range c.Messages {
 		if m.Role == RoleUser {
-			s := m.Content
-			if len(s) > 48 {
-				s = s[:48] + "…"
-			}
-			return s
+			return truncateRunes(m.Content, 48)
 		}
 	}
 	return "Untitled"
@@ -148,21 +147,25 @@ func (c *Conversation) EstimateTokens() int {
 	return total
 }
 
-// EstimateTokens estimates the token cost of a single message: content,
-// reasoning, tool calls, steps, and attachments.
+// EstimateTokens estimates the token cost of a single message. Provider usage
+// is not part of the size estimate: those values describe the last request,
+// not the stored message. When Steps are present they are the chronological
+// source of truth and the mirrored Content/Reasoning/ToolCalls fields are
+// ignored so multi-round turns are not double-counted.
 func (m Message) EstimateTokens() int {
-	total := EstimateTokens(m.Content)
-	total += EstimateTokens(m.Reasoning)
-	if m.Usage != nil {
-		total += m.Usage.InputTokens + m.Usage.OutputTokens
-	}
-	for _, tc := range m.ToolCalls {
-		total += EstimateTokens(tc.Name) + EstimateTokens(tc.Args) + EstimateTokens(tc.Output)
-	}
-	for _, s := range m.Steps {
-		total += EstimateTokens(s.Content)
-		for _, tc := range s.ToolCalls {
-			total += EstimateTokens(tc.Name) + EstimateTokens(tc.Args) + EstimateTokens(tc.Output)
+	total := 0
+	if len(m.Steps) > 0 {
+		for _, s := range m.Steps {
+			total += EstimateTokens(s.Content)
+			for _, tc := range s.ToolCalls {
+				total += estimateToolCallTokens(tc)
+			}
+		}
+	} else {
+		total += EstimateTokens(m.Content)
+		total += EstimateTokens(m.Reasoning)
+		for _, tc := range m.ToolCalls {
+			total += estimateToolCallTokens(tc)
 		}
 	}
 	for _, attachment := range m.Attachments {
@@ -171,6 +174,21 @@ func (m Message) EstimateTokens() int {
 		total += EstimateTokens(attachment.DataURL)
 	}
 	return total
+}
+
+func estimateToolCallTokens(tc ToolCall) int {
+	return EstimateTokens(tc.Name) + EstimateTokens(tc.Args) + EstimateTokens(tc.Output)
+}
+
+func truncateRunes(s string, n int) string {
+	if n <= 0 || s == "" {
+		return s
+	}
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:n]) + "…"
 }
 
 // Compact replaces the oldest messages with a summary marker message and
@@ -203,7 +221,7 @@ func (c *Conversation) Compact(summary string, keepTokenBudget int) {
 		if remaining <= 0 {
 			break
 		}
-		msg := stripForRetention(c.Messages[i])
+		msg := StripForRetention(c.Messages[i])
 		tokens := msg.EstimateTokens()
 		if tokens <= remaining {
 			retained = append([]Message{msg}, retained...)
@@ -234,7 +252,7 @@ func (c *Conversation) ArchiveMessages(keepTokenBudget int) []Message {
 		if remaining <= 0 {
 			break
 		}
-		msg := stripForRetention(c.Messages[i])
+		msg := StripForRetention(c.Messages[i])
 		tokens := msg.EstimateTokens()
 		if tokens <= remaining {
 			retainedCount++
@@ -252,10 +270,10 @@ func (c *Conversation) ArchiveMessages(keepTokenBudget int) []Message {
 	return archived
 }
 
-// stripForRetention returns a copy of the message with tool calls, reasoning,
+// StripForRetention returns a copy of the message with tool calls, reasoning,
 // and steps removed. These are already captured in the compaction summary, so
 // retaining them would duplicate context and waste the token budget.
-func stripForRetention(m Message) Message {
+func StripForRetention(m Message) Message {
 	return Message{
 		ID:          m.ID,
 		Role:        m.Role,
@@ -264,7 +282,6 @@ func stripForRetention(m Message) Message {
 		CreatedAt:   m.CreatedAt,
 		Status:      m.Status,
 		Model:       m.Model,
-		Usage:       m.Usage,
 	}
 }
 
@@ -276,9 +293,22 @@ func truncateMessageContent(m Message, tokens int) Message {
 		m.Content = ""
 		return m
 	}
-	maxChars := tokens * 4
-	if len(m.Content) > maxChars {
-		m.Content = m.Content[:maxChars]
+	maxBytes := tokens * 4
+	if len(m.Content) > maxBytes {
+		m.Content = truncateToBytes(m.Content, maxBytes)
 	}
 	return m
+}
+
+func truncateToBytes(s string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(s) <= maxBytes {
+		return s
+	}
+	for maxBytes > 0 && !utf8.RuneStart(s[maxBytes]) {
+		maxBytes--
+	}
+	return s[:maxBytes]
 }

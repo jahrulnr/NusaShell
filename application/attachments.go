@@ -1,8 +1,10 @@
 package application
 
 import (
+	"bytes"
 	"encoding/base64"
 	"strings"
+	"unicode/utf8"
 
 	"nusashell/contracts"
 	"nusashell/domain"
@@ -39,6 +41,9 @@ func attachmentFromDTO(item contracts.AttachmentDTO) (domain.Attachment, error) 
 	switch attachment.Type {
 	case "text":
 		if attachment.MediaType != "text/plain" || attachment.DataURL != "" {
+			return domain.Attachment{}, errAttachment("text attachment must contain UTF-8 text")
+		}
+		if !utf8.ValidString(attachment.Content) {
 			return domain.Attachment{}, errAttachment("text attachment must contain UTF-8 text")
 		}
 		if len([]byte(attachment.Content)) > maxAttachmentBytes {
@@ -89,5 +94,25 @@ func validateDataURL(dataURL, mediaType, name string) error {
 	if len(data) > maxAttachmentBytes {
 		return errAttachment(name + " is larger than 4 MiB")
 	}
+	if sniffed := sniffMediaType(data); sniffed != mediaType {
+		return errAttachment("invalid data for " + name)
+	}
 	return nil
+}
+
+func sniffMediaType(data []byte) string {
+	switch {
+	case bytes.HasPrefix(data, []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}):
+		return "image/png"
+	case len(data) >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF:
+		return "image/jpeg"
+	case bytes.HasPrefix(data, []byte("GIF8")):
+		return "image/gif"
+	case bytes.HasPrefix(data, []byte("%PDF-")):
+		return "application/pdf"
+	case len(data) >= 12 && bytes.HasPrefix(data, []byte("RIFF")) && bytes.Equal(data[8:12], []byte("WEBP")):
+		return "image/webp"
+	default:
+		return ""
+	}
 }

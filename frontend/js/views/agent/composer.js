@@ -42,10 +42,11 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
   workspaceButton.addEventListener('click', chooseWorkspace);
   stopButton.addEventListener('click', async () => {
     await stopActiveRun();
-    stopButton.hidden = true;
   });
 
+  let sending = false;
   async function send() {
+    if (sending) return;
     const text = input.value.trim();
     if (!text && !state.attachments.length) return;
     if (!state.model) {
@@ -60,6 +61,7 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
       await sendSteer(text);
       return;
     }
+    sending = true;
     try {
       if (!state.activeId) await createConversation(text.slice(0, 48));
       const attachments = [...state.attachments];
@@ -84,6 +86,8 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
         return;
       }
       toast(error.message, 'error');
+    } finally {
+      sending = false;
     }
   }
 

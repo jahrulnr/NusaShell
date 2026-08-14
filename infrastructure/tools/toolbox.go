@@ -432,23 +432,17 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 
 	// dynamic MCP tools: mcp__<server>__<tool>
 	if rest, ok := strings.CutPrefix(name, "mcp__"); ok {
-		serverName, toolName, ok := strings.Cut(rest, "__")
+		server, toolName, ok := matchMCPTool(rest, t.MCPServers.List())
 		if !ok {
 			return "", fmt.Errorf("malformed mcp tool name: %s", name)
 		}
-		for _, s := range t.MCPServers.List() {
-			if s.Name != serverName {
-				continue
+		var args map[string]any
+		if len(argsJSON) > 0 {
+			if err := json.Unmarshal(argsJSON, &args); err != nil {
+				return "", fmt.Errorf("invalid args: %w", err)
 			}
-			var args map[string]any
-			if len(argsJSON) > 0 {
-				if err := json.Unmarshal(argsJSON, &args); err != nil {
-					return "", fmt.Errorf("invalid args: %w", err)
-				}
-			}
-			return t.MCP.CallTool(ctx, s.ID, toolName, args)
 		}
-		return "", fmt.Errorf("mcp server %q not found", serverName)
+		return t.MCP.CallTool(ctx, server.ID, toolName, args)
 	}
 
 	return "", fmt.Errorf("unknown tool: %s", name)
@@ -578,4 +572,27 @@ func strEnum(desc string, values ...string) map[string]any {
 		enums[i] = v
 	}
 	return map[string]any{"type": "string", "description": desc, "enum": enums}
+}
+
+// matchMCPTool resolves mcp__<server>__<tool> against configured servers,
+// preferring the longest server-name prefix so names that contain "__" still
+// route to the right server.
+func matchMCPTool(rest string, servers []*domain.MCPServer) (*domain.MCPServer, string, bool) {
+	var best *domain.MCPServer
+	bestTool := ""
+	for _, server := range servers {
+		prefix := server.Name + "__"
+		toolName, ok := strings.CutPrefix(rest, prefix)
+		if !ok || toolName == "" {
+			continue
+		}
+		if best == nil || len(server.Name) > len(best.Name) {
+			best = server
+			bestTool = toolName
+		}
+	}
+	if best == nil {
+		return nil, "", false
+	}
+	return best, bestTool, true
 }

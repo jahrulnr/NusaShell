@@ -37,11 +37,15 @@ func (s *Server) Routes() http.Handler {
 	return logRequests(s.Logger, mux)
 }
 
+// maxRPCBodyBytes fits the documented attachment contract: four 4 MiB files
+// as base64 data URLs, plus JSON envelope overhead.
+const maxRPCBodyBytes = 24 << 20
+
 // ---- HTTP RPC ----
 
 func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 	var req contracts.Request
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRPCBodyBytes)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, contracts.ErrResult(contracts.CodeValidation, "malformed request body"))
 		return
 	}

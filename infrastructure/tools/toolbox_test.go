@@ -43,8 +43,10 @@ func (s *stubMCPStore) Delete(id string) error           { return nil }
 
 // stubMCP is a minimal MCP manager stub for testing.
 type stubMCP struct {
-	tools   map[string][]contracts.MCPToolDTO // serverID -> tools
-	running map[string]bool                   // serverID -> running
+	tools        map[string][]contracts.MCPToolDTO // serverID -> tools
+	running      map[string]bool                   // serverID -> running
+	lastServerID string
+	lastTool     string
 }
 
 func (m *stubMCP) Connect(ctx context.Context, s *domain.MCPServer) ([]contracts.MCPToolDTO, error) {
@@ -58,6 +60,8 @@ func (m *stubMCP) ToolsFor(serverID string) ([]contracts.MCPToolDTO, bool) {
 	return tools, ok
 }
 func (m *stubMCP) CallTool(ctx context.Context, serverID, toolName string, args map[string]any) (string, error) {
+	m.lastServerID = serverID
+	m.lastTool = toolName
 	return "ok", nil
 }
 
@@ -430,5 +434,22 @@ func TestToolSchemaServerNotRunning(t *testing.T) {
 	_, err := tb.Execute(context.Background(), "tool_schema", []byte(`{"server":"github","tool":"create_issue"}`))
 	if err == nil {
 		t.Error("expected error for non-running server")
+	}
+}
+
+func TestMCPToolNameMatchesLongestServerPrefix(t *testing.T) {
+	mcp := &stubMCP{}
+	tb := testToolbox(nil,
+		[]*domain.MCPServer{
+			{ID: "short", Name: "foo", Command: "npx", Enabled: true},
+			{ID: "long", Name: "foo__bar", Command: "npx", Enabled: true},
+		},
+		mcp,
+	)
+	if _, err := tb.Execute(context.Background(), "mcp__foo__bar__read", nil); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if mcp.lastServerID != "long" || mcp.lastTool != "read" {
+		t.Fatalf("routed to server %q tool %q, want long/read", mcp.lastServerID, mcp.lastTool)
 	}
 }

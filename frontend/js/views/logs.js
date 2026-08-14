@@ -2,6 +2,7 @@
 
 import { rpc, on } from '../rpc.js';
 import { el, fmtClock } from '../ui.js';
+import { entriesAfter } from '../log-tail.js';
 
 const state = { entries: [], level: '', follow: true, max: 500, lastRenderedId: null };
 
@@ -43,8 +44,8 @@ function renderTail(appendOnly = false) {
     state.lastRenderedId = null;
   }
   let lastId = state.lastRenderedId;
-  for (const entry of visible) {
-    if (appendOnly && entry.id === lastId) continue;
+  const toRender = appendOnly ? entriesAfter(visible, lastId) : visible;
+  for (const entry of toRender) {
     tail.append(el('div', { class: 'log-line', 'data-id': entry.id },
       el('span', { class: 'log-time', text: fmtClock(entry.time) }),
       el('span', { class: `log-level ${entry.level}`, text: entry.level }),

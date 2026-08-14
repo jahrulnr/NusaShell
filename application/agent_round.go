@@ -27,9 +27,7 @@ func (a *App) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, mo
 	}
 	settings := a.Settings.Get()
 	contextWindow := resolveContextWindow(provider, model, settings)
-	// Auto-trigger compaction when the conversation reaches 80% of the
-	// effective context window, leaving room for the next turn's output.
-	compactionTrigger := contextWindow * 4 / 5
+	compactionTrigger := compactionTriggerTokens(contextWindow, settings)
 	if !settings.CompactionEnabled || conversation.EstimateTokens() <= compactionTrigger {
 		return adapter, conversation, settings, nil
 	}
@@ -227,7 +225,11 @@ func applyStreamRound(message *domain.Message, model string, round streamedTurnR
 }
 
 func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domain.ToolCall) error {
-	for _, toolCall := range toolCalls {
+	for i, toolCall := range toolCalls {
+		if err := run.Ctx.Err(); err != nil {
+			a.interruptRemainingTools(run, messageID, toolCalls[i:])
+			return err
+		}
 		a.Bus.Emit(contracts.EventToolStarted, contracts.ToolStartedEvent{
 			RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID, Name: toolCall.Name, Args: []byte(toolCall.Args),
 		})
@@ -235,8 +237,13 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 		output, err := a.Toolbox.Execute(WithConversationID(run.Ctx, run.ConversationID), toolCall.Name, []byte(toolCall.Args))
 		status := domain.ToolOK
 		if err != nil {
-			status = domain.ToolFailed
-			output = "error: " + err.Error()
+			if run.Ctx.Err() != nil {
+				status = domain.ToolInterrupted
+				output = "interrupted"
+			} else {
+				status = domain.ToolFailed
+				output = "error: " + err.Error()
+			}
 		}
 		a.Bus.Emit(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
 			RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID,
@@ -258,16 +265,38 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 			})
 		}
 
-		conversation, err := a.Conversations.Get(run.ConversationID)
-		if err != nil {
-			return err
+		conversation, convErr := a.Conversations.Get(run.ConversationID)
+		if convErr != nil {
+			return convErr
 		}
 		conversation = a.updateToolResult(conversation, messageID, toolCall.ID, status, output)
-		if err := a.Conversations.Save(conversation); err != nil {
+		if saveErr := a.Conversations.Save(conversation); saveErr != nil {
+			return saveErr
+		}
+		if err := run.Ctx.Err(); err != nil {
+			a.interruptRemainingTools(run, messageID, toolCalls[i+1:])
 			return err
 		}
 	}
 	return nil
+}
+
+func (a *App) interruptRemainingTools(run *TurnRun, messageID string, toolCalls []domain.ToolCall) {
+	if len(toolCalls) == 0 {
+		return
+	}
+	conversation, err := a.Conversations.Get(run.ConversationID)
+	if err != nil {
+		return
+	}
+	for _, toolCall := range toolCalls {
+		a.Bus.Emit(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
+			RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID,
+			Name: toolCall.Name, Status: string(domain.ToolInterrupted), Output: "interrupted",
+		})
+		conversation = a.updateToolResult(conversation, messageID, toolCall.ID, domain.ToolInterrupted, "interrupted")
+	}
+	_ = a.Conversations.Save(conversation)
 }
 
 func (a *App) appendTurnAssistant(conversationID string) (*domain.Conversation, string, error) {
