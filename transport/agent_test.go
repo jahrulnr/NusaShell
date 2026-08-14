@@ -382,16 +382,17 @@ func TestAgentTurnMultiPassCompaction(t *testing.T) {
 	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
 	convID := h.newConversation(t)
 
-	// Small context window so compaction auto-triggers at 80% (4000 tokens)
-	// and must multi-pass to fit the history.
+	// Seed history with compaction disabled so Complete is only used on the
+	// triggering turn. A small context window then forces multi-pass summary.
 	h.rpcOK(t, "settings.set", map[string]any{
-		"max_input_tokens": 5000,
+		"compaction_enabled": false,
+		"max_input_tokens":   5000,
 	})
 
 	// Seed 4 turns with large messages: 8 messages × ~2000 tokens = ~16000 tokens.
 	// keep budget = min(64000, 5000*0.3) = 1500 → splitIdx keeps ~1 message.
 	// toCompact = ~7 messages × ~2000 = ~14000 tokens.
-	// available = 5000 - 300 - 2000 - 800 = 1900 → ~7 chunks → 7 passes.
+	// available = 5000 - 300 - 2000 - 800 = 1900 → multiple passes.
 	bigMsg := strings.Repeat("x", 8000)
 	for i := 0; i < 4; i++ {
 		h.llm.setScript([]llmStep{{Text: bigMsg}})
@@ -400,6 +401,8 @@ func TestAgentTurnMultiPassCompaction(t *testing.T) {
 		})
 		waitTurnDone(t, h, convID)
 	}
+
+	h.rpcOK(t, "settings.set", map[string]any{"compaction_enabled": true})
 
 	// Set up the compaction summary response and the final turn response.
 	h.llm.setComplete(llmStep{Text: "SUMMARY: compacted pass."})
