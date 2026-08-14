@@ -27,6 +27,7 @@ func TestParseRetryAfter(t *testing.T) {
 	}
 }
 
+
 // TestIncompleteSSEErrorDistinct pins the contract for the "stream closed
 // cleanly but the protocol terminator ([DONE] / message_stop /
 // response.completed) never arrived" path. It must:

@@ -54,7 +54,11 @@ type responsesInputItem struct {
 	CallID  string          `json:"call_id,omitempty"`
 	Name    string          `json:"name,omitempty"`
 	Args    string          `json:"arguments,omitempty"`
-	Output  string          `json:"output,omitempty"`
+	// Output uses a pointer so the Responses API always receives the field
+	// on function_call_output items, even when the tool result is an empty
+	// string. A bare string + omitempty would drop "output":"" and trigger
+	// "Missing required parameter: 'input[N].output'".
+	Output *string `json:"output,omitempty"`
 }
 
 type responsesContentBlock struct {
@@ -124,10 +128,11 @@ func toResponsesInput(msgs []application.ChatMessage) []responsesInputItem {
 				})
 			}
 		case "tool":
+			output := m.ToolResult.Content
 			out = append(out, responsesInputItem{
 				Type:   "function_call_output",
 				CallID: m.ToolResult.ToolCallID,
-				Output: m.ToolResult.Content,
+				Output: &output,
 			})
 		}
 	}
