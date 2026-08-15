@@ -52,6 +52,18 @@ Embedding model used by skill and memory search. Models tagged as embedding-capa
   - Type: number
   - Notes: Turns before review; 0 disables turn-based review.
 
+## Vision fallback
+
+When the active chat model cannot see images, NusaShell can describe attached images using a separate vision-capable model so the conversation continues without errors. Pick any model that supports image input. Leave disabled if you always use vision-capable chat models.
+
+- **Vision fallback title** (`#settings-vision-title`):
+  - Section: Settings
+  - Type: text
+
+- **Vision fallback model** (`#settings-vision-model`):
+  - Section: Settings
+  - Type: select
+
 ## Context compaction
 
 Toggle compaction, set max input tokens (fallback context window, default 200000), max output tokens (default 65536), prompt caching, and optional sampling parameters (temperature, top-p, top-k, frequency penalty, presence penalty).

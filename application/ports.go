@@ -207,9 +207,10 @@ type ChatMessage struct {
 }
 
 type ToolResult struct {
-	ToolCallID string
-	Name       string
-	Content    string
+	ToolCallID  string
+	Name        string
+	Content     string
+	Attachments []domain.Attachment // optional image attachments (read_image tool)
 }
 
 type ChatRequest struct {

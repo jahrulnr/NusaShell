@@ -709,23 +709,34 @@ func (a *App) handleAppInfo() (any, *contracts.RPCError) {
 
 // resolveModel finds the provider owning a model id and its API key.
 func (a *App) resolveModel(model string) (*domain.Provider, string, *contracts.RPCError) {
+	p, _, key, rpcErr := a.resolveModelWithMeta(model)
+	if rpcErr != nil {
+		return nil, "", rpcErr
+	}
+	return p, key, nil
+}
+
+// resolveModelWithMeta is like resolveModel but also returns the model
+// metadata (capabilities, kind, etc.). Used by the agent runtime to
+// check vision support before sending image attachments.
+func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Model, string, *contracts.RPCError) {
 	for _, p := range a.Providers.List() {
 		if !p.Enabled || !p.HasModel(model) {
 			continue
 		}
 		key, has, err := a.Credentials.Get(p.ID)
 		if err != nil {
-			return nil, "", rpcInternal(err)
+			return nil, nil, "", rpcInternal(err)
 		}
 		if !has && requiresKey(p.Kind) {
-			return nil, "", &contracts.RPCError{Code: contracts.CodeConflict, Message: fmt.Sprintf("provider %q has no API key", p.Name)}
+			return nil, nil, "", &contracts.RPCError{Code: contracts.CodeConflict, Message: fmt.Sprintf("provider %q has no API key", p.Name)}
 		}
 		if !has && p.Kind == domain.ProviderCodex {
-			return nil, "", &contracts.RPCError{Code: contracts.CodeConflict, Message: fmt.Sprintf("provider %q is not logged in — use the Codex login command to authenticate with your ChatGPT account", p.Name)}
+			return nil, nil, "", &contracts.RPCError{Code: contracts.CodeConflict, Message: fmt.Sprintf("provider %q is not logged in — use the Codex login command to authenticate with your ChatGPT account", p.Name)}
 		}
-		return p, key, nil
+		return p, p.FindModel(model), key, nil
 	}
-	return nil, "", &contracts.RPCError{
+	return nil, nil, "", &contracts.RPCError{
 		Code:    contracts.CodeValidation,
 		Message: fmt.Sprintf("model %q is not available on any enabled provider", model),
 	}

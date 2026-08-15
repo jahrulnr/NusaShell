@@ -63,7 +63,7 @@ type anthropicContentBlock struct {
 	Name         string           `json:"name,omitempty"`
 	Input        json.RawMessage  `json:"input,omitempty"`
 	ToolUseID    string           `json:"tool_use_id,omitempty"`
-	Content      string           `json:"content,omitempty"`
+	Content      json.RawMessage  `json:"content,omitempty"`
 	Source       *anthropicSource `json:"source,omitempty"`
 	Title        string           `json:"title,omitempty"`
 	CacheControl *cacheControl    `json:"cache_control,omitempty"`
@@ -140,17 +140,43 @@ func toAnthropicMessages(msgs []application.ChatMessage) []anthropicMessage {
 			}
 			out = append(out, anthropicMessage{Role: "assistant", Content: aiutil.MustJSON(blocks)})
 		case "tool":
+			var toolContent json.RawMessage
+			if len(m.ToolResult.Attachments) > 0 {
+				toolContent = anthropicToolResultContent(m.ToolResult)
+			} else {
+				toolContent = aiutil.MustJSON(m.ToolResult.Content)
+			}
 			out = append(out, anthropicMessage{
 				Role: "user",
 				Content: aiutil.MustJSON([]anthropicContentBlock{{
 					Type:      "tool_result",
 					ToolUseID: m.ToolResult.ToolCallID,
-					Content:   m.ToolResult.Content,
+					Content:   toolContent,
 				}}),
 			})
 		}
 	}
 	return out
+}
+
+// anthropicToolResultContent builds a JSON array of content blocks for a
+// tool_result that carries image attachments. Text content comes first,
+// followed by image blocks.
+func anthropicToolResultContent(result *application.ToolResult) json.RawMessage {
+	var blocks []anthropicContentBlock
+	if result.Content != "" {
+		blocks = append(blocks, anthropicContentBlock{Type: "text", Text: result.Content})
+	}
+	for _, att := range result.Attachments {
+		if att.Type == "image" {
+			blocks = append(blocks, anthropicContentBlock{
+				Type: "image", Source: &anthropicSource{
+					Type: "base64", MediaType: att.MediaType, Data: aiutil.DataURLBase64(att.DataURL),
+				},
+			})
+		}
+	}
+	return aiutil.MustJSON(blocks)
 }
 
 func anthropicUserContent(message application.ChatMessage) []anthropicContentBlock {

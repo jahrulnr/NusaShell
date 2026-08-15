@@ -98,6 +98,12 @@ type Settings struct {
 	// auto-detects the first enabled provider with an embedding model.
 	EmbeddingProviderID string `json:"embedding_provider_id,omitempty"`
 	EmbeddingModelID    string `json:"embedding_model_id,omitempty"`
+	// VisionFallback selects an auxiliary vision model used to describe
+	// images when the active chat model does not support image input.
+	// When VisionProviderID is empty, non-vision models receive a text
+	// placeholder instead of an image description.
+	VisionProviderID string `json:"vision_provider_id,omitempty"`
+	VisionModelID    string `json:"vision_model_id,omitempty"`
 	// Sampling parameters. nil = use provider default (do not send the
 	// field). Non-nil overrides the provider default for every turn.
 	// Ranges: temperature 0–2 (OpenAI) / 0–1 (Anthropic), top_p 0–1,

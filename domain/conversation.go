@@ -54,6 +54,11 @@ type ToolCall struct {
 	Args   string // raw JSON, as sent by the model
 	Status ToolCallStatus
 	Output string
+	// OutputAttachments carries image attachments returned by tools like
+	// read_image so vision-capable models can see them in the tool result.
+	// Empty for all other tools. Persisted with the tool call so subsequent
+	// rounds and conversation reloads keep the images visible.
+	OutputAttachments []Attachment
 }
 
 // StepType identifies a temporal segment within a multi-round assistant turn.

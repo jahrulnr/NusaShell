@@ -60,9 +60,9 @@ func (a *App) toolDefinitions() []ToolDef {
 	return definitions
 }
 
-func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy) (streamedTurnRound, error) {
+func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, supportsVision bool) (streamedTurnRound, error) {
 	for retry := 1; ; retry++ {
-		roundResult, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, maxTokens, injectHydration, promptCache)
+		roundResult, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, maxTokens, injectHydration, promptCache, supportsVision)
 		if err == nil || retry >= maxProviderAttempts || roundResult.Content != "" || roundResult.Reasoning != "" {
 			return roundResult, err
 		}
@@ -92,14 +92,14 @@ func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *do
 	}
 }
 
-func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy) (streamedTurnRound, error) {
+func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, supportsVision bool) (streamedTurnRound, error) {
 	var content strings.Builder
 	var reasoning strings.Builder
 	system := buildSystemPrompt(conversation)
 	if continuation {
 		system += "\n\nThe immediately preceding assistant response was interrupted by a transient upstream failure. Continue it from exactly where it stopped. Do not repeat prior text."
 	}
-	messages := chatMessages(conversation, messageID)
+	messages := chatMessages(conversation, messageID, supportsVision)
 	// Inject the synthetic runtime-hydration transcript (runtime_context,
 	// memory, skill_list, mcp_list, tool_list) as an ephemeral assistant
 	// toolCalls + tool results exchange, placed AFTER the durable history and
@@ -258,7 +258,7 @@ func applyStreamRound(message *domain.Message, model string, round streamedTurnR
 	message.Usage = toDomainUsage(round.Response.Usage)
 }
 
-func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domain.ToolCall) error {
+func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domain.ToolCall, supportsVision bool, settings domain.Settings) error {
 	for i, toolCall := range toolCalls {
 		if err := run.Ctx.Err(); err != nil {
 			a.interruptRemainingTools(run, messageID, toolCalls[i:])
@@ -268,7 +268,14 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 			RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID, Name: toolCall.Name, Args: []byte(toolCall.Args),
 		})
 		a.log("info", "tools", "tool call: %s", toolCall.Name)
-		output, err := a.Toolbox.Execute(WithConversationID(run.Ctx, run.ConversationID), toolCall.Name, []byte(toolCall.Args))
+		var output string
+		var outputAttachments []domain.Attachment
+		var err error
+		if toolCall.Name == "read_image" {
+			output, outputAttachments, err = a.executeReadImage(run, toolCall, supportsVision, settings)
+		} else {
+			output, err = a.Toolbox.Execute(WithConversationID(run.Ctx, run.ConversationID), toolCall.Name, []byte(toolCall.Args))
+		}
 		status := domain.ToolOK
 		if err != nil {
 			if run.Ctx.Err() != nil {
@@ -303,7 +310,7 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 		if convErr != nil {
 			return convErr
 		}
-		conversation = a.updateToolResult(conversation, messageID, toolCall.ID, status, output)
+		conversation = a.updateToolResult(conversation, messageID, toolCall.ID, status, output, outputAttachments)
 		if saveErr := a.Conversations.Save(conversation); saveErr != nil {
 			return saveErr
 		}
@@ -328,7 +335,7 @@ func (a *App) interruptRemainingTools(run *TurnRun, messageID string, toolCalls 
 			RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID,
 			Name: toolCall.Name, Status: string(domain.ToolInterrupted), Output: "interrupted",
 		})
-		conversation = a.updateToolResult(conversation, messageID, toolCall.ID, domain.ToolInterrupted, "interrupted")
+		conversation = a.updateToolResult(conversation, messageID, toolCall.ID, domain.ToolInterrupted, "interrupted", nil)
 	}
 	_ = a.Conversations.Save(conversation)
 }

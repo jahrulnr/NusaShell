@@ -57,3 +57,51 @@ Messages) tokens when a cache hit or write happens.
 
 A running turn can be stopped; the partial assistant message is kept and
 marked as interrupted.
+
+## Image attachments and vision
+
+Users can attach images (PNG, JPEG, GIF, WebP) to a turn. The agent runtime
+checks whether the active chat model supports image input using the `Vision`
+capability flag from the model catalog (models.dev / OpenRouter).
+
+- **Vision-capable model:** images are sent directly to the model as
+  `image_url` (Chat Completions) or `image` (Messages) content blocks.
+- **Non-vision model:** images are stripped from the conversation history
+  before sending to the provider. A text placeholder
+  (`[image content omitted — this model does not support image input]`) is
+  appended to the user message so the model knows an image was present.
+  This prevents provider errors when switching from a vision model to a
+  text-only model mid-conversation.
+
+### Vision fallback
+
+When the active chat model does not support vision but the user has
+configured a **Vision fallback model** in settings (VisionProviderID +
+VisionModelID), the agent describes each attached image using the fallback
+vision model before the first turn round. The description is injected as a
+text attachment on the user message. The original image is preserved so a
+later switch to a vision-capable model can still see it.
+
+If no fallback is configured, non-vision models receive the text placeholder
+described above.
+
+### read_image tool
+
+The `read_image` tool lets the model request an image from the conversation
+on demand. It accepts an `attachment_name` (the name of an image attachment
+from any user message in the conversation) and an optional `question`.
+
+- **Vision-capable model (native fast path):** the image is returned
+  directly as a tool result attachment. The provider adapter serializes it
+  as an `image_url` content block (Chat Completions) or `image` content
+  block (Messages) in the tool result, so the model sees the pixels in the
+  next round.
+- **Non-vision model + fallback configured:** the image is described using
+  the vision fallback model and the text description is returned as the
+  tool result.
+- **Non-vision model + no fallback:** returns an error message explaining
+  that the model cannot see images and no fallback is configured.
+
+The image attachment is preserved on the original user message, so
+`read_image` can re-load it even after compaction prunes it from the
+visible context window.

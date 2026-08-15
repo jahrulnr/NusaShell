@@ -337,6 +337,16 @@
           ]
         },
         {
+          "heading": "Vision fallback",
+          "paragraphs": [
+            "When the active chat model cannot see images, NusaShell can describe attached images using a separate vision-capable model so the conversation continues without errors. Pick any model that supports image input. Leave disabled if you always use vision-capable chat models."
+          ],
+          "controls": [
+            "settings-vision-title",
+            "settings-vision-model"
+          ]
+        },
+        {
           "heading": "Context compaction",
           "paragraphs": [
             "Toggle compaction, set max input tokens (fallback context window, default 200000), max output tokens (default 65536), prompt caching, and optional sampling parameters (temperature, top-p, top-k, frequency penalty, presence penalty)."
@@ -481,6 +491,8 @@
     "settings-max-tool-rounds": { "label": "Maximum tool rounds", "section": "Settings", "type": "number", "notes": "1–10000, default 8." },
     "settings-embedding-title": { "label": "Embeddings title", "section": "Settings", "type": "text" },
     "settings-embedding-model": { "label": "Embedding model", "section": "Settings", "type": "select" },
+    "settings-vision-title": { "label": "Vision fallback title", "section": "Settings", "type": "text" },
+    "settings-vision-model": { "label": "Vision fallback model", "section": "Settings", "type": "select" },
     "settings-learning-threshold": { "label": "Learning review threshold", "section": "Settings", "type": "number", "notes": "Turns before review; 0 disables turn-based review." },
     "settings-context-title": { "label": "Context compaction title", "section": "Settings", "type": "text" },
     "settings-compaction-enabled": { "label": "Compact long conversations", "section": "Settings", "type": "checkbox" },

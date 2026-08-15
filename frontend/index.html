@@ -406,6 +406,17 @@
               <small>How many turns to accumulate before extracting learnings (default 50). Set 0 to disable turn-based review; compaction-triggered review still runs.</small>
             </label>
           </section>
+          <section class="settings-card settings-vision-card" aria-labelledby="settings-vision-title">
+            <div class="settings-card-title">Vision fallback</div>
+            <h2 id="settings-vision-title" class="sr-only">Vision fallback</h2>
+            <p class="settings-card-copy">When the active chat model cannot see images, NusaShell can describe attached images using a separate vision-capable model so the conversation continues without errors. Pick any model that supports image input.</p>
+            <label class="settings-field" for="settings-vision-model">Vision fallback model
+              <select id="settings-vision-model">
+                <option value="">Disabled — non-vision models get a text placeholder instead</option>
+              </select>
+              <small>Only models with vision capability appear here. Leave disabled if you always use vision-capable chat models.</small>
+            </label>
+          </section>
           <section class="settings-card" aria-labelledby="settings-context-title">
             <div class="settings-card-title">Context compaction</div>
             <h2 id="settings-context-title" class="sr-only">Context compaction</h2>

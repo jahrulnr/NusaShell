@@ -580,6 +580,12 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	if req.EmbeddingModelID != nil {
 		s.EmbeddingModelID = strings.TrimSpace(*req.EmbeddingModelID)
 	}
+	if req.VisionProviderID != nil {
+		s.VisionProviderID = strings.TrimSpace(*req.VisionProviderID)
+	}
+	if req.VisionModelID != nil {
+		s.VisionModelID = strings.TrimSpace(*req.VisionModelID)
+	}
 	if req.LearningReviewThreshold != nil {
 		v := *req.LearningReviewThreshold
 		if v < 0 {
@@ -606,6 +612,8 @@ func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 		MaxOutputTokens:         s.MaxOutputTokens,
 		EmbeddingProviderID:     s.EmbeddingProviderID,
 		EmbeddingModelID:        s.EmbeddingModelID,
+		VisionProviderID:        s.VisionProviderID,
+		VisionModelID:           s.VisionModelID,
 		Temperature:             s.Temperature,
 		TopP:                    s.TopP,
 		TopK:                    s.TopK,

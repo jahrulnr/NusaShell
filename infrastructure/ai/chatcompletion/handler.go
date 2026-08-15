@@ -132,7 +132,10 @@ func toOpenAIMessages(req application.ChatRequest) []openAIMessage {
 			}
 			out = append(out, msg)
 		case "tool":
-			content := m.ToolResult.Content
+			content := any(m.ToolResult.Content)
+			if len(m.ToolResult.Attachments) > 0 {
+				content = openAIToolContent(m.ToolResult)
+			}
 			out = append(out, openAIMessage{
 				Role:       "tool",
 				Content:    content,
@@ -141,6 +144,25 @@ func toOpenAIMessages(req application.ChatRequest) []openAIMessage {
 		}
 	}
 	return out
+}
+
+// openAIToolContent builds a multimodal content array for tool results that
+// carry image attachments (e.g. read_image). The text content comes first,
+// followed by image_url blocks for each attachment.
+func openAIToolContent(result *application.ToolResult) []map[string]any {
+	blocks := make([]map[string]any, 0, 1+len(result.Attachments))
+	if result.Content != "" {
+		blocks = append(blocks, map[string]any{"type": "text", "text": result.Content})
+	}
+	for _, att := range result.Attachments {
+		if att.Type == "image" {
+			blocks = append(blocks, map[string]any{
+				"type":      "image_url",
+				"image_url": map[string]any{"url": att.DataURL},
+			})
+		}
+	}
+	return blocks
 }
 
 func openAIUserContent(message application.ChatMessage) []map[string]any {

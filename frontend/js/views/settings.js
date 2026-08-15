@@ -4,9 +4,10 @@ import { autoReconnectEnabled, rpc, setAutoReconnect } from '../rpc.js';
 import { toast, createSelect } from '../ui.js';
 
 let bound = false;
-const state = { embeddingProviderId: '', embeddingModelId: '' };
+const state = { embeddingProviderId: '', embeddingModelId: '', visionProviderId: '', visionModelId: '' };
 let preferredSelect;
 let embeddingSelect;
+let visionSelect;
 
 export async function initSettings() {
   if (!bound) {
@@ -21,6 +22,10 @@ export async function initSettings() {
     });
     embeddingSelect = createSelect(document.getElementById('settings-embedding-model'), {
       placeholder: 'Automatic — use first available embedding model',
+      search: true,
+    });
+    visionSelect = createSelect(document.getElementById('settings-vision-model'), {
+      placeholder: 'Disabled — non-vision models get a text placeholder instead',
       search: true,
     });
     window.addEventListener('hashchange', () => {
@@ -51,6 +56,8 @@ async function refresh() {
     setOptionalNumber('settings-presence-penalty', settings.presence_penalty);
     state.embeddingProviderId = settings.embedding_provider_id ?? '';
     state.embeddingModelId = settings.embedding_model_id ?? '';
+    state.visionProviderId = settings.vision_provider_id ?? '';
+    state.visionModelId = settings.vision_model_id ?? '';
     document.getElementById('settings-learning-threshold').value = settings.learning_review_threshold ?? 50;
   } else {
     setStatus(`Could not load runtime settings: ${settingsResult.reason.message}`, true);
@@ -59,6 +66,7 @@ async function refresh() {
   const allModels = modelsResult.status === 'fulfilled' ? modelsResult.value.models ?? [] : [];
   renderModelOptions(allModels);
   renderEmbeddingModelOptions(allModels);
+  renderVisionModelOptions(allModels);
   document.getElementById('settings-sidebar-compact').checked = localStorage.getItem('nusashell.sidebarMode') === 'icons';
   document.getElementById('settings-auto-reconnect').checked = autoReconnectEnabled();
 
@@ -105,6 +113,26 @@ function renderEmbeddingModelOptions(models) {
   if (selected) embeddingSelect.setSelected([selected]);
 }
 
+function renderVisionModelOptions(models) {
+  const visionModels = models.filter((m) => m.vision === true);
+  const data = [
+    { text: 'Disabled — non-vision models get a text placeholder instead', value: '', placeholder: true },
+    ...visionModels.map((m) => {
+      const label = m.display_name || m.id;
+      const ctx = m.context ? ` ${Math.round(m.context / 1000)}K` : '';
+      return {
+        text: m.provider_name ? `${label}${ctx} · ${m.provider_name}` : `${label}${ctx}`,
+        value: `${m.provider_id}:${m.id}`,
+      };
+    }),
+  ];
+  visionSelect.setData(data);
+  const selected = state.visionProviderId && state.visionModelId
+    ? `${state.visionProviderId}:${state.visionModelId}`
+    : '';
+  if (selected) visionSelect.setSelected([selected]);
+}
+
 function setOptionalNumber(id, value) {
   const input = document.getElementById(id);
   if (!input) return;
@@ -149,6 +177,10 @@ async function save() {
     const [embProviderId, embModelId] = embeddingValue.includes(':')
       ? embeddingValue.split(':', 2)
       : ['', ''];
+    const visionValue = visionSelect.getSelected()?.[0] ?? '';
+    const [visProviderId, visModelId] = visionValue.includes(':')
+      ? visionValue.split(':', 2)
+      : ['', ''];
     const learningThreshold = Number(document.getElementById('settings-learning-threshold').value);
     if (!Number.isInteger(learningThreshold) || learningThreshold < 0 || learningThreshold > 1000) {
       setStatus('Learning review threshold must be between 0 and 1,000.', true);
@@ -162,6 +194,8 @@ async function save() {
       max_output_tokens: maxOutputTokens,
       embedding_provider_id: embProviderId || null,
       embedding_model_id: embModelId || null,
+      vision_provider_id: visProviderId || null,
+      vision_model_id: visModelId || null,
       learning_review_threshold: learningThreshold,
       temperature: optionalNumber('settings-temperature'),
       top_p: optionalNumber('settings-top-p'),

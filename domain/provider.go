@@ -71,3 +71,15 @@ func (p *Provider) HasModel(id string) bool {
 	}
 	return false
 }
+
+// FindModel returns the model metadata for the given ID, or nil if not
+// found. Used by the agent runtime to check capabilities (e.g. Vision)
+// before sending attachments that the model may not support.
+func (p *Provider) FindModel(id string) *Model {
+	for i := range p.Models {
+		if p.Models[i].ID == id {
+			return &p.Models[i]
+		}
+	}
+	return nil
+}

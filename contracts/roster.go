@@ -750,6 +750,8 @@ type SettingsDTO struct {
 	MaxOutputTokens         int      `json:"max_output_tokens"`
 	EmbeddingProviderID     string   `json:"embedding_provider_id,omitempty"`
 	EmbeddingModelID        string   `json:"embedding_model_id,omitempty"`
+	VisionProviderID        string   `json:"vision_provider_id,omitempty"`
+	VisionModelID           string   `json:"vision_model_id,omitempty"`
 	Temperature             *float64 `json:"temperature,omitempty"`
 	TopP                    *float64 `json:"top_p,omitempty"`
 	TopK                    *int     `json:"top_k,omitempty"`
@@ -771,6 +773,8 @@ type SettingsSetRequest struct {
 	MaxOutputTokens         *int            `json:"max_output_tokens,omitempty"`
 	EmbeddingProviderID     *string         `json:"embedding_provider_id,omitempty"`
 	EmbeddingModelID        *string         `json:"embedding_model_id,omitempty"`
+	VisionProviderID        *string         `json:"vision_provider_id,omitempty"`
+	VisionModelID           *string         `json:"vision_model_id,omitempty"`
 	Temperature             json.RawMessage `json:"temperature,omitempty"`
 	TopP                    json.RawMessage `json:"top_p,omitempty"`
 	TopK                    json.RawMessage `json:"top_k,omitempty"`

@@ -76,7 +76,7 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 	a.runs[run.ID] = run
 	a.runsMu.Unlock()
 
-	go a.runTurn(run, provider, apiKey, model, req.Effort, asstMsg.ID, false)
+	go a.runTurn(run, provider, apiKey, model, req.Effort, asstMsg.ID, false, modelSupportsVision(provider, model))
 	a.log("info", "agent", "turn started: %s (model %s)", run.ID, model)
 	return contracts.TurnStartResult{RunID: run.ID}, nil
 }
@@ -154,7 +154,7 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 	a.runs[run.ID] = run
 	a.runsMu.Unlock()
 
-	go a.runTurn(run, provider, apiKey, model, req.Effort, targetMsgID, continuation)
+	go a.runTurn(run, provider, apiKey, model, req.Effort, targetMsgID, continuation, modelSupportsVision(provider, model))
 	a.log("info", "agent", "turn retried: %s (model %s)", run.ID, model)
 	return contracts.TurnStartResult{RunID: run.ID}, nil
 }
@@ -257,7 +257,7 @@ func (a *App) handleTurnsCancelSteer(req contracts.TurnCancelSteerRequest) (any,
 	return map[string]any{"ok": true, "accepted": true}, nil
 }
 
-func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool) {
+func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, supportsVision bool) {
 	defer func() {
 		run.Cancel()
 		a.runsMu.Lock()
@@ -288,6 +288,14 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 	if err != nil {
 		a.failTurn(run, asstMsgID, err)
 		return
+	}
+	// Vision fallback: when the active model does not support images but
+	// the user attached images and configured a vision fallback model,
+	// describe each image via the fallback and inject the description as
+	// a text attachment on the latest user message. The original image is
+	// preserved so a later switch to a vision model can still see it.
+	if !supportsVision && settings.VisionProviderID != "" && settings.VisionModelID != "" {
+		conversation = a.enrichWithVisionDescriptions(run.Ctx, conversation, asstMsgID, settings)
 	}
 	toolDefs := a.toolDefinitions()
 	maxTokens := resolveMaxOutput(provider, model, settings)
@@ -320,7 +328,7 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 		a.Bus.Emit(contracts.EventTurnStarted, contracts.TurnStartedEvent{
 			RunID: run.ID, ConversationID: run.ConversationID, MessageID: currentMsgID, Round: round,
 		})
-		roundResult, streamErr := a.streamTurnRound(run, adapter, conversation, currentMsgID, model, effort, toolsForRound, settings, continuation, maxTokens, injectHydration, promptCache)
+		roundResult, streamErr := a.streamTurnRound(run, adapter, conversation, currentMsgID, model, effort, toolsForRound, settings, continuation, maxTokens, injectHydration, promptCache, supportsVision)
 		injectHydration = false // only the first round after a user message gets hydration
 		continuation = false
 		totalUsage = mergeUsage(totalUsage, roundResult.Response.Usage)
@@ -424,7 +432,7 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 			break
 		}
 
-		if err := a.executeTurnTools(run, currentMsgID, roundResult.Response.ToolCalls); err != nil {
+		if err := a.executeTurnTools(run, currentMsgID, roundResult.Response.ToolCalls, supportsVision, settings); err != nil {
 			if run.Ctx.Err() != nil {
 				a.interruptTurn(run, currentMsgID, roundResult, totalUsage, model)
 				return
@@ -686,6 +694,7 @@ func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *do
 				for _, tc := range m.ToolCalls {
 					msgs = append(msgs, ChatMessage{Role: "tool", ToolResult: &ToolResult{
 						ToolCallID: tc.ID, Name: tc.Name, Content: wrapToolOutput(tc.Name, tc.Output),
+						Attachments: tc.OutputAttachments,
 					}})
 				}
 			}
@@ -754,7 +763,7 @@ func (a *App) appendToolCall(c *domain.Conversation, msgID string, tc domain.Too
 	return c
 }
 
-func (a *App) updateToolResult(c *domain.Conversation, msgID, callID string, status domain.ToolCallStatus, output string) *domain.Conversation {
+func (a *App) updateToolResult(c *domain.Conversation, msgID, callID string, status domain.ToolCallStatus, output string, outputAttachments []domain.Attachment) *domain.Conversation {
 	for i := range c.Messages {
 		if c.Messages[i].ID != msgID {
 			continue
@@ -764,6 +773,7 @@ func (a *App) updateToolResult(c *domain.Conversation, msgID, callID string, sta
 			if c.Messages[i].ToolCalls[j].ID == callID {
 				c.Messages[i].ToolCalls[j].Status = status
 				c.Messages[i].ToolCalls[j].Output = output
+				c.Messages[i].ToolCalls[j].OutputAttachments = outputAttachments
 				updated = true
 			}
 		}
@@ -780,6 +790,7 @@ func (a *App) updateToolResult(c *domain.Conversation, msgID, callID string, sta
 				}
 				c.Messages[i].Steps[stepIndex].ToolCalls[callIndex].Status = status
 				c.Messages[i].Steps[stepIndex].ToolCalls[callIndex].Output = output
+				c.Messages[i].Steps[stepIndex].ToolCalls[callIndex].OutputAttachments = outputAttachments
 				updated = true
 			}
 		}
@@ -887,12 +898,37 @@ func toDomainUsage(u ChatUsage) *domain.Usage {
 
 // chatMessages flattens history into the neutral provider shape. The
 // current turn's placeholder (asstMsgID) is skipped while still empty.
-func chatMessages(c *domain.Conversation, pendingMsgID string) []ChatMessage {
+// modelSupportsVision reports whether the given model on the given provider
+// supports image input. Returns true when the model metadata is unknown
+// (not in catalog) to preserve backward compatibility — providers will
+// reject the image if unsupported, and the reactive error path handles that.
+func modelSupportsVision(provider *domain.Provider, model string) bool {
+	if provider == nil {
+		return true
+	}
+	m := provider.FindModel(model)
+	if m == nil {
+		return true
+	}
+	return m.Vision
+}
+
+func chatMessages(c *domain.Conversation, pendingMsgID string, supportsVision bool) []ChatMessage {
 	var out []ChatMessage
 	for _, m := range c.Messages {
 		switch m.Role {
 		case domain.RoleUser:
-			out = append(out, ChatMessage{Role: "user", Content: m.Content, Attachments: m.Attachments})
+			content := m.Content
+			attachments := m.Attachments
+			if !supportsVision && hasImageAttachment(attachments) {
+				attachments = stripImageAttachments(attachments)
+				if content == "" {
+					content = imageOmittedPlaceholder
+				} else if !containsImageOmissionNote(content) {
+					content = content + "\n\n" + imageOmittedPlaceholder
+				}
+			}
+			out = append(out, ChatMessage{Role: "user", Content: content, Attachments: attachments})
 		case domain.RoleAssistant:
 			if m.ID == pendingMsgID && m.Content == "" && m.Reasoning == "" && len(m.ToolCalls) == 0 {
 				continue
@@ -905,6 +941,7 @@ func chatMessages(c *domain.Conversation, pendingMsgID string) []ChatMessage {
 			for _, tc := range m.ToolCalls {
 				out = append(out, ChatMessage{Role: "tool", ToolResult: &ToolResult{
 					ToolCallID: tc.ID, Name: tc.Name, Content: wrapToolOutput(tc.Name, tc.Output),
+					Attachments: tc.OutputAttachments,
 				}})
 			}
 		case domain.RoleSystem:
@@ -912,4 +949,29 @@ func chatMessages(c *domain.Conversation, pendingMsgID string) []ChatMessage {
 		}
 	}
 	return out
+}
+
+const imageOmittedPlaceholder = "[image content omitted — this model does not support image input]"
+
+func hasImageAttachment(atts []domain.Attachment) bool {
+	for _, a := range atts {
+		if a.Type == "image" {
+			return true
+		}
+	}
+	return false
+}
+
+func stripImageAttachments(atts []domain.Attachment) []domain.Attachment {
+	filtered := make([]domain.Attachment, 0, len(atts))
+	for _, a := range atts {
+		if a.Type != "image" {
+			filtered = append(filtered, a)
+		}
+	}
+	return filtered
+}
+
+func containsImageOmissionNote(content string) bool {
+	return strings.Contains(content, "image content omitted")
 }
