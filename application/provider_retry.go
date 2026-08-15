@@ -142,8 +142,17 @@ func isRetryableUpstream(err *UpstreamError) bool {
 		return false
 	}
 	switch err.StatusCode {
-	case 408, 409, 425, 429:
+	case 408, 409, 425:
 		return true
+	case 429:
+		// Only retry 429 if the provider advertised a Retry-After window
+		// that fits within our cutoff. Without Retry-After, the rate-limit
+		// window is unknown and our exponential backoff (250ms–4s) is far
+		// shorter than typical rate-limit windows (1–60 minutes). Retrying
+		// just spams the provider with requests that all hit the same
+		// rate-limit window, making the limit worse. Fail fast so the user
+		// sees the error and can retry manually when the window clears.
+		return err.RetryAfter > 0 && err.RetryAfter <= retryAfterCutoff
 	default:
 		return err.StatusCode >= 500 && err.StatusCode <= 599
 	}

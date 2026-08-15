@@ -2,6 +2,9 @@ package application
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -57,9 +60,9 @@ func (a *App) toolDefinitions() []ToolDef {
 	return definitions
 }
 
-func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool) (streamedTurnRound, error) {
+func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy) (streamedTurnRound, error) {
 	for retry := 1; ; retry++ {
-		roundResult, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, maxTokens, injectHydration)
+		roundResult, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, maxTokens, injectHydration, promptCache)
 		if err == nil || retry >= maxProviderAttempts || roundResult.Content != "" || roundResult.Reasoning != "" {
 			return roundResult, err
 		}
@@ -89,7 +92,7 @@ func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *do
 	}
 }
 
-func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool) (streamedTurnRound, error) {
+func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy) (streamedTurnRound, error) {
 	var content strings.Builder
 	var reasoning strings.Builder
 	system := buildSystemPrompt(conversation)
@@ -121,6 +124,7 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 		Messages:         messages,
 		Tools:            tools,
 		PromptCaching:    settings.PromptCaching,
+		PromptCache:      promptCache,
 		MaxTokens:        maxTokens,
 		Effort:           effort,
 		Temperature:      settings.Temperature,
@@ -140,6 +144,23 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 		})
 	})
 	return streamedTurnRound{Content: content.String(), Reasoning: reasoning.String(), Response: response}, err
+}
+
+// buildPromptCachePolicy computes the provider-neutral prompt-cache intent for
+// a turn. The cache key is derived from [providerId, model, conversationId] so
+// the provider can dedup cache entries across requests in the same
+// conversation. When prompt caching is disabled in settings, returns nil.
+// Mirrors the TS promptCacheKey + AgentPromptCachePolicy.
+func buildPromptCachePolicy(settings domain.Settings, providerID, model, conversationID string) *PromptCachePolicy {
+	if !settings.PromptCaching {
+		return nil
+	}
+	canonical, _ := json.Marshal([3]string{providerID, model, conversationID})
+	sum := sha256.Sum256(canonical)
+	return &PromptCachePolicy{
+		Mode: "auto",
+		Key:  "pc_" + hex.EncodeToString(sum[:]),
+	}
 }
 
 // buildHydration assembles the synthetic runtime-hydration transcript from the

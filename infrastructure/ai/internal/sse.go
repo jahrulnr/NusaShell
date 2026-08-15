@@ -189,6 +189,10 @@ func JoinEndpoint(base, op string) string {
 	return base + op
 }
 
+// NusaShellUserAgent identifies NusaShell to every inference endpoint
+// without impersonating an SDK. Mirrors the TS NUSASHELL_USER_AGENT.
+const NusaShellUserAgent = "NusaShell"
+
 // jsonReq builds an HTTP request with a JSON body.
 func jsonReq(ctx context.Context, method, url string, headers map[string]string, body any) (*http.Request, error) {
 	var rd io.Reader
@@ -204,6 +208,7 @@ func jsonReq(ctx context.Context, method, url string, headers map[string]string,
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", NusaShellUserAgent)
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
@@ -218,6 +223,12 @@ func OpenSSE(ctx context.Context, client *http.Client, url string, headers map[s
 	if err != nil {
 		return nil, err
 	}
+	// Accept: text/event-stream tells gateways (tokenrouter, openrouter, …)
+	// to proxy the SSE stream as-is. Without it, some gateways buffer the
+	// response and send it as JSON, which causes the SSE parser to see no
+	// data frames, hit EOF without [DONE], and fall back to a second
+	// non-streaming request — doubling the request count per tool round.
+	req.Header.Set("Accept", "text/event-stream, application/json")
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, &application.UpstreamError{Kind: application.KindConnect, Temporary: true, Err: err}
@@ -255,6 +266,8 @@ func DoJSON(ctx context.Context, client *http.Client, method, url string, header
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", NusaShellUserAgent)
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}

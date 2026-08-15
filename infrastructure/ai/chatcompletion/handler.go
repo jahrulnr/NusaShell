@@ -11,7 +11,7 @@ import (
 
 	"nusashell/application"
 	"nusashell/domain"
-	"nusashell/infrastructure/ai/internal"
+	aiutil "nusashell/infrastructure/ai/internal"
 )
 
 // Adapter talks to any OpenAI-compatible /chat/completions endpoint.
@@ -75,6 +75,7 @@ type openAIRequest struct {
 	TopP             *float64        `json:"top_p,omitempty"`
 	FrequencyPenalty *float64        `json:"frequency_penalty,omitempty"`
 	PresencePenalty  *float64        `json:"presence_penalty,omitempty"`
+	PromptCacheKey   string          `json:"prompt_cache_key,omitempty"`
 }
 
 type openAIChunk struct {
@@ -194,6 +195,9 @@ func buildRequest(req application.ChatRequest, stream bool) openAIRequest {
 	}
 	if req.Effort != "" && req.Effort != "auto" {
 		r.ReasoningEffort = req.Effort
+	}
+	if req.PromptCache != nil && req.PromptCache.Mode != "off" && req.PromptCache.Key != "" {
+		r.PromptCacheKey = req.PromptCache.Key
 	}
 	return r
 }

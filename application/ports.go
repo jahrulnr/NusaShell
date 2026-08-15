@@ -127,6 +127,29 @@ type ChatRequest struct {
 	TopK             *int
 	FrequencyPenalty *float64
 	PresencePenalty  *float64
+	// PromptCache controls provider-side prompt caching. When non-nil and
+	// PromptCaching is true, adapters translate the policy to their native
+	// wire format (prompt_cache_key for OpenAI, cache_control for Anthropic).
+	PromptCache *PromptCachePolicy
+}
+
+// PromptCachePolicy is the provider-neutral cache intent. Adapters translate
+// it to their native wire format. Mirrors the TS AgentPromptCachePolicy.
+type PromptCachePolicy struct {
+	// Mode: "auto" (default) or "off". "off" disables caching even when
+	// the provider supports it.
+	Mode string
+	// TTL: "5m" (default) or "1h". Anthropic supports 1h; OpenAI ignores it.
+	TTL string
+	// Key is a stable routing key sent to OpenAI-compatible providers as
+	// prompt_cache_key so they can dedup cache entries across requests in
+	// the same conversation. Format: "pc_<sha256>".
+	Key string
+	// StableSystemMessages is the number of leading system messages that
+	// are cache-stable. Anthropic marks only the last of these with
+	// cache_control instead of the entire system block, so volatile tail
+	// content (user prompt, memory, todos) doesn't break cache hits.
+	StableSystemMessages int
 }
 
 type ChatUsage struct {

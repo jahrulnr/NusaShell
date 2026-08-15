@@ -75,17 +75,24 @@ type responsesContentBlock struct {
 }
 
 type responsesRequest struct {
-	Model            string               `json:"model"`
-	Instructions     string               `json:"instructions,omitempty"`
-	Input            []responsesInputItem `json:"input,omitempty"`
-	Tools            []responsesToolDef   `json:"tools,omitempty"`
-	Stream           bool                 `json:"stream"`
-	MaxOutputTokens  int                  `json:"max_output_tokens,omitempty"`
-	Reasoning        *responsesReasoning  `json:"reasoning,omitempty"`
-	Temperature      *float64             `json:"temperature,omitempty"`
-	TopP             *float64             `json:"top_p,omitempty"`
-	FrequencyPenalty *float64             `json:"frequency_penalty,omitempty"`
-	PresencePenalty  *float64             `json:"presence_penalty,omitempty"`
+	Model              string               `json:"model"`
+	Instructions       string               `json:"instructions,omitempty"`
+	Input              []responsesInputItem `json:"input,omitempty"`
+	Tools              []responsesToolDef   `json:"tools,omitempty"`
+	Stream             bool                 `json:"stream"`
+	MaxOutputTokens    int                  `json:"max_output_tokens,omitempty"`
+	Reasoning          *responsesReasoning  `json:"reasoning,omitempty"`
+	Temperature        *float64             `json:"temperature,omitempty"`
+	TopP               *float64             `json:"top_p,omitempty"`
+	FrequencyPenalty   *float64             `json:"frequency_penalty,omitempty"`
+	PresencePenalty    *float64             `json:"presence_penalty,omitempty"`
+	PromptCacheKey     string               `json:"prompt_cache_key,omitempty"`
+	PromptCacheOptions *responsesCacheOpts  `json:"prompt_cache_options,omitempty"`
+}
+
+type responsesCacheOpts struct {
+	Mode string `json:"mode"`
+	TTL  string `json:"ttl,omitempty"`
 }
 
 type responsesReasoning struct {
@@ -175,6 +182,14 @@ func buildResponsesRequest(req application.ChatRequest, stream bool) responsesRe
 	}
 	if req.Effort != "" && req.Effort != "auto" {
 		out.Reasoning = &responsesReasoning{Effort: req.Effort}
+	}
+	if req.PromptCache != nil && req.PromptCache.Mode != "off" {
+		if req.PromptCache.Key != "" {
+			out.PromptCacheKey = req.PromptCache.Key
+		}
+		if req.PromptCache.Mode == "explicit" {
+			out.PromptCacheOptions = &responsesCacheOpts{Mode: "explicit", TTL: req.PromptCache.TTL}
+		}
 	}
 	for _, t := range req.Tools {
 		out.Tools = append(out.Tools, responsesToolDef{

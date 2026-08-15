@@ -12,7 +12,7 @@ import (
 
 	"nusashell/application"
 	"nusashell/domain"
-	"nusashell/infrastructure/ai/internal"
+	aiutil "nusashell/infrastructure/ai/internal"
 )
 
 const anthropicVersion = "2023-06-01"
@@ -77,6 +77,7 @@ type anthropicSource struct {
 
 type cacheControl struct {
 	Type string `json:"type"`
+	TTL  string `json:"ttl,omitempty"`
 }
 
 type anthropicMessage struct {
@@ -188,10 +189,14 @@ func buildAnthropicRequest(req application.ChatRequest, stream bool) anthropicRe
 		TopP:        req.TopP,
 		TopK:        req.TopK,
 	}
+	cacheTTL := ""
+	if req.PromptCache != nil && req.PromptCache.TTL == "1h" {
+		cacheTTL = "1h"
+	}
 	if req.System != "" {
 		if req.PromptCaching {
 			out.System = aiutil.MustJSON([]anthropicContentBlock{{
-				Type: "text", Text: req.System, CacheControl: &cacheControl{Type: "ephemeral"},
+				Type: "text", Text: req.System, CacheControl: &cacheControl{Type: "ephemeral", TTL: cacheTTL},
 			}})
 		} else {
 			out.System = aiutil.MustJSON([]anthropicContentBlock{{Type: "text", Text: req.System}})
@@ -204,7 +209,7 @@ func buildAnthropicRequest(req application.ChatRequest, stream bool) anthropicRe
 			InputSchema: t.InputSchema,
 		}
 		if req.PromptCaching {
-			def.CacheControl = &cacheControl{Type: "ephemeral"}
+			def.CacheControl = &cacheControl{Type: "ephemeral", TTL: cacheTTL}
 		}
 		out.Tools = append(out.Tools, def)
 	}

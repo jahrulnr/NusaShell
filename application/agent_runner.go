@@ -266,6 +266,7 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 	}
 	toolDefs := a.toolDefinitions()
 	maxTokens := resolveMaxOutput(provider, model, settings)
+	promptCache := buildPromptCachePolicy(settings, provider.ID, model, run.ConversationID)
 
 	a.Bus.Emit(contracts.EventTurnStarted, contracts.TurnStartedEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, MessageID: asstMsgID, Round: 0,
@@ -294,7 +295,7 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 		a.Bus.Emit(contracts.EventTurnStarted, contracts.TurnStartedEvent{
 			RunID: run.ID, ConversationID: run.ConversationID, MessageID: currentMsgID, Round: round,
 		})
-		roundResult, streamErr := a.streamTurnRound(run, adapter, conversation, currentMsgID, model, effort, toolsForRound, settings, continuation, maxTokens, injectHydration)
+		roundResult, streamErr := a.streamTurnRound(run, adapter, conversation, currentMsgID, model, effort, toolsForRound, settings, continuation, maxTokens, injectHydration, promptCache)
 		injectHydration = false // only the first round after a user message gets hydration
 		continuation = false
 		totalUsage = mergeUsage(totalUsage, roundResult.Response.Usage)
