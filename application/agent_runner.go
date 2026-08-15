@@ -10,7 +10,7 @@ import (
 	"nusashell/domain"
 )
 
-func (a *App) handleTurnsStart(req contracts.TurnStartRequest) (any, *contracts.RPCError) {
+func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartRequest) (any, *contracts.RPCError) {
 	c, rpcErr := a.getConversation(req.ConversationID)
 	if rpcErr != nil {
 		return nil, rpcErr
@@ -65,8 +65,13 @@ func (a *App) handleTurnsStart(req contracts.TurnStartRequest) (any, *contracts.
 		return nil, rpcInternal(err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	run := &TurnRun{ID: domain.NewID("run"), ConversationID: c.ID, MessageID: asstMsg.ID, Ctx: ctx, Cancel: cancel}
+	// Turn goroutines outlive the HTTP request (fire-and-forget: the RPC
+	// returns the RunID immediately while the turn streams via SSE/WS).
+	// Derive from the request context but detach cancellation so the turn
+	// is not killed when the HTTP response is sent. The turn is cancelled
+	// explicitly via handleTurnsStop or server shutdown.
+	turnCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	run := &TurnRun{ID: domain.NewID("run"), ConversationID: c.ID, MessageID: asstMsg.ID, Ctx: turnCtx, Cancel: cancel}
 	a.runsMu.Lock()
 	a.runs[run.ID] = run
 	a.runsMu.Unlock()
@@ -81,7 +86,7 @@ func (a *App) handleTurnsStart(req contracts.TurnStartRequest) (any, *contracts.
 // no tool calls), the partial is frozen as a completed step and the new model
 // is asked to continue from where it stopped; otherwise the failed message is
 // cleared and re-run from scratch.
-func (a *App) handleTurnsRetry(req contracts.TurnRetryRequest) (any, *contracts.RPCError) {
+func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryRequest) (any, *contracts.RPCError) {
 	c, rpcErr := a.getConversation(req.ConversationID)
 	if rpcErr != nil {
 		return nil, rpcErr
@@ -143,8 +148,8 @@ func (a *App) handleTurnsRetry(req contracts.TurnRetryRequest) (any, *contracts.
 		return nil, rpcInternal(err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	run := &TurnRun{ID: domain.NewID("run"), ConversationID: c.ID, MessageID: targetMsgID, Ctx: ctx, Cancel: cancel}
+	turnCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	run := &TurnRun{ID: domain.NewID("run"), ConversationID: c.ID, MessageID: targetMsgID, Ctx: turnCtx, Cancel: cancel}
 	a.runsMu.Lock()
 	a.runs[run.ID] = run
 	a.runsMu.Unlock()
@@ -198,7 +203,7 @@ func (a *App) handleTurnsActive(req contracts.ConversationIDRequest) (any, *cont
 	}, nil
 }
 
-func (a *App) handleTurnsSteer(req contracts.TurnSteerRequest) (any, *contracts.RPCError) {
+func (a *App) handleTurnsSteer(ctx context.Context, req contracts.TurnSteerRequest) (any, *contracts.RPCError) {
 	text := strings.TrimSpace(req.Text)
 	if text == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "steer text is required"}
@@ -330,8 +335,10 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 					a.CodexRouter.MarkCircuitOpen(currentAccount, time.Now().Add(cooldown))
 					a.log("warn", "ai", "codex circuit open: account %s usage exhausted for %s (conversation %s)",
 						currentAccount, cooldown.Round(time.Minute), run.ConversationID)
-					// Async fetch exact reset time from usage API
-					go a.refreshCodexCircuit(provider.ID, currentAccount)
+					// Async fetch exact reset time from usage API.
+					// Derive from the turn context so the goroutine exits
+					// early if the turn is cancelled.
+					go a.refreshCodexCircuit(run.Ctx, provider.ID, currentAccount)
 				} else {
 					a.CodexRouter.MarkRateLimited(currentAccount, cooldown)
 				}

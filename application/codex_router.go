@@ -75,9 +75,19 @@ func (r *CodexAccountRouter) PickAccountDetailed(conversationID, providerID stri
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := time.Now()
-	// Check sticky first
-	if sticky, ok := r.sticky[conversationID]; ok && !r.isBlockedLocked(sticky, now) {
-		return PickAccountResult{AccountID: sticky}
+	// Build a set of available accounts for O(1) sticky lookup
+	availSet := make(map[string]bool, len(available))
+	for _, acc := range available {
+		availSet[acc] = true
+	}
+	// Check sticky first — but only if it's still in the available list.
+	// If the sticky account was deleted, clean up the stale mapping.
+	if sticky, ok := r.sticky[conversationID]; ok {
+		if !availSet[sticky] {
+			delete(r.sticky, conversationID)
+		} else if !r.isBlockedLocked(sticky, now) {
+			return PickAccountResult{AccountID: sticky}
+		}
 	}
 	// Pick first available that is not blocked
 	for _, acc := range available {

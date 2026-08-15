@@ -234,3 +234,26 @@ func TestCodexAccountRouter_CircuitDoesNotShorten(t *testing.T) {
 		t.Fatalf("circuit should not shorten: first=%s second=%s", first, second)
 	}
 }
+
+func TestCodexAccountRouter_StickyCleanupWhenAccountDeleted(t *testing.T) {
+	r := NewCodexAccountRouter()
+	accounts := []string{"acc-a", "acc-b"}
+
+	// Pick for conv-1 — sticks to acc-a
+	picked := r.PickAccount("conv-1", "prov-1", accounts)
+	if picked != "acc-a" {
+		t.Fatalf("expected acc-a, got %s", picked)
+	}
+
+	// acc-a is deleted (removed from available list)
+	accounts = []string{"acc-b"}
+	picked2 := r.PickAccount("conv-1", "prov-1", accounts)
+	if picked2 != "acc-b" {
+		t.Fatalf("expected failover to acc-b, got %s", picked2)
+	}
+
+	// Sticky should now point to acc-b, not acc-a
+	if got := r.StickyAccount("conv-1"); got != "acc-b" {
+		t.Fatalf("sticky should be acc-b after cleanup, got %s", got)
+	}
+}

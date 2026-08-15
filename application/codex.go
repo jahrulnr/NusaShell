@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -62,6 +63,54 @@ func (a *App) codexAccountCircuitUntil(accountID string) int64 {
 	return until.Unix()
 }
 
+// markProviderHasCreds updates the provider's HasAPIKey flag and persists
+// it. Errors are logged but not returned — the credential is already
+// stored, so a failed flag update is a cosmetic issue, not data loss.
+func (a *App) markProviderHasCreds(providerID string, hasKey bool) {
+	p, err := a.Providers.Get(providerID)
+	if err != nil {
+		a.log("warn", "ai", "failed to get provider %s for cred flag update: %v", providerID, err)
+		return
+	}
+	p.HasAPIKey = hasKey
+	p.UpdatedAt = time.Now().UTC()
+	if err := a.Providers.Save(p); err != nil {
+		a.log("warn", "ai", "failed to save provider %s cred flag: %v", providerID, err)
+	}
+}
+
+// loadCodexToken reads and parses a stored Codex OAuth token for a
+// specific account. Returns the parsed token, the raw JSON string, and
+// an error if the token is missing or corrupted. Old tokens lacking
+// email/name are enriched via JWT decoding and persisted.
+func (a *App) loadCodexToken(providerID, accountID string) (CodexTokenJSON, string, error) {
+	tokenJSON, has, err := a.Credentials.Get(accountKey(providerID, accountID))
+	if err != nil {
+		return CodexTokenJSON{}, "", err
+	}
+	if !has {
+		return CodexTokenJSON{}, "", fmt.Errorf("account %s not found", accountID)
+	}
+	var tok CodexTokenJSON
+	if err := json.Unmarshal([]byte(tokenJSON), &tok); err != nil {
+		return CodexTokenJSON{}, tokenJSON, fmt.Errorf("invalid token JSON for account %s: %w", accountID, err)
+	}
+	// Enrich old tokens that lack email/name by decoding the JWT.
+	if tok.Email == "" && a.CodexOAuth != nil {
+		email, name := a.CodexOAuth.ExtractProfile(tokenJSON)
+		if email != "" {
+			tok.Email = email
+			tok.Name = name
+			if updated, err := json.Marshal(tok); err == nil {
+				if err := a.Credentials.Set(accountKey(providerID, accountID), string(updated)); err != nil {
+					a.log("warn", "ai", "failed to persist enriched profile for account %s: %v", accountID, err)
+				}
+			}
+		}
+	}
+	return tok, tokenJSON, nil
+}
+
 // handleCodexLogin triggers the OAuth PKCE flow. The implementation opens
 // a browser and blocks until the callback completes. The resulting token
 // is stored in CredentialStore under both the provider ID (active) and
@@ -104,10 +153,7 @@ func (a *App) handleCodexLogin(req contracts.CodexLoginRequest) (any, *contracts
 		return nil, rpcInternal(err)
 	}
 	// Mark provider as having credentials
-	p, _ := a.Providers.Get(req.ProviderID)
-	p.HasAPIKey = true
-	p.UpdatedAt = time.Now().UTC()
-	_ = a.Providers.Save(p)
+	a.markProviderHasCreds(req.ProviderID, true)
 	a.log("info", "ai", "codex login successful: account %s", tok.AccountID)
 	return contracts.CodexLoginResult{AccountID: tok.AccountID}, nil
 }
@@ -162,10 +208,7 @@ func (a *App) handleCodexImport(req contracts.CodexImportRequest) (any, *contrac
 	if err := a.Credentials.Set(req.ProviderID, tokenStr); err != nil {
 		return nil, rpcInternal(err)
 	}
-	p, _ := a.Providers.Get(req.ProviderID)
-	p.HasAPIKey = true
-	p.UpdatedAt = time.Now().UTC()
-	_ = a.Providers.Save(p)
+	a.markProviderHasCreds(req.ProviderID, true)
 	a.log("info", "ai", "codex import successful: account %s", tok.AccountID)
 	return contracts.CodexImportResult{
 		AccountID: tok.AccountID,
@@ -181,26 +224,25 @@ func (a *App) handleCodexLogout(req contracts.CodexLogoutRequest) (any, *contrac
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 	}
 	if req.AccountID != "" {
-		_ = a.Credentials.Delete(accountKey(req.ProviderID, req.AccountID))
+		if err := a.Credentials.Delete(accountKey(req.ProviderID, req.AccountID)); err != nil {
+			a.log("warn", "ai", "failed to delete account credential: %v", err)
+		}
 		// If this was the active account, clear the active key too
 		activeJSON, hasActive, _ := a.Credentials.Get(req.ProviderID)
 		if hasActive {
 			var active CodexTokenJSON
 			if json.Unmarshal([]byte(activeJSON), &active) == nil && active.AccountID == req.AccountID {
-				_ = a.Credentials.Delete(req.ProviderID)
-				// Mark provider as not configured
-				p, _ := a.Providers.Get(req.ProviderID)
-				p.HasAPIKey = false
-				p.UpdatedAt = time.Now().UTC()
-				_ = a.Providers.Save(p)
+				if err := a.Credentials.Delete(req.ProviderID); err != nil {
+					a.log("warn", "ai", "failed to delete active credential: %v", err)
+				}
+				a.markProviderHasCreds(req.ProviderID, false)
 			}
 		}
 	} else {
-		_ = a.Credentials.Delete(req.ProviderID)
-		p, _ := a.Providers.Get(req.ProviderID)
-		p.HasAPIKey = false
-		p.UpdatedAt = time.Now().UTC()
-		_ = a.Providers.Save(p)
+		if err := a.Credentials.Delete(req.ProviderID); err != nil {
+			a.log("warn", "ai", "failed to delete active credential: %v", err)
+		}
+		a.markProviderHasCreds(req.ProviderID, false)
 	}
 	a.log("info", "ai", "codex logout: %s", req.AccountID)
 	return map[string]bool{"ok": true}, nil
@@ -230,34 +272,17 @@ func (a *App) handleCodexAccountsList(req contracts.CodexAccountsListRequest) (a
 	for _, id := range ids {
 		// Extract accountID from the key: "{providerID}:account:{accountID}"
 		accountID := strings.TrimPrefix(id, prefix)
-		tokenJSON, has, _ := a.Credentials.Get(id)
-		if !has {
+		tok, _, err := a.loadCodexToken(req.ProviderID, accountID)
+		if err != nil {
+			a.log("warn", "ai", "skipping account %s in list: %v", accountID, err)
 			continue
-		}
-		var tok CodexTokenJSON
-		var expiresAt int64
-		if json.Unmarshal([]byte(tokenJSON), &tok) == nil {
-			expiresAt = tok.ExpiresAt
-		}
-		email, name := tok.Email, tok.Name
-		// Enrich old tokens that lack email/name by decoding the JWT.
-		if email == "" && a.CodexOAuth != nil {
-			email, name = a.CodexOAuth.ExtractProfile(tokenJSON)
-			// Persist the enriched profile so future reads skip decoding.
-			if email != "" {
-				tok.Email = email
-				tok.Name = name
-				if updated, err := json.Marshal(tok); err == nil {
-					_ = a.Credentials.Set(id, string(updated))
-				}
-			}
 		}
 		accounts = append(accounts, contracts.CodexAccountDTO{
 			AccountID:        accountID,
-			Email:            email,
-			Name:             name,
+			Email:            tok.Email,
+			Name:             tok.Name,
 			Active:           accountID == activeAccountID,
-			ExpiresAt:        expiresAt,
+			ExpiresAt:        tok.ExpiresAt,
 			CircuitOpen:      a.isCodexAccountCircuitOpen(accountID),
 			CircuitOpenUntil: a.codexAccountCircuitUntil(accountID),
 		})
@@ -368,12 +393,15 @@ func (a *App) handleCodexUsage(req contracts.CodexUsageRequest) (any, *contracts
 	defer cancel()
 	var accounts []contracts.CodexAccountUsage
 	for _, accID := range accountIDs {
-		tokenJSON, has, _ := a.Credentials.Get(accountKey(req.ProviderID, accID))
-		if !has {
+		tok, tokenJSON, err := a.loadCodexToken(req.ProviderID, accID)
+		if err != nil {
+			accounts = append(accounts, contracts.CodexAccountUsage{
+				AccountID: accID,
+				Active:    accID == activeAccountID,
+				Error:     err.Error(),
+			})
 			continue
 		}
-		var tok CodexTokenJSON
-		json.Unmarshal([]byte(tokenJSON), &tok)
 		entry := contracts.CodexAccountUsage{
 			AccountID:   accID,
 			Email:       tok.Email,
@@ -416,15 +444,18 @@ func (a *App) handleCodexUsage(req contracts.CodexUsageRequest) (any, *contracts
 // Called after a 429 failover to refine the circuit-open duration from
 // the provider's usage endpoint (which has precise reset timestamps).
 // Runs in a goroutine — errors are logged but not surfaced to the user.
-func (a *App) refreshCodexCircuit(providerID, accountID string) {
+// The parent context is respected so the goroutine exits early if the
+// turn is cancelled.
+func (a *App) refreshCodexCircuit(parent context.Context, providerID, accountID string) {
 	if a.CodexUsage == nil || a.CodexRouter == nil || accountID == "" {
 		return
 	}
-	tokenJSON, has, _ := a.Credentials.Get(accountKey(providerID, accountID))
-	if !has {
+	_, tokenJSON, err := a.loadCodexToken(providerID, accountID)
+	if err != nil {
+		a.log("warn", "ai", "codex circuit refresh: cannot load token for account %s: %v", accountID, err)
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
 	defer cancel()
 	usage, err := a.CodexUsage.FetchUsage(ctx, tokenJSON)
 	if err != nil {
@@ -470,8 +501,9 @@ func (a *App) RefreshCircuitBreakers(ctx context.Context) int {
 		}
 		accountIDs := a.listCodexAccountIDs(p.ID)
 		for _, accID := range accountIDs {
-			tokenJSON, has, _ := a.Credentials.Get(accountKey(p.ID, accID))
-			if !has {
+			_, tokenJSON, err := a.loadCodexToken(p.ID, accID)
+			if err != nil {
+				a.log("warn", "ai", "codex circuit poll: cannot load token for account %s: %v", accID, err)
 				continue
 			}
 			checked++

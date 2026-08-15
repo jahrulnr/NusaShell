@@ -59,7 +59,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			s.writeWSError(conn, ctx, req.ID, contracts.CodeValidation, "malformed frame")
 			continue
 		}
-		result, rpcErr := s.App.Dispatch(req.Method, req.Payload)
+		result, rpcErr := s.App.Dispatch(ctx, req.Method, req.Payload)
 		resp := contracts.WSResponse{ID: req.ID}
 		if rpcErr != nil {
 			s.Logger.Debug("ws rpc error", "method", req.Method, "code", rpcErr.Code)

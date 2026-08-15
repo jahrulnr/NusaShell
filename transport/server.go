@@ -50,7 +50,7 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	start := time.Now()
-	result, rpcErr := s.App.Dispatch(req.Method, req.Payload)
+	result, rpcErr := s.App.Dispatch(r.Context(), req.Method, req.Payload)
 	if rpcErr != nil {
 		s.Logger.Debug("rpc error", "method", req.Method, "code", rpcErr.Code, "elapsed_ms", time.Since(start).Milliseconds())
 		writeJSON(w, http.StatusOK, contracts.ErrResult(rpcErr.Code, rpcErr.Message))

@@ -230,7 +230,7 @@ func (a *App) log(level, source, format string, args ...any) {
 
 // Dispatch routes an RPC method to its use case. Transport handlers are the
 // only other caller of this method, which keeps handler-level tests honest.
-func (a *App) Dispatch(method string, payload json.RawMessage) (any, *contracts.RPCError) {
+func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessage) (any, *contracts.RPCError) {
 	switch method {
 	case contracts.MethodAppInfo:
 		return a.handleAppInfo()
@@ -277,7 +277,7 @@ func (a *App) Dispatch(method string, payload json.RawMessage) (any, *contracts.
 		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
 			return nil, rpcErr
 		}
-		return a.handleTurnsStart(req)
+		return a.handleTurnsStart(ctx, req)
 	case contracts.MethodTurnsStop:
 		var req contracts.TurnStopRequest
 		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
@@ -289,13 +289,13 @@ func (a *App) Dispatch(method string, payload json.RawMessage) (any, *contracts.
 		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
 			return nil, rpcErr
 		}
-		return a.handleTurnsRetry(req)
+		return a.handleTurnsRetry(ctx, req)
 	case contracts.MethodTurnsSteer:
 		var req contracts.TurnSteerRequest
 		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
 			return nil, rpcErr
 		}
-		return a.handleTurnsSteer(req)
+		return a.handleTurnsSteer(ctx, req)
 	case contracts.MethodTurnsCancelSteer:
 		var req contracts.TurnCancelSteerRequest
 		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
