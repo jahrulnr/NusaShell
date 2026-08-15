@@ -200,6 +200,7 @@
 .settings-toggle input:checked + .toggle-slider::before { transform: translateX(16px); background: white; }
 .settings-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-soft); }
 .settings-inline-action { margin-top: 0; }
+.settings-header-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
 .settings-save-status { min-width: 0; color: var(--text-faint); font: 10.5px var(--font-mono); }
 .settings-connection { display: flex; align-items: center; gap: 8px; color: var(--text-dim); font: 11px var(--font-mono); }
 .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border-soft); color: var(--text-dim); font-size: 12px; }

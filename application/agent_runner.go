@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -259,6 +260,18 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 		a.runsMu.Unlock()
 	}()
 
+	// Codex sticky account: pick the account bound to this conversation
+	// so the Codex backend can reuse the prompt cache shard. If the
+	// sticky account is rate-limited, PickAccount returns a different one.
+	if provider.Kind == domain.ProviderCodex && a.CodexRouter != nil {
+		accounts := a.listCodexAccountIDs(provider.ID)
+		if picked := a.CodexRouter.PickAccount(run.ConversationID, provider.ID, accounts); picked != "" {
+			if token, has, _ := a.Credentials.Get(accountKey(provider.ID, picked)); has {
+				apiKey = token
+			}
+		}
+	}
+
 	adapter, conversation, settings, err := a.initializeTurn(run, provider, apiKey, model)
 	if err != nil {
 		a.failTurn(run, asstMsgID, err)
@@ -302,7 +315,47 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 		if streamErr != nil {
 			if run.Ctx.Err() != nil {
 				a.interruptTurn(run, currentMsgID, roundResult, totalUsage, model)
-			} else if !continuedPartialStream && canContinuePartialStream(streamErr, roundResult) {
+				return
+			}
+			// Codex account failover with circuit breaker:
+			// - Transient 429 (Retry-After \u2264 5min): MarkRateLimited (short cooldown)
+			// - Usage exhausted (Retry-After > 5min): MarkCircuitOpen (long block until reset)
+			// Then try a different account. If all accounts are blocked, fail with
+			// a clear error so the user knows when to retry.
+			if provider.Kind == domain.ProviderCodex && a.CodexRouter != nil && isRateLimitError(streamErr) {
+				currentAccount := a.CodexRouter.StickyAccount(run.ConversationID)
+				cooldown := rateLimitCooldown(streamErr)
+				if cooldown > retryAfterCutoff {
+					// Usage quota exhausted — open circuit until reset
+					a.CodexRouter.MarkCircuitOpen(currentAccount, time.Now().Add(cooldown))
+					a.log("warn", "ai", "codex circuit open: account %s usage exhausted for %s (conversation %s)",
+						currentAccount, cooldown.Round(time.Minute), run.ConversationID)
+					// Async fetch exact reset time from usage API
+					go a.refreshCodexCircuit(provider.ID, currentAccount)
+				} else {
+					a.CodexRouter.MarkRateLimited(currentAccount, cooldown)
+				}
+				accounts := a.listCodexAccountIDs(provider.ID)
+				pickResult := a.CodexRouter.PickAccountDetailed(run.ConversationID, provider.ID, accounts)
+				newAccount := pickResult.AccountID
+				if newAccount != "" && newAccount != currentAccount {
+					if newToken, has, _ := a.Credentials.Get(accountKey(provider.ID, newAccount)); has {
+						newAdapter, buildErr := a.Factory(run.Ctx, provider, newToken)
+						if buildErr == nil {
+							adapter = newAdapter
+							apiKey = newToken
+							a.log("info", "ai", "codex failover: account %s \u2192 %s for conversation %s",
+								currentAccount, newAccount, run.ConversationID)
+							round--
+							continue
+						}
+					}
+				}
+				if pickResult.AllRateLimited && !pickResult.EarliestReset.IsZero() {
+					streamErr = fmt.Errorf("all Codex accounts are rate-limited. Earliest reset at %s", pickResult.EarliestReset.Format(time.RFC3339))
+				}
+			}
+			if !continuedPartialStream && canContinuePartialStream(streamErr, roundResult) {
 				if err := a.persistPartialTurnRound(run.ConversationID, currentMsgID, model, roundResult); err != nil {
 					a.failTurn(run, currentMsgID, err)
 					return

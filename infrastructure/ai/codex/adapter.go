@@ -9,6 +9,7 @@ import (
 
 	"nusashell/application"
 	"nusashell/infrastructure/ai/codex/runtime"
+	"nusashell/infrastructure/config"
 )
 
 // RuntimeAdapter implements application.CodexRuntime using the
@@ -130,4 +131,25 @@ func NewUsageAdapter() *UsageAdapter { return &UsageAdapter{} }
 
 func (u *UsageAdapter) FetchUsage(ctx context.Context, tokenJSON string) (application.CodexUsageResult, error) {
 	return FetchUsage(ctx, tokenJSON)
+}
+
+// CLIAuthImporterAdapter implements application.CodexCLIAuthImporter by
+// reading the Codex CLI auth.json from the user's home directory.
+type CLIAuthImporterAdapter struct{}
+
+func NewCLIAuthImporterAdapter() *CLIAuthImporterAdapter { return &CLIAuthImporterAdapter{} }
+
+func (c *CLIAuthImporterAdapter) ImportFromCodexCLI(ctx context.Context) (application.CodexToken, error) {
+	tok, err := ReadCodexCLIAuth(config.CodexCLIAuthPath())
+	if err != nil {
+		return application.CodexToken{}, err
+	}
+	return application.CodexToken{
+		AccessToken:  tok.AccessToken,
+		RefreshToken: tok.RefreshToken,
+		AccountID:    tok.AccountID,
+		Email:        tok.Email,
+		Name:         tok.Name,
+		ExpiresAt:    tok.ExpiresAt,
+	}, nil
 }

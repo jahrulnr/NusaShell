@@ -36,6 +36,8 @@ type App struct {
 	CodexRuntime    CodexRuntime
 	CodexOAuth      CodexOAuth
 	CodexUsage      CodexUsage
+	CodexCLIAuth    CodexCLIAuthImporter
+	CodexRouter     *CodexAccountRouter
 	retrySleeper    RetrySleeper
 
 	runsMu  sync.Mutex
@@ -340,6 +342,12 @@ func (a *App) Dispatch(method string, payload json.RawMessage) (any, *contracts.
 			return nil, rpcErr
 		}
 		return a.handleCodexLogin(req)
+	case contracts.MethodCodexImport:
+		var req contracts.CodexImportRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleCodexImport(req)
 	case contracts.MethodCodexLogout:
 		var req contracts.CodexLogoutRequest
 		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
@@ -358,6 +366,8 @@ func (a *App) Dispatch(method string, payload json.RawMessage) (any, *contracts.
 			return nil, rpcErr
 		}
 		return a.handleCodexAccountsSwitch(req)
+	case contracts.MethodCodexRefreshCircuits:
+		return a.handleCodexRefreshCircuits()
 	case contracts.MethodCodexRuntimeStatus:
 		return a.handleCodexRuntimeStatus()
 	case contracts.MethodCodexRuntimeDownload:

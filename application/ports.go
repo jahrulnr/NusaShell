@@ -125,6 +125,16 @@ type CodexOAuth interface {
 	ExtractProfile(tokenJSON string) (email, name string)
 }
 
+// CodexCLIAuthImporter reads the Codex CLI auth.json (~/.codex/auth.json)
+// and returns the token in NusaShell's CodexToken shape. Used by the
+// "Import from Codex CLI" flow so users who already logged in to the
+// official Codex CLI don't need to re-login in NusaShell.
+type CodexCLIAuthImporter interface {
+	// ImportFromCodexCLI reads the Codex CLI auth.json and returns the
+	// parsed token. Returns an error if the file is missing or invalid.
+	ImportFromCodexCLI(ctx context.Context) (CodexToken, error)
+}
+
 // CodexUsage fetches the ChatGPT rate-limit usage for a stored OAuth token.
 // The token JSON is the same string stored in CredentialStore.
 type CodexUsage interface {

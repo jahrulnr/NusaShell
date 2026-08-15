@@ -141,11 +141,13 @@ function renderDetail(p) {
     ),
   ));
 
-  // Codex-specific sections: OAuth accounts + usage + runtime binary
+  // Codex-specific sections: unified accounts+usage card + runtime binary
   if (p.kind === 'codex') {
-    detail.append(renderCodexAccounts(p));
-    detail.append(renderCodexUsage(p));
-    detail.append(renderCodexRuntime(p));
+    const codexGrid = el('div', { class: 'codex-cards-grid' },
+      renderCodexAccounts(p),
+      renderCodexRuntime(p),
+    );
+    detail.append(codexGrid);
   }
 
   detail.append(el('div', { class: 'provider-models-card' },
@@ -207,18 +209,58 @@ function renderCodexAccounts(p) {
     el('div', { class: 'provider-models-head' },
       el('div', {},
         el('h2', { text: 'ChatGPT Accounts' }),
-        el('p', { text: 'Sign in with one or more ChatGPT accounts' }),
+        el('p', { text: 'Account info, plan, and usage quota' }),
       ),
-      el('button', { class: 'mini-btn', type: 'button', text: 'Sign in with ChatGPT' }),
+      el('div', { class: 'codex-auth-buttons' },
+        el('button', { class: 'mini-btn ghost', type: 'button', text: 'Import from Codex CLI' }),
+        el('button', { class: 'mini-btn ghost', type: 'button', text: '\u21bb Refresh' }),
+        el('button', { class: 'mini-btn', type: 'button', text: 'Sign in with ChatGPT' }),
+      ),
     ),
     el('div', { class: 'codex-account-list', id: 'codex-account-list' },
-      el('div', { class: 'provider-model-empty', text: 'Loading accounts…' }),
+      el('div', { class: 'provider-model-empty', text: 'Loading accounts\u2026' }),
     ),
   );
-  const loginBtn = card.querySelector('button');
+  const buttons = card.querySelectorAll('button');
+  const importBtn = buttons[0];
+  const refreshBtn = buttons[1];
+  const loginBtn = buttons[2];
+  refreshBtn.addEventListener('click', async () => {
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = 'Refreshing\u2026';
+    try {
+      const res = await rpc('ai.codex.refresh-circuits', {});
+      toast(`Checked ${res.checked ?? 0} accounts`, 'success');
+      await refreshCodexAccounts(p.id);
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      refreshBtn.disabled = false;
+      refreshBtn.textContent = '\u21bb Refresh';
+    }
+  });
+  importBtn.addEventListener('click', async () => {
+    importBtn.disabled = true;
+    importBtn.textContent = 'Importing\u2026';
+    try {
+      const res = await rpc('ai.codex.import', { provider_id: p.id });
+      if (res.skipped) {
+        toast(`Account ${res.email || res.account_id} already imported`, 'info');
+      } else {
+        toast(`Imported ${res.email || res.account_id} from Codex CLI`, 'success');
+      }
+      await refreshCodexAccounts(p.id);
+      await refresh();
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      importBtn.disabled = false;
+      importBtn.textContent = 'Import from Codex CLI';
+    }
+  });
   loginBtn.addEventListener('click', async () => {
     loginBtn.disabled = true;
-    loginBtn.textContent = 'Opening browser…';
+    loginBtn.textContent = 'Opening browser\u2026';
     try {
       await rpc('ai.codex.login', { provider_id: p.id });
       toast('ChatGPT login successful', 'success');
@@ -240,27 +282,49 @@ async function refreshCodexAccounts(providerId) {
   const list = document.getElementById('codex-account-list');
   if (!list) return;
   try {
-    const res = await rpc('ai.codex.accounts.list', { provider_id: providerId });
+    // Fetch unified accounts+usage data in one call
+    const res = await rpc('ai.codex.usage', { provider_id: providerId });
     const accounts = res.accounts ?? [];
     if (!accounts.length) {
       list.innerHTML = '';
-      list.append(el('div', { class: 'provider-model-empty', text: 'No accounts signed in. Click "Sign in with ChatGPT" to add one.' }));
+      list.append(el('div', { class: 'provider-model-empty', text: 'No accounts signed in. Click \"Sign in with ChatGPT\" to add one.' }));
       return;
     }
     list.innerHTML = '';
     for (const acc of accounts) {
-      const expires = acc.expires_at ? new Date(acc.expires_at * 1000).toLocaleString() : 'unknown';
       const display = acc.email || acc.name || acc.account_id;
-      const secondary = (acc.email && acc.name) ? `${acc.name} · ${acc.account_id}` : (acc.email ? acc.account_id : (acc.name ? acc.account_id : ''));
-      list.append(el('div', { class: 'codex-account-item' },
+      const secondary = (acc.email && acc.name) ? `${acc.name} \u00b7 ${acc.account_id}` : (acc.email ? acc.account_id : (acc.name ? acc.account_id : ''));
+      const planLabel = acc.plan ? acc.plan.charAt(0).toUpperCase() + acc.plan.slice(1) : (acc.error ? 'Error' : '\u2014');
+      const circuitUntil = acc.circuit_open ? new Date(acc.circuit_open_until * 1000).toLocaleString() : '';
+
+      // Build usage windows section
+      const usageParts = [];
+      if (acc.error) {
+        usageParts.push(el('span', { class: 'codex-account-usage-error', text: acc.error }));
+      } else if (acc.primary_window || acc.weekly_window) {
+        if (acc.primary_window) usageParts.push(renderUsageBar('Session', acc.primary_window));
+        if (acc.weekly_window) usageParts.push(renderUsageBar('Weekly', acc.weekly_window));
+      } else {
+        usageParts.push(el('span', { class: 'codex-account-usage-empty', text: 'No usage data' }));
+      }
+
+      list.append(el('div', { class: 'codex-account-item unified' },
+        // Left: account identity + badges
         el('div', { class: 'codex-account-info' },
           el('span', { class: 'codex-account-id', text: display }),
           ...(secondary ? [el('span', { class: 'codex-account-secondary', text: secondary })] : []),
           el('span', { class: 'codex-account-meta' },
             ...(acc.active ? [el('span', { class: 'codex-account-badge active', text: 'active' })] : []),
-            el('span', { class: 'codex-account-expires', text: `expires ${expires}` }),
+            ...(acc.circuit_open ? [el('span', { class: 'codex-account-badge circuit-open', text: `limit \u00b7 resets ${circuitUntil}` })] : []),
+            ...(acc.limit_reached && !acc.circuit_open ? [el('span', { class: 'codex-account-badge circuit-open', text: 'limit reached' })] : []),
           ),
         ),
+        // Middle: plan + usage quota
+        el('div', { class: 'codex-account-quota' },
+          el('span', { class: 'codex-account-plan', text: planLabel }),
+          ...usageParts,
+        ),
+        // Right: actions
         el('div', { class: 'codex-account-actions' },
           ...(acc.active ? [] : [el('button', { class: 'mini-btn ghost', type: 'button', text: 'Switch', 'data-acc': acc.account_id })]),
           el('button', { class: 'mini-btn danger', type: 'button', text: 'Remove', 'data-acc': acc.account_id }),
@@ -296,69 +360,21 @@ async function refreshCodexAccounts(providerId) {
   }
 }
 
-function renderCodexUsage(p) {
-  const card = el('div', { class: 'provider-models-card codex-usage-card' },
-    el('div', { class: 'provider-models-head' },
-      el('div', {},
-        el('h2', { text: 'Usage Quota' }),
-        el('p', { text: 'ChatGPT rate-limit usage for active account' }),
-      ),
-      el('button', { class: 'mini-btn ghost', type: 'button', text: 'Refresh' }),
-    ),
-    el('div', { class: 'codex-usage-body', id: 'codex-usage-body' },
-      el('div', { class: 'provider-model-empty', text: 'Loading usage…' }),
-    ),
-  );
-  card.querySelector('button').addEventListener('click', () => refreshCodexUsage(p.id));
-  setTimeout(() => refreshCodexUsage(p.id), 0);
-  return card;
-}
-
-async function refreshCodexUsage(providerId) {
-  const body = document.getElementById('codex-usage-body');
-  if (!body) return;
-  try {
-    const res = await rpc('ai.codex.usage', { provider_id: providerId });
-    body.innerHTML = '';
-    const planLabel = res.plan ? res.plan.charAt(0).toUpperCase() + res.plan.slice(1) : 'Unknown';
-    body.append(el('div', { class: 'codex-usage-plan' },
-      el('span', { class: 'codex-usage-plan-label', text: 'Plan' }),
-      el('span', { class: 'codex-usage-plan-value', text: planLabel }),
-      ...(res.limit_reached ? [el('span', { class: 'codex-usage-limit-reached', text: 'limit reached' })] : []),
-    ));
-    if (res.primary_window) {
-      body.append(renderUsageWindow('Session', res.primary_window));
-    }
-    if (res.weekly_window) {
-      body.append(renderUsageWindow('Weekly', res.weekly_window));
-    }
-    if (res.reset_credits_available > 0) {
-      body.append(el('div', { class: 'codex-usage-credits', text: `${res.reset_credits_available} reset credit${res.reset_credits_available > 1 ? 's' : ''} available` }));
-    }
-    if (!res.primary_window && !res.weekly_window) {
-      body.append(el('div', { class: 'provider-model-empty', text: 'No usage windows available.' }));
-    }
-  } catch (err) {
-    body.innerHTML = '';
-    body.append(el('div', { class: 'provider-model-empty', text: `Error: ${err.message}` }));
-  }
-}
-
-function renderUsageWindow(label, win) {
+function renderUsageBar(label, win) {
   const remaining = win.remaining_percent ?? (100 - win.used_percent);
   const resetDate = win.reset_at ? new Date(win.reset_at * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'unknown';
   const barColor = win.used_percent >= 90 ? 'critical' : (win.used_percent >= 70 ? 'warning' : 'ok');
   return el('div', { class: 'codex-usage-window' },
     el('div', { class: 'codex-usage-window-head' },
       el('span', { class: 'codex-usage-window-label', text: label }),
-      el('span', { class: 'codex-usage-window-pct', text: `${win.used_percent}% used` }),
+      el('span', { class: 'codex-usage-window-pct', text: `${win.used_percent}%` }),
     ),
     el('div', { class: 'codex-usage-bar' },
       el('div', { class: `codex-usage-bar-fill ${barColor}`, style: `width:${win.used_percent}%` }),
     ),
     el('div', { class: 'codex-usage-window-foot' },
-      el('span', { text: `${remaining}% remaining` }),
-      el('span', { class: 'codex-usage-reset', text: `resets ${resetDate}` }),
+      el('span', { text: `${remaining}% left` }),
+      el('span', { class: 'codex-usage-reset', text: resetDate }),
     ),
   );
 }

@@ -179,6 +179,49 @@ func UnmarshalToken(s string) (*TokenJSON, error) {
 	return &t, nil
 }
 
+// codexCLIAuthFile is the on-disk shape of ~/.codex/auth.json as written
+// by the official Codex CLI.
+type codexCLIAuthFile struct {
+	AuthMode string `json:"auth_mode"`
+	Tokens   struct {
+		IDToken      string `json:"id_token"`
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		AccountID    string `json:"account_id"`
+	} `json:"tokens"`
+}
+
+// ReadCodexCLIAuth reads the Codex CLI auth.json from the given path and
+// converts it to a TokenJSON suitable for NusaShell's CredentialStore.
+// Email and name are extracted from the id_token JWT claims. Returns
+// an error if the file is missing, unreadable, or has no access_token.
+func ReadCodexCLIAuth(path string) (*TokenJSON, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read codex cli auth: %w", err)
+	}
+	var raw codexCLIAuthFile
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("parse codex cli auth: %w", err)
+	}
+	if raw.Tokens.AccessToken == "" {
+		return nil, fmt.Errorf("codex cli auth: no access_token in %s", path)
+	}
+	// Extract email/name from id_token (preferred) or access_token.
+	claims := extractJWTClaims(raw.Tokens.IDToken)
+	if claims.Email == "" {
+		claims = extractJWTClaims(raw.Tokens.AccessToken)
+	}
+	return &TokenJSON{
+		AccessToken:  raw.Tokens.AccessToken,
+		RefreshToken: raw.Tokens.RefreshToken,
+		AccountID:    raw.Tokens.AccountID,
+		Email:        claims.Email,
+		Name:         claims.Name,
+		ExpiresAt:    0, // Codex CLI auth.json doesn't carry expiry; refresh will set it
+	}, nil
+}
+
 // ---- internal OAuth helpers (ported from genai example) ----
 
 type codeExchangeResponse struct {

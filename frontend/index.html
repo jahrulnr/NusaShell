@@ -306,6 +306,10 @@
             <h1>Settings</h1>
             <p>Control how this local NusaShell instance connects, runs agent turns, and presents the workspace.</p>
           </div>
+          <div class="settings-header-actions">
+            <span class="settings-save-status" id="settings-save-status" role="status" aria-live="polite"></span>
+            <button class="action-btn" id="settings-save-btn" type="button">Save settings</button>
+          </div>
         </div>
         <div class="view-body settings-body">
           <section class="settings-card settings-runtime-card" aria-labelledby="settings-runtime-title">
@@ -363,10 +367,6 @@
                 <input id="settings-presence-penalty" type="number" min="-2" max="2" step="0.1" inputmode="decimal" placeholder="provider default">
               </label>
             </details>
-            <div class="settings-actions">
-              <span class="settings-save-status" id="settings-save-status" role="status" aria-live="polite"></span>
-              <button class="action-btn" id="settings-save-btn" type="button">Save settings</button>
-            </div>
           </section>
           <section class="settings-card" aria-labelledby="settings-appearance-title">
             <div class="settings-card-title">Appearance</div>

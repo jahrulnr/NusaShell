@@ -115,6 +115,8 @@ body {
 .view-header h1 { margin: 0; font-family: var(--font-display); font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
 .view-header p { margin: 5px 0 0; color: var(--text-faint); font-size: 12px; }
 .view-body { flex: 1; min-height: 0; padding: 0 26px 22px; }
+.view.active.providers-view .view-body,
+.view.active.mcp-view .view-body { overflow-y: auto; }
 
 /* ============ Buttons ============ */
 .action-btn {

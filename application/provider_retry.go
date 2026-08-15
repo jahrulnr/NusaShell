@@ -218,3 +218,25 @@ func describeProviderError(err error) string {
 	}
 	return strings.Join(parts, " ")
 }
+
+// isRateLimitError reports whether the error is a 429 rate-limit response
+// from the provider. Used by Codex account failover to decide whether to
+// switch to a different account.
+func isRateLimitError(err error) bool {
+	var upstream *UpstreamError
+	if !errors.As(err, &upstream) {
+		return false
+	}
+	return upstream.StatusCode == 429
+}
+
+// rateLimitCooldown returns the duration to mark an account as rate-limited.
+// Uses the provider's Retry-After if available; defaults to 5 minutes
+// (matching retryAfterCutoff) when the provider didn't advertise one.
+func rateLimitCooldown(err error) time.Duration {
+	var upstream *UpstreamError
+	if errors.As(err, &upstream) && upstream.RetryAfter > 0 {
+		return upstream.RetryAfter
+	}
+	return retryAfterCutoff
+}

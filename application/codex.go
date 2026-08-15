@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"nusashell/contracts"
+	"nusashell/domain"
 )
 
 // accountKeyPrefix returns the CredentialStore key prefix for additional
@@ -18,6 +19,47 @@ func accountKeyPrefix(providerID string) string {
 // accountKey returns the CredentialStore key for a specific account.
 func accountKey(providerID, accountID string) string {
 	return accountKeyPrefix(providerID) + accountID
+}
+
+// listCodexAccountIDs returns all stored account IDs for a Codex provider,
+// extracted from CredentialStore keys matching "{providerID}:account:*".
+func (a *App) listCodexAccountIDs(providerID string) []string {
+	prefix := accountKeyPrefix(providerID)
+	ids, err := a.Credentials.ListByPrefix(prefix)
+	if err != nil {
+		return nil
+	}
+	var accounts []string
+	for _, id := range ids {
+		accountID := strings.TrimPrefix(id, prefix)
+		if accountID != "" {
+			accounts = append(accounts, accountID)
+		}
+	}
+	return accounts
+}
+
+// isCodexAccountCircuitOpen reports whether an account's circuit breaker
+// is currently open (usage exhausted). Returns false if the router is
+// not configured or the circuit is closed.
+func (a *App) isCodexAccountCircuitOpen(accountID string) bool {
+	if a.CodexRouter == nil || accountID == "" {
+		return false
+	}
+	return !a.CodexRouter.CircuitOpenUntil(accountID).IsZero()
+}
+
+// codexAccountCircuitUntil returns the unix timestamp at which the
+// account's circuit breaker will close, or 0 if the circuit is closed.
+func (a *App) codexAccountCircuitUntil(accountID string) int64 {
+	if a.CodexRouter == nil || accountID == "" {
+		return 0
+	}
+	until := a.CodexRouter.CircuitOpenUntil(accountID)
+	if until.IsZero() {
+		return 0
+	}
+	return until.Unix()
 }
 
 // handleCodexLogin triggers the OAuth PKCE flow. The implementation opens
@@ -68,6 +110,68 @@ func (a *App) handleCodexLogin(req contracts.CodexLoginRequest) (any, *contracts
 	_ = a.Providers.Save(p)
 	a.log("info", "ai", "codex login successful: account %s", tok.AccountID)
 	return contracts.CodexLoginResult{AccountID: tok.AccountID}, nil
+}
+
+// handleCodexImport imports a token from the Codex CLI auth.json
+// (~/.codex/auth.json) into NusaShell's CredentialStore. If an account
+// with the same account_id is already stored, the import is skipped
+// (idempotent) and Skipped=true is returned.
+func (a *App) handleCodexImport(req contracts.CodexImportRequest) (any, *contracts.RPCError) {
+	if _, err := a.Providers.Get(req.ProviderID); err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
+	}
+	if a.CodexCLIAuth == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeInternal, Message: "codex CLI auth importer is not configured"}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	tok, err := a.CodexCLIAuth.ImportFromCodexCLI(ctx)
+	if err != nil {
+		a.log("warn", "ai", "codex import failed: %v", err)
+		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
+	}
+	// Skip if account already stored (idempotent — avoid duplicates).
+	if tok.AccountID != "" {
+		if _, has, _ := a.Credentials.Get(accountKey(req.ProviderID, tok.AccountID)); has {
+			a.log("info", "ai", "codex import skipped: account %s already present", tok.AccountID)
+			return contracts.CodexImportResult{
+				AccountID: tok.AccountID,
+				Email:     tok.Email,
+				Name:      tok.Name,
+				Skipped:   true,
+			}, nil
+		}
+	}
+	tokenJSON, err := json.Marshal(CodexTokenJSON{
+		AccessToken:  tok.AccessToken,
+		RefreshToken: tok.RefreshToken,
+		AccountID:    tok.AccountID,
+		Email:        tok.Email,
+		Name:         tok.Name,
+		ExpiresAt:    tok.ExpiresAt,
+	})
+	if err != nil {
+		return nil, rpcInternal(err)
+	}
+	tokenStr := string(tokenJSON)
+	if tok.AccountID != "" {
+		if err := a.Credentials.Set(accountKey(req.ProviderID, tok.AccountID), tokenStr); err != nil {
+			return nil, rpcInternal(err)
+		}
+	}
+	if err := a.Credentials.Set(req.ProviderID, tokenStr); err != nil {
+		return nil, rpcInternal(err)
+	}
+	p, _ := a.Providers.Get(req.ProviderID)
+	p.HasAPIKey = true
+	p.UpdatedAt = time.Now().UTC()
+	_ = a.Providers.Save(p)
+	a.log("info", "ai", "codex import successful: account %s", tok.AccountID)
+	return contracts.CodexImportResult{
+		AccountID: tok.AccountID,
+		Email:     tok.Email,
+		Name:      tok.Name,
+	}, nil
 }
 
 // handleCodexLogout removes a stored OAuth token. If accountID is empty,
@@ -149,11 +253,13 @@ func (a *App) handleCodexAccountsList(req contracts.CodexAccountsListRequest) (a
 			}
 		}
 		accounts = append(accounts, contracts.CodexAccountDTO{
-			AccountID: accountID,
-			Email:     email,
-			Name:      name,
-			Active:    accountID == activeAccountID,
-			ExpiresAt: expiresAt,
+			AccountID:        accountID,
+			Email:            email,
+			Name:             name,
+			Active:           accountID == activeAccountID,
+			ExpiresAt:        expiresAt,
+			CircuitOpen:      a.isCodexAccountCircuitOpen(accountID),
+			CircuitOpenUntil: a.codexAccountCircuitUntil(accountID),
 		})
 	}
 	if accounts == nil {
@@ -180,6 +286,23 @@ func (a *App) handleCodexAccountsSwitch(req contracts.CodexAccountsSwitchRequest
 	}
 	a.log("info", "ai", "codex switched to account %s", req.AccountID)
 	return map[string]bool{"ok": true}, nil
+}
+
+// handleCodexRefreshCircuits manually triggers a usage poll for all
+// stored Codex accounts and updates circuit breaker state. Called by
+// the frontend "Refresh" button in the Codex accounts card.
+func (a *App) handleCodexRefreshCircuits() (any, *contracts.RPCError) {
+	if a.CodexUsage == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeInternal, Message: "codex usage is not configured"}
+	}
+	if a.CodexRouter == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeInternal, Message: "codex router is not configured"}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	checked := a.RefreshCircuitBreakers(ctx)
+	a.log("info", "ai", "codex circuit refresh: checked %d accounts", checked)
+	return map[string]any{"ok": true, "checked": checked}, nil
 }
 
 // handleCodexRuntimeStatus reports the managed Codex binary state.
@@ -218,46 +341,174 @@ func (a *App) handleCodexRuntimeDownload(req contracts.CodexRuntimeDownloadReque
 	}, nil
 }
 
-// handleCodexUsage fetches the ChatGPT rate-limit usage for the active
-// account of a Codex provider. Returns plan type, used/remaining percent,
-// and reset time for the primary (session) and secondary (weekly) windows.
+// handleCodexUsage fetches the ChatGPT rate-limit usage for ALL stored
+// accounts of a Codex provider. Returns an array of per-account usage
+// snapshots so the user can compare and switch to the account with the
+// most remaining quota.
 func (a *App) handleCodexUsage(req contracts.CodexUsageRequest) (any, *contracts.RPCError) {
 	if a.CodexUsage == nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeInternal, Message: "codex usage is not configured"}
 	}
-	tokenJSON, has, err := a.Credentials.Get(req.ProviderID)
-	if err != nil {
-		return nil, rpcInternal(err)
+	if _, err := a.Providers.Get(req.ProviderID); err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 	}
+	// Determine active account
+	var activeAccountID string
+	if activeJSON, has, _ := a.Credentials.Get(req.ProviderID); has {
+		var active CodexTokenJSON
+		if json.Unmarshal([]byte(activeJSON), &active) == nil {
+			activeAccountID = active.AccountID
+		}
+	}
+	accountIDs := a.listCodexAccountIDs(req.ProviderID)
+	if len(accountIDs) == 0 {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "no accounts — sign in first"}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var accounts []contracts.CodexAccountUsage
+	for _, accID := range accountIDs {
+		tokenJSON, has, _ := a.Credentials.Get(accountKey(req.ProviderID, accID))
+		if !has {
+			continue
+		}
+		var tok CodexTokenJSON
+		json.Unmarshal([]byte(tokenJSON), &tok)
+		entry := contracts.CodexAccountUsage{
+			AccountID:   accID,
+			Email:       tok.Email,
+			Name:        tok.Name,
+			Active:      accID == activeAccountID,
+			CircuitOpen: a.isCodexAccountCircuitOpen(accID),
+		}
+		usage, err := a.CodexUsage.FetchUsage(ctx, tokenJSON)
+		if err != nil {
+			entry.Error = err.Error()
+			accounts = append(accounts, entry)
+			continue
+		}
+		entry.Plan = usage.Plan
+		entry.LimitReached = usage.LimitReached
+		entry.ResetCreditsAvailable = usage.ResetCreditsAvailable
+		if usage.PrimaryWindow != nil {
+			entry.PrimaryWindow = &contracts.CodexUsageWindowDTO{
+				UsedPercent:       usage.PrimaryWindow.UsedPercent,
+				RemainingPercent:  100 - usage.PrimaryWindow.UsedPercent,
+				ResetAt:           usage.PrimaryWindow.ResetAt,
+				ResetAfterSeconds: usage.PrimaryWindow.ResetAfterSeconds,
+			}
+		}
+		if usage.WeeklyWindow != nil {
+			entry.WeeklyWindow = &contracts.CodexUsageWindowDTO{
+				UsedPercent:       usage.WeeklyWindow.UsedPercent,
+				RemainingPercent:  100 - usage.WeeklyWindow.UsedPercent,
+				ResetAt:           usage.WeeklyWindow.ResetAt,
+				ResetAfterSeconds: usage.WeeklyWindow.ResetAfterSeconds,
+			}
+		}
+		accounts = append(accounts, entry)
+	}
+	return contracts.CodexAccountsUsageResult{Accounts: accounts}, nil
+}
+
+// refreshCodexCircuit async-fetches the usage status for a Codex account
+// and updates the circuit breaker with the exact reset time from the API.
+// Called after a 429 failover to refine the circuit-open duration from
+// the provider's usage endpoint (which has precise reset timestamps).
+// Runs in a goroutine — errors are logged but not surfaced to the user.
+func (a *App) refreshCodexCircuit(providerID, accountID string) {
+	if a.CodexUsage == nil || a.CodexRouter == nil || accountID == "" {
+		return
+	}
+	tokenJSON, has, _ := a.Credentials.Get(accountKey(providerID, accountID))
 	if !has {
-		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "no active account — sign in first"}
+		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	usage, err := a.CodexUsage.FetchUsage(ctx, tokenJSON)
 	if err != nil {
-		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
+		a.log("warn", "ai", "codex circuit refresh failed for account %s: %v", accountID, err)
+		return
 	}
-	result := contracts.CodexUsageResult{
-		Plan:                  usage.Plan,
-		LimitReached:          usage.LimitReached,
-		ResetCreditsAvailable: usage.ResetCreditsAvailable,
+	a.applyUsageToCircuit(accountID, usage)
+}
+
+// applyUsageToCircuit opens or closes the circuit breaker for an account
+// based on the usage result. If LimitReached, opens the circuit until the
+// primary window reset time. Otherwise closes it (e.g. user upgraded to
+// Plus/Pro and usage was refilled).
+func (a *App) applyUsageToCircuit(accountID string, usage CodexUsageResult) {
+	if usage.LimitReached && usage.PrimaryWindow != nil && usage.PrimaryWindow.ResetAt > 0 {
+		resetAt := time.Unix(usage.PrimaryWindow.ResetAt, 0)
+		a.CodexRouter.MarkCircuitOpen(accountID, resetAt)
+		a.log("info", "ai", "codex circuit open until %s for account %s (usage limit reached)",
+			resetAt.Format(time.RFC3339), accountID)
+	} else {
+		// Usage no longer limit-reached — close the circuit. This handles
+		// the case where the user upgraded their plan and usage was refilled.
+		if a.CodexRouter.CircuitOpenUntil(accountID).IsZero() {
+			return // already closed
+		}
+		a.CodexRouter.ResetCircuit(accountID)
+		a.log("info", "ai", "codex circuit closed for account %s (usage limit cleared)", accountID)
 	}
-	if usage.PrimaryWindow != nil {
-		result.PrimaryWindow = &contracts.CodexUsageWindowDTO{
-			UsedPercent:       usage.PrimaryWindow.UsedPercent,
-			RemainingPercent:  100 - usage.PrimaryWindow.UsedPercent,
-			ResetAt:           usage.PrimaryWindow.ResetAt,
-			ResetAfterSeconds: usage.PrimaryWindow.ResetAfterSeconds,
+}
+
+// RefreshCircuitBreakers polls usage for all stored Codex accounts across
+// all Codex providers and updates circuit breaker state. Returns the
+// number of accounts checked. Used by the background monitor and the
+// manual "Refresh" RPC from the frontend.
+func (a *App) RefreshCircuitBreakers(ctx context.Context) int {
+	if a.CodexUsage == nil || a.CodexRouter == nil {
+		return 0
+	}
+	checked := 0
+	for _, p := range a.Providers.List() {
+		if p.Kind != domain.ProviderCodex || !p.Enabled {
+			continue
+		}
+		accountIDs := a.listCodexAccountIDs(p.ID)
+		for _, accID := range accountIDs {
+			tokenJSON, has, _ := a.Credentials.Get(accountKey(p.ID, accID))
+			if !has {
+				continue
+			}
+			checked++
+			usage, err := a.CodexUsage.FetchUsage(ctx, tokenJSON)
+			if err != nil {
+				a.log("warn", "ai", "codex circuit poll failed for account %s: %v", accID, err)
+				continue
+			}
+			a.applyUsageToCircuit(accID, usage)
 		}
 	}
-	if usage.WeeklyWindow != nil {
-		result.WeeklyWindow = &contracts.CodexUsageWindowDTO{
-			UsedPercent:       usage.WeeklyWindow.UsedPercent,
-			RemainingPercent:  100 - usage.WeeklyWindow.UsedPercent,
-			ResetAt:           usage.WeeklyWindow.ResetAt,
-			ResetAfterSeconds: usage.WeeklyWindow.ResetAfterSeconds,
-		}
+	return checked
+}
+
+// StartCodexCircuitMonitor launches a background goroutine that polls
+// Codex usage every 5 minutes and updates circuit breaker state. This
+// catches cases where an account's usage quota is refilled (e.g. user
+// upgraded to Plus/Pro) without waiting for a 429 failover. The
+// goroutine exits when ctx is cancelled.
+func (a *App) StartCodexCircuitMonitor(ctx context.Context) {
+	if a.CodexUsage == nil || a.CodexRouter == nil {
+		return
 	}
-	return result, nil
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		// Initial check on startup so circuits reflect current usage state.
+		a.RefreshCircuitBreakers(ctx)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				pollCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				a.RefreshCircuitBreakers(pollCtx)
+				cancel()
+			}
+		}
+	}()
 }

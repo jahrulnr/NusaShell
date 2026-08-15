@@ -106,6 +106,8 @@ func run() error {
 	}
 	app.CodexOAuth = codex.NewOAuthAdapter()
 	app.CodexUsage = codex.NewUsageAdapter()
+	app.CodexCLIAuth = codex.NewCLIAuthImporterAdapter()
+	app.CodexRouter = application.NewCodexAccountRouter()
 
 	srv := transport.New(app, logger, transport.StaticHandler(frontend.FS, dev), dev)
 	httpServer := &http.Server{
@@ -118,6 +120,7 @@ func run() error {
 	// Request contexts derive from the signal context, so SSE/WebSocket
 	// handlers unblock as soon as shutdown begins.
 	httpServer.BaseContext = func(net.Listener) context.Context { return ctx }
+	app.StartCodexCircuitMonitor(ctx)
 
 	go func() {
 		logger.Info("nusashell-light listening", "addr", httpServer.Addr, "data_dir", dataDir, "dev", dev, "version", version)

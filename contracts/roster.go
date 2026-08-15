@@ -34,8 +34,10 @@ const (
 	// ChatGPT accounts per provider.
 	MethodCodexLogin           = "ai.codex.login"
 	MethodCodexLogout          = "ai.codex.logout"
+	MethodCodexImport          = "ai.codex.import"
 	MethodCodexAccountsList    = "ai.codex.accounts.list"
 	MethodCodexAccountsSwitch  = "ai.codex.accounts.switch"
+	MethodCodexRefreshCircuits = "ai.codex.refresh-circuits"
 	MethodCodexRuntimeStatus   = "ai.codex.runtime.status"
 	MethodCodexRuntimeDownload = "ai.codex.runtime.download"
 	MethodCodexUsage           = "ai.codex.usage"
@@ -404,6 +406,22 @@ type CodexLoginResult struct {
 	Email     string `json:"email,omitempty"`
 }
 
+// CodexImportRequest imports a token from the Codex CLI auth.json
+// (~/.codex/auth.json) into NusaShell's CredentialStore. If the account
+// is already stored, the import is skipped (idempotent).
+type CodexImportRequest struct {
+	ProviderID string `json:"provider_id"`
+}
+
+// CodexImportResult reports the outcome of a Codex CLI import.
+type CodexImportResult struct {
+	AccountID string `json:"account_id,omitempty"`
+	Email     string `json:"email,omitempty"`
+	Name      string `json:"name,omitempty"`
+	// Skipped is true when the account was already present in the store.
+	Skipped bool `json:"skipped,omitempty"`
+}
+
 // CodexLogoutRequest removes a stored OAuth token for a specific account.
 // If AccountID is empty, the active account is removed.
 type CodexLogoutRequest struct {
@@ -418,6 +436,11 @@ type CodexAccountDTO struct {
 	Name      string `json:"name,omitempty"`
 	Active    bool   `json:"active"`
 	ExpiresAt int64  `json:"expires_at,omitempty"`
+	// CircuitOpen is true when the account's usage quota is exhausted
+	// and the circuit breaker is open. The account will be skipped by
+	// the router until CircuitOpenUntil.
+	CircuitOpen      bool  `json:"circuit_open,omitempty"`
+	CircuitOpenUntil int64 `json:"circuit_open_until,omitempty"` // unix seconds
 }
 
 type CodexAccountsListRequest struct {
@@ -473,6 +496,31 @@ type CodexUsageResult struct {
 	PrimaryWindow         *CodexUsageWindowDTO `json:"primary_window,omitempty"`
 	WeeklyWindow          *CodexUsageWindowDTO `json:"weekly_window,omitempty"`
 	ResetCreditsAvailable int                  `json:"reset_credits_available"`
+}
+
+// CodexAccountUsage is the usage snapshot for a single account, combined
+// with its identity and circuit-breaker status. Used by the unified
+// accounts+usage view in the frontend.
+type CodexAccountUsage struct {
+	AccountID   string `json:"account_id"`
+	Email       string `json:"email,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Active      bool   `json:"active"`
+	CircuitOpen bool   `json:"circuit_open,omitempty"`
+	// Usage fields — empty if fetch failed for this account
+	Plan                  string               `json:"plan,omitempty"`
+	LimitReached          bool                 `json:"limit_reached"`
+	PrimaryWindow         *CodexUsageWindowDTO `json:"primary_window,omitempty"`
+	WeeklyWindow          *CodexUsageWindowDTO `json:"weekly_window,omitempty"`
+	ResetCreditsAvailable int                  `json:"reset_credits_available"`
+	// Error is set when usage fetch failed for this account
+	Error string `json:"error,omitempty"`
+}
+
+// CodexAccountsUsageResult is the response for ai.codex.usage when
+// returning usage for all accounts (not just the active one).
+type CodexAccountsUsageResult struct {
+	Accounts []CodexAccountUsage `json:"accounts"`
 }
 
 // ---- skills ----
