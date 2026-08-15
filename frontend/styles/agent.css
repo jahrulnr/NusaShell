@@ -528,6 +528,7 @@
 .agent-model-row:hover { background: #111d29; }
 .agent-model-choice { display: flex; min-width: 0; flex-direction: column; gap: 4px; border: 0; padding: 6px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
 .agent-model-name { min-width: 0; overflow-wrap: anywhere; font: 11px var(--font-mono); white-space: normal; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.agent-model-id { color: var(--text-faint); font-size: 9px; }
 .agent-model-badges { display: inline-flex; gap: 3px; flex-wrap: wrap; }
 .agent-model-badge { font: 9px var(--font-mono); padding: 1px 5px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.03em; }
 .agent-badge-reasoning { background: rgba(197, 244, 93, 0.12); color: var(--accent); border: 1px solid rgba(197, 244, 93, 0.3); }

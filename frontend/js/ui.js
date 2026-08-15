@@ -10,6 +10,7 @@ export function el(tag, attrs = {}, ...children) {
     if (k === 'class') node.className = v;
     else if (k === 'text') node.textContent = v;
     else if (k === 'html') node.innerHTML = v;
+    else if (k === 'dataset' && typeof v === 'object') Object.assign(node.dataset, v);
     else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v);
     else if (typeof v === 'boolean' && k in node) node[k] = v;
     else if (v !== undefined && v !== null) node.setAttribute(k, v);

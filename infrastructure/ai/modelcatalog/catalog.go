@@ -533,3 +533,10 @@ func (c *Catalog) Stats() int {
 func (c *Catalog) EnsureLoaded(ctx context.Context) error {
 	return c.ensureLoaded(ctx)
 }
+
+// Loaded reports whether the catalog has been fetched and indexed.
+func (c *Catalog) Loaded() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.loaded
+}

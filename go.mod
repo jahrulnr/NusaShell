@@ -3,7 +3,7 @@ module nusashell
 go 1.26.5
 
 require (
-	github.com/jahrulnr/searchwire v0.0.0-20260810154705-67911707c508
+	github.com/jahrulnr/searchwire v0.0.0-20260815193458-61a4a7d3e695
 	github.com/mark3labs/mcp-go v0.58.0
 	github.com/ncruces/zenity v0.10.15
 	modernc.org/sqlite v1.56.0
@@ -32,5 +32,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-
-replace github.com/jahrulnr/searchwire => ./.experimental/searchwire

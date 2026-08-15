@@ -273,20 +273,26 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 				if meta == nil {
 					continue
 				}
+				isFreeVariant := isFreeTierModel(models[i].ID)
 				if models[i].Context == 0 {
 					models[i].Context = meta.Context
 				}
 				if models[i].MaxOutput == 0 {
 					models[i].MaxOutput = meta.Output
 				}
-				if models[i].InputCost == 0 {
-					models[i].InputCost = meta.InputCost
-				}
-				if models[i].OutputCost == 0 {
-					models[i].OutputCost = meta.OutputCost
-				}
-				if models[i].CacheReadCost == 0 {
-					models[i].CacheReadCost = meta.CacheReadCost
+				// Free-tier variants (e.g. "qwen/qwen3.8-max:free") have $0
+				// pricing from the provider API. Don't override with the base
+				// model's real pricing from the catalog — $0 is correct.
+				if !isFreeVariant {
+					if models[i].InputCost == 0 {
+						models[i].InputCost = meta.InputCost
+					}
+					if models[i].OutputCost == 0 {
+						models[i].OutputCost = meta.OutputCost
+					}
+					if models[i].CacheReadCost == 0 {
+						models[i].CacheReadCost = meta.CacheReadCost
+					}
 				}
 				if models[i].Description == "" {
 					models[i].Description = meta.Description
@@ -323,6 +329,20 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 	return models, nil
 }
 
+// isFreeTierModel reports whether a model ID denotes a free-tier variant.
+// Gateways like OpenRouter append ":free" or "-free" to model IDs. These
+// variants have $0 pricing from the provider API and should not be
+// overridden by the base model's real pricing during catalog enrichment.
+func isFreeTierModel(id string) bool {
+	lower := strings.ToLower(id)
+	for _, suffix := range []string{":free", "-free"} {
+		if strings.HasSuffix(lower, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
 // catalogHintForProvider maps a NusaShell provider to a models.dev provider
 // ID, used to disambiguate model lookups when the same bare model ID exists
 // under multiple providers (e.g. "gpt-5.5" under "openai" and "ai-router").
@@ -355,10 +375,20 @@ func catalogHintForProvider(p *domain.Provider) string {
 }
 
 func (a *App) handleModelsList() (any, *contracts.RPCError) {
+	// Enrich models with catalog metadata at read time, not just at import.
+	// This ensures models imported before a catalog update (or before the
+	// suffix-stripping fix) still get reasoning efforts, capabilities, and
+	// pricing filled in without requiring a manual re-import.
+	if a.ModelCatalog != nil {
+		_ = a.ModelCatalog.EnsureLoaded(context.Background())
+	}
 	var out []contracts.ModelDTO
 	for _, p := range a.Providers.List() {
 		if !p.Enabled {
 			continue
+		}
+		if a.ModelCatalog != nil && a.ModelCatalog.Loaded() {
+			a.enrichProviderModelsAtRead(p)
 		}
 		out = append(out, modelsDTO(p)...)
 	}
@@ -366,6 +396,58 @@ func (a *App) handleModelsList() (any, *contracts.RPCError) {
 		out = []contracts.ModelDTO{}
 	}
 	return contracts.ModelsListResult{Models: out}, nil
+}
+
+// enrichProviderModelsAtRead fills in missing metadata from the catalog
+// without persisting — it's a read-time enrichment so the UI always shows
+// current capabilities even for models imported before a catalog update.
+func (a *App) enrichProviderModelsAtRead(p *domain.Provider) {
+	hint := catalogHintForProvider(p)
+	for i := range p.Models {
+		meta := a.ModelCatalog.Lookup(hint, p.Models[i].ID)
+		if meta == nil {
+			continue
+		}
+		isFreeVariant := isFreeTierModel(p.Models[i].ID)
+		if p.Models[i].Context == 0 {
+			p.Models[i].Context = meta.Context
+		}
+		if p.Models[i].MaxOutput == 0 {
+			p.Models[i].MaxOutput = meta.Output
+		}
+		if !isFreeVariant {
+			if p.Models[i].InputCost == 0 {
+				p.Models[i].InputCost = meta.InputCost
+			}
+			if p.Models[i].OutputCost == 0 {
+				p.Models[i].OutputCost = meta.OutputCost
+			}
+			if p.Models[i].CacheReadCost == 0 {
+				p.Models[i].CacheReadCost = meta.CacheReadCost
+			}
+		}
+		if p.Models[i].Description == "" {
+			p.Models[i].Description = meta.Description
+		}
+		if p.Models[i].DisplayName == "" {
+			p.Models[i].DisplayName = meta.Name
+		}
+		if len(p.Models[i].SupportedEfforts) == 0 {
+			p.Models[i].SupportedEfforts = meta.SupportedEfforts
+		}
+		if p.Models[i].KnowledgeCutoff == "" {
+			p.Models[i].KnowledgeCutoff = meta.KnowledgeCutoff
+		}
+		// Capabilities are always overridden — the catalog is authoritative
+		// for reasoning, tool call, vision, etc.
+		p.Models[i].ToolCall = meta.ToolCall
+		p.Models[i].StructuredOutput = meta.StructuredOutput
+		p.Models[i].Reasoning = meta.Reasoning
+		p.Models[i].Vision = meta.Vision
+		if meta.Kind != "" {
+			p.Models[i].Kind = domain.ModelKind(meta.Kind)
+		}
+	}
 }
 
 func modelsDTO(p *domain.Provider) []contracts.ModelDTO {

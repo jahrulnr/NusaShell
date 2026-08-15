@@ -68,6 +68,7 @@ function renderModelMenu(menu, models, selectedModel, selectedEffort, selectMode
     for (const model of providerModels) {
       const isSelected = `${model.provider_id}:${model.id}` === selectedModel || (selectedModel && !selectedModel.includes(':') && model.id === selectedModel);
       const name = model.display_name || model.id;
+      const showId = model.display_name && model.display_name !== model.id;
       const badges = [];
       if (model.reasoning) badges.push(el('span', { class: 'agent-model-badge agent-badge-reasoning', text: 'reasoning', title: 'Supports reasoning/thinking mode' }));
       if (model.tool_call) badges.push(el('span', { class: 'agent-model-badge agent-badge-tool', text: 'tools', title: 'Supports function/tool calling' }));
@@ -76,10 +77,11 @@ function renderModelMenu(menu, models, selectedModel, selectedEffort, selectMode
       const metaChildren = [el('span', { class: 'agent-model-provider', text: model.provider_name })];
       if (model.context) metaChildren.push(el('span', { class: 'agent-model-context', text: formatContext(model.context) }));
       if (model.input_cost || model.output_cost) metaChildren.push(el('span', { class: 'agent-model-cost', text: formatCost(model.input_cost, model.output_cost) }));
-      const row = el('div', { class: `agent-model-row${isSelected ? ' is-selected' : ''}` },
+      const row = el('div', { class: `agent-model-row${isSelected ? ' is-selected' : ''}`, dataset: { modelId: model.id } },
         el('button', { class: 'agent-model-choice', type: 'button' },
           el('span', { class: 'agent-model-name' },
             el('span', { text: name }),
+            showId ? el('span', { class: 'agent-model-id', text: model.id }) : null,
             badges.length ? el('span', { class: 'agent-model-badges' }, badges) : null,
           ),
           el('span', { class: 'agent-model-meta' }, metaChildren),
@@ -115,11 +117,18 @@ function renderModelMenu(menu, models, selectedModel, selectedEffort, selectMode
     const query = search.value.toLowerCase();
     for (const section of list.querySelectorAll('.agent-model-section')) {
       const provider = section.querySelector('.agent-model-section-title').textContent;
+      let anyVisible = false;
       for (const row of section.querySelectorAll('.agent-model-row')) {
         const nameEl = row.querySelector('.agent-model-name > span');
         const name = nameEl ? nameEl.textContent : '';
-        row.hidden = !(name.toLowerCase().includes(query) || provider.toLowerCase().includes(query));
+        const modelId = row.dataset.modelId || '';
+        const visible = name.toLowerCase().includes(query)
+          || modelId.toLowerCase().includes(query)
+          || provider.toLowerCase().includes(query);
+        row.hidden = !visible;
+        if (visible) anyVisible = true;
       }
+      section.hidden = !anyVisible;
     }
   }, 120));
   menu.append(list);
