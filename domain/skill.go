@@ -2,11 +2,38 @@ package domain
 
 import "time"
 
+// SkillState controls the skill lifecycle: active skills are surfaced to
+// the agent, stale skills are still searchable but de-prioritized, and
+// archived skills are hidden from default listings.
+type SkillState string
+
+const (
+	SkillStateActive   SkillState = "active"
+	SkillStateStale    SkillState = "stale"
+	SkillStateArchived SkillState = "archived"
+)
+
+// SkillOrigin records who created the skill so the curator can distinguish
+// user-authored skills from agent-discovered ones.
+type SkillOrigin string
+
+const (
+	SkillOriginUser    SkillOrigin = "user"
+	SkillOriginAgent   SkillOrigin = "agent"
+	SkillOriginBuiltin SkillOrigin = "builtin"
+)
+
 type Skill struct {
 	ID          string
 	Name        string
 	Description string
 	Content     string
+	Category    string      // optional grouping (e.g. "git", "k8s")
+	State       SkillState  // active | stale | archived (default active)
+	Origin      SkillOrigin // user | agent | builtin
+	Pinned      bool        // pinned skills bypass decay and always surface
+	UsageCount  int         // incremented each time the skill is used in a turn
+	LastUsedAt  time.Time   // zero = never used
 	UpdatedAt   time.Time
 }
 
@@ -14,6 +41,31 @@ type MemoryEntry struct {
 	ID        string
 	Content   string
 	Tags      []string
+	Source    string // "user" | "agent" | "system" (default "user")
+	CreatedAt time.Time
+}
+
+// LearningEdgeType classifies the relationship between two learning nodes.
+type LearningEdgeType string
+
+const (
+	EdgeRelated     LearningEdgeType = "related"      // generic semantic link
+	EdgeUsedWith    LearningEdgeType = "used_with"    // co-occurred in a turn
+	EdgeDerivedFrom LearningEdgeType = "derived_from" // target was source for source
+)
+
+// LearningEdge is a bitemporal edge between two learning nodes (skills or
+// memory entries). ValidAt is when the relationship became true; InvalidAt
+// is nil while the relationship is still current. Weight is strengthened
+// on repeat observation via probability-union (CombineWeights).
+type LearningEdge struct {
+	ID        string
+	SourceID  string           // skill or memory ID
+	TargetID  string           // skill or memory ID
+	Type      LearningEdgeType // related | used_with | derived_from
+	Weight    float64          // [0, 1]
+	ValidAt   time.Time        // when the relationship became true
+	InvalidAt *time.Time       // nil = still valid
 	CreatedAt time.Time
 }
 

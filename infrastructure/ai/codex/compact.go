@@ -102,7 +102,7 @@ type jsonrpcNotification struct {
 // from the server-side compaction blob. This is a known limitation.
 //
 // On any error, the caller falls back to client-side compaction.
-func compactViaSubprocess(ctx context.Context, c *domain.Conversation, model string) (string, error) {
+func compactViaSubprocess(ctx context.Context, c *domain.Conversation, model, accessToken, accountID string) (string, error) {
 	if len(c.Messages) <= 1 {
 		return "", nil
 	}
@@ -122,11 +122,27 @@ func compactViaSubprocess(ctx context.Context, c *domain.Conversation, model str
 	}
 	defer os.RemoveAll(dir)
 
+	// Compact only needs to read the conversation and produce a summary.
+	// Use read-only sandbox instead of danger-full-access to limit blast
+	// radius if the subprocess is compromised. The approval policy is
+	// never because there is no human to approve in a background compact.
 	cmd := exec.CommandContext(subCtx, binPath, "app-server",
-		"-c", "sandbox_mode=danger-full-access",
+		"-c", "sandbox_mode=read-only",
 		"-c", "approval_policy=never",
 	)
 	cmd.Dir = dir
+	// Inject NusaShell's OAuth token so the subprocess authenticates as
+	// the same account instead of relying on Codex CLI's own auth.json.
+	// This prevents cross-account access on multi-user systems and ensures
+	// the compact request counts against the correct account's usage.
+	if accessToken != "" {
+		cmd.Env = append(os.Environ(),
+			"OPENAI_CODEX_ACCESS_TOKEN="+accessToken,
+		)
+		if accountID != "" {
+			cmd.Env = append(cmd.Env, "OPENAI_CODEX_ACCOUNT_ID="+accountID)
+		}
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return "", fmt.Errorf("codex compact: stdin pipe: %w", err)

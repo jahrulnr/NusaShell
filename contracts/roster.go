@@ -530,6 +530,12 @@ type SkillDTO struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	Category    string `json:"category,omitempty"`
+	State       string `json:"state,omitempty"`
+	Origin      string `json:"origin,omitempty"`
+	Pinned      bool   `json:"pinned"`
+	UsageCount  int    `json:"usage_count,omitempty"`
+	LastUsedAt  string `json:"last_used_at,omitempty"`
 	UpdatedAt   string `json:"updated_at"`
 }
 
@@ -611,6 +617,7 @@ type MemoryEntryDTO struct {
 	ID        string   `json:"id"`
 	Content   string   `json:"content"`
 	Tags      []string `json:"tags,omitempty"`
+	Source    string   `json:"source,omitempty"`
 	CreatedAt string   `json:"created_at"`
 }
 
@@ -760,4 +767,28 @@ type SettingsSetRequest struct {
 	TopK                json.RawMessage `json:"top_k,omitempty"`
 	FrequencyPenalty    json.RawMessage `json:"frequency_penalty,omitempty"`
 	PresencePenalty     json.RawMessage `json:"presence_penalty,omitempty"`
+}
+
+// ---- learning ----
+
+const (
+	MethodLearningSearch = "learning.search"
+)
+
+type LearningSearchRequest struct {
+	Query string `json:"query"`
+	Kind  string `json:"kind,omitempty"`  // "skills" | "memory" | "" (both)
+	Limit int    `json:"limit,omitempty"` // default 10, max 50
+}
+
+type LearningSearchResultItem struct {
+	ID      string  `json:"id"`
+	Kind    string  `json:"kind"` // "skill" | "memory"
+	Name    string  `json:"name,omitempty"`
+	Content string  `json:"content,omitempty"`
+	Score   float32 `json:"score"`
+}
+
+type LearningSearchResult struct {
+	Items []LearningSearchResultItem `json:"items"`
 }

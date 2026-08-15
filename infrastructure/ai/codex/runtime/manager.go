@@ -16,6 +16,8 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -185,6 +187,27 @@ func (m *Manager) EnsureBinary(ctx context.Context) (string, error) {
 	if man.ActiveVersion != "" {
 		binPath := m.BinaryPath(man.ActiveVersion)
 		if info, err := os.Stat(binPath); err == nil && !info.IsDir() {
+			// Verify SHA256 against manifest to detect tampering or
+			// corrupted downloads. If the hash is empty (legacy install
+			// before verification was added), compute and persist it now
+			// so subsequent calls can verify.
+			ver, ok := man.Installed[man.ActiveVersion]
+			if !ok {
+				return binPath, nil
+			}
+			actual, err := computeSHA256(binPath)
+			if err != nil {
+				return "", fmt.Errorf("runtime: hash binary %s: %w", binPath, err)
+			}
+			if ver.SHA256 == "" {
+				ver.SHA256 = actual
+				man.Installed[man.ActiveVersion] = ver
+				_ = m.SaveManifest(man)
+				return binPath, nil
+			}
+			if !strings.EqualFold(ver.SHA256, actual) {
+				return "", fmt.Errorf("runtime: binary %s SHA256 mismatch (expected %s, got %s) — possible tampering or corrupted download; remove the runtime dir to re-download", binPath, ver.SHA256, actual)
+			}
 			return binPath, nil
 		}
 	}
@@ -230,7 +253,13 @@ func (m *Manager) DownloadLatest(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	// 4. Update manifest
+	// 4. Compute SHA256 for tamper detection on subsequent loads.
+	hash, err := computeSHA256(binPath)
+	if err != nil {
+		return "", fmt.Errorf("runtime: hash downloaded binary: %w", err)
+	}
+
+	// 5. Update manifest
 	man, _ := m.LoadManifest()
 	if man.Installed == nil {
 		man.Installed = map[string]InstalledVer{}
@@ -239,6 +268,7 @@ func (m *Manager) DownloadLatest(ctx context.Context) (string, error) {
 		Path:        binPath,
 		Source:      "github",
 		InstalledAt: time.Now().UTC(),
+		SHA256:      hash,
 	}
 	man.ActiveVersion = version
 	if err := m.SaveManifest(man); err != nil {
@@ -367,4 +397,20 @@ func parseVersionTag(tag string) string {
 	s = strings.TrimPrefix(s, "rust-v")
 	s = strings.TrimPrefix(s, "v")
 	return s
+}
+
+// computeSHA256 returns the hex-encoded SHA256 hash of the file at path.
+// Used to verify downloaded binaries against the manifest and detect
+// tampering or corrupted downloads.
+func computeSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }

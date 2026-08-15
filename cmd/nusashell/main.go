@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -51,6 +52,18 @@ func run() error {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
+	// Security guard: the server has no auth and exposes MCP command
+	// execution (RCE via stdio MCP servers). Binding to a non-loopback
+	// address without explicit consent is a misconfiguration that can
+	// expose the shell to the local network. Require
+	// NUSASHELL_ALLOW_REMOTE=1 to proceed.
+	if !isLoopbackHost(host) && os.Getenv("NUSASHELL_ALLOW_REMOTE") != "1" {
+		return fmt.Errorf("refusing to bind to non-loopback address %q: set NUSASHELL_ALLOW_REMOTE=1 to explicitly allow remote access (WARNING: no auth, MCP command execution is exposed)", host)
+	}
+	if !isLoopbackHost(host) {
+		logger.Warn("remote access enabled — no auth, MCP command execution is exposed to the network", "host", host)
+	}
+
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return err
 	}
@@ -82,6 +95,7 @@ func run() error {
 		Credentials:   credentials,
 		Skills:        &jsonstore.Skills{S: store},
 		Memory:        &jsonstore.Memory{S: store},
+		LearningEdges: &jsonstore.LearningEdges{S: store},
 		Todos:         todoStore,
 		MCP:           &jsonstore.MCP{S: store},
 		Logs:          &jsonstore.Logs{S: store},
@@ -150,4 +164,15 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// isLoopbackHost returns true if the host is a loopback address
+// (127.0.0.1, ::1, localhost). Used to guard against accidental remote
+// binding when the server has no auth.
+func isLoopbackHost(host string) bool {
+	if host == "localhost" || host == "::1" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

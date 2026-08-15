@@ -22,6 +22,7 @@ type App struct {
 	Credentials   CredentialStore
 	Skills        SkillStore
 	Memory        MemoryStore
+	LearningEdges LearningEdgeStore
 	Todos         ConversationTodoPort
 	MCP           MCPServerStore
 	Logs          LogStore
@@ -41,6 +42,11 @@ type App struct {
 	CodexCLIAuth                CodexCLIAuthImporter
 	CodexRouter                 *CodexAccountRouter
 	retrySleeper                RetrySleeper
+
+	// learningMu guards lazy init of learningSearcher and graphService.
+	learningMu       sync.Mutex
+	learningSearcher *LearningSearcher
+	graphService     *LearningGraphService
 
 	runsMu  sync.Mutex
 	runs    map[string]*TurnRun
@@ -173,6 +179,7 @@ type Deps struct {
 	Credentials                 CredentialStore
 	Skills                      SkillStore
 	Memory                      MemoryStore
+	LearningEdges               LearningEdgeStore
 	Todos                       ConversationTodoPort
 	MCP                         MCPServerStore
 	Logs                        LogStore
@@ -203,6 +210,7 @@ func NewApp(deps Deps) *App {
 		Credentials:                 deps.Credentials,
 		Skills:                      deps.Skills,
 		Memory:                      deps.Memory,
+		LearningEdges:               deps.LearningEdges,
 		Todos:                       deps.Todos,
 		MCP:                         deps.MCP,
 		Logs:                        deps.Logs,
@@ -218,6 +226,47 @@ func NewApp(deps Deps) *App {
 		retrySleeper:                deps.RetrySleeper,
 		runs:                        map[string]*TurnRun{},
 	}
+}
+
+// learningSearch returns the lazy-initialized LearningSearcher. The
+// searcher is built on first call so it sees the latest embedding settings
+// (which may be configured after App construction via the settings UI).
+func (a *App) learningSearch() *LearningSearcher {
+	a.learningMu.Lock()
+	defer a.learningMu.Unlock()
+	if a.learningSearcher != nil {
+		return a.learningSearcher
+	}
+	var embed Embedder
+	if a.EmbedderFactory != nil {
+		st := a.Settings.Get()
+		embed = ResolveEmbedder(a.Providers, a.Credentials, a.EmbedderFactory, st.EmbeddingProviderID)
+	}
+	a.learningSearcher = NewLearningSearcher(a.Skills, a.Memory, embed)
+	return a.learningSearcher
+}
+
+// graph returns the lazy-initialized LearningGraphService.
+func (a *App) graph() *LearningGraphService {
+	a.learningMu.Lock()
+	defer a.learningMu.Unlock()
+	if a.graphService != nil {
+		return a.graphService
+	}
+	if a.LearningEdges == nil {
+		return nil
+	}
+	a.graphService = NewLearningGraphService(a.LearningEdges)
+	return a.graphService
+}
+
+// InvalidateLearningSearcher forces the next learningSearch() call to
+// rebuild the searcher with fresh embedding settings. Called when the
+// embedding model selection changes in settings.
+func (a *App) InvalidateLearningSearcher() {
+	a.learningMu.Lock()
+	defer a.learningMu.Unlock()
+	a.learningSearcher = nil
 }
 
 func (a *App) log(level, source, format string, args ...any) {
@@ -456,6 +505,12 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 			return nil, rpcErr
 		}
 		return a.handleMemoryDelete(req)
+	case contracts.MethodLearningSearch:
+		var req contracts.LearningSearchRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleLearningSearch(req)
 	case contracts.MethodTodosGet:
 		var req contracts.TodosGetRequest
 		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {

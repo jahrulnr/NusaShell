@@ -13,10 +13,15 @@ import (
 
 // handleWS upgrades to WebSocket. The client sends {id, method, payload}
 // request frames and receives {id, ok, result|error} replies plus server
-// events as {type, payload}. No auth or origin policy: personal/community
-// shell per the project boundary.
+// events as {type, payload}.
+//
+// Origin is restricted to loopback hosts (localhost, 127.0.0.1, ::1) to
+// prevent CSRF from browser-based attackers. The server has no auth and
+// exposes MCP command execution, so cross-origin WS would be RCE.
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		OriginPatterns: loopbackOriginPatterns(),
+	})
 	if err != nil {
 		return
 	}
@@ -89,4 +94,16 @@ func (s *Server) writeWSError(conn *websocket.Conn, ctx context.Context, id int,
 		Error: &contracts.RPCError{Code: code, Message: msg},
 	})
 	_ = conn.Write(ctx, websocket.MessageText, b)
+}
+
+// loopbackOriginPatterns returns the origin patterns allowed for WS
+// connections. Only loopback hosts are accepted to prevent CSRF from
+// browser-based attackers (the server has no auth and exposes MCP
+// command execution).
+func loopbackOriginPatterns() []string {
+	return []string{
+		"localhost:*",
+		"127.0.0.1:*",
+		"::1:*",
+	}
 }

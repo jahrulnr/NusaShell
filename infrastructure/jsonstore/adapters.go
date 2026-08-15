@@ -31,6 +31,14 @@ func (m *Memory) Save(v *domain.MemoryEntry) error {
 }
 func (m *Memory) Delete(id string) error { return m.S.DeleteMemory(id) }
 
+type LearningEdges struct{ S *Store }
+
+func (l *LearningEdges) List() []*domain.LearningEdge { return l.S.ListLearningEdges() }
+func (l *LearningEdges) Save(v *domain.LearningEdge) error {
+	return l.S.SaveLearningEdge(v)
+}
+func (l *LearningEdges) Delete(id string) error { return l.S.DeleteLearningEdge(id) }
+
 type MCP struct{ S *Store }
 
 func (m *MCP) List() []*domain.MCPServer { return m.S.ListMCP() }

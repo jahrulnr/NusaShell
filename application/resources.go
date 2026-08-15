@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,12 +15,27 @@ import (
 // ---- skills ----
 
 func skillDTO(s *domain.Skill) contracts.SkillDTO {
-	return contracts.SkillDTO{
+	dto := contracts.SkillDTO{
 		ID:          s.ID,
 		Name:        s.Name,
 		Description: s.Description,
+		Category:    s.Category,
+		State:       string(s.State),
+		Origin:      string(s.Origin),
+		Pinned:      s.Pinned,
+		UsageCount:  s.UsageCount,
 		UpdatedAt:   s.UpdatedAt.Format(timeRFC3339),
 	}
+	if !s.LastUsedAt.IsZero() {
+		dto.LastUsedAt = s.LastUsedAt.Format(timeRFC3339)
+	}
+	if s.State == "" {
+		dto.State = string(domain.SkillStateActive)
+	}
+	if s.Origin == "" {
+		dto.Origin = string(domain.SkillOriginUser)
+	}
+	return dto
 }
 
 func (a *App) handleSkillsList() (any, *contracts.RPCError) {
@@ -55,7 +71,11 @@ func (a *App) handleSkillsSave(req contracts.SkillSaveRequest) (any, *contracts.
 		}
 		s = existing
 	} else {
-		s = &domain.Skill{ID: domain.NewID("skill")}
+		s = &domain.Skill{
+			ID:     domain.NewULID("skill"),
+			State:  domain.SkillStateActive,
+			Origin: domain.SkillOriginUser,
+		}
 	}
 	s.Name = name
 	s.Description = strings.TrimSpace(req.Description)
@@ -205,12 +225,17 @@ func (a *App) handleMCPToolsList() (any, *contracts.RPCError) {
 // ---- memory ----
 
 func memDTO(e *domain.MemoryEntry) contracts.MemoryEntryDTO {
-	return contracts.MemoryEntryDTO{
+	dto := contracts.MemoryEntryDTO{
 		ID:        e.ID,
 		Content:   e.Content,
 		Tags:      e.Tags,
+		Source:    e.Source,
 		CreatedAt: e.CreatedAt.Format(timeRFC3339),
 	}
+	if dto.Source == "" {
+		dto.Source = "user"
+	}
+	return dto
 }
 
 func (a *App) handleMemoryList() (any, *contracts.RPCError) {
@@ -228,9 +253,10 @@ func (a *App) handleMemorySave(req contracts.MemorySaveRequest) (any, *contracts
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "memory content is required"}
 	}
 	e := &domain.MemoryEntry{
-		ID:        domain.NewID("mem"),
+		ID:        domain.NewULID("mem"),
 		Content:   content,
 		Tags:      req.Tags,
+		Source:    "user",
 		CreatedAt: time.Now().UTC(),
 	}
 	if err := a.Memory.Save(e); err != nil {
@@ -266,6 +292,78 @@ func (a *App) handleMemoryDelete(req contracts.MemoryIDRequest) (any, *contracts
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 	}
 	return map[string]bool{"ok": true}, nil
+}
+
+// ---- learning search ----
+
+// handleLearningSearch runs hybrid BM25 + embedding search over skills and
+// memory entries, fused via RRF. The kind filter ("skills" or "memory")
+// restricts the search to one collection; empty searches both.
+func (a *App) handleLearningSearch(req contracts.LearningSearchRequest) (any, *contracts.RPCError) {
+	query := strings.TrimSpace(req.Query)
+	limit := req.Limit
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	kind := strings.ToLower(strings.TrimSpace(req.Kind))
+	searcher := a.learningSearch()
+	ctx := context.Background()
+	items := make([]contracts.LearningSearchResultItem, 0, limit*2)
+
+	if kind == "" || kind == "skills" {
+		results, err := searcher.SearchSkills(ctx, query, limit)
+		if err == nil {
+			for _, r := range results {
+				s, err := a.Skills.Get(r.ID)
+				if err != nil {
+					continue
+				}
+				items = append(items, contracts.LearningSearchResultItem{
+					ID:      s.ID,
+					Kind:    "skill",
+					Name:    s.Name,
+					Content: truncate(s.Content, 200),
+					Score:   float32(r.Score),
+				})
+			}
+		}
+	}
+	if kind == "" || kind == "memory" {
+		results, err := searcher.SearchMemory(ctx, query, limit)
+		if err == nil {
+			for _, r := range results {
+				var content string
+				for _, e := range a.Memory.List() {
+					if e.ID == r.ID {
+						content = e.Content
+						break
+					}
+				}
+				if content == "" {
+					continue
+				}
+				items = append(items, contracts.LearningSearchResultItem{
+					ID:      r.ID,
+					Kind:    "memory",
+					Content: truncate(content, 200),
+					Score:   float32(r.Score),
+				})
+			}
+		}
+	}
+	// Sort by score descending.
+	sort.Slice(items, func(i, j int) bool { return items[i].Score > items[j].Score })
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return contracts.LearningSearchResult{Items: items}, nil
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 // ---- docs ----
@@ -417,6 +515,9 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	if err := a.Settings.Set(s); err != nil {
 		return nil, rpcInternal(err)
 	}
+	// Invalidate the learning searcher so the next search rebuilds it with
+	// the new embedding settings (if the embedding model selection changed).
+	a.InvalidateLearningSearcher()
 	return contracts.SettingsGetResult{Settings: settingsDTO(s)}, nil
 }
 

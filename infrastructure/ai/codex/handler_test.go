@@ -374,6 +374,16 @@ func TestTokenJSONIsExpired(t *testing.T) {
 	if !tok2.IsExpired(2 * time.Hour) {
 		t.Fatal("token with 1h left should be expired with 2h margin")
 	}
+	// ExpiresAt=0 with RefreshToken: treat as expired so first use refreshes.
+	tok3 := &TokenJSON{ExpiresAt: 0, RefreshToken: "refresh"}
+	if !tok3.IsExpired(0) {
+		t.Fatal("unknown expiry with refresh token should be expired (refresh on first use)")
+	}
+	// ExpiresAt=0 without RefreshToken: can't refresh, assume valid.
+	tok4 := &TokenJSON{ExpiresAt: 0}
+	if tok4.IsExpired(0) {
+		t.Fatal("unknown expiry without refresh token should not be expired (can't refresh)")
+	}
 }
 
 func TestTokenJSONMarshalUnmarshal(t *testing.T) {

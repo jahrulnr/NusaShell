@@ -154,9 +154,15 @@ func Refresh(ctx context.Context, old *TokenJSON) (*TokenJSON, error) {
 
 // IsExpired returns true if the access token has expired or will expire
 // within the given margin.
+//
+// If ExpiresAt is 0 (unknown — e.g. token imported from Codex CLI
+// auth.json which doesn't carry expiry), the token is treated as expired
+// when a RefreshToken is available so the first use triggers a refresh
+// and populates a real expiry. If there is no RefreshToken, the token is
+// assumed valid (we can't refresh anyway).
 func (t *TokenJSON) IsExpired(margin time.Duration) bool {
 	if t.ExpiresAt == 0 {
-		return false // unknown expiry, assume valid
+		return t.RefreshToken != "" // unknown expiry, refresh if we can
 	}
 	return time.Now().Add(margin).Unix() > t.ExpiresAt
 }

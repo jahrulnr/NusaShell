@@ -41,6 +41,7 @@ type Store struct {
 	skills        []*domain.Skill
 	mcpServers    []*domain.MCPServer
 	memories      []*domain.MemoryEntry
+	learningEdges []*domain.LearningEdge
 	settings      domain.Settings
 
 	logMu sync.Mutex
@@ -110,6 +111,20 @@ func (s *Store) load() error {
 			var e domain.MemoryEntry
 			if err := json.Unmarshal([]byte(line), &e); err == nil {
 				s.memories = append(s.memories, &e)
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	// learning_edges: JSONL
+	if b, err := os.ReadFile(filepath.Join(s.dir, "learning_edges.jsonl")); err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			if line == "" {
+				continue
+			}
+			var e domain.LearningEdge
+			if err := json.Unmarshal([]byte(line), &e); err == nil {
+				s.learningEdges = append(s.learningEdges, &e)
 			}
 		}
 	} else if !os.IsNotExist(err) {
@@ -577,4 +592,36 @@ func (s *Store) SetSettings(settings domain.Settings) error {
 	defer s.mu.Unlock()
 	s.settings = settings
 	return s.writeJSON("settings.json", settings)
+}
+
+// ---- learning edges ----
+
+func (s *Store) ListLearningEdges() []*domain.LearningEdge {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*domain.LearningEdge, len(s.learningEdges))
+	for i, e := range s.learningEdges {
+		out[i] = clone(e)
+	}
+	return out
+}
+
+func (s *Store) SaveLearningEdge(e *domain.LearningEdge) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stored := clone(e)
+	s.learningEdges = append(s.learningEdges, stored)
+	return s.appendJSONL("learning_edges.jsonl", stored)
+}
+
+func (s *Store) DeleteLearningEdge(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, e := range s.learningEdges {
+		if e.ID == id {
+			s.learningEdges = append(s.learningEdges[:i], s.learningEdges[i+1:]...)
+			return s.writeJSONL("learning_edges.jsonl", s.learningEdges)
+		}
+	}
+	return fmt.Errorf("%w: learning edge %s", ErrNotFound, id)
 }

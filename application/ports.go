@@ -55,6 +55,13 @@ type MemoryStore interface {
 	Delete(id string) error
 }
 
+// LearningEdgeStore persists bitemporal edges between learning nodes.
+type LearningEdgeStore interface {
+	List() []*domain.LearningEdge
+	Save(e *domain.LearningEdge) error
+	Delete(id string) error
+}
+
 // ConversationTodoPort is the per-conversation todo checklist store. The
 // model owns the list (full-replace via the `todo` tool); the user can
 // delete items from the UI. Implementations must be safe for concurrent use.

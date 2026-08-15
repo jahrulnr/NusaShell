@@ -503,5 +503,5 @@ func (a *Adapter) CompactServer(ctx context.Context, c *domain.Conversation, mod
 	if len(c.Messages) <= 1 {
 		return "", nil
 	}
-	return compactViaSubprocess(ctx, c, model)
+	return compactViaSubprocess(ctx, c, model, a.AccessToken, a.AccountID)
 }
