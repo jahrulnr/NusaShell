@@ -50,7 +50,7 @@ func (t *Toolbox) webAnswerSearcher() *searchwire.Searcher {
 		return nil
 	}
 	model := strings.TrimSpace(s.WebAnswerModel)
-	cfg := searchwire.Config{}
+	cfg := searchwire.Config{Timeout: 120 * time.Second}
 	switch provider {
 	case "brave":
 		cfg.Brave = searchwire.BraveConfig{APIKey: key}
