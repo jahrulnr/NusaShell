@@ -60,6 +60,10 @@ type Adapter struct {
 	AccountID string
 	// Originator identifies the client type. Defaults to DefaultOriginator.
 	Originator string
+	// InstallationID is a persistent UUID identifying this NusaShell
+	// install. Sent as x-codex-installation-id. Stable across sessions so
+	// the backend can route requests to the same cache shard.
+	InstallationID string
 	// Client is the HTTP client for API calls.
 	Client *http.Client
 }
@@ -91,6 +95,24 @@ func (a *Adapter) headers() map[string]string {
 	}
 	if a.AccountID != "" {
 		h["ChatGPT-Account-ID"] = a.AccountID
+	}
+	if a.InstallationID != "" {
+		h["x-codex-installation-id"] = a.InstallationID
+	}
+	return h
+}
+
+// sessionHeaders returns Codex session routing headers for a conversation.
+// These enable server-side prompt cache hits: the backend derives a stable
+// cache key from (installation_id, session_id, thread_id, prompt_cache_key).
+// session-id and thread-id are both set to the conversation ID so all
+// requests in the same conversation share a cache entry.
+func (a *Adapter) sessionHeaders(conversationID string) map[string]string {
+	h := map[string]string{}
+	if conversationID != "" {
+		h["session-id"] = conversationID
+		h["thread-id"] = conversationID
+		h["x-client-request-id"] = conversationID
 	}
 	return h
 }
@@ -342,7 +364,14 @@ func (a *Adapter) Complete(ctx context.Context, req application.ChatRequest) (ap
 }
 
 func (a *Adapter) Stream(ctx context.Context, req application.ChatRequest, onDelta, onReasoning func(string)) (application.ChatResponse, error) {
-	resp, err := aiutil.OpenSSE(ctx, a.Client, a.responsesURL(), a.headers(), buildCodexRequest(req))
+	// Merge base auth headers with session routing headers (session-id,
+	// thread-id) so the Codex backend can route requests to the same cache
+	// shard across rounds in the same conversation.
+	hdrs := a.headers()
+	for k, v := range a.sessionHeaders(req.ConversationID) {
+		hdrs[k] = v
+	}
+	resp, err := aiutil.OpenSSE(ctx, a.Client, a.responsesURL(), hdrs, buildCodexRequest(req))
 	if err != nil {
 		if aiutil.ShouldRetryWithoutImages(err, req.Messages, ctx) {
 			stripped := req

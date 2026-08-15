@@ -18,6 +18,7 @@ import (
 	"nusashell/frontend"
 	"nusashell/infrastructure/ai"
 	"nusashell/infrastructure/ai/codex"
+	"nusashell/infrastructure/config"
 	"nusashell/infrastructure/docs"
 	"nusashell/infrastructure/jsonstore"
 	"nusashell/infrastructure/mcpclient"
@@ -135,11 +136,7 @@ func run() error {
 }
 
 func defaultDataDir() string {
-	base, err := os.UserConfigDir()
-	if err != nil {
-		base = "."
-	}
-	return filepath.Join(base, "nusashell-go")
+	return config.DefaultDataDir()
 }
 
 func envOr(key, fallback string) string {

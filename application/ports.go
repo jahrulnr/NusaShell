@@ -214,6 +214,11 @@ type ChatRequest struct {
 	// PromptCaching is true, adapters translate the policy to their native
 	// wire format (prompt_cache_key for OpenAI, cache_control for Anthropic).
 	PromptCache *PromptCachePolicy
+	// ConversationID is the stable ID of the conversation this request
+	// belongs to. Used by Codex adapter to set session-id and thread-id
+	// headers, which enable server-side prompt cache hits across requests
+	// in the same conversation.
+	ConversationID string
 }
 
 // PromptCachePolicy is the provider-neutral cache intent. Adapters translate

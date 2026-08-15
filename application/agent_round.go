@@ -132,6 +132,7 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 		TopK:             settings.TopK,
 		FrequencyPenalty: settings.FrequencyPenalty,
 		PresencePenalty:  settings.PresencePenalty,
+		ConversationID:   run.ConversationID,
 	}, func(delta string) {
 		content.WriteString(delta)
 		a.Bus.Emit(contracts.EventMessageDelta, contracts.MessageDeltaEvent{
