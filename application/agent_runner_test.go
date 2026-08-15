@@ -2,7 +2,10 @@ package application
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"nusashell/contracts"
 	"nusashell/domain"
@@ -130,6 +133,50 @@ func (r *recordingToolbox) ListTools() []ToolInfo { return nil }
 func (r *recordingToolbox) Execute(ctx context.Context, name string, argsJSON []byte) (string, error) {
 	r.names = append(r.names, name)
 	return "ok", nil
+}
+
+func TestRunTurnFailsWhenAllCodexAccountsBlocked(t *testing.T) {
+	conv := &domain.Conversation{
+		ID:       "c1",
+		Messages: []domain.Message{{ID: "m1", Role: domain.RoleAssistant}},
+	}
+	creds := &memCreds{m: map[string]string{
+		"prov":              `{"access_token":"active","account_id":"acc1"}`,
+		"prov:account:acc1": `{"access_token":"t1","account_id":"acc1"}`,
+		"prov:account:acc2": `{"access_token":"t2","account_id":"acc2"}`,
+	}}
+	router := NewCodexAccountRouter()
+	router.MarkCircuitOpen("acc1", time.Now().Add(time.Hour))
+	router.MarkCircuitOpen("acc2", time.Now().Add(2*time.Hour))
+
+	factoryCalled := false
+	app := &App{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		Credentials:   creds,
+		CodexRouter:   router,
+		Factory: func(ctx context.Context, p *domain.Provider, apiKey string) (AIProvider, error) {
+			factoryCalled = true
+			return nil, errors.New("factory should not run when all Codex accounts are blocked")
+		},
+		runs: map[string]*TurnRun{},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
+	provider := &domain.Provider{ID: "prov", Kind: domain.ProviderCodex}
+
+	app.runTurn(run, provider, "active-token", "gpt-5.3-codex", "", "m1", false)
+
+	if factoryCalled {
+		t.Fatal("factory must not run when every Codex account is blocked")
+	}
+	if conv.Messages[0].Status != domain.StatusError {
+		t.Fatalf("status = %q, want error", conv.Messages[0].Status)
+	}
+	if !strings.Contains(conv.Messages[0].Error, "rate-limited") {
+		t.Fatalf("error = %q, want rate-limited message", conv.Messages[0].Error)
+	}
 }
 
 func TestDiscardQueuedSteerOnFail(t *testing.T) {

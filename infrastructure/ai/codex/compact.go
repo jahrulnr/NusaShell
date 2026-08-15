@@ -140,7 +140,10 @@ func compactViaSubprocess(ctx context.Context, c *domain.Conversation, model str
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("codex compact: start subprocess: %w", err)
 	}
-	defer cmd.Process.Kill()
+	defer func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	}()
 
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 1<<20), 32<<20)

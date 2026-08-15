@@ -45,6 +45,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Resilient upstream recovery.** Transient provider failures now retry with
   bounded backoff and `Retry-After` support; interrupted streaming output is
   preserved and continued once without repeating completed tool work.
+- **Windows Codex compact fixture.** `TestCompactServerSubprocessSuccess`
+  compiles a Go fake Codex app-server instead of writing a bash script, so
+  the subprocess path is executable on Windows CI.
+- **Codex turn-start failover.** When every stored Codex account is
+  rate-limited or circuit-open, the turn fails immediately instead of
+  sending the blocked active token.
+- **Codex OAuth refresh persistence.** Refreshed tokens are written to both
+  the active provider key and the account-scoped credential key.
+- **Provider delete credential cleanup.** Deleting a provider also removes
+  `{providerID}:account:*` credentials, not only the active key.
+- **Codex circuit usage snapshot.** `LimitReached` without a reset timestamp
+  no longer closes an already-open circuit breaker.
 
 ## [0.1.0] - 2026-08-13
 
