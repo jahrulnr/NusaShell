@@ -171,7 +171,68 @@ func (c *Catalog) Lookup(providerHint, modelID string) *ModelMetadata {
 	if m, ok := c.byName[bare]; ok {
 		return m
 	}
+	// 5. Provider-suffix fallback — gateways like OpenRouter append ":free"
+	// or "-free" to model IDs to denote free-tier variants. The base model
+	// metadata (reasoning efforts, context, pricing) is the same, so strip
+	// the suffix and retry the full lookup chain.
+	if stripped := stripProviderSuffix(lower); stripped != lower && stripped != "" {
+		if m := c.lookupUnlocked(providerHint, stripped); m != nil {
+			return m
+		}
+	}
 	return nil
+}
+
+// lookupUnlocked performs the same lookup chain as Lookup without
+// re-acquiring the read lock. Used internally by Lookup after stripping
+// provider-added suffixes.
+func (c *Catalog) lookupUnlocked(providerHint, modelID string) *ModelMetadata {
+	lower := strings.ToLower(modelID)
+	if m, ok := c.byID[lower]; ok {
+		return m
+	}
+	if providerHint != "" {
+		prefixed := strings.ToLower(providerHint) + "/" + lower
+		if m, ok := c.byID[prefixed]; ok {
+			return m
+		}
+	}
+	bare := lower
+	if idx := strings.Index(bare, "/"); idx >= 0 {
+		bare = bare[idx+1:]
+	}
+	if bare != lower {
+		if m, ok := c.byBareID[bare]; ok {
+			return m
+		}
+	}
+	if m, ok := c.byBareID[lower]; ok {
+		return m
+	}
+	if m, ok := c.byBareID[bare]; ok {
+		return m
+	}
+	if m, ok := c.byName[lower]; ok {
+		return m
+	}
+	if m, ok := c.byName[bare]; ok {
+		return m
+	}
+	return nil
+}
+
+// stripProviderSuffix removes provider-added suffixes that denote free-tier
+// or variant models. Gateways like OpenRouter append ":free" or "-free" to
+// model IDs (e.g. "qwen/qwen3.8-max:free" → "qwen/qwen3.8-max"). The base
+// model metadata is the same. Returns the original string if no known
+// suffix was found.
+func stripProviderSuffix(id string) string {
+	for _, suffix := range []string{":free", "-free", ":nitro", "-nitro"} {
+		if strings.HasSuffix(id, suffix) {
+			return strings.TrimSuffix(id, suffix)
+		}
+	}
+	return id
 }
 
 // ensureLoaded fetches the catalog if stale or not yet loaded.

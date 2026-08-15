@@ -4,10 +4,11 @@ import { autoReconnectEnabled, rpc, setAutoReconnect } from '../rpc.js';
 import { toast, createSelect } from '../ui.js';
 
 let bound = false;
-const state = { embeddingProviderId: '', embeddingModelId: '', visionProviderId: '', visionModelId: '' };
+const state = { embeddingProviderId: '', embeddingModelId: '', visionProviderId: '', visionModelId: '', webAnswerProvider: '', webAnswerModel: '' };
 let preferredSelect;
 let embeddingSelect;
 let visionSelect;
+let webAnswerProviderSelect;
 
 export async function initSettings() {
   if (!bound) {
@@ -27,6 +28,18 @@ export async function initSettings() {
     visionSelect = createSelect(document.getElementById('settings-vision-model'), {
       placeholder: 'Disabled — non-vision models get a text placeholder instead',
       search: true,
+    });
+    webAnswerProviderSelect = createSelect(document.getElementById('settings-web-answer-provider'), {
+      placeholder: 'Disabled — web_answer tool is not available',
+      data: [
+        { text: 'Disabled — web_answer tool is not available', value: '', placeholder: true },
+        { text: 'Brave (Answers API)', value: 'brave' },
+        { text: 'OpenRouter (web_search server tool)', value: 'openrouter' },
+        { text: 'OpenAI (Responses API web_search)', value: 'openai' },
+        { text: 'Perplexity (Agent API)', value: 'perplexity' },
+        { text: 'Anthropic (Messages API web_search)', value: 'anthropic' },
+        { text: 'xAI (Responses API web_search)', value: 'xai' },
+      ],
     });
     window.addEventListener('hashchange', () => {
       if (location.hash === '#settings') void refresh();
@@ -58,7 +71,13 @@ async function refresh() {
     state.embeddingModelId = settings.embedding_model_id ?? '';
     state.visionProviderId = settings.vision_provider_id ?? '';
     state.visionModelId = settings.vision_model_id ?? '';
+    state.webAnswerProvider = settings.web_answer_provider ?? '';
+    state.webAnswerModel = settings.web_answer_model ?? '';
     document.getElementById('settings-learning-threshold').value = settings.learning_review_threshold ?? 50;
+    // Web answer: set provider dropdown and model field. API key is write-only.
+    webAnswerProviderSelect.setSelected([state.webAnswerProvider || '']);
+    document.getElementById('settings-web-answer-model').value = state.webAnswerModel;
+    document.getElementById('settings-web-answer-api-key').value = '';
   } else {
     setStatus(`Could not load runtime settings: ${settingsResult.reason.message}`, true);
   }
@@ -89,7 +108,7 @@ function renderModelOptions(models) {
       const ctx = m.context ? ` ${Math.round(m.context / 1000)}K` : '';
       return {
         text: m.provider_name ? `${label}${ctx} · ${m.provider_name}` : `${label}${ctx}`,
-        value: m.id,
+        value: `${m.provider_id}:${m.id}`,
       };
     }),
   ];
@@ -133,6 +152,15 @@ function renderVisionModelOptions(models) {
   if (selected) visionSelect.setSelected([selected]);
 }
 
+// splitProviderModel splits a "providerId:modelId" select value on the first
+// colon only, so model IDs that contain colons (e.g. Ollama's
+// "nomic-embed-text:latest") are preserved intact.
+function splitProviderModel(value) {
+  const idx = value.indexOf(':');
+  if (idx < 0) return { providerId: '', modelId: '' };
+  return { providerId: value.slice(0, idx), modelId: value.slice(idx + 1) };
+}
+
 function setOptionalNumber(id, value) {
   const input = document.getElementById(id);
   if (!input) return;
@@ -174,18 +202,17 @@ async function save() {
   button.disabled = true;
   try {
     const embeddingValue = embeddingSelect.getSelected()?.[0] ?? '';
-    const [embProviderId, embModelId] = embeddingValue.includes(':')
-      ? embeddingValue.split(':', 2)
-      : ['', ''];
+    const { providerId: embProviderId, modelId: embModelId } = splitProviderModel(embeddingValue);
     const visionValue = visionSelect.getSelected()?.[0] ?? '';
-    const [visProviderId, visModelId] = visionValue.includes(':')
-      ? visionValue.split(':', 2)
-      : ['', ''];
+    const { providerId: visProviderId, modelId: visModelId } = splitProviderModel(visionValue);
     const learningThreshold = Number(document.getElementById('settings-learning-threshold').value);
     if (!Number.isInteger(learningThreshold) || learningThreshold < 0 || learningThreshold > 1000) {
       setStatus('Learning review threshold must be between 0 and 1,000.', true);
       return;
     }
+    const webAnswerProvider = webAnswerProviderSelect.getSelected()?.[0] ?? '';
+    const webAnswerModel = document.getElementById('settings-web-answer-model')?.value?.trim() ?? '';
+    const webAnswerAPIKey = document.getElementById('settings-web-answer-api-key')?.value?.trim() ?? '';
     await rpc('settings.set', {
       compaction_enabled: document.getElementById('settings-compaction-enabled').checked,
       prompt_caching: document.getElementById('settings-prompt-caching').checked,
@@ -196,6 +223,9 @@ async function save() {
       embedding_model_id: embModelId || null,
       vision_provider_id: visProviderId || null,
       vision_model_id: visModelId || null,
+      web_answer_provider: webAnswerProvider || null,
+      web_answer_model: webAnswerModel || null,
+      web_answer_api_key: webAnswerAPIKey || null,
       learning_review_threshold: learningThreshold,
       temperature: optionalNumber('settings-temperature'),
       top_p: optionalNumber('settings-top-p'),

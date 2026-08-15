@@ -5,6 +5,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -12,19 +13,61 @@ import (
 	"nusashell/application"
 	"nusashell/contracts"
 	"nusashell/domain"
+
+	"github.com/jahrulnr/searchwire"
 )
 
 type Toolbox struct {
-	Skills     application.SkillStore
-	Memory     application.MemoryStore
-	Docs       application.DocsSource
-	MCPServers application.MCPServerStore
-	Todos      application.ConversationTodoPort
-	MCP        interface {
+	Skills      application.SkillStore
+	Memory      application.MemoryStore
+	Docs        application.DocsSource
+	MCPServers  application.MCPServerStore
+	Todos       application.ConversationTodoPort
+	Searcher    *searchwire.Searcher // zero-config searcher for web_search + web_fetch
+	Settings    application.SettingsStore
+	Credentials application.CredentialStore
+	MCP         interface {
 		Connect(ctx context.Context, s *domain.MCPServer) ([]contracts.MCPToolDTO, error)
 		ToolsFor(serverID string) ([]contracts.MCPToolDTO, bool)
 		CallTool(ctx context.Context, serverID, toolName string, args map[string]any) (string, error)
 	}
+}
+
+// webAnswerSearcher builds a searchwire.Searcher on-demand from the web
+// answer settings + stored API key. Returns nil if web_answer is not
+// configured (no provider or no API key).
+func (t *Toolbox) webAnswerSearcher() *searchwire.Searcher {
+	if t.Settings == nil || t.Credentials == nil {
+		return nil
+	}
+	s := t.Settings.Get()
+	provider := strings.TrimSpace(s.WebAnswerProvider)
+	if provider == "" {
+		return nil
+	}
+	key, has, _ := t.Credentials.Get("web_answer")
+	if !has || strings.TrimSpace(key) == "" {
+		return nil
+	}
+	model := strings.TrimSpace(s.WebAnswerModel)
+	cfg := searchwire.Config{}
+	switch provider {
+	case "brave":
+		cfg.Brave = searchwire.BraveConfig{APIKey: key}
+	case "openrouter":
+		cfg.OpenRouter = searchwire.OpenRouterConfig{APIKey: key, Model: model}
+	case "openai":
+		cfg.OpenAI = searchwire.OpenAIConfig{APIKey: key, Model: model}
+	case "perplexity":
+		cfg.Perplexity = searchwire.PerplexityConfig{APIKey: key, Preset: model}
+	case "anthropic":
+		cfg.Anthropic = searchwire.AnthropicConfig{APIKey: key, Model: model}
+	case "xai":
+		cfg.XAI = searchwire.XAIConfig{APIKey: key, Model: model}
+	default:
+		return nil
+	}
+	return searchwire.New(cfg)
 }
 
 func (t *Toolbox) ListTools() []application.ToolInfo {
@@ -45,6 +88,8 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "tool_search", Description: "Search a running MCP server's tools by name or description (case-insensitive token match — any term matches). Returns matching tool names and descriptions.", InputSchema: obj("object", props("server", str("MCP server name"), "query", str("Search query")), "server", "query")},
 		{Name: "tool_schema", Description: "Load one MCP tool's input schema by server and tool name. Useful when you need the exact argument shape before calling an mcp__<server>__<tool> tool.", InputSchema: obj("object", props("server", str("MCP server name"), "tool", str("Tool name within the server")), "server", "tool")},
 		{Name: "read_image", Description: "Load an image from the conversation into your context so you can see it. Pass the attachment name (from a user message) to view that image. When your active model supports vision, the image is attached to your context directly. For non-vision models, the image is described using a vision fallback model and the text description is returned.", InputSchema: obj("object", props("attachment_name", str("Name of the image attachment from a user message in this conversation"), "question", str("Optional question about the image")), "attachment_name")},
+		{Name: "web_search", Description: "Search the web for fresh information. Returns ranked results with title, URL, and snippet from multiple sources (Brave, Startpage, Wikipedia, GitHub). Use this when you need current information, documentation, or research. Follow up with web_fetch on promising URLs for full page content.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results (default 10)")), "query")},
+		{Name: "web_fetch", Description: "Fetch a URL and return readable text (HTML stripped to title + visible text). Use after web_search to read full page content from a result URL. Accepts http/https only.", InputSchema: obj("object", props("url", str("URL to fetch"), "max_bytes", intSchema("Optional max bytes of extracted text (default 2MB)")), "url")},
 	}
 	for _, s := range t.MCPServers.List() {
 		if !s.Enabled {
@@ -70,6 +115,16 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 				InputSchema: schema,
 			})
 		}
+	}
+	if sw := t.webAnswerSearcher(); sw != nil && sw.CanAnswer() {
+		providers := sw.AvailableAnswerProviders()
+		providerList := strings.Join(providers, ", ")
+		desc := "Get a web-grounded answer to a question using an LLM with built-in web search. Use when you need a synthesized answer rather than raw search results. Available providers: " + providerList + ". Omit provider to use the default priority order."
+		tools = append(tools, application.ToolInfo{
+			Name:        "web_answer",
+			Description: desc,
+			InputSchema: obj("object", props("question", str("Question to answer"), "provider", str("Optional provider: "+providerList)), "question"),
+		})
 	}
 	return tools
 }
@@ -429,6 +484,136 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", fmt.Errorf("tool %q not found on server %q; use tool_list or tool_search to see available tools", args.Tool, args.Server)
 		}
 		return "", fmt.Errorf("server %q not found; use mcp_list to see configured servers", args.Server)
+	case name == "web_search":
+		if t.Searcher == nil {
+			return "", fmt.Errorf("search is not available")
+		}
+		var args struct {
+			Query string `json:"query"`
+			Limit int    `json:"limit"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if strings.TrimSpace(args.Query) == "" {
+			return "", fmt.Errorf("query is required")
+		}
+		limit := args.Limit
+		if limit <= 0 {
+			limit = 10
+		}
+		resp, err := t.Searcher.Search(ctx, args.Query)
+		if err != nil {
+			return "", fmt.Errorf("search failed: %w", err)
+		}
+		if limit > len(resp.Results) {
+			limit = len(resp.Results)
+		}
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("Search: %s\n\n", resp.Query))
+		for i, r := range resp.Results[:limit] {
+			sb.WriteString(fmt.Sprintf("## %d. %s\n", i+1, r.Title))
+			sb.WriteString(fmt.Sprintf("URL: %s\n", r.URL))
+			if r.Snippet != "" {
+				sb.WriteString(fmt.Sprintf("Snippet: %s\n", r.Snippet))
+			}
+			sb.WriteString(fmt.Sprintf("Sources: %s\n\n", strings.Join(r.Sources, ", ")))
+		}
+		if len(resp.Errors) > 0 {
+			sb.WriteString("Source errors:\n")
+			for _, e := range resp.Errors {
+				sb.WriteString(fmt.Sprintf("- %s: %s\n", e.Source, e.Error))
+			}
+		}
+		if len(resp.Results) == 0 {
+			sb.WriteString("No results found.\n")
+		}
+		return sb.String(), nil
+	case name == "web_fetch":
+		if t.Searcher == nil {
+			return "", fmt.Errorf("search is not available")
+		}
+		var args struct {
+			URL      string `json:"url"`
+			MaxBytes int64  `json:"max_bytes"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if strings.TrimSpace(args.URL) == "" {
+			return "", fmt.Errorf("url is required")
+		}
+		page, err := t.Searcher.FetchWithLimit(ctx, args.URL, args.MaxBytes)
+		if err != nil {
+			var httpErr *searchwire.HTTPError
+			if errors.As(err, &httpErr) && httpErr.RetryAfter > 0 {
+				return "", fmt.Errorf("fetch failed: %w (retry after %ds)", err, httpErr.RetryAfter)
+			}
+			return "", fmt.Errorf("fetch failed: %w", err)
+		}
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("URL: %s\n", page.URL))
+		if page.FinalURL != page.URL {
+			sb.WriteString(fmt.Sprintf("Final URL: %s\n", page.FinalURL))
+		}
+		sb.WriteString(fmt.Sprintf("Status: %d | Content-Type: %s\n", page.StatusCode, page.ContentType))
+		if page.Redirects > 0 {
+			sb.WriteString(fmt.Sprintf("Redirects: %d\n", page.Redirects))
+		}
+		if len(page.Headers) > 0 {
+			sb.WriteString("Headers:\n")
+			for k, v := range page.Headers {
+				sb.WriteString(fmt.Sprintf("- %s: %s\n", k, v))
+			}
+		}
+		if page.Title != "" {
+			sb.WriteString(fmt.Sprintf("Title: %s\n", page.Title))
+		}
+		if len(page.Links) > 0 {
+			sb.WriteString(fmt.Sprintf("Links: %d\n", len(page.Links)))
+			for i, l := range page.Links {
+				if i >= 50 {
+					sb.WriteString("... (more links omitted)\n")
+					break
+				}
+				label := strings.TrimSpace(l.Text)
+				if label == "" {
+					sb.WriteString(fmt.Sprintf("- %s\n", l.Href))
+				} else {
+					sb.WriteString(fmt.Sprintf("- %s -> %s\n", label, l.Href))
+				}
+			}
+		}
+		if page.Truncated {
+			sb.WriteString(fmt.Sprintf("[truncated at %d bytes]\n", page.Bytes))
+		}
+		sb.WriteString("\n")
+		sb.WriteString(page.Text)
+		return sb.String(), nil
+	case name == "web_answer":
+		sw := t.webAnswerSearcher()
+		if sw == nil || !sw.CanAnswer() {
+			return "", fmt.Errorf("web_answer is not configured — set a provider and API key in Settings → Web Answer")
+		}
+		var args struct {
+			Question string `json:"question"`
+			Provider string `json:"provider"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if strings.TrimSpace(args.Question) == "" {
+			return "", fmt.Errorf("question is required")
+		}
+		opts := searchwire.AnswerOptions{Provider: strings.TrimSpace(args.Provider)}
+		answer, err := sw.AnswerWithOptions(ctx, args.Question, opts)
+		if err != nil {
+			return "", fmt.Errorf("answer failed: %w", err)
+		}
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("Provider: %s\n\n", answer.Provider))
+		sb.WriteString(answer.Text)
+		return sb.String(), nil
 	}
 
 	// dynamic MCP tools: mcp__<server>__<tool>

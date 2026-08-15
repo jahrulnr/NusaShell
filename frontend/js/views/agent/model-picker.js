@@ -66,7 +66,7 @@ function renderModelMenu(menu, models, selectedModel, selectedEffort, selectMode
   for (const [provider, providerModels] of byProvider) {
     const section = el('div', { class: 'agent-model-section' }, el('div', { class: 'agent-model-section-title', text: provider }));
     for (const model of providerModels) {
-      const isSelected = model.id === selectedModel;
+      const isSelected = `${model.provider_id}:${model.id}` === selectedModel || (selectedModel && !selectedModel.includes(':') && model.id === selectedModel);
       const name = model.display_name || model.id;
       const badges = [];
       if (model.reasoning) badges.push(el('span', { class: 'agent-model-badge agent-badge-reasoning', text: 'reasoning', title: 'Supports reasoning/thinking mode' }));
@@ -86,7 +86,7 @@ function renderModelMenu(menu, models, selectedModel, selectedEffort, selectMode
         ),
       );
       row.querySelector('button').addEventListener('click', () => {
-        selectModel(model.id);
+        selectModel(`${model.provider_id}:${model.id}`);
         closeMenu();
       });
       // Effort selector: show for any model that advertises supported efforts.
@@ -97,11 +97,11 @@ function renderModelMenu(menu, models, selectedModel, selectedEffort, selectMode
         const effortBar = el('div', { class: 'agent-model-effort-bar' });
         effortBar.append(el('span', { class: 'agent-model-effort-label', text: 'Reasoning:' }));
         const autoBtn = el('button', { class: `agent-effort-chip${isSelected && selectedEffort === 'auto' ? ' is-active' : ''}`, type: 'button', text: 'default' });
-        autoBtn.addEventListener('click', (e) => { e.stopPropagation(); selectModel(model.id); selectEffort('auto'); closeMenu(); });
+        autoBtn.addEventListener('click', (e) => { e.stopPropagation(); selectModel(`${model.provider_id}:${model.id}`); selectEffort('auto'); closeMenu(); });
         effortBar.append(autoBtn);
         for (const effort of model.supported_efforts) {
           const chip = el('button', { class: `agent-effort-chip${isSelected && selectedEffort === effort ? ' is-active' : ''}`, type: 'button', text: effort });
-          chip.addEventListener('click', (e) => { e.stopPropagation(); selectModel(model.id); selectEffort(effort); closeMenu(); });
+          chip.addEventListener('click', (e) => { e.stopPropagation(); selectModel(`${model.provider_id}:${model.id}`); selectEffort(effort); closeMenu(); });
           effortBar.append(chip);
         }
         row.append(effortBar);

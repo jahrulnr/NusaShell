@@ -128,10 +128,13 @@ function renderAssistantTurn(messages, onRetry) {
   }
   meta.append(el('span', { class: 'agent-message-meta', text: fmtTime(finalMessage.created_at) }));
   node.append(meta);
-  if (failedMessage?.error) node.append(el('div', { class: 'agent-message-meta', text: failedMessage.error }));
+  if (failedMessage?.error) node.append(el('div', { class: 'agent-message-meta agent-error-text', text: failedMessage.error }));
   if (failedMessage && onRetry) {
     const retryBtn = el('button', { class: 'agent-retry-btn', type: 'button', text: '↻ Retry with model' });
-    retryBtn.addEventListener('click', () => onRetry(node));
+    // Pass the failed message ID so retryTurn can remove only the failed
+    // message's DOM, not the entire turn node (which may contain successful
+    // assistant messages from earlier rounds in the same turn).
+    retryBtn.addEventListener('click', () => onRetry(node, failedMessage.id));
     node.append(retryBtn);
   }
   return node;

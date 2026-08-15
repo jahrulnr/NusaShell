@@ -417,6 +417,31 @@
               <small>Only models with vision capability appear here. Leave disabled if you always use vision-capable chat models.</small>
             </label>
           </section>
+          <section class="settings-card settings-web-answer-card" aria-labelledby="settings-web-answer-title">
+            <div class="settings-card-title">Web Answer</div>
+            <h2 id="settings-web-answer-title" class="sr-only">Web Answer</h2>
+            <p class="settings-card-copy">Configure a web-grounded answer provider for the <code>web_answer</code> tool. This is separate from your chat providers — pick a supported vendor and enter its API key. The key is stored securely in the credential store, not in settings JSON.</p>
+            <label class="settings-field" for="settings-web-answer-provider">Answer provider
+              <select id="settings-web-answer-provider">
+                <option value="">Disabled — web_answer tool is not available</option>
+                <option value="brave">Brave (Answers API)</option>
+                <option value="openrouter">OpenRouter (web_search server tool)</option>
+                <option value="openai">OpenAI (Responses API web_search)</option>
+                <option value="perplexity">Perplexity (Agent API)</option>
+                <option value="anthropic">Anthropic (Messages API web_search)</option>
+                <option value="xai">xAI (Responses API web_search)</option>
+              </select>
+              <small>Pick a vendor that supports web-grounded answers. Each requires its own API key.</small>
+            </label>
+            <label class="settings-field" for="settings-web-answer-api-key">API key
+              <input id="settings-web-answer-api-key" type="password" autocomplete="off" placeholder="Paste API key — leave blank to keep existing">
+              <small>Stored in the credential store. Leave blank while saving to keep the existing key.</small>
+            </label>
+            <label class="settings-field" for="settings-web-answer-model">Model / preset (optional)
+              <input id="settings-web-answer-model" type="text" autocomplete="off" placeholder="Vendor default">
+              <small>Leave blank to use the vendor's cost-focused default: OpenRouter <code>openrouter/auto</code>, OpenAI <code>gpt-5.6-luna</code>, Perplexity <code>low</code> preset, Anthropic <code>claude-haiku-4-5</code>, xAI <code>grok-4.5</code>. Brave does not use a model.</small>
+            </label>
+          </section>
           <section class="settings-card" aria-labelledby="settings-context-title">
             <div class="settings-card-title">Context compaction</div>
             <h2 id="settings-context-title" class="sr-only">Context compaction</h2>

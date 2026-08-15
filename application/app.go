@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -707,19 +708,55 @@ func (a *App) handleAppInfo() (any, *contracts.RPCError) {
 	}, nil
 }
 
-// resolveModel finds the provider owning a model id and its API key.
-func (a *App) resolveModel(model string) (*domain.Provider, string, *contracts.RPCError) {
-	p, _, key, rpcErr := a.resolveModelWithMeta(model)
+// resolveModel finds the provider owning a model id and its API key. It
+// returns the bare model ID (without provider prefix) so callers can pass
+// it to the provider API without leaking the qualified format.
+func (a *App) resolveModel(model string) (*domain.Provider, string, string, *contracts.RPCError) {
+	p, m, key, rpcErr := a.resolveModelWithMeta(model)
 	if rpcErr != nil {
-		return nil, "", rpcErr
+		return nil, "", "", rpcErr
 	}
-	return p, key, nil
+	bareID := model
+	if m != nil {
+		bareID = m.ID
+	}
+	return p, bareID, key, nil
 }
 
 // resolveModelWithMeta is like resolveModel but also returns the model
 // metadata (capabilities, kind, etc.). Used by the agent runtime to
 // check vision support before sending image attachments.
 func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Model, string, *contracts.RPCError) {
+	// Support "provider_id:model_id" qualified model IDs so the user can
+	// disambiguate when the same model is available on multiple providers
+	// (e.g. deepseek-v4-flash on both tokenrouter and openrouter). When
+	// unqualified, fall back to first-match for backward compatibility.
+	if providerID, modelID, ok := splitQualifiedModel(model); ok {
+		p, err := a.Providers.Get(providerID)
+		if err != nil || p == nil || !p.Enabled {
+			return nil, nil, "", &contracts.RPCError{
+				Code:    contracts.CodeValidation,
+				Message: fmt.Sprintf("provider %q is not available or not enabled", providerID),
+			}
+		}
+		if !p.HasModel(modelID) {
+			return nil, nil, "", &contracts.RPCError{
+				Code:    contracts.CodeValidation,
+				Message: fmt.Sprintf("model %q is not available on provider %q", modelID, providerID),
+			}
+		}
+		key, has, err := a.Credentials.Get(p.ID)
+		if err != nil {
+			return nil, nil, "", rpcInternal(err)
+		}
+		if !has && requiresKey(p.Kind) {
+			return nil, nil, "", &contracts.RPCError{Code: contracts.CodeConflict, Message: fmt.Sprintf("provider %q has no API key", p.Name)}
+		}
+		if !has && p.Kind == domain.ProviderCodex {
+			return nil, nil, "", &contracts.RPCError{Code: contracts.CodeConflict, Message: fmt.Sprintf("provider %q is not logged in — use the Codex login command to authenticate with your ChatGPT account", p.Name)}
+		}
+		return p, p.FindModel(modelID), key, nil
+	}
 	for _, p := range a.Providers.List() {
 		if !p.Enabled || !p.HasModel(model) {
 			continue
@@ -740,6 +777,16 @@ func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Mode
 		Code:    contracts.CodeValidation,
 		Message: fmt.Sprintf("model %q is not available on any enabled provider", model),
 	}
+}
+
+// splitQualifiedModel splits a "provider_id:model_id" string on the first
+// colon. Returns ok=false when the string is a bare model ID (no colon).
+func splitQualifiedModel(s string) (providerID, modelID string, ok bool) {
+	idx := strings.IndexByte(s, ':')
+	if idx <= 0 {
+		return "", "", false
+	}
+	return s[:idx], s[idx+1:], true
 }
 
 func requiresKey(kind domain.ProviderKind) bool {

@@ -27,7 +27,7 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 	if model == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "model is required"}
 	}
-	provider, apiKey, rpcErr := a.resolveModel(model)
+	provider, model, apiKey, rpcErr := a.resolveModel(model)
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
@@ -117,7 +117,7 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "no failed assistant turn to retry"}
 	}
 
-	provider, apiKey, rpcErr := a.resolveModel(model)
+	provider, model, apiKey, rpcErr := a.resolveModel(model)
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
@@ -132,14 +132,14 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 		c.AddMessage(next)
 		targetMsgID = next.ID
 	} else {
-		failed.Status = domain.StatusDone
-		failed.Error = ""
-		failed.Content = ""
-		failed.Reasoning = ""
-		failed.Steps = nil
-		failed.ToolCalls = nil
-		failed.Usage = nil
-		targetMsgID = failed.ID
+		// Delete the failed message entirely and create a fresh one.
+		// Wiping content in-place leaves a ghost "done" message with empty
+		// content that shows up as a gap when the UI re-renders from server
+		// state on turn completion.
+		c.Messages = append(c.Messages[:failedIdx], c.Messages[failedIdx+1:]...)
+		next := domain.Message{ID: domain.NewID("msg"), Role: domain.RoleAssistant, CreatedAt: time.Now().UTC()}
+		c.AddMessage(next)
+		targetMsgID = next.ID
 	}
 	c.Model = model
 	c.Effort = req.Effort
@@ -518,15 +518,25 @@ func compactionTriggerTokens(contextWindow int, settings domain.Settings) int {
 	return trigger
 }
 
-// resolveMaxOutput picks the per-turn completion token ceiling: the model's
-// advertised max output when known, otherwise the global settings default.
+// resolveMaxOutput picks the per-turn completion token ceiling. The model's
+// advertised max output is used when known, but capped by the global settings
+// default — the setting acts as a ceiling, not just a fallback. This prevents
+// sending absurdly high max_tokens values (e.g. 1M for models that advertise
+// it) which cause credit/balance rejections on gateways like OpenRouter.
 func resolveMaxOutput(provider *domain.Provider, model string, settings domain.Settings) int {
+	cap := settings.MaxOutputTokens
+	if cap <= 0 {
+		cap = 65536
+	}
 	for _, m := range provider.Models {
 		if m.ID == model && m.MaxOutput > 0 {
-			return m.MaxOutput
+			if m.MaxOutput < cap {
+				return m.MaxOutput
+			}
+			return cap
 		}
 	}
-	return settings.MaxOutputTokens
+	return cap
 }
 
 // resolveContextWindow picks the effective context window for compaction

@@ -247,7 +247,7 @@ async function openConversation(id) {
   const hasSaved = loadRoomState(id);
   if (!hasSaved) {
     const requestedModel = conversation.model || localStorage.getItem('nusashell.model') || '';
-    state.model = models.length && requestedModel && !models.some((model) => model.id === requestedModel) ? '' : requestedModel;
+    state.model = models.length && requestedModel && !models.some((model) => `${model.provider_id}:${model.id}` === requestedModel) && !models.some((model) => model.id === requestedModel) ? '' : requestedModel;
     state.effort = conversation.effort || 'auto';
   }
   renderConversationList();
@@ -481,7 +481,7 @@ function beginTurn(runId, userText, attachments = []) {
   scrollToBottom(true);
 }
 
-async function retryTurn(failedNode) {
+async function retryTurn(failedNode, failedMessageId) {
   if (state.running) return;
   if (!state.activeId) return;
   const model = state.model;
@@ -501,7 +501,25 @@ async function retryTurn(failedNode) {
   updateSendAvailability(state);
 
   const thread = document.getElementById('agent-thread');
-  failedNode.remove();
+  // Remove the failed message's error UI (error text + retry button) from
+  // the turn node without wiping the entire turn — earlier successful
+  // assistant messages in the same turn group must stay visible.
+  if (failedMessageId) {
+    // Remove the error text and retry button that belong to the failed message.
+    failedNode.querySelectorAll('.agent-retry-btn, .agent-error-text').forEach((n) => n.remove());
+    // If the turn node has no bubble content left (no prior successful
+    // messages), remove the whole node; otherwise keep it and append the
+    // new retry bubble as a sibling.
+    const bubble = failedNode.querySelector('.agent-bubble');
+    if (bubble && bubble.children.length === 0) {
+      failedNode.remove();
+    } else {
+      failedNode.classList.remove('agent-message-error');
+    }
+  } else {
+    // Backward compat: no message ID — remove the whole node.
+    failedNode.remove();
+  }
   const bubble = el('div', { class: 'agent-bubble' });
   const msgNode = el('div', { class: 'agent-message assistant agent-pending' }, bubble);
   thread.append(msgNode);
@@ -1083,7 +1101,7 @@ async function refreshModels() {
   } catch {
     models = [];
   }
-  if (state.model && models.length && !models.some((model) => model.id === state.model)) {
+  if (state.model && models.length && !models.some((model) => `${model.provider_id}:${model.id}` === state.model) && !models.some((model) => model.id === state.model)) {
     state.model = '';
     localStorage.removeItem('nusashell.model');
   }
@@ -1092,8 +1110,8 @@ async function refreshModels() {
 
 function updateModelTrigger() {
   const label = document.getElementById('model-trigger-label');
-  const chosen = models.find((m) => m.id === state.model);
-  const parts = [chosen ? chosen.id : (state.model || 'No model')];
+  const chosen = models.find((m) => `${m.provider_id}:${m.id}` === state.model) || models.find((m) => m.id === state.model);
+  const parts = [chosen ? (chosen.display_name || chosen.id) : (state.model || 'No model')];
   if (state.effort && state.effort !== 'auto') parts.push(state.effort);
   label.textContent = parts.join(' · ');
   label.title = chosen ? `${chosen.id} · ${chosen.provider_name}${state.effort && state.effort !== 'auto' ? ` · ${state.effort}` : ''}` : '';
@@ -1104,7 +1122,8 @@ function selectModel(modelID) {
   state.model = modelID;
   localStorage.setItem('nusashell.model', modelID);
   // Clamp effort to the new model's supported efforts; reset to auto if unsupported.
-  const chosen = models.find((m) => m.id === modelID);
+  // Match by qualified ID (provider_id:model_id) or bare ID for backward compat.
+  const chosen = models.find((m) => `${m.provider_id}:${m.id}` === modelID) || models.find((m) => m.id === modelID);
   if (chosen) {
     const supported = chosen.supported_efforts || [];
     if (state.effort !== 'auto' && supported.length && !supported.includes(state.effort)) {
@@ -1154,7 +1173,7 @@ function updateComposerStatus() {
     return;
   }
   status.classList.remove('is-running');
-  const chosen = models.find((model) => model.id === state.model);
+  const chosen = models.find((model) => `${model.provider_id}:${model.id}` === state.model) || models.find((model) => model.id === state.model);
   if (!chosen) {
     status.textContent = 'Choose a model';
     return;

@@ -104,6 +104,14 @@ type Settings struct {
 	// placeholder instead of an image description.
 	VisionProviderID string `json:"vision_provider_id,omitempty"`
 	VisionModelID    string `json:"vision_model_id,omitempty"`
+	// WebAnswer configures the web_answer tool's answer provider. This is
+	// separate from the chat providers — the user picks a searchwire-supported
+	// vendor (brave, openrouter, openai, perplexity, anthropic, xai) and
+	// supplies an API key manually. The API key is stored in the
+	// CredentialStore under the "web_answer" key, not in settings JSON.
+	// When WebAnswerProvider is empty, web_answer is not available.
+	WebAnswerProvider string `json:"web_answer_provider,omitempty"`
+	WebAnswerModel    string `json:"web_answer_model,omitempty"`
 	// Sampling parameters. nil = use provider default (do not send the
 	// field). Non-nil overrides the provider default for every turn.
 	// Ranges: temperature 0–2 (OpenAI) / 0–1 (Anthropic), top_p 0–1,

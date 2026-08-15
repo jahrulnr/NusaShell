@@ -137,3 +137,33 @@ func TestLookupByDisplayName(t *testing.T) {
 		t.Errorf("Lookup matched wrong model: got %q", got.ID)
 	}
 }
+
+func TestLookupStripsProviderSuffix(t *testing.T) {
+	c := &Catalog{
+		loaded:   true,
+		byID:     map[string]*ModelMetadata{"qwen/qwen3.8-max": {ID: "qwen/qwen3.8-max", Kind: "chat", SupportedEfforts: []string{"low", "medium", "high"}}},
+		byBareID: map[string]*ModelMetadata{"qwen3.8-max": {ID: "qwen/qwen3.8-max", Kind: "chat", SupportedEfforts: []string{"low", "medium", "high"}}},
+		byName:   map[string]*ModelMetadata{},
+	}
+	tests := []struct {
+		query string
+		want  string
+	}{
+		{"qwen/qwen3.8-max:free", "qwen/qwen3.8-max"},
+		{"qwen/qwen3.8-max-free", "qwen/qwen3.8-max"},
+		{"qwen3.8-max:free", "qwen/qwen3.8-max"},
+		{"qwen3.8-max-free", "qwen/qwen3.8-max"},
+		{"qwen/qwen3.8-max:nitro", "qwen/qwen3.8-max"},
+		{"qwen/qwen3.8-max", "qwen/qwen3.8-max"}, // no suffix — exact match
+	}
+	for _, tt := range tests {
+		got := c.Lookup("", tt.query)
+		if got == nil {
+			t.Errorf("Lookup(%q) returned nil, want %q", tt.query, tt.want)
+			continue
+		}
+		if got.ID != tt.want {
+			t.Errorf("Lookup(%q) = %q, want %q", tt.query, got.ID, tt.want)
+		}
+	}
+}

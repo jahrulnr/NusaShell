@@ -28,6 +28,8 @@ import (
 	"nusashell/infrastructure/tools"
 	"nusashell/infrastructure/workspacepicker"
 	"nusashell/transport"
+
+	"github.com/jahrulnr/searchwire"
 )
 
 // version is the single source of truth for the Go port until a VERSION file
@@ -88,11 +90,13 @@ func run() error {
 	mcpManager := mcpclient.NewManager()
 	bus := application.NewBus()
 	todoStore := jsonstore.NewTodoStore(filepath.Join(dataDir, "conversation-todos.json"))
+	providerStore := &jsonstore.Providers{S: store}
+	searcher := searchwire.New(tools.SearchwireConfigFromProviders(providerStore, credentials))
 	app := application.NewApp(application.Deps{
 		Version:       version,
 		DataDir:       dataDir,
 		Conversations: store,
-		Providers:     &jsonstore.Providers{S: store},
+		Providers:     providerStore,
 		Credentials:   credentials,
 		Skills:        &jsonstore.Skills{S: store},
 		Memory:        &jsonstore.Memory{S: store},
@@ -104,12 +108,15 @@ func run() error {
 		Docs:          docSource,
 		Bus:           bus,
 		Toolbox: &tools.Toolbox{
-			Skills:     &jsonstore.Skills{S: store},
-			Memory:     &jsonstore.Memory{S: store},
-			Docs:       docSource,
-			MCPServers: &jsonstore.MCP{S: store},
-			Todos:      todoStore,
-			MCP:        mcpManager,
+			Skills:      &jsonstore.Skills{S: store},
+			Memory:      &jsonstore.Memory{S: store},
+			Docs:        docSource,
+			MCPServers:  &jsonstore.MCP{S: store},
+			Todos:       todoStore,
+			Searcher:    searcher,
+			Settings:    &jsonstore.Settings{S: store},
+			Credentials: credentials,
+			MCP:         mcpManager,
 		},
 		MCPToolbox:                  mcpManager,
 		Factory:                     ai.NewFactory(credentials),

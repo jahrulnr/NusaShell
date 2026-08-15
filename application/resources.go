@@ -586,6 +586,22 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	if req.VisionModelID != nil {
 		s.VisionModelID = strings.TrimSpace(*req.VisionModelID)
 	}
+	if req.WebAnswerProvider != nil {
+		s.WebAnswerProvider = strings.TrimSpace(*req.WebAnswerProvider)
+	}
+	if req.WebAnswerModel != nil {
+		s.WebAnswerModel = strings.TrimSpace(*req.WebAnswerModel)
+	}
+	if req.WebAnswerAPIKey != nil {
+		key := strings.TrimSpace(*req.WebAnswerAPIKey)
+		if key == "" {
+			_ = a.Credentials.Delete("web_answer")
+		} else {
+			if err := a.Credentials.Set("web_answer", key); err != nil {
+				return nil, rpcInternal(err)
+			}
+		}
+	}
 	if req.LearningReviewThreshold != nil {
 		v := *req.LearningReviewThreshold
 		if v < 0 {
@@ -614,6 +630,8 @@ func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 		EmbeddingModelID:        s.EmbeddingModelID,
 		VisionProviderID:        s.VisionProviderID,
 		VisionModelID:           s.VisionModelID,
+		WebAnswerProvider:       s.WebAnswerProvider,
+		WebAnswerModel:          s.WebAnswerModel,
 		Temperature:             s.Temperature,
 		TopP:                    s.TopP,
 		TopK:                    s.TopK,

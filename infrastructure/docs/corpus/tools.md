@@ -22,10 +22,41 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `tool_search` | search a running MCP server's tools by name or description |
 | `tool_schema` | load one MCP tool's input schema by server and tool name before calling it |
 | `read_image` | load an image from the conversation into the model's context (vision models see it directly; non-vision models get a text description via the vision fallback) |
+| `web_search` | search the web across Brave, Startpage, Wikipedia, and GitHub; returns ranked results with title, URL, and snippet |
+| `web_fetch` | fetch a URL and return readable text; supports HTML, JSON (pretty-printed), XML/RSS/Atom, Markdown, CSV, and plain text with newlines preserved; collects links and selected response headers; honors `max_bytes`; surfaces `Retry-After` on 429/503 and structured JSON error bodies |
+| `web_answer` | get a web-grounded answer via an LLM with built-in web search (only available when an answer-provider API key is configured) |
 
 The system prompt advertises the same set: `skill_list`, `skill_search`,
 `skill_read`, `memory_*`, `docs_*`, `mcp_list`, `tool_list`, `tool_search`,
-`tool_schema`, `read_image`, plus `mcp__<server>__<tool>` for each enabled MCP server.
+`tool_schema`, `read_image`, `web_search`, `web_fetch`,
+`web_answer` (when available), plus `mcp__<server>__<tool>` for each enabled MCP server.
+
+## Native web research (searchwire)
+
+NusaShell ships with built-in web research tools powered by
+[searchwire](https://github.com/jahrulnr/searchwire). These are native tools,
+not MCP plugins — they work with zero configuration and no MCP servers
+installed.
+
+- **`web_search`**: metasearch across Brave, Startpage, Wikipedia, and
+  GitHub. No API key required for the default path (HTML scraping + public
+  APIs). Returns ranked, deduplicated results with snippets.
+- **`web_fetch`**: fetches a URL and returns readable text. Supports HTML
+  (nav/footer/aside/form stripped, `<pre>`/`<code>` preserved, links
+  collected, `og:title`/`<h1>` title fallbacks), JSON (pretty-printed;
+  invalid JSON returned raw), XML/RSS/Atom (tag-stripped, newlines
+  preserved), Markdown/CSV/plain text (newlines preserved). Non-UTF-8
+  charsets are decoded. Surfaces `ETag`/`Last-Modified`/rate-limit
+  headers, redirect count, and a `[truncated]` marker. Non-2xx returns
+  `Retry-After` (seconds) and parsed JSON error envelope when present.
+- **`web_answer`**: web-grounded LLM answer (optional). Only
+  registered when a vendor and API key are configured in Settings → Web Answer.
+  This is a separate config from the chat providers — pick a searchwire-supported
+  vendor (Brave, OpenRouter, OpenAI, Perplexity, Anthropic, xAI) and enter its
+  API key manually. The key is stored in the credential store, not in settings
+  JSON. An optional model/preset override can be set per vendor.
+
+Recommended workflow: `web_search` → pick URLs → `web_fetch`.
 
 ## MCP tools
 
