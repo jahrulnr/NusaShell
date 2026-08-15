@@ -41,7 +41,7 @@ func TestHandleProvidersDeleteRemovesAccountCredentials(t *testing.T) {
 		"prov:account:acc2": "tok2",
 		"other":             "keep",
 	}}
-	app := &App{Providers: provs, Credentials: creds, Logs: &fakeLogStore{}}
+	app := &App{Providers: provs, Credentials: creds, Logs: &fakeLogStore{}, Bus: NewBus()}
 
 	resp, rpcErr := app.handleProvidersDelete(contracts.ProviderIDRequest{ID: "prov"})
 	if rpcErr != nil {
@@ -61,7 +61,7 @@ func TestHandleProvidersDeleteRemovesAccountCredentials(t *testing.T) {
 }
 
 func TestApplyUsageToCircuitKeepsOpenWithoutResetAt(t *testing.T) {
-	app := &App{CodexRouter: NewCodexAccountRouter(), Logs: &fakeLogStore{}}
+	app := &App{CodexRouter: NewCodexAccountRouter(), Logs: &fakeLogStore{}, Bus: NewBus()}
 	until := time.Now().Add(time.Hour)
 	app.CodexRouter.MarkCircuitOpen("acc1", until)
 
@@ -74,7 +74,7 @@ func TestApplyUsageToCircuitKeepsOpenWithoutResetAt(t *testing.T) {
 }
 
 func TestApplyUsageToCircuitClosesWhenLimitCleared(t *testing.T) {
-	app := &App{CodexRouter: NewCodexAccountRouter(), Logs: &fakeLogStore{}}
+	app := &App{CodexRouter: NewCodexAccountRouter(), Logs: &fakeLogStore{}, Bus: NewBus()}
 	app.CodexRouter.MarkCircuitOpen("acc1", time.Now().Add(time.Hour))
 
 	app.applyUsageToCircuit("acc1", CodexUsageResult{LimitReached: false})
