@@ -86,20 +86,82 @@ func (g *LearningGraphService) InvalidateEdge(id string) error {
 }
 
 // Neighbors returns valid edges from the given node, optionally filtered by
-// edge type. Only edges with InvalidAt == nil are returned.
+// edge type. Only edges with InvalidAt == nil are returned. Checks both
+// SourceID and TargetID so the graph is treated as undirected for traversal.
 func (g *LearningGraphService) Neighbors(nodeID string, edgeType domain.LearningEdgeType) []*domain.LearningEdge {
 	var out []*domain.LearningEdge
 	for _, e := range g.edges.List() {
 		if e.InvalidAt != nil {
 			continue
 		}
-		if e.SourceID != nodeID {
+		if e.SourceID != nodeID && e.TargetID != nodeID {
 			continue
 		}
 		if edgeType != "" && e.Type != edgeType {
 			continue
 		}
 		out = append(out, e)
+	}
+	return out
+}
+
+// NeighborIDs returns the IDs of nodes adjacent to nodeID (undirected),
+// optionally filtered by edge type. Excludes nodeID itself.
+func (g *LearningGraphService) NeighborIDs(nodeID string, edgeType domain.LearningEdgeType) []string {
+	seen := map[string]bool{nodeID: true}
+	var out []string
+	for _, e := range g.edges.List() {
+		if e.InvalidAt != nil {
+			continue
+		}
+		if edgeType != "" && e.Type != edgeType {
+			continue
+		}
+		var other string
+		if e.SourceID == nodeID {
+			other = e.TargetID
+		} else if e.TargetID == nodeID {
+			other = e.SourceID
+		} else {
+			continue
+		}
+		if !seen[other] {
+			seen[other] = true
+			out = append(out, other)
+		}
+	}
+	return out
+}
+
+// BFS expands from seed node IDs up to maxHops, returning all reachable
+// node IDs (excluding the seeds themselves). Used as a graph search
+// channel: seeds from BM25/embedding matches are expanded 2 hops to
+// find related-but-lexically-different entries.
+func (g *LearningGraphService) BFS(seeds []string, maxHops int) []string {
+	if maxHops <= 0 || len(seeds) == 0 {
+		return nil
+	}
+	visited := make(map[string]bool, len(seeds))
+	for _, s := range seeds {
+		visited[s] = true
+	}
+	frontier := seeds
+	var out []string
+	for hop := 0; hop < maxHops; hop++ {
+		var next []string
+		for _, node := range frontier {
+			for _, n := range g.NeighborIDs(node, "") {
+				if !visited[n] {
+					visited[n] = true
+					out = append(out, n)
+					next = append(next, n)
+				}
+			}
+		}
+		frontier = next
+		if len(frontier) == 0 {
+			break
+		}
 	}
 	return out
 }
@@ -112,6 +174,12 @@ func (g *LearningGraphService) AllEdges() []*domain.LearningEdge {
 // DeleteEdge permanently removes an edge from the store.
 func (g *LearningGraphService) DeleteEdge(id string) error {
 	return g.edges.Delete(id)
+}
+
+// SaveEdge updates an existing edge in the store. Used by consolidation
+// to rewire edges when merging near-duplicate entries.
+func (g *LearningGraphService) SaveEdge(e *domain.LearningEdge) error {
+	return g.edges.Save(e)
 }
 
 // replaceEdge rewrites an edge by deleting and re-saving it. The JSONL store

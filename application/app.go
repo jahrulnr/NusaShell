@@ -63,6 +63,9 @@ type App struct {
 	// edgeBuilder pre-computes learning edges (similarity + token overlap)
 	// as a background job. Nil if not configured.
 	edgeBuilder *EdgeBuilder
+	// Trajectory records learning layer events to a JSONL log for
+	// debugging and observability. Best-effort — nil = no-op.
+	Trajectory *TrajectoryRecorder
 
 	runsMu  sync.Mutex
 	runs    map[string]*TurnRun
@@ -261,6 +264,7 @@ func NewApp(deps Deps) *App {
 		if cache, err := jsonstore.NewEmbeddingCache(deps.DataDir); err == nil {
 			app.EmbeddingCache = cache
 		}
+		app.Trajectory = NewTrajectoryRecorder(deps.DataDir)
 	}
 	if deps.Memory != nil && deps.Skills != nil {
 		app.edgeBuilder = NewEdgeBuilder(
@@ -288,7 +292,13 @@ func (a *App) learningSearch() *LearningSearcher {
 		st := a.Settings.Get()
 		embed = ResolveEmbedder(a.Providers, a.Credentials, a.EmbedderFactory, st.EmbeddingProviderID)
 	}
-	a.learningSearcher = NewLearningSearcher(a.Skills, a.Memory, embed)
+	// Inline graph init to avoid re-locking learningMu (graph() also locks).
+	if a.graphService == nil {
+		if a.LearningEdges != nil {
+			a.graphService = NewLearningGraphService(a.LearningEdges)
+		}
+	}
+	a.learningSearcher = NewLearningSearcher(a.Skills, a.Memory, embed, a.graphService)
 	return a.learningSearcher
 }
 

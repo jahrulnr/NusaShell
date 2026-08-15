@@ -423,6 +423,13 @@ func (a *App) flushLearningReview(conversationID string) {
 		}
 	}
 	combined := joinMessages(userMsgs) + "\n---\n" + joinMessages(assistantMsgs)
+	if a.Trajectory != nil {
+		a.Trajectory.Record("review", map[string]interface{}{
+			"conversation": conversationID,
+			"user_msgs":    len(userMsgs),
+			"asst_msgs":    len(assistantMsgs),
+		})
+	}
 	a.ReviewTurnAsync(context.Background(), conversationID, combined, combined)
 }
 

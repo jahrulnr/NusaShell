@@ -3,7 +3,7 @@
 # Gates follow the repository verification baseline:
 # gofmt, go test, go test -race, go vet, go build.
 
-.PHONY: all build test race vet fmt check run test-frontend test-frontend-e2e
+.PHONY: all build test race vet fmt check run test-frontend test-frontend-e2e scan-ui-docs
 
 all: check
 
@@ -55,5 +55,10 @@ fmt-check:
 	@echo "gofmt: ok"
 
 ## run: build and start the development server (listens on NUSASHELL_PORT/9999).
-run: build
+run: scan-ui-docs build
 	./bin/nusashell
+
+## scan-ui-docs: regenerate infrastructure/docs/corpus/ui-*.md from ui-map.json.
+## Fails when a data-view lacks a map entry or a mapped control ID is missing from source.
+scan-ui-docs:
+	node scripts/scan-ui-docs.mjs

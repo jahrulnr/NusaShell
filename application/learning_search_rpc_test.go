@@ -130,6 +130,12 @@ type fakeMemoryStore struct {
 
 func (f *fakeMemoryStore) List() []*domain.MemoryEntry { return f.entries }
 func (f *fakeMemoryStore) Save(e *domain.MemoryEntry) error {
+	for i, existing := range f.entries {
+		if existing.ID == e.ID {
+			f.entries[i] = e
+			return nil
+		}
+	}
 	f.entries = append(f.entries, e)
 	return nil
 }

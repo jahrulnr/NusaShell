@@ -5,6 +5,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"nusashell/domain"
 	"nusashell/infrastructure/jsonstore"
@@ -16,23 +17,51 @@ type SearchResult struct {
 	Score float64
 }
 
+// SearchOptions controls hybrid search behavior. Zero value = defaults.
+type SearchOptions struct {
+	// MaxHops is the BFS expansion depth from BM25/embedding matches.
+	// Default 2. Set 0 to disable graph expansion.
+	MaxHops int
+	// ApplyDecay enables temporal decay on fused results. Default true.
+	ApplyDecay *bool
+}
+
+// defaultSearchOptions returns sensible defaults.
+func defaultSearchOptions() SearchOptions {
+	t := true
+	return SearchOptions{MaxHops: 2, ApplyDecay: &t}
+}
+
 // LearningSearcher provides hybrid search over skills and memory entries.
 // It combines in-memory BM25 (keyword) with optional embedding cosine
-// similarity (semantic), fused via Reciprocal Rank Fusion. When no
-// Embedder is configured, it falls back to BM25-only.
+// similarity (semantic) and graph BFS expansion, fused via Reciprocal
+// Rank Fusion. Temporal decay is applied to fused results to boost
+// recently-used entries. When no Embedder is configured, it falls back
+// to BM25 + graph only.
 type LearningSearcher struct {
 	skills SkillStore
 	memory MemoryStore
 	embed  Embedder // nil = BM25-only
+	graph  *LearningGraphService
 }
 
-// NewLearningSearcher creates a searcher. embed may be nil for BM25-only.
-func NewLearningSearcher(skills SkillStore, memory MemoryStore, embed Embedder) *LearningSearcher {
-	return &LearningSearcher{skills: skills, memory: memory, embed: embed}
+// NewLearningSearcher creates a searcher. embed and graph may be nil
+// for BM25-only search.
+func NewLearningSearcher(skills SkillStore, memory MemoryStore, embed Embedder, graph *LearningGraphService) *LearningSearcher {
+	return &LearningSearcher{skills: skills, memory: memory, embed: embed, graph: graph}
 }
 
 // SearchSkills searches the skill library. Returns ranked results.
 func (s *LearningSearcher) SearchSkills(ctx context.Context, query string, topK int) ([]SearchResult, error) {
+	return s.searchSkillsWithOpts(ctx, query, topK, defaultSearchOptions())
+}
+
+// SearchSkillsWithOpts searches with custom options (e.g. disable graph BFS).
+func (s *LearningSearcher) SearchSkillsWithOpts(ctx context.Context, query string, topK int, opts SearchOptions) ([]SearchResult, error) {
+	return s.searchSkillsWithOpts(ctx, query, topK, opts)
+}
+
+func (s *LearningSearcher) searchSkillsWithOpts(ctx context.Context, query string, topK int, opts SearchOptions) ([]SearchResult, error) {
 	if topK <= 0 {
 		topK = 10
 	}
@@ -65,8 +94,26 @@ func (s *LearningSearcher) SearchSkills(ctx context.Context, query string, topK 
 		}
 	}
 
+	// Channel 3: Graph BFS expansion from BM25/embedding seeds.
+	// Finds related skills that don't lexically match the query.
+	if s.graph != nil && opts.MaxHops > 0 {
+		seeds := collectSeeds(lists)
+		if len(seeds) > 0 {
+			expanded := s.graph.BFS(seeds, opts.MaxHops)
+			if len(expanded) > 0 {
+				lists = append(lists, expanded)
+			}
+		}
+	}
+
 	// Fuse via RRF
 	fused := fuseRRF(lists, 60, topK)
+
+	// Apply temporal decay (recency boost) if enabled
+	if opts.ApplyDecay == nil || *opts.ApplyDecay {
+		fused = s.applyTemporalDecay(fused, skills, nil)
+	}
+
 	out := make([]SearchResult, len(fused))
 	for i, f := range fused {
 		out[i] = SearchResult{ID: f.ID, Score: f.Score}
@@ -76,6 +123,15 @@ func (s *LearningSearcher) SearchSkills(ctx context.Context, query string, topK 
 
 // SearchMemory searches the memory library. Returns ranked results.
 func (s *LearningSearcher) SearchMemory(ctx context.Context, query string, topK int) ([]SearchResult, error) {
+	return s.searchMemoryWithOpts(ctx, query, topK, defaultSearchOptions())
+}
+
+// SearchMemoryWithOpts searches with custom options.
+func (s *LearningSearcher) SearchMemoryWithOpts(ctx context.Context, query string, topK int, opts SearchOptions) ([]SearchResult, error) {
+	return s.searchMemoryWithOpts(ctx, query, topK, opts)
+}
+
+func (s *LearningSearcher) searchMemoryWithOpts(ctx context.Context, query string, topK int, opts SearchOptions) ([]SearchResult, error) {
 	if topK <= 0 {
 		topK = 10
 	}
@@ -108,13 +164,95 @@ func (s *LearningSearcher) SearchMemory(ctx context.Context, query string, topK 
 		}
 	}
 
+	// Channel 3: Graph BFS expansion
+	if s.graph != nil && opts.MaxHops > 0 {
+		seeds := collectSeeds(lists)
+		if len(seeds) > 0 {
+			expanded := s.graph.BFS(seeds, opts.MaxHops)
+			if len(expanded) > 0 {
+				lists = append(lists, expanded)
+			}
+		}
+	}
+
 	// Fuse via RRF
 	fused := fuseRRF(lists, 60, topK)
+
+	// Apply temporal decay
+	if opts.ApplyDecay == nil || *opts.ApplyDecay {
+		fused = s.applyTemporalDecay(fused, nil, entries)
+	}
+
 	out := make([]SearchResult, len(fused))
 	for i, f := range fused {
 		out[i] = SearchResult{ID: f.ID, Score: f.Score}
 	}
 	return out, nil
+}
+
+// collectSeeds deduplicates IDs from all ranked lists for BFS seeding.
+func collectSeeds(lists [][]string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, list := range lists {
+		for _, id := range list {
+			if !seen[id] {
+				seen[id] = true
+				out = append(out, id)
+			}
+		}
+	}
+	return out
+}
+
+// applyTemporalDecay applies a recency boost to fused results. Entries
+// accessed or created more recently get a small score bump. The decay
+// function is: score *= (1 + decayFactor * recencyWeight) where
+// recencyWeight is 1.0 for entries accessed today, decaying to 0 over
+// 30 days. This mirrors memex's temporal decay multiplier.
+func (s *LearningSearcher) applyTemporalDecay(fused []rrfResult, skills []*domain.Skill, memories []*domain.MemoryEntry) []rrfResult {
+	if len(fused) == 0 {
+		return fused
+	}
+	now := time.Now()
+	halfLifeDays := 30.0 // 30-day half-life
+	decayFactor := 0.15  // max 15% boost
+
+	// Build lookup maps
+	skillMap := make(map[string]*domain.Skill, len(skills))
+	for _, sk := range skills {
+		skillMap[sk.ID] = sk
+	}
+	memMap := make(map[string]*domain.MemoryEntry, len(memories))
+	for _, m := range memories {
+		memMap[m.ID] = m
+	}
+
+	for i := range fused {
+		var lastUsed time.Time
+		if sk, ok := skillMap[fused[i].ID]; ok {
+			lastUsed = sk.LastUsedAt
+			if lastUsed.IsZero() {
+				lastUsed = sk.UpdatedAt
+			}
+		} else if m, ok := memMap[fused[i].ID]; ok {
+			lastUsed = m.CreatedAt
+		}
+		if lastUsed.IsZero() {
+			continue
+		}
+		daysSince := now.Sub(lastUsed).Hours() / 24
+		if daysSince < 0 {
+			daysSince = 0
+		}
+		// Exponential decay: weight = 0.5^(days / halfLife)
+		recencyWeight := math.Pow(0.5, daysSince/halfLifeDays)
+		fused[i].Score *= 1.0 + decayFactor*recencyWeight
+	}
+
+	// Re-sort after decay adjustment
+	sort.Slice(fused, func(i, j int) bool { return fused[i].Score > fused[j].Score })
+	return fused
 }
 
 // embeddingSearch embeds the query and all docs, computes cosine similarity,

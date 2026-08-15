@@ -356,6 +356,14 @@ func (a *App) handleLearningSearch(req contracts.LearningSearchRequest) (any, *c
 	if len(items) > limit {
 		items = items[:limit]
 	}
+	if a.Trajectory != nil {
+		a.Trajectory.Record("search", map[string]interface{}{
+			"query":  query,
+			"kind":   kind,
+			"limit":  limit,
+			"result": len(items),
+		})
+	}
 	return contracts.LearningSearchResult{Items: items}, nil
 }
 
@@ -417,6 +425,12 @@ func (a *App) handleLearningGraph() (any, *contracts.RPCError) {
 		}
 	}
 
+	if a.Trajectory != nil {
+		a.Trajectory.Record("graph_load", map[string]interface{}{
+			"nodes": len(nodes),
+			"edges": len(edges),
+		})
+	}
 	return contracts.LearningGraphResult{Nodes: nodes, Edges: edges}, nil
 }
 
