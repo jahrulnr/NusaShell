@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	maxProviderAttempts = 3
+	maxProviderAttempts = 5
 	retryBaseDelay      = 250 * time.Millisecond
 	retryMaxDelay       = 4 * time.Second
 	// retryAfterCutoff is the maximum Retry-After the agent will honor. If a

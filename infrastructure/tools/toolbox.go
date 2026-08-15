@@ -17,6 +17,8 @@ import (
 	"github.com/jahrulnr/searchwire"
 )
 
+func ptrBool(v bool) *bool { return &v }
+
 type Toolbox struct {
 	Skills      application.SkillStore
 	Memory      application.MemoryStore
@@ -50,20 +52,31 @@ func (t *Toolbox) webAnswerSearcher() *searchwire.Searcher {
 		return nil
 	}
 	model := strings.TrimSpace(s.WebAnswerModel)
-	cfg := searchwire.Config{Timeout: 120 * time.Second}
+	disabled := false
+	cfg := searchwire.Config{
+		Timeout: 120 * time.Second,
+		// Explicitly disable all answer providers so env var fallback
+		// (e.g. OPENROUTER_API_KEY) doesn't silently enable a provider
+		// the user didn't select in Settings.
+		OpenRouter: searchwire.OpenRouterConfig{Enabled: &disabled},
+		OpenAI:     searchwire.OpenAIConfig{Enabled: &disabled},
+		Perplexity: searchwire.PerplexityConfig{Enabled: &disabled},
+		Anthropic:  searchwire.AnthropicConfig{Enabled: &disabled},
+		XAI:        searchwire.XAIConfig{Enabled: &disabled},
+	}
 	switch provider {
 	case "brave":
 		cfg.Brave = searchwire.BraveConfig{APIKey: key}
 	case "openrouter":
-		cfg.OpenRouter = searchwire.OpenRouterConfig{APIKey: key, Model: model}
+		cfg.OpenRouter = searchwire.OpenRouterConfig{Enabled: ptrBool(true), APIKey: key, Model: model}
 	case "openai":
-		cfg.OpenAI = searchwire.OpenAIConfig{APIKey: key, Model: model}
+		cfg.OpenAI = searchwire.OpenAIConfig{Enabled: ptrBool(true), APIKey: key, Model: model}
 	case "perplexity":
-		cfg.Perplexity = searchwire.PerplexityConfig{APIKey: key, Preset: model}
+		cfg.Perplexity = searchwire.PerplexityConfig{Enabled: ptrBool(true), APIKey: key, Preset: model}
 	case "anthropic":
-		cfg.Anthropic = searchwire.AnthropicConfig{APIKey: key, Model: model}
+		cfg.Anthropic = searchwire.AnthropicConfig{Enabled: ptrBool(true), APIKey: key, Model: model}
 	case "xai":
-		cfg.XAI = searchwire.XAIConfig{APIKey: key, Model: model}
+		cfg.XAI = searchwire.XAIConfig{Enabled: ptrBool(true), APIKey: key, Model: model}
 	default:
 		return nil
 	}

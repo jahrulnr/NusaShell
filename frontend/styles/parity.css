@@ -324,8 +324,8 @@ summary { outline: none; }
 .view-header p { color: var(--text-dim); font: 400 11px/1.45 var(--font-mono); }
 .view-kicker { color: var(--accent); font-family: var(--font-mono); letter-spacing: .14em; }
 
-/* Agent: Electron's flat graphite conversation workspace. */
-.view.active.agent-view { background: #101310; border: 0; border-radius: 0; }
+/* Agent: Electron's flat dark conversation workspace. */
+.view.active.agent-view { background: #090e16; border: 0; border-radius: 0; }
 .agent-shell {
   grid-template-columns: 234px minmax(0, 1fr);
   width: 100%;
@@ -333,57 +333,19 @@ summary { outline: none; }
   margin: 0;
   border: 0;
   border-radius: 0;
-  background: #101310;
+  background: #090e16;
 }
 .agent-conversations {
   border-right-color: #373c37;
   border-bottom: 0;
   padding: 17px 13px;
-  background: #101310;
+  background: #0b0f17;
 }
-.agent-conversation {
-  position: relative;
-  background: #101310;
-}
-.agent-thread { padding: 24px clamp(36px, 6vw, 76px) 16px; gap: 18px; background: transparent; }
 .agent-conversation-item:hover { background-color: rgba(255, 255, 255, .025); }
 .agent-conversation-item.is-active {
   border-color: var(--accent-border);
   background: var(--accent-soft);
 }
-.agent-message { max-width: min(100%, 760px); }
-.agent-message.assistant .agent-bubble { padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--text); }
-.agent-message.user .agent-bubble {
-  border-color: var(--border-strong);
-  background: #232723;
-  color: var(--text);
-  font-weight: 400;
-}
-.agent-message.assistant .agent-bubble { color: var(--text); }
-.agent-composer-stack {
-  flex: none;
-  align-self: center;
-  width: min(800px, calc(100% - 54px));
-  margin: 0 auto 14px;
-  overflow: hidden;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-lg);
-  background: #191c19;
-}
-.agent-composer {
-  width: 100%;
-  padding: 12px 14px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
-.agent-composer textarea { min-height: 44px; padding: 8px 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
-.agent-composer textarea:focus { border: 0; box-shadow: none; }
-.agent-composer-footer { margin-top: 6px; }
-.agent-tool-job-strip { border: 0; padding: 0; background: transparent; }
-.agent-tool-job-strip-head { display: none; }
-.agent-tool-job-strip#tool-job-strip { border-bottom: 1px solid var(--border-soft); }
-.agent-tool-job-strip#tool-job-strip .agent-tool-job-list { padding: 10px 14px; }
 .agent-tool-stack {
   display: grid;
   gap: 2px;
@@ -423,6 +385,7 @@ summary { outline: none; }
 .agent-tool-terminal.is-success .agent-tool-terminal-prompt { border-color: rgba(85, 217, 150, .35); color: #66d59c; }
 .agent-tool-terminal.is-error .agent-tool-terminal-prompt { border-color: rgba(245, 91, 104, .4); color: #ff8f99; }
 .agent-tool-terminal-title { overflow: hidden; color: #aab7c7; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.agent-tool-terminal-badge { flex-shrink: 0; color: #5b8db8; font: 8px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .06em; border: 1px solid rgba(91, 141, 184, .3); border-radius: 4px; padding: 2px 4px; }
 .agent-tool-terminal-meta { min-width: 0; max-width: 100%; overflow: hidden; color: #688079; font: 9px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .agent-tool-terminal.is-error .agent-tool-terminal-meta { color: #d68d94; }
 .agent-tool-terminal.is-running .agent-tool-terminal-meta { color: #7ab5d9; }
@@ -544,8 +507,8 @@ summary { outline: none; }
   .view.active.mcp-view { border-radius: var(--radius-sm); }
   .agent-shell { grid-template-columns: 1fr; }
   .agent-conversations { display: none; }
-  .agent-thread { padding: 24px; }
-  .agent-composer-stack { width: calc(100% - 16px); margin-bottom: 8px; }
+  .agent-thread { padding: 16px; }
+  .agent-composer-stack { margin-inline: 14px; }
   .skills-workspace { grid-template-columns: 1fr; overflow: visible; }
   .skills-catalog { max-height: 300px; border-right: 0; border-bottom: 1px solid var(--border); }
   .skills-editor-pane { min-height: 420px; }

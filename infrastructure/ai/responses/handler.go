@@ -338,7 +338,11 @@ func (r *Adapter) Stream(ctx context.Context, req application.ChatRequest, onDel
 			if frame.Response != nil && frame.Response.Error != nil {
 				msg = frame.Response.Error.Message
 			}
-			streamErr = fmt.Errorf("%s", msg)
+			streamErr = &application.UpstreamError{
+				Kind:      application.KindSSETransport,
+				Temporary: true,
+				Err:       fmt.Errorf("%s", msg),
+			}
 			return streamErr
 		}
 		return nil
@@ -368,6 +372,18 @@ func (r *Adapter) Stream(ctx context.Context, req application.ChatRequest, onDel
 			return aiutil.StreamFallbackToComplete(ctx, r, req, onDelta, onReasoning)
 		}
 		return result, emptyErr
+	}
+	// Stream completed but produced no content, reasoning, or tool calls.
+	// This happens with unstable upstream gateways (e.g. AGY/OmniRoute
+	// proxying to Gemini) that return a 200 with an empty body. Treat it
+	// as a retryable transport error so the agent retry loop can re-request
+	// instead of failing the turn immediately.
+	if result.Content == "" && result.Reasoning == "" && len(result.ToolCalls) == 0 {
+		return result, &application.UpstreamError{
+			Kind:      application.KindSSETransport,
+			Temporary: true,
+			Err:       fmt.Errorf("provider returned empty content"),
+		}
 	}
 	return result, nil
 }

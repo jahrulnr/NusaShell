@@ -646,6 +646,9 @@ func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *do
 	}
 
 	toCompact := c.Messages[:splitIdx]
+	// Strip hydration checkpoints from the compaction input — they are
+	// synthetic runtime snapshots, not durable conversation content.
+	toCompact = filterHydrationDomainMessages(toCompact)
 	runningSummary := c.Summary
 
 	// Available token budget per pass for message content.
@@ -926,6 +929,29 @@ func modelSupportsVision(provider *domain.Provider, model string) bool {
 		return true
 	}
 	return m.Vision
+}
+
+// filterHydrationDomainMessages strips hydration checkpoint messages (pure
+// hydration tool calls, no content/reasoning) from a domain.Message slice.
+// Used by compaction to exclude synthetic runtime snapshots from summaries.
+func filterHydrationDomainMessages(msgs []domain.Message) []domain.Message {
+	out := make([]domain.Message, 0, len(msgs))
+	for _, m := range msgs {
+		if len(m.ToolCalls) > 0 && m.Content == "" && m.Reasoning == "" {
+			allHydration := true
+			for _, tc := range m.ToolCalls {
+				if !domain.IsHydrationCallID(tc.ID) {
+					allHydration = false
+					break
+				}
+			}
+			if allHydration {
+				continue
+			}
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 func chatMessages(c *domain.Conversation, pendingMsgID string, supportsVision bool) []ChatMessage {

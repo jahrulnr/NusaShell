@@ -3,7 +3,7 @@ module nusashell
 go 1.26.5
 
 require (
-	github.com/jahrulnr/searchwire v0.0.0-20260815193458-61a4a7d3e695
+	github.com/jahrulnr/searchwire v0.0.0-20260815212041-8dcb6fbafb70
 	github.com/mark3labs/mcp-go v0.58.0
 	github.com/ncruces/zenity v0.10.15
 	modernc.org/sqlite v1.56.0

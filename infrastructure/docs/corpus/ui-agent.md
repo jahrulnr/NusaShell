@@ -67,8 +67,22 @@ Shows in-flight tool calls for the current turn, with one entry per MCP or built
 
 - **Tool calls strip** (`#tool-job-strip`):
   - Section: Agent
-  - Type: list
+  - Type: container
   - Notes: In-flight tool calls for the current turn.
+
+- **Tool calls toggle** (`#tool-job-strip-toggle`):
+  - Section: Agent
+  - Type: button
+  - Action: Collapse/expand the tool calls list.
+  - Notes: Default collapsed.
+
+- **Tool calls title** (`#tool-job-strip-title`):
+  - Section: Agent
+  - Type: text
+
+- **Tool calls meta** (`#tool-job-strip-meta`):
+  - Section: Agent
+  - Type: text
 
 ## Task checklist
 
@@ -78,9 +92,20 @@ A compact strip showing the agent's todo list for the current conversation. Item
   - Section: Agent
   - Type: container
 
-- **Task summary** (`#agent-todo-strip-summary`):
+- **Task checklist toggle** (`#agent-todo-strip-toggle`):
+  - Section: Agent
+  - Type: button
+  - Action: Collapse/expand the task list.
+  - Notes: Default collapsed.
+
+- **Task count** (`#agent-todo-strip-count`):
   - Section: Agent
   - Type: text
+
+- **Task progress meta** (`#agent-todo-strip-meta`):
+  - Section: Agent
+  - Type: text
+  - Notes: Shows open count or 'All done'.
 
 - **Task list** (`#agent-todo-strip-list`):
   - Section: Agent
@@ -95,6 +120,12 @@ When a user sends a steer message mid-turn, it is queued here and applied at the
   - Section: Agent
   - Type: container
   - Notes: Queued steer messages waiting for a safe boundary.
+
+- **Steer queue toggle** (`#agent-steer-queue-toggle`):
+  - Section: Agent
+  - Type: button
+  - Action: Collapse/expand the steer queue.
+  - Notes: Default expanded.
 
 - **Steer queue title** (`#agent-steer-queue-title`):
   - Section: Agent

@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
 const html = await readFile(new URL('./index.html', import.meta.url), 'utf8');
-const parityCSS = await readFile(new URL('./styles/electron-parity.css', import.meta.url), 'utf8');
+const parityCSS = await readFile(new URL('./styles/parity.css', import.meta.url), 'utf8');
 const agentView = await readFile(new URL('./js/views/agent.js', import.meta.url), 'utf8');
 const appShell = await readFile(new URL('./js/app.js', import.meta.url), 'utf8');
 const agentRender = await readFile(new URL('./js/views/agent/render.js', import.meta.url), 'utf8');

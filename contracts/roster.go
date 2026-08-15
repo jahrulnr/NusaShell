@@ -146,19 +146,20 @@ type MessageStepDTO struct {
 }
 
 type MessageDTO struct {
-	ID          string           `json:"id"`
-	Role        string           `json:"role"`
-	Content     string           `json:"content"`
-	Reasoning   string           `json:"reasoning,omitempty"`
-	Steps       []MessageStepDTO `json:"steps,omitempty"`
-	Model       string           `json:"model,omitempty"`
-	Usage       *UsageDTO        `json:"usage,omitempty"`
-	CreatedAt   string           `json:"created_at"`
-	Status      string           `json:"status,omitempty"`
-	Error       string           `json:"error,omitempty"`
-	ToolCalls   []ToolCallDTO    `json:"tool_calls,omitempty"`
-	Attachments []AttachmentDTO  `json:"attachments,omitempty"`
-	Steer       bool             `json:"steer,omitempty"`
+	ID             string           `json:"id"`
+	Role           string           `json:"role"`
+	Content        string           `json:"content"`
+	Reasoning      string           `json:"reasoning,omitempty"`
+	Steps          []MessageStepDTO `json:"steps,omitempty"`
+	Model          string           `json:"model,omitempty"`
+	Usage          *UsageDTO        `json:"usage,omitempty"`
+	CreatedAt      string           `json:"created_at"`
+	Status         string           `json:"status,omitempty"`
+	Error          string           `json:"error,omitempty"`
+	ToolCalls      []ToolCallDTO    `json:"tool_calls,omitempty"`
+	Attachments    []AttachmentDTO  `json:"attachments,omitempty"`
+	Steer          bool             `json:"steer,omitempty"`
+	ContextUpdated bool             `json:"context_updated,omitempty"`
 }
 
 type AttachmentDTO struct {

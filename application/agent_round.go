@@ -99,25 +99,38 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 	if continuation {
 		system += "\n\nThe immediately preceding assistant response was interrupted by a transient upstream failure. Continue it from exactly where it stopped. Do not repeat prior text."
 	}
-	messages := chatMessages(conversation, messageID, supportsVision)
-	// Inject the synthetic runtime-hydration transcript (runtime_context,
-	// memory, skill_list, mcp_list, tool_list) as an ephemeral assistant
-	// toolCalls + tool results exchange, placed AFTER the durable history and
-	// BEFORE the model's own output. This gives the model fresh runtime facts
-	// (date, workspace, memory, skills, MCP catalog, tool catalog) without
-	// baking volatile values into the stable system prompt prefix (which would
-	// break prompt-cache hits). The transcript is never persisted in the
-	// conversation store.
+	// Persist the synthetic runtime-hydration transcript (runtime_context,
+	// memory, skill_list, mcp_list, tool_list, todo_list) to the conversation
+	// store as an assistant message with hydration tool calls + matching tool
+	// results. Persisting (rather than injecting ephemerally) keeps the
+	// message-list prefix stable across tool rounds, so the provider can
+	// reuse prompt-cache hits from round 1 on round 2+.
 	//
-	// Hydration is injected exactly once per user message: on the first round
+	// Hydration is persisted exactly once per user message: on the first round
 	// of a turn (after the initial user message or post-compaction), and once
-	// more when a steer is applied (a new user message mid-turn). Re-injecting
-	// every tool round causes smaller models to misinterpret the synthetic
-	// tool calls as a pattern to repeat ("call all tools in parallel every
-	// round"), leading to redundant parallel tool calls.
-	if injectHydration {
-		messages = append(messages, a.buildHydration(conversation)...)
+	// more when a steer is applied (a new user message mid-turn). If a
+	// hydration checkpoint already exists in the history (e.g. from a prior
+	// round of the same turn), it is reused as-is. Re-injecting every tool
+	// round causes smaller models to misinterpret the synthetic tool calls as
+	// a pattern to repeat ("call all tools in parallel every round"), leading
+	// to redundant parallel tool calls.
+	//
+	// The hydration messages are marked with the "hydrate-" tool call ID
+	// prefix so the UI can filter them out of the visible conversation and
+	// compaction can strip them before summarization.
+	if injectHydration && !HasHydration(chatMessages(conversation, messageID, supportsVision)) {
+		hydrationMsgs := a.buildHydration(conversation)
+		conversation = a.persistHydration(conversation, hydrationMsgs)
+		// Mark the assistant message for this turn so the UI can show a
+		// "context updated" badge — the hydration checkpoint was freshly
+		// persisted, meaning runtime facts (date, memory, skills, MCP, tools)
+		// were refreshed for this turn.
+		a.updateMessage(conversation, messageID, func(message *domain.Message) {
+			message.ContextUpdated = true
+		})
+		_ = a.Conversations.Save(conversation)
 	}
+	messages := chatMessages(conversation, messageID, supportsVision)
 	response, err := adapter.Stream(run.Ctx, ChatRequest{
 		Model:            model,
 		System:           system,
@@ -164,11 +177,50 @@ func buildPromptCachePolicy(settings domain.Settings, providerID, model, convers
 	}
 }
 
+// persistHydration appends the synthetic hydration messages (assistant
+// toolCalls + matching tool results) to the conversation store and saves.
+// The messages are marked with the "hydrate-" tool call ID prefix so the UI
+// can filter them out and compaction can strip them before summarization.
+// Returns the updated conversation.
+func (a *App) persistHydration(c *domain.Conversation, msgs []ChatMessage) *domain.Conversation {
+	if len(msgs) == 0 {
+		return c
+	}
+	// The first message is the assistant message with hydration tool calls.
+	// Subsequent messages are the tool results.
+	for _, m := range msgs {
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+			hydMsg := domain.Message{
+				ID:        domain.NewID("msg"),
+				Role:      domain.RoleAssistant,
+				ToolCalls: m.ToolCalls,
+				Status:    domain.StatusDone,
+				CreatedAt: time.Now().UTC(),
+			}
+			c.Messages = append(c.Messages, hydMsg)
+		} else if m.Role == "tool" && m.ToolResult != nil {
+			// Attach tool results to the last assistant message's tool calls.
+			for i := len(c.Messages) - 1; i >= 0; i-- {
+				if c.Messages[i].Role == domain.RoleAssistant && len(c.Messages[i].ToolCalls) > 0 {
+					for j := range c.Messages[i].ToolCalls {
+						if c.Messages[i].ToolCalls[j].ID == m.ToolResult.ToolCallID {
+							c.Messages[i].ToolCalls[j].Output = m.ToolResult.Content
+							break
+						}
+					}
+					break
+				}
+			}
+		}
+	}
+	_ = a.Conversations.Save(c)
+	return c
+}
+
 // buildHydration assembles the synthetic runtime-hydration transcript from the
-// App's read-only stores. The transcript is ephemeral — never persisted in the
-// conversation — and is rebuilt fresh for each provider request so runtime
-// facts (date, workspace, memory, skills, MCP catalog, tool catalog) stay
-// current.
+// App's read-only stores. The transcript is rebuilt fresh for each provider
+// request so runtime facts (date, workspace, memory, skills, MCP catalog,
+// tool catalog) stay current.
 func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
 	source := HydrationSource{
 		RuntimeContext: DefaultRuntimeContext(c.Workspace),

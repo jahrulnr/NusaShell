@@ -6,6 +6,7 @@ import { renderMarkdown } from '../markdown.js';
 import { estimateContextTokens, formatContextUsage, effectiveContextWindow } from '../agent-ui.js';
 import { bindComposer, updateSendAvailability } from './agent/composer.js';
 import { bindModelPicker } from './agent/model-picker.js';
+import { bindRoomInfo, updateRoomInfo } from './agent/room-info.js';
 import {
   attachmentChip,
   reasoningDisclosure,
@@ -79,6 +80,8 @@ export async function initAgent() {
     selectEffort,
     refreshModels,
   });
+  bindRoomInfo({ getConversation: () => state.conversation });
+  bindStripToggles();
   bindEvents();
   bindScrollPin();
   window.addEventListener('nusashell:preferred-model', (event) => {
@@ -282,6 +285,7 @@ async function openConversation(id) {
   updateModelTrigger();
   updateComposerStatus();
   updateSendAvailability(state);
+  updateRoomInfo(conversation);
 }
 
 // reattachActiveRunFromBackend queries the backend for the active run of the
@@ -404,10 +408,32 @@ async function fetchTodos() {
   }
 }
 
+// bindStripToggles wires the expand/collapse toggle buttons for the todo,
+// tool-job, and steer-queue strips. Default is collapsed (list hidden).
+// The toggle flips aria-expanded and shows/hides the list element.
+function bindStripToggles() {
+  const pairs = [
+    { toggleId: 'agent-todo-strip-toggle', listId: 'agent-todo-strip-list' },
+    { toggleId: 'tool-job-strip-toggle', listId: 'tool-job-list' },
+    { toggleId: 'agent-steer-queue-toggle', listId: 'agent-steer-queue-list' },
+  ];
+  for (const { toggleId, listId } of pairs) {
+    const toggle = document.getElementById(toggleId);
+    const list = document.getElementById(listId);
+    if (!toggle || !list) continue;
+    toggle.addEventListener('click', () => {
+      const open = toggle.getAttribute('aria-expanded') === 'true';
+      toggle.setAttribute('aria-expanded', String(!open));
+      list.hidden = open;
+    });
+  }
+}
+
 // renderTodoStrip renders the todo checklist strip from state.todos. It is
 // idempotent — safe to call multiple times. The strip is hidden when there
 // are no items. Each item gets a status glyph and a delete button. Delete
 // buttons are created fresh on each render, so no stale listeners.
+// Default state: collapsed (list hidden), expanded only on user click.
 function renderTodoStrip() {
   const strip = document.getElementById('agent-todo-strip');
   if (!strip) return;
@@ -417,11 +443,14 @@ function renderTodoStrip() {
     return;
   }
   strip.hidden = false;
-  const summaryEl = document.getElementById('agent-todo-strip-summary');
-  if (summaryEl) {
-    const done = summary.completed ?? 0;
-    const total = summary.total ?? items.length;
-    summaryEl.textContent = `${done}/${total} done`;
+  const countEl = document.getElementById('agent-todo-strip-count');
+  const metaEl = document.getElementById('agent-todo-strip-meta');
+  const total = items.length;
+  if (countEl) countEl.textContent = `${total} Task${total === 1 ? '' : 's'}`;
+  if (metaEl) {
+    const incomplete = items.filter((i) => i.status !== 'completed').length;
+    metaEl.textContent = incomplete === 0 ? 'All done' : `${incomplete} open`;
+    metaEl.dataset.done = incomplete === 0 ? 'true' : 'false';
   }
   const list = document.getElementById('agent-todo-strip-list');
   if (!list) return;

@@ -76,7 +76,10 @@
           ],
           "controls": [
             "agent-composer-stack",
-            "tool-job-strip"
+            "tool-job-strip",
+            "tool-job-strip-toggle",
+            "tool-job-strip-title",
+            "tool-job-strip-meta"
           ]
         },
         {
@@ -86,7 +89,9 @@
           ],
           "controls": [
             "agent-todo-strip",
-            "agent-todo-strip-summary",
+            "agent-todo-strip-toggle",
+            "agent-todo-strip-count",
+            "agent-todo-strip-meta",
             "agent-todo-strip-list"
           ]
         },
@@ -97,6 +102,7 @@
           ],
           "controls": [
             "agent-steer-queue",
+            "agent-steer-queue-toggle",
             "agent-steer-queue-title",
             "agent-steer-queue-state",
             "agent-steer-queue-text",
@@ -422,11 +428,17 @@
     "agent-offline-state": { "label": "Offline mascot", "section": "Agent", "type": "status", "notes": "Shown when the backend is unreachable." },
     "agent-thread": { "label": "Thread log", "section": "Agent", "type": "log", "notes": "Renders the active conversation messages." },
     "agent-composer-stack": { "label": "Composer stack", "section": "Agent", "type": "container", "notes": "Holds tool strip, todo strip, steer queue, and composer." },
-    "tool-job-strip": { "label": "Tool calls strip", "section": "Agent", "type": "list", "notes": "In-flight tool calls for the current turn." },
+    "tool-job-strip": { "label": "Tool calls strip", "section": "Agent", "type": "container", "notes": "In-flight tool calls for the current turn." },
+    "tool-job-strip-toggle": { "label": "Tool calls toggle", "section": "Agent", "type": "button", "action": "Collapse/expand the tool calls list.", "notes": "Default collapsed." },
+    "tool-job-strip-title": { "label": "Tool calls title", "section": "Agent", "type": "text" },
+    "tool-job-strip-meta": { "label": "Tool calls meta", "section": "Agent", "type": "text" },
     "agent-todo-strip": { "label": "Task checklist strip", "section": "Agent", "type": "container" },
-    "agent-todo-strip-summary": { "label": "Task summary", "section": "Agent", "type": "text" },
+    "agent-todo-strip-toggle": { "label": "Task checklist toggle", "section": "Agent", "type": "button", "action": "Collapse/expand the task list.", "notes": "Default collapsed." },
+    "agent-todo-strip-count": { "label": "Task count", "section": "Agent", "type": "text" },
+    "agent-todo-strip-meta": { "label": "Task progress meta", "section": "Agent", "type": "text", "notes": "Shows open count or 'All done'." },
     "agent-todo-strip-list": { "label": "Task list", "section": "Agent", "type": "list", "notes": "Items come from the `todo` tool; user-deleted items disappear." },
     "agent-steer-queue": { "label": "Steer queue", "section": "Agent", "type": "container", "notes": "Queued steer messages waiting for a safe boundary." },
+    "agent-steer-queue-toggle": { "label": "Steer queue toggle", "section": "Agent", "type": "button", "action": "Collapse/expand the steer queue.", "notes": "Default expanded." },
     "agent-steer-queue-title": { "label": "Steer queue title", "section": "Agent", "type": "text" },
     "agent-steer-queue-state": { "label": "Steer queue state", "section": "Agent", "type": "text" },
     "agent-steer-queue-text": { "label": "Steer queue text", "section": "Agent", "type": "text" },

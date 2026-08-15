@@ -392,6 +392,15 @@ func (a *Adapter) Stream(ctx context.Context, req application.ChatRequest, onDel
 		}
 		return result, emptyErr
 	}
+	// Stream completed but produced no content, reasoning, or tool calls.
+	// Treat as retryable so unstable upstream gateways get retried.
+	if result.Content == "" && result.Reasoning == "" && len(result.ToolCalls) == 0 {
+		return result, &application.UpstreamError{
+			Kind:      application.KindSSETransport,
+			Temporary: true,
+			Err:       fmt.Errorf("provider returned empty content"),
+		}
+	}
 	return result, nil
 }
 

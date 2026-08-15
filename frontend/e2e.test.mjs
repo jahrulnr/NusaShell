@@ -680,9 +680,11 @@ test('HYDR-NEW-ROOM: first turn of a new conversation injects the hydration tran
       `HYDR-NEW-ROOM: memory slot must contain the seeded entry, got: ${memResult.content}`,
     );
 
-    // The hydration transcript must NOT be persisted in the conversation.
+    // The hydration transcript is persisted to the conversation store for
+    // prompt-cache stability but must be hidden from the UI (filtered out
+    // of the conversations.get response).
     const gotten = await rpcModule.rpc('agent.conversations.get', { id: convID });
-    const persistedHydration = findHydration(
+    const visibleHydration = findHydration(
       (gotten.messages || []).map((m) => ({
         role: m.role,
         tool_calls: m.tool_calls,
@@ -690,8 +692,8 @@ test('HYDR-NEW-ROOM: first turn of a new conversation injects the hydration tran
       })),
     );
     assert.equal(
-      persistedHydration, null,
-      'HYDR-NEW-ROOM: hydration transcript must be ephemeral — not persisted in the conversation store',
+      visibleHydration, null,
+      'HYDR-NEW-ROOM: hydration transcript must be hidden from the UI (not present in conversations.get response)',
     );
   } catch (error) {
     throw new Error(`${error.message}\nGo server output:\n${server.output()}`);
@@ -854,9 +856,11 @@ test('HYDR-POST-COMPACTION: turn after compaction re-injects the hydration trans
       `HYDR-POST-COMPACTION: memory slot must contain the seeded entry, got: ${memResult.content}`,
     );
 
-    // The hydration transcript must NOT be persisted in the conversation.
+    // The hydration transcript is persisted to the conversation store for
+    // prompt-cache stability but must be hidden from the UI (filtered out
+    // of the conversations.get response).
     const gotten = await rpcModule.rpc('agent.conversations.get', { id: convID });
-    const persistedHydration = findHydration(
+    const visibleHydration = findHydration(
       (gotten.messages || []).map((m) => ({
         role: m.role,
         tool_calls: m.tool_calls,
@@ -864,8 +868,8 @@ test('HYDR-POST-COMPACTION: turn after compaction re-injects the hydration trans
       })),
     );
     assert.equal(
-      persistedHydration, null,
-      'HYDR-POST-COMPACTION: hydration transcript must be ephemeral — not persisted in the conversation store',
+      visibleHydration, null,
+      'HYDR-POST-COMPACTION: hydration transcript must be hidden from the UI (not present in conversations.get response)',
     );
   } catch (error) {
     throw new Error(`${error.message}\nGo server output:\n${server.output()}`);

@@ -326,6 +326,17 @@ func (o *Adapter) Stream(ctx context.Context, req application.ChatRequest, onDel
 		}
 		return result, emptyErr
 	}
+	// Stream completed but produced no content, reasoning, or tool calls.
+	// This happens with unstable upstream gateways that return a 200 with
+	// an empty body. Treat it as a retryable transport error so the agent
+	// retry loop can re-request instead of failing the turn immediately.
+	if result.Content == "" && result.Reasoning == "" && len(result.ToolCalls) == 0 {
+		return result, &application.UpstreamError{
+			Kind:      application.KindSSETransport,
+			Temporary: true,
+			Err:       fmt.Errorf("provider returned empty content"),
+		}
+	}
 	return result, nil
 }
 

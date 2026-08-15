@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="styles/logs.css">
 <link rel="stylesheet" href="styles/modals.css">
 <link rel="stylesheet" href="styles/responsive.css">
-<link rel="stylesheet" href="styles/electron-parity.css">
+<link rel="stylesheet" href="styles/parity.css">
 <link rel="stylesheet" href="vendor/slim-select/slimselect.css">
 <link rel="stylesheet" href="vendor/slim-select/nusashell-override.css">
 </head>
@@ -115,6 +115,28 @@
               <span class="agent-offline-note">Your visible conversation stays on this device.</span>
             </section>
 
+            <section class="agent-room-info" id="agent-room-info" aria-label="Conversation diagnostics" hidden>
+              <button class="agent-room-info-trigger" id="agent-room-info-trigger" type="button" aria-label="Room info" aria-expanded="false" aria-controls="agent-room-info-popover" title="Room info">
+                <span class="agent-room-info-trigger-icon" aria-hidden="true">i</span>
+              </button>
+              <div class="agent-room-info-popover" id="agent-room-info-popover" role="dialog" aria-label="Conversation diagnostics" hidden>
+                <div class="agent-room-info-popover-head">
+                  <div>
+                    <span class="agent-room-info-eyebrow">ROOM</span>
+                    <div class="agent-room-info-title" id="agent-room-info-title">Conversation details</div>
+                  </div>
+                  <button class="agent-room-info-close" id="agent-room-info-close" type="button" aria-label="Close conversation diagnostics">×</button>
+                </div>
+                <div class="agent-room-info-metrics" aria-live="polite">
+                  <span class="agent-room-info-metric"><span class="agent-room-info-label">Tools</span><strong id="agent-room-tool-count">0</strong></span>
+                  <span class="agent-room-info-metric"><span class="agent-room-info-label">Compactions</span><strong id="agent-room-compaction-count">0</strong></span>
+                  <button class="agent-room-info-id" id="agent-room-id-copy" type="button" title="Copy conversation ID">
+                    <span class="agent-room-info-label">ID</span><code id="agent-room-id">—</code><span class="agent-room-info-copy" aria-hidden="true">⧉</span>
+                  </button>
+                </div>
+              </div>
+            </section>
+
             <div class="agent-thread" id="agent-thread" role="log" aria-live="off" aria-label="Agent conversation">
               <div class="agent-empty">
                 <div class="agent-empty-mark">✦</div>
@@ -124,26 +146,34 @@
             </div>
 
             <div class="agent-composer-stack" id="agent-composer-stack">
-              <div class="agent-tool-job-strip" id="tool-job-strip" hidden>
+              <div class="agent-tool-job-strip" id="tool-job-strip" hidden aria-label="Background tool runs">
                 <div class="agent-tool-job-strip-head">
-                  <span class="agent-tool-job-strip-title">Tool calls</span>
+                  <button class="agent-tool-job-strip-toggle" id="tool-job-strip-toggle" type="button" aria-label="Tool runs" aria-expanded="false" aria-controls="tool-job-list" title="Collapse/expand tool runs">
+                    <span class="agent-tool-job-strip-chevron" aria-hidden="true">›</span>
+                    <span class="agent-tool-job-strip-title" id="tool-job-strip-title">0 tool runs</span>
+                  </button>
+                  <span class="agent-tool-job-strip-meta" id="tool-job-strip-meta" aria-live="polite" aria-atomic="true"></span>
                 </div>
-                <div class="agent-tool-job-list" id="tool-job-list"></div>
+                <div class="agent-tool-job-list" id="tool-job-list" role="list" aria-live="off" hidden></div>
               </div>
 
-              <section class="agent-todo-strip" id="agent-todo-strip" hidden aria-label="Agent task checklist" aria-live="polite">
+              <section class="agent-todo-strip" id="agent-todo-strip" hidden aria-label="Agent task checklist">
                 <div class="agent-todo-strip-head">
-                  <span class="agent-todo-strip-dot" aria-hidden="true"></span>
-                  <span class="agent-todo-strip-title">Tasks</span>
-                  <span class="agent-todo-strip-summary" id="agent-todo-strip-summary"></span>
+                  <button class="agent-todo-strip-toggle" id="agent-todo-strip-toggle" type="button" aria-label="Task checklist" aria-expanded="false" aria-controls="agent-todo-strip-list" title="Collapse/expand tasks">
+                    <span class="agent-todo-strip-chevron" aria-hidden="true">›</span>
+                    <span class="agent-todo-strip-count" id="agent-todo-strip-count" aria-live="polite" aria-atomic="true">0 Tasks</span>
+                  </button>
+                  <span class="agent-todo-strip-meta" id="agent-todo-strip-meta" aria-live="polite" aria-atomic="true"></span>
                 </div>
-                <ul class="agent-todo-strip-list" id="agent-todo-strip-list" role="list"></ul>
+                <ol class="agent-todo-strip-list" id="agent-todo-strip-list" role="list" hidden></ol>
               </section>
 
               <section class="agent-steer-queue" id="agent-steer-queue" hidden aria-label="Pending steer" aria-live="polite">
-                <div class="agent-steer-queue-head">
-                  <span class="agent-steer-queue-dot" aria-hidden="true"></span>
-                  <span class="agent-steer-queue-title" id="agent-steer-queue-title">1 steer queued</span>
+                <div class="agent-todo-strip-head">
+                  <button class="agent-todo-strip-toggle" id="agent-steer-queue-toggle" type="button" aria-label="Steering queue" aria-expanded="true" aria-controls="agent-steer-queue-list" title="Collapse/expand steering queue">
+                    <span class="agent-todo-strip-chevron" aria-hidden="true">›</span>
+                    <span id="agent-steer-queue-title">1 steer queued</span>
+                  </button>
                   <span class="agent-steer-queue-state" id="agent-steer-queue-state">Waiting for a safe boundary</span>
                 </div>
                 <div class="agent-steer-queue-item" id="agent-steer-queue-list" role="list">
@@ -162,10 +192,13 @@
                     <button class="agent-attach-btn" id="agent-attach-btn" type="button" aria-label="Attach images, PDFs, or text files" title="Attach images, PDFs, or text files">
                       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="m21 11-8.5 8.5a5.25 5.25 0 0 1-7.4-7.4l8.5-8.5a3.5 3.5 0 0 1 4.95 4.95l-8.5 8.5a1.75 1.75 0 0 1-2.48-2.48l8-8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </button>
-                    <button class="agent-model-trigger" id="model-trigger" type="button" title="Choose model" aria-haspopup="dialog" aria-controls="model-menu" aria-expanded="false">
-                      <span id="model-trigger-label">Model · auto</span>
-                      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    </button>
+                    <div class="agent-model-control">
+                      <button class="agent-model-trigger" id="model-trigger" type="button" title="Choose model" aria-haspopup="dialog" aria-controls="model-menu" aria-expanded="false">
+                        <span id="model-trigger-label">Model · auto</span>
+                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                      </button>
+                      <div class="agent-model-menu" id="model-menu" role="dialog" aria-label="Choose model" hidden></div>
+                    </div>
                     <button class="agent-workspace-btn" id="agent-workspace-btn" type="button" aria-label="Choose workspace folder" title="Home (user home directory)">
                       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
                       <span id="agent-workspace-label">Home</span>
@@ -185,8 +218,6 @@
             </div>
           </div>
         </div>
-
-        <div class="agent-model-menu" id="model-menu" role="dialog" aria-label="Choose model" hidden></div>
       </section>
 
       <!-- ===== Skills ===== -->

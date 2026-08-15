@@ -12,7 +12,7 @@
   - Files: `application/ports.go`, `application/agent_runner.go`,
     `infrastructure/ai/`.
 
-- [x] Frontend: Electron-parity composer and conversation shell
+- [x] Frontend: parity composer and conversation shell
   - Acceptance: folder picker, context counter, attachments, and responsive
   conversation UI are usable and correctly labelled.
   - Verify: `node --test frontend/*.test.mjs` and browser smoke check.
@@ -24,4 +24,4 @@
     Markdown-rendered reasoning; exclude the unavailable Todo strip.
   - Verify: frontend layout/E2E tests, browser smoke check, and Go test gates.
   - Files: `frontend/index.html`, `frontend/js/views/agent.js`,
-    `frontend/styles/electron-parity.css`, `application/agent_runner.go`.
+    `frontend/styles/parity.css`, `application/agent_runner.go`.

@@ -10,6 +10,61 @@ import (
 	"nusashell/domain"
 )
 
+// isHydrationMessage returns true when a message is a pure hydration
+// checkpoint — all tool calls have the "hydrate-" prefix and there is no
+// visible content or reasoning. These messages are hidden from the UI.
+func isHydrationMessage(m domain.Message) bool {
+	if len(m.ToolCalls) == 0 || (m.Content != "" || m.Reasoning != "") {
+		return false
+	}
+	for _, tc := range m.ToolCalls {
+		if !domain.IsHydrationCallID(tc.ID) {
+			return false
+		}
+	}
+	return true
+}
+
+// filterHydrationToolCalls strips hydration tool calls from a message that
+// has both real and hydration tool calls (mixed). Returns the message
+// unchanged if it has no hydration tool calls.
+func filterHydrationToolCalls(m domain.Message) domain.Message {
+	if len(m.ToolCalls) == 0 {
+		return m
+	}
+	hasHydration := false
+	for _, tc := range m.ToolCalls {
+		if domain.IsHydrationCallID(tc.ID) {
+			hasHydration = true
+			break
+		}
+	}
+	if !hasHydration {
+		return m
+	}
+	filtered := make([]domain.ToolCall, 0, len(m.ToolCalls))
+	for _, tc := range m.ToolCalls {
+		if !domain.IsHydrationCallID(tc.ID) {
+			filtered = append(filtered, tc)
+		}
+	}
+	m.ToolCalls = filtered
+	// Also filter hydration tool calls from steps.
+	for i := range m.Steps {
+		if len(m.Steps[i].ToolCalls) == 0 {
+			continue
+		}
+		stepFiltered := make([]domain.ToolCall, 0, len(m.Steps[i].ToolCalls))
+		for _, tc := range m.Steps[i].ToolCalls {
+			if !domain.IsHydrationCallID(tc.ID) {
+				stepFiltered = append(stepFiltered, tc)
+			}
+		}
+		m.Steps[i].ToolCalls = stepFiltered
+	}
+	return m
+}
+
 func convDTO(c *domain.Conversation) contracts.ConversationDTO {
 	return contracts.ConversationDTO{
 		ID:           c.ID,
@@ -28,16 +83,24 @@ func convDTO(c *domain.Conversation) contracts.ConversationDTO {
 const timeRFC3339 = "2006-01-02T15:04:05Z07:00"
 
 func msgDTO(m domain.Message) contracts.MessageDTO {
+	// Filter hydration tool calls from the DTO sent to the UI.
+	// If ALL tool calls in a message are hydration calls and there is
+	// no content or reasoning, the entire message is hidden from the UI.
+	if isHydrationMessage(m) {
+		return contracts.MessageDTO{}
+	}
+	m = filterHydrationToolCalls(m)
 	dto := contracts.MessageDTO{
-		ID:        m.ID,
-		Role:      string(m.Role),
-		Content:   m.Content,
-		Reasoning: m.Reasoning,
-		Model:     m.Model,
-		CreatedAt: m.CreatedAt.Format(timeRFC3339),
-		Status:    string(m.Status),
-		Error:     m.Error,
-		Steer:     m.Steer,
+		ID:             m.ID,
+		Role:           string(m.Role),
+		Content:        m.Content,
+		Reasoning:      m.Reasoning,
+		Model:          m.Model,
+		CreatedAt:      m.CreatedAt.Format(timeRFC3339),
+		Status:         string(m.Status),
+		Error:          m.Error,
+		Steer:          m.Steer,
+		ContextUpdated: m.ContextUpdated,
 	}
 	if m.Usage != nil {
 		dto.Usage = &contracts.UsageDTO{
@@ -109,7 +172,11 @@ func (a *App) handleConversationsGet(req contracts.ConversationIDRequest) (any, 
 	}
 	msgs := make([]contracts.MessageDTO, 0, len(c.Messages))
 	for _, m := range c.Messages {
-		msgs = append(msgs, msgDTO(m))
+		dto := msgDTO(m)
+		if dto.ID == "" {
+			continue // hidden hydration checkpoint
+		}
+		msgs = append(msgs, dto)
 	}
 	return contracts.ConversationGetResult{Conversation: convDTO(c), Messages: msgs}, nil
 }
@@ -121,7 +188,11 @@ func (a *App) handleConversationsChunk(req contracts.ConversationChunkRequest) (
 	}
 	out := make([]contracts.MessageDTO, 0, len(msgs))
 	for _, m := range msgs {
-		out = append(out, msgDTO(m))
+		dto := msgDTO(m)
+		if dto.ID == "" {
+			continue // hidden hydration checkpoint
+		}
+		out = append(out, dto)
 	}
 	return contracts.ConversationChunkResult{Messages: out}, nil
 }

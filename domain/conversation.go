@@ -81,19 +81,20 @@ type MessageStep struct {
 }
 
 type Message struct {
-	ID          string
-	Role        MessageRole
-	Content     string // final text (mirrors last text step, for backward compat)
-	Reasoning   string // final reasoning (mirrors last reasoning step, for backward compat)
-	Steps       []MessageStep
-	Model       string
-	Usage       *Usage
-	CreatedAt   time.Time
-	Status      MessageStatus
-	Error       string
-	ToolCalls   []ToolCall // all tool calls (mirrors tool_calls steps, for backward compat)
-	Attachments []Attachment
-	Steer       bool // true for user messages injected mid-turn (steering)
+	ID             string
+	Role           MessageRole
+	Content        string // final text (mirrors last text step, for backward compat)
+	Reasoning      string // final reasoning (mirrors last reasoning step, for backward compat)
+	Steps          []MessageStep
+	Model          string
+	Usage          *Usage
+	CreatedAt      time.Time
+	Status         MessageStatus
+	Error          string
+	ToolCalls      []ToolCall // all tool calls (mirrors tool_calls steps, for backward compat)
+	Attachments    []Attachment
+	Steer          bool // true for user messages injected mid-turn (steering)
+	ContextUpdated bool // true when a fresh hydration checkpoint was persisted for this turn
 }
 
 type Conversation struct {

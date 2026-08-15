@@ -121,6 +121,9 @@ function renderAssistantTurn(messages, onRetry) {
   const meta = el('div', { class: 'agent-turn-meta' });
   const model = [...messages].reverse().find((message) => message.model)?.model;
   if (model) meta.append(el('span', { class: 'agent-turn-tag', text: model }));
+  if (finalMessage.context_updated) {
+    meta.append(el('span', { class: 'agent-turn-tag agent-context-updated-badge', text: '⟳ Context updated' }));
+  }
   const usage = totalUsage(messages);
   if (usage) {
     meta.append(el('span', { class: 'agent-turn-tag', text: `↑${usage.input_tokens} ↓${usage.output_tokens}` }));
@@ -177,9 +180,13 @@ function totalUsage(messages) {
 
 export function renderToolJob(toolCall) {
   const card = el('details', { class: 'agent-tool-terminal' });
+  const name = toolCall.name || 'tool';
+  const isMcp = name.startsWith('mcp__');
+  const displayName = isMcp ? name.replace(/^mcp__/, '').replace(/__/g, ' · ') : name;
   const summary = el('summary', {},
     el('span', { class: 'agent-tool-terminal-prompt', text: '›_' }),
-    el('span', { class: 'agent-tool-terminal-title', text: toolCall.name || 'tool' }),
+    el('span', { class: 'agent-tool-terminal-title', text: displayName }),
+    isMcp ? el('span', { class: 'agent-tool-terminal-badge', text: 'MCP' }) : null,
     el('span', { class: 'agent-tool-terminal-meta', text: toolTerminalMeta(toolCall) }),
     el('span', { class: 'agent-tool-terminal-chevron', text: '⌄' }),
   );

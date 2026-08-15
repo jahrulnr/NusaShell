@@ -1,4 +1,4 @@
-# Spec and implementation plan: Electron-parity agent workspace
+# Spec and implementation plan: Parity agent workspace
 
 ## Objective
 
@@ -63,7 +63,7 @@ Electron renderer's labels, controls, interaction, and visual hierarchy.
    OpenAI-compatible, Responses, and Anthropic payloads. Verify request-shape
    tests and existing adapter integration tests.
 
-### Phase 2: Electron-parity composer
+### Phase 2: parity composer
 
 3. Add Electron-equivalent composer markup, folder/attachment controls, drag
    and drop, chips, per-conversation workspace label, and context counter.

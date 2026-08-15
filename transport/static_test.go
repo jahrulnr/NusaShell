@@ -38,11 +38,11 @@ func TestFrontendAssets(t *testing.T) {
 	h := newHarness(t, nil)
 
 	checks := map[string][]string{
-		"/js/app.js":                  {"text/javascript", "application/javascript"},
-		"/styles/global.css":          {"text/css"},
-		"/styles/electron-parity.css": {"text/css"},
-		"/nusashell-mark.png":         {"image/png"},
-		"/agent-offline-mascot.png":   {"image/png"},
+		"/js/app.js":                {"text/javascript", "application/javascript"},
+		"/styles/global.css":        {"text/css"},
+		"/styles/parity.css":        {"text/css"},
+		"/nusashell-mark.png":       {"image/png"},
+		"/agent-offline-mascot.png": {"image/png"},
 	}
 	for path, wantCT := range checks {
 		resp, err := http.Get(h.server.URL + path)
