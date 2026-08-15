@@ -39,6 +39,15 @@ Instructions for humans and coding agents working in this repository.
 - Embed production frontend assets with Go (`embed.FS` or equivalent). Test MIME types, module imports, deep links, cache behavior, and 404 handling.
 - Do not hide frontend traceability behind a required bundle. If an exception is approved, document source mapping and debugging procedure.
 
+## Frontend style
+
+- `frontend/` is native JavaScript, HTML, and CSS. Use browser APIs and ES
+  modules; do not require a production Node build.
+- Do not render visible native browser controls or dialogs (`<select>`
+  option menus, `alert()`, `confirm()`, `prompt()`). Use a styled select
+  library (e.g. Slim Select) or custom components that match the existing
+  visual language. Native controls should only appear as a last resort.
+
 ## Verification baseline
 
 Before considering a change complete, run the narrowest relevant tests first, then the repository gates:

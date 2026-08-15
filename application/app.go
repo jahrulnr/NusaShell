@@ -27,18 +27,20 @@ type App struct {
 	Logs          LogStore
 	Settings      SettingsStore
 
-	Docs            DocsSource
-	Bus             *Bus
-	Toolbox         ToolExecutor
-	MCPToolbox      MCPToolbox
-	Factory         ProviderFactory
-	WorkspacePicker WorkspacePicker
-	CodexRuntime    CodexRuntime
-	CodexOAuth      CodexOAuth
-	CodexUsage      CodexUsage
-	CodexCLIAuth    CodexCLIAuthImporter
-	CodexRouter     *CodexAccountRouter
-	retrySleeper    RetrySleeper
+	Docs                        DocsSource
+	Bus                         *Bus
+	Toolbox                     ToolExecutor
+	MCPToolbox                  MCPToolbox
+	Factory                     ProviderFactory
+	EmbedderFactory             EmbedderFactory
+	EmbeddingModelListerFactory EmbeddingModelListerFactory
+	WorkspacePicker             WorkspacePicker
+	CodexRuntime                CodexRuntime
+	CodexOAuth                  CodexOAuth
+	CodexUsage                  CodexUsage
+	CodexCLIAuth                CodexCLIAuthImporter
+	CodexRouter                 *CodexAccountRouter
+	retrySleeper                RetrySleeper
 
 	runsMu  sync.Mutex
 	runs    map[string]*TurnRun
@@ -164,24 +166,26 @@ func (r *TurnRun) queuedSteer() *SteerEntry {
 
 // Deps is the wiring for NewApp.
 type Deps struct {
-	Version         string
-	DataDir         string
-	Conversations   ConversationStore
-	Providers       ProviderStore
-	Credentials     CredentialStore
-	Skills          SkillStore
-	Memory          MemoryStore
-	Todos           ConversationTodoPort
-	MCP             MCPServerStore
-	Logs            LogStore
-	Settings        SettingsStore
-	Docs            DocsSource
-	Bus             *Bus
-	Toolbox         ToolExecutor
-	MCPToolbox      MCPToolbox
-	Factory         ProviderFactory
-	WorkspacePicker WorkspacePicker
-	RetrySleeper    RetrySleeper
+	Version                     string
+	DataDir                     string
+	Conversations               ConversationStore
+	Providers                   ProviderStore
+	Credentials                 CredentialStore
+	Skills                      SkillStore
+	Memory                      MemoryStore
+	Todos                       ConversationTodoPort
+	MCP                         MCPServerStore
+	Logs                        LogStore
+	Settings                    SettingsStore
+	Docs                        DocsSource
+	Bus                         *Bus
+	Toolbox                     ToolExecutor
+	MCPToolbox                  MCPToolbox
+	Factory                     ProviderFactory
+	EmbedderFactory             EmbedderFactory             // optional; nil = BM25-only search
+	EmbeddingModelListerFactory EmbeddingModelListerFactory // optional; nil = skip /embeddings/models fetch
+	WorkspacePicker             WorkspacePicker
+	RetrySleeper                RetrySleeper
 }
 
 func NewApp(deps Deps) *App {
@@ -192,25 +196,27 @@ func NewApp(deps Deps) *App {
 		deps.RetrySleeper = sleepForRetry
 	}
 	return &App{
-		Version:         deps.Version,
-		DataDir:         deps.DataDir,
-		Conversations:   deps.Conversations,
-		Providers:       deps.Providers,
-		Credentials:     deps.Credentials,
-		Skills:          deps.Skills,
-		Memory:          deps.Memory,
-		Todos:           deps.Todos,
-		MCP:             deps.MCP,
-		Logs:            deps.Logs,
-		Settings:        deps.Settings,
-		Docs:            deps.Docs,
-		Bus:             deps.Bus,
-		Toolbox:         deps.Toolbox,
-		MCPToolbox:      deps.MCPToolbox,
-		Factory:         deps.Factory,
-		WorkspacePicker: deps.WorkspacePicker,
-		retrySleeper:    deps.RetrySleeper,
-		runs:            map[string]*TurnRun{},
+		Version:                     deps.Version,
+		DataDir:                     deps.DataDir,
+		Conversations:               deps.Conversations,
+		Providers:                   deps.Providers,
+		Credentials:                 deps.Credentials,
+		Skills:                      deps.Skills,
+		Memory:                      deps.Memory,
+		Todos:                       deps.Todos,
+		MCP:                         deps.MCP,
+		Logs:                        deps.Logs,
+		Settings:                    deps.Settings,
+		Docs:                        deps.Docs,
+		Bus:                         deps.Bus,
+		Toolbox:                     deps.Toolbox,
+		MCPToolbox:                  deps.MCPToolbox,
+		Factory:                     deps.Factory,
+		EmbedderFactory:             deps.EmbedderFactory,
+		EmbeddingModelListerFactory: deps.EmbeddingModelListerFactory,
+		WorkspacePicker:             deps.WorkspacePicker,
+		retrySleeper:                deps.RetrySleeper,
+		runs:                        map[string]*TurnRun{},
 	}
 }
 
@@ -539,7 +545,7 @@ func (a *App) resolveModel(model string) (*domain.Provider, string, *contracts.R
 }
 
 func requiresKey(kind domain.ProviderKind) bool {
-	// local Chat endpoints (Ollama, LM Studio, …) work without a key
+	// local endpoints (Ollama, LM Studio via chat kind) work without a key
 	// Codex uses OAuth tokens stored in CredentialStore, not a user-supplied key
 	return kind == domain.ProviderMessages || kind == domain.ProviderResponses
 }

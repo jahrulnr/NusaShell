@@ -5,5 +5,5 @@ package frontend
 
 import "embed"
 
-//go:embed index.html styles fonts js nusashell-mark.png agent-offline-mascot.png
+//go:embed index.html styles fonts js vendor nusashell-mark.png agent-offline-mascot.png
 var FS embed.FS

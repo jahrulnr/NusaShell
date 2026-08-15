@@ -1,16 +1,27 @@
 // Logs workspace: live tail of runtime entries.
 
 import { rpc, on } from '../rpc.js';
-import { el, fmtClock } from '../ui.js';
+import { el, fmtClock, createSelect } from '../ui.js';
 import { entriesAfter } from '../log-tail.js';
 
 const state = { entries: [], level: '', follow: true, max: 500, lastRenderedId: null };
+let levelFilter;
 
 export async function initLogs() {
   document.getElementById('log-follow').addEventListener('change', (e) => { state.follow = e.target.checked; });
-  document.getElementById('log-level-filter').addEventListener('change', (e) => {
-    state.level = e.target.value;
-    renderTail();
+  levelFilter = createSelect(document.getElementById('log-level-filter'), {
+    data: [
+      { text: 'All levels', value: '' },
+      { text: 'debug', value: 'debug' },
+      { text: 'info', value: 'info' },
+      { text: 'warn', value: 'warn' },
+      { text: 'error', value: 'error' },
+    ],
+    value: '',
+    onChange: (value) => {
+      state.level = value;
+      renderTail();
+    },
   });
   document.getElementById('logs-clear-btn').addEventListener('click', async () => {
     try {

@@ -544,3 +544,59 @@ func (a *App) StartCodexCircuitMonitor(ctx context.Context) {
 		}
 	}()
 }
+
+// StartAutoModelImport launches a background goroutine that re-imports
+// models from all enabled providers every 4 hours. This keeps the model
+// list fresh without requiring the user to manually click "import" after
+// a provider adds new models. The goroutine exits when ctx is cancelled.
+// An initial import runs 30 seconds after startup to avoid blocking the
+// server boot.
+func (a *App) StartAutoModelImport(ctx context.Context) {
+	go func() {
+		// Delay the initial import so the server is fully up and serving
+		// requests before we start hitting provider APIs.
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(30 * time.Second):
+		}
+		a.autoImportAllProviders(ctx)
+
+		ticker := time.NewTicker(4 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				a.autoImportAllProviders(ctx)
+			}
+		}
+	}()
+}
+
+// autoImportAllProviders iterates all enabled providers and re-imports
+// their model lists. Failures are logged but do not stop the loop — one
+// provider being down should not prevent imports from the others.
+func (a *App) autoImportAllProviders(ctx context.Context) {
+	for _, p := range a.Providers.List() {
+		if !p.Enabled {
+			continue
+		}
+		// Codex models come from the app-server, not a /models endpoint.
+		// Skip it — Codex model import is handled separately.
+		if p.Kind == domain.ProviderCodex {
+			continue
+		}
+		key, has, _ := a.Credentials.Get(p.ID)
+		if !has && requiresKey(p.Kind) {
+			continue
+		}
+		importCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		_, err := a.importModelsForProvider(importCtx, p, key)
+		cancel()
+		if err != nil {
+			a.log("warn", "ai", "auto-import failed: %s: %v", p.Name, err)
+		}
+	}
+}

@@ -353,6 +353,7 @@ type ModelDTO struct {
 	Description      string   `json:"description,omitempty"`
 	SupportedEfforts []string `json:"supported_efforts,omitempty"`
 	DefaultEffort    string   `json:"default_effort,omitempty"`
+	IsEmbedding      bool     `json:"is_embedding,omitempty"`
 }
 
 type ProviderDTO struct {
@@ -732,6 +733,8 @@ type SettingsDTO struct {
 	MaxToolRounds       int      `json:"max_tool_rounds"`
 	MaxInputTokens      int      `json:"max_input_tokens"`
 	MaxOutputTokens     int      `json:"max_output_tokens"`
+	EmbeddingProviderID string   `json:"embedding_provider_id,omitempty"`
+	EmbeddingModelID    string   `json:"embedding_model_id,omitempty"`
 	Temperature         *float64 `json:"temperature,omitempty"`
 	TopP                *float64 `json:"top_p,omitempty"`
 	TopK                *int     `json:"top_k,omitempty"`
@@ -750,6 +753,8 @@ type SettingsSetRequest struct {
 	MaxToolRounds       *int            `json:"max_tool_rounds,omitempty"`
 	MaxInputTokens      *int            `json:"max_input_tokens,omitempty"`
 	MaxOutputTokens     *int            `json:"max_output_tokens,omitempty"`
+	EmbeddingProviderID *string         `json:"embedding_provider_id,omitempty"`
+	EmbeddingModelID    *string         `json:"embedding_model_id,omitempty"`
 	Temperature         json.RawMessage `json:"temperature,omitempty"`
 	TopP                json.RawMessage `json:"top_p,omitempty"`
 	TopK                json.RawMessage `json:"top_k,omitempty"`

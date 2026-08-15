@@ -41,6 +41,11 @@ type Settings struct {
 	MaxToolRounds       int
 	MaxInputTokens      int // global context window cap (default 200k)
 	MaxOutputTokens     int // default max completion tokens (default 64k)
+	// EmbeddingModel selects the global embedding model for the learning
+	// search layer. When EmbeddingProviderID is empty, the learning layer
+	// auto-detects the first enabled provider with an embedding model.
+	EmbeddingProviderID string `json:"embedding_provider_id,omitempty"`
+	EmbeddingModelID    string `json:"embedding_model_id,omitempty"`
 	// Sampling parameters. nil = use provider default (do not send the
 	// field). Non-nil overrides the provider default for every turn.
 	// Ranges: temperature 0–2 (OpenAI) / 0–1 (Anthropic), top_p 0–1,

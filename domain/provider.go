@@ -4,13 +4,15 @@ import "time"
 
 // ProviderKind names the wire API shape, not a vendor: Messages (Anthropic
 // Messages API), Responses (OpenAI Responses API), Chat (any OpenAI-compatible
-// Chat Completions endpoint).
+// Chat Completions endpoint), Ollama (local, OpenAI-compatible chat + native
+// embeddings), Codex (ChatGPT Codex backend, OAuth).
 type ProviderKind string
 
 const (
 	ProviderMessages  ProviderKind = "messages"
 	ProviderResponses ProviderKind = "responses"
 	ProviderChat      ProviderKind = "chat"
+	ProviderOllama    ProviderKind = "ollama"
 	ProviderCodex     ProviderKind = "codex"
 )
 
@@ -22,6 +24,7 @@ type Model struct {
 	Description      string
 	SupportedEfforts []string // reasoning effort levels the provider advertises (e.g. "low","medium","high","xhigh"); empty when unsupported
 	DefaultEffort    string   // provider-advertised default effort, "" when none
+	IsEmbedding      bool     // true if this model produces embedding vectors (not a chat model)
 }
 
 type Provider struct {

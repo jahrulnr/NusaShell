@@ -10,6 +10,7 @@ const KIND_META = {
   messages: { label: 'Messages', mark: 'MS', cls: 'accent-anthropic', desc: 'Messages API format' },
   responses: { label: 'Responses', mark: 'RS', cls: 'accent-openai', desc: 'Responses API format' },
   chat: { label: 'Chat', mark: 'CH', cls: 'accent-compatible', desc: 'Chat Completions API format' },
+  ollama: { label: 'Ollama', mark: 'OL', cls: 'accent-compatible', desc: 'Local Ollama (chat + embeddings, no API key needed)' },
   codex: { label: 'Codex', mark: 'CX', cls: 'accent-codex', desc: 'ChatGPT Codex backend (OAuth, no API key needed)' },
 };
 
@@ -464,6 +465,7 @@ const KIND_DEFAULTS = {
   messages: 'https://api.anthropic.com',
   responses: 'https://api.openai.com/v1',
   chat: 'https://api.openai.com/v1',
+  ollama: 'http://localhost:11434',
   codex: 'https://chatgpt.com/backend-api/codex',
 };
 
@@ -482,6 +484,7 @@ async function addProvider(provider = null) {
           { value: 'messages', label: 'Messages' },
           { value: 'responses', label: 'Responses' },
           { value: 'chat', label: 'Chat' },
+          { value: 'ollama', label: 'Ollama (local)' },
           { value: 'codex', label: 'Codex (ChatGPT)' },
         ],
         value: initialKind,
@@ -495,11 +498,18 @@ async function addProvider(provider = null) {
             urlInput.value = KIND_DEFAULTS[kindInput.value] ?? '';
           }
           const isCod = kindInput.value === 'codex';
+          const isOllama = kindInput.value === 'ollama';
           urlInput.disabled = isCod;
           urlInput.placeholder = isCod ? 'Fixed — uses ChatGPT Codex backend' : `API base URL — vendor endpoint or AI gateway (e.g. ${KIND_DEFAULTS[kindInput.value] ?? ''})`;
           if (apiKeyInput) {
             apiKeyInput.disabled = isCod;
-            apiKeyInput.placeholder = isCod ? 'Not needed — uses ChatGPT OAuth' : (provider?.has_api_key ? 'leave blank to keep current key' : 'sk-…');
+            if (isCod) {
+              apiKeyInput.placeholder = 'Not needed — uses ChatGPT OAuth';
+            } else if (isOllama) {
+              apiKeyInput.placeholder = 'optional — only if Ollama is behind an auth proxy';
+            } else {
+              apiKeyInput.placeholder = provider?.has_api_key ? 'leave blank to keep current key' : 'sk-…';
+            }
           }
         },
       },

@@ -77,6 +77,14 @@ function installBrowserGlobals(dom, baseURL) {
   globalThis.fetch = fetchFromServer;
   window.fetch = fetchFromServer;
   window.confirm = () => true;
+  const MutationObserverPolyfill = class {
+    constructor() { this.callback = null; }
+    observe() {}
+    disconnect() {}
+    takeRecords() { return []; }
+  };
+  globalThis.MutationObserver = window.MutationObserver ?? MutationObserverPolyfill;
+  window.MutationObserver = globalThis.MutationObserver;
   if (NativeWebSocket) {
     globalThis.WebSocket = NativeWebSocket;
     window.WebSocket = NativeWebSocket;

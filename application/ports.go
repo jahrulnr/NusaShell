@@ -295,6 +295,45 @@ type ModelLister interface {
 	ListModels(ctx context.Context, apiKey string) ([]domain.Model, error)
 }
 
+// EmbeddingModelLister is implemented by providers that can enumerate
+// embedding models separately from chat models. Some AI gateways expose
+// embedding models on a dedicated /embeddings/models endpoint rather than
+// the standard /models endpoint. This interface lets the application layer
+// fetch embedding models from any provider kind (chat, responses, messages)
+// without coupling the embedding concern to a specific chat adapter.
+type EmbeddingModelLister interface {
+	ListEmbeddingModels(ctx context.Context, apiKey string) ([]string, error)
+}
+
+// Embedder is implemented by providers that can produce embedding vectors.
+// This is an optional capability — not all AIProvider implementations support
+// embeddings (e.g. Anthropic Messages, Codex OAuth). The learning layer uses
+// this to build a vector index for semantic skill/memory search. When no
+// configured provider implements Embedder, the learning layer falls back to
+// BM25-only keyword search.
+type Embedder interface {
+	// Embed returns a vector for a single text input.
+	Embed(ctx context.Context, text string) ([]float32, error)
+	// EmbedBatch returns vectors for multiple inputs in one call.
+	EmbedBatch(ctx context.Context, texts []string) ([][]float32, error)
+	// Dim returns the embedding dimensionality. Must be stable across calls.
+	Dim() int
+}
+
+// EmbedderFactory builds an Embedder for a given provider, if the provider
+// supports embeddings. Returns nil, nil if the provider kind does not support
+// embeddings (caller falls back to BM25). Returns an error only on auth or
+// connectivity failure.
+type EmbedderFactory func(p *domain.Provider, apiKey string) (Embedder, error)
+
+// EmbeddingModelListerFactory builds an EmbeddingModelLister for a given
+// provider. Returns nil if the provider kind does not expose a separate
+// embedding models endpoint (e.g. Codex OAuth). The factory is provider-kind
+// agnostic — AI gateways often support multiple chat APIs while exposing
+// embeddings on a single OpenAI-compatible endpoint, so the same lister
+// works for chat, responses, and messages kinds.
+type EmbeddingModelListerFactory func(p *domain.Provider) EmbeddingModelLister
+
 // ---- agent tools port ----
 
 type ToolInfo struct {

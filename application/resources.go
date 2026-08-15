@@ -408,6 +408,12 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	}, &s.PresencePenalty); err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
 	}
+	if req.EmbeddingProviderID != nil {
+		s.EmbeddingProviderID = strings.TrimSpace(*req.EmbeddingProviderID)
+	}
+	if req.EmbeddingModelID != nil {
+		s.EmbeddingModelID = strings.TrimSpace(*req.EmbeddingModelID)
+	}
 	if err := a.Settings.Set(s); err != nil {
 		return nil, rpcInternal(err)
 	}
@@ -422,6 +428,8 @@ func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 		MaxToolRounds:       s.MaxToolRounds,
 		MaxInputTokens:      s.MaxInputTokens,
 		MaxOutputTokens:     s.MaxOutputTokens,
+		EmbeddingProviderID: s.EmbeddingProviderID,
+		EmbeddingModelID:    s.EmbeddingModelID,
 		Temperature:         s.Temperature,
 		TopP:                s.TopP,
 		TopK:                s.TopK,

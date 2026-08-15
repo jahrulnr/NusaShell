@@ -16,6 +16,8 @@
 <link rel="stylesheet" href="styles/modals.css">
 <link rel="stylesheet" href="styles/responsive.css">
 <link rel="stylesheet" href="styles/electron-parity.css">
+<link rel="stylesheet" href="vendor/slim-select/slimselect.css">
+<link rel="stylesheet" href="vendor/slim-select/nusashell-override.css">
 </head>
 <body>
 
@@ -323,8 +325,19 @@
               <small>Used by new conversations. Existing conversations keep their selected model.</small>
             </label>
             <label class="settings-field" for="settings-max-tool-rounds">Maximum tool rounds per turn
-              <input id="settings-max-tool-rounds" type="number" min="1" max="10000" step="1" inputmode="numeric">
+              <input id="settings-max-tool-rounds" type="number" min="1" max="10000" step="1" inputmode="numeric" value="8">
               <small>Stops a turn that keeps requesting more tool work. The default is 8.</small>
+            </label>
+          </section>
+          <section class="settings-card settings-embedding-card" aria-labelledby="settings-embedding-title">
+            <div class="settings-card-title">Embeddings</div>
+            <h2 id="settings-embedding-title" class="sr-only">Embeddings</h2>
+            <p class="settings-card-copy">Choose the embedding model used by skill and memory search. Models tagged as embedding-capable appear here after you import them from a provider.</p>
+            <label class="settings-field" for="settings-embedding-model">Embedding model
+              <select id="settings-embedding-model">
+                <option value="">Automatic — use first available embedding model</option>
+              </select>
+              <small>Used globally for semantic search over skills and memory. Ollama models (e.g. nomic-embed-text) work locally without an API key.</small>
             </label>
           </section>
           <section class="settings-card" aria-labelledby="settings-context-title">
@@ -337,11 +350,11 @@
               <span class="toggle-slider" aria-hidden="true"></span>
             </label>
             <label class="settings-field" for="settings-max-input-tokens">Max input tokens (fallback context window)
-              <input id="settings-max-input-tokens" type="number" min="1000" max="2000000" step="1000" inputmode="numeric">
+              <input id="settings-max-input-tokens" type="number" min="1000" max="2000000" step="1000" inputmode="numeric" value="200000">
               <small>Fallback context window when a provider does not advertise one (default 200,000). Models that report their own window use that value instead.</small>
             </label>
             <label class="settings-field" for="settings-max-output-tokens">Max output tokens (default completion limit)
-              <input id="settings-max-output-tokens" type="number" min="256" max="1000000" step="256" inputmode="numeric">
+              <input id="settings-max-output-tokens" type="number" min="256" max="1000000" step="256" inputmode="numeric" value="65536">
               <small>Default max completion tokens per turn (default 65,536). Models that advertise their own limit use that instead.</small>
             </label>
             <label class="settings-toggle" for="settings-prompt-caching">

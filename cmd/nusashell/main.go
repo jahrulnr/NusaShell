@@ -96,9 +96,11 @@ func run() error {
 			Todos:      todoStore,
 			MCP:        mcpManager,
 		},
-		MCPToolbox:      mcpManager,
-		Factory:         ai.NewFactory(credentials),
-		WorkspacePicker: workspacepicker.Zenity{},
+		MCPToolbox:                  mcpManager,
+		Factory:                     ai.NewFactory(credentials),
+		EmbedderFactory:             ai.NewEmbedderFactory(),
+		EmbeddingModelListerFactory: ai.NewEmbeddingModelListerFactory(),
+		WorkspacePicker:             workspacepicker.Zenity{},
 	})
 	// Wire Codex runtime + OAuth adapters (optional — nil-safe if unavailable)
 	if rt, err := codex.NewRuntimeAdapter(); err == nil {
@@ -121,6 +123,7 @@ func run() error {
 	// handlers unblock as soon as shutdown begins.
 	httpServer.BaseContext = func(net.Listener) context.Context { return ctx }
 	app.StartCodexCircuitMonitor(ctx)
+	app.StartAutoModelImport(ctx)
 
 	go func() {
 		logger.Info("nusashell-light listening", "addr", httpServer.Addr, "data_dir", dataDir, "dev", dev, "version", version)

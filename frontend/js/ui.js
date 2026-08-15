@@ -1,5 +1,9 @@
 // Shared UI helpers: toasts, dialogs, time formatting, DOM shortcuts.
 
+import SlimSelect from '../vendor/slim-select/slimselect.es.js';
+
+export { SlimSelect };
+
 export function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -58,30 +62,67 @@ export function toast(message, kind = 'info', timeout = 4000) {
   return remove;
 }
 
+export function createSelect(selectEl, { data = [], value = '', placeholder = '', search = null, onChange } = {}) {
+  const ss = new SlimSelect({
+    select: selectEl,
+    data,
+    settings: {
+      showSearch: search ?? data.length > 7,
+      placeholderText: placeholder,
+      contentPosition: 'absolute',
+      closeOnSelect: true,
+    },
+    events: {
+      afterChange: (selected) => {
+        if (onChange) onChange(selected[0]?.value ?? '');
+      },
+    },
+  });
+  if (value !== undefined && value !== '') ss.setSelected([value]);
+  return ss;
+}
+
 export function dialog({ title, message, fields = [], actions = [{ label: 'Cancel', value: null }], danger = false }) {
   return new Promise((resolve) => {
     const overlay = el('div', { class: 'ui-dialog-overlay' });
     const body = el('div', { class: 'ui-dialog-body' });
     if (message) body.append(el('p', { class: 'ui-dialog-message', text: message }));
     const values = {};
+    const slimInstances = [];
     for (const field of fields) {
       let input;
       if (field.tag === 'textarea') {
         input = el('textarea', { placeholder: field.placeholder ?? '', rows: field.rows ?? 3 });
         input.value = field.value ?? '';
       } else if (field.tag === 'select') {
-        const opts = (field.options ?? []).map((o) => {
+        input = el('select', { class: 'slim-select' });
+        const data = (field.options ?? []).map((o) => {
           const opt = typeof o === 'object' ? o : { value: o, label: o };
-          return el('option', { value: opt.value, text: opt.label });
+          return { text: opt.label, value: opt.value };
         });
-        input = el('select', {}, ...opts);
-        const first = field.options?.[0];
-        input.value = field.value ?? (typeof first === 'object' ? first?.value : first) ?? '';
+        const selected = field.value ?? data[0]?.value ?? '';
+        const ss = new SlimSelect({
+          select: input,
+          data,
+          settings: {
+            showSearch: data.length > 7,
+            placeholderText: field.placeholder ?? '',
+            contentPosition: 'absolute',
+            closeOnSelect: true,
+          },
+          events: {
+            afterChange: () => {
+              if (typeof field.onChange === 'function') field.onChange(input, values);
+            },
+          },
+        });
+        if (selected) ss.setSelected([selected]);
+        slimInstances.push(input);
       } else {
         input = el('input', { type: field.type ?? 'text', placeholder: field.placeholder ?? '', value: field.value ?? '' });
       }
       values[field.name] = input;
-      if (typeof field.onChange === 'function') {
+      if (field.tag !== 'select' && typeof field.onChange === 'function') {
         input.addEventListener('change', () => field.onChange(input, values));
       }
       body.append(el('label', { class: 'ui-dialog-field' }, field.label, input));
@@ -117,7 +158,7 @@ export function dialog({ title, message, fields = [], actions = [{ label: 'Cance
     });
     overlay.append(dialogNode);
     document.body.append(overlay);
-    const first = overlay.querySelector('input, textarea, select');
+    const first = overlay.querySelector('input, textarea, .ss-main');
     if (first) setTimeout(() => first.focus(), 30);
   });
 }

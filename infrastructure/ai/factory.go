@@ -16,7 +16,9 @@ import (
 	"nusashell/domain"
 	"nusashell/infrastructure/ai/chatcompletion"
 	"nusashell/infrastructure/ai/codex"
+	"nusashell/infrastructure/ai/embeddings"
 	"nusashell/infrastructure/ai/messages"
+	"nusashell/infrastructure/ai/ollama"
 	"nusashell/infrastructure/ai/responses"
 	"nusashell/infrastructure/config"
 )
@@ -41,6 +43,14 @@ func NewFactory(creds application.CredentialStore) application.ProviderFactory {
 			return &responses.Adapter{BaseURL: p.BaseURL, APIKey: apiKey, Client: client}, nil
 		case domain.ProviderChat:
 			return &chatcompletion.Adapter{BaseURL: p.BaseURL, APIKey: apiKey, Client: client}, nil
+		case domain.ProviderOllama:
+			// Ollama exposes an OpenAI-compatible /v1/chat/completions endpoint.
+			// Reuse the chatcompletion adapter with the /v1 suffix appended.
+			base := strings.TrimRight(p.BaseURL, "/")
+			if !strings.HasSuffix(base, "/v1") {
+				base += "/v1"
+			}
+			return &chatcompletion.Adapter{BaseURL: base, APIKey: apiKey, Client: client}, nil
 		case domain.ProviderCodex:
 			return newCodexAdapter(ctx, p, apiKey, client, creds)
 		default:
@@ -153,4 +163,81 @@ func newProviderHTTPClient() *http.Client {
 			IdleConnTimeout:       90 * time.Second,
 		},
 	}
+}
+
+// NewEmbedderFactory returns an EmbedderFactory that builds an Embedder for
+// providers that support embeddings. Returns nil, nil for provider kinds
+// that cannot produce embeddings (Anthropic Messages, Codex OAuth) — the
+// caller falls back to BM25-only search in that case.
+//
+// The factory needs the provider's model list to find an embedding-capable
+// model. If the provider has no embedding model in its Models slice, the
+// factory returns nil, nil.
+func NewEmbedderFactory() application.EmbedderFactory {
+	return func(p *domain.Provider, apiKey string) (application.Embedder, error) {
+		switch p.Kind {
+		case domain.ProviderOllama:
+			// Ollama: find an embedding model in the provider's model list,
+			// fall back to nomic-embed-text if none tagged. API key is
+			// optional — only needed when Ollama is behind an auth proxy.
+			model := ""
+			for _, m := range p.Models {
+				if m.IsEmbedding {
+					model = m.ID
+					break
+				}
+			}
+			return ollama.New(p.BaseURL, model, apiKey), nil
+		case domain.ProviderChat, domain.ProviderResponses, domain.ProviderMessages:
+			// OpenAI-compatible: find an embedding model in the provider's
+			// model list. If none tagged, return nil — can't guess the model.
+			// Works for any gateway kind (chat, responses, messages) since
+			// AI gateways expose embeddings on a single OpenAI-compatible
+			// endpoint regardless of which chat API is configured.
+			model := ""
+			for _, m := range p.Models {
+				if m.IsEmbedding {
+					model = m.ID
+					break
+				}
+			}
+			if model == "" {
+				return nil, nil
+			}
+			base := embeddingBaseURL(p.BaseURL)
+			return chatcompletion.NewEmbedder(base, apiKey, model), nil
+		default:
+			// Codex OAuth does not support embeddings.
+			return nil, nil
+		}
+	}
+}
+
+// NewEmbeddingModelListerFactory returns a factory that builds an
+// EmbeddingModelLister for any provider kind that exposes an OpenAI-compatible
+// /embeddings/models endpoint. Returns nil for Codex (no such endpoint).
+//
+// The lister is provider-kind agnostic — AI gateways (OpenRouter, TokenRouter,
+// OmniRoute) support multiple chat APIs (messages, responses, chat) while
+// exposing embeddings on a single endpoint, so the same lister works
+// regardless of which chat API the provider is configured to use.
+func NewEmbeddingModelListerFactory() application.EmbeddingModelListerFactory {
+	return func(p *domain.Provider) application.EmbeddingModelLister {
+		if p.Kind == domain.ProviderCodex {
+			return nil
+		}
+		base := embeddingBaseURL(p.BaseURL)
+		return embeddings.NewModelLister(base, newProviderHTTPClient())
+	}
+}
+
+// embeddingBaseURL normalizes a provider BaseURL to the OpenAI-compatible
+// API root (ending with /v1) for embedding endpoints. If the BaseURL already
+// ends with /v1, it is used as-is; otherwise /v1 is appended.
+func embeddingBaseURL(baseURL string) string {
+	base := strings.TrimRight(baseURL, "/")
+	if !strings.HasSuffix(base, "/v1") {
+		base += "/v1"
+	}
+	return base
 }

@@ -8,6 +8,7 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/infrastructure/config"
 )
 
 func (a *App) providerDTO(p *domain.Provider) contracts.ProviderDTO {
@@ -23,13 +24,16 @@ func (a *App) providerDTO(p *domain.Provider) contracts.ProviderDTO {
 	dto.Configured = hasKey || !requiresKey(p.Kind)
 	for _, m := range p.Models {
 		dto.Models = append(dto.Models, contracts.ModelDTO{
-			ID:           m.ID,
-			ProviderID:   p.ID,
-			ProviderName: p.Name,
-			Context:      m.Context,
-			MaxOutput:    m.MaxOutput,
-			InputCost:    m.InputCost,
-			Description:  m.Description,
+			ID:               m.ID,
+			ProviderID:       p.ID,
+			ProviderName:     p.Name,
+			Context:          m.Context,
+			MaxOutput:        m.MaxOutput,
+			InputCost:        m.InputCost,
+			Description:      m.Description,
+			SupportedEfforts: m.SupportedEfforts,
+			DefaultEffort:    m.DefaultEffort,
+			IsEmbedding:      m.IsEmbedding,
 		})
 	}
 	return dto
@@ -53,15 +57,20 @@ func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *cont
 	if kind == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "kind is required"}
 	}
-	if kind != domain.ProviderMessages && kind != domain.ProviderResponses && kind != domain.ProviderChat && kind != domain.ProviderCodex {
-		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "kind must be messages, responses, chat, or codex"}
+	if kind != domain.ProviderMessages && kind != domain.ProviderResponses && kind != domain.ProviderChat && kind != domain.ProviderOllama && kind != domain.ProviderCodex {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "kind must be messages, responses, chat, ollama, or codex"}
 	}
 	// Codex uses a fixed backend URL and OAuth — no user-supplied base URL.
+	// Ollama defaults to localhost:11434 — no API key needed.
 	// Other kinds require a base URL.
 	baseURL := strings.TrimSpace(req.BaseURL)
 	if kind == domain.ProviderCodex {
 		if baseURL == "" {
 			baseURL = "https://chatgpt.com/backend-api/codex"
+		}
+	} else if kind == domain.ProviderOllama {
+		if baseURL == "" {
+			baseURL = "http://localhost:11434"
 		}
 	} else if baseURL == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "base url is required"}
@@ -173,29 +182,74 @@ func (a *App) handleProvidersImport(req contracts.ProviderIDRequest) (any, *cont
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	adapter, err := a.Factory(ctx, p, key)
+	models, err := a.importModelsForProvider(ctx, p, key)
 	if err != nil {
-		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
-	}
-	lister, ok := adapter.(ModelLister)
-	if !ok {
-		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "this provider kind does not support model import"}
-	}
-	models, err := lister.ListModels(ctx, key)
-	if err != nil {
-		a.log("warn", "ai", "model import failed: %s: %v", p.Name, err)
 		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
 	}
 	if len(models) == 0 {
 		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: "provider returned no models"}
 	}
+	return contracts.ImportModelsResult{Models: modelsDTO(p)}, nil
+}
+
+// importModelsForProvider fetches the model list from a provider, tags
+// embedding models, persists the updated provider, and returns the models.
+// Used by both the manual import RPC and the background auto-import ticker.
+//
+// It fetches chat models via the provider's chat adapter (ModelLister) and
+// embedding models via a separate EmbeddingModelLister (if configured). This
+// separation is needed because AI gateways often expose embedding models on
+// a dedicated /embeddings/models endpoint, separate from the chat /models
+// endpoint, and the gateway may be configured with any chat API kind
+// (chat, responses, or messages).
+func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, key string) ([]domain.Model, error) {
+	adapter, err := a.Factory(ctx, p, key)
+	if err != nil {
+		return nil, err
+	}
+	lister, ok := adapter.(ModelLister)
+	if !ok {
+		return nil, fmt.Errorf("provider kind %s does not support model import", p.Kind)
+	}
+	models, err := lister.ListModels(ctx, key)
+	if err != nil {
+		a.log("warn", "ai", "model import failed: %s: %v", p.Name, err)
+		return nil, err
+	}
+	// Tag embedding models from the chat /models response so the learning
+	// search layer can pick them. Some gateways (e.g. OpenAI platform) list
+	// embedding models in /models directly.
+	seen := make(map[string]bool, len(models))
+	for i := range models {
+		seen[models[i].ID] = true
+		if config.IsKnownEmbeddingModel(models[i].ID) {
+			models[i].IsEmbedding = true
+		}
+	}
+	// Fetch embedding models from the separate /embeddings/models endpoint.
+	// This is provider-kind agnostic — works for chat, responses, and
+	// messages kinds. Skipped if no EmbeddingModelListerFactory is wired or
+	// the provider kind does not expose the endpoint (e.g. Codex OAuth).
+	if a.EmbeddingModelListerFactory != nil && p.Kind != domain.ProviderCodex {
+		embLister := a.EmbeddingModelListerFactory(p)
+		if embLister != nil {
+			embIDs, _ := embLister.ListEmbeddingModels(ctx, key)
+			for _, id := range embIDs {
+				if seen[id] {
+					continue
+				}
+				seen[id] = true
+				models = append(models, domain.Model{ID: id, IsEmbedding: true})
+			}
+		}
+	}
 	p.Models = models
 	p.UpdatedAt = time.Now().UTC()
 	if err := a.Providers.Save(p); err != nil {
-		return nil, rpcInternal(err)
+		return nil, err
 	}
 	a.log("info", "ai", "imported %d models from %s", len(models), p.Name)
-	return contracts.ImportModelsResult{Models: modelsDTO(p)}, nil
+	return models, nil
 }
 
 func (a *App) handleModelsList() (any, *contracts.RPCError) {
@@ -225,6 +279,7 @@ func modelsDTO(p *domain.Provider) []contracts.ModelDTO {
 			Description:      m.Description,
 			SupportedEfforts: m.SupportedEfforts,
 			DefaultEffort:    m.DefaultEffort,
+			IsEmbedding:      m.IsEmbedding,
 		})
 	}
 	return out

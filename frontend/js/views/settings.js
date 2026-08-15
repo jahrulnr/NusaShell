@@ -1,9 +1,12 @@
 // Settings workspace: native browser preferences plus the Go runtime controls.
 
 import { autoReconnectEnabled, rpc, setAutoReconnect } from '../rpc.js';
-import { toast } from '../ui.js';
+import { toast, createSelect } from '../ui.js';
 
 let bound = false;
+const state = { embeddingProviderId: '', embeddingModelId: '' };
+let preferredSelect;
+let embeddingSelect;
 
 export async function initSettings() {
   if (!bound) {
@@ -12,6 +15,14 @@ export async function initSettings() {
     document.getElementById('settings-sidebar-compact').addEventListener('change', saveSidebarPreference);
     document.getElementById('settings-auto-reconnect').addEventListener('change', saveReconnectPreference);
     document.getElementById('settings-check-connection-btn').addEventListener('click', checkConnection);
+    preferredSelect = createSelect(document.getElementById('settings-preferred-model'), {
+      placeholder: 'Automatic — choose in each conversation',
+      search: true,
+    });
+    embeddingSelect = createSelect(document.getElementById('settings-embedding-model'), {
+      placeholder: 'Automatic — use first available embedding model',
+      search: true,
+    });
     window.addEventListener('hashchange', () => {
       if (location.hash === '#settings') void refresh();
     });
@@ -38,11 +49,15 @@ async function refresh() {
     setOptionalNumber('settings-top-k', settings.top_k);
     setOptionalNumber('settings-frequency-penalty', settings.frequency_penalty);
     setOptionalNumber('settings-presence-penalty', settings.presence_penalty);
+    state.embeddingProviderId = settings.embedding_provider_id ?? '';
+    state.embeddingModelId = settings.embedding_model_id ?? '';
   } else {
     setStatus(`Could not load runtime settings: ${settingsResult.reason.message}`, true);
   }
 
-  renderModelOptions(modelsResult.status === 'fulfilled' ? modelsResult.value.models ?? [] : []);
+  const allModels = modelsResult.status === 'fulfilled' ? modelsResult.value.models ?? [] : [];
+  renderModelOptions(allModels);
+  renderEmbeddingModelOptions(allModels);
   document.getElementById('settings-sidebar-compact').checked = localStorage.getItem('nusashell.sidebarMode') === 'icons';
   document.getElementById('settings-auto-reconnect').checked = autoReconnectEnabled();
 
@@ -54,25 +69,34 @@ async function refresh() {
 }
 
 function renderModelOptions(models) {
-  const select = document.getElementById('settings-preferred-model');
   const selected = localStorage.getItem('nusashell.model') || '';
-  select.replaceChildren(option('Automatic — choose in each conversation', ''));
-  for (const model of models) {
-    const label = model.provider_name ? `${model.id} · ${model.provider_name}` : model.id;
-    select.append(option(label, model.id));
-  }
-  select.value = models.some((model) => model.id === selected) ? selected : '';
+  const data = [
+    { text: 'Automatic — choose in each conversation', value: '', placeholder: true },
+    ...models.map((m) => ({
+      text: m.provider_name ? `${m.id} · ${m.provider_name}` : m.id,
+      value: m.id,
+    })),
+  ];
+  preferredSelect.setData(data);
+  if (selected) preferredSelect.setSelected([selected]);
 }
 
-function option(label, value) {
-  const node = document.createElement('option');
-  node.value = value;
-  node.textContent = label;
-  return node;
+function renderEmbeddingModelOptions(models) {
+  const embeddingModels = models.filter((m) => m.is_embedding);
+  const data = [
+    { text: 'Automatic — use first available embedding model', value: '', placeholder: true },
+    ...embeddingModels.map((m) => ({
+      text: m.provider_name ? `${m.id} · ${m.provider_name}` : m.id,
+      value: `${m.provider_id}:${m.id}`,
+    })),
+  ];
+  embeddingSelect.setData(data);
+  const selected = state.embeddingProviderId && state.embeddingModelId
+    ? `${state.embeddingProviderId}:${state.embeddingModelId}`
+    : '';
+  if (selected) embeddingSelect.setSelected([selected]);
 }
 
-// setOptionalNumber fills an input with a nullable numeric setting. Empty
-// string signals "use provider default" so the field stays blank.
 function setOptionalNumber(id, value) {
   const input = document.getElementById(id);
   if (!input) return;
@@ -113,19 +137,25 @@ async function save() {
   }
   button.disabled = true;
   try {
+    const embeddingValue = embeddingSelect.getSelected()?.[0] ?? '';
+    const [embProviderId, embModelId] = embeddingValue.includes(':')
+      ? embeddingValue.split(':', 2)
+      : ['', ''];
     await rpc('settings.set', {
       compaction_enabled: document.getElementById('settings-compaction-enabled').checked,
       prompt_caching: document.getElementById('settings-prompt-caching').checked,
       max_tool_rounds: maxToolRounds,
       max_input_tokens: maxInputTokens,
       max_output_tokens: maxOutputTokens,
+      embedding_provider_id: embProviderId || null,
+      embedding_model_id: embModelId || null,
       temperature: optionalNumber('settings-temperature'),
       top_p: optionalNumber('settings-top-p'),
       top_k: optionalNumber('settings-top-k'),
       frequency_penalty: optionalNumber('settings-frequency-penalty'),
       presence_penalty: optionalNumber('settings-presence-penalty'),
     });
-    const model = document.getElementById('settings-preferred-model').value;
+    const model = preferredSelect.getSelected()?.[0] ?? '';
     localStorage.setItem('nusashell.model', model);
     window.dispatchEvent(new CustomEvent('nusashell:preferred-model', { detail: { model } }));
     setStatus('Saved on this device.');
