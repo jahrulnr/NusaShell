@@ -120,6 +120,13 @@ type ChatRequest struct {
 	PromptCaching bool
 	MaxTokens     int
 	Effort        string // reasoning effort: "auto" (omit) or a level from the model's SupportedEfforts
+	// Sampling parameters. nil = use provider default. Set from
+	// domain.Settings at turn start.
+	Temperature      *float64
+	TopP             *float64
+	TopK             *int
+	FrequencyPenalty *float64
+	PresencePenalty  *float64
 }
 
 type ChatUsage struct {

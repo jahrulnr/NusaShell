@@ -1,4 +1,7 @@
-package ai
+// Package responses implements the application.AIProvider port for the
+// OpenAI Responses API (/v1/responses) with SSE streaming, function calling,
+// and usage including cached tokens.
+package responses
 
 import (
 	"context"
@@ -9,36 +12,38 @@ import (
 
 	"nusashell/application"
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/chatcompletion"
+	aiutil "nusashell/infrastructure/ai/internal"
 )
 
-// ResponsesAdapter talks to the OpenAI Responses API (/v1/responses) with
+// Adapter talks to the OpenAI Responses API (/v1/responses) with
 // SSE streaming, function calling, and usage including cached tokens.
-type ResponsesAdapter struct {
+type Adapter struct {
 	BaseURL string
 	APIKey  string
 	Client  *http.Client
 }
 
-func (r *ResponsesAdapter) Kind() domain.ProviderKind { return domain.ProviderResponses }
+func (r *Adapter) Kind() domain.ProviderKind { return domain.ProviderResponses }
 
-func (r *ResponsesAdapter) responsesURL() string {
-	return joinEndpoint(r.BaseURL, "/responses")
+func (r *Adapter) responsesURL() string {
+	return aiutil.JoinEndpoint(r.BaseURL, "/responses")
 }
 
 // chatFallback returns an OpenAI chat-completions adapter sharing this
 // adapter's base URL, API key, and HTTP client. Used when the Responses API
 // is not available (404/405/unsupported), falling back to /chat/completions.
-func (r *ResponsesAdapter) chatFallback() *OpenAIAdapter {
-	return &OpenAIAdapter{BaseURL: r.BaseURL, APIKey: r.APIKey, Client: r.Client}
+func (r *Adapter) chatFallback() *chatcompletion.Adapter {
+	return &chatcompletion.Adapter{BaseURL: r.BaseURL, APIKey: r.APIKey, Client: r.Client}
 }
 
-func (r *ResponsesAdapter) headers() map[string]string {
+func (r *Adapter) headers() map[string]string {
 	h := map[string]string{}
 	if r.APIKey != "" {
 		h["Authorization"] = "Bearer " + r.APIKey
 	}
-	if isOpenRouterURL(r.BaseURL) {
-		for k, v := range openRouterAttributionHeaders() {
+	if aiutil.IsOpenRouterURL(r.BaseURL) {
+		for k, v := range aiutil.OpenRouterAttributionHeaders() {
 			h[k] = v
 		}
 	}
@@ -70,13 +75,17 @@ type responsesContentBlock struct {
 }
 
 type responsesRequest struct {
-	Model           string               `json:"model"`
-	Instructions    string               `json:"instructions,omitempty"`
-	Input           []responsesInputItem `json:"input,omitempty"`
-	Tools           []responsesToolDef   `json:"tools,omitempty"`
-	Stream          bool                 `json:"stream"`
-	MaxOutputTokens int                  `json:"max_output_tokens,omitempty"`
-	Reasoning       *responsesReasoning  `json:"reasoning,omitempty"`
+	Model            string               `json:"model"`
+	Instructions     string               `json:"instructions,omitempty"`
+	Input            []responsesInputItem `json:"input,omitempty"`
+	Tools            []responsesToolDef   `json:"tools,omitempty"`
+	Stream           bool                 `json:"stream"`
+	MaxOutputTokens  int                  `json:"max_output_tokens,omitempty"`
+	Reasoning        *responsesReasoning  `json:"reasoning,omitempty"`
+	Temperature      *float64             `json:"temperature,omitempty"`
+	TopP             *float64             `json:"top_p,omitempty"`
+	FrequencyPenalty *float64             `json:"frequency_penalty,omitempty"`
+	PresencePenalty  *float64             `json:"presence_penalty,omitempty"`
 }
 
 type responsesReasoning struct {
@@ -98,13 +107,6 @@ type responsesUsage struct {
 	} `json:"input_tokens_details"`
 }
 
-// strJSON encodes a plain string as a JSON string RawMessage (message
-// content in the Responses API is a string, not a block array).
-func strJSON(s string) json.RawMessage {
-	b, _ := json.Marshal(s)
-	return b
-}
-
 // toResponsesInput flattens ChatMessages into the canonical Responses API
 // input shape: message items carry string content, function calls and their
 // outputs are top-level items.
@@ -113,14 +115,14 @@ func toResponsesInput(msgs []application.ChatMessage) []responsesInputItem {
 	for _, m := range msgs {
 		switch m.Role {
 		case "user":
-			content := strJSON(m.Content)
+			content := aiutil.StrJSON(m.Content)
 			if len(m.Attachments) > 0 {
-				content = mustJSON(responsesUserContent(m))
+				content = aiutil.MustJSON(responsesUserContent(m))
 			}
 			out = append(out, responsesInputItem{Role: "user", Content: content})
 		case "assistant":
 			if m.Content != "" {
-				out = append(out, responsesInputItem{Role: "assistant", Content: strJSON(m.Content)})
+				out = append(out, responsesInputItem{Role: "assistant", Content: aiutil.StrJSON(m.Content)})
 			}
 			for _, tc := range m.ToolCalls {
 				out = append(out, responsesInputItem{
@@ -147,7 +149,7 @@ func responsesUserContent(message application.ChatMessage) []map[string]any {
 	for _, attachment := range message.Attachments {
 		switch attachment.Type {
 		case "text":
-			blocks = append(blocks, map[string]any{"type": "input_text", "text": textAttachmentContent(attachment)})
+			blocks = append(blocks, map[string]any{"type": "input_text", "text": aiutil.TextAttachmentContent(attachment)})
 		case "image":
 			blocks = append(blocks, map[string]any{"type": "input_image", "image_url": attachment.DataURL})
 		case "file":
@@ -161,11 +163,15 @@ func responsesUserContent(message application.ChatMessage) []map[string]any {
 
 func buildResponsesRequest(req application.ChatRequest, stream bool) responsesRequest {
 	out := responsesRequest{
-		Model:           req.Model,
-		Instructions:    req.System,
-		Input:           toResponsesInput(req.Messages),
-		Stream:          stream,
-		MaxOutputTokens: req.MaxTokens,
+		Model:            req.Model,
+		Instructions:     req.System,
+		Input:            toResponsesInput(req.Messages),
+		Stream:           stream,
+		MaxOutputTokens:  req.MaxTokens,
+		Temperature:      req.Temperature,
+		TopP:             req.TopP,
+		FrequencyPenalty: req.FrequencyPenalty,
+		PresencePenalty:  req.PresencePenalty,
 	}
 	if req.Effort != "" && req.Effort != "auto" {
 		out.Reasoning = &responsesReasoning{Effort: req.Effort}
@@ -199,10 +205,10 @@ type responsesNonStreamResponse struct {
 	} `json:"error"`
 }
 
-func (r *ResponsesAdapter) Complete(ctx context.Context, req application.ChatRequest) (application.ChatResponse, error) {
+func (r *Adapter) Complete(ctx context.Context, req application.ChatRequest) (application.ChatResponse, error) {
 	var out responsesNonStreamResponse
-	if err := doJSON(ctx, r.Client, http.MethodPost, r.responsesURL(), r.headers(), buildResponsesRequest(req, false), &out); err != nil {
-		if isResponsesUnsupported(err) {
+	if err := aiutil.DoJSON(ctx, r.Client, http.MethodPost, r.responsesURL(), r.headers(), buildResponsesRequest(req, false), &out); err != nil {
+		if aiutil.IsResponsesUnsupported(err) {
 			return r.chatFallback().Complete(ctx, req)
 		}
 		return application.ChatResponse{}, err
@@ -231,25 +237,25 @@ func (r *ResponsesAdapter) Complete(ctx context.Context, req application.ChatReq
 			}
 		case "function_call":
 			resp.ToolCalls = append(resp.ToolCalls, domain.ToolCall{
-				ID: item.CallID, Name: item.Name, Args: repairToolCallArguments(item.Args),
+				ID: item.CallID, Name: item.Name, Args: aiutil.RepairToolCallArguments(item.Args),
 			})
 		}
 	}
 	return resp, nil
 }
 
-func (r *ResponsesAdapter) Stream(ctx context.Context, req application.ChatRequest, onDelta, onReasoning func(string)) (application.ChatResponse, error) {
-	resp, err := openSSE(ctx, r.Client, r.responsesURL(), r.headers(), buildResponsesRequest(req, true))
+func (r *Adapter) Stream(ctx context.Context, req application.ChatRequest, onDelta, onReasoning func(string)) (application.ChatResponse, error) {
+	resp, err := aiutil.OpenSSE(ctx, r.Client, r.responsesURL(), r.headers(), buildResponsesRequest(req, true))
 	if err != nil {
-		if isResponsesUnsupported(err) {
+		if aiutil.IsResponsesUnsupported(err) {
 			return r.chatFallback().Stream(ctx, req, onDelta, onReasoning)
 		}
-		if isStreamUnsupportedError(err) {
-			return streamFallbackToComplete(ctx, r, req, onDelta, onReasoning)
+		if aiutil.IsStreamUnsupportedError(err) {
+			return aiutil.StreamFallbackToComplete(ctx, r, req, onDelta, onReasoning)
 		}
-		if shouldRetryWithoutImages(err, req.Messages, ctx) {
+		if aiutil.ShouldRetryWithoutImages(err, req.Messages, ctx) {
 			stripped := req
-			stripped.Messages = stripImages(req.Messages)
+			stripped.Messages = aiutil.StripImages(req.Messages)
 			return r.Stream(ctx, stripped, onDelta, onReasoning)
 		}
 		return application.ChatResponse{}, err
@@ -260,7 +266,7 @@ func (r *ResponsesAdapter) Stream(ctx context.Context, req application.ChatReque
 	toolByIndex := map[int]*domain.ToolCall{}
 	streamErr := error(nil)
 	completed := false
-	readErr := readSSE(ctx, resp.Body, defaultIdleTimeout, func(ev sseEvent) error {
+	readErr := aiutil.ReadSSE(ctx, resp.Body, aiutil.DefaultIdleTimeout, func(ev aiutil.Event) error {
 		// gateways (OpenRouter) terminate Responses streams with the chat
 		// completions sentinel
 		if ev.Data == "[DONE]" {
@@ -283,7 +289,7 @@ func (r *ResponsesAdapter) Stream(ctx context.Context, req application.ChatReque
 				Usage responsesUsage `json:"usage"`
 			} `json:"response"`
 		}
-		if err := decodeData(ev, &frame); err != nil {
+		if err := aiutil.DecodeData(ev, &frame); err != nil {
 			return err
 		}
 		switch frame.Type {
@@ -323,31 +329,35 @@ func (r *ResponsesAdapter) Stream(ctx context.Context, req application.ChatReque
 		return nil
 	})
 	if readErr != nil {
-		return result, retryableSSEReadError(readErr)
+		return result, aiutil.RetryableSSEReadError(readErr)
 	}
 	if streamErr != nil {
 		return result, streamErr
 	}
-	if !completed {
-		emptyErr := incompleteSSEError()
-		if isIncompleteEmptyStream(emptyErr, result) {
-			return streamFallbackToComplete(ctx, r, req, onDelta, onReasoning)
-		}
-		return result, emptyErr
-	}
+	// Finalize accumulated tool calls before the incomplete-stream check so
+	// that a stream which closed without the terminator but carried tool-call
+	// deltas is NOT misclassified as empty (which would silently discard the
+	// tool calls and fall back to non-streaming).
 	seen := map[string]bool{}
 	for _, tc := range toolByIndex {
 		if tc.ID == "" || seen[tc.ID] {
 			continue
 		}
 		seen[tc.ID] = true
-		tc.Args = repairToolCallArguments(tc.Args)
+		tc.Args = aiutil.RepairToolCallArguments(tc.Args)
 		result.ToolCalls = append(result.ToolCalls, *tc)
+	}
+	if !completed {
+		emptyErr := aiutil.IncompleteSSEError()
+		if aiutil.IsIncompleteEmptyStream(emptyErr, result) {
+			return aiutil.StreamFallbackToComplete(ctx, r, req, onDelta, onReasoning)
+		}
+		return result, emptyErr
 	}
 	return result, nil
 }
 
-func (r *ResponsesAdapter) ListModels(ctx context.Context, apiKey string) ([]domain.Model, error) {
+func (r *Adapter) ListModels(ctx context.Context, apiKey string) ([]domain.Model, error) {
 	base := strings.TrimRight(r.BaseURL, "/")
 	url := base + "/models"
 	headers := map[string]string{}
@@ -370,7 +380,7 @@ func (r *ResponsesAdapter) ListModels(ctx context.Context, apiKey string) ([]dom
 			} `json:"reasoning"`
 		} `json:"data"`
 	}
-	if err := doJSON(ctx, r.Client, http.MethodGet, url, headers, nil, &out); err != nil {
+	if err := aiutil.DoJSON(ctx, r.Client, http.MethodGet, url, headers, nil, &out); err != nil {
 		return nil, err
 	}
 	models := make([]domain.Model, 0, len(out.Data))
@@ -378,8 +388,8 @@ func (r *ResponsesAdapter) ListModels(ctx context.Context, apiKey string) ([]dom
 		if m.ID == "" {
 			continue
 		}
-		model := domain.Model{ID: m.ID, Context: m.ContextLength, MaxOutput: m.MaxTokens, Description: m.Description, SupportedEfforts: normalizeEfforts(m.Reasoning.SupportedEfforts), DefaultEffort: normalizeEffort(m.Reasoning.DefaultEffort)}
-		if v, err := parseFloat(m.Pricing.Prompt); err == nil {
+		model := domain.Model{ID: m.ID, Context: m.ContextLength, MaxOutput: m.MaxTokens, Description: m.Description, SupportedEfforts: aiutil.NormalizeEfforts(m.Reasoning.SupportedEfforts), DefaultEffort: aiutil.NormalizeEffort(m.Reasoning.DefaultEffort)}
+		if v, err := aiutil.ParseFloat(m.Pricing.Prompt); err == nil {
 			model.InputCost = v * 1_000_000
 		}
 		models = append(models, model)

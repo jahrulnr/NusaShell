@@ -33,6 +33,11 @@ async function refresh() {
     document.getElementById('settings-max-tool-rounds').value = settings.max_tool_rounds ?? 8;
     document.getElementById('settings-max-input-tokens').value = settings.max_input_tokens ?? 200000;
     document.getElementById('settings-max-output-tokens').value = settings.max_output_tokens ?? 65536;
+    setOptionalNumber('settings-temperature', settings.temperature);
+    setOptionalNumber('settings-top-p', settings.top_p);
+    setOptionalNumber('settings-top-k', settings.top_k);
+    setOptionalNumber('settings-frequency-penalty', settings.frequency_penalty);
+    setOptionalNumber('settings-presence-penalty', settings.presence_penalty);
   } else {
     setStatus(`Could not load runtime settings: ${settingsResult.reason.message}`, true);
   }
@@ -66,6 +71,23 @@ function option(label, value) {
   return node;
 }
 
+// setOptionalNumber fills an input with a nullable numeric setting. Empty
+// string signals "use provider default" so the field stays blank.
+function setOptionalNumber(id, value) {
+  const input = document.getElementById(id);
+  if (!input) return;
+  input.value = value == null ? '' : String(value);
+}
+
+// optionalNumber reads an input and returns null when blank or invalid so
+// the backend treats it as "use provider default".
+function optionalNumber(id) {
+  const raw = document.getElementById(id)?.value?.trim();
+  if (raw === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
 function renderAppInfo(info) {
   document.getElementById('settings-version').textContent = info.version || 'development build';
   document.getElementById('settings-data-dir').textContent = info.data_dir || '—';
@@ -97,6 +119,11 @@ async function save() {
       max_tool_rounds: maxToolRounds,
       max_input_tokens: maxInputTokens,
       max_output_tokens: maxOutputTokens,
+      temperature: optionalNumber('settings-temperature'),
+      top_p: optionalNumber('settings-top-p'),
+      top_k: optionalNumber('settings-top-k'),
+      frequency_penalty: optionalNumber('settings-frequency-penalty'),
+      presence_penalty: optionalNumber('settings-presence-penalty'),
     });
     const model = document.getElementById('settings-preferred-model').value;
     localStorage.setItem('nusashell.model', model);

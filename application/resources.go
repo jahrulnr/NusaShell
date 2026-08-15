@@ -2,6 +2,8 @@ package application
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -362,6 +364,50 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 		}
 		s.MaxOutputTokens = *req.MaxOutputTokens
 	}
+	// Sampling parameters use json.RawMessage to distinguish three states:
+	// absent (don't change), null (clear to nil), value (set). A *float64
+	// with omitempty cannot tell null from absent, so once set the parameter
+	// could never be cleared.
+	if err := applyOptionalFloat(req.Temperature, func(v float64) error {
+		if v < 0 || v > 2 {
+			return fmt.Errorf("temperature must be between 0 and 2")
+		}
+		return nil
+	}, &s.Temperature); err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
+	}
+	if err := applyOptionalFloat(req.TopP, func(v float64) error {
+		if v < 0 || v > 1 {
+			return fmt.Errorf("top_p must be between 0 and 1")
+		}
+		return nil
+	}, &s.TopP); err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
+	}
+	if err := applyOptionalInt(req.TopK, func(v int) error {
+		if v < 1 {
+			return fmt.Errorf("top_k must be at least 1")
+		}
+		return nil
+	}, &s.TopK); err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
+	}
+	if err := applyOptionalFloat(req.FrequencyPenalty, func(v float64) error {
+		if v < -2 || v > 2 {
+			return fmt.Errorf("frequency_penalty must be between -2 and 2")
+		}
+		return nil
+	}, &s.FrequencyPenalty); err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
+	}
+	if err := applyOptionalFloat(req.PresencePenalty, func(v float64) error {
+		if v < -2 || v > 2 {
+			return fmt.Errorf("presence_penalty must be between -2 and 2")
+		}
+		return nil
+	}, &s.PresencePenalty); err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
+	}
 	if err := a.Settings.Set(s); err != nil {
 		return nil, rpcInternal(err)
 	}
@@ -376,5 +422,53 @@ func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 		MaxToolRounds:       s.MaxToolRounds,
 		MaxInputTokens:      s.MaxInputTokens,
 		MaxOutputTokens:     s.MaxOutputTokens,
+		Temperature:         s.Temperature,
+		TopP:                s.TopP,
+		TopK:                s.TopK,
+		FrequencyPenalty:    s.FrequencyPenalty,
+		PresencePenalty:     s.PresencePenalty,
 	}
+}
+
+// applyOptionalFloat parses a json.RawMessage sampling parameter in three
+// states: nil (absent — don't change), "null" (clear to nil), or a float64
+// value (validate then set). A *float64 with omitempty cannot distinguish
+// null from absent, so json.RawMessage is used on the wire instead.
+func applyOptionalFloat(raw json.RawMessage, validate func(float64) error, target **float64) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	if string(raw) == "null" {
+		*target = nil
+		return nil
+	}
+	var v float64
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return fmt.Errorf("invalid number: %w", err)
+	}
+	if err := validate(v); err != nil {
+		return err
+	}
+	*target = &v
+	return nil
+}
+
+// applyOptionalInt is the integer variant of applyOptionalFloat for top_k.
+func applyOptionalInt(raw json.RawMessage, validate func(int) error, target **int) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	if string(raw) == "null" {
+		*target = nil
+		return nil
+	}
+	var v int
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return fmt.Errorf("invalid integer: %w", err)
+	}
+	if err := validate(v); err != nil {
+		return err
+	}
+	*target = &v
+	return nil
 }

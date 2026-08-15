@@ -1,16 +1,40 @@
-package ai
+package chatcompletion
 
 import (
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"nusashell/application"
+	"nusashell/domain"
 )
 
-// TestOpenAIListModelsParsesOpenRouterFields: the chat adapter must parse
-// context_length, max_tokens, description, and pricing.prompt from an
-// OpenRouter-shaped /models response, not just the model id.
+func TestChatCompletionAdapterEncodesAttachments(t *testing.T) {
+	req := application.ChatRequest{
+		Model: "test-model",
+		Messages: []application.ChatMessage{{
+			Role:    "user",
+			Content: "Review these files",
+			Attachments: []domain.Attachment{
+				{Type: "text", Name: "notes.txt", MediaType: "text/plain", Content: "Local notes"},
+				{Type: "image", Name: "pixel.png", MediaType: "image/png", DataURL: "data:image/png;base64,iVBORw0KGgo="},
+				{Type: "file", Name: "brief.pdf", MediaType: "application/pdf", DataURL: "data:application/pdf;base64,JVBERi0="},
+			},
+		}},
+	}
+
+	body := marshalRequest(t, buildRequest(req, false))
+	if !containsAll(body, "Attached text file: notes.txt\\n\\nLocal notes", "image_url", "data:image/png;base64,iVBORw0KGgo=", "[Attached document: brief.pdf (application/pdf)]") {
+		t.Fatalf("chat attachment mapping = %s", body)
+	}
+	if strings.Contains(body, "file_data") {
+		t.Fatalf("chat completions must use the Electron-compatible document marker: %s", body)
+	}
+}
+
 func TestOpenAIListModelsParsesOpenRouterFields(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/models" {
@@ -43,7 +67,7 @@ func TestOpenAIListModelsParsesOpenRouterFields(t *testing.T) {
 	}))
 	defer server.Close()
 
-	adapter := &OpenAIAdapter{BaseURL: server.URL + "/v1", Client: server.Client()}
+	adapter := &Adapter{BaseURL: server.URL + "/v1", Client: server.Client()}
 	models, err := adapter.ListModels(context.Background(), "test-key")
 	if err != nil {
 		t.Fatalf("ListModels failed: %v", err)
@@ -63,7 +87,7 @@ func TestOpenAIListModelsParsesOpenRouterFields(t *testing.T) {
 		t.Fatalf("model 0 max_output = %d, want 16384", m1.MaxOutput)
 	}
 	if m1.Description != "GPT-4o is a multimodal model." {
-		t.Fatalf("model 0 description = %q", m1.Description)
+		t.Fatalf("model 0 description = %q, want GPT-4o is a multimodal model.", m1.Description)
 	}
 	if m1.InputCost != 5 {
 		t.Fatalf("model 0 input_cost = %v, want 5 (USD per 1M = 0.000005 * 1e6)", m1.InputCost)
@@ -75,35 +99,20 @@ func TestOpenAIListModelsParsesOpenRouterFields(t *testing.T) {
 	}
 }
 
-// TestResponsesListModelsParsesOpenRouterFields: same enrichment for the
-// responses adapter.
-func TestResponsesListModelsParsesOpenRouterFields(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
-			"data": []map[string]any{
-				{
-					"id":             "openai/o3-mini",
-					"context_length": 200000,
-					"max_tokens":     100000,
-					"description":    "Reasoning model.",
-					"pricing":        map[string]any{"prompt": "0.0000011"},
-				},
-			},
-		})
-	}))
-	defer server.Close()
+func containsAll(value string, want ...string) bool {
+	for _, item := range want {
+		if !strings.Contains(value, item) {
+			return false
+		}
+	}
+	return true
+}
 
-	adapter := &ResponsesAdapter{BaseURL: server.URL + "/v1", Client: server.Client()}
-	models, err := adapter.ListModels(context.Background(), "test-key")
+func marshalRequest(t *testing.T, value any) string {
+	t.Helper()
+	body, err := json.Marshal(value)
 	if err != nil {
-		t.Fatalf("ListModels failed: %v", err)
+		t.Fatal(err)
 	}
-	if len(models) != 1 {
-		t.Fatalf("expected 1 model, got %d", len(models))
-	}
-	m := models[0]
-	if m.Context != 200000 || m.MaxOutput != 100000 || m.Description != "Reasoning model." {
-		t.Fatalf("enriched model = %+v, want context=200000 max_output=100000", m)
-	}
+	return string(body)
 }

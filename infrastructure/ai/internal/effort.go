@@ -1,4 +1,4 @@
-package ai
+package aiutil
 
 import "strings"
 
@@ -26,9 +26,9 @@ var effortAliases = map[string]string{
 	"default": "auto",
 }
 
-// normalizeEffort canonicalizes a single effort level. Unknown values map to
+// NormalizeEffort canonicalizes a single effort level. Unknown values map to
 // "auto" (omit on the wire).
-func normalizeEffort(raw string) string {
+func NormalizeEffort(raw string) string {
 	s := strings.ToLower(strings.TrimSpace(raw))
 	if s == "" {
 		return "auto"
@@ -45,17 +45,17 @@ func normalizeEffort(raw string) string {
 	return "auto"
 }
 
-// normalizeEfforts deduplicates a list of effort levels, dropping "auto" and
+// NormalizeEfforts deduplicates a list of effort levels, dropping "auto" and
 // unknown values. Returns nil when the input is empty or contains no valid
 // levels — callers treat nil as "reasoning effort not supported".
-func normalizeEfforts(raws []string) []string {
+func NormalizeEfforts(raws []string) []string {
 	if len(raws) == 0 {
 		return nil
 	}
 	seen := map[string]bool{}
 	var out []string
 	for _, raw := range raws {
-		eff := normalizeEffort(raw)
+		eff := NormalizeEffort(raw)
 		if eff == "auto" || seen[eff] {
 			continue
 		}

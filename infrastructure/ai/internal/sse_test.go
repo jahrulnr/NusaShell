@@ -1,4 +1,4 @@
-package ai
+package aiutil
 
 import (
 	"context"
@@ -27,7 +27,6 @@ func TestParseRetryAfter(t *testing.T) {
 	}
 }
 
-
 // TestIncompleteSSEErrorDistinct pins the contract for the "stream closed
 // cleanly but the protocol terminator ([DONE] / message_stop /
 // response.completed) never arrived" path. It must:
@@ -36,62 +35,62 @@ func TestParseRetryAfter(t *testing.T) {
 //   - surface a message that names the failure mode (not bare "unexpected EOF")
 //     so operators can tell it apart from a mid-frame network cut.
 func TestIncompleteSSEErrorDistinct(t *testing.T) {
-	err := incompleteSSEError()
+	err := IncompleteSSEError()
 	if !errors.Is(err, io.ErrUnexpectedEOF) {
-		t.Fatalf("incompleteSSEError must wrap io.ErrUnexpectedEOF, got %v", err)
+		t.Fatalf("IncompleteSSEError must wrap io.ErrUnexpectedEOF, got %v", err)
 	}
 	var upstream *application.UpstreamError
 	if !errors.As(err, &upstream) {
-		t.Fatalf("incompleteSSEError must be an *UpstreamError, got %T", err)
+		t.Fatalf("IncompleteSSEError must be an *UpstreamError, got %T", err)
 	}
 	if !upstream.Temporary {
-		t.Fatalf("incompleteSSEError must be marked Temporary")
+		t.Fatalf("IncompleteSSEError must be marked Temporary")
 	}
 	if upstream.Kind != application.KindSSETransport {
-		t.Fatalf("incompleteSSEError Kind = %q, want %q", upstream.Kind, application.KindSSETransport)
+		t.Fatalf("IncompleteSSEError Kind = %q, want %q", upstream.Kind, application.KindSSETransport)
 	}
 	msg := err.Error()
 	if !strings.Contains(msg, "incomplete") && !strings.Contains(msg, "terminator") {
-		t.Fatalf("incompleteSSEError message must name the failure mode, got %q", msg)
+		t.Fatalf("IncompleteSSEError message must name the failure mode, got %q", msg)
 	}
 }
 
 // TestRetryableSSEReadErrorDistinct pins the "connection cut mid-frame" path.
 // It must preserve the underlying error chain, stay retryable, and produce a
-// message distinct from incompleteSSEError so logs can differentiate the two.
+// message distinct from IncompleteSSEError so logs can differentiate the two.
 func TestRetryableSSEReadErrorDistinct(t *testing.T) {
-	err := retryableSSEReadError(io.ErrUnexpectedEOF)
+	err := RetryableSSEReadError(io.ErrUnexpectedEOF)
 	if !errors.Is(err, io.ErrUnexpectedEOF) {
-		t.Fatalf("retryableSSEReadError must preserve io.ErrUnexpectedEOF chain, got %v", err)
+		t.Fatalf("RetryableSSEReadError must preserve io.ErrUnexpectedEOF chain, got %v", err)
 	}
 	var upstream *application.UpstreamError
 	if !errors.As(err, &upstream) {
-		t.Fatalf("retryableSSEReadError must be an *UpstreamError, got %T", err)
+		t.Fatalf("RetryableSSEReadError must be an *UpstreamError, got %T", err)
 	}
 	if !upstream.Temporary {
-		t.Fatalf("retryableSSEReadError must be marked Temporary")
+		t.Fatalf("RetryableSSEReadError must be marked Temporary")
 	}
 	if upstream.Kind != application.KindSSETransport {
-		t.Fatalf("retryableSSEReadError Kind = %q, want %q", upstream.Kind, application.KindSSETransport)
+		t.Fatalf("RetryableSSEReadError Kind = %q, want %q", upstream.Kind, application.KindSSETransport)
 	}
-	if err.Error() == incompleteSSEError().Error() {
-		t.Fatalf("retryableSSEReadError and incompleteSSEError must produce distinguishable messages (both %q)", err.Error())
+	if err.Error() == IncompleteSSEError().Error() {
+		t.Fatalf("RetryableSSEReadError and IncompleteSSEError must produce distinguishable messages (both %q)", err.Error())
 	}
 }
 
 // TestRetryableSSEReadErrorPassesThroughNonRetryable ensures a non-network
-// error (e.g. a JSON decode failure from decodeData, or an error returned by
+// error (e.g. a JSON decode failure from DecodeData, or an error returned by
 // the frame callback) is NOT relabeled as a retryable UpstreamError — only
 // io.ErrUnexpectedEOF and net.Error get the temporary wrapper.
 func TestRetryableSSEReadErrorPassesThroughNonRetryable(t *testing.T) {
 	src := errors.New("invalid SSE frame: bad json")
-	err := retryableSSEReadError(src)
+	err := RetryableSSEReadError(src)
 	if err != src {
-		t.Fatalf("retryableSSEReadError must pass non-network errors through unwrapped, got %v", err)
+		t.Fatalf("RetryableSSEReadError must pass non-network errors through unwrapped, got %v", err)
 	}
 	var upstream *application.UpstreamError
 	if errors.As(err, &upstream) {
-		t.Fatalf("retryableSSEReadError must not wrap non-network errors as UpstreamError, got %v", upstream)
+		t.Fatalf("RetryableSSEReadError must not wrap non-network errors as UpstreamError, got %v", upstream)
 	}
 }
 
@@ -99,13 +98,13 @@ func TestRetryableSSEReadErrorPassesThroughNonRetryable(t *testing.T) {
 // reset) is wrapped as a temporary retryable UpstreamError.
 func TestRetryableSSEReadErrorWrapsNetError(t *testing.T) {
 	src := &netError{msg: "read tcp 1.2.3.4:443: connection reset by peer", timeout: false}
-	err := retryableSSEReadError(src)
+	err := RetryableSSEReadError(src)
 	if !errors.Is(err, src) {
-		t.Fatalf("retryableSSEReadError must preserve the net.Error chain, got %v", err)
+		t.Fatalf("RetryableSSEReadError must preserve the net.Error chain, got %v", err)
 	}
 	var upstream *application.UpstreamError
 	if !errors.As(err, &upstream) || !upstream.Temporary {
-		t.Fatalf("retryableSSEReadError must wrap net.Error as temporary UpstreamError, got %v", err)
+		t.Fatalf("RetryableSSEReadError must wrap net.Error as temporary UpstreamError, got %v", err)
 	}
 }
 
@@ -119,11 +118,11 @@ func (e *netError) Error() string   { return e.msg }
 func (e *netError) Timeout() bool   { return e.timeout }
 func (e *netError) Temporary() bool { return true }
 
-// TestReadSSEIdleTimeout verifies that readSSE with a non-zero idleTimeout
-// returns errIdleTimeout when the stream stalls (sends one chunk then never
+// TestReadSSEIdleTimeout verifies that ReadSSE with a non-zero idleTimeout
+// returns ErrIdleTimeout when the stream stalls (sends one chunk then never
 // sends another). This is the "hung provider" detection path — distinct from
-// a clean close without terminator (incompleteSSEError) or a mid-frame cut
-// (retryableSSEReadError).
+// a clean close without terminator (IncompleteSSEError) or a mid-frame cut
+// (RetryableSSEReadError).
 func TestReadSSEIdleTimeout(t *testing.T) {
 	// Simulate a provider that sends one SSE frame then stalls forever.
 	r, w := io.Pipe()
@@ -135,16 +134,16 @@ func TestReadSSEIdleTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	var got []sseEvent
-	err := readSSE(ctx, r, 50*time.Millisecond, func(ev sseEvent) error {
+	var got []Event
+	err := ReadSSE(ctx, r, 50*time.Millisecond, func(ev Event) error {
 		got = append(got, ev)
 		return nil
 	})
-	if !errors.Is(err, errIdleTimeout) {
-		t.Fatalf("readSSE with idle timeout must return errIdleTimeout on stall, got %v", err)
+	if !errors.Is(err, ErrIdleTimeout) {
+		t.Fatalf("ReadSSE with idle timeout must return ErrIdleTimeout on stall, got %v", err)
 	}
 	if len(got) == 0 {
-		t.Fatalf("readSSE must deliver the first chunk before timing out")
+		t.Fatalf("ReadSSE must deliver the first chunk before timing out")
 	}
 }
 
@@ -159,9 +158,9 @@ func TestReadSSEIdleTimeoutDisabled(t *testing.T) {
 		w.Close()
 	}()
 
-	err := readSSE(context.Background(), r, 0, func(ev sseEvent) error { return nil })
+	err := ReadSSE(context.Background(), r, 0, func(ev Event) error { return nil })
 	if err != nil {
-		t.Fatalf("readSSE with idleTimeout=0 must not time out when stream closes, got %v", err)
+		t.Fatalf("ReadSSE with idleTimeout=0 must not time out when stream closes, got %v", err)
 	}
 }
 
@@ -169,13 +168,13 @@ func TestReadSSEIdleTimeoutDisabled(t *testing.T) {
 // closes cleanly within the idle window does NOT trigger a timeout.
 func TestReadSSEIdleTimeoutCompletes(t *testing.T) {
 	r := strings.NewReader("data: {\"choices\":[{}]}\n\ndata: [DONE]\n\n")
-	err := readSSE(context.Background(), r, 5*time.Second, func(ev sseEvent) error { return nil })
+	err := ReadSSE(context.Background(), r, 5*time.Second, func(ev Event) error { return nil })
 	if err != nil {
-		t.Fatalf("readSSE must not time out on a completing stream, got %v", err)
+		t.Fatalf("ReadSSE must not time out on a completing stream, got %v", err)
 	}
 }
 
-// TestIdleTimeoutErrorKind verifies that errIdleTimeout is wrapped as
+// TestIdleTimeoutErrorKind verifies that ErrIdleTimeout is wrapped as
 // KindIdleTimeout by the adapter-level helper.
 func TestIdleTimeoutErrorKind(t *testing.T) {
 	err := idleTimeoutUpstreamError()
@@ -209,8 +208,8 @@ func TestIsOpenRouterURL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.url, func(t *testing.T) {
-			if got := isOpenRouterURL(tt.url); got != tt.want {
-				t.Fatalf("isOpenRouterURL(%q) = %t, want %t", tt.url, got, tt.want)
+			if got := IsOpenRouterURL(tt.url); got != tt.want {
+				t.Fatalf("IsOpenRouterURL(%q) = %t, want %t", tt.url, got, tt.want)
 			}
 		})
 	}
@@ -219,7 +218,7 @@ func TestIsOpenRouterURL(t *testing.T) {
 // TestOpenRouterAttributionHeaders verifies the attribution headers are
 // present and carry the expected NusaShell identification values.
 func TestOpenRouterAttributionHeaders(t *testing.T) {
-	h := openRouterAttributionHeaders()
+	h := OpenRouterAttributionHeaders()
 	if h["http-referer"] == "" {
 		t.Fatal("missing http-referer header")
 	}
@@ -254,8 +253,8 @@ func TestIsStreamUnsupported(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isStreamUnsupported(tt.status, tt.body); got != tt.want {
-				t.Fatalf("isStreamUnsupported(%d, %q) = %t, want %t", tt.status, tt.body, got, tt.want)
+			if got := IsStreamUnsupported(tt.status, tt.body); got != tt.want {
+				t.Fatalf("IsStreamUnsupported(%d, %q) = %t, want %t", tt.status, tt.body, got, tt.want)
 			}
 		})
 	}
@@ -285,8 +284,8 @@ func TestIsResponsesUnsupported(t *testing.T) {
 				StatusCode: tt.status,
 				Err:        errors.New(tt.body),
 			}
-			if got := isResponsesUnsupported(err); got != tt.want {
-				t.Fatalf("isResponsesUnsupported(%d, %q) = %t, want %t", tt.status, tt.body, got, tt.want)
+			if got := IsResponsesUnsupported(err); got != tt.want {
+				t.Fatalf("IsResponsesUnsupported(%d, %q) = %t, want %t", tt.status, tt.body, got, tt.want)
 			}
 		})
 	}
@@ -308,8 +307,8 @@ func TestLooksLikeSseText(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			if got := looksLikeSseText(tt.input); got != tt.want {
-				t.Fatalf("looksLikeSseText(%q) = %t, want %t", tt.input, got, tt.want)
+			if got := LooksLikeSseText(tt.input); got != tt.want {
+				t.Fatalf("LooksLikeSseText(%q) = %t, want %t", tt.input, got, tt.want)
 			}
 		})
 	}
@@ -365,8 +364,8 @@ func TestShouldRetryWithoutImages(t *testing.T) {
 			if tt.hasImage {
 				msgs[0].Attachments = []domain.Attachment{{Type: "image", DataURL: "data:image/png;base64,abc"}}
 			}
-			if got := shouldRetryWithoutImages(tt.err, msgs, tt.ctx); got != tt.want {
-				t.Fatalf("shouldRetryWithoutImages = %t, want %t", got, tt.want)
+			if got := ShouldRetryWithoutImages(tt.err, msgs, tt.ctx); got != tt.want {
+				t.Fatalf("ShouldRetryWithoutImages = %t, want %t", got, tt.want)
 			}
 		})
 	}
@@ -390,9 +389,9 @@ func TestRepairToolCallArguments(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := repairToolCallArguments(tt.input)
+			got := RepairToolCallArguments(tt.input)
 			if got != tt.want {
-				t.Fatalf("repairToolCallArguments(%q) = %q, want %q", tt.input, got, tt.want)
+				t.Fatalf("RepairToolCallArguments(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}

@@ -1,7 +1,6 @@
-// Package ai implements the application AI provider port for Anthropic and
-// OpenAI-compatible chat endpoints, including SSE streaming, tool calling,
-// and Anthropic prompt caching.
-package ai
+// Package aiutil provides shared SSE streaming, HTTP, and error-handling
+// utilities for the AI provider adapters under infrastructure/ai/.
+package aiutil
 
 import (
 	"bufio"
@@ -21,33 +20,33 @@ import (
 	"nusashell/application"
 )
 
-// defaultIdleTimeout is the per-chunk stall window for SSE streams. The timer
+// DefaultIdleTimeout is the per-chunk stall window for SSE streams. The timer
 // resets on every successful read, so it only fires when the provider sends
 // no data for this duration — a hung stream, not a slow one. Mirrors the TS
 // createIdleTimeout(DEFAULT_TIMEOUT_MS = 60_000).
-const defaultIdleTimeout = 60 * time.Second
+const DefaultIdleTimeout = 60 * time.Second
 
 // defaultMaxResponseBytes is the safety cap on SSE stream size. Prevents OOM
 // if a provider sends an unexpectedly large response. Mirrors the TS
 // DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024.
 const defaultMaxResponseBytes = 8 * 1024 * 1024
 
-// sseEvent is one Server-Sent Event frame.
-type sseEvent struct {
+// Event is one Server-Sent Event frame.
+type Event struct {
 	Event string
 	Data  string
 }
 
-// errIdleTimeout is returned by readSSE when the stream stalls for the
+// ErrIdleTimeout is returned by ReadSSE when the stream stalls for the
 // configured idle window with no data. It is wrapped as KindIdleTimeout by
 // the adapter.
-var errIdleTimeout = errors.New("SSE stream idle timeout: provider stalled with no data")
+var ErrIdleTimeout = errors.New("SSE stream idle timeout: provider stalled with no data")
 
-// errResponseTooLarge is returned when the SSE stream exceeds
+// ErrResponseTooLarge is returned when the SSE stream exceeds
 // defaultMaxResponseBytes. It is wrapped as a non-retryable UpstreamError.
-var errResponseTooLarge = errors.New("SSE stream exceeded the configured size limit")
+var ErrResponseTooLarge = errors.New("SSE stream exceeded the configured size limit")
 
-// limitedReader wraps an io.Reader and returns errResponseTooLarge when the
+// limitedReader wraps an io.Reader and returns ErrResponseTooLarge when the
 // total bytes read exceed max. Unlike io.LimitReader, it returns a distinct
 // error instead of a silent EOF at the limit.
 type limitedReader struct {
@@ -60,7 +59,7 @@ func (l *limitedReader) Read(p []byte) (int, error) {
 	n, err := l.r.Read(p)
 	l.n += n
 	if l.n > l.max {
-		return n, errResponseTooLarge
+		return n, ErrResponseTooLarge
 	}
 	return n, err
 }
@@ -68,7 +67,7 @@ func (l *limitedReader) Read(p []byte) (int, error) {
 // idleTimeoutReader wraps an io.ReadCloser with a resettable idle timer.
 // Each successful Read resets the timer. If no data arrives for timeout
 // duration, the timer fires, closes the underlying reader (unblocking any
-// pending Read), and subsequent/timed-out reads return errIdleTimeout.
+// pending Read), and subsequent/timed-out reads return ErrIdleTimeout.
 type idleTimeoutReader struct {
 	rc       io.ReadCloser
 	timeout  time.Duration
@@ -94,7 +93,7 @@ func (r *idleTimeoutReader) Read(p []byte) (int, error) {
 	timedOut := r.timedOut
 	r.mu.Unlock()
 	if timedOut {
-		return n, errIdleTimeout
+		return n, ErrIdleTimeout
 	}
 	if n > 0 {
 		r.timer.Reset(r.timeout)
@@ -107,12 +106,12 @@ func (r *idleTimeoutReader) Close() error {
 	return r.rc.Close()
 }
 
-// readSSE streams SSE frames from r, calling fn for each frame until EOF.
+// ReadSSE streams SSE frames from r, calling fn for each frame until EOF.
 // If idleTimeout > 0, the stream is wrapped with an idle watchdog that fires
-// errIdleTimeout when no data arrives for the configured duration. Pass 0 to
+// ErrIdleTimeout when no data arrives for the configured duration. Pass 0 to
 // disable the idle watchdog (original blocking behavior). If maxBytes > 0,
-// the read aborts with errResponseTooLarge when the stream exceeds the limit.
-func readSSE(ctx context.Context, r io.Reader, idleTimeout time.Duration, fn func(ev sseEvent) error) error {
+// the read aborts with ErrResponseTooLarge when the stream exceeds the limit.
+func ReadSSE(ctx context.Context, r io.Reader, idleTimeout time.Duration, fn func(ev Event) error) error {
 	var body io.Reader = r
 	if idleTimeout > 0 {
 		// Wrap with idle timeout. If r is not a ReadCloser, wrap with
@@ -127,14 +126,14 @@ func readSSE(ctx context.Context, r io.Reader, idleTimeout time.Duration, fn fun
 	body = &limitedReader{r: body, max: defaultMaxResponseBytes}
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-	var ev sseEvent
+	var ev Event
 	flush := func() error {
 		if ev.Data != "" || ev.Event != "" {
 			if err := fn(ev); err != nil {
 				return err
 			}
 		}
-		ev = sseEvent{}
+		ev = Event{}
 		return nil
 	}
 	for scanner.Scan() {
@@ -169,20 +168,20 @@ func readSSE(ctx context.Context, r io.Reader, idleTimeout time.Duration, fn fun
 	return flush()
 }
 
-// decodeData unmarshals an SSE data payload.
-func decodeData[T any](ev sseEvent, out *T) error {
+// DecodeData unmarshals an SSE data payload.
+func DecodeData[T any](ev Event, out *T) error {
 	if ev.Data == "" {
 		return fmt.Errorf("empty SSE data frame")
 	}
 	return json.Unmarshal([]byte(ev.Data), out)
 }
 
-// joinEndpoint appends the operation path to the configured base URL
+// JoinEndpoint appends the operation path to the configured base URL
 // verbatim. The base URL is the API root the user chose — it already carries
 // whatever version segment the endpoint uses (v1, v4, …) — so no version is
 // ever injected. A base that already ends with the operation path is used
 // as-is, letting users paste a full endpoint.
-func joinEndpoint(base, op string) string {
+func JoinEndpoint(base, op string) string {
 	base = strings.TrimRight(base, "/")
 	if strings.HasSuffix(base, op) {
 		return base
@@ -211,10 +210,10 @@ func jsonReq(ctx context.Context, method, url string, headers map[string]string,
 	return req, nil
 }
 
-// openSSE creates an SSE request and validates the HTTP response before a
+// OpenSSE creates an SSE request and validates the HTTP response before a
 // provider-specific stream decoder reads its frames. Wire decoding stays in
 // each adapter because the event shapes differ by provider protocol.
-func openSSE(ctx context.Context, client *http.Client, url string, headers map[string]string, body any) (*http.Response, error) {
+func OpenSSE(ctx context.Context, client *http.Client, url string, headers map[string]string, body any) (*http.Response, error) {
 	req, err := jsonReq(ctx, http.MethodPost, url, headers, body)
 	if err != nil {
 		return nil, err
@@ -241,8 +240,8 @@ func readAllLimit(r io.Reader, n int64) (string, error) {
 	return string(b), err
 }
 
-// doJSON performs a request and decodes the JSON response into out.
-func doJSON(ctx context.Context, client *http.Client, method, url string, headers map[string]string, body any, out any) error {
+// DoJSON performs a request and decodes the JSON response into out.
+func DoJSON(ctx context.Context, client *http.Client, method, url string, headers map[string]string, body any, out any) error {
 	var rd io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -290,11 +289,11 @@ func parseRetryAfter(value string, now time.Time) time.Duration {
 	return 0
 }
 
-// isOpenRouterURL reports whether baseUrl points at an OpenRouter API host.
+// IsOpenRouterURL reports whether baseUrl points at an OpenRouter API host.
 // OpenRouter-specific attribution headers must only be sent to its own hosts;
 // a custom OpenAI-compatible proxy may reject or forward unknown
 // router-specific headers to an unrelated upstream.
-func isOpenRouterURL(baseUrl string) bool {
+func IsOpenRouterURL(baseUrl string) bool {
 	u, err := neturl.Parse(baseUrl)
 	if err != nil {
 		return false
@@ -303,9 +302,9 @@ func isOpenRouterURL(baseUrl string) bool {
 	return host == "openrouter.ai" || strings.HasSuffix(host, ".openrouter.ai")
 }
 
-// openRouterAttributionHeaders returns the OpenRouter ranking/attribution
+// OpenRouterAttributionHeaders returns the OpenRouter ranking/attribution
 // headers NusaShell sends when talking to an OpenRouter endpoint.
-func openRouterAttributionHeaders() map[string]string {
+func OpenRouterAttributionHeaders() map[string]string {
 	return map[string]string{
 		"http-referer":            "https://github.com/jahrulnr/NusaShell",
 		"x-openrouter-title":      "NusaShell",
@@ -321,10 +320,10 @@ var streamUnsupportedPhrases = []string{
 	"not support", "unsupported", "disabled", "not available", "not enabled", "must be false", "non-stream",
 }
 
-// isStreamUnsupported reports whether a 4xx response body indicates the
+// IsStreamUnsupported reports whether a 4xx response body indicates the
 // provider rejects streaming. Auth errors (401/402/403) are excluded — they
 // won't work non-streaming either. 5xx errors are excluded — they're transient.
-func isStreamUnsupported(status int, body string) bool {
+func IsStreamUnsupported(status int, body string) bool {
 	if status == 401 || status == 402 || status == 403 {
 		return false
 	}
@@ -343,12 +342,12 @@ func isStreamUnsupported(status int, body string) bool {
 	return false
 }
 
-// isResponsesUnsupported reports whether an UpstreamError indicates the
+// IsResponsesUnsupported reports whether an UpstreamError indicates the
 // Responses API (/responses) is not available, triggering a fallback to chat
 // completions (/chat/completions). 404/405 are always unsupported; 4xx/5xx
 // bodies with "not found"/"not supported"/"does not support"/"unavailable"
 // are also unsupported.
-func isResponsesUnsupported(err error) bool {
+func IsResponsesUnsupported(err error) bool {
 	var upstream *application.UpstreamError
 	if !errors.As(err, &upstream) {
 		return false
@@ -371,10 +370,10 @@ func isResponsesUnsupported(err error) bool {
 	return false
 }
 
-// looksLikeSseText reports whether a response body string begins with SSE
+// LooksLikeSseText reports whether a response body string begins with SSE
 // framing (data: or event:), used to detect SSE content returned with a
 // non-event-stream content-type.
-func looksLikeSseText(value string) bool {
+func LooksLikeSseText(value string) bool {
 	prefix := strings.TrimLeft(value, " \t\r\n")
 	if len(prefix) > 32 {
 		prefix = prefix[:32]
@@ -383,21 +382,21 @@ func looksLikeSseText(value string) bool {
 	return strings.HasPrefix(prefix, "data:") || strings.HasPrefix(prefix, "event:")
 }
 
-// isStreamUnsupportedError checks whether an UpstreamError from openSSE
+// IsStreamUnsupportedError checks whether an UpstreamError from OpenSSE
 // indicates the provider rejects streaming, triggering a fallback to
 // non-streaming Complete.
-func isStreamUnsupportedError(err error) bool {
+func IsStreamUnsupportedError(err error) bool {
 	var upstream *application.UpstreamError
 	if !errors.As(err, &upstream) || upstream.Err == nil {
 		return false
 	}
-	return isStreamUnsupported(upstream.StatusCode, upstream.Err.Error())
+	return IsStreamUnsupported(upstream.StatusCode, upstream.Err.Error())
 }
 
-// streamFallbackToComplete calls the adapter's Complete method and simulates
+// StreamFallbackToComplete calls the adapter's Complete method and simulates
 // streaming by emitting the full content/reasoning as a single delta. Used
 // when the provider rejects streaming but non-streaming works.
-func streamFallbackToComplete(ctx context.Context, adapter application.AIProvider, req application.ChatRequest, onDelta, onReasoning func(string)) (application.ChatResponse, error) {
+func StreamFallbackToComplete(ctx context.Context, adapter application.AIProvider, req application.ChatRequest, onDelta, onReasoning func(string)) (application.ChatResponse, error) {
 	resp, err := adapter.Complete(ctx, req)
 	if err != nil {
 		return resp, err
@@ -411,11 +410,11 @@ func streamFallbackToComplete(ctx context.Context, adapter application.AIProvide
 	return resp, nil
 }
 
-// shouldRetryWithoutImages reports whether a 4xx provider error should be
+// ShouldRetryWithoutImages reports whether a 4xx provider error should be
 // retried with image attachments stripped. Returns true only when the error
 // is a 4xx UpstreamError, the context is not aborted, and at least one user
 // message carries an image attachment. Mirrors the TS shouldRetryWithoutImages.
-func shouldRetryWithoutImages(err error, messages []application.ChatMessage, ctx context.Context) bool {
+func ShouldRetryWithoutImages(err error, messages []application.ChatMessage, ctx context.Context) bool {
 	if ctx != nil && ctx.Err() != nil {
 		return false
 	}
@@ -439,10 +438,10 @@ func shouldRetryWithoutImages(err error, messages []application.ChatMessage, ctx
 	return false
 }
 
-// stripImages returns a copy of messages with image attachments removed.
+// StripImages returns a copy of messages with image attachments removed.
 // Used to retry a 4xx request that may have been rejected due to image
 // content (some providers/models reject images with a 400).
-func stripImages(messages []application.ChatMessage) []application.ChatMessage {
+func StripImages(messages []application.ChatMessage) []application.ChatMessage {
 	out := make([]application.ChatMessage, len(messages))
 	copy(out, messages)
 	for i := range out {
@@ -460,10 +459,10 @@ func stripImages(messages []application.ChatMessage) []application.ChatMessage {
 	return out
 }
 
-// isIncompleteEmptyStream reports whether the error is incompleteSSEError with
+// IsIncompleteEmptyStream reports whether the error is incompleteSSEError with
 // no accumulated content, indicating an empty response body that may succeed
 // as a non-streaming request.
-func isIncompleteEmptyStream(err error, result application.ChatResponse) bool {
+func IsIncompleteEmptyStream(err error, result application.ChatResponse) bool {
 	var upstream *application.UpstreamError
 	if !errors.As(err, &upstream) || upstream.Kind != application.KindSSETransport {
 		return false
@@ -513,11 +512,11 @@ func stripTrailingCommas(value string) string {
 	return out.String()
 }
 
-// repairToolCallArguments attempts to repair malformed JSON tool call
+// RepairToolCallArguments attempts to repair malformed JSON tool call
 // arguments by stripping markdown fences and trailing commas. Returns "{}"
 // for empty/whitespace input. If the result is not valid JSON, returns "{}".
 // Mirrors the TS repairableJsonCandidates + parseObject pipeline.
-func repairToolCallArguments(value string) string {
+func RepairToolCallArguments(value string) string {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
 		return "{}"
@@ -566,13 +565,15 @@ func extractMarkdownFence(value string) string {
 	return ""
 }
 
-func incompleteSSEError() error {
+// IncompleteSSEError returns the error for the "clean close, no terminator"
+// path.
+func IncompleteSSEError() error {
 	// The HTTP stream closed cleanly (no scanner error) but the provider
 	// never sent the protocol terminator ([DONE] for OpenAI/Responses,
 	// message_stop for Anthropic, response.completed for Responses). This
 	// is the "clean close, no terminator" path — distinct from a mid-frame
 	// TCP cut, which surfaces as a real io.ErrUnexpectedEOF from the body
-	// reader and is wrapped by retryableSSEReadError below. Naming the mode
+	// reader and is wrapped by RetryableSSEReadError below. Naming the mode
 	// lets operators tell the two apart in the retry log.
 	return &application.UpstreamError{
 		Kind:      application.KindSSETransport,
@@ -581,27 +582,29 @@ func incompleteSSEError() error {
 	}
 }
 
-func retryableSSEReadError(err error) error {
+// RetryableSSEReadError wraps mid-frame read failures as retryable
+// UpstreamErrors.
+func RetryableSSEReadError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, errIdleTimeout) {
+	if errors.Is(err, ErrIdleTimeout) {
 		return idleTimeoutUpstreamError()
 	}
-	if errors.Is(err, errResponseTooLarge) {
+	if errors.Is(err, ErrResponseTooLarge) {
 		// Non-retryable: the response is genuinely too large, retrying
 		// will hit the same limit.
 		return &application.UpstreamError{
 			Kind:      application.KindSSETransport,
 			Temporary: false,
-			Err:       errResponseTooLarge,
+			Err:       ErrResponseTooLarge,
 		}
 	}
 	var networkErr net.Error
 	if errors.Is(err, io.ErrUnexpectedEOF) || errors.As(err, &networkErr) {
 		// Mid-frame read failure: the connection was cut while a frame was
 		// in flight. Wrap with a descriptive prefix so this path is
-		// distinguishable from incompleteSSEError in logs.
+		// distinguishable from IncompleteSSEError in logs.
 		return &application.UpstreamError{
 			Kind:      application.KindSSETransport,
 			Temporary: true,
@@ -611,13 +614,13 @@ func retryableSSEReadError(err error) error {
 	return err
 }
 
-// idleTimeoutUpstreamError wraps errIdleTimeout as a retryable UpstreamError
+// idleTimeoutUpstreamError wraps ErrIdleTimeout as a retryable UpstreamError
 // with KindIdleTimeout, so the retry log and event can distinguish a stalled
 // stream from a mid-frame cut or a clean close without terminator.
 func idleTimeoutUpstreamError() error {
 	return &application.UpstreamError{
 		Kind:      application.KindIdleTimeout,
 		Temporary: true,
-		Err:       errIdleTimeout,
+		Err:       ErrIdleTimeout,
 	}
 }

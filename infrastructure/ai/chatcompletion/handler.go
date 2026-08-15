@@ -1,4 +1,6 @@
-package ai
+// Package chatcompletion implements the application.AIProvider port for
+// any OpenAI-compatible /chat/completions endpoint.
+package chatcompletion
 
 import (
 	"context"
@@ -9,28 +11,29 @@ import (
 
 	"nusashell/application"
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/internal"
 )
 
-// OpenAIAdapter talks to any OpenAI-compatible /chat/completions endpoint.
-type OpenAIAdapter struct {
+// Adapter talks to any OpenAI-compatible /chat/completions endpoint.
+type Adapter struct {
 	BaseURL string
 	APIKey  string
 	Client  *http.Client
 }
 
-func (o *OpenAIAdapter) Kind() domain.ProviderKind { return domain.ProviderChat }
+func (o *Adapter) Kind() domain.ProviderKind { return domain.ProviderChat }
 
-func (o *OpenAIAdapter) chatURL() string {
-	return joinEndpoint(o.BaseURL, "/chat/completions")
+func (o *Adapter) chatURL() string {
+	return aiutil.JoinEndpoint(o.BaseURL, "/chat/completions")
 }
 
-func (o *OpenAIAdapter) headers() map[string]string {
+func (o *Adapter) headers() map[string]string {
 	h := map[string]string{}
 	if o.APIKey != "" {
 		h["Authorization"] = "Bearer " + o.APIKey
 	}
-	if isOpenRouterURL(o.BaseURL) {
-		for k, v := range openRouterAttributionHeaders() {
+	if aiutil.IsOpenRouterURL(o.BaseURL) {
+		for k, v := range aiutil.OpenRouterAttributionHeaders() {
 			h[k] = v
 		}
 	}
@@ -62,12 +65,16 @@ type openAITool struct {
 }
 
 type openAIRequest struct {
-	Model           string          `json:"model"`
-	Messages        []openAIMessage `json:"messages"`
-	Tools           []openAITool    `json:"tools,omitempty"`
-	Stream          bool            `json:"stream"`
-	MaxTokens       int             `json:"max_tokens,omitempty"`
-	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
+	Model            string          `json:"model"`
+	Messages         []openAIMessage `json:"messages"`
+	Tools            []openAITool    `json:"tools,omitempty"`
+	Stream           bool            `json:"stream"`
+	MaxTokens        int             `json:"max_tokens,omitempty"`
+	ReasoningEffort  string          `json:"reasoning_effort,omitempty"`
+	Temperature      *float64        `json:"temperature,omitempty"`
+	TopP             *float64        `json:"top_p,omitempty"`
+	FrequencyPenalty *float64        `json:"frequency_penalty,omitempty"`
+	PresencePenalty  *float64        `json:"presence_penalty,omitempty"`
 }
 
 type openAIChunk struct {
@@ -143,7 +150,7 @@ func openAIUserContent(message application.ChatMessage) []map[string]any {
 	for _, attachment := range message.Attachments {
 		switch attachment.Type {
 		case "text":
-			blocks = append(blocks, map[string]any{"type": "text", "text": textAttachmentContent(attachment)})
+			blocks = append(blocks, map[string]any{"type": "text", "text": aiutil.TextAttachmentContent(attachment)})
 		case "image":
 			blocks = append(blocks, map[string]any{
 				"type":      "image_url",
@@ -152,7 +159,7 @@ func openAIUserContent(message application.ChatMessage) []map[string]any {
 		case "file":
 			// Chat Completions has no portable file-input part. Electron keeps
 			// the document visible to the model as a descriptive text block.
-			blocks = append(blocks, map[string]any{"type": "text", "text": documentAttachmentContent(attachment)})
+			blocks = append(blocks, map[string]any{"type": "text", "text": aiutil.DocumentAttachmentContent(attachment)})
 		}
 	}
 	return blocks
@@ -175,11 +182,15 @@ func openAITools(tools []application.ToolDef) []openAITool {
 
 func buildRequest(req application.ChatRequest, stream bool) openAIRequest {
 	r := openAIRequest{
-		Model:     req.Model,
-		Messages:  toOpenAIMessages(req),
-		Tools:     openAITools(req.Tools),
-		Stream:    stream,
-		MaxTokens: req.MaxTokens,
+		Model:            req.Model,
+		Messages:         toOpenAIMessages(req),
+		Tools:            openAITools(req.Tools),
+		Stream:           stream,
+		MaxTokens:        req.MaxTokens,
+		Temperature:      req.Temperature,
+		TopP:             req.TopP,
+		FrequencyPenalty: req.FrequencyPenalty,
+		PresencePenalty:  req.PresencePenalty,
 	}
 	if req.Effort != "" && req.Effort != "auto" {
 		r.ReasoningEffort = req.Effort
@@ -187,9 +198,9 @@ func buildRequest(req application.ChatRequest, stream bool) openAIRequest {
 	return r
 }
 
-func (o *OpenAIAdapter) Complete(ctx context.Context, req application.ChatRequest) (application.ChatResponse, error) {
+func (o *Adapter) Complete(ctx context.Context, req application.ChatRequest) (application.ChatResponse, error) {
 	var out openAIResponse
-	if err := doJSON(ctx, o.Client, http.MethodPost, o.chatURL(), o.headers(), buildRequest(req, false), &out); err != nil {
+	if err := aiutil.DoJSON(ctx, o.Client, http.MethodPost, o.chatURL(), o.headers(), buildRequest(req, false), &out); err != nil {
 		return application.ChatResponse{}, err
 	}
 	if out.Error != nil {
@@ -202,15 +213,15 @@ func (o *OpenAIAdapter) Complete(ctx context.Context, req application.ChatReques
 	return resp, nil
 }
 
-func (o *OpenAIAdapter) Stream(ctx context.Context, req application.ChatRequest, onDelta, onReasoning func(string)) (application.ChatResponse, error) {
-	resp, err := openSSE(ctx, o.Client, o.chatURL(), o.headers(), buildRequest(req, true))
+func (o *Adapter) Stream(ctx context.Context, req application.ChatRequest, onDelta, onReasoning func(string)) (application.ChatResponse, error) {
+	resp, err := aiutil.OpenSSE(ctx, o.Client, o.chatURL(), o.headers(), buildRequest(req, true))
 	if err != nil {
-		if isStreamUnsupportedError(err) {
-			return streamFallbackToComplete(ctx, o, req, onDelta, onReasoning)
+		if aiutil.IsStreamUnsupportedError(err) {
+			return aiutil.StreamFallbackToComplete(ctx, o, req, onDelta, onReasoning)
 		}
-		if shouldRetryWithoutImages(err, req.Messages, ctx) {
+		if aiutil.ShouldRetryWithoutImages(err, req.Messages, ctx) {
 			stripped := req
-			stripped.Messages = stripImages(req.Messages)
+			stripped.Messages = aiutil.StripImages(req.Messages)
 			return o.Stream(ctx, stripped, onDelta, onReasoning)
 		}
 		return application.ChatResponse{}, err
@@ -220,13 +231,13 @@ func (o *OpenAIAdapter) Stream(ctx context.Context, req application.ChatRequest,
 	var result application.ChatResponse
 	toolAcc := map[int]*domain.ToolCall{}
 	completed := false
-	err = readSSE(ctx, resp.Body, defaultIdleTimeout, func(ev sseEvent) error {
+	err = aiutil.ReadSSE(ctx, resp.Body, aiutil.DefaultIdleTimeout, func(ev aiutil.Event) error {
 		if ev.Data == "[DONE]" {
 			completed = true
 			return nil
 		}
 		var chunk openAIChunk
-		if err := decodeData(ev, &chunk); err != nil {
+		if err := aiutil.DecodeData(ev, &chunk); err != nil {
 			return err
 		}
 		if chunk.Usage != nil {
@@ -266,15 +277,12 @@ func (o *OpenAIAdapter) Stream(ctx context.Context, req application.ChatRequest,
 		return nil
 	})
 	if err != nil {
-		return result, retryableSSEReadError(err)
+		return result, aiutil.RetryableSSEReadError(err)
 	}
-	if !completed {
-		emptyErr := incompleteSSEError()
-		if isIncompleteEmptyStream(emptyErr, result) {
-			return streamFallbackToComplete(ctx, o, req, onDelta, onReasoning)
-		}
-		return result, emptyErr
-	}
+	// Finalize accumulated tool calls before the incomplete-stream check so
+	// that a stream which closed without the terminator but carried tool-call
+	// deltas is NOT misclassified as empty (which would silently discard the
+	// tool calls and fall back to non-streaming).
 	indexes := make([]int, 0, len(toolAcc))
 	for index := range toolAcc {
 		indexes = append(indexes, index)
@@ -282,13 +290,20 @@ func (o *OpenAIAdapter) Stream(ctx context.Context, req application.ChatRequest,
 	sort.Ints(indexes)
 	for _, index := range indexes {
 		tc := toolAcc[index]
-		tc.Args = repairToolCallArguments(tc.Args)
+		tc.Args = aiutil.RepairToolCallArguments(tc.Args)
 		result.ToolCalls = append(result.ToolCalls, *tc)
+	}
+	if !completed {
+		emptyErr := aiutil.IncompleteSSEError()
+		if aiutil.IsIncompleteEmptyStream(emptyErr, result) {
+			return aiutil.StreamFallbackToComplete(ctx, o, req, onDelta, onReasoning)
+		}
+		return result, emptyErr
 	}
 	return result, nil
 }
 
-func (o *OpenAIAdapter) ListModels(ctx context.Context, apiKey string) ([]domain.Model, error) {
+func (o *Adapter) ListModels(ctx context.Context, apiKey string) ([]domain.Model, error) {
 	base := strings.TrimRight(o.BaseURL, "/")
 	url := base + "/models"
 	headers := map[string]string{}
@@ -311,7 +326,7 @@ func (o *OpenAIAdapter) ListModels(ctx context.Context, apiKey string) ([]domain
 			} `json:"reasoning"`
 		} `json:"data"`
 	}
-	if err := doJSON(ctx, o.Client, http.MethodGet, url, headers, nil, &out); err != nil {
+	if err := aiutil.DoJSON(ctx, o.Client, http.MethodGet, url, headers, nil, &out); err != nil {
 		return nil, err
 	}
 	models := make([]domain.Model, 0, len(out.Data))
@@ -319,8 +334,8 @@ func (o *OpenAIAdapter) ListModels(ctx context.Context, apiKey string) ([]domain
 		if m.ID == "" {
 			continue
 		}
-		model := domain.Model{ID: m.ID, Context: m.ContextLength, MaxOutput: m.MaxTokens, Description: m.Description, SupportedEfforts: normalizeEfforts(m.Reasoning.SupportedEfforts), DefaultEffort: normalizeEffort(m.Reasoning.DefaultEffort)}
-		if v, err := parseFloat(m.Pricing.Prompt); err == nil {
+		model := domain.Model{ID: m.ID, Context: m.ContextLength, MaxOutput: m.MaxTokens, Description: m.Description, SupportedEfforts: aiutil.NormalizeEfforts(m.Reasoning.SupportedEfforts), DefaultEffort: aiutil.NormalizeEffort(m.Reasoning.DefaultEffort)}
+		if v, err := aiutil.ParseFloat(m.Pricing.Prompt); err == nil {
 			model.InputCost = v * 1_000_000
 		}
 		models = append(models, model)
@@ -328,14 +343,14 @@ func (o *OpenAIAdapter) ListModels(ctx context.Context, apiKey string) ([]domain
 	return models, nil
 }
 
-func (o *OpenAIAdapter) responseFromOpenAI(out openAIResponse) (application.ChatResponse, error) {
+func (o *Adapter) responseFromOpenAI(out openAIResponse) (application.ChatResponse, error) {
 	if len(out.Choices) == 0 {
 		return application.ChatResponse{}, fmt.Errorf("provider returned no choices")
 	}
 	ch := out.Choices[0]
 	resp := application.ChatResponse{
-		Content:    deref(ch.Message.Content),
-		StopReason: deref(ch.FinishReason),
+		Content:    aiutil.Deref(ch.Message.Content),
+		StopReason: aiutil.Deref(ch.FinishReason),
 	}
 	if out.Usage != nil {
 		resp.Usage = application.ChatUsage{
@@ -347,15 +362,8 @@ func (o *OpenAIAdapter) responseFromOpenAI(out openAIResponse) (application.Chat
 		resp.ToolCalls = append(resp.ToolCalls, domain.ToolCall{
 			ID:   tc.ID,
 			Name: tc.Function.Name,
-			Args: repairToolCallArguments(tc.Function.Arguments),
+			Args: aiutil.RepairToolCallArguments(tc.Function.Arguments),
 		})
 	}
 	return resp, nil
-}
-
-func deref(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }

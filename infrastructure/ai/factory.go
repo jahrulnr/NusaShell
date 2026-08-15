@@ -8,6 +8,9 @@ import (
 
 	"nusashell/application"
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/chatcompletion"
+	"nusashell/infrastructure/ai/messages"
+	"nusashell/infrastructure/ai/responses"
 )
 
 // Factory builds the provider adapter for a stored provider config. It
@@ -16,11 +19,11 @@ func Factory(_ context.Context, p *domain.Provider, apiKey string) (application.
 	client := newProviderHTTPClient()
 	switch p.Kind {
 	case domain.ProviderMessages:
-		return &AnthropicAdapter{BaseURL: p.BaseURL, APIKey: apiKey, Client: client}, nil
+		return &messages.Adapter{BaseURL: p.BaseURL, APIKey: apiKey, Client: client}, nil
 	case domain.ProviderResponses:
-		return &ResponsesAdapter{BaseURL: p.BaseURL, APIKey: apiKey, Client: client}, nil
+		return &responses.Adapter{BaseURL: p.BaseURL, APIKey: apiKey, Client: client}, nil
 	case domain.ProviderChat:
-		return &OpenAIAdapter{BaseURL: p.BaseURL, APIKey: apiKey, Client: client}, nil
+		return &chatcompletion.Adapter{BaseURL: p.BaseURL, APIKey: apiKey, Client: client}, nil
 	default:
 		return nil, &application.ErrUnsupportedProvider{Kind: string(p.Kind)}
 	}

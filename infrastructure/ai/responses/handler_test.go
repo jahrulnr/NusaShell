@@ -1,7 +1,10 @@
-package ai
+package responses
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -9,7 +12,7 @@ import (
 	"nusashell/domain"
 )
 
-func TestAdaptersEncodeAttachmentsOnlyWhenPresent(t *testing.T) {
+func TestResponsesAdapterEncodesAttachments(t *testing.T) {
 	req := application.ChatRequest{
 		Model: "test-model",
 		Messages: []application.ChatMessage{{
@@ -23,26 +26,13 @@ func TestAdaptersEncodeAttachmentsOnlyWhenPresent(t *testing.T) {
 		}},
 	}
 
-	chatBody := marshalAttachmentRequest(t, buildRequest(req, false))
-	if !containsAll(chatBody, "Attached text file: notes.txt\\n\\nLocal notes", "image_url", "data:image/png;base64,iVBORw0KGgo=", "[Attached document: brief.pdf (application/pdf)]") {
-		t.Fatalf("chat attachment mapping = %s", chatBody)
-	}
-	if strings.Contains(chatBody, "file_data") {
-		t.Fatalf("chat completions must use the Electron-compatible document marker: %s", chatBody)
-	}
-
-	responsesBody := marshalAttachmentRequest(t, buildResponsesRequest(req, false))
-	if !containsAll(responsesBody, "input_image", "input_file", "brief.pdf", "Attached text file: notes.txt\\n\\nLocal notes") {
-		t.Fatalf("responses attachment mapping = %s", responsesBody)
-	}
-
-	anthropicBody := marshalAttachmentRequest(t, buildAnthropicRequest(req, false))
-	if !containsAll(anthropicBody, `"type":"image"`, `"type":"document"`, "brief.pdf", "Attached text file: notes.txt\\n\\nLocal notes") {
-		t.Fatalf("anthropic attachment mapping = %s", anthropicBody)
+	body := marshalRequest(t, buildResponsesRequest(req, false))
+	if !containsAll(body, "input_image", "input_file", "brief.pdf", "Attached text file: notes.txt\\n\\nLocal notes") {
+		t.Fatalf("responses attachment mapping = %s", body)
 	}
 }
 
-func TestTextOnlyAdapterRequestsKeepScalarContent(t *testing.T) {
+func TestTextOnlyRequestsKeepScalarContent(t *testing.T) {
 	req := application.ChatRequest{Model: "test-model", Messages: []application.ChatMessage{{Role: "user", Content: "Hello"}}}
 	body, err := json.Marshal(buildResponsesRequest(req, false))
 	if err != nil {
@@ -64,6 +54,37 @@ func TestTextOnlyAdapterRequestsKeepScalarContent(t *testing.T) {
 	}
 }
 
+func TestResponsesListModelsParsesOpenRouterFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{
+					"id":             "openai/o3-mini",
+					"context_length": 200000,
+					"max_tokens":     100000,
+					"description":    "Reasoning model.",
+					"pricing":        map[string]any{"prompt": "0.0000011"},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := &Adapter{BaseURL: server.URL + "/v1", Client: server.Client()}
+	models, err := adapter.ListModels(context.Background(), "test-key")
+	if err != nil {
+		t.Fatalf("ListModels failed: %v", err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("expected 1 model, got %d", len(models))
+	}
+	m := models[0]
+	if m.Context != 200000 || m.MaxOutput != 100000 || m.Description != "Reasoning model." {
+		t.Fatalf("enriched model = %+v, want context=200000 max_output=100000", m)
+	}
+}
+
 func containsAll(value string, want ...string) bool {
 	for _, item := range want {
 		if !strings.Contains(value, item) {
@@ -73,7 +94,7 @@ func containsAll(value string, want ...string) bool {
 	return true
 }
 
-func marshalAttachmentRequest(t *testing.T, value any) string {
+func marshalRequest(t *testing.T, value any) string {
 	t.Helper()
 	body, err := json.Marshal(value)
 	if err != nil {

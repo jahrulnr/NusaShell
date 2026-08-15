@@ -1,4 +1,7 @@
-package ai
+// Package messages implements the application.AIProvider port for the
+// Anthropic Messages API with SSE streaming, tool use, and ephemeral prompt
+// caching.
+package messages
 
 import (
 	"context"
@@ -9,26 +12,27 @@ import (
 
 	"nusashell/application"
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/internal"
 )
 
 const anthropicVersion = "2023-06-01"
 
-// AnthropicAdapter talks to the Anthropic Messages API with SSE streaming,
+// Adapter talks to the Anthropic Messages API with SSE streaming,
 // tool use, and ephemeral prompt caching.
-type AnthropicAdapter struct {
+type Adapter struct {
 	BaseURL string
 	APIKey  string
 	Client  *http.Client
 }
 
-func (a *AnthropicAdapter) Kind() domain.ProviderKind { return domain.ProviderMessages }
+func (a *Adapter) Kind() domain.ProviderKind { return domain.ProviderMessages }
 
 // messagesURL appends the Messages operation. When the base already carries
 // a version or a full endpoint it is honored verbatim; a bare root (e.g.
 // https://api.anthropic.com or a gateway's /api/anthropic compat root) gets
 // the Anthropic-compatible convention suffix /v1/messages — this is how
 // Anthropic-compatible servers (including GLM/Zhipu) expose the endpoint.
-func (a *AnthropicAdapter) messagesURL() string {
+func (a *Adapter) messagesURL() string {
 	base := strings.TrimRight(a.BaseURL, "/")
 	if strings.HasSuffix(base, "/messages") {
 		return base
@@ -39,13 +43,13 @@ func (a *AnthropicAdapter) messagesURL() string {
 	return base + "/v1/messages"
 }
 
-func (a *AnthropicAdapter) headers() map[string]string {
+func (a *Adapter) headers() map[string]string {
 	h := map[string]string{
 		"x-api-key":         a.APIKey,
 		"anthropic-version": anthropicVersion,
 	}
-	if isOpenRouterURL(a.BaseURL) {
-		for k, v := range openRouterAttributionHeaders() {
+	if aiutil.IsOpenRouterURL(a.BaseURL) {
+		for k, v := range aiutil.OpenRouterAttributionHeaders() {
 			h[k] = v
 		}
 	}
@@ -81,12 +85,15 @@ type anthropicMessage struct {
 }
 
 type anthropicRequest struct {
-	Model     string             `json:"model"`
-	MaxTokens int                `json:"max_tokens"`
-	System    json.RawMessage    `json:"system,omitempty"`
-	Messages  []anthropicMessage `json:"messages"`
-	Tools     []anthropicToolDef `json:"tools,omitempty"`
-	Stream    bool               `json:"stream"`
+	Model       string             `json:"model"`
+	MaxTokens   int                `json:"max_tokens"`
+	System      json.RawMessage    `json:"system,omitempty"`
+	Messages    []anthropicMessage `json:"messages"`
+	Tools       []anthropicToolDef `json:"tools,omitempty"`
+	Stream      bool               `json:"stream"`
+	Temperature *float64           `json:"temperature,omitempty"`
+	TopP        *float64           `json:"top_p,omitempty"`
+	TopK        *int               `json:"top_k,omitempty"`
 }
 
 type anthropicToolDef struct {
@@ -112,7 +119,7 @@ func toAnthropicMessages(msgs []application.ChatMessage) []anthropicMessage {
 		case "user":
 			out = append(out, anthropicMessage{
 				Role:    "user",
-				Content: mustJSON(anthropicUserContent(m)),
+				Content: aiutil.MustJSON(anthropicUserContent(m)),
 			})
 		case "assistant":
 			var blocks []anthropicContentBlock
@@ -130,11 +137,11 @@ func toAnthropicMessages(msgs []application.ChatMessage) []anthropicMessage {
 			if len(blocks) == 0 {
 				continue
 			}
-			out = append(out, anthropicMessage{Role: "assistant", Content: mustJSON(blocks)})
+			out = append(out, anthropicMessage{Role: "assistant", Content: aiutil.MustJSON(blocks)})
 		case "tool":
 			out = append(out, anthropicMessage{
 				Role: "user",
-				Content: mustJSON([]anthropicContentBlock{{
+				Content: aiutil.MustJSON([]anthropicContentBlock{{
 					Type:      "tool_result",
 					ToolUseID: m.ToolResult.ToolCallID,
 					Content:   m.ToolResult.Content,
@@ -153,17 +160,17 @@ func anthropicUserContent(message application.ChatMessage) []anthropicContentBlo
 	for _, attachment := range message.Attachments {
 		switch attachment.Type {
 		case "text":
-			blocks = append(blocks, anthropicContentBlock{Type: "text", Text: textAttachmentContent(attachment)})
+			blocks = append(blocks, anthropicContentBlock{Type: "text", Text: aiutil.TextAttachmentContent(attachment)})
 		case "image":
 			blocks = append(blocks, anthropicContentBlock{
 				Type: "image", Source: &anthropicSource{
-					Type: "base64", MediaType: attachment.MediaType, Data: dataURLBase64(attachment.DataURL),
+					Type: "base64", MediaType: attachment.MediaType, Data: aiutil.DataURLBase64(attachment.DataURL),
 				},
 			})
 		case "file":
 			blocks = append(blocks, anthropicContentBlock{
 				Type: "document", Title: attachment.Name, Source: &anthropicSource{
-					Type: "base64", MediaType: attachment.MediaType, Data: dataURLBase64(attachment.DataURL),
+					Type: "base64", MediaType: attachment.MediaType, Data: aiutil.DataURLBase64(attachment.DataURL),
 				},
 			})
 		}
@@ -173,18 +180,21 @@ func anthropicUserContent(message application.ChatMessage) []anthropicContentBlo
 
 func buildAnthropicRequest(req application.ChatRequest, stream bool) anthropicRequest {
 	out := anthropicRequest{
-		Model:     req.Model,
-		MaxTokens: req.MaxTokens,
-		Messages:  toAnthropicMessages(req.Messages),
-		Stream:    stream,
+		Model:       req.Model,
+		MaxTokens:   req.MaxTokens,
+		Messages:    toAnthropicMessages(req.Messages),
+		Stream:      stream,
+		Temperature: req.Temperature,
+		TopP:        req.TopP,
+		TopK:        req.TopK,
 	}
 	if req.System != "" {
 		if req.PromptCaching {
-			out.System = mustJSON([]anthropicContentBlock{{
+			out.System = aiutil.MustJSON([]anthropicContentBlock{{
 				Type: "text", Text: req.System, CacheControl: &cacheControl{Type: "ephemeral"},
 			}})
 		} else {
-			out.System = mustJSON([]anthropicContentBlock{{Type: "text", Text: req.System}})
+			out.System = aiutil.MustJSON([]anthropicContentBlock{{Type: "text", Text: req.System}})
 		}
 	}
 	for _, t := range req.Tools {
@@ -199,14 +209,6 @@ func buildAnthropicRequest(req application.ChatRequest, stream bool) anthropicRe
 		out.Tools = append(out.Tools, def)
 	}
 	return out
-}
-
-func mustJSON(v any) json.RawMessage {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return json.RawMessage("[]")
-	}
-	return b
 }
 
 type anthropicNonStreamResponse struct {
@@ -225,9 +227,9 @@ type anthropicNonStreamResponse struct {
 	} `json:"error"`
 }
 
-func (a *AnthropicAdapter) Complete(ctx context.Context, req application.ChatRequest) (application.ChatResponse, error) {
+func (a *Adapter) Complete(ctx context.Context, req application.ChatRequest) (application.ChatResponse, error) {
 	var out anthropicNonStreamResponse
-	if err := doJSON(ctx, a.Client, http.MethodPost, a.messagesURL(), a.headers(), buildAnthropicRequest(req, false), &out); err != nil {
+	if err := aiutil.DoJSON(ctx, a.Client, http.MethodPost, a.messagesURL(), a.headers(), buildAnthropicRequest(req, false), &out); err != nil {
 		return application.ChatResponse{}, err
 	}
 	if out.Error != nil {
@@ -249,22 +251,22 @@ func (a *AnthropicAdapter) Complete(ctx context.Context, req application.ChatReq
 			resp.Reasoning += block.Thinking
 		case "tool_use":
 			resp.ToolCalls = append(resp.ToolCalls, domain.ToolCall{
-				ID: block.ID, Name: block.Name, Args: repairToolCallArguments(string(block.Input)),
+				ID: block.ID, Name: block.Name, Args: aiutil.RepairToolCallArguments(string(block.Input)),
 			})
 		}
 	}
 	return resp, nil
 }
 
-func (a *AnthropicAdapter) Stream(ctx context.Context, req application.ChatRequest, onDelta, onReasoning func(string)) (application.ChatResponse, error) {
-	resp, err := openSSE(ctx, a.Client, a.messagesURL(), a.headers(), buildAnthropicRequest(req, true))
+func (a *Adapter) Stream(ctx context.Context, req application.ChatRequest, onDelta, onReasoning func(string)) (application.ChatResponse, error) {
+	resp, err := aiutil.OpenSSE(ctx, a.Client, a.messagesURL(), a.headers(), buildAnthropicRequest(req, true))
 	if err != nil {
-		if isStreamUnsupportedError(err) {
-			return streamFallbackToComplete(ctx, a, req, onDelta, onReasoning)
+		if aiutil.IsStreamUnsupportedError(err) {
+			return aiutil.StreamFallbackToComplete(ctx, a, req, onDelta, onReasoning)
 		}
-		if shouldRetryWithoutImages(err, req.Messages, ctx) {
+		if aiutil.ShouldRetryWithoutImages(err, req.Messages, ctx) {
 			stripped := req
-			stripped.Messages = stripImages(req.Messages)
+			stripped.Messages = aiutil.StripImages(req.Messages)
 			return a.Stream(ctx, stripped, onDelta, onReasoning)
 		}
 		return application.ChatResponse{}, err
@@ -274,7 +276,7 @@ func (a *AnthropicAdapter) Stream(ctx context.Context, req application.ChatReque
 	var result application.ChatResponse
 	toolByIndex := map[int]*domain.ToolCall{}
 	completed := false
-	err = readSSE(ctx, resp.Body, defaultIdleTimeout, func(ev sseEvent) error {
+	err = aiutil.ReadSSE(ctx, resp.Body, aiutil.DefaultIdleTimeout, func(ev aiutil.Event) error {
 		if ev.Event == "ping" {
 			return nil
 		}
@@ -298,7 +300,7 @@ func (a *AnthropicAdapter) Stream(ctx context.Context, req application.ChatReque
 			} `json:"message"`
 			Usage *anthropicUsage `json:"usage"`
 		}
-		if err := decodeData(ev, &frame); err != nil {
+		if err := aiutil.DecodeData(ev, &frame); err != nil {
 			return err
 		}
 		switch frame.Type {
@@ -337,29 +339,33 @@ func (a *AnthropicAdapter) Stream(ctx context.Context, req application.ChatReque
 		return nil
 	})
 	if err != nil {
-		return result, retryableSSEReadError(err)
+		return result, aiutil.RetryableSSEReadError(err)
 	}
-	if !completed {
-		emptyErr := incompleteSSEError()
-		if isIncompleteEmptyStream(emptyErr, result) {
-			return streamFallbackToComplete(ctx, a, req, onDelta, onReasoning)
-		}
-		return result, emptyErr
-	}
+	// Finalize accumulated tool calls before the incomplete-stream check so
+	// that a stream which closed without the terminator but carried tool-call
+	// deltas is NOT misclassified as empty (which would silently discard the
+	// tool calls and fall back to non-streaming).
 	seen := map[string]bool{}
 	for _, tc := range toolByIndex {
 		if tc.ID == "" || seen[tc.ID] {
 			continue
 		}
 		seen[tc.ID] = true
-		tc.Args = repairToolCallArguments(tc.Args)
+		tc.Args = aiutil.RepairToolCallArguments(tc.Args)
 		result.ToolCalls = append(result.ToolCalls, *tc)
+	}
+	if !completed {
+		emptyErr := aiutil.IncompleteSSEError()
+		if aiutil.IsIncompleteEmptyStream(emptyErr, result) {
+			return aiutil.StreamFallbackToComplete(ctx, a, req, onDelta, onReasoning)
+		}
+		return result, emptyErr
 	}
 	return result, nil
 }
 
 // ListModels fetches the Anthropic model catalog (id, context window, pricing).
-func (a *AnthropicAdapter) ListModels(ctx context.Context, _ string) ([]domain.Model, error) {
+func (a *Adapter) ListModels(ctx context.Context, _ string) ([]domain.Model, error) {
 	base := strings.TrimRight(a.BaseURL, "/")
 	url := base
 	if !strings.HasSuffix(url, "/models") {
@@ -379,7 +385,7 @@ func (a *AnthropicAdapter) ListModels(ctx context.Context, _ string) ([]domain.M
 			} `json:"pricing"`
 		} `json:"data"`
 	}
-	if err := doJSON(ctx, a.Client, http.MethodGet, url, a.headers(), nil, &out); err != nil {
+	if err := aiutil.DoJSON(ctx, a.Client, http.MethodGet, url, a.headers(), nil, &out); err != nil {
 		return nil, err
 	}
 	models := make([]domain.Model, 0, len(out.Data))
@@ -389,21 +395,12 @@ func (a *AnthropicAdapter) ListModels(ctx context.Context, _ string) ([]domain.M
 		}
 		model := domain.Model{ID: m.ID, Context: m.ContextWindow, Description: m.DisplayName}
 		// pricing strings look like "3.0" (USD per MTok)
-		if v, err := parseFloat(m.Pricing.Input); err == nil {
+		if v, err := aiutil.ParseFloat(m.Pricing.Input); err == nil {
 			model.InputCost = v
 		}
 		models = append(models, model)
 	}
 	return models, nil
-}
-
-func parseFloat(s string) (float64, error) {
-	if s == "" {
-		return 0, fmt.Errorf("empty")
-	}
-	var v float64
-	_, err := fmt.Sscanf(s, "%f", &v)
-	return v, err
 }
 
 func anthropicUsageToChat(u anthropicUsage) application.ChatUsage {

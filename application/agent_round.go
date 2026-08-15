@@ -116,13 +116,18 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 		messages = append(messages, a.buildHydration(conversation)...)
 	}
 	response, err := adapter.Stream(run.Ctx, ChatRequest{
-		Model:         model,
-		System:        system,
-		Messages:      messages,
-		Tools:         tools,
-		PromptCaching: settings.PromptCaching,
-		MaxTokens:     maxTokens,
-		Effort:        effort,
+		Model:            model,
+		System:           system,
+		Messages:         messages,
+		Tools:            tools,
+		PromptCaching:    settings.PromptCaching,
+		MaxTokens:        maxTokens,
+		Effort:           effort,
+		Temperature:      settings.Temperature,
+		TopP:             settings.TopP,
+		TopK:             settings.TopK,
+		FrequencyPenalty: settings.FrequencyPenalty,
+		PresencePenalty:  settings.PresencePenalty,
 	}, func(delta string) {
 		content.WriteString(delta)
 		a.Bus.Emit(contracts.EventMessageDelta, contracts.MessageDeltaEvent{

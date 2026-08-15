@@ -41,6 +41,16 @@ type Settings struct {
 	MaxToolRounds       int
 	MaxInputTokens      int // global context window cap (default 200k)
 	MaxOutputTokens     int // default max completion tokens (default 64k)
+	// Sampling parameters. nil = use provider default (do not send the
+	// field). Non-nil overrides the provider default for every turn.
+	// Ranges: temperature 0–2 (OpenAI) / 0–1 (Anthropic), top_p 0–1,
+	// top_k > 0 (Anthropic only), frequency_penalty -2..2 (OpenAI only),
+	// presence_penalty -2..2 (OpenAI only).
+	Temperature      *float64 `json:"temperature,omitempty"`
+	TopP             *float64 `json:"top_p,omitempty"`
+	TopK             *int     `json:"top_k,omitempty"`
+	FrequencyPenalty *float64 `json:"frequency_penalty,omitempty"`
+	PresencePenalty  *float64 `json:"presence_penalty,omitempty"`
 }
 
 // DefaultSettings returns the factory defaults.
