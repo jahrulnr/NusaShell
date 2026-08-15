@@ -56,3 +56,43 @@ Do not weaken or delete tests merely to make a suite pass. Do not commit secrets
 ## Change documentation
 
 When a behavior or public wire contract changes, update the relevant package documentation and golden fixtures. Record intentional compatibility breaks and non-functional trade-offs explicitly.
+
+## Experiments (`.experimental/`)
+
+`.experimental/` is the approved scratch space for proving a theory before it
+lands in NusaShell. Use it for: testing logic, testing upstream behavior
+(provider quirks, SSE edge cases, OAuth flows), spike implementations,
+side-by-side comparisons with other projects, and any proof-of-concept that
+should not touch the production tree yet.
+
+- Create a new subfolder under `.experimental/` per experiment (e.g.
+  `.experimental/sse-multiline/`, `.experimental/codex-oauth-flow/`).
+  Create the folder if it does not exist.
+- One experiment per folder; keep experiments isolated and self-contained.
+- Experiments are not part of the build: they must not be imported by
+  `cmd/nusashell`, `application`, `domain`, `contracts`, `infrastructure`, or
+  `transport`. They are not covered by `go test ./...` from the repo root
+  unless they carry their own `go.mod` or are explicitly wired in.
+- Treat an experiment as throwaway evidence, not a permanent feature. Once
+  the theory is proven, port the minimal correct version into the real
+  package and delete or archive the experiment folder.
+- Credentials policy is scoped to `.experimental/` only:
+  - **Allowed:** local-only credentials that are useless if leaked — e.g.
+    personal `omniroute` / `9router` tokens, `~/.codex/auth.json` reads,
+    local OAuth fixtures tied to a single machine. These may be read from
+    the user's home directory at runtime and quoted in experiment output
+    because exposure to the internet or another git checkout does not let
+    anyone else use them.
+  - **Forbidden:** credentials that would let a third party impersonate the
+    user or bill against an account from anywhere — e.g. raw OpenAI API
+    keys, Anthropic API keys, production OAuth client secrets, anything
+    that works outside the originating machine. Never commit these to
+    `.experimental/`; load them from the environment or a git-ignored file
+    under the user's home directory instead.
+  - When in doubt, prefer reading from `~/.config/...`, `~/.codex/...`, or
+    an env var over writing the value into a file under
+    `.experimental/`.
+  - If a credential must live in a file under `.experimental/` (e.g. a
+    fixture JSON), add it to `.gitignore` so it never gets committed.
+- Reference experiments in PRs or decisions when they informed the final
+  implementation, but do not depend on them at runtime.

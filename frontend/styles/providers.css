@@ -32,6 +32,7 @@
 .accent-anthropic .provider-mark { color: #f0a0b8; border-color: #82405b; background: #32202c; }
 .accent-openai .provider-mark { color: #7dd3fc; border-color: #36739a; background: #1e3a4f; }
 .accent-compatible .provider-mark { color: #61d0a7; border-color: #28735f; background: #10362f; }
+.accent-codex .provider-mark { color: #c9a0ff; border-color: #6b3fa0; background: #2a1a3e; }
 .provider-state { margin-left: auto; color: var(--text-faint); font: 10px var(--font-mono); }
 .provider-enabled { margin-left: auto; }
 .provider-registry-card > p { min-height: 36px; margin: 14px 0; color: var(--text-dim); font-size: 12px; line-height: 1.45; }
@@ -92,3 +93,112 @@
 .provider-card:hover { border-color: var(--accent); }
 .provider-card-custom { grid-column: span 2; color: var(--blue-info); }
 .provider-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin: 10px 0 4px; }
+
+/* ============ Codex-specific UI ============ */
+.codex-accounts-card, .codex-runtime-card { margin-top: 14px; }
+.codex-account-list { max-height: 280px; overflow: auto; }
+.codex-account-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--border-soft);
+  padding: 10px 0;
+}
+.codex-account-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.codex-account-id { color: #d4deea; font: 11px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.codex-account-secondary { color: var(--text-faint); font: 9px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.codex-account-meta { display: flex; align-items: center; gap: 6px; }
+.codex-account-badge {
+  border-radius: 4px;
+  padding: 2px 5px;
+  font: 8.5px var(--font-mono);
+  background: #14323a;
+  color: #53c9d8;
+}
+.codex-account-badge.active { background: #123226; color: #56cf91; }
+.codex-account-expires { color: var(--text-faint); font: 9px var(--font-mono); }
+.codex-account-actions { display: flex; gap: 5px; flex: 0 0 auto; }
+
+.codex-runtime-status { padding: 8px 0; }
+.codex-runtime-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border-soft);
+  font: 10.5px var(--font-mono);
+  color: #d4deea;
+}
+.codex-runtime-info.installed { color: var(--green); }
+.codex-runtime-info.downloading { color: #53c9d8; }
+.codex-runtime-info.error { color: var(--red); }
+.codex-runtime-path {
+  color: var(--text-faint);
+  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 300px;
+}
+
+/* Codex usage quota */
+.codex-usage-card { margin-top: 14px; }
+.codex-usage-body { padding: 4px 0; }
+.codex-usage-plan {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border-soft);
+  font: 10.5px var(--font-mono);
+}
+.codex-usage-plan-label { color: var(--text-faint); }
+.codex-usage-plan-value { color: #d4deea; }
+.codex-usage-limit-reached {
+  margin-left: auto;
+  border-radius: 4px;
+  padding: 2px 6px;
+  background: rgba(245,91,104,.15);
+  color: #ff9ca5;
+  font-size: 9px;
+}
+.codex-usage-window {
+  padding: 10px 0;
+  border-top: 1px solid var(--border-soft);
+}
+.codex-usage-window-head {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font: 10px var(--font-mono);
+}
+.codex-usage-window-label { color: var(--text-faint); }
+.codex-usage-window-pct { color: #d4deea; }
+.codex-usage-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: #1a2535;
+  overflow: hidden;
+}
+.codex-usage-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width .3s ease;
+}
+.codex-usage-bar-fill.ok { background: #56cf91; }
+.codex-usage-bar-fill.warning { background: #d8c953; }
+.codex-usage-bar-fill.critical { background: #f55b68; }
+.codex-usage-window-foot {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 5px;
+  font: 9px var(--font-mono);
+  color: var(--text-faint);
+}
+.codex-usage-credits {
+  padding: 8px 0;
+  border-top: 1px solid var(--border-soft);
+  color: #53c9d8;
+  font: 10px var(--font-mono);
+}

@@ -33,6 +33,9 @@ type App struct {
 	MCPToolbox      MCPToolbox
 	Factory         ProviderFactory
 	WorkspacePicker WorkspacePicker
+	CodexRuntime    CodexRuntime
+	CodexOAuth      CodexOAuth
+	CodexUsage      CodexUsage
 	retrySleeper    RetrySleeper
 
 	runsMu  sync.Mutex
@@ -331,6 +334,44 @@ func (a *App) Dispatch(method string, payload json.RawMessage) (any, *contracts.
 		return a.handleProvidersImport(req)
 	case contracts.MethodModelsList:
 		return a.handleModelsList()
+	case contracts.MethodCodexLogin:
+		var req contracts.CodexLoginRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleCodexLogin(req)
+	case contracts.MethodCodexLogout:
+		var req contracts.CodexLogoutRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleCodexLogout(req)
+	case contracts.MethodCodexAccountsList:
+		var req contracts.CodexAccountsListRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleCodexAccountsList(req)
+	case contracts.MethodCodexAccountsSwitch:
+		var req contracts.CodexAccountsSwitchRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleCodexAccountsSwitch(req)
+	case contracts.MethodCodexRuntimeStatus:
+		return a.handleCodexRuntimeStatus()
+	case contracts.MethodCodexRuntimeDownload:
+		var req contracts.CodexRuntimeDownloadRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleCodexRuntimeDownload(req)
+	case contracts.MethodCodexUsage:
+		var req contracts.CodexUsageRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleCodexUsage(req)
 	case contracts.MethodSkillsList:
 		return a.handleSkillsList()
 	case contracts.MethodSkillsRead:
@@ -458,7 +499,7 @@ func (a *App) handleAppInfo() (any, *contracts.RPCError) {
 			MCP:           true,
 			Compaction:    settings.CompactionEnabled,
 			PromptCaching: settings.PromptCaching,
-			Providers:     []string{"messages", "responses", "chat"},
+			Providers:     []string{"messages", "responses", "chat", "codex"},
 		},
 	}, nil
 }
@@ -476,6 +517,9 @@ func (a *App) resolveModel(model string) (*domain.Provider, string, *contracts.R
 		if !has && requiresKey(p.Kind) {
 			return nil, "", &contracts.RPCError{Code: contracts.CodeConflict, Message: fmt.Sprintf("provider %q has no API key", p.Name)}
 		}
+		if !has && p.Kind == domain.ProviderCodex {
+			return nil, "", &contracts.RPCError{Code: contracts.CodeConflict, Message: fmt.Sprintf("provider %q is not logged in — use the Codex login command to authenticate with your ChatGPT account", p.Name)}
+		}
 		return p, key, nil
 	}
 	return nil, "", &contracts.RPCError{
@@ -486,6 +530,7 @@ func (a *App) resolveModel(model string) (*domain.Provider, string, *contracts.R
 
 func requiresKey(kind domain.ProviderKind) bool {
 	// local Chat endpoints (Ollama, LM Studio, …) work without a key
+	// Codex uses OAuth tokens stored in CredentialStore, not a user-supplied key
 	return kind == domain.ProviderMessages || kind == domain.ProviderResponses
 }
 

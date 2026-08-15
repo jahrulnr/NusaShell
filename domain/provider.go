@@ -11,6 +11,7 @@ const (
 	ProviderMessages  ProviderKind = "messages"
 	ProviderResponses ProviderKind = "responses"
 	ProviderChat      ProviderKind = "chat"
+	ProviderCodex     ProviderKind = "codex"
 )
 
 type Model struct {

@@ -29,6 +29,17 @@ const (
 	MethodProvidersImport = "ai.providers.import-models"
 	MethodModelsList      = "ai.models.list"
 
+	// Codex-specific methods. Codex uses OAuth (not API keys), has a
+	// managed runtime binary (auto-downloaded), and supports multiple
+	// ChatGPT accounts per provider.
+	MethodCodexLogin           = "ai.codex.login"
+	MethodCodexLogout          = "ai.codex.logout"
+	MethodCodexAccountsList    = "ai.codex.accounts.list"
+	MethodCodexAccountsSwitch  = "ai.codex.accounts.switch"
+	MethodCodexRuntimeStatus   = "ai.codex.runtime.status"
+	MethodCodexRuntimeDownload = "ai.codex.runtime.download"
+	MethodCodexUsage           = "ai.codex.usage"
+
 	MethodSkillsList   = "skills.list"
 	MethodSkillsRead   = "skills.read"
 	MethodSkillsSave   = "skills.save"
@@ -377,6 +388,91 @@ type ImportModelsResult struct {
 
 type ModelsListResult struct {
 	Models []ModelDTO `json:"models"`
+}
+
+// ---- codex ----
+
+// CodexLoginRequest triggers the OAuth PKCE flow for a Codex provider.
+// The browser opens the ChatGPT auth page; after callback, the token
+// is stored in CredentialStore and returned (without the refresh token).
+type CodexLoginRequest struct {
+	ProviderID string `json:"provider_id"`
+}
+
+type CodexLoginResult struct {
+	AccountID string `json:"account_id,omitempty"`
+	Email     string `json:"email,omitempty"`
+}
+
+// CodexLogoutRequest removes a stored OAuth token for a specific account.
+// If AccountID is empty, the active account is removed.
+type CodexLogoutRequest struct {
+	ProviderID string `json:"provider_id"`
+	AccountID  string `json:"account_id,omitempty"`
+}
+
+// CodexAccountDTO describes one stored ChatGPT account.
+type CodexAccountDTO struct {
+	AccountID string `json:"account_id"`
+	Email     string `json:"email,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Active    bool   `json:"active"`
+	ExpiresAt int64  `json:"expires_at,omitempty"`
+}
+
+type CodexAccountsListRequest struct {
+	ProviderID string `json:"provider_id"`
+}
+
+type CodexAccountsListResult struct {
+	Accounts []CodexAccountDTO `json:"accounts"`
+}
+
+// CodexAccountsSwitchRequest sets a different account as the active one.
+type CodexAccountsSwitchRequest struct {
+	ProviderID string `json:"provider_id"`
+	AccountID  string `json:"account_id"`
+}
+
+// CodexRuntimeStatusResult reports the managed Codex binary state.
+type CodexRuntimeStatusResult struct {
+	Installed     bool   `json:"installed"`
+	Version       string `json:"version,omitempty"`
+	Path          string `json:"path,omitempty"`
+	Downloading   bool   `json:"downloading,omitempty"`
+	DownloadError string `json:"download_error,omitempty"`
+}
+
+type CodexRuntimeDownloadRequest struct {
+	// Force re-download even if a binary is already installed.
+	Force bool `json:"force,omitempty"`
+}
+
+type CodexRuntimeDownloadResult struct {
+	Version string `json:"version"`
+	Path    string `json:"path"`
+}
+
+// ---- codex usage ----
+
+type CodexUsageRequest struct {
+	ProviderID string `json:"provider_id"`
+}
+
+// CodexUsageWindowDTO is one rate-limit window (session or weekly).
+type CodexUsageWindowDTO struct {
+	UsedPercent       int   `json:"used_percent"`
+	RemainingPercent  int   `json:"remaining_percent"`
+	ResetAt           int64 `json:"reset_at,omitempty"` // unix seconds
+	ResetAfterSeconds int64 `json:"reset_after_seconds,omitempty"`
+}
+
+type CodexUsageResult struct {
+	Plan                  string               `json:"plan,omitempty"`
+	LimitReached          bool                 `json:"limit_reached"`
+	PrimaryWindow         *CodexUsageWindowDTO `json:"primary_window,omitempty"`
+	WeeklyWindow          *CodexUsageWindowDTO `json:"weekly_window,omitempty"`
+	ResetCreditsAvailable int                  `json:"reset_credits_available"`
 }
 
 // ---- skills ----

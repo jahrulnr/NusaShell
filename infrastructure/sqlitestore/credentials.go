@@ -76,4 +76,27 @@ func (c *CredentialStore) Delete(providerID string) error {
 	return err
 }
 
+// ListByPrefix returns all provider IDs that start with the given prefix.
+// Used by Codex multi-account support to enumerate accounts stored under
+// "{providerID}:account:{accountID}" keys.
+func (c *CredentialStore) ListByPrefix(prefix string) ([]string, error) {
+	rows, err := c.db.Query(
+		`SELECT provider_id FROM credentials WHERE provider_id LIKE ? ORDER BY provider_id`,
+		prefix+"%",
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (c *CredentialStore) Close() error { return c.db.Close() }

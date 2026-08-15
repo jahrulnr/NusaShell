@@ -95,6 +95,11 @@ function fakeLLM(port) {
   let completeText = 'compaction summary: user likes Go.';
   let scripts = [];
   let sendDone = true;
+  // requests captures every parsed chat/completions request body alongside
+  // whether it was a streaming request. Used by hydration E2E tests to
+  // verify the synthetic runtime-hydration transcript is present in the
+  // messages array sent to the provider.
+  const requests = [];
   const server = createHTTPServer((req, res) => {
     const url = new URL(req.url, `http://127.0.0.1:${port}`);
     if (req.method === 'GET' && url.pathname.endsWith('/models')) {
@@ -111,6 +116,7 @@ function fakeLLM(port) {
       req.on('data', (chunk) => { body += chunk; });
       req.on('end', () => {
         const parsed = JSON.parse(body);
+        requests.push({ stream: !!parsed.stream, body: parsed });
         if (!parsed.stream) {
           // Non-streaming: used by compaction summary requests.
           res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -153,6 +159,7 @@ function fakeLLM(port) {
     setComplete: (text) => { completeText = text; },
     setScripts: (s) => { scripts = s; },
     setSendDone: (v) => { sendDone = v; },
+    requests: () => requests,
     url: `http://127.0.0.1:${port}`,
   };
 }
@@ -524,6 +531,333 @@ test('BH-SETTINGS-01: sampling parameters cannot be cleared to null once set', a
       afterClear.settings.temperature, undefined,
       `BH-SETTINGS-01: temperature must be cleared after sending null (got ${afterClear.settings.temperature}). ` +
         `The settings.set contract must distinguish null (clear) from absent (don't change).`,
+    );
+  } catch (error) {
+    throw new Error(`${error.message}\nGo server output:\n${server.output()}`);
+  }
+});
+
+// findHydration inspects a parsed chat/completions request body for the
+// synthetic runtime-hydration transcript. Returns the hydration messages
+// (assistant toolCalls + matching tool results) when present, or null when
+// the request has no hydration exchange.
+//
+// Shape in the OpenAI request:
+//   - assistant message with tool_calls whose ids start with "hydrate-"
+//   - followed by tool messages with tool_call_id matching those ids,
+//     containing runtime_context / memory / skill_list / mcp_list /
+//     tool_list / todo_list snapshots.
+function findHydration(messages) {
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role !== 'assistant' || !Array.isArray(m.tool_calls) || m.tool_calls.length === 0) continue;
+    const hydrateCalls = m.tool_calls.filter((c) => c.id?.startsWith('hydrate-'));
+    if (hydrateCalls.length === 0) continue;
+    const ids = new Set(hydrateCalls.map((c) => c.id));
+    const results = [];
+    for (let j = i + 1; j < messages.length; j++) {
+      const t = messages[j];
+      if (t.role !== 'tool') break;
+      if (ids.has(t.tool_call_id)) results.push(t);
+    }
+    if (results.length > 0) return { assistant: m, results, calls: hydrateCalls };
+  }
+  return null;
+}
+
+// hydrationSlotNames returns the tool-call function names from a hydration
+// exchange, in order. Used to assert the full 6-slot transcript is present.
+function hydrationSlotNames(hydration) {
+  return hydration.calls.map((c) => c.function?.name);
+}
+
+// HYDR-NEW-ROOM: A brand-new conversation's first turn must inject the
+// synthetic runtime-hydration transcript (runtime_context, memory,
+// skill_list, mcp_list, tool_list, todo_list) into the provider request.
+// The transcript is ephemeral — never persisted — so it must appear in the
+// request body but NOT in the persisted conversation messages.
+test('HYDR-NEW-ROOM: first turn of a new conversation injects the hydration transcript', async (t) => {
+  assert.ok(NativeWebSocket, 'Node WebSocket support is required for the E2E event stream');
+  const llmPort = await freePort();
+  const llm = fakeLLM(llmPort);
+  await new Promise((resolveListen) => llm.server.listen(llmPort, '127.0.0.1', resolveListen));
+  t.after(() => new Promise((r) => llm.server.close(r)));
+
+  const port = await freePort();
+  const dataDir = await mkdtemp(join(tmpdir(), 'nusashell-hydr-new-room-'));
+  const baseURL = `http://127.0.0.1:${port}/`;
+  const server = await buildAndStartServer(port, dataDir);
+  let rpcModule;
+  t.after(async () => {
+    rpcModule?.closeWS();
+    if (server.go.exitCode === null) {
+      await new Promise((resolveStop) => {
+        const timer = setTimeout(resolveStop, 2000);
+        server.go.once('exit', () => { clearTimeout(timer); resolveStop(); });
+        server.go.kill();
+      });
+    }
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  });
+
+  try {
+    await waitFor(async () => {
+      try { return (await nodeFetch(baseURL)).ok; } catch { return false; }
+    }, 'Go server startup', 20000);
+
+    const html = await (await nodeFetch(baseURL)).text();
+    const dom = new JSDOM(html, { url: baseURL, pretendToBeVisual: true });
+    installBrowserGlobals(dom, baseURL);
+    rpcModule = await import(`${pathToFileURL(join(repo, 'frontend', 'js', 'rpc.js')).href}`);
+    await import(`${pathToFileURL(join(repo, 'frontend', 'js', 'app.js')).href}?e2e=${Date.now()}`);
+
+    await waitFor(() => document.getElementById('conn-status')?.textContent === 'Connected', 'WebSocket connection');
+
+    // Save a provider pointing at the fake LLM.
+    const saveRes = await rpcModule.rpc('ai.providers.save', {
+      kind: 'chat', name: 'FakeLLM', base_url: `${llm.url}/v1`, api_key: 'test-key', enabled: true,
+    });
+    const providerID = saveRes.providers[0].id;
+    await rpcModule.rpc('ai.providers.import-models', { id: providerID });
+
+    // Seed one memory entry so the memory slot is non-empty.
+    await rpcModule.rpc('memory.save', { content: 'User prefers concise answers.', tags: ['pref'] });
+
+    // Create a new conversation.
+    window.location.hash = '#agent';
+    window.dispatchEvent(new window.Event('hashchange'));
+    document.getElementById('new-conversation-btn').click();
+    await waitFor(
+      () => [...document.querySelectorAll('#conversation-list .agent-conversation-title')].some((n) => n.textContent === 'Untitled'),
+      'new conversation through the UI',
+    );
+    const conversations = await rpcModule.rpc('agent.conversations.list');
+    const convID = conversations.conversations[0].id;
+
+    // Script: a single short reply so the turn finishes quickly.
+    llm.setScripts([[{ text: 'Hello from the assistant.' }]]);
+
+    // Start the first turn.
+    await rpcModule.rpc('agent.turns.start', {
+      conversation_id: convID, text: 'hi', model: 'tiny-model',
+    });
+
+    // Wait for the turn to finish.
+    await waitFor(async () => {
+      const c = await rpcModule.rpc('agent.conversations.get', { id: convID });
+      return c.conversation?.status === 'idle';
+    }, 'first turn done', 15000);
+
+    // Verify the streaming request contains the hydration transcript.
+    const streamingReqs = llm.requests().filter((r) => r.stream);
+    assert.ok(streamingReqs.length > 0, 'at least one streaming request must have been sent');
+    const lastStream = streamingReqs[streamingReqs.length - 1];
+    const hydration = findHydration(lastStream.body.messages);
+    assert.ok(hydration, 'HYDR-NEW-ROOM: hydration transcript must be present in the first turn request');
+
+    // All 6 slots must be present and in canonical order.
+    const slots = hydrationSlotNames(hydration);
+    assert.deepEqual(
+      slots,
+      ['runtime_context', 'memory', 'skill_list', 'mcp_list', 'tool_list', 'todo_list'],
+      `HYDR-NEW-ROOM: hydration slots must be the full 6-slot transcript in order, got ${JSON.stringify(slots)}`,
+    );
+
+    // The memory slot must contain the seeded entry.
+    const memCall = hydration.calls.find((c) => c.function?.name === 'memory');
+    const memResult = hydration.results.find((r) => r.tool_call_id === memCall?.id);
+    assert.ok(memResult, 'HYDR-NEW-ROOM: memory tool result must exist');
+    assert.ok(
+      memResult.content.includes('User prefers concise answers.'),
+      `HYDR-NEW-ROOM: memory slot must contain the seeded entry, got: ${memResult.content}`,
+    );
+
+    // The hydration transcript must NOT be persisted in the conversation.
+    const gotten = await rpcModule.rpc('agent.conversations.get', { id: convID });
+    const persistedHydration = findHydration(
+      (gotten.messages || []).map((m) => ({
+        role: m.role,
+        tool_calls: m.tool_calls,
+        tool_call_id: m.tool_call_id,
+      })),
+    );
+    assert.equal(
+      persistedHydration, null,
+      'HYDR-NEW-ROOM: hydration transcript must be ephemeral — not persisted in the conversation store',
+    );
+  } catch (error) {
+    throw new Error(`${error.message}\nGo server output:\n${server.output()}`);
+  }
+});
+
+// HYDR-POST-COMPACTION: After compaction runs, the next turn must re-inject
+// the hydration transcript. Compaction replaces durable history with a
+// summary; the model loses all runtime facts (date, workspace, memory,
+// skills, MCP catalog, tool catalog) unless hydration is re-injected.
+// This test seeds enough history to trigger compaction, then verifies the
+// post-compaction streaming request contains a fresh hydration transcript.
+test('HYDR-POST-COMPACTION: turn after compaction re-injects the hydration transcript', async (t) => {
+  assert.ok(NativeWebSocket, 'Node WebSocket support is required for the E2E event stream');
+  const llmPort = await freePort();
+  const llm = fakeLLM(llmPort);
+  await new Promise((resolveListen) => llm.server.listen(llmPort, '127.0.0.1', resolveListen));
+  t.after(() => new Promise((r) => llm.server.close(r)));
+
+  const port = await freePort();
+  const dataDir = await mkdtemp(join(tmpdir(), 'nusashell-hydr-post-compaction-'));
+  const baseURL = `http://127.0.0.1:${port}/`;
+  const server = await buildAndStartServer(port, dataDir);
+  let rpcModule;
+  t.after(async () => {
+    rpcModule?.closeWS();
+    if (server.go.exitCode === null) {
+      await new Promise((resolveStop) => {
+        const timer = setTimeout(resolveStop, 2000);
+        server.go.once('exit', () => { clearTimeout(timer); resolveStop(); });
+        server.go.kill();
+      });
+    }
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  });
+
+  try {
+    await waitFor(async () => {
+      try { return (await nodeFetch(baseURL)).ok; } catch { return false; }
+    }, 'Go server startup', 20000);
+
+    const html = await (await nodeFetch(baseURL)).text();
+    const dom = new JSDOM(html, { url: baseURL, pretendToBeVisual: true });
+    installBrowserGlobals(dom, baseURL);
+    rpcModule = await import(`${pathToFileURL(join(repo, 'frontend', 'js', 'rpc.js')).href}`);
+    await import(`${pathToFileURL(join(repo, 'frontend', 'js', 'app.js')).href}?e2e=${Date.now()}`);
+
+    await waitFor(() => document.getElementById('conn-status')?.textContent === 'Connected', 'WebSocket connection');
+
+    // Save a provider pointing at the fake LLM.
+    const saveRes = await rpcModule.rpc('ai.providers.save', {
+      kind: 'chat', name: 'FakeLLM', base_url: `${llm.url}/v1`, api_key: 'test-key', enabled: true,
+    });
+    const providerID = saveRes.providers[0].id;
+    await rpcModule.rpc('ai.providers.import-models', { id: providerID });
+
+    // Seed one memory entry so the memory slot is non-empty.
+    await rpcModule.rpc('memory.save', { content: 'User is testing compaction hydration.', tags: ['test'] });
+
+    // Disable compaction while seeding history.
+    await rpcModule.rpc('settings.set', { compaction_enabled: false });
+
+    // Create a conversation.
+    window.location.hash = '#agent';
+    window.dispatchEvent(new window.Event('hashchange'));
+    document.getElementById('new-conversation-btn').click();
+    await waitFor(
+      () => [...document.querySelectorAll('#conversation-list .agent-conversation-title')].some((n) => n.textContent === 'Untitled'),
+      'new conversation through the UI',
+    );
+    const conversations = await rpcModule.rpc('agent.conversations.list');
+    const convID = conversations.conversations[0].id;
+
+    // Seed 4 turns with large messages (~4000 tokens total) to exceed the
+    // compaction trigger once it is enabled.
+    const bigMsg = 'x'.repeat(2000);
+    for (let i = 0; i < 4; i++) {
+      llm.setScripts([[{ text: bigMsg }]]);
+      await rpcModule.rpc('agent.turns.start', {
+        conversation_id: convID, text: bigMsg, model: 'tiny-model',
+      });
+      await waitFor(async () => {
+        const c = await rpcModule.rpc('agent.conversations.get', { id: convID });
+        return c.conversation?.status === 'idle';
+      }, `seed turn ${i + 1} done`, 15000);
+    }
+
+    // Clear captured requests so we only inspect the post-compaction turn.
+    llm.requests().length = 0;
+
+    // Enable compaction with a small context window (trigger = 800 tokens).
+    // The seeded history (~4000 tokens) is well above the trigger.
+    await rpcModule.rpc('settings.set', { max_input_tokens: 1000, compaction_enabled: true });
+
+    // Set the compaction summary response (non-streaming).
+    llm.setComplete('SUMMARY: user was testing compaction hydration.');
+    // Set the streaming reply for the post-compaction turn.
+    llm.setScripts([[{ text: 'Turn after compaction with hydration.' }]]);
+
+    // Trigger compaction + the next turn with a new user message.
+    await rpcModule.rpc('agent.turns.start', {
+      conversation_id: convID, text: 'continue', model: 'tiny-model',
+    });
+
+    // Wait for the compaction marker to appear in the UI.
+    await waitFor(
+      () => [...document.querySelectorAll('#agent-thread .agent-compaction-marker')].some(
+        (n) => n.textContent.includes('Compacted'),
+      ),
+      'compaction marker in the UI',
+      15000,
+    );
+
+    // Wait for the post-compaction turn to finish.
+    await waitFor(async () => {
+      const c = await rpcModule.rpc('agent.conversations.get', { id: convID });
+      return c.conversation?.status === 'idle';
+    }, 'post-compaction turn done', 15000);
+
+    // Verify the post-compaction streaming request contains a fresh
+    // hydration transcript. The non-streaming compaction request must NOT
+    // contain hydration (it summarizes durable history only).
+    const allReqs = llm.requests();
+    const nonStreamReqs = allReqs.filter((r) => !r.stream);
+    const streamReqs = allReqs.filter((r) => r.stream);
+
+    // Non-streaming compaction request must not carry hydration.
+    for (const ns of nonStreamReqs) {
+      const nsHyd = findHydration(ns.body.messages);
+      assert.equal(
+        nsHyd, null,
+        'HYDR-POST-COMPACTION: compaction summary request must not contain hydration transcript',
+      );
+    }
+
+    // The streaming post-compaction request must carry hydration.
+    assert.ok(streamReqs.length > 0, 'a streaming request must have been sent after compaction');
+    const lastStream = streamReqs[streamReqs.length - 1];
+    const hydration = findHydration(lastStream.body.messages);
+    assert.ok(
+      hydration,
+      'HYDR-POST-COMPACTION: hydration transcript must be re-injected after compaction',
+    );
+
+    // All 6 slots must be present and in canonical order.
+    const slots = hydrationSlotNames(hydration);
+    assert.deepEqual(
+      slots,
+      ['runtime_context', 'memory', 'skill_list', 'mcp_list', 'tool_list', 'todo_list'],
+      `HYDR-POST-COMPACTION: hydration slots must be the full 6-slot transcript in order, got ${JSON.stringify(slots)}`,
+    );
+
+    // The memory slot must contain the seeded entry (proves the transcript
+    // was rebuilt fresh from live stores, not reused from before compaction).
+    const memCall = hydration.calls.find((c) => c.function?.name === 'memory');
+    const memResult = hydration.results.find((r) => r.tool_call_id === memCall?.id);
+    assert.ok(memResult, 'HYDR-POST-COMPACTION: memory tool result must exist');
+    assert.ok(
+      memResult.content.includes('User is testing compaction hydration.'),
+      `HYDR-POST-COMPACTION: memory slot must contain the seeded entry, got: ${memResult.content}`,
+    );
+
+    // The hydration transcript must NOT be persisted in the conversation.
+    const gotten = await rpcModule.rpc('agent.conversations.get', { id: convID });
+    const persistedHydration = findHydration(
+      (gotten.messages || []).map((m) => ({
+        role: m.role,
+        tool_calls: m.tool_calls,
+        tool_call_id: m.tool_call_id,
+      })),
+    );
+    assert.equal(
+      persistedHydration, null,
+      'HYDR-POST-COMPACTION: hydration transcript must be ephemeral — not persisted in the conversation store',
     );
   } catch (error) {
     throw new Error(`${error.message}\nGo server output:\n${server.output()}`);

@@ -10,6 +10,7 @@ const KIND_META = {
   messages: { label: 'Messages', mark: 'MS', cls: 'accent-anthropic', desc: 'Messages API format' },
   responses: { label: 'Responses', mark: 'RS', cls: 'accent-openai', desc: 'Responses API format' },
   chat: { label: 'Chat', mark: 'CH', cls: 'accent-compatible', desc: 'Chat Completions API format' },
+  codex: { label: 'Codex', mark: 'CX', cls: 'accent-codex', desc: 'ChatGPT Codex backend (OAuth, no API key needed)' },
 };
 
 export async function initProviders() {
@@ -111,7 +112,7 @@ function backToRegistry() {
 }
 
 function renderDetail(p) {
-  const meta = KIND_META[p.kind] || KIND_META.compatible;
+  const meta = KIND_META[p.kind] || KIND_META.chat;
   const detail = document.getElementById('provider-detail');
   detail.innerHTML = '';
   detail.append(el('div', { class: 'provider-detail-head' },
@@ -127,9 +128,9 @@ function renderDetail(p) {
       ),
     ),
     el('dl', { class: 'provider-detail-grid' },
-      el('div', {}, el('dt', { text: 'Kind' }), el('dd', { text: (KIND_META[p.kind] || KIND_META.compatible).label })),
+      el('div', {}, el('dt', { text: 'Kind' }), el('dd', { text: (KIND_META[p.kind] || KIND_META.chat).label })),
       el('div', {}, el('dt', { text: 'Base URL' }), el('dd', { text: p.base_url || '—' })),
-      el('div', {}, el('dt', { text: 'API key' }), el('dd', { text: p.has_api_key ? '••••••••' : '—' })),
+      el('div', {}, el('dt', { text: p.kind === 'codex' ? 'Auth' : 'API key' }), el('dd', { text: p.kind === 'codex' ? (p.has_api_key ? 'ChatGPT OAuth ✓' : 'Not signed in') : (p.has_api_key ? '••••••••' : '—') })),
       el('div', {}, el('dt', { text: 'Status' }), el('dd', { text: p.enabled === false ? 'disabled' : 'enabled' })),
     ),
     el('div', { class: 'provider-detail-actions' },
@@ -139,6 +140,14 @@ function renderDetail(p) {
       el('button', { class: 'mini-btn danger', type: 'button', text: 'Delete' }),
     ),
   ));
+
+  // Codex-specific sections: OAuth accounts + usage + runtime binary
+  if (p.kind === 'codex') {
+    detail.append(renderCodexAccounts(p));
+    detail.append(renderCodexUsage(p));
+    detail.append(renderCodexRuntime(p));
+  }
+
   detail.append(el('div', { class: 'provider-models-card' },
     el('div', { class: 'provider-models-head' },
       el('div', {},
@@ -180,7 +189,7 @@ function renderDetail(p) {
     }
   });
   delBtn.addEventListener('click', async () => {
-    const ok = await confirmDialog('Delete provider', `"${p.name}" and its stored API key will be removed.`, 'Delete');
+    const ok = await confirmDialog('Delete provider', `"${p.name}" and its stored credentials will be removed.`, 'Delete');
     if (!ok) return;
     try {
       await rpc('ai.providers.delete', { id: p.id });
@@ -189,6 +198,230 @@ function renderDetail(p) {
       await refresh();
     } catch (err) { toast(err.message, 'error'); }
   });
+}
+
+// ---- Codex-specific UI ----
+
+function renderCodexAccounts(p) {
+  const card = el('div', { class: 'provider-models-card codex-accounts-card' },
+    el('div', { class: 'provider-models-head' },
+      el('div', {},
+        el('h2', { text: 'ChatGPT Accounts' }),
+        el('p', { text: 'Sign in with one or more ChatGPT accounts' }),
+      ),
+      el('button', { class: 'mini-btn', type: 'button', text: 'Sign in with ChatGPT' }),
+    ),
+    el('div', { class: 'codex-account-list', id: 'codex-account-list' },
+      el('div', { class: 'provider-model-empty', text: 'Loading accounts…' }),
+    ),
+  );
+  const loginBtn = card.querySelector('button');
+  loginBtn.addEventListener('click', async () => {
+    loginBtn.disabled = true;
+    loginBtn.textContent = 'Opening browser…';
+    try {
+      await rpc('ai.codex.login', { provider_id: p.id });
+      toast('ChatGPT login successful', 'success');
+      await refreshCodexAccounts(p.id);
+      await refresh();
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      loginBtn.disabled = false;
+      loginBtn.textContent = 'Sign in with ChatGPT';
+    }
+  });
+  // Defer refresh until the card is in the DOM
+  setTimeout(() => refreshCodexAccounts(p.id), 0);
+  return card;
+}
+
+async function refreshCodexAccounts(providerId) {
+  const list = document.getElementById('codex-account-list');
+  if (!list) return;
+  try {
+    const res = await rpc('ai.codex.accounts.list', { provider_id: providerId });
+    const accounts = res.accounts ?? [];
+    if (!accounts.length) {
+      list.innerHTML = '';
+      list.append(el('div', { class: 'provider-model-empty', text: 'No accounts signed in. Click "Sign in with ChatGPT" to add one.' }));
+      return;
+    }
+    list.innerHTML = '';
+    for (const acc of accounts) {
+      const expires = acc.expires_at ? new Date(acc.expires_at * 1000).toLocaleString() : 'unknown';
+      const display = acc.email || acc.name || acc.account_id;
+      const secondary = (acc.email && acc.name) ? `${acc.name} · ${acc.account_id}` : (acc.email ? acc.account_id : (acc.name ? acc.account_id : ''));
+      list.append(el('div', { class: 'codex-account-item' },
+        el('div', { class: 'codex-account-info' },
+          el('span', { class: 'codex-account-id', text: display }),
+          ...(secondary ? [el('span', { class: 'codex-account-secondary', text: secondary })] : []),
+          el('span', { class: 'codex-account-meta' },
+            ...(acc.active ? [el('span', { class: 'codex-account-badge active', text: 'active' })] : []),
+            el('span', { class: 'codex-account-expires', text: `expires ${expires}` }),
+          ),
+        ),
+        el('div', { class: 'codex-account-actions' },
+          ...(acc.active ? [] : [el('button', { class: 'mini-btn ghost', type: 'button', text: 'Switch', 'data-acc': acc.account_id })]),
+          el('button', { class: 'mini-btn danger', type: 'button', text: 'Remove', 'data-acc': acc.account_id }),
+        ),
+      ));
+    }
+    // Wire buttons
+    list.querySelectorAll('button').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const accId = e.currentTarget.dataset.acc;
+        if (e.currentTarget.textContent === 'Switch') {
+          try {
+            await rpc('ai.codex.accounts.switch', { provider_id: providerId, account_id: accId });
+            toast('Switched account', 'success');
+            await refreshCodexAccounts(providerId);
+            await refresh();
+          } catch (err) { toast(err.message, 'error'); }
+        } else if (e.currentTarget.textContent === 'Remove') {
+          const ok = await confirmDialog('Remove account', `Remove ChatGPT account ${accId}?`, 'Remove');
+          if (!ok) return;
+          try {
+            await rpc('ai.codex.logout', { provider_id: providerId, account_id: accId });
+            toast('Account removed', 'success');
+            await refreshCodexAccounts(providerId);
+            await refresh();
+          } catch (err) { toast(err.message, 'error'); }
+        }
+      });
+    });
+  } catch (err) {
+    list.innerHTML = '';
+    list.append(el('div', { class: 'provider-model-empty', text: `Error: ${err.message}` }));
+  }
+}
+
+function renderCodexUsage(p) {
+  const card = el('div', { class: 'provider-models-card codex-usage-card' },
+    el('div', { class: 'provider-models-head' },
+      el('div', {},
+        el('h2', { text: 'Usage Quota' }),
+        el('p', { text: 'ChatGPT rate-limit usage for active account' }),
+      ),
+      el('button', { class: 'mini-btn ghost', type: 'button', text: 'Refresh' }),
+    ),
+    el('div', { class: 'codex-usage-body', id: 'codex-usage-body' },
+      el('div', { class: 'provider-model-empty', text: 'Loading usage…' }),
+    ),
+  );
+  card.querySelector('button').addEventListener('click', () => refreshCodexUsage(p.id));
+  setTimeout(() => refreshCodexUsage(p.id), 0);
+  return card;
+}
+
+async function refreshCodexUsage(providerId) {
+  const body = document.getElementById('codex-usage-body');
+  if (!body) return;
+  try {
+    const res = await rpc('ai.codex.usage', { provider_id: providerId });
+    body.innerHTML = '';
+    const planLabel = res.plan ? res.plan.charAt(0).toUpperCase() + res.plan.slice(1) : 'Unknown';
+    body.append(el('div', { class: 'codex-usage-plan' },
+      el('span', { class: 'codex-usage-plan-label', text: 'Plan' }),
+      el('span', { class: 'codex-usage-plan-value', text: planLabel }),
+      ...(res.limit_reached ? [el('span', { class: 'codex-usage-limit-reached', text: 'limit reached' })] : []),
+    ));
+    if (res.primary_window) {
+      body.append(renderUsageWindow('Session', res.primary_window));
+    }
+    if (res.weekly_window) {
+      body.append(renderUsageWindow('Weekly', res.weekly_window));
+    }
+    if (res.reset_credits_available > 0) {
+      body.append(el('div', { class: 'codex-usage-credits', text: `${res.reset_credits_available} reset credit${res.reset_credits_available > 1 ? 's' : ''} available` }));
+    }
+    if (!res.primary_window && !res.weekly_window) {
+      body.append(el('div', { class: 'provider-model-empty', text: 'No usage windows available.' }));
+    }
+  } catch (err) {
+    body.innerHTML = '';
+    body.append(el('div', { class: 'provider-model-empty', text: `Error: ${err.message}` }));
+  }
+}
+
+function renderUsageWindow(label, win) {
+  const remaining = win.remaining_percent ?? (100 - win.used_percent);
+  const resetDate = win.reset_at ? new Date(win.reset_at * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'unknown';
+  const barColor = win.used_percent >= 90 ? 'critical' : (win.used_percent >= 70 ? 'warning' : 'ok');
+  return el('div', { class: 'codex-usage-window' },
+    el('div', { class: 'codex-usage-window-head' },
+      el('span', { class: 'codex-usage-window-label', text: label }),
+      el('span', { class: 'codex-usage-window-pct', text: `${win.used_percent}% used` }),
+    ),
+    el('div', { class: 'codex-usage-bar' },
+      el('div', { class: `codex-usage-bar-fill ${barColor}`, style: `width:${win.used_percent}%` }),
+    ),
+    el('div', { class: 'codex-usage-window-foot' },
+      el('span', { text: `${remaining}% remaining` }),
+      el('span', { class: 'codex-usage-reset', text: `resets ${resetDate}` }),
+    ),
+  );
+}
+
+function renderCodexRuntime(p) {
+  const card = el('div', { class: 'provider-models-card codex-runtime-card' },
+    el('div', { class: 'provider-models-head' },
+      el('div', {},
+        el('h2', { text: 'Codex Runtime' }),
+        el('p', { text: 'Official Codex CLI binary for compaction + ACP' }),
+      ),
+      el('button', { class: 'mini-btn', type: 'button', text: 'Download' }),
+    ),
+    el('div', { class: 'codex-runtime-status', id: 'codex-runtime-status' },
+      el('div', { class: 'provider-model-empty', text: 'Checking runtime status…' }),
+    ),
+  );
+  const dlBtn = card.querySelector('button');
+  dlBtn.addEventListener('click', async () => {
+    dlBtn.disabled = true;
+    dlBtn.textContent = 'Downloading…';
+    try {
+      const res = await rpc('ai.codex.runtime.download', {});
+      toast(`Codex runtime v${res.version} downloaded`, 'success');
+      refreshCodexRuntime();
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      dlBtn.disabled = false;
+      dlBtn.textContent = 'Download';
+    }
+  });
+  // Defer refresh until the card is in the DOM
+  setTimeout(() => refreshCodexRuntime(), 0);
+  return card;
+}
+
+async function refreshCodexRuntime() {
+  const status = document.getElementById('codex-runtime-status');
+  if (!status) return;
+  try {
+    const res = await rpc('ai.codex.runtime.status', {});
+    status.innerHTML = '';
+    if (res.downloading) {
+      status.append(el('div', { class: 'codex-runtime-info downloading', text: 'Downloading…' }));
+      return;
+    }
+    if (res.download_error) {
+      status.append(el('div', { class: 'codex-runtime-info error', text: `Download failed: ${res.download_error}` }));
+      return;
+    }
+    if (res.installed) {
+      status.append(el('div', { class: 'codex-runtime-info installed' },
+        el('span', { text: `v${res.version}` }),
+        el('span', { class: 'codex-runtime-path', text: res.path }),
+      ));
+    } else {
+      status.append(el('div', { class: 'provider-model-empty', text: 'Not installed. Click "Download" to get the official Codex binary (~85 MB).' }));
+    }
+  } catch (err) {
+    status.innerHTML = '';
+    status.append(el('div', { class: 'provider-model-empty', text: `Error: ${err.message}` }));
+  }
 }
 
 function renderModels(p) {
@@ -215,13 +448,17 @@ const KIND_DEFAULTS = {
   messages: 'https://api.anthropic.com',
   responses: 'https://api.openai.com/v1',
   chat: 'https://api.openai.com/v1',
+  codex: 'https://chatgpt.com/backend-api/codex',
 };
 
 async function addProvider(provider = null) {
   const initialKind = provider?.kind ?? 'chat';
+  const isCodex = initialKind === 'codex';
   const res = await dialog({
     title: provider ? 'Edit provider' : 'Add provider',
-    message: provider ? 'Update provider settings.' : 'API keys are stored in the local SQLite credential store.',
+    message: provider ? 'Update provider settings.' : isCodex
+      ? 'Codex uses ChatGPT OAuth — no API key needed. Sign in after saving.'
+      : 'API keys are stored in the local SQLite credential store.',
     fields: [
       {
         name: 'kind', label: 'Kind', tag: 'select',
@@ -229,24 +466,30 @@ async function addProvider(provider = null) {
           { value: 'messages', label: 'Messages' },
           { value: 'responses', label: 'Responses' },
           { value: 'chat', label: 'Chat' },
+          { value: 'codex', label: 'Codex (ChatGPT)' },
         ],
         value: initialKind,
         onChange: (kindInput, all) => {
           const urlInput = all.base_url;
+          const apiKeyInput = all.api_key;
           if (!urlInput) return;
           const current = urlInput.value.trim();
-          // suggest the new kind's default only while the field is empty or
-          // still holds a previous suggestion; never overwrite user input
           const known = Object.values(KIND_DEFAULTS);
           if (current === '' || known.includes(current)) {
             urlInput.value = KIND_DEFAULTS[kindInput.value] ?? '';
           }
-          urlInput.placeholder = `API base URL — vendor endpoint or AI gateway (e.g. ${KIND_DEFAULTS[kindInput.value] ?? ''})`;
+          const isCod = kindInput.value === 'codex';
+          urlInput.disabled = isCod;
+          urlInput.placeholder = isCod ? 'Fixed — uses ChatGPT Codex backend' : `API base URL — vendor endpoint or AI gateway (e.g. ${KIND_DEFAULTS[kindInput.value] ?? ''})`;
+          if (apiKeyInput) {
+            apiKeyInput.disabled = isCod;
+            apiKeyInput.placeholder = isCod ? 'Not needed — uses ChatGPT OAuth' : (provider?.has_api_key ? 'leave blank to keep current key' : 'sk-…');
+          }
         },
       },
       { name: 'name', label: 'Name', value: provider?.name ?? '', placeholder: 'e.g. my provider' },
-      { name: 'base_url', label: 'Base URL', value: provider?.base_url ?? KIND_DEFAULTS[initialKind] ?? '', placeholder: `API base URL — vendor endpoint or AI gateway (e.g. ${KIND_DEFAULTS[initialKind]})` },
-      { name: 'api_key', label: 'API key', value: '', placeholder: provider?.has_api_key ? 'leave blank to keep current key' : 'sk-…' },
+      { name: 'base_url', label: 'Base URL', value: provider?.base_url ?? KIND_DEFAULTS[initialKind] ?? '', placeholder: `API base URL — vendor endpoint or AI gateway (e.g. ${KIND_DEFAULTS[initialKind]})`, disabled: isCodex },
+      { name: 'api_key', label: 'API key', value: '', placeholder: isCodex ? 'Not needed — uses ChatGPT OAuth' : (provider?.has_api_key ? 'leave blank to keep current key' : 'sk-…'), disabled: isCodex },
     ],
     actions: [
       { label: 'Cancel', value: null },
@@ -256,7 +499,7 @@ async function addProvider(provider = null) {
   if (res.value !== 'save') return;
   const { kind, name, base_url, api_key } = res.fields;
   if (!name.trim()) { toast('Provider name is required', 'error'); return; }
-  if (!base_url.trim()) { toast('Base URL is required', 'error'); return; }
+  if (kind !== 'codex' && !base_url.trim()) { toast('Base URL is required', 'error'); return; }
   try {
     await rpc('ai.providers.save', {
       id: provider?.id || undefined,

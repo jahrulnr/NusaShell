@@ -593,7 +593,7 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 			MCP:        mcpManager,
 		},
 		MCPToolbox: mcpManager,
-		Factory:    ai.Factory,
+		Factory:    ai.NewFactory(creds),
 		RetrySleeper: func(context.Context, time.Duration) error {
 			return nil
 		},

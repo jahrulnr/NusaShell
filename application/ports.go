@@ -36,6 +36,10 @@ type CredentialStore interface {
 	Get(providerID string) (string, bool, error)
 	Set(providerID, key string) error
 	Delete(providerID string) error
+	// ListByPrefix returns all provider IDs that start with the given
+	// prefix. Used by Codex multi-account support to enumerate accounts
+	// stored under "{providerID}:account:{accountID}" keys.
+	ListByPrefix(prefix string) ([]string, error)
 }
 
 type SkillStore interface {
@@ -88,6 +92,85 @@ type WorkspacePicker interface {
 type WorkspacePickerFunc func(ctx context.Context) (string, error)
 
 func (f WorkspacePickerFunc) Choose(ctx context.Context) (string, error) { return f(ctx) }
+
+// CodexRuntime manages the official Codex CLI binary as a NusaShell-managed
+// sidecar. The application layer uses this port to check runtime status and
+// trigger downloads without depending on runtime package details.
+type CodexRuntime interface {
+	// Status returns the current runtime binary status: installed path +
+	// version, or download progress/error if a download is in flight.
+	Status() CodexRuntimeStatus
+	// EnsureBinary returns the path to a usable Codex binary, downloading
+	// it if necessary. If force is true, a re-download is triggered even
+	// if a binary is already installed.
+	EnsureBinary(ctx context.Context, force bool) (string, error)
+}
+
+// CodexRuntimeStatus is the runtime status snapshot returned by Status().
+type CodexRuntimeStatus struct {
+	Installed     bool
+	Version       string
+	Path          string
+	Downloading   bool
+	DownloadError string
+}
+
+// CodexOAuth performs the Codex ChatGPT OAuth PKCE login flow. The
+// implementation opens a browser and blocks until the callback completes.
+type CodexOAuth interface {
+	Login(ctx context.Context) (CodexToken, error)
+	// ExtractProfile decodes a stored token JSON and returns the email
+	// and name. Used to enrich old tokens that lack email/name fields by
+	// decoding the JWT access_token claims.
+	ExtractProfile(tokenJSON string) (email, name string)
+}
+
+// CodexUsage fetches the ChatGPT rate-limit usage for a stored OAuth token.
+// The token JSON is the same string stored in CredentialStore.
+type CodexUsage interface {
+	FetchUsage(ctx context.Context, tokenJSON string) (CodexUsageResult, error)
+}
+
+// CodexUsageResult is the parsed usage snapshot returned by the Codex
+// wham/usage endpoint.
+type CodexUsageResult struct {
+	Plan          string // "go", "plus", "pro", etc.
+	LimitReached  bool
+	PrimaryWindow *CodexUsageWindow
+	// WeeklyWindow is the secondary window, if any (e.g. for review models).
+	WeeklyWindow *CodexUsageWindow
+	// ResetCreditsAvailable is the number of rate-limit reset credits
+	// the user can spend to reset their usage window.
+	ResetCreditsAvailable int
+}
+
+// CodexUsageWindow is one rate-limit window (session or weekly).
+type CodexUsageWindow struct {
+	UsedPercent       int   // 0-100
+	ResetAt           int64 // unix seconds
+	ResetAfterSeconds int64
+}
+
+// CodexToken is the result of a successful OAuth login.
+type CodexToken struct {
+	AccessToken  string
+	RefreshToken string
+	AccountID    string
+	Email        string
+	Name         string
+	ExpiresAt    int64 // unix seconds, 0 = unknown
+}
+
+// CodexTokenJSON is the on-disk format for cached OAuth tokens, stored
+// in CredentialStore as a JSON string. Matches codex.TokenJSON.
+type CodexTokenJSON struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	AccountID    string `json:"account_id,omitempty"`
+	Email        string `json:"email,omitempty"`
+	Name         string `json:"name,omitempty"`
+	ExpiresAt    int64  `json:"expires_at,omitempty"`
+}
 
 // ---- AI provider port ----
 
@@ -175,6 +258,21 @@ type AIProvider interface {
 	// Stream reports text deltas and, when the provider emits thinking
 	// content, reasoning deltas.
 	Stream(ctx context.Context, req ChatRequest, onDelta, onReasoning func(text string)) (ChatResponse, error)
+}
+
+// ServerCompactor is an optional capability implemented by adapters that
+// support server-side compaction (e.g. Codex /responses/compact). When the
+// adapter implements this interface, compactConversation delegates to
+// CompactServer instead of using the model to summarize client-side. If
+// CompactServer returns an error (e.g. 404 for free accounts, network
+// failure), the caller falls back to client-side compaction.
+//
+// The returned summary is a human-readable text summary for UI display and
+// the compaction marker. The opaque blob (if any) is stored separately on
+// the conversation via SetCompactionBlob so subsequent requests can pass it
+// back to the server.
+type ServerCompactor interface {
+	CompactServer(ctx context.Context, c *domain.Conversation, model string, contextWindow int) (summary string, err error)
 }
 
 // ModelLister is implemented by providers that can enumerate models.

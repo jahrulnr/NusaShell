@@ -474,6 +474,11 @@ func resolveContextWindow(provider *domain.Provider, model string, settings doma
 // window. Each chunk is summarized together with the running summary from the
 // previous pass, producing a progressively folded summary that preserves all
 // prior context. The most recent messages are kept intact.
+//
+// When the adapter implements ServerCompactor (e.g. Codex), the call is
+// delegated to the server-side compact endpoint first. If that fails (e.g.
+// 404 for free accounts, network error), the function falls back to the
+// client-side multi-pass summarization below.
 func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *domain.Conversation, model string, contextWindow int) (string, error) {
 	const (
 		keepTokenBudget = 64000 // retained recent messages token budget
@@ -484,6 +489,38 @@ func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *do
 
 	if len(c.Messages) <= 1 {
 		return "", nil
+	}
+
+	// Edge case: if the adapter supports server-side compaction, try it
+	// first. On any error, fall back to client-side compaction so the
+	// conversation still gets summarized.
+	if compactor, ok := adapter.(ServerCompactor); ok {
+		summary, err := compactor.CompactServer(ctx, c, model, contextWindow)
+		if err == nil {
+			// Server-side compaction succeeded. Archive the dropped
+			// messages and apply the summary the same way client-side
+			// compaction does, so the conversation shape stays consistent.
+			effectiveKeepBudget := keepTokenBudget
+			if cap := contextWindow * 3 / 10; cap < effectiveKeepBudget {
+				effectiveKeepBudget = cap
+			}
+			if effectiveKeepBudget < 1000 {
+				effectiveKeepBudget = 1000
+			}
+			toArchive := c.ArchiveMessages(effectiveKeepBudget)
+			if len(toArchive) > 0 {
+				idx, archErr := a.Conversations.ArchiveChunk(c.ID, toArchive)
+				if archErr != nil {
+					a.log("warn", "agent", "failed to archive chunk for %s: %v", c.ID, archErr)
+				} else {
+					c.ChunkCount = idx + 1
+				}
+			}
+			c.Summary = ""
+			c.Compact(summary, effectiveKeepBudget)
+			return summary, a.Conversations.Save(c)
+		}
+		a.log("warn", "agent", "server-side compaction failed for %s, falling back to client-side: %v", c.ID, err)
 	}
 
 	// Cap the keep budget to 30% of the context window so that compaction

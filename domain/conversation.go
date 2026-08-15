@@ -103,6 +103,12 @@ type Conversation struct {
 	Workspace  string // optional absolute working directory selected for this conversation
 	Messages   []Message
 	ChunkCount int // number of archived pre-compaction chunks available for scroll-back
+	// CompactionBlob holds an opaque server-side compaction payload (e.g.
+	// Codex encrypted_content) that only the originating provider can read.
+	// When non-empty, the Codex adapter passes it back as a Compaction item
+	// in subsequent request input. Empty for providers that don't support
+	// server-side compaction.
+	CompactionBlob string
 }
 
 // NewConversation creates an empty conversation.

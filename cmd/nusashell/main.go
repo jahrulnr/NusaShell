@@ -17,6 +17,7 @@ import (
 	"nusashell/application"
 	"nusashell/frontend"
 	"nusashell/infrastructure/ai"
+	"nusashell/infrastructure/ai/codex"
 	"nusashell/infrastructure/docs"
 	"nusashell/infrastructure/jsonstore"
 	"nusashell/infrastructure/mcpclient"
@@ -95,9 +96,15 @@ func run() error {
 			MCP:        mcpManager,
 		},
 		MCPToolbox:      mcpManager,
-		Factory:         ai.Factory,
+		Factory:         ai.NewFactory(credentials),
 		WorkspacePicker: workspacepicker.Zenity{},
 	})
+	// Wire Codex runtime + OAuth adapters (optional — nil-safe if unavailable)
+	if rt, err := codex.NewRuntimeAdapter(); err == nil {
+		app.CodexRuntime = rt
+	}
+	app.CodexOAuth = codex.NewOAuthAdapter()
+	app.CodexUsage = codex.NewUsageAdapter()
 
 	srv := transport.New(app, logger, transport.StaticHandler(frontend.FS, dev), dev)
 	httpServer := &http.Server{

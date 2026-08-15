@@ -53,14 +53,17 @@ func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *cont
 	if kind == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "kind is required"}
 	}
-	if kind != domain.ProviderMessages && kind != domain.ProviderResponses && kind != domain.ProviderChat {
-		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "kind must be messages, responses or chat"}
+	if kind != domain.ProviderMessages && kind != domain.ProviderResponses && kind != domain.ProviderChat && kind != domain.ProviderCodex {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "kind must be messages, responses, chat, or codex"}
 	}
-	// No hidden defaults: the base URL is user/UX responsibility (the
-	// frontend suggests per-kind defaults and rejects empty input). The
-	// backend stays strict so it can grow more logic without surprises.
+	// Codex uses a fixed backend URL and OAuth — no user-supplied base URL.
+	// Other kinds require a base URL.
 	baseURL := strings.TrimSpace(req.BaseURL)
-	if baseURL == "" {
+	if kind == domain.ProviderCodex {
+		if baseURL == "" {
+			baseURL = "https://chatgpt.com/backend-api/codex"
+		}
+	} else if baseURL == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "base url is required"}
 	}
 
@@ -168,7 +171,7 @@ func (a *App) handleProvidersImport(req contracts.ProviderIDRequest) (any, *cont
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	adapter, err := a.Factory(ctx, p, key)
 	if err != nil {
