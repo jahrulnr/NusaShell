@@ -90,8 +90,11 @@ func newCodexAdapter(ctx context.Context, p *domain.Provider, storedJSON string,
 			}, nil
 		}
 		// Persist the refreshed token so subsequent turns don't refresh again.
+		// Write both the active provider key and the account-scoped key used
+		// by multi-account routing; otherwise failover keeps serving the
+		// expired token.
 		if newJSON, err := refreshed.Marshal(); err == nil {
-			_ = creds.Set(p.ID, newJSON)
+			_ = application.PersistCodexToken(creds, p.ID, refreshed.AccountID, newJSON)
 		}
 		return &codex.Adapter{
 			BaseURL:        p.BaseURL,

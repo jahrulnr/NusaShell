@@ -266,13 +266,20 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 	}()
 
 	// Codex sticky account: pick the account bound to this conversation
-	// so the Codex backend can reuse the prompt cache shard. If the
-	// sticky account is rate-limited, PickAccount returns a different one.
+	// so the Codex backend can reuse the prompt cache shard. If every
+	// stored account is rate-limited or circuit-open, fail before the
+	// first request instead of silently using the active (blocked) token.
 	if provider.Kind == domain.ProviderCodex && a.CodexRouter != nil {
 		accounts := a.listCodexAccountIDs(provider.ID)
-		if picked := a.CodexRouter.PickAccount(run.ConversationID, provider.ID, accounts); picked != "" {
-			if token, has, _ := a.Credentials.Get(accountKey(provider.ID, picked)); has {
-				apiKey = token
+		if len(accounts) > 0 {
+			pick := a.CodexRouter.PickAccountDetailed(run.ConversationID, provider.ID, accounts)
+			if pick.AccountID != "" {
+				if token, has, _ := a.Credentials.Get(accountKey(provider.ID, pick.AccountID)); has {
+					apiKey = token
+				}
+			} else if pick.AllRateLimited {
+				a.failTurn(run, asstMsgID, allCodexAccountsLimitedError(pick.EarliestReset))
+				return
 			}
 		}
 	}
@@ -338,7 +345,7 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 					// Async fetch exact reset time from usage API.
 					// Derive from the turn context so the goroutine exits
 					// early if the turn is cancelled.
-					go a.refreshCodexCircuit(run.Ctx, provider.ID, currentAccount)
+					go a.refreshCodexCircuit(context.WithoutCancel(run.Ctx), provider.ID, currentAccount)
 				} else {
 					a.CodexRouter.MarkRateLimited(currentAccount, cooldown)
 				}
@@ -358,8 +365,8 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 						}
 					}
 				}
-				if pickResult.AllRateLimited && !pickResult.EarliestReset.IsZero() {
-					streamErr = fmt.Errorf("all Codex accounts are rate-limited. Earliest reset at %s", pickResult.EarliestReset.Format(time.RFC3339))
+				if pickResult.AllRateLimited {
+					streamErr = allCodexAccountsLimitedError(pickResult.EarliestReset)
 				}
 			}
 			if !continuedPartialStream && canContinuePartialStream(streamErr, roundResult) {
@@ -781,6 +788,13 @@ func (a *App) updateToolResult(c *domain.Conversation, msgID, callID string, sta
 		}
 	}
 	return c
+}
+
+func allCodexAccountsLimitedError(reset time.Time) error {
+	if reset.IsZero() {
+		return fmt.Errorf("all Codex accounts are rate-limited")
+	}
+	return fmt.Errorf("all Codex accounts are rate-limited. Earliest reset at %s", reset.Format(time.RFC3339))
 }
 
 func (a *App) failTurn(run *TurnRun, msgID string, err error) {

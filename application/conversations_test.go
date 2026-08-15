@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"nusashell/contracts"
@@ -61,6 +62,73 @@ func (f *fakeConvStore) ArchiveChunk(id string, messages []domain.Message) (int,
 
 func (f *fakeConvStore) GetChunk(id string, index int) ([]domain.Message, error) {
 	return nil, errNotFound
+}
+
+// memCreds is an in-memory CredentialStore for tests.
+type memCreds struct {
+	m map[string]string
+}
+
+func (c *memCreds) Get(id string) (string, bool, error) {
+	v, ok := c.m[id]
+	return v, ok, nil
+}
+
+func (c *memCreds) Set(id, v string) error {
+	if c.m == nil {
+		c.m = map[string]string{}
+	}
+	c.m[id] = v
+	return nil
+}
+
+func (c *memCreds) Delete(id string) error {
+	delete(c.m, id)
+	return nil
+}
+
+func (c *memCreds) ListByPrefix(prefix string) ([]string, error) {
+	var ids []string
+	for k := range c.m {
+		if strings.HasPrefix(k, prefix) {
+			ids = append(ids, k)
+		}
+	}
+	return ids, nil
+}
+
+// fakeProviderStore is a minimal in-memory ProviderStore for tests.
+type fakeProviderStore struct {
+	items map[string]*domain.Provider
+}
+
+func (f *fakeProviderStore) List() []*domain.Provider {
+	out := make([]*domain.Provider, 0, len(f.items))
+	for _, p := range f.items {
+		out = append(out, p)
+	}
+	return out
+}
+
+func (f *fakeProviderStore) Get(id string) (*domain.Provider, error) {
+	p, ok := f.items[id]
+	if !ok {
+		return nil, errNotFound
+	}
+	return p, nil
+}
+
+func (f *fakeProviderStore) Save(p *domain.Provider) error {
+	if f.items == nil {
+		f.items = map[string]*domain.Provider{}
+	}
+	f.items[p.ID] = p
+	return nil
+}
+
+func (f *fakeProviderStore) Delete(id string) error {
+	delete(f.items, id)
+	return nil
 }
 
 func TestHandleConversationsDeleteClearsTodos(t *testing.T) {

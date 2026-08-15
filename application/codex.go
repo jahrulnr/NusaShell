@@ -22,6 +22,19 @@ func accountKey(providerID, accountID string) string {
 	return accountKeyPrefix(providerID) + accountID
 }
 
+// PersistCodexToken writes token JSON under both the active provider key
+// and the account-scoped key used by multi-account routing. Account-scoped
+// persistence is skipped when accountID is empty.
+func PersistCodexToken(creds CredentialStore, providerID, accountID, tokenJSON string) error {
+	if err := creds.Set(providerID, tokenJSON); err != nil {
+		return err
+	}
+	if accountID == "" {
+		return nil
+	}
+	return creds.Set(accountKey(providerID, accountID), tokenJSON)
+}
+
 // listCodexAccountIDs returns all stored account IDs for a Codex provider,
 // extracted from CredentialStore keys matching "{providerID}:account:*".
 func (a *App) listCodexAccountIDs(providerID string) []string {
@@ -142,14 +155,7 @@ func (a *App) handleCodexLogin(req contracts.CodexLoginRequest) (any, *contracts
 		return nil, rpcInternal(err)
 	}
 	tokenStr := string(tokenJSON)
-	// Store under account-specific key
-	if tok.AccountID != "" {
-		if err := a.Credentials.Set(accountKey(req.ProviderID, tok.AccountID), tokenStr); err != nil {
-			return nil, rpcInternal(err)
-		}
-	}
-	// Set as active
-	if err := a.Credentials.Set(req.ProviderID, tokenStr); err != nil {
+	if err := PersistCodexToken(a.Credentials, req.ProviderID, tok.AccountID, tokenStr); err != nil {
 		return nil, rpcInternal(err)
 	}
 	// Mark provider as having credentials
@@ -200,12 +206,7 @@ func (a *App) handleCodexImport(req contracts.CodexImportRequest) (any, *contrac
 		return nil, rpcInternal(err)
 	}
 	tokenStr := string(tokenJSON)
-	if tok.AccountID != "" {
-		if err := a.Credentials.Set(accountKey(req.ProviderID, tok.AccountID), tokenStr); err != nil {
-			return nil, rpcInternal(err)
-		}
-	}
-	if err := a.Credentials.Set(req.ProviderID, tokenStr); err != nil {
+	if err := PersistCodexToken(a.Credentials, req.ProviderID, tok.AccountID, tokenStr); err != nil {
 		return nil, rpcInternal(err)
 	}
 	a.markProviderHasCreds(req.ProviderID, true)
@@ -470,20 +471,20 @@ func (a *App) refreshCodexCircuit(parent context.Context, providerID, accountID 
 // primary window reset time. Otherwise closes it (e.g. user upgraded to
 // Plus/Pro and usage was refilled).
 func (a *App) applyUsageToCircuit(accountID string, usage CodexUsageResult) {
-	if usage.LimitReached && usage.PrimaryWindow != nil && usage.PrimaryWindow.ResetAt > 0 {
-		resetAt := time.Unix(usage.PrimaryWindow.ResetAt, 0)
-		a.CodexRouter.MarkCircuitOpen(accountID, resetAt)
-		a.log("info", "ai", "codex circuit open until %s for account %s (usage limit reached)",
-			resetAt.Format(time.RFC3339), accountID)
-	} else {
-		// Usage no longer limit-reached — close the circuit. This handles
-		// the case where the user upgraded their plan and usage was refilled.
-		if a.CodexRouter.CircuitOpenUntil(accountID).IsZero() {
-			return // already closed
+	if usage.LimitReached {
+		if usage.PrimaryWindow != nil && usage.PrimaryWindow.ResetAt > 0 {
+			resetAt := time.Unix(usage.PrimaryWindow.ResetAt, 0)
+			a.CodexRouter.MarkCircuitOpen(accountID, resetAt)
+			a.log("info", "ai", "codex circuit open until %s for account %s (usage limit reached)",
+				resetAt.Format(time.RFC3339), accountID)
 		}
-		a.CodexRouter.ResetCircuit(accountID)
-		a.log("info", "ai", "codex circuit closed for account %s (usage limit cleared)", accountID)
+		return
 	}
+	if a.CodexRouter.CircuitOpenUntil(accountID).IsZero() {
+		return
+	}
+	a.CodexRouter.ResetCircuit(accountID)
+	a.log("info", "ai", "codex circuit closed for account %s (usage limit cleared)", accountID)
 }
 
 // RefreshCircuitBreakers polls usage for all stored Codex accounts across

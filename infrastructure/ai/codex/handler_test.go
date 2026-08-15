@@ -3,9 +3,13 @@ package codex
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -459,32 +463,8 @@ func TestCompactServerSingleMessage(t *testing.T) {
 	}
 }
 
-// fakeCompactScript is a shell script that emulates the Codex app-server
-// JSON-RPC protocol for compaction testing. It reads NDJSON from stdin,
-// responds to initialize/thread/start/turn/start/thread/compact/start,
-// and emits item/completed + turn/completed notifications.
-const fakeCompactScript = `#!/bin/bash
-read line
-echo '{"jsonrpc":"2.0","id":1,"result":{"userAgent":"test","codexHome":"/tmp","platformFamily":"unix","platformOs":"linux"}}'
-read line
-read line
-echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"test-thread-001"}}}'
-read line
-echo '{"jsonrpc":"2.0","id":100,"result":{"turn":{"id":"turn-1","items":[],"status":"inProgress"}}}'
-echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"test-thread-001","turn":{"id":"turn-1","status":"completed"}}}'
-read line
-echo '{"jsonrpc":"2.0","id":200,"result":{}}'
-echo '{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"contextCompaction","id":"cc-1"},"threadId":"test-thread-001","turnId":"compact-turn"}}'
-echo '{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","text":"Compaction summary: user discussed testing."},"threadId":"test-thread-001","turnId":"compact-turn"}}'
-echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"test-thread-001","turn":{"id":"compact-turn","status":"completed"}}}'
-`
-
 func TestCompactServerSubprocessSuccess(t *testing.T) {
-	// Create fake codex binary
-	binPath := t.TempDir() + "/fake-codex"
-	if err := os.WriteFile(binPath, []byte(fakeCompactScript), 0755); err != nil {
-		t.Fatalf("write fake binary: %v", err)
-	}
+	binPath := buildFakeCodex(t)
 
 	oldBin := CodexBinary
 	CodexBinary = binPath
@@ -583,5 +563,39 @@ func TestBuildTurnInputEmptyContent(t *testing.T) {
 	input := buildTurnInput(c)
 	if len(input) != 1 {
 		t.Fatalf("expected 1 item (empty content skipped), got %d", len(input))
+	}
+}
+
+func buildFakeCodex(t *testing.T) string {
+	t.Helper()
+	root, err := moduleRoot()
+	if err != nil {
+		t.Fatalf("module root: %v", err)
+	}
+	out := filepath.Join(t.TempDir(), "fake-codex")
+	if runtime.GOOS == "windows" {
+		out += ".exe"
+	}
+	cmd := exec.Command("go", "build", "-o", out, filepath.Join(root, "testdata", "fakecodex"))
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build fakecodex: %v\n%s", err, b)
+	}
+	return out
+}
+
+func moduleRoot() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("go.mod not found above %s", dir)
+		}
+		dir = parent
 	}
 }

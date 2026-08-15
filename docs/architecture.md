@@ -146,7 +146,16 @@ make check   # gofmt + go test -race + go vet + go build
 Handler-level tests in `transport/` drive the real HTTP/WS/SSE handlers
 against a scripted fake LLM server and a fake stdio MCP binary
 (`testdata/fakemcp`), covering the full turn lifecycle, tool calls,
-compaction, stop, and both provider wire formats.
+compaction, stop, and both provider wire formats. Codex server-side
+compaction tests compile `testdata/fakecodex` so the subprocess path
+runs on Windows as well as Unix.
+
+Codex OAuth tokens are stored under the provider ID (active account) and
+under `{providerID}:account:{accountID}` for multi-account failover.
+Deleting a provider removes both the active key and every account-scoped
+credential. A turn that has stored Codex accounts but finds all of them
+rate-limited or circuit-open fails immediately instead of using the
+blocked active token.
 
 ## Proposed PWA and offline-first design
 
