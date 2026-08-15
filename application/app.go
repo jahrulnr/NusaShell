@@ -400,6 +400,20 @@ func (a *App) CloseLifecycle() {
 	}
 }
 
+// Close releases resources held by the app (file handles, background
+// goroutines). Safe to call multiple times. Tests should call this via
+// t.Cleanup so that Windows does not fail TempDir removal with "file
+// in use" errors from the embedding cache and trajectory log handles.
+func (a *App) Close() {
+	a.CloseLifecycle()
+	if a.EmbeddingCache != nil {
+		_ = a.EmbeddingCache.Close()
+	}
+	if a.Trajectory != nil {
+		_ = a.Trajectory.Close()
+	}
+}
+
 func (a *App) log(level, source, format string, args ...any) {
 	e := &domain.LogEntry{
 		ID:      domain.NewID("log"),

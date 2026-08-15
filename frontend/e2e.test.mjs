@@ -230,7 +230,7 @@ test('embedded frontend completes one representative flow through the Go backend
 
     window.location.hash = '#logs';
     window.dispatchEvent(new window.Event('hashchange'));
-    await waitFor(() => document.querySelector('#log-tail .log-line .log-msg')?.textContent.includes('skill saved'), 'live log event in the UI');
+    await waitFor(() => [...document.querySelectorAll('#log-tail .log-line .log-msg')].some((el) => el.textContent.includes('skill saved')), 'live log event in the UI');
 
     window.location.hash = '#agent';
     window.dispatchEvent(new window.Event('hashchange'));

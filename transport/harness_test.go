@@ -602,6 +602,7 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 	srv := New(app, logger, StaticHandler(frontend.FS, false), false)
 	httpSrv := httptest.NewServer(srv.Routes())
 	t.Cleanup(httpSrv.Close)
+	t.Cleanup(app.Close)
 	return &harness{t: t, app: app, server: httpSrv, store: store, creds: creds, llm: llm, mcpBin: fakemcpBin}
 }
 

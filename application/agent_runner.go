@@ -27,10 +27,14 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 	if model == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "model is required"}
 	}
-	provider, model, apiKey, rpcErr := a.resolveModel(model)
+	provider, bareModel, apiKey, rpcErr := a.resolveModel(model)
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
+	// Store the qualified model ID (as sent by the UI) in the conversation
+	// so the provider selection is preserved across restarts. The bare model
+	// ID is used only for the API call.
+	qualifiedModel := model
 
 	a.startMu.Lock()
 	defer a.startMu.Unlock()
@@ -58,7 +62,7 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 	}
 	c.AddMessage(userMsg)
 	c.AddMessage(asstMsg)
-	c.Model = model
+	c.Model = qualifiedModel
 	c.Effort = req.Effort
 	c.Status = "running"
 	if err := a.Conversations.Save(c); err != nil {
@@ -76,8 +80,8 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 	a.runs[run.ID] = run
 	a.runsMu.Unlock()
 
-	go a.runTurn(run, provider, apiKey, model, req.Effort, asstMsg.ID, false, modelSupportsVision(provider, model))
-	a.log("info", "agent", "turn started: %s (model %s)", run.ID, model)
+	go a.runTurn(run, provider, apiKey, bareModel, req.Effort, asstMsg.ID, false, modelSupportsVision(provider, bareModel))
+	a.log("info", "agent", "turn started: %s (model %s)", run.ID, bareModel)
 	return contracts.TurnStartResult{RunID: run.ID}, nil
 }
 
@@ -117,10 +121,11 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "no failed assistant turn to retry"}
 	}
 
-	provider, model, apiKey, rpcErr := a.resolveModel(model)
+	provider, bareModel, apiKey, rpcErr := a.resolveModel(model)
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
+	qualifiedModel := model
 
 	failed := &c.Messages[failedIdx]
 	continuation := shouldContinueFailedTurn(*failed)
@@ -141,7 +146,7 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 		c.AddMessage(next)
 		targetMsgID = next.ID
 	}
-	c.Model = model
+	c.Model = qualifiedModel
 	c.Effort = req.Effort
 	c.Status = "running"
 	if err := a.Conversations.Save(c); err != nil {
@@ -154,8 +159,8 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 	a.runs[run.ID] = run
 	a.runsMu.Unlock()
 
-	go a.runTurn(run, provider, apiKey, model, req.Effort, targetMsgID, continuation, modelSupportsVision(provider, model))
-	a.log("info", "agent", "turn retried: %s (model %s)", run.ID, model)
+	go a.runTurn(run, provider, apiKey, bareModel, req.Effort, targetMsgID, continuation, modelSupportsVision(provider, bareModel))
+	a.log("info", "agent", "turn retried: %s (model %s)", run.ID, bareModel)
 	return contracts.TurnStartResult{RunID: run.ID}, nil
 }
 
