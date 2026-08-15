@@ -9,6 +9,7 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/modelcatalog"
 	"nusashell/infrastructure/jsonstore"
 )
 
@@ -36,6 +37,7 @@ type App struct {
 	Factory                     ProviderFactory
 	EmbedderFactory             EmbedderFactory
 	EmbeddingModelListerFactory EmbeddingModelListerFactory
+	ModelCatalog                *modelcatalog.Catalog
 	WorkspacePicker             WorkspacePicker
 	CodexRuntime                CodexRuntime
 	CodexOAuth                  CodexOAuth
@@ -210,6 +212,7 @@ type Deps struct {
 	Factory                     ProviderFactory
 	EmbedderFactory             EmbedderFactory             // optional; nil = BM25-only search
 	EmbeddingModelListerFactory EmbeddingModelListerFactory // optional; nil = skip /embeddings/models fetch
+	ModelCatalog                *modelcatalog.Catalog       // optional; nil = skip enrichment from models.dev
 	WorkspacePicker             WorkspacePicker
 	RetrySleeper                RetrySleeper
 }
@@ -242,6 +245,7 @@ func NewApp(deps Deps) *App {
 		EmbedderFactory:             deps.EmbedderFactory,
 		EmbeddingModelListerFactory: deps.EmbeddingModelListerFactory,
 		WorkspacePicker:             deps.WorkspacePicker,
+		ModelCatalog:                deps.ModelCatalog,
 		retrySleeper:                deps.RetrySleeper,
 		runs:                        map[string]*TurnRun{},
 		turnsSinceReview:            map[string]int{},

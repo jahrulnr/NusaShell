@@ -185,7 +185,7 @@ func NewEmbedderFactory() application.EmbedderFactory {
 			// optional — only needed when Ollama is behind an auth proxy.
 			model := ""
 			for _, m := range p.Models {
-				if m.IsEmbedding {
+				if m.Kind == domain.ModelKindEmbedding {
 					model = m.ID
 					break
 				}
@@ -199,7 +199,7 @@ func NewEmbedderFactory() application.EmbedderFactory {
 			// endpoint regardless of which chat API is configured.
 			model := ""
 			for _, m := range p.Models {
-				if m.IsEmbedding {
+				if m.Kind == domain.ModelKindEmbedding {
 					model = m.ID
 					break
 				}

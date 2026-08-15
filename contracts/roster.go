@@ -347,13 +347,21 @@ type ModelDTO struct {
 	ID               string   `json:"id"`
 	ProviderID       string   `json:"provider_id"`
 	ProviderName     string   `json:"provider_name"`
+	DisplayName      string   `json:"display_name,omitempty"`
 	Context          int      `json:"context,omitempty"`
 	MaxOutput        int      `json:"max_output,omitempty"`
 	InputCost        float64  `json:"input_cost,omitempty"`
+	OutputCost       float64  `json:"output_cost,omitempty"`
+	CacheReadCost    float64  `json:"cache_read_cost,omitempty"`
 	Description      string   `json:"description,omitempty"`
 	SupportedEfforts []string `json:"supported_efforts,omitempty"`
 	DefaultEffort    string   `json:"default_effort,omitempty"`
-	IsEmbedding      bool     `json:"is_embedding,omitempty"`
+	Kind             string   `json:"kind,omitempty"`
+	ToolCall         bool     `json:"tool_call,omitempty"`
+	StructuredOutput bool     `json:"structured_output,omitempty"`
+	Reasoning        bool     `json:"reasoning,omitempty"`
+	Vision           bool     `json:"vision,omitempty"`
+	KnowledgeCutoff  string   `json:"knowledge_cutoff,omitempty"`
 }
 
 type ProviderDTO struct {

@@ -368,7 +368,7 @@ func ResolveEmbedder(providers ProviderStore, creds CredentialStore, factory Emb
 		}
 		hasEmbedding := false
 		for _, m := range p.Models {
-			if m.IsEmbedding {
+			if m.Kind == domain.ModelKindEmbedding {
 				hasEmbedding = true
 				break
 			}

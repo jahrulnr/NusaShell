@@ -33,7 +33,7 @@ func (a *App) providerDTO(p *domain.Provider) contracts.ProviderDTO {
 			Description:      m.Description,
 			SupportedEfforts: m.SupportedEfforts,
 			DefaultEffort:    m.DefaultEffort,
-			IsEmbedding:      m.IsEmbedding,
+			Kind:             string(m.Kind),
 		})
 	}
 	return dto
@@ -239,7 +239,7 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 	for i := range models {
 		seen[models[i].ID] = true
 		if config.IsKnownEmbeddingModel(models[i].ID) {
-			models[i].IsEmbedding = true
+			models[i].Kind = domain.ModelKindEmbedding
 		}
 	}
 	// Fetch embedding models from the separate /embeddings/models endpoint.
@@ -255,7 +255,62 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 					continue
 				}
 				seen[id] = true
-				models = append(models, domain.Model{ID: id, IsEmbedding: true})
+				models = append(models, domain.Model{ID: id, Kind: domain.ModelKindEmbedding})
+			}
+		}
+	}
+	// Enrich models with metadata from the models.dev catalog (key-less,
+	// public). Fills in context window, pricing, capabilities (reasoning,
+	// tool call, structured output, vision) that provider /models endpoints
+	// often don't return. Skipped if no catalog is configured or the catalog
+	// fetch fails — provider-imported data stays as-is.
+	if a.ModelCatalog != nil {
+		if err := a.ModelCatalog.EnsureLoaded(ctx); err == nil {
+			hint := catalogHintForProvider(p)
+			enriched := 0
+			for i := range models {
+				meta := a.ModelCatalog.Lookup(hint, models[i].ID)
+				if meta == nil {
+					continue
+				}
+				if models[i].Context == 0 {
+					models[i].Context = meta.Context
+				}
+				if models[i].MaxOutput == 0 {
+					models[i].MaxOutput = meta.Output
+				}
+				if models[i].InputCost == 0 {
+					models[i].InputCost = meta.InputCost
+				}
+				if models[i].OutputCost == 0 {
+					models[i].OutputCost = meta.OutputCost
+				}
+				if models[i].CacheReadCost == 0 {
+					models[i].CacheReadCost = meta.CacheReadCost
+				}
+				if models[i].Description == "" {
+					models[i].Description = meta.Description
+				}
+				if models[i].DisplayName == "" {
+					models[i].DisplayName = meta.Name
+				}
+				if len(models[i].SupportedEfforts) == 0 {
+					models[i].SupportedEfforts = meta.SupportedEfforts
+				}
+				if models[i].KnowledgeCutoff == "" {
+					models[i].KnowledgeCutoff = meta.KnowledgeCutoff
+				}
+				models[i].ToolCall = meta.ToolCall
+				models[i].StructuredOutput = meta.StructuredOutput
+				models[i].Reasoning = meta.Reasoning
+				models[i].Vision = meta.Vision
+				if meta.Kind != "" {
+					models[i].Kind = domain.ModelKind(meta.Kind)
+				}
+				enriched++
+			}
+			if enriched > 0 {
+				a.log("info", "ai", "enriched %d/%d models from models.dev catalog for %s", enriched, len(models), p.Name)
 			}
 		}
 	}
@@ -266,6 +321,37 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 	}
 	a.log("info", "ai", "imported %d models from %s", len(models), p.Name)
 	return models, nil
+}
+
+// catalogHintForProvider maps a NusaShell provider to a models.dev provider
+// ID, used to disambiguate model lookups when the same bare model ID exists
+// under multiple providers (e.g. "gpt-5.5" under "openai" and "ai-router").
+func catalogHintForProvider(p *domain.Provider) string {
+	switch p.Kind {
+	case domain.ProviderResponses:
+		return "openai"
+	case domain.ProviderMessages:
+		return "anthropic"
+	case domain.ProviderCodex:
+		return "openai"
+	}
+	// For chat-kind providers, try to match by base URL domain.
+	lower := strings.ToLower(p.BaseURL)
+	switch {
+	case strings.Contains(lower, "deepseek"):
+		return "deepseek"
+	case strings.Contains(lower, "openrouter"):
+		return "openrouter" // openrouter already returns rich metadata, but catalog can supplement
+	case strings.Contains(lower, "glm") || strings.Contains(lower, "zhipu") || strings.Contains(lower, "zai"):
+		return "zai-org"
+	case strings.Contains(lower, "moonshot") || strings.Contains(lower, "kimi"):
+		return "moonshotai"
+	case strings.Contains(lower, "minimax"):
+		return "minimax"
+	case strings.Contains(lower, "qwen") || strings.Contains(lower, "alibaba"):
+		return "qwen"
+	}
+	return ""
 }
 
 func (a *App) handleModelsList() (any, *contracts.RPCError) {
@@ -289,13 +375,21 @@ func modelsDTO(p *domain.Provider) []contracts.ModelDTO {
 			ID:               m.ID,
 			ProviderID:       p.ID,
 			ProviderName:     p.Name,
+			DisplayName:      m.DisplayName,
 			Context:          m.Context,
 			MaxOutput:        m.MaxOutput,
 			InputCost:        m.InputCost,
+			OutputCost:       m.OutputCost,
+			CacheReadCost:    m.CacheReadCost,
 			Description:      m.Description,
 			SupportedEfforts: m.SupportedEfforts,
 			DefaultEffort:    m.DefaultEffort,
-			IsEmbedding:      m.IsEmbedding,
+			Kind:             string(m.Kind),
+			ToolCall:         m.ToolCall,
+			StructuredOutput: m.StructuredOutput,
+			Reasoning:        m.Reasoning,
+			Vision:           m.Vision,
+			KnowledgeCutoff:  m.KnowledgeCutoff,
 		})
 	}
 	return out

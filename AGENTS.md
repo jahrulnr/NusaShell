@@ -66,6 +66,51 @@ Do not weaken or delete tests merely to make a suite pass. Do not commit secrets
 
 When a behavior or public wire contract changes, update the relevant package documentation and golden fixtures. Record intentional compatibility breaks and non-functional trade-offs explicitly.
 
+## Documentation sync (required)
+
+The agent's product knowledge comes from the embedded corpus in
+`infrastructure/docs/corpus/*.md` (surfaced via `docs_search` / `docs_read`)
+and the system prompt in `application/prompts.go`. Outdated docs make the
+agent hallucinate capabilities, misdescribe the UI, or give wrong answers.
+**Any change that affects user-visible behavior, agent capabilities, or the
+UI must update the matching documentation in the same change.**
+
+When adding, renaming, removing, or changing:
+
+- **Agent tools or built-in tool list** → update `infrastructure/docs/corpus/tools.md`
+  and the tool advertisement in `application/prompts.go` in the same change.
+- **Provider kinds, auth model, base URL rules, or model import behavior** →
+  update `infrastructure/docs/corpus/providers.md`.
+- **Turn lifecycle, compaction, prompt caching, steer, todo, stop, or other
+  agent runtime behavior** → update `infrastructure/docs/corpus/agent.md`.
+- **Data files, data directory layout, or persisted artifacts** → update
+  `infrastructure/docs/corpus/data-locations.md`.
+- **Skills, memory, learning, MCP, or other subsystem behavior** → update the
+  matching `infrastructure/docs/corpus/*.md` file.
+- **System prompt rules or identity** → update `application/prompts.go` and
+  any `agent.md` section that references the changed rule.
+
+A change is not complete until the corpus reflects the new behavior. CI does
+not yet gate non-UI docs for drift, so the agent author is responsible for
+keeping them in sync. When in doubt, search the corpus for the changed
+concept (`docs_search`) and update every page that mentions it.
+
+## UI knowledge docs (required)
+
+When changing launcher or view UI:
+
+- Update `infrastructure/docs/corpus/ui-source/ui-map.json` and regenerate
+  `infrastructure/docs/corpus/ui-*.md` by running `make scan-ui-docs` whenever
+  a `data-view`, view control, button, modal, or interaction in `frontend/`
+  is added, renamed, removed, or changed.
+- The CI `test-backend` job runs `go run ./cmd/scan-ui-docs -check` and fails
+  if any view is undocumented or a mapped control ID is missing from source,
+  or if committed `ui-*.md` differ from generated content (drift gate).
+- The CI `build` job regenerates `ui-*.md` before `go build` so the embedded
+  corpus is always fresh.
+- Do **not** edit `infrastructure/docs/corpus/ui-*.md` files manually; they
+  are generated from the UI map.
+
 ## Experiments (`.experimental/`)
 
 `.experimental/` is the approved scratch space for proving a theory before it

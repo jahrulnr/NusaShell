@@ -527,7 +527,15 @@
 .agent-model-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; border-radius: 7px; padding: 4px; cursor: pointer; }
 .agent-model-row:hover { background: #111d29; }
 .agent-model-choice { display: flex; min-width: 0; flex-direction: column; gap: 4px; border: 0; padding: 6px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
-.agent-model-name { min-width: 0; overflow-wrap: anywhere; font: 11px var(--font-mono); white-space: normal; }
+.agent-model-name { min-width: 0; overflow-wrap: anywhere; font: 11px var(--font-mono); white-space: normal; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.agent-model-badges { display: inline-flex; gap: 3px; flex-wrap: wrap; }
+.agent-model-badge { font: 9px var(--font-mono); padding: 1px 5px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.03em; }
+.agent-badge-reasoning { background: rgba(197, 244, 93, 0.12); color: var(--accent); border: 1px solid rgba(197, 244, 93, 0.3); }
+.agent-badge-tool { background: rgba(88, 166, 255, 0.12); color: #58a6ff; border: 1px solid rgba(88, 166, 255, 0.3); }
+.agent-badge-vision { background: rgba(240, 136, 62, 0.12); color: #f0883e; border: 1px solid rgba(240, 136, 62, 0.3); }
+.agent-badge-structured { background: rgba(193, 166, 255, 0.12); color: #c1a6ff; border: 1px solid rgba(193, 166, 255, 0.3); }
+.agent-model-context { color: var(--text-faint); }
+.agent-model-cost { color: var(--text-faint); }
 .agent-model-meta { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; color: var(--text-faint); font-size: 9.5px; }
 .agent-model-provider { color: #6ea3ff; }
 .agent-model-empty { padding: 22px; color: var(--text-faint); font-size: 11px; text-align: center; }

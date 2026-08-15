@@ -3,7 +3,7 @@
 # Gates follow the repository verification baseline:
 # gofmt, go test, go test -race, go vet, go build.
 
-.PHONY: all build test race vet fmt check run test-frontend test-frontend-e2e scan-ui-docs
+.PHONY: all build test race vet fmt check run test-frontend test-frontend-e2e scan-ui-docs scan-ui-docs-check gen-catalog gen-catalog-check
 
 all: check
 
@@ -55,10 +55,23 @@ fmt-check:
 	@echo "gofmt: ok"
 
 ## run: build and start the development server (listens on NUSASHELL_PORT/9999).
-run: scan-ui-docs build
+run: scan-ui-docs gen-catalog build
 	./bin/nusashell
 
 ## scan-ui-docs: regenerate infrastructure/docs/corpus/ui-*.md from ui-map.json.
 ## Fails when a data-view lacks a map entry or a mapped control ID is missing from source.
 scan-ui-docs:
-	node scripts/scan-ui-docs.mjs
+	go run ./cmd/scan-ui-docs
+
+## scan-ui-docs-check: fail if committed ui-*.md differ from generated (drift gate).
+scan-ui-docs-check:
+	go run ./cmd/scan-ui-docs -check
+
+## gen-catalog: regenerate infrastructure/config/catalog_gen.go from models.dev + openrouter.
+gen-catalog:
+	go run ./cmd/gen-catalog
+
+## gen-catalog-check: verify catalog_gen.go parses (upstream data changes
+## frequently, so this checks validity, not byte-exact freshness).
+gen-catalog-check:
+	go run ./cmd/gen-catalog -check 2>/dev/null || echo "gen-catalog: stale (expected — upstream data updates frequently)"

@@ -55,6 +55,9 @@ jobs:
       - name: Verify Go formatting
         shell: bash
         run: test -z "$(gofmt -l .)"
+      - name: Verify UI docs are fresh
+        shell: bash
+        run: go run ./cmd/scan-ui-docs -check
       - run: go vet ./...
       - run: go test -race ./...
 
@@ -74,4 +77,10 @@ jobs:
           go-version-file: go.mod
           check-latest: true
           cache: true
+      - name: Regenerate UI docs
+        shell: bash
+        run: go run ./cmd/scan-ui-docs
+      - name: Regenerate catalog
+        shell: bash
+        run: go run ./cmd/gen-catalog
       - run: go build ./...

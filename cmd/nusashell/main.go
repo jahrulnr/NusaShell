@@ -19,6 +19,7 @@ import (
 	"nusashell/frontend"
 	"nusashell/infrastructure/ai"
 	"nusashell/infrastructure/ai/codex"
+	"nusashell/infrastructure/ai/modelcatalog"
 	"nusashell/infrastructure/config"
 	"nusashell/infrastructure/docs"
 	"nusashell/infrastructure/jsonstore"
@@ -114,6 +115,7 @@ func run() error {
 		Factory:                     ai.NewFactory(credentials),
 		EmbedderFactory:             ai.NewEmbedderFactory(),
 		EmbeddingModelListerFactory: ai.NewEmbeddingModelListerFactory(),
+		ModelCatalog:                modelcatalog.New(nil),
 		WorkspacePicker:             workspacepicker.Zenity{},
 	})
 	// Wire Codex runtime + OAuth adapters (optional — nil-safe if unavailable)

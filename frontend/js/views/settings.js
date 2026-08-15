@@ -70,20 +70,27 @@ async function refresh() {
 }
 
 function renderModelOptions(models) {
+  // Only chat LLMs belong in the default model picker. Kind is enriched
+  // from models.dev; treat unknown ("") as chat for backward compatibility.
+  const chatModels = models.filter((m) => !m.kind || m.kind === 'chat');
   const selected = localStorage.getItem('nusashell.model') || '';
   const data = [
     { text: 'Automatic — choose in each conversation', value: '', placeholder: true },
-    ...models.map((m) => ({
-      text: m.provider_name ? `${m.id} · ${m.provider_name}` : m.id,
-      value: m.id,
-    })),
+    ...chatModels.map((m) => {
+      const label = m.display_name || m.id;
+      const ctx = m.context ? ` ${Math.round(m.context / 1000)}K` : '';
+      return {
+        text: m.provider_name ? `${label}${ctx} · ${m.provider_name}` : `${label}${ctx}`,
+        value: m.id,
+      };
+    }),
   ];
   preferredSelect.setData(data);
   if (selected) preferredSelect.setSelected([selected]);
 }
 
 function renderEmbeddingModelOptions(models) {
-  const embeddingModels = models.filter((m) => m.is_embedding);
+  const embeddingModels = models.filter((m) => m.kind === 'embedding');
   const data = [
     { text: 'Automatic — use first available embedding model', value: '', placeholder: true },
     ...embeddingModels.map((m) => ({
