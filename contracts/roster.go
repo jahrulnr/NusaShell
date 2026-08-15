@@ -734,19 +734,20 @@ type LogAppendEvent struct {
 // ---- settings ----
 
 type SettingsDTO struct {
-	CompactionEnabled   bool     `json:"compaction_enabled"`
-	CompactionThreshold int      `json:"compaction_threshold"`
-	PromptCaching       bool     `json:"prompt_caching"`
-	MaxToolRounds       int      `json:"max_tool_rounds"`
-	MaxInputTokens      int      `json:"max_input_tokens"`
-	MaxOutputTokens     int      `json:"max_output_tokens"`
-	EmbeddingProviderID string   `json:"embedding_provider_id,omitempty"`
-	EmbeddingModelID    string   `json:"embedding_model_id,omitempty"`
-	Temperature         *float64 `json:"temperature,omitempty"`
-	TopP                *float64 `json:"top_p,omitempty"`
-	TopK                *int     `json:"top_k,omitempty"`
-	FrequencyPenalty    *float64 `json:"frequency_penalty,omitempty"`
-	PresencePenalty     *float64 `json:"presence_penalty,omitempty"`
+	CompactionEnabled       bool     `json:"compaction_enabled"`
+	CompactionThreshold     int      `json:"compaction_threshold"`
+	PromptCaching           bool     `json:"prompt_caching"`
+	MaxToolRounds           int      `json:"max_tool_rounds"`
+	MaxInputTokens          int      `json:"max_input_tokens"`
+	MaxOutputTokens         int      `json:"max_output_tokens"`
+	EmbeddingProviderID     string   `json:"embedding_provider_id,omitempty"`
+	EmbeddingModelID        string   `json:"embedding_model_id,omitempty"`
+	Temperature             *float64 `json:"temperature,omitempty"`
+	TopP                    *float64 `json:"top_p,omitempty"`
+	TopK                    *int     `json:"top_k,omitempty"`
+	FrequencyPenalty        *float64 `json:"frequency_penalty,omitempty"`
+	PresencePenalty         *float64 `json:"presence_penalty,omitempty"`
+	LearningReviewThreshold int      `json:"learning_review_threshold,omitempty"`
 }
 
 type SettingsGetResult struct {
@@ -754,25 +755,27 @@ type SettingsGetResult struct {
 }
 
 type SettingsSetRequest struct {
-	CompactionEnabled   *bool           `json:"compaction_enabled,omitempty"`
-	CompactionThreshold *int            `json:"compaction_threshold,omitempty"`
-	PromptCaching       *bool           `json:"prompt_caching,omitempty"`
-	MaxToolRounds       *int            `json:"max_tool_rounds,omitempty"`
-	MaxInputTokens      *int            `json:"max_input_tokens,omitempty"`
-	MaxOutputTokens     *int            `json:"max_output_tokens,omitempty"`
-	EmbeddingProviderID *string         `json:"embedding_provider_id,omitempty"`
-	EmbeddingModelID    *string         `json:"embedding_model_id,omitempty"`
-	Temperature         json.RawMessage `json:"temperature,omitempty"`
-	TopP                json.RawMessage `json:"top_p,omitempty"`
-	TopK                json.RawMessage `json:"top_k,omitempty"`
-	FrequencyPenalty    json.RawMessage `json:"frequency_penalty,omitempty"`
-	PresencePenalty     json.RawMessage `json:"presence_penalty,omitempty"`
+	CompactionEnabled       *bool           `json:"compaction_enabled,omitempty"`
+	CompactionThreshold     *int            `json:"compaction_threshold,omitempty"`
+	PromptCaching           *bool           `json:"prompt_caching,omitempty"`
+	MaxToolRounds           *int            `json:"max_tool_rounds,omitempty"`
+	MaxInputTokens          *int            `json:"max_input_tokens,omitempty"`
+	MaxOutputTokens         *int            `json:"max_output_tokens,omitempty"`
+	EmbeddingProviderID     *string         `json:"embedding_provider_id,omitempty"`
+	EmbeddingModelID        *string         `json:"embedding_model_id,omitempty"`
+	Temperature             json.RawMessage `json:"temperature,omitempty"`
+	TopP                    json.RawMessage `json:"top_p,omitempty"`
+	TopK                    json.RawMessage `json:"top_k,omitempty"`
+	FrequencyPenalty        json.RawMessage `json:"frequency_penalty,omitempty"`
+	PresencePenalty         json.RawMessage `json:"presence_penalty,omitempty"`
+	LearningReviewThreshold *int            `json:"learning_review_threshold,omitempty"`
 }
 
 // ---- learning ----
 
 const (
 	MethodLearningSearch = "learning.search"
+	MethodLearningGraph  = "learning.graph"
 )
 
 type LearningSearchRequest struct {
@@ -791,4 +794,23 @@ type LearningSearchResultItem struct {
 
 type LearningSearchResult struct {
 	Items []LearningSearchResultItem `json:"items"`
+}
+
+// LearningGraphResult is the full graph payload for the frontend graph view.
+type LearningGraphResult struct {
+	Nodes []LearningGraphNode `json:"nodes"`
+	Edges []LearningGraphEdge `json:"edges"`
+}
+
+type LearningGraphNode struct {
+	ID   string `json:"id"`
+	Kind string `json:"kind"` // "skill" | "memory"
+	Name string `json:"name,omitempty"`
+}
+
+type LearningGraphEdge struct {
+	From   string  `json:"from"`
+	To     string  `json:"to"`
+	Type   string  `json:"type"`   // "related" | "used_with" | "derived_from"
+	Weight float64 `json:"weight"` // [0, 1]
 }

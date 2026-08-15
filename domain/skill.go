@@ -108,17 +108,25 @@ type Settings struct {
 	TopK             *int     `json:"top_k,omitempty"`
 	FrequencyPenalty *float64 `json:"frequency_penalty,omitempty"`
 	PresencePenalty  *float64 `json:"presence_penalty,omitempty"`
+	// LearningReviewThreshold controls when the background learning
+	// review fires. The review extracts observations (decisions,
+	// preferences, errors, facts) from accumulated turns and writes
+	// them to memory through the approval gate. Set to 0 to disable
+	// turn-based review (compaction-triggered review still runs).
+	// Default: 50 turns.
+	LearningReviewThreshold int `json:"learning_review_threshold,omitempty"`
 }
 
 // DefaultSettings returns the factory defaults.
 func DefaultSettings() Settings {
 	return Settings{
-		CompactionEnabled:   true,
-		CompactionThreshold: 40000,
-		PromptCaching:       true,
-		MaxToolRounds:       8,
-		MaxInputTokens:      200000,
-		MaxOutputTokens:     65536,
+		CompactionEnabled:       true,
+		CompactionThreshold:     40000,
+		PromptCaching:           true,
+		MaxToolRounds:           8,
+		MaxInputTokens:          200000,
+		MaxOutputTokens:         65536,
+		LearningReviewThreshold: 50,
 	}
 }
 

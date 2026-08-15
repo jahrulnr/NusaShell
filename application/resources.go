@@ -366,6 +366,60 @@ func truncate(s string, n int) string {
 	return s[:n] + "..."
 }
 
+// handleLearningGraph returns the full learning graph (nodes + edges)
+// for the frontend graph view. Nodes are skills + memory entries; edges
+// are pre-computed by the EdgeBuilder (similarity + token overlap).
+func (a *App) handleLearningGraph() (any, *contracts.RPCError) {
+	// Build edges if edge builder is configured (idempotent — strengthens
+	// existing edges, doesn't duplicate).
+	if a.edgeBuilder != nil {
+		// Resolve embedder lazily for embedding-based edges
+		if a.edgeBuilder.embed == nil {
+			if embedder, modelID := a.resolveEmbedder(); embedder != nil {
+				a.edgeBuilder.embed = embedder
+				a.edgeBuilder.modelID = modelID
+			}
+		}
+		_ = a.edgeBuilder.Build(context.Background())
+	}
+
+	// Collect nodes
+	var nodes []contracts.LearningGraphNode
+	for _, s := range a.Skills.List() {
+		nodes = append(nodes, contracts.LearningGraphNode{
+			ID:   s.ID,
+			Kind: "skill",
+			Name: s.Name,
+		})
+	}
+	for _, m := range a.Memory.List() {
+		name := m.Content
+		if len(name) > 40 {
+			name = name[:40] + "…"
+		}
+		nodes = append(nodes, contracts.LearningGraphNode{
+			ID:   m.ID,
+			Kind: "memory",
+			Name: name,
+		})
+	}
+
+	// Collect edges from graph service
+	var edges []contracts.LearningGraphEdge
+	if gs := a.graph(); gs != nil {
+		for _, e := range gs.AllEdges() {
+			edges = append(edges, contracts.LearningGraphEdge{
+				From:   e.SourceID,
+				To:     e.TargetID,
+				Type:   string(e.Type),
+				Weight: e.Weight,
+			})
+		}
+	}
+
+	return contracts.LearningGraphResult{Nodes: nodes, Edges: edges}, nil
+}
+
 // ---- docs ----
 
 func (a *App) handleDocsList() (any, *contracts.RPCError) {
@@ -512,6 +566,13 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	if req.EmbeddingModelID != nil {
 		s.EmbeddingModelID = strings.TrimSpace(*req.EmbeddingModelID)
 	}
+	if req.LearningReviewThreshold != nil {
+		v := *req.LearningReviewThreshold
+		if v < 0 {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "learning_review_threshold must be >= 0 (0 disables turn-based review)"}
+		}
+		s.LearningReviewThreshold = v
+	}
 	if err := a.Settings.Set(s); err != nil {
 		return nil, rpcInternal(err)
 	}
@@ -523,19 +584,20 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 
 func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 	return contracts.SettingsDTO{
-		CompactionEnabled:   s.CompactionEnabled,
-		CompactionThreshold: s.CompactionThreshold,
-		PromptCaching:       s.PromptCaching,
-		MaxToolRounds:       s.MaxToolRounds,
-		MaxInputTokens:      s.MaxInputTokens,
-		MaxOutputTokens:     s.MaxOutputTokens,
-		EmbeddingProviderID: s.EmbeddingProviderID,
-		EmbeddingModelID:    s.EmbeddingModelID,
-		Temperature:         s.Temperature,
-		TopP:                s.TopP,
-		TopK:                s.TopK,
-		FrequencyPenalty:    s.FrequencyPenalty,
-		PresencePenalty:     s.PresencePenalty,
+		CompactionEnabled:       s.CompactionEnabled,
+		CompactionThreshold:     s.CompactionThreshold,
+		PromptCaching:           s.PromptCaching,
+		MaxToolRounds:           s.MaxToolRounds,
+		MaxInputTokens:          s.MaxInputTokens,
+		MaxOutputTokens:         s.MaxOutputTokens,
+		EmbeddingProviderID:     s.EmbeddingProviderID,
+		EmbeddingModelID:        s.EmbeddingModelID,
+		Temperature:             s.Temperature,
+		TopP:                    s.TopP,
+		TopK:                    s.TopK,
+		FrequencyPenalty:        s.FrequencyPenalty,
+		PresencePenalty:         s.PresencePenalty,
+		LearningReviewThreshold: s.LearningReviewThreshold,
 	}
 }
 

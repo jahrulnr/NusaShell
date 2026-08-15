@@ -138,6 +138,8 @@ func run() error {
 	httpServer.BaseContext = func(net.Listener) context.Context { return ctx }
 	app.StartCodexCircuitMonitor(ctx)
 	app.StartAutoModelImport(ctx)
+	app.StartLifecycle()
+	defer app.CloseLifecycle()
 
 	go func() {
 		logger.Info("nusashell-light listening", "addr", httpServer.Addr, "data_dir", dataDir, "dev", dev, "version", version)

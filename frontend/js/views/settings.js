@@ -51,6 +51,7 @@ async function refresh() {
     setOptionalNumber('settings-presence-penalty', settings.presence_penalty);
     state.embeddingProviderId = settings.embedding_provider_id ?? '';
     state.embeddingModelId = settings.embedding_model_id ?? '';
+    document.getElementById('settings-learning-threshold').value = settings.learning_review_threshold ?? 50;
   } else {
     setStatus(`Could not load runtime settings: ${settingsResult.reason.message}`, true);
   }
@@ -141,6 +142,11 @@ async function save() {
     const [embProviderId, embModelId] = embeddingValue.includes(':')
       ? embeddingValue.split(':', 2)
       : ['', ''];
+    const learningThreshold = Number(document.getElementById('settings-learning-threshold').value);
+    if (!Number.isInteger(learningThreshold) || learningThreshold < 0 || learningThreshold > 1000) {
+      setStatus('Learning review threshold must be between 0 and 1,000.', true);
+      return;
+    }
     await rpc('settings.set', {
       compaction_enabled: document.getElementById('settings-compaction-enabled').checked,
       prompt_caching: document.getElementById('settings-prompt-caching').checked,
@@ -149,6 +155,7 @@ async function save() {
       max_output_tokens: maxOutputTokens,
       embedding_provider_id: embProviderId || null,
       embedding_model_id: embModelId || null,
+      learning_review_threshold: learningThreshold,
       temperature: optionalNumber('settings-temperature'),
       top_p: optionalNumber('settings-top-p'),
       top_k: optionalNumber('settings-top-k'),

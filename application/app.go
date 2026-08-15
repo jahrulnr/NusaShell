@@ -9,6 +9,7 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/infrastructure/jsonstore"
 )
 
 // App is the application service: it owns the use cases and dispatches RPC
@@ -43,10 +44,25 @@ type App struct {
 	CodexRouter                 *CodexAccountRouter
 	retrySleeper                RetrySleeper
 
-	// learningMu guards lazy init of learningSearcher and graphService.
+	// learningMu guards lazy init of learningSearcher and graphService,
+	// plus the per-conversation turn counter for threshold-based review.
 	learningMu       sync.Mutex
 	learningSearcher *LearningSearcher
 	graphService     *LearningGraphService
+	LearningReviewer *LearningReviewer
+	lifecycle        *LifecycleManager
+	lifecycleCancel  context.CancelFunc
+	// turnsSinceReview tracks turns since the last learning review per
+	// conversation. When the count reaches LearningReviewThreshold, the
+	// review fires and the counter resets.
+	turnsSinceReview map[string]int
+	// EmbeddingCache stores computed embedding vectors to avoid
+	// re-embedding the same content on every search. Content-addressed
+	// by (model_id, sha256(normalized_text)).
+	EmbeddingCache *jsonstore.EmbeddingCache
+	// edgeBuilder pre-computes learning edges (similarity + token overlap)
+	// as a background job. Nil if not configured.
+	edgeBuilder *EdgeBuilder
 
 	runsMu  sync.Mutex
 	runs    map[string]*TurnRun
@@ -202,7 +218,7 @@ func NewApp(deps Deps) *App {
 	if deps.RetrySleeper == nil {
 		deps.RetrySleeper = sleepForRetry
 	}
-	return &App{
+	app := &App{
 		Version:                     deps.Version,
 		DataDir:                     deps.DataDir,
 		Conversations:               deps.Conversations,
@@ -225,7 +241,37 @@ func NewApp(deps Deps) *App {
 		WorkspacePicker:             deps.WorkspacePicker,
 		retrySleeper:                deps.RetrySleeper,
 		runs:                        map[string]*TurnRun{},
+		turnsSinceReview:            map[string]int{},
 	}
+	// Wire the learning reviewer (background extraction after turns).
+	// The graph service is lazy-initialized on first access.
+	if deps.Memory != nil {
+		app.LearningReviewer = NewLearningReviewer(deps.Memory, app.graph())
+	}
+	// Wire the lifecycle manager (decay + prune). Started by StartLifecycle,
+	// stopped by CloseLifecycle.
+	if deps.Memory != nil {
+		app.lifecycle = NewLifecycleManager(deps.Memory, deps.Skills, DefaultLifecycleConfig())
+	}
+	// Wire the embedding cache + edge builder. The cache persists to
+	// learning_embeddings.jsonl and avoids re-embedding on every search.
+	// The edge builder pre-computes similarity + token overlap edges as
+	// a background job.
+	if deps.DataDir != "" {
+		if cache, err := jsonstore.NewEmbeddingCache(deps.DataDir); err == nil {
+			app.EmbeddingCache = cache
+		}
+	}
+	if deps.Memory != nil && deps.Skills != nil {
+		app.edgeBuilder = NewEdgeBuilder(
+			deps.Memory, deps.Skills, app.graph(),
+			nil, // embedder is resolved lazily via ResolveEmbedder
+			app.EmbeddingCache,
+			DefaultEdgeBuilderConfig(),
+			"", // model ID resolved lazily
+		)
+	}
+	return app
 }
 
 // learningSearch returns the lazy-initialized LearningSearcher. The
@@ -260,6 +306,20 @@ func (a *App) graph() *LearningGraphService {
 	return a.graphService
 }
 
+// resolveEmbedder returns the configured embedder and its model ID.
+// Returns nil, "" if no embedder is available.
+func (a *App) resolveEmbedder() (Embedder, string) {
+	if a.EmbedderFactory == nil {
+		return nil, ""
+	}
+	st := a.Settings.Get()
+	embed := ResolveEmbedder(a.Providers, a.Credentials, a.EmbedderFactory, st.EmbeddingProviderID)
+	if embed == nil {
+		return nil, ""
+	}
+	return embed, st.EmbeddingModelID
+}
+
 // InvalidateLearningSearcher forces the next learningSearch() call to
 // rebuild the searcher with fresh embedding settings. Called when the
 // embedding model selection changes in settings.
@@ -267,6 +327,62 @@ func (a *App) InvalidateLearningSearcher() {
 	a.learningMu.Lock()
 	defer a.learningMu.Unlock()
 	a.learningSearcher = nil
+}
+
+// StartLifecycle starts the background decay/prune loop and the
+// compaction-triggered learning review subscriber. Safe to call once at
+// server startup. No-op if no lifecycle manager is configured.
+func (a *App) StartLifecycle() {
+	if a.lifecycle == nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.lifecycleCancel = cancel
+	go a.lifecycle.Run(ctx)
+	a.log("info", "learning", "lifecycle manager started (decay=%s prune=%s)", DefaultLifecycleConfig().DecayInterval, DefaultLifecycleConfig().PruneInterval)
+
+	// Subscribe to compaction events: when a conversation is compacted,
+	// flush the learning review for that conversation. Compaction is a
+	// natural checkpoint — the full context is being summarized, so
+	// extracting learnings at the same time is free context-wise.
+	if a.LearningReviewer != nil && a.Bus != nil {
+		go a.subscribeCompactionReview(ctx)
+	}
+}
+
+// subscribeCompactionReview listens for compaction events and triggers
+// a learning review for the compacted conversation. Exits when ctx is
+// cancelled.
+func (a *App) subscribeCompactionReview(ctx context.Context) {
+	_, events, unsubscribe := a.Bus.Subscribe()
+	defer unsubscribe()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-events:
+			if !ok {
+				return
+			}
+			if ev.Type != contracts.EventCompacted {
+				continue
+			}
+			var ce contracts.CompactedEvent
+			if err := json.Unmarshal(ev.Payload, &ce); err != nil {
+				continue
+			}
+			a.flushLearningReview(ce.ConversationID)
+		}
+	}
+}
+
+// CloseLifecycle stops the background decay/prune loop. Safe to call
+// at server shutdown. No-op if not started.
+func (a *App) CloseLifecycle() {
+	if a.lifecycleCancel != nil {
+		a.lifecycleCancel()
+		a.lifecycleCancel = nil
+	}
 }
 
 func (a *App) log(level, source, format string, args ...any) {
@@ -511,6 +627,8 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 			return nil, rpcErr
 		}
 		return a.handleLearningSearch(req)
+	case contracts.MethodLearningGraph:
+		return a.handleLearningGraph()
 	case contracts.MethodTodosGet:
 		var req contracts.TodosGetRequest
 		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {

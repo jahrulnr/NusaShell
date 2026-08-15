@@ -7,6 +7,7 @@ import { initMcp } from './views/mcp.js';
 import { initProviders } from './views/providers.js';
 import { initLogs } from './views/logs.js';
 import { initSettings } from './views/settings.js';
+import { initLearning } from './views/learning.js';
 import { toast } from './ui.js';
 
 function setConnection(status) {
@@ -110,6 +111,7 @@ async function boot() {
     initProviders(),
     initLogs(),
     initSettings(),
+    initLearning(),
   ]);
   // never swallow init failures silently: a dead view is a bug, not a state
   for (const r of results) {

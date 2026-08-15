@@ -364,5 +364,79 @@ func (a *App) finishTurn(run *TurnRun, messageID, model string, usage ChatUsage)
 		},
 	})
 	a.log("info", "agent", "turn finished: %s (in %d / out %d)", run.ID, usage.InputTokens, usage.OutputTokens)
+
+	// Threshold-based learning review: accumulate turns since the last
+	// review and only fire when the threshold is reached. This avoids
+	// burning extraction cycles on short "hi/thanks" exchanges. The
+	// compaction hook (subscribeCompactionReview) fires independently
+	// when a conversation is compacted, so learning still happens for
+	// long conversations that compact before reaching the threshold.
+	a.incrementTurnCounter(conversation.ID)
+
 	return nil
+}
+
+// incrementTurnCounter bumps the per-conversation turn counter and
+// triggers a learning review if the threshold is reached. The threshold
+// is read from settings (default 50, 0 disables turn-based review).
+func (a *App) incrementTurnCounter(conversationID string) {
+	if a.LearningReviewer == nil {
+		return
+	}
+	threshold := a.Settings.Get().LearningReviewThreshold
+	if threshold <= 0 {
+		return // turn-based review disabled
+	}
+	a.learningMu.Lock()
+	a.turnsSinceReview[conversationID]++
+	count := a.turnsSinceReview[conversationID]
+	a.learningMu.Unlock()
+	if count < threshold {
+		return
+	}
+	a.flushLearningReview(conversationID)
+}
+
+// flushLearningReview resets the turn counter for a conversation and
+// fires a background review over all accumulated messages since the
+// last review. Called when the threshold is reached or when a
+// compaction event fires (whichever comes first).
+func (a *App) flushLearningReview(conversationID string) {
+	a.learningMu.Lock()
+	a.turnsSinceReview[conversationID] = 0
+	a.learningMu.Unlock()
+
+	conversation, err := a.Conversations.Get(conversationID)
+	if err != nil {
+		return
+	}
+	// Extract from the full conversation — the reviewer's dedup logic
+	// handles repeats. This catches signals that were spread across
+	// multiple turns, not just the last one.
+	var userMsgs, assistantMsgs []string
+	for _, m := range conversation.Messages {
+		switch m.Role {
+		case domain.RoleUser:
+			userMsgs = append(userMsgs, m.Content)
+		case domain.RoleAssistant:
+			assistantMsgs = append(assistantMsgs, m.Content)
+		}
+	}
+	combined := joinMessages(userMsgs) + "\n---\n" + joinMessages(assistantMsgs)
+	a.ReviewTurnAsync(context.Background(), conversationID, combined, combined)
+}
+
+// joinMessages concatenates messages with newlines for batch extraction.
+func joinMessages(msgs []string) string {
+	if len(msgs) == 0 {
+		return ""
+	}
+	out := ""
+	for i, m := range msgs {
+		if i > 0 {
+			out += "\n"
+		}
+		out += m
+	}
+	return out
 }
