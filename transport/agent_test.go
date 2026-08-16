@@ -670,7 +670,7 @@ func waitTurnRunning(t *testing.T, h *harness, convID string) {
 
 func waitTurnDone(t *testing.T, h *harness, convID string) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		gotten := h.rpcOK(t, "agent.conversations.get", map[string]any{"id": convID})
 		var conv struct {
@@ -679,7 +679,20 @@ func waitTurnDone(t *testing.T, h *harness, convID string) {
 			} `json:"conversation"`
 		}
 		_ = json.Unmarshal(gotten.Result, &conv)
-		if conv.Conversation.Status == "idle" {
+		if conv.Conversation.Status != "idle" {
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		// The conversation reports idle but the run map may not be cleared
+		// yet (async cleanup). Confirm no active run exists before returning,
+		// otherwise the next agent.turns.start can race with the tail of the
+		// previous turn and fail with "conversation is busy" on slow runners.
+		active := h.rpcOK(t, "agent.turns.active", map[string]any{"id": convID})
+		var act struct {
+			Active bool `json:"active"`
+		}
+		_ = json.Unmarshal(active.Result, &act)
+		if !act.Active {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
