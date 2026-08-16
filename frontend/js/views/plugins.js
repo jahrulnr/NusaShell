@@ -180,6 +180,7 @@ function openDrawer(server) {
   renderDrawerTools(server);
   renderDrawerManifest(server);
   renderDrawerAutoUpdate(server);
+  renderDrawerAutoStart(server);
 
   const drawer = document.getElementById('plugin-drawer');
   const overlay = document.getElementById('plugin-drawer-overlay');
@@ -232,6 +233,27 @@ function renderDrawerAutoUpdate(server) {
       toast(toggle.checked ? 'Auto update enabled' : 'Auto update disabled', 'success');
       const installed = servers.find((srv) => srv.id === server.id);
       if (installed) installed.autoUpdate = toggle.checked;
+    } catch (error) {
+      toast(error.message, 'error');
+      toggle.checked = !toggle.checked;
+    }
+  };
+}
+
+function renderDrawerAutoStart(server) {
+  const section = document.getElementById('plugin-drawer-autostart');
+  if (!section) return;
+  section.hidden = !(server.plugin === true);
+  if (server.plugin !== true) return;
+  const toggle = document.getElementById('plugin-autostart-toggle');
+  if (!toggle) return;
+  toggle.checked = Boolean(server.autostart);
+  toggle.onchange = async () => {
+    try {
+      await rpc('plugin.set_autostart', { id: server.id, enabled: toggle.checked });
+      toast(toggle.checked ? 'Auto start enabled' : 'Auto start disabled', 'success');
+      const installed = servers.find((srv) => srv.id === server.id);
+      if (installed) installed.autostart = toggle.checked;
     } catch (error) {
       toast(error.message, 'error');
       toggle.checked = !toggle.checked;

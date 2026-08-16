@@ -163,6 +163,7 @@ func pluginToDTO(p *domain.Plugin) contracts.PluginDTO {
 		Category:    p.Manifest.Category,
 		HasUI:       p.HasUI,
 		InstallPath: p.InstallPath,
+		Autostart:   p.Manifest.MCP.Autostart,
 		Manifest: &contracts.PluginManifestDTO{
 			ID:   p.Manifest.ID,
 			Name: p.Manifest.Name,
@@ -410,9 +411,27 @@ func (a *App) handlePluginCheckUpdates() (any, *contracts.RPCError) {
 	return contracts.PluginCatalogResult{Plugins: out}, nil
 }
 
-// handlePluginSetAutoUpdate persists the auto-update preference for a
-// plugin (stored on the manifest so it survives restarts).
-func (a *App) handlePluginSetAutoUpdate(req contracts.PluginSetAutoUpdateRequest) (any, *contracts.RPCError) {
+// handlePluginSetAutoStart persists the auto-start preference (launch the
+// plugin's MCP server when the app starts).
+func (a *App) handlePluginSetAutoStart(req contracts.PluginSetFlagRequest) (any, *contracts.RPCError) {
+	if a.Plugins == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "plugin store not available"}
+	}
+	id := strings.TrimPrefix(req.ID, "plugin:")
+	p, err := a.Plugins.Get(id)
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
+	}
+	p.Manifest.MCP.Autostart = req.Enabled
+	if err := a.Plugins.Save(p); err != nil {
+		return nil, rpcInternal(err)
+	}
+	a.log("info", "plugin", "autostart set: %s = %v", id, req.Enabled)
+	return map[string]bool{"ok": true}, nil
+}
+
+// handlePluginSetAutoUpdate persists auto-update (same flag shape).
+func (a *App) handlePluginSetAutoUpdate(req contracts.PluginSetFlagRequest) (any, *contracts.RPCError) {
 	if a.Plugins == nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "plugin store not available"}
 	}

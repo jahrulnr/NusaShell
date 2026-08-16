@@ -62,6 +62,7 @@ const (
 	MethodPluginCheckUpdates  = "plugin.check_updates"
 	MethodPluginUpdate        = "plugin.update"
 	MethodPluginSetAutoUpdate = "plugin.set_autoupdate"
+	MethodPluginSetAutoStart  = "plugin.set_autostart"
 
 	MethodMemoryList   = "memory.list"
 	MethodMemorySave   = "memory.save"
@@ -126,17 +127,17 @@ type Features struct {
 // ---- conversations ----
 
 type ConversationDTO struct {
-	ID           string `json:"id"`
-	Title        string `json:"title"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
-	MessageCount int    `json:"message_count"`
-	Model        string `json:"model,omitempty"`
-	Effort       string `json:"effort,omitempty"`
-	Status       string `json:"status,omitempty"`
-	Workspace    string `json:"workspace,omitempty"`
-	ChunkCount   int    `json:"chunk_count,omitempty"`
-	EstimatedTokens int64 `json:"estimated_tokens,omitempty"`
+	ID              string `json:"id"`
+	Title           string `json:"title"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
+	MessageCount    int    `json:"message_count"`
+	Model           string `json:"model,omitempty"`
+	Effort          string `json:"effort,omitempty"`
+	Status          string `json:"status,omitempty"`
+	Workspace       string `json:"workspace,omitempty"`
+	ChunkCount      int    `json:"chunk_count,omitempty"`
+	EstimatedTokens int64  `json:"estimated_tokens,omitempty"`
 }
 
 type UsageDTO struct {
@@ -734,6 +735,7 @@ type PluginDTO struct {
 	Tools           []MCPToolDTO       `json:"tools,omitempty"`
 	AutoUpdate      bool               `json:"autoUpdate"`
 	UpdateAvailable string             `json:"updateAvailable,omitempty"` // catalog version when newer
+	Autostart       bool               `json:"autostart"`
 	Manifest        *PluginManifestDTO `json:"manifest,omitempty"`
 }
 
@@ -771,7 +773,7 @@ type PluginListResult struct {
 	Plugins []PluginDTO `json:"plugins"`
 }
 
-type PluginSetAutoUpdateRequest struct {
+type PluginSetFlagRequest struct {
 	ID      string `json:"id"`
 	Enabled bool   `json:"enabled"`
 }

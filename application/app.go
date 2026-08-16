@@ -797,11 +797,17 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 	case contracts.MethodPluginCheckUpdates:
 		return a.handlePluginCheckUpdates()
 	case contracts.MethodPluginSetAutoUpdate:
-		var req contracts.PluginSetAutoUpdateRequest
+		var req contracts.PluginSetFlagRequest
 		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
 			return nil, rpcErr
 		}
 		return a.handlePluginSetAutoUpdate(req)
+	case contracts.MethodPluginSetAutoStart:
+		var req contracts.PluginSetFlagRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handlePluginSetAutoStart(req)
 	case contracts.MethodPluginUpdate:
 		var req contracts.PluginIDRequest
 		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
