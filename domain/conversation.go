@@ -119,6 +119,10 @@ type Conversation struct {
 	// in subsequent request input. Empty for providers that don't support
 	// server-side compaction.
 	CompactionBlob string
+	// EstimatedTokens is the last server-side context estimate for this
+	// conversation (system + messages + tool definitions). It lets the UI
+	// show the same number while idle as it showed during the live turn.
+	EstimatedTokens int64
 }
 
 // NewConversation creates an empty conversation.

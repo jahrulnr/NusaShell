@@ -731,19 +731,15 @@ func resolveMaxOutput(provider *domain.Provider, model string, settings domain.S
 	return cap
 }
 
-// effectiveContextWindow applies the user-configured input ceiling to a
-// model-advertised context window. A provider may advertise a 1M window while
-// the configured max input is 200k; sending the full advertised window can
-// still be rejected by gateways/content filters before the model itself is
-// reached. A positive model window wins only up to the configured ceiling.
+// effectiveContextWindow picks the window shown/used for a model: the
+// model-advertised window wins (catalog value); the configured max_input_tokens
+// is only a fallback for models that do not advertise one. Capping catalog
+// models to the global setting confused users ("1M model, why 200k?").
 func effectiveContextWindow(modelWindow, maxInputTokens int) int {
-	if modelWindow <= 0 {
-		return maxInputTokens
+	if modelWindow > 0 {
+		return modelWindow
 	}
-	if maxInputTokens > 0 && maxInputTokens < modelWindow {
-		return maxInputTokens
-	}
-	return modelWindow
+	return maxInputTokens
 }
 
 // resolveContextWindow picks the effective context window for compaction

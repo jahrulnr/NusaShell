@@ -136,6 +136,7 @@ type ConversationDTO struct {
 	Status       string `json:"status,omitempty"`
 	Workspace    string `json:"workspace,omitempty"`
 	ChunkCount   int    `json:"chunk_count,omitempty"`
+	EstimatedTokens int64 `json:"estimated_tokens,omitempty"`
 }
 
 type UsageDTO struct {

@@ -12,18 +12,17 @@ export function formatContextUsage(usedTokens, contextWindow) {
 
 /**
  * Resolve the effective context window denominator shown to the user.
- * The global max_input_tokens setting is a ceiling, not only a fallback:
- * a model advertising 1M with the default 200k cap is shown as 200k. This
- * matches backend compaction and avoids sending requests larger than the
- * configured/provider-safe input budget. When the model window is unknown,
- * the global setting is used as a fallback; when neither is known, returns 0.
+ * The global max_input_tokens cap is only a FALLBACK for models that are
+ * not in the catalog (unknown window). When the model advertises its window,
+ * that window wins — capping it to the global setting only confuses users
+ * ("1M model, why 200k?"). When the model window is unknown the global
+ * setting is used; when neither is known, returns 0.
  */
 export function effectiveContextWindow(modelWindow, globalMaxInputTokens) {
   const windowValue = Number.isFinite(modelWindow) && modelWindow > 0 ? modelWindow : 0;
   const fallback = Number.isFinite(globalMaxInputTokens) && globalMaxInputTokens > 0 ? globalMaxInputTokens : 0;
-  if (windowValue === 0) return fallback;
-  if (fallback === 0) return windowValue;
-  return Math.min(windowValue, fallback);
+  if (windowValue > 0) return windowValue;
+  return fallback;
 }
 
 export function estimateContextTokens(messages = []) {

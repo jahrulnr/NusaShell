@@ -136,12 +136,18 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 	messages := chatMessages(conversation, messageID, supportsVision)
 	// Publish a lightweight server-side context estimate (system + messages +
 	// tool definitions as actually sent) so the UI badge is not just a guess
-	// from the transcript alone.
+	// from the transcript alone — and remember it on the conversation so the
+	// idle badge shows the same number.
 	if a.Bus != nil {
+		est := estimateRequestTokens(system, messages, tools)
 		a.Bus.Emit(contracts.EventContextEstimate, contracts.ContextEstimateEvent{
 			RunID: run.ID, ConversationID: run.ConversationID, MessageID: messageID,
-			EstimatedTokens: estimateRequestTokens(system, messages, tools),
+			EstimatedTokens: est,
 		})
+		if conversation.EstimatedTokens != est {
+			conversation.EstimatedTokens = est
+			_ = a.Conversations.Save(conversation)
+		}
 	}
 	response, err := adapter.Stream(run.Ctx, ChatRequest{
 		Model:            model,

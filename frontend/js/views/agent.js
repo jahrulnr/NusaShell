@@ -37,6 +37,7 @@ const state = {
   pinned: true, // auto-scroll only when the user is at the bottom (per-room, saved/restored)
   steerId: null, // id of the queued steer shown in the strip (per-room, saved/restored)
   steerDraft: '', // text of pending steer (per-room, saved/restored)
+  contextEstimate: 0, // last server-side context estimate for the active room
   // Chunk-based lazy load: track how many pre-compaction chunks are available
   // (from the backend) and which chunk index to load next (descending from
   // ChunkCount-1 toward 0). loadedChunks prevents duplicate loads.
@@ -921,6 +922,7 @@ function bindEvents() {
     // + tool definitions) instead of a transcript-only guess.
     const { conversation_id, estimated_tokens } = payload;
     if (conversation_id !== state.activeId) return;
+    state.contextEstimate = Number(estimated_tokens) || 0;
     const status = document.getElementById('agent-provider-status');
     if (!status) return;
     if (!Number.isFinite(Number(estimated_tokens)) || Number(estimated_tokens) <= 0) return;
@@ -1359,7 +1361,9 @@ function updateComposerStatus() {
     const chosen = models.find((model) => `${model.provider_id}:${model.id}` === state.model) || models.find((model) => model.id === state.model);
     if (chosen) {
       const windowSize = effectiveContextWindow(Number(chosen.context) || 0, Number(state.settings.max_input_tokens) || 0);
-      status.textContent = formatContextUsage(estimateContextTokens(state.messages), windowSize);
+      // Live: prefer the server estimate received via agent.context.estimate.
+      const est = state.contextEstimate ?? (state.conversation?.estimated_tokens > 0 ? state.conversation.estimated_tokens : 0);
+      status.textContent = formatContextUsage(est > 0 ? est : estimateContextTokens(state.messages), windowSize);
       return;
     }
     // No model selected — fall back to a neutral running label.
@@ -1374,5 +1378,8 @@ function updateComposerStatus() {
     return;
   }
   const contextWindow = effectiveContextWindow(Number(chosen.context) || 0, Number(state.settings.max_input_tokens) || 0);
-  status.textContent = formatContextUsage(estimateContextTokens(state.messages), contextWindow);
+  // Idle: reuse the last server-side estimate so idle matches what the live
+  // turn showed (system + messages + tool definitions), instead of jumping.
+  const est = state.conversation?.estimated_tokens ?? 0;
+  status.textContent = formatContextUsage(est > 0 ? est : estimateContextTokens(state.messages), contextWindow);
 }

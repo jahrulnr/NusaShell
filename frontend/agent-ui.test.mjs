@@ -14,7 +14,9 @@ test('context usage uses the effective model window', () => {
 });
 
 test('global max input tokens caps an advertised model context window', () => {
-  assert.equal(effectiveContextWindow(1_000_000, 200_000), 200_000);
+  // Model window (catalog) wins over the global cap — cap is only a
+  // fallback for models not in the catalog.
+  assert.equal(effectiveContextWindow(1_000_000, 200_000), 1_000_000);
   assert.equal(effectiveContextWindow(128_000, 200_000), 128_000);
   assert.equal(effectiveContextWindow(0, 200_000), 200_000);
   assert.equal(effectiveContextWindow(1_000_000, 0), 1_000_000);
