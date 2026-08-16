@@ -770,13 +770,18 @@ function bindScrollPin() {
 
 function isAtBottom(el) {
   if (!el) return true;
-  return el.scrollHeight - el.scrollTop - el.clientHeight <= 4;
+  // Small tolerance so streamed deltas that grow the container do not
+  // accidentally unpin a user who is still effectively at the latest line.
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= 24;
 }
 
 function scrollToBottom(force = false) {
   const thread = document.getElementById('agent-thread');
-  if (!thread || (!force && !state.pinned)) return;
+  if (!thread) return;
+  if (!force && !state.pinned) return;
   thread.scrollTop = thread.scrollHeight;
+  // Re-pin after a forced jump so the next delta keeps following.
+  state.pinned = true;
 }
 
 // ---- chunk-based lazy load ----

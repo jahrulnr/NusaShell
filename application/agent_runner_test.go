@@ -91,6 +91,26 @@ func TestCompactionTriggerAutoUsesWindowPercentage(t *testing.T) {
 	}
 }
 
+func TestResolveContextWindowHonorsGlobalInputCap(t *testing.T) {
+	provider := &domain.Provider{Models: []domain.Model{
+		{ID: "long-model", Context: 1_000_000},
+		{ID: "small-model", Context: 128_000},
+	}}
+	settings := domain.Settings{MaxInputTokens: 200_000}
+	if got := resolveContextWindow(provider, "long-model", settings); got != 200_000 {
+		t.Fatalf("long model context = %d, want global cap 200000", got)
+	}
+	if got := resolveContextWindow(provider, "small-model", settings); got != 128_000 {
+		t.Fatalf("small model context = %d, want model window 128000", got)
+	}
+	if got := resolveContextWindow(provider, "unknown", settings); got != 200_000 {
+		t.Fatalf("unknown model context = %d, want fallback 200000", got)
+	}
+	if got := effectiveContextWindow(1_000_000, 0); got != 1_000_000 {
+		t.Fatalf("uncapped model context = %d, want 1000000", got)
+	}
+}
+
 func TestInterruptTurnKeepsReasoning(t *testing.T) {
 	conv := &domain.Conversation{
 		ID:       "c1",
