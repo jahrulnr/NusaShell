@@ -109,3 +109,13 @@
 .skills-editor-form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .skills-editor-form .skill-fields { padding: 12px 16px; border-bottom: 1px solid var(--border-soft); background: #0a101a; }
 .skill-badge { display: inline-block; margin-left: 8px; border-radius: 4px; padding: 2px 6px; background: #142238; color: #63a5ff; font: 8.5px var(--font-mono); text-transform: uppercase; }
+
+/* Skill file tree */
+.skills-files { border-top: 1px solid var(--border-soft); margin-top: 12px; padding-top: 10px; }
+.skills-files-head { color: var(--text-faint); font: 9px var(--font-mono); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+.skills-files-tree { max-height: 200px; overflow: auto; border: 1px solid var(--border-soft); border-radius: 8px; background: #0a1018; padding: 6px 8px; }
+.skill-file-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; font: 10.5px var(--font-mono); color: var(--text-dim); }
+.skill-file-row.is-dir { color: var(--text); }
+.skill-file-icon { width: 12px; color: var(--text-faint); flex: none; }
+.skill-file-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skill-file-size { margin-left: auto; color: var(--text-faint); flex: none; font-size: 9px; }

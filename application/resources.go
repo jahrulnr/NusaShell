@@ -81,7 +81,15 @@ func (a *App) handleSkillsRead(req contracts.SkillIDRequest) (any, *contracts.RP
 	if err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 	}
-	return contracts.SkillReadResult{Skill: contracts.SkillFull{SkillDTO: skillDTO(s), Content: s.Content}}, nil
+	full := contracts.SkillFull{SkillDTO: skillDTO(s), Content: s.Content}
+	if files, ferr := a.Skills.Files(req.ID); ferr == nil {
+		for _, f := range files {
+			full.Files = append(full.Files, contracts.SkillFileDTO{
+				Path: f.Path, Type: f.Type, SizeBytes: f.SizeBytes, Editable: f.Editable,
+			})
+		}
+	}
+	return contracts.SkillReadResult{Skill: full}, nil
 }
 
 func (a *App) handleSkillsSave(req contracts.SkillSaveRequest) (any, *contracts.RPCError) {

@@ -672,7 +672,15 @@ type SkillsListResult struct {
 
 type SkillFull struct {
 	SkillDTO
-	Content string `json:"content"`
+	Content string         `json:"content"`
+	Files   []SkillFileDTO `json:"files,omitempty"`
+}
+
+type SkillFileDTO struct {
+	Path      string `json:"path"`
+	Type      string `json:"type"` // "file" | "directory"
+	SizeBytes int64  `json:"sizeBytes"`
+	Editable  bool   `json:"editable"`
 }
 
 type SkillReadResult struct {
