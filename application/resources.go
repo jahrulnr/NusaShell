@@ -284,9 +284,25 @@ func (a *App) handlePluginList() (any, *contracts.RPCError) {
 		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
 	}
 	out := make([]contracts.PluginDTO, 0, len(plugins))
+	// Check the catalog once so the UI can show which installed plugins have
+	// a newer version (updateAvailable) without an extra round-trip.
+	updatesByID := map[string]string{}
+	if a.PluginInstaller != nil {
+		ctxU, cancelU := context.WithTimeout(context.Background(), 30*time.Second)
+		updates, uerr := a.PluginInstaller.CheckUpdates(ctxU, plugins)
+		cancelU()
+		if uerr == nil {
+			for _, u := range updates {
+				updatesByID[u.PluginID] = u.Version
+			}
+		}
+	}
 	for _, p := range plugins {
 		dto := pluginToDTO(p)
 		dto.Status, dto.Tools = a.pluginStatus(p)
+		if v, ok := updatesByID[p.Manifest.ID]; ok {
+			dto.UpdateAvailable = v
+		}
 		out = append(out, dto)
 	}
 	return contracts.PluginListResult{Plugins: out}, nil
