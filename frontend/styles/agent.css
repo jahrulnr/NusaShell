@@ -451,8 +451,8 @@
   display: block;
   width: 100%;
   min-height: 33px;
-  max-height: none;
-  overflow-y: hidden;
+  max-height: 180px;
+  overflow-y: auto;
   resize: none;
   border: 1px solid var(--border);
   border-radius: 10px;

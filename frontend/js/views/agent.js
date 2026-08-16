@@ -139,6 +139,42 @@ async function loadAgentData() {
 
 // ---------- conversations ----------
 
+function deriveTitle(messages, fallback = 'Untitled') {
+  // Use the first non-empty user message as the conversation title.
+  for (const message of messages ?? []) {
+    if (message?.role === 'user' && message.content?.trim()) {
+      const text = String(message.content).trim().replace(/\s+/g, ' ');
+      return text.length > 60 ? `${text.slice(0, 60)}…` : text;
+    }
+  }
+  return fallback;
+}
+
+async function maybeAutoTitleConversation(conversationId) {
+  if (!conversationId) return;
+  const conv = state.conversations.find((c) => c.id === conversationId);
+  if (!conv || (conv.title && conv.title !== 'Untitled')) return;
+  let messages = state.messages;
+  if (state.activeId !== conversationId) {
+    try {
+      const gotten = await rpc('agent.conversations.get', { id: conversationId });
+      messages = gotten?.messages ?? [];
+    } catch {
+      return;
+    }
+  }
+  const title = deriveTitle(messages);
+  if (!title || title === 'Untitled') return;
+  try {
+    await rpc('agent.conversations.rename', { id: conversationId, title });
+    const target = state.conversations.find((c) => c.id === conversationId);
+    if (target) target.title = title;
+    renderConversationList();
+  } catch {
+    // Title is cosmetic — never fail the turn on it.
+  }
+}
+
 async function refreshConversations() {
   const { conversations } = await rpc('agent.conversations.list');
   state.conversations = conversations;
@@ -1008,6 +1044,7 @@ function bindEvents() {
     endTurn(run_id);
     if (error) toast(error, 'error');
     if (conversation_id === state.activeId) refreshActiveConversation();
+    void maybeAutoTitleConversation(conversation_id);
     refreshConversations();
   });
   on('agent.turn.error', (payload) => {

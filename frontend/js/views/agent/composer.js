@@ -10,9 +10,11 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
   const fileInput = document.getElementById('agent-file-input');
   const workspaceButton = document.getElementById('agent-workspace-btn');
 
-  const autosize = () => {
+              const autosize = () => {
     input.style.height = 'auto';
     input.style.height = `${Math.min(input.scrollHeight, 180)}px`;
+    // Show a scrollbar only when the content exceeds the cap.
+    input.style.overflowY = input.scrollHeight > 180 ? 'auto' : 'hidden';
   };
   input.addEventListener('input', () => {
     autosize();
