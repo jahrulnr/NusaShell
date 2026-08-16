@@ -368,7 +368,10 @@ function renderThread(messages) {
     return;
   }
   thread.replaceChildren(renderConversation(messages, retryTurn));
-  scrollToBottom(true);
+  // Defer the scroll until after layout: setting scrollTop synchronously
+  // right after replaceChildren observes a stale (small) scrollHeight, so
+  // a freshly opened long room would sit at the top until the next paint.
+  requestAnimationFrame(() => scrollToBottom(true));
 }
 
 function renderAttachments() {
