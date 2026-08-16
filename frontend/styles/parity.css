@@ -357,7 +357,7 @@ summary { outline: none; }
 .agent-tool-terminal { color: #9aa8ba; }
 .agent-tool-terminal summary {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto auto;
+  grid-template-columns: 24px minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 8px;
   min-height: 34px;
@@ -367,6 +367,20 @@ summary { outline: none; }
   cursor: pointer;
   list-style: none;
 }
+.agent-tool-elapsed {
+  flex: 0 0 auto;
+  align-self: center;
+  justify-self: end;
+  color: var(--text-faint);
+  font: 10px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+.agent-tool-terminal[data-status="running"] .agent-tool-elapsed {
+  color: var(--accent);
+  animation: agent-tool-tick 2s ease-in-out infinite;
+}
+@keyframes agent-tool-tick { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
 .agent-tool-terminal summary::-webkit-details-marker { display: none; }
 .agent-tool-terminal summary:hover { background: rgba(18, 28, 40, .72); }
 .agent-tool-terminal summary:focus-visible { background: rgba(18, 28, 40, .72); outline: 1px solid #527edc; outline-offset: 2px; }

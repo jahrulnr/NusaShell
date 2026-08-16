@@ -223,6 +223,7 @@ export function renderToolJob(toolCall) {
     el('span', { class: 'agent-tool-terminal-title', text: displayName }),
     isMcp ? el('span', { class: 'agent-tool-terminal-badge', text: 'MCP' }) : null,
     el('span', { class: 'agent-tool-terminal-meta', text: toolTerminalMeta(toolCall) }),
+    el('span', { class: 'agent-tool-elapsed', text: '' }),
     el('span', { class: 'agent-tool-terminal-chevron', text: '⌄' }),
   );
   const body = el('div', { class: 'agent-tool-terminal-body' },

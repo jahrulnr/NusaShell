@@ -159,7 +159,7 @@ func pluginToDTO(p *domain.Plugin) contracts.PluginDTO {
 		ID:          p.Manifest.ID,
 		Name:        p.Manifest.Name,
 		Version:     p.Manifest.Version,
-		Icon:        pluginicon.ResolveLocal(p.Manifest.Icon, p.InstallPath),
+		Icon:        pluginicon.FileURL(p.Manifest.Icon, p.InstallPath),
 		Category:    p.Manifest.Category,
 		HasUI:       p.HasUI,
 		InstallPath: p.InstallPath,

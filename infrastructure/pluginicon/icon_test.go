@@ -124,3 +124,29 @@ func mustDecode(t *testing.T, dataURL string) []byte {
 	}
 	return raw
 }
+
+func TestFileURL(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "icon.png", tinyPNG)
+
+	// file:// relative forms → absolute file:/// under the plugin dir.
+	for _, form := range []string{"file://icon.png", "file://assets/icon.png"} {
+		got := FileURL(form, dir)
+		if !strings.HasPrefix(got, "file://"+filepath.ToSlash(dir)) || !strings.HasSuffix(got, ".png") {
+			t.Errorf("FileURL(%q) = %q, want file:// under %s", form, got, dir)
+		}
+	}
+
+	// Absolute file:/// stays absolute (just normalized).
+	abs := filepath.Join(dir, "icon.png")
+	if got := FileURL("file:///"+filepath.ToSlash(abs), dir); got != "file://"+filepath.ToSlash(abs) {
+		t.Errorf("absolute should pass through, got %q", got)
+	}
+
+	// Non-file:// values (text, emoji, paths, http) are left as-is.
+	for _, form := range []string{"📝", "N", "", "icon.png", "./icon.png", "/abs/icon.png", "https://x/i.png"} {
+		if got := FileURL(form, dir); got != form {
+			t.Errorf("FileURL(%q) = %q, want unchanged", form, got)
+		}
+	}
+}

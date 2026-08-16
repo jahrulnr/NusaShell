@@ -120,7 +120,7 @@ function shortIcon(value) {
 }
 
 function isImageIcon(icon) {
-  return typeof icon === 'string' && /^(data:|https?:\/\/)/i.test(icon);
+  return typeof icon === 'string' && /^(data:|https?:\/\/|file:\/\/\/)/i.test(icon);
 }
 
 // iconNode returns an <img> for image icons (data URL / http) or a text

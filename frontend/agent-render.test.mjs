@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { renderConversation } from './js/views/agent/render.js';
+import { renderConversation, renderToolJob } from './js/views/agent/render.js';
 
 function renderTranscript(messages) {
   const dom = new JSDOM('<main id="thread"></main>');
@@ -52,4 +52,22 @@ test('renders one model and usage summary for all assistant rounds in a user tur
   assert.match(assistantTurns[0].querySelector('.agent-turn-meta').textContent, /↑300 ↓60/);
   assert.match(assistantTurns[0].querySelector('.agent-turn-meta').textContent, /cache 8/);
   assert.match(assistantTurns[1].querySelector('.agent-turn-meta').textContent, /luna/);
+});
+
+test('tool job summary includes elapsed span before chevron', () => {
+  const dom = new JSDOM('<main id="thread"></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const job = renderToolJob({ id: 'c1', name: 'exec', args: { command: 'ls' }, status: 'running' });
+    const summary = job.querySelector('summary');
+    const classes = [...summary.children].map((node) => node.className);
+    const elapsedIdx = classes.indexOf('agent-tool-elapsed');
+    const chevronIdx = classes.indexOf('agent-tool-terminal-chevron');
+    assert.ok(elapsedIdx >= 0, 'elapsed span present');
+    assert.ok(chevronIdx >= 0, 'chevron span present');
+    assert.ok(elapsedIdx < chevronIdx, 'elapsed sits left of chevron');
+  } finally {
+    globalThis.document = previousDocument;
+  }
 });
