@@ -2,6 +2,14 @@ package domain
 
 import "time"
 
+// MaxAutoContinuesCap is the absolute ceiling for a finite MaxAutoContinues
+// value (matches MaxToolRounds). Values above this are clamped.
+const MaxAutoContinuesCap = 10000
+
+// DefaultMaxAutoContinues is the product default for the outer multi-turn
+// auto-continue budget when the user has not configured one.
+const DefaultMaxAutoContinues = 10
+
 // SkillState controls the skill lifecycle: active skills are surfaced to
 // the agent, stale skills are still searchable but de-prioritized, and
 // archived skills are hidden from default listings.
@@ -70,12 +78,13 @@ type LearningEdge struct {
 }
 
 type MCPServer struct {
-	ID      string
-	Name    string
-	Command string
-	Args    []string
-	Env     map[string]string
-	Enabled bool
+	ID         string
+	Name       string
+	Command    string
+	Args       []string
+	Env        map[string]string
+	Enabled    bool
+	WorkingDir string
 }
 
 type LogEntry struct {
@@ -129,18 +138,33 @@ type Settings struct {
 	// turn-based review (compaction-triggered review still runs).
 	// Default: 50 turns.
 	LearningReviewThreshold int `json:"learning_review_threshold,omitempty"`
+	// MaxAutoContinues is the outer multi-turn auto-continue budget.
+	// After a successful sealed turn, if the conversation todo list
+	// still has open items (pending or in_progress), the agent runner
+	// starts the next turn without a user message, injecting the
+	// continue.md steering prompt. The chain stops when:
+	//   - no open todos remain
+	//   - the chain budget is exhausted
+	//   - the last assistant turn ended with a question
+	//   - the user stops the turn, sends a message, or switches
+	//     conversations
+	// 0 = unlimited (escape hatch for long unattended runs).
+	// Negative or unset = product default (10).
+	// Default: 10.
+	MaxAutoContinues int `json:"max_auto_continues,omitempty"`
 }
 
 // DefaultSettings returns the factory defaults.
 func DefaultSettings() Settings {
 	return Settings{
 		CompactionEnabled:       true,
-		CompactionThreshold:     40000,
+		CompactionThreshold:     0, // 0 = auto (80% of model context window)
 		PromptCaching:           true,
 		MaxToolRounds:           8,
 		MaxInputTokens:          200000,
 		MaxOutputTokens:         65536,
 		LearningReviewThreshold: 50,
+		MaxAutoContinues:        DefaultMaxAutoContinues,
 	}
 }
 
@@ -155,6 +179,18 @@ func NormalizeSettings(settings Settings) Settings {
 	}
 	if settings.MaxOutputTokens < 256 {
 		settings.MaxOutputTokens = DefaultSettings().MaxOutputTokens
+	}
+	// Migrate the old flat CompactionThreshold default (40000) to 0 (auto).
+	// The old default was a flat token count that didn't scale with the
+	// model's context window — a 1M-context model would compact at 40k,
+	// wasting 96% of its context. 0 means "auto = 80% of model context".
+	if settings.CompactionThreshold == 40000 {
+		settings.CompactionThreshold = 0
+	}
+	// MaxAutoContinues: 0 is a valid sentinel (unlimited). Only negative
+	// or unset (-1 from JSON omitempty on older files) needs the default.
+	if settings.MaxAutoContinues < 0 {
+		settings.MaxAutoContinues = DefaultSettings().MaxAutoContinues
 	}
 	return settings
 }

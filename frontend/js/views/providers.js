@@ -19,7 +19,7 @@ export async function initProviders() {
   await refresh();
 }
 
-async function refresh() {
+export async function refresh() {
   const res = await rpc('ai.providers.list');
   providers = res.providers ?? [];
   if (detailId && !providers.find((p) => p.id === detailId)) detailId = null;

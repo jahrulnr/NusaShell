@@ -69,7 +69,7 @@ When a behavior or public wire contract changes, update the relevant package doc
 ## Documentation sync (required)
 
 The agent's product knowledge comes from the embedded corpus in
-`infrastructure/docs/corpus/*.md` (surfaced via `docs_search` / `docs_read`)
+`resources/agent/docs/*.md` (surfaced via `docs_search` / `docs_read`)
 and the system prompt in `application/prompts.go`. Outdated docs make the
 agent hallucinate capabilities, misdescribe the UI, or give wrong answers.
 **Any change that affects user-visible behavior, agent capabilities, or the
@@ -77,16 +77,16 @@ UI must update the matching documentation in the same change.**
 
 When adding, renaming, removing, or changing:
 
-- **Agent tools or built-in tool list** → update `infrastructure/docs/corpus/tools.md`
+- **Agent tools or built-in tool list** → update `resources/agent/docs/tools.md`
   and the tool advertisement in `application/prompts.go` in the same change.
 - **Provider kinds, auth model, base URL rules, or model import behavior** →
-  update `infrastructure/docs/corpus/providers.md`.
+  update `resources/agent/docs/providers.md`.
 - **Turn lifecycle, compaction, prompt caching, steer, todo, stop, or other
-  agent runtime behavior** → update `infrastructure/docs/corpus/agent.md`.
+  agent runtime behavior** → update `resources/agent/docs/agent.md`.
 - **Data files, data directory layout, or persisted artifacts** → update
-  `infrastructure/docs/corpus/data-locations.md`.
+  `resources/agent/docs/data-locations.md`.
 - **Skills, memory, learning, MCP, or other subsystem behavior** → update the
-  matching `infrastructure/docs/corpus/*.md` file.
+  matching `resources/agent/docs/*.md` file.
 - **System prompt rules or identity** → update `application/prompts.go` and
   any `agent.md` section that references the changed rule.
 
@@ -99,8 +99,8 @@ concept (`docs_search`) and update every page that mentions it.
 
 When changing launcher or view UI:
 
-- Update `infrastructure/docs/corpus/ui-source/ui-map.json` and regenerate
-  `infrastructure/docs/corpus/ui-*.md` by running `make scan-ui-docs` whenever
+- Update `resources/agent/docs/ui-source/ui-map.json` and regenerate
+  `resources/agent/docs/ui-*.md` by running `make scan-ui-docs` whenever
   a `data-view`, view control, button, modal, or interaction in `frontend/`
   is added, renamed, removed, or changed.
 - The CI `test-backend` job runs `go run ./cmd/scan-ui-docs -check` and fails
@@ -108,7 +108,7 @@ When changing launcher or view UI:
   or if committed `ui-*.md` differ from generated content (drift gate).
 - The CI `build` job regenerates `ui-*.md` before `go build` so the embedded
   corpus is always fresh.
-- Do **not** edit `infrastructure/docs/corpus/ui-*.md` files manually; they
+- Do **not** edit `resources/agent/docs/ui-*.md` files manually; they
   are generated from the UI map.
 
 ## Experiments (`.experimental/`)

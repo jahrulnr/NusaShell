@@ -44,6 +44,14 @@ export async function initLogs() {
   renderTail();
 }
 
+export async function refresh() {
+  try {
+    const res = await rpc('logs.list', { limit: 300 });
+    state.entries = res.entries ?? [];
+  } catch { /* backend not ready */ }
+  renderTail();
+}
+
 function renderTail(appendOnly = false) {
   const tail = document.getElementById('log-tail');
   const shouldFollow = state.follow || !appendOnly;

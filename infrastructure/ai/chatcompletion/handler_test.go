@@ -99,6 +99,50 @@ func TestOpenAIListModelsParsesOpenRouterFields(t *testing.T) {
 	}
 }
 
+func TestCompleteExtractsReasoningContent(t *testing.T) {
+	// Reasoning models (DeepSeek, dots-3-note, Qwen) put their output in
+	// "reasoning_content" instead of "content" in non-streaming responses.
+	// The Complete path must extract it so vision fallback and other
+	// non-streaming callers don't get an empty response.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{
+					"message": map[string]any{
+						"content":           nil,
+						"reasoning_content": "The image shows a cat sitting on a windowsill.",
+					},
+					"finish_reason": "stop",
+				},
+			},
+			"usage": map[string]any{
+				"prompt_tokens":     100,
+				"completion_tokens": 50,
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := &Adapter{BaseURL: server.URL + "/v1", Client: server.Client()}
+	resp, err := adapter.Complete(context.Background(), application.ChatRequest{
+		Model: "test-model",
+		Messages: []application.ChatMessage{{
+			Role:    "user",
+			Content: "Describe this image",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Complete failed: %v", err)
+	}
+	if resp.Content != "" {
+		t.Errorf("Content = %q, want empty (model puts output in reasoning)", resp.Content)
+	}
+	if resp.Reasoning != "The image shows a cat sitting on a windowsill." {
+		t.Errorf("Reasoning = %q, want the description", resp.Reasoning)
+	}
+}
+
 func containsAll(value string, want ...string) bool {
 	for _, item := range want {
 		if !strings.Contains(value, item) {

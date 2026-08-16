@@ -8,6 +8,10 @@ import (
 	"nusashell/domain"
 )
 
+// MaxMemoryEntries is the hard capacity limit for memory entries. The
+// lifecycle manager prunes low-strength entries when this is exceeded.
+const MaxMemoryEntries = 500
+
 // LifecycleConfig controls the decay and prune cycle for learning memory.
 type LifecycleConfig struct {
 	DecayInterval  time.Duration // default 1h

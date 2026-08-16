@@ -327,6 +327,10 @@ func parseEmbeddedCatalog() ([]flatEntry, error) {
 	}
 	out := make([]flatEntry, len(entries))
 	for i, e := range entries {
+		efforts := e.SupportedEfforts
+		if e.Reasoning && len(efforts) == 0 {
+			efforts = defaultReasoningEfforts
+		}
 		out[i] = flatEntry{
 			ID: e.ID,
 			Metadata: &ModelMetadata{
@@ -342,7 +346,7 @@ func parseEmbeddedCatalog() ([]flatEntry, error) {
 				ToolCall:         e.ToolCall,
 				StructuredOutput: e.StructuredOutput,
 				Vision:           e.Vision,
-				SupportedEfforts: e.SupportedEfforts,
+				SupportedEfforts: efforts,
 				KnowledgeCutoff:  e.KnowledgeCutoff,
 				Kind:             e.Kind,
 			},
@@ -418,8 +422,21 @@ func convertModel(id string, cm catalogModel) *ModelMetadata {
 			meta.SupportedEfforts = append(meta.SupportedEfforts, opt.Values...)
 		}
 	}
+	// When the catalog marks a model as reasoning=true but doesn't list
+	// effort levels (models.dev leaves reasoning_options=[] for many
+	// reasoners), fill in a default effort set so the UI shows the
+	// selector. "auto" (the default selection) still omits
+	// reasoning_effort on the wire, so this only affects UI visibility.
+	if meta.Reasoning && len(meta.SupportedEfforts) == 0 {
+		meta.SupportedEfforts = defaultReasoningEfforts
+	}
 	return meta
 }
+
+// defaultReasoningEfforts is the fallback effort set for reasoners whose
+// catalog entry doesn't list specific effort levels. Matches the common
+// set supported by most OpenAI-compatible reasoning models.
+var defaultReasoningEfforts = []string{"low", "medium", "high"}
 
 // embeddingNamePatterns matches model IDs/names that indicate an embedding
 // model. These produce vectors, not text — they must never appear in the

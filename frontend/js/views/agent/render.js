@@ -1,5 +1,6 @@
 import { renderMarkdown } from '../../markdown.js';
 import { el, fmtTime } from '../../ui.js';
+import { createAskCard } from '../ask-card.js';
 
 export function renderEmptyThread() {
   const thread = document.getElementById('agent-thread');
@@ -64,7 +65,7 @@ export function reasoningDisclosure(reasoning) {
 
 export function renderMessage(message) {
   if (message.role === 'system') {
-    return el('div', { class: 'agent-compaction-marker', text: message.content });
+    return renderCompactionMessage(message);
   }
   if (message.role === 'user') {
     const node = el('div', { class: `agent-message user${message.steer ? ' agent-steer' : ''}` });
@@ -82,6 +83,24 @@ export function renderMessage(message) {
   }
 
   return renderAssistantTurn([message]);
+}
+
+// renderCompactionMessage renders a system (compaction handover) message as
+// an assistant-style bubble so the summary content is readable, not crammed
+// into a tiny dashed pill. A "Compacted context" label distinguishes it from
+// a regular assistant response.
+function renderCompactionMessage(message) {
+  const node = el('div', { class: 'agent-message assistant agent-compaction-marker' });
+  const bubble = el('div', { class: 'agent-bubble' });
+  bubble.append(el('div', { class: 'agent-compaction-label', text: '⬇ Compacted context' }));
+  const textBox = el('div', { class: 'agent-bubble-text' });
+  if (message.content) textBox.innerHTML = renderMarkdown(message.content);
+  bubble.append(textBox);
+  node.append(bubble);
+  node.append(el('div', { class: 'agent-turn-meta' },
+    el('span', { class: 'agent-message-meta', text: fmtTime(message.created_at) }),
+  ));
+  return node;
 }
 
 export function renderConversation(messages, onRetry) {
@@ -153,7 +172,7 @@ function appendAssistantSteps(bubble, message) {
         textBox.innerHTML = renderMarkdown(step.content);
         bubble.append(textBox);
       } else if (step.type === 'tool_calls' && step.tool_calls?.length) {
-        bubble.append(el('div', { class: 'agent-tool-stack' }, step.tool_calls.map(renderToolJob)));
+        bubble.append(el('div', { class: 'agent-tool-stack' }, step.tool_calls.map(renderToolCallCard)));
       }
     }
   } else {
@@ -161,7 +180,7 @@ function appendAssistantSteps(bubble, message) {
     const textBox = el('div', { class: 'agent-bubble-text' });
     if (message.content) textBox.innerHTML = renderMarkdown(message.content);
     if (textBox.innerHTML) bubble.append(textBox);
-    if (message.tool_calls?.length) bubble.append(el('div', { class: 'agent-tool-stack' }, message.tool_calls.map(renderToolJob)));
+    if (message.tool_calls?.length) bubble.append(el('div', { class: 'agent-tool-stack' }, message.tool_calls.map(renderToolCallCard)));
   }
 }
 
@@ -176,6 +195,22 @@ function totalUsage(messages) {
     total.cache_read += message.usage.cache_read ?? 0;
   }
   return hasUsage ? total : null;
+}
+
+// renderToolCallCard dispatches to the right card type based on the tool
+// name. ask_question renders as a sealed ask card (matching Electron's
+// toolActivity); everything else renders as a tool terminal.
+export function renderToolCallCard(toolCall) {
+  if (toolCall.name === 'ask_question') {
+    let parsedArgs = {};
+    try { parsedArgs = JSON.parse(toolCall.args || '{}'); } catch {}
+    return createAskCard(toolCall.id, parsedArgs, {
+      sealed: true,
+      output: toolCall.output || '',
+      ok: toolCall.status !== 'fail',
+    });
+  }
+  return renderToolJob(toolCall);
 }
 
 export function renderToolJob(toolCall) {

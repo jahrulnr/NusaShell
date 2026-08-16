@@ -1,14 +1,26 @@
 // NusaShell Light — application shell. Router + transport wiring.
 
 import { rpc, on, connectWS } from './rpc.js';
-import { initAgent } from './views/agent.js';
-import { initSkills } from './views/skills.js';
-import { initMcp } from './views/mcp.js';
-import { initProviders } from './views/providers.js';
-import { initLogs } from './views/logs.js';
-import { initSettings } from './views/settings.js';
-import { initLearning } from './views/learning.js';
+import { initHome, refresh as refreshHome } from './views/home.js';
+import { initAgent, refresh as refreshAgent } from './views/agent.js';
+import { initSkills, refresh as refreshSkills } from './views/skills.js';
+import { initPlugins, refresh as refreshPlugins } from './views/plugins.js';
+import { initProviders, refresh as refreshProviders } from './views/providers.js';
+import { initLogs, refresh as refreshLogs } from './views/logs.js';
+import { initSettings, refresh as refreshSettings } from './views/settings.js';
+import { initLearning, refresh as refreshLearning } from './views/learning.js';
 import { toast } from './ui.js';
+
+const viewRefresh = {
+  home: refreshHome,
+  agent: refreshAgent,
+  skills: refreshSkills,
+  plugins: refreshPlugins,
+  providers: refreshProviders,
+  logs: refreshLogs,
+  settings: refreshSettings,
+  learning: refreshLearning,
+};
 
 function setConnection(status) {
   document.documentElement.dataset.backendStatus = status;
@@ -46,11 +58,15 @@ function setConnection(status) {
   }
 }
 
+let routeInitial = true;
+
 function route() {
-  const requested = location.hash.slice(1) || 'agent';
-  const known = [...document.querySelectorAll('.view')].some((view) => view.dataset.view === requested);
-  const target = known ? requested : 'agent';
-  if (target !== requested) history.replaceState(null, '', '#agent');
+  const requested = location.hash.slice(1) || 'home';
+  const aliases = { mcp: 'plugins' };
+  const routed = aliases[requested] || requested;
+  const known = [...document.querySelectorAll('.view')].some((view) => view.dataset.view === routed);
+  const target = known ? routed : 'home';
+  if (target !== requested) history.replaceState(null, '', `#${target}`);
   const items = document.querySelectorAll('[data-nav]');
   items.forEach((item) => {
     const active = item.dataset.view === target;
@@ -60,6 +76,14 @@ function route() {
   });
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.dataset.view === target));
   if (target === 'logs') document.getElementById('log-tail').scrollTop = document.getElementById('log-tail').scrollHeight;
+  // Re-fetch the target view's data so it never goes stale after
+  // changes made elsewhere (plugin install/uninstall, MCP edits, etc).
+  // Skip on the initial route call — views already fetched during init.
+  if (!routeInitial) {
+    const refresher = viewRefresh[target];
+    if (refresher) refresher().catch((err) => console.warn(`refresh ${target}:`, err?.message || err));
+  }
+  routeInitial = false;
 }
 
 async function boot() {
@@ -105,9 +129,10 @@ async function boot() {
   }
 
   const results = await Promise.allSettled([
+    initHome(),
     initAgent(),
     initSkills(),
-    initMcp(),
+    initPlugins(),
     initProviders(),
     initLogs(),
     initSettings(),

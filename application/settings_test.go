@@ -67,4 +67,8 @@ func TestNormalizeSettingsFillsMaxTokenDefaults(t *testing.T) {
 	if normalized.MaxOutputTokens != 65536 {
 		t.Fatalf("max_output_tokens = %d, want 65536", normalized.MaxOutputTokens)
 	}
+	// Old flat default 40000 migrates to 0 (auto = 80% of model context).
+	if normalized.CompactionThreshold != 0 {
+		t.Fatalf("compaction_threshold = %d, want 0 (auto after migration)", normalized.CompactionThreshold)
+	}
 }

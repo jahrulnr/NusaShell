@@ -96,8 +96,9 @@ type openAIChunk struct {
 type openAIResponse struct {
 	Choices []struct {
 		Message struct {
-			Content   *string          `json:"content"`
-			ToolCalls []openAIToolCall `json:"tool_calls"`
+			Content          *string          `json:"content"`
+			ReasoningContent *string          `json:"reasoning_content"`
+			ToolCalls        []openAIToolCall `json:"tool_calls"`
 		} `json:"message"`
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
@@ -387,6 +388,7 @@ func (o *Adapter) responseFromOpenAI(out openAIResponse) (application.ChatRespon
 	ch := out.Choices[0]
 	resp := application.ChatResponse{
 		Content:    aiutil.Deref(ch.Message.Content),
+		Reasoning:  aiutil.Deref(ch.Message.ReasoningContent),
 		StopReason: aiutil.Deref(ch.FinishReason),
 	}
 	if out.Usage != nil {

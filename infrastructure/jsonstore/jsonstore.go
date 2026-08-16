@@ -561,16 +561,23 @@ func (s *Store) ListLogs(level string, limit int) []*domain.LogEntry {
 	s.logMu.Lock()
 	defer s.logMu.Unlock()
 	entries := s.readLogsLocked()
-	var out []*domain.LogEntry
-	for i := len(entries) - 1; i >= 0 && len(out) < limit; i-- {
+	// Collect the most recent `limit` matching entries by walking backwards
+	// from the end of the on-disk log (which is in append = chronological
+	// order). Then reverse so the result is oldest-first: the Logs view
+	// appends rows in slice order and "Follow" scrolls to the bottom, so
+	// the newest entry must be last for follow-to-latest to work.
+	var recent []*domain.LogEntry
+	for i := len(entries) - 1; i >= 0 && len(recent) < limit; i-- {
 		e := entries[i]
 		if level != "" && e.Level != level {
 			continue
 		}
-		out = append(out, e)
+		recent = append(recent, e)
 	}
-	// newest first, matching the UI expectation
-	return out
+	for i, j := 0, len(recent)-1; i < j; i, j = i+1, j-1 {
+		recent[i], recent[j] = recent[j], recent[i]
+	}
+	return recent
 }
 
 func (s *Store) ClearLogs() {

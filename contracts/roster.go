@@ -21,6 +21,8 @@ const (
 	MethodTurnsSteer                 = "agent.turns.steer"
 	MethodTurnsCancelSteer           = "agent.turns.cancel-steer"
 	MethodTurnsActive                = "agent.turns.active"
+	MethodAskAnswer                  = "agent.ask.answer"
+	MethodAskCancel                  = "agent.ask.cancel"
 
 	MethodProvidersList   = "ai.providers.list"
 	MethodProvidersSave   = "ai.providers.save"
@@ -52,7 +54,10 @@ const (
 	MethodMCPServersSave   = "mcp.servers.save"
 	MethodMCPServersDelete = "mcp.servers.delete"
 	MethodMCPServersTest   = "mcp.servers.test"
+	MethodMCPServersStop   = "mcp.servers.stop"
 	MethodMCPToolsList     = "mcp.tools.list"
+	MethodPluginList       = "plugin.list"
+	MethodPluginUninstall  = "plugin.uninstall"
 
 	MethodMemoryList   = "memory.list"
 	MethodMemorySave   = "memory.save"
@@ -89,6 +94,10 @@ const (
 	EventProviderRetry  = "agent.provider.retry"
 	EventLogAppend      = "logs.append"
 	EventTodoUpdated    = "agent.todo.updated"
+	EventAutoContinue   = "agent.auto_continue"
+	EventAskPending     = "agent.ask.pending"
+	EventAskAnswered    = "agent.ask.answered"
+	EventAskCancelled   = "agent.ask.cancelled"
 )
 
 // ---- app ----
@@ -298,12 +307,32 @@ type TodoUpdatedEvent struct {
 }
 
 type TurnDoneEvent struct {
-	RunID          string    `json:"run_id"`
-	ConversationID string    `json:"conversation_id"`
-	MessageID      string    `json:"message_id"`
-	Model          string    `json:"model,omitempty"`
-	Usage          *UsageDTO `json:"usage,omitempty"`
-	Error          string    `json:"error,omitempty"`
+	RunID          string           `json:"run_id"`
+	ConversationID string           `json:"conversation_id"`
+	MessageID      string           `json:"message_id"`
+	Model          string           `json:"model,omitempty"`
+	Usage          *UsageDTO        `json:"usage,omitempty"`
+	Error          string           `json:"error,omitempty"`
+	AutoContinue   *AutoContinueDTO `json:"auto_continue,omitempty"`
+}
+
+// AutoContinueDTO mirrors domain.AutoContinueDecision for the wire. When
+// ShouldContinue is true, the agent runner will start the next turn without
+// a user message, injecting the continue.md steering prompt.
+type AutoContinueDTO struct {
+	ShouldContinue   bool   `json:"should_continue"`
+	OpenTodoCount    int    `json:"open_todo_count"`
+	ContinuesUsed    int    `json:"continues_used"`
+	MaxAutoContinues int    `json:"max_auto_continues"`
+	Reason           string `json:"reason"`
+}
+
+// AutoContinueEvent is emitted at each auto-continue chain step so the UI
+// can show "Continuing tasks… (N/M)" and update the strip.
+type AutoContinueEvent struct {
+	ConversationID string          `json:"conversation_id"`
+	RunID          string          `json:"run_id"`
+	Decision       AutoContinueDTO `json:"decision"`
 }
 
 type TurnErrorEvent struct {
@@ -322,6 +351,75 @@ type SteerEvent struct {
 	SteerID        string `json:"steer_id,omitempty"`
 	Text           string `json:"text,omitempty"`
 	Status         string `json:"status"`
+}
+
+// ---- ask_question ----
+
+// AskOptionDTO mirrors domain.AskQuestionOption for the wire.
+type AskOptionDTO struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+	Default     bool   `json:"default,omitempty"`
+	Icon        string `json:"icon,omitempty"`
+	Image       string `json:"image,omitempty"`
+}
+
+// AskPendingEvent is emitted when the model calls ask_question and the tool
+// is waiting for the user's answer. The UI renders a question card with the
+// options and optional free-text input.
+type AskPendingEvent struct {
+	ConversationID string         `json:"conversation_id"`
+	RunID          string         `json:"run_id"`
+	ToolCallID     string         `json:"tool_call_id"`
+	Question       string         `json:"question"`
+	Options        []AskOptionDTO `json:"options"`
+	AllowFreeText  bool           `json:"allow_free_text"`
+	MultiSelect    bool           `json:"multi_select"`
+}
+
+// AskAnswerRequest is the RPC payload for agent.ask.answer. The UI sends the
+// user's selected option IDs and/or free text.
+type AskAnswerRequest struct {
+	RunID      string   `json:"run_id"`
+	ToolCallID string   `json:"tool_call_id"`
+	Via        string   `json:"via"` // "option" or "text"
+	OptionIDs  []string `json:"option_ids,omitempty"`
+	Text       string   `json:"text,omitempty"`
+}
+
+// AskAnswerResult is the RPC response for agent.ask.answer.
+type AskAnswerResult struct {
+	OK        bool     `json:"ok"`
+	Answer    string   `json:"answer"`
+	Via       string   `json:"via"`
+	OptionIDs []string `json:"option_ids,omitempty"`
+}
+
+// AskCancelRequest is the RPC payload for agent.ask.cancel.
+type AskCancelRequest struct {
+	RunID      string `json:"run_id"`
+	ToolCallID string `json:"tool_call_id"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+// AskAnsweredEvent is emitted when the user answers an ask_question, so other
+// UI surfaces (e.g. the tool card) can update.
+type AskAnsweredEvent struct {
+	ConversationID string `json:"conversation_id"`
+	RunID          string `json:"run_id"`
+	ToolCallID     string `json:"tool_call_id"`
+	Answer         string `json:"answer"`
+	Via            string `json:"via"`
+}
+
+// AskCancelledEvent is emitted when an ask_question is cancelled (by the user
+// or because the turn ended).
+type AskCancelledEvent struct {
+	ConversationID string `json:"conversation_id"`
+	RunID          string `json:"run_id"`
+	ToolCallID     string `json:"tool_call_id"`
+	Reason         string `json:"reason,omitempty"`
 }
 
 // ProviderRetryEvent is emitted when the agent retries a provider request
@@ -593,10 +691,67 @@ type MCPServerDTO struct {
 	Enabled bool              `json:"enabled"`
 	Status  string            `json:"status,omitempty"`
 	Tools   []MCPToolDTO      `json:"tools,omitempty"`
+	Plugin  bool              `json:"plugin,omitempty"`
+	HasUI   bool              `json:"hasUI,omitempty"`
+	// Plugin metadata (populated only when Plugin == true) so the MCP
+	// drawer can render icon, version, category, and install path without
+	// a separate plugin.detail call.
+	Version     string `json:"version,omitempty"`
+	Icon        string `json:"icon,omitempty"`
+	Category    string `json:"category,omitempty"`
+	InstallPath string `json:"installPath,omitempty"`
 }
 
 type MCPServersListResult struct {
 	Servers []MCPServerDTO `json:"servers"`
+}
+
+// PluginDTO is the wire representation of an installed plugin.
+type PluginDTO struct {
+	ID          string             `json:"id"`
+	Name        string             `json:"name"`
+	Version     string             `json:"version"`
+	Icon        string             `json:"icon"`
+	Category    string             `json:"category,omitempty"`
+	HasUI       bool               `json:"hasUI"`
+	InstallPath string             `json:"installPath"`
+	Manifest    *PluginManifestDTO `json:"manifest,omitempty"`
+}
+
+type PluginManifestDTO struct {
+	ID   string       `json:"id"`
+	Name string       `json:"name"`
+	UI   *PluginUIDTO `json:"ui,omitempty"`
+	MCP  PluginMCPDTO `json:"mcp"`
+}
+
+type PluginUIDTO struct {
+	Entry  string          `json:"entry"`
+	Window PluginWindowDTO `json:"window,omitempty"`
+}
+
+type PluginWindowDTO struct {
+	Mode        string `json:"mode,omitempty"`
+	DefaultSize struct {
+		Width  int `json:"width"`
+		Height int `json:"height"`
+	} `json:"defaultSize,omitempty"`
+	Resizable bool `json:"resizable,omitempty"`
+}
+
+type PluginMCPDTO struct {
+	Transport string   `json:"transport"`
+	Command   string   `json:"command,omitempty"`
+	Args      []string `json:"args,omitempty"`
+	Autostart bool     `json:"autostart,omitempty"`
+}
+
+type PluginListResult struct {
+	Plugins []PluginDTO `json:"plugins"`
+}
+
+type PluginIDRequest struct {
+	ID string `json:"id"`
 }
 
 type MCPSaveRequest struct {
@@ -761,6 +916,7 @@ type SettingsDTO struct {
 	FrequencyPenalty        *float64 `json:"frequency_penalty,omitempty"`
 	PresencePenalty         *float64 `json:"presence_penalty,omitempty"`
 	LearningReviewThreshold int      `json:"learning_review_threshold,omitempty"`
+	MaxAutoContinues        int      `json:"max_auto_continues,omitempty"`
 }
 
 type SettingsGetResult struct {
@@ -787,6 +943,7 @@ type SettingsSetRequest struct {
 	FrequencyPenalty        json.RawMessage `json:"frequency_penalty,omitempty"`
 	PresencePenalty         json.RawMessage `json:"presence_penalty,omitempty"`
 	LearningReviewThreshold *int            `json:"learning_review_threshold,omitempty"`
+	MaxAutoContinues        *int            `json:"max_auto_continues,omitempty"`
 }
 
 // ---- learning ----

@@ -20,6 +20,10 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
+	// Save image/file attachments to disk so file-based tools can access
+	// them by absolute path. The path is stored on the attachment and
+	// surfaced to the model in the placeholder and read_image result.
+	a.saveAttachmentsToDisk(req.ConversationID, attachments)
 	if text == "" && len(attachments) == 0 {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "message text is required"}
 	}
@@ -80,7 +84,9 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 	a.runs[run.ID] = run
 	a.runsMu.Unlock()
 
-	go a.runTurn(run, provider, apiKey, bareModel, req.Effort, asstMsg.ID, false, modelSupportsVision(provider, bareModel))
+	a.goSafe("agent", func() {
+		a.runTurn(run, provider, apiKey, bareModel, req.Effort, asstMsg.ID, false, modelSupportsVision(provider, bareModel), "")
+	})
 	a.log("info", "agent", "turn started: %s (model %s)", run.ID, bareModel)
 	return contracts.TurnStartResult{RunID: run.ID}, nil
 }
@@ -159,7 +165,9 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 	a.runs[run.ID] = run
 	a.runsMu.Unlock()
 
-	go a.runTurn(run, provider, apiKey, bareModel, req.Effort, targetMsgID, continuation, modelSupportsVision(provider, bareModel))
+	a.goSafe("agent", func() {
+		a.runTurn(run, provider, apiKey, bareModel, req.Effort, targetMsgID, continuation, modelSupportsVision(provider, bareModel), "")
+	})
 	a.log("info", "agent", "turn retried: %s (model %s)", run.ID, bareModel)
 	return contracts.TurnStartResult{RunID: run.ID}, nil
 }
@@ -172,6 +180,11 @@ func (a *App) handleTurnsStop(req contracts.TurnStopRequest) (any, *contracts.RP
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "run not found or already finished"}
 	}
 	run.Cancel()
+	// Reject pending ask_question calls so the tool handler unblocks
+	// immediately rather than waiting for the turn-end defer.
+	if a.AskQuestions != nil {
+		a.AskQuestions.RejectRun(run.ID, "Agent turn interrupted by the user")
+	}
 	a.log("info", "agent", "turn stopped: %s", run.ID)
 	return map[string]bool{"ok": true}, nil
 }
@@ -208,6 +221,70 @@ func (a *App) handleTurnsActive(req contracts.ConversationIDRequest) (any, *cont
 	}, nil
 }
 
+// handleAskAnswer resolves a pending ask_question with the user's answer.
+func (a *App) handleAskAnswer(req contracts.AskAnswerRequest) (any, *contracts.RPCError) {
+	if a.AskQuestions == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "ask_question is not available"}
+	}
+	if req.RunID == "" || req.ToolCallID == "" {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "run_id and tool_call_id are required"}
+	}
+	answer := domain.AskQuestionAnswer{
+		Via:       domain.AskAnswerVia(req.Via),
+		OptionIDs: req.OptionIDs,
+		Text:      req.Text,
+	}
+	result, err := a.AskQuestions.Answer(req.RunID, req.ToolCallID, answer)
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
+	}
+	// Emit answered event so other UI surfaces can update.
+	convID := a.runConversationID(req.RunID)
+	a.Bus.Emit(contracts.EventAskAnswered, contracts.AskAnsweredEvent{
+		ConversationID: convID,
+		RunID:          req.RunID,
+		ToolCallID:     req.ToolCallID,
+		Answer:         result.Answer,
+		Via:            result.Via,
+	})
+	return contracts.AskAnswerResult{
+		OK:        result.OK,
+		Answer:    result.Answer,
+		Via:       result.Via,
+		OptionIDs: result.OptionIDs,
+	}, nil
+}
+
+// handleAskCancel cancels a pending ask_question (user clicked Cancel).
+func (a *App) handleAskCancel(req contracts.AskCancelRequest) (any, *contracts.RPCError) {
+	if a.AskQuestions == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "ask_question is not available"}
+	}
+	if req.RunID == "" || req.ToolCallID == "" {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "run_id and tool_call_id are required"}
+	}
+	a.AskQuestions.Cancel(req.RunID, req.ToolCallID, req.Reason)
+	convID := a.runConversationID(req.RunID)
+	a.Bus.Emit(contracts.EventAskCancelled, contracts.AskCancelledEvent{
+		ConversationID: convID,
+		RunID:          req.RunID,
+		ToolCallID:     req.ToolCallID,
+		Reason:         req.Reason,
+	})
+	return map[string]bool{"ok": true}, nil
+}
+
+// runConversationID returns the conversation id for a run id, or "" if the
+// run is not found.
+func (a *App) runConversationID(runID string) string {
+	a.runsMu.Lock()
+	defer a.runsMu.Unlock()
+	if run, ok := a.runs[runID]; ok {
+		return run.ConversationID
+	}
+	return ""
+}
+
 func (a *App) handleTurnsSteer(ctx context.Context, req contracts.TurnSteerRequest) (any, *contracts.RPCError) {
 	text := strings.TrimSpace(req.Text)
 	if text == "" {
@@ -221,6 +298,7 @@ func (a *App) handleTurnsSteer(ctx context.Context, req contracts.TurnSteerReque
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
+	a.saveAttachmentsToDisk(req.ConversationID, attachments)
 	now := time.Now().UTC()
 	steerMsg := domain.Message{
 		ID:          domain.NewID("msg"),
@@ -262,13 +340,67 @@ func (a *App) handleTurnsCancelSteer(req contracts.TurnCancelSteerRequest) (any,
 	return map[string]any{"ok": true, "accepted": true}, nil
 }
 
-func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, supportsVision bool) {
+func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, supportsVision bool, systemPromptSuffix string) {
 	defer func() {
 		run.Cancel()
+		// Reject any pending ask_question calls for this run so the
+		// tool handler unblocks instead of hanging forever.
+		if a.AskQuestions != nil {
+			a.AskQuestions.RejectRun(run.ID, "Agent turn ended")
+		}
 		a.runsMu.Lock()
 		delete(a.runs, run.ID)
 		a.runsMu.Unlock()
 	}()
+	a.runTurnChain(run, provider, apiKey, model, effort, asstMsgID, initialContinuation, supportsVision, systemPromptSuffix, 0)
+}
+
+// runTurnChain executes the turn and, on success, checks the auto-continue
+// policy. If open todos remain and the chain budget has not been exhausted,
+// it starts the next turn without a user message, injecting the continue
+// prompt as a system prompt suffix. The chain stops when:
+//   - the turn fails or is interrupted
+//   - no open todos remain
+//   - the last assistant text ends with a question
+//   - the chain budget is exhausted
+//   - the user stops the turn, sends a message, or switches conversations
+//     (detected via run.Ctx cancellation)
+func (a *App) runTurnChain(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, supportsVision bool, systemPromptSuffix string, autoContinueIndex int) {
+	chainModel := model
+	chainEffort := effort
+	chainAsstMsgID := asstMsgID
+	chainContinuation := initialContinuation
+	chainSuffix := systemPromptSuffix
+	chainIndex := autoContinueIndex
+	for {
+		shouldContinue, nextAsstMsgID := a.runSingleTurn(run, provider, apiKey, chainModel, chainEffort, chainAsstMsgID, chainContinuation, supportsVision, chainSuffix, chainIndex)
+		if !shouldContinue {
+			return
+		}
+		// Abort the chain if the turn was cancelled (user Stop, server
+		// shutdown, or conversation switch). The single turn already
+		// handled the interrupt; we just exit the chain.
+		if run.Ctx.Err() != nil {
+			return
+		}
+		// Abort if a new user turn was started for this conversation
+		// (the user sent a message while the chain was between turns).
+		if a.activeRunForConversation(run.ConversationID) != nil && a.activeRunForConversation(run.ConversationID).ID != run.ID {
+			return
+		}
+		chainIndex++
+		chainAsstMsgID = nextAsstMsgID
+		chainContinuation = false
+		chainSuffix = continuePrompt
+		a.log("info", "agent", "auto-continue chain: starting turn %d for %s (open todos remain)", chainIndex, run.ConversationID)
+	}
+}
+
+// runSingleTurn executes one complete turn (all tool rounds) and returns
+// (shouldAutoContinue, nextAssistantMessageID). The shouldAutoContinue flag
+// is true only when the turn succeeded and the auto-continue policy says
+// the chain should continue.
+func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, supportsVision bool, systemPromptSuffix string, autoContinueIndex int) (bool, string) {
 
 	// Codex sticky account: pick the account bound to this conversation
 	// so the Codex backend can reuse the prompt cache shard. If every
@@ -284,7 +416,7 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 				}
 			} else if pick.AllRateLimited {
 				a.failTurn(run, asstMsgID, allCodexAccountsLimitedError(pick.EarliestReset))
-				return
+				return false, ""
 			}
 		}
 	}
@@ -292,7 +424,7 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 	adapter, conversation, settings, err := a.initializeTurn(run, provider, apiKey, model)
 	if err != nil {
 		a.failTurn(run, asstMsgID, err)
-		return
+		return false, ""
 	}
 	// Vision fallback: when the active model does not support images but
 	// the user attached images and configured a vision fallback model,
@@ -333,14 +465,14 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 		a.Bus.Emit(contracts.EventTurnStarted, contracts.TurnStartedEvent{
 			RunID: run.ID, ConversationID: run.ConversationID, MessageID: currentMsgID, Round: round,
 		})
-		roundResult, streamErr := a.streamTurnRound(run, adapter, conversation, currentMsgID, model, effort, toolsForRound, settings, continuation, maxTokens, injectHydration, promptCache, supportsVision)
+		roundResult, streamErr := a.streamTurnRound(run, adapter, conversation, currentMsgID, model, effort, toolsForRound, settings, continuation, maxTokens, injectHydration, promptCache, supportsVision, systemPromptSuffix)
 		injectHydration = false // only the first round after a user message gets hydration
 		continuation = false
 		totalUsage = mergeUsage(totalUsage, roundResult.Response.Usage)
 		if streamErr != nil {
 			if run.Ctx.Err() != nil {
 				a.interruptTurn(run, currentMsgID, roundResult, totalUsage, model)
-				return
+				return false, ""
 			}
 			// Codex account failover with circuit breaker:
 			// - Transient 429 (Retry-After \u2264 5min): MarkRateLimited (short cooldown)
@@ -358,7 +490,9 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 					// Async fetch exact reset time from usage API.
 					// Derive from the turn context so the goroutine exits
 					// early if the turn is cancelled.
-					go a.refreshCodexCircuit(context.WithoutCancel(run.Ctx), provider.ID, currentAccount)
+					a.goSafe("codex", func() {
+						a.refreshCodexCircuit(context.WithoutCancel(run.Ctx), provider.ID, currentAccount)
+					})
 				} else {
 					a.CodexRouter.MarkRateLimited(currentAccount, cooldown)
 				}
@@ -385,13 +519,13 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 			if !continuedPartialStream && canContinuePartialStream(streamErr, roundResult) {
 				if err := a.persistPartialTurnRound(run.ConversationID, currentMsgID, model, roundResult); err != nil {
 					a.failTurn(run, currentMsgID, err)
-					return
+					return false, ""
 				}
 				a.log("warn", "ai", "continuing partial provider stream for turn %s", run.ID)
 				conversation, currentMsgID, err = a.appendTurnAssistant(run.ConversationID)
 				if err != nil {
 					a.failTurn(run, currentMsgID, err)
-					return
+					return false, ""
 				}
 				continuation = true
 				continuedPartialStream = true
@@ -402,7 +536,7 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 			} else {
 				a.failStreamTurn(run, currentMsgID, model, roundResult, streamErr)
 			}
-			return
+			return false, ""
 		}
 
 		if toolRounds >= settings.MaxToolRounds && len(roundResult.Response.ToolCalls) > 0 {
@@ -411,7 +545,7 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 		}
 		if err := a.persistTurnRound(run.ConversationID, currentMsgID, model, roundResult); err != nil {
 			a.failTurn(run, currentMsgID, err)
-			return
+			return false, ""
 		}
 
 		if len(roundResult.Response.ToolCalls) == 0 {
@@ -422,14 +556,14 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 			applied, steerConv, steerErr := a.applyQueuedSteer(run, currentMsgID)
 			if steerErr != nil {
 				a.failTurn(run, currentMsgID, steerErr)
-				return
+				return false, ""
 			}
 			if applied {
 				conversation = steerConv
 				conversation, currentMsgID, err = a.appendTurnAssistant(run.ConversationID)
 				if err != nil {
 					a.failTurn(run, currentMsgID, err)
-					return
+					return false, ""
 				}
 				injectHydration = true // steer is a new user message — re-hydrate
 				continue
@@ -440,10 +574,10 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 		if err := a.executeTurnTools(run, currentMsgID, roundResult.Response.ToolCalls, supportsVision, settings); err != nil {
 			if run.Ctx.Err() != nil {
 				a.interruptTurn(run, currentMsgID, roundResult, totalUsage, model)
-				return
+				return false, ""
 			}
 			a.failTurn(run, currentMsgID, err)
-			return
+			return false, ""
 		}
 		toolRounds++
 
@@ -453,7 +587,7 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 		applied, steerConv, steerErr := a.applyQueuedSteer(run, currentMsgID)
 		if steerErr != nil {
 			a.failTurn(run, currentMsgID, steerErr)
-			return
+			return false, ""
 		}
 		if applied {
 			conversation = steerConv
@@ -463,14 +597,60 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 		conversation, currentMsgID, err = a.appendTurnAssistant(run.ConversationID)
 		if err != nil {
 			a.failTurn(run, currentMsgID, err)
-			return
+			return false, ""
 		}
 	}
 
-	if err := a.finishTurn(run, asstMsgID, model, totalUsage); err != nil {
+	if err := a.finishTurn(run, asstMsgID, model, totalUsage, autoContinueIndex); err != nil {
 		a.failTurn(run, asstMsgID, err)
+		return false, ""
 	}
 	a.discardQueuedSteer(run)
+
+	// Compute the auto-continue decision. finishTurn already emitted
+	// TurnDone with the decision attached, but we need the raw decision
+	// here to decide whether to start the next turn.
+	if a.Todos == nil {
+		return false, ""
+	}
+	items := a.Todos.Get(run.ConversationID)
+	conv, err := a.Conversations.Get(run.ConversationID)
+	if err != nil {
+		return false, ""
+	}
+	lastText := lastAssistantText(conv, asstMsgID)
+	decision := domain.DecideAutoContinue(domain.AutoContinueInput{
+		Items:             items,
+		AutoContinueIndex: autoContinueIndex,
+		MaxAutoContinues:  a.Settings.Get().MaxAutoContinues,
+		TurnOK:            true,
+		HasConversation:   true,
+		TurnText:          lastText,
+	})
+	if !decision.ShouldContinue {
+		a.log("info", "agent", "auto-continue chain stopped: %s (open todos: %d)", decision.Reason, decision.OpenTodoCount)
+		return false, ""
+	}
+	// Emit an event so the UI can show "Continuing tasks… (N/M)".
+	a.Bus.Emit(contracts.EventAutoContinue, contracts.AutoContinueEvent{
+		ConversationID: run.ConversationID,
+		RunID:          run.ID,
+		Decision: contracts.AutoContinueDTO{
+			ShouldContinue:   decision.ShouldContinue,
+			OpenTodoCount:    decision.OpenTodoCount,
+			ContinuesUsed:    decision.ContinuesUsed,
+			MaxAutoContinues: decision.MaxAutoContinues,
+			Reason:           string(decision.Reason),
+		},
+	})
+	// Append a fresh assistant message for the next turn.
+	nextConv, nextMsgID, err := a.appendTurnAssistant(run.ConversationID)
+	if err != nil {
+		a.log("error", "agent", "auto-continue: failed to append assistant message: %v", err)
+		return false, ""
+	}
+	_ = nextConv
+	return true, nextMsgID
 }
 
 // applyQueuedSteer drains a queued steer and appends it as a real user message
@@ -509,14 +689,21 @@ func shouldContinueFailedTurn(failed domain.Message) bool {
 }
 
 // compactionTriggerTokens is the estimated-token watermark that starts
-// compaction: the configured threshold, capped at 80% of the model window so
-// a high threshold cannot wait until the next turn already overflows.
+// compaction. When CompactionThreshold is 0 (auto, the default), compaction
+// triggers at 80% of the model's context window — so a 1M-context model
+// compacts at ~800k, not at a flat 40k. When CompactionThreshold is non-zero,
+// it is used as the trigger but still capped at 80% of the window so a high
+// threshold cannot wait until the next turn already overflows.
 func compactionTriggerTokens(contextWindow int, settings domain.Settings) int {
 	trigger := settings.CompactionThreshold
-	if trigger < 1000 {
-		trigger = domain.DefaultSettings().CompactionThreshold
-	}
 	windowCap := contextWindow * 4 / 5
+	if trigger <= 0 {
+		// Auto: use 80% of the model's context window.
+		if windowCap > 0 {
+			return windowCap
+		}
+		return domain.DefaultSettings().CompactionThreshold
+	}
 	if windowCap > 0 && windowCap < trigger {
 		return windowCap
 	}
@@ -962,11 +1149,13 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, supportsVision bo
 			content := m.Content
 			attachments := m.Attachments
 			if !supportsVision && hasImageAttachment(attachments) {
+				imageAtts := filterImageAttachments(attachments)
 				attachments = stripImageAttachments(attachments)
+				placeholder := imageOmittedPlaceholderFor(imageAtts)
 				if content == "" {
-					content = imageOmittedPlaceholder
+					content = placeholder
 				} else if !containsImageOmissionNote(content) {
-					content = content + "\n\n" + imageOmittedPlaceholder
+					content = content + "\n\n" + placeholder
 				}
 			}
 			out = append(out, ChatMessage{Role: "user", Content: content, Attachments: attachments})
@@ -994,6 +1183,39 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, supportsVision bo
 
 const imageOmittedPlaceholder = "[image content omitted — this model does not support image input]"
 
+// imageOmittedPlaceholderFor builds a placeholder that tells the model to
+// call read_image with the absolute file path to access the image. Only
+// absolute paths are shown — relative paths are rejected to avoid ambiguity
+// between the model's working directory and the actual file location.
+func imageOmittedPlaceholderFor(atts []domain.Attachment) string {
+	if len(atts) == 0 {
+		return imageOmittedPlaceholder
+	}
+	paths := make([]string, 0, len(atts))
+	for _, a := range atts {
+		if a.FilePath != "" {
+			paths = append(paths, a.FilePath)
+		}
+	}
+	if len(paths) == 0 {
+		return imageOmittedPlaceholder
+	}
+	list := strings.Join(paths, ", ")
+	return "[image content omitted — this model does not support image input. " +
+		"Image file(s): " + list + ". " +
+		"Call the read_image tool with file_path set to one of the absolute paths above to load the image into your context.]"
+}
+
+func imageAttachmentNames(atts []domain.Attachment) []string {
+	var names []string
+	for _, a := range atts {
+		if a.Type == "image" {
+			names = append(names, a.Name)
+		}
+	}
+	return names
+}
+
 func hasImageAttachment(atts []domain.Attachment) bool {
 	for _, a := range atts {
 		if a.Type == "image" {
@@ -1013,6 +1235,38 @@ func stripImageAttachments(atts []domain.Attachment) []domain.Attachment {
 	return filtered
 }
 
+func filterImageAttachments(atts []domain.Attachment) []domain.Attachment {
+	var images []domain.Attachment
+	for _, a := range atts {
+		if a.Type == "image" {
+			images = append(images, a)
+		}
+	}
+	return images
+}
+
 func containsImageOmissionNote(content string) bool {
 	return strings.Contains(content, "image content omitted")
+}
+
+// saveAttachmentsToDisk writes image/file attachments to the attachment store
+// and fills in the FilePath field with the absolute path. Failures are
+// logged but non-fatal — the attachment still has its DataURL for inline
+// use by vision-capable models.
+func (a *App) saveAttachmentsToDisk(conversationID string, attachments []domain.Attachment) {
+	if a.Attachments == nil {
+		return
+	}
+	for i := range attachments {
+		att := &attachments[i]
+		if att.Type == "text" || att.FilePath != "" {
+			continue
+		}
+		path, err := a.Attachments.Save(conversationID, *att)
+		if err != nil {
+			a.log("warn", "attachments", "failed to save %s to disk: %v", att.Name, err)
+			continue
+		}
+		att.FilePath = path
+	}
 }

@@ -61,6 +61,7 @@ func TestChatMessagesKeepsReasoningOnlyAssistantTurns(t *testing.T) {
 }
 
 func TestCompactionTriggerUsesThresholdCappedByWindow(t *testing.T) {
+	// Explicit threshold: capped at 80% of window for small windows.
 	settings := domain.Settings{CompactionThreshold: 40000}
 	if got := compactionTriggerTokens(1000, settings); got != 800 {
 		t.Fatalf("small window: got %d, want 800 (80%% of 1000)", got)
@@ -71,6 +72,22 @@ func TestCompactionTriggerUsesThresholdCappedByWindow(t *testing.T) {
 	settings.CompactionThreshold = 5000
 	if got := compactionTriggerTokens(200000, settings); got != 5000 {
 		t.Fatalf("custom threshold: got %d, want 5000", got)
+	}
+}
+
+func TestCompactionTriggerAutoUsesWindowPercentage(t *testing.T) {
+	// Threshold=0 means "auto": compaction triggers at 80% of the model's
+	// context window, not at a flat token count. This is the default for
+	// new installations and after migration from the old 40k default.
+	settings := domain.Settings{CompactionThreshold: 0}
+	if got := compactionTriggerTokens(1048576, settings); got != 838860 {
+		t.Fatalf("1M window auto: got %d, want 838860 (80%% of 1M)", got)
+	}
+	if got := compactionTriggerTokens(200000, settings); got != 160000 {
+		t.Fatalf("200k window auto: got %d, want 160000 (80%% of 200k)", got)
+	}
+	if got := compactionTriggerTokens(1000, settings); got != 800 {
+		t.Fatalf("1k window auto: got %d, want 800", got)
 	}
 }
 
@@ -166,7 +183,7 @@ func TestRunTurnFailsWhenAllCodexAccountsBlocked(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	provider := &domain.Provider{ID: "prov", Kind: domain.ProviderCodex}
 
-	app.runTurn(run, provider, "active-token", "gpt-5.3-codex", "", "m1", false, true)
+	app.runTurn(run, provider, "active-token", "gpt-5.3-codex", "", "m1", false, true, "")
 
 	if factoryCalled {
 		t.Fatal("factory must not run when every Codex account is blocked")

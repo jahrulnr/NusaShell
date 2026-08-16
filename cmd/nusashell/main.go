@@ -20,10 +20,14 @@ import (
 	"nusashell/infrastructure/ai"
 	"nusashell/infrastructure/ai/codex"
 	"nusashell/infrastructure/ai/modelcatalog"
+	"nusashell/infrastructure/attachmentfs"
 	"nusashell/infrastructure/config"
 	"nusashell/infrastructure/docs"
 	"nusashell/infrastructure/jsonstore"
 	"nusashell/infrastructure/mcpclient"
+	"nusashell/infrastructure/pluginfs"
+	"nusashell/infrastructure/pluginruntime"
+	"nusashell/infrastructure/skillfs"
 	"nusashell/infrastructure/sqlitestore"
 	"nusashell/infrastructure/tools"
 	"nusashell/infrastructure/workspacepicker"
@@ -89,34 +93,68 @@ func run() error {
 
 	mcpManager := mcpclient.NewManager()
 	bus := application.NewBus()
+	askService := application.NewAskQuestionService()
 	todoStore := jsonstore.NewTodoStore(filepath.Join(dataDir, "conversation-todos.json"))
 	providerStore := &jsonstore.Providers{S: store}
 	searcher := searchwire.New(tools.SearchwireConfigFromProviders(providerStore, credentials))
+	// Seed builtin skills from the embedded resources/agent/skills/ tree
+	// into the user data directory, then create the filesystem-backed
+	// skill store. Skill content (SKILL.md) lives on disk; metadata
+	// (state, usage, provenance) is cataloged in skills.json.
+	skillsRoot := filepath.Join(dataDir, "agent", "skills")
+	if err := skillfs.SeedBuiltinSkills(skillsRoot); err != nil {
+		slog.Warn("builtin skill seed failed", "error", err)
+	}
+	skillStore, err := skillfs.New(skillsRoot)
+	if err != nil {
+		slog.Warn("skill store init failed, using empty store", "error", err)
+		skillStore, _ = skillfs.New(skillsRoot)
+	}
+	// Plugin store: installed plugins live under <datadir>/plugins/<id>/.
+	// Each plugin has manifest.json + mcp/ (stdio server) + ui/ (static
+	// HTML/CSS/JS). The runtime manager wraps the MCP manager to start
+	// plugin MCP servers and route tool calls from plugin UIs.
+	pluginsRoot := filepath.Join(dataDir, "plugins")
+	pluginStore, err := pluginfs.New(pluginsRoot)
+	if err != nil {
+		slog.Warn("plugin store init failed", "error", err)
+	}
+	pluginRuntime := pluginruntime.New(pluginStore, mcpManager)
+	// Attachment store: saves image/file attachments to disk so file-based
+	// tools can access them by absolute path.
+	attachmentStore, err := attachmentfs.New(filepath.Join(dataDir, "attachments"))
+	if err != nil {
+		slog.Warn("attachment store init failed", "error", err)
+	}
 	app := application.NewApp(application.Deps{
 		Version:       version,
 		DataDir:       dataDir,
 		Conversations: store,
 		Providers:     providerStore,
 		Credentials:   credentials,
-		Skills:        &jsonstore.Skills{S: store},
+		Skills:        skillStore,
 		Memory:        &jsonstore.Memory{S: store},
 		LearningEdges: &jsonstore.LearningEdges{S: store},
 		Todos:         todoStore,
 		MCP:           &jsonstore.MCP{S: store},
+		Plugins:       pluginStore,
 		Logs:          &jsonstore.Logs{S: store},
 		Settings:      &jsonstore.Settings{S: store},
+		Attachments:   attachmentStore,
 		Docs:          docSource,
 		Bus:           bus,
+		AskQuestions:  askService,
 		Toolbox: &tools.Toolbox{
-			Skills:      &jsonstore.Skills{S: store},
-			Memory:      &jsonstore.Memory{S: store},
-			Docs:        docSource,
-			MCPServers:  &jsonstore.MCP{S: store},
-			Todos:       todoStore,
-			Searcher:    searcher,
-			Settings:    &jsonstore.Settings{S: store},
-			Credentials: credentials,
-			MCP:         mcpManager,
+			Skills:       skillStore,
+			Memory:       &jsonstore.Memory{S: store},
+			Docs:         docSource,
+			MCPServers:   &jsonstore.MCP{S: store},
+			Todos:        todoStore,
+			Searcher:     searcher,
+			Settings:     &jsonstore.Settings{S: store},
+			Credentials:  credentials,
+			AskQuestions: askService,
+			MCP:          mcpManager,
 		},
 		MCPToolbox:                  mcpManager,
 		Factory:                     ai.NewFactory(credentials),
@@ -124,6 +162,7 @@ func run() error {
 		EmbeddingModelListerFactory: ai.NewEmbeddingModelListerFactory(),
 		ModelCatalog:                modelcatalog.New(nil),
 		WorkspacePicker:             workspacepicker.Zenity{},
+		Logger:                      logger,
 	})
 	// Wire Codex runtime + OAuth adapters (optional — nil-safe if unavailable)
 	if rt, err := codex.NewRuntimeAdapter(); err == nil {
@@ -135,6 +174,12 @@ func run() error {
 	app.CodexRouter = application.NewCodexAccountRouter()
 
 	srv := transport.New(app, logger, transport.StaticHandler(frontend.FS, dev), dev)
+	// Register plugin routes: serve plugin UI static files and route
+	// tool calls from plugin UIs to the plugin's MCP server.
+	if pluginStore != nil {
+		pluginHandler := transport.NewPluginHandler(pluginStore, pluginRuntime)
+		pluginHandler.RegisterRoutes(srv.RoutesMux())
+	}
 	httpServer := &http.Server{
 		Addr:              host + ":" + port,
 		Handler:           srv.Routes(),

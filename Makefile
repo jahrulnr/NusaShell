@@ -58,7 +58,7 @@ fmt-check:
 run: scan-ui-docs gen-catalog build
 	./bin/nusashell
 
-## scan-ui-docs: regenerate infrastructure/docs/corpus/ui-*.md from ui-map.json.
+## scan-ui-docs: regenerate resources/agent/docs/ui-*.md from ui-map.json.
 ## Fails when a data-view lacks a map entry or a mapped control ID is missing from source.
 scan-ui-docs:
 	go run ./cmd/scan-ui-docs

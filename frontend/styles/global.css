@@ -81,7 +81,7 @@ body {
 .content:has(.skills-view.active) { overflow: hidden; }
 .view.active.skills-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .view.active.logs-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.view.active.providers-view, .view.active.mcp-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.view.active.providers-view, .view.active.mcp-view, .view.active.plugins-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .view.active.learning-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .view.active.settings-view { display: flex; flex-direction: column; min-height: 100%; }
 .view.active.settings-view .settings-body { margin-top: 1rem; }
@@ -117,7 +117,8 @@ body {
 .view-header p { margin: 5px 0 0; color: var(--text-faint); font-size: 12px; }
 .view-body { flex: 1; min-height: 0; padding: 0 26px 22px; }
 .view.active.providers-view .view-body,
-.view.active.mcp-view .view-body { overflow-y: auto; }
+.view.active.mcp-view .view-body,
+.view.active.plugins-view .view-body { overflow-y: auto; }
 
 /* ============ Buttons ============ */
 .action-btn {

@@ -1,20 +1,18 @@
 // Package docs provides the product documentation corpus the agent can read
 // through docs_list / docs_search / docs_read. The corpus is embedded at
-// build time; a user-supplied directory may extend it.
+// build time via the resources package; a user-supplied directory may
+// extend it.
 package docs
 
 import (
-	"embed"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"nusashell/application"
+	"nusashell/resources"
 )
-
-//go:embed corpus/*.md
-var corpusFS embed.FS
 
 // Source implements application.DocsSource.
 type Source struct {
@@ -33,7 +31,7 @@ type docEntry struct {
 // from that directory (id = base name without extension).
 func New(extraDir string) (*Source, error) {
 	s := &Source{extraDir: extraDir}
-	entries, err := corpusFS.ReadDir("corpus")
+	entries, err := resources.DocsFS.ReadDir("agent/docs")
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +39,7 @@ func New(extraDir string) (*Source, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
-		b, err := corpusFS.ReadFile("corpus/" + e.Name())
+		b, err := resources.DocsFS.ReadFile("agent/docs/" + e.Name())
 		if err != nil {
 			return nil, err
 		}

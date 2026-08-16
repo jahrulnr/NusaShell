@@ -13,13 +13,22 @@ import (
 // real provider.
 type fakeVisionAdapter struct {
 	description string
+	// reasoningOnly simulates reasoning models (e.g. dots-3-note) that put
+	// their output in Reasoning instead of Content.
+	reasoningOnly bool
 }
 
 func (f *fakeVisionAdapter) Kind() domain.ProviderKind { return domain.ProviderChat }
 func (f *fakeVisionAdapter) Complete(ctx context.Context, req ChatRequest) (ChatResponse, error) {
+	if f.reasoningOnly {
+		return ChatResponse{Reasoning: f.description}, nil
+	}
 	return ChatResponse{Content: f.description}, nil
 }
 func (f *fakeVisionAdapter) Stream(ctx context.Context, req ChatRequest, onDelta, onReasoning func(text string)) (ChatResponse, error) {
+	if f.reasoningOnly {
+		return ChatResponse{Reasoning: f.description}, nil
+	}
 	return ChatResponse{Content: f.description}, nil
 }
 
@@ -133,5 +142,40 @@ func TestDescribeImagesWithFallbackProviderNotFound(t *testing.T) {
 	out := app.describeImagesWithFallback(context.Background(), settings, atts)
 	if len(out) != 1 {
 		t.Fatalf("expected unchanged attachments when provider not found, got %d", len(out))
+	}
+}
+
+// TestDescribeImagesWithFallbackReasoningOnlyModel tests reasoning models
+// (e.g. dots-3-note-preview) that put their output in the reasoning field
+// instead of content. The fallback must still produce a description.
+func TestDescribeImagesWithFallbackReasoningOnlyModel(t *testing.T) {
+	app := &App{
+		Logs: &fakeLogStore{},
+		Bus:  NewBus(),
+		Providers: &fakeProviderStore{items: map[string]*domain.Provider{
+			"vision-prov": {ID: "vision-prov", Enabled: true, Kind: domain.ProviderChat},
+		}},
+		Credentials: &fakeVisionCredStore{creds: map[string]string{"vision-prov": "key"}},
+		Factory: func(ctx context.Context, p *domain.Provider, apiKey string) (AIProvider, error) {
+			return &fakeVisionAdapter{
+				description:   "A photo of a sunset over the ocean",
+				reasoningOnly: true,
+			}, nil
+		},
+	}
+	settings := domain.Settings{VisionProviderID: "vision-prov", VisionModelID: "dots-3-note"}
+	atts := []domain.Attachment{
+		{Type: "image", Name: "sunset.jpg", MediaType: "image/jpeg", DataURL: "data:image/jpeg;base64,/9j/4AAQ="},
+	}
+	out := app.describeImagesWithFallback(context.Background(), settings, atts)
+	if len(out) != 2 {
+		t.Fatalf("expected 2 attachments (image + description), got %d", len(out))
+	}
+	desc := out[1]
+	if desc.Type != "text" {
+		t.Errorf("description should be text type, got %q", desc.Type)
+	}
+	if !strings.Contains(desc.Content, "sunset") {
+		t.Errorf("description should contain reasoning output, got: %q", desc.Content)
 	}
 }

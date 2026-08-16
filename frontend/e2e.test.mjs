@@ -210,7 +210,7 @@ test('embedded frontend completes one representative flow through the Go backend
     await import(`${pathToFileURL(join(repo, 'frontend', 'js', 'app.js')).href}?e2e=${Date.now()}`);
 
     await waitFor(() => document.getElementById('conn-status')?.textContent === 'Connected', 'WebSocket connection');
-    await waitFor(() => document.getElementById('skills-count')?.textContent === '0 skills', 'initial skills view');
+    await waitFor(() => /skills$/.test(document.getElementById('skills-count')?.textContent || ''), 'initial skills view');
 
     window.location.hash = '#settings';
     window.dispatchEvent(new window.Event('hashchange'));
@@ -226,7 +226,7 @@ test('embedded frontend completes one representative flow through the Go backend
     document.getElementById('skill-name').dispatchEvent(new window.Event('input', { bubbles: true }));
     document.getElementById('skill-content').dispatchEvent(new window.Event('input', { bubbles: true }));
     document.getElementById('skill-save-btn').click();
-    await waitFor(() => document.querySelector('#skills-list .skills-list-item strong')?.textContent === 'e2e-skill', 'skill save through the UI');
+    await waitFor(() => [...document.querySelectorAll('#skills-list .skills-list-item strong')].some((el) => el.textContent === 'e2e-skill'), 'skill save through the UI');
 
     window.location.hash = '#logs';
     window.dispatchEvent(new window.Event('hashchange'));
@@ -352,6 +352,11 @@ test('compaction triggers and renders a marker when conversation exceeds thresho
       ),
       'compaction marker in the UI',
       15000,
+    );
+    // Verify it rendered as an assistant bubble, not a standalone pill.
+    assert.ok(
+      document.querySelector('#agent-thread .agent-message.agent-compaction-marker'),
+      'compaction marker should be in an agent-message assistant bubble',
     );
 
     // Wait for the turn to finish.

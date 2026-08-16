@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -39,13 +40,16 @@ type Usage struct {
 
 // Attachment is a durable user-provided message part. Text attachments retain
 // their decoded content; image and PDF attachments retain their original data
-// URL so compatible providers can receive the exact source bytes.
+// URL so compatible providers can receive the exact source bytes. Image and
+// file attachments are also saved to disk under <datadir>/attachments/ and
+// the absolute path is stored in FilePath so file-based tools can access them.
 type Attachment struct {
 	Type      string // text | image | file
 	Name      string
 	MediaType string
 	Content   string // text only
 	DataURL   string // image and file only
+	FilePath  string // absolute path on disk for image/file attachments; empty for text
 }
 
 type ToolCall struct {
@@ -183,9 +187,56 @@ func (m Message) EstimateTokens() int {
 	for _, attachment := range m.Attachments {
 		total += EstimateTokens(attachment.Name)
 		total += EstimateTokens(attachment.Content)
-		total += EstimateTokens(attachment.DataURL)
+		if attachment.Type == "image" {
+			total += estimateImageTokens(attachment.DataURL)
+		} else {
+			// Non-image file attachments: count the data URL as text.
+			// PDFs and other documents are usually sent as descriptive
+			// markers, not raw bytes, so this is a small contribution.
+			total += EstimateTokens(attachment.DataURL)
+		}
 	}
 	return total
+}
+
+// estimateImageTokens estimates the token cost of an image attachment using
+// a resolution-based heuristic, matching how providers (OpenAI, Anthropic)
+// actually charge for images: by tile count, not by byte size.
+//
+// Base64 encoding inflates binary data by ~33%, and EstimateTokens (chars/4)
+// on a base64 string would count a 1MB image as ~330k tokens — far more than
+// any provider charges (a 1024x1024 image is ~765 tokens on OpenAI).
+//
+// We can't decode the image here (domain must stay pure), so we estimate the
+// decoded byte size from the base64 length and use a conservative heuristic:
+// ~1 token per 256 decoded bytes, capped at 2000 tokens for very large images.
+// This is still a rough estimate but is within an order of magnitude of the
+// real provider cost, unlike the base64-char-based estimate which was off by
+// ~400x.
+func estimateImageTokens(dataURL string) int {
+	if dataURL == "" {
+		return 0
+	}
+	// Strip the "data:...;base64," prefix to get the base64 payload.
+	_, b64, ok := strings.Cut(dataURL, ",")
+	if !ok {
+		return 0
+	}
+	// Base64 encodes 3 bytes as 4 chars, so decoded size ≈ len*3/4.
+	decodedBytes := len(b64) * 3 / 4
+	// Heuristic: ~1 token per 256 decoded bytes. A 1MB image → ~4000 tokens.
+	// Cap at 2000 to avoid inflating context for very large images; providers
+	// typically downscale before tokenizing anyway.
+	tokens := decodedBytes / 256
+	if tokens > 2000 {
+		tokens = 2000
+	}
+	if tokens < 85 {
+		// Minimum token cost for any image (OpenAI charges ~85 for a
+		// 512x512 low-detail image).
+		tokens = 85
+	}
+	return tokens
 }
 
 func estimateToolCallTokens(tc ToolCall) int {

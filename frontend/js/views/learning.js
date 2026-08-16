@@ -2,7 +2,7 @@
 // Uses vis-network for graph rendering (vendored ESM standalone build).
 
 import { rpc } from '../rpc.js';
-import { el, debounce } from '../ui.js';
+import { el, debounce, createSelect } from '../ui.js';
 import { DataSet, Network } from '../../vendor/vis-network/vis-network.esm.min.js';
 
 const state = {
@@ -25,7 +25,16 @@ export async function initLearning() {
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') doSearch();
   });
-  kindFilter.addEventListener('change', () => doSearch());
+  createSelect(kindFilter, {
+    data: [
+      { text: 'All', value: '' },
+      { text: 'Skills', value: 'skills' },
+      { text: 'Memory', value: 'memory' },
+    ],
+    value: '',
+    placeholder: 'All',
+    onChange: () => doSearch(),
+  });
   searchBtn.addEventListener('click', () => doSearch());
   refreshBtn.addEventListener('click', () => loadGraph());
   fitBtn.addEventListener('click', () => {
@@ -36,6 +45,11 @@ export async function initLearning() {
   initGraph();
   // Initial search with empty query returns nothing (BM25 needs terms),
   // so just load the graph.
+  await loadGraph();
+}
+
+export async function refresh() {
+  await loadStats();
   await loadGraph();
 }
 

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -797,7 +799,7 @@ func TestSettingsHandlers(t *testing.T) {
 	if err := json.Unmarshal(gotten.Result, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !out.Settings.CompactionEnabled || out.Settings.CompactionThreshold != 40000 || !out.Settings.PromptCaching || out.Settings.MaxToolRounds != 8 {
+	if !out.Settings.CompactionEnabled || out.Settings.CompactionThreshold != 0 || !out.Settings.PromptCaching || out.Settings.MaxToolRounds != 8 {
 		t.Fatalf("defaults = %+v", out.Settings)
 	}
 
@@ -816,14 +818,225 @@ func TestSettingsHandlers(t *testing.T) {
 		t.Fatalf("after set = %+v", out.Settings)
 	}
 
-	res := h.rpc(t, "settings.set", map[string]any{"compaction_threshold": 10})
+	// 0 is valid (auto = 80% of model context window).
+	h.rpcOK(t, "settings.set", map[string]any{"compaction_threshold": 0})
+
+	res := h.rpc(t, "settings.set", map[string]any{"compaction_threshold": -1})
 	if res.OK || res.Error == nil || res.Error.Code != "VALIDATION_ERROR" {
-		t.Fatalf("tiny threshold must fail validation, got %+v", res)
+		t.Fatalf("negative threshold must fail validation, got %+v", res)
 	}
 	res = h.rpc(t, "settings.set", map[string]any{"max_tool_rounds": 0})
 	if res.OK || res.Error == nil || res.Error.Code != "VALIDATION_ERROR" {
 		t.Fatalf("zero max tool rounds must fail validation, got %+v", res)
 	}
+}
+
+// ---- MCP servers stop / plugin uninstall ----
+
+func TestMCPServersStopDropsConnection(t *testing.T) {
+	h := newHarness(t, nil)
+
+	// Register a stdio MCP server backed by the fakemcp binary.
+	saved := h.rpcOK(t, "mcp.servers.save", map[string]any{
+		"name": "fakemcp", "command": h.mcpBin, "args": []string{}, "enabled": true,
+	})
+	var savedOut struct {
+		Servers []struct {
+			ID string `json:"id"`
+		} `json:"servers"`
+	}
+	if err := json.Unmarshal(saved.Result, &savedOut); err != nil {
+		t.Fatal(err)
+	}
+	serverID := savedOut.Servers[0].ID
+
+	// Connect so the toolbox caches the connection.
+	tested := h.rpcOK(t, "mcp.servers.test", map[string]any{"id": serverID})
+	var testOut struct {
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(tested.Result, &testOut); err != nil {
+		t.Fatal(err)
+	}
+	if len(testOut.Tools) == 0 {
+		t.Fatalf("mcp test returned no tools: %s", tested.Result)
+	}
+
+	// List must report the server as connected.
+	listed := h.rpcOK(t, "mcp.servers.list", map[string]any{})
+	var listOut struct {
+		Servers []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"servers"`
+	}
+	if err := json.Unmarshal(listed.Result, &listOut); err != nil {
+		t.Fatal(err)
+	}
+	var before string
+	for _, s := range listOut.Servers {
+		if s.ID == serverID {
+			before = s.Status
+		}
+	}
+	if before != "connected" {
+		t.Fatalf("status before stop = %q, want connected", before)
+	}
+
+	// Stop drops the cached connection.
+	h.rpcOK(t, "mcp.servers.stop", map[string]any{"id": serverID})
+
+	listed2 := h.rpcOK(t, "mcp.servers.list", map[string]any{})
+	var listOut2 struct {
+		Servers []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"servers"`
+	}
+	if err := json.Unmarshal(listed2.Result, &listOut2); err != nil {
+		t.Fatal(err)
+	}
+	var after string
+	for _, s := range listOut2.Servers {
+		if s.ID == serverID {
+			after = s.Status
+		}
+	}
+	if after == "connected" {
+		t.Fatalf("status after stop = connected, want idle/error")
+	}
+}
+
+func TestPluginUninstallRemovesPluginAndDropsMCP(t *testing.T) {
+	h := newHarness(t, nil)
+
+	// Install a fake plugin into the harness plugin store. The plugin
+	// points at the fakemcp binary so mcp.servers.test can connect.
+	src := t.TempDir()
+	manifest := map[string]any{
+		"id":      "test.echo-plugin",
+		"name":    "Echo Plugin",
+		"version": "0.1.0",
+		"icon":    "🔊",
+		"mcp": map[string]any{
+			"transport": "stdio",
+			"command":   h.mcpBin,
+			"args":      []string{},
+		},
+	}
+	manifestBytes, _ := json.Marshal(manifest)
+	if err := os.WriteFile(filepath.Join(src, "manifest.json"), manifestBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	installed, err := h.plugins.Install(src)
+	if err != nil {
+		t.Fatalf("install plugin: %v", err)
+	}
+	pluginID := installed.Manifest.ID
+
+	// The plugin must appear in mcp.servers.list with plugin=true.
+	listed := h.rpcOK(t, "mcp.servers.list", map[string]any{})
+	var listOut struct {
+		Servers []struct {
+			ID      string `json:"id"`
+			Plugin  bool   `json:"plugin"`
+			Version string `json:"version"`
+			Icon    string `json:"icon"`
+		} `json:"servers"`
+	}
+	if err := json.Unmarshal(listed.Result, &listOut); err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, s := range listOut.Servers {
+		if s.ID == "plugin:"+pluginID {
+			found = true
+			if !s.Plugin {
+				t.Fatalf("plugin server %s has plugin=false", s.ID)
+			}
+			if s.Version != "0.1.0" {
+				t.Fatalf("plugin server version = %q, want 0.1.0", s.Version)
+			}
+			if s.Icon != "🔊" {
+				t.Fatalf("plugin server icon = %q, want 🔊", s.Icon)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("plugin %s not in mcp.servers.list: %s", pluginID, listed.Result)
+	}
+
+	// Uninstall via RPC.
+	h.rpcOK(t, "plugin.uninstall", map[string]any{"id": pluginID})
+
+	// The plugin must no longer appear in mcp.servers.list.
+	listed2 := h.rpcOK(t, "mcp.servers.list", map[string]any{})
+	var listOut2 struct {
+		Servers []struct {
+			ID string `json:"id"`
+		} `json:"servers"`
+	}
+	if err := json.Unmarshal(listed2.Result, &listOut2); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range listOut2.Servers {
+		if s.ID == "plugin:"+pluginID {
+			t.Fatalf("plugin %s still listed after uninstall", pluginID)
+		}
+	}
+
+	// Uninstalling again must fail with NOT_FOUND.
+	res := h.rpc(t, "plugin.uninstall", map[string]any{"id": pluginID})
+	if res.OK || res.Error == nil || res.Error.Code != "NOT_FOUND" {
+		t.Fatalf("second uninstall want NOT_FOUND, got %+v", res)
+	}
+}
+
+func TestMCPServersListReportsPluginUI(t *testing.T) {
+	h := newHarness(t, nil)
+	src := t.TempDir()
+	manifest := map[string]any{
+		"id":      "test.ui-plugin",
+		"name":    "UI Plugin",
+		"version": "0.1.0",
+		"icon":    "🧩",
+		"ui":      map[string]any{"entry": "ui/index.html"},
+		"mcp": map[string]any{
+			"transport": "stdio",
+			"command":   h.mcpBin,
+		},
+	}
+	manifestBytes, _ := json.Marshal(manifest)
+	if err := os.WriteFile(filepath.Join(src, "manifest.json"), manifestBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	installed, err := h.plugins.Install(src)
+	if err != nil {
+		t.Fatalf("install plugin: %v", err)
+	}
+
+	listed := h.rpcOK(t, "mcp.servers.list", map[string]any{})
+	var result struct {
+		Servers []struct {
+			ID     string `json:"id"`
+			Plugin bool   `json:"plugin"`
+			HasUI  bool   `json:"hasUI"`
+		} `json:"servers"`
+	}
+	if err := json.Unmarshal(listed.Result, &result); err != nil {
+		t.Fatal(err)
+	}
+	for _, server := range result.Servers {
+		if server.ID == "plugin:"+installed.Manifest.ID {
+			if !server.Plugin || !server.HasUI {
+				t.Fatalf("plugin server metadata = %+v, want plugin and hasUI", server)
+			}
+			return
+		}
+	}
+	t.Fatalf("UI plugin %q not found in mcp.servers.list: %s", installed.Manifest.ID, listed.Result)
 }
 
 // helper: POST raw bytes (used by malformed body test)

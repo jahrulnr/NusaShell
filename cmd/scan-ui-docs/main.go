@@ -1,9 +1,9 @@
 // Command scan-ui-docs generates the agent-usable UI documentation corpus
-// from infrastructure/docs/corpus/ui-source/ui-map.json and validates it
+// from resources/agent/docs/ui-source/ui-map.json and validates it
 // against the frontend source (frontend/index.html + frontend/js/**/*.js).
 //
-// The generated files infrastructure/docs/corpus/ui-*.md are embedded at
-// build time by infrastructure/docs/docs.go so the agent can surface them
+// The generated files resources/agent/docs/ui-*.md are embedded at
+// build time by resources/resources.go so the agent can surface them
 // through docs_search / docs_read.
 //
 // Usage:
@@ -72,19 +72,19 @@ var (
 func main() {
 	repoRoot := flag.String("repo-root", ".", "repository root (defaults to cwd)")
 	check := flag.Bool("check", false, "fail if committed ui-*.md differ from generated content (drift gate)")
-	outDir := flag.String("out-dir", "", "output directory for ui-*.md (defaults to <repo-root>/infrastructure/docs/corpus)")
+	outDir := flag.String("out-dir", "", "output directory for ui-*.md (defaults to <repo-root>/resources/agent/docs)")
 	flag.Parse()
 
 	root, err := filepath.Abs(*repoRoot)
 	if err != nil {
 		fail("resolve repo root: %v", err)
 	}
-	uiMapPath := filepath.Join(root, "infrastructure", "docs", "corpus", "ui-source", "ui-map.json")
+	uiMapPath := filepath.Join(root, "resources", "agent", "docs", "ui-source", "ui-map.json")
 	htmlPath := filepath.Join(root, "frontend", "index.html")
 	jsDir := filepath.Join(root, "frontend", "js")
 	dest := *outDir
 	if dest == "" {
-		dest = filepath.Join(root, "infrastructure", "docs", "corpus")
+		dest = filepath.Join(root, "resources", "agent", "docs")
 	}
 
 	m, err := loadMap(uiMapPath)

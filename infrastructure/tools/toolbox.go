@@ -20,15 +20,16 @@ import (
 func ptrBool(v bool) *bool { return &v }
 
 type Toolbox struct {
-	Skills      application.SkillStore
-	Memory      application.MemoryStore
-	Docs        application.DocsSource
-	MCPServers  application.MCPServerStore
-	Todos       application.ConversationTodoPort
-	Searcher    *searchwire.Searcher // zero-config searcher for web_search + web_fetch
-	Settings    application.SettingsStore
-	Credentials application.CredentialStore
-	MCP         interface {
+	Skills       application.SkillStore
+	Memory       application.MemoryStore
+	Docs         application.DocsSource
+	MCPServers   application.MCPServerStore
+	Todos        application.ConversationTodoPort
+	Searcher     *searchwire.Searcher // zero-config searcher for web_search + web_fetch
+	Settings     application.SettingsStore
+	Credentials  application.CredentialStore
+	AskQuestions *application.AskQuestionService
+	MCP          interface {
 		Connect(ctx context.Context, s *domain.MCPServer) ([]contracts.MCPToolDTO, error)
 		ToolsFor(serverID string) ([]contracts.MCPToolDTO, bool)
 		CallTool(ctx context.Context, serverID, toolName string, args map[string]any) (string, error)
@@ -88,19 +89,21 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "skill_list", Description: "List available skills with their names and descriptions.", InputSchema: obj("object", props("limit", intSchema("Max results, default 100")))},
 		{Name: "skill_search", Description: "Search installed skills by name or description (case-insensitive substring match).", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 50")), "query")},
 		{Name: "skill_read", Description: "Read a skill's full markdown content by name so you can follow its instructions.", InputSchema: obj("object", props("name", str("Skill name (from skill_list or skill_search)")), "name")},
+		{Name: "skill_save", Description: "Create or update a skill. When id is omitted a new skill is created; otherwise the existing skill with that id is updated. Skills should be reusable procedures or domain knowledge, not one-off task notes.", InputSchema: obj("object", props("id", str("Existing skill id to update (omit to create new)"), "name", str("Skill name (lowercase with hyphens, matches folder name)"), "description", str("Short description (max 1024 chars)"), "content", str("Full skill markdown content")), "name", "description", "content")},
 		{Name: "skill_run", Description: "Load a skill's markdown instructions by skill name so you can follow them.", InputSchema: obj("object", props("name", str("Skill name to load")), "name")},
 		{Name: "memory_save", Description: "Save a fact to long-term memory with optional tags.", InputSchema: obj("object", props("content", str("Fact to remember"), "tags", arr("Optional tags")), "content")},
 		{Name: "memory_search", Description: "Search memory entries by substring match over content and tags.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 10")), "query")},
 		{Name: "memory_list", Description: "List all memory entries.", InputSchema: obj("object", nil)},
 		{Name: "memory_delete", Description: "Delete a memory entry by id.", InputSchema: obj("object", props("id", str("Memory entry id")), "id")},
 		{Name: "todo", Description: "Replace the conversation task checklist (full replace, Claude TodoWrite style). Empty items clears the list. The user can delete items from the UI — treat deleted items as gone and do not re-add them.", InputSchema: obj("object", props("items", arrObj("Full replacement list of todo items (max 50)", props("id", str("Stable item id (unique within the list)"), "content", str("Short task description (max 500 chars)"), "status", strEnum("Item status; prefer exactly one in_progress at a time", "pending", "in_progress", "completed")), "id", "content", "status")), "items")},
+		{Name: "ask_question", Description: "Pause and ask the user a structured clarifying question before continuing. Use only for genuine decisions the user must make — not for things you can figure out yourself. The user can answer via options or free text (when allowed). The turn blocks until the user answers or cancels.", InputSchema: obj("object", props("question", str("The question to show the user"), "options", arrObj("Selectable choices (1-8). Mark one default when possible.", props("id", str("Stable option id"), "label", str("Short option label"), "description", str("Optional one-line explanation"), "default", obj("boolean", nil), "icon", str("Optional emoji or short icon glyph"), "image", str("Optional image URL or compact data URI")), "id", "label"), "allow_free_text", obj("boolean", nil), "multi_select", obj("boolean", nil)), "question", "options")},
 		{Name: "docs_search", Description: "Search the NusaShell Light documentation corpus.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 10")), "query")},
 		{Name: "docs_read", Description: "Read a documentation page by id (see docs_search results).", InputSchema: obj("object", props("id", str("Documentation page id")), "id")},
 		{Name: "mcp_list", Description: "List configured MCP servers with their enabled status and runtime state (running/stopped).", InputSchema: obj("object", nil)},
 		{Name: "tool_list", Description: "List tools from a running MCP server by name (names and descriptions, plus optional input schemas). When the server is omitted, lists tools across all running MCP servers.", InputSchema: obj("object", props("server", str("Optional MCP server name; when omitted, lists tools across all running servers")))},
 		{Name: "tool_search", Description: "Search a running MCP server's tools by name or description (case-insensitive token match — any term matches). Returns matching tool names and descriptions.", InputSchema: obj("object", props("server", str("MCP server name"), "query", str("Search query")), "server", "query")},
 		{Name: "tool_schema", Description: "Load one MCP tool's input schema by server and tool name. Useful when you need the exact argument shape before calling an mcp__<server>__<tool> tool.", InputSchema: obj("object", props("server", str("MCP server name"), "tool", str("Tool name within the server")), "server", "tool")},
-		{Name: "read_image", Description: "Load an image from the conversation into your context so you can see it. Pass the attachment name (from a user message) to view that image. When your active model supports vision, the image is attached to your context directly. For non-vision models, the image is described using a vision fallback model and the text description is returned.", InputSchema: obj("object", props("attachment_name", str("Name of the image attachment from a user message in this conversation"), "question", str("Optional question about the image")), "attachment_name")},
+		{Name: "read_image", Description: "Load an image from the conversation into your context so you can see it. Pass file_path (the absolute path shown in the image placeholder). When your active model supports vision, the image is attached to your context directly. For non-vision models, the image is described using a vision fallback model and the text description is returned.", InputSchema: obj("object", props("file_path", str("Absolute path of the image file on disk (shown in the image placeholder)"), "question", str("Optional question about the image")), "file_path")},
 		{Name: "web_search", Description: "Search the web for fresh information. Returns ranked results with title, URL, and snippet from multiple sources (Brave, Startpage, Wikipedia, GitHub). Use this when you need current information, documentation, or research. Follow up with web_fetch on promising URLs for full page content.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results (default 10)")), "query")},
 		{Name: "web_fetch", Description: "Fetch a URL and return readable text (HTML stripped to title + visible text). Use after web_search to read full page content from a result URL. Accepts http/https only.", InputSchema: obj("object", props("url", str("URL to fetch"), "max_bytes", intSchema("Optional max bytes of extracted text (default 2MB)")), "url")},
 	}
@@ -238,6 +241,46 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		}
 		return "", fmt.Errorf("skill %q not found; use skill_list to see available skills", args.Name)
 
+	case name == "skill_save":
+		var args struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Content     string `json:"content"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		name := strings.TrimSpace(args.Name)
+		if name == "" {
+			return "", fmt.Errorf("skill name is required")
+		}
+		if strings.TrimSpace(args.Content) == "" {
+			return "", fmt.Errorf("skill content is required")
+		}
+		var s *domain.Skill
+		if args.ID != "" {
+			existing, err := t.Skills.Get(args.ID)
+			if err != nil {
+				return "", fmt.Errorf("skill %q not found: %w", args.ID, err)
+			}
+			s = existing
+		} else {
+			s = &domain.Skill{
+				ID:     domain.NewULID("skill"),
+				State:  domain.SkillStateActive,
+				Origin: domain.SkillOriginAgent,
+			}
+		}
+		s.Name = name
+		s.Description = strings.TrimSpace(args.Description)
+		s.Content = args.Content
+		s.UpdatedAt = time.Now().UTC()
+		if err := t.Skills.Save(s); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Saved skill %q (id=%s).", s.Name, s.ID), nil
+
 	case name == "memory_save":
 		var args struct {
 			Content string   `json:"content"`
@@ -309,6 +352,9 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 
 	case name == "todo":
 		return t.execTodo(ctx, argsJSON)
+
+	case name == "ask_question":
+		return t.execAskQuestion(ctx, argsJSON)
 
 	case name == "docs_search":
 		var args struct {
@@ -714,6 +760,67 @@ func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error)
 	}
 	b, _ := json.Marshal(out)
 	return string(b), nil
+}
+
+// execAskQuestion pauses the turn and asks the user a structured clarifying
+// question. The tool blocks until the UI answers via agent.ask.answer RPC or
+// the turn is cancelled. Requires a run id and conversation id in the context.
+func (t *Toolbox) execAskQuestion(ctx context.Context, argsJSON []byte) (string, error) {
+	if t.AskQuestions == nil {
+		return "", fmt.Errorf("ask_question is not available in this runtime")
+	}
+	runID := application.RunIDFromContext(ctx)
+	if runID == "" {
+		return "", fmt.Errorf("ask_question requires a running turn context")
+	}
+	conversationID := application.ConversationIDFromContext(ctx)
+	var args struct {
+		Question      string                     `json:"question"`
+		Options       []domain.AskQuestionOption `json:"options"`
+		AllowFreeText *bool                      `json:"allow_free_text"`
+		MultiSelect   *bool                      `json:"multi_select"`
+	}
+	if err := json.Unmarshal(argsJSON, &args); err != nil {
+		return "", fmt.Errorf("invalid args: %w", err)
+	}
+	allowFreeText := true
+	if args.AllowFreeText != nil {
+		allowFreeText = *args.AllowFreeText
+	}
+	multiSelect := false
+	if args.MultiSelect != nil {
+		multiSelect = *args.MultiSelect
+	}
+	req, err := domain.ValidateAskQuestionRequest(args.Question, args.Options, allowFreeText, multiSelect)
+	if err != nil {
+		return "", err
+	}
+	// Generate a tool call ID if not available from context. The tool
+	// execution framework passes the call ID separately; for now we use
+	// a composite key from runID + question hash to avoid collisions.
+	callID := application.ToolCallIDFromContext(ctx)
+	if callID == "" {
+		callID = domain.NewID("ask")
+	}
+	ch, err := t.AskQuestions.Ask(runID, callID, conversationID, req)
+	if err != nil {
+		return "", err
+	}
+	select {
+	case result := <-ch:
+		if !result.OK {
+			return "", fmt.Errorf("%s", result.Answer)
+		}
+		b, _ := json.Marshal(map[string]any{
+			"ok":     true,
+			"via":    result.Via,
+			"answer": result.Answer,
+		})
+		return string(b), nil
+	case <-ctx.Done():
+		t.AskQuestions.Cancel(runID, callID, "Agent turn cancelled")
+		return "", ctx.Err()
+	}
 }
 
 // ---- json schema helpers ----

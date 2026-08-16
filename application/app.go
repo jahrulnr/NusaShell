@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -27,9 +29,12 @@ type App struct {
 	Memory        MemoryStore
 	LearningEdges LearningEdgeStore
 	Todos         ConversationTodoPort
+	AskQuestions  *AskQuestionService
 	MCP           MCPServerStore
+	Plugins       PluginStore
 	Logs          LogStore
 	Settings      SettingsStore
+	Attachments   AttachmentStore
 
 	Docs                        DocsSource
 	Bus                         *Bus
@@ -52,7 +57,7 @@ type App struct {
 	learningMu       sync.Mutex
 	learningSearcher *LearningSearcher
 	graphService     *LearningGraphService
-	LearningReviewer *LearningReviewer
+	ReviewAgent      *BackgroundReviewAgent
 	lifecycle        *LifecycleManager
 	lifecycleCancel  context.CancelFunc
 	// turnsSinceReview tracks turns since the last learning review per
@@ -73,6 +78,10 @@ type App struct {
 	runsMu  sync.Mutex
 	runs    map[string]*TurnRun
 	startMu sync.Mutex
+
+	// Logger is an optional structured logger used for crash recovery
+	// diagnostics from fire-and-forget goroutines. Nil = slog.Default().
+	Logger *slog.Logger
 }
 
 // MCPToolbox gives use cases access to connected MCP servers and their tools.
@@ -203,9 +212,12 @@ type Deps struct {
 	Memory                      MemoryStore
 	LearningEdges               LearningEdgeStore
 	Todos                       ConversationTodoPort
+	AskQuestions                *AskQuestionService
 	MCP                         MCPServerStore
+	Plugins                     PluginStore
 	Logs                        LogStore
 	Settings                    SettingsStore
+	Attachments                 AttachmentStore
 	Docs                        DocsSource
 	Bus                         *Bus
 	Toolbox                     ToolExecutor
@@ -216,6 +228,9 @@ type Deps struct {
 	ModelCatalog                *modelcatalog.Catalog       // optional; nil = skip enrichment from models.dev
 	WorkspacePicker             WorkspacePicker
 	RetrySleeper                RetrySleeper
+	// Logger is an optional structured logger for crash recovery from
+	// fire-and-forget goroutines. Nil = slog.Default().
+	Logger *slog.Logger
 }
 
 func NewApp(deps Deps) *App {
@@ -235,9 +250,12 @@ func NewApp(deps Deps) *App {
 		Memory:                      deps.Memory,
 		LearningEdges:               deps.LearningEdges,
 		Todos:                       deps.Todos,
+		AskQuestions:                deps.AskQuestions,
 		MCP:                         deps.MCP,
+		Plugins:                     deps.Plugins,
 		Logs:                        deps.Logs,
 		Settings:                    deps.Settings,
+		Attachments:                 deps.Attachments,
 		Docs:                        deps.Docs,
 		Bus:                         deps.Bus,
 		Toolbox:                     deps.Toolbox,
@@ -248,13 +266,36 @@ func NewApp(deps Deps) *App {
 		WorkspacePicker:             deps.WorkspacePicker,
 		ModelCatalog:                deps.ModelCatalog,
 		retrySleeper:                deps.RetrySleeper,
+		Logger:                      deps.Logger,
 		runs:                        map[string]*TurnRun{},
 		turnsSinceReview:            map[string]int{},
 	}
-	// Wire the learning reviewer (background extraction after turns).
-	// The graph service is lazy-initialized on first access.
-	if deps.Memory != nil {
-		app.LearningReviewer = NewLearningReviewer(deps.Memory, app.graph())
+	// Wire the background LLM review agent. Uses the conversation's
+	// configured model ("global LLM") with a restricted toolset and the
+	// review prompt (single pass for both memory and skills).
+	app.ReviewAgent = NewBackgroundReviewAgent(app, DefaultReviewSettings())
+	// Wire the ask_question service callback so pending asks emit an
+	// EventAskPending over the bus. The UI renders a question card from
+	// this event and answers via the agent.ask.answer RPC.
+	if app.AskQuestions != nil {
+		app.AskQuestions.SetOnAsk(func(runID, callID, conversationID string, req domain.AskQuestionRequest) {
+			opts := make([]contracts.AskOptionDTO, len(req.Options))
+			for i, o := range req.Options {
+				opts[i] = contracts.AskOptionDTO{
+					ID: o.ID, Label: o.Label, Description: o.Description,
+					Default: o.Default, Icon: o.Icon, Image: o.Image,
+				}
+			}
+			app.Bus.Emit(contracts.EventAskPending, contracts.AskPendingEvent{
+				ConversationID: conversationID,
+				RunID:          runID,
+				ToolCallID:     callID,
+				Question:       req.Question,
+				Options:        opts,
+				AllowFreeText:  req.AllowFreeText,
+				MultiSelect:    req.MultiSelect,
+			})
+		})
 	}
 	// Wire the lifecycle manager (decay + prune). Started by StartLifecycle,
 	// stopped by CloseLifecycle.
@@ -353,15 +394,15 @@ func (a *App) StartLifecycle() {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	a.lifecycleCancel = cancel
-	go a.lifecycle.Run(ctx)
+	a.goSafe("learning", func() { a.lifecycle.Run(ctx) })
 	a.log("info", "learning", "lifecycle manager started (decay=%s prune=%s)", DefaultLifecycleConfig().DecayInterval, DefaultLifecycleConfig().PruneInterval)
 
 	// Subscribe to compaction events: when a conversation is compacted,
 	// flush the learning review for that conversation. Compaction is a
 	// natural checkpoint — the full context is being summarized, so
 	// extracting learnings at the same time is free context-wise.
-	if a.LearningReviewer != nil && a.Bus != nil {
-		go a.subscribeCompactionReview(ctx)
+	if a.ReviewAgent != nil && a.Bus != nil {
+		a.goSafe("learning", func() { a.subscribeCompactionReview(ctx) })
 	}
 }
 
@@ -426,6 +467,28 @@ func (a *App) log(level, source, format string, args ...any) {
 	a.Bus.Emit(contracts.EventLogAppend, contracts.LogAppendEvent{Entry: contracts.LogEntryDTO{
 		ID: e.ID, Time: e.Time.Format(timeRFC3339), Level: e.Level, Source: e.Source, Message: e.Message,
 	}})
+}
+
+// goSafe runs fn in a new goroutine with panic recovery. A panic is logged
+// to both the in-app Logs view (via a.log) and the structured logger (so it
+// is visible even when the UI is closed) and does not crash the process.
+// Use it for fire-and-forget goroutines whose panic would otherwise take
+// down the whole server (agent turns, review agents, background monitors).
+func (a *App) goSafe(source string, fn func()) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				stack := debug.Stack()
+				a.log("error", source, "goroutine panic recovered: %v\n%s", r, stack)
+				logger := a.Logger
+				if logger == nil {
+					logger = slog.Default()
+				}
+				logger.Error("goroutine panic recovered", "source", source, "panic", r, "stack", string(stack))
+			}
+		}()
+		fn()
+	}()
 }
 
 // Dispatch routes an RPC method to its use case. Transport handlers are the
@@ -508,6 +571,18 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 			return nil, rpcErr
 		}
 		return a.handleTurnsActive(req)
+	case contracts.MethodAskAnswer:
+		var req contracts.AskAnswerRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAskAnswer(req)
+	case contracts.MethodAskCancel:
+		var req contracts.AskCancelRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAskCancel(req)
 	case contracts.MethodProvidersList:
 		return a.handleProvidersList()
 	case contracts.MethodProvidersSave:
@@ -628,8 +703,22 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 			return nil, rpcErr
 		}
 		return a.handleMCPServersTest(req)
+	case contracts.MethodMCPServersStop:
+		var req contracts.MCPIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleMCPServersStop(req)
 	case contracts.MethodMCPToolsList:
 		return a.handleMCPToolsList()
+	case contracts.MethodPluginList:
+		return a.handlePluginList()
+	case contracts.MethodPluginUninstall:
+		var req contracts.PluginIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handlePluginUninstall(req)
 	case contracts.MethodMemoryList:
 		return a.handleMemoryList()
 	case contracts.MethodMemorySave:

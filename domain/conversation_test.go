@@ -51,6 +51,31 @@ func TestMessageEstimateTokensFallsBackToFlatFieldsWithoutSteps(t *testing.T) {
 	}
 }
 
+// TestMessageEstimateTokensImageNotCountedByBase64Size: image attachments
+// must not be counted by their base64 data URL length. A 1MB image encodes
+// to ~1.3MB base64, which at chars/4 would be ~330k tokens — far more than
+// any provider actually charges (typically 765-1000 tokens for a 1024x1024
+// image). The estimate must use a resolution-based heuristic instead.
+func TestMessageEstimateTokensImageNotCountedByBase64Size(t *testing.T) {
+	// Simulate a 1MB image as a base64 data URL (~1.3MB of base64 chars).
+	bigBase64 := "data:image/png;base64," + strings.Repeat("A", 1_300_000)
+	msg := Message{
+		Content: "What is this?",
+		Attachments: []Attachment{
+			{Type: "image", Name: "big.png", MediaType: "image/png", DataURL: bigBase64},
+		},
+	}
+	got := msg.EstimateTokens()
+	// "What is this?" = 14 chars = ~4 tokens. Image should add a small
+	// fixed cost (hundreds, not hundreds of thousands).
+	if got > 5000 {
+		t.Fatalf("EstimateTokens() = %d for one image — should be resolution-based (~hundreds), not base64-char-based (~330k)", got)
+	}
+	if got < 100 {
+		t.Fatalf("EstimateTokens() = %d — image should contribute a non-trivial token estimate", got)
+	}
+}
+
 func TestDefaultTitleDoesNotSplitUTF8Rune(t *testing.T) {
 	c := &Conversation{Messages: []Message{{
 		Role:    RoleUser,

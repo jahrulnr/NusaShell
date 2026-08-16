@@ -48,7 +48,7 @@ export async function initSettings() {
   await refresh();
 }
 
-async function refresh() {
+export async function refresh() {
   const [settingsResult, infoResult, modelsResult] = await Promise.allSettled([
     rpc('settings.get'),
     rpc('app.info', {}, { timeoutMs: 4000 }),
@@ -61,6 +61,7 @@ async function refresh() {
     document.getElementById('settings-prompt-caching').checked = settings.prompt_caching === true;
     document.getElementById('settings-max-tool-rounds').value = settings.max_tool_rounds ?? 8;
     document.getElementById('settings-max-input-tokens').value = settings.max_input_tokens ?? 200000;
+    document.getElementById('settings-compaction-threshold').value = settings.compaction_threshold ?? 0;
     document.getElementById('settings-max-output-tokens').value = settings.max_output_tokens ?? 65536;
     setOptionalNumber('settings-temperature', settings.temperature);
     setOptionalNumber('settings-top-p', settings.top_p);
@@ -74,6 +75,7 @@ async function refresh() {
     state.webAnswerProvider = settings.web_answer_provider ?? '';
     state.webAnswerModel = settings.web_answer_model ?? '';
     document.getElementById('settings-learning-threshold').value = settings.learning_review_threshold ?? 50;
+    document.getElementById('settings-auto-continues').value = settings.max_auto_continues ?? 10;
     // Web answer: set provider dropdown and model field. API key is write-only.
     webAnswerProviderSelect.setSelected([state.webAnswerProvider || '']);
     document.getElementById('settings-web-answer-model').value = state.webAnswerModel;
@@ -195,6 +197,11 @@ async function save() {
     setStatus('Max input tokens must be between 1,000 and 2,000,000.', true);
     return;
   }
+  const compactionThreshold = Number(document.getElementById('settings-compaction-threshold').value);
+  if (!Number.isInteger(compactionThreshold) || compactionThreshold < 0 || compactionThreshold > 2000000) {
+    setStatus('Compaction threshold must be between 0 and 2,000,000 (0 = auto).', true);
+    return;
+  }
   if (!Number.isInteger(maxOutputTokens) || maxOutputTokens < 256 || maxOutputTokens > 1000000) {
     setStatus('Max output tokens must be between 256 and 1,000,000.', true);
     return;
@@ -210,6 +217,11 @@ async function save() {
       setStatus('Learning review threshold must be between 0 and 1,000.', true);
       return;
     }
+    const maxAutoContinues = Number(document.getElementById('settings-auto-continues').value);
+    if (!Number.isInteger(maxAutoContinues) || maxAutoContinues < 0 || maxAutoContinues > 10000) {
+      setStatus('Max auto-continues must be between 0 and 10,000 (0 = unlimited).', true);
+      return;
+    }
     const webAnswerProvider = webAnswerProviderSelect.getSelected()?.[0] ?? '';
     const webAnswerModel = document.getElementById('settings-web-answer-model')?.value?.trim() ?? '';
     const webAnswerAPIKey = document.getElementById('settings-web-answer-api-key')?.value?.trim() ?? '';
@@ -218,6 +230,7 @@ async function save() {
       prompt_caching: document.getElementById('settings-prompt-caching').checked,
       max_tool_rounds: maxToolRounds,
       max_input_tokens: maxInputTokens,
+      compaction_threshold: compactionThreshold,
       max_output_tokens: maxOutputTokens,
       embedding_provider_id: embProviderId || null,
       embedding_model_id: embModelId || null,
@@ -227,6 +240,7 @@ async function save() {
       web_answer_model: webAnswerModel || null,
       web_answer_api_key: webAnswerAPIKey || null,
       learning_review_threshold: learningThreshold,
+      max_auto_continues: maxAutoContinues,
       temperature: optionalNumber('settings-temperature'),
       top_p: optionalNumber('settings-top-p'),
       top_k: optionalNumber('settings-top-k'),

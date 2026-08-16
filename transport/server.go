@@ -19,22 +19,28 @@ type Server struct {
 	Logger *slog.Logger
 	Static http.Handler
 	Dev    bool
+	mux    *http.ServeMux
 }
 
 // New builds a Server with all routes wired.
 func New(app *application.App, logger *slog.Logger, static http.Handler, dev bool) *Server {
-	return &Server{App: app, Logger: logger, Static: static, Dev: dev}
-}
-
-func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
+	s := &Server{App: app, Logger: logger, Static: static, Dev: dev, mux: mux}
 	mux.HandleFunc("POST /rpc", s.handleRPC)
 	mux.HandleFunc("GET /events", s.handleSSE)
 	mux.HandleFunc("GET /ws", s.handleWS)
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		s.Static.ServeHTTP(w, r)
 	})
-	return logRequests(s.Logger, mux)
+	return s
+}
+
+// RoutesMux returns the underlying mux so callers can register
+// additional routes (e.g. plugin handlers) before serving.
+func (s *Server) RoutesMux() *http.ServeMux { return s.mux }
+
+func (s *Server) Routes() http.Handler {
+	return logRequests(s.Logger, s.mux)
 }
 
 // maxRPCBodyBytes fits the documented attachment contract: four 4 MiB files

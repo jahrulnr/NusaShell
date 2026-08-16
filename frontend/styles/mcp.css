@@ -8,9 +8,12 @@
   background: var(--panel);
   border: 1px solid var(--border-soft);
   border-radius: 12px;
-  transition: border-color .15s;
+  transition: border-color .15s, box-shadow .15s;
+  cursor: pointer;
 }
 .mcp-row:hover { border-color: var(--border); }
+.mcp-row:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.mcp-row.is-selected { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
 .mcp-row-icon {
   width: 40px;
   height: 40px;
@@ -24,7 +27,18 @@
   font: 600 15px var(--font-mono);
 }
 .mcp-row-info { flex: 1; min-width: 0; }
-.mcp-row-name { font-size: 14px; font-weight: 600; }
+.mcp-row-name { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.mcp-row-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent-ink);
+  background: var(--accent);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.mcp-row-plugin { border-left: 2px solid var(--accent); }
 .mcp-row-meta { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; font-family: var(--font-mono); }
 .mcp-row-tools { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
 .mcp-tool-chip { border-radius: 4px; padding: 2px 6px; background: #142238; color: #63a5ff; font: 8.5px var(--font-mono); }

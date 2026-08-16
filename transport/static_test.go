@@ -27,7 +27,7 @@ func TestFrontendServed(t *testing.T) {
 	if !strings.Contains(html, "<title>NusaShell</title>") {
 		t.Fatalf("index.html missing title")
 	}
-	for _, needle := range []string{"data-view=\"agent\"", "data-view=\"skills\"", "data-view=\"mcp\"", "data-view=\"providers\"", "data-view=\"logs\"", "data-view=\"settings\""} {
+	for _, needle := range []string{"data-view=\"agent\"", "data-view=\"skills\"", "data-view=\"plugins\"", "data-view=\"providers\"", "data-view=\"logs\"", "data-view=\"settings\""} {
 		if !strings.Contains(html, needle) {
 			t.Fatalf("index.html missing %s", needle)
 		}
@@ -69,7 +69,7 @@ func TestFrontendAssets(t *testing.T) {
 	app.Body.Close()
 	for _, mod := range []string{
 		"./rpc.js", "./views/agent.js", "./views/agent/render.js", "./views/agent/composer.js", "./views/agent/model-picker.js",
-		"./views/skills.js", "./views/mcp.js", "./views/providers.js", "./views/logs.js", "./views/settings.js", "./ui.js", "./markdown.js",
+		"./views/skills.js", "./views/plugins.js", "./views/plugins-model.js", "./views/providers.js", "./views/logs.js", "./views/settings.js", "./ui.js", "./markdown.js",
 	} {
 		ref := strings.TrimPrefix(mod, "./")
 		resp, err := http.Get(h.server.URL + "/js/" + ref)

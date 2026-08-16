@@ -35,6 +35,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	// writer: forward bus events to the socket until the subscription
 	// closes or the request context is cancelled.
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				s.Logger.Error("ws event writer panic recovered", "panic", r)
+			}
+		}()
 		for {
 			select {
 			case <-ctx.Done():

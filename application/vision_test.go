@@ -1,6 +1,7 @@
 package application
 
 import (
+	"strings"
 	"testing"
 
 	"nusashell/domain"
@@ -13,7 +14,7 @@ func TestChatMessagesStripsImagesForNonVisionModel(t *testing.T) {
 			Role:    domain.RoleUser,
 			Content: "What's in this image?",
 			Attachments: []domain.Attachment{
-				{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,iVBORw0KGgo="},
+				{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,iVBORw0KGgo=", FilePath: "/data/attachments/c1/cat.png"},
 				{Type: "text", Name: "note.txt", MediaType: "text/plain", Content: "see image"},
 			},
 		},
@@ -49,6 +50,36 @@ func TestChatMessagesStripsImagesForNonVisionModel(t *testing.T) {
 	}
 	if !containsImageOmissionNote(userMsg.Content) {
 		t.Errorf("content should contain image omission placeholder, got: %q", userMsg.Content)
+	}
+	// The placeholder must include the absolute file path and tell the model
+	// to call read_image with file_path.
+	if !strings.Contains(userMsg.Content, "/data/attachments/c1/cat.png") {
+		t.Errorf("placeholder should include absolute file path, got: %q", userMsg.Content)
+	}
+	if !strings.Contains(userMsg.Content, "read_image") {
+		t.Errorf("placeholder should mention read_image tool, got: %q", userMsg.Content)
+	}
+}
+
+func TestChatMessagesPlaceholderIncludesFilePath(t *testing.T) {
+	c := &domain.Conversation{Messages: []domain.Message{
+		{
+			ID:      "u1",
+			Role:    domain.RoleUser,
+			Content: "What's in this image?",
+			Attachments: []domain.Attachment{
+				{Type: "image", Name: "photo.jpg", MediaType: "image/jpeg", DataURL: "data:image/jpeg;base64,/9j/4AAQ=", FilePath: "/home/user/.config/nusashell-light/attachments/conv_1/photo.jpg"},
+			},
+		},
+		{ID: "a1", Role: domain.RoleAssistant, Content: "ok", Status: domain.StatusDone},
+	}}
+
+	got := chatMessages(c, "", false)
+	userMsg := got[0]
+	// The placeholder must include the absolute file path so file-based
+	// tools can access the image directly.
+	if !strings.Contains(userMsg.Content, "/home/user/.config/nusashell-light/attachments/conv_1/photo.jpg") {
+		t.Errorf("placeholder should include absolute file path, got: %q", userMsg.Content)
 	}
 }
 

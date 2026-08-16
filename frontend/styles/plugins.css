@@ -1,0 +1,73 @@
+/* ============ Plugins catalog (native MCP + MCP plugins) ============ */
+.plugin-table {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.plugin-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+  font: inherit;
+}
+.plugin-row:hover { border-color: var(--border); background: var(--panel-alt); }
+.plugin-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.plugin-row.is-selected { border-color: var(--accent); background: var(--accent-soft); }
+.plugin-row-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: 600 15px var(--font-mono);
+}
+.plugin-row-icon-plugin { background: var(--panel-raised); }
+.plugin-row-info { flex: 1; min-width: 0; }
+.plugin-row-name { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
+.plugin-row-badge {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.plugin-row-meta { margin-top: 2px; color: var(--text-faint); font: 11.5px var(--font-mono); overflow-wrap: anywhere; }
+.plugin-row-tools { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.plugin-tool-chip { padding: 2px 6px; border-radius: 4px; background: #142238; color: #63a5ff; font: 8.5px var(--font-mono); }
+.plugin-row-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.plugin-row-state.connected { color: var(--green); background: rgba(47,191,113,.1); }
+.plugin-row-state.error { color: var(--red); background: rgba(239,75,95,.1); }
+.plugin-row-state.idle { color: var(--text-faint); background: var(--panel-alt); }
+
+@media (max-width: 620px) {
+  .plugin-row { align-items: flex-start; }
+  .plugin-row-state { margin-left: auto; }
+  .plugin-row-tools { display: none; }
+}

@@ -24,6 +24,7 @@ import (
 	"nusashell/infrastructure/docs"
 	"nusashell/infrastructure/jsonstore"
 	"nusashell/infrastructure/mcpclient"
+	"nusashell/infrastructure/pluginfs"
 	"nusashell/infrastructure/sqlitestore"
 	"nusashell/infrastructure/tools"
 
@@ -495,13 +496,14 @@ func (f *fakeLLM) serveAnthropic(w http.ResponseWriter, r *http.Request, body []
 // ---- harness ----
 
 type harness struct {
-	t      *testing.T
-	app    *application.App
-	server *httptest.Server
-	store  *jsonstore.Store
-	creds  *sqlitestore.CredentialStore
-	llm    *fakeLLM
-	mcpBin string
+	t       *testing.T
+	app     *application.App
+	server  *httptest.Server
+	store   *jsonstore.Store
+	creds   *sqlitestore.CredentialStore
+	llm     *fakeLLM
+	mcpBin  string
+	plugins *pluginfs.Store
 }
 
 var fakemcpBin string
@@ -572,6 +574,10 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 	}
 	mcpManager := mcpclient.NewManager()
 	bus := application.NewBus()
+	pluginStore, err := pluginfs.New(filepath.Join(dataDir, "plugins"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	app := application.NewApp(application.Deps{
 		Version:       "test",
 		DataDir:       dataDir,
@@ -585,6 +591,7 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 		Settings:      &jsonstore.Settings{S: store},
 		Docs:          docSource,
 		Bus:           bus,
+		Plugins:       pluginStore,
 		Toolbox: &tools.Toolbox{
 			Skills:     &jsonstore.Skills{S: store},
 			Memory:     &jsonstore.Memory{S: store},
@@ -603,7 +610,7 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 	httpSrv := httptest.NewServer(srv.Routes())
 	t.Cleanup(httpSrv.Close)
 	t.Cleanup(app.Close)
-	return &harness{t: t, app: app, server: httpSrv, store: store, creds: creds, llm: llm, mcpBin: fakemcpBin}
+	return &harness{t: t, app: app, server: httpSrv, store: store, creds: creds, llm: llm, mcpBin: fakemcpBin, plugins: pluginStore}
 }
 
 // rpc performs a POST /rpc call and decodes the envelope.

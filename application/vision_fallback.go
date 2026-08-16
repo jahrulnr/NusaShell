@@ -167,7 +167,13 @@ func (a *App) describeOneImage(ctx context.Context, adapter AIProvider, model st
 	if err != nil {
 		return "", err
 	}
+	// Reasoning models (e.g. dots-3-note, DeepSeek) may put the description
+	// in the reasoning field instead of content. Fall back to reasoning when
+	// content is empty so the vision fallback still produces a description.
 	description := strings.TrimSpace(resp.Content)
+	if description == "" {
+		description = strings.TrimSpace(resp.Reasoning)
+	}
 	if description == "" {
 		return "", fmt.Errorf("empty description from vision model")
 	}

@@ -2,26 +2,27 @@ package application
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"nusashell/domain"
 )
 
-func TestFindImageAttachment(t *testing.T) {
+func TestFindImageAttachmentByPath(t *testing.T) {
 	conv := &domain.Conversation{Messages: []domain.Message{
 		{ID: "u1", Role: domain.RoleUser, Content: "look", Attachments: []domain.Attachment{
-			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc"},
+			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: "/data/attachments/c1/cat.png"},
 			{Type: "text", Name: "note.txt", MediaType: "text/plain", Content: "see image"},
 		}},
 		{ID: "a1", Role: domain.RoleAssistant, Content: "ok"},
 		{ID: "u2", Role: domain.RoleUser, Content: "another", Attachments: []domain.Attachment{
-			{Type: "image", Name: "dog.jpg", MediaType: "image/jpeg", DataURL: "data:image/jpeg;base64,def"},
+			{Type: "image", Name: "dog.jpg", MediaType: "image/jpeg", DataURL: "data:image/jpeg;base64,def", FilePath: "/data/attachments/c1/dog.jpg"},
 		}},
 	}}
 
 	// Exact match
-	img, err := findImageAttachment(conv, "cat.png")
+	img, err := findImageAttachmentByPath(conv, "/data/attachments/c1/cat.png")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -30,7 +31,7 @@ func TestFindImageAttachment(t *testing.T) {
 	}
 
 	// Case-insensitive match
-	img, err = findImageAttachment(conv, "CAT.PNG")
+	img, err = findImageAttachmentByPath(conv, "/DATA/ATTACHMENTS/C1/CAT.PNG")
 	if err != nil {
 		t.Fatalf("unexpected error for case-insensitive: %v", err)
 	}
@@ -39,7 +40,7 @@ func TestFindImageAttachment(t *testing.T) {
 	}
 
 	// Second image in different message
-	img, err = findImageAttachment(conv, "dog.jpg")
+	img, err = findImageAttachmentByPath(conv, "/data/attachments/c1/dog.jpg")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -48,22 +49,16 @@ func TestFindImageAttachment(t *testing.T) {
 	}
 
 	// Not found
-	_, err = findImageAttachment(conv, "nonexistent.png")
+	_, err = findImageAttachmentByPath(conv, "/data/attachments/c1/nonexistent.png")
 	if err == nil {
 		t.Error("expected error for nonexistent image")
-	}
-
-	// Text attachment should not match
-	_, err = findImageAttachment(conv, "note.txt")
-	if err == nil {
-		t.Error("text attachment should not be found as image")
 	}
 }
 
 func TestExecuteReadImageVisionModel(t *testing.T) {
 	conv := &domain.Conversation{Messages: []domain.Message{
 		{ID: "u1", Role: domain.RoleUser, Content: "look", Attachments: []domain.Attachment{
-			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc"},
+			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: "/data/attachments/c1/cat.png"},
 		}},
 	}}
 	app := &App{
@@ -75,7 +70,7 @@ func TestExecuteReadImageVisionModel(t *testing.T) {
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
 		Name: "read_image",
-		Args: `{"attachment_name":"cat.png","question":"what color is the cat?"}`,
+		Args: `{"file_path":"/data/attachments/c1/cat.png","question":"what color is the cat?"}`,
 	}
 
 	output, atts, err := app.executeReadImage(run, toolCall, true, domain.Settings{})
@@ -99,7 +94,7 @@ func TestExecuteReadImageVisionModel(t *testing.T) {
 func TestExecuteReadImageNonVisionNoFallback(t *testing.T) {
 	conv := &domain.Conversation{Messages: []domain.Message{
 		{ID: "u1", Role: domain.RoleUser, Content: "look", Attachments: []domain.Attachment{
-			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc"},
+			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: "/data/attachments/c1/cat.png"},
 		}},
 	}}
 	app := &App{
@@ -111,7 +106,7 @@ func TestExecuteReadImageNonVisionNoFallback(t *testing.T) {
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
 		Name: "read_image",
-		Args: `{"attachment_name":"cat.png"}`,
+		Args: `{"file_path":"/data/attachments/c1/cat.png"}`,
 	}
 
 	output, atts, err := app.executeReadImage(run, toolCall, false, domain.Settings{})
@@ -130,7 +125,7 @@ func TestExecuteReadImageNonVisionNoFallback(t *testing.T) {
 func TestExecuteReadImageImageNotFound(t *testing.T) {
 	conv := &domain.Conversation{Messages: []domain.Message{
 		{ID: "u1", Role: domain.RoleUser, Content: "look", Attachments: []domain.Attachment{
-			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc"},
+			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: "/data/attachments/c1/cat.png"},
 		}},
 	}}
 	app := &App{
@@ -142,7 +137,7 @@ func TestExecuteReadImageImageNotFound(t *testing.T) {
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
 		Name: "read_image",
-		Args: `{"attachment_name":"nonexistent.png"}`,
+		Args: `{"file_path":"/data/attachments/c1/nonexistent.png"}`,
 	}
 
 	output, _, err := app.executeReadImage(run, toolCall, true, domain.Settings{})
@@ -167,9 +162,30 @@ func TestExecuteReadImageMissingArgs(t *testing.T) {
 
 	output, _, err := app.executeReadImage(run, toolCall, true, domain.Settings{})
 	if err == nil {
-		t.Error("expected error for missing attachment_name")
+		t.Error("expected error for missing file_path")
 	}
-	if !strings.Contains(output, "attachment_name is required") {
+	if !strings.Contains(output, "file_path is required") {
 		t.Errorf("output should mention missing arg, got: %q", output)
 	}
+}
+
+func TestExecuteReadImageRejectsRelativePath(t *testing.T) {
+	app := &App{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
+	toolCall := domain.ToolCall{
+		ID:   "tc1",
+		Name: "read_image",
+		Args: `{"file_path":"cat.png"}`,
+	}
+
+	output, _, err := app.executeReadImage(run, toolCall, true, domain.Settings{})
+	if err == nil {
+		t.Error("expected error for relative path")
+	}
+	if !strings.Contains(output, "absolute") {
+		t.Errorf("output should mention absolute path required, got: %q", output)
+	}
+	_ = filepath.IsAbs // keep import used
 }

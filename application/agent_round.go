@@ -60,9 +60,9 @@ func (a *App) toolDefinitions() []ToolDef {
 	return definitions
 }
 
-func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, supportsVision bool) (streamedTurnRound, error) {
+func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, supportsVision bool, systemPromptSuffix string) (streamedTurnRound, error) {
 	for retry := 1; ; retry++ {
-		roundResult, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, maxTokens, injectHydration, promptCache, supportsVision)
+		roundResult, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, maxTokens, injectHydration, promptCache, supportsVision, systemPromptSuffix)
 		if err == nil || retry >= maxProviderAttempts || roundResult.Content != "" || roundResult.Reasoning != "" {
 			return roundResult, err
 		}
@@ -92,12 +92,15 @@ func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *do
 	}
 }
 
-func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, supportsVision bool) (streamedTurnRound, error) {
+func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, supportsVision bool, systemPromptSuffix string) (streamedTurnRound, error) {
 	var content strings.Builder
 	var reasoning strings.Builder
 	system := buildSystemPrompt(conversation)
 	if continuation {
 		system += "\n\nThe immediately preceding assistant response was interrupted by a transient upstream failure. Continue it from exactly where it stopped. Do not repeat prior text."
+	}
+	if systemPromptSuffix != "" {
+		system += "\n\n" + systemPromptSuffix
 	}
 	// Persist the synthetic runtime-hydration transcript (runtime_context,
 	// memory, skill_list, mcp_list, tool_list, todo_list) to the conversation
@@ -326,7 +329,10 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 		if toolCall.Name == "read_image" {
 			output, outputAttachments, err = a.executeReadImage(run, toolCall, supportsVision, settings)
 		} else {
-			output, err = a.Toolbox.Execute(WithConversationID(run.Ctx, run.ConversationID), toolCall.Name, []byte(toolCall.Args))
+			toolCtx := WithConversationID(run.Ctx, run.ConversationID)
+			toolCtx = WithRunID(toolCtx, run.ID)
+			toolCtx = WithToolCallID(toolCtx, toolCall.ID)
+			output, err = a.Toolbox.Execute(toolCtx, toolCall.Name, []byte(toolCall.Args))
 		}
 		status := domain.ToolOK
 		if err != nil {
@@ -405,7 +411,7 @@ func (a *App) appendTurnAssistant(conversationID string) (*domain.Conversation, 
 	return conversation, next.ID, nil
 }
 
-func (a *App) finishTurn(run *TurnRun, messageID, model string, usage ChatUsage) error {
+func (a *App) finishTurn(run *TurnRun, messageID, model string, usage ChatUsage, autoContinueIndex int) error {
 	conversation, err := a.Conversations.Get(run.ConversationID)
 	if err != nil {
 		return err
@@ -415,12 +421,37 @@ func (a *App) finishTurn(run *TurnRun, messageID, model string, usage ChatUsage)
 	if err := a.Conversations.Save(conversation); err != nil {
 		return err
 	}
+
+	// Compute the outer multi-turn auto-continue decision. Only attached
+	// when a todo port is configured; failed/cancelled paths omit it.
+	var autoContinue *contracts.AutoContinueDTO
+	if a.Todos != nil {
+		items := a.Todos.Get(run.ConversationID)
+		lastText := lastAssistantText(conversation, messageID)
+		decision := domain.DecideAutoContinue(domain.AutoContinueInput{
+			Items:             items,
+			AutoContinueIndex: autoContinueIndex,
+			MaxAutoContinues:  a.Settings.Get().MaxAutoContinues,
+			TurnOK:            true,
+			HasConversation:   true,
+			TurnText:          lastText,
+		})
+		autoContinue = &contracts.AutoContinueDTO{
+			ShouldContinue:   decision.ShouldContinue,
+			OpenTodoCount:    decision.OpenTodoCount,
+			ContinuesUsed:    decision.ContinuesUsed,
+			MaxAutoContinues: decision.MaxAutoContinues,
+			Reason:           string(decision.Reason),
+		}
+	}
+
 	a.Bus.Emit(contracts.EventTurnDone, contracts.TurnDoneEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, MessageID: messageID, Model: model,
 		Usage: &contracts.UsageDTO{
 			InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
 			CacheRead: usage.CacheRead, CacheWrite: usage.CacheWrite,
 		},
+		AutoContinue: autoContinue,
 	})
 	a.log("info", "agent", "turn finished: %s (in %d / out %d)", run.ID, usage.InputTokens, usage.OutputTokens)
 
@@ -435,11 +466,23 @@ func (a *App) finishTurn(run *TurnRun, messageID, model string, usage ChatUsage)
 	return nil
 }
 
+// lastAssistantText returns the visible text content of the assistant message
+// with the given ID. Used by the auto-continue policy to detect whether the
+// turn ended with a question (which means the agent is waiting for the user).
+func lastAssistantText(c *domain.Conversation, messageID string) string {
+	for i := range c.Messages {
+		if c.Messages[i].ID == messageID && c.Messages[i].Role == domain.RoleAssistant {
+			return c.Messages[i].Content
+		}
+	}
+	return ""
+}
+
 // incrementTurnCounter bumps the per-conversation turn counter and
 // triggers a learning review if the threshold is reached. The threshold
 // is read from settings (default 50, 0 disables turn-based review).
 func (a *App) incrementTurnCounter(conversationID string) {
-	if a.LearningReviewer == nil {
+	if a.ReviewAgent == nil {
 		return
 	}
 	threshold := a.Settings.Get().LearningReviewThreshold
@@ -457,52 +500,20 @@ func (a *App) incrementTurnCounter(conversationID string) {
 }
 
 // flushLearningReview resets the turn counter for a conversation and
-// fires a background review over all accumulated messages since the
-// last review. Called when the threshold is reached or when a
-// compaction event fires (whichever comes first).
+// fires a background LLM review over the recent transcript. Called when
+// the threshold is reached or when a compaction event fires (whichever
+// comes first). The review uses the conversation's configured model
+// (the "global LLM") with a restricted toolset and the review
+// prompt. It is fire-and-forget — it never blocks or fails the parent
+// turn.
 func (a *App) flushLearningReview(conversationID string) {
 	a.learningMu.Lock()
 	a.turnsSinceReview[conversationID] = 0
 	a.learningMu.Unlock()
-
-	conversation, err := a.Conversations.Get(conversationID)
-	if err != nil {
+	if a.ReviewAgent == nil {
 		return
 	}
-	// Extract from the full conversation — the reviewer's dedup logic
-	// handles repeats. This catches signals that were spread across
-	// multiple turns, not just the last one.
-	var userMsgs, assistantMsgs []string
-	for _, m := range conversation.Messages {
-		switch m.Role {
-		case domain.RoleUser:
-			userMsgs = append(userMsgs, m.Content)
-		case domain.RoleAssistant:
-			assistantMsgs = append(assistantMsgs, m.Content)
-		}
-	}
-	combined := joinMessages(userMsgs) + "\n---\n" + joinMessages(assistantMsgs)
-	if a.Trajectory != nil {
-		a.Trajectory.Record("review", map[string]interface{}{
-			"conversation": conversationID,
-			"user_msgs":    len(userMsgs),
-			"asst_msgs":    len(assistantMsgs),
-		})
-	}
-	a.ReviewTurnAsync(context.Background(), conversationID, combined, combined)
-}
-
-// joinMessages concatenates messages with newlines for batch extraction.
-func joinMessages(msgs []string) string {
-	if len(msgs) == 0 {
-		return ""
-	}
-	out := ""
-	for i, m := range msgs {
-		if i > 0 {
-			out += "\n"
-		}
-		out += m
-	}
-	return out
+	a.goSafe("learning", func() {
+		a.ReviewAgent.RunReview(context.Background(), conversationID)
+	})
 }

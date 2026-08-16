@@ -49,6 +49,13 @@ type SkillStore interface {
 	Delete(id string) error
 }
 
+// PluginStore reads installed plugins from the filesystem.
+type PluginStore interface {
+	List() ([]*domain.Plugin, error)
+	Get(id string) (*domain.Plugin, error)
+	Uninstall(id string) error
+}
+
 type MemoryStore interface {
 	List() []*domain.MemoryEntry
 	Save(e *domain.MemoryEntry) error
@@ -87,6 +94,16 @@ type LogStore interface {
 type SettingsStore interface {
 	Get() domain.Settings
 	Set(s domain.Settings) error
+}
+
+// AttachmentStore saves image/file attachments to disk so file-based tools
+// (shell, python, etc.) can access them by absolute path. Text attachments
+// are not saved (they stay inline).
+type AttachmentStore interface {
+	// Save writes the attachment data to disk under <root>/<conversationID>/
+	// and returns the absolute path. Only image and file attachments are
+	// saved; text attachments are skipped (returns "").
+	Save(conversationID string, att domain.Attachment) (string, error)
 }
 
 // WorkspacePicker is the host-native directory chooser. It lives behind an

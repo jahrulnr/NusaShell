@@ -25,8 +25,8 @@ func TestIncrementTurnCounterBelowThreshold(t *testing.T) {
 		turnsSinceReview: map[string]int{},
 		Settings:         &fakeSettingsStoreWithThreshold{threshold: 5},
 		Memory:           &fakeMemoryStore{},
-		LearningReviewer: NewLearningReviewer(&fakeMemoryStore{}, nil),
 	}
+	app.ReviewAgent = NewBackgroundReviewAgent(app, DefaultReviewSettings())
 	for i := 0; i < 4; i++ {
 		app.incrementTurnCounter("conv_1")
 	}
@@ -40,9 +40,9 @@ func TestIncrementTurnCounterAtThresholdFlushes(t *testing.T) {
 		turnsSinceReview: map[string]int{},
 		Settings:         &fakeSettingsStoreWithThreshold{threshold: 3},
 		Memory:           &fakeMemoryStore{},
-		LearningReviewer: NewLearningReviewer(&fakeMemoryStore{}, nil),
 		Conversations:    &fakeConversationStore{},
 	}
+	app.ReviewAgent = NewBackgroundReviewAgent(app, DefaultReviewSettings())
 	for i := 0; i < 3; i++ {
 		app.incrementTurnCounter("conv_1")
 	}
@@ -56,8 +56,8 @@ func TestIncrementTurnCounterDisabled(t *testing.T) {
 		turnsSinceReview: map[string]int{},
 		Settings:         &fakeSettingsStoreWithThreshold{threshold: 0},
 		Memory:           &fakeMemoryStore{},
-		LearningReviewer: NewLearningReviewer(&fakeMemoryStore{}, nil),
 	}
+	app.ReviewAgent = NewBackgroundReviewAgent(app, DefaultReviewSettings())
 	for i := 0; i < 100; i++ {
 		app.incrementTurnCounter("conv_1")
 	}

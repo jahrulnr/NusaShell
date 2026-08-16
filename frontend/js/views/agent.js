@@ -20,6 +20,7 @@ import {
   toolTerminalMeta,
   toolTerminalOutput,
 } from './agent/render.js';
+import { createAskCard, sealAskCard, cancelAskCard } from './ask-card.js';
 
 const state = {
   conversations: [],
@@ -909,6 +910,10 @@ function bindEvents() {
     const run = getRunOrQueue('agent.tool.started', payload);
     if (!run) return;
     if (conversation_id !== state.activeId) return;
+    // ask_question renders as an ask card (not a tool terminal). The card
+    // is created when agent.ask.pending fires with the validated args.
+    // Skip the tool terminal here to avoid a double card.
+    if (name === 'ask_question') return;
     run.strip.hidden = false;
     const job = renderToolJob({ name, args: args ?? {}, status: 'running' });
     run.toolJobs.set(tool_call_id, job);
@@ -927,10 +932,18 @@ function bindEvents() {
     }, 1000);
   });
   on('agent.tool.completed', (payload) => {
-    const { tool_call_id, status, output, conversation_id } = payload;
+    const { tool_call_id, name, status, output, conversation_id } = payload;
     const run = getRunOrQueue('agent.tool.completed', payload);
     if (!run) return;
     if (conversation_id !== state.activeId) return;
+    // ask_question: the ask card is already sealed by agent.ask.answered
+    // (or agent.ask.cancelled). Skip the tool terminal update — the ask
+    // card IS the tool card, there's no terminal to update.
+    if (name === 'ask_question') {
+      const job = run.toolJobs.get(tool_call_id);
+      if (job?._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
+      return;
+    }
     const job = run.toolJobs.get(tool_call_id);
     if (!job) return;
     // Clear the elapsed timer — the final duration stays displayed.
@@ -985,6 +998,54 @@ function bindEvents() {
     endTurn(run_id);
     toast(message || 'Turn failed', 'error');
     if (conversation_id === state.activeId) refreshActiveConversation();
+  });
+  on('agent.auto_continue', (payload) => {
+    const { conversation_id, decision } = payload;
+    if (conversation_id !== state.activeId) return;
+    const status = document.getElementById('agent-provider-status');
+    if (!status) return;
+    const { continues_used, max_auto_continues } = decision || {};
+    const label = max_auto_continues === 0
+      ? `Continuing tasks… (${continues_used})`
+      : `Continuing tasks… (${continues_used}/${max_auto_continues})`;
+    status.textContent = label;
+    status.classList.add('is-running');
+  });
+  on('agent.ask.pending', (payload) => {
+    const { conversation_id, run_id, tool_call_id, question, options, allow_free_text, multi_select } = payload;
+    if (conversation_id !== state.activeId) return;
+    const run = state.runs.get(run_id);
+    if (!run) return;
+    // The ask card replaces the tool terminal card entirely (matching
+    // Electron's createStreamingToolCard). It lives in the tool strip,
+    // not nested inside a tool terminal <details>.
+    run.strip.hidden = false;
+    const card = createAskCard(tool_call_id, { question, options, allow_free_text, multi_select }, {
+      runId: run_id,
+      onSubmit: (err) => toast(err instanceof Error ? err.message : 'Could not send answer', 'error'),
+      onStop: () => rpc('agent.turns.stop', { run_id }).catch(() => {}),
+    });
+    run.toolJobs.set(tool_call_id, card);
+    run.strip.append(card);
+    card.focus();
+    scrollToBottom();
+  });
+  on('agent.ask.answered', (payload) => {
+    const { run_id, tool_call_id, answer, via } = payload;
+    const run = state.runs.get(run_id);
+    if (!run) return;
+    // The ask card is stored in toolJobs (not in the bubble).
+    const card = run.toolJobs.get(tool_call_id);
+    if (!card || !card.classList?.contains('agent-ask-card')) return;
+    sealAskCard(card, { ok: true, answer, via, optionIds: payload.option_ids || [] });
+  });
+  on('agent.ask.cancelled', (payload) => {
+    const { run_id, tool_call_id, reason } = payload;
+    const run = state.runs.get(run_id);
+    if (!run) return;
+    const card = run.toolJobs.get(tool_call_id);
+    if (!card || !card.classList?.contains('agent-ask-card')) return;
+    cancelAskCard(card, reason);
   });
   on('agent.compacted', ({ conversation_id, summary }) => {
     if (conversation_id !== state.activeId) return;
@@ -1173,6 +1234,14 @@ export async function openConversationExternal(id) {
   if (backendIsOffline()) return;
   await refreshConversations();
   await openConversation(id);
+}
+
+// refresh reloads the conversation list without disrupting the active
+// conversation thread (which is kept live by WS events). Called when
+// the user navigates back to the Agent view.
+export async function refresh() {
+  if (backendIsOffline()) return;
+  await refreshConversations();
 }
 
 // ---------- status ----------

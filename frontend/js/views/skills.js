@@ -18,7 +18,7 @@ export async function initSkills() {
   await refresh();
 }
 
-async function refresh() {
+export async function refresh() {
   const { skills } = await rpc('skills.list');
   state.skills = skills;
   document.getElementById('skills-count').textContent = `${skills.length} skill${skills.length === 1 ? '' : 's'}`;
@@ -58,7 +58,8 @@ function renderList() {
 
 async function selectSkill(id, reload = true) {
   if (state.dirty && reload) {
-    if (!confirm('Discard unsaved changes?')) return;
+    const ok = await confirmDialog('Discard changes?', 'You have unsaved edits. Discard them and switch skills?', 'Discard', true);
+    if (!ok) return;
     state.dirty = false;
   }
   state.activeId = id;
@@ -88,7 +89,10 @@ function showEmpty() {
 }
 
 async function newSkill() {
-  if (state.dirty && !confirm('Discard unsaved changes?')) return;
+  if (state.dirty) {
+    const ok = await confirmDialog('Discard changes?', 'You have unsaved edits. Discard them and start a new skill?', 'Discard', true);
+    if (!ok) return;
+  }
   state.activeId = null;
   state.dirty = false;
   renderList();

@@ -528,7 +528,7 @@ func (a *App) StartCodexCircuitMonitor(ctx context.Context) {
 	if a.CodexUsage == nil || a.CodexRouter == nil {
 		return
 	}
-	go func() {
+	a.goSafe("codex", func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 		// Initial check on startup so circuits reflect current usage state.
@@ -543,7 +543,7 @@ func (a *App) StartCodexCircuitMonitor(ctx context.Context) {
 				cancel()
 			}
 		}
-	}()
+	})
 }
 
 // StartAutoModelImport launches a background goroutine that re-imports
@@ -553,7 +553,7 @@ func (a *App) StartCodexCircuitMonitor(ctx context.Context) {
 // An initial import runs 30 seconds after startup to avoid blocking the
 // server boot.
 func (a *App) StartAutoModelImport(ctx context.Context) {
-	go func() {
+	a.goSafe("ai", func() {
 		// Delay the initial import so the server is fully up and serving
 		// requests before we start hitting provider APIs.
 		select {
@@ -573,7 +573,7 @@ func (a *App) StartAutoModelImport(ctx context.Context) {
 				a.autoImportAllProviders(ctx)
 			}
 		}
-	}()
+	})
 }
 
 // autoImportAllProviders iterates all enabled providers and re-imports

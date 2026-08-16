@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"nusashell/contracts"
@@ -107,7 +109,16 @@ func dial(ctx context.Context, s *domain.MCPServer) (*conn, error) {
 	for k, v := range s.Env {
 		env = append(env, k+"="+v)
 	}
-	mcpClient, err := client.NewStdioMCPClient(s.Command, env, s.Args...)
+	var opts []transport.StdioOption
+	if s.WorkingDir != "" {
+		opts = append(opts, transport.WithCommandFunc(func(_ context.Context, command string, env []string, args []string) (*exec.Cmd, error) {
+			cmd := exec.Command(command, args...)
+			cmd.Env = env
+			cmd.Dir = s.WorkingDir
+			return cmd, nil
+		}))
+	}
+	mcpClient, err := client.NewStdioMCPClientWithOptions(s.Command, env, s.Args, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("start %s: %w", s.Command, err)
 	}
