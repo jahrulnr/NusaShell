@@ -67,7 +67,8 @@ PNG/JPEG/GIF/WebP images, and PDF documents. Text is sent as text; binary
 attachments are persisted and mapped to each provider's native multimodal
 wire format. Attachment UTF-8 validity, byte signatures, and data URL media
 types are validated at the application boundary. HTTP `/rpc` accepts bodies
-up to 24 MiB so four encoded attachments fit the envelope.
+up to 64 MiB so four encoded attachments fit the envelope and plugin ZIP
+uploads (`plugin.install`) with bundled `node_modules` are accepted.
 
 The composer presents an estimated context counter based on the persisted
 conversation and the selected model's `context` window. It is a UI estimate,

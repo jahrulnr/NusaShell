@@ -53,7 +53,15 @@ type SkillStore interface {
 type PluginStore interface {
 	List() ([]*domain.Plugin, error)
 	Get(id string) (*domain.Plugin, error)
+	Install(sourceDir string) (*domain.Plugin, error)
 	Uninstall(id string) error
+}
+
+// PluginInstaller fetches plugins from the curated catalog, a GitHub
+// repository, or a local ZIP archive and installs them.
+type PluginInstaller interface {
+	Catalog(ctx context.Context) ([]domain.PluginCatalogEntry, error)
+	Install(ctx context.Context, req domain.PluginInstallRequest) (*domain.Plugin, error)
 }
 
 type MemoryStore interface {

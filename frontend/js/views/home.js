@@ -1,6 +1,8 @@
 // Home / launcher view. This mirrors the Electron launcher surface while
 // keeping the Go port's HTTP plugin endpoint and browser-window handoff.
 
+import { openPluginWindow as openPluginWindowInShell } from '../plugin-window.js';
+
 let plugins = [];
 let launcherSearchQuery = '';
 let launcherCategory = 'All';
@@ -205,19 +207,10 @@ function appendEmptyState(grid, text) {
 }
 
 function openPluginWindow(plugin) {
-  const id = pluginId(plugin);
   const manifest = pluginManifest(plugin);
-  const win = manifest.ui?.window || {};
-  const width = win.defaultSize?.width || 1024;
-  const height = win.defaultSize?.height || 720;
-  const features = [
-    `width=${width}`,
-    `height=${height}`,
-    'menubar=no',
-    'toolbar=no',
-    'location=no',
-    'status=no',
-    `resizable=${win.resizable !== false ? 'yes' : 'no'}`,
-  ].join(',');
-  window.open(`/plugins/${id}/`, id, features);
+  openPluginWindowInShell({
+    id: pluginId(plugin),
+    name: plugin?.name || manifest.name || pluginId(plugin),
+    ui: manifest.ui,
+  });
 }

@@ -43,7 +43,9 @@
   position: fixed;
   bottom: 20px;
   right: 20px;
-  z-index: 100;
+  /* Above every overlay/dialog (max z-index 100) so error toasts are never
+     hidden behind a modal. */
+  z-index: 300;
   display: flex;
   flex-direction: column;
   gap: 8px;

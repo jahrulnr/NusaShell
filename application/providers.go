@@ -82,6 +82,12 @@ func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *cont
 		if err != nil {
 			return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 		}
+		// Codex is provider-specific: OAuth accounts and the fixed backend
+		// URL are tied to the kind, so switching it in place would orphan
+		// that state. Delete and recreate instead.
+		if existing.Kind == domain.ProviderCodex && kind != domain.ProviderCodex {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "codex kind is provider-specific and cannot be changed; delete this provider and add a new one instead"}
+		}
 		p = existing
 		p.Kind = kind
 		p.Name = name

@@ -113,6 +113,7 @@ func (s *Store) Install(sourceDir string) (*domain.Plugin, error) {
 	if err := copyDir(sourceDir, destDir); err != nil {
 		return nil, fmt.Errorf("pluginfs: copy %s → %s: %w", sourceDir, destDir, err)
 	}
+
 	return s.Get(manifest.ID)
 }
 
@@ -173,14 +174,20 @@ func copyDir(src, dst string) error {
 		if err != nil {
 			return err
 		}
+		if rel == "." {
+			return os.MkdirAll(dst, 0o755)
+		}
+		// Skip .git directories and symlinks. Symlinks in node_modules/.bin
+		// are not portable and .git is never useful at runtime.
+		if info.Mode()&os.ModeSymlink != 0 || rel == ".git" || strings.Contains(rel, string(filepath.Separator)+".git"+string(filepath.Separator)) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		dest := filepath.Join(dst, rel)
 		if info.IsDir() {
 			return os.MkdirAll(dest, 0o755)
-		}
-		// Skip node_modules to avoid huge copies — the plugin should
-		// run npm install after copying.
-		if strings.Contains(rel, "node_modules") {
-			return nil
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {

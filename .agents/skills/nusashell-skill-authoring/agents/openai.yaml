@@ -1,0 +1,4 @@
+interface:
+  display_name: "NusaShell Skill Authoring"
+  short_description: "Create skills for NusaShell safely"
+  default_prompt: "Use $nusashell-skill-authoring to create or review a NusaShell agent skill."

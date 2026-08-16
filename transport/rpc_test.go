@@ -396,6 +396,48 @@ func TestProviderValidationAndErrors(t *testing.T) {
 		t.Fatalf("missing provider must be NOT_FOUND, got %+v", res)
 	}
 
+	// codex kind is provider-specific: it cannot be changed in place
+	res = h.rpc(t, "ai.providers.save", map[string]any{"kind": "codex", "name": "Codex Locked"})
+	if !res.OK {
+		t.Fatalf("create codex provider must succeed, got %+v", res)
+	}
+	var codexOut struct {
+		Providers []struct {
+			ID string `json:"id"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(res.Result, &codexOut); err != nil || len(codexOut.Providers) == 0 {
+		t.Fatalf("codex provider not returned: %s", res.Result)
+	}
+	codexID := codexOut.Providers[0].ID
+	res = h.rpc(t, "ai.providers.save", map[string]any{"id": codexID, "kind": "chat", "name": "Codex Locked"})
+	if res.OK || res.Error == nil || res.Error.Code != "VALIDATION_ERROR" || !strings.Contains(res.Error.Message, "codex") {
+		t.Fatalf("codex kind change must fail validation, got %+v", res)
+	}
+
+	// non-codex kinds are switchable in place (chat → messages)
+	res = h.rpc(t, "ai.providers.save", map[string]any{"kind": "chat", "name": "Switchable", "base_url": "http://x/v1"})
+	if !res.OK {
+		t.Fatalf("create chat provider must succeed, got %+v", res)
+	}
+	var switchOut struct {
+		Providers []struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(res.Result, &switchOut); err != nil || len(switchOut.Providers) == 0 {
+		t.Fatalf("chat provider not returned: %s", res.Result)
+	}
+	switchID := switchOut.Providers[0].ID
+	res = h.rpc(t, "ai.providers.save", map[string]any{"id": switchID, "kind": "messages", "name": "Switchable", "base_url": "http://x"})
+	if !res.OK || res.Error != nil {
+		t.Fatalf("non-codex kind change must succeed, got %+v", res)
+	}
+	if err := json.Unmarshal(res.Result, &switchOut); err != nil || len(switchOut.Providers) == 0 || switchOut.Providers[0].Kind != "messages" {
+		t.Fatalf("kind not updated to messages: %s", res.Result)
+	}
+
 	// provider failure surfaces as PROVIDER_ERROR
 	pid := h.addOpenAIProvider(t, "Failing")
 	h.llm.failStatus = http.StatusInternalServerError

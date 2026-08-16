@@ -3,6 +3,7 @@
 
 import { rpc } from '../rpc.js';
 import { el, toast, dialog, confirmDialog } from '../ui.js';
+import { openPluginWindow as openPluginWindowInShell } from '../plugin-window.js';
 import { hasPluginUI, pluginKind, pluginRowMeta } from './plugins-model.js';
 
 export { hasPluginUI, pluginKind, pluginRowMeta } from './plugins-model.js';
@@ -14,8 +15,16 @@ let drawerReturnFocus = null;
 
 const STATES = ['idle', 'connecting', 'connected', 'error'];
 
+// Catalog entries fetched from the backend (plugin.catalog).
+let catalogEntries = [];
+
+let installTab = 'catalog';
+let installReturnFocus = null;
+
 export async function initPlugins() {
   document.getElementById('plugins-add-mcp')?.addEventListener('click', () => addMcp());
+  document.getElementById('plugins-install-plugin')?.addEventListener('click', () => installPlugin());
+  wireInstallDialog();
   wireDrawer();
   await refresh();
 }
@@ -62,7 +71,10 @@ function renderList() {
       dataset: { pluginId: server.id },
       'aria-label': `Open ${server.name} details`,
     });
-    const icon = el('div', { class: `plugin-row-icon ${server.plugin ? 'plugin-row-icon-plugin' : ''}`, text: shortIcon(server.icon || server.name) });
+    const iconValue = server.icon || server.name;
+    const icon = el('div', { class: `plugin-row-icon ${server.plugin ? 'plugin-row-icon-plugin' : ''}` },
+      iconNode(iconValue, shortIcon(iconValue)),
+    );
     const info = el('div', { class: 'plugin-row-info' },
       el('div', { class: 'plugin-row-name' },
         el('span', { text: server.name }),
@@ -82,6 +94,24 @@ function shortIcon(value) {
   return String(value || '🧩').slice(0, 2).toUpperCase();
 }
 
+function isImageIcon(icon) {
+  return typeof icon === 'string' && /^(data:|https?:\/\/)/i.test(icon);
+}
+
+// iconNode returns an <img> for image icons (data URL / http) or a text
+// span for emoji/text icons. Image load failures fall back to the text.
+function iconNode(icon, fallbackText) {
+  if (isImageIcon(icon)) {
+    const img = el('img', { class: 'plugin-icon-img', alt: '', loading: 'lazy' });
+    img.addEventListener('error', () => {
+      img.replaceWith(el('span', { text: fallbackText }));
+    }, { once: true });
+    img.src = icon;
+    return img;
+  }
+  return el('span', { text: fallbackText });
+}
+
 function stateClass(status) {
   if (status === 'connected') return 'connected';
   if (status === 'error') return 'error';
@@ -97,7 +127,7 @@ function wireDrawer() {
   document.getElementById('plugin-btn-open-ui')?.addEventListener('click', () => {
     if (currentServer) openPluginWindow(currentServer);
   });
-  document.getElementById('plugin-btn-test')?.addEventListener('click', () => { if (currentServer) void testServer(currentServer); });
+  document.getElementById('plugin-btn-start')?.addEventListener('click', () => { if (currentServer) void startServer(currentServer); });
   document.getElementById('plugin-btn-stop')?.addEventListener('click', () => { if (currentServer) void stopServer(currentServer); });
   document.getElementById('plugin-btn-restart')?.addEventListener('click', () => { if (currentServer) void restartServer(currentServer); });
   document.getElementById('plugin-btn-edit')?.addEventListener('click', () => { if (currentServer) addMcp(currentServer); });
@@ -111,7 +141,9 @@ function openDrawer(server) {
   renderList();
 
   const isPlugin = server.plugin === true;
-  document.getElementById('plugin-drawer-icon').textContent = shortIcon(server.icon || server.name);
+  const drawerIcon = document.getElementById('plugin-drawer-icon');
+  const drawerIconValue = server.icon || server.name;
+  drawerIcon.replaceChildren(iconNode(drawerIconValue, shortIcon(drawerIconValue)));
   document.getElementById('plugin-drawer-title').textContent = server.name;
   document.getElementById('plugin-drawer-subtitle').textContent = pluginRowMeta(server);
   document.getElementById('plugin-btn-open-ui').hidden = !hasPluginUI(server);
@@ -167,7 +199,7 @@ function renderDrawerTools(server) {
   count.textContent = String(tools.length);
   list.replaceChildren();
   if (!tools.length) {
-    list.append(el('div', { class: 'tools-empty', text: 'No tools loaded. Click Test to connect.' }));
+    list.append(el('div', { class: 'tools-empty', text: 'No tools loaded. Click Start to connect.' }));
     return;
   }
   for (const tool of tools) {
@@ -200,18 +232,18 @@ function renderDrawerManifest(server) {
   )));
 }
 
-async function testServer(server) {
-  const button = document.getElementById('plugin-btn-test');
+async function startServer(server) {
+  const button = document.getElementById('plugin-btn-start');
   button.disabled = true;
-  button.textContent = 'Testing…';
+  button.textContent = 'Starting…';
   try {
     const result = await rpc('mcp.servers.test', { id: server.id });
-    toast(`Connected · ${result.tools?.length ?? 0} tools`, 'success');
+    toast(`Started · ${result.tools?.length ?? 0} tools`, 'success');
   } catch (error) {
     toast(error.message, 'error');
   } finally {
     button.disabled = false;
-    button.textContent = 'Test';
+    button.textContent = 'Start';
     await refresh();
   }
 }
@@ -267,11 +299,11 @@ async function uninstallPlugin(server) {
 
 function openPluginWindow(server) {
   if (!hasPluginUI(server)) return;
-  const pluginID = server.id.replace(/^plugin:/, '');
-  const windowConfig = server.manifest?.ui?.window ?? {};
-  const width = windowConfig.defaultSize?.width || 1024;
-  const height = windowConfig.defaultSize?.height || 720;
-  window.open(`/plugins/${pluginID}/`, pluginID, `width=${width},height=${height},menubar=no,toolbar=no,location=no,status=no,resizable=${windowConfig.resizable === false ? 'no' : 'yes'}`);
+  openPluginWindowInShell({
+    id: server.id.replace(/^plugin:/, ''),
+    name: server.name,
+    ui: server.manifest?.ui,
+  });
 }
 
 async function addMcp(server = null) {
@@ -314,4 +346,183 @@ async function addMcp(server = null) {
   } catch (error) {
     toast(error.message, 'error');
   }
+}
+
+function wireInstallDialog() {
+  const overlay = document.getElementById('plugin-install-overlay');
+  const tabs = overlay.querySelectorAll('.plugin-install-tab');
+  tabs.forEach((tab) => tab.addEventListener('click', () => setInstallTab(tab.dataset.tab)));
+  document.getElementById('plugin-install-close')?.addEventListener('click', closeInstallDialog);
+  document.getElementById('plugin-install-cancel')?.addEventListener('click', closeInstallDialog);
+  document.getElementById('plugin-install-confirm')?.addEventListener('click', () => confirmInstall());
+  document.getElementById('plugin-catalog-search')?.addEventListener('input', (event) => renderCatalogList(event.target.value));
+  overlay?.addEventListener('mousedown', (event) => { if (event.target === overlay) closeInstallDialog(); });
+  document.getElementById('plugin-install-zip-file')?.addEventListener('change', (event) => {
+    const file = event.target.files[0];
+    document.getElementById('plugin-install-zip-name').textContent = file ? file.name : 'No file selected';
+  });
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !overlay.hidden) closeInstallDialog(); });
+}
+
+function setInstallTab(tab) {
+  installTab = tab;
+  clearInstallError();
+  const overlay = document.getElementById('plugin-install-overlay');
+  overlay.querySelectorAll('.plugin-install-tab').forEach((t) => {
+    const active = t.dataset.tab === tab;
+    t.classList.toggle('active', active);
+    t.setAttribute('aria-selected', String(active));
+  });
+  overlay.querySelectorAll('.plugin-install-panel').forEach((panel) => {
+    panel.classList.toggle('active', panel.dataset.panel === tab);
+  });
+}
+
+function showInstallError(message) {
+  const banner = document.getElementById('plugin-install-error');
+  if (!banner) return;
+  banner.textContent = message;
+  banner.hidden = false;
+}
+
+function clearInstallError() {
+  const banner = document.getElementById('plugin-install-error');
+  if (banner) banner.hidden = true;
+}
+
+export async function installPlugin() {
+  installReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  clearInstallError();
+  const overlay = document.getElementById('plugin-install-overlay');
+  document.getElementById('plugin-catalog-search').value = '';
+  const list = document.getElementById('plugin-catalog-list');
+  list.replaceChildren(el('div', { class: 'plugin-catalog-empty', text: 'Loading catalog…' }));
+  setInstallTab('catalog');
+  overlay.hidden = false;
+  overlay.setAttribute('aria-hidden', 'false');
+  document.getElementById('plugin-install-tab-catalog').focus();
+  try {
+    await loadCatalog();
+    renderCatalogList();
+  } catch (error) {
+    list.replaceChildren(el('div', { class: 'plugin-catalog-empty', text: `Catalog unavailable: ${error.message}` }));
+  }
+}
+
+async function loadCatalog() {
+  const result = await rpc('plugin.catalog');
+  catalogEntries = result.plugins ?? [];
+}
+
+function closeInstallDialog() {
+  clearInstallError();
+  const overlay = document.getElementById('plugin-install-overlay');
+  overlay.hidden = true;
+  overlay.setAttribute('aria-hidden', 'true');
+  document.getElementById('plugin-install-zip-file').value = '';
+  document.getElementById('plugin-install-zip-name').textContent = 'No file selected';
+  document.getElementById('plugin-install-github-url').value = '';
+  document.getElementById('plugin-install-github-subdir').value = '';
+  document.getElementById('plugin-install-github-ref').value = '';
+  if (installReturnFocus?.isConnected) installReturnFocus.focus();
+  installReturnFocus = null;
+}
+
+function renderCatalogList(query = '') {
+  const list = document.getElementById('plugin-catalog-list');
+  if (!list) return;
+  list.replaceChildren();
+  const normalized = query.trim().toLowerCase();
+  const installed = new Set(pluginCatalog.map((plugin) => plugin.id));
+  const filtered = normalized
+    ? catalogEntries.filter((item) => (
+        item.name.toLowerCase().includes(normalized) ||
+        item.id.toLowerCase().includes(normalized) ||
+        (item.pluginId || '').toLowerCase().includes(normalized) ||
+        (item.description || '').toLowerCase().includes(normalized)
+      ))
+    : catalogEntries;
+  if (!filtered.length) {
+    list.append(el('div', { class: 'plugin-catalog-empty', text: normalized ? 'No plugins match your search.' : 'No plugins in the catalog yet.' }));
+    return;
+  }
+  for (const item of filtered) {
+    const isInstalled = installed.has(item.pluginId);
+    const iconValue = item.icon || '🔌';
+    const row = el('div', { class: 'plugin-catalog-entry' },
+      el('div', { class: 'plugin-catalog-icon' }, iconNode(iconValue, iconValue)),
+      el('div', { class: 'plugin-catalog-info' },
+        el('div', { class: 'plugin-catalog-name' },
+          el('span', { text: item.name }),
+          el('span', { class: 'plugin-catalog-version', text: `v${item.version}` }),
+        ),
+        el('div', { class: 'plugin-catalog-desc', text: item.description || item.pluginId }),
+      ),
+      el('button', {
+        class: 'mini-btn plugin-catalog-install',
+        type: 'button',
+        text: isInstalled ? 'Reinstall' : 'Install',
+        disabled: isInstalled ? false : undefined,
+        'aria-label': `${isInstalled ? 'Reinstall' : 'Install'} ${item.name}`,
+      }),
+    );
+    row.querySelector('.plugin-catalog-install').addEventListener('click', () => installFromCatalog(item));
+    list.append(row);
+  }
+}
+
+async function confirmInstall() {
+  if (installTab === 'catalog') {
+    toast('Choose a plugin from the catalog list', 'info');
+    return;
+  }
+  if (installTab === 'github') {
+    const url = document.getElementById('plugin-install-github-url').value.trim();
+    if (!url) {
+      toast('GitHub URL is required', 'error');
+      return;
+    }
+    const subdir = document.getElementById('plugin-install-github-subdir').value.trim();
+    const ref = document.getElementById('plugin-install-github-ref').value.trim();
+    try {
+      await runInstall({ source: 'github', url, subdir, ref });
+      closeInstallDialog();
+    } catch (error) {
+      showInstallError(error.message);
+    }
+    return;
+  }
+  if (installTab === 'zip') {
+    const file = document.getElementById('plugin-install-zip-file').files[0];
+    if (!file) {
+      toast('Select a .zip file first', 'error');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const base64 = e.target.result.split(',')[1];
+      try {
+        await runInstall({ source: 'zip', data: base64 });
+        closeInstallDialog();
+      } catch (error) {
+        showInstallError(error.message);
+      }
+    };
+    reader.readAsDataURL(file);
+  }
+}
+
+async function installFromCatalog(item) {
+  try {
+    await runInstall({ source: 'catalog', id: item.id });
+    closeInstallDialog();
+  } catch (error) {
+    showInstallError(error.message);
+  }
+}
+
+async function runInstall(payload) {
+  await rpc('plugin.install', payload, { timeoutMs: 300000 });
+  toast('Plugin installed successfully', 'success');
+  await refresh();
 }

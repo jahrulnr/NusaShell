@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -10,6 +11,7 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/infrastructure/pluginicon"
 )
 
 // ---- skills ----
@@ -190,7 +192,7 @@ func (a *App) handleMCPServersList() (any, *contracts.RPCError) {
 					HasUI:       p.HasUI,
 					Status:      "idle",
 					Version:     p.Manifest.Version,
-					Icon:        p.Manifest.Icon,
+					Icon:        pluginicon.ResolveLocal(p.Manifest.Icon, p.InstallPath),
 					Category:    p.Manifest.Category,
 					InstallPath: p.InstallPath,
 				}
@@ -205,6 +207,39 @@ func (a *App) handleMCPServersList() (any, *contracts.RPCError) {
 	return contracts.MCPServersListResult{Servers: out}, nil
 }
 
+func pluginToDTO(p *domain.Plugin) contracts.PluginDTO {
+	dto := contracts.PluginDTO{
+		ID:          p.Manifest.ID,
+		Name:        p.Manifest.Name,
+		Version:     p.Manifest.Version,
+		Icon:        pluginicon.ResolveLocal(p.Manifest.Icon, p.InstallPath),
+		Category:    p.Manifest.Category,
+		HasUI:       p.HasUI,
+		InstallPath: p.InstallPath,
+	}
+	if p.HasUI {
+		dto.Manifest = &contracts.PluginManifestDTO{
+			ID:   p.Manifest.ID,
+			Name: p.Manifest.Name,
+			UI: &contracts.PluginUIDTO{
+				Entry:  p.Manifest.UI.Entry,
+				Window: contracts.PluginWindowDTO{},
+			},
+			MCP: contracts.PluginMCPDTO{
+				Transport: string(p.Manifest.MCP.Transport),
+				Command:   p.Manifest.MCP.Command,
+				Args:      p.Manifest.MCP.Args,
+				Autostart: p.Manifest.MCP.Autostart,
+			},
+		}
+		dto.Manifest.UI.Window.Mode = string(p.Manifest.UI.Window.Mode)
+		dto.Manifest.UI.Window.DefaultSize.Width = p.Manifest.UI.Window.DefaultSize.Width
+		dto.Manifest.UI.Window.DefaultSize.Height = p.Manifest.UI.Window.DefaultSize.Height
+		dto.Manifest.UI.Window.Resizable = p.Manifest.UI.Window.Resizable
+	}
+	return dto
+}
+
 func (a *App) handlePluginList() (any, *contracts.RPCError) {
 	if a.Plugins == nil {
 		return contracts.PluginListResult{Plugins: []contracts.PluginDTO{}}, nil
@@ -215,38 +250,68 @@ func (a *App) handlePluginList() (any, *contracts.RPCError) {
 	}
 	out := make([]contracts.PluginDTO, 0, len(plugins))
 	for _, p := range plugins {
-		dto := contracts.PluginDTO{
-			ID:          p.Manifest.ID,
-			Name:        p.Manifest.Name,
-			Version:     p.Manifest.Version,
-			Icon:        p.Manifest.Icon,
-			Category:    p.Manifest.Category,
-			HasUI:       p.HasUI,
-			InstallPath: p.InstallPath,
-		}
-		if p.HasUI {
-			dto.Manifest = &contracts.PluginManifestDTO{
-				ID:   p.Manifest.ID,
-				Name: p.Manifest.Name,
-				UI: &contracts.PluginUIDTO{
-					Entry:  p.Manifest.UI.Entry,
-					Window: contracts.PluginWindowDTO{},
-				},
-				MCP: contracts.PluginMCPDTO{
-					Transport: string(p.Manifest.MCP.Transport),
-					Command:   p.Manifest.MCP.Command,
-					Args:      p.Manifest.MCP.Args,
-					Autostart: p.Manifest.MCP.Autostart,
-				},
-			}
-			dto.Manifest.UI.Window.Mode = string(p.Manifest.UI.Window.Mode)
-			dto.Manifest.UI.Window.DefaultSize.Width = p.Manifest.UI.Window.DefaultSize.Width
-			dto.Manifest.UI.Window.DefaultSize.Height = p.Manifest.UI.Window.DefaultSize.Height
-			dto.Manifest.UI.Window.Resizable = p.Manifest.UI.Window.Resizable
-		}
-		out = append(out, dto)
+		out = append(out, pluginToDTO(p))
 	}
 	return contracts.PluginListResult{Plugins: out}, nil
+}
+
+func (a *App) handlePluginCatalog() (any, *contracts.RPCError) {
+	if a.PluginInstaller == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "plugin installer not available"}
+	}
+	entries, err := a.PluginInstaller.Catalog(context.Background())
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
+	}
+	out := make([]contracts.PluginCatalogEntry, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, contracts.PluginCatalogEntry{
+			ID:          e.ID,
+			PluginID:    e.PluginID,
+			Name:        e.Name,
+			Version:     e.Version,
+			Description: e.Description,
+			Icon:        e.Icon,
+			Tag:         e.Tag,
+			ReleasedAt:  e.ReleasedAt,
+		})
+	}
+	return contracts.PluginCatalogResult{Plugins: out}, nil
+}
+
+func (a *App) handlePluginInstall(req contracts.PluginInstallRequest) (any, *contracts.RPCError) {
+	if a.PluginInstaller == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "plugin installer not available"}
+	}
+	source := domain.PluginInstallSource(req.Source)
+	var data []byte
+	if req.Data != "" {
+		var err error
+		data, err = base64.StdEncoding.DecodeString(req.Data)
+		if err != nil {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "invalid zip data"}
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	plugin, err := a.PluginInstaller.Install(ctx, domain.PluginInstallRequest{
+		Source: source,
+		ID:     req.ID,
+		URL:    req.URL,
+		Subdir: req.Subdir,
+		Ref:    req.Ref,
+		Data:   data,
+	})
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
+	}
+
+	dto := pluginToDTO(plugin)
+	a.MCPToolbox.Drop(plugin.Manifest.MCPServerID())
+	a.log("info", "plugin", "plugin installed: %s v%s", plugin.Manifest.Name, plugin.Manifest.Version)
+	return contracts.PluginInstallResult{Plugin: &dto}, nil
 }
 
 func (a *App) handleMCPServersSave(req contracts.MCPSaveRequest) (any, *contracts.RPCError) {

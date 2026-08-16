@@ -139,7 +139,7 @@
         {
           "heading": "Composer",
           "paragraphs": [
-            "The message input with attachments, model picker, workspace selector, provider status, stop, and send buttons. Ctrl+Enter (⌘↩ on Mac) sends."
+            "The message input with attachments, model picker, workspace selector, provider status, stop, and send buttons. Ctrl+Enter (\u2318\u21a9 on Mac) sends."
           ],
           "controls": [
             "agent-form",
@@ -212,10 +212,50 @@
         {
           "heading": "Header",
           "paragraphs": [
-            "View title and an Add MCP button that opens the stdio server editor."
+            "View title and two buttons: Add MCP opens the stdio server editor; Install plugin opens the plugin installer with catalog, GitHub, and ZIP options."
           ],
           "controls": [
-            "plugins-add-mcp"
+            "plugins-add-mcp",
+            "plugins-install-plugin"
+          ]
+        },
+        {
+          "heading": "Plugin installer",
+          "paragraphs": [
+            "A tabbed dialog for installing plugins. Catalog shows official first-party plugins. GitHub installs from a repository URL, optionally targeting a subdirectory for monorepos. Upload ZIP lets the user browse or drop a plugin archive."
+          ],
+          "controls": [
+            "plugin-install-overlay",
+            "plugin-install-title",
+            "plugin-install-close",
+            "plugin-install-cancel",
+            "plugin-install-confirm",
+            "plugin-install-tab-catalog",
+            "plugin-install-tab-github",
+            "plugin-install-tab-zip",
+            "plugin-install-panel-catalog",
+            "plugin-install-panel-github",
+            "plugin-install-panel-zip",
+            "plugin-install-error",
+            "plugin-catalog-search",
+            "plugin-catalog-list",
+            "plugin-install-github-url",
+            "plugin-install-github-subdir",
+            "plugin-install-github-ref",
+            "plugin-install-zip-file",
+            "plugin-install-zip-name"
+          ]
+        },
+        {
+          "heading": "Plugin window",
+          "paragraphs": [
+            "An in-shell window that renders plugin UIs in a movable, resizable frame sized from the manifest ui.window (fullscreen mode covers the shell; panel/widget use defaultSize with a 700x700 / 380x280 fallback). Opens from Home tiles and the Plugins drawer Open UI button; no browser popups. Close with the X button or Escape."
+          ],
+          "controls": [
+            "plugin-window",
+            "plugin-window-title",
+            "plugin-window-close",
+            "plugin-window-frame"
           ]
         },
         {
@@ -230,7 +270,7 @@
         {
           "heading": "Detail drawer",
           "paragraphs": [
-            "A right-hand drawer that opens when a catalog row is clicked. Shows the state machine, actions, tools, and manifest summary. Native MCP rows expose Test, Stop, Restart, Edit, and Delete; plugin rows expose Test, Stop, Restart, and Uninstall; MCP + UI plugins also expose Open UI. Close with the X button, overlay, or Escape."
+            "A right-hand drawer that opens when a catalog row is clicked. Shows the state machine, actions, tools, and manifest summary. Native MCP rows expose Start, Stop, Restart, Edit, and Delete; plugin rows expose Start, Stop, Restart, and Uninstall; MCP + UI plugins also expose Open UI. Close with the X button, overlay, or Escape."
           ],
           "controls": [
             "plugin-drawer",
@@ -238,7 +278,7 @@
             "plugin-drawer-close",
             "plugin-state-machine",
             "plugin-btn-open-ui",
-            "plugin-btn-test",
+            "plugin-btn-start",
             "plugin-btn-stop",
             "plugin-btn-restart",
             "plugin-btn-edit",
@@ -459,142 +499,859 @@
     }
   },
   "controls": {
-    "conn-status": { "label": "Connection status text", "section": "Title bar", "type": "text", "notes": "Reflects backend WebSocket/RPC reachability." },
-    "conn-fill": { "label": "Connection orb", "section": "Title bar", "type": "indicator", "notes": "Color-coded connection state." },
-    "nav-settings-btn": { "label": "Settings shortcut", "section": "Title bar", "type": "button", "action": "Opens the Settings view." },
-    "sidebar": { "label": "Sidebar", "section": "Sidebar", "type": "container", "notes": "Holds navigation items and storage indicator." },
-    "sidebar-mode-toggle": { "label": "Collapse sidebar", "section": "Sidebar", "type": "button", "action": "Toggles icon-only sidebar mode (persisted locally)." },
-    "storage-path": { "label": "Data directory path", "section": "Storage", "type": "text", "notes": "Absolute path to the data directory." },
-
-    "search-input": { "label": "App search", "section": "Home", "type": "search", "action": "Filters installed apps by name, id, or description. Escape clears the query." },
-    "search-clear": { "label": "Clear app search", "section": "Home", "type": "button", "action": "Clears the app search and returns focus to the search input." },
-    "launcher-tabs": { "label": "App categories", "section": "Home", "type": "tab group", "action": "Filters the app grid to a category." },
-    "app-grid": { "label": "App grid", "section": "Home", "type": "grid", "action": "Click an app tile to open its plugin UI in a separate browser window." },
-
-    "agent-conversations": { "label": "Conversations pane", "section": "Agent", "type": "container" },
-    "conversations-title": { "label": "Conversations label", "section": "Agent", "type": "text" },
-    "conversation-count": { "label": "Thread count", "section": "Agent", "type": "text" },
-    "new-conversation-btn": { "label": "New conversation", "section": "Agent", "type": "button", "action": "Creates a new conversation and focuses the composer." },
-    "conversation-search": { "label": "Conversation search", "section": "Agent", "type": "search", "notes": "Filters conversation titles in real time." },
-    "conversation-list": { "label": "Conversation list", "section": "Agent", "type": "list" },
-    "agent-shell": { "label": "Agent shell", "section": "Agent", "type": "container" },
-    "agent-conversation": { "label": "Active conversation", "section": "Agent", "type": "container" },
-    "agent-offline-state": { "label": "Offline mascot", "section": "Agent", "type": "status", "notes": "Shown when the backend is unreachable." },
-    "agent-thread": { "label": "Thread log", "section": "Agent", "type": "log", "notes": "Renders the active conversation messages." },
-    "agent-composer-stack": { "label": "Composer stack", "section": "Agent", "type": "container", "notes": "Holds tool strip, todo strip, steer queue, and composer." },
-    "tool-job-strip": { "label": "Tool calls strip", "section": "Agent", "type": "container", "notes": "In-flight tool calls for the current turn." },
-    "tool-job-strip-toggle": { "label": "Tool calls toggle", "section": "Agent", "type": "button", "action": "Collapse/expand the tool calls list.", "notes": "Default collapsed." },
-    "tool-job-strip-title": { "label": "Tool calls title", "section": "Agent", "type": "text" },
-    "tool-job-strip-meta": { "label": "Tool calls meta", "section": "Agent", "type": "text" },
-    "agent-todo-strip": { "label": "Task checklist strip", "section": "Agent", "type": "container" },
-    "agent-todo-strip-toggle": { "label": "Task checklist toggle", "section": "Agent", "type": "button", "action": "Collapse/expand the task list.", "notes": "Default collapsed." },
-    "agent-todo-strip-count": { "label": "Task count", "section": "Agent", "type": "text" },
-    "agent-todo-strip-meta": { "label": "Task progress meta", "section": "Agent", "type": "text", "notes": "Shows open count or 'All done'." },
-    "agent-todo-strip-list": { "label": "Task list", "section": "Agent", "type": "list", "notes": "Items come from the `todo` tool; user-deleted items disappear." },
-    "agent-steer-queue": { "label": "Steer queue", "section": "Agent", "type": "container", "notes": "Queued steer messages waiting for a safe boundary." },
-    "agent-steer-queue-toggle": { "label": "Steer queue toggle", "section": "Agent", "type": "button", "action": "Collapse/expand the steer queue.", "notes": "Default expanded." },
-    "agent-steer-queue-title": { "label": "Steer queue title", "section": "Agent", "type": "text" },
-    "agent-steer-queue-state": { "label": "Steer queue state", "section": "Agent", "type": "text" },
-    "agent-steer-queue-text": { "label": "Steer queue text", "section": "Agent", "type": "text" },
-    "agent-steer-cancel": { "label": "Cancel queued steer", "section": "Agent", "type": "button", "action": "Cancels the pending steer message." },
-    "agent-form": { "label": "Composer form", "section": "Agent", "type": "form" },
-    "composer-input": { "label": "Message input", "section": "Agent", "type": "textarea", "shortcut": "Ctrl+Enter / ⌘↩ to send" },
-    "agent-attachments": { "label": "Attachments preview", "section": "Agent", "type": "container" },
-    "agent-file-input": { "label": "File input", "section": "Agent", "type": "input", "notes": "Hidden file picker for images, PDFs, and text files." },
-    "agent-attach-btn": { "label": "Attach files", "section": "Agent", "type": "button", "action": "Opens the file picker." },
-    "model-trigger": { "label": "Model picker trigger", "section": "Agent", "type": "button", "action": "Opens the model menu." },
-    "model-trigger-label": { "label": "Model label", "section": "Agent", "type": "text" },
-    "model-menu": { "label": "Model menu", "section": "Agent", "type": "dialog", "notes": "Lists models grouped by provider with effort chips." },
-    "agent-workspace-btn": { "label": "Workspace selector", "section": "Agent", "type": "button", "action": "Opens the host folder dialog." },
-    "agent-workspace-label": { "label": "Workspace label", "section": "Agent", "type": "text" },
-    "agent-provider-status": { "label": "Provider status", "section": "Agent", "type": "text" },
-    "stop-btn": { "label": "Stop", "section": "Agent", "type": "button", "action": "Cancels the running turn; partial output is kept and marked interrupted." },
-    "send-btn": { "label": "Send", "section": "Agent", "type": "submit", "shortcut": "Ctrl+Enter / ⌘↩" },
-
-    "new-skill-btn": { "label": "New skill", "section": "Skills", "type": "button", "action": "Creates a new skill and opens the editor." },
-    "skills-count": { "label": "Skills count", "section": "Skills", "type": "text" },
-    "skills-search": { "label": "Skills search", "section": "Skills", "type": "search" },
-    "skills-list": { "label": "Skills catalog", "section": "Skills", "type": "list" },
-    "skill-editor-title": { "label": "Editor title", "section": "Skills", "type": "text" },
-    "skill-editor-meta": { "label": "Editor meta", "section": "Skills", "type": "text" },
-    "skill-run-btn": { "label": "Run skill", "section": "Skills", "type": "button", "action": "Opens the skill in a new Agent conversation as its system context." },
-    "skill-save-btn": { "label": "Save skill", "section": "Skills", "type": "button", "action": "Persists the edited skill." },
-    "skill-delete-btn": { "label": "Delete skill", "section": "Skills", "type": "button", "action": "Deletes the selected skill." },
-    "skill-editor-form": { "label": "Editor form", "section": "Skills", "type": "container" },
-    "skill-name": { "label": "Skill name", "section": "Skills", "type": "input" },
-    "skill-description": { "label": "Skill description", "section": "Skills", "type": "input" },
-    "skill-content": { "label": "Skill markdown", "section": "Skills", "type": "textarea", "notes": "Injected verbatim into the agent context when loaded." },
-    "skill-editor-empty": { "label": "Editor empty state", "section": "Skills", "type": "text" },
-
-    "plugins-add-mcp": { "label": "Add MCP", "section": "Plugins", "type": "button", "action": "Opens the native MCP server editor." },
-    "plugin-table": { "label": "Plugin catalog", "section": "Plugins", "type": "list", "notes": "Lists native MCP servers, MCP-only plugins, and MCP + UI plugins with runtime status and tool chips. Clicking a row opens the Plugins detail drawer." },
-    "plugin-drawer": { "label": "Plugin detail drawer", "section": "Plugins", "type": "drawer", "notes": "Right-hand panel showing state machine, actions, tools, and manifest for the selected catalog item." },
-    "plugin-drawer-overlay": { "label": "Drawer overlay", "section": "Plugins", "type": "overlay", "action": "Clicking the overlay closes the drawer." },
-    "plugin-drawer-close": { "label": "Close drawer", "section": "Plugins", "type": "button", "action": "Closes the Plugins detail drawer." },
-    "plugin-state-machine": { "label": "State machine", "section": "Plugins", "type": "indicator", "notes": "Shows idle → connecting → connected → error with the current state highlighted." },
-    "plugin-btn-open-ui": { "label": "Open UI", "section": "Plugins", "type": "button", "action": "Opens the selected MCP + UI plugin in a separate browser window. Hidden for MCP-only entries." },
-    "plugin-btn-test": { "label": "Test", "section": "Plugins", "type": "button", "action": "Connects the selected MCP server or plugin and lists its tools." },
-    "plugin-btn-stop": { "label": "Stop", "section": "Plugins", "type": "button", "action": "Drops the cached MCP connection (mcp.servers.stop)." },
-    "plugin-btn-restart": { "label": "Restart", "section": "Plugins", "type": "button", "action": "Stops then tests the selected MCP server or plugin." },
-    "plugin-btn-edit": { "label": "Edit", "section": "Plugins", "type": "button", "action": "Opens the MCP server editor for the selected native MCP entry. Hidden for plugins." },
-    "plugin-btn-delete": { "label": "Delete", "section": "Plugins", "type": "button", "action": "Deletes the selected native MCP server (mcp.servers.delete). Hidden for plugins." },
-    "plugin-btn-uninstall": { "label": "Uninstall", "section": "Plugins", "type": "button", "action": "Uninstalls the selected plugin and drops its MCP connection (plugin.uninstall). Hidden for native MCP entries." },
-    "plugin-tools-list": { "label": "Tools list", "section": "Plugins", "type": "list", "notes": "Lists the tools exposed by the connected MCP server or plugin with name and description." },
-    "plugin-tool-count": { "label": "Tool count", "section": "Plugins", "type": "indicator", "notes": "Number of tools currently loaded for the selected entry." },
-    "plugin-manifest-info": { "label": "Manifest info", "section": "Plugins", "type": "panel", "notes": "Key/value summary of the selected MCP server or plugin, including version, category, and install path when available." },
-
-    "add-provider-btn": { "label": "Add provider", "section": "Providers", "type": "button", "action": "Opens the provider editor." },
-    "provider-registry": { "label": "Provider registry", "section": "Providers", "type": "list", "notes": "Provider cards grouped by kind." },
-    "provider-detail": { "label": "Provider detail", "section": "Providers", "type": "container", "notes": "Edit form for the selected provider." },
-
-    "learning-stat-memory": { "label": "Memory count", "section": "Learning", "type": "text" },
-    "learning-stat-edges": { "label": "Edge count", "section": "Learning", "type": "text" },
-    "learning-search-input": { "label": "Learning search", "section": "Learning", "type": "search" },
-    "learning-kind-filter": { "label": "Kind filter", "section": "Learning", "type": "select", "notes": "All, Skills, Memory." },
-    "learning-search-btn": { "label": "Search button", "section": "Learning", "type": "button", "action": "Runs the hybrid search." },
-    "learning-results": { "label": "Results", "section": "Learning", "type": "list" },
-    "learning-results-count": { "label": "Results count", "section": "Learning", "type": "text" },
-    "learning-graph": { "label": "Knowledge graph", "section": "Learning", "type": "visualization", "notes": "vis-network force-directed graph." },
-    "learning-graph-refresh": { "label": "Reload graph", "section": "Learning", "type": "button", "action": "Reloads the graph from the backend." },
-    "learning-graph-fit": { "label": "Fit to view", "section": "Learning", "type": "button", "action": "Fits the graph to the viewport." },
-
-    "log-level-filter": { "label": "Level filter", "section": "Logs", "type": "select", "notes": "All, debug, info, warn, error." },
-    "log-count": { "label": "Entry count", "section": "Logs", "type": "text" },
-    "log-follow": { "label": "Follow", "section": "Logs", "type": "checkbox", "notes": "Auto-scrolls to the newest entry." },
-    "logs-clear-btn": { "label": "Clear", "section": "Logs", "type": "button", "action": "Clears the on-screen log tail." },
-    "log-tail": { "label": "Log tail", "section": "Logs", "type": "list" },
-
-    "settings-save-btn": { "label": "Save settings", "section": "Settings", "type": "button", "action": "Persists runtime settings." },
-    "settings-save-status": { "label": "Save status", "section": "Settings", "type": "status" },
-    "settings-runtime-title": { "label": "Agent runtime title", "section": "Settings", "type": "text" },
-    "settings-preferred-model": { "label": "Default model", "section": "Settings", "type": "select", "notes": "Used by new conversations." },
-    "settings-max-tool-rounds": { "label": "Maximum tool rounds", "section": "Settings", "type": "number", "notes": "1–10000, default 8." },
-    "settings-embedding-title": { "label": "Embeddings title", "section": "Settings", "type": "text" },
-    "settings-embedding-model": { "label": "Embedding model", "section": "Settings", "type": "select" },
-    "settings-vision-title": { "label": "Vision fallback title", "section": "Settings", "type": "text" },
-    "settings-vision-model": { "label": "Vision fallback model", "section": "Settings", "type": "select" },
-    "settings-learning-threshold": { "label": "Learning review threshold", "section": "Settings", "type": "number", "notes": "Turns before review; 0 disables turn-based review." },
-    "settings-context-title": { "label": "Context compaction title", "section": "Settings", "type": "text" },
-    "settings-compaction-enabled": { "label": "Compact long conversations", "section": "Settings", "type": "checkbox" },
-    "settings-max-input-tokens": { "label": "Max input tokens", "section": "Settings", "type": "number", "notes": "Fallback context window, default 200000." },
-    "settings-max-output-tokens": { "label": "Max output tokens", "section": "Settings", "type": "number", "notes": "Default 65536." },
-    "settings-prompt-caching": { "label": "Prompt caching", "section": "Settings", "type": "checkbox" },
-    "settings-temperature": { "label": "Temperature", "section": "Settings", "type": "number" },
-    "settings-top-p": { "label": "Top P", "section": "Settings", "type": "number" },
-    "settings-top-k": { "label": "Top K", "section": "Settings", "type": "number", "notes": "Anthropic only." },
-    "settings-frequency-penalty": { "label": "Frequency penalty", "section": "Settings", "type": "number", "notes": "OpenAI only." },
-    "settings-presence-penalty": { "label": "Presence penalty", "section": "Settings", "type": "number", "notes": "OpenAI only." },
-    "settings-appearance-title": { "label": "Appearance title", "section": "Settings", "type": "text" },
-    "settings-sidebar-compact": { "label": "Use icon-only sidebar", "section": "Settings", "type": "checkbox", "notes": "Browser-only preference." },
-    "settings-connection-title": { "label": "Connection title", "section": "Settings", "type": "text" },
-    "settings-conn-fill": { "label": "Backend status orb", "section": "Settings", "type": "indicator" },
-    "settings-conn-label": { "label": "Backend status label", "section": "Settings", "type": "text" },
-    "settings-auto-reconnect": { "label": "Reconnect automatically", "section": "Settings", "type": "checkbox" },
-    "settings-check-connection-btn": { "label": "Check connection", "section": "Settings", "type": "button", "action": "Probes the backend." },
-    "settings-connection-status": { "label": "Connection status", "section": "Settings", "type": "status" },
-    "settings-system-title": { "label": "System title", "section": "Settings", "type": "text" },
-    "settings-version": { "label": "Version", "section": "Settings", "type": "text" },
-    "settings-data-dir": { "label": "Data directory", "section": "Settings", "type": "text" },
-    "settings-transports": { "label": "Transports", "section": "Settings", "type": "text" }
+    "conn-status": {
+      "label": "Connection status text",
+      "section": "Title bar",
+      "type": "text",
+      "notes": "Reflects backend WebSocket/RPC reachability."
+    },
+    "conn-fill": {
+      "label": "Connection orb",
+      "section": "Title bar",
+      "type": "indicator",
+      "notes": "Color-coded connection state."
+    },
+    "nav-settings-btn": {
+      "label": "Settings shortcut",
+      "section": "Title bar",
+      "type": "button",
+      "action": "Opens the Settings view."
+    },
+    "sidebar": {
+      "label": "Sidebar",
+      "section": "Sidebar",
+      "type": "container",
+      "notes": "Holds navigation items and storage indicator."
+    },
+    "sidebar-mode-toggle": {
+      "label": "Collapse sidebar",
+      "section": "Sidebar",
+      "type": "button",
+      "action": "Toggles icon-only sidebar mode (persisted locally)."
+    },
+    "storage-path": {
+      "label": "Data directory path",
+      "section": "Storage",
+      "type": "text",
+      "notes": "Absolute path to the data directory."
+    },
+    "search-input": {
+      "label": "App search",
+      "section": "Home",
+      "type": "search",
+      "action": "Filters installed apps by name, id, or description. Escape clears the query."
+    },
+    "search-clear": {
+      "label": "Clear app search",
+      "section": "Home",
+      "type": "button",
+      "action": "Clears the app search and returns focus to the search input."
+    },
+    "launcher-tabs": {
+      "label": "App categories",
+      "section": "Home",
+      "type": "tab group",
+      "action": "Filters the app grid to a category."
+    },
+    "app-grid": {
+      "label": "App grid",
+      "section": "Home",
+      "type": "grid",
+      "action": "Click an app tile to open its plugin UI in a separate browser window."
+    },
+    "agent-conversations": {
+      "label": "Conversations pane",
+      "section": "Agent",
+      "type": "container"
+    },
+    "conversations-title": {
+      "label": "Conversations label",
+      "section": "Agent",
+      "type": "text"
+    },
+    "conversation-count": {
+      "label": "Thread count",
+      "section": "Agent",
+      "type": "text"
+    },
+    "new-conversation-btn": {
+      "label": "New conversation",
+      "section": "Agent",
+      "type": "button",
+      "action": "Creates a new conversation and focuses the composer."
+    },
+    "conversation-search": {
+      "label": "Conversation search",
+      "section": "Agent",
+      "type": "search",
+      "notes": "Filters conversation titles in real time."
+    },
+    "conversation-list": {
+      "label": "Conversation list",
+      "section": "Agent",
+      "type": "list"
+    },
+    "agent-shell": {
+      "label": "Agent shell",
+      "section": "Agent",
+      "type": "container"
+    },
+    "agent-conversation": {
+      "label": "Active conversation",
+      "section": "Agent",
+      "type": "container"
+    },
+    "agent-offline-state": {
+      "label": "Offline mascot",
+      "section": "Agent",
+      "type": "status",
+      "notes": "Shown when the backend is unreachable."
+    },
+    "agent-thread": {
+      "label": "Thread log",
+      "section": "Agent",
+      "type": "log",
+      "notes": "Renders the active conversation messages."
+    },
+    "agent-composer-stack": {
+      "label": "Composer stack",
+      "section": "Agent",
+      "type": "container",
+      "notes": "Holds tool strip, todo strip, steer queue, and composer."
+    },
+    "tool-job-strip": {
+      "label": "Tool calls strip",
+      "section": "Agent",
+      "type": "container",
+      "notes": "In-flight tool calls for the current turn."
+    },
+    "tool-job-strip-toggle": {
+      "label": "Tool calls toggle",
+      "section": "Agent",
+      "type": "button",
+      "action": "Collapse/expand the tool calls list.",
+      "notes": "Default collapsed."
+    },
+    "tool-job-strip-title": {
+      "label": "Tool calls title",
+      "section": "Agent",
+      "type": "text"
+    },
+    "tool-job-strip-meta": {
+      "label": "Tool calls meta",
+      "section": "Agent",
+      "type": "text"
+    },
+    "agent-todo-strip": {
+      "label": "Task checklist strip",
+      "section": "Agent",
+      "type": "container"
+    },
+    "agent-todo-strip-toggle": {
+      "label": "Task checklist toggle",
+      "section": "Agent",
+      "type": "button",
+      "action": "Collapse/expand the task list.",
+      "notes": "Default collapsed."
+    },
+    "agent-todo-strip-count": {
+      "label": "Task count",
+      "section": "Agent",
+      "type": "text"
+    },
+    "agent-todo-strip-meta": {
+      "label": "Task progress meta",
+      "section": "Agent",
+      "type": "text",
+      "notes": "Shows open count or 'All done'."
+    },
+    "agent-todo-strip-list": {
+      "label": "Task list",
+      "section": "Agent",
+      "type": "list",
+      "notes": "Items come from the `todo` tool; user-deleted items disappear."
+    },
+    "agent-steer-queue": {
+      "label": "Steer queue",
+      "section": "Agent",
+      "type": "container",
+      "notes": "Queued steer messages waiting for a safe boundary."
+    },
+    "agent-steer-queue-toggle": {
+      "label": "Steer queue toggle",
+      "section": "Agent",
+      "type": "button",
+      "action": "Collapse/expand the steer queue.",
+      "notes": "Default expanded."
+    },
+    "agent-steer-queue-title": {
+      "label": "Steer queue title",
+      "section": "Agent",
+      "type": "text"
+    },
+    "agent-steer-queue-state": {
+      "label": "Steer queue state",
+      "section": "Agent",
+      "type": "text"
+    },
+    "agent-steer-queue-text": {
+      "label": "Steer queue text",
+      "section": "Agent",
+      "type": "text"
+    },
+    "agent-steer-cancel": {
+      "label": "Cancel queued steer",
+      "section": "Agent",
+      "type": "button",
+      "action": "Cancels the pending steer message."
+    },
+    "agent-form": {
+      "label": "Composer form",
+      "section": "Agent",
+      "type": "form"
+    },
+    "composer-input": {
+      "label": "Message input",
+      "section": "Agent",
+      "type": "textarea",
+      "shortcut": "Ctrl+Enter / \u2318\u21a9 to send"
+    },
+    "agent-attachments": {
+      "label": "Attachments preview",
+      "section": "Agent",
+      "type": "container"
+    },
+    "agent-file-input": {
+      "label": "File input",
+      "section": "Agent",
+      "type": "input",
+      "notes": "Hidden file picker for images, PDFs, and text files."
+    },
+    "agent-attach-btn": {
+      "label": "Attach files",
+      "section": "Agent",
+      "type": "button",
+      "action": "Opens the file picker."
+    },
+    "model-trigger": {
+      "label": "Model picker trigger",
+      "section": "Agent",
+      "type": "button",
+      "action": "Opens the model menu."
+    },
+    "model-trigger-label": {
+      "label": "Model label",
+      "section": "Agent",
+      "type": "text"
+    },
+    "model-menu": {
+      "label": "Model menu",
+      "section": "Agent",
+      "type": "dialog",
+      "notes": "Lists models grouped by provider with effort chips."
+    },
+    "agent-workspace-btn": {
+      "label": "Workspace selector",
+      "section": "Agent",
+      "type": "button",
+      "action": "Opens the host folder dialog."
+    },
+    "agent-workspace-label": {
+      "label": "Workspace label",
+      "section": "Agent",
+      "type": "text"
+    },
+    "agent-provider-status": {
+      "label": "Provider status",
+      "section": "Agent",
+      "type": "text"
+    },
+    "stop-btn": {
+      "label": "Stop",
+      "section": "Agent",
+      "type": "button",
+      "action": "Cancels the running turn; partial output is kept and marked interrupted."
+    },
+    "send-btn": {
+      "label": "Send",
+      "section": "Agent",
+      "type": "submit",
+      "shortcut": "Ctrl+Enter / \u2318\u21a9"
+    },
+    "new-skill-btn": {
+      "label": "New skill",
+      "section": "Skills",
+      "type": "button",
+      "action": "Creates a new skill and opens the editor."
+    },
+    "skills-count": {
+      "label": "Skills count",
+      "section": "Skills",
+      "type": "text"
+    },
+    "skills-search": {
+      "label": "Skills search",
+      "section": "Skills",
+      "type": "search"
+    },
+    "skills-list": {
+      "label": "Skills catalog",
+      "section": "Skills",
+      "type": "list"
+    },
+    "skill-editor-title": {
+      "label": "Editor title",
+      "section": "Skills",
+      "type": "text"
+    },
+    "skill-editor-meta": {
+      "label": "Editor meta",
+      "section": "Skills",
+      "type": "text"
+    },
+    "skill-run-btn": {
+      "label": "Run skill",
+      "section": "Skills",
+      "type": "button",
+      "action": "Opens the skill in a new Agent conversation as its system context."
+    },
+    "skill-save-btn": {
+      "label": "Save skill",
+      "section": "Skills",
+      "type": "button",
+      "action": "Persists the edited skill."
+    },
+    "skill-delete-btn": {
+      "label": "Delete skill",
+      "section": "Skills",
+      "type": "button",
+      "action": "Deletes the selected skill."
+    },
+    "skill-editor-form": {
+      "label": "Editor form",
+      "section": "Skills",
+      "type": "container"
+    },
+    "skill-name": {
+      "label": "Skill name",
+      "section": "Skills",
+      "type": "input"
+    },
+    "skill-description": {
+      "label": "Skill description",
+      "section": "Skills",
+      "type": "input"
+    },
+    "skill-content": {
+      "label": "Skill markdown",
+      "section": "Skills",
+      "type": "textarea",
+      "notes": "Injected verbatim into the agent context when loaded."
+    },
+    "skill-editor-empty": {
+      "label": "Editor empty state",
+      "section": "Skills",
+      "type": "text"
+    },
+    "plugins-add-mcp": {
+      "label": "Add MCP",
+      "section": "Plugins",
+      "type": "button",
+      "action": "Opens the native MCP server editor."
+    },
+    "plugin-table": {
+      "label": "Plugin catalog",
+      "section": "Plugins",
+      "type": "list",
+      "notes": "Lists native MCP servers, MCP-only plugins, and MCP + UI plugins with runtime status and tool chips. Clicking a row opens the Plugins detail drawer."
+    },
+    "plugin-drawer": {
+      "label": "Plugin detail drawer",
+      "section": "Plugins",
+      "type": "drawer",
+      "notes": "Right-hand panel showing state machine, actions, tools, and manifest for the selected catalog item."
+    },
+    "plugin-drawer-overlay": {
+      "label": "Drawer overlay",
+      "section": "Plugins",
+      "type": "overlay",
+      "action": "Clicking the overlay closes the drawer."
+    },
+    "plugin-drawer-close": {
+      "label": "Close drawer",
+      "section": "Plugins",
+      "type": "button",
+      "action": "Closes the Plugins detail drawer."
+    },
+    "plugin-state-machine": {
+      "label": "State machine",
+      "section": "Plugins",
+      "type": "indicator",
+      "notes": "Shows idle \u2192 connecting \u2192 connected \u2192 error with the current state highlighted."
+    },
+    "plugin-btn-open-ui": {
+      "label": "Open UI",
+      "section": "Plugins",
+      "type": "button",
+      "action": "Opens the selected MCP + UI plugin in the in-shell plugin window. Hidden for MCP-only entries."
+    },
+    "plugin-btn-start": {
+      "label": "Start",
+      "section": "Plugins",
+      "type": "button",
+      "action": "Connects the selected MCP server or plugin and lists its tools."
+    },
+    "plugin-btn-stop": {
+      "label": "Stop",
+      "section": "Plugins",
+      "type": "button",
+      "action": "Drops the cached MCP connection (mcp.servers.stop)."
+    },
+    "plugin-btn-restart": {
+      "label": "Restart",
+      "section": "Plugins",
+      "type": "button",
+      "action": "Stops then starts the selected MCP server or plugin."
+    },
+    "plugin-btn-edit": {
+      "label": "Edit",
+      "section": "Plugins",
+      "type": "button",
+      "action": "Opens the MCP server editor for the selected native MCP entry. Hidden for plugins."
+    },
+    "plugin-btn-delete": {
+      "label": "Delete",
+      "section": "Plugins",
+      "type": "button",
+      "action": "Deletes the selected native MCP server (mcp.servers.delete). Hidden for plugins."
+    },
+    "plugin-btn-uninstall": {
+      "label": "Uninstall",
+      "section": "Plugins",
+      "type": "button",
+      "action": "Uninstalls the selected plugin and drops its MCP connection (plugin.uninstall). Hidden for native MCP entries."
+    },
+    "plugin-tools-list": {
+      "label": "Tools list",
+      "section": "Plugins",
+      "type": "list",
+      "notes": "Lists the tools exposed by the connected MCP server or plugin with name and description."
+    },
+    "plugin-tool-count": {
+      "label": "Tool count",
+      "section": "Plugins",
+      "type": "indicator",
+      "notes": "Number of tools currently loaded for the selected entry."
+    },
+    "plugin-manifest-info": {
+      "label": "Manifest info",
+      "section": "Plugins",
+      "type": "panel",
+      "notes": "Key/value summary of the selected MCP server or plugin, including version, category, and install path when available."
+    },
+    "add-provider-btn": {
+      "label": "Add provider",
+      "section": "Providers",
+      "type": "button",
+      "action": "Opens the provider editor."
+    },
+    "provider-registry": {
+      "label": "Provider registry",
+      "section": "Providers",
+      "type": "list",
+      "notes": "Provider cards grouped by kind."
+    },
+    "provider-detail": {
+      "label": "Provider detail",
+      "section": "Providers",
+      "type": "container",
+      "notes": "Edit form for the selected provider."
+    },
+    "learning-stat-memory": {
+      "label": "Memory count",
+      "section": "Learning",
+      "type": "text"
+    },
+    "learning-stat-edges": {
+      "label": "Edge count",
+      "section": "Learning",
+      "type": "text"
+    },
+    "learning-search-input": {
+      "label": "Learning search",
+      "section": "Learning",
+      "type": "search"
+    },
+    "learning-kind-filter": {
+      "label": "Kind filter",
+      "section": "Learning",
+      "type": "select",
+      "notes": "All, Skills, Memory."
+    },
+    "learning-search-btn": {
+      "label": "Search button",
+      "section": "Learning",
+      "type": "button",
+      "action": "Runs the hybrid search."
+    },
+    "learning-results": {
+      "label": "Results",
+      "section": "Learning",
+      "type": "list"
+    },
+    "learning-results-count": {
+      "label": "Results count",
+      "section": "Learning",
+      "type": "text"
+    },
+    "learning-graph": {
+      "label": "Knowledge graph",
+      "section": "Learning",
+      "type": "visualization",
+      "notes": "vis-network force-directed graph."
+    },
+    "learning-graph-refresh": {
+      "label": "Reload graph",
+      "section": "Learning",
+      "type": "button",
+      "action": "Reloads the graph from the backend."
+    },
+    "learning-graph-fit": {
+      "label": "Fit to view",
+      "section": "Learning",
+      "type": "button",
+      "action": "Fits the graph to the viewport."
+    },
+    "log-level-filter": {
+      "label": "Level filter",
+      "section": "Logs",
+      "type": "select",
+      "notes": "All, debug, info, warn, error."
+    },
+    "log-count": {
+      "label": "Entry count",
+      "section": "Logs",
+      "type": "text"
+    },
+    "log-follow": {
+      "label": "Follow",
+      "section": "Logs",
+      "type": "checkbox",
+      "notes": "Auto-scrolls to the newest entry."
+    },
+    "logs-clear-btn": {
+      "label": "Clear",
+      "section": "Logs",
+      "type": "button",
+      "action": "Clears the on-screen log tail."
+    },
+    "log-tail": {
+      "label": "Log tail",
+      "section": "Logs",
+      "type": "list"
+    },
+    "settings-save-btn": {
+      "label": "Save settings",
+      "section": "Settings",
+      "type": "button",
+      "action": "Persists runtime settings."
+    },
+    "settings-save-status": {
+      "label": "Save status",
+      "section": "Settings",
+      "type": "status"
+    },
+    "settings-runtime-title": {
+      "label": "Agent runtime title",
+      "section": "Settings",
+      "type": "text"
+    },
+    "settings-preferred-model": {
+      "label": "Default model",
+      "section": "Settings",
+      "type": "select",
+      "notes": "Used by new conversations."
+    },
+    "settings-max-tool-rounds": {
+      "label": "Maximum tool rounds",
+      "section": "Settings",
+      "type": "number",
+      "notes": "1\u201310000, default 8."
+    },
+    "settings-embedding-title": {
+      "label": "Embeddings title",
+      "section": "Settings",
+      "type": "text"
+    },
+    "settings-embedding-model": {
+      "label": "Embedding model",
+      "section": "Settings",
+      "type": "select"
+    },
+    "settings-vision-title": {
+      "label": "Vision fallback title",
+      "section": "Settings",
+      "type": "text"
+    },
+    "settings-vision-model": {
+      "label": "Vision fallback model",
+      "section": "Settings",
+      "type": "select"
+    },
+    "settings-learning-threshold": {
+      "label": "Learning review threshold",
+      "section": "Settings",
+      "type": "number",
+      "notes": "Turns before review; 0 disables turn-based review."
+    },
+    "settings-context-title": {
+      "label": "Context compaction title",
+      "section": "Settings",
+      "type": "text"
+    },
+    "settings-compaction-enabled": {
+      "label": "Compact long conversations",
+      "section": "Settings",
+      "type": "checkbox"
+    },
+    "settings-max-input-tokens": {
+      "label": "Max input tokens",
+      "section": "Settings",
+      "type": "number",
+      "notes": "Fallback context window, default 200000."
+    },
+    "settings-max-output-tokens": {
+      "label": "Max output tokens",
+      "section": "Settings",
+      "type": "number",
+      "notes": "Default 65536."
+    },
+    "settings-prompt-caching": {
+      "label": "Prompt caching",
+      "section": "Settings",
+      "type": "checkbox"
+    },
+    "settings-temperature": {
+      "label": "Temperature",
+      "section": "Settings",
+      "type": "number"
+    },
+    "settings-top-p": {
+      "label": "Top P",
+      "section": "Settings",
+      "type": "number"
+    },
+    "settings-top-k": {
+      "label": "Top K",
+      "section": "Settings",
+      "type": "number",
+      "notes": "Anthropic only."
+    },
+    "settings-frequency-penalty": {
+      "label": "Frequency penalty",
+      "section": "Settings",
+      "type": "number",
+      "notes": "OpenAI only."
+    },
+    "settings-presence-penalty": {
+      "label": "Presence penalty",
+      "section": "Settings",
+      "type": "number",
+      "notes": "OpenAI only."
+    },
+    "settings-appearance-title": {
+      "label": "Appearance title",
+      "section": "Settings",
+      "type": "text"
+    },
+    "settings-sidebar-compact": {
+      "label": "Use icon-only sidebar",
+      "section": "Settings",
+      "type": "checkbox",
+      "notes": "Browser-only preference."
+    },
+    "settings-connection-title": {
+      "label": "Connection title",
+      "section": "Settings",
+      "type": "text"
+    },
+    "settings-conn-fill": {
+      "label": "Backend status orb",
+      "section": "Settings",
+      "type": "indicator"
+    },
+    "settings-conn-label": {
+      "label": "Backend status label",
+      "section": "Settings",
+      "type": "text"
+    },
+    "settings-auto-reconnect": {
+      "label": "Reconnect automatically",
+      "section": "Settings",
+      "type": "checkbox"
+    },
+    "settings-check-connection-btn": {
+      "label": "Check connection",
+      "section": "Settings",
+      "type": "button",
+      "action": "Probes the backend."
+    },
+    "settings-connection-status": {
+      "label": "Connection status",
+      "section": "Settings",
+      "type": "status"
+    },
+    "settings-system-title": {
+      "label": "System title",
+      "section": "Settings",
+      "type": "text"
+    },
+    "settings-version": {
+      "label": "Version",
+      "section": "Settings",
+      "type": "text"
+    },
+    "settings-data-dir": {
+      "label": "Data directory",
+      "section": "Settings",
+      "type": "text"
+    },
+    "settings-transports": {
+      "label": "Transports",
+      "section": "Settings",
+      "type": "text"
+    },
+    "plugins-install-plugin": {
+      "label": "Install plugin",
+      "section": "Plugins",
+      "type": "button",
+      "action": "Opens the plugin installer dialog."
+    },
+    "plugin-install-overlay": {
+      "label": "Plugin install dialog",
+      "section": "Plugins",
+      "type": "dialog"
+    },
+    "plugin-install-title": {
+      "label": "Install plugin title",
+      "section": "Plugins",
+      "type": "heading"
+    },
+    "plugin-install-close": {
+      "label": "Close install dialog",
+      "section": "Plugins",
+      "type": "button",
+      "action": "Closes the plugin installer."
+    },
+    "plugin-install-cancel": {
+      "label": "Cancel install",
+      "section": "Plugins",
+      "type": "button",
+      "action": "Closes the plugin installer without installing."
+    },
+    "plugin-install-confirm": {
+      "label": "Confirm install",
+      "section": "Plugins",
+      "type": "button",
+      "action": "Confirms the current install source (GitHub or ZIP)."
+    },
+    "plugin-install-tab-catalog": {
+      "label": "Catalog tab",
+      "section": "Plugins",
+      "type": "tab"
+    },
+    "plugin-install-tab-github": {
+      "label": "GitHub tab",
+      "section": "Plugins",
+      "type": "tab"
+    },
+    "plugin-install-tab-zip": {
+      "label": "Upload ZIP tab",
+      "section": "Plugins",
+      "type": "tab"
+    },
+    "plugin-install-panel-catalog": {
+      "label": "Catalog panel",
+      "section": "Plugins",
+      "type": "panel"
+    },
+    "plugin-install-panel-github": {
+      "label": "GitHub panel",
+      "section": "Plugins",
+      "type": "panel"
+    },
+    "plugin-install-panel-zip": {
+      "label": "Upload ZIP panel",
+      "section": "Plugins",
+      "type": "panel"
+    },
+    "plugin-install-error": {
+      "label": "Install error banner",
+      "section": "Plugins",
+      "type": "status",
+      "notes": "Inline error shown inside the installer when an install attempt fails; cleared on tab switch or dialog close."
+    },
+    "plugin-catalog-search": {
+      "label": "Plugin catalog search",
+      "section": "Plugins",
+      "type": "search",
+      "action": "Filters the plugin catalog by name, id, or description."
+    },
+    "plugin-catalog-list": {
+      "label": "Plugin catalog list",
+      "section": "Plugins",
+      "type": "list"
+    },
+    "plugin-install-github-url": {
+      "label": "GitHub URL",
+      "section": "Plugins",
+      "type": "text",
+      "notes": "Repository URL or owner/repo shorthand."
+    },
+    "plugin-install-github-subdir": {
+      "label": "GitHub subdirectory",
+      "section": "Plugins",
+      "type": "text",
+      "notes": "Optional subdirectory inside a monorepo."
+    },
+    "plugin-install-github-ref": {
+      "label": "GitHub ref",
+      "section": "Plugins",
+      "type": "text",
+      "notes": "Optional branch or tag."
+    },
+    "plugin-install-zip-file": {
+      "label": "ZIP file input",
+      "section": "Plugins",
+      "type": "file"
+    },
+    "plugin-install-zip-name": {
+      "label": "Selected ZIP file name",
+      "section": "Plugins",
+      "type": "text"
+    },
+    "plugin-window": {
+      "label": "Plugin window",
+      "section": "Plugins",
+      "type": "dialog",
+      "notes": "In-shell window hosting the plugin UI in an iframe; sized per manifest ui.window (fullscreen / panel / widget), movable via the title bar, resizable when allowed."
+    },
+    "plugin-window-title": {
+      "label": "Plugin window title",
+      "section": "Plugins",
+      "type": "text"
+    },
+    "plugin-window-close": {
+      "label": "Close plugin window",
+      "section": "Plugins",
+      "type": "button",
+      "action": "Closes the in-shell plugin window (Escape also works)."
+    },
+    "plugin-window-frame": {
+      "label": "Plugin window frame",
+      "section": "Plugins",
+      "type": "frame",
+      "notes": "Iframe hosting /plugins/{id}/ with the window.shell shim."
+    }
   }
 }

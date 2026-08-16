@@ -22,19 +22,20 @@ type App struct {
 	Version string
 	DataDir string
 
-	Conversations ConversationStore
-	Providers     ProviderStore
-	Credentials   CredentialStore
-	Skills        SkillStore
-	Memory        MemoryStore
-	LearningEdges LearningEdgeStore
-	Todos         ConversationTodoPort
-	AskQuestions  *AskQuestionService
-	MCP           MCPServerStore
-	Plugins       PluginStore
-	Logs          LogStore
-	Settings      SettingsStore
-	Attachments   AttachmentStore
+	Conversations   ConversationStore
+	Providers       ProviderStore
+	Credentials     CredentialStore
+	Skills          SkillStore
+	Memory          MemoryStore
+	LearningEdges   LearningEdgeStore
+	Todos           ConversationTodoPort
+	AskQuestions    *AskQuestionService
+	MCP             MCPServerStore
+	Plugins         PluginStore
+	PluginInstaller PluginInstaller
+	Logs            LogStore
+	Settings        SettingsStore
+	Attachments     AttachmentStore
 
 	Docs                        DocsSource
 	Bus                         *Bus
@@ -215,6 +216,7 @@ type Deps struct {
 	AskQuestions                *AskQuestionService
 	MCP                         MCPServerStore
 	Plugins                     PluginStore
+	PluginInstaller             PluginInstaller
 	Logs                        LogStore
 	Settings                    SettingsStore
 	Attachments                 AttachmentStore
@@ -253,6 +255,7 @@ func NewApp(deps Deps) *App {
 		AskQuestions:                deps.AskQuestions,
 		MCP:                         deps.MCP,
 		Plugins:                     deps.Plugins,
+		PluginInstaller:             deps.PluginInstaller,
 		Logs:                        deps.Logs,
 		Settings:                    deps.Settings,
 		Attachments:                 deps.Attachments,
@@ -713,6 +716,14 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 		return a.handleMCPToolsList()
 	case contracts.MethodPluginList:
 		return a.handlePluginList()
+	case contracts.MethodPluginCatalog:
+		return a.handlePluginCatalog()
+	case contracts.MethodPluginInstall:
+		var req contracts.PluginInstallRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handlePluginInstall(req)
 	case contracts.MethodPluginUninstall:
 		var req contracts.PluginIDRequest
 		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {

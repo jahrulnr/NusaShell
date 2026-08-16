@@ -17,6 +17,7 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `providers.json` | provider configs (no keys) | JSON |
 | `skills.json` | skill library | JSON |
 | `mcp-servers.json` | MCP server definitions | JSON |
+| `plugins/<id>/` | installed plugins: `manifest.json` + `mcp/` + optional `ui/` | JSON + files |
 | `memories.jsonl` | agent memory entries | JSONL |
 | `logs.jsonl` | activity log (bounded ring) | JSONL |
 | `settings.json` | compaction / caching settings | JSON |

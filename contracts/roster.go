@@ -58,6 +58,8 @@ const (
 	MethodMCPToolsList     = "mcp.tools.list"
 	MethodPluginList       = "plugin.list"
 	MethodPluginUninstall  = "plugin.uninstall"
+	MethodPluginCatalog    = "plugin.catalog"
+	MethodPluginInstall    = "plugin.install"
 
 	MethodMemoryList   = "memory.list"
 	MethodMemorySave   = "memory.save"
@@ -752,6 +754,34 @@ type PluginListResult struct {
 
 type PluginIDRequest struct {
 	ID string `json:"id"`
+}
+
+type PluginCatalogEntry struct {
+	ID          string `json:"id"`
+	PluginID    string `json:"pluginId"`
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Description string `json:"description,omitempty"`
+	Icon        string `json:"icon,omitempty"`
+	Tag         string `json:"tag"`
+	ReleasedAt  string `json:"releasedAt,omitempty"`
+}
+
+type PluginCatalogResult struct {
+	Plugins []PluginCatalogEntry `json:"plugins"`
+}
+
+type PluginInstallRequest struct {
+	Source string `json:"source"`
+	ID     string `json:"id,omitempty"`
+	URL    string `json:"url,omitempty"`
+	Subdir string `json:"subdir,omitempty"`
+	Ref    string `json:"ref,omitempty"`
+	Data   string `json:"data,omitempty"` // base64-encoded ZIP
+}
+
+type PluginInstallResult struct {
+	Plugin *PluginDTO `json:"plugin,omitempty"`
 }
 
 type MCPSaveRequest struct {

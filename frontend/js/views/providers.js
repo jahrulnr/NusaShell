@@ -474,9 +474,13 @@ async function addProvider(provider = null) {
   const isCodex = initialKind === 'codex';
   const res = await dialog({
     title: provider ? 'Edit provider' : 'Add provider',
-    message: provider ? 'Update provider settings.' : isCodex
-      ? 'Codex uses ChatGPT OAuth — no API key needed. Sign in after saving.'
-      : 'API keys are stored in the local SQLite credential store.',
+    message: provider?.kind === 'codex'
+      ? 'Codex is provider-specific — its kind cannot be changed here.'
+      : provider
+        ? 'Update provider settings. The kind (wire format) can be changed.'
+        : isCodex
+          ? 'Codex uses ChatGPT OAuth — no API key needed. Sign in after saving.'
+          : 'API keys are stored in the local SQLite credential store.',
     fields: [
       {
         name: 'kind', label: 'Kind', tag: 'select',
@@ -488,6 +492,9 @@ async function addProvider(provider = null) {
           { value: 'codex', label: 'Codex (ChatGPT)' },
         ],
         value: initialKind,
+        // Codex is provider-specific (OAuth accounts, fixed backend URL):
+        // its kind cannot be changed in place.
+        disabled: isCodex,
         onChange: (kindInput, all) => {
           const urlInput = all.base_url;
           const apiKeyInput = all.api_key;
