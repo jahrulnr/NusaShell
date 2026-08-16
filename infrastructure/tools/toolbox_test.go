@@ -675,3 +675,70 @@ func TestListToolsIncludesMcpInstall(t *testing.T) {
 		t.Fatalf("ListTools missing mcp_install")
 	}
 }
+
+// --- mcp_server_add tests ---
+
+type savingStubPlugin struct {
+	*stubPluginStore
+	saved []*domain.Plugin
+}
+
+func newSavingStub(plugins []*domain.Plugin) *savingStubPlugin {
+	return &savingStubPlugin{stubPluginStore: &stubPluginStore{plugins: plugins}}
+}
+
+func (s *savingStubPlugin) Save(p *domain.Plugin) error {
+	s.saved = append(s.saved, p)
+	return nil
+}
+
+func TestMcpServerAdd(t *testing.T) {
+	store := newSavingStub(nil)
+	tb := &Toolbox{Plugins: store, MCP: &stubDropper{droppedServers: map[string]bool{}}}
+	out, err := tb.Execute(context.Background(), "mcp_server_add", []byte(`{"name":"GitHub MCP","command":"npx","args":["-y","@modelcontextprotocol/server-github"],"env":{"TOKEN":"x"}}`))
+	if err != nil {
+		t.Fatalf("mcp_server_add: %v", err)
+	}
+	if !strings.Contains(out, "added MCP server") {
+		t.Fatalf("unexpected output %q", out)
+	}
+	if len(store.saved) != 1 {
+		t.Fatalf("expected one saved plugin, got %d", len(store.saved))
+	}
+	got := store.saved[0]
+	if got.Manifest.Name != "GitHub MCP" || got.Manifest.MCP.Command != "npx" {
+		t.Fatalf("unexpected manifest: %+v", got.Manifest)
+	}
+	if len(got.Manifest.MCP.Args) != 2 || got.Manifest.MCP.Args[1] != "@modelcontextprotocol/server-github" {
+		t.Fatalf("unexpected args: %v", got.Manifest.MCP.Args)
+	}
+	if got.Manifest.MCP.Env["TOKEN"] != "x" {
+		t.Fatalf("env not saved: %v", got.Manifest.MCP.Env)
+	}
+	if got.Manifest.ID == "" || !domain.ValidatePluginID(got.Manifest.ID) {
+		t.Fatalf("invalid generated id %q", got.Manifest.ID)
+	}
+}
+
+func TestMcpServerAddValidation(t *testing.T) {
+	tb := &Toolbox{Plugins: newSavingStub(nil), MCP: &stubDropper{droppedServers: map[string]bool{}}}
+	_, err := tb.Execute(context.Background(), "mcp_server_add", []byte(`{"command":"npx"}`))
+	if err == nil || !strings.Contains(err.Error(), "name is required") {
+		t.Fatalf("expected name-required, got %v", err)
+	}
+	_, err = tb.Execute(context.Background(), "mcp_server_add", []byte(`{"name":"x"}`))
+	if err == nil || !strings.Contains(err.Error(), "command is required") {
+		t.Fatalf("expected command-required, got %v", err)
+	}
+}
+
+func TestListToolsIncludesMcpServerAdd(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	names := map[string]bool{}
+	for _, ti := range tb.ListTools() {
+		names[ti.Name] = true
+	}
+	if !names["mcp_server_add"] {
+		t.Fatalf("ListTools missing mcp_server_add")
+	}
+}
