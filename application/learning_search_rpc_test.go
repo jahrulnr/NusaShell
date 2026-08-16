@@ -74,21 +74,40 @@ func TestHandleLearningSearchEmptyQuery(t *testing.T) {
 	skills := &fakeSkillStore{items: map[string]*domain.Skill{
 		"skill_1": {ID: "skill_1", Name: "Test", Content: "content"},
 	}}
+	memory := &fakeMemoryStore{entries: []*domain.MemoryEntry{
+		{ID: "mem_1", Content: "A memory entry"},
+	}}
 	app := &App{
 		Skills:   skills,
-		Memory:   &fakeMemoryStore{},
+		Memory:   memory,
 		Settings: &fakeSettingsStore{settings: domain.Settings{}},
 	}
+	// kind=skills: empty query lists all skills (unfiltered browse).
 	resp, _ := app.handleLearningSearch(contracts.LearningSearchRequest{
 		Query: "",
 		Kind:  "skills",
 	})
 	result := resp.(contracts.LearningSearchResult)
-	// Empty query → BM25 returns no hits (no terms to match). This is
-	// expected; the caller should use skills.list / memory.list for
-	// unfiltered listings.
-	if len(result.Items) != 0 {
-		t.Fatalf("empty query should return 0 results, got %d", len(result.Items))
+	if len(result.Items) != 1 || result.Items[0].ID != "skill_1" {
+		t.Fatalf("empty query + kind=skills should list all skills, got %+v", result.Items)
+	}
+	// kind=memory: empty query lists all memory entries.
+	resp, _ = app.handleLearningSearch(contracts.LearningSearchRequest{
+		Query: "",
+		Kind:  "memory",
+	})
+	result = resp.(contracts.LearningSearchResult)
+	if len(result.Items) != 1 || result.Items[0].ID != "mem_1" {
+		t.Fatalf("empty query + kind=memory should list all memory, got %+v", result.Items)
+	}
+	// no kind: empty query lists both, capped by limit.
+	resp, _ = app.handleLearningSearch(contracts.LearningSearchRequest{
+		Query: "",
+		Limit: 10,
+	})
+	result = resp.(contracts.LearningSearchResult)
+	if len(result.Items) != 2 {
+		t.Fatalf("empty query should list both kinds, got %d items", len(result.Items))
 	}
 }
 
@@ -158,4 +177,37 @@ func (f *fakeSettingsStore) Get() domain.Settings { return f.settings }
 func (f *fakeSettingsStore) Set(s domain.Settings) error {
 	f.settings = s
 	return nil
+}
+
+func TestHandleLearningGraphFiltersDanglingEdges(t *testing.T) {
+	skills := &fakeSkillStore{items: map[string]*domain.Skill{
+		"skill_1": {ID: "skill_1", Name: "Git", Content: "x"},
+	}}
+	memory := &fakeMemoryStore{entries: []*domain.MemoryEntry{
+		{ID: "mem_1", Content: "memory one"},
+	}}
+	app := &App{
+		Skills:   skills,
+		Memory:   memory,
+		Settings: &fakeSettingsStore{settings: domain.Settings{}},
+		LearningEdges: &fakeEdgeStore{edges: []*domain.LearningEdge{
+			{SourceID: "skill_1", TargetID: "mem_1", Type: domain.EdgeUsedWith, Weight: 0.8},      // valid
+			{SourceID: "skill_1", TargetID: "mem_deleted", Type: domain.EdgeRelated, Weight: 0.9}, // dangling
+			{SourceID: "mem_gone", TargetID: "mem_1", Type: domain.EdgeRelated, Weight: 0.7},      // dangling
+		}},
+	}
+	resp, rpcErr := app.handleLearningGraph()
+	if rpcErr != nil {
+		t.Fatalf("handleLearningGraph: %v", rpcErr)
+	}
+	result := resp.(contracts.LearningGraphResult)
+	if len(result.Nodes) != 2 {
+		t.Fatalf("nodes = %d, want 2", len(result.Nodes))
+	}
+	if len(result.Edges) != 1 {
+		t.Fatalf("edges = %d, want 1 (dangling edges filtered), got %+v", len(result.Edges), result.Edges)
+	}
+	if result.Edges[0].From != "skill_1" || result.Edges[0].To != "mem_1" {
+		t.Fatalf("unexpected edge: %+v", result.Edges[0])
+	}
 }

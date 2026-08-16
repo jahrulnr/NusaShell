@@ -491,6 +491,38 @@ func (a *App) handleLearningSearch(req contracts.LearningSearchRequest) (any, *c
 		limit = 10
 	}
 	kind := strings.ToLower(strings.TrimSpace(req.Kind))
+
+	// Empty query: return an unfiltered listing (all skills and/or memories)
+	// so the Learning view shows content immediately instead of an empty
+	// "search to begin" state. Score is 0; items are sorted by name.
+	if query == "" {
+		items := make([]contracts.LearningSearchResultItem, 0, limit*2)
+		if kind == "" || kind == "skills" {
+			for _, sk := range a.Skills.List() {
+				items = append(items, contracts.LearningSearchResultItem{
+					ID:      sk.ID,
+					Kind:    "skill",
+					Name:    sk.Name,
+					Content: truncate(sk.Content, 200),
+				})
+			}
+		}
+		if kind == "" || kind == "memory" {
+			for _, mem := range a.Memory.List() {
+				items = append(items, contracts.LearningSearchResultItem{
+					ID:      mem.ID,
+					Kind:    "memory",
+					Content: truncate(mem.Content, 200),
+				})
+			}
+		}
+		sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+		if len(items) > limit {
+			items = items[:limit]
+		}
+		return contracts.LearningSearchResult{Items: items}, nil
+	}
+
 	searcher := a.learningSearch()
 	ctx := context.Background()
 	items := make([]contracts.LearningSearchResultItem, 0, limit*2)
@@ -597,10 +629,24 @@ func (a *App) handleLearningGraph() (any, *contracts.RPCError) {
 		})
 	}
 
-	// Collect edges from graph service
+	// Collect edges from graph service. Only edges whose BOTH endpoints are
+	// present in the node set are emitted: memory/skill entries that were
+	// deleted after an edge was persisted would otherwise reference nodes
+	// that do not exist, and vis-network silently drops them — making whole
+	// clusters appear disconnected.
+	nodeIDs := make(map[string]struct{}, len(nodes))
+	for _, n := range nodes {
+		nodeIDs[n.ID] = struct{}{}
+	}
 	var edges []contracts.LearningGraphEdge
 	if gs := a.graph(); gs != nil {
 		for _, e := range gs.AllEdges() {
+			if _, ok := nodeIDs[e.SourceID]; !ok {
+				continue
+			}
+			if _, ok := nodeIDs[e.TargetID]; !ok {
+				continue
+			}
 			edges = append(edges, contracts.LearningGraphEdge{
 				From:   e.SourceID,
 				To:     e.TargetID,

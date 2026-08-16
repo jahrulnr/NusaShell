@@ -43,9 +43,10 @@ export async function initLearning() {
 
   await loadStats();
   initGraph();
-  // Initial search with empty query returns nothing (BM25 needs terms),
-  // so just load the graph.
-  await loadGraph();
+  // Initial search: empty query lists all skills + memories so the results
+  // pane is populated immediately (backend returns an unfiltered listing
+  // for empty queries). The graph loads in parallel.
+  await Promise.all([doSearch(), loadGraph()]);
 }
 
 export async function refresh() {
@@ -73,16 +74,6 @@ async function doSearch() {
 
   const resultsEl = document.getElementById('learning-results');
   const countEl = document.getElementById('learning-results-count');
-
-  if (!query) {
-    resultsEl.innerHTML = '';
-    resultsEl.appendChild(el('div', { class: 'learning-empty' }, [
-      el('strong', { text: 'Search to begin' }),
-      el('span', { text: 'Enter a query to search across memory and skills.' }),
-    ]));
-    countEl.textContent = '0';
-    return;
-  }
 
   resultsEl.innerHTML = '';
   resultsEl.appendChild(el('div', { class: 'learning-searching' }, [el('span', { text: 'Searching…' })]));

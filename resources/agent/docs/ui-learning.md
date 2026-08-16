@@ -36,7 +36,7 @@ Hybrid search across memory and skills, with a kind filter (All, Skills, Memory)
 
 ## Results
 
-Ranked search results with a count. Empty state prompts the user to enter a query.
+Ranked search results with a count. With an empty query the pane lists all skills and memories so content is visible immediately.
 
 - **Results** (`#learning-results`):
   - Section: Learning
