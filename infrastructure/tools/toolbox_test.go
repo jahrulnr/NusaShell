@@ -457,3 +457,138 @@ func TestMCPToolNameMatchesLongestServerPrefix(t *testing.T) {
 		t.Fatalf("routed to server %q tool %q, want plugin:long/read", mcp.lastServerID, mcp.lastTool)
 	}
 }
+
+// --- mcp management tools ---
+
+type recordedStubPluginStore struct {
+	*stubPluginStore
+	installedDirs []string
+	deleted       []string
+}
+
+func newRecordedStub(plugins []*domain.Plugin) *recordedStubPluginStore {
+	return &recordedStubPluginStore{stubPluginStore: &stubPluginStore{plugins: plugins}}
+}
+
+func (s *recordedStubPluginStore) Install(sourceDir string) (*domain.Plugin, error) {
+	s.installedDirs = append(s.installedDirs, sourceDir)
+	p := &domain.Plugin{Manifest: domain.PluginManifest{
+		ID:      "plugin:fake",
+		Name:    "Fake",
+		Version: "1.0.0",
+		Icon:    "🧪",
+		MCP:     domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "nope"},
+	}}
+	if len(s.plugins) == 0 {
+		s.plugins = []*domain.Plugin{p}
+	}
+	return p, nil
+}
+
+func (s *recordedStubPluginStore) Delete(id string) error {
+	s.deleted = append(s.deleted, id)
+	return nil
+}
+
+type stubDropper struct {
+	droppedServers map[string]bool
+}
+
+func (d *stubDropper) Connect(ctx context.Context, p *domain.Plugin) ([]contracts.MCPToolDTO, error) {
+	return nil, nil
+}
+func (d *stubDropper) ToolsFor(serverID string) ([]contracts.MCPToolDTO, bool) { return nil, false }
+func (d *stubDropper) CallTool(ctx context.Context, serverID, toolName string, args map[string]any) (string, error) {
+	return "ok", nil
+}
+func (d *stubDropper) Drop(serverID string) { d.droppedServers[serverID] = true }
+
+func TestMcpRegister(t *testing.T) {
+	store := newRecordedStub(nil)
+	tb := &Toolbox{Plugins: store, MCP: &stubMCP{tools: map[string][]contracts.MCPToolDTO{}}}
+	out, err := tb.Execute(context.Background(), "mcp_register", []byte(`{"source":"/tmp/fake-plugin"}`))
+	if err != nil {
+		t.Fatalf("mcp_register: %v", err)
+	}
+	if !strings.Contains(out, "registered plugin") {
+		t.Fatalf("unexpected output %q", out)
+	}
+	if len(store.installedDirs) != 1 || store.installedDirs[0] != "/tmp/fake-plugin" {
+		t.Fatalf("expected install of /tmp/fake-plugin, got %v", store.installedDirs)
+	}
+}
+
+func TestMcpRegisterMissingSource(t *testing.T) {
+	tb := &Toolbox{Plugins: newRecordedStub(nil), MCP: &stubMCP{}}
+	_, err := tb.Execute(context.Background(), "mcp_register", []byte(`{}`))
+	if err == nil || !strings.Contains(err.Error(), "source is required") {
+		t.Fatalf("expected source-required error, got %v", err)
+	}
+}
+
+func TestMcpEnable(t *testing.T) {
+	plugin := &domain.Plugin{Manifest: domain.PluginManifest{ID: "nusashell.demo", Name: "Demo", Version: "1.0.0", Icon: "🧩", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "nope"}}}
+	serverID := plugin.Manifest.MCPServerID()
+	mcp := &stubMCP{tools: map[string][]contracts.MCPToolDTO{
+		serverID: {{Name: "demo_ping", Description: "ping"}},
+	}}
+	tb := &Toolbox{Plugins: &stubPluginStore{plugins: []*domain.Plugin{plugin}}, MCP: mcp}
+	out, err := tb.Execute(context.Background(), "mcp_enable", []byte(`{"id":"nusashell.demo"}`))
+	if err != nil {
+		t.Fatalf("mcp_enable: %v", err)
+	}
+	if !strings.Contains(out, "1 tool") {
+		t.Fatalf("expected 1 tool in output, got %q", out)
+	}
+}
+
+func TestMcpEnableUnknown(t *testing.T) {
+	tb := &Toolbox{Plugins: &stubPluginStore{}, MCP: &stubMCP{}}
+	_, err := tb.Execute(context.Background(), "mcp_enable", []byte(`{"id":"nope"}`))
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected not-found error, got %v", err)
+	}
+}
+
+func TestMcpDisable(t *testing.T) {
+	dropper := &stubDropper{droppedServers: map[string]bool{}}
+	tb := &Toolbox{Plugins: &stubPluginStore{}, MCP: dropper}
+	out, err := tb.Execute(context.Background(), "mcp_disable", []byte(`{"id":"nusashell.demo"}`))
+	if err != nil {
+		t.Fatalf("mcp_disable: %v", err)
+	}
+	if !strings.Contains(out, "disabled") {
+		t.Fatalf("unexpected output %q", out)
+	}
+	if !dropper.droppedServers["plugin:nusashell.demo"] {
+		t.Fatalf("expected drop of plugin:nusashell.demo")
+	}
+}
+
+func TestMcpUnregister(t *testing.T) {
+	store := newRecordedStub([]*domain.Plugin{{Manifest: domain.PluginManifest{ID: "demo", Name: "Demo", Version: "1.0.0", Icon: "🧩", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "nope"}}}})
+	tb := &Toolbox{Plugins: store, MCP: &stubDropper{droppedServers: map[string]bool{}}}
+	out, err := tb.Execute(context.Background(), "mcp_unregister", []byte(`{"id":"demo"}`))
+	if err != nil {
+		t.Fatalf("mcp_unregister: %v", err)
+	}
+	if !strings.Contains(out, "unregistered") {
+		t.Fatalf("unexpected output %q", out)
+	}
+	if len(store.deleted) != 1 || store.deleted[0] != "demo" {
+		t.Fatalf("expected delete demo, got %v", store.deleted)
+	}
+}
+
+func TestListToolsIncludesMcpManagement(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	names := map[string]bool{}
+	for _, ti := range tb.ListTools() {
+		names[ti.Name] = true
+	}
+	for _, want := range []string{"mcp_register", "mcp_enable", "mcp_disable", "mcp_unregister"} {
+		if !names[want] {
+			t.Fatalf("ListTools missing %q", want)
+		}
+	}
+}

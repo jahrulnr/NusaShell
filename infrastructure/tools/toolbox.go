@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -103,6 +104,10 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "tool_list", Description: "List tools from a running MCP server by name (names and descriptions, plus optional input schemas). When the server is omitted, lists tools across all running MCP servers.", InputSchema: obj("object", props("server", str("Optional MCP server name; when omitted, lists tools across all running servers")))},
 		{Name: "tool_search", Description: "Search a running MCP server's tools by name or description (case-insensitive token match — any term matches). Returns matching tool names and descriptions.", InputSchema: obj("object", props("server", str("MCP server name"), "query", str("Search query")), "server", "query")},
 		{Name: "tool_schema", Description: "Load one MCP tool's input schema by server and tool name. Useful when you need the exact argument shape before calling an mcp__<server>__<tool> tool.", InputSchema: obj("object", props("server", str("MCP server name"), "tool", str("Tool name within the server")), "server", "tool")},
+		{Name: "mcp_register", Description: "Register a new MCP plugin from a local folder (or update an existing one). The folder must contain manifest.json. After registering, call mcp_enable to connect and load its tools.", InputSchema: obj("object", props("source", str("Absolute path to the plugin folder containing manifest.json")), "source")},
+		{Name: "mcp_enable", Description: "Start/connect an MCP plugin and load its tools (alias of plugin.test). The plugin must be registered first (mcp_register or the Plugins view).", InputSchema: obj("object", props("id", str("Plugin id (e.g. nusashell.files)")), "id")},
+		{Name: "mcp_disable", Description: "Stop/disconnect an MCP plugin. The definition stays installed; only the MCP subprocess is stopped. Tools from this server are no longer listed.", InputSchema: obj("object", props("id", str("Plugin id")), "id")},
+		{Name: "mcp_unregister", Description: "Remove an MCP plugin entirely (deletes its folder under the plugins data dir). Use mcp_disable first if you only want to stop it.", InputSchema: obj("object", props("id", str("Plugin id")), "id")},
 		{Name: "read_image", Description: "Load an image from the conversation into your context so you can see it. Pass file_path (the absolute path shown in the image placeholder). When your active model supports vision, the image is attached to your context directly. For non-vision models, the image is described using a vision fallback model and the text description is returned.", InputSchema: obj("object", props("file_path", str("Absolute path of the image file on disk (shown in the image placeholder)"), "question", str("Optional question about the image")), "file_path")},
 		{Name: "web_search", Description: "Search the web for fresh information. Returns ranked results with title, URL, and snippet from multiple sources (Brave, Startpage, Wikipedia, GitHub). Use this when you need current information, documentation, or research. Follow up with web_fetch on promising URLs for full page content.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results (default 10)")), "query")},
 		{Name: "web_fetch", Description: "Fetch a URL and return readable text (HTML stripped to title + visible text). Use after web_search to read full page content from a result URL. Accepts http/https only.", InputSchema: obj("object", props("url", str("URL to fetch"), "max_bytes", intSchema("Optional max bytes of extracted text (default 2MB)")), "url")},
@@ -390,6 +395,102 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", fmt.Errorf("document %q not found; use docs_search first", args.ID)
 		}
 		return doc.Content, nil
+
+	case name == "mcp_register":
+		var args struct {
+			Source string `json:"source"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if strings.TrimSpace(args.Source) == "" {
+			return "", fmt.Errorf("source is required: absolute path to a plugin folder containing manifest.json")
+		}
+		if t.Plugins == nil {
+			return "", fmt.Errorf("plugin store not available")
+		}
+		absSource, err := filepath.Abs(args.Source)
+		if err != nil {
+			return "", fmt.Errorf("resolve source path: %w", err)
+		}
+		p, err := t.Plugins.Install(absSource)
+		if err != nil {
+			return "", fmt.Errorf("mcp_register: %w", err)
+		}
+		// Drop any stale cached connection so the new manifest is used.
+		if mcp, ok := t.MCP.(interface{ Drop(string) }); ok {
+			mcp.Drop(p.Manifest.MCPServerID())
+		}
+		return fmt.Sprintf("registered plugin %q (%s v%s) — run mcp_enable with id=%s to connect", p.Manifest.Name, p.Manifest.ID, p.Manifest.Version, p.Manifest.ID), nil
+
+	case name == "mcp_enable":
+		var args struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if strings.TrimSpace(args.ID) == "" {
+			return "", fmt.Errorf("id is required (use mcp_list to see registered plugins)")
+		}
+		if t.Plugins == nil || t.MCP == nil {
+			return "", fmt.Errorf("plugin runtime not available")
+		}
+		p, err := t.Plugins.Get(args.ID)
+		if err != nil {
+			return "", fmt.Errorf("plugin %q not found; register it first with mcp_register", args.ID)
+		}
+		ctxConn, cancelConn := context.WithTimeout(ctx, 20*time.Second)
+		defer cancelConn()
+		tools, err := t.MCP.Connect(ctxConn, p)
+		if err != nil {
+			return "", fmt.Errorf("mcp_enable %q: %w", args.ID, err)
+		}
+		return fmt.Sprintf("enabled plugin %q — %d tool(s) available", args.ID, len(tools)), nil
+
+	case name == "mcp_disable":
+		var args struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if strings.TrimSpace(args.ID) == "" {
+			return "", fmt.Errorf("id is required")
+		}
+		if t.MCP == nil {
+			return "", fmt.Errorf("plugin runtime not available")
+		}
+		dropper, ok := t.MCP.(interface{ Drop(string) })
+		if !ok {
+			return "", fmt.Errorf("mcp runtime does not support disconnect")
+		}
+		dropper.Drop("plugin:" + args.ID)
+		return fmt.Sprintf("disabled plugin %q (definition kept)", args.ID), nil
+
+	case name == "mcp_unregister":
+		var args struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if strings.TrimSpace(args.ID) == "" {
+			return "", fmt.Errorf("id is required")
+		}
+		if t.Plugins == nil {
+			return "", fmt.Errorf("plugin store not available")
+		}
+		if _, err := t.Plugins.Get(args.ID); err != nil {
+			return "", fmt.Errorf("plugin %q not found", args.ID)
+		}
+		if err := t.Plugins.Delete(args.ID); err != nil {
+			return "", fmt.Errorf("mcp_unregister: %w", err)
+		}
+		if dropper, ok := t.MCP.(interface{ Drop(string) }); ok {
+			dropper.Drop("plugin:" + args.ID)
+		}
+		return fmt.Sprintf("unregistered plugin %q", args.ID), nil
 
 	case name == "mcp_list":
 		if t.Plugins == nil {
