@@ -214,6 +214,7 @@ export function renderToolCallCard(toolCall) {
 }
 
 export function renderToolJob(toolCall) {
+  const card = el('details', { class: 'agent-tool-terminal' });
   const name = toolCall.name || 'tool';
   const isMcp = name.startsWith('mcp__');
   const displayName = isMcp ? name.replace(/^mcp__/, '').replace(/__/g, ' · ') : name;
