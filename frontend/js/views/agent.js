@@ -693,7 +693,10 @@ function endTurn(runId) {
   const convId = run.conversationId;
   run.msgNode.classList.remove('agent-pending');
   // Clean up transient UI elements (thinking dots, retry banner, tool timers).
-  run.textBox?.querySelector('.agent-thinking-dots')?.remove();
+  // Use a bubble-wide query: multi-round turns leave a textBox with dots per
+  // round that produced no text, so only removing from run.textBox would
+  // leave stale dots above tool stacks.
+  run.bubble?.querySelectorAll('.agent-thinking-dots').forEach((n) => n.remove());
   run.bubble?.querySelector('.agent-retry-banner')?.remove();
   clearToolTimers(run);
   state.runs.delete(runId);
@@ -914,6 +917,19 @@ function bindEvents() {
     // is created when agent.ask.pending fires with the validated args.
     // Skip the tool terminal here to avoid a double card.
     if (name === 'ask_question') return;
+    // The model moved on to a tool call — no longer "thinking". Drop the
+    // dots in the current round's textBox so they don't linger above the
+    // tool stack when the round produced no text. If the box is empty
+    // (tool-only round), remove it entirely so no blank bubble-text slot
+    // sits above the tools.
+    const tb = run.textBox;
+    if (tb) {
+      tb.querySelector('.agent-thinking-dots')?.remove();
+      if (!tb.textContent.trim() && !tb.querySelector('*')) {
+        tb.remove();
+        run.textBox = null;
+      }
+    }
     run.strip.hidden = false;
     const job = renderToolJob({ name, args: args ?? {}, status: 'running' });
     run.toolJobs.set(tool_call_id, job);
