@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -535,6 +536,10 @@ func (d *stubDropper) Drop(serverID string) { d.droppedServers[serverID] = true 
 func TestMcpRegister(t *testing.T) {
 	store := newRecordedStub(nil)
 	tb := &Toolbox{Plugins: store, MCP: &stubMCP{tools: map[string][]contracts.MCPToolDTO{}}}
+	absPluginSource, err := filepath.Abs("/tmp/fake-plugin")
+	if err != nil {
+		t.Fatalf("filepath.Abs: %v", err)
+	}
 	out, err := tb.Execute(context.Background(), "mcp_register", []byte(`{"source":"/tmp/fake-plugin"}`))
 	if err != nil {
 		t.Fatalf("mcp_register: %v", err)
@@ -542,8 +547,8 @@ func TestMcpRegister(t *testing.T) {
 	if !strings.Contains(out, "registered plugin") {
 		t.Fatalf("unexpected output %q", out)
 	}
-	if len(store.installedDirs) != 1 || store.installedDirs[0] != "/tmp/fake-plugin" {
-		t.Fatalf("expected install of /tmp/fake-plugin, got %v", store.installedDirs)
+	if len(store.installedDirs) != 1 || store.installedDirs[0] != absPluginSource {
+		t.Fatalf("expected install of %s, got %v", absPluginSource, store.installedDirs)
 	}
 }
 

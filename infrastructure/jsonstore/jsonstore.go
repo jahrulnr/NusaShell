@@ -148,13 +148,39 @@ func (s *Store) writeJSON(name string, v any) error {
 	return atomicWrite(filepath.Join(s.dir, name), b)
 }
 
-// atomicWrite writes via a temp file + rename so readers never see torn files.
+// atomicWrite writes via a unique temp file + rename so readers never see torn
+// files and concurrent writers of the same path cannot collide on a shared
+// temp name (which would race the rename and fail with "no such file").
 func atomicWrite(path string, b []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".nusashell-*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	name := tmp.Name()
+	cleanup := func() { _ = os.Remove(name) }
+	if _, err := tmp.Write(b); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Chmod(name, 0o644); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(name, path); err != nil {
+		cleanup()
+		return err
+	}
+	return nil
 }
 
 // ---- conversations ----
