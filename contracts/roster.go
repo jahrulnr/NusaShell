@@ -708,16 +708,18 @@ type MCPServerDTO struct {
 
 // PluginDTO is the wire representation of an installed plugin.
 type PluginDTO struct {
-	ID          string             `json:"id"`
-	Name        string             `json:"name"`
-	Version     string             `json:"version"`
-	Icon        string             `json:"icon"`
-	Category    string             `json:"category,omitempty"`
-	HasUI       bool               `json:"hasUI"`
-	InstallPath string             `json:"installPath"`
-	Status      string             `json:"status,omitempty"` // idle | connected
-	Tools       []MCPToolDTO       `json:"tools,omitempty"`
-	Manifest    *PluginManifestDTO `json:"manifest,omitempty"`
+	ID              string             `json:"id"`
+	Name            string             `json:"name"`
+	Version         string             `json:"version"`
+	Icon            string             `json:"icon"`
+	Category        string             `json:"category,omitempty"`
+	HasUI           bool               `json:"hasUI"`
+	InstallPath     string             `json:"installPath"`
+	Status          string             `json:"status,omitempty"` // idle | connected
+	Tools           []MCPToolDTO       `json:"tools,omitempty"`
+	AutoUpdate      bool               `json:"autoUpdate"`
+	UpdateAvailable string             `json:"updateAvailable,omitempty"` // catalog version when newer
+	Manifest        *PluginManifestDTO `json:"manifest,omitempty"`
 }
 
 type PluginManifestDTO struct {

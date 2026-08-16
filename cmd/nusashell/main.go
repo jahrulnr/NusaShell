@@ -195,6 +195,7 @@ func run() error {
 	httpServer.BaseContext = func(net.Listener) context.Context { return ctx }
 	app.StartCodexCircuitMonitor(ctx)
 	app.StartAutoModelImport(ctx)
+	app.StartAutoUpdateLoop(ctx, 0)
 	app.StartLifecycle()
 	defer app.CloseLifecycle()
 

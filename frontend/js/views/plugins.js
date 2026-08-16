@@ -38,6 +38,42 @@ export async function refresh() {
     if (updated) openDrawer(updated);
     else closeDrawer();
   }
+  void refreshUpdateBadges();
+}
+
+// refreshUpdateBadges asks the backend which catalog plugins have a newer
+// version than installed and paints a "Update available" badge on rows.
+async function refreshUpdateBadges() {
+  const badgeHost = document.getElementById('plugins-update-badge');
+  let updates = [];
+  try {
+    const result = await rpc('plugin.check_updates');
+    updates = result.plugins ?? [];
+  } catch {
+    updates = [];
+  }
+  const count = updates.length;
+  if (badgeHost) {
+    badgeHost.textContent = count ? String(count) : '';
+    badgeHost.hidden = count === 0;
+    badgeHost.title = count ? `${count} plugin update${count === 1 ? '' : 's'} available` : '';
+  }
+  const available = new Map(updates.map((u) => [u.pluginId, u.version]));
+  for (const row of document.querySelectorAll('.plugin-row')) {
+    const id = row.dataset.pluginId;
+    let badge = row.querySelector('.plugin-row-update-badge');
+    const version = available.get(id);
+    if (version) {
+      if (!badge) {
+        badge = el('span', { class: 'plugin-row-update-badge', text: '↑ update' });
+        row.append(badge);
+      } else {
+        badge.textContent = '↑ ' + version;
+      }
+    } else if (badge) {
+      badge.remove();
+    }
+  }
 }
 
 function renderList() {

@@ -385,7 +385,76 @@ func (a *App) InvalidateLearningSearcher() {
 	a.learningSearcher = nil
 }
 
-// StartLifecycle starts the background decay/prune loop and the
+// StartAutoUpdateLoop periodically checks catalog updates and upgrades
+// plugins with AutoUpdate enabled. Interval defaults to 6h. Safe no-op when
+// installer or store are unavailable.
+func (a *App) StartAutoUpdateLoop(ctx context.Context, interval time.Duration) {
+	if a.Plugins == nil || a.PluginInstaller == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = 6 * time.Hour
+	}
+	a.goSafe("autoupdate", func() {
+		a.runAutoUpdateOnce(ctx)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				a.runAutoUpdateOnce(ctx)
+			}
+		}
+	})
+	a.log("info", "plugin", "auto-update loop started (interval=%s)", interval)
+}
+
+func (a *App) runAutoUpdateOnce(ctx context.Context) {
+	installed, err := a.Plugins.List()
+	if err != nil {
+		a.log("warn", "autoupdate", "list plugins: %v", err)
+		return
+	}
+	var targets []*domain.Plugin
+	for _, p := range installed {
+		if p.Manifest.AutoUpdate {
+			targets = append(targets, p)
+		}
+	}
+	if len(targets) == 0 {
+		return
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	updates, err := a.PluginInstaller.CheckUpdates(checkCtx, installed)
+	if err != nil {
+		a.log("warn", "autoupdate", "check updates: %v", err)
+		return
+	}
+	byID := map[string]domain.PluginCatalogEntry{}
+	for _, u := range updates {
+		byID[u.PluginID] = u
+	}
+	for _, p := range targets {
+		entry, ok := byID[p.Manifest.ID]
+		if !ok {
+			continue
+		}
+		updateCtx, cancelUpd := context.WithTimeout(ctx, 5*time.Minute)
+		updated, err := a.PluginInstaller.Update(updateCtx, entry.ID)
+		cancelUpd()
+		if err != nil {
+			a.log("warn", "autoupdate", "update %s: %v", p.Manifest.ID, err)
+			continue
+		}
+		a.MCPToolbox.Drop("plugin:" + updated.Manifest.ID)
+		a.log("info", "autoupdate", "auto-updated %s → v%s", updated.Manifest.Name, updated.Manifest.Version)
+	}
+}
+
+// StartLifecycle starts the lifecycle (decay/prune) loop and the
 // compaction-triggered learning review subscriber. Safe to call once at
 // server startup. No-op if no lifecycle manager is configured.
 func (a *App) StartLifecycle() {
