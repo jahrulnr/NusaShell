@@ -24,3 +24,8 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 
 Credentials never appear in the JSON/JSONL files. Deleting the data
 directory removes everything, including stored keys.
+
+Selected provider keys can be seeded into `credentials.db` from an
+environment variable on startup (for example `OPENROUTER_API_KEY`); see
+the Providers page for the supported variables. The key is still persisted
+only in `credentials.db`.

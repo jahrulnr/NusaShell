@@ -51,6 +51,23 @@ never needs a key (only set one when Ollama is behind an auth proxy).
 manual key field. Keys are stored in the SQLite credential store
 (`credentials.db`) inside the data directory, never in the JSON files.
 
+### Seeding keys from the environment
+
+Keys normally come from the UI form, but a small set of well-known providers
+can be seeded from an environment variable at startup for headless or
+containerized deployments (for example a Cloud Agent secret). NusaShell still
+stores the key only in `credentials.db` — the environment variable is just the
+source on boot. Seeding is idempotent and non-destructive: it creates the
+provider (enabled) on first run and, on later runs, only rewrites the stored
+key when the variable's value changes (secret rotation). A provider's name,
+base URL, and enabled state that you edit in the UI are never overwritten, and
+the variable is never re-read into the wire config. Models are fetched by the
+normal auto-import loop after seeding.
+
+| Env variable | Seeded provider | Kind | Base URL |
+| --- | --- | --- | --- |
+| `OPENROUTER_API_KEY` | OpenRouter | `chat` | `https://openrouter.ai/api/v1` |
+
 ## Models
 
 After saving a provider, use **Import models** to fetch its model list
