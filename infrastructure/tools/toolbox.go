@@ -90,9 +90,10 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 	tools := []application.ToolInfo{
 		{Name: "skill_list", Description: "List available skills with their names and descriptions.", InputSchema: obj("object", props("limit", intSchema("Max results, default 100")))},
 		{Name: "skill_search", Description: "Search installed skills by name or description (case-insensitive substring match).", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 50")), "query")},
-		{Name: "skill_read", Description: "Read a skill's full markdown content by name so you can follow its instructions.", InputSchema: obj("object", props("name", str("Skill name (from skill_list or skill_search)")), "name")},
+		{Name: "skill_read", Description: "Read a text file inside an installed skill (default SKILL.md). Pass path for support files (e.g. references/x.md) and offset/max_chars for pagination of long files.", InputSchema: obj("object", props("name", str("Skill id (from skill_list or skill_search)"), "path", str("Relative file path inside the skill folder; defaults to SKILL.md"), "offset", intSchema("Character offset for pagination (default 0)"), "max_chars", intSchema("Maximum characters to return (default 20000, max 100000)")), "name")},
 		{Name: "skill_save", Description: "Create or update a skill. When id is omitted a new skill is created; otherwise the existing skill with that id is updated. Skills should be reusable procedures or domain knowledge, not one-off task notes.", InputSchema: obj("object", props("id", str("Existing skill id to update (omit to create new)"), "name", str("Skill name (lowercase with hyphens, matches folder name)"), "description", str("Short description (max 1024 chars)"), "content", str("Full skill markdown content")), "name", "description", "content")},
 		{Name: "skill_run", Description: "Load a skill's markdown instructions by skill name so you can follow them.", InputSchema: obj("object", props("name", str("Skill name to load")), "name")},
+		{Name: "skill_files", Description: "List the files inside an installed skill folder (SKILL.md + support files) with size and editability, to discover references/guides before skill_read.", InputSchema: obj("object", props("name", str("Skill id")), "name")},
 		{Name: "memory_save", Description: "Save a fact to long-term memory with optional tags.", InputSchema: obj("object", props("content", str("Fact to remember"), "tags", arr("Optional tags")), "content")},
 		{Name: "memory_search", Description: "Search memory entries by substring match over content and tags.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 10")), "query")},
 		{Name: "memory_list", Description: "List all memory entries.", InputSchema: obj("object", nil)},
@@ -223,17 +224,93 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 
 	case name == "skill_read":
 		var args struct {
+			Name     string `json:"name"`
+			Path     string `json:"path"`
+			Offset   int    `json:"offset"`
+			MaxChars int    `json:"max_chars"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if strings.TrimSpace(args.Name) == "" {
+			return "", fmt.Errorf("name is required (use skill_list to see available skills)")
+		}
+		if r, ok := t.Skills.(interface {
+			ReadFile(id, path string, offset, maxChars int) (*domain.SkillFile, error)
+		}); ok {
+			file, err := r.ReadFile(args.Name, args.Path, args.Offset, args.MaxChars)
+			if err != nil {
+				// Legacy stores without real skill folders report unsupported;
+				// fall back to SKILL.md Content so old behavior is preserved.
+				msg := err.Error()
+				if strings.Contains(msg, "not supported") || strings.Contains(msg, "unsupported") {
+					for _, s := range t.Skills.List() {
+						if s.Name == args.Name || s.ID == args.Name {
+							return s.Content, nil
+						}
+					}
+					return "", fmt.Errorf("skill %q not found; use skill_list or skill_search to see available skills", args.Name)
+				}
+				return "", fmt.Errorf("skill_read: %w", err)
+			}
+			var sb strings.Builder
+			if file.Editable {
+				sb.WriteString(file.Content)
+			} else {
+				sb.WriteString(fmt.Sprintf("[%s is not editable text; %d bytes]", file.Path, file.SizeBytes))
+			}
+			if file.Truncated {
+				sb.WriteString(fmt.Sprintf("\n… [truncated — continue with offset=%d]", file.NextOffset))
+			}
+			return sb.String(), nil
+		}
+		// Fallback: legacy Content-only stores (e.g. jsonstore or test stubs).
+		for _, s := range t.Skills.List() {
+			if s.Name == args.Name || s.ID == args.Name {
+				return s.Content, nil
+			}
+		}
+		return "", fmt.Errorf("skill %q not found; use skill_list or skill_search to see available skills", args.Name)
+
+	case name == "skill_files":
+		var args struct {
 			Name string `json:"name"`
 		}
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return "", fmt.Errorf("invalid args: %w", err)
 		}
-		for _, s := range t.Skills.List() {
-			if s.Name == args.Name {
-				return s.Content, nil
-			}
+		if strings.TrimSpace(args.Name) == "" {
+			return "", fmt.Errorf("name is required")
 		}
-		return "", fmt.Errorf("skill %q not found; use skill_list or skill_search to see available skills", args.Name)
+		if f, ok := t.Skills.(interface {
+			Files(id string) ([]domain.SkillFileEntry, error)
+		}); ok {
+			entries, err := f.Files(args.Name)
+			if err != nil {
+				msg := err.Error()
+				if strings.Contains(msg, "not supported") || strings.Contains(msg, "unsupported") {
+					return "", fmt.Errorf("skill store does not support file listing")
+				}
+				return "", fmt.Errorf("skill_files: %w", err)
+			}
+			var sb strings.Builder
+			for _, e := range entries {
+				kind := "f"
+				if e.Type == "directory" {
+					kind = "d"
+				}
+				fmt.Fprintf(&sb, "%s  %s", kind, e.Path)
+				if e.Type == "file" {
+					fmt.Fprintf(&sb, "  (%d B%s)", e.SizeBytes, map[bool]string{true: "", false: ", binary"}[e.Editable])
+				}
+				sb.WriteString("\n")
+			}
+			if sb.Len() == 0 {
+				return fmt.Sprintf("skill %q has no files", args.Name), nil
+			}
+			return strings.TrimSpace(sb.String()), nil
+		}
+		return "", fmt.Errorf("skill store does not support file listing")
 
 	case name == "skill_run":
 		var args struct {

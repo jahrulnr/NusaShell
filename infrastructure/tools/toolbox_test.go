@@ -25,6 +25,12 @@ func (s *stubSkillStore) Get(id string) (*domain.Skill, error) {
 }
 func (s *stubSkillStore) Save(sk *domain.Skill) error { return nil }
 func (s *stubSkillStore) Delete(id string) error      { return nil }
+func (s *stubSkillStore) ReadFile(id, path string, offset, maxChars int) (*domain.SkillFile, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (s *stubSkillStore) Files(id string) ([]domain.SkillFileEntry, error) {
+	return nil, fmt.Errorf("not implemented")
+}
 
 // stubPluginStore is a minimal PluginStore for testing.
 type stubPluginStore struct{ plugins []*domain.Plugin }
@@ -137,11 +143,34 @@ func TestSkillSearchNoMatch(t *testing.T) {
 	}
 }
 
+type stubSkillStoreNoFiles struct{ skills []*domain.Skill }
+
+func (s *stubSkillStoreNoFiles) List() []*domain.Skill { return s.skills }
+func (s *stubSkillStoreNoFiles) Get(id string) (*domain.Skill, error) {
+	for _, sk := range s.skills {
+		if sk.ID == id {
+			return sk, nil
+		}
+	}
+	return nil, fmt.Errorf("not found")
+}
+func (s *stubSkillStoreNoFiles) Save(sk *domain.Skill) error { return nil }
+func (s *stubSkillStoreNoFiles) Delete(id string) error      { return nil }
+func (s *stubSkillStoreNoFiles) ReadFile(id, path string, offset, maxChars int) (*domain.SkillFile, error) {
+	return nil, errReadFileUnsupported
+}
+func (s *stubSkillStoreNoFiles) Files(id string) ([]domain.SkillFileEntry, error) {
+	return nil, errReadFileUnsupported
+}
+
+var errReadFileUnsupported = fmt.Errorf("file reads unsupported by this store")
+
 func TestSkillRead(t *testing.T) {
-	tb := testToolbox(
-		[]*domain.Skill{{ID: "s1", Name: "git-helper", Description: "Git help", Content: "# Git Helper\nUse git status."}},
-		nil, &stubMCP{},
-	)
+	tb := &Toolbox{
+		Skills:  &stubSkillStoreNoFiles{skills: []*domain.Skill{{ID: "s1", Name: "git-helper", Description: "Git help", Content: "# Git Helper\nUse git status."}}},
+		Plugins: &stubPluginStore{},
+		MCP:     &stubMCP{},
+	}
 	out, err := tb.Execute(context.Background(), "skill_read", []byte(`{"name":"git-helper"}`))
 	if err != nil {
 		t.Fatalf("skill_read: %v", err)
@@ -740,5 +769,72 @@ func TestListToolsIncludesMcpServerAdd(t *testing.T) {
 	}
 	if !names["mcp_server_add"] {
 		t.Fatalf("ListTools missing mcp_server_add")
+	}
+}
+
+// --- enriched skill_read (file + listing) ---
+
+type skillFileStoreStub struct {
+	*stubSkillStore
+	files   map[string][]domain.SkillFileEntry
+	readErr error
+	read    func(id, path string, offset, maxChars int) (*domain.SkillFile, error)
+}
+
+func (s *skillFileStoreStub) ReadFile(id, path string, offset, maxChars int) (*domain.SkillFile, error) {
+	if s.readErr != nil {
+		return nil, s.readErr
+	}
+	if s.read != nil {
+		return s.read(id, path, offset, maxChars)
+	}
+	return nil, fmt.Errorf("not implemented")
+}
+func (s *skillFileStoreStub) Files(id string) ([]domain.SkillFileEntry, error) {
+	return s.files[id], nil
+}
+
+func TestSkillReadFile(t *testing.T) {
+	store := &skillFileStoreStub{stubSkillStore: &stubSkillStore{skills: []*domain.Skill{{ID: "mcp-creator", Name: "mcp-creator"}}}}
+	store.read = func(id, path string, offset, maxChars int) (*domain.SkillFile, error) {
+		if path == "" {
+			path = "SKILL.md"
+		}
+		return &domain.SkillFile{SkillID: id, Path: path, Content: "hello from " + path, Editable: true, SizeBytes: 20}, nil
+	}
+	tb := &Toolbox{Skills: store, Plugins: &stubPluginStore{}, MCP: &stubMCP{}}
+	out, err := tb.Execute(context.Background(), "skill_read", []byte(`{"name":"mcp-creator","path":"references/prerequisites.md"}`))
+	if err != nil {
+		t.Fatalf("skill_read file: %v", err)
+	}
+	if !strings.Contains(out, "references/prerequisites.md") {
+		t.Fatalf("unexpected content %q", out)
+	}
+}
+
+func TestSkillFiles(t *testing.T) {
+	store := &skillFileStoreStub{stubSkillStore: &stubSkillStore{skills: []*domain.Skill{{ID: "mcp-creator", Name: "mcp-creator"}}}}
+	store.files = map[string][]domain.SkillFileEntry{
+		"mcp-creator": {
+			{Path: "SKILL.md", Type: "file", SizeBytes: 10, Editable: true},
+			{Path: "references", Type: "directory"},
+			{Path: "references/prerequisites.md", Type: "file", SizeBytes: 5, Editable: true},
+		},
+	}
+	tb := &Toolbox{Skills: store, Plugins: &stubPluginStore{}, MCP: &stubMCP{}}
+	out, err := tb.Execute(context.Background(), "skill_files", []byte(`{"name":"mcp-creator"}`))
+	if err != nil {
+		t.Fatalf("skill_files: %v", err)
+	}
+	if !strings.Contains(out, "references/prerequisites.md") || !strings.Contains(out, "SKILL.md") {
+		t.Fatalf("unexpected listing %q", out)
+	}
+}
+
+func TestSkillFilesUnsupported(t *testing.T) {
+	tb := &Toolbox{Skills: &stubSkillStoreNoFiles{}, Plugins: &stubPluginStore{}, MCP: &stubMCP{}}
+	_, err := tb.Execute(context.Background(), "skill_files", []byte(`{"name":"x"}`))
+	if err == nil || !strings.Contains(err.Error(), "does not support file listing") {
+		t.Fatalf("expected unsupported error, got %v", err)
 	}
 }

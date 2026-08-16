@@ -130,6 +130,12 @@ func (f *fakeSkillStore) Get(id string) (*domain.Skill, error) {
 	}
 	return s, nil
 }
+func (f *fakeSkillStore) ReadFile(id, path string, offset, maxChars int) (*domain.SkillFile, error) {
+	return nil, errNotFound
+}
+func (f *fakeSkillStore) Files(id string) ([]domain.SkillFileEntry, error) {
+	return nil, errNotFound
+}
 func (f *fakeSkillStore) Save(s *domain.Skill) error {
 	if f.items == nil {
 		f.items = map[string]*domain.Skill{}

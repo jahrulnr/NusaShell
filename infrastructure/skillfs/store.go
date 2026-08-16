@@ -24,8 +24,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"nusashell/application"
 	"nusashell/domain"
@@ -505,3 +507,158 @@ func cleanupOrphanBuiltin(root string, sourceIDs map[string]bool, provenance map
 
 // Compile-time interface check.
 var _ application.SkillStore = (*Store)(nil)
+
+// --- enriched skill file reads (port of Electron skill_read) ---
+
+const maxSkillEditableBytes = 1024 * 1024
+
+// normalizedRel validates a skill-relative path: posix separators, no
+// leading "/", no empty/".." segments. Returns the cleaned path.
+func normalizedRel(path string) (string, error) {
+	p := strings.ReplaceAll(path, "\\", "/")
+	p = strings.TrimPrefix(p, "./")
+	if p == "" || strings.HasPrefix(p, "/") {
+		return "", fmt.Errorf("invalid skill path")
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == "" || seg == ".." {
+			return "", fmt.Errorf("invalid skill path")
+		}
+	}
+	return p, nil
+}
+
+// safeSkillPath resolves a skill-relative path to an absolute path inside
+// the skill's directory, refusing traversal.
+func (s *Store) safeSkillPath(id, rel string) (string, error) {
+	if !skillIDRe.MatchString(id) {
+		return "", fmt.Errorf("skill %q not found", id)
+	}
+	clean, err := normalizedRel(rel)
+	if err != nil {
+		return "", fmt.Errorf("skill %q: %w", id, err)
+	}
+	rootDir := filepath.Join(s.root, id)
+	if !strings.HasPrefix(rootDir, s.root+string(filepath.Separator)) && rootDir != s.root {
+		return "", fmt.Errorf("invalid skill path")
+	}
+	target := filepath.Join(rootDir, filepath.FromSlash(clean))
+	if target != rootDir && !strings.HasPrefix(target, rootDir+string(filepath.Separator)) {
+		return "", fmt.Errorf("invalid skill path")
+	}
+	info, err := os.Stat(target)
+	if err == nil && info.IsDir() {
+		return "", fmt.Errorf("skill file not found: %s", rel)
+	}
+	return target, nil
+}
+
+func isUTF8Text(data []byte) bool {
+	for _, b := range data {
+		if b == 0 {
+			return false
+		}
+	}
+	return utf8.Valid(data)
+}
+
+// ReadFile implements SkillStore.ReadFile.
+func (s *Store) ReadFile(id, path string, offset, maxChars int) (*domain.SkillFile, error) {
+	rel := strings.TrimSpace(path)
+	if rel == "" {
+		rel = "SKILL.md"
+	}
+	target, err := s.safeSkillPath(id, rel)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		return nil, fmt.Errorf("skill file not found: %s", rel)
+	}
+	editable := len(data) <= maxSkillEditableBytes && isUTF8Text(data)
+	sf := &domain.SkillFile{
+		SkillID:   id,
+		Path:      strings.ReplaceAll(rel, "\\", "/"),
+		SizeBytes: int64(len(data)),
+		Editable:  editable,
+	}
+	if !editable {
+		return sf, nil
+	}
+	text := string(data)
+	start := offset
+	if start < 0 {
+		start = 0
+	}
+	if start > len(text) {
+		start = len(text)
+	}
+	limit := maxChars
+	if limit <= 0 {
+		limit = 20000
+	}
+	if limit > 100000 {
+		limit = 100000
+	}
+	if start+limit > len(text) {
+		limit = len(text) - start
+	}
+	sf.Content = text[start : start+limit]
+	if start+limit < len(text) {
+		sf.Truncated = true
+		sf.NextOffset = start + limit
+	}
+	return sf, nil
+}
+
+// Files implements SkillStore.Files and lists the skill directory tree.
+func (s *Store) Files(id string) ([]domain.SkillFileEntry, error) {
+	if !skillIDRe.MatchString(id) {
+		return nil, fmt.Errorf("skill %q not found", id)
+	}
+	rootDir := filepath.Join(s.root, id)
+	var out []domain.SkillFileEntry
+	var walkDir func(dir, prefix string) error
+	walkDir = func(dir, prefix string) error {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return err
+		}
+		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+		for _, entry := range entries {
+			if entry.Type()&os.ModeSymlink != 0 {
+				continue
+			}
+			name := entry.Name()
+			relPath := name
+			if prefix != "" {
+				relPath = prefix + "/" + name
+			}
+			full := filepath.Join(dir, name)
+			if entry.IsDir() {
+				out = append(out, domain.SkillFileEntry{Path: relPath, Type: "directory"})
+				if err := walkDir(full, relPath); err != nil {
+					return err
+				}
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			editable := false
+			if info.Size() <= maxSkillEditableBytes {
+				if data, err := os.ReadFile(full); err == nil {
+					editable = isUTF8Text(data)
+				}
+			}
+			out = append(out, domain.SkillFileEntry{Path: relPath, Type: "file", SizeBytes: info.Size(), Editable: editable})
+		}
+		return nil
+	}
+	if err := walkDir(rootDir, ""); err != nil {
+		return nil, fmt.Errorf("skill %q not found", id)
+	}
+	return out, nil
+}

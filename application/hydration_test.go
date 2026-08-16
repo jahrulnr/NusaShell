@@ -26,6 +26,12 @@ func (s *stubSkillStoreHyd) Get(id string) (*domain.Skill, error) {
 }
 func (s *stubSkillStoreHyd) Save(sk *domain.Skill) error { return nil }
 func (s *stubSkillStoreHyd) Delete(id string) error      { return nil }
+func (s *stubSkillStoreHyd) ReadFile(id, path string, offset, maxChars int) (*domain.SkillFile, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (s *stubSkillStoreHyd) Files(id string) ([]domain.SkillFileEntry, error) {
+	return nil, fmt.Errorf("not implemented")
+}
 
 // stubPluginStoreHyd is a minimal PluginStore for hydration tests.
 type stubPluginStoreHyd struct{ plugins []*domain.Plugin }

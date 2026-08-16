@@ -47,6 +47,13 @@ type SkillStore interface {
 	Get(id string) (*domain.Skill, error)
 	Save(s *domain.Skill) error
 	Delete(id string) error
+	// ReadFile reads any text file inside a skill directory (default
+	// SKILL.md) with offset/maxChars pagination. Mirrors the Electron
+	// shell's skill_read (registry.read) semantics.
+	ReadFile(id, path string, offset, maxChars int) (*domain.SkillFile, error)
+	// Files lists the nested directory tree of a skill folder (path,
+	// type, sizeBytes, editable), sorted as in the Electron shell.
+	Files(id string) ([]domain.SkillFileEntry, error)
 }
 
 // PluginStore is the single source of truth for plugins (MCP servers and

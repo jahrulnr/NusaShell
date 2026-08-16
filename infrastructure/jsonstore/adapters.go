@@ -1,6 +1,10 @@
 package jsonstore
 
-import "nusashell/domain"
+import (
+	"fmt"
+
+	"nusashell/domain"
+)
 
 // Sub-store adapters expose the application port method names. The Store
 // itself implements ConversationStore (List/Get/Save/Delete).
@@ -52,4 +56,14 @@ type Settings struct{ S *Store }
 func (st *Settings) Get() domain.Settings { return st.S.GetSettings() }
 func (st *Settings) Set(v domain.Settings) error {
 	return st.S.SetSettings(v)
+}
+
+// SkillsAdapter adds file-level skill reads for stores without a real
+// skills directory on disk (legacy jsonstore path). Reads are unsupported —
+// they return a clear error so the toolbox falls back to Content.
+func (k *Skills) ReadFile(id, path string, offset, maxChars int) (*domain.SkillFile, error) {
+	return nil, fmt.Errorf("skill file reads are not supported by this store")
+}
+func (k *Skills) Files(id string) ([]domain.SkillFileEntry, error) {
+	return nil, fmt.Errorf("skill file listing is not supported by this store")
 }
