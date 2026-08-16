@@ -52,8 +52,11 @@ func TestResolveLocalFileIcons(t *testing.T) {
 		}
 	}
 
+	// Absolute file URL must use the file:/// + forward-slash form so it
+	// parses as an absolute URL on every OS (on Windows, file://C:\... is
+	// treated as a relative path with a drive-letter prefix).
 	abs := filepath.Join(dir, "icon.png")
-	got := ResolveLocal("file://"+abs, dir)
+	got := ResolveLocal("file:///"+filepath.ToSlash(abs), dir)
 	if !strings.HasPrefix(got, "data:image/png;base64,") {
 		t.Errorf("absolute file URL = %q, want data URL", got)
 	}

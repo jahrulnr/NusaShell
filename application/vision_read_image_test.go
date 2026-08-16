@@ -9,20 +9,35 @@ import (
 	"nusashell/domain"
 )
 
+// absTestPath builds an absolute path on any OS: Linux gets /data/...,
+// Windows gets \\data\\. Both satisfy filepath.IsAbs.
+func absTestPath(parts ...string) string {
+	return filepath.Join(append([]string{string(filepath.Separator), "data"}, parts...)...)
+}
+
+// filePathArgs builds a read_image args JSON with the given file path.
+func filePathArgs(path string, question string) string {
+	qs := ""
+	if question != "" {
+		qs = ",\"question\":\"" + question + "\""
+	}
+	return "{\"file_path\":\"" + path + "\"" + qs + "}"
+}
+
 func TestFindImageAttachmentByPath(t *testing.T) {
 	conv := &domain.Conversation{Messages: []domain.Message{
 		{ID: "u1", Role: domain.RoleUser, Content: "look", Attachments: []domain.Attachment{
-			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: "/data/attachments/c1/cat.png"},
+			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: absTestPath("attachments", "c1", "cat.png")},
 			{Type: "text", Name: "note.txt", MediaType: "text/plain", Content: "see image"},
 		}},
 		{ID: "a1", Role: domain.RoleAssistant, Content: "ok"},
 		{ID: "u2", Role: domain.RoleUser, Content: "another", Attachments: []domain.Attachment{
-			{Type: "image", Name: "dog.jpg", MediaType: "image/jpeg", DataURL: "data:image/jpeg;base64,def", FilePath: "/data/attachments/c1/dog.jpg"},
+			{Type: "image", Name: "dog.jpg", MediaType: "image/jpeg", DataURL: "data:image/jpeg;base64,def", FilePath: absTestPath("attachments", "c1", "dog.jpg")},
 		}},
 	}}
 
 	// Exact match
-	img, err := findImageAttachmentByPath(conv, "/data/attachments/c1/cat.png")
+	img, err := findImageAttachmentByPath(conv, absTestPath("attachments", "c1", "cat.png"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -40,7 +55,7 @@ func TestFindImageAttachmentByPath(t *testing.T) {
 	}
 
 	// Second image in different message
-	img, err = findImageAttachmentByPath(conv, "/data/attachments/c1/dog.jpg")
+	img, err = findImageAttachmentByPath(conv, absTestPath("attachments", "c1", "dog.jpg"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -49,7 +64,7 @@ func TestFindImageAttachmentByPath(t *testing.T) {
 	}
 
 	// Not found
-	_, err = findImageAttachmentByPath(conv, "/data/attachments/c1/nonexistent.png")
+	_, err = findImageAttachmentByPath(conv, absTestPath("attachments", "c1", "nonexistent.png"))
 	if err == nil {
 		t.Error("expected error for nonexistent image")
 	}
@@ -58,7 +73,7 @@ func TestFindImageAttachmentByPath(t *testing.T) {
 func TestExecuteReadImageVisionModel(t *testing.T) {
 	conv := &domain.Conversation{Messages: []domain.Message{
 		{ID: "u1", Role: domain.RoleUser, Content: "look", Attachments: []domain.Attachment{
-			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: "/data/attachments/c1/cat.png"},
+			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: absTestPath("attachments", "c1", "cat.png")},
 		}},
 	}}
 	app := &App{
@@ -70,7 +85,7 @@ func TestExecuteReadImageVisionModel(t *testing.T) {
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
 		Name: "read_image",
-		Args: `{"file_path":"/data/attachments/c1/cat.png","question":"what color is the cat?"}`,
+		Args: filePathArgs(absTestPath("attachments", "c1", "cat.png"), "what color is the cat?"),
 	}
 
 	output, atts, err := app.executeReadImage(run, toolCall, true, domain.Settings{})
@@ -94,7 +109,7 @@ func TestExecuteReadImageVisionModel(t *testing.T) {
 func TestExecuteReadImageNonVisionNoFallback(t *testing.T) {
 	conv := &domain.Conversation{Messages: []domain.Message{
 		{ID: "u1", Role: domain.RoleUser, Content: "look", Attachments: []domain.Attachment{
-			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: "/data/attachments/c1/cat.png"},
+			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: absTestPath("attachments", "c1", "cat.png")},
 		}},
 	}}
 	app := &App{
@@ -106,7 +121,7 @@ func TestExecuteReadImageNonVisionNoFallback(t *testing.T) {
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
 		Name: "read_image",
-		Args: `{"file_path":"/data/attachments/c1/cat.png"}`,
+		Args: filePathArgs(absTestPath("attachments", "c1", "cat.png"), ""),
 	}
 
 	output, atts, err := app.executeReadImage(run, toolCall, false, domain.Settings{})
@@ -125,7 +140,7 @@ func TestExecuteReadImageNonVisionNoFallback(t *testing.T) {
 func TestExecuteReadImageImageNotFound(t *testing.T) {
 	conv := &domain.Conversation{Messages: []domain.Message{
 		{ID: "u1", Role: domain.RoleUser, Content: "look", Attachments: []domain.Attachment{
-			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: "/data/attachments/c1/cat.png"},
+			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: absTestPath("attachments", "c1", "cat.png")},
 		}},
 	}}
 	app := &App{
@@ -137,7 +152,7 @@ func TestExecuteReadImageImageNotFound(t *testing.T) {
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
 		Name: "read_image",
-		Args: `{"file_path":"/data/attachments/c1/nonexistent.png"}`,
+		Args: filePathArgs(absTestPath("attachments", "c1", "nonexistent.png"), ""),
 	}
 
 	output, _, err := app.executeReadImage(run, toolCall, true, domain.Settings{})

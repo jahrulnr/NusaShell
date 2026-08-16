@@ -761,6 +761,9 @@ func TestAgentTurnWithMCPTool(t *testing.T) {
 	if !found {
 		t.Fatalf("mcp tool call missing from messages: %+v", conv.Messages)
 	}
+	// Stop the plugin's MCP subprocess so TempDir cleanup does not fail on
+	// Windows, where a running child process locks the plugin directory.
+	h.rpcOK(t, "plugin.stop", map[string]any{"id": serverID})
 }
 
 // TestAgentTurnAnthropic drives a turn through the Anthropic adapter and
