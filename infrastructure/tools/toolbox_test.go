@@ -634,6 +634,12 @@ type stubPluginInstaller struct {
 func (s *stubPluginInstaller) Catalog(ctx context.Context) ([]domain.PluginCatalogEntry, error) {
 	return s.catalog, nil
 }
+func (s *stubPluginInstaller) CheckUpdates(ctx context.Context, installed []*domain.Plugin) ([]domain.PluginCatalogEntry, error) {
+	return nil, nil
+}
+func (s *stubPluginInstaller) Update(ctx context.Context, pluginID string) (*domain.Plugin, error) {
+	return s.Install(ctx, domain.PluginInstallRequest{Source: domain.InstallSourceCatalog, ID: pluginID})
+}
 func (s *stubPluginInstaller) Install(ctx context.Context, req domain.PluginInstallRequest) (*domain.Plugin, error) {
 	s.lastReq = req
 	if s.err != nil {

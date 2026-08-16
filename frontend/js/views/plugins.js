@@ -143,6 +143,7 @@ function openDrawer(server) {
   renderDrawerState(server);
   renderDrawerTools(server);
   renderDrawerManifest(server);
+  renderDrawerAutoUpdate(server);
 
   const drawer = document.getElementById('plugin-drawer');
   const overlay = document.getElementById('plugin-drawer-overlay');
@@ -179,6 +180,27 @@ function renderDrawerState(server) {
     if (index > 0) stateMachine.append(el('span', { class: 'state-arrow', text: '→' }));
     stateMachine.append(el('span', { class: `state-node${state === current ? ' current' : ''}`, text: state }));
   });
+}
+
+function renderDrawerAutoUpdate(server) {
+  const section = document.getElementById('plugin-drawer-autoupdate');
+  if (!section) return;
+  section.hidden = !(server.plugin === true);
+  if (server.plugin !== true) return;
+  const toggle = document.getElementById('plugin-autoupdate-toggle');
+  if (!toggle) return;
+  toggle.checked = Boolean(server.autoUpdate);
+  toggle.onchange = async () => {
+    try {
+      await rpc('plugin.set_autoupdate', { id: server.id, enabled: toggle.checked });
+      toast(toggle.checked ? 'Auto update enabled' : 'Auto update disabled', 'success');
+      const installed = servers.find((srv) => srv.id === server.id);
+      if (installed) installed.autoUpdate = toggle.checked;
+    } catch (error) {
+      toast(error.message, 'error');
+      toggle.checked = !toggle.checked;
+    }
+  };
 }
 
 function renderDrawerTools(server) {
@@ -436,8 +458,13 @@ function renderCatalogList(query = '') {
     return;
   }
   for (const item of filtered) {
+    const installedPlugin = servers.find((server) => server.plugin === true && server.pluginId === item.pluginId);
     const isInstalled = installed.has(item.pluginId);
+    const installedVersion = installedPlugin?.version ?? '';
+    const hasUpdate = isInstalled && installedVersion && installedVersion !== item.version && newerVersion(item.version, installedVersion);
     const iconValue = item.icon || '🔌';
+    const actionText = !isInstalled ? 'Install' : (hasUpdate ? 'Update' : (installedVersion === item.version ? 'Installed' : 'Reinstall'));
+    const actionDisabled = !isInstalled ? false : (actionText === 'Installed');
     const row = el('div', { class: 'plugin-catalog-entry' },
       el('div', { class: 'plugin-catalog-icon' }, iconNode(iconValue, iconValue)),
       el('div', { class: 'plugin-catalog-info' },
@@ -448,14 +475,17 @@ function renderCatalogList(query = '') {
         el('div', { class: 'plugin-catalog-desc', text: item.description || item.pluginId }),
       ),
       el('button', {
-        class: 'mini-btn plugin-catalog-install',
+        class: `mini-btn plugin-catalog-action${hasUpdate ? ' has-update' : ''}`,
         type: 'button',
-        text: isInstalled ? 'Reinstall' : 'Install',
-        disabled: isInstalled ? false : undefined,
-        'aria-label': `${isInstalled ? 'Reinstall' : 'Install'} ${item.name}`,
+        text: actionText,
+        disabled: actionDisabled ? true : undefined,
+        'aria-label': `${actionText} ${item.name}`,
       }),
     );
-    row.querySelector('.plugin-catalog-install').addEventListener('click', () => installFromCatalog(item));
+    row.querySelector('.plugin-catalog-action').addEventListener('click', () => {
+      if (hasUpdate) updatePlugin(item);
+      else installFromCatalog(item);
+    });
     list.append(row);
   }
 }
@@ -498,6 +528,30 @@ async function confirmInstall() {
       }
     };
     reader.readAsDataURL(file);
+  }
+}
+
+// Simple semver compare ("major.minor.patch"); falls back to string compare.
+function cmpVersions(a, b) {
+  const pa = (a || '').split(/[-+]/)[0].split('.').map((n) => Number(n));
+  const pb = (b || '').split(/[-+]/)[0].split('.').map((n) => Number(n));
+  for (let i = 0; i < 3; i++) {
+    const x = pa[i] ?? 0, y = pb[i] ?? 0;
+    if (x !== y) return x > y ? 1 : -1;
+  }
+  return 0;
+}
+function newerVersion(cand, base) {
+  return cmpVersions(cand, base) > 0;
+}
+
+async function updatePlugin(item) {
+  try {
+    await runInstall({ source: 'catalog', id: item.id });
+    closeInstallDialog();
+    toast(`${item.name} updated to v${item.version}`, 'success');
+  } catch (error) {
+    showInstallError(error.message);
   }
 }
 

@@ -384,6 +384,77 @@ func (a *App) handlePluginUninstall(req contracts.PluginIDRequest) (any, *contra
 	return a.handlePluginDelete(req)
 }
 
+// handlePluginCheckUpdates compares installed plugins against the catalog
+// and returns entries with a newer version available.
+func (a *App) handlePluginCheckUpdates() (any, *contracts.RPCError) {
+	if a.Plugins == nil || a.PluginInstaller == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "plugin runtime not available"}
+	}
+	installed, err := a.Plugins.List()
+	if err != nil {
+		return nil, rpcInternal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	updates, err := a.PluginInstaller.CheckUpdates(ctx, installed)
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
+	}
+	out := make([]contracts.PluginCatalogEntry, 0, len(updates))
+	for _, e := range updates {
+		out = append(out, contracts.PluginCatalogEntry{
+			ID: e.ID, PluginID: e.PluginID, Name: e.Name, Version: e.Version,
+			Description: e.Description, Icon: e.Icon, Tag: e.Tag, ReleasedAt: e.ReleasedAt,
+		})
+	}
+	return contracts.PluginCatalogResult{Plugins: out}, nil
+}
+
+// handlePluginSetAutoUpdate persists the auto-update preference for a
+// plugin (stored on the manifest so it survives restarts).
+func (a *App) handlePluginSetAutoUpdate(req contracts.PluginSetAutoUpdateRequest) (any, *contracts.RPCError) {
+	if a.Plugins == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "plugin store not available"}
+	}
+	id := strings.TrimPrefix(req.ID, "plugin:")
+	p, err := a.Plugins.Get(id)
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
+	}
+	p.Manifest.AutoUpdate = req.Enabled
+	if err := a.Plugins.Save(p); err != nil {
+		return nil, rpcInternal(err)
+	}
+	a.log("info", "plugin", "autoupdate set: %s = %v", id, req.Enabled)
+	return map[string]bool{"ok": true}, nil
+}
+
+// handlePluginUpdate updates a catalog plugin to its latest release.
+func (a *App) handlePluginUpdate(req contracts.PluginIDRequest) (any, *contracts.RPCError) {
+	if a.PluginInstaller == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "plugin installer not available"}
+	}
+	id := strings.TrimSpace(req.ID)
+	// Accept either the catalog key (e.g. "notes") or the manifest id
+	// (e.g. "nusashell.notes") — normalize to the catalog key by looking up
+	// the installed plugin's catalog entry.
+	catalogID := id
+	if strings.HasPrefix(id, "nusashell.") {
+		catalogID = strings.TrimPrefix(id, "nusashell.")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	updated, err := a.PluginInstaller.Update(ctx, catalogID)
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
+	}
+	a.MCPToolbox.Drop("plugin:" + updated.Manifest.ID)
+	a.log("info", "plugin", "plugin updated: %s v%s", updated.Manifest.Name, updated.Manifest.Version)
+	dto := pluginToDTO(updated)
+	dto.Status, dto.Tools = a.pluginStatus(updated)
+	return contracts.PluginInstallResult{Plugin: &dto}, nil
+}
+
 // handlePluginToolsList returns tools from all connected plugins.
 // Plugins that are not running contribute nothing; call handlePluginTest
 // (Start) first to connect.

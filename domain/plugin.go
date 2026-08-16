@@ -88,6 +88,7 @@ type PluginManifest struct {
 	Icon         string            `json:"icon"`
 	Description  string            `json:"description,omitempty"`
 	Category     string            `json:"category,omitempty"`
+	AutoUpdate   bool              `json:"autoUpdate,omitempty"`
 	UI           *PluginUIConfig   `json:"ui,omitempty"`
 	MCP          PluginMCPConfig   `json:"mcp"`
 	Dependencies map[string]string `json:"dependencies,omitempty"`

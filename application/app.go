@@ -725,6 +725,20 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 			return nil, rpcErr
 		}
 		return a.handlePluginUninstall(req)
+	case contracts.MethodPluginCheckUpdates:
+		return a.handlePluginCheckUpdates()
+	case contracts.MethodPluginSetAutoUpdate:
+		var req contracts.PluginSetAutoUpdateRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handlePluginSetAutoUpdate(req)
+	case contracts.MethodPluginUpdate:
+		var req contracts.PluginIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handlePluginUpdate(req)
 	case contracts.MethodMemoryList:
 		return a.handleMemoryList()
 	case contracts.MethodMemorySave:

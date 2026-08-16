@@ -50,15 +50,18 @@ const (
 	MethodSkillsDelete = "skills.delete"
 	MethodSkillsRun    = "skills.run"
 
-	MethodPluginList      = "plugin.list"
-	MethodPluginSave      = "plugin.save"
-	MethodPluginDelete    = "plugin.delete"
-	MethodPluginTest      = "plugin.test"
-	MethodPluginStop      = "plugin.stop"
-	MethodPluginToolsList = "plugin.tools.list"
-	MethodPluginUninstall = "plugin.uninstall"
-	MethodPluginCatalog   = "plugin.catalog"
-	MethodPluginInstall   = "plugin.install"
+	MethodPluginList          = "plugin.list"
+	MethodPluginSave          = "plugin.save"
+	MethodPluginDelete        = "plugin.delete"
+	MethodPluginTest          = "plugin.test"
+	MethodPluginStop          = "plugin.stop"
+	MethodPluginToolsList     = "plugin.tools.list"
+	MethodPluginUninstall     = "plugin.uninstall"
+	MethodPluginCatalog       = "plugin.catalog"
+	MethodPluginInstall       = "plugin.install"
+	MethodPluginCheckUpdates  = "plugin.check_updates"
+	MethodPluginUpdate        = "plugin.update"
+	MethodPluginSetAutoUpdate = "plugin.set_autoupdate"
 
 	MethodMemoryList   = "memory.list"
 	MethodMemorySave   = "memory.save"
@@ -749,6 +752,11 @@ type PluginMCPDTO struct {
 
 type PluginListResult struct {
 	Plugins []PluginDTO `json:"plugins"`
+}
+
+type PluginSetAutoUpdateRequest struct {
+	ID      string `json:"id"`
+	Enabled bool   `json:"enabled"`
 }
 
 type PluginIDRequest struct {

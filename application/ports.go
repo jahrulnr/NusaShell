@@ -74,6 +74,10 @@ type PluginStore interface {
 type PluginInstaller interface {
 	Catalog(ctx context.Context) ([]domain.PluginCatalogEntry, error)
 	Install(ctx context.Context, req domain.PluginInstallRequest) (*domain.Plugin, error)
+	// CheckUpdates returns catalog entries newer than their installed match.
+	CheckUpdates(ctx context.Context, installed []*domain.Plugin) ([]domain.PluginCatalogEntry, error)
+	// Update reinstalls a catalog plugin at its latest version.
+	Update(ctx context.Context, pluginID string) (*domain.Plugin, error)
 }
 
 type MemoryStore interface {

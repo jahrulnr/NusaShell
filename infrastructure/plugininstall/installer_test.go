@@ -338,3 +338,24 @@ func TestCatalog(t *testing.T) {
 		t.Fatalf("files file:// icon must resolve to a data URL, got %q", files.Icon)
 	}
 }
+
+func TestNewerVersion(t *testing.T) {
+	if !newerVersion("2.0.0", "1.9.0") {
+		t.Fatal("2.0.0 should be newer than 1.9.0")
+	}
+	if newerVersion("1.9.0", "2.0.0") {
+		t.Fatal("1.9.0 should NOT be newer")
+	}
+	if newerVersion("2.0.0", "2.0.0") {
+		t.Fatal("equal versions are not newer")
+	}
+	if !newerVersion("1.10.0", "1.9.0") {
+		t.Fatal("1.10.0 should be newer than 1.9.0")
+	}
+	if !newerVersion("v2", "1.0.0") {
+		// non-semver falls back to string inequality so "v2" vs "1.0.0"
+		// (different strings) counts as newer per fallback rule; this is
+		// by design for tags that are not semver (e.g. "v2").
+		t.Fatal("expected non-semver to compare by string")
+	}
+}

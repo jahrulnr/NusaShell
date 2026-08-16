@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -131,8 +132,79 @@ func (i *Installer) Catalog(ctx context.Context) ([]domain.PluginCatalogEntry, e
 	return result, nil
 }
 
+// CheckUpdates returns catalog entries that have a newer version than the
+// installed plugin with the same plugin id.
+func (i *Installer) CheckUpdates(ctx context.Context, installed []*domain.Plugin) ([]domain.PluginCatalogEntry, error) {
+	catalog, err := i.Catalog(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byID := map[string]*domain.Plugin{}
+	for _, p := range installed {
+		byID[p.Manifest.ID] = p
+	}
+	var updates []domain.PluginCatalogEntry
+	for _, entry := range catalog {
+		installed, ok := byID[entry.PluginID]
+		if !ok {
+			continue // not installed -> not an "update"
+		}
+		if newerVersion(entry.Version, installed.Manifest.Version) {
+			updates = append(updates, entry)
+		}
+	}
+	return updates, nil
+}
+
+// Update reinstalls a catalog plugin from its latest release (the plugin
+// store replaces the existing folder with the same id).
+func (i *Installer) Update(ctx context.Context, pluginID string) (*domain.Plugin, error) {
+	return i.Install(ctx, domain.PluginInstallRequest{
+		Source: domain.InstallSourceCatalog,
+		ID:     pluginID,
+	})
+}
+
+// newerVersion reports whether cand is a newer semantic version than base.
+// Non-semver versions fall back to simple string inequality ordering.
+func newerVersion(cand, base string) bool {
+	a, aok := parseSemver(cand)
+	b, bok := parseSemver(base)
+	if aok && bok {
+		if a[0] != b[0] {
+			return a[0] > b[0]
+		}
+		if a[1] != b[1] {
+			return a[1] > b[1]
+		}
+		return a[2] > b[2]
+	}
+	return cand != "" && base != "" && cand != base
+}
+
+// parseSemver parses "major.minor.patch" (ignoring prerelease suffix).
+func parseSemver(v string) ([3]int, bool) {
+	core := v
+	if idx := strings.IndexAny(core, "-+"); idx >= 0 {
+		core = core[:idx]
+	}
+	parts := strings.Split(core, ".")
+	if len(parts) != 3 {
+		return [3]int{}, false
+	}
+	var out [3]int
+	for i, p := range parts {
+		n, err := strconv.Atoi(strings.TrimSpace(p))
+		if err != nil {
+			return [3]int{}, false
+		}
+		out[i] = n
+	}
+	return out, true
+}
+
 // Install fetches a plugin from the requested source, validates it, and
-// installs it through the plugin store.
+// installs it through the store.
 func (i *Installer) Install(ctx context.Context, req domain.PluginInstallRequest) (*domain.Plugin, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
