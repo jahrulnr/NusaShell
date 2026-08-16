@@ -91,14 +91,16 @@ func TestCompactionTriggerAutoUsesWindowPercentage(t *testing.T) {
 	}
 }
 
-func TestResolveContextWindowHonorsGlobalInputCap(t *testing.T) {
+func TestResolveContextWindowModelWinsOverGlobalCap(t *testing.T) {
 	provider := &domain.Provider{Models: []domain.Model{
 		{ID: "long-model", Context: 1_000_000},
 		{ID: "small-model", Context: 128_000},
 	}}
 	settings := domain.Settings{MaxInputTokens: 200_000}
-	if got := resolveContextWindow(provider, "long-model", settings); got != 200_000 {
-		t.Fatalf("long model context = %d, want global cap 200000", got)
+	// Catalog model window wins over the global cap — the cap is only a
+	// fallback for models not in the catalog (avoids "1M model, why 200k?").
+	if got := resolveContextWindow(provider, "long-model", settings); got != 1_000_000 {
+		t.Fatalf("long model context = %d, want model window 1000000", got)
 	}
 	if got := resolveContextWindow(provider, "small-model", settings); got != 128_000 {
 		t.Fatalf("small model context = %d, want model window 128000", got)
@@ -108,6 +110,9 @@ func TestResolveContextWindowHonorsGlobalInputCap(t *testing.T) {
 	}
 	if got := effectiveContextWindow(1_000_000, 0); got != 1_000_000 {
 		t.Fatalf("uncapped model context = %d, want 1000000", got)
+	}
+	if got := effectiveContextWindow(1_000_000, 200_000); got != 1_000_000 {
+		t.Fatalf("catalog model should ignore global cap, got %d", got)
 	}
 }
 
