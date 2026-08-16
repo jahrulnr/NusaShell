@@ -21,16 +21,17 @@ import (
 func ptrBool(v bool) *bool { return &v }
 
 type Toolbox struct {
-	Skills       application.SkillStore
-	Memory       application.MemoryStore
-	Docs         application.DocsSource
-	Plugins      application.PluginStore
-	Todos        application.ConversationTodoPort
-	Searcher     *searchwire.Searcher // zero-config searcher for web_search + web_fetch
-	Settings     application.SettingsStore
-	Credentials  application.CredentialStore
-	AskQuestions *application.AskQuestionService
-	MCP          interface {
+	Skills          application.SkillStore
+	Memory          application.MemoryStore
+	Docs            application.DocsSource
+	Plugins         application.PluginStore
+	PluginInstaller application.PluginInstaller
+	Todos           application.ConversationTodoPort
+	Searcher        *searchwire.Searcher // zero-config searcher for web_search + web_fetch
+	Settings        application.SettingsStore
+	Credentials     application.CredentialStore
+	AskQuestions    *application.AskQuestionService
+	MCP             interface {
 		Connect(ctx context.Context, p *domain.Plugin) ([]contracts.MCPToolDTO, error)
 		ToolsFor(serverID string) ([]contracts.MCPToolDTO, bool)
 		CallTool(ctx context.Context, serverID, toolName string, args map[string]any) (string, error)
@@ -108,6 +109,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "mcp_enable", Description: "Start/connect an MCP plugin and load its tools (alias of plugin.test). The plugin must be registered first (mcp_register or the Plugins view).", InputSchema: obj("object", props("id", str("Plugin id (e.g. nusashell.files)")), "id")},
 		{Name: "mcp_disable", Description: "Stop/disconnect an MCP plugin. The definition stays installed; only the MCP subprocess is stopped. Tools from this server are no longer listed.", InputSchema: obj("object", props("id", str("Plugin id")), "id")},
 		{Name: "mcp_unregister", Description: "Remove an MCP plugin entirely (deletes its folder under the plugins data dir). Use mcp_disable first if you only want to stop it.", InputSchema: obj("object", props("id", str("Plugin id")), "id")},
+		{Name: "mcp_install", Description: "Install an MCP plugin from the curated catalog or a GitHub repository (owner/repo or URL). After install, call mcp_enable with the resulting plugin id to connect and load its tools.", InputSchema: obj("object", props("source", strEnum("Install source", "catalog", "github"), "id", str("Catalog plugin id (required when source=catalog)"), "url", str("GitHub repo URL or owner/repo shorthand (required when source=github)"), "subdir", str("Optional subdirectory inside a monorepo (github)"), "ref", str("Optional branch or tag to pin (github)")), "source")},
 		{Name: "read_image", Description: "Load an image from the conversation into your context so you can see it. Pass file_path (the absolute path shown in the image placeholder). When your active model supports vision, the image is attached to your context directly. For non-vision models, the image is described using a vision fallback model and the text description is returned.", InputSchema: obj("object", props("file_path", str("Absolute path of the image file on disk (shown in the image placeholder)"), "question", str("Optional question about the image")), "file_path")},
 		{Name: "web_search", Description: "Search the web for fresh information. Returns ranked results with title, URL, and snippet from multiple sources (Brave, Startpage, Wikipedia, GitHub). Use this when you need current information, documentation, or research. Follow up with web_fetch on promising URLs for full page content.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results (default 10)")), "query")},
 		{Name: "web_fetch", Description: "Fetch a URL and return readable text (HTML stripped to title + visible text). Use after web_search to read full page content from a result URL. Accepts http/https only.", InputSchema: obj("object", props("url", str("URL to fetch"), "max_bytes", intSchema("Optional max bytes of extracted text (default 2MB)")), "url")},
@@ -395,6 +397,52 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", fmt.Errorf("document %q not found; use docs_search first", args.ID)
 		}
 		return doc.Content, nil
+
+	case name == "mcp_install":
+		var args struct {
+			Source string `json:"source"`
+			ID     string `json:"id"`
+			URL    string `json:"url"`
+			Subdir string `json:"subdir"`
+			Ref    string `json:"ref"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if t.PluginInstaller == nil {
+			return "", fmt.Errorf("plugin installer not available")
+		}
+		var src domain.PluginInstallSource
+		switch args.Source {
+		case "catalog":
+			src = domain.InstallSourceCatalog
+			if strings.TrimSpace(args.ID) == "" {
+				return "", fmt.Errorf("id is required when source=catalog")
+			}
+		case "github":
+			src = domain.InstallSourceGitHub
+			if strings.TrimSpace(args.URL) == "" {
+				return "", fmt.Errorf("url is required when source=github (owner/repo or URL)")
+			}
+		default:
+			return "", fmt.Errorf(`source must be "catalog" or "github"`)
+		}
+		ctxInst, cancelInst := context.WithTimeout(ctx, 5*time.Minute)
+		defer cancelInst()
+		p, err := t.PluginInstaller.Install(ctxInst, domain.PluginInstallRequest{
+			Source: src,
+			ID:     args.ID,
+			URL:    args.URL,
+			Subdir: args.Subdir,
+			Ref:    args.Ref,
+		})
+		if err != nil {
+			return "", fmt.Errorf("mcp_install: %w", err)
+		}
+		if dropper, ok := t.MCP.(interface{ Drop(string) }); ok {
+			dropper.Drop(p.Manifest.MCPServerID())
+		}
+		return fmt.Sprintf("installed plugin %q (%s v%s) — run mcp_enable with id=%s to connect", p.Manifest.Name, p.Manifest.ID, p.Manifest.Version, p.Manifest.ID), nil
 
 	case name == "mcp_register":
 		var args struct {

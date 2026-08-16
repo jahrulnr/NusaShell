@@ -592,3 +592,86 @@ func TestListToolsIncludesMcpManagement(t *testing.T) {
 		}
 	}
 }
+
+// --- mcp_install tests ---
+
+type stubPluginInstaller struct {
+	catalog []domain.PluginCatalogEntry
+	lastReq domain.PluginInstallRequest
+	plugin  *domain.Plugin
+	err     error
+}
+
+func (s *stubPluginInstaller) Catalog(ctx context.Context) ([]domain.PluginCatalogEntry, error) {
+	return s.catalog, nil
+}
+func (s *stubPluginInstaller) Install(ctx context.Context, req domain.PluginInstallRequest) (*domain.Plugin, error) {
+	s.lastReq = req
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.plugin != nil {
+		return s.plugin, nil
+	}
+	return &domain.Plugin{Manifest: domain.PluginManifest{
+		ID:      "nusashell.demo",
+		Name:    "Demo",
+		Version: "1.0.0",
+		Icon:    "🧩",
+		MCP:     domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "demo"},
+	}}, nil
+}
+
+func TestMcpInstallCatalog(t *testing.T) {
+	inst := &stubPluginInstaller{}
+	tb := &Toolbox{PluginInstaller: inst, Plugins: &stubPluginStore{}, MCP: &stubDropper{droppedServers: map[string]bool{}}}
+	out, err := tb.Execute(context.Background(), "mcp_install", []byte(`{"source":"catalog","id":"notes"}`))
+	if err != nil {
+		t.Fatalf("mcp_install catalog: %v", err)
+	}
+	if !strings.Contains(out, "installed plugin") {
+		t.Fatalf("unexpected output %q", out)
+	}
+	if inst.lastReq.Source != domain.InstallSourceCatalog || inst.lastReq.ID != "notes" {
+		t.Fatalf("unexpected request: %+v", inst.lastReq)
+	}
+}
+
+func TestMcpInstallGithub(t *testing.T) {
+	inst := &stubPluginInstaller{}
+	tb := &Toolbox{PluginInstaller: inst, Plugins: &stubPluginStore{}, MCP: &stubDropper{droppedServers: map[string]bool{}}}
+	_, err := tb.Execute(context.Background(), "mcp_install", []byte(`{"source":"github","url":"jahrulnr/NusaShell-mcp","ref":"master"}`))
+	if err != nil {
+		t.Fatalf("mcp_install github: %v", err)
+	}
+	if inst.lastReq.Source != domain.InstallSourceGitHub || inst.lastReq.URL != "jahrulnr/NusaShell-mcp" || inst.lastReq.Ref != "master" {
+		t.Fatalf("unexpected request: %+v", inst.lastReq)
+	}
+}
+
+func TestMcpInstallMissingFields(t *testing.T) {
+	tb := &Toolbox{PluginInstaller: &stubPluginInstaller{}, Plugins: &stubPluginStore{}}
+	_, err := tb.Execute(context.Background(), "mcp_install", []byte(`{"source":"catalog"}`))
+	if err == nil || !strings.Contains(err.Error(), "id is required") {
+		t.Fatalf("expected catalog id-required error, got %v", err)
+	}
+	_, err = tb.Execute(context.Background(), "mcp_install", []byte(`{"source":"github"}`))
+	if err == nil || !strings.Contains(err.Error(), "url is required") {
+		t.Fatalf("expected github url-required error, got %v", err)
+	}
+	_, err = tb.Execute(context.Background(), "mcp_install", []byte(`{"source":"zip"}`))
+	if err == nil || !strings.Contains(err.Error(), `source must be`) {
+		t.Fatalf("expected unsupported source error, got %v", err)
+	}
+}
+
+func TestListToolsIncludesMcpInstall(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	names := map[string]bool{}
+	for _, ti := range tb.ListTools() {
+		names[ti.Name] = true
+	}
+	if !names["mcp_install"] {
+		t.Fatalf("ListTools missing mcp_install")
+	}
+}
