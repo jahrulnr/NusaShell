@@ -234,8 +234,8 @@ func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
 	if a.Skills != nil {
 		source.Skills = a.Skills
 	}
-	if a.MCP != nil {
-		source.MCPServers = a.MCP
+	if a.Plugins != nil {
+		source.Plugins = a.Plugins
 	}
 	if a.MCPToolbox != nil {
 		source.MCP = a.MCPToolbox

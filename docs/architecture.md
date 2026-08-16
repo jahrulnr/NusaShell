@@ -3,7 +3,7 @@
 NusaShell Light is a local, personal AI shell: a Go binary that serves an
 embedded vanilla JS/HTML/CSS frontend and brokers conversations with
 Messages / Responses / Chat format providers, skills, memory, docs and MCP
-servers. There is no security layer by design (no auth, no rate limiting);
+plugins. There is no security layer by design (no auth, no rate limiting);
 the process listens on `127.0.0.1` by default. Bind it to another address
 only on a trusted network (`NUSASHELL_HOST`).
 
@@ -124,7 +124,7 @@ no-op there.
 | Store | Format | Location |
 | --- | --- | --- |
 | conversations | JSON | `{data}/conversations/<id>.json` |
-| providers, skills, mcp servers, settings | JSON | `{data}/*.json` |
+| providers, skills, plugins, settings | JSON | `{data}/*.json` + `{data}/plugins/` |
 | memory, logs | JSONL | `{data}/*.jsonl` |
 | API keys | SQLite | `{data}/credentials.db` |
 

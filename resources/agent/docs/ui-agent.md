@@ -1,6 +1,6 @@
 # Agent
 
-The default view: multi-conversation chat against any configured provider model. Each conversation keeps its own history on disk and can use skills, memory, docs, and MCP servers as tools.
+The default view: multi-conversation chat against any configured provider model. Each conversation keeps its own history on disk and can use skills, memory, docs, and plugin-provided MCP tools.
 
 **How to open:** Open NusaShell, or click the Agent item in the left sidebar.
 

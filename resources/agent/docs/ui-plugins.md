@@ -1,6 +1,6 @@
 # Plugins
 
-Manage native Model Context Protocol servers and installed plugins. Both MCP-only plugins and plugins that expose a browser UI appear in one catalog.
+Manage all plugins: manual MCP servers, MCP-only plugins, and MCP + UI plugins appear in one catalog.
 
 **How to open:** Click the Plugins item in the left sidebar.
 
@@ -131,12 +131,12 @@ An in-shell window that renders plugin UIs in a movable, resizable frame sized f
 
 ## Plugin catalog
 
-Lists native MCP servers, headless MCP plugins, and MCP + UI plugins with runtime state. Clicking a row opens the Plugins detail drawer.
+Lists all plugins — manual MCP servers, MCP-only plugins, and MCP + UI plugins — with runtime state (idle/connected). Clicking a row opens the Plugins detail drawer.
 
 - **Plugin catalog** (`#plugin-table`):
   - Section: Plugins
   - Type: list
-  - Notes: Lists native MCP servers, MCP-only plugins, and MCP + UI plugins with runtime status and tool chips. Clicking a row opens the Plugins detail drawer.
+  - Notes: Lists all plugins with runtime status and tool chips. Clicking a row opens the Plugins detail drawer.
 
 ## Detail drawer
 
@@ -175,7 +175,7 @@ A right-hand drawer that opens when a catalog row is clicked. Shows the state ma
 - **Stop** (`#plugin-btn-stop`):
   - Section: Plugins
   - Type: button
-  - Action: Drops the cached MCP connection (mcp.servers.stop).
+  - Action: Drops the cached MCP connection (plugin.stop).
 
 - **Restart** (`#plugin-btn-restart`):
   - Section: Plugins
@@ -190,7 +190,7 @@ A right-hand drawer that opens when a catalog row is clicked. Shows the state ma
 - **Delete** (`#plugin-btn-delete`):
   - Section: Plugins
   - Type: button
-  - Action: Deletes the selected native MCP server (mcp.servers.delete). Hidden for plugins.
+  - Action: Deletes the selected manual MCP-server plugin (plugin.delete). Hidden for installed plugins.
 
 - **Uninstall** (`#plugin-btn-uninstall`):
   - Section: Plugins

@@ -27,15 +27,19 @@ func (s *stubSkillStoreHyd) Get(id string) (*domain.Skill, error) {
 func (s *stubSkillStoreHyd) Save(sk *domain.Skill) error { return nil }
 func (s *stubSkillStoreHyd) Delete(id string) error      { return nil }
 
-// stubMCPStoreHyd is a minimal MCPServerStore for hydration tests.
-type stubMCPStoreHyd struct{ servers []*domain.MCPServer }
+// stubPluginStoreHyd is a minimal PluginStore for hydration tests.
+type stubPluginStoreHyd struct{ plugins []*domain.Plugin }
 
-func (s *stubMCPStoreHyd) List() []*domain.MCPServer { return s.servers }
-func (s *stubMCPStoreHyd) Get(id string) (*domain.MCPServer, error) {
+func (s *stubPluginStoreHyd) List() ([]*domain.Plugin, error) { return s.plugins, nil }
+func (s *stubPluginStoreHyd) Get(id string) (*domain.Plugin, error) {
 	return nil, fmt.Errorf("not found")
 }
-func (s *stubMCPStoreHyd) Save(srv *domain.MCPServer) error { return nil }
-func (s *stubMCPStoreHyd) Delete(id string) error           { return nil }
+func (s *stubPluginStoreHyd) Install(sourceDir string) (*domain.Plugin, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (s *stubPluginStoreHyd) Uninstall(id string) error   { return nil }
+func (s *stubPluginStoreHyd) Save(p *domain.Plugin) error { return nil }
+func (s *stubPluginStoreHyd) Delete(id string) error      { return nil }
 
 // stubMCPReader is a minimal MCPToolReader for testing.
 type stubMCPReader struct {
@@ -178,30 +182,35 @@ func TestHydrationSkillsSorted(t *testing.T) {
 
 func TestHydrationMcpList(t *testing.T) {
 	b := NewHydrationBuilder(HydrationSource{
-		MCPServers: &stubMCPStoreHyd{servers: []*domain.MCPServer{
-			{ID: "srv1", Name: "github", Enabled: true},
-			{ID: "srv2", Name: "fs", Enabled: true},
+		Plugins: &stubPluginStoreHyd{plugins: []*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "github", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio}}},
+			{Manifest: domain.PluginManifest{ID: "srv2", Name: "fs", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio}}},
 		}},
 		MCP: &stubMCPReader{tools: map[string][]contracts.MCPToolDTO{
-			"srv1": {{Name: "create_issue"}},
+			"plugin:srv1": {{Name: "create_issue"}},
 		}},
 	})
 	result := b.Build()
 	mcpContent := result.Messages[4].ToolResult.Content
 	var mcp struct {
-		Running []struct {
-			Name  string `json:"name"`
-			Tools int    `json:"tools"`
-		} `json:"running"`
+		Plugins []struct {
+			Name    string `json:"name"`
+			Running bool   `json:"running"`
+			Tools   int    `json:"tools"`
+		} `json:"plugins"`
 	}
 	if err := json.Unmarshal([]byte(mcpContent), &mcp); err != nil {
 		t.Fatalf("invalid mcp_list JSON: %v", err)
 	}
-	if len(mcp.Running) != 1 {
-		t.Fatalf("expected 1 running server, got %d", len(mcp.Running))
+	// The merged plugin list must include ALL plugins — running and idle.
+	if len(mcp.Plugins) != 2 {
+		t.Fatalf("expected 2 plugins (running + idle), got %d", len(mcp.Plugins))
 	}
-	if mcp.Running[0].Name != "github" || mcp.Running[0].Tools != 1 {
-		t.Errorf("expected github with 1 tool, got %+v", mcp.Running[0])
+	if mcp.Plugins[1].Name != "github" || !mcp.Plugins[1].Running || mcp.Plugins[1].Tools != 1 {
+		t.Errorf("expected github running with 1 tool, got %+v", mcp.Plugins[1])
+	}
+	if mcp.Plugins[0].Name != "fs" || mcp.Plugins[0].Running {
+		t.Errorf("expected fs idle, got %+v", mcp.Plugins[0])
 	}
 }
 

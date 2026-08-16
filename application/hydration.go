@@ -35,7 +35,7 @@ type MCPToolReader interface {
 type HydrationSource struct {
 	Memory         MemoryStore
 	Skills         SkillStore
-	MCPServers     MCPServerStore
+	Plugins        PluginStore
 	MCP            MCPToolReader
 	RuntimeContext RuntimeContextSnapshot
 	// Tools is the full tool catalog (built-in + MCP) from Toolbox.ListTools().
@@ -174,30 +174,41 @@ func (b *HydrationBuilder) readSkills() hydrationSlot {
 }
 
 func (b *HydrationBuilder) readMcpList() hydrationSlot {
-	if b.source.MCPServers == nil {
-		return hydrationSlot{name: "mcp_list", content: `{"running":[]}`}
+	if b.source.Plugins == nil {
+		return hydrationSlot{name: "mcp_list", content: `{"plugins":[]}`}
 	}
-	servers := b.source.MCPServers.List()
+	plugins, err := b.source.Plugins.List()
+	if err != nil {
+		return hydrationSlot{name: "mcp_list", content: `{"plugins":[]}`}
+	}
 	type srvInfo struct {
 		Name    string `json:"name"`
+		ID      string `json:"id"`
 		Running bool   `json:"running"`
 		Tools   int    `json:"tools"`
+		UI      bool   `json:"ui,omitempty"`
 	}
-	var running []srvInfo
-	for _, s := range servers {
+	out := make([]srvInfo, 0, len(plugins))
+	for _, p := range plugins {
 		toolCount := 0
 		isRunning := false
 		if b.source.MCP != nil {
-			if tools, ok := b.source.MCP.ToolsFor(s.ID); ok {
+			if tools, ok := b.source.MCP.ToolsFor(p.Manifest.MCPServerID()); ok {
 				isRunning = true
 				toolCount = len(tools)
 			}
 		}
-		if isRunning {
-			running = append(running, srvInfo{Name: s.Name, Running: true, Tools: toolCount})
-		}
+		out = append(out, srvInfo{
+			Name:    p.Manifest.Name,
+			ID:      p.Manifest.ID,
+			Running: isRunning,
+			Tools:   toolCount,
+			UI:      p.HasUI,
+		})
 	}
-	content, _ := json.Marshal(map[string]any{"running": running})
+	// Stable order for prompt-cache friendliness.
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	content, _ := json.Marshal(map[string]any{"plugins": out, "count": len(out)})
 	return hydrationSlot{name: "mcp_list", content: string(content)}
 }
 

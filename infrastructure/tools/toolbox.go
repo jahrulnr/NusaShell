@@ -23,14 +23,14 @@ type Toolbox struct {
 	Skills       application.SkillStore
 	Memory       application.MemoryStore
 	Docs         application.DocsSource
-	MCPServers   application.MCPServerStore
+	Plugins      application.PluginStore
 	Todos        application.ConversationTodoPort
 	Searcher     *searchwire.Searcher // zero-config searcher for web_search + web_fetch
 	Settings     application.SettingsStore
 	Credentials  application.CredentialStore
 	AskQuestions *application.AskQuestionService
 	MCP          interface {
-		Connect(ctx context.Context, s *domain.MCPServer) ([]contracts.MCPToolDTO, error)
+		Connect(ctx context.Context, p *domain.Plugin) ([]contracts.MCPToolDTO, error)
 		ToolsFor(serverID string) ([]contracts.MCPToolDTO, bool)
 		CallTool(ctx context.Context, serverID, toolName string, args map[string]any) (string, error)
 	}
@@ -107,29 +107,29 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "web_search", Description: "Search the web for fresh information. Returns ranked results with title, URL, and snippet from multiple sources (Brave, Startpage, Wikipedia, GitHub). Use this when you need current information, documentation, or research. Follow up with web_fetch on promising URLs for full page content.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results (default 10)")), "query")},
 		{Name: "web_fetch", Description: "Fetch a URL and return readable text (HTML stripped to title + visible text). Use after web_search to read full page content from a result URL. Accepts http/https only.", InputSchema: obj("object", props("url", str("URL to fetch"), "max_bytes", intSchema("Optional max bytes of extracted text (default 2MB)")), "url")},
 	}
-	for _, s := range t.MCPServers.List() {
-		if !s.Enabled {
-			continue
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		dt, err := t.MCP.Connect(ctx, s)
-		cancel()
-		if err != nil {
-			continue
-		}
-		for _, tool := range dt {
-			var schema map[string]any
-			if len(tool.InputSchema) > 0 {
-				_ = json.Unmarshal(tool.InputSchema, &schema)
+	if t.Plugins != nil {
+		plugins, _ := t.Plugins.List()
+		for _, p := range plugins {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			dt, err := t.MCP.Connect(ctx, p)
+			cancel()
+			if err != nil {
+				continue
 			}
-			if schema == nil {
-				schema = obj("object", nil)
+			for _, tool := range dt {
+				var schema map[string]any
+				if len(tool.InputSchema) > 0 {
+					_ = json.Unmarshal(tool.InputSchema, &schema)
+				}
+				if schema == nil {
+					schema = obj("object", nil)
+				}
+				tools = append(tools, application.ToolInfo{
+					Name:        "mcp__" + p.Manifest.Name + "__" + tool.Name,
+					Description: tool.Description,
+					InputSchema: schema,
+				})
 			}
-			tools = append(tools, application.ToolInfo{
-				Name:        "mcp__" + s.Name + "__" + tool.Name,
-				Description: tool.Description,
-				InputSchema: schema,
-			})
 		}
 	}
 	if sw := t.webAnswerSearcher(); sw != nil && sw.CanAnswer() {
@@ -392,29 +392,38 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		return doc.Content, nil
 
 	case name == "mcp_list":
-		servers := t.MCPServers.List()
+		if t.Plugins == nil {
+			return `{"count":0,"plugins":[]}`, nil
+		}
+		plugins, err := t.Plugins.List()
+		if err != nil {
+			return "", fmt.Errorf("mcp_list: %w", err)
+		}
 		type srvInfo struct {
 			ID      string `json:"id"`
 			Name    string `json:"name"`
 			Command string `json:"command"`
-			Enabled bool   `json:"enabled"`
 			Running bool   `json:"running"`
 			Tools   int    `json:"tools"`
 		}
-		out := make([]srvInfo, 0, len(servers))
-		for _, s := range servers {
+		out := make([]srvInfo, 0, len(plugins))
+		for _, p := range plugins {
 			toolCount := 0
 			running := false
-			if tools, ok := t.MCP.ToolsFor(s.ID); ok {
+			serverID := p.Manifest.MCPServerID()
+			if tools, ok := t.MCP.ToolsFor(serverID); ok {
 				running = true
 				toolCount = len(tools)
 			}
 			out = append(out, srvInfo{
-				ID: s.ID, Name: s.Name, Command: s.Command,
-				Enabled: s.Enabled, Running: running, Tools: toolCount,
+				ID:      serverID,
+				Name:    p.Manifest.Name,
+				Command: p.Manifest.MCP.Command,
+				Running: running,
+				Tools:   toolCount,
 			})
 		}
-		b, _ := json.Marshal(map[string]any{"count": len(out), "servers": out})
+		b, _ := json.Marshal(map[string]any{"count": len(out), "plugins": out})
 		return string(b), nil
 
 	case name == "tool_list":
@@ -429,11 +438,12 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			InputSchema map[string]any `json:"input_schema,omitempty"`
 		}
 		var entries []toolEntry
-		for _, s := range t.MCPServers.List() {
-			if args.Server != "" && s.Name != args.Server {
+		plugins, _ := t.Plugins.List()
+		for _, p := range plugins {
+			if args.Server != "" && p.Manifest.Name != args.Server {
 				continue
 			}
-			tools, ok := t.MCP.ToolsFor(s.ID)
+			tools, ok := t.MCP.ToolsFor(p.Manifest.MCPServerID())
 			if !ok {
 				continue
 			}
@@ -443,8 +453,8 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 					_ = json.Unmarshal(tool.InputSchema, &schema)
 				}
 				entries = append(entries, toolEntry{
-					Name:   "mcp__" + s.Name + "__" + tool.Name,
-					Server: s.Name, Description: tool.Description, InputSchema: schema,
+					Name:   "mcp__" + p.Manifest.Name + "__" + tool.Name,
+					Server: p.Manifest.Name, Description: tool.Description, InputSchema: schema,
 				})
 			}
 		}
@@ -472,11 +482,12 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		}
 		tokens := strings.Fields(strings.ToLower(args.Query))
 		var matches []match
-		for _, s := range t.MCPServers.List() {
-			if args.Server != "" && s.Name != args.Server {
+		plugins, _ := t.Plugins.List()
+		for _, p := range plugins {
+			if args.Server != "" && p.Manifest.Name != args.Server {
 				continue
 			}
-			tools, ok := t.MCP.ToolsFor(s.ID)
+			tools, ok := t.MCP.ToolsFor(p.Manifest.MCPServerID())
 			if !ok {
 				continue
 			}
@@ -493,8 +504,8 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 					continue
 				}
 				matches = append(matches, match{
-					Name:   "mcp__" + s.Name + "__" + tool.Name,
-					Server: s.Name, Description: tool.Description,
+					Name:   "mcp__" + p.Manifest.Name + "__" + tool.Name,
+					Server: p.Manifest.Name, Description: tool.Description,
 				})
 			}
 		}
@@ -515,11 +526,12 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return "", fmt.Errorf("invalid args: %w", err)
 		}
-		for _, s := range t.MCPServers.List() {
-			if s.Name != args.Server {
+		plugins, _ := t.Plugins.List()
+		for _, p := range plugins {
+			if p.Manifest.Name != args.Server {
 				continue
 			}
-			tools, ok := t.MCP.ToolsFor(s.ID)
+			tools, ok := t.MCP.ToolsFor(p.Manifest.MCPServerID())
 			if !ok {
 				return "", fmt.Errorf("server %q is not running; call mcp_list to see running servers", args.Server)
 			}
@@ -677,7 +689,8 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 
 	// dynamic MCP tools: mcp__<server>__<tool>
 	if rest, ok := strings.CutPrefix(name, "mcp__"); ok {
-		server, toolName, ok := matchMCPTool(rest, t.MCPServers.List())
+		plugins, _ := t.Plugins.List()
+		plugin, toolName, ok := matchMCPTool(rest, plugins)
 		if !ok {
 			return "", fmt.Errorf("malformed mcp tool name: %s", name)
 		}
@@ -687,7 +700,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				return "", fmt.Errorf("invalid args: %w", err)
 			}
 		}
-		return t.MCP.CallTool(ctx, server.ID, toolName, args)
+		return t.MCP.CallTool(ctx, plugin.Manifest.MCPServerID(), toolName, args)
 	}
 
 	return "", fmt.Errorf("unknown tool: %s", name)
@@ -880,20 +893,22 @@ func strEnum(desc string, values ...string) map[string]any {
 	return map[string]any{"type": "string", "description": desc, "enum": enums}
 }
 
-// matchMCPTool resolves mcp__<server>__<tool> against configured servers,
+// matchMCPTool resolves mcp__<server>__<tool> against installed plugins,
 // preferring the longest server-name prefix so names that contain "__" still
-// route to the right server.
-func matchMCPTool(rest string, servers []*domain.MCPServer) (*domain.MCPServer, string, bool) {
-	var best *domain.MCPServer
+// route to the right plugin. The plugin's manifest name is the MCP server
+// name used in tool naming.
+func matchMCPTool(rest string, plugins []*domain.Plugin) (*domain.Plugin, string, bool) {
+	var best *domain.Plugin
 	bestTool := ""
-	for _, server := range servers {
-		prefix := server.Name + "__"
+	for _, p := range plugins {
+		name := p.Manifest.Name
+		prefix := name + "__"
 		toolName, ok := strings.CutPrefix(rest, prefix)
 		if !ok || toolName == "" {
 			continue
 		}
-		if best == nil || len(server.Name) > len(best.Name) {
-			best = server
+		if best == nil || len(name) > len(best.Manifest.Name) {
+			best = p
 			bestTool = toolName
 		}
 	}

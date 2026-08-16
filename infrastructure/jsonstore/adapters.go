@@ -39,15 +39,6 @@ func (l *LearningEdges) Save(v *domain.LearningEdge) error {
 }
 func (l *LearningEdges) Delete(id string) error { return l.S.DeleteLearningEdge(id) }
 
-type MCP struct{ S *Store }
-
-func (m *MCP) List() []*domain.MCPServer { return m.S.ListMCP() }
-func (m *MCP) Get(id string) (*domain.MCPServer, error) {
-	return m.S.GetMCP(id)
-}
-func (m *MCP) Save(v *domain.MCPServer) error { return m.S.SaveMCP(v) }
-func (m *MCP) Delete(id string) error         { return m.S.DeleteMCP(id) }
-
 type Logs struct{ S *Store }
 
 func (l *Logs) Append(e *domain.LogEntry) { l.S.AppendLog(e) }

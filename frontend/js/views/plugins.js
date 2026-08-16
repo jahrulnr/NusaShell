@@ -30,19 +30,8 @@ export async function initPlugins() {
 }
 
 export async function refresh() {
-  const [serverResult, catalogResult] = await Promise.allSettled([
-    rpc('mcp.servers.list'),
-    rpc('plugin.list'),
-  ]);
-  if (serverResult.status === 'rejected') throw serverResult.reason;
-  servers = serverResult.value.servers ?? [];
-  pluginCatalog = catalogResult.status === 'fulfilled' ? catalogResult.value.plugins ?? [] : [];
-  const catalogByID = new Map(pluginCatalog.map((plugin) => [plugin.id, plugin]));
-  servers = servers.map((server) => {
-    if (!server.plugin) return server;
-    const plugin = catalogByID.get(server.id.replace(/^plugin:/, ''));
-    return plugin ? { ...server, hasUI: server.hasUI || plugin.hasUI, manifest: plugin.manifest } : server;
-  });
+  const serverResult = await rpc('plugin.list');
+  servers = serverResult.plugins ?? [];
   renderList();
   if (currentServer) {
     const updated = servers.find((server) => server.id === currentServer.id);
@@ -237,7 +226,7 @@ async function startServer(server) {
   button.disabled = true;
   button.textContent = 'Starting…';
   try {
-    const result = await rpc('mcp.servers.test', { id: server.id });
+    const result = await rpc('plugin.test', { id: server.id });
     toast(`Started · ${result.tools?.length ?? 0} tools`, 'success');
   } catch (error) {
     toast(error.message, 'error');
@@ -250,7 +239,7 @@ async function startServer(server) {
 
 async function stopServer(server) {
   try {
-    await rpc('mcp.servers.stop', { id: server.id });
+    await rpc('plugin.stop', { id: server.id });
     toast('MCP server stopped', 'success');
     await refresh();
   } catch (error) {
@@ -260,8 +249,8 @@ async function stopServer(server) {
 
 async function restartServer(server) {
   try {
-    await rpc('mcp.servers.stop', { id: server.id });
-    const result = await rpc('mcp.servers.test', { id: server.id });
+    await rpc('plugin.stop', { id: server.id });
+    const result = await rpc('plugin.test', { id: server.id });
     toast(`Restarted · ${result.tools?.length ?? 0} tools`, 'success');
   } catch (error) {
     toast(error.message, 'error');
@@ -274,7 +263,7 @@ async function deleteServer(server) {
   const ok = await confirmDialog('Delete MCP server', `"${server.name}" will be removed.`, 'Delete');
   if (!ok) return;
   try {
-    await rpc('mcp.servers.delete', { id: server.id });
+    await rpc('plugin.delete', { id: server.id });
     toast('MCP server deleted', 'success');
     closeDrawer();
     await refresh();
@@ -284,7 +273,7 @@ async function deleteServer(server) {
 }
 
 async function uninstallPlugin(server) {
-  const pluginID = server.id.replace(/^plugin:/, '');
+  const pluginID = server.id;
   const ok = await confirmDialog('Uninstall plugin', `"${server.name}" and its files under plugins/${pluginID} will be removed.`, 'Uninstall');
   if (!ok) return;
   try {
@@ -333,7 +322,7 @@ async function addMcp(server = null) {
     if (separator > 0) envObject[line.slice(0, separator).trim()] = line.slice(separator + 1).trim();
   }
   try {
-    await rpc('mcp.servers.save', {
+    await rpc('plugin.save', {
       id: server?.id || undefined,
       name: name.trim(),
       command: command.trim(),

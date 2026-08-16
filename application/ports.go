@@ -49,12 +49,17 @@ type SkillStore interface {
 	Delete(id string) error
 }
 
-// PluginStore reads installed plugins from the filesystem.
+// PluginStore is the single source of truth for plugins (MCP servers and
+// MCP + UI plugins). A plugin is installed from the catalog, a GitHub repo,
+// a ZIP archive, or created manually; its manifest carries the MCP server
+// connection config plus optional UI metadata.
 type PluginStore interface {
 	List() ([]*domain.Plugin, error)
 	Get(id string) (*domain.Plugin, error)
 	Install(sourceDir string) (*domain.Plugin, error)
 	Uninstall(id string) error
+	Save(p *domain.Plugin) error
+	Delete(id string) error
 }
 
 // PluginInstaller fetches plugins from the curated catalog, a GitHub
@@ -84,13 +89,6 @@ type ConversationTodoPort interface {
 	Get(conversationID string) []domain.TodoItem
 	Set(conversationID string, items []domain.TodoItem)
 	Clear(conversationID string)
-}
-
-type MCPServerStore interface {
-	List() []*domain.MCPServer
-	Get(id string) (*domain.MCPServer, error)
-	Save(s *domain.MCPServer) error
-	Delete(id string) error
 }
 
 type LogStore interface {

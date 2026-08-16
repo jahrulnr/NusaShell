@@ -148,65 +148,12 @@ func (a *App) handleSkillsRun(req contracts.SkillIDRequest) (any, *contracts.RPC
 	return contracts.SkillRunResult{ConversationID: c.ID}, nil
 }
 
-// ---- MCP ----
+// ---- plugins (MCP servers + MCP+UI plugins) ----
 
-func mcpDTO(s *domain.MCPServer) contracts.MCPServerDTO {
-	return contracts.MCPServerDTO{
-		ID:      s.ID,
-		Name:    s.Name,
-		Command: s.Command,
-		Args:    s.Args,
-		Env:     s.Env,
-		Enabled: s.Enabled,
-	}
-}
-
-func (a *App) handleMCPServersList() (any, *contracts.RPCError) {
-	list := a.MCP.List()
-	out := make([]contracts.MCPServerDTO, 0, len(list))
-	for _, s := range list {
-		dto := mcpDTO(s)
-		dto.Status = "idle"
-		if tools, ok := a.MCPToolbox.ToolsFor(s.ID); ok {
-			dto.Status = "connected"
-			dto.Tools = tools
-		}
-		out = append(out, dto)
-	}
-	// Merge installed plugins so they appear in the MCP view alongside
-	// user-registered stdio servers. Plugin MCP servers are prefixed
-	// with "plugin:" in their ID.
-	if a.Plugins != nil {
-		plugins, err := a.Plugins.List()
-		if err == nil {
-			for _, p := range plugins {
-				serverID := p.Manifest.MCPServerID()
-				dto := contracts.MCPServerDTO{
-					ID:          serverID,
-					Name:        p.Manifest.Name,
-					Command:     p.Manifest.MCP.Command,
-					Args:        p.Manifest.MCP.Args,
-					Env:         p.Manifest.MCP.Env,
-					Enabled:     true,
-					Plugin:      true,
-					HasUI:       p.HasUI,
-					Status:      "idle",
-					Version:     p.Manifest.Version,
-					Icon:        pluginicon.ResolveLocal(p.Manifest.Icon, p.InstallPath),
-					Category:    p.Manifest.Category,
-					InstallPath: p.InstallPath,
-				}
-				if tools, ok := a.MCPToolbox.ToolsFor(serverID); ok {
-					dto.Status = "connected"
-					dto.Tools = tools
-				}
-				out = append(out, dto)
-			}
-		}
-	}
-	return contracts.MCPServersListResult{Servers: out}, nil
-}
-
+// pluginToDTO converts a domain.Plugin into its wire representation.
+// The same DTO serves both catalog-installed plugins and manual MCP
+// servers: a plugin is the single concept; "MCP server" is just a
+// plugin whose manifest has an mcp block and no ui block.
 func pluginToDTO(p *domain.Plugin) contracts.PluginDTO {
 	dto := contracts.PluginDTO{
 		ID:          p.Manifest.ID,
@@ -216,43 +163,45 @@ func pluginToDTO(p *domain.Plugin) contracts.PluginDTO {
 		Category:    p.Manifest.Category,
 		HasUI:       p.HasUI,
 		InstallPath: p.InstallPath,
-	}
-	if p.HasUI {
-		dto.Manifest = &contracts.PluginManifestDTO{
+		Manifest: &contracts.PluginManifestDTO{
 			ID:   p.Manifest.ID,
 			Name: p.Manifest.Name,
-			UI: &contracts.PluginUIDTO{
-				Entry:  p.Manifest.UI.Entry,
-				Window: contracts.PluginWindowDTO{},
-			},
 			MCP: contracts.PluginMCPDTO{
 				Transport: string(p.Manifest.MCP.Transport),
 				Command:   p.Manifest.MCP.Command,
 				Args:      p.Manifest.MCP.Args,
+				Env:       p.Manifest.MCP.Env,
 				Autostart: p.Manifest.MCP.Autostart,
+				KeepAlive: p.Manifest.MCP.KeepAliveOnClose,
+			},
+		},
+	}
+	if p.HasUI {
+		dto.Manifest.UI = &contracts.PluginUIDTO{
+			Entry: p.Manifest.UI.Entry,
+			Window: contracts.PluginWindowDTO{
+				Mode:      string(p.Manifest.UI.Window.Mode),
+				Resizable: p.Manifest.UI.Window.Resizable,
 			},
 		}
-		dto.Manifest.UI.Window.Mode = string(p.Manifest.UI.Window.Mode)
 		dto.Manifest.UI.Window.DefaultSize.Width = p.Manifest.UI.Window.DefaultSize.Width
 		dto.Manifest.UI.Window.DefaultSize.Height = p.Manifest.UI.Window.DefaultSize.Height
-		dto.Manifest.UI.Window.Resizable = p.Manifest.UI.Window.Resizable
 	}
 	return dto
 }
 
-func (a *App) handlePluginList() (any, *contracts.RPCError) {
-	if a.Plugins == nil {
-		return contracts.PluginListResult{Plugins: []contracts.PluginDTO{}}, nil
+// pluginStatus returns the runtime state of a plugin's MCP server.
+// Status is "connected" when tools are cached for its MCP server id,
+// otherwise "idle". Manual MCP-server plugins and catalog-installed
+// plugins are indistinguishable here.
+func (a *App) pluginStatus(p *domain.Plugin) (string, []contracts.MCPToolDTO) {
+	if a.MCPToolbox == nil {
+		return "idle", nil
 	}
-	plugins, err := a.Plugins.List()
-	if err != nil {
-		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
+	if tools, ok := a.MCPToolbox.ToolsFor(p.Manifest.MCPServerID()); ok {
+		return "connected", tools
 	}
-	out := make([]contracts.PluginDTO, 0, len(plugins))
-	for _, p := range plugins {
-		out = append(out, pluginToDTO(p))
-	}
-	return contracts.PluginListResult{Plugins: out}, nil
+	return "idle", nil
 }
 
 func (a *App) handlePluginCatalog() (any, *contracts.RPCError) {
@@ -314,131 +263,148 @@ func (a *App) handlePluginInstall(req contracts.PluginInstallRequest) (any, *con
 	return contracts.PluginInstallResult{Plugin: &dto}, nil
 }
 
-func (a *App) handleMCPServersSave(req contracts.MCPSaveRequest) (any, *contracts.RPCError) {
+// handlePluginList returns every plugin — installed from the catalog or
+// created manually as an MCP server — with runtime state. Idle and
+// stopped plugins are included; the frontend renders their status.
+func (a *App) handlePluginList() (any, *contracts.RPCError) {
+	if a.Plugins == nil {
+		return contracts.PluginListResult{Plugins: []contracts.PluginDTO{}}, nil
+	}
+	plugins, err := a.Plugins.List()
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
+	}
+	out := make([]contracts.PluginDTO, 0, len(plugins))
+	for _, p := range plugins {
+		dto := pluginToDTO(p)
+		dto.Status, dto.Tools = a.pluginStatus(p)
+		out = append(out, dto)
+	}
+	return contracts.PluginListResult{Plugins: out}, nil
+}
+
+// handlePluginSave creates or updates a manual MCP-server plugin (or a
+// full plugin manifest when the request carries UI fields). The plugin is
+// stored as <datadir>/plugins/<id>/manifest.json like any installed
+// plugin, so manual MCP servers and catalog plugins live in one store.
+func (a *App) handlePluginSave(req contracts.PluginSaveRequest) (any, *contracts.RPCError) {
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "server name is required"}
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "plugin name is required"}
 	}
 	command := strings.TrimSpace(req.Command)
 	if command == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "command is required"}
 	}
-	var s *domain.MCPServer
+	var p *domain.Plugin
 	if req.ID != "" {
-		existing, err := a.MCP.Get(req.ID)
+		existing, err := a.Plugins.Get(req.ID)
 		if err != nil {
 			return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 		}
-		s = existing
+		p = existing
 	} else {
-		s = &domain.MCPServer{ID: domain.NewID("mcp")}
+		p = &domain.Plugin{Manifest: domain.PluginManifest{
+			ID:      domain.NewID("plugin"),
+			Version: "0.1.0",
+			Icon:    "🧩",
+			MCP:     domain.PluginMCPConfig{Transport: domain.PluginTransportStdio},
+		}}
 	}
-	s.Name = name
-	s.Command = command
-	s.Args = req.Args
-	s.Env = req.Env
-	s.Enabled = req.Enabled
-	if err := a.MCP.Save(s); err != nil {
+	p.Manifest.Name = name
+	p.Manifest.MCP.Command = command
+	p.Manifest.MCP.Args = req.Args
+	p.Manifest.MCP.Env = req.Env
+	p.Manifest.MCP.Autostart = req.Autostart
+	if err := a.Plugins.Save(p); err != nil {
 		return nil, rpcInternal(err)
 	}
-	a.MCPToolbox.Drop(s.ID)
-	a.log("info", "mcp", "mcp server saved: %s", s.Name)
-	return contracts.MCPServersListResult{Servers: []contracts.MCPServerDTO{mcpDTO(s)}}, nil
+	a.MCPToolbox.Drop(p.Manifest.MCPServerID())
+	a.log("info", "plugin", "plugin saved: %s", p.Manifest.Name)
+	dto := pluginToDTO(p)
+	dto.Status, dto.Tools = a.pluginStatus(p)
+	return contracts.PluginListResult{Plugins: []contracts.PluginDTO{dto}}, nil
 }
 
-func (a *App) handleMCPServersDelete(req contracts.MCPIDRequest) (any, *contracts.RPCError) {
-	if _, err := a.MCP.Get(req.ID); err != nil {
-		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
-	}
-	if err := a.MCP.Delete(req.ID); err != nil {
-		return nil, rpcInternal(err)
-	}
-	a.MCPToolbox.Drop(req.ID)
-	a.log("info", "mcp", "mcp server deleted: %s", req.ID)
-	return map[string]bool{"ok": true}, nil
-}
-
-func (a *App) handleMCPServersTest(req contracts.MCPIDRequest) (any, *contracts.RPCError) {
-	s, err := a.resolveMCPServer(req.ID)
-	if err != nil {
-		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	tools, err := a.MCPToolbox.Connect(ctx, s)
-	if err != nil {
-		a.log("warn", "mcp", "mcp test failed: %s: %v", s.Name, err)
-		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
-	}
-	return contracts.MCPTestResult{Tools: tools}, nil
-}
-
-func (a *App) handleMCPServersStop(req contracts.MCPIDRequest) (any, *contracts.RPCError) {
-	// Stop works for both stdio servers and plugin servers: both are
-	// identified by the same MCP server ID used by the toolbox.
-	a.MCPToolbox.Drop(req.ID)
-	a.log("info", "mcp", "mcp server stopped: %s", req.ID)
-	return map[string]bool{"ok": true}, nil
-}
-
-func (a *App) handlePluginUninstall(req contracts.PluginIDRequest) (any, *contracts.RPCError) {
+// handlePluginDelete removes a plugin. It works for both manual
+// MCP-server plugins and catalog-installed plugins.
+func (a *App) handlePluginDelete(req contracts.PluginIDRequest) (any, *contracts.RPCError) {
 	if a.Plugins == nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "plugin store not available"}
 	}
 	if _, err := a.Plugins.Get(req.ID); err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 	}
-	if err := a.Plugins.Uninstall(req.ID); err != nil {
+	if err := a.Plugins.Delete(req.ID); err != nil {
 		return nil, rpcInternal(err)
 	}
-	// Drop any cached MCP connection for this plugin so the agent does
-	// not keep calling a subprocess whose files were just removed.
+	// Drop any cached MCP connection so the agent does not keep calling
+	// a subprocess whose files were just removed.
 	a.MCPToolbox.Drop("plugin:" + req.ID)
-	a.log("info", "plugin", "plugin uninstalled: %s", req.ID)
+	a.log("info", "plugin", "plugin deleted: %s", req.ID)
 	return map[string]bool{"ok": true}, nil
 }
 
-// resolveMCPServer looks up a server by ID. For plugin servers (ID
-// prefixed with "plugin:"), it reads the plugin manifest from the
-// plugin store and converts it to an MCPServer.
-func (a *App) resolveMCPServer(id string) (*domain.MCPServer, error) {
-	if len(id) > 7 && id[:7] == "plugin:" {
-		if a.Plugins == nil {
-			return nil, fmt.Errorf("plugin store not available")
-		}
-		pluginID := id[7:]
-		p, err := a.Plugins.Get(pluginID)
-		if err != nil {
-			return nil, err
-		}
-		m := p.Manifest.MCP
-		return &domain.MCPServer{
-			ID:         p.Manifest.MCPServerID(),
-			Name:       p.Manifest.Name,
-			Command:    m.Command,
-			Args:       m.Args,
-			Env:        m.Env,
-			Enabled:    true,
-			WorkingDir: p.InstallPath,
-		}, nil
+// handlePluginTest connects a plugin's MCP server and returns its tools.
+func (a *App) handlePluginTest(req contracts.PluginIDRequest) (any, *contracts.RPCError) {
+	if a.Plugins == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "plugin store not available"}
 	}
-	return a.MCP.Get(id)
+	p, err := a.Plugins.Get(req.ID)
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	tools, err := a.MCPToolbox.Connect(ctx, p)
+	if err != nil {
+		a.log("warn", "plugin", "plugin test failed: %s: %v", p.Manifest.Name, err)
+		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
+	}
+	return contracts.PluginTestResult{Tools: tools}, nil
 }
 
-func (a *App) handleMCPToolsList() (any, *contracts.RPCError) {
+// handlePluginStop drops the cached MCP connection for a plugin. The
+// plugin definition remains installed; only the subprocess is stopped.
+func (a *App) handlePluginStop(req contracts.PluginIDRequest) (any, *contracts.RPCError) {
+	if a.Plugins == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "plugin store not available"}
+	}
+	if _, err := a.Plugins.Get(req.ID); err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
+	}
+	a.MCPToolbox.Drop("plugin:" + req.ID)
+	a.log("info", "plugin", "plugin stopped: %s", req.ID)
+	return map[string]bool{"ok": true}, nil
+}
+
+// handlePluginUninstall is an alias for handlePluginDelete kept for the
+// install flow naming; uninstalling a catalog plugin removes its folder.
+func (a *App) handlePluginUninstall(req contracts.PluginIDRequest) (any, *contracts.RPCError) {
+	return a.handlePluginDelete(req)
+}
+
+// handlePluginToolsList returns tools from all connected plugins.
+// Plugins that are not running contribute nothing; call handlePluginTest
+// (Start) first to connect.
+func (a *App) handlePluginToolsList() (any, *contracts.RPCError) {
+	if a.Plugins == nil {
+		return contracts.PluginToolsListResult{Tools: []contracts.MCPToolDTO{}}, nil
+	}
+	plugins, err := a.Plugins.List()
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
+	}
 	var out []contracts.MCPToolDTO
-	for _, s := range a.MCP.List() {
-		if !s.Enabled {
-			continue
-		}
-		if tools, ok := a.MCPToolbox.ToolsFor(s.ID); ok {
+	for _, p := range plugins {
+		if tools, ok := a.MCPToolbox.ToolsFor(p.Manifest.MCPServerID()); ok {
 			out = append(out, tools...)
 		}
 	}
 	if out == nil {
 		out = []contracts.MCPToolDTO{}
 	}
-	return contracts.MCPToolsListResult{Tools: out}, nil
+	return contracts.PluginToolsListResult{Tools: out}, nil
 }
 
 // ---- memory ----

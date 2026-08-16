@@ -26,20 +26,24 @@ func (s *stubSkillStore) Get(id string) (*domain.Skill, error) {
 func (s *stubSkillStore) Save(sk *domain.Skill) error { return nil }
 func (s *stubSkillStore) Delete(id string) error      { return nil }
 
-// stubMCPStore is a minimal MCPServerStore for testing.
-type stubMCPStore struct{ servers []*domain.MCPServer }
+// stubPluginStore is a minimal PluginStore for testing.
+type stubPluginStore struct{ plugins []*domain.Plugin }
 
-func (s *stubMCPStore) List() []*domain.MCPServer { return s.servers }
-func (s *stubMCPStore) Get(id string) (*domain.MCPServer, error) {
-	for _, srv := range s.servers {
-		if srv.ID == id {
-			return srv, nil
+func (s *stubPluginStore) List() ([]*domain.Plugin, error) { return s.plugins, nil }
+func (s *stubPluginStore) Get(id string) (*domain.Plugin, error) {
+	for _, p := range s.plugins {
+		if p.Manifest.ID == id {
+			return p, nil
 		}
 	}
 	return nil, fmt.Errorf("not found")
 }
-func (s *stubMCPStore) Save(srv *domain.MCPServer) error { return nil }
-func (s *stubMCPStore) Delete(id string) error           { return nil }
+func (s *stubPluginStore) Install(sourceDir string) (*domain.Plugin, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (s *stubPluginStore) Uninstall(id string) error   { return nil }
+func (s *stubPluginStore) Save(p *domain.Plugin) error { return nil }
+func (s *stubPluginStore) Delete(id string) error      { return nil }
 
 // stubMCP is a minimal MCP manager stub for testing.
 type stubMCP struct {
@@ -49,8 +53,8 @@ type stubMCP struct {
 	lastTool     string
 }
 
-func (m *stubMCP) Connect(ctx context.Context, s *domain.MCPServer) ([]contracts.MCPToolDTO, error) {
-	if tools, ok := m.tools[s.ID]; ok {
+func (m *stubMCP) Connect(ctx context.Context, p *domain.Plugin) ([]contracts.MCPToolDTO, error) {
+	if tools, ok := m.tools[p.Manifest.MCPServerID()]; ok {
 		return tools, nil
 	}
 	return nil, fmt.Errorf("not connected")
@@ -65,11 +69,11 @@ func (m *stubMCP) CallTool(ctx context.Context, serverID, toolName string, args 
 	return "ok", nil
 }
 
-func testToolbox(skills []*domain.Skill, servers []*domain.MCPServer, mcp *stubMCP) *Toolbox {
+func testToolbox(skills []*domain.Skill, plugins []*domain.Plugin, mcp *stubMCP) *Toolbox {
 	return &Toolbox{
-		Skills:     &stubSkillStore{skills: skills},
-		MCPServers: &stubMCPStore{servers: servers},
-		MCP:        mcp,
+		Skills:  &stubSkillStore{skills: skills},
+		Plugins: &stubPluginStore{plugins: plugins},
+		MCP:     mcp,
 	}
 }
 
@@ -177,13 +181,13 @@ func TestSkillListLimit(t *testing.T) {
 
 func TestMcpList(t *testing.T) {
 	tb := testToolbox(nil,
-		[]*domain.MCPServer{
-			{ID: "srv1", Name: "github", Command: "npx", Enabled: true},
-			{ID: "srv2", Name: "filesystem", Command: "npx", Enabled: false},
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "github", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+			{Manifest: domain.PluginManifest{ID: "srv2", Name: "filesystem", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
 		},
 		&stubMCP{
 			tools: map[string][]contracts.MCPToolDTO{
-				"srv1": {{Name: "create_issue", Description: "Create a GitHub issue"}},
+				"plugin:srv1": {{Name: "create_issue", Description: "Create a GitHub issue"}},
 			},
 		},
 	)
@@ -193,17 +197,17 @@ func TestMcpList(t *testing.T) {
 	}
 	var res struct {
 		Count   int `json:"count"`
-		Servers []struct {
+		Plugins []struct {
 			Name    string `json:"name"`
 			Running bool   `json:"running"`
 			Tools   int    `json:"tools"`
-		} `json:"servers"`
+		} `json:"plugins"`
 	}
 	if err := json.Unmarshal([]byte(out), &res); err != nil {
 		t.Fatalf("invalid JSON: %v\n%s", err, out)
 	}
 	if res.Count != 2 {
-		t.Errorf("expected 2 servers, got %d", res.Count)
+		t.Errorf("expected 2 plugins, got %d", res.Count)
 	}
 	// github should be running with 1 tool
 	var github *struct {
@@ -211,9 +215,9 @@ func TestMcpList(t *testing.T) {
 		Running bool   `json:"running"`
 		Tools   int    `json:"tools"`
 	}
-	for i := range res.Servers {
-		if res.Servers[i].Name == "github" {
-			github = &res.Servers[i]
+	for i := range res.Plugins {
+		if res.Plugins[i].Name == "github" {
+			github = &res.Plugins[i]
 		}
 	}
 	if github == nil || !github.Running || github.Tools != 1 {
@@ -223,14 +227,14 @@ func TestMcpList(t *testing.T) {
 
 func TestToolListAll(t *testing.T) {
 	tb := testToolbox(nil,
-		[]*domain.MCPServer{
-			{ID: "srv1", Name: "github", Command: "npx", Enabled: true},
-			{ID: "srv2", Name: "fs", Command: "npx", Enabled: true},
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "github", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+			{Manifest: domain.PluginManifest{ID: "srv2", Name: "fs", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
 		},
 		&stubMCP{
 			tools: map[string][]contracts.MCPToolDTO{
-				"srv1": {{Name: "create_issue", Description: "Create issue", InputSchema: json.RawMessage(`{"type":"object","properties":{"title":{"type":"string"}}}`)}},
-				"srv2": {{Name: "read_file", Description: "Read a file"}},
+				"plugin:srv1": {{Name: "create_issue", Description: "Create issue", InputSchema: json.RawMessage(`{"type":"object","properties":{"title":{"type":"string"}}}`)}},
+				"plugin:srv2": {{Name: "read_file", Description: "Read a file"}},
 			},
 		},
 	)
@@ -255,14 +259,14 @@ func TestToolListAll(t *testing.T) {
 
 func TestToolListByServer(t *testing.T) {
 	tb := testToolbox(nil,
-		[]*domain.MCPServer{
-			{ID: "srv1", Name: "github", Command: "npx", Enabled: true},
-			{ID: "srv2", Name: "fs", Command: "npx", Enabled: true},
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "github", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+			{Manifest: domain.PluginManifest{ID: "srv2", Name: "fs", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
 		},
 		&stubMCP{
 			tools: map[string][]contracts.MCPToolDTO{
-				"srv1": {{Name: "create_issue", Description: "Create issue"}},
-				"srv2": {{Name: "read_file", Description: "Read file"}},
+				"plugin:srv1": {{Name: "create_issue", Description: "Create issue"}},
+				"plugin:srv2": {{Name: "read_file", Description: "Read file"}},
 			},
 		},
 	)
@@ -290,8 +294,8 @@ func TestToolListByServer(t *testing.T) {
 
 func TestToolListNotRunning(t *testing.T) {
 	tb := testToolbox(nil,
-		[]*domain.MCPServer{
-			{ID: "srv1", Name: "github", Command: "npx", Enabled: true},
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "github", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
 		},
 		&stubMCP{tools: map[string][]contracts.MCPToolDTO{}}, // no running servers
 	)
@@ -312,12 +316,12 @@ func TestToolListNotRunning(t *testing.T) {
 
 func TestToolSearch(t *testing.T) {
 	tb := testToolbox(nil,
-		[]*domain.MCPServer{
-			{ID: "srv1", Name: "github", Command: "npx", Enabled: true},
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "github", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
 		},
 		&stubMCP{
 			tools: map[string][]contracts.MCPToolDTO{
-				"srv1": {
+				"plugin:srv1": {
 					{Name: "create_issue", Description: "Create a GitHub issue"},
 					{Name: "list_repos", Description: "List repositories"},
 				},
@@ -347,12 +351,12 @@ func TestToolSearch(t *testing.T) {
 
 func TestToolSearchTokenMatch(t *testing.T) {
 	tb := testToolbox(nil,
-		[]*domain.MCPServer{
-			{ID: "srv1", Name: "github", Command: "npx", Enabled: true},
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "github", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
 		},
 		&stubMCP{
 			tools: map[string][]contracts.MCPToolDTO{
-				"srv1": {
+				"plugin:srv1": {
 					{Name: "create_issue", Description: "Create a GitHub issue for tracking bugs"},
 				},
 			},
@@ -376,12 +380,12 @@ func TestToolSearchTokenMatch(t *testing.T) {
 
 func TestToolSchema(t *testing.T) {
 	tb := testToolbox(nil,
-		[]*domain.MCPServer{
-			{ID: "srv1", Name: "github", Command: "npx", Enabled: true},
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "github", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
 		},
 		&stubMCP{
 			tools: map[string][]contracts.MCPToolDTO{
-				"srv1": {
+				"plugin:srv1": {
 					{Name: "create_issue", Description: "Create issue", InputSchema: json.RawMessage(`{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}`)},
 				},
 			},
@@ -409,12 +413,12 @@ func TestToolSchema(t *testing.T) {
 
 func TestToolSchemaNotFound(t *testing.T) {
 	tb := testToolbox(nil,
-		[]*domain.MCPServer{
-			{ID: "srv1", Name: "github", Command: "npx", Enabled: true},
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "github", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
 		},
 		&stubMCP{
 			tools: map[string][]contracts.MCPToolDTO{
-				"srv1": {{Name: "create_issue"}},
+				"plugin:srv1": {{Name: "create_issue"}},
 			},
 		},
 	)
@@ -426,8 +430,8 @@ func TestToolSchemaNotFound(t *testing.T) {
 
 func TestToolSchemaServerNotRunning(t *testing.T) {
 	tb := testToolbox(nil,
-		[]*domain.MCPServer{
-			{ID: "srv1", Name: "github", Command: "npx", Enabled: true},
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "github", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
 		},
 		&stubMCP{tools: map[string][]contracts.MCPToolDTO{}}, // not running
 	)
@@ -440,16 +444,16 @@ func TestToolSchemaServerNotRunning(t *testing.T) {
 func TestMCPToolNameMatchesLongestServerPrefix(t *testing.T) {
 	mcp := &stubMCP{}
 	tb := testToolbox(nil,
-		[]*domain.MCPServer{
-			{ID: "short", Name: "foo", Command: "npx", Enabled: true},
-			{ID: "long", Name: "foo__bar", Command: "npx", Enabled: true},
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "short", Name: "foo", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+			{Manifest: domain.PluginManifest{ID: "long", Name: "foo__bar", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
 		},
 		mcp,
 	)
 	if _, err := tb.Execute(context.Background(), "mcp__foo__bar__read", nil); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if mcp.lastServerID != "long" || mcp.lastTool != "read" {
-		t.Fatalf("routed to server %q tool %q, want long/read", mcp.lastServerID, mcp.lastTool)
+	if mcp.lastServerID != "plugin:long" || mcp.lastTool != "read" {
+		t.Fatalf("routed to server %q tool %q, want plugin:long/read", mcp.lastServerID, mcp.lastTool)
 	}
 }

@@ -77,16 +77,6 @@ type LearningEdge struct {
 	CreatedAt time.Time
 }
 
-type MCPServer struct {
-	ID         string
-	Name       string
-	Command    string
-	Args       []string
-	Env        map[string]string
-	Enabled    bool
-	WorkingDir string
-}
-
 type LogEntry struct {
 	ID      string
 	Time    time.Time

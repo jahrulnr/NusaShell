@@ -17,8 +17,8 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `todo` | replace the conversation task checklist (full-replace, Claude TodoWrite style; max 50 items, 500 chars each; prefer exactly one `in_progress` at a time). The user can delete items from the UI — treat deleted items as gone and do not re-add them. |
 | `docs_search` | search the product documentation |
 | `docs_read` | read a documentation page by id |
-| `mcp_list` | list configured MCP servers with enabled status and runtime state (running/stopped) |
-| `tool_list` | list tools from a running MCP server (or across all running servers when the server is omitted) |
+| `mcp_list` | list all plugins (MCP servers) with runtime state: every plugin appears, running or idle |
+| `tool_list` | list tools from a running plugin's MCP server (or across all running servers when the server is omitted) |
 | `tool_search` | search a running MCP server's tools by name or description |
 | `tool_schema` | load one MCP tool's input schema by server and tool name before calling it |
 | `read_image` | load an image from the conversation into the model's context (vision models see it directly; non-vision models get a text description via the vision fallback) |
@@ -35,7 +35,7 @@ The system prompt advertises the same set: `skill_list`, `skill_search`,
 
 NusaShell ships with built-in web research tools powered by
 [searchwire](https://github.com/jahrulnr/searchwire). These are native tools,
-not MCP plugins — they work with zero configuration and no MCP servers
+not MCP plugins — they work with zero configuration and no plugins installed
 installed.
 
 - **`web_search`**: metasearch across Brave, Startpage, Wikipedia, and
@@ -60,7 +60,10 @@ Recommended workflow: `web_search` → pick URLs → `web_fetch`.
 
 ## MCP tools
 
-Every tool of an enabled MCP server is exposed as `mcp__<server>__<tool>`
+The agent-facing tool names keep the `mcp_*` prefix even though the data
+model is now "plugins": the tools genuinely come from each plugin's MCP
+server, and the shell still connects to that server to fetch them. Every
+plugin exposes its MCP tools as `mcp__<server>__<tool>`
 with the server's own input schema. The shell connects to the server on
 first use (stdio) and keeps the connection for the process lifetime;
 re-saving or deleting the server drops the connection.

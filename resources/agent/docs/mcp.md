@@ -1,21 +1,25 @@
-# MCP servers and Plugins
+# Plugins (MCP servers + MCP+UI plugins)
 
-MCP (Model Context Protocol) servers expose tools to the agent over stdio:
-the shell spawns the configured command and speaks JSON-RPC over stdin and
-stdout.
+A **plugin** is the single concept for anything that exposes MCP tools to
+the agent: a manual MCP server (stdio) or an installed plugin from the
+catalog (MCP-only or MCP + UI). The shell spawns the plugin's MCP command
+and speaks JSON-RPC over stdin/stdout; tools surface to the agent as
+`mcp__<server>__<tool>`.
 
-## Adding a server
+## Adding a plugin manually
 
-A server needs a name, a command, arguments and optional environment
-entries (`KEY=VALUE`). Example:
+A manual MCP-server plugin needs a name, a command, arguments and optional
+environment entries (`KEY=VALUE`). Example:
 
     name:     files
     command:  npx
     args:     -y @modelcontextprotocol/server-filesystem /path/to/dir
 
-Servers connect lazily: the first tool listing or `mcp_call` spawns the
-process. **Start** connects immediately and lists the tools; **Stop** drops
-the cached connection and **Restart** stops then starts.
+It is stored as `plugins/<id>/manifest.json` exactly like a catalog
+installed plugin. Plugins connect lazily: the first tool listing spawns the
+process. **Start** (plugin.test) connects immediately and lists the tools;
+**Stop** (plugin.stop) drops the cached connection and **Restart** stops
+then starts.
 
 ## Tool exposure
 
@@ -23,10 +27,12 @@ Every tool of an enabled server becomes an agent tool named
 `mcp__<server>__<tool>`. Tool schemas come from the server's own
 `tools/list` response.
 
-The Plugins view is the unified catalog for native MCP servers, MCP-only
-plugins, and MCP plugins that also expose a browser UI. Select an entry to
-test, stop, restart, edit/delete native MCP servers, uninstall plugins, or
-open the UI for an MCP + UI plugin.
+The Plugins view is the single catalog for all plugins: manual MCP
+servers, MCP-only plugins, and MCP + UI plugins. Select an entry to test,
+stop, restart, edit/delete (manual MCP entries), uninstall, or open the UI
+for an MCP + UI plugin. RPC methods are `plugin.list`, `plugin.save`,
+`plugin.test`, `plugin.stop`, `plugin.delete`, `plugin.uninstall`,
+`plugin.catalog`, `plugin.install`.
 
 ## Installing plugins
 
@@ -66,6 +72,8 @@ shell:
 
 ## Storage
 
-Server definitions live in `mcp-servers.json` (JSON, non-credential).
-Environment values may contain secrets by design of the personal shell; keep
-the data directory private.
+All plugin definitions live under `plugins/<id>/manifest.json` in the data
+directory (JSON, non-credential). There is no separate MCP server store —
+a manual MCP server is just a plugin manifest with an `mcp` block and no
+`ui` block. Environment values may contain secrets by design of the
+personal shell; keep the data directory private.

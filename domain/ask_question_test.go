@@ -9,12 +9,12 @@ func TestValidateAskQuestionRequest(t *testing.T) {
 	}
 
 	cases := []struct {
-		name        string
-		question    string
-		options     []AskQuestionOption
-		allowFree   bool
-		multi       bool
-		wantErr     error
+		name      string
+		question  string
+		options   []AskQuestionOption
+		allowFree bool
+		multi     bool
+		wantErr   error
 	}{
 		{"valid", "Which?", validOpts, true, false, nil},
 		{"empty question", "", validOpts, true, false, ErrAskQuestionEmpty},

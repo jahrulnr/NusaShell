@@ -30,7 +30,6 @@ type App struct {
 	LearningEdges   LearningEdgeStore
 	Todos           ConversationTodoPort
 	AskQuestions    *AskQuestionService
-	MCP             MCPServerStore
 	Plugins         PluginStore
 	PluginInstaller PluginInstaller
 	Logs            LogStore
@@ -88,7 +87,7 @@ type App struct {
 // MCPToolbox gives use cases access to connected MCP servers and their tools.
 type MCPToolbox interface {
 	ToolsFor(serverID string) ([]contracts.MCPToolDTO, bool)
-	Connect(ctx context.Context, s *domain.MCPServer) ([]contracts.MCPToolDTO, error)
+	Connect(ctx context.Context, p *domain.Plugin) ([]contracts.MCPToolDTO, error)
 	Drop(serverID string)
 }
 
@@ -214,7 +213,6 @@ type Deps struct {
 	LearningEdges               LearningEdgeStore
 	Todos                       ConversationTodoPort
 	AskQuestions                *AskQuestionService
-	MCP                         MCPServerStore
 	Plugins                     PluginStore
 	PluginInstaller             PluginInstaller
 	Logs                        LogStore
@@ -253,7 +251,6 @@ func NewApp(deps Deps) *App {
 		LearningEdges:               deps.LearningEdges,
 		Todos:                       deps.Todos,
 		AskQuestions:                deps.AskQuestions,
-		MCP:                         deps.MCP,
 		Plugins:                     deps.Plugins,
 		PluginInstaller:             deps.PluginInstaller,
 		Logs:                        deps.Logs,
@@ -686,36 +683,34 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 			return nil, rpcErr
 		}
 		return a.handleSkillsRun(req)
-	case contracts.MethodMCPServersList:
-		return a.handleMCPServersList()
-	case contracts.MethodMCPServersSave:
-		var req contracts.MCPSaveRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleMCPServersSave(req)
-	case contracts.MethodMCPServersDelete:
-		var req contracts.MCPIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleMCPServersDelete(req)
-	case contracts.MethodMCPServersTest:
-		var req contracts.MCPIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleMCPServersTest(req)
-	case contracts.MethodMCPServersStop:
-		var req contracts.MCPIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleMCPServersStop(req)
-	case contracts.MethodMCPToolsList:
-		return a.handleMCPToolsList()
 	case contracts.MethodPluginList:
 		return a.handlePluginList()
+	case contracts.MethodPluginSave:
+		var req contracts.PluginSaveRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handlePluginSave(req)
+	case contracts.MethodPluginDelete:
+		var req contracts.PluginIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handlePluginDelete(req)
+	case contracts.MethodPluginTest:
+		var req contracts.PluginIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handlePluginTest(req)
+	case contracts.MethodPluginStop:
+		var req contracts.PluginIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handlePluginStop(req)
+	case contracts.MethodPluginToolsList:
+		return a.handlePluginToolsList()
 	case contracts.MethodPluginCatalog:
 		return a.handlePluginCatalog()
 	case contracts.MethodPluginInstall:

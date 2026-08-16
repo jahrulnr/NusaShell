@@ -129,6 +129,36 @@ func (s *Store) Uninstall(id string) error {
 	return os.RemoveAll(dir)
 }
 
+// Save writes a plugin's manifest.json back into its directory, creating
+// the directory if needed. It is used by the manual plugin editor so
+// user-created MCP servers are stored the same way as installed plugins.
+func (s *Store) Save(p *domain.Plugin) error {
+	if p == nil || p.Manifest.ID == "" {
+		return fmt.Errorf("pluginfs: cannot save plugin without id")
+	}
+	dir, err := s.safePluginDir(p.Manifest.ID)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("pluginfs: mkdir %s: %w", dir, err)
+	}
+	data, err := json.MarshalIndent(p.Manifest, "", "  ")
+	if err != nil {
+		return fmt.Errorf("pluginfs: marshal manifest: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), data, 0o644); err != nil {
+		return fmt.Errorf("pluginfs: write manifest: %w", err)
+	}
+	return nil
+}
+
+// Delete removes a plugin directory. Manual MCP-server-as-plugin entries
+// and catalog-installed plugins are removed the same way.
+func (s *Store) Delete(id string) error {
+	return s.Uninstall(id)
+}
+
 // UIPath returns the absolute path to the plugin's UI entry file.
 func (s *Store) UIPath(p *domain.Plugin) string {
 	if p.Manifest.UI == nil {

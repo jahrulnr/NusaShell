@@ -67,7 +67,7 @@
     },
     "agent": {
       "title": "Agent",
-      "purpose": "The default view: multi-conversation chat against any configured provider model. Each conversation keeps its own history on disk and can use skills, memory, docs, and MCP servers as tools.",
+      "purpose": "The default view: multi-conversation chat against any configured provider model. Each conversation keeps its own history on disk and can use skills, memory, docs, and plugin-provided MCP tools.",
       "howToOpen": "Open NusaShell, or click the Agent item in the left sidebar.",
       "sections": [
         {
@@ -206,7 +206,7 @@
     },
     "plugins": {
       "title": "Plugins",
-      "purpose": "Manage native Model Context Protocol servers and installed plugins. Both MCP-only plugins and plugins that expose a browser UI appear in one catalog.",
+      "purpose": "Manage all plugins: manual MCP servers, MCP-only plugins, and MCP + UI plugins appear in one catalog.",
       "howToOpen": "Click the Plugins item in the left sidebar.",
       "sections": [
         {
@@ -261,7 +261,7 @@
         {
           "heading": "Plugin catalog",
           "paragraphs": [
-            "Lists native MCP servers, headless MCP plugins, and MCP + UI plugins with runtime state. Clicking a row opens the Plugins detail drawer."
+            "Lists all plugins — manual MCP servers, MCP-only plugins, and MCP + UI plugins — with runtime state (idle/connected). Clicking a row opens the Plugins detail drawer."
           ],
           "controls": [
             "plugin-table"
@@ -863,7 +863,7 @@
       "label": "Plugin catalog",
       "section": "Plugins",
       "type": "list",
-      "notes": "Lists native MCP servers, MCP-only plugins, and MCP + UI plugins with runtime status and tool chips. Clicking a row opens the Plugins detail drawer."
+      "notes": "Lists all plugins with runtime status and tool chips. Clicking a row opens the Plugins detail drawer."
     },
     "plugin-drawer": {
       "label": "Plugin detail drawer",
@@ -905,7 +905,7 @@
       "label": "Stop",
       "section": "Plugins",
       "type": "button",
-      "action": "Drops the cached MCP connection (mcp.servers.stop)."
+      "action": "Drops the cached MCP connection (plugin.stop)."
     },
     "plugin-btn-restart": {
       "label": "Restart",
@@ -923,7 +923,7 @@
       "label": "Delete",
       "section": "Plugins",
       "type": "button",
-      "action": "Deletes the selected native MCP server (mcp.servers.delete). Hidden for plugins."
+      "action": "Deletes the selected manual MCP-server plugin (plugin.delete). Hidden for installed plugins."
     },
     "plugin-btn-uninstall": {
       "label": "Uninstall",

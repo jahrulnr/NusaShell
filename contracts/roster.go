@@ -50,16 +50,15 @@ const (
 	MethodSkillsDelete = "skills.delete"
 	MethodSkillsRun    = "skills.run"
 
-	MethodMCPServersList   = "mcp.servers.list"
-	MethodMCPServersSave   = "mcp.servers.save"
-	MethodMCPServersDelete = "mcp.servers.delete"
-	MethodMCPServersTest   = "mcp.servers.test"
-	MethodMCPServersStop   = "mcp.servers.stop"
-	MethodMCPToolsList     = "mcp.tools.list"
-	MethodPluginList       = "plugin.list"
-	MethodPluginUninstall  = "plugin.uninstall"
-	MethodPluginCatalog    = "plugin.catalog"
-	MethodPluginInstall    = "plugin.install"
+	MethodPluginList      = "plugin.list"
+	MethodPluginSave      = "plugin.save"
+	MethodPluginDelete    = "plugin.delete"
+	MethodPluginTest      = "plugin.test"
+	MethodPluginStop      = "plugin.stop"
+	MethodPluginToolsList = "plugin.tools.list"
+	MethodPluginUninstall = "plugin.uninstall"
+	MethodPluginCatalog   = "plugin.catalog"
+	MethodPluginInstall   = "plugin.install"
 
 	MethodMemoryList   = "memory.list"
 	MethodMemorySave   = "memory.save"
@@ -704,10 +703,6 @@ type MCPServerDTO struct {
 	InstallPath string `json:"installPath,omitempty"`
 }
 
-type MCPServersListResult struct {
-	Servers []MCPServerDTO `json:"servers"`
-}
-
 // PluginDTO is the wire representation of an installed plugin.
 type PluginDTO struct {
 	ID          string             `json:"id"`
@@ -717,6 +712,8 @@ type PluginDTO struct {
 	Category    string             `json:"category,omitempty"`
 	HasUI       bool               `json:"hasUI"`
 	InstallPath string             `json:"installPath"`
+	Status      string             `json:"status,omitempty"` // idle | connected
+	Tools       []MCPToolDTO       `json:"tools,omitempty"`
 	Manifest    *PluginManifestDTO `json:"manifest,omitempty"`
 }
 
@@ -742,10 +739,12 @@ type PluginWindowDTO struct {
 }
 
 type PluginMCPDTO struct {
-	Transport string   `json:"transport"`
-	Command   string   `json:"command,omitempty"`
-	Args      []string `json:"args,omitempty"`
-	Autostart bool     `json:"autostart,omitempty"`
+	Transport string            `json:"transport"`
+	Command   string            `json:"command,omitempty"`
+	Args      []string          `json:"args,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+	Autostart bool              `json:"autostart,omitempty"`
+	KeepAlive bool              `json:"keepAliveOnClose,omitempty"`
 }
 
 type PluginListResult struct {
@@ -784,24 +783,23 @@ type PluginInstallResult struct {
 	Plugin *PluginDTO `json:"plugin,omitempty"`
 }
 
-type MCPSaveRequest struct {
-	ID      string            `json:"id,omitempty"`
-	Name    string            `json:"name"`
-	Command string            `json:"command"`
-	Args    []string          `json:"args,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-	Enabled bool              `json:"enabled"`
+// PluginSaveRequest creates or updates a manual MCP-server plugin. The
+// plugin is persisted as <datadir>/plugins/<id>/manifest.json like any
+// installed plugin.
+type PluginSaveRequest struct {
+	ID        string            `json:"id,omitempty"`
+	Name      string            `json:"name"`
+	Command   string            `json:"command"`
+	Args      []string          `json:"args,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+	Autostart bool              `json:"autostart,omitempty"`
 }
 
-type MCPIDRequest struct {
-	ID string `json:"id"`
-}
-
-type MCPTestResult struct {
+type PluginTestResult struct {
 	Tools []MCPToolDTO `json:"tools"`
 }
 
-type MCPToolsListResult struct {
+type PluginToolsListResult struct {
 	Tools []MCPToolDTO `json:"tools"`
 }
 

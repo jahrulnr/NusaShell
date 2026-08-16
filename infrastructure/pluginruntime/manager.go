@@ -2,9 +2,9 @@
 // starting/stopping their MCP servers and routing tool calls from
 // plugin UIs to the MCP server.
 //
-// It wraps the existing mcpclient.Manager, translating a plugin's
-// manifest into a domain.MCPServer so the MCP connection logic stays
-// in one place.
+// It wraps the existing mcpclient.Manager, which operates directly on a
+// plugin's manifest MCP config, so the MCP connection logic stays in one
+// place.
 package pluginruntime
 
 import (
@@ -13,7 +13,6 @@ import (
 	"sync"
 
 	"nusashell/contracts"
-	"nusashell/domain"
 	"nusashell/infrastructure/mcpclient"
 	"nusashell/infrastructure/pluginfs"
 )
@@ -44,8 +43,7 @@ func (m *Manager) EnsureStarted(ctx context.Context, pluginID string) ([]contrac
 	if err != nil {
 		return nil, err
 	}
-	server := pluginToMCPServer(plugin)
-	tools, err := m.mcp.Connect(ctx, server)
+	tools, err := m.mcp.Connect(ctx, plugin)
 	if err != nil {
 		return nil, fmt.Errorf("plugin %s: %w", pluginID, err)
 	}
@@ -62,12 +60,11 @@ func (m *Manager) CallTool(ctx context.Context, pluginID, toolName string, args 
 	if err != nil {
 		return "", err
 	}
-	server := pluginToMCPServer(plugin)
 	// Ensure connected.
-	if _, err := m.mcp.Connect(ctx, server); err != nil {
+	if _, err := m.mcp.Connect(ctx, plugin); err != nil {
 		return "", fmt.Errorf("plugin %s: %w", pluginID, err)
 	}
-	return m.mcp.CallTool(ctx, server.ID, toolName, args)
+	return m.mcp.CallTool(ctx, plugin.Manifest.MCPServerID(), toolName, args)
 }
 
 // ListTools returns the tools advertised by a running plugin. Returns
@@ -105,19 +102,4 @@ func (m *Manager) RunningPlugins() []string {
 		out = append(out, id)
 	}
 	return out
-}
-
-// pluginToMCPServer converts a plugin's manifest into a domain.MCPServer
-// so the mcpclient.Manager can dial it.
-func pluginToMCPServer(p *domain.Plugin) *domain.MCPServer {
-	m := p.Manifest.MCP
-	return &domain.MCPServer{
-		ID:         p.Manifest.MCPServerID(),
-		Name:       p.Manifest.Name,
-		Command:    m.Command,
-		Args:       m.Args,
-		Env:        m.Env,
-		Enabled:    true,
-		WorkingDir: p.InstallPath,
-	}
 }

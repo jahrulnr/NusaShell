@@ -695,21 +695,21 @@ func TestAgentTurnWithMCPTool(t *testing.T) {
 	convID := h.newConversation(t)
 
 	// register the fake MCP server
-	saved := h.rpcOK(t, "mcp.servers.save", map[string]any{
+	saved := h.rpcOK(t, "plugin.save", map[string]any{
 		"name": "fakemcp", "command": h.mcpBin, "args": []string{}, "enabled": true,
 	})
 	var sv struct {
-		Servers []struct {
+		Plugins []struct {
 			ID string `json:"id"`
-		} `json:"servers"`
+		} `json:"plugins"`
 	}
-	if err := json.Unmarshal(saved.Result, &sv); err != nil || len(sv.Servers) != 1 {
-		t.Fatalf("mcp save = %s", saved.Result)
+	if err := json.Unmarshal(saved.Result, &sv); err != nil || len(sv.Plugins) != 1 {
+		t.Fatalf("plugin save = %s", saved.Result)
 	}
-	serverID := sv.Servers[0].ID
+	serverID := sv.Plugins[0].ID
 
 	// test connection lists tools
-	tested := h.rpcOK(t, "mcp.servers.test", map[string]any{"id": serverID})
+	tested := h.rpcOK(t, "plugin.test", map[string]any{"id": serverID})
 	var tools struct {
 		Tools []struct {
 			Name        string `json:"name"`

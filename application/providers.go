@@ -60,22 +60,12 @@ func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *cont
 	if kind != domain.ProviderMessages && kind != domain.ProviderResponses && kind != domain.ProviderChat && kind != domain.ProviderOllama && kind != domain.ProviderCodex {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "kind must be messages, responses, chat, ollama, or codex"}
 	}
-	// Codex uses a fixed backend URL and OAuth — no user-supplied base URL.
-	// Ollama defaults to localhost:11434 — no API key needed.
-	// Other kinds require a base URL.
 	baseURL := strings.TrimSpace(req.BaseURL)
-	if kind == domain.ProviderCodex {
-		if baseURL == "" {
-			baseURL = "https://chatgpt.com/backend-api/codex"
-		}
-	} else if kind == domain.ProviderOllama {
-		if baseURL == "" {
-			baseURL = "http://localhost:11434"
-		}
-	} else if baseURL == "" {
-		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "base url is required"}
-	}
 
+	// Resolve the existing provider first: the kind-change guard depends on
+	// it and must fire before base URL validation (switching a codex
+	// provider to "chat" would otherwise fail on "base url is required"
+	// before reaching the guard).
 	var p *domain.Provider
 	if req.ID != "" {
 		existing, err := a.Providers.Get(req.ID)
@@ -89,10 +79,6 @@ func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *cont
 			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "codex kind is provider-specific and cannot be changed; delete this provider and add a new one instead"}
 		}
 		p = existing
-		p.Kind = kind
-		p.Name = name
-		p.BaseURL = baseURL
-		p.Enabled = req.Enabled
 	} else {
 		p = &domain.Provider{
 			ID:      domain.NewID("prov"),
@@ -102,6 +88,23 @@ func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *cont
 			Enabled: req.Enabled,
 		}
 	}
+
+	// Codex uses a fixed backend URL and OAuth — no user-supplied base URL.
+	// Ollama defaults to localhost:11434 — no API key needed.
+	// Other kinds require a base URL.
+	if baseURL == "" {
+		if kind == domain.ProviderCodex {
+			baseURL = "https://chatgpt.com/backend-api/codex"
+		} else if kind == domain.ProviderOllama {
+			baseURL = "http://localhost:11434"
+		} else {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "base url is required"}
+		}
+	}
+	p.Kind = kind
+	p.Name = name
+	p.BaseURL = baseURL
+	p.Enabled = req.Enabled
 	p.UpdatedAt = time.Now().UTC()
 
 	if req.APIKey != "" {
