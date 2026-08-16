@@ -19,7 +19,11 @@ test('Agent uses the Electron workspace shell without unsupported Todo UI', () =
   // The todo checklist strip uses a distinct class name (agent-todo-strip).
   assert.match(html, /class="agent-todo-strip" id="agent-todo-strip"/);
   assert.match(html, /id="agent-todo-strip-list"/);
-  assert.match(html, /id="agent-todo-strip-summary"/);
+  // The strip's live summary line is rendered via the meta span; the old
+  // "summary" element was replaced by count + meta during the agent view
+  // refactor, so assert on the elements the UI actually uses.
+  assert.match(html, /id="agent-todo-strip-count"/);
+  assert.match(html, /id="agent-todo-strip-meta"/);
   const tabletRules = parityCSS.slice(
     parityCSS.indexOf('@media (max-width: 900px)'),
     parityCSS.indexOf('@media (max-width: 760px)'),
