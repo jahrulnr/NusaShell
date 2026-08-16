@@ -937,6 +937,8 @@ function bindEvents() {
     const job = renderToolJob({ name, args: args ?? {}, status: 'running' });
     run.toolJobs.set(tool_call_id, job);
     run.strip.append(job);
+    // Keep room diagnostics live while tools execute.
+    updateRoomInfo(state.conversation);
     // Start an elapsed timer so the user can see how long the tool has been
     // running. The timer is stored on the job element and cleared on complete.
     const startTime = Date.now();
@@ -980,6 +982,8 @@ function bindEvents() {
     job.open = false;
     const meta = job.querySelector('.agent-tool-terminal-meta');
     if (meta) meta.textContent = toolTerminalMeta(next);
+    // Room diagnostics stay current after the tool settles.
+    updateRoomInfo(state.conversation);
     const outputEl = job.querySelector('.agent-tool-terminal-output');
     if (outputEl) {
       outputEl.classList.toggle('is-error', next.status === 'fail');
@@ -1291,13 +1295,24 @@ function updateComposerStatus() {
   workspaceButton.title = workspace || 'Home (user home directory)';
 
   const status = document.getElementById('agent-provider-status');
+  const stopBtn = document.getElementById('stop-btn');
   if (state.running || state.conversation?.status === 'running') {
-    status.textContent = 'Running…';
+    // Live turn: keep the useful context-usage badge visible (running is
+    // already conveyed by the prompt pulse + activity); just pulse it.
     status.classList.add('is-running');
-    document.getElementById('stop-btn').hidden = false;
+    if (stopBtn) stopBtn.hidden = false;
+    const chosen = models.find((model) => `${model.provider_id}:${model.id}` === state.model) || models.find((model) => model.id === state.model);
+    if (chosen) {
+      const windowSize = effectiveContextWindow(Number(chosen.context) || 0, Number(state.settings.max_input_tokens) || 0);
+      status.textContent = formatContextUsage(estimateContextTokens(state.messages), windowSize);
+      return;
+    }
+    // No model selected — fall back to a neutral running label.
+    status.textContent = 'Running';
     return;
   }
   status.classList.remove('is-running');
+  if (stopBtn) stopBtn.hidden = true;
   const chosen = models.find((model) => `${model.provider_id}:${model.id}` === state.model) || models.find((model) => model.id === state.model);
   if (!chosen) {
     status.textContent = 'Choose a model';
