@@ -51,20 +51,27 @@ never needs a key (only set one when Ollama is behind an auth proxy).
 manual key field. Keys are stored in the SQLite credential store
 (`credentials.db`) inside the data directory, never in the JSON files.
 
-### Seeding keys from the environment
+### Seeding keys from the environment (explicit)
 
-Keys normally come from the UI form, but a small set of well-known providers
-can be seeded from an environment variable at startup for headless or
-containerized deployments (for example a Cloud Agent secret). NusaShell still
-stores the key only in `credentials.db` — the environment variable is just the
-source on boot. Seeding is idempotent and non-destructive: it creates the
-provider (enabled) on first run and, on later runs, only rewrites the stored
-key when the variable's value changes (secret rotation). A provider's name,
-base URL, and enabled state that you edit in the UI are never overwritten, and
-the variable is never re-read into the wire config. Models are fetched by the
-normal auto-import loop after seeding.
+Keys normally come from the UI form. For headless or containerized setups,
+the binary also offers an **explicit, opt-in** subcommand that copies keys
+from environment variables into `credentials.db`:
 
-| Env variable | Seeded provider | Kind | Base URL |
+```bash
+nusashell seed-providers
+```
+
+This runs **only when you invoke it** — the server never reads these
+variables on its own during normal startup, so there is no hidden behavior.
+It respects `NUSASHELL_DATA_DIR`, prints a line per action, and then exits.
+It is idempotent and non-destructive: it creates the provider (enabled) on
+first run and, on later invocations, only rewrites the stored key when the
+variable's value changed (secret rotation). A provider's name, base URL, and
+enabled state that you edited in the UI are never overwritten, and the
+variable is never re-read into the wire config. After seeding, use **Import
+models** (or wait for the periodic auto-import) to populate the model list.
+
+| Env variable | Provider | Kind | Base URL |
 | --- | --- | --- | --- |
 | `OPENROUTER_API_KEY` | OpenRouter | `chat` | `https://openrouter.ai/api/v1` |
 
