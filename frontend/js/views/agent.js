@@ -286,7 +286,7 @@ async function openConversation(id) {
   updateModelTrigger();
   updateComposerStatus();
   updateSendAvailability(state);
-  updateRoomInfo(conversation);
+  updateRoomInfo(state.conversation, state.messages);
 }
 
 // reattachActiveRunFromBackend queries the backend for the active run of the
@@ -938,7 +938,7 @@ function bindEvents() {
     run.toolJobs.set(tool_call_id, job);
     run.strip.append(job);
     // Keep room diagnostics live while tools execute.
-    updateRoomInfo(state.conversation);
+    updateRoomInfo(state.conversation, state.messages);
     // Start an elapsed timer so the user can see how long the tool has been
     // running. The timer is stored on the job element and cleared on complete.
     const startTime = Date.now();
@@ -983,7 +983,7 @@ function bindEvents() {
     const meta = job.querySelector('.agent-tool-terminal-meta');
     if (meta) meta.textContent = toolTerminalMeta(next);
     // Room diagnostics stay current after the tool settles.
-    updateRoomInfo(state.conversation);
+    updateRoomInfo(state.conversation, state.messages);
     const outputEl = job.querySelector('.agent-tool-terminal-output');
     if (outputEl) {
       outputEl.classList.toggle('is-error', next.status === 'fail');

@@ -37,7 +37,7 @@ export function bindRoomInfo({ getConversation, copyText }) {
   return { toggleRoomInfo };
 }
 
-export function updateRoomInfo(conversation) {
+export function updateRoomInfo(conversation, extraMessages) {
   const info = document.getElementById('agent-room-info');
   const title = document.getElementById('agent-room-info-title');
   const toolCount = document.getElementById('agent-room-tool-count');
@@ -51,7 +51,10 @@ export function updateRoomInfo(conversation) {
   if (!hasRoom) return;
 
   title.textContent = conversation?.title || 'Conversation details';
-  const meta = getRoomMetadata(conversation);
+  // The active conversation's messages live in state.messages (a sibling of
+  // the conversation payload) — prefer them when provided so the popover
+  // reflects the real thread instead of a payload without messages.
+  const meta = getRoomMetadata(conversation, extraMessages);
   toolCount.textContent = String(meta.toolCallCount);
   compactionCount.textContent = String(meta.compactionCount);
   idEl.textContent = meta.conversationId;
@@ -63,8 +66,12 @@ export function updateRoomInfo(conversation) {
   };
 }
 
-function getRoomMetadata(conversation) {
-  const messages = Array.isArray(conversation?.messages) ? conversation.messages : [];
+function getRoomMetadata(conversation, extraMessages) {
+  // Use the caller-provided message list (state.messages) when supplied;
+  // otherwise fall back to conversation.messages.
+  const messages = Array.isArray(extraMessages)
+    ? extraMessages
+    : Array.isArray(conversation?.messages) ? conversation.messages : [];
   let toolCallCount = 0;
   for (const message of messages) {
     if (Array.isArray(message?.tool_calls)) {
