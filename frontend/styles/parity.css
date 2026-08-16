@@ -357,7 +357,7 @@ summary { outline: none; }
 .agent-tool-terminal { color: #9aa8ba; }
 .agent-tool-terminal summary {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto auto auto;
+  grid-template-columns: 24px minmax(0, 1fr) auto auto auto auto;
   align-items: center;
   gap: 8px;
   min-height: 34px;

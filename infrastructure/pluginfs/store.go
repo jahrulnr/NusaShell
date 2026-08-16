@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"nusashell/domain"
+	"nusashell/infrastructure/pluginicon"
 )
 
 // Store reads installed plugins from <root>/<plugin-id>/.
@@ -247,13 +248,15 @@ type PluginDTO struct {
 	Manifest    *domain.PluginManifest `json:"manifest,omitempty"`
 }
 
-// ToDTO converts a domain.Plugin to a PluginDTO.
+// ToDTO converts a domain.Plugin to a PluginDTO. Local file icons are
+// resolved to PNG data URLs so browsers (http://localhost) can render them
+// (file:// is blocked by the browser from an http origin).
 func ToDTO(p *domain.Plugin) PluginDTO {
 	return PluginDTO{
 		ID:          p.Manifest.ID,
 		Name:        p.Manifest.Name,
 		Version:     p.Manifest.Version,
-		Icon:        p.Manifest.Icon,
+		Icon:        pluginicon.ResolveLocal(p.Manifest.Icon, p.InstallPath),
 		Category:    p.Manifest.Category,
 		HasUI:       p.HasUI,
 		InstallPath: p.InstallPath,
