@@ -945,6 +945,7 @@ function bindEvents() {
       const head = job.querySelector('.agent-tool-job-card-head') || job;
       head.append(elapsedEl);
     }
+    job._startedAt = startTime;
     job._elapsedTimer = setInterval(() => {
       const secs = Math.floor((Date.now() - startTime) / 1000);
       elapsedEl.textContent = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
@@ -965,6 +966,13 @@ function bindEvents() {
     }
     const job = run.toolJobs.get(tool_call_id);
     if (!job) return;
+    // Write the final elapsed duration before clearing the timer so the
+    // finished card keeps showing how long the tool ran.
+    const elapsedEl = job.querySelector('.agent-tool-elapsed');
+    if (elapsedEl && job._startedAt) {
+      const secs = Math.floor((Date.now() - job._startedAt) / 1000);
+      elapsedEl.textContent = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
+    }
     // Clear the elapsed timer — the final duration stays displayed.
     if (job._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
     const next = { name: job.querySelector('.agent-tool-terminal-title')?.textContent, args: job._toolArgs, status: status || 'ok', output };
