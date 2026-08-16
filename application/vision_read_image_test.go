@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,12 +17,17 @@ func absTestPath(parts ...string) string {
 }
 
 // filePathArgs builds a read_image args JSON with the given file path.
+// encoding/json escapes the path properly (backslashes on Windows).
 func filePathArgs(path string, question string) string {
-	qs := ""
+	m := map[string]string{"file_path": path}
 	if question != "" {
-		qs = ",\"question\":\"" + question + "\""
+		m["question"] = question
 	}
-	return "{\"file_path\":\"" + path + "\"" + qs + "}"
+	b, err := json.Marshal(m)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
 }
 
 func TestFindImageAttachmentByPath(t *testing.T) {
@@ -46,7 +52,7 @@ func TestFindImageAttachmentByPath(t *testing.T) {
 	}
 
 	// Case-insensitive match
-	img, err = findImageAttachmentByPath(conv, "/DATA/ATTACHMENTS/C1/CAT.PNG")
+	img, err = findImageAttachmentByPath(conv, strings.ToUpper(absTestPath("attachments", "c1", "cat.png")))
 	if err != nil {
 		t.Fatalf("unexpected error for case-insensitive: %v", err)
 	}
