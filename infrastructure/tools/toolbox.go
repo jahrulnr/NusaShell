@@ -119,10 +119,12 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 	if t.Plugins != nil {
 		plugins, _ := t.Plugins.List()
 		for _, p := range plugins {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			dt, err := t.MCP.Connect(ctx, p)
-			cancel()
-			if err != nil {
+			// Dynamic parity: only tools of plugins that are explicitly
+			// ENABLED (connected via mcp_enable / plugin.test) are exposed to
+			// the agent. Idle plugins stay out of the tool definitions to
+			// save tokens and match the NusaShell flow (mcp_list → mcp_enable).
+			dt, ok := t.MCP.ToolsFor(p.Manifest.MCPServerID())
+			if !ok {
 				continue
 			}
 			for _, tool := range dt {
