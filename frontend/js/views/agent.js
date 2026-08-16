@@ -916,6 +916,19 @@ function bindEvents() {
     run.textBox.innerHTML = renderMarkdown(run.raw);
     scrollToBottom();
   });
+  on('agent.context.estimate', (payload) => {
+    // Use the server-side estimate of what is really sent (system + messages
+    // + tool definitions) instead of a transcript-only guess.
+    const { conversation_id, estimated_tokens } = payload;
+    if (conversation_id !== state.activeId) return;
+    const status = document.getElementById('agent-provider-status');
+    if (!status) return;
+    if (!Number.isFinite(Number(estimated_tokens)) || Number(estimated_tokens) <= 0) return;
+    const chosen = models.find((model) => `${model.provider_id}:${model.id}` === state.model) || models.find((model) => model.id === state.model);
+    if (!chosen) return;
+    const windowSize = effectiveContextWindow(Number(chosen.context) || 0, Number(state.settings.max_input_tokens) || 0);
+    status.textContent = formatContextUsage(Number(estimated_tokens), windowSize);
+  });
   on('agent.reasoning.delta', (payload) => {
     const { text, conversation_id } = payload;
     const run = getRunOrQueue('agent.reasoning.delta', payload);

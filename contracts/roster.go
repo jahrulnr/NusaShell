@@ -84,24 +84,25 @@ const (
 
 // Event types pushed over SSE (/events) and WebSocket (/ws).
 const (
-	EventTurnStarted    = "agent.turn.started"
-	EventMessageDelta   = "agent.message.delta"
-	EventReasoningDelta = "agent.reasoning.delta"
-	EventToolStarted    = "agent.tool.started"
-	EventToolCompleted  = "agent.tool.completed"
-	EventTurnDone       = "agent.turn.done"
-	EventTurnError      = "agent.turn.error"
-	EventCompacted      = "agent.compacted"
-	EventSteerQueued    = "agent.steer.queued"
-	EventSteerApplied   = "agent.steer.applied"
-	EventSteerCancelled = "agent.steer.cancelled"
-	EventProviderRetry  = "agent.provider.retry"
-	EventLogAppend      = "logs.append"
-	EventTodoUpdated    = "agent.todo.updated"
-	EventAutoContinue   = "agent.auto_continue"
-	EventAskPending     = "agent.ask.pending"
-	EventAskAnswered    = "agent.ask.answered"
-	EventAskCancelled   = "agent.ask.cancelled"
+	EventTurnStarted     = "agent.turn.started"
+	EventMessageDelta    = "agent.message.delta"
+	EventContextEstimate = "agent.context.estimate"
+	EventReasoningDelta  = "agent.reasoning.delta"
+	EventToolStarted     = "agent.tool.started"
+	EventToolCompleted   = "agent.tool.completed"
+	EventTurnDone        = "agent.turn.done"
+	EventTurnError       = "agent.turn.error"
+	EventCompacted       = "agent.compacted"
+	EventSteerQueued     = "agent.steer.queued"
+	EventSteerApplied    = "agent.steer.applied"
+	EventSteerCancelled  = "agent.steer.cancelled"
+	EventProviderRetry   = "agent.provider.retry"
+	EventLogAppend       = "logs.append"
+	EventTodoUpdated     = "agent.todo.updated"
+	EventAutoContinue    = "agent.auto_continue"
+	EventAskPending      = "agent.ask.pending"
+	EventAskAnswered     = "agent.ask.answered"
+	EventAskCancelled    = "agent.ask.cancelled"
 )
 
 // ---- app ----
@@ -285,6 +286,19 @@ type ReasoningDeltaEvent struct {
 	ConversationID string `json:"conversation_id"`
 	MessageID      string `json:"message_id"`
 	Text           string `json:"text"`
+}
+
+// ContextEstimateEvent carries a lightweight server-side estimate of the
+// actual request payload (system prompt + messages + tool definitions) so
+// the UI badge reflects the tokens really sent to the provider.
+type ContextEstimateEvent struct {
+	RunID           string `json:"run_id"`
+	ConversationID  string `json:"conversation_id"`
+	MessageID       string `json:"message_id"`
+	EstimatedTokens int64  `json:"estimated_tokens"`
+	SystemTokens    int64  `json:"system_tokens,omitempty"`
+	MessagesTokens  int64  `json:"messages_tokens,omitempty"`
+	ToolsTokens     int64  `json:"tools_tokens,omitempty"`
 }
 
 type ToolStartedEvent struct {
