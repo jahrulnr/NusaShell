@@ -114,3 +114,8 @@ as a generic subprocess: **command**, **args**, **env**, and a label.
 The parent agent spawns these binaries with `subagent` (optional `count` for
 parallel sessions). You can peek, steer, stop, change mode, and answer
 permission prompts from the Agent dock, drawer, or popup.
+
+Stdio is newline-delimited JSON-RPC (`\n` between messages, no embedded
+newlines). NusaShell does **not** send LSP `Content-Length` headers — Gemini
+CLI (`gemini --acp`) and the ACP spec parse each line with `JSON.parse`.
+Logs from the agent belong on stderr.

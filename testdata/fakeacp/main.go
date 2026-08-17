@@ -1,6 +1,6 @@
 // Command fakeacp is a scripted Agent Client Protocol server over stdio
-// used by handler-level tests. It speaks JSON-RPC 2.0 with Content-Length
-// framing.
+// used by handler-level tests. It speaks JSON-RPC 2.0 with newline-delimited
+// frames (ACP stdio). It still accepts Content-Length on stdin.
 package main
 
 import (
@@ -278,8 +278,8 @@ func notify(method string, params any) {
 func writeFrame(body []byte) {
 	mu.Lock()
 	defer mu.Unlock()
-	fmt.Fprintf(os.Stdout, "Content-Length: %d\r\n\r\n", len(body))
 	_, _ = os.Stdout.Write(body)
+	_, _ = os.Stdout.Write([]byte("\n"))
 }
 
 func readFrame(r *bufio.Reader) ([]byte, error) {
