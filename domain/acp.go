@@ -316,8 +316,25 @@ func SamplePermissionPaths(paths []string) []string {
 }
 
 // AppendTranscript adds a chunk and drops from the front when over the cap.
+// Consecutive text and thought chunks are merged into a single chunk so
+// streaming agent_message_chunk updates (often one char/token each) do not
+// produce one transcript line per delta.
 func (r *AcpRun) AppendTranscript(chunk AcpTranscriptChunk) {
+	if (chunk.Kind == "text" || chunk.Kind == "thought") && len(r.Transcript) > 0 {
+		last := &r.Transcript[len(r.Transcript)-1]
+		if last.Kind == chunk.Kind {
+			last.Text += chunk.Text
+			r.trimTranscriptCap()
+			return
+		}
+	}
 	r.Transcript = append(r.Transcript, chunk)
+	r.trimTranscriptCap()
+}
+
+// trimTranscriptCap drops chunks from the front until the total text size is
+// under MaxAcpTranscriptBytes.
+func (r *AcpRun) trimTranscriptCap() {
 	total := 0
 	for _, c := range r.Transcript {
 		total += utf8.RuneCountInString(c.Text) + utf8.RuneCountInString(c.ToolTitle)
@@ -459,6 +476,13 @@ func WrapSessionAuthError(agent *AcpAgent, err error) error {
 }
 
 func isSessionAuthRequired(err error) bool {
+	return IsSessionAuthRequired(err)
+}
+
+// IsSessionAuthRequired reports whether err indicates the ACP agent needs
+// authentication before session/new can succeed. Exported so the runtime
+// can decide whether to retry with Authenticate (lazy auth).
+func IsSessionAuthRequired(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "authentication required") ||
 		strings.Contains(msg, "not authenticated") ||

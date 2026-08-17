@@ -22,6 +22,7 @@ import {
 } from './agent/render.js';
 import { bindSubagents, setSubagentConversation } from './agent/subagents.js';
 import { renderMermaidDiagrams } from '../mermaid-render.js';
+import { createAskCard, sealAskCard, cancelAskCard } from './ask-card.js';
 
 const state = {
   conversations: [],

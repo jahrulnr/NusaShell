@@ -133,3 +133,10 @@ If you register a CLI without logging in, **Probe** still works (it only runs
 fail until you complete **Authenticate** with one of the advertised method ids.
 NusaShell surfaces a clear error naming those ids instead of a bare JSON-RPC
 `Authentication required`.
+
+**One login only (lazy auth):** After you **Authenticate** once, NusaShell
+does not re-call `authenticate` on subsequent probes, catalog refreshes, or
+subagent spawns. It tries `session/new` first and only calls `authenticate`
+when the agent reports an auth-required error. Agents that persist their own
+auth (e.g. Devin/Codex storing tokens in `~/.codex/auth.json`) will not
+re-trigger the browser login flow on every new connection.

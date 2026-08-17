@@ -40,6 +40,7 @@ type rpcErr struct {
 var (
 	mu       sync.Mutex
 	authed   bool
+	reAuthed bool
 	sessions = map[string]string{}
 	cancels  = map[string]chan struct{}{}
 	rpcWait  = map[any]chan request{}
@@ -80,7 +81,7 @@ func handle(req request) {
 	switch req.Method {
 	case "initialize":
 		auth := []any{}
-		if os.Getenv("FAKEACP_AUTH") == "1" {
+		if os.Getenv("FAKEACP_AUTH") == "1" || os.Getenv("FAKEACP_SOFT_AUTH") == "1" {
 			auth = []any{map[string]any{"id": "cursor_login", "name": "Cursor login", "description": "Sign in via Cursor"}}
 		}
 		reply(req.ID, map[string]any{
@@ -94,8 +95,13 @@ func handle(req request) {
 		})
 	case "authenticate":
 		authed = true
+		reAuthed = true
 		reply(req.ID, map[string]any{})
 	case "session/new":
+		if os.Getenv("FAKEACP_SOFT_AUTH") == "1" && reAuthed {
+			fail(req.ID, "re-authentication triggered unnecessarily")
+			return
+		}
 		if os.Getenv("FAKEACP_AUTH") == "1" && !authed {
 			fail(req.ID, "authentication required")
 			return

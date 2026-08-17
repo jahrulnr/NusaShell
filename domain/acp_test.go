@@ -246,6 +246,41 @@ func TestAcpRunLiveAndTranscriptCap(t *testing.T) {
 	}
 }
 
+// TestAppendTranscriptMergesConsecutiveTextChunks verifies that streaming
+// agent_message_chunk updates (often one char/token each) are merged into a
+// single text chunk so the UI does not render one line per delta.
+func TestAppendTranscriptMergesConsecutiveTextChunks(t *testing.T) {
+	r := &AcpRun{}
+	r.AppendTranscript(AcpTranscriptChunk{Kind: "text", Text: "H"})
+	r.AppendTranscript(AcpTranscriptChunk{Kind: "text", Text: "i"})
+	r.AppendTranscript(AcpTranscriptChunk{Kind: "text", Text: "!"})
+	r.AppendTranscript(AcpTranscriptChunk{Kind: "tool", ToolID: "t1", ToolTitle: "ls"})
+	r.AppendTranscript(AcpTranscriptChunk{Kind: "text", Text: "done"})
+	r.AppendTranscript(AcpTranscriptChunk{Kind: "thought", Text: "think"})
+	r.AppendTranscript(AcpTranscriptChunk{Kind: "thought", Text: " more"})
+
+	want := []struct {
+		kind string
+		text string
+	}{
+		{"text", "Hi!"},
+		{"tool", ""},
+		{"text", "done"},
+		{"thought", "think more"},
+	}
+	if len(r.Transcript) != len(want) {
+		t.Fatalf("transcript len = %d, want %d: %+v", len(r.Transcript), len(want), r.Transcript)
+	}
+	for i, w := range want {
+		if r.Transcript[i].Kind != w.kind {
+			t.Fatalf("chunk %d kind = %q, want %q", i, r.Transcript[i].Kind, w.kind)
+		}
+		if w.text != "" && r.Transcript[i].Text != w.text {
+			t.Fatalf("chunk %d text = %q, want %q", i, r.Transcript[i].Text, w.text)
+		}
+	}
+}
+
 func TestValidateAcpAgentSave(t *testing.T) {
 	if ValidateAcpAgentSave("", "cursor") == "" {
 		t.Fatal("empty name")

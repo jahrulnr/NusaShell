@@ -134,22 +134,37 @@ func (rt *Runtime) RefreshCatalog(ctx context.Context, agent *domain.AcpAgent) (
 			return *agent, err
 		}
 		applyInitialize(agent, init)
-		if agent.AuthMethodID != "" && len(init.AuthMethods) > 0 {
-			if err := conn.Authenticate(ctx, agent.AuthMethodID); err != nil {
-				return *agent, err
-			}
-		}
 		cwd := agent.DefaultWorkspace
 		if cwd == "" {
 			cwd, _ = os.Getwd()
 		}
-		sess, err := conn.NewSession(ctx, cwd)
+		sess, err := newSessionWithLazyAuth(ctx, conn, agent, cwd)
 		if err != nil {
 			return *agent, domain.WrapSessionAuthError(agent, err)
 		}
 		applySession(agent, sess)
 		return *agent, nil
 	})
+}
+
+// newSessionWithLazyAuth tries NewSession first and only calls Authenticate
+// when the agent reports an auth-required error. This prevents agents that
+// persist their own auth (e.g. Devin/Codex storing tokens in
+// ~/.codex/auth.json) from re-triggering browser login on every new
+// connection. When AuthMethodID is empty and NewSession fails, the error is
+// returned for WrapSessionAuthError to upgrade.
+func newSessionWithLazyAuth(ctx context.Context, conn *acpclient.Conn, agent *domain.AcpAgent, cwd string) (acpclient.NewSessionResult, error) {
+	sess, err := conn.NewSession(ctx, cwd)
+	if err == nil {
+		return sess, nil
+	}
+	if agent.AuthMethodID == "" || !domain.IsSessionAuthRequired(err) {
+		return sess, err
+	}
+	if err := conn.Authenticate(ctx, agent.AuthMethodID); err != nil {
+		return acpclient.NewSessionResult{}, err
+	}
+	return conn.NewSession(ctx, cwd)
 }
 
 func (rt *Runtime) withThrowaway(ctx context.Context, agent *domain.AcpAgent, fn func(*acpclient.Conn) (domain.AcpAgent, error)) (domain.AcpAgent, error) {
@@ -233,7 +248,7 @@ func (rt *Runtime) Spawn(ctx context.Context, req application.AcpSpawnRequest) (
 	if err != nil {
 		return nil, err
 	}
-	sess, err := pc.conn.NewSession(ctx, workspace)
+	sess, err := newSessionWithLazyAuth(ctx, pc.conn, req.Agent, workspace)
 	if err != nil {
 		return nil, domain.WrapSessionAuthError(req.Agent, err)
 	}
@@ -336,15 +351,10 @@ func (rt *Runtime) ensureConn(agent *domain.AcpAgent, workspace string) (*pooled
 		return nil, err
 	}
 	applyInitialize(agent, init)
-	if agent.AuthMethodID != "" && len(init.AuthMethods) > 0 {
-		authCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		err := conn.Authenticate(authCtx, agent.AuthMethodID)
-		cancel()
-		if err != nil {
-			conn.Close()
-			return nil, err
-		}
-	}
+	// Lazy auth: do NOT proactively call Authenticate here. NewSession in
+	// Spawn will try first and only Authenticate on auth-required failure.
+	// This prevents agents that persist their own auth (Devin/Codex) from
+	// re-triggering browser login on every pooled connection.
 	pc.conn = conn
 	rt.mu.Lock()
 	rt.initLocked()

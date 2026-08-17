@@ -2,6 +2,7 @@
 
 import { rpc, on } from '../../rpc.js';
 import { el, toast, confirmDialog } from '../../ui.js';
+import { renderMarkdown } from '../../markdown.js';
 
 const LIVE = new Set(['starting', 'running', 'waiting_permission']);
 const RECENT_MS = 2 * 60 * 1000;
@@ -353,10 +354,17 @@ function transcriptLine(chunk) {
       el('span', { text: `${chunk.tool_title || chunk.tool_id || ''} ${chunk.tool_status || ''}`.trim() }),
     );
   }
-  return el('div', { class: `acp-transcript-line is-${chunk.kind || 'text'}` },
-    chunk.kind === 'thought' ? el('span', { class: 'acp-transcript-kind', text: 'think' }) : null,
-    el('span', { text: chunk.text || chunk.kind || '' }),
-  );
+  const line = el('div', { class: `acp-transcript-line is-${chunk.kind || 'text'}` });
+  if (chunk.kind === 'thought') line.append(el('span', { class: 'acp-transcript-kind', text: 'think' }));
+  const body = el('div', { class: 'acp-transcript-text' });
+  const text = chunk.text || chunk.kind || '';
+  if (chunk.kind === 'thought' || chunk.kind === 'text') {
+    body.innerHTML = renderMarkdown(text);
+  } else {
+    body.textContent = text;
+  }
+  line.append(body);
+  return line;
 }
 
 function queuePermission(runId, permission, run) {
