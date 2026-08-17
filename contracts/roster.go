@@ -732,8 +732,16 @@ type MCPServerDTO struct {
 
 // PluginDTO is the wire representation of an installed plugin.
 type PluginDTO struct {
-	ID              string             `json:"id"`
-	Name            string             `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Plugin distinguishes an installed plugin (catalog/GitHub/ZIP or any
+	// entry exposing a UI) from a plain manual stdio MCP server the user
+	// added by hand. The UI uses it to pick badges and drawer actions.
+	Plugin bool `json:"plugin"`
+	// Catalog is true when this plugin's id exists in the curated catalog,
+	// so it can be updated (manual "Update") and auto-updated. GitHub/ZIP
+	// and manual MCP servers are not catalog-managed.
+	Catalog         bool               `json:"catalog"`
 	Version         string             `json:"version"`
 	Icon            string             `json:"icon"`
 	Category        string             `json:"category,omitempty"`
