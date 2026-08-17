@@ -47,13 +47,37 @@ type SkillStore interface {
 	Get(id string) (*domain.Skill, error)
 	Save(s *domain.Skill) error
 	Delete(id string) error
+	// ReadFile reads any text file inside a skill directory (default
+	// SKILL.md) with offset/maxChars pagination. Mirrors the Electron
+	// shell's skill_read (registry.read) semantics.
+	ReadFile(id, path string, offset, maxChars int) (*domain.SkillFile, error)
+	// Files lists the nested directory tree of a skill folder (path,
+	// type, sizeBytes, editable), sorted as in the Electron shell.
+	Files(id string) ([]domain.SkillFileEntry, error)
 }
 
-// PluginStore reads installed plugins from the filesystem.
+// PluginStore is the single source of truth for plugins (MCP servers and
+// MCP + UI plugins). A plugin is installed from the catalog, a GitHub repo,
+// a ZIP archive, or created manually; its manifest carries the MCP server
+// connection config plus optional UI metadata.
 type PluginStore interface {
 	List() ([]*domain.Plugin, error)
 	Get(id string) (*domain.Plugin, error)
+	Install(sourceDir string) (*domain.Plugin, error)
 	Uninstall(id string) error
+	Save(p *domain.Plugin) error
+	Delete(id string) error
+}
+
+// PluginInstaller fetches plugins from the curated catalog, a GitHub
+// repository, or a local ZIP archive and installs them.
+type PluginInstaller interface {
+	Catalog(ctx context.Context) ([]domain.PluginCatalogEntry, error)
+	Install(ctx context.Context, req domain.PluginInstallRequest) (*domain.Plugin, error)
+	// CheckUpdates returns catalog entries newer than their installed match.
+	CheckUpdates(ctx context.Context, installed []*domain.Plugin) ([]domain.PluginCatalogEntry, error)
+	// Update reinstalls a catalog plugin at its latest version.
+	Update(ctx context.Context, pluginID string) (*domain.Plugin, error)
 }
 
 type MemoryStore interface {
@@ -76,13 +100,6 @@ type ConversationTodoPort interface {
 	Get(conversationID string) []domain.TodoItem
 	Set(conversationID string, items []domain.TodoItem)
 	Clear(conversationID string)
-}
-
-type MCPServerStore interface {
-	List() []*domain.MCPServer
-	Get(id string) (*domain.MCPServer, error)
-	Save(s *domain.MCPServer) error
-	Delete(id string) error
 }
 
 type LogStore interface {

@@ -26,6 +26,7 @@ import (
 	"nusashell/infrastructure/jsonstore"
 	"nusashell/infrastructure/mcpclient"
 	"nusashell/infrastructure/pluginfs"
+	"nusashell/infrastructure/plugininstall"
 	"nusashell/infrastructure/pluginruntime"
 	"nusashell/infrastructure/skillfs"
 	"nusashell/infrastructure/sqlitestore"
@@ -170,6 +171,7 @@ func run() error {
 	if err != nil {
 		slog.Warn("plugin store init failed", "error", err)
 	}
+	pluginInstaller := plugininstall.New(pluginStore, logger)
 	pluginRuntime := pluginruntime.New(pluginStore, mcpManager)
 	// Attachment store: saves image/file attachments to disk so file-based
 	// tools can access them by absolute path.
@@ -178,34 +180,35 @@ func run() error {
 		slog.Warn("attachment store init failed", "error", err)
 	}
 	app := application.NewApp(application.Deps{
-		Version:       version,
-		DataDir:       dataDir,
-		Conversations: store,
-		Providers:     providerStore,
-		Credentials:   credentials,
-		Skills:        skillStore,
-		Memory:        &jsonstore.Memory{S: store},
-		LearningEdges: &jsonstore.LearningEdges{S: store},
-		Todos:         todoStore,
-		MCP:           &jsonstore.MCP{S: store},
-		Plugins:       pluginStore,
-		Logs:          &jsonstore.Logs{S: store},
-		Settings:      &jsonstore.Settings{S: store},
-		Attachments:   attachmentStore,
-		Docs:          docSource,
-		Bus:           bus,
-		AskQuestions:  askService,
+		Version:         version,
+		DataDir:         dataDir,
+		Conversations:   store,
+		Providers:       providerStore,
+		Credentials:     credentials,
+		Skills:          skillStore,
+		Memory:          &jsonstore.Memory{S: store},
+		LearningEdges:   &jsonstore.LearningEdges{S: store},
+		Todos:           todoStore,
+		Plugins:         pluginStore,
+		PluginInstaller: pluginInstaller,
+		Logs:            &jsonstore.Logs{S: store},
+		Settings:        &jsonstore.Settings{S: store},
+		Attachments:     attachmentStore,
+		Docs:            docSource,
+		Bus:             bus,
+		AskQuestions:    askService,
 		Toolbox: &tools.Toolbox{
-			Skills:       skillStore,
-			Memory:       &jsonstore.Memory{S: store},
-			Docs:         docSource,
-			MCPServers:   &jsonstore.MCP{S: store},
-			Todos:        todoStore,
-			Searcher:     searcher,
-			Settings:     &jsonstore.Settings{S: store},
-			Credentials:  credentials,
-			AskQuestions: askService,
-			MCP:          mcpManager,
+			Skills:          skillStore,
+			Memory:          &jsonstore.Memory{S: store},
+			Docs:            docSource,
+			Plugins:         pluginStore,
+			PluginInstaller: pluginInstaller,
+			Todos:           todoStore,
+			Searcher:        searcher,
+			Settings:        &jsonstore.Settings{S: store},
+			Credentials:     credentials,
+			AskQuestions:    askService,
+			MCP:             mcpManager,
 		},
 		MCPToolbox:                  mcpManager,
 		Factory:                     ai.NewFactory(credentials),
@@ -243,6 +246,7 @@ func run() error {
 	httpServer.BaseContext = func(net.Listener) context.Context { return ctx }
 	app.StartCodexCircuitMonitor(ctx)
 	app.StartAutoModelImport(ctx)
+	app.StartAutoUpdateLoop(ctx, 0)
 	app.StartLifecycle()
 	defer app.CloseLifecycle()
 

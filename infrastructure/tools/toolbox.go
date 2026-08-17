@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,17 +21,18 @@ import (
 func ptrBool(v bool) *bool { return &v }
 
 type Toolbox struct {
-	Skills       application.SkillStore
-	Memory       application.MemoryStore
-	Docs         application.DocsSource
-	MCPServers   application.MCPServerStore
-	Todos        application.ConversationTodoPort
-	Searcher     *searchwire.Searcher // zero-config searcher for web_search + web_fetch
-	Settings     application.SettingsStore
-	Credentials  application.CredentialStore
-	AskQuestions *application.AskQuestionService
-	MCP          interface {
-		Connect(ctx context.Context, s *domain.MCPServer) ([]contracts.MCPToolDTO, error)
+	Skills          application.SkillStore
+	Memory          application.MemoryStore
+	Docs            application.DocsSource
+	Plugins         application.PluginStore
+	PluginInstaller application.PluginInstaller
+	Todos           application.ConversationTodoPort
+	Searcher        *searchwire.Searcher // zero-config searcher for web_search + web_fetch
+	Settings        application.SettingsStore
+	Credentials     application.CredentialStore
+	AskQuestions    *application.AskQuestionService
+	MCP             interface {
+		Connect(ctx context.Context, p *domain.Plugin) ([]contracts.MCPToolDTO, error)
 		ToolsFor(serverID string) ([]contracts.MCPToolDTO, bool)
 		CallTool(ctx context.Context, serverID, toolName string, args map[string]any) (string, error)
 	}
@@ -88,9 +90,10 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 	tools := []application.ToolInfo{
 		{Name: "skill_list", Description: "List available skills with their names and descriptions.", InputSchema: obj("object", props("limit", intSchema("Max results, default 100")))},
 		{Name: "skill_search", Description: "Search installed skills by name or description (case-insensitive substring match).", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 50")), "query")},
-		{Name: "skill_read", Description: "Read a skill's full markdown content by name so you can follow its instructions.", InputSchema: obj("object", props("name", str("Skill name (from skill_list or skill_search)")), "name")},
+		{Name: "skill_read", Description: "Read a text file inside an installed skill (default SKILL.md). Pass path for support files (e.g. references/x.md) and offset/max_chars for pagination of long files.", InputSchema: obj("object", props("name", str("Skill id (from skill_list or skill_search)"), "path", str("Relative file path inside the skill folder; defaults to SKILL.md"), "offset", intSchema("Character offset for pagination (default 0)"), "max_chars", intSchema("Maximum characters to return (default 20000, max 100000)")), "name")},
 		{Name: "skill_save", Description: "Create or update a skill. When id is omitted a new skill is created; otherwise the existing skill with that id is updated. Skills should be reusable procedures or domain knowledge, not one-off task notes.", InputSchema: obj("object", props("id", str("Existing skill id to update (omit to create new)"), "name", str("Skill name (lowercase with hyphens, matches folder name)"), "description", str("Short description (max 1024 chars)"), "content", str("Full skill markdown content")), "name", "description", "content")},
 		{Name: "skill_run", Description: "Load a skill's markdown instructions by skill name so you can follow them.", InputSchema: obj("object", props("name", str("Skill name to load")), "name")},
+		{Name: "skill_files", Description: "List the files inside an installed skill folder (SKILL.md + support files) with size and editability, to discover references/guides before skill_read.", InputSchema: obj("object", props("name", str("Skill id")), "name")},
 		{Name: "memory_save", Description: "Save a fact to long-term memory with optional tags.", InputSchema: obj("object", props("content", str("Fact to remember"), "tags", arr("Optional tags")), "content")},
 		{Name: "memory_search", Description: "Search memory entries by substring match over content and tags.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 10")), "query")},
 		{Name: "memory_list", Description: "List all memory entries.", InputSchema: obj("object", nil)},
@@ -103,33 +106,41 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "tool_list", Description: "List tools from a running MCP server by name (names and descriptions, plus optional input schemas). When the server is omitted, lists tools across all running MCP servers.", InputSchema: obj("object", props("server", str("Optional MCP server name; when omitted, lists tools across all running servers")))},
 		{Name: "tool_search", Description: "Search a running MCP server's tools by name or description (case-insensitive token match — any term matches). Returns matching tool names and descriptions.", InputSchema: obj("object", props("server", str("MCP server name"), "query", str("Search query")), "server", "query")},
 		{Name: "tool_schema", Description: "Load one MCP tool's input schema by server and tool name. Useful when you need the exact argument shape before calling an mcp__<server>__<tool> tool.", InputSchema: obj("object", props("server", str("MCP server name"), "tool", str("Tool name within the server")), "server", "tool")},
+		{Name: "mcp_register", Description: "Register a new MCP plugin from a local folder (or update an existing one). The folder must contain manifest.json. After registering, call mcp_enable to connect and load its tools.", InputSchema: obj("object", props("source", str("Absolute path to the plugin folder containing manifest.json")), "source")},
+		{Name: "mcp_enable", Description: "Start/connect an MCP plugin and load its tools (alias of plugin.test). The plugin must be registered first (mcp_register or the Plugins view).", InputSchema: obj("object", props("id", str("Plugin id (e.g. nusashell.files)")), "id")},
+		{Name: "mcp_disable", Description: "Stop/disconnect an MCP plugin. The definition stays installed; only the MCP subprocess is stopped. Tools from this server are no longer listed.", InputSchema: obj("object", props("id", str("Plugin id")), "id")},
+		{Name: "mcp_unregister", Description: "Remove an MCP plugin entirely (deletes its folder under the plugins data dir). Use mcp_disable first if you only want to stop it.", InputSchema: obj("object", props("id", str("Plugin id")), "id")},
+		{Name: "mcp_install", Description: "Install an MCP plugin from the curated catalog or a GitHub repository (owner/repo or URL). After install, call mcp_enable with the resulting plugin id to connect and load its tools.", InputSchema: obj("object", props("source", strEnum("Install source", "catalog", "github"), "id", str("Catalog plugin id (required when source=catalog)"), "url", str("GitHub repo URL or owner/repo shorthand (required when source=github)"), "subdir", str("Optional subdirectory inside a monorepo (github)"), "ref", str("Optional branch or tag to pin (github)")), "source")},
+		{Name: "mcp_server_add", Description: "Register a manual MCP server (no manifest needed) by command/args/env — e.g. npx servers. Use for generic MCP servers; use mcp_register for NusaShell plugin folders. After adding, call mcp_enable with the server id to connect and load its tools.", InputSchema: obj("object", props("name", str("Human-readable server name"), "command", str("Command to launch the server (e.g. npx, node, python)"), "args", arr("Arguments (e.g. -y @modelcontextprotocol/server-github)"), "env", obj("object", props("additional", str("KEY=VALUE entries")), "additional"), "id", str("Optional stable id (default auto-generated)")), "name", "command")},
 		{Name: "read_image", Description: "Load an image from the conversation into your context so you can see it. Pass file_path (the absolute path shown in the image placeholder). When your active model supports vision, the image is attached to your context directly. For non-vision models, the image is described using a vision fallback model and the text description is returned.", InputSchema: obj("object", props("file_path", str("Absolute path of the image file on disk (shown in the image placeholder)"), "question", str("Optional question about the image")), "file_path")},
 		{Name: "web_search", Description: "Search the web for fresh information. Returns ranked results with title, URL, and snippet from multiple sources (Brave, Startpage, Wikipedia, GitHub). Use this when you need current information, documentation, or research. Follow up with web_fetch on promising URLs for full page content.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results (default 10)")), "query")},
 		{Name: "web_fetch", Description: "Fetch a URL and return readable text (HTML stripped to title + visible text). Use after web_search to read full page content from a result URL. Accepts http/https only.", InputSchema: obj("object", props("url", str("URL to fetch"), "max_bytes", intSchema("Optional max bytes of extracted text (default 2MB)")), "url")},
 	}
-	for _, s := range t.MCPServers.List() {
-		if !s.Enabled {
-			continue
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		dt, err := t.MCP.Connect(ctx, s)
-		cancel()
-		if err != nil {
-			continue
-		}
-		for _, tool := range dt {
-			var schema map[string]any
-			if len(tool.InputSchema) > 0 {
-				_ = json.Unmarshal(tool.InputSchema, &schema)
+	if t.Plugins != nil {
+		plugins, _ := t.Plugins.List()
+		for _, p := range plugins {
+			// Dynamic parity: only tools of plugins that are explicitly
+			// ENABLED (connected via mcp_enable / plugin.test) are exposed to
+			// the agent. Idle plugins stay out of the tool definitions to
+			// save tokens and match the NusaShell flow (mcp_list → mcp_enable).
+			dt, ok := t.MCP.ToolsFor(p.Manifest.MCPServerID())
+			if !ok {
+				continue
 			}
-			if schema == nil {
-				schema = obj("object", nil)
+			for _, tool := range dt {
+				var schema map[string]any
+				if len(tool.InputSchema) > 0 {
+					_ = json.Unmarshal(tool.InputSchema, &schema)
+				}
+				if schema == nil {
+					schema = obj("object", nil)
+				}
+				tools = append(tools, application.ToolInfo{
+					Name:        "mcp__" + p.Manifest.Name + "__" + tool.Name,
+					Description: tool.Description,
+					InputSchema: schema,
+				})
 			}
-			tools = append(tools, application.ToolInfo{
-				Name:        "mcp__" + s.Name + "__" + tool.Name,
-				Description: tool.Description,
-				InputSchema: schema,
-			})
 		}
 	}
 	if sw := t.webAnswerSearcher(); sw != nil && sw.CanAnswer() {
@@ -215,17 +226,93 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 
 	case name == "skill_read":
 		var args struct {
+			Name     string `json:"name"`
+			Path     string `json:"path"`
+			Offset   int    `json:"offset"`
+			MaxChars int    `json:"max_chars"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if strings.TrimSpace(args.Name) == "" {
+			return "", fmt.Errorf("name is required (use skill_list to see available skills)")
+		}
+		if r, ok := t.Skills.(interface {
+			ReadFile(id, path string, offset, maxChars int) (*domain.SkillFile, error)
+		}); ok {
+			file, err := r.ReadFile(args.Name, args.Path, args.Offset, args.MaxChars)
+			if err != nil {
+				// Legacy stores without real skill folders report unsupported;
+				// fall back to SKILL.md Content so old behavior is preserved.
+				msg := err.Error()
+				if strings.Contains(msg, "not supported") || strings.Contains(msg, "unsupported") {
+					for _, s := range t.Skills.List() {
+						if s.Name == args.Name || s.ID == args.Name {
+							return s.Content, nil
+						}
+					}
+					return "", fmt.Errorf("skill %q not found; use skill_list or skill_search to see available skills", args.Name)
+				}
+				return "", fmt.Errorf("skill_read: %w", err)
+			}
+			var sb strings.Builder
+			if file.Editable {
+				sb.WriteString(file.Content)
+			} else {
+				sb.WriteString(fmt.Sprintf("[%s is not editable text; %d bytes]", file.Path, file.SizeBytes))
+			}
+			if file.Truncated {
+				sb.WriteString(fmt.Sprintf("\n… [truncated — continue with offset=%d]", file.NextOffset))
+			}
+			return sb.String(), nil
+		}
+		// Fallback: legacy Content-only stores (e.g. jsonstore or test stubs).
+		for _, s := range t.Skills.List() {
+			if s.Name == args.Name || s.ID == args.Name {
+				return s.Content, nil
+			}
+		}
+		return "", fmt.Errorf("skill %q not found; use skill_list or skill_search to see available skills", args.Name)
+
+	case name == "skill_files":
+		var args struct {
 			Name string `json:"name"`
 		}
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return "", fmt.Errorf("invalid args: %w", err)
 		}
-		for _, s := range t.Skills.List() {
-			if s.Name == args.Name {
-				return s.Content, nil
-			}
+		if strings.TrimSpace(args.Name) == "" {
+			return "", fmt.Errorf("name is required")
 		}
-		return "", fmt.Errorf("skill %q not found; use skill_list or skill_search to see available skills", args.Name)
+		if f, ok := t.Skills.(interface {
+			Files(id string) ([]domain.SkillFileEntry, error)
+		}); ok {
+			entries, err := f.Files(args.Name)
+			if err != nil {
+				msg := err.Error()
+				if strings.Contains(msg, "not supported") || strings.Contains(msg, "unsupported") {
+					return "", fmt.Errorf("skill store does not support file listing")
+				}
+				return "", fmt.Errorf("skill_files: %w", err)
+			}
+			var sb strings.Builder
+			for _, e := range entries {
+				kind := "f"
+				if e.Type == "directory" {
+					kind = "d"
+				}
+				fmt.Fprintf(&sb, "%s  %s", kind, e.Path)
+				if e.Type == "file" {
+					fmt.Fprintf(&sb, "  (%d B%s)", e.SizeBytes, map[bool]string{true: "", false: ", binary"}[e.Editable])
+				}
+				sb.WriteString("\n")
+			}
+			if sb.Len() == 0 {
+				return fmt.Sprintf("skill %q has no files", args.Name), nil
+			}
+			return strings.TrimSpace(sb.String()), nil
+		}
+		return "", fmt.Errorf("skill store does not support file listing")
 
 	case name == "skill_run":
 		var args struct {
@@ -391,30 +478,228 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		}
 		return doc.Content, nil
 
+	case name == "mcp_install":
+		var args struct {
+			Source string `json:"source"`
+			ID     string `json:"id"`
+			URL    string `json:"url"`
+			Subdir string `json:"subdir"`
+			Ref    string `json:"ref"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if t.PluginInstaller == nil {
+			return "", fmt.Errorf("plugin installer not available")
+		}
+		var src domain.PluginInstallSource
+		switch args.Source {
+		case "catalog":
+			src = domain.InstallSourceCatalog
+			if strings.TrimSpace(args.ID) == "" {
+				return "", fmt.Errorf("id is required when source=catalog")
+			}
+		case "github":
+			src = domain.InstallSourceGitHub
+			if strings.TrimSpace(args.URL) == "" {
+				return "", fmt.Errorf("url is required when source=github (owner/repo or URL)")
+			}
+		default:
+			return "", fmt.Errorf(`source must be "catalog" or "github"`)
+		}
+		ctxInst, cancelInst := context.WithTimeout(ctx, 5*time.Minute)
+		defer cancelInst()
+		p, err := t.PluginInstaller.Install(ctxInst, domain.PluginInstallRequest{
+			Source: src,
+			ID:     args.ID,
+			URL:    args.URL,
+			Subdir: args.Subdir,
+			Ref:    args.Ref,
+		})
+		if err != nil {
+			return "", fmt.Errorf("mcp_install: %w", err)
+		}
+		if dropper, ok := t.MCP.(interface{ Drop(string) }); ok {
+			dropper.Drop(p.Manifest.MCPServerID())
+		}
+		return fmt.Sprintf("installed plugin %q (%s v%s) — run mcp_enable with id=%s to connect", p.Manifest.Name, p.Manifest.ID, p.Manifest.Version, p.Manifest.ID), nil
+
+	case name == "mcp_server_add":
+		var args struct {
+			ID      string            `json:"id"`
+			Name    string            `json:"name"`
+			Command string            `json:"command"`
+			Args    []string          `json:"args"`
+			Env     map[string]string `json:"env"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if strings.TrimSpace(args.Name) == "" {
+			return "", fmt.Errorf("name is required")
+		}
+		if strings.TrimSpace(args.Command) == "" {
+			return "", fmt.Errorf("command is required")
+		}
+		if t.Plugins == nil {
+			return "", fmt.Errorf("plugin store not available")
+		}
+		id := strings.TrimSpace(args.ID)
+		if id == "" {
+			id = domain.NewID("mcp")
+		} else if !domain.ValidatePluginID(id) {
+			return "", fmt.Errorf("id %q is not a valid plugin identifier", id)
+		}
+		// Reuse the same storage model as CLI MCP servers (manual manifest).
+		p := &domain.Plugin{Manifest: domain.PluginManifest{
+			ID:      id,
+			Name:    strings.TrimSpace(args.Name),
+			Version: "0.1.0",
+			Icon:    "🧩",
+			MCP: domain.PluginMCPConfig{
+				Transport: domain.PluginTransportStdio,
+				Command:   strings.TrimSpace(args.Command),
+				Args:      args.Args,
+				Env:       args.Env,
+			},
+		}}
+		if err := t.Plugins.Save(p); err != nil {
+			return "", fmt.Errorf("mcp_server_add: %w", err)
+		}
+		if dropper, ok := t.MCP.(interface{ Drop(string) }); ok {
+			dropper.Drop(p.Manifest.MCPServerID())
+		}
+		return fmt.Sprintf("added MCP server %q (id=%s) — run mcp_enable with id=%s to connect", p.Manifest.Name, p.Manifest.ID, p.Manifest.ID), nil
+
+	case name == "mcp_register":
+		var args struct {
+			Source string `json:"source"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if strings.TrimSpace(args.Source) == "" {
+			return "", fmt.Errorf("source is required: absolute path to a plugin folder containing manifest.json")
+		}
+		if t.Plugins == nil {
+			return "", fmt.Errorf("plugin store not available")
+		}
+		absSource, err := filepath.Abs(args.Source)
+		if err != nil {
+			return "", fmt.Errorf("resolve source path: %w", err)
+		}
+		p, err := t.Plugins.Install(absSource)
+		if err != nil {
+			return "", fmt.Errorf("mcp_register: %w", err)
+		}
+		// Drop any stale cached connection so the new manifest is used.
+		if mcp, ok := t.MCP.(interface{ Drop(string) }); ok {
+			mcp.Drop(p.Manifest.MCPServerID())
+		}
+		return fmt.Sprintf("registered plugin %q (%s v%s) — run mcp_enable with id=%s to connect", p.Manifest.Name, p.Manifest.ID, p.Manifest.Version, p.Manifest.ID), nil
+
+	case name == "mcp_enable":
+		var args struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if strings.TrimSpace(args.ID) == "" {
+			return "", fmt.Errorf("id is required (use mcp_list to see registered plugins)")
+		}
+		if t.Plugins == nil || t.MCP == nil {
+			return "", fmt.Errorf("plugin runtime not available")
+		}
+		p, err := t.Plugins.Get(args.ID)
+		if err != nil {
+			return "", fmt.Errorf("plugin %q not found; register it first with mcp_register", args.ID)
+		}
+		ctxConn, cancelConn := context.WithTimeout(ctx, 20*time.Second)
+		defer cancelConn()
+		tools, err := t.MCP.Connect(ctxConn, p)
+		if err != nil {
+			return "", fmt.Errorf("mcp_enable %q: %w", args.ID, err)
+		}
+		return fmt.Sprintf("enabled plugin %q — %d tool(s) available", args.ID, len(tools)), nil
+
+	case name == "mcp_disable":
+		var args struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if strings.TrimSpace(args.ID) == "" {
+			return "", fmt.Errorf("id is required")
+		}
+		if t.MCP == nil {
+			return "", fmt.Errorf("plugin runtime not available")
+		}
+		dropper, ok := t.MCP.(interface{ Drop(string) })
+		if !ok {
+			return "", fmt.Errorf("mcp runtime does not support disconnect")
+		}
+		dropper.Drop("plugin:" + args.ID)
+		return fmt.Sprintf("disabled plugin %q (definition kept)", args.ID), nil
+
+	case name == "mcp_unregister":
+		var args struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if strings.TrimSpace(args.ID) == "" {
+			return "", fmt.Errorf("id is required")
+		}
+		if t.Plugins == nil {
+			return "", fmt.Errorf("plugin store not available")
+		}
+		if _, err := t.Plugins.Get(args.ID); err != nil {
+			return "", fmt.Errorf("plugin %q not found", args.ID)
+		}
+		if err := t.Plugins.Delete(args.ID); err != nil {
+			return "", fmt.Errorf("mcp_unregister: %w", err)
+		}
+		if dropper, ok := t.MCP.(interface{ Drop(string) }); ok {
+			dropper.Drop("plugin:" + args.ID)
+		}
+		return fmt.Sprintf("unregistered plugin %q", args.ID), nil
+
 	case name == "mcp_list":
-		servers := t.MCPServers.List()
+		if t.Plugins == nil {
+			return `{"count":0,"plugins":[]}`, nil
+		}
+		plugins, err := t.Plugins.List()
+		if err != nil {
+			return "", fmt.Errorf("mcp_list: %w", err)
+		}
 		type srvInfo struct {
 			ID      string `json:"id"`
 			Name    string `json:"name"`
 			Command string `json:"command"`
-			Enabled bool   `json:"enabled"`
 			Running bool   `json:"running"`
 			Tools   int    `json:"tools"`
 		}
-		out := make([]srvInfo, 0, len(servers))
-		for _, s := range servers {
+		out := make([]srvInfo, 0, len(plugins))
+		for _, p := range plugins {
 			toolCount := 0
 			running := false
-			if tools, ok := t.MCP.ToolsFor(s.ID); ok {
+			serverID := p.Manifest.MCPServerID()
+			if tools, ok := t.MCP.ToolsFor(serverID); ok {
 				running = true
 				toolCount = len(tools)
 			}
 			out = append(out, srvInfo{
-				ID: s.ID, Name: s.Name, Command: s.Command,
-				Enabled: s.Enabled, Running: running, Tools: toolCount,
+				ID:      serverID,
+				Name:    p.Manifest.Name,
+				Command: p.Manifest.MCP.Command,
+				Running: running,
+				Tools:   toolCount,
 			})
 		}
-		b, _ := json.Marshal(map[string]any{"count": len(out), "servers": out})
+		b, _ := json.Marshal(map[string]any{"count": len(out), "plugins": out})
 		return string(b), nil
 
 	case name == "tool_list":
@@ -429,11 +714,12 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			InputSchema map[string]any `json:"input_schema,omitempty"`
 		}
 		var entries []toolEntry
-		for _, s := range t.MCPServers.List() {
-			if args.Server != "" && s.Name != args.Server {
+		plugins, _ := t.Plugins.List()
+		for _, p := range plugins {
+			if args.Server != "" && p.Manifest.Name != args.Server {
 				continue
 			}
-			tools, ok := t.MCP.ToolsFor(s.ID)
+			tools, ok := t.MCP.ToolsFor(p.Manifest.MCPServerID())
 			if !ok {
 				continue
 			}
@@ -443,8 +729,8 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 					_ = json.Unmarshal(tool.InputSchema, &schema)
 				}
 				entries = append(entries, toolEntry{
-					Name:   "mcp__" + s.Name + "__" + tool.Name,
-					Server: s.Name, Description: tool.Description, InputSchema: schema,
+					Name:   "mcp__" + p.Manifest.Name + "__" + tool.Name,
+					Server: p.Manifest.Name, Description: tool.Description, InputSchema: schema,
 				})
 			}
 		}
@@ -472,11 +758,12 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		}
 		tokens := strings.Fields(strings.ToLower(args.Query))
 		var matches []match
-		for _, s := range t.MCPServers.List() {
-			if args.Server != "" && s.Name != args.Server {
+		plugins, _ := t.Plugins.List()
+		for _, p := range plugins {
+			if args.Server != "" && p.Manifest.Name != args.Server {
 				continue
 			}
-			tools, ok := t.MCP.ToolsFor(s.ID)
+			tools, ok := t.MCP.ToolsFor(p.Manifest.MCPServerID())
 			if !ok {
 				continue
 			}
@@ -493,8 +780,8 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 					continue
 				}
 				matches = append(matches, match{
-					Name:   "mcp__" + s.Name + "__" + tool.Name,
-					Server: s.Name, Description: tool.Description,
+					Name:   "mcp__" + p.Manifest.Name + "__" + tool.Name,
+					Server: p.Manifest.Name, Description: tool.Description,
 				})
 			}
 		}
@@ -515,11 +802,12 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return "", fmt.Errorf("invalid args: %w", err)
 		}
-		for _, s := range t.MCPServers.List() {
-			if s.Name != args.Server {
+		plugins, _ := t.Plugins.List()
+		for _, p := range plugins {
+			if p.Manifest.Name != args.Server {
 				continue
 			}
-			tools, ok := t.MCP.ToolsFor(s.ID)
+			tools, ok := t.MCP.ToolsFor(p.Manifest.MCPServerID())
 			if !ok {
 				return "", fmt.Errorf("server %q is not running; call mcp_list to see running servers", args.Server)
 			}
@@ -677,7 +965,8 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 
 	// dynamic MCP tools: mcp__<server>__<tool>
 	if rest, ok := strings.CutPrefix(name, "mcp__"); ok {
-		server, toolName, ok := matchMCPTool(rest, t.MCPServers.List())
+		plugins, _ := t.Plugins.List()
+		plugin, toolName, ok := matchMCPTool(rest, plugins)
 		if !ok {
 			return "", fmt.Errorf("malformed mcp tool name: %s", name)
 		}
@@ -687,7 +976,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				return "", fmt.Errorf("invalid args: %w", err)
 			}
 		}
-		return t.MCP.CallTool(ctx, server.ID, toolName, args)
+		return t.MCP.CallTool(ctx, plugin.Manifest.MCPServerID(), toolName, args)
 	}
 
 	return "", fmt.Errorf("unknown tool: %s", name)
@@ -880,20 +1169,22 @@ func strEnum(desc string, values ...string) map[string]any {
 	return map[string]any{"type": "string", "description": desc, "enum": enums}
 }
 
-// matchMCPTool resolves mcp__<server>__<tool> against configured servers,
+// matchMCPTool resolves mcp__<server>__<tool> against installed plugins,
 // preferring the longest server-name prefix so names that contain "__" still
-// route to the right server.
-func matchMCPTool(rest string, servers []*domain.MCPServer) (*domain.MCPServer, string, bool) {
-	var best *domain.MCPServer
+// route to the right plugin. The plugin's manifest name is the MCP server
+// name used in tool naming.
+func matchMCPTool(rest string, plugins []*domain.Plugin) (*domain.Plugin, string, bool) {
+	var best *domain.Plugin
 	bestTool := ""
-	for _, server := range servers {
-		prefix := server.Name + "__"
+	for _, p := range plugins {
+		name := p.Manifest.Name
+		prefix := name + "__"
 		toolName, ok := strings.CutPrefix(rest, prefix)
 		if !ok || toolName == "" {
 			continue
 		}
-		if best == nil || len(server.Name) > len(best.Name) {
-			best = server
+		if best == nil || len(name) > len(best.Manifest.Name) {
+			best = p
 			bestTool = toolName
 		}
 	}

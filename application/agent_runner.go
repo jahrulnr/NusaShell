@@ -731,13 +731,24 @@ func resolveMaxOutput(provider *domain.Provider, model string, settings domain.S
 	return cap
 }
 
+// effectiveContextWindow picks the window shown/used for a model: the
+// model-advertised window wins (catalog value); the configured max_input_tokens
+// is only a fallback for models that do not advertise one. Capping catalog
+// models to the global setting confused users ("1M model, why 200k?").
+func effectiveContextWindow(modelWindow, maxInputTokens int) int {
+	if modelWindow > 0 {
+		return modelWindow
+	}
+	return maxInputTokens
+}
+
 // resolveContextWindow picks the effective context window for compaction
-// decisions: the model's advertised context when known, otherwise the global
-// max_input_tokens fallback.
+// decisions: min(model context, max_input_tokens) when both are known, or the
+// configured max_input_tokens fallback when the model does not advertise one.
 func resolveContextWindow(provider *domain.Provider, model string, settings domain.Settings) int {
 	for _, m := range provider.Models {
 		if m.ID == model && m.Context > 0 {
-			return m.Context
+			return effectiveContextWindow(m.Context, settings.MaxInputTokens)
 		}
 	}
 	return settings.MaxInputTokens

@@ -50,14 +50,19 @@ const (
 	MethodSkillsDelete = "skills.delete"
 	MethodSkillsRun    = "skills.run"
 
-	MethodMCPServersList   = "mcp.servers.list"
-	MethodMCPServersSave   = "mcp.servers.save"
-	MethodMCPServersDelete = "mcp.servers.delete"
-	MethodMCPServersTest   = "mcp.servers.test"
-	MethodMCPServersStop   = "mcp.servers.stop"
-	MethodMCPToolsList     = "mcp.tools.list"
-	MethodPluginList       = "plugin.list"
-	MethodPluginUninstall  = "plugin.uninstall"
+	MethodPluginList          = "plugin.list"
+	MethodPluginSave          = "plugin.save"
+	MethodPluginDelete        = "plugin.delete"
+	MethodPluginTest          = "plugin.test"
+	MethodPluginStop          = "plugin.stop"
+	MethodPluginToolsList     = "plugin.tools.list"
+	MethodPluginUninstall     = "plugin.uninstall"
+	MethodPluginCatalog       = "plugin.catalog"
+	MethodPluginInstall       = "plugin.install"
+	MethodPluginCheckUpdates  = "plugin.check_updates"
+	MethodPluginUpdate        = "plugin.update"
+	MethodPluginSetAutoUpdate = "plugin.set_autoupdate"
+	MethodPluginSetAutoStart  = "plugin.set_autostart"
 
 	MethodMemoryList   = "memory.list"
 	MethodMemorySave   = "memory.save"
@@ -80,24 +85,25 @@ const (
 
 // Event types pushed over SSE (/events) and WebSocket (/ws).
 const (
-	EventTurnStarted    = "agent.turn.started"
-	EventMessageDelta   = "agent.message.delta"
-	EventReasoningDelta = "agent.reasoning.delta"
-	EventToolStarted    = "agent.tool.started"
-	EventToolCompleted  = "agent.tool.completed"
-	EventTurnDone       = "agent.turn.done"
-	EventTurnError      = "agent.turn.error"
-	EventCompacted      = "agent.compacted"
-	EventSteerQueued    = "agent.steer.queued"
-	EventSteerApplied   = "agent.steer.applied"
-	EventSteerCancelled = "agent.steer.cancelled"
-	EventProviderRetry  = "agent.provider.retry"
-	EventLogAppend      = "logs.append"
-	EventTodoUpdated    = "agent.todo.updated"
-	EventAutoContinue   = "agent.auto_continue"
-	EventAskPending     = "agent.ask.pending"
-	EventAskAnswered    = "agent.ask.answered"
-	EventAskCancelled   = "agent.ask.cancelled"
+	EventTurnStarted     = "agent.turn.started"
+	EventMessageDelta    = "agent.message.delta"
+	EventContextEstimate = "agent.context.estimate"
+	EventReasoningDelta  = "agent.reasoning.delta"
+	EventToolStarted     = "agent.tool.started"
+	EventToolCompleted   = "agent.tool.completed"
+	EventTurnDone        = "agent.turn.done"
+	EventTurnError       = "agent.turn.error"
+	EventCompacted       = "agent.compacted"
+	EventSteerQueued     = "agent.steer.queued"
+	EventSteerApplied    = "agent.steer.applied"
+	EventSteerCancelled  = "agent.steer.cancelled"
+	EventProviderRetry   = "agent.provider.retry"
+	EventLogAppend       = "logs.append"
+	EventTodoUpdated     = "agent.todo.updated"
+	EventAutoContinue    = "agent.auto_continue"
+	EventAskPending      = "agent.ask.pending"
+	EventAskAnswered     = "agent.ask.answered"
+	EventAskCancelled    = "agent.ask.cancelled"
 )
 
 // ---- app ----
@@ -121,16 +127,17 @@ type Features struct {
 // ---- conversations ----
 
 type ConversationDTO struct {
-	ID           string `json:"id"`
-	Title        string `json:"title"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
-	MessageCount int    `json:"message_count"`
-	Model        string `json:"model,omitempty"`
-	Effort       string `json:"effort,omitempty"`
-	Status       string `json:"status,omitempty"`
-	Workspace    string `json:"workspace,omitempty"`
-	ChunkCount   int    `json:"chunk_count,omitempty"`
+	ID              string `json:"id"`
+	Title           string `json:"title"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
+	MessageCount    int    `json:"message_count"`
+	Model           string `json:"model,omitempty"`
+	Effort          string `json:"effort,omitempty"`
+	Status          string `json:"status,omitempty"`
+	Workspace       string `json:"workspace,omitempty"`
+	ChunkCount      int    `json:"chunk_count,omitempty"`
+	EstimatedTokens int64  `json:"estimated_tokens,omitempty"`
 }
 
 type UsageDTO struct {
@@ -281,6 +288,19 @@ type ReasoningDeltaEvent struct {
 	ConversationID string `json:"conversation_id"`
 	MessageID      string `json:"message_id"`
 	Text           string `json:"text"`
+}
+
+// ContextEstimateEvent carries a lightweight server-side estimate of the
+// actual request payload (system prompt + messages + tool definitions) so
+// the UI badge reflects the tokens really sent to the provider.
+type ContextEstimateEvent struct {
+	RunID           string `json:"run_id"`
+	ConversationID  string `json:"conversation_id"`
+	MessageID       string `json:"message_id"`
+	EstimatedTokens int64  `json:"estimated_tokens"`
+	SystemTokens    int64  `json:"system_tokens,omitempty"`
+	MessagesTokens  int64  `json:"messages_tokens,omitempty"`
+	ToolsTokens     int64  `json:"tools_tokens,omitempty"`
 }
 
 type ToolStartedEvent struct {
@@ -652,7 +672,15 @@ type SkillsListResult struct {
 
 type SkillFull struct {
 	SkillDTO
-	Content string `json:"content"`
+	Content string         `json:"content"`
+	Files   []SkillFileDTO `json:"files,omitempty"`
+}
+
+type SkillFileDTO struct {
+	Path      string `json:"path"`
+	Type      string `json:"type"` // "file" | "directory"
+	SizeBytes int64  `json:"sizeBytes"`
+	Editable  bool   `json:"editable"`
 }
 
 type SkillReadResult struct {
@@ -702,20 +730,21 @@ type MCPServerDTO struct {
 	InstallPath string `json:"installPath,omitempty"`
 }
 
-type MCPServersListResult struct {
-	Servers []MCPServerDTO `json:"servers"`
-}
-
 // PluginDTO is the wire representation of an installed plugin.
 type PluginDTO struct {
-	ID          string             `json:"id"`
-	Name        string             `json:"name"`
-	Version     string             `json:"version"`
-	Icon        string             `json:"icon"`
-	Category    string             `json:"category,omitempty"`
-	HasUI       bool               `json:"hasUI"`
-	InstallPath string             `json:"installPath"`
-	Manifest    *PluginManifestDTO `json:"manifest,omitempty"`
+	ID              string             `json:"id"`
+	Name            string             `json:"name"`
+	Version         string             `json:"version"`
+	Icon            string             `json:"icon"`
+	Category        string             `json:"category,omitempty"`
+	HasUI           bool               `json:"hasUI"`
+	InstallPath     string             `json:"installPath"`
+	Status          string             `json:"status,omitempty"` // idle | connected
+	Tools           []MCPToolDTO       `json:"tools,omitempty"`
+	AutoUpdate      bool               `json:"autoUpdate"`
+	UpdateAvailable string             `json:"updateAvailable,omitempty"` // catalog version when newer
+	Autostart       bool               `json:"autostart"`
+	Manifest        *PluginManifestDTO `json:"manifest,omitempty"`
 }
 
 type PluginManifestDTO struct {
@@ -740,38 +769,72 @@ type PluginWindowDTO struct {
 }
 
 type PluginMCPDTO struct {
-	Transport string   `json:"transport"`
-	Command   string   `json:"command,omitempty"`
-	Args      []string `json:"args,omitempty"`
-	Autostart bool     `json:"autostart,omitempty"`
+	Transport string            `json:"transport"`
+	Command   string            `json:"command,omitempty"`
+	Args      []string          `json:"args,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+	Autostart bool              `json:"autostart,omitempty"`
+	KeepAlive bool              `json:"keepAliveOnClose,omitempty"`
 }
 
 type PluginListResult struct {
 	Plugins []PluginDTO `json:"plugins"`
 }
 
+type PluginSetFlagRequest struct {
+	ID      string `json:"id"`
+	Enabled bool   `json:"enabled"`
+}
+
 type PluginIDRequest struct {
 	ID string `json:"id"`
 }
 
-type MCPSaveRequest struct {
-	ID      string            `json:"id,omitempty"`
-	Name    string            `json:"name"`
-	Command string            `json:"command"`
-	Args    []string          `json:"args,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-	Enabled bool              `json:"enabled"`
+type PluginCatalogEntry struct {
+	ID          string `json:"id"`
+	PluginID    string `json:"pluginId"`
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Description string `json:"description,omitempty"`
+	Icon        string `json:"icon,omitempty"`
+	Tag         string `json:"tag"`
+	ReleasedAt  string `json:"releasedAt,omitempty"`
 }
 
-type MCPIDRequest struct {
-	ID string `json:"id"`
+type PluginCatalogResult struct {
+	Plugins []PluginCatalogEntry `json:"plugins"`
 }
 
-type MCPTestResult struct {
+type PluginInstallRequest struct {
+	Source string `json:"source"`
+	ID     string `json:"id,omitempty"`
+	URL    string `json:"url,omitempty"`
+	Subdir string `json:"subdir,omitempty"`
+	Ref    string `json:"ref,omitempty"`
+	Data   string `json:"data,omitempty"` // base64-encoded ZIP
+}
+
+type PluginInstallResult struct {
+	Plugin *PluginDTO `json:"plugin,omitempty"`
+}
+
+// PluginSaveRequest creates or updates a manual MCP-server plugin. The
+// plugin is persisted as <datadir>/plugins/<id>/manifest.json like any
+// installed plugin.
+type PluginSaveRequest struct {
+	ID        string            `json:"id,omitempty"`
+	Name      string            `json:"name"`
+	Command   string            `json:"command"`
+	Args      []string          `json:"args,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+	Autostart bool              `json:"autostart,omitempty"`
+}
+
+type PluginTestResult struct {
 	Tools []MCPToolDTO `json:"tools"`
 }
 
-type MCPToolsListResult struct {
+type PluginToolsListResult struct {
 	Tools []MCPToolDTO `json:"tools"`
 }
 

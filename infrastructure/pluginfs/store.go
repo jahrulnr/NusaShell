@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"nusashell/domain"
+	"nusashell/infrastructure/pluginicon"
 )
 
 // Store reads installed plugins from <root>/<plugin-id>/.
@@ -113,6 +114,7 @@ func (s *Store) Install(sourceDir string) (*domain.Plugin, error) {
 	if err := copyDir(sourceDir, destDir); err != nil {
 		return nil, fmt.Errorf("pluginfs: copy %s → %s: %w", sourceDir, destDir, err)
 	}
+
 	return s.Get(manifest.ID)
 }
 
@@ -126,6 +128,36 @@ func (s *Store) Uninstall(id string) error {
 		return fmt.Errorf("plugin %q not found", id)
 	}
 	return os.RemoveAll(dir)
+}
+
+// Save writes a plugin's manifest.json back into its directory, creating
+// the directory if needed. It is used by the manual plugin editor so
+// user-created MCP servers are stored the same way as installed plugins.
+func (s *Store) Save(p *domain.Plugin) error {
+	if p == nil || p.Manifest.ID == "" {
+		return fmt.Errorf("pluginfs: cannot save plugin without id")
+	}
+	dir, err := s.safePluginDir(p.Manifest.ID)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("pluginfs: mkdir %s: %w", dir, err)
+	}
+	data, err := json.MarshalIndent(p.Manifest, "", "  ")
+	if err != nil {
+		return fmt.Errorf("pluginfs: marshal manifest: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), data, 0o644); err != nil {
+		return fmt.Errorf("pluginfs: write manifest: %w", err)
+	}
+	return nil
+}
+
+// Delete removes a plugin directory. Manual MCP-server-as-plugin entries
+// and catalog-installed plugins are removed the same way.
+func (s *Store) Delete(id string) error {
+	return s.Uninstall(id)
 }
 
 // UIPath returns the absolute path to the plugin's UI entry file.
@@ -173,14 +205,20 @@ func copyDir(src, dst string) error {
 		if err != nil {
 			return err
 		}
+		if rel == "." {
+			return os.MkdirAll(dst, 0o755)
+		}
+		// Skip .git directories and symlinks. Symlinks in node_modules/.bin
+		// are not portable and .git is never useful at runtime.
+		if info.Mode()&os.ModeSymlink != 0 || rel == ".git" || strings.Contains(rel, string(filepath.Separator)+".git"+string(filepath.Separator)) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		dest := filepath.Join(dst, rel)
 		if info.IsDir() {
 			return os.MkdirAll(dest, 0o755)
-		}
-		// Skip node_modules to avoid huge copies — the plugin should
-		// run npm install after copying.
-		if strings.Contains(rel, "node_modules") {
-			return nil
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -210,13 +248,15 @@ type PluginDTO struct {
 	Manifest    *domain.PluginManifest `json:"manifest,omitempty"`
 }
 
-// ToDTO converts a domain.Plugin to a PluginDTO.
+// ToDTO converts a domain.Plugin to a PluginDTO. Local file icons are
+// resolved to PNG data URLs so browsers (http://localhost) can render them
+// (file:// is blocked by the browser from an http origin).
 func ToDTO(p *domain.Plugin) PluginDTO {
 	return PluginDTO{
 		ID:          p.Manifest.ID,
 		Name:        p.Manifest.Name,
 		Version:     p.Manifest.Version,
-		Icon:        p.Manifest.Icon,
+		Icon:        pluginicon.ResolveLocal(p.Manifest.Icon, p.InstallPath),
 		Category:    p.Manifest.Category,
 		HasUI:       p.HasUI,
 		InstallPath: p.InstallPath,

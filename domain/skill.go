@@ -45,6 +45,25 @@ type Skill struct {
 	UpdatedAt   time.Time
 }
 
+// SkillFile is a read of one file inside a skill package.
+type SkillFile struct {
+	SkillID    string
+	Path       string // normalized relative path (posix)
+	Content    string // text content when editable text
+	SizeBytes  int64
+	Editable   bool
+	Truncated  bool // content was clipped by maxChars
+	NextOffset int  // set when truncated (continue reading from here)
+}
+
+// SkillFileEntry describes one entry in a skill directory tree.
+type SkillFileEntry struct {
+	Path      string // posix relative path
+	Type      string // "file" | "directory"
+	SizeBytes int64
+	Editable  bool
+}
+
 type MemoryEntry struct {
 	ID        string
 	Content   string
@@ -75,16 +94,6 @@ type LearningEdge struct {
 	ValidAt   time.Time        // when the relationship became true
 	InvalidAt *time.Time       // nil = still valid
 	CreatedAt time.Time
-}
-
-type MCPServer struct {
-	ID         string
-	Name       string
-	Command    string
-	Args       []string
-	Env        map[string]string
-	Enabled    bool
-	WorkingDir string
 }
 
 type LogEntry struct {

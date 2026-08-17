@@ -1,30 +1,146 @@
 # Plugins
 
-Manage native Model Context Protocol servers and installed plugins. Both MCP-only plugins and plugins that expose a browser UI appear in one catalog.
+Manage all plugins: manual MCP servers, MCP-only plugins, and MCP + UI plugins appear in one catalog.
 
 **How to open:** Click the Plugins item in the left sidebar.
 
 ## Header
 
-View title and an Add MCP button that opens the stdio server editor.
+View title and two buttons: Add MCP opens the stdio server editor; Install plugin opens the plugin installer with catalog, GitHub, and ZIP options.
 
 - **Add MCP** (`#plugins-add-mcp`):
   - Section: Plugins
   - Type: button
   - Action: Opens the native MCP server editor.
 
+- **Install plugin** (`#plugins-install-plugin`):
+  - Section: Plugins
+  - Type: button
+  - Action: Opens the plugin installer dialog.
+
+## Plugin installer
+
+A tabbed dialog for installing plugins. Catalog shows official first-party plugins. GitHub installs from a repository URL, optionally targeting a subdirectory for monorepos. Upload ZIP lets the user browse or drop a plugin archive.
+
+- **Plugin install dialog** (`#plugin-install-overlay`):
+  - Section: Plugins
+  - Type: dialog
+
+- **Install plugin title** (`#plugin-install-title`):
+  - Section: Plugins
+  - Type: heading
+
+- **Close install dialog** (`#plugin-install-close`):
+  - Section: Plugins
+  - Type: button
+  - Action: Closes the plugin installer.
+
+- **Cancel install** (`#plugin-install-cancel`):
+  - Section: Plugins
+  - Type: button
+  - Action: Closes the plugin installer without installing.
+
+- **Confirm install** (`#plugin-install-confirm`):
+  - Section: Plugins
+  - Type: button
+  - Action: Confirms the current install source (GitHub or ZIP).
+
+- **Catalog tab** (`#plugin-install-tab-catalog`):
+  - Section: Plugins
+  - Type: tab
+
+- **GitHub tab** (`#plugin-install-tab-github`):
+  - Section: Plugins
+  - Type: tab
+
+- **Upload ZIP tab** (`#plugin-install-tab-zip`):
+  - Section: Plugins
+  - Type: tab
+
+- **Catalog panel** (`#plugin-install-panel-catalog`):
+  - Section: Plugins
+  - Type: panel
+
+- **GitHub panel** (`#plugin-install-panel-github`):
+  - Section: Plugins
+  - Type: panel
+
+- **Upload ZIP panel** (`#plugin-install-panel-zip`):
+  - Section: Plugins
+  - Type: panel
+
+- **Install error banner** (`#plugin-install-error`):
+  - Section: Plugins
+  - Type: status
+  - Notes: Inline error shown inside the installer when an install attempt fails; cleared on tab switch or dialog close.
+
+- **Plugin catalog search** (`#plugin-catalog-search`):
+  - Section: Plugins
+  - Type: search
+  - Action: Filters the plugin catalog by name, id, or description.
+
+- **Plugin catalog list** (`#plugin-catalog-list`):
+  - Section: Plugins
+  - Type: list
+
+- **GitHub URL** (`#plugin-install-github-url`):
+  - Section: Plugins
+  - Type: text
+  - Notes: Repository URL or owner/repo shorthand.
+
+- **GitHub subdirectory** (`#plugin-install-github-subdir`):
+  - Section: Plugins
+  - Type: text
+  - Notes: Optional subdirectory inside a monorepo.
+
+- **GitHub ref** (`#plugin-install-github-ref`):
+  - Section: Plugins
+  - Type: text
+  - Notes: Optional branch or tag.
+
+- **ZIP file input** (`#plugin-install-zip-file`):
+  - Section: Plugins
+  - Type: file
+
+- **Selected ZIP file name** (`#plugin-install-zip-name`):
+  - Section: Plugins
+  - Type: text
+
+## Plugin window
+
+An in-shell window that renders plugin UIs in a movable, resizable frame sized from the manifest ui.window (fullscreen mode covers the shell; panel/widget use defaultSize with a 700x700 / 380x280 fallback). Opens from Home tiles and the Plugins drawer Open UI button; no browser popups. Close with the X button or Escape.
+
+- **Plugin window** (`#plugin-window`):
+  - Section: Plugins
+  - Type: dialog
+  - Notes: In-shell window hosting the plugin UI in an iframe; sized per manifest ui.window (fullscreen / panel / widget), movable via the title bar, resizable when allowed.
+
+- **Plugin window title** (`#plugin-window-title`):
+  - Section: Plugins
+  - Type: text
+
+- **Close plugin window** (`#plugin-window-close`):
+  - Section: Plugins
+  - Type: button
+  - Action: Closes the in-shell plugin window (Escape also works).
+
+- **Plugin window frame** (`#plugin-window-frame`):
+  - Section: Plugins
+  - Type: frame
+  - Notes: Iframe hosting /plugins/{id}/ with the window.shell shim.
+
 ## Plugin catalog
 
-Lists native MCP servers, headless MCP plugins, and MCP + UI plugins with runtime state. Clicking a row opens the Plugins detail drawer.
+Lists all plugins — manual MCP servers, MCP-only plugins, and MCP + UI plugins — with runtime state (idle/connected). Clicking a row opens the Plugins detail drawer.
 
 - **Plugin catalog** (`#plugin-table`):
   - Section: Plugins
   - Type: list
-  - Notes: Lists native MCP servers, MCP-only plugins, and MCP + UI plugins with runtime status and tool chips. Clicking a row opens the Plugins detail drawer.
+  - Notes: Lists all plugins with runtime status and tool chips. Clicking a row opens the Plugins detail drawer.
 
 ## Detail drawer
 
-A right-hand drawer that opens when a catalog row is clicked. Shows the state machine, actions, tools, and manifest summary. Native MCP rows expose Test, Stop, Restart, Edit, and Delete; plugin rows expose Test, Stop, Restart, and Uninstall; MCP + UI plugins also expose Open UI. Close with the X button, overlay, or Escape.
+A right-hand drawer that opens when a catalog row is clicked. Shows the state machine, actions, tools, and manifest summary. Native MCP rows expose Start, Stop, Restart, Edit, and Delete; plugin rows expose Start, Stop, Restart, and Uninstall; MCP + UI plugins also expose Open UI. Close with the X button, overlay, or Escape.
 
 - **Plugin detail drawer** (`#plugin-drawer`):
   - Section: Plugins
@@ -49,9 +165,9 @@ A right-hand drawer that opens when a catalog row is clicked. Shows the state ma
 - **Open UI** (`#plugin-btn-open-ui`):
   - Section: Plugins
   - Type: button
-  - Action: Opens the selected MCP + UI plugin in a separate browser window. Hidden for MCP-only entries.
+  - Action: Opens the selected MCP + UI plugin in the in-shell plugin window. Hidden for MCP-only entries.
 
-- **Test** (`#plugin-btn-test`):
+- **Start** (`#plugin-btn-start`):
   - Section: Plugins
   - Type: button
   - Action: Connects the selected MCP server or plugin and lists its tools.
@@ -59,12 +175,12 @@ A right-hand drawer that opens when a catalog row is clicked. Shows the state ma
 - **Stop** (`#plugin-btn-stop`):
   - Section: Plugins
   - Type: button
-  - Action: Drops the cached MCP connection (mcp.servers.stop).
+  - Action: Drops the cached MCP connection (plugin.stop).
 
 - **Restart** (`#plugin-btn-restart`):
   - Section: Plugins
   - Type: button
-  - Action: Stops then tests the selected MCP server or plugin.
+  - Action: Stops then starts the selected MCP server or plugin.
 
 - **Edit** (`#plugin-btn-edit`):
   - Section: Plugins
@@ -74,7 +190,7 @@ A right-hand drawer that opens when a catalog row is clicked. Shows the state ma
 - **Delete** (`#plugin-btn-delete`):
   - Section: Plugins
   - Type: button
-  - Action: Deletes the selected native MCP server (mcp.servers.delete). Hidden for plugins.
+  - Action: Deletes the selected manual MCP-server plugin (plugin.delete). Hidden for installed plugins.
 
 - **Uninstall** (`#plugin-btn-uninstall`):
   - Section: Plugins

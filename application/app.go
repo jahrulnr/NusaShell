@@ -22,19 +22,19 @@ type App struct {
 	Version string
 	DataDir string
 
-	Conversations ConversationStore
-	Providers     ProviderStore
-	Credentials   CredentialStore
-	Skills        SkillStore
-	Memory        MemoryStore
-	LearningEdges LearningEdgeStore
-	Todos         ConversationTodoPort
-	AskQuestions  *AskQuestionService
-	MCP           MCPServerStore
-	Plugins       PluginStore
-	Logs          LogStore
-	Settings      SettingsStore
-	Attachments   AttachmentStore
+	Conversations   ConversationStore
+	Providers       ProviderStore
+	Credentials     CredentialStore
+	Skills          SkillStore
+	Memory          MemoryStore
+	LearningEdges   LearningEdgeStore
+	Todos           ConversationTodoPort
+	AskQuestions    *AskQuestionService
+	Plugins         PluginStore
+	PluginInstaller PluginInstaller
+	Logs            LogStore
+	Settings        SettingsStore
+	Attachments     AttachmentStore
 
 	Docs                        DocsSource
 	Bus                         *Bus
@@ -87,7 +87,7 @@ type App struct {
 // MCPToolbox gives use cases access to connected MCP servers and their tools.
 type MCPToolbox interface {
 	ToolsFor(serverID string) ([]contracts.MCPToolDTO, bool)
-	Connect(ctx context.Context, s *domain.MCPServer) ([]contracts.MCPToolDTO, error)
+	Connect(ctx context.Context, p *domain.Plugin) ([]contracts.MCPToolDTO, error)
 	Drop(serverID string)
 }
 
@@ -213,8 +213,8 @@ type Deps struct {
 	LearningEdges               LearningEdgeStore
 	Todos                       ConversationTodoPort
 	AskQuestions                *AskQuestionService
-	MCP                         MCPServerStore
 	Plugins                     PluginStore
+	PluginInstaller             PluginInstaller
 	Logs                        LogStore
 	Settings                    SettingsStore
 	Attachments                 AttachmentStore
@@ -251,8 +251,8 @@ func NewApp(deps Deps) *App {
 		LearningEdges:               deps.LearningEdges,
 		Todos:                       deps.Todos,
 		AskQuestions:                deps.AskQuestions,
-		MCP:                         deps.MCP,
 		Plugins:                     deps.Plugins,
+		PluginInstaller:             deps.PluginInstaller,
 		Logs:                        deps.Logs,
 		Settings:                    deps.Settings,
 		Attachments:                 deps.Attachments,
@@ -385,7 +385,76 @@ func (a *App) InvalidateLearningSearcher() {
 	a.learningSearcher = nil
 }
 
-// StartLifecycle starts the background decay/prune loop and the
+// StartAutoUpdateLoop periodically checks catalog updates and upgrades
+// plugins with AutoUpdate enabled. Interval defaults to 6h. Safe no-op when
+// installer or store are unavailable.
+func (a *App) StartAutoUpdateLoop(ctx context.Context, interval time.Duration) {
+	if a.Plugins == nil || a.PluginInstaller == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = 6 * time.Hour
+	}
+	a.goSafe("autoupdate", func() {
+		a.runAutoUpdateOnce(ctx)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				a.runAutoUpdateOnce(ctx)
+			}
+		}
+	})
+	a.log("info", "plugin", "auto-update loop started (interval=%s)", interval)
+}
+
+func (a *App) runAutoUpdateOnce(ctx context.Context) {
+	installed, err := a.Plugins.List()
+	if err != nil {
+		a.log("warn", "autoupdate", "list plugins: %v", err)
+		return
+	}
+	var targets []*domain.Plugin
+	for _, p := range installed {
+		if p.Manifest.AutoUpdate {
+			targets = append(targets, p)
+		}
+	}
+	if len(targets) == 0 {
+		return
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	updates, err := a.PluginInstaller.CheckUpdates(checkCtx, installed)
+	if err != nil {
+		a.log("warn", "autoupdate", "check updates: %v", err)
+		return
+	}
+	byID := map[string]domain.PluginCatalogEntry{}
+	for _, u := range updates {
+		byID[u.PluginID] = u
+	}
+	for _, p := range targets {
+		entry, ok := byID[p.Manifest.ID]
+		if !ok {
+			continue
+		}
+		updateCtx, cancelUpd := context.WithTimeout(ctx, 5*time.Minute)
+		updated, err := a.PluginInstaller.Update(updateCtx, entry.ID)
+		cancelUpd()
+		if err != nil {
+			a.log("warn", "autoupdate", "update %s: %v", p.Manifest.ID, err)
+			continue
+		}
+		a.MCPToolbox.Drop("plugin:" + updated.Manifest.ID)
+		a.log("info", "autoupdate", "auto-updated %s → v%s", updated.Manifest.Name, updated.Manifest.Version)
+	}
+}
+
+// StartLifecycle starts the lifecycle (decay/prune) loop and the
 // compaction-triggered learning review subscriber. Safe to call once at
 // server startup. No-op if no lifecycle manager is configured.
 func (a *App) StartLifecycle() {
@@ -683,42 +752,68 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 			return nil, rpcErr
 		}
 		return a.handleSkillsRun(req)
-	case contracts.MethodMCPServersList:
-		return a.handleMCPServersList()
-	case contracts.MethodMCPServersSave:
-		var req contracts.MCPSaveRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleMCPServersSave(req)
-	case contracts.MethodMCPServersDelete:
-		var req contracts.MCPIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleMCPServersDelete(req)
-	case contracts.MethodMCPServersTest:
-		var req contracts.MCPIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleMCPServersTest(req)
-	case contracts.MethodMCPServersStop:
-		var req contracts.MCPIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleMCPServersStop(req)
-	case contracts.MethodMCPToolsList:
-		return a.handleMCPToolsList()
 	case contracts.MethodPluginList:
 		return a.handlePluginList()
+	case contracts.MethodPluginSave:
+		var req contracts.PluginSaveRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handlePluginSave(req)
+	case contracts.MethodPluginDelete:
+		var req contracts.PluginIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handlePluginDelete(req)
+	case contracts.MethodPluginTest:
+		var req contracts.PluginIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handlePluginTest(req)
+	case contracts.MethodPluginStop:
+		var req contracts.PluginIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handlePluginStop(req)
+	case contracts.MethodPluginToolsList:
+		return a.handlePluginToolsList()
+	case contracts.MethodPluginCatalog:
+		return a.handlePluginCatalog()
+	case contracts.MethodPluginInstall:
+		var req contracts.PluginInstallRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handlePluginInstall(req)
 	case contracts.MethodPluginUninstall:
 		var req contracts.PluginIDRequest
 		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
 			return nil, rpcErr
 		}
 		return a.handlePluginUninstall(req)
+	case contracts.MethodPluginCheckUpdates:
+		return a.handlePluginCheckUpdates()
+	case contracts.MethodPluginSetAutoUpdate:
+		var req contracts.PluginSetFlagRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handlePluginSetAutoUpdate(req)
+	case contracts.MethodPluginSetAutoStart:
+		var req contracts.PluginSetFlagRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handlePluginSetAutoStart(req)
+	case contracts.MethodPluginUpdate:
+		var req contracts.PluginIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handlePluginUpdate(req)
 	case contracts.MethodMemoryList:
 		return a.handleMemoryList()
 	case contracts.MethodMemorySave:

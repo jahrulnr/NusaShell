@@ -3,7 +3,7 @@
 NusaShell Light is a local, personal AI shell: a Go binary that serves an
 embedded vanilla JS/HTML/CSS frontend and brokers conversations with
 Messages / Responses / Chat format providers, skills, memory, docs and MCP
-servers. There is no security layer by design (no auth, no rate limiting);
+plugins. There is no security layer by design (no auth, no rate limiting);
 the process listens on `127.0.0.1` by default. Bind it to another address
 only on a trusted network (`NUSASHELL_HOST`).
 
@@ -67,7 +67,8 @@ PNG/JPEG/GIF/WebP images, and PDF documents. Text is sent as text; binary
 attachments are persisted and mapped to each provider's native multimodal
 wire format. Attachment UTF-8 validity, byte signatures, and data URL media
 types are validated at the application boundary. HTTP `/rpc` accepts bodies
-up to 24 MiB so four encoded attachments fit the envelope.
+up to 64 MiB so four encoded attachments fit the envelope and plugin ZIP
+uploads (`plugin.install`) with bundled `node_modules` are accepted.
 
 The composer presents an estimated context counter based on the persisted
 conversation and the selected model's `context` window. It is a UI estimate,
@@ -123,7 +124,7 @@ no-op there.
 | Store | Format | Location |
 | --- | --- | --- |
 | conversations | JSON | `{data}/conversations/<id>.json` |
-| providers, skills, mcp servers, settings | JSON | `{data}/*.json` |
+| providers, skills, plugins, settings | JSON | `{data}/*.json` + `{data}/plugins/` |
 | memory, logs | JSONL | `{data}/*.jsonl` |
 | API keys | SQLite | `{data}/credentials.db` |
 

@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -9,20 +10,45 @@ import (
 	"nusashell/domain"
 )
 
+// testAbsPath returns an absolute path under dir (a t.TempDir). On Windows,
+// root-anchored paths without a drive letter (\\data\...) are NOT absolute
+// per filepath.IsAbs, so the dir parameter must be a platform-native
+// absolute base (t.TempDir()).
+func testAbsPath(dir string, parts ...string) string {
+	return filepath.Join(append([]string{dir}, parts...)...)
+}
+
+// filePathArgs builds a read_image args JSON with the given file path.
+// encoding/json escapes the path properly (backslashes on Windows).
+func filePathArgs(path string, question string) string {
+	m := map[string]string{"file_path": path}
+	if question != "" {
+		m["question"] = question
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
 func TestFindImageAttachmentByPath(t *testing.T) {
+	dir := t.TempDir()
+	catPath := testAbsPath(dir, "cat.png")
+	dogPath := testAbsPath(dir, "dog.jpg")
 	conv := &domain.Conversation{Messages: []domain.Message{
 		{ID: "u1", Role: domain.RoleUser, Content: "look", Attachments: []domain.Attachment{
-			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: "/data/attachments/c1/cat.png"},
+			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: catPath},
 			{Type: "text", Name: "note.txt", MediaType: "text/plain", Content: "see image"},
 		}},
 		{ID: "a1", Role: domain.RoleAssistant, Content: "ok"},
 		{ID: "u2", Role: domain.RoleUser, Content: "another", Attachments: []domain.Attachment{
-			{Type: "image", Name: "dog.jpg", MediaType: "image/jpeg", DataURL: "data:image/jpeg;base64,def", FilePath: "/data/attachments/c1/dog.jpg"},
+			{Type: "image", Name: "dog.jpg", MediaType: "image/jpeg", DataURL: "data:image/jpeg;base64,def", FilePath: dogPath},
 		}},
 	}}
 
 	// Exact match
-	img, err := findImageAttachmentByPath(conv, "/data/attachments/c1/cat.png")
+	img, err := findImageAttachmentByPath(conv, catPath)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -31,7 +57,7 @@ func TestFindImageAttachmentByPath(t *testing.T) {
 	}
 
 	// Case-insensitive match
-	img, err = findImageAttachmentByPath(conv, "/DATA/ATTACHMENTS/C1/CAT.PNG")
+	img, err = findImageAttachmentByPath(conv, strings.ToUpper(catPath))
 	if err != nil {
 		t.Fatalf("unexpected error for case-insensitive: %v", err)
 	}
@@ -40,7 +66,7 @@ func TestFindImageAttachmentByPath(t *testing.T) {
 	}
 
 	// Second image in different message
-	img, err = findImageAttachmentByPath(conv, "/data/attachments/c1/dog.jpg")
+	img, err = findImageAttachmentByPath(conv, dogPath)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -49,16 +75,18 @@ func TestFindImageAttachmentByPath(t *testing.T) {
 	}
 
 	// Not found
-	_, err = findImageAttachmentByPath(conv, "/data/attachments/c1/nonexistent.png")
+	_, err = findImageAttachmentByPath(conv, testAbsPath(dir, "nonexistent.png"))
 	if err == nil {
 		t.Error("expected error for nonexistent image")
 	}
 }
 
 func TestExecuteReadImageVisionModel(t *testing.T) {
+	dir := t.TempDir()
+	catPath := testAbsPath(dir, "cat.png")
 	conv := &domain.Conversation{Messages: []domain.Message{
 		{ID: "u1", Role: domain.RoleUser, Content: "look", Attachments: []domain.Attachment{
-			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: "/data/attachments/c1/cat.png"},
+			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: catPath},
 		}},
 	}}
 	app := &App{
@@ -70,7 +98,7 @@ func TestExecuteReadImageVisionModel(t *testing.T) {
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
 		Name: "read_image",
-		Args: `{"file_path":"/data/attachments/c1/cat.png","question":"what color is the cat?"}`,
+		Args: filePathArgs(catPath, "what color is the cat?"),
 	}
 
 	output, atts, err := app.executeReadImage(run, toolCall, true, domain.Settings{})
@@ -92,9 +120,11 @@ func TestExecuteReadImageVisionModel(t *testing.T) {
 }
 
 func TestExecuteReadImageNonVisionNoFallback(t *testing.T) {
+	dir := t.TempDir()
+	catPath := testAbsPath(dir, "cat.png")
 	conv := &domain.Conversation{Messages: []domain.Message{
 		{ID: "u1", Role: domain.RoleUser, Content: "look", Attachments: []domain.Attachment{
-			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: "/data/attachments/c1/cat.png"},
+			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: catPath},
 		}},
 	}}
 	app := &App{
@@ -106,7 +136,7 @@ func TestExecuteReadImageNonVisionNoFallback(t *testing.T) {
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
 		Name: "read_image",
-		Args: `{"file_path":"/data/attachments/c1/cat.png"}`,
+		Args: filePathArgs(catPath, ""),
 	}
 
 	output, atts, err := app.executeReadImage(run, toolCall, false, domain.Settings{})
@@ -123,9 +153,11 @@ func TestExecuteReadImageNonVisionNoFallback(t *testing.T) {
 }
 
 func TestExecuteReadImageImageNotFound(t *testing.T) {
+	dir := t.TempDir()
+	catPath := testAbsPath(dir, "cat.png")
 	conv := &domain.Conversation{Messages: []domain.Message{
 		{ID: "u1", Role: domain.RoleUser, Content: "look", Attachments: []domain.Attachment{
-			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: "/data/attachments/c1/cat.png"},
+			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: catPath},
 		}},
 	}}
 	app := &App{
@@ -137,7 +169,7 @@ func TestExecuteReadImageImageNotFound(t *testing.T) {
 	toolCall := domain.ToolCall{
 		ID:   "tc1",
 		Name: "read_image",
-		Args: `{"file_path":"/data/attachments/c1/nonexistent.png"}`,
+		Args: filePathArgs(testAbsPath(dir, "nonexistent.png"), ""),
 	}
 
 	output, _, err := app.executeReadImage(run, toolCall, true, domain.Settings{})

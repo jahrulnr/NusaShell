@@ -96,7 +96,7 @@ export function dialog({ title, message, fields = [], actions = [{ label: 'Cance
         input = el('textarea', { placeholder: field.placeholder ?? '', rows: field.rows ?? 3 });
         input.value = field.value ?? '';
       } else if (field.tag === 'select') {
-        input = el('select', { class: 'slim-select' });
+        input = el('select', { class: 'slim-select', disabled: field.disabled === true });
         const data = (field.options ?? []).map((o) => {
           const opt = typeof o === 'object' ? o : { value: o, label: o };
           return { text: opt.label, value: opt.value };

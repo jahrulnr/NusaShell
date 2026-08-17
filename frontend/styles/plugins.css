@@ -37,6 +37,15 @@
   font: 600 15px var(--font-mono);
 }
 .plugin-row-icon-plugin { background: var(--panel-raised); }
+.plugin-icon-img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  border-radius: 6px;
+}
+.plugin-row-icon .plugin-icon-img { width: 22px; height: 22px; }
+.plugin-catalog-icon .plugin-icon-img { width: 24px; height: 24px; }
+.drawer-icon .plugin-icon-img { width: 28px; height: 28px; }
 .plugin-row-info { flex: 1; min-width: 0; }
 .plugin-row-name { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
 .plugin-row-badge {
@@ -66,8 +75,219 @@
 .plugin-row-state.error { color: var(--red); background: rgba(239,75,95,.1); }
 .plugin-row-state.idle { color: var(--text-faint); background: var(--panel-alt); }
 
+/* ============ View header actions ============ */
+.view-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ============ Plugin install dialog ============ */
+/* Higher specificity to beat .ui-dialog from modals.css (loaded later). */
+.ui-dialog.plugin-install-dialog {
+  width: min(960px, 92vw);
+  max-height: min(90vh, 840px);
+}
+.plugin-install-dialog .ui-dialog-body {
+  padding: 0;
+}
+
+.plugin-catalog-searchbar {
+  margin-bottom: 12px;
+}
+.plugin-catalog-searchbar input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-alt);
+  color: var(--text);
+  font: inherit;
+}
+.plugin-catalog-searchbar input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.plugin-catalog-empty {
+  padding: 18px 10px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.plugin-install-error {
+  margin: 14px 20px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(239, 75, 95, .4);
+  border-radius: 8px;
+  background: rgba(239, 75, 95, .08);
+  color: var(--red);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* ============ In-shell plugin window ============ */
+.plugin-window {
+  position: fixed;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  min-width: 260px;
+  min-height: 180px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .5);
+}
+.plugin-window.is-fullscreen {
+  inset: 0;
+  width: auto !important;
+  height: auto !important;
+  border: 0;
+  border-radius: 0;
+}
+.plugin-window-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 8px 8px 14px;
+  background: var(--panel-alt);
+  border-bottom: 1px solid var(--border-soft);
+  cursor: move;
+  user-select: none;
+  touch-action: none;
+}
+.plugin-window-title {
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plugin-window-close {
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+.plugin-window-close:hover { color: var(--text); background: rgba(255, 255, 255, .06); }
+.plugin-window-frame {
+  flex: 1;
+  border: 0;
+  background: #fff;
+  min-height: 0;
+}
+.plugin-install-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--panel-alt);
+}
+.plugin-install-tab {
+  flex: 1;
+  padding: 12px 8px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.plugin-install-tab:hover { color: var(--text); background: var(--panel); }
+.plugin-install-tab.active { color: var(--accent); border-bottom-color: var(--accent); background: var(--panel); }
+
+.plugin-install-panel {
+  display: none;
+  padding: 18px 20px;
+  min-height: 220px;
+}
+.plugin-install-panel.active { display: block; }
+
+.plugin-install-hint {
+  margin: 0 0 16px;
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Catalog list inside install dialog */
+.plugin-catalog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.plugin-catalog-entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--panel-alt);
+  transition: border-color .15s, background .15s;
+}
+.plugin-catalog-entry:hover { border-color: var(--border); background: var(--panel); }
+.plugin-catalog-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--accent-soft);
+  font-size: 18px;
+}
+.plugin-catalog-info { flex: 1; min-width: 0; }
+.plugin-catalog-name { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
+.plugin-catalog-version {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-faint);
+  background: var(--panel);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.plugin-catalog-desc { font-size: 11.5px; color: var(--text-faint); margin-top: 3px; }
+
+/* Upload zone inside install dialog */
+.plugin-upload-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 20px;
+  border: 1.5px dashed var(--border);
+  border-radius: 12px;
+  background: var(--panel-alt);
+  color: var(--text);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.plugin-upload-zone:hover { border-color: var(--accent); background: var(--panel); }
+.plugin-upload-icon { font-size: 28px; }
+.plugin-upload-zone strong { font-size: 13px; }
+.plugin-upload-zone span:last-child { font-size: 11.5px; color: var(--text-faint); }
+
 @media (max-width: 620px) {
   .plugin-row { align-items: flex-start; }
   .plugin-row-state { margin-left: auto; }
   .plugin-row-tools { display: none; }
+  .view-header-actions { flex-wrap: wrap; }
 }
+
+.plugins-update-badge { display:inline-block; margin-left:8px; padding:2px 8px; border-radius:10px; background:#e8590c; color:#fff; font-size:12px; font-weight:600; }
+.plugin-row-update-badge { margin-left:auto; padding:1px 6px; border-radius:8px; background:#fff3bf; color:#b45309; font-size:11px; font-weight:600; }

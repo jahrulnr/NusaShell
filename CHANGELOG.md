@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Unified plugins model.** MCP servers and installed plugins are now one
+  concept: every entry is a plugin stored under `plugins/<id>/manifest.json`
+  (a manual MCP server is a plugin manifest with an `mcp` block and no `ui`
+  block). The old `mcp.servers.*` RPC methods, the `MCPServer` domain type,
+  and the `mcp-servers.json` store were removed; RPC is now `plugin.list`,
+  `plugin.save`, `plugin.test`, `plugin.stop`, `plugin.delete`,
+  `plugin.uninstall`, `plugin.catalog`, `plugin.install`.
+- **`mcp_list` lists all plugins.** The agent-facing `mcp_list` tool and the
+  hydration snapshot now include every plugin (running or idle) with its
+  runtime state, so the model can see configured-but-stopped servers; the
+  JSON key is `plugins` (was `running`).
+- **Manual MCP server editing via plugins UI.** Add/Edit MCP in the Plugins
+  view now writes a plugin manifest (`plugin.save`) instead of a separate
+  MCP server record.
+
+### Fixed
+
+- **Provider kind-change validation ordering.** Saving a codex provider with
+  a different kind now correctly fails with `VALIDATION_ERROR` (the guard now
+  runs before base URL validation, which previously masked it with "base url
+  is required").
+
+
 - **Loopback by default.** The HTTP server now listens on `127.0.0.1` unless
   `NUSASHELL_HOST` is set, matching the documented personal-shell threat model.
 - **Larger RPC bodies.** `/rpc` accepts up to 24 MiB so the documented four

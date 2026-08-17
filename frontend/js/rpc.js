@@ -66,7 +66,16 @@ const wsPending = new Map();
 let wsOptions = {};
 let reconnectTimer = null;
 let reconnectDelay = 500;
-let autoReconnect = localStorage.getItem('nusashell.autoReconnect') !== 'false';
+// localStorage is browser-only; guards keep this module importable in
+// Node-based unit tests (jsdom lacks a real storage global).
+function lsGet(key, fallback = null) {
+  try { return typeof localStorage !== 'undefined' ? localStorage.getItem(key) : fallback; }
+  catch { return fallback; }
+}
+function lsSet(key, value) {
+  try { if (typeof localStorage !== 'undefined') localStorage.setItem(key, value); } catch { /* noop */ }
+}
+let autoReconnect = lsGet('nusashell.autoReconnect') !== 'false';
 
 function rejectPending(message) {
   const error = new Error(message);
@@ -146,7 +155,7 @@ export function autoReconnectEnabled() {
 
 export function setAutoReconnect(enabled) {
   autoReconnect = Boolean(enabled);
-  localStorage.setItem('nusashell.autoReconnect', String(autoReconnect));
+  lsSet('nusashell.autoReconnect', String(autoReconnect));
   if (!autoReconnect && reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;

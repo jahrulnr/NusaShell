@@ -396,6 +396,48 @@ func TestProviderValidationAndErrors(t *testing.T) {
 		t.Fatalf("missing provider must be NOT_FOUND, got %+v", res)
 	}
 
+	// codex kind is provider-specific: it cannot be changed in place
+	res = h.rpc(t, "ai.providers.save", map[string]any{"kind": "codex", "name": "Codex Locked"})
+	if !res.OK {
+		t.Fatalf("create codex provider must succeed, got %+v", res)
+	}
+	var codexOut struct {
+		Providers []struct {
+			ID string `json:"id"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(res.Result, &codexOut); err != nil || len(codexOut.Providers) == 0 {
+		t.Fatalf("codex provider not returned: %s", res.Result)
+	}
+	codexID := codexOut.Providers[0].ID
+	res = h.rpc(t, "ai.providers.save", map[string]any{"id": codexID, "kind": "chat", "name": "Codex Locked"})
+	if res.OK || res.Error == nil || res.Error.Code != "VALIDATION_ERROR" || !strings.Contains(res.Error.Message, "codex") {
+		t.Fatalf("codex kind change must fail validation, got %+v", res)
+	}
+
+	// non-codex kinds are switchable in place (chat → messages)
+	res = h.rpc(t, "ai.providers.save", map[string]any{"kind": "chat", "name": "Switchable", "base_url": "http://x/v1"})
+	if !res.OK {
+		t.Fatalf("create chat provider must succeed, got %+v", res)
+	}
+	var switchOut struct {
+		Providers []struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(res.Result, &switchOut); err != nil || len(switchOut.Providers) == 0 {
+		t.Fatalf("chat provider not returned: %s", res.Result)
+	}
+	switchID := switchOut.Providers[0].ID
+	res = h.rpc(t, "ai.providers.save", map[string]any{"id": switchID, "kind": "messages", "name": "Switchable", "base_url": "http://x"})
+	if !res.OK || res.Error != nil {
+		t.Fatalf("non-codex kind change must succeed, got %+v", res)
+	}
+	if err := json.Unmarshal(res.Result, &switchOut); err != nil || len(switchOut.Providers) == 0 || switchOut.Providers[0].Kind != "messages" {
+		t.Fatalf("kind not updated to messages: %s", res.Result)
+	}
+
 	// provider failure surfaces as PROVIDER_ERROR
 	pid := h.addOpenAIProvider(t, "Failing")
 	h.llm.failStatus = http.StatusInternalServerError
@@ -837,13 +879,13 @@ func TestMCPServersStopDropsConnection(t *testing.T) {
 	h := newHarness(t, nil)
 
 	// Register a stdio MCP server backed by the fakemcp binary.
-	saved := h.rpcOK(t, "mcp.servers.save", map[string]any{
+	saved := h.rpcOK(t, "plugin.save", map[string]any{
 		"name": "fakemcp", "command": h.mcpBin, "args": []string{}, "enabled": true,
 	})
 	var savedOut struct {
 		Servers []struct {
 			ID string `json:"id"`
-		} `json:"servers"`
+		} `json:"plugins"`
 	}
 	if err := json.Unmarshal(saved.Result, &savedOut); err != nil {
 		t.Fatal(err)
@@ -851,7 +893,7 @@ func TestMCPServersStopDropsConnection(t *testing.T) {
 	serverID := savedOut.Servers[0].ID
 
 	// Connect so the toolbox caches the connection.
-	tested := h.rpcOK(t, "mcp.servers.test", map[string]any{"id": serverID})
+	tested := h.rpcOK(t, "plugin.test", map[string]any{"id": serverID})
 	var testOut struct {
 		Tools []struct {
 			Name string `json:"name"`
@@ -865,12 +907,12 @@ func TestMCPServersStopDropsConnection(t *testing.T) {
 	}
 
 	// List must report the server as connected.
-	listed := h.rpcOK(t, "mcp.servers.list", map[string]any{})
+	listed := h.rpcOK(t, "plugin.list", map[string]any{})
 	var listOut struct {
 		Servers []struct {
 			ID     string `json:"id"`
 			Status string `json:"status"`
-		} `json:"servers"`
+		} `json:"plugins"`
 	}
 	if err := json.Unmarshal(listed.Result, &listOut); err != nil {
 		t.Fatal(err)
@@ -886,14 +928,14 @@ func TestMCPServersStopDropsConnection(t *testing.T) {
 	}
 
 	// Stop drops the cached connection.
-	h.rpcOK(t, "mcp.servers.stop", map[string]any{"id": serverID})
+	h.rpcOK(t, "plugin.stop", map[string]any{"id": serverID})
 
-	listed2 := h.rpcOK(t, "mcp.servers.list", map[string]any{})
+	listed2 := h.rpcOK(t, "plugin.list", map[string]any{})
 	var listOut2 struct {
 		Servers []struct {
 			ID     string `json:"id"`
 			Status string `json:"status"`
-		} `json:"servers"`
+		} `json:"plugins"`
 	}
 	if err := json.Unmarshal(listed2.Result, &listOut2); err != nil {
 		t.Fatal(err)
@@ -913,7 +955,7 @@ func TestPluginUninstallRemovesPluginAndDropsMCP(t *testing.T) {
 	h := newHarness(t, nil)
 
 	// Install a fake plugin into the harness plugin store. The plugin
-	// points at the fakemcp binary so mcp.servers.test can connect.
+	// points at the fakemcp binary so plugin.test can connect.
 	src := t.TempDir()
 	manifest := map[string]any{
 		"id":      "test.echo-plugin",
@@ -936,47 +978,47 @@ func TestPluginUninstallRemovesPluginAndDropsMCP(t *testing.T) {
 	}
 	pluginID := installed.Manifest.ID
 
-	// The plugin must appear in mcp.servers.list with plugin=true.
-	listed := h.rpcOK(t, "mcp.servers.list", map[string]any{})
+	// The plugin must appear in plugin.list with its manifest metadata.
+	listed := h.rpcOK(t, "plugin.list", map[string]any{})
 	var listOut struct {
-		Servers []struct {
+		Plugins []struct {
 			ID      string `json:"id"`
-			Plugin  bool   `json:"plugin"`
 			Version string `json:"version"`
 			Icon    string `json:"icon"`
-		} `json:"servers"`
+			Status  string `json:"status"`
+		} `json:"plugins"`
 	}
 	if err := json.Unmarshal(listed.Result, &listOut); err != nil {
 		t.Fatal(err)
 	}
 	var found bool
-	for _, s := range listOut.Servers {
-		if s.ID == "plugin:"+pluginID {
+	for _, p := range listOut.Plugins {
+		if p.ID == pluginID {
 			found = true
-			if !s.Plugin {
-				t.Fatalf("plugin server %s has plugin=false", s.ID)
+			if p.Version != "0.1.0" {
+				t.Fatalf("plugin version = %q, want 0.1.0", p.Version)
 			}
-			if s.Version != "0.1.0" {
-				t.Fatalf("plugin server version = %q, want 0.1.0", s.Version)
+			if p.Icon != "🔊" {
+				t.Fatalf("plugin icon = %q, want 🔊", p.Icon)
 			}
-			if s.Icon != "🔊" {
-				t.Fatalf("plugin server icon = %q, want 🔊", s.Icon)
+			if p.Status != "idle" {
+				t.Fatalf("plugin status = %q, want idle (not connected)", p.Status)
 			}
 		}
 	}
 	if !found {
-		t.Fatalf("plugin %s not in mcp.servers.list: %s", pluginID, listed.Result)
+		t.Fatalf("plugin %s not in plugin.list: %s", pluginID, listed.Result)
 	}
 
 	// Uninstall via RPC.
 	h.rpcOK(t, "plugin.uninstall", map[string]any{"id": pluginID})
 
-	// The plugin must no longer appear in mcp.servers.list.
-	listed2 := h.rpcOK(t, "mcp.servers.list", map[string]any{})
+	// The plugin must no longer appear in plugin.list.
+	listed2 := h.rpcOK(t, "plugin.list", map[string]any{})
 	var listOut2 struct {
 		Servers []struct {
 			ID string `json:"id"`
-		} `json:"servers"`
+		} `json:"plugins"`
 	}
 	if err := json.Unmarshal(listed2.Result, &listOut2); err != nil {
 		t.Fatal(err)
@@ -1017,26 +1059,25 @@ func TestMCPServersListReportsPluginUI(t *testing.T) {
 		t.Fatalf("install plugin: %v", err)
 	}
 
-	listed := h.rpcOK(t, "mcp.servers.list", map[string]any{})
+	listed := h.rpcOK(t, "plugin.list", map[string]any{})
 	var result struct {
-		Servers []struct {
-			ID     string `json:"id"`
-			Plugin bool   `json:"plugin"`
-			HasUI  bool   `json:"hasUI"`
-		} `json:"servers"`
+		Plugins []struct {
+			ID    string `json:"id"`
+			HasUI bool   `json:"hasUI"`
+		} `json:"plugins"`
 	}
 	if err := json.Unmarshal(listed.Result, &result); err != nil {
 		t.Fatal(err)
 	}
-	for _, server := range result.Servers {
-		if server.ID == "plugin:"+installed.Manifest.ID {
-			if !server.Plugin || !server.HasUI {
-				t.Fatalf("plugin server metadata = %+v, want plugin and hasUI", server)
+	for _, p := range result.Plugins {
+		if p.ID == installed.Manifest.ID {
+			if !p.HasUI {
+				t.Fatalf("plugin metadata = %+v, want hasUI", p)
 			}
 			return
 		}
 	}
-	t.Fatalf("UI plugin %q not found in mcp.servers.list: %s", installed.Manifest.ID, listed.Result)
+	t.Fatalf("UI plugin %q not found in plugin.list: %s", installed.Manifest.ID, listed.Result)
 }
 
 // helper: POST raw bytes (used by malformed body test)

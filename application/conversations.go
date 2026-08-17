@@ -67,16 +67,17 @@ func filterHydrationToolCalls(m domain.Message) domain.Message {
 
 func convDTO(c *domain.Conversation) contracts.ConversationDTO {
 	return contracts.ConversationDTO{
-		ID:           c.ID,
-		Title:        c.Title,
-		CreatedAt:    c.CreatedAt.Format(timeRFC3339),
-		UpdatedAt:    c.UpdatedAt.Format(timeRFC3339),
-		MessageCount: len(c.Messages),
-		Model:        c.Model,
-		Effort:       c.Effort,
-		Status:       c.Status,
-		Workspace:    c.Workspace,
-		ChunkCount:   c.ChunkCount,
+		ID:              c.ID,
+		Title:           c.Title,
+		CreatedAt:       c.CreatedAt.Format(timeRFC3339),
+		UpdatedAt:       c.UpdatedAt.Format(timeRFC3339),
+		MessageCount:    len(c.Messages),
+		Model:           c.Model,
+		Effort:          c.Effort,
+		Status:          c.Status,
+		Workspace:       c.Workspace,
+		ChunkCount:      c.ChunkCount,
+		EstimatedTokens: c.EstimatedTokens,
 	}
 }
 

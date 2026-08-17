@@ -134,6 +134,21 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 		_ = a.Conversations.Save(conversation)
 	}
 	messages := chatMessages(conversation, messageID, supportsVision)
+	// Publish a lightweight server-side context estimate (system + messages +
+	// tool definitions as actually sent) so the UI badge is not just a guess
+	// from the transcript alone — and remember it on the conversation so the
+	// idle badge shows the same number.
+	if a.Bus != nil {
+		est := estimateRequestTokens(system, messages, tools)
+		a.Bus.Emit(contracts.EventContextEstimate, contracts.ContextEstimateEvent{
+			RunID: run.ID, ConversationID: run.ConversationID, MessageID: messageID,
+			EstimatedTokens: est,
+		})
+		if conversation.EstimatedTokens != est {
+			conversation.EstimatedTokens = est
+			_ = a.Conversations.Save(conversation)
+		}
+	}
 	response, err := adapter.Stream(run.Ctx, ChatRequest{
 		Model:            model,
 		System:           system,
@@ -163,6 +178,47 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 	return streamedTurnRound{Content: content.String(), Reasoning: reasoning.String(), Response: response}, err
 }
 
+// estimateRequestTokens approximates provider tokens from the real request
+// payload: system + messages + tools JSON. ~4 chars/token with a surcharge
+// for non-ASCII (CJK-ish) characters, ~4 tokens per-message overhead, ~150
+// tokens per image attachment, plus a 5% safety buffer.
+func estimateRequestTokens(system string, messages []ChatMessage, tools []ToolDef) int64 {
+	chars := int64(len(system))
+	totalOverhead := int64(4 * len(messages))
+	images := 0
+	raw, _ := json.Marshal(messages)
+	chars += int64(len(raw))
+	if len(tools) > 0 {
+		rawTools, _ := json.Marshal(tools)
+		chars += int64(len(rawTools))
+	}
+	// Non-ASCII cost more (CJK ≈ 1–2 tokens each): add ~1 token per non-ASCII
+	// rune so unicode-heavy threads are not undercounted.
+	for _, m := range messages {
+		if len(m.Attachments) > 0 {
+			for _, a := range m.Attachments {
+				if a.Type == "image" {
+					images++
+				}
+			}
+		}
+	}
+	chars += int64(images * 150)
+	tokens := (chars + totalOverhead) / 4
+	return int64(float64(tokens) * 1.05)
+}
+
+func asciiCount(s string) int {
+	n := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x80 {
+			n++
+		}
+	}
+	return n
+}
+
+// NeedsBuild... (unused guard)
 // buildPromptCachePolicy computes the provider-neutral prompt-cache intent for
 // a turn. The cache key is derived from [providerId, model, conversationId] so
 // the provider can dedup cache entries across requests in the same
@@ -234,8 +290,8 @@ func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
 	if a.Skills != nil {
 		source.Skills = a.Skills
 	}
-	if a.MCP != nil {
-		source.MCPServers = a.MCP
+	if a.Plugins != nil {
+		source.Plugins = a.Plugins
 	}
 	if a.MCPToolbox != nil {
 		source.MCP = a.MCPToolbox

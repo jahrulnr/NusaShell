@@ -27,7 +27,7 @@ type Manager struct {
 }
 
 type conn struct {
-	server *domain.MCPServer
+	plugin *domain.Plugin
 	client *client.Client
 	tools  []contracts.MCPToolDTO
 }
@@ -36,19 +36,19 @@ func NewManager() *Manager {
 	return &Manager{conns: map[string]*conn{}}
 }
 
-// Connect returns the server's tools, connecting on first use. The returned
-// connection is cached until Drop or the process exits.
-func (m *Manager) Connect(ctx context.Context, s *domain.MCPServer) ([]contracts.MCPToolDTO, error) {
+// Connect returns the plugin's MCP tools, connecting on first use. The
+// returned connection is cached until Drop or the process exits.
+func (m *Manager) Connect(ctx context.Context, p *domain.Plugin) ([]contracts.MCPToolDTO, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if c, ok := m.conns[s.ID]; ok {
+	if c, ok := m.conns[p.Manifest.MCPServerID()]; ok {
 		return c.tools, nil
 	}
-	c, err := dial(ctx, s)
+	c, err := dial(ctx, p)
 	if err != nil {
 		return nil, err
 	}
-	m.conns[s.ID] = c
+	m.conns[p.Manifest.MCPServerID()] = c
 	return c.tools, nil
 }
 
@@ -104,23 +104,24 @@ func contentText(result *mcp.CallToolResult) string {
 	return strings.TrimSpace(sb.String())
 }
 
-func dial(ctx context.Context, s *domain.MCPServer) (*conn, error) {
+func dial(ctx context.Context, p *domain.Plugin) (*conn, error) {
+	cfg := p.Manifest.MCP
 	env := append([]string{}, os.Environ()...)
-	for k, v := range s.Env {
+	for k, v := range cfg.Env {
 		env = append(env, k+"="+v)
 	}
 	var opts []transport.StdioOption
-	if s.WorkingDir != "" {
+	if p.InstallPath != "" {
 		opts = append(opts, transport.WithCommandFunc(func(_ context.Context, command string, env []string, args []string) (*exec.Cmd, error) {
 			cmd := exec.Command(command, args...)
 			cmd.Env = env
-			cmd.Dir = s.WorkingDir
+			cmd.Dir = p.InstallPath
 			return cmd, nil
 		}))
 	}
-	mcpClient, err := client.NewStdioMCPClientWithOptions(s.Command, env, s.Args, opts...)
+	mcpClient, err := client.NewStdioMCPClientWithOptions(cfg.Command, env, cfg.Args, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("start %s: %w", s.Command, err)
+		return nil, fmt.Errorf("start %s: %w", cfg.Command, err)
 	}
 	initCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
@@ -135,12 +136,12 @@ func dial(ctx context.Context, s *domain.MCPServer) (*conn, error) {
 	})
 	if err != nil {
 		_ = mcpClient.Close()
-		return nil, fmt.Errorf("initialize %s: %w", s.Name, err)
+		return nil, fmt.Errorf("initialize %s: %w", p.Manifest.Name, err)
 	}
 	toolsResult, err := mcpClient.ListTools(ctx, mcp.ListToolsRequest{})
 	if err != nil {
 		_ = mcpClient.Close()
-		return nil, fmt.Errorf("list tools %s: %w", s.Name, err)
+		return nil, fmt.Errorf("list tools %s: %w", p.Manifest.Name, err)
 	}
 	tools := make([]contracts.MCPToolDTO, 0, len(toolsResult.Tools))
 	for _, t := range toolsResult.Tools {
@@ -151,5 +152,5 @@ func dial(ctx context.Context, s *domain.MCPServer) (*conn, error) {
 			InputSchema: schema,
 		})
 	}
-	return &conn{server: s, client: mcpClient, tools: tools}, nil
+	return &conn{plugin: p, client: mcpClient, tools: tools}, nil
 }

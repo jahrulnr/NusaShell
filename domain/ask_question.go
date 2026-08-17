@@ -12,10 +12,10 @@ type AskQuestionOption struct {
 
 // AskQuestionRequest is the validated payload the model sends to ask_question.
 type AskQuestionRequest struct {
-	Question     string              `json:"question"`
-	Options      []AskQuestionOption `json:"options"`
-	AllowFreeText bool               `json:"allow_free_text"`
-	MultiSelect  bool                `json:"multi_select"`
+	Question      string              `json:"question"`
+	Options       []AskQuestionOption `json:"options"`
+	AllowFreeText bool                `json:"allow_free_text"`
+	MultiSelect   bool                `json:"multi_select"`
 }
 
 // AskAnswerVia indicates whether the user answered via option or free text.
@@ -37,9 +37,9 @@ type AskQuestionAnswer struct {
 // answers. The Answer field is a human-readable summary (e.g. "Option A" or
 // "custom text" or "Option A — custom note").
 type AskQuestionResult struct {
-	OK   bool   `json:"ok"`
-	Via  string `json:"via"`
-	Answer string `json:"answer"`
+	OK        bool     `json:"ok"`
+	Via       string   `json:"via"`
+	Answer    string   `json:"answer"`
 	OptionIDs []string `json:"option_ids,omitempty"`
 	Text      string   `json:"text,omitempty"`
 }

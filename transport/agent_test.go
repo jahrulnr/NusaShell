@@ -670,7 +670,7 @@ func waitTurnRunning(t *testing.T, h *harness, convID string) {
 
 func waitTurnDone(t *testing.T, h *harness, convID string) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		gotten := h.rpcOK(t, "agent.conversations.get", map[string]any{"id": convID})
 		var conv struct {
@@ -679,7 +679,20 @@ func waitTurnDone(t *testing.T, h *harness, convID string) {
 			} `json:"conversation"`
 		}
 		_ = json.Unmarshal(gotten.Result, &conv)
-		if conv.Conversation.Status == "idle" {
+		if conv.Conversation.Status != "idle" {
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		// The conversation reports idle but the run map may not be cleared
+		// yet (async cleanup). Confirm no active run exists before returning,
+		// otherwise the next agent.turns.start can race with the tail of the
+		// previous turn and fail with "conversation is busy" on slow runners.
+		active := h.rpcOK(t, "agent.turns.active", map[string]any{"id": convID})
+		var act struct {
+			Active bool `json:"active"`
+		}
+		_ = json.Unmarshal(active.Result, &act)
+		if !act.Active {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -695,21 +708,21 @@ func TestAgentTurnWithMCPTool(t *testing.T) {
 	convID := h.newConversation(t)
 
 	// register the fake MCP server
-	saved := h.rpcOK(t, "mcp.servers.save", map[string]any{
+	saved := h.rpcOK(t, "plugin.save", map[string]any{
 		"name": "fakemcp", "command": h.mcpBin, "args": []string{}, "enabled": true,
 	})
 	var sv struct {
-		Servers []struct {
+		Plugins []struct {
 			ID string `json:"id"`
-		} `json:"servers"`
+		} `json:"plugins"`
 	}
-	if err := json.Unmarshal(saved.Result, &sv); err != nil || len(sv.Servers) != 1 {
-		t.Fatalf("mcp save = %s", saved.Result)
+	if err := json.Unmarshal(saved.Result, &sv); err != nil || len(sv.Plugins) != 1 {
+		t.Fatalf("plugin save = %s", saved.Result)
 	}
-	serverID := sv.Servers[0].ID
+	serverID := sv.Plugins[0].ID
 
 	// test connection lists tools
-	tested := h.rpcOK(t, "mcp.servers.test", map[string]any{"id": serverID})
+	tested := h.rpcOK(t, "plugin.test", map[string]any{"id": serverID})
 	var tools struct {
 		Tools []struct {
 			Name        string `json:"name"`
@@ -761,6 +774,9 @@ func TestAgentTurnWithMCPTool(t *testing.T) {
 	if !found {
 		t.Fatalf("mcp tool call missing from messages: %+v", conv.Messages)
 	}
+	// Stop the plugin's MCP subprocess so TempDir cleanup does not fail on
+	// Windows, where a running child process locks the plugin directory.
+	h.rpcOK(t, "plugin.stop", map[string]any{"id": serverID})
 }
 
 // TestAgentTurnAnthropic drives a turn through the Anthropic adapter and

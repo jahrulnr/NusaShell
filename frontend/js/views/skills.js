@@ -75,10 +75,34 @@ async function selectSkill(id, reload = true) {
   document.getElementById('skill-save-btn').hidden = false;
   document.getElementById('skill-delete-btn').hidden = false;
   document.getElementById('skill-run-btn').hidden = false;
+  renderSkillFiles(skill.files);
   state.dirty = false;
 }
 
+function renderSkillFiles(files) {
+  const panel = document.getElementById('skill-files');
+  const tree = document.getElementById('skill-files-tree');
+  if (!panel || !tree) return;
+  if (!Array.isArray(files) || files.length === 0) {
+    panel.hidden = true;
+    tree.replaceChildren();
+    return;
+  }
+  panel.hidden = false;
+  tree.replaceChildren();
+  for (const f of files) {
+    const row = el('div', { class: 'skill-file-row' + (f.type === 'directory' ? ' is-dir' : '') },
+      el('span', { class: 'skill-file-icon', text: f.type === 'directory' ? '▸' : '·' }),
+      el('span', { class: 'skill-file-path', text: f.path }),
+      f.type === 'file' ? el('span', { class: 'skill-file-size', text: `${f.sizeBytes} B` }) : null,
+    );
+    tree.append(row);
+  }
+}
+
 function showEmpty() {
+  const panel = document.getElementById('skill-files');
+  if (panel) panel.hidden = true;
   document.getElementById('skill-editor-title').textContent = 'No skill selected';
   document.getElementById('skill-editor-meta').textContent = '';
   document.getElementById('skill-editor-form').hidden = true;

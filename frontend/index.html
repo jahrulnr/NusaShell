@@ -315,6 +315,10 @@
                 <strong>Select a skill</strong>
                 <span>Pick a skill from the catalog or create a new one.</span>
               </div>
+              <div class="skills-files" id="skill-files" hidden>
+                <div class="skills-files-head">Skill files</div>
+                <div class="skills-files-tree" id="skill-files-tree"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -328,7 +332,10 @@
             <h1>Plugins</h1>
             <p>Manage native MCP servers and installed plugins, including plugins with their own UI.</p>
           </div>
-          <button class="action-btn" id="plugins-add-mcp" type="button">+ Add MCP</button>
+          <div class="view-header-actions">
+            <button class="action-btn" id="plugins-add-mcp" type="button">+ Add MCP</button>
+            <button class="action-btn" id="plugins-install-plugin" type="button">Install plugin</button>
+          </div>
         </div>
         <div class="view-body">
           <div class="plugin-table" id="plugin-table"></div>
@@ -379,8 +386,8 @@
               </div>
               <div class="learning-results" id="learning-results">
                 <div class="learning-empty">
-                  <strong>Search to begin</strong>
-                  <span>Enter a query to search across memory and skills.</span>
+                  <strong>Loading…</strong>
+                  <span>Gathering memories and skills.</span>
                 </div>
               </div>
             </div>
@@ -603,6 +610,68 @@
 
 <div class="toast-container" id="toast-container"></div>
 
+<!-- ===== Plugin Install Dialog ===== -->
+<div class="ui-dialog-overlay" id="plugin-install-overlay" aria-hidden="true" hidden>
+  <div class="ui-dialog plugin-install-dialog" role="dialog" aria-modal="true" aria-labelledby="plugin-install-title">
+    <div class="ui-dialog-header">
+      <h2 id="plugin-install-title">Install plugin</h2>
+      <button class="ui-dialog-close" id="plugin-install-close" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="plugin-install-tabs" role="tablist" aria-label="Plugin install source">
+      <button class="plugin-install-tab active" type="button" data-tab="catalog" role="tab" aria-selected="true" id="plugin-install-tab-catalog" aria-controls="plugin-install-panel-catalog">Catalog</button>
+      <button class="plugin-install-tab" type="button" data-tab="github" role="tab" aria-selected="false" id="plugin-install-tab-github" aria-controls="plugin-install-panel-github">GitHub</button>
+      <button class="plugin-install-tab" type="button" data-tab="zip" role="tab" aria-selected="false" id="plugin-install-tab-zip" aria-controls="plugin-install-panel-zip">Upload ZIP</button>
+    </div>
+    <div class="ui-dialog-body plugin-install-body">
+      <div class="plugin-install-error" id="plugin-install-error" role="alert" hidden></div>
+      <div class="plugin-install-panel active" id="plugin-install-panel-catalog" data-panel="catalog" role="tabpanel" aria-labelledby="plugin-install-tab-catalog">
+        <p class="plugin-install-hint">Official first-party plugins from the NusaShell catalog.</p>
+        <div class="plugin-catalog-searchbar">
+          <input type="search" id="plugin-catalog-search" placeholder="Search plugins by name or description…" aria-label="Search plugins" />
+        </div>
+        <div class="plugin-catalog-list" id="plugin-catalog-list"></div>
+      </div>
+      <div class="plugin-install-panel" id="plugin-install-panel-github" data-panel="github" role="tabpanel" aria-labelledby="plugin-install-tab-github">
+        <p class="plugin-install-hint">Install from a Git repository. Supports monorepo subdirectories.</p>
+        <label class="ui-dialog-field" for="plugin-install-github-url">
+          GitHub URL or <code>owner/repo</code>
+          <input type="text" id="plugin-install-github-url" placeholder="e.g. jahrulnr/NusaShell-mcp" />
+        </label>
+        <label class="ui-dialog-field" for="plugin-install-github-subdir">
+          Subdirectory (optional, for monorepo)
+          <input type="text" id="plugin-install-github-subdir" placeholder="e.g. notes" />
+        </label>
+        <label class="ui-dialog-field" for="plugin-install-github-ref">
+          Ref (branch or tag, optional)
+          <input type="text" id="plugin-install-github-ref" placeholder="e.g. v1.0.0 or master" />
+        </label>
+      </div>
+      <div class="plugin-install-panel" id="plugin-install-panel-zip" data-panel="zip" role="tabpanel" aria-labelledby="plugin-install-tab-zip">
+        <p class="plugin-install-hint">Upload a plugin archive (.zip).</p>
+        <label class="plugin-upload-zone" for="plugin-install-zip-file">
+          <input type="file" id="plugin-install-zip-file" accept=".zip" hidden />
+          <span class="plugin-upload-icon" aria-hidden="true">🗜</span>
+          <strong>Drop a .zip here or click to browse</strong>
+          <span id="plugin-install-zip-name">No file selected</span>
+        </label>
+      </div>
+    </div>
+    <div class="ui-dialog-actions">
+      <button class="mini-btn ghost" id="plugin-install-cancel" type="button">Cancel</button>
+      <button class="mini-btn" id="plugin-install-confirm" type="button">Install</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Plugin window (in-shell, sized per manifest ui.window) ===== -->
+<div class="plugin-window" id="plugin-window" role="dialog" aria-label="Plugin window" hidden>
+  <div class="plugin-window-titlebar" id="plugin-window-titlebar">
+    <span class="plugin-window-title" id="plugin-window-title">Plugin</span>
+    <button class="plugin-window-close" id="plugin-window-close" type="button" aria-label="Close plugin window">×</button>
+  </div>
+  <iframe class="plugin-window-frame" id="plugin-window-frame" title="Plugin window"></iframe>
+</div>
+
 <!-- ===== Plugin Detail Drawer ===== -->
 <div class="drawer-overlay" id="plugin-drawer-overlay" aria-hidden="true"></div>
 <aside class="plugin-drawer" id="plugin-drawer" role="dialog" aria-modal="true" aria-labelledby="plugin-drawer-title" aria-hidden="true" inert hidden>
@@ -629,13 +698,30 @@
       <div class="drawer-label">Actions</div>
       <div class="drawer-actions" id="plugin-drawer-actions">
         <button class="action-btn action-start" id="plugin-btn-open-ui" type="button" hidden>Open UI</button>
-        <button class="action-btn action-start" id="plugin-btn-test" type="button">Test</button>
+        <button class="action-btn action-start" id="plugin-btn-start" type="button">Start</button>
         <button class="action-btn action-stop" id="plugin-btn-stop" type="button">Stop</button>
         <button class="action-btn action-restart" id="plugin-btn-restart" type="button">Restart</button>
+        <button class="action-btn action-start" id="plugin-btn-update" type="button" hidden>Update</button>
         <button class="action-btn action-edit-mcp" id="plugin-btn-edit" type="button" hidden>Edit</button>
         <button class="action-btn action-uninstall" id="plugin-btn-uninstall" type="button" hidden>Uninstall</button>
         <button class="action-btn action-uninstall" id="plugin-btn-delete" type="button" hidden>Delete</button>
       </div>
+    </div>
+
+    <div class="drawer-section" id="plugin-drawer-autostart" hidden>
+      <div class="drawer-label">Auto start</div>
+      <label class="drawer-toggle-row">
+        <span>Launch this plugin's MCP server automatically when NusaShell starts</span>
+        <input type="checkbox" class="drawer-toggle" id="plugin-autostart-toggle" />
+      </label>
+    </div>
+
+    <div class="drawer-section" id="plugin-drawer-autoupdate" hidden>
+      <div class="drawer-label">Auto update</div>
+      <label class="drawer-toggle-row">
+        <span>Update this plugin automatically when a new version is released</span>
+        <input type="checkbox" class="drawer-toggle" id="plugin-autoupdate-toggle" />
+      </label>
     </div>
 
     <div class="drawer-section">

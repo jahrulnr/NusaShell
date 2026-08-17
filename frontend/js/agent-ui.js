@@ -12,21 +12,25 @@ export function formatContextUsage(usedTokens, contextWindow) {
 
 /**
  * Resolve the effective context window denominator shown to the user.
- * When the model advertises its own context window (e.g. OpenRouter
- * context_length: 1000000), that value is used as-is. When the provider
- * does not return a context window (e.g. OpenAI /models), the global
- * max_input_tokens setting (default 200k) is used as a fallback. When
- * neither is known, returns 0 (badge shows "X ctx" without denominator).
+ * The global max_input_tokens cap is only a FALLBACK for models that are
+ * not in the catalog (unknown window). When the model advertises its window,
+ * that window wins — capping it to the global setting only confuses users
+ * ("1M model, why 200k?"). When the model window is unknown the global
+ * setting is used; when neither is known, returns 0.
  */
 export function effectiveContextWindow(modelWindow, globalMaxInputTokens) {
   const windowValue = Number.isFinite(modelWindow) && modelWindow > 0 ? modelWindow : 0;
-  if (windowValue > 0) return windowValue;
   const fallback = Number.isFinite(globalMaxInputTokens) && globalMaxInputTokens > 0 ? globalMaxInputTokens : 0;
+  if (windowValue > 0) return windowValue;
   return fallback;
 }
 
 export function estimateContextTokens(messages = []) {
-  return Math.ceil(messages.reduce((total, message) => total + estimateMessageChars(message), 0) / 4);
+  let chars = 0;
+  for (const message of messages) chars += estimateMessageChars(message);
+  // ~4 chars/token, +4 tokens per message, +5% safety buffer.
+  const tokens = chars / 4 + 4 * messages.length;
+  return Math.ceil(tokens * 1.05);
 }
 
 export function inspectAttachmentContent(bytes) {
@@ -61,19 +65,41 @@ function formatTokenCount(value) {
 function estimateMessageChars(message) {
   if (!message || typeof message !== 'object') return 0;
   let chars = 0;
-  // Durable assistant messages mirror content, reasoning, and tool calls in
-  // steps. This is the same no-double-counting rule used by Electron.
+  const nonAsciiWeight = (text) => {
+    let extra = 0;
+    for (const ch of String(text ?? '')) {
+      if (ch.charCodeAt(0) > 0x7f) extra += 4; // ~1 token surcharge per rune
+    }
+    return extra;
+  };
   if (Array.isArray(message.steps) && message.steps.length > 0) {
     chars += estimateTokenChars(message.steps);
     if (message.attachments) chars += estimateTokenChars(message.attachments);
-    return chars;
+    return chars + jsonNonAsciiSurcharge(message.steps, nonAsciiWeight);
   }
-  if (typeof message.content === 'string') chars += message.content.length;
-  else if (message.content != null) chars += estimateTokenChars(message.content);
-  if (typeof message.reasoning === 'string') chars += message.reasoning.length;
+  if (typeof message.content === 'string') chars += message.content.length + nonAsciiWeight(message.content);
+  else if (message.content != null) {
+    chars += estimateTokenChars(message.content);
+    chars += jsonNonAsciiSurcharge([message.content], nonAsciiWeight);
+  }
+  if (typeof message.reasoning === 'string') chars += message.reasoning.length + nonAsciiWeight(message.reasoning);
   if (message.tool_calls) chars += estimateTokenChars(message.tool_calls);
   if (message.attachments) chars += estimateTokenChars(message.attachments);
   return chars;
+}
+
+function jsonNonAsciiSurcharge(parts, weight) {
+  let extra = 0;
+  for (const part of parts ?? []) {
+    if (typeof part === 'string') extra += weight(part);
+    else if (part && typeof part === 'object') {
+      for (const key of Object.keys(part)) {
+        const value = part[key];
+        if (typeof value === 'string') extra += weight(value);
+      }
+    }
+  }
+  return extra;
 }
 
 function estimateTokenChars(value) {

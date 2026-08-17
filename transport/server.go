@@ -43,9 +43,10 @@ func (s *Server) Routes() http.Handler {
 	return logRequests(s.Logger, s.mux)
 }
 
-// maxRPCBodyBytes fits the documented attachment contract: four 4 MiB files
-// as base64 data URLs, plus JSON envelope overhead.
-const maxRPCBodyBytes = 24 << 20
+// maxRPCBodyBytes fits the documented attachment contract (four 4 MiB files
+// as base64 data URLs, plus JSON envelope overhead) and leaves headroom for
+// plugin ZIP uploads (plugin.install), which can carry pruned node_modules.
+const maxRPCBodyBytes = 64 << 20
 
 // ---- HTTP RPC ----
 

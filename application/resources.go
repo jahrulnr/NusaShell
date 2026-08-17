@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -10,6 +11,7 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+	"nusashell/infrastructure/pluginicon"
 )
 
 // ---- skills ----
@@ -79,7 +81,15 @@ func (a *App) handleSkillsRead(req contracts.SkillIDRequest) (any, *contracts.RP
 	if err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 	}
-	return contracts.SkillReadResult{Skill: contracts.SkillFull{SkillDTO: skillDTO(s), Content: s.Content}}, nil
+	full := contracts.SkillFull{SkillDTO: skillDTO(s), Content: s.Content}
+	if files, ferr := a.Skills.Files(req.ID); ferr == nil {
+		for _, f := range files {
+			full.Files = append(full.Files, contracts.SkillFileDTO{
+				Path: f.Path, Type: f.Type, SizeBytes: f.SizeBytes, Editable: f.Editable,
+			})
+		}
+	}
+	return contracts.SkillReadResult{Skill: full}, nil
 }
 
 func (a *App) handleSkillsSave(req contracts.SkillSaveRequest) (any, *contracts.RPCError) {
@@ -146,65 +156,125 @@ func (a *App) handleSkillsRun(req contracts.SkillIDRequest) (any, *contracts.RPC
 	return contracts.SkillRunResult{ConversationID: c.ID}, nil
 }
 
-// ---- MCP ----
+// ---- plugins (MCP servers + MCP+UI plugins) ----
 
-func mcpDTO(s *domain.MCPServer) contracts.MCPServerDTO {
-	return contracts.MCPServerDTO{
-		ID:      s.ID,
-		Name:    s.Name,
-		Command: s.Command,
-		Args:    s.Args,
-		Env:     s.Env,
-		Enabled: s.Enabled,
+// pluginToDTO converts a domain.Plugin into its wire representation.
+// The same DTO serves both catalog-installed plugins and manual MCP
+// servers: a plugin is the single concept; "MCP server" is just a
+// plugin whose manifest has an mcp block and no ui block.
+func pluginToDTO(p *domain.Plugin) contracts.PluginDTO {
+	dto := contracts.PluginDTO{
+		ID:          p.Manifest.ID,
+		Name:        p.Manifest.Name,
+		Version:     p.Manifest.Version,
+		Icon:        pluginicon.ResolveLocal(p.Manifest.Icon, p.InstallPath),
+		Category:    p.Manifest.Category,
+		HasUI:       p.HasUI,
+		InstallPath: p.InstallPath,
+		Autostart:   p.Manifest.MCP.Autostart,
+		Manifest: &contracts.PluginManifestDTO{
+			ID:   p.Manifest.ID,
+			Name: p.Manifest.Name,
+			MCP: contracts.PluginMCPDTO{
+				Transport: string(p.Manifest.MCP.Transport),
+				Command:   p.Manifest.MCP.Command,
+				Args:      p.Manifest.MCP.Args,
+				Env:       p.Manifest.MCP.Env,
+				Autostart: p.Manifest.MCP.Autostart,
+				KeepAlive: p.Manifest.MCP.KeepAliveOnClose,
+			},
+		},
 	}
+	if p.HasUI {
+		dto.Manifest.UI = &contracts.PluginUIDTO{
+			Entry: p.Manifest.UI.Entry,
+			Window: contracts.PluginWindowDTO{
+				Mode:      string(p.Manifest.UI.Window.Mode),
+				Resizable: p.Manifest.UI.Window.Resizable,
+			},
+		}
+		dto.Manifest.UI.Window.DefaultSize.Width = p.Manifest.UI.Window.DefaultSize.Width
+		dto.Manifest.UI.Window.DefaultSize.Height = p.Manifest.UI.Window.DefaultSize.Height
+	}
+	return dto
 }
 
-func (a *App) handleMCPServersList() (any, *contracts.RPCError) {
-	list := a.MCP.List()
-	out := make([]contracts.MCPServerDTO, 0, len(list))
-	for _, s := range list {
-		dto := mcpDTO(s)
-		dto.Status = "idle"
-		if tools, ok := a.MCPToolbox.ToolsFor(s.ID); ok {
-			dto.Status = "connected"
-			dto.Tools = tools
-		}
-		out = append(out, dto)
+// pluginStatus returns the runtime state of a plugin's MCP server.
+// Status is "connected" when tools are cached for its MCP server id,
+// otherwise "idle". Manual MCP-server plugins and catalog-installed
+// plugins are indistinguishable here.
+func (a *App) pluginStatus(p *domain.Plugin) (string, []contracts.MCPToolDTO) {
+	if a.MCPToolbox == nil {
+		return "idle", nil
 	}
-	// Merge installed plugins so they appear in the MCP view alongside
-	// user-registered stdio servers. Plugin MCP servers are prefixed
-	// with "plugin:" in their ID.
-	if a.Plugins != nil {
-		plugins, err := a.Plugins.List()
-		if err == nil {
-			for _, p := range plugins {
-				serverID := p.Manifest.MCPServerID()
-				dto := contracts.MCPServerDTO{
-					ID:          serverID,
-					Name:        p.Manifest.Name,
-					Command:     p.Manifest.MCP.Command,
-					Args:        p.Manifest.MCP.Args,
-					Env:         p.Manifest.MCP.Env,
-					Enabled:     true,
-					Plugin:      true,
-					HasUI:       p.HasUI,
-					Status:      "idle",
-					Version:     p.Manifest.Version,
-					Icon:        p.Manifest.Icon,
-					Category:    p.Manifest.Category,
-					InstallPath: p.InstallPath,
-				}
-				if tools, ok := a.MCPToolbox.ToolsFor(serverID); ok {
-					dto.Status = "connected"
-					dto.Tools = tools
-				}
-				out = append(out, dto)
-			}
-		}
+	if tools, ok := a.MCPToolbox.ToolsFor(p.Manifest.MCPServerID()); ok {
+		return "connected", tools
 	}
-	return contracts.MCPServersListResult{Servers: out}, nil
+	return "idle", nil
 }
 
+func (a *App) handlePluginCatalog() (any, *contracts.RPCError) {
+	if a.PluginInstaller == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "plugin installer not available"}
+	}
+	entries, err := a.PluginInstaller.Catalog(context.Background())
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
+	}
+	out := make([]contracts.PluginCatalogEntry, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, contracts.PluginCatalogEntry{
+			ID:          e.ID,
+			PluginID:    e.PluginID,
+			Name:        e.Name,
+			Version:     e.Version,
+			Description: e.Description,
+			Icon:        e.Icon,
+			Tag:         e.Tag,
+			ReleasedAt:  e.ReleasedAt,
+		})
+	}
+	return contracts.PluginCatalogResult{Plugins: out}, nil
+}
+
+func (a *App) handlePluginInstall(req contracts.PluginInstallRequest) (any, *contracts.RPCError) {
+	if a.PluginInstaller == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "plugin installer not available"}
+	}
+	source := domain.PluginInstallSource(req.Source)
+	var data []byte
+	if req.Data != "" {
+		var err error
+		data, err = base64.StdEncoding.DecodeString(req.Data)
+		if err != nil {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "invalid zip data"}
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	plugin, err := a.PluginInstaller.Install(ctx, domain.PluginInstallRequest{
+		Source: source,
+		ID:     req.ID,
+		URL:    req.URL,
+		Subdir: req.Subdir,
+		Ref:    req.Ref,
+		Data:   data,
+	})
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
+	}
+
+	dto := pluginToDTO(plugin)
+	a.MCPToolbox.Drop(plugin.Manifest.MCPServerID())
+	a.log("info", "plugin", "plugin installed: %s v%s", plugin.Manifest.Name, plugin.Manifest.Version)
+	return contracts.PluginInstallResult{Plugin: &dto}, nil
+}
+
+// handlePluginList returns every plugin — installed from the catalog or
+// created manually as an MCP server — with runtime state. Idle and
+// stopped plugins are included; the frontend renders their status.
 func (a *App) handlePluginList() (any, *contracts.RPCError) {
 	if a.Plugins == nil {
 		return contracts.PluginListResult{Plugins: []contracts.PluginDTO{}}, nil
@@ -214,166 +284,241 @@ func (a *App) handlePluginList() (any, *contracts.RPCError) {
 		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
 	}
 	out := make([]contracts.PluginDTO, 0, len(plugins))
-	for _, p := range plugins {
-		dto := contracts.PluginDTO{
-			ID:          p.Manifest.ID,
-			Name:        p.Manifest.Name,
-			Version:     p.Manifest.Version,
-			Icon:        p.Manifest.Icon,
-			Category:    p.Manifest.Category,
-			HasUI:       p.HasUI,
-			InstallPath: p.InstallPath,
-		}
-		if p.HasUI {
-			dto.Manifest = &contracts.PluginManifestDTO{
-				ID:   p.Manifest.ID,
-				Name: p.Manifest.Name,
-				UI: &contracts.PluginUIDTO{
-					Entry:  p.Manifest.UI.Entry,
-					Window: contracts.PluginWindowDTO{},
-				},
-				MCP: contracts.PluginMCPDTO{
-					Transport: string(p.Manifest.MCP.Transport),
-					Command:   p.Manifest.MCP.Command,
-					Args:      p.Manifest.MCP.Args,
-					Autostart: p.Manifest.MCP.Autostart,
-				},
+	// Check the catalog once so the UI can show which installed plugins have
+	// a newer version (updateAvailable) without an extra round-trip.
+	updatesByID := map[string]string{}
+	if a.PluginInstaller != nil {
+		ctxU, cancelU := context.WithTimeout(context.Background(), 30*time.Second)
+		updates, uerr := a.PluginInstaller.CheckUpdates(ctxU, plugins)
+		cancelU()
+		if uerr == nil {
+			for _, u := range updates {
+				updatesByID[u.PluginID] = u.Version
 			}
-			dto.Manifest.UI.Window.Mode = string(p.Manifest.UI.Window.Mode)
-			dto.Manifest.UI.Window.DefaultSize.Width = p.Manifest.UI.Window.DefaultSize.Width
-			dto.Manifest.UI.Window.DefaultSize.Height = p.Manifest.UI.Window.DefaultSize.Height
-			dto.Manifest.UI.Window.Resizable = p.Manifest.UI.Window.Resizable
+		}
+	}
+	for _, p := range plugins {
+		dto := pluginToDTO(p)
+		dto.Status, dto.Tools = a.pluginStatus(p)
+		if v, ok := updatesByID[p.Manifest.ID]; ok {
+			dto.UpdateAvailable = v
 		}
 		out = append(out, dto)
 	}
 	return contracts.PluginListResult{Plugins: out}, nil
 }
 
-func (a *App) handleMCPServersSave(req contracts.MCPSaveRequest) (any, *contracts.RPCError) {
+// handlePluginSave creates or updates a manual MCP-server plugin (or a
+// full plugin manifest when the request carries UI fields). The plugin is
+// stored as <datadir>/plugins/<id>/manifest.json like any installed
+// plugin, so manual MCP servers and catalog plugins live in one store.
+func (a *App) handlePluginSave(req contracts.PluginSaveRequest) (any, *contracts.RPCError) {
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "server name is required"}
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "plugin name is required"}
 	}
 	command := strings.TrimSpace(req.Command)
 	if command == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "command is required"}
 	}
-	var s *domain.MCPServer
+	var p *domain.Plugin
 	if req.ID != "" {
-		existing, err := a.MCP.Get(req.ID)
+		existing, err := a.Plugins.Get(req.ID)
 		if err != nil {
 			return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 		}
-		s = existing
+		p = existing
 	} else {
-		s = &domain.MCPServer{ID: domain.NewID("mcp")}
+		p = &domain.Plugin{Manifest: domain.PluginManifest{
+			ID:      domain.NewID("plugin"),
+			Version: "0.1.0",
+			Icon:    "🧩",
+			MCP:     domain.PluginMCPConfig{Transport: domain.PluginTransportStdio},
+		}}
 	}
-	s.Name = name
-	s.Command = command
-	s.Args = req.Args
-	s.Env = req.Env
-	s.Enabled = req.Enabled
-	if err := a.MCP.Save(s); err != nil {
+	p.Manifest.Name = name
+	p.Manifest.MCP.Command = command
+	p.Manifest.MCP.Args = req.Args
+	p.Manifest.MCP.Env = req.Env
+	p.Manifest.MCP.Autostart = req.Autostart
+	if err := a.Plugins.Save(p); err != nil {
 		return nil, rpcInternal(err)
 	}
-	a.MCPToolbox.Drop(s.ID)
-	a.log("info", "mcp", "mcp server saved: %s", s.Name)
-	return contracts.MCPServersListResult{Servers: []contracts.MCPServerDTO{mcpDTO(s)}}, nil
+	a.MCPToolbox.Drop(p.Manifest.MCPServerID())
+	a.log("info", "plugin", "plugin saved: %s", p.Manifest.Name)
+	dto := pluginToDTO(p)
+	dto.Status, dto.Tools = a.pluginStatus(p)
+	return contracts.PluginListResult{Plugins: []contracts.PluginDTO{dto}}, nil
 }
 
-func (a *App) handleMCPServersDelete(req contracts.MCPIDRequest) (any, *contracts.RPCError) {
-	if _, err := a.MCP.Get(req.ID); err != nil {
-		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
-	}
-	if err := a.MCP.Delete(req.ID); err != nil {
-		return nil, rpcInternal(err)
-	}
-	a.MCPToolbox.Drop(req.ID)
-	a.log("info", "mcp", "mcp server deleted: %s", req.ID)
-	return map[string]bool{"ok": true}, nil
-}
-
-func (a *App) handleMCPServersTest(req contracts.MCPIDRequest) (any, *contracts.RPCError) {
-	s, err := a.resolveMCPServer(req.ID)
-	if err != nil {
-		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	tools, err := a.MCPToolbox.Connect(ctx, s)
-	if err != nil {
-		a.log("warn", "mcp", "mcp test failed: %s: %v", s.Name, err)
-		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
-	}
-	return contracts.MCPTestResult{Tools: tools}, nil
-}
-
-func (a *App) handleMCPServersStop(req contracts.MCPIDRequest) (any, *contracts.RPCError) {
-	// Stop works for both stdio servers and plugin servers: both are
-	// identified by the same MCP server ID used by the toolbox.
-	a.MCPToolbox.Drop(req.ID)
-	a.log("info", "mcp", "mcp server stopped: %s", req.ID)
-	return map[string]bool{"ok": true}, nil
-}
-
-func (a *App) handlePluginUninstall(req contracts.PluginIDRequest) (any, *contracts.RPCError) {
+// handlePluginDelete removes a plugin. It works for both manual
+// MCP-server plugins and catalog-installed plugins.
+func (a *App) handlePluginDelete(req contracts.PluginIDRequest) (any, *contracts.RPCError) {
 	if a.Plugins == nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "plugin store not available"}
 	}
 	if _, err := a.Plugins.Get(req.ID); err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 	}
-	if err := a.Plugins.Uninstall(req.ID); err != nil {
+	if err := a.Plugins.Delete(req.ID); err != nil {
 		return nil, rpcInternal(err)
 	}
-	// Drop any cached MCP connection for this plugin so the agent does
-	// not keep calling a subprocess whose files were just removed.
+	// Drop any cached MCP connection so the agent does not keep calling
+	// a subprocess whose files were just removed.
 	a.MCPToolbox.Drop("plugin:" + req.ID)
-	a.log("info", "plugin", "plugin uninstalled: %s", req.ID)
+	a.log("info", "plugin", "plugin deleted: %s", req.ID)
 	return map[string]bool{"ok": true}, nil
 }
 
-// resolveMCPServer looks up a server by ID. For plugin servers (ID
-// prefixed with "plugin:"), it reads the plugin manifest from the
-// plugin store and converts it to an MCPServer.
-func (a *App) resolveMCPServer(id string) (*domain.MCPServer, error) {
-	if len(id) > 7 && id[:7] == "plugin:" {
-		if a.Plugins == nil {
-			return nil, fmt.Errorf("plugin store not available")
-		}
-		pluginID := id[7:]
-		p, err := a.Plugins.Get(pluginID)
-		if err != nil {
-			return nil, err
-		}
-		m := p.Manifest.MCP
-		return &domain.MCPServer{
-			ID:         p.Manifest.MCPServerID(),
-			Name:       p.Manifest.Name,
-			Command:    m.Command,
-			Args:       m.Args,
-			Env:        m.Env,
-			Enabled:    true,
-			WorkingDir: p.InstallPath,
-		}, nil
+// handlePluginTest connects a plugin's MCP server and returns its tools.
+func (a *App) handlePluginTest(req contracts.PluginIDRequest) (any, *contracts.RPCError) {
+	if a.Plugins == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "plugin store not available"}
 	}
-	return a.MCP.Get(id)
+	p, err := a.Plugins.Get(req.ID)
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	tools, err := a.MCPToolbox.Connect(ctx, p)
+	if err != nil {
+		a.log("warn", "plugin", "plugin test failed: %s: %v", p.Manifest.Name, err)
+		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
+	}
+	return contracts.PluginTestResult{Tools: tools}, nil
 }
 
-func (a *App) handleMCPToolsList() (any, *contracts.RPCError) {
+// handlePluginStop drops the cached MCP connection for a plugin. The
+// plugin definition remains installed; only the subprocess is stopped.
+func (a *App) handlePluginStop(req contracts.PluginIDRequest) (any, *contracts.RPCError) {
+	if a.Plugins == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "plugin store not available"}
+	}
+	if _, err := a.Plugins.Get(req.ID); err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
+	}
+	a.MCPToolbox.Drop("plugin:" + req.ID)
+	a.log("info", "plugin", "plugin stopped: %s", req.ID)
+	return map[string]bool{"ok": true}, nil
+}
+
+// handlePluginUninstall is an alias for handlePluginDelete kept for the
+// install flow naming; uninstalling a catalog plugin removes its folder.
+func (a *App) handlePluginUninstall(req contracts.PluginIDRequest) (any, *contracts.RPCError) {
+	return a.handlePluginDelete(req)
+}
+
+// handlePluginCheckUpdates compares installed plugins against the catalog
+// and returns entries with a newer version available.
+func (a *App) handlePluginCheckUpdates() (any, *contracts.RPCError) {
+	if a.Plugins == nil || a.PluginInstaller == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "plugin runtime not available"}
+	}
+	installed, err := a.Plugins.List()
+	if err != nil {
+		return nil, rpcInternal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	updates, err := a.PluginInstaller.CheckUpdates(ctx, installed)
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
+	}
+	out := make([]contracts.PluginCatalogEntry, 0, len(updates))
+	for _, e := range updates {
+		out = append(out, contracts.PluginCatalogEntry{
+			ID: e.ID, PluginID: e.PluginID, Name: e.Name, Version: e.Version,
+			Description: e.Description, Icon: e.Icon, Tag: e.Tag, ReleasedAt: e.ReleasedAt,
+		})
+	}
+	return contracts.PluginCatalogResult{Plugins: out}, nil
+}
+
+// handlePluginSetAutoStart persists the auto-start preference (launch the
+// plugin's MCP server when the app starts).
+func (a *App) handlePluginSetAutoStart(req contracts.PluginSetFlagRequest) (any, *contracts.RPCError) {
+	if a.Plugins == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "plugin store not available"}
+	}
+	id := strings.TrimPrefix(req.ID, "plugin:")
+	p, err := a.Plugins.Get(id)
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
+	}
+	p.Manifest.MCP.Autostart = req.Enabled
+	if err := a.Plugins.Save(p); err != nil {
+		return nil, rpcInternal(err)
+	}
+	a.log("info", "plugin", "autostart set: %s = %v", id, req.Enabled)
+	return map[string]bool{"ok": true}, nil
+}
+
+// handlePluginSetAutoUpdate persists auto-update (same flag shape).
+func (a *App) handlePluginSetAutoUpdate(req contracts.PluginSetFlagRequest) (any, *contracts.RPCError) {
+	if a.Plugins == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "plugin store not available"}
+	}
+	id := strings.TrimPrefix(req.ID, "plugin:")
+	p, err := a.Plugins.Get(id)
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
+	}
+	p.Manifest.AutoUpdate = req.Enabled
+	if err := a.Plugins.Save(p); err != nil {
+		return nil, rpcInternal(err)
+	}
+	a.log("info", "plugin", "autoupdate set: %s = %v", id, req.Enabled)
+	return map[string]bool{"ok": true}, nil
+}
+
+// handlePluginUpdate updates a catalog plugin to its latest release.
+func (a *App) handlePluginUpdate(req contracts.PluginIDRequest) (any, *contracts.RPCError) {
+	if a.PluginInstaller == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "plugin installer not available"}
+	}
+	id := strings.TrimSpace(req.ID)
+	// Accept either the catalog key (e.g. "notes") or the manifest id
+	// (e.g. "nusashell.notes") — normalize to the catalog key by looking up
+	// the installed plugin's catalog entry.
+	catalogID := id
+	if strings.HasPrefix(id, "nusashell.") {
+		catalogID = strings.TrimPrefix(id, "nusashell.")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	updated, err := a.PluginInstaller.Update(ctx, catalogID)
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
+	}
+	a.MCPToolbox.Drop("plugin:" + updated.Manifest.ID)
+	a.log("info", "plugin", "plugin updated: %s v%s", updated.Manifest.Name, updated.Manifest.Version)
+	dto := pluginToDTO(updated)
+	dto.Status, dto.Tools = a.pluginStatus(updated)
+	return contracts.PluginInstallResult{Plugin: &dto}, nil
+}
+
+// handlePluginToolsList returns tools from all connected plugins.
+// Plugins that are not running contribute nothing; call handlePluginTest
+// (Start) first to connect.
+func (a *App) handlePluginToolsList() (any, *contracts.RPCError) {
+	if a.Plugins == nil {
+		return contracts.PluginToolsListResult{Tools: []contracts.MCPToolDTO{}}, nil
+	}
+	plugins, err := a.Plugins.List()
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
+	}
 	var out []contracts.MCPToolDTO
-	for _, s := range a.MCP.List() {
-		if !s.Enabled {
-			continue
-		}
-		if tools, ok := a.MCPToolbox.ToolsFor(s.ID); ok {
+	for _, p := range plugins {
+		if tools, ok := a.MCPToolbox.ToolsFor(p.Manifest.MCPServerID()); ok {
 			out = append(out, tools...)
 		}
 	}
 	if out == nil {
 		out = []contracts.MCPToolDTO{}
 	}
-	return contracts.MCPToolsListResult{Tools: out}, nil
+	return contracts.PluginToolsListResult{Tools: out}, nil
 }
 
 // ---- memory ----
@@ -460,6 +605,38 @@ func (a *App) handleLearningSearch(req contracts.LearningSearchRequest) (any, *c
 		limit = 10
 	}
 	kind := strings.ToLower(strings.TrimSpace(req.Kind))
+
+	// Empty query: return an unfiltered listing (all skills and/or memories)
+	// so the Learning view shows content immediately instead of an empty
+	// "search to begin" state. Score is 0; items are sorted by name.
+	if query == "" {
+		items := make([]contracts.LearningSearchResultItem, 0, limit*2)
+		if kind == "" || kind == "skills" {
+			for _, sk := range a.Skills.List() {
+				items = append(items, contracts.LearningSearchResultItem{
+					ID:      sk.ID,
+					Kind:    "skill",
+					Name:    sk.Name,
+					Content: truncate(sk.Content, 200),
+				})
+			}
+		}
+		if kind == "" || kind == "memory" {
+			for _, mem := range a.Memory.List() {
+				items = append(items, contracts.LearningSearchResultItem{
+					ID:      mem.ID,
+					Kind:    "memory",
+					Content: truncate(mem.Content, 200),
+				})
+			}
+		}
+		sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+		if len(items) > limit {
+			items = items[:limit]
+		}
+		return contracts.LearningSearchResult{Items: items}, nil
+	}
+
 	searcher := a.learningSearch()
 	ctx := context.Background()
 	items := make([]contracts.LearningSearchResultItem, 0, limit*2)
@@ -566,10 +743,24 @@ func (a *App) handleLearningGraph() (any, *contracts.RPCError) {
 		})
 	}
 
-	// Collect edges from graph service
+	// Collect edges from graph service. Only edges whose BOTH endpoints are
+	// present in the node set are emitted: memory/skill entries that were
+	// deleted after an edge was persisted would otherwise reference nodes
+	// that do not exist, and vis-network silently drops them — making whole
+	// clusters appear disconnected.
+	nodeIDs := make(map[string]struct{}, len(nodes))
+	for _, n := range nodes {
+		nodeIDs[n.ID] = struct{}{}
+	}
 	var edges []contracts.LearningGraphEdge
 	if gs := a.graph(); gs != nil {
 		for _, e := range gs.AllEdges() {
+			if _, ok := nodeIDs[e.SourceID]; !ok {
+				continue
+			}
+			if _, ok := nodeIDs[e.TargetID]; !ok {
+				continue
+			}
 			edges = append(edges, contracts.LearningGraphEdge{
 				From:   e.SourceID,
 				To:     e.TargetID,

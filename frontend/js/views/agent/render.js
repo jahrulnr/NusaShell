@@ -223,6 +223,7 @@ export function renderToolJob(toolCall) {
     el('span', { class: 'agent-tool-terminal-title', text: displayName }),
     isMcp ? el('span', { class: 'agent-tool-terminal-badge', text: 'MCP' }) : null,
     el('span', { class: 'agent-tool-terminal-meta', text: toolTerminalMeta(toolCall) }),
+    el('span', { class: 'agent-tool-elapsed', text: toolCall.elapsed ? formatElapsed(toolCall.elapsed) : '' }),
     el('span', { class: 'agent-tool-terminal-chevron', text: '⌄' }),
   );
   const body = el('div', { class: 'agent-tool-terminal-body' },
@@ -233,6 +234,13 @@ export function renderToolJob(toolCall) {
   card.append(summary, body);
   setToolTerminalStatus(card, toolCall.status || 'running');
   return card;
+}
+
+// formatElapsed formats a duration in seconds (e.g. 3 → "3s", 75 → "1m 15s").
+export function formatElapsed(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  if (total < 60) return `${total}s`;
+  return `${Math.floor(total / 60)}m ${total % 60}s`;
 }
 
 export function toolTerminalMeta(toolCall) {

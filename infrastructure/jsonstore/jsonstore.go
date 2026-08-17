@@ -39,7 +39,6 @@ type Store struct {
 	conversations map[string]*domain.Conversation
 	providers     []*domain.Provider
 	skills        []*domain.Skill
-	mcpServers    []*domain.MCPServer
 	memories      []*domain.MemoryEntry
 	learningEdges []*domain.LearningEdge
 	settings      domain.Settings
@@ -93,9 +92,6 @@ func (s *Store) load() error {
 	}
 	s.migrateProviderKinds()
 	if err := s.loadJSON("skills.json", &s.skills); err != nil {
-		return err
-	}
-	if err := s.loadJSON("mcp-servers.json", &s.mcpServers); err != nil {
 		return err
 	}
 	if err := s.loadJSON("settings.json", &s.settings); err != nil {
@@ -152,13 +148,67 @@ func (s *Store) writeJSON(name string, v any) error {
 	return atomicWrite(filepath.Join(s.dir, name), b)
 }
 
-// atomicWrite writes via a temp file + rename so readers never see torn files.
+type atomicWriter struct {
+	mu sync.Mutex
+}
+
+var (
+	atomicWritersMu sync.Mutex
+	atomicWriters   = make(map[string]*atomicWriter)
+)
+
+func getAtomicWriter(path string) *atomicWriter {
+	atomicWritersMu.Lock()
+	defer atomicWritersMu.Unlock()
+
+	if w, ok := atomicWriters[path]; ok {
+		return w
+	}
+
+	w := &atomicWriter{}
+	atomicWriters[path] = w
+	return w
+}
+
+// atomicWrite writes via a unique temp file + rename so readers never see torn
+// files and concurrent writers of the same path cannot collide on a shared
+// temp name (which would race the rename and fail with "no such file").
 func atomicWrite(path string, b []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	w := getAtomicWriter(path)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".nusashell-*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	name := tmp.Name()
+	cleanup := func() {
+		_ = os.Remove(name)
+	}
+	if _, err := tmp.Write(b); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Chmod(name, 0o644); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(name, path); err != nil {
+		cleanup()
+		return err
+	}
+	return nil
 }
 
 // ---- conversations ----
@@ -390,55 +440,6 @@ func (s *Store) DeleteSkill(id string) error {
 		}
 	}
 	return fmt.Errorf("%w: skill %s", ErrNotFound, id)
-}
-
-// ---- mcp servers ----
-
-func (s *Store) ListMCP() []*domain.MCPServer {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]*domain.MCPServer, len(s.mcpServers))
-	for i, m := range s.mcpServers {
-		out[i] = clone(m)
-	}
-	return out
-}
-
-func (s *Store) GetMCP(id string) (*domain.MCPServer, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, m := range s.mcpServers {
-		if m.ID == id {
-			return clone(m), nil
-		}
-	}
-	return nil, fmt.Errorf("%w: mcp server %s", ErrNotFound, id)
-}
-
-func (s *Store) SaveMCP(m *domain.MCPServer) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	stored := clone(m)
-	for i, existing := range s.mcpServers {
-		if existing.ID == m.ID {
-			s.mcpServers[i] = stored
-			return s.writeJSON("mcp-servers.json", s.mcpServers)
-		}
-	}
-	s.mcpServers = append(s.mcpServers, stored)
-	return s.writeJSON("mcp-servers.json", s.mcpServers)
-}
-
-func (s *Store) DeleteMCP(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i, m := range s.mcpServers {
-		if m.ID == id {
-			s.mcpServers = append(s.mcpServers[:i], s.mcpServers[i+1:]...)
-			return s.writeJSON("mcp-servers.json", s.mcpServers)
-		}
-	}
-	return fmt.Errorf("%w: mcp server %s", ErrNotFound, id)
 }
 
 // ---- memory ----

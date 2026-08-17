@@ -25,5 +25,5 @@ test('Settings exposes the Go-supported Electron parity controls', () => {
 test('WebSocket reconnect is an explicit persisted preference', () => {
   assert.match(rpc, /export function setAutoReconnect\(enabled\)/);
   assert.match(rpc, /if \(!autoReconnect \|\| reconnectTimer/);
-  assert.match(rpc, /localStorage\.setItem\('nusashell\.autoReconnect'/);
+  assert.match(rpc, /lsSet\('nusashell\.autoReconnect'/);
 });
