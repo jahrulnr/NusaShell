@@ -129,7 +129,7 @@ func TestInterruptTurnKeepsReasoning(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	app.interruptTurn(run, "m1", streamedTurnRound{Content: "hello", Reasoning: "think"}, ChatUsage{OutputTokens: 4}, "model-x")
+	app.interruptTurn(run, "m1", streamedTurnRound{Content: "hello", Reasoning: "think"}, ChatUsage{InputTokens: 100, OutputTokens: 4}, ChatUsage{InputTokens: 100, OutputTokens: 4}.ContextTokens(), "model-x")
 
 	got := conv.Messages[0]
 	if got.Content != "hello" || got.Reasoning != "think" || got.Status != domain.StatusInterrupted {
@@ -137,6 +137,9 @@ func TestInterruptTurnKeepsReasoning(t *testing.T) {
 	}
 	if got.Model != "model-x" {
 		t.Fatalf("model = %q", got.Model)
+	}
+	if conv.ContextTokens != 104 {
+		t.Fatalf("interrupt should persist context tokens (input+output), got %d", conv.ContextTokens)
 	}
 }
 

@@ -443,6 +443,11 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 	})
 
 	var totalUsage ChatUsage
+	// lastUsage holds the most recent round's provider usage. Its
+	// ContextTokens() is the authoritative context fill for the whole turn
+	// (the final request re-sends the full history), unlike totalUsage which
+	// sums per-round tokens for the ↑/↓ display tags.
+	var lastUsage ChatUsage
 	currentMsgID := asstMsgID
 	round := 0
 	toolRounds := 0
@@ -469,9 +474,12 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 		injectHydration = false // only the first round after a user message gets hydration
 		continuation = false
 		totalUsage = mergeUsage(totalUsage, roundResult.Response.Usage)
+		if roundResult.Response.Usage.ContextTokens() > 0 {
+			lastUsage = roundResult.Response.Usage
+		}
 		if streamErr != nil {
 			if run.Ctx.Err() != nil {
-				a.interruptTurn(run, currentMsgID, roundResult, totalUsage, model)
+				a.interruptTurn(run, currentMsgID, roundResult, totalUsage, lastUsage.ContextTokens(), model)
 				return false, ""
 			}
 			// Codex account failover with circuit breaker:
@@ -573,7 +581,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 
 		if err := a.executeTurnTools(run, currentMsgID, roundResult.Response.ToolCalls, supportsVision, settings); err != nil {
 			if run.Ctx.Err() != nil {
-				a.interruptTurn(run, currentMsgID, roundResult, totalUsage, model)
+				a.interruptTurn(run, currentMsgID, roundResult, totalUsage, lastUsage.ContextTokens(), model)
 				return false, ""
 			}
 			a.failTurn(run, currentMsgID, err)
@@ -601,7 +609,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 		}
 	}
 
-	if err := a.finishTurn(run, asstMsgID, model, totalUsage, autoContinueIndex); err != nil {
+	if err := a.finishTurn(run, asstMsgID, model, totalUsage, lastUsage.ContextTokens(), autoContinueIndex); err != nil {
 		a.failTurn(run, asstMsgID, err)
 		return false, ""
 	}
@@ -1057,7 +1065,7 @@ func (a *App) failStreamTurn(run *TurnRun, msgID, model string, round streamedTu
 	})
 }
 
-func (a *App) interruptTurn(run *TurnRun, msgID string, round streamedTurnRound, usage ChatUsage, model string) {
+func (a *App) interruptTurn(run *TurnRun, msgID string, round streamedTurnRound, usage ChatUsage, contextTokens int, model string) {
 	a.log("warn", "agent", "turn interrupted: %s", run.ID)
 	if c, e := a.Conversations.Get(run.ConversationID); e == nil {
 		a.updateMessage(c, msgID, func(m *domain.Message) {
@@ -1072,12 +1080,16 @@ func (a *App) interruptTurn(run *TurnRun, msgID string, round streamedTurnRound,
 			}
 		})
 		c.Status = "idle"
+		if contextTokens > 0 {
+			c.ContextTokens = int64(contextTokens)
+		}
 		_ = a.Conversations.Save(c)
 	}
 	a.discardQueuedSteer(run)
 	a.Bus.Emit(contracts.EventTurnDone, contracts.TurnDoneEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, MessageID: msgID, Model: model,
-		Usage: &contracts.UsageDTO{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens},
+		Usage:         &contracts.UsageDTO{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens},
+		ContextTokens: contextTokens,
 	})
 }
 

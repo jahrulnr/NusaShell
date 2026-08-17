@@ -78,6 +78,7 @@ func convDTO(c *domain.Conversation) contracts.ConversationDTO {
 		Workspace:       c.Workspace,
 		ChunkCount:      c.ChunkCount,
 		EstimatedTokens: c.EstimatedTokens,
+		ContextTokens:   c.ContextTokens,
 	}
 }
 
