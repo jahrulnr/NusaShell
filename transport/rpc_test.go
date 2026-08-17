@@ -85,7 +85,7 @@ func TestRPCAppInfo(t *testing.T) {
 	if err := json.Unmarshal(res.Result, &info); err != nil {
 		t.Fatal(err)
 	}
-	if info.Name != "NusaShell Light" || info.Version != "test" {
+	if info.Name != "NusaShell" || info.Version != "test" {
 		t.Fatalf("app info = %+v", info)
 	}
 	if len(info.Transports) != 3 {

@@ -284,7 +284,7 @@ func run() error {
 	}
 
 	go func() {
-		logger.Info("nusashell-light listening", "addr", httpServer.Addr, "data_dir", dataDir, "dev", dev, "version", version)
+		logger.Info("nusashell listening", "addr", httpServer.Addr, "data_dir", dataDir, "dev", dev, "version", version)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("server failed", "error", err)
 			stop()

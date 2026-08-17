@@ -1,7 +1,7 @@
 # NusaShell Automation Engine — Scheduling, Events, and Dynamic Workflows
 
 Status: Implemented as an extension of the CI runner
-Target: NusaShell Light / `jahrulnr/NusaShell-agent`
+Target: NusaShell / `jahrulnr/NusaShell`
 
 ## 1. Split of responsibilities
 

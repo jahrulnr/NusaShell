@@ -1,4 +1,4 @@
-// NusaShell Light — application shell. Router + transport wiring.
+// NusaShell — application shell. Router + transport wiring.
 
 import { rpc, on, connectWS } from './rpc.js';
 import { initHome, refresh as refreshHome } from './views/home.js';
@@ -149,7 +149,7 @@ async function boot() {
   try {
     const info = await rpc('app.info', {}, { timeoutMs: 4000 });
     document.getElementById('storage-path').textContent = info.data_dir || '';
-    document.title = `NusaShell Light ${info.version ?? ''}`.trim();
+    document.title = `NusaShell ${info.version ?? ''}`.trim();
   } catch (err) {
     setConnection('offline');
   }

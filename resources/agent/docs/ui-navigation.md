@@ -1,8 +1,8 @@
 # Navigation and Shell Chrome
 
-Global chrome surrounding every NusaShell Light view: title bar, sidebar, connection status, and storage indicator.
+Global chrome surrounding every NusaShell view: title bar, sidebar, connection status, and storage indicator.
 
-**How to open:** Always visible when the NusaShell Light window is open.
+**How to open:** Always visible when the NusaShell window is open.
 
 ## Title bar
 

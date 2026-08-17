@@ -1,5 +1,5 @@
 {
-  "name": "nusashell-light-e2e",
+  "name": "nusashell-e2e",
   "private": true,
   "type": "module",
   "scripts": {

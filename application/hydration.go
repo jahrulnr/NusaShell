@@ -127,7 +127,7 @@ func (b *HydrationBuilder) readRuntimeContext() hydrationSlot {
 		ctx.CurrentDate = time.Now().UTC().Format(time.RFC3339)
 	}
 	if ctx.Environment == "" {
-		ctx.Environment = "nusashell-light"
+		ctx.Environment = "nusashell"
 	}
 	if ctx.RuntimeOS == "" {
 		ctx.RuntimeOS = runtime.GOOS + "/" + runtime.GOARCH
@@ -353,7 +353,7 @@ func randomNonce() string {
 func DefaultRuntimeContext(workspace string) RuntimeContextSnapshot {
 	env := os.Getenv("NUSASHELL_ENV")
 	if env == "" {
-		env = "nusashell-light"
+		env = "nusashell"
 	}
 	return RuntimeContextSnapshot{
 		CurrentDate: time.Now().UTC().Format(time.RFC3339),

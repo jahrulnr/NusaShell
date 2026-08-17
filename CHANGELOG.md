@@ -113,7 +113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **NusaShell Light Go port.** A self-contained Go application serves an
+- **NusaShell Go port.** A self-contained Go application serves an
   embedded native-JavaScript frontend with multi-conversation agent chat,
   Messages, Responses, and Chat provider formats, MCP, skills, memory,
   document search, and local credential storage.

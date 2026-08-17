@@ -4,7 +4,7 @@ import "strings"
 
 // KnownEmbeddingModels is a provider-agnostic allowlist of public embedding
 // model names (without the provider prefix). If a provider's /models or
-// /embeddings/models response contains one of these names, NusaShell-go can
+// /embeddings/models response contains one of these names, NusaShell can
 // pre-mark the model as an embedding model without relying on fragile name
 // heuristics (e.g. looking for the substring "embed").
 //

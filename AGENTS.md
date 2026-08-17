@@ -1,4 +1,4 @@
-# AGENTS.md - NusaShell Light
+# AGENTS.md - NusaShell
 
 Instructions for humans and coding agents working in this repository.
 

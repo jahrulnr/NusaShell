@@ -1,6 +1,6 @@
-# NusaShell Light
+# NusaShell
 
-NusaShell Light is a local, personal AI shell written in Go. It delivers the
+NusaShell is a local, personal AI shell written in Go. It delivers the
 NusaShell conversation experience in a single binary: an embedded native
 JavaScript frontend, multi-conversation agent chat, provider adapters, MCP,
 skills, memory, and documentation tools.
@@ -41,8 +41,8 @@ Requirements:
   provider is already available). Windows and macOS use their system dialogs.
 
 ```bash
-git clone git@github.com:jahrulnr/NusaShell-agent.git
-cd NusaShell-agent
+git clone git@github.com:jahrulnr/NusaShell.git
+cd NusaShell
 
 # Keep the local UI private to this machine.
 export NUSASHELL_HOST=127.0.0.1
@@ -83,7 +83,7 @@ through RPC, WebSocket events, application services, and local persistence.
 | --- | --- | --- |
 | `NUSASHELL_HOST` | `127.0.0.1` | HTTP listen host |
 | `NUSASHELL_PORT` | `9999` | HTTP listen port |
-| `NUSASHELL_DATA_DIR` | platform config directory plus `nusashell-go` | Local data directory |
+| `NUSASHELL_DATA_DIR` | platform config directory plus `nusashell` | Local data directory |
 | `NUSASHELL_DEV` | unset | Serve `frontend/` directly from disk for development |
 
 Use `NUSASHELL_DEV=1` when iterating on the UI. The server keeps the same
@@ -115,4 +115,4 @@ repository template at [`.github/pull_request_template.md`](.github/pull_request
 
 ## License
 
-NusaShell Light is released under the [MIT License](LICENSE).
+NusaShell is released under the [MIT License](LICENSE).

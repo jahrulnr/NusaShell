@@ -1,6 +1,6 @@
 # Settings
 
-Control how this local NusaShell Light instance runs agent turns, manages context, picks embedding models, and presents the workspace. Browser-only preferences stay in local storage.
+Control how this local NusaShell instance runs agent turns, manages context, picks embedding models, and presents the workspace. Browser-only preferences stay in local storage.
 
 **How to open:** Click the settings icon in the title bar, or press the Settings shortcut.
 

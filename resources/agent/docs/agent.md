@@ -138,7 +138,7 @@ capability flag from the model catalog (models.dev / OpenRouter).
   and instructs the model to call the `read_image` tool with `file_path` to
   load the image.
   Example: `[image content omitted — this model does not support image
-  input. Image file(s): /home/user/.config/nusashell-light/attachments/conv_1/cat.png.
+  input. Image file(s): /home/user/.config/nusashell/attachments/conv_1/cat.png.
   Call the read_image tool with file_path set to one of the absolute paths
   above to load the image into your context.]`. This prevents provider
   errors when switching from a vision model to a text-only model

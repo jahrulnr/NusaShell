@@ -1,7 +1,7 @@
 # NusaShell CI Runner — Technical Design
 
 Status: Implemented (local executor)
-Target: NusaShell Light / `jahrulnr/NusaShell-agent`
+Target: NusaShell / `jahrulnr/NusaShell`
 
 ## 1. Summary
 

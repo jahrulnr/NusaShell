@@ -1,4 +1,4 @@
-# NusaShell Light (Go port) developer tooling.
+# NusaShell (Go) developer tooling.
 #
 # Gates follow the repository verification baseline:
 # gofmt, go test, go test -race, go vet, go build.

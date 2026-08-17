@@ -15,7 +15,7 @@ type Request struct {
 }
 
 // ErrorCode classifies RPC failures. There is deliberately no auth/ratelimit
-// code: NusaShell Light is a personal/community shell without a security layer.
+// code: NusaShell is a personal/community shell without a security layer.
 type ErrorCode string
 
 const (

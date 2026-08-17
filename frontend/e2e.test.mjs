@@ -175,7 +175,7 @@ function fakeLLM(port) {
 test('embedded frontend completes one representative flow through the Go backend', async (t) => {
   assert.ok(NativeWebSocket, 'Node WebSocket support is required for the E2E event stream');
   const port = await freePort();
-  const dataDir = await mkdtemp(join(tmpdir(), 'nusashell-light-e2e-'));
+  const dataDir = await mkdtemp(join(tmpdir(), 'nusashell-e2e-'));
   const baseURL = `http://127.0.0.1:${port}/`;
   const server = await buildAndStartServer(port, dataDir);
   let rpcModule;

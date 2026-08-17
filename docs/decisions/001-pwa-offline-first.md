@@ -1,10 +1,10 @@
 ---
-name: PWA dan Mode Offline-First untuk NusaShell Light
+name: PWA dan Mode Offline-First untuk NusaShell
 description: Desain PWA yang menjaga shell, riwayat lokal, draft, dan antrean tetap berguna saat backend Go tidak tersedia tanpa memindahkan kredensial atau host tools ke browser.
 tag: pwa, offline-first, indexeddb, service-worker, synchronization, nusashell
 ---
 
-# ADR-001: PWA dan mode offline-first untuk NusaShell Light
+# ADR-001: PWA dan mode offline-first untuk NusaShell
 
 ## Status
 
@@ -16,7 +16,7 @@ Proposed
 
 ## Context
 
-NusaShell Light sudah memiliki frontend native ES module yang disajikan dari
+NusaShell sudah memiliki frontend native ES module yang disajikan dari
 satu origin oleh binary Go. Ini modal yang baik untuk PWA: tidak ada bundler
 produksi, aset mudah diaudit, dan semua tampilan berbicara ke satu kontrak
 `/rpc`. Namun saat ini browser tetap bergantung penuh pada proses Go:
@@ -135,7 +135,7 @@ when `navigator.serviceWorker` exists. The manifest uses:
 ```json
 {
   "id": "/",
-  "name": "NusaShell Light",
+  "name": "NusaShell",
   "short_name": "NusaShell",
   "start_url": "/#agent",
   "scope": "/",

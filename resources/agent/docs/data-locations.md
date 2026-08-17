@@ -1,11 +1,11 @@
 # Data locations
 
 All application data lives under a single data directory. The default is the
-platform config directory plus `nusashell-light`:
+platform config directory plus `nusashell`:
 
-- Linux:   `~/.config/nusashell-light`
-- macOS:   `~/Library/Application Support/nusashell-light`
-- Windows: `%APPDATA%\nusashell-light`
+- Linux:   `~/.config/nusashell`
+- macOS:   `~/Library/Application Support/nusashell`
+- Windows: `%APPDATA%\nusashell`
 
 Override with the `NUSASHELL_DATA_DIR` environment variable.
 

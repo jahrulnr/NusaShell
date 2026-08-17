@@ -68,7 +68,7 @@ func TestChatMessagesPlaceholderIncludesFilePath(t *testing.T) {
 			Role:    domain.RoleUser,
 			Content: "What's in this image?",
 			Attachments: []domain.Attachment{
-				{Type: "image", Name: "photo.jpg", MediaType: "image/jpeg", DataURL: "data:image/jpeg;base64,/9j/4AAQ=", FilePath: "/home/user/.config/nusashell-light/attachments/conv_1/photo.jpg"},
+				{Type: "image", Name: "photo.jpg", MediaType: "image/jpeg", DataURL: "data:image/jpeg;base64,/9j/4AAQ=", FilePath: "/home/user/.config/nusashell/attachments/conv_1/photo.jpg"},
 			},
 		},
 		{ID: "a1", Role: domain.RoleAssistant, Content: "ok", Status: domain.StatusDone},
@@ -78,7 +78,7 @@ func TestChatMessagesPlaceholderIncludesFilePath(t *testing.T) {
 	userMsg := got[0]
 	// The placeholder must include the absolute file path so file-based
 	// tools can access the image directly.
-	if !strings.Contains(userMsg.Content, "/home/user/.config/nusashell-light/attachments/conv_1/photo.jpg") {
+	if !strings.Contains(userMsg.Content, "/home/user/.config/nusashell/attachments/conv_1/photo.jpg") {
 		t.Errorf("placeholder should include absolute file path, got: %q", userMsg.Content)
 	}
 }

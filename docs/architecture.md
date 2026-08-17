@@ -1,6 +1,6 @@
-# NusaShell Light — architecture
+# NusaShell — architecture
 
-NusaShell Light is a local, personal AI shell: a Go binary that serves an
+NusaShell is a local, personal AI shell: a Go binary that serves an
 embedded vanilla JS/HTML/CSS frontend and brokers conversations with
 Messages / Responses / Chat format providers, skills, memory, docs and MCP
 plugins. There is no security layer by design (no auth, no rate limiting);

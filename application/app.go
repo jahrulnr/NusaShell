@@ -1029,7 +1029,7 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 func (a *App) handleAppInfo() (any, *contracts.RPCError) {
 	settings := a.Settings.Get()
 	return contracts.AppInfoResult{
-		Name:       "NusaShell Light",
+		Name:       "NusaShell",
 		Version:    a.Version,
 		DataDir:    a.DataDir,
 		Transports: []string{"http", "ws", "sse"},

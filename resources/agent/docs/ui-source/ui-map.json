@@ -2,8 +2,8 @@
   "views": {
     "navigation": {
       "title": "Navigation and Shell Chrome",
-      "purpose": "Global chrome surrounding every NusaShell Light view: title bar, sidebar, connection status, and storage indicator.",
-      "howToOpen": "Always visible when the NusaShell Light window is open.",
+      "purpose": "Global chrome surrounding every NusaShell view: title bar, sidebar, connection status, and storage indicator.",
+      "howToOpen": "Always visible when the NusaShell window is open.",
       "chrome": true,
       "sections": [
         {
@@ -512,7 +512,7 @@
     },
     "settings": {
       "title": "Settings",
-      "purpose": "Control how this local NusaShell Light instance runs agent turns, manages context, picks embedding models, and presents the workspace. Browser-only preferences stay in local storage.",
+      "purpose": "Control how this local NusaShell instance runs agent turns, manages context, picks embedding models, and presents the workspace. Browser-only preferences stay in local storage.",
       "howToOpen": "Click the settings icon in the title bar, or press the Settings shortcut.",
       "sections": [
         {
