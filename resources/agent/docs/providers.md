@@ -91,3 +91,24 @@ reports latency and the model count. No completion is sent, so the probe
 never costs tokens, works before importing models, and does not trip
 model-routing failures on the upstream — a broken model only surfaces when
 you actually chat with it.
+
+## ACP subagents
+
+ACP (Agent Client Protocol) agents are **not** chat providers. They never
+appear in the Agent composer model picker. You register them in Providers
+as a generic subprocess: **command**, **args**, **env**, and a label.
+
+- Command is immutable after save (delete and recreate to change the binary).
+- Probe runs `initialize` and caches advertised auth methods.
+- Authenticate uses a method id the agent advertised — nothing is hardcoded
+  per vendor.
+- Refresh catalog opens a throwaway `session/new` to import modes and models.
+- Mode IDs stay vendor-specific; NusaShell maps them onto internal risk
+  tiers (`read_only`, `edit_confirmed`, `bypass`). Unknown modes are
+  read-only. New sessions start on the strictest advertised mode. Bypass is
+  never the default — promote it from the live subagent UI.
+- Env values stay in `acp-agents.json`. List/get RPC returns **keys only**.
+
+The parent agent spawns these binaries with `subagent` (optional `count` for
+parallel sessions). You can peek, steer, stop, change mode, and answer
+permission prompts from the Agent dock, drawer, or popup.

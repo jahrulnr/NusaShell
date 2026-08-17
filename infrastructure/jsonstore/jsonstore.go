@@ -38,6 +38,7 @@ type Store struct {
 	mu            sync.RWMutex
 	conversations map[string]*domain.Conversation
 	providers     []*domain.Provider
+	acpAgents     []*domain.AcpAgent
 	skills        []*domain.Skill
 	memories      []*domain.MemoryEntry
 	learningEdges []*domain.LearningEdge
@@ -91,6 +92,9 @@ func (s *Store) load() error {
 		return err
 	}
 	s.migrateProviderKinds()
+	if err := s.loadJSON("acp-agents.json", &s.acpAgents); err != nil {
+		return err
+	}
 	if err := s.loadJSON("skills.json", &s.skills); err != nil {
 		return err
 	}
@@ -391,6 +395,55 @@ func (s *Store) DeleteProvider(id string) error {
 		}
 	}
 	return fmt.Errorf("%w: provider %s", ErrNotFound, id)
+}
+
+// ---- ACP agents ----
+
+func (s *Store) ListAcpAgents() []*domain.AcpAgent {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*domain.AcpAgent, len(s.acpAgents))
+	for i, a := range s.acpAgents {
+		out[i] = clone(a)
+	}
+	return out
+}
+
+func (s *Store) GetAcpAgent(id string) (*domain.AcpAgent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, a := range s.acpAgents {
+		if a.ID == id {
+			return clone(a), nil
+		}
+	}
+	return nil, fmt.Errorf("%w: acp agent %s", ErrNotFound, id)
+}
+
+func (s *Store) SaveAcpAgent(a *domain.AcpAgent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stored := clone(a)
+	for i, existing := range s.acpAgents {
+		if existing.ID == a.ID {
+			s.acpAgents[i] = stored
+			return s.writeJSON("acp-agents.json", s.acpAgents)
+		}
+	}
+	s.acpAgents = append(s.acpAgents, stored)
+	return s.writeJSON("acp-agents.json", s.acpAgents)
+}
+
+func (s *Store) DeleteAcpAgent(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, a := range s.acpAgents {
+		if a.ID == id {
+			s.acpAgents = append(s.acpAgents[:i], s.acpAgents[i+1:]...)
+			return s.writeJSON("acp-agents.json", s.acpAgents)
+		}
+	}
+	return fmt.Errorf("%w: acp agent %s", ErrNotFound, id)
 }
 
 // ---- skills ----

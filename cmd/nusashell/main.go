@@ -17,6 +17,7 @@ import (
 
 	"nusashell/application"
 	"nusashell/frontend"
+	"nusashell/infrastructure/acpruntime"
 	"nusashell/infrastructure/ai"
 	"nusashell/infrastructure/ai/codex"
 	"nusashell/infrastructure/ai/modelcatalog"
@@ -173,51 +174,56 @@ func run() error {
 	}
 	pluginInstaller := plugininstall.New(pluginStore, logger)
 	pluginRuntime := pluginruntime.New(pluginStore, mcpManager)
+	acpRuntime := acpruntime.New()
 	// Attachment store: saves image/file attachments to disk so file-based
 	// tools can access them by absolute path.
 	attachmentStore, err := attachmentfs.New(filepath.Join(dataDir, "attachments"))
 	if err != nil {
 		slog.Warn("attachment store init failed", "error", err)
 	}
-	app := application.NewApp(application.Deps{
-		Version:         version,
-		DataDir:         dataDir,
-		Conversations:   store,
-		Providers:       providerStore,
-		Credentials:     credentials,
+	tb := &tools.Toolbox{
 		Skills:          skillStore,
 		Memory:          &jsonstore.Memory{S: store},
-		LearningEdges:   &jsonstore.LearningEdges{S: store},
-		Todos:           todoStore,
+		Docs:            docSource,
 		Plugins:         pluginStore,
 		PluginInstaller: pluginInstaller,
-		Logs:            &jsonstore.Logs{S: store},
+		Todos:           todoStore,
+		Searcher:        searcher,
 		Settings:        &jsonstore.Settings{S: store},
-		Attachments:     attachmentStore,
-		Docs:            docSource,
-		Bus:             bus,
+		Credentials:     credentials,
 		AskQuestions:    askService,
-		Toolbox: &tools.Toolbox{
-			Skills:          skillStore,
-			Memory:          &jsonstore.Memory{S: store},
-			Docs:            docSource,
-			Plugins:         pluginStore,
-			PluginInstaller: pluginInstaller,
-			Todos:           todoStore,
-			Searcher:        searcher,
-			Settings:        &jsonstore.Settings{S: store},
-			Credentials:     credentials,
-			AskQuestions:    askService,
-			MCP:             mcpManager,
-		},
+		MCP:             mcpManager,
+	}
+	app := application.NewApp(application.Deps{
+		Version:                     version,
+		DataDir:                     dataDir,
+		Conversations:               store,
+		Providers:                   providerStore,
+		Credentials:                 credentials,
+		Skills:                      skillStore,
+		Memory:                      &jsonstore.Memory{S: store},
+		LearningEdges:               &jsonstore.LearningEdges{S: store},
+		Todos:                       todoStore,
+		Plugins:                     pluginStore,
+		PluginInstaller:             pluginInstaller,
+		Logs:                        &jsonstore.Logs{S: store},
+		Settings:                    &jsonstore.Settings{S: store},
+		Attachments:                 attachmentStore,
+		Docs:                        docSource,
+		Bus:                         bus,
+		AskQuestions:                askService,
+		Toolbox:                     tb,
 		MCPToolbox:                  mcpManager,
 		Factory:                     ai.NewFactory(credentials),
 		EmbedderFactory:             ai.NewEmbedderFactory(),
 		EmbeddingModelListerFactory: ai.NewEmbeddingModelListerFactory(),
 		ModelCatalog:                modelcatalog.New(nil),
 		WorkspacePicker:             workspacepicker.Zenity{},
+		AcpAgents:                   &jsonstore.AcpAgents{S: store},
+		Acp:                         acpRuntime,
 		Logger:                      logger,
 	})
+	tb.Acp = app
 	// Wire Codex runtime + OAuth adapters (optional — nil-safe if unavailable)
 	if rt, err := codex.NewRuntimeAdapter(); err == nil {
 		app.CodexRuntime = rt

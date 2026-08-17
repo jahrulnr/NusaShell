@@ -5,11 +5,20 @@ import { initHome, refresh as refreshHome } from './views/home.js';
 import { initAgent, refresh as refreshAgent } from './views/agent.js';
 import { initSkills, refresh as refreshSkills } from './views/skills.js';
 import { initPlugins, refresh as refreshPlugins, closeOverlays as closePluginOverlays } from './views/plugins.js';
-import { initProviders, refresh as refreshProviders } from './views/providers.js';
+import { closeAcpOverlays } from './views/agent/subagents.js';
+import { initProviders as initLlmProviders, refresh as refreshLlmProviders } from './views/providers.js';
+import { initAcpProviders, refreshAcpProviders } from './views/providers-acp.js';
 import { initLogs, refresh as refreshLogs } from './views/logs.js';
 import { initSettings, refresh as refreshSettings } from './views/settings.js';
 import { initLearning, refresh as refreshLearning } from './views/learning.js';
 import { toast, dismissOpenDialogs } from './ui.js';
+
+async function initProviders() {
+  await Promise.all([initLlmProviders(), initAcpProviders()]);
+}
+async function refreshProviders() {
+  await Promise.all([refreshLlmProviders(), refreshAcpProviders()]);
+}
 
 const viewRefresh = {
   home: refreshHome,
@@ -68,6 +77,7 @@ let currentView = null;
 // window to close here.)
 function closeFloatingOverlays() {
   try { closePluginOverlays(); } catch { /* view not ready */ }
+  try { closeAcpOverlays({ keepPermission: true }); } catch { /* view not ready */ }
   dismissOpenDialogs();
 }
 

@@ -18,6 +18,15 @@ func (p *Providers) Get(id string) (*domain.Provider, error) {
 func (p *Providers) Save(v *domain.Provider) error { return p.S.SaveProvider(v) }
 func (p *Providers) Delete(id string) error        { return p.S.DeleteProvider(id) }
 
+type AcpAgents struct{ S *Store }
+
+func (a *AcpAgents) List() []*domain.AcpAgent { return a.S.ListAcpAgents() }
+func (a *AcpAgents) Get(id string) (*domain.AcpAgent, error) {
+	return a.S.GetAcpAgent(id)
+}
+func (a *AcpAgents) Save(v *domain.AcpAgent) error { return a.S.SaveAcpAgent(v) }
+func (a *AcpAgents) Delete(id string) error        { return a.S.DeleteAcpAgent(id) }
+
 type Skills struct{ S *Store }
 
 func (k *Skills) List() []*domain.Skill { return k.S.ListSkills() }

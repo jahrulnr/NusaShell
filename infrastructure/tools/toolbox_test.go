@@ -849,3 +849,44 @@ func TestSkillFilesUnsupported(t *testing.T) {
 		t.Fatalf("expected unsupported error, got %v", err)
 	}
 }
+
+type stubAcp struct {
+	agents []*domain.AcpAgent
+}
+
+func (s *stubAcp) SpawnSubagents(ctx context.Context, argsJSON []byte) (string, error) {
+	return `{"runs":[]}`, nil
+}
+func (s *stubAcp) SteerAcpRun(ctx context.Context, argsJSON []byte) (string, error) {
+	return "{}", nil
+}
+func (s *stubAcp) StopAcpRun(ctx context.Context, argsJSON []byte) (string, error) {
+	return "{}", nil
+}
+func (s *stubAcp) WaitAcpRun(ctx context.Context, argsJSON []byte) (string, error) {
+	return "{}", nil
+}
+func (s *stubAcp) EnabledAcpAgents() []*domain.AcpAgent { return s.agents }
+
+func TestListToolsOmitsSubagentWhenNoAgents(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	for _, ti := range tb.ListTools() {
+		if strings.HasPrefix(ti.Name, "subagent") {
+			t.Fatalf("subagent tools must stay hidden without ACP agents, found %q", ti.Name)
+		}
+	}
+}
+
+func TestListToolsIncludesSubagentWhenAgentsEnabled(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	tb.Acp = &stubAcp{agents: []*domain.AcpAgent{{ID: "acp_1", Name: "Cursor", Enabled: true}}}
+	names := map[string]bool{}
+	for _, ti := range tb.ListTools() {
+		names[ti.Name] = true
+	}
+	for _, want := range []string{"subagent", "subagent_steer", "subagent_stop", "subagent_wait"} {
+		if !names[want] {
+			t.Fatalf("ListTools missing %q", want)
+		}
+	}
+}

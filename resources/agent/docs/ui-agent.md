@@ -1,6 +1,6 @@
 # Agent
 
-The default view: multi-conversation chat against any configured provider model. Each conversation keeps its own history on disk and can use skills, memory, docs, and plugin-provided MCP tools.
+The default view: multi-conversation chat against any configured provider model. Each conversation keeps its own history on disk and can use skills, memory, docs, plugin-provided MCP tools, and spawned ACP subagents.
 
 **How to open:** Open NusaShell, or click the Agent item in the left sidebar.
 
@@ -70,7 +70,7 @@ Shows in-flight tool calls for the current turn, with one entry per MCP or built
 - **Composer stack** (`#agent-composer-stack`):
   - Section: Agent
   - Type: container
-  - Notes: Holds tool strip, todo strip, steer queue, and composer.
+  - Notes: Holds ACP dock, tool strip, todo strip, steer queue, and composer.
 
 - **Tool calls strip** (`#tool-job-strip`):
   - Section: Agent
@@ -90,6 +90,122 @@ Shows in-flight tool calls for the current turn, with one entry per MCP or built
 - **Tool calls meta** (`#tool-job-strip-meta`):
   - Section: Agent
   - Type: text
+
+## ACP subagent dock
+
+Appears above the composer when ACP subagents are live (or recently finished in this room). Each chip opens the right-hand drawer; the peek control opens a popup for one run. Drawer and popup support steer, stop, mode changes, and risk promotion. Permission prompts use a global overlay that stays visible across views.
+
+- **ACP subagent dock** (`#acp-dock`):
+  - Section: Agent
+  - Type: container
+  - Notes: Hidden until at least one live or recently finished ACP run exists.
+
+- **ACP dock toggle** (`#acp-dock-toggle`):
+  - Section: Agent
+  - Type: button
+  - Action: Collapse/expand the subagent chip list.
+
+- **ACP dock title** (`#acp-dock-title`):
+  - Section: Agent
+  - Type: text
+
+- **ACP dock meta** (`#acp-dock-meta`):
+  - Section: Agent
+  - Type: text
+
+- **Open ACP drawer** (`#acp-dock-open-drawer`):
+  - Section: Agent
+  - Type: button
+  - Action: Opens the right-hand multi-subagent drawer.
+
+- **ACP dock chips** (`#acp-dock-list`):
+  - Section: Agent
+  - Type: list
+
+## ACP live views
+
+The drawer lists every live spawn so you can switch between parallel subagents. The peek popup focuses one run. The permission overlay is fail-closed: timeout denies. Allow once, allow for this session, or deny.
+
+- **ACP drawer overlay** (`#acp-drawer-overlay`):
+  - Section: Agent
+  - Type: overlay
+  - Action: Click to close the subagent drawer.
+
+- **ACP subagent drawer** (`#acp-drawer`):
+  - Section: Agent
+  - Type: drawer
+  - Notes: Wider than the plugin drawer so a live transcript, steer box, and mode chips fit.
+
+- **Close ACP drawer** (`#acp-drawer-close`):
+  - Section: Agent
+  - Type: button
+  - Action: Closes the subagent drawer.
+
+- **ACP drawer title** (`#acp-drawer-title`):
+  - Section: Agent
+  - Type: text
+
+- **ACP drawer subtitle** (`#acp-drawer-subtitle`):
+  - Section: Agent
+  - Type: text
+
+- **ACP drawer body** (`#acp-drawer-body`):
+  - Section: Agent
+  - Type: container
+
+- **ACP peek overlay** (`#acp-popup-overlay`):
+  - Section: Agent
+  - Type: overlay
+  - Action: Click outside the dialog to close the peek popup.
+
+- **ACP peek popup** (`#acp-popup`):
+  - Section: Agent
+  - Type: dialog
+
+- **Close ACP peek** (`#acp-popup-close`):
+  - Section: Agent
+  - Type: button
+  - Action: Closes the peek popup.
+
+- **ACP peek title** (`#acp-popup-title`):
+  - Section: Agent
+  - Type: text
+
+- **ACP peek body** (`#acp-popup-body`):
+  - Section: Agent
+  - Type: container
+
+- **ACP permission overlay** (`#acp-permission-overlay`):
+  - Section: Agent
+  - Type: overlay
+  - Notes: Global. Timeout denies. Stays visible if you leave the Agent view.
+
+- **ACP permission dialog** (`#acp-permission-dialog`):
+  - Section: Agent
+  - Type: dialog
+
+- **ACP permission title** (`#acp-permission-title`):
+  - Section: Agent
+  - Type: text
+
+- **ACP permission details** (`#acp-permission-body`):
+  - Section: Agent
+  - Type: container
+
+- **Deny ACP permission** (`#acp-permission-deny`):
+  - Section: Agent
+  - Type: button
+  - Action: Denies the pending tool. Fail-closed.
+
+- **Allow ACP permission for session** (`#acp-permission-allow-session`):
+  - Section: Agent
+  - Type: button
+  - Action: Allows this tool and auto-allows later permission prompts on the same run.
+
+- **Allow ACP permission once** (`#acp-permission-allow`):
+  - Section: Agent
+  - Type: button
+  - Action: Allows this tool call once.
 
 ## Task checklist
 

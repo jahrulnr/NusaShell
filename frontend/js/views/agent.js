@@ -20,7 +20,7 @@ import {
   toolTerminalMeta,
   toolTerminalOutput,
 } from './agent/render.js';
-import { createAskCard, sealAskCard, cancelAskCard } from './ask-card.js';
+import { bindSubagents, setSubagentConversation } from './agent/subagents.js';
 import { renderMermaidDiagrams } from '../mermaid-render.js';
 
 const state = {
@@ -116,6 +116,7 @@ export async function initAgent() {
   });
   bindRoomInfo({ getConversation: () => state.conversation });
   bindStripToggles();
+  bindSubagents({ getActiveConversationId: () => state.activeId });
   bindEvents();
   bindScrollPin();
   window.addEventListener('nusashell:preferred-model', (event) => {
@@ -316,6 +317,7 @@ async function openConversation(id) {
   saveRoomState(state.activeId);
   const token = ++state.conversationLoadToken;
   state.activeId = id;
+  setSubagentConversation(id);
   // the backend returns messages as a sibling of conversation
   const { conversation, messages } = await rpc('agent.conversations.get', { id });
   if (token !== state.conversationLoadToken) return;

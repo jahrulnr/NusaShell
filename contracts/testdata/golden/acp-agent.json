@@ -1,0 +1,35 @@
+{
+  "id": "acp_1",
+  "name": "Cursor",
+  "command": "cursor",
+  "args": [
+    "agent",
+    "acp"
+  ],
+  "env_keys": [
+    "CURSOR_API_KEY"
+  ],
+  "enabled": true,
+  "preferred_mode_id": "plan",
+  "capabilities": {
+    "load_session": false,
+    "has_modes": true,
+    "has_mcp": false,
+    "has_fs": true
+  },
+  "modes": [
+    {
+      "id": "plan",
+      "name": "Plan",
+      "risk_tier": "read_only"
+    }
+  ],
+  "models": [
+    {
+      "id": "auto",
+      "name": "auto",
+      "tier": "unclassified"
+    }
+  ],
+  "updated_at": "2026-08-17T00:00:00Z"
+}

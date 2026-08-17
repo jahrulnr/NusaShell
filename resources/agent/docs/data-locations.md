@@ -15,6 +15,7 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | --- | --- | --- |
 | `conversations/*.json` | one file per agent conversation | JSON |
 | `providers.json` | provider configs (no keys) | JSON |
+| `acp-agents.json` | ACP subagent configs (command/args/env; env values stored locally, keys only on the wire) | JSON |
 | `skills.json` | skill library | JSON |
 | `plugins/<id>/` | plugins (manual MCP servers and installed plugins): `manifest.json` + optional `ui/` | JSON + files |
 | `memories.jsonl` | agent memory entries | JSONL |

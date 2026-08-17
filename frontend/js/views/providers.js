@@ -32,6 +32,10 @@ function renderRegistry() {
   registry.style.display = detailId ? 'none' : '';
   detail.hidden = !detailId;
   document.getElementById('add-provider-btn').hidden = !!detailId;
+  const acpSection = document.getElementById('provider-acp-section');
+  const addAcp = document.getElementById('add-acp-agent-btn');
+  if (acpSection) acpSection.hidden = !!detailId;
+  if (addAcp) addAcp.hidden = !!detailId;
   registry.innerHTML = '';
   if (!providers.length) {
     registry.append(el('div', { class: 'empty-state', style: 'grid-column:1/-1' },

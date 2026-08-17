@@ -25,11 +25,28 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `web_search` | search the web across Brave, Startpage, Wikipedia, and GitHub; returns ranked results with title, URL, and snippet |
 | `web_fetch` | fetch a URL and return readable text; supports HTML, JSON (pretty-printed), XML/RSS/Atom, Markdown, CSV, and plain text with newlines preserved; collects links and selected response headers; honors `max_bytes`; surfaces `Retry-After` on 429/503 and structured JSON error bodies |
 | `web_answer` | get a web-grounded answer via an LLM with built-in web search (only available when an answer-provider API key is configured) |
+| `subagent` | spawn 1–6 ACP coding-agent sessions (only listed when at least one ACP agent is enabled in Providers) |
+| `subagent_steer` | queue an extra instruction on a live ACP run |
+| `subagent_stop` | cancel a live ACP run (pending permissions fail closed) |
+| `subagent_wait` | wait for an async ACP run to finish |
 
 The system prompt advertises the same set: `skill_list`, `skill_search`,
 `skill_read`, `memory_*`, `docs_*`, `mcp_list`, `tool_list`, `tool_search`,
 `tool_schema`, `read_image`, `web_search`, `web_fetch`,
 `web_answer` (when available), plus `mcp__<server>__<tool>` for each enabled MCP server.
+When at least one ACP agent is enabled, the toolbox also advertises `subagent`,
+`subagent_steer`, `subagent_stop`, and `subagent_wait`. ACP agents do not receive
+this conversation, NusaShell MCP plugins, or shell meta-tools.
+
+## ACP subagents
+
+`subagent` fans a self-contained brief out to 1–6 parallel ACP sessions
+(process-wide cap 8 live runs). Pass absolute paths. `workspace` overrides the
+conversation workspace for new spawns only — an already-running session keeps
+the directory it started with. `async: true` returns run ids immediately;
+otherwise the tool waits for each spawn. Permission prompts are fail-closed
+(timeout = deny). The user can peek, steer, stop, and promote risk from the
+Agent dock / drawer / popup.
 
 ## Native web research (searchwire)
 

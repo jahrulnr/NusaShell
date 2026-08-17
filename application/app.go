@@ -50,6 +50,8 @@ type App struct {
 	CodexUsage                  CodexUsage
 	CodexCLIAuth                CodexCLIAuthImporter
 	CodexRouter                 *CodexAccountRouter
+	AcpAgents                   AcpAgentStore
+	Acp                         AcpRuntime
 	retrySleeper                RetrySleeper
 
 	// learningMu guards lazy init of learningSearcher and graphService,
@@ -228,6 +230,8 @@ type Deps struct {
 	ModelCatalog                *modelcatalog.Catalog       // optional; nil = skip enrichment from models.dev
 	WorkspacePicker             WorkspacePicker
 	RetrySleeper                RetrySleeper
+	AcpAgents                   AcpAgentStore
+	Acp                         AcpRuntime
 	// Logger is an optional structured logger for crash recovery from
 	// fire-and-forget goroutines. Nil = slog.Default().
 	Logger *slog.Logger
@@ -265,6 +269,8 @@ func NewApp(deps Deps) *App {
 		EmbeddingModelListerFactory: deps.EmbeddingModelListerFactory,
 		WorkspacePicker:             deps.WorkspacePicker,
 		ModelCatalog:                deps.ModelCatalog,
+		AcpAgents:                   deps.AcpAgents,
+		Acp:                         deps.Acp,
 		retrySleeper:                deps.RetrySleeper,
 		Logger:                      deps.Logger,
 		runs:                        map[string]*TurnRun{},
@@ -282,6 +288,7 @@ func NewApp(deps Deps) *App {
 			app.Bus.Emit(contracts.EventAskPending, askPendingEvent(conversationID, runID, callID, req))
 		})
 	}
+	app.wireAcpCallbacks()
 	// Wire the lifecycle manager (decay + prune). Started by StartLifecycle,
 	// stopped by CloseLifecycle.
 	if deps.Memory != nil {
@@ -501,6 +508,9 @@ func (a *App) CloseLifecycle() {
 // in use" errors from the embedding cache and trajectory log handles.
 func (a *App) Close() {
 	a.CloseLifecycle()
+	if a.Acp != nil {
+		a.Acp.Close()
+	}
 	if a.EmbeddingCache != nil {
 		_ = a.EmbeddingCache.Close()
 	}
@@ -875,6 +885,86 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 			return nil, rpcErr
 		}
 		return a.handleSettingsSet(req)
+	case contracts.MethodAcpAgentsList:
+		return a.handleAcpAgentsList()
+	case contracts.MethodAcpAgentsSave:
+		var req contracts.AcpAgentSaveRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpAgentsSave(req)
+	case contracts.MethodAcpAgentsDelete:
+		var req contracts.AcpAgentIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpAgentsDelete(req)
+	case contracts.MethodAcpAgentsProbe:
+		var req contracts.AcpAgentIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpAgentsProbe(req)
+	case contracts.MethodAcpAgentsAuthenticate:
+		var req contracts.AcpAuthenticateRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpAgentsAuthenticate(req)
+	case contracts.MethodAcpAgentsRefreshCatalog:
+		var req contracts.AcpAgentIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpAgentsRefreshCatalog(req)
+	case contracts.MethodAcpRunsList:
+		var req contracts.AcpRunsListRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpRunsList(req)
+	case contracts.MethodAcpRunsGet:
+		var req contracts.AcpRunIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpRunsGet(req)
+	case contracts.MethodAcpRunsSteer:
+		var req contracts.AcpRunSteerRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpRunsSteer(req)
+	case contracts.MethodAcpRunsStop:
+		var req contracts.AcpRunIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpRunsStop(req)
+	case contracts.MethodAcpRunsWait:
+		var req contracts.AcpRunWaitRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpRunsWait(req)
+	case contracts.MethodAcpRunsPromote:
+		var req contracts.AcpRunPromoteRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpRunsPromote(req)
+	case contracts.MethodAcpRunsSetMode:
+		var req contracts.AcpRunSetModeRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpRunsSetMode(req)
+	case contracts.MethodAcpPermissionDecide:
+		var req contracts.AcpPermissionDecideRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpPermissionDecide(req)
 	default:
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: fmt.Sprintf("unknown method: %s", method)}
 	}

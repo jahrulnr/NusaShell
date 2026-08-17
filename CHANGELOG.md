@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **ACP spawn-only subagents.** Register generic Agent Client Protocol
+  binaries (command + args + env) in Providers. They never appear in the
+  composer. The parent agent delegates with `subagent` / `subagent_steer` /
+  `subagent_stop` / `subagent_wait` (advertised only when at least one ACP
+  agent is enabled). Live runs show in an Agent dock, right-hand drawer, and
+  peek popup, with fail-closed permission prompts, dynamic workspace binding,
+  and parallel spawn (1–6 per call, 8 live cap).
+
 ### Changed
 
 - **Unified plugins model.** MCP servers and installed plugins are now one
