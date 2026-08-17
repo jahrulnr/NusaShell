@@ -55,6 +55,9 @@ func TestPluginHandlerCallToolForwardsStructuredContent(t *testing.T) {
 	handler.RegisterRoutes(mux)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
+	// Stop the plugin's MCP server before cleanup so Windows can remove
+	// the temp dir (the process holds a lock on the binary otherwise).
+	t.Cleanup(func() { runtime.Stop("test.fakemcp") })
 
 	// Call the "structured" tool which returns text="label=<label>" plus
 	// structuredContent={label, ok}.
@@ -149,6 +152,9 @@ func TestPluginHandlerCallToolTextOnlyResult(t *testing.T) {
 	handler.RegisterRoutes(mux)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
+	// Stop the plugin's MCP server before cleanup so Windows can remove
+	// the temp dir (the process holds a lock on the binary otherwise).
+	t.Cleanup(func() { runtime.Stop("test.fakemcp") })
 
 	body, _ := json.Marshal(map[string]any{"text": "world"})
 	resp, err := http.Post(srv.URL+"/plugins/test.fakemcp/tools/echo", "application/json", bytes.NewReader(body))
@@ -217,6 +223,9 @@ func TestPluginHandlerCallToolErrorForwarded(t *testing.T) {
 	handler.RegisterRoutes(mux)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
+	// Stop the plugin's MCP server before cleanup so Windows can remove
+	// the temp dir (the process holds a lock on the binary otherwise).
+	t.Cleanup(func() { runtime.Stop("test.fakemcp") })
 
 	// Call a tool that does not exist → fakemcp returns a JSON-RPC error,
 	// which mcp-go surfaces as a Go error (not an IsError result).

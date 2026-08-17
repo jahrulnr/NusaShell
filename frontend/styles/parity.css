@@ -128,8 +128,8 @@ summary { outline: none; }
 
 .sidebar {
   position: relative;
-  width: 296px;
-  min-width: 296px;
+  width: 230px;
+  min-width: 230px;
   padding: var(--space-4) var(--space-3) var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);

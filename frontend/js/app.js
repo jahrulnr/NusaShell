@@ -12,6 +12,7 @@ import { initLogs, refresh as refreshLogs } from './views/logs.js';
 import { initSettings, refresh as refreshSettings } from './views/settings.js';
 import { initLearning, refresh as refreshLearning } from './views/learning.js';
 import { initAutomation, refresh as refreshAutomation } from './views/automation.js';
+import { initTelemetry, refresh as refreshTelemetry } from './views/telemetry.js';
 import { toast, dismissOpenDialogs } from './ui.js';
 
 async function initProviders() {
@@ -31,6 +32,7 @@ const viewRefresh = {
   settings: refreshSettings,
   learning: refreshLearning,
   automation: refreshAutomation,
+  telemetry: refreshTelemetry,
 };
 
 function setConnection(status) {
@@ -69,7 +71,6 @@ function setConnection(status) {
   }
 }
 
-let routeInitial = true;
 let currentView = null;
 
 // closeFloatingOverlays dismisses body-level overlays (plugin detail drawer,
@@ -104,12 +105,8 @@ function route() {
   if (target === 'logs') document.getElementById('log-tail').scrollTop = document.getElementById('log-tail').scrollHeight;
   // Re-fetch the target view's data so it never goes stale after
   // changes made elsewhere (plugin install/uninstall, MCP edits, etc).
-  // Skip on the initial route call — views already fetched during init.
-  if (!routeInitial) {
-    const refresher = viewRefresh[target];
-    if (refresher) refresher().catch((err) => console.warn(`refresh ${target}:`, err?.message || err));
-  }
-  routeInitial = false;
+  const refresher = viewRefresh[target];
+  if (refresher) refresher().catch((err) => console.warn(`refresh ${target}:`, err?.message || err));
 }
 
 async function boot() {
@@ -164,6 +161,7 @@ async function boot() {
     initSettings(),
     initLearning(),
     initAutomation(),
+    initTelemetry(),
   ]);
   // never swallow init failures silently: a dead view is a bug, not a state
   for (const r of results) {

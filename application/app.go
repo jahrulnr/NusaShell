@@ -772,6 +772,12 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 			return nil, rpcErr
 		}
 		return a.handleCodexUsage(req)
+	case contracts.MethodTelemetryReport:
+		var req contracts.TelemetryReportRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleTelemetryReport(req)
 	case contracts.MethodSkillsList:
 		return a.handleSkillsList()
 	case contracts.MethodSkillsRead:

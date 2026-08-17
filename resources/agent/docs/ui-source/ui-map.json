@@ -298,7 +298,7 @@
         {
           "heading": "Plugin catalog",
           "paragraphs": [
-            "Lists all plugins — manual MCP servers, MCP-only plugins, and MCP + UI plugins — with runtime state (idle/connected). Clicking a row opens the Plugins detail drawer."
+            "Lists all plugins \u2014 manual MCP servers, MCP-only plugins, and MCP + UI plugins \u2014 with runtime state (idle/connected). Clicking a row opens the Plugins detail drawer."
           ],
           "controls": [
             "plugin-table"
@@ -609,6 +609,89 @@
             "settings-version",
             "settings-data-dir",
             "settings-transports"
+          ]
+        }
+      ]
+    },
+    "telemetry": {
+      "title": "Telemetry",
+      "purpose": "Aggregate token usage, spend, and caching across all conversations. Mirrors the OpenRouter Activity dashboard layout with summary metric cards and time-series charts.",
+      "howToOpen": "Click the Telemetry item in the left sidebar.",
+      "sections": [
+        {
+          "heading": "Header",
+          "paragraphs": [
+            "Range selector (All time / 7 / 14 / 30 / 90 days) and Refresh button."
+          ],
+          "controls": [
+            "telemetry-range",
+            "telemetry-refresh-btn"
+          ]
+        },
+        {
+          "heading": "Summary metrics",
+          "paragraphs": [
+            "Four metric cards: Total spend (USD), Requests, Total tokens, Cache hit percent."
+          ],
+          "controls": [
+            "tm-spend",
+            "tm-requests",
+            "tm-tokens",
+            "tm-cache"
+          ]
+        },
+        {
+          "heading": "Usage by model",
+          "paragraphs": [
+            "Stacked bar chart showing daily spend broken down by model."
+          ],
+          "controls": [
+            "chart-usage-model"
+          ]
+        },
+        {
+          "heading": "Top models",
+          "paragraphs": [
+            "Ranked table of models by spend, with request and token counts."
+          ],
+          "controls": [
+            "tm-top-models"
+          ]
+        },
+        {
+          "heading": "Token breakdown",
+          "paragraphs": [
+            "Stacked bar chart showing daily prompt, completion, and cache-read tokens."
+          ],
+          "controls": [
+            "chart-token-breakdown"
+          ]
+        },
+        {
+          "heading": "Prompt token caching",
+          "paragraphs": [
+            "Stacked bar chart showing daily cached vs uncached prompt tokens."
+          ],
+          "controls": [
+            "chart-caching"
+          ]
+        },
+        {
+          "heading": "Request volume by model",
+          "paragraphs": [
+            "Stacked bar chart showing daily request counts broken down by model."
+          ],
+          "controls": [
+            "chart-requests"
+          ]
+        },
+        {
+          "heading": "Top providers",
+          "paragraphs": [
+            "Ranked table of providers by spend, with request and token counts."
+          ],
+          "controls": [
+            "tm-top-providers"
           ]
         }
       ]
@@ -1647,6 +1730,78 @@
       "section": "Agent",
       "type": "button",
       "action": "Allows this tool call once."
+    },
+    "telemetry-range": {
+      "label": "Time range selector",
+      "section": "Telemetry header",
+      "type": "select",
+      "notes": "All time / 7 / 14 / 30 / 90 days lookback window."
+    },
+    "telemetry-refresh-btn": {
+      "label": "Refresh button",
+      "section": "Telemetry header",
+      "type": "button",
+      "notes": "Reloads telemetry data from backend."
+    },
+    "tm-spend": {
+      "label": "Total spend metric",
+      "section": "Telemetry summary",
+      "type": "text",
+      "notes": "Aggregate USD spend for the selected period."
+    },
+    "tm-requests": {
+      "label": "Total requests metric",
+      "section": "Telemetry summary",
+      "type": "text",
+      "notes": "Total assistant turns with usage data."
+    },
+    "tm-tokens": {
+      "label": "Total tokens metric",
+      "section": "Telemetry summary",
+      "type": "text",
+      "notes": "Sum of input + output + cache tokens."
+    },
+    "tm-cache": {
+      "label": "Cache hit percent",
+      "section": "Telemetry summary",
+      "type": "text",
+      "notes": "Cache read tokens / (input + cache read) * 100."
+    },
+    "chart-usage-model": {
+      "label": "Usage by model chart",
+      "section": "Telemetry charts",
+      "type": "canvas",
+      "notes": "Stacked bar chart of daily spend per model."
+    },
+    "tm-top-models": {
+      "label": "Top models table",
+      "section": "Telemetry charts",
+      "type": "container",
+      "notes": "Ranked list of models by spend."
+    },
+    "chart-token-breakdown": {
+      "label": "Token breakdown chart",
+      "section": "Telemetry charts",
+      "type": "canvas",
+      "notes": "Stacked bar chart of daily prompt/completion/cache tokens."
+    },
+    "chart-caching": {
+      "label": "Prompt caching chart",
+      "section": "Telemetry charts",
+      "type": "canvas",
+      "notes": "Stacked bar chart of cached vs uncached prompt tokens."
+    },
+    "chart-requests": {
+      "label": "Request volume chart",
+      "section": "Telemetry charts",
+      "type": "canvas",
+      "notes": "Stacked bar chart of daily requests per model."
+    },
+    "tm-top-providers": {
+      "label": "Top providers table",
+      "section": "Telemetry charts",
+      "type": "container",
+      "notes": "Ranked list of providers by spend."
     }
   }
 }
