@@ -254,3 +254,43 @@ func TestProbeDiscoversAuthMethods(t *testing.T) {
 		t.Fatalf("auth methods = %+v", updated.CachedAuthMethods)
 	}
 }
+
+func TestSpawnFailsWithoutAuthenticate(t *testing.T) {
+	rt := New()
+	defer rt.Close()
+	ws := t.TempDir()
+	agent := testAgent(ws)
+	agent.Env = map[string]string{"FAKEACP_AUTH": "1"}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	_, err := rt.Spawn(ctx, application.AcpSpawnRequest{
+		Agent:     agent,
+		Prompt:    "hello",
+		Workspace: ws,
+	})
+	if err == nil {
+		t.Fatal("expected spawn to fail without authenticate")
+	}
+	if !strings.Contains(err.Error(), "not authenticated") {
+		t.Fatalf("error = %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "cursor_login") {
+		t.Fatalf("error should list auth method ids: %q", err.Error())
+	}
+}
+
+func TestRefreshCatalogFailsWithoutAuthenticate(t *testing.T) {
+	rt := New()
+	defer rt.Close()
+	agent := testAgent(t.TempDir())
+	agent.Env = map[string]string{"FAKEACP_AUTH": "1"}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	_, err := rt.RefreshCatalog(ctx, agent)
+	if err == nil {
+		t.Fatal("expected refresh to fail without authenticate")
+	}
+	if !strings.Contains(err.Error(), "not authenticated") {
+		t.Fatalf("error = %q", err.Error())
+	}
+}

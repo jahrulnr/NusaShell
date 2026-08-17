@@ -119,3 +119,17 @@ Stdio is newline-delimited JSON-RPC (`\n` between messages, no embedded
 newlines). NusaShell does **not** send LSP `Content-Length` headers — Gemini
 CLI (`gemini --acp`) and the ACP spec parse each line with `JSON.parse`.
 Logs from the agent belong on stderr.
+
+### Common CLIs (install + auth)
+
+| CLI | Command | Auth methods (typical) | Not logged in |
+| --- | --- | --- | --- |
+| Cursor | `curl https://cursor.com/install \| bash` then `agent acp` | `cursor_login` | `initialize` succeeds; `session/new` returns `Authentication required`. Run `agent login` locally, then **Authenticate** with `cursor_login` in Providers. |
+| Codex (adapter) | `npm i @agentclientprotocol/codex-acp` → `codex-acp` | `api-key` (and ChatGPT login when browser available) | Same: probe works, spawn/refresh catalog fail until **Authenticate** (API key env or ChatGPT login). |
+| Gemini | `npm i @google/gemini-cli` → `gemini --acp` | `oauth-personal`, `gemini-api-key`, … | Probe lists methods; session may still require **Authenticate** depending on local credentials. |
+
+If you register a CLI without logging in, **Probe** still works (it only runs
+`initialize`). **Refresh catalog** and `subagent` spawn call `session/new` and
+fail until you complete **Authenticate** with one of the advertised method ids.
+NusaShell surfaces a clear error naming those ids instead of a bare JSON-RPC
+`Authentication required`.

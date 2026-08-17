@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
@@ -423,6 +424,46 @@ func RedactEnvKeys(env map[string]string) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// WrapSessionAuthError upgrades session/new failures when the agent advertised
+// auth methods but Providers never stored an AuthMethodID (CLI not logged in).
+func WrapSessionAuthError(agent *AcpAgent, err error) error {
+	if err == nil || agent == nil {
+		return err
+	}
+	if strings.TrimSpace(agent.AuthMethodID) != "" {
+		return err
+	}
+	if len(agent.CachedAuthMethods) == 0 {
+		return err
+	}
+	if !isSessionAuthRequired(err) {
+		return err
+	}
+	methods := make([]string, 0, len(agent.CachedAuthMethods))
+	for _, m := range agent.CachedAuthMethods {
+		if id := strings.TrimSpace(m.ID); id != "" {
+			methods = append(methods, id)
+		}
+	}
+	if len(methods) == 0 {
+		return err
+	}
+	return fmt.Errorf(
+		"ACP agent %q is not authenticated — use Authenticate in Providers (methods: %s) before spawning or refreshing catalog: %v",
+		agent.Name,
+		strings.Join(methods, ", "),
+		err,
+	)
+}
+
+func isSessionAuthRequired(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "authentication required") ||
+		strings.Contains(msg, "not authenticated") ||
+		strings.Contains(msg, "not logged in") ||
+		strings.Contains(msg, "run 'agent login'")
 }
 
 // ValidateAcpAgentSave checks required fields for a generic ACP registration.
