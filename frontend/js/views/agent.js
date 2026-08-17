@@ -3,7 +3,7 @@
 import { rpc, on, emit } from '../rpc.js';
 import { el, fmtTime, toast, confirmDialog, debounce } from '../ui.js';
 import { renderMarkdown } from '../markdown.js';
-import { formatContextUsage, effectiveContextWindow } from '../agent-ui.js';
+import { estimateContextTokens, formatContextUsage, effectiveContextWindow, initialWindowStart, previousWindowStart } from '../agent-ui.js';
 import { bindComposer, updateSendAvailability } from './agent/composer.js';
 import { bindModelPicker } from './agent/model-picker.js';
 import { bindRoomInfo, updateRoomInfo } from './agent/room-info.js';
@@ -46,6 +46,11 @@ const state = {
   nextChunkIndex: -1,
   loadedChunks: new Set(),
   loadingChunk: false,
+  // Active-message windowing: only the last INITIAL_WINDOW messages are
+  // rendered on open; activeWindowStart is the index of the first rendered
+  // active message. Older active messages are prepended in WINDOW_BATCH-sized
+  // batches on scroll-up (before falling back to archived chunks).
+  activeWindowStart: 0,
   // Todo checklist: server-authoritative via agent.todo.updated events and
   // agent.todos.get RPC. todoRenderToken guards against stale async renders
   // (e.g. a fetch that resolves after the user switched to another room).
@@ -63,6 +68,18 @@ const state = {
 };
 
 const MAX_ROOM_BUFFER_CHARS = 512 * 1024; // per room (raw + rawReasoning)
+
+// Active-message windowing sizes (messages, not turns). INITIAL_WINDOW keeps
+// the first paint of a long conversation cheap; WINDOW_BATCH is revealed per
+// scroll-to-top before archived chunks load.
+const INITIAL_WINDOW = 60;
+const WINDOW_BATCH = 40;
+
+// windowedActiveMessages returns the currently-rendered slice of active
+// messages (the tail from activeWindowStart onward).
+function windowedActiveMessages() {
+  return state.messages.slice(state.activeWindowStart);
+}
 
 // Per-room state that survives conversation switches. When the user switches
 // away from a conversation, its per-room state is saved here. When they switch
@@ -302,6 +319,9 @@ async function openConversation(id) {
   // fill preferred, else server heuristic). Resetting here prevents another
   // room's number from leaking across a switch.
   state.contextEstimate = Number(conversation?.context_tokens) || Number(conversation?.estimated_tokens) || 0;
+  // Only render the most recent INITIAL_WINDOW messages on open; older active
+  // messages are revealed on scroll-up. Keeps opening a long conversation fast.
+  state.activeWindowStart = initialWindowStart(state.messages.length, INITIAL_WINDOW);
   // Reset chunk lazy-load state for the new conversation.
   state.chunkCount = conversation?.chunk_count ?? 0;
   state.nextChunkIndex = state.chunkCount - 1;
@@ -316,7 +336,7 @@ async function openConversation(id) {
     state.effort = conversation.effort || 'auto';
   }
   renderConversationList();
-  renderThread(state.messages);
+  renderThread(windowedActiveMessages(), true);
   // If the active conversation has very few bubbles (e.g. after compaction
   // the active slice is just a marker + a handful of retained messages),
   // proactively load the newest archived chunk so the user sees history
@@ -496,7 +516,11 @@ function reattachActiveRun() {
   scrollToBottom(true);
 }
 
-function renderThread(messages) {
+// renderThread paints the given (already windowed) messages. force controls the
+// deferred scroll: true jumps to the bottom once fully rendered (opening a room
+// — idea: auto-scroll when loaded); false respects the pin so a background
+// refresh never yanks a user who scrolled up to read history.
+function renderThread(messages, force = true) {
   const thread = document.getElementById('agent-thread');
   if (!messages.length) {
     renderEmptyThread();
@@ -509,7 +533,7 @@ function renderThread(messages) {
   // Defer the scroll until after layout: setting scrollTop synchronously
   // right after replaceChildren observes a stale (small) scrollHeight, so
   // a freshly opened long room would sit at the top until the next paint.
-  requestAnimationFrame(() => scrollToBottom(true));
+  requestAnimationFrame(() => scrollToBottom(force));
 }
 
 // ---- per-room live run buffers ----
@@ -960,9 +984,41 @@ function bindScrollPin() {
   if (!thread) return;
   thread.addEventListener('scroll', () => {
     state.pinned = isAtBottom(thread);
-    // Lazy-load older chunks when the user scrolls to the top.
-    if (thread.scrollTop <= 4) maybeLoadOlderChunk();
+    // Reveal older history when the user scrolls to the top: first the older
+    // active messages held back by the window, then archived chunks.
+    if (thread.scrollTop <= 4) loadOlderInView();
   }, { passive: true });
+}
+
+// loadOlderInView reveals the next slice of older history at the top of the
+// thread. Active messages held back by the window are shown first (cheap,
+// already in memory); only once they are exhausted do we load archived
+// pre-compaction chunks from the backend.
+function loadOlderInView() {
+  if (state.activeWindowStart > 0) {
+    prependActiveBatch();
+    return;
+  }
+  maybeLoadOlderChunk();
+}
+
+// prependActiveBatch renders the previous WINDOW_BATCH of already-loaded active
+// messages above the current view, preserving the scroll position. The active
+// (streaming) run lives at the tail, which this never touches, so no run
+// rebinding is needed (unlike chunk loads).
+function prependActiveBatch() {
+  const thread = document.getElementById('agent-thread');
+  if (!thread || state.activeWindowStart <= 0) return;
+  const prevHeight = thread.scrollHeight;
+  const prevScroll = thread.scrollTop;
+  const newStart = previousWindowStart(state.activeWindowStart, WINDOW_BATCH);
+  const batch = state.messages.slice(newStart, state.activeWindowStart);
+  state.activeWindowStart = newStart;
+  if (!batch.length) return;
+  thread.insertBefore(renderConversation(batch, retryTurn), thread.firstChild);
+  // Keep the user anchored on the same content after older messages grow the
+  // scroll height at the top.
+  thread.scrollTop = prevScroll + (thread.scrollHeight - prevHeight);
 }
 
 function isAtBottom(el) {
@@ -1258,6 +1314,10 @@ function bindEvents() {
     const job = renderToolJob({ name, args: args ?? {}, status: 'running' });
     run.toolJobs.set(tool_call_id, job);
     run.strip.append(job);
+    // Appending a tool card grows the thread; follow it if the user is pinned.
+    // Without this, a burst of parallel tool.started events would leave the
+    // view stranded above the latest activity until some later event scrolled.
+    scrollToBottom();
     // Keep room diagnostics live while tools execute.
     updateRoomInfo(state.conversation, state.messages);
     // Start an elapsed timer so the user can see how long the tool has been
@@ -1568,6 +1628,9 @@ async function refreshActiveConversation() {
     // Re-sync the context badge with the backend source of truth (the turn
     // that just finished persisted the provider-measured context_tokens).
     state.contextEstimate = Number(conversation?.context_tokens) || Number(conversation?.estimated_tokens) || 0;
+    // Re-window to the tail on refresh (a turn finished / compaction changed
+    // the set). Render respects the pin so a user who scrolled up is not yanked.
+    state.activeWindowStart = initialWindowStart(state.messages.length, INITIAL_WINDOW);
     // Reset chunk state — compaction may have created new chunks.
     state.chunkCount = conversation?.chunk_count ?? 0;
     state.nextChunkIndex = state.chunkCount - 1;
@@ -1578,7 +1641,7 @@ async function refreshActiveConversation() {
     // the server snapshot catches up.
     const buffer = state.roomBuffers.get(conversationId);
     const hasLiveBuffer = buffer && !buffer.done && !buffer.capped && buffer.lastEventAt > 0;
-    renderThread(state.messages);
+    renderThread(windowedActiveMessages(), state.pinned);
     if (hasLiveBuffer) applyBufferedRunToDOM(conversationId);
     maybeLoadOlderChunk();
     updateComposerStatus();
