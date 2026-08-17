@@ -187,6 +187,12 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIPro
 			output, execErr := r.app.Toolbox.Execute(ctx, tc.Name, []byte(tc.Args))
 			if execErr != nil {
 				output = "error: " + execErr.Error()
+				// Only count a mutation when the tool actually succeeded.
+				// Recording it on failure produced misleading trajectory
+				// entries ("saved") with nothing persisted, and hid the
+				// real cause (e.g. the review prompt telling the model to
+				// call a non-existent tool).
+				r.app.log("warn", "learning", "review tool %q failed: %v", tc.Name, execErr)
 			} else {
 				// Track mutations.
 				switch tc.Name {

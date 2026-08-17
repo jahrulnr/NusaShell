@@ -4,7 +4,8 @@ agent-owned skills.
 
 ## Memory rules
 
-- Use the `memory` tool to save or update entries.
+- Use the `memory_save` tool to save or update entries
+- If you need to check what is already stored, use `memory_search` / `memory_list`.
 - Save only durable, reusable facts: user preferences, communication style,
   recurring workflows, environment details, or persona traits.
 - Do NOT save transient task state, one-off requests, or environment-failure
