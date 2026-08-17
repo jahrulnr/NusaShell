@@ -176,6 +176,12 @@ func run() error {
 	app.CodexCLIAuth = codex.NewCLIAuthImporterAdapter()
 	app.CodexRouter = application.NewCodexAccountRouter()
 
+	// Bridge deploy-time provider secrets (e.g. OPENROUTER_API_KEY) into the
+	// SQLite credential store. NusaShell reads keys only from that store, so
+	// this seeds/refreshes them from the environment on startup. Idempotent
+	// and non-destructive; the auto-import loop below then fetches models.
+	app.SeedProvidersFromEnv(os.Getenv)
+
 	srv := transport.New(app, logger, transport.StaticHandler(frontend.FS, dev), dev)
 	// Register plugin routes: serve plugin UI static files and route
 	// tool calls from plugin UIs to the plugin's MCP server.
