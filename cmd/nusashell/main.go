@@ -260,6 +260,7 @@ func run() error {
 	app.StartAutoModelImport(ctx)
 	app.StartAutoUpdateLoop(ctx, 0)
 	app.StartLifecycle()
+	app.StartMCPAutostart(ctx)
 	defer app.CloseLifecycle()
 	if autoSvc != nil {
 		go func() {

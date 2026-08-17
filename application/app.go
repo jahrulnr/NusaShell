@@ -400,6 +400,43 @@ func (a *App) StartAutoUpdateLoop(ctx context.Context, interval time.Duration) {
 	a.log("info", "plugin", "auto-update loop started (interval=%s)", interval)
 }
 
+const mcpAutostartTimeout = 20 * time.Second
+
+// StartMCPAutostart connects every plugin whose manifest has mcp.autostart.
+// It runs synchronously so automations and the agent toolbox see those
+// tools before the first FireDue tick. A failed connect is logged and
+// skipped; the process still starts.
+func (a *App) StartMCPAutostart(ctx context.Context) {
+	if a.Plugins == nil || a.MCPToolbox == nil {
+		return
+	}
+	list, err := a.Plugins.List()
+	if err != nil {
+		a.log("warn", "plugin", "autostart list: %v", err)
+		return
+	}
+	for _, p := range list {
+		if p == nil || !p.Manifest.MCP.Autostart {
+			continue
+		}
+		if err := a.connectPluginMCP(ctx, p); err != nil {
+			a.log("warn", "plugin", "autostart connect %s: %v", p.Manifest.ID, err)
+			continue
+		}
+		a.log("info", "plugin", "autostart connected: %s", p.Manifest.ID)
+	}
+}
+
+func (a *App) connectPluginMCP(ctx context.Context, p *domain.Plugin) error {
+	if a.MCPToolbox == nil || p == nil {
+		return nil
+	}
+	connectCtx, cancel := context.WithTimeout(ctx, mcpAutostartTimeout)
+	defer cancel()
+	_, err := a.MCPToolbox.Connect(connectCtx, p)
+	return err
+}
+
 func (a *App) runAutoUpdateOnce(ctx context.Context) {
 	installed, err := a.Plugins.List()
 	if err != nil {
@@ -521,10 +558,14 @@ func (a *App) log(level, source, format string, args ...any) {
 		Source:  source,
 		Message: fmt.Sprintf(format, args...),
 	}
-	a.Logs.Append(e)
-	a.Bus.Emit(contracts.EventLogAppend, contracts.LogAppendEvent{Entry: contracts.LogEntryDTO{
-		ID: e.ID, Time: e.Time.Format(timeRFC3339), Level: e.Level, Source: e.Source, Message: e.Message,
-	}})
+	if a.Logs != nil {
+		a.Logs.Append(e)
+	}
+	if a.Bus != nil {
+		a.Bus.Emit(contracts.EventLogAppend, contracts.LogAppendEvent{Entry: contracts.LogEntryDTO{
+			ID: e.ID, Time: e.Time.Format(timeRFC3339), Level: e.Level, Source: e.Source, Message: e.Message,
+		}})
+	}
 }
 
 // goSafe runs fn in a new goroutine with panic recovery. A panic is logged

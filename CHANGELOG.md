@@ -35,6 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **MCP autostart at process boot.** Plugins with `mcp.autostart` are
+  connected when the Go process starts (and immediately when the toggle is
+  turned on), so automations and agent tools are available without a manual
+  Start. A failed connect is logged and skipped.
+
 - **Provider kind-change validation ordering.** Saving a codex provider with
   a different kind now correctly fails with `VALIDATION_ERROR` (the guard now
   runs before base URL validation, which previously masked it with "base url

@@ -15,7 +15,7 @@ A repository may include `.nusashell/pipeline.yaml`. `ci_pipeline_read` / `ci.pi
 - **when** — event type plus optional `where` filters. Duplicate `(event, trigger, workflow)` deliveries are ignored.
 - **manual** — UI, RPC, or `automation.run` only.
 
-Availability is `runnable`, `blocked`, `disabled`, or `invalid`. Blocked means a required MCP provider is disabled or not running. Enable the provider; do not rewrite the YAML.
+Availability is `runnable`, `blocked`, `disabled`, or `invalid`. Blocked means a required MCP provider is disabled or not running. Enable the provider and turn on **Auto start** in Plugins if the workflow should have that MCP ready as soon as NusaShell boots; do not rewrite the YAML.
 
 ## Waiting
 

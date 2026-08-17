@@ -16,10 +16,11 @@ environment entries (`KEY=VALUE`). Example:
     args:     -y @modelcontextprotocol/server-filesystem /path/to/dir
 
 It is stored as `plugins/<id>/manifest.json` exactly like a catalog
-installed plugin. Plugins connect lazily: the first tool listing spawns the
-process. **Start** (plugin.test) connects immediately and lists the tools;
-**Stop** (plugin.stop) drops the cached connection and **Restart** stops
-then starts.
+installed plugin. Plugins with `mcp.autostart` (the Plugins drawer toggle)
+are connected when the Go process starts, so automations and the agent
+toolbox can use those tools immediately. Other plugins stay lazy: the first
+tool listing or **Start** (`plugin.test`) spawns the process. **Stop**
+(`plugin.stop`) drops the cached connection and **Restart** stops then starts.
 
 ## Tool exposure
 
