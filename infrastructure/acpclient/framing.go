@@ -10,11 +10,12 @@ import (
 )
 
 func writeFrame(w io.Writer, body []byte) error {
-	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body))
-	if _, err := w.Write([]byte(header)); err != nil {
+	// ACP stdio is newline-delimited JSON-RPC (not LSP Content-Length).
+	// Gemini CLI, Claude Code, and the official spec JSON.parse each line.
+	if _, err := w.Write(body); err != nil {
 		return err
 	}
-	_, err := w.Write(body)
+	_, err := w.Write([]byte("\n"))
 	return err
 }
 

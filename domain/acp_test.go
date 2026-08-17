@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -58,6 +59,33 @@ func TestStrictestAvailableMode(t *testing.T) {
 	}
 	if StrictestAvailableMode(nil, nil) != "" {
 		t.Fatal("empty modes should return empty")
+	}
+}
+
+func TestWrapSessionAuthError(t *testing.T) {
+	agent := &AcpAgent{
+		Name: "Cursor",
+		CachedAuthMethods: []AcpAuthMethod{
+			{ID: "cursor_login", Name: "Cursor Login"},
+		},
+	}
+	upstream := fmt.Errorf("acp Authentication required")
+	got := WrapSessionAuthError(agent, upstream)
+	if got == upstream {
+		t.Fatal("expected wrapped error")
+	}
+	if !strings.Contains(got.Error(), "not authenticated") {
+		t.Fatalf("got %q", got.Error())
+	}
+	if !strings.Contains(got.Error(), "cursor_login") {
+		t.Fatalf("got %q", got.Error())
+	}
+	agent.AuthMethodID = "cursor_login"
+	if WrapSessionAuthError(agent, upstream) != upstream {
+		t.Fatal("should not wrap when auth method already set")
+	}
+	if WrapSessionAuthError(agent, nil) != nil {
+		t.Fatal("nil err")
 	}
 }
 

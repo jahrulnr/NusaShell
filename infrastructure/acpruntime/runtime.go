@@ -145,7 +145,7 @@ func (rt *Runtime) RefreshCatalog(ctx context.Context, agent *domain.AcpAgent) (
 		}
 		sess, err := conn.NewSession(ctx, cwd)
 		if err != nil {
-			return *agent, err
+			return *agent, domain.WrapSessionAuthError(agent, err)
 		}
 		applySession(agent, sess)
 		return *agent, nil
@@ -235,7 +235,7 @@ func (rt *Runtime) Spawn(ctx context.Context, req application.AcpSpawnRequest) (
 	}
 	sess, err := pc.conn.NewSession(ctx, workspace)
 	if err != nil {
-		return nil, err
+		return nil, domain.WrapSessionAuthError(req.Agent, err)
 	}
 	applySession(req.Agent, sess)
 

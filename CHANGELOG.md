@@ -53,6 +53,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   outside the workspace prompt instead of auto-allowing.
 - **ACP test helper binary on Windows.** `fakeacp` test builds now use a
   `.exe` suffix so GitHub Actions `windows-latest` can execute them.
+- **ACP stdio is newline-delimited JSON.** Outbound frames are one JSON-RPC
+  object per line. LSP `Content-Length` headers made Gemini CLI (`gemini --acp`)
+  fail with `Unexpected token 'C', "Content-Length: …" is not valid JSON`.
+  Inbound still accepts Content-Length for older helpers.
+- **ACP spawn without CLI login.** When `session/new` fails with
+  `Authentication required` and Providers never stored an auth method id,
+  spawn and refresh catalog now report which advertised method ids to use
+  (`cursor_login`, `api-key`, …) instead of a bare JSON-RPC error.
 
 - **Provider kind-change validation ordering.** Saving a codex provider with
   a different kind now correctly fails with `VALIDATION_ERROR` (the guard now
