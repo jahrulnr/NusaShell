@@ -1,0 +1,78 @@
+{
+ "ID": "conv_sample_fixture",
+ "Title": "Sample conversation (test fixture)",
+ "Model": "prov_46a23e011d841532:deepseek/deepseek-v4-flash-0731",
+ "Status": "idle",
+ "Messages": [
+  {
+   "ID": "msg_3782001428c73b5b",
+   "Role": "user",
+   "Content": "kayaknya mcp ini, semenjak di pindah ke golang rada ga stable (kadang mcp files read stuck sampai 3 menit lebih, kadang terminal ikutan stuck). kamu audit ya. khusus nya files dan terminal",
+   "CreatedAt": "2026-08-16T18:33:19.511213552Z",
+   "Status": "done"
+  },
+  {
+   "ID": "msg_92db2fdd684273ed",
+   "Role": "assistant",
+   "Content": "Oke, saya mulai audit. Setup TODOs dulu, lalu baca skill yang relevan (mcp-creator — ada Files & Terminal) dan lihat struktur repo Go-",
+   "CreatedAt": "2026-08-16T18:33:19.511213552Z",
+   "Status": "done"
+  },
+  {
+   "ID": "msg_ea7bf17b45d4a36f",
+   "Role": "assistant",
+   "Content": "",
+   "CreatedAt": "2026-08-16T18:33:21.324707947Z",
+   "Status": "done"
+  },
+  {
+   "ID": "msg_acd179aea1f0c449",
+   "Role": "assistant",
+   "Content": "Memory confirms: NusaShell-mcp baru di-rebase Node.js→Go (commit 1693e9a, v2.0.0). Workspace reponya ada di `/media/jahrulnr/storage/workspace/NusaShell-mcp`. Sekarang saya baca skill mcp-creator (pola plugin MCP NusaShell) + eksplorasi repo via Terminal",
+   "CreatedAt": "2026-08-16T18:33:26.408981535Z",
+   "Status": "done"
+  },
+  {
+   "ID": "msg_704468c991ee6c05",
+   "Role": "assistant",
+   "Content": "",
+   "CreatedAt": "2026-08-16T18:33:33.684797156Z",
+   "Status": "done"
+  },
+  {
+   "ID": "msg_67c8787c2feaa13f",
+   "Role": "assistant",
+   "Content": "Repo sudah ada beberapa commit fix terbaru (bound timeouts, cap 1 MiB). Sekarang saya bedah kode: pertama framework `mcpkit` (loop stdio), lalu `files`, lalu `terminal`\n\n",
+   "CreatedAt": "2026-08-16T18:33:38.794895761Z",
+   "Status": "done"
+  },
+  {
+   "ID": "msg_a19f84a81aa516e0",
+   "Role": "assistant",
+   "Content": "Framework pakai `mark3labs/mcp-go` stdio. Sekarang baca entry point + handler files & terminal\n\n",
+   "CreatedAt": "2026-08-16T18:33:42.270458394Z",
+   "Status": "done"
+  },
+  {
+   "ID": "msg_5ffdffae9fdc1722",
+   "Role": "assistant",
+   "Content": "Submit: framework stdio + handler sudah ada waktu `withHandlerTimeout` untuk beberapa tool, tapi banyak handler tidak di-bound. Sekarang bedah service Files",
+   "CreatedAt": "2026-08-16T18:33:45.455826367Z",
+   "Status": "done"
+  },
+  {
+   "ID": "msg_mermaid_valid",
+   "Role": "assistant",
+   "Content": "Here is the flow:\n\n```mermaid\nflowchart TD\n  A[Start] --> B{OK?}\n  B -->|yes| C[Done]\n  B -->|no| D[Retry]\n```\n\nThat is the plan.",
+   "CreatedAt": "2026-08-17T10:00:00Z",
+   "Status": "complete"
+  },
+  {
+   "ID": "msg_mermaid_invalid",
+   "Role": "assistant",
+   "Content": "Broken diagram:\n\n```mermaid\nthis is not valid mermaid @@@ ->->\n```\n\nfallback should show source.",
+   "CreatedAt": "2026-08-17T10:01:00Z",
+   "Status": "complete"
+  }
+ ]
+}
