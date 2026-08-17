@@ -50,6 +50,8 @@ type App struct {
 	CodexUsage                  CodexUsage
 	CodexCLIAuth                CodexCLIAuthImporter
 	CodexRouter                 *CodexAccountRouter
+	AcpAgents                   AcpAgentStore
+	Acp                         AcpRuntime
 	retrySleeper                RetrySleeper
 
 	// learningMu guards lazy init of learningSearcher and graphService,
@@ -74,6 +76,8 @@ type App struct {
 	// Trajectory records learning layer events to a JSONL log for
 	// debugging and observability. Best-effort — nil = no-op.
 	Trajectory *TrajectoryRecorder
+
+	Automation *Automation
 
 	runsMu  sync.Mutex
 	runs    map[string]*TurnRun
@@ -228,9 +232,12 @@ type Deps struct {
 	ModelCatalog                *modelcatalog.Catalog       // optional; nil = skip enrichment from models.dev
 	WorkspacePicker             WorkspacePicker
 	RetrySleeper                RetrySleeper
+	AcpAgents                   AcpAgentStore
+	Acp                         AcpRuntime
 	// Logger is an optional structured logger for crash recovery from
 	// fire-and-forget goroutines. Nil = slog.Default().
-	Logger *slog.Logger
+	Logger     *slog.Logger
+	Automation *Automation
 }
 
 func NewApp(deps Deps) *App {
@@ -265,8 +272,11 @@ func NewApp(deps Deps) *App {
 		EmbeddingModelListerFactory: deps.EmbeddingModelListerFactory,
 		WorkspacePicker:             deps.WorkspacePicker,
 		ModelCatalog:                deps.ModelCatalog,
+		AcpAgents:                   deps.AcpAgents,
+		Acp:                         deps.Acp,
 		retrySleeper:                deps.RetrySleeper,
 		Logger:                      deps.Logger,
+		Automation:                  deps.Automation,
 		runs:                        map[string]*TurnRun{},
 		turnsSinceReview:            map[string]int{},
 	}
@@ -282,6 +292,7 @@ func NewApp(deps Deps) *App {
 			app.Bus.Emit(contracts.EventAskPending, askPendingEvent(conversationID, runID, callID, req))
 		})
 	}
+	app.wireAcpCallbacks()
 	// Wire the lifecycle manager (decay + prune). Started by StartLifecycle,
 	// stopped by CloseLifecycle.
 	if deps.Memory != nil {
@@ -396,6 +407,43 @@ func (a *App) StartAutoUpdateLoop(ctx context.Context, interval time.Duration) {
 	a.log("info", "plugin", "auto-update loop started (interval=%s)", interval)
 }
 
+const mcpAutostartTimeout = 20 * time.Second
+
+// StartMCPAutostart connects every plugin whose manifest has mcp.autostart.
+// It runs synchronously so automations and the agent toolbox see those
+// tools before the first FireDue tick. A failed connect is logged and
+// skipped; the process still starts.
+func (a *App) StartMCPAutostart(ctx context.Context) {
+	if a.Plugins == nil || a.MCPToolbox == nil {
+		return
+	}
+	list, err := a.Plugins.List()
+	if err != nil {
+		a.log("warn", "plugin", "autostart list: %v", err)
+		return
+	}
+	for _, p := range list {
+		if p == nil || !p.Manifest.MCP.Autostart {
+			continue
+		}
+		if err := a.connectPluginMCP(ctx, p); err != nil {
+			a.log("warn", "plugin", "autostart connect %s: %v", p.Manifest.ID, err)
+			continue
+		}
+		a.log("info", "plugin", "autostart connected: %s", p.Manifest.ID)
+	}
+}
+
+func (a *App) connectPluginMCP(ctx context.Context, p *domain.Plugin) error {
+	if a.MCPToolbox == nil || p == nil {
+		return nil
+	}
+	connectCtx, cancel := context.WithTimeout(ctx, mcpAutostartTimeout)
+	defer cancel()
+	_, err := a.MCPToolbox.Connect(connectCtx, p)
+	return err
+}
+
 func (a *App) runAutoUpdateOnce(ctx context.Context) {
 	installed, err := a.Plugins.List()
 	if err != nil {
@@ -501,6 +549,9 @@ func (a *App) CloseLifecycle() {
 // in use" errors from the embedding cache and trajectory log handles.
 func (a *App) Close() {
 	a.CloseLifecycle()
+	if a.Acp != nil {
+		a.Acp.Close()
+	}
 	if a.EmbeddingCache != nil {
 		_ = a.EmbeddingCache.Close()
 	}
@@ -517,10 +568,14 @@ func (a *App) log(level, source, format string, args ...any) {
 		Source:  source,
 		Message: fmt.Sprintf(format, args...),
 	}
-	a.Logs.Append(e)
-	a.Bus.Emit(contracts.EventLogAppend, contracts.LogAppendEvent{Entry: contracts.LogEntryDTO{
-		ID: e.ID, Time: e.Time.Format(timeRFC3339), Level: e.Level, Source: e.Source, Message: e.Message,
-	}})
+	if a.Logs != nil {
+		a.Logs.Append(e)
+	}
+	if a.Bus != nil {
+		a.Bus.Emit(contracts.EventLogAppend, contracts.LogAppendEvent{Entry: contracts.LogEntryDTO{
+			ID: e.ID, Time: e.Time.Format(timeRFC3339), Level: e.Level, Source: e.Source, Message: e.Message,
+		}})
+	}
 }
 
 // goSafe runs fn in a new goroutine with panic recovery. A panic is logged
@@ -875,6 +930,97 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 			return nil, rpcErr
 		}
 		return a.handleSettingsSet(req)
+	case contracts.MethodCIPipelinesList, contracts.MethodCIPipelinesRead, contracts.MethodCIPipelinesValidate,
+		contracts.MethodCIRunsStart, contracts.MethodCIRunsList, contracts.MethodCIRunsGet,
+		contracts.MethodCIRunsCancel, contracts.MethodCIRunsRetry, contracts.MethodCIJobsGet,
+		contracts.MethodCIJobsLogs, contracts.MethodCIJobsCancel, contracts.MethodCIArtifactsList,
+		contracts.MethodCIRunnersList, contracts.MethodCICacheList, contracts.MethodCICacheClear,
+		contracts.MethodAutomationList, contracts.MethodAutomationGet, contracts.MethodAutomationSave,
+		contracts.MethodAutomationDelete, contracts.MethodAutomationEnable, contracts.MethodAutomationDisable,
+		contracts.MethodAutomationRun, contracts.MethodAutomationValidate, contracts.MethodAutomationEvents,
+		contracts.MethodAutomationIngest, contracts.MethodAutomationDependents, contracts.MethodAutomationSchedules,
+		contracts.MethodAutomationCapabilities, contracts.MethodAutomationSetDisabled:
+		return a.handleCI(ctx, method, payload)
+	case contracts.MethodAcpAgentsList:
+		return a.handleAcpAgentsList()
+	case contracts.MethodAcpAgentsSave:
+		var req contracts.AcpAgentSaveRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpAgentsSave(req)
+	case contracts.MethodAcpAgentsDelete:
+		var req contracts.AcpAgentIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpAgentsDelete(req)
+	case contracts.MethodAcpAgentsProbe:
+		var req contracts.AcpAgentIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpAgentsProbe(req)
+	case contracts.MethodAcpAgentsAuthenticate:
+		var req contracts.AcpAuthenticateRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpAgentsAuthenticate(req)
+	case contracts.MethodAcpAgentsRefreshCatalog:
+		var req contracts.AcpAgentIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpAgentsRefreshCatalog(req)
+	case contracts.MethodAcpRunsList:
+		var req contracts.AcpRunsListRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpRunsList(req)
+	case contracts.MethodAcpRunsGet:
+		var req contracts.AcpRunIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpRunsGet(req)
+	case contracts.MethodAcpRunsSteer:
+		var req contracts.AcpRunSteerRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpRunsSteer(req)
+	case contracts.MethodAcpRunsStop:
+		var req contracts.AcpRunIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpRunsStop(req)
+	case contracts.MethodAcpRunsWait:
+		var req contracts.AcpRunWaitRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpRunsWait(req)
+	case contracts.MethodAcpRunsPromote:
+		var req contracts.AcpRunPromoteRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpRunsPromote(req)
+	case contracts.MethodAcpRunsSetMode:
+		var req contracts.AcpRunSetModeRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpRunsSetMode(req)
+	case contracts.MethodAcpPermissionDecide:
+		var req contracts.AcpPermissionDecideRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpPermissionDecide(req)
 	default:
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: fmt.Sprintf("unknown method: %s", method)}
 	}
@@ -892,6 +1038,7 @@ func (a *App) handleAppInfo() (any, *contracts.RPCError) {
 			MCP:           true,
 			Compaction:    settings.CompactionEnabled,
 			PromptCaching: settings.PromptCaching,
+			Automation:    a.Automation != nil,
 			Providers:     []string{"messages", "responses", "chat", "codex"},
 		},
 	}, nil

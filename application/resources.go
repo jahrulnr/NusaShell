@@ -361,6 +361,11 @@ func (a *App) handlePluginSave(req contracts.PluginSaveRequest) (any, *contracts
 		return nil, rpcInternal(err)
 	}
 	a.MCPToolbox.Drop(p.Manifest.MCPServerID())
+	if p.Manifest.MCP.Autostart {
+		if err := a.connectPluginMCP(context.Background(), p); err != nil {
+			a.log("warn", "plugin", "autostart connect %s: %v", p.Manifest.ID, err)
+		}
+	}
 	a.log("info", "plugin", "plugin saved: %s", p.Manifest.Name)
 	dto := pluginToDTO(p)
 	dto.Status, dto.Tools = a.pluginStatus(p)
@@ -378,6 +383,13 @@ func (a *App) handlePluginDelete(req contracts.PluginIDRequest) (any, *contracts
 	}
 	if err := a.Plugins.Delete(req.ID); err != nil {
 		return nil, rpcInternal(err)
+	}
+	if a.Automation != nil && a.Automation.Caps != nil {
+		deps, _ := a.Automation.Caps.Dependents(context.Background(), req.ID)
+		_ = a.Automation.Caps.SetDisabled(context.Background(), req.ID, true)
+		if len(deps) > 0 {
+			a.log("info", "plugin", "plugin %s had %d dependent automation(s); they are now blocked", req.ID, len(deps))
+		}
 	}
 	// Drop any cached MCP connection so the agent does not keep calling
 	// a subprocess whose files were just removed.
@@ -465,6 +477,11 @@ func (a *App) handlePluginSetAutoStart(req contracts.PluginSetFlagRequest) (any,
 	p.Manifest.MCP.Autostart = req.Enabled
 	if err := a.Plugins.Save(p); err != nil {
 		return nil, rpcInternal(err)
+	}
+	if req.Enabled {
+		if err := a.connectPluginMCP(context.Background(), p); err != nil {
+			a.log("warn", "plugin", "autostart connect %s: %v", id, err)
+		}
 	}
 	a.log("info", "plugin", "autostart set: %s = %v", id, req.Enabled)
 	return map[string]bool{"ok": true}, nil

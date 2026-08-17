@@ -60,6 +60,19 @@ func TestRosterUniqueness(t *testing.T) {
 		MethodDocsList, MethodDocsSearch, MethodDocsRead,
 		MethodLogsList, MethodLogsClear,
 		MethodSettingsGet, MethodSettingsSet,
+		MethodCIPipelinesList, MethodCIPipelinesRead, MethodCIPipelinesValidate,
+		MethodCIRunsStart, MethodCIRunsList, MethodCIRunsGet, MethodCIRunsCancel, MethodCIRunsRetry,
+		MethodCIJobsGet, MethodCIJobsLogs, MethodCIJobsCancel, MethodCIArtifactsList,
+		MethodCIRunnersList, MethodCICacheList, MethodCICacheClear,
+		MethodAutomationList, MethodAutomationGet, MethodAutomationSave, MethodAutomationDelete,
+		MethodAutomationEnable, MethodAutomationDisable, MethodAutomationRun, MethodAutomationValidate,
+		MethodAutomationEvents, MethodAutomationIngest, MethodAutomationDependents,
+		MethodAutomationSchedules, MethodAutomationCapabilities, MethodAutomationSetDisabled,
+		MethodAcpAgentsList, MethodAcpAgentsSave, MethodAcpAgentsDelete,
+		MethodAcpAgentsProbe, MethodAcpAgentsAuthenticate, MethodAcpAgentsRefreshCatalog,
+		MethodAcpRunsList, MethodAcpRunsGet, MethodAcpRunsSteer, MethodAcpRunsStop,
+		MethodAcpRunsWait, MethodAcpRunsPromote, MethodAcpRunsSetMode,
+		MethodAcpPermissionDecide,
 	}
 	seen := map[string]bool{}
 	for _, m := range methods {
@@ -76,6 +89,14 @@ func TestRosterUniqueness(t *testing.T) {
 		EventTurnStarted, EventMessageDelta, EventReasoningDelta, EventToolStarted, EventToolCompleted,
 		EventTurnDone, EventTurnError, EventCompacted, EventSteerQueued, EventSteerApplied,
 		EventSteerCancelled, EventProviderRetry, EventLogAppend, EventTodoUpdated,
+		EventCIRunCreated, EventCIRunStarted, EventCIRunCompleted, EventCIRunFailed,
+		EventCIRunCancelled, EventCIRunWaiting, EventCIRunBlocked,
+		EventCIJobQueued, EventCIJobStarted, EventCIJobCompleted, EventCIJobFailed,
+		EventCIJobCancelled, EventCIJobSkipped,
+		EventCIStepStarted, EventCIStepOutput, EventCIStepCompleted, EventCIStepFailed,
+		EventAutomationEvent,
+		EventAcpRunStarted, EventAcpRunUpdated, EventAcpRunDone,
+		EventAcpPermissionRequested, EventAcpPermissionDecided, EventAcpSessionModeChanged,
 	}
 	seenEv := map[string]bool{}
 	for _, e := range events {
@@ -143,6 +164,15 @@ func TestGoldenDTOs(t *testing.T) {
 	})
 	assertGolden(t, "turn-started-event.json", TurnStartedEvent{
 		RunID: "run_1", ConversationID: "conv_1", MessageID: "msg_1",
+	})
+	assertGolden(t, "acp-agent.json", AcpAgentDTO{
+		ID: "acp_1", Name: "Cursor", Command: "cursor", Args: []string{"agent", "acp"},
+		EnvKeys: []string{"CURSOR_API_KEY"}, Enabled: true,
+		PreferredModeID:    "plan",
+		CachedCapabilities: AcpCapabilitiesDTO{HasModes: true, HasFS: true},
+		CachedModes:        []AcpModeDTO{{ID: "plan", Name: "Plan", RiskTier: "read_only"}},
+		CachedModels:       []AcpModelDTO{{ID: "auto", Name: "auto", Tier: "unclassified"}},
+		UpdatedAt:          "2026-08-17T00:00:00Z",
 	})
 }
 

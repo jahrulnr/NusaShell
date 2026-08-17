@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"nusashell/application"
 	"nusashell/contracts"
 	"nusashell/domain"
 )
@@ -536,11 +537,16 @@ func (d *stubDropper) Drop(serverID string) { d.droppedServers[serverID] = true 
 func TestMcpRegister(t *testing.T) {
 	store := newRecordedStub(nil)
 	tb := &Toolbox{Plugins: store, MCP: &stubMCP{tools: map[string][]contracts.MCPToolDTO{}}}
-	absPluginSource, err := filepath.Abs("/tmp/fake-plugin")
+	dir := t.TempDir()
+	absPluginSource, err := filepath.Abs(dir)
 	if err != nil {
 		t.Fatalf("filepath.Abs: %v", err)
 	}
-	out, err := tb.Execute(context.Background(), "mcp_register", []byte(`{"source":"/tmp/fake-plugin"}`))
+	payload, err := json.Marshal(map[string]string{"source": dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := tb.Execute(context.Background(), "mcp_register", payload)
 	if err != nil {
 		t.Fatalf("mcp_register: %v", err)
 	}
@@ -611,6 +617,25 @@ func TestMcpUnregister(t *testing.T) {
 	}
 	if len(store.deleted) != 1 || store.deleted[0] != "demo" {
 		t.Fatalf("expected delete demo, got %v", store.deleted)
+	}
+}
+
+func TestListToolsIncludesAutomation(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	names := map[string]bool{}
+	for _, ti := range tb.ListTools() {
+		names[ti.Name] = true
+	}
+	for _, want := range []string{
+		"ci_pipeline_list", "ci_pipeline_read", "ci_pipeline_validate", "ci_run",
+		"ci_run_status", "ci_logs", "ci_cancel",
+		"automation_list", "automation_read", "automation_validate", "automation_create",
+		"automation_enable", "automation_disable", "automation_status",
+		"schedule_once", "schedule_every", "wait_until",
+	} {
+		if !names[want] {
+			t.Fatalf("ListTools missing %q", want)
+		}
 	}
 }
 
@@ -847,5 +872,60 @@ func TestSkillFilesUnsupported(t *testing.T) {
 	_, err := tb.Execute(context.Background(), "skill_files", []byte(`{"name":"x"}`))
 	if err == nil || !strings.Contains(err.Error(), "does not support file listing") {
 		t.Fatalf("expected unsupported error, got %v", err)
+	}
+}
+
+type stubAcp struct {
+	agents []*domain.AcpAgent
+}
+
+func (s *stubAcp) SpawnSubagents(ctx context.Context, argsJSON []byte) (string, error) {
+	return `{"runs":[]}`, nil
+}
+func (s *stubAcp) SteerAcpRun(ctx context.Context, argsJSON []byte) (string, error) {
+	return "{}", nil
+}
+func (s *stubAcp) StopAcpRun(ctx context.Context, argsJSON []byte) (string, error) {
+	return "{}", nil
+}
+func (s *stubAcp) WaitAcpRun(ctx context.Context, argsJSON []byte) (string, error) {
+	return "{}", nil
+}
+func (s *stubAcp) EnabledAcpAgents() []*domain.AcpAgent { return s.agents }
+
+func TestListToolsOmitsSubagentWhenNoAgents(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	for _, ti := range tb.ListTools() {
+		if strings.HasPrefix(ti.Name, "subagent") {
+			t.Fatalf("subagent tools must stay hidden without ACP agents, found %q", ti.Name)
+		}
+	}
+}
+
+func TestListToolsIncludesSubagentWhenAgentsEnabled(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	tb.Acp = &stubAcp{agents: []*domain.AcpAgent{{ID: "acp_1", Name: "Cursor", Enabled: true}}}
+	names := map[string]bool{}
+	for _, ti := range tb.ListTools() {
+		names[ti.Name] = true
+	}
+	for _, want := range []string{"subagent", "subagent_steer", "subagent_stop", "subagent_wait"} {
+		if !names[want] {
+			t.Fatalf("ListTools missing %q", want)
+		}
+	}
+}
+
+func TestPipelineAgentRunnerHidesEnabledAcpTools(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	tb.Acp = &stubAcp{agents: []*domain.AcpAgent{{ID: "acp_1", Name: "Cursor", Enabled: true}}}
+	runner := application.NewPipelineAgentRunner(tb)
+	for _, ti := range runner.Tools.ListTools() {
+		if strings.HasPrefix(ti.Name, "subagent") {
+			t.Fatalf("pipeline agent listed %q", ti.Name)
+		}
+	}
+	if _, err := runner.Tools.Execute(context.Background(), "subagent", []byte(`{"prompt":"x"}`)); err == nil {
+		t.Fatal("pipeline agent must not execute subagent")
 	}
 }

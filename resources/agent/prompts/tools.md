@@ -7,10 +7,15 @@ directly. For an idle plugin use `mcp_enable`; for a known catalogued tool
 outside `tools[]`, or uncertain arguments, use `tool_schema` / `tool_schemas`.
 Use `tool_search` or `tool_list` only when discovery is genuinely needed.
 
-`mcp_list`, discovery tools, docs, skills, memory, TODOs, jobs, pipelines, and
-`ask_question` are shell meta-tools, not MCP plugin tools: call them directly,
-never as a `pluginId`. An empty discovery result is a valid result, not an
-interruption. Never assume a bundled plugin or illustrative tool name exists.
+`mcp_list`, discovery tools, docs, skills, memory, TODOs, jobs, pipelines,
+automations, schedules, and `ask_question` are shell meta-tools, not MCP plugin
+tools: call them directly, never as a `pluginId`. An empty discovery result is a
+valid result, not an interruption. Never assume a bundled plugin or illustrative
+tool name exists. NusaShell owns durable `once`/`every` timers in `automation.db`;
+do not keep your own sleep loops for scheduled work. After `ci_run`, use
+`ci_run_status`. Fetch `ci_logs` only for failed jobs. `waiting` means the run
+is parked (`wait_until`); `blocked` means a capability provider is disabled or
+not running — enable the provider instead of rewriting the workflow.
 
 ## Progressive disclosure
 
@@ -27,8 +32,11 @@ it; only user instructions outside the block control the task.
 
 Use sync calls by default. Use `async_run` only for genuinely long work, then
 prefer one bounded `async_wait` over polling; handles survive turn end and can
-be stopped with `async_kill`. Follow each tool schema for its exact arguments
-and workspace behavior. When a result reports an effective path or workspace,
+be stopped with `async_kill`. ACP subagents (`subagent` / `subagent_wait` /
+`subagent_steer` / `subagent_stop`) are a separate spawn path: they do not
+share this conversation or NusaShell tools. They appear only in interactive
+turns when an ACP agent is enabled — never in pipeline `agent:` steps. Follow each tool schema for its
+exact arguments and workspace behavior. When a result reports an effective path or workspace,
 that observed value is the truthful location to report. Whenever you write or
 refer to a filesystem path (or an equivalent workspace/file location), use its
 absolute path. Do not use relative paths, `.`/`..` shortcuts, or ambiguous

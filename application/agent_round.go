@@ -105,6 +105,11 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 	var content strings.Builder
 	var reasoning strings.Builder
 	system := buildSystemPrompt(conversation)
+	if a != nil {
+		if suffix := a.acpDelegationPrompt(); suffix != "" {
+			system += "\n\n" + suffix
+		}
+	}
 	if continuation {
 		system += "\n\nThe immediately preceding assistant response was interrupted by a transient upstream failure. Continue it from exactly where it stopped. Do not repeat prior text."
 	}

@@ -82,6 +82,22 @@ const (
 
 	MethodSettingsGet = "settings.get"
 	MethodSettingsSet = "settings.set"
+
+	// ACP agents are spawn-only subagents (not user chat providers).
+	MethodAcpAgentsList           = "acp.agents.list"
+	MethodAcpAgentsSave           = "acp.agents.save"
+	MethodAcpAgentsDelete         = "acp.agents.delete"
+	MethodAcpAgentsProbe          = "acp.agents.probe"
+	MethodAcpAgentsAuthenticate   = "acp.agents.authenticate"
+	MethodAcpAgentsRefreshCatalog = "acp.agents.refresh-catalog"
+	MethodAcpRunsList             = "acp.runs.list"
+	MethodAcpRunsGet              = "acp.runs.get"
+	MethodAcpRunsSteer            = "acp.runs.steer"
+	MethodAcpRunsStop             = "acp.runs.stop"
+	MethodAcpRunsWait             = "acp.runs.wait"
+	MethodAcpRunsPromote          = "acp.runs.promote"
+	MethodAcpRunsSetMode          = "acp.runs.set-mode"
+	MethodAcpPermissionDecide     = "acp.permission.decide"
 )
 
 // Event types pushed over SSE (/events) and WebSocket (/ws).
@@ -105,6 +121,13 @@ const (
 	EventAskPending      = "agent.ask.pending"
 	EventAskAnswered     = "agent.ask.answered"
 	EventAskCancelled    = "agent.ask.cancelled"
+
+	EventAcpRunStarted          = "acp.run.started"
+	EventAcpRunUpdated          = "acp.run.updated"
+	EventAcpRunDone             = "acp.run.done"
+	EventAcpPermissionRequested = "acp.permission.requested"
+	EventAcpPermissionDecided   = "acp.permission.decided"
+	EventAcpSessionModeChanged  = "acp.session.mode_changed"
 )
 
 // ---- app ----
@@ -122,6 +145,7 @@ type Features struct {
 	MCP           bool     `json:"mcp"`
 	Compaction    bool     `json:"compaction"`
 	PromptCaching bool     `json:"prompt_caching"`
+	Automation    bool     `json:"automation"`
 	Providers     []string `json:"providers"`
 }
 

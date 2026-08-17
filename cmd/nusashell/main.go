@@ -17,10 +17,12 @@ import (
 
 	"nusashell/application"
 	"nusashell/frontend"
+	"nusashell/infrastructure/acpruntime"
 	"nusashell/infrastructure/ai"
 	"nusashell/infrastructure/ai/codex"
 	"nusashell/infrastructure/ai/modelcatalog"
 	"nusashell/infrastructure/attachmentfs"
+	"nusashell/infrastructure/ci"
 	"nusashell/infrastructure/config"
 	"nusashell/infrastructure/docs"
 	"nusashell/infrastructure/jsonstore"
@@ -173,51 +175,66 @@ func run() error {
 	}
 	pluginInstaller := plugininstall.New(pluginStore, logger)
 	pluginRuntime := pluginruntime.New(pluginStore, mcpManager)
+	acpRuntime := acpruntime.New()
 	// Attachment store: saves image/file attachments to disk so file-based
 	// tools can access them by absolute path.
 	attachmentStore, err := attachmentfs.New(filepath.Join(dataDir, "attachments"))
 	if err != nil {
 		slog.Warn("attachment store init failed", "error", err)
 	}
-	app := application.NewApp(application.Deps{
-		Version:         version,
-		DataDir:         dataDir,
-		Conversations:   store,
-		Providers:       providerStore,
-		Credentials:     credentials,
+	tb := &tools.Toolbox{
 		Skills:          skillStore,
 		Memory:          &jsonstore.Memory{S: store},
-		LearningEdges:   &jsonstore.LearningEdges{S: store},
-		Todos:           todoStore,
+		Docs:            docSource,
 		Plugins:         pluginStore,
 		PluginInstaller: pluginInstaller,
-		Logs:            &jsonstore.Logs{S: store},
+		Todos:           todoStore,
+		Searcher:        searcher,
 		Settings:        &jsonstore.Settings{S: store},
-		Attachments:     attachmentStore,
-		Docs:            docSource,
-		Bus:             bus,
+		Credentials:     credentials,
 		AskQuestions:    askService,
-		Toolbox: &tools.Toolbox{
-			Skills:          skillStore,
-			Memory:          &jsonstore.Memory{S: store},
-			Docs:            docSource,
-			Plugins:         pluginStore,
-			PluginInstaller: pluginInstaller,
-			Todos:           todoStore,
-			Searcher:        searcher,
-			Settings:        &jsonstore.Settings{S: store},
-			Credentials:     credentials,
-			AskQuestions:    askService,
-			MCP:             mcpManager,
-		},
+		MCP:             mcpManager,
+	}
+	app := application.NewApp(application.Deps{
+		Version:                     version,
+		DataDir:                     dataDir,
+		Conversations:               store,
+		Providers:                   providerStore,
+		Credentials:                 credentials,
+		Skills:                      skillStore,
+		Memory:                      &jsonstore.Memory{S: store},
+		LearningEdges:               &jsonstore.LearningEdges{S: store},
+		Todos:                       todoStore,
+		Plugins:                     pluginStore,
+		PluginInstaller:             pluginInstaller,
+		Logs:                        &jsonstore.Logs{S: store},
+		Settings:                    &jsonstore.Settings{S: store},
+		Attachments:                 attachmentStore,
+		Docs:                        docSource,
+		Bus:                         bus,
+		AskQuestions:                askService,
+		Toolbox:                     tb,
 		MCPToolbox:                  mcpManager,
 		Factory:                     ai.NewFactory(credentials),
 		EmbedderFactory:             ai.NewEmbedderFactory(),
 		EmbeddingModelListerFactory: ai.NewEmbeddingModelListerFactory(),
 		ModelCatalog:                modelcatalog.New(nil),
 		WorkspacePicker:             workspacepicker.Zenity{},
+		AcpAgents:                   &jsonstore.AcpAgents{S: store},
+		Acp:                         acpRuntime,
 		Logger:                      logger,
 	})
+	tb.Acp = app
+	var autoSvc *application.Automation
+	if svc, autoDB, err := ci.BuildAutomation(dataDir, bus, pluginStore, mcpManager, mcpManager); err != nil {
+		slog.Warn("automation store init failed", "error", err)
+	} else {
+		autoSvc = svc
+		app.Automation = svc
+		defer autoDB.Close()
+		tb.Automation = svc
+		svc.Exec.Agent = application.NewPipelineAgentRunner(tb)
+	}
 	// Wire Codex runtime + OAuth adapters (optional — nil-safe if unavailable)
 	if rt, err := codex.NewRuntimeAdapter(); err == nil {
 		app.CodexRuntime = rt
@@ -248,7 +265,23 @@ func run() error {
 	app.StartAutoModelImport(ctx)
 	app.StartAutoUpdateLoop(ctx, 0)
 	app.StartLifecycle()
+	app.StartMCPAutostart(ctx)
 	defer app.CloseLifecycle()
+	if autoSvc != nil {
+		go func() {
+			_ = autoSvc.Auto.FireDue(context.Background())
+			ticker := time.NewTicker(15 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					_ = autoSvc.Auto.FireDue(context.Background())
+				}
+			}
+		}()
+	}
 
 	go func() {
 		logger.Info("nusashell-light listening", "addr", httpServer.Addr, "data_dir", dataDir, "dev", dev, "version", version)

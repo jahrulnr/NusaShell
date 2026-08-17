@@ -15,7 +15,7 @@ transport/       HTTP /rpc, SSE /events, WebSocket /ws, static assets
 application/     use cases, agent runner, ports, event bus (Bus)
 domain/          pure entities and policies (no I/O imports)
 contracts/       wire types, method roster, golden JSON fixtures
-infrastructure/  jsonstore, sqlitestore, ai adapters, mcpclient, tools, docs
+infrastructure/  jsonstore, sqlitestore, ai adapters, mcpclient, tools, docs, ci
 cmd/nusashell/   composition root (env config, wiring, lifecycle)
 testdata/        fake stdio MCP server used by handler-level tests
 ```
@@ -23,6 +23,12 @@ testdata/        fake stdio MCP server used by handler-level tests
 The dependency rule points inward: domain imports nothing outside stdlib;
 application imports domain + contracts; transport imports application and
 contracts; infrastructure implements application ports.
+
+Automation (CI runner + trigger engine) is wired in `cmd/nusashell`: SQLite
+`automation.db`, local executor, and a 15s `FireDue` loop. Domain types are
+pure; YAML parsing and process execution stay in `infrastructure/ci`. RPC
+methods are `ci.*` and `automation.*`. The frontend Automation view is an
+embedded ES module with no build step.
 
 ## Transports
 

@@ -15,7 +15,9 @@
 <link rel="stylesheet" href="styles/plugins.css">
 <link rel="stylesheet" href="styles/drawer.css">
 <link rel="stylesheet" href="styles/providers.css">
+<link rel="stylesheet" href="styles/acp.css">
 <link rel="stylesheet" href="styles/learning.css">
+<link rel="stylesheet" href="styles/automation.css">
 <link rel="stylesheet" href="styles/logs.css">
 <link rel="stylesheet" href="styles/modals.css">
 <link rel="stylesheet" href="styles/responsive.css">
@@ -66,6 +68,10 @@
         <button class="nav-item" type="button" data-view="learning" data-nav title="Learning">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="M12 3L21 8L12 13L3 8L12 3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M7 11V16C7 16 9 18 12 18C15 18 17 16 17 16V11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 8V13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           <span class="nav-label">Learning</span>
+        </button>
+        <button class="nav-item" type="button" data-view="automation" data-nav title="Automation">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><path d="M12 5V3M12 21v-2M5 12H3M21 12h-2M7.05 7.05 5.64 5.64M18.36 18.36l-1.41-1.41M7.05 16.95l-1.41 1.41M18.36 5.64l-1.41 1.41" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <span class="nav-label">Automation</span>
         </button>
         <button class="nav-item" type="button" data-view="plugins" data-nav title="Plugins">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7"/></svg>
@@ -197,6 +203,18 @@
                 </div>
                 <div class="agent-tool-job-list" id="tool-job-list" role="list" aria-live="off" hidden></div>
               </div>
+
+              <section class="acp-dock" id="acp-dock" hidden aria-label="ACP subagents">
+                <div class="acp-dock-head">
+                  <button class="agent-todo-strip-toggle" id="acp-dock-toggle" type="button" aria-label="ACP subagents" aria-expanded="true" aria-controls="acp-dock-list" title="Collapse/expand subagents">
+                    <span class="agent-todo-strip-chevron" aria-hidden="true">›</span>
+                    <span class="acp-dock-title" id="acp-dock-title">0 subagents</span>
+                  </button>
+                  <span class="acp-dock-meta" id="acp-dock-meta" aria-live="polite"></span>
+                  <button class="mini-btn ghost" id="acp-dock-open-drawer" type="button">Drawer</button>
+                </div>
+                <div class="acp-dock-list" id="acp-dock-list" role="list"></div>
+              </section>
 
               <section class="agent-todo-strip" id="agent-todo-strip" hidden aria-label="Agent task checklist">
                 <div class="agent-todo-strip-head">
@@ -348,13 +366,30 @@
           <div>
             <div class="view-kicker"><span class="view-kicker-dot"></span>Providers</div>
             <h1>AI providers</h1>
-            <p>Anthropic and OpenAI-compatible endpoints. API keys are kept in the local credential store.</p>
+            <p>Chat backends for the Agent composer, plus spawn-only ACP subagents the parent agent can delegate to.</p>
           </div>
-          <button class="action-btn" id="add-provider-btn" type="button">+ Add provider</button>
+          <div class="view-header-actions" id="providers-header-actions">
+            <button class="action-btn" id="add-provider-btn" type="button">+ Add provider</button>
+            <button class="action-btn" id="add-acp-agent-btn" type="button">+ Add ACP agent</button>
+          </div>
         </div>
         <div class="view-body">
-          <div id="provider-registry" class="provider-registry"></div>
-          <div id="provider-detail" hidden></div>
+          <div id="provider-llm-section">
+            <div class="provider-section-head">
+              <div class="view-kicker"><span class="view-kicker-dot"></span>Chat providers</div>
+              <p>Messages, Responses, Chat, Ollama, and Codex. These models appear in the Agent composer.</p>
+            </div>
+            <div id="provider-registry" class="provider-registry"></div>
+            <div id="provider-detail" hidden></div>
+          </div>
+          <div id="provider-acp-section">
+            <div class="provider-section-head">
+              <div class="view-kicker"><span class="view-kicker-dot"></span>ACP subagents</div>
+              <p>Generic command + args agents. They never appear in the composer — the parent agent spawns them via <code>subagent</code>.</p>
+            </div>
+            <div id="acp-agent-registry" class="provider-registry"></div>
+            <div id="acp-agent-detail" hidden></div>
+          </div>
         </div>
       </section>
 
@@ -405,6 +440,62 @@
                 <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-memory"></span>Memory</span>
                 <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-related"></span>Related</span>
                 <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-used"></span>Used with</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== Automation ===== -->
+      <section class="view automation-view" data-view="automation">
+        <div class="view-header automation-header">
+          <div>
+            <div class="view-kicker"><span class="view-kicker-dot"></span>Automation</div>
+            <h1>Pipelines &amp; schedules</h1>
+            <p>Run workspace pipelines, durable once/every/when automations, and inspect waiting or blocked runs.</p>
+          </div>
+          <div class="automation-header-stats">
+            <span class="automation-stat" id="auto-stat-runnable">0 runnable</span>
+            <span class="automation-stat" id="auto-stat-blocked">0 blocked</span>
+            <span class="automation-stat" id="auto-stat-waiting">0 waiting</span>
+          </div>
+        </div>
+        <div class="view-body automation-body">
+          <div class="automation-toolbar">
+            <div class="tabs" id="auto-tabs" role="tablist" aria-label="Automation sections">
+              <button class="tab active" type="button" id="auto-tab-workflows" data-auto-tab="workflows" role="tab" aria-selected="true">Workflows</button>
+              <button class="tab" type="button" id="auto-tab-runs" data-auto-tab="runs" role="tab" aria-selected="false">Runs</button>
+              <button class="tab" type="button" id="auto-tab-schedules" data-auto-tab="schedules" role="tab" aria-selected="false">Schedules</button>
+              <button class="tab" type="button" id="auto-tab-events" data-auto-tab="events" role="tab" aria-selected="false">Events</button>
+            </div>
+            <div class="automation-toolbar-actions">
+              <input type="text" id="auto-workspace" placeholder="Workspace path for .nusashell/pipeline.yaml" autocomplete="off" spellcheck="false">
+              <button class="mini-btn ghost" id="auto-run-pipeline-btn" type="button">Run pipeline</button>
+              <button class="mini-btn" id="auto-new-btn" type="button">New automation</button>
+            </div>
+          </div>
+          <div class="automation-blocked" id="auto-blocked-banner" hidden>
+            <span id="auto-blocked-text">A capability provider is disabled.</span>
+            <button class="mini-btn" id="auto-enable-provider-btn" type="button">Enable provider</button>
+          </div>
+          <div class="automation-workspace">
+            <div class="automation-list-pane">
+              <div class="automation-pane-head">
+                <h2 id="auto-list-title">Workflows</h2>
+                <span id="auto-list-count">0</span>
+              </div>
+              <div class="automation-list" id="auto-list"></div>
+            </div>
+            <div class="automation-detail-pane">
+              <div class="automation-pane-head">
+                <h2 id="auto-detail-title">Detail</h2>
+                <div class="automation-detail-actions" id="auto-detail-actions"></div>
+              </div>
+              <div class="automation-detail" id="auto-detail">
+                <div class="automation-empty">
+                  <strong>No selection</strong>
+                  <span>Pick a workflow or run, or create a once/every/when automation.</span>
+                </div>
               </div>
             </div>
           </div>
@@ -731,6 +822,54 @@
     </div>
   </div>
 </aside>
+
+<!-- ===== ACP subagent drawer ===== -->
+<div class="drawer-overlay acp-drawer-overlay" id="acp-drawer-overlay" aria-hidden="true"></div>
+<aside class="acp-drawer" id="acp-drawer" role="dialog" aria-modal="true" aria-labelledby="acp-drawer-title" aria-hidden="true" inert hidden>
+  <div class="drawer-header">
+    <div class="drawer-title-row">
+      <div class="drawer-icon" aria-hidden="true">ACP</div>
+      <div>
+        <div class="drawer-title" id="acp-drawer-title">Subagents</div>
+        <div class="drawer-subtitle" id="acp-drawer-subtitle">Live ACP sessions</div>
+      </div>
+    </div>
+    <button class="icon-btn" id="acp-drawer-close" type="button" aria-label="Close subagent drawer">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+  <div class="drawer-body" id="acp-drawer-body"></div>
+</aside>
+
+<!-- ===== ACP peek popup ===== -->
+<div class="acp-popup-overlay" id="acp-popup-overlay" hidden>
+  <div class="acp-popup" id="acp-popup" role="dialog" aria-modal="true" aria-labelledby="acp-popup-title">
+    <div class="acp-popup-head">
+      <div>
+        <div class="acp-popup-kicker">Peek</div>
+        <h2 id="acp-popup-title">Subagent</h2>
+      </div>
+      <button class="icon-btn" id="acp-popup-close" type="button" aria-label="Close subagent peek">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="acp-popup-body" id="acp-popup-body"></div>
+  </div>
+</div>
+
+<!-- ===== ACP permission overlay (global) ===== -->
+<div class="acp-permission-overlay" id="acp-permission-overlay" hidden>
+  <div class="acp-permission-dialog" id="acp-permission-dialog" role="alertdialog" aria-modal="true" aria-labelledby="acp-permission-title" aria-describedby="acp-permission-body">
+    <div class="acp-permission-kicker">Permission required</div>
+    <h2 id="acp-permission-title">ACP subagent wants to continue</h2>
+    <div id="acp-permission-body"></div>
+    <div class="acp-permission-actions">
+      <button class="mini-btn ghost" id="acp-permission-deny" type="button">Deny</button>
+      <button class="mini-btn ghost" id="acp-permission-allow-session" type="button">Allow for this session</button>
+      <button class="mini-btn" id="acp-permission-allow" type="button">Allow once</button>
+    </div>
+  </div>
+</div>
 
 <script type="module" src="js/app.js"></script>
 </body>

@@ -20,7 +20,7 @@
         {
           "heading": "Sidebar",
           "paragraphs": [
-            "Vertical navigation on the left, ordered Home, Agent, Skills, Plugins, Providers, Learning, and Logs. It can show icons with labels or icons only, and remembers that choice locally."
+            "Vertical navigation on the left, ordered Home, Agent, Skills, Learning, Automation, Plugins, Providers, and Logs. It can show icons with labels or icons only, and remembers that choice locally."
           ],
           "controls": [
             "sidebar",
@@ -67,7 +67,7 @@
     },
     "agent": {
       "title": "Agent",
-      "purpose": "The default view: multi-conversation chat against any configured provider model. Each conversation keeps its own history on disk and can use skills, memory, docs, and plugin-provided MCP tools.",
+      "purpose": "The default view: multi-conversation chat against any configured provider model. Each conversation keeps its own history on disk and can use skills, memory, docs, plugin-provided MCP tools, and spawned ACP subagents.",
       "howToOpen": "Open NusaShell, or click the Agent item in the left sidebar.",
       "sections": [
         {
@@ -109,6 +109,46 @@
             "tool-job-strip-toggle",
             "tool-job-strip-title",
             "tool-job-strip-meta"
+          ]
+        },
+        {
+          "heading": "ACP subagent dock",
+          "paragraphs": [
+            "Appears above the composer when ACP subagents are live (or recently finished in this room). Each chip opens the right-hand drawer; the peek control opens a popup for one run. Drawer and popup support steer, stop, mode changes, and risk promotion. Permission prompts use a global overlay that stays visible across views."
+          ],
+          "controls": [
+            "acp-dock",
+            "acp-dock-toggle",
+            "acp-dock-title",
+            "acp-dock-meta",
+            "acp-dock-open-drawer",
+            "acp-dock-list"
+          ]
+        },
+        {
+          "heading": "ACP live views",
+          "paragraphs": [
+            "The drawer lists every live spawn so you can switch between parallel subagents. The peek popup focuses one run. The permission overlay is fail-closed: timeout denies. Allow once, allow for this session, or deny."
+          ],
+          "controls": [
+            "acp-drawer-overlay",
+            "acp-drawer",
+            "acp-drawer-close",
+            "acp-drawer-title",
+            "acp-drawer-subtitle",
+            "acp-drawer-body",
+            "acp-popup-overlay",
+            "acp-popup",
+            "acp-popup-close",
+            "acp-popup-title",
+            "acp-popup-body",
+            "acp-permission-overlay",
+            "acp-permission-dialog",
+            "acp-permission-title",
+            "acp-permission-body",
+            "acp-permission-deny",
+            "acp-permission-allow-session",
+            "acp-permission-allow"
           ]
         },
         {
@@ -296,26 +336,40 @@
     },
     "providers": {
       "title": "Providers",
-      "purpose": "Configure LLM backends by wire format (Messages, Responses, Chat, Ollama, Codex). API keys live in the local SQLite credential store, never in the JSON files.",
+      "purpose": "Configure LLM chat backends by wire format (Messages, Responses, Chat, Ollama, Codex) and spawn-only ACP subagent binaries. Chat API keys live in the local SQLite credential store. ACP env values stay on disk in acp-agents.json; the wire API only returns env keys.",
       "howToOpen": "Click the Providers item in the left sidebar.",
       "sections": [
         {
           "heading": "Header",
           "paragraphs": [
-            "View title and an Add provider button."
+            "View title plus Add provider (chat backends) and Add ACP agent (spawn-only subprocesses)."
           ],
           "controls": [
-            "add-provider-btn"
+            "providers-header-actions",
+            "add-provider-btn",
+            "add-acp-agent-btn"
           ]
         },
         {
-          "heading": "Registry and detail",
+          "heading": "Chat providers",
           "paragraphs": [
-            "The registry lists providers as cards. Selecting one opens the detail pane for editing the base URL, API key, enabled state, importing models, and testing connectivity."
+            "The registry lists LLM providers as cards. Selecting one opens the detail pane for editing the base URL, API key, enabled state, importing models, and testing connectivity. These models appear in the Agent composer."
           ],
           "controls": [
+            "provider-llm-section",
             "provider-registry",
             "provider-detail"
+          ]
+        },
+        {
+          "heading": "ACP subagents",
+          "paragraphs": [
+            "A separate registry for Agent Client Protocol binaries. Register a generic command + args + env. Probe discovers auth methods, modes, and models at runtime. ACP agents never appear in the composer; the parent agent spawns them with the subagent tool. Command is immutable after save."
+          ],
+          "controls": [
+            "provider-acp-section",
+            "acp-agent-registry",
+            "acp-agent-detail"
           ]
         }
       ]
@@ -365,6 +419,65 @@
             "learning-graph",
             "learning-graph-refresh",
             "learning-graph-fit"
+          ]
+        }
+      ]
+    },
+    "automation": {
+      "title": "Automation",
+      "purpose": "Run workspace pipelines, manage durable once/every/when automations, inspect DAG runs, and see waiting or blocked states without occupying a runner.",
+      "howToOpen": "Click the Automation item in the left sidebar.",
+      "sections": [
+        {
+          "heading": "Header stats",
+          "paragraphs": [
+            "Counts of runnable, blocked, and waiting automations so provider outages are visible without opening a run."
+          ],
+          "controls": [
+            "auto-stat-runnable",
+            "auto-stat-blocked",
+            "auto-stat-waiting"
+          ]
+        },
+        {
+          "heading": "Toolbar",
+          "paragraphs": [
+            "Tabs switch between Workflows, Runs, Schedules, and Events. The workspace field is used when starting .nusashell/pipeline.yaml. New automation opens a once/every/when/manual wizard. Run pipeline starts the workspace file."
+          ],
+          "controls": [
+            "auto-tabs",
+            "auto-tab-workflows",
+            "auto-tab-runs",
+            "auto-tab-schedules",
+            "auto-tab-events",
+            "auto-workspace",
+            "auto-run-pipeline-btn",
+            "auto-new-btn"
+          ]
+        },
+        {
+          "heading": "Blocked provider",
+          "paragraphs": [
+            "When a saved automation depends on a disabled MCP provider it stays BLOCKED rather than FAILED. Enable provider restores the binding without rewriting the workflow."
+          ],
+          "controls": [
+            "auto-blocked-banner",
+            "auto-blocked-text",
+            "auto-enable-provider-btn"
+          ]
+        },
+        {
+          "heading": "List and detail",
+          "paragraphs": [
+            "The list shows the active tab. The detail pane renders job needs as a DAG, waiting wake times, and run/enable/disable/cancel actions."
+          ],
+          "controls": [
+            "auto-list",
+            "auto-list-title",
+            "auto-list-count",
+            "auto-detail",
+            "auto-detail-title",
+            "auto-detail-actions"
           ]
         }
       ]
@@ -626,7 +739,7 @@
       "label": "Composer stack",
       "section": "Agent",
       "type": "container",
-      "notes": "Holds tool strip, todo strip, steer queue, and composer."
+      "notes": "Holds ACP dock, tool strip, todo strip, steer queue, and composer."
     },
     "tool-job-strip": {
       "label": "Tool calls strip",
@@ -1369,6 +1482,171 @@
       "label": "Selected ZIP file name",
       "section": "Plugins",
       "type": "text"
+    },
+    "providers-header-actions": {
+      "label": "Providers header actions",
+      "section": "Providers",
+      "type": "container"
+    },
+    "add-acp-agent-btn": {
+      "label": "Add ACP agent",
+      "section": "Providers",
+      "type": "button",
+      "action": "Opens a generic command/args/env form to register a spawn-only ACP binary."
+    },
+    "provider-llm-section": {
+      "label": "Chat providers section",
+      "section": "Providers",
+      "type": "container"
+    },
+    "provider-acp-section": {
+      "label": "ACP subagents section",
+      "section": "Providers",
+      "type": "container"
+    },
+    "acp-agent-registry": {
+      "label": "ACP agent registry",
+      "section": "Providers",
+      "type": "list",
+      "notes": "Cards for spawn-only ACP binaries. Not shown in the Agent composer."
+    },
+    "acp-agent-detail": {
+      "label": "ACP agent detail",
+      "section": "Providers",
+      "type": "panel",
+      "notes": "Edit label/args/env, probe, authenticate, refresh catalog, and map advertised modes to risk tiers. Command is read-only after save."
+    },
+    "acp-dock": {
+      "label": "ACP subagent dock",
+      "section": "Agent",
+      "type": "container",
+      "notes": "Hidden until at least one live or recently finished ACP run exists."
+    },
+    "acp-dock-toggle": {
+      "label": "ACP dock toggle",
+      "section": "Agent",
+      "type": "button",
+      "action": "Collapse/expand the subagent chip list."
+    },
+    "acp-dock-title": {
+      "label": "ACP dock title",
+      "section": "Agent",
+      "type": "text"
+    },
+    "acp-dock-meta": {
+      "label": "ACP dock meta",
+      "section": "Agent",
+      "type": "text"
+    },
+    "acp-dock-open-drawer": {
+      "label": "Open ACP drawer",
+      "section": "Agent",
+      "type": "button",
+      "action": "Opens the right-hand multi-subagent drawer."
+    },
+    "acp-dock-list": {
+      "label": "ACP dock chips",
+      "section": "Agent",
+      "type": "list"
+    },
+    "acp-drawer-overlay": {
+      "label": "ACP drawer overlay",
+      "section": "Agent",
+      "type": "overlay",
+      "action": "Click to close the subagent drawer."
+    },
+    "acp-drawer": {
+      "label": "ACP subagent drawer",
+      "section": "Agent",
+      "type": "drawer",
+      "notes": "Wider than the plugin drawer so a live transcript, steer box, and mode chips fit."
+    },
+    "acp-drawer-close": {
+      "label": "Close ACP drawer",
+      "section": "Agent",
+      "type": "button",
+      "action": "Closes the subagent drawer."
+    },
+    "acp-drawer-title": {
+      "label": "ACP drawer title",
+      "section": "Agent",
+      "type": "text"
+    },
+    "acp-drawer-subtitle": {
+      "label": "ACP drawer subtitle",
+      "section": "Agent",
+      "type": "text"
+    },
+    "acp-drawer-body": {
+      "label": "ACP drawer body",
+      "section": "Agent",
+      "type": "container"
+    },
+    "acp-popup-overlay": {
+      "label": "ACP peek overlay",
+      "section": "Agent",
+      "type": "overlay",
+      "action": "Click outside the dialog to close the peek popup."
+    },
+    "acp-popup": {
+      "label": "ACP peek popup",
+      "section": "Agent",
+      "type": "dialog"
+    },
+    "acp-popup-close": {
+      "label": "Close ACP peek",
+      "section": "Agent",
+      "type": "button",
+      "action": "Closes the peek popup."
+    },
+    "acp-popup-title": {
+      "label": "ACP peek title",
+      "section": "Agent",
+      "type": "text"
+    },
+    "acp-popup-body": {
+      "label": "ACP peek body",
+      "section": "Agent",
+      "type": "container"
+    },
+    "acp-permission-overlay": {
+      "label": "ACP permission overlay",
+      "section": "Agent",
+      "type": "overlay",
+      "notes": "Global. Timeout denies. Stays visible if you leave the Agent view."
+    },
+    "acp-permission-dialog": {
+      "label": "ACP permission dialog",
+      "section": "Agent",
+      "type": "dialog"
+    },
+    "acp-permission-title": {
+      "label": "ACP permission title",
+      "section": "Agent",
+      "type": "text"
+    },
+    "acp-permission-body": {
+      "label": "ACP permission details",
+      "section": "Agent",
+      "type": "container"
+    },
+    "acp-permission-deny": {
+      "label": "Deny ACP permission",
+      "section": "Agent",
+      "type": "button",
+      "action": "Denies the pending tool. Fail-closed."
+    },
+    "acp-permission-allow-session": {
+      "label": "Allow ACP permission for session",
+      "section": "Agent",
+      "type": "button",
+      "action": "Allows this tool and auto-allows later permission prompts on the same run."
+    },
+    "acp-permission-allow": {
+      "label": "Allow ACP permission once",
+      "section": "Agent",
+      "type": "button",
+      "action": "Allows this tool call once."
     }
   }
 }

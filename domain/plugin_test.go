@@ -45,6 +45,25 @@ func TestPluginManifestValidateRejectsUnsafeIDs(t *testing.T) {
 	}
 }
 
+func TestPluginManifestValidateRejectsRootedUIEntry(t *testing.T) {
+	base := PluginManifest{
+		ID: "notes", Name: "n", Version: "1", Icon: "x",
+		MCP: PluginMCPConfig{Transport: PluginTransportStdio, Command: "x"},
+	}
+	ok := base
+	ok.UI = &PluginUIConfig{Entry: "ui/index.html"}
+	if err := ok.Validate(); err != nil {
+		t.Fatalf("relative ui.entry should be valid: %v", err)
+	}
+	for _, entry := range []string{"/etc/index.html", `\Windows\index.html`, `C:\plugins\index.html`} {
+		bad := base
+		bad.UI = &PluginUIConfig{Entry: entry}
+		if err := bad.Validate(); err == nil {
+			t.Fatalf("ui.entry %q must be rejected", entry)
+		}
+	}
+}
+
 func TestValidatePluginID(t *testing.T) {
 	cases := []struct {
 		id   string

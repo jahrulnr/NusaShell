@@ -20,6 +20,7 @@ import (
 
 	"nusashell/application"
 	"nusashell/frontend"
+	"nusashell/infrastructure/acpruntime"
 	"nusashell/infrastructure/ai"
 	"nusashell/infrastructure/docs"
 	"nusashell/infrastructure/jsonstore"
@@ -507,6 +508,7 @@ type harness struct {
 }
 
 var fakemcpBin string
+var fakeacpBin string
 
 func TestMain(m *testing.M) {
 	root, err := moduleRoot()
@@ -530,8 +532,25 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "build fakemcp: %v\n%s", err, out)
 		os.Exit(1)
 	}
+	acp, err := os.CreateTemp("", "fakeacp-*")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	acp.Close()
+	os.Remove(acp.Name())
+	fakeacpBin = acp.Name()
+	if runtime.GOOS == "windows" {
+		fakeacpBin += ".exe"
+	}
+	cmd = exec.Command("go", "build", "-o", fakeacpBin, filepath.Join(root, "testdata", "fakeacp"))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "build fakeacp: %v\n%s", err, out)
+		os.Exit(1)
+	}
 	code := m.Run()
 	os.Remove(fakemcpBin)
+	os.Remove(fakeacpBin)
 	os.Exit(code)
 }
 
@@ -578,6 +597,14 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
+	acpRuntime := acpruntime.New()
+	tb := &tools.Toolbox{
+		Skills:  &jsonstore.Skills{S: store},
+		Memory:  &jsonstore.Memory{S: store},
+		Docs:    docSource,
+		Plugins: pluginStore,
+		MCP:     mcpManager,
+	}
 	app := application.NewApp(application.Deps{
 		Version:       "test",
 		DataDir:       dataDir,
@@ -591,19 +618,16 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 		Docs:          docSource,
 		Bus:           bus,
 		Plugins:       pluginStore,
-		Toolbox: &tools.Toolbox{
-			Skills:  &jsonstore.Skills{S: store},
-			Memory:  &jsonstore.Memory{S: store},
-			Docs:    docSource,
-			Plugins: pluginStore,
-			MCP:     mcpManager,
-		},
-		MCPToolbox: mcpManager,
-		Factory:    ai.NewFactory(creds),
+		Toolbox:       tb,
+		MCPToolbox:    mcpManager,
+		AcpAgents:     &jsonstore.AcpAgents{S: store},
+		Acp:           acpRuntime,
+		Factory:       ai.NewFactory(creds),
 		RetrySleeper: func(context.Context, time.Duration) error {
 			return nil
 		},
 	})
+	tb.Acp = app
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := New(app, logger, StaticHandler(frontend.FS, false), false)
 	httpSrv := httptest.NewServer(srv.Routes())
