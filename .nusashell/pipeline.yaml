@@ -1,0 +1,34 @@
+version: 1
+name: NusaShell verification
+triggers:
+  manual: true
+defaults:
+  shell: auto
+  timeout: 10m
+env:
+  CI: "true"
+jobs:
+  test-backend:
+    name: Backend tests
+    runs_on: [local]
+    steps:
+      - name: Format
+        run: test -z "$(gofmt -l .)"
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
+  test-frontend:
+    name: Frontend tests
+    runs_on: [local]
+    steps:
+      - name: Syntax
+        run: node --check frontend/js/app.js
+      - name: Test
+        run: node --test frontend/*.test.mjs
+  build:
+    name: Build
+    needs: [test-backend, test-frontend]
+    steps:
+      - name: Build
+        run: go build ./cmd/nusashell

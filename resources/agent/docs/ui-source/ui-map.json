@@ -20,7 +20,7 @@
         {
           "heading": "Sidebar",
           "paragraphs": [
-            "Vertical navigation on the left, ordered Home, Agent, Skills, Plugins, Providers, Learning, and Logs. It can show icons with labels or icons only, and remembers that choice locally."
+            "Vertical navigation on the left, ordered Home, Agent, Skills, Learning, Automation, Plugins, Providers, and Logs. It can show icons with labels or icons only, and remembers that choice locally."
           ],
           "controls": [
             "sidebar",
@@ -365,6 +365,65 @@
             "learning-graph",
             "learning-graph-refresh",
             "learning-graph-fit"
+          ]
+        }
+      ]
+    },
+    "automation": {
+      "title": "Automation",
+      "purpose": "Run workspace pipelines, manage durable once/every/when automations, inspect DAG runs, and see waiting or blocked states without occupying a runner.",
+      "howToOpen": "Click the Automation item in the left sidebar.",
+      "sections": [
+        {
+          "heading": "Header stats",
+          "paragraphs": [
+            "Counts of runnable, blocked, and waiting automations so provider outages are visible without opening a run."
+          ],
+          "controls": [
+            "auto-stat-runnable",
+            "auto-stat-blocked",
+            "auto-stat-waiting"
+          ]
+        },
+        {
+          "heading": "Toolbar",
+          "paragraphs": [
+            "Tabs switch between Workflows, Runs, Schedules, and Events. The workspace field is used when starting .nusashell/pipeline.yaml. New automation opens a once/every/when/manual wizard. Run pipeline starts the workspace file."
+          ],
+          "controls": [
+            "auto-tabs",
+            "auto-tab-workflows",
+            "auto-tab-runs",
+            "auto-tab-schedules",
+            "auto-tab-events",
+            "auto-workspace",
+            "auto-run-pipeline-btn",
+            "auto-new-btn"
+          ]
+        },
+        {
+          "heading": "Blocked provider",
+          "paragraphs": [
+            "When a saved automation depends on a disabled MCP provider it stays BLOCKED rather than FAILED. Enable provider restores the binding without rewriting the workflow."
+          ],
+          "controls": [
+            "auto-blocked-banner",
+            "auto-blocked-text",
+            "auto-enable-provider-btn"
+          ]
+        },
+        {
+          "heading": "List and detail",
+          "paragraphs": [
+            "The list shows the active tab. The detail pane renders job needs as a DAG, waiting wake times, and run/enable/disable/cancel actions."
+          ],
+          "controls": [
+            "auto-list",
+            "auto-list-title",
+            "auto-list-count",
+            "auto-detail",
+            "auto-detail-title",
+            "auto-detail-actions"
           ]
         }
       ]

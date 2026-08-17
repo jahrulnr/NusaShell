@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Automation engine and CI runner.** Workspace `.nusashell/pipeline.yaml`
+  plus saved once/every/when automations, a local executor, SQLite
+  `automation.db`, agent tools (`ci_*`, `automation_*`, `schedule_*`,
+  `wait_until`), RPC (`ci.*` / `automation.*`), and an Automation sidebar
+  view. Waiting parks the run without occupying a runner. Disabled MCP
+  providers block dependent automations instead of failing them.
+
 ### Changed
 
 - **Unified plugins model.** MCP servers and installed plugins are now one

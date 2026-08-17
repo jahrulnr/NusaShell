@@ -25,11 +25,28 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `web_search` | search the web across Brave, Startpage, Wikipedia, and GitHub; returns ranked results with title, URL, and snippet |
 | `web_fetch` | fetch a URL and return readable text; supports HTML, JSON (pretty-printed), XML/RSS/Atom, Markdown, CSV, and plain text with newlines preserved; collects links and selected response headers; honors `max_bytes`; surfaces `Retry-After` on 429/503 and structured JSON error bodies |
 | `web_answer` | get a web-grounded answer via an LLM with built-in web search (only available when an answer-provider API key is configured) |
+| `ci_pipeline_list` | list `.nusashell/pipeline.yaml` jobs in a workspace |
+| `ci_pipeline_read` | read and validate the workspace pipeline |
+| `ci_pipeline_validate` | validate pipeline/workflow YAML (INVALID vs BLOCKED) |
+| `ci_run` | start a workspace pipeline or a saved automation |
+| `ci_run_status` | DAG summary and status; use this after `ci_run` |
+| `ci_logs` | job log tail (prefer failed jobs) |
+| `ci_cancel` | cancel a run |
+| `automation_list` | saved automations with availability |
+| `automation_read` | one automation plus capability bindings |
+| `automation_validate` | validate YAML |
+| `automation_create` | persist a once/every/when/manual workflow (NusaShell owns the schedule) |
+| `automation_enable` / `automation_disable` | lifecycle without deleting |
+| `automation_status` | inspect waiting/blocked runs |
+| `schedule_once` | one-shot RFC3339 automation |
+| `schedule_every` | cron or interval automation (not equivalent) |
+| `wait_until` | durable wait; the runner is not occupied |
 
 The system prompt advertises the same set: `skill_list`, `skill_search`,
 `skill_read`, `memory_*`, `docs_*`, `mcp_list`, `tool_list`, `tool_search`,
 `tool_schema`, `read_image`, `web_search`, `web_fetch`,
-`web_answer` (when available), plus `mcp__<server>__<tool>` for each enabled MCP server.
+`web_answer` (when available), `ci_*`, `automation_*`, `schedule_once`,
+`schedule_every`, `wait_until`, plus `mcp__<server>__<tool>` for each enabled MCP server.
 
 ## Native web research (searchwire)
 

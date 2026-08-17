@@ -21,6 +21,10 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `logs.jsonl` | activity log (bounded ring) | JSONL |
 | `settings.json` | compaction / caching settings | JSON |
 | `credentials.db` | API keys per provider | SQLite |
+| `automation.db` | workflows, runs, schedules, events, waits, locks | SQLite |
+| `ci/runs/` | local executor scratch directories | files |
+
+Workspace pipelines live in the project tree as `.nusashell/pipeline.yaml`, not under the data directory.
 
 Credentials never appear in the JSON/JSONL files. Deleting the data
 directory removes everything, including stored keys.

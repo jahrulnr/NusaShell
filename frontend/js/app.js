@@ -9,6 +9,7 @@ import { initProviders, refresh as refreshProviders } from './views/providers.js
 import { initLogs, refresh as refreshLogs } from './views/logs.js';
 import { initSettings, refresh as refreshSettings } from './views/settings.js';
 import { initLearning, refresh as refreshLearning } from './views/learning.js';
+import { initAutomation, refresh as refreshAutomation } from './views/automation.js';
 import { toast, dismissOpenDialogs } from './ui.js';
 
 const viewRefresh = {
@@ -20,6 +21,7 @@ const viewRefresh = {
   logs: refreshLogs,
   settings: refreshSettings,
   learning: refreshLearning,
+  automation: refreshAutomation,
 };
 
 function setConnection(status) {
@@ -151,6 +153,7 @@ async function boot() {
     initLogs(),
     initSettings(),
     initLearning(),
+    initAutomation(),
   ]);
   // never swallow init failures silently: a dead view is a bug, not a state
   for (const r of results) {

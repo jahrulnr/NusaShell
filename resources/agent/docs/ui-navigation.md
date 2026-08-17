@@ -25,7 +25,7 @@ Identifies NusaShell with its brand mark and wordmark, followed by compact backe
 
 ## Sidebar
 
-Vertical navigation on the left, ordered Home, Agent, Skills, Plugins, Providers, Learning, and Logs. It can show icons with labels or icons only, and remembers that choice locally.
+Vertical navigation on the left, ordered Home, Agent, Skills, Learning, Automation, Plugins, Providers, and Logs. It can show icons with labels or icons only, and remembers that choice locally.
 
 - **Sidebar** (`#sidebar`):
   - Section: Sidebar

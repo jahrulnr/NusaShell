@@ -8,7 +8,7 @@ file under `conversations/` in the data directory.
 
 1. You send a message; the shell appends your message to the conversation.
 2. The agent builds a request from the history, the system prompt and the
-   live tool list (skills, memory, docs, MCP servers).
+   live tool list (skills, memory, docs, MCP servers, CI/automation).
 3. The provider streams text and tool calls back; each delta is pushed to
    the UI over SSE and WebSocket.
 4. Tool calls are executed locally and their results feed the next round,
@@ -161,3 +161,9 @@ paths are rejected — only absolute paths are accepted.
 The image attachment is preserved on the original user message, so
 `read_image` can re-load it even after compaction prunes it from the
 visible context window.
+
+## Automation
+
+Durable pipelines and schedules are a separate subsystem (see the Automation
+page). Use `ci_*` / `automation_*` / `schedule_*` tools; NusaShell owns the
+timer table in `automation.db`. A `waiting` run does not hold a runner.
