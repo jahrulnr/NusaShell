@@ -8,10 +8,7 @@ Author and manage markdown instruction packs the agent can load on demand via `s
 
 View title and a New skill button.
 
-- **New skill** (`#new-skill-btn`):
-  - Section: Skills
-  - Type: button
-  - Action: Creates a new skill and opens the editor.
+- **`#new-skill-btn`** (missing map entry)
 
 ## Catalog
 
@@ -36,43 +33,27 @@ Edit the selected skill's name, description, and markdown content. Run opens the
 - **Editor title** (`#skill-editor-title`):
   - Section: Skills
   - Type: text
+  - Notes: Shows the selected skill name or 'No file selected'.
 
 - **Editor meta** (`#skill-editor-meta`):
   - Section: Skills
   - Type: text
 
-- **Run skill** (`#skill-run-btn`):
-  - Section: Skills
-  - Type: button
-  - Action: Opens the skill in a new Agent conversation as its system context.
+- **`#skill-run-btn`** (missing map entry)
 
-- **Save skill** (`#skill-save-btn`):
-  - Section: Skills
-  - Type: button
-  - Action: Persists the edited skill.
+- **`#skill-save-btn`** (missing map entry)
 
-- **Delete skill** (`#skill-delete-btn`):
-  - Section: Skills
-  - Type: button
-  - Action: Deletes the selected skill.
+- **`#skill-delete-btn`** (missing map entry)
 
-- **Editor form** (`#skill-editor-form`):
-  - Section: Skills
-  - Type: container
+- **`#skill-editor-form`** (missing map entry)
 
-- **Skill name** (`#skill-name`):
-  - Section: Skills
-  - Type: input
+- **`#skill-name`** (missing map entry)
 
-- **Skill description** (`#skill-description`):
-  - Section: Skills
-  - Type: input
+- **`#skill-description`** (missing map entry)
 
-- **Skill markdown** (`#skill-content`):
-  - Section: Skills
-  - Type: textarea
-  - Notes: Injected verbatim into the agent context when loaded.
+- **`#skill-content`** (missing map entry)
 
 - **Editor empty state** (`#skill-editor-empty`):
   - Section: Skills
   - Type: text
+  - Notes: Empty state shown when no file is selected. Prompts user to pick a file from the skill tree.

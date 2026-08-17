@@ -1,21 +1,34 @@
-// Skills workspace: catalog + editor.
+// Skills workspace: catalog + file tree + file viewer.
 
 import { rpc } from '../rpc.js';
-import { el, toast, confirmDialog, debounce } from '../ui.js';
+import { el, debounce, toast } from '../ui.js';
 
-const state = { skills: [], activeId: null, dirty: false };
+const state = { skills: [], activeId: null, activeFile: null };
 
 export async function initSkills() {
-  document.getElementById('new-skill-btn').addEventListener('click', newSkill);
-  document.getElementById('skill-save-btn').addEventListener('click', saveSkill);
-  document.getElementById('skill-delete-btn').addEventListener('click', deleteSkill);
-  document.getElementById('skill-run-btn').addEventListener('click', runSkill);
   document.getElementById('skills-search').addEventListener('input', debounce(renderList, 150));
-
-  for (const id of ['skill-name', 'skill-description', 'skill-content']) {
-    document.getElementById(id).addEventListener('input', () => { state.dirty = true; });
-  }
+  document.getElementById('install-skill-btn').addEventListener('click', () => {
+    document.getElementById('skill-file-input').click();
+  });
+  document.getElementById('skill-file-input').addEventListener('change', installSkill);
+  initSplitters();
   await refresh();
+}
+
+async function installSkill(e) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  e.target.value = ''; // reset for re-install
+  try {
+    const buf = await file.arrayBuffer();
+    const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+    const res = await rpc('skills.install', { data: b64, filename: file.name });
+    toast(`Installed: ${res.name}`, 'success');
+    await refresh();
+    selectSkill(res.id);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
 }
 
 export async function refresh() {
@@ -26,7 +39,7 @@ export async function refresh() {
   if (state.activeId) {
     const still = skills.find((s) => s.id === state.activeId);
     if (!still) { state.activeId = null; showEmpty(); }
-    else await selectSkill(state.activeId, false);
+    else await selectSkill(state.activeId);
   }
 }
 
@@ -38,7 +51,7 @@ function renderList() {
   if (!filtered.length) {
     list.append(el('div', { class: 'skills-empty' },
       el('strong', { text: q ? 'No matching skills' : 'No skills yet' }),
-      el('span', { text: q ? 'Try a different search.' : 'Create a skill to give the agent reusable instructions.' }),
+      el('span', { text: q ? 'Try a different search.' : 'Skills are managed via the file system.' }),
     ));
     return;
   }
@@ -56,133 +69,137 @@ function renderList() {
   }
 }
 
-async function selectSkill(id, reload = true) {
-  if (state.dirty && reload) {
-    const ok = await confirmDialog('Discard changes?', 'You have unsaved edits. Discard them and switch skills?', 'Discard', true);
-    if (!ok) return;
-    state.dirty = false;
-  }
+async function selectSkill(id) {
   state.activeId = id;
+  state.activeFile = null;
   const { skill } = await rpc('skills.read', { id });
   renderList();
   document.getElementById('skill-editor-title').textContent = skill.name;
   document.getElementById('skill-editor-meta').textContent = skill.description || '';
-  document.getElementById('skill-name').value = skill.name;
-  document.getElementById('skill-description').value = skill.description || '';
-  document.getElementById('skill-content').value = skill.content || '';
-  document.getElementById('skill-editor-form').hidden = false;
   document.getElementById('skill-editor-empty').hidden = true;
-  document.getElementById('skill-save-btn').hidden = false;
-  document.getElementById('skill-delete-btn').hidden = false;
-  document.getElementById('skill-run-btn').hidden = false;
-  renderSkillFiles(skill.files);
-  state.dirty = false;
+  document.getElementById('skill-file-viewer').hidden = true;
+  renderSkillFiles(skill.files, skill.name);
 }
 
-function renderSkillFiles(files) {
-  const panel = document.getElementById('skill-files');
+function renderSkillFiles(files, skillName) {
   const tree = document.getElementById('skill-files-tree');
-  if (!panel || !tree) return;
-  if (!Array.isArray(files) || files.length === 0) {
-    panel.hidden = true;
-    tree.replaceChildren();
+  const empty = document.getElementById('skill-tree-empty');
+  const meta = document.getElementById('skill-tree-meta');
+  if (!tree) return;
+  tree.replaceChildren();
+  const fileEntries = (files || []).filter((f) => f.type === 'file');
+  if (fileEntries.length === 0) {
+    tree.hidden = true;
+    if (empty) empty.hidden = false;
+    if (meta) meta.textContent = skillName ? `${skillName} — no files` : 'No skill selected';
     return;
   }
-  panel.hidden = false;
-  tree.replaceChildren();
-  for (const f of files) {
-    const row = el('div', { class: 'skill-file-row' + (f.type === 'directory' ? ' is-dir' : '') },
-      el('span', { class: 'skill-file-icon', text: f.type === 'directory' ? '▸' : '·' }),
-      el('span', { class: 'skill-file-path', text: f.path }),
-      f.type === 'file' ? el('span', { class: 'skill-file-size', text: `${f.sizeBytes} B` }) : null,
+  tree.hidden = false;
+  if (empty) empty.hidden = true;
+  if (meta) meta.textContent = skillName || '';
+  for (const f of fileEntries) {
+    const row = el('div', {
+      class: 'skill-file-row' + (state.activeFile === f.path ? ' active' : ''),
+    },
+      el('span', { class: 'skill-file-icon', text: '·' }),
+      el('span', { class: 'skill-file-path', text: f.path, title: f.path }),
+      el('span', { class: 'skill-file-size', text: formatFileSize(f.sizeBytes) }),
     );
+    row.addEventListener('click', () => openSkillFile(f.path));
     tree.append(row);
   }
 }
 
+function formatFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function openSkillFile(path) {
+  if (!state.activeId) return;
+  state.activeFile = path;
+  // Re-render tree to highlight active file.
+  const skill = state.skills.find((s) => s.id === state.activeId);
+  if (skill) {
+    const { skill: full } = await rpc('skills.read', { id: state.activeId });
+    renderSkillFiles(full.files, skill.name);
+  }
+  try {
+    const res = await rpc('skills.file.read', { id: state.activeId, path });
+    document.getElementById('skill-editor-empty').hidden = true;
+    document.getElementById('skill-file-viewer').hidden = false;
+    document.getElementById('skill-file-path').textContent = path;
+    document.getElementById('skill-file-size').textContent = formatFileSize(res.sizeBytes) + (res.truncated ? ' (truncated)' : '');
+    document.getElementById('skill-file-content').textContent = res.content || '';
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
 function showEmpty() {
-  const panel = document.getElementById('skill-files');
-  if (panel) panel.hidden = true;
-  document.getElementById('skill-editor-title').textContent = 'No skill selected';
+  document.getElementById('skill-editor-title').textContent = 'No file selected';
   document.getElementById('skill-editor-meta').textContent = '';
-  document.getElementById('skill-editor-form').hidden = true;
   document.getElementById('skill-editor-empty').hidden = false;
-  document.getElementById('skill-save-btn').hidden = true;
-  document.getElementById('skill-delete-btn').hidden = true;
-  document.getElementById('skill-run-btn').hidden = true;
+  document.getElementById('skill-file-viewer').hidden = true;
+  const tree = document.getElementById('skill-files-tree');
+  if (tree) tree.replaceChildren();
+  const empty = document.getElementById('skill-tree-empty');
+  if (empty) empty.hidden = false;
+  const meta = document.getElementById('skill-tree-meta');
+  if (meta) meta.textContent = 'No skill selected';
+  state.activeFile = null;
 }
 
-async function newSkill() {
-  if (state.dirty) {
-    const ok = await confirmDialog('Discard changes?', 'You have unsaved edits. Discard them and start a new skill?', 'Discard', true);
-    if (!ok) return;
-  }
-  state.activeId = null;
-  state.dirty = false;
-  renderList();
-  document.getElementById('skill-editor-title').textContent = 'New skill';
-  document.getElementById('skill-editor-meta').textContent = 'not saved yet';
-  document.getElementById('skill-name').value = '';
-  document.getElementById('skill-description').value = '';
-  document.getElementById('skill-content').value = '';
-  document.getElementById('skill-editor-form').hidden = false;
-  document.getElementById('skill-editor-empty').hidden = true;
-  document.getElementById('skill-save-btn').hidden = false;
-  document.getElementById('skill-delete-btn').hidden = true;
-  document.getElementById('skill-run-btn').hidden = true;
-  document.getElementById('skill-name').focus();
+// ---- Draggable splitters ----
+
+function initSplitters() {
+  const ws = document.getElementById('skills-workspace');
+  if (!ws) return;
+  const s1 = document.getElementById('skills-splitter-1');
+  const s2 = document.getElementById('skills-splitter-2');
+
+  const saved1 = localStorage.getItem('skills-col-1');
+  const saved2 = localStorage.getItem('skills-col-2');
+  if (saved1) ws.style.setProperty('--skills-col-1', saved1);
+  if (saved2) ws.style.setProperty('--skills-col-2', saved2);
+
+  if (s1) makeSplitter(s1, ws, '--skills-col-1', 150, 450);
+  if (s2) makeSplitter(s2, ws, '--skills-col-2', 150, 500);
 }
 
-async function saveSkill() {
-  const name = document.getElementById('skill-name').value.trim();
-  const description = document.getElementById('skill-description').value.trim();
-  const content = document.getElementById('skill-content').value;
-  if (!name) { toast('Skill name is required', 'error'); return; }
-  if (!content.trim()) { toast('Skill content is required', 'error'); return; }
-  try {
-    const { skill } = await rpc('skills.save', {
-      id: state.activeId || undefined,
-      name,
-      description,
-      content,
-    });
-    state.activeId = skill.id;
-    state.dirty = false;
-    toast('Skill saved', 'success');
-    await refresh();
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-}
+function makeSplitter(splitter, ws, varName, minPx, maxPx) {
+  let dragging = false;
 
-async function deleteSkill() {
-  const ok = await confirmDialog('Delete skill', `"${document.getElementById('skill-name').value}" will be removed from the library.`, 'Delete');
-  if (!ok) return;
-  try {
-    await rpc('skills.delete', { id: state.activeId });
-    state.activeId = null;
-    toast('Skill deleted', 'success');
-    await refresh();
-    showEmpty();
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-}
+  splitter.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    dragging = true;
+    splitter.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  });
 
-async function runSkill() {
-  try {
-    const { conversation_id } = await rpc('skills.run', { id: state.activeId });
-    toast('Skill opened in a new conversation', 'success');
-    // navigate to the agent view; it will pick up the new conversation on next refresh
-    document.querySelector('[data-nav][data-view="agent"]').click();
-    await new Promise((r) => setTimeout(r, 150));
-    const { conversations } = await rpc('agent.conversations.list');
-    const conv = conversations.find((c) => c.id === conversation_id);
-    if (conv) {
-      const evt = new CustomEvent('nusashell:open-conversation', { detail: conv.id });
-      document.dispatchEvent(evt);
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const rect = ws.getBoundingClientRect();
+    let px;
+    if (varName === '--skills-col-1') {
+      px = e.clientX - rect.left;
+    } else {
+      const col1 = parseFloat(getComputedStyle(ws).getPropertyValue('--skills-col-1')) || 250;
+      px = e.clientX - rect.left - col1 - 8;
     }
-  } catch (err) {
-    toast(err.message, 'error');
-  }
+    px = Math.max(minPx, Math.min(maxPx, px));
+    const val = `${px}px`;
+    ws.style.setProperty(varName, val);
+    localStorage.setItem(varName.replace('--', ''), val);
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    splitter.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
 }

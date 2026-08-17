@@ -18,6 +18,8 @@
 package skillfs
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -661,4 +663,138 @@ func (s *Store) Files(id string) ([]domain.SkillFileEntry, error) {
 		return nil, fmt.Errorf("skill %q not found", id)
 	}
 	return out, nil
+}
+
+// Install extracts a .skill (zip) archive into the skill root directory.
+// The archive must contain a top-level directory with a SKILL.md file.
+// The skill ID is derived from the top-level directory name. If a skill
+// with the same ID already exists, it is overwritten.
+func (s *Store) Install(zipData []byte) (string, error) {
+	r, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
+	if err != nil {
+		return "", fmt.Errorf("skillfs: invalid zip archive: %w", err)
+	}
+
+	// Find the top-level directory name and verify SKILL.md exists.
+	var topLevel string
+	hasSkillMD := false
+	for _, f := range r.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		parts := strings.SplitN(strings.TrimPrefix(f.Name, "/"), "/", 2)
+		if topLevel == "" {
+			topLevel = parts[0]
+		} else if parts[0] != topLevel {
+			return "", fmt.Errorf("skillfs: archive has multiple top-level directories")
+		}
+		if strings.HasSuffix(f.Name, "/SKILL.md") || f.Name == topLevel+"/SKILL.md" {
+			hasSkillMD = true
+		}
+	}
+	if topLevel == "" {
+		return "", fmt.Errorf("skillfs: archive is empty")
+	}
+	if !hasSkillMD {
+		return "", fmt.Errorf("skillfs: archive missing SKILL.md in %s/", topLevel)
+	}
+	if !skillIDRe.MatchString(topLevel) {
+		return "", fmt.Errorf("skillfs: invalid skill id %q (must be lowercase with hyphens)", topLevel)
+	}
+
+	// Extract into skill root, overwriting any existing skill with same ID.
+	destDir := filepath.Join(s.root, topLevel)
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return "", fmt.Errorf("skillfs: mkdir %s: %w", destDir, err)
+	}
+	for _, f := range r.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		// Path relative to the top-level directory. Zip entries always
+		// use forward slashes; convert to the native path separator so
+		// filepath.Join and os.MkdirAll work correctly on Windows.
+		rel := strings.TrimPrefix(f.Name, topLevel+"/")
+		if rel == f.Name {
+			// File at root without top-level prefix — skip (shouldn't happen).
+			continue
+		}
+		rel = filepath.FromSlash(rel)
+		dest := filepath.Join(destDir, rel)
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			return "", fmt.Errorf("skillfs: mkdir for %s: %w", dest, err)
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return "", fmt.Errorf("skillfs: open %s: %w", f.Name, err)
+		}
+		var buf bytes.Buffer
+		if _, err := buf.ReadFrom(rc); err != nil {
+			rc.Close()
+			return "", fmt.Errorf("skillfs: read %s: %w", f.Name, err)
+		}
+		rc.Close()
+		if err := os.WriteFile(dest, buf.Bytes(), 0o644); err != nil {
+			return "", fmt.Errorf("skillfs: write %s: %w", dest, err)
+		}
+	}
+
+	// Parse SKILL.md frontmatter to get name + description.
+	skillMD, err := os.ReadFile(filepath.Join(destDir, "SKILL.md"))
+	if err != nil {
+		return "", fmt.Errorf("skillfs: read SKILL.md: %w", err)
+	}
+	name, description := parseFrontmatter(string(skillMD))
+
+	// Register metadata.
+	skill := &domain.Skill{
+		ID:          topLevel,
+		Name:        name,
+		Description: description,
+		State:       domain.SkillStateActive,
+		Origin:      domain.SkillOriginUser,
+		UpdatedAt:   time.Now().UTC(),
+	}
+	s.json.set(skill)
+	if err := s.json.save(); err != nil {
+		return "", err
+	}
+
+	// Update provenance.
+	prov, _ := loadProvenance(s.root)
+	prov[topLevel] = provenanceEntry{
+		CreatedBy: "user",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	_ = saveProvenance(s.root, prov)
+
+	return topLevel, nil
+}
+
+// parseFrontmatter extracts name and description from YAML frontmatter
+// in a SKILL.md file. Returns ("", "") if no frontmatter is found.
+func parseFrontmatter(content string) (name, description string) {
+	if !strings.HasPrefix(content, "---") {
+		return "", ""
+	}
+	end := strings.Index(content[3:], "---")
+	if end < 0 {
+		return "", ""
+	}
+	frontmatter := content[3 : end+3]
+	for _, line := range strings.Split(frontmatter, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "name:") {
+			name = strings.TrimSpace(strings.TrimPrefix(line, "name:"))
+			name = strings.Trim(name, `"'`)
+		}
+		if strings.HasPrefix(line, "description:") {
+			description = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
+			description = strings.Trim(description, `"'`)
+		}
+	}
+	if name == "" {
+		name = "unnamed"
+	}
+	return name, description
 }

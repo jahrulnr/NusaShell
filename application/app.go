@@ -804,6 +804,18 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 			return nil, rpcErr
 		}
 		return a.handleSkillsRun(req)
+	case contracts.MethodSkillsFileRead:
+		var req contracts.SkillFileReadRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleSkillsFileRead(req)
+	case contracts.MethodSkillsInstall:
+		var req contracts.SkillInstallRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleSkillsInstall(req)
 	case contracts.MethodPluginList:
 		return a.handlePluginList()
 	case contracts.MethodPluginSave:

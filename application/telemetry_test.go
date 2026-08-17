@@ -15,16 +15,18 @@ func TestHandleTelemetryReportAggregatesUsage(t *testing.T) {
 			ID: "conv_1",
 			Messages: []domain.Message{
 				{
-					Role:      domain.RoleAssistant,
-					Model:     "gpt-5.6-luna",
-					CreatedAt: now,
-					Usage:     &domain.Usage{InputTokens: 1000, OutputTokens: 500, CacheRead: 200, CacheWrite: 100},
+					Role:       domain.RoleAssistant,
+					Model:      "gpt-5.6-luna",
+					ProviderID: "prov_1",
+					CreatedAt:  now,
+					Usage:      &domain.Usage{InputTokens: 1000, OutputTokens: 500, CacheRead: 200, CacheWrite: 100},
 				},
 				{
-					Role:      domain.RoleAssistant,
-					Model:     "claude-opus-5",
-					CreatedAt: now.Add(-2 * 24 * time.Hour),
-					Usage:     &domain.Usage{InputTokens: 2000, OutputTokens: 800, CacheRead: 400},
+					Role:       domain.RoleAssistant,
+					Model:      "claude-opus-5",
+					ProviderID: "prov_1",
+					CreatedAt:  now.Add(-2 * 24 * time.Hour),
+					Usage:      &domain.Usage{InputTokens: 2000, OutputTokens: 800, CacheRead: 400},
 				},
 				// User messages are skipped.
 				{Role: domain.RoleUser, Model: "", CreatedAt: now},
@@ -180,6 +182,35 @@ func TestHandleTelemetryReportEmptyStore(t *testing.T) {
 	}
 	if len(result.Series) != 0 {
 		t.Fatalf("series len = %d, want 0", len(result.Series))
+	}
+}
+
+func TestHandleTelemetryReportLegacyMessageUnknownProvider(t *testing.T) {
+	now := time.Now().UTC()
+	convStore := &fakeConvStore{convs: map[string]*domain.Conversation{
+		"conv_1": {
+			ID: "conv_1",
+			Messages: []domain.Message{
+				// Legacy message: no ProviderID, model not in any provider catalog.
+				{
+					Role:      domain.RoleAssistant,
+					Model:     "some-unknown-model",
+					CreatedAt: now,
+					Usage:     &domain.Usage{InputTokens: 1000, OutputTokens: 500},
+				},
+			},
+		},
+	}}
+	provStore := &fakeProviderStore{items: map[string]*domain.Provider{}}
+	app := &App{Conversations: convStore, Providers: provStore, Logs: &fakeLogStore{}, Bus: NewBus()}
+
+	resp, _ := app.handleTelemetryReport(contracts.TelemetryReportRequest{})
+	result := resp.(contracts.TelemetryReportResult)
+	if len(result.TopProviders) != 1 {
+		t.Fatalf("top_providers len = %d, want 1", len(result.TopProviders))
+	}
+	if result.TopProviders[0].ProviderName != "Unknown" {
+		t.Fatalf("provider name = %s, want Unknown", result.TopProviders[0].ProviderName)
 	}
 }
 

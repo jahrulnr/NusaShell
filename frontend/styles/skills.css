@@ -3,7 +3,7 @@
 .skills-view .view-body { margin-top: 1rem; }
 .skills-workspace {
   display: grid;
-  grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
+  grid-template-columns: var(--skills-col-1, 250px) 4px var(--skills-col-2, 240px) 4px minmax(0, 1fr);
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
@@ -12,13 +12,25 @@
   background: #090e16;
 }
 .skills-catalog,
+.skills-tree-pane,
 .skills-editor-pane {
   display: flex;
   min-width: 0;
   min-height: 0;
   flex-direction: column;
 }
-.skills-catalog { border-right: 1px solid var(--border); }
+/* Splitters — draggable dividers between panes */
+.skills-splitter {
+  cursor: col-resize;
+  background: var(--border);
+  flex: none;
+  transition: background 0.15s;
+  z-index: 2;
+}
+.skills-splitter:hover,
+.skills-splitter.dragging {
+  background: #3b6ef0;
+}
 .skills-pane-head {
   display: flex;
   min-height: 62px;
@@ -89,33 +101,82 @@
 .skills-editor-head { min-height: 62px; }
 .skills-editor-head > div:first-child { min-width: 0; }
 .skills-editor-head h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; }
-.skills-editor-actions { display: flex; flex: none; gap: 7px; }
-.skill-editor {
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  width: 100%;
-  margin: 0;
-  border: 0;
-  outline: 0;
-  resize: none;
-  padding: 18px 20px;
-  background: #080c13;
-  color: #d9e2ef;
-  font: 12px/1.7 var(--font-mono);
-  tab-size: 2;
-}
-.skill-editor:focus { box-shadow: inset 3px 0 #3b6ef0; }
-.skills-editor-form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-.skills-editor-form .skill-fields { padding: 12px 16px; border-bottom: 1px solid var(--border-soft); background: #0a101a; }
-.skill-badge { display: inline-block; margin-left: 8px; border-radius: 4px; padding: 2px 6px; background: #142238; color: #63a5ff; font: 8.5px var(--font-mono); text-transform: uppercase; }
 
-/* Skill file tree */
-.skills-files { border-top: 1px solid var(--border-soft); margin-top: 12px; padding-top: 10px; }
-.skills-files-head { color: var(--text-faint); font: 9px var(--font-mono); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
-.skills-files-tree { max-height: 200px; overflow: auto; border: 1px solid var(--border-soft); border-radius: 8px; background: #0a1018; padding: 6px 8px; }
-.skill-file-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; font: 10.5px var(--font-mono); color: var(--text-dim); }
-.skill-file-row.is-dir { color: var(--text); }
+/* Skill file tree (middle column) */
+.skills-files-tree {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 8px;
+}
+.skills-tree-empty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 7px;
+  flex: 1 1 auto;
+  min-height: 180px;
+  padding: 28px;
+  color: #8795aa;
+  text-align: center;
+}
+.skills-tree-empty strong { color: #bdc8d8; font-size: 13px; }
+.skills-tree-empty span { max-width: 220px; font-size: 11px; line-height: 1.55; }
+.skill-file-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  font: 10.5px var(--font-mono);
+  color: var(--text-dim);
+  cursor: default;
+}
+.skill-file-row:hover { background: #101824; }
+.skill-file-row.active { background: #11203a; color: var(--text); }
+.skill-file-row.is-dir { color: var(--text); cursor: default; }
+.skill-file-row:not(.is-dir) { cursor: pointer; }
 .skill-file-icon { width: 12px; color: var(--text-faint); flex: none; }
 .skill-file-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .skill-file-size { margin-left: auto; color: var(--text-faint); flex: none; font-size: 9px; }
+
+/* File viewer (right pane) */
+.skills-file-viewer {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.skills-file-viewer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-soft);
+  background: #0a101a;
+  font: 11px var(--font-mono);
+  color: var(--text-dim);
+}
+.skills-file-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 16px 20px;
+  background: #080c13;
+  color: #d9e2ef;
+  font: 12px/1.7 var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  tab-size: 2;
+}
+
+/* Responsive: collapse tree pane on narrow screens */
+@media (max-width: 1100px) {
+  .skills-workspace {
+    grid-template-columns: minmax(200px, 240px) minmax(0, 1fr) !important;
+  }
+  .skills-tree-pane,
+  .skills-splitter { display: none; }
+}

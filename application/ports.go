@@ -54,6 +54,10 @@ type SkillStore interface {
 	// Files lists the nested directory tree of a skill folder (path,
 	// type, sizeBytes, editable), sorted as in the Electron shell.
 	Files(id string) ([]domain.SkillFileEntry, error)
+	// Install extracts a .skill (zip) archive into the skill root and
+	// registers the skill metadata. The archive must contain a top-level
+	// directory with a SKILL.md file. Returns the installed skill ID.
+	Install(zipData []byte) (string, error)
 }
 
 // PluginStore is the single source of truth for plugins (MCP servers and

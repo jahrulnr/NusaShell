@@ -36,6 +36,12 @@ const viewRefresh = {
 };
 
 function setConnection(status) {
+  // Don't downgrade from 'open' to 'closed' — 'closed' is a transient WS
+  // state that immediately triggers reconnect. Showing "Offline" for a
+  // millisecond before "Reconnecting…" is a false positive.
+  if (status === 'closed' && document.documentElement.dataset.backendStatus === 'open') {
+    return;
+  }
   document.documentElement.dataset.backendStatus = status;
   window.dispatchEvent(new CustomEvent('nusashell:connection-status', { detail: { status } }));
   const orb = document.getElementById('conn-fill');
@@ -50,6 +56,11 @@ function setConnection(status) {
     orb.classList.add('connecting');
     label.textContent = 'Connecting…';
   } else if (status === 'reconnecting') {
+    orb.classList.add('connecting');
+    label.textContent = 'Reconnecting…';
+  } else if (status === 'closed') {
+    // 'closed' is transient — scheduleReconnect will fire immediately.
+    // Show "Reconnecting…" instead of "Offline" to avoid false positive.
     orb.classList.add('connecting');
     label.textContent = 'Reconnecting…';
   } else {
@@ -148,7 +159,11 @@ async function boot() {
     document.getElementById('storage-path').textContent = info.data_dir || '';
     document.title = `NusaShell ${info.version ?? ''}`.trim();
   } catch (err) {
-    setConnection('offline');
+    // Only mark offline if WS isn't already open — app.info uses HTTP,
+    // which can fail independently of the WS event stream.
+    if (document.documentElement.dataset.backendStatus !== 'open') {
+      setConnection('offline');
+    }
   }
 
   const results = await Promise.allSettled([

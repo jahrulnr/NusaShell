@@ -60,9 +60,10 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 		Status:      domain.StatusDone,
 	}
 	asstMsg := domain.Message{
-		ID:        domain.NewID("msg"),
-		Role:      domain.RoleAssistant,
-		CreatedAt: now,
+		ID:         domain.NewID("msg"),
+		Role:       domain.RoleAssistant,
+		CreatedAt:  now,
+		ProviderID: provider.ID,
 	}
 	c.AddMessage(userMsg)
 	c.AddMessage(asstMsg)
@@ -139,7 +140,7 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 	if continuation {
 		failed.Status = domain.StatusDone
 		failed.Error = ""
-		next := domain.Message{ID: domain.NewID("msg"), Role: domain.RoleAssistant, CreatedAt: time.Now().UTC()}
+		next := domain.Message{ID: domain.NewID("msg"), Role: domain.RoleAssistant, CreatedAt: time.Now().UTC(), ProviderID: provider.ID}
 		c.AddMessage(next)
 		targetMsgID = next.ID
 	} else {
@@ -148,7 +149,7 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 		// content that shows up as a gap when the UI re-renders from server
 		// state on turn completion.
 		c.Messages = append(c.Messages[:failedIdx], c.Messages[failedIdx+1:]...)
-		next := domain.Message{ID: domain.NewID("msg"), Role: domain.RoleAssistant, CreatedAt: time.Now().UTC()}
+		next := domain.Message{ID: domain.NewID("msg"), Role: domain.RoleAssistant, CreatedAt: time.Now().UTC(), ProviderID: provider.ID}
 		c.AddMessage(next)
 		targetMsgID = next.ID
 	}

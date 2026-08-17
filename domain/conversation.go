@@ -91,6 +91,7 @@ type Message struct {
 	Reasoning      string // final reasoning (mirrors last reasoning step, for backward compat)
 	Steps          []MessageStep
 	Model          string
+	ProviderID     string // provider that served this turn; "" for legacy messages
 	Usage          *Usage
 	CreatedAt      time.Time
 	Status         MessageStatus

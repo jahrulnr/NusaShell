@@ -27,6 +27,9 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
       send();
     }
   });
+  input.addEventListener('paste', (event) => {
+    handlePaste(event, input, autosize);
+  });
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     send();
@@ -113,6 +116,50 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
       updateSendAvailability(state);
     } catch (error) {
       toast(error.message, 'error');
+    }
+  }
+
+  async function handlePaste(event, inputEl, autosize) {
+    const items = event.clipboardData?.items;
+    if (!items) return;
+
+    // Check for image items first — images always become attachments.
+    const imageItems = [];
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        imageItems.push(item);
+      }
+    }
+
+    // Handle image paste → image attachment.
+    if (imageItems.length > 0) {
+      event.preventDefault();
+      for (const item of imageItems) {
+        const file = item.getAsFile();
+        if (file) await addAttachments([file]);
+      }
+      return;
+    }
+
+    // Check text length. DataTransferItem.getAsString is async (callback),
+    // so we read it synchronously via clipboardData.getData which is available
+    // during the paste event.
+    const textContent = event.clipboardData.getData('text/plain') || '';
+    if (textContent.length > 1024) {
+      event.preventDefault();
+      if (state.attachments.length >= 4) {
+        toast('A turn can include up to 4 attachments.', 'error');
+        return;
+      }
+      const name = `pasted-${Date.now()}.txt`;
+      state.attachments.push({
+        type: 'text',
+        name,
+        media_type: 'text/plain',
+        content: textContent,
+      });
+      renderAttachments();
+      updateSendAvailability(state);
     }
   }
 

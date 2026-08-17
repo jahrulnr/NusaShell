@@ -23,7 +23,9 @@ func (a *App) handleTelemetryReport(req contracts.TelemetryReportRequest) (any, 
 		cacheReadCost float64
 	}
 	priceLookup := make(map[string]modelPrice)
+	providerNameLookup := make(map[string]string)
 	for _, p := range a.Providers.List() {
+		providerNameLookup[p.ID] = p.Name
 		for _, m := range p.Models {
 			priceLookup[m.ID] = modelPrice{
 				providerID:    p.ID,
@@ -108,14 +110,23 @@ func (a *App) handleTelemetryReport(req contracts.TelemetryReportRequest) (any, 
 			if !cutoff.IsZero() && t.Before(cutoff) {
 				continue
 			}
-			// Apply provider filter (resolve from price lookup).
-			mp, _ := priceLookup[msg.Model]
-			if req.ProviderID != "" && mp.providerID != req.ProviderID {
+			// Apply provider filter. Use the message's ProviderID when
+			// available; fall back to priceLookup for legacy messages.
+			msgProvID := msg.ProviderID
+			if msgProvID == "" {
+				if mp, ok := priceLookup[msg.Model]; ok {
+					msgProvID = mp.providerID
+				} else {
+					msgProvID = "unknown"
+				}
+			}
+			if req.ProviderID != "" && msgProvID != req.ProviderID {
 				continue
 			}
 
 			u := msg.Usage
-			// Estimate cost: (input/1M * inputCost) + (output/1M * outputCost) + (cacheRead/1M * cacheReadCost).
+			// Estimate cost from model pricing (input/output/cache per 1M).
+			mp := priceLookup[msg.Model]
 			spend := float64(u.InputTokens)/1e6*mp.inputCost +
 				float64(u.OutputTokens)/1e6*mp.outputCost +
 				float64(u.CacheRead)/1e6*mp.cacheReadCost
@@ -134,10 +145,16 @@ func (a *App) handleTelemetryReport(req contracts.TelemetryReportRequest) (any, 
 				latest = t
 			}
 
+			// Resolve provider name for this message's provider.
+			provName := providerNameLookup[msgProvID]
+			if provName == "" {
+				provName = "Unknown"
+			}
+
 			// Model aggregation.
 			ma, ok := models[msg.Model]
 			if !ok {
-				ma = &modelAgg{modelID: msg.Model, providerID: mp.providerID, providerName: mp.providerName}
+				ma = &modelAgg{modelID: msg.Model, providerID: msgProvID, providerName: provName}
 				models[msg.Model] = ma
 			}
 			ma.spend += spend
@@ -148,10 +165,10 @@ func (a *App) handleTelemetryReport(req contracts.TelemetryReportRequest) (any, 
 			ma.cacheRead += u.CacheRead
 
 			// Provider aggregation.
-			pa, ok := providers[mp.providerID]
+			pa, ok := providers[msgProvID]
 			if !ok {
-				pa = &providerAgg{providerID: mp.providerID, providerName: mp.providerName}
-				providers[mp.providerID] = pa
+				pa = &providerAgg{providerID: msgProvID, providerName: provName}
+				providers[msgProvID] = pa
 			}
 			pa.spend += spend
 			pa.requests++

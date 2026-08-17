@@ -45,11 +45,13 @@ const (
 	MethodCodexRuntimeDownload = "ai.codex.runtime.download"
 	MethodCodexUsage           = "ai.codex.usage"
 
-	MethodSkillsList   = "skills.list"
-	MethodSkillsRead   = "skills.read"
-	MethodSkillsSave   = "skills.save"
-	MethodSkillsDelete = "skills.delete"
-	MethodSkillsRun    = "skills.run"
+	MethodSkillsList     = "skills.list"
+	MethodSkillsRead     = "skills.read"
+	MethodSkillsSave     = "skills.save"
+	MethodSkillsDelete   = "skills.delete"
+	MethodSkillsRun      = "skills.run"
+	MethodSkillsFileRead = "skills.file.read"
+	MethodSkillsInstall  = "skills.install"
 
 	MethodPluginList          = "plugin.list"
 	MethodPluginSave          = "plugin.save"
@@ -197,6 +199,7 @@ type MessageDTO struct {
 	Reasoning      string           `json:"reasoning,omitempty"`
 	Steps          []MessageStepDTO `json:"steps,omitempty"`
 	Model          string           `json:"model,omitempty"`
+	ProviderID     string           `json:"provider_id,omitempty"`
 	Usage          *UsageDTO        `json:"usage,omitempty"`
 	CreatedAt      string           `json:"created_at"`
 	Status         string           `json:"status,omitempty"`
@@ -729,6 +732,33 @@ type SkillFileDTO struct {
 
 type SkillReadResult struct {
 	Skill SkillFull `json:"skill"`
+}
+
+type SkillFileReadRequest struct {
+	ID       string `json:"id"`
+	Path     string `json:"path"`
+	Offset   int    `json:"offset,omitempty"`
+	MaxChars int    `json:"maxChars,omitempty"`
+}
+
+type SkillFileReadResult struct {
+	Content    string `json:"content"`
+	SizeBytes  int64  `json:"sizeBytes"`
+	Truncated  bool   `json:"truncated"`
+	NextOffset int    `json:"nextOffset,omitempty"`
+}
+
+type SkillInstallRequest struct {
+	// Data is the base64-encoded .skill (zip) archive content.
+	Data string `json:"data"`
+	// Filename is the original filename (e.g. "my-skill.skill") used for
+	// error messages and logging only.
+	Filename string `json:"filename,omitempty"`
+}
+
+type SkillInstallResult struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type SkillSaveRequest struct {

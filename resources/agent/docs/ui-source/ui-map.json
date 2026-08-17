@@ -984,12 +984,6 @@
       "type": "submit",
       "shortcut": "Ctrl+Enter / \u2318\u21a9"
     },
-    "new-skill-btn": {
-      "label": "New skill",
-      "section": "Skills",
-      "type": "button",
-      "action": "Creates a new skill and opens the editor."
-    },
     "skills-count": {
       "label": "Skills count",
       "section": "Skills",
@@ -1008,56 +1002,19 @@
     "skill-editor-title": {
       "label": "Editor title",
       "section": "Skills",
-      "type": "text"
+      "type": "text",
+      "notes": "Shows the selected skill name or 'No file selected'."
     },
     "skill-editor-meta": {
       "label": "Editor meta",
       "section": "Skills",
       "type": "text"
     },
-    "skill-run-btn": {
-      "label": "Run skill",
-      "section": "Skills",
-      "type": "button",
-      "action": "Opens the skill in a new Agent conversation as its system context."
-    },
-    "skill-save-btn": {
-      "label": "Save skill",
-      "section": "Skills",
-      "type": "button",
-      "action": "Persists the edited skill."
-    },
-    "skill-delete-btn": {
-      "label": "Delete skill",
-      "section": "Skills",
-      "type": "button",
-      "action": "Deletes the selected skill."
-    },
-    "skill-editor-form": {
-      "label": "Editor form",
-      "section": "Skills",
-      "type": "container"
-    },
-    "skill-name": {
-      "label": "Skill name",
-      "section": "Skills",
-      "type": "input"
-    },
-    "skill-description": {
-      "label": "Skill description",
-      "section": "Skills",
-      "type": "input"
-    },
-    "skill-content": {
-      "label": "Skill markdown",
-      "section": "Skills",
-      "type": "textarea",
-      "notes": "Injected verbatim into the agent context when loaded."
-    },
     "skill-editor-empty": {
       "label": "Editor empty state",
       "section": "Skills",
-      "type": "text"
+      "type": "text",
+      "notes": "Empty state shown when no file is selected. Prompts user to pick a file from the skill tree."
     },
     "plugins-add-mcp": {
       "label": "Add MCP",
@@ -1838,6 +1795,72 @@
       "section": "Telemetry summary",
       "type": "text",
       "notes": "Sub-text under metric card."
+    },
+    "skill-tree-meta": {
+      "label": "Skill tree meta",
+      "section": "Skills tree pane",
+      "type": "text",
+      "notes": "Shows skill name or 'No skill selected' in the tree pane header."
+    },
+    "skill-tree-empty": {
+      "label": "Skill tree empty state",
+      "section": "Skills tree pane",
+      "type": "panel",
+      "notes": "Empty state shown when no skill is selected or skill has no files."
+    },
+    "skill-file-viewer": {
+      "label": "Skill file viewer",
+      "section": "Skills editor pane",
+      "type": "panel",
+      "notes": "Shows file content when a file is clicked in the skill tree."
+    },
+    "skill-file-path": {
+      "label": "Skill file path",
+      "section": "Skills file viewer",
+      "type": "text",
+      "notes": "Path of the currently opened file."
+    },
+    "skill-file-size": {
+      "label": "Skill file size",
+      "section": "Skills file viewer",
+      "type": "text",
+      "notes": "Size of the currently opened file."
+    },
+    "skill-file-content": {
+      "label": "Skill file content",
+      "section": "Skills file viewer",
+      "type": "pre",
+      "notes": "Pre-formatted text content of the opened skill file."
+    },
+    "skills-splitter-1": {
+      "label": "Catalog/tree splitter",
+      "section": "Skills workspace",
+      "type": "dragger",
+      "notes": "Draggable divider between Catalog and Skill tree panes. Persists width to localStorage."
+    },
+    "skills-splitter-2": {
+      "label": "Tree/editor splitter",
+      "section": "Skills workspace",
+      "type": "dragger",
+      "notes": "Draggable divider between Skill tree and Editor panes. Persists width to localStorage."
+    },
+    "skills-workspace": {
+      "label": "Skills workspace grid",
+      "section": "Skills workspace",
+      "type": "container",
+      "notes": "3-column grid with CSS variable widths for draggable splitters."
+    },
+    "install-skill-btn": {
+      "label": "Install skill button",
+      "section": "Skills header",
+      "type": "button",
+      "notes": "Opens file picker to install a .skill or .zip archive."
+    },
+    "skill-file-input": {
+      "label": "Skill file input",
+      "section": "Skills header",
+      "type": "file-input",
+      "notes": "Hidden file input accepting .skill and .zip files for skill installation."
     }
   }
 }

@@ -287,10 +287,11 @@
             <h1>Skill library</h1>
             <p>Reusable instruction packs the agent can load via <code>skill_run</code>.</p>
           </div>
-          <button class="action-btn" id="new-skill-btn" type="button">+ New skill</button>
+          <button class="action-btn" id="install-skill-btn" type="button">Install skill</button>
         </div>
+        <input type="file" id="skill-file-input" accept=".skill,.zip" hidden>
         <div class="view-body" style="display:flex;flex-direction:column;min-height:0;padding-bottom:22px;">
-          <div class="skills-workspace">
+          <div class="skills-workspace" id="skills-workspace">
             <div class="skills-catalog">
               <div class="skills-pane-head">
                 <div>
@@ -304,38 +305,38 @@
               </div>
               <div class="skills-list" id="skills-list"></div>
             </div>
+            <div class="skills-splitter" id="skills-splitter-1"></div>
+            <div class="skills-tree-pane">
+              <div class="skills-pane-head">
+                <div>
+                  <h2>Skill tree</h2>
+                  <span id="skill-tree-meta">No skill selected</span>
+                </div>
+              </div>
+              <div class="skills-files-tree" id="skill-files-tree"></div>
+              <div class="skills-tree-empty" id="skill-tree-empty">
+                <strong>No files</strong>
+                <span>Select a skill to browse its files.</span>
+              </div>
+            </div>
+            <div class="skills-splitter" id="skills-splitter-2"></div>
             <div class="skills-editor-pane">
               <div class="skills-pane-head skills-editor-head">
                 <div>
-                  <h2 id="skill-editor-title">No skill selected</h2>
+                  <h2 id="skill-editor-title">No file selected</h2>
                   <span id="skill-editor-meta"></span>
                 </div>
-                <div class="skills-editor-actions">
-                  <button class="mini-btn ghost" id="skill-run-btn" type="button" title="Open this skill in a new Agent conversation" hidden>Run</button>
-                  <button class="mini-btn" id="skill-save-btn" type="button" hidden>Save</button>
-                  <button class="mini-btn danger" id="skill-delete-btn" type="button" hidden>Delete</button>
-                </div>
               </div>
-              <div class="skills-editor-form" id="skill-editor-form" hidden>
-                <div class="skill-fields">
-                  <div class="settings-field">
-                    <label for="skill-name">Name</label>
-                    <input id="skill-name" type="text" placeholder="e.g. code-review" autocomplete="off">
-                  </div>
-                  <div class="settings-field">
-                    <label for="skill-description">Description</label>
-                    <input id="skill-description" type="text" placeholder="What this skill does" autocomplete="off">
-                  </div>
+              <div class="skills-file-viewer" id="skill-file-viewer" hidden>
+                <div class="skills-file-viewer-head">
+                  <span id="skill-file-path"></span>
+                  <span id="skill-file-size" class="skill-file-size"></span>
                 </div>
-                <textarea class="skill-editor" id="skill-content" placeholder="# Skill instructions&#10;&#10;Write the markdown instructions the agent should follow when this skill is loaded." spellcheck="false"></textarea>
+                <pre class="skills-file-content" id="skill-file-content"></pre>
               </div>
               <div class="skills-editor-empty" id="skill-editor-empty">
-                <strong>Select a skill</strong>
-                <span>Pick a skill from the catalog or create a new one.</span>
-              </div>
-              <div class="skills-files" id="skill-files" hidden>
-                <div class="skills-files-head">Skill files</div>
-                <div class="skills-files-tree" id="skill-files-tree"></div>
+                <strong>Select a file</strong>
+                <span>Pick a file from the skill tree to preview its content.</span>
               </div>
             </div>
           </div>

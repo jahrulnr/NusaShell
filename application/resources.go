@@ -92,6 +92,47 @@ func (a *App) handleSkillsRead(req contracts.SkillIDRequest) (any, *contracts.RP
 	return contracts.SkillReadResult{Skill: full}, nil
 }
 
+func (a *App) handleSkillsFileRead(req contracts.SkillFileReadRequest) (any, *contracts.RPCError) {
+	if req.ID == "" || req.Path == "" {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "id and path are required"}
+	}
+	maxChars := req.MaxChars
+	if maxChars <= 0 {
+		maxChars = 200_000
+	}
+	f, err := a.Skills.ReadFile(req.ID, req.Path, req.Offset, maxChars)
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
+	}
+	return contracts.SkillFileReadResult{
+		Content:    f.Content,
+		SizeBytes:  f.SizeBytes,
+		Truncated:  f.Truncated,
+		NextOffset: f.NextOffset,
+	}, nil
+}
+
+func (a *App) handleSkillsInstall(req contracts.SkillInstallRequest) (any, *contracts.RPCError) {
+	if req.Data == "" {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "data is required"}
+	}
+	zipData, err := base64.StdEncoding.DecodeString(req.Data)
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "invalid base64 data"}
+	}
+	id, err := a.Skills.Install(zipData)
+	if err != nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
+	}
+	skill, _ := a.Skills.Get(id)
+	name := id
+	if skill != nil {
+		name = skill.Name
+	}
+	a.log("info", "skills", "skill installed: %s", id)
+	return contracts.SkillInstallResult{ID: id, Name: name}, nil
+}
+
 func (a *App) handleSkillsSave(req contracts.SkillSaveRequest) (any, *contracts.RPCError) {
 	name := strings.TrimSpace(req.Name)
 	if name == "" {

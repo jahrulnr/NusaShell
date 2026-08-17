@@ -98,6 +98,7 @@ func msgDTO(m domain.Message) contracts.MessageDTO {
 		Content:        m.Content,
 		Reasoning:      m.Reasoning,
 		Model:          m.Model,
+		ProviderID:     m.ProviderID,
 		CreatedAt:      m.CreatedAt.Format(timeRFC3339),
 		Status:         string(m.Status),
 		Error:          m.Error,
