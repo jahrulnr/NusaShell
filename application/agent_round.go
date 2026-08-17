@@ -7,11 +7,20 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"nusashell/contracts"
 	"nusashell/domain"
 )
+
+// maxParallelTools bounds how many tool calls from a single assistant round run
+// concurrently. The model often emits several independent tool calls at once
+// (e.g. multiple searches); running them in parallel cuts wall-clock latency
+// without changing the provider round count (there is still exactly one
+// follow-up request per round). Results are persisted in tool-call order so
+// the transcript stays deterministic.
+const maxParallelTools = 6
 
 type streamedTurnRound struct {
 	Content   string
@@ -369,44 +378,53 @@ func applyStreamRound(message *domain.Message, model string, round streamedTurnR
 	message.Usage = toDomainUsage(round.Response.Usage)
 }
 
+// toolExecResult is one tool's outcome from the concurrent execution phase,
+// held until results are persisted in tool-call order.
+type toolExecResult struct {
+	status domain.ToolCallStatus
+	output string
+	atts   []domain.Attachment
+}
+
 func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domain.ToolCall, supportsVision bool, settings domain.Settings) error {
-	for i, toolCall := range toolCalls {
-		if err := run.Ctx.Err(); err != nil {
-			a.interruptRemainingTools(run, messageID, toolCalls[i:])
-			return err
-		}
-		a.Bus.Emit(contracts.EventToolStarted, contracts.ToolStartedEvent{
-			RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID, Name: toolCall.Name, Args: []byte(toolCall.Args),
-		})
-		a.log("info", "tools", "tool call: %s", toolCall.Name)
-		var output string
-		var outputAttachments []domain.Attachment
-		var err error
-		if toolCall.Name == "read_image" {
-			output, outputAttachments, err = a.executeReadImage(run, toolCall, supportsVision, settings)
-		} else {
-			toolCtx := WithConversationID(run.Ctx, run.ConversationID)
-			toolCtx = WithRunID(toolCtx, run.ID)
-			toolCtx = WithToolCallID(toolCtx, toolCall.ID)
-			output, err = a.Toolbox.Execute(toolCtx, toolCall.Name, []byte(toolCall.Args))
-		}
-		status := domain.ToolOK
-		if err != nil {
-			if run.Ctx.Err() != nil {
-				status = domain.ToolInterrupted
-				output = "interrupted"
-			} else {
-				status = domain.ToolFailed
-				output = "error: " + err.Error()
-			}
-		}
-		a.Bus.Emit(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
-			RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID,
-			Name: toolCall.Name, Status: string(status), Output: output,
-		})
+	if err := run.Ctx.Err(); err != nil {
+		a.interruptRemainingTools(run, messageID, toolCalls)
+		return err
+	}
+
+	// Phase 1: execute all tool calls concurrently (bounded). Only tool
+	// execution and event emission happen here — no conversation-store writes —
+	// so each backing store's own lock is sufficient and there are no
+	// read-modify-write races on the conversation snapshot. Results are kept in
+	// tool-call order for deterministic persistence in phase 2.
+	results := make([]toolExecResult, len(toolCalls))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, maxParallelTools)
+	for i := range toolCalls {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			results[i] = a.runOneTool(run, toolCalls[i], supportsVision, settings)
+		}(i)
+	}
+	wg.Wait()
+
+	// Phase 2: persist results in tool-call order and emit todo updates. This
+	// runs on the single turn goroutine, so conversation snapshot writes never
+	// race with each other.
+	conversation, err := a.Conversations.Get(run.ConversationID)
+	if err != nil {
+		return err
+	}
+	for i := range toolCalls {
+		toolCall := toolCalls[i]
+		r := results[i]
+		conversation = a.updateToolResult(conversation, messageID, toolCall.ID, r.status, r.output, r.atts)
 		// When the model updates the todo checklist, emit a dedicated event so
 		// the UI can re-render the strip without polling agent.todos.get.
-		if toolCall.Name == "todo" && status == domain.ToolOK && a.Todos != nil {
+		if toolCall.Name == "todo" && r.status == domain.ToolOK && a.Todos != nil {
 			items := a.Todos.Get(run.ConversationID)
 			dtos := make([]contracts.TodoItemDTO, 0, len(items))
 			for _, item := range items {
@@ -419,21 +437,65 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 				Summary:        contracts.TodoSummaryDTO{Total: summary.Total, Pending: summary.Pending, InProgress: summary.InProgress, Completed: summary.Completed},
 			})
 		}
-
-		conversation, convErr := a.Conversations.Get(run.ConversationID)
-		if convErr != nil {
-			return convErr
-		}
-		conversation = a.updateToolResult(conversation, messageID, toolCall.ID, status, output, outputAttachments)
-		if saveErr := a.Conversations.Save(conversation); saveErr != nil {
-			return saveErr
-		}
-		if err := run.Ctx.Err(); err != nil {
-			a.interruptRemainingTools(run, messageID, toolCalls[i+1:])
-			return err
-		}
+	}
+	if saveErr := a.Conversations.Save(conversation); saveErr != nil {
+		return saveErr
+	}
+	if err := run.Ctx.Err(); err != nil {
+		return err
 	}
 	return nil
+}
+
+// runOneTool executes a single tool call and returns its result. It emits the
+// tool-started and tool-completed events and never writes to the conversation
+// store, so it is safe to run concurrently for the tool calls of one round.
+func (a *App) runOneTool(run *TurnRun, toolCall domain.ToolCall, supportsVision bool, settings domain.Settings) toolExecResult {
+	a.Bus.Emit(contracts.EventToolStarted, contracts.ToolStartedEvent{
+		RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID, Name: toolCall.Name, Args: []byte(toolCall.Args),
+	})
+	a.log("info", "tools", "tool call: %s", toolCall.Name)
+
+	// If the turn was already cancelled, do not start the tool — mark it
+	// interrupted (mirrors the pre-parallel behavior of skipping remaining
+	// tools after cancellation).
+	if run.Ctx.Err() != nil {
+		res := toolExecResult{status: domain.ToolInterrupted, output: "interrupted"}
+		a.emitToolCompleted(run, toolCall, res)
+		return res
+	}
+
+	var output string
+	var outputAttachments []domain.Attachment
+	var err error
+	if toolCall.Name == "read_image" {
+		output, outputAttachments, err = a.executeReadImage(run, toolCall, supportsVision, settings)
+	} else {
+		toolCtx := WithConversationID(run.Ctx, run.ConversationID)
+		toolCtx = WithRunID(toolCtx, run.ID)
+		toolCtx = WithToolCallID(toolCtx, toolCall.ID)
+		output, err = a.Toolbox.Execute(toolCtx, toolCall.Name, []byte(toolCall.Args))
+	}
+	status := domain.ToolOK
+	if err != nil {
+		if run.Ctx.Err() != nil {
+			status = domain.ToolInterrupted
+			output = "interrupted"
+		} else {
+			status = domain.ToolFailed
+			output = "error: " + err.Error()
+		}
+	}
+	res := toolExecResult{status: status, output: output, atts: outputAttachments}
+	a.emitToolCompleted(run, toolCall, res)
+	return res
+}
+
+func (a *App) emitToolCompleted(run *TurnRun, toolCall domain.ToolCall, res toolExecResult) {
+	a.Bus.Emit(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
+		RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID,
+		Name: toolCall.Name, Status: string(res.status), Output: res.output,
+	})
 }
 
 func (a *App) interruptRemainingTools(run *TurnRun, messageID string, toolCalls []domain.ToolCall) {

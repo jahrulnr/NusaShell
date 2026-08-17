@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -169,11 +170,16 @@ func TestExecuteTurnToolsStopsOnCancel(t *testing.T) {
 	}
 }
 
-type recordingToolbox struct{ names []string }
+type recordingToolbox struct {
+	mu    sync.Mutex
+	names []string
+}
 
 func (r *recordingToolbox) ListTools() []ToolInfo { return nil }
 func (r *recordingToolbox) Execute(ctx context.Context, name string, argsJSON []byte) (string, error) {
+	r.mu.Lock()
 	r.names = append(r.names, name)
+	r.mu.Unlock()
 	return "ok", nil
 }
 
