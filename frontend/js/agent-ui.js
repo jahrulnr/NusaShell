@@ -33,6 +33,24 @@ export function estimateContextTokens(messages = []) {
   return Math.ceil(tokens * 1.05);
 }
 
+// initialWindowStart returns the index of the first active message to render
+// so only the most recent `windowSize` messages are shown on open. Older
+// messages stay in state and are prepended on scroll-up. This keeps opening a
+// long (uncompacted) conversation from rendering thousands of DOM nodes at once.
+export function initialWindowStart(total, windowSize) {
+  const n = Math.max(0, Math.floor(Number(total) || 0));
+  const w = Math.max(1, Math.floor(Number(windowSize) || 1));
+  return Math.max(0, n - w);
+}
+
+// previousWindowStart returns the new window start after revealing one more
+// batch of older messages (clamped at 0).
+export function previousWindowStart(currentStart, batch) {
+  const s = Math.max(0, Math.floor(Number(currentStart) || 0));
+  const b = Math.max(1, Math.floor(Number(batch) || 1));
+  return Math.max(0, s - b);
+}
+
 export function inspectAttachmentContent(bytes) {
   const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   if (startsWith(data, PNG_SIGNATURE)) return { type: 'image', mediaType: 'image/png' };
