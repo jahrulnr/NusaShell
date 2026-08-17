@@ -37,9 +37,13 @@ func (a *App) handleTelemetryReport(req contracts.TelemetryReportRequest) (any, 
 
 	// Determine the cutoff date for the lookback window.
 	var cutoff time.Time
-	if req.Days > 0 {
-		cutoff = time.Now().AddDate(0, 0, -req.Days)
+	if req.Minutes > 0 {
+		cutoff = time.Now().Add(-time.Duration(req.Minutes) * time.Minute)
 	}
+
+	// Determine bucket size based on the lookback window. Shorter windows
+	// get finer buckets so the chart shows meaningful granularity.
+	bucketSize := chooseBucketSize(req.Minutes)
 
 	// Aggregate.
 	type modelAgg struct {
@@ -60,11 +64,7 @@ func (a *App) handleTelemetryReport(req contracts.TelemetryReportRequest) (any, 
 		requests     int
 		tokens       int
 	}
-	type dayKey struct {
-		year  int
-		month int
-		day   int
-	}
+	type bucketKey int64 // unix seconds truncated to bucket boundary
 	type dayModelAgg struct {
 		modelID  string
 		spend    float64
@@ -84,7 +84,7 @@ func (a *App) handleTelemetryReport(req contracts.TelemetryReportRequest) (any, 
 
 	models := make(map[string]*modelAgg)
 	providers := make(map[string]*providerAgg)
-	days := make(map[dayKey]*dayAgg)
+	buckets := make(map[bucketKey]*dayAgg)
 
 	var totalSpend float64
 	var totalRequests int
@@ -157,15 +157,16 @@ func (a *App) handleTelemetryReport(req contracts.TelemetryReportRequest) (any, 
 			pa.requests++
 			pa.tokens += u.InputTokens + u.OutputTokens
 
-			// Day bucket.
-			dk := dayKey{t.Year(), int(t.Month()), t.Day()}
-			da, ok := days[dk]
+			// Bucket by dynamic size.
+			bucketStart := t.Truncate(bucketSize)
+			bk := bucketKey(bucketStart.Unix())
+			da, ok := buckets[bk]
 			if !ok {
 				da = &dayAgg{
-					date:     t.Format("2006-01-02"),
+					date:     formatBucketLabel(bucketStart, bucketSize),
 					perModel: make(map[string]*dayModelAgg),
 				}
-				days[dk] = da
+				buckets[bk] = da
 			}
 			da.spend += spend
 			da.requests++
@@ -205,46 +206,81 @@ func (a *App) handleTelemetryReport(req contracts.TelemetryReportRequest) (any, 
 		summary.PeriodEnd = latest.UTC().Format(time.RFC3339)
 	}
 
-	// Build daily series (sorted by date).
-	series := make([]contracts.TelemetryDayBucketDTO, 0, len(days))
-	dayKeys := make([]dayKey, 0, len(days))
-	for k := range days {
-		dayKeys = append(dayKeys, k)
+	// Build series. Fill empty buckets between cutoff and now so the chart
+	// always shows the full selected range, not just active periods.
+	now := time.Now()
+	var startBucket time.Time
+	if !cutoff.IsZero() {
+		startBucket = cutoff.Truncate(bucketSize)
+	} else if !earliest.IsZero() {
+		startBucket = earliest.Truncate(bucketSize)
 	}
-	sort.Slice(dayKeys, func(i, j int) bool {
-		a, b := dayKeys[i], dayKeys[j]
-		if a.year != b.year {
-			return a.year < b.year
+	// End bucket is always now (the chart should show up to current time,
+	// not just the last usage timestamp).
+	endBucket := now.Truncate(bucketSize)
+
+	series := make([]contracts.TelemetryDayBucketDTO, 0)
+	if !startBucket.IsZero() {
+		for bt := startBucket; !bt.After(endBucket); bt = bt.Add(bucketSize) {
+			bk := bucketKey(bt.Unix())
+			da := buckets[bk]
+			bucket := contracts.TelemetryDayBucketDTO{
+				Date: formatBucketLabel(bt, bucketSize),
+			}
+			if da != nil {
+				bucket.Spend = roundCost(da.spend)
+				bucket.Requests = da.requests
+				bucket.InputTokens = da.inputTokens
+				bucket.OutputTokens = da.outputTokens
+				bucket.CacheRead = da.cacheRead
+				bucket.CacheWrite = da.cacheWrite
+				for _, dm := range da.perModel {
+					bucket.PerModel = append(bucket.PerModel, contracts.TelemetryModelDayDTO{
+						ModelID:  dm.modelID,
+						Spend:    roundCost(dm.spend),
+						Requests: dm.requests,
+						Tokens:   dm.tokens,
+					})
+				}
+				sort.Slice(bucket.PerModel, func(i, j int) bool {
+					return bucket.PerModel[i].Spend > bucket.PerModel[j].Spend
+				})
+			}
+			series = append(series, bucket)
 		}
-		if a.month != b.month {
-			return a.month < b.month
+	} else {
+		// No data at all — return empty series.
+		bucketKeys := make([]bucketKey, 0, len(buckets))
+		for k := range buckets {
+			bucketKeys = append(bucketKeys, k)
 		}
-		return a.day < b.day
-	})
-	for _, dk := range dayKeys {
-		da := days[dk]
-		bucket := contracts.TelemetryDayBucketDTO{
-			Date:         da.date,
-			Spend:        roundCost(da.spend),
-			Requests:     da.requests,
-			InputTokens:  da.inputTokens,
-			OutputTokens: da.outputTokens,
-			CacheRead:    da.cacheRead,
-			CacheWrite:   da.cacheWrite,
-		}
-		for _, dm := range da.perModel {
-			bucket.PerModel = append(bucket.PerModel, contracts.TelemetryModelDayDTO{
-				ModelID:  dm.modelID,
-				Spend:    roundCost(dm.spend),
-				Requests: dm.requests,
-				Tokens:   dm.tokens,
-			})
-		}
-		// Sort per-model by spend descending for stable chart rendering.
-		sort.Slice(bucket.PerModel, func(i, j int) bool {
-			return bucket.PerModel[i].Spend > bucket.PerModel[j].Spend
+		sort.Slice(bucketKeys, func(i, j int) bool {
+			return bucketKeys[i] < bucketKeys[j]
 		})
-		series = append(series, bucket)
+		for _, bk := range bucketKeys {
+			da := buckets[bk]
+			bucket := contracts.TelemetryDayBucketDTO{
+				Date:         da.date,
+				Spend:        roundCost(da.spend),
+				Requests:     da.requests,
+				InputTokens:  da.inputTokens,
+				OutputTokens: da.outputTokens,
+				CacheRead:    da.cacheRead,
+				CacheWrite:   da.cacheWrite,
+			}
+			for _, dm := range da.perModel {
+				bucket.PerModel = append(bucket.PerModel, contracts.TelemetryModelDayDTO{
+					ModelID:  dm.modelID,
+					Spend:    roundCost(dm.spend),
+					Requests: dm.requests,
+					Tokens:   dm.tokens,
+				})
+			}
+			sort.Slice(bucket.PerModel, func(i, j int) bool {
+				return bucket.PerModel[i].Spend > bucket.PerModel[j].Spend
+			})
+			series = append(series, bucket)
+		}
 	}
 
 	// Build top models (sorted by spend descending).
@@ -293,6 +329,51 @@ func (a *App) handleTelemetryReport(req contracts.TelemetryReportRequest) (any, 
 // noise in JSON output (e.g. 0.0000001 → 0).
 func roundCost(v float64) float64 {
 	return float64(int64(v*1e6+0.5)) / 1e6
+}
+
+// chooseBucketSize picks a time bucket duration based on the lookback window.
+// Shorter windows get finer buckets so charts show meaningful granularity:
+//   - ≤30m  → 1m buckets
+//   - ≤1h   → 2m
+//   - ≤3h   → 5m
+//   - ≤12h  → 15m
+//   - ≤2d   → 1h
+//   - ≤1w   → 6h
+//   - ≤1mo  → 1d
+//   - ≤1y   → 1d
+//   - all-time → 1d
+func chooseBucketSize(minutes int) time.Duration {
+	switch {
+	case minutes <= 0:
+		return 24 * time.Hour // all-time: daily
+	case minutes <= 30:
+		return time.Minute
+	case minutes <= 60:
+		return 2 * time.Minute
+	case minutes <= 180:
+		return 5 * time.Minute
+	case minutes <= 720: // 12h
+		return 15 * time.Minute
+	case minutes <= 2880: // 2d
+		return time.Hour
+	case minutes <= 10080: // 1w
+		return 6 * time.Hour
+	default: // 1mo, 1y
+		return 24 * time.Hour
+	}
+}
+
+// formatBucketLabel renders a bucket start time as a human-readable label
+// appropriate for the bucket size. Sub-day buckets show HH:MM, daily
+// buckets show YYYY-MM-DD.
+func formatBucketLabel(t time.Time, bucketSize time.Duration) string {
+	// Truncate to bucket boundary (already done by caller, but be safe).
+	t = t.Truncate(bucketSize)
+	if bucketSize >= 24*time.Hour {
+		return t.Format("2006-01-02")
+	}
+	// Sub-day: show HH:MM.
+	return t.Format("15:04")
 }
 
 // (unused import guard: strings is used by future filter helpers)

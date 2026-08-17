@@ -1802,6 +1802,42 @@
       "section": "Telemetry charts",
       "type": "container",
       "notes": "Ranked list of providers by spend."
+    },
+    "tm-blended": {
+      "label": "Blended $/1M metric",
+      "section": "Telemetry summary",
+      "type": "text",
+      "notes": "Average cost per 1M tokens = total_spend / (total_tokens / 1M)."
+    },
+    "tm-blended-sub": {
+      "label": "Blended cost sub-label",
+      "section": "Telemetry summary",
+      "type": "text",
+      "notes": "Sub-text under blended cost metric."
+    },
+    "tm-spend-sub": {
+      "label": "tm-spend sub-label",
+      "section": "Telemetry summary",
+      "type": "text",
+      "notes": "Sub-text under metric card."
+    },
+    "tm-requests-sub": {
+      "label": "tm-requests sub-label",
+      "section": "Telemetry summary",
+      "type": "text",
+      "notes": "Sub-text under metric card."
+    },
+    "tm-tokens-sub": {
+      "label": "tm-tokens sub-label",
+      "section": "Telemetry summary",
+      "type": "text",
+      "notes": "Sub-text under metric card."
+    },
+    "tm-cache-sub": {
+      "label": "tm-cache sub-label",
+      "section": "Telemetry summary",
+      "type": "text",
+      "notes": "Sub-text under metric card."
     }
   }
 }

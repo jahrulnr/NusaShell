@@ -10,8 +10,9 @@ const (
 type TelemetryReportRequest struct {
 	ProviderID string `json:"provider_id,omitempty"`
 	ModelID    string `json:"model_id,omitempty"`
-	// Days is the lookback window in days (0 = all-time).
-	Days int `json:"days,omitempty"`
+	// Minutes is the lookback window in minutes (0 = all-time).
+	// The UI sends this from the range selector (15m, 30m, 1h, 3h, 1d, etc).
+	Minutes int `json:"minutes,omitempty"`
 }
 
 // TelemetryReportResult is the full payload returned by telemetry.report.

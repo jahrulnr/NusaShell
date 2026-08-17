@@ -4,7 +4,7 @@
 import { rpc } from '../rpc.js';
 
 let charts = {};
-let currentRange = 30;
+let currentRange = 180; // 3h default
 let chartReady = false;
 
 const PALETTE = ['#a3e635', '#22d3ee', '#a78bfa', '#fb923c', '#facc15', '#60a5fa', '#f472b6', '#94a3b8', '#ef4444'];
@@ -40,7 +40,7 @@ export async function refresh() {
       console.error('telemetry: Chart.js not loaded (window.Chart missing)');
       return;
     }
-    const res = await rpc('telemetry.report', { days: currentRange });
+    const res = await rpc('telemetry.report', { minutes: currentRange });
     renderSummary(res.summary);
     renderTables(res);
     // Defer chart rendering until the browser has laid out the canvas
@@ -57,6 +57,9 @@ function renderSummary(s) {
   set('tm-requests', formatNum(s.total_requests));
   set('tm-tokens', formatNum(s.total_tokens));
   set('tm-cache', `${s.cache_hit_percent.toFixed(1)}%`);
+  // Blended $/1M = total_spend / (total_tokens / 1M)
+  const blended = s.total_tokens > 0 ? (s.total_spend / (s.total_tokens / 1e6)) : 0;
+  set('tm-blended', formatUSD(blended));
 }
 
 function renderCharts(res, Chart) {
@@ -71,11 +74,15 @@ function renderCharts(res, Chart) {
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        layout: { padding: { top: 2, bottom: 0, left: 0, right: 0 } },
         scales: {
-          x: { stacked: true, grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } },
-          y: { stacked: true, grid: { color: 'rgba(148,163,184,0.08)' }, ticks: { callback: (v) => formatNum(v) } },
+          x: { stacked: true, grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8, font: { size: 10 } } },
+          y: { stacked: true, grid: { color: 'rgba(148,163,184,0.06)' }, ticks: { callback: (v) => formatNum(v), font: { size: 10 }, maxTicksLimit: 5 } },
         },
-        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, boxHeight: 10, padding: 12 } }, tooltip: { mode: 'index', intersect: false } },
+        plugins: {
+          legend: { position: 'bottom', labels: { boxWidth: 8, boxHeight: 8, padding: 6, font: { size: 10 } } },
+          tooltip: { mode: 'index', intersect: false, bodyFont: { size: 11 }, titleFont: { size: 11 } },
+        },
       },
     });
   };
@@ -155,8 +162,8 @@ function formatUSD(v) {
 }
 
 function formatNum(v) {
-  if (v >= 1e9) return `${(v / 1e9).toFixed(1)}B`;
-  if (v >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
-  if (v >= 1e3) return `${(v / 1e3).toFixed(1)}K`;
+  if (v >= 1e9) return `${(v / 1e9).toFixed(2)}B`;
+  if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
+  if (v >= 1e3) return `${(v / 1e3).toFixed(2)}K`;
   return String(v);
 }

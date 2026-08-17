@@ -1,9 +1,14 @@
-/* ============ Telemetry workspace ============ */
+/* ============ Telemetry workspace ============
+   Layout matches OpenRouter Activity dashboard:
+   - 5-col summary grid with sparklines
+   - 2-col chart grid, compact spacing
+   - Full-width with px padding, no max-width
+*/
 
 .telemetry-header-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 .telemetry-range-select {
   background: var(--panel);
@@ -11,7 +16,7 @@
   border-radius: var(--radius-sm);
   color: var(--text);
   font-size: 12px;
-  padding: 6px 10px;
+  padding: 5px 10px;
   cursor: pointer;
 }
 .telemetry-range-select:hover { border-color: var(--border-strong); }
@@ -21,64 +26,79 @@
 .telemetry-body {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 12px;
 }
 
-/* ---- Summary metric cards ---- */
+/* ---- Summary metric cards (5-col, compact) ---- */
 .telemetry-summary {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
 }
 .telemetry-metric-card {
   background: var(--panel);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
-  padding: 16px 18px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
+  transition: border-color 0.15s;
 }
+.telemetry-metric-card:hover { border-color: var(--border); }
 .telemetry-metric-label {
   font-size: 11px;
   color: var(--text-faint);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  font-weight: 400;
 }
 .telemetry-metric-value {
   font-family: var(--font-display);
-  font-size: 22px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 700;
   color: var(--text);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.telemetry-metric-change {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.telemetry-metric-change.up { color: var(--accent); }
+.telemetry-metric-change.down { color: #ef4444; }
+.telemetry-metric-sub {
+  font-size: 10px;
+  color: var(--text-faint);
 }
 
-/* ---- Chart grid ---- */
+/* ---- Chart grid (2-col, compact) ---- */
 .telemetry-charts {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 14px;
+  gap: 8px;
 }
 .telemetry-chart-card {
   background: var(--panel);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
-  padding: 16px 18px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  min-height: 280px;
+  gap: 6px;
+  min-height: 220px;
 }
 .telemetry-chart-card h3 {
   margin: 0;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 .telemetry-chart-card canvas {
   flex: 1;
-  min-height: 200px;
-  max-height: 320px;
+  min-height: 160px;
+  max-height: 240px;
 }
 .telemetry-chart-wide {
   grid-column: span 2;
@@ -88,24 +108,24 @@
 .telemetry-table {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   overflow-y: auto;
-  max-height: 260px;
+  max-height: 200px;
 }
 .telemetry-table-row {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
-  padding: 6px 0;
+  gap: 6px;
+  padding: 4px 0;
   border-bottom: 1px solid var(--border-soft);
-  font-size: 12px;
+  font-size: 11px;
 }
 .telemetry-table-row:last-child { border-bottom: none; }
 .tm-rank {
   color: var(--text-faint);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10px;
 }
 .tm-name {
   color: var(--text);
@@ -117,7 +137,7 @@
   color: var(--text);
   font-weight: 600;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
 }
 .tm-sub {
   grid-column: 2 / 4;
@@ -127,13 +147,16 @@
 }
 .telemetry-empty {
   color: var(--text-faint);
-  font-size: 12px;
+  font-size: 11px;
   text-align: center;
-  padding: 24px 0;
+  padding: 20px 0;
 }
 
 /* ---- Responsive ---- */
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
+  .telemetry-summary { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 768px) {
   .telemetry-summary { grid-template-columns: repeat(2, 1fr); }
   .telemetry-charts { grid-template-columns: 1fr; }
   .telemetry-chart-wide { grid-column: span 1; }

@@ -45,7 +45,7 @@ func TestHandleTelemetryReportAggregatesUsage(t *testing.T) {
 	}}
 	app := &App{Conversations: convStore, Providers: provStore, Logs: &fakeLogStore{}, Bus: NewBus()}
 
-	resp, rpcErr := app.handleTelemetryReport(contracts.TelemetryReportRequest{Days: 0})
+	resp, rpcErr := app.handleTelemetryReport(contracts.TelemetryReportRequest{Minutes: 0})
 	if rpcErr != nil {
 		t.Fatalf("unexpected rpc error: %v", rpcErr)
 	}
@@ -101,9 +101,18 @@ func TestHandleTelemetryReportAggregatesUsage(t *testing.T) {
 		t.Fatalf("top provider name = %s, want OpenRouter", result.TopProviders[0].ProviderName)
 	}
 
-	// Series: 2 day buckets (today and 2 days ago).
-	if len(result.Series) != 2 {
-		t.Fatalf("series len = %d, want 2", len(result.Series))
+	// Series: daily buckets spanning from 2 days ago to today (filled).
+	// With all-time (minutes=0), bucketSize=1d, so we get 3 buckets:
+	// 2-days-ago, 1-day-ago (empty), today.
+	if len(result.Series) < 2 {
+		t.Fatalf("series len = %d, want >= 2", len(result.Series))
+	}
+	// First and last should have data; middle may be empty (filled).
+	if result.Series[0].Requests == 0 {
+		t.Fatalf("first bucket should have data, got 0 requests")
+	}
+	if result.Series[len(result.Series)-1].Requests == 0 {
+		t.Fatalf("last bucket should have data, got 0 requests")
 	}
 }
 
@@ -136,7 +145,7 @@ func TestHandleTelemetryReportDaysFilter(t *testing.T) {
 	app := &App{Conversations: convStore, Providers: provStore, Logs: &fakeLogStore{}, Bus: NewBus()}
 
 	// 7-day window: only the recent message should be included.
-	resp, _ := app.handleTelemetryReport(contracts.TelemetryReportRequest{Days: 7})
+	resp, _ := app.handleTelemetryReport(contracts.TelemetryReportRequest{Minutes: 7 * 24 * 60})
 	result := resp.(contracts.TelemetryReportResult)
 	if result.Summary.TotalRequests != 1 {
 		t.Fatalf("total_requests = %d, want 1 (7-day filter)", result.Summary.TotalRequests)
@@ -146,7 +155,7 @@ func TestHandleTelemetryReportDaysFilter(t *testing.T) {
 	}
 
 	// All-time: both messages.
-	resp, _ = app.handleTelemetryReport(contracts.TelemetryReportRequest{Days: 0})
+	resp, _ = app.handleTelemetryReport(contracts.TelemetryReportRequest{Minutes: 0})
 	result = resp.(contracts.TelemetryReportResult)
 	if result.Summary.TotalRequests != 2 {
 		t.Fatalf("total_requests = %d, want 2 (all-time)", result.Summary.TotalRequests)
@@ -171,5 +180,46 @@ func TestHandleTelemetryReportEmptyStore(t *testing.T) {
 	}
 	if len(result.Series) != 0 {
 		t.Fatalf("series len = %d, want 0", len(result.Series))
+	}
+}
+
+func TestChooseBucketSize(t *testing.T) {
+	cases := []struct {
+		minutes int
+		want    time.Duration
+	}{
+		{0, 24 * time.Hour},      // all-time
+		{15, time.Minute},        // 15m → 1m
+		{30, time.Minute},        // 30m → 1m
+		{60, 2 * time.Minute},    // 1h → 2m
+		{180, 5 * time.Minute},   // 3h → 5m
+		{720, 15 * time.Minute},  // 12h → 15m
+		{1440, time.Hour},        // 1d → 1h
+		{2880, time.Hour},        // 2d → 1h
+		{10080, 6 * time.Hour},   // 1w → 6h
+		{43200, 24 * time.Hour},  // 1mo → 1d
+		{525600, 24 * time.Hour}, // 1y → 1d
+	}
+	for _, c := range cases {
+		got := chooseBucketSize(c.minutes)
+		if got != c.want {
+			t.Fatalf("chooseBucketSize(%d) = %v, want %v", c.minutes, got, c.want)
+		}
+	}
+}
+
+func TestFormatBucketLabel(t *testing.T) {
+	// Daily bucket → YYYY-MM-DD
+	daily := chooseBucketSize(0)
+	got := formatBucketLabel(time.Date(2026, 8, 17, 14, 30, 0, 0, time.UTC), daily)
+	if got != "2026-08-17" {
+		t.Fatalf("daily label = %q, want 2026-08-17", got)
+	}
+	// 5-min bucket → HH:MM
+	fiveMin := chooseBucketSize(180)
+	got = formatBucketLabel(time.Date(2026, 8, 17, 14, 32, 0, 0, time.UTC), fiveMin)
+	// 14:32 truncated to 5-min bucket = 14:30
+	if got != "14:30" {
+		t.Fatalf("5m label = %q, want 14:30", got)
 	}
 }

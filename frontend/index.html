@@ -93,11 +93,6 @@
       </nav>
 
       <div class="storage">
-        <div class="storage-row">
-          <span>Data</span>
-          <span class="storage-text" id="storage-path">…</span>
-        </div>
-        <div class="storage-bar"><div class="storage-fill" id="storage-fill"></div></div>
       </div>
       <button class="sidebar-mode-toggle" id="sidebar-mode-toggle" type="button" aria-label="Collapse sidebar" aria-pressed="false" title="Use icon-only sidebar">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true"><path d="M4 5h16M4 12h16M4 19h16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -543,21 +538,47 @@
           </div>
           <div class="telemetry-header-actions">
             <select id="telemetry-range" class="telemetry-range-select">
-              <option value="0">All time</option>
-              <option value="7">Last 7 days</option>
-              <option value="14">Last 14 days</option>
-              <option value="30" selected>Last 30 days</option>
-              <option value="90">Last 90 days</option>
+              <option value="15">15m</option>
+              <option value="30">30m</option>
+              <option value="60">1h</option>
+              <option value="180" selected>3h</option>
+              <option value="1440">1d</option>
+              <option value="2880">2d</option>
+              <option value="10080">1w</option>
+              <option value="43200">1mo</option>
+              <option value="525600">1y</option>
+              <option value="0">All</option>
             </select>
             <button class="mini-btn" id="telemetry-refresh-btn" type="button">Refresh</button>
           </div>
         </div>
         <div class="view-body telemetry-body">
           <div class="telemetry-summary" id="telemetry-summary">
-            <div class="telemetry-metric-card"><span class="telemetry-metric-label">Total spend</span><span class="telemetry-metric-value" id="tm-spend">$0.00</span></div>
-            <div class="telemetry-metric-card"><span class="telemetry-metric-label">Requests</span><span class="telemetry-metric-value" id="tm-requests">0</span></div>
-            <div class="telemetry-metric-card"><span class="telemetry-metric-label">Total tokens</span><span class="telemetry-metric-value" id="tm-tokens">0</span></div>
-            <div class="telemetry-metric-card"><span class="telemetry-metric-label">Cache hit</span><span class="telemetry-metric-value" id="tm-cache">0%</span></div>
+            <div class="telemetry-metric-card">
+              <span class="telemetry-metric-label">Total spend</span>
+              <span class="telemetry-metric-value" id="tm-spend">$0.00</span>
+              <span class="telemetry-metric-sub" id="tm-spend-sub">all time</span>
+            </div>
+            <div class="telemetry-metric-card">
+              <span class="telemetry-metric-label">Requests</span>
+              <span class="telemetry-metric-value" id="tm-requests">0</span>
+              <span class="telemetry-metric-sub" id="tm-requests-sub">turns</span>
+            </div>
+            <div class="telemetry-metric-card">
+              <span class="telemetry-metric-label">Token volume</span>
+              <span class="telemetry-metric-value" id="tm-tokens">0</span>
+              <span class="telemetry-metric-sub" id="tm-tokens-sub">total</span>
+            </div>
+            <div class="telemetry-metric-card">
+              <span class="telemetry-metric-label">Cache hit</span>
+              <span class="telemetry-metric-value" id="tm-cache">0%</span>
+              <span class="telemetry-metric-sub" id="tm-cache-sub">prompt tokens</span>
+            </div>
+            <div class="telemetry-metric-card">
+              <span class="telemetry-metric-label">Blended $/1M</span>
+              <span class="telemetry-metric-value" id="tm-blended">$0.00</span>
+              <span class="telemetry-metric-sub" id="tm-blended-sub">avg cost</span>
+            </div>
           </div>
           <div class="telemetry-charts">
             <div class="telemetry-chart-card telemetry-chart-wide"><h3>Usage by model</h3><canvas id="chart-usage-model"></canvas></div>
