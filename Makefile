@@ -3,7 +3,7 @@
 # Gates follow the repository verification baseline:
 # gofmt, go test, go test -race, go vet, go build.
 
-.PHONY: all build test race vet fmt check run test-frontend test-frontend-e2e scan-ui-docs scan-ui-docs-check gen-catalog gen-catalog-check
+.PHONY: all build test race vet fmt check run install test-frontend test-frontend-e2e scan-ui-docs scan-ui-docs-check gen-catalog gen-catalog-check
 
 all: check
 
@@ -57,6 +57,17 @@ fmt-check:
 ## run: build and start the development server (listens on NUSASHELL_PORT/9999).
 run: scan-ui-docs gen-catalog build
 	./bin/nusashell
+
+## install: build and install the `nusashell` CLI into ~/.local/bin so the
+## Go app is runnable as `nusashell` from anywhere. Override the destination
+## with NUSASHELL_INSTALL_DIR. This replaces any existing ~/.local/bin/nusashell
+## (e.g. an Electron wrapper left by NusaShell-Desktop's make install).
+install: build
+	@dest="$${NUSASHELL_INSTALL_DIR:-$${HOME}/.local/bin}"; \
+	mkdir -p "$$dest"; \
+	install -m 0755 ./bin/nusashell "$$dest/nusashell"; \
+	echo "installed: $$dest/nusashell"; \
+	echo "run: nusashell"
 
 ## scan-ui-docs: regenerate resources/agent/docs/ui-*.md from ui-map.json.
 ## Fails when a data-view lacks a map entry or a mapped control ID is missing from source.

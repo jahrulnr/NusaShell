@@ -12,6 +12,7 @@
 .DS_Store
 .idea/
 .vscode/
+.vtcode/
 .experimental/
 *.swp
 # Local env

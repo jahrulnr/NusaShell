@@ -53,6 +53,16 @@ Open `http://127.0.0.1:9999`, configure a provider, then choose a folder from
 the composer’s workspace button. The selected folder is the workspace for the
 active conversation.
 
+To run NusaShell from anywhere as a `nusashell` command (the Go app owns the
+CLI name; it replaces any wrapper left by NusaShell-Desktop):
+
+```bash
+make install              # builds ./bin/nusashell and installs to ~/.local/bin
+nusashell                 # starts the server (default http://127.0.0.1:9999)
+```
+
+Set `NUSASHELL_INSTALL_DIR` to install to a different directory.
+
 ## Development and verification
 
 ```bash
