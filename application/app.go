@@ -279,22 +279,7 @@ func NewApp(deps Deps) *App {
 	// this event and answers via the agent.ask.answer RPC.
 	if app.AskQuestions != nil {
 		app.AskQuestions.SetOnAsk(func(runID, callID, conversationID string, req domain.AskQuestionRequest) {
-			opts := make([]contracts.AskOptionDTO, len(req.Options))
-			for i, o := range req.Options {
-				opts[i] = contracts.AskOptionDTO{
-					ID: o.ID, Label: o.Label, Description: o.Description,
-					Default: o.Default, Icon: o.Icon, Image: o.Image,
-				}
-			}
-			app.Bus.Emit(contracts.EventAskPending, contracts.AskPendingEvent{
-				ConversationID: conversationID,
-				RunID:          runID,
-				ToolCallID:     callID,
-				Question:       req.Question,
-				Options:        opts,
-				AllowFreeText:  req.AllowFreeText,
-				MultiSelect:    req.MultiSelect,
-			})
+			app.Bus.Emit(contracts.EventAskPending, askPendingEvent(conversationID, runID, callID, req))
 		})
 	}
 	// Wire the lifecycle manager (decay + prune). Started by StartLifecycle,
@@ -652,6 +637,12 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 			return nil, rpcErr
 		}
 		return a.handleAskCancel(req)
+	case contracts.MethodAskPending:
+		var req contracts.AskPendingListRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAskPendingList(req)
 	case contracts.MethodProvidersList:
 		return a.handleProvidersList()
 	case contracts.MethodProvidersSave:

@@ -6,6 +6,37 @@ import (
 	"nusashell/domain"
 )
 
+func TestAskQuestionService_PendingForConversation(t *testing.T) {
+	s := NewAskQuestionService()
+	req := domain.AskQuestionRequest{Question: "Q?", Options: []domain.AskQuestionOption{{ID: "a", Label: "A"}}}
+	_, _ = s.Ask("run-1", "call-1", "conv-1", req)
+	_, _ = s.Ask("run-1", "call-2", "conv-1", req)
+	_, _ = s.Ask("run-2", "call-3", "conv-2", req)
+
+	got := s.PendingForConversation("conv-1")
+	if len(got) != 2 {
+		t.Fatalf("PendingForConversation(conv-1) = %d asks, want 2", len(got))
+	}
+	for _, p := range got {
+		if p.ConversationID != "conv-1" || p.Req.Question != "Q?" {
+			t.Fatalf("unexpected pending ask: %+v", p)
+		}
+	}
+	// Answering removes it from the pending list.
+	if _, err := s.Answer("run-1", "call-1", domain.AskQuestionAnswer{Via: domain.AskAnswerViaOption, OptionIDs: []string{"a"}}); err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	if len(s.PendingForConversation("conv-1")) != 1 {
+		t.Fatalf("after answer, conv-1 should have 1 pending ask")
+	}
+	if len(s.PendingForConversation("conv-2")) != 1 {
+		t.Fatalf("conv-2 should still have 1 pending ask")
+	}
+	if len(s.PendingForConversation("missing")) != 0 {
+		t.Fatalf("unknown conversation should have 0 pending asks")
+	}
+}
+
 func TestAskQuestionService_Answer(t *testing.T) {
 	s := NewAskQuestionService()
 	req := domain.AskQuestionRequest{

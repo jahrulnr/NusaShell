@@ -23,6 +23,7 @@ const (
 	MethodTurnsActive                = "agent.turns.active"
 	MethodAskAnswer                  = "agent.ask.answer"
 	MethodAskCancel                  = "agent.ask.cancel"
+	MethodAskPending                 = "agent.ask.pending"
 
 	MethodProvidersList   = "ai.providers.list"
 	MethodProvidersSave   = "ai.providers.save"
@@ -404,6 +405,17 @@ type AskPendingEvent struct {
 	Options        []AskOptionDTO `json:"options"`
 	AllowFreeText  bool           `json:"allow_free_text"`
 	MultiSelect    bool           `json:"multi_select"`
+}
+
+// AskPendingListRequest lists in-flight ask_question calls for a conversation
+// so the UI can rebuild interactive cards after a room switch or reload.
+type AskPendingListRequest struct {
+	ConversationID string `json:"conversation_id"`
+}
+
+// AskPendingListResult carries the pending asks (same shape as the live event).
+type AskPendingListResult struct {
+	Asks []AskPendingEvent `json:"asks"`
 }
 
 // AskAnswerRequest is the RPC payload for agent.ask.answer. The UI sends the

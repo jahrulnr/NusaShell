@@ -83,9 +83,28 @@ export function createSelect(selectEl, { data = [], value = '', placeholder = ''
   return ss;
 }
 
+// Open modal dialogs register a dismiss fn here so navigation (or any global
+// teardown) can close them and resolve their promise as cancelled — otherwise
+// a body-level overlay left open would cover the next view.
+const openDialogDismissers = new Set();
+
+// dismissOpenDialogs cancels and removes every open dialog()/confirmDialog()
+// overlay. Called by the router on view change to prevent overlay bleed.
+export function dismissOpenDialogs() {
+  for (const dismiss of [...openDialogDismissers]) dismiss();
+}
+
 export function dialog({ title, message, fields = [], actions = [{ label: 'Cancel', value: null }], danger = false }) {
   return new Promise((resolve) => {
     const overlay = el('div', { class: 'ui-dialog-overlay' });
+    const settle = (result) => {
+      if (!openDialogDismissers.has(dismiss)) return;
+      openDialogDismissers.delete(dismiss);
+      overlay.remove();
+      resolve(result);
+    };
+    const dismiss = () => settle({ value: null, fields: {} });
+    openDialogDismissers.add(dismiss);
     const body = el('div', { class: 'ui-dialog-body' });
     if (message) body.append(el('p', { class: 'ui-dialog-message', text: message }));
     const values = {};
@@ -134,8 +153,7 @@ export function dialog({ title, message, fields = [], actions = [{ label: 'Cance
         text: a.label,
       });
       btn.addEventListener('click', () => {
-        overlay.remove();
-        resolve({ value: a.value, fields: Object.fromEntries(Object.entries(values).map(([k, n]) => [k, n.value])) });
+        settle({ value: a.value, fields: Object.fromEntries(Object.entries(values).map(([k, n]) => [k, n.value])) });
       });
       return btn;
     });
@@ -147,15 +165,9 @@ export function dialog({ title, message, fields = [], actions = [{ label: 'Cance
       body,
       el('div', { class: 'ui-dialog-actions' }, actionBtns),
     );
-    dialogNode.querySelector('.ui-dialog-close').addEventListener('click', () => {
-      overlay.remove();
-      resolve({ value: null, fields: {} });
-    });
+    dialogNode.querySelector('.ui-dialog-close').addEventListener('click', () => dismiss());
     overlay.addEventListener('mousedown', (e) => {
-      if (e.target === overlay) {
-        overlay.remove();
-        resolve({ value: null, fields: {} });
-      }
+      if (e.target === overlay) dismiss();
     });
     overlay.append(dialogNode);
     document.body.append(overlay);
