@@ -467,12 +467,19 @@ func (a *App) appendTurnAssistant(conversationID string) (*domain.Conversation, 
 	return conversation, next.ID, nil
 }
 
-func (a *App) finishTurn(run *TurnRun, messageID, model string, usage ChatUsage, autoContinueIndex int) error {
+func (a *App) finishTurn(run *TurnRun, messageID, model string, usage ChatUsage, contextTokens, autoContinueIndex int) error {
 	conversation, err := a.Conversations.Get(run.ConversationID)
 	if err != nil {
 		return err
 	}
 	conversation.Status = "idle"
+	// Record the authoritative provider-measured context fill (last round's
+	// input + cached input + output) as the source of truth for the idle
+	// badge. Providers that report no usage leave it at zero, and the UI
+	// falls back to the heuristic EstimatedTokens.
+	if contextTokens > 0 {
+		conversation.ContextTokens = int64(contextTokens)
+	}
 	conversation.Touch()
 	if err := a.Conversations.Save(conversation); err != nil {
 		return err
@@ -507,7 +514,8 @@ func (a *App) finishTurn(run *TurnRun, messageID, model string, usage ChatUsage,
 			InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
 			CacheRead: usage.CacheRead, CacheWrite: usage.CacheWrite,
 		},
-		AutoContinue: autoContinue,
+		ContextTokens: contextTokens,
+		AutoContinue:  autoContinue,
 	})
 	a.log("info", "agent", "turn finished: %s (in %d / out %d)", run.ID, usage.InputTokens, usage.OutputTokens)
 

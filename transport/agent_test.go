@@ -1616,3 +1616,79 @@ func TestAgentTurnRetryThenError(t *testing.T) {
 		t.Fatalf("expected error to contain 429, got %q", lastAssistant.Error)
 	}
 }
+
+// TestTurnContextTokensIsLastRoundNotSum proves the backend is the source of
+// truth for the context badge: a two-round (tool) turn reports context_tokens
+// equal to the LAST round's provider usage (input+output = 15), while the
+// display usage sums both rounds (input 20 / output 10). The authoritative
+// number is also persisted on the conversation for the idle badge.
+func TestTurnContextTokensIsLastRoundNotSum(t *testing.T) {
+	h := newHarness(t, nil)
+	pid := h.addOpenAIProvider(t, "Usage provider")
+	h.rpcOK(t, "ai.providers.import-models", map[string]any{"id": pid})
+	convID := h.newConversation(t)
+
+	// Round 1 calls a tool; round 2 answers. The fake provider reports
+	// prompt_tokens=10, completion_tokens=5 per request.
+	h.llm.setRounds([][]llmStep{
+		{{Tool: &llmToolCall{ID: "call_1", Name: "docs_search", Args: map[string]any{"query": "mcp"}}}},
+		{{Text: "done"}},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	done := make(chan []map[string]any, 1)
+	go func() {
+		frames, err := readSSEUntil(t, ctx, h.server.URL+"/events", contracts.EventTurnDone)
+		if err != nil {
+			done <- nil
+			return
+		}
+		done <- frames
+	}()
+	time.Sleep(100 * time.Millisecond)
+	h.rpcOK(t, "agent.turns.start", map[string]any{
+		"conversation_id": convID, "text": "what is mcp?", "model": "fake-model-1",
+	})
+
+	select {
+	case frames := <-done:
+		if frames == nil {
+			t.Fatal("no turn.done frame received")
+		}
+		var payload map[string]any
+		for _, f := range frames {
+			if f["type"] == contracts.EventTurnDone {
+				payload = f["payload"].(map[string]any)
+			}
+		}
+		if payload == nil {
+			t.Fatal("turn.done payload missing")
+		}
+		// context_tokens = last round only (10 + 5).
+		if got := payload["context_tokens"]; got != float64(15) {
+			t.Fatalf("turn.done context_tokens = %v, want 15 (last round, not summed)", got)
+		}
+		// usage still sums both rounds for the ↑/↓ display tags.
+		usage := payload["usage"].(map[string]any)
+		if usage["input_tokens"] != float64(20) || usage["output_tokens"] != float64(10) {
+			t.Fatalf("turn.done usage = %v, want input 20 / output 10 (summed)", usage)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for turn.done")
+	}
+
+	// The idle badge source of truth is persisted on the conversation.
+	gotten := h.rpcOK(t, "agent.conversations.get", map[string]any{"id": convID})
+	var conv struct {
+		Conversation struct {
+			ContextTokens int64 `json:"context_tokens"`
+		} `json:"conversation"`
+	}
+	if err := json.Unmarshal(gotten.Result, &conv); err != nil {
+		t.Fatal(err)
+	}
+	if conv.Conversation.ContextTokens != 15 {
+		t.Fatalf("persisted context_tokens = %d, want 15", conv.Conversation.ContextTokens)
+	}
+}

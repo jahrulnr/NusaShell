@@ -119,10 +119,17 @@ type Conversation struct {
 	// in subsequent request input. Empty for providers that don't support
 	// server-side compaction.
 	CompactionBlob string
-	// EstimatedTokens is the last server-side context estimate for this
-	// conversation (system + messages + tool definitions). It lets the UI
-	// show the same number while idle as it showed during the live turn.
+	// EstimatedTokens is the last server-side *heuristic* context estimate for
+	// this conversation (system + messages + tool definitions, ~chars/4). It
+	// is a provisional live number shown while a turn streams, before the
+	// provider reports real usage; it is a fallback for ContextTokens.
 	EstimatedTokens int64
+	// ContextTokens is the authoritative provider-measured context fill after
+	// the last completed turn (last round's input + cached input + output).
+	// This is the source of truth for the idle context badge. Zero until a
+	// turn completes with provider usage (e.g. some local providers report
+	// none), in which case the UI falls back to EstimatedTokens.
+	ContextTokens int64
 }
 
 // NewConversation creates an empty conversation.

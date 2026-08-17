@@ -762,9 +762,10 @@
       "type": "text"
     },
     "agent-provider-status": {
-      "label": "Provider status",
+      "label": "Provider status / context usage",
       "section": "Agent",
-      "type": "text"
+      "type": "text",
+      "notes": "Shows the backend context usage as used/window (e.g. 32k/1M). The number is the server source of truth: the live server-side estimate while a turn streams and the provider-measured context fill after it completes. The frontend never sums message bubbles."
     },
     "stop-btn": {
       "label": "Stop",

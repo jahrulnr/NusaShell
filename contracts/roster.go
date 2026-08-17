@@ -138,6 +138,10 @@ type ConversationDTO struct {
 	Workspace       string `json:"workspace,omitempty"`
 	ChunkCount      int    `json:"chunk_count,omitempty"`
 	EstimatedTokens int64  `json:"estimated_tokens,omitempty"`
+	// ContextTokens is the authoritative provider-measured context fill after
+	// the last completed turn; the UI's idle context badge prefers it over the
+	// EstimatedTokens heuristic.
+	ContextTokens int64 `json:"context_tokens,omitempty"`
 }
 
 type UsageDTO struct {
@@ -327,13 +331,17 @@ type TodoUpdatedEvent struct {
 }
 
 type TurnDoneEvent struct {
-	RunID          string           `json:"run_id"`
-	ConversationID string           `json:"conversation_id"`
-	MessageID      string           `json:"message_id"`
-	Model          string           `json:"model,omitempty"`
-	Usage          *UsageDTO        `json:"usage,omitempty"`
-	Error          string           `json:"error,omitempty"`
-	AutoContinue   *AutoContinueDTO `json:"auto_continue,omitempty"`
+	RunID          string    `json:"run_id"`
+	ConversationID string    `json:"conversation_id"`
+	MessageID      string    `json:"message_id"`
+	Model          string    `json:"model,omitempty"`
+	Usage          *UsageDTO `json:"usage,omitempty"`
+	// ContextTokens is the authoritative context fill after this turn (last
+	// round input + cached input + output). The UI badge uses it as the
+	// source of truth, unlike Usage which sums per-round tokens for display.
+	ContextTokens int              `json:"context_tokens,omitempty"`
+	Error         string           `json:"error,omitempty"`
+	AutoContinue  *AutoContinueDTO `json:"auto_continue,omitempty"`
 }
 
 // AutoContinueDTO mirrors domain.AutoContinueDecision for the wire. When

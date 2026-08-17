@@ -194,9 +194,10 @@ The message input with attachments, model picker, workspace selector, provider s
   - Section: Agent
   - Type: text
 
-- **Provider status** (`#agent-provider-status`):
+- **Provider status / context usage** (`#agent-provider-status`):
   - Section: Agent
   - Type: text
+  - Notes: Shows the backend context usage as used/window (e.g. 32k/1M). The number is the server source of truth: the live server-side estimate while a turn streams and the provider-measured context fill after it completes. The frontend never sums message bubbles.
 
 - **Stop** (`#stop-btn`):
   - Section: Agent

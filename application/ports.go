@@ -299,6 +299,21 @@ type ChatUsage struct {
 	CacheWrite   int
 }
 
+// ContextTokens is the authoritative context fill for a single
+// request/response round: the full prompt (uncached input plus any cached or
+// cache-written input) plus the generated output. This is what actually
+// occupies the model's context window after the round.
+//
+// Use the LAST round's ContextTokens as the conversation's context usage, not
+// the sum of per-round usage: each tool round re-sends the growing history, so
+// summing InputTokens across rounds double counts the prompt and can exceed
+// the window. For OpenAI-style providers InputTokens already includes cached
+// tokens (CacheRead/CacheWrite stay 0); for Anthropic the cache fields are
+// reported separately and must be added back.
+func (u ChatUsage) ContextTokens() int {
+	return u.InputTokens + u.CacheRead + u.CacheWrite + u.OutputTokens
+}
+
 type ChatResponse struct {
 	Content    string
 	Reasoning  string
