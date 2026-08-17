@@ -732,7 +732,7 @@ func TestAgentTurnWithMCPTool(t *testing.T) {
 	if err := json.Unmarshal(tested.Result, &tools); err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 2 || tools.Tools[0].Name != "echo" {
+	if len(tools.Tools) != 3 || tools.Tools[0].Name != "echo" {
 		t.Fatalf("mcp tools = %+v", tools.Tools)
 	}
 

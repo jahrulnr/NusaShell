@@ -91,6 +91,17 @@ func handle(req request) {
 					"required": []string{"a", "b"},
 				},
 			},
+			{
+				Name:        "structured",
+				Description: "Return a structured content payload with a human-readable text summary",
+				InputSchema: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"label": map[string]any{"type": "string"},
+					},
+					"required": []string{"label"},
+				},
+			},
 		}}, nil)
 	case "tools/call":
 		var params struct {
@@ -110,6 +121,19 @@ func handle(req request) {
 			sum := int(a) + int(b)
 			reply(req.ID, map[string]any{
 				"content": []map[string]any{{"type": "text", "text": fmt.Sprintf("%d", sum)}},
+			}, nil)
+		case "structured":
+			label, _ := params.Arguments["label"].(string)
+			// Mimic the NusaShell-mcp plugins: human-readable text + a
+			// structuredContent payload. The host bridge must forward
+			// structuredContent so plugin UIs can render JSON without
+			// parsing the text.
+			reply(req.ID, map[string]any{
+				"content": []map[string]any{{"type": "text", "text": "label=" + label}},
+				"structuredContent": map[string]any{
+					"label": label,
+					"ok":    true,
+				},
 			}, nil)
 		default:
 			reply(req.ID, nil, &rpcError{Code: -32602, Message: "unknown tool: " + params.Name})

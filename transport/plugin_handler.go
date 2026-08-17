@@ -16,6 +16,8 @@ import (
 	"nusashell/contracts"
 	"nusashell/infrastructure/pluginfs"
 	"nusashell/infrastructure/pluginruntime"
+
+	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // PluginHandler serves plugin UI static files and routes tool calls
@@ -104,7 +106,9 @@ func (h *PluginHandler) handlePlugin(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleCallTool routes a tool call to the plugin's MCP server.
-// Body is JSON args. Response is the MCP tool result text.
+// Body is JSON args. Response is the full MCP tool result
+// (content + structuredContent + isError) so plugin UIs that expect
+// structured JSON do not have to parse human-readable text.
 func (h *PluginHandler) handleCallTool(w http.ResponseWriter, r *http.Request, pluginID, toolName string) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 	if err != nil {
@@ -123,12 +127,50 @@ func (h *PluginHandler) handleCallTool(w http.ResponseWriter, r *http.Request, p
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
-	result, err := h.Runtime.CallTool(ctx, pluginID, toolName, args)
+	result, err := h.Runtime.CallToolRaw(ctx, pluginID, toolName, args)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
-		return
+		// Surface MCP-level errors (e.g. server not connected) as 502.
+		// Tool-level errors (IsError=true) are forwarded in the result
+		// body so the UI can render the tool's error message.
+		if result == nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"result": result})
+	writeJSON(w, http.StatusOK, map[string]any{"result": pluginToolResultDTO(result)})
+}
+
+// pluginToolResultDTO maps an mcp.CallToolResult to the JSON shape the
+// plugin UI bridge expects: { content, structuredContent, isError }.
+// Text content parts are normalized to { type: "text", text: string } so
+// the UI does not need to import the mcp-go type registry.
+func pluginToolResultDTO(result *mcp.CallToolResult) map[string]any {
+	if result == nil {
+		return map[string]any{"content": []any{}, "isError": false}
+	}
+	content := make([]any, 0, len(result.Content))
+	for _, c := range result.Content {
+		if t, ok := c.(mcp.TextContent); ok {
+			content = append(content, map[string]any{"type": "text", "text": t.Text})
+			continue
+		}
+		// Non-text content (image/audio/embedded) is rare for plugin UIs;
+		// fall back to the SDK's JSON marshalling so we never drop a part.
+		if raw, err := json.Marshal(c); err == nil {
+			var decoded any
+			if json.Unmarshal(raw, &decoded) == nil {
+				content = append(content, decoded)
+			}
+		}
+	}
+	out := map[string]any{
+		"content": content,
+		"isError": result.IsError,
+	}
+	if result.StructuredContent != nil {
+		out["structuredContent"] = result.StructuredContent
+	}
+	return out
 }
 
 // handleListTools returns the tools advertised by a running plugin.

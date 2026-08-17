@@ -15,6 +15,8 @@ import (
 	"nusashell/contracts"
 	"nusashell/infrastructure/mcpclient"
 	"nusashell/infrastructure/pluginfs"
+
+	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // Manager owns the plugin store + MCP connection manager. It is safe
@@ -54,7 +56,9 @@ func (m *Manager) EnsureStarted(ctx context.Context, pluginID string) ([]contrac
 }
 
 // CallTool routes a tool call from the plugin UI to the plugin's MCP
-// server. The plugin is started if it is not already running.
+// server and returns the concatenated text content. The plugin is started
+// if it is not already running. Use CallToolRaw when the caller needs the
+// full MCP result (structuredContent, isError, content parts).
 func (m *Manager) CallTool(ctx context.Context, pluginID, toolName string, args map[string]any) (string, error) {
 	plugin, err := m.store.Get(pluginID)
 	if err != nil {
@@ -65,6 +69,22 @@ func (m *Manager) CallTool(ctx context.Context, pluginID, toolName string, args 
 		return "", fmt.Errorf("plugin %s: %w", pluginID, err)
 	}
 	return m.mcp.CallTool(ctx, plugin.Manifest.MCPServerID(), toolName, args)
+}
+
+// CallToolRaw routes a tool call from the plugin UI to the plugin's MCP
+// server and returns the full MCP CallToolResult, including StructuredContent
+// and IsError. The plugin is started if it is not already running. The
+// caller is responsible for inspecting IsError and forwarding the result
+// shape the UI expects (content + structuredContent).
+func (m *Manager) CallToolRaw(ctx context.Context, pluginID, toolName string, args map[string]any) (*mcp.CallToolResult, error) {
+	plugin, err := m.store.Get(pluginID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := m.mcp.Connect(ctx, plugin); err != nil {
+		return nil, fmt.Errorf("plugin %s: %w", pluginID, err)
+	}
+	return m.mcp.CallToolRaw(ctx, plugin.Manifest.MCPServerID(), toolName, args)
 }
 
 // ListTools returns the tools advertised by a running plugin. Returns

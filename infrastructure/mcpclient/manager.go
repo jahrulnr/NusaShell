@@ -73,24 +73,37 @@ func (m *Manager) Drop(serverID string) {
 	}
 }
 
-// CallTool executes a tool on a connected server.
+// CallTool executes a tool on a connected server and returns the
+// concatenated text content. Use CallToolRaw when the caller needs the
+// full MCP result (structuredContent, isError, content parts).
 func (m *Manager) CallTool(ctx context.Context, serverID, toolName string, args map[string]any) (string, error) {
+	result, err := m.CallToolRaw(ctx, serverID, toolName, args)
+	if err != nil {
+		return "", err
+	}
+	return contentText(result), nil
+}
+
+// CallToolRaw executes a tool on a connected server and returns the full
+// MCP CallToolResult, including StructuredContent and IsError. The caller
+// is responsible for inspecting IsError and extracting content.
+func (m *Manager) CallToolRaw(ctx context.Context, serverID, toolName string, args map[string]any) (*mcp.CallToolResult, error) {
 	m.mu.Lock()
 	c, ok := m.conns[serverID]
 	m.mu.Unlock()
 	if !ok {
-		return "", fmt.Errorf("mcp server %q is not connected", serverID)
+		return nil, fmt.Errorf("mcp server %q is not connected", serverID)
 	}
 	result, err := c.client.CallTool(ctx, mcp.CallToolRequest{
 		Params: mcp.CallToolParams{Name: toolName, Arguments: args},
 	})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if result.IsError {
-		return "", fmt.Errorf("tool %s failed: %s", toolName, contentText(result))
+		return result, fmt.Errorf("tool %s failed: %s", toolName, contentText(result))
 	}
-	return contentText(result), nil
+	return result, nil
 }
 
 func contentText(result *mcp.CallToolResult) string {
