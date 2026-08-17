@@ -51,14 +51,22 @@ const state = {
   todos: { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 } },
   todoRenderToken: 0,
   conversationLoadToken: 0,
+  // Per-room live run buffers. While the user is looking at another room, the
+  // deltas for this room keep arriving over the same WebSocket; they are
+  // mirrored here (raw text, reasoning, tool jobs) so switching back renders
+  // a stable, complete stream instead of a blank turn. `raw`/`rawReasoning`
+  // are capped to keep memory bounded — when a cap is hit the room falls
+  // back to the persisted snapshot on switch-back. `lastEventAt` powers the
+  // sidebar live-activity indicator.
+  roomBuffers: new Map(), // conversationId -> RoomStreamBuffer
 };
+
+const MAX_ROOM_BUFFER_CHARS = 512 * 1024; // per room (raw + rawReasoning)
 
 // Per-room state that survives conversation switches. When the user switches
 // away from a conversation, its per-room state is saved here. When they switch
 // back, it's restored. This prevents state from one room leaking into another.
 const savedRooms = new Map(); // conversationId -> { pinned, steerDraft, attachments, model }
-
-let agentDataLoading = false;
 
 export async function initAgent() {
   bindComposer({
@@ -119,6 +127,7 @@ function isOfflineStatus(status) {
   return status === 'offline' || status === 'closed' || status === 'error';
 }
 
+let agentDataLoading;
 async function loadAgentData() {
   if (agentDataLoading) return;
   agentDataLoading = true;
@@ -224,7 +233,13 @@ function renderConversationList() {
     return;
   }
   for (const c of filtered) {
-    const item = el('div', { class: `agent-conversation-item${c.id === state.activeId ? ' is-active' : ''}`, role: 'listitem' },
+    const buffer = state.roomBuffers.get(c.id);
+    // Only rooms that are not the active one and not terminal get the live
+    // dot. The dot signals "this room is still streaming in the background".
+    const isLive = Boolean(
+      buffer && !buffer.done && !buffer.capped && c.id !== state.activeId && buffer.lastEventAt > 0,
+    );
+    const item = el('div', { class: `agent-conversation-item${c.id === state.activeId ? ' is-active' : ''}${isLive ? ' is-running' : ''}`, role: 'listitem' },
       el('button', {
         class: 'agent-conversation-open',
         title: c.title,
@@ -234,6 +249,9 @@ function renderConversationList() {
       ),
       el('button', { class: 'agent-conversation-delete', title: 'Delete conversation', 'aria-label': 'Delete conversation' }, '✕'),
     );
+    if (isLive) {
+      item.querySelector('.agent-conversation-open').append(el('span', { class: 'agent-conversation-dot', 'aria-hidden': 'true' }));
+    }
     item.querySelector('.agent-conversation-open').addEventListener('click', () => openConversation(c.id));
     item.querySelector('.agent-conversation-delete').addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -242,6 +260,7 @@ function renderConversationList() {
       try {
         await rpc('agent.conversations.delete', { id: c.id });
         savedRooms.delete(c.id);
+        state.roomBuffers.delete(c.id);
         if (state.activeId === c.id) {
           state.activeId = null;
           state.conversation = null;
@@ -306,10 +325,41 @@ async function openConversation(id) {
   await reattachActiveRunFromBackend();
   if (token !== state.conversationLoadToken) return;
   reattachActiveRun();
+  // Render any buffered deltas that arrived while this room was not visible
+  // (deltas keep arriving over the same WebSocket). The buffered run is
+  // merged into the thread so a switch-back never shows a blank turn: the
+  // persisted snapshot (which lags the live stream by one full round) is
+  // capped by the accumulated raw text + reasoning + tool jobs.
+  applyBufferedRunToDOM(state.activeId);
+  // The buffered run (if any) is still a live stream; treat it as the active
+  // run again so subsequent deltas keep the DOM in sync. Only re-attach for
+  // a LIVE buffer (not the terminal done buffer); a done buffer is already
+  // fully rendered and re-registering it would leave a phantom run in
+  // state.runs with no future turn.done to clean it up (composer stuck in
+  // steer mode).
+  const buffer = state.roomBuffers.get(state.activeId);
+  if (buffer && !buffer.done && !runForConversation(state.activeId)) {
+    state.runs.set(buffer.runId, {
+      msgNode: buffer.msgNode,
+      bubble: buffer.bubble,
+      strip: buffer.strip,
+      textBox: buffer.textBox,
+      reasoningEl: buffer.reasoningEl,
+      toolJobs: buffer.toolJobs,
+      raw: buffer.raw,
+      rawReasoning: buffer.rawReasoning,
+      round: buffer.round,
+      conversationId: state.activeId,
+      runId: buffer.runId,
+      messageId: buffer.messageId,
+    });
+  }
+  expireCompletedBuffers();
+  renderConversationList();
   // Restore the steer queue strip if a steer is still pending for this room.
   // The strip is composer chrome, not part of the thread — it is re-shown
   // from saved per-room state rather than re-rendered from messages.
-  if (state.steerDraft && state.running) {
+  if (state.steerDraft && runForConversation(state.activeId)) {
     showSteerQueued(state.steerDraft, state.steerId);
   } else {
     clearSteerQueue();
@@ -409,6 +459,87 @@ function renderThread(messages) {
   // right after replaceChildren observes a stale (small) scrollHeight, so
   // a freshly opened long room would sit at the top until the next paint.
   requestAnimationFrame(() => scrollToBottom(true));
+}
+
+// ---- per-room live run buffers ----
+
+// getOrCreateRoomBuffer returns the live-run buffer for a conversation,
+// creating it on first activity. The buffer mirrors the deltas that keep
+// arriving on the shared WebSocket while the user is looking at another room.
+function getOrCreateRoomBuffer(convId) {
+  if (!convId) return null;
+  let buffer = state.roomBuffers.get(convId);
+  if (!buffer) {
+    buffer = {
+      runId: null,
+      messageId: null,
+      round: 1,
+      raw: '',
+      rawReasoning: '',
+      toolJobs: new Map(),
+      lastEventAt: 0,
+      done: false,
+      // DOM refs are filled only when this room becomes active again.
+      msgNode: null, bubble: null, strip: null, textBox: null, reasoningEl: null,
+    };
+    state.roomBuffers.set(convId, buffer);
+  }
+  return buffer;
+}
+
+function touchRoomBuffer(buffer) {
+  if (!buffer) return;
+  buffer.lastEventAt = Date.now();
+}
+
+// expireCompletedBuffers prunes room buffers whose runs have finished and are
+// longer needed: the persisted snapshot is authoritative after the turn is
+// terminal, and a stale buffer would only re-merge old deltas on switch-back.
+function expireCompletedBuffers() {
+  for (const [convId, buffer] of state.roomBuffers) {
+    if (buffer.done && buffer.lastEventAt < Date.now() - 30_000) {
+      state.roomBuffers.delete(convId);
+    }
+  }
+}
+
+// applyBufferedRunToDOM merges the buffered LIVE run for the now-active
+// conversation into the rendered thread. It replaces the last assistant node
+// with a streaming placeholder populated from the accumulated raw text +
+// reasoning + tool jobs, so switching back never shows a blank turn.
+//
+// Terminal (done) buffers are intentionally NOT rendered here: once a turn
+// finishes, the persisted snapshot is authoritative and already contains the
+// final message, so re-merging a stale done buffer would misrender when a
+// newer turn has progressed past it.
+function applyBufferedRunToDOM(convId) {
+  const buffer = state.roomBuffers.get(convId);
+  if (!buffer || buffer.done || buffer.capped || buffer.lastEventAt === 0) return;
+  const thread = document.getElementById('agent-thread');
+  if (!thread) return;
+  const assistantNodes = thread.querySelectorAll('.agent-message.assistant');
+  const lastAssistant = assistantNodes[assistantNodes.length - 1];
+  if (!lastAssistant) return;
+  // Replace the persisted tail with a fresh streaming placeholder.
+  const bubble = el('div', { class: 'agent-bubble' });
+  const msgNode = el('div', { class: 'agent-message assistant agent-pending' }, bubble);
+  lastAssistant.replaceWith(msgNode);
+  const reasoningEl = reasoningDisclosure('');
+  reasoningEl.hidden = !buffer.rawReasoning;
+  const textBox = el('div', { class: 'agent-bubble-text' });
+  if (buffer.raw) textBox.innerHTML = renderMarkdown(buffer.raw);
+  else textBox.append(el('span', { class: 'agent-thinking-dots' }, el('span'), el('span'), el('span')));
+  const strip = el('div', { class: 'agent-tool-stack' });
+  strip.hidden = buffer.toolJobs.size === 0;
+  for (const job of buffer.toolJobs.values()) strip.append(job);
+  bubble.append(reasoningEl, textBox, strip);
+  // Refresh the buffered DOM refs so the active-run handlers keep updating.
+  buffer.msgNode = msgNode;
+  buffer.bubble = bubble;
+  buffer.reasoningEl = reasoningEl;
+  buffer.textBox = textBox;
+  buffer.strip = strip;
+  scrollToBottom(true);
 }
 
 function renderAttachments() {
@@ -552,7 +683,7 @@ function beginTurn(runId, userText, attachments = []) {
 }
 
 async function retryTurn(failedNode, failedMessageId) {
-  if (state.running) return;
+  if (runForConversation(state.activeId)) return;
   if (!state.activeId) return;
   const model = state.model;
   if (!model) {
@@ -731,7 +862,11 @@ function endTurn(runId) {
   const run = state.runs.get(runId);
   if (!run) return;
   const convId = run.conversationId;
-  run.msgNode.classList.remove('agent-pending');
+  // Detach the DOM for a run that ended while this room was NOT visible.
+  // The room's live buffer is kept so switching back renders the final
+  // state; the run entry is removed from the shared map (the DOM refs for
+  // an invisible room are stale after renderThread anyway).
+  if (run.msgNode) run.msgNode.classList.remove('agent-pending');
   // Clean up transient UI elements (thinking dots, retry banner, tool timers).
   // Use a bubble-wide query: multi-round turns leave a textBox with dots per
   // round that produced no text, so only removing from run.textBox would
@@ -740,10 +875,19 @@ function endTurn(runId) {
   run.bubble?.querySelector('.agent-retry-banner')?.remove();
   clearToolTimers(run);
   state.runs.delete(runId);
+  // Finalize the room buffer: the turn is terminal now, the persisted
+  // snapshot is authoritative on the next switch-back. Keep the buffer
+  // around briefly so the sidebar dot can still signal "finished", then
+  // let reattach render from the server snapshot.
+  const buffer = state.roomBuffers.get(convId);
+  if (buffer) {
+    buffer.done = true;
+    touchRoomBuffer(buffer);
+  }
   // Clear steer for this conversation (turn ended, unapplied steer is cancelled).
   if (convId === state.activeId) {
     clearSteerQueue();
-    if (!state.running) {
+    if (!runForConversation(state.activeId)) {
       document.getElementById('stop-btn').hidden = true;
     }
     updateSendAvailability(state);
@@ -751,6 +895,7 @@ function endTurn(runId) {
   } else {
     clearSavedSteerQueue(convId);
   }
+  refreshLiveDots();
 }
 
 // ---------- scroll pinning ----------
@@ -818,9 +963,12 @@ async function loadOlderChunk() {
   const conversationId = state.activeId;
   const token = state.conversationLoadToken;
   const thread = document.getElementById('agent-thread');
-  // Save scroll anchor so we can restore position after prepending.
+  // Save the scroll anchor so we can restore position after prepending.
   const prevHeight = thread?.scrollHeight ?? 0;
   const prevScroll = thread?.scrollTop ?? 0;
+  // Capture the run that is currently bound to this room (if any) so a
+  // chunk-load that resolves after a room switch does not clobber it.
+  const prevRun = runForConversation(conversationId);
   try {
     const result = await rpc('agent.conversations.chunk', { id: conversationId, index: chunkIndex });
     if (token !== state.conversationLoadToken || state.activeId !== conversationId) return;
@@ -838,10 +986,35 @@ async function loadOlderChunk() {
     // Insert a "Load older" sentinel above the chunk so the user can manually
     // trigger the next load if the proactive threshold is not met.
     thread?.insertBefore(fragment, thread.firstChild);
-    // Restore scroll position so the user doesn't jump.
+    // Restore the scroll position so the user doesn't jump.
     if (thread) {
       const newHeight = thread.scrollHeight;
       thread.scrollTop = prevScroll + (newHeight - prevHeight);
+    }
+    // A chunk load replaced the DOM nodes for this room. Rebind the active
+    // run's DOM refs to the freshly re-rendered nodes so streaming deltas do
+    // not target detached nodes.
+    if (prevRun && state.activeId === conversationId) {
+      const assistantNodes = thread.querySelectorAll('.agent-message.assistant');
+      const lastAssistant = assistantNodes[assistantNodes.length - 1];
+      if (lastAssistant && runForConversation(conversationId) === prevRun) {
+        const bubble = el('div', { class: 'agent-bubble' });
+        const msgNode = el('div', { class: 'agent-message assistant agent-pending' }, bubble);
+        lastAssistant.replaceWith(msgNode);
+        const reasoningEl = reasoningDisclosure('');
+        reasoningEl.hidden = !prevRun.rawReasoning;
+        const textBox = el('div', { class: 'agent-bubble-text' });
+        if (prevRun.raw) textBox.innerHTML = renderMarkdown(prevRun.raw);
+        const strip = el('div', { class: 'agent-tool-stack' });
+        strip.hidden = true;
+        bubble.append(reasoningEl, textBox, strip);
+        prevRun.msgNode = msgNode;
+        prevRun.bubble = bubble;
+        prevRun.reasoningEl = reasoningEl;
+        prevRun.textBox = textBox;
+        prevRun.strip = strip;
+        prevRun.toolJobs = new Map();
+      }
     }
   } catch (err) {
     if (token === state.conversationLoadToken && state.activeId === conversationId) {
@@ -908,6 +1081,22 @@ function bindEvents() {
     if (!run) return;
     // Always accumulate raw text so we can re-render on room switch.
     run.raw += text;
+    // Mirror into the room buffer so a switch-back that happens at any point
+    // (including after this run entry was cleaned up) still renders the full
+    // stream. The buffer is capped; when the cap is hit the room falls back
+    // to the persisted snapshot on switch-back.
+    if (conversation_id !== state.activeId) {
+      const buffer = getOrCreateRoomBuffer(conversation_id);
+      buffer.runId = run.runId;
+      buffer.messageId = run.messageId;
+      buffer.raw += text;
+      if (buffer.raw.length > MAX_ROOM_BUFFER_CHARS) {
+        buffer.capped = true;
+        buffer.raw = buffer.raw.slice(-MAX_ROOM_BUFFER_CHARS);
+      }
+      touchRoomBuffer(buffer);
+      refreshLiveDots();
+    }
     // Only update DOM if this conversation is the active one.
     if (conversation_id !== state.activeId || !run.textBox) return;
     // Remove thinking dots / retry banner on first delta.
@@ -936,6 +1125,19 @@ function bindEvents() {
     const run = getRunOrQueue('agent.reasoning.delta', payload);
     if (!run) return;
     run.rawReasoning += text;
+    // Mirror into the room buffer for a non-active room so a switch-back
+    // restores the full reasoning stream.
+    if (conversation_id !== state.activeId) {
+      const buffer = getOrCreateRoomBuffer(conversation_id);
+      buffer.runId = run.runId;
+      buffer.messageId = run.messageId;
+      buffer.rawReasoning += text;
+      if (buffer.raw.length + buffer.rawReasoning.length > MAX_ROOM_BUFFER_CHARS) {
+        buffer.capped = true;
+      }
+      touchRoomBuffer(buffer);
+      refreshLiveDots();
+    }
     if (conversation_id !== state.activeId) return;
     if (run.reasoningEl) {
       run.reasoningEl.hidden = false;
@@ -971,7 +1173,18 @@ function bindEvents() {
     const { tool_call_id, name, args, conversation_id } = payload;
     const run = getRunOrQueue('agent.tool.started', payload);
     if (!run) return;
-    if (conversation_id !== state.activeId) return;
+    // Mirror tool activity into the non-active room buffer so a switch-back
+    // restores the tool cards that ran while this room was hidden.
+    if (conversation_id !== state.activeId) {
+      const buffer = getOrCreateRoomBuffer(conversation_id);
+      buffer.runId = run.runId;
+      buffer.messageId = run.messageId;
+      const job = renderToolJob({ name, args: args ?? {}, status: 'running' });
+      buffer.toolJobs.set(tool_call_id, job);
+      touchRoomBuffer(buffer);
+      refreshLiveDots();
+      return;
+    }
     // ask_question renders as an ask card (not a tool terminal). The card
     // is created when agent.ask.pending fires with the validated args.
     // Skip the tool terminal here to avoid a double card.
@@ -1013,7 +1226,27 @@ function bindEvents() {
     const { tool_call_id, name, status, output, conversation_id } = payload;
     const run = getRunOrQueue('agent.tool.completed', payload);
     if (!run) return;
-    if (conversation_id !== state.activeId) return;
+    // Mirror the completed tool output into the non-active room buffer so a
+    // switch-back renders the finished tool card.
+    if (conversation_id !== state.activeId) {
+      const buffer = getOrCreateRoomBuffer(conversation_id);
+      const job = buffer.toolJobs.get(tool_call_id);
+      if (job) {
+        const next = { name, args: job._toolArgs, status: status || 'ok', output };
+        setToolTerminalStatus(job, next.status);
+        job.open = false;
+        const meta = job.querySelector('.agent-tool-terminal-meta');
+        if (meta) meta.textContent = toolTerminalMeta(next);
+        const outputEl = job.querySelector('.agent-tool-terminal-output');
+        if (outputEl) {
+          outputEl.classList.toggle('is-error', next.status === 'fail');
+          outputEl.textContent = toolTerminalOutput(next);
+        }
+      }
+      touchRoomBuffer(buffer);
+      refreshLiveDots();
+      return;
+    }
     // ask_question: the ask card is already sealed by agent.ask.answered
     // (or agent.ask.cancelled). Skip the tool terminal update — the ask
     // card IS the tool card, there's no terminal to update.
@@ -1071,6 +1304,15 @@ function bindEvents() {
     const { run_id, message, conversation_id } = payload;
     const run = getRunOrQueue('agent.turn.error', payload);
     if (run) {
+      // Mirror the terminal error state into the room buffer so a
+      // non-active room still shows the failure when switched back.
+      if (conversation_id !== state.activeId) {
+        const buffer = getOrCreateRoomBuffer(conversation_id);
+        buffer.raw += (buffer.raw ? '\n\n' : '') + (message || 'Turn failed');
+        buffer.done = true;
+        touchRoomBuffer(buffer);
+        refreshLiveDots();
+      }
       const bubble = run.msgNode.querySelector('.agent-bubble');
       if (bubble) bubble.textContent = message || 'Turn failed';
       run.msgNode.classList.add('agent-message-error');
@@ -1135,10 +1377,16 @@ function bindEvents() {
     if (!card || !card.classList?.contains('agent-ask-card')) return;
     cancelAskCard(card, reason);
   });
-  on('agent.compacted', ({ conversation_id, summary }) => {
-    if (conversation_id !== state.activeId) return;
+  on('agent.compacted', ({ conversation_id }) => {
+    // Compaction rebuilds the durable history; drop any live buffer for this
+    // room so a switch-back doesn't merge deltas that predate the summary.
+    state.roomBuffers.delete(conversation_id);
+    if (conversation_id !== state.activeId) {
+      refreshLiveDots();
+      return;
+    }
     const thread = document.getElementById('agent-thread');
-    thread.append(el('div', { class: 'agent-compaction-marker', text: `Compacted · ${summary ? 'context summarized' : 'history trimmed'}` }));
+    thread.append(el('div', { class: 'agent-compaction-marker', text: 'Compacted · context summarized' }));
     scrollToBottom();
     refreshActiveConversation();
   });
@@ -1167,10 +1415,14 @@ function bindEvents() {
   });
   on('agent.todo.updated', (payload) => {
     const { conversation_id, items, summary } = payload;
-    // Only update the DOM if this event is for the active conversation.
-    // Events for other conversations are dropped — their todos will be
-    // fetched fresh when the user switches to them.
-    if (conversation_id !== state.activeId) return;
+    // Keep the per-room status fresh (used by the sidebar live dot) even for
+    // non-active rooms; only the DOM strip touches the active room.
+    if (conversation_id !== state.activeId) {
+      const buffer = getOrCreateRoomBuffer(conversation_id);
+      touchRoomBuffer(buffer);
+      refreshLiveDots();
+      return;
+    }
     state.todos = { items: items ?? [], summary: summary ?? { total: 0, pending: 0, in_progress: 0, completed: 0 } };
     renderTodoStrip();
   });
@@ -1259,7 +1511,13 @@ async function refreshActiveConversation() {
     state.nextChunkIndex = state.chunkCount - 1;
     state.loadedChunks = new Set();
     state.loadingChunk = false;
+    // If a live buffer exists for this room (a turn is still streaming across
+    // the refresh race), re-merge it so the visible stream stays stable while
+    // the server snapshot catches up.
+    const buffer = state.roomBuffers.get(conversationId);
+    const hasLiveBuffer = buffer && !buffer.done && !buffer.capped && buffer.lastEventAt > 0;
     renderThread(state.messages);
+    if (hasLiveBuffer) applyBufferedRunToDOM(conversationId);
     maybeLoadOlderChunk();
     updateComposerStatus();
   } catch (err) {
@@ -1330,6 +1588,7 @@ export async function openConversationExternal(id) {
 export async function refresh() {
   if (backendIsOffline()) return;
   await refreshConversations();
+  expireCompletedBuffers();
 }
 
 // ---------- status ----------
@@ -1353,7 +1612,18 @@ function updateComposerStatus() {
 
   const status = document.getElementById('agent-provider-status');
   const stopBtn = document.getElementById('stop-btn');
-  if (state.running || state.conversation?.status === 'running') {
+  // Only consider a run that actually belongs to the room the user is
+  // looking at; a turn running in another room should not flip this room's
+  // header into "running". A live buffer for the active room counts as
+  // running too (the run is still streaming over the WS). After a page
+  // refresh the run map is empty until reattachActiveRunFromBackend
+  // resolves, so fall back to the persisted status for the active room.
+  const activeRun = runForConversation(state.activeId);
+  const activeBuffered = state.roomBuffers.get(state.activeId);
+  const activeRoomLive = Boolean(
+    activeRun || (activeBuffered && !activeBuffered.done && !activeBuffered.capped && activeBuffered.lastEventAt > 0),
+  );
+  if (activeRoomLive) {
     // Live turn: keep the useful context-usage badge visible (running is
     // already conveyed by the prompt pulse + activity); just pulse it.
     status.classList.add('is-running');
@@ -1370,6 +1640,12 @@ function updateComposerStatus() {
     status.textContent = 'Running';
     return;
   }
+  if (state.activeId && state.conversation?.id === state.activeId && state.conversation?.status === 'running') {
+    status.classList.add('is-running');
+    if (stopBtn) stopBtn.hidden = false;
+    status.textContent = 'Running';
+    return;
+  }
   status.classList.remove('is-running');
   if (stopBtn) stopBtn.hidden = true;
   const chosen = models.find((model) => `${model.provider_id}:${model.id}` === state.model) || models.find((model) => model.id === state.model);
@@ -1383,3 +1659,36 @@ function updateComposerStatus() {
   const est = state.conversation?.estimated_tokens ?? 0;
   status.textContent = formatContextUsage(est > 0 ? est : estimateContextTokens(state.messages), contextWindow);
 }
+
+// ---- sidebar live activity helpers ----
+
+// maybeRenderConversationList re-renders the conversation list only when it
+// is the visible view (avoids layout churn while typing in the composer).
+function maybeRenderConversationList() {
+  const view = document.querySelector('.view.agent-view');
+  if (!view || view.classList.contains('active')) renderConversationList();
+}
+
+// refreshLiveDots re-renders just the sidebar indicators (no thread touch).
+// Called when any non-active room buffer changes so the user can see at a
+// glance which rooms are still streaming.
+function refreshLiveDots() {
+  maybeRenderConversationList();
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

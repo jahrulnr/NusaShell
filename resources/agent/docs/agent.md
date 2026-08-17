@@ -16,6 +16,32 @@ file under `conversations/` in the data directory.
 5. The finished assistant message (content, tool calls, usage) is saved to
    the conversation file.
 
+### Switching rooms during a live turn
+
+A conversation is a "room" in the Agent workspace. The run itself lives on
+the backend (fire-and-forget), so a turn keeps streaming even after you
+switch to another room. To keep the UI stable, the frontend keeps a small
+per-room **live buffer**: every delta (text, reasoning, tool calls) that
+arrives over the shared WebSocket while a room is not visible is mirrored
+in memory on that room's buffer (capped at 512 KiB per room).
+
+- Switching back to a room that is still streaming re-merges its live buffer
+  into the thread immediately, so you never see a blank/frozen turn or a
+  "content appears only after the turn finishes".
+- A turn that **finishes while you are in another room** is shown in the
+  sidebar with a small pulsing live dot while it is still active. Once it
+  settles, the UI re-reads the authoritative snapshot from the backend, so
+  opening the room shows the final persisted content (the turn's full text +
+  tool calls), never a blank turn.
+- The live buffer covers only in-flight turns (buffers are marked terminal
+  when the run finishes and expire shortly after); the persisted snapshot is
+  the source of truth once a turn is done.
+- Buffers are capped for memory safety; a room that exceeds the cap falls
+  back to rendering from the persisted snapshot on switch-back.
+- Unlike session-scoped SSE, the shared WebSocket keeps delivering every
+  conversation's deltas to the one open page, so this works without extra
+  backend polling or workers.
+
 ## Task checklist
 
 The `todo` tool replaces the conversation's task checklist in one call
