@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"nusashell/domain"
 )
@@ -149,18 +148,42 @@ func (s *Store) writeJSON(name string, v any) error {
 	return atomicWrite(filepath.Join(s.dir, name), b)
 }
 
+type atomicWriter struct {
+	mu sync.Mutex
+}
+
+var (
+	atomicWritersMu sync.Mutex
+	atomicWriters   = make(map[string]*atomicWriter)
+)
+
+func getAtomicWriter(path string) *atomicWriter {
+	atomicWritersMu.Lock()
+	defer atomicWritersMu.Unlock()
+
+	if w, ok := atomicWriters[path]; ok {
+		return w
+	}
+
+	w := &atomicWriter{}
+	atomicWriters[path] = w
+	return w
+}
+
 // atomicWrite writes via a unique temp file + rename so readers never see torn
 // files and concurrent writers of the same path cannot collide on a shared
 // temp name (which would race the rename and fail with "no such file").
 func atomicWrite(path string, b []byte) error {
+	w := getAtomicWriter(path)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".nusashell-*.tmp")
 	if err != nil {
 		return err
 	}
-	sleepTime := 10 * time.Millisecond
 	name := tmp.Name()
 	cleanup := func() {
-		time.Sleep(sleepTime)
 		_ = os.Remove(name)
 	}
 	if _, err := tmp.Write(b); err != nil {
