@@ -108,26 +108,7 @@ A tabbed dialog for installing plugins. Catalog shows official first-party plugi
 
 ## Plugin window
 
-An in-shell window that renders plugin UIs in a movable, resizable frame sized from the manifest ui.window (fullscreen mode covers the shell; panel/widget use defaultSize with a 700x700 / 380x280 fallback). Opens from Home tiles and the Plugins drawer Open UI button; no browser popups. Close with the X button or Escape.
-
-- **Plugin window** (`#plugin-window`):
-  - Section: Plugins
-  - Type: dialog
-  - Notes: In-shell window hosting the plugin UI in an iframe; sized per manifest ui.window (fullscreen / panel / widget), movable via the title bar, resizable when allowed.
-
-- **Plugin window title** (`#plugin-window-title`):
-  - Section: Plugins
-  - Type: text
-
-- **Close plugin window** (`#plugin-window-close`):
-  - Section: Plugins
-  - Type: button
-  - Action: Closes the in-shell plugin window (Escape also works).
-
-- **Plugin window frame** (`#plugin-window-frame`):
-  - Section: Plugins
-  - Type: frame
-  - Notes: Iframe hosting /plugins/{id}/ with the window.shell shim.
+Plugin UIs open in a separate browser window served same-origin at /plugins/<id>/ (the server injects the window.shell shim). Opening happens from Home tiles and the Plugins drawer Open UI button. The window is sized from the manifest ui.window (panel/widget request defaultSize with a 700x700 / 380x280 fallback; fullscreen opens a normal browser window). This keeps the plugin from covering or replacing the NusaShell UI. If the browser blocks the pop-up, a toast prompts the user to allow pop-ups.
 
 ## Plugin catalog
 
@@ -165,7 +146,7 @@ A right-hand drawer that opens when a catalog row is clicked. Shows the state ma
 - **Open UI** (`#plugin-btn-open-ui`):
   - Section: Plugins
   - Type: button
-  - Action: Opens the selected MCP + UI plugin in the in-shell plugin window. Hidden for MCP-only entries.
+  - Action: Opens the selected MCP + UI plugin in a separate browser window (served at /plugins/<id>/). Hidden for MCP-only entries.
 
 - **Start** (`#plugin-btn-start`):
   - Section: Plugins

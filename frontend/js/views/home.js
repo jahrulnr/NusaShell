@@ -1,7 +1,8 @@
 // Home / launcher view. This mirrors the Electron launcher surface while
 // keeping the Go port's HTTP plugin endpoint and browser-window handoff.
 
-import { openPluginWindow as openPluginWindowInShell } from '../plugin-window.js';
+import { openPluginWindow as launchPluginWindow } from '../plugin-window.js';
+import { toast } from '../ui.js';
 
 let plugins = [];
 let launcherSearchQuery = '';
@@ -208,9 +209,7 @@ function appendEmptyState(grid, text) {
 
 function openPluginWindow(plugin) {
   const manifest = pluginManifest(plugin);
-  openPluginWindowInShell({
-    id: pluginId(plugin),
-    name: plugin?.name || manifest.name || pluginId(plugin),
-    ui: manifest.ui,
-  });
+  const name = plugin?.name || manifest.name || pluginId(plugin);
+  const opened = launchPluginWindow({ id: pluginId(plugin), name, ui: manifest.ui });
+  if (!opened) toast(`Allow pop-ups to open “${name}” in its own window.`, 'error');
 }
