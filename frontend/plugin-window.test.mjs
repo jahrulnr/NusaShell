@@ -3,16 +3,44 @@ import { test } from 'node:test';
 
 import { openPluginWindow, windowFeatures } from './js/plugin-window.js';
 
-test('windowFeatures sizes panel/widget and defers fullscreen to the browser', () => {
-  const panel = windowFeatures({ mode: 'panel', defaultSize: { width: 820, height: 640 } });
-  assert.match(panel, /popup=yes/);
-  assert.match(panel, /width=820/);
-  assert.match(panel, /height=640/);
+function feat(str, key) {
+  const m = new RegExp(`${key}=(\\d+)`).exec(str);
+  return m ? Number(m[1]) : null;
+}
 
-  assert.match(windowFeatures({ mode: 'widget' }), /width=380/);
-  assert.match(windowFeatures(), /width=700/); // default is panel 700x700
-  // Fullscreen opens a normal browser window/tab — no popup size features.
-  assert.equal(windowFeatures({ mode: 'fullscreen' }), '');
+test('windowFeatures always requests a separate popup window (never a bare tab)', () => {
+  const screen = { width: 1600, height: 900 };
+  // Every mode yields a real window: popup=yes with explicit size + position.
+  for (const cfg of [{ mode: 'fullscreen' }, { mode: 'panel' }, { mode: 'widget' }, {}]) {
+    const f = windowFeatures(cfg, screen);
+    assert.match(f, /popup=yes/, `popup for ${JSON.stringify(cfg)}`);
+    assert.ok(feat(f, 'width') > 0 && feat(f, 'height') > 0, 'has explicit size');
+    assert.ok(Number.isInteger(feat(f, 'left')) && Number.isInteger(feat(f, 'top')), 'centered');
+  }
+});
+
+test('windowFeatures honors a declared size and clamps it to the screen', () => {
+  const f = windowFeatures({ mode: 'panel', defaultSize: { width: 820, height: 640 } }, { width: 1600, height: 900 });
+  assert.equal(feat(f, 'width'), 820);
+  assert.equal(feat(f, 'height'), 640);
+  // Oversized declaration is clamped to the screen.
+  const big = windowFeatures({ mode: 'panel', defaultSize: { width: 5000, height: 4000 } }, { width: 1280, height: 800 });
+  assert.equal(feat(big, 'width'), 1280);
+  assert.equal(feat(big, 'height'), 800);
+});
+
+test('windowFeatures picks a dynamic panel size that scales with the screen', () => {
+  const small = windowFeatures({ mode: 'panel' }, { width: 1280, height: 800 });
+  const large = windowFeatures({ mode: 'panel' }, { width: 2560, height: 1440 });
+  // No declared size → the default width scales with the screen (capped at 1100).
+  assert.ok(feat(large, 'width') >= feat(small, 'width'), 'wider screen → wider default');
+  assert.ok(feat(small, 'width') <= 1100 && feat(large, 'width') <= 1100, 'capped');
+  // Fullscreen uses the whole screen.
+  const fs = windowFeatures({ mode: 'fullscreen' }, { width: 1600, height: 900 });
+  assert.equal(feat(fs, 'width'), 1600);
+  assert.equal(feat(fs, 'height'), 900);
+  // Widget stays compact.
+  assert.equal(feat(windowFeatures({ mode: 'widget' }, { width: 1600, height: 900 }), 'width'), 380);
 });
 
 test('openPluginWindow opens the plugin URL in a separate window (not an overlay)', () => {
