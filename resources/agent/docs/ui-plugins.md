@@ -140,7 +140,9 @@ Lists all plugins — manual MCP servers, MCP-only plugins, and MCP + UI plugins
 
 ## Detail drawer
 
-A right-hand drawer that opens when a catalog row is clicked. Shows the state machine, actions, tools, and manifest summary. Native MCP rows expose Start, Stop, Restart, Edit, and Delete; plugin rows expose Start, Stop, Restart, and Uninstall; MCP + UI plugins also expose Open UI. Close with the X button, overlay, or Escape.
+A right-hand drawer that opens when a catalog row is clicked. Shows the state machine, actions, preferences, tools, and manifest summary. Native MCP rows expose Start, Stop, Restart, Edit, and Delete; plugin rows expose Start, Stop, Restart, and Uninstall; MCP + UI plugins also expose Open UI. When a catalog plugin has a newer release, an Update button appears that updates it in place (plugin.update). Close with the X button, overlay, or Escape.
+
+The Preferences area has an Auto start switch (shown for every entry) that launches the MCP server when NusaShell starts, and an Auto update switch (shown only for catalog-managed plugins) that updates the plugin automatically when a new version is released.
 
 - **Plugin detail drawer** (`#plugin-drawer`):
   - Section: Plugins
@@ -182,6 +184,11 @@ A right-hand drawer that opens when a catalog row is clicked. Shows the state ma
   - Type: button
   - Action: Stops then starts the selected MCP server or plugin.
 
+- **Update** (`#plugin-btn-update`):
+  - Section: Plugins
+  - Type: button
+  - Action: Updates a catalog plugin in place to its latest release (plugin.update). Appears only when a newer catalog version is available; the label shows the target version.
+
 - **Edit** (`#plugin-btn-edit`):
   - Section: Plugins
   - Type: button
@@ -196,6 +203,26 @@ A right-hand drawer that opens when a catalog row is clicked. Shows the state ma
   - Section: Plugins
   - Type: button
   - Action: Uninstalls the selected plugin and drops its MCP connection (plugin.uninstall). Hidden for native MCP entries.
+
+- **Auto start section** (`#plugin-drawer-autostart`):
+  - Section: Plugins
+  - Type: section
+  - Notes: Preference row shown for every entry; contains the auto-start switch.
+
+- **Auto start** (`#plugin-autostart-toggle`):
+  - Section: Plugins
+  - Type: toggle
+  - Action: Launches this MCP server or plugin automatically when NusaShell starts (plugin.set_autostart).
+
+- **Auto update section** (`#plugin-drawer-autoupdate`):
+  - Section: Plugins
+  - Type: section
+  - Notes: Preference row shown only for catalog-managed plugins; contains the auto-update switch.
+
+- **Auto update** (`#plugin-autoupdate-toggle`):
+  - Section: Plugins
+  - Type: toggle
+  - Action: Updates this catalog plugin automatically when a new version is released (plugin.set_autoupdate). Shown only for catalog-managed plugins.
 
 - **Tools list** (`#plugin-tools-list`):
   - Section: Plugins

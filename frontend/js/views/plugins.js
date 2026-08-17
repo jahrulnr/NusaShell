@@ -4,12 +4,11 @@
 import { rpc } from '../rpc.js';
 import { el, toast, dialog, confirmDialog } from '../ui.js';
 import { openPluginWindow as openPluginWindowInShell } from '../plugin-window.js';
-import { hasPluginUI, pluginKind, pluginRowMeta } from './plugins-model.js';
+import { hasPluginUI, pluginKind, pluginRowMeta, canAutoUpdate, hasUpdate } from './plugins-model.js';
 
-export { hasPluginUI, pluginKind, pluginRowMeta } from './plugins-model.js';
+export { hasPluginUI, pluginKind, pluginRowMeta, canAutoUpdate, hasUpdate } from './plugins-model.js';
 
 let servers = [];
-let pluginCatalog = [];
 let currentServer = null;
 let drawerReturnFocus = null;
 
@@ -155,6 +154,7 @@ function wireDrawer() {
   document.getElementById('plugin-btn-start')?.addEventListener('click', () => { if (currentServer) void startServer(currentServer); });
   document.getElementById('plugin-btn-stop')?.addEventListener('click', () => { if (currentServer) void stopServer(currentServer); });
   document.getElementById('plugin-btn-restart')?.addEventListener('click', () => { if (currentServer) void restartServer(currentServer); });
+  document.getElementById('plugin-btn-update')?.addEventListener('click', () => { if (currentServer) void updateInstalledPlugin(currentServer); });
   document.getElementById('plugin-btn-edit')?.addEventListener('click', () => { if (currentServer) addMcp(currentServer); });
   document.getElementById('plugin-btn-delete')?.addEventListener('click', () => { if (currentServer) void deleteServer(currentServer); });
   document.getElementById('plugin-btn-uninstall')?.addEventListener('click', () => { if (currentServer) void uninstallPlugin(currentServer); });
@@ -175,6 +175,13 @@ function openDrawer(server) {
   document.getElementById('plugin-btn-edit').hidden = isPlugin;
   document.getElementById('plugin-btn-uninstall').hidden = !isPlugin;
   document.getElementById('plugin-btn-delete').hidden = isPlugin;
+
+  // Manual "Update" appears only when the catalog has a newer version.
+  const updateBtn = document.getElementById('plugin-btn-update');
+  if (updateBtn) {
+    updateBtn.hidden = !hasUpdate(server);
+    updateBtn.textContent = hasUpdate(server) ? `Update to v${server.updateAvailable}` : 'Update';
+  }
 
   renderDrawerState(server);
   renderDrawerTools(server);
@@ -222,8 +229,10 @@ function renderDrawerState(server) {
 function renderDrawerAutoUpdate(server) {
   const section = document.getElementById('plugin-drawer-autoupdate');
   if (!section) return;
-  section.hidden = !(server.plugin === true);
-  if (server.plugin !== true) return;
+  // Auto-update only makes sense for catalog-managed plugins; manual MCP
+  // servers and GitHub/ZIP installs have no catalog release to track.
+  section.hidden = !canAutoUpdate(server);
+  if (!canAutoUpdate(server)) return;
   const toggle = document.getElementById('plugin-autoupdate-toggle');
   if (!toggle) return;
   toggle.checked = Boolean(server.autoUpdate);
@@ -243,8 +252,9 @@ function renderDrawerAutoUpdate(server) {
 function renderDrawerAutoStart(server) {
   const section = document.getElementById('plugin-drawer-autostart');
   if (!section) return;
-  section.hidden = !(server.plugin === true);
-  if (server.plugin !== true) return;
+  // Any MCP server or plugin can be launched on startup, so this applies to
+  // every entry in the list (manual servers included).
+  section.hidden = false;
   const toggle = document.getElementById('plugin-autostart-toggle');
   if (!toggle) return;
   toggle.checked = Boolean(server.autostart);
@@ -283,11 +293,12 @@ function renderDrawerTools(server) {
 
 function renderDrawerManifest(server) {
   const info = document.getElementById('plugin-manifest-info');
+  const mcp = server.manifest?.mcp ?? {};
   const rows = [
     ['id', server.id],
     ['type', server.plugin ? (hasPluginUI(server) ? 'MCP + UI plugin' : 'MCP plugin') : 'MCP server'],
-    ['command', server.command || '—'],
-    ['args', (server.args || []).join(' ') || '—'],
+    ['command', mcp.command || '—'],
+    ['args', (mcp.args || []).join(' ') || '—'],
     ['status', server.status || 'idle'],
   ];
   if (server.plugin) {
@@ -339,6 +350,29 @@ async function restartServer(server) {
   }
 }
 
+// updateInstalledPlugin updates a catalog plugin in place to its latest
+// release via plugin.update (no reinstall dialog). Used by the drawer's
+// manual "Update" button that appears when updateAvailable is set.
+async function updateInstalledPlugin(server) {
+  const button = document.getElementById('plugin-btn-update');
+  const previous = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Updating…';
+  }
+  try {
+    await rpc('plugin.update', { id: server.id }, { timeoutMs: 300000 });
+    toast(`${server.name} updated`, 'success');
+    await refresh();
+  } catch (error) {
+    toast(error.message, 'error');
+    if (button) {
+      button.disabled = false;
+      button.textContent = previous;
+    }
+  }
+}
+
 async function deleteServer(server) {
   const ok = await confirmDialog('Delete MCP server', `"${server.name}" will be removed.`, 'Delete');
   if (!ok) return;
@@ -376,14 +410,15 @@ function openPluginWindow(server) {
 }
 
 async function addMcp(server = null) {
+  const mcp = server?.manifest?.mcp ?? {};
   const result = await dialog({
     title: server ? 'Edit MCP server' : 'Add MCP server',
     message: 'A stdio MCP server launched as a child process. Environment entries use KEY=VALUE.',
     fields: [
       { name: 'name', label: 'Name', value: server?.name ?? '', placeholder: 'e.g. filesystem' },
-      { name: 'command', label: 'Command', value: server?.command ?? '', placeholder: 'e.g. npx' },
-      { name: 'args', label: 'Arguments (space separated)', value: (server?.args ?? []).join(' '), placeholder: '-y @modelcontextprotocol/server-filesystem /path' },
-      { name: 'env', label: 'Environment (optional)', value: Object.entries(server?.env ?? {}).map(([key, value]) => `${key}=${value}`).join('\n'), placeholder: 'KEY=VALUE', tag: 'textarea' },
+      { name: 'command', label: 'Command', value: mcp.command ?? '', placeholder: 'e.g. npx' },
+      { name: 'args', label: 'Arguments (space separated)', value: (mcp.args ?? []).join(' '), placeholder: '-y @modelcontextprotocol/server-filesystem /path' },
+      { name: 'env', label: 'Environment (optional)', value: Object.entries(mcp.env ?? {}).map(([key, value]) => `${key}=${value}`).join('\n'), placeholder: 'KEY=VALUE', tag: 'textarea' },
     ],
     actions: [
       { label: 'Cancel', value: null },
@@ -408,7 +443,7 @@ async function addMcp(server = null) {
       command: command.trim(),
       args: args.split(/\s+/).filter(Boolean),
       env: envObject,
-      enabled: server?.enabled !== false,
+      autostart: mcp.autostart === true,
     });
     toast('MCP server saved', 'success');
     await refresh();
@@ -502,7 +537,9 @@ function renderCatalogList(query = '') {
   if (!list) return;
   list.replaceChildren();
   const normalized = query.trim().toLowerCase();
-  const installed = new Set(pluginCatalog.map((plugin) => plugin.id));
+  // Installed catalog plugins are those whose manifest id (server.id) matches
+  // a catalog entry's pluginId.
+  const installed = new Set(servers.filter((server) => server.plugin).map((server) => server.id));
   const filtered = normalized
     ? catalogEntries.filter((item) => (
         item.name.toLowerCase().includes(normalized) ||
@@ -516,7 +553,7 @@ function renderCatalogList(query = '') {
     return;
   }
   for (const item of filtered) {
-    const installedPlugin = servers.find((server) => server.plugin === true && server.pluginId === item.pluginId);
+    const installedPlugin = servers.find((server) => server.id === item.pluginId);
     const isInstalled = installed.has(item.pluginId);
     const installedVersion = installedPlugin?.version ?? '';
     const hasUpdate = isInstalled && installedVersion && installedVersion !== item.version && newerVersion(item.version, installedVersion);

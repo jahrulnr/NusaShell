@@ -701,7 +701,7 @@
         <button class="action-btn action-start" id="plugin-btn-start" type="button">Start</button>
         <button class="action-btn action-stop" id="plugin-btn-stop" type="button">Stop</button>
         <button class="action-btn action-restart" id="plugin-btn-restart" type="button">Restart</button>
-        <button class="action-btn action-start" id="plugin-btn-update" type="button" hidden>Update</button>
+        <button class="action-btn action-update" id="plugin-btn-update" type="button" hidden>Update</button>
         <button class="action-btn action-edit-mcp" id="plugin-btn-edit" type="button" hidden>Edit</button>
         <button class="action-btn action-uninstall" id="plugin-btn-uninstall" type="button" hidden>Uninstall</button>
         <button class="action-btn action-uninstall" id="plugin-btn-delete" type="button" hidden>Delete</button>
@@ -712,7 +712,10 @@
       <div class="drawer-label">Auto start</div>
       <label class="drawer-toggle-row">
         <span>Launch this plugin's MCP server automatically when NusaShell starts</span>
-        <input type="checkbox" class="drawer-toggle" id="plugin-autostart-toggle" />
+        <span class="toggle">
+          <input type="checkbox" id="plugin-autostart-toggle" />
+          <span class="toggle-slider"></span>
+        </span>
       </label>
     </div>
 
@@ -720,7 +723,10 @@
       <div class="drawer-label">Auto update</div>
       <label class="drawer-toggle-row">
         <span>Update this plugin automatically when a new version is released</span>
-        <input type="checkbox" class="drawer-toggle" id="plugin-autoupdate-toggle" />
+        <span class="toggle">
+          <input type="checkbox" id="plugin-autoupdate-toggle" />
+          <span class="toggle-slider"></span>
+        </span>
       </label>
     </div>
 

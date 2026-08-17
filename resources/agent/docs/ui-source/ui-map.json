@@ -270,7 +270,8 @@
         {
           "heading": "Detail drawer",
           "paragraphs": [
-            "A right-hand drawer that opens when a catalog row is clicked. Shows the state machine, actions, tools, and manifest summary. Native MCP rows expose Start, Stop, Restart, Edit, and Delete; plugin rows expose Start, Stop, Restart, and Uninstall; MCP + UI plugins also expose Open UI. Close with the X button, overlay, or Escape."
+            "A right-hand drawer that opens when a catalog row is clicked. Shows the state machine, actions, preferences, tools, and manifest summary. Native MCP rows expose Start, Stop, Restart, Edit, and Delete; plugin rows expose Start, Stop, Restart, and Uninstall; MCP + UI plugins also expose Open UI. When a catalog plugin has a newer release, an Update button appears that updates it in place (plugin.update). Close with the X button, overlay, or Escape.",
+            "The Preferences area has an Auto start switch (shown for every entry) that launches the MCP server when NusaShell starts, and an Auto update switch (shown only for catalog-managed plugins) that updates the plugin automatically when a new version is released."
           ],
           "controls": [
             "plugin-drawer",
@@ -281,9 +282,14 @@
             "plugin-btn-start",
             "plugin-btn-stop",
             "plugin-btn-restart",
+            "plugin-btn-update",
             "plugin-btn-edit",
             "plugin-btn-delete",
             "plugin-btn-uninstall",
+            "plugin-drawer-autostart",
+            "plugin-autostart-toggle",
+            "plugin-drawer-autoupdate",
+            "plugin-autoupdate-toggle",
             "plugin-tools-list",
             "plugin-tool-count",
             "plugin-manifest-info"
@@ -913,6 +919,12 @@
       "type": "button",
       "action": "Stops then starts the selected MCP server or plugin."
     },
+    "plugin-btn-update": {
+      "label": "Update",
+      "section": "Plugins",
+      "type": "button",
+      "action": "Updates a catalog plugin in place to its latest release (plugin.update). Appears only when a newer catalog version is available; the label shows the target version."
+    },
     "plugin-btn-edit": {
       "label": "Edit",
       "section": "Plugins",
@@ -930,6 +942,30 @@
       "section": "Plugins",
       "type": "button",
       "action": "Uninstalls the selected plugin and drops its MCP connection (plugin.uninstall). Hidden for native MCP entries."
+    },
+    "plugin-drawer-autostart": {
+      "label": "Auto start section",
+      "section": "Plugins",
+      "type": "section",
+      "notes": "Preference row shown for every entry; contains the auto-start switch."
+    },
+    "plugin-autostart-toggle": {
+      "label": "Auto start",
+      "section": "Plugins",
+      "type": "toggle",
+      "action": "Launches this MCP server or plugin automatically when NusaShell starts (plugin.set_autostart)."
+    },
+    "plugin-drawer-autoupdate": {
+      "label": "Auto update section",
+      "section": "Plugins",
+      "type": "section",
+      "notes": "Preference row shown only for catalog-managed plugins; contains the auto-update switch."
+    },
+    "plugin-autoupdate-toggle": {
+      "label": "Auto update",
+      "section": "Plugins",
+      "type": "toggle",
+      "action": "Updates this catalog plugin automatically when a new version is released (plugin.set_autoupdate). Shown only for catalog-managed plugins."
     },
     "plugin-tools-list": {
       "label": "Tools list",

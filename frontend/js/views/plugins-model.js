@@ -15,3 +15,16 @@ export function pluginRowMeta(server, kind = pluginKind(server)) {
   const version = server.version ? `v${server.version}` : 'installed';
   return `${server.id.replace(/^plugin:/, '')} · ${version} · ${kind === 'plugin-ui' ? 'MCP + UI' : 'MCP'}`;
 }
+
+// canAutoUpdate reports whether the auto-update toggle applies to this entry.
+// Only catalog-managed plugins have a release channel to follow; manual MCP
+// servers and GitHub/ZIP installs do not.
+export function canAutoUpdate(server) {
+  return server?.catalog === true;
+}
+
+// hasUpdate reports whether a newer catalog version is available, driving the
+// drawer's manual "Update" button and the row/nav update badges.
+export function hasUpdate(server) {
+  return Boolean(server?.updateAvailable);
+}

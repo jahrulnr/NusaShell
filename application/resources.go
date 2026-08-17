@@ -172,6 +172,10 @@ func pluginToDTO(p *domain.Plugin) contracts.PluginDTO {
 		HasUI:       p.HasUI,
 		InstallPath: p.InstallPath,
 		Autostart:   p.Manifest.MCP.Autostart,
+		AutoUpdate:  p.Manifest.AutoUpdate,
+		// Baseline: anything exposing a UI is a plugin. handlePluginList
+		// upgrades this (and Catalog) using catalog membership.
+		Plugin: p.HasUI,
 		Manifest: &contracts.PluginManifestDTO{
 			ID:   p.Manifest.ID,
 			Name: p.Manifest.Name,
@@ -284,11 +288,19 @@ func (a *App) handlePluginList() (any, *contracts.RPCError) {
 		return nil, &contracts.RPCError{Code: contracts.CodeProvider, Message: err.Error()}
 	}
 	out := make([]contracts.PluginDTO, 0, len(plugins))
-	// Check the catalog once so the UI can show which installed plugins have
-	// a newer version (updateAvailable) without an extra round-trip.
+	// Check the catalog once so the UI can show which installed plugins are
+	// catalog-managed (Catalog → auto-update/manual-update eligible) and
+	// which have a newer version available (updateAvailable). The catalog
+	// is cached, so CheckUpdates below reuses this fetch.
+	catalogIDs := map[string]bool{}
 	updatesByID := map[string]string{}
 	if a.PluginInstaller != nil {
 		ctxU, cancelU := context.WithTimeout(context.Background(), 30*time.Second)
+		if entries, cerr := a.PluginInstaller.Catalog(ctxU); cerr == nil {
+			for _, e := range entries {
+				catalogIDs[e.PluginID] = true
+			}
+		}
 		updates, uerr := a.PluginInstaller.CheckUpdates(ctxU, plugins)
 		cancelU()
 		if uerr == nil {
@@ -300,6 +312,10 @@ func (a *App) handlePluginList() (any, *contracts.RPCError) {
 	for _, p := range plugins {
 		dto := pluginToDTO(p)
 		dto.Status, dto.Tools = a.pluginStatus(p)
+		if catalogIDs[p.Manifest.ID] {
+			dto.Catalog = true
+			dto.Plugin = true
+		}
 		if v, ok := updatesByID[p.Manifest.ID]; ok {
 			dto.UpdateAvailable = v
 		}
@@ -495,6 +511,9 @@ func (a *App) handlePluginUpdate(req contracts.PluginIDRequest) (any, *contracts
 	a.log("info", "plugin", "plugin updated: %s v%s", updated.Manifest.Name, updated.Manifest.Version)
 	dto := pluginToDTO(updated)
 	dto.Status, dto.Tools = a.pluginStatus(updated)
+	// A plugin updated from the catalog is, by definition, catalog-managed.
+	dto.Plugin = true
+	dto.Catalog = true
 	return contracts.PluginInstallResult{Plugin: &dto}, nil
 }
 
