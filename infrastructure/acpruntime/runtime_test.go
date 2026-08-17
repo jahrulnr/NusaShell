@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -25,7 +26,11 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	_ = tmp.Close()
+	_ = os.Remove(tmp.Name())
 	fakeBin = tmp.Name()
+	if runtime.GOOS == "windows" {
+		fakeBin += ".exe"
+	}
 	cmd := exec.Command("go", "build", "-o", fakeBin, filepath.Join(root, "testdata", "fakeacp"))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		os.Stderr.Write(out)
@@ -215,6 +220,22 @@ func TestPermissionPromptThenAllow(t *testing.T) {
 	}
 	if finished.Status != domain.AcpRunCompleted {
 		t.Fatalf("status = %s error=%s", finished.Status, finished.Error)
+	}
+}
+
+func TestContainedPathRejectsSlashRooted(t *testing.T) {
+	ws := filepath.Join(string(filepath.Separator), "proj")
+	_, err := containedPath(ws, filepath.Join(string(filepath.Separator), "etc", "passwd"))
+	if err == nil {
+		t.Fatal("slash-rooted path outside workspace must be rejected")
+	}
+	got, err := containedPath(ws, "main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(ws, "main.go")
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
 	}
 }
 

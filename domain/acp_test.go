@@ -129,6 +129,34 @@ func TestDecideAcpPermission(t *testing.T) {
 	})
 }
 
+func TestPathsWithinWorkspaceSlashRootedOutside(t *testing.T) {
+	ws := filepath.Join(string(filepath.Separator), "proj")
+	out := filepath.Join(string(filepath.Separator), "etc", "passwd")
+	if pathsWithinWorkspace([]string{out}, ws) {
+		t.Fatalf("slash-rooted %q must be outside %q", out, ws)
+	}
+	if pathsWithinWorkspace([]string{"/etc/passwd"}, ws) {
+		t.Fatal("unix-style absolute path must be outside workspace")
+	}
+	in := filepath.Join(ws, "main.go")
+	if !pathsWithinWorkspace([]string{in}, ws) {
+		t.Fatalf("inside %q should be within %q", in, ws)
+	}
+	if !pathsWithinWorkspace([]string{"main.go"}, ws) {
+		t.Fatal("relative in-workspace path should join and pass")
+	}
+	if pathsWithinWorkspace([]string{"../secret"}, ws) {
+		t.Fatal("relative escape must fail")
+	}
+	dots := filepath.Join(ws, "...hidden")
+	if !pathsWithinWorkspace([]string{dots}, ws) {
+		t.Fatal("...hidden inside workspace is not an escape")
+	}
+	if pathsWithinWorkspace([]string{""}, ws) {
+		t.Fatal("empty path is not within workspace")
+	}
+}
+
 func TestSamplePermissionPaths(t *testing.T) {
 	paths := make([]string, MaxAcpPermissionPaths+3)
 	for i := range paths {

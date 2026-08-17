@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **ACP workspace path containment on Windows.** Slash-rooted paths such as
+  `\etc\passwd` (and Unix-style `/etc/passwd`) are treated as rooted locations
+  and no longer join onto the bound workspace, so `edit_confirmed` edits
+  outside the workspace prompt instead of auto-allowing.
+- **ACP test helper binary on Windows.** `fakeacp` test builds now use a
+  `.exe` suffix so GitHub Actions `windows-latest` can execute them.
+
 - **Provider kind-change validation ordering.** Saving a codex provider with
   a different kind now correctly fails with `VALIDATION_ERROR` (the guard now
   runs before base URL validation, which previously masked it with "base url

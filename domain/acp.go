@@ -340,21 +340,49 @@ func (r *AcpRun) Live() bool {
 	return false
 }
 
-func pathsWithinWorkspace(paths []string, workspace string) bool {
-	if strings.TrimSpace(workspace) == "" {
-		return false
+// pathRooted reports whether p is an absolute location that must not be
+// joined onto a workspace prefix. On Windows, slash-rooted paths such as
+// `\etc\passwd` and Unix-style `/etc/passwd` are rooted even though
+// filepath.IsAbs is false without a volume.
+func pathRooted(p string) bool {
+	if filepath.IsAbs(p) {
+		return true
+	}
+	return strings.HasPrefix(filepath.ToSlash(p), "/")
+}
+
+func relEscapesWorkspace(rel string) bool {
+	if rel == ".." {
+		return true
+	}
+	sep := string(filepath.Separator)
+	return strings.HasPrefix(rel, ".."+sep) || strings.HasPrefix(rel, "../")
+}
+
+// ResolveWithinWorkspace joins relative paths onto workspace and reports
+// whether the result stays inside workspace. Rooted paths are compared as-is.
+func ResolveWithinWorkspace(workspace, path string) (string, bool) {
+	if strings.TrimSpace(workspace) == "" || strings.TrimSpace(path) == "" {
+		return "", false
 	}
 	root := filepath.Clean(workspace)
+	clean := filepath.Clean(path)
+	if !pathRooted(clean) {
+		clean = filepath.Clean(filepath.Join(root, clean))
+	}
+	rel, err := filepath.Rel(root, clean)
+	if err != nil || relEscapesWorkspace(rel) {
+		return "", false
+	}
+	return clean, true
+}
+
+func pathsWithinWorkspace(paths []string, workspace string) bool {
 	if len(paths) == 0 {
 		return false
 	}
 	for _, p := range paths {
-		clean := filepath.Clean(p)
-		if !filepath.IsAbs(clean) {
-			clean = filepath.Join(root, clean)
-		}
-		rel, err := filepath.Rel(root, clean)
-		if err != nil || strings.HasPrefix(rel, "..") {
+		if _, ok := ResolveWithinWorkspace(workspace, p); !ok {
 			return false
 		}
 	}

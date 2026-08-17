@@ -542,14 +542,8 @@ func (pc *pooledConn) WriteTextFile(ctx context.Context, params acpclient.WriteT
 }
 
 func containedPath(workspace, p string) (string, error) {
-	clean := p
-	if !filepath.IsAbs(clean) {
-		clean = filepath.Join(workspace, clean)
-	}
-	clean = filepath.Clean(clean)
-	root := filepath.Clean(workspace)
-	rel, err := filepath.Rel(root, clean)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	clean, ok := domain.ResolveWithinWorkspace(workspace, p)
+	if !ok {
 		return "", fmt.Errorf("path %q is outside the bound workspace", p)
 	}
 	return clean, nil

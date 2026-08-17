@@ -92,6 +92,9 @@ a chip for the right-hand drawer (all parallel spawns), or peek one run in a
 popup. Both surfaces stream the transcript and offer steer, stop, mode
 change, and risk promotion (edits / bypass). Permission prompts use a global
 overlay — Allow once, Allow for this session, or Deny. Timeout denies.
+`edit_confirmed` auto-allows edit/delete/move only when every path stays
+inside the bound workspace; slash-rooted paths (`/etc/passwd`, `\Windows\…`)
+are treated as absolute even on Windows and never join onto the workspace.
 Existing runs keep the workspace they bound at spawn; new spawns follow the
 current conversation workspace unless the tool overrides it.
 

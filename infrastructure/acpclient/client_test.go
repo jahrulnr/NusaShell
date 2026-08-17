@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -22,7 +23,11 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	_ = tmp.Close()
+	_ = os.Remove(tmp.Name())
 	fakeBin = tmp.Name()
+	if runtime.GOOS == "windows" {
+		fakeBin += ".exe"
+	}
 	cmd := exec.Command("go", "build", "-o", fakeBin, filepath.Join(root, "testdata", "fakeacp"))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		os.Stderr.Write(out)

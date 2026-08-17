@@ -107,6 +107,8 @@ as a generic subprocess: **command**, **args**, **env**, and a label.
   tiers (`read_only`, `edit_confirmed`, `bypass`). Unknown modes are
   read-only. New sessions start on the strictest advertised mode. Bypass is
   never the default — promote it from the live subagent UI.
+  `edit_confirmed` auto-allows workspace-contained edits; slash-rooted
+  paths are absolute (even on Windows) and prompt instead of auto-allow.
 - Env values stay in `acp-agents.json`. List/get RPC returns **keys only**.
 
 The parent agent spawns these binaries with `subagent` (optional `count` for
