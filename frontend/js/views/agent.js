@@ -51,6 +51,12 @@ const state = {
   // active message. Older active messages are prepended in WINDOW_BATCH-sized
   // batches on scroll-up (before falling back to archived chunks).
   activeWindowStart: 0,
+  // While a room is opening we scroll to the bottom; suppress the
+  // scroll-to-top "load older" trigger until that settles so the initial
+  // scrollTop≈0 is not mistaken for the user scrolling up (which would strand
+  // the view mid-conversation and churn the DOM).
+  suppressTopLoad: false,
+  loadingActiveBatch: false,
   // Todo checklist: server-authoritative via agent.todo.updated events and
   // agent.todos.get RPC. todoRenderToken guards against stale async renders
   // (e.g. a fetch that resolves after the user switched to another room).
@@ -73,7 +79,7 @@ const MAX_ROOM_BUFFER_CHARS = 512 * 1024; // per room (raw + rawReasoning)
 // the first paint of a long conversation cheap; WINDOW_BATCH is revealed per
 // scroll-to-top before archived chunks load.
 const INITIAL_WINDOW = 60;
-const WINDOW_BATCH = 40;
+const WINDOW_BATCH = 30;
 
 // windowedActiveMessages returns the currently-rendered slice of active
 // messages (the tail from activeWindowStart onward).
@@ -530,10 +536,18 @@ function renderThread(messages, force = true) {
   // Render any Mermaid diagrams in the freshly painted thread (settle point,
   // not per-delta).
   void renderMermaidDiagrams(thread);
+  // Show the "Load older" button when the window holds back older messages.
+  updateOlderSentinel();
   // Defer the scroll until after layout: setting scrollTop synchronously
   // right after replaceChildren observes a stale (small) scrollHeight, so
   // a freshly opened long room would sit at the top until the next paint.
-  requestAnimationFrame(() => scrollToBottom(force));
+  if (force) {
+    // Opening/first paint: force to the bottom robustly across layout frames.
+    scrollThreadToBottomHard();
+  } else {
+    // Background refresh: respect the pin so a user reading history is not yanked.
+    requestAnimationFrame(() => scrollToBottom(false));
+  }
 }
 
 // ---- per-room live run buffers ----
@@ -984,41 +998,76 @@ function bindScrollPin() {
   if (!thread) return;
   thread.addEventListener('scroll', () => {
     state.pinned = isAtBottom(thread);
-    // Reveal older history when the user scrolls to the top: first the older
-    // active messages held back by the window, then archived chunks.
-    if (thread.scrollTop <= 4) loadOlderInView();
+    // Older *active* messages are revealed via the explicit "Load older"
+    // button (a deliberate click keeps the scroll anchored — auto-loading
+    // during a fast wheel scroll fights the browser's momentum and jumps the
+    // view). Archived pre-compaction chunks keep their proactive scroll-top
+    // load, but only once the in-memory window is fully revealed.
+    if (!state.suppressTopLoad && thread.scrollTop <= 4 && state.activeWindowStart === 0) {
+      maybeLoadOlderChunk();
+    }
   }, { passive: true });
 }
 
-// loadOlderInView reveals the next slice of older history at the top of the
-// thread. Active messages held back by the window are shown first (cheap,
-// already in memory); only once they are exhausted do we load archived
-// pre-compaction chunks from the backend.
-function loadOlderInView() {
-  if (state.activeWindowStart > 0) {
-    prependActiveBatch();
+// hasOlderActiveMessages reports whether older active messages are held back by
+// the window and can be revealed with the "Load older" button.
+function hasOlderActiveMessages() {
+  return state.activeWindowStart > 0;
+}
+
+// updateOlderSentinel keeps a "Load older messages" button pinned at the top of
+// the thread while older active messages remain windowed out. Clicking it
+// reveals one batch with a stable (anchored) scroll position.
+function updateOlderSentinel() {
+  const thread = document.getElementById('agent-thread');
+  if (!thread) return;
+  let btn = document.getElementById('agent-load-older');
+  if (!hasOlderActiveMessages()) {
+    btn?.remove();
     return;
   }
-  maybeLoadOlderChunk();
+  if (!btn) {
+    btn = el('button', {
+      class: 'agent-load-older',
+      id: 'agent-load-older',
+      type: 'button',
+    });
+    btn.addEventListener('click', () => prependActiveBatch());
+  }
+  btn.textContent = '↑ Load older messages';
+  if (thread.firstChild !== btn) thread.insertBefore(btn, thread.firstChild);
 }
 
 // prependActiveBatch renders the previous WINDOW_BATCH of already-loaded active
-// messages above the current view, preserving the scroll position. The active
-// (streaming) run lives at the tail, which this never touches, so no run
-// rebinding is needed (unlike chunk loads).
+// messages above the current view, preserving the scroll position. It is driven
+// by the explicit "Load older" button (a deliberate click, so there is no
+// momentum-scroll fighting the anchor). The active (streaming) run lives at the
+// tail, which this never touches, so no run rebinding is needed.
 function prependActiveBatch() {
   const thread = document.getElementById('agent-thread');
-  if (!thread || state.activeWindowStart <= 0) return;
-  const prevHeight = thread.scrollHeight;
-  const prevScroll = thread.scrollTop;
-  const newStart = previousWindowStart(state.activeWindowStart, WINDOW_BATCH);
-  const batch = state.messages.slice(newStart, state.activeWindowStart);
-  state.activeWindowStart = newStart;
-  if (!batch.length) return;
-  thread.insertBefore(renderConversation(batch, retryTurn), thread.firstChild);
-  // Keep the user anchored on the same content after older messages grow the
-  // scroll height at the top.
-  thread.scrollTop = prevScroll + (thread.scrollHeight - prevHeight);
+  if (!thread || state.activeWindowStart <= 0 || state.loadingActiveBatch) return;
+  state.loadingActiveBatch = true;
+  try {
+    const newStart = previousWindowStart(state.activeWindowStart, WINDOW_BATCH);
+    const batch = state.messages.slice(newStart, state.activeWindowStart);
+    state.activeWindowStart = newStart;
+    if (!batch.length) return;
+    // Anchor to the first real message so it stays visually stationary after
+    // older messages are inserted above it. Measuring the element's viewport
+    // position (rather than scrollHeight deltas) is robust to async layout.
+    const anchor = thread.querySelector('.agent-message') || thread.firstElementChild;
+    const anchorTop = anchor ? anchor.getBoundingClientRect().top : 0;
+    // Insert the batch just above the first real message (below the sentinel
+    // button, which updateOlderSentinel keeps pinned at the very top).
+    thread.insertBefore(renderConversation(batch, retryTurn), anchor);
+    if (anchor) {
+      const shift = anchor.getBoundingClientRect().top - anchorTop;
+      thread.scrollTop += shift;
+    }
+    updateOlderSentinel();
+  } finally {
+    state.loadingActiveBatch = false;
+  }
 }
 
 function isAtBottom(el) {
@@ -1026,6 +1075,30 @@ function isAtBottom(el) {
   // Small tolerance so streamed deltas that grow the container do not
   // accidentally unpin a user who is still effectively at the latest line.
   return el.scrollHeight - el.scrollTop - el.clientHeight <= 24;
+}
+
+// scrollThreadToBottomHard forces the thread to the bottom robustly after an
+// initial render: layout (fonts/markdown) can settle across a couple of frames,
+// so a single scrollTop assignment may land short. It also suppresses the
+// scroll-to-top loader until it settles so the transient scrollTop≈0 during
+// layout is not treated as the user scrolling up.
+function scrollThreadToBottomHard() {
+  const thread = document.getElementById('agent-thread');
+  if (!thread) return;
+  state.suppressTopLoad = true;
+  const jump = () => {
+    thread.scrollTop = thread.scrollHeight;
+    state.pinned = true;
+  };
+  jump();
+  requestAnimationFrame(() => {
+    jump();
+    requestAnimationFrame(() => {
+      jump();
+      // Re-enable older-history loading only once we are actually at the bottom.
+      state.suppressTopLoad = false;
+    });
+  });
 }
 
 function scrollToBottom(force = false) {

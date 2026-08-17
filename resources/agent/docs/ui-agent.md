@@ -38,6 +38,8 @@ Lists conversations with a search filter and a New conversation button. The coun
 
 Renders the active conversation. An offline mascot appears when the backend is unreachable.
 
+Long conversations open showing only the most recent messages, scrolled to the bottom; a 'Load older messages' button at the top of the thread reveals earlier messages in batches (keeping the scroll position anchored). Live streaming auto-follows only while the view is pinned to the bottom.
+
 - **Agent shell** (`#agent-shell`):
   - Section: Agent
   - Type: container
@@ -54,7 +56,12 @@ Renders the active conversation. An offline mascot appears when the backend is u
 - **Thread log** (`#agent-thread`):
   - Section: Agent
   - Type: log
-  - Notes: Renders the active conversation messages.
+  - Notes: Renders the active conversation messages. Long conversations are windowed: only the most recent messages render on open (scrolled to bottom), older ones load on demand.
+
+- **Load older messages** (`#agent-load-older`):
+  - Section: Agent
+  - Type: button
+  - Action: Reveals the previous batch of older messages at the top of the thread, keeping the scroll position anchored. Shown only while older messages remain windowed out; hidden once the oldest message is reached.
 
 ## Tool call strip
 
