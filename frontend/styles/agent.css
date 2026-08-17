@@ -1018,3 +1018,23 @@
 .agent-ask-card.is-error .agent-ask-answer {
   color: #d68d94;
 }
+
+/* "Load older messages" sentinel pinned at the top of a windowed thread. */
+.agent-load-older {
+  display: block;
+  width: fit-content;
+  margin: 8px auto 12px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-alt);
+  color: var(--text-faint);
+  font: 12px/1.4 "IBM Plex Sans", system-ui, sans-serif;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.agent-load-older:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
