@@ -2,6 +2,7 @@ package application
 
 import (
 	"encoding/base64"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -77,8 +78,11 @@ func TestFolderAttachmentRequiresFilePath(t *testing.T) {
 }
 
 func TestFolderAttachmentAcceptsAbsolutePath(t *testing.T) {
+	// Build a path that is absolute on the current OS: "C:\home\user\project"
+	// on Windows, "/home/user/project" on Unix.
+	absPath := filepath.Join(filepath.VolumeName("C:"), string(filepath.Separator), "home", "user", "project")
 	got, err := attachmentFromDTO(contracts.AttachmentDTO{
-		Type: "folder", Name: "my-project", FilePath: "/home/user/project",
+		Type: "folder", Name: "my-project", FilePath: absPath,
 	})
 	if err != nil {
 		t.Fatalf("valid folder rejected: %v", err)
@@ -86,7 +90,7 @@ func TestFolderAttachmentAcceptsAbsolutePath(t *testing.T) {
 	if got.Type != "folder" {
 		t.Fatalf("type = %q", got.Type)
 	}
-	if got.FilePath != "/home/user/project" {
+	if got.FilePath != absPath {
 		t.Fatalf("file_path = %q", got.FilePath)
 	}
 	if got.MediaType != "inode/directory" {

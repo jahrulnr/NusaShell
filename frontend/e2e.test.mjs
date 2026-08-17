@@ -219,24 +219,21 @@ test('embedded frontend completes one representative flow through the Go backend
     await waitFor(() => document.getElementById('settings-save-status')?.textContent === 'Saved on this device.', 'settings save through the UI');
     assert.equal((await rpcModule.rpc('settings.get')).settings.max_tool_rounds, 2);
 
-    document.getElementById('new-skill-btn').click();
-    document.getElementById('skill-name').value = 'e2e-skill';
-    document.getElementById('skill-description').value = 'Cross-layer smoke skill';
-    document.getElementById('skill-content').value = '# E2E\n\nKeep the flow intact.';
-    document.getElementById('skill-name').dispatchEvent(new window.Event('input', { bubbles: true }));
-    document.getElementById('skill-content').dispatchEvent(new window.Event('input', { bubbles: true }));
-    document.getElementById('skill-save-btn').click();
-    await waitFor(() => [...document.querySelectorAll('#skills-list .skills-list-item strong')].some((el) => el.textContent === 'e2e-skill'), 'skill save through the UI');
-
-    window.location.hash = '#logs';
-    window.dispatchEvent(new window.Event('hashchange'));
-    await waitFor(() => [...document.querySelectorAll('#log-tail .log-line .log-msg')].some((el) => el.textContent.includes('skill saved')), 'live log event in the UI');
+    // Skills CRUD is now install/delete only (no inline create form), so the
+    // representative flow skips skill creation. Verify the logs view renders
+    // live events from the conversation creation below instead.
 
     window.location.hash = '#agent';
     window.dispatchEvent(new window.Event('hashchange'));
     document.getElementById('new-conversation-btn').click();
     await waitFor(() => [...document.querySelectorAll('#conversation-list .agent-conversation-title')].some((node) => node.textContent === 'Untitled'), 'new conversation through the UI');
 
+    window.location.hash = '#logs';
+    window.dispatchEvent(new window.Event('hashchange'));
+    await waitFor(() => [...document.querySelectorAll('#log-tail .log-line .log-msg')].some((el) => el.textContent.includes('conversation created')), 'live log event in the UI');
+
+    window.location.hash = '#agent';
+    window.dispatchEvent(new window.Event('hashchange'));
     assert.equal(document.querySelectorAll('.view.active').length, 1);
     assert.match(document.getElementById('log-count').textContent, /entries/);
 
