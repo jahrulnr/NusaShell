@@ -1,69 +1,52 @@
-// Plugin window: renders plugin UIs inside the shell in a movable, resizable
-// window, mirroring the Electron BrowserWindow instead of relying on
-// window.open (whose size features browsers ignore → fullscreen tabs).
+// Launch a plugin UI in a separate browser window.
 //
-// Sizing follows the manifest's ui.window: mode "fullscreen" covers the
-// shell; "panel"/"widget" use defaultSize (fallback 700x700 / 380x280) and
-// honor `resizable`.
-
-let dragState = null;
+// Plugin UIs are served same-origin at /plugins/<id>/ (the server injects the
+// window.shell shim), so window.open loads them directly. We deliberately open
+// a real browser window instead of an in-shell overlay: the previous overlay
+// rendered fullscreen plugins on top of — effectively replacing — the
+// NusaShell UI. Opening a separate window keeps the launcher and the plugin
+// independent, matching the launcher's "opens in a separate browser window"
+// contract.
+//
+// Returns true when a window was opened, false when the browser blocked the
+// pop-up so callers can surface a hint.
 
 export function openPluginWindow({ id, name, ui }) {
-  const win = document.getElementById('plugin-window');
-  if (!win) return;
-  const frame = document.getElementById('plugin-window-frame');
-  const title = document.getElementById('plugin-window-title');
-
-  const windowConfig = ui?.window ?? {};
-  const mode = windowConfig.mode || 'panel';
-  const isFullscreen = mode === 'fullscreen';
-  const width = windowConfig.defaultSize?.width || (mode === 'widget' ? 380 : 700);
-  const height = windowConfig.defaultSize?.height || (mode === 'widget' ? 280 : 700);
-
-  win.classList.toggle('is-fullscreen', isFullscreen);
-  win.style.resize = windowConfig.resizable === false ? 'none' : 'both';
-  win.style.width = isFullscreen ? '' : `${width}px`;
-  win.style.height = isFullscreen ? '' : `${height}px`;
-  if (!isFullscreen) {
-    win.style.left = `${Math.max(12, Math.round((window.innerWidth - width) / 2))}px`;
-    win.style.top = `${Math.max(12, Math.round((window.innerHeight - height) / 3))}px`;
+  if (!id) return false;
+  const url = `/plugins/${id}/`;
+  // A stable per-plugin target reuses/focuses an existing window instead of
+  // stacking duplicates when the tile is clicked again.
+  const target = `nusashell-plugin:${id}`;
+  let win = null;
+  try {
+    win = window.open(url, target, windowFeatures(ui?.window));
+  } catch {
+    win = null;
   }
-  title.textContent = name;
-  frame.src = `/plugins/${id}/`;
-  win.hidden = false;
-  document.getElementById('plugin-window-close').focus();
+  if (!win) return false;
+  try {
+    win.focus();
+  } catch {
+    /* focus is best-effort */
+  }
+  if (name) {
+    try {
+      win.document.title = name;
+    } catch {
+      /* document may not be ready yet; the plugin sets its own <title> */
+    }
+  }
+  return true;
 }
 
-export function closePluginWindow() {
-  const win = document.getElementById('plugin-window');
-  if (!win) return;
-  const frame = document.getElementById('plugin-window-frame');
-  frame.src = 'about:blank';
-  win.hidden = true;
-}
-
-export function wirePluginWindow() {
-  const win = document.getElementById('plugin-window');
-  if (!win) return;
-  document.getElementById('plugin-window-close')?.addEventListener('click', closePluginWindow);
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !win.hidden) closePluginWindow();
-  });
-
-  const bar = document.getElementById('plugin-window-titlebar');
-  bar.addEventListener('pointerdown', (event) => {
-    if (event.target.closest('#plugin-window-close')) return;
-    if (win.classList.contains('is-fullscreen')) return;
-    dragState = { dx: event.clientX - win.offsetLeft, dy: event.clientY - win.offsetTop };
-    bar.setPointerCapture(event.pointerId);
-  });
-  bar.addEventListener('pointermove', (event) => {
-    if (!dragState) return;
-    const x = Math.min(Math.max(0, event.clientX - dragState.dx), window.innerWidth - 60);
-    const y = Math.min(Math.max(0, event.clientY - dragState.dy), window.innerHeight - 60);
-    win.style.left = `${x}px`;
-    win.style.top = `${y}px`;
-  });
-  bar.addEventListener('pointerup', () => { dragState = null; });
-  bar.addEventListener('pointercancel', () => { dragState = null; });
+// windowFeatures maps the manifest ui.window to window.open features.
+// Fullscreen plugins open as a normal browser window/tab (the browser controls
+// the size); panel/widget request their default size. Browsers only honor
+// width/height when `popup` is set, so non-fullscreen sizes use popup=yes.
+export function windowFeatures(windowConfig = {}) {
+  const mode = windowConfig?.mode || 'panel';
+  if (mode === 'fullscreen') return '';
+  const width = Number(windowConfig?.defaultSize?.width) || (mode === 'widget' ? 380 : 700);
+  const height = Number(windowConfig?.defaultSize?.height) || (mode === 'widget' ? 280 : 700);
+  return `popup=yes,width=${width},height=${height}`;
 }

@@ -3,7 +3,7 @@
 
 import { rpc } from '../rpc.js';
 import { el, toast, dialog, confirmDialog } from '../ui.js';
-import { openPluginWindow as openPluginWindowInShell } from '../plugin-window.js';
+import { openPluginWindow as launchPluginWindow } from '../plugin-window.js';
 import { hasPluginUI, pluginKind, pluginRowMeta, canAutoUpdate, hasUpdate } from './plugins-model.js';
 
 export { hasPluginUI, pluginKind, pluginRowMeta, canAutoUpdate, hasUpdate } from './plugins-model.js';
@@ -402,11 +402,12 @@ async function uninstallPlugin(server) {
 
 function openPluginWindow(server) {
   if (!hasPluginUI(server)) return;
-  openPluginWindowInShell({
+  const opened = launchPluginWindow({
     id: server.id.replace(/^plugin:/, ''),
     name: server.name,
     ui: server.manifest?.ui,
   });
+  if (!opened) toast(`Allow pop-ups to open “${server.name}” in its own window.`, 'error');
 }
 
 async function addMcp(server = null) {

@@ -9,7 +9,6 @@ import { initProviders, refresh as refreshProviders } from './views/providers.js
 import { initLogs, refresh as refreshLogs } from './views/logs.js';
 import { initSettings, refresh as refreshSettings } from './views/settings.js';
 import { initLearning, refresh as refreshLearning } from './views/learning.js';
-import { wirePluginWindow } from './plugin-window.js';
 import { toast } from './ui.js';
 
 const viewRefresh = {
@@ -107,8 +106,6 @@ async function boot() {
   setSidebarCompact(compact, false);
   window.nusashell = { ...(window.nusashell || {}), setSidebarCompact };
   window.addEventListener('hashchange', route);
-
-  wirePluginWindow();
 
   setConnection('connecting');
   // one transport per function: WS carries BE -> FE event triggers; the FE

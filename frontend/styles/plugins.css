@@ -130,62 +130,6 @@
 }
 
 /* ============ In-shell plugin window ============ */
-.plugin-window {
-  position: fixed;
-  z-index: 90;
-  display: flex;
-  flex-direction: column;
-  min-width: 260px;
-  min-height: 180px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--panel);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, .5);
-}
-.plugin-window.is-fullscreen {
-  inset: 0;
-  width: auto !important;
-  height: auto !important;
-  border: 0;
-  border-radius: 0;
-}
-.plugin-window-titlebar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 8px 8px 8px 14px;
-  background: var(--panel-alt);
-  border-bottom: 1px solid var(--border-soft);
-  cursor: move;
-  user-select: none;
-  touch-action: none;
-}
-.plugin-window-title {
-  font-size: 12px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.plugin-window-close {
-  border: 0;
-  background: transparent;
-  color: var(--text-faint);
-  font-size: 20px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 2px 8px;
-  border-radius: 6px;
-}
-.plugin-window-close:hover { color: var(--text); background: rgba(255, 255, 255, .06); }
-.plugin-window-frame {
-  flex: 1;
-  border: 0;
-  background: #fff;
-  min-height: 0;
-}
 .plugin-install-tabs {
   display: flex;
   gap: 0;

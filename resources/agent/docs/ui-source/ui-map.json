@@ -249,14 +249,9 @@
         {
           "heading": "Plugin window",
           "paragraphs": [
-            "An in-shell window that renders plugin UIs in a movable, resizable frame sized from the manifest ui.window (fullscreen mode covers the shell; panel/widget use defaultSize with a 700x700 / 380x280 fallback). Opens from Home tiles and the Plugins drawer Open UI button; no browser popups. Close with the X button or Escape."
+            "Plugin UIs open in a separate browser window served same-origin at /plugins/<id>/ (the server injects the window.shell shim). Opening happens from Home tiles and the Plugins drawer Open UI button. The window is sized from the manifest ui.window (panel/widget request defaultSize with a 700x700 / 380x280 fallback; fullscreen opens a normal browser window). This keeps the plugin from covering or replacing the NusaShell UI. If the browser blocks the pop-up, a toast prompts the user to allow pop-ups."
           ],
-          "controls": [
-            "plugin-window",
-            "plugin-window-title",
-            "plugin-window-close",
-            "plugin-window-frame"
-          ]
+          "controls": []
         },
         {
           "heading": "Plugin catalog",
@@ -900,7 +895,7 @@
       "label": "Open UI",
       "section": "Plugins",
       "type": "button",
-      "action": "Opens the selected MCP + UI plugin in the in-shell plugin window. Hidden for MCP-only entries."
+      "action": "Opens the selected MCP + UI plugin in a separate browser window (served at /plugins/<id>/). Hidden for MCP-only entries."
     },
     "plugin-btn-start": {
       "label": "Start",
@@ -1366,29 +1361,6 @@
       "label": "Selected ZIP file name",
       "section": "Plugins",
       "type": "text"
-    },
-    "plugin-window": {
-      "label": "Plugin window",
-      "section": "Plugins",
-      "type": "dialog",
-      "notes": "In-shell window hosting the plugin UI in an iframe; sized per manifest ui.window (fullscreen / panel / widget), movable via the title bar, resizable when allowed."
-    },
-    "plugin-window-title": {
-      "label": "Plugin window title",
-      "section": "Plugins",
-      "type": "text"
-    },
-    "plugin-window-close": {
-      "label": "Close plugin window",
-      "section": "Plugins",
-      "type": "button",
-      "action": "Closes the in-shell plugin window (Escape also works)."
-    },
-    "plugin-window-frame": {
-      "label": "Plugin window frame",
-      "section": "Plugins",
-      "type": "frame",
-      "notes": "Iframe hosting /plugins/{id}/ with the window.shell shim."
     }
   }
 }
