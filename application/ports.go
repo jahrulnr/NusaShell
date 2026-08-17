@@ -44,20 +44,35 @@ type CredentialStore interface {
 
 type SkillStore interface {
 	List() []*domain.Skill
-	Get(id string) (*domain.Skill, error)
+	// Get returns a skill by ID. If ownedBy is empty, priority resolution
+	// picks user > builtin > plugin. If ownedBy is set (e.g. "plugin:acme"),
+	// returns the exact skill with that owner or not-found.
+	Get(id, ownedBy string) (*domain.Skill, error)
 	Save(s *domain.Skill) error
-	Delete(id string) error
+	// Delete removes a skill. If ownedBy is empty, deletes the highest-
+	// priority skill with that ID. Plugin-owned skills cannot be deleted
+	// directly — uninstall the plugin instead.
+	Delete(id, ownedBy string) error
 	// ReadFile reads any text file inside a skill directory (default
-	// SKILL.md) with offset/maxChars pagination. Mirrors the Electron
-	// shell's skill_read (registry.read) semantics.
-	ReadFile(id, path string, offset, maxChars int) (*domain.SkillFile, error)
+	// SKILL.md) with offset/maxChars pagination. ownedBy resolution is
+	// the same as Get.
+	ReadFile(id, ownedBy, path string, offset, maxChars int) (*domain.SkillFile, error)
 	// Files lists the nested directory tree of a skill folder (path,
 	// type, sizeBytes, editable), sorted as in the Electron shell.
-	Files(id string) ([]domain.SkillFileEntry, error)
+	// ownedBy resolution is the same as Get.
+	Files(id, ownedBy string) ([]domain.SkillFileEntry, error)
 	// Install extracts a .skill (zip) archive into the skill root and
 	// registers the skill metadata. The archive must contain a top-level
 	// directory with a SKILL.md file. Returns the installed skill ID.
 	Install(zipData []byte) (string, error)
+	// MountPluginSkills scans a plugin's skills/ directory and registers
+	// all skill packages found there with owned_by="plugin:<pluginID>".
+	// File content is read from the plugin directory (mount, no copy).
+	MountPluginSkills(pluginID, pluginSkillsDir string) error
+	// UnmountPluginSkills removes all skills owned by plugin:<pluginID>
+	// from the metadata catalog. Files in the plugin directory are not
+	// touched (the plugin uninstaller handles those).
+	UnmountPluginSkills(pluginID string) error
 }
 
 // PluginStore is the single source of truth for plugins (MCP servers and

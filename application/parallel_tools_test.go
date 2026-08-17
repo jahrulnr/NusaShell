@@ -69,7 +69,9 @@ func TestExecuteTurnToolsRunsConcurrently(t *testing.T) {
 	app, conv, run := newBarrierApp(t, toolCalls, box)
 
 	done := make(chan error, 1)
-	go func() { done <- app.executeTurnTools(run, "m1", toolCalls, true, domain.Settings{}) }()
+	go func() {
+		done <- app.executeTurnTools(run, "m1", toolCalls, ModelCapabilities{Vision: true}, domain.Settings{})
+	}()
 
 	select {
 	case err := <-done:
@@ -115,7 +117,7 @@ func TestExecuteTurnToolsPersistsResultsInOrder(t *testing.T) {
 	}
 	app, conv, run := newBarrierApp(t, toolCalls, orderedToolbox{})
 
-	if err := app.executeTurnTools(run, "m1", toolCalls, true, domain.Settings{}); err != nil {
+	if err := app.executeTurnTools(run, "m1", toolCalls, ModelCapabilities{Vision: true}, domain.Settings{}); err != nil {
 		t.Fatalf("executeTurnTools: %v", err)
 	}
 	got := conv.Messages[0].ToolCalls

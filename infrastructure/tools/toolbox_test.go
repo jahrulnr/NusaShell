@@ -17,7 +17,7 @@ import (
 type stubSkillStore struct{ skills []*domain.Skill }
 
 func (s *stubSkillStore) List() []*domain.Skill { return s.skills }
-func (s *stubSkillStore) Get(id string) (*domain.Skill, error) {
+func (s *stubSkillStore) Get(id, ownedBy string) (*domain.Skill, error) {
 	for _, sk := range s.skills {
 		if sk.ID == id {
 			return sk, nil
@@ -25,14 +25,19 @@ func (s *stubSkillStore) Get(id string) (*domain.Skill, error) {
 	}
 	return nil, fmt.Errorf("not found")
 }
-func (s *stubSkillStore) Save(sk *domain.Skill) error { return nil }
-func (s *stubSkillStore) Delete(id string) error      { return nil }
-func (s *stubSkillStore) ReadFile(id, path string, offset, maxChars int) (*domain.SkillFile, error) {
+func (s *stubSkillStore) Save(sk *domain.Skill) error     { return nil }
+func (s *stubSkillStore) Delete(id, ownedBy string) error { return nil }
+func (s *stubSkillStore) ReadFile(id, ownedBy, path string, offset, maxChars int) (*domain.SkillFile, error) {
 	return nil, fmt.Errorf("not implemented")
 }
-func (s *stubSkillStore) Files(id string) ([]domain.SkillFileEntry, error) {
+func (s *stubSkillStore) Files(id, ownedBy string) ([]domain.SkillFileEntry, error) {
 	return nil, fmt.Errorf("not implemented")
 }
+func (s *stubSkillStore) Install(zipData []byte) (string, error) {
+	return "", fmt.Errorf("not supported")
+}
+func (s *stubSkillStore) MountPluginSkills(pluginID, dir string) error { return nil }
+func (s *stubSkillStore) UnmountPluginSkills(pluginID string) error    { return nil }
 
 // stubPluginStore is a minimal PluginStore for testing.
 type stubPluginStore struct{ plugins []*domain.Plugin }
@@ -148,7 +153,7 @@ func TestSkillSearchNoMatch(t *testing.T) {
 type stubSkillStoreNoFiles struct{ skills []*domain.Skill }
 
 func (s *stubSkillStoreNoFiles) List() []*domain.Skill { return s.skills }
-func (s *stubSkillStoreNoFiles) Get(id string) (*domain.Skill, error) {
+func (s *stubSkillStoreNoFiles) Get(id, ownedBy string) (*domain.Skill, error) {
 	for _, sk := range s.skills {
 		if sk.ID == id {
 			return sk, nil
@@ -156,14 +161,19 @@ func (s *stubSkillStoreNoFiles) Get(id string) (*domain.Skill, error) {
 	}
 	return nil, fmt.Errorf("not found")
 }
-func (s *stubSkillStoreNoFiles) Save(sk *domain.Skill) error { return nil }
-func (s *stubSkillStoreNoFiles) Delete(id string) error      { return nil }
-func (s *stubSkillStoreNoFiles) ReadFile(id, path string, offset, maxChars int) (*domain.SkillFile, error) {
+func (s *stubSkillStoreNoFiles) Save(sk *domain.Skill) error     { return nil }
+func (s *stubSkillStoreNoFiles) Delete(id, ownedBy string) error { return nil }
+func (s *stubSkillStoreNoFiles) ReadFile(id, ownedBy, path string, offset, maxChars int) (*domain.SkillFile, error) {
 	return nil, errReadFileUnsupported
 }
-func (s *stubSkillStoreNoFiles) Files(id string) ([]domain.SkillFileEntry, error) {
+func (s *stubSkillStoreNoFiles) Files(id, ownedBy string) ([]domain.SkillFileEntry, error) {
 	return nil, errReadFileUnsupported
 }
+func (s *stubSkillStoreNoFiles) Install(zipData []byte) (string, error) {
+	return "", fmt.Errorf("not supported")
+}
+func (s *stubSkillStoreNoFiles) MountPluginSkills(pluginID, dir string) error { return nil }
+func (s *stubSkillStoreNoFiles) UnmountPluginSkills(pluginID string) error    { return nil }
 
 var errReadFileUnsupported = fmt.Errorf("file reads unsupported by this store")
 
@@ -814,25 +824,25 @@ type skillFileStoreStub struct {
 	*stubSkillStore
 	files   map[string][]domain.SkillFileEntry
 	readErr error
-	read    func(id, path string, offset, maxChars int) (*domain.SkillFile, error)
+	read    func(id, ownedBy, path string, offset, maxChars int) (*domain.SkillFile, error)
 }
 
-func (s *skillFileStoreStub) ReadFile(id, path string, offset, maxChars int) (*domain.SkillFile, error) {
+func (s *skillFileStoreStub) ReadFile(id, ownedBy, path string, offset, maxChars int) (*domain.SkillFile, error) {
 	if s.readErr != nil {
 		return nil, s.readErr
 	}
 	if s.read != nil {
-		return s.read(id, path, offset, maxChars)
+		return s.read(id, ownedBy, path, offset, maxChars)
 	}
 	return nil, fmt.Errorf("not implemented")
 }
-func (s *skillFileStoreStub) Files(id string) ([]domain.SkillFileEntry, error) {
+func (s *skillFileStoreStub) Files(id, ownedBy string) ([]domain.SkillFileEntry, error) {
 	return s.files[id], nil
 }
 
 func TestSkillReadFile(t *testing.T) {
 	store := &skillFileStoreStub{stubSkillStore: &stubSkillStore{skills: []*domain.Skill{{ID: "mcp-creator", Name: "mcp-creator"}}}}
-	store.read = func(id, path string, offset, maxChars int) (*domain.SkillFile, error) {
+	store.read = func(id, ownedBy, path string, offset, maxChars int) (*domain.SkillFile, error) {
 		if path == "" {
 			path = "SKILL.md"
 		}

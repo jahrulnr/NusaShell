@@ -184,6 +184,22 @@ The image attachment is preserved on the original user message, so
 `read_image` can re-load it even after compaction prunes it from the
 visible context window.
 
+## Folder attachments
+
+Users can drag and drop a folder onto the conversation area. The folder is
+attached as a path-only reference (`type: "folder"`) — no bytes are stored.
+The absolute path is injected into the user message as a text placeholder:
+
+```
+[Folder dropped: /home/user/project. Use file tools to list and read its contents.]
+```
+
+The agent can then use file tools (`list_dir`, `read_file`, `grep`, etc.)
+to explore the directory. Folder attachments are only available in desktop
+shells (Electron) where the browser exposes `File.path`; in pure web mode
+the browser does not expose filesystem paths and the drop is rejected with
+a clear error.
+
 ## Automation
 
 Durable pipelines and schedules are a separate subsystem (see the Automation

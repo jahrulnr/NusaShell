@@ -319,6 +319,8 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 				models[i].StructuredOutput = meta.StructuredOutput
 				models[i].Reasoning = meta.Reasoning
 				models[i].Vision = meta.Vision
+				models[i].Audio = meta.Audio
+				models[i].Video = meta.Video
 				if meta.Kind != "" {
 					models[i].Kind = domain.ModelKind(meta.Kind)
 				}
@@ -453,6 +455,8 @@ func (a *App) enrichProviderModelsAtRead(p *domain.Provider) {
 		p.Models[i].StructuredOutput = meta.StructuredOutput
 		p.Models[i].Reasoning = meta.Reasoning
 		p.Models[i].Vision = meta.Vision
+		p.Models[i].Audio = meta.Audio
+		p.Models[i].Video = meta.Video
 		if meta.Kind != "" {
 			p.Models[i].Kind = domain.ModelKind(meta.Kind)
 		}
@@ -480,6 +484,8 @@ func modelsDTO(p *domain.Provider) []contracts.ModelDTO {
 			StructuredOutput: m.StructuredOutput,
 			Reasoning:        m.Reasoning,
 			Vision:           m.Vision,
+			Audio:            m.Audio,
+			Video:            m.Video,
 			KnowledgeCutoff:  m.KnowledgeCutoff,
 		})
 	}

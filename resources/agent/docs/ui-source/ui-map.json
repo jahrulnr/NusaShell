@@ -181,7 +181,7 @@
         {
           "heading": "Composer",
           "paragraphs": [
-            "The message input with attachments, model picker, workspace selector, provider status, stop, and send buttons. Ctrl+Enter (\u2318\u21a9 on Mac) sends."
+            "The message input with attachments, model picker, workspace selector, provider status, stop, and send buttons. Ctrl+Enter (\u2318\u21a9 on Mac) sends. The whole conversation area accepts drag & drop of files and folders — folders are attached as path-only references (desktop only)."
           ],
           "controls": [
             "agent-form",
@@ -203,7 +203,7 @@
     },
     "skills": {
       "title": "Skills",
-      "purpose": "Author and manage markdown instruction packs the agent can load on demand via `skill_run`.",
+      "purpose": "Browse and read installed skill packages (SKILL.md + support files). Skills come from three owners: user, builtin, and plugin:<id>. Lower-priority owners (plugin) are shadowed when a higher-priority owner (user/builtin) defines the same skill ID.",
       "howToOpen": "Click the Skills item in the left sidebar.",
       "sections": [
         {
@@ -218,7 +218,7 @@
         {
           "heading": "Catalog",
           "paragraphs": [
-            "Searchable list of installed skills. The count reflects persisted skills."
+            "Searchable list of installed skills. Each row shows the skill name, an owner badge (user/builtin/plugin:<id>), and last-updated time. Shadowed skills are dimmed. The count reflects persisted skills."
           ],
           "controls": [
             "skills-count",
@@ -227,21 +227,17 @@
           ]
         },
         {
-          "heading": "Editor",
+          "heading": "Detail",
           "paragraphs": [
-            "Edit the selected skill's name, description, and markdown content. Run opens the skill in a new Agent conversation as its system context. Save and Delete persist changes."
+            "Read-only viewer for the selected skill. Shows the skill name, description, and owner, plus a file tree (SKILL.md + support files) on the left and the selected file's content on the right. Plugin-owned skills are read-only."
           ],
           "controls": [
             "skill-editor-title",
             "skill-editor-meta",
-            "skill-run-btn",
-            "skill-save-btn",
-            "skill-delete-btn",
-            "skill-editor-form",
-            "skill-name",
-            "skill-description",
-            "skill-content",
-            "skill-editor-empty"
+            "skill-editor-empty",
+            "skill-file-viewer",
+            "skill-files-tree",
+            "skill-file-content"
           ]
         }
       ]
@@ -403,11 +399,20 @@
         {
           "heading": "Results",
           "paragraphs": [
-            "Ranked search results with a count. With an empty query the pane lists all skills and memories so content is visible immediately."
+            "Ranked search results with a count. With an empty query the pane lists all skills and memories so content is visible immediately. Memory entries have a delete button (×) that opens a confirm dialog and calls memory.delete. Long content is collapsed to 3 lines; click to expand."
           ],
           "controls": [
             "learning-results",
             "learning-results-count"
+          ]
+        },
+        {
+          "heading": "Splitter",
+          "paragraphs": [
+            "Draggable splitter between the results pane and the graph pane. Drag to resize the results pane width; the width persists to localStorage."
+          ],
+          "controls": [
+            "learning-splitter"
           ]
         },
         {
@@ -555,6 +560,26 @@
           "controls": [
             "settings-vision-title",
             "settings-vision-model"
+          ]
+        },
+        {
+          "heading": "Audio fallback",
+          "paragraphs": [
+            "When the active chat model cannot hear audio, NusaShell can transcribe or describe attached audio files using a separate audio-capable model so the conversation continues without errors. Pick any model that supports audio input. Leave disabled if you always use audio-capable chat models."
+          ],
+          "controls": [
+            "settings-audio-title",
+            "settings-audio-model"
+          ]
+        },
+        {
+          "heading": "Video fallback",
+          "paragraphs": [
+            "When the active chat model cannot see video, NusaShell can describe attached video files using a separate video-capable model so the conversation continues without errors. Pick any model that supports video input. Leave disabled if you always use video-capable chat models."
+          ],
+          "controls": [
+            "settings-video-title",
+            "settings-video-model"
           ]
         },
         {
@@ -1288,6 +1313,26 @@
     },
     "settings-vision-model": {
       "label": "Vision fallback model",
+      "section": "Settings",
+      "type": "select"
+    },
+    "settings-audio-title": {
+      "label": "Audio fallback title",
+      "section": "Settings",
+      "type": "text"
+    },
+    "settings-audio-model": {
+      "label": "Audio fallback model",
+      "section": "Settings",
+      "type": "select"
+    },
+    "settings-video-title": {
+      "label": "Video fallback title",
+      "section": "Settings",
+      "type": "text"
+    },
+    "settings-video-model": {
+      "label": "Video fallback model",
       "section": "Settings",
       "type": "select"
     },

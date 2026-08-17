@@ -30,11 +30,11 @@ func (a *AcpAgents) Delete(id string) error        { return a.S.DeleteAcpAgent(i
 type Skills struct{ S *Store }
 
 func (k *Skills) List() []*domain.Skill { return k.S.ListSkills() }
-func (k *Skills) Get(id string) (*domain.Skill, error) {
+func (k *Skills) Get(id, ownedBy string) (*domain.Skill, error) {
 	return k.S.GetSkill(id)
 }
-func (k *Skills) Save(v *domain.Skill) error { return k.S.SaveSkill(v) }
-func (k *Skills) Delete(id string) error     { return k.S.DeleteSkill(id) }
+func (k *Skills) Save(v *domain.Skill) error      { return k.S.SaveSkill(v) }
+func (k *Skills) Delete(id, ownedBy string) error { return k.S.DeleteSkill(id) }
 
 type Memory struct{ S *Store }
 
@@ -70,9 +70,18 @@ func (st *Settings) Set(v domain.Settings) error {
 // SkillsAdapter adds file-level skill reads for stores without a real
 // skills directory on disk (legacy jsonstore path). Reads are unsupported —
 // they return a clear error so the toolbox falls back to Content.
-func (k *Skills) ReadFile(id, path string, offset, maxChars int) (*domain.SkillFile, error) {
+func (k *Skills) ReadFile(id, ownedBy, path string, offset, maxChars int) (*domain.SkillFile, error) {
 	return nil, fmt.Errorf("skill file reads are not supported by this store")
 }
-func (k *Skills) Files(id string) ([]domain.SkillFileEntry, error) {
+func (k *Skills) Files(id, ownedBy string) ([]domain.SkillFileEntry, error) {
 	return nil, fmt.Errorf("skill file listing is not supported by this store")
+}
+func (k *Skills) Install(zipData []byte) (string, error) {
+	return "", fmt.Errorf("skill install is not supported by this store")
+}
+func (k *Skills) MountPluginSkills(pluginID, pluginSkillsDir string) error {
+	return nil // no-op for legacy stores
+}
+func (k *Skills) UnmountPluginSkills(pluginID string) error {
+	return nil // no-op for legacy stores
 }

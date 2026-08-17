@@ -187,6 +187,7 @@ function openDrawer(server) {
   const updateBtn = document.getElementById('plugin-btn-update');
   if (updateBtn) {
     updateBtn.hidden = !hasUpdate(server);
+    updateBtn.disabled = false;
     updateBtn.textContent = hasUpdate(server) ? `Update to v${server.updateAvailable}` : 'Update';
   }
 
@@ -373,6 +374,10 @@ async function updateInstalledPlugin(server) {
     await refresh();
   } catch (error) {
     toast(error.message, 'error');
+  } finally {
+    // Always re-enable the button. On success, refresh() → openDrawer()
+    // also resets disabled, but this covers the case where refresh fails
+    // or the plugin is no longer in the list.
     if (button) {
       button.disabled = false;
       button.textContent = previous;

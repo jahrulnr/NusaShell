@@ -71,6 +71,12 @@ func (a *App) describeImagesWithFallback(ctx context.Context, settings domain.Se
 }
 
 func (a *App) resolveVisionProvider(providerID string) (*domain.Provider, string, bool) {
+	return a.resolveFallbackProvider(providerID)
+}
+
+// resolveFallbackProvider looks up an enabled provider by ID and returns
+// its API key. Used by all modality fallbacks (vision, audio, video).
+func (a *App) resolveFallbackProvider(providerID string) (*domain.Provider, string, bool) {
 	for _, p := range a.Providers.List() {
 		if p.ID == providerID && p.Enabled {
 			key, has, _ := a.Credentials.Get(p.ID)
@@ -140,13 +146,7 @@ func (a *App) enrichWithVisionDescriptions(ctx context.Context, conversation *do
 }
 
 func countImages(atts []domain.Attachment) int {
-	n := 0
-	for _, a := range atts {
-		if a.Type == "image" {
-			n++
-		}
-	}
-	return n
+	return countAttachmentsByType(atts, "image")
 }
 
 func (a *App) describeOneImage(ctx context.Context, adapter AIProvider, model string, image domain.Attachment) (string, error) {

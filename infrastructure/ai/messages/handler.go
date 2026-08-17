@@ -160,15 +160,18 @@ func toAnthropicMessages(msgs []application.ChatMessage) []anthropicMessage {
 }
 
 // anthropicToolResultContent builds a JSON array of content blocks for a
-// tool_result that carries image attachments. Text content comes first,
-// followed by image blocks.
+// tool_result that carries image/audio/video attachments. Text content
+// comes first, followed by image blocks. Audio and video use the same
+// image source type — Anthropic-compatible gateways route them based on
+// the media type.
 func anthropicToolResultContent(result *application.ToolResult) json.RawMessage {
 	var blocks []anthropicContentBlock
 	if result.Content != "" {
 		blocks = append(blocks, anthropicContentBlock{Type: "text", Text: result.Content})
 	}
 	for _, att := range result.Attachments {
-		if att.Type == "image" {
+		switch att.Type {
+		case "image", "audio", "video":
 			blocks = append(blocks, anthropicContentBlock{
 				Type: "image", Source: &anthropicSource{
 					Type: "base64", MediaType: att.MediaType, Data: aiutil.DataURLBase64(att.DataURL),
@@ -188,7 +191,7 @@ func anthropicUserContent(message application.ChatMessage) []anthropicContentBlo
 		switch attachment.Type {
 		case "text":
 			blocks = append(blocks, anthropicContentBlock{Type: "text", Text: aiutil.TextAttachmentContent(attachment)})
-		case "image":
+		case "image", "audio", "video":
 			blocks = append(blocks, anthropicContentBlock{
 				Type: "image", Source: &anthropicSource{
 					Type: "base64", MediaType: attachment.MediaType, Data: aiutil.DataURLBase64(attachment.DataURL),

@@ -176,6 +176,16 @@ func run() error {
 	pluginInstaller := plugininstall.New(pluginStore, logger)
 	pluginRuntime := pluginruntime.New(pluginStore, mcpManager)
 	acpRuntime := acpruntime.New()
+	// Mount skills from already-installed plugins (skills/ directory).
+	if pluginStore != nil && skillStore != nil {
+		plugins, _ := pluginStore.List()
+		for _, p := range plugins {
+			skillsDir := filepath.Join(p.InstallPath, "skills")
+			if err := skillStore.MountPluginSkills(p.Manifest.ID, skillsDir); err != nil {
+				slog.Warn("plugin skill mount failed", "plugin", p.Manifest.ID, "error", err)
+			}
+		}
+	}
 	// Attachment store: saves image/file attachments to disk so file-based
 	// tools can access them by absolute path.
 	attachmentStore, err := attachmentfs.New(filepath.Join(dataDir, "attachments"))

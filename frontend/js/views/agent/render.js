@@ -304,6 +304,7 @@ function truncate(value, limit) {
 function attachmentIcon(attachment) {
   if (attachment.type === 'image') return 'IMG';
   if (attachment.type === 'file') return 'PDF';
+  if (attachment.type === 'folder') return 'DIR';
   return 'TXT';
 }
 
@@ -316,6 +317,14 @@ function renderMessageAttachments(attachments) {
     if (attachment.type === 'image') {
       const image = el('img', { src: attachment.data_url, alt: attachment.name, loading: 'lazy' });
       gallery.append(el('figure', { class: 'agent-message-attachment agent-message-image' }, image, el('figcaption', { text: attachment.name })));
+      continue;
+    }
+    if (attachment.type === 'folder') {
+      gallery.append(el('div', { class: 'agent-message-attachment agent-message-file' },
+        el('span', { class: 'agent-message-file-kind', text: 'DIR' }),
+        el('span', { class: 'agent-message-file-name', text: attachment.name }),
+        attachment.file_path ? el('span', { class: 'agent-message-file-path', text: attachment.file_path }) : null,
+      ));
       continue;
     }
     gallery.append(el('div', { class: 'agent-message-attachment agent-message-file' },

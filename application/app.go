@@ -529,7 +529,7 @@ func (a *App) subscribeCompactionReview(ctx context.Context) {
 			if err := json.Unmarshal(ev.Payload, &ce); err != nil {
 				continue
 			}
-			a.flushLearningReview(ce.ConversationID)
+			a.flushLearningReview(ce.ConversationID, "compaction")
 		}
 	}
 }
@@ -798,12 +798,6 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 			return nil, rpcErr
 		}
 		return a.handleSkillsDelete(req)
-	case contracts.MethodSkillsRun:
-		var req contracts.SkillIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleSkillsRun(req)
 	case contracts.MethodSkillsFileRead:
 		var req contracts.SkillFileReadRequest
 		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {

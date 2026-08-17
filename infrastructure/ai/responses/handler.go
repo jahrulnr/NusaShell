@@ -157,7 +157,7 @@ func responsesUserContent(message application.ChatMessage) []map[string]any {
 		switch attachment.Type {
 		case "text":
 			blocks = append(blocks, map[string]any{"type": "input_text", "text": aiutil.TextAttachmentContent(attachment)})
-		case "image":
+		case "image", "audio", "video":
 			blocks = append(blocks, map[string]any{"type": "input_image", "image_url": attachment.DataURL})
 		case "file":
 			blocks = append(blocks, map[string]any{

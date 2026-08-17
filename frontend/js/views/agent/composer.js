@@ -1,5 +1,5 @@
 import { rpc } from '../../rpc.js';
-import { toast } from '../../ui.js';
+import { el, toast } from '../../ui.js';
 import { inspectAttachmentContent, toDataURL } from '../../agent-ui.js';
 
 export function bindComposer({ state, createConversation, beginTurn, refreshConversations, renderAttachments, updateComposerStatus, showSteerQueued, clearSteerQueue, promoteSteerToTranscript, stopActiveRun }) {
@@ -39,11 +39,55 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
     await addAttachments(fileInput.files);
     fileInput.value = '';
   });
-  form.addEventListener('dragover', (event) => event.preventDefault());
-  form.addEventListener('drop', async (event) => {
-    event.preventDefault();
-    await addAttachments(event.dataTransfer?.files);
-  });
+
+  // Drag & drop on the whole conversation area (not just the composer form).
+  // Shows a drag overlay while dragging and handles both files and folders.
+  // Folders are detected via webkitGetAsEntry() and attached as path-only
+  // references (type: "folder") — the agent can use file tools to explore
+  // the directory. File.path is only available in desktop shells (Electron);
+  // in pure web mode folders fall back to a workspace-picker prompt.
+  const dropZone = document.getElementById('agent-conversation');
+  if (dropZone) {
+    let dragCounter = 0;
+    let overlay = null;
+
+    const showOverlay = () => {
+      if (overlay) return;
+      overlay = el('div', { class: 'agent-drop-overlay' }, [
+        el('div', { class: 'agent-drop-overlay-inner' }, [
+          el('div', { class: 'agent-drop-overlay-icon', text: '⤓' }),
+          el('div', { class: 'agent-drop-overlay-text', text: 'Drop files or folders to attach' }),
+        ]),
+      ]);
+      dropZone.appendChild(overlay);
+    };
+    const hideOverlay = () => {
+      if (overlay) { overlay.remove(); overlay = null; }
+    };
+
+    dropZone.addEventListener('dragenter', (event) => {
+      if (!event.dataTransfer?.types?.includes('Files')) return;
+      event.preventDefault();
+      dragCounter++;
+      showOverlay();
+    });
+    dropZone.addEventListener('dragover', (event) => {
+      if (!event.dataTransfer?.types?.includes('Files')) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'copy';
+    });
+    dropZone.addEventListener('dragleave', (event) => {
+      event.preventDefault();
+      dragCounter--;
+      if (dragCounter <= 0) { dragCounter = 0; hideOverlay(); }
+    });
+    dropZone.addEventListener('drop', async (event) => {
+      event.preventDefault();
+      dragCounter = 0;
+      hideOverlay();
+      await handleDrop(event.dataTransfer);
+    });
+  }
   workspaceButton.addEventListener('click', chooseWorkspace);
   stopButton.addEventListener('click', async () => {
     await stopActiveRun();
@@ -188,6 +232,80 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
         ...(detected.type === 'text' ? { content: detected.content } : { data_url: toDataURL(bytes, detected.mediaType) }),
       });
     }
+    renderAttachments();
+    updateSendAvailability(state);
+  }
+
+  // handleDrop processes a DataTransfer from a drop event. It distinguishes
+  // folders from files using webkitGetAsEntry(). Folders are attached as
+  // path-only references (type: "folder") when File.path is available
+  // (desktop shell). Files are processed as normal byte attachments.
+  async function handleDrop(dataTransfer) {
+    if (!dataTransfer) return;
+    const items = dataTransfer.items;
+    const files = [];
+
+    // First pass: separate folder entries from file entries using the
+    // entries API (webkitGetAsEntry). This lets us detect directories
+    // which dataTransfer.files does not expose.
+    const folderEntries = [];
+    const fileItems = [];
+    if (items && items.length > 0) {
+      const entryPromises = [];
+      for (const item of items) {
+        if (item.kind !== 'file') continue;
+        const entry = item.webkitGetAsEntry?.();
+        if (entry && entry.isDirectory) {
+          folderEntries.push(entry);
+        } else {
+          fileItems.push(item);
+        }
+      }
+      // Collect File objects for non-folder items.
+      for (const item of fileItems) {
+        const file = item.getAsFile();
+        if (file) files.push(file);
+      }
+    } else {
+      // Fallback: no items API, use files directly.
+      for (const file of dataTransfer.files) files.push(file);
+    }
+
+    // Process folders: attach as path-only references.
+    for (const entry of folderEntries) {
+      if (state.attachments.length >= 4) {
+        toast('A turn can include up to 4 attachments.', 'error');
+        break;
+      }
+      await addFolderAttachment(entry);
+    }
+
+    // Process files: normal byte attachments.
+    if (files.length > 0) await addAttachments(files);
+  }
+
+  // addFolderAttachment converts a FileSystemDirectoryEntry into a folder
+  // attachment. In desktop shells (Electron), File.path exposes the absolute
+  // filesystem path. In pure web mode, File.path is undefined — we still
+  // attach the folder name but without a path, and the backend will reject
+  // it with a clear validation error.
+  async function addFolderAttachment(entry) {
+    // Try to get the underlying File object — Electron exposes .path on it.
+    const file = await new Promise((resolve) => entry.file(resolve, () => resolve(null)));
+    const name = entry.name || file?.name || 'Folder';
+    const filePath = file?.path || '';
+
+    if (!filePath) {
+      toast(`Cannot attach folder "${name}" — the browser does not expose filesystem paths. Use the workspace picker instead.`, 'error', 6000);
+      return;
+    }
+
+    state.attachments.push({
+      type: 'folder',
+      name,
+      media_type: 'inode/directory',
+      file_path: filePath,
+    });
     renderAttachments();
     updateSendAvailability(state);
   }

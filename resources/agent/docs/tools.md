@@ -6,13 +6,14 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 
 | Tool | Purpose |
 | --- | --- |
-| `skill_list` | list available skills (name + description) |
+| `skill_list` | list available skills (name + description + owned_by + shadowed) |
 | `skill_search` | search installed skills by name or description (case-insensitive substring) |
-| `skill_read` | read a skill's full markdown content by name |
-| `skill_run` | load a skill's instructions by name (alias of `skill_read` for the legacy prompt path) |
-| `memory_save` | persist a fact with optional tags |
-| `memory_search` | substring search over memory |
-| `memory_list` | list all memory entries |
+| `skill_read` | read a skill's `SKILL.md` (or a support file via `path`) by name; paginated with `offset`/`max_chars` |
+| `skill_files` | list the files inside a skill folder (path, type, size, editable) |
+| `skill_save` | create or update a user-owned skill (plugin-owned skills are read-only) |
+| `memory_save` | persist a fact with optional tags (source is recorded as "agent") |
+| `memory_search` | substring search over memory content + tags; results are newest-first and include id, created_at, source, tags |
+| `memory_list` | list all memory entries newest-first with id, created_at, source, tags, and content |
 | `memory_delete` | remove a memory entry by id |
 | `todo` | replace the conversation task checklist (full-replace, Claude TodoWrite style; max 50 items, 500 chars each; prefer exactly one `in_progress` at a time). The user can delete items from the UI — treat deleted items as gone and do not re-add them. |
 | `docs_search` | search the product documentation |
@@ -22,6 +23,8 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `tool_search` | search a running MCP server's tools by name or description |
 | `tool_schema` | load one MCP tool's input schema by server and tool name before calling it |
 | `read_image` | load an image from the conversation into the model's context (vision models see it directly; non-vision models get a text description via the vision fallback) |
+| `read_audio` | load an audio file from the conversation into the model's context (audio-capable models hear it directly; non-audio models get a text transcript via the audio fallback) |
+| `read_video` | load a video file from the conversation into the model's context (video-capable models see it directly; non-video models get a text description via the video fallback) |
 | `web_search` | search the web across Brave, Startpage, Wikipedia, and GitHub; returns ranked results with title, URL, and snippet |
 | `web_fetch` | fetch a URL and return readable text; supports HTML, JSON (pretty-printed), XML/RSS/Atom, Markdown, CSV, and plain text with newlines preserved; collects links and selected response headers; honors `max_bytes`; surfaces `Retry-After` on 429/503 and structured JSON error bodies |
 | `web_answer` | get a web-grounded answer via an LLM with built-in web search (only available when an answer-provider API key is configured) |
@@ -48,7 +51,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 
 The system prompt advertises the same set: `skill_list`, `skill_search`,
 `skill_read`, `memory_*`, `docs_*`, `mcp_list`, `tool_list`, `tool_search`,
-`tool_schema`, `read_image`, `web_search`, `web_fetch`,
+`tool_schema`, `read_image`, `read_audio`, `read_video`, `web_search`, `web_fetch`,
 `web_answer` (when available), `ci_*`, `automation_*`, `schedule_once`,
 `schedule_every`, `wait_until`, plus `mcp__<server>__<tool>` for each enabled MCP server.
 When at least one ACP agent is enabled, the interactive toolbox also advertises

@@ -49,6 +49,8 @@ type Model struct {
 	StructuredOutput bool   // supports structured/JSON output
 	Reasoning        bool   // supports reasoning/thinking mode
 	Vision           bool   // supports image input (multimodal)
+	Audio            bool   // supports audio input (multimodal)
+	Video            bool   // supports video input (multimodal)
 	KnowledgeCutoff  string // knowledge cutoff date (e.g. "2025-05")
 }
 

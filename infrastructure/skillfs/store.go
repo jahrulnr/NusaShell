@@ -28,6 +28,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -46,6 +47,10 @@ var skillIDRe = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 type Store struct {
 	root string // <datadir>/agent/skills
 	json *jsonMetaStore
+	mu   sync.RWMutex
+	// pluginMounts maps "plugin:<pluginID>" → skills directory path.
+	// Skills in these directories are read-only and mounted (no copy).
+	pluginMounts map[string]string
 }
 
 // New creates a filesystem skill store rooted at root. The directory is
@@ -58,7 +63,7 @@ func New(root string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{root: root, json: j}, nil
+	return &Store{root: root, json: j, pluginMounts: make(map[string]string)}, nil
 }
 
 // SeedBuiltinSkills copies builtin skill packages from the embedded
@@ -143,23 +148,52 @@ func SeedBuiltinSkills(root string) error {
 	return nil
 }
 
-// List returns all skills from the filesystem, sorted by name.
+// List returns all skills from the filesystem (user/builtin + mounted
+// plugin skills), sorted by name.
 func (s *Store) List() []*domain.Skill {
-	entries, err := os.ReadDir(s.root)
-	if err != nil {
-		return nil
-	}
 	var out []*domain.Skill
-	for _, entry := range entries {
-		if !entry.IsDir() || !skillIDRe.MatchString(entry.Name()) {
-			continue
+
+	// Scan root directory (user + builtin skills).
+	entries, err := os.ReadDir(s.root)
+	if err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() || !skillIDRe.MatchString(entry.Name()) {
+				continue
+			}
+			skill, err := s.loadSkillFromDir(entry.Name(), s.root)
+			if err != nil {
+				continue
+			}
+			out = append(out, skill)
 		}
-		skill, err := s.loadSkill(entry.Name())
+	}
+
+	// Scan plugin mounts.
+	s.mu.RLock()
+	mounts := make(map[string]string, len(s.pluginMounts))
+	for k, v := range s.pluginMounts {
+		mounts[k] = v
+	}
+	s.mu.RUnlock()
+	for owner, dir := range mounts {
+		pluginEntries, err := os.ReadDir(dir)
 		if err != nil {
 			continue
 		}
-		out = append(out, skill)
+		for _, entry := range pluginEntries {
+			if !entry.IsDir() || !skillIDRe.MatchString(entry.Name()) {
+				continue
+			}
+			skill, err := s.loadSkillFromDir(entry.Name(), dir)
+			if err != nil {
+				continue
+			}
+			skill.OwnedBy = owner
+			skill.PluginDir = dir
+			out = append(out, skill)
+		}
 	}
+
 	// Sort by name.
 	for i := 0; i < len(out); i++ {
 		for j := i + 1; j < len(out); j++ {
@@ -171,12 +205,80 @@ func (s *Store) List() []*domain.Skill {
 	return out
 }
 
-// Get returns a skill by ID (which is the folder name).
-func (s *Store) Get(id string) (*domain.Skill, error) {
+// Get returns a skill by ID. If ownedBy is empty, priority resolution
+// picks user > builtin > plugin. If ownedBy is set, returns the exact
+// skill with that owner.
+func (s *Store) Get(id, ownedBy string) (*domain.Skill, error) {
 	if !skillIDRe.MatchString(id) {
 		return nil, fmt.Errorf("skill %q not found", id)
 	}
-	return s.loadSkill(id)
+
+	// Exact owner lookup.
+	if ownedBy != "" {
+		return s.getWithOwner(id, ownedBy)
+	}
+
+	// Priority resolution: collect all skills with this ID.
+	candidates := s.skillsByID(id)
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("skill %q not found", id)
+	}
+	// Sort by priority (user > builtin > plugin).
+	sort.Slice(candidates, func(i, j int) bool {
+		return domain.SkillOwnerPriority(candidates[i].EffectiveOwnedBy()) < domain.SkillOwnerPriority(candidates[j].EffectiveOwnedBy())
+	})
+	return candidates[0], nil
+}
+
+// getWithOwner returns the skill with the exact owner.
+func (s *Store) getWithOwner(id, ownedBy string) (*domain.Skill, error) {
+	// User/builtin: read from root.
+	if ownedBy == "user" || ownedBy == "builtin" || ownedBy == string(domain.SkillOriginUser) || ownedBy == string(domain.SkillOriginBuiltin) {
+		skill, err := s.loadSkillFromDir(id, s.root)
+		if err != nil {
+			return nil, fmt.Errorf("skill %q not found", id)
+		}
+		return skill, nil
+	}
+	// Plugin: read from mount.
+	s.mu.RLock()
+	dir, ok := s.pluginMounts[ownedBy]
+	s.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("skill %q not found (owner %s not mounted)", id, ownedBy)
+	}
+	skill, err := s.loadSkillFromDir(id, dir)
+	if err != nil {
+		return nil, fmt.Errorf("skill %q not found", id)
+	}
+	skill.OwnedBy = ownedBy
+	skill.PluginDir = dir
+	return skill, nil
+}
+
+// skillsByID returns all skills (across root + plugin mounts) with the
+// given ID.
+func (s *Store) skillsByID(id string) []*domain.Skill {
+	var out []*domain.Skill
+	// Check root.
+	if skill, err := s.loadSkillFromDir(id, s.root); err == nil {
+		out = append(out, skill)
+	}
+	// Check plugin mounts.
+	s.mu.RLock()
+	mounts := make(map[string]string, len(s.pluginMounts))
+	for k, v := range s.pluginMounts {
+		mounts[k] = v
+	}
+	s.mu.RUnlock()
+	for owner, dir := range mounts {
+		if skill, err := s.loadSkillFromDir(id, dir); err == nil {
+			skill.OwnedBy = owner
+			skill.PluginDir = dir
+			out = append(out, skill)
+		}
+	}
+	return out
 }
 
 // Save writes a skill's SKILL.md to the filesystem and updates metadata
@@ -185,6 +287,10 @@ func (s *Store) Get(id string) (*domain.Skill, error) {
 // If the skill has no ID, the name is used as the ID. If an existing
 // skill is renamed, the old folder is removed.
 func (s *Store) Save(skill *domain.Skill) error {
+	// Plugin-owned skills are read-only.
+	if strings.HasPrefix(skill.EffectiveOwnedBy(), "plugin:") {
+		return fmt.Errorf("plugin-owned skills are read-only; uninstall the plugin to modify")
+	}
 	// Use the skill name as the folder ID (matching Electron's pattern).
 	if skill.ID == "" {
 		skill.ID = skill.Name
@@ -225,10 +331,19 @@ func (s *Store) Save(skill *domain.Skill) error {
 
 // Delete removes a skill directory and its metadata. If the skill is
 // builtin, it is recorded in .deleted-builtin.json so it is not
-// re-seeded on restart.
-func (s *Store) Delete(id string) error {
+// re-seeded on restart. Plugin-owned skills cannot be deleted directly.
+func (s *Store) Delete(id, ownedBy string) error {
 	if !skillIDRe.MatchString(id) {
 		return fmt.Errorf("skill %q not found", id)
+	}
+	// Resolve the skill to check its owner.
+	skill, err := s.Get(id, ownedBy)
+	if err != nil {
+		return err
+	}
+	owner := skill.EffectiveOwnedBy()
+	if strings.HasPrefix(owner, "plugin:") {
+		return fmt.Errorf("skill %q is owned by plugin %s; uninstall the plugin to remove it", id, strings.TrimPrefix(owner, "plugin:"))
 	}
 	dir := filepath.Join(s.root, id)
 	// Check provenance before deleting.
@@ -243,7 +358,7 @@ func (s *Store) Delete(id string) error {
 		return fmt.Errorf("skillfs: remove %s: %w", dir, err)
 	}
 	// Remove from metadata + provenance.
-	s.json.delete(id)
+	s.json.delete(metaKey(id, owner))
 	if err := s.json.save(); err != nil {
 		return err
 	}
@@ -252,10 +367,11 @@ func (s *Store) Delete(id string) error {
 	return nil
 }
 
-// loadSkill reads SKILL.md from <root>/<id>/SKILL.md and merges metadata
-// from skills.json.
-func (s *Store) loadSkill(id string) (*domain.Skill, error) {
-	skillFile := filepath.Join(s.root, id, "SKILL.md")
+// loadSkillFromDir reads SKILL.md from <dir>/<id>/SKILL.md and merges
+// metadata from skills.json. The dir parameter is the parent directory
+// (either s.root for user/builtin skills, or a plugin mount directory).
+func (s *Store) loadSkillFromDir(id, dir string) (*domain.Skill, error) {
+	skillFile := filepath.Join(dir, id, "SKILL.md")
 	data, err := os.ReadFile(skillFile)
 	if err != nil {
 		return nil, fmt.Errorf("skillfs: read %s: %w", skillFile, err)
@@ -267,11 +383,24 @@ func (s *Store) loadSkill(id string) (*domain.Skill, error) {
 		Description: desc,
 		Content:     content,
 	}
-	// Merge metadata from skills.json.
-	if meta, ok := s.json.get(id); ok {
+	// Merge metadata from skills.json. Try composite key first (for
+	// plugin skills), then flat key (for user/builtin).
+	if meta, ok := s.json.get(metaKey(id, skill.OwnedBy)); ok {
 		skill.Category = meta.Category
 		skill.State = meta.State
 		skill.Origin = meta.Origin
+		skill.OwnedBy = meta.OwnedBy
+		skill.PluginDir = meta.PluginDir
+		skill.Pinned = meta.Pinned
+		skill.UsageCount = meta.UsageCount
+		skill.LastUsedAt = meta.LastUsedAt
+		skill.UpdatedAt = meta.UpdatedAt
+	} else if meta, ok := s.json.get(id); ok {
+		skill.Category = meta.Category
+		skill.State = meta.State
+		skill.Origin = meta.Origin
+		skill.OwnedBy = meta.OwnedBy
+		skill.PluginDir = meta.PluginDir
 		skill.Pinned = meta.Pinned
 		skill.UsageCount = meta.UsageCount
 		skill.LastUsedAt = meta.LastUsedAt
@@ -351,6 +480,8 @@ type skillMeta struct {
 	Category   string             `json:"category,omitempty"`
 	State      domain.SkillState  `json:"state,omitempty"`
 	Origin     domain.SkillOrigin `json:"origin,omitempty"`
+	OwnedBy    string             `json:"owned_by,omitempty"`
+	PluginDir  string             `json:"plugin_dir,omitempty"` // mount source for plugin skills
 	Pinned     bool               `json:"pinned,omitempty"`
 	UsageCount int                `json:"usage_count,omitempty"`
 	LastUsedAt time.Time          `json:"last_used_at,omitempty"`
@@ -380,15 +511,28 @@ func (j *jsonMetaStore) get(id string) (*skillMeta, bool) {
 }
 
 func (j *jsonMetaStore) set(s *domain.Skill) {
-	j.items[s.ID] = &skillMeta{
+	key := metaKey(s.ID, s.EffectiveOwnedBy())
+	j.items[key] = &skillMeta{
 		Category:   s.Category,
 		State:      s.State,
 		Origin:     s.Origin,
+		OwnedBy:    s.OwnedBy,
+		PluginDir:  s.PluginDir,
 		Pinned:     s.Pinned,
 		UsageCount: s.UsageCount,
 		LastUsedAt: s.LastUsedAt,
 		UpdatedAt:  s.UpdatedAt,
 	}
+}
+
+// metaKey returns the composite key for the metadata store. User/builtin
+// skills use their ID directly (backward compatible). Plugin skills use
+// "plugin:<pluginID>:<skillID>".
+func metaKey(id, ownedBy string) string {
+	if ownedBy == "" || ownedBy == "user" || ownedBy == "builtin" || ownedBy == string(domain.SkillOriginUser) || ownedBy == string(domain.SkillOriginBuiltin) {
+		return id
+	}
+	return ownedBy + ":" + id
 }
 
 func (j *jsonMetaStore) delete(id string) {
@@ -532,7 +676,7 @@ func normalizedRel(path string) (string, error) {
 
 // safeSkillPath resolves a skill-relative path to an absolute path inside
 // the skill's directory, refusing traversal.
-func (s *Store) safeSkillPath(id, rel string) (string, error) {
+func (s *Store) safeSkillPath(id, ownedBy, rel string) (string, error) {
 	if !skillIDRe.MatchString(id) {
 		return "", fmt.Errorf("skill %q not found", id)
 	}
@@ -540,9 +684,22 @@ func (s *Store) safeSkillPath(id, rel string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("skill %q: %w", id, err)
 	}
-	rootDir := filepath.Join(s.root, id)
-	if !strings.HasPrefix(rootDir, s.root+string(filepath.Separator)) && rootDir != s.root {
-		return "", fmt.Errorf("invalid skill path")
+	// Resolve the skill directory based on ownedBy.
+	var rootDir string
+	if ownedBy != "" && strings.HasPrefix(ownedBy, "plugin:") {
+		s.mu.RLock()
+		dir, ok := s.pluginMounts[ownedBy]
+		s.mu.RUnlock()
+		if !ok {
+			return "", fmt.Errorf("skill %q not found (owner %s not mounted)", id, ownedBy)
+		}
+		rootDir = filepath.Join(dir, id)
+	} else {
+		rootDir = filepath.Join(s.root, id)
+	}
+	if !strings.HasPrefix(rootDir, s.root+string(filepath.Separator)) && rootDir != s.root && !strings.HasPrefix(rootDir, s.root) {
+		// Plugin dirs are outside root — that's expected. Just ensure
+		// the resolved target stays within rootDir.
 	}
 	target := filepath.Join(rootDir, filepath.FromSlash(clean))
 	if target != rootDir && !strings.HasPrefix(target, rootDir+string(filepath.Separator)) {
@@ -565,12 +722,12 @@ func isUTF8Text(data []byte) bool {
 }
 
 // ReadFile implements SkillStore.ReadFile.
-func (s *Store) ReadFile(id, path string, offset, maxChars int) (*domain.SkillFile, error) {
+func (s *Store) ReadFile(id, ownedBy, path string, offset, maxChars int) (*domain.SkillFile, error) {
 	rel := strings.TrimSpace(path)
 	if rel == "" {
 		rel = "SKILL.md"
 	}
-	target, err := s.safeSkillPath(id, rel)
+	target, err := s.safeSkillPath(id, ownedBy, rel)
 	if err != nil {
 		return nil, err
 	}
@@ -615,11 +772,22 @@ func (s *Store) ReadFile(id, path string, offset, maxChars int) (*domain.SkillFi
 }
 
 // Files implements SkillStore.Files and lists the skill directory tree.
-func (s *Store) Files(id string) ([]domain.SkillFileEntry, error) {
+func (s *Store) Files(id, ownedBy string) ([]domain.SkillFileEntry, error) {
 	if !skillIDRe.MatchString(id) {
 		return nil, fmt.Errorf("skill %q not found", id)
 	}
-	rootDir := filepath.Join(s.root, id)
+	var rootDir string
+	if ownedBy != "" && strings.HasPrefix(ownedBy, "plugin:") {
+		s.mu.RLock()
+		dir, ok := s.pluginMounts[ownedBy]
+		s.mu.RUnlock()
+		if !ok {
+			return nil, fmt.Errorf("skill %q not found (owner %s not mounted)", id, ownedBy)
+		}
+		rootDir = filepath.Join(dir, id)
+	} else {
+		rootDir = filepath.Join(s.root, id)
+	}
 	var out []domain.SkillFileEntry
 	var walkDir func(dir, prefix string) error
 	walkDir = func(dir, prefix string) error {
@@ -753,6 +921,7 @@ func (s *Store) Install(zipData []byte) (string, error) {
 		Description: description,
 		State:       domain.SkillStateActive,
 		Origin:      domain.SkillOriginUser,
+		OwnedBy:     "user",
 		UpdatedAt:   time.Now().UTC(),
 	}
 	s.json.set(skill)
@@ -797,4 +966,73 @@ func parseFrontmatter(content string) (name, description string) {
 		name = "unnamed"
 	}
 	return name, description
+}
+
+// MountPluginSkills scans a plugin's skills/ directory and registers all
+// skill packages found there with owned_by="plugin:<pluginID>". File
+// content is read from the plugin directory (mount, no copy).
+func (s *Store) MountPluginSkills(pluginID, pluginSkillsDir string) error {
+	if pluginID == "" {
+		return fmt.Errorf("skillfs: plugin ID is required for mount")
+	}
+	owner := "plugin:" + pluginID
+	// Check if the directory exists.
+	info, err := os.Stat(pluginSkillsDir)
+	if err != nil || !info.IsDir() {
+		// No skills/ directory — nothing to mount, not an error.
+		return nil
+	}
+	// Register the mount.
+	s.mu.Lock()
+	s.pluginMounts[owner] = pluginSkillsDir
+	s.mu.Unlock()
+	// Scan for skill directories and register metadata.
+	entries, err := os.ReadDir(pluginSkillsDir)
+	if err != nil {
+		return fmt.Errorf("skillfs: scan plugin skills %s: %w", pluginSkillsDir, err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !skillIDRe.MatchString(entry.Name()) {
+			continue
+		}
+		skillID := entry.Name()
+		// Load skill to get name/description from SKILL.md.
+		skill, err := s.loadSkillFromDir(skillID, pluginSkillsDir)
+		if err != nil {
+			continue
+		}
+		skill.OwnedBy = owner
+		skill.PluginDir = pluginSkillsDir
+		skill.Origin = domain.SkillOriginUser // placeholder; OwnedBy is authoritative
+		skill.UpdatedAt = time.Now().UTC()
+		s.json.set(skill)
+	}
+	return s.json.save()
+}
+
+// UnmountPluginSkills removes all skills owned by plugin:<pluginID>
+// from the metadata catalog. Files in the plugin directory are not
+// touched (the plugin uninstaller handles those).
+func (s *Store) UnmountPluginSkills(pluginID string) error {
+	if pluginID == "" {
+		return fmt.Errorf("skillfs: plugin ID is required for unmount")
+	}
+	owner := "plugin:" + pluginID
+	s.mu.Lock()
+	delete(s.pluginMounts, owner)
+	s.mu.Unlock()
+	// Remove all metadata entries for this owner.
+	for key, meta := range s.json.items {
+		if meta.OwnedBy == owner {
+			delete(s.json.items, key)
+		}
+	}
+	// Also clean composite keys (plugin:<pluginID>:<skillID>).
+	prefix := owner + ":"
+	for key := range s.json.items {
+		if strings.HasPrefix(key, prefix) {
+			delete(s.json.items, key)
+		}
+	}
+	return s.json.save()
 }

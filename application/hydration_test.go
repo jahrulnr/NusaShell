@@ -21,17 +21,22 @@ func (s *stubMemStore) Delete(id string) error           { return nil }
 type stubSkillStoreHyd struct{ skills []*domain.Skill }
 
 func (s *stubSkillStoreHyd) List() []*domain.Skill { return s.skills }
-func (s *stubSkillStoreHyd) Get(id string) (*domain.Skill, error) {
+func (s *stubSkillStoreHyd) Get(id, ownedBy string) (*domain.Skill, error) {
 	return nil, fmt.Errorf("not found")
 }
-func (s *stubSkillStoreHyd) Save(sk *domain.Skill) error { return nil }
-func (s *stubSkillStoreHyd) Delete(id string) error      { return nil }
-func (s *stubSkillStoreHyd) ReadFile(id, path string, offset, maxChars int) (*domain.SkillFile, error) {
+func (s *stubSkillStoreHyd) Save(sk *domain.Skill) error     { return nil }
+func (s *stubSkillStoreHyd) Delete(id, ownedBy string) error { return nil }
+func (s *stubSkillStoreHyd) ReadFile(id, ownedBy, path string, offset, maxChars int) (*domain.SkillFile, error) {
 	return nil, fmt.Errorf("not implemented")
 }
-func (s *stubSkillStoreHyd) Files(id string) ([]domain.SkillFileEntry, error) {
+func (s *stubSkillStoreHyd) Files(id, ownedBy string) ([]domain.SkillFileEntry, error) {
 	return nil, fmt.Errorf("not implemented")
 }
+func (s *stubSkillStoreHyd) Install(zipData []byte) (string, error) {
+	return "", fmt.Errorf("not implemented")
+}
+func (s *stubSkillStoreHyd) MountPluginSkills(pluginID, dir string) error { return nil }
+func (s *stubSkillStoreHyd) UnmountPluginSkills(pluginID string) error    { return nil }
 
 // stubPluginStoreHyd is a minimal PluginStore for hydration tests.
 type stubPluginStoreHyd struct{ plugins []*domain.Plugin }

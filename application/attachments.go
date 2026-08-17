@@ -3,6 +3,7 @@ package application
 import (
 	"bytes"
 	"encoding/base64"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
@@ -34,6 +35,7 @@ func attachmentFromDTO(item contracts.AttachmentDTO) (domain.Attachment, error) 
 	attachment := domain.Attachment{
 		Type: strings.TrimSpace(item.Type), Name: strings.TrimSpace(item.Name),
 		MediaType: strings.TrimSpace(item.MediaType), Content: item.Content, DataURL: item.DataURL,
+		FilePath: strings.TrimSpace(item.FilePath),
 	}
 	if attachment.Name == "" {
 		return domain.Attachment{}, errAttachment("attachment name is required")
@@ -63,6 +65,17 @@ func attachmentFromDTO(item contracts.AttachmentDTO) (domain.Attachment, error) 
 		if err := validateDataURL(attachment.DataURL, attachment.MediaType, attachment.Name); err != nil {
 			return domain.Attachment{}, err
 		}
+	case "folder":
+		// Folder attachments are path-only references (no bytes). The agent
+		// can use file tools to explore the directory. FilePath must be a
+		// non-empty absolute path.
+		if attachment.FilePath == "" {
+			return domain.Attachment{}, errAttachment("folder attachment requires a file_path")
+		}
+		if !filepath.IsAbs(attachment.FilePath) {
+			return domain.Attachment{}, errAttachment("folder attachment file_path must be absolute")
+		}
+		attachment.MediaType = "inode/directory"
 	default:
 		return domain.Attachment{}, errAttachment("unsupported attachment type")
 	}

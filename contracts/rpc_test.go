@@ -52,7 +52,7 @@ func TestRosterUniqueness(t *testing.T) {
 		MethodTurnsRetry, MethodTurnsSteer, MethodTurnsCancelSteer, MethodTurnsActive,
 		MethodProvidersList, MethodProvidersSave, MethodProvidersDelete, MethodProvidersTest,
 		MethodProvidersImport, MethodModelsList,
-		MethodSkillsList, MethodSkillsRead, MethodSkillsSave, MethodSkillsDelete, MethodSkillsRun,
+		MethodSkillsList, MethodSkillsRead, MethodSkillsSave, MethodSkillsDelete,
 		MethodPluginList, MethodPluginSave, MethodPluginDelete, MethodPluginTest,
 		MethodPluginStop, MethodPluginToolsList, MethodPluginUninstall,
 		MethodMemoryList, MethodMemorySave, MethodMemorySearch, MethodMemoryDelete,
@@ -97,6 +97,7 @@ func TestRosterUniqueness(t *testing.T) {
 		EventAutomationEvent,
 		EventAcpRunStarted, EventAcpRunUpdated, EventAcpRunDone,
 		EventAcpPermissionRequested, EventAcpPermissionDecided, EventAcpSessionModeChanged,
+		EventLearningReviewStarted, EventLearningReviewDone,
 	}
 	seenEv := map[string]bool{}
 	for _, e := range events {

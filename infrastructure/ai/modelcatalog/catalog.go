@@ -42,6 +42,8 @@ type ModelMetadata struct {
 	ToolCall         bool     `json:"tool_call"`
 	StructuredOutput bool     `json:"structured_output"`
 	Vision           bool     `json:"vision"`
+	Audio            bool     `json:"audio"`
+	Video            bool     `json:"video"`
 	Temperature      bool     `json:"temperature"`
 	SupportedEfforts []string `json:"supported_efforts"`
 	KnowledgeCutoff  string   `json:"knowledge_cutoff"`
@@ -415,6 +417,20 @@ func convertModel(id string, cm catalogModel) *ModelMetadata {
 	}
 	if cm.Attachment {
 		meta.Vision = true
+	}
+	// Audio: from modalities.input includes "audio"
+	for _, m := range cm.Modalities.Input {
+		if m == "audio" {
+			meta.Audio = true
+			break
+		}
+	}
+	// Video: from modalities.input includes "video"
+	for _, m := range cm.Modalities.Input {
+		if m == "video" {
+			meta.Video = true
+			break
+		}
 	}
 	// Supported efforts from reasoning_options
 	for _, opt := range cm.ReasoningOptions {

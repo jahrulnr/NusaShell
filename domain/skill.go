@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // MaxAutoContinuesCap is the absolute ceiling for a finite MaxAutoContinues
 // value (matches MaxToolRounds). Values above this are clamped.
@@ -39,10 +42,36 @@ type Skill struct {
 	Category    string      // optional grouping (e.g. "git", "k8s")
 	State       SkillState  // active | stale | archived (default active)
 	Origin      SkillOrigin // user | agent | builtin
+	OwnedBy     string      // "user", "builtin", "plugin:<plugin-id>" — secondary key for disambiguation; "" defaults to Origin
+	PluginDir   string      // mount source directory for plugin-owned skills (read-only); empty for user/builtin
 	Pinned      bool        // pinned skills bypass decay and always surface
 	UsageCount  int         // incremented each time the skill is used in a turn
 	LastUsedAt  time.Time   // zero = never used
 	UpdatedAt   time.Time
+}
+
+// EffectiveOwnedBy returns OwnedBy if set, otherwise a stringified Origin.
+// This is the value used for priority resolution and UI badges.
+func (s *Skill) EffectiveOwnedBy() string {
+	if s.OwnedBy != "" {
+		return s.OwnedBy
+	}
+	return string(s.Origin)
+}
+
+// SkillOwnerPriority returns the resolution priority for an owner.
+// Lower = higher priority. User wins, then builtin, then plugin (alpha).
+func SkillOwnerPriority(ownedBy string) int {
+	switch {
+	case ownedBy == "user" || ownedBy == string(SkillOriginUser):
+		return 0
+	case ownedBy == "builtin" || ownedBy == string(SkillOriginBuiltin):
+		return 1
+	case strings.HasPrefix(ownedBy, "plugin:"):
+		return 2
+	default:
+		return 3
+	}
 }
 
 // SkillFile is a read of one file inside a skill package.
@@ -122,6 +151,20 @@ type Settings struct {
 	// placeholder instead of an image description.
 	VisionProviderID string `json:"vision_provider_id,omitempty"`
 	VisionModelID    string `json:"vision_model_id,omitempty"`
+	// AudioFallback selects an auxiliary audio-capable model used to
+	// transcribe/describe audio when the active chat model does not
+	// support audio input. When empty, non-audio models receive an
+	// error message directing the user to configure a fallback or switch
+	// to an audio-capable model.
+	AudioProviderID string `json:"audio_provider_id,omitempty"`
+	AudioModelID    string `json:"audio_model_id,omitempty"`
+	// VideoFallback selects an auxiliary video-capable model used to
+	// describe video when the active chat model does not support video
+	// input. When empty, non-video models receive an error message
+	// directing the user to configure a fallback or switch to a
+	// video-capable model.
+	VideoProviderID string `json:"video_provider_id,omitempty"`
+	VideoModelID    string `json:"video_model_id,omitempty"`
 	// WebAnswer configures the web_answer tool's answer provider. This is
 	// separate from the chat providers — the user picks a searchwire-supported
 	// vendor (brave, openrouter, openai, perplexity, anthropic, xai) and

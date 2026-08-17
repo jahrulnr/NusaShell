@@ -57,3 +57,39 @@ func TestAttachmentCountLimit(t *testing.T) {
 		t.Fatalf("message = %q", rpcErr.Message)
 	}
 }
+
+func TestFolderAttachmentRequiresAbsolutePath(t *testing.T) {
+	_, err := attachmentFromDTO(contracts.AttachmentDTO{
+		Type: "folder", Name: "my-project", FilePath: "relative/path",
+	})
+	if err == nil {
+		t.Fatal("want error for relative path")
+	}
+}
+
+func TestFolderAttachmentRequiresFilePath(t *testing.T) {
+	_, err := attachmentFromDTO(contracts.AttachmentDTO{
+		Type: "folder", Name: "my-project",
+	})
+	if err == nil {
+		t.Fatal("want error for missing file_path")
+	}
+}
+
+func TestFolderAttachmentAcceptsAbsolutePath(t *testing.T) {
+	got, err := attachmentFromDTO(contracts.AttachmentDTO{
+		Type: "folder", Name: "my-project", FilePath: "/home/user/project",
+	})
+	if err != nil {
+		t.Fatalf("valid folder rejected: %v", err)
+	}
+	if got.Type != "folder" {
+		t.Fatalf("type = %q", got.Type)
+	}
+	if got.FilePath != "/home/user/project" {
+		t.Fatalf("file_path = %q", got.FilePath)
+	}
+	if got.MediaType != "inode/directory" {
+		t.Fatalf("media_type = %q", got.MediaType)
+	}
+}

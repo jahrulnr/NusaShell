@@ -49,7 +49,6 @@ const (
 	MethodSkillsRead     = "skills.read"
 	MethodSkillsSave     = "skills.save"
 	MethodSkillsDelete   = "skills.delete"
-	MethodSkillsRun      = "skills.run"
 	MethodSkillsFileRead = "skills.file.read"
 	MethodSkillsInstall  = "skills.install"
 
@@ -123,6 +122,9 @@ const (
 	EventAskPending      = "agent.ask.pending"
 	EventAskAnswered     = "agent.ask.answered"
 	EventAskCancelled    = "agent.ask.cancelled"
+
+	EventLearningReviewStarted = "learning.review.started"
+	EventLearningReviewDone    = "learning.review.done"
 
 	EventAcpRunStarted          = "acp.run.started"
 	EventAcpRunUpdated          = "acp.run.updated"
@@ -216,6 +218,7 @@ type AttachmentDTO struct {
 	MediaType string `json:"media_type"`
 	Content   string `json:"content,omitempty"`
 	DataURL   string `json:"data_url,omitempty"`
+	FilePath  string `json:"file_path,omitempty"` // absolute path for folder/file references (desktop only)
 }
 
 type ConversationsListResult struct {
@@ -402,6 +405,15 @@ type CompactedEvent struct {
 	Summary        string `json:"summary"`
 }
 
+// LearningReviewEvent is emitted when the background learning review
+// (autolearn) starts or completes so the UI can toast the user. The
+// review is fire-and-forget; Status is "started" or "done".
+type LearningReviewEvent struct {
+	ConversationID string `json:"conversation_id"`
+	Status         string `json:"status"`           // "started" | "done"
+	Reason         string `json:"reason,omitempty"` // "threshold" | "compaction"
+}
+
 type SteerEvent struct {
 	ConversationID string `json:"conversation_id"`
 	SteerID        string `json:"steer_id,omitempty"`
@@ -527,6 +539,8 @@ type ModelDTO struct {
 	StructuredOutput bool     `json:"structured_output,omitempty"`
 	Reasoning        bool     `json:"reasoning,omitempty"`
 	Vision           bool     `json:"vision,omitempty"`
+	Audio            bool     `json:"audio,omitempty"`
+	Video            bool     `json:"video,omitempty"`
 	KnowledgeCutoff  string   `json:"knowledge_cutoff,omitempty"`
 }
 
@@ -707,6 +721,8 @@ type SkillDTO struct {
 	Category    string `json:"category,omitempty"`
 	State       string `json:"state,omitempty"`
 	Origin      string `json:"origin,omitempty"`
+	OwnedBy     string `json:"owned_by,omitempty"`
+	Shadowed    bool   `json:"shadowed,omitempty"`
 	Pinned      bool   `json:"pinned"`
 	UsageCount  int    `json:"usage_count,omitempty"`
 	LastUsedAt  string `json:"last_used_at,omitempty"`
@@ -736,6 +752,7 @@ type SkillReadResult struct {
 
 type SkillFileReadRequest struct {
 	ID       string `json:"id"`
+	OwnedBy  string `json:"owned_by,omitempty"`
 	Path     string `json:"path"`
 	Offset   int    `json:"offset,omitempty"`
 	MaxChars int    `json:"maxChars,omitempty"`
@@ -769,11 +786,8 @@ type SkillSaveRequest struct {
 }
 
 type SkillIDRequest struct {
-	ID string `json:"id"`
-}
-
-type SkillRunResult struct {
-	ConversationID string `json:"conversation_id"`
+	ID      string `json:"id"`
+	OwnedBy string `json:"owned_by,omitempty"`
 }
 
 // ---- mcp ----
@@ -1053,6 +1067,10 @@ type SettingsDTO struct {
 	EmbeddingModelID        string   `json:"embedding_model_id,omitempty"`
 	VisionProviderID        string   `json:"vision_provider_id,omitempty"`
 	VisionModelID           string   `json:"vision_model_id,omitempty"`
+	AudioProviderID         string   `json:"audio_provider_id,omitempty"`
+	AudioModelID            string   `json:"audio_model_id,omitempty"`
+	VideoProviderID         string   `json:"video_provider_id,omitempty"`
+	VideoModelID            string   `json:"video_model_id,omitempty"`
 	WebAnswerProvider       string   `json:"web_answer_provider,omitempty"`
 	WebAnswerModel          string   `json:"web_answer_model,omitempty"`
 	Temperature             *float64 `json:"temperature,omitempty"`
@@ -1079,6 +1097,10 @@ type SettingsSetRequest struct {
 	EmbeddingModelID        *string         `json:"embedding_model_id,omitempty"`
 	VisionProviderID        *string         `json:"vision_provider_id,omitempty"`
 	VisionModelID           *string         `json:"vision_model_id,omitempty"`
+	AudioProviderID         *string         `json:"audio_provider_id,omitempty"`
+	AudioModelID            *string         `json:"audio_model_id,omitempty"`
+	VideoProviderID         *string         `json:"video_provider_id,omitempty"`
+	VideoModelID            *string         `json:"video_model_id,omitempty"`
 	WebAnswerProvider       *string         `json:"web_answer_provider,omitempty"`
 	WebAnswerModel          *string         `json:"web_answer_model,omitempty"`
 	WebAnswerAPIKey         *string         `json:"web_answer_api_key,omitempty"`

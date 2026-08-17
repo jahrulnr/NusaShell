@@ -69,9 +69,9 @@ func (a *App) toolDefinitions() []ToolDef {
 	return definitions
 }
 
-func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, supportsVision bool, systemPromptSuffix string) (streamedTurnRound, error) {
+func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, caps ModelCapabilities, systemPromptSuffix string) (streamedTurnRound, error) {
 	for retry := 1; ; retry++ {
-		roundResult, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, maxTokens, injectHydration, promptCache, supportsVision, systemPromptSuffix)
+		roundResult, err := a.streamTurnRoundOnce(run, adapter, conversation, messageID, model, effort, tools, settings, continuation, maxTokens, injectHydration, promptCache, caps, systemPromptSuffix)
 		if err == nil || retry >= maxProviderAttempts || roundResult.Content != "" || roundResult.Reasoning != "" {
 			return roundResult, err
 		}
@@ -101,7 +101,7 @@ func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *do
 	}
 }
 
-func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, supportsVision bool, systemPromptSuffix string) (streamedTurnRound, error) {
+func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, caps ModelCapabilities, systemPromptSuffix string) (streamedTurnRound, error) {
 	var content strings.Builder
 	var reasoning strings.Builder
 	system := buildSystemPrompt(conversation)
@@ -135,7 +135,7 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 	// The hydration messages are marked with the "hydrate-" tool call ID
 	// prefix so the UI can filter them out of the visible conversation and
 	// compaction can strip them before summarization.
-	if injectHydration && !HasHydration(chatMessages(conversation, messageID, supportsVision)) {
+	if injectHydration && !HasHydration(chatMessages(conversation, messageID, caps)) {
 		hydrationMsgs := a.buildHydration(conversation)
 		conversation = a.persistHydration(conversation, hydrationMsgs)
 		// Mark the assistant message for this turn so the UI can show a
@@ -147,7 +147,7 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 		})
 		_ = a.Conversations.Save(conversation)
 	}
-	messages := chatMessages(conversation, messageID, supportsVision)
+	messages := chatMessages(conversation, messageID, caps)
 	// Publish a lightweight server-side context estimate (system + messages +
 	// tool definitions as actually sent) so the UI badge is not just a guess
 	// from the transcript alone — and remember it on the conversation so the
@@ -391,7 +391,7 @@ type toolExecResult struct {
 	atts   []domain.Attachment
 }
 
-func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domain.ToolCall, supportsVision bool, settings domain.Settings) error {
+func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domain.ToolCall, caps ModelCapabilities, settings domain.Settings) error {
 	if err := run.Ctx.Err(); err != nil {
 		a.interruptRemainingTools(run, messageID, toolCalls)
 		return err
@@ -411,7 +411,7 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			results[i] = a.runOneTool(run, toolCalls[i], supportsVision, settings)
+			results[i] = a.runOneTool(run, toolCalls[i], caps, settings)
 		}(i)
 	}
 	wg.Wait()
@@ -455,7 +455,7 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 // runOneTool executes a single tool call and returns its result. It emits the
 // tool-started and tool-completed events and never writes to the conversation
 // store, so it is safe to run concurrently for the tool calls of one round.
-func (a *App) runOneTool(run *TurnRun, toolCall domain.ToolCall, supportsVision bool, settings domain.Settings) toolExecResult {
+func (a *App) runOneTool(run *TurnRun, toolCall domain.ToolCall, caps ModelCapabilities, settings domain.Settings) toolExecResult {
 	a.Bus.Emit(contracts.EventToolStarted, contracts.ToolStartedEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID, Name: toolCall.Name, Args: []byte(toolCall.Args),
 	})
@@ -473,9 +473,14 @@ func (a *App) runOneTool(run *TurnRun, toolCall domain.ToolCall, supportsVision 
 	var output string
 	var outputAttachments []domain.Attachment
 	var err error
-	if toolCall.Name == "read_image" {
-		output, outputAttachments, err = a.executeReadImage(run, toolCall, supportsVision, settings)
-	} else {
+	switch toolCall.Name {
+	case "read_image":
+		output, outputAttachments, err = a.executeReadImage(run, toolCall, caps, settings)
+	case "read_audio":
+		output, outputAttachments, err = a.executeReadAudio(run, toolCall, caps, settings)
+	case "read_video":
+		output, outputAttachments, err = a.executeReadVideo(run, toolCall, caps, settings)
+	default:
 		toolCtx := WithConversationID(run.Ctx, run.ConversationID)
 		toolCtx = WithRunID(toolCtx, run.ID)
 		toolCtx = WithToolCallID(toolCtx, toolCall.ID)
@@ -627,7 +632,7 @@ func (a *App) incrementTurnCounter(conversationID string) {
 	if count < threshold {
 		return
 	}
-	a.flushLearningReview(conversationID)
+	a.flushLearningReview(conversationID, "threshold")
 }
 
 // flushLearningReview resets the turn counter for a conversation and
@@ -637,14 +642,30 @@ func (a *App) incrementTurnCounter(conversationID string) {
 // (the "global LLM") with a restricted toolset and the review
 // prompt. It is fire-and-forget — it never blocks or fails the parent
 // turn.
-func (a *App) flushLearningReview(conversationID string) {
+func (a *App) flushLearningReview(conversationID string, reason string) {
 	a.learningMu.Lock()
 	a.turnsSinceReview[conversationID] = 0
 	a.learningMu.Unlock()
 	if a.ReviewAgent == nil {
 		return
 	}
+	// Emit a toast-friendly event so the UI can surface "Autolearn spawned
+	// in background" without blocking the turn.
+	if a.Bus != nil {
+		a.Bus.Emit(contracts.EventLearningReviewStarted, contracts.LearningReviewEvent{
+			ConversationID: conversationID,
+			Status:         "started",
+			Reason:         reason,
+		})
+	}
 	a.goSafe("learning", func() {
 		a.ReviewAgent.RunReview(context.Background(), conversationID)
+		if a.Bus != nil {
+			a.Bus.Emit(contracts.EventLearningReviewDone, contracts.LearningReviewEvent{
+				ConversationID: conversationID,
+				Status:         "done",
+				Reason:         reason,
+			})
+		}
 	})
 }

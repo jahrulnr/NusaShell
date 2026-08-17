@@ -101,7 +101,7 @@ func TestExecuteReadImageVisionModel(t *testing.T) {
 		Args: filePathArgs(catPath, "what color is the cat?"),
 	}
 
-	output, atts, err := app.executeReadImage(run, toolCall, true, domain.Settings{})
+	output, atts, err := app.executeReadImage(run, toolCall, ModelCapabilities{Vision: true}, domain.Settings{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestExecuteReadImageNonVisionNoFallback(t *testing.T) {
 		Args: filePathArgs(catPath, ""),
 	}
 
-	output, atts, err := app.executeReadImage(run, toolCall, false, domain.Settings{})
+	output, atts, err := app.executeReadImage(run, toolCall, ModelCapabilities{}, domain.Settings{})
 	// No fallback configured → returns error message, no attachments
 	if err != nil {
 		t.Fatalf("expected graceful error message, not Go error: %v", err)
@@ -172,7 +172,7 @@ func TestExecuteReadImageImageNotFound(t *testing.T) {
 		Args: filePathArgs(testAbsPath(dir, "nonexistent.png"), ""),
 	}
 
-	output, _, err := app.executeReadImage(run, toolCall, true, domain.Settings{})
+	output, _, err := app.executeReadImage(run, toolCall, ModelCapabilities{Vision: true}, domain.Settings{})
 	if err == nil {
 		t.Error("expected error for nonexistent image")
 	}
@@ -192,7 +192,7 @@ func TestExecuteReadImageMissingArgs(t *testing.T) {
 		Args: `{}`,
 	}
 
-	output, _, err := app.executeReadImage(run, toolCall, true, domain.Settings{})
+	output, _, err := app.executeReadImage(run, toolCall, ModelCapabilities{Vision: true}, domain.Settings{})
 	if err == nil {
 		t.Error("expected error for missing file_path")
 	}
@@ -212,7 +212,7 @@ func TestExecuteReadImageRejectsRelativePath(t *testing.T) {
 		Args: `{"file_path":"cat.png"}`,
 	}
 
-	output, _, err := app.executeReadImage(run, toolCall, true, domain.Settings{})
+	output, _, err := app.executeReadImage(run, toolCall, ModelCapabilities{Vision: true}, domain.Settings{})
 	if err == nil {
 		t.Error("expected error for relative path")
 	}

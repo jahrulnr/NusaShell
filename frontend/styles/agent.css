@@ -195,6 +195,7 @@
 .agent-message-file { display: flex; flex: 0 1 230px; width: 230px; max-width: 100%; align-items: center; gap: 8px; padding: 10px; }
 .agent-message-file-kind { flex: none; border: 1px solid #42526a; border-radius: 5px; padding: 3px 5px; color: #a9c7ff; font: 9px var(--font-mono); }
 .agent-message-file-name { min-width: 0; overflow: hidden; color: #c6d1df; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.agent-message-file-path { display: block; min-width: 0; overflow: hidden; color: var(--text-faint); font: 9px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .agent-bubble {
   padding: 11px 13px;
   border-radius: 11px;
@@ -1048,6 +1049,7 @@
   font-size: 12px;
   color: #c98a2b;
   margin-bottom: 6px;
+}
 /* "Load older messages" sentinel pinned at the top of a windowed thread. */
 .agent-load-older {
   display: block;
@@ -1066,4 +1068,40 @@
   background: var(--accent-soft);
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* Drag & drop overlay for the conversation area */
+.agent-drop-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(88, 166, 255, 0.08);
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-md);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  animation: agent-drop-fade-in 0.12s ease;
+}
+.agent-drop-overlay-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  color: var(--accent);
+}
+.agent-drop-overlay-icon {
+  font-size: 36px;
+  line-height: 1;
+  opacity: 0.8;
+}
+.agent-drop-overlay-text {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+@keyframes agent-drop-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }

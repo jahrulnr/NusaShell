@@ -3,7 +3,7 @@
 import { rpc } from '../rpc.js';
 import { el, debounce, toast } from '../ui.js';
 
-const state = { skills: [], activeId: null, activeFile: null };
+const state = { skills: [], activeId: null, activeOwnedBy: '', activeFile: null };
 
 export async function initSkills() {
   document.getElementById('skills-search').addEventListener('input', debounce(renderList, 150));
@@ -37,9 +37,9 @@ export async function refresh() {
   document.getElementById('skills-count').textContent = `${skills.length} skill${skills.length === 1 ? '' : 's'}`;
   renderList();
   if (state.activeId) {
-    const still = skills.find((s) => s.id === state.activeId);
-    if (!still) { state.activeId = null; showEmpty(); }
-    else await selectSkill(state.activeId);
+    const still = skills.find((s) => s.id === state.activeId && (s.owned_by || '') === state.activeOwnedBy);
+    if (!still) { state.activeId = null; state.activeOwnedBy = ''; showEmpty(); }
+    else await selectSkill(state.activeId, state.activeOwnedBy);
   }
 }
 
@@ -56,29 +56,45 @@ function renderList() {
     return;
   }
   for (const s of filtered) {
+    const ownerBadge = s.owned_by && s.owned_by !== 'user'
+      ? el('span', { class: `skill-owner-badge ${s.owned_by.startsWith('plugin:') ? 'plugin' : s.owned_by}`, text: s.owned_by.replace('plugin:', '') })
+      : null;
     const item = el('button', {
-      class: `skills-list-item${s.id === state.activeId ? ' active' : ''}`,
+      class: `skills-list-item${s.id === state.activeId && (s.owned_by || '') === state.activeOwnedBy ? ' active' : ''}${s.shadowed ? ' shadowed' : ''}`,
       type: 'button',
     },
-      el('strong', { text: s.name }),
+      el('div', { class: 'skill-item-header' },
+        el('strong', { text: s.name }),
+        ownerBadge,
+      ),
       el('span', { text: s.description || 'No description' }),
       el('small', { text: `updated ${s.updated_at?.slice(0, 16).replace('T', ' ')}` }),
     );
-    item.addEventListener('click', () => selectSkill(s.id));
+    item.addEventListener('click', () => selectSkill(s.id, s.owned_by));
     list.append(item);
   }
 }
 
-async function selectSkill(id) {
+async function selectSkill(id, ownedBy) {
   state.activeId = id;
+  state.activeOwnedBy = ownedBy || '';
   state.activeFile = null;
-  const { skill } = await rpc('skills.read', { id });
+  const { skill } = await rpc('skills.read', { id, owned_by: ownedBy || undefined });
   renderList();
   document.getElementById('skill-editor-title').textContent = skill.name;
-  document.getElementById('skill-editor-meta').textContent = skill.description || '';
+  const ownerLabel = formatOwner(skill.owned_by);
+  document.getElementById('skill-editor-meta').textContent = skill.description || '' + (ownerLabel ? ` · ${ownerLabel}` : '');
   document.getElementById('skill-editor-empty').hidden = true;
   document.getElementById('skill-file-viewer').hidden = true;
   renderSkillFiles(skill.files, skill.name);
+}
+
+function formatOwner(ownedBy) {
+  if (!ownedBy) return '';
+  if (ownedBy === 'user') return 'user';
+  if (ownedBy === 'builtin') return 'builtin';
+  if (ownedBy.startsWith('plugin:')) return ownedBy;
+  return ownedBy;
 }
 
 function renderSkillFiles(files, skillName) {
@@ -122,11 +138,11 @@ async function openSkillFile(path) {
   // Re-render tree to highlight active file.
   const skill = state.skills.find((s) => s.id === state.activeId);
   if (skill) {
-    const { skill: full } = await rpc('skills.read', { id: state.activeId });
+    const { skill: full } = await rpc('skills.read', { id: state.activeId, owned_by: state.activeOwnedBy || undefined });
     renderSkillFiles(full.files, skill.name);
   }
   try {
-    const res = await rpc('skills.file.read', { id: state.activeId, path });
+    const res = await rpc('skills.file.read', { id: state.activeId, owned_by: state.activeOwnedBy || undefined, path });
     document.getElementById('skill-editor-empty').hidden = true;
     document.getElementById('skill-file-viewer').hidden = false;
     document.getElementById('skill-file-path').textContent = path;
@@ -149,6 +165,7 @@ function showEmpty() {
   const meta = document.getElementById('skill-tree-meta');
   if (meta) meta.textContent = 'No skill selected';
   state.activeFile = null;
+  state.activeOwnedBy = '';
 }
 
 // ---- Draggable splitters ----

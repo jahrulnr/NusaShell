@@ -269,7 +269,7 @@ When a user sends a steer message mid-turn, it is queued here and applied at the
 
 ## Composer
 
-The message input with attachments, model picker, workspace selector, provider status, stop, and send buttons. Ctrl+Enter (⌘↩ on Mac) sends.
+The message input with attachments, model picker, workspace selector, provider status, stop, and send buttons. Ctrl+Enter (⌘↩ on Mac) sends. The whole conversation area accepts drag & drop of files and folders — folders are attached as path-only references (desktop only).
 
 - **Composer form** (`#agent-form`):
   - Section: Agent

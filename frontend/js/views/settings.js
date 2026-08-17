@@ -4,10 +4,12 @@ import { autoReconnectEnabled, rpc, setAutoReconnect } from '../rpc.js';
 import { toast, createSelect } from '../ui.js';
 
 let bound = false;
-const state = { embeddingProviderId: '', embeddingModelId: '', visionProviderId: '', visionModelId: '', webAnswerProvider: '', webAnswerModel: '' };
+const state = { embeddingProviderId: '', embeddingModelId: '', visionProviderId: '', visionModelId: '', audioProviderId: '', audioModelId: '', videoProviderId: '', videoModelId: '', webAnswerProvider: '', webAnswerModel: '' };
 let preferredSelect;
 let embeddingSelect;
 let visionSelect;
+let audioSelect;
+let videoSelect;
 let webAnswerProviderSelect;
 
 export async function initSettings() {
@@ -27,6 +29,14 @@ export async function initSettings() {
     });
     visionSelect = createSelect(document.getElementById('settings-vision-model'), {
       placeholder: 'Disabled — non-vision models get a text placeholder instead',
+      search: true,
+    });
+    audioSelect = createSelect(document.getElementById('settings-audio-model'), {
+      placeholder: 'Disabled — non-audio models get a text placeholder instead',
+      search: true,
+    });
+    videoSelect = createSelect(document.getElementById('settings-video-model'), {
+      placeholder: 'Disabled — non-video models get a text placeholder instead',
       search: true,
     });
     webAnswerProviderSelect = createSelect(document.getElementById('settings-web-answer-provider'), {
@@ -72,6 +82,10 @@ export async function refresh() {
     state.embeddingModelId = settings.embedding_model_id ?? '';
     state.visionProviderId = settings.vision_provider_id ?? '';
     state.visionModelId = settings.vision_model_id ?? '';
+    state.audioProviderId = settings.audio_provider_id ?? '';
+    state.audioModelId = settings.audio_model_id ?? '';
+    state.videoProviderId = settings.video_provider_id ?? '';
+    state.videoModelId = settings.video_model_id ?? '';
     state.webAnswerProvider = settings.web_answer_provider ?? '';
     state.webAnswerModel = settings.web_answer_model ?? '';
     document.getElementById('settings-learning-threshold').value = settings.learning_review_threshold ?? 50;
@@ -88,6 +102,8 @@ export async function refresh() {
   renderModelOptions(allModels);
   renderEmbeddingModelOptions(allModels);
   renderVisionModelOptions(allModels);
+  renderAudioModelOptions(allModels);
+  renderVideoModelOptions(allModels);
   document.getElementById('settings-sidebar-compact').checked = localStorage.getItem('nusashell.sidebarMode') === 'icons';
   document.getElementById('settings-auto-reconnect').checked = autoReconnectEnabled();
 
@@ -154,6 +170,46 @@ function renderVisionModelOptions(models) {
   if (selected) visionSelect.setSelected([selected]);
 }
 
+function renderAudioModelOptions(models) {
+  const audioModels = models.filter((m) => m.audio === true);
+  const data = [
+    { text: 'Disabled — non-audio models get a text placeholder instead', value: '', placeholder: true },
+    ...audioModels.map((m) => {
+      const label = m.display_name || m.id;
+      const ctx = m.context ? ` ${Math.round(m.context / 1000)}K` : '';
+      return {
+        text: m.provider_name ? `${label}${ctx} · ${m.provider_name}` : `${label}${ctx}`,
+        value: `${m.provider_id}:${m.id}`,
+      };
+    }),
+  ];
+  audioSelect.setData(data);
+  const selected = state.audioProviderId && state.audioModelId
+    ? `${state.audioProviderId}:${state.audioModelId}`
+    : '';
+  if (selected) audioSelect.setSelected([selected]);
+}
+
+function renderVideoModelOptions(models) {
+  const videoModels = models.filter((m) => m.video === true);
+  const data = [
+    { text: 'Disabled — non-video models get a text placeholder instead', value: '', placeholder: true },
+    ...videoModels.map((m) => {
+      const label = m.display_name || m.id;
+      const ctx = m.context ? ` ${Math.round(m.context / 1000)}K` : '';
+      return {
+        text: m.provider_name ? `${label}${ctx} · ${m.provider_name}` : `${label}${ctx}`,
+        value: `${m.provider_id}:${m.id}`,
+      };
+    }),
+  ];
+  videoSelect.setData(data);
+  const selected = state.videoProviderId && state.videoModelId
+    ? `${state.videoProviderId}:${state.videoModelId}`
+    : '';
+  if (selected) videoSelect.setSelected([selected]);
+}
+
 // splitProviderModel splits a "providerId:modelId" select value on the first
 // colon only, so model IDs that contain colons (e.g. Ollama's
 // "nomic-embed-text:latest") are preserved intact.
@@ -212,6 +268,10 @@ async function save() {
     const { providerId: embProviderId, modelId: embModelId } = splitProviderModel(embeddingValue);
     const visionValue = visionSelect.getSelected()?.[0] ?? '';
     const { providerId: visProviderId, modelId: visModelId } = splitProviderModel(visionValue);
+    const audioValue = audioSelect.getSelected()?.[0] ?? '';
+    const { providerId: audProviderId, modelId: audModelId } = splitProviderModel(audioValue);
+    const videoValue = videoSelect.getSelected()?.[0] ?? '';
+    const { providerId: vidProviderId, modelId: vidModelId } = splitProviderModel(videoValue);
     const learningThreshold = Number(document.getElementById('settings-learning-threshold').value);
     if (!Number.isInteger(learningThreshold) || learningThreshold < 0 || learningThreshold > 1000) {
       setStatus('Learning review threshold must be between 0 and 1,000.', true);
@@ -236,6 +296,10 @@ async function save() {
       embedding_model_id: embModelId || null,
       vision_provider_id: visProviderId || null,
       vision_model_id: visModelId || null,
+      audio_provider_id: audProviderId || null,
+      audio_model_id: audModelId || null,
+      video_provider_id: vidProviderId || null,
+      video_model_id: vidModelId || null,
       web_answer_provider: webAnswerProvider || null,
       web_answer_model: webAnswerModel || null,
       web_answer_api_key: webAnswerAPIKey || null,

@@ -22,7 +22,7 @@ func TestChatMessagesStripsImagesForNonVisionModel(t *testing.T) {
 	}}
 
 	// Non-vision model: image stripped, text attachment kept, placeholder added
-	got := chatMessages(c, "", false)
+	got := chatMessages(c, "", ModelCapabilities{})
 	if len(got) != 2 {
 		t.Fatalf("got %d messages, want 2", len(got))
 	}
@@ -74,7 +74,7 @@ func TestChatMessagesPlaceholderIncludesFilePath(t *testing.T) {
 		{ID: "a1", Role: domain.RoleAssistant, Content: "ok", Status: domain.StatusDone},
 	}}
 
-	got := chatMessages(c, "", false)
+	got := chatMessages(c, "", ModelCapabilities{})
 	userMsg := got[0]
 	// The placeholder must include the absolute file path so file-based
 	// tools can access the image directly.
@@ -97,7 +97,7 @@ func TestChatMessagesKeepsImagesForVisionModel(t *testing.T) {
 	}}
 
 	// Vision model: image kept, no placeholder
-	got := chatMessages(c, "", true)
+	got := chatMessages(c, "", ModelCapabilities{Vision: true})
 	if len(got) != 2 {
 		t.Fatalf("got %d messages, want 2", len(got))
 	}
@@ -133,7 +133,7 @@ func TestChatMessagesStripsImagesFromHistoryWhenSwitchingModel(t *testing.T) {
 	}}
 
 	// Non-vision model: image from u1 stripped, but assistant response a1 preserved
-	got := chatMessages(c, "", false)
+	got := chatMessages(c, "", ModelCapabilities{})
 	if len(got) != 3 {
 		t.Fatalf("got %d messages, want 3", len(got))
 	}

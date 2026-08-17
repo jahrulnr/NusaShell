@@ -180,3 +180,21 @@
   .skills-tree-pane,
   .skills-splitter { display: none; }
 }
+
+/* Owner badge + shadowed skill */
+.skill-item-header { display: flex; align-items: center; gap: 6px; }
+.skill-owner-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font: 8.5px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: #142238;
+  color: #63a5ff;
+  flex: none;
+}
+.skill-owner-badge.plugin { background: #0e2a1e; color: #4ade80; }
+.skill-owner-badge.builtin { background: #2a2a3a; color: #a5b4fc; }
+.skills-list-item.shadowed { opacity: 0.55; }
+.skills-list-item.shadowed .skill-owner-badge { opacity: 1; }

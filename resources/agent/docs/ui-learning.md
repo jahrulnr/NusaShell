@@ -36,7 +36,7 @@ Hybrid search across memory and skills, with a kind filter (All, Skills, Memory)
 
 ## Results
 
-Ranked search results with a count. With an empty query the pane lists all skills and memories so content is visible immediately.
+Ranked search results with a count. With an empty query the pane lists all skills and memories so content is visible immediately. Memory entries have a delete button (×) that opens a confirm dialog and calls memory.delete. Long content is collapsed to 3 lines; click to expand.
 
 - **Results** (`#learning-results`):
   - Section: Learning
@@ -45,6 +45,12 @@ Ranked search results with a count. With an empty query the pane lists all skill
 - **Results count** (`#learning-results-count`):
   - Section: Learning
   - Type: text
+
+## Splitter
+
+Draggable splitter between the results pane and the graph pane. Drag to resize the results pane width; the width persists to localStorage.
+
+- **`#learning-splitter`** (missing map entry)
 
 ## Knowledge graph
 

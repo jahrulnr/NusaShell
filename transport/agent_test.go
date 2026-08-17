@@ -968,7 +968,7 @@ func TestAgentTurnToolFailure(t *testing.T) {
 	convID := h.newConversation(t)
 
 	h.llm.setRounds([][]llmStep{
-		{{Tool: &llmToolCall{ID: "call_bad", Name: "skill_run", Args: map[string]any{"name": "missing-skill"}}}},
+		{{Tool: &llmToolCall{ID: "call_bad", Name: "skill_read", Args: map[string]any{"name": "missing-skill"}}}},
 		{{Text: "done despite failure"}},
 	})
 	h.rpcOK(t, "agent.turns.start", map[string]any{
@@ -994,7 +994,7 @@ func TestAgentTurnToolFailure(t *testing.T) {
 	found := false
 	for _, m := range conv.Messages {
 		for _, tc := range m.ToolCalls {
-			if tc.Name != "skill_run" {
+			if tc.Name != "skill_read" {
 				continue
 			}
 			found = true

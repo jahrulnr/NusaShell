@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -51,6 +52,7 @@ func skillDTO(s *domain.Skill) contracts.SkillDTO {
 		Category:    s.Category,
 		State:       string(s.State),
 		Origin:      string(s.Origin),
+		OwnedBy:     s.EffectiveOwnedBy(),
 		Pinned:      s.Pinned,
 		UsageCount:  s.UsageCount,
 		UpdatedAt:   s.UpdatedAt.Format(timeRFC3339),
@@ -67,22 +69,49 @@ func skillDTO(s *domain.Skill) contracts.SkillDTO {
 	return dto
 }
 
+// skillDTOsWithShadow marks skills that are shadowed by a higher-priority
+// skill with the same ID. Priority: user > builtin > plugin.
+func skillDTOsWithShadow(skills []*domain.Skill) []contracts.SkillDTO {
+	// Group by ID to detect collisions.
+	byID := make(map[string][]*domain.Skill)
+	for _, s := range skills {
+		byID[s.ID] = append(byID[s.ID], s)
+	}
+	out := make([]contracts.SkillDTO, 0, len(skills))
+	for _, s := range skills {
+		dto := skillDTO(s)
+		// If there are multiple skills with this ID, mark lower-priority
+		// ones as shadowed.
+		if candidates := byID[s.ID]; len(candidates) > 1 {
+			// Find the highest priority owner.
+			bestPriority := domain.SkillOwnerPriority(s.EffectiveOwnedBy())
+			for _, c := range candidates {
+				if p := domain.SkillOwnerPriority(c.EffectiveOwnedBy()); p < bestPriority {
+					bestPriority = p
+				}
+			}
+			if domain.SkillOwnerPriority(s.EffectiveOwnedBy()) > bestPriority {
+				dto.Shadowed = true
+			}
+		}
+		out = append(out, dto)
+	}
+	return out
+}
+
 func (a *App) handleSkillsList() (any, *contracts.RPCError) {
 	list := a.Skills.List()
-	out := make([]contracts.SkillDTO, 0, len(list))
-	for _, s := range list {
-		out = append(out, skillDTO(s))
-	}
+	out := skillDTOsWithShadow(list)
 	return contracts.SkillsListResult{Skills: out}, nil
 }
 
 func (a *App) handleSkillsRead(req contracts.SkillIDRequest) (any, *contracts.RPCError) {
-	s, err := a.Skills.Get(req.ID)
+	s, err := a.Skills.Get(req.ID, req.OwnedBy)
 	if err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 	}
 	full := contracts.SkillFull{SkillDTO: skillDTO(s), Content: s.Content}
-	if files, ferr := a.Skills.Files(req.ID); ferr == nil {
+	if files, ferr := a.Skills.Files(req.ID, req.OwnedBy); ferr == nil {
 		for _, f := range files {
 			full.Files = append(full.Files, contracts.SkillFileDTO{
 				Path: f.Path, Type: f.Type, SizeBytes: f.SizeBytes, Editable: f.Editable,
@@ -100,7 +129,7 @@ func (a *App) handleSkillsFileRead(req contracts.SkillFileReadRequest) (any, *co
 	if maxChars <= 0 {
 		maxChars = 200_000
 	}
-	f, err := a.Skills.ReadFile(req.ID, req.Path, req.Offset, maxChars)
+	f, err := a.Skills.ReadFile(req.ID, req.OwnedBy, req.Path, req.Offset, maxChars)
 	if err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 	}
@@ -124,7 +153,7 @@ func (a *App) handleSkillsInstall(req contracts.SkillInstallRequest) (any, *cont
 	if err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: err.Error()}
 	}
-	skill, _ := a.Skills.Get(id)
+	skill, _ := a.Skills.Get(id, "")
 	name := id
 	if skill != nil {
 		name = skill.Name
@@ -143,7 +172,7 @@ func (a *App) handleSkillsSave(req contracts.SkillSaveRequest) (any, *contracts.
 	}
 	var s *domain.Skill
 	if req.ID != "" {
-		existing, err := a.Skills.Get(req.ID)
+		existing, err := a.Skills.Get(req.ID, "")
 		if err != nil {
 			return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 		}
@@ -167,34 +196,14 @@ func (a *App) handleSkillsSave(req contracts.SkillSaveRequest) (any, *contracts.
 }
 
 func (a *App) handleSkillsDelete(req contracts.SkillIDRequest) (any, *contracts.RPCError) {
-	if _, err := a.Skills.Get(req.ID); err != nil {
+	if _, err := a.Skills.Get(req.ID, req.OwnedBy); err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 	}
-	if err := a.Skills.Delete(req.ID); err != nil {
+	if err := a.Skills.Delete(req.ID, req.OwnedBy); err != nil {
 		return nil, rpcInternal(err)
 	}
 	a.log("info", "skills", "skill deleted: %s", req.ID)
 	return map[string]bool{"ok": true}, nil
-}
-
-// handleSkillsRun opens a new conversation primed with the skill instructions.
-func (a *App) handleSkillsRun(req contracts.SkillIDRequest) (any, *contracts.RPCError) {
-	s, err := a.Skills.Get(req.ID)
-	if err != nil {
-		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
-	}
-	c := domain.NewConversation(domain.NewID("conv"), "Skill: "+s.Name)
-	c.AddMessage(domain.Message{
-		ID:        domain.NewID("msg"),
-		Role:      domain.RoleSystem,
-		Content:   s.Content,
-		CreatedAt: time.Now().UTC(),
-		Status:    domain.StatusDone,
-	})
-	if err := a.Conversations.Save(c); err != nil {
-		return nil, rpcInternal(err)
-	}
-	return contracts.SkillRunResult{ConversationID: c.ID}, nil
 }
 
 // ---- plugins (MCP servers + MCP+UI plugins) ----
@@ -313,6 +322,13 @@ func (a *App) handlePluginInstall(req contracts.PluginInstallRequest) (any, *con
 
 	dto := pluginToDTO(plugin)
 	a.MCPToolbox.Drop(plugin.Manifest.MCPServerID())
+	// Mount any skills bundled with the plugin (skills/ directory).
+	if a.Skills != nil {
+		skillsDir := filepath.Join(plugin.InstallPath, "skills")
+		if err := a.Skills.MountPluginSkills(plugin.Manifest.ID, skillsDir); err != nil {
+			a.log("warn", "plugin", "skill mount failed for %s: %v", plugin.Manifest.ID, err)
+		}
+	}
 	a.log("info", "plugin", "plugin installed: %s v%s", plugin.Manifest.Name, plugin.Manifest.Version)
 	return contracts.PluginInstallResult{Plugin: &dto}, nil
 }
@@ -421,6 +437,12 @@ func (a *App) handlePluginDelete(req contracts.PluginIDRequest) (any, *contracts
 	}
 	if _, err := a.Plugins.Get(req.ID); err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
+	}
+	// Unmount plugin skills before deleting the plugin directory.
+	if a.Skills != nil {
+		if err := a.Skills.UnmountPluginSkills(req.ID); err != nil {
+			a.log("warn", "plugin", "skill unmount failed for %s: %v", req.ID, err)
+		}
 	}
 	if err := a.Plugins.Delete(req.ID); err != nil {
 		return nil, rpcInternal(err)
@@ -694,7 +716,7 @@ func (a *App) handleLearningSearch(req contracts.LearningSearchRequest) (any, *c
 					ID:      sk.ID,
 					Kind:    "skill",
 					Name:    sk.Name,
-					Content: truncate(sk.Content, 200),
+					Content: sk.Content,
 				})
 			}
 		}
@@ -703,7 +725,7 @@ func (a *App) handleLearningSearch(req contracts.LearningSearchRequest) (any, *c
 				items = append(items, contracts.LearningSearchResultItem{
 					ID:      mem.ID,
 					Kind:    "memory",
-					Content: truncate(mem.Content, 200),
+					Content: mem.Content,
 				})
 			}
 		}
@@ -722,7 +744,7 @@ func (a *App) handleLearningSearch(req contracts.LearningSearchRequest) (any, *c
 		results, err := searcher.SearchSkills(ctx, query, limit)
 		if err == nil {
 			for _, r := range results {
-				s, err := a.Skills.Get(r.ID)
+				s, err := a.Skills.Get(r.ID, "")
 				if err != nil {
 					continue
 				}
@@ -730,7 +752,7 @@ func (a *App) handleLearningSearch(req contracts.LearningSearchRequest) (any, *c
 					ID:      s.ID,
 					Kind:    "skill",
 					Name:    s.Name,
-					Content: truncate(s.Content, 200),
+					Content: s.Content,
 					Score:   float32(r.Score),
 				})
 			}
@@ -753,7 +775,7 @@ func (a *App) handleLearningSearch(req contracts.LearningSearchRequest) (any, *c
 				items = append(items, contracts.LearningSearchResultItem{
 					ID:      r.ID,
 					Kind:    "memory",
-					Content: truncate(content, 200),
+					Content: content,
 					Score:   float32(r.Score),
 				})
 			}
@@ -773,13 +795,6 @@ func (a *App) handleLearningSearch(req contracts.LearningSearchRequest) (any, *c
 		})
 	}
 	return contracts.LearningSearchResult{Items: items}, nil
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
 }
 
 // handleLearningGraph returns the full learning graph (nodes + edges)
@@ -1008,6 +1023,18 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	if req.VisionModelID != nil {
 		s.VisionModelID = strings.TrimSpace(*req.VisionModelID)
 	}
+	if req.AudioProviderID != nil {
+		s.AudioProviderID = strings.TrimSpace(*req.AudioProviderID)
+	}
+	if req.AudioModelID != nil {
+		s.AudioModelID = strings.TrimSpace(*req.AudioModelID)
+	}
+	if req.VideoProviderID != nil {
+		s.VideoProviderID = strings.TrimSpace(*req.VideoProviderID)
+	}
+	if req.VideoModelID != nil {
+		s.VideoModelID = strings.TrimSpace(*req.VideoModelID)
+	}
 	if req.WebAnswerProvider != nil {
 		s.WebAnswerProvider = strings.TrimSpace(*req.WebAnswerProvider)
 	}
@@ -1059,6 +1086,10 @@ func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 		EmbeddingModelID:        s.EmbeddingModelID,
 		VisionProviderID:        s.VisionProviderID,
 		VisionModelID:           s.VisionModelID,
+		AudioProviderID:         s.AudioProviderID,
+		AudioModelID:            s.AudioModelID,
+		VideoProviderID:         s.VideoProviderID,
+		VideoModelID:            s.VideoModelID,
 		WebAnswerProvider:       s.WebAnswerProvider,
 		WebAnswerModel:          s.WebAnswerModel,
 		Temperature:             s.Temperature,

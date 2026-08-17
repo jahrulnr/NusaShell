@@ -125,7 +125,7 @@ func msgDTO(m domain.Message) contracts.MessageDTO {
 	for _, attachment := range m.Attachments {
 		dto.Attachments = append(dto.Attachments, contracts.AttachmentDTO{
 			Type: attachment.Type, Name: attachment.Name, MediaType: attachment.MediaType,
-			Content: attachment.Content, DataURL: attachment.DataURL,
+			Content: attachment.Content, DataURL: attachment.DataURL, FilePath: attachment.FilePath,
 		})
 	}
 	for _, s := range m.Steps {

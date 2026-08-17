@@ -153,6 +153,12 @@ async function boot() {
     const entry = payload?.entry ?? payload;
     if (entry?.level === 'error') toast(entry.message, 'error', 5000);
   });
+  on('learning.review.started', () => {
+    toast('Autolearn spawned in background.', 'info', 3500);
+  });
+  on('learning.review.done', () => {
+    toast('Autolearn finished.', 'success', 2500);
+  });
 
   try {
     const info = await rpc('app.info', {}, { timeoutMs: 4000 });

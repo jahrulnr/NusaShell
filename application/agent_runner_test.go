@@ -52,7 +52,7 @@ func TestChatMessagesKeepsReasoningOnlyAssistantTurns(t *testing.T) {
 		{ID: "a1", Role: domain.RoleAssistant, Reasoning: "thinking", Status: domain.StatusDone},
 		{ID: "pending", Role: domain.RoleAssistant},
 	}}
-	got := chatMessages(c, "pending", true)
+	got := chatMessages(c, "pending", ModelCapabilities{Vision: true})
 	if len(got) != 2 {
 		t.Fatalf("got %d messages, want user + reasoning-only assistant", len(got))
 	}
@@ -162,7 +162,7 @@ func TestExecuteTurnToolsStopsOnCancel(t *testing.T) {
 		Toolbox:       box,
 	}
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
-	if err := app.executeTurnTools(run, "m1", conv.Messages[0].ToolCalls, true, domain.Settings{}); err == nil {
+	if err := app.executeTurnTools(run, "m1", conv.Messages[0].ToolCalls, ModelCapabilities{Vision: true}, domain.Settings{}); err == nil {
 		t.Fatal("want context error")
 	}
 	if len(box.names) != 0 {
@@ -217,7 +217,7 @@ func TestRunTurnFailsWhenAllCodexAccountsBlocked(t *testing.T) {
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	provider := &domain.Provider{ID: "prov", Kind: domain.ProviderCodex}
 
-	app.runTurn(run, provider, "active-token", "gpt-5.3-codex", "", "m1", false, true, "")
+	app.runTurn(run, provider, "active-token", "gpt-5.3-codex", "", "m1", false, ModelCapabilities{Vision: true}, "")
 
 	if factoryCalled {
 		t.Fatal("factory must not run when every Codex account is blocked")

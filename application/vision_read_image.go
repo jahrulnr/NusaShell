@@ -17,7 +17,7 @@ import (
 //     image via the vision fallback model and returns the text description.
 //   - No fallback (non-vision model, no fallback): returns an error message
 //     explaining that the model cannot see images and no fallback is configured.
-func (a *App) executeReadImage(run *TurnRun, toolCall domain.ToolCall, supportsVision bool, settings domain.Settings) (string, []domain.Attachment, error) {
+func (a *App) executeReadImage(run *TurnRun, toolCall domain.ToolCall, caps ModelCapabilities, settings domain.Settings) (string, []domain.Attachment, error) {
 	var args struct {
 		FilePath string `json:"file_path"`
 		Question string `json:"question"`
@@ -44,7 +44,7 @@ func (a *App) executeReadImage(run *TurnRun, toolCall domain.ToolCall, supportsV
 	}
 
 	// Native fast path: vision model gets the image directly.
-	if supportsVision {
+	if caps.Vision {
 		question := strings.TrimSpace(args.Question)
 		summary := "Image loaded into your context."
 		if image.FilePath != "" {

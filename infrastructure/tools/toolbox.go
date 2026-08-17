@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -100,7 +101,6 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "skill_search", Description: "Search installed skills by name or description (case-insensitive substring match).", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 50")), "query")},
 		{Name: "skill_read", Description: "Read a text file inside an installed skill (default SKILL.md). Pass path for support files (e.g. references/x.md) and offset/max_chars for pagination of long files.", InputSchema: obj("object", props("name", str("Skill id (from skill_list or skill_search)"), "path", str("Relative file path inside the skill folder; defaults to SKILL.md"), "offset", intSchema("Character offset for pagination (default 0)"), "max_chars", intSchema("Maximum characters to return (default 20000, max 100000)")), "name")},
 		{Name: "skill_save", Description: "Create or update a skill. When id is omitted a new skill is created; otherwise the existing skill with that id is updated. Skills should be reusable procedures or domain knowledge, not one-off task notes.", InputSchema: obj("object", props("id", str("Existing skill id to update (omit to create new)"), "name", str("Skill name (lowercase with hyphens, matches folder name)"), "description", str("Short description (max 1024 chars)"), "content", str("Full skill markdown content")), "name", "description", "content")},
-		{Name: "skill_run", Description: "Load a skill's markdown instructions by skill name so you can follow them.", InputSchema: obj("object", props("name", str("Skill name to load")), "name")},
 		{Name: "skill_files", Description: "List the files inside an installed skill folder (SKILL.md + support files) with size and editability, to discover references/guides before skill_read.", InputSchema: obj("object", props("name", str("Skill id")), "name")},
 		{Name: "memory_save", Description: "Save a fact to long-term memory with optional tags.", InputSchema: obj("object", props("content", str("Fact to remember"), "tags", arr("Optional tags")), "content")},
 		{Name: "memory_search", Description: "Search memory entries by substring match over content and tags.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 10")), "query")},
@@ -138,6 +138,8 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "mcp_install", Description: "Install an MCP plugin from the curated catalog or a GitHub repository (owner/repo or URL). After install, call mcp_enable with the resulting plugin id to connect and load its tools.", InputSchema: obj("object", props("source", strEnum("Install source", "catalog", "github"), "id", str("Catalog plugin id (required when source=catalog)"), "url", str("GitHub repo URL or owner/repo shorthand (required when source=github)"), "subdir", str("Optional subdirectory inside a monorepo (github)"), "ref", str("Optional branch or tag to pin (github)")), "source")},
 		{Name: "mcp_server_add", Description: "Register a manual MCP server (no manifest needed) by command/args/env — e.g. npx servers. Use for generic MCP servers; use mcp_register for NusaShell plugin folders. After adding, call mcp_enable with the server id to connect and load its tools.", InputSchema: obj("object", props("name", str("Human-readable server name"), "command", str("Command to launch the server (e.g. npx, node, python)"), "args", arr("Arguments (e.g. -y @modelcontextprotocol/server-github)"), "env", obj("object", props("additional", str("KEY=VALUE entries")), "additional"), "id", str("Optional stable id (default auto-generated)")), "name", "command")},
 		{Name: "read_image", Description: "Load an image from the conversation into your context so you can see it. Pass file_path (the absolute path shown in the image placeholder). When your active model supports vision, the image is attached to your context directly. For non-vision models, the image is described using a vision fallback model and the text description is returned.", InputSchema: obj("object", props("file_path", str("Absolute path of the image file on disk (shown in the image placeholder)"), "question", str("Optional question about the image")), "file_path")},
+		{Name: "read_audio", Description: "Load an audio file from the conversation into your context so you can hear it. Pass file_path (the absolute path shown in the audio placeholder). When your active model supports audio input, the audio is attached to your context directly. For non-audio models, the audio is transcribed/described using an audio fallback model and the text transcript is returned.", InputSchema: obj("object", props("file_path", str("Absolute path of the audio file on disk"), "question", str("Optional question about the audio")), "file_path")},
+		{Name: "read_video", Description: "Load a video file from the conversation into your context so you can see it. Pass file_path (the absolute path shown in the video placeholder). When your active model supports video input, the video is attached to your context directly. For non-video models, the video is described using a video fallback model and the text description is returned.", InputSchema: obj("object", props("file_path", str("Absolute path of the video file on disk"), "question", str("Optional question about the video")), "file_path")},
 		{Name: "web_search", Description: "Search the web for fresh information. Returns ranked results with title, URL, and snippet from multiple sources (Brave, Startpage, Wikipedia, GitHub). Use this when you need current information, documentation, or research. Follow up with web_fetch on promising URLs for full page content.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results (default 10)")), "query")},
 		{Name: "web_fetch", Description: "Fetch a URL and return readable text (HTML stripped to title + visible text). Use after web_search to read full page content from a result URL. Accepts http/https only.", InputSchema: obj("object", props("url", str("URL to fetch"), "max_bytes", intSchema("Optional max bytes of extracted text (default 2MB)")), "url")},
 	}
@@ -271,9 +273,9 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", fmt.Errorf("name is required (use skill_list to see available skills)")
 		}
 		if r, ok := t.Skills.(interface {
-			ReadFile(id, path string, offset, maxChars int) (*domain.SkillFile, error)
+			ReadFile(id, ownedBy, path string, offset, maxChars int) (*domain.SkillFile, error)
 		}); ok {
-			file, err := r.ReadFile(args.Name, args.Path, args.Offset, args.MaxChars)
+			file, err := r.ReadFile(args.Name, "", args.Path, args.Offset, args.MaxChars)
 			if err != nil {
 				// Legacy stores without real skill folders report unsupported;
 				// fall back to SKILL.md Content so old behavior is preserved.
@@ -318,9 +320,9 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", fmt.Errorf("name is required")
 		}
 		if f, ok := t.Skills.(interface {
-			Files(id string) ([]domain.SkillFileEntry, error)
+			Files(id, ownedBy string) ([]domain.SkillFileEntry, error)
 		}); ok {
-			entries, err := f.Files(args.Name)
+			entries, err := f.Files(args.Name, "")
 			if err != nil {
 				msg := err.Error()
 				if strings.Contains(msg, "not supported") || strings.Contains(msg, "unsupported") {
@@ -347,20 +349,6 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		}
 		return "", fmt.Errorf("skill store does not support file listing")
 
-	case name == "skill_run":
-		var args struct {
-			Name string `json:"name"`
-		}
-		if err := json.Unmarshal(argsJSON, &args); err != nil {
-			return "", fmt.Errorf("invalid args: %w", err)
-		}
-		for _, s := range t.Skills.List() {
-			if s.Name == args.Name {
-				return fmt.Sprintf("Skill %q loaded. Follow these instructions:\n\n%s", s.Name, s.Content), nil
-			}
-		}
-		return "", fmt.Errorf("skill %q not found; use skill_list to see available skills", args.Name)
-
 	case name == "skill_save":
 		var args struct {
 			ID          string `json:"id"`
@@ -380,7 +368,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		}
 		var s *domain.Skill
 		if args.ID != "" {
-			existing, err := t.Skills.Get(args.ID)
+			existing, err := t.Skills.Get(args.ID, "")
 			if err != nil {
 				return "", fmt.Errorf("skill %q not found: %w", args.ID, err)
 			}
@@ -412,7 +400,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if strings.TrimSpace(args.Content) == "" {
 			return "", fmt.Errorf("content is required")
 		}
-		e := &domain.MemoryEntry{ID: domain.NewID("mem"), Content: args.Content, Tags: args.Tags, CreatedAt: time.Now().UTC()}
+		e := &domain.MemoryEntry{ID: domain.NewID("mem"), Content: args.Content, Tags: args.Tags, Source: "agent", CreatedAt: time.Now().UTC()}
 		if err := t.Memory.Save(e); err != nil {
 			return "", err
 		}
@@ -430,14 +418,16 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if limit <= 0 {
 			limit = 10
 		}
+		entries := t.Memory.List()
+		sort.Slice(entries, func(i, j int) bool { return entries[i].CreatedAt.After(entries[j].CreatedAt) })
 		var sb strings.Builder
 		q := strings.ToLower(args.Query)
 		found := 0
-		for _, e := range t.Memory.List() {
+		for _, e := range entries {
 			if !strings.Contains(strings.ToLower(e.Content+" "+strings.Join(e.Tags, " ")), q) {
 				continue
 			}
-			sb.WriteString(fmt.Sprintf("- [%s] %s\n", e.ID, e.Content))
+			sb.WriteString(formatMemoryEntry(e))
 			found++
 			if found >= limit {
 				break
@@ -449,9 +439,11 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		return strings.TrimSpace(sb.String()), nil
 
 	case name == "memory_list":
+		entries := t.Memory.List()
+		sort.Slice(entries, func(i, j int) bool { return entries[i].CreatedAt.After(entries[j].CreatedAt) })
 		var sb strings.Builder
-		for _, e := range t.Memory.List() {
-			sb.WriteString(fmt.Sprintf("- [%s] %s\n", e.ID, e.Content))
+		for _, e := range entries {
+			sb.WriteString(formatMemoryEntry(e))
 		}
 		if sb.Len() == 0 {
 			return "No memory entries.", nil
@@ -1415,4 +1407,21 @@ func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON [
 	default:
 		return "", false, nil
 	}
+}
+
+// formatMemoryEntry renders one memory entry for agent tool output. It
+// surfaces id, created_at (RFC3339), source, tags, and content so the
+// agent can reason about recency, provenance, and clustering — not just
+// the raw text. Entries are listed newest-first by the callers.
+func formatMemoryEntry(e *domain.MemoryEntry) string {
+	ts := e.CreatedAt.UTC().Format(time.RFC3339)
+	source := e.Source
+	if source == "" {
+		source = "user"
+	}
+	tags := ""
+	if len(e.Tags) > 0 {
+		tags = " tags:" + strings.Join(e.Tags, ",")
+	}
+	return fmt.Sprintf("- [%s] (%s, %s%s) %s\n", e.ID, ts, source, tags, e.Content)
 }

@@ -645,28 +645,6 @@ func TestSkillLifecycle(t *testing.T) {
 		t.Fatalf("update changed id: %s != %s", upd.Skill.ID, sid)
 	}
 
-	// run creates a conversation primed with the skill
-	ran := h.rpcOK(t, "skills.run", map[string]any{"id": sid})
-	var run struct {
-		ConversationID string `json:"conversation_id"`
-	}
-	if err := json.Unmarshal(ran.Result, &run); err != nil || run.ConversationID == "" {
-		t.Fatalf("skills.run = %+v (%s)", run, ran.Result)
-	}
-	gotten := h.rpcOK(t, "agent.conversations.get", map[string]any{"id": run.ConversationID})
-	var get struct {
-		Messages []struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		} `json:"messages"`
-	}
-	if err := json.Unmarshal(gotten.Result, &get); err != nil {
-		t.Fatal(err)
-	}
-	if len(get.Messages) != 1 || get.Messages[0].Role != "system" || get.Messages[0].Content != "v2" {
-		t.Fatalf("skill-run conversation messages = %+v", get.Messages)
-	}
-
 	h.rpcOK(t, "skills.delete", map[string]any{"id": sid})
 	res = h.rpc(t, "skills.read", map[string]any{"id": sid})
 	if res.OK || res.Error == nil || res.Error.Code != "NOT_FOUND" {

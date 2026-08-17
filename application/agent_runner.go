@@ -86,7 +86,7 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 	a.runsMu.Unlock()
 
 	a.goSafe("agent", func() {
-		a.runTurn(run, provider, apiKey, bareModel, req.Effort, asstMsg.ID, false, modelSupportsVision(provider, bareModel), "")
+		a.runTurn(run, provider, apiKey, bareModel, req.Effort, asstMsg.ID, false, modelCapabilities(provider, bareModel), "")
 	})
 	a.log("info", "agent", "turn started: %s (model %s)", run.ID, bareModel)
 	return contracts.TurnStartResult{RunID: run.ID}, nil
@@ -167,7 +167,7 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 	a.runsMu.Unlock()
 
 	a.goSafe("agent", func() {
-		a.runTurn(run, provider, apiKey, bareModel, req.Effort, targetMsgID, continuation, modelSupportsVision(provider, bareModel), "")
+		a.runTurn(run, provider, apiKey, bareModel, req.Effort, targetMsgID, continuation, modelCapabilities(provider, bareModel), "")
 	})
 	a.log("info", "agent", "turn retried: %s (model %s)", run.ID, bareModel)
 	return contracts.TurnStartResult{RunID: run.ID}, nil
@@ -377,7 +377,7 @@ func (a *App) handleTurnsCancelSteer(req contracts.TurnCancelSteerRequest) (any,
 	return map[string]any{"ok": true, "accepted": true}, nil
 }
 
-func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, supportsVision bool, systemPromptSuffix string) {
+func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, caps ModelCapabilities, systemPromptSuffix string) {
 	defer func() {
 		run.Cancel()
 		// Reject any pending ask_question calls for this run so the
@@ -389,7 +389,7 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 		delete(a.runs, run.ID)
 		a.runsMu.Unlock()
 	}()
-	a.runTurnChain(run, provider, apiKey, model, effort, asstMsgID, initialContinuation, supportsVision, systemPromptSuffix, 0)
+	a.runTurnChain(run, provider, apiKey, model, effort, asstMsgID, initialContinuation, caps, systemPromptSuffix, 0)
 }
 
 // runTurnChain executes the turn and, on success, checks the auto-continue
@@ -402,7 +402,7 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 //   - the chain budget is exhausted
 //   - the user stops the turn, sends a message, or switches conversations
 //     (detected via run.Ctx cancellation)
-func (a *App) runTurnChain(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, supportsVision bool, systemPromptSuffix string, autoContinueIndex int) {
+func (a *App) runTurnChain(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, caps ModelCapabilities, systemPromptSuffix string, autoContinueIndex int) {
 	chainModel := model
 	chainEffort := effort
 	chainAsstMsgID := asstMsgID
@@ -410,7 +410,7 @@ func (a *App) runTurnChain(run *TurnRun, provider *domain.Provider, apiKey, mode
 	chainSuffix := systemPromptSuffix
 	chainIndex := autoContinueIndex
 	for {
-		shouldContinue, nextAsstMsgID := a.runSingleTurn(run, provider, apiKey, chainModel, chainEffort, chainAsstMsgID, chainContinuation, supportsVision, chainSuffix, chainIndex)
+		shouldContinue, nextAsstMsgID := a.runSingleTurn(run, provider, apiKey, chainModel, chainEffort, chainAsstMsgID, chainContinuation, caps, chainSuffix, chainIndex)
 		if !shouldContinue {
 			return
 		}
@@ -437,7 +437,7 @@ func (a *App) runTurnChain(run *TurnRun, provider *domain.Provider, apiKey, mode
 // (shouldAutoContinue, nextAssistantMessageID). The shouldAutoContinue flag
 // is true only when the turn succeeded and the auto-continue policy says
 // the chain should continue.
-func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, supportsVision bool, systemPromptSuffix string, autoContinueIndex int) (bool, string) {
+func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, model, effort, asstMsgID string, initialContinuation bool, caps ModelCapabilities, systemPromptSuffix string, autoContinueIndex int) (bool, string) {
 
 	// Codex sticky account: pick the account bound to this conversation
 	// so the Codex backend can reuse the prompt cache shard. If every
@@ -468,8 +468,16 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 	// describe each image via the fallback and inject the description as
 	// a text attachment on the latest user message. The original image is
 	// preserved so a later switch to a vision model can still see it.
-	if !supportsVision && settings.VisionProviderID != "" && settings.VisionModelID != "" {
+	if !caps.Vision && settings.VisionProviderID != "" && settings.VisionModelID != "" {
 		conversation = a.enrichWithVisionDescriptions(run.Ctx, conversation, asstMsgID, settings)
+	}
+	// Audio fallback: same proactive enrichment for audio attachments.
+	if !caps.Audio && settings.AudioProviderID != "" && settings.AudioModelID != "" {
+		conversation = a.enrichWithAudioDescriptions(run.Ctx, conversation, asstMsgID, settings)
+	}
+	// Video fallback: same proactive enrichment for video attachments.
+	if !caps.Video && settings.VideoProviderID != "" && settings.VideoModelID != "" {
+		conversation = a.enrichWithVideoDescriptions(run.Ctx, conversation, asstMsgID, settings)
 	}
 	toolDefs := a.toolDefinitions()
 	maxTokens := resolveMaxOutput(provider, model, settings)
@@ -507,7 +515,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 		a.Bus.Emit(contracts.EventTurnStarted, contracts.TurnStartedEvent{
 			RunID: run.ID, ConversationID: run.ConversationID, MessageID: currentMsgID, Round: round,
 		})
-		roundResult, streamErr := a.streamTurnRound(run, adapter, conversation, currentMsgID, model, effort, toolsForRound, settings, continuation, maxTokens, injectHydration, promptCache, supportsVision, systemPromptSuffix)
+		roundResult, streamErr := a.streamTurnRound(run, adapter, conversation, currentMsgID, model, effort, toolsForRound, settings, continuation, maxTokens, injectHydration, promptCache, caps, systemPromptSuffix)
 		injectHydration = false // only the first round after a user message gets hydration
 		continuation = false
 		totalUsage = mergeUsage(totalUsage, roundResult.Response.Usage)
@@ -616,7 +624,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 			break
 		}
 
-		if err := a.executeTurnTools(run, currentMsgID, roundResult.Response.ToolCalls, supportsVision, settings); err != nil {
+		if err := a.executeTurnTools(run, currentMsgID, roundResult.Response.ToolCalls, caps, settings); err != nil {
 			if run.Ctx.Err() != nil {
 				a.interruptTurn(run, currentMsgID, roundResult, totalUsage, lastUsage.ContextTokens(), model)
 				return false, ""
@@ -1161,21 +1169,38 @@ func toDomainUsage(u ChatUsage) *domain.Usage {
 	}
 }
 
-// chatMessages flattens history into the neutral provider shape. The
-// current turn's placeholder (asstMsgID) is skipped while still empty.
+// ModelCapabilities describes which input modalities the active chat model
+// accepts. It is resolved once per turn from the provider's model metadata
+// and threaded through the turn chain so tool dispatch (read_image,
+// read_audio, read_video) and chatMessages can behave correctly without
+// re-querying the provider on every round.
+type ModelCapabilities struct {
+	Vision bool // image input
+	Audio  bool // audio input
+	Video  bool // video input
+}
+
+// modelCapabilities resolves the input modalities the given model on the
+// given provider supports. Unknown models (not in catalog) default to all-
+// true to preserve backward compatibility — providers will reject the
+// attachment if unsupported, and the reactive error path handles that.
+func modelCapabilities(provider *domain.Provider, model string) ModelCapabilities {
+	if provider == nil {
+		return ModelCapabilities{Vision: true, Audio: true, Video: true}
+	}
+	m := provider.FindModel(model)
+	if m == nil {
+		return ModelCapabilities{Vision: true, Audio: true, Video: true}
+	}
+	return ModelCapabilities{Vision: m.Vision, Audio: m.Audio, Video: m.Video}
+}
+
 // modelSupportsVision reports whether the given model on the given provider
 // supports image input. Returns true when the model metadata is unknown
 // (not in catalog) to preserve backward compatibility — providers will
 // reject the image if unsupported, and the reactive error path handles that.
 func modelSupportsVision(provider *domain.Provider, model string) bool {
-	if provider == nil {
-		return true
-	}
-	m := provider.FindModel(model)
-	if m == nil {
-		return true
-	}
-	return m.Vision
+	return modelCapabilities(provider, model).Vision
 }
 
 // filterHydrationDomainMessages strips hydration checkpoint messages (pure
@@ -1201,20 +1226,54 @@ func filterHydrationDomainMessages(msgs []domain.Message) []domain.Message {
 	return out
 }
 
-func chatMessages(c *domain.Conversation, pendingMsgID string, supportsVision bool) []ChatMessage {
+func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabilities) []ChatMessage {
 	var out []ChatMessage
 	for _, m := range c.Messages {
 		switch m.Role {
 		case domain.RoleUser:
 			content := m.Content
 			attachments := m.Attachments
-			if !supportsVision && hasImageAttachment(attachments) {
-				imageAtts := filterImageAttachments(attachments)
-				attachments = stripImageAttachments(attachments)
-				placeholder := imageOmittedPlaceholderFor(imageAtts)
+			if !caps.Vision && hasAttachmentOfType(attachments, "image") {
+				imageAtts := filterAttachmentsByType(attachments, "image")
+				attachments = stripAttachmentsByType(attachments, "image")
+				placeholder := omittedPlaceholderFor("image", "read_image", imageAtts)
 				if content == "" {
 					content = placeholder
-				} else if !containsImageOmissionNote(content) {
+				} else if !containsOmissionNote(content, "image") {
+					content = content + "\n\n" + placeholder
+				}
+			}
+			if !caps.Audio && hasAttachmentOfType(attachments, "audio") {
+				audioAtts := filterAttachmentsByType(attachments, "audio")
+				attachments = stripAttachmentsByType(attachments, "audio")
+				placeholder := omittedPlaceholderFor("audio", "read_audio", audioAtts)
+				if content == "" {
+					content = placeholder
+				} else if !containsOmissionNote(content, "audio") {
+					content = content + "\n\n" + placeholder
+				}
+			}
+			if !caps.Video && hasAttachmentOfType(attachments, "video") {
+				videoAtts := filterAttachmentsByType(attachments, "video")
+				attachments = stripAttachmentsByType(attachments, "video")
+				placeholder := omittedPlaceholderFor("video", "read_video", videoAtts)
+				if content == "" {
+					content = placeholder
+				} else if !containsOmissionNote(content, "video") {
+					content = content + "\n\n" + placeholder
+				}
+			}
+			// Folder attachments are path-only references. Inject the path
+			// as text so the agent can use file tools to explore the
+			// directory. The attachment itself is stripped from the
+			// attachment list (it has no bytes for the provider).
+			if hasAttachmentOfType(attachments, "folder") {
+				folderAtts := filterAttachmentsByType(attachments, "folder")
+				attachments = stripAttachmentsByType(attachments, "folder")
+				placeholder := folderPlaceholderFor(folderAtts)
+				if content == "" {
+					content = placeholder
+				} else {
 					content = content + "\n\n" + placeholder
 				}
 			}
@@ -1243,13 +1302,15 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, supportsVision bo
 
 const imageOmittedPlaceholder = "[image content omitted — this model does not support image input]"
 
-// imageOmittedPlaceholderFor builds a placeholder that tells the model to
-// call read_image with the absolute file path to access the image. Only
-// absolute paths are shown — relative paths are rejected to avoid ambiguity
-// between the model's working directory and the actual file location.
-func imageOmittedPlaceholderFor(atts []domain.Attachment) string {
+// omittedPlaceholderFor builds a placeholder that tells the model to call
+// the matching read_* tool with the absolute file path to access the
+// attachment. Only absolute paths are shown — relative paths are rejected
+// to avoid ambiguity between the model's working directory and the actual
+// file location. kind is "image" | "audio" | "video"; toolName is the
+// matching read_* tool.
+func omittedPlaceholderFor(kind, toolName string, atts []domain.Attachment) string {
 	if len(atts) == 0 {
-		return imageOmittedPlaceholder
+		return "[" + kind + " content omitted — this model does not support " + kind + " input]"
 	}
 	paths := make([]string, 0, len(atts))
 	for _, a := range atts {
@@ -1258,18 +1319,51 @@ func imageOmittedPlaceholderFor(atts []domain.Attachment) string {
 		}
 	}
 	if len(paths) == 0 {
-		return imageOmittedPlaceholder
+		return "[" + kind + " content omitted — this model does not support " + kind + " input]"
 	}
 	list := strings.Join(paths, ", ")
-	return "[image content omitted — this model does not support image input. " +
-		"Image file(s): " + list + ". " +
-		"Call the read_image tool with file_path set to one of the absolute paths above to load the image into your context.]"
+	capKind := strings.ToUpper(kind[:1]) + kind[1:]
+	return "[" + kind + " content omitted — this model does not support " + kind + " input. " +
+		capKind + " file(s): " + list + ". " +
+		"Call the " + toolName + " tool with file_path set to one of the absolute paths above to load the " + kind + " into your context.]"
+}
+
+// imageOmittedPlaceholderFor is kept for backward compatibility with tests.
+func imageOmittedPlaceholderFor(atts []domain.Attachment) string {
+	return omittedPlaceholderFor("image", "read_image", atts)
+}
+
+// folderPlaceholderFor builds a text placeholder that tells the agent the
+// absolute path of a dropped folder. The agent can use file tools
+// (list_dir, read_file, etc.) to explore the directory. Folder attachments
+// carry no bytes — only the path.
+func folderPlaceholderFor(atts []domain.Attachment) string {
+	if len(atts) == 0 {
+		return ""
+	}
+	paths := make([]string, 0, len(atts))
+	for _, a := range atts {
+		if a.FilePath != "" {
+			paths = append(paths, a.FilePath)
+		}
+	}
+	if len(paths) == 0 {
+		return ""
+	}
+	if len(paths) == 1 {
+		return "[Folder dropped: " + paths[0] + ". Use file tools to list and read its contents.]"
+	}
+	return "[Folders dropped: " + strings.Join(paths, ", ") + ". Use file tools to list and read their contents.]"
 }
 
 func imageAttachmentNames(atts []domain.Attachment) []string {
+	return attachmentNamesByType(atts, "image")
+}
+
+func attachmentNamesByType(atts []domain.Attachment, typ string) []string {
 	var names []string
 	for _, a := range atts {
-		if a.Type == "image" {
+		if a.Type == typ {
 			names = append(names, a.Name)
 		}
 	}
@@ -1277,8 +1371,12 @@ func imageAttachmentNames(atts []domain.Attachment) []string {
 }
 
 func hasImageAttachment(atts []domain.Attachment) bool {
+	return hasAttachmentOfType(atts, "image")
+}
+
+func hasAttachmentOfType(atts []domain.Attachment, typ string) bool {
 	for _, a := range atts {
-		if a.Type == "image" {
+		if a.Type == typ {
 			return true
 		}
 	}
@@ -1286,9 +1384,13 @@ func hasImageAttachment(atts []domain.Attachment) bool {
 }
 
 func stripImageAttachments(atts []domain.Attachment) []domain.Attachment {
+	return stripAttachmentsByType(atts, "image")
+}
+
+func stripAttachmentsByType(atts []domain.Attachment, typ string) []domain.Attachment {
 	filtered := make([]domain.Attachment, 0, len(atts))
 	for _, a := range atts {
-		if a.Type != "image" {
+		if a.Type != typ {
 			filtered = append(filtered, a)
 		}
 	}
@@ -1296,17 +1398,25 @@ func stripImageAttachments(atts []domain.Attachment) []domain.Attachment {
 }
 
 func filterImageAttachments(atts []domain.Attachment) []domain.Attachment {
-	var images []domain.Attachment
+	return filterAttachmentsByType(atts, "image")
+}
+
+func filterAttachmentsByType(atts []domain.Attachment, typ string) []domain.Attachment {
+	var out []domain.Attachment
 	for _, a := range atts {
-		if a.Type == "image" {
-			images = append(images, a)
+		if a.Type == typ {
+			out = append(out, a)
 		}
 	}
-	return images
+	return out
 }
 
 func containsImageOmissionNote(content string) bool {
-	return strings.Contains(content, "image content omitted")
+	return containsOmissionNote(content, "image")
+}
+
+func containsOmissionNote(content, kind string) bool {
+	return strings.Contains(content, kind+" content omitted")
 }
 
 // saveAttachmentsToDisk writes image/file attachments to the attachment store
@@ -1319,7 +1429,7 @@ func (a *App) saveAttachmentsToDisk(conversationID string, attachments []domain.
 	}
 	for i := range attachments {
 		att := &attachments[i]
-		if att.Type == "text" || att.FilePath != "" {
+		if att.Type == "text" || att.Type == "folder" || att.FilePath != "" {
 			continue
 		}
 		path, err := a.Attachments.Save(conversationID, *att)

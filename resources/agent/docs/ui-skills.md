@@ -1,6 +1,6 @@
 # Skills
 
-Author and manage markdown instruction packs the agent can load on demand via `skill_run`.
+Browse and read installed skill packages (SKILL.md + support files). Skills come from three owners: user, builtin, and plugin:<id>. Lower-priority owners (plugin) are shadowed when a higher-priority owner (user/builtin) defines the same skill ID.
 
 **How to open:** Click the Skills item in the left sidebar.
 
@@ -12,7 +12,7 @@ View title and a New skill button.
 
 ## Catalog
 
-Searchable list of installed skills. The count reflects persisted skills.
+Searchable list of installed skills. Each row shows the skill name, an owner badge (user/builtin/plugin:<id>), and last-updated time. Shadowed skills are dimmed. The count reflects persisted skills.
 
 - **Skills count** (`#skills-count`):
   - Section: Skills
@@ -26,9 +26,9 @@ Searchable list of installed skills. The count reflects persisted skills.
   - Section: Skills
   - Type: list
 
-## Editor
+## Detail
 
-Edit the selected skill's name, description, and markdown content. Run opens the skill in a new Agent conversation as its system context. Save and Delete persist changes.
+Read-only viewer for the selected skill. Shows the skill name, description, and owner, plus a file tree (SKILL.md + support files) on the left and the selected file's content on the right. Plugin-owned skills are read-only.
 
 - **Editor title** (`#skill-editor-title`):
   - Section: Skills
@@ -39,21 +39,19 @@ Edit the selected skill's name, description, and markdown content. Run opens the
   - Section: Skills
   - Type: text
 
-- **`#skill-run-btn`** (missing map entry)
-
-- **`#skill-save-btn`** (missing map entry)
-
-- **`#skill-delete-btn`** (missing map entry)
-
-- **`#skill-editor-form`** (missing map entry)
-
-- **`#skill-name`** (missing map entry)
-
-- **`#skill-description`** (missing map entry)
-
-- **`#skill-content`** (missing map entry)
-
 - **Editor empty state** (`#skill-editor-empty`):
   - Section: Skills
   - Type: text
   - Notes: Empty state shown when no file is selected. Prompts user to pick a file from the skill tree.
+
+- **Skill file viewer** (`#skill-file-viewer`):
+  - Section: Skills editor pane
+  - Type: panel
+  - Notes: Shows file content when a file is clicked in the skill tree.
+
+- **`#skill-files-tree`** (missing map entry)
+
+- **Skill file content** (`#skill-file-content`):
+  - Section: Skills file viewer
+  - Type: pre
+  - Notes: Pre-formatted text content of the opened skill file.

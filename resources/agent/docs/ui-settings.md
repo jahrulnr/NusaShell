@@ -64,6 +64,30 @@ When the active chat model cannot see images, NusaShell can describe attached im
   - Section: Settings
   - Type: select
 
+## Audio fallback
+
+When the active chat model cannot hear audio, NusaShell can transcribe or describe attached audio files using a separate audio-capable model so the conversation continues without errors. Pick any model that supports audio input. Leave disabled if you always use audio-capable chat models.
+
+- **Audio fallback title** (`#settings-audio-title`):
+  - Section: Settings
+  - Type: text
+
+- **Audio fallback model** (`#settings-audio-model`):
+  - Section: Settings
+  - Type: select
+
+## Video fallback
+
+When the active chat model cannot see video, NusaShell can describe attached video files using a separate video-capable model so the conversation continues without errors. Pick any model that supports video input. Leave disabled if you always use video-capable chat models.
+
+- **Video fallback title** (`#settings-video-title`):
+  - Section: Settings
+  - Type: text
+
+- **Video fallback model** (`#settings-video-model`):
+  - Section: Settings
+  - Type: select
+
 ## Context compaction
 
 Toggle compaction, set max input tokens (fallback context window, default 200000), max output tokens (default 65536), prompt caching, and optional sampling parameters (temperature, top-p, top-k, frequency penalty, presence penalty).

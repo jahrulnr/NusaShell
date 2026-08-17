@@ -1,7 +1,23 @@
 # Skills
 
-A skill is a markdown instruction pack the agent can load on demand. Skills
-are stored in `skills.json` in the data directory.
+A skill is a markdown instruction pack the agent can load on demand. Each skill
+lives in its own directory `<datadir>/agent/skills/<id>/SKILL.md` plus optional
+support files (references, scripts, assets).
+
+## Ownership and priority
+
+Every skill has an `owned_by` field that records who provided it:
+
+- `user` — authored by the user via the Skills workspace or `skill_save`.
+- `builtin` — shipped with NusaShell and seeded into the data directory.
+- `plugin:<plugin-id>` — bundled inside a plugin's `skills/` directory and
+  mounted read-only at plugin install time. Uninstalling the plugin removes
+  the skill.
+
+When two owners define a skill with the same ID, the higher-priority owner
+shadows the lower one. Priority order: `user` > `builtin` > `plugin:<id>`.
+Shadowed skills still appear in `skill_list` (dimmed in the UI) but
+`skill_read` and the agent's skill resolution use the winner.
 
 ## Authoring
 
@@ -12,11 +28,17 @@ what the skill does and when to use it.
 Keep instructions imperative and self-contained; the content is injected
 verbatim into the agent's context when the skill is loaded.
 
+Plugin-owned skills are read-only — uninstall the plugin to remove or modify
+them.
+
 ## Using skills
 
-- `skill_list` — enumerate skills.
-- `skill_run` — load a skill's content by name; the agent then follows its
-  instructions for the rest of the turn.
+- `skill_list` — enumerate skills (returns `owned_by` and `shadowed` flags).
+- `skill_read` — read a skill's `SKILL.md` (or a support file via `path`)
+  by name. The agent then follows its instructions for the rest of the turn.
+- `skill_files` — list the files inside a skill folder before reading them.
+- `skill_save` — create or update a user-owned skill.
 
-The Skills workspace also has a **Run** button that opens the skill in a new
-conversation as its system context.
+The Skills workspace is a read-only browser: it shows the catalog, the file
+tree of the selected skill, and a file viewer. Use `skill_save` (or the New
+skill button) to author skills.

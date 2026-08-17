@@ -148,15 +148,19 @@ func toOpenAIMessages(req application.ChatRequest) []openAIMessage {
 }
 
 // openAIToolContent builds a multimodal content array for tool results that
-// carry image attachments (e.g. read_image). The text content comes first,
-// followed by image_url blocks for each attachment.
+// carry image/audio/video attachments (e.g. read_image, read_audio,
+// read_video). The text content comes first, followed by image_url blocks
+// for each attachment. Audio and video use the same image_url transport
+// with data URLs — gateways like OpenRouter route these to Gemini's native
+// multimodal input based on the MIME type in the data URL.
 func openAIToolContent(result *application.ToolResult) []map[string]any {
 	blocks := make([]map[string]any, 0, 1+len(result.Attachments))
 	if result.Content != "" {
 		blocks = append(blocks, map[string]any{"type": "text", "text": result.Content})
 	}
 	for _, att := range result.Attachments {
-		if att.Type == "image" {
+		switch att.Type {
+		case "image", "audio", "video":
 			blocks = append(blocks, map[string]any{
 				"type":      "image_url",
 				"image_url": map[string]any{"url": att.DataURL},
@@ -175,7 +179,10 @@ func openAIUserContent(message application.ChatMessage) []map[string]any {
 		switch attachment.Type {
 		case "text":
 			blocks = append(blocks, map[string]any{"type": "text", "text": aiutil.TextAttachmentContent(attachment)})
-		case "image":
+		case "image", "audio", "video":
+			// image_url is the universal multimodal transport for OpenAI-
+			// compatible endpoints. Gateways route audio/video data URLs
+			// to providers that support them (e.g. Gemini via OpenRouter).
 			blocks = append(blocks, map[string]any{
 				"type":      "image_url",
 				"image_url": map[string]any{"url": attachment.DataURL},

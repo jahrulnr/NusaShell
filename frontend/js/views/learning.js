@@ -2,7 +2,7 @@
 // Uses vis-network for graph rendering (vendored ESM standalone build).
 
 import { rpc } from '../rpc.js';
-import { el, debounce, createSelect } from '../ui.js';
+import { el, debounce, createSelect, toast } from '../ui.js';
 import { DataSet, Network } from '../../vendor/vis-network/vis-network.esm.min.js';
 
 const state = {
@@ -41,12 +41,64 @@ export async function initLearning() {
     if (state.network) state.network.fit({ animation: { duration: 300 } });
   });
 
+  initSplitter();
+
   await loadStats();
   initGraph();
   // Initial search: empty query lists all skills + memories so the results
   // pane is populated immediately (backend returns an unfiltered listing
   // for empty queries). The graph loads in parallel.
   await Promise.all([doSearch(), loadGraph()]);
+}
+
+// Draggable splitter between results pane and graph pane. Persists the
+// results-pane width (px) to localStorage so the user's preference survives
+// reloads. The graph pane fills the remaining space (1fr).
+function initSplitter() {
+  const workspace = document.getElementById('learning-workspace');
+  const resultsPane = document.getElementById('learning-results-pane');
+  const splitter = document.getElementById('learning-splitter');
+  if (!workspace || !resultsPane || !splitter) return;
+
+  const STORAGE_KEY = 'nushell:learning-split';
+  const SPLITTER_W = 6;
+  const applyWidth = (w) => {
+    workspace.style.gridTemplateColumns = `${w}px ${SPLITTER_W}px minmax(0, 1fr)`;
+  };
+
+  const saved = Number.parseInt(localStorage.getItem(STORAGE_KEY) || '', 10);
+  if (saved > 120 && saved < window.innerWidth - 200) {
+    applyWidth(saved);
+  }
+
+  let dragging = false;
+  let startX = 0;
+  let startW = 0;
+
+  splitter.addEventListener('mousedown', (e) => {
+    dragging = true;
+    startX = e.clientX;
+    startW = resultsPane.getBoundingClientRect().width;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const delta = e.clientX - startX;
+    const w = Math.max(180, Math.min(window.innerWidth - 200, startW + delta));
+    applyWidth(w);
+  });
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    const w = resultsPane.getBoundingClientRect().width;
+    localStorage.setItem(STORAGE_KEY, String(Math.round(w)));
+    // Resize the graph to fit the new container.
+    if (state.network) state.network.redraw();
+  });
 }
 
 export async function refresh() {
@@ -104,17 +156,88 @@ function renderResults() {
     return;
   }
   for (const item of state.results) {
+    const isLong = item.content && item.content.length > 200;
+    const contentEl = item.content
+      ? el('div', { class: 'learning-result-content collapsed', text: item.content })
+      : null;
+    if (isLong && contentEl) {
+      contentEl.title = 'Click to expand/collapse';
+      contentEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        contentEl.classList.toggle('collapsed');
+        contentEl.classList.toggle('expanded');
+      });
+    }
+    const headerRight = el('div', { class: 'learning-result-header-right' }, [
+      el('span', { class: 'learning-result-score', text: scoreLabel(item.score) }),
+    ]);
+    if (item.kind === 'memory') {
+      const delBtn = el('button', {
+        class: 'learning-result-delete',
+        type: 'button',
+        title: 'Delete memory',
+        'aria-label': 'Delete memory',
+        text: '×',
+      });
+      delBtn.addEventListener('click', (e) => deleteMemory(item.id, e));
+      headerRight.appendChild(delBtn);
+    }
     const card = el('div', { class: 'learning-result-card', 'data-id': item.id, 'data-kind': item.kind }, [
       el('div', { class: 'learning-result-header' }, [
         el('span', { class: `learning-result-kind learning-kind-${item.kind}`, text: item.kind }),
-        el('span', { class: 'learning-result-score', text: scoreLabel(item.score) }),
+        headerRight,
       ]),
       item.name ? el('div', { class: 'learning-result-name', text: item.name }) : null,
-      item.content ? el('div', { class: 'learning-result-content', text: item.content }) : null,
+      contentEl,
     ]);
     card.addEventListener('click', () => focusNode(item.id));
     resultsEl.appendChild(card);
   }
+}
+
+async function deleteMemory(id, event) {
+  event.stopPropagation();
+  const ok = await confirmDelete(id);
+  if (!ok) return;
+  try {
+    await rpc('memory.delete', { id });
+    toast('Memory deleted.', 'success', 2000);
+    // Remove from local state + re-render without a full reload.
+    state.results = state.results.filter((r) => !(r.id === id && r.kind === 'memory'));
+    renderResults();
+    document.getElementById('learning-results-count').textContent = String(state.results.length);
+    // Refresh stats + graph in the background.
+    loadStats();
+    loadGraph();
+  } catch (e) {
+    toast(e.message || 'Failed to delete memory.', 'error', 4000);
+  }
+}
+
+// Inline confirmation: a small popover asking "Delete this memory?" with
+// confirm/cancel. Avoids native confirm() per the frontend style rules.
+function confirmDelete(id) {
+  // Synchronous-style confirmation via a transient inline dialog. Returns
+  // true only if the user clicks confirm. We use a simple approach: render
+  // a modal-like overlay and resolve on click.
+  return new Promise((resolve) => {
+    const overlay = el('div', { class: 'learning-confirm-overlay' }, [
+      el('div', { class: 'learning-confirm-dialog' }, [
+        el('strong', { text: 'Delete this memory?' }),
+        el('span', { text: 'This cannot be undone.' }),
+        el('div', { class: 'learning-confirm-actions' }, [
+          el('button', { class: 'mini-btn', type: 'button', text: 'Cancel' }),
+          el('button', { class: 'mini-btn danger', type: 'button', text: 'Delete' }),
+        ]),
+      ]),
+    ]);
+    document.body.appendChild(overlay);
+    const [cancelBtn, deleteBtn] = overlay.querySelectorAll('button');
+    const close = (result) => { overlay.remove(); resolve(result); };
+    cancelBtn.addEventListener('click', () => close(false));
+    deleteBtn.addEventListener('click', () => close(true));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+  });
 }
 
 function scoreLabel(score) {

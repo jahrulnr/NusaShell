@@ -1,6 +1,7 @@
 package application
 
 import (
+	"fmt"
 	"testing"
 
 	"nusashell/contracts"
@@ -123,17 +124,17 @@ func (f *fakeSkillStore) List() []*domain.Skill {
 	}
 	return out
 }
-func (f *fakeSkillStore) Get(id string) (*domain.Skill, error) {
+func (f *fakeSkillStore) Get(id, ownedBy string) (*domain.Skill, error) {
 	s, ok := f.items[id]
 	if !ok {
 		return nil, errNotFound
 	}
 	return s, nil
 }
-func (f *fakeSkillStore) ReadFile(id, path string, offset, maxChars int) (*domain.SkillFile, error) {
+func (f *fakeSkillStore) ReadFile(id, ownedBy, path string, offset, maxChars int) (*domain.SkillFile, error) {
 	return nil, errNotFound
 }
-func (f *fakeSkillStore) Files(id string) ([]domain.SkillFileEntry, error) {
+func (f *fakeSkillStore) Files(id, ownedBy string) ([]domain.SkillFileEntry, error) {
 	return nil, errNotFound
 }
 func (f *fakeSkillStore) Save(s *domain.Skill) error {
@@ -143,10 +144,15 @@ func (f *fakeSkillStore) Save(s *domain.Skill) error {
 	f.items[s.ID] = s
 	return nil
 }
-func (f *fakeSkillStore) Delete(id string) error {
+func (f *fakeSkillStore) Delete(id, ownedBy string) error {
 	delete(f.items, id)
 	return nil
 }
+func (f *fakeSkillStore) Install(zipData []byte) (string, error) {
+	return "", fmt.Errorf("not supported")
+}
+func (f *fakeSkillStore) MountPluginSkills(pluginID, dir string) error { return nil }
+func (f *fakeSkillStore) UnmountPluginSkills(pluginID string) error    { return nil }
 
 // fakeMemoryStore is a minimal MemoryStore for tests.
 type fakeMemoryStore struct {

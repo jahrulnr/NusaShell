@@ -414,8 +414,8 @@
             <select id="learning-kind-filter" class="select" aria-label="Filter learning entries by kind"></select>
             <button class="mini-btn" id="learning-search-btn" type="button">Search</button>
           </div>
-          <div class="learning-workspace">
-            <div class="learning-results-pane">
+          <div class="learning-workspace" id="learning-workspace">
+            <div class="learning-results-pane" id="learning-results-pane">
               <div class="learning-pane-head">
                 <h2>Results</h2>
                 <span id="learning-results-count">0</span>
@@ -427,6 +427,7 @@
                 </div>
               </div>
             </div>
+            <div class="learning-splitter" id="learning-splitter" title="Drag to resize"></div>
             <div class="learning-graph-pane">
               <div class="learning-pane-head">
                 <h2>Knowledge graph</h2>
@@ -649,6 +650,28 @@
                 <option value="">Disabled — non-vision models get a text placeholder instead</option>
               </select>
               <small>Only models with vision capability appear here. Leave disabled if you always use vision-capable chat models.</small>
+            </label>
+          </section>
+          <section class="settings-card settings-audio-card" aria-labelledby="settings-audio-title">
+            <div class="settings-card-title">Audio fallback</div>
+            <h2 id="settings-audio-title" class="sr-only">Audio fallback</h2>
+            <p class="settings-card-copy">When the active chat model cannot hear audio, NusaShell can transcribe or describe attached audio files using a separate audio-capable model so the conversation continues without errors. Pick any model that supports audio input.</p>
+            <label class="settings-field" for="settings-audio-model">Audio fallback model
+              <select id="settings-audio-model">
+                <option value="">Disabled — non-audio models get a text placeholder instead</option>
+              </select>
+              <small>Only models with audio capability appear here. Leave disabled if you always use audio-capable chat models.</small>
+            </label>
+          </section>
+          <section class="settings-card settings-video-card" aria-labelledby="settings-video-title">
+            <div class="settings-card-title">Video fallback</div>
+            <h2 id="settings-video-title" class="sr-only">Video fallback</h2>
+            <p class="settings-card-copy">When the active chat model cannot see video, NusaShell can describe attached video files using a separate video-capable model so the conversation continues without errors. Pick any model that supports video input.</p>
+            <label class="settings-field" for="settings-video-model">Video fallback model
+              <select id="settings-video-model">
+                <option value="">Disabled — non-video models get a text placeholder instead</option>
+              </select>
+              <small>Only models with video capability appear here. Leave disabled if you always use video-capable chat models.</small>
             </label>
           </section>
           <section class="settings-card settings-web-answer-card" aria-labelledby="settings-web-answer-title">
