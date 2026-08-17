@@ -16,6 +16,22 @@ file under `conversations/` in the data directory.
 5. The finished assistant message (content, tool calls, usage) is saved to
    the conversation file.
 
+### Mermaid diagrams
+
+Fenced ` ```mermaid ` blocks in assistant messages are rendered as diagrams in
+the chat. Rendering is deferred to settle points (a finished turn or a
+re-rendered thread), never on every streaming delta, so live text keeps
+streaming cheaply. Invalid Mermaid (a syntactically wrong diagram from the
+model) is detected before rendering and falls back to showing the raw source
+with a note — it never breaks the message.
+
+### ask_question restoration
+
+`ask_question` blocks the turn until you answer. If you switch rooms or reload
+the page while a question is pending, the interactive card is rebuilt from the
+backend (via `agent.ask.pending`) so the turn is never stuck behind a
+non-answerable card.
+
 ### Switching rooms during a live turn
 
 A conversation is a "room" in the Agent workspace. The run itself lives on

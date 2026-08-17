@@ -221,6 +221,42 @@ func (a *App) handleTurnsActive(req contracts.ConversationIDRequest) (any, *cont
 	}, nil
 }
 
+// askPendingEvent maps a domain ask request to the wire event shape shared by
+// the live EventAskPending and the agent.ask.pending list RPC.
+func askPendingEvent(conversationID, runID, callID string, req domain.AskQuestionRequest) contracts.AskPendingEvent {
+	opts := make([]contracts.AskOptionDTO, len(req.Options))
+	for i, o := range req.Options {
+		opts[i] = contracts.AskOptionDTO{
+			ID: o.ID, Label: o.Label, Description: o.Description,
+			Default: o.Default, Icon: o.Icon, Image: o.Image,
+		}
+	}
+	return contracts.AskPendingEvent{
+		ConversationID: conversationID,
+		RunID:          runID,
+		ToolCallID:     callID,
+		Question:       req.Question,
+		Options:        opts,
+		AllowFreeText:  req.AllowFreeText,
+		MultiSelect:    req.MultiSelect,
+	}
+}
+
+// handleAskPendingList returns the in-flight ask_question calls for a
+// conversation so the UI can rebuild interactive cards after a room switch or
+// page reload (the original EventAskPending was missed).
+func (a *App) handleAskPendingList(req contracts.AskPendingListRequest) (any, *contracts.RPCError) {
+	if a.AskQuestions == nil {
+		return contracts.AskPendingListResult{Asks: []contracts.AskPendingEvent{}}, nil
+	}
+	pending := a.AskQuestions.PendingForConversation(req.ConversationID)
+	asks := make([]contracts.AskPendingEvent, 0, len(pending))
+	for _, p := range pending {
+		asks = append(asks, askPendingEvent(p.ConversationID, p.RunID, p.CallID, p.Req))
+	}
+	return contracts.AskPendingListResult{Asks: asks}, nil
+}
+
 // handleAskAnswer resolves a pending ask_question with the user's answer.
 func (a *App) handleAskAnswer(req contracts.AskAnswerRequest) (any, *contracts.RPCError) {
 	if a.AskQuestions == nil {

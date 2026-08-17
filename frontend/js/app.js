@@ -4,12 +4,12 @@ import { rpc, on, connectWS } from './rpc.js';
 import { initHome, refresh as refreshHome } from './views/home.js';
 import { initAgent, refresh as refreshAgent } from './views/agent.js';
 import { initSkills, refresh as refreshSkills } from './views/skills.js';
-import { initPlugins, refresh as refreshPlugins } from './views/plugins.js';
+import { initPlugins, refresh as refreshPlugins, closeOverlays as closePluginOverlays } from './views/plugins.js';
 import { initProviders, refresh as refreshProviders } from './views/providers.js';
 import { initLogs, refresh as refreshLogs } from './views/logs.js';
 import { initSettings, refresh as refreshSettings } from './views/settings.js';
 import { initLearning, refresh as refreshLearning } from './views/learning.js';
-import { toast } from './ui.js';
+import { toast, dismissOpenDialogs } from './ui.js';
 
 const viewRefresh = {
   home: refreshHome,
@@ -59,6 +59,17 @@ function setConnection(status) {
 }
 
 let routeInitial = true;
+let currentView = null;
+
+// closeFloatingOverlays dismisses body-level overlays (plugin detail drawer,
+// plugin install dialog, and global modal dialogs) so an overlay left open on
+// one view never bleeds over another after navigation. (Plugin UIs open in a
+// separate browser window via window.open, so there is no in-shell plugin
+// window to close here.)
+function closeFloatingOverlays() {
+  try { closePluginOverlays(); } catch { /* view not ready */ }
+  dismissOpenDialogs();
+}
 
 function route() {
   const requested = location.hash.slice(1) || 'home';
@@ -66,6 +77,9 @@ function route() {
   const routed = aliases[requested] || requested;
   const known = [...document.querySelectorAll('.view')].some((view) => view.dataset.view === routed);
   const target = known ? routed : 'home';
+  // Close any open floating overlay when the view actually changes.
+  if (currentView !== null && currentView !== target) closeFloatingOverlays();
+  currentView = target;
   if (target !== requested) history.replaceState(null, '', `#${target}`);
   const items = document.querySelectorAll('[data-nav]');
   items.forEach((item) => {

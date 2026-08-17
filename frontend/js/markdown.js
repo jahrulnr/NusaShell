@@ -80,10 +80,19 @@ export function renderMarkdown(src) {
     // fenced code
     if (/^```/.test(trimmed)) {
       closeList();
+      const lang = (/^```\s*([A-Za-z0-9_+-]+)/.exec(trimmed)?.[1] || '').toLowerCase();
       const buf = [];
       i++;
       while (i < lines.length && !/^```/.test(lines[i].trim())) { buf.push(escapeHtml(lines[i])); i++; }
-      out.push(`<pre><code>${buf.join('\n')}</code></pre>`);
+      if (lang === 'mermaid') {
+        // Emit a placeholder holding the raw diagram source. It is NOT rendered
+        // to SVG here — the renderer (js/mermaid-render.js) turns it into a
+        // diagram at settle points only, so live streaming deltas keep
+        // re-emitting a cheap placeholder instead of re-rendering the diagram.
+        out.push(`<div class="mermaid-block"><pre class="mermaid-src">${buf.join('\n')}</pre></div>`);
+      } else {
+        out.push(`<pre><code>${buf.join('\n')}</code></pre>`);
+      }
       continue;
     }
 

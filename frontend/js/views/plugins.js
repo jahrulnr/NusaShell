@@ -28,6 +28,13 @@ export async function initPlugins() {
   await refresh();
 }
 
+// closeOverlays dismisses the plugin drawer and install dialog. Called by the
+// router on view change so an open plugin overlay never bleeds over other views.
+export function closeOverlays() {
+  closeInstallDialog();
+  closeDrawer();
+}
+
 export async function refresh() {
   const serverResult = await rpc('plugin.list');
   servers = serverResult.plugins ?? [];

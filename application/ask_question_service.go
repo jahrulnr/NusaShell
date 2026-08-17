@@ -133,6 +133,30 @@ func (s *AskQuestionService) RejectRun(runID string, reason string) {
 	}
 }
 
+// PendingAsk is a snapshot of one in-flight ask. Used to restore the UI card
+// after the user switches rooms or reloads the page (the original
+// EventAskPending was missed while the room was not active or before reload).
+type PendingAsk struct {
+	RunID          string
+	CallID         string
+	ConversationID string
+	Req            domain.AskQuestionRequest
+}
+
+// PendingForConversation returns all in-flight asks for a conversation so the
+// UI can rebuild interactive question cards on (re)entry.
+func (s *AskQuestionService) PendingForConversation(conversationID string) []PendingAsk {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]PendingAsk, 0)
+	for _, p := range s.pending {
+		if p.conversationID == conversationID {
+			out = append(out, PendingAsk{RunID: p.runID, CallID: p.callID, ConversationID: p.conversationID, Req: p.req})
+		}
+	}
+	return out
+}
+
 // HasPending reports whether a pending ask exists for the given (runID, callID).
 func (s *AskQuestionService) HasPending(runID, callID string) bool {
 	s.mu.Lock()

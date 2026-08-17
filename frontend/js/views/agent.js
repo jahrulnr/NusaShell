@@ -21,6 +21,7 @@ import {
   toolTerminalOutput,
 } from './agent/render.js';
 import { createAskCard, sealAskCard, cancelAskCard } from './ask-card.js';
+import { renderMermaidDiagrams } from '../mermaid-render.js';
 
 const state = {
   conversations: [],
@@ -378,6 +379,49 @@ async function openConversation(id) {
   updateComposerStatus();
   updateSendAvailability(state);
   updateRoomInfo(state.conversation, state.messages);
+  // Rebuild interactive ask_question cards for asks still pending on this
+  // conversation's run (room switch / reload missed the live event; the
+  // persisted tool call would otherwise render as a dead sealed card).
+  void restorePendingAsks(state.activeId, token);
+}
+
+// restorePendingAsks queries the backend for in-flight ask_question calls on the
+// active conversation and rebuilds interactive cards, replacing any sealed
+// placeholder rendered from the persisted (unanswered) tool call.
+async function restorePendingAsks(conversationId, token) {
+  const run = runForConversation(conversationId);
+  if (!run) return; // no active run → any ask is already resolved
+  let asks = [];
+  try {
+    const res = await rpc('agent.ask.pending', { conversation_id: conversationId });
+    asks = res.asks ?? [];
+  } catch {
+    return;
+  }
+  if (token !== state.conversationLoadToken || state.activeId !== conversationId) return;
+  if (!asks.length) return;
+  const cards = [...document.querySelectorAll('#agent-thread .agent-ask-card')];
+  for (const a of asks) {
+    const runId = a.run_id || run.runId;
+    const card = createAskCard(a.tool_call_id, {
+      question: a.question,
+      options: a.options,
+      allow_free_text: a.allow_free_text,
+      multi_select: a.multi_select,
+    }, {
+      runId,
+      onSubmit: (err) => toast(err instanceof Error ? err.message : 'Could not send answer', 'error'),
+      onStop: () => rpc('agent.turns.stop', { run_id: runId }).catch(() => {}),
+    });
+    const existing = cards.find((c) => c.dataset.callId === a.tool_call_id);
+    if (existing) existing.replaceWith(card);
+    else {
+      run.strip.hidden = false;
+      run.strip.append(card);
+    }
+    run.toolJobs.set(a.tool_call_id, card);
+  }
+  scrollToBottom();
 }
 
 // reattachActiveRunFromBackend queries the backend for the active run of the
@@ -459,6 +503,9 @@ function renderThread(messages) {
     return;
   }
   thread.replaceChildren(renderConversation(messages, retryTurn));
+  // Render any Mermaid diagrams in the freshly painted thread (settle point,
+  // not per-delta).
+  void renderMermaidDiagrams(thread);
   // Defer the scroll until after layout: setting scrollTop synchronously
   // right after replaceChildren observes a stale (small) scrollHeight, so
   // a freshly opened long room would sit at the top until the next paint.
@@ -990,6 +1037,7 @@ async function loadOlderChunk() {
     // Insert a "Load older" sentinel above the chunk so the user can manually
     // trigger the next load if the proactive threshold is not met.
     thread?.insertBefore(fragment, thread.firstChild);
+    if (thread) void renderMermaidDiagrams(thread);
     // Restore the scroll position so the user doesn't jump.
     if (thread) {
       const newHeight = thread.scrollHeight;
@@ -1302,6 +1350,8 @@ function bindEvents() {
       }
       meta.append(el('span', { class: 'agent-message-meta', text: fmtTime(new Date().toISOString()) }));
       run.msgNode.append(meta);
+      // Render any Mermaid diagrams in the just-finished message (settle point).
+      void renderMermaidDiagrams(run.msgNode);
     }
     endTurn(run_id);
     if (error) toast(error, 'error');
