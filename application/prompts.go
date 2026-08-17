@@ -44,3 +44,15 @@ func buildSystemPrompt(c *domain.Conversation) string {
 	}
 	return sb.String()
 }
+
+var subagentDelegationPrompt = resources.Prompt("subagent-delegation")
+
+func (a *App) acpDelegationPrompt() string {
+	agents := a.enabledAcpAgents()
+	if len(agents) == 0 || strings.TrimSpace(subagentDelegationPrompt) == "" {
+		return ""
+	}
+	list, def := availableAcpSummary(agents)
+	p := strings.ReplaceAll(subagentDelegationPrompt, "{{available_subagents}}", list)
+	return strings.ReplaceAll(p, "{{default_subagent}}", def)
+}

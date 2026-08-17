@@ -46,24 +46,35 @@ func (e *LocalExecutor) RunStep(ctx context.Context, req application.RunStepRequ
 		return application.StepResult{Error: "local executor only runs shell steps"}, fmt.Errorf("no run command")
 	}
 	shell, args := selectShell(req.Step.Shell, req.Step.Run)
-	cmd := exec.CommandContext(ctx, shell, args...)
+	cmd := exec.Command(shell, args...)
 	cmd.Dir = req.Workspace.Dir
 	cmd.Env = flattenEnv(req.Env)
 	setProcGroup(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &chunkWriter{req: req, stream: "stdout", buf: &stdout}
 	cmd.Stderr = &chunkWriter{req: req, stream: "stderr", buf: &stderr}
-	err := cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return application.StepResult{Error: err.Error()}, err
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	var err error
+	select {
+	case err = <-done:
+	case <-ctx.Done():
+		killProcGroup(cmd)
+		err = <-done
+		res := application.StepResult{Error: ctx.Err().Error()}
+		if cmd.ProcessState != nil {
+			res.ExitCode = cmd.ProcessState.ExitCode()
+		}
+		return res, ctx.Err()
+	}
 	res := application.StepResult{}
 	if cmd.ProcessState != nil {
 		res.ExitCode = cmd.ProcessState.ExitCode()
 	}
 	if err != nil {
-		if ctx.Err() != nil {
-			killProcGroup(cmd)
-			res.Error = ctx.Err().Error()
-			return res, ctx.Err()
-		}
 		res.Error = err.Error()
 		return res, nil
 	}

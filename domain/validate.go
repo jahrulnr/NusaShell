@@ -106,7 +106,7 @@ func validateJob(r *ValidationResult, i int, j Job) {
 		r.Add(ValidationIssue{Path: path + ".retry.max_attempts", Code: "invalid_retry", Message: "max_attempts must be non-negative", Level: ValidationSyntax})
 	}
 	for _, p := range j.Artifacts.Paths {
-		if strings.HasPrefix(p, "/") || strings.Contains(p, "..") {
+		if hostRootedPath(p) || strings.Contains(p, "..") {
 			r.Add(ValidationIssue{Path: path + ".artifacts.paths", Code: "invalid_artifact_path", Message: "artifact paths must be relative and stay inside the workspace", Level: ValidationSyntax})
 		}
 	}

@@ -403,3 +403,43 @@ type ToolExecutor interface {
 	ListTools() []ToolInfo
 	Execute(ctx context.Context, name string, argsJSON []byte) (string, error)
 }
+
+// ---- ACP subagent ports ----
+
+type AcpAgentStore interface {
+	List() []*domain.AcpAgent
+	Get(id string) (*domain.AcpAgent, error)
+	Save(a *domain.AcpAgent) error
+	Delete(id string) error
+}
+
+type AcpSpawnRequest struct {
+	Agent            *domain.AcpAgent
+	ConversationID   string
+	ParentToolCallID string
+	Prompt           string
+	Workspace        string
+	ModeID           string
+	ModelID          string
+}
+
+type AcpPermissionDecision struct {
+	OptionID string
+	Outcome  domain.PermissionOutcome
+}
+
+type AcpRuntime interface {
+	Probe(ctx context.Context, agent *domain.AcpAgent) (domain.AcpAgent, error)
+	Authenticate(ctx context.Context, agent *domain.AcpAgent, methodID string) error
+	RefreshCatalog(ctx context.Context, agent *domain.AcpAgent) (domain.AcpAgent, error)
+	Spawn(ctx context.Context, req AcpSpawnRequest) (*domain.AcpRun, error)
+	Steer(runID, text string) error
+	Stop(runID string) error
+	Wait(ctx context.Context, runID string) (*domain.AcpRun, error)
+	Get(runID string) (*domain.AcpRun, bool)
+	List(conversationID string) []*domain.AcpRun
+	DecidePermission(runID, requestID, optionID string, outcome domain.PermissionOutcome) error
+	PromoteRisk(runID string, tier domain.RiskTier) error
+	SetMode(ctx context.Context, runID, modeID string) error
+	Close()
+}

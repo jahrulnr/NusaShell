@@ -37,6 +37,13 @@ type Toolbox struct {
 		ToolsFor(serverID string) ([]contracts.MCPToolDTO, bool)
 		CallTool(ctx context.Context, serverID, toolName string, args map[string]any) (string, error)
 	}
+	Acp interface {
+		SpawnSubagents(ctx context.Context, argsJSON []byte) (string, error)
+		SteerAcpRun(ctx context.Context, argsJSON []byte) (string, error)
+		StopAcpRun(ctx context.Context, argsJSON []byte) (string, error)
+		WaitAcpRun(ctx context.Context, argsJSON []byte) (string, error)
+		EnabledAcpAgents() []*domain.AcpAgent
+	}
 }
 
 // webAnswerSearcher builds a searchwire.Searcher on-demand from the web
@@ -133,6 +140,14 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "read_image", Description: "Load an image from the conversation into your context so you can see it. Pass file_path (the absolute path shown in the image placeholder). When your active model supports vision, the image is attached to your context directly. For non-vision models, the image is described using a vision fallback model and the text description is returned.", InputSchema: obj("object", props("file_path", str("Absolute path of the image file on disk (shown in the image placeholder)"), "question", str("Optional question about the image")), "file_path")},
 		{Name: "web_search", Description: "Search the web for fresh information. Returns ranked results with title, URL, and snippet from multiple sources (Brave, Startpage, Wikipedia, GitHub). Use this when you need current information, documentation, or research. Follow up with web_fetch on promising URLs for full page content.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results (default 10)")), "query")},
 		{Name: "web_fetch", Description: "Fetch a URL and return readable text (HTML stripped to title + visible text). Use after web_search to read full page content from a result URL. Accepts http/https only.", InputSchema: obj("object", props("url", str("URL to fetch"), "max_bytes", intSchema("Optional max bytes of extracted text (default 2MB)")), "url")},
+	}
+	if t.Acp != nil && len(t.Acp.EnabledAcpAgents()) > 0 {
+		tools = append(tools,
+			application.ToolInfo{Name: "subagent", Description: "Delegate a self-contained task to a configured ACP coding agent (Cursor, Claude Code, Codex CLI, etc). The ACP agent does not receive this conversation, MCP plugins, or NusaShell tools. Pass a compact brief with absolute paths. Set async true to return immediately with run ids; otherwise wait until each spawn finishes. count (1-6) fans the same brief out to parallel sessions.", InputSchema: obj("object", props("prompt", str("Self-contained task brief"), "agent_id", str("Optional ACP agent id from Providers; omit to use the default enabled agent"), "workspace", str("Optional absolute workspace path (defaults to the conversation workspace)"), "mode_id", str("Optional ACP session mode id advertised by the agent"), "model_id", str("Optional ACP model id advertised by the agent"), "async", obj("boolean", nil), "count", intSchema("Number of parallel spawns of the same brief (1-6, default 1)")), "prompt")},
+			application.ToolInfo{Name: "subagent_steer", Description: "Send an additional instruction to a live ACP subagent without cancelling it. Applied at the next prompt boundary.", InputSchema: obj("object", props("id", str("ACP run id from subagent"), "text", str("Steer instruction")), "id", "text")},
+			application.ToolInfo{Name: "subagent_stop", Description: "Cancel a live ACP subagent run.", InputSchema: obj("object", props("id", str("ACP run id")), "id")},
+			application.ToolInfo{Name: "subagent_wait", Description: "Wait for an async ACP subagent run to finish.", InputSchema: obj("object", props("id", str("ACP run id"), "timeout_ms", intSchema("Optional wait timeout in milliseconds")), "id")},
+		)
 	}
 	if t.Plugins != nil {
 		plugins, _ := t.Plugins.List()
@@ -849,6 +864,26 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", fmt.Errorf("tool %q not found on server %q; use tool_list or tool_search to see available tools", args.Tool, args.Server)
 		}
 		return "", fmt.Errorf("server %q not found; use mcp_list to see configured servers", args.Server)
+	case name == "subagent":
+		if t.Acp == nil {
+			return "", fmt.Errorf("no ACP agents configured")
+		}
+		return t.Acp.SpawnSubagents(ctx, argsJSON)
+	case name == "subagent_steer":
+		if t.Acp == nil {
+			return "", fmt.Errorf("no ACP agents configured")
+		}
+		return t.Acp.SteerAcpRun(ctx, argsJSON)
+	case name == "subagent_stop":
+		if t.Acp == nil {
+			return "", fmt.Errorf("no ACP agents configured")
+		}
+		return t.Acp.StopAcpRun(ctx, argsJSON)
+	case name == "subagent_wait":
+		if t.Acp == nil {
+			return "", fmt.Errorf("no ACP agents configured")
+		}
+		return t.Acp.WaitAcpRun(ctx, argsJSON)
 	case name == "web_search":
 		if t.Searcher == nil {
 			return "", fmt.Errorf("search is not available")

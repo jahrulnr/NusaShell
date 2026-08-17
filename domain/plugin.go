@@ -132,7 +132,7 @@ func (m *PluginManifest) Validate() error {
 		if strings.TrimSpace(m.UI.Entry) == "" {
 			return fmt.Errorf("manifest: ui.entry is required when ui is present")
 		}
-		if strings.Contains(m.UI.Entry, "..") || strings.HasPrefix(m.UI.Entry, "/") {
+		if strings.Contains(m.UI.Entry, "..") || hostRootedPath(m.UI.Entry) {
 			return fmt.Errorf("manifest: ui.entry must be a relative path within the plugin directory")
 		}
 	}

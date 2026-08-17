@@ -12,10 +12,18 @@ import (
 	"nusashell/domain"
 )
 
-func TestLocalExecutorRunsEcho(t *testing.T) {
+func echoHello() string {
+	return "echo hello-ci"
+}
+
+func sleepTen() string {
 	if runtime.GOOS == "windows" {
-		t.Skip("unix echo")
+		return "Start-Sleep -Seconds 10"
 	}
+	return "sleep 10"
+}
+
+func TestLocalExecutorRunsEcho(t *testing.T) {
 	ex := &LocalExecutor{Root: t.TempDir()}
 	dir := t.TempDir()
 	run := &domain.WorkflowRun{ID: "run1", WorkflowID: "wf"}
@@ -32,7 +40,7 @@ func TestLocalExecutorRunsEcho(t *testing.T) {
 	defer cancel()
 	res, err := ex.RunStep(ctx, application.RunStepRequest{
 		Run: run, Job: domain.Job{ID: "j"}, JobRun: jr,
-		Step: domain.Step{Run: "echo hello-ci"}, StepRun: sr,
+		Step: domain.Step{Run: echoHello()}, StepRun: sr,
 		Workspace: ws,
 		Env:       CIEnv(run, *jr, *sr, ws.Dir),
 		OnOutput:  func(c domain.LogChunk) { logs = append(logs, c) },
@@ -58,9 +66,6 @@ func TestLocalExecutorRunsEcho(t *testing.T) {
 }
 
 func TestLocalExecutorCancel(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("unix sleep")
-	}
 	ex := &LocalExecutor{Root: t.TempDir()}
 	run := &domain.WorkflowRun{ID: "run2"}
 	jr := &domain.JobRun{ID: "jr2", JobID: "j"}
@@ -71,11 +76,15 @@ func TestLocalExecutorCancel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 	res, err := ex.RunStep(ctx, application.RunStepRequest{
-		Run: run, JobRun: jr, Step: domain.Step{Run: "sleep 10"}, StepRun: sr, Workspace: ws,
+		Run: run, JobRun: jr, Step: domain.Step{Run: sleepTen()}, StepRun: sr, Workspace: ws,
 	})
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("cancel took %s; process group was not interrupted", elapsed)
+	}
 	if err == nil && res.ExitCode == 0 {
 		t.Fatal("expected cancellation")
 	}

@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `wait_until`), RPC (`ci.*` / `automation.*`), and an Automation sidebar
   view. Waiting parks the run without occupying a runner. Disabled MCP
   providers block dependent automations instead of failing them.
+- **ACP spawn-only subagents.** Register generic Agent Client Protocol
+  binaries (command + args + env) in Providers. They never appear in the
+  composer. The parent agent delegates with `subagent` / `subagent_steer` /
+  `subagent_stop` / `subagent_wait` (advertised only when at least one ACP
+  agent is enabled). Live runs show in an Agent dock, right-hand drawer, and
+  peek popup, with fail-closed permission prompts, dynamic workspace binding,
+  and parallel spawn (1–6 per call, 8 live cap). Pipeline `agent:` steps
+  do not advertise or execute those tools (approval must not block unattended runs).
 
 ### Changed
 
@@ -39,6 +47,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connected when the Go process starts (and immediately when the toggle is
   turned on), so automations and agent tools are available without a manual
   Start. A failed connect is logged and skipped.
+- **ACP workspace path containment on Windows.** Slash-rooted paths such as
+  `\etc\passwd` (and Unix-style `/etc/passwd`) are treated as rooted locations
+  and no longer join onto the bound workspace, so `edit_confirmed` edits
+  outside the workspace prompt instead of auto-allowing.
+- **ACP test helper binary on Windows.** `fakeacp` test builds now use a
+  `.exe` suffix so GitHub Actions `windows-latest` can execute them.
 
 - **Provider kind-change validation ordering.** Saving a codex provider with
   a different kind now correctly fails with `VALIDATION_ERROR` (the guard now

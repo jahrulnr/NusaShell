@@ -83,6 +83,25 @@ equivalent halt, stop the turn and preserve any unfinished work. The
 frontend shows the queued steer in a strip with a Cancel button; only one
 steer can be queued at a time.
 
+## ACP subagents
+
+ACP coding agents are spawn-only. The user never chats with them in the
+composer. When the parent agent calls `subagent`, a dock appears above the
+composer: chips for every live run (and recent finishes in this room). Click
+a chip for the right-hand drawer (all parallel spawns), or peek one run in a
+popup. Both surfaces stream the transcript and offer steer, stop, mode
+change, and risk promotion (edits / bypass). Permission prompts use a global
+overlay — Allow once, Allow for this session, or Deny. Timeout denies.
+`edit_confirmed` auto-allows edit/delete/move only when every path stays
+inside the bound workspace; slash-rooted paths (`/etc/passwd`, `\Windows\…`)
+are treated as absolute even on Windows and never join onto the workspace.
+Existing runs keep the workspace they bound at spawn; new spawns follow the
+current conversation workspace unless the tool overrides it.
+
+Pipeline `agent:` steps never advertise `subagent` / `subagent_steer` /
+`subagent_stop` / `subagent_wait`. Those tools require an interactive
+permission overlay; unattended FireDue must not wait on approval.
+
 ## Compaction
 
 When the estimated token count of a conversation exceeds the configured

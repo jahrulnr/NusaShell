@@ -149,13 +149,28 @@ func TestValidateSyntaxCycleIsInvalid(t *testing.T) {
 }
 
 func TestValidateAbsoluteArtifactPath(t *testing.T) {
-	w := &WorkflowDefinition{
-		Name: "x",
-		Jobs: []Job{{ID: "a", Artifacts: ArtifactSpec{Paths: []string{"/etc/passwd"}}, Steps: []Step{{Run: "x"}}}},
+	cases := []string{
+		"/etc/passwd",
+		`\Windows\System32\config`,
+		`C:\secrets\out.bin`,
+		"../escape",
 	}
-	r := ValidateSyntax(w)
-	if r.Verdict() != "INVALID" {
-		t.Fatal(r.Issues)
+	for _, p := range cases {
+		w := &WorkflowDefinition{
+			Name: "x",
+			Jobs: []Job{{ID: "a", Artifacts: ArtifactSpec{Paths: []string{p}}, Steps: []Step{{Run: "x"}}}},
+		}
+		r := ValidateSyntax(w)
+		if r.Verdict() != "INVALID" {
+			t.Fatalf("path %q should be INVALID, got %+v", p, r.Issues)
+		}
+	}
+	ok := &WorkflowDefinition{
+		Name: "x",
+		Jobs: []Job{{ID: "a", Artifacts: ArtifactSpec{Paths: []string{"dist/app.bin"}}, Steps: []Step{{Run: "x"}}}},
+	}
+	if r := ValidateSyntax(ok); r.Verdict() == "INVALID" {
+		t.Fatalf("relative artifact path should be valid: %+v", r.Issues)
 	}
 }
 

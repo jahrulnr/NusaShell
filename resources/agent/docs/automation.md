@@ -34,6 +34,11 @@ A step may set `wait_until: <RFC3339>`. The run status becomes `waiting` and the
 
 After `ci_run`, call `ci_run_status`. Fetch logs only for failed jobs.
 
+Pipeline `agent:` steps do not receive ACP tools (`subagent`, `subagent_steer`,
+`subagent_stop`, `subagent_wait`). Permission prompts are interactive and must
+not stall an unattended run. The composer agent still sees those tools when an
+ACP provider is enabled.
+
 ## UI
 
 Open **Automation** in the sidebar. Tabs: Workflows, Runs, Schedules, Events. New automation opens a once/every/when/manual wizard. Run pipeline starts the workspace YAML. Blocked automations show Enable provider.
