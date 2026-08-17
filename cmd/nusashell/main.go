@@ -21,6 +21,7 @@ import (
 	"nusashell/infrastructure/ai/codex"
 	"nusashell/infrastructure/ai/modelcatalog"
 	"nusashell/infrastructure/attachmentfs"
+	"nusashell/infrastructure/ci"
 	"nusashell/infrastructure/config"
 	"nusashell/infrastructure/docs"
 	"nusashell/infrastructure/jsonstore"
@@ -218,6 +219,17 @@ func run() error {
 		WorkspacePicker:             workspacepicker.Zenity{},
 		Logger:                      logger,
 	})
+	var autoSvc *application.Automation
+	if svc, autoDB, err := ci.BuildAutomation(dataDir, bus, pluginStore, mcpManager, mcpManager); err != nil {
+		slog.Warn("automation store init failed", "error", err)
+	} else {
+		autoSvc = svc
+		app.Automation = svc
+		defer autoDB.Close()
+		if tb, ok := app.Toolbox.(*tools.Toolbox); ok {
+			tb.Automation = svc
+		}
+	}
 	// Wire Codex runtime + OAuth adapters (optional — nil-safe if unavailable)
 	if rt, err := codex.NewRuntimeAdapter(); err == nil {
 		app.CodexRuntime = rt
@@ -249,6 +261,21 @@ func run() error {
 	app.StartAutoUpdateLoop(ctx, 0)
 	app.StartLifecycle()
 	defer app.CloseLifecycle()
+	if autoSvc != nil {
+		go func() {
+			_ = autoSvc.Auto.FireDue(context.Background())
+			ticker := time.NewTicker(15 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					_ = autoSvc.Auto.FireDue(context.Background())
+				}
+			}
+		}()
+	}
 
 	go func() {
 		logger.Info("nusashell-light listening", "addr", httpServer.Addr, "data_dir", dataDir, "dev", dev, "version", version)

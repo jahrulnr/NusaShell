@@ -75,6 +75,8 @@ type App struct {
 	// debugging and observability. Best-effort — nil = no-op.
 	Trajectory *TrajectoryRecorder
 
+	Automation *Automation
+
 	runsMu  sync.Mutex
 	runs    map[string]*TurnRun
 	startMu sync.Mutex
@@ -230,7 +232,8 @@ type Deps struct {
 	RetrySleeper                RetrySleeper
 	// Logger is an optional structured logger for crash recovery from
 	// fire-and-forget goroutines. Nil = slog.Default().
-	Logger *slog.Logger
+	Logger     *slog.Logger
+	Automation *Automation
 }
 
 func NewApp(deps Deps) *App {
@@ -267,6 +270,7 @@ func NewApp(deps Deps) *App {
 		ModelCatalog:                deps.ModelCatalog,
 		retrySleeper:                deps.RetrySleeper,
 		Logger:                      deps.Logger,
+		Automation:                  deps.Automation,
 		runs:                        map[string]*TurnRun{},
 		turnsSinceReview:            map[string]int{},
 	}
@@ -875,6 +879,17 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 			return nil, rpcErr
 		}
 		return a.handleSettingsSet(req)
+	case contracts.MethodCIPipelinesList, contracts.MethodCIPipelinesRead, contracts.MethodCIPipelinesValidate,
+		contracts.MethodCIRunsStart, contracts.MethodCIRunsList, contracts.MethodCIRunsGet,
+		contracts.MethodCIRunsCancel, contracts.MethodCIRunsRetry, contracts.MethodCIJobsGet,
+		contracts.MethodCIJobsLogs, contracts.MethodCIJobsCancel, contracts.MethodCIArtifactsList,
+		contracts.MethodCIRunnersList, contracts.MethodCICacheList, contracts.MethodCICacheClear,
+		contracts.MethodAutomationList, contracts.MethodAutomationGet, contracts.MethodAutomationSave,
+		contracts.MethodAutomationDelete, contracts.MethodAutomationEnable, contracts.MethodAutomationDisable,
+		contracts.MethodAutomationRun, contracts.MethodAutomationValidate, contracts.MethodAutomationEvents,
+		contracts.MethodAutomationIngest, contracts.MethodAutomationDependents, contracts.MethodAutomationSchedules,
+		contracts.MethodAutomationCapabilities, contracts.MethodAutomationSetDisabled:
+		return a.handleCI(ctx, method, payload)
 	default:
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: fmt.Sprintf("unknown method: %s", method)}
 	}
@@ -892,6 +907,7 @@ func (a *App) handleAppInfo() (any, *contracts.RPCError) {
 			MCP:           true,
 			Compaction:    settings.CompactionEnabled,
 			PromptCaching: settings.PromptCaching,
+			Automation:    a.Automation != nil,
 			Providers:     []string{"messages", "responses", "chat", "codex"},
 		},
 	}, nil

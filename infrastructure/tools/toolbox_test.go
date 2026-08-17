@@ -614,6 +614,25 @@ func TestMcpUnregister(t *testing.T) {
 	}
 }
 
+func TestListToolsIncludesAutomation(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	names := map[string]bool{}
+	for _, ti := range tb.ListTools() {
+		names[ti.Name] = true
+	}
+	for _, want := range []string{
+		"ci_pipeline_list", "ci_pipeline_read", "ci_pipeline_validate", "ci_run",
+		"ci_run_status", "ci_logs", "ci_cancel",
+		"automation_list", "automation_read", "automation_validate", "automation_create",
+		"automation_enable", "automation_disable", "automation_status",
+		"schedule_once", "schedule_every", "wait_until",
+	} {
+		if !names[want] {
+			t.Fatalf("ListTools missing %q", want)
+		}
+	}
+}
+
 func TestListToolsIncludesMcpManagement(t *testing.T) {
 	tb := testToolbox(nil, nil, &stubMCP{})
 	names := map[string]bool{}

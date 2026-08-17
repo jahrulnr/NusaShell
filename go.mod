@@ -6,6 +6,7 @@ require (
 	github.com/jahrulnr/searchwire v0.0.0-20260815212041-8dcb6fbafb70
 	github.com/mark3labs/mcp-go v0.58.0
 	github.com/ncruces/zenity v0.10.15
+	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.56.0
 	nhooyr.io/websocket v1.8.17
 )

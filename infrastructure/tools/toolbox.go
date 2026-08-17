@@ -31,6 +31,7 @@ type Toolbox struct {
 	Settings        application.SettingsStore
 	Credentials     application.CredentialStore
 	AskQuestions    *application.AskQuestionService
+	Automation      *application.Automation
 	MCP             interface {
 		Connect(ctx context.Context, p *domain.Plugin) ([]contracts.MCPToolDTO, error)
 		ToolsFor(serverID string) ([]contracts.MCPToolDTO, bool)
@@ -102,6 +103,23 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "ask_question", Description: "Pause and ask the user a structured clarifying question before continuing. Use only for genuine decisions the user must make — not for things you can figure out yourself. The user can answer via options or free text (when allowed). The turn blocks until the user answers or cancels.", InputSchema: obj("object", props("question", str("The question to show the user"), "options", arrObj("Selectable choices (1-8). Mark one default when possible.", props("id", str("Stable option id"), "label", str("Short option label"), "description", str("Optional one-line explanation"), "default", obj("boolean", nil), "icon", str("Optional emoji or short icon glyph"), "image", str("Optional image URL or compact data URI")), "id", "label"), "allow_free_text", obj("boolean", nil), "multi_select", obj("boolean", nil)), "question", "options")},
 		{Name: "docs_search", Description: "Search the NusaShell Light documentation corpus.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 10")), "query")},
 		{Name: "docs_read", Description: "Read a documentation page by id (see docs_search results).", InputSchema: obj("object", props("id", str("Documentation page id")), "id")},
+		{Name: "ci_pipeline_list", Description: "List pipeline definitions in the current workspace (.nusashell/pipeline.yaml).", InputSchema: obj("object", props("workspace", str("Workspace path")))},
+		{Name: "ci_pipeline_read", Description: "Read and validate the workspace pipeline definition.", InputSchema: obj("object", props("workspace", str("Workspace path")))},
+		{Name: "ci_pipeline_validate", Description: "Validate pipeline YAML and report structured errors.", InputSchema: obj("object", props("yaml", str("Pipeline YAML"), "workspace", str("Workspace path")))},
+		{Name: "ci_run", Description: "Start a pipeline or saved automation.", InputSchema: obj("object", props("workspace", str("Workspace path for .nusashell/pipeline.yaml"), "workflow_id", str("Saved automation id")))},
+		{Name: "ci_run_status", Description: "Return run status, DAG summary, and failed jobs. Use this after ci_run; do not fetch full logs unless a job failed.", InputSchema: obj("object", props("run_id", str("Run id")), "run_id")},
+		{Name: "ci_logs", Description: "Retrieve job logs (tail 200 by default). Prefer failed jobs.", InputSchema: obj("object", props("job_id", str("Job run id"), "run_id", str("Run id"), "limit", intSchema("Max chunks")), "job_id")},
+		{Name: "ci_cancel", Description: "Cancel a running pipeline/automation run.", InputSchema: obj("object", props("run_id", str("Run id")), "run_id")},
+		{Name: "automation_list", Description: "List saved automations with availability (runnable/blocked/disabled).", InputSchema: obj("object", nil)},
+		{Name: "automation_read", Description: "Read one automation definition and capability bindings.", InputSchema: obj("object", props("id", str("Automation id")), "id")},
+		{Name: "automation_validate", Description: "Validate a workflow YAML. Distinguishes INVALID vs BLOCKED (provider disabled/missing).", InputSchema: obj("object", props("yaml", str("Workflow YAML")), "yaml")},
+		{Name: "automation_create", Description: "Create an automation from YAML (once/every/when triggers). NusaShell owns durable scheduling — do not keep timers yourself.", InputSchema: obj("object", props("yaml", str("Workflow YAML"), "enabled", obj("boolean", nil)), "yaml")},
+		{Name: "automation_enable", Description: "Enable an automation and restore event subscriptions/schedules.", InputSchema: obj("object", props("id", str("Automation id")), "id")},
+		{Name: "automation_disable", Description: "Disable an automation without deleting it.", InputSchema: obj("object", props("id", str("Automation id")), "id")},
+		{Name: "automation_status", Description: "Inspect a run, including waiting/blocked states.", InputSchema: obj("object", props("run_id", str("Run id")), "run_id")},
+		{Name: "schedule_once", Description: "Create a one-shot scheduled automation at an RFC3339 timestamp.", InputSchema: obj("object", props("at", str("RFC3339 time"), "yaml", str("Jobs YAML or a full workflow"), "name", str("Automation name")), "at")},
+		{Name: "schedule_every", Description: "Create a recurring automation. cron uses calendar semantics; interval uses elapsed time. They are not equivalent.", InputSchema: obj("object", props("cron", str("5-field cron"), "interval", str("Go duration such as 1h"), "timezone", str("IANA timezone"), "yaml", str("Jobs YAML"), "name", str("Name")))},
+		{Name: "wait_until", Description: "Explain or create a durable wait_until step. Waiting never keeps a runner occupied.", InputSchema: obj("object", props("at", str("RFC3339 time")), "at")},
 		{Name: "mcp_list", Description: "List configured MCP servers with their enabled status and runtime state (running/stopped).", InputSchema: obj("object", nil)},
 		{Name: "tool_list", Description: "List tools from a running MCP server by name (names and descriptions, plus optional input schemas). When the server is omitted, lists tools across all running MCP servers.", InputSchema: obj("object", props("server", str("Optional MCP server name; when omitted, lists tools across all running servers")))},
 		{Name: "tool_search", Description: "Search a running MCP server's tools by name or description (case-insensitive token match — any term matches). Returns matching tool names and descriptions.", InputSchema: obj("object", props("server", str("MCP server name"), "query", str("Search query")), "server", "query")},
@@ -963,6 +981,10 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		return sb.String(), nil
 	}
 
+	if out, handled, err := t.executeAutomation(ctx, name, argsJSON); handled {
+		return out, err
+	}
+
 	// dynamic MCP tools: mcp__<server>__<tool>
 	if rest, ok := strings.CutPrefix(name, "mcp__"); ok {
 		plugins, _ := t.Plugins.List()
@@ -1192,4 +1214,170 @@ func matchMCPTool(rest string, plugins []*domain.Plugin) (*domain.Plugin, string
 		return nil, "", false
 	}
 	return best, bestTool, true
+}
+
+func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON []byte) (string, bool, error) {
+	if t.Automation == nil {
+		switch name {
+		case "ci_pipeline_list", "ci_pipeline_read", "ci_pipeline_validate", "ci_run", "ci_run_status",
+			"ci_logs", "ci_cancel", "automation_list", "automation_read", "automation_validate",
+			"automation_create", "automation_enable", "automation_disable", "automation_status",
+			"schedule_once", "schedule_every", "wait_until":
+			return "", true, fmt.Errorf("automation is not configured")
+		default:
+			return "", false, nil
+		}
+	}
+	a := t.Automation
+	var args map[string]any
+	_ = json.Unmarshal(argsJSON, &args)
+	str := func(k string) string {
+		v, _ := args[k].(string)
+		return v
+	}
+	encode := func(v any, err error) (string, bool, error) {
+		if err != nil {
+			return "", true, err
+		}
+		b, _ := json.Marshal(v)
+		return string(b), true, nil
+	}
+	switch name {
+	case "ci_pipeline_list", "ci_pipeline_read":
+		w, r, err := a.ReadPipeline(ctx, str("workspace"))
+		if err != nil {
+			return "", true, err
+		}
+		return encode(map[string]any{"name": w.Name, "jobs": w.JobIDs(), "validation": r.Verdict()}, nil)
+	case "ci_pipeline_validate", "automation_validate":
+		raw := []byte(str("yaml"))
+		if len(raw) == 0 && str("workspace") != "" {
+			_, r, err := a.ReadPipeline(ctx, str("workspace"))
+			return encode(r, err)
+		}
+		r, _ := a.ValidateYAML(raw)
+		return encode(r, nil)
+	case "ci_run":
+		if id := str("workflow_id"); id != "" {
+			run, err := a.RunWorkflow(ctx, id, "agent")
+			return encode(run, err)
+		}
+		run, err := a.StartPipeline(ctx, str("workspace"), "agent")
+		return encode(run, err)
+	case "ci_run_status", "automation_status":
+		run, err := a.Runs.Get(ctx, str("run_id"))
+		if err != nil {
+			return "", true, err
+		}
+		sum := run.Summary()
+		return encode(map[string]any{
+			"run_id": run.ID, "status": run.Status, "wake_at": run.WakeAt,
+			"summary": sum, "blocked_reason": run.BlockedReason,
+		}, nil)
+	case "ci_logs":
+		chunks, err := a.Logs.Read(ctx, str("job_id"), 0, 200)
+		return encode(chunks, err)
+	case "ci_cancel":
+		return encode(map[string]bool{"ok": true}, a.Exec.Cancel(ctx, str("run_id")))
+	case "automation_list":
+		list, err := a.Workflows.List(ctx)
+		if err != nil {
+			return "", true, err
+		}
+		type row struct {
+			ID, Name, Availability string
+			Enabled                bool
+		}
+		var out []row
+		for _, w := range list {
+			avail, _ := a.AvailabilityOf(ctx, w)
+			out = append(out, row{ID: w.ID, Name: w.Name, Enabled: w.Enabled, Availability: avail})
+		}
+		return encode(out, nil)
+	case "automation_read":
+		w, err := a.Workflows.Get(ctx, str("id"))
+		if err != nil {
+			return "", true, err
+		}
+		avail, reason := a.AvailabilityOf(ctx, w)
+		caps := []any{}
+		for _, name := range w.ReferencedCapabilities() {
+			b, _ := a.Caps.Resolve(ctx, name, domain.DefaultAutoStart)
+			caps = append(caps, b)
+		}
+		return encode(map[string]any{"workflow": w, "availability": avail, "reason": reason, "capabilities": caps}, nil)
+	case "automation_create":
+		w, err := a.ParseDefinition(str("yaml"))
+		if err != nil {
+			return "", true, err
+		}
+		if n := str("name"); n != "" {
+			w.Name = n
+		}
+		w.Enabled = true
+		saved, r, err := a.SaveWorkflow(ctx, w)
+		return encode(map[string]any{"workflow": saved, "validation": r}, err)
+	case "automation_enable", "automation_disable":
+		w, err := a.Workflows.Get(ctx, str("id"))
+		if err != nil {
+			return "", true, err
+		}
+		w.Enabled = name == "automation_enable"
+		if w.Enabled {
+			err = a.Auto.EnableWorkflow(ctx, w)
+		} else {
+			err = a.Workflows.Put(ctx, w)
+		}
+		return encode(map[string]any{"id": w.ID, "enabled": w.Enabled}, err)
+	case "schedule_once":
+		at, err := time.Parse(time.RFC3339, str("at"))
+		if err != nil {
+			return "", true, fmt.Errorf("at must be RFC3339")
+		}
+		w, err := a.ParseDefinition(str("yaml"))
+		if err != nil {
+			w = &domain.WorkflowDefinition{Name: str("name"), Jobs: []domain.Job{{ID: "run", Steps: []domain.Step{{Run: "true"}}}}}
+		}
+		if w.Name == "" {
+			w.Name = str("name")
+		}
+		if w.Name == "" {
+			w.Name = "once"
+		}
+		w.Enabled = true
+		w.Triggers = []domain.Trigger{{ID: "t1", Kind: domain.TriggerOnce, Family: domain.FamilyOnce, At: &at}}
+		saved, r, err := a.SaveWorkflow(ctx, w)
+		return encode(map[string]any{"workflow": saved, "validation": r}, err)
+	case "schedule_every":
+		w, err := a.ParseDefinition(str("yaml"))
+		if err != nil {
+			w = &domain.WorkflowDefinition{Name: str("name"), Jobs: []domain.Job{{ID: "run", Steps: []domain.Step{{Run: "true"}}}}}
+		}
+		if w.Name == "" {
+			w.Name = str("name")
+		}
+		tr := domain.Trigger{ID: "t1", Family: domain.FamilyEvery, Timezone: str("timezone")}
+		if str("cron") != "" {
+			tr.Kind = domain.TriggerCron
+			tr.Cron = str("cron")
+		} else {
+			d, err := time.ParseDuration(str("interval"))
+			if err != nil {
+				return "", true, fmt.Errorf("interval or cron is required")
+			}
+			tr.Kind = domain.TriggerInterval
+			tr.Interval = d
+		}
+		w.Triggers = []domain.Trigger{tr}
+		w.Enabled = true
+		saved, r, err := a.SaveWorkflow(ctx, w)
+		return encode(map[string]any{"workflow": saved, "validation": r}, err)
+	case "wait_until":
+		return encode(map[string]string{
+			"hint": "Use a workflow step wait_until: <RFC3339>. The run enters waiting and resumes after restart.",
+			"at":   str("at"),
+		}, nil)
+	default:
+		return "", false, nil
+	}
 }

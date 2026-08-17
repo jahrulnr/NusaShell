@@ -122,6 +122,7 @@ type Features struct {
 	MCP           bool     `json:"mcp"`
 	Compaction    bool     `json:"compaction"`
 	PromptCaching bool     `json:"prompt_caching"`
+	Automation    bool     `json:"automation"`
 	Providers     []string `json:"providers"`
 }
 

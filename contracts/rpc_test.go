@@ -60,6 +60,14 @@ func TestRosterUniqueness(t *testing.T) {
 		MethodDocsList, MethodDocsSearch, MethodDocsRead,
 		MethodLogsList, MethodLogsClear,
 		MethodSettingsGet, MethodSettingsSet,
+		MethodCIPipelinesList, MethodCIPipelinesRead, MethodCIPipelinesValidate,
+		MethodCIRunsStart, MethodCIRunsList, MethodCIRunsGet, MethodCIRunsCancel, MethodCIRunsRetry,
+		MethodCIJobsGet, MethodCIJobsLogs, MethodCIJobsCancel, MethodCIArtifactsList,
+		MethodCIRunnersList, MethodCICacheList, MethodCICacheClear,
+		MethodAutomationList, MethodAutomationGet, MethodAutomationSave, MethodAutomationDelete,
+		MethodAutomationEnable, MethodAutomationDisable, MethodAutomationRun, MethodAutomationValidate,
+		MethodAutomationEvents, MethodAutomationIngest, MethodAutomationDependents,
+		MethodAutomationSchedules, MethodAutomationCapabilities, MethodAutomationSetDisabled,
 	}
 	seen := map[string]bool{}
 	for _, m := range methods {
@@ -76,6 +84,12 @@ func TestRosterUniqueness(t *testing.T) {
 		EventTurnStarted, EventMessageDelta, EventReasoningDelta, EventToolStarted, EventToolCompleted,
 		EventTurnDone, EventTurnError, EventCompacted, EventSteerQueued, EventSteerApplied,
 		EventSteerCancelled, EventProviderRetry, EventLogAppend, EventTodoUpdated,
+		EventCIRunCreated, EventCIRunStarted, EventCIRunCompleted, EventCIRunFailed,
+		EventCIRunCancelled, EventCIRunWaiting, EventCIRunBlocked,
+		EventCIJobQueued, EventCIJobStarted, EventCIJobCompleted, EventCIJobFailed,
+		EventCIJobCancelled, EventCIJobSkipped,
+		EventCIStepStarted, EventCIStepOutput, EventCIStepCompleted, EventCIStepFailed,
+		EventAutomationEvent,
 	}
 	seenEv := map[string]bool{}
 	for _, e := range events {
