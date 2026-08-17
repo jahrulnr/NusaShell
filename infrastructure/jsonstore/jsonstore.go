@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"nusashell/domain"
 )
@@ -156,8 +157,12 @@ func atomicWrite(path string, b []byte) error {
 	if err != nil {
 		return err
 	}
+	sleepTime := 10 * time.Millisecond
 	name := tmp.Name()
-	cleanup := func() { _ = os.Remove(name) }
+	cleanup := func() {
+		time.Sleep(sleepTime)
+		_ = os.Remove(name)
+	}
 	if _, err := tmp.Write(b); err != nil {
 		_ = tmp.Close()
 		cleanup()
