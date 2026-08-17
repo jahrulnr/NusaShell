@@ -1,6 +1,7 @@
 package application
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -8,10 +9,10 @@ import (
 )
 
 // envProviderSpec describes a provider whose API key can be supplied through
-// an environment variable at startup. NusaShell stores credentials only in
-// the SQLite/form-input store; this bridges a deploy-time secret (for
-// example a Cloud Agent secret) into that store so a provider is usable
-// without manual UI entry.
+// an environment variable. NusaShell stores credentials only in the
+// SQLite/form-input store; this lets an explicit, opt-in command copy a
+// deploy-time secret (for example a Cloud Agent secret) into that store
+// without manual UI entry. The server itself never reads these variables.
 type envProviderSpec struct {
 	ID      string
 	EnvVar  string
@@ -35,16 +36,22 @@ var envProviderSpecs = []envProviderSpec{
 }
 
 // SeedProvidersFromEnv creates or refreshes provider API keys from
-// environment variables. It is idempotent and non-destructive: it never
-// deletes or disables providers and never rewrites a user's custom name or
-// base URL. On first run it creates the provider (enabled) and stores its
-// key; on later runs it only rewrites the stored key when the env value is
-// present and differs (supporting secret rotation). Model import is left to
-// the normal auto-import loop. getenv is injected so the effect is testable.
-func (a *App) SeedProvidersFromEnv(getenv func(string) string) {
+// environment variables and returns a human-readable line per action taken.
+// It is meant to be invoked explicitly (e.g. the `seed-providers`
+// subcommand), never implicitly during normal server startup.
+//
+// It is idempotent and non-destructive: it never deletes or disables
+// providers and never rewrites a user's custom name or base URL. On first
+// run it creates the provider (enabled) and stores its key; on later runs it
+// only rewrites the stored key when the env value is present and differs
+// (supporting secret rotation). Providers whose key is already current are
+// left untouched and produce no action line. Model import is left to the
+// normal import flow. getenv is injected so the effect is testable.
+func (a *App) SeedProvidersFromEnv(getenv func(string) string) []string {
 	if a.Providers == nil || a.Credentials == nil {
-		return
+		return nil
 	}
+	var actions []string
 	for _, spec := range envProviderSpecs {
 		key := strings.TrimSpace(getenv(spec.EnvVar))
 		if key == "" {
@@ -52,17 +59,22 @@ func (a *App) SeedProvidersFromEnv(getenv func(string) string) {
 		}
 		existing, err := a.Providers.Get(spec.ID)
 		if err != nil {
-			a.seedNewProvider(spec, key)
+			if msg := a.seedNewProvider(spec, key); msg != "" {
+				actions = append(actions, msg)
+			}
 			continue
 		}
-		a.refreshProviderKey(existing, spec, key)
+		if msg := a.refreshProviderKey(existing, spec, key); msg != "" {
+			actions = append(actions, msg)
+		}
 	}
+	return actions
 }
 
-func (a *App) seedNewProvider(spec envProviderSpec, key string) {
+func (a *App) seedNewProvider(spec envProviderSpec, key string) string {
 	if err := a.Credentials.Set(spec.ID, key); err != nil {
 		a.log("warn", "ai", "env seed: failed to store %s credential: %v", spec.Name, err)
-		return
+		return ""
 	}
 	p := &domain.Provider{
 		ID:        spec.ID,
@@ -75,29 +87,31 @@ func (a *App) seedNewProvider(spec envProviderSpec, key string) {
 	}
 	if err := a.Providers.Save(p); err != nil {
 		a.log("warn", "ai", "env seed: failed to save provider %s: %v", spec.Name, err)
-		return
+		return ""
 	}
 	a.log("info", "ai", "seeded provider %s from %s", spec.Name, spec.EnvVar)
+	return fmt.Sprintf("%s created from %s", spec.Name, spec.EnvVar)
 }
 
-func (a *App) refreshProviderKey(existing *domain.Provider, spec envProviderSpec, key string) {
+func (a *App) refreshProviderKey(existing *domain.Provider, spec envProviderSpec, key string) string {
 	cur, has, err := a.Credentials.Get(spec.ID)
 	if err != nil {
 		a.log("warn", "ai", "env seed: failed to read %s credential: %v", spec.Name, err)
-		return
+		return ""
 	}
 	if has && cur == key {
-		return
+		return ""
 	}
 	if err := a.Credentials.Set(spec.ID, key); err != nil {
 		a.log("warn", "ai", "env seed: failed to update %s credential: %v", spec.Name, err)
-		return
+		return ""
 	}
 	existing.HasAPIKey = true
 	existing.UpdatedAt = time.Now().UTC()
 	if err := a.Providers.Save(existing); err != nil {
 		a.log("warn", "ai", "env seed: failed to persist %s: %v", spec.Name, err)
-		return
+		return ""
 	}
 	a.log("info", "ai", "refreshed %s API key from %s", spec.Name, spec.EnvVar)
+	return fmt.Sprintf("%s API key refreshed from %s", spec.Name, spec.EnvVar)
 }

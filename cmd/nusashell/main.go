@@ -42,10 +42,61 @@ import (
 const version = "0.1.0"
 
 func main() {
+	// Explicit subcommands run and exit before the server starts. Keep this
+	// dispatch tiny; the default (no subcommand) is to run the server.
+	if len(os.Args) > 1 && os.Args[1] == "seed-providers" {
+		if err := seedProvidersCmd(); err != nil {
+			slog.Error("seed-providers failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		slog.Error("nusashell exited with error", "error", err)
 		os.Exit(1)
 	}
+}
+
+// seedProvidersCmd copies provider API keys from environment variables into
+// the SQLite credential store for the configured data directory, then exits.
+// It is explicit and opt-in: the server never reads these variables on its
+// own. Idempotent and non-destructive (see App.SeedProvidersFromEnv).
+func seedProvidersCmd() error {
+	dataDir := envOr("NUSASHELL_DATA_DIR", defaultDataDir())
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return err
+	}
+	_ = os.Chmod(dataDir, 0o700)
+
+	store, err := jsonstore.New(dataDir)
+	if err != nil {
+		return err
+	}
+	credentials, err := sqlitestore.NewCredentials(filepath.Join(dataDir, "credentials.db"))
+	if err != nil {
+		return err
+	}
+	defer credentials.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	app := application.NewApp(application.Deps{
+		DataDir:     dataDir,
+		Providers:   &jsonstore.Providers{S: store},
+		Credentials: credentials,
+		Logs:        &jsonstore.Logs{S: store},
+		Bus:         application.NewBus(),
+		Logger:      logger,
+	})
+
+	actions := app.SeedProvidersFromEnv(os.Getenv)
+	if len(actions) == 0 {
+		fmt.Fprintln(os.Stdout, "seed-providers: nothing to do (no known provider env vars set, or keys already current)")
+		return nil
+	}
+	for _, a := range actions {
+		fmt.Fprintln(os.Stdout, "seed-providers: "+a)
+	}
+	return nil
 }
 
 func run() error {
@@ -175,12 +226,6 @@ func run() error {
 	app.CodexUsage = codex.NewUsageAdapter()
 	app.CodexCLIAuth = codex.NewCLIAuthImporterAdapter()
 	app.CodexRouter = application.NewCodexAccountRouter()
-
-	// Bridge deploy-time provider secrets (e.g. OPENROUTER_API_KEY) into the
-	// SQLite credential store. NusaShell reads keys only from that store, so
-	// this seeds/refreshes them from the environment on startup. Idempotent
-	// and non-destructive; the auto-import loop below then fetches models.
-	app.SeedProvidersFromEnv(os.Getenv)
 
 	srv := transport.New(app, logger, transport.StaticHandler(frontend.FS, dev), dev)
 	// Register plugin routes: serve plugin UI static files and route

@@ -21,7 +21,11 @@ func newSeedTestApp() (*App, *fakeProviderStore, *memCreds) {
 func TestSeedProvidersFromEnvCreatesProvider(t *testing.T) {
 	app, providers, creds := newSeedTestApp()
 
-	app.SeedProvidersFromEnv(mapEnv(map[string]string{"OPENROUTER_API_KEY": "sk-or-test"}))
+	actions := app.SeedProvidersFromEnv(mapEnv(map[string]string{"OPENROUTER_API_KEY": "sk-or-test"}))
+
+	if len(actions) != 1 {
+		t.Fatalf("expected 1 action line, got %v", actions)
+	}
 
 	p, err := providers.Get("openrouter")
 	if err != nil {
@@ -73,8 +77,11 @@ func TestSeedProvidersFromEnvIsIdempotent(t *testing.T) {
 	env := mapEnv(map[string]string{"OPENROUTER_API_KEY": "sk-or-test"})
 
 	app.SeedProvidersFromEnv(env)
-	app.SeedProvidersFromEnv(env)
+	second := app.SeedProvidersFromEnv(env)
 
+	if len(second) != 0 {
+		t.Fatalf("second run with an unchanged key must report no action, got %v", second)
+	}
 	if n := len(providers.List()); n != 1 {
 		t.Fatalf("running twice must not duplicate providers, got %d", n)
 	}
@@ -88,8 +95,11 @@ func TestSeedProvidersFromEnvRefreshesRotatedKey(t *testing.T) {
 	app, providers, creds := newSeedTestApp()
 	app.SeedProvidersFromEnv(mapEnv(map[string]string{"OPENROUTER_API_KEY": "sk-old"}))
 
-	app.SeedProvidersFromEnv(mapEnv(map[string]string{"OPENROUTER_API_KEY": "sk-new"}))
+	actions := app.SeedProvidersFromEnv(mapEnv(map[string]string{"OPENROUTER_API_KEY": "sk-new"}))
 
+	if len(actions) != 1 {
+		t.Fatalf("rotation should report one refresh action, got %v", actions)
+	}
 	key, _, _ := creds.Get("openrouter")
 	if key != "sk-new" {
 		t.Errorf("credential = %q, want sk-new (rotated)", key)
