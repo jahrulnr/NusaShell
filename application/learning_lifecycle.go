@@ -45,6 +45,19 @@ type LifecycleManager struct {
 	memory MemoryStore
 	skills SkillStore
 	cfg    LifecycleConfig
+	log    func(level, source, format string, args ...any)
+}
+
+// SetLogger wires a log function so the manager can report decay/prune
+// activity. Optional — if not set, no logging.
+func (m *LifecycleManager) SetLogger(fn func(level, source, format string, args ...any)) {
+	m.log = fn
+}
+
+func (m *LifecycleManager) logf(level, format string, args ...any) {
+	if m.log != nil {
+		m.log(level, "learning", format, args...)
+	}
 }
 
 // NewLifecycleManager creates a manager with the given config.
@@ -75,7 +88,11 @@ func (m *LifecycleManager) Run(ctx context.Context) {
 
 // runDecay is a no-op for now — decay is computed on-the-fly during prune.
 // This method exists as the hook for future persistent strength tracking.
-func (m *LifecycleManager) runDecay() {}
+// Logs a heartbeat so the user can see the decay cycle is alive.
+func (m *LifecycleManager) runDecay() {
+	entries := m.memory.List()
+	m.logf("debug", "decay tick: %d entries (decay is computed on-the-fly during prune)", len(entries))
+}
 
 // runPrune removes memory entries whose computed strength falls below
 // the threshold. Strength is derived from age and initial signal weight
@@ -84,6 +101,7 @@ func (m *LifecycleManager) runDecay() {}
 func (m *LifecycleManager) runPrune() {
 	entries := m.memory.List()
 	if len(entries) == 0 {
+		m.logf("debug", "prune tick: no entries")
 		return
 	}
 	// If over capacity, prune the weakest entries down to the limit.
@@ -102,6 +120,11 @@ func (m *LifecycleManager) runPrune() {
 		}
 		for _, id := range toDelete {
 			_ = m.memory.Delete(id)
+		}
+		if len(toDelete) > 0 {
+			m.logf("info", "pruned %d weak entries (had %d, threshold=%.2f)", len(toDelete), len(entries), m.cfg.PruneThreshold)
+		} else {
+			m.logf("debug", "prune tick: %d entries, none below threshold", len(entries))
 		}
 		return
 	}
@@ -126,6 +149,7 @@ func (m *LifecycleManager) runPrune() {
 	for i := 0; i < toPrune; i++ {
 		_ = m.memory.Delete(scored[i].id)
 	}
+	m.logf("info", "pruned %d over-capacity entries (had %d, target=%d)", toPrune, len(entries), target)
 }
 
 // computeStrength returns the decayed strength of a memory entry.

@@ -223,13 +223,7 @@ func estimateRequestTokens(system string, messages []ChatMessage, tools []ToolDe
 }
 
 func asciiCount(s string) int {
-	n := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] < 0x80 {
-			n++
-		}
-	}
-	return n
+	return domain.AsciiCount(s)
 }
 
 // NeedsBuild... (unused guard)
@@ -496,6 +490,13 @@ func (a *App) runOneTool(run *TurnRun, toolCall domain.ToolCall, caps ModelCapab
 			output = "error: " + err.Error()
 		}
 	}
+	// Async subagent: the tool returns immediately with "starting" status.
+	// Keep the tool call marked as running so the UI shows a spinner; the
+	// OnDone callback will update it to ok/fail with the summary when the
+	// subagent finishes.
+	if toolCall.Name == "subagent" && err == nil {
+		status = domain.ToolRunning
+	}
 	res := toolExecResult{status: status, output: output, atts: outputAttachments}
 	a.emitToolCompleted(run, toolCall, res)
 	return res
@@ -570,6 +571,7 @@ func (a *App) finishTurn(run *TurnRun, messageID, model string, usage ChatUsage,
 			TurnOK:            true,
 			HasConversation:   true,
 			TurnText:          lastText,
+			HasBackgroundJobs: a.hasPendingSubagents(run.ConversationID),
 		})
 		autoContinue = &contracts.AutoContinueDTO{
 			ShouldContinue:   decision.ShouldContinue,
@@ -606,17 +608,13 @@ func (a *App) finishTurn(run *TurnRun, messageID, model string, usage ChatUsage,
 // with the given ID. Used by the auto-continue policy to detect whether the
 // turn ended with a question (which means the agent is waiting for the user).
 func lastAssistantText(c *domain.Conversation, messageID string) string {
-	for i := range c.Messages {
-		if c.Messages[i].ID == messageID && c.Messages[i].Role == domain.RoleAssistant {
-			return c.Messages[i].Content
-		}
-	}
-	return ""
+	return domain.LastAssistantText(c, messageID)
 }
 
 // incrementTurnCounter bumps the per-conversation turn counter and
 // triggers a learning review if the threshold is reached. The threshold
-// is read from settings (default 50, 0 disables turn-based review).
+// is read from settings (default 10, 0 disables turn-based review).
+// Counters are persisted to disk so they survive server restarts.
 func (a *App) incrementTurnCounter(conversationID string) {
 	if a.ReviewAgent == nil {
 		return
@@ -629,6 +627,8 @@ func (a *App) incrementTurnCounter(conversationID string) {
 	a.turnsSinceReview[conversationID]++
 	count := a.turnsSinceReview[conversationID]
 	a.learningMu.Unlock()
+	// Persist so the counter survives restarts.
+	a.saveTurnCounters()
 	if count < threshold {
 		return
 	}
@@ -643,9 +643,11 @@ func (a *App) incrementTurnCounter(conversationID string) {
 // prompt. It is fire-and-forget — it never blocks or fails the parent
 // turn.
 func (a *App) flushLearningReview(conversationID string, reason string) {
+	a.log("info", "learning", "review triggered: conv=%s reason=%s", conversationID, reason)
 	a.learningMu.Lock()
 	a.turnsSinceReview[conversationID] = 0
 	a.learningMu.Unlock()
+	a.saveTurnCounters()
 	if a.ReviewAgent == nil {
 		return
 	}

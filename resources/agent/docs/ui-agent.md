@@ -175,38 +175,6 @@ The drawer lists every live spawn so you can switch between parallel subagents. 
   - Section: Agent
   - Type: container
 
-- **ACP permission overlay** (`#acp-permission-overlay`):
-  - Section: Agent
-  - Type: overlay
-  - Notes: Global. Timeout denies. Stays visible if you leave the Agent view.
-
-- **ACP permission dialog** (`#acp-permission-dialog`):
-  - Section: Agent
-  - Type: dialog
-
-- **ACP permission title** (`#acp-permission-title`):
-  - Section: Agent
-  - Type: text
-
-- **ACP permission details** (`#acp-permission-body`):
-  - Section: Agent
-  - Type: container
-
-- **Deny ACP permission** (`#acp-permission-deny`):
-  - Section: Agent
-  - Type: button
-  - Action: Denies the pending tool. Fail-closed.
-
-- **Allow ACP permission for session** (`#acp-permission-allow-session`):
-  - Section: Agent
-  - Type: button
-  - Action: Allows this tool and auto-allows later permission prompts on the same run.
-
-- **Allow ACP permission once** (`#acp-permission-allow`):
-  - Section: Agent
-  - Type: button
-  - Action: Allows this tool call once.
-
 ## Task checklist
 
 A compact strip showing the agent's todo list for the current conversation. Items come from the `todo` tool; the user can delete items from the UI.

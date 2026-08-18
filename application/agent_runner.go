@@ -322,7 +322,7 @@ func (a *App) runConversationID(runID string) string {
 	return ""
 }
 
-func (a *App) handleTurnsSteer(ctx context.Context, req contracts.TurnSteerRequest) (any, *contracts.RPCError) {
+func (a *App) handleTurnsSteer(_ context.Context, req contracts.TurnSteerRequest) (any, *contracts.RPCError) {
 	text := strings.TrimSpace(req.Text)
 	if text == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "steer text is required"}
@@ -682,6 +682,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 		TurnOK:            true,
 		HasConversation:   true,
 		TurnText:          lastText,
+		HasBackgroundJobs: a.hasPendingSubagents(run.ConversationID),
 	})
 	if !decision.ShouldContinue {
 		a.log("info", "agent", "auto-continue chain stopped: %s (open todos: %d)", decision.Reason, decision.OpenTodoCount)
@@ -712,7 +713,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 // applyQueuedSteer drains a queued steer and appends it as a real user message
 // at the current safe boundary. Returns (true, updatedConversation, nil) when a
 // steer was applied, (false, nil, nil) when no steer was queued.
-func (a *App) applyQueuedSteer(run *TurnRun, currentMsgID string) (bool, *domain.Conversation, error) {
+func (a *App) applyQueuedSteer(run *TurnRun, _ string) (bool, *domain.Conversation, error) {
 	entry := run.drainSteer()
 	if entry == nil {
 		return false, nil, nil
@@ -741,7 +742,7 @@ func canContinuePartialStream(err error, round streamedTurnRound) bool {
 // restarted from scratch so a leftover continuation flag cannot skip tool
 // work or consume the mid-stream continuation budget.
 func shouldContinueFailedTurn(failed domain.Message) bool {
-	return (failed.Content != "" || failed.Reasoning != "") && len(failed.ToolCalls) == 0
+	return domain.ShouldContinueFailedTurn(failed)
 }
 
 // compactionTriggerTokens is the estimated-token watermark that starts
@@ -751,19 +752,7 @@ func shouldContinueFailedTurn(failed domain.Message) bool {
 // it is used as the trigger but still capped at 80% of the window so a high
 // threshold cannot wait until the next turn already overflows.
 func compactionTriggerTokens(contextWindow int, settings domain.Settings) int {
-	trigger := settings.CompactionThreshold
-	windowCap := contextWindow * 4 / 5
-	if trigger <= 0 {
-		// Auto: use 80% of the model's context window.
-		if windowCap > 0 {
-			return windowCap
-		}
-		return domain.DefaultSettings().CompactionThreshold
-	}
-	if windowCap > 0 && windowCap < trigger {
-		return windowCap
-	}
-	return trigger
+	return domain.CompactionTriggerTokens(contextWindow, settings)
 }
 
 // resolveMaxOutput picks the per-turn completion token ceiling. The model's
@@ -772,19 +761,7 @@ func compactionTriggerTokens(contextWindow int, settings domain.Settings) int {
 // sending absurdly high max_tokens values (e.g. 1M for models that advertise
 // it) which cause credit/balance rejections on gateways like OpenRouter.
 func resolveMaxOutput(provider *domain.Provider, model string, settings domain.Settings) int {
-	cap := settings.MaxOutputTokens
-	if cap <= 0 {
-		cap = 65536
-	}
-	for _, m := range provider.Models {
-		if m.ID == model && m.MaxOutput > 0 {
-			if m.MaxOutput < cap {
-				return m.MaxOutput
-			}
-			return cap
-		}
-	}
-	return cap
+	return domain.ResolveMaxOutput(provider, model, settings)
 }
 
 // effectiveContextWindow picks the window shown/used for a model: the
@@ -792,22 +769,14 @@ func resolveMaxOutput(provider *domain.Provider, model string, settings domain.S
 // is only a fallback for models that do not advertise one. Capping catalog
 // models to the global setting confused users ("1M model, why 200k?").
 func effectiveContextWindow(modelWindow, maxInputTokens int) int {
-	if modelWindow > 0 {
-		return modelWindow
-	}
-	return maxInputTokens
+	return domain.EffectiveContextWindow(modelWindow, maxInputTokens)
 }
 
 // resolveContextWindow picks the effective context window for compaction
 // decisions: min(model context, max_input_tokens) when both are known, or the
 // configured max_input_tokens fallback when the model does not advertise one.
 func resolveContextWindow(provider *domain.Provider, model string, settings domain.Settings) int {
-	for _, m := range provider.Models {
-		if m.ID == model && m.Context > 0 {
-			return effectiveContextWindow(m.Context, settings.MaxInputTokens)
-		}
-	}
-	return settings.MaxInputTokens
+	return domain.ResolveContextWindow(provider, model, settings)
 }
 
 // compactConversation summarizes the conversation history via multi-pass
@@ -1037,7 +1006,9 @@ func (a *App) appendToolCall(c *domain.Conversation, msgID string, tc domain.Too
 
 func (a *App) updateToolResult(c *domain.Conversation, msgID, callID string, status domain.ToolCallStatus, output string, outputAttachments []domain.Attachment) *domain.Conversation {
 	for i := range c.Messages {
-		if c.Messages[i].ID != msgID {
+		// When msgID is empty, search all messages (used by the async
+		// subagent completion path which only knows the tool call ID).
+		if msgID != "" && c.Messages[i].ID != msgID {
 			continue
 		}
 		updated := false
@@ -1188,14 +1159,8 @@ type ModelCapabilities struct {
 // true to preserve backward compatibility — providers will reject the
 // attachment if unsupported, and the reactive error path handles that.
 func modelCapabilities(provider *domain.Provider, model string) ModelCapabilities {
-	if provider == nil {
-		return ModelCapabilities{Vision: true, Audio: true, Video: true}
-	}
-	m := provider.FindModel(model)
-	if m == nil {
-		return ModelCapabilities{Vision: true, Audio: true, Video: true}
-	}
-	return ModelCapabilities{Vision: m.Vision, Audio: m.Audio, Video: m.Video}
+	dc := domain.ModelCapabilitiesOf(provider, model)
+	return ModelCapabilities{Vision: dc.Vision, Audio: dc.Audio, Video: dc.Video}
 }
 
 // modelSupportsVision reports whether the given model on the given provider
@@ -1203,30 +1168,14 @@ func modelCapabilities(provider *domain.Provider, model string) ModelCapabilitie
 // (not in catalog) to preserve backward compatibility — providers will
 // reject the image if unsupported, and the reactive error path handles that.
 func modelSupportsVision(provider *domain.Provider, model string) bool {
-	return modelCapabilities(provider, model).Vision
+	return domain.ModelSupportsVision(provider, model)
 }
 
 // filterHydrationDomainMessages strips hydration checkpoint messages (pure
 // hydration tool calls, no content/reasoning) from a domain.Message slice.
 // Used by compaction to exclude synthetic runtime snapshots from summaries.
 func filterHydrationDomainMessages(msgs []domain.Message) []domain.Message {
-	out := make([]domain.Message, 0, len(msgs))
-	for _, m := range msgs {
-		if len(m.ToolCalls) > 0 && m.Content == "" && m.Reasoning == "" {
-			allHydration := true
-			for _, tc := range m.ToolCalls {
-				if !domain.IsHydrationCallID(tc.ID) {
-					allHydration = false
-					break
-				}
-			}
-			if allHydration {
-				continue
-			}
-		}
-		out = append(out, m)
-	}
-	return out
+	return domain.FilterHydrationDomainMessages(msgs)
 }
 
 func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabilities) []ChatMessage {
@@ -1312,28 +1261,12 @@ const imageOmittedPlaceholder = "[image content omitted — this model does not 
 // file location. kind is "image" | "audio" | "video"; toolName is the
 // matching read_* tool.
 func omittedPlaceholderFor(kind, toolName string, atts []domain.Attachment) string {
-	if len(atts) == 0 {
-		return "[" + kind + " content omitted — this model does not support " + kind + " input]"
-	}
-	paths := make([]string, 0, len(atts))
-	for _, a := range atts {
-		if a.FilePath != "" {
-			paths = append(paths, a.FilePath)
-		}
-	}
-	if len(paths) == 0 {
-		return "[" + kind + " content omitted — this model does not support " + kind + " input]"
-	}
-	list := strings.Join(paths, ", ")
-	capKind := strings.ToUpper(kind[:1]) + kind[1:]
-	return "[" + kind + " content omitted — this model does not support " + kind + " input. " +
-		capKind + " file(s): " + list + ". " +
-		"Call the " + toolName + " tool with file_path set to one of the absolute paths above to load the " + kind + " into your context.]"
+	return domain.OmittedPlaceholderFor(kind, toolName, atts)
 }
 
 // imageOmittedPlaceholderFor is kept for backward compatibility with tests.
 func imageOmittedPlaceholderFor(atts []domain.Attachment) string {
-	return omittedPlaceholderFor("image", "read_image", atts)
+	return domain.ImageOmittedPlaceholderFor(atts)
 }
 
 // folderPlaceholderFor builds a text placeholder that tells the agent the
@@ -1341,85 +1274,47 @@ func imageOmittedPlaceholderFor(atts []domain.Attachment) string {
 // (list_dir, read_file, etc.) to explore the directory. Folder attachments
 // carry no bytes — only the path.
 func folderPlaceholderFor(atts []domain.Attachment) string {
-	if len(atts) == 0 {
-		return ""
-	}
-	paths := make([]string, 0, len(atts))
-	for _, a := range atts {
-		if a.FilePath != "" {
-			paths = append(paths, a.FilePath)
-		}
-	}
-	if len(paths) == 0 {
-		return ""
-	}
-	if len(paths) == 1 {
-		return "[Folder dropped: " + paths[0] + ". Use file tools to list and read its contents.]"
-	}
-	return "[Folders dropped: " + strings.Join(paths, ", ") + ". Use file tools to list and read their contents.]"
+	return domain.FolderPlaceholderFor(atts)
 }
 
 func imageAttachmentNames(atts []domain.Attachment) []string {
-	return attachmentNamesByType(atts, "image")
+	return domain.ImageAttachmentNames(atts)
 }
 
 func attachmentNamesByType(atts []domain.Attachment, typ string) []string {
-	var names []string
-	for _, a := range atts {
-		if a.Type == typ {
-			names = append(names, a.Name)
-		}
-	}
-	return names
+	return domain.AttachmentNamesByType(atts, typ)
 }
 
 func hasImageAttachment(atts []domain.Attachment) bool {
-	return hasAttachmentOfType(atts, "image")
+	return domain.HasImageAttachment(atts)
 }
 
 func hasAttachmentOfType(atts []domain.Attachment, typ string) bool {
-	for _, a := range atts {
-		if a.Type == typ {
-			return true
-		}
-	}
-	return false
+	return domain.HasAttachmentOfType(atts, typ)
 }
 
 func stripImageAttachments(atts []domain.Attachment) []domain.Attachment {
-	return stripAttachmentsByType(atts, "image")
+	return domain.StripImageAttachments(atts)
 }
 
 func stripAttachmentsByType(atts []domain.Attachment, typ string) []domain.Attachment {
-	filtered := make([]domain.Attachment, 0, len(atts))
-	for _, a := range atts {
-		if a.Type != typ {
-			filtered = append(filtered, a)
-		}
-	}
-	return filtered
+	return domain.StripAttachmentsByType(atts, typ)
 }
 
 func filterImageAttachments(atts []domain.Attachment) []domain.Attachment {
-	return filterAttachmentsByType(atts, "image")
+	return domain.FilterImageAttachments(atts)
 }
 
 func filterAttachmentsByType(atts []domain.Attachment, typ string) []domain.Attachment {
-	var out []domain.Attachment
-	for _, a := range atts {
-		if a.Type == typ {
-			out = append(out, a)
-		}
-	}
-	return out
+	return domain.FilterAttachmentsByType(atts, typ)
 }
 
 func containsImageOmissionNote(content string) bool {
-	return containsOmissionNote(content, "image")
+	return domain.ContainsImageOmissionNote(content)
 }
 
 func containsOmissionNote(content, kind string) bool {
-	return strings.Contains(content, kind+" content omitted")
+	return domain.ContainsOmissionNote(content, kind)
 }
 
 // saveAttachmentsToDisk writes image/file attachments to the attachment store

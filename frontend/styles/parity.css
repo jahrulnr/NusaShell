@@ -414,6 +414,125 @@ summary { outline: none; }
 .agent-tool-terminal-output { color: #d5dde8; max-height: calc(10 * 1.55em); overflow-y: auto; overscroll-behavior: contain; }
 .agent-tool-terminal-output.is-error { color: #d68d94; }
 @keyframes agent-tool-terminal-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+
+/* ---- subagent delegation card ---- */
+.agent-subagent-card {
+  width: min(100%, 620px);
+  margin: 6px 0 10px 6px;
+  border: 1px solid #2b3a50;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(20, 30, 44, .92), rgba(13, 20, 30, .96));
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+  overflow: hidden;
+}
+.agent-subagent-card:hover { border-color: #3d5a7a; background: linear-gradient(180deg, rgba(24, 36, 52, .94), rgba(15, 23, 35, .98)); }
+.agent-subagent-card:focus-visible { outline: 1px solid #527edc; outline-offset: 2px; }
+.agent-subagent-card.is-running { border-color: #3a5274; }
+.agent-subagent-card.is-error { border-color: #5a3d44; }
+
+.agent-subagent-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px 0;
+}
+.agent-subagent-icon {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  color: #7ab5d9;
+  font: 12px var(--font-mono);
+}
+.agent-subagent-card.is-success .agent-subagent-icon { color: #66d59c; }
+.agent-subagent-card.is-error .agent-subagent-icon { color: #ff8f99; }
+.agent-subagent-card.is-running .agent-subagent-icon { animation: agent-tool-terminal-pulse 1.2s ease-in-out infinite; }
+
+.agent-subagent-name {
+  color: #c5d0de;
+  font: 600 12px/1.2 "IBM Plex Sans", system-ui, sans-serif;
+  letter-spacing: .02em;
+}
+.agent-subagent-status {
+  margin-left: auto;
+  flex-shrink: 0;
+  font: 9px/1 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  border: 1px solid;
+  border-radius: 4px;
+  padding: 3px 6px;
+}
+.agent-subagent-status.is-running { color: #7ab5d9; border-color: rgba(122, 181, 217, .3); }
+.agent-subagent-status.is-success { color: #66d59c; border-color: rgba(102, 213, 156, .3); }
+.agent-subagent-status.is-error { color: #ff8f99; border-color: rgba(255, 143, 153, .3); }
+
+.agent-subagent-body { padding: 8px 14px 12px; }
+.agent-subagent-prompt {
+  margin: 0 0 6px;
+  color: #93a3b8;
+  font: 12px/1.4 "IBM Plex Sans", system-ui, sans-serif;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-subagent-summary {
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  border-left: 2px solid #3d5a7a;
+  color: #b0c0d4;
+  font: 11.5px/1.4 "IBM Plex Sans", system-ui, sans-serif;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-subagent-card.is-error .agent-subagent-summary { border-left-color: #5a3d44; color: #d68d94; }
+.agent-subagent-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 6px;
+}
+.agent-subagent-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.06);
+  color: #8a9aae;
+  font: 10.5px/1.4 "IBM Plex Sans", system-ui, sans-serif;
+  cursor: help;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-subagent-runs { display: grid; gap: 4px; margin-bottom: 6px; }
+.agent-subagent-run {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(18, 28, 40, .6);
+  font: 10.5px var(--font-mono);
+  color: #8fa0b6;
+  cursor: pointer;
+  transition: background .12s ease;
+}
+.agent-subagent-run:hover { background: rgba(24, 36, 52, .8); }
+.agent-subagent-run.is-completed .agent-subagent-run-status { color: #66d59c; }
+.agent-subagent-run.is-failed .agent-subagent-run-status { color: #ff8f99; }
+.agent-subagent-run-status { flex-shrink: 0; }
+.agent-subagent-run-id { color: #688079; }
+
+.agent-subagent-cta {
+  color: #5b8db8;
+  font: 11px "IBM Plex Sans", system-ui, sans-serif;
+  letter-spacing: .02em;
+}
+.agent-subagent-card:hover .agent-subagent-cta { color: #7ab5d9; }
 .agent-reasoning { width: min(100%, 790px); margin: 2px 0 8px; }
 .agent-reasoning summary { margin-left: -12px; }
 .agent-reasoning-content { min-width: 0; max-width: calc(100% - 12px); margin: 2px 0 11px 12px; white-space: normal; }

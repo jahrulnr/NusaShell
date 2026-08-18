@@ -172,17 +172,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.acp-mode-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
-.acp-mode-chip {
-  border: 1px solid #2a3d4e;
-  border-radius: 8px;
-  padding: 5px 8px;
-  background: #101820;
-  color: #c4cfdd;
-  cursor: pointer;
-  font: 11.5px "IBM Plex Sans", system-ui, sans-serif;
-}
-.acp-mode-chip.is-active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .acp-transcript {
   max-height: 280px;
   overflow: auto;
@@ -203,20 +192,6 @@
   font: 10px var(--font-mono);
   text-transform: uppercase;
 }
-.acp-steer-form { display: grid; gap: 8px; margin-top: 12px; }
-.acp-steer-form textarea {
-  width: 100%;
-  box-sizing: border-box;
-  min-height: 64px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel-alt);
-  color: var(--text);
-  font: 12.5px "IBM Plex Sans", system-ui, sans-serif;
-  resize: vertical;
-}
-.acp-run-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .acp-run-error { color: #ff9ca5; font-size: 12px; }
 .acp-empty { color: var(--text-faint); font-size: 12.5px; }
 
@@ -251,32 +226,6 @@
 .acp-popup-kicker { color: var(--text-faint); font: 10px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
 .acp-popup-head h2 { margin: 4px 0 0; font-size: 16px; }
 .acp-popup-body { padding: 16px 18px 20px; }
-
-/* Permission overlay */
-.acp-permission-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 120;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgba(0,0,0,.72);
-  backdrop-filter: blur(6px);
-}
-.acp-permission-overlay[hidden] { display: none; }
-.acp-permission-dialog {
-  width: min(460px, 100%);
-  border: 1px solid #5a4630;
-  border-radius: 14px;
-  padding: 18px 20px 16px;
-  background: #16120d;
-  box-shadow: 0 24px 70px rgba(0,0,0,.5);
-}
-.acp-permission-kicker { color: #f5c15d; font: 10px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
-.acp-permission-dialog h2 { margin: 8px 0 10px; font-size: 17px; }
-.acp-permission-paths { margin: 8px 0 0; padding-left: 18px; color: #d4deea; }
-.acp-permission-paths code { font: 11.5px var(--font-mono); overflow-wrap: anywhere; }
-.acp-permission-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 
 @media (max-width: 720px) {
   .acp-drawer, .acp-drawer-overlay { width: 100%; }

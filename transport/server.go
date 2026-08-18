@@ -29,6 +29,7 @@ func New(app *application.App, logger *slog.Logger, static http.Handler, dev boo
 	mux.HandleFunc("POST /rpc", s.handleRPC)
 	mux.HandleFunc("GET /events", s.handleSSE)
 	mux.HandleFunc("GET /ws", s.handleWS)
+	mux.HandleFunc("GET /local-file", s.handleLocalFile)
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		s.Static.ServeHTTP(w, r)
 	})

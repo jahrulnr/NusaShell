@@ -141,14 +141,7 @@
             "acp-popup",
             "acp-popup-close",
             "acp-popup-title",
-            "acp-popup-body",
-            "acp-permission-overlay",
-            "acp-permission-dialog",
-            "acp-permission-title",
-            "acp-permission-body",
-            "acp-permission-deny",
-            "acp-permission-allow-session",
-            "acp-permission-allow"
+            "acp-popup-body"
           ]
         },
         {
@@ -1693,45 +1686,6 @@
       "label": "ACP peek body",
       "section": "Agent",
       "type": "container"
-    },
-    "acp-permission-overlay": {
-      "label": "ACP permission overlay",
-      "section": "Agent",
-      "type": "overlay",
-      "notes": "Global. Timeout denies. Stays visible if you leave the Agent view."
-    },
-    "acp-permission-dialog": {
-      "label": "ACP permission dialog",
-      "section": "Agent",
-      "type": "dialog"
-    },
-    "acp-permission-title": {
-      "label": "ACP permission title",
-      "section": "Agent",
-      "type": "text"
-    },
-    "acp-permission-body": {
-      "label": "ACP permission details",
-      "section": "Agent",
-      "type": "container"
-    },
-    "acp-permission-deny": {
-      "label": "Deny ACP permission",
-      "section": "Agent",
-      "type": "button",
-      "action": "Denies the pending tool. Fail-closed."
-    },
-    "acp-permission-allow-session": {
-      "label": "Allow ACP permission for session",
-      "section": "Agent",
-      "type": "button",
-      "action": "Allows this tool and auto-allows later permission prompts on the same run."
-    },
-    "acp-permission-allow": {
-      "label": "Allow ACP permission once",
-      "section": "Agent",
-      "type": "button",
-      "action": "Allows this tool call once."
     },
     "telemetry-range": {
       "label": "Time range selector",

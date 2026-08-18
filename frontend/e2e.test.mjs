@@ -7,11 +7,27 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { createServer as createHTTPServer } from 'node:http';
 import { test } from 'node:test';
-import { JSDOM } from 'jsdom';
+import { JSDOM, VirtualConsole } from 'jsdom';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const nodeFetch = globalThis.fetch.bind(globalThis);
 const NativeWebSocket = globalThis.WebSocket;
+
+// Silenced virtual console: JSDOM prints "Not implemented: ..." warnings for
+// canvas getContext and other browser-only APIs that vis-network probes. These
+// are expected in a headless test environment and add noise without value.
+const silentConsole = new VirtualConsole();
+silentConsole.on('error', () => {});
+silentConsole.on('warn', () => {});
+silentConsole.on('jsdomError', () => {});
+
+function createJSDOM(html, baseURL) {
+  return new JSDOM(html, {
+    url: baseURL,
+    pretendToBeVisual: true,
+    virtualConsole: silentConsole,
+  });
+}
 
 async function freePort() {
   return new Promise((resolvePort, reject) => {
@@ -73,6 +89,9 @@ function installBrowserGlobals(dom, baseURL) {
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: window.navigator });
   globalThis.CustomEvent = window.CustomEvent;
   globalThis.Node = window.Node;
+  globalThis.Element = window.Element;
+  globalThis.HTMLElement = window.HTMLElement;
+  globalThis.SVGElement = window.SVGElement;
   globalThis.requestAnimationFrame = window.requestAnimationFrame.bind(window);
   globalThis.fetch = fetchFromServer;
   window.fetch = fetchFromServer;
@@ -204,7 +223,7 @@ test('embedded frontend completes one representative flow through the Go backend
     }, 'Go server startup', 20000);
 
     const html = await (await nodeFetch(baseURL)).text();
-    const dom = new JSDOM(html, { url: baseURL, pretendToBeVisual: true });
+    const dom = createJSDOM(html, baseURL);
     installBrowserGlobals(dom, baseURL);
     rpcModule = await import(`${pathToFileURL(join(repo, 'frontend', 'js', 'rpc.js')).href}`);
     await import(`${pathToFileURL(join(repo, 'frontend', 'js', 'app.js')).href}?e2e=${Date.now()}`);
@@ -286,7 +305,7 @@ test('compaction triggers and renders a marker when conversation exceeds thresho
     }, 'Go server startup', 20000);
 
     const html = await (await nodeFetch(baseURL)).text();
-    const dom = new JSDOM(html, { url: baseURL, pretendToBeVisual: true });
+    const dom = createJSDOM(html, baseURL);
     installBrowserGlobals(dom, baseURL);
     rpcModule = await import(`${pathToFileURL(join(repo, 'frontend', 'js', 'rpc.js')).href}`);
     await import(`${pathToFileURL(join(repo, 'frontend', 'js', 'app.js')).href}?e2e=${Date.now()}`);
@@ -416,7 +435,7 @@ test('BH-AI-01: incomplete stream with tool-call deltas must not silently fall b
     }, 'Go server startup', 20000);
 
     const html = await (await nodeFetch(baseURL)).text();
-    const dom = new JSDOM(html, { url: baseURL, pretendToBeVisual: true });
+    const dom = createJSDOM(html, baseURL);
     installBrowserGlobals(dom, baseURL);
     rpcModule = await import(`${pathToFileURL(join(repo, 'frontend', 'js', 'rpc.js')).href}`);
     await import(`${pathToFileURL(join(repo, 'frontend', 'js', 'app.js')).href}?e2e=${Date.now()}`);
@@ -517,7 +536,7 @@ test('BH-SETTINGS-01: sampling parameters cannot be cleared to null once set', a
     }, 'Go server startup', 20000);
 
     const html = await (await nodeFetch(baseURL)).text();
-    const dom = new JSDOM(html, { url: baseURL, pretendToBeVisual: true });
+    const dom = createJSDOM(html, baseURL);
     installBrowserGlobals(dom, baseURL);
     rpcModule = await import(`${pathToFileURL(join(repo, 'frontend', 'js', 'rpc.js')).href}`);
     await import(`${pathToFileURL(join(repo, 'frontend', 'js', 'app.js')).href}?e2e=${Date.now()}`);
@@ -616,7 +635,7 @@ test('HYDR-NEW-ROOM: first turn of a new conversation injects the hydration tran
     }, 'Go server startup', 20000);
 
     const html = await (await nodeFetch(baseURL)).text();
-    const dom = new JSDOM(html, { url: baseURL, pretendToBeVisual: true });
+    const dom = createJSDOM(html, baseURL);
     installBrowserGlobals(dom, baseURL);
     rpcModule = await import(`${pathToFileURL(join(repo, 'frontend', 'js', 'rpc.js')).href}`);
     await import(`${pathToFileURL(join(repo, 'frontend', 'js', 'app.js')).href}?e2e=${Date.now()}`);
@@ -738,7 +757,7 @@ test('HYDR-POST-COMPACTION: turn after compaction re-injects the hydration trans
     }, 'Go server startup', 20000);
 
     const html = await (await nodeFetch(baseURL)).text();
-    const dom = new JSDOM(html, { url: baseURL, pretendToBeVisual: true });
+    const dom = createJSDOM(html, baseURL);
     installBrowserGlobals(dom, baseURL);
     rpcModule = await import(`${pathToFileURL(join(repo, 'frontend', 'js', 'rpc.js')).href}`);
     await import(`${pathToFileURL(join(repo, 'frontend', 'js', 'app.js')).href}?e2e=${Date.now()}`);

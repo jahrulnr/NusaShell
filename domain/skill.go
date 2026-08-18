@@ -215,7 +215,7 @@ func DefaultSettings() Settings {
 		MaxToolRounds:           8,
 		MaxInputTokens:          200000,
 		MaxOutputTokens:         65536,
-		LearningReviewThreshold: 50,
+		LearningReviewThreshold: 10,
 		MaxAutoContinues:        DefaultMaxAutoContinues,
 	}
 }

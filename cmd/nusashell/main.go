@@ -232,6 +232,7 @@ func run() error {
 		WorkspacePicker:             workspacepicker.Zenity{},
 		AcpAgents:                   &jsonstore.AcpAgents{S: store},
 		Acp:                         acpRuntime,
+		AcpRunStorage:               jsonstore.NewAcpRunStore(dataDir),
 		Logger:                      logger,
 	})
 	tb.Acp = app

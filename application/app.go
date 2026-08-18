@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"runtime/debug"
-	"strings"
 	"sync"
 	"time"
 
@@ -52,11 +53,12 @@ type App struct {
 	CodexRouter                 *CodexAccountRouter
 	AcpAgents                   AcpAgentStore
 	Acp                         AcpRuntime
+	AcpRunStorage               domain.AcpRunStorage
 	retrySleeper                RetrySleeper
 
 	// learningMu guards lazy init of learningSearcher and graphService,
 	// plus the per-conversation turn counter for threshold-based review.
-	learningMu       sync.Mutex
+	learningMu       sync.RWMutex
 	learningSearcher *LearningSearcher
 	graphService     *LearningGraphService
 	ReviewAgent      *BackgroundReviewAgent
@@ -83,9 +85,63 @@ type App struct {
 	runs    map[string]*TurnRun
 	startMu sync.Mutex
 
+	// pendingSubagents tracks active (not-yet-completed) ACP subagent run
+	// IDs per conversation. Used to implement HasBackgroundJobs: while any
+	// subagent is running, the parent agent's auto-continue chain pauses
+	// with reason "awaiting-background-jobs" instead of ending the turn.
+	// When a subagent completes, the OnDone callback removes it from this
+	// map and triggers a new turn so the parent agent processes the result.
+	pendingSubagentsMu sync.Mutex
+	pendingSubagents   map[string]map[string]bool // conversationID → set of runIDs
+
 	// Logger is an optional structured logger used for crash recovery
 	// diagnostics from fire-and-forget goroutines. Nil = slog.Default().
 	Logger *slog.Logger
+}
+
+// trackPendingSubagent records that a subagent run is active for a
+// conversation. Called when the subagent tool spawns a run.
+func (a *App) trackPendingSubagent(conversationID, runID string) {
+	if conversationID == "" || runID == "" {
+		return
+	}
+	a.pendingSubagentsMu.Lock()
+	defer a.pendingSubagentsMu.Unlock()
+	if a.pendingSubagents == nil {
+		a.pendingSubagents = map[string]map[string]bool{}
+	}
+	if a.pendingSubagents[conversationID] == nil {
+		a.pendingSubagents[conversationID] = map[string]bool{}
+	}
+	a.pendingSubagents[conversationID][runID] = true
+}
+
+// untrackPendingSubagent removes a completed subagent run. Returns true
+// if the run was found and removed, false if it was not tracked.
+func (a *App) untrackPendingSubagent(conversationID, runID string) bool {
+	a.pendingSubagentsMu.Lock()
+	defer a.pendingSubagentsMu.Unlock()
+	set := a.pendingSubagents[conversationID]
+	if set == nil {
+		return false
+	}
+	if !set[runID] {
+		return false
+	}
+	delete(set, runID)
+	if len(set) == 0 {
+		delete(a.pendingSubagents, conversationID)
+	}
+	return true
+}
+
+// hasPendingSubagents reports whether any subagent runs are still active
+// for the given conversation. Used by the auto-continue policy to decide
+// whether to pause (awaiting-background-jobs) or proceed.
+func (a *App) hasPendingSubagents(conversationID string) bool {
+	a.pendingSubagentsMu.Lock()
+	defer a.pendingSubagentsMu.Unlock()
+	return len(a.pendingSubagents[conversationID]) > 0
 }
 
 // MCPToolbox gives use cases access to connected MCP servers and their tools.
@@ -242,6 +298,7 @@ type Deps struct {
 	RetrySleeper                RetrySleeper
 	AcpAgents                   AcpAgentStore
 	Acp                         AcpRuntime
+	AcpRunStorage               domain.AcpRunStorage
 	// Logger is an optional structured logger for crash recovery from
 	// fire-and-forget goroutines. Nil = slog.Default().
 	Logger     *slog.Logger
@@ -282,11 +339,13 @@ func NewApp(deps Deps) *App {
 		ModelCatalog:                deps.ModelCatalog,
 		AcpAgents:                   deps.AcpAgents,
 		Acp:                         deps.Acp,
+		AcpRunStorage:               deps.AcpRunStorage,
 		retrySleeper:                deps.RetrySleeper,
 		Logger:                      deps.Logger,
 		Automation:                  deps.Automation,
 		runs:                        map[string]*TurnRun{},
 		turnsSinceReview:            map[string]int{},
+		pendingSubagents:            map[string]map[string]bool{},
 	}
 	// Wire the background LLM review agent. Uses the conversation's
 	// configured model ("global LLM") with a restricted toolset and the
@@ -305,6 +364,7 @@ func NewApp(deps Deps) *App {
 	// stopped by CloseLifecycle.
 	if deps.Memory != nil {
 		app.lifecycle = NewLifecycleManager(deps.Memory, deps.Skills, DefaultLifecycleConfig())
+		app.lifecycle.SetLogger(app.log)
 	}
 	// Wire the embedding cache + edge builder. The cache persists to
 	// learning_embeddings.jsonl and avoids re-embedding on every search.
@@ -315,6 +375,8 @@ func NewApp(deps Deps) *App {
 			app.EmbeddingCache = cache
 		}
 		app.Trajectory = NewTrajectoryRecorder(deps.DataDir)
+		// Load persisted turn counters so review thresholds survive restarts.
+		app.loadTurnCounters(deps.DataDir)
 	}
 	if deps.Memory != nil && deps.Skills != nil {
 		app.edgeBuilder = NewEdgeBuilder(
@@ -549,6 +611,61 @@ func (a *App) CloseLifecycle() {
 		a.lifecycleCancel()
 		a.lifecycleCancel = nil
 	}
+	// Persist turn counters so review thresholds survive restarts.
+	a.saveTurnCounters()
+}
+
+// turnCountersPath returns the path to the persisted turn counter file.
+func (a *App) turnCountersPath() string {
+	if a.DataDir == "" {
+		return ""
+	}
+	return filepath.Join(a.DataDir, "learning_turns.json")
+}
+
+// loadTurnCounters restores per-conversation turn counters from disk so
+// that the learning review threshold survives server restarts. Without
+// this, a user who restarts frequently never reaches the threshold and
+// the review agent never fires.
+func (a *App) loadTurnCounters(dataDir string) {
+	path := filepath.Join(dataDir, "learning_turns.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return // file doesn't exist yet — fresh start
+	}
+	var counters map[string]int
+	if err := json.Unmarshal(data, &counters); err != nil {
+		return
+	}
+	a.learningMu.Lock()
+	a.turnsSinceReview = counters
+	a.learningMu.Unlock()
+	if len(counters) > 0 {
+		a.log("info", "learning", "loaded %d turn counter(s) from disk", len(counters))
+	}
+}
+
+// saveTurnCounters persists turn counters to disk. Called on lifecycle
+// shutdown and after each counter update.
+func (a *App) saveTurnCounters() {
+	path := a.turnCountersPath()
+	if path == "" {
+		return
+	}
+	a.learningMu.RLock()
+	counters := make(map[string]int, len(a.turnsSinceReview))
+	for k, v := range a.turnsSinceReview {
+		counters[k] = v
+	}
+	a.learningMu.RUnlock()
+	if len(counters) == 0 {
+		return
+	}
+	data, err := json.Marshal(counters)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(path, data, 0o600)
 }
 
 // Close releases resources held by the app (file handles, background
@@ -1138,17 +1255,11 @@ func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Mode
 // splitQualifiedModel splits a "provider_id:model_id" string on the first
 // colon. Returns ok=false when the string is a bare model ID (no colon).
 func splitQualifiedModel(s string) (providerID, modelID string, ok bool) {
-	idx := strings.IndexByte(s, ':')
-	if idx <= 0 {
-		return "", "", false
-	}
-	return s[:idx], s[idx+1:], true
+	return domain.SplitQualifiedModel(s)
 }
 
 func requiresKey(kind domain.ProviderKind) bool {
-	// local endpoints (Ollama, LM Studio via chat kind) work without a key
-	// Codex uses OAuth tokens stored in CredentialStore, not a user-supplied key
-	return kind == domain.ProviderMessages || kind == domain.ProviderResponses
+	return domain.RequiresKey(kind)
 }
 
 func rpcInternal(err error) *contracts.RPCError {

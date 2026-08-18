@@ -23,25 +23,7 @@ import (
 // suffix is appended when the result is empty or already taken to keep IDs
 // unique and valid.
 func skillSlug(name string) string {
-	var out []byte
-	prevDash := true
-	for _, r := range strings.ToLower(name) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			out = append(out, byte(r))
-			prevDash = false
-		case r == ' ' || r == '_' || r == '-':
-			if !prevDash {
-				out = append(out, '-')
-				prevDash = true
-			}
-		}
-	}
-	result := strings.Trim(string(out), "-")
-	if result == "" {
-		result = "skill"
-	}
-	return result
+	return domain.SkillSlug(name)
 }
 
 func skillDTO(s *domain.Skill) contracts.SkillDTO {
@@ -1107,40 +1089,10 @@ func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 // value (validate then set). A *float64 with omitempty cannot distinguish
 // null from absent, so json.RawMessage is used on the wire instead.
 func applyOptionalFloat(raw json.RawMessage, validate func(float64) error, target **float64) error {
-	if len(raw) == 0 {
-		return nil
-	}
-	if string(raw) == "null" {
-		*target = nil
-		return nil
-	}
-	var v float64
-	if err := json.Unmarshal(raw, &v); err != nil {
-		return fmt.Errorf("invalid number: %w", err)
-	}
-	if err := validate(v); err != nil {
-		return err
-	}
-	*target = &v
-	return nil
+	return domain.ApplyOptionalFloat(raw, validate, target)
 }
 
 // applyOptionalInt is the integer variant of applyOptionalFloat for top_k.
 func applyOptionalInt(raw json.RawMessage, validate func(int) error, target **int) error {
-	if len(raw) == 0 {
-		return nil
-	}
-	if string(raw) == "null" {
-		*target = nil
-		return nil
-	}
-	var v int
-	if err := json.Unmarshal(raw, &v); err != nil {
-		return fmt.Errorf("invalid integer: %w", err)
-	}
-	if err := validate(v); err != nil {
-		return err
-	}
-	*target = &v
-	return nil
+	return domain.ApplyOptionalInt(raw, validate, target)
 }

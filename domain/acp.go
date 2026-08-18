@@ -393,11 +393,11 @@ func (r *AcpRun) Live() bool {
 	return false
 }
 
-// pathRooted reports whether p is an absolute location that must not be
+// PathRooted reports whether p is an absolute location that must not be
 // joined onto a workspace prefix. On Windows, slash-rooted paths such as
 // `\etc\passwd` and Unix-style `/etc/passwd` are rooted even though
 // filepath.IsAbs is false without a volume.
-func pathRooted(p string) bool {
+func PathRooted(p string) bool {
 	if filepath.IsAbs(p) {
 		return true
 	}
@@ -409,7 +409,7 @@ func pathRooted(p string) bool {
 // Windows volume paths (`C:\…`) are rooted on every GOOS so validation
 // fixtures stay portable.
 func hostRootedPath(p string) bool {
-	if pathRooted(p) || strings.HasPrefix(p, `\`) {
+	if PathRooted(p) || strings.HasPrefix(p, `\`) {
 		return true
 	}
 	if len(p) >= 2 && p[1] == ':' {
@@ -435,7 +435,7 @@ func ResolveWithinWorkspace(workspace, path string) (string, bool) {
 	}
 	root := filepath.Clean(workspace)
 	clean := filepath.Clean(path)
-	if !pathRooted(clean) {
+	if !PathRooted(clean) {
 		clean = filepath.Clean(filepath.Join(root, clean))
 	}
 	rel, err := filepath.Rel(root, clean)

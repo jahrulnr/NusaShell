@@ -93,11 +93,12 @@ func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *cont
 	// Ollama defaults to localhost:11434 — no API key needed.
 	// Other kinds require a base URL.
 	if baseURL == "" {
-		if kind == domain.ProviderCodex {
+		switch kind {
+		case domain.ProviderCodex:
 			baseURL = "https://chatgpt.com/backend-api/codex"
-		} else if kind == domain.ProviderOllama {
+		case domain.ProviderOllama:
 			baseURL = "http://localhost:11434"
-		} else {
+		default:
 			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "base url is required"}
 		}
 	}

@@ -189,29 +189,16 @@ func TestStopCancelsSlowRun(t *testing.T) {
 	}
 }
 
-func TestPermissionPromptThenAllow(t *testing.T) {
+func TestPermissionAutoAllowedByOrchestrator(t *testing.T) {
 	rt := New()
 	defer rt.Close()
 	ws := t.TempDir()
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	gotPerm := make(chan domain.AcpPermissionRequest, 1)
-	rt.SetCallbacks(nil, nil, func(_ *domain.AcpRun, req domain.AcpPermissionRequest) {
-		gotPerm <- req
-	}, nil)
 	run, err := rt.Spawn(ctx, application.AcpSpawnRequest{
 		Agent: testAgent(ws), Prompt: "NEED_PERMISSION edit", Workspace: ws,
 	})
 	if err != nil {
-		t.Fatal(err)
-	}
-	var req domain.AcpPermissionRequest
-	select {
-	case req = <-gotPerm:
-	case <-time.After(4 * time.Second):
-		t.Fatal("timed out waiting for permission prompt")
-	}
-	if err := rt.DecidePermission(run.ID, req.ID, "allow-once", domain.PermissionAllowOnce); err != nil {
 		t.Fatal(err)
 	}
 	finished, err := rt.Wait(ctx, run.ID)

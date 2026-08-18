@@ -1,6 +1,7 @@
 import { renderMarkdown } from '../../markdown.js';
 import { el, fmtTime } from '../../ui.js';
 import { createAskCard } from '../ask-card.js';
+import { openDrawer, agentNameForId } from './subagents.js';
 
 export function renderEmptyThread() {
   const thread = document.getElementById('agent-thread');
@@ -199,7 +200,8 @@ function totalUsage(messages) {
 
 // renderToolCallCard dispatches to the right card type based on the tool
 // name. ask_question renders as a sealed ask card (matching Electron's
-// toolActivity); everything else renders as a tool terminal.
+// toolActivity); subagent renders as a delegation card (clickable → drawer);
+// everything else renders as a tool terminal.
 export function renderToolCallCard(toolCall) {
   if (toolCall.name === 'ask_question') {
     let parsedArgs = {};
@@ -210,7 +212,118 @@ export function renderToolCallCard(toolCall) {
       ok: toolCall.status !== 'fail',
     });
   }
+  if (toolCall.name === 'subagent') {
+    return renderSubagentCard(toolCall);
+  }
   return renderToolJob(toolCall);
+}
+
+// renderSubagentCard builds a delegation card for the `subagent` tool.
+// Async flow: saat spawn, output = {"runs":[{"id":"...","status":"starting"}]}.
+// Saat selesai, output = YAML frontmatter (status, workspace, output_path)
+// + markdown body (summary). Card re-render via EventToolCompleted.
+function renderSubagentCard(toolCall) {
+  let args = {};
+  try { args = JSON.parse(toolCall.args || '{}'); } catch {}
+  let runs = [];
+  let meta = null;       // parsed YAML header
+  let outputText = '';   // markdown body (summary)
+  try {
+    const parsed = JSON.parse(toolCall.output || '{}');
+    runs = parsed.runs || [];
+  } catch {
+    // Not JSON — try YAML frontmatter + markdown body
+    const parsed = parseSubagentResult(toolCall.output || '');
+    meta = parsed.meta;
+    outputText = parsed.body;
+  }
+
+  const agentName = agentNameForId(args.agent_id) || 'Subagent';
+  const promptPreview = (args.prompt || '').split('\n')[0].slice(0, 120);
+  const isRunning = toolCall.status === 'running' || !toolCall.output;
+  const isFailed = toolCall.status === 'fail' || meta?.status === 'failed';
+  const isCancelled = meta?.status === 'cancelled';
+  const status = isRunning ? 'running' : (isFailed ? 'error' : 'success');
+
+  const card = el('div', { class: `agent-subagent-card is-${status}`, role: 'button', tabindex: '0', 'aria-label': `Open ${agentName} transcript` });
+  card._toolArgs = toolCall.args;
+
+  // Header: icon + agent name + status
+  const header = el('div', { class: 'agent-subagent-header' },
+    el('span', { class: 'agent-subagent-icon', text: '◇' }),
+    el('span', { class: 'agent-subagent-name', text: agentName }),
+    el('span', { class: `agent-subagent-status is-${status}`, text: isRunning ? 'running' : (isCancelled ? 'cancelled' : (isFailed ? 'failed' : 'done')) }),
+  );
+
+  // Body: prompt preview + metadata + summary + runs list
+  const body = el('div', { class: 'agent-subagent-body' });
+  if (promptPreview) {
+    body.append(el('p', { class: 'agent-subagent-prompt', text: promptPreview }));
+  }
+  // Metadata chips (workspace, output_path) saat done
+  if (meta) {
+    const metaRow = el('div', { class: 'agent-subagent-meta' });
+    if (meta.workspace) {
+      metaRow.append(el('span', { class: 'agent-subagent-meta-chip', title: meta.workspace, text: '📁 ' + meta.workspace.split('/').pop() }));
+    }
+    if (meta.output_path) {
+      metaRow.append(el('span', { class: 'agent-subagent-meta-chip', title: meta.output_path, text: '📄 transcript' }));
+    }
+    if (metaRow.children.length) body.append(metaRow);
+  }
+  // Summary preview saat done
+  if (!isRunning && outputText) {
+    const summaryPreview = outputText.split('\n')[0].slice(0, 160);
+    body.append(el('p', { class: 'agent-subagent-summary', text: summaryPreview }));
+  }
+  if (runs.length > 1) {
+    body.append(el('div', { class: 'agent-subagent-runs' },
+      ...runs.map((r) => el('div', { class: `agent-subagent-run is-${r.status}`, 'data-run-id': r.id },
+        el('span', { class: 'agent-subagent-run-status', text: r.status === 'completed' ? '✓' : (r.status === 'failed' ? '✗' : '•') }),
+        el('span', { class: 'agent-subagent-run-id', text: r.id.slice(-8) }),
+      )),
+    ));
+  }
+  body.append(el('span', { class: 'agent-subagent-cta', text: isRunning ? 'View live transcript →' : 'View transcript →' }));
+
+  card.append(header, body);
+
+  card.addEventListener('click', (event) => {
+    const runRow = event.target.closest('[data-run-id]');
+    const runId = runRow?.dataset.runId || runs[0]?.id;
+    if (runId) openDrawer(runId);
+  });
+  card.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    card.click();
+  });
+
+  return card;
+}
+
+// parseSubagentResult splits a YAML frontmatter + markdown body tool
+// result into { meta, body }. Returns { meta: null, body: raw } if the
+// input is not in the expected format.
+function parseSubagentResult(raw) {
+  if (!raw.startsWith('---\n')) return { meta: null, body: raw };
+  const end = raw.indexOf('\n---\n', 4);
+  if (end < 0) return { meta: null, body: raw };
+  const header = raw.slice(4, end);
+  const body = raw.slice(end + 5);
+  const meta = {};
+  for (const line of header.split('\n')) {
+    const idx = line.indexOf(':');
+    if (idx < 0) continue;
+    const key = line.slice(0, idx).trim();
+    let val = line.slice(idx + 1).trim();
+    // strip surrounding quotes
+    if (val.startsWith('"') && val.endsWith('"')) {
+      val = val.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    }
+    meta[key] = val;
+  }
+  return { meta, body };
 }
 
 export function renderToolJob(toolCall) {
@@ -315,8 +428,19 @@ function renderMessageAttachments(attachments) {
   });
   for (const attachment of attachments) {
     if (attachment.type === 'image') {
-      const image = el('img', { src: attachment.data_url, alt: attachment.name, loading: 'lazy' });
-      gallery.append(el('figure', { class: 'agent-message-attachment agent-message-image' }, image, el('figcaption', { text: attachment.name })));
+      const src = attachment.data_url || (attachment.file_path ? '/local-file?path=' + encodeURIComponent(attachment.file_path) : '');
+      const image = el('img', { src, alt: attachment.name, loading: 'lazy' });
+      image.addEventListener('error', () => image.classList.add('img-load-error'));
+      const fig = el('figure', { class: 'agent-message-attachment agent-message-image' }, image, el('figcaption', { text: attachment.name }));
+      gallery.append(fig);
+      continue;
+    }
+    if (attachment.type === 'video') {
+      const src = attachment.data_url || (attachment.file_path ? '/local-file?path=' + encodeURIComponent(attachment.file_path) : '');
+      const video = el('video', { controls: true, preload: 'metadata', src });
+      video.addEventListener('error', () => video.classList.add('video-load-error'));
+      const fig = el('figure', { class: 'agent-message-attachment agent-message-video' }, video, el('figcaption', { text: attachment.name }));
+      gallery.append(fig);
       continue;
     }
     if (attachment.type === 'folder') {

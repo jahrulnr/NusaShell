@@ -373,10 +373,7 @@ func (a *App) handleAcpPermissionDecide(req contracts.AcpPermissionDecideRequest
 }
 
 func permissionTitle(run *domain.AcpRun) string {
-	if run != nil && run.PendingPermission != nil {
-		return run.PendingPermission.ToolTitle
-	}
-	return ""
+	return domain.PermissionTitle(run)
 }
 
 func (a *App) acpReady(id string) (*domain.AcpAgent, AcpRuntime, *contracts.RPCError) {
@@ -475,11 +472,11 @@ func (a *App) spawnAcpSubagents(ctx context.Context, argsJSON []byte) (string, e
 	if workspace == "" {
 		workspace = agent.DefaultWorkspace
 	}
-	if workspace != "" && !isAbsPath(workspace) {
+	if workspace != "" && !domain.PathRooted(workspace) {
 		return "", fmt.Errorf("workspace must be an absolute path")
 	}
 
-	results := make([]acpSpawned, count)
+	results := make([]domain.AcpSpawned, count)
 	for i := 0; i < count; i++ {
 		run, err := a.Acp.Spawn(ctx, AcpSpawnRequest{
 			Agent:            agent,
@@ -490,58 +487,18 @@ func (a *App) spawnAcpSubagents(ctx context.Context, argsJSON []byte) (string, e
 			ModeID:           args.ModeID,
 			ModelID:          args.ModelID,
 		})
-		results[i] = acpSpawned{run: run, err: err}
+		results[i] = domain.AcpSpawned{Run: run, Err: err}
 		if err == nil && run != nil {
 			a.emitAcpRun(contracts.EventAcpRunStarted, run)
+			a.trackPendingSubagent(run.ConversationID, run.ID)
 		}
 	}
-	if !args.Async {
-		for i, r := range results {
-			if r.err != nil || r.run == nil {
-				continue
-			}
-			waitCtx := ctx
-			finished, werr := a.Acp.Wait(waitCtx, r.run.ID)
-			if finished != nil {
-				results[i].run = finished
-			}
-			if werr != nil && results[i].err == nil {
-				results[i].err = werr
-			}
-		}
-	}
-	return formatSpawnResult(results, args.Async), nil
-}
-
-type acpSpawned struct {
-	run *domain.AcpRun
-	err error
-}
-
-func formatSpawnResult(results []acpSpawned, async bool) string {
-	type item struct {
-		ID        string `json:"id"`
-		Status    string `json:"status"`
-		Workspace string `json:"workspace,omitempty"`
-		Summary   string `json:"summary,omitempty"`
-		Error     string `json:"error,omitempty"`
-		Async     bool   `json:"async,omitempty"`
-	}
-	out := make([]item, 0, len(results))
-	for _, r := range results {
-		if r.err != nil {
-			out = append(out, item{Status: "failed", Error: r.err.Error(), Async: async})
-			continue
-		}
-		it := item{ID: r.run.ID, Status: string(r.run.Status), Workspace: r.run.Workspace, Async: async}
-		if !r.run.Live() {
-			it.Summary = transcriptSummary(r.run)
-			it.Error = r.run.Error
-		}
-		out = append(out, it)
-	}
-	b, _ := json.Marshal(map[string]any{"runs": out, "async": async})
-	return string(b)
+	// Always async: the parent agent gets "starting" immediately and is
+	// free to continue other work. When the subagent finishes, the OnDone
+	// callback updates the original tool call with the summary and
+	// triggers a new turn (tool injection) so the parent agent processes
+	// the result without blocking.
+	return domain.FormatSpawnResult(results), nil
 }
 
 func transcriptSummary(run *domain.AcpRun) string {
@@ -566,6 +523,175 @@ func transcriptSummary(run *domain.AcpRun) string {
 
 func isAbsPath(p string) bool {
 	return len(p) > 0 && (p[0] == '/' || (len(p) > 1 && p[1] == ':'))
+}
+
+// acpTranscriptPath returns the absolute path to the JSONL file where
+// completed ACP run records are persisted, or "" if storage is not
+// configured or not file-backed. Included in the tool result YAML header
+// so the parent agent can reference it for debugging.
+func acpTranscriptPath(storage domain.AcpRunStorage) string {
+	if storage == nil {
+		return ""
+	}
+	type pather interface{ TranscriptPath() string }
+	if p, ok := storage.(pather); ok {
+		return p.TranscriptPath()
+	}
+	return ""
+}
+
+// subagentCompletionResult builds the tool result: YAML frontmatter
+// (status, workspace, output_path) + markdown body (the summary).
+func subagentCompletionResult(run *domain.AcpRun, transcriptPath string) string {
+	body := subagentCompletionBody(run)
+	var y strings.Builder
+	y.WriteString("---\n")
+	y.WriteString("status: ")
+	y.WriteString(yamlScalar(string(run.Status)))
+	y.WriteString("\n")
+	if run.Workspace != "" {
+		y.WriteString("workspace: ")
+		y.WriteString(yamlScalar(run.Workspace))
+		y.WriteString("\n")
+	}
+	if transcriptPath != "" {
+		y.WriteString("output_path: ")
+		y.WriteString(yamlScalar(transcriptPath))
+		y.WriteString("\n")
+	}
+	y.WriteString("---\n\n")
+	y.WriteString(body)
+	return y.String()
+}
+
+// yamlScalar quotes a string for YAML if it contains characters that
+// require quoting (colons, quotes, newlines, leading spaces). Otherwise
+// returns it bare. This is a minimal escaper — not a full YAML
+// serializer — sufficient for the flat key:value header we produce.
+func yamlScalar(s string) string {
+	if s == "" {
+		return `""`
+	}
+	if strings.ContainsAny(s, ":\"'\n#") || s[0] == ' ' || s[0] == '-' {
+		return `"` + strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), `"`, `\"`) + `"`
+	}
+	return s
+}
+
+// subagentCompletionBody builds the markdown body of the tool result —
+// the human-readable summary the parent agent reads and acts on. Handles
+// every completion edge case:
+//
+//   - Normal (text output): the concatenated text chunks, truncated.
+//   - Failed with text: text + error suffix so the parent agent sees
+//     both the partial work and the failure reason.
+//   - Tool-only / empty / thinking-only: no text chunks → fall back to
+//     a structured summary that includes stop_reason, error, and the
+//     last tool call (if any) so the parent agent has enough context to
+//     decide what to do next.
+//   - Cancelled: explicit cancellation message.
+func subagentCompletionBody(run *domain.AcpRun) string {
+	var b strings.Builder
+	for _, c := range run.Transcript {
+		if c.Kind == "text" && c.Text != "" {
+			b.WriteString(c.Text)
+		}
+	}
+	textOut := strings.TrimSpace(b.String())
+
+	isFailed := run.Status == domain.AcpRunFailed
+	isCancelled := run.Status == domain.AcpRunCancelled
+
+	// Cancelled: explicit message regardless of partial text.
+	if isCancelled {
+		if textOut != "" {
+			return textOut + "\n\n[Subagent was cancelled.]"
+		}
+		return "Subagent was cancelled."
+	}
+
+	// Failed with text: include the error so the parent agent sees both.
+	if isFailed && textOut != "" {
+		errPart := run.Error
+		if errPart == "" {
+			errPart = run.StopReason
+		}
+		if errPart != "" {
+			if len(textOut) > 3800 {
+				textOut = textOut[:3800] + "…"
+			}
+			return textOut + "\n\n[Subagent failed: " + errPart + "]"
+		}
+	}
+
+	// Normal text output.
+	if textOut != "" {
+		if len(textOut) > 4000 {
+			return textOut[:4000] + "…"
+		}
+		return textOut
+	}
+
+	// No text output (tool-only, thinking-only, or empty). Build a
+	// structured fallback so the parent agent has enough context.
+	return structuredFallbackSummary(run)
+}
+
+// structuredFallbackSummary builds a summary when the subagent produced
+// no text chunks (tool-only, thinking-only, or empty output). It
+// includes the stop reason, error, and the last tool call so the parent
+// agent can decide what to do next.
+func structuredFallbackSummary(run *domain.AcpRun) string {
+	var parts []string
+
+	// Status line.
+	switch run.Status {
+	case domain.AcpRunFailed:
+		parts = append(parts, "Subagent failed.")
+	case domain.AcpRunCancelled:
+		parts = append(parts, "Subagent was cancelled.")
+	case domain.AcpRunCompleted:
+		parts = append(parts, "Subagent completed with no text output.")
+	default:
+		parts = append(parts, "Subagent ended (status: "+string(run.Status)+").")
+	}
+
+	// Error reason (if any).
+	if run.Error != "" {
+		parts = append(parts, "Error: "+run.Error)
+	}
+
+	// Stop reason (if any and different from error).
+	if run.StopReason != "" && run.StopReason != run.Error {
+		parts = append(parts, "Stop reason: "+run.StopReason)
+	}
+
+	// Last tool call (if any) — gives the parent agent context about
+	// what the subagent was doing.
+	lastTool := lastToolCallFromTranscript(run)
+	if lastTool != "" {
+		parts = append(parts, "Last tool: "+lastTool)
+	}
+
+	return strings.Join(parts, " ")
+}
+
+// lastToolCallFromTranscript scans the transcript in reverse and returns
+// a compact description of the last tool call (title + status), or empty
+// if none. AcpTranscriptChunk uses flat fields (ToolTitle, ToolStatus)
+// rather than a nested ToolCall pointer.
+func lastToolCallFromTranscript(run *domain.AcpRun) string {
+	for i := len(run.Transcript) - 1; i >= 0; i-- {
+		c := run.Transcript[i]
+		if c.Kind == "tool" && c.ToolTitle != "" {
+			s := c.ToolTitle
+			if c.ToolStatus != "" {
+				s += " (" + c.ToolStatus + ")"
+			}
+			return s
+		}
+	}
+	return ""
 }
 
 func (a *App) SpawnSubagents(ctx context.Context, argsJSON []byte) (string, error) {
@@ -643,7 +769,10 @@ func (a *App) wireAcpCallbacks() {
 	}
 	sink.SetCallbacks(
 		func(run *domain.AcpRun) { a.emitAcpRun(contracts.EventAcpRunUpdated, run) },
-		func(run *domain.AcpRun) { a.emitAcpRun(contracts.EventAcpRunDone, run) },
+		func(run *domain.AcpRun) {
+			a.emitAcpRun(contracts.EventAcpRunDone, run)
+			a.onAcpRunDone(run)
+		},
 		func(run *domain.AcpRun, req domain.AcpPermissionRequest) {
 			a.emitAcpRun(contracts.EventAcpRunUpdated, run)
 			perm := contracts.AcpPermissionDTO{
@@ -667,13 +796,202 @@ func (a *App) wireAcpCallbacks() {
 	)
 }
 
+// onAcpRunDone handles subagent completion: persists the transcript to
+// JSONL storage, updates the original `subagent` tool call from running
+// to ok/fail with a text summary, and triggers a new parent-agent turn
+// (tool injection) so the parent processes the result without blocking.
+//
+// This is the async completion path. The spawn path returns immediately
+// with status "starting"; this callback fires when the subagent finishes
+// (completed, failed, or cancelled) and closes the loop.
+func (a *App) onAcpRunDone(run *domain.AcpRun) {
+	if run == nil || run.ConversationID == "" {
+		return
+	}
+
+	// 1. Persist the full transcript to JSONL storage.
+	if a.AcpRunStorage != nil {
+		record := domain.AcpRunRecord{
+			ID:               run.ID,
+			AgentID:          run.AgentID,
+			AgentName:        run.AgentName,
+			ConversationID:   run.ConversationID,
+			ParentToolCallID: run.ParentToolCallID,
+			Workspace:        run.Workspace,
+			Prompt:           run.Prompt,
+			Status:           run.Status,
+			ModelID:          run.CurrentModelID,
+			RiskTier:         run.RiskTier,
+			StopReason:       run.StopReason,
+			Error:            run.Error,
+			Transcript:       run.Transcript,
+			StartedAt:        run.StartedAt,
+			EndedAt:          run.EndedAt,
+		}
+		if err := a.AcpRunStorage.Save(record); err != nil {
+			a.log("error", "acp", "failed to persist run %s: %v", run.ID, err)
+		}
+	}
+
+	// 2. Untrack the pending subagent.
+	wasPending := a.untrackPendingSubagent(run.ConversationID, run.ID)
+
+	// 3. Update the original `subagent` tool call with the structured
+	// result (YAML frontmatter + markdown body). The tool call was marked
+	// "running" when spawned; now it transitions to ok/fail.
+	if run.ParentToolCallID != "" {
+		transcriptPath := acpTranscriptPath(a.AcpRunStorage)
+		result := domain.SubagentCompletionResult(run, transcriptPath)
+		status := domain.ToolOK
+		if run.Status == domain.AcpRunFailed || run.Status == domain.AcpRunCancelled {
+			status = domain.ToolFailed
+		}
+		a.updateSubagentToolCall(run.ConversationID, run.ParentToolCallID, status, result)
+	}
+
+	// 4. Trigger a new parent-agent turn (tool injection). Only trigger
+	// if this run was pending (not already completed) and no turn is
+	// currently active for the conversation — the agent loop will pick
+	// up the updated tool call and process the result.
+	if wasPending {
+		a.triggerSubagentCompletionTurn(run.ConversationID)
+	}
+}
+
+// updateSubagentToolCall finds the original `subagent` tool call by its
+// ID and updates its status + output in the conversation store. Emits a
+// ToolCompleted event so the frontend re-renders the delegation card.
+func (a *App) updateSubagentToolCall(conversationID, toolCallID string, status domain.ToolCallStatus, output string) {
+	conv, err := a.Conversations.Get(conversationID)
+	if err != nil {
+		a.log("error", "acp", "updateSubagentToolCall: conversation %s not found: %v", conversationID, err)
+		return
+	}
+	conv = a.updateToolResult(conv, "", toolCallID, status, output, nil)
+	if err := a.Conversations.Save(conv); err != nil {
+		a.log("error", "acp", "updateSubagentToolCall: save failed: %v", err)
+		return
+	}
+	a.Bus.Emit(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
+		ConversationID: conversationID,
+		ToolCallID:     toolCallID,
+		Name:           "subagent",
+		Status:         string(status),
+		Output:         output,
+	})
+}
+
+// triggerSubagentCompletionTurn starts a new agent turn for the
+// conversation to process the completed subagent's output. This is the
+// "tool injection" mechanism: the parent agent sees the updated tool
+// call in its message history and processes the result as if it had
+// just completed the tool call itself.
+//
+// The turn is only started if the conversation is idle (no active turn).
+// If a turn is already running, the updated tool call will be visible
+// in the next round's context and processed naturally.
+func (a *App) triggerSubagentCompletionTurn(conversationID string) {
+	a.startMu.Lock()
+	defer a.startMu.Unlock()
+
+	// If a turn is already active, the updated tool call will be picked
+	// up in the next round — no need to start a new one.
+	if a.activeRunForConversation(conversationID) != nil {
+		return
+	}
+
+	conv, err := a.Conversations.Get(conversationID)
+	if err != nil {
+		a.log("error", "acp", "triggerSubagentCompletionTurn: conversation %s not found: %v", conversationID, err)
+		return
+	}
+	if conv.Status != "idle" {
+		return
+	}
+
+	// Find the provider + model from the conversation's last assistant
+	// message. If none, use the first enabled provider.
+	provider, model, apiKey, effort, err := a.resolveConversationProvider(conv)
+	if err != nil {
+		a.log("error", "acp", "triggerSubagentCompletionTurn: no provider: %v", err)
+		return
+	}
+
+	now := time.Now().UTC()
+	asstMsg := domain.Message{
+		ID:         domain.NewID("msg"),
+		Role:       domain.RoleAssistant,
+		CreatedAt:  now,
+		ProviderID: provider.ID,
+	}
+	conv.AddMessage(asstMsg)
+	conv.Status = "running"
+	if err := a.Conversations.Save(conv); err != nil {
+		a.log("error", "acp", "triggerSubagentCompletionTurn: save failed: %v", err)
+		return
+	}
+
+	turnCtx, cancel := context.WithCancel(context.Background())
+	run := &TurnRun{
+		ID:             domain.NewID("run"),
+		ConversationID: conv.ID,
+		MessageID:      asstMsg.ID,
+		Ctx:            turnCtx,
+		Cancel:         cancel,
+	}
+	a.runsMu.Lock()
+	a.runs[run.ID] = run
+	a.runsMu.Unlock()
+
+	bareModel := strings.TrimSpace(strings.TrimPrefix(model, provider.ID+"/"))
+	caps := modelCapabilities(provider, bareModel)
+
+	a.goSafe("agent", func() {
+		a.runTurn(run, provider, apiKey, bareModel, effort, asstMsg.ID, false, caps, "A subagent completed. Process its output and continue.")
+	})
+	a.log("info", "acp", "subagent completion turn triggered for %s (model %s)", conv.ID, bareModel)
+}
+
+// resolveConversationProvider picks the provider + model + API key +
+// effort for a subagent completion turn. It uses the conversation's
+// last successful assistant message model; if none, it falls back to
+// the first enabled provider with a model.
+func (a *App) resolveConversationProvider(conv *domain.Conversation) (*domain.Provider, string, string, string, error) {
+	model := ""
+	for i := len(conv.Messages) - 1; i >= 0; i-- {
+		m := conv.Messages[i]
+		if m.Role == domain.RoleAssistant && m.Model != "" && m.Status == domain.StatusDone {
+			model = m.Model
+			break
+		}
+	}
+	if model == "" {
+		model = conv.Model
+	}
+	if model != "" {
+		p, bare, key, rpcErr := a.resolveModel(model)
+		if rpcErr == nil && p != nil && p.Enabled {
+			return p, bare, key, conv.Effort, nil
+		}
+	}
+	// Fallback: first enabled provider with at least one model.
+	for _, p := range a.Providers.List() {
+		if !p.Enabled {
+			continue
+		}
+		models := p.Models
+		if len(models) == 0 {
+			continue
+		}
+		key, has, err := a.Credentials.Get(p.ID)
+		if err != nil || !has || key == "" {
+			continue
+		}
+		return p, models[0].ID, key, conv.Effort, nil
+	}
+	return nil, "", "", "", fmt.Errorf("no enabled provider with a model")
+}
+
 func availableAcpSummary(agents []*domain.AcpAgent) (list, def string) {
-	if len(agents) == 0 {
-		return "(none configured)", "(none)"
-	}
-	var names []string
-	for _, agent := range agents {
-		names = append(names, agent.Name+" ("+agent.ID+")")
-	}
-	return strings.Join(names, ", "), agents[0].Name
+	return domain.AvailableAcpSummary(agents)
 }

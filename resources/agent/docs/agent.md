@@ -85,13 +85,38 @@ steer can be queued at a time.
 
 ## ACP subagents
 
-ACP coding agents are spawn-only. The user never chats with them in the
-composer. When the parent agent calls `subagent`, a dock appears above the
-composer: chips for every live run (and recent finishes in this room). Click
-a chip for the right-hand drawer (all parallel spawns), or peek one run in a
-popup. Both surfaces stream the transcript and offer steer, stop, mode
-change, and risk promotion (edits / bypass). Permission prompts use a global
-overlay — Allow once, Allow for this session, or Deny. Timeout denies.
+ACP coding agents are spawn-only and always async. The user never chats
+with them in the composer. When the parent agent calls `subagent`, the
+tool returns immediately with `{"runs":[{"id":"…","status":"starting"}]}`
+and the tool call is marked `running` in the conversation. The parent
+agent is free to continue other work — it does not block on the
+subagent.
+
+A dock appears above the composer: chips for every live run (and recent
+finishes in this room). Click a chip for the right-hand drawer (all
+parallel spawns), or peek one run in a popup. Both surfaces stream the
+transcript live. The user is an observer: steer, stop, mode change, and
+risk promotion are handled by the orchestrator (parent agent), not the
+user. Permissions are auto-allowed — the orchestrator delegates
+authority when it spawns a subagent.
+
+### Async completion (tool injection)
+
+When a subagent finishes (completed, failed, or cancelled):
+
+1. The full transcript is persisted to `acp_runs.jsonl` in the data
+   directory as a JSONL line (one per run).
+2. The original `subagent` tool call is updated from `running` to
+   `ok`/`fail` with the subagent's last-turn text summary as output.
+3. A new parent-agent turn is triggered (tool injection) so the parent
+   processes the result without a user message. The parent agent sees
+   the completed tool call in its message history and acts on the
+   summary as if it had just called the tool.
+
+While any subagent is running, the parent agent's auto-continue chain
+pauses with reason `awaiting-background-jobs` instead of ending the
+turn. When all subagents complete, the chain resumes.
+
 `edit_confirmed` auto-allows edit/delete/move only when every path stays
 inside the bound workspace; slash-rooted paths (`/etc/passwd`, `\Windows\…`)
 are treated as absolute even on Windows and never join onto the workspace.
@@ -103,7 +128,7 @@ Stdio framing is newline-delimited JSON-RPC. Do not expect LSP
 
 Pipeline `agent:` steps never advertise `subagent` / `subagent_steer` /
 `subagent_stop` / `subagent_wait`. Those tools require an interactive
-permission overlay; unattended FireDue must not wait on approval.
+context; unattended FireDue must not wait on them.
 
 ## Compaction
 

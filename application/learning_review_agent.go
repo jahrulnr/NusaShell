@@ -88,25 +88,31 @@ var reviewToolWhitelist = map[string]bool{
 // — it never blocks or fails the parent turn.
 func (r *BackgroundReviewAgent) RunReview(ctx context.Context, conversationID string) {
 	if !r.settings.Enabled || r.app == nil {
+		r.app.log("debug", "learning", "review skipped: disabled or no app (conv=%s)", conversationID)
 		return
 	}
 	conversation, err := r.app.Conversations.Get(conversationID)
 	if err != nil {
+		r.app.log("warn", "learning", "review aborted: conversation %s not found: %v", conversationID, err)
 		return
 	}
 	model := conversation.Model
 	if model == "" {
+		r.app.log("warn", "learning", "review aborted: conversation %s has no model configured", conversationID)
 		return
 	}
 	provider, bareModel, apiKey, rpcErr := r.app.resolveModel(model)
 	if rpcErr != nil || provider == nil {
+		r.app.log("warn", "learning", "review aborted: cannot resolve model %q: %v", model, rpcErr)
 		return
 	}
 	adapter, err := r.app.Factory(context.Background(), provider, apiKey)
 	if err != nil {
+		r.app.log("warn", "learning", "review aborted: cannot build adapter for %q: %v", model, err)
 		return
 	}
 
+	r.app.log("info", "learning", "review started: conv=%s model=%s rounds=%d", conversationID, bareModel, r.settings.MaxToolRounds)
 	reviewCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
 	defer cancel()
 
@@ -125,6 +131,7 @@ func (r *BackgroundReviewAgent) RunReview(ctx context.Context, conversationID st
 			"mutations":    kinds,
 		})
 	}
+	r.app.log("info", "learning", "review done: conv=%s mutations=%d", conversationID, len(mutations))
 }
 
 // runReviewLoop executes the bounded tool loop: send transcript → get tool

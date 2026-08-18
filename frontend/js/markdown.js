@@ -14,10 +14,45 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
+// videoExtensions are file extensions that should render as <video>
+// instead of <img> when used in markdown image syntax.
+const videoExtensions = new Set(['mp4', 'webm', 'ogg', 'ogv', 'mov', 'avi', 'mkv', 'm4v']);
+
+// resolveMediaUrl converts a file:// URL to a /local-file?path= proxy URL
+// so the browser can load local files from an http:// origin. http(s)://
+// and data: URLs pass through unchanged.
+function resolveMediaUrl(url) {
+  if (url.startsWith('file://')) {
+    // file:///path/to/file → /local-file?path=/path/to/file
+    const path = decodeURIComponent(url.slice('file://'.length).replace(/^\/+/, '/'));
+    return '/local-file?path=' + encodeURIComponent(path);
+  }
+  return url;
+}
+
+// isVideoUrl checks if a URL points to a video file by extension.
+function isVideoUrl(url) {
+  try {
+    const u = new URL(url, 'http://placeholder/');
+    const ext = u.pathname.split('.').pop()?.toLowerCase();
+    return videoExtensions.has(ext);
+  } catch {
+    return false;
+  }
+}
+
 function inline(text) {
   let out = escapeHtml(text);
   // code spans (before other inline rules so backticks stay literal)
   out = out.replace(/`([^`]+)`/g, (_, code) => `<code>${code}</code>`);
+  // images / videos: ![alt](url) — auto-detect video by extension
+  out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, rawUrl) => {
+    const url = resolveMediaUrl(rawUrl);
+    if (isVideoUrl(rawUrl)) {
+      return `<video controls preload="metadata" src="${url}">${escapeHtml(alt)}</video>`;
+    }
+    return `<img src="${url}" alt="${escapeHtml(alt)}" loading="lazy" onerror="this.classList.add('img-load-error');this.nextElementSibling?.classList.remove('hidden')">`;
+  });
   // bold / italic
   out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   out = out.replace(/\*([^*]+)\*/g, '<em>$1</em>');

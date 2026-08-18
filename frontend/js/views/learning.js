@@ -248,6 +248,11 @@ function scoreLabel(score) {
 function initGraph() {
   const container = document.getElementById('learning-graph');
   if (!container) return;
+  // vis-network requires a canvas 2D context. In headless/test environments
+  // (JSDOM without the `canvas` npm package), getContext() returns null and
+  // the Network constructor throws. Guard so the rest of the view still works.
+  const probe = document.createElement('canvas');
+  if (!probe.getContext || !probe.getContext('2d')) return;
   state.nodes = new DataSet([]);
   state.edges = new DataSet([]);
   const options = {

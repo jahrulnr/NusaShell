@@ -65,10 +65,17 @@ permission prompt cannot stall an unattended run.
 `subagent` fans a self-contained brief out to 1–6 parallel ACP sessions
 (process-wide cap 8 live runs). Pass absolute paths. `workspace` overrides the
 conversation workspace for new spawns only — an already-running session keeps
-the directory it started with. `async: true` returns run ids immediately;
-otherwise the tool waits for each spawn. Permission prompts are fail-closed
-(timeout = deny). The user can peek, steer, stop, and promote risk from the
-Agent dock / drawer / popup. Unattended pipeline agents never see these tools.
+the directory it started with. The tool is always async: it returns run ids
+with `status: "starting"` immediately and the parent agent is free to
+continue other work. When a subagent finishes, the tool call is updated
+with the subagent's text summary and a new parent-agent turn is triggered
+(tool injection) so the parent processes the result without a user
+message. While any subagent is running, the parent's auto-continue chain
+pauses with reason `awaiting-background-jobs`. Completed run transcripts
+are persisted to `acp_runs.jsonl`. Permissions are auto-allowed
+(orchestrator delegates authority). The user can peek the transcript
+from the Agent dock / drawer / popup. Unattended pipeline agents never
+see these tools.
 
 ## Native web research (searchwire)
 

@@ -303,3 +303,22 @@ func TestRedactEnvKeys(t *testing.T) {
 		t.Fatalf("leaked value: %v", keys)
 	}
 }
+
+func TestIsSubagentResultCallID(t *testing.T) {
+	cases := []struct {
+		id   string
+		want bool
+	}{
+		{"subagent-result-acprun_abc", true},
+		{"subagent-result-", true},
+		{"subagent-result", false},
+		{"hydrate-runtime_context", false},
+		{"call_abc", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := IsSubagentResultCallID(c.id); got != c.want {
+			t.Errorf("IsSubagentResultCallID(%q) = %v, want %v", c.id, got, c.want)
+		}
+	}
+}

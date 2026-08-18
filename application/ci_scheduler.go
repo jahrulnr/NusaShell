@@ -488,18 +488,7 @@ func (s *ExecutionScheduler) RecoverStale(ctx context.Context) error {
 }
 
 func (s *ExecutionScheduler) claimJobs(run *domain.WorkflowRun, ready []string) []string {
-	var claimed []string
-	for _, jobID := range ready {
-		jr := run.JobRunByID(jobID)
-		if jr == nil {
-			continue
-		}
-		if jr.Status == domain.StatusQueued || jr.Status == domain.StatusPending {
-			jr.Status = domain.StatusRunning
-			claimed = append(claimed, jobID)
-		}
-	}
-	return claimed
+	return domain.ClaimJobs(run, ready)
 }
 
 func (s *ExecutionScheduler) persist(ctx context.Context, run *domain.WorkflowRun) error {
@@ -514,89 +503,23 @@ func (s *ExecutionScheduler) persist(ctx context.Context, run *domain.WorkflowRu
 }
 
 func mergeRun(dst, src *domain.WorkflowRun) {
-	dst.Status = mergeStatus(dst.Status, src.Status)
-	if src.BlockedReason != "" {
-		dst.BlockedReason = src.BlockedReason
-	}
-	if src.StartedAt != nil {
-		dst.StartedAt = src.StartedAt
-	}
-	if src.FinishedAt != nil {
-		dst.FinishedAt = src.FinishedAt
-	}
-	if src.Status == domain.StatusWaiting {
-		dst.WakeAt = src.WakeAt
-	} else if dst.Status != domain.StatusWaiting {
-		dst.WakeAt = src.WakeAt
-	}
-	for i := range src.Jobs {
-		sj := src.Jobs[i]
-		found := false
-		for j := range dst.Jobs {
-			if dst.Jobs[j].JobID == sj.JobID {
-				dst.Jobs[j] = mergeJobRun(dst.Jobs[j], sj)
-				found = true
-				break
-			}
-		}
-		if !found {
-			dst.Jobs = append(dst.Jobs, sj)
-		}
-	}
+	domain.MergeRun(dst, src)
 }
 
 func mergeStatus(dst, src domain.RunStatus) domain.RunStatus {
-	if dst == domain.StatusWaiting && (src == domain.StatusQueued || src == domain.StatusPending || src == domain.StatusRunning) {
-		return src
-	}
-	if statusRank(src) >= statusRank(dst) {
-		return src
-	}
-	return dst
+	return domain.MergeStatus(dst, src)
 }
 
 func mergeJobRun(dst, src domain.JobRun) domain.JobRun {
-	if dst.Status == domain.StatusWaiting && (src.Status == domain.StatusQueued || src.Status == domain.StatusPending || src.Status == domain.StatusRunning) {
-		return src
-	}
-	sr, dr := statusRank(src.Status), statusRank(dst.Status)
-	if sr > dr {
-		return src
-	}
-	if sr < dr {
-		return dst
-	}
-	if finishedSteps(src) >= finishedSteps(dst) {
-		return src
-	}
-	return dst
+	return domain.MergeJobRun(dst, src)
 }
 
 func statusRank(s domain.RunStatus) int {
-	switch s {
-	case domain.StatusPending, domain.StatusQueued:
-		return 1
-	case domain.StatusRunning:
-		return 2
-	case domain.StatusWaiting:
-		return 3
-	case domain.StatusBlocked, domain.StatusSkipped:
-		return 4
-	case domain.StatusSuccess, domain.StatusFailed, domain.StatusCancelled, domain.StatusExpired:
-		return 5
-	default:
-		return 0
-	}
+	return domain.StatusRank(s)
 }
 
 func finishedSteps(j domain.JobRun) int {
-	n := 0
-	for _, s := range j.Steps {
-		if s.Status.IsTerminal() {
-			n++
-		}
-	}
-	return n
+	return domain.FinishedSteps(j)
 }
 
 func (s *ExecutionScheduler) emit(typ string, v any) {
@@ -630,25 +553,11 @@ func NewWorkflowRun(def domain.WorkflowDefinition, requestedBy string) *domain.W
 }
 
 func conditionEnv(run *domain.WorkflowRun) domain.ConditionEnv {
-	jobs := map[string]domain.JobRun{}
-	outputs := map[string]any{}
-	for _, j := range run.Jobs {
-		jobs[j.JobID] = j
-		for k, v := range j.Outputs {
-			outputs[j.JobID+"."+k] = v
-		}
-	}
-	return domain.ConditionEnv{Jobs: jobs, Outputs: outputs}
+	return domain.BuildConditionEnv(run)
 }
 
 func mergeEnv(layers ...map[string]string) map[string]string {
-	out := map[string]string{}
-	for _, layer := range layers {
-		for k, v := range layer {
-			out[k] = v
-		}
-	}
-	return out
+	return domain.MergeEnv(layers...)
 }
 
 func ciEnv(run *domain.WorkflowRun, job domain.JobRun, step domain.StepRun, workspace string) map[string]string {

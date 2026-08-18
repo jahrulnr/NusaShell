@@ -209,7 +209,7 @@ func (a *App) describeVideosWithFallback(ctx context.Context, settings domain.Se
 // message, and returns a reloaded conversation so chatMessages sees the
 // descriptions. If no video is present or description fails, the
 // conversation is returned unchanged.
-func (a *App) enrichWithVideoDescriptions(ctx context.Context, conversation *domain.Conversation, asstMsgID string, settings domain.Settings) *domain.Conversation {
+func (a *App) enrichWithVideoDescriptions(ctx context.Context, conversation *domain.Conversation, _ string, settings domain.Settings) *domain.Conversation {
 	var userMsgIdx int = -1
 	for i := len(conversation.Messages) - 1; i >= 0; i-- {
 		if conversation.Messages[i].Role == domain.RoleUser {

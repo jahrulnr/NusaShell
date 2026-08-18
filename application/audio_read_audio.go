@@ -209,7 +209,7 @@ func (a *App) describeAudiosWithFallback(ctx context.Context, settings domain.Se
 // message, and returns a reloaded conversation so chatMessages sees the
 // transcripts. If no audio is present or transcription fails, the
 // conversation is returned unchanged.
-func (a *App) enrichWithAudioDescriptions(ctx context.Context, conversation *domain.Conversation, asstMsgID string, settings domain.Settings) *domain.Conversation {
+func (a *App) enrichWithAudioDescriptions(ctx context.Context, conversation *domain.Conversation, _ string, settings domain.Settings) *domain.Conversation {
 	var userMsgIdx int = -1
 	for i := len(conversation.Messages) - 1; i >= 0; i-- {
 		if conversation.Messages[i].Role == domain.RoleUser {

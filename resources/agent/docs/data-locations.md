@@ -23,6 +23,7 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `plugins/<id>/` | plugins (manual MCP servers and installed plugins): `manifest.json` + optional `ui/` + optional `skills/` (mounted read-only as `plugin:<id>` skills) | JSON + files |
 | `memories.jsonl` | agent memory entries | JSONL |
 | `logs.jsonl` | activity log (bounded ring) | JSONL |
+| `acp_runs.jsonl` | completed ACP subagent run transcripts (one JSON line per run) | JSONL |
 | `settings.json` | compaction / caching settings | JSON |
 | `credentials.db` | API keys per provider | SQLite |
 | `automation.db` | workflows, runs, schedules, events, waits, locks | SQLite |

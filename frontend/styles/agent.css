@@ -192,6 +192,15 @@
 .agent-message-image { position: relative; flex: 0 1 230px; width: 230px; max-width: 100%; margin: 0; box-shadow: 0 10px 28px rgba(0, 0, 0, .18); }
 .agent-message-image img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; background: #070b10; }
 .agent-message-image figcaption { position: absolute; right: 6px; bottom: 6px; max-width: calc(100% - 12px); overflow: hidden; border-radius: 5px; padding: 3px 6px; background: rgba(5, 9, 14, .84); color: #c7d0dc; font: 8px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.agent-message-image img.img-load-error { aspect-ratio: auto; height: 80px; object-fit: contain; padding: 12px; opacity: .5; }
+.agent-message-video { position: relative; flex: 0 1 320px; width: 320px; max-width: 100%; margin: 0; box-shadow: 0 10px 28px rgba(0, 0, 0, .18); }
+.agent-message-video video { display: block; width: 100%; border-radius: 11px; background: #070b10; }
+.agent-message-video video.video-load-error { height: 80px; opacity: .5; }
+.agent-message-video figcaption { position: absolute; right: 6px; bottom: 6px; max-width: calc(100% - 12px); overflow: hidden; border-radius: 5px; padding: 3px 6px; background: rgba(5, 9, 14, .84); color: #c7d0dc; font: 8px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+/* Inline media in markdown (images and videos from ![alt](url) syntax) */
+.agent-bubble-text img { max-width: 100%; border-radius: 8px; margin: 4px 0; }
+.agent-bubble-text video { max-width: 100%; border-radius: 8px; margin: 4px 0; }
+.agent-bubble-text img.img-load-error { height: 60px; width: auto; opacity: .4; border: 1px dashed #42526a; border-radius: 4px; }
 .agent-message-file { display: flex; flex: 0 1 230px; width: 230px; max-width: 100%; align-items: center; gap: 8px; padding: 10px; }
 .agent-message-file-kind { flex: none; border: 1px solid #42526a; border-radius: 5px; padding: 3px 5px; color: #a9c7ff; font: 9px var(--font-mono); }
 .agent-message-file-name { min-width: 0; overflow: hidden; color: #c6d1df; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }

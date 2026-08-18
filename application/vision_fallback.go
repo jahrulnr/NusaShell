@@ -95,7 +95,7 @@ func (a *App) resolveFallbackProvider(providerID string) (*domain.Provider, stri
 // updated message, and returns a reloaded conversation so chatMessages
 // sees the descriptions. If no images are present or description fails,
 // the conversation is returned unchanged.
-func (a *App) enrichWithVisionDescriptions(ctx context.Context, conversation *domain.Conversation, asstMsgID string, settings domain.Settings) *domain.Conversation {
+func (a *App) enrichWithVisionDescriptions(ctx context.Context, conversation *domain.Conversation, _ string, settings domain.Settings) *domain.Conversation {
 	// Find the latest user message (the one just before the pending assistant message).
 	var userMsgIdx int = -1
 	for i := len(conversation.Messages) - 1; i >= 0; i-- {
