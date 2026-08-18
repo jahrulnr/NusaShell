@@ -3,6 +3,7 @@
 import { rpc, on, emit } from '../rpc.js';
 import { el, fmtTime, toast, confirmDialog, debounce } from '../ui.js';
 import { renderMarkdown } from '../markdown.js';
+import { incrementalRender } from '../incremental-render.js';
 import { estimateContextTokens, formatContextUsage, effectiveContextWindow, initialWindowStart, previousWindowStart } from '../agent-ui.js';
 import { bindComposer, updateSendAvailability } from './agent/composer.js';
 import { bindModelPicker } from './agent/model-picker.js';
@@ -511,9 +512,9 @@ function reattachActiveRun() {
   // Re-render accumulated content.
   if (run.rawReasoning) {
     const content = reasoningEl.querySelector('.agent-reasoning-content');
-    if (content) content.innerHTML = renderMarkdown(run.rawReasoning);
+    if (content) { content.innerHTML = renderMarkdown(run.rawReasoning); void renderMermaidDiagrams(content); }
   }
-  if (run.raw) textBox.innerHTML = renderMarkdown(run.raw);
+  if (run.raw) { textBox.innerHTML = renderMarkdown(run.raw); void renderMermaidDiagrams(textBox); }
   // Update the run entry with fresh DOM references.
   run.msgNode = msgNode;
   run.bubble = bubble;
@@ -621,6 +622,8 @@ function applyBufferedRunToDOM(convId) {
   const textBox = el('div', { class: 'agent-bubble-text' });
   if (buffer.raw) textBox.innerHTML = renderMarkdown(buffer.raw);
   else textBox.append(el('span', { class: 'agent-thinking-dots' }, el('span'), el('span'), el('span')));
+  // Render any complete mermaid blocks in the restored buffer immediately.
+  void renderMermaidDiagrams(textBox);
   const strip = el('div', { class: 'agent-tool-stack' });
   strip.hidden = buffer.toolJobs.size === 0;
   for (const job of buffer.toolJobs.values()) strip.append(job);
@@ -1189,6 +1192,7 @@ async function loadOlderChunk() {
         reasoningEl.hidden = !prevRun.rawReasoning;
         const textBox = el('div', { class: 'agent-bubble-text' });
         if (prevRun.raw) textBox.innerHTML = renderMarkdown(prevRun.raw);
+        void renderMermaidDiagrams(textBox);
         const strip = el('div', { class: 'agent-tool-stack' });
         strip.hidden = true;
         bubble.append(reasoningEl, textBox, strip);
@@ -1287,7 +1291,12 @@ function bindEvents() {
     run.textBox.querySelector('.agent-thinking-dots')?.remove();
     const banner = run.bubble.querySelector('.agent-retry-banner');
     if (banner && run.raw) banner.remove();
-    run.textBox.innerHTML = renderMarkdown(run.raw);
+    // Incremental render: only blocks whose byte range changed are
+    // re-rendered. Unchanged blocks — including rendered Mermaid SVGs —
+    // are preserved. This is the ChatGPT pattern: mermaid renders at
+    // fence-close and stays locked across subsequent text deltas.
+    incrementalRender(run.textBox, run.raw);
+    void renderMermaidDiagrams(run.textBox);
     scrollToBottom();
   });
   on('agent.context.estimate', (payload) => {
@@ -1328,7 +1337,10 @@ function bindEvents() {
       // Remove thinking dots when reasoning starts arriving.
       run.textBox?.querySelector('.agent-thinking-dots')?.remove();
       const content = run.reasoningEl.querySelector('.agent-reasoning-content');
-      if (content) content.innerHTML = renderMarkdown(run.rawReasoning);
+      if (content) {
+        incrementalRender(content, run.rawReasoning);
+        void renderMermaidDiagrams(content);
+      }
       scrollToBottom();
     }
   });

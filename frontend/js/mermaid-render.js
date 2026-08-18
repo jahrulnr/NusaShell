@@ -71,6 +71,10 @@ export async function renderMermaidDiagrams(container) {
   // SVG the placeholder is gone, so it is skipped — this is what keeps repeated
   // calls (and live re-renders) from re-rendering an already-drawn diagram.
   const blocks = [...container.querySelectorAll('.mermaid-block')].filter((b) => {
+    // Skip incomplete blocks — the fence is still open (streaming delta
+    // hasn't received the closing ``` yet). Rendering now would show a
+    // misleading "invalid syntax" warning for source that is still growing.
+    if (b.dataset.complete === 'false') return false;
     const src = b.querySelector('.mermaid-src');
     if (!src) return false;
     const code = (src.textContent || '').trim();

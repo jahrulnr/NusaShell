@@ -17,7 +17,7 @@ test('markdown emits a mermaid placeholder (no SVG) so streaming deltas stay che
   assert.doesNotMatch(html, /<svg/);
   // A normal code fence is still a plain code block, not a mermaid block.
   const plain = renderMarkdown('```js\nconst a = 1;\n```');
-  assert.match(plain, /<pre><code>/);
+  assert.match(plain, /<pre[^>]*><code>/);
   assert.doesNotMatch(plain, /mermaid-block/);
 });
 
