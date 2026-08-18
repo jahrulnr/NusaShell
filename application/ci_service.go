@@ -169,7 +169,7 @@ func runDTO(r *domain.WorkflowRun) contracts.CIRunDTO {
 	for _, j := range r.Jobs {
 		steps := make([]contracts.CIStepDTO, 0, len(j.Steps))
 		for _, s := range j.Steps {
-			st := contracts.CIStepDTO{ID: s.ID, Name: s.Name, Status: string(s.Status), ExitCode: s.ExitCode, Error: s.Error}
+			st := contracts.CIStepDTO{ID: s.ID, Name: s.Name, Status: string(s.Status), ExitCode: s.ExitCode, Error: s.Error, Output: s.Output}
 			if s.StartedAt != nil {
 				st.StartedAt = s.StartedAt.Format(time.RFC3339)
 			}

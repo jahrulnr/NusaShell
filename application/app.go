@@ -127,6 +127,14 @@ type TurnRun struct {
 	MessageID      string
 	Ctx            context.Context
 	Cancel         context.CancelFunc
+	// Headless marks unattended turns (pipeline agent steps). When true,
+	// ACP subagent tools are filtered from the tool set so permission
+	// prompts never stall a headless run.
+	Headless bool
+	// RiskTierCap is the maximum ACP RiskTier that may be promoted to
+	// during a headless turn. Derived from the workflow TrustLevel via
+	// domain.TrustLevelToRiskTierCap. Empty means no cap (interactive turns).
+	RiskTierCap domain.RiskTier
 
 	steerMu     sync.Mutex
 	steerQueued *SteerEntry
@@ -944,7 +952,7 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 		return a.handleSettingsSet(req)
 	case contracts.MethodCIPipelinesList, contracts.MethodCIPipelinesRead, contracts.MethodCIPipelinesValidate,
 		contracts.MethodCIRunsStart, contracts.MethodCIRunsList, contracts.MethodCIRunsGet,
-		contracts.MethodCIRunsCancel, contracts.MethodCIRunsRetry, contracts.MethodCIJobsGet,
+		contracts.MethodCIRunsCancel, contracts.MethodCIRunsSteer, contracts.MethodCIRunsRetry, contracts.MethodCIJobsGet,
 		contracts.MethodCIJobsLogs, contracts.MethodCIJobsCancel, contracts.MethodCIArtifactsList,
 		contracts.MethodCIRunnersList, contracts.MethodCICacheList, contracts.MethodCICacheClear,
 		contracts.MethodAutomationList, contracts.MethodAutomationGet, contracts.MethodAutomationSave,

@@ -26,6 +26,7 @@ func BuildAutomation(dataDir string, bus *application.Bus, plugins application.P
 	es.Waits = WaitSQL{store}
 	es.Clock = application.SystemClock{}
 	es.Bus = bus
+	es.Notifier = NewHTTPNotifier()
 	autoSched := &application.AutomationScheduler{
 		Workflows: WorkflowSQL{store},
 		Schedules: ScheduleSQL{store},

@@ -96,7 +96,10 @@ you actually chat with it.
 
 ACP (Agent Client Protocol) agents are **not** chat providers. They never
 appear in the Agent composer model picker. You register them in Providers
-as a generic subprocess: **command**, **args**, **env**, and a label.
+as a generic subprocess: **command**, **args**, **env**, **transport**, and
+a label. Transport is `stdio` (default, local subprocess) or `remote`
+(WebSocket URL to a cloud agent). For `remote`, Command holds the WebSocket
+URL and Args/Env are ignored.
 
 - Command is immutable after save (delete and recreate to change the binary).
 - Probe runs `initialize` and caches advertised auth methods.

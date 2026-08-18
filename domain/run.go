@@ -85,15 +85,17 @@ type JobRun struct {
 
 // StepRun is the runtime state of one step.
 type StepRun struct {
-	ID         string
-	StepID     string
-	Name       string
-	Status     RunStatus
-	ExitCode   int
-	Error      string
-	StartedAt  *time.Time
-	FinishedAt *time.Time
-	WakeAt     *time.Time
+	ID             string
+	StepID         string
+	Name           string
+	Status         RunStatus
+	ExitCode       int
+	Error          string
+	Output         string
+	ConversationID string
+	StartedAt      *time.Time
+	FinishedAt     *time.Time
+	WakeAt         *time.Time
 }
 
 // JobRunByID returns the job run for a definition job id.

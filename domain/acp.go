@@ -18,6 +18,27 @@ const (
 	RiskBypass        RiskTier = "bypass"
 )
 
+// AcpTransportKind selects how NusaShell talks to an ACP agent.
+const (
+	AcpTransportStdio  = "stdio"  // local subprocess (default)
+	AcpTransportRemote = "remote" // cloud agent over WebSocket/HTTP
+)
+
+// TrustLevelToRiskTierCap maps a workflow TrustLevel to the maximum RiskTier
+// that headless (pipeline) agent steps and ACP subagents spawned from them
+// may reach. This enforces the "unattended runs must not silently reach
+// bypass" rule: only an explicit privileged workflow can unlock bypass.
+func TrustLevelToRiskTierCap(trust TrustLevel) RiskTier {
+	switch trust {
+	case TrustPrivileged:
+		return RiskBypass
+	case TrustTrusted:
+		return RiskEditConfirmed
+	default:
+		return RiskReadOnly
+	}
+}
+
 // AcpRunStatus is the lifecycle of one spawned ACP subagent run.
 type AcpRunStatus string
 
@@ -64,13 +85,16 @@ const (
 )
 
 // AcpAgent is a generic ACP subprocess configuration. Vendors are not
-// hardcoded: command + args + env is the whole identity.
+// hardcoded: command + args + env is the whole identity. For remote
+// (cloud) agents, Command holds the WebSocket/HTTP endpoint URL and Args
+// is empty; Transport selects the dial mode.
 type AcpAgent struct {
 	ID                 string
 	Name               string
 	Command            string
 	Args               []string
 	Env                map[string]string
+	Transport          string
 	Enabled            bool
 	PreferredModelID   string
 	PreferredModeID    string
@@ -82,6 +106,17 @@ type AcpAgent struct {
 	CachedModes        []AcpMode
 	CachedModels       []AcpModelInfo
 	UpdatedAt          time.Time
+}
+
+// EffectiveTransport returns the transport kind, defaulting to stdio for
+// empty or unrecognized values (fail-safe).
+func (a *AcpAgent) EffectiveTransport() string {
+	switch a.Transport {
+	case AcpTransportRemote:
+		return AcpTransportRemote
+	default:
+		return AcpTransportStdio
+	}
 }
 
 // ModeRiskMapping maps one agent-advertised mode ID onto an internal risk tier.

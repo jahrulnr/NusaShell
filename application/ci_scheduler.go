@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,16 +21,17 @@ const (
 
 // ExecutionScheduler evaluates the DAG, matches runners, and runs jobs.
 type ExecutionScheduler struct {
-	Runs    PipelineRunStore
-	Logs    ExecutionLogStore
-	Exec    JobExecutor
-	Caps    CapabilityResolver
-	Agent   AgentStepRunner
-	Runners RunnerRegistry
-	Waits   WaitStore
-	Bus     *Bus
-	Clock   Clock
-	MaxJobs int
+	Runs     PipelineRunStore
+	Logs     ExecutionLogStore
+	Exec     JobExecutor
+	Caps     CapabilityResolver
+	Agent    AgentStepRunner
+	Runners  RunnerRegistry
+	Waits    WaitStore
+	Bus      *Bus
+	Clock    Clock
+	MaxJobs  int
+	Notifier RunNotifier
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
@@ -234,7 +236,7 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) er
 		case step.Uses != "":
 			result, err = s.runUses(jobCtx, run, step)
 		case step.Agent != nil:
-			result, err = s.runAgent(jobCtx, step)
+			result, err = s.runAgent(jobCtx, run, step, sr)
 		default:
 			envMap := mergeEnv(run.Definition.Env, job.Env, step.Env)
 			for k, v := range ciEnv(run, *jr, *sr, ws.Dir) {
@@ -263,6 +265,11 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) er
 		}
 		sr.Status = domain.StatusSuccess
 		sr.ExitCode = result.ExitCode
+		if step.Agent != nil && result.Outputs != nil {
+			if text, ok := result.Outputs["output"].(string); ok {
+				sr.Output = text
+			}
+		}
 		for k, v := range result.Outputs {
 			outputs[k] = v
 		}
@@ -338,13 +345,16 @@ func (s *ExecutionScheduler) runUses(ctx context.Context, run *domain.WorkflowRu
 	return StepResult{ExitCode: 0, Outputs: outputs}, nil
 }
 
-func (s *ExecutionScheduler) runAgent(ctx context.Context, step domain.Step) (StepResult, error) {
+func (s *ExecutionScheduler) runAgent(ctx context.Context, run *domain.WorkflowRun, step domain.Step, sr *domain.StepRun) (StepResult, error) {
 	if s.Agent == nil {
 		return StepResult{Error: "agent steps are not configured"}, fmt.Errorf("agent steps are not configured")
 	}
-	out, err := s.Agent.RunAgentStep(ctx, step.Agent.Prompt, step.Agent.OutputSchema)
+	out, convID, err := s.Agent.RunAgentStep(ctx, step.Agent.Prompt, step.Agent.Model, run.Definition.Trust, step.Agent.OutputSchema)
 	if err != nil {
 		return StepResult{Error: err.Error()}, err
+	}
+	if sr != nil {
+		sr.ConversationID = convID
 	}
 	return StepResult{ExitCode: 0, Outputs: out}, nil
 }
@@ -382,6 +392,7 @@ func (s *ExecutionScheduler) failRun(ctx context.Context, run *domain.WorkflowRu
 	run.FinishedAt = &t
 	_ = s.persist(ctx, run)
 	s.emit(contracts.EventCIRunFailed, map[string]any{"run_id": run.ID, "error": reason})
+	s.notifyWebhook(ctx, run)
 	return fmt.Errorf("%s", reason)
 }
 
@@ -405,7 +416,25 @@ func (s *ExecutionScheduler) maybeFinalize(ctx context.Context, run *domain.Work
 		run.Status = domain.StatusSuccess
 		s.emit(contracts.EventCIRunCompleted, map[string]any{"run_id": run.ID})
 	}
+	s.notifyWebhook(ctx, run)
 	return s.persist(ctx, run)
+}
+
+// notifyWebhook fires the workflow webhook (if configured) in a
+// fire-and-forget goroutine. Errors are logged but never block the run.
+func (s *ExecutionScheduler) notifyWebhook(ctx context.Context, run *domain.WorkflowRun) {
+	if s.Notifier == nil || strings.TrimSpace(run.Definition.WebhookURL) == "" {
+		return
+	}
+	url := run.Definition.WebhookURL
+	go func() {
+		notifyCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := s.Notifier.NotifyRunCompleted(notifyCtx, url, run); err != nil {
+			s.emit("ci.webhook.failed", map[string]any{"run_id": run.ID, "url": url, "error": err.Error()})
+		}
+	}()
+	_ = ctx
 }
 
 func (s *ExecutionScheduler) Cancel(ctx context.Context, runID string) error {

@@ -18,6 +18,7 @@ func (a *App) acpAgentDTO(agent *domain.AcpAgent) contracts.AcpAgentDTO {
 		Command:          agent.Command,
 		Args:             agent.Args,
 		EnvKeys:          domain.RedactEnvKeys(agent.Env),
+		Transport:        agent.EffectiveTransport(),
 		Enabled:          agent.Enabled,
 		PreferredModelID: agent.PreferredModelID,
 		PreferredModeID:  agent.PreferredModeID,
@@ -149,6 +150,7 @@ func (a *App) handleAcpAgentsSave(req contracts.AcpAgentSaveRequest) (any, *cont
 	}
 	agent.Name = strings.TrimSpace(req.Name)
 	agent.Command = strings.TrimSpace(req.Command)
+	agent.Transport = strings.TrimSpace(req.Transport)
 	if req.Args != nil {
 		agent.Args = req.Args
 	}

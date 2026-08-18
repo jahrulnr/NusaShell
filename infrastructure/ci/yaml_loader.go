@@ -17,12 +17,13 @@ func ParseYAML(raw []byte) (*domain.WorkflowDefinition, error) {
 		return nil, fmt.Errorf("yaml: %w", err)
 	}
 	w := &domain.WorkflowDefinition{
-		Name:    strings.TrimSpace(doc.Name),
-		Version: doc.Version,
-		Enabled: true,
-		Trust:   domain.TrustLevel(doc.Trust),
-		Env:     doc.Env,
-		Source:  domain.WorkflowSource{Kind: "file"},
+		Name:       strings.TrimSpace(doc.Name),
+		Version:    doc.Version,
+		Enabled:    true,
+		Trust:      domain.TrustLevel(doc.Trust),
+		Env:        doc.Env,
+		WebhookURL: strings.TrimSpace(doc.WebhookURL),
+		Source:     domain.WorkflowSource{Kind: "file"},
 	}
 	if doc.Enabled != nil {
 		w.Enabled = *doc.Enabled
@@ -88,6 +89,7 @@ type yamlDoc struct {
 	Triggers    yaml.Node          `yaml:"triggers"`
 	Defaults    yamlDefaults       `yaml:"defaults"`
 	Env         map[string]string  `yaml:"env"`
+	WebhookURL  string             `yaml:"webhook_url"`
 	Jobs        map[string]yamlJob `yaml:"jobs"`
 }
 
@@ -196,6 +198,7 @@ type yamlStep struct {
 type yamlAgent struct {
 	Prompt       string         `yaml:"prompt"`
 	OutputSchema map[string]any `yaml:"output_schema"`
+	Model        string         `yaml:"model"`
 }
 
 func parseTrigger(t yamlTrigger, i int) (domain.Trigger, error) {
@@ -320,7 +323,7 @@ func parseStep(s yamlStep) (domain.Step, error) {
 		step.WaitUntil = &tm
 	}
 	if s.Agent != nil {
-		step.Agent = &domain.AgentStep{Prompt: s.Agent.Prompt, OutputSchema: s.Agent.OutputSchema}
+		step.Agent = &domain.AgentStep{Prompt: s.Agent.Prompt, OutputSchema: s.Agent.OutputSchema, Model: s.Agent.Model}
 	}
 	if s.Timeout != "" {
 		d, err := parseDuration(s.Timeout)

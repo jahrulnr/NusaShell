@@ -480,6 +480,9 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 		conversation = a.enrichWithVideoDescriptions(run.Ctx, conversation, asstMsgID, settings)
 	}
 	toolDefs := a.toolDefinitions()
+	if run.Headless {
+		toolDefs = filterACPToolDefs(toolDefs)
+	}
 	maxTokens := resolveMaxOutput(provider, model, settings)
 	promptCache := buildPromptCachePolicy(settings, provider.ID, model, run.ConversationID)
 

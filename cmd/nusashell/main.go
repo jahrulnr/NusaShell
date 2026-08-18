@@ -235,6 +235,7 @@ func run() error {
 		Logger:                      logger,
 	})
 	tb.Acp = app
+	tb.Steerer = app
 	var autoSvc *application.Automation
 	if svc, autoDB, err := ci.BuildAutomation(dataDir, bus, pluginStore, mcpManager, mcpManager); err != nil {
 		slog.Warn("automation store init failed", "error", err)
@@ -243,7 +244,7 @@ func run() error {
 		app.Automation = svc
 		defer autoDB.Close()
 		tb.Automation = svc
-		svc.Exec.Agent = application.NewPipelineAgentRunner(tb)
+		svc.Exec.Agent = application.NewPipelineAgentRunner(tb, app)
 	}
 	// Wire Codex runtime + OAuth adapters (optional — nil-safe if unavailable)
 	if rt, err := codex.NewRuntimeAdapter(); err == nil {

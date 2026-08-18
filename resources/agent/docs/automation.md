@@ -34,11 +34,28 @@ A step may set `wait_until: <RFC3339>`. The run status becomes `waiting` and the
 
 After `ci_run`, call `ci_run_status`. Fetch logs only for failed jobs.
 
-Pipeline `agent:` steps do not receive ACP tools (`subagent`, `subagent_steer`,
-`subagent_stop`, `subagent_wait`). Permission prompts are interactive and must
-not stall an unattended run. The composer agent still sees those tools when an
-ACP provider is enabled.
+Pipeline `agent:` steps run a full agent turn (tool loop, compaction, skills,
+memory, docs) synchronously via `RunHeadlessTurn`. They do not receive ACP
+tools (`subagent`, `subagent_steer`, `subagent_stop`, `subagent_wait`) —
+permission prompts are interactive and must not stall an unattended run. The
+composer agent still sees those tools when an ACP provider is enabled.
+
+An `agent:` step accepts an optional `model` field (`provider_id:model_id` or
+bare model ID). When omitted, the first enabled provider's first model is
+used. The step output is `{"output": "<final assistant text>"}`.
+
+A running agent step can be steered (additional instructions queued without
+canceling) via `ci.runs.steer` RPC or the `ci_steer` agent tool. The steer
+text is injected at the next tool-round boundary.
+
+## Webhooks
+
+A workflow can set `webhook_url` at the top level. When a run completes or
+fails, NusaShell POSTs a JSON payload (`run_id`, `workflow`, `status`,
+`started_at`, `finished_at`, `jobs`, `failed`, `success`) to that URL. The
+webhook is fire-and-forget (10s timeout, errors logged as `ci.webhook.failed`
+events, never blocks the run).
 
 ## UI
 
-Open **Automation** in the sidebar. Tabs: Workflows, Runs, Schedules, Events. New automation opens a once/every/when/manual wizard. Run pipeline starts the workspace YAML. Blocked automations show Enable provider.
+Open **Automation** in the sidebar. Tabs: Workflows, Runs, Schedules, Events. New automation opens a once/every/when/manual wizard. Run pipeline starts the workspace YAML. Blocked automations show Enable provider. Running agent steps show a **Steer** button.

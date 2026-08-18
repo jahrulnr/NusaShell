@@ -185,8 +185,17 @@ type MCPToolCaller interface {
 }
 
 // AgentStepRunner executes an agent: prompt step. Nil means the step fails.
+// Returns the step outputs and the headless conversation ID (for steer).
 type AgentStepRunner interface {
-	RunAgentStep(ctx context.Context, prompt string, schema map[string]any) (map[string]any, error)
+	RunAgentStep(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any) (map[string]any, string, error)
+}
+
+// HeadlessTurnRunner executes a full agent turn synchronously (no streaming
+// UI) and returns the final assistant text as {"output": text} plus the
+// conversation ID. The conversation ID lets callers steer the running turn.
+type HeadlessTurnRunner interface {
+	RunHeadlessTurn(ctx context.Context, prompt, model string, trust domain.TrustLevel, schema map[string]any) (map[string]any, string, error)
+	SteerHeadlessTurn(conversationID, text string) error
 }
 
 // DebounceStore remembers last fire times per trigger.
@@ -199,4 +208,10 @@ type DebounceStore interface {
 type ProviderStateStore interface {
 	Get(ctx context.Context, providerID string) (disabled bool, ok bool, err error)
 	SetDisabled(ctx context.Context, providerID string, disabled bool) error
+}
+
+// RunNotifier sends a notification when a workflow run completes or fails.
+// Implementations POST a JSON payload to an external webhook URL.
+type RunNotifier interface {
+	NotifyRunCompleted(ctx context.Context, url string, run *domain.WorkflowRun) error
 }

@@ -10,6 +10,7 @@ const (
 	MethodCIRunsList          = "ci.runs.list"
 	MethodCIRunsGet           = "ci.runs.get"
 	MethodCIRunsCancel        = "ci.runs.cancel"
+	MethodCIRunsSteer         = "ci.runs.steer"
 	MethodCIRunsRetry         = "ci.runs.retry"
 	MethodCIJobsGet           = "ci.jobs.get"
 	MethodCIJobsLogs          = "ci.jobs.logs"
@@ -97,6 +98,7 @@ type CIStepDTO struct {
 	Status    string `json:"status"`
 	ExitCode  int    `json:"exit_code,omitempty"`
 	Error     string `json:"error,omitempty"`
+	Output    string `json:"output,omitempty"`
 	StartedAt string `json:"started_at,omitempty"`
 }
 
@@ -160,6 +162,11 @@ type CIWorkspaceRequest struct {
 type CIRunIDRequest struct {
 	ID        string `json:"id"`
 	Workspace string `json:"workspace,omitempty"`
+}
+
+type CIRunSteerRequest struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
 }
 
 type CILogsRequest struct {

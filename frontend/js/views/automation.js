@@ -237,10 +237,28 @@ function renderRunDetail(run, detail, actions) {
     el('div', { class: 'auto-job-card' },
       el('h3', { text: j.name || j.id }),
       el('span', { class: `auto-pill ${j.status}`, text: j.status }),
-      ...(j.steps || []).map((s) => el('div', { class: 'auto-step', text: `${s.name || s.id}: ${s.status}` })),
+      ...(j.steps || []).map((s) => {
+        const stepEl = el('div', { class: 'auto-step', text: `${s.name || s.id}: ${s.status}` });
+        if (s.output) {
+          stepEl.append(el('pre', { class: 'auto-step-output', text: s.output }));
+        }
+        return stepEl;
+      }),
     ),
   )));
   if (run.status === 'running' || run.status === 'queued' || run.status === 'waiting') {
+    const hasAgentStep = (run.jobs || []).some(j => (j.steps || []).some(s => s.status === 'running' && s.output !== undefined));
+    if (hasAgentStep) {
+      const steer = el('button', { class: 'mini-btn ghost', type: 'button', text: 'Steer' });
+      steer.addEventListener('click', async () => {
+        const text = await dialog({ input: true, placeholder: 'Additional instructions for the running agent step…' });
+        if (text) {
+          await rpc('ci.runs.steer', { id: run.id, text });
+          await refresh();
+        }
+      });
+      actions.append(steer);
+    }
     const cancel = el('button', { class: 'mini-btn ghost danger', type: 'button', text: 'Cancel' });
     cancel.addEventListener('click', async () => {
       await rpc('ci.runs.cancel', { id: run.id });

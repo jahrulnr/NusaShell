@@ -45,6 +45,9 @@ type Toolbox struct {
 		WaitAcpRun(ctx context.Context, argsJSON []byte) (string, error)
 		EnabledAcpAgents() []*domain.AcpAgent
 	}
+	Steerer interface {
+		SteerHeadlessTurn(conversationID, text string) error
+	}
 }
 
 // webAnswerSearcher builds a searchwire.Searcher on-demand from the web
@@ -117,6 +120,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "ci_run_status", Description: "Return run status, DAG summary, and failed jobs. Use this after ci_run; do not fetch full logs unless a job failed.", InputSchema: obj("object", props("run_id", str("Run id")), "run_id")},
 		{Name: "ci_logs", Description: "Retrieve job logs (tail 200 by default). Prefer failed jobs.", InputSchema: obj("object", props("job_id", str("Job run id"), "run_id", str("Run id"), "limit", intSchema("Max chunks")), "job_id")},
 		{Name: "ci_cancel", Description: "Cancel a running pipeline/automation run.", InputSchema: obj("object", props("run_id", str("Run id")), "run_id")},
+		{Name: "ci_steer", Description: "Send additional instructions to a running agent step without canceling.", InputSchema: obj("object", props("run_id", str("Run id"), "text", str("Steer instructions")), "run_id", "text")},
 		{Name: "automation_list", Description: "List saved automations with availability (runnable/blocked/disabled).", InputSchema: obj("object", nil)},
 		{Name: "automation_read", Description: "Read one automation definition and capability bindings.", InputSchema: obj("object", props("id", str("Automation id")), "id")},
 		{Name: "automation_validate", Description: "Validate a workflow YAML. Distinguishes INVALID vs BLOCKED (provider disabled/missing).", InputSchema: obj("object", props("yaml", str("Workflow YAML")), "yaml")},
@@ -1247,7 +1251,7 @@ func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON [
 	if t.Automation == nil {
 		switch name {
 		case "ci_pipeline_list", "ci_pipeline_read", "ci_pipeline_validate", "ci_run", "ci_run_status",
-			"ci_logs", "ci_cancel", "automation_list", "automation_read", "automation_validate",
+			"ci_logs", "ci_cancel", "ci_steer", "automation_list", "automation_read", "automation_validate",
 			"automation_create", "automation_enable", "automation_disable", "automation_status",
 			"schedule_once", "schedule_every", "wait_until":
 			return "", true, fmt.Errorf("automation is not configured")
@@ -1306,6 +1310,31 @@ func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON [
 		return encode(chunks, err)
 	case "ci_cancel":
 		return encode(map[string]bool{"ok": true}, a.Exec.Cancel(ctx, str("run_id")))
+	case "ci_steer":
+		runID := str("run_id")
+		text := str("text")
+		run, err := a.Runs.Get(ctx, runID)
+		if err != nil {
+			return "", true, fmt.Errorf("run not found: %w", err)
+		}
+		var convID string
+		for _, j := range run.Jobs {
+			for _, s := range j.Steps {
+				if s.Status == domain.StatusRunning && s.ConversationID != "" {
+					convID = s.ConversationID
+				}
+			}
+		}
+		if convID == "" {
+			return "", true, fmt.Errorf("no running agent step to steer")
+		}
+		if t.Steerer == nil {
+			return "", true, fmt.Errorf("steer is not configured")
+		}
+		if err := t.Steerer.SteerHeadlessTurn(convID, text); err != nil {
+			return "", true, err
+		}
+		return encode(map[string]any{"steered": true, "conversation_id": convID}, nil)
 	case "automation_list":
 		list, err := a.Workflows.List(ctx)
 		if err != nil {

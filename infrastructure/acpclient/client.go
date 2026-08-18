@@ -20,10 +20,43 @@ type Handler interface {
 	SessionUpdate(params SessionUpdateParams)
 }
 
-// Conn is one ACP stdio subprocess.
-type Conn struct {
+// wire is the transport-neutral read/write/close surface for ACP JSON-RPC.
+// stdioWire wraps a local subprocess; remoteWire wraps a WebSocket to a
+// cloud agent. Both speak the same line-delimited JSON-RPC 2.0 protocol.
+type wire interface {
+	Write(body []byte) error
+	Read() ([]byte, error)
+	Close() error
+}
+
+// stdioWire wraps a local ACP subprocess's stdin/stdout.
+type stdioWire struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
+	reader *bufio.Reader
+	cancel context.CancelFunc
+}
+
+func (w *stdioWire) Write(body []byte) error {
+	return writeFrame(w.stdin, body)
+}
+
+func (w *stdioWire) Read() ([]byte, error) {
+	return readFrame(w.reader)
+}
+
+func (w *stdioWire) Close() error {
+	w.stdin.Close()
+	w.cancel()
+	if w.cmd.Process != nil {
+		_ = w.cmd.Process.Kill()
+	}
+	return nil
+}
+
+// Conn is one ACP session transport (stdio or remote).
+type Conn struct {
+	w      wire
 	cancel context.CancelFunc
 
 	mu      sync.Mutex
@@ -65,18 +98,32 @@ func Dial(ctx context.Context, command string, args []string, env []string, cwd 
 		cancel()
 		return nil, fmt.Errorf("start %s: %w", command, err)
 	}
+	w := &stdioWire{cmd: cmd, stdin: stdin, reader: bufio.NewReader(stdout), cancel: cancel}
 	c := &Conn{
-		cmd:     cmd,
-		stdin:   stdin,
+		w:       w,
 		cancel:  cancel,
 		pending: map[int]chan rpcReply{},
 		handler: handler,
 	}
-	go c.readLoop(stdout)
+	go c.readLoop()
 	go func() {
 		_ = cmd.Wait()
 		c.failAll(fmt.Errorf("ACP process exited"))
 	}()
+	return c, nil
+}
+
+// DialWire creates a Conn from an existing wire (e.g., remoteWire for
+// cloud agents). Used when the transport is already established.
+func DialWire(ctx context.Context, w wire, handler Handler) (*Conn, error) {
+	_, cancel := context.WithCancel(ctx)
+	c := &Conn{
+		w:       w,
+		cancel:  cancel,
+		pending: map[int]chan rpcReply{},
+		handler: handler,
+	}
+	go c.readLoop()
 	return c, nil
 }
 
@@ -85,11 +132,8 @@ func (c *Conn) Close() {
 		return
 	}
 	c.failAll(fmt.Errorf("ACP connection closed"))
-	_ = c.stdin.Close()
+	_ = c.w.Close()
 	c.cancel()
-	if c.cmd.Process != nil {
-		_ = c.cmd.Process.Kill()
-	}
 }
 
 func (c *Conn) failAll(err error) {
@@ -119,7 +163,7 @@ func (c *Conn) call(ctx context.Context, method string, params any, result any) 
 		return err
 	}
 	c.mu.Lock()
-	err = writeFrame(c.stdin, body)
+	err = c.w.Write(body)
 	c.mu.Unlock()
 	if err != nil {
 		return err
@@ -148,7 +192,7 @@ func (c *Conn) notify(method string, params any) error {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return writeFrame(c.stdin, body)
+	return c.w.Write(body)
 }
 
 func (c *Conn) reply(id any, result any, rpcErr *rpcError) {
@@ -159,14 +203,13 @@ func (c *Conn) reply(id any, result any, rpcErr *rpcError) {
 	}
 	body, _ := json.Marshal(resp)
 	c.mu.Lock()
-	_ = writeFrame(c.stdin, body)
+	_ = c.w.Write(body)
 	c.mu.Unlock()
 }
 
-func (c *Conn) readLoop(stdout io.Reader) {
-	r := bufio.NewReader(stdout)
+func (c *Conn) readLoop() {
 	for {
-		body, err := readFrame(r)
+		body, err := c.w.Read()
 		if err != nil {
 			c.failAll(err)
 			return

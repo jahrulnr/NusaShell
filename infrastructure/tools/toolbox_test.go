@@ -929,7 +929,7 @@ func TestListToolsIncludesSubagentWhenAgentsEnabled(t *testing.T) {
 func TestPipelineAgentRunnerHidesEnabledAcpTools(t *testing.T) {
 	tb := testToolbox(nil, nil, &stubMCP{})
 	tb.Acp = &stubAcp{agents: []*domain.AcpAgent{{ID: "acp_1", Name: "Cursor", Enabled: true}}}
-	runner := application.NewPipelineAgentRunner(tb)
+	runner := application.NewPipelineAgentRunner(tb, nil)
 	for _, ti := range runner.Tools.ListTools() {
 		if strings.HasPrefix(ti.Name, "subagent") {
 			t.Fatalf("pipeline agent listed %q", ti.Name)

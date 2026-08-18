@@ -17,6 +17,7 @@ type WorkflowDefinition struct {
 	Env         map[string]string
 	Jobs        []Job
 	Source      WorkflowSource
+	WebhookURL  string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -134,6 +135,9 @@ type Step struct {
 type AgentStep struct {
 	Prompt       string
 	OutputSchema map[string]any
+	// Model is an optional "provider_id:model_id" or bare model ID. When
+	// empty, the first enabled provider's first model is used.
+	Model string
 }
 
 // JobByID returns the job with the given id, or nil.

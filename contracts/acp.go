@@ -8,6 +8,7 @@ type AcpAgentDTO struct {
 	Command            string             `json:"command"`
 	Args               []string           `json:"args,omitempty"`
 	EnvKeys            []string           `json:"env_keys,omitempty"`
+	Transport          string             `json:"transport,omitempty"`
 	Enabled            bool               `json:"enabled"`
 	PreferredModelID   string             `json:"preferred_model_id,omitempty"`
 	PreferredModeID    string             `json:"preferred_mode_id,omitempty"`
@@ -63,6 +64,7 @@ type AcpAgentSaveRequest struct {
 	Command          string            `json:"command"`
 	Args             []string          `json:"args,omitempty"`
 	Env              map[string]string `json:"env,omitempty"`
+	Transport        string            `json:"transport,omitempty"`
 	Enabled          *bool             `json:"enabled,omitempty"`
 	PreferredModelID string            `json:"preferred_model_id,omitempty"`
 	PreferredModeID  string            `json:"preferred_mode_id,omitempty"`

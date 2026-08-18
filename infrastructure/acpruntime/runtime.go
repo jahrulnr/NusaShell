@@ -172,12 +172,26 @@ func (rt *Runtime) withThrowaway(ctx context.Context, agent *domain.AcpAgent, fn
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	conn, err := acpclient.Dial(ctx, agent.Command, agent.Args, launchEnv(agent), cwd, nil)
+	conn, err := rt.dialAgent(ctx, agent, cwd, nil)
 	if err != nil {
 		return *agent, err
 	}
 	defer conn.Close()
 	return fn(conn)
+}
+
+// dialAgent opens an ACP connection using the transport selected by
+// agent.EffectiveTransport(): stdio (local subprocess) or remote (WebSocket
+// to a cloud agent). handler receives incoming agent→client requests.
+func (rt *Runtime) dialAgent(ctx context.Context, agent *domain.AcpAgent, cwd string, handler acpclient.Handler) (*acpclient.Conn, error) {
+	if agent.EffectiveTransport() == domain.AcpTransportRemote {
+		w, err := acpclient.DialRemote(ctx, agent.Command, nil)
+		if err != nil {
+			return nil, err
+		}
+		return acpclient.DialWire(ctx, w, handler)
+	}
+	return acpclient.Dial(ctx, agent.Command, agent.Args, launchEnv(agent), cwd, handler)
 }
 
 func applyInitialize(agent *domain.AcpAgent, init acpclient.InitializeResult) {
@@ -339,7 +353,7 @@ func (rt *Runtime) ensureConn(agent *domain.AcpAgent, workspace string) (*pooled
 	rt.mu.Unlock()
 
 	pc := &pooledConn{key: key, agent: agent, runtime: rt, cwd: workspace}
-	conn, err := acpclient.Dial(context.Background(), agent.Command, agent.Args, launchEnv(agent), workspace, pc)
+	conn, err := rt.dialAgent(context.Background(), agent, workspace, pc)
 	if err != nil {
 		return nil, err
 	}

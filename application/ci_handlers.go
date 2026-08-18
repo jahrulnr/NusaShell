@@ -116,6 +116,33 @@ func (a *App) handleCI(ctx context.Context, method string, payload json.RawMessa
 		}
 		run, _ := auto.Runs.Get(ctx, req.ID)
 		return runDTO(run), nil
+	case contracts.MethodCIRunsSteer:
+		var req contracts.CIRunSteerRequest
+		if err := contracts.DecodePayload(payload, &req); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(req.Text) == "" {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "steer text is required"}
+		}
+		run, err := auto.Runs.Get(ctx, req.ID)
+		if err != nil {
+			return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
+		}
+		var convID string
+		for _, j := range run.Jobs {
+			for _, s := range j.Steps {
+				if s.Status == domain.StatusRunning && s.ConversationID != "" {
+					convID = s.ConversationID
+				}
+			}
+		}
+		if convID == "" {
+			return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "no running agent step to steer"}
+		}
+		if err := a.SteerHeadlessTurn(convID, req.Text); err != nil {
+			return nil, rpcInternal(err)
+		}
+		return map[string]any{"steered": true, "conversation_id": convID}, nil
 	case contracts.MethodCIRunsRetry:
 		var req contracts.CIRunIDRequest
 		if err := contracts.DecodePayload(payload, &req); err != nil {
