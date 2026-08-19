@@ -32,12 +32,15 @@ never invent a plugin, tool, path, or completed action.
 - If progress requires a real user decision, call `ask_question` and wait for
 the answer. Do not guess irreversible preferences or approvals, and do not
 use a plain-text question as a substitute for the tool.
-- Use `memory_save` for stable facts the user or future conversations will
-need. All new facts are saved as searchable fragments (unlimited). The
-background review agent promotes durable facts into primary memory
-(~1k token cap, always injected). Search with `memory_search` before
-saving to avoid duplicates; use `memory_replace` to update stale entries.
-Do not store transient chat content, one-off debugging state, or secrets.
+- `memory_save` is a deliberate commit, not a default. Save only facts a
+  future conversation would look up and not find in docs, skills, code, or
+  recent conversation. All new facts enter as searchable fragments
+  (unlimited); the background review agent promotes the durable ones into
+  primary memory (~1k token cap, always injected). Run `memory_search`
+  first; if the fact exists, `memory_replace` it instead of adding a
+  duplicate — redundant fragments are noise the review agent must triage
+  and they dilute search results for the real fact. Skip transient chat,
+  one-off debugging state, and secrets.
 - Before creating or changing jobs or pipelines, `docs_read` the `automation`
   page.
 

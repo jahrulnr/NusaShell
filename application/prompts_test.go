@@ -93,6 +93,21 @@ func TestAgentPromptRoutesCommonToolWorkflows(t *testing.T) {
 	}
 }
 
+func TestSystemPromptMemorySelectivity(t *testing.T) {
+	prompt := strings.Join(strings.Fields(systemPrompt), " ")
+	for _, expected := range []string{
+		"deliberate commit, not a default",
+		"would look up and not find in docs, skills, code, or recent conversation",
+		"memory_search",
+		"memory_replace",
+		"redundant fragments are noise",
+	} {
+		if !strings.Contains(prompt, expected) {
+			t.Errorf("system prompt missing memory selectivity guidance for %q", expected)
+		}
+	}
+}
+
 func TestSystemPromptRoutesIntentEvidenceAndRisk(t *testing.T) {
 	prompt := strings.Join(strings.Fields(systemPrompt), " ")
 	for _, expected := range []string{

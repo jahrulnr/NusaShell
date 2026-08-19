@@ -61,8 +61,19 @@ project, task, tags) — like `docs_search` but for memory.
 
 ## When to save
 
-Save only durable, reusable facts. Search with `memory_search` first to
-avoid duplicates.
+Treat `memory_save` as a deliberate commit, not a default. Before saving,
+apply two tests:
+
+1. **Lookup test:** would a future conversation plausibly need to look this
+   up rather than re-derive it in seconds?
+2. **Source test:** would that conversation find the fact faster in docs,
+   skills, code, or the current conversation than by searching memory?
+
+Save only when both answers favor memory — the fact is durable, not already
+captured elsewhere, and likely to be searched for. Run `memory_search`
+first; if a matching fragment exists, `memory_replace` it instead of adding
+a duplicate. A redundant fragment is noise the background review agent must
+triage, and it pushes the real fact down in search results.
 
 Good examples:
 
