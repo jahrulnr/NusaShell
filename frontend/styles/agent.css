@@ -1040,7 +1040,11 @@
   overflow-x: auto;
   text-align: center;
 }
-.mermaid-block svg { max-width: 100%; height: auto; }
+.mermaid-block svg {
+  max-width: 100%;
+  height: auto;
+  display: inline-block;
+}
 .mermaid-block .mermaid-src {
   margin: 0;
   text-align: left;

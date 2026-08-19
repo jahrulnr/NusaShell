@@ -29,6 +29,10 @@ function loadMermaid() {
           securityLevel: 'strict',
           theme: 'dark',
           fontFamily: 'inherit',
+          // Workaround for mermaid-js/mermaid#790: foreignObject (HTML
+          // labels) has overflow:hidden by default, which clips long node
+          // text. Force overflow:visible so labels never get cut off.
+          themeCSS: '.label foreignObject { overflow: visible; } .nodeLabel, .edgeLabel, .label { overflow: visible; }',
         });
       } catch { /* initialize is best-effort */ }
       resolve(window.mermaid);
@@ -114,6 +118,21 @@ export async function renderMermaidDiagrams(container) {
       block.classList.remove('mermaid-error');
       block.innerHTML = svg;
       block.dataset.rendered = hash;
+      // Mermaid 10.x emits explicit width/height in px on the <svg>. When
+      // the container is narrower than the diagram, max-width:100% scales
+      // the width but the fixed px height clips text. Replace the px
+      // dimensions with viewBox-driven sizing so the SVG scales
+      // proportionally and never clips.
+      const svgEl = block.querySelector('svg');
+      if (svgEl) {
+        const vb = svgEl.getAttribute('viewBox');
+        if (vb) {
+          svgEl.removeAttribute('width');
+          svgEl.removeAttribute('height');
+          svgEl.style.maxWidth = '100%';
+          svgEl.style.height = 'auto';
+        }
+      }
     } catch {
       renderFallback(block, code, hash);
     }
