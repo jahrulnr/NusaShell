@@ -107,7 +107,7 @@ type MemoryStore interface {
 }
 
 // PrimaryStore is the always-injected working-set memory backed by a
-// single MEMORY.md file. Foreground agents read and update entries; the
+// single primary.md file. Foreground agents read and update entries; the
 // background review agent promotes entries from fragments. Create is
 // intentionally absent — new facts enter via fragments first.
 type PrimaryStore interface {
@@ -117,7 +117,7 @@ type PrimaryStore interface {
 }
 
 // FragmentStore is the unlimited, searchable memory archive backed by
-// one markdown file per entry under memories/fragments/. Foreground
+// one markdown file per entry under memory/fragments/. Foreground
 // agents create, update, delete, and search fragments; the background
 // review agent promotes durable fragments into primary memory.
 type FragmentStore interface {
@@ -152,6 +152,16 @@ type LogStore interface {
 	Append(e *domain.LogEntry)
 	List(level string, limit int) []*domain.LogEntry
 	Clear()
+}
+
+// CanvasArtifactStore persists interactive HTML/CSS/JS artifacts the agent
+// produces via artifact_create / artifact_update. Artifacts are scoped per
+// conversation. Implementations must be safe for concurrent use.
+type CanvasArtifactStore interface {
+	List(conversationID string) []*domain.CanvasArtifact
+	Get(conversationID, id string) *domain.CanvasArtifact
+	Save(conversationID string, a *domain.CanvasArtifact) error
+	Delete(conversationID, id string) error
 }
 
 type SettingsStore interface {

@@ -200,7 +200,7 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIPro
 		return nil, nil
 	}
 	// Inject the current primary memory content into the system prompt so
-	// the review agent can see what is already in MEMORY.md before deciding
+	// the review agent can see what is already in primary.md before deciding
 	// to promote (avoid duplicates) or demote (spot stale entries). Without
 	// this, the agent would have to call memory_list target=primary first,
 	// burning a tool round and sometimes skipping the check entirely.

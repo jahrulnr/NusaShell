@@ -93,6 +93,22 @@ func TestAgentPromptRoutesCommonToolWorkflows(t *testing.T) {
 	}
 }
 
+func TestSystemPromptRoutesArtifactGuidance(t *testing.T) {
+	prompt := strings.Join(strings.Fields(systemPrompt), " ")
+	for _, expected := range []string{
+		"artifact_create",
+		"artifact_update",
+		"prototypes, minigames, dashboards, simulations",
+		"sandboxed iframe",
+		"prefer reusing CDNs",
+		"64k token budget",
+	} {
+		if !strings.Contains(prompt, expected) {
+			t.Errorf("system prompt missing artifact guidance for %q", expected)
+		}
+	}
+}
+
 func TestSystemPromptMemorySelectivity(t *testing.T) {
 	prompt := strings.Join(strings.Fields(systemPrompt), " ")
 	for _, expected := range []string{

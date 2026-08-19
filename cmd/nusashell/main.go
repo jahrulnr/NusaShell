@@ -149,14 +149,15 @@ func run() error {
 	mcpManager := mcpclient.NewManager()
 	bus := application.NewBus()
 	askService := application.NewAskQuestionService()
-	todoStore := jsonstore.NewTodoStore(filepath.Join(dataDir, "conversation-todos.json"))
+	todoStore := jsonstore.NewTodoStore(filepath.Join(dataDir, "conversations", "todos.json"))
+	artifactStore := jsonstore.NewArtifactStore(filepath.Join(dataDir, "conversations", "artifacts.json"))
 	providerStore := &jsonstore.Providers{S: store}
 	searcher := searchwire.New(tools.SearchwireConfigFromProviders(providerStore, credentials))
 	// Seed builtin skills from the embedded resources/agent/skills/ tree
 	// into the user data directory, then create the filesystem-backed
 	// skill store. Skill content (SKILL.md) lives on disk; metadata
 	// (state, usage, provenance) is cataloged in skills.json.
-	skillsRoot := filepath.Join(dataDir, "agent", "skills")
+	skillsRoot := filepath.Join(dataDir, "skills")
 	if err := skillfs.SeedBuiltinSkills(skillsRoot); err != nil {
 		slog.Warn("builtin skill seed failed", "error", err)
 	}
@@ -193,8 +194,8 @@ func run() error {
 	if err != nil {
 		slog.Warn("attachment store init failed", "error", err)
 	}
-	// Two-tier memory: primary (MEMORY.md, always-injected, ~1k token cap)
-	// and fragments (memories/fragments/*.md, unlimited, searchable). Both
+	// Two-tier memory: primary (primary.md, always-injected, ~1k token cap)
+	// and fragments (memory/fragments/*.md, unlimited, searchable). Both
 	// auto-create their files/directories on first use.
 	primaryStore, err := memorystore.NewPrimary(dataDir)
 	if err != nil {
@@ -218,6 +219,7 @@ func run() error {
 		Credentials:     credentials,
 		AskQuestions:    askService,
 		MCP:             mcpManager,
+		Artifacts:       artifactStore,
 	}
 	app := application.NewApp(application.Deps{
 		Version:                     version,

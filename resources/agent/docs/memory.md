@@ -8,8 +8,8 @@ archive.
 
 | Tier | Storage | Cap | Injected | Tools |
 |---|---|---|---|---|
-| **Primary** | `MEMORY.md` (single markdown file) | ~1k tokens | Every turn (via hydration) | `memory_list target=primary`, `memory_replace target=primary`, `memory_demote` |
-| **Fragments** | `memories/fragments/*.md` (one file per entry) | Unlimited | On-demand (search) | `memory_save`, `memory_search`, `memory_list target=fragments`, `memory_replace target=fragment`, `memory_delete`, `memory_promote` |
+| **Primary** | `memory/primary.md` (single markdown file) | ~1k tokens | Every turn (via hydration) | `memory_list target=primary`, `memory_replace target=primary`, `memory_demote` |
+| **Fragments** | `memory/fragments/*.md` (one file per entry) | Unlimited | On-demand (search) | `memory_save`, `memory_search`, `memory_list target=fragments`, `memory_replace target=fragment`, `memory_delete`, `memory_promote` |
 
 Primary memory is the hot set — the durable, frequently-needed facts the
 agent sees in every turn. Fragments are the cold archive — all new facts

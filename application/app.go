@@ -373,7 +373,7 @@ func NewApp(deps Deps) *App {
 		app.lifecycle.SetLogger(app.log)
 	}
 	// Wire the embedding cache + edge builder. The cache persists to
-	// learning_embeddings.jsonl and avoids re-embedding on every search.
+	// learning/embeddings.jsonl and avoids re-embedding on every search.
 	// The edge builder pre-computes similarity + token overlap edges as
 	// a background job.
 	if deps.DataDir != "" {
@@ -626,7 +626,7 @@ func (a *App) turnCountersPath() string {
 	if a.DataDir == "" {
 		return ""
 	}
-	return filepath.Join(a.DataDir, "learning_turns.json")
+	return filepath.Join(a.DataDir, "learning", "turns.json")
 }
 
 // loadTurnCounters restores per-conversation turn counters from disk so
@@ -634,7 +634,7 @@ func (a *App) turnCountersPath() string {
 // this, a user who restarts frequently never reaches the threshold and
 // the review agent never fires.
 func (a *App) loadTurnCounters(dataDir string) {
-	path := filepath.Join(dataDir, "learning_turns.json")
+	path := filepath.Join(dataDir, "learning", "turns.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return // file doesn't exist yet — fresh start
@@ -671,6 +671,7 @@ func (a *App) saveTurnCounters() {
 	if err != nil {
 		return
 	}
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
 	_ = os.WriteFile(path, data, 0o600)
 }
 

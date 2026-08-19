@@ -13,22 +13,35 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 
 | Path | Content | Format |
 | --- | --- | --- |
+| `config/settings.json` | compaction / caching / sound notification / user prompt settings | JSON |
+| `config/providers.json` | provider configs (no keys) | JSON |
+| `config/acp-agents.json` | ACP subagent configs (command/args/env; env values stored locally, keys only on the wire) | JSON |
+| `config/mcp-servers.json` | manual MCP server registry | JSON |
+| `config/codex-installation-id` | persistent Codex installation UUID for cache routing | text |
+| `config/skills.json` | legacy skill metadata catalog (skillfs uses `skills/skills.json`) | JSON |
 | `conversations/*.json` | one file per agent conversation | JSON |
-| `providers.json` | provider configs (no keys) | JSON |
-| `acp-agents.json` | ACP subagent configs (command/args/env; env values stored locally, keys only on the wire) | JSON |
-| `agent/skills/<id>/` | one directory per user/builtin skill: `SKILL.md` + optional support files | markdown + files |
-| `agent/skills/skills.json` | skill metadata (category, state, origin, owned_by, pinned, usage) | JSON |
-| `agent/skills/.provenance.json` | skill authorship log (createdBy, createdAt) | JSON |
-| `agent/skills/.deleted-builtin.json` | builtin skills the user deleted (so they are not re-seeded) | JSON |
+| `conversations/*.chunks/` | archived conversation chunks (compaction) | JSON |
+| `conversations/todos.json` | per-conversation TODO checklists + goal briefs | JSON |
+| `conversations/artifacts.json` | per-conversation interactive artifacts (HTML/CSS/JS) | JSON |
+| `skills/<id>/` | one directory per user/builtin skill: `SKILL.md` + optional support files | markdown + files |
+| `skills/skills.json` | skill metadata (category, state, origin, owned_by, pinned, usage) | JSON |
+| `skills/.provenance.json` | skill authorship log (createdBy, createdAt) | JSON |
+| `skills/.deleted-builtin.json` | builtin skills the user deleted (so they are not re-seeded) | JSON |
 | `plugins/<id>/` | plugins (manual MCP servers and installed plugins): `manifest.json` + optional `ui/` + optional `skills/` (mounted read-only as `plugin:<id>` skills) | JSON + files |
-| `MEMORY.md` | primary memory (always-injected working set, ~1k token cap; auto-created on first run) | Markdown |
-| `memories/fragments/*.md` | memory fragments (unlimited searchable archive; one markdown file per entry with YAML frontmatter) | Markdown + YAML |
-| `learning_reviews/` | background review agent transcripts (one JSON file per review run; viewable from the Learning log) | JSON |
+| `memory/primary.md` | primary memory (always-injected working set, ~1k token cap; auto-created on first run) | Markdown |
+| `memory/fragments/*.md` | memory fragments (unlimited searchable archive; one markdown file per entry with YAML frontmatter) | Markdown + YAML |
+| `memory/legacy.jsonl` | legacy memory entries (pre-fragment system) | JSONL |
+| `learning/edges.jsonl` | learning edges (skill/memory similarity + token overlap) | JSONL |
+| `learning/embeddings.jsonl` | embedding cache for memory/skill entries | JSONL |
+| `learning/trajectory.jsonl` | learning trajectory log (one event per line) | JSONL |
+| `learning/turns.json` | turn counters for review agent scheduling | JSON |
+| `learning/reviews/` | background review agent transcripts (one JSON file per review run; viewable from the Learning log) | JSON |
+| `attachments/<conv_id>/` | image/file attachments saved for file-based tool access | files |
+| `docs/` | optional user-supplied docs that extend the embedded corpus | markdown |
 | `logs.jsonl` | activity log (bounded ring) | JSONL |
-| `acp_runs.jsonl` | completed ACP subagent run transcripts (one JSON line per run) | JSONL |
-| `settings.json` | compaction / caching / sound notification / user prompt settings | JSON |
+| `conversations/acp_runs.jsonl` | completed ACP subagent run transcripts (one JSON line per run) | JSONL |
 | `credentials.db` | API keys per provider | SQLite |
-| `automation.db` | workflows, runs, schedules, events, waits, locks | SQLite |
+| `ci/automation.db` | workflows, runs, schedules, events, waits, locks | SQLite |
 | `ci/runs/` | local executor scratch directories | files |
 
 Workspace pipelines live in the project tree as `.nusashell/pipeline.yaml`, not under the data directory.

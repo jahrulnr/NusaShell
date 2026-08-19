@@ -2,6 +2,7 @@ import { renderMarkdown } from '../../markdown.js';
 import { el, fmtTime } from '../../ui.js';
 import { createAskCard } from '../ask-card.js';
 import { openDrawer, agentNameForId } from './subagents.js';
+import { renderArtifactCard, parseArtifactOutput } from '../../artifact-render.js';
 
 export function renderEmptyThread() {
   const thread = document.getElementById('agent-thread');
@@ -214,6 +215,10 @@ export function renderToolCallCard(toolCall) {
   }
   if (toolCall.name === 'subagent') {
     return renderSubagentCard(toolCall);
+  }
+  const artifact = parseArtifactOutput(toolCall);
+  if (artifact) {
+    return renderArtifactCard(toolCall, artifact);
   }
   return renderToolJob(toolCall);
 }

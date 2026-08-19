@@ -8,7 +8,7 @@ A repository may include `.nusashell/pipeline.yaml`. `ci_pipeline_read` / `ci.pi
 
 ## Saved automations
 
-`automation_create` / `automation.save` persist a workflow in `automation.db` (not conversation JSON). Triggers:
+`automation_create` / `automation.save` persist a workflow in `ci/automation.db` (not conversation JSON). Triggers:
 
 - **once** — RFC3339 timestamp. Fires at most once. Survives restart.
 - **every** — `cron` (5-field calendar) or `interval` (elapsed duration such as `1h`). They are not equivalent.

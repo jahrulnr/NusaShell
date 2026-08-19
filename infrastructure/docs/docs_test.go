@@ -34,3 +34,17 @@ func TestReadTrimsWhitespace(t *testing.T) {
 		t.Fatalf("whitespace-trimmed read failed: %v", err)
 	}
 }
+
+func TestArtifactsDocExists(t *testing.T) {
+	s, err := New("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := s.Read("artifacts")
+	if err != nil {
+		t.Fatalf("artifacts doc not found: %v", err)
+	}
+	if doc.Title == "" {
+		t.Error("artifacts doc has empty title")
+	}
+}

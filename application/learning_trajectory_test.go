@@ -27,7 +27,7 @@ func TestTrajectoryRecorderWritesEvents(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, "learning_trajectory.jsonl"))
+	data, err := os.ReadFile(filepath.Join(dir, "learning", "trajectory.jsonl"))
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}

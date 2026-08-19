@@ -10,7 +10,7 @@ import (
 // ReviewTranscript is the persisted record of one background review run:
 // the review agent's own conversation with the LLM (user transcript →
 // assistant tool_calls → tool results → …). Stored as one JSON file per
-// review under <dataDir>/learning_reviews/<id>.json.
+// review under <dataDir>/learning/reviews/<id>.json.
 type ReviewTranscript struct {
 	ID             string        `json:"id"`
 	ConversationID string        `json:"conversation_id"`
@@ -22,7 +22,7 @@ type ReviewTranscript struct {
 // reviewTranscriptDir is the folder under the data directory that holds
 // review transcript files.
 func reviewTranscriptDir(dataDir string) string {
-	return filepath.Join(dataDir, "learning_reviews")
+	return filepath.Join(dataDir, "learning", "reviews")
 }
 
 // saveReviewTranscript writes the review agent's message history to a

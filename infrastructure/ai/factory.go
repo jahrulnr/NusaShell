@@ -114,12 +114,17 @@ func newCodexAdapter(ctx context.Context, p *domain.Provider, storedJSON string,
 }
 
 // loadOrGenerateInstallationID loads a persistent installation UUID from
-// <data-dir>/codex-installation-id, or generates a new one and persists it
-// if none exists. This ID is sent as x-codex-installation-id so the Codex
-// backend can route requests from the same install to the same cache shard.
+// <data-dir>/config/codex-installation-id, or generates a new one and
+// persists it if none exists. This ID is sent as x-codex-installation-id
+// so the Codex backend can route requests from the same install to the
+// same cache shard. Respects NUSASHELL_DATA_DIR so the ID lives alongside
+// the rest of the user's data, not in a hardcoded default location.
 func loadOrGenerateInstallationID() string {
-	dir := config.DefaultDataDir()
-	path := filepath.Join(dir, "codex-installation-id")
+	dir := os.Getenv("NUSASHELL_DATA_DIR")
+	if dir == "" {
+		dir = config.DefaultDataDir()
+	}
+	path := filepath.Join(dir, "config", "codex-installation-id")
 	if data, err := os.ReadFile(path); err == nil {
 		id := strings.TrimSpace(string(data))
 		if id != "" {
@@ -127,7 +132,7 @@ func loadOrGenerateInstallationID() string {
 		}
 	}
 	id := mustGenerateUUID()
-	_ = os.MkdirAll(dir, 0o700)
+	_ = os.MkdirAll(filepath.Dir(path), 0o700)
 	_ = os.WriteFile(path, []byte(id), 0o600)
 	return id
 }

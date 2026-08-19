@@ -38,6 +38,11 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `web_search` | search the web across Brave, Startpage, Wikipedia, and GitHub; returns ranked results with title, URL, and snippet |
 | `web_fetch` | fetch a URL and return readable text; supports HTML, JSON (pretty-printed), XML/RSS/Atom, Markdown, CSV, and plain text with newlines preserved; collects links and selected response headers; honors `max_bytes`; surfaces `Retry-After` on 429/503 and structured JSON error bodies |
 | `web_answer` | get a web-grounded answer via an LLM with built-in web search (only available when an answer-provider API key is configured) |
+| `artifact_create` | create an interactive HTML/CSS/JS artifact rendered in a sandboxed iframe in the UI (prototypes, minigames, dashboards, visualizations); external resources and CDNs allowed |
+| `artifact_update` | partial update of an existing artifact by id (only the fields you pass are replaced) |
+| `artifact_read` | read an existing artifact's full content by id |
+| `artifact_list` | list artifacts in the current conversation |
+| `artifact_delete` | delete an artifact by id |
 | `ci_pipeline_list` | list `.nusashell/pipeline.yaml` jobs in a workspace |
 | `ci_pipeline_read` | read and validate the workspace pipeline |
 | `ci_pipeline_validate` | validate pipeline/workflow YAML (INVALID vs BLOCKED) |

@@ -14,7 +14,10 @@ import (
 
 func writeTrajectory(t *testing.T, dir string, lines []string) {
 	t.Helper()
-	path := filepath.Join(dir, "learning_trajectory.jsonl")
+	path := filepath.Join(dir, "learning", "trajectory.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir trajectory dir: %v", err)
+	}
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
 		t.Fatalf("write trajectory: %v", err)
 	}
@@ -202,7 +205,7 @@ func TestTrajectoryRecordRoundTrip(t *testing.T) {
 	})
 	_ = rec.Close()
 
-	b, err := os.ReadFile(filepath.Join(dir, "learning_trajectory.jsonl"))
+	b, err := os.ReadFile(filepath.Join(dir, "learning", "trajectory.jsonl"))
 	if err != nil {
 		t.Fatalf("read trajectory: %v", err)
 	}

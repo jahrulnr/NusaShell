@@ -17,7 +17,7 @@ import (
 
 // FragmentsDir is the subdirectory under the data dir that holds one
 // markdown file per memory fragment.
-const FragmentsDir = "memories/fragments"
+const FragmentsDir = "memory/fragments"
 
 // fragmentFrontmatter is the YAML metadata block at the top of each
 // fragment file. It is kept small and non-verbose: only the fields the
@@ -34,7 +34,7 @@ type fragmentFrontmatter struct {
 }
 
 // Fragments is the FragmentStore adapter backed by one markdown file
-// per entry under <dataDir>/memories/fragments/<id>.md. Each file has a
+// per entry under <dataDir>/memory/fragments/<id>.md. Each file has a
 // YAML frontmatter block delimited by "---" lines, followed by the
 // markdown body. The store loads all fragments into memory on first
 // access and re-reads files on demand when a Get is requested.

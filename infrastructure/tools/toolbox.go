@@ -49,6 +49,7 @@ type Toolbox struct {
 	Steerer interface {
 		SteerHeadlessTurn(conversationID, text string) error
 	}
+	Artifacts application.CanvasArtifactStore
 }
 
 // webAnswerSearcher builds a searchwire.Searcher on-demand from the web
@@ -152,6 +153,15 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "read_video", Description: "Load a video file from the conversation into your context so you can see it. Pass file_path (the absolute path shown in the video placeholder). When your active model supports video input, the video is attached to your context directly. For non-video models, the video is described using a video fallback model and the text description is returned.", InputSchema: obj("object", props("file_path", str("Absolute path of the video file on disk"), "question", str("Optional question about the video")), "file_path")},
 		{Name: "web_search", Description: "Search the web for fresh information. Returns ranked results with title, URL, and snippet from multiple sources (Brave, Startpage, Wikipedia, GitHub). Use this when you need current information, documentation, or research. Follow up with web_fetch on promising URLs for full page content.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results (default 10)")), "query")},
 		{Name: "web_fetch", Description: "Fetch a URL and return readable text (HTML stripped to title + visible text). Use after web_search to read full page content from a result URL. Accepts http/https only.", InputSchema: obj("object", props("url", str("URL to fetch"), "max_bytes", intSchema("Optional max bytes of extracted text (default 2MB)")), "url")},
+	}
+	if t.Artifacts != nil {
+		tools = append(tools,
+			application.ToolInfo{Name: "artifact_create", Description: "Create a new interactive artifact (HTML/CSS/JS) rendered in a sandboxed iframe in the UI. Use for prototypes, minigames, dashboards, visualizations, or any interactive content that mermaid or tables cannot express. External resources (CDNs, <script src>, <img>, <video>) are allowed — prefer reusing CDNs over inlining large libraries to save tokens. Max 64k tokens total.", InputSchema: obj("object", props("html", str("HTML body content (or a full <!DOCTYPE html> document)"), "css", str("Optional CSS, inlined into the document <head>"), "js", str("Optional JavaScript, inlined at end of <body>"), "title", str("Artifact title shown in the card header"), "width", intSchema("Optional iframe width in pixels"), "height", intSchema("Optional iframe height in pixels")), "html")},
+			application.ToolInfo{Name: "artifact_update", Description: "Update an existing artifact by id. Only the fields you pass are replaced; omitted fields keep their current value. Use this for small edits instead of re-outputting the whole artifact.", InputSchema: obj("object", props("id", str("Artifact id from artifact_create result"), "html", str("New HTML body (omit to keep current)"), "css", str("New CSS (omit to keep current)"), "js", str("New JS (omit to keep current)"), "title", str("New title (omit to keep current)")), "id")},
+			application.ToolInfo{Name: "artifact_read", Description: "Read an existing artifact's full content by id.", InputSchema: obj("object", props("id", str("Artifact id")), "id")},
+			application.ToolInfo{Name: "artifact_list", Description: "List artifacts in the current conversation with id, title, and updated_at.", InputSchema: obj("object", nil)},
+			application.ToolInfo{Name: "artifact_delete", Description: "Delete an artifact by id.", InputSchema: obj("object", props("id", str("Artifact id")), "id")},
+		)
 	}
 	if t.Acp != nil && len(t.Acp.EnabledAcpAgents()) > 0 {
 		tools = append(tools,
@@ -1167,6 +1177,11 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		case <-time.After(time.Duration(args.Seconds) * time.Second):
 		}
 		return yamlBlock(map[string]any{"status": "slept", "seconds": args.Seconds}), nil
+	}
+
+	// Artifact tools: interactive HTML/CSS/JS documents rendered in the UI.
+	if out, handled, err := t.executeArtifact(ctx, name, argsJSON); handled {
+		return out, err
 	}
 
 	if out, handled, err := t.executeAutomation(ctx, name, argsJSON); handled {

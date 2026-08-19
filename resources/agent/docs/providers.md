@@ -112,7 +112,7 @@ URL and Args/Env are ignored.
   never the default — promote it from the live subagent UI.
   `edit_confirmed` auto-allows workspace-contained edits; slash-rooted
   paths are absolute (even on Windows) and prompt instead of auto-allow.
-- Env values stay in `acp-agents.json`. List/get RPC returns **keys only**.
+- Env values stay in `config/acp-agents.json`. List/get RPC returns **keys only**.
 
 The parent agent spawns these binaries with `subagent` (optional `count` for
 parallel sessions). You can peek, steer, stop, change mode, and answer

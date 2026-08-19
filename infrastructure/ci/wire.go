@@ -8,7 +8,7 @@ import (
 
 // BuildAutomation wires durable stores, the local executor, and both schedulers.
 func BuildAutomation(dataDir string, bus *application.Bus, plugins application.PluginStore, mcp application.MCPToolbox, caller application.MCPToolCaller) (*application.Automation, *SQLite, error) {
-	store, err := OpenSQLite(filepath.Join(dataDir, "automation.db"))
+	store, err := OpenSQLite(filepath.Join(dataDir, "ci", "automation.db"))
 	if err != nil {
 		return nil, nil, err
 	}

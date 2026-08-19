@@ -5,9 +5,9 @@ import "time"
 // ---- Two-tier memory ----
 //
 // Primary memory is a small, always-injected working set (~1k tokens)
-// stored in a single MEMORY.md file. Fragments are an unlimited,
+// stored in a single primary.md file. Fragments are an unlimited,
 // on-demand archive stored as one markdown file per entry under
-// memories/fragments/. The background review agent promotes durable
+// memory/fragments/. The background review agent promotes durable
 // facts from fragments into primary; foreground agents save new
 // observations as fragments and search fragments by content + metadata.
 
@@ -19,7 +19,7 @@ const PrimaryTokenCap = 1000
 // PrimaryCharCap is the character approximation of PrimaryTokenCap.
 const PrimaryCharCap = PrimaryTokenCap * 4
 
-// PrimaryEntry is one line in the primary MEMORY.md file. Primary
+// PrimaryEntry is one line in the primary primary.md file. Primary
 // entries are short, durable facts promoted from fragments by the
 // background review agent. Foreground agents can read and update them
 // but cannot create new ones directly.
@@ -49,7 +49,7 @@ const (
 )
 
 // MemoryFragment is one searchable memory archive entry, stored as a
-// single markdown file under memories/fragments/<id>.md. The YAML
+// single markdown file under memory/fragments/<id>.md. The YAML
 // frontmatter carries the metadata used for filtering; the body is the
 // content the agent reads when the fragment is retrieved.
 type MemoryFragment struct {

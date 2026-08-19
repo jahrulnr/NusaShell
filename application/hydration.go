@@ -33,7 +33,7 @@ type MCPToolReader interface {
 // HydrationSource assembles the read-only sources of truth the builder draws
 // from. A nil store means that snapshot slot is skipped (fail-soft).
 type HydrationSource struct {
-	Primary        PrimaryStore // always-injected working set (MEMORY.md)
+	Primary        PrimaryStore // always-injected working set (primary.md)
 	Memory         MemoryStore  // legacy — used by lifecycle/learning subsystems
 	Skills         SkillStore
 	Plugins        PluginStore

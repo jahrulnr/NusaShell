@@ -234,9 +234,13 @@ func buildPromptCachePolicy(settings domain.Settings, providerID, model, convers
 	}
 	canonical, _ := json.Marshal([3]string{providerID, model, conversationID})
 	sum := sha256.Sum256(canonical)
+	// OpenAI caps prompt_cache_key at 64 chars; use 32 total (pc_ + 29 hex
+	// chars from the sha256 digest) for a comfortable margin below the
+	// limit while keeping plenty of cardinality for cache routing.
+	full := hex.EncodeToString(sum[:])
 	return &PromptCachePolicy{
 		Mode: "auto",
-		Key:  "pc_" + hex.EncodeToString(sum[:]),
+		Key:  "pc_" + full[:29],
 	}
 }
 

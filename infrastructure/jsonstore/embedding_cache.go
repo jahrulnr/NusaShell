@@ -5,7 +5,7 @@
 // content on every search call — a problem that scales linearly with the
 // number of memory/skill entries.
 //
-// Storage: learning_embeddings.jsonl — one entry per line, append-only.
+// Storage: learning/embeddings.jsonl — one entry per line, append-only.
 // The full cache is loaded into memory at startup. Cache hits return
 // instantly with zero API calls; cache misses embed, store, and return.
 //
@@ -31,7 +31,7 @@ type EmbeddingCacheEntry struct {
 }
 
 // EmbeddingCache is a content-addressed cache for embedding vectors.
-// It persists to learning_embeddings.jsonl and keeps an in-memory map
+// It persists to learning/embeddings.jsonl and keeps an in-memory map
 // for O(1) lookups.
 type EmbeddingCache struct {
 	mu      sync.RWMutex
@@ -48,7 +48,10 @@ func cacheKey(modelID, hash string) string {
 
 // NewEmbeddingCache opens or creates the cache file at dataDir.
 func NewEmbeddingCache(dataDir string) (*EmbeddingCache, error) {
-	path := filepath.Join(dataDir, "learning_embeddings.jsonl")
+	path := filepath.Join(dataDir, "learning", "embeddings.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
 	c := &EmbeddingCache{
 		path:    path,
 		entries: make(map[string]*EmbeddingCacheEntry),

@@ -105,9 +105,16 @@ safe fallback.
   structured data (e.g. tool parameters, file formats, tier differences).
 - Use a mermaid diagram when explaining workflows, state transitions,
   architecture, or relationships between components.
-- Keep prose short. If a table or diagram can convey the same information,
-  use it instead of writing an essay. Reserve prose for context that cannot
-  be expressed structurally.
+- Use `artifact_create` for interactive content that mermaid and tables
+  cannot express: prototypes, minigames, dashboards, simulations,
+  calculators, or rich visualizations. The artifact renders in a sandboxed
+  iframe in the UI. External resources (CDNs, `<script src>`, `<img>`,
+  `<video>`) are allowed — prefer reusing CDNs over inlining large
+  libraries to stay within the 64k token budget. Use `artifact_update` for
+  small edits instead of re-outputting the whole artifact.
+- Keep prose short. If a table, diagram, or artifact can convey the same
+  information, use it instead of writing an essay. Reserve prose for context
+  that cannot be expressed structurally.
 
 ## User messages during task execution
 

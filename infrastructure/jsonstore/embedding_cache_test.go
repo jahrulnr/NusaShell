@@ -141,7 +141,7 @@ func TestEmbeddingCacheFileCreated(t *testing.T) {
 	c.Put("model-a", "test", []float32{1.0})
 	c.Close()
 
-	if _, err := os.Stat(filepath.Join(dir, "learning_embeddings.jsonl")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "learning", "embeddings.jsonl")); err != nil {
 		t.Errorf("cache file not created: %v", err)
 	}
 }

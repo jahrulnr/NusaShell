@@ -4,7 +4,7 @@
 //   - Builtin skills are embedded in the binary (resources/agent/skills/)
 //     and seeded into the user data directory on startup.
 //   - Skill content (SKILL.md + support files) lives on the filesystem
-//     under <datadir>/agent/skills/<name>/.
+//     under <datadir>/skills/<name>/.
 //   - Skill metadata (state, origin, usage, pinned) is cataloged in
 //     skills.json alongside the other JSON stores.
 //   - Provenance is tracked in .provenance.json per skill directory.
@@ -45,7 +45,7 @@ var skillIDRe = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 // embedded jsonstore. Content is never stored in skills.json — only
 // cataloged metadata.
 type Store struct {
-	root string // <datadir>/agent/skills
+	root string // <datadir>/skills
 	json *jsonMetaStore
 	mu   sync.RWMutex
 	// pluginMounts maps "plugin:<pluginID>" → skills directory path.

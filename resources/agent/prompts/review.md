@@ -34,10 +34,10 @@ conversations. When in doubt, save nothing.
 NusaShell has two memory tiers:
 
 1. **Fragments** — unlimited, searchable archive. One file per entry under
-   `memories/fragments/`. All new facts are saved here first. Searchable by
+   `memory/fragments/`. All new facts are saved here first. Searchable by
    content (BM25) and metadata (category, project, task, tags).
 2. **Primary memory** — small, always-injected working set (~1k token cap).
-   Stored in `MEMORY.md`. Only the most durable, frequently-needed facts
+   Stored in `memory/primary.md`. Only the most durable, frequently-needed facts
    belong here. The agent sees primary memory in every turn via hydration.
 
 ## Current primary memory

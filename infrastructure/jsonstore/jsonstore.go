@@ -55,7 +55,7 @@ func New(dir string) (*Store, error) {
 		conversations: map[string]*domain.Conversation{},
 		settings:      domain.DefaultSettings(),
 	}
-	for _, sub := range []string{"conversations"} {
+	for _, sub := range []string{"conversations", "config", "memory", "learning"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
 			return nil, err
 		}
@@ -88,22 +88,22 @@ func (s *Store) load() error {
 		s.conversations[c.ID] = &c
 	}
 
-	if err := s.loadJSON("providers.json", &s.providers); err != nil {
+	if err := s.loadJSON("config/providers.json", &s.providers); err != nil {
 		return err
 	}
 	s.migrateProviderKinds()
-	if err := s.loadJSON("acp-agents.json", &s.acpAgents); err != nil {
+	if err := s.loadJSON("config/acp-agents.json", &s.acpAgents); err != nil {
 		return err
 	}
-	if err := s.loadJSON("skills.json", &s.skills); err != nil {
+	if err := s.loadJSON("config/skills.json", &s.skills); err != nil {
 		return err
 	}
-	if err := s.loadJSON("settings.json", &s.settings); err != nil {
+	if err := s.loadJSON("config/settings.json", &s.settings); err != nil {
 		return err
 	}
 	s.settings = domain.NormalizeSettings(s.settings)
-	// memories: JSONL
-	if b, err := os.ReadFile(filepath.Join(s.dir, "memories.jsonl")); err == nil {
+	// memories: JSONL (legacy)
+	if b, err := os.ReadFile(filepath.Join(s.dir, "memory", "legacy.jsonl")); err == nil {
 		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
 			if line == "" {
 				continue
@@ -120,7 +120,7 @@ func (s *Store) load() error {
 		return err
 	}
 	// learning_edges: JSONL
-	if b, err := os.ReadFile(filepath.Join(s.dir, "learning_edges.jsonl")); err == nil {
+	if b, err := os.ReadFile(filepath.Join(s.dir, "learning", "edges.jsonl")); err == nil {
 		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
 			if line == "" {
 				continue
@@ -347,7 +347,7 @@ func (s *Store) migrateProviderKinds() {
 		}
 	}
 	if changed {
-		_ = s.writeJSON("providers.json", s.providers)
+		_ = s.writeJSON("config/providers.json", s.providers)
 	}
 }
 
@@ -381,11 +381,11 @@ func (s *Store) SaveProvider(p *domain.Provider) error {
 	for i, existing := range s.providers {
 		if existing.ID == p.ID {
 			s.providers[i] = stored
-			return s.writeJSON("providers.json", s.providers)
+			return s.writeJSON("config/providers.json", s.providers)
 		}
 	}
 	s.providers = append(s.providers, stored)
-	return s.writeJSON("providers.json", s.providers)
+	return s.writeJSON("config/providers.json", s.providers)
 }
 
 func (s *Store) DeleteProvider(id string) error {
@@ -394,7 +394,7 @@ func (s *Store) DeleteProvider(id string) error {
 	for i, p := range s.providers {
 		if p.ID == id {
 			s.providers = append(s.providers[:i], s.providers[i+1:]...)
-			return s.writeJSON("providers.json", s.providers)
+			return s.writeJSON("config/providers.json", s.providers)
 		}
 	}
 	return fmt.Errorf("%w: provider %s", ErrNotFound, id)
@@ -430,11 +430,11 @@ func (s *Store) SaveAcpAgent(a *domain.AcpAgent) error {
 	for i, existing := range s.acpAgents {
 		if existing.ID == a.ID {
 			s.acpAgents[i] = stored
-			return s.writeJSON("acp-agents.json", s.acpAgents)
+			return s.writeJSON("config/acp-agents.json", s.acpAgents)
 		}
 	}
 	s.acpAgents = append(s.acpAgents, stored)
-	return s.writeJSON("acp-agents.json", s.acpAgents)
+	return s.writeJSON("config/acp-agents.json", s.acpAgents)
 }
 
 func (s *Store) DeleteAcpAgent(id string) error {
@@ -443,7 +443,7 @@ func (s *Store) DeleteAcpAgent(id string) error {
 	for i, a := range s.acpAgents {
 		if a.ID == id {
 			s.acpAgents = append(s.acpAgents[:i], s.acpAgents[i+1:]...)
-			return s.writeJSON("acp-agents.json", s.acpAgents)
+			return s.writeJSON("config/acp-agents.json", s.acpAgents)
 		}
 	}
 	return fmt.Errorf("%w: acp agent %s", ErrNotFound, id)
@@ -479,11 +479,11 @@ func (s *Store) SaveSkill(sk *domain.Skill) error {
 	for i, existing := range s.skills {
 		if existing.ID == sk.ID {
 			s.skills[i] = stored
-			return s.writeJSON("skills.json", s.skills)
+			return s.writeJSON("config/skills.json", s.skills)
 		}
 	}
 	s.skills = append(s.skills, stored)
-	return s.writeJSON("skills.json", s.skills)
+	return s.writeJSON("config/skills.json", s.skills)
 }
 
 func (s *Store) DeleteSkill(id string) error {
@@ -492,7 +492,7 @@ func (s *Store) DeleteSkill(id string) error {
 	for i, sk := range s.skills {
 		if sk.ID == id {
 			s.skills = append(s.skills[:i], s.skills[i+1:]...)
-			return s.writeJSON("skills.json", s.skills)
+			return s.writeJSON("config/skills.json", s.skills)
 		}
 	}
 	return fmt.Errorf("%w: skill %s", ErrNotFound, id)
@@ -523,7 +523,7 @@ func (s *Store) SaveMemory(e *domain.MemoryEntry) error {
 	}
 	stored := clone(e)
 	s.memories = append(s.memories, stored)
-	return s.appendJSONL("memories.jsonl", stored)
+	return s.appendJSONL("memory/legacy.jsonl", stored)
 }
 
 func (s *Store) DeleteMemory(id string) error {
@@ -708,7 +708,7 @@ func (s *Store) SetSettings(settings domain.Settings) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.settings = settings
-	return s.writeJSON("settings.json", settings)
+	return s.writeJSON("config/settings.json", settings)
 }
 
 // ---- learning edges ----
@@ -728,7 +728,7 @@ func (s *Store) SaveLearningEdge(e *domain.LearningEdge) error {
 	defer s.mu.Unlock()
 	stored := clone(e)
 	s.learningEdges = append(s.learningEdges, stored)
-	return s.appendJSONL("learning_edges.jsonl", stored)
+	return s.appendJSONL("learning/edges.jsonl", stored)
 }
 
 func (s *Store) DeleteLearningEdge(id string) error {
@@ -737,7 +737,7 @@ func (s *Store) DeleteLearningEdge(id string) error {
 	for i, e := range s.learningEdges {
 		if e.ID == id {
 			s.learningEdges = append(s.learningEdges[:i], s.learningEdges[i+1:]...)
-			return s.writeJSONL("learning_edges.jsonl", s.learningEdges)
+			return s.writeJSONL("learning/edges.jsonl", s.learningEdges)
 		}
 	}
 	return fmt.Errorf("%w: learning edge %s", ErrNotFound, id)

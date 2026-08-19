@@ -10,7 +10,7 @@ import (
 )
 
 // TodoStore is a durable, per-conversation todo checklist store backed by a
-// single JSON file (conversation-todos.json). It stores both the goal brief
+// single JSON file (conversations/todos.json). It stores both the goal brief
 // and the item list per conversation. It is safe for concurrent use.
 type TodoStore struct {
 	mu    sync.RWMutex
@@ -19,8 +19,7 @@ type TodoStore struct {
 }
 
 // NewTodoStore opens or creates the todo store at path. A missing or corrupt
-// file is treated as an empty store so the shell can still boot. Old files
-// in the legacy format (map[string][]TodoItem) are migrated transparently.
+// file is treated as an empty store so the shell can still boot.
 func NewTodoStore(path string) *TodoStore {
 	t := &TodoStore{
 		path:  path,

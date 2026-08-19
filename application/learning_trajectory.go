@@ -2,7 +2,7 @@
 // debugging and observability. Each line is one event: extraction, review,
 // edge build, consolidation, decay, prune, search.
 //
-// Storage: learning_trajectory.jsonl — append-only, one event per line.
+// Storage: learning/trajectory.jsonl — append-only, one event per line.
 // The file is human-auditable: tail -f to watch learning happen live.
 //
 // This is a debug/observability tool, not a source of truth. The actual
@@ -39,7 +39,10 @@ func NewTrajectoryRecorder(dataDir string) *TrajectoryRecorder {
 	if dataDir == "" {
 		return nil
 	}
-	path := filepath.Join(dataDir, "learning_trajectory.jsonl")
+	path := filepath.Join(dataDir, "learning", "trajectory.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil
+	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return nil
@@ -80,7 +83,7 @@ func (r *TrajectoryRecorder) Close() error {
 
 // trajectoryFileName is the trajectory log path inside a data directory.
 func trajectoryFileName(dataDir string) string {
-	return filepath.Join(dataDir, "learning_trajectory.jsonl")
+	return filepath.Join(dataDir, "learning", "trajectory.jsonl")
 }
 
 // ReadTrajectory loads learning events from the trajectory log, newest

@@ -11,8 +11,8 @@ import (
 )
 
 // AcpRunStore is a JSONL-backed implementation of domain.AcpRunStorage.
-// Each completed run is appended as one JSON line to acp_runs.jsonl in
-// the data directory. The file is read on demand to list or load runs;
+// Each completed run is appended as one JSON line to conversations/acp_runs.jsonl
+// in the data directory. The file is read on demand to list or load runs;
 // there is no in-memory index — the expected volume is low (one line per
 // subagent completion) and the file grows slowly.
 //
@@ -30,7 +30,7 @@ func NewAcpRunStore(dir string) *AcpRunStore {
 }
 
 func (s *AcpRunStore) path() string {
-	return filepath.Join(s.dir, "acp_runs.jsonl")
+	return filepath.Join(s.dir, "conversations", "acp_runs.jsonl")
 }
 
 // TranscriptPath returns the absolute path to the JSONL transcript file.
@@ -46,7 +46,7 @@ func (s *AcpRunStore) Save(record domain.AcpRunRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if err := os.MkdirAll(s.dir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(s.path()), 0o755); err != nil {
 		return err
 	}
 

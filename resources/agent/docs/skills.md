@@ -1,7 +1,7 @@
 # Skills
 
 A skill is a markdown instruction pack the agent can load on demand. Each skill
-lives in its own directory `<datadir>/agent/skills/<id>/SKILL.md` plus optional
+lives in its own directory `<datadir>/skills/<id>/SKILL.md` plus optional
 support files (references, scripts, assets).
 
 ## Ownership and priority

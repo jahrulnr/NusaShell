@@ -45,7 +45,7 @@ func TestSQLiteOnceTriggerSurvivesReopen(t *testing.T) {
 	svc2.Clock = clock
 	svc2.Auto.Clock = clock
 	svc2.Exec.Clock = clock
-	if _, err := os.Stat(filepath.Join(dir, "automation.db")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "ci", "automation.db")); err != nil {
 		t.Fatal(err)
 	}
 	clock.Advance(2 * time.Hour)

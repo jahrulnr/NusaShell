@@ -1,6 +1,6 @@
 // Package memorystore implements the two-tier memory persistence
-// adapters: a single MEMORY.md file for the always-injected primary
-// working set, and one markdown file per entry under memories/fragments/
+// adapters: a single primary.md file for the always-injected primary
+// working set, and one markdown file per entry under memory/fragments/
 // for the unlimited searchable archive. Both adapters auto-create their
 // files and directories on first use.
 package memorystore
@@ -18,16 +18,16 @@ import (
 	"nusashell/domain"
 )
 
-// ---- Primary store (MEMORY.md) ----
+// ---- Primary store (primary.md) ----
 
-// PrimaryFile is the on-disk name of the primary memory document.
-const PrimaryFile = "MEMORY.md"
+// PrimaryFile is the on-disk path of the primary memory document.
+const PrimaryFile = "memory/primary.md"
 
-// PrimaryVersion is the schema version of the MEMORY.md frontmatter.
+// PrimaryVersion is the schema version of the primary.md frontmatter.
 // Bump when the file format changes in a backward-incompatible way.
 const PrimaryVersion = 1
 
-// primaryFrontmatter is the YAML metadata block at the top of MEMORY.md.
+// primaryFrontmatter is the YAML metadata block at the top of primary.md.
 // It carries the last-updated timestamp and schema version so a human
 // (or migration tool) can tell when the file was last touched and what
 // format version it uses.
@@ -36,7 +36,7 @@ type primaryFrontmatter struct {
 	Version     int    `yaml:"version"`
 }
 
-// Primary is the PrimaryStore adapter backed by MEMORY.md. The file is
+// Primary is the PrimaryStore adapter backed by primary.md. The file is
 // a markdown document with YAML frontmatter (last_updated + version)
 // followed by one bullet line per entry. Each entry line is formatted as:
 //
@@ -50,7 +50,7 @@ type Primary struct {
 	loaded  bool
 }
 
-// NewPrimary opens (or auto-creates) the MEMORY.md file at dataDir and
+// NewPrimary opens (or auto-creates) the primary.md file at dataDir and
 // loads its entries into memory. The file is created empty with YAML
 // frontmatter if it does not exist.
 func NewPrimary(dataDir string) (*Primary, error) {
@@ -187,7 +187,7 @@ func (p *Primary) writeFile() error {
 	return os.WriteFile(p.path, []byte(b.String()), 0o644)
 }
 
-// emptyPrimaryFile returns the content written when MEMORY.md is
+// emptyPrimaryFile returns the content written when primary.md is
 // auto-created: YAML frontmatter with the current timestamp + version,
 // followed by an empty body.
 func emptyPrimaryFile() string {

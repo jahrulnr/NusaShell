@@ -15,14 +15,14 @@ func TestPrimaryAutoCreates(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, PrimaryFile)
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatal("MEMORY.md should not exist yet")
+		t.Fatal("primary.md should not exist yet")
 	}
 	p, err := NewPrimary(dir)
 	if err != nil {
 		t.Fatalf("NewPrimary: %v", err)
 	}
 	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("MEMORY.md not auto-created: %v", err)
+		t.Fatalf("primary.md not auto-created: %v", err)
 	}
 	if mem := p.Load(); len(mem.Entries) != 0 {
 		t.Errorf("new primary should be empty, got %d entries", len(mem.Entries))
@@ -107,11 +107,11 @@ func TestPrimaryAutoCreateHasYAMLFrontmatter(t *testing.T) {
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, PrimaryFile))
 	if err != nil {
-		t.Fatalf("read MEMORY.md: %v", err)
+		t.Fatalf("read primary.md: %v", err)
 	}
 	s := string(raw)
 	if !strings.HasPrefix(s, "---\n") {
-		t.Fatal("MEMORY.md should start with YAML frontmatter delimiter '---'")
+		t.Fatal("primary.md should start with YAML frontmatter delimiter '---'")
 	}
 	if !strings.Contains(s, "last_updated:") {
 		t.Error("frontmatter missing last_updated field")
@@ -134,7 +134,7 @@ func TestPrimaryUpdateWritesFrontmatter(t *testing.T) {
 	raw, _ := os.ReadFile(filepath.Join(dir, PrimaryFile))
 	s := string(raw)
 	if !strings.HasPrefix(s, "---\n") {
-		t.Fatal("updated MEMORY.md should start with YAML frontmatter")
+		t.Fatal("updated primary.md should start with YAML frontmatter")
 	}
 	if !strings.Contains(s, "last_updated:") {
 		t.Error("updated frontmatter missing last_updated")
