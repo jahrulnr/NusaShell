@@ -33,8 +33,8 @@ func TestHTTPNotifierPostsRunCompletion(t *testing.T) {
 	n := NewHTTPNotifier()
 	now := time.Now().UTC()
 	run := &domain.WorkflowRun{
-		ID:     "run_1",
-		Status: domain.StatusSuccess,
+		ID:         "run_1",
+		Status:     domain.StatusSuccess,
 		Definition: domain.WorkflowDefinition{Name: "test-workflow"},
 		StartedAt:  &now,
 		FinishedAt: &now,

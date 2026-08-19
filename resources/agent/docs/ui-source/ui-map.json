@@ -365,17 +365,27 @@
     },
     "learning": {
       "title": "Learning",
-      "purpose": "Search accumulated memory entries and skills via hybrid BM25 + embedding + graph search, and explore how they connect in the knowledge graph.",
+      "purpose": "Search accumulated memory entries and skills via hybrid BM25 + embedding + graph search, explore how they connect in the knowledge graph, and review what autolearn saved.",
       "howToOpen": "Click the Learning item in the left sidebar.",
       "sections": [
         {
           "heading": "Header stats",
           "paragraphs": [
-            "Live counts of memory entries and learning edges."
+            "Live counts of memory entries and learning edges. The memory count refreshes in real time when a tool or the background review agent saves, promotes, or demotes a memory entry (via the `memory.updated` event)."
           ],
           "controls": [
             "learning-stat-memory",
             "learning-stat-edges"
+          ]
+        },
+        {
+          "heading": "Tabs",
+          "paragraphs": [
+            "Switches between Memory & Graph (search + graph) and Learning log (autolearn activity feed). The log loads lazily on first open."
+          ],
+          "controls": [
+            "learning-tab-memory",
+            "learning-tab-log"
           ]
         },
         {
@@ -392,7 +402,7 @@
         {
           "heading": "Results",
           "paragraphs": [
-            "Ranked search results with a count. With an empty query the pane lists all skills and memories so content is visible immediately. Memory entries have a delete button (×) that opens a confirm dialog and calls memory.delete. Long content is collapsed to 3 lines; click to expand."
+            "Ranked search results with a count. With an empty query the pane lists all skills and memories so content is visible immediately. Memory entries show a tier badge (primary or fragment) next to the kind label so the two tiers are visually distinguishable. Memory entries have a delete button (×) that opens a confirm dialog and calls memory.delete. Long content is collapsed to 3 lines; click to expand. Results refresh automatically when memory or skills change (via `memory.updated` / `skill.updated` events, debounced 300ms)."
           ],
           "controls": [
             "learning-results",
@@ -411,12 +421,23 @@
         {
           "heading": "Knowledge graph",
           "paragraphs": [
-            "Force-directed graph (vis-network) of skills, memory entries, and their edges. Refresh reloads the graph; Fit fits it to view. Legend distinguishes Skill, Memory, Related, and Used-with edges."
+            "Force-directed graph (vis-network) of skills, memory entries, and their edges. Refresh reloads the graph; Fit fits it to view. Legend distinguishes Skill, Memory, Related, and Used-with edges. The graph refreshes automatically when memory or skills change (via `memory.updated` / `skill.updated` events, debounced 300ms)."
           ],
           "controls": [
             "learning-graph",
             "learning-graph-refresh",
             "learning-graph-fit"
+          ]
+        },
+        {
+          "heading": "Learning log",
+          "paragraphs": [
+            "Autolearn activity feed from the trajectory log (review runs, extraction, edge building, consolidation, decay, prune), newest first. Review entries show a status badge (done or error) with the error message when failed, the source conversation, the mutations saved (kind, tool, saved snippet), per-type extras, and a View transcript button that expands the background review agent's own conversation (its LLM exchanges + tool calls + tool results) inline. A running indicator appears at the top while a review is in-flight. Refresh reloads the feed."
+          ],
+          "controls": [
+            "learning-log-count",
+            "learning-log-refresh",
+            "learning-log"
           ]
         }
       ]
@@ -538,7 +559,7 @@
         {
           "heading": "Embeddings",
           "paragraphs": [
-            "Embedding model used by skill and memory search. Models tagged as embedding-capable appear here after import. Ollama models (e.g. nomic-embed-text) work locally without an API key. The learning review threshold controls how many turns accumulate before extracting learnings (default 50, 0 disables turn-based review)."
+            "Embedding model used by skill and memory search. Models tagged as embedding-capable appear here after import. Ollama models (e.g. nomic-embed-text) work locally without an API key. The learning review threshold controls how many turns accumulate before extracting learnings (default 10, 0 disables turn-based review)."
           ],
           "controls": [
             "settings-embedding-title",
@@ -587,6 +608,7 @@
             "settings-max-input-tokens",
             "settings-max-output-tokens",
             "settings-prompt-caching",
+            "settings-sound-notifications",
             "settings-temperature",
             "settings-top-p",
             "settings-top-k",
@@ -1234,6 +1256,35 @@
       "type": "button",
       "action": "Fits the graph to the viewport."
     },
+    "learning-tab-memory": {
+      "label": "Memory & Graph tab",
+      "section": "Learning",
+      "type": "tab",
+      "notes": "Shows the search + knowledge graph panel."
+    },
+    "learning-tab-log": {
+      "label": "Learning log tab",
+      "section": "Learning",
+      "type": "tab",
+      "notes": "Shows the autolearn activity feed."
+    },
+    "learning-log-count": {
+      "label": "Learning log count",
+      "section": "Learning",
+      "type": "text"
+    },
+    "learning-log-refresh": {
+      "label": "Refresh learning log",
+      "section": "Learning",
+      "type": "button",
+      "action": "Reloads the autolearn trajectory feed."
+    },
+    "learning-log": {
+      "label": "Learning log",
+      "section": "Learning",
+      "type": "list",
+      "notes": "Trajectory events; review entries have an Open in Agent button."
+    },
     "log-level-filter": {
       "label": "Level filter",
       "section": "Logs",
@@ -1368,6 +1419,12 @@
       "label": "Prompt caching",
       "section": "Settings",
       "type": "checkbox"
+    },
+    "settings-sound-notifications": {
+      "label": "Sound notifications",
+      "section": "Settings",
+      "type": "checkbox",
+      "notes": "Play a sound when an agent turn completes or fails. Default on."
     },
     "settings-temperature": {
       "label": "Temperature",

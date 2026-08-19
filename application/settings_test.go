@@ -98,3 +98,46 @@ func TestNormalizeSettingsFillsMaxParallelTools(t *testing.T) {
 		t.Fatalf("max_parallel_tools = %d, want 64 (clamped)", over.MaxParallelTools)
 	}
 }
+
+// TestDefaultSettingsSoundNotificationsOn: the factory default has sound
+// notifications enabled so the UI plays turn-complete/error cues without
+// requiring the user to opt in.
+func TestDefaultSettingsSoundNotificationsOn(t *testing.T) {
+	s := domain.DefaultSettings()
+	if !s.SoundNotifications {
+		t.Fatal("default SoundNotifications = false, want true")
+	}
+}
+
+// TestNormalizeSettingsPreservesSoundNotifications: NormalizeSettings must
+// not reset SoundNotifications to the default when the field is explicitly
+// false (user disabled it). Toggles use zero-value=false semantics, so we
+// cannot distinguish "unset" from "intentionally false" — but the field is
+// omitempty on the wire, so a settings file written by an older version
+// simply omits it and NormalizeSettings leaves it as false. The UI treats
+// false as "disabled" only when the DTO reports it; the default-on behavior
+// is enforced by the frontend (`!== false` check) and by DefaultSettings
+// for fresh installs.
+func TestNormalizeSettingsPreservesSoundNotifications(t *testing.T) {
+	disabled := domain.NormalizeSettings(domain.Settings{MaxToolRounds: 8, SoundNotifications: false})
+	if disabled.SoundNotifications != false {
+		t.Fatal("NormalizeSettings should preserve SoundNotifications=false")
+	}
+	enabled := domain.NormalizeSettings(domain.Settings{MaxToolRounds: 8, SoundNotifications: true})
+	if !enabled.SoundNotifications {
+		t.Fatal("NormalizeSettings should preserve SoundNotifications=true")
+	}
+}
+
+// TestNormalizeSettingsPreservesUserPrompt: NormalizeSettings must not
+// clear UserPrompt when it is set. An empty UserPrompt (unset) stays empty.
+func TestNormalizeSettingsPreservesUserPrompt(t *testing.T) {
+	withPrompt := domain.NormalizeSettings(domain.Settings{MaxToolRounds: 8, UserPrompt: "Always respond in Indonesian."})
+	if withPrompt.UserPrompt != "Always respond in Indonesian." {
+		t.Fatalf("UserPrompt = %q, want preserved", withPrompt.UserPrompt)
+	}
+	withoutPrompt := domain.NormalizeSettings(domain.Settings{MaxToolRounds: 8})
+	if withoutPrompt.UserPrompt != "" {
+		t.Fatalf("UserPrompt = %q, want empty", withoutPrompt.UserPrompt)
+	}
+}

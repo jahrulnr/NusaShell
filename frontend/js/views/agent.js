@@ -24,6 +24,7 @@ import {
 import { bindSubagents, setSubagentConversation } from './agent/subagents.js';
 import { renderMermaidDiagrams } from '../mermaid-render.js';
 import { createAskCard, sealAskCard, cancelAskCard } from './ask-card.js';
+import { playComplete, playError } from '../sounds.js';
 
 const state = {
   conversations: [],
@@ -236,7 +237,7 @@ async function createConversation(title = '') {
     state.steerId = null;
     state.steerDraft = '';
     state.attachments = [];
-    state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 } };
+    state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 }, goal: '' };
     state.todoRenderToken++;
     await refreshConversations();
     renderEmptyThread();
@@ -295,7 +296,7 @@ function renderConversationList() {
           state.attachments = [];
           state.steerId = null;
           state.steerDraft = '';
-          state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 } };
+          state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 }, goal: '' };
           state.todoRenderToken++;
           clearSteerQueue();
           renderEmptyThread();
@@ -656,7 +657,7 @@ function renderAttachments() {
 // while the fetch is in-flight, the stale response is discarded.
 async function fetchTodos() {
   if (!state.activeId) {
-    state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 } };
+    state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 }, goal: '' };
     renderTodoStrip();
     return;
   }
@@ -664,13 +665,13 @@ async function fetchTodos() {
   try {
     const result = await rpc('agent.todos.get', { conversation_id: state.activeId });
     if (token !== state.todoRenderToken) return; // stale — a newer fetch or room switch won
-    state.todos = { items: result.items ?? [], summary: result.summary ?? { total: 0, pending: 0, in_progress: 0, completed: 0 } };
+    state.todos = { items: result.items ?? [], summary: result.summary ?? { total: 0, pending: 0, in_progress: 0, completed: 0 }, goal: result.goal ?? '' };
     renderTodoStrip();
   } catch (err) {
     if (token !== state.todoRenderToken) return;
     // Fail-soft: hide the strip rather than crash. The backend may not support
     // todos yet (older version), or the conversation may have been deleted.
-    state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 } };
+    state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 }, goal: '' };
     renderTodoStrip();
   }
 }
@@ -698,30 +699,50 @@ function bindStripToggles() {
 
 // renderTodoStrip renders the todo checklist strip from state.todos. It is
 // idempotent — safe to call multiple times. The strip is hidden when there
-// are no items. Each item gets a status glyph and a delete button. Delete
-// buttons are created fresh on each render, so no stale listeners.
-// Default state: collapsed (list hidden), expanded only on user click.
+// are no items and no goal. Each item gets a status glyph and a delete
+// button. Delete buttons are created fresh on each render, so no stale
+// listeners. Default state: collapsed (list hidden), expanded only on user
+// click. The goal brief (if set) is shown as a muted line above the item
+// list.
 function renderTodoStrip() {
   const strip = document.getElementById('agent-todo-strip');
   if (!strip) return;
-  const { items, summary } = state.todos;
-  if (!items || items.length === 0) {
+  const { items, goal } = state.todos;
+  const hasItems = items && items.length > 0;
+  const hasGoal = goal && goal.trim();
+  if (!hasItems && !hasGoal) {
     strip.hidden = true;
     return;
   }
   strip.hidden = false;
   const countEl = document.getElementById('agent-todo-strip-count');
   const metaEl = document.getElementById('agent-todo-strip-meta');
-  const total = items.length;
+  const total = items ? items.length : 0;
   if (countEl) countEl.textContent = `${total} Task${total === 1 ? '' : 's'}`;
   if (metaEl) {
-    const incomplete = items.filter((i) => i.status !== 'completed').length;
+    const incomplete = items ? items.filter((i) => i.status !== 'completed').length : 0;
     metaEl.textContent = incomplete === 0 ? 'All done' : `${incomplete} open`;
     metaEl.dataset.done = incomplete === 0 ? 'true' : 'false';
   }
+  // Goal brief: shown as a muted, collapsed line above the item list.
+  const goalEl = document.getElementById('agent-todo-strip-goal');
+  if (goalEl) {
+    if (hasGoal) {
+      goalEl.hidden = false;
+      goalEl.textContent = goal.trim();
+      goalEl.title = 'User goal — survives compaction so the agent does not drift';
+    } else {
+      goalEl.hidden = true;
+      goalEl.textContent = '';
+    }
+  }
   const list = document.getElementById('agent-todo-strip-list');
   if (!list) return;
-  list.replaceChildren(...items.map((item) => renderTodoItem(item, handleTodoDelete)));
+  if (hasItems) {
+    list.replaceChildren(...items.map((item) => renderTodoItem(item, handleTodoDelete)));
+  } else {
+    list.replaceChildren();
+  }
 }
 
 // handleTodoDelete removes a single todo item by ID. The button is disabled
@@ -733,7 +754,7 @@ async function handleTodoDelete(itemId, btn) {
   btn.disabled = true;
   try {
     const result = await rpc('agent.todos.delete', { conversation_id: state.activeId, ids: [itemId] });
-    state.todos = { items: result.items ?? [], summary: result.summary ?? { total: 0, pending: 0, in_progress: 0, completed: 0 } };
+    state.todos = { items: result.items ?? [], summary: result.summary ?? { total: 0, pending: 0, in_progress: 0, completed: 0 }, goal: result.goal ?? state.todos.goal ?? '' };
     renderTodoStrip();
   } catch (err) {
     btn.disabled = false;
@@ -1502,13 +1523,19 @@ function bindEvents() {
       void renderMermaidDiagrams(run.msgNode);
     }
     endTurn(run_id);
-    if (error) toast(error, 'error');
+    if (error) {
+      toast(error, 'error');
+      playError(state.settings?.sound_notifications !== false);
+    } else {
+      playComplete(state.settings?.sound_notifications !== false);
+    }
     if (conversation_id === state.activeId) refreshActiveConversation();
     void maybeAutoTitleConversation(conversation_id);
     refreshConversations();
   });
   on('agent.turn.error', (payload) => {
     const { run_id, message, conversation_id } = payload;
+    playError(state.settings?.sound_notifications !== false);
     const run = getRunOrQueue('agent.turn.error', payload);
     if (run) {
       // Mirror the terminal error state into the room buffer so a
@@ -1621,7 +1648,7 @@ function bindEvents() {
     }
   });
   on('agent.todo.updated', (payload) => {
-    const { conversation_id, items, summary } = payload;
+    const { conversation_id, items, summary, goal } = payload;
     // Keep the per-room status fresh (used by the sidebar live dot) even for
     // non-active rooms; only the DOM strip touches the active room.
     if (conversation_id !== state.activeId) {
@@ -1630,7 +1657,7 @@ function bindEvents() {
       refreshLiveDots();
       return;
     }
-    state.todos = { items: items ?? [], summary: summary ?? { total: 0, pending: 0, in_progress: 0, completed: 0 } };
+    state.todos = { items: items ?? [], summary: summary ?? { total: 0, pending: 0, in_progress: 0, completed: 0 }, goal: goal ?? state.todos.goal ?? '' };
     renderTodoStrip();
   });
 }

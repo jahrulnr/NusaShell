@@ -42,7 +42,7 @@ Default model for new conversations, the maximum tool rounds per turn (default 8
 
 ## Embeddings
 
-Embedding model used by skill and memory search. Models tagged as embedding-capable appear here after import. Ollama models (e.g. nomic-embed-text) work locally without an API key. The learning review threshold controls how many turns accumulate before extracting learnings (default 50, 0 disables turn-based review).
+Embedding model used by skill and memory search. Models tagged as embedding-capable appear here after import. Ollama models (e.g. nomic-embed-text) work locally without an API key. The learning review threshold controls how many turns accumulate before extracting learnings (default 10, 0 disables turn-based review).
 
 - **Embeddings title** (`#settings-embedding-title`):
   - Section: Settings
@@ -118,6 +118,11 @@ Toggle compaction, set max input tokens (fallback context window, default 200000
 - **Prompt caching** (`#settings-prompt-caching`):
   - Section: Settings
   - Type: checkbox
+
+- **Sound notifications** (`#settings-sound-notifications`):
+  - Section: Settings
+  - Type: checkbox
+  - Notes: Play a sound when an agent turn completes or fails. Default on.
 
 - **Temperature** (`#settings-temperature`):
   - Section: Settings

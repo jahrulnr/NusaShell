@@ -300,7 +300,9 @@ async function refreshCodexAccounts(providerId) {
       const display = acc.email || acc.name || acc.account_id;
       const secondary = (acc.email && acc.name) ? `${acc.name} \u00b7 ${acc.account_id}` : (acc.email ? acc.account_id : (acc.name ? acc.account_id : ''));
       const planLabel = acc.plan ? acc.plan.charAt(0).toUpperCase() + acc.plan.slice(1) : (acc.error ? 'Error' : '\u2014');
-      const circuitUntil = acc.circuit_open ? new Date(acc.circuit_open_until * 1000).toLocaleString() : '';
+      const circuitUntil = acc.circuit_open
+        ? (acc.circuit_open_until ? new Date(acc.circuit_open_until * 1000).toLocaleString() : 'soon')
+        : '';
 
       // Build usage windows section
       const usageParts = [];

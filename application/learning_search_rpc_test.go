@@ -2,6 +2,7 @@ package application
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"nusashell/contracts"
@@ -46,13 +47,13 @@ func TestHandleLearningSearchBoth(t *testing.T) {
 	skills := &fakeSkillStore{items: map[string]*domain.Skill{
 		"skill_1": {ID: "skill_1", Name: "Git rebase", Content: "Rebase workflow"},
 	}}
-	memory := &fakeMemoryStore{entries: []*domain.MemoryEntry{
-		{ID: "mem_1", Content: "User prefers git rebase over merge"},
+	fragments := &fakeFragmentStore{frags: []*domain.MemoryFragment{
+		{ID: "frag_1", Content: "User prefers git rebase over merge", Category: domain.FragmentCategoryGeneral},
 	}}
 	app := &App{
-		Skills:   skills,
-		Memory:   memory,
-		Settings: &fakeSettingsStore{settings: domain.Settings{}},
+		Skills:    skills,
+		Fragments: fragments,
+		Settings:  &fakeSettingsStore{settings: domain.Settings{}},
 	}
 	resp, _ := app.handleLearningSearch(contracts.LearningSearchRequest{
 		Query: "rebase",
@@ -60,8 +61,12 @@ func TestHandleLearningSearchBoth(t *testing.T) {
 	})
 	result := resp.(contracts.LearningSearchResult)
 	kinds := map[string]bool{}
+	tiers := map[string]bool{}
 	for _, item := range result.Items {
 		kinds[item.Kind] = true
+		if item.Kind == "memory" {
+			tiers[item.Tier] = true
+		}
 	}
 	if !kinds["skill"] {
 		t.Error("expected skill results")
@@ -69,19 +74,22 @@ func TestHandleLearningSearchBoth(t *testing.T) {
 	if !kinds["memory"] {
 		t.Error("expected memory results")
 	}
+	if !tiers["fragment"] {
+		t.Error("expected memory result with tier=fragment")
+	}
 }
 
 func TestHandleLearningSearchEmptyQuery(t *testing.T) {
 	skills := &fakeSkillStore{items: map[string]*domain.Skill{
 		"skill_1": {ID: "skill_1", Name: "Test", Content: "content"},
 	}}
-	memory := &fakeMemoryStore{entries: []*domain.MemoryEntry{
-		{ID: "mem_1", Content: "A memory entry"},
+	fragments := &fakeFragmentStore{frags: []*domain.MemoryFragment{
+		{ID: "frag_1", Content: "A memory entry", Category: domain.FragmentCategoryGeneral},
 	}}
 	app := &App{
-		Skills:   skills,
-		Memory:   memory,
-		Settings: &fakeSettingsStore{settings: domain.Settings{}},
+		Skills:    skills,
+		Fragments: fragments,
+		Settings:  &fakeSettingsStore{settings: domain.Settings{}},
 	}
 	// kind=skills: empty query lists all skills (unfiltered browse).
 	resp, _ := app.handleLearningSearch(contracts.LearningSearchRequest{
@@ -92,13 +100,13 @@ func TestHandleLearningSearchEmptyQuery(t *testing.T) {
 	if len(result.Items) != 1 || result.Items[0].ID != "skill_1" {
 		t.Fatalf("empty query + kind=skills should list all skills, got %+v", result.Items)
 	}
-	// kind=memory: empty query lists all memory entries.
+	// kind=memory: empty query lists all memory entries (fragments + primary).
 	resp, _ = app.handleLearningSearch(contracts.LearningSearchRequest{
 		Query: "",
 		Kind:  "memory",
 	})
 	result = resp.(contracts.LearningSearchResult)
-	if len(result.Items) != 1 || result.Items[0].ID != "mem_1" {
+	if len(result.Items) != 1 || result.Items[0].ID != "frag_1" {
 		t.Fatalf("empty query + kind=memory should list all memory, got %+v", result.Items)
 	}
 	// no kind: empty query lists both, capped by limit.
@@ -109,6 +117,40 @@ func TestHandleLearningSearchEmptyQuery(t *testing.T) {
 	result = resp.(contracts.LearningSearchResult)
 	if len(result.Items) != 2 {
 		t.Fatalf("empty query should list both kinds, got %d items", len(result.Items))
+	}
+}
+
+// TestHandleLearningSearchTierBadge verifies that primary and fragment
+// memory entries are tagged with the correct tier so the UI can show
+// a distinguishing badge.
+func TestHandleLearningSearchTierBadge(t *testing.T) {
+	fragments := &fakeFragmentStore{frags: []*domain.MemoryFragment{
+		{ID: "frag_1", Content: "A fragment entry", Category: domain.FragmentCategoryGeneral},
+	}}
+	primary := &stubPrimaryStoreReview{mem: &domain.PrimaryMemory{
+		Entries: []domain.PrimaryEntry{
+			{ID: "prim_1", Content: "A primary entry"},
+		},
+	}}
+	app := &App{
+		Fragments: fragments,
+		Primary:   primary,
+		Settings:  &fakeSettingsStore{settings: domain.Settings{}},
+	}
+	resp, _ := app.handleLearningSearch(contracts.LearningSearchRequest{
+		Query: "",
+		Kind:  "memory",
+	})
+	result := resp.(contracts.LearningSearchResult)
+	tiers := map[string]string{}
+	for _, item := range result.Items {
+		tiers[item.ID] = item.Tier
+	}
+	if tiers["frag_1"] != "fragment" {
+		t.Errorf("frag_1 tier = %q, want \"fragment\"", tiers["frag_1"])
+	}
+	if tiers["prim_1"] != "primary" {
+		t.Errorf("prim_1 tier = %q, want \"primary\"", tiers["prim_1"])
 	}
 }
 
@@ -179,6 +221,29 @@ func (f *fakeMemoryStore) Delete(id string) error {
 	}
 	return errNotFound
 }
+func (f *fakeMemoryStore) Replace(target, oldText, content string) error {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		target = domain.MemoryTargetMemory
+	}
+	idx := -1
+	for i, e := range f.entries {
+		if e.Target != target {
+			continue
+		}
+		if strings.Contains(e.Content, oldText) {
+			if idx >= 0 {
+				return fmt.Errorf("multiple matches")
+			}
+			idx = i
+		}
+	}
+	if idx < 0 {
+		return errNotFound
+	}
+	f.entries[idx].Content = content
+	return nil
+}
 
 // fakeSettingsStore is a minimal SettingsStore for tests.
 type fakeSettingsStore struct {
@@ -195,17 +260,17 @@ func TestHandleLearningGraphFiltersDanglingEdges(t *testing.T) {
 	skills := &fakeSkillStore{items: map[string]*domain.Skill{
 		"skill_1": {ID: "skill_1", Name: "Git", Content: "x"},
 	}}
-	memory := &fakeMemoryStore{entries: []*domain.MemoryEntry{
-		{ID: "mem_1", Content: "memory one"},
+	fragments := &fakeFragmentStore{frags: []*domain.MemoryFragment{
+		{ID: "frag_1", Content: "memory one", Category: domain.FragmentCategoryGeneral},
 	}}
 	app := &App{
-		Skills:   skills,
-		Memory:   memory,
-		Settings: &fakeSettingsStore{settings: domain.Settings{}},
+		Skills:    skills,
+		Fragments: fragments,
+		Settings:  &fakeSettingsStore{settings: domain.Settings{}},
 		LearningEdges: &fakeEdgeStore{edges: []*domain.LearningEdge{
-			{SourceID: "skill_1", TargetID: "mem_1", Type: domain.EdgeUsedWith, Weight: 0.8},      // valid
+			{SourceID: "skill_1", TargetID: "frag_1", Type: domain.EdgeUsedWith, Weight: 0.8},     // valid
 			{SourceID: "skill_1", TargetID: "mem_deleted", Type: domain.EdgeRelated, Weight: 0.9}, // dangling
-			{SourceID: "mem_gone", TargetID: "mem_1", Type: domain.EdgeRelated, Weight: 0.7},      // dangling
+			{SourceID: "mem_gone", TargetID: "frag_1", Type: domain.EdgeRelated, Weight: 0.7},     // dangling
 		}},
 	}
 	resp, rpcErr := app.handleLearningGraph()
@@ -219,7 +284,94 @@ func TestHandleLearningGraphFiltersDanglingEdges(t *testing.T) {
 	if len(result.Edges) != 1 {
 		t.Fatalf("edges = %d, want 1 (dangling edges filtered), got %+v", len(result.Edges), result.Edges)
 	}
-	if result.Edges[0].From != "skill_1" || result.Edges[0].To != "mem_1" {
+	if result.Edges[0].From != "skill_1" || result.Edges[0].To != "frag_1" {
 		t.Fatalf("unexpected edge: %+v", result.Edges[0])
 	}
+}
+
+// fakeFragmentStore is a minimal FragmentStore for tests.
+type fakeFragmentStore struct {
+	frags []*domain.MemoryFragment
+}
+
+func (f *fakeFragmentStore) List(filter domain.FragmentSearchFilter) []*domain.MemoryFragment {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = len(f.frags)
+	}
+	out := make([]*domain.MemoryFragment, 0, limit)
+	for _, fr := range f.frags {
+		if filter.Category != "" && fr.Category != filter.Category {
+			continue
+		}
+		if filter.Project != "" && fr.Project != filter.Project {
+			continue
+		}
+		if filter.Task != "" && fr.Task != filter.Task {
+			continue
+		}
+		out = append(out, fr)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+func (f *fakeFragmentStore) Get(id string) *domain.MemoryFragment {
+	for _, fr := range f.frags {
+		if fr.ID == id {
+			return fr
+		}
+	}
+	return nil
+}
+func (f *fakeFragmentStore) Save(fr *domain.MemoryFragment) error {
+	for i, existing := range f.frags {
+		if existing.ID == fr.ID {
+			f.frags[i] = fr
+			return nil
+		}
+	}
+	f.frags = append(f.frags, fr)
+	return nil
+}
+func (f *fakeFragmentStore) Delete(id string) error {
+	for i, fr := range f.frags {
+		if fr.ID == id {
+			f.frags = append(f.frags[:i], f.frags[i+1:]...)
+			return nil
+		}
+	}
+	return errNotFound
+}
+func (f *fakeFragmentStore) Search(filter domain.FragmentSearchFilter) []domain.FragmentSearchHit {
+	q := strings.ToLower(strings.TrimSpace(filter.Query))
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	hits := make([]domain.FragmentSearchHit, 0, limit)
+	for _, fr := range f.frags {
+		if filter.Category != "" && fr.Category != filter.Category {
+			continue
+		}
+		if filter.Project != "" && fr.Project != filter.Project {
+			continue
+		}
+		if filter.Task != "" && fr.Task != filter.Task {
+			continue
+		}
+		if q != "" && !strings.Contains(strings.ToLower(fr.Content), q) {
+			continue
+		}
+		score := 1.0
+		if q == "" {
+			score = 0
+		}
+		hits = append(hits, domain.FragmentSearchHit{Fragment: fr, Score: score})
+		if len(hits) >= limit {
+			break
+		}
+	}
+	return hits
 }

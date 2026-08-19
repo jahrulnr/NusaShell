@@ -433,6 +433,7 @@
 .agent-todo-strip-count { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: inherit; font: 12.5px/1.2 "IBM Plex Sans", system-ui, sans-serif; }
 .agent-todo-strip-meta { flex: none; margin-right: 10px; padding: 3px 8px; border-radius: 999px; background: #141e2b; color: #8fa0b6; font: 11px/1.2 "JetBrains Mono", monospace; white-space: nowrap; }
 .agent-todo-strip-meta[data-done="true"] { color: #8fd; background: rgba(120, 200, 120, .1); }
+.agent-todo-strip-goal { margin: 0; padding: 6px 12px 4px; font: 11.5px/1.4 "IBM Plex Sans", system-ui, sans-serif; color: var(--text-faint); border-left: 2px solid var(--border-soft); margin-left: 10px; margin-right: 10px; white-space: pre-wrap; word-break: break-word; max-height: 4.2em; overflow: hidden; }
 .agent-todo-strip-list { list-style: none; margin: 0; padding: 0 10px 8px; display: flex; flex-direction: column; gap: 1px; }
 .agent-todo-item { display: grid; grid-template-columns: 18px minmax(0, 1fr) 22px; align-items: center; gap: 8px; padding: 3px 6px 3px 9px; border: 1px solid var(--border-soft); border-radius: 7px; background: #080c13; min-height: 28px; }
 .agent-todo-item-glyph { font: 12px var(--font-mono); text-align: center; line-height: 1; }

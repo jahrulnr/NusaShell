@@ -16,6 +16,18 @@ type stubMemStore struct{ entries []*domain.MemoryEntry }
 func (s *stubMemStore) List() []*domain.MemoryEntry      { return s.entries }
 func (s *stubMemStore) Save(e *domain.MemoryEntry) error { return nil }
 func (s *stubMemStore) Delete(id string) error           { return nil }
+func (s *stubMemStore) Replace(target, oldText, content string) error {
+	return nil
+}
+
+// stubPrimaryStore is a minimal PrimaryStore for hydration tests.
+type stubPrimaryStore struct{ mem *domain.PrimaryMemory }
+
+func (s *stubPrimaryStore) Load() *domain.PrimaryMemory { return s.mem }
+func (s *stubPrimaryStore) Update(entries []domain.PrimaryEntry) error {
+	return nil
+}
+func (s *stubPrimaryStore) Replace(oldText, content string) error { return nil }
 
 // stubSkillStoreHyd is a minimal SkillStore for hydration tests.
 type stubSkillStoreHyd struct{ skills []*domain.Skill }
@@ -132,8 +144,11 @@ func TestHydrationRuntimeContext(t *testing.T) {
 
 func TestHydrationMemory(t *testing.T) {
 	b := NewHydrationBuilder(HydrationSource{
-		Memory: &stubMemStore{entries: []*domain.MemoryEntry{
-			{ID: "m1", Content: "User likes Go", Tags: []string{"pref"}},
+		Primary: &stubPrimaryStore{mem: &domain.PrimaryMemory{
+			Entries: []domain.PrimaryEntry{
+				{ID: "frag_1", Content: "User prefers Indonesian"},
+				{ID: "frag_2", Content: "Repo uses Go + Clean Architecture"},
+			},
 		}},
 	})
 	result := b.Build()
@@ -142,19 +157,34 @@ func TestHydrationMemory(t *testing.T) {
 	var mem struct {
 		Count   int `json:"count"`
 		Entries []struct {
-			ID      string   `json:"id"`
-			Content string   `json:"content"`
-			Tags    []string `json:"tags"`
+			ID      string `json:"id"`
+			Content string `json:"content"`
 		} `json:"entries"`
+		Usage struct {
+			Chars int `json:"chars"`
+			Limit int `json:"limit"`
+			Pct   int `json:"pct"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal([]byte(memContent), &mem); err != nil {
 		t.Fatalf("invalid memory JSON: %v", err)
 	}
-	if mem.Count != 1 {
-		t.Errorf("expected 1 memory entry, got %d", mem.Count)
+	if mem.Count != 2 {
+		t.Errorf("expected 2 primary entries, got %d", mem.Count)
 	}
-	if len(mem.Entries) != 1 || mem.Entries[0].Content != "User likes Go" {
-		t.Errorf("unexpected memory entries: %+v", mem.Entries)
+	if len(mem.Entries) != 2 {
+		t.Fatalf("unexpected entries: %+v", mem.Entries)
+	}
+	if mem.Entries[0].ID != "frag_1" || mem.Entries[0].Content != "User prefers Indonesian" {
+		t.Errorf("entry 0 = %+v", mem.Entries[0])
+	}
+	// Usage should report the primary char budget.
+	if mem.Usage.Limit != domain.PrimaryCharCap {
+		t.Errorf("limit = %d, want %d", mem.Usage.Limit, domain.PrimaryCharCap)
+	}
+	expectedChars := len("User prefers Indonesian") + len("Repo uses Go + Clean Architecture")
+	if mem.Usage.Chars != expectedChars {
+		t.Errorf("chars = %d, want %d", mem.Usage.Chars, expectedChars)
 	}
 }
 
@@ -163,7 +193,7 @@ func TestHydrationMemoryNil(t *testing.T) {
 	result := b.Build()
 	memContent := result.Messages[2].ToolResult.Content
 	if memContent != "{}" {
-		t.Errorf("expected {} for nil memory, got %s", memContent)
+		t.Errorf("expected {} for nil primary, got %s", memContent)
 	}
 }
 
@@ -280,6 +310,55 @@ func TestHydrationTodoList(t *testing.T) {
 	}
 }
 
+func TestHydrationTodoListWithGoal(t *testing.T) {
+	port := &fakeTodoPort{
+		items: map[string][]domain.TodoItem{
+			"conv_1": {
+				{ID: "1", Content: "Step 1", Status: domain.TodoInProgress},
+			},
+		},
+		goals: map[string]string{
+			"conv_1": "Build a CLI tool that converts Markdown to HTML with custom templates.",
+		},
+	}
+	b := NewHydrationBuilder(HydrationSource{Todos: port, ConvID: "conv_1"})
+	result := b.Build()
+	todoContent := result.Messages[6].ToolResult.Content
+	if !strings.Contains(todoContent, "USER GOAL") {
+		t.Errorf("expected USER GOAL header, got: %s", todoContent)
+	}
+	if !strings.Contains(todoContent, "Build a CLI tool that converts Markdown") {
+		t.Errorf("expected goal text, got: %s", todoContent)
+	}
+	if !strings.Contains(todoContent, "CURRENT TASKS") {
+		t.Errorf("expected CURRENT TASKS header, got: %s", todoContent)
+	}
+	// Goal should appear before tasks
+	goalIdx := strings.Index(todoContent, "USER GOAL")
+	tasksIdx := strings.Index(todoContent, "CURRENT TASKS")
+	if goalIdx == -1 || tasksIdx == -1 || goalIdx > tasksIdx {
+		t.Errorf("goal should appear before tasks, goalIdx=%d tasksIdx=%d", goalIdx, tasksIdx)
+	}
+}
+
+func TestHydrationTodoListGoalOnly(t *testing.T) {
+	port := &fakeTodoPort{
+		items: map[string][]domain.TodoItem{},
+		goals: map[string]string{
+			"conv_1": "Refactor the auth module to use JWT.",
+		},
+	}
+	b := NewHydrationBuilder(HydrationSource{Todos: port, ConvID: "conv_1"})
+	result := b.Build()
+	todoContent := result.Messages[6].ToolResult.Content
+	if !strings.Contains(todoContent, "USER GOAL") {
+		t.Errorf("expected USER GOAL header, got: %s", todoContent)
+	}
+	if strings.Contains(todoContent, "CURRENT TASKS") {
+		t.Errorf("should not have CURRENT TASKS when no items, got: %s", todoContent)
+	}
+}
+
 func TestHydrationTodoListEmpty(t *testing.T) {
 	port := &fakeTodoPort{items: map[string][]domain.TodoItem{}}
 	b := NewHydrationBuilder(HydrationSource{Todos: port, ConvID: "conv_1"})
@@ -302,10 +381,18 @@ func TestHydrationTodoListNilPort(t *testing.T) {
 // fakeTodoPort is a minimal in-memory ConversationTodoPort for testing.
 type fakeTodoPort struct {
 	items map[string][]domain.TodoItem
+	goals map[string]string
 }
 
 func (f *fakeTodoPort) Get(convID string) []domain.TodoItem {
 	return f.items[convID]
+}
+
+func (f *fakeTodoPort) GetGoal(convID string) string {
+	if f.goals == nil {
+		return ""
+	}
+	return f.goals[convID]
 }
 
 func (f *fakeTodoPort) Set(convID string, items []domain.TodoItem) {
@@ -315,8 +402,16 @@ func (f *fakeTodoPort) Set(convID string, items []domain.TodoItem) {
 	f.items[convID] = items
 }
 
+func (f *fakeTodoPort) SetGoal(convID string, goal string) {
+	if f.goals == nil {
+		f.goals = map[string]string{}
+	}
+	f.goals[convID] = goal
+}
+
 func (f *fakeTodoPort) Clear(convID string) {
 	delete(f.items, convID)
+	delete(f.goals, convID)
 }
 
 func TestFilterHydrationRemovesAll(t *testing.T) {

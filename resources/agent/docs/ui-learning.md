@@ -1,12 +1,12 @@
 # Learning
 
-Search accumulated memory entries and skills via hybrid BM25 + embedding + graph search, and explore how they connect in the knowledge graph.
+Search accumulated memory entries and skills via hybrid BM25 + embedding + graph search, explore how they connect in the knowledge graph, and review what autolearn saved.
 
 **How to open:** Click the Learning item in the left sidebar.
 
 ## Header stats
 
-Live counts of memory entries and learning edges.
+Live counts of memory entries and learning edges. The memory count refreshes in real time when a tool or the background review agent saves, promotes, or demotes a memory entry (via the `memory.updated` event).
 
 - **Memory count** (`#learning-stat-memory`):
   - Section: Learning
@@ -15,6 +15,20 @@ Live counts of memory entries and learning edges.
 - **Edge count** (`#learning-stat-edges`):
   - Section: Learning
   - Type: text
+
+## Tabs
+
+Switches between Memory & Graph (search + graph) and Learning log (autolearn activity feed). The log loads lazily on first open.
+
+- **Memory & Graph tab** (`#learning-tab-memory`):
+  - Section: Learning
+  - Type: tab
+  - Notes: Shows the search + knowledge graph panel.
+
+- **Learning log tab** (`#learning-tab-log`):
+  - Section: Learning
+  - Type: tab
+  - Notes: Shows the autolearn activity feed.
 
 ## Search bar
 
@@ -36,7 +50,7 @@ Hybrid search across memory and skills, with a kind filter (All, Skills, Memory)
 
 ## Results
 
-Ranked search results with a count. With an empty query the pane lists all skills and memories so content is visible immediately. Memory entries have a delete button (×) that opens a confirm dialog and calls memory.delete. Long content is collapsed to 3 lines; click to expand.
+Ranked search results with a count. With an empty query the pane lists all skills and memories so content is visible immediately. Memory entries show a tier badge (primary or fragment) next to the kind label so the two tiers are visually distinguishable. Memory entries have a delete button (×) that opens a confirm dialog and calls memory.delete. Long content is collapsed to 3 lines; click to expand. Results refresh automatically when memory or skills change (via `memory.updated` / `skill.updated` events, debounced 300ms).
 
 - **Results** (`#learning-results`):
   - Section: Learning
@@ -54,7 +68,7 @@ Draggable splitter between the results pane and the graph pane. Drag to resize t
 
 ## Knowledge graph
 
-Force-directed graph (vis-network) of skills, memory entries, and their edges. Refresh reloads the graph; Fit fits it to view. Legend distinguishes Skill, Memory, Related, and Used-with edges.
+Force-directed graph (vis-network) of skills, memory entries, and their edges. Refresh reloads the graph; Fit fits it to view. Legend distinguishes Skill, Memory, Related, and Used-with edges. The graph refreshes automatically when memory or skills change (via `memory.updated` / `skill.updated` events, debounced 300ms).
 
 - **Knowledge graph** (`#learning-graph`):
   - Section: Learning
@@ -70,3 +84,21 @@ Force-directed graph (vis-network) of skills, memory entries, and their edges. R
   - Section: Learning
   - Type: button
   - Action: Fits the graph to the viewport.
+
+## Learning log
+
+Autolearn activity feed from the trajectory log (review runs, extraction, edge building, consolidation, decay, prune), newest first. Review entries show a status badge (done or error) with the error message when failed, the source conversation, the mutations saved (kind, tool, saved snippet), per-type extras, and a View transcript button that expands the background review agent's own conversation (its LLM exchanges + tool calls + tool results) inline. A running indicator appears at the top while a review is in-flight. Refresh reloads the feed.
+
+- **Learning log count** (`#learning-log-count`):
+  - Section: Learning
+  - Type: text
+
+- **Refresh learning log** (`#learning-log-refresh`):
+  - Section: Learning
+  - Type: button
+  - Action: Reloads the autolearn trajectory feed.
+
+- **Learning log** (`#learning-log`):
+  - Section: Learning
+  - Type: list
+  - Notes: Trajectory events; review entries have an Open in Agent button.

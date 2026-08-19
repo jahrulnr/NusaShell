@@ -81,14 +81,27 @@ When adding, renaming, removing, or changing:
   and the tool advertisement in `application/prompts.go` in the same change.
 - **Provider kinds, auth model, base URL rules, or model import behavior** →
   update `resources/agent/docs/providers.md`.
-- **Turn lifecycle, compaction, prompt caching, steer, todo, stop, or other
-  agent runtime behavior** → update `resources/agent/docs/agent.md`.
+- **Automations, pipelines, CI runs, scheduling, or webhooks** → update
+  `resources/agent/docs/automation.md`.
+- **Plugins / MCP servers, tool discovery, install/register/enable flows** →
+  update `resources/agent/docs/mcp.md`.
+- **ACP subagent delegation, async completion, or permissions** → update
+  `resources/agent/docs/agent-subagents.md`.
+- **Image/audio/video attachments, vision fallback, read_image/read_audio/
+  read_video, or folder attachments** → update
+  `resources/agent/docs/agent-attachments.md`.
 - **Data files, data directory layout, or persisted artifacts** → update
   `resources/agent/docs/data-locations.md`.
-- **Skills, memory, learning, MCP, or other subsystem behavior** → update the
-  matching `resources/agent/docs/*.md` file.
+- **Skills, memory, or learning subsystem behavior** → update the matching
+  `resources/agent/docs/skills.md` / `resources/agent/docs/memory.md`.
 - **System prompt rules or identity** → update `application/prompts.go` and
-  any `agent.md` section that references the changed rule.
+  the matching `resources/agent/prompts/*.md` file.
+
+Docs under `resources/agent/docs/*.md` are **agent work guidance**: each
+workflow doc must include concrete good/bad tool-call examples so the agent
+uses tools precisely instead of guessing. Non-workflow facts (single tool
+use, UI mechanics that do not change tool-calling) belong in the system
+prompt, not in the docs corpus.
 
 A change is not complete until the corpus reflects the new behavior. CI does
 not yet gate non-UI docs for drift, so the agent author is responsible for

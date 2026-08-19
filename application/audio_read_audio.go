@@ -91,7 +91,11 @@ func (a *App) executeReadAudio(run *TurnRun, toolCall domain.ToolCall, caps Mode
 	if audio.FilePath != "" {
 		result += "\n\nFile path: " + audio.FilePath
 	}
-	return result, nil, nil
+	meta := map[string]any{"type": "audio", "name": audio.Name}
+	if audio.FilePath != "" {
+		meta["file_path"] = audio.FilePath
+	}
+	return yamlMDApp(meta, result), nil, nil
 }
 
 // findAudioAttachmentByPath searches all user messages in the conversation

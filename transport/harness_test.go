@@ -25,6 +25,7 @@ import (
 	"nusashell/infrastructure/docs"
 	"nusashell/infrastructure/jsonstore"
 	"nusashell/infrastructure/mcpclient"
+	"nusashell/infrastructure/memorystore"
 	"nusashell/infrastructure/pluginfs"
 	"nusashell/infrastructure/sqlitestore"
 	"nusashell/infrastructure/tools"
@@ -597,13 +598,23 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
+	primaryStore, err := memorystore.NewPrimary(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fragmentStore, err := memorystore.NewFragments(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	acpRuntime := acpruntime.New()
 	tb := &tools.Toolbox{
-		Skills:  &jsonstore.Skills{S: store},
-		Memory:  &jsonstore.Memory{S: store},
-		Docs:    docSource,
-		Plugins: pluginStore,
-		MCP:     mcpManager,
+		Skills:    &jsonstore.Skills{S: store},
+		Memory:    &jsonstore.Memory{S: store},
+		Primary:   primaryStore,
+		Fragments: fragmentStore,
+		Docs:      docSource,
+		Plugins:   pluginStore,
+		MCP:       mcpManager,
 	}
 	app := application.NewApp(application.Deps{
 		Version:       "test",
@@ -613,6 +624,8 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 		Credentials:   creds,
 		Skills:        &jsonstore.Skills{S: store},
 		Memory:        &jsonstore.Memory{S: store},
+		Primary:       primaryStore,
+		Fragments:     fragmentStore,
 		Logs:          &jsonstore.Logs{S: store},
 		Settings:      &jsonstore.Settings{S: store},
 		Docs:          docSource,

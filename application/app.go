@@ -28,6 +28,8 @@ type App struct {
 	Credentials     CredentialStore
 	Skills          SkillStore
 	Memory          MemoryStore
+	Primary         PrimaryStore
+	Fragments       FragmentStore
 	LearningEdges   LearningEdgeStore
 	Todos           ConversationTodoPort
 	AskQuestions    *AskQuestionService
@@ -278,6 +280,8 @@ type Deps struct {
 	Credentials                 CredentialStore
 	Skills                      SkillStore
 	Memory                      MemoryStore
+	Primary                     PrimaryStore
+	Fragments                   FragmentStore
 	LearningEdges               LearningEdgeStore
 	Todos                       ConversationTodoPort
 	AskQuestions                *AskQuestionService
@@ -320,6 +324,8 @@ func NewApp(deps Deps) *App {
 		Credentials:                 deps.Credentials,
 		Skills:                      deps.Skills,
 		Memory:                      deps.Memory,
+		Primary:                     deps.Primary,
+		Fragments:                   deps.Fragments,
 		LearningEdges:               deps.LearningEdges,
 		Todos:                       deps.Todos,
 		AskQuestions:                deps.AskQuestions,
@@ -1025,6 +1031,18 @@ func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessa
 		return a.handleLearningSearch(req)
 	case contracts.MethodLearningGraph:
 		return a.handleLearningGraph()
+	case contracts.MethodLearningLog:
+		var req contracts.LearningLogRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleLearningLog(req)
+	case contracts.MethodLearningReviewTranscript:
+		var req contracts.LearningReviewTranscriptRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleLearningReviewTranscript(req)
 	case contracts.MethodTodosGet:
 		var req contracts.TodosGetRequest
 		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {

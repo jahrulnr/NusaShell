@@ -30,12 +30,27 @@ tool listing or **Start** (`plugin.test`) spawns the process. **Stop**
 
 ## Tool exposure
 
-MCP plugin tools are not advertised in the tool list sent to the provider
-(prompt cache stability). The agent discovers them via `tool_list`,
-`tool_search`, and `tool_schema`, then calls them by name
-(`mcp__<server>__<tool>`). Execution validates against the connected MCP
-server at call time. Tool schemas come from the server's own `tools/list`
-response.
+MCP plugin tools are not advertised in the tool list sent to the provider.
+The agent discovers them via `tool_list`, `tool_search`, and `tool_schema`,
+then calls them by name (`mcp__<server>__<tool>`). Execution validates
+against the connected MCP server at call time. Tool schemas come from the
+server's own `tools/list` response.
+
+### Idle plugin enable workflow
+
+An idle plugin (listed in `mcp_list` with `running: false`) must be enabled
+before its tools can be called.
+
+Good example:
+
+    mcp_list()                                  # → {plugins: [{name: "files", running: false}]}
+    mcp_enable(id="plugin:files")               # connect + load tools
+    tool_list(server="files")                   # now discoverable
+    mcp__files__read({path: "/home/user/a.txt"})
+
+Bad example — calling an idle plugin's tool without enabling:
+
+    mcp__files__read({path: "/home/user/a.txt"})  # fails: server not running
 
 The Plugins view is the single catalog for all plugins: manual MCP
 servers, MCP-only plugins, and MCP + UI plugins. Select an entry to test,

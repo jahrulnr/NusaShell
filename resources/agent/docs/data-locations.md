@@ -21,10 +21,12 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `agent/skills/.provenance.json` | skill authorship log (createdBy, createdAt) | JSON |
 | `agent/skills/.deleted-builtin.json` | builtin skills the user deleted (so they are not re-seeded) | JSON |
 | `plugins/<id>/` | plugins (manual MCP servers and installed plugins): `manifest.json` + optional `ui/` + optional `skills/` (mounted read-only as `plugin:<id>` skills) | JSON + files |
-| `memories.jsonl` | agent memory entries | JSONL |
+| `MEMORY.md` | primary memory (always-injected working set, ~1k token cap; auto-created on first run) | Markdown |
+| `memories/fragments/*.md` | memory fragments (unlimited searchable archive; one markdown file per entry with YAML frontmatter) | Markdown + YAML |
+| `learning_reviews/` | background review agent transcripts (one JSON file per review run; viewable from the Learning log) | JSON |
 | `logs.jsonl` | activity log (bounded ring) | JSONL |
 | `acp_runs.jsonl` | completed ACP subagent run transcripts (one JSON line per run) | JSONL |
-| `settings.json` | compaction / caching settings | JSON |
+| `settings.json` | compaction / caching / sound notification / user prompt settings | JSON |
 | `credentials.db` | API keys per provider | SQLite |
 | `automation.db` | workflows, runs, schedules, events, waits, locks | SQLite |
 | `ci/runs/` | local executor scratch directories | files |

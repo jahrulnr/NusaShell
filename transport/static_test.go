@@ -110,3 +110,28 @@ func TestFrontendAssets(t *testing.T) {
 		t.Fatalf("GET /nope.js = %d, want 404", resp.StatusCode)
 	}
 }
+
+// TestSoundsEndpoint verifies that the embedded notification sounds are
+// served at /sounds/ with the correct MIME type so the frontend can play
+// them on turn-complete / turn-error events.
+func TestSoundsEndpoint(t *testing.T) {
+	h := newHarness(t, nil)
+	for _, name := range []string{"notification.wav", "notification-error.wav"} {
+		resp, err := http.Get(h.server.URL + "/sounds/" + name)
+		if err != nil {
+			t.Fatalf("GET /sounds/%s: %v", name, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET /sounds/%s = %d, want 200", name, resp.StatusCode)
+		}
+		ct := resp.Header.Get("Content-Type")
+		if !strings.HasPrefix(ct, "audio/wav") && !strings.HasPrefix(ct, "audio/x-wav") && !strings.HasPrefix(ct, "application/octet-stream") {
+			t.Fatalf("GET /sounds/%s content-type = %q, want audio/wav or similar", name, ct)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		if len(body) < 1000 {
+			t.Fatalf("GET /sounds/%s body too small: %d bytes", name, len(body))
+		}
+	}
+}

@@ -102,7 +102,7 @@ func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *do
 func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation *domain.Conversation, messageID, model, effort string, tools []ToolDef, settings domain.Settings, continuation bool, maxTokens int, injectHydration bool, promptCache *PromptCachePolicy, caps ModelCapabilities, systemPromptSuffix string) (streamedTurnRound, error) {
 	var content strings.Builder
 	var reasoning strings.Builder
-	system := buildSystemPrompt(conversation)
+	system := buildSystemPrompt(conversation, settings.UserPrompt)
 	if a != nil {
 		if suffix := a.acpDelegationPrompt(); suffix != "" {
 			system += "\n\n" + suffix
@@ -290,6 +290,9 @@ func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
 	source := HydrationSource{
 		RuntimeContext: DefaultRuntimeContext(c.Workspace),
 	}
+	if a.Primary != nil {
+		source.Primary = a.Primary
+	}
 	if a.Memory != nil {
 		source.Memory = a.Memory
 	}
@@ -436,6 +439,7 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 				ConversationID: run.ConversationID,
 				Items:          dtos,
 				Summary:        contracts.TodoSummaryDTO{Total: summary.Total, Pending: summary.Pending, InProgress: summary.InProgress, Completed: summary.Completed},
+				Goal:           a.Todos.GetGoal(run.ConversationID),
 			})
 		}
 	}
@@ -501,6 +505,7 @@ func (a *App) runOneTool(run *TurnRun, toolCall domain.ToolCall, caps ModelCapab
 	}
 	res := toolExecResult{status: status, output: output, atts: outputAttachments}
 	a.emitToolCompleted(run, toolCall, res)
+	a.emitLearningMutationEvents(toolCall.Name, status)
 	return res
 }
 
@@ -509,6 +514,28 @@ func (a *App) emitToolCompleted(run *TurnRun, toolCall domain.ToolCall, res tool
 		RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID,
 		Name: toolCall.Name, Status: string(res.status), Output: res.output,
 	})
+}
+
+// emitLearningMutationEvents publishes memory.updated and/or skill.updated
+// events when a tool mutates the memory or skill stores, so the Learning UI
+// can refresh its memory list, search results, and graph in real time without
+// polling. Only successful tool calls trigger the events.
+func (a *App) emitLearningMutationEvents(toolName string, status domain.ToolCallStatus) {
+	if a.Bus == nil || status != domain.ToolOK {
+		return
+	}
+	switch toolName {
+	case "memory_save", "memory_replace", "memory_delete", "memory_promote", "memory_demote":
+		a.Bus.Emit(contracts.EventMemoryUpdated, map[string]any{
+			"source": "tool",
+			"tool":   toolName,
+		})
+	case "skill_create", "skill_update", "skill_delete":
+		a.Bus.Emit(contracts.EventSkillUpdated, map[string]any{
+			"source": "tool",
+			"tool":   toolName,
+		})
+	}
 }
 
 func (a *App) interruptRemainingTools(run *TurnRun, messageID string, toolCalls []domain.ToolCall) {
@@ -663,7 +690,18 @@ func (a *App) flushLearningReview(conversationID string, reason string) {
 		})
 	}
 	a.goSafe("learning", func() {
-		a.ReviewAgent.RunReview(context.Background(), conversationID)
+		err := a.ReviewAgent.RunReview(context.Background(), conversationID)
+		if err != nil {
+			a.ReviewAgent.recordReviewError(conversationID, err.Error())
+			if a.Bus != nil {
+				a.Bus.Emit(contracts.EventLearningReviewError, contracts.LearningReviewEvent{
+					ConversationID: conversationID,
+					Status:         "error",
+					Error:          err.Error(),
+				})
+			}
+			return
+		}
 		if a.Bus != nil {
 			a.Bus.Emit(contracts.EventLearningReviewDone, contracts.LearningReviewEvent{
 				ConversationID: conversationID,

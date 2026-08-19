@@ -38,6 +38,7 @@ func (a *App) handleTodosGet(req contracts.TodosGetRequest) (any, *contracts.RPC
 		ConversationID: req.ConversationID,
 		Items:          dtos,
 		Summary:        todoSummaryDTO(domain.SummarizeTodos(items)),
+		Goal:           a.Todos.GetGoal(req.ConversationID),
 	}, nil
 }
 

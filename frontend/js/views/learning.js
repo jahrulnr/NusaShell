@@ -1,8 +1,8 @@
-// Learning workspace: search + memory list + knowledge graph.
+// Learning workspace: search + memory list + knowledge graph + autolearn log.
 // Uses vis-network for graph rendering (vendored ESM standalone build).
 
-import { rpc } from '../rpc.js';
-import { el, debounce, createSelect, toast } from '../ui.js';
+import { rpc, on, off } from '../rpc.js';
+import { el, debounce, createSelect, toast, fmtTime } from '../ui.js';
 import { DataSet, Network } from '../../vendor/vis-network/vis-network.esm.min.js';
 
 const state = {
@@ -12,6 +12,13 @@ const state = {
   edges: null,
   memoryCount: 0,
   edgeCount: 0,
+  logEntries: [],
+  logLoaded: false,
+  runningReviews: new Set(), // conversation IDs with in-flight reviews
+  reviewEventHandlers: null, // cleanup funcs for event listeners
+  learningEventHandlers: null, // cleanup funcs for memory/skill update listeners
+  memoryRefreshTimer: null, // debounce timer for memory.updated refresh
+  skillRefreshTimer: null, // debounce timer for skill.updated refresh
 };
 
 export async function initLearning() {
@@ -20,6 +27,7 @@ export async function initLearning() {
   const searchBtn = document.getElementById('learning-search-btn');
   const refreshBtn = document.getElementById('learning-graph-refresh');
   const fitBtn = document.getElementById('learning-graph-fit');
+  const logRefreshBtn = document.getElementById('learning-log-refresh');
 
   input.addEventListener('input', debounce(() => doSearch(), 200));
   input.addEventListener('keydown', (e) => {
@@ -40,15 +48,132 @@ export async function initLearning() {
   fitBtn.addEventListener('click', () => {
     if (state.network) state.network.fit({ animation: { duration: 300 } });
   });
+  logRefreshBtn.addEventListener('click', () => loadLog());
 
+  initTabs();
   initSplitter();
+  initReviewEventListeners();
+  initLearningUpdateListeners();
 
   await loadStats();
   initGraph();
   // Initial search: empty query lists all skills + memories so the results
   // pane is populated immediately (backend returns an unfiltered listing
-  // for empty queries). The graph loads in parallel.
+  // for empty queries). The graph loads in parallel. The learning log
+  // loads lazily on first tab switch to keep init light.
   await Promise.all([doSearch(), loadGraph()]);
+}
+
+// Tab switching between "Memory & Graph" and "Learning log". The log is
+// fetched lazily on first open so switching back and forth does not spam
+// the trajectory file read.
+function initTabs() {
+  const tabs = document.querySelectorAll('[data-learning-tab]');
+  for (const tab of tabs) {
+    tab.addEventListener('click', () => {
+      const target = tab.dataset.learningTab;
+      tabs.forEach((t) => {
+        const active = t === tab;
+        t.classList.toggle('active', active);
+        t.setAttribute('aria-selected', String(active));
+      });
+      document.getElementById('learning-panel-memory').hidden = target !== 'memory';
+      document.getElementById('learning-panel-log').hidden = target !== 'log';
+      if (target === 'log') {
+        loadLog();
+        // The graph canvas was possibly hidden while the other panel was
+        // active; re-fit after layout settles.
+        setTimeout(() => { if (state.network) state.network.fit({ animation: { duration: 200 } }); }, 60);
+      }
+    });
+  }
+}
+
+// Real-time review status: when a review starts, show a "running"
+// indicator at the top of the log. When it finishes (done or error),
+// refresh the log so the final status appears from the trajectory.
+function initReviewEventListeners() {
+  if (state.reviewEventHandlers) return;
+  const onStarted = (payload) => {
+    const convId = payload?.conversation_id;
+    if (convId) state.runningReviews.add(convId);
+    showRunningIndicator();
+  };
+  const onDone = (payload) => {
+    const convId = payload?.conversation_id;
+    if (convId) state.runningReviews.delete(convId);
+    if (state.runningReviews.size === 0) hideRunningIndicator();
+    if (state.logLoaded) loadLog();
+    // A review may have promoted/demoted memory or saved skills —
+    // refresh the memory & graph panes too.
+    loadStats();
+    loadGraph();
+    doSearch();
+  };
+  const onError = (payload) => {
+    const convId = payload?.conversation_id;
+    if (convId) state.runningReviews.delete(convId);
+    if (state.runningReviews.size === 0) hideRunningIndicator();
+    if (state.logLoaded) loadLog();
+  };
+  on('learning.review.started', onStarted);
+  on('learning.review.done', onDone);
+  on('learning.review.error', onError);
+  state.reviewEventHandlers = [
+    () => off('learning.review.started', onStarted),
+    () => off('learning.review.done', onDone),
+    () => off('learning.review.error', onError),
+  ];
+}
+
+// Real-time memory & skill updates: when a tool or review agent mutates
+// memory or skills, the backend emits memory.updated / skill.updated so
+// the Learning tab can refresh its stats, search results, and graph
+// without polling. A short debounce coalesces bursts (e.g. a review that
+// saves several fragments in quick succession).
+function initLearningUpdateListeners() {
+  if (state.learningEventHandlers) return;
+  const onMemoryUpdated = () => {
+    if (state.memoryRefreshTimer) clearTimeout(state.memoryRefreshTimer);
+    state.memoryRefreshTimer = setTimeout(() => {
+      state.memoryRefreshTimer = null;
+      loadStats();
+      loadGraph();
+      doSearch();
+    }, 300);
+  };
+  const onSkillUpdated = () => {
+    if (state.skillRefreshTimer) clearTimeout(state.skillRefreshTimer);
+    state.skillRefreshTimer = setTimeout(() => {
+      state.skillRefreshTimer = null;
+      loadGraph();
+      doSearch();
+    }, 300);
+  };
+  on('memory.updated', onMemoryUpdated);
+  on('skill.updated', onSkillUpdated);
+  state.learningEventHandlers = [
+    () => off('memory.updated', onMemoryUpdated),
+    () => off('skill.updated', onSkillUpdated),
+  ];
+}
+
+function showRunningIndicator() {
+  const logEl = document.getElementById('learning-log');
+  if (!logEl) return;
+  let indicator = document.getElementById('learning-log-running');
+  if (!indicator) {
+    indicator = el('div', { id: 'learning-log-running', class: 'learning-log-running' }, [
+      el('span', { class: 'learning-log-running-dot' }),
+      el('span', { text: 'Autolearn running…' }),
+    ]);
+    logEl.insertBefore(indicator, logEl.firstChild);
+  }
+}
+
+function hideRunningIndicator() {
+  const indicator = document.getElementById('learning-log-running');
+  if (indicator) indicator.remove();
 }
 
 // Draggable splitter between results pane and graph pane. Persists the
@@ -104,6 +229,254 @@ function initSplitter() {
 export async function refresh() {
   await loadStats();
   await loadGraph();
+  // Refresh the log too — but only if it has been opened at least once
+  // (lazy-loading keeps init light).
+  if (state.logLoaded) loadLog();
+}
+
+// ---- Learning log (autolearn trajectory) ----
+
+async function loadLog() {
+  const logEl = document.getElementById('learning-log');
+  if (!logEl) return;
+  const countEl = document.getElementById('learning-log-count');
+  state.logLoaded = true;
+  logEl.innerHTML = '';
+  logEl.appendChild(el('div', { class: 'learning-empty' }, [
+    el('strong', { text: 'Loading…' }),
+    el('span', { text: 'Reading the autolearn trajectory.' }),
+  ]));
+  try {
+    const res = await rpc('learning.log', { limit: 200 });
+    state.logEntries = res.entries || [];
+    renderLog();
+    countEl.textContent = `${state.logEntries.length} event${state.logEntries.length === 1 ? '' : 's'}`;
+  } catch (e) {
+    logEl.innerHTML = '';
+    logEl.appendChild(el('div', { class: 'learning-empty' }, [
+      el('strong', { text: 'Log unavailable' }),
+      el('span', { text: e.message || 'Unknown error' }),
+    ]));
+    countEl.textContent = '0 events';
+  }
+}
+
+function renderLog() {
+  const logEl = document.getElementById('learning-log');
+  logEl.innerHTML = '';
+  if (state.logEntries.length === 0) {
+    logEl.appendChild(el('div', { class: 'learning-empty' }, [
+      el('strong', { text: 'No learning activity yet' }),
+      el('span', { text: 'Autolearn runs in the background after enough turns and records what it saved here.' }),
+    ]));
+    return;
+  }
+  for (const entry of state.logEntries) {
+    logEl.appendChild(renderLogEntry(entry));
+  }
+}
+
+function renderLogEntry(entry) {
+  const headChildren = [
+    el('span', { class: `learning-log-type learning-type-${entry.type}`, text: typeLabel(entry.type) }),
+  ];
+  // Status badge: review entries carry a status (done|error). Other
+  // event types (prune, decay, etc.) do not have a status.
+  if (entry.status) {
+    headChildren.push(el('span', {
+      class: `learning-log-status learning-log-status-${entry.status}`,
+      text: entry.status,
+      title: entry.status === 'error' && entry.error ? entry.error : '',
+    }));
+  }
+  headChildren.push(el('span', { class: 'learning-log-time', text: fmtTime(entry.ts) }));
+  const head = el('div', { class: 'learning-log-entry-head' }, headChildren);
+
+  const parts = [head];
+
+  // Error message: shown when the review failed so the user can see
+  // why without opening the transcript.
+  if (entry.status === 'error' && entry.error) {
+    parts.push(el('div', { class: 'learning-log-error', text: entry.error }));
+  }
+
+  // Source conversation (read-only label — the log is about the review
+  // agent's work, not the source conversation itself).
+  if (entry.conversation_id) {
+    parts.push(el('div', { class: 'learning-log-conv' }, [
+      el('span', { class: 'learning-log-conv-title', text: entry.conversation_title || 'Untitled conversation' }),
+      el('span', { class: 'learning-log-conv-id', text: entry.conversation_id }),
+    ]));
+  }
+
+  if (entry.mutations && entry.mutations.length > 0) {
+    const muts = el('div', { class: 'learning-log-mutations' });
+    for (const m of entry.mutations) {
+      const row = el('div', { class: 'learning-log-mutation' }, [
+        el('span', { class: `learning-mut-kind learning-mut-kind-${m.kind}`, text: m.kind }),
+        el('span', { text: m.snippet || m.tool || 'saved' }),
+      ]);
+      muts.appendChild(row);
+    }
+    parts.push(muts);
+  }
+
+  // Per-type extras (e.g. prune/decay counts, consolidation merges).
+  const extras = detailText(entry);
+  if (extras) {
+    parts.push(el('div', { class: 'learning-log-detail', text: extras }));
+  }
+
+  // "View transcript" button: opens the review agent's own conversation
+  // (LLM exchanges + tool calls) inline. Only review entries have a
+  // review_id; other event types (prune, decay, etc.) have no transcript.
+  if (entry.review_id) {
+    const transcriptRow = el('div', { class: 'learning-log-transcript-row' }, [
+      el('button', {
+        class: 'learning-log-open',
+        type: 'button',
+        text: 'View transcript',
+        title: 'Show the background review agent conversation',
+      }),
+    ]);
+    const btn = transcriptRow.querySelector('.learning-log-open');
+    btn.addEventListener('click', () => toggleTranscript(entry.review_id, btn));
+    parts.push(transcriptRow);
+  }
+
+  return el('div', { class: 'learning-log-entry' }, parts);
+}
+
+// toggleTranscript fetches and renders the review agent's conversation
+// (its LLM exchanges + tool calls + tool results) inline below the log
+// entry. Toggles open/closed on repeated clicks.
+async function toggleTranscript(reviewID, btn) {
+  const entry = btn.closest('.learning-log-entry');
+  if (!entry) return;
+  const existing = entry.querySelector('.learning-log-transcript');
+  if (existing) {
+    existing.remove();
+    btn.textContent = 'View transcript';
+    return;
+  }
+  btn.textContent = 'Loading…';
+  btn.disabled = true;
+  try {
+    const res = await rpc('learning.review.transcript', { id: reviewID });
+    const view = renderTranscript(res);
+    entry.appendChild(view);
+    btn.textContent = 'Hide transcript';
+  } catch (e) {
+    toast(e.message || 'Failed to load transcript.', 'error', 4000);
+    btn.textContent = 'View transcript';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// renderTranscript renders the review agent's conversation as a compact,
+// read-only thread with a distinct background review banner so it is
+// visually distinguishable from a regular Agent view conversation.
+function renderTranscript(transcript) {
+  const view = el('div', { class: 'learning-log-transcript' });
+  // Banner: makes it obvious this is a background review agent transcript,
+  // not a regular conversation. Includes model + timestamp for context.
+  view.appendChild(el('div', { class: 'learning-log-transcript-banner' }, [
+    el('span', { class: 'learning-log-transcript-badge', text: 'Background review agent' }),
+    el('span', { class: 'learning-log-transcript-meta', text: transcript.model || '' }),
+    el('span', { class: 'learning-log-transcript-meta', text: fmtTime(transcript.created_at) }),
+  ]));
+  if (!transcript.messages || transcript.messages.length === 0) {
+    view.appendChild(el('div', { class: 'learning-log-detail', text: 'No messages recorded.' }));
+    return view;
+  }
+  for (const msg of transcript.messages) {
+    view.appendChild(renderTranscriptMessage(msg));
+  }
+  return view;
+}
+
+// formatToolArgs normalizes tool-call args for display. The backend may
+// send args as a raw JSON object (when the DTO uses json.RawMessage) or as
+// a JSON string (older transcripts). Either way we want a readable,
+// indented JSON string in the transcript view — never "[object Object]".
+function formatToolArgs(args) {
+  if (args == null || args === '') return '';
+  if (typeof args === 'string') {
+    const trimmed = args.trim();
+    if (!trimmed) return '';
+    // Already a JSON string — try to pretty-print it; fall back to raw.
+    try {
+      return JSON.stringify(JSON.parse(trimmed), null, 2);
+    } catch {
+      return trimmed;
+    }
+  }
+  // Object/array — stringify for display.
+  try {
+    return JSON.stringify(args, null, 2);
+  } catch {
+    return String(args);
+  }
+}
+
+function renderTranscriptMessage(msg) {
+  const roleLabel = msg.role === 'user' ? 'Transcript' : msg.role === 'assistant' ? 'Review agent' : 'Tool';
+  const row = el('div', { class: `learning-log-tc-msg learning-log-tc-${msg.role}` }, [
+    el('span', { class: 'learning-log-tc-role', text: roleLabel }),
+  ]);
+  if (msg.content) {
+    row.appendChild(el('div', { class: 'learning-log-tc-content', text: msg.content }));
+  }
+  if (msg.tool_calls && msg.tool_calls.length > 0) {
+    for (const tc of msg.tool_calls) {
+      const args = formatToolArgs(tc.args);
+      const call = el('div', { class: 'learning-log-tc-tool' }, [
+        el('span', { class: 'learning-log-tc-tool-name', text: tc.name }),
+        el('code', { class: 'learning-log-tc-tool-args', text: args }),
+      ]);
+      row.appendChild(call);
+    }
+  }
+  if (msg.tool_result) {
+    const result = el('div', { class: 'learning-log-tc-result' }, [
+      el('span', { class: 'learning-log-tc-result-name', text: msg.tool_result.name }),
+      el('pre', { class: 'learning-log-tc-result-content', text: msg.tool_result.content || '' }),
+    ]);
+    row.appendChild(result);
+  }
+  return row;
+}
+
+function typeLabel(type) {
+  switch (type) {
+    case 'review': return 'Autolearn review';
+    case 'extract': return 'Extraction';
+    case 'edge_build': return 'Edge build';
+    case 'consolidate': return 'Consolidation';
+    case 'decay': return 'Decay';
+    case 'prune': return 'Prune';
+    default: return type.replace(/_/g, ' ');
+  }
+}
+
+// detailText renders non-conversation detail fields (numbers, counts) so
+// the log entry stays scannable. The conversation and mutations fields
+// are rendered separately.
+function detailText(entry) {
+  if (!entry.detail) return '';
+  const lines = [];
+  for (const [key, value] of Object.entries(entry.detail)) {
+    if (key === 'conversation' || key === 'mutations') continue;
+    if (value !== null && typeof value === 'object') {
+      for (const [k, v] of Object.entries(value)) {
+        lines.push(`${k}: ${v}`);
+      }
+    } else {
+      lines.push(`${key}: ${value}`);
+    }
+  }
+  return lines.join('\n');
 }
 
 async function loadStats() {
@@ -185,6 +558,9 @@ function renderResults() {
     const card = el('div', { class: 'learning-result-card', 'data-id': item.id, 'data-kind': item.kind }, [
       el('div', { class: 'learning-result-header' }, [
         el('span', { class: `learning-result-kind learning-kind-${item.kind}`, text: item.kind }),
+        item.kind === 'memory' && item.tier
+          ? el('span', { class: `learning-result-tier learning-tier-${item.tier}`, text: item.tier, title: item.tier === 'primary' ? 'Primary memory (always injected, ~1k token cap)' : 'Fragment (searchable archive)' })
+          : null,
         headerRight,
       ]),
       item.name ? el('div', { class: 'learning-result-name', text: item.name }) : null,

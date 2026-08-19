@@ -224,6 +224,7 @@
                   </button>
                   <span class="agent-todo-strip-meta" id="agent-todo-strip-meta" aria-live="polite" aria-atomic="true"></span>
                 </div>
+                <p class="agent-todo-strip-goal" id="agent-todo-strip-goal" hidden></p>
                 <ol class="agent-todo-strip-list" id="agent-todo-strip-list" role="list" hidden></ol>
               </section>
 
@@ -396,48 +397,66 @@
           <div>
             <div class="view-kicker"><span class="view-kicker-dot"></span>Learning</div>
             <h1>Memory &amp; knowledge graph</h1>
-            <p>Search accumulated memory entries and explore how skills, facts, and errors connect.</p>
+            <p>Search accumulated memory entries, explore the knowledge graph, and review what autolearn saved.</p>
           </div>
           <div class="learning-header-stats">
             <span class="learning-stat" id="learning-stat-memory">0 memories</span>
             <span class="learning-stat" id="learning-stat-edges">0 edges</span>
           </div>
         </div>
+        <div class="learning-tabs" role="tablist" aria-label="Learning sections">
+          <button class="tab active" type="button" id="learning-tab-memory" data-learning-tab="memory" role="tab" aria-selected="true">Memory &amp; Graph</button>
+          <button class="tab" type="button" id="learning-tab-log" data-learning-tab="log" role="tab" aria-selected="false">Learning log</button>
+        </div>
         <div class="view-body learning-body">
-          <div class="learning-search-bar">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-            <input type="search" id="learning-search-input" placeholder="Search memories and skills…" autocomplete="off">
-            <select id="learning-kind-filter" class="select" aria-label="Filter learning entries by kind"></select>
-            <button class="mini-btn" id="learning-search-btn" type="button">Search</button>
-          </div>
-          <div class="learning-workspace" id="learning-workspace">
-            <div class="learning-results-pane" id="learning-results-pane">
-              <div class="learning-pane-head">
-                <h2>Results</h2>
-                <span id="learning-results-count">0</span>
+          <div class="learning-panel" id="learning-panel-memory" data-learning-panel="memory">
+            <div class="learning-search-bar">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              <input type="search" id="learning-search-input" placeholder="Search memories and skills…" autocomplete="off">
+              <select id="learning-kind-filter" class="select" aria-label="Filter learning entries by kind"></select>
+              <button class="mini-btn" id="learning-search-btn" type="button">Search</button>
+            </div>
+            <div class="learning-workspace" id="learning-workspace">
+              <div class="learning-results-pane" id="learning-results-pane">
+                <div class="learning-pane-head">
+                  <h2>Results</h2>
+                  <span id="learning-results-count">0</span>
+                </div>
+                <div class="learning-results" id="learning-results">
+                  <div class="learning-empty">
+                    <strong>Loading…</strong>
+                    <span>Gathering memories and skills.</span>
+                  </div>
+                </div>
               </div>
-              <div class="learning-results" id="learning-results">
-                <div class="learning-empty">
-                  <strong>Loading…</strong>
-                  <span>Gathering memories and skills.</span>
+              <div class="learning-splitter" id="learning-splitter" title="Drag to resize"></div>
+              <div class="learning-graph-pane">
+                <div class="learning-pane-head">
+                  <h2>Knowledge graph</h2>
+                  <div class="learning-graph-controls">
+                    <button class="mini-btn ghost" id="learning-graph-refresh" type="button" title="Reload graph">↻</button>
+                    <button class="mini-btn ghost" id="learning-graph-fit" type="button" title="Fit to view">Fit</button>
+                  </div>
+                </div>
+                <div class="learning-graph" id="learning-graph"></div>
+                <div class="learning-graph-legend">
+                  <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-skill"></span>Skill</span>
+                  <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-memory"></span>Memory</span>
+                  <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-related"></span>Related</span>
+                  <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-used"></span>Used with</span>
                 </div>
               </div>
             </div>
-            <div class="learning-splitter" id="learning-splitter" title="Drag to resize"></div>
-            <div class="learning-graph-pane">
-              <div class="learning-pane-head">
-                <h2>Knowledge graph</h2>
-                <div class="learning-graph-controls">
-                  <button class="mini-btn ghost" id="learning-graph-refresh" type="button" title="Reload graph">↻</button>
-                  <button class="mini-btn ghost" id="learning-graph-fit" type="button" title="Fit to view">Fit</button>
-                </div>
-              </div>
-              <div class="learning-graph" id="learning-graph"></div>
-              <div class="learning-graph-legend">
-                <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-skill"></span>Skill</span>
-                <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-memory"></span>Memory</span>
-                <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-related"></span>Related</span>
-                <span class="learning-legend-item"><span class="learning-legend-dot learning-legend-used"></span>Used with</span>
+          </div>
+          <div class="learning-panel" id="learning-panel-log" data-learning-panel="log" hidden>
+            <div class="learning-log-toolbar">
+              <span class="log-count" id="learning-log-count">0 events</span>
+              <button class="mini-btn ghost" id="learning-log-refresh" type="button">Refresh</button>
+            </div>
+            <div class="learning-log" id="learning-log">
+              <div class="learning-empty">
+                <strong>Loading…</strong>
+                <span>Reading the autolearn trajectory.</span>
               </div>
             </div>
           </div>
@@ -633,8 +652,8 @@
               <small>Used globally for semantic search over skills and memory. Ollama models (e.g. nomic-embed-text) work locally without an API key.</small>
             </label>
             <label class="settings-field" for="settings-learning-threshold">Learning review threshold (turns)
-              <input id="settings-learning-threshold" type="number" min="0" max="1000" step="1" inputmode="numeric" value="50">
-              <small>How many turns to accumulate before extracting learnings (default 50). Set 0 to disable turn-based review; compaction-triggered review still runs.</small>
+              <input id="settings-learning-threshold" type="number" min="0" max="1000" step="1" inputmode="numeric" value="10">
+              <small>How many turns to accumulate before extracting learnings (default 10). Set 0 to disable turn-based review; compaction-triggered review still runs.</small>
             </label>
             <label class="settings-field" for="settings-auto-continues">Max auto-continues
               <input id="settings-auto-continues" type="number" min="0" max="10000" step="1" inputmode="numeric" value="10">
@@ -724,6 +743,15 @@
               <span><strong>Prompt caching</strong><small>Use provider-side ephemeral prompt caching when supported.</small></span>
               <input id="settings-prompt-caching" type="checkbox">
               <span class="toggle-slider" aria-hidden="true"></span>
+            </label>
+            <label class="settings-toggle" for="settings-sound-notifications">
+              <span><strong>Sound notifications</strong><small>Play a sound when an agent turn completes or fails.</small></span>
+              <input id="settings-sound-notifications" type="checkbox">
+              <span class="toggle-slider" aria-hidden="true"></span>
+            </label>
+            <label class="settings-field" for="settings-user-prompt">User prompt (custom instructions)
+              <textarea id="settings-user-prompt" rows="4" placeholder="e.g. Always respond in Indonesian. Prefer concise answers. Use git rebase over merge."></textarea>
+              <small>Injected into every agent turn's system prompt inside &lt;user_instructions&gt; tags, after the base identity and tool protocol. Changing this will break the prompt cache for all subsequent turns until a new cache shard stabilizes — expect higher latency and cost on the first few turns after editing.</small>
             </label>
             <details class="settings-field settings-sampling">
               <summary><strong>Sampling parameters</strong><small>Override provider defaults. Leave blank to use provider default.</small></summary>

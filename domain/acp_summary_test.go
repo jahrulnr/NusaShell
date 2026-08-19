@@ -3,7 +3,6 @@ package domain
 import (
 	"strings"
 	"testing"
-
 )
 
 func TestSubagentCompletionResultNormalText(t *testing.T) {

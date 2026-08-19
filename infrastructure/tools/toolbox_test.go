@@ -146,8 +146,8 @@ func TestSkillSearchNoMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("skill_search: %v", err)
 	}
-	if out != "No skills matched." {
-		t.Errorf("expected no match message, got: %s", out)
+	if !strings.Contains(out, "count: 0") {
+		t.Errorf("expected count: 0 in YAML output, got: %s", out)
 	}
 }
 
@@ -215,9 +215,8 @@ func TestSkillListLimit(t *testing.T) {
 		t.Fatalf("skill_list: %v", err)
 	}
 	// Should only contain 2 entries
-	lines := strings.Count(out, "\n") + 1
-	if lines != 2 {
-		t.Errorf("expected 2 entries with limit=2, got %d lines: %s", lines, out)
+	if !strings.Contains(out, "count: 2") {
+		t.Errorf("expected count: 2 with limit=2, got: %s", out)
 	}
 }
 
@@ -237,33 +236,12 @@ func TestMcpList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mcp_list: %v", err)
 	}
-	var res struct {
-		Count   int `json:"count"`
-		Plugins []struct {
-			Name    string `json:"name"`
-			Running bool   `json:"running"`
-			Tools   int    `json:"tools"`
-		} `json:"plugins"`
-	}
-	if err := json.Unmarshal([]byte(out), &res); err != nil {
-		t.Fatalf("invalid JSON: %v\n%s", err, out)
-	}
-	if res.Count != 2 {
-		t.Errorf("expected 2 plugins, got %d", res.Count)
+	if !strings.Contains(out, "count: 2") {
+		t.Errorf("expected 2 plugins, got: %s", out)
 	}
 	// github should be running with 1 tool
-	var github *struct {
-		Name    string `json:"name"`
-		Running bool   `json:"running"`
-		Tools   int    `json:"tools"`
-	}
-	for i := range res.Plugins {
-		if res.Plugins[i].Name == "github" {
-			github = &res.Plugins[i]
-		}
-	}
-	if github == nil || !github.Running || github.Tools != 1 {
-		t.Errorf("expected github running with 1 tool, got: %+v", github)
+	if !strings.Contains(out, "name: github") || !strings.Contains(out, "running: true") || !strings.Contains(out, "tools: 1") {
+		t.Errorf("expected github running with 1 tool, got: %s", out)
 	}
 }
 
@@ -284,18 +262,8 @@ func TestToolListAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tool_list: %v", err)
 	}
-	var res struct {
-		Count int `json:"count"`
-		Tools []struct {
-			Name   string `json:"name"`
-			Server string `json:"server"`
-		} `json:"tools"`
-	}
-	if err := json.Unmarshal([]byte(out), &res); err != nil {
-		t.Fatalf("invalid JSON: %v\n%s", err, out)
-	}
-	if res.Count != 2 {
-		t.Errorf("expected 2 tools, got %d", res.Count)
+	if !strings.Contains(out, "count: 2") {
+		t.Errorf("expected 2 tools, got: %s", out)
 	}
 }
 
@@ -316,21 +284,11 @@ func TestToolListByServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tool_list: %v", err)
 	}
-	var res struct {
-		Count int `json:"count"`
-		Tools []struct {
-			Name   string `json:"name"`
-			Server string `json:"server"`
-		} `json:"tools"`
+	if !strings.Contains(out, "count: 1") {
+		t.Errorf("expected 1 tool from github, got: %s", out)
 	}
-	if err := json.Unmarshal([]byte(out), &res); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-	if res.Count != 1 {
-		t.Errorf("expected 1 tool from github, got %d", res.Count)
-	}
-	if len(res.Tools) > 0 && res.Tools[0].Server != "github" {
-		t.Errorf("expected server=github, got %s", res.Tools[0].Server)
+	if !strings.Contains(out, "server: github") {
+		t.Errorf("expected server=github, got: %s", out)
 	}
 }
 
@@ -345,14 +303,8 @@ func TestToolListNotRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tool_list: %v", err)
 	}
-	var res struct {
-		Count int `json:"count"`
-	}
-	if err := json.Unmarshal([]byte(out), &res); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-	if res.Count != 0 {
-		t.Errorf("expected 0 tools from non-running server, got %d", res.Count)
+	if !strings.Contains(out, "count: 0") {
+		t.Errorf("expected 0 tools from non-running server, got: %s", out)
 	}
 }
 
@@ -374,20 +326,11 @@ func TestToolSearch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tool_search: %v", err)
 	}
-	var res struct {
-		Count   int `json:"count"`
-		Matches []struct {
-			Name string `json:"name"`
-		} `json:"matches"`
+	if !strings.Contains(out, "count: 1") {
+		t.Errorf("expected 1 match, got: %s", out)
 	}
-	if err := json.Unmarshal([]byte(out), &res); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-	if res.Count != 1 {
-		t.Errorf("expected 1 match, got %d", res.Count)
-	}
-	if len(res.Matches) > 0 && !strings.Contains(res.Matches[0].Name, "create_issue") {
-		t.Errorf("expected create_issue match, got %s", res.Matches[0].Name)
+	if !strings.Contains(out, "create_issue") {
+		t.Errorf("expected create_issue match, got: %s", out)
 	}
 }
 
@@ -409,14 +352,8 @@ func TestToolSearchTokenMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tool_search: %v", err)
 	}
-	var res struct {
-		Count int `json:"count"`
-	}
-	if err := json.Unmarshal([]byte(out), &res); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-	if res.Count != 1 {
-		t.Errorf("expected 1 match for token match, got %d", res.Count)
+	if !strings.Contains(out, "count: 1") {
+		t.Errorf("expected 1 match for token match, got: %s", out)
 	}
 }
 
@@ -437,19 +374,11 @@ func TestToolSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tool_schema: %v", err)
 	}
-	var res struct {
-		Server      string         `json:"server"`
-		Tool        string         `json:"tool"`
-		InputSchema map[string]any `json:"input_schema"`
+	if !strings.Contains(out, "server: github") || !strings.Contains(out, "tool: create_issue") {
+		t.Errorf("expected github/create_issue, got: %s", out)
 	}
-	if err := json.Unmarshal([]byte(out), &res); err != nil {
-		t.Fatalf("invalid JSON: %v\n%s", err, out)
-	}
-	if res.Server != "github" || res.Tool != "create_issue" {
-		t.Errorf("expected github/create_issue, got %s/%s", res.Server, res.Tool)
-	}
-	if res.InputSchema["type"] != "object" {
-		t.Errorf("expected object schema, got: %v", res.InputSchema["type"])
+	if !strings.Contains(out, "type: object") {
+		t.Errorf("expected object schema, got: %s", out)
 	}
 }
 
@@ -585,7 +514,7 @@ func TestMcpRegister(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mcp_register: %v", err)
 	}
-	if !strings.Contains(out, "registered plugin") {
+	if !strings.Contains(out, "status: registered") {
 		t.Fatalf("unexpected output %q", out)
 	}
 	if len(store.installedDirs) != 1 || store.installedDirs[0] != absPluginSource {
@@ -612,8 +541,8 @@ func TestMcpEnable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mcp_enable: %v", err)
 	}
-	if !strings.Contains(out, "1 tool") {
-		t.Fatalf("expected 1 tool in output, got %q", out)
+	if !strings.Contains(out, "status: enabled") || !strings.Contains(out, "tools: 1") {
+		t.Fatalf("expected status: enabled and tools: 1 in output, got %q", out)
 	}
 }
 
@@ -687,6 +616,19 @@ func TestListToolsIncludesMcpManagement(t *testing.T) {
 	}
 }
 
+func TestListToolsIncludesMemoryReplace(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	names := map[string]bool{}
+	for _, ti := range tb.ListTools() {
+		names[ti.Name] = true
+	}
+	for _, want := range []string{"memory_save", "memory_replace", "memory_search", "memory_list", "memory_delete"} {
+		if !names[want] {
+			t.Fatalf("ListTools missing %q", want)
+		}
+	}
+}
+
 // --- mcp_install tests ---
 
 type stubPluginInstaller struct {
@@ -729,7 +671,7 @@ func TestMcpInstallCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mcp_install catalog: %v", err)
 	}
-	if !strings.Contains(out, "installed plugin") {
+	if !strings.Contains(out, "status: installed") {
 		t.Fatalf("unexpected output %q", out)
 	}
 	if inst.lastReq.Source != domain.InstallSourceCatalog || inst.lastReq.ID != "notes" {
@@ -799,7 +741,7 @@ func TestMcpServerAdd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mcp_server_add: %v", err)
 	}
-	if !strings.Contains(out, "added MCP server") {
+	if !strings.Contains(out, "status: added") {
 		t.Fatalf("unexpected output %q", out)
 	}
 	if len(store.saved) != 1 {
@@ -973,7 +915,7 @@ func TestSleepTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sleep failed: %v", err)
 	}
-	if !strings.Contains(out, "Slept 1") {
+	if !strings.Contains(out, "status: slept") || !strings.Contains(out, "seconds: 1") {
 		t.Fatalf("unexpected output: %s", out)
 	}
 	if elapsed < 900*time.Millisecond {

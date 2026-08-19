@@ -33,7 +33,8 @@ type MCPToolReader interface {
 // HydrationSource assembles the read-only sources of truth the builder draws
 // from. A nil store means that snapshot slot is skipped (fail-soft).
 type HydrationSource struct {
-	Memory         MemoryStore
+	Primary        PrimaryStore // always-injected working set (MEMORY.md)
+	Memory         MemoryStore  // legacy — used by lifecycle/learning subsystems
 	Skills         SkillStore
 	Plugins        PluginStore
 	MCP            MCPToolReader
@@ -137,20 +138,35 @@ func (b *HydrationBuilder) readRuntimeContext() hydrationSlot {
 }
 
 func (b *HydrationBuilder) readMemory() hydrationSlot {
-	if b.source.Memory == nil {
+	if b.source.Primary == nil {
 		return hydrationSlot{name: "memory", content: "{}"}
 	}
-	entries := b.source.Memory.List()
-	type memEntry struct {
-		ID      string   `json:"id"`
-		Content string   `json:"content"`
-		Tags    []string `json:"tags,omitempty"`
+	mem := b.source.Primary.Load()
+	type primaryEntry struct {
+		ID      string `json:"id"`
+		Content string `json:"content"`
 	}
-	out := make([]memEntry, 0, len(entries))
-	for _, e := range entries {
-		out = append(out, memEntry{ID: e.ID, Content: e.Content, Tags: e.Tags})
+	type usage struct {
+		Chars int `json:"chars"`
+		Limit int `json:"limit"`
+		Pct   int `json:"pct"`
 	}
-	content, _ := json.Marshal(map[string]any{"entries": out, "count": len(out)})
+	out := make([]primaryEntry, 0, len(mem.Entries))
+	chars := 0
+	for _, e := range mem.Entries {
+		out = append(out, primaryEntry{ID: e.ID, Content: e.Content})
+		chars += len(e.Content)
+	}
+	limit := domain.PrimaryCharCap
+	pct := 0
+	if limit > 0 {
+		pct = chars * 100 / limit
+	}
+	content, _ := json.Marshal(map[string]any{
+		"entries": out,
+		"count":   len(out),
+		"usage":   usage{Chars: chars, Limit: limit, Pct: pct},
+	})
 	return hydrationSlot{name: "memory", content: string(content)}
 }
 
@@ -236,12 +252,24 @@ func (b *HydrationBuilder) readToolList() hydrationSlot {
 // readTodoList injects the current conversation's todo checklist as a
 // synthetic `todo_list` tool result. Only incomplete items are included
 // (completed items are noise for the model — the UI strip still shows them).
+// The goal brief (if set) is prepended so the agent sees the user's original
+// intent every turn — this survives compaction because hydration is
+// re-injected after context summarization.
 // Returns an empty-content slot when no todo port or no conversation id is
 // configured so the slot is harmless but present for call-ID alignment.
 func (b *HydrationBuilder) readTodoList() hydrationSlot {
 	if b.source.Todos == nil || b.source.ConvID == "" {
 		return hydrationSlot{name: "todo_list", content: ""}
 	}
+	var sections []string
+	// Goal brief: the user's original intent, set once via the `todo` tool's
+	// `goal` argument. Re-injected every turn so the agent does not drift
+	// after compaction.
+	goal := b.source.Todos.GetGoal(b.source.ConvID)
+	if goal != "" {
+		sections = append(sections, "USER GOAL (survives compaction — do not drift from this)\n"+goal)
+	}
+	// Items: only incomplete ones (completed items are noise for the model).
 	items := b.source.Todos.Get(b.source.ConvID)
 	var lines []string
 	for _, item := range items {
@@ -254,11 +282,13 @@ func (b *HydrationBuilder) readTodoList() hydrationSlot {
 		}
 		lines = append(lines, glyph+" "+item.Content)
 	}
-	if len(lines) == 0 {
+	if len(lines) > 0 {
+		sections = append(sections, "CURRENT TASKS (agent-owned checklist — user may delete items)\n"+strings.Join(lines, "\n"))
+	}
+	if len(sections) == 0 {
 		return hydrationSlot{name: "todo_list", content: ""}
 	}
-	content := "CURRENT TASKS (agent-owned checklist — user may delete items)\n" + strings.Join(lines, "\n")
-	return hydrationSlot{name: "todo_list", content: content}
+	return hydrationSlot{name: "todo_list", content: strings.Join(sections, "\n\n")}
 }
 
 // FilterHydration drops the synthetic runtime-hydration exchange (assistant

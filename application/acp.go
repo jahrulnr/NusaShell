@@ -9,6 +9,8 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+
+	"gopkg.in/yaml.v3"
 )
 
 func (a *App) acpAgentDTO(agent *domain.AcpAgent) contracts.AcpAgentDTO {
@@ -710,8 +712,8 @@ func (a *App) SteerAcpRun(ctx context.Context, argsJSON []byte) (string, error) 
 	if rpcErr != nil {
 		return "", fmt.Errorf("%s", rpcErr.Message)
 	}
-	b, _ := json.Marshal(res)
-	return string(b), nil
+	b, _ := yaml.Marshal(res)
+	return "---\n" + strings.TrimRight(string(b), "\n") + "\n---", nil
 }
 
 func (a *App) StopAcpRun(ctx context.Context, argsJSON []byte) (string, error) {
@@ -725,8 +727,8 @@ func (a *App) StopAcpRun(ctx context.Context, argsJSON []byte) (string, error) {
 	if rpcErr != nil {
 		return "", fmt.Errorf("%s", rpcErr.Message)
 	}
-	b, _ := json.Marshal(res)
-	return string(b), nil
+	b, _ := yaml.Marshal(res)
+	return "---\n" + strings.TrimRight(string(b), "\n") + "\n---", nil
 }
 
 func (a *App) WaitAcpRun(ctx context.Context, argsJSON []byte) (string, error) {
@@ -741,8 +743,8 @@ func (a *App) WaitAcpRun(ctx context.Context, argsJSON []byte) (string, error) {
 	if rpcErr != nil {
 		return "", fmt.Errorf("%s", rpcErr.Message)
 	}
-	b, _ := json.Marshal(res)
-	return string(b), nil
+	b, _ := yaml.Marshal(res)
+	return "---\n" + strings.TrimRight(string(b), "\n") + "\n---", nil
 }
 
 func (a *App) EnabledAcpAgents() []*domain.AcpAgent {

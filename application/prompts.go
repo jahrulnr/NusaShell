@@ -23,13 +23,21 @@ var continuePrompt = resources.Prompt("continue")
 // buildSystemPrompt composes the agent identity + tool protocol with
 // compaction summaries and any system-level skill messages stored in the
 // conversation. The system.md + tools.md prefix is cache-stable across
-// turns; only the tail (system messages, workspace) varies.
-func buildSystemPrompt(c *domain.Conversation) string {
+// turns; the user prompt (if set) extends that prefix — changing it
+// breaks the prompt cache for all subsequent turns until a new cache
+// shard stabilizes. Only the tail (system messages, workspace) varies
+// per conversation/turn.
+func buildSystemPrompt(c *domain.Conversation, userPrompt string) string {
 	var sb strings.Builder
 	sb.WriteString(systemPrompt)
 	if toolsPrompt != "" {
 		sb.WriteString("\n\n")
 		sb.WriteString(toolsPrompt)
+	}
+	if up := strings.TrimSpace(userPrompt); up != "" {
+		sb.WriteString("\n\n<user_instructions>\n")
+		sb.WriteString(up)
+		sb.WriteString("\n</user_instructions>")
 	}
 	for _, m := range c.Messages {
 		if m.Role == domain.RoleSystem && strings.TrimSpace(m.Content) != "" {

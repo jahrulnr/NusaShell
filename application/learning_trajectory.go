@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -75,4 +76,51 @@ func (r *TrajectoryRecorder) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.file.Close()
+}
+
+// trajectoryFileName is the trajectory log path inside a data directory.
+func trajectoryFileName(dataDir string) string {
+	return filepath.Join(dataDir, "learning_trajectory.jsonl")
+}
+
+// ReadTrajectory loads learning events from the trajectory log, newest
+// first. Events that are pure UI query noise (search, graph_load) are
+// excluded so the log surfaces learning-layer activity. Returns an empty
+// slice when the file is missing or unreadable — the log view must never
+// fail because the debug log is absent.
+func ReadTrajectory(dataDir string, limit int) []TrajectoryEvent {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	b, err := os.ReadFile(trajectoryFileName(dataDir))
+	if err != nil {
+		return nil
+	}
+	var events []TrajectoryEvent
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var e TrajectoryEvent
+		if json.Unmarshal([]byte(line), &e) != nil {
+			continue
+		}
+		switch e.Type {
+		case "search", "graph_load":
+			continue // UI query noise, not learning-layer activity
+		}
+		events = append(events, e)
+	}
+	// Reverse so the newest event is first.
+	for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
+		events[i], events[j] = events[j], events[i]
+	}
+	if len(events) > limit {
+		events = events[:limit]
+	}
+	return events
 }

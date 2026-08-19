@@ -42,3 +42,20 @@ them.
 The Skills workspace is a read-only browser: it shows the catalog, the file
 tree of the selected skill, and a file viewer. Use `skill_save` (or the New
 skill button) to author skills.
+
+### skill_save guidance
+
+Save class-level, reusable procedures — never one-off debugging notes or
+environment-failure folklore.
+
+Good example:
+
+    skill_save(name="release-checklist",
+               description="Steps for tagging a release and verifying the build",
+               content="## Release\n1. …")
+
+Bad examples:
+
+    skill_save(name="bug-2026-08-19", description="fix", content="the debug session…")
+
+    skill_save(name="my-api-key-notes", description="credentials", content="sk-…")  # secrets

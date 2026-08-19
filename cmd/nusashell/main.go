@@ -27,6 +27,7 @@ import (
 	"nusashell/infrastructure/docs"
 	"nusashell/infrastructure/jsonstore"
 	"nusashell/infrastructure/mcpclient"
+	"nusashell/infrastructure/memorystore"
 	"nusashell/infrastructure/pluginfs"
 	"nusashell/infrastructure/plugininstall"
 	"nusashell/infrastructure/pluginruntime"
@@ -192,9 +193,22 @@ func run() error {
 	if err != nil {
 		slog.Warn("attachment store init failed", "error", err)
 	}
+	// Two-tier memory: primary (MEMORY.md, always-injected, ~1k token cap)
+	// and fragments (memories/fragments/*.md, unlimited, searchable). Both
+	// auto-create their files/directories on first use.
+	primaryStore, err := memorystore.NewPrimary(dataDir)
+	if err != nil {
+		slog.Warn("primary memory init failed", "error", err)
+	}
+	fragmentStore, err := memorystore.NewFragments(dataDir)
+	if err != nil {
+		slog.Warn("fragment memory init failed", "error", err)
+	}
 	tb := &tools.Toolbox{
 		Skills:          skillStore,
 		Memory:          &jsonstore.Memory{S: store},
+		Primary:         primaryStore,
+		Fragments:       fragmentStore,
 		Docs:            docSource,
 		Plugins:         pluginStore,
 		PluginInstaller: pluginInstaller,
@@ -213,6 +227,8 @@ func run() error {
 		Credentials:                 credentials,
 		Skills:                      skillStore,
 		Memory:                      &jsonstore.Memory{S: store},
+		Primary:                     primaryStore,
+		Fragments:                   fragmentStore,
 		LearningEdges:               &jsonstore.LearningEdges{S: store},
 		Todos:                       todoStore,
 		Plugins:                     pluginStore,

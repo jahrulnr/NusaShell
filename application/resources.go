@@ -618,11 +618,70 @@ func memDTO(e *domain.MemoryEntry) contracts.MemoryEntryDTO {
 	return dto
 }
 
+// fragmentDTO converts a MemoryFragment to a MemoryEntryDTO for the UI.
+func fragmentDTO(f *domain.MemoryFragment) contracts.MemoryEntryDTO {
+	dto := contracts.MemoryEntryDTO{
+		ID:        f.ID,
+		Content:   f.Content,
+		Tags:      f.Tags,
+		Source:    f.Source,
+		CreatedAt: f.CreatedAt.Format(timeRFC3339),
+		Category:  f.Category,
+		Project:   f.Project,
+		Task:      f.Task,
+		Tier:      "fragment",
+	}
+	if dto.Source == "" {
+		dto.Source = "user"
+	}
+	return dto
+}
+
+// primaryDTO converts a PrimaryEntry to a MemoryEntryDTO for the UI.
+func primaryDTO(e *domain.PrimaryEntry) contracts.MemoryEntryDTO {
+	dto := contracts.MemoryEntryDTO{
+		ID:        e.ID,
+		Content:   e.Content,
+		Source:    e.Source,
+		CreatedAt: e.UpdatedAt.Format(timeRFC3339),
+		Tier:      "primary",
+	}
+	if dto.Source == "" {
+		dto.Source = "user"
+	}
+	return dto
+}
+
+// emitMemoryUpdated publishes a memory.updated event so the Learning UI
+// can refresh its memory list, search results, and graph without polling.
+func (a *App) emitMemoryUpdated() {
+	if a.Bus != nil {
+		a.Bus.Emit(contracts.EventMemoryUpdated, map[string]any{"source": "rpc"})
+	}
+}
+
+// emitSkillUpdated publishes a skill.updated event so the Learning UI
+// can refresh its skill list, search results, and graph without polling.
+func (a *App) emitSkillUpdated() {
+	if a.Bus != nil {
+		a.Bus.Emit(contracts.EventSkillUpdated, map[string]any{"source": "rpc"})
+	}
+}
+
 func (a *App) handleMemoryList() (any, *contracts.RPCError) {
-	list := a.Memory.List()
-	out := make([]contracts.MemoryEntryDTO, 0, len(list))
-	for _, e := range list {
-		out = append(out, memDTO(e))
+	out := make([]contracts.MemoryEntryDTO, 0)
+	// Primary memory entries (always-injected working set).
+	if a.Primary != nil {
+		mem := a.Primary.Load()
+		for i := range mem.Entries {
+			out = append(out, primaryDTO(&mem.Entries[i]))
+		}
+	}
+	// Fragments (searchable archive).
+	if a.Fragments != nil {
+		for _, f := range a.Fragments.List(domain.FragmentSearchFilter{Limit: 500}) {
+			out = append(out, fragmentDTO(f))
+		}
 	}
 	return contracts.MemoryListResult{Entries: out}, nil
 }
@@ -632,32 +691,56 @@ func (a *App) handleMemorySave(req contracts.MemorySaveRequest) (any, *contracts
 	if content == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "memory content is required"}
 	}
-	e := &domain.MemoryEntry{
-		ID:        domain.NewULID("mem"),
-		Content:   content,
-		Tags:      req.Tags,
-		Source:    "user",
-		CreatedAt: time.Now().UTC(),
+	if a.Fragments == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeInternal, Message: "fragment store not configured"}
 	}
-	if err := a.Memory.Save(e); err != nil {
+	category := strings.TrimSpace(req.Category)
+	if category == "" {
+		category = domain.FragmentCategoryGeneral
+	}
+	frag := &domain.MemoryFragment{
+		Category: category,
+		Project:  strings.TrimSpace(req.Project),
+		Task:     strings.TrimSpace(req.Task),
+		Tags:     req.Tags,
+		Content:  content,
+		Source:   "user",
+	}
+	if err := a.Fragments.Save(frag); err != nil {
 		return nil, rpcInternal(err)
 	}
-	return contracts.MemoryListResult{Entries: []contracts.MemoryEntryDTO{memDTO(e)}}, nil
+	a.emitMemoryUpdated()
+	return contracts.MemoryListResult{Entries: []contracts.MemoryEntryDTO{fragmentDTO(frag)}}, nil
 }
 
 func (a *App) handleMemorySearch(req contracts.MemorySearchRequest) (any, *contracts.RPCError) {
-	query := strings.ToLower(strings.TrimSpace(req.Query))
+	query := strings.TrimSpace(req.Query)
 	limit := req.Limit
 	if limit <= 0 || limit > 50 {
-		limit = 10
+		limit = 20
 	}
 	var out []contracts.MemoryEntryDTO
-	for _, e := range a.Memory.List() {
-		hay := strings.ToLower(e.Content + " " + strings.Join(e.Tags, " "))
-		if query == "" || strings.Contains(hay, query) {
-			out = append(out, memDTO(e))
-			if len(out) >= limit {
-				break
+	// Search fragments via BM25 + metadata filters.
+	if a.Fragments != nil {
+		hits := a.Fragments.Search(domain.FragmentSearchFilter{
+			Query:    query,
+			Category: strings.TrimSpace(req.Category),
+			Project:  strings.TrimSpace(req.Project),
+			Task:     strings.TrimSpace(req.Task),
+			Tags:     req.Tags,
+			Limit:    limit,
+		})
+		for _, h := range hits {
+			out = append(out, fragmentDTO(h.Fragment))
+		}
+	}
+	// Also include primary memory entries that match the query (substring).
+	if a.Primary != nil {
+		mem := a.Primary.Load()
+		q := strings.ToLower(query)
+		for i := range mem.Entries {
+			if q == "" || strings.Contains(strings.ToLower(mem.Entries[i].Content), q) {
+				out = append(out, primaryDTO(&mem.Entries[i]))
 			}
 		}
 	}
@@ -668,9 +751,13 @@ func (a *App) handleMemorySearch(req contracts.MemorySearchRequest) (any, *contr
 }
 
 func (a *App) handleMemoryDelete(req contracts.MemoryIDRequest) (any, *contracts.RPCError) {
-	if err := a.Memory.Delete(req.ID); err != nil {
+	if a.Fragments == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeInternal, Message: "fragment store not configured"}
+	}
+	if err := a.Fragments.Delete(req.ID); err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 	}
+	a.emitMemoryUpdated()
 	return map[string]bool{"ok": true}, nil
 }
 
@@ -703,12 +790,39 @@ func (a *App) handleLearningSearch(req contracts.LearningSearchRequest) (any, *c
 			}
 		}
 		if kind == "" || kind == "memory" {
-			for _, mem := range a.Memory.List() {
-				items = append(items, contracts.LearningSearchResultItem{
-					ID:      mem.ID,
-					Kind:    "memory",
-					Content: mem.Content,
-				})
+			// Primary memory entries.
+			if a.Primary != nil {
+				mem := a.Primary.Load()
+				for i := range mem.Entries {
+					content := mem.Entries[i].Content
+					name := content
+					if len(name) > 40 {
+						name = name[:40] + "…"
+					}
+					items = append(items, contracts.LearningSearchResultItem{
+						ID:      mem.Entries[i].ID,
+						Kind:    "memory",
+						Tier:    "primary",
+						Name:    name,
+						Content: content,
+					})
+				}
+			}
+			// Fragments.
+			if a.Fragments != nil {
+				for _, f := range a.Fragments.List(domain.FragmentSearchFilter{Limit: 200}) {
+					name := f.Content
+					if len(name) > 40 {
+						name = name[:40] + "…"
+					}
+					items = append(items, contracts.LearningSearchResultItem{
+						ID:      f.ID,
+						Kind:    "memory",
+						Tier:    "fragment",
+						Name:    name,
+						Content: f.Content,
+					})
+				}
 			}
 		}
 		sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
@@ -741,25 +855,45 @@ func (a *App) handleLearningSearch(req contracts.LearningSearchRequest) (any, *c
 		}
 	}
 	if kind == "" || kind == "memory" {
-		results, err := searcher.SearchMemory(ctx, query, limit)
-		if err == nil {
-			for _, r := range results {
-				var content string
-				for _, e := range a.Memory.List() {
-					if e.ID == r.ID {
-						content = e.Content
-						break
-					}
-				}
-				if content == "" {
-					continue
+		// Search fragments via BM25.
+		if a.Fragments != nil {
+			hits := a.Fragments.Search(domain.FragmentSearchFilter{
+				Query: query,
+				Limit: limit,
+			})
+			for _, h := range hits {
+				name := h.Fragment.Content
+				if len(name) > 40 {
+					name = name[:40] + "…"
 				}
 				items = append(items, contracts.LearningSearchResultItem{
-					ID:      r.ID,
+					ID:      h.Fragment.ID,
 					Kind:    "memory",
-					Content: content,
-					Score:   float32(r.Score),
+					Tier:    "fragment",
+					Name:    name,
+					Content: h.Fragment.Content,
+					Score:   float32(h.Score),
 				})
+			}
+		}
+		// Also search primary memory via substring.
+		if a.Primary != nil {
+			mem := a.Primary.Load()
+			q := strings.ToLower(query)
+			for i := range mem.Entries {
+				if strings.Contains(strings.ToLower(mem.Entries[i].Content), q) {
+					name := mem.Entries[i].Content
+					if len(name) > 40 {
+						name = name[:40] + "…"
+					}
+					items = append(items, contracts.LearningSearchResultItem{
+						ID:      mem.Entries[i].ID,
+						Kind:    "memory",
+						Tier:    "primary",
+						Name:    name,
+						Content: mem.Entries[i].Content,
+					})
+				}
 			}
 		}
 	}
@@ -805,16 +939,34 @@ func (a *App) handleLearningGraph() (any, *contracts.RPCError) {
 			Name: s.Name,
 		})
 	}
-	for _, m := range a.Memory.List() {
-		name := m.Content
-		if len(name) > 40 {
-			name = name[:40] + "…"
+	// Primary memory nodes.
+	if a.Primary != nil {
+		mem := a.Primary.Load()
+		for i := range mem.Entries {
+			name := mem.Entries[i].Content
+			if len(name) > 40 {
+				name = name[:40] + "…"
+			}
+			nodes = append(nodes, contracts.LearningGraphNode{
+				ID:   mem.Entries[i].ID,
+				Kind: "memory",
+				Name: name,
+			})
 		}
-		nodes = append(nodes, contracts.LearningGraphNode{
-			ID:   m.ID,
-			Kind: "memory",
-			Name: name,
-		})
+	}
+	// Fragment nodes.
+	if a.Fragments != nil {
+		for _, f := range a.Fragments.List(domain.FragmentSearchFilter{Limit: 500}) {
+			name := f.Content
+			if len(name) > 40 {
+				name = name[:40] + "…"
+			}
+			nodes = append(nodes, contracts.LearningGraphNode{
+				ID:   f.ID,
+				Kind: "memory",
+				Name: name,
+			})
+		}
 	}
 
 	// Collect edges from graph service. Only edges whose BOTH endpoints are
@@ -851,6 +1003,140 @@ func (a *App) handleLearningGraph() (any, *contracts.RPCError) {
 		})
 	}
 	return contracts.LearningGraphResult{Nodes: nodes, Edges: edges}, nil
+}
+
+// handleLearningLog returns the autolearn activity feed: learning-layer
+// events from the trajectory log (review runs, extraction, edge building,
+// consolidation, decay, prune), newest first. Review events are enriched
+// with the source conversation title and their mutations (kind, tool,
+// snippet). Events that are pure UI query noise (search, graph_load) are
+// excluded.
+func (a *App) handleLearningLog(req contracts.LearningLogRequest) (any, *contracts.RPCError) {
+	events := ReadTrajectory(a.DataDir, req.Limit)
+
+	// Conversation title lookup for review events. Build once from the
+	// store (conversation counts are small) rather than per event.
+	titles := map[string]string{}
+	if a.Conversations != nil {
+		for _, c := range a.Conversations.List() {
+			if c.Title != "" {
+				titles[c.ID] = c.Title
+			}
+		}
+	}
+
+	out := make([]contracts.LearningLogEntryDTO, 0, len(events))
+	for _, e := range events {
+		entry := contracts.LearningLogEntryDTO{
+			TS:   e.Timestamp.UTC().Format(time.RFC3339),
+			Type: e.Type,
+		}
+		if convID, ok := e.Detail["conversation"].(string); ok && convID != "" {
+			entry.ConversationID = convID
+			entry.ConversationTitle = titles[convID]
+		}
+		if reviewID, ok := e.Detail["review_id"].(string); ok {
+			entry.ReviewID = reviewID
+		}
+		if status, ok := e.Detail["status"].(string); ok {
+			entry.Status = status
+		}
+		if errMsg, ok := e.Detail["error"].(string); ok {
+			entry.Error = errMsg
+		}
+		if raw, ok := e.Detail["mutations"]; ok {
+			if list, ok := raw.([]interface{}); ok {
+				for _, m := range list {
+					if mm, ok := m.(map[string]interface{}); ok {
+						// Structured mutation: kind + tool + snippet.
+						mut := contracts.LearningLogMutationDTO{}
+						if kind, ok := mm["kind"].(string); ok {
+							mut.Kind = kind
+						}
+						if tool, ok := mm["tool"].(string); ok {
+							mut.Tool = tool
+						}
+						if snippet, ok := mm["snippet"].(string); ok {
+							mut.Snippet = snippet
+						}
+						entry.Mutations = append(entry.Mutations, mut)
+						continue
+					}
+					if s, ok := m.(string); ok {
+						// Legacy entries recorded mutations as a list of
+						// kind strings (e.g. ["memory"]).
+						entry.Mutations = append(entry.Mutations, contracts.LearningLogMutationDTO{Kind: s})
+					}
+				}
+			}
+		}
+		// Pass through the remaining detail fields as raw JSON so the UI
+		// can show per-type extras (e.g. decay/prune counts). The
+		// conversation and mutations fields are structured columns and
+		// must not be duplicated here.
+		if len(e.Detail) > 0 {
+			detail := make(map[string]json.RawMessage, len(e.Detail))
+			for k, v := range e.Detail {
+				if k == "conversation" || k == "mutations" || k == "review_id" || k == "status" || k == "error" {
+					continue
+				}
+				b, err := json.Marshal(v)
+				if err == nil {
+					detail[k] = b
+				}
+			}
+			if len(detail) > 0 {
+				entry.Detail = detail
+			}
+		}
+		out = append(out, entry)
+	}
+	return contracts.LearningLogResult{Entries: out}, nil
+}
+
+// handleLearningReviewTranscript returns the review agent's own
+// conversation (LLM exchanges + tool calls + tool results) for a given
+// review ID. This is the "background agent conversation" the user opens
+// from the learning log — not the source conversation that was reviewed.
+func (a *App) handleLearningReviewTranscript(req contracts.LearningReviewTranscriptRequest) (any, *contracts.RPCError) {
+	if req.ID == "" {
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "review transcript id is required"}
+	}
+	t := ReadReviewTranscript(a.DataDir, req.ID)
+	if t == nil {
+		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: "review transcript not found"}
+	}
+	msgs := make([]contracts.LearningReviewTranscriptMessageDTO, 0, len(t.Messages))
+	for _, m := range t.Messages {
+		dto := contracts.LearningReviewTranscriptMessageDTO{
+			Role:    m.Role,
+			Content: m.Content,
+		}
+		for _, tc := range m.ToolCalls {
+			dto.ToolCalls = append(dto.ToolCalls, contracts.ToolCallDTO{
+				ID:     tc.ID,
+				Name:   tc.Name,
+				Args:   json.RawMessage(tc.Args),
+				Status: string(tc.Status),
+				Output: tc.Output,
+			})
+		}
+		if m.ToolResult != nil {
+			dto.ToolResult = &contracts.ToolResultDTO{
+				ToolCallID: m.ToolResult.ToolCallID,
+				Name:       m.ToolResult.Name,
+				Content:    m.ToolResult.Content,
+			}
+		}
+		msgs = append(msgs, dto)
+	}
+	return contracts.LearningReviewTranscriptResult{
+		ID:             t.ID,
+		ConversationID: t.ConversationID,
+		Model:          t.Model,
+		CreatedAt:      t.CreatedAt.Format(time.RFC3339),
+		Messages:       msgs,
+	}, nil
 }
 
 // ---- docs ----
@@ -1053,6 +1339,12 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 		}
 		s.MaxAutoContinues = v
 	}
+	if req.SoundNotifications != nil {
+		s.SoundNotifications = *req.SoundNotifications
+	}
+	if req.UserPrompt != nil {
+		s.UserPrompt = strings.TrimSpace(*req.UserPrompt)
+	}
 	if err := a.Settings.Set(s); err != nil {
 		return nil, rpcInternal(err)
 	}
@@ -1088,6 +1380,8 @@ func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 		PresencePenalty:         s.PresencePenalty,
 		LearningReviewThreshold: s.LearningReviewThreshold,
 		MaxAutoContinues:        s.MaxAutoContinues,
+		SoundNotifications:      s.SoundNotifications,
+		UserPrompt:              s.UserPrompt,
 	}
 }
 

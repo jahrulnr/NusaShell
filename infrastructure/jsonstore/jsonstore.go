@@ -110,6 +110,9 @@ func (s *Store) load() error {
 			}
 			var e domain.MemoryEntry
 			if err := json.Unmarshal([]byte(line), &e); err == nil {
+				if e.Target == "" {
+					e.Target = domain.MemoryTargetMemory
+				}
 				s.memories = append(s.memories, &e)
 			}
 		}
@@ -508,8 +511,16 @@ func (s *Store) ListMemories() []*domain.MemoryEntry {
 }
 
 func (s *Store) SaveMemory(e *domain.MemoryEntry) error {
+	if e.Target == "" {
+		e.Target = domain.MemoryTargetMemory
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	used := s.targetChars(e.Target)
+	limit := domain.MemoryLimit(e.Target)
+	if used+len(e.Content) > limit {
+		return fmt.Errorf("memory target %q at %d/%d chars; adding %d would exceed the limit — use memory_replace to merge or remove stale entries first", e.Target, used, limit, len(e.Content))
+	}
 	stored := clone(e)
 	s.memories = append(s.memories, stored)
 	return s.appendJSONL("memories.jsonl", stored)
@@ -525,6 +536,51 @@ func (s *Store) DeleteMemory(id string) error {
 		}
 	}
 	return fmt.Errorf("%w: memory %s", ErrNotFound, id)
+}
+
+// ReplaceMemory finds the single entry in target whose content contains
+// oldText as a substring, replaces its content with content, and preserves
+// its ID, Target, Source, and CreatedAt. Returns an error if zero or
+// multiple entries match.
+func (s *Store) ReplaceMemory(target, oldText, content string) error {
+	if target == "" {
+		target = domain.MemoryTargetMemory
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	indices := make([]int, 0, 1)
+	for i, e := range s.memories {
+		if e.Target != target {
+			continue
+		}
+		if strings.Contains(e.Content, oldText) {
+			indices = append(indices, i)
+		}
+	}
+	if len(indices) == 0 {
+		return fmt.Errorf("no %q entry contains %q", target, oldText)
+	}
+	if len(indices) > 1 {
+		return fmt.Errorf("multiple %q entries contain %q — use a more specific substring", target, oldText)
+	}
+	used := s.targetChars(target)
+	old := s.memories[indices[0]]
+	if used-len(old.Content)+len(content) > domain.MemoryLimit(target) {
+		return fmt.Errorf("replacement would exceed the %q char limit (%d/%d)", target, used-len(old.Content)+len(content), domain.MemoryLimit(target))
+	}
+	s.memories[indices[0]].Content = content
+	return s.writeJSONL("memories.jsonl", s.memories)
+}
+
+// targetChars returns the total content length across entries in a target.
+func (s *Store) targetChars(target string) int {
+	total := 0
+	for _, e := range s.memories {
+		if e.Target == target {
+			total += len(e.Content)
+		}
+	}
+	return total
 }
 
 func (s *Store) appendJSONL(name string, v any) error {

@@ -10,7 +10,7 @@ func TestTrustLevelToRiskTierCap(t *testing.T) {
 		{TrustSafe, RiskReadOnly},
 		{TrustTrusted, RiskEditConfirmed},
 		{TrustPrivileged, RiskBypass},
-		{"", RiskReadOnly},      // default safe
+		{"", RiskReadOnly},        // default safe
 		{"unknown", RiskReadOnly}, // unknown falls to safe
 	}
 	for _, c := range cases {

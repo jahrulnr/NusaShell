@@ -1,27 +1,103 @@
 # Memory
 
-Memory stores short facts the agent can recall across conversations. Entries
-are append-only JSONL (`memories.jsonl`) with optional tags; search is a
-simple case-insensitive substring match over content and tags.
+NusaShell has a two-tier memory system: a small, always-injected
+**primary** working set and an unlimited, searchable **fragments**
+archive.
 
-Each entry carries:
+## Two tiers
 
-- `id` — stable identifier (`mem_<ulid>`).
-- `content` — the fact text.
-- `tags` — optional free-form tags for filtering.
-- `source` — who wrote it: `user` (via the UI), `agent` (via `memory_save`), or `system`.
-- `created_at` — UTC RFC3339 timestamp.
+| Tier | Storage | Cap | Injected | Tools |
+|---|---|---|---|---|
+| **Primary** | `MEMORY.md` (single markdown file) | ~1k tokens | Every turn (via hydration) | `memory_list target=primary`, `memory_replace target=primary`, `memory_demote` |
+| **Fragments** | `memories/fragments/*.md` (one file per entry) | Unlimited | On-demand (search) | `memory_save`, `memory_search`, `memory_list target=fragments`, `memory_replace target=fragment`, `memory_delete`, `memory_promote` |
+
+Primary memory is the hot set — the durable, frequently-needed facts the
+agent sees in every turn. Fragments are the cold archive — all new facts
+enter here first, and the background review agent promotes the most
+durable ones into primary.
+
+## Fragment metadata
+
+Each fragment is a markdown file with YAML frontmatter:
+
+```yaml
+---
+id: frag_01J…
+category: project          # project | user | task | general
+project: nusashell         # optional workspace/project label
+task: memory-tier          # optional task label
+tags: [go, arch]           # optional free-form tags
+source: agent              # agent | user
+created_at: 2026-08-19T12:00:00Z
+updated_at: 2026-08-19T12:30:00Z
+---
+The repo uses Go with Clean Architecture and strict layer dependencies.
+```
+
+Search combines BM25 content ranking with metadata filters (category,
+project, task, tags) — like `docs_search` but for memory.
 
 ## Tools
 
-- `memory_save` — store a fact (`content`, optional `tags`). The entry is
-  recorded with `source: "agent"` and the current timestamp.
-- `memory_search` — find entries (`query`, optional `limit`, default 10).
-  Results are newest-first and include id, created_at, source, tags, and
-  content so the agent can reason about recency and provenance.
-- `memory_list` — list all entries newest-first with full metadata.
-- `memory_delete` — remove an entry by id.
+- `memory_save` — save a new fact as a **fragment** (`content`, `category`,
+  optional `project`, `task`, `tags`). All new facts enter fragments first.
+- `memory_search` — search fragments by content (BM25) with optional
+  metadata filters (`query`, `category`, `project`, `task`, `tags`,
+  `limit`). Returns ranked results with scores.
+- `memory_list` — list entries. `target="primary"` lists the always-injected
+  working set; `target="fragments"` (default) lists the archive with
+  optional metadata filters.
+- `memory_replace` — update an existing entry. For primary: `target="primary"`
+  + `old_text` (substring match) + `content`. For fragments: `target="fragment"`
+  + `id` + `content`.
+- `memory_delete` — delete a fragment by `id`. Primary entries cannot be
+  deleted (use `memory_demote` to move them back to fragments).
+- `memory_promote` — move a fragment into **primary memory**. Use when a
+  fragment contains a durable, frequently-needed fact. Background review
+  agent only.
+- `memory_demote` — move a primary entry back to fragments. Use when a
+  primary entry is stale or no longer frequently needed. Background review
+  agent only.
 
-Use memory for stable facts (preferences, decisions, environment details)
-rather than transient chat content. There are no embeddings: search quality
-depends on the wording of the query and the stored text.
+## When to save
+
+Save only durable, reusable facts. Search with `memory_search` first to
+avoid duplicates.
+
+Good examples:
+
+    memory_save(content="User prefers Indonesian for code comments", category="user", tags=["preference"])
+    memory_save(content="Repo policy: ignore untracked folders in root — they are research scratch", category="project", tags=["repo-policy"])
+    memory_search(query="comment language")   # before saving, check for duplicates
+
+## When to promote
+
+The background review agent promotes fragments into primary memory when
+they are durable and frequently needed. Primary is capped at ~1k tokens,
+so be selective. When primary is near its cap, demote stale entries
+before promoting new ones.
+
+The review agent sees the current primary memory content injected into
+its system prompt at the start of each review run, so it can avoid
+promoting duplicates and spot stale entries to demote without needing to
+call `memory_list target=primary` first.
+
+Good examples:
+
+    memory_promote(id="frag_01J…")   # "User prefers Indonesian" — durable, every-turn fact
+    memory_demote(old_text="old CI config")  # stale, no longer needed in primary
+
+## What not to save
+
+- Temporary debugging steps or error workarounds
+- One-time task instructions
+- Information already captured in skills, memory, or documentation
+- Sensitive credentials or API keys
+- Transient state (e.g. "pipeline failed: missing env var")
+
+Bad examples:
+
+    memory_save(content="User asked me to fix the bug at 14:32")            # transient
+    memory_save(content="The API key format for provider X is sk-...")       # secrets
+    memory_save(content="pipeline failed: missing env var")                 # one-off state
+    memory_save(content="NusaShell is a Go binary with Clean Architecture") # already in docs

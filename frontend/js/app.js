@@ -159,6 +159,10 @@ async function boot() {
   on('learning.review.done', () => {
     toast('Autolearn finished.', 'success', 2500);
   });
+  on('learning.review.error', (payload) => {
+    const msg = payload?.error || 'Unknown error';
+    toast(`Autolearn failed: ${msg}`, 'error', 6000);
+  });
 
   try {
     const info = await rpc('app.info', {}, { timeoutMs: 4000 });

@@ -22,14 +22,14 @@ func NewHTTPNotifier() *HTTPNotifier {
 }
 
 type webhookPayload struct {
-	RunID     string `json:"run_id"`
-	Workflow  string `json:"workflow"`
-	Status    string `json:"status"`
-	StartedAt string `json:"started_at,omitempty"`
+	RunID      string `json:"run_id"`
+	Workflow   string `json:"workflow"`
+	Status     string `json:"status"`
+	StartedAt  string `json:"started_at,omitempty"`
 	FinishedAt string `json:"finished_at,omitempty"`
-	Jobs      int    `json:"jobs"`
-	Failed    int    `json:"failed"`
-	Success   int    `json:"success"`
+	Jobs       int    `json:"jobs"`
+	Failed     int    `json:"failed"`
+	Success    int    `json:"success"`
 }
 
 func (n *HTTPNotifier) NotifyRunCompleted(ctx context.Context, url string, run *domain.WorkflowRun) error {

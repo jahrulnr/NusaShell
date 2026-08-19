@@ -9,6 +9,8 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestAcpAgentsCRUDAndProbe(t *testing.T) {
@@ -90,11 +92,12 @@ func TestAcpSpawnSteerStopViaTools(t *testing.T) {
 	}
 	var parsed struct {
 		Runs []struct {
-			ID     string `json:"id"`
-			Status string `json:"status"`
-		} `json:"runs"`
+			ID     string `yaml:"id"`
+			Status string `yaml:"status"`
+		} `yaml:"runs"`
 	}
-	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+	yamlOut := strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(out), "---\n"), "\n---")
+	if err := yaml.Unmarshal([]byte(yamlOut), &parsed); err != nil {
 		t.Fatal(err)
 	}
 	if len(parsed.Runs) != 2 {
@@ -119,10 +122,11 @@ func TestAcpSpawnSteerStopViaTools(t *testing.T) {
 	}
 	var slowParsed struct {
 		Runs []struct {
-			ID string `json:"id"`
-		} `json:"runs"`
+			ID string `yaml:"id"`
+		} `yaml:"runs"`
 	}
-	if err := json.Unmarshal([]byte(slow), &slowParsed); err != nil || len(slowParsed.Runs) != 1 {
+	yamlSlow := strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(slow), "---\n"), "\n---")
+	if err := yaml.Unmarshal([]byte(yamlSlow), &slowParsed); err != nil || len(slowParsed.Runs) != 1 {
 		t.Fatalf("slow spawn: %v %s", err, slow)
 	}
 	stopped := h.rpcOK(t, "acp.runs.stop", map[string]any{"id": slowParsed.Runs[0].ID})

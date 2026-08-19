@@ -91,7 +91,11 @@ func (a *App) executeReadVideo(run *TurnRun, toolCall domain.ToolCall, caps Mode
 	if video.FilePath != "" {
 		result += "\n\nFile path: " + video.FilePath
 	}
-	return result, nil, nil
+	meta := map[string]any{"type": "video", "name": video.Name}
+	if video.FilePath != "" {
+		meta["file_path"] = video.FilePath
+	}
+	return yamlMDApp(meta, result), nil, nil
 }
 
 // findVideoAttachmentByPath searches all user messages in the conversation

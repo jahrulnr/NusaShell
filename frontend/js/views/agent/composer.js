@@ -311,10 +311,7 @@ export function bindComposer({ state, createConversation, beginTurn, refreshConv
   }
 
   async function chooseWorkspace() {
-    if (!state.activeId) {
-      toast('Start or select a conversation first.', 'error');
-      return;
-    }
+    if (!state.activeId) await createConversation();
     try {
       const { conversation } = await rpc('agent.conversations.pick-workspace', { id: state.activeId });
       state.conversation = conversation;

@@ -404,11 +404,12 @@ func (a *App) handleCodexUsage(req contracts.CodexUsageRequest) (any, *contracts
 			continue
 		}
 		entry := contracts.CodexAccountUsage{
-			AccountID:   accID,
-			Email:       tok.Email,
-			Name:        tok.Name,
-			Active:      accID == activeAccountID,
-			CircuitOpen: a.isCodexAccountCircuitOpen(accID),
+			AccountID:        accID,
+			Email:            tok.Email,
+			Name:             tok.Name,
+			Active:           accID == activeAccountID,
+			CircuitOpen:      a.isCodexAccountCircuitOpen(accID),
+			CircuitOpenUntil: a.codexAccountCircuitUntil(accID),
 		}
 		usage, err := a.CodexUsage.FetchUsage(ctx, tokenJSON)
 		if err != nil {

@@ -43,6 +43,9 @@ func (m *Memory) Save(v *domain.MemoryEntry) error {
 	return m.S.SaveMemory(v)
 }
 func (m *Memory) Delete(id string) error { return m.S.DeleteMemory(id) }
+func (m *Memory) Replace(target, oldText, content string) error {
+	return m.S.ReplaceMemory(target, oldText, content)
+}
 
 type LearningEdges struct{ S *Store }
 

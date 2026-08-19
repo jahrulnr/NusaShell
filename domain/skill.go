@@ -95,10 +95,27 @@ type SkillFileEntry struct {
 
 type MemoryEntry struct {
 	ID        string
+	Target    string // "memory" (project notes) or "user" (profile facts); default "memory"
 	Content   string
 	Tags      []string
 	Source    string // "user" | "agent" | "system" (default "user")
 	CreatedAt time.Time
+}
+
+// Memory target constants and per-target character limits.
+const (
+	MemoryTargetMemory = "memory" // project/task notes
+	MemoryTargetUser   = "user"   // user-profile facts (preferences, habits)
+	MemoryLimitMemory  = 2200     // chars across all "memory" entries
+	MemoryLimitUser    = 1375     // chars across all "user" entries
+)
+
+// MemoryLimit returns the total character budget for a target.
+func MemoryLimit(target string) int {
+	if target == MemoryTargetUser {
+		return MemoryLimitUser
+	}
+	return MemoryLimitMemory
 }
 
 // LearningEdgeType classifies the relationship between two learning nodes.
@@ -193,7 +210,7 @@ type Settings struct {
 	// preferences, errors, facts) from accumulated turns and writes
 	// them to memory through the approval gate. Set to 0 to disable
 	// turn-based review (compaction-triggered review still runs).
-	// Default: 50 turns.
+	// Default: 10 turns.
 	LearningReviewThreshold int `json:"learning_review_threshold,omitempty"`
 	// MaxAutoContinues is the outer multi-turn auto-continue budget.
 	// After a successful sealed turn, if the conversation todo list
@@ -209,6 +226,16 @@ type Settings struct {
 	// Negative or unset = product default (10).
 	// Default: 10.
 	MaxAutoContinues int `json:"max_auto_continues,omitempty"`
+	// SoundNotifications controls whether the UI plays a sound when an
+	// agent turn completes or fails. Default true. The frontend reads
+	// this from settings.get and gates audio playback on it.
+	SoundNotifications bool `json:"sound_notifications,omitempty"`
+	// UserPrompt is custom instructions the user wants injected into every
+	// agent turn's system prompt. Placed after the cache-stable prefix
+	// (system.md + tools.md) but before per-conversation system messages,
+	// so changing it breaks the prompt cache for all subsequent turns until
+	// a new cache shard stabilizes. Empty = no injection.
+	UserPrompt string `json:"user_prompt,omitempty"`
 }
 
 // DefaultSettings returns the factory defaults.
@@ -223,6 +250,7 @@ func DefaultSettings() Settings {
 		MaxParallelTools:        6,
 		LearningReviewThreshold: 10,
 		MaxAutoContinues:        DefaultMaxAutoContinues,
+		SoundNotifications:      true,
 	}
 }
 

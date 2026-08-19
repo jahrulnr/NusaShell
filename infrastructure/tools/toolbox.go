@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -23,7 +22,9 @@ func ptrBool(v bool) *bool { return &v }
 
 type Toolbox struct {
 	Skills          application.SkillStore
-	Memory          application.MemoryStore
+	Memory          application.MemoryStore // legacy — used by lifecycle/learning subsystems
+	Primary         application.PrimaryStore
+	Fragments       application.FragmentStore
 	Docs            application.DocsSource
 	Plugins         application.PluginStore
 	PluginInstaller application.PluginInstaller
@@ -105,11 +106,14 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "skill_read", Description: "Read a text file inside an installed skill (default SKILL.md). Pass path for support files (e.g. references/x.md) and offset/max_chars for pagination of long files.", InputSchema: obj("object", props("name", str("Skill id (from skill_list or skill_search)"), "path", str("Relative file path inside the skill folder; defaults to SKILL.md"), "offset", intSchema("Character offset for pagination (default 0)"), "max_chars", intSchema("Maximum characters to return (default 20000, max 100000)")), "name")},
 		{Name: "skill_save", Description: "Create or update a skill. When id is omitted a new skill is created; otherwise the existing skill with that id is updated. Skills should be reusable procedures or domain knowledge, not one-off task notes.", InputSchema: obj("object", props("id", str("Existing skill id to update (omit to create new)"), "name", str("Skill name (lowercase with hyphens, matches folder name)"), "description", str("Short description (max 1024 chars)"), "content", str("Full skill markdown content")), "name", "description", "content")},
 		{Name: "skill_files", Description: "List the files inside an installed skill folder (SKILL.md + support files) with size and editability, to discover references/guides before skill_read.", InputSchema: obj("object", props("name", str("Skill id")), "name")},
-		{Name: "memory_save", Description: "Save a fact to long-term memory with optional tags.", InputSchema: obj("object", props("content", str("Fact to remember"), "tags", arr("Optional tags")), "content")},
-		{Name: "memory_search", Description: "Search memory entries by substring match over content and tags.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 10")), "query")},
-		{Name: "memory_list", Description: "List all memory entries.", InputSchema: obj("object", nil)},
-		{Name: "memory_delete", Description: "Delete a memory entry by id.", InputSchema: obj("object", props("id", str("Memory entry id")), "id")},
-		{Name: "todo", Description: "Replace the conversation task checklist (full replace, Claude TodoWrite style). Empty items clears the list. The user can delete items from the UI — treat deleted items as gone and do not re-add them.", InputSchema: obj("object", props("items", arrObj("Full replacement list of todo items (max 50)", props("id", str("Stable item id (unique within the list)"), "content", str("Short task description (max 500 chars)"), "status", strEnum("Item status; prefer exactly one in_progress at a time", "pending", "in_progress", "completed")), "id", "content", "status")), "items")},
+		{Name: "memory_save", Description: "Save a fact to long-term memory as a searchable fragment. Fragments are unlimited and indexed by content + metadata (category, project, task, tags). Use memory_search to retrieve them later.", InputSchema: obj("object", props("content", str("Fact or observation to remember"), "category", strEnum("Memory category", "project", "user", "task", "general"), "project", str("Optional project/workspace label"), "task", str("Optional task label"), "tags", arr("Optional tags for filtering")), "content")},
+		{Name: "memory_replace", Description: "Update an existing memory entry. For primary memory, use old_text (substring match). For fragments, use id to update by identifier.", InputSchema: obj("object", props("target", strEnum("Update target: \"primary\" (always-injected working set) or \"fragment\" (searchable archive)", "primary", "fragment"), "old_text", str("For primary: unique substring of the entry to replace"), "id", str("For fragment: fragment id to update"), "content", str("New content")), "target", "content")},
+		{Name: "memory_search", Description: "Search memory fragments by content (BM25) with optional metadata filters (category, project, task, tags). Returns ranked results with scores.", InputSchema: obj("object", props("query", str("Search query"), "category", strEnum("Optional category filter", "project", "user", "task", "general"), "project", str("Optional project filter"), "task", str("Optional task filter"), "tags", arr("Optional tags filter (ALL must match)"), "limit", intSchema("Max results, default 20")), "query")},
+		{Name: "memory_list", Description: "List memory entries. Target \"primary\" lists the always-injected working set; target \"fragments\" lists the searchable archive (with optional metadata filters).", InputSchema: obj("object", props("target", strEnum("List target: \"primary\" or \"fragments\" (default)", "primary", "fragments"), "category", strEnum("Optional fragment category filter", "project", "user", "task", "general"), "project", str("Optional fragment project filter"), "limit", intSchema("Max fragment results, default 50")))},
+		{Name: "memory_delete", Description: "Delete a memory fragment by id. Primary memory entries cannot be deleted (use memory_replace to update or memory_demote to move to fragments).", InputSchema: obj("object", props("id", str("Fragment id")), "id")},
+		{Name: "memory_promote", Description: "Promote a fragment into primary memory (the always-injected working set, ~1k token cap). Use when a fragment contains a durable, frequently-needed fact. Background review agent only.", InputSchema: obj("object", props("id", str("Fragment id to promote")), "id")},
+		{Name: "memory_demote", Description: "Demote a primary memory entry back to fragments. Use when a primary entry is stale or no longer frequently needed. Background review agent only.", InputSchema: obj("object", props("old_text", str("Substring of the primary entry to demote")), "old_text")},
+		{Name: "todo", Description: "Replace the conversation task checklist (full replace, Claude TodoWrite style). Empty items clears the list. The user can delete items from the UI — treat deleted items as gone and do not re-add them. The optional `goal` argument sets a brief of what the user wants and why (max ~10k tokens); it survives compaction and is re-injected every turn so the agent does not drift from the original intent.", InputSchema: obj("object", props("items", arrObj("Full replacement list of todo items (max 50)", props("id", str("Stable item id (unique within the list)"), "content", str("Short task description (max 500 chars)"), "status", strEnum("Item status; prefer exactly one in_progress at a time", "pending", "in_progress", "completed")), "id", "content", "status"), "goal", str("What the user wants and the overall goal, descriptively. Set once at the start of a task; survives compaction. Max ~10000 tokens.")), "items")},
 		{Name: "ask_question", Description: "Pause and ask the user a structured clarifying question before continuing. Use only for genuine decisions the user must make — not for things you can figure out yourself. The user can answer via options or free text (when allowed). The turn blocks until the user answers or cancels.", InputSchema: obj("object", props("question", str("The question to show the user"), "options", arrObj("Selectable choices (1-8). Mark one default when possible.", props("id", str("Stable option id"), "label", str("Short option label"), "description", str("Optional one-line explanation"), "default", obj("boolean", nil), "icon", str("Optional emoji or short icon glyph"), "image", str("Optional image URL or compact data URI")), "id", "label"), "allow_free_text", obj("boolean", nil), "multi_select", obj("boolean", nil)), "question", "options")},
 		{Name: "docs_search", Description: "Search the NusaShell documentation corpus.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 10")), "query")},
 		{Name: "docs_read", Description: "Read a documentation page by id (see docs_search results).", InputSchema: obj("object", props("id", str("Documentation page id")), "id")},
@@ -191,20 +195,15 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if limit < len(skills) {
 			skills = skills[:limit]
 		}
-		var sb strings.Builder
+		type skillItem struct {
+			Name        string `yaml:"name"`
+			Description string `yaml:"description,omitempty"`
+		}
+		items := make([]skillItem, 0, len(skills))
 		for _, s := range skills {
-			sb.WriteString("- ")
-			sb.WriteString(s.Name)
-			if s.Description != "" {
-				sb.WriteString(": ")
-				sb.WriteString(s.Description)
-			}
-			sb.WriteString("\n")
+			items = append(items, skillItem{Name: s.Name, Description: s.Description})
 		}
-		if sb.Len() == 0 {
-			return "No skills in the library.", nil
-		}
-		return strings.TrimSpace(sb.String()), nil
+		return yamlBlock(map[string]any{"count": len(items), "skills": items}), nil
 
 	case name == "skill_search":
 		var args struct {
@@ -222,27 +221,21 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			limit = 50
 		}
 		q := strings.ToLower(args.Query)
-		var sb strings.Builder
-		found := 0
+		type skillMatch struct {
+			Name        string `yaml:"name"`
+			Description string `yaml:"description,omitempty"`
+		}
+		var matches []skillMatch
 		for _, s := range t.Skills.List() {
 			if !strings.Contains(strings.ToLower(s.Name+" "+s.Description), q) {
 				continue
 			}
-			sb.WriteString(fmt.Sprintf("- %s", s.Name))
-			if s.Description != "" {
-				sb.WriteString(": ")
-				sb.WriteString(s.Description)
-			}
-			sb.WriteString("\n")
-			found++
-			if found >= limit {
+			matches = append(matches, skillMatch{Name: s.Name, Description: s.Description})
+			if len(matches) >= limit {
 				break
 			}
 		}
-		if found == 0 {
-			return "No skills matched.", nil
-		}
-		return strings.TrimSpace(sb.String()), nil
+		return yamlBlock(map[string]any{"query": args.Query, "count": len(matches), "matches": matches}), nil
 
 	case name == "skill_read":
 		var args struct {
@@ -284,12 +277,21 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			if file.Truncated {
 				sb.WriteString(fmt.Sprintf("\n… [truncated — continue with offset=%d]", file.NextOffset))
 			}
-			return sb.String(), nil
+			meta := map[string]any{
+				"skill":     args.Name,
+				"path":      file.Path,
+				"editable":  file.Editable,
+				"truncated": file.Truncated,
+			}
+			if file.Truncated {
+				meta["next_offset"] = file.NextOffset
+			}
+			return yamlMD(meta, sb.String()), nil
 		}
 		// Fallback: legacy Content-only stores (e.g. jsonstore or test stubs).
 		for _, s := range t.Skills.List() {
 			if s.Name == args.Name || s.ID == args.Name {
-				return s.Content, nil
+				return yamlMD(map[string]any{"skill": s.Name, "source": "legacy"}, s.Content), nil
 			}
 		}
 		return "", fmt.Errorf("skill %q not found; use skill_list or skill_search to see available skills", args.Name)
@@ -315,22 +317,17 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				}
 				return "", fmt.Errorf("skill_files: %w", err)
 			}
-			var sb strings.Builder
+			type fileEntry struct {
+				Type      string `yaml:"type"`
+				Path      string `yaml:"path"`
+				SizeBytes int64  `yaml:"size,omitempty"`
+				Editable  bool   `yaml:"editable,omitempty"`
+			}
+			entries2 := make([]fileEntry, 0, len(entries))
 			for _, e := range entries {
-				kind := "f"
-				if e.Type == "directory" {
-					kind = "d"
-				}
-				fmt.Fprintf(&sb, "%s  %s", kind, e.Path)
-				if e.Type == "file" {
-					fmt.Fprintf(&sb, "  (%d B%s)", e.SizeBytes, map[bool]string{true: "", false: ", binary"}[e.Editable])
-				}
-				sb.WriteString("\n")
+				entries2 = append(entries2, fileEntry{Type: e.Type, Path: e.Path, SizeBytes: e.SizeBytes, Editable: e.Editable})
 			}
-			if sb.Len() == 0 {
-				return fmt.Sprintf("skill %q has no files", args.Name), nil
-			}
-			return strings.TrimSpace(sb.String()), nil
+			return yamlBlock(map[string]any{"skill": args.Name, "count": len(entries2), "files": entries2}), nil
 		}
 		return "", fmt.Errorf("skill store does not support file listing")
 
@@ -372,12 +369,15 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if err := t.Skills.Save(s); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Saved skill %q (id=%s).", s.Name, s.ID), nil
+		return yamlBlock(map[string]any{"status": "saved", "skill": s.Name, "id": s.ID}), nil
 
 	case name == "memory_save":
 		var args struct {
-			Content string   `json:"content"`
-			Tags    []string `json:"tags"`
+			Content  string   `json:"content"`
+			Category string   `json:"category"`
+			Project  string   `json:"project"`
+			Task     string   `json:"task"`
+			Tags     []string `json:"tags"`
 		}
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return "", fmt.Errorf("invalid args: %w", err)
@@ -385,55 +385,137 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if strings.TrimSpace(args.Content) == "" {
 			return "", fmt.Errorf("content is required")
 		}
-		e := &domain.MemoryEntry{ID: domain.NewID("mem"), Content: args.Content, Tags: args.Tags, Source: "agent", CreatedAt: time.Now().UTC()}
-		if err := t.Memory.Save(e); err != nil {
+		if t.Fragments == nil {
+			return "", fmt.Errorf("fragment store not configured")
+		}
+		frag := &domain.MemoryFragment{
+			Category: args.Category,
+			Project:  args.Project,
+			Task:     args.Task,
+			Tags:     args.Tags,
+			Content:  args.Content,
+			Source:   "agent",
+		}
+		if err := t.Fragments.Save(frag); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Saved memory entry %s.", e.ID), nil
+		return yamlBlock(map[string]any{"status": "saved", "fragment_id": frag.ID, "category": frag.Category}), nil
 
-	case name == "memory_search":
+	case name == "memory_replace":
 		var args struct {
-			Query string `json:"query"`
-			Limit int    `json:"limit"`
+			Target  string `json:"target"`
+			OldText string `json:"old_text"`
+			ID      string `json:"id"`
+			Content string `json:"content"`
 		}
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return "", fmt.Errorf("invalid args: %w", err)
 		}
+		if strings.TrimSpace(args.Content) == "" {
+			return "", fmt.Errorf("content is required")
+		}
+		switch args.Target {
+		case "primary":
+			if t.Primary == nil {
+				return "", fmt.Errorf("primary store not configured")
+			}
+			if strings.TrimSpace(args.OldText) == "" {
+				return "", fmt.Errorf("old_text is required for primary target")
+			}
+			if err := t.Primary.Replace(args.OldText, args.Content); err != nil {
+				return "", err
+			}
+			return yamlBlock(map[string]any{"status": "replaced", "target": "primary", "matched": args.OldText}), nil
+		case "fragment":
+			if t.Fragments == nil {
+				return "", fmt.Errorf("fragment store not configured")
+			}
+			if args.ID == "" {
+				return "", fmt.Errorf("id is required for fragment target")
+			}
+			frag := t.Fragments.Get(args.ID)
+			if frag == nil {
+				return "", fmt.Errorf("fragment %s not found", args.ID)
+			}
+			frag.Content = args.Content
+			if err := t.Fragments.Save(frag); err != nil {
+				return "", err
+			}
+			return yamlBlock(map[string]any{"status": "updated", "target": "fragment", "id": args.ID}), nil
+		default:
+			return "", fmt.Errorf("target must be \"primary\" or \"fragment\"")
+		}
+
+	case name == "memory_search":
+		var args struct {
+			Query    string   `json:"query"`
+			Category string   `json:"category"`
+			Project  string   `json:"project"`
+			Task     string   `json:"task"`
+			Tags     []string `json:"tags"`
+			Limit    int      `json:"limit"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if t.Fragments == nil {
+			return "", fmt.Errorf("fragment store not configured")
+		}
 		limit := args.Limit
 		if limit <= 0 {
-			limit = 10
+			limit = 20
 		}
-		entries := t.Memory.List()
-		sort.Slice(entries, func(i, j int) bool { return entries[i].CreatedAt.After(entries[j].CreatedAt) })
-		var sb strings.Builder
-		q := strings.ToLower(args.Query)
-		found := 0
-		for _, e := range entries {
-			if !strings.Contains(strings.ToLower(e.Content+" "+strings.Join(e.Tags, " ")), q) {
-				continue
-			}
-			sb.WriteString(formatMemoryEntry(e))
-			found++
-			if found >= limit {
-				break
-			}
+		hits := t.Fragments.Search(domain.FragmentSearchFilter{
+			Query:    args.Query,
+			Category: args.Category,
+			Project:  args.Project,
+			Task:     args.Task,
+			Tags:     args.Tags,
+			Limit:    limit,
+		})
+		frags := make([]map[string]any, 0, len(hits))
+		for _, h := range hits {
+			frags = append(frags, formatFragment(h.Fragment, h.Score))
 		}
-		if found == 0 {
-			return "No memory entries matched.", nil
-		}
-		return strings.TrimSpace(sb.String()), nil
+		return yamlBlock(map[string]any{"query": args.Query, "count": len(frags), "fragments": frags}), nil
 
 	case name == "memory_list":
-		entries := t.Memory.List()
-		sort.Slice(entries, func(i, j int) bool { return entries[i].CreatedAt.After(entries[j].CreatedAt) })
-		var sb strings.Builder
-		for _, e := range entries {
-			sb.WriteString(formatMemoryEntry(e))
+		var args struct {
+			Target   string `json:"target"`
+			Category string `json:"category"`
+			Project  string `json:"project"`
+			Limit    int    `json:"limit"`
 		}
-		if sb.Len() == 0 {
-			return "No memory entries.", nil
+		_ = json.Unmarshal(argsJSON, &args)
+		limit := args.Limit
+		if limit <= 0 {
+			limit = 50
 		}
-		return strings.TrimSpace(sb.String()), nil
+		if args.Target == "primary" {
+			if t.Primary == nil {
+				return yamlBlock(map[string]any{"target": "primary", "count": 0, "error": "primary store not configured"}), nil
+			}
+			mem := t.Primary.Load()
+			entries := make([]map[string]any, 0, len(mem.Entries))
+			for _, e := range mem.Entries {
+				entries = append(entries, map[string]any{"id": e.ID, "content": e.Content})
+			}
+			return yamlBlock(map[string]any{"target": "primary", "count": len(entries), "entries": entries}), nil
+		}
+		// Default: list fragments
+		if t.Fragments == nil {
+			return yamlBlock(map[string]any{"target": "fragments", "count": 0, "error": "fragment store not configured"}), nil
+		}
+		frags := t.Fragments.List(domain.FragmentSearchFilter{
+			Category: args.Category,
+			Project:  args.Project,
+			Limit:    limit,
+		})
+		items := make([]map[string]any, 0, len(frags))
+		for _, f := range frags {
+			items = append(items, formatFragment(f, 0))
+		}
+		return yamlBlock(map[string]any{"target": "fragments", "count": len(items), "fragments": items}), nil
 
 	case name == "memory_delete":
 		var args struct {
@@ -442,10 +524,90 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return "", fmt.Errorf("invalid args: %w", err)
 		}
-		if err := t.Memory.Delete(args.ID); err != nil {
+		if t.Fragments == nil {
+			return "", fmt.Errorf("fragment store not configured")
+		}
+		if err := t.Fragments.Delete(args.ID); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Deleted memory entry %s.", args.ID), nil
+		return yamlBlock(map[string]any{"status": "deleted", "fragment_id": args.ID}), nil
+
+	case name == "memory_promote":
+		var args struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if t.Primary == nil || t.Fragments == nil {
+			return "", fmt.Errorf("primary or fragment store not configured")
+		}
+		frag := t.Fragments.Get(args.ID)
+		if frag == nil {
+			return "", fmt.Errorf("fragment %s not found", args.ID)
+		}
+		mem := t.Primary.Load()
+		entries := mem.Entries
+		// Avoid duplicate promotion: skip if an entry with the same ID
+		// or content already exists in primary.
+		for _, e := range entries {
+			if e.ID == frag.ID || e.Content == frag.Content {
+				return yamlBlock(map[string]any{"status": "already_promoted", "fragment_id": args.ID}), nil
+			}
+		}
+		entries = append(entries, domain.PrimaryEntry{
+			ID:        frag.ID,
+			Content:   frag.Content,
+			Source:    "agent",
+			UpdatedAt: time.Now().UTC(),
+		})
+		if err := t.Primary.Update(entries); err != nil {
+			return "", err
+		}
+		return yamlBlock(map[string]any{"status": "promoted", "fragment_id": args.ID}), nil
+
+	case name == "memory_demote":
+		var args struct {
+			OldText string `json:"old_text"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if strings.TrimSpace(args.OldText) == "" {
+			return "", fmt.Errorf("old_text is required")
+		}
+		if t.Primary == nil || t.Fragments == nil {
+			return "", fmt.Errorf("primary or fragment store not configured")
+		}
+		mem := t.Primary.Load()
+		var kept []domain.PrimaryEntry
+		var demoted *domain.PrimaryEntry
+		for i := range mem.Entries {
+			e := &mem.Entries[i]
+			if demoted == nil && strings.Contains(e.Content, args.OldText) {
+				demoted = e
+				continue
+			}
+			kept = append(kept, *e)
+		}
+		if demoted == nil {
+			return "", fmt.Errorf("no primary entry matching %q", args.OldText)
+		}
+		if err := t.Primary.Update(kept); err != nil {
+			return "", err
+		}
+		// Save the demoted entry as a fragment so it stays searchable.
+		frag := &domain.MemoryFragment{
+			ID:        demoted.ID,
+			Category:  domain.FragmentCategoryGeneral,
+			Content:   demoted.Content,
+			Source:    "agent",
+			CreatedAt: demoted.UpdatedAt,
+		}
+		if err := t.Fragments.Save(frag); err != nil {
+			return "", fmt.Errorf("demoted from primary but failed to save as fragment: %w", err)
+		}
+		return yamlBlock(map[string]any{"status": "demoted", "matched": args.OldText, "fragment_id": frag.ID}), nil
 
 	case name == "todo":
 		return t.execTodo(ctx, argsJSON)
@@ -466,14 +628,16 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			limit = 10
 		}
 		hits := t.Docs.Search(args.Query, limit)
-		if len(hits) == 0 {
-			return "No documentation matched.", nil
+		type docHit struct {
+			ID    string `yaml:"id"`
+			Title string `yaml:"title"`
+			Path  string `yaml:"path"`
 		}
-		var sb strings.Builder
+		results := make([]docHit, 0, len(hits))
 		for _, h := range hits {
-			sb.WriteString(fmt.Sprintf("- [%s] %s (%s)\n", h.ID, h.Title, h.Path))
+			results = append(results, docHit{ID: h.ID, Title: h.Title, Path: h.Path})
 		}
-		return strings.TrimSpace(sb.String()), nil
+		return yamlBlock(map[string]any{"query": args.Query, "count": len(results), "results": results}), nil
 
 	case name == "docs_read":
 		var args struct {
@@ -486,7 +650,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if err != nil {
 			return "", fmt.Errorf("document %q not found; use docs_search first", args.ID)
 		}
-		return doc.Content, nil
+		return yamlMD(map[string]any{"id": args.ID, "title": doc.Title, "path": doc.Path}, doc.Content), nil
 
 	case name == "mcp_install":
 		var args struct {
@@ -532,7 +696,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if dropper, ok := t.MCP.(interface{ Drop(string) }); ok {
 			dropper.Drop(p.Manifest.MCPServerID())
 		}
-		return fmt.Sprintf("installed plugin %q (%s v%s) — run mcp_enable with id=%s to connect", p.Manifest.Name, p.Manifest.ID, p.Manifest.Version, p.Manifest.ID), nil
+		return yamlBlock(map[string]any{"status": "installed", "name": p.Manifest.Name, "id": p.Manifest.ID, "version": p.Manifest.Version, "next": "mcp_enable id=" + p.Manifest.ID}), nil
 
 	case name == "mcp_server_add":
 		var args struct {
@@ -579,7 +743,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if dropper, ok := t.MCP.(interface{ Drop(string) }); ok {
 			dropper.Drop(p.Manifest.MCPServerID())
 		}
-		return fmt.Sprintf("added MCP server %q (id=%s) — run mcp_enable with id=%s to connect", p.Manifest.Name, p.Manifest.ID, p.Manifest.ID), nil
+		return yamlBlock(map[string]any{"status": "added", "name": p.Manifest.Name, "id": p.Manifest.ID, "next": "mcp_enable id=" + p.Manifest.ID}), nil
 
 	case name == "mcp_register":
 		var args struct {
@@ -606,7 +770,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if mcp, ok := t.MCP.(interface{ Drop(string) }); ok {
 			mcp.Drop(p.Manifest.MCPServerID())
 		}
-		return fmt.Sprintf("registered plugin %q (%s v%s) — run mcp_enable with id=%s to connect", p.Manifest.Name, p.Manifest.ID, p.Manifest.Version, p.Manifest.ID), nil
+		return yamlBlock(map[string]any{"status": "registered", "name": p.Manifest.Name, "id": p.Manifest.ID, "version": p.Manifest.Version, "next": "mcp_enable id=" + p.Manifest.ID}), nil
 
 	case name == "mcp_enable":
 		var args struct {
@@ -631,7 +795,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if err != nil {
 			return "", fmt.Errorf("mcp_enable %q: %w", args.ID, err)
 		}
-		return fmt.Sprintf("enabled plugin %q — %d tool(s) available", args.ID, len(tools)), nil
+		return yamlBlock(map[string]any{"status": "enabled", "id": args.ID, "tools": len(tools)}), nil
 
 	case name == "mcp_disable":
 		var args struct {
@@ -651,7 +815,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", fmt.Errorf("mcp runtime does not support disconnect")
 		}
 		dropper.Drop("plugin:" + args.ID)
-		return fmt.Sprintf("disabled plugin %q (definition kept)", args.ID), nil
+		return yamlBlock(map[string]any{"status": "disabled", "id": args.ID}), nil
 
 	case name == "mcp_unregister":
 		var args struct {
@@ -675,22 +839,22 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if dropper, ok := t.MCP.(interface{ Drop(string) }); ok {
 			dropper.Drop("plugin:" + args.ID)
 		}
-		return fmt.Sprintf("unregistered plugin %q", args.ID), nil
+		return yamlBlock(map[string]any{"status": "unregistered", "id": args.ID}), nil
 
 	case name == "mcp_list":
 		if t.Plugins == nil {
-			return `{"count":0,"plugins":[]}`, nil
+			return yamlBlock(map[string]any{"count": 0, "plugins": []any{}}), nil
 		}
 		plugins, err := t.Plugins.List()
 		if err != nil {
 			return "", fmt.Errorf("mcp_list: %w", err)
 		}
 		type srvInfo struct {
-			ID      string `json:"id"`
-			Name    string `json:"name"`
-			Command string `json:"command"`
-			Running bool   `json:"running"`
-			Tools   int    `json:"tools"`
+			ID      string `yaml:"id"`
+			Name    string `yaml:"name"`
+			Command string `yaml:"command,omitempty"`
+			Running bool   `yaml:"running"`
+			Tools   int    `yaml:"tools"`
 		}
 		out := make([]srvInfo, 0, len(plugins))
 		for _, p := range plugins {
@@ -709,8 +873,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				Tools:   toolCount,
 			})
 		}
-		b, _ := json.Marshal(map[string]any{"count": len(out), "plugins": out})
-		return string(b), nil
+		return yamlBlock(map[string]any{"count": len(out), "plugins": out}), nil
 
 	case name == "tool_list":
 		var args struct {
@@ -718,10 +881,10 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		}
 		_ = json.Unmarshal(argsJSON, &args)
 		type toolEntry struct {
-			Name        string         `json:"name"`
-			Server      string         `json:"server"`
-			Description string         `json:"description,omitempty"`
-			InputSchema map[string]any `json:"input_schema,omitempty"`
+			Name        string         `yaml:"name"`
+			Server      string         `yaml:"server"`
+			Description string         `yaml:"description,omitempty"`
+			InputSchema map[string]any `yaml:"input_schema,omitempty"`
 		}
 		var entries []toolEntry
 		plugins, _ := t.Plugins.List()
@@ -747,8 +910,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if entries == nil {
 			entries = []toolEntry{}
 		}
-		b, _ := json.Marshal(map[string]any{"count": len(entries), "tools": entries})
-		return string(b), nil
+		return yamlBlock(map[string]any{"count": len(entries), "tools": entries}), nil
 
 	case name == "tool_search":
 		var args struct {
@@ -762,9 +924,9 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", fmt.Errorf("query is required")
 		}
 		type match struct {
-			Name        string `json:"name"`
-			Server      string `json:"server"`
-			Description string `json:"description,omitempty"`
+			Name        string `yaml:"name"`
+			Server      string `yaml:"server"`
+			Description string `yaml:"description,omitempty"`
 		}
 		tokens := strings.Fields(strings.ToLower(args.Query))
 		var matches []match
@@ -798,11 +960,10 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if matches == nil {
 			matches = []match{}
 		}
-		b, _ := json.Marshal(map[string]any{
+		return yamlBlock(map[string]any{
 			"server": args.Server, "query": args.Query,
 			"count": len(matches), "matches": matches,
-		})
-		return string(b), nil
+		}), nil
 
 	case name == "tool_schema":
 		var args struct {
@@ -832,11 +993,10 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				if schema == nil {
 					schema = obj("object", nil)
 				}
-				b, _ := json.Marshal(map[string]any{
+				return yamlBlock(map[string]any{
 					"server": args.Server, "tool": args.Tool,
 					"input_schema": schema,
-				})
-				return string(b), nil
+				}), nil
 			}
 			return "", fmt.Errorf("tool %q not found on server %q; use tool_list or tool_search to see available tools", args.Tool, args.Server)
 		}
@@ -886,26 +1046,29 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if limit > len(resp.Results) {
 			limit = len(resp.Results)
 		}
-		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("Search: %s\n\n", resp.Query))
-		for i, r := range resp.Results[:limit] {
-			sb.WriteString(fmt.Sprintf("## %d. %s\n", i+1, r.Title))
-			sb.WriteString(fmt.Sprintf("URL: %s\n", r.URL))
-			if r.Snippet != "" {
-				sb.WriteString(fmt.Sprintf("Snippet: %s\n", r.Snippet))
-			}
-			sb.WriteString(fmt.Sprintf("Sources: %s\n\n", strings.Join(r.Sources, ", ")))
+		type searchResult struct {
+			Title   string   `yaml:"title"`
+			URL     string   `yaml:"url"`
+			Snippet string   `yaml:"snippet,omitempty"`
+			Sources []string `yaml:"sources,omitempty"`
 		}
+		results := make([]searchResult, 0, limit)
+		for _, r := range resp.Results[:limit] {
+			results = append(results, searchResult{Title: r.Title, URL: r.URL, Snippet: r.Snippet, Sources: r.Sources})
+		}
+		meta := map[string]any{"query": resp.Query, "count": len(results)}
 		if len(resp.Errors) > 0 {
-			sb.WriteString("Source errors:\n")
-			for _, e := range resp.Errors {
-				sb.WriteString(fmt.Sprintf("- %s: %s\n", e.Source, e.Error))
+			type srcErr struct {
+				Source string `yaml:"source"`
+				Error  string `yaml:"error"`
 			}
+			errs := make([]srcErr, 0, len(resp.Errors))
+			for _, e := range resp.Errors {
+				errs = append(errs, srcErr{Source: e.Source, Error: e.Error})
+			}
+			meta["errors"] = errs
 		}
-		if len(resp.Results) == 0 {
-			sb.WriteString("No results found.\n")
-		}
-		return sb.String(), nil
+		return yamlBlock(meta), nil
 	case name == "web_fetch":
 		if t.Searcher == nil {
 			return "", fmt.Errorf("search is not available")
@@ -929,44 +1092,41 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", fmt.Errorf("fetch failed: %w", err)
 		}
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("URL: %s\n", page.URL))
+		meta := map[string]any{
+			"url":          page.URL,
+			"status":       page.StatusCode,
+			"content_type": page.ContentType,
+			"truncated":    page.Truncated,
+		}
 		if page.FinalURL != page.URL {
-			sb.WriteString(fmt.Sprintf("Final URL: %s\n", page.FinalURL))
+			meta["final_url"] = page.FinalURL
 		}
-		sb.WriteString(fmt.Sprintf("Status: %d | Content-Type: %s\n", page.StatusCode, page.ContentType))
 		if page.Redirects > 0 {
-			sb.WriteString(fmt.Sprintf("Redirects: %d\n", page.Redirects))
-		}
-		if len(page.Headers) > 0 {
-			sb.WriteString("Headers:\n")
-			for k, v := range page.Headers {
-				sb.WriteString(fmt.Sprintf("- %s: %s\n", k, v))
-			}
+			meta["redirects"] = page.Redirects
 		}
 		if page.Title != "" {
-			sb.WriteString(fmt.Sprintf("Title: %s\n", page.Title))
+			meta["title"] = page.Title
 		}
 		if len(page.Links) > 0 {
-			sb.WriteString(fmt.Sprintf("Links: %d\n", len(page.Links)))
-			for i, l := range page.Links {
-				if i >= 50 {
-					sb.WriteString("... (more links omitted)\n")
+			type linkEntry struct {
+				Text string `yaml:"text,omitempty"`
+				Href string `yaml:"href"`
+			}
+			links := make([]linkEntry, 0, len(page.Links))
+			for _, l := range page.Links {
+				if len(links) >= 50 {
 					break
 				}
-				label := strings.TrimSpace(l.Text)
-				if label == "" {
-					sb.WriteString(fmt.Sprintf("- %s\n", l.Href))
-				} else {
-					sb.WriteString(fmt.Sprintf("- %s -> %s\n", label, l.Href))
-				}
+				links = append(links, linkEntry{Text: strings.TrimSpace(l.Text), Href: l.Href})
 			}
+			meta["links_count"] = len(page.Links)
+			meta["links"] = links
 		}
 		if page.Truncated {
-			sb.WriteString(fmt.Sprintf("[truncated at %d bytes]\n", page.Bytes))
+			meta["bytes"] = page.Bytes
 		}
-		sb.WriteString("\n")
 		sb.WriteString(page.Text)
-		return sb.String(), nil
+		return yamlMD(meta, sb.String()), nil
 	case name == "web_answer":
 		sw := t.webAnswerSearcher()
 		if sw == nil || !sw.CanAnswer() {
@@ -987,10 +1147,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if err != nil {
 			return "", fmt.Errorf("answer failed: %w", err)
 		}
-		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("Provider: %s\n\n", answer.Provider))
-		sb.WriteString(answer.Text)
-		return sb.String(), nil
+		return yamlMD(map[string]any{"provider": answer.Provider}, answer.Text), nil
 	case name == "sleep":
 		var args struct {
 			Seconds int `json:"seconds"`
@@ -1009,7 +1166,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", ctx.Err()
 		case <-time.After(time.Duration(args.Seconds) * time.Second):
 		}
-		return fmt.Sprintf("Slept %d seconds.", args.Seconds), nil
+		return yamlBlock(map[string]any{"status": "slept", "seconds": args.Seconds}), nil
 	}
 
 	if out, handled, err := t.executeAutomation(ctx, name, argsJSON); handled {
@@ -1039,11 +1196,14 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 }
 
 // execTodo replaces the conversation todo checklist (full-replace, Claude
-// TodoWrite style). Empty items clears the list. Requires a conversation id
-// in the context (set via WithConversationID by the turn runner).
+// TodoWrite style). Empty items clears the list. The optional `goal` argument
+// sets a brief of what the user wants and why — it survives compaction and
+// is re-injected every turn via hydration. Requires a conversation id in
+// the context (set via WithConversationID by the turn runner).
 const (
 	todoMaxItems        = 50
 	todoMaxContentChars = 500
+	todoMaxGoalChars    = 40000 // ~10k tokens (4 chars/token average)
 )
 
 func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error) {
@@ -1060,12 +1220,17 @@ func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error)
 			Content string `json:"content"`
 			Status  string `json:"status"`
 		} `json:"items"`
+		Goal string `json:"goal"`
 	}
 	if err := json.Unmarshal(argsJSON, &args); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
 	if len(args.Items) > todoMaxItems {
 		return "", fmt.Errorf("items must have at most %d entries", todoMaxItems)
+	}
+	goal := strings.TrimSpace(args.Goal)
+	if len(goal) > todoMaxGoalChars {
+		return "", fmt.Errorf("goal exceeds %d chars (~10k tokens)", todoMaxGoalChars)
 	}
 	items := make([]domain.TodoItem, 0, len(args.Items))
 	seenIDs := make(map[string]bool, len(args.Items))
@@ -1092,8 +1257,21 @@ func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error)
 		items = append(items, domain.TodoItem{ID: id, Content: content, Status: status})
 	}
 	t.Todos.Set(conversationID, items)
+	if goal != "" {
+		t.Todos.SetGoal(conversationID, goal)
+	}
 	current := t.Todos.Get(conversationID)
+	currentGoal := t.Todos.GetGoal(conversationID)
 	summary := domain.SummarizeTodos(current)
+	type todoItemOut struct {
+		ID      string `yaml:"id"`
+		Content string `yaml:"content"`
+		Status  string `yaml:"status"`
+	}
+	itemOuts := make([]todoItemOut, 0, len(current))
+	for _, item := range current {
+		itemOuts = append(itemOuts, todoItemOut{ID: item.ID, Content: item.Content, Status: string(item.Status)})
+	}
 	out := map[string]any{
 		"ok":           true,
 		"conversation": conversationID,
@@ -1101,10 +1279,12 @@ func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error)
 		"pending":      summary.Pending,
 		"in_progress":  summary.InProgress,
 		"completed":    summary.Completed,
-		"items":        current,
+		"items":        itemOuts,
 	}
-	b, _ := json.Marshal(out)
-	return string(b), nil
+	if currentGoal != "" {
+		out["goal"] = currentGoal
+	}
+	return yamlBlock(out), nil
 }
 
 // execAskQuestion pauses the turn and asks the user a structured clarifying
@@ -1156,12 +1336,11 @@ func (t *Toolbox) execAskQuestion(ctx context.Context, argsJSON []byte) (string,
 		if !result.OK {
 			return "", fmt.Errorf("%s", result.Answer)
 		}
-		b, _ := json.Marshal(map[string]any{
+		return yamlBlock(map[string]any{
 			"ok":     true,
 			"via":    result.Via,
 			"answer": result.Answer,
-		})
-		return string(b), nil
+		}), nil
 	case <-ctx.Done():
 		t.AskQuestions.Cancel(runID, callID, "Agent turn cancelled")
 		return "", ctx.Err()
@@ -1273,8 +1452,7 @@ func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON [
 		if err != nil {
 			return "", true, err
 		}
-		b, _ := json.Marshal(v)
-		return string(b), true, nil
+		return yamlBlock(v), true, nil
 	}
 	switch name {
 	case "ci_pipeline_list", "ci_pipeline_read":
@@ -1473,19 +1651,51 @@ func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON [
 	}
 }
 
-// formatMemoryEntry renders one memory entry for agent tool output. It
-// surfaces id, created_at (RFC3339), source, tags, and content so the
-// agent can reason about recency, provenance, and clustering — not just
-// the raw text. Entries are listed newest-first by the callers.
-func formatMemoryEntry(e *domain.MemoryEntry) string {
-	ts := e.CreatedAt.UTC().Format(time.RFC3339)
+// formatMemoryEntry renders one memory entry as a YAML-mapped map for
+// yamlBlock output. It surfaces id, created_at, source, tags, and content
+// so the agent can reason about recency, provenance, and clustering.
+func formatMemoryEntry(e *domain.MemoryEntry) map[string]any {
 	source := e.Source
 	if source == "" {
 		source = "user"
 	}
-	tags := ""
-	if len(e.Tags) > 0 {
-		tags = " tags:" + strings.Join(e.Tags, ",")
+	target := e.Target
+	if target == "" {
+		target = domain.MemoryTargetMemory
 	}
-	return fmt.Sprintf("- [%s] (%s, %s%s) %s\n", e.ID, ts, source, tags, e.Content)
+	m := map[string]any{
+		"id":         e.ID,
+		"target":     target,
+		"created_at": e.CreatedAt.UTC().Format(time.RFC3339),
+		"source":     source,
+		"content":    e.Content,
+	}
+	if len(e.Tags) > 0 {
+		m["tags"] = e.Tags
+	}
+	return m
+}
+
+// formatFragment renders one memory fragment as a YAML-mapped map for
+// yamlBlock output. Score is included when non-zero (BM25 search results).
+func formatFragment(f *domain.MemoryFragment, score float64) map[string]any {
+	m := map[string]any{
+		"id":         f.ID,
+		"category":   f.Category,
+		"updated_at": f.UpdatedAt.UTC().Format(time.RFC3339),
+		"content":    f.Content,
+	}
+	if f.Project != "" {
+		m["project"] = f.Project
+	}
+	if f.Task != "" {
+		m["task"] = f.Task
+	}
+	if len(f.Tags) > 0 {
+		m["tags"] = f.Tags
+	}
+	if score > 0 {
+		m["score"] = score
+	}
+	return m
 }

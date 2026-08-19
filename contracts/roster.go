@@ -125,6 +125,10 @@ const (
 
 	EventLearningReviewStarted = "learning.review.started"
 	EventLearningReviewDone    = "learning.review.done"
+	EventLearningReviewError   = "learning.review.error"
+
+	EventMemoryUpdated = "memory.updated"
+	EventSkillUpdated  = "skill.updated"
 
 	EventAcpRunStarted          = "acp.run.started"
 	EventAcpRunUpdated          = "acp.run.updated"
@@ -359,6 +363,7 @@ type TodoUpdatedEvent struct {
 	ConversationID string         `json:"conversation_id"`
 	Items          []TodoItemDTO  `json:"items"`
 	Summary        TodoSummaryDTO `json:"summary"`
+	Goal           string         `json:"goal,omitempty"`
 }
 
 type TurnDoneEvent struct {
@@ -406,12 +411,14 @@ type CompactedEvent struct {
 }
 
 // LearningReviewEvent is emitted when the background learning review
-// (autolearn) starts or completes so the UI can toast the user. The
-// review is fire-and-forget; Status is "started" or "done".
+// (autolearn) starts, completes, or errors so the UI can toast the
+// user. The review is fire-and-forget; Status is "started", "done", or
+// "error". When Status is "error", Error carries the failure reason.
 type LearningReviewEvent struct {
 	ConversationID string `json:"conversation_id"`
-	Status         string `json:"status"`           // "started" | "done"
+	Status         string `json:"status"`           // "started" | "done" | "error"
 	Reason         string `json:"reason,omitempty"` // "threshold" | "compaction"
+	Error          string `json:"error,omitempty"`  // failure message when status="error"
 }
 
 type SteerEvent struct {
@@ -696,6 +703,10 @@ type CodexAccountUsage struct {
 	Name        string `json:"name,omitempty"`
 	Active      bool   `json:"active"`
 	CircuitOpen bool   `json:"circuit_open,omitempty"`
+	// CircuitOpenUntil is the unix timestamp at which the circuit breaker
+	// will close (usage reset). 0 if the circuit is closed or the reset
+	// time is unknown.
+	CircuitOpenUntil int64 `json:"circuit_open_until,omitempty"`
 	// Usage fields — empty if fetch failed for this account
 	Plan                  string               `json:"plan,omitempty"`
 	LimitReached          bool                 `json:"limit_reached"`
@@ -942,6 +953,13 @@ type MemoryEntryDTO struct {
 	Tags      []string `json:"tags,omitempty"`
 	Source    string   `json:"source,omitempty"`
 	CreatedAt string   `json:"created_at"`
+	// Fragment metadata (populated when reading from the fragments store).
+	Category string `json:"category,omitempty"`
+	Project  string `json:"project,omitempty"`
+	Task     string `json:"task,omitempty"`
+	// Tier marks the memory source: "primary" (always-injected) or
+	// "fragment" (searchable archive). Empty for legacy entries.
+	Tier string `json:"tier,omitempty"`
 }
 
 type MemoryListResult struct {
@@ -949,13 +967,20 @@ type MemoryListResult struct {
 }
 
 type MemorySaveRequest struct {
-	Content string   `json:"content"`
-	Tags    []string `json:"tags,omitempty"`
+	Content  string   `json:"content"`
+	Tags     []string `json:"tags,omitempty"`
+	Category string   `json:"category,omitempty"`
+	Project  string   `json:"project,omitempty"`
+	Task     string   `json:"task,omitempty"`
 }
 
 type MemorySearchRequest struct {
-	Query string `json:"query"`
-	Limit int    `json:"limit,omitempty"`
+	Query    string   `json:"query"`
+	Limit    int      `json:"limit,omitempty"`
+	Category string   `json:"category,omitempty"`
+	Project  string   `json:"project,omitempty"`
+	Task     string   `json:"task,omitempty"`
+	Tags     []string `json:"tags,omitempty"`
 }
 
 type MemoryIDRequest struct {
@@ -985,6 +1010,7 @@ type TodosGetResult struct {
 	ConversationID string         `json:"conversation_id"`
 	Items          []TodoItemDTO  `json:"items"`
 	Summary        TodoSummaryDTO `json:"summary"`
+	Goal           string         `json:"goal,omitempty"`
 }
 
 type TodosDeleteRequest struct {
@@ -1081,6 +1107,8 @@ type SettingsDTO struct {
 	PresencePenalty         *float64 `json:"presence_penalty,omitempty"`
 	LearningReviewThreshold int      `json:"learning_review_threshold,omitempty"`
 	MaxAutoContinues        int      `json:"max_auto_continues,omitempty"`
+	SoundNotifications      bool     `json:"sound_notifications"`
+	UserPrompt              string   `json:"user_prompt,omitempty"`
 }
 
 type SettingsGetResult struct {
@@ -1113,13 +1141,17 @@ type SettingsSetRequest struct {
 	PresencePenalty         json.RawMessage `json:"presence_penalty,omitempty"`
 	LearningReviewThreshold *int            `json:"learning_review_threshold,omitempty"`
 	MaxAutoContinues        *int            `json:"max_auto_continues,omitempty"`
+	SoundNotifications      *bool           `json:"sound_notifications,omitempty"`
+	UserPrompt              *string         `json:"user_prompt,omitempty"`
 }
 
 // ---- learning ----
 
 const (
-	MethodLearningSearch = "learning.search"
-	MethodLearningGraph  = "learning.graph"
+	MethodLearningSearch           = "learning.search"
+	MethodLearningGraph            = "learning.graph"
+	MethodLearningLog              = "learning.log"
+	MethodLearningReviewTranscript = "learning.review.transcript"
 )
 
 type LearningSearchRequest struct {
@@ -1130,7 +1162,8 @@ type LearningSearchRequest struct {
 
 type LearningSearchResultItem struct {
 	ID      string  `json:"id"`
-	Kind    string  `json:"kind"` // "skill" | "memory"
+	Kind    string  `json:"kind"`           // "skill" | "memory"
+	Tier    string  `json:"tier,omitempty"` // "primary" | "fragment" (memory only)
 	Name    string  `json:"name,omitempty"`
 	Content string  `json:"content,omitempty"`
 	Score   float32 `json:"score"`
@@ -1157,4 +1190,59 @@ type LearningGraphEdge struct {
 	To     string  `json:"to"`
 	Type   string  `json:"type"`   // "related" | "used_with" | "derived_from"
 	Weight float64 `json:"weight"` // [0, 1]
+}
+
+// ---- learning log (autolearn trajectory) ----
+
+type LearningLogRequest struct {
+	Limit int `json:"limit,omitempty"` // default 100, max 500
+}
+
+type LearningLogMutationDTO struct {
+	Kind    string `json:"kind"`              // "memory" | "skills"
+	Tool    string `json:"tool,omitempty"`    // tool that produced the mutation
+	Snippet string `json:"snippet,omitempty"` // trimmed content/name saved
+}
+
+type LearningLogEntryDTO struct {
+	TS                string                     `json:"ts"`
+	Type              string                     `json:"type"` // review|extract|edge_build|consolidate|decay|prune
+	ConversationID    string                     `json:"conversation_id,omitempty"`
+	ConversationTitle string                     `json:"conversation_title,omitempty"`
+	ReviewID          string                     `json:"review_id,omitempty"`
+	Status            string                     `json:"status,omitempty"` // done|error (review only)
+	Error             string                     `json:"error,omitempty"`  // failure message (review, status=error)
+	Mutations         []LearningLogMutationDTO   `json:"mutations,omitempty"`
+	Detail            map[string]json.RawMessage `json:"detail,omitempty"`
+}
+
+type LearningLogResult struct {
+	Entries []LearningLogEntryDTO `json:"entries"`
+}
+
+// ---- review transcript ----
+
+type LearningReviewTranscriptRequest struct {
+	ID string `json:"id"`
+}
+
+type ToolResultDTO struct {
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	Name       string `json:"name,omitempty"`
+	Content    string `json:"content,omitempty"`
+}
+
+type LearningReviewTranscriptMessageDTO struct {
+	Role       string         `json:"role"` // user | assistant | tool
+	Content    string         `json:"content,omitempty"`
+	ToolCalls  []ToolCallDTO  `json:"tool_calls,omitempty"`
+	ToolResult *ToolResultDTO `json:"tool_result,omitempty"`
+}
+
+type LearningReviewTranscriptResult struct {
+	ID             string                               `json:"id"`
+	ConversationID string                               `json:"conversation_id"`
+	Model          string                               `json:"model"`
+	CreatedAt      string                               `json:"created_at"`
+	Messages       []LearningReviewTranscriptMessageDTO `json:"messages"`
 }

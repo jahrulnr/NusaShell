@@ -11,6 +11,7 @@ import (
 
 	"nusashell/application"
 	"nusashell/contracts"
+	"nusashell/resources"
 )
 
 // Server wires the application service to all transports.
@@ -30,6 +31,12 @@ func New(app *application.App, logger *slog.Logger, static http.Handler, dev boo
 	mux.HandleFunc("GET /events", s.handleSSE)
 	mux.HandleFunc("GET /ws", s.handleWS)
 	mux.HandleFunc("GET /local-file", s.handleLocalFile)
+	// Sound assets: serve embedded notification sounds (turn-complete,
+	// turn-error) from resources/sounds/. Registered before the catch-all
+	// so /sounds/* does not fall through to the frontend file server.
+	if soundFS, err := resources.SoundAssets(); err == nil {
+		mux.Handle("GET /sounds/", http.StripPrefix("/sounds/", http.FileServer(http.FS(soundFS))))
+	}
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		s.Static.ServeHTTP(w, r)
 	})

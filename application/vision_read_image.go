@@ -90,7 +90,11 @@ func (a *App) executeReadImage(run *TurnRun, toolCall domain.ToolCall, caps Mode
 	if image.FilePath != "" {
 		result += "\n\nFile path: " + image.FilePath
 	}
-	return result, nil, nil
+	meta := map[string]any{"type": "image", "name": image.Name}
+	if image.FilePath != "" {
+		meta["file_path"] = image.FilePath
+	}
+	return yamlMDApp(meta, result), nil, nil
 }
 
 // findImageAttachmentByPath searches all user messages in the conversation for

@@ -1,8 +1,9 @@
 package domain
 
 import (
-	"encoding/json"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // TranscriptSummary extracts the concatenated text chunks from a run's
@@ -180,17 +181,17 @@ type AcpSpawned struct {
 	Err error
 }
 
-// FormatSpawnResult builds the JSON tool output for a `subagent` tool
+// FormatSpawnResult builds the YAML tool output for a `subagent` tool
 // call. Always async: each item has status + workspace, and a summary
 // when the run already finished (not live).
 func FormatSpawnResult(results []AcpSpawned) string {
 	type item struct {
-		ID        string `json:"id"`
-		Status    string `json:"status"`
-		Workspace string `json:"workspace,omitempty"`
-		Summary   string `json:"summary,omitempty"`
-		Error     string `json:"error,omitempty"`
-		Async     bool   `json:"async,omitempty"`
+		ID        string `yaml:"id,omitempty"`
+		Status    string `yaml:"status"`
+		Workspace string `yaml:"workspace,omitempty"`
+		Summary   string `yaml:"summary,omitempty"`
+		Error     string `yaml:"error,omitempty"`
+		Async     bool   `yaml:"async,omitempty"`
 	}
 	out := make([]item, 0, len(results))
 	for _, r := range results {
@@ -205,6 +206,6 @@ func FormatSpawnResult(results []AcpSpawned) string {
 		}
 		out = append(out, it)
 	}
-	b, _ := json.Marshal(map[string]any{"runs": out, "async": true})
-	return string(b)
+	b, _ := yaml.Marshal(map[string]any{"runs": out, "async": true, "count": len(out)})
+	return "---\n" + strings.TrimRight(string(b), "\n") + "\n---"
 }

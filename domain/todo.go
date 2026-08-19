@@ -32,6 +32,16 @@ type TodoItem struct {
 	Status  TodoStatus `json:"status"`
 }
 
+// ConversationTodos is the full todo state for a conversation: the goal
+// brief (what the user wants and why, max ~10k tokens) plus the multi-step
+// item list. The goal is set once at the start of a task and survives
+// compaction — it is re-injected into every turn's hydration so the agent
+// does not drift from the original intent after context summarization.
+type ConversationTodos struct {
+	Goal  string     `json:"goal,omitempty"`
+	Items []TodoItem `json:"items"`
+}
+
 // TodoSummary holds aggregate counts derived from a todo list. Used by the
 // tool result and the RPC result.
 type TodoSummary struct {

@@ -69,6 +69,8 @@ export async function refresh() {
     const { settings } = settingsResult.value;
     document.getElementById('settings-compaction-enabled').checked = settings.compaction_enabled !== false;
     document.getElementById('settings-prompt-caching').checked = settings.prompt_caching === true;
+    document.getElementById('settings-sound-notifications').checked = settings.sound_notifications !== false;
+    document.getElementById('settings-user-prompt').value = settings.user_prompt ?? '';
     document.getElementById('settings-max-tool-rounds').value = settings.max_tool_rounds ?? 8;
     document.getElementById('settings-max-parallel-tools').value = settings.max_parallel_tools ?? 6;
     document.getElementById('settings-max-input-tokens').value = settings.max_input_tokens ?? 200000;
@@ -89,7 +91,7 @@ export async function refresh() {
     state.videoModelId = settings.video_model_id ?? '';
     state.webAnswerProvider = settings.web_answer_provider ?? '';
     state.webAnswerModel = settings.web_answer_model ?? '';
-    document.getElementById('settings-learning-threshold').value = settings.learning_review_threshold ?? 50;
+    document.getElementById('settings-learning-threshold').value = settings.learning_review_threshold ?? 10;
     document.getElementById('settings-auto-continues').value = settings.max_auto_continues ?? 10;
     // Web answer: set provider dropdown and model field. API key is write-only.
     webAnswerProviderSelect.setSelected([state.webAnswerProvider || '']);
@@ -294,6 +296,8 @@ async function save() {
     await rpc('settings.set', {
       compaction_enabled: document.getElementById('settings-compaction-enabled').checked,
       prompt_caching: document.getElementById('settings-prompt-caching').checked,
+      sound_notifications: document.getElementById('settings-sound-notifications').checked,
+      user_prompt: document.getElementById('settings-user-prompt').value.trim() || null,
       max_tool_rounds: maxToolRounds,
       max_parallel_tools: maxParallelTools,
       max_input_tokens: maxInputTokens,

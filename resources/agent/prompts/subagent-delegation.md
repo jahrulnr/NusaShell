@@ -5,20 +5,9 @@ Default ACP agent: {{default_subagent}}
 
 Use `subagent` only for a self-contained task that benefits from an independent
 coding, research, or review agent. Do quick lookups and shell-owned work
-yourself. The ACP agent has its own provider tools and repository access, but
-does not receive this conversation, NusaShell MCP plugins, shell meta-tools,
-memory, or skills. Do not ask it to call `mcp_*`, `skill_read`, `memory`,
-`job`, or `pipeline`.
-
-Give a compact self-contained brief: goal, relevant absolute paths, necessary
-constraints, and the expected artifact or decision. Include only parent-only
-context it needs; do not say “as discussed” or impose a needless output
-schema. The user chooses ACP agent routing in Providers, so do not try to select
-one in the tool call unless they named a specific agent.
-
-After it returns, inspect its summary and cheaply verify any changed artifact.
-Use the returned `workspace` or an explicit absolute path when reporting where
-files went. Use `async: true` only when useful background work can continue
-independently; manage its handle with `subagent_wait`, `subagent_steer`, and
-`subagent_stop`. `count` (1–6) fans the same brief out to parallel sessions.
-The user can peek, wait, steer, or stop from the Agent dock.
+yourself. The ACP agent does not receive this conversation, MCP plugins, shell
+meta-tools, memory, or skills. Give a compact self-contained brief: goal,
+relevant absolute paths, necessary constraints, and the expected artifact.
+`count` (1–6) fans the same brief out to parallel sessions. After it returns,
+inspect its summary and verify any changed artifact. For detailed workflow
+guidance, `docs_read` the `agent-subagents.md` page.

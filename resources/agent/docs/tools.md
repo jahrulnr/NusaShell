@@ -11,11 +11,14 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `skill_read` | read a skill's `SKILL.md` (or a support file via `path`) by name; paginated with `offset`/`max_chars` |
 | `skill_files` | list the files inside a skill folder (path, type, size, editable) |
 | `skill_save` | create or update a user-owned skill (plugin-owned skills are read-only) |
-| `memory_save` | persist a fact with optional tags (source is recorded as "agent") |
-| `memory_search` | substring search over memory content + tags; results are newest-first and include id, created_at, source, tags |
-| `memory_list` | list all memory entries newest-first with id, created_at, source, tags, and content |
-| `memory_delete` | remove a memory entry by id |
-| `todo` | replace the conversation task checklist (full-replace, Claude TodoWrite style; max 50 items, 500 chars each; prefer exactly one `in_progress` at a time). The user can delete items from the UI — treat deleted items as gone and do not re-add them. |
+| `memory_save` | save a fact as a searchable fragment (unlimited archive); pick a category (`project`, `user`, `task`, `general`) + optional `project`, `task`, `tags` |
+| `memory_replace` | update an existing entry: `target="primary"` + `old_text` (substring) for primary memory, or `target="fragment"` + `id` for fragments |
+| `memory_search` | BM25 search over fragments with metadata filters (`category`, `project`, `task`, `tags`); returns ranked results with scores |
+| `memory_list` | list entries: `target="primary"` for the always-injected working set, `target="fragments"` (default) for the archive with optional metadata filters |
+| `memory_delete` | delete a fragment by id (primary entries cannot be deleted — use `memory_demote`) |
+| `memory_promote` | promote a fragment into primary memory (~1k token cap); background review agent only |
+| `memory_demote` | demote a primary entry back to fragments; background review agent only |
+| `todo` | replace the conversation task checklist (full-replace, Claude TodoWrite style; max 50 items, 500 chars each; prefer exactly one `in_progress` at a time). The optional `goal` argument sets a brief of what the user wants and why (max ~10k tokens) — it survives compaction and is re-injected every turn so the agent does not drift from the original intent. The user can delete items from the UI — treat deleted items as gone and do not re-add them. |
 | `docs_search` | search the product documentation |
 | `docs_read` | read a documentation page by id |
 | `mcp_list` | list all plugins (MCP servers) with runtime state: every plugin appears, running or idle |
@@ -56,6 +59,27 @@ The system prompt advertises the same set: `skill_list`, `skill_search`,
 `tool_schema`, `read_image`, `read_audio`, `read_video`, `web_search`, `web_fetch`,
 `web_answer` (when available), `ci_*`, `automation_*`, `schedule_once`,
 `schedule_every`, `wait_until`, `sleep`.
+
+## Output format
+
+All built-in tools return output in **YAML×Markdown** format: a YAML front
+matter block delimited by `---` lines (structured fields like `count`,
+`status`, `items`) followed by an optional markdown body for content-heavy
+results (file contents, page text, descriptions). This is consistent across
+all 46+ built-in tools — no JSON or ad-hoc plain text. MCP plugin tools
+(`mcp__<server>__<tool>`) return whatever the MCP server produces (format
+depends on the server).
+
+Example:
+```
+---
+count: 2
+status: ok
+---
+
+First result line
+Second result line
+```
 MCP plugin tools (`mcp__<server>__<tool>`) are NOT advertised in the tool
 list — the tool list must stay stable for the lifetime of a conversation so
 the provider prompt cache (OpenAI / Claude) is not invalidated. The agent
@@ -121,3 +145,22 @@ plugin exposes its MCP tools as `mcp__<server>__<tool>`
 with the server's own input schema. The shell connects to the server on
 first use (stdio) and keeps the connection for the process lifetime;
 re-saving or deleting the server drops the connection.
+
+### MCP tool discovery workflow
+
+MCP tools are not advertised in `tools[]`. Discover, check the schema, then
+call by name — never guess a tool name or schema.
+
+Good example:
+
+    tool_list(server="files")                    # → [{name: "read", …}, {name: "write", …}]
+    tool_schema(server="files", tool="read")     # exact argument shape
+    mcp__files__read({path: "/home/user/a.txt"})
+
+Bad examples:
+
+    mcp__files__read_file({path: "a.txt"})       # guessed name + relative path
+
+    mcp__files__read({path: "a.txt"})            # skipped discovery, relative path
+
+    tool_list()                                   # called every round to re-check

@@ -34,6 +34,25 @@ A step may set `wait_until: <RFC3339>`. The run status becomes `waiting` and the
 
 After `ci_run`, call `ci_run_status`. Fetch logs only for failed jobs.
 
+### ci_run async workflow
+
+For a long pipeline, pass `async: true` so `ci_run` returns a `run_id`
+immediately, continue other work, then `ci_wait` once for completion.
+
+Good example:
+
+    ci_run(workspace="/home/user/proj", async=true)      # → {run_id: "run_42", status: "queued"}
+    # … do other work …
+    ci_wait(run_id="run_42", timeout_ms=300000)          # blocks until terminal or timeout
+    ci_logs(job_id="run_42:job_1")                       # only if a job failed
+
+Bad examples:
+
+    ci_run(workspace="/home/user/proj")                  # blocks the turn for the whole pipeline
+
+    ci_run_status(run_id="run_42")                       # polled in a sleep loop
+    sleep(seconds=5)                                     # instead of a single ci_wait
+
 Pipeline `agent:` steps run a full agent turn (tool loop, compaction, skills,
 memory, docs) synchronously via `RunHeadlessTurn`. They do not receive ACP
 tools (`subagent`, `subagent_steer`, `subagent_stop`, `subagent_wait`) —

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -649,8 +649,10 @@ test('HYDR-NEW-ROOM: first turn of a new conversation injects the hydration tran
     const providerID = saveRes.providers[0].id;
     await rpcModule.rpc('ai.providers.import-models', { id: providerID });
 
-    // Seed one memory entry so the memory slot is non-empty.
-    await rpcModule.rpc('memory.save', { content: 'User prefers concise answers.', tags: ['pref'] });
+    // Seed one primary memory entry so the memory slot is non-empty.
+    // Hydration reads from MEMORY.md (primary memory), so we write
+    // directly to the file in the data dir.
+    await writeFile(join(dataDir, 'MEMORY.md'), '---\nlast_updated: 2026-08-19T12:00:00Z\nversion: 1\n---\n\n- [frag_test] User prefers concise answers.\n');
 
     // Create a new conversation.
     window.location.hash = '#agent';
@@ -771,8 +773,10 @@ test('HYDR-POST-COMPACTION: turn after compaction re-injects the hydration trans
     const providerID = saveRes.providers[0].id;
     await rpcModule.rpc('ai.providers.import-models', { id: providerID });
 
-    // Seed one memory entry so the memory slot is non-empty.
-    await rpcModule.rpc('memory.save', { content: 'User is testing compaction hydration.', tags: ['test'] });
+    // Seed one primary memory entry so the memory slot is non-empty.
+    // Hydration reads from MEMORY.md (primary memory), so we write
+    // directly to the file in the data dir.
+    await writeFile(join(dataDir, 'MEMORY.md'), '---\nlast_updated: 2026-08-19T12:00:00Z\nversion: 1\n---\n\n- [frag_test] User is testing compaction hydration.\n');
 
     // Disable compaction while seeding history.
     await rpcModule.rpc('settings.set', { compaction_enabled: false });

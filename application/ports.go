@@ -103,6 +103,29 @@ type MemoryStore interface {
 	List() []*domain.MemoryEntry
 	Save(e *domain.MemoryEntry) error
 	Delete(id string) error
+	Replace(target, oldText, content string) error
+}
+
+// PrimaryStore is the always-injected working-set memory backed by a
+// single MEMORY.md file. Foreground agents read and update entries; the
+// background review agent promotes entries from fragments. Create is
+// intentionally absent — new facts enter via fragments first.
+type PrimaryStore interface {
+	Load() *domain.PrimaryMemory
+	Update(entries []domain.PrimaryEntry) error
+	Replace(oldText, content string) error // substring match update
+}
+
+// FragmentStore is the unlimited, searchable memory archive backed by
+// one markdown file per entry under memories/fragments/. Foreground
+// agents create, update, delete, and search fragments; the background
+// review agent promotes durable fragments into primary memory.
+type FragmentStore interface {
+	List(filter domain.FragmentSearchFilter) []*domain.MemoryFragment
+	Get(id string) *domain.MemoryFragment
+	Save(f *domain.MemoryFragment) error
+	Delete(id string) error
+	Search(filter domain.FragmentSearchFilter) []domain.FragmentSearchHit
 }
 
 // LearningEdgeStore persists bitemporal edges between learning nodes.
@@ -114,10 +137,14 @@ type LearningEdgeStore interface {
 
 // ConversationTodoPort is the per-conversation todo checklist store. The
 // model owns the list (full-replace via the `todo` tool); the user can
-// delete items from the UI. Implementations must be safe for concurrent use.
+// delete items from the UI. The goal brief is set alongside items and
+// survives compaction via hydration. Implementations must be safe for
+// concurrent use.
 type ConversationTodoPort interface {
 	Get(conversationID string) []domain.TodoItem
+	GetGoal(conversationID string) string
 	Set(conversationID string, items []domain.TodoItem)
+	SetGoal(conversationID string, goal string)
 	Clear(conversationID string)
 }
 
