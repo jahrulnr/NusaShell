@@ -14,13 +14,11 @@ import (
 	"nusashell/domain"
 )
 
-// maxParallelTools bounds how many tool calls from a single assistant round run
-// concurrently. The model often emits several independent tool calls at once
-// (e.g. multiple searches); running them in parallel cuts wall-clock latency
-// without changing the provider round count (there is still exactly one
-// follow-up request per round). Results are persisted in tool-call order so
-// the transcript stays deterministic.
-const maxParallelTools = 6
+// defaultMaxParallelTools is the fallback concurrency bound for tool calls
+// from a single assistant round when settings.MaxParallelTools is not set.
+// The actual bound is settings.MaxParallelTools (default 6, range 1–64,
+// configurable in Settings).
+const defaultMaxParallelTools = 6
 
 type streamedTurnRound struct {
 	Content   string
@@ -398,7 +396,11 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 	// tool-call order for deterministic persistence in phase 2.
 	results := make([]toolExecResult, len(toolCalls))
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, maxParallelTools)
+	limit := settings.MaxParallelTools
+	if limit < 1 {
+		limit = defaultMaxParallelTools
+	}
+	sem := make(chan struct{}, limit)
 	for i := range toolCalls {
 		wg.Add(1)
 		go func(i int) {

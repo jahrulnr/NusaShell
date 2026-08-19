@@ -617,6 +617,10 @@
               <input id="settings-max-tool-rounds" type="number" min="1" max="10000" step="1" inputmode="numeric" value="8">
               <small>Stops a turn that keeps requesting more tool work. The default is 8.</small>
             </label>
+            <label class="settings-field" for="settings-max-parallel-tools">Max parallel tools per round
+              <input id="settings-max-parallel-tools" type="number" min="1" max="64" step="1" inputmode="numeric" value="6">
+              <small>How many tool calls from one assistant round run at once (default 6). Raising it cuts latency when the model emits many independent calls; lower it to reduce load.</small>
+            </label>
           </section>
           <section class="settings-card settings-embedding-card" aria-labelledby="settings-embedding-title">
             <div class="settings-card-title">Embeddings</div>

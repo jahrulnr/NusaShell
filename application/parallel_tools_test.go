@@ -92,6 +92,42 @@ func TestExecuteTurnToolsRunsConcurrently(t *testing.T) {
 	}
 }
 
+// TestExecuteTurnToolsRespectsMaxParallelTools: when settings.MaxParallelTools
+// is set below the number of tool calls, the semaphore bounds concurrency to
+// that value (maxActive never exceeds it). This proves the cap is configurable
+// and not a hardcoded constant.
+func TestExecuteTurnToolsRespectsMaxParallelTools(t *testing.T) {
+	cap := 2
+	box := &barrierToolbox{want: cap, gate: make(chan struct{})}
+	toolCalls := []domain.ToolCall{
+		{ID: "t1", Name: "a"}, {ID: "t2", Name: "b"},
+		{ID: "t3", Name: "c"}, {ID: "t4", Name: "d"},
+	}
+	app, _, run := newBarrierApp(t, toolCalls, box)
+	settings := domain.Settings{MaxParallelTools: cap}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- app.executeTurnTools(run, "m1", toolCalls, ModelCapabilities{Vision: true}, settings)
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("executeTurnTools: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("executeTurnTools did not complete")
+	}
+
+	if box.maxActive > cap {
+		t.Fatalf("max concurrent tools = %d, want <= %d (cap not respected)", box.maxActive, cap)
+	}
+	if box.maxActive < cap {
+		t.Fatalf("max concurrent tools = %d, want exactly %d (cap should allow this many)", box.maxActive, cap)
+	}
+}
+
 // orderedToolbox returns the tool name as output so we can assert results are
 // persisted in tool-call order regardless of completion order.
 type orderedToolbox struct{}

@@ -526,12 +526,13 @@
         {
           "heading": "Agent runtime",
           "paragraphs": [
-            "Default model for new conversations and the maximum tool rounds per turn (default 8). Existing conversations keep their selected model."
+            "Default model for new conversations, the maximum tool rounds per turn (default 8), and the max parallel tools per round (default 6, range 1–64). Existing conversations keep their selected model."
           ],
           "controls": [
             "settings-runtime-title",
             "settings-preferred-model",
-            "settings-max-tool-rounds"
+            "settings-max-tool-rounds",
+            "settings-max-parallel-tools"
           ]
         },
         {
@@ -1288,6 +1289,12 @@
       "section": "Settings",
       "type": "number",
       "notes": "1\u201310000, default 8."
+    },
+    "settings-max-parallel-tools": {
+      "label": "Max parallel tools",
+      "section": "Settings",
+      "type": "number",
+      "notes": "1\u201364, default 6. Bounds concurrent tool calls per assistant round."
     },
     "settings-embedding-title": {
       "label": "Embeddings title",

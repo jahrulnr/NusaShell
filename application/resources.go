@@ -949,6 +949,12 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 		}
 		s.MaxOutputTokens = *req.MaxOutputTokens
 	}
+	if req.MaxParallelTools != nil {
+		if *req.MaxParallelTools < 1 || *req.MaxParallelTools > 64 {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "max parallel tools must be between 1 and 64"}
+		}
+		s.MaxParallelTools = *req.MaxParallelTools
+	}
 	// Sampling parameters use json.RawMessage to distinguish three states:
 	// absent (don't change), null (clear to nil), value (set). A *float64
 	// with omitempty cannot tell null from absent, so once set the parameter
@@ -1064,6 +1070,7 @@ func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 		MaxToolRounds:           s.MaxToolRounds,
 		MaxInputTokens:          s.MaxInputTokens,
 		MaxOutputTokens:         s.MaxOutputTokens,
+		MaxParallelTools:        s.MaxParallelTools,
 		EmbeddingProviderID:     s.EmbeddingProviderID,
 		EmbeddingModelID:        s.EmbeddingModelID,
 		VisionProviderID:        s.VisionProviderID,

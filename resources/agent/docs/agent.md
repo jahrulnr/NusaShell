@@ -13,10 +13,11 @@ file under `conversations/` in the data directory.
    the UI over SSE and WebSocket.
 4. Tool calls are executed locally and their results feed the next round,
    up to `max_tool_rounds` per turn (default 8, configurable in Settings).
-   When a round emits several tool calls, they run **concurrently** (bounded,
-   up to 6 at once) to cut wall-clock latency; their results are then persisted
-   in the model's original tool-call order, and a single follow-up request is
-   sent to the provider for the whole round (parallel tools do not add provider
+   When a round emits several tool calls, they run **concurrently** (bounded
+   by `max_parallel_tools`, default 6, range 1–64, configurable in Settings)
+   to cut wall-clock latency; their results are then persisted in the model's
+   original tool-call order, and a single follow-up request is sent to the
+   provider for the whole round (parallel tools do not add provider
    round-trips). A cancelled turn skips any not-yet-started tools.
 5. The finished assistant message (content, tool calls, usage) is saved to
    the conversation file.

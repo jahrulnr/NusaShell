@@ -72,3 +72,29 @@ func TestNormalizeSettingsFillsMaxTokenDefaults(t *testing.T) {
 		t.Fatalf("compaction_threshold = %d, want 0 (auto after migration)", normalized.CompactionThreshold)
 	}
 }
+
+// TestNormalizeSettingsFillsMaxParallelTools: settings written before
+// max_parallel_tools existed get the factory default (6), and out-of-range
+// values are clamped into the valid 1–64 band.
+func TestNormalizeSettingsFillsMaxParallelTools(t *testing.T) {
+	// Unset (0) → default 6.
+	zero := domain.NormalizeSettings(domain.Settings{MaxToolRounds: 8})
+	if zero.MaxParallelTools != 6 {
+		t.Fatalf("max_parallel_tools = %d, want 6 (default)", zero.MaxParallelTools)
+	}
+	// Negative → default 6.
+	neg := domain.NormalizeSettings(domain.Settings{MaxToolRounds: 8, MaxParallelTools: -1})
+	if neg.MaxParallelTools != 6 {
+		t.Fatalf("max_parallel_tools = %d, want 6 (default for negative)", neg.MaxParallelTools)
+	}
+	// In-range preserved.
+	ok := domain.NormalizeSettings(domain.Settings{MaxToolRounds: 8, MaxParallelTools: 12})
+	if ok.MaxParallelTools != 12 {
+		t.Fatalf("max_parallel_tools = %d, want 12 (preserved)", ok.MaxParallelTools)
+	}
+	// Above cap → clamped to 64.
+	over := domain.NormalizeSettings(domain.Settings{MaxToolRounds: 8, MaxParallelTools: 999})
+	if over.MaxParallelTools != 64 {
+		t.Fatalf("max_parallel_tools = %d, want 64 (clamped)", over.MaxParallelTools)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"nusashell/application"
 	"nusashell/contracts"
@@ -482,21 +483,45 @@ func TestToolSchemaServerNotRunning(t *testing.T) {
 	}
 }
 
-func TestMCPToolNameMatchesLongestServerPrefix(t *testing.T) {
-	mcp := &stubMCP{}
+func TestMCPDynamicToolsNotAdvertised(t *testing.T) {
+	mcp := &stubMCP{tools: map[string][]contracts.MCPToolDTO{
+		"plugin:files": {{Name: "read", Description: "read a file"}},
+	}}
 	tb := testToolbox(nil,
 		[]*domain.Plugin{
-			{Manifest: domain.PluginManifest{ID: "short", Name: "foo", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
-			{Manifest: domain.PluginManifest{ID: "long", Name: "foo__bar", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+			{Manifest: domain.PluginManifest{ID: "files", Name: "files", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
 		},
 		mcp,
 	)
-	if _, err := tb.Execute(context.Background(), "mcp__foo__bar__read", nil); err != nil {
-		t.Fatalf("execute: %v", err)
+	for _, ti := range tb.ListTools() {
+		if strings.HasPrefix(ti.Name, "mcp__") {
+			t.Fatalf("dynamic MCP tool %q should not be advertised to the agent", ti.Name)
+		}
 	}
-	if mcp.lastServerID != "plugin:long" || mcp.lastTool != "read" {
-		t.Fatalf("routed to server %q tool %q, want plugin:long/read", mcp.lastServerID, mcp.lastTool)
+}
+
+func TestMCPDynamicToolsExecutableButNotAdvertised(t *testing.T) {
+	mcp := &stubMCP{tools: map[string][]contracts.MCPToolDTO{
+		"plugin:files": {{Name: "read", Description: "read a file"}},
+	}}
+	tb := testToolbox(nil,
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "files", Name: "files", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+		},
+		mcp,
+	)
+	// Not in ListTools (cache stability) ...
+	for _, ti := range tb.ListTools() {
+		if strings.HasPrefix(ti.Name, "mcp__") {
+			t.Fatalf("mcp__ tool %q should not be advertised", ti.Name)
+		}
 	}
+	// ... but still callable by name.
+	out, err := tb.Execute(context.Background(), "mcp__files__read", nil)
+	if err != nil {
+		t.Fatalf("mcp__ tool should still be executable: %v", err)
+	}
+	_ = out
 }
 
 // --- mcp management tools ---
@@ -937,5 +962,70 @@ func TestPipelineAgentRunnerHidesEnabledAcpTools(t *testing.T) {
 	}
 	if _, err := runner.Tools.Execute(context.Background(), "subagent", []byte(`{"prompt":"x"}`)); err == nil {
 		t.Fatal("pipeline agent must not execute subagent")
+	}
+}
+
+func TestSleepTool(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	start := time.Now()
+	out, err := tb.Execute(context.Background(), "sleep", []byte(`{"seconds":1}`))
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("sleep failed: %v", err)
+	}
+	if !strings.Contains(out, "Slept 1") {
+		t.Fatalf("unexpected output: %s", out)
+	}
+	if elapsed < 900*time.Millisecond {
+		t.Fatalf("sleep returned too fast: %v", elapsed)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("sleep took too long: %v", elapsed)
+	}
+}
+
+func TestSleepToolRejectsZeroAndNegative(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	if _, err := tb.Execute(context.Background(), "sleep", []byte(`{"seconds":0}`)); err == nil {
+		t.Fatal("seconds=0 should error")
+	}
+	if _, err := tb.Execute(context.Background(), "sleep", []byte(`{"seconds":-5}`)); err == nil {
+		t.Fatal("seconds=-5 should error")
+	}
+}
+
+func TestSleepToolDescriptionMentionsCap(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	for _, ti := range tb.ListTools() {
+		if ti.Name == "sleep" {
+			if !strings.Contains(ti.Description, "300") {
+				t.Fatalf("sleep description should mention 300s cap: %s", ti.Description)
+			}
+			return
+		}
+	}
+	t.Fatal("sleep tool not found")
+}
+
+func TestSleepToolRespectsContextCancellation(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, err := tb.Execute(ctx, "sleep", []byte(`{"seconds":5}`))
+	if err == nil {
+		t.Fatal("should error when context cancelled")
+	}
+}
+
+func TestListToolsIncludesSleepAndWaitAndCiWait(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	names := map[string]bool{}
+	for _, ti := range tb.ListTools() {
+		names[ti.Name] = true
+	}
+	for _, want := range []string{"sleep", "ci_wait", "ci_run"} {
+		if !names[want] {
+			t.Fatalf("ListTools missing %q", want)
+		}
 	}
 }

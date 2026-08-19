@@ -140,6 +140,11 @@ type Settings struct {
 	MaxToolRounds       int
 	MaxInputTokens      int // global context window cap (default 200k)
 	MaxOutputTokens     int // default max completion tokens (default 64k)
+	// MaxParallelTools bounds how many tool calls from a single assistant
+	// round run concurrently. The model often emits several independent
+	// tool calls at once; running them in parallel cuts wall-clock latency
+	// without adding provider round-trips. Default 6, range 1–64.
+	MaxParallelTools int `json:"max_parallel_tools,omitempty"`
 	// EmbeddingModel selects the global embedding model for the learning
 	// search layer. When EmbeddingProviderID is empty, the learning layer
 	// auto-detects the first enabled provider with an embedding model.
@@ -215,6 +220,7 @@ func DefaultSettings() Settings {
 		MaxToolRounds:           8,
 		MaxInputTokens:          200000,
 		MaxOutputTokens:         65536,
+		MaxParallelTools:        6,
 		LearningReviewThreshold: 10,
 		MaxAutoContinues:        DefaultMaxAutoContinues,
 	}
@@ -231,6 +237,12 @@ func NormalizeSettings(settings Settings) Settings {
 	}
 	if settings.MaxOutputTokens < 256 {
 		settings.MaxOutputTokens = DefaultSettings().MaxOutputTokens
+	}
+	// MaxParallelTools: 0/negative = default (6); clamp to 1–64.
+	if settings.MaxParallelTools < 1 {
+		settings.MaxParallelTools = DefaultSettings().MaxParallelTools
+	} else if settings.MaxParallelTools > 64 {
+		settings.MaxParallelTools = 64
 	}
 	// Migrate the old flat CompactionThreshold default (40000) to 0 (auto).
 	// The old default was a flat token count that didn't scale with the

@@ -9,6 +9,7 @@ const rpc = await readFile(new URL('./js/rpc.js', import.meta.url), 'utf8');
 test('Settings exposes the Go-supported Electron parity controls', () => {
   for (const id of [
     'settings-max-tool-rounds',
+    'settings-max-parallel-tools',
     'settings-preferred-model',
     'settings-auto-reconnect',
     'settings-check-connection-btn',
@@ -20,6 +21,7 @@ test('Settings exposes the Go-supported Electron parity controls', () => {
   assert.match(settingsView, /rpc\('app\.info'/);
   assert.match(settingsView, /rpc\('ai\.models\.list'/);
   assert.match(settingsView, /max_tool_rounds/);
+  assert.match(settingsView, /max_parallel_tools/);
 });
 
 test('WebSocket reconnect is an explicit persisted preference', () => {

@@ -1,10 +1,16 @@
 # Plugins (MCP servers + MCP+UI plugins)
 
-A **plugin** is the single concept for anything that exposes MCP tools to
-the agent: a manual MCP server (stdio) or an installed plugin from the
-catalog (MCP-only or MCP + UI). The shell spawns the plugin's MCP command
-and speaks JSON-RPC over stdin/stdout; tools surface to the agent as
-`mcp__<server>__<tool>`.
+A **plugin** is the single concept for anything that exposes MCP tools:
+a manual MCP server (stdio) or an installed plugin from the catalog
+(MCP-only or MCP + UI). The shell spawns the plugin's MCP command and
+speaks JSON-RPC over stdin/stdout.
+
+MCP plugin tools are NOT advertised in the tool list sent to the provider —
+the tool list must stay stable for the lifetime of a conversation so the
+provider prompt cache (OpenAI / Claude) is not invalidated. The agent can
+still discover MCP tools via `tool_list`, `tool_search`, and `tool_schema`,
+then call them by name (`mcp__<server>__<tool>`); execution validates
+against the connected MCP server at call time.
 
 ## Adding a plugin manually
 
@@ -24,9 +30,12 @@ tool listing or **Start** (`plugin.test`) spawns the process. **Stop**
 
 ## Tool exposure
 
-Every tool of an enabled server becomes an agent tool named
-`mcp__<server>__<tool>`. Tool schemas come from the server's own
-`tools/list` response.
+MCP plugin tools are not advertised in the tool list sent to the provider
+(prompt cache stability). The agent discovers them via `tool_list`,
+`tool_search`, and `tool_schema`, then calls them by name
+(`mcp__<server>__<tool>`). Execution validates against the connected MCP
+server at call time. Tool schemas come from the server's own `tools/list`
+response.
 
 The Plugins view is the single catalog for all plugins: manual MCP
 servers, MCP-only plugins, and MCP + UI plugins. Select an entry to test,

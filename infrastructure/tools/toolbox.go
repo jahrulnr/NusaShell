@@ -116,7 +116,8 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "ci_pipeline_list", Description: "List pipeline definitions in the current workspace (.nusashell/pipeline.yaml).", InputSchema: obj("object", props("workspace", str("Workspace path")))},
 		{Name: "ci_pipeline_read", Description: "Read and validate the workspace pipeline definition.", InputSchema: obj("object", props("workspace", str("Workspace path")))},
 		{Name: "ci_pipeline_validate", Description: "Validate pipeline YAML and report structured errors.", InputSchema: obj("object", props("yaml", str("Pipeline YAML"), "workspace", str("Workspace path")))},
-		{Name: "ci_run", Description: "Start a pipeline or saved automation.", InputSchema: obj("object", props("workspace", str("Workspace path for .nusashell/pipeline.yaml"), "workflow_id", str("Saved automation id")))},
+		{Name: "ci_run", Description: "Start a pipeline or saved automation. Set async=true to return immediately with a run_id while the pipeline runs in the background; then use ci_wait or ci_run_status to check on it. Without async, the call blocks until the pipeline finishes.", InputSchema: obj("object", props("workspace", str("Workspace path for .nusashell/pipeline.yaml"), "workflow_id", str("Saved automation id"), "async", obj("boolean", nil)))},
+		{Name: "ci_wait", Description: "Block until a pipeline run reaches a terminal state (done, failed, cancelled, blocked) or the timeout expires. Use after ci_run with async=true. Returns the final run status and summary.", InputSchema: obj("object", props("run_id", str("Run id"), "timeout_ms", intSchema("Max wait in milliseconds (default 300000 = 5 min, max 3600000 = 1 h)")), "run_id")},
 		{Name: "ci_run_status", Description: "Return run status, DAG summary, and failed jobs. Use this after ci_run; do not fetch full logs unless a job failed.", InputSchema: obj("object", props("run_id", str("Run id")), "run_id")},
 		{Name: "ci_logs", Description: "Retrieve job logs (tail 200 by default). Prefer failed jobs.", InputSchema: obj("object", props("job_id", str("Job run id"), "run_id", str("Run id"), "limit", intSchema("Max chunks")), "job_id")},
 		{Name: "ci_cancel", Description: "Cancel a running pipeline/automation run.", InputSchema: obj("object", props("run_id", str("Run id")), "run_id")},
@@ -131,6 +132,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "schedule_once", Description: "Create a one-shot scheduled automation at an RFC3339 timestamp.", InputSchema: obj("object", props("at", str("RFC3339 time"), "yaml", str("Jobs YAML or a full workflow"), "name", str("Automation name")), "at")},
 		{Name: "schedule_every", Description: "Create a recurring automation. cron uses calendar semantics; interval uses elapsed time. They are not equivalent.", InputSchema: obj("object", props("cron", str("5-field cron"), "interval", str("Go duration such as 1h"), "timezone", str("IANA timezone"), "yaml", str("Jobs YAML"), "name", str("Name")))},
 		{Name: "wait_until", Description: "Explain or create a durable wait_until step. Waiting never keeps a runner occupied.", InputSchema: obj("object", props("at", str("RFC3339 time")), "at")},
+		{Name: "sleep", Description: "Pause for the given number of seconds (max 300). Use for retry backoff or to wait between polls of an async ci_run. Does not consume a provider round — the turn resumes after the pause.", InputSchema: obj("object", props("seconds", intSchema("Seconds to sleep (1-300)")), "seconds")},
 		{Name: "mcp_list", Description: "List configured MCP servers with their enabled status and runtime state (running/stopped).", InputSchema: obj("object", nil)},
 		{Name: "tool_list", Description: "List tools from a running MCP server by name (names and descriptions, plus optional input schemas). When the server is omitted, lists tools across all running MCP servers.", InputSchema: obj("object", props("server", str("Optional MCP server name; when omitted, lists tools across all running servers")))},
 		{Name: "tool_search", Description: "Search a running MCP server's tools by name or description (case-insensitive token match — any term matches). Returns matching tool names and descriptions.", InputSchema: obj("object", props("server", str("MCP server name"), "query", str("Search query")), "server", "query")},
@@ -155,33 +157,12 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 			application.ToolInfo{Name: "subagent_wait", Description: "Wait for an async ACP subagent run to finish.", InputSchema: obj("object", props("id", str("ACP run id"), "timeout_ms", intSchema("Optional wait timeout in milliseconds")), "id")},
 		)
 	}
-	if t.Plugins != nil {
-		plugins, _ := t.Plugins.List()
-		for _, p := range plugins {
-			// Dynamic parity: only tools of plugins that are explicitly
-			// ENABLED (connected via mcp_enable / plugin.test) are exposed to
-			// the agent. Idle plugins stay out of the tool definitions to
-			// save tokens and match the NusaShell flow (mcp_list → mcp_enable).
-			dt, ok := t.MCP.ToolsFor(p.Manifest.MCPServerID())
-			if !ok {
-				continue
-			}
-			for _, tool := range dt {
-				var schema map[string]any
-				if len(tool.InputSchema) > 0 {
-					_ = json.Unmarshal(tool.InputSchema, &schema)
-				}
-				if schema == nil {
-					schema = obj("object", nil)
-				}
-				tools = append(tools, application.ToolInfo{
-					Name:        "mcp__" + p.Manifest.Name + "__" + tool.Name,
-					Description: tool.Description,
-					InputSchema: schema,
-				})
-			}
-		}
-	}
+	// MCP plugin tools are NOT advertised to the agent. The tool list must
+	// stay stable for the lifetime of a conversation so the provider prompt
+	// cache (OpenAI / Claude) is not invalidated. The agent can still inspect
+	// MCP servers via mcp_list, tool_list, tool_search, and tool_schema, but
+	// cannot call mcp__<server>__<tool> directly. MCP tools are available to
+	// pipeline workflow steps (capability resolution) and the Plugins UI.
 	if sw := t.webAnswerSearcher(); sw != nil && sw.CanAnswer() {
 		providers := sw.AvailableAnswerProviders()
 		providerList := strings.Join(providers, ", ")
@@ -1010,13 +991,35 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		sb.WriteString(fmt.Sprintf("Provider: %s\n\n", answer.Provider))
 		sb.WriteString(answer.Text)
 		return sb.String(), nil
+	case name == "sleep":
+		var args struct {
+			Seconds int `json:"seconds"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+		if args.Seconds < 1 {
+			return "", fmt.Errorf("seconds must be at least 1")
+		}
+		if args.Seconds > 300 {
+			args.Seconds = 300
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(time.Duration(args.Seconds) * time.Second):
+		}
+		return fmt.Sprintf("Slept %d seconds.", args.Seconds), nil
 	}
 
 	if out, handled, err := t.executeAutomation(ctx, name, argsJSON); handled {
 		return out, err
 	}
 
-	// dynamic MCP tools: mcp__<server>__<tool>
+	// MCP plugin tools: mcp__<server>__<tool>. These are NOT advertised in
+	// ListTools() to keep the provider tool list stable (prompt cache), but
+	// the agent can still discover them via tool_list / tool_schema and call
+	// them by name. Execution validates against the connected MCP server.
 	if rest, ok := strings.CutPrefix(name, "mcp__"); ok {
 		plugins, _ := t.Plugins.List()
 		plugin, toolName, ok := matchMCPTool(rest, plugins)
@@ -1250,7 +1253,7 @@ func matchMCPTool(rest string, plugins []*domain.Plugin) (*domain.Plugin, string
 func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON []byte) (string, bool, error) {
 	if t.Automation == nil {
 		switch name {
-		case "ci_pipeline_list", "ci_pipeline_read", "ci_pipeline_validate", "ci_run", "ci_run_status",
+		case "ci_pipeline_list", "ci_pipeline_read", "ci_pipeline_validate", "ci_run", "ci_wait", "ci_run_status",
 			"ci_logs", "ci_cancel", "ci_steer", "automation_list", "automation_read", "automation_validate",
 			"automation_create", "automation_enable", "automation_disable", "automation_status",
 			"schedule_once", "schedule_every", "wait_until":
@@ -1289,12 +1292,44 @@ func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON [
 		r, _ := a.ValidateYAML(raw)
 		return encode(r, nil)
 	case "ci_run":
+		async, _ := args["async"].(bool)
 		if id := str("workflow_id"); id != "" {
-			run, err := a.RunWorkflow(ctx, id, "agent")
+			var run *domain.WorkflowRun
+			var err error
+			if async {
+				run, err = a.RunWorkflowAsync(ctx, id, "agent")
+			} else {
+				run, err = a.RunWorkflow(ctx, id, "agent")
+			}
 			return encode(run, err)
 		}
-		run, err := a.StartPipeline(ctx, str("workspace"), "agent")
+		var run *domain.WorkflowRun
+		var err error
+		if async {
+			run, err = a.StartPipelineAsync(ctx, str("workspace"), "agent")
+		} else {
+			run, err = a.StartPipeline(ctx, str("workspace"), "agent")
+		}
 		return encode(run, err)
+	case "ci_wait":
+		timeoutMs, _ := args["timeout_ms"].(float64)
+		timeout := 5 * time.Minute
+		if timeoutMs > 0 {
+			timeout = time.Duration(timeoutMs) * time.Millisecond
+		}
+		if timeout > time.Hour {
+			timeout = time.Hour
+		}
+		run, err := a.WaitRun(ctx, str("run_id"), timeout)
+		if err != nil {
+			return "", true, err
+		}
+		sum := run.Summary()
+		return encode(map[string]any{
+			"run_id": run.ID, "status": run.Status, "wake_at": run.WakeAt,
+			"summary": sum, "blocked_reason": run.BlockedReason,
+			"timed_out": !run.Status.IsTerminal(),
+		}, nil)
 	case "ci_run_status", "automation_status":
 		run, err := a.Runs.Get(ctx, str("run_id"))
 		if err != nil {

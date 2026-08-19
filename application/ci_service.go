@@ -72,6 +72,16 @@ func (a *Automation) ReadPipeline(ctx context.Context, workspace string) (*domai
 }
 
 func (a *Automation) StartPipeline(ctx context.Context, workspace string, requestedBy string) (*domain.WorkflowRun, error) {
+	return a.startPipeline(ctx, workspace, requestedBy, false)
+}
+
+// StartPipelineAsync is like StartPipeline but schedules the run in a
+// background goroutine so the caller receives the run immediately.
+func (a *Automation) StartPipelineAsync(ctx context.Context, workspace string, requestedBy string) (*domain.WorkflowRun, error) {
+	return a.startPipeline(ctx, workspace, requestedBy, true)
+}
+
+func (a *Automation) startPipeline(ctx context.Context, workspace string, requestedBy string, async bool) (*domain.WorkflowRun, error) {
 	w, r, err := a.ReadPipeline(ctx, workspace)
 	if err != nil {
 		return nil, err
@@ -90,8 +100,12 @@ func (a *Automation) StartPipeline(ctx context.Context, workspace string, reques
 	}
 	run := NewWorkflowRun(*w, requestedBy)
 	run.Workspace = workspace
-	if err := a.Exec.StartRun(ctx, run); err != nil {
-		return run, err
+	startErr := a.Exec.StartRun(ctx, run)
+	if async {
+		startErr = a.Exec.StartRunAsync(ctx, run)
+	}
+	if startErr != nil {
+		return run, startErr
 	}
 	return a.Exec.Runs.Get(ctx, run.ID)
 }
@@ -121,15 +135,54 @@ func (a *Automation) SaveWorkflow(ctx context.Context, w *domain.WorkflowDefinit
 }
 
 func (a *Automation) RunWorkflow(ctx context.Context, id, requestedBy string) (*domain.WorkflowRun, error) {
+	return a.runWorkflow(ctx, id, requestedBy, false)
+}
+
+// RunWorkflowAsync is like RunWorkflow but schedules in the background.
+func (a *Automation) RunWorkflowAsync(ctx context.Context, id, requestedBy string) (*domain.WorkflowRun, error) {
+	return a.runWorkflow(ctx, id, requestedBy, true)
+}
+
+func (a *Automation) runWorkflow(ctx context.Context, id, requestedBy string, async bool) (*domain.WorkflowRun, error) {
 	w, err := a.Workflows.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	run := NewWorkflowRun(*w, requestedBy)
-	if err := a.Exec.StartRun(ctx, run); err != nil {
-		return run, err
+	var startErr error
+	if async {
+		startErr = a.Exec.StartRunAsync(ctx, run)
+	} else {
+		startErr = a.Exec.StartRun(ctx, run)
+	}
+	if startErr != nil {
+		return run, startErr
 	}
 	return a.Exec.Runs.Get(ctx, run.ID)
+}
+
+// WaitRun blocks until the run reaches a terminal state or the timeout
+// expires. Returns the latest run snapshot. A non-positive timeout means
+// poll once and return immediately.
+func (a *Automation) WaitRun(ctx context.Context, runID string, timeout time.Duration) (*domain.WorkflowRun, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		run, err := a.Exec.Runs.Get(ctx, runID)
+		if err != nil {
+			return nil, err
+		}
+		if run.Status.IsTerminal() {
+			return run, nil
+		}
+		if timeout > 0 && time.Now().After(deadline) {
+			return run, nil
+		}
+		select {
+		case <-ctx.Done():
+			return run, ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
 }
 
 func workflowDTO(w *domain.WorkflowDefinition, avail string, reason string) contracts.AutomationDTO {

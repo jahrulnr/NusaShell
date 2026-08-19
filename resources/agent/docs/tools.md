@@ -31,7 +31,8 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `ci_pipeline_list` | list `.nusashell/pipeline.yaml` jobs in a workspace |
 | `ci_pipeline_read` | read and validate the workspace pipeline |
 | `ci_pipeline_validate` | validate pipeline/workflow YAML (INVALID vs BLOCKED) |
-| `ci_run` | start a workspace pipeline or a saved automation |
+| `ci_run` | start a workspace pipeline or a saved automation; set `async: true` to return immediately with a `run_id` while the pipeline runs in the background |
+| `ci_wait` | block until a run reaches a terminal state or the timeout expires; use after `ci_run` with `async: true` |
 | `ci_run_status` | DAG summary and status; use this after `ci_run` |
 | `ci_logs` | job log tail (prefer failed jobs) |
 | `ci_cancel` | cancel a run |
@@ -44,6 +45,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `schedule_once` | one-shot RFC3339 automation |
 | `schedule_every` | cron or interval automation (not equivalent) |
 | `wait_until` | durable wait; the runner is not occupied |
+| `sleep` | pause 1–300 seconds; use for retry backoff or between polls of an async `ci_run` |
 | `subagent` | spawn 1–6 ACP coding-agent sessions (only listed when at least one ACP agent is enabled in Providers; never listed for pipeline `agent:` steps) |
 | `subagent_steer` | queue an extra instruction on a live ACP run |
 | `subagent_stop` | cancel a live ACP run (pending permissions fail closed) |
@@ -53,7 +55,13 @@ The system prompt advertises the same set: `skill_list`, `skill_search`,
 `skill_read`, `memory_*`, `docs_*`, `mcp_list`, `tool_list`, `tool_search`,
 `tool_schema`, `read_image`, `read_audio`, `read_video`, `web_search`, `web_fetch`,
 `web_answer` (when available), `ci_*`, `automation_*`, `schedule_once`,
-`schedule_every`, `wait_until`, plus `mcp__<server>__<tool>` for each enabled MCP server.
+`schedule_every`, `wait_until`, `sleep`.
+MCP plugin tools (`mcp__<server>__<tool>`) are NOT advertised in the tool
+list — the tool list must stay stable for the lifetime of a conversation so
+the provider prompt cache (OpenAI / Claude) is not invalidated. The agent
+can still discover MCP tools via `tool_list` / `tool_search` / `tool_schema`
+and call them by name (`mcp__<server>__<tool>`); execution validates against
+the connected MCP server at call time.
 When at least one ACP agent is enabled, the interactive toolbox also advertises
 `subagent`, `subagent_steer`, `subagent_stop`, and `subagent_wait`. ACP agents
 do not receive this conversation, NusaShell MCP plugins, or shell meta-tools.

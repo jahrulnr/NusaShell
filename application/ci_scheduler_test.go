@@ -325,3 +325,97 @@ func TestConcurrencySkip(t *testing.T) {
 func (a *Automation) LocksAcquireForTest(key, runID string) {
 	_ = a.Auto.Locks.Acquire(context.Background(), key, runID)
 }
+
+func TestStartRunAsyncReturnsImmediately(t *testing.T) {
+	fx := &fakeExec{Slow: 100 * time.Millisecond}
+	svc, _, _ := testAutomation(t, fx)
+	w := &domain.WorkflowDefinition{
+		ID:   "async",
+		Name: "async",
+		Jobs: []domain.Job{{ID: "j", Steps: []domain.Step{{ID: "s", Run: "echo"}}}},
+	}
+	run := NewWorkflowRun(*w, "test")
+	start := time.Now()
+	if err := svc.Exec.StartRunAsync(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	elapsed := time.Since(start)
+	if elapsed > 50*time.Millisecond {
+		t.Fatalf("StartRunAsync blocked for %v, should return immediately", elapsed)
+	}
+	got, err := svc.Runs.Get(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != domain.StatusQueued && got.Status != domain.StatusRunning && got.Status != domain.StatusSuccess {
+		t.Fatalf("unexpected initial status %s", got.Status)
+	}
+}
+
+func TestStartRunAsyncCompletesInBackground(t *testing.T) {
+	fx := &fakeExec{}
+	svc, _, _ := testAutomation(t, fx)
+	w := &domain.WorkflowDefinition{
+		ID:   "async-done",
+		Name: "async-done",
+		Jobs: []domain.Job{{ID: "j", Steps: []domain.Step{{ID: "s", Run: "echo"}}}},
+	}
+	run := NewWorkflowRun(*w, "test")
+	if err := svc.Exec.StartRunAsync(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		got, _ := svc.Runs.Get(context.Background(), run.ID)
+		if got.Status.IsTerminal() {
+			if got.Status != domain.StatusSuccess {
+				t.Fatalf("expected success, got %s", got.Status)
+			}
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("run did not complete within 2s")
+}
+
+func TestWaitRunBlocksUntilTerminal(t *testing.T) {
+	fx := &fakeExec{Slow: 50 * time.Millisecond}
+	svc, _, _ := testAutomation(t, fx)
+	w := &domain.WorkflowDefinition{
+		ID:   "wait",
+		Name: "wait",
+		Jobs: []domain.Job{{ID: "j", Steps: []domain.Step{{ID: "s", Run: "echo"}}}},
+	}
+	run := NewWorkflowRun(*w, "test")
+	if err := svc.Exec.StartRunAsync(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.WaitRun(context.Background(), run.ID, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Status.IsTerminal() {
+		t.Fatalf("expected terminal status, got %s", got.Status)
+	}
+}
+
+func TestWaitRunTimeoutReturnsNonTerminal(t *testing.T) {
+	fx := &fakeExec{Slow: 2 * time.Second}
+	svc, _, _ := testAutomation(t, fx)
+	w := &domain.WorkflowDefinition{
+		ID:   "wait-timeout",
+		Name: "wait-timeout",
+		Jobs: []domain.Job{{ID: "j", Steps: []domain.Step{{ID: "s", Run: "echo"}}}},
+	}
+	run := NewWorkflowRun(*w, "test")
+	if err := svc.Exec.StartRunAsync(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.WaitRun(context.Background(), run.ID, 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.IsTerminal() {
+		t.Fatalf("expected non-terminal status before slow job finishes, got %s", got.Status)
+	}
+}

@@ -68,6 +68,25 @@ func (s *ExecutionScheduler) StartRun(ctx context.Context, run *domain.WorkflowR
 	return s.Tick(ctx, run.ID)
 }
 
+// StartRunAsync persists a snapshot, then begins scheduling in a background
+// goroutine with a detached context. The caller receives the run ID
+// immediately and can poll status with ci_run_status or block with ci_wait.
+// Cancel still works: it sets terminal status, which the Tick loop observes
+// on its next iteration.
+func (s *ExecutionScheduler) StartRunAsync(ctx context.Context, run *domain.WorkflowRun) error {
+	if run.Status == "" {
+		run.Status = domain.StatusQueued
+	}
+	t := s.now().UTC()
+	run.CreatedAt = t
+	if err := s.Runs.Create(ctx, run); err != nil {
+		return err
+	}
+	s.emit(contracts.EventCIRunCreated, map[string]any{"run_id": run.ID, "workflow_id": run.WorkflowID, "status": run.Status})
+	go func() { _ = s.Tick(context.Background(), run.ID) }()
+	return nil
+}
+
 // Tick re-evaluates one run.
 func (s *ExecutionScheduler) Tick(ctx context.Context, runID string) error {
 	run, err := s.Runs.Get(ctx, runID)

@@ -1063,6 +1063,7 @@ type SettingsDTO struct {
 	MaxToolRounds           int      `json:"max_tool_rounds"`
 	MaxInputTokens          int      `json:"max_input_tokens"`
 	MaxOutputTokens         int      `json:"max_output_tokens"`
+	MaxParallelTools        int      `json:"max_parallel_tools,omitempty"`
 	EmbeddingProviderID     string   `json:"embedding_provider_id,omitempty"`
 	EmbeddingModelID        string   `json:"embedding_model_id,omitempty"`
 	VisionProviderID        string   `json:"vision_provider_id,omitempty"`
@@ -1093,6 +1094,7 @@ type SettingsSetRequest struct {
 	MaxToolRounds           *int            `json:"max_tool_rounds,omitempty"`
 	MaxInputTokens          *int            `json:"max_input_tokens,omitempty"`
 	MaxOutputTokens         *int            `json:"max_output_tokens,omitempty"`
+	MaxParallelTools        *int            `json:"max_parallel_tools,omitempty"`
 	EmbeddingProviderID     *string         `json:"embedding_provider_id,omitempty"`
 	EmbeddingModelID        *string         `json:"embedding_model_id,omitempty"`
 	VisionProviderID        *string         `json:"vision_provider_id,omitempty"`

@@ -70,6 +70,7 @@ export async function refresh() {
     document.getElementById('settings-compaction-enabled').checked = settings.compaction_enabled !== false;
     document.getElementById('settings-prompt-caching').checked = settings.prompt_caching === true;
     document.getElementById('settings-max-tool-rounds').value = settings.max_tool_rounds ?? 8;
+    document.getElementById('settings-max-parallel-tools').value = settings.max_parallel_tools ?? 6;
     document.getElementById('settings-max-input-tokens').value = settings.max_input_tokens ?? 200000;
     document.getElementById('settings-compaction-threshold').value = settings.compaction_threshold ?? 0;
     document.getElementById('settings-max-output-tokens').value = settings.max_output_tokens ?? 65536;
@@ -245,8 +246,13 @@ async function save() {
   const maxToolRounds = Number(document.getElementById('settings-max-tool-rounds').value);
   const maxInputTokens = Number(document.getElementById('settings-max-input-tokens').value);
   const maxOutputTokens = Number(document.getElementById('settings-max-output-tokens').value);
+  const maxParallelTools = Number(document.getElementById('settings-max-parallel-tools').value);
   if (!Number.isInteger(maxToolRounds) || maxToolRounds < 1 || maxToolRounds > 10000) {
     setStatus('Maximum tool rounds must be between 1 and 10,000.', true);
+    return;
+  }
+  if (!Number.isInteger(maxParallelTools) || maxParallelTools < 1 || maxParallelTools > 64) {
+    setStatus('Max parallel tools must be between 1 and 64.', true);
     return;
   }
   if (!Number.isInteger(maxInputTokens) || maxInputTokens < 1000 || maxInputTokens > 2000000) {
@@ -289,6 +295,7 @@ async function save() {
       compaction_enabled: document.getElementById('settings-compaction-enabled').checked,
       prompt_caching: document.getElementById('settings-prompt-caching').checked,
       max_tool_rounds: maxToolRounds,
+      max_parallel_tools: maxParallelTools,
       max_input_tokens: maxInputTokens,
       compaction_threshold: compactionThreshold,
       max_output_tokens: maxOutputTokens,

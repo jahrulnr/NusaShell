@@ -701,6 +701,9 @@ func waitTurnDone(t *testing.T, h *harness, convID string) {
 }
 
 // TestAgentTurnWithMCPTool executes a real MCP stdio tool through the agent.
+// MCP tools are not advertised in the tool list (prompt cache stability), but
+// the agent can still discover them via tool_list / tool_schema and call them
+// by name — execution validates against the connected MCP server.
 func TestAgentTurnWithMCPTool(t *testing.T) {
 	h := newHarness(t, nil)
 	pid := h.addOpenAIProvider(t, "Fake")
@@ -736,7 +739,8 @@ func TestAgentTurnWithMCPTool(t *testing.T) {
 		t.Fatalf("mcp tools = %+v", tools.Tools)
 	}
 
-	// agent turn that calls the MCP echo tool
+	// agent turn that calls the MCP echo tool by name (not advertised, but
+	// still executable via matchMCPTool dispatch).
 	h.llm.setRounds([][]llmStep{
 		{{Tool: &llmToolCall{ID: "call_9", Name: "mcp__fakemcp__echo", Args: map[string]any{"text": "hello-mcp"}}}},
 		{{Text: "Echo done."}},
