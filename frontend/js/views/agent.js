@@ -297,6 +297,7 @@ function renderConversationList() {
           state.attachments = [];
           state.steerId = null;
           state.steerDraft = '';
+          state.contextEstimate = 0;
           state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 }, goal: '' };
           state.todoRenderToken++;
           clearSteerQueue();
