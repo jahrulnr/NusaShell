@@ -1,6 +1,6 @@
 # Providers
 
-Configure LLM chat backends by wire format (Messages, Responses, Chat, Ollama, Codex) and spawn-only ACP subagent binaries. Chat API keys live in the local SQLite credential store. ACP env values stay on disk in config/acp-agents.json; the wire API only returns env keys.
+Configure LLM chat backends by wire format (Messages, Responses, Chat, Ollama, Codex) and spawn-only ACP subagent binaries. Chat API keys live in the local SQLite credential store. ACP env values stay on disk in acp-agents.json; the wire API only returns env keys.
 
 **How to open:** Click the Providers item in the left sidebar.
 

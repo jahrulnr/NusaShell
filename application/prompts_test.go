@@ -102,6 +102,8 @@ func TestSystemPromptRoutesArtifactGuidance(t *testing.T) {
 		"sandboxed iframe",
 		"prefer reusing CDNs",
 		"64k token budget",
+		"width and height are required",
+		"640x480",
 	} {
 		if !strings.Contains(prompt, expected) {
 			t.Errorf("system prompt missing artifact guidance for %q", expected)

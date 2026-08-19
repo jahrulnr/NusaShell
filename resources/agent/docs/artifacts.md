@@ -20,17 +20,36 @@ diagram is cheaper and renders inline.
 
 ## Tools
 
-- `artifact_create(html, css?, js?, title?, width?, height?)` — create a
-  new artifact, returns `{ "artifact": { id, title, html, css, js, width,
-  height } }`. The UI renders it as a card; the user clicks to open the
-  iframe.
+- `artifact_create(html, css?, js?, title?, width, height)` — create a
+  new artifact. `width` and `height` are **required** (pixels) and
+  control the iframe viewport size. Returns
+  `{ "artifact": { id, title, html, css, js, width, height } }`. The UI
+  renders it as a card; the user clicks to open the iframe.
 - `artifact_update(id, html?, css?, js?, title?)` — partial update. Only
   the fields you pass are replaced; omitted fields keep their current
   value. Use this for small edits instead of re-outputting the whole
-  artifact.
+  artifact. Width and height are preserved from the original.
 - `artifact_read(id)` — read an artifact's full content.
 - `artifact_list()` — list artifacts in the current conversation.
 - `artifact_delete(id)` — delete an artifact.
+
+## Sizing guide
+
+`width` and `height` are required on `artifact_create`. The iframe fills
+the thread width (CSS `width: 100%`), so `width` controls the max
+rendering width and `height` controls the visible viewport. Pick the
+smallest size that comfortably fits the content — too small crops the
+view, too large dominates the thread.
+
+| Content type | width | height | Notes |
+|---|---|---|---|
+| Prototype / minigame | 640 | 480 | Classic 4:3, fits most game loops |
+| Dashboard / charts | 720 | 400 | Wider for side-by-side panels |
+| Widget / calculator | 360 | 480 | Narrow, phone-like |
+| Timeline / list | 640 | 600 | Tall scrollable content |
+| Full-page demo | 800 | 600 | When the artifact is the main output |
+
+When in doubt, use 640x480.
 
 ## Token budget
 
@@ -50,6 +69,13 @@ available at `/vendor/...` paths inside the iframe.
       js="const c=document.getElementById('c');/* minigame loop */",
       title="Pong prototype",
       width=640, height=480,
+    )
+
+    artifact_create(
+      html="<div id='chart'></div>",
+      js="/* chartjs render */",
+      title="Sales dashboard",
+      width=720, height=400,
     )
 
     artifact_update(id="art_01J…", js="/* fix: ball speed */")

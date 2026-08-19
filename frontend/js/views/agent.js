@@ -23,6 +23,7 @@ import {
 } from './agent/render.js';
 import { bindSubagents, setSubagentConversation } from './agent/subagents.js';
 import { renderMermaidDiagrams } from '../mermaid-render.js';
+import { renderArtifactCard, parseArtifactOutput } from '../artifact-render.js';
 import { createAskCard, sealAskCard, cancelAskCard } from './ask-card.js';
 import { playComplete, playError } from '../sounds.js';
 
@@ -1453,15 +1454,29 @@ function bindEvents() {
       const buffer = getOrCreateRoomBuffer(conversation_id);
       const job = buffer.toolJobs.get(tool_call_id);
       if (job) {
-        const next = { name, args: job._toolArgs, status: status || 'ok', output };
-        setToolTerminalStatus(job, next.status);
-        job.open = false;
-        const meta = job.querySelector('.agent-tool-terminal-meta');
-        if (meta) meta.textContent = toolTerminalMeta(next);
-        const outputEl = job.querySelector('.agent-tool-terminal-output');
-        if (outputEl) {
-          outputEl.classList.toggle('is-error', next.status === 'fail');
-          outputEl.textContent = toolTerminalOutput(next);
+        // artifact_create / artifact_update: swap terminal for artifact card
+        // in the buffer too, so a room switch-back shows the card directly.
+        if (name === 'artifact_create' || name === 'artifact_update') {
+          if (job._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
+          const toolCall = { name, args: job._toolArgs ?? {}, output: output ?? '', status: status || 'ok' };
+          const artifact = parseArtifactOutput(toolCall);
+          if (artifact) {
+            const card = renderArtifactCard(toolCall, artifact);
+            card._toolArgs = toolCall.args;
+            job.replaceWith(card);
+            buffer.toolJobs.set(tool_call_id, card);
+          }
+        } else {
+          const next = { name, args: job._toolArgs, status: status || 'ok', output };
+          setToolTerminalStatus(job, next.status);
+          job.open = false;
+          const meta = job.querySelector('.agent-tool-terminal-meta');
+          if (meta) meta.textContent = toolTerminalMeta(next);
+          const outputEl = job.querySelector('.agent-tool-terminal-output');
+          if (outputEl) {
+            outputEl.classList.toggle('is-error', next.status === 'fail');
+            outputEl.textContent = toolTerminalOutput(next);
+          }
         }
       }
       touchRoomBuffer(buffer);
@@ -1474,6 +1489,23 @@ function bindEvents() {
     if (name === 'ask_question') {
       const job = run.toolJobs.get(tool_call_id);
       if (job?._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
+      return;
+    }
+    // artifact_create / artifact_update: replace the tool terminal with an
+    // artifact card once the tool settles. During execution the user sees a
+    // normal tool terminal (so they know something is running); after
+    // completion the terminal is swapped for the clickable artifact card.
+    if (name === 'artifact_create' || name === 'artifact_update') {
+      const job = run.toolJobs.get(tool_call_id);
+      if (job?._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
+      const toolCall = { name, args: job?._toolArgs ?? {}, output: output ?? '', status: status || 'ok' };
+      const artifact = parseArtifactOutput(toolCall);
+      if (artifact && job) {
+        const card = renderArtifactCard(toolCall, artifact);
+        job.replaceWith(card);
+        run.toolJobs.set(tool_call_id, card);
+        card._toolArgs = toolCall.args;
+      }
       return;
     }
     const job = run.toolJobs.get(tool_call_id);

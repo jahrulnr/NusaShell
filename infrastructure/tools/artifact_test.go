@@ -69,10 +69,12 @@ func TestArtifactCreateReturnsArtifact(t *testing.T) {
 	tb := artifactToolbox(t)
 	ctx := artifactCtx("conv1")
 	out, err := tb.Execute(ctx, "artifact_create", mustJSON(t, map[string]any{
-		"html":  "<h1>Hello</h1>",
-		"css":   "h1{color:red}",
-		"js":    "console.log('hi')",
-		"title": "Test",
+		"html":   "<h1>Hello</h1>",
+		"css":    "h1{color:red}",
+		"js":     "console.log('hi')",
+		"title":  "Test",
+		"width":  640,
+		"height": 480,
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +102,7 @@ func TestArtifactCreateReturnsArtifact(t *testing.T) {
 
 func TestArtifactCreateRequiresConversationContext(t *testing.T) {
 	tb := artifactToolbox(t)
-	_, err := tb.Execute(context.Background(), "artifact_create", mustJSON(t, map[string]any{"html": "<p/>"}))
+	_, err := tb.Execute(context.Background(), "artifact_create", mustJSON(t, map[string]any{"html": "<p/>", "width": 640, "height": 480}))
 	if err == nil {
 		t.Fatal("expected error for missing conversation context")
 	}
@@ -109,9 +111,22 @@ func TestArtifactCreateRequiresConversationContext(t *testing.T) {
 func TestArtifactCreateRejectsEmptyContent(t *testing.T) {
 	tb := artifactToolbox(t)
 	ctx := artifactCtx("conv1")
-	_, err := tb.Execute(ctx, "artifact_create", mustJSON(t, map[string]any{}))
+	_, err := tb.Execute(ctx, "artifact_create", mustJSON(t, map[string]any{"width": 640, "height": 480}))
 	if err == nil {
 		t.Fatal("expected error for empty artifact")
+	}
+}
+
+func TestArtifactCreateRequiresWidthAndHeight(t *testing.T) {
+	tb := artifactToolbox(t)
+	ctx := artifactCtx("conv1")
+	_, err := tb.Execute(ctx, "artifact_create", mustJSON(t, map[string]any{"html": "<p/>"}))
+	if err == nil {
+		t.Fatal("expected error for missing width and height")
+	}
+	_, err = tb.Execute(ctx, "artifact_create", mustJSON(t, map[string]any{"html": "<p/>", "width": 640}))
+	if err == nil {
+		t.Fatal("expected error for missing height")
 	}
 }
 
@@ -119,8 +134,10 @@ func TestArtifactUpdatePartialReplace(t *testing.T) {
 	tb := artifactToolbox(t)
 	ctx := artifactCtx("conv1")
 	out, err := tb.Execute(ctx, "artifact_create", mustJSON(t, map[string]any{
-		"html":  "<p>original</p>",
-		"title": "Original",
+		"html":   "<p>original</p>",
+		"title":  "Original",
+		"width":  640,
+		"height": 480,
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -165,7 +182,7 @@ func TestArtifactUpdateNotFound(t *testing.T) {
 	ctx := artifactCtx("conv1")
 	_, err := tb.Execute(ctx, "artifact_update", mustJSON(t, map[string]any{
 		"id":   "art_nonexistent",
-		"html": "<p/>",
+		"html": "<p/>", "width": 640, "height": 480,
 	}))
 	if err == nil {
 		t.Fatal("expected error for nonexistent artifact")
@@ -175,8 +192,8 @@ func TestArtifactUpdateNotFound(t *testing.T) {
 func TestArtifactListReturnsCreatedArtifacts(t *testing.T) {
 	tb := artifactToolbox(t)
 	ctx := artifactCtx("conv1")
-	tb.Execute(ctx, "artifact_create", mustJSON(t, map[string]any{"html": "<p>1</p>", "title": "First"}))
-	tb.Execute(ctx, "artifact_create", mustJSON(t, map[string]any{"html": "<p>2</p>", "title": "Second"}))
+	tb.Execute(ctx, "artifact_create", mustJSON(t, map[string]any{"html": "<p>1</p>", "title": "First", "width": 640, "height": 480}))
+	tb.Execute(ctx, "artifact_create", mustJSON(t, map[string]any{"html": "<p>2</p>", "title": "Second", "width": 640, "height": 480}))
 	out, err := tb.Execute(ctx, "artifact_list", mustJSON(t, map[string]any{}))
 	if err != nil {
 		t.Fatal(err)
@@ -197,7 +214,7 @@ func TestArtifactListReturnsCreatedArtifacts(t *testing.T) {
 func TestArtifactDeleteRemovesArtifact(t *testing.T) {
 	tb := artifactToolbox(t)
 	ctx := artifactCtx("conv1")
-	out, _ := tb.Execute(ctx, "artifact_create", mustJSON(t, map[string]any{"html": "<p/>"}))
+	out, _ := tb.Execute(ctx, "artifact_create", mustJSON(t, map[string]any{"html": "<p/>", "width": 640, "height": 480}))
 	var created struct {
 		Artifact struct {
 			ID string `json:"id"`
@@ -224,7 +241,7 @@ func TestArtifactCreateRejectsOversized(t *testing.T) {
 	tb := artifactToolbox(t)
 	ctx := artifactCtx("conv1")
 	big := strings.Repeat("x", artifactMaxBytes+1)
-	_, err := tb.Execute(ctx, "artifact_create", mustJSON(t, map[string]any{"html": big}))
+	_, err := tb.Execute(ctx, "artifact_create", mustJSON(t, map[string]any{"html": big, "width": 640, "height": 480}))
 	if err == nil {
 		t.Fatal("expected error for oversized artifact")
 	}

@@ -62,6 +62,9 @@ func (t *Toolbox) artifactCreate(ctx context.Context, argsJSON []byte) (string, 
 	if strings.TrimSpace(args.HTML) == "" && strings.TrimSpace(args.CSS) == "" && strings.TrimSpace(args.JS) == "" {
 		return "", fmt.Errorf("at least one of html, css, or js is required")
 	}
+	if args.Width <= 0 || args.Height <= 0 {
+		return "", fmt.Errorf("width and height are required (pixels). Recommended: 640x480 for prototypes/games, 720x400 for dashboards, 360x480 for widgets/calculators, 640x600 for tall content (timelines, lists)")
+	}
 	if total := len(args.HTML) + len(args.CSS) + len(args.JS); total > artifactMaxBytes {
 		return "", fmt.Errorf("artifact too large: %d bytes (max %d); split into smaller updates or reuse CDNs for large libraries", total, artifactMaxBytes)
 	}

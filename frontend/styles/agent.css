@@ -1117,9 +1117,9 @@
 .artifact-frame {
   display: block;
   width: 100%;
+  max-width: 100%;
   border: 0;
   background: #fff;
-  min-height: 200px;
 }
 .artifact-error-overlay {
   padding: 10px 14px;
