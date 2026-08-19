@@ -501,10 +501,10 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 	toolRounds := 0
 	continuation := initialContinuation
 	continuedPartialStream := initialContinuation
-	// injectHydration is true on the first round of a turn (after the initial
-	// user message or post-compaction) and whenever a steer is applied (a new
-	// user message mid-turn). It is reset to false after the first round so
-	// subsequent tool rounds do not re-inject the synthetic transcript.
+	// injectHydration lets the first round create a checkpoint when the current
+	// history epoch has none, normally initially or after compaction. Existing
+	// checkpoints are reused across normal user messages and steers. The flag is
+	// reset after one round so later tool rounds do not repeat the check.
 	injectHydration := true
 	for {
 		round++
@@ -519,7 +519,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 			RunID: run.ID, ConversationID: run.ConversationID, MessageID: currentMsgID, Round: round,
 		})
 		roundResult, streamErr := a.streamTurnRound(run, adapter, conversation, currentMsgID, model, effort, toolsForRound, settings, continuation, maxTokens, injectHydration, promptCache, caps, systemPromptSuffix)
-		injectHydration = false // only the first round after a user message gets hydration
+		injectHydration = false // only the first round may create a missing checkpoint
 		continuation = false
 		totalUsage = mergeUsage(totalUsage, roundResult.Response.Usage)
 		if roundResult.Response.Usage.ContextTokens() > 0 {
@@ -621,7 +621,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 					a.failTurn(run, currentMsgID, err)
 					return false, ""
 				}
-				injectHydration = true // steer is a new user message — re-hydrate
+				injectHydration = true // allow a missing post-compaction checkpoint
 				continue
 			}
 			break
@@ -647,7 +647,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 		}
 		if applied {
 			conversation = steerConv
-			injectHydration = true // steer is a new user message — re-hydrate
+			injectHydration = true // allow a missing post-compaction checkpoint
 		}
 
 		conversation, currentMsgID, err = a.appendTurnAssistant(run.ConversationID)

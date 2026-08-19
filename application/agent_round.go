@@ -121,14 +121,12 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 	// message-list prefix stable across tool rounds, so the provider can
 	// reuse prompt-cache hits from round 1 on round 2+.
 	//
-	// Hydration is persisted exactly once per user message: on the first round
-	// of a turn (after the initial user message or post-compaction), and once
-	// more when a steer is applied (a new user message mid-turn). If a
-	// hydration checkpoint already exists in the history (e.g. from a prior
-	// round of the same turn), it is reused as-is. Re-injecting every tool
-	// round causes smaller models to misinterpret the synthetic tool calls as
-	// a pattern to repeat ("call all tools in parallel every round"), leading
-	// to redundant parallel tool calls.
+	// Hydration is persisted once per history epoch. Normal user messages and
+	// steers reuse the checkpoint already present in conversation history.
+	// Compaction strips that checkpoint, so the first post-compaction round
+	// creates a fresh one. Re-injecting it while history is intact causes smaller
+	// models to misinterpret the synthetic tool calls as a pattern to repeat
+	// ("call all tools in parallel every round") and wastes context.
 	//
 	// The hydration messages are marked with the "hydrate-" tool call ID
 	// prefix so the UI can filter them out of the visible conversation and
@@ -282,10 +280,9 @@ func (a *App) persistHydration(c *domain.Conversation, msgs []ChatMessage) *doma
 	return c
 }
 
-// buildHydration assembles the synthetic runtime-hydration transcript from the
-// App's read-only stores. The transcript is rebuilt fresh for each provider
-// request so runtime facts (date, workspace, memory, skills, MCP catalog,
-// tool catalog) stay current.
+// buildHydration assembles a synthetic runtime-hydration checkpoint from the
+// App's read-only stores when the current history epoch does not already have
+// one, normally on the initial turn or immediately after compaction.
 func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
 	source := HydrationSource{
 		RuntimeContext: DefaultRuntimeContext(c.Workspace),

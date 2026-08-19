@@ -130,6 +130,7 @@ func (s *Source) Search(query string, limit int) []application.DocHit {
 }
 
 func (s *Source) Read(id string) (application.DocFull, error) {
+	id = strings.TrimSuffix(strings.TrimSpace(id), ".md")
 	for _, d := range s.docs {
 		if d.id == id {
 			return application.DocFull{

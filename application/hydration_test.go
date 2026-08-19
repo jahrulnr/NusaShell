@@ -258,8 +258,8 @@ func TestHydrationMcpList(t *testing.T) {
 func TestHydrationToolList(t *testing.T) {
 	b := NewHydrationBuilder(HydrationSource{
 		Tools: []ToolInfo{
-			{Name: "skill_list", Description: "List skills"},
-			{Name: "memory_save", Description: "Save memory"},
+			{Name: "skill_list", Description: "List skills", InputSchema: map[string]any{"type": "object"}},
+			{Name: "memory_save", Description: "Save memory", InputSchema: map[string]any{"type": "object"}},
 		},
 	})
 	result := b.Build()
@@ -267,7 +267,9 @@ func TestHydrationToolList(t *testing.T) {
 	var tl struct {
 		Count int `json:"count"`
 		Tools []struct {
-			Name string `json:"name"`
+			Name        string         `json:"name"`
+			Description string         `json:"description"`
+			InputSchema map[string]any `json:"input_schema"`
 		} `json:"tools"`
 	}
 	if err := json.Unmarshal([]byte(toolContent), &tl); err != nil {
@@ -279,6 +281,14 @@ func TestHydrationToolList(t *testing.T) {
 	// Should be sorted
 	if tl.Tools[0].Name != "memory_save" || tl.Tools[1].Name != "skill_list" {
 		t.Errorf("expected sorted tools, got %s %s", tl.Tools[0].Name, tl.Tools[1].Name)
+	}
+	for _, tool := range tl.Tools {
+		if tool.Description == "" {
+			t.Errorf("tool %s should keep its description", tool.Name)
+		}
+		if tool.InputSchema != nil {
+			t.Errorf("tool %s should omit its input schema from hydration", tool.Name)
+		}
 	}
 }
 
@@ -489,6 +499,19 @@ func TestHasHydrationTrue(t *testing.T) {
 	}, result.Messages...)
 	if !HasHydration(messages) {
 		t.Error("expected HasHydration=true")
+	}
+}
+
+func TestHasHydrationReusesCheckpointAfterLaterUserMessage(t *testing.T) {
+	b := NewHydrationBuilder(HydrationSource{})
+	result := b.Build()
+	messages := append([]ChatMessage{{Role: "user", Content: "hello"}}, result.Messages...)
+	messages = append(messages,
+		ChatMessage{Role: "assistant", Content: "hi"},
+		ChatMessage{Role: "user", Content: "follow up"},
+	)
+	if !HasHydration(messages) {
+		t.Error("expected the existing hydration checkpoint to remain reusable")
 	}
 }
 

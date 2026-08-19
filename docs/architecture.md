@@ -139,10 +139,11 @@ Credentials never touch the JSON/JSONL files. All writes are atomic
 
 ## Tools
 
-Built-in: `skill_list`, `skill_run`, `memory_save`, `memory_search`,
-`memory_list`, `memory_delete`, `docs_search`, `docs_read`. Each enabled MCP
-server contributes `mcp__<server>__<tool>` tools with the server's own
-schemas; stdio connections are lazy and cached per process.
+The built-in roster comes from `Toolbox.ListTools` and is documented in
+`resources/agent/docs/tools.md`. MCP tools are intentionally omitted from the
+provider's static `tools[]`; the agent discovers them with `mcp_list`,
+`tool_list` or `tool_search`, loads `tool_schema`, then calls the observed
+`mcp__<server>__<tool>` name. Stdio connections are lazy and cached per process.
 
 ## Verification baseline
 

@@ -104,12 +104,26 @@ func (s *Store) Install(sourceDir string) (*domain.Plugin, error) {
 	if err := manifest.Validate(); err != nil {
 		return nil, err
 	}
+	sourcePath, err := filepath.EvalSymlinks(sourceDir)
+	if err != nil {
+		return nil, fmt.Errorf("pluginfs: resolve source %s: %w", sourceDir, err)
+	}
+	rootPath, err := filepath.EvalSymlinks(s.root)
+	if err != nil {
+		return nil, fmt.Errorf("pluginfs: resolve root %s: %w", s.root, err)
+	}
+	if rel, err := filepath.Rel(rootPath, sourcePath); err == nil && (rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))) {
+		return nil, fmt.Errorf("pluginfs: source directory must be outside the installed plugins root: %s", sourceDir)
+	}
+
 	destDir := filepath.Join(s.root, manifest.ID)
 	// Remove existing plugin with same ID.
-	if _, err := os.Stat(destDir); err == nil {
+	if _, statErr := os.Stat(destDir); statErr == nil {
 		if err := os.RemoveAll(destDir); err != nil {
 			return nil, fmt.Errorf("pluginfs: remove old %s: %w", destDir, err)
 		}
+	} else if !os.IsNotExist(statErr) {
+		return nil, fmt.Errorf("pluginfs: stat destination %s: %w", destDir, statErr)
 	}
 	if err := copyDir(sourceDir, destDir); err != nil {
 		return nil, fmt.Errorf("pluginfs: copy %s → %s: %w", sourceDir, destDir, err)

@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +15,9 @@ import (
 	"nusashell/application"
 	"nusashell/contracts"
 	"nusashell/domain"
+	docsinfra "nusashell/infrastructure/docs"
+	"nusashell/infrastructure/pluginfs"
+	"nusashell/resources"
 )
 
 // stubSkillStore is a minimal SkillStore for testing.
@@ -947,6 +953,134 @@ func TestSleepToolDescriptionMentionsCap(t *testing.T) {
 		}
 	}
 	t.Fatal("sleep tool not found")
+}
+
+func TestDocsReadAcceptsCanonicalIDAndMarkdownFilename(t *testing.T) {
+	source, err := docsinfra.New("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tb := &Toolbox{Docs: source}
+	for _, id := range []string{"automation", "automation.md"} {
+		out, err := tb.Execute(context.Background(), "docs_read", []byte(fmt.Sprintf(`{"id":%q}`, id)))
+		if err != nil {
+			t.Fatalf("docs_read id %q: %v", id, err)
+		}
+		if !strings.Contains(out, "Automation and pipelines") {
+			t.Fatalf("docs_read id %q returned unexpected content: %s", id, out)
+		}
+		if !strings.Contains(out, "id: automation\n") {
+			t.Fatalf("docs_read id %q did not return canonical metadata: %s", id, out)
+		}
+	}
+}
+
+func TestAgentToolsDocMatchesBuiltInRoster(t *testing.T) {
+	content, err := resources.DocsFS.ReadFile("agent/docs/tools.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pattern := regexp.MustCompile("`([a-z][a-z0-9_]*)`")
+	documented := map[string]bool{}
+	for _, line := range strings.Split(string(content), "\n") {
+		if !strings.HasPrefix(line, "| `") {
+			continue
+		}
+		cells := strings.Split(line, "|")
+		for _, match := range pattern.FindAllStringSubmatch(cells[1], -1) {
+			documented[match[1]] = true
+		}
+	}
+	tb := testToolbox(nil, nil, &stubMCP{})
+	actual := map[string]bool{}
+	for _, tool := range tb.ListTools() {
+		actual[tool.Name] = true
+		if !documented[tool.Name] {
+			t.Errorf("agent tools documentation missing %q", tool.Name)
+		}
+	}
+	conditional := map[string]bool{
+		"web_answer": true, "subagent": true, "subagent_steer": true,
+		"subagent_stop": true, "subagent_wait": true,
+	}
+	for name := range documented {
+		if !actual[name] && !conditional[name] {
+			t.Errorf("agent tools documentation contains stale built-in %q", name)
+		}
+	}
+}
+
+func TestMcpCreatorSkillUsesRuntimeToolContract(t *testing.T) {
+	foundRuntimeName := false
+	err := fs.WalkDir(resources.BuiltinSkillsFS, "agent/skills/mcp-creator", func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() {
+			return walkErr
+		}
+		content, err := resources.BuiltinSkillsFS.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		text := string(content)
+		for _, stale := range []string{"mcp_context", "mcp_<pluginId>_<tool>", "capabilities.prompts", "prompts.js"} {
+			if strings.Contains(text, stale) {
+				t.Errorf("%s contains stale tool contract %q", path, stale)
+			}
+		}
+		foundRuntimeName = foundRuntimeName || strings.Contains(text, "mcp__<server>__<tool>")
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !foundRuntimeName {
+		t.Error("mcp-creator missing runtime MCP tool naming contract")
+	}
+}
+
+func TestTodoToolDescriptionMatchesSingleHydrationCheckpoint(t *testing.T) {
+	for _, tool := range testToolbox(nil, nil, &stubMCP{}).ListTools() {
+		if tool.Name != "todo" {
+			continue
+		}
+		if strings.Contains(tool.Description, "every turn") || !strings.Contains(tool.Description, "reused until compaction") {
+			t.Fatalf("todo description contradicts hydration lifecycle: %s", tool.Description)
+		}
+		return
+	}
+	t.Fatal("todo tool not found")
+}
+
+func TestMcpRegisterRejectsSourcesInsideInstalledRoot(t *testing.T) {
+	for _, nested := range []bool{false, true} {
+		t.Run(fmt.Sprintf("nested=%t", nested), func(t *testing.T) {
+			root := t.TempDir()
+			store, err := pluginfs.New(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			destination := filepath.Join(root, "same.plugin")
+			source := destination
+			if nested {
+				source = filepath.Join(destination, "staging")
+			}
+			if err := os.MkdirAll(source, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			manifestPath := filepath.Join(source, "manifest.json")
+			manifest := `{"id":"same.plugin","name":"Same Plugin","version":"1.0.0","icon":"S","mcp":{"transport":"stdio","command":"node"}}`
+			if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			tb := &Toolbox{Plugins: store}
+			_, err = tb.Execute(context.Background(), "mcp_register", []byte(fmt.Sprintf(`{"source":%q}`, source)))
+			if err == nil || !strings.Contains(err.Error(), "source directory must be outside the installed plugins root") {
+				t.Fatalf("expected installed-root rejection, got %v", err)
+			}
+			if _, err := os.Stat(manifestPath); err != nil {
+				t.Fatalf("installed-root rejection must preserve source files: %v", err)
+			}
+		})
+	}
 }
 
 func TestSleepToolRespectsContextCancellation(t *testing.T) {

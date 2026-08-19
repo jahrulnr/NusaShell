@@ -59,3 +59,68 @@ func TestBuildSystemPromptWhitespaceUserPromptIgnored(t *testing.T) {
 		t.Error("whitespace-only user prompt should not be injected")
 	}
 }
+
+func TestAgentPromptsUseCanonicalDocIDs(t *testing.T) {
+	prompt := strings.Join([]string{systemPrompt, toolsPrompt, subagentDelegationPrompt}, "\n")
+	for _, stale := range []string{"`mcp.md`", "`agent-attachments.md`", "`automation.md`", "`agent-subagents.md`"} {
+		if strings.Contains(prompt, stale) {
+			t.Errorf("prompt contains non-canonical documentation id %s", stale)
+		}
+	}
+	for _, canonical := range []string{"`mcp`", "`agent-attachments`", "`automation`", "`agent-subagents`"} {
+		if !strings.Contains(prompt, canonical) {
+			t.Errorf("prompt missing canonical documentation id %s", canonical)
+		}
+	}
+}
+
+func TestAgentPromptRoutesCommonToolWorkflows(t *testing.T) {
+	prompt := strings.Join(strings.Fields(systemPrompt+"\n"+toolsPrompt), " ")
+	for _, expected := range []string{
+		"Skip TODOs for one-step answers or lookups",
+		"docs_read",
+		"docs_search",
+		"skill_read",
+		"web_search",
+		"web_fetch",
+		"ask_question",
+		"memory_search",
+		"subagent",
+	} {
+		if !strings.Contains(prompt, expected) {
+			t.Errorf("agent prompt missing workflow routing guidance for %q", expected)
+		}
+	}
+}
+
+func TestSystemPromptRoutesIntentEvidenceAndRisk(t *testing.T) {
+	prompt := strings.Join(strings.Fields(systemPrompt), " ")
+	for _, expected := range []string{
+		"discussion or an execution task",
+		"fictional or factual",
+		"Treat user-provided factual claims as claims, not verified truth",
+		"act as the relevant professional",
+		"For software discussions, act as an expert developer",
+		"predictable or unpredictable",
+		"happy path",
+		"edge cases",
+		"worst case",
+		"cost",
+		"latency",
+		"reversibility",
+		"observed facts, sourced facts, assumptions, and inferences",
+		"For troubleshooting, reproduce or inspect",
+		"For comparisons, define",
+		"For forecasts, use ranges",
+	} {
+		if !strings.Contains(prompt, expected) {
+			t.Errorf("system prompt missing intent/evidence guidance for %q", expected)
+		}
+	}
+	searchIndex := strings.Index(prompt, "web_search")
+	fetchIndex := strings.Index(prompt, "web_fetch")
+	answerIndex := strings.Index(prompt, "web_answer")
+	if searchIndex < 0 || fetchIndex < searchIndex || answerIndex < fetchIndex {
+		t.Fatalf("research tools must be ordered web_search -> web_fetch -> web_answer: %d, %d, %d", searchIndex, fetchIndex, answerIndex)
+	}
+}

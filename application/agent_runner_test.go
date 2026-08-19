@@ -46,6 +46,60 @@ func TestShouldContinueFailedTurn(t *testing.T) {
 	}
 }
 
+func TestHydrationCheckpointPersistsOnceUntilCompaction(t *testing.T) {
+	conversation := &domain.Conversation{
+		ID: "c1",
+		Messages: []domain.Message{
+			{ID: "u1", Role: domain.RoleUser, Content: "first"},
+			{ID: "a1", Role: domain.RoleAssistant},
+		},
+	}
+	app := &App{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conversation}},
+		Toolbox:       &recordingToolbox{},
+	}
+	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: context.Background()}
+	adapter := &reviewStubAdapter{}
+	callRound := func(messageID string) {
+		t.Helper()
+		if _, err := app.streamTurnRoundOnce(run, adapter, conversation, messageID, "model", "", nil, domain.Settings{}, false, 0, true, nil, ModelCapabilities{}, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	countCheckpoints := func() int {
+		count := 0
+		for _, message := range conversation.Messages {
+			if isHydrationMessage(message) {
+				count++
+			}
+		}
+		return count
+	}
+
+	callRound("a1")
+	if got := countCheckpoints(); got != 1 {
+		t.Fatalf("initial checkpoints = %d, want 1", got)
+	}
+	conversation.Messages = append(conversation.Messages,
+		domain.Message{ID: "u2", Role: domain.RoleUser, Content: "follow up"},
+		domain.Message{ID: "a2", Role: domain.RoleAssistant},
+	)
+	callRound("a2")
+	if got := countCheckpoints(); got != 1 {
+		t.Fatalf("checkpoints after later user message = %d, want 1", got)
+	}
+
+	conversation.Messages = filterHydrationDomainMessages(conversation.Messages)
+	conversation.Messages = append(conversation.Messages,
+		domain.Message{ID: "u3", Role: domain.RoleUser, Content: "after compaction"},
+		domain.Message{ID: "a3", Role: domain.RoleAssistant},
+	)
+	callRound("a3")
+	if got := countCheckpoints(); got != 1 {
+		t.Fatalf("post-compaction checkpoints = %d, want 1 fresh checkpoint", got)
+	}
+}
+
 func TestChatMessagesKeepsReasoningOnlyAssistantTurns(t *testing.T) {
 	c := &domain.Conversation{Messages: []domain.Message{
 		{ID: "u1", Role: domain.RoleUser, Content: "hi"},

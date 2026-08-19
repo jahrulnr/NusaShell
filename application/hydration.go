@@ -39,7 +39,8 @@ type HydrationSource struct {
 	Plugins        PluginStore
 	MCP            MCPToolReader
 	RuntimeContext RuntimeContextSnapshot
-	// Tools is the full tool catalog (built-in + MCP) from Toolbox.ListTools().
+	// Tools is the built-in tool catalog from Toolbox.ListTools(). Hydration keeps
+	// only names and descriptions because the provider already receives schemas.
 	Tools []ToolInfo
 	// Todos is the per-conversation todo checklist. When nil, no todo_list
 	// slot is injected.
@@ -231,16 +232,14 @@ func (b *HydrationBuilder) readMcpList() hydrationSlot {
 func (b *HydrationBuilder) readToolList() hydrationSlot {
 	tools := b.source.Tools
 	type toolEntry struct {
-		Name        string         `json:"name"`
-		Description string         `json:"description,omitempty"`
-		InputSchema map[string]any `json:"input_schema,omitempty"`
+		Name        string `json:"name"`
+		Description string `json:"description,omitempty"`
 	}
 	out := make([]toolEntry, 0, len(tools))
 	for _, t := range tools {
 		out = append(out, toolEntry{
 			Name:        t.Name,
 			Description: t.Description,
-			InputSchema: t.InputSchema,
 		})
 	}
 	// Sort by name for stable output (prompt-cache friendly).
@@ -249,12 +248,11 @@ func (b *HydrationBuilder) readToolList() hydrationSlot {
 	return hydrationSlot{name: "tool_list", content: string(content)}
 }
 
-// readTodoList injects the current conversation's todo checklist as a
-// synthetic `todo_list` tool result. Only incomplete items are included
+// readTodoList injects the current conversation's todo checklist into a
+// synthetic `todo_list` checkpoint. Only incomplete items are included
 // (completed items are noise for the model — the UI strip still shows them).
-// The goal brief (if set) is prepended so the agent sees the user's original
-// intent every turn — this survives compaction because hydration is
-// re-injected after context summarization.
+// The checkpoint is reused while history remains intact; after compaction, a
+// fresh checkpoint restores the goal and open items from the todo store.
 // Returns an empty-content slot when no todo port or no conversation id is
 // configured so the slot is harmless but present for call-ID alignment.
 func (b *HydrationBuilder) readTodoList() hydrationSlot {
@@ -263,8 +261,7 @@ func (b *HydrationBuilder) readTodoList() hydrationSlot {
 	}
 	var sections []string
 	// Goal brief: the user's original intent, set once via the `todo` tool's
-	// `goal` argument. Re-injected every turn so the agent does not drift
-	// after compaction.
+	// `goal` argument and restored in a fresh checkpoint after compaction.
 	goal := b.source.Todos.GetGoal(b.source.ConvID)
 	if goal != "" {
 		sections = append(sections, "USER GOAL (survives compaction — do not drift from this)\n"+goal)
@@ -326,9 +323,9 @@ func FilterHydration(messages []ChatMessage) []ChatMessage {
 	return out
 }
 
-// HasHydration returns true when messages contain at least one complete
+// HasHydration returns true when the current conversation history contains a
 // hydration exchange (assistant with hydration toolCalls + matching tool
-// results). Used to decide whether to re-inject hydration on later turns.
+// results). The checkpoint is reused until compaction removes it.
 func HasHydration(messages []ChatMessage) bool {
 	for i := len(messages) - 1; i >= 0; i-- {
 		m := messages[i]

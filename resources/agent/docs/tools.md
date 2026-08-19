@@ -18,13 +18,20 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `memory_delete` | delete a fragment by id (primary entries cannot be deleted — use `memory_demote`) |
 | `memory_promote` | promote a fragment into primary memory (~1k token cap); background review agent only |
 | `memory_demote` | demote a primary entry back to fragments; background review agent only |
-| `todo` | replace the conversation task checklist (full-replace, Claude TodoWrite style; max 50 items, 500 chars each; prefer exactly one `in_progress` at a time). The optional `goal` argument sets a brief of what the user wants and why (max ~10k tokens) — it survives compaction and is re-injected every turn so the agent does not drift from the original intent. The user can delete items from the UI — treat deleted items as gone and do not re-add them. |
-| `docs_search` | search the product documentation |
-| `docs_read` | read a documentation page by id |
+| `todo` | replace the conversation task checklist (full-replace, Claude TodoWrite style; max 50 items, 500 chars each; prefer exactly one `in_progress` at a time). The optional `goal` argument sets a brief of what the user wants and why (max ~10k tokens). It stays available through conversation history and is re-injected with the fresh hydration checkpoint after compaction. The user can delete items from the UI — treat deleted items as gone and do not re-add them. |
+| `ask_question` | block for a structured user decision; use only when progress genuinely requires a choice or approval |
+| `docs_search` | search the product documentation when the page id is unknown |
+| `docs_read` | read a documentation page by canonical extensionless id; a `.md` suffix is accepted as a compatibility alias |
 | `mcp_list` | list all plugins (MCP servers) with runtime state: every plugin appears, running or idle |
 | `tool_list` | list tools from a running plugin's MCP server (or across all running servers when the server is omitted) |
 | `tool_search` | search a running MCP server's tools by name or description |
 | `tool_schema` | load one MCP tool's input schema by server and tool name before calling it |
+| `mcp_register` | copy a plugin from an absolute staging folder outside the installed plugins root; check inventory and ask before replacing an existing id |
+| `mcp_enable` | connect an installed plugin and load its MCP tools |
+| `mcp_disable` | stop a plugin without uninstalling it |
+| `mcp_unregister` | permanently delete an installed plugin; ask first and use `mcp_disable` when it only needs to stop |
+| `mcp_install` | install a plugin from the curated catalog or GitHub |
+| `mcp_server_add` | register a manual MCP server from command, arguments, and environment entries |
 | `read_image` | load an image from the conversation into the model's context (vision models see it directly; non-vision models get a text description via the vision fallback) |
 | `read_audio` | load an audio file from the conversation into the model's context (audio-capable models hear it directly; non-audio models get a text transcript via the audio fallback) |
 | `read_video` | load a video file from the conversation into the model's context (video-capable models see it directly; non-video models get a text description via the video fallback) |
@@ -39,6 +46,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `ci_run_status` | DAG summary and status; use this after `ci_run` |
 | `ci_logs` | job log tail (prefer failed jobs) |
 | `ci_cancel` | cancel a run |
+| `ci_steer` | send additional instructions to a running pipeline agent step |
 | `automation_list` | saved automations with availability |
 | `automation_read` | one automation plus capability bindings |
 | `automation_validate` | validate YAML |
@@ -54,11 +62,33 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `subagent_stop` | cancel a live ACP run (pending permissions fail closed) |
 | `subagent_wait` | wait for an async ACP run to finish |
 
-The system prompt advertises the same set: `skill_list`, `skill_search`,
-`skill_read`, `memory_*`, `docs_*`, `mcp_list`, `tool_list`, `tool_search`,
-`tool_schema`, `read_image`, `read_audio`, `read_video`, `web_search`, `web_fetch`,
-`web_answer` (when available), `ci_*`, `automation_*`, `schedule_once`,
-`schedule_every`, `wait_until`, `sleep`.
+The provider receives the current `Toolbox.ListTools` roster. `web_answer` is
+listed only when configured, while `subagent`, `subagent_steer`, `subagent_stop`,
+and `subagent_wait` are listed only when an ACP agent is enabled.
+
+## Workflow routing
+
+Use the smallest sufficient workflow. One-step answers and lookups do not need
+a TODO. Multi-step, asynchronous, or cross-turn work does.
+
+Good examples:
+
+    docs_read(id="automation")
+    skill_read(name="release-checklist")
+    web_search(query="current Go release notes")
+    web_fetch(url="<URL selected from web_search>")
+    ask_question(question="Which deployment target should I use?", options=[...])
+
+Bad examples:
+
+    todo(items=[{"id":"1","content":"Define MCP","status":"in_progress"}])
+    skill_list()
+    web_fetch(url="<guessed URL>")
+
+Use the hydrated skill and tool catalogs before repeating a list call. If the
+user says skills or plugin state changed, refresh with `skill_search` or
+`mcp_list`. Built-in tool schemas come from `tools[]`; the hydration catalog
+contains only names and descriptions. MCP schemas come from `tool_schema`.
 
 ## Output format
 
@@ -113,8 +143,7 @@ see these tools.
 
 NusaShell ships with built-in web research tools powered by
 [searchwire](https://github.com/jahrulnr/searchwire). These are native tools,
-not MCP plugins — they work with zero configuration and no plugins installed
-installed.
+not MCP plugins — they work with zero configuration and no installed plugin.
 
 - **`web_search`**: metasearch across Brave, Startpage, Wikipedia, and
   GitHub. No API key required for the default path (HTML scraping + public
@@ -134,7 +163,28 @@ installed.
   API key manually. The key is stored in the credential store, not in settings
   JSON. An optional model/preset override can be set per vendor.
 
-Recommended workflow: `web_search` → pick URLs → `web_fetch`.
+Use web research for material factual claims that are current, disputed,
+consequential, unfamiliar, or likely to have changed. Prefer official or primary
+sources and cross-check unstable claims. Do not browse for pure arithmetic,
+logic, fictional premises, or facts already observed through an authoritative
+local tool.
+
+Good example:
+
+    web_search(query="official release notes for the detected framework version")
+    web_fetch(url="<official result selected from web_search>")
+    web_answer(question="Synthesize the verified sources and their trade-offs")
+
+`web_answer` is optional and follows source discovery. It does not replace
+`web_fetch` for consequential claims.
+
+Bad examples:
+
+    web_fetch(url="<guessed URL>")
+    web_answer(question="Is the user's assumption definitely true?")
+
+When evidence remains incomplete, report the claim as unverified and separate
+observed or sourced facts from assumptions and inferences.
 
 ## MCP tools
 

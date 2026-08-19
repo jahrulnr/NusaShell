@@ -1,6 +1,6 @@
 ---
 name: mcp-creator
-description: Author NusaShell MCP plugins with Files and Terminal.
+description: Create or extend NusaShell MCP plugins using discovered Files and Terminal tools. Use when the user asks the in-app agent to build, register, test, or remove a headless or headed plugin.
 ---
 
 # Create a NusaShell MCP plugin
@@ -12,17 +12,20 @@ should use `.agents/skills/build-nusashell-plugin/` and write under the checkout
 
 ## Hard boundaries
 
-- Write only under `{userData}/plugins/{folder}/`. Resolve `{userData}` from
-  the `data-locations.md` product document or an absolute path supplied by the
-  user. Never write the repository `plugins/` tree or bundled read-only
+- Author in an absolute staging folder outside the installed plugins directory,
+  using the active workspace or another user-approved scratch location. Resolve
+  the installed directory with `docs_read(id="data-locations")`; never stage
+  inside it because `mcp_register` copies into and may replace that destination.
+- Never write the repository `plugins/` tree or bundled read-only
   `resources/plugins/` from the in-app agent.
 - Use Files and Terminal for file creation and build/test commands. If either
   prerequisite is unavailable, stop and ask the user to enable a suitable
   Files-like and Terminal-like plugin; do not invent direct filesystem APIs.
-- A folder on disk is not installed inventory. Finish with `mcp_register`, then
+- A staged folder is not installed inventory. Finish with `mcp_register`, then
   `mcp_enable`, and verify with `mcp_list` and live tool discovery.
-- Registration and unregistration are interactive, confirmation-gated, and
-  unavailable to jobs/background turns.
+- `mcp_register` and `mcp_unregister` do not add their own confirmation gate.
+  Check current inventory and use `ask_question` before replacement or removal;
+  never invoke those destructive transitions from an unattended job.
 
 ## Workflow
 
@@ -31,31 +34,33 @@ should use `.agents/skills/build-nusashell-plugin/` and write under the checkout
 2. Choose a shape:
    - headless: `manifest.json` + `mcp/` for agent/automation-only capability;
    - headed: add `ui/index.html` only when users need a visual Home surface.
-3. Create `{userData}/plugins/{folder}/manifest.json` and the declared `mcp/`
-   files using the templates and guides. Keep the folder name equal to the
-   manifest `id` for predictable registration.
+3. Create `manifest.json` and the declared `mcp/` files in the staging folder
+   using the templates and guides. Keep the folder name equal to the manifest
+   `id` for predictable registration.
 4. Implement tools with strict bounded schemas, safe errors, and structured
    results. Tool names must follow the **create** rule: let `domain` = last
    segment of the plugin id; tool names must **not** start with `${domain}_`
    and must **not** equal `domain`. Prefer short verbs (`list`, `read`,
    `write`, `exec`) or multi-word verbs without the domain
-   (`list_projects`, `create_ticket`). The shell expands to
-   `mcp_<pluginId>_<tool>` for agent-facing uniqueness. **If wrapping an
-   existing MCP catalog, preserve tool names as-is** (no domain redesign).
-   Add `mcp/prompts.js` and advertise `capabilities.prompts`:
-   domain/multi-step plugins must provide a `howto` or `workflow` prompt;
-   native-like plugins should provide a short root/cwd/destructive-operations
-   constraints prompt.
+   (`list_projects`, `create_ticket`). The shell exposes a discovered tool as
+   `mcp__<server>__<tool>`, where `<server>` is the manifest name. **If wrapping
+   an existing MCP catalog, preserve tool names as-is** (no domain redesign).
+   The current in-app toolbox does not expose MCP `prompts/list` or
+   `prompts/get`; keep ordered usage guidance in bounded tool descriptions or
+   this skill instead of requiring an unreachable prompt capability.
 5. Validate the folder with the checklist in
    `references/repository-contract.md`. Use Terminal with an absolute `cwd`
    when running a build or test.
-6. Call `mcp_register` with the folder or its absolute path. Wait for the user
-   confirmation. If it fails, fix the folder in place; do not register an
-   arbitrary path.
-7. Call `mcp_enable`, then `mcp_list`, `tool_list`/`tool_search`, and
-   `mcp_context` `list_prompts`/`get_prompt`. Load schemas before calling tools.
-8. For removal, stop the plugin, confirm with the user, then call
-   `mcp_unregister`. Never unregister bundled built-in plugins.
+6. Call `mcp_list`. If the manifest id already exists, use `ask_question` to
+   confirm replacement. Then call `mcp_register(source=<absolute staging path>)`.
+   If it fails, fix the staging folder in place; never register the installed
+   destination as its own source.
+7. Call `mcp_enable`, then verify with `mcp_list` and `tool_list` or
+   `tool_search`. Load the exact `tool_schema`, call one discovered tool through
+   its `mcp__<server>__<tool>` name, and inspect the observed result.
+8. For removal, call `mcp_disable`, use `ask_question` to confirm deletion, then
+   call `mcp_unregister`. Never unregister bundled built-in plugins or perform
+   removal from an unattended job.
 
 ## Safety
 

@@ -7,8 +7,8 @@ import (
 	"nusashell/resources"
 )
 
-// systemPrompt is loaded once from resources/agent/prompts/system.md at
-// init time. Edit the markdown file directly — no code changes needed.
+// systemPrompt is loaded once from resources/agent/prompts/system.md at init
+// time. The markdown owns identity, operating rules, and intent/evidence routing.
 var systemPrompt = resources.Prompt("system")
 
 // toolsPrompt is the static tool/context protocol block, loaded from
