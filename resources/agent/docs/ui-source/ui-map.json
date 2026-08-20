@@ -559,12 +559,13 @@
         {
           "heading": "Embeddings",
           "paragraphs": [
-            "Embedding model used by skill and memory search. Models tagged as embedding-capable appear here after import. Ollama models (e.g. nomic-embed-text) work locally without an API key. The learning review threshold controls how many turns accumulate before extracting learnings (default 10, 0 disables turn-based review)."
+            "Embedding model used by skill and memory search. Models tagged as embedding-capable appear here after import. Ollama models (e.g. nomic-embed-text) work locally without an API key. The learning review threshold controls how many turns accumulate before extracting learnings (default 10, 0 disables turn-based review). The review model routes background autolearn reviews to a cheaper or faster model (default uses the conversation's active model)."
           ],
           "controls": [
             "settings-embedding-title",
             "settings-embedding-model",
-            "settings-learning-threshold"
+            "settings-learning-threshold",
+            "settings-review-model"
           ]
         },
         {
@@ -1393,6 +1394,12 @@
       "section": "Settings",
       "type": "number",
       "notes": "Turns before review; 0 disables turn-based review."
+    },
+    "settings-review-model": {
+      "label": "Review model",
+      "section": "Settings",
+      "type": "select",
+      "notes": "Routes background autolearn reviews to a dedicated model; empty uses the conversation's active model."
     },
     "settings-context-title": {
       "label": "Context compaction title",

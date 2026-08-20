@@ -8,21 +8,17 @@ import (
 )
 
 // systemPrompt is loaded once from resources/agent/prompts/system.md at init
-// time. The markdown owns identity, operating rules, and intent/evidence routing.
+// time. The markdown owns identity, tool/context protocol, operating rules,
+// and intent/evidence routing as one merged document.
 var systemPrompt = resources.Prompt("system")
-
-// toolsPrompt is the static tool/context protocol block, loaded from
-// resources/agent/prompts/tools.md. Appended to the system prompt on
-// every request (cache-stable prefix).
-var toolsPrompt = resources.Prompt("tools")
 
 // continuePrompt is the steering prompt injected at the start of each
 // auto-continue turn. Loaded from resources/agent/prompts/continue.md.
 var continuePrompt = resources.Prompt("continue")
 
-// buildSystemPrompt composes the agent identity + tool protocol with
-// compaction summaries and any system-level skill messages stored in the
-// conversation. The system.md + tools.md prefix is cache-stable across
+// buildSystemPrompt composes the agent identity + tool protocol (single
+// system.md) with compaction summaries and any system-level skill messages
+// stored in the conversation. The system.md prefix is cache-stable across
 // turns; the user prompt (if set) extends that prefix — changing it
 // breaks the prompt cache for all subsequent turns until a new cache
 // shard stabilizes. Only the tail (system messages, workspace) varies
@@ -30,10 +26,6 @@ var continuePrompt = resources.Prompt("continue")
 func buildSystemPrompt(c *domain.Conversation, userPrompt string) string {
 	var sb strings.Builder
 	sb.WriteString(systemPrompt)
-	if toolsPrompt != "" {
-		sb.WriteString("\n\n")
-		sb.WriteString(toolsPrompt)
-	}
 	if up := strings.TrimSpace(userPrompt); up != "" {
 		sb.WriteString("\n\n<user_instructions>\n")
 		sb.WriteString(up)

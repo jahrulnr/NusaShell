@@ -91,6 +91,11 @@ func (a *App) handleTelemetryReport(req contracts.TelemetryReportRequest) (any, 
 	var totalSpend float64
 	var totalRequests int
 	var totalInput, totalOutput, totalCacheRead, totalCacheWrite int
+	// totalCacheHitPrompt is the sum of per-message prompt totals that carry
+	// cache information. Messages without cache fields are excluded so they
+	// do not drag the hit rate denominator down (e.g. providers that never
+	// populate cache tokens).
+	var totalCacheHitPrompt int
 	var earliest, latest time.Time
 
 	for _, conv := range a.Conversations.List() {
@@ -137,6 +142,19 @@ func (a *App) handleTelemetryReport(req contracts.TelemetryReportRequest) (any, 
 			totalOutput += u.OutputTokens
 			totalCacheRead += u.CacheRead
 			totalCacheWrite += u.CacheWrite
+
+			// Prompt total for the cache hit rate. OpenAI-style providers
+			// (Responses/chat-completions) report input_tokens as the TOTAL
+			// with cached_tokens already inside it, so the total is just
+			// InputTokens. Anthropic reports cache fields separately, so
+			// CacheWrite + CacheRead must be added back. Messages with no
+			// cache info are excluded from the hit-rate math entirely.
+			switch {
+			case u.CacheWrite > 0:
+				totalCacheHitPrompt += u.InputTokens + u.CacheWrite + u.CacheRead
+			case u.CacheRead > 0:
+				totalCacheHitPrompt += u.InputTokens
+			}
 
 			if earliest.IsZero() || t.Before(earliest) {
 				earliest = t
@@ -202,11 +220,13 @@ func (a *App) handleTelemetryReport(req contracts.TelemetryReportRequest) (any, 
 		}
 	}
 
-	// Build summary.
+	// Build summary. The hit rate uses the per-message prompt totals that
+	// carry cache information (totalCacheHitPrompt), not input+cacheRead:
+	// OpenAI-style input_tokens already includes cached tokens, so adding
+	// CacheRead back double counts the hits and halves the reported rate.
 	cacheHitPercent := 0.0
-	totalPromptTokens := totalInput + totalCacheRead
-	if totalPromptTokens > 0 {
-		cacheHitPercent = float64(totalCacheRead) / float64(totalPromptTokens) * 100
+	if totalCacheHitPrompt > 0 {
+		cacheHitPercent = float64(totalCacheRead) / float64(totalCacheHitPrompt) * 100
 	}
 	summary := contracts.TelemetrySummaryDTO{
 		TotalSpend:       roundCost(totalSpend),

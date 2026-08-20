@@ -54,6 +54,21 @@ test('renders one model and usage summary for all assistant rounds in a user tur
   assert.match(assistantTurns[1].querySelector('.agent-turn-meta').textContent, /luna/);
 });
 
+test('usage badges render compact token units instead of raw counts', () => {
+  const thread = renderTranscript([
+    { role: 'user', content: 'Run checks', created_at: '2026-08-13T18:00:00Z' },
+    {
+      role: 'assistant', model: 'luna', created_at: '2026-08-13T18:00:01Z',
+      usage: { input_tokens: 27085560, output_tokens: 137158, cache_read: 25944438 },
+      steps: [{ type: 'text', content: 'done' }],
+    },
+  ]);
+  const meta = thread.querySelector('.agent-turn-meta').textContent;
+  assert.match(meta, /↑27\.09M ↓137\.16k/);
+  assert.match(meta, /cache 25\.94M/);
+  assert.doesNotMatch(meta, /27085560|137158|25944438/);
+});
+
 test('tool job summary includes elapsed span before chevron', () => {
   const dom = new JSDOM('<main id="thread"></main>');
   const previousDocument = globalThis.document;

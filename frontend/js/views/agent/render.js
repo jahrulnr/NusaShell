@@ -147,8 +147,8 @@ function renderAssistantTurn(messages, onRetry) {
   }
   const usage = totalUsage(messages);
   if (usage) {
-    meta.append(el('span', { class: 'agent-turn-tag', text: `↑${usage.input_tokens} ↓${usage.output_tokens}` }));
-    if (usage.cache_read) meta.append(el('span', { class: 'agent-turn-tag', text: `cache ${usage.cache_read}` }));
+    meta.append(el('span', { class: 'agent-turn-tag', text: `↑${formatTokens(usage.input_tokens)} ↓${formatTokens(usage.output_tokens)}` }));
+    if (usage.cache_read) meta.append(el('span', { class: 'agent-turn-tag', text: `cache ${formatTokens(usage.cache_read)}` }));
   }
   meta.append(el('span', { class: 'agent-message-meta', text: fmtTime(finalMessage.created_at) }));
   node.append(meta);
@@ -368,6 +368,20 @@ export function formatElapsed(seconds) {
   return `${Math.floor(total / 60)}m ${total % 60}s`;
 }
 
+// formatTokens renders a token count with a human unit suffix
+// (e.g. 10680 → "10.68k", 27085560 → "27.09M", 137 → "137").
+export function formatTokens(value) {
+  const n = Number(value) || 0;
+  if (n >= 1e9) return `${trimUnit((n / 1e9).toFixed(2))}B`;
+  if (n >= 1e6) return `${trimUnit((n / 1e6).toFixed(2))}M`;
+  if (n >= 1e3) return `${trimUnit((n / 1e3).toFixed(2))}k`;
+  return String(n);
+}
+
+function trimUnit(value) {
+  return value.replace(/\.?0+$/, '');
+}
+
 export function toolTerminalMeta(toolCall) {
   const status = toolCall.status || 'running';
   if (status === 'running') return 'Running';
@@ -442,6 +456,15 @@ function summarizeToolArgs(args) {
 
 function formatToolTerminalInput(name, args) {
   const tool = String(name || 'tool');
+  if (tool === 'mcp_call') {
+    const parsed = parseToolArgs(args);
+    const ref = parsed.ref || '?';
+    const inner = parseToolArgs(parsed.arguments_json);
+    if (Object.keys(inner).length) {
+      return `mcp_call(${ref}) ${truncate(JSON.stringify(inner, null, 2), 8000)}`;
+    }
+    return `mcp_call(${ref}) {}`;
+  }
   const input = args && typeof args === 'object' ? truncate(JSON.stringify(args, null, 2), 8000) : '';
   return input ? `${tool}(${input})` : `${tool}()`;
 }

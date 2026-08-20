@@ -99,6 +99,52 @@ func TestOpenAIListModelsParsesOpenRouterFields(t *testing.T) {
 	}
 }
 
+// TestCompleteParsesCachedTokens is a regression test for the telemetry gap:
+// OpenRouter reports Luna's prompt-cache hit rate at 92% while NusaShell
+// showed ~48% because chatcompletion never parsed prompt_tokens_details.
+// cached_tokens (CacheRead stayed 0 for DeepSeek and other chat-completion
+// models). The non-streaming Complete path must populate CacheRead so the
+// hit rate is computed, not zeroed.
+func TestCompleteParsesCachedTokens(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{
+					"message":       map[string]any{"content": "hello"},
+					"finish_reason": "stop",
+				},
+			},
+			"usage": map[string]any{
+				"prompt_tokens":     1000,
+				"completion_tokens": 50,
+				"prompt_tokens_details": map[string]any{
+					"cached_tokens": 920,
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := &Adapter{BaseURL: server.URL + "/v1", Client: server.Client()}
+	resp, err := adapter.Complete(context.Background(), application.ChatRequest{
+		Model: "test-model",
+		Messages: []application.ChatMessage{{
+			Role:    "user",
+			Content: "Hi",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Complete failed: %v", err)
+	}
+	if resp.Usage.InputTokens != 1000 {
+		t.Errorf("InputTokens = %d, want 1000 (total prompt incl. cached)", resp.Usage.InputTokens)
+	}
+	if resp.Usage.CacheRead != 920 {
+		t.Errorf("CacheRead = %d, want 920 (from prompt_tokens_details.cached_tokens)", resp.Usage.CacheRead)
+	}
+}
+
 func TestCompleteExtractsReasoningContent(t *testing.T) {
 	// Reasoning models (DeepSeek, dots-3-note, Qwen) put their output in
 	// "reasoning_content" instead of "content" in non-streaming responses.

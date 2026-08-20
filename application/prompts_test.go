@@ -61,7 +61,7 @@ func TestBuildSystemPromptWhitespaceUserPromptIgnored(t *testing.T) {
 }
 
 func TestAgentPromptsUseCanonicalDocIDs(t *testing.T) {
-	prompt := strings.Join([]string{systemPrompt, toolsPrompt, subagentDelegationPrompt}, "\n")
+	prompt := strings.Join([]string{systemPrompt, subagentDelegationPrompt}, "\n")
 	for _, stale := range []string{"`mcp.md`", "`agent-attachments.md`", "`automation.md`", "`agent-subagents.md`"} {
 		if strings.Contains(prompt, stale) {
 			t.Errorf("prompt contains non-canonical documentation id %s", stale)
@@ -75,7 +75,7 @@ func TestAgentPromptsUseCanonicalDocIDs(t *testing.T) {
 }
 
 func TestAgentPromptRoutesCommonToolWorkflows(t *testing.T) {
-	prompt := strings.Join(strings.Fields(systemPrompt+"\n"+toolsPrompt), " ")
+	prompt := strings.Join(strings.Fields(systemPrompt), " ")
 	for _, expected := range []string{
 		"Skip TODOs for one-step answers or lookups",
 		"docs_read",
@@ -92,6 +92,29 @@ func TestAgentPromptRoutesCommonToolWorkflows(t *testing.T) {
 	} {
 		if !strings.Contains(prompt, expected) {
 			t.Errorf("agent prompt missing workflow routing guidance for %q", expected)
+		}
+	}
+}
+
+func TestSystemPromptIncludesMergedToolProtocol(t *testing.T) {
+	// tools.md was merged into system.md: the single prompt must carry the
+	// tool/context protocol so no separate append is needed.
+	prompt := strings.Join(strings.Fields(systemPrompt), " ")
+	for _, expected := range []string{
+		"mcp_search",
+		"mcp_call",
+		"STALE_TOOL_REF",
+		"mcp__<server>__<tool>",
+		"tool_calls",
+		"untrusted_tool_result",
+		"shell meta-tools",
+		"absolute path",
+		"skill_read",
+		"web_search",
+		"web_fetch",
+	} {
+		if !strings.Contains(prompt, expected) {
+			t.Errorf("merged system prompt missing tool protocol guidance for %q", expected)
 		}
 	}
 }

@@ -258,6 +258,134 @@ func TestBuildTranscriptTruncatesToolOutput(t *testing.T) {
 	}
 }
 
+func TestApplyReviewModelOverride(t *testing.T) {
+	newApp := func(reviewModel string) *App {
+		return &App{
+			Providers: &fakeProviderStore{items: map[string]*domain.Provider{
+				"chat-prov": {ID: "chat-prov", Enabled: true, Kind: domain.ProviderChat},
+				"cheap-prov": {ID: "cheap-prov", Enabled: true, Kind: domain.ProviderChat, Models: []domain.Model{
+					{ID: "haiku", Context: 128000},
+				}},
+			}},
+			Credentials: &fakeVisionCredStore{creds: map[string]string{"cheap-prov": "key"}},
+			Factory: func(_ context.Context, _ *domain.Provider, _ string) (AIProvider, error) {
+				return &fakeVisionAdapter{description: "review-adapter"}, nil
+			},
+			Settings: &fakeSettingsStoreWithThreshold{threshold: 10, reviewModel: reviewModel},
+			Logs:     &fakeLogStore{},
+		}
+	}
+
+	t.Run("no override uses the conversation adapter", func(t *testing.T) {
+		agent := NewBackgroundReviewAgent(newApp(""), DefaultReviewSettings())
+		defaultAdapter := &fakeVisionAdapter{description: "default"}
+		gotAdapter, gotModel := agent.applyReviewModelOverride(context.Background(), defaultAdapter, "gpt-5")
+		if gotAdapter != defaultAdapter || gotModel != "gpt-5" {
+			t.Fatalf("got (%v, %q), want default adapter+model", gotAdapter, gotModel)
+		}
+	})
+
+	t.Run("configured override builds a separate adapter", func(t *testing.T) {
+		agent := NewBackgroundReviewAgent(newApp("cheap-prov:haiku"), DefaultReviewSettings())
+		defaultAdapter := &fakeVisionAdapter{description: "default"}
+		gotAdapter, gotModel := agent.applyReviewModelOverride(context.Background(), defaultAdapter, "gpt-5")
+		if gotAdapter == defaultAdapter {
+			t.Fatal("expected a separate adapter for the review model override")
+		}
+		if gotModel != "haiku" {
+			t.Fatalf("got model %q, want haiku", gotModel)
+		}
+	})
+
+	t.Run("unresolvable override falls back", func(t *testing.T) {
+		agent := NewBackgroundReviewAgent(newApp("nope:missing"), DefaultReviewSettings())
+		defaultAdapter := &fakeVisionAdapter{description: "default"}
+		gotAdapter, gotModel := agent.applyReviewModelOverride(context.Background(), defaultAdapter, "gpt-5")
+		if gotAdapter != defaultAdapter || gotModel != "gpt-5" {
+			t.Fatalf("got (%v, %q), want fallback to default adapter+model", gotAdapter, gotModel)
+		}
+	})
+
+	t.Run("nil settings store falls back", func(t *testing.T) {
+		agent := NewBackgroundReviewAgent(&App{Toolbox: &reviewStubToolbox{}, Logs: &fakeLogStore{}}, DefaultReviewSettings())
+		defaultAdapter := &fakeVisionAdapter{description: "default"}
+		gotAdapter, gotModel := agent.applyReviewModelOverride(context.Background(), defaultAdapter, "gpt-5")
+		if gotAdapter != defaultAdapter || gotModel != "gpt-5" {
+			t.Fatalf("got (%v, %q), want fallback when settings store is nil", gotAdapter, gotModel)
+		}
+	})
+}
+
+// chunkConversationStore returns a fixed archived chunk from GetChunk.
+type chunkConversationStore struct {
+	chunk []domain.Message
+}
+
+func (s *chunkConversationStore) Get(id string) (*domain.Conversation, error) { return nil, nil }
+func (s *chunkConversationStore) Save(c *domain.Conversation) error           { return nil }
+func (s *chunkConversationStore) List() []*domain.Conversation                { return nil }
+func (s *chunkConversationStore) Delete(id string) error                      { return nil }
+func (s *chunkConversationStore) ArchiveChunk(id string, messages []domain.Message) (int, error) {
+	return 0, nil
+}
+func (s *chunkConversationStore) GetChunk(id string, index int) ([]domain.Message, error) {
+	return s.chunk, nil
+}
+
+func TestBuildTranscriptTokenCapDropsOldest(t *testing.T) {
+	app := &App{
+		Toolbox: &reviewStubToolbox{},
+		Logs:    &fakeLogStore{},
+	}
+	settings := DefaultReviewSettings()
+	settings.MaxTranscriptTokens = 10 // 40 chars cap
+	agent := NewBackgroundReviewAgent(app, settings)
+	long := strings.Repeat("y", 100)
+	conv := &domain.Conversation{
+		ID: "conv_cap",
+		Messages: []domain.Message{
+			{Role: domain.RoleUser, Content: "OLDEST-" + long},
+			{Role: domain.RoleAssistant, Content: "NEWEST-" + long},
+		},
+	}
+	transcript := agent.buildTranscript(conv)
+	if strings.Contains(transcript, "OLDEST") {
+		t.Error("transcript should drop the oldest line when over the token cap")
+	}
+	if !strings.Contains(transcript, "NEWEST") {
+		t.Error("transcript should keep the most recent line")
+	}
+}
+
+func TestBuildTranscriptUsesArchivedChunkWhenCompacted(t *testing.T) {
+	app := &App{
+		Toolbox: &reviewStubToolbox{},
+		Logs:    &fakeLogStore{},
+		Conversations: &chunkConversationStore{chunk: []domain.Message{
+			{Role: domain.RoleAssistant, Content: "old work", ToolCalls: []domain.ToolCall{
+				{Name: "grep", Args: `{"pattern":"auth"}`, Output: "src/auth.go: 5 matches"},
+			}},
+		}},
+	}
+	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
+	// Post-compaction live messages have tool calls stripped (StripForRetention).
+	conv := &domain.Conversation{
+		ID:         "conv_compacted",
+		ChunkCount: 1,
+		Messages: []domain.Message{
+			{Role: domain.RoleUser, Content: "recent question"},
+			{Role: domain.RoleAssistant, Content: "recent answer"},
+		},
+	}
+	transcript := agent.buildTranscript(conv)
+	if !strings.Contains(transcript, "→ tool: grep(") {
+		t.Error("transcript should include tool calls from the archived chunk")
+	}
+	if !strings.Contains(transcript, "recent question") {
+		t.Error("transcript should still include live messages")
+	}
+}
+
 func TestIsNothingToSave(t *testing.T) {
 	cases := []struct {
 		input string

@@ -113,10 +113,13 @@ partial message remains visible and is marked as failed.
 ### Runtime settings
 
 `settings.get` and `settings.set` expose the persisted agent runtime knobs:
-compaction, prompt caching, and `max_tool_rounds` (1–10000). Browser-only
-preferences such as the default model, icon-only sidebar, and automatic
-WebSocket reconnect stay in local storage because they describe one browser
-client rather than the local agent process.
+compaction (enabled, threshold, optional dedicated model), prompt caching,
+`max_tool_rounds` (1–10000), parallel tool limits, learning review threshold,
+an optional dedicated review model (background autolearn), and max
+input/output token ceilings. Browser-only preferences such as the default
+model, icon-only sidebar, and automatic WebSocket reconnect stay in local
+storage because they describe one browser client rather than the local agent
+process.
 
 ### Prompt caching
 

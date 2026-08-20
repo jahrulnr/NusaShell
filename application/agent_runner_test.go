@@ -147,6 +147,41 @@ func TestCompactionTriggerAutoUsesWindowPercentage(t *testing.T) {
 	}
 }
 
+func TestCompactionTodoContext(t *testing.T) {
+	port := &fakeTodoPort{
+		items: map[string][]domain.TodoItem{
+			"conv_1": {
+				{ID: "1", Content: "Finish auth", Status: domain.TodoInProgress},
+				{ID: "2", Content: "Write tests", Status: domain.TodoPending},
+				{ID: "3", Content: "Done item", Status: domain.TodoCompleted},
+			},
+		},
+		goals: map[string]string{"conv_1": "Build a CLI tool that converts Markdown"},
+	}
+	ctx := (&App{Todos: port}).compactionTodoContext("conv_1")
+	for _, want := range []string{"Build a CLI tool that converts Markdown", "[in_progress] Finish auth", "[pending] Write tests"} {
+		if !strings.Contains(ctx, want) {
+			t.Errorf("compaction todo context missing %q: %s", want, ctx)
+		}
+	}
+	if strings.Contains(ctx, "Done item") {
+		t.Error("completed todos must not appear in the compaction context")
+	}
+
+	// No todo store configured.
+	if got := (&App{}).compactionTodoContext("x"); got != "" {
+		t.Errorf("no todo store: got %q, want empty", got)
+	}
+	// Goal present but no open items.
+	doneOnly := &fakeTodoPort{
+		items: map[string][]domain.TodoItem{"c": {{ID: "1", Content: "done", Status: domain.TodoCompleted}}},
+		goals: map[string]string{"c": "goal text"},
+	}
+	if got := (&App{Todos: doneOnly}).compactionTodoContext("c"); got != "User goal: goal text" {
+		t.Errorf("goal-only context: got %q, want %q", got, "User goal: goal text")
+	}
+}
+
 func TestCompactionTriggerSubtractsMaxOutput(t *testing.T) {
 	// 256k window, 64k output → available = 196608 → trigger = 80% × 196608 = 157286
 	settings := domain.Settings{CompactionThreshold: 0}

@@ -659,6 +659,12 @@
               <input id="settings-learning-threshold" type="number" min="0" max="1000" step="1" inputmode="numeric" value="10">
               <small>How many turns to accumulate before extracting learnings (default 10). Set 0 to disable turn-based review; compaction-triggered review still runs.</small>
             </label>
+            <label class="settings-field" for="settings-review-model">Review model
+              <select id="settings-review-model">
+                <option value="">Default — use the conversation's active model</option>
+              </select>
+              <small>Route background autolearn reviews to a cheaper or faster model. Reviews re-read the recent transcript, so this directly controls background cost. Leave as default to use the active model.</small>
+            </label>
             <label class="settings-field" for="settings-auto-continues">Max auto-continues
               <input id="settings-auto-continues" type="number" min="0" max="10000" step="1" inputmode="numeric" value="10">
               <small>After a successful turn, if the todo list still has open items, the agent automatically starts the next turn (default 10). Set 0 for unlimited; the chain stops on error, question, or user stop.</small>

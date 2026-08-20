@@ -88,8 +88,11 @@ type openAIChunk struct {
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
+		PromptTokens        int `json:"prompt_tokens"`
+		CompletionTokens    int `json:"completion_tokens"`
+		PromptTokensDetails struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
 	} `json:"usage"`
 }
 
@@ -103,8 +106,11 @@ type openAIResponse struct {
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
+		PromptTokens        int `json:"prompt_tokens"`
+		CompletionTokens    int `json:"completion_tokens"`
+		PromptTokensDetails struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
 	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
@@ -278,6 +284,7 @@ func (o *Adapter) Stream(ctx context.Context, req application.ChatRequest, onDel
 			result.Usage = application.ChatUsage{
 				InputTokens:  chunk.Usage.PromptTokens,
 				OutputTokens: chunk.Usage.CompletionTokens,
+				CacheRead:    chunk.Usage.PromptTokensDetails.CachedTokens,
 			}
 		}
 		for _, ch := range chunk.Choices {
@@ -402,6 +409,7 @@ func (o *Adapter) responseFromOpenAI(out openAIResponse) (application.ChatRespon
 		resp.Usage = application.ChatUsage{
 			InputTokens:  out.Usage.PromptTokens,
 			OutputTokens: out.Usage.CompletionTokens,
+			CacheRead:    out.Usage.PromptTokensDetails.CachedTokens,
 		}
 	}
 	for _, tc := range ch.Message.ToolCalls {

@@ -31,21 +31,23 @@ import (
 
 // ReviewSettings controls the background review agent.
 type ReviewSettings struct {
-	Enabled            bool
-	MemoryEveryNTurns  int // trigger threshold (from settings.LearningReviewThreshold)
-	MaxToolRounds      int // bounded tool loop (default 6)
-	TranscriptTailMsgs int // how many recent messages to include (default 40)
-	MaxTranscriptChars int // per-message truncation (default 4000)
+	Enabled             bool
+	MemoryEveryNTurns   int // trigger threshold (from settings.LearningReviewThreshold)
+	MaxToolRounds       int // bounded tool loop (default 6)
+	TranscriptTailMsgs  int // how many recent messages to include (default 40)
+	MaxTranscriptChars  int // per-message truncation (default 4000)
+	MaxTranscriptTokens int // total transcript cap, ~chars/4 (default 30000)
 }
 
 // DefaultReviewSettings returns sensible defaults.
 func DefaultReviewSettings() ReviewSettings {
 	return ReviewSettings{
-		Enabled:            true,
-		MemoryEveryNTurns:  10,
-		MaxToolRounds:      6,
-		TranscriptTailMsgs: 40,
-		MaxTranscriptChars: 4000,
+		Enabled:             true,
+		MemoryEveryNTurns:   10,
+		MaxToolRounds:       6,
+		TranscriptTailMsgs:  40,
+		MaxTranscriptChars:  4000,
+		MaxTranscriptTokens: 30000,
 	}
 }
 
@@ -72,6 +74,9 @@ func NewBackgroundReviewAgent(app *App, settings ReviewSettings) *BackgroundRevi
 	}
 	if settings.MaxTranscriptChars <= 0 {
 		settings.MaxTranscriptChars = 4000
+	}
+	if settings.MaxTranscriptTokens <= 0 {
+		settings.MaxTranscriptTokens = 30000
 	}
 	return &BackgroundReviewAgent{app: app, settings: settings}
 }
@@ -119,9 +124,17 @@ func (r *BackgroundReviewAgent) RunReview(ctx context.Context, conversationID st
 		r.app.log("warn", "learning", "review aborted: cannot build adapter for %q: %v", model, err)
 		return fmt.Errorf("cannot build adapter for %q: %v", model, err)
 	}
+	// Optional dedicated review model (settings.ReviewModel). Reviews re-send
+	// the transcript tail, so routing them to a cheaper/faster model cuts
+	// background cost. Falls back to the conversation model when unset or
+	// unresolvable, mirroring resolveCompactionAdapter.
+	adapter, bareModel = r.applyReviewModelOverride(context.Background(), adapter, bareModel)
 
 	r.app.log("info", "learning", "review started: conv=%s model=%s rounds=%d", conversationID, bareModel, r.settings.MaxToolRounds)
-	reviewCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
+	// 180s: a single completion over a long transcript can take tens of
+	// seconds, and the loop may run several tool rounds. The old 60s cap
+	// killed exactly the reviews that needed the most time (big transcripts).
+	reviewCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 180*time.Second)
 	defer cancel()
 
 	mutations, messages := r.runReviewLoop(reviewCtx, adapter, bareModel, conversation)
@@ -161,6 +174,32 @@ func (r *BackgroundReviewAgent) recordReviewError(conversationID, errMsg string)
 		"status":       "error",
 		"error":        errMsg,
 	})
+}
+
+// applyReviewModelOverride routes the review to settings.ReviewModel when
+// configured and resolvable; otherwise it returns the given adapter+model
+// unchanged so reviews still run. `model` is the bare model id used for
+// logging, not the "providerID:modelID" form.
+func (r *BackgroundReviewAgent) applyReviewModelOverride(ctx context.Context, adapter AIProvider, model string) (AIProvider, string) {
+	if r.app == nil || r.app.Settings == nil {
+		return adapter, model
+	}
+	rm := strings.TrimSpace(r.app.Settings.Get().ReviewModel)
+	if rm == "" {
+		return adapter, model
+	}
+	rProvider, rBare, rKey, rErr := r.app.resolveModel(rm)
+	if rErr != nil || rProvider == nil {
+		r.app.log("warn", "learning", "review model %q could not be resolved, falling back to conversation model: %v", rm, rErr)
+		return adapter, model
+	}
+	rAdapter, fErr := r.app.Factory(ctx, rProvider, rKey)
+	if fErr != nil {
+		r.app.log("warn", "learning", "review model %q adapter build failed, falling back to conversation model: %v", rm, fErr)
+		return adapter, model
+	}
+	r.app.log("info", "learning", "review using override model %s", rm)
+	return rAdapter, rBare
 }
 
 // mutationSnippet extracts a trimmed field value from a tool-call JSON
@@ -354,15 +393,18 @@ func (r *BackgroundReviewAgent) reviewTools() []ToolDef {
 	return out
 }
 
-// buildTranscript extracts the last N messages from the conversation and
+// buildTranscript extracts the recent messages from the conversation and
 // formats them as a plain-text transcript for the review agent. Tool calls
 // and their outputs are included inline so the review agent can see what
 // tools were used and what they returned — this is essential for spotting
 // skill-worthy patterns (e.g. a multi-step tool workflow the agent should
 // remember) and for understanding the context around a memory-worthy fact.
+// The transcript is bounded by both message count and total tokens: the tail
+// is truncated per message, then the whole transcript is trimmed from the
+// oldest line until it fits the token cap, so tool-heavy conversations
+// (dozens of tool calls per turn) cannot overflow the review model's window.
 func (r *BackgroundReviewAgent) buildTranscript(c *domain.Conversation) string {
-	msgs := c.Messages
-	tail := msgs
+	tail := r.transcriptMessages(c)
 	if len(tail) > r.settings.TranscriptTailMsgs {
 		tail = tail[len(tail)-r.settings.TranscriptTailMsgs:]
 	}
@@ -395,7 +437,50 @@ func (r *BackgroundReviewAgent) buildTranscript(c *domain.Conversation) string {
 		}
 		lines = append(lines, fmt.Sprintf("[%s] %s", role, strings.Join(parts, "\n")))
 	}
+	lines = r.trimTranscriptLines(lines)
 	return strings.Join(lines, "\n\n")
+}
+
+// transcriptMessages returns the messages to review. Compaction strips tool
+// calls and reasoning from retained messages (StripForRetention), so when the
+// conversation has archived chunks the latest chunk — which preserves the
+// full dropped window including tool calls — is prepended to restore the
+// tool-call evidence the review needs to spot skill-worthy patterns. Falls
+// back to the live messages alone when no store is configured or the chunk
+// is unavailable.
+func (r *BackgroundReviewAgent) transcriptMessages(c *domain.Conversation) []domain.Message {
+	msgs := c.Messages
+	if r.app == nil || r.app.Conversations == nil || c.ChunkCount <= 0 {
+		return msgs
+	}
+	chunk, err := r.app.Conversations.GetChunk(c.ID, c.ChunkCount-1)
+	if err != nil || len(chunk) == 0 {
+		return msgs
+	}
+	merged := make([]domain.Message, 0, len(chunk)+len(msgs))
+	merged = append(merged, chunk...)
+	merged = append(merged, msgs...)
+	return merged
+}
+
+// trimTranscriptLines drops the oldest lines until the transcript fits the
+// configured token cap (~chars/4), keeping the most recent detail. The most
+// recent line is always kept even when it alone exceeds the cap (best effort).
+func (r *BackgroundReviewAgent) trimTranscriptLines(lines []string) []string {
+	charCap := r.settings.MaxTranscriptTokens * 4
+	total := 0
+	start := 0
+	for i, line := range lines {
+		total += len(line)
+		for total > charCap && start < i {
+			total -= len(lines[start])
+			start++
+		}
+	}
+	if start == 0 {
+		return lines
+	}
+	return lines[start:]
 }
 
 const (

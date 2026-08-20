@@ -1203,6 +1203,9 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	if req.CompactionModel != nil {
 		s.CompactionModel = strings.TrimSpace(*req.CompactionModel)
 	}
+	if req.ReviewModel != nil {
+		s.ReviewModel = strings.TrimSpace(*req.ReviewModel)
+	}
 	if req.PromptCaching != nil {
 		s.PromptCaching = *req.PromptCaching
 	}
@@ -1354,6 +1357,7 @@ func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 		CompactionEnabled:       s.CompactionEnabled,
 		CompactionThreshold:     s.CompactionThreshold,
 		CompactionModel:         s.CompactionModel,
+		ReviewModel:             s.ReviewModel,
 		PromptCaching:           s.PromptCaching,
 		MaxToolRounds:           s.MaxToolRounds,
 		RepeatedToolLimit:       s.RepeatedToolLimit,

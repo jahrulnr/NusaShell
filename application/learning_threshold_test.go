@@ -7,16 +7,18 @@ import (
 )
 
 // fakeSettingsStoreWithThreshold is a settings store that returns a
-// configurable LearningReviewThreshold.
+// configurable LearningReviewThreshold and ReviewModel.
 type fakeSettingsStoreWithThreshold struct {
-	threshold int
+	threshold   int
+	reviewModel string
 }
 
 func (f *fakeSettingsStoreWithThreshold) Get() domain.Settings {
-	return domain.Settings{LearningReviewThreshold: f.threshold}
+	return domain.Settings{LearningReviewThreshold: f.threshold, ReviewModel: f.reviewModel}
 }
 func (f *fakeSettingsStoreWithThreshold) Set(s domain.Settings) error {
 	f.threshold = s.LearningReviewThreshold
+	f.reviewModel = s.ReviewModel
 	return nil
 }
 

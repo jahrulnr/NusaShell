@@ -76,9 +76,12 @@ func TestHandleTelemetryReportAggregatesUsage(t *testing.T) {
 	if result.Summary.CacheWriteTokens != 100 {
 		t.Fatalf("cache_write = %d, want 100", result.Summary.CacheWriteTokens)
 	}
-	// Cache hit % = 600 / (3000 + 600) * 100 = 16.67%
-	if result.Summary.CacheHitPercent < 16.6 || result.Summary.CacheHitPercent > 16.7 {
-		t.Fatalf("cache_hit_percent = %.2f, want ~16.67", result.Summary.CacheHitPercent)
+	// Cache hit % — per-message prompt totals with provider-style detection:
+	//   gpt-5.6-luna (CacheWrite>0, Anthropic-style): 1000+100+200 = 1300 → 200 hit
+	//   claude-opus-5  (CacheWrite==0, OpenAI-style): InputTokens already includes cached → 2000 → 400 hit
+	//   total = 1300 + 2000 = 3300, hit = 600 → 18.18%
+	if result.Summary.CacheHitPercent < 18.1 || result.Summary.CacheHitPercent > 18.2 {
+		t.Fatalf("cache_hit_percent = %.2f, want ~18.18", result.Summary.CacheHitPercent)
 	}
 	// Spend: gpt = 1000/1M*1 + 500/1M*3 + 200/1M*0.1 = 0.001 + 0.0015 + 0.00002 = 0.00252
 	//        claude = 2000/1M*5 + 800/1M*15 + 400/1M*0.5 = 0.01 + 0.012 + 0.0002 = 0.0222
@@ -161,6 +164,76 @@ func TestHandleTelemetryReportDaysFilter(t *testing.T) {
 	result = resp.(contracts.TelemetryReportResult)
 	if result.Summary.TotalRequests != 2 {
 		t.Fatalf("total_requests = %d, want 2 (all-time)", result.Summary.TotalRequests)
+	}
+}
+
+// TestHandleTelemetryReportCacheHitRateStyles pins the per-message prompt
+// total used for the cache hit rate. This is a regression test for the
+// OpenRouter gap: OpenAI-style usage reports input_tokens as the TOTAL
+// (cached tokens already included), so hit rate = CacheRead / InputTokens;
+// Anthropic-style reports cache fields separately, so the total must add
+// CacheWrite + CacheRead back; messages with no cache info (e.g. providers
+// that never populated the fields) must not drag the denominator down.
+func TestHandleTelemetryReportCacheHitRateStyles(t *testing.T) {
+	now := time.Now().UTC()
+	convStore := &fakeConvStore{convs: map[string]*domain.Conversation{
+		"conv_1": {
+			ID: "conv_1",
+			Messages: []domain.Message{
+				// OpenAI Responses style (Luna): input already includes cached.
+				{
+					Role:       domain.RoleAssistant,
+					Model:      "gpt-5.6-luna",
+					ProviderID: "prov_1",
+					CreatedAt:  now,
+					Usage:      &domain.Usage{InputTokens: 1000, OutputTokens: 300, CacheRead: 920},
+				},
+				// Anthropic style: cache fields separate from input.
+				{
+					Role:       domain.RoleAssistant,
+					Model:      "claude-opus-5",
+					ProviderID: "prov_1",
+					CreatedAt:  now,
+					Usage:      &domain.Usage{InputTokens: 200, OutputTokens: 100, CacheRead: 800, CacheWrite: 100},
+				},
+				// No cache info at all: must not be counted in the denominator.
+				{
+					Role:       domain.RoleAssistant,
+					Model:      "deepseek/deepseek-v4",
+					ProviderID: "prov_1",
+					CreatedAt:  now,
+					Usage:      &domain.Usage{InputTokens: 500, OutputTokens: 100},
+				},
+			},
+		},
+	}}
+	provStore := &fakeProviderStore{items: map[string]*domain.Provider{
+		"prov_1": {
+			ID:   "prov_1",
+			Name: "OpenRouter",
+			Models: []domain.Model{
+				{ID: "gpt-5.6-luna", InputCost: 1.0, OutputCost: 3.0, CacheReadCost: 0.1},
+				{ID: "claude-opus-5", InputCost: 5.0, OutputCost: 15.0, CacheReadCost: 0.5},
+				{ID: "deepseek/deepseek-v4", InputCost: 1.0, OutputCost: 2.0},
+			},
+		},
+	}}
+	app := &App{Conversations: convStore, Providers: provStore, Logs: &fakeLogStore{}, Bus: NewBus()}
+
+	resp, rpcErr := app.handleTelemetryReport(contracts.TelemetryReportRequest{Minutes: 0})
+	if rpcErr != nil {
+		t.Fatalf("unexpected rpc error: %v", rpcErr)
+	}
+	result := resp.(contracts.TelemetryReportResult)
+
+	// Hit tokens: 920 + 800 = 1720.
+	// Prompt totals: Luna 1000 (OpenAI total), Claude 200+100+800 = 1100 → 2100.
+	// deepseek message (no cache info) is excluded from the hit-rate math.
+	if result.Summary.CacheReadTokens != 1720 {
+		t.Fatalf("cache_read = %d, want 1720", result.Summary.CacheReadTokens)
+	}
+	if result.Summary.CacheHitPercent < 81.8 || result.Summary.CacheHitPercent > 82.0 {
+		t.Fatalf("cache_hit_percent = %.2f, want ~81.9 (1720/2100)", result.Summary.CacheHitPercent)
 	}
 }
 

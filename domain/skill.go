@@ -218,6 +218,12 @@ type Settings struct {
 	// turn-based review (compaction-triggered review still runs).
 	// Default: 10 turns.
 	LearningReviewThreshold int `json:"learning_review_threshold,omitempty"`
+	// ReviewModel selects the model used by the background review agent.
+	// When empty, the conversation's active model is used. Format:
+	// "providerID:modelID" (same as CompactionModel). Useful for routing
+	// reviews to a cheaper/faster model; reviews re-send the transcript
+	// tail, so the model choice directly affects background cost.
+	ReviewModel string `json:"review_model,omitempty"`
 	// MaxAutoContinues is the outer multi-turn auto-continue budget.
 	// After a successful sealed turn, if the conversation todo list
 	// still has open items (pending or in_progress), the agent runner

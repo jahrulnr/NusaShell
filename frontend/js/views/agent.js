@@ -10,6 +10,7 @@ import { bindModelPicker } from './agent/model-picker.js';
 import { bindRoomInfo, updateRoomInfo } from './agent/room-info.js';
 import {
   attachmentChip,
+  formatTokens,
   reasoningDisclosure,
   renderEmptyThread,
   renderConversation,
@@ -1556,8 +1557,8 @@ function bindEvents() {
       const meta = el('div', { class: 'agent-turn-meta' });
       if (model) meta.append(el('span', { class: 'agent-turn-tag', text: model }));
       if (usage) {
-        meta.append(el('span', { class: 'agent-turn-tag', text: `↑${usage.input_tokens ?? 0} ↓${usage.output_tokens ?? 0}` }));
-        if (usage.cache_read) meta.append(el('span', { class: 'agent-turn-tag', text: `cache ${usage.cache_read}` }));
+        meta.append(el('span', { class: 'agent-turn-tag', text: `↑${formatTokens(usage.input_tokens ?? 0)} ↓${formatTokens(usage.output_tokens ?? 0)}` }));
+        if (usage.cache_read) meta.append(el('span', { class: 'agent-turn-tag', text: `cache ${formatTokens(usage.cache_read)}` }));
       }
       meta.append(el('span', { class: 'agent-message-meta', text: fmtTime(new Date().toISOString()) }));
       run.msgNode.append(meta);

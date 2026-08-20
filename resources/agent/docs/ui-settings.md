@@ -42,7 +42,7 @@ Default model for new conversations, the maximum tool rounds per turn (default 8
 
 ## Embeddings
 
-Embedding model used by skill and memory search. Models tagged as embedding-capable appear here after import. Ollama models (e.g. nomic-embed-text) work locally without an API key. The learning review threshold controls how many turns accumulate before extracting learnings (default 10, 0 disables turn-based review).
+Embedding model used by skill and memory search. Models tagged as embedding-capable appear here after import. Ollama models (e.g. nomic-embed-text) work locally without an API key. The learning review threshold controls how many turns accumulate before extracting learnings (default 10, 0 disables turn-based review). The review model routes background autolearn reviews to a cheaper or faster model (default uses the conversation's active model).
 
 - **Embeddings title** (`#settings-embedding-title`):
   - Section: Settings
@@ -56,6 +56,11 @@ Embedding model used by skill and memory search. Models tagged as embedding-capa
   - Section: Settings
   - Type: number
   - Notes: Turns before review; 0 disables turn-based review.
+
+- **Review model** (`#settings-review-model`):
+  - Section: Settings
+  - Type: select
+  - Notes: Routes background autolearn reviews to a dedicated model; empty uses the conversation's active model.
 
 ## Vision fallback
 

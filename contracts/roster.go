@@ -1103,6 +1103,7 @@ type SettingsDTO struct {
 	MaxInputTokens          int      `json:"max_input_tokens"`
 	MaxOutputTokens         int      `json:"max_output_tokens"`
 	MaxParallelTools        int      `json:"max_parallel_tools,omitempty"`
+	ReviewModel             string   `json:"review_model,omitempty"`
 	EmbeddingProviderID     string   `json:"embedding_provider_id,omitempty"`
 	EmbeddingModelID        string   `json:"embedding_model_id,omitempty"`
 	VisionProviderID        string   `json:"vision_provider_id,omitempty"`
@@ -1138,6 +1139,7 @@ type SettingsSetRequest struct {
 	MaxInputTokens          *int            `json:"max_input_tokens,omitempty"`
 	MaxOutputTokens         *int            `json:"max_output_tokens,omitempty"`
 	MaxParallelTools        *int            `json:"max_parallel_tools,omitempty"`
+	ReviewModel             *string         `json:"review_model,omitempty"`
 	EmbeddingProviderID     *string         `json:"embedding_provider_id,omitempty"`
 	EmbeddingModelID        *string         `json:"embedding_model_id,omitempty"`
 	VisionProviderID        *string         `json:"vision_provider_id,omitempty"`
