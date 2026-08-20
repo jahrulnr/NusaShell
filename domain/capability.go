@@ -37,8 +37,12 @@ const (
 	AutoStartAllow               AutoStartPolicy = "allow_auto_start"
 )
 
-// DefaultAutoStart is the recommended automation default.
-const DefaultAutoStart = AutoStartAllow
+// DefaultAutoStart is the recommended automation default. It inherits the
+// user's plugin autostart preference: a server whose autostart is off stays
+// off unless something explicitly enables it (mcp_enable) or an automation
+// author opts in with auto_start: allow. AutoStartAllow would ignore the user
+// flag and silently spawn servers, which reads as a security concern in the UI.
+const DefaultAutoStart = AutoStartInherit
 
 // WorkflowAvailability is derived from capability status + auto-start.
 type WorkflowAvailability string
