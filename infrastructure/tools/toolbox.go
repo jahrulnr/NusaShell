@@ -108,12 +108,10 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "skill_save", Description: "Create or update a skill, or write a support file inside an existing skill. When path is set, write content to that file (e.g. references/errors.md, templates/config.yaml, scripts/verify.sh) — the skill must already exist. When path is omitted, create or update the skill's SKILL.md body and metadata (name, description). Skills should be reusable procedures or domain knowledge, not one-off task notes.", InputSchema: obj("object", props("id", str("Existing skill id to update (omit to create new; ignored when path is set)"), "name", str("Skill name (lowercase with hyphens, matches folder name)"), "description", str("Short description (max 1024 chars); ignored when path is set"), "path", str("Relative file path inside the skill folder (e.g. references/x.md); defaults to SKILL.md when omitted"), "content", str("Full file content")), "name", "content")},
 		{Name: "skill_files", Description: "List the files inside an installed skill folder (SKILL.md + support files) with size and editability, to discover references/guides before skill_read.", InputSchema: obj("object", props("name", str("Skill id")), "name")},
 		{Name: "memory_save", Description: "Save a fact to long-term memory as a searchable fragment. Fragments are unlimited and indexed by content + metadata (category, project, task, tags). Use memory_search to retrieve them later.", InputSchema: obj("object", props("content", str("Fact or observation to remember"), "category", strEnum("Memory category", "project", "user", "task", "general"), "project", str("Optional project/workspace label"), "task", str("Optional task label"), "tags", arr("Optional tags for filtering")), "content")},
-		{Name: "memory_replace", Description: "Update an existing memory entry. For primary memory, use old_text (substring match). For fragments, use id to update by identifier.", InputSchema: obj("object", props("target", strEnum("Update target: \"primary\" (always-injected working set) or \"fragment\" (searchable archive)", "primary", "fragment"), "old_text", str("For primary: unique substring of the entry to replace"), "id", str("For fragment: fragment id to update"), "content", str("New content")), "target", "content")},
+		{Name: "memory_replace", Description: "Update memory. For primary (target=\"primary\"): replace a substring of the primary document body with new content, or rewrite the entire body by omitting old_text. For fragments (target=\"fragment\"): update a fragment by id.", InputSchema: obj("object", props("target", strEnum("Update target: \"primary\" (always-injected document) or \"fragment\" (searchable archive)", "primary", "fragment"), "old_text", str("For primary: substring of the document to replace (omit to rewrite the entire body)"), "id", str("For fragment: fragment id to update"), "content", str("New content")), "target", "content")},
 		{Name: "memory_search", Description: "Search memory fragments by content (BM25) with optional metadata filters (category, project, task, tags). Returns ranked results with scores.", InputSchema: obj("object", props("query", str("Search query"), "category", strEnum("Optional category filter", "project", "user", "task", "general"), "project", str("Optional project filter"), "task", str("Optional task filter"), "tags", arr("Optional tags filter (ALL must match)"), "limit", intSchema("Max results, default 20")), "query")},
 		{Name: "memory_list", Description: "List memory entries. Target \"primary\" lists the always-injected working set; target \"fragments\" lists the searchable archive (with optional metadata filters).", InputSchema: obj("object", props("target", strEnum("List target: \"primary\" or \"fragments\" (default)", "primary", "fragments"), "category", strEnum("Optional fragment category filter", "project", "user", "task", "general"), "project", str("Optional fragment project filter"), "limit", intSchema("Max fragment results, default 50")))},
-		{Name: "memory_delete", Description: "Delete a memory fragment by id. Primary memory entries cannot be deleted (use memory_replace to update or memory_demote to move to fragments).", InputSchema: obj("object", props("id", str("Fragment id")), "id")},
-		{Name: "memory_promote", Description: "Promote a fragment into primary memory (the always-injected working set, ~1k token cap). Use when a fragment contains a durable, frequently-needed fact. Background review agent only.", InputSchema: obj("object", props("id", str("Fragment id to promote")), "id")},
-		{Name: "memory_demote", Description: "Demote a primary memory entry back to fragments. Use when a primary entry is stale or no longer frequently needed. Background review agent only.", InputSchema: obj("object", props("old_text", str("Substring of the primary entry to demote")), "old_text")},
+		{Name: "memory_delete", Description: "Delete a memory fragment by id.", InputSchema: obj("object", props("id", str("Fragment id")), "id")},
 		{Name: "todo", Description: "Replace the conversation task checklist (full replace, Claude TodoWrite style). Empty items clears the list. The user can delete items from the UI — treat deleted items as gone and do not re-add them. The optional `goal` argument sets a structured brief that survives compaction. Format: three short lines — Want: (what the user asked for, in their words), Plan: (key steps/approach), Done: (acceptance criteria — what the finished result looks like). Set once at the start of a task; do not repeat on every call. The current hydration checkpoint is reused until compaction; the goal remains in tool history and is included in the fresh post-compaction checkpoint.", InputSchema: obj("object", props("items", arrObj("Full replacement list of todo items (max 50)", props("id", str("Stable item id (unique within the list)"), "content", str("Short task description (max 500 chars)"), "status", strEnum("Item status; prefer exactly one in_progress at a time", "pending", "in_progress", "completed")), "id", "content", "status"), "goal", str("Structured brief: 'Want: <user intent in their words>\\nPlan: <key steps/approach>\\nDone: <acceptance criteria — what the finished result looks like>'. Set once at task start; survives compaction. Max ~10000 tokens.")), "items")},
 		{Name: "ask_question", Description: "Pause and ask the user a structured clarifying question before continuing. Use only for genuine decisions the user must make — not for things you can figure out yourself. The user can answer via options or free text (when allowed). The turn blocks until the user answers or cancels.", InputSchema: obj("object", props("question", str("The question to show the user"), "options", arrObj("Selectable choices (1-8). Mark one default when possible.", props("id", str("Stable option id"), "label", str("Short option label"), "description", str("Optional one-line explanation"), "default", obj("boolean", nil), "icon", str("Optional emoji or short icon glyph"), "image", str("Optional image URL or compact data URI")), "id", "label"), "allow_free_text", obj("boolean", nil), "multi_select", obj("boolean", nil)), "question", "options")},
 		{Name: "docs_search", Description: "Search the NusaShell documentation corpus.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 10")), "query")},
@@ -441,7 +439,11 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				return "", fmt.Errorf("primary store not configured")
 			}
 			if strings.TrimSpace(args.OldText) == "" {
-				return "", fmt.Errorf("old_text is required for primary target")
+				// No old_text: rewrite the entire primary document body.
+				if err := t.Primary.Update([]domain.PrimaryEntry{{Content: args.Content, Source: "agent"}}); err != nil {
+					return "", err
+				}
+				return yamlBlock(map[string]any{"status": "rewritten", "target": "primary"}), nil
 			}
 			if err := t.Primary.Replace(args.OldText, args.Content); err != nil {
 				return "", err
@@ -552,88 +554,6 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", err
 		}
 		return yamlBlock(map[string]any{"status": "deleted", "fragment_id": args.ID}), nil
-
-	case name == "memory_promote":
-		var args struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(argsJSON, &args); err != nil {
-			return "", fmt.Errorf("invalid args: %w", err)
-		}
-		if t.Primary == nil || t.Fragments == nil {
-			return "", fmt.Errorf("primary or fragment store not configured")
-		}
-		frag := t.Fragments.Get(args.ID)
-		if frag == nil {
-			return "", fmt.Errorf("fragment %s not found", args.ID)
-		}
-		mem := t.Primary.Load()
-		entries := mem.Entries
-		// Avoid duplicate promotion: skip if an entry with the same ID
-		// or content already exists in primary.
-		for _, e := range entries {
-			if e.ID == frag.ID || e.Content == frag.Content {
-				return yamlBlock(map[string]any{"status": "already_promoted", "fragment_id": args.ID}), nil
-			}
-		}
-		entries = append(entries, domain.PrimaryEntry{
-			ID:        frag.ID,
-			Content:   frag.Content,
-			Source:    "agent",
-			UpdatedAt: time.Now().UTC(),
-		})
-		if err := t.Primary.Update(entries); err != nil {
-			return "", err
-		}
-		// Remove the fragment from the archive so the entry does not appear
-		// in both primary and fragment tiers simultaneously.
-		if err := t.Fragments.Delete(frag.ID); err != nil {
-			return "", fmt.Errorf("promoted to primary but failed to delete fragment %s: %w", frag.ID, err)
-		}
-		return yamlBlock(map[string]any{"status": "promoted", "fragment_id": args.ID}), nil
-
-	case name == "memory_demote":
-		var args struct {
-			OldText string `json:"old_text"`
-		}
-		if err := json.Unmarshal(argsJSON, &args); err != nil {
-			return "", fmt.Errorf("invalid args: %w", err)
-		}
-		if strings.TrimSpace(args.OldText) == "" {
-			return "", fmt.Errorf("old_text is required")
-		}
-		if t.Primary == nil || t.Fragments == nil {
-			return "", fmt.Errorf("primary or fragment store not configured")
-		}
-		mem := t.Primary.Load()
-		var kept []domain.PrimaryEntry
-		var demoted *domain.PrimaryEntry
-		for i := range mem.Entries {
-			e := &mem.Entries[i]
-			if demoted == nil && strings.Contains(e.Content, args.OldText) {
-				demoted = e
-				continue
-			}
-			kept = append(kept, *e)
-		}
-		if demoted == nil {
-			return "", fmt.Errorf("no primary entry matching %q", args.OldText)
-		}
-		if err := t.Primary.Update(kept); err != nil {
-			return "", err
-		}
-		// Save the demoted entry as a fragment so it stays searchable.
-		frag := &domain.MemoryFragment{
-			ID:        demoted.ID,
-			Category:  domain.FragmentCategoryGeneral,
-			Content:   demoted.Content,
-			Source:    "agent",
-			CreatedAt: demoted.UpdatedAt,
-		}
-		if err := t.Fragments.Save(frag); err != nil {
-			return "", fmt.Errorf("demoted from primary but failed to save as fragment: %w", err)
-		}
-		return yamlBlock(map[string]any{"status": "demoted", "matched": args.OldText, "fragment_id": frag.ID}), nil
 
 	case name == "todo":
 		return t.execTodo(ctx, argsJSON)

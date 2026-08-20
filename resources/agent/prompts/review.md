@@ -42,11 +42,96 @@ NusaShell has two memory tiers:
 
 ## Current primary memory
 
-Below is the current content of primary memory. Use it to avoid promoting
-duplicates and to decide whether a stale entry should be demoted before
-promoting a new one.
+Below is the current content of primary memory. Read it before editing
+to avoid duplicates and to spot stale text that should be trimmed.
 
 {{primary_memory}}
+
+## Primary memory writing guide
+
+Primary memory (`memory/primary.md`) is a single prose document — think
+of it as a living brief about the user and working context that the
+agent reads every turn. It is NOT a dump of raw fragments. Write it like
+a content writer would: clear, flowing prose, not bullet lists of facts.
+
+### When to add to primary
+
+A fact belongs in primary when ALL of these are true:
+
+1. **Durable** — it will still be true next week, not just this session.
+2. **Frequently needed** — the agent would benefit from knowing it in
+   most conversations, not just one niche task.
+3. **Not already in primary** — read the current document first; if the
+   fact is already there (even phrased differently), do not add it again.
+4. **Not better as a skill** — if the fact is a reusable procedure or
+   workflow (not a static fact), it belongs in skills, not primary. Use
+   the `skill-creator` skill if it is available; otherwise save as a
+   fragment and flag it for skill creation.
+
+Good primary candidates:
+- User persona: communication style, language preferences, working hours,
+  role, team structure.
+- Stable environment facts: workspace paths, toolchain quirks, repo
+  policies that affect every session.
+- Long-term project context: what the user is building, why, and the
+  architectural constraints that don't change.
+
+Bad primary candidates (save as fragments instead):
+- One-off task notes, debugging steps, transient state.
+- Facts that only matter for a specific task, not every conversation.
+- Raw error messages or stack traces.
+
+### When to update primary
+
+- **Refine** — if the current primary text is verbose or unclear, rewrite
+  it to be more concise. Primary is capped at ~1k tokens; every word
+  competes for space.
+- **Correct** — if the user corrected something that contradicts the
+  current primary text, update the text. User corrections are the
+  strongest signal that primary needs editing.
+- **Consolidate** — if primary has overlapping or redundant paragraphs,
+  merge them into one clear passage.
+
+### When to remove from primary
+
+- **Stale** — the fact is no longer true (old toolchain, old project,
+  old role). Remove the stale text; do not leave it to "age out".
+- **Demoted to fragment** — the fact is still true but no longer
+  frequently needed. Save it as a fragment first (`memory_save`), then
+  remove it from primary so the fragment stays searchable.
+- **Never needed** — the fact was added speculatively but never proved
+  useful. Remove it.
+
+### How to write primary
+
+- Write in second person ("You are…", "You prefer…") — the agent reads
+  primary as a brief about itself and the user.
+- Use flowing prose, not bullet lists. One paragraph per topic, blank
+  line between topics.
+- Be specific and concrete: "address the user as 'tuan'" is better than
+  "be polite".
+- Keep the total document under ~1k tokens. If it's too long, trim the
+  least essential paragraph first.
+- Read the current document before editing. Use `old_text` to replace a
+  specific passage, or omit `old_text` to rewrite the entire body when
+  a full restructure is needed.
+- If a writing skill is available (e.g. `article-writing`), use it to
+  guide prose style: paragraph rhythm, register shifts, and clarity.
+  Call `skill_search` or `skill_list` to check. Apply the skill's
+  principles to keep primary readable and human-sounding, not a dry
+  fact dump.
+
+### Skill routing
+
+Before saving a fact, decide: is this a **static fact** (memory) or a
+**reusable procedure** (skill)?
+
+- Static fact → `memory_save` (fragment) or `memory_replace target=primary`
+  (primary).
+- Reusable procedure/workflow → use the `skill-creator` skill if
+  available. If `skill-creator` is not installed, save the procedure as
+  a fragment with `category="task"` and tags `["skill-candidate"]` so a
+  future review can promote it to a skill.
 
 ## Memory rules
 
@@ -62,16 +147,12 @@ promoting a new one.
   saving (avoid duplicates). Use `memory_list` to browse.
 - Use `memory_replace` with `target="fragment"` and `id` to update an
   existing fragment's content.
-- Use `memory_promote` to move a fragment into **primary memory** when it
-  is a durable, frequently-needed fact (e.g. "user prefers Indonesian",
-  "repo uses Go + Clean Architecture"). Primary is capped at ~1k tokens,
-  so be selective.
-- Use `memory_demote` to move a stale primary entry back to fragments
-  when it is no longer frequently needed.
+- Use `memory_replace` with `target="primary"` to edit the **primary
+  document**. Pass `old_text` to replace a substring, or omit `old_text`
+  to rewrite the entire body. See the "Primary memory writing guide"
+  above for when to add, update, and remove.
 - Save only durable, reusable facts. Do NOT save transient task state,
   one-off requests, or environment-failure folklore.
-- Keep primary memory lean: promote only the most essential facts. When
-  primary is near its cap, demote stale entries before promoting new ones.
 
 {{skill_review_rules}}
 

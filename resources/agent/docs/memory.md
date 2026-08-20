@@ -1,20 +1,44 @@
 # Memory
 
 NusaShell has a two-tier memory system: a small, always-injected
-**primary** working set and an unlimited, searchable **fragments**
+**primary** document and an unlimited, searchable **fragments**
 archive.
 
 ## Two tiers
 
 | Tier | Storage | Cap | Injected | Tools |
 |---|---|---|---|---|
-| **Primary** | `memory/primary.md` (single markdown file) | ~1k tokens | Every turn (via hydration) | `memory_list target=primary`, `memory_replace target=primary`, `memory_demote` |
-| **Fragments** | `memory/fragments/*.md` (one file per entry) | Unlimited | On-demand (search) | `memory_save`, `memory_search`, `memory_list target=fragments`, `memory_replace target=fragment`, `memory_delete`, `memory_promote` |
+| **Primary** | `memory/primary.md` (single markdown document) | ~1k tokens | Every turn (via hydration) | `memory_list target=primary`, `memory_replace target=primary` |
+| **Fragments** | `memory/fragments/*.md` (one file per entry) | Unlimited | On-demand (search) | `memory_save`, `memory_search`, `memory_list target=fragments`, `memory_replace target=fragment`, `memory_delete` |
 
-Primary memory is the hot set — the durable, frequently-needed facts the
-agent sees in every turn. Fragments are the cold archive — all new facts
-enter here first, and the background review agent promotes the most
-durable ones into primary.
+Primary memory is a single markdown document — like a README the agent
+maintains about the user and working context. It is injected into every
+turn. Fragments are the cold archive — all new facts enter here first,
+and the background review agent edits the primary document to reflect
+the most durable facts.
+
+## Primary document format
+
+`memory/primary.md` is a markdown file with YAML frontmatter followed by
+a free-form prose body:
+
+```markdown
+---
+last_updated: "2026-08-20T00:00:00Z"
+version: 2
+---
+
+You are a backend developer living in Jakarta. You prefer pragmatic
+solutions over over-engineered architectures.
+
+You work on NusaShell and value clean architecture, Go, and tooling
+that works for both humans and AI agents.
+```
+
+The entire body is one document — paragraphs are part of the same
+entry, not separate entries. The agent edits the body in place via
+`memory_replace target=primary` (substring match) or rewrites the whole
+body by omitting `old_text`.
 
 ## Fragment metadata
 
@@ -44,20 +68,14 @@ project, task, tags) — like `docs_search` but for memory.
 - `memory_search` — search fragments by content (BM25) with optional
   metadata filters (`query`, `category`, `project`, `task`, `tags`,
   `limit`). Returns ranked results with scores.
-- `memory_list` — list entries. `target="primary"` lists the always-injected
-  working set; `target="fragments"` (default) lists the archive with
+- `memory_list` — list entries. `target="primary"` returns the primary
+  document; `target="fragments"` (default) lists the archive with
   optional metadata filters.
-- `memory_replace` — update an existing entry. For primary: `target="primary"`
-  + `old_text` (substring match) + `content`. For fragments: `target="fragment"`
-  + `id` + `content`.
-- `memory_delete` — delete a fragment by `id`. Primary entries cannot be
-  deleted (use `memory_demote` to move them back to fragments).
-- `memory_promote` — move a fragment into **primary memory**. Use when a
-  fragment contains a durable, frequently-needed fact. Background review
-  agent only.
-- `memory_demote` — move a primary entry back to fragments. Use when a
-  primary entry is stale or no longer frequently needed. Background review
-  agent only.
+- `memory_replace` — update memory. For primary: `target="primary"` +
+  `old_text` (substring match) + `content` to edit part of the document,
+  or omit `old_text` to rewrite the entire body. For fragments:
+  `target="fragment"` + `id` + `content`.
+- `memory_delete` — delete a fragment by `id`.
 
 ## When to save
 
@@ -81,22 +99,23 @@ Good examples:
     memory_save(content="Repo policy: ignore untracked folders in root — they are research scratch", category="project", tags=["repo-policy"])
     memory_search(query="comment language")   # before saving, check for duplicates
 
-## When to promote
+## How the review agent edits primary
 
-The background review agent promotes fragments into primary memory when
-they are durable and frequently needed. Primary is capped at ~1k tokens,
-so be selective. When primary is near its cap, demote stale entries
-before promoting new ones.
+The background review agent edits the primary document via
+`memory_replace target=primary` when it finds durable facts in fragments
+that belong in the always-injected working set. Primary is capped at ~1k
+tokens, so the agent rewrites or trims stale text before adding new
+content.
 
-The review agent sees the current primary memory content injected into
-its system prompt at the start of each review run, so it can avoid
-promoting duplicates and spot stale entries to demote without needing to
-call `memory_list target=primary` first.
+The review agent sees the current primary document injected into its
+system prompt at the start of each review run, so it can avoid
+duplicates and spot stale text without needing to call
+`memory_list target=primary` first.
 
 Good examples:
 
-    memory_promote(id="frag_01J…")   # "User prefers Indonesian" — durable, every-turn fact
-    memory_demote(old_text="old CI config")  # stale, no longer needed in primary
+    memory_replace(target="primary", old_text="old CI config notes", content="CI uses GitHub Actions + GitLab Runner")
+    memory_replace(target="primary", content="Full rewrite of the primary document body…")
 
 ## What not to save
 

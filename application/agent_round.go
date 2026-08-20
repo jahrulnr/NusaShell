@@ -525,7 +525,7 @@ func (a *App) emitLearningMutationEvents(toolName string, status domain.ToolCall
 		return
 	}
 	switch toolName {
-	case "memory_save", "memory_replace", "memory_delete", "memory_promote", "memory_demote":
+	case "memory_save", "memory_replace", "memory_delete":
 		a.Bus.Emit(contracts.EventMemoryUpdated, map[string]any{
 			"source": "tool",
 			"tool":   toolName,

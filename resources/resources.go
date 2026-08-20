@@ -65,10 +65,9 @@ const (
 // with skill-rules.md content. The {{primary_memory}} placeholder is left
 // intact here and substituted by the caller with the live primary memory
 // content (so the review agent sees what is already in primary.md before
-// deciding to promote/demote). There is intentionally only one
-// review agent — it decides both memory and skill writes in a single pass
-// to avoid the redundancy bug where memory contains skill fragments and
-// vice versa.
+// editing it). There is intentionally only one review agent — it decides
+// both memory and skill writes in a single pass to avoid the redundancy
+// bug where memory contains skill fragments and vice versa.
 func ReviewPrompt() string {
 	base := Prompt("review")
 	if base == "" {

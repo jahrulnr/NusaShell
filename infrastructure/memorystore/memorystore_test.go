@@ -24,8 +24,9 @@ func TestPrimaryAutoCreates(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("primary.md not auto-created: %v", err)
 	}
-	if mem := p.Load(); len(mem.Entries) != 0 {
-		t.Errorf("new primary should be empty, got %d entries", len(mem.Entries))
+	mem := p.Load()
+	if len(mem.Entries) != 1 || mem.Entries[0].Content != "" {
+		t.Errorf("new primary should be empty, got %+v", mem)
 	}
 }
 
@@ -35,19 +36,39 @@ func TestPrimaryUpdateAndLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	body := "You are a backend developer living in Jakarta.\n\nYou prefer pragmatic solutions."
+	if err := p.Update([]domain.PrimaryEntry{{Content: body, Source: "agent"}}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	loaded := p.Load()
+	if len(loaded.Entries) != 1 {
+		t.Fatalf("loaded %d entries, want 1 (single document)", len(loaded.Entries))
+	}
+	if loaded.Entries[0].Content != body {
+		t.Errorf("body mismatch:\nwant: %q\ngot:  %q", body, loaded.Entries[0].Content)
+	}
+}
+
+func TestPrimaryUpdateMergesEntries(t *testing.T) {
+	dir := t.TempDir()
+	p, _ := NewPrimary(dir)
 	entries := []domain.PrimaryEntry{
-		{ID: "frag_1", Content: "user prefers Indonesian", Source: "agent"},
-		{ID: "frag_2", Content: "repo uses Go + Clean Architecture", Source: "agent"},
+		{Content: "First paragraph.", Source: "agent"},
+		{Content: "Second paragraph.", Source: "agent"},
 	}
 	if err := p.Update(entries); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 	loaded := p.Load()
-	if len(loaded.Entries) != 2 {
-		t.Fatalf("loaded %d entries, want 2", len(loaded.Entries))
+	if len(loaded.Entries) != 1 {
+		t.Fatalf("loaded %d entries, want 1", len(loaded.Entries))
 	}
-	if loaded.Entries[0].Content != "user prefers Indonesian" {
-		t.Errorf("entry 0 = %q", loaded.Entries[0].Content)
+	if !strings.Contains(loaded.Entries[0].Content, "First paragraph.") ||
+		!strings.Contains(loaded.Entries[0].Content, "Second paragraph.") {
+		t.Errorf("merged body missing content: %q", loaded.Entries[0].Content)
+	}
+	if !strings.Contains(loaded.Entries[0].Content, "\n\n") {
+		t.Errorf("merged body should have blank line separator: %q", loaded.Entries[0].Content)
 	}
 }
 
@@ -55,7 +76,7 @@ func TestPrimaryUpdateEnforcesCap(t *testing.T) {
 	dir := t.TempDir()
 	p, _ := NewPrimary(dir)
 	big := strings.Repeat("x", domain.PrimaryCharCap+1)
-	if err := p.Update([]domain.PrimaryEntry{{ID: "x", Content: big}}); err == nil {
+	if err := p.Update([]domain.PrimaryEntry{{Content: big}}); err == nil {
 		t.Error("Update should reject content over the cap")
 	}
 }
@@ -63,9 +84,7 @@ func TestPrimaryUpdateEnforcesCap(t *testing.T) {
 func TestPrimaryReplace(t *testing.T) {
 	dir := t.TempDir()
 	p, _ := NewPrimary(dir)
-	_ = p.Update([]domain.PrimaryEntry{
-		{ID: "frag_1", Content: "user prefers English", Source: "agent"},
-	})
+	_ = p.Update([]domain.PrimaryEntry{{Content: "user prefers English", Source: "agent"}})
 	if err := p.Replace("English", "user prefers Indonesian"); err != nil {
 		t.Fatalf("Replace: %v", err)
 	}
@@ -78,24 +97,24 @@ func TestPrimaryReplace(t *testing.T) {
 func TestPrimaryReplaceNoMatch(t *testing.T) {
 	dir := t.TempDir()
 	p, _ := NewPrimary(dir)
-	_ = p.Update([]domain.PrimaryEntry{{ID: "x", Content: "hello"}})
+	_ = p.Update([]domain.PrimaryEntry{{Content: "hello"}})
 	if err := p.Replace("nonexistent", "new"); err == nil {
-		t.Error("Replace should fail when no entry matches")
+		t.Error("Replace should fail when no text matches")
 	}
 }
 
 func TestPrimaryPersistsAcrossInstances(t *testing.T) {
 	dir := t.TempDir()
 	p1, _ := NewPrimary(dir)
-	_ = p1.Update([]domain.PrimaryEntry{{ID: "frag_1", Content: "persisted fact"}})
+	_ = p1.Update([]domain.PrimaryEntry{{Content: "persisted document body"}})
 
 	p2, err := NewPrimary(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	loaded := p2.Load()
-	if len(loaded.Entries) != 1 || loaded.Entries[0].Content != "persisted fact" {
-		t.Errorf("reload lost entries: %+v", loaded.Entries)
+	if len(loaded.Entries) != 1 || loaded.Entries[0].Content != "persisted document body" {
+		t.Errorf("reload lost document: %+v", loaded)
 	}
 }
 
@@ -122,15 +141,16 @@ func TestPrimaryAutoCreateHasYAMLFrontmatter(t *testing.T) {
 	if !strings.Contains(s, fmt.Sprintf("version: %d", PrimaryVersion)) {
 		t.Errorf("frontmatter version should be %d", PrimaryVersion)
 	}
-	if len(p.Load().Entries) != 0 {
-		t.Errorf("auto-created primary should be empty, got %d entries", len(p.Load().Entries))
+	mem := p.Load()
+	if len(mem.Entries) != 1 || mem.Entries[0].Content != "" {
+		t.Errorf("auto-created primary should be empty, got %+v", mem)
 	}
 }
 
 func TestPrimaryUpdateWritesFrontmatter(t *testing.T) {
 	dir := t.TempDir()
 	p, _ := NewPrimary(dir)
-	_ = p.Update([]domain.PrimaryEntry{{ID: "frag_1", Content: "test fact"}})
+	_ = p.Update([]domain.PrimaryEntry{{Content: "test document body"}})
 	raw, _ := os.ReadFile(filepath.Join(dir, PrimaryFile))
 	s := string(raw)
 	if !strings.HasPrefix(s, "---\n") {
@@ -142,8 +162,30 @@ func TestPrimaryUpdateWritesFrontmatter(t *testing.T) {
 	if !strings.Contains(s, "version:") {
 		t.Error("updated frontmatter missing version")
 	}
-	if !strings.Contains(s, "- [frag_1] test fact") {
-		t.Errorf("updated body missing entry, got:\n%s", s)
+	if !strings.Contains(s, "test document body") {
+		t.Errorf("updated body missing content, got:\n%s", s)
+	}
+	if strings.Contains(s, "- [") {
+		t.Errorf("format should not contain bullet ID prefix, got:\n%s", s)
+	}
+}
+
+func TestPrimaryMultiParagraphDocument(t *testing.T) {
+	dir := t.TempDir()
+	p, _ := NewPrimary(dir)
+	body := "You are a backend developer.\n\nYou prefer Go and clean architecture.\n\nYou work on NusaShell."
+	if err := p.Update([]domain.PrimaryEntry{{Content: body, Source: "agent"}}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	loaded := p.Load()
+	if len(loaded.Entries) != 1 {
+		t.Fatalf("loaded %d entries, want 1 (entire body = 1 entry)", len(loaded.Entries))
+	}
+	if loaded.Entries[0].Content != body {
+		t.Errorf("body should be preserved as-is:\nwant: %q\ngot:  %q", body, loaded.Entries[0].Content)
+	}
+	if !strings.HasPrefix(loaded.Entries[0].ID, "prim_") {
+		t.Errorf("ID should be prim_ prefixed, got %q", loaded.Entries[0].ID)
 	}
 }
 

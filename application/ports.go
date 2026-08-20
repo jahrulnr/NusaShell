@@ -112,10 +112,11 @@ type MemoryStore interface {
 	Replace(target, oldText, content string) error
 }
 
-// PrimaryStore is the always-injected working-set memory backed by a
-// single primary.md file. Foreground agents read and update entries; the
-// background review agent promotes entries from fragments. Create is
-// intentionally absent — new facts enter via fragments first.
+// PrimaryStore is the always-injected primary memory document backed by a
+// single primary.md file. The document body is free-form prose that the
+// agent edits in place via Replace (substring match) or Update (rewrite
+// the entire body). There is no per-entry create/delete — the agent
+// maintains the document like a README.
 type PrimaryStore interface {
 	Load() *domain.PrimaryMemory
 	Update(entries []domain.PrimaryEntry) error
@@ -124,8 +125,7 @@ type PrimaryStore interface {
 
 // FragmentStore is the unlimited, searchable memory archive backed by
 // one markdown file per entry under memory/fragments/. Foreground
-// agents create, update, delete, and search fragments; the background
-// review agent promotes durable fragments into primary memory.
+// agents create, update, delete, and search fragments.
 type FragmentStore interface {
 	List(filter domain.FragmentSearchFilter) []*domain.MemoryFragment
 	Get(id string) *domain.MemoryFragment

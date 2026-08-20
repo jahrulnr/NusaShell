@@ -82,8 +82,6 @@ var reviewToolWhitelist = map[string]bool{
 	"memory_replace": true,
 	"memory_search":  true,
 	"memory_list":    true,
-	"memory_promote": true,
-	"memory_demote":  true,
 	"skill_list":     true,
 	"skill_search":   true,
 	"skill_read":     true,
@@ -200,10 +198,10 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIPro
 		return nil, nil
 	}
 	// Inject the current primary memory content into the system prompt so
-	// the review agent can see what is already in primary.md before deciding
-	// to promote (avoid duplicates) or demote (spot stale entries). Without
-	// this, the agent would have to call memory_list target=primary first,
-	// burning a tool round and sometimes skipping the check entirely.
+	// the review agent can see what is already in primary.md before editing
+	// it (avoid duplicates, spot stale text). Without this, the agent would
+	// have to call memory_list target=primary first, burning a tool round
+	// and sometimes skipping the check entirely.
 	systemPrompt = r.injectPrimaryMemory(systemPrompt)
 	transcript := r.buildTranscript(conversation)
 	if transcript == "" {
@@ -282,7 +280,7 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIPro
 				// refresh memory/skill panes in real time during a review.
 				if r.app.Bus != nil {
 					switch tc.Name {
-					case "memory_save", "memory_replace", "memory_promote", "memory_demote":
+					case "memory_save", "memory_replace":
 						r.app.Bus.Emit(contracts.EventMemoryUpdated, map[string]any{
 							"source": "review",
 							"tool":   tc.Name,
@@ -321,9 +319,10 @@ func isNothingToSave(content string) bool {
 
 // injectPrimaryMemory reads the current primary memory from the PrimaryStore
 // and substitutes it into the review system prompt's {{primary_memory}}
-// placeholder. Each entry is rendered as "- [id] content" so the agent can
-// reference ids when calling memory_demote. Returns the prompt unchanged
-// when no PrimaryStore is configured or the document is empty.
+// placeholder. Each entry is rendered as a bullet line so the agent can
+// see what is already in primary memory. memory_replace target=primary
+// (substring match), not IDs, so no ID prefix is needed. Returns the
+// prompt unchanged when no PrimaryStore is configured or the document is empty.
 func (r *BackgroundReviewAgent) injectPrimaryMemory(prompt string) string {
 	if r.app == nil || r.app.Primary == nil {
 		return strings.ReplaceAll(prompt, resources.PrimaryMemoryPlaceholder(), "(unavailable)")
@@ -334,7 +333,7 @@ func (r *BackgroundReviewAgent) injectPrimaryMemory(prompt string) string {
 	}
 	lines := make([]string, 0, len(mem.Entries))
 	for _, e := range mem.Entries {
-		lines = append(lines, fmt.Sprintf("- [%s] %s", e.ID, e.Content))
+		lines = append(lines, fmt.Sprintf("- %s", e.Content))
 	}
 	return resources.SubstitutePrimaryMemory(prompt, lines)
 }

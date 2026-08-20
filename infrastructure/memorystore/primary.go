@@ -6,6 +6,8 @@
 package memorystore
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,7 +27,7 @@ const PrimaryFile = "memory/primary.md"
 
 // PrimaryVersion is the schema version of the primary.md frontmatter.
 // Bump when the file format changes in a backward-incompatible way.
-const PrimaryVersion = 1
+const PrimaryVersion = 2
 
 // primaryFrontmatter is the YAML metadata block at the top of primary.md.
 // It carries the last-updated timestamp and schema version so a human
@@ -37,21 +39,31 @@ type primaryFrontmatter struct {
 }
 
 // Primary is the PrimaryStore adapter backed by primary.md. The file is
-// a markdown document with YAML frontmatter (last_updated + version)
-// followed by one bullet line per entry. Each entry line is formatted as:
+// a single markdown document with YAML frontmatter (last_updated +
+// version) followed by the body — a free-form prose document the agent
+// edits in place via memory_replace. Think of it as a README the agent
+// maintains about the user and working context:
 //
-//   - [id] content
+//	---
+//	last_updated: "2026-08-20T00:00:00Z"
+//	version: 2
+//	---
 //
-// so it stays readable when opened by hand and parseable by the adapter.
+//	You are a backend developer living in Jakarta...
+//	You work on NusaShell and prefer pragmatic solutions...
+//
+// The entire body is treated as one entry; paragraphs are part of the
+// same document, not separate entries. The ID is derived from a content
+// hash so it survives reload with a stable ID without being stored.
 type Primary struct {
-	mu      sync.RWMutex
-	path    string
-	entries []domain.PrimaryEntry
-	loaded  bool
+	mu     sync.RWMutex
+	path   string
+	entry  domain.PrimaryEntry
+	loaded bool
 }
 
 // NewPrimary opens (or auto-creates) the primary.md file at dataDir and
-// loads its entries into memory. The file is created empty with YAML
+// loads its body into memory. The file is created empty with YAML
 // frontmatter if it does not exist.
 func NewPrimary(dataDir string) (*Primary, error) {
 	p := &Primary{path: filepath.Join(dataDir, PrimaryFile)}
@@ -78,15 +90,15 @@ func (p *Primary) load(create bool) error {
 		if err := os.WriteFile(p.path, []byte(emptyPrimaryFile()), 0o644); err != nil {
 			return err
 		}
-		p.entries = nil
+		p.entry = domain.PrimaryEntry{}
 		p.loaded = true
 		return nil
 	}
-	entries, err := parsePrimary(string(raw))
+	entry, err := parsePrimary(string(raw))
 	if err != nil {
 		return err
 	}
-	p.entries = entries
+	p.entry = entry
 	p.loaded = true
 	return nil
 }
@@ -97,38 +109,40 @@ func (p *Primary) Load() *domain.PrimaryMemory {
 	_ = p.load(false)
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	out := make([]domain.PrimaryEntry, len(p.entries))
-	copy(out, p.entries)
-	updated := time.Time{}
-	for _, e := range out {
-		if e.UpdatedAt.After(updated) {
-			updated = e.UpdatedAt
-		}
+	return &domain.PrimaryMemory{
+		Entries:   []domain.PrimaryEntry{p.entry},
+		UpdatedAt: p.entry.UpdatedAt,
 	}
-	return &domain.PrimaryMemory{Entries: out, UpdatedAt: updated}
 }
 
-// Update replaces the entire primary entry list and rewrites the file.
-// Used by memory_promote / memory_demote. Returns an error if the new
-// content would exceed PrimaryCharCap.
+// Update replaces the entire primary document body and rewrites the file.
+// Used by memory_replace target=primary when the agent rewrites the whole
+// document. Returns an error if the new content would exceed PrimaryCharCap.
 func (p *Primary) Update(entries []domain.PrimaryEntry) error {
-	total := 0
+	var content string
 	for _, e := range entries {
-		total += len(e.Content)
+		if content != "" {
+			content += "\n\n"
+		}
+		content += e.Content
 	}
-	if total > domain.PrimaryCharCap {
-		return fmt.Errorf("primary memory at %d/%d chars; promote/demote to fit — primary is capped at ~%d tokens", total, domain.PrimaryCharCap, domain.PrimaryTokenCap)
+	if len(content) > domain.PrimaryCharCap {
+		return fmt.Errorf("primary memory at %d/%d chars; primary is capped at ~%d tokens", len(content), domain.PrimaryCharCap, domain.PrimaryTokenCap)
 	}
 	p.mu.Lock()
-	p.entries = entries
+	p.entry = domain.PrimaryEntry{
+		ID:        primaryID(content),
+		Content:   content,
+		UpdatedAt: time.Now().UTC(),
+	}
 	err := p.writeFile()
 	p.mu.Unlock()
 	return err
 }
 
-// Replace performs a substring-match update on a single entry. The
-// first entry whose content contains oldText is updated to content.
-// Used by foreground agents via memory_replace.
+// Replace performs a substring-match update on the document body. The
+// first occurrence of oldText is replaced with content. Used by
+// foreground agents via memory_replace target=primary.
 func (p *Primary) Replace(oldText, content string) error {
 	oldText = strings.TrimSpace(oldText)
 	content = strings.TrimSpace(content)
@@ -138,35 +152,25 @@ func (p *Primary) Replace(oldText, content string) error {
 	_ = p.load(false)
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	idx := -1
-	for i, e := range p.entries {
-		if strings.Contains(e.Content, oldText) {
-			idx = i
-			break
-		}
+	if !strings.Contains(p.entry.Content, oldText) {
+		return fmt.Errorf("no primary text matching %q", oldText)
 	}
-	if idx < 0 {
-		return fmt.Errorf("no primary entry matching %q", oldText)
+	newBody := strings.Replace(p.entry.Content, oldText, content, 1)
+	if len(newBody) > domain.PrimaryCharCap {
+		return fmt.Errorf("primary memory at %d/%d chars; update would exceed the ~%d token cap", len(newBody), domain.PrimaryCharCap, domain.PrimaryTokenCap)
 	}
-	// Recompute total with the new content to enforce the cap.
-	total := 0
-	for i, e := range p.entries {
-		if i == idx {
-			total += len(content)
-		} else {
-			total += len(e.Content)
-		}
+	p.entry = domain.PrimaryEntry{
+		ID:        primaryID(newBody),
+		Content:   newBody,
+		UpdatedAt: time.Now().UTC(),
 	}
-	if total > domain.PrimaryCharCap {
-		return fmt.Errorf("primary memory at %d/%d chars; update would exceed the ~%d token cap", total, domain.PrimaryCharCap, domain.PrimaryTokenCap)
-	}
-	p.entries[idx].Content = content
-	p.entries[idx].UpdatedAt = time.Now().UTC()
 	return p.writeFile()
 }
 
-// writeFile serializes the current entries to the markdown file with
-// YAML frontmatter (last_updated + version). Caller must hold p.mu.
+// writeFile serializes the current document to the markdown file with
+// YAML frontmatter (last_updated + version). The body is written as-is
+// so the file reads as clean writing when opened by hand. Caller must
+// hold p.mu.
 func (p *Primary) writeFile() error {
 	fm := primaryFrontmatter{
 		LastUpdated: time.Now().UTC().Format(time.RFC3339),
@@ -177,11 +181,8 @@ func (p *Primary) writeFile() error {
 	b.WriteString("---\n")
 	b.Write(fmBytes)
 	b.WriteString("---\n\n")
-	for _, e := range p.entries {
-		b.WriteString("- [")
-		b.WriteString(e.ID)
-		b.WriteString("] ")
-		b.WriteString(e.Content)
+	b.WriteString(p.entry.Content)
+	if p.entry.Content != "" && !strings.HasSuffix(p.entry.Content, "\n") {
 		b.WriteString("\n")
 	}
 	return os.WriteFile(p.path, []byte(b.String()), 0o644)
@@ -203,19 +204,16 @@ func emptyPrimaryFile() string {
 	return b.String()
 }
 
-// parsePrimary splits the file into YAML frontmatter + body and parses
-// the body into entries. Lines that do not match the "- [id] content"
-// format are ignored (blank lines, prose written by a human). Legacy
-// files with an HTML comment header (no frontmatter) are still parsed
-// for backward compatibility.
-func parsePrimary(raw string) ([]domain.PrimaryEntry, error) {
+// parsePrimary splits the file into YAML frontmatter + body and returns
+// the entire body as a single entry. The ID is derived from a content
+// hash so it survives reload with a stable ID without being stored.
+func parsePrimary(raw string) (domain.PrimaryEntry, error) {
 	raw = strings.TrimSpace(raw)
 	body := raw
 	// Strip YAML frontmatter if present.
 	if strings.HasPrefix(raw, "---") {
 		rest := strings.TrimPrefix(raw, "---\n")
 		if strings.HasPrefix(rest, "---") {
-			// empty frontmatter
 			body = strings.TrimSpace(strings.TrimPrefix(rest, "---"))
 		} else {
 			end := strings.Index(rest, "\n---")
@@ -224,30 +222,19 @@ func parsePrimary(raw string) ([]domain.PrimaryEntry, error) {
 			}
 		}
 	}
-	var out []domain.PrimaryEntry
-	for _, line := range strings.Split(body, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "<!--") || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if !strings.HasPrefix(line, "- [") {
-			continue
-		}
-		rest := strings.TrimPrefix(line, "- [")
-		close := strings.Index(rest, "]")
-		if close < 0 {
-			continue
-		}
-		id := rest[:close]
-		content := strings.TrimSpace(rest[close+1:])
-		if id == "" || content == "" {
-			continue
-		}
-		out = append(out, domain.PrimaryEntry{
-			ID:        id,
-			Content:   content,
-			UpdatedAt: time.Now().UTC(), // file format does not persist timestamps per entry
-		})
+	if body == "" {
+		return domain.PrimaryEntry{}, nil
 	}
-	return out, nil
+	return domain.PrimaryEntry{
+		ID:        primaryID(body),
+		Content:   body,
+		UpdatedAt: time.Now().UTC(),
+	}, nil
+}
+
+// primaryID derives a deterministic ID from content so the entry survives
+// reload with a stable ID even though the file does not store it.
+func primaryID(content string) string {
+	h := sha256.Sum256([]byte(content))
+	return "prim_" + hex.EncodeToString(h[:8])
 }

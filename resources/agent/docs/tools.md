@@ -12,12 +12,10 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `skill_files` | list the files inside a skill folder (path, type, size, editable) |
 | `skill_save` | create or update a skill (omit `id` to create new; pass `id` to update), or write a support file inside an existing skill (pass `path` like `references/errors.md`, `templates/config.yaml`, `scripts/verify.sh`; skill must already exist; plugin-owned skills are read-only) |
 | `memory_save` | save a fact as a searchable fragment (unlimited archive); pick a category (`project`, `user`, `task`, `general`) + optional `project`, `task`, `tags` |
-| `memory_replace` | update an existing entry: `target="primary"` + `old_text` (substring) for primary memory, or `target="fragment"` + `id` for fragments |
+| `memory_replace` | update memory: `target="primary"` + `old_text` (substring) to edit the primary document, or omit `old_text` to rewrite the entire body; `target="fragment"` + `id` for fragments |
 | `memory_search` | BM25 search over fragments with metadata filters (`category`, `project`, `task`, `tags`); returns ranked results with scores |
-| `memory_list` | list entries: `target="primary"` for the always-injected working set, `target="fragments"` (default) for the archive with optional metadata filters |
-| `memory_delete` | delete a fragment by id (primary entries cannot be deleted — use `memory_demote`) |
-| `memory_promote` | promote a fragment into primary memory (~1k token cap); background review agent only |
-| `memory_demote` | demote a primary entry back to fragments; background review agent only |
+| `memory_list` | list entries: `target="primary"` for the always-injected document, `target="fragments"` (default) for the archive with optional metadata filters |
+| `memory_delete` | delete a fragment by id |
 | `todo` | replace the conversation task checklist (full-replace, Claude TodoWrite style; max 50 items, 500 chars each; prefer exactly one `in_progress` at a time). The optional `goal` argument sets a brief of what the user wants and why (max ~10k tokens). It stays available through conversation history and is re-injected with the fresh hydration checkpoint after compaction. The user can delete items from the UI — treat deleted items as gone and do not re-add them. |
 | `ask_question` | block for a structured user decision; use only when progress genuinely requires a choice or approval |
 | `docs_search` | search the product documentation when the page id is unknown |
