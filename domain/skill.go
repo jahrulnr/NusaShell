@@ -153,10 +153,16 @@ type LogEntry struct {
 type Settings struct {
 	CompactionEnabled   bool
 	CompactionThreshold int
-	PromptCaching       bool
-	MaxToolRounds       int
-	MaxInputTokens      int // global context window cap (default 200k)
-	MaxOutputTokens     int // default max completion tokens (default 64k)
+	// CompactionModel selects the model used for context compaction
+	// summarization. When empty, the conversation's active model is used.
+	// Format: "providerID:modelID" (same as VisionModelID etc). Useful for
+	// routing compaction to a cheaper/faster model while keeping the chat
+	// model for the actual conversation.
+	CompactionModel string `json:"compaction_model,omitempty"`
+	PromptCaching   bool
+	MaxToolRounds   int
+	MaxInputTokens  int // global context window cap (default 200k)
+	MaxOutputTokens int // default max completion tokens (default 64k)
 	// MaxParallelTools bounds how many tool calls from a single assistant
 	// round run concurrently. The model often emits several independent
 	// tool calls at once; running them in parallel cuts wall-clock latency

@@ -47,9 +47,11 @@ func (a *App) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, mo
 
 	a.log("info", "agent", "compaction triggered for %s: est=%d trigger=%d window=%d maxOut=%d",
 		conversation.ID, beforeTokens, compactionTrigger, contextWindow, maxOutput)
-	summary, err := a.compactConversation(run.Ctx, adapter, conversation, model, contextWindow)
+	compAdapter, compModel, compWindow := a.resolveCompactionAdapter(run.Ctx, adapter, model, contextWindow, settings)
+	summary, err := a.compactConversation(run.Ctx, compAdapter, conversation, compModel, compWindow)
 	if err != nil {
 		a.log("warn", "agent", "compaction failed for %s: %v", conversation.ID, err)
+		a.Bus.Emit(contracts.EventCompactionFailed, contracts.CompactionFailedEvent{ConversationID: conversation.ID, Error: err.Error()})
 	} else {
 		a.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{ConversationID: conversation.ID, Summary: summary})
 		a.log("info", "agent", "compacted conversation %s", conversation.ID)

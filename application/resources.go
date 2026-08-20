@@ -1222,6 +1222,9 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 		}
 		s.CompactionThreshold = *req.CompactionThreshold
 	}
+	if req.CompactionModel != nil {
+		s.CompactionModel = strings.TrimSpace(*req.CompactionModel)
+	}
 	if req.PromptCaching != nil {
 		s.PromptCaching = *req.PromptCaching
 	}
@@ -1372,6 +1375,7 @@ func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 	return contracts.SettingsDTO{
 		CompactionEnabled:       s.CompactionEnabled,
 		CompactionThreshold:     s.CompactionThreshold,
+		CompactionModel:         s.CompactionModel,
 		PromptCaching:           s.PromptCaching,
 		MaxToolRounds:           s.MaxToolRounds,
 		RepeatedToolLimit:       s.RepeatedToolLimit,

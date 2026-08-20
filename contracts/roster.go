@@ -103,25 +103,26 @@ const (
 
 // Event types pushed over SSE (/events) and WebSocket (/ws).
 const (
-	EventTurnStarted     = "agent.turn.started"
-	EventMessageDelta    = "agent.message.delta"
-	EventContextEstimate = "agent.context.estimate"
-	EventReasoningDelta  = "agent.reasoning.delta"
-	EventToolStarted     = "agent.tool.started"
-	EventToolCompleted   = "agent.tool.completed"
-	EventTurnDone        = "agent.turn.done"
-	EventTurnError       = "agent.turn.error"
-	EventCompacted       = "agent.compacted"
-	EventSteerQueued     = "agent.steer.queued"
-	EventSteerApplied    = "agent.steer.applied"
-	EventSteerCancelled  = "agent.steer.cancelled"
-	EventProviderRetry   = "agent.provider.retry"
-	EventLogAppend       = "logs.append"
-	EventTodoUpdated     = "agent.todo.updated"
-	EventAutoContinue    = "agent.auto_continue"
-	EventAskPending      = "agent.ask.pending"
-	EventAskAnswered     = "agent.ask.answered"
-	EventAskCancelled    = "agent.ask.cancelled"
+	EventTurnStarted      = "agent.turn.started"
+	EventMessageDelta     = "agent.message.delta"
+	EventContextEstimate  = "agent.context.estimate"
+	EventReasoningDelta   = "agent.reasoning.delta"
+	EventToolStarted      = "agent.tool.started"
+	EventToolCompleted    = "agent.tool.completed"
+	EventTurnDone         = "agent.turn.done"
+	EventTurnError        = "agent.turn.error"
+	EventCompacted        = "agent.compacted"
+	EventCompactionFailed = "agent.compaction.failed"
+	EventSteerQueued      = "agent.steer.queued"
+	EventSteerApplied     = "agent.steer.applied"
+	EventSteerCancelled   = "agent.steer.cancelled"
+	EventProviderRetry    = "agent.provider.retry"
+	EventLogAppend        = "logs.append"
+	EventTodoUpdated      = "agent.todo.updated"
+	EventAutoContinue     = "agent.auto_continue"
+	EventAskPending       = "agent.ask.pending"
+	EventAskAnswered      = "agent.ask.answered"
+	EventAskCancelled     = "agent.ask.cancelled"
 
 	EventLearningReviewStarted = "learning.review.started"
 	EventLearningReviewDone    = "learning.review.done"
@@ -408,6 +409,15 @@ type TurnErrorEvent struct {
 type CompactedEvent struct {
 	ConversationID string `json:"conversation_id"`
 	Summary        string `json:"summary"`
+}
+
+// CompactionFailedEvent is emitted when context compaction fails so the UI
+// can toast the user. The turn continues with the un-compacted conversation;
+// this is a warning, not a turn-fatal error. Emergency compaction failures
+// (context overflow) still go through EventTurnError since they fail the turn.
+type CompactionFailedEvent struct {
+	ConversationID string `json:"conversation_id"`
+	Error          string `json:"error"`
 }
 
 // LearningReviewEvent is emitted when the background learning review
@@ -1086,6 +1096,7 @@ type LogAppendEvent struct {
 type SettingsDTO struct {
 	CompactionEnabled       bool     `json:"compaction_enabled"`
 	CompactionThreshold     int      `json:"compaction_threshold"`
+	CompactionModel         string   `json:"compaction_model,omitempty"`
 	PromptCaching           bool     `json:"prompt_caching"`
 	MaxToolRounds           int      `json:"max_tool_rounds"`
 	RepeatedToolLimit       int      `json:"repeated_tool_limit,omitempty"`
@@ -1120,6 +1131,7 @@ type SettingsGetResult struct {
 type SettingsSetRequest struct {
 	CompactionEnabled       *bool           `json:"compaction_enabled,omitempty"`
 	CompactionThreshold     *int            `json:"compaction_threshold,omitempty"`
+	CompactionModel         *string         `json:"compaction_model,omitempty"`
 	PromptCaching           *bool           `json:"prompt_caching,omitempty"`
 	MaxToolRounds           *int            `json:"max_tool_rounds,omitempty"`
 	RepeatedToolLimit       *int            `json:"repeated_tool_limit,omitempty"`

@@ -1666,6 +1666,14 @@ function bindEvents() {
     scrollToBottom();
     refreshActiveConversation();
   });
+  on('agent.compaction.failed', ({ conversation_id, error }) => {
+    // Compaction failed but the turn continues with the un-compacted
+    // conversation. Warn the user so they know context may fill up soon;
+    // this is not turn-fatal (emergency compaction will catch overflow).
+    const msg = error || 'Context compaction failed';
+    toast(`Compaction failed: ${msg}`, 'error');
+    if (conversation_id === state.activeId) refreshActiveConversation();
+  });
   on('agent.steer.queued', ({ conversation_id, steer_id, text }) => {
     if (conversation_id !== state.activeId) return;
     showSteerQueued(text, steer_id);

@@ -95,7 +95,7 @@ When the active chat model cannot see video, NusaShell can describe attached vid
 
 ## Context compaction
 
-Toggle compaction, set max input tokens (fallback context window, default 200000), max output tokens (default 65536), prompt caching, and optional sampling parameters (temperature, top-p, top-k, frequency penalty, presence penalty).
+Toggle compaction, set max input tokens (fallback context window, default 200000), max output tokens (default 65536), pick an optional compaction model (default uses the active chat model), prompt caching, and optional sampling parameters (temperature, top-p, top-k, frequency penalty, presence penalty).
 
 - **Context compaction title** (`#settings-context-title`):
   - Section: Settings
@@ -104,6 +104,11 @@ Toggle compaction, set max input tokens (fallback context window, default 200000
 - **Compact long conversations** (`#settings-compaction-enabled`):
   - Section: Settings
   - Type: checkbox
+
+- **Compaction model** (`#settings-compaction-model`):
+  - Section: Settings
+  - Type: select
+  - Notes: Route compaction summarization to a cheaper or faster model. Default uses the conversation's active model.
 
 - **Max input tokens** (`#settings-max-input-tokens`):
   - Section: Settings

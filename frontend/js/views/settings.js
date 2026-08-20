@@ -4,10 +4,11 @@ import { autoReconnectEnabled, rpc, setAutoReconnect } from '../rpc.js';
 import { toast, createSelect } from '../ui.js';
 
 let bound = false;
-const state = { embeddingProviderId: '', embeddingModelId: '', visionProviderId: '', visionModelId: '', audioProviderId: '', audioModelId: '', videoProviderId: '', videoModelId: '', webAnswerProvider: '', webAnswerModel: '' };
+const state = { embeddingProviderId: '', embeddingModelId: '', visionProviderId: '', visionModelId: '', audioProviderId: '', audioModelId: '', videoProviderId: '', videoModelId: '', webAnswerProvider: '', webAnswerModel: '', compactionModel: '' };
 let preferredSelect;
 let embeddingSelect;
 let visionSelect;
+let compactionSelect;
 let audioSelect;
 let videoSelect;
 let webAnswerProviderSelect;
@@ -37,6 +38,10 @@ export async function initSettings() {
     });
     videoSelect = createSelect(document.getElementById('settings-video-model'), {
       placeholder: 'Disabled — non-video models get a text placeholder instead',
+      search: true,
+    });
+    compactionSelect = createSelect(document.getElementById('settings-compaction-model'), {
+      placeholder: 'Default — use the conversation\'s active model',
       search: true,
     });
     webAnswerProviderSelect = createSelect(document.getElementById('settings-web-answer-provider'), {
@@ -92,6 +97,7 @@ export async function refresh() {
     state.videoModelId = settings.video_model_id ?? '';
     state.webAnswerProvider = settings.web_answer_provider ?? '';
     state.webAnswerModel = settings.web_answer_model ?? '';
+    state.compactionModel = settings.compaction_model ?? '';
     document.getElementById('settings-learning-threshold').value = settings.learning_review_threshold ?? 10;
     document.getElementById('settings-auto-continues').value = settings.max_auto_continues ?? 10;
     // Web answer: set provider dropdown and model field. API key is write-only.
@@ -108,6 +114,7 @@ export async function refresh() {
   renderVisionModelOptions(allModels);
   renderAudioModelOptions(allModels);
   renderVideoModelOptions(allModels);
+  renderCompactionModelOptions(allModels);
   document.getElementById('settings-sidebar-compact').checked = localStorage.getItem('nusashell.sidebarMode') === 'icons';
   document.getElementById('settings-auto-reconnect').checked = autoReconnectEnabled();
 
@@ -214,6 +221,23 @@ function renderVideoModelOptions(models) {
   if (selected) videoSelect.setSelected([selected]);
 }
 
+function renderCompactionModelOptions(models) {
+  const chatModels = models.filter((m) => !m.kind || m.kind === 'chat');
+  const data = [
+    { text: 'Default — use the conversation\'s active model', value: '', placeholder: true },
+    ...chatModels.map((m) => {
+      const label = m.display_name || m.id;
+      const ctx = m.context ? ` ${Math.round(m.context / 1000)}K` : '';
+      return {
+        text: m.provider_name ? `${label}${ctx} · ${m.provider_name}` : `${label}${ctx}`,
+        value: `${m.provider_id}:${m.id}`,
+      };
+    }),
+  ];
+  compactionSelect.setData(data);
+  if (state.compactionModel) compactionSelect.setSelected([state.compactionModel]);
+}
+
 // splitProviderModel splits a "providerId:modelId" select value on the first
 // colon only, so model IDs that contain colons (e.g. Ollama's
 // "nomic-embed-text:latest") are preserved intact.
@@ -286,6 +310,7 @@ async function save() {
     const { providerId: audProviderId, modelId: audModelId } = splitProviderModel(audioValue);
     const videoValue = videoSelect.getSelected()?.[0] ?? '';
     const { providerId: vidProviderId, modelId: vidModelId } = splitProviderModel(videoValue);
+    const compactionValue = compactionSelect.getSelected()?.[0] ?? '';
     const learningThreshold = Number(document.getElementById('settings-learning-threshold').value);
     if (!Number.isInteger(learningThreshold) || learningThreshold < 0 || learningThreshold > 1000) {
       setStatus('Learning review threshold must be between 0 and 1,000.', true);
@@ -309,6 +334,7 @@ async function save() {
       max_parallel_tools: maxParallelTools,
       max_input_tokens: maxInputTokens,
       compaction_threshold: compactionThreshold,
+      compaction_model: compactionValue || null,
       max_output_tokens: maxOutputTokens,
       embedding_provider_id: embProviderId || null,
       embedding_model_id: embModelId || null,

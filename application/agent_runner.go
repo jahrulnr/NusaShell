@@ -601,7 +601,8 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 				preEmg := conversation.EstimateTokens()
 				a.log("warn", "agent", "context overflow for turn %s (est=%d), forcing emergency compaction", run.ID, preEmg)
 				cw := resolveContextWindow(provider, model, settings)
-				summary, compErr := a.compactConversation(run.Ctx, adapter, conversation, model, cw)
+				compAdapter, compModel, compWindow := a.resolveCompactionAdapter(run.Ctx, adapter, model, cw, settings)
+				summary, compErr := a.compactConversation(run.Ctx, compAdapter, conversation, compModel, compWindow)
 				if compErr == nil {
 					a.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{ConversationID: conversation.ID, Summary: summary})
 					conversation, _ = a.Conversations.Get(run.ConversationID)
@@ -612,6 +613,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 					continue
 				}
 				a.log("warn", "agent", "emergency compaction failed for %s: %v", conversation.ID, compErr)
+				a.Bus.Emit(contracts.EventCompactionFailed, contracts.CompactionFailedEvent{ConversationID: conversation.ID, Error: compErr.Error()})
 				a.failStreamTurn(run, currentMsgID, model, roundResult, streamErr)
 			} else {
 				a.failStreamTurn(run, currentMsgID, model, roundResult, streamErr)
@@ -801,6 +803,32 @@ func shouldContinueFailedTurn(failed domain.Message) bool {
 // threshold cannot wait until the next turn already overflows.
 func compactionTriggerTokens(contextWindow, maxOutput int, settings domain.Settings) int {
 	return domain.CompactionTriggerTokens(contextWindow, maxOutput, settings)
+}
+
+// resolveCompactionAdapter returns the adapter, model, and context window to
+// use for compaction summarization. When settings.CompactionModel is empty,
+// the current chat adapter+model are used as-is. When set, a separate adapter
+// is built for the configured model (e.g. a cheaper/faster model). On any
+// resolution or factory error, it falls back to the default adapter+model so
+// compaction still runs instead of silently skipping.
+func (a *App) resolveCompactionAdapter(ctx context.Context, defaultAdapter AIProvider, defaultModel string, defaultWindow int, settings domain.Settings) (AIProvider, string, int) {
+	compModel := strings.TrimSpace(settings.CompactionModel)
+	if compModel == "" {
+		return defaultAdapter, defaultModel, defaultWindow
+	}
+	provider, bareModel, apiKey, rpcErr := a.resolveModel(compModel)
+	if rpcErr != nil || provider == nil {
+		a.log("warn", "agent", "compaction model %q could not be resolved, falling back to chat model: %v", compModel, rpcErr)
+		return defaultAdapter, defaultModel, defaultWindow
+	}
+	adapter, err := a.Factory(ctx, provider, apiKey)
+	if err != nil {
+		a.log("warn", "agent", "compaction model %q adapter build failed, falling back to chat model: %v", compModel, err)
+		return defaultAdapter, defaultModel, defaultWindow
+	}
+	window := resolveContextWindow(provider, bareModel, settings)
+	a.log("info", "agent", "compaction using override model %s (window=%d)", compModel, window)
+	return adapter, bareModel, window
 }
 
 // resolveMaxOutput picks the per-turn completion token ceiling. The model's

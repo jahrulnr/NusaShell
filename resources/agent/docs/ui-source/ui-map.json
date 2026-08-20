@@ -600,11 +600,12 @@
         {
           "heading": "Context compaction",
           "paragraphs": [
-            "Toggle compaction, set max input tokens (fallback context window, default 200000), max output tokens (default 65536), prompt caching, and optional sampling parameters (temperature, top-p, top-k, frequency penalty, presence penalty)."
+            "Toggle compaction, set max input tokens (fallback context window, default 200000), max output tokens (default 65536), pick an optional compaction model (default uses the active chat model), prompt caching, and optional sampling parameters (temperature, top-p, top-k, frequency penalty, presence penalty)."
           ],
           "controls": [
             "settings-context-title",
             "settings-compaction-enabled",
+            "settings-compaction-model",
             "settings-max-input-tokens",
             "settings-max-output-tokens",
             "settings-prompt-caching",
@@ -1402,6 +1403,12 @@
       "label": "Compact long conversations",
       "section": "Settings",
       "type": "checkbox"
+    },
+    "settings-compaction-model": {
+      "label": "Compaction model",
+      "section": "Settings",
+      "type": "select",
+      "notes": "Route compaction summarization to a cheaper or faster model. Default uses the conversation's active model."
     },
     "settings-max-input-tokens": {
       "label": "Max input tokens",

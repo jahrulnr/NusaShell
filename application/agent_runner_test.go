@@ -155,6 +155,84 @@ func TestCompactionTriggerSubtractsMaxOutput(t *testing.T) {
 	}
 }
 
+func TestResolveCompactionAdapter_defaultUsesCurrentModel(t *testing.T) {
+	// When CompactionModel is empty, the current adapter+model are used as-is.
+	app := &App{
+		Providers: &fakeProviderStore{items: map[string]*domain.Provider{
+			"chat-prov": {ID: "chat-prov", Enabled: true, Kind: domain.ProviderChat},
+		}},
+		Factory: func(ctx context.Context, p *domain.Provider, apiKey string) (AIProvider, error) {
+			return &fakeVisionAdapter{description: "default"}, nil
+		},
+	}
+	defaultAdapter := &fakeVisionAdapter{description: "default"}
+	settings := domain.Settings{}
+	gotAdapter, gotModel, gotWindow := app.resolveCompactionAdapter(context.Background(), defaultAdapter, "chat-prov:gpt-5", 200000, settings)
+	if gotAdapter != defaultAdapter {
+		t.Fatal("expected default adapter when CompactionModel empty")
+	}
+	if gotModel != "chat-prov:gpt-5" {
+		t.Fatalf("expected default model, got %q", gotModel)
+	}
+	if gotWindow != 200000 {
+		t.Fatalf("expected default window, got %d", gotWindow)
+	}
+}
+
+func TestResolveCompactionAdapter_overrideUsesSeparateModel(t *testing.T) {
+	// When CompactionModel is set, a separate adapter is built for that model.
+	app := &App{
+		Providers: &fakeProviderStore{items: map[string]*domain.Provider{
+			"chat-prov": {ID: "chat-prov", Enabled: true, Kind: domain.ProviderChat},
+			"cheap-prov": {ID: "cheap-prov", Enabled: true, Kind: domain.ProviderChat, Models: []domain.Model{
+				{ID: "haiku", Context: 128000},
+			}},
+		}},
+		Credentials: &fakeVisionCredStore{creds: map[string]string{"cheap-prov": "key"}},
+		Factory: func(ctx context.Context, p *domain.Provider, apiKey string) (AIProvider, error) {
+			return &fakeVisionAdapter{description: "compaction-adapter"}, nil
+		},
+	}
+	defaultAdapter := &fakeVisionAdapter{description: "default"}
+	settings := domain.Settings{CompactionModel: "cheap-prov:haiku"}
+	gotAdapter, gotModel, gotWindow := app.resolveCompactionAdapter(context.Background(), defaultAdapter, "chat-prov:gpt-5", 200000, settings)
+	if gotAdapter == defaultAdapter {
+		t.Fatal("expected a different adapter for compaction model override")
+	}
+	if gotModel != "haiku" {
+		t.Fatalf("expected override model 'haiku', got %q", gotModel)
+	}
+	if gotWindow != 128000 {
+		t.Fatalf("expected override model window 128000, got %d", gotWindow)
+	}
+}
+
+func TestResolveCompactionAdapter_overrideFallsBackOnResolveError(t *testing.T) {
+	// If the override model cannot be resolved, fall back to the default
+	// adapter+model so compaction still runs with the chat model.
+	app := &App{
+		Providers: &fakeProviderStore{items: map[string]*domain.Provider{
+			"chat-prov": {ID: "chat-prov", Enabled: true, Kind: domain.ProviderChat},
+		}},
+		Credentials: &fakeVisionCredStore{creds: map[string]string{"chat-prov": "key"}},
+		Factory: func(ctx context.Context, p *domain.Provider, apiKey string) (AIProvider, error) {
+			return &fakeVisionAdapter{description: "default"}, nil
+		},
+	}
+	defaultAdapter := &fakeVisionAdapter{description: "default"}
+	settings := domain.Settings{CompactionModel: "no-such-prov:no-such-model"}
+	gotAdapter, gotModel, gotWindow := app.resolveCompactionAdapter(context.Background(), defaultAdapter, "chat-prov:gpt-5", 200000, settings)
+	if gotAdapter != defaultAdapter {
+		t.Fatal("expected fallback to default adapter on resolve error")
+	}
+	if gotModel != "chat-prov:gpt-5" {
+		t.Fatalf("expected fallback model, got %q", gotModel)
+	}
+	if gotWindow != 200000 {
+		t.Fatalf("expected fallback window, got %d", gotWindow)
+	}
+}
+
 func TestResolveContextWindowModelWinsOverGlobalCap(t *testing.T) {
 	provider := &domain.Provider{Models: []domain.Model{
 		{ID: "long-model", Context: 1_000_000},

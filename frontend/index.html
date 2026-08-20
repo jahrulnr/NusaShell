@@ -739,6 +739,12 @@
               <input id="settings-compaction-threshold" type="number" min="0" max="2000000" step="1000" inputmode="numeric" value="0">
               <small>Token count that triggers compaction. 0 = auto (compact at 80% of the model's context window). Set a non-zero value to compact earlier.</small>
             </label>
+            <label class="settings-field" for="settings-compaction-model">Compaction model
+              <select id="settings-compaction-model">
+                <option value="">Default — use the conversation's active model</option>
+              </select>
+              <small>Route compaction summarization to a cheaper or faster model while keeping the chat model for the conversation. Leave as default to use the active model.</small>
+            </label>
             <label class="settings-field" for="settings-max-output-tokens">Max output tokens (default completion limit)
               <input id="settings-max-output-tokens" type="number" min="256" max="1000000" step="256" inputmode="numeric" value="65536">
               <small>Default max completion tokens per turn (default 65,536). Models that advertise their own limit use that instead.</small>
