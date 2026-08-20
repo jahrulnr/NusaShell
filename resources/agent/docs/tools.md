@@ -25,7 +25,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `tool_search` | search a running MCP server's tools by name or description |
 | `tool_schema` | load one MCP tool's input schema by server and tool name before calling it |
 | `mcp_register` | copy a plugin from an absolute staging folder outside the installed plugins root; check inventory and ask before replacing an existing id |
-| `mcp_enable` | connect an installed plugin and load its MCP tools |
+| `mcp_enable` | connect an installed plugin and load its MCP tools; returns tool names + descriptions — call tools directly, no `tool_list` needed |
 | `mcp_disable` | stop a plugin without uninstalling it |
 | `mcp_unregister` | permanently delete an installed plugin; ask first and use `mcp_disable` when it only needs to stop |
 | `mcp_install` | install a plugin from the curated catalog or GitHub |

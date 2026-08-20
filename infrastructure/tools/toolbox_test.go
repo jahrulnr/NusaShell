@@ -251,9 +251,9 @@ func TestMcpList(t *testing.T) {
 	if !strings.Contains(out, "count: 2") {
 		t.Errorf("expected 2 plugins, got: %s", out)
 	}
-	// github should be running with 1 tool
-	if !strings.Contains(out, "name: github") || !strings.Contains(out, "running: true") || !strings.Contains(out, "tools: 1") {
-		t.Errorf("expected github running with 1 tool, got: %s", out)
+	// github should be running with 1 tool — rendered in markdown body
+	if !strings.Contains(out, "**github**") || !strings.Contains(out, "running") || !strings.Contains(out, "1 tool") {
+		t.Errorf("expected github running with 1 tool in body, got: %s", out)
 	}
 }
 
@@ -299,8 +299,8 @@ func TestToolListByServer(t *testing.T) {
 	if !strings.Contains(out, "count: 1") {
 		t.Errorf("expected 1 tool from github, got: %s", out)
 	}
-	if !strings.Contains(out, "server: github") {
-		t.Errorf("expected server=github, got: %s", out)
+	if !strings.Contains(out, "[github]") {
+		t.Errorf("expected [github] server tag in body, got: %s", out)
 	}
 }
 
@@ -555,6 +555,11 @@ func TestMcpEnable(t *testing.T) {
 	}
 	if !strings.Contains(out, "status: enabled") || !strings.Contains(out, "tools: 1") {
 		t.Fatalf("expected status: enabled and tools: 1 in output, got %q", out)
+	}
+	// mcp_enable should return tool names in the body so the agent
+	// doesn't need a follow-up tool_list call.
+	if !strings.Contains(out, "mcp__Demo__demo_ping") {
+		t.Errorf("expected tool name in body, got %q", out)
 	}
 }
 

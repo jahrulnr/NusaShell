@@ -141,7 +141,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "tool_search", Description: "Search a running MCP server's tools by name or description (case-insensitive token match — any term matches). Returns matching tool names and descriptions.", InputSchema: obj("object", props("server", str("MCP server name"), "query", str("Search query")), "server", "query")},
 		{Name: "tool_schema", Description: "Load one MCP tool's input schema by server and tool name. Useful when you need the exact argument shape before calling an mcp__<server>__<tool> tool.", InputSchema: obj("object", props("server", str("MCP server name"), "tool", str("Tool name within the server")), "server", "tool")},
 		{Name: "mcp_register", Description: "Copy a new MCP plugin from an absolute staging folder into the installed plugin store, or replace an existing plugin with the same id. The source must contain manifest.json and must stay outside the installed plugins root. Check mcp_list and ask the user before replacing an existing id; then call mcp_enable.", InputSchema: obj("object", props("source", str("Absolute staging path to the plugin folder containing manifest.json")), "source")},
-		{Name: "mcp_enable", Description: "Start/connect an MCP plugin and load its tools (alias of plugin.test). The plugin must be registered first (mcp_register or the Plugins view).", InputSchema: obj("object", props("id", str("Plugin id (e.g. nusashell.files)")), "id")},
+		{Name: "mcp_enable", Description: "Start/connect an MCP plugin and load its tools. Returns the tool names and descriptions so you can call them directly — no need to call tool_list after enable. The plugin must be registered first (mcp_register or the Plugins view).", InputSchema: obj("object", props("id", str("Plugin id (e.g. nusashell.files)")), "id")},
 		{Name: "mcp_disable", Description: "Stop/disconnect an MCP plugin. The definition stays installed; only the MCP subprocess is stopped. Tools from this server are no longer listed.", InputSchema: obj("object", props("id", str("Plugin id")), "id")},
 		{Name: "mcp_unregister", Description: "Remove an MCP plugin entirely and delete its installed folder. Ask the user for confirmation first. Use mcp_disable when the plugin only needs to stop.", InputSchema: obj("object", props("id", str("Plugin id")), "id")},
 		{Name: "mcp_install", Description: "Install an MCP plugin from the curated catalog or a GitHub repository (owner/repo or URL). After install, call mcp_enable with the resulting plugin id to connect and load its tools.", InputSchema: obj("object", props("source", strEnum("Install source", "catalog", "github"), "id", str("Catalog plugin id (required when source=catalog)"), "url", str("GitHub repo URL or owner/repo shorthand (required when source=github)"), "subdir", str("Optional subdirectory inside a monorepo (github)"), "ref", str("Optional branch or tag to pin (github)")), "source")},
@@ -203,15 +203,12 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if limit < len(skills) {
 			skills = skills[:limit]
 		}
-		type skillItem struct {
-			Name        string `yaml:"name"`
-			Description string `yaml:"description,omitempty"`
-		}
-		items := make([]skillItem, 0, len(skills))
+		meta := map[string]any{"count": len(skills)}
+		var bodyLines []string
 		for _, s := range skills {
-			items = append(items, skillItem{Name: s.Name, Description: s.Description})
+			bodyLines = append(bodyLines, fmt.Sprintf("- **%s**: %s", s.Name, s.Description))
 		}
-		return yamlBlock(map[string]any{"count": len(items), "skills": items}), nil
+		return yamlMDList(meta, bodyLines), nil
 
 	case name == "skill_search":
 		var args struct {
@@ -229,21 +226,19 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			limit = 50
 		}
 		q := strings.ToLower(args.Query)
-		type skillMatch struct {
-			Name        string `yaml:"name"`
-			Description string `yaml:"description,omitempty"`
-		}
-		var matches []skillMatch
+		var bodyLines []string
+		count := 0
 		for _, s := range t.Skills.List() {
 			if !strings.Contains(strings.ToLower(s.Name+" "+s.Description), q) {
 				continue
 			}
-			matches = append(matches, skillMatch{Name: s.Name, Description: s.Description})
-			if len(matches) >= limit {
+			bodyLines = append(bodyLines, fmt.Sprintf("- **%s**: %s", s.Name, s.Description))
+			count++
+			if count >= limit {
 				break
 			}
 		}
-		return yamlBlock(map[string]any{"query": args.Query, "count": len(matches), "matches": matches}), nil
+		return yamlMDList(map[string]any{"query": args.Query, "count": count}, bodyLines), nil
 
 	case name == "skill_read":
 		var args struct {
@@ -325,17 +320,15 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				}
 				return "", fmt.Errorf("skill_files: %w", err)
 			}
-			type fileEntry struct {
-				Type      string `yaml:"type"`
-				Path      string `yaml:"path"`
-				SizeBytes int64  `yaml:"size,omitempty"`
-				Editable  bool   `yaml:"editable,omitempty"`
-			}
-			entries2 := make([]fileEntry, 0, len(entries))
+			var bodyLines []string
 			for _, e := range entries {
-				entries2 = append(entries2, fileEntry{Type: e.Type, Path: e.Path, SizeBytes: e.SizeBytes, Editable: e.Editable})
+				editFlag := ""
+				if e.Editable {
+					editFlag = " (editable)"
+				}
+				bodyLines = append(bodyLines, fmt.Sprintf("- **%s** `%s`%s — %d bytes", e.Type, e.Path, editFlag, e.SizeBytes))
 			}
-			return yamlBlock(map[string]any{"skill": args.Name, "count": len(entries2), "files": entries2}), nil
+			return yamlMDList(map[string]any{"skill": args.Name, "count": len(entries)}, bodyLines), nil
 		}
 		return "", fmt.Errorf("skill store does not support file listing")
 
@@ -496,11 +489,11 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			Tags:     args.Tags,
 			Limit:    limit,
 		})
-		frags := make([]map[string]any, 0, len(hits))
+		var bodyLines []string
 		for _, h := range hits {
-			frags = append(frags, formatFragment(h.Fragment, h.Score))
+			bodyLines = append(bodyLines, formatFragmentLine(h.Fragment, h.Score))
 		}
-		return yamlBlock(map[string]any{"query": args.Query, "count": len(frags), "fragments": frags}), nil
+		return yamlMDList(map[string]any{"query": args.Query, "count": len(hits)}, bodyLines), nil
 
 	case name == "memory_list":
 		var args struct {
@@ -519,11 +512,14 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				return yamlBlock(map[string]any{"target": "primary", "count": 0, "error": "primary store not configured"}), nil
 			}
 			mem := t.Primary.Load()
-			entries := make([]map[string]any, 0, len(mem.Entries))
+			var bodyLines []string
 			for _, e := range mem.Entries {
-				entries = append(entries, map[string]any{"id": e.ID, "content": e.Content})
+				if e.Content == "" {
+					continue
+				}
+				bodyLines = append(bodyLines, fmt.Sprintf("- **%s**: %s", e.ID, truncate(e.Content, 120)))
 			}
-			return yamlBlock(map[string]any{"target": "primary", "count": len(entries), "entries": entries}), nil
+			return yamlMDList(map[string]any{"target": "primary", "count": len(mem.Entries)}, bodyLines), nil
 		}
 		// Default: list fragments
 		if t.Fragments == nil {
@@ -534,11 +530,11 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			Project:  args.Project,
 			Limit:    limit,
 		})
-		items := make([]map[string]any, 0, len(frags))
+		var fragLines []string
 		for _, f := range frags {
-			items = append(items, formatFragment(f, 0))
+			fragLines = append(fragLines, formatFragmentLine(f, 0))
 		}
-		return yamlBlock(map[string]any{"target": "fragments", "count": len(items), "fragments": items}), nil
+		return yamlMDList(map[string]any{"target": "fragments", "count": len(frags)}, fragLines), nil
 
 	case name == "memory_delete":
 		var args struct {
@@ -642,7 +638,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if dropper, ok := t.MCP.(interface{ Drop(string) }); ok {
 			dropper.Drop(p.Manifest.MCPServerID())
 		}
-		return yamlBlock(map[string]any{"status": "installed", "name": p.Manifest.Name, "id": p.Manifest.ID, "version": p.Manifest.Version, "next": "mcp_enable id=" + p.Manifest.ID}), nil
+		return yamlMD(map[string]any{"status": "installed", "name": p.Manifest.Name, "id": p.Manifest.ID, "version": p.Manifest.Version}, "Plugin installed. Call `mcp_enable id="+p.Manifest.ID+"` to connect and load its tools."), nil
 
 	case name == "mcp_server_add":
 		var args struct {
@@ -689,7 +685,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if dropper, ok := t.MCP.(interface{ Drop(string) }); ok {
 			dropper.Drop(p.Manifest.MCPServerID())
 		}
-		return yamlBlock(map[string]any{"status": "added", "name": p.Manifest.Name, "id": p.Manifest.ID, "next": "mcp_enable id=" + p.Manifest.ID}), nil
+		return yamlMD(map[string]any{"status": "added", "name": p.Manifest.Name, "id": p.Manifest.ID}, "Server added. Call `mcp_enable id="+p.Manifest.ID+"` to connect and load its tools."), nil
 
 	case name == "mcp_register":
 		var args struct {
@@ -716,7 +712,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if mcp, ok := t.MCP.(interface{ Drop(string) }); ok {
 			mcp.Drop(p.Manifest.MCPServerID())
 		}
-		return yamlBlock(map[string]any{"status": "registered", "name": p.Manifest.Name, "id": p.Manifest.ID, "version": p.Manifest.Version, "next": "mcp_enable id=" + p.Manifest.ID}), nil
+		return yamlMD(map[string]any{"status": "registered", "name": p.Manifest.Name, "id": p.Manifest.ID, "version": p.Manifest.Version}, "Plugin registered. Call `mcp_enable id="+p.Manifest.ID+"` to connect and load its tools."), nil
 
 	case name == "mcp_enable":
 		var args struct {
@@ -741,7 +737,25 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if err != nil {
 			return "", fmt.Errorf("mcp_enable %q: %w", args.ID, err)
 		}
-		return yamlBlock(map[string]any{"status": "enabled", "id": args.ID, "tools": len(tools)}), nil
+		// Return tool names + descriptions so the agent can call them
+		// directly without a follow-up tool_list round-trip.
+		type toolInfo struct {
+			Name        string `yaml:"name"`
+			Description string `yaml:"description,omitempty"`
+		}
+		toolInfos := make([]toolInfo, 0, len(tools))
+		var bodyLines []string
+		for _, tool := range tools {
+			fullName := "mcp__" + p.Manifest.Name + "__" + tool.Name
+			toolInfos = append(toolInfos, toolInfo{Name: fullName, Description: tool.Description})
+			bodyLines = append(bodyLines, fmt.Sprintf("- **%s**: %s", fullName, tool.Description))
+		}
+		meta := map[string]any{
+			"status": "enabled",
+			"id":     args.ID,
+			"tools":  len(tools),
+		}
+		return yamlMD(meta, strings.Join(bodyLines, "\n")), nil
 
 	case name == "mcp_disable":
 		var args struct {
@@ -802,7 +816,8 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			Running bool   `yaml:"running"`
 			Tools   int    `yaml:"tools"`
 		}
-		out := make([]srvInfo, 0, len(plugins))
+		var bodyLines []string
+		count := 0
 		for _, p := range plugins {
 			toolCount := 0
 			running := false
@@ -811,15 +826,14 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				running = true
 				toolCount = len(tools)
 			}
-			out = append(out, srvInfo{
-				ID:      serverID,
-				Name:    p.Manifest.Name,
-				Command: p.Manifest.MCP.Command,
-				Running: running,
-				Tools:   toolCount,
-			})
+			status := "idle"
+			if running {
+				status = fmt.Sprintf("running (%d tools)", toolCount)
+			}
+			bodyLines = append(bodyLines, fmt.Sprintf("- **%s** — %s", p.Manifest.Name, status))
+			count++
 		}
-		return yamlBlock(map[string]any{"count": len(out), "plugins": out}), nil
+		return yamlMDList(map[string]any{"count": count}, bodyLines), nil
 
 	case name == "tool_list":
 		var args struct {
@@ -853,10 +867,11 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				})
 			}
 		}
-		if entries == nil {
-			entries = []toolEntry{}
+		var bodyLines []string
+		for _, e := range entries {
+			bodyLines = append(bodyLines, fmt.Sprintf("- **%s** [%s]: %s", e.Name, e.Server, e.Description))
 		}
-		return yamlBlock(map[string]any{"count": len(entries), "tools": entries}), nil
+		return yamlMDList(map[string]any{"count": len(entries)}, bodyLines), nil
 
 	case name == "tool_search":
 		var args struct {
@@ -903,13 +918,11 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				})
 			}
 		}
-		if matches == nil {
-			matches = []match{}
+		var bodyLines []string
+		for _, m := range matches {
+			bodyLines = append(bodyLines, fmt.Sprintf("- **%s** [%s]: %s", m.Name, m.Server, m.Description))
 		}
-		return yamlBlock(map[string]any{
-			"server": args.Server, "query": args.Query,
-			"count": len(matches), "matches": matches,
-		}), nil
+		return yamlMDList(map[string]any{"server": args.Server, "query": args.Query, "count": len(matches)}, bodyLines), nil
 
 	case name == "tool_schema":
 		var args struct {
@@ -1214,28 +1227,32 @@ func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error)
 	current := t.Todos.Get(conversationID)
 	currentGoal := t.Todos.GetGoal(conversationID)
 	summary := domain.SummarizeTodos(current)
-	type todoItemOut struct {
-		ID      string `yaml:"id"`
-		Content string `yaml:"content"`
-		Status  string `yaml:"status"`
-	}
-	itemOuts := make([]todoItemOut, 0, len(current))
-	for _, item := range current {
-		itemOuts = append(itemOuts, todoItemOut{ID: item.ID, Content: item.Content, Status: string(item.Status)})
-	}
-	out := map[string]any{
+	meta := map[string]any{
 		"ok":           true,
 		"conversation": conversationID,
 		"total":        summary.Total,
 		"pending":      summary.Pending,
 		"in_progress":  summary.InProgress,
 		"completed":    summary.Completed,
-		"items":        itemOuts,
 	}
+	var bodyLines []string
 	if currentGoal != "" {
-		out["goal"] = currentGoal
+		bodyLines = append(bodyLines, "## Goal", "", currentGoal, "")
 	}
-	return yamlBlock(out), nil
+	if len(current) > 0 {
+		bodyLines = append(bodyLines, "## Items", "")
+		for _, item := range current {
+			mark := "[ ]"
+			switch item.Status {
+			case domain.TodoInProgress:
+				mark = "[~]"
+			case domain.TodoCompleted:
+				mark = "[x]"
+			}
+			bodyLines = append(bodyLines, fmt.Sprintf("- %s **%s**: %s", mark, item.ID, item.Content))
+		}
+	}
+	return yamlMD(meta, strings.Join(bodyLines, "\n")), nil
 }
 
 // execAskQuestion pauses the turn and asks the user a structured clarifying
@@ -1649,4 +1666,26 @@ func formatFragment(f *domain.MemoryFragment, score float64) map[string]any {
 		m["score"] = score
 	}
 	return m
+}
+
+// formatFragmentLine renders a fragment as a single markdown list line for
+// yamlMD output. Score is included when non-zero.
+func formatFragmentLine(f *domain.MemoryFragment, score float64) string {
+	parts := []string{fmt.Sprintf("- **%s** [%s]", f.ID, f.Category)}
+	if f.Project != "" {
+		parts = append(parts, fmt.Sprintf("project=%s", f.Project))
+	}
+	if score > 0 {
+		parts = append(parts, fmt.Sprintf("score=%.2f", score))
+	}
+	parts = append(parts, "— "+truncate(f.Content, 150))
+	return strings.Join(parts, " ")
+}
+
+// truncate shortens s to maxLen characters, appending "…" if truncated.
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-1] + "…"
 }

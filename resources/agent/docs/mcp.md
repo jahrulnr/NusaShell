@@ -44,9 +44,16 @@ before its tools can be called.
 Good example:
 
     mcp_list()                                  # → {plugins: [{name: "files", running: false}]}
-    mcp_enable(id="plugin:files")               # connect + load tools
-    tool_list(server="files")                   # now discoverable
-    mcp__files__read({path: "/home/user/a.txt"})
+    mcp_enable(id="plugin:files")               # connect + load tools; returns tool names + descriptions
+    mcp__files__read({path: "/home/user/a.txt"}) # call directly — no tool_list needed
+
+`mcp_enable` returns the full tool list (names + descriptions) in its
+output. You do NOT need to call `tool_list` after `mcp_enable` — the
+tool names are already in the result. Call the tools directly.
+
+Use `tool_list` only when you need to re-discover tools on a server that
+was already enabled earlier in the session and you forgot the tool names,
+or when the tool list may have changed (e.g. after a plugin update).
 
 Bad example — calling an idle plugin's tool without enabling:
 
