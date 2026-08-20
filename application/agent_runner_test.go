@@ -116,33 +116,42 @@ func TestChatMessagesKeepsReasoningOnlyAssistantTurns(t *testing.T) {
 }
 
 func TestCompactionTriggerUsesThresholdCappedByWindow(t *testing.T) {
-	// Explicit threshold: capped at 80% of window for small windows.
+	// Explicit threshold: capped at 80% of available budget (window - maxOutput).
 	settings := domain.Settings{CompactionThreshold: 40000}
-	if got := compactionTriggerTokens(1000, settings); got != 800 {
+	if got := compactionTriggerTokens(1000, 0, settings); got != 800 {
 		t.Fatalf("small window: got %d, want 800 (80%% of 1000)", got)
 	}
-	if got := compactionTriggerTokens(200000, settings); got != 40000 {
+	if got := compactionTriggerTokens(200000, 0, settings); got != 40000 {
 		t.Fatalf("large window: got %d, want threshold 40000", got)
 	}
 	settings.CompactionThreshold = 5000
-	if got := compactionTriggerTokens(200000, settings); got != 5000 {
+	if got := compactionTriggerTokens(200000, 0, settings); got != 5000 {
 		t.Fatalf("custom threshold: got %d, want 5000", got)
 	}
 }
 
 func TestCompactionTriggerAutoUsesWindowPercentage(t *testing.T) {
 	// Threshold=0 means "auto": compaction triggers at 80% of the model's
-	// context window, not at a flat token count. This is the default for
-	// new installations and after migration from the old 40k default.
+	// available input budget (contextWindow - maxOutput), not at a flat
+	// token count. This is the default for new installations and after
+	// migration from the old 40k default.
 	settings := domain.Settings{CompactionThreshold: 0}
-	if got := compactionTriggerTokens(1048576, settings); got != 838860 {
+	if got := compactionTriggerTokens(1048576, 0, settings); got != 838860 {
 		t.Fatalf("1M window auto: got %d, want 838860 (80%% of 1M)", got)
 	}
-	if got := compactionTriggerTokens(200000, settings); got != 160000 {
+	if got := compactionTriggerTokens(200000, 0, settings); got != 160000 {
 		t.Fatalf("200k window auto: got %d, want 160000 (80%% of 200k)", got)
 	}
-	if got := compactionTriggerTokens(1000, settings); got != 800 {
+	if got := compactionTriggerTokens(1000, 0, settings); got != 800 {
 		t.Fatalf("1k window auto: got %d, want 800", got)
+	}
+}
+
+func TestCompactionTriggerSubtractsMaxOutput(t *testing.T) {
+	// 256k window, 64k output → available = 196608 → trigger = 80% × 196608 = 157286
+	settings := domain.Settings{CompactionThreshold: 0}
+	if got := compactionTriggerTokens(262144, 65536, settings); got != 157286 {
+		t.Fatalf("with maxOutput: got %d, want 157286", got)
 	}
 }
 

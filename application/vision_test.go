@@ -7,6 +7,10 @@ import (
 	"nusashell/domain"
 )
 
+func containsImageOmissionNote(content string) bool {
+	return containsOmissionNote(content, "image")
+}
+
 func TestChatMessagesStripsImagesForNonVisionModel(t *testing.T) {
 	c := &domain.Conversation{Messages: []domain.Message{
 		{

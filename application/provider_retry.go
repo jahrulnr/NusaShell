@@ -230,6 +230,41 @@ func isRateLimitError(err error) bool {
 	return upstream.StatusCode == 429
 }
 
+// isContextOverflowError reports whether the provider rejected the request
+// because the prompt + max_output combination exceeded the model's context
+// window. Providers return HTTP 400 with body containing phrases like
+// "maximum context length", "context_length_exceeded", or "reduce the length
+// of the input prompt". Used by the emergency-compaction safety net to force
+// a compaction and retry instead of failing the turn.
+func isContextOverflowError(err error) bool {
+	var upstream *UpstreamError
+	if !errors.As(err, &upstream) {
+		return false
+	}
+	if upstream.StatusCode != 400 {
+		return false
+	}
+	body := ""
+	if upstream.Err != nil {
+		body = strings.ToLower(upstream.Err.Error())
+	}
+	for _, phrase := range contextOverflowPhrases {
+		if strings.Contains(body, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+var contextOverflowPhrases = []string{
+	"maximum context length",
+	"context_length_exceeded",
+	"reduce the length of the input prompt",
+	"too many input tokens",
+	"input_tokens",
+	"prompt is too long",
+}
+
 // rateLimitCooldown returns the duration to mark an account as rate-limited.
 // Uses the provider's Retry-After if available; defaults to 5 minutes
 // (matching retryAfterCutoff) when the provider didn't advertise one.

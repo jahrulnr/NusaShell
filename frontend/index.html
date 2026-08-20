@@ -636,6 +636,10 @@
               <input id="settings-max-tool-rounds" type="number" min="1" max="10000" step="1" inputmode="numeric" value="8">
               <small>Stops a turn that keeps requesting more tool work. The default is 8.</small>
             </label>
+            <label class="settings-field" for="settings-repeated-tool-limit">Repeated tool call limit
+              <input id="settings-repeated-tool-limit" type="number" min="0" max="100" step="1" inputmode="numeric" value="3">
+              <small>Breaks tool loops: if the model calls the same tool with the same args N rounds in a row without text, tools are stripped for one round (default 3). Set 0 to disable.</small>
+            </label>
             <label class="settings-field" for="settings-max-parallel-tools">Max parallel tools per round
               <input id="settings-max-parallel-tools" type="number" min="1" max="64" step="1" inputmode="numeric" value="6">
               <small>How many tool calls from one assistant round run at once (default 6). Raising it cuts latency when the model emits many independent calls; lower it to reduce load.</small>

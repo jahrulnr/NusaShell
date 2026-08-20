@@ -88,10 +88,9 @@ func (m *LifecycleManager) Run(ctx context.Context) {
 
 // runDecay is a no-op for now — decay is computed on-the-fly during prune.
 // This method exists as the hook for future persistent strength tracking.
-// Logs a heartbeat so the user can see the decay cycle is alive.
 func (m *LifecycleManager) runDecay() {
-	entries := m.memory.List()
-	m.logf("debug", "decay tick: %d entries (decay is computed on-the-fly during prune)", len(entries))
+	// No-op: decay is computed on-the-fly during prune. Avoid logging every
+	// tick to keep the log clean.
 }
 
 // runPrune removes memory entries whose computed strength falls below

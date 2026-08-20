@@ -683,11 +683,11 @@ async function fetchTodos() {
 // The toggle flips aria-expanded and shows/hides the list element.
 function bindStripToggles() {
   const pairs = [
-    { toggleId: 'agent-todo-strip-toggle', listId: 'agent-todo-strip-list' },
+    { toggleId: 'agent-todo-strip-toggle', listId: 'agent-todo-strip-list', extraIds: ['agent-todo-strip-goal'] },
     { toggleId: 'tool-job-strip-toggle', listId: 'tool-job-list' },
     { toggleId: 'agent-steer-queue-toggle', listId: 'agent-steer-queue-list' },
   ];
-  for (const { toggleId, listId } of pairs) {
+  for (const { toggleId, listId, extraIds } of pairs) {
     const toggle = document.getElementById(toggleId);
     const list = document.getElementById(listId);
     if (!toggle || !list) continue;
@@ -695,6 +695,12 @@ function bindStripToggles() {
       const open = toggle.getAttribute('aria-expanded') === 'true';
       toggle.setAttribute('aria-expanded', String(!open));
       list.hidden = open;
+      if (extraIds) {
+        for (const id of extraIds) {
+          const el = document.getElementById(id);
+          if (el) el.hidden = open;
+        }
+      }
     });
   }
 }
@@ -726,13 +732,16 @@ function renderTodoStrip() {
     metaEl.textContent = incomplete === 0 ? 'All done' : `${incomplete} open`;
     metaEl.dataset.done = incomplete === 0 ? 'true' : 'false';
   }
-  // Goal brief: shown as a muted, collapsed line above the item list.
+  // Goal brief: shown as a muted line above the item list. Respects the
+  // toggle state so a collapsed strip stays collapsed on re-render.
   const goalEl = document.getElementById('agent-todo-strip-goal');
+  const toggleEl = document.getElementById('agent-todo-strip-toggle');
+  const stripOpen = toggleEl?.getAttribute('aria-expanded') === 'true';
   if (goalEl) {
     if (hasGoal) {
-      goalEl.hidden = false;
       goalEl.textContent = goal.trim();
       goalEl.title = 'User goal — survives compaction so the agent does not drift';
+      goalEl.hidden = !stripOpen;
     } else {
       goalEl.hidden = true;
       goalEl.textContent = '';

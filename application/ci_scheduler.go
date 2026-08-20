@@ -525,22 +525,6 @@ func mergeRun(dst, src *domain.WorkflowRun) {
 	domain.MergeRun(dst, src)
 }
 
-func mergeStatus(dst, src domain.RunStatus) domain.RunStatus {
-	return domain.MergeStatus(dst, src)
-}
-
-func mergeJobRun(dst, src domain.JobRun) domain.JobRun {
-	return domain.MergeJobRun(dst, src)
-}
-
-func statusRank(s domain.RunStatus) int {
-	return domain.StatusRank(s)
-}
-
-func finishedSteps(j domain.JobRun) int {
-	return domain.FinishedSteps(j)
-}
-
 func (s *ExecutionScheduler) emit(typ string, v any) {
 	if s.Bus != nil {
 		s.Bus.Emit(typ, v)

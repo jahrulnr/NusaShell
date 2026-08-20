@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"nusashell/domain"
@@ -33,6 +34,56 @@ type modelListResponse struct {
 		} `json:"data"`
 		NextCursor *string `json:"nextCursor"`
 	} `json:"result"`
+}
+
+// codexModelsCache is the on-disk shape of ~/.codex/models_cache.json.
+// The Codex CLI caches the full model catalog (including context_window
+// and max_context_window) here, but the JSON-RPC model/list endpoint does
+// not expose those fields. We parse this file to get the real context
+// window that Codex enforces — which is often smaller than the model's
+// documented ceiling (e.g. luna: 272k cache vs 1.05M models.dev).
+type codexModelsCache struct {
+	Models []struct {
+		Slug                      string `json:"slug"`
+		ContextWindow             int    `json:"context_window"`
+		MaxContextWindow          int    `json:"max_context_window"`
+		EffectiveContextWindowPct int    `json:"effective_context_window_percent"`
+	} `json:"models"`
+}
+
+// loadCodexModelsCache reads ~/.codex/models_cache.json and returns a
+// slug → context window map. Returns nil if the file is missing or
+// cannot be parsed — callers fall back to the model/list data as-is.
+func loadCodexModelsCache() map[string]int {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	path := filepath.Join(home, ".codex", "models_cache.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var cache codexModelsCache
+	if err := json.Unmarshal(data, &cache); err != nil {
+		return nil
+	}
+	out := make(map[string]int, len(cache.Models))
+	for _, m := range cache.Models {
+		if m.Slug == "" {
+			continue
+		}
+		// Use max_context_window if available (the user can raise it via
+		// config), otherwise the default context_window.
+		cw := m.MaxContextWindow
+		if cw <= 0 {
+			cw = m.ContextWindow
+		}
+		if cw > 0 {
+			out[m.Slug] = cw
+		}
+	}
+	return out
 }
 
 // listModelsViaSubprocess spawns a Codex app-server subprocess and calls
@@ -113,7 +164,10 @@ func listModelsViaSubprocess(ctx context.Context) ([]domain.Model, error) {
 		return nil, fmt.Errorf("codex model list: parse response: %w", err)
 	}
 
-	// Convert to domain.Model
+	// Convert to domain.Model, enriching with context window from
+	// ~/.codex/models_cache.json (the JSON-RPC model/list does not expose
+	// context_window, but the cache file does).
+	cacheCtx := loadCodexModelsCache()
 	models := make([]domain.Model, 0, len(resp.Result.Data))
 	for _, m := range resp.Result.Data {
 		if m.Hidden {
@@ -123,12 +177,16 @@ func listModelsViaSubprocess(ctx context.Context) ([]domain.Model, error) {
 		for _, e := range m.SupportedReasoningEfforts {
 			efforts = append(efforts, e.ReasoningEffort)
 		}
-		models = append(models, domain.Model{
+		dm := domain.Model{
 			ID:               m.ID,
 			Description:      m.Description,
 			SupportedEfforts: efforts,
 			DefaultEffort:    m.DefaultReasoningEffort,
-		})
+		}
+		if cw, ok := cacheCtx[m.ID]; ok {
+			dm.Context = cw
+		}
+		models = append(models, dm)
 	}
 
 	if len(models) == 0 {

@@ -289,15 +289,19 @@ func (c *Conversation) Compact(summary string, keepTokenBudget int) {
 
 	// Iterate backward from the most recent message, keeping messages until
 	// the token budget is exhausted. The last message that does not fit is
-	// truncated rather than dropped.
+	// truncated rather than dropped. Token cost is computed from the original
+	// message (including tool calls/reasoning) so that tool-heavy messages
+	// are not undercounted — the stripped version is retained but the budget
+	// reflects what the provider actually sent.
 	remaining := keepTokenBudget
 	var retained []Message
 	for i := len(c.Messages) - 1; i >= 0; i-- {
 		if remaining <= 0 {
 			break
 		}
-		msg := StripForRetention(c.Messages[i])
-		tokens := msg.EstimateTokens()
+		orig := c.Messages[i]
+		tokens := orig.EstimateTokens()
+		msg := StripForRetention(orig)
 		if tokens <= remaining {
 			retained = append([]Message{msg}, retained...)
 			remaining -= tokens
@@ -327,8 +331,9 @@ func (c *Conversation) ArchiveMessages(keepTokenBudget int) []Message {
 		if remaining <= 0 {
 			break
 		}
-		msg := StripForRetention(c.Messages[i])
-		tokens := msg.EstimateTokens()
+		// Use the original message's token cost (including tool calls) so
+		// tool-heavy messages are not undercounted — same logic as Compact.
+		tokens := c.Messages[i].EstimateTokens()
 		if tokens <= remaining {
 			retainedCount++
 			remaining -= tokens

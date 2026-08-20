@@ -29,9 +29,6 @@ func OmittedPlaceholderFor(kind, toolName string, atts []Attachment) string {
 }
 
 // ImageOmittedPlaceholderFor is kept for backward compatibility with tests.
-func ImageOmittedPlaceholderFor(atts []Attachment) string {
-	return OmittedPlaceholderFor("image", "read_image", atts)
-}
 
 // FolderPlaceholderFor builds a text placeholder that tells the agent the
 // absolute path of a dropped folder. The agent can use file tools
@@ -57,9 +54,6 @@ func FolderPlaceholderFor(atts []Attachment) string {
 }
 
 // ImageAttachmentNames returns the names of image attachments.
-func ImageAttachmentNames(atts []Attachment) []string {
-	return AttachmentNamesByType(atts, "image")
-}
 
 // AttachmentNamesByType returns the names of attachments matching typ.
 func AttachmentNamesByType(atts []Attachment, typ string) []string {
@@ -73,9 +67,6 @@ func AttachmentNamesByType(atts []Attachment, typ string) []string {
 }
 
 // HasImageAttachment reports whether atts contains any image attachment.
-func HasImageAttachment(atts []Attachment) bool {
-	return HasAttachmentOfType(atts, "image")
-}
 
 // HasAttachmentOfType reports whether atts contains any attachment of typ.
 func HasAttachmentOfType(atts []Attachment, typ string) bool {
@@ -88,9 +79,6 @@ func HasAttachmentOfType(atts []Attachment, typ string) bool {
 }
 
 // StripImageAttachments removes image attachments from atts.
-func StripImageAttachments(atts []Attachment) []Attachment {
-	return StripAttachmentsByType(atts, "image")
-}
 
 // StripAttachmentsByType removes attachments of typ from atts.
 func StripAttachmentsByType(atts []Attachment, typ string) []Attachment {
@@ -104,9 +92,6 @@ func StripAttachmentsByType(atts []Attachment, typ string) []Attachment {
 }
 
 // FilterImageAttachments returns only image attachments from atts.
-func FilterImageAttachments(atts []Attachment) []Attachment {
-	return FilterAttachmentsByType(atts, "image")
-}
 
 // FilterAttachmentsByType returns only attachments of typ from atts.
 func FilterAttachmentsByType(atts []Attachment, typ string) []Attachment {
@@ -121,9 +106,6 @@ func FilterAttachmentsByType(atts []Attachment, typ string) []Attachment {
 
 // ContainsImageOmissionNote reports whether content mentions an image
 // omission placeholder.
-func ContainsImageOmissionNote(content string) bool {
-	return ContainsOmissionNote(content, "image")
-}
 
 // ContainsOmissionNote reports whether content mentions an omission
 // placeholder for the given kind.

@@ -72,6 +72,7 @@ export async function refresh() {
     document.getElementById('settings-sound-notifications').checked = settings.sound_notifications !== false;
     document.getElementById('settings-user-prompt').value = settings.user_prompt ?? '';
     document.getElementById('settings-max-tool-rounds').value = settings.max_tool_rounds ?? 8;
+    document.getElementById('settings-repeated-tool-limit').value = settings.repeated_tool_limit ?? 3;
     document.getElementById('settings-max-parallel-tools').value = settings.max_parallel_tools ?? 6;
     document.getElementById('settings-max-input-tokens').value = settings.max_input_tokens ?? 200000;
     document.getElementById('settings-compaction-threshold').value = settings.compaction_threshold ?? 0;
@@ -246,11 +247,16 @@ function renderAppInfo(info) {
 async function save() {
   const button = document.getElementById('settings-save-btn');
   const maxToolRounds = Number(document.getElementById('settings-max-tool-rounds').value);
+  const repeatedToolLimit = Number(document.getElementById('settings-repeated-tool-limit').value);
   const maxInputTokens = Number(document.getElementById('settings-max-input-tokens').value);
   const maxOutputTokens = Number(document.getElementById('settings-max-output-tokens').value);
   const maxParallelTools = Number(document.getElementById('settings-max-parallel-tools').value);
   if (!Number.isInteger(maxToolRounds) || maxToolRounds < 1 || maxToolRounds > 10000) {
     setStatus('Maximum tool rounds must be between 1 and 10,000.', true);
+    return;
+  }
+  if (!Number.isInteger(repeatedToolLimit) || repeatedToolLimit < 0 || repeatedToolLimit > 100) {
+    setStatus('Repeated tool call limit must be between 0 and 100 (0 = disabled).', true);
     return;
   }
   if (!Number.isInteger(maxParallelTools) || maxParallelTools < 1 || maxParallelTools > 64) {
@@ -299,6 +305,7 @@ async function save() {
       sound_notifications: document.getElementById('settings-sound-notifications').checked,
       user_prompt: document.getElementById('settings-user-prompt').value.trim() || null,
       max_tool_rounds: maxToolRounds,
+      repeated_tool_limit: repeatedToolLimit,
       max_parallel_tools: maxParallelTools,
       max_input_tokens: maxInputTokens,
       compaction_threshold: compactionThreshold,

@@ -1223,6 +1223,12 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 		}
 		s.MaxToolRounds = *req.MaxToolRounds
 	}
+	if req.RepeatedToolLimit != nil {
+		if *req.RepeatedToolLimit < 0 || *req.RepeatedToolLimit > 100 {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "repeated tool limit must be between 0 and 100 (0 = disabled)"}
+		}
+		s.RepeatedToolLimit = *req.RepeatedToolLimit
+	}
 	if req.MaxInputTokens != nil {
 		if *req.MaxInputTokens < 1000 || *req.MaxInputTokens > 2000000 {
 			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "max input tokens must be between 1000 and 2000000"}
@@ -1360,6 +1366,7 @@ func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 		CompactionThreshold:     s.CompactionThreshold,
 		PromptCaching:           s.PromptCaching,
 		MaxToolRounds:           s.MaxToolRounds,
+		RepeatedToolLimit:       s.RepeatedToolLimit,
 		MaxInputTokens:          s.MaxInputTokens,
 		MaxOutputTokens:         s.MaxOutputTokens,
 		MaxParallelTools:        s.MaxParallelTools,

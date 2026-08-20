@@ -86,6 +86,9 @@ func TestAgentPromptRoutesCommonToolWorkflows(t *testing.T) {
 		"ask_question",
 		"memory_search",
 		"subagent",
+		"Want:",
+		"Plan:",
+		"Done:",
 	} {
 		if !strings.Contains(prompt, expected) {
 			t.Errorf("agent prompt missing workflow routing guidance for %q", expected)

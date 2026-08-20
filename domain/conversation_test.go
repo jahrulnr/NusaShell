@@ -89,3 +89,40 @@ func TestDefaultTitleDoesNotSplitUTF8Rune(t *testing.T) {
 		t.Fatalf("title = %q, want truncated with ellipsis", title)
 	}
 }
+
+// TestCompactCountsToolCallsInTokenBudget: Compact must count tool call
+// tokens when deciding which messages to retain. A conversation full of
+// tool-only messages (empty content, non-trivial tool calls) must not
+// be treated as "fits in budget" — that would skip compaction entirely
+// and cause context overflow at the provider.
+func TestCompactCountsToolCallsInTokenBudget(t *testing.T) {
+	// 100 assistant messages, each with empty content but a tool call
+	// with a large output. Total tool-call tokens >> keep budget.
+	msgs := make([]Message, 100)
+	for i := range msgs {
+		msgs[i] = Message{
+			ID:      NewID("msg"),
+			Role:    RoleAssistant,
+			Content: "",
+			ToolCalls: []ToolCall{{
+				ID:     NewID("call"),
+				Name:   "mcp_enable",
+				Args:   `{"id":"nusashell.terminal"}`,
+				Output: strings.Repeat("x", 400), // ~100 tokens per call
+			}},
+		}
+	}
+	c := &Conversation{Messages: msgs}
+	keepBudget := 1000 // small budget: should only retain ~10 messages
+	archived := c.ArchiveMessages(keepBudget)
+	if len(archived) == 0 {
+		t.Fatal("ArchiveMessages returned nil — tool call tokens not counted, everything 'fits'")
+	}
+	if len(archived) < 80 {
+		t.Fatalf("ArchiveMessages archived only %d messages, expected most to be archived (tool tokens undercounted)", len(archived))
+	}
+	c.Compact("summary", keepBudget)
+	if len(c.Messages) > 15 {
+		t.Fatalf("after Compact, %d messages retained — tool call tokens not counted in budget", len(c.Messages))
+	}
+}

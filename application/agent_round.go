@@ -38,11 +38,15 @@ func (a *App) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, mo
 	}
 	settings := a.Settings.Get()
 	contextWindow := resolveContextWindow(provider, model, settings)
-	compactionTrigger := compactionTriggerTokens(contextWindow, settings)
-	if !settings.CompactionEnabled || conversation.EstimateTokens() <= compactionTrigger {
+	maxOutput := resolveMaxOutput(provider, model, settings)
+	compactionTrigger := compactionTriggerTokens(contextWindow, maxOutput, settings)
+	beforeTokens := conversation.EstimateTokens()
+	if !settings.CompactionEnabled || beforeTokens <= compactionTrigger {
 		return adapter, conversation, settings, nil
 	}
 
+	a.log("info", "agent", "compaction triggered for %s: est=%d trigger=%d window=%d maxOut=%d",
+		conversation.ID, beforeTokens, compactionTrigger, contextWindow, maxOutput)
 	summary, err := a.compactConversation(run.Ctx, adapter, conversation, model, contextWindow)
 	if err != nil {
 		a.log("warn", "agent", "compaction failed for %s: %v", conversation.ID, err)
@@ -51,6 +55,9 @@ func (a *App) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, mo
 		a.log("info", "agent", "compacted conversation %s", conversation.ID)
 	}
 	conversation, err = a.Conversations.Get(run.ConversationID)
+	afterTokens := conversation.EstimateTokens()
+	a.log("info", "agent", "compaction result for %s: before=%d after=%d (msgs=%d)",
+		conversation.ID, beforeTokens, afterTokens, len(conversation.Messages))
 	return adapter, conversation, settings, err
 }
 
@@ -218,16 +225,6 @@ func estimateRequestTokens(system string, messages []ChatMessage, tools []ToolDe
 	return int64(float64(tokens) * 1.05)
 }
 
-func asciiCount(s string) int {
-	return domain.AsciiCount(s)
-}
-
-// NeedsBuild... (unused guard)
-// buildPromptCachePolicy computes the provider-neutral prompt-cache intent for
-// a turn. The cache key is derived from [providerId, model, conversationId] so
-// the provider can dedup cache entries across requests in the same
-// conversation. When prompt caching is disabled in settings, returns nil.
-// Mirrors the TS promptCacheKey + AgentPromptCachePolicy.
 func buildPromptCachePolicy(settings domain.Settings, providerID, model, conversationID string) *PromptCachePolicy {
 	if !settings.PromptCaching {
 		return nil

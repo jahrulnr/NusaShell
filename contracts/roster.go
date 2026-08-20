@@ -1087,6 +1087,7 @@ type SettingsDTO struct {
 	CompactionThreshold     int      `json:"compaction_threshold"`
 	PromptCaching           bool     `json:"prompt_caching"`
 	MaxToolRounds           int      `json:"max_tool_rounds"`
+	RepeatedToolLimit       int      `json:"repeated_tool_limit,omitempty"`
 	MaxInputTokens          int      `json:"max_input_tokens"`
 	MaxOutputTokens         int      `json:"max_output_tokens"`
 	MaxParallelTools        int      `json:"max_parallel_tools,omitempty"`
@@ -1120,6 +1121,7 @@ type SettingsSetRequest struct {
 	CompactionThreshold     *int            `json:"compaction_threshold,omitempty"`
 	PromptCaching           *bool           `json:"prompt_caching,omitempty"`
 	MaxToolRounds           *int            `json:"max_tool_rounds,omitempty"`
+	RepeatedToolLimit       *int            `json:"repeated_tool_limit,omitempty"`
 	MaxInputTokens          *int            `json:"max_input_tokens,omitempty"`
 	MaxOutputTokens         *int            `json:"max_output_tokens,omitempty"`
 	MaxParallelTools        *int            `json:"max_parallel_tools,omitempty"`

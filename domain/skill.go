@@ -230,6 +230,11 @@ type Settings struct {
 	// agent turn completes or fails. Default true. The frontend reads
 	// this from settings.get and gates audio playback on it.
 	SoundNotifications bool `json:"sound_notifications,omitempty"`
+	// RepeatedToolLimit is the max number of consecutive identical
+	// single-tool calls (same name + args, no text) before the agent
+	// strips tools for one round to break the loop. 0 = disabled.
+	// Default: 3.
+	RepeatedToolLimit int `json:"repeated_tool_limit,omitempty"`
 	// UserPrompt is custom instructions the user wants injected into every
 	// agent turn's system prompt. Placed after the cache-stable prefix
 	// (system.md + tools.md) but before per-conversation system messages,
@@ -251,6 +256,7 @@ func DefaultSettings() Settings {
 		LearningReviewThreshold: 10,
 		MaxAutoContinues:        DefaultMaxAutoContinues,
 		SoundNotifications:      true,
+		RepeatedToolLimit:       3,
 	}
 }
 
@@ -283,6 +289,11 @@ func NormalizeSettings(settings Settings) Settings {
 	// or unset (-1 from JSON omitempty on older files) needs the default.
 	if settings.MaxAutoContinues < 0 {
 		settings.MaxAutoContinues = DefaultSettings().MaxAutoContinues
+	}
+	// RepeatedToolLimit: 0 is a valid sentinel (disabled). Negative or
+	// unset (-1 from JSON omitempty on older files) needs the default.
+	if settings.RepeatedToolLimit < 0 {
+		settings.RepeatedToolLimit = DefaultSettings().RepeatedToolLimit
 	}
 	return settings
 }

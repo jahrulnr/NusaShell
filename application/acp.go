@@ -503,34 +503,6 @@ func (a *App) spawnAcpSubagents(ctx context.Context, argsJSON []byte) (string, e
 	return domain.FormatSpawnResult(results), nil
 }
 
-func transcriptSummary(run *domain.AcpRun) string {
-	var b strings.Builder
-	for _, c := range run.Transcript {
-		if c.Kind == "text" && c.Text != "" {
-			b.WriteString(c.Text)
-		}
-	}
-	s := strings.TrimSpace(b.String())
-	if s == "" {
-		if run.Error != "" {
-			return run.Error
-		}
-		return run.StopReason
-	}
-	if len(s) > 4000 {
-		return s[:4000] + "…"
-	}
-	return s
-}
-
-func isAbsPath(p string) bool {
-	return len(p) > 0 && (p[0] == '/' || (len(p) > 1 && p[1] == ':'))
-}
-
-// acpTranscriptPath returns the absolute path to the JSONL file where
-// completed ACP run records are persisted, or "" if storage is not
-// configured or not file-backed. Included in the tool result YAML header
-// so the parent agent can reference it for debugging.
 func acpTranscriptPath(storage domain.AcpRunStorage) string {
 	if storage == nil {
 		return ""
@@ -544,158 +516,6 @@ func acpTranscriptPath(storage domain.AcpRunStorage) string {
 
 // subagentCompletionResult builds the tool result: YAML frontmatter
 // (status, workspace, output_path) + markdown body (the summary).
-func subagentCompletionResult(run *domain.AcpRun, transcriptPath string) string {
-	body := subagentCompletionBody(run)
-	var y strings.Builder
-	y.WriteString("---\n")
-	y.WriteString("status: ")
-	y.WriteString(yamlScalar(string(run.Status)))
-	y.WriteString("\n")
-	if run.Workspace != "" {
-		y.WriteString("workspace: ")
-		y.WriteString(yamlScalar(run.Workspace))
-		y.WriteString("\n")
-	}
-	if transcriptPath != "" {
-		y.WriteString("output_path: ")
-		y.WriteString(yamlScalar(transcriptPath))
-		y.WriteString("\n")
-	}
-	y.WriteString("---\n\n")
-	y.WriteString(body)
-	return y.String()
-}
-
-// yamlScalar quotes a string for YAML if it contains characters that
-// require quoting (colons, quotes, newlines, leading spaces). Otherwise
-// returns it bare. This is a minimal escaper — not a full YAML
-// serializer — sufficient for the flat key:value header we produce.
-func yamlScalar(s string) string {
-	if s == "" {
-		return `""`
-	}
-	if strings.ContainsAny(s, ":\"'\n#") || s[0] == ' ' || s[0] == '-' {
-		return `"` + strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), `"`, `\"`) + `"`
-	}
-	return s
-}
-
-// subagentCompletionBody builds the markdown body of the tool result —
-// the human-readable summary the parent agent reads and acts on. Handles
-// every completion edge case:
-//
-//   - Normal (text output): the concatenated text chunks, truncated.
-//   - Failed with text: text + error suffix so the parent agent sees
-//     both the partial work and the failure reason.
-//   - Tool-only / empty / thinking-only: no text chunks → fall back to
-//     a structured summary that includes stop_reason, error, and the
-//     last tool call (if any) so the parent agent has enough context to
-//     decide what to do next.
-//   - Cancelled: explicit cancellation message.
-func subagentCompletionBody(run *domain.AcpRun) string {
-	var b strings.Builder
-	for _, c := range run.Transcript {
-		if c.Kind == "text" && c.Text != "" {
-			b.WriteString(c.Text)
-		}
-	}
-	textOut := strings.TrimSpace(b.String())
-
-	isFailed := run.Status == domain.AcpRunFailed
-	isCancelled := run.Status == domain.AcpRunCancelled
-
-	// Cancelled: explicit message regardless of partial text.
-	if isCancelled {
-		if textOut != "" {
-			return textOut + "\n\n[Subagent was cancelled.]"
-		}
-		return "Subagent was cancelled."
-	}
-
-	// Failed with text: include the error so the parent agent sees both.
-	if isFailed && textOut != "" {
-		errPart := run.Error
-		if errPart == "" {
-			errPart = run.StopReason
-		}
-		if errPart != "" {
-			if len(textOut) > 3800 {
-				textOut = textOut[:3800] + "…"
-			}
-			return textOut + "\n\n[Subagent failed: " + errPart + "]"
-		}
-	}
-
-	// Normal text output.
-	if textOut != "" {
-		if len(textOut) > 4000 {
-			return textOut[:4000] + "…"
-		}
-		return textOut
-	}
-
-	// No text output (tool-only, thinking-only, or empty). Build a
-	// structured fallback so the parent agent has enough context.
-	return structuredFallbackSummary(run)
-}
-
-// structuredFallbackSummary builds a summary when the subagent produced
-// no text chunks (tool-only, thinking-only, or empty output). It
-// includes the stop reason, error, and the last tool call so the parent
-// agent can decide what to do next.
-func structuredFallbackSummary(run *domain.AcpRun) string {
-	var parts []string
-
-	// Status line.
-	switch run.Status {
-	case domain.AcpRunFailed:
-		parts = append(parts, "Subagent failed.")
-	case domain.AcpRunCancelled:
-		parts = append(parts, "Subagent was cancelled.")
-	case domain.AcpRunCompleted:
-		parts = append(parts, "Subagent completed with no text output.")
-	default:
-		parts = append(parts, "Subagent ended (status: "+string(run.Status)+").")
-	}
-
-	// Error reason (if any).
-	if run.Error != "" {
-		parts = append(parts, "Error: "+run.Error)
-	}
-
-	// Stop reason (if any and different from error).
-	if run.StopReason != "" && run.StopReason != run.Error {
-		parts = append(parts, "Stop reason: "+run.StopReason)
-	}
-
-	// Last tool call (if any) — gives the parent agent context about
-	// what the subagent was doing.
-	lastTool := lastToolCallFromTranscript(run)
-	if lastTool != "" {
-		parts = append(parts, "Last tool: "+lastTool)
-	}
-
-	return strings.Join(parts, " ")
-}
-
-// lastToolCallFromTranscript scans the transcript in reverse and returns
-// a compact description of the last tool call (title + status), or empty
-// if none. AcpTranscriptChunk uses flat fields (ToolTitle, ToolStatus)
-// rather than a nested ToolCall pointer.
-func lastToolCallFromTranscript(run *domain.AcpRun) string {
-	for i := len(run.Transcript) - 1; i >= 0; i-- {
-		c := run.Transcript[i]
-		if c.Kind == "tool" && c.ToolTitle != "" {
-			s := c.ToolTitle
-			if c.ToolStatus != "" {
-				s += " (" + c.ToolStatus + ")"
-			}
-			return s
-		}
-	}
-	return ""
-}
-
 func (a *App) SpawnSubagents(ctx context.Context, argsJSON []byte) (string, error) {
 	return a.spawnAcpSubagents(ctx, argsJSON)
 }
@@ -842,8 +662,7 @@ func (a *App) onAcpRunDone(run *domain.AcpRun) {
 	// result (YAML frontmatter + markdown body). The tool call was marked
 	// "running" when spawned; now it transitions to ok/fail.
 	if run.ParentToolCallID != "" {
-		transcriptPath := acpTranscriptPath(a.AcpRunStorage)
-		result := domain.SubagentCompletionResult(run, transcriptPath)
+		result := domain.SubagentCompletionResult(run, "")
 		status := domain.ToolOK
 		if run.Status == domain.AcpRunFailed || run.Status == domain.AcpRunCancelled {
 			status = domain.ToolFailed

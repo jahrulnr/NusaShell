@@ -111,6 +111,37 @@ func TestIsRateLimitError(t *testing.T) {
 	}
 }
 
+func TestIsContextOverflowError(t *testing.T) {
+	if isContextOverflowError(nil) {
+		t.Fatal("nil should not be context overflow")
+	}
+	// 400 with context_length_exceeded body
+	overflowErr := &UpstreamError{StatusCode: 400, Err: errors.New(`{"error":{"message":"This model's maximum context length is 262144 tokens","type":"BadRequestError","code":400}}`)}
+	if !isContextOverflowError(overflowErr) {
+		t.Fatal("400 with 'maximum context length' should be context overflow")
+	}
+	// 400 with context_length_exceeded
+	overflowErr2 := &UpstreamError{StatusCode: 400, Err: errors.New("context_length_exceeded")}
+	if !isContextOverflowError(overflowErr2) {
+		t.Fatal("400 with 'context_length_exceeded' should be context overflow")
+	}
+	// 400 with reduce prompt
+	overflowErr3 := &UpstreamError{StatusCode: 400, Err: errors.New("Please reduce the length of the input prompt")}
+	if !isContextOverflowError(overflowErr3) {
+		t.Fatal("400 with 'reduce the length of the input prompt' should be context overflow")
+	}
+	// 400 unrelated
+	badRequestErr := &UpstreamError{StatusCode: 400, Err: errors.New("invalid model")}
+	if isContextOverflowError(badRequestErr) {
+		t.Fatal("400 unrelated should not be context overflow")
+	}
+	// 500 should not match
+	serverErr := &UpstreamError{StatusCode: 500, Err: errors.New("maximum context length")}
+	if isContextOverflowError(serverErr) {
+		t.Fatal("500 should not be context overflow even with matching body")
+	}
+}
+
 func TestRateLimitCooldown(t *testing.T) {
 	// With Retry-After
 	err := &UpstreamError{StatusCode: 429, RetryAfter: 2 * time.Minute, Err: errors.New("rate limited")}

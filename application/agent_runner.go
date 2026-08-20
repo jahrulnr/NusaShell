@@ -501,6 +501,9 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 	toolRounds := 0
 	continuation := initialContinuation
 	continuedPartialStream := initialContinuation
+	compactedOverflow := false   // safety net: emergency-compact once on context overflow
+	repeatedToolCount := 0       // guard: detect identical repeated tool calls
+	var lastToolSignature string // guard: "name|args" of the last single-tool round
 	// injectHydration lets the first round create a checkpoint when the current
 	// history epoch has none, normally initially or after compaction. Existing
 	// checkpoints are reused across normal user messages and steers. The flag is
@@ -589,6 +592,27 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 				// additional tool round and must not reduce the user's tool budget.
 				round--
 				continue
+			} else if !compactedOverflow && isContextOverflowError(streamErr) {
+				// Emergency compaction safety net: the conversation exceeded the
+				// model's context window (input + max_output > window). This can
+				// happen when the estimate is inaccurate or compaction was
+				// disabled. Force compaction once, then retry the round.
+				compactedOverflow = true
+				preEmg := conversation.EstimateTokens()
+				a.log("warn", "agent", "context overflow for turn %s (est=%d), forcing emergency compaction", run.ID, preEmg)
+				cw := resolveContextWindow(provider, model, settings)
+				summary, compErr := a.compactConversation(run.Ctx, adapter, conversation, model, cw)
+				if compErr == nil {
+					a.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{ConversationID: conversation.ID, Summary: summary})
+					conversation, _ = a.Conversations.Get(run.ConversationID)
+					postEmg := conversation.EstimateTokens()
+					a.log("info", "agent", "emergency compaction done for %s: before=%d after=%d (msgs=%d)",
+						conversation.ID, preEmg, postEmg, len(conversation.Messages))
+					round--
+					continue
+				}
+				a.log("warn", "agent", "emergency compaction failed for %s: %v", conversation.ID, compErr)
+				a.failStreamTurn(run, currentMsgID, model, roundResult, streamErr)
 			} else {
 				a.failStreamTurn(run, currentMsgID, model, roundResult, streamErr)
 			}
@@ -636,6 +660,30 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 			return false, ""
 		}
 		toolRounds++
+
+		// Repeated-tool-call guard: if the model calls a single tool with the
+		// same arguments multiple rounds in a row without producing any text,
+		// it is stuck in a loop. Break the cycle by stripping tools for the
+		// next round so the model is forced to respond with text.
+		// RepeatedToolLimit = 0 disables the guard.
+		if settings.RepeatedToolLimit > 0 && len(roundResult.Response.ToolCalls) == 1 && roundResult.Content == "" {
+			sig := roundResult.Response.ToolCalls[0].Name + "|" + roundResult.Response.ToolCalls[0].Args
+			if sig == lastToolSignature {
+				repeatedToolCount++
+			} else {
+				repeatedToolCount = 1
+				lastToolSignature = sig
+			}
+			if repeatedToolCount >= settings.RepeatedToolLimit {
+				a.log("warn", "agent", "turn %s: detected repeated tool call %s (%dx), forcing text-only round", run.ID, roundResult.Response.ToolCalls[0].Name, repeatedToolCount)
+				toolRounds = settings.MaxToolRounds // strip tools for next round
+				repeatedToolCount = 0
+				lastToolSignature = ""
+			}
+		} else {
+			repeatedToolCount = 0
+			lastToolSignature = ""
+		}
 
 		// Drain any queued steer message at this safe boundary (between tool
 		// completion and the next provider round). The steer is appended as a
@@ -751,8 +799,8 @@ func shouldContinueFailedTurn(failed domain.Message) bool {
 // compacts at ~800k, not at a flat 40k. When CompactionThreshold is non-zero,
 // it is used as the trigger but still capped at 80% of the window so a high
 // threshold cannot wait until the next turn already overflows.
-func compactionTriggerTokens(contextWindow int, settings domain.Settings) int {
-	return domain.CompactionTriggerTokens(contextWindow, settings)
+func compactionTriggerTokens(contextWindow, maxOutput int, settings domain.Settings) int {
+	return domain.CompactionTriggerTokens(contextWindow, maxOutput, settings)
 }
 
 // resolveMaxOutput picks the per-turn completion token ceiling. The model's
@@ -848,15 +896,14 @@ func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *do
 	}
 
 	// Calculate the split point: iterate backward from the most recent message,
-	// counting tokens of stripped messages until the keep budget is exhausted.
-	// Everything before the split point gets summarized; everything after is
-	// retained by Compact.
+	// counting tokens until the keep budget is exhausted. Everything before the
+	// split point gets summarized; everything after is retained by Compact.
+	// Token cost is computed from the original message (including tool calls)
+	// so tool-heavy messages are not undercounted — matching Compact/ArchiveMessages.
 	remaining := effectiveKeepBudget
 	splitIdx := 0
 	for i := len(c.Messages) - 1; i >= 0; i-- {
-		// Match Compact/ArchiveMessages: stripped token count (no tool
-		// calls/reasoning/steps/usage) is what will actually be retained.
-		tokens := domain.StripForRetention(c.Messages[i]).EstimateTokens()
+		tokens := c.Messages[i].EstimateTokens()
 		if tokens > remaining {
 			splitIdx = i + 1
 			break
@@ -1252,8 +1299,6 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabil
 	return out
 }
 
-const imageOmittedPlaceholder = "[image content omitted — this model does not support image input]"
-
 // omittedPlaceholderFor builds a placeholder that tells the model to call
 // the matching read_* tool with the absolute file path to access the
 // attachment. Only absolute paths are shown — relative paths are rejected
@@ -1265,9 +1310,6 @@ func omittedPlaceholderFor(kind, toolName string, atts []domain.Attachment) stri
 }
 
 // imageOmittedPlaceholderFor is kept for backward compatibility with tests.
-func imageOmittedPlaceholderFor(atts []domain.Attachment) string {
-	return domain.ImageOmittedPlaceholderFor(atts)
-}
 
 // folderPlaceholderFor builds a text placeholder that tells the agent the
 // absolute path of a dropped folder. The agent can use file tools
@@ -1277,40 +1319,16 @@ func folderPlaceholderFor(atts []domain.Attachment) string {
 	return domain.FolderPlaceholderFor(atts)
 }
 
-func imageAttachmentNames(atts []domain.Attachment) []string {
-	return domain.ImageAttachmentNames(atts)
-}
-
-func attachmentNamesByType(atts []domain.Attachment, typ string) []string {
-	return domain.AttachmentNamesByType(atts, typ)
-}
-
-func hasImageAttachment(atts []domain.Attachment) bool {
-	return domain.HasImageAttachment(atts)
-}
-
 func hasAttachmentOfType(atts []domain.Attachment, typ string) bool {
 	return domain.HasAttachmentOfType(atts, typ)
-}
-
-func stripImageAttachments(atts []domain.Attachment) []domain.Attachment {
-	return domain.StripImageAttachments(atts)
 }
 
 func stripAttachmentsByType(atts []domain.Attachment, typ string) []domain.Attachment {
 	return domain.StripAttachmentsByType(atts, typ)
 }
 
-func filterImageAttachments(atts []domain.Attachment) []domain.Attachment {
-	return domain.FilterImageAttachments(atts)
-}
-
 func filterAttachmentsByType(atts []domain.Attachment, typ string) []domain.Attachment {
 	return domain.FilterAttachmentsByType(atts, typ)
-}
-
-func containsImageOmissionNote(content string) bool {
-	return domain.ContainsImageOmissionNote(content)
 }
 
 func containsOmissionNote(content, kind string) bool {

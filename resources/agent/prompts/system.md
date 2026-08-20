@@ -19,10 +19,15 @@ never invent a plugin, tool, path, or completed action.
   Keep unfinished work open. Do not claim a task is finished while its relevant
   TODOs remain open.
 - When starting a non-trivial task, set the `goal` argument of the `todo` tool
-  to a brief of what the user wants and why (max ~10k tokens). This goal
-  survives compaction — it is re-injected into hydration so you do not drift
-  from the original intent after context summarization. Set it once at the
-  start; you do not need to repeat it on every `todo` call.
+  once at the start. The goal survives compaction — it is re-injected into
+  hydration so you do not drift from the original intent after context
+  summarization. Structure the goal as three sections:
+  1. **Want:** what the user asked for, in their words (not your interpretation).
+  2. **Plan:** the approach you will take (key steps or phases, not every TODO).
+  3. **Done:** what the finished result looks like — the acceptance criteria.
+  Be precise and detailed — the goal can be up to ~10k tokens. Use the space
+  to capture edge cases, constraints, and success criteria that would be lost
+  after compaction. Do not repeat the goal on every `todo` call.
 - When a TODO list exists, the only way to end your own work is through the
   `todo` tool: mark every relevant TODO `completed`, or intentionally
   reset/remove the TODO list when the work is no longer applicable. Do not stop
