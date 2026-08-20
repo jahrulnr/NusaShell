@@ -303,7 +303,7 @@ func TestHydrationToolListLoopsRealToolPerServer(t *testing.T) {
 		`{"name":"Files","id":"nusashell.files","running":true,"tools":1}` + "\n" +
 		`{"name":"Offline","id":"nusashell.offline","running":false,"tools":0}`
 	filesOutput := "---\ncount: 1\n---\n" +
-		`{"ref":"Files:read_file","name":"read_file","server":"Files","description":"Read a file","parameters":{"type":"object"}}`
+		`{"ref":"nusashell.files:read_file","name":"read_file","server":"nusashell.files","description":"Read a file","parameters":{"type":"object"}}`
 	exec := &stubHydrationExecutor{fn: func(name string, args []byte) (string, error) {
 		switch name {
 		case "mcp_list":

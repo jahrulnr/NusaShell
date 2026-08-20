@@ -369,21 +369,21 @@ func TestToolListByServer(t *testing.T) {
 			},
 		},
 	)
-	out, err := tb.Execute(context.Background(), "tool_list", []byte(`{"server":"github"}`))
+	out, err := tb.Execute(context.Background(), "tool_list", []byte(`{"server":"srv1"}`))
 	if err != nil {
 		t.Fatalf("tool_list: %v", err)
 	}
 	if !strings.Contains(out, "count: 1") {
-		t.Errorf("expected 1 tool from github, got: %s", out)
+		t.Errorf("expected 1 tool from srv1, got: %s", out)
 	}
-	if !strings.Contains(out, `"server":"github"`) {
-		t.Errorf("expected server=github in JSONL, got: %s", out)
+	if !strings.Contains(out, `"server":"srv1"`) {
+		t.Errorf("expected server=srv1 in JSONL, got: %s", out)
 	}
 }
 
 func TestToolListByPluginID(t *testing.T) {
-	// tool_list should accept the plugin id (e.g. "nusashell.terminal")
-	// not just the manifest Name (e.g. "Terminal").
+	// tool_list accepts the plugin id (e.g. "nusashell.terminal") — the
+	// only accepted form. Refs use the plugin id as prefix.
 	tb := testToolbox(nil,
 		[]*domain.Plugin{
 			{Manifest: domain.PluginManifest{ID: "nusashell.terminal", Name: "Terminal", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
@@ -401,7 +401,7 @@ func TestToolListByPluginID(t *testing.T) {
 	if !strings.Contains(out, "count: 1") {
 		t.Errorf("expected 1 tool via plugin id, got: %s", out)
 	}
-	if !strings.Contains(out, `"ref":"Terminal:exec"`) || !strings.Contains(out, `"name":"exec"`) {
+	if !strings.Contains(out, `"ref":"nusashell.terminal:exec"`) || !strings.Contains(out, `"name":"exec"`) {
 		t.Errorf("expected ref+name in JSONL, got: %s", out)
 	}
 }
@@ -422,7 +422,7 @@ func TestToolListNotRunning(t *testing.T) {
 	}
 }
 
-func TestToolSearch(t *testing.T) {
+func TestMcpSearch(t *testing.T) {
 	tb := testToolbox(nil,
 		[]*domain.Plugin{
 			{Manifest: domain.PluginManifest{ID: "srv1", Name: "github", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
@@ -436,9 +436,9 @@ func TestToolSearch(t *testing.T) {
 			},
 		},
 	)
-	out, err := tb.Execute(context.Background(), "tool_search", []byte(`{"server":"github","query":"issue"}`))
+	out, err := tb.Execute(context.Background(), "mcp_search", []byte(`{"server":"srv1","query":"issue"}`))
 	if err != nil {
-		t.Fatalf("tool_search: %v", err)
+		t.Fatalf("mcp_search: %v", err)
 	}
 	if !strings.Contains(out, "count: 1") {
 		t.Errorf("expected 1 match, got: %s", out)
@@ -446,17 +446,17 @@ func TestToolSearch(t *testing.T) {
 	if !strings.Contains(out, "create_issue") {
 		t.Errorf("expected create_issue match, got: %s", out)
 	}
-	// tool_search must return the full parameters so the model can call
+	// mcp_search must return the full parameters so the model can call
 	// the tool directly without a follow-up tool_schema round-trip.
 	if !strings.Contains(out, "\"parameters\"") {
-		t.Errorf("expected parameters in tool_search output, got: %s", out)
+		t.Errorf("expected parameters in mcp_search output, got: %s", out)
 	}
 	if !strings.Contains(out, "\"title\"") {
 		t.Errorf("expected title field in parameters, got: %s", out)
 	}
 }
 
-func TestToolSearchTokenMatch(t *testing.T) {
+func TestMcpSearchTokenMatch(t *testing.T) {
 	tb := testToolbox(nil,
 		[]*domain.Plugin{
 			{Manifest: domain.PluginManifest{ID: "srv1", Name: "github", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
@@ -470,62 +470,16 @@ func TestToolSearchTokenMatch(t *testing.T) {
 		},
 	)
 	// "issue bug" — any token matches
-	out, err := tb.Execute(context.Background(), "tool_search", []byte(`{"server":"github","query":"issue bug"}`))
+	out, err := tb.Execute(context.Background(), "mcp_search", []byte(`{"server":"srv1","query":"issue bug"}`))
 	if err != nil {
-		t.Fatalf("tool_search: %v", err)
+		t.Fatalf("mcp_search: %v", err)
 	}
 	if !strings.Contains(out, "count: 1") {
 		t.Errorf("expected 1 match for token match, got: %s", out)
 	}
 }
 
-func TestToolSearchAllServers(t *testing.T) {
-	tb := testToolbox(nil,
-		[]*domain.Plugin{
-			{Manifest: domain.PluginManifest{ID: "srv1", Name: "github", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
-			{Manifest: domain.PluginManifest{ID: "srv2", Name: "files", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
-		},
-		&stubMCP{
-			tools: map[string][]contracts.MCPToolDTO{
-				"plugin:srv1": {
-					{Name: "create_issue", Description: "Create a GitHub issue"},
-				},
-				"plugin:srv2": {
-					{Name: "read_file", Description: "Read a file from disk", InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`)},
-					{Name: "list_files", Description: "List files in a directory"},
-				},
-			},
-		},
-	)
-	// No server specified — should search across ALL running servers.
-	out, err := tb.Execute(context.Background(), "tool_search", []byte(`{"query":"file"}`))
-	if err != nil {
-		t.Fatalf("tool_search all servers: %v", err)
-	}
-	// Should match read_file and list_files from the files server, but not create_issue.
-	if !strings.Contains(out, "count: 2") {
-		t.Errorf("expected 2 matches across all servers, got: %s", out)
-	}
-	if !strings.Contains(out, `"ref":"files:read_file"`) || !strings.Contains(out, `"ref":"files:list_files"`) {
-		t.Errorf("expected files server refs in results, got: %s", out)
-	}
-	if strings.Contains(out, "create_issue") {
-		t.Errorf("github tool should not match 'file' query, got: %s", out)
-	}
-	// Meta should show server: all
-	if !strings.Contains(out, "server: all") {
-		t.Errorf("expected server: all in meta, got: %s", out)
-	}
-	// tool_search must return full parameters so the model can call directly.
-	if !strings.Contains(out, "\"parameters\"") {
-		t.Errorf("expected parameters in tool_search output, got: %s", out)
-	}
-	if !strings.Contains(out, "\"path\"") {
-		t.Errorf("expected path field in read_file parameters, got: %s", out)
-	}
-}
-
-func TestToolSearchRanksByRelevance(t *testing.T) {
+func TestMcpSearchRanksByRelevance(t *testing.T) {
 	tb := testToolbox(nil,
 		[]*domain.Plugin{
 			{Manifest: domain.PluginManifest{ID: "srv2", Name: "files", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
@@ -537,9 +491,9 @@ func TestToolSearchRanksByRelevance(t *testing.T) {
 			},
 		}},
 	)
-	out, err := tb.Execute(context.Background(), "tool_search", []byte(`{"query":"file"}`))
+	out, err := tb.Execute(context.Background(), "mcp_search", []byte(`{"query":"file"}`))
 	if err != nil {
-		t.Fatalf("tool_search: %v", err)
+		t.Fatalf("mcp_search: %v", err)
 	}
 	// Both match by substring; BM25 ranks read_file (the query token occurs
 	// in its text) above list_files (only the plural "files" occurs).
@@ -548,7 +502,7 @@ func TestToolSearchRanksByRelevance(t *testing.T) {
 	}
 }
 
-func TestToolSearchBoundedByLimit(t *testing.T) {
+func TestMcpSearchBoundedByLimit(t *testing.T) {
 	tb := testToolbox(nil,
 		[]*domain.Plugin{
 			{Manifest: domain.PluginManifest{ID: "srv2", Name: "files", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
@@ -561,12 +515,12 @@ func TestToolSearchBoundedByLimit(t *testing.T) {
 			},
 		}},
 	)
-	out, err := tb.Execute(context.Background(), "tool_search", []byte(`{"query":"file","limit":2}`))
+	out, err := tb.Execute(context.Background(), "mcp_search", []byte(`{"query":"file","limit":2}`))
 	if err != nil {
-		t.Fatalf("tool_search: %v", err)
+		t.Fatalf("mcp_search: %v", err)
 	}
 	if !strings.Contains(out, "count: 2") {
-		t.Errorf("tool_search must honor the limit, got: %s", out)
+		t.Errorf("mcp_search must honor the limit, got: %s", out)
 	}
 }
 
@@ -583,12 +537,12 @@ func TestToolSchema(t *testing.T) {
 			},
 		},
 	)
-	out, err := tb.Execute(context.Background(), "tool_schema", []byte(`{"server":"github","tool":"create_issue"}`))
+	out, err := tb.Execute(context.Background(), "tool_schema", []byte(`{"server":"srv1","tool":"create_issue"}`))
 	if err != nil {
 		t.Fatalf("tool_schema: %v", err)
 	}
-	if !strings.Contains(out, "server: github") || !strings.Contains(out, "tool: create_issue") {
-		t.Errorf("expected github/create_issue, got: %s", out)
+	if !strings.Contains(out, "server: srv1") || !strings.Contains(out, "tool: create_issue") {
+		t.Errorf("expected srv1/create_issue, got: %s", out)
 	}
 	// Full tool definition as a single JSONL line.
 	if !strings.Contains(out, `"name":"create_issue"`) {
@@ -628,11 +582,11 @@ func TestMcpSearchAllServers(t *testing.T) {
 		t.Errorf("expected 2 matches, got: %s", out)
 	}
 	// mcp_search must return a ref the model can pass to mcp_call.
-	if !strings.Contains(out, `"ref":"files:read_file"`) {
-		t.Errorf("expected ref files:read_file, got: %s", out)
+	if !strings.Contains(out, `"ref":"srv2:read_file"`) {
+		t.Errorf("expected ref srv2:read_file, got: %s", out)
 	}
-	if !strings.Contains(out, `"ref":"files:list_files"`) {
-		t.Errorf("expected ref files:list_files, got: %s", out)
+	if !strings.Contains(out, `"ref":"srv2:list_files"`) {
+		t.Errorf("expected ref srv2:list_files, got: %s", out)
 	}
 	if strings.Contains(out, "create_issue") {
 		t.Errorf("github tool should not match 'file' query, got: %s", out)
@@ -656,15 +610,15 @@ func TestMcpSearchWithServer(t *testing.T) {
 			},
 		},
 	)
-	out, err := tb.Execute(context.Background(), "mcp_search", []byte(`{"server":"github","query":"issue"}`))
+	out, err := tb.Execute(context.Background(), "mcp_search", []byte(`{"server":"srv1","query":"issue"}`))
 	if err != nil {
 		t.Fatalf("mcp_search: %v", err)
 	}
 	if !strings.Contains(out, "count: 1") {
 		t.Errorf("expected 1 match, got: %s", out)
 	}
-	if !strings.Contains(out, `"ref":"github:create_issue"`) {
-		t.Errorf("expected ref github:create_issue, got: %s", out)
+	if !strings.Contains(out, `"ref":"srv1:create_issue"`) {
+		t.Errorf("expected ref srv1:create_issue, got: %s", out)
 	}
 }
 
@@ -688,7 +642,7 @@ func TestMcpCallExecutes(t *testing.T) {
 		},
 		mcp,
 	)
-	out, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"files:read_file","arguments_json":"{\"path\":\"/etc/hosts\"}"}`))
+	out, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"srv1:read_file","arguments_json":"{\"path\":\"/etc/hosts\"}"}`))
 	if err != nil {
 		t.Fatalf("mcp_call: %v", err)
 	}
@@ -720,7 +674,7 @@ func TestMcpCallStaleRef(t *testing.T) {
 		},
 		mcp,
 	)
-	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"files:read_file","arguments_json":"{}"}`))
+	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"srv1:read_file","arguments_json":"{}"}`))
 	if err == nil {
 		t.Fatal("expected error for stale ref")
 	}
@@ -747,7 +701,7 @@ func TestMcpCallMissingRef(t *testing.T) {
 
 func TestMcpCallMissingArgumentsJSON(t *testing.T) {
 	tb := testToolbox(nil, nil, &stubMCP{})
-	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"files:read"}`))
+	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"srv1:read"}`))
 	if err == nil {
 		t.Fatal("expected error for missing arguments_json")
 	}
@@ -758,7 +712,7 @@ func TestMcpCallMissingArgumentsJSON(t *testing.T) {
 
 func TestMcpCallInvalidArgumentsJSON(t *testing.T) {
 	tb := testToolbox(nil, nil, &stubMCP{})
-	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"files:read","arguments_json":"not json"}`))
+	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"srv1:read","arguments_json":"not json"}`))
 	if err == nil {
 		t.Fatal("expected error for invalid arguments_json")
 	}
@@ -838,7 +792,7 @@ func TestMcpCallPassesArgumentsJSONThrough(t *testing.T) {
 		},
 		mcp,
 	)
-	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"files:read","arguments_json":"{\"path\":\"/etc/hosts\",\"offset\":0}"}`))
+	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"srv1:read","arguments_json":"{\"path\":\"/etc/hosts\",\"offset\":0}"}`))
 	if err != nil {
 		t.Fatalf("mcp_call: %v", err)
 	}
@@ -866,7 +820,7 @@ func TestMcpCallEmptyArgumentsJSON(t *testing.T) {
 		},
 		mcp,
 	)
-	out, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"files:list","arguments_json":"{}"}`))
+	out, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"srv1:list","arguments_json":"{}"}`))
 	if err != nil {
 		t.Fatalf("mcp_call: %v", err)
 	}
@@ -889,7 +843,7 @@ func TestToolSchemaNotFound(t *testing.T) {
 			},
 		},
 	)
-	_, err := tb.Execute(context.Background(), "tool_schema", []byte(`{"server":"github","tool":"nonexistent"}`))
+	_, err := tb.Execute(context.Background(), "tool_schema", []byte(`{"server":"srv1","tool":"nonexistent"}`))
 	if err == nil {
 		t.Error("expected error for missing tool")
 	}
@@ -902,7 +856,7 @@ func TestToolSchemaServerNotRunning(t *testing.T) {
 		},
 		&stubMCP{tools: map[string][]contracts.MCPToolDTO{}}, // not running
 	)
-	_, err := tb.Execute(context.Background(), "tool_schema", []byte(`{"server":"github","tool":"create_issue"}`))
+	_, err := tb.Execute(context.Background(), "tool_schema", []byte(`{"server":"srv1","tool":"create_issue"}`))
 	if err == nil {
 		t.Error("expected error for non-running server")
 	}
@@ -1043,7 +997,7 @@ func TestMcpEnable(t *testing.T) {
 		t.Fatalf("expected status: enabled and tools: 1 in output, got %q", out)
 	}
 	// mcp_enable returns only status + count — no tool dump.
-	// The agent must use tool_list or tool_search to discover tools.
+	// The agent must use tool_list or mcp_search to discover tools.
 	if strings.Contains(out, `"name":"mcp__Demo__demo_ping"`) {
 		t.Errorf("mcp_enable must not dump tool definitions, got %q", out)
 	}
@@ -1077,7 +1031,7 @@ func TestMcpEnableIdempotent(t *testing.T) {
 
 	// Second enable: already connected — must NOT reconnect and must NOT
 	// dump tools. Return a short already_enabled signal so the agent
-	// stops re-enabling and moves on to tool_list/tool_search.
+	// stops re-enabling and moves on to tool_list/mcp_search.
 	out2, err := tb.Execute(context.Background(), "mcp_enable", []byte(`{"id":"nusashell.demo"}`))
 	if err != nil {
 		t.Fatalf("second mcp_enable: %v", err)

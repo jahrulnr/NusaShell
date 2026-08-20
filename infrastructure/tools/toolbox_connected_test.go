@@ -11,7 +11,7 @@ import (
 // are NOT advertised to the agent. The tool list must stay stable for the
 // lifetime of a conversation so the provider prompt cache (OpenAI / Claude)
 // is not invalidated. The agent can inspect MCP servers via mcp_list,
-// tool_list, tool_search, and tool_schema, but cannot call
+// tool_list, mcp_search, and tool_schema, but cannot call
 // mcp__<server>__<tool> directly.
 func TestListToolsDoesNotExposeMCPDynamicTools(t *testing.T) {
 	enabled := &domain.Plugin{Manifest: domain.PluginManifest{ID: "enabled", Name: "Enabled", Version: "1.0.0", Icon: "🧩", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "x"}}}

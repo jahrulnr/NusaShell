@@ -9,5 +9,5 @@ template only when another MCP host explicitly supports prompt resources.
 - Order: explain any required sequence.
 - Constraints: root/cwd, credentials, limits, or containment.
 - Failure modes: common errors and the safe recovery.
-- Schema reminder: use `tool_list`/`tool_search`, then `tool_schema`; do not
+- Schema reminder: use `tool_list`/`mcp_search`, then `tool_schema`; do not
   invent arguments.

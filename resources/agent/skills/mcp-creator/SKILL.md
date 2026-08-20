@@ -57,7 +57,7 @@ should use `.agents/skills/build-nusashell-plugin/` and write under the checkout
    If it fails, fix the staging folder in place; never register the installed
    destination as its own source.
 7. Call `mcp_enable`, then verify with `mcp_list` and `tool_list` or
-   `tool_search`. Load the exact `tool_schema`, call one discovered tool
+   `mcp_search`. Load the exact `tool_schema`, call one discovered tool
    through `mcp_call` with its `ref`, and inspect the observed result.
 8. For removal, call `mcp_disable`, use `ask_question` to confirm deletion, then
    call `mcp_unregister`. Never unregister bundled built-in plugins or perform

@@ -33,7 +33,7 @@ test with Terminal using an absolute `cwd`. After registration, verify:
 
 1. `mcp_list` shows the plugin and its userData install path.
 2. `mcp_enable` starts it.
-3. `tool_list` or `tool_search` finds the implemented tools.
+3. `tool_list` or `mcp_search` finds the implemented tools.
 4. `tool_schema` is loaded before any tool call.
 5. One discovered tool called via `mcp_call(ref=<server>:<tool>)` returns the
    expected result.

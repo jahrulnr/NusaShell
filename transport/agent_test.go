@@ -743,7 +743,7 @@ func TestAgentTurnWithMCPTool(t *testing.T) {
 	// contract: mcp_call with a ref (not advertised in tools[], but
 	// discoverable via mcp_search / tool_list).
 	h.llm.setRounds([][]llmStep{
-		{{Tool: &llmToolCall{ID: "call_9", Name: "mcp_call", Args: map[string]any{"ref": "fakemcp:echo", "arguments_json": "{\"text\":\"hello-mcp\"}"}}}},
+		{{Tool: &llmToolCall{ID: "call_9", Name: "mcp_call", Args: map[string]any{"ref": serverID + ":echo", "arguments_json": "{\"text\":\"hello-mcp\"}"}}}},
 		{{Text: "Echo done."}},
 	})
 	h.rpcOK(t, "agent.turns.start", map[string]any{
