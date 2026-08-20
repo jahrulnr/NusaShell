@@ -24,6 +24,8 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `tool_list` | list tools from a running MCP server; accepts server name, plugin id, or MCP server id; returns full tool defs (name, server, description, parameters) — call after `mcp_enable` to discover tools |
 | `tool_search` | search running MCP servers' tools by name or description; when server is omitted, searches across ALL running servers; returns full tool definitions (name, server, description, parameters) so you can call the tool directly without a follow-up `tool_schema` |
 | `tool_schema` | load one MCP tool's full definition as a single JSONL line (name, description, parameters with type/properties/required) before calling it; accepts server name, plugin id, or MCP server id |
+| `mcp_search` | universal MCP tool discovery — search running MCP servers by name or description (token match); returns a `ref` plus the full `parameters` schema for each match; pass the `ref` to `mcp_call` to execute; always prefer `mcp_search` + `mcp_call` over guessing `mcp__<server>__<tool>` names |
+| `mcp_call` | universal MCP tool execution — run a tool by `ref` (from `mcp_search`) with `arguments` matching the tool's parameters schema; returns a `STALE_TOOL_REF` error if the server was disabled/restarted since the search (re-search and retry) |
 | `mcp_register` | copy a plugin from an absolute staging folder outside the installed plugins root; check inventory and ask before replacing an existing id |
 | `mcp_enable` | connect an installed plugin so its tools become available; returns only status + tool count — follow with `tool_list` or `tool_search` to discover tools; returns `already_enabled` if already connected (no reconnect) — do not re-call |
 | `mcp_disable` | stop a plugin without uninstalling it |
@@ -116,9 +118,17 @@ status: ok
 MCP plugin tools (`mcp__<server>__<tool>`) are NOT advertised in the tool
 list — the tool list must stay stable for the lifetime of a conversation so
 the provider prompt cache (OpenAI / Claude) is not invalidated. The agent
-can still discover MCP tools via `tool_list` / `tool_search` / `tool_schema`
-and call them by name (`mcp__<server>__<tool>`); execution validates against
-the connected MCP server at call time.
+discovers and calls MCP tools via the universal `mcp_search` + `mcp_call`
+pair, which works on every provider:
+
+1. `mcp_search(query="read file")` → returns `{"ref":"files:read_file","parameters":{...}}`
+2. `mcp_call(ref="files:read_file", arguments={"path":"/etc/hosts"})` → executes the tool
+
+The legacy `tool_list` / `tool_search` / `tool_schema` tools still work for
+inspection, but they return text the model must then act on — they do not
+make the tool callable. Always use `mcp_search` + `mcp_call` for execution.
+If `mcp_call` returns `STALE_TOOL_REF`, the server was disabled or restarted
+since the search; run `mcp_search` again and retry.
 When at least one ACP agent is enabled, the interactive toolbox also advertises
 `subagent`, `subagent_steer`, `subagent_stop`, and `subagent_wait`. ACP agents
 do not receive this conversation, NusaShell MCP plugins, or shell meta-tools.
@@ -201,19 +211,18 @@ re-saving or deleting the server drops the connection.
 
 ### MCP tool discovery workflow
 
-MCP tools are not advertised in `tools[]`. Discover, check the schema, then
-call by name — never guess a tool name or schema.
+MCP tools are not advertised in `tools[]`. Use the universal `mcp_search` +
+`mcp_call` pair to discover and execute — never guess a tool name or schema.
 
 Good example:
 
-    tool_list(server="Files")                    # → {"name":"mcp__Files__read","server":"Files","description":"Read file"}
-    tool_schema(server="Files", tool="read")     # → {"name":"read","description":"Read file","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File path"}},"required":["path"]}}
-    mcp__Files__read({path: "/home/user/a.txt"})
+    mcp_search(query="read file")                # → {"ref":"Files:read","name":"read","server":"Files","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}
+    mcp_call(ref="Files:read", arguments={"path": "/home/user/a.txt"})
 
 Bad examples:
 
-    mcp__files__read_file({path: "a.txt"})       # guessed name + relative path
+    mcp__files__read_file({path: "a.txt"})       # guessed name — not in tools[], not callable
 
-    mcp__files__read({path: "a.txt"})            # skipped discovery, relative path
+    mcp_call(ref="Files:read", arguments={})  # ref from a previous search; server restarted → STALE_TOOL_REF
 
     tool_list()                                   # called every round to re-check

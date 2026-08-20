@@ -76,6 +76,7 @@ func TestIsUntrustedTool(t *testing.T) {
 		want bool
 	}{
 		{"mcp__server__tool", true},
+		{"mcp_call", true},
 		{"docs_search", true},
 		{"docs_read", true},
 		{"memory_save", false},

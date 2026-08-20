@@ -74,6 +74,7 @@ type stubMCP struct {
 	running      map[string]bool                   // serverID -> running
 	lastServerID string
 	lastTool     string
+	lastArgs     map[string]any
 	connectCount int             // incremented on each Connect call
 	connected    map[string]bool // serverID -> connected (set by Connect)
 }
@@ -106,6 +107,7 @@ func (m *stubMCP) ToolsFor(serverID string) ([]contracts.MCPToolDTO, bool) {
 func (m *stubMCP) CallTool(ctx context.Context, serverID, toolName string, args map[string]any) (string, error) {
 	m.lastServerID = serverID
 	m.lastTool = toolName
+	m.lastArgs = args
 	return "ok", nil
 }
 
@@ -494,6 +496,149 @@ func TestToolSchema(t *testing.T) {
 	}
 	if !strings.Contains(out, `"required":["title"]`) {
 		t.Errorf("expected required array in JSONL, got: %s", out)
+	}
+}
+
+func TestMcpSearchAllServers(t *testing.T) {
+	tb := testToolbox(nil,
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "github", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+			{Manifest: domain.PluginManifest{ID: "srv2", Name: "files", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+		},
+		&stubMCP{
+			tools: map[string][]contracts.MCPToolDTO{
+				"plugin:srv1": {
+					{Name: "create_issue", Description: "Create a GitHub issue"},
+				},
+				"plugin:srv2": {
+					{Name: "read_file", Description: "Read a file from disk", InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`)},
+					{Name: "list_files", Description: "List files in a directory"},
+				},
+			},
+		},
+	)
+	out, err := tb.Execute(context.Background(), "mcp_search", []byte(`{"query":"file"}`))
+	if err != nil {
+		t.Fatalf("mcp_search: %v", err)
+	}
+	if !strings.Contains(out, "count: 2") {
+		t.Errorf("expected 2 matches, got: %s", out)
+	}
+	// mcp_search must return a ref the model can pass to mcp_call.
+	if !strings.Contains(out, `"ref":"files:read_file"`) {
+		t.Errorf("expected ref files:read_file, got: %s", out)
+	}
+	if !strings.Contains(out, `"ref":"files:list_files"`) {
+		t.Errorf("expected ref files:list_files, got: %s", out)
+	}
+	if strings.Contains(out, "create_issue") {
+		t.Errorf("github tool should not match 'file' query, got: %s", out)
+	}
+	// Full parameters must be included so the model knows how to call.
+	if !strings.Contains(out, `"parameters"`) || !strings.Contains(out, `"path"`) {
+		t.Errorf("expected parameters with path field, got: %s", out)
+	}
+}
+
+func TestMcpSearchWithServer(t *testing.T) {
+	tb := testToolbox(nil,
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "github", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+			{Manifest: domain.PluginManifest{ID: "srv2", Name: "files", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+		},
+		&stubMCP{
+			tools: map[string][]contracts.MCPToolDTO{
+				"plugin:srv1": {{Name: "create_issue", Description: "Create a GitHub issue"}},
+				"plugin:srv2": {{Name: "read_file", Description: "Read a file"}},
+			},
+		},
+	)
+	out, err := tb.Execute(context.Background(), "mcp_search", []byte(`{"server":"github","query":"issue"}`))
+	if err != nil {
+		t.Fatalf("mcp_search: %v", err)
+	}
+	if !strings.Contains(out, "count: 1") {
+		t.Errorf("expected 1 match, got: %s", out)
+	}
+	if !strings.Contains(out, `"ref":"github:create_issue"`) {
+		t.Errorf("expected ref github:create_issue, got: %s", out)
+	}
+}
+
+func TestMcpSearchEmptyQuery(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	_, err := tb.Execute(context.Background(), "mcp_search", []byte(`{"query":""}`))
+	if err == nil {
+		t.Error("expected error for empty query")
+	}
+}
+
+func TestMcpCallExecutes(t *testing.T) {
+	mcp := &stubMCP{
+		tools: map[string][]contracts.MCPToolDTO{
+			"plugin:srv1": {{Name: "read_file", Description: "Read a file", InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`)}},
+		},
+	}
+	tb := testToolbox(nil,
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "files", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+		},
+		mcp,
+	)
+	out, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"files:read_file","arguments":{"path":"/etc/hosts"}}`))
+	if err != nil {
+		t.Fatalf("mcp_call: %v", err)
+	}
+	if !strings.Contains(out, "ok") {
+		t.Errorf("expected tool output, got: %s", out)
+	}
+	if mcp.lastServerID != "plugin:srv1" {
+		t.Errorf("expected serverID plugin:srv1, got %s", mcp.lastServerID)
+	}
+	if mcp.lastTool != "read_file" {
+		t.Errorf("expected tool read_file, got %s", mcp.lastTool)
+	}
+	if mcp.lastArgs["path"] != "/etc/hosts" {
+		t.Errorf("expected path argument passed through, got %v", mcp.lastArgs)
+	}
+}
+
+func TestMcpCallStaleRef(t *testing.T) {
+	// Server was connected when searched, but disconnected before mcp_call.
+	mcp := &stubMCP{
+		tools: map[string][]contracts.MCPToolDTO{
+			"plugin:srv1": {{Name: "read_file", Description: "Read a file"}},
+		},
+		connected: map[string]bool{}, // strict mode: nothing connected
+	}
+	tb := testToolbox(nil,
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "files", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+		},
+		mcp,
+	)
+	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"files:read_file","arguments":{}}`))
+	if err == nil {
+		t.Fatal("expected error for stale ref")
+	}
+	if !strings.Contains(err.Error(), "not running") && !strings.Contains(err.Error(), "STALE") {
+		t.Errorf("expected stale/not-running error, got %v", err)
+	}
+}
+
+func TestMcpCallMalformedRef(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"not_a_valid_ref","arguments":{}}`))
+	if err == nil {
+		t.Fatal("expected error for malformed ref")
+	}
+}
+
+func TestMcpCallMissingRef(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"arguments":{}}`))
+	if err == nil {
+		t.Fatal("expected error for missing ref")
 	}
 }
 
