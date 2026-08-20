@@ -60,7 +60,7 @@ Good example:
     mcp_list()                                       # → {"name":"Files","id":"nusashell.files","running":false,"tools":0}
     mcp_enable(id="nusashell.files")                 # → {"status":"enabled","tools":3} (status + count only)
     mcp_search(query="read file")                    # → {"ref":"Files:read","name":"read","server":"Files","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}} (JSONL)
-    mcp_call(ref="Files:read", arguments={"path": "/home/user/a.txt"})  # executes the tool
+    mcp_call(ref="Files:read", arguments_json="{\"path\": \"/home/user/a.txt\"}")  # executes the tool
 
 `mcp_enable` returns only status + tool count — it does NOT dump tool
 definitions. After `mcp_enable`, call `mcp_search` to discover the tools
@@ -91,7 +91,7 @@ Bad example — writing the tool call as text instead of using `mcp_call`:
     {"path":"/home/user/a.txt"}
 
     # RIGHT — use mcp_call with the ref from mcp_search:
-    mcp_call(ref="Files:read", arguments={"path": "/home/user/a.txt"})
+    mcp_call(ref="Files:read", arguments_json="{\"path\": \"/home/user/a.txt\"}")
 
 The Plugins view is the single catalog for all plugins: manual MCP
 servers, MCP-only plugins, and MCP + UI plugins. Select an entry to test,

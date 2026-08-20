@@ -335,11 +335,17 @@ export function renderToolJob(toolCall) {
   const card = el('details', { class: 'agent-tool-terminal' });
   const name = toolCall.name || 'tool';
   const isMcp = name.startsWith('mcp__');
-  const displayName = isMcp ? name.replace(/^mcp__/, '').replace(/__/g, ' · ') : name;
+  const isMcpCall = name === 'mcp_call';
+  const mcpRef = isMcpCall ? parseMcpCallRef(toolCall.args) : null;
+  const displayName = isMcp
+    ? name.replace(/^mcp__/, '').replace(/__/g, ' · ')
+    : isMcpCall && mcpRef
+      ? mcpRef.replace(':', ' · ')
+      : name;
   const summary = el('summary', {},
     el('span', { class: 'agent-tool-terminal-prompt', text: '›_' }),
     el('span', { class: 'agent-tool-terminal-title', text: displayName }),
-    isMcp ? el('span', { class: 'agent-tool-terminal-badge', text: 'MCP' }) : null,
+    (isMcp || isMcpCall) ? el('span', { class: 'agent-tool-terminal-badge', text: 'MCP' }) : null,
     el('span', { class: 'agent-tool-terminal-meta', text: toolTerminalMeta(toolCall) }),
     el('span', { class: 'agent-tool-elapsed', text: toolCall.elapsed ? formatElapsed(toolCall.elapsed) : '' }),
     el('span', { class: 'agent-tool-terminal-chevron', text: '⌄' }),
@@ -349,6 +355,7 @@ export function renderToolJob(toolCall) {
     toolTerminalPanel('Output', 'agent-tool-terminal-output', toolTerminalOutput(toolCall)),
   );
   card._toolArgs = toolCall.args;
+  card._toolName = name;
   card.append(summary, body);
   setToolTerminalStatus(card, toolCall.status || 'running');
   return card;
@@ -363,7 +370,12 @@ export function formatElapsed(seconds) {
 
 export function toolTerminalMeta(toolCall) {
   const status = toolCall.status || 'running';
-  return status === 'running' ? 'Running' : summarizeToolArgs(toolCall.args) || (status === 'fail' ? 'Failed' : 'Completed');
+  if (status === 'running') return 'Running';
+  if (toolCall.name === 'mcp_call') {
+    const inner = summarizeMcpCallArgs(toolCall.args);
+    if (inner) return inner;
+  }
+  return summarizeToolArgs(toolCall.args) || (status === 'fail' ? 'Failed' : 'Completed');
 }
 
 export function toolTerminalOutput(toolCall) {
@@ -396,6 +408,25 @@ function toolTerminalPanel(label, codeClass, text) {
     el('div', { class: 'agent-tool-terminal-panel-label', text: label }),
     el('pre', { class: codeClass, text }),
   );
+}
+
+function parseToolArgs(args) {
+  if (!args) return {};
+  if (typeof args === 'string') { try { return JSON.parse(args); } catch { return {}; } }
+  if (typeof args === 'object' && !Array.isArray(args)) return args;
+  return {};
+}
+
+function parseMcpCallRef(args) {
+  const parsed = parseToolArgs(args);
+  return parsed.ref || null;
+}
+
+function summarizeMcpCallArgs(args) {
+  const parsed = parseToolArgs(args);
+  const inner = parsed.arguments_json;
+  if (!inner) return '';
+  return summarizeToolArgs(parseToolArgs(inner));
 }
 
 function summarizeToolArgs(args) {

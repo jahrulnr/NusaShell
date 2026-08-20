@@ -25,7 +25,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `tool_search` | search running MCP servers' tools by name or description; when server is omitted, searches across ALL running servers; returns full tool definitions (name, server, description, parameters) so you can call the tool directly without a follow-up `tool_schema` |
 | `tool_schema` | load one MCP tool's full definition as a single JSONL line (name, description, parameters with type/properties/required) before calling it; accepts server name, plugin id, or MCP server id |
 | `mcp_search` | universal MCP tool discovery — search running MCP servers by name or description (token match); returns a `ref` plus the full `parameters` schema for each match; pass the `ref` to `mcp_call` to execute; always prefer `mcp_search` + `mcp_call` over guessing `mcp__<server>__<tool>` names |
-| `mcp_call` | universal MCP tool execution — run a tool by `ref` (from `mcp_search`) with `arguments` matching the tool's parameters schema; returns a `STALE_TOOL_REF` error if the server was disabled/restarted since the search (re-search and retry) |
+| `mcp_call` | universal MCP tool execution — run a tool by `ref` (from `mcp_search`) with `arguments_json` (a JSON-encoded string of the arguments matching the tool's parameters schema); returns a `STALE_TOOL_REF` error if the server was disabled/restarted since the search (re-search and retry) |
 | `mcp_register` | copy a plugin from an absolute staging folder outside the installed plugins root; check inventory and ask before replacing an existing id |
 | `mcp_enable` | connect an installed plugin so its tools become available; returns only status + tool count — follow with `tool_list` or `tool_search` to discover tools; returns `already_enabled` if already connected (no reconnect) — do not re-call |
 | `mcp_disable` | stop a plugin without uninstalling it |
@@ -122,7 +122,7 @@ discovers and calls MCP tools via the universal `mcp_search` + `mcp_call`
 pair, which works on every provider:
 
 1. `mcp_search(query="read file")` → returns `{"ref":"files:read_file","parameters":{...}}`
-2. `mcp_call(ref="files:read_file", arguments={"path":"/etc/hosts"})` → executes the tool
+2. `mcp_call(ref="files:read_file", arguments_json="{\"path\":\"/etc/hosts\"}")` → executes the tool
 
 The legacy `tool_list` / `tool_search` / `tool_schema` tools still work for
 inspection, but they return text the model must then act on — they do not
@@ -217,12 +217,14 @@ MCP tools are not advertised in `tools[]`. Use the universal `mcp_search` +
 Good example:
 
     mcp_search(query="read file")                # → {"ref":"Files:read","name":"read","server":"Files","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}
-    mcp_call(ref="Files:read", arguments={"path": "/home/user/a.txt"})
+    mcp_call(ref="Files:read", arguments_json="{\"path\": \"/home/user/a.txt\"}")
 
 Bad examples:
 
     mcp__files__read_file({path: "a.txt"})       # guessed name — not in tools[], not callable
 
-    mcp_call(ref="Files:read", arguments={})  # ref from a previous search; server restarted → STALE_TOOL_REF
+    mcp_call(ref="Files:read", arguments_json="{}")  # empty payload — the tool requires path
+
+    mcp_call(ref="Files:read")                   # missing arguments_json — schema requires it
 
     tool_list()                                   # called every round to re-check

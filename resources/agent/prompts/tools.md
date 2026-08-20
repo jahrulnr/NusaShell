@@ -31,12 +31,14 @@ or illustrative tool name exists.
 - Use `mcp_list` when plugin state is unknown or changed. If a plugin shows
   `running: false`, call `mcp_enable` to start it (returns status + count
   only). Then discover tools with `mcp_search` (returns a `ref` plus full
-  definitions with parameters), and execute with `mcp_call(ref, arguments)`
-  — do NOT write the call as text and do NOT guess `mcp__<server>__<tool>`
-  names. If `mcp_call` returns `STALE_TOOL_REF`, the server was disabled or
-  restarted since the search; run `mcp_search` again and retry. Use
-  `tool_schema` only when you need the exact argument shape for a single
-  tool.
+  definitions with parameters), and execute with
+  `mcp_call(ref, arguments_json)` — pass `arguments_json` as a JSON-encoded
+  string of the arguments matching the discovered parameters schema, e.g.
+  `arguments_json="{\"path\":\"/etc/hosts\"}"`. Do NOT write the call as
+  text and do NOT guess `mcp__<server>__<tool>` names. If `mcp_call`
+  returns `STALE_TOOL_REF`, the server was disabled or restarted since the
+  search; run `mcp_search` again and retry. Use `tool_schema` only when you
+  need the exact argument shape for a single tool.
 - Use `ask_question` only when progress requires a real user decision. Search
   with `memory_search` before saving a durable fact with `memory_save`.
 

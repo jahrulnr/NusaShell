@@ -141,7 +141,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "tool_search", Description: "Search running MCP servers' tools by name or description (case-insensitive token match — any term matches). When server is omitted, searches across ALL running MCP servers. Returns matching tools with their full input schema (name, server, description, parameters) so you can call them directly without a follow-up tool_schema call.", InputSchema: obj("object", props("server", str("Optional: server name, plugin id, or MCP server id; when omitted, searches all running servers"), "query", str("Search query")), "query")},
 		{Name: "tool_schema", Description: "Load one MCP tool's input schema by server and tool name. Accepts the server name (e.g. \"Terminal\"), the plugin id (e.g. \"nusashell.terminal\"), or the MCP server id. The tool name is the bare tool name (e.g. \"exec\"), not the mcp__ prefixed form. Returns the schema as readable JSON so you know exact field names and types before calling the tool.", InputSchema: obj("object", props("server", str("Server name, plugin id, or MCP server id"), "tool", str("Bare tool name within the server (e.g. \"exec\")")), "server", "tool")},
 		{Name: "mcp_search", Description: "Search running MCP servers' tools by name or description (case-insensitive token match — any term matches). When server is omitted, searches across ALL running MCP servers. Returns matching tools with a `ref` you pass to `mcp_call` plus the full input schema (parameters) so you know exactly how to call the tool. This is the universal MCP discovery path that works on every provider — always use mcp_search + mcp_call instead of guessing mcp__<server>__<tool> names.", InputSchema: obj("object", props("server", str("Optional: server name, plugin id, or MCP server id; when omitted, searches all running servers"), "query", str("Search query"), "limit", intSchema("Max results, default 20")), "query")},
-		{Name: "mcp_call", Description: "Execute an MCP tool by ref. Get the ref from mcp_search (the `ref` field in the results, format <server>:<tool> e.g. files:read_file), then pass `arguments` matching the tool's parameters schema. The ref binds to a specific running MCP server + tool; if the server has been disabled or restarted since the search, you get a STALE_TOOL_REF error and must mcp_search again. This is the universal MCP execution path — always use mcp_call instead of calling mcp__<server>__<tool> directly.", InputSchema: obj("object", props("ref", str("Tool ref from mcp_search results (e.g. files:read_file)"), "arguments", obj("object", props("additional", str("Tool arguments matching the parameters schema from mcp_search")), "additional")), "ref", "arguments")},
+		{Name: "mcp_call", Description: "Execute an MCP tool by ref. Get the ref from mcp_search (the `ref` field in the results, format <server>:<tool> e.g. files:read_file). Pass `arguments_json` as a JSON-encoded string of the arguments matching the tool's parameters schema from mcp_search — the exact object that the tool expects as its input, e.g. {\"path\":\"/etc/hosts\"}. The ref binds to a specific running MCP server + tool; if the server has been disabled or restarted since the search, you get a STALE_TOOL_REF error and must mcp_search again. This is the universal MCP execution path — always use mcp_call instead of calling mcp__<server>__<tool> directly.", InputSchema: obj("object", props("ref", str("Tool ref from mcp_search results (e.g. files:read_file)"), "arguments_json", str("JSON-encoded tool arguments matching the parameters schema from mcp_search (e.g. {\"path\":\"/etc/hosts\"})")), "ref", "arguments_json")},
 		{Name: "mcp_register", Description: "Copy a new MCP plugin from an absolute staging folder into the installed plugin store, or replace an existing plugin with the same id. The source must contain manifest.json and must stay outside the installed plugins root. Check mcp_list and ask the user before replacing an existing id; then call mcp_enable.", InputSchema: obj("object", props("source", str("Absolute staging path to the plugin folder containing manifest.json")), "source")},
 		{Name: "mcp_enable", Description: "Start/connect an MCP plugin so its tools become available. Returns only status + tool count — use tool_list or tool_search to discover the tools, then tool_schema for exact parameters. If already connected, returns already_enabled without reconnecting. The plugin must be registered first (mcp_register or the Plugins view).", InputSchema: obj("object", props("id", str("Plugin id (e.g. nusashell.files)")), "id")},
 		{Name: "mcp_disable", Description: "Stop/disconnect an MCP plugin. The definition stays installed; only the MCP subprocess is stopped. Tools from this server are no longer listed.", InputSchema: obj("object", props("id", str("Plugin id")), "id")},
@@ -1014,14 +1014,21 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 
 	case name == "mcp_call":
 		var args struct {
-			Ref       string         `json:"ref"`
-			Arguments map[string]any `json:"arguments"`
+			Ref           string `json:"ref"`
+			ArgumentsJSON string `json:"arguments_json"`
 		}
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return "", fmt.Errorf("invalid args: %w", err)
 		}
 		if strings.TrimSpace(args.Ref) == "" {
 			return "", fmt.Errorf("ref is required (use mcp_search to find tools and their refs)")
+		}
+		if strings.TrimSpace(args.ArgumentsJSON) == "" {
+			return "", fmt.Errorf("arguments_json is required (JSON-encoded tool arguments from the mcp_search parameters schema)")
+		}
+		var toolArgs map[string]any
+		if err := json.Unmarshal([]byte(args.ArgumentsJSON), &toolArgs); err != nil {
+			return "", fmt.Errorf("arguments_json must be a JSON object (e.g. {\"path\":\"/etc/hosts\"}): %v", err)
 		}
 		idx := strings.LastIndex(args.Ref, ":")
 		if idx <= 0 || idx == len(args.Ref)-1 {
@@ -1057,7 +1064,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if !toolExists {
 			return "", fmt.Errorf("STALE_TOOL_REF: tool %q not found on server %q; call mcp_search again", toolName, plugin.Manifest.Name)
 		}
-		return t.MCP.CallTool(ctx, plugin.Manifest.MCPServerID(), toolName, args.Arguments)
+		return t.MCP.CallTool(ctx, plugin.Manifest.MCPServerID(), toolName, toolArgs)
 
 	case name == "subagent":
 		if t.Acp == nil {

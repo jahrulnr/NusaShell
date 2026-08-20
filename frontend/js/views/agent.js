@@ -1529,7 +1529,7 @@ function bindEvents() {
     }
     // Clear the elapsed timer — the final duration stays displayed.
     if (job._elapsedTimer) { clearInterval(job._elapsedTimer); job._elapsedTimer = null; }
-    const next = { name: job.querySelector('.agent-tool-terminal-title')?.textContent, args: job._toolArgs, status: status || 'ok', output };
+    const next = { name: job._toolName || name, args: job._toolArgs, status: status || 'ok', output };
     setToolTerminalStatus(job, next.status);
     job.open = false;
     const meta = job.querySelector('.agent-tool-terminal-meta');

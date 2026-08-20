@@ -585,7 +585,7 @@ func TestMcpCallExecutes(t *testing.T) {
 		},
 		mcp,
 	)
-	out, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"files:read_file","arguments":{"path":"/etc/hosts"}}`))
+	out, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"files:read_file","arguments_json":"{\"path\":\"/etc/hosts\"}"}`))
 	if err != nil {
 		t.Fatalf("mcp_call: %v", err)
 	}
@@ -617,7 +617,7 @@ func TestMcpCallStaleRef(t *testing.T) {
 		},
 		mcp,
 	)
-	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"files:read_file","arguments":{}}`))
+	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"files:read_file","arguments_json":"{}"}`))
 	if err == nil {
 		t.Fatal("expected error for stale ref")
 	}
@@ -628,7 +628,7 @@ func TestMcpCallStaleRef(t *testing.T) {
 
 func TestMcpCallMalformedRef(t *testing.T) {
 	tb := testToolbox(nil, nil, &stubMCP{})
-	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"not_a_valid_ref","arguments":{}}`))
+	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"not_a_valid_ref","arguments_json":"{}"}`))
 	if err == nil {
 		t.Fatal("expected error for malformed ref")
 	}
@@ -636,9 +636,142 @@ func TestMcpCallMalformedRef(t *testing.T) {
 
 func TestMcpCallMissingRef(t *testing.T) {
 	tb := testToolbox(nil, nil, &stubMCP{})
-	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"arguments":{}}`))
+	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"arguments_json":"{}"}`))
 	if err == nil {
 		t.Fatal("expected error for missing ref")
+	}
+}
+
+func TestMcpCallMissingArgumentsJSON(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"files:read"}`))
+	if err == nil {
+		t.Fatal("expected error for missing arguments_json")
+	}
+	if !strings.Contains(err.Error(), "arguments_json") {
+		t.Errorf("expected arguments_json error, got %v", err)
+	}
+}
+
+func TestMcpCallInvalidArgumentsJSON(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"files:read","arguments_json":"not json"}`))
+	if err == nil {
+		t.Fatal("expected error for invalid arguments_json")
+	}
+}
+
+// TestMcpCallSchemaAdvertisesArgumentsJSON is a regression test for
+// conv_f159e2e234a900e4 + conv_cefd2640b3b2f3a4 + conv_42ac5a9a2b274518:
+// dynamic MCP tool arguments must travel in a statically representable
+// string field. The original schema wrapped args in a required "additional"
+// string; the open-object variant (additionalProperties:true, no fixed
+// properties) made Luna emit arguments:{} every round because function-call
+// generation has no affordance for properties absent from the schema. The
+// schema must require arguments_json (a JSON-encoded string of the MCP
+// tool's parameters) so the model always produces a payload.
+func TestMcpCallSchemaAdvertisesArgumentsJSON(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	var def *application.ToolInfo
+	for _, ti := range tb.ListTools() {
+		if ti.Name == "mcp_call" {
+			def = &ti
+			break
+		}
+	}
+	if def == nil {
+		t.Fatal("mcp_call not in ListTools()")
+	}
+	props := def.InputSchema["properties"].(map[string]any)
+	argsSchema, ok := props["arguments_json"].(map[string]any)
+	if !ok {
+		t.Fatalf("arguments_json schema missing or wrong type: %#v", props)
+	}
+	if argsSchema["type"] != "string" {
+		t.Errorf("arguments_json.type = %v, want string", argsSchema["type"])
+	}
+	if _, hasObjectArgs := props["arguments"]; hasObjectArgs {
+		t.Errorf("mcp_call must not advertise an object 'arguments' field, got %#v", props)
+	}
+	reqAny, ok := def.InputSchema["required"].([]any)
+	if !ok {
+		reqStrings, ok2 := def.InputSchema["required"].([]string)
+		if !ok2 || len(reqStrings) == 0 {
+			t.Fatal("mcp_call schema must declare required fields")
+		}
+		reqAny = make([]any, len(reqStrings))
+		for i, r := range reqStrings {
+			reqAny[i] = r
+		}
+	}
+	if len(reqAny) == 0 {
+		t.Fatal("mcp_call schema must declare required fields")
+	}
+	hasRef, hasArgs := false, false
+	for _, r := range reqAny {
+		switch r {
+		case "ref":
+			hasRef = true
+		case "arguments_json":
+			hasArgs = true
+		}
+	}
+	if !hasRef || !hasArgs {
+		t.Errorf("required must include ref and arguments_json, got %v", reqAny)
+	}
+}
+
+func TestMcpCallPassesArgumentsJSONThrough(t *testing.T) {
+	// End-to-end: the arguments_json string is parsed and its keys reach
+	// the MCP server unchanged — no additional wrapper, no empty object.
+	mcp := &stubMCP{
+		tools: map[string][]contracts.MCPToolDTO{
+			"plugin:srv1": {{Name: "read", Description: "Read a file", InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`)}},
+		},
+	}
+	tb := testToolbox(nil,
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "files", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+		},
+		mcp,
+	)
+	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"files:read","arguments_json":"{\"path\":\"/etc/hosts\",\"offset\":0}"}`))
+	if err != nil {
+		t.Fatalf("mcp_call: %v", err)
+	}
+	if mcp.lastArgs["path"] != "/etc/hosts" {
+		t.Errorf("expected path=/etc/hosts passed through, got %v", mcp.lastArgs)
+	}
+	if mcp.lastArgs["offset"] != float64(0) {
+		t.Errorf("expected offset=0 passed through, got %v", mcp.lastArgs)
+	}
+	if _, hasAdditional := mcp.lastArgs["additional"]; hasAdditional {
+		t.Errorf("arguments.additional wrapper leaked to MCP server: %v", mcp.lastArgs)
+	}
+}
+
+func TestMcpCallEmptyArgumentsJSON(t *testing.T) {
+	// Tools that need no arguments still work with an empty object payload.
+	mcp := &stubMCP{
+		tools: map[string][]contracts.MCPToolDTO{
+			"plugin:srv1": {{Name: "list", Description: "List things"}},
+		},
+	}
+	tb := testToolbox(nil,
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "files", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+		},
+		mcp,
+	)
+	out, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"files:list","arguments_json":"{}"}`))
+	if err != nil {
+		t.Fatalf("mcp_call: %v", err)
+	}
+	if !strings.Contains(out, "ok") {
+		t.Errorf("expected tool output, got: %s", out)
+	}
+	if mcp.lastArgs == nil {
+		t.Error("expected empty args map, got nil")
 	}
 }
 
