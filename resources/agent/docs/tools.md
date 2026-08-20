@@ -21,11 +21,11 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `docs_search` | search the product documentation when the page id is unknown |
 | `docs_read` | read a documentation page by canonical extensionless id; a `.md` suffix is accepted as a compatibility alias |
 | `mcp_list` | list all plugins (MCP servers) with runtime state: every plugin appears, running or idle |
-| `tool_list` | list tools from a running MCP server; accepts server name, plugin id, or MCP server id; not needed after `mcp_enable` (which already returns tool names) |
-| `tool_search` | search a running MCP server's tools by name or description |
+| `tool_list` | list tools from a running MCP server; accepts server name, plugin id, or MCP server id; returns full tool defs (name, server, description, parameters) — call after `mcp_enable` to discover tools |
+| `tool_search` | search running MCP servers' tools by name or description; when server is omitted, searches across ALL running servers; returns full tool definitions (name, server, description, parameters) so you can call the tool directly without a follow-up `tool_schema` |
 | `tool_schema` | load one MCP tool's full definition as a single JSONL line (name, description, parameters with type/properties/required) before calling it; accepts server name, plugin id, or MCP server id |
 | `mcp_register` | copy a plugin from an absolute staging folder outside the installed plugins root; check inventory and ask before replacing an existing id |
-| `mcp_enable` | connect an installed plugin and load its MCP tools; returns tool names + descriptions — call tools directly, no `tool_list` needed |
+| `mcp_enable` | connect an installed plugin so its tools become available; returns only status + tool count — follow with `tool_list` or `tool_search` to discover tools; returns `already_enabled` if already connected (no reconnect) — do not re-call |
 | `mcp_disable` | stop a plugin without uninstalling it |
 | `mcp_unregister` | permanently delete an installed plugin; ask first and use `mcp_disable` when it only needs to stop |
 | `mcp_install` | install a plugin from the curated catalog or GitHub |

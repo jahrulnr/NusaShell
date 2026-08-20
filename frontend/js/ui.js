@@ -116,6 +116,20 @@ export function dialog({ title, message, fields = [], actions = [{ label: 'Cance
         input.value = field.value ?? '';
       } else if (field.tag === 'select') {
         input = el('select', { class: 'slim-select', disabled: field.disabled === true });
+      } else {
+        input = el('input', { type: field.type ?? 'text', placeholder: field.placeholder ?? '', value: field.value ?? '' });
+      }
+      values[field.name] = input;
+      if (field.tag !== 'select' && typeof field.onChange === 'function') {
+        input.addEventListener('change', () => field.onChange(input, values));
+      }
+      // Append the field to the DOM BEFORE initializing SlimSelect.
+      // SlimSelect inserts .ss-main as a sibling of the <select> via
+      // parentNode.insertBefore — if the select is detached (no parent),
+      // .ss-main is never attached and the field appears empty.
+      const fieldEl = el('label', { class: 'ui-dialog-field' }, field.label, input);
+      body.append(fieldEl);
+      if (field.tag === 'select') {
         const data = (field.options ?? []).map((o) => {
           const opt = typeof o === 'object' ? o : { value: o, label: o };
           return { text: opt.label, value: opt.value };
@@ -137,15 +151,8 @@ export function dialog({ title, message, fields = [], actions = [{ label: 'Cance
           },
         });
         if (selected) ss.setSelected([selected]);
-        slimInstances.push(input);
-      } else {
-        input = el('input', { type: field.type ?? 'text', placeholder: field.placeholder ?? '', value: field.value ?? '' });
+        slimInstances.push(ss);
       }
-      values[field.name] = input;
-      if (field.tag !== 'select' && typeof field.onChange === 'function') {
-        input.addEventListener('change', () => field.onChange(input, values));
-      }
-      body.append(el('label', { class: 'ui-dialog-field' }, field.label, input));
     }
     const actionBtns = actions.map((a) => {
       const btn = el('button', {

@@ -1,10 +1,13 @@
 ## Tool and context protocol
 
-`tools[]` lists built-in tools. MCP plugin tools are not listed there but are
-callable by name. For the MCP discovery workflow, `docs_read` the `mcp` page.
-For media attachments (image/audio/video), `docs_read` the `agent-attachments`
-page. For pipelines, automations, and CI runs, `docs_read` the `automation`
-page.
+`tools[]` lists built-in tools only. You will not see MCP plugin tools in
+`tools[]`, but you can emit `tool_calls` for them by name
+(`mcp__<server>__<tool>`) once their schema is available from discovery
+— the runtime accepts and executes them. Do NOT write tool calls as text
+in your reply; always use the `tool_calls` mechanism. For the MCP
+discovery workflow, `docs_read` the `mcp` page. For media attachments
+(image/audio/video), `docs_read` the `agent-attachments` page. For
+pipelines, automations, and CI runs, `docs_read` the `automation` page.
 
 `mcp_list`, discovery tools, docs, skills, memory, TODOs, jobs, pipelines,
 automations, schedules, and `ask_question` are shell meta-tools, not MCP
@@ -24,9 +27,13 @@ or illustrative tool name exists.
 - Use `web_search` for fresh external information, then `web_fetch` only for
   promising result URLs. Use `web_answer` only when it is available and a
   synthesized web-grounded answer is preferable to source inspection.
-- Use `mcp_list` when plugin state is unknown or changed, then discover with
-  `tool_list` or `tool_search`, load the exact schema with `tool_schema`, and
-  call the discovered MCP tool by name.
+- Use `mcp_list` when plugin state is unknown or changed. If a plugin shows
+  `running: false`, call `mcp_enable` to start it (returns status + count
+  only). Then discover tools with `tool_list` or `tool_search` (both return
+  full definitions with parameters), and emit a `tool_calls` entry for the
+  `mcp__<server>__<tool>` name with the parameters from the discovery
+  result — do NOT write the call as text. Use `tool_schema` only when you
+  need the exact argument shape for a single tool.
 - Use `ask_question` only when progress requires a real user decision. Search
   with `memory_search` before saving a durable fact with `memory_save`.
 

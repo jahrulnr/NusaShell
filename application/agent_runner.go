@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -501,9 +502,8 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 	toolRounds := 0
 	continuation := initialContinuation
 	continuedPartialStream := initialContinuation
-	compactedOverflow := false   // safety net: emergency-compact once on context overflow
-	repeatedToolCount := 0       // guard: detect identical repeated tool calls
-	var lastToolSignature string // guard: "name|args" of the last single-tool round
+	compactedOverflow := false // safety net: emergency-compact once on context overflow
+	repeatedGuard := &repeatedToolGuard{limit: settings.RepeatedToolLimit}
 	// injectHydration lets the first round create a checkpoint when the current
 	// history epoch has none, normally initially or after compaction. Existing
 	// checkpoints are reused across normal user messages and steers. The flag is
@@ -663,28 +663,16 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 		}
 		toolRounds++
 
-		// Repeated-tool-call guard: if the model calls a single tool with the
-		// same arguments multiple rounds in a row without producing any text,
-		// it is stuck in a loop. Break the cycle by stripping tools for the
-		// next round so the model is forced to respond with text.
+		// Repeated-tool-call guard: if the model calls the same set of tools
+		// with the same arguments multiple rounds in a row without producing
+		// any text, it is stuck in a loop. This catches both single-tool and
+		// parallel-tool loops (e.g. GPT-5.6 Luna re-enabling 6 MCP plugins
+		// every round). Break the cycle by stripping tools for the next round
+		// so the model is forced to respond with text.
 		// RepeatedToolLimit = 0 disables the guard.
-		if settings.RepeatedToolLimit > 0 && len(roundResult.Response.ToolCalls) == 1 && roundResult.Content == "" {
-			sig := roundResult.Response.ToolCalls[0].Name + "|" + roundResult.Response.ToolCalls[0].Args
-			if sig == lastToolSignature {
-				repeatedToolCount++
-			} else {
-				repeatedToolCount = 1
-				lastToolSignature = sig
-			}
-			if repeatedToolCount >= settings.RepeatedToolLimit {
-				a.log("warn", "agent", "turn %s: detected repeated tool call %s (%dx), forcing text-only round", run.ID, roundResult.Response.ToolCalls[0].Name, repeatedToolCount)
-				toolRounds = settings.MaxToolRounds // strip tools for next round
-				repeatedToolCount = 0
-				lastToolSignature = ""
-			}
-		} else {
-			repeatedToolCount = 0
-			lastToolSignature = ""
+		if repeatedGuard.check(roundResult.Response.ToolCalls, roundResult.Content) {
+			a.log("warn", "agent", "turn %s: detected repeated tool round (%dx identical set), forcing text-only round", run.ID, repeatedGuard.limit)
+			toolRounds = settings.MaxToolRounds // strip tools for next round
 		}
 
 		// Drain any queued steer message at this safe boundary (between tool
@@ -1384,4 +1372,56 @@ func (a *App) saveAttachmentsToDisk(conversationID string, attachments []domain.
 		}
 		att.FilePath = path
 	}
+}
+
+// toolRoundSignature returns a deterministic, order-independent signature for
+// a set of tool calls. Tools are sorted by name+args so the same set in any
+// order produces the same signature. This lets the repeated-tool guard detect
+// parallel-tool loops (e.g. GPT-5.6 Luna calling 6 mcp_enable in a different
+// order each round).
+func toolRoundSignature(calls []domain.ToolCall) string {
+	if len(calls) == 0 {
+		return ""
+	}
+	sigs := make([]string, len(calls))
+	for i, c := range calls {
+		sigs[i] = c.Name + "|" + c.Args
+	}
+	sort.Strings(sigs)
+	return strings.Join(sigs, "\n")
+}
+
+// repeatedToolGuard detects when the agent calls the same set of tools with
+// the same arguments for N consecutive rounds without producing text. When
+// the streak reaches the limit, check returns true and the caller strips
+// tools for the next round to break the loop. A round with text content or a
+// different tool signature resets the streak. limit=0 disables the guard.
+type repeatedToolGuard struct {
+	limit   int
+	streak  int
+	lastSig string
+}
+
+// check updates the guard state and returns true if the repeated-tool limit
+// has been reached (the caller should force a text-only round). After firing,
+// the guard resets so a new streak must build up before firing again.
+func (g *repeatedToolGuard) check(calls []domain.ToolCall, content string) bool {
+	if g.limit <= 0 || len(calls) == 0 || content != "" {
+		g.streak = 0
+		g.lastSig = ""
+		return false
+	}
+	sig := toolRoundSignature(calls)
+	if sig == g.lastSig {
+		g.streak++
+	} else {
+		g.streak = 1
+		g.lastSig = sig
+	}
+	if g.streak >= g.limit {
+		g.streak = 0
+		g.lastSig = ""
+		return true
+	}
+	return false
 }

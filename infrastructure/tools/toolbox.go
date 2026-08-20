@@ -138,10 +138,10 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "sleep", Description: "Pause for the given number of seconds (max 300). Use for retry backoff or to wait between polls of an async ci_run. Does not consume a provider round — the turn resumes after the pause.", InputSchema: obj("object", props("seconds", intSchema("Seconds to sleep (1-300)")), "seconds")},
 		{Name: "mcp_list", Description: "List configured MCP servers with their enabled status and runtime state (running/stopped).", InputSchema: obj("object", nil)},
 		{Name: "tool_list", Description: "List tools from a running MCP server. Accepts the server name (e.g. \"Terminal\"), the plugin id (e.g. \"nusashell.terminal\"), or the MCP server id (e.g. \"plugin:nusashell.terminal\"). When omitted, lists tools across all running MCP servers. You do NOT need to call this after mcp_enable — mcp_enable already returns the tool names.", InputSchema: obj("object", props("server", str("Server name, plugin id, or MCP server id; when omitted, lists all running servers")))},
-		{Name: "tool_search", Description: "Search a running MCP server's tools by name or description (case-insensitive token match — any term matches). Returns matching tool names and descriptions.", InputSchema: obj("object", props("server", str("MCP server name"), "query", str("Search query")), "server", "query")},
+		{Name: "tool_search", Description: "Search running MCP servers' tools by name or description (case-insensitive token match — any term matches). When server is omitted, searches across ALL running MCP servers. Returns matching tools with their full input schema (name, server, description, parameters) so you can call them directly without a follow-up tool_schema call.", InputSchema: obj("object", props("server", str("Optional: server name, plugin id, or MCP server id; when omitted, searches all running servers"), "query", str("Search query")), "query")},
 		{Name: "tool_schema", Description: "Load one MCP tool's input schema by server and tool name. Accepts the server name (e.g. \"Terminal\"), the plugin id (e.g. \"nusashell.terminal\"), or the MCP server id. The tool name is the bare tool name (e.g. \"exec\"), not the mcp__ prefixed form. Returns the schema as readable JSON so you know exact field names and types before calling the tool.", InputSchema: obj("object", props("server", str("Server name, plugin id, or MCP server id"), "tool", str("Bare tool name within the server (e.g. \"exec\")")), "server", "tool")},
 		{Name: "mcp_register", Description: "Copy a new MCP plugin from an absolute staging folder into the installed plugin store, or replace an existing plugin with the same id. The source must contain manifest.json and must stay outside the installed plugins root. Check mcp_list and ask the user before replacing an existing id; then call mcp_enable.", InputSchema: obj("object", props("source", str("Absolute staging path to the plugin folder containing manifest.json")), "source")},
-		{Name: "mcp_enable", Description: "Start/connect an MCP plugin and load its tools. Returns the tool names and descriptions so you can call them directly — no need to call tool_list after enable. The plugin must be registered first (mcp_register or the Plugins view).", InputSchema: obj("object", props("id", str("Plugin id (e.g. nusashell.files)")), "id")},
+		{Name: "mcp_enable", Description: "Start/connect an MCP plugin so its tools become available. Returns only status + tool count — use tool_list or tool_search to discover the tools, then tool_schema for exact parameters. If already connected, returns already_enabled without reconnecting. The plugin must be registered first (mcp_register or the Plugins view).", InputSchema: obj("object", props("id", str("Plugin id (e.g. nusashell.files)")), "id")},
 		{Name: "mcp_disable", Description: "Stop/disconnect an MCP plugin. The definition stays installed; only the MCP subprocess is stopped. Tools from this server are no longer listed.", InputSchema: obj("object", props("id", str("Plugin id")), "id")},
 		{Name: "mcp_unregister", Description: "Remove an MCP plugin entirely and delete its installed folder. Ask the user for confirmation first. Use mcp_disable when the plugin only needs to stop.", InputSchema: obj("object", props("id", str("Plugin id")), "id")},
 		{Name: "mcp_install", Description: "Install an MCP plugin from the curated catalog or a GitHub repository (owner/repo or URL). After install, call mcp_enable with the resulting plugin id to connect and load its tools.", InputSchema: obj("object", props("source", strEnum("Install source", "catalog", "github"), "id", str("Catalog plugin id (required when source=catalog)"), "url", str("GitHub repo URL or owner/repo shorthand (required when source=github)"), "subdir", str("Optional subdirectory inside a monorepo (github)"), "ref", str("Optional branch or tag to pin (github)")), "source")},
@@ -719,28 +719,29 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if err != nil {
 			return "", fmt.Errorf("plugin %q not found; register it first with mcp_register", args.ID)
 		}
+		// Idempotency: if the server is already connected, return a short
+		// already_enabled signal without reconnecting. The agent should use
+		// tool_list or tool_search to discover tools on an enabled server.
+		if tools, ok := t.MCP.ToolsFor(p.Manifest.MCPServerID()); ok {
+			return yamlMD(map[string]any{
+				"status": "already_enabled",
+				"id":     args.ID,
+				"server": p.Manifest.Name,
+				"tools":  len(tools),
+			}, "Plugin is already connected. Use tool_list or tool_search to discover its tools."), nil
+		}
 		ctxConn, cancelConn := context.WithTimeout(ctx, 20*time.Second)
 		defer cancelConn()
 		tools, err := t.MCP.Connect(ctxConn, p)
 		if err != nil {
 			return "", fmt.Errorf("mcp_enable %q: %w", args.ID, err)
 		}
-		// Return tool names + descriptions as JSONL so the agent can call
-		// them directly without a follow-up tool_list round-trip.
-		items := make([]any, 0, len(tools))
-		for _, tool := range tools {
-			items = append(items, map[string]any{
-				"name":        "mcp__" + p.Manifest.Name + "__" + tool.Name,
-				"description": tool.Description,
-			})
-		}
-		meta := map[string]any{
+		return yamlMD(map[string]any{
 			"status": "enabled",
 			"id":     args.ID,
 			"server": p.Manifest.Name,
 			"tools":  len(tools),
-		}
-		return yamlJSONL(meta, items), nil
+		}, "Plugin connected. Use tool_list or tool_search to discover its tools, then tool_schema for exact parameters before calling."), nil
 
 	case name == "mcp_disable":
 		var args struct {
@@ -828,10 +829,18 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				continue
 			}
 			for _, tool := range tools {
+				var schema map[string]any
+				if len(tool.InputSchema) > 0 {
+					_ = json.Unmarshal(tool.InputSchema, &schema)
+				}
+				if schema == nil {
+					schema = obj("object", nil)
+				}
 				items = append(items, map[string]any{
 					"name":        "mcp__" + p.Manifest.Name + "__" + tool.Name,
 					"server":      p.Manifest.Name,
 					"description": tool.Description,
+					"parameters":  schema,
 				})
 			}
 		}
@@ -871,14 +880,26 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				if !hit {
 					continue
 				}
+				var schema map[string]any
+				if len(tool.InputSchema) > 0 {
+					_ = json.Unmarshal(tool.InputSchema, &schema)
+				}
+				if schema == nil {
+					schema = obj("object", nil)
+				}
 				items = append(items, map[string]any{
 					"name":        "mcp__" + p.Manifest.Name + "__" + tool.Name,
 					"server":      p.Manifest.Name,
 					"description": tool.Description,
+					"parameters":  schema,
 				})
 			}
 		}
-		return yamlJSONL(map[string]any{"server": args.Server, "query": args.Query, "count": len(items)}, items), nil
+		serverLabel := args.Server
+		if serverLabel == "" {
+			serverLabel = "all"
+		}
+		return yamlJSONL(map[string]any{"server": serverLabel, "query": args.Query, "count": len(items)}, items), nil
 
 	case name == "tool_schema":
 		var args struct {

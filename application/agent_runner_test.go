@@ -407,3 +407,72 @@ func TestDiscardQueuedSteerOnFail(t *testing.T) {
 		t.Fatal("expected steer cancelled event")
 	}
 }
+
+func TestToolRoundSignatureStable(t *testing.T) {
+	// Same tools, different order → same signature (set-based, not order-dependent).
+	a := []domain.ToolCall{
+		{Name: "mcp_enable", Args: `{"id":"x"}`},
+		{Name: "tool_schema", Args: `{"server":"Files","tool":"read"}`},
+	}
+	b := []domain.ToolCall{
+		{Name: "tool_schema", Args: `{"server":"Files","tool":"read"}`},
+		{Name: "mcp_enable", Args: `{"id":"x"}`},
+	}
+	if sigA, sigB := toolRoundSignature(a), toolRoundSignature(b); sigA != sigB {
+		t.Fatalf("order-independent signature mismatch:\n  A=%q\n  B=%q", sigA, sigB)
+	}
+}
+
+func TestRepeatedToolGuardParallelLoop(t *testing.T) {
+	// Simulate GPT-5.6 Luna behavior: 6 parallel tool calls, same set
+	// every round, no text. The guard must fire after RepeatedToolLimit
+	// consecutive identical rounds.
+	const limit = 3
+	g := &repeatedToolGuard{limit: limit}
+	tools := []domain.ToolCall{
+		{Name: "mcp_enable", Args: `{"id":"nusashell.files"}`},
+		{Name: "mcp_enable", Args: `{"id":"nusashell.terminal"}`},
+		{Name: "mcp_enable", Args: `{"id":"nusashell.kanban"}`},
+		{Name: "mcp_enable", Args: `{"id":"nusashell.notes"}`},
+		{Name: "tool_schema", Args: `{"server":"Files","tool":"read"}`},
+		{Name: "tool_schema", Args: `{"server":"Terminal","tool":"exec"}`},
+	}
+
+	for i := 1; i <= limit-1; i++ {
+		if fired := g.check(tools, ""); fired {
+			t.Fatalf("round %d: guard fired too early (limit=%d)", i, limit)
+		}
+	}
+	if !g.check(tools, "") {
+		t.Fatal("guard should fire on the limit-th identical parallel round")
+	}
+	// After firing, the guard resets — a new identical round should not fire immediately.
+	if fired := g.check(tools, ""); fired {
+		t.Fatal("guard should reset after firing, not fire again immediately")
+	}
+}
+
+func TestRepeatedToolGuardResetsOnContent(t *testing.T) {
+	g := &repeatedToolGuard{limit: 3}
+	tools := []domain.ToolCall{{Name: "mcp_enable", Args: `{"id":"x"}`}}
+
+	for i := 1; i <= 2; i++ {
+		g.check(tools, "")
+	}
+	// A round with text content resets the streak.
+	g.check(tools, "here is my answer")
+	if fired := g.check(tools, ""); fired {
+		t.Fatal("guard should reset after a round with content, not fire")
+	}
+}
+
+func TestRepeatedToolGuardDifferentArgsResets(t *testing.T) {
+	g := &repeatedToolGuard{limit: 3}
+	g.check([]domain.ToolCall{{Name: "mcp_enable", Args: `{"id":"a"}`}}, "")
+	g.check([]domain.ToolCall{{Name: "mcp_enable", Args: `{"id":"a"}`}}, "")
+	// Different args → new signature → streak resets.
+	g.check([]domain.ToolCall{{Name: "mcp_enable", Args: `{"id":"b"}`}}, "")
+	if fired := g.check([]domain.ToolCall{{Name: "mcp_enable", Args: `{"id":"b"}`}}, ""); fired {
+		t.Fatal("different args should reset streak, not fire after 2 rounds")
+	}
+}

@@ -74,15 +74,32 @@ type stubMCP struct {
 	running      map[string]bool                   // serverID -> running
 	lastServerID string
 	lastTool     string
+	connectCount int             // incremented on each Connect call
+	connected    map[string]bool // serverID -> connected (set by Connect)
 }
 
 func (m *stubMCP) Connect(ctx context.Context, p *domain.Plugin) ([]contracts.MCPToolDTO, error) {
+	m.connectCount++
+	if m.connected == nil {
+		m.connected = map[string]bool{}
+	}
+	m.connected[p.Manifest.MCPServerID()] = true
 	if tools, ok := m.tools[p.Manifest.MCPServerID()]; ok {
 		return tools, nil
 	}
 	return nil, fmt.Errorf("not connected")
 }
 func (m *stubMCP) ToolsFor(serverID string) ([]contracts.MCPToolDTO, bool) {
+	// When connected-tracking is active (non-nil map), only return tools
+	// for explicitly connected servers. When nil (legacy mode), any server
+	// with tools in the map is treated as connected.
+	if m.connected != nil {
+		if m.connected[serverID] {
+			tools, ok := m.tools[serverID]
+			return tools, ok
+		}
+		return nil, false
+	}
 	tools, ok := m.tools[serverID]
 	return tools, ok
 }
@@ -353,7 +370,7 @@ func TestToolSearch(t *testing.T) {
 		&stubMCP{
 			tools: map[string][]contracts.MCPToolDTO{
 				"plugin:srv1": {
-					{Name: "create_issue", Description: "Create a GitHub issue"},
+					{Name: "create_issue", Description: "Create a GitHub issue", InputSchema: json.RawMessage(`{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}`)},
 					{Name: "list_repos", Description: "List repositories"},
 				},
 			},
@@ -368,6 +385,14 @@ func TestToolSearch(t *testing.T) {
 	}
 	if !strings.Contains(out, "create_issue") {
 		t.Errorf("expected create_issue match, got: %s", out)
+	}
+	// tool_search must return the full parameters so the model can call
+	// the tool directly without a follow-up tool_schema round-trip.
+	if !strings.Contains(out, "\"parameters\"") {
+		t.Errorf("expected parameters in tool_search output, got: %s", out)
+	}
+	if !strings.Contains(out, "\"title\"") {
+		t.Errorf("expected title field in parameters, got: %s", out)
 	}
 }
 
@@ -391,6 +416,52 @@ func TestToolSearchTokenMatch(t *testing.T) {
 	}
 	if !strings.Contains(out, "count: 1") {
 		t.Errorf("expected 1 match for token match, got: %s", out)
+	}
+}
+
+func TestToolSearchAllServers(t *testing.T) {
+	tb := testToolbox(nil,
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "github", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+			{Manifest: domain.PluginManifest{ID: "srv2", Name: "files", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+		},
+		&stubMCP{
+			tools: map[string][]contracts.MCPToolDTO{
+				"plugin:srv1": {
+					{Name: "create_issue", Description: "Create a GitHub issue"},
+				},
+				"plugin:srv2": {
+					{Name: "read_file", Description: "Read a file from disk", InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`)},
+					{Name: "list_files", Description: "List files in a directory"},
+				},
+			},
+		},
+	)
+	// No server specified — should search across ALL running servers.
+	out, err := tb.Execute(context.Background(), "tool_search", []byte(`{"query":"file"}`))
+	if err != nil {
+		t.Fatalf("tool_search all servers: %v", err)
+	}
+	// Should match read_file and list_files from the files server, but not create_issue.
+	if !strings.Contains(out, "count: 2") {
+		t.Errorf("expected 2 matches across all servers, got: %s", out)
+	}
+	if !strings.Contains(out, "mcp__files__read_file") || !strings.Contains(out, "mcp__files__list_files") {
+		t.Errorf("expected files server tools in results, got: %s", out)
+	}
+	if strings.Contains(out, "create_issue") {
+		t.Errorf("github tool should not match 'file' query, got: %s", out)
+	}
+	// Meta should show server: all
+	if !strings.Contains(out, "server: all") {
+		t.Errorf("expected server: all in meta, got: %s", out)
+	}
+	// tool_search must return full parameters so the model can call directly.
+	if !strings.Contains(out, "\"parameters\"") {
+		t.Errorf("expected parameters in tool_search output, got: %s", out)
+	}
+	if !strings.Contains(out, "\"path\"") {
+		t.Errorf("expected path field in read_file parameters, got: %s", out)
 	}
 }
 
@@ -577,9 +648,12 @@ func TestMcpRegisterMissingSource(t *testing.T) {
 func TestMcpEnable(t *testing.T) {
 	plugin := &domain.Plugin{Manifest: domain.PluginManifest{ID: "nusashell.demo", Name: "Demo", Version: "1.0.0", Icon: "🧩", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "nope"}}}
 	serverID := plugin.Manifest.MCPServerID()
-	mcp := &stubMCP{tools: map[string][]contracts.MCPToolDTO{
-		serverID: {{Name: "demo_ping", Description: "ping"}},
-	}}
+	mcp := &stubMCP{
+		tools: map[string][]contracts.MCPToolDTO{
+			serverID: {{Name: "demo_ping", Description: "ping", InputSchema: json.RawMessage(`{"type":"object","properties":{"msg":{"type":"string"}},"required":["msg"]}`)}},
+		},
+		connected: map[string]bool{}, // strict mode: not connected until Connect
+	}
 	tb := &Toolbox{Plugins: &stubPluginStore{plugins: []*domain.Plugin{plugin}}, MCP: mcp}
 	out, err := tb.Execute(context.Background(), "mcp_enable", []byte(`{"id":"nusashell.demo"}`))
 	if err != nil {
@@ -588,10 +662,54 @@ func TestMcpEnable(t *testing.T) {
 	if !strings.Contains(out, "status: enabled") || !strings.Contains(out, "tools: 1") {
 		t.Fatalf("expected status: enabled and tools: 1 in output, got %q", out)
 	}
-	// mcp_enable should return tool names in the body so the agent
-	// doesn't need a follow-up tool_list call.
-	if !strings.Contains(out, `"name":"mcp__Demo__demo_ping"`) {
-		t.Errorf("expected tool name in JSONL, got %q", out)
+	// mcp_enable returns only status + count — no tool dump.
+	// The agent must use tool_list or tool_search to discover tools.
+	if strings.Contains(out, `"name":"mcp__Demo__demo_ping"`) {
+		t.Errorf("mcp_enable must not dump tool definitions, got %q", out)
+	}
+}
+
+func TestMcpEnableIdempotent(t *testing.T) {
+	plugin := &domain.Plugin{Manifest: domain.PluginManifest{ID: "nusashell.demo", Name: "Demo", Version: "1.0.0", Icon: "🧩", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "nope"}}}
+	serverID := plugin.Manifest.MCPServerID()
+	mcp := &stubMCP{
+		tools: map[string][]contracts.MCPToolDTO{
+			serverID: {{Name: "demo_ping", Description: "ping", InputSchema: json.RawMessage(`{"type":"object","properties":{"msg":{"type":"string"}},"required":["msg"]}`)}},
+		},
+		connected: map[string]bool{}, // strict mode: track Connect calls
+	}
+	tb := &Toolbox{Plugins: &stubPluginStore{plugins: []*domain.Plugin{plugin}}, MCP: mcp}
+
+	// First enable: connects, returns status + count only.
+	out1, err := tb.Execute(context.Background(), "mcp_enable", []byte(`{"id":"nusashell.demo"}`))
+	if err != nil {
+		t.Fatalf("first mcp_enable: %v", err)
+	}
+	if !strings.Contains(out1, "status: enabled") {
+		t.Fatalf("first call: expected status: enabled, got %q", out1)
+	}
+	if strings.Contains(out1, `"name":"mcp__Demo__demo_ping"`) {
+		t.Fatalf("first call: must not dump tools, got %q", out1)
+	}
+	if mcp.connectCount != 1 {
+		t.Fatalf("first call: expected 1 Connect, got %d", mcp.connectCount)
+	}
+
+	// Second enable: already connected — must NOT reconnect and must NOT
+	// dump tools. Return a short already_enabled signal so the agent
+	// stops re-enabling and moves on to tool_list/tool_search.
+	out2, err := tb.Execute(context.Background(), "mcp_enable", []byte(`{"id":"nusashell.demo"}`))
+	if err != nil {
+		t.Fatalf("second mcp_enable: %v", err)
+	}
+	if !strings.Contains(out2, "already_enabled") {
+		t.Fatalf("second call: expected already_enabled status, got %q", out2)
+	}
+	if strings.Contains(out2, `"name":"mcp__Demo__demo_ping"`) {
+		t.Fatalf("second call: must not dump tools, got %q", out2)
+	}
+	if mcp.connectCount != 1 {
+		t.Fatalf("second call: must not reconnect, expected 1 Connect, got %d", mcp.connectCount)
 	}
 }
 
