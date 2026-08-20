@@ -40,6 +40,9 @@ func (s *stubSkillStore) ReadFile(id, ownedBy, path string, offset, maxChars int
 func (s *stubSkillStore) Files(id, ownedBy string) ([]domain.SkillFileEntry, error) {
 	return nil, fmt.Errorf("not implemented")
 }
+func (s *stubSkillStore) WriteFile(id, ownedBy, path, content string) error {
+	return fmt.Errorf("not implemented")
+}
 func (s *stubSkillStore) Install(zipData []byte) (string, error) {
 	return "", fmt.Errorf("not supported")
 }
@@ -175,6 +178,9 @@ func (s *stubSkillStoreNoFiles) ReadFile(id, ownedBy, path string, offset, maxCh
 }
 func (s *stubSkillStoreNoFiles) Files(id, ownedBy string) ([]domain.SkillFileEntry, error) {
 	return nil, errReadFileUnsupported
+}
+func (s *stubSkillStoreNoFiles) WriteFile(id, ownedBy, path, content string) error {
+	return errReadFileUnsupported
 }
 func (s *stubSkillStoreNoFiles) Install(zipData []byte) (string, error) {
 	return "", fmt.Errorf("not supported")
@@ -795,9 +801,12 @@ func TestListToolsIncludesMcpServerAdd(t *testing.T) {
 
 type skillFileStoreStub struct {
 	*stubSkillStore
-	files   map[string][]domain.SkillFileEntry
-	readErr error
-	read    func(id, ownedBy, path string, offset, maxChars int) (*domain.SkillFile, error)
+	files    map[string][]domain.SkillFileEntry
+	readErr  error
+	read     func(id, ownedBy, path string, offset, maxChars int) (*domain.SkillFile, error)
+	writeErr error
+	written  map[string]string // key "id|path" → content
+	write    func(id, ownedBy, path, content string) error
 }
 
 func (s *skillFileStoreStub) ReadFile(id, ownedBy, path string, offset, maxChars int) (*domain.SkillFile, error) {
@@ -811,6 +820,19 @@ func (s *skillFileStoreStub) ReadFile(id, ownedBy, path string, offset, maxChars
 }
 func (s *skillFileStoreStub) Files(id, ownedBy string) ([]domain.SkillFileEntry, error) {
 	return s.files[id], nil
+}
+func (s *skillFileStoreStub) WriteFile(id, ownedBy, path, content string) error {
+	if s.writeErr != nil {
+		return s.writeErr
+	}
+	if s.write != nil {
+		return s.write(id, "", path, content)
+	}
+	if s.written == nil {
+		s.written = map[string]string{}
+	}
+	s.written[id+"|"+path] = content
+	return nil
 }
 
 func TestSkillReadFile(t *testing.T) {
@@ -855,6 +877,48 @@ func TestSkillFilesUnsupported(t *testing.T) {
 	_, err := tb.Execute(context.Background(), "skill_files", []byte(`{"name":"x"}`))
 	if err == nil || !strings.Contains(err.Error(), "does not support file listing") {
 		t.Fatalf("expected unsupported error, got %v", err)
+	}
+}
+
+func TestSkillSaveWithPath_writesSupportFile(t *testing.T) {
+	store := &skillFileStoreStub{stubSkillStore: &stubSkillStore{skills: []*domain.Skill{{ID: "my-skill", Name: "my-skill"}}}}
+	tb := &Toolbox{Skills: store, Plugins: &stubPluginStore{}, MCP: &stubMCP{}}
+	out, err := tb.Execute(context.Background(), "skill_save", []byte(`{"name":"my-skill","path":"references/errors.md","content":"# Error recipes\n"}`))
+	if err != nil {
+		t.Fatalf("skill_save with path: %v", err)
+	}
+	if !strings.Contains(out, "saved") {
+		t.Fatalf("unexpected output %q", out)
+	}
+	got, ok := store.written["my-skill|references/errors.md"]
+	if !ok {
+		t.Fatal("WriteFile was not called with the expected id+path")
+	}
+	if got != "# Error recipes\n" {
+		t.Fatalf("written content = %q, want %q", got, "# Error recipes\n")
+	}
+}
+
+func TestSkillSaveWithPath_emptyPathUsesSaveNotWriteFile(t *testing.T) {
+	store := &skillFileStoreStub{stubSkillStore: &stubSkillStore{skills: []*domain.Skill{{ID: "my-skill", Name: "my-skill"}}}}
+	tb := &Toolbox{Skills: store, Plugins: &stubPluginStore{}, MCP: &stubMCP{}}
+	_, err := tb.Execute(context.Background(), "skill_save", []byte(`{"name":"my-skill","path":"","content":"# Updated\n"}`))
+	if err != nil {
+		t.Fatalf("skill_save empty path: %v", err)
+	}
+	// Empty path must go through Save (metadata + SKILL.md), not WriteFile.
+	if len(store.written) != 0 {
+		t.Fatalf("WriteFile should not be called for empty path, got %v", store.written)
+	}
+}
+
+func TestSkillSaveWithPath_nonexistentSkill_rejected(t *testing.T) {
+	store := &skillFileStoreStub{stubSkillStore: &stubSkillStore{}}
+	store.writeErr = fmt.Errorf("skill %q not found", "no-such")
+	tb := &Toolbox{Skills: store, Plugins: &stubPluginStore{}, MCP: &stubMCP{}}
+	_, err := tb.Execute(context.Background(), "skill_save", []byte(`{"name":"no-such","path":"references/x.md","content":"x"}`))
+	if err == nil {
+		t.Fatal("expected error for nonexistent skill, got nil")
 	}
 }
 

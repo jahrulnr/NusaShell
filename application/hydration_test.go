@@ -44,6 +44,9 @@ func (s *stubSkillStoreHyd) ReadFile(id, ownedBy, path string, offset, maxChars 
 func (s *stubSkillStoreHyd) Files(id, ownedBy string) ([]domain.SkillFileEntry, error) {
 	return nil, fmt.Errorf("not implemented")
 }
+func (s *stubSkillStoreHyd) WriteFile(id, ownedBy, path, content string) error {
+	return fmt.Errorf("not implemented")
+}
 func (s *stubSkillStoreHyd) Install(zipData []byte) (string, error) {
 	return "", fmt.Errorf("not implemented")
 }

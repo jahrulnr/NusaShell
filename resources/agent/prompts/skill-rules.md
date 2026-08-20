@@ -9,7 +9,16 @@
   otherwise extend the closest suitable agent-owned skill without duplicating
   its guidance.
 - Use `skill_save` to create a new skill (omit `id`) or update an existing one
-  (pass `id`).
+  (pass `id`). To write a support file inside an existing skill, pass `path`
+  (e.g. `references/errors.md`, `templates/config.yaml`, `scripts/verify.sh`)
+  instead of `id` — the skill must already exist.
+- Prefer updating an existing skill's support files over rewriting the entire
+  SKILL.md body. Use `skill_read` with `path` to inspect a support file before
+  patching it with `skill_save` and the same `path`.
+- Support file directories: `references/` for session-specific detail and
+  condensed knowledge banks, `templates/` for starter files meant to be copied,
+  `scripts/` for statically re-runnable actions. Add a one-line pointer in
+  SKILL.md when you create a new support file so future agents find it.
 - Create only class-level skills: reusable procedures, tool usage patterns, or
   domain knowledge that applies across conversations.
 - Never edit or create skills owned by the user (provenance-protected).

@@ -771,6 +771,41 @@ func (s *Store) ReadFile(id, ownedBy, path string, offset, maxChars int) (*domai
 	return sf, nil
 }
 
+// WriteFile writes content to a file inside a skill directory (default
+// SKILL.md). Parent directories (e.g. references/, templates/, scripts/)
+// are created as needed. The skill must already exist; plugin-owned skills
+// are read-only. Path traversal is rejected via safeSkillPath.
+func (s *Store) WriteFile(id, ownedBy, path, content string) error {
+	skill, err := s.Get(id, ownedBy)
+	if err != nil {
+		return fmt.Errorf("skill %q not found: %w", id, err)
+	}
+	if strings.HasPrefix(skill.EffectiveOwnedBy(), "plugin:") {
+		return fmt.Errorf("plugin-owned skills are read-only; uninstall the plugin to modify")
+	}
+	rel := strings.TrimSpace(path)
+	if rel == "" {
+		rel = "SKILL.md"
+	}
+	target, err := s.safeSkillPath(id, ownedBy, rel)
+	if err != nil {
+		return err
+	}
+	if dir := filepath.Dir(target); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("skillfs: mkdir %s: %w", dir, err)
+		}
+	}
+	if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("skillfs: write %s: %w", rel, err)
+	}
+	// Touch skill metadata so UpdatedAt reflects the change.
+	skill.UpdatedAt = time.Now().UTC()
+	s.json.set(skill)
+	_ = s.json.save()
+	return nil
+}
+
 // Files implements SkillStore.Files and lists the skill directory tree.
 func (s *Store) Files(id, ownedBy string) ([]domain.SkillFileEntry, error) {
 	if !skillIDRe.MatchString(id) {

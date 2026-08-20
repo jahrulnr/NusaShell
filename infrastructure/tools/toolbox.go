@@ -105,7 +105,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "skill_list", Description: "List available skills with their names and descriptions.", InputSchema: obj("object", props("limit", intSchema("Max results, default 100")))},
 		{Name: "skill_search", Description: "Search installed skills by name or description (case-insensitive substring match).", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 50")), "query")},
 		{Name: "skill_read", Description: "Read a text file inside an installed skill (default SKILL.md). Pass path for support files (e.g. references/x.md) and offset/max_chars for pagination of long files.", InputSchema: obj("object", props("name", str("Skill id (from skill_list or skill_search)"), "path", str("Relative file path inside the skill folder; defaults to SKILL.md"), "offset", intSchema("Character offset for pagination (default 0)"), "max_chars", intSchema("Maximum characters to return (default 20000, max 100000)")), "name")},
-		{Name: "skill_save", Description: "Create or update a skill. When id is omitted a new skill is created; otherwise the existing skill with that id is updated. Skills should be reusable procedures or domain knowledge, not one-off task notes.", InputSchema: obj("object", props("id", str("Existing skill id to update (omit to create new)"), "name", str("Skill name (lowercase with hyphens, matches folder name)"), "description", str("Short description (max 1024 chars)"), "content", str("Full skill markdown content")), "name", "description", "content")},
+		{Name: "skill_save", Description: "Create or update a skill, or write a support file inside an existing skill. When path is set, write content to that file (e.g. references/errors.md, templates/config.yaml, scripts/verify.sh) — the skill must already exist. When path is omitted, create or update the skill's SKILL.md body and metadata (name, description). Skills should be reusable procedures or domain knowledge, not one-off task notes.", InputSchema: obj("object", props("id", str("Existing skill id to update (omit to create new; ignored when path is set)"), "name", str("Skill name (lowercase with hyphens, matches folder name)"), "description", str("Short description (max 1024 chars); ignored when path is set"), "path", str("Relative file path inside the skill folder (e.g. references/x.md); defaults to SKILL.md when omitted"), "content", str("Full file content")), "name", "content")},
 		{Name: "skill_files", Description: "List the files inside an installed skill folder (SKILL.md + support files) with size and editability, to discover references/guides before skill_read.", InputSchema: obj("object", props("name", str("Skill id")), "name")},
 		{Name: "memory_save", Description: "Save a fact to long-term memory as a searchable fragment. Fragments are unlimited and indexed by content + metadata (category, project, task, tags). Use memory_search to retrieve them later.", InputSchema: obj("object", props("content", str("Fact or observation to remember"), "category", strEnum("Memory category", "project", "user", "task", "general"), "project", str("Optional project/workspace label"), "task", str("Optional task label"), "tags", arr("Optional tags for filtering")), "content")},
 		{Name: "memory_replace", Description: "Update an existing memory entry. For primary memory, use old_text (substring match). For fragments, use id to update by identifier.", InputSchema: obj("object", props("target", strEnum("Update target: \"primary\" (always-injected working set) or \"fragment\" (searchable archive)", "primary", "fragment"), "old_text", str("For primary: unique substring of the entry to replace"), "id", str("For fragment: fragment id to update"), "content", str("New content")), "target", "content")},
@@ -346,6 +346,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			ID          string `json:"id"`
 			Name        string `json:"name"`
 			Description string `json:"description"`
+			Path        string `json:"path"`
 			Content     string `json:"content"`
 		}
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
@@ -357,6 +358,16 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		}
 		if strings.TrimSpace(args.Content) == "" {
 			return "", fmt.Errorf("skill content is required")
+		}
+		// When path is set, write a support file (references/, templates/,
+		// scripts/) inside an existing skill — mirrors skill_read's name+path
+		// pattern. The skill must already exist; creation is not supported
+		// in this mode.
+		if path := strings.TrimSpace(args.Path); path != "" {
+			if err := t.Skills.WriteFile(name, "", path, args.Content); err != nil {
+				return "", fmt.Errorf("skill_save: %w", err)
+			}
+			return yamlBlock(map[string]any{"status": "saved", "skill": name, "path": path}), nil
 		}
 		var s *domain.Skill
 		if args.ID != "" {
@@ -573,6 +584,11 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		})
 		if err := t.Primary.Update(entries); err != nil {
 			return "", err
+		}
+		// Remove the fragment from the archive so the entry does not appear
+		// in both primary and fragment tiers simultaneously.
+		if err := t.Fragments.Delete(frag.ID); err != nil {
+			return "", fmt.Errorf("promoted to primary but failed to delete fragment %s: %w", frag.ID, err)
 		}
 		return yamlBlock(map[string]any{"status": "promoted", "fragment_id": args.ID}), nil
 

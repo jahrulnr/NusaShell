@@ -10,7 +10,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `skill_search` | search installed skills by name or description (case-insensitive substring) |
 | `skill_read` | read a skill's `SKILL.md` (or a support file via `path`) by name; paginated with `offset`/`max_chars` |
 | `skill_files` | list the files inside a skill folder (path, type, size, editable) |
-| `skill_save` | create or update a user-owned skill (plugin-owned skills are read-only) |
+| `skill_save` | create or update a skill (omit `id` to create new; pass `id` to update), or write a support file inside an existing skill (pass `path` like `references/errors.md`, `templates/config.yaml`, `scripts/verify.sh`; skill must already exist; plugin-owned skills are read-only) |
 | `memory_save` | save a fact as a searchable fragment (unlimited archive); pick a category (`project`, `user`, `task`, `general`) + optional `project`, `task`, `tags` |
 | `memory_replace` | update an existing entry: `target="primary"` + `old_text` (substring) for primary memory, or `target="fragment"` + `id` for fragments |
 | `memory_search` | BM25 search over fragments with metadata filters (`category`, `project`, `task`, `tags`); returns ranked results with scores |

@@ -152,6 +152,14 @@ func (a *App) handleSkillsSave(req contracts.SkillSaveRequest) (any, *contracts.
 	if strings.TrimSpace(req.Content) == "" {
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "skill content is required"}
 	}
+	// When path is set, write a support file inside an existing skill.
+	if path := strings.TrimSpace(req.Path); path != "" {
+		if err := a.Skills.WriteFile(name, "", path, req.Content); err != nil {
+			return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
+		}
+		a.log("info", "skills", "skill file saved: %s/%s", name, path)
+		return contracts.SkillReadResult{Skill: contracts.SkillFull{SkillDTO: contracts.SkillDTO{ID: name, Name: name}}}, nil
+	}
 	var s *domain.Skill
 	if req.ID != "" {
 		existing, err := a.Skills.Get(req.ID, "")

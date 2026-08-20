@@ -57,6 +57,12 @@ type SkillStore interface {
 	// SKILL.md) with offset/maxChars pagination. ownedBy resolution is
 	// the same as Get.
 	ReadFile(id, ownedBy, path string, offset, maxChars int) (*domain.SkillFile, error)
+	// WriteFile writes content to a file inside a skill directory (default
+	// SKILL.md). Parent directories (references/, templates/, scripts/)
+	// are created as needed. The skill must already exist; plugin-owned
+	// skills are read-only. Used by the background review agent to add
+	// support files and patch existing ones for skill self-improvement.
+	WriteFile(id, ownedBy, path, content string) error
 	// Files lists the nested directory tree of a skill folder (path,
 	// type, sizeBytes, editable), sorted as in the Electron shell.
 	// ownedBy resolution is the same as Get.

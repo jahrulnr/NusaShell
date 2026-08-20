@@ -179,6 +179,9 @@ func (f *fakeSkillStore) ReadFile(id, ownedBy, path string, offset, maxChars int
 func (f *fakeSkillStore) Files(id, ownedBy string) ([]domain.SkillFileEntry, error) {
 	return nil, errNotFound
 }
+func (f *fakeSkillStore) WriteFile(id, ownedBy, path, content string) error {
+	return errNotFound
+}
 func (f *fakeSkillStore) Save(s *domain.Skill) error {
 	if f.items == nil {
 		f.items = map[string]*domain.Skill{}

@@ -79,6 +79,9 @@ func (k *Skills) ReadFile(id, ownedBy, path string, offset, maxChars int) (*doma
 func (k *Skills) Files(id, ownedBy string) ([]domain.SkillFileEntry, error) {
 	return nil, fmt.Errorf("skill file listing is not supported by this store")
 }
+func (k *Skills) WriteFile(id, ownedBy, path, content string) error {
+	return fmt.Errorf("skill file writes are not supported by this store")
+}
 func (k *Skills) Install(zipData []byte) (string, error) {
 	return "", fmt.Errorf("skill install is not supported by this store")
 }

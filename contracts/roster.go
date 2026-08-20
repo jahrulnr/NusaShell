@@ -793,6 +793,7 @@ type SkillSaveRequest struct {
 	ID          string `json:"id,omitempty"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	Path        string `json:"path,omitempty"`
 	Content     string `json:"content"`
 }
 
