@@ -144,9 +144,10 @@ Credentials never touch the JSON/JSONL files. All writes are atomic
 
 The built-in roster comes from `Toolbox.ListTools` and is documented in
 `resources/agent/docs/tools.md`. MCP tools are intentionally omitted from the
-provider's static `tools[]`; the agent discovers them with `mcp_list`,
-`tool_list` or `tool_search`, loads `tool_schema`, then calls the observed
-`mcp__<server>__<tool>` name. Stdio connections are lazy and cached per process.
+provider's static `tools[]`; the agent discovers them with `mcp_search`
+(`tool_list`/`tool_search` return the same `ref`-shaped items), then executes
+them via `mcp_call` with the observed `ref` — `mcp__<server>__<tool>` names
+are not callable. Stdio connections are lazy and cached per process.
 
 ## Verification baseline
 

@@ -5,17 +5,8 @@ a manual MCP server (stdio) or an installed plugin from the catalog
 (MCP-only or MCP + UI). The shell spawns the plugin's MCP command and
 speaks JSON-RPC over stdin/stdout.
 
-MCP plugin tools are NOT advertised in the tool list sent to the provider —
-the tool list must stay stable for the lifetime of a conversation so the
-provider prompt cache (OpenAI / Claude) is not invalidated. You will not
-see MCP tools in `tools[]`. Use the universal `mcp_search` + `mcp_call`
-pair to discover and execute MCP tools — this works on every provider and
-keeps the tool list stable. Do NOT write tool calls as text in your reply
-and do NOT guess `mcp__<server>__<tool>` names (they are not in `tools[]`
-and may not be callable on your provider). The legacy `tool_list`,
-`tool_search`, and `tool_schema` tools still work for inspection but
-return text the model must then act on — prefer `mcp_search` + `mcp_call`
-for execution.
+MCP plugin tools are not advertised in `tools[]` — see Tool exposure below
+for the discovery and execution contract.
 
 ## Adding a plugin manually
 
@@ -39,10 +30,10 @@ MCP plugin tools are not advertised in the tool list sent to the provider.
 You will not see them in `tools[]`. Use the universal `mcp_search` +
 `mcp_call` pair to discover and execute — this works on every provider and
 keeps the tool list stable. Do NOT write tool calls as text in your reply
-and do NOT guess `mcp__<server>__<tool>` names. The legacy `tool_list`,
-`tool_search`, and `tool_schema` tools still work for inspection but
-return text the model must then act on — prefer `mcp_search` + `mcp_call`
-for execution. Tool schemas come from the server's own `tools/list`
+and do NOT call `mcp__<server>__<tool>` names — they are not callable;
+`mcp_call` with a `ref` is the only execution path. `tool_list` and
+`tool_search` return `ref`s too, so every discovery flow ends in
+`mcp_call`. Tool schemas come from the server's own `tools/list`
 response. `mcp_search` accepts an optional `server`; when omitted, it
 searches across ALL running MCP servers, so the agent can find a tool
 without knowing which server hosts it. `mcp_search` returns a `ref` plus
@@ -65,8 +56,9 @@ Good example:
 `mcp_enable` returns only status + tool count — it does NOT dump tool
 definitions. After `mcp_enable`, call `mcp_search` to discover the tools
 (returns `ref` + full definitions with parameters), then `mcp_call` to
-execute. Use `tool_schema` only when you need the exact argument shape
-for a single tool and don't already have it from `mcp_search`.
+execute. Use `tool_schema` only when you need the exact argument shape (field names,
+types, required fields) for a single tool and don't already have it from
+`mcp_search`.
 If the plugin is already connected, `mcp_enable` returns
 `status: already_enabled` without reconnecting — do NOT call
 `mcp_enable` again for the same plugin; use `mcp_search` or call the
@@ -76,18 +68,14 @@ tools directly.
 the plugin id (e.g. "nusashell.files"), or the MCP server id (e.g.
 "plugin:nusashell.files") — use whichever you have.
 
-Use `tool_schema` when you need the exact argument shape (field names,
-types, required fields) before calling an MCP tool. It returns the
-schema as readable JSON in the body.
-
 Bad example — guessing a tool name without discovery:
 
-    mcp__files__read({path: "/home/user/a.txt"})  # not in tools[], may not be callable on your provider
+    mcp__files__read({path: "/home/user/a.txt"})  # not in tools[], not callable
 
 Bad example — writing the tool call as text instead of using `mcp_call`:
 
     # WRONG — this is text, the runtime will NOT execute it:
-    to=mcp__Files__read code:.json
+    to=Files:read code:.json
     {"path":"/home/user/a.txt"}
 
     # RIGHT — use mcp_call with the ref from mcp_search:

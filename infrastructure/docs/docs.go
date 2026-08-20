@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"nusashell/application"
+	"nusashell/infrastructure/jsonstore"
 	"nusashell/resources"
 )
 
@@ -94,36 +95,70 @@ func (s *Source) List() []application.DocMeta {
 
 func (s *Source) Search(query string, limit int) []application.DocHit {
 	q := strings.ToLower(strings.TrimSpace(query))
-	var hits []application.DocHit
+	// Recall: substring over full content (unchanged).
+	type candidate struct {
+		doc docEntry
+		idx int
+	}
+	var cands []candidate
 	for _, d := range s.docs {
 		lower := strings.ToLower(d.content)
 		idx := strings.Index(lower, q)
 		if q == "" || idx >= 0 {
-			snippet := ""
-			if idx >= 0 {
-				start := idx - 80
-				if start < 0 {
-					start = 0
-				}
-				end := idx + len(q) + 120
-				if end > len(d.content) {
-					end = len(d.content)
-				}
-				snippet = strings.TrimSpace(d.content[start:end])
-				if start > 0 {
-					snippet = "…" + snippet
-				}
-				if end < len(d.content) {
-					snippet += "…"
-				}
+			cands = append(cands, candidate{doc: d, idx: idx})
+		}
+	}
+	// Ranking: BM25 over candidate contents so multi-term queries surface
+	// the most relevant page first instead of embedded-corpus order.
+	if len(cands) > 1 && q != "" {
+		docs := make([]jsonstore.BM25Doc, len(cands))
+		for i, c := range cands {
+			docs[i] = jsonstore.BM25Doc{ID: c.doc.id, Text: c.doc.content}
+		}
+		results := jsonstore.NewBM25(docs).Search(q, len(cands))
+		rank := make(map[string]int, len(results))
+		for i, r := range results {
+			rank[r.ID] = i
+		}
+		sort.SliceStable(cands, func(i, j int) bool {
+			ri, oki := rank[cands[i].doc.id]
+			rj, okj := rank[cands[j].doc.id]
+			if oki != okj {
+				return oki
 			}
-			hits = append(hits, application.DocHit{
-				DocMeta: application.DocMeta{ID: d.id, Title: d.title, Path: d.path},
-				Snippet: snippet,
-			})
-			if len(hits) >= limit {
-				break
+			if oki {
+				return ri < rj
 			}
+			return cands[i].doc.id < cands[j].doc.id
+		})
+	}
+	hits := make([]application.DocHit, 0, len(cands))
+	for _, c := range cands {
+		d := c.doc
+		snippet := ""
+		if c.idx >= 0 {
+			start := c.idx - 80
+			if start < 0 {
+				start = 0
+			}
+			end := c.idx + len(q) + 120
+			if end > len(d.content) {
+				end = len(d.content)
+			}
+			snippet = strings.TrimSpace(d.content[start:end])
+			if start > 0 {
+				snippet = "…" + snippet
+			}
+			if end < len(d.content) {
+				snippet += "…"
+			}
+		}
+		hits = append(hits, application.DocHit{
+			DocMeta: application.DocMeta{ID: d.id, Title: d.title, Path: d.path},
+			Snippet: snippet,
+		})
+		if len(hits) >= limit {
+			break
 		}
 	}
 	return hits

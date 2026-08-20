@@ -19,8 +19,9 @@ Tools must follow the **create** naming rule: let `domain` = last segment of
 the plugin id; tool names must **not** start with `${domain}_` and must **not**
 equal `domain`. Prefer short verbs (`list`, `read`, `write`, `exec`) or
 multi-word verbs without the domain (`list_projects`, `create_ticket`). The
-shell exposes discovered tools as `mcp__<server>__<tool>`, where `<server>` is
-the manifest name. **If wrapping an existing MCP catalog, preserve upstream
+shell exposes discovered tools via `mcp_search` / `tool_list` as a `ref`
+(`<server>:<tool>`, e.g. `Files:exec`) and executes them only through
+`mcp_call(ref=...)`. **If wrapping an existing MCP catalog, preserve upstream
 tool names as-is** (no domain redesign). Tools must strictly validate bounded
 inputs, return structured content with safe text fallback, and avoid credentials
 in schemas, results, and logs. Put required ordering and constraints in bounded
@@ -34,4 +35,5 @@ test with Terminal using an absolute `cwd`. After registration, verify:
 2. `mcp_enable` starts it.
 3. `tool_list` or `tool_search` finds the implemented tools.
 4. `tool_schema` is loaded before any tool call.
-5. One discovered `mcp__<server>__<tool>` call returns the expected result.
+5. One discovered tool called via `mcp_call(ref=<server>:<tool>)` returns the
+   expected result.

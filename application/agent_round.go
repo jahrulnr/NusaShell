@@ -290,23 +290,11 @@ func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
 	source := HydrationSource{
 		RuntimeContext: DefaultRuntimeContext(c.Workspace),
 	}
-	if a.Primary != nil {
-		source.Primary = a.Primary
-	}
-	if a.Memory != nil {
-		source.Memory = a.Memory
-	}
-	if a.Skills != nil {
-		source.Skills = a.Skills
-	}
-	if a.Plugins != nil {
-		source.Plugins = a.Plugins
-	}
-	if a.MCPToolbox != nil {
-		source.MCP = a.MCPToolbox
-	}
 	if a.Toolbox != nil {
-		source.Tools = a.Toolbox.ListTools()
+		// The real toolbox executes the meta-tools (mcp_list, tool_list per
+		// server, skill_list, memory_list) so the checkpoint contains genuine
+		// tool output — the same tools the agent calls.
+		source.Executor = a.Toolbox
 	}
 	if a.Todos != nil {
 		source.Todos = a.Todos

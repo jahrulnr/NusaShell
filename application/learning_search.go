@@ -24,6 +24,10 @@ type SearchOptions struct {
 	MaxHops int
 	// ApplyDecay enables temporal decay on fused results. Default true.
 	ApplyDecay *bool
+	// DisableEmbedding skips the embedding channel even when an embedder is
+	// configured. The agent-loop search tools set this to avoid per-call
+	// embedding cost; the Learning UI keeps the full hybrid path.
+	DisableEmbedding bool
 }
 
 // defaultSearchOptions returns sensible defaults.
@@ -86,8 +90,8 @@ func (s *LearningSearcher) searchSkillsWithOpts(ctx context.Context, query strin
 	}
 	lists = append(lists, bm25IDs)
 
-	// Channel 2: Embedding cosine similarity (if available)
-	if s.embed != nil {
+	// Channel 2: Embedding cosine similarity (if available and enabled).
+	if s.embed != nil && !opts.DisableEmbedding {
 		embIDs, err := s.embeddingSearch(ctx, query, docs, topK*2)
 		if err == nil && len(embIDs) > 0 {
 			lists = append(lists, embIDs)
@@ -156,8 +160,8 @@ func (s *LearningSearcher) searchMemoryWithOpts(ctx context.Context, query strin
 	}
 	lists = append(lists, bm25IDs)
 
-	// Channel 2: Embedding cosine similarity (if available)
-	if s.embed != nil {
+	// Channel 2: Embedding cosine similarity (if available and enabled).
+	if s.embed != nil && !opts.DisableEmbedding {
 		embIDs, err := s.embeddingSearch(ctx, query, docs, topK*2)
 		if err == nil && len(embIDs) > 0 {
 			lists = append(lists, embIDs)

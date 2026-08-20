@@ -104,7 +104,7 @@ func TestSystemPromptIncludesMergedToolProtocol(t *testing.T) {
 		"mcp_search",
 		"mcp_call",
 		"STALE_TOOL_REF",
-		"mcp__<server>__<tool>",
+		"ref",
 		"tool_calls",
 		"untrusted_tool_result",
 		"shell meta-tools",

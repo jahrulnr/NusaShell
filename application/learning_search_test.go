@@ -1,7 +1,9 @@
 package application
 
 import (
+	"context"
 	"math"
+	"nusashell/domain"
 	"testing"
 )
 
@@ -74,6 +76,55 @@ func TestFuseRRF_TopK(t *testing.T) {
 	fused := fuseRRF([][]string{list1, list2}, 60, 3)
 	if len(fused) != 3 {
 		t.Errorf("expected 3 results, got %d", len(fused))
+	}
+}
+
+// countingEmbedder counts Embed/EmbedBatch calls so tests can assert that
+// DisableEmbedding skips the embedding channel entirely.
+type countingEmbedder struct{ calls int }
+
+func (e *countingEmbedder) Embed(_ context.Context, text string) ([]float32, error) {
+	e.calls++
+	return []float32{1, 0}, nil
+}
+func (e *countingEmbedder) EmbedBatch(_ context.Context, texts []string) ([][]float32, error) {
+	e.calls++
+	out := make([][]float32, len(texts))
+	for i := range out {
+		out[i] = []float32{1, 0}
+	}
+	return out, nil
+}
+func (e *countingEmbedder) Dim() int { return 2 }
+
+func TestSearchSkillsDisableEmbeddingSkipsEmbedder(t *testing.T) {
+	embed := &countingEmbedder{}
+	s := NewLearningSearcher(&stubSkillStoreHyd{skills: []*domain.Skill{
+		{ID: "s1", Name: "git-helper", Description: "git rebase guide"},
+		{ID: "s2", Name: "docker-pro", Description: "docker build guide"},
+	}}, nil, embed, nil)
+
+	// Default options use the embedder.
+	if _, err := s.SearchSkillsWithOpts(context.Background(), "git", 5, defaultSearchOptions()); err != nil {
+		t.Fatal(err)
+	}
+	if embed.calls == 0 {
+		t.Fatal("embedder should be used when embedding is enabled")
+	}
+
+	// DisableEmbedding: BM25 only — the embedder must not be called.
+	embed.calls = 0
+	opts := defaultSearchOptions()
+	opts.DisableEmbedding = true
+	res, err := s.SearchSkillsWithOpts(context.Background(), "git", 5, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if embed.calls != 0 {
+		t.Fatalf("embedder called %d times despite DisableEmbedding", embed.calls)
+	}
+	if len(res) == 0 || res[0].ID != "s1" {
+		t.Fatalf("expected s1 as BM25 top hit, got %+v", res)
 	}
 }
 

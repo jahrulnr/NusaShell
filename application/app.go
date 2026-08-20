@@ -420,6 +420,20 @@ func (a *App) learningSearch() *LearningSearcher {
 	return a.learningSearcher
 }
 
+// SearchSkills implements SkillSearcher for the skill_search tool. It ranks
+// with BM25 + graph + recency but forces embedding off — per-call embedding
+// cost in the agent loop is not justified; the Learning UI keeps the full
+// hybrid path.
+func (a *App) SearchSkills(ctx context.Context, query string, topK int) ([]SearchResult, error) {
+	s := a.learningSearch()
+	if s == nil {
+		return nil, nil
+	}
+	opts := defaultSearchOptions()
+	opts.DisableEmbedding = true
+	return s.SearchSkillsWithOpts(ctx, query, topK, opts)
+}
+
 // graph returns the lazy-initialized LearningGraphService.
 func (a *App) graph() *LearningGraphService {
 	a.learningMu.Lock()

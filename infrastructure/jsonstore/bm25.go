@@ -4,6 +4,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // BM25Doc is a searchable document with an ID and text content.
@@ -89,8 +90,14 @@ func (s *BM25) Search(query string, topK int) []BM25Result {
 	return results
 }
 
+// bm25Tokenize splits on any non-alphanumeric run so hyphenated and
+// underscore-joined identifiers match their parts: "read_file" and
+// "git-rebase" tokenize to ["read","file"] and ["git","rebase"], letting a
+// query like "read file" rank the tool "read_file" correctly.
 func bm25Tokenize(s string) []string {
-	return strings.Fields(strings.ToLower(s))
+	return strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	})
 }
 
 func bm25TermFrequency(text, term string) int {

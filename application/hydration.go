@@ -1,17 +1,16 @@
 package application
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"runtime"
-	"sort"
 	"strings"
 	"time"
 
-	"nusashell/contracts"
 	"nusashell/domain"
 )
 
@@ -24,24 +23,18 @@ type RuntimeContextSnapshot struct {
 	Workspace   string `json:"workspace,omitempty"`
 }
 
-// MCPToolReader is the minimal read-only interface the hydration builder needs
-// to enumerate tools from running MCP servers without executing the gateway.
-type MCPToolReader interface {
-	ToolsFor(serverID string) ([]contracts.MCPToolDTO, bool)
-}
-
 // HydrationSource assembles the read-only sources of truth the builder draws
-// from. A nil store means that snapshot slot is skipped (fail-soft).
+// from. Slots whose content is empty are omitted from the transcript
+// (dynamic hydration).
 type HydrationSource struct {
-	Primary        PrimaryStore // always-injected working set (primary.md)
-	Memory         MemoryStore  // legacy — used by lifecycle/learning subsystems
-	Skills         SkillStore
-	Plugins        PluginStore
-	MCP            MCPToolReader
 	RuntimeContext RuntimeContextSnapshot
-	// Tools is the built-in tool catalog from Toolbox.ListTools(). Hydration keeps
-	// only names and descriptions because the provider already receives schemas.
-	Tools []ToolInfo
+	// Executor runs the REAL meta-tools — mcp_list, tool_list (per running
+	// server), skill_list, memory_list target=primary — so the checkpoint
+	// contains genuine tool output, the same tools the agent itself calls.
+	// The builder never mutates, clones, or mirrors a tool: it calls the
+	// real tool, processes the result, and attaches it to the conversation.
+	// When nil, the tool-backed slots fail soft (hidden).
+	Executor ToolExecutor
 	// Todos is the per-conversation todo checklist. When nil, no todo_list
 	// slot is injected.
 	Todos  ConversationTodoPort
@@ -49,9 +42,12 @@ type HydrationSource struct {
 }
 
 // HydrationBuilder produces an ephemeral synthetic tool transcript
-// (assistant toolCalls + matching tool results) representing a read-only
-// snapshot of the shell runtime. It NEVER executes the gateway — results are
-// precomputed from the read-only sources of truth.
+// (assistant toolCalls + matching tool results) representing a snapshot of
+// the shell runtime. Every tool-backed slot executes its REAL tool through
+// the Executor — the same implementation the agent calls — and attaches the
+// genuine output (processed only where the checkpoint adds value, e.g.
+// primary-memory usage stats). The transcript is DYNAMIC: slots with empty
+// content are omitted entirely, so the call count varies per epoch.
 //
 // The transcript is placed AFTER a real user message (or compaction summary)
 // and BEFORE the model's own output, so the model sees fresh runtime facts
@@ -60,6 +56,9 @@ type HydrationSource struct {
 // would break prompt-cache hits).
 type HydrationBuilder struct {
 	source HydrationSource
+	// runningServerIDs caches the ids of running MCP servers parsed from the
+	// real mcp_list output, consumed by readToolList for the per-server loop.
+	runningServerIDs []string
 }
 
 // NewHydrationBuilder creates a builder from the given read-only sources.
@@ -83,10 +82,14 @@ func (b *HydrationBuilder) Build() HydrationResult {
 	slots := b.collectSlots()
 	calls := make([]domain.ToolCall, 0, len(slots))
 	for i, slot := range slots {
+		args := slot.args
+		if args == "" {
+			args = "{}"
+		}
 		calls = append(calls, domain.ToolCall{
 			ID:   fmt.Sprintf("%s%s_%d", domain.HydrateToolCallPrefix, nonce, i),
 			Name: slot.name,
-			Args: "{}",
+			Args: args,
 		})
 	}
 	messages := make([]ChatMessage, 0, len(slots)+1)
@@ -109,17 +112,26 @@ func (b *HydrationBuilder) Build() HydrationResult {
 
 type hydrationSlot struct {
 	name    string
+	args    string // tool-call arguments rendered in the synthetic transcript ("{}" when empty)
 	content string
 }
 
 func (b *HydrationBuilder) collectSlots() []hydrationSlot {
 	var slots []hydrationSlot
-	slots = append(slots, b.readRuntimeContext())
-	slots = append(slots, b.readMemory())
-	slots = append(slots, b.readSkills())
-	slots = append(slots, b.readMcpList())
-	slots = append(slots, b.readToolList())
-	slots = append(slots, b.readTodoList())
+	for _, slot := range []hydrationSlot{
+		b.readRuntimeContext(),
+		b.readMemory(),
+		b.readSkills(),
+		b.readMcpList(),
+	} {
+		if slot.content != "" {
+			slots = append(slots, slot)
+		}
+	}
+	slots = append(slots, b.readToolList()...)
+	if slot := b.readTodoList(); slot.content != "" {
+		slots = append(slots, slot)
+	}
 	return slots
 }
 
@@ -138,11 +150,18 @@ func (b *HydrationBuilder) readRuntimeContext() hydrationSlot {
 	return hydrationSlot{name: "runtime_context", content: string(content)}
 }
 
+// readMemory runs the real `memory_list` tool with target=primary and
+// attaches its entries, enriched with usage stats computed from the output
+// (the checkpoint's value-add; the tool itself returns bare entries). An
+// empty primary document hides the slot.
 func (b *HydrationBuilder) readMemory() hydrationSlot {
-	if b.source.Primary == nil {
-		return hydrationSlot{name: "memory", content: "{}"}
+	if b.source.Executor == nil {
+		return hydrationSlot{name: "memory", content: ""}
 	}
-	mem := b.source.Primary.Load()
+	out, err := b.source.Executor.Execute(context.Background(), "memory_list", []byte(`{"target":"primary"}`))
+	if err != nil {
+		return hydrationSlot{name: "memory", content: ""}
+	}
 	type primaryEntry struct {
 		ID      string `json:"id"`
 		Content string `json:"content"`
@@ -152,11 +171,22 @@ func (b *HydrationBuilder) readMemory() hydrationSlot {
 		Limit int `json:"limit"`
 		Pct   int `json:"pct"`
 	}
-	out := make([]primaryEntry, 0, len(mem.Entries))
+	var entries []primaryEntry
 	chars := 0
-	for _, e := range mem.Entries {
-		out = append(out, primaryEntry{ID: e.ID, Content: e.Content})
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "{") {
+			continue
+		}
+		var e primaryEntry
+		if json.Unmarshal([]byte(line), &e) != nil || e.Content == "" {
+			continue
+		}
+		entries = append(entries, e)
 		chars += len(e.Content)
+	}
+	if len(entries) == 0 {
+		return hydrationSlot{name: "memory", content: ""}
 	}
 	limit := domain.PrimaryCharCap
 	pct := 0
@@ -164,88 +194,98 @@ func (b *HydrationBuilder) readMemory() hydrationSlot {
 		pct = chars * 100 / limit
 	}
 	content, _ := json.Marshal(map[string]any{
-		"entries": out,
-		"count":   len(out),
+		"entries": entries,
+		"count":   len(entries),
 		"usage":   usage{Chars: chars, Limit: limit, Pct: pct},
 	})
-	return hydrationSlot{name: "memory", content: string(content)}
+	return hydrationSlot{name: "memory", args: `{"target":"primary"}`, content: string(content)}
 }
 
+// readSkills runs the real `skill_list` tool and attaches its output
+// verbatim. An empty skill library hides the slot.
 func (b *HydrationBuilder) readSkills() hydrationSlot {
-	if b.source.Skills == nil {
-		return hydrationSlot{name: "skill_list", content: "[]"}
+	if b.source.Executor == nil {
+		return hydrationSlot{name: "skill_list", content: ""}
 	}
-	skills := b.source.Skills.List()
-	type skillEntry struct {
-		Name        string `json:"name"`
-		Description string `json:"description,omitempty"`
+	out, err := b.source.Executor.Execute(context.Background(), "skill_list", []byte("{}"))
+	if err != nil || !hasJSONLLines(out) {
+		return hydrationSlot{name: "skill_list", content: ""}
 	}
-	out := make([]skillEntry, 0, len(skills))
-	for _, s := range skills {
-		out = append(out, skillEntry{Name: s.Name, Description: s.Description})
-	}
-	// Sort by name for stable output (prompt-cache friendly).
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	content, _ := json.Marshal(out)
-	return hydrationSlot{name: "skill_list", content: string(content)}
+	return hydrationSlot{name: "skill_list", args: "{}", content: out}
 }
 
-func (b *HydrationBuilder) readMcpList() hydrationSlot {
-	if b.source.Plugins == nil {
-		return hydrationSlot{name: "mcp_list", content: `{"plugins":[]}`}
-	}
-	plugins, err := b.source.Plugins.List()
-	if err != nil {
-		return hydrationSlot{name: "mcp_list", content: `{"plugins":[]}`}
-	}
-	type srvInfo struct {
-		Name    string `json:"name"`
-		ID      string `json:"id"`
-		Running bool   `json:"running"`
-		Tools   int    `json:"tools"`
-		UI      bool   `json:"ui,omitempty"`
-	}
-	out := make([]srvInfo, 0, len(plugins))
-	for _, p := range plugins {
-		toolCount := 0
-		isRunning := false
-		if b.source.MCP != nil {
-			if tools, ok := b.source.MCP.ToolsFor(p.Manifest.MCPServerID()); ok {
-				isRunning = true
-				toolCount = len(tools)
-			}
+// hasJSONLLines reports whether a yamlJSONL tool output contains at least
+// one JSON record, i.e. the tool had something to report.
+func hasJSONLLines(out string) bool {
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "{") {
+			return true
 		}
-		out = append(out, srvInfo{
-			Name:    p.Manifest.Name,
-			ID:      p.Manifest.ID,
-			Running: isRunning,
-			Tools:   toolCount,
-			UI:      p.HasUI,
-		})
 	}
-	// Stable order for prompt-cache friendliness.
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	content, _ := json.Marshal(map[string]any{"plugins": out, "count": len(out)})
-	return hydrationSlot{name: "mcp_list", content: string(content)}
+	return false
 }
 
-func (b *HydrationBuilder) readToolList() hydrationSlot {
-	tools := b.source.Tools
-	type toolEntry struct {
-		Name        string `json:"name"`
-		Description string `json:"description,omitempty"`
+// readMcpList executes the real `mcp_list` tool so the checkpoint contains
+// the genuine output the agent would see from a direct call. The running
+// server ids parsed from that output drive the per-server tool_list loop.
+// A runtime with no plugins hides the slot.
+func (b *HydrationBuilder) readMcpList() hydrationSlot {
+	if b.source.Executor == nil {
+		return hydrationSlot{name: "mcp_list", content: ""}
 	}
-	out := make([]toolEntry, 0, len(tools))
-	for _, t := range tools {
-		out = append(out, toolEntry{
-			Name:        t.Name,
-			Description: t.Description,
-		})
+	out, err := b.source.Executor.Execute(context.Background(), "mcp_list", []byte("{}"))
+	if err != nil || !hasJSONLLines(out) {
+		return hydrationSlot{name: "mcp_list", content: ""}
 	}
-	// Sort by name for stable output (prompt-cache friendly).
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	content, _ := json.Marshal(map[string]any{"count": len(out), "tools": out})
-	return hydrationSlot{name: "tool_list", content: string(content)}
+	b.runningServerIDs = parseRunningServerIDs(out)
+	return hydrationSlot{name: "mcp_list", args: "{}", content: out}
+}
+
+// parseRunningServerIDs extracts the ids of running plugins from the real
+// mcp_list tool output (YAML frontmatter followed by one JSON object per
+// line), so the tool_list loop follows exactly what the mcp_list result
+// shows the model.
+func parseRunningServerIDs(out string) []string {
+	var ids []string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "{") {
+			continue
+		}
+		var srv struct {
+			ID      string `json:"id"`
+			Running bool   `json:"running"`
+		}
+		if json.Unmarshal([]byte(line), &srv) != nil || !srv.Running || srv.ID == "" {
+			continue
+		}
+		ids = append(ids, srv.ID)
+	}
+	return ids
+}
+
+// readToolList executes the real `tool_list` tool once per running MCP
+// server — ids taken from the real mcp_list result — producing one synthetic
+// `tool_list` call+result per server, the same discovery workflow the agent
+// itself would run. The built-in tool catalog is intentionally NOT injected:
+// the provider request already carries it with schemas in `tools[]` every
+// round, and a synthetic built-in `tool_list` slot gave the name a different
+// meaning than the real tool (built-in catalog vs MCP tools), which confused
+// agents.
+func (b *HydrationBuilder) readToolList() []hydrationSlot {
+	var slots []hydrationSlot
+	if b.source.Executor == nil {
+		return slots
+	}
+	for _, id := range b.runningServerIDs {
+		args, _ := json.Marshal(map[string]string{"server": id})
+		out, err := b.source.Executor.Execute(context.Background(), "tool_list", args)
+		if err != nil || !hasJSONLLines(out) {
+			continue
+		}
+		slots = append(slots, hydrationSlot{name: "tool_list", args: string(args), content: out})
+	}
+	return slots
 }
 
 // readTodoList injects the current conversation's todo checklist into a
@@ -253,8 +293,9 @@ func (b *HydrationBuilder) readToolList() hydrationSlot {
 // (completed items are noise for the model — the UI strip still shows them).
 // The checkpoint is reused while history remains intact; after compaction, a
 // fresh checkpoint restores the goal and open items from the todo store.
-// Returns an empty-content slot when no todo port or no conversation id is
-// configured so the slot is harmless but present for call-ID alignment.
+// There is no real `todo_list` tool (the `todo` tool is a full-replace
+// writer), so the slot reads the todo store directly. Empty content (no
+// goal and no open items) hides the slot.
 func (b *HydrationBuilder) readTodoList() hydrationSlot {
 	if b.source.Todos == nil || b.source.ConvID == "" {
 		return hydrationSlot{name: "todo_list", content: ""}

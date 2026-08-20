@@ -140,6 +140,64 @@ func TestSkillSearch(t *testing.T) {
 	}
 }
 
+// stubSkillSearcher returns scripted ranked results for skill_search tests.
+type stubSkillSearcher struct {
+	ids []string
+}
+
+func (s *stubSkillSearcher) SearchSkills(_ context.Context, _ string, topK int) ([]application.SearchResult, error) {
+	out := make([]application.SearchResult, 0, topK)
+	for _, id := range s.ids {
+		out = append(out, application.SearchResult{ID: id})
+	}
+	return out, nil
+}
+
+func TestSkillSearchUsesRankedSearcher(t *testing.T) {
+	tb := testToolbox(
+		[]*domain.Skill{
+			{ID: "s1", Name: "git-helper", Description: "Help with git operations"},
+			{ID: "s2", Name: "git-advanced", Description: "Advanced git workflows"},
+			{ID: "docker-pro", Name: "docker-pro", Description: "Docker container management"},
+		},
+		nil, &stubMCP{},
+	)
+	tb.SkillSearcher = &stubSkillSearcher{ids: []string{"s2", "s1"}}
+	out, err := tb.Execute(context.Background(), "skill_search", []byte(`{"query":"git"}`))
+	if err != nil {
+		t.Fatalf("skill_search: %v", err)
+	}
+	if strings.Index(out, "git-advanced") > strings.Index(out, "git-helper") {
+		t.Errorf("searcher ranking should be preserved (s2 before s1), got: %s", out)
+	}
+	if strings.Contains(out, "docker-pro") {
+		t.Errorf("docker-pro should not match git query, got: %s", out)
+	}
+}
+
+func TestSkillSearchRecallFallback(t *testing.T) {
+	// The ranker misses an inflected name; the substring fallback keeps it
+	// so recall never regresses below the plain matcher.
+	tb := testToolbox(
+		[]*domain.Skill{
+			{ID: "s1", Name: "review", Description: "Review code for bugs"},
+			{ID: "s2", Name: "reviews", Description: "Handle review sessions"},
+		},
+		nil, &stubMCP{},
+	)
+	tb.SkillSearcher = &stubSkillSearcher{ids: []string{"s1"}}
+	out, err := tb.Execute(context.Background(), "skill_search", []byte(`{"query":"review"}`))
+	if err != nil {
+		t.Fatalf("skill_search: %v", err)
+	}
+	if !strings.Contains(out, "reviews") {
+		t.Errorf("recall fallback should include substring matches the ranker missed, got: %s", out)
+	}
+	if strings.Index(out, "review") > strings.Index(out, "reviews") {
+		t.Errorf("ranked hit should come before the fallback hit, got: %s", out)
+	}
+}
+
 func TestSkillSearchCaseInsensitive(t *testing.T) {
 	tb := testToolbox(
 		[]*domain.Skill{{ID: "s1", Name: "Code-Review", Description: "Review code"}},
@@ -343,8 +401,8 @@ func TestToolListByPluginID(t *testing.T) {
 	if !strings.Contains(out, "count: 1") {
 		t.Errorf("expected 1 tool via plugin id, got: %s", out)
 	}
-	if !strings.Contains(out, `"name":"mcp__Terminal__exec"`) {
-		t.Errorf("expected tool name in JSONL, got: %s", out)
+	if !strings.Contains(out, `"ref":"Terminal:exec"`) || !strings.Contains(out, `"name":"exec"`) {
+		t.Errorf("expected ref+name in JSONL, got: %s", out)
 	}
 }
 
@@ -448,8 +506,8 @@ func TestToolSearchAllServers(t *testing.T) {
 	if !strings.Contains(out, "count: 2") {
 		t.Errorf("expected 2 matches across all servers, got: %s", out)
 	}
-	if !strings.Contains(out, "mcp__files__read_file") || !strings.Contains(out, "mcp__files__list_files") {
-		t.Errorf("expected files server tools in results, got: %s", out)
+	if !strings.Contains(out, `"ref":"files:read_file"`) || !strings.Contains(out, `"ref":"files:list_files"`) {
+		t.Errorf("expected files server refs in results, got: %s", out)
 	}
 	if strings.Contains(out, "create_issue") {
 		t.Errorf("github tool should not match 'file' query, got: %s", out)
@@ -464,6 +522,51 @@ func TestToolSearchAllServers(t *testing.T) {
 	}
 	if !strings.Contains(out, "\"path\"") {
 		t.Errorf("expected path field in read_file parameters, got: %s", out)
+	}
+}
+
+func TestToolSearchRanksByRelevance(t *testing.T) {
+	tb := testToolbox(nil,
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv2", Name: "files", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+		},
+		&stubMCP{tools: map[string][]contracts.MCPToolDTO{
+			"plugin:srv2": {
+				{Name: "list_files", Description: "List files in a directory"},
+				{Name: "read_file", Description: "Read a file from disk"},
+			},
+		}},
+	)
+	out, err := tb.Execute(context.Background(), "tool_search", []byte(`{"query":"file"}`))
+	if err != nil {
+		t.Fatalf("tool_search: %v", err)
+	}
+	// Both match by substring; BM25 ranks read_file (the query token occurs
+	// in its text) above list_files (only the plural "files" occurs).
+	if strings.Index(out, "read_file") > strings.Index(out, "list_files") {
+		t.Errorf("read_file should rank above list_files, got: %s", out)
+	}
+}
+
+func TestToolSearchBoundedByLimit(t *testing.T) {
+	tb := testToolbox(nil,
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv2", Name: "files", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+		},
+		&stubMCP{tools: map[string][]contracts.MCPToolDTO{
+			"plugin:srv2": {
+				{Name: "read_file", Description: "Read a file"},
+				{Name: "write_file", Description: "Write a file"},
+				{Name: "list_files", Description: "List files"},
+			},
+		}},
+	)
+	out, err := tb.Execute(context.Background(), "tool_search", []byte(`{"query":"file","limit":2}`))
+	if err != nil {
+		t.Fatalf("tool_search: %v", err)
+	}
+	if !strings.Contains(out, "count: 2") {
+		t.Errorf("tool_search must honor the limit, got: %s", out)
 	}
 }
 
@@ -822,7 +925,7 @@ func TestMCPDynamicToolsNotAdvertised(t *testing.T) {
 	}
 }
 
-func TestMCPDynamicToolsExecutableButNotAdvertised(t *testing.T) {
+func TestMCPDynamicToolsNotCallableByName(t *testing.T) {
 	mcp := &stubMCP{tools: map[string][]contracts.MCPToolDTO{
 		"plugin:files": {{Name: "read", Description: "read a file"}},
 	}}
@@ -838,12 +941,11 @@ func TestMCPDynamicToolsExecutableButNotAdvertised(t *testing.T) {
 			t.Fatalf("mcp__ tool %q should not be advertised", ti.Name)
 		}
 	}
-	// ... but still callable by name.
-	out, err := tb.Execute(context.Background(), "mcp__files__read", nil)
-	if err != nil {
-		t.Fatalf("mcp__ tool should still be executable: %v", err)
+	// ... and the legacy mcp__ name is NOT callable: the only execution
+	// contract is mcp_call with a ref.
+	if out, err := tb.Execute(context.Background(), "mcp__files__read", nil); err == nil {
+		t.Fatalf("mcp__ tool must not be executable, got: %s", out)
 	}
-	_ = out
 }
 
 // --- mcp management tools ---
@@ -1520,19 +1622,19 @@ func TestMcpCreatorSkillUsesRuntimeToolContract(t *testing.T) {
 			return err
 		}
 		text := string(content)
-		for _, stale := range []string{"mcp_context", "mcp_<pluginId>_<tool>", "capabilities.prompts", "prompts.js"} {
+		for _, stale := range []string{"mcp_context", "mcp_<pluginId>_<tool>", "capabilities.prompts", "prompts.js", "mcp__<server>__<tool>"} {
 			if strings.Contains(text, stale) {
 				t.Errorf("%s contains stale tool contract %q", path, stale)
 			}
 		}
-		foundRuntimeName = foundRuntimeName || strings.Contains(text, "mcp__<server>__<tool>")
+		foundRuntimeName = foundRuntimeName || strings.Contains(text, "<server>:<tool>")
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !foundRuntimeName {
-		t.Error("mcp-creator missing runtime MCP tool naming contract")
+		t.Error("mcp-creator missing runtime MCP ref naming contract")
 	}
 }
 

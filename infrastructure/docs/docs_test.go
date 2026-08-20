@@ -35,6 +35,23 @@ func TestReadTrimsWhitespace(t *testing.T) {
 	}
 }
 
+func TestSearchRanksByRelevance(t *testing.T) {
+	s := &Source{docs: []docEntry{
+		{id: "a", title: "A", path: "p", content: "alpha alpha alpha beta"},
+		{id: "b", title: "B", path: "p", content: "alpha gamma"},
+	}}
+	// Only doc a contains "beta".
+	hits := s.Search("beta", 5)
+	if len(hits) != 1 || hits[0].ID != "a" {
+		t.Fatalf("beta hits = %+v, want only a", hits)
+	}
+	// Both contain "alpha"; BM25 ranks the denser match first.
+	hits = s.Search("alpha", 5)
+	if len(hits) != 2 || hits[0].ID != "a" || hits[1].ID != "b" {
+		t.Fatalf("alpha hits = %+v, want a then b", hits)
+	}
+}
+
 func TestArtifactsDocExists(t *testing.T) {
 	s, err := New("")
 	if err != nil {

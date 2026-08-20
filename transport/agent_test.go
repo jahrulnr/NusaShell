@@ -739,10 +739,11 @@ func TestAgentTurnWithMCPTool(t *testing.T) {
 		t.Fatalf("mcp tools = %+v", tools.Tools)
 	}
 
-	// agent turn that calls the MCP echo tool by name (not advertised, but
-	// still executable via matchMCPTool dispatch).
+	// agent turn that calls the MCP echo tool through the single execution
+	// contract: mcp_call with a ref (not advertised in tools[], but
+	// discoverable via mcp_search / tool_list).
 	h.llm.setRounds([][]llmStep{
-		{{Tool: &llmToolCall{ID: "call_9", Name: "mcp__fakemcp__echo", Args: map[string]any{"text": "hello-mcp"}}}},
+		{{Tool: &llmToolCall{ID: "call_9", Name: "mcp_call", Args: map[string]any{"ref": "fakemcp:echo", "arguments_json": "{\"text\":\"hello-mcp\"}"}}}},
 		{{Text: "Echo done."}},
 	})
 	h.rpcOK(t, "agent.turns.start", map[string]any{
@@ -767,7 +768,7 @@ func TestAgentTurnWithMCPTool(t *testing.T) {
 	found := false
 	for _, m := range conv.Messages {
 		for _, tc := range m.ToolCalls {
-			if tc.Name == "mcp__fakemcp__echo" {
+			if tc.Name == "mcp_call" {
 				found = true
 				if tc.Status != "ok" || !strings.Contains(tc.Output, "echo: hello-mcp") {
 					t.Fatalf("mcp tool call = %+v", tc)

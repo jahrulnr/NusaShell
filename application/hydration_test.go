@@ -1,33 +1,14 @@
 package application
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 
-	"nusashell/contracts"
 	"nusashell/domain"
 )
-
-// stubMemStore is a minimal MemoryStore for testing.
-type stubMemStore struct{ entries []*domain.MemoryEntry }
-
-func (s *stubMemStore) List() []*domain.MemoryEntry      { return s.entries }
-func (s *stubMemStore) Save(e *domain.MemoryEntry) error { return nil }
-func (s *stubMemStore) Delete(id string) error           { return nil }
-func (s *stubMemStore) Replace(target, oldText, content string) error {
-	return nil
-}
-
-// stubPrimaryStore is a minimal PrimaryStore for hydration tests.
-type stubPrimaryStore struct{ mem *domain.PrimaryMemory }
-
-func (s *stubPrimaryStore) Load() *domain.PrimaryMemory { return s.mem }
-func (s *stubPrimaryStore) Update(entries []domain.PrimaryEntry) error {
-	return nil
-}
-func (s *stubPrimaryStore) Replace(oldText, content string) error { return nil }
 
 // stubSkillStoreHyd is a minimal SkillStore for hydration tests.
 type stubSkillStoreHyd struct{ skills []*domain.Skill }
@@ -53,28 +34,38 @@ func (s *stubSkillStoreHyd) Install(zipData []byte) (string, error) {
 func (s *stubSkillStoreHyd) MountPluginSkills(pluginID, dir string) error { return nil }
 func (s *stubSkillStoreHyd) UnmountPluginSkills(pluginID string) error    { return nil }
 
-// stubPluginStoreHyd is a minimal PluginStore for hydration tests.
-type stubPluginStoreHyd struct{ plugins []*domain.Plugin }
-
-func (s *stubPluginStoreHyd) List() ([]*domain.Plugin, error) { return s.plugins, nil }
-func (s *stubPluginStoreHyd) Get(id string) (*domain.Plugin, error) {
-	return nil, fmt.Errorf("not found")
-}
-func (s *stubPluginStoreHyd) Install(sourceDir string) (*domain.Plugin, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-func (s *stubPluginStoreHyd) Uninstall(id string) error   { return nil }
-func (s *stubPluginStoreHyd) Save(p *domain.Plugin) error { return nil }
-func (s *stubPluginStoreHyd) Delete(id string) error      { return nil }
-
-// stubMCPReader is a minimal MCPToolReader for testing.
-type stubMCPReader struct {
-	tools map[string][]contracts.MCPToolDTO
+// stubHydrationExecutor is a scripted ToolExecutor for hydration tests. It
+// records every call and returns the scripted output per tool name.
+type stubHydrationExecutor struct {
+	fn    func(name string, args []byte) (string, error)
+	calls []string
 }
 
-func (m *stubMCPReader) ToolsFor(serverID string) ([]contracts.MCPToolDTO, bool) {
-	tools, ok := m.tools[serverID]
-	return tools, ok
+func (s *stubHydrationExecutor) ListTools() []ToolInfo { return nil }
+func (s *stubHydrationExecutor) Execute(_ context.Context, name string, args []byte) (string, error) {
+	s.calls = append(s.calls, name+" "+string(args))
+	return s.fn(name, args)
+}
+
+// emptyToolOutput is a yamlJSONL output with no records — the builder must
+// hide slots whose real tool reports nothing.
+const emptyToolOutput = "---\ncount: 0\n---\n"
+
+// hydrationResultByName returns the tool-result content of the named slot.
+// The transcript is dynamic, so tests look slots up by name, never by index.
+func hydrationResultByName(t *testing.T, result HydrationResult, name string) string {
+	t.Helper()
+	for i, c := range result.Messages[0].ToolCalls {
+		if c.Name == name {
+			r := result.Messages[i+1]
+			if r.ToolResult == nil {
+				t.Fatalf("slot %q has no tool result", name)
+			}
+			return r.ToolResult.Content
+		}
+	}
+	t.Fatalf("slot %q not found in hydration transcript", name)
+	return ""
 }
 
 func TestHydrationBuildBasic(t *testing.T) {
@@ -87,18 +78,20 @@ func TestHydrationBuildBasic(t *testing.T) {
 		},
 	})
 	result := b.Build()
-	if result.CallCount != 6 {
-		t.Fatalf("expected 6 hydration calls, got %d", result.CallCount)
+	// Without an executor or todos, every tool-backed slot is hidden: only
+	// runtime_context remains (dynamic transcript).
+	if result.CallCount != 1 {
+		t.Fatalf("expected 1 hydration call, got %d", result.CallCount)
 	}
-	if len(result.Messages) != 7 { // 1 assistant + 6 tool results
-		t.Fatalf("expected 7 messages, got %d", len(result.Messages))
+	if len(result.Messages) != 2 { // 1 assistant + 1 tool result
+		t.Fatalf("expected 2 messages, got %d", len(result.Messages))
 	}
 	// First message: assistant with toolCalls
 	if result.Messages[0].Role != "assistant" {
 		t.Errorf("expected first message role=assistant, got %s", result.Messages[0].Role)
 	}
-	if len(result.Messages[0].ToolCalls) != 6 {
-		t.Errorf("expected 6 toolCalls, got %d", len(result.Messages[0].ToolCalls))
+	if len(result.Messages[0].ToolCalls) != 1 {
+		t.Errorf("expected 1 toolCall, got %d", len(result.Messages[0].ToolCalls))
 	}
 	// All call IDs must have hydrate: prefix
 	for _, c := range result.Messages[0].ToolCalls {
@@ -146,17 +139,26 @@ func TestHydrationRuntimeContext(t *testing.T) {
 }
 
 func TestHydrationMemory(t *testing.T) {
-	b := NewHydrationBuilder(HydrationSource{
-		Primary: &stubPrimaryStore{mem: &domain.PrimaryMemory{
-			Entries: []domain.PrimaryEntry{
-				{ID: "frag_1", Content: "User prefers Indonesian"},
-				{ID: "frag_2", Content: "Repo uses Go + Clean Architecture"},
-			},
-		}},
-	})
+	// The memory slot runs the real memory_list tool (target=primary) and
+	// enriches its entries with usage stats computed from the output.
+	exec := &stubHydrationExecutor{fn: func(name string, _ []byte) (string, error) {
+		switch name {
+		case "memory_list":
+			return "---\ncount: 2\n---\n" +
+				`{"id":"frag_1","content":"User prefers Indonesian"}` + "\n" +
+				`{"id":"frag_2","content":"Repo uses Go + Clean Architecture"}`, nil
+		case "skill_list", "mcp_list", "tool_list":
+			return emptyToolOutput, nil
+		}
+		return "", fmt.Errorf("unexpected tool %q", name)
+	}}
+	b := NewHydrationBuilder(HydrationSource{Executor: exec})
 	result := b.Build()
-	// memory is the second tool result (index 2)
-	memContent := result.Messages[2].ToolResult.Content
+	if got := result.Messages[0].ToolCalls[1].Args; got != `{"target":"primary"}` {
+		t.Errorf("memory call args = %s, want target=primary", got)
+	}
+	// memory is the second slot (after runtime_context)
+	memContent := hydrationResultByName(t, result, "memory")
 	var mem struct {
 		Count   int `json:"count"`
 		Entries []struct {
@@ -191,107 +193,162 @@ func TestHydrationMemory(t *testing.T) {
 	}
 }
 
-func TestHydrationMemoryNil(t *testing.T) {
+func TestHydrationMemoryHiddenWhenEmpty(t *testing.T) {
+	// No executor: the memory slot is hidden, not emitted as an empty stub.
 	b := NewHydrationBuilder(HydrationSource{})
 	result := b.Build()
-	memContent := result.Messages[2].ToolResult.Content
-	if memContent != "{}" {
-		t.Errorf("expected {} for nil primary, got %s", memContent)
-	}
-}
-
-func TestHydrationSkillsSorted(t *testing.T) {
-	b := NewHydrationBuilder(HydrationSource{
-		Skills: &stubSkillStoreHyd{skills: []*domain.Skill{
-			{ID: "s3", Name: "zebra", Description: "z"},
-			{ID: "s1", Name: "alpha", Description: "a"},
-			{ID: "s2", Name: "mid", Description: "m"},
-		}},
-	})
-	result := b.Build()
-	skillContent := result.Messages[3].ToolResult.Content
-	var skills []struct {
-		Name string `json:"name"`
-	}
-	if err := json.Unmarshal([]byte(skillContent), &skills); err != nil {
-		t.Fatalf("invalid skill_list JSON: %v", err)
-	}
-	if len(skills) != 3 {
-		t.Fatalf("expected 3 skills, got %d", len(skills))
-	}
-	if skills[0].Name != "alpha" || skills[1].Name != "mid" || skills[2].Name != "zebra" {
-		t.Errorf("expected sorted skills, got %s %s %s", skills[0].Name, skills[1].Name, skills[2].Name)
-	}
-}
-
-func TestHydrationMcpList(t *testing.T) {
-	b := NewHydrationBuilder(HydrationSource{
-		Plugins: &stubPluginStoreHyd{plugins: []*domain.Plugin{
-			{Manifest: domain.PluginManifest{ID: "srv1", Name: "github", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio}}},
-			{Manifest: domain.PluginManifest{ID: "srv2", Name: "fs", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio}}},
-		}},
-		MCP: &stubMCPReader{tools: map[string][]contracts.MCPToolDTO{
-			"plugin:srv1": {{Name: "create_issue"}},
-		}},
-	})
-	result := b.Build()
-	mcpContent := result.Messages[4].ToolResult.Content
-	var mcp struct {
-		Plugins []struct {
-			Name    string `json:"name"`
-			Running bool   `json:"running"`
-			Tools   int    `json:"tools"`
-		} `json:"plugins"`
-	}
-	if err := json.Unmarshal([]byte(mcpContent), &mcp); err != nil {
-		t.Fatalf("invalid mcp_list JSON: %v", err)
-	}
-	// The merged plugin list must include ALL plugins — running and idle.
-	if len(mcp.Plugins) != 2 {
-		t.Fatalf("expected 2 plugins (running + idle), got %d", len(mcp.Plugins))
-	}
-	if mcp.Plugins[1].Name != "github" || !mcp.Plugins[1].Running || mcp.Plugins[1].Tools != 1 {
-		t.Errorf("expected github running with 1 tool, got %+v", mcp.Plugins[1])
-	}
-	if mcp.Plugins[0].Name != "fs" || mcp.Plugins[0].Running {
-		t.Errorf("expected fs idle, got %+v", mcp.Plugins[0])
-	}
-}
-
-func TestHydrationToolList(t *testing.T) {
-	b := NewHydrationBuilder(HydrationSource{
-		Tools: []ToolInfo{
-			{Name: "skill_list", Description: "List skills", InputSchema: map[string]any{"type": "object"}},
-			{Name: "memory_save", Description: "Save memory", InputSchema: map[string]any{"type": "object"}},
-		},
-	})
-	result := b.Build()
-	toolContent := result.Messages[5].ToolResult.Content
-	var tl struct {
-		Count int `json:"count"`
-		Tools []struct {
-			Name        string         `json:"name"`
-			Description string         `json:"description"`
-			InputSchema map[string]any `json:"input_schema"`
-		} `json:"tools"`
-	}
-	if err := json.Unmarshal([]byte(toolContent), &tl); err != nil {
-		t.Fatalf("invalid tool_list JSON: %v", err)
-	}
-	if tl.Count != 2 {
-		t.Errorf("expected 2 tools, got %d", tl.Count)
-	}
-	// Should be sorted
-	if tl.Tools[0].Name != "memory_save" || tl.Tools[1].Name != "skill_list" {
-		t.Errorf("expected sorted tools, got %s %s", tl.Tools[0].Name, tl.Tools[1].Name)
-	}
-	for _, tool := range tl.Tools {
-		if tool.Description == "" {
-			t.Errorf("tool %s should keep its description", tool.Name)
+	for _, c := range result.Messages[0].ToolCalls {
+		if c.Name == "memory" {
+			t.Fatal("memory slot must be hidden when the real tool is unavailable")
 		}
-		if tool.InputSchema != nil {
-			t.Errorf("tool %s should omit its input schema from hydration", tool.Name)
+	}
+	// Executor present but primary memory empty: also hidden.
+	exec := &stubHydrationExecutor{fn: func(name string, _ []byte) (string, error) {
+		switch name {
+		case "memory_list", "skill_list", "mcp_list", "tool_list":
+			return emptyToolOutput, nil
 		}
+		return "", fmt.Errorf("unexpected tool %q", name)
+	}}
+	result = NewHydrationBuilder(HydrationSource{Executor: exec}).Build()
+	for _, c := range result.Messages[0].ToolCalls {
+		if c.Name == "memory" {
+			t.Fatal("memory slot must be hidden when primary memory is empty")
+		}
+	}
+}
+
+func TestHydrationSkillsRealOutput(t *testing.T) {
+	// The skill_list slot attaches the real tool's output verbatim.
+	skillOutput := "---\ncount: 2\n---\n" +
+		`{"name":"alpha","description":"a"}` + "\n" +
+		`{"name":"zebra","description":"z"}`
+	exec := &stubHydrationExecutor{fn: func(name string, _ []byte) (string, error) {
+		switch name {
+		case "skill_list":
+			return skillOutput, nil
+		case "memory_list", "mcp_list", "tool_list":
+			return emptyToolOutput, nil
+		}
+		return "", fmt.Errorf("unexpected tool %q", name)
+	}}
+	b := NewHydrationBuilder(HydrationSource{Executor: exec})
+	result := b.Build()
+	if got := hydrationResultByName(t, result, "skill_list"); got != skillOutput {
+		t.Fatalf("skill_list slot must contain the real tool output verbatim:\n got %q\nwant %q", got, skillOutput)
+	}
+}
+
+func TestHydrationSkillsHiddenWhenEmpty(t *testing.T) {
+	exec := &stubHydrationExecutor{fn: func(name string, _ []byte) (string, error) {
+		switch name {
+		case "memory_list", "skill_list", "mcp_list", "tool_list":
+			return emptyToolOutput, nil
+		}
+		return "", fmt.Errorf("unexpected tool %q", name)
+	}}
+	result := NewHydrationBuilder(HydrationSource{Executor: exec}).Build()
+	for _, c := range result.Messages[0].ToolCalls {
+		if c.Name == "skill_list" {
+			t.Fatal("skill_list slot must be hidden when the skill library is empty")
+		}
+	}
+}
+
+func TestHydrationMcpListExecutesRealTool(t *testing.T) {
+	realOutput := "---\ncount: 2\n---\n" +
+		`{"name":"fs","id":"srv2","running":false,"tools":0}` + "\n" +
+		`{"name":"github","id":"srv1","running":true,"tools":1}`
+	b := NewHydrationBuilder(HydrationSource{
+		Executor: &stubHydrationExecutor{fn: func(name string, _ []byte) (string, error) {
+			switch name {
+			case "mcp_list":
+				return realOutput, nil
+			case "memory_list", "skill_list", "tool_list":
+				return emptyToolOutput, nil
+			}
+			return "", fmt.Errorf("unexpected tool %q", name)
+		}},
+	})
+	result := b.Build()
+	mcpContent := hydrationResultByName(t, result, "mcp_list")
+	if mcpContent != realOutput {
+		t.Fatalf("mcp_list slot must contain the real tool output verbatim:\n got %q\nwant %q", mcpContent, realOutput)
+	}
+}
+
+func TestHydrationMcpListHiddenWhenNoPlugins(t *testing.T) {
+	exec := &stubHydrationExecutor{fn: func(name string, _ []byte) (string, error) {
+		switch name {
+		case "memory_list", "skill_list", "mcp_list", "tool_list":
+			return emptyToolOutput, nil
+		}
+		return "", fmt.Errorf("unexpected tool %q", name)
+	}}
+	result := NewHydrationBuilder(HydrationSource{Executor: exec}).Build()
+	for _, c := range result.Messages[0].ToolCalls {
+		if c.Name == "mcp_list" || c.Name == "tool_list" {
+			t.Fatalf("mcp/tool slots must be hidden when no plugins exist, got %s", c.Name)
+		}
+	}
+}
+
+// TestHydrationToolListLoopsRealToolPerServer pins the discovery workflow:
+// the real mcp_list runs first, then the real tool_list runs once per
+// RUNNING server id (from the mcp_list result) — the same sequence the agent
+// itself would execute. No tool_list call happens for stopped servers, and
+// the built-in catalog is never injected (tools[] covers it).
+func TestHydrationToolListLoopsRealToolPerServer(t *testing.T) {
+	mcpOutput := "---\ncount: 2\n---\n" +
+		`{"name":"Files","id":"nusashell.files","running":true,"tools":1}` + "\n" +
+		`{"name":"Offline","id":"nusashell.offline","running":false,"tools":0}`
+	filesOutput := "---\ncount: 1\n---\n" +
+		`{"ref":"Files:read_file","name":"read_file","server":"Files","description":"Read a file","parameters":{"type":"object"}}`
+	exec := &stubHydrationExecutor{fn: func(name string, args []byte) (string, error) {
+		switch name {
+		case "mcp_list":
+			return mcpOutput, nil
+		case "tool_list":
+			if string(args) == `{"server":"nusashell.files"}` {
+				return filesOutput, nil
+			}
+			return emptyToolOutput, nil
+		case "memory_list", "skill_list":
+			return emptyToolOutput, nil
+		}
+		return "", fmt.Errorf("unexpected tool %q", name)
+	}}
+	b := NewHydrationBuilder(HydrationSource{Executor: exec})
+	result := b.Build()
+
+	// mcp_list first, then exactly one tool_list call per running server,
+	// with the server id from the mcp_list result as the argument.
+	var toolListCalls []string
+	for _, call := range exec.calls {
+		if strings.HasPrefix(call, "tool_list ") {
+			toolListCalls = append(toolListCalls, strings.TrimPrefix(call, "tool_list "))
+		}
+	}
+	if len(toolListCalls) != 1 {
+		t.Fatalf("expected 1 tool_list call for 1 running server, got %d (%v)", len(toolListCalls), exec.calls)
+	}
+	if toolListCalls[0] != `{"server":"nusashell.files"}` {
+		t.Errorf("tool_list args = %s, want server=nusashell.files", toolListCalls[0])
+	}
+
+	// The tool_list result in the transcript carries the real output verbatim.
+	var found bool
+	for i := 1; i < len(result.Messages); i++ {
+		m := result.Messages[i]
+		if m.Role == "tool" && m.ToolResult != nil && m.ToolResult.Name == "tool_list" {
+			if m.ToolResult.Content != filesOutput {
+				t.Fatalf("tool_list slot must contain the real tool output verbatim:\n got %q\nwant %q", m.ToolResult.Content, filesOutput)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("tool_list result not found in the hydration transcript")
 	}
 }
 
@@ -306,8 +363,7 @@ func TestHydrationTodoList(t *testing.T) {
 	}}
 	b := NewHydrationBuilder(HydrationSource{Todos: port, ConvID: "conv_1"})
 	result := b.Build()
-	// todo_list is the 6th slot (index 6 in messages: 0=assistant, 1-6=results)
-	todoContent := result.Messages[6].ToolResult.Content
+	todoContent := hydrationResultByName(t, result, "todo_list")
 	if !strings.Contains(todoContent, "CURRENT TASKS") {
 		t.Errorf("expected CURRENT TASKS header, got: %s", todoContent)
 	}
@@ -336,7 +392,7 @@ func TestHydrationTodoListWithGoal(t *testing.T) {
 	}
 	b := NewHydrationBuilder(HydrationSource{Todos: port, ConvID: "conv_1"})
 	result := b.Build()
-	todoContent := result.Messages[6].ToolResult.Content
+	todoContent := hydrationResultByName(t, result, "todo_list")
 	if !strings.Contains(todoContent, "USER GOAL") {
 		t.Errorf("expected USER GOAL header, got: %s", todoContent)
 	}
@@ -363,7 +419,7 @@ func TestHydrationTodoListGoalOnly(t *testing.T) {
 	}
 	b := NewHydrationBuilder(HydrationSource{Todos: port, ConvID: "conv_1"})
 	result := b.Build()
-	todoContent := result.Messages[6].ToolResult.Content
+	todoContent := hydrationResultByName(t, result, "todo_list")
 	if !strings.Contains(todoContent, "USER GOAL") {
 		t.Errorf("expected USER GOAL header, got: %s", todoContent)
 	}
@@ -372,22 +428,22 @@ func TestHydrationTodoListGoalOnly(t *testing.T) {
 	}
 }
 
-func TestHydrationTodoListEmpty(t *testing.T) {
+// TestHydrationTodoListHiddenWhenEmpty pins the dynamic rule: no goal and no
+// open items → the todo_list slot is omitted entirely (not an empty stub).
+func TestHydrationTodoListHiddenWhenEmpty(t *testing.T) {
 	port := &fakeTodoPort{items: map[string][]domain.TodoItem{}}
-	b := NewHydrationBuilder(HydrationSource{Todos: port, ConvID: "conv_1"})
-	result := b.Build()
-	todoContent := result.Messages[6].ToolResult.Content
-	if todoContent != "" {
-		t.Errorf("expected empty content for no todos, got: %s", todoContent)
+	result := NewHydrationBuilder(HydrationSource{Todos: port, ConvID: "conv_1"}).Build()
+	for _, c := range result.Messages[0].ToolCalls {
+		if c.Name == "todo_list" {
+			t.Fatal("todo_list slot must be hidden when there is no goal and no open items")
+		}
 	}
-}
-
-func TestHydrationTodoListNilPort(t *testing.T) {
-	b := NewHydrationBuilder(HydrationSource{})
-	result := b.Build()
-	todoContent := result.Messages[6].ToolResult.Content
-	if todoContent != "" {
-		t.Errorf("expected empty content for nil todo port, got: %s", todoContent)
+	// Nil port: also hidden.
+	result = NewHydrationBuilder(HydrationSource{}).Build()
+	for _, c := range result.Messages[0].ToolCalls {
+		if c.Name == "todo_list" {
+			t.Fatal("todo_list slot must be hidden when no todo port is configured")
+		}
 	}
 }
 

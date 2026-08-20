@@ -592,9 +592,11 @@ test('BH-SETTINGS-01: sampling parameters cannot be cleared to null once set', a
 //
 // Shape in the OpenAI request:
 //   - assistant message with tool_calls whose ids start with "hydrate-"
-//   - followed by tool messages with tool_call_id matching those ids,
-//     containing runtime_context / memory / skill_list / mcp_list /
-//     tool_list / todo_list snapshots.
+//   - followed by tool messages with tool_call_id matching those ids.
+// The transcript is DYNAMIC: slots whose real tool reports nothing (no
+// plugins, no todos, empty primary memory) are omitted entirely. In this
+// harness (fresh data dir, seeded primary, embedded skills, no plugins)
+// the visible slots are runtime_context, memory, skill_list.
 function findHydration(messages) {
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
@@ -620,10 +622,10 @@ function hydrationSlotNames(hydration) {
 }
 
 // HYDR-NEW-ROOM: A brand-new conversation's first turn must inject the
-// synthetic runtime-hydration transcript (runtime_context, memory,
-// skill_list, mcp_list, tool_list, todo_list) into the provider request.
-// The transcript is ephemeral — never persisted — so it must appear in the
-// request body but NOT in the persisted conversation messages.
+// runtime-hydration transcript (dynamic: only slots with real content) into
+// the provider request. The transcript is ephemeral — never persisted — so
+// it must appear in the request body but NOT in the persisted conversation
+// messages.
 test('HYDR-NEW-ROOM: first turn of a new conversation injects the hydration transcript', async (t) => {
   assert.ok(NativeWebSocket, 'Node WebSocket support is required for the E2E event stream');
   const llmPort = await freePort();
@@ -706,12 +708,14 @@ test('HYDR-NEW-ROOM: first turn of a new conversation injects the hydration tran
     const hydration = findHydration(lastStream.body.messages);
     assert.ok(hydration, 'HYDR-NEW-ROOM: hydration transcript must be present in the first turn request');
 
-    // All 6 slots must be present and in canonical order.
+    // Dynamic transcript: this harness has no plugins and no todos, so the
+    // mcp_list / tool_list / todo_list slots are hidden. Seeded primary
+    // memory and the embedded skill library keep memory + skill_list alive.
     const slots = hydrationSlotNames(hydration);
     assert.deepEqual(
       slots,
-      ['runtime_context', 'memory', 'skill_list', 'mcp_list', 'tool_list', 'todo_list'],
-      `HYDR-NEW-ROOM: hydration slots must be the full 6-slot transcript in order, got ${JSON.stringify(slots)}`,
+      ['runtime_context', 'memory', 'skill_list'],
+      `HYDR-NEW-ROOM: hydration slots must be the dynamic transcript in order, got ${JSON.stringify(slots)}`,
     );
 
     // The memory slot must contain the seeded entry.
@@ -884,12 +888,13 @@ test('HYDR-POST-COMPACTION: turn after compaction re-injects the hydration trans
       'HYDR-POST-COMPACTION: hydration transcript must be re-injected after compaction',
     );
 
-    // All 6 slots must be present and in canonical order.
+    // Dynamic transcript (see HYDR-NEW-ROOM): mcp/tool/todo slots are
+    // hidden in this harness; memory + skill_list survive.
     const slots = hydrationSlotNames(hydration);
     assert.deepEqual(
       slots,
-      ['runtime_context', 'memory', 'skill_list', 'mcp_list', 'tool_list', 'todo_list'],
-      `HYDR-POST-COMPACTION: hydration slots must be the full 6-slot transcript in order, got ${JSON.stringify(slots)}`,
+      ['runtime_context', 'memory', 'skill_list'],
+      `HYDR-POST-COMPACTION: hydration slots must be the dynamic transcript in order, got ${JSON.stringify(slots)}`,
     );
 
     // The memory slot must contain the seeded entry (proves the transcript

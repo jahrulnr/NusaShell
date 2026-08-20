@@ -7,7 +7,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | Tool | Purpose |
 | --- | --- |
 | `skill_list` | list available skills (name + description + owned_by + shadowed) |
-| `skill_search` | search installed skills by name or description (case-insensitive substring) |
+| `skill_search` | search installed skills by name or description; results ranked by relevance (BM25 + related-skill expansion, no embedding) |
 | `skill_read` | read a skill's `SKILL.md` (or a support file via `path`) by name; paginated with `offset`/`max_chars` |
 | `skill_files` | list the files inside a skill folder (path, type, size, editable) |
 | `skill_save` | create or update a skill (omit `id` to create new; pass `id` to update), or write a support file inside an existing skill (pass `path` like `references/errors.md`, `templates/config.yaml`, `scripts/verify.sh`; skill must already exist; plugin-owned skills are read-only) |
@@ -18,16 +18,16 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `memory_delete` | delete a fragment by id |
 | `todo` | replace the conversation task checklist (full-replace, Claude TodoWrite style; max 50 items, 500 chars each; prefer exactly one `in_progress` at a time). The optional `goal` argument sets a brief of what the user wants and why (max ~10k tokens). It stays available through conversation history and is re-injected with the fresh hydration checkpoint after compaction. The user can delete items from the UI — treat deleted items as gone and do not re-add them. |
 | `ask_question` | block for a structured user decision; use only when progress genuinely requires a choice or approval |
-| `docs_search` | search the product documentation when the page id is unknown |
-| `docs_read` | read a documentation page by canonical extensionless id; a `.md` suffix is accepted as a compatibility alias |
+| `docs_search` | search the product documentation when the page id is unknown; results ranked by relevance |
+| `docs_read` | read a documentation page by canonical extensionless id (from `docs_search` results) |
 | `mcp_list` | list all plugins (MCP servers) with runtime state: every plugin appears, running or idle |
-| `tool_list` | list tools from a running MCP server; accepts server name, plugin id, or MCP server id; returns full tool defs (name, server, description, parameters) — call after `mcp_enable` to discover tools |
-| `tool_search` | search running MCP servers' tools by name or description; when server is omitted, searches across ALL running servers; returns full tool definitions (name, server, description, parameters) so you can call the tool directly without a follow-up `tool_schema` |
+| `tool_list` | list tools from a running MCP server; accepts server name, plugin id, or MCP server id; returns full tool defs (ref, name, server, description, parameters) — pass the `ref` to `mcp_call` to execute; call after `mcp_enable` to discover tools |
+| `tool_search` | search running MCP servers' tools by name or description; when server is omitted, searches across ALL running servers; returns full tool definitions (ref, name, server, description, parameters) so you can call the tool via `mcp_call` without a follow-up `tool_schema` |
 | `tool_schema` | load one MCP tool's full definition as a single JSONL line (name, description, parameters with type/properties/required) before calling it; accepts server name, plugin id, or MCP server id |
-| `mcp_search` | universal MCP tool discovery — search running MCP servers by name or description (token match); returns a `ref` plus the full `parameters` schema for each match; pass the `ref` to `mcp_call` to execute; always prefer `mcp_search` + `mcp_call` over guessing `mcp__<server>__<tool>` names |
-| `mcp_call` | universal MCP tool execution — run a tool by `ref` (from `mcp_search`) with `arguments_json` (a JSON-encoded string of the arguments matching the tool's parameters schema); returns a `STALE_TOOL_REF` error if the server was disabled/restarted since the search (re-search and retry) |
+| `mcp_search` | universal MCP tool discovery — search running MCP servers by name or description (token match); returns a `ref` plus the full `parameters` schema for each match; pass the `ref` to `mcp_call` to execute; always prefer `mcp_search` + `mcp_call` over guessing tool names |
+| `mcp_call` | the only MCP tool execution path — run a tool by `ref` (from `mcp_search`, `tool_list`, or `tool_search`) with `arguments_json` (a JSON-encoded string of the arguments matching the tool's parameters schema); returns a `STALE_TOOL_REF` error if the server was disabled/restarted since discovery (re-search and retry) |
 | `mcp_register` | copy a plugin from an absolute staging folder outside the installed plugins root; check inventory and ask before replacing an existing id |
-| `mcp_enable` | connect an installed plugin so its tools become available; returns only status + tool count — follow with `tool_list` or `tool_search` to discover tools; returns `already_enabled` if already connected (no reconnect) — do not re-call |
+| `mcp_enable` | connect an installed plugin so its tools become available; returns only status + tool count — follow with `tool_list` or `tool_search` to discover tools; returns `already_enabled` if already connected (no reconnect) |
 | `mcp_disable` | stop a plugin without uninstalling it |
 | `mcp_unregister` | permanently delete an installed plugin; ask first and use `mcp_disable` when it only needs to stop |
 | `mcp_install` | install a plugin from the curated catalog or GitHub |
@@ -90,10 +90,9 @@ Bad examples:
     skill_list()
     web_fetch(url="<guessed URL>")
 
-Use the hydrated skill and tool catalogs before repeating a list call. If the
+Use the skill catalog before repeating a `skill_list` call. If the
 user says skills or plugin state changed, refresh with `skill_search` or
-`mcp_list`. Built-in tool schemas come from `tools[]`; the hydration catalog
-contains only names and descriptions. MCP schemas come from `tool_schema`.
+`mcp_list`. The built-in tool catalog always comes from `tools[]`. The MCP schemas and refs come from `mcp_search`.
 
 ## Output format
 
@@ -101,9 +100,9 @@ All built-in tools return output in **YAML frontmatter + JSONL body** format:
 a YAML front matter block delimited by `---` lines (structured metadata like
 `count`, `status`, `query`) followed by zero or more JSONL lines — one JSON
 object per line. Each JSONL line is a self-contained record the agent can
-parse independently. This is consistent across all built-in tools. MCP plugin
-tools (`mcp__<server>__<tool>`) return whatever the MCP server produces
-(format depends on the server).
+parse independently. This is consistent across all built-in tools. MCP tools
+called via `mcp_call` return whatever the MCP server produces (format depends
+on the server).
 
 Example:
 ```
@@ -115,18 +114,17 @@ status: ok
 {"id":"frag_1","category":"user","content":"prefers Indonesian"}
 {"id":"frag_2","category":"project","content":"Go + Clean Architecture"}
 ```
-MCP plugin tools (`mcp__<server>__<tool>`) are NOT advertised in the tool
-list — the tool list must stay stable for the lifetime of a conversation so
-the provider prompt cache (OpenAI / Claude) is not invalidated. The agent
-discovers and calls MCP tools via the universal `mcp_search` + `mcp_call`
-pair, which works on every provider:
+MCP plugin tools are NOT advertised in the tool list — the tool list must
+stay stable for the lifetime of a conversation so the provider prompt cache
+(OpenAI / Claude) is not invalidated. The agent discovers and calls MCP tools
+via the universal `mcp_search` + `mcp_call` pair, which works on every
+provider; `mcp__<server>__<tool>` names are not callable:
 
 1. `mcp_search(query="read file")` → returns `{"ref":"files:read_file","parameters":{...}}`
 2. `mcp_call(ref="files:read_file", arguments_json="{\"path\":\"/etc/hosts\"}")` → executes the tool
 
-The legacy `tool_list` / `tool_search` / `tool_schema` tools still work for
-inspection, but they return text the model must then act on — they do not
-make the tool callable. Always use `mcp_search` + `mcp_call` for execution.
+`tool_list`, `tool_search`, and `tool_schema` return the same `ref`-shaped
+definitions for inspection and exact schema lookups.
 If `mcp_call` returns `STALE_TOOL_REF`, the server was disabled or restarted
 since the search; run `mcp_search` again and retry.
 When at least one ACP agent is enabled, the interactive toolbox also advertises
@@ -201,13 +199,12 @@ observed or sourced facts from assumptions and inferences.
 
 ## MCP tools
 
-The agent-facing tool names keep the `mcp_*` prefix even though the data
-model is now "plugins": the tools genuinely come from each plugin's MCP
-server, and the shell still connects to that server to fetch them. Every
-plugin exposes its MCP tools as `mcp__<server>__<tool>`
-with the server's own input schema. The shell connects to the server on
-first use (stdio) and keeps the connection for the process lifetime;
-re-saving or deleting the server drops the connection.
+MCP tools come from each plugin's MCP server with the server's own input
+schema. Discovery (`mcp_search` / `tool_list`) returns a `ref`
+(`<server>:<tool>`, e.g. `Files:exec`) and execution goes through
+`mcp_call`. The shell connects to the server on first use (stdio) and keeps
+the connection for the process lifetime; re-saving or deleting the server
+drops the connection.
 
 ### MCP tool discovery workflow
 
@@ -221,7 +218,7 @@ Good example:
 
 Bad examples:
 
-    mcp__files__read_file({path: "a.txt"})       # guessed name — not in tools[], not callable
+    mcp__files__read_file({path: "a.txt"})       # not in tools[], not callable
 
     mcp_call(ref="Files:read", arguments_json="{}")  # empty payload — the tool requires path
 

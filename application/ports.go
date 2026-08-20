@@ -424,6 +424,14 @@ type EmbeddingModelLister interface {
 	ListEmbeddingModels(ctx context.Context, apiKey string) ([]string, error)
 }
 
+// SkillSearcher ranks the skill library for the skill_search tool.
+// Implemented by App: BM25 + graph + recency with embedding forced off
+// (per-call embedding cost in the agent loop is not justified; the Learning
+// UI keeps the full hybrid path via LearningSearcher directly).
+type SkillSearcher interface {
+	SearchSkills(ctx context.Context, query string, topK int) ([]SearchResult, error)
+}
+
 // Embedder is implemented by providers that can produce embedding vectors.
 // This is an optional capability — not all AIProvider implementations support
 // embeddings (e.g. Anthropic Messages, Codex OAuth). The learning layer uses

@@ -42,9 +42,10 @@ should use `.agents/skills/build-nusashell-plugin/` and write under the checkout
    segment of the plugin id; tool names must **not** start with `${domain}_`
    and must **not** equal `domain`. Prefer short verbs (`list`, `read`,
    `write`, `exec`) or multi-word verbs without the domain
-   (`list_projects`, `create_ticket`). The shell exposes a discovered tool as
-   `mcp__<server>__<tool>`, where `<server>` is the manifest name. **If wrapping
-   an existing MCP catalog, preserve tool names as-is** (no domain redesign).
+   (`list_projects`, `create_ticket`). The shell exposes discovered tools via
+   `mcp_search` / `tool_list` as a `ref` (`<server>:<tool>`, e.g. `Files:exec`)
+   and executes them only through `mcp_call(ref=...)`. **If wrapping an existing
+   MCP catalog, preserve tool names as-is** (no domain redesign).
    The current in-app toolbox does not expose MCP `prompts/list` or
    `prompts/get`; keep ordered usage guidance in bounded tool descriptions or
    this skill instead of requiring an unreachable prompt capability.
@@ -56,8 +57,8 @@ should use `.agents/skills/build-nusashell-plugin/` and write under the checkout
    If it fails, fix the staging folder in place; never register the installed
    destination as its own source.
 7. Call `mcp_enable`, then verify with `mcp_list` and `tool_list` or
-   `tool_search`. Load the exact `tool_schema`, call one discovered tool through
-   its `mcp__<server>__<tool>` name, and inspect the observed result.
+   `tool_search`. Load the exact `tool_schema`, call one discovered tool
+   through `mcp_call` with its `ref`, and inspect the observed result.
 8. For removal, call `mcp_disable`, use `ask_question` to confirm deletion, then
    call `mcp_unregister`. Never unregister bundled built-in plugins or perform
    removal from an unattended job.

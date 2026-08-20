@@ -18,6 +18,25 @@ func TestBM25_ExactMatch(t *testing.T) {
 	}
 }
 
+func TestBM25_SeparatorTokens(t *testing.T) {
+	// Hyphenated/underscore-joined identifiers must match their parts:
+	// "read_file" should rank for the query "read file".
+	docs := []BM25Doc{
+		{ID: "tool", Text: "read_file guide"},
+		{ID: "skill", Text: "git-rebase tutorial"},
+		{ID: "other", Text: "unrelated content"},
+	}
+	bm25 := NewBM25(docs)
+	results := bm25.Search("read file", 3)
+	if len(results) == 0 || results[0].ID != "tool" {
+		t.Errorf("expected 'tool' to match 'read file', got %+v", results)
+	}
+	results = bm25.Search("rebase", 3)
+	if len(results) == 0 || results[0].ID != "skill" {
+		t.Errorf("expected 'skill' to match 'rebase', got %+v", results)
+	}
+}
+
 func TestBM25_NoMatch(t *testing.T) {
 	docs := []BM25Doc{
 		{ID: "a", Text: "git rebase tutorial"},
