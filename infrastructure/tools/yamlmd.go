@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -19,9 +20,9 @@ func yamlBlock(v any) string {
 	return "---\n" + s + "\n---"
 }
 
-// yamlMD produces a YAML×Markdown tool output: a YAML front matter block
-// followed by an optional markdown body. When body is empty, only the front
-// matter is returned. This is the standard output format for all built-in tools.
+// yamlMD produces a YAML front matter block followed by an optional body.
+// When body is empty, only the front matter is returned. This is the
+// standard output format for all built-in tools.
 //
 // Example:
 //
@@ -40,13 +41,33 @@ func yamlMD(meta any, body string) string {
 	return block + "\n\n" + body
 }
 
-// yamlMDList is a convenience wrapper for list/search results: it builds
-// metadata (at minimum a count) and a markdown list body from the provided
-// lines. When lines is empty, only the front matter is returned.
-func yamlMDList(meta any, lines []string) string {
-	if len(lines) == 0 {
+// yamlJSONL produces a YAML front matter block followed by a JSONL body:
+// one JSON object per line. Each item in items is marshaled to a single
+// line of compact JSON. When items is empty, only the front matter is
+// returned. This is the standard format for list/search tool output —
+// the agent can parse each line independently and the data is structured,
+// not prose.
+//
+// Example:
+//
+//	---
+//	count: 2
+//	---
+//
+//	{"id":"frag_1","category":"user","content":"prefers Indonesian"}
+//	{"id":"frag_2","category":"project","content":"Go + Clean Arch"}
+func yamlJSONL(meta any, items []any) string {
+	if len(items) == 0 {
 		return yamlBlock(meta)
 	}
-	body := strings.Join(lines, "\n")
-	return yamlMD(meta, body)
+	var lines []string
+	for _, item := range items {
+		b, err := json.Marshal(item)
+		if err != nil {
+			lines = append(lines, fmt.Sprintf(`{"error":"marshal: %s"}`, err.Error()))
+			continue
+		}
+		lines = append(lines, string(b))
+	}
+	return yamlMD(meta, strings.Join(lines, "\n"))
 }

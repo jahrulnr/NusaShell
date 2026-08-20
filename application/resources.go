@@ -612,20 +612,6 @@ func (a *App) handlePluginToolsList() (any, *contracts.RPCError) {
 
 // ---- memory ----
 
-func memDTO(e *domain.MemoryEntry) contracts.MemoryEntryDTO {
-	dto := contracts.MemoryEntryDTO{
-		ID:        e.ID,
-		Content:   e.Content,
-		Tags:      e.Tags,
-		Source:    e.Source,
-		CreatedAt: e.CreatedAt.Format(timeRFC3339),
-	}
-	if dto.Source == "" {
-		dto.Source = "user"
-	}
-	return dto
-}
-
 // fragmentDTO converts a MemoryFragment to a MemoryEntryDTO for the UI.
 func fragmentDTO(f *domain.MemoryFragment) contracts.MemoryEntryDTO {
 	dto := contracts.MemoryEntryDTO{
@@ -665,14 +651,6 @@ func primaryDTO(e *domain.PrimaryEntry) contracts.MemoryEntryDTO {
 func (a *App) emitMemoryUpdated() {
 	if a.Bus != nil {
 		a.Bus.Emit(contracts.EventMemoryUpdated, map[string]any{"source": "rpc"})
-	}
-}
-
-// emitSkillUpdated publishes a skill.updated event so the Learning UI
-// can refresh its skill list, search results, and graph without polling.
-func (a *App) emitSkillUpdated() {
-	if a.Bus != nil {
-		a.Bus.Emit(contracts.EventSkillUpdated, map[string]any{"source": "rpc"})
 	}
 }
 

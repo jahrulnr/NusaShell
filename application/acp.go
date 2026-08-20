@@ -503,17 +503,6 @@ func (a *App) spawnAcpSubagents(ctx context.Context, argsJSON []byte) (string, e
 	return domain.FormatSpawnResult(results), nil
 }
 
-func acpTranscriptPath(storage domain.AcpRunStorage) string {
-	if storage == nil {
-		return ""
-	}
-	type pather interface{ TranscriptPath() string }
-	if p, ok := storage.(pather); ok {
-		return p.TranscriptPath()
-	}
-	return ""
-}
-
 // subagentCompletionResult builds the tool result: YAML frontmatter
 // (status, workspace, output_path) + markdown body (the summary).
 func (a *App) SpawnSubagents(ctx context.Context, argsJSON []byte) (string, error) {

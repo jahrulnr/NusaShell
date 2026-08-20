@@ -53,19 +53,6 @@ func FolderPlaceholderFor(atts []Attachment) string {
 	return "[Folders dropped: " + strings.Join(paths, ", ") + ". Use file tools to list and read their contents.]"
 }
 
-// ImageAttachmentNames returns the names of image attachments.
-
-// AttachmentNamesByType returns the names of attachments matching typ.
-func AttachmentNamesByType(atts []Attachment, typ string) []string {
-	var names []string
-	for _, a := range atts {
-		if a.Type == typ {
-			names = append(names, a.Name)
-		}
-	}
-	return names
-}
-
 // HasImageAttachment reports whether atts contains any image attachment.
 
 // HasAttachmentOfType reports whether atts contains any attachment of typ.

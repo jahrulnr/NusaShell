@@ -63,11 +63,11 @@ func TestExecTodoWithGoal(t *testing.T) {
 	if !strings.Contains(result, "Build a REST API with Go and Clean Architecture.") {
 		t.Errorf("goal missing in result, got: %s", result)
 	}
-	if !strings.Contains(result, "## Goal") {
-		t.Errorf("expected ## Goal heading in body, got: %s", result)
+	if !strings.Contains(result, "goal: Build a REST API") {
+		t.Errorf("expected goal field in meta, got: %s", result)
 	}
-	if !strings.Contains(result, "- [~] **1**: Step 1") {
-		t.Errorf("expected markdown item with in_progress marker, got: %s", result)
+	if !strings.Contains(result, `"status":"in_progress"`) {
+		t.Errorf("expected JSONL item with in_progress status, got: %s", result)
 	}
 	if todoPort.GetGoal("conv_1") != "Build a REST API with Go and Clean Architecture." {
 		t.Errorf("goal not persisted in port")
@@ -142,8 +142,8 @@ func TestExecTodoEmptyItemsWithGoal(t *testing.T) {
 	if !strings.Contains(result, "Just a goal, no steps yet.") {
 		t.Errorf("goal missing in result, got: %s", result)
 	}
-	if !strings.Contains(result, "## Goal") {
-		t.Errorf("expected ## Goal heading in body, got: %s", result)
+	if !strings.Contains(result, "goal: Just a goal") {
+		t.Errorf("expected goal field in meta, got: %s", result)
 	}
 	if todoPort.GetGoal("conv_1") != "Just a goal, no steps yet." {
 		t.Errorf("goal not persisted")

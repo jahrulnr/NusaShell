@@ -39,20 +39,6 @@ type Trigger struct {
 	AutoStart AutoStartPolicy
 }
 
-// FamilyOf maps an internal kind onto the user-facing family.
-func FamilyOf(kind TriggerKind) TriggerFamily {
-	switch kind {
-	case TriggerOnce:
-		return FamilyOnce
-	case TriggerInterval, TriggerCron:
-		return FamilyEvery
-	case TriggerEvent:
-		return FamilyWhen
-	default:
-		return FamilyManual
-	}
-}
-
 // Location loads the IANA timezone, defaulting to UTC.
 func (t Trigger) Location() *time.Location {
 	if t.Timezone == "" {

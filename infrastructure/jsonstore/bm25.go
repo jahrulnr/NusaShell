@@ -55,9 +55,6 @@ func NewBM25(docs []BM25Doc) *BM25 {
 	return s
 }
 
-// AvgDL returns the average document length across the indexed docs.
-func (s *BM25) AvgDL() float64 { return s.avgDL }
-
 // Search returns ranked results for a query, limited to topK.
 func (s *BM25) Search(query string, topK int) []BM25Result {
 	terms := bm25Tokenize(query)

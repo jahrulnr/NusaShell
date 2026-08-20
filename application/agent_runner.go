@@ -797,10 +797,11 @@ func shouldContinueFailedTurn(failed domain.Message) bool {
 
 // compactionTriggerTokens is the estimated-token watermark that starts
 // compaction. When CompactionThreshold is 0 (auto, the default), compaction
-// triggers at 80% of the model's context window — so a 1M-context model
-// compacts at ~800k, not at a flat 40k. When CompactionThreshold is non-zero,
-// it is used as the trigger but still capped at 80% of the window so a high
-// threshold cannot wait until the next turn already overflows.
+// triggers at 80% of the model's available input budget (contextWindow minus
+// maxOutput) — so a 256k model with 64k output compacts at ~122k input, not
+// ~205k. When CompactionThreshold is non-zero, it is used as the trigger but
+// still capped at 80% of the available budget so a high threshold cannot wait
+// until the next turn already overflows.
 func compactionTriggerTokens(contextWindow, maxOutput int, settings domain.Settings) int {
 	return domain.CompactionTriggerTokens(contextWindow, maxOutput, settings)
 }

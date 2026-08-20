@@ -251,9 +251,9 @@ func TestMcpList(t *testing.T) {
 	if !strings.Contains(out, "count: 2") {
 		t.Errorf("expected 2 plugins, got: %s", out)
 	}
-	// github should be running with 1 tool — rendered in markdown body
-	if !strings.Contains(out, "**github**") || !strings.Contains(out, "running") || !strings.Contains(out, "1 tool") {
-		t.Errorf("expected github running with 1 tool in body, got: %s", out)
+	// github should be running with 1 tool — rendered as JSONL
+	if !strings.Contains(out, `"name":"github"`) || !strings.Contains(out, `"running":true`) || !strings.Contains(out, `"tools":1`) {
+		t.Errorf("expected github running with 1 tool in JSONL, got: %s", out)
 	}
 }
 
@@ -299,8 +299,33 @@ func TestToolListByServer(t *testing.T) {
 	if !strings.Contains(out, "count: 1") {
 		t.Errorf("expected 1 tool from github, got: %s", out)
 	}
-	if !strings.Contains(out, "[github]") {
-		t.Errorf("expected [github] server tag in body, got: %s", out)
+	if !strings.Contains(out, `"server":"github"`) {
+		t.Errorf("expected server=github in JSONL, got: %s", out)
+	}
+}
+
+func TestToolListByPluginID(t *testing.T) {
+	// tool_list should accept the plugin id (e.g. "nusashell.terminal")
+	// not just the manifest Name (e.g. "Terminal").
+	tb := testToolbox(nil,
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "nusashell.terminal", Name: "Terminal", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+		},
+		&stubMCP{
+			tools: map[string][]contracts.MCPToolDTO{
+				"plugin:nusashell.terminal": {{Name: "exec", Description: "Run command"}},
+			},
+		},
+	)
+	out, err := tb.Execute(context.Background(), "tool_list", []byte(`{"server":"nusashell.terminal"}`))
+	if err != nil {
+		t.Fatalf("tool_list by plugin id: %v", err)
+	}
+	if !strings.Contains(out, "count: 1") {
+		t.Errorf("expected 1 tool via plugin id, got: %s", out)
+	}
+	if !strings.Contains(out, `"name":"mcp__Terminal__exec"`) {
+		t.Errorf("expected tool name in JSONL, got: %s", out)
 	}
 }
 
@@ -389,8 +414,15 @@ func TestToolSchema(t *testing.T) {
 	if !strings.Contains(out, "server: github") || !strings.Contains(out, "tool: create_issue") {
 		t.Errorf("expected github/create_issue, got: %s", out)
 	}
-	if !strings.Contains(out, "type: object") {
-		t.Errorf("expected object schema, got: %s", out)
+	// Full tool definition as a single JSONL line.
+	if !strings.Contains(out, `"name":"create_issue"`) {
+		t.Errorf("expected tool name in JSONL, got: %s", out)
+	}
+	if !strings.Contains(out, `"parameters":`) {
+		t.Errorf("expected parameters field in JSONL, got: %s", out)
+	}
+	if !strings.Contains(out, `"required":["title"]`) {
+		t.Errorf("expected required array in JSONL, got: %s", out)
 	}
 }
 
@@ -558,8 +590,8 @@ func TestMcpEnable(t *testing.T) {
 	}
 	// mcp_enable should return tool names in the body so the agent
 	// doesn't need a follow-up tool_list call.
-	if !strings.Contains(out, "mcp__Demo__demo_ping") {
-		t.Errorf("expected tool name in body, got %q", out)
+	if !strings.Contains(out, `"name":"mcp__Demo__demo_ping"`) {
+		t.Errorf("expected tool name in JSONL, got %q", out)
 	}
 }
 

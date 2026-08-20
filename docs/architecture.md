@@ -86,10 +86,10 @@ content, reasoning, or tool-call fields.
 ### Compaction
 
 When the conversation's estimated tokens exceed the lesser of
-`settings.compaction_threshold` (default 40000) and 80% of the model's
-context window, the provider summarizes the history non-streaming, the
-summary replaces the oldest messages behind a marker, and `agent.compacted`
-is emitted.
+`settings.compaction_threshold` (default 0 = auto, which means 80% of the
+model's available input budget) and 80% of that budget, the provider
+summarizes the history non-streaming, the summary replaces the oldest
+messages behind a marker, and `agent.compacted` is emitted.
 
 ### Upstream recovery
 

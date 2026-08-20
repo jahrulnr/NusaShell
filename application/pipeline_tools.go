@@ -6,12 +6,6 @@ import (
 	"nusashell/domain"
 )
 
-// ACPToolNames is the spawn-only ACP surface. Interactive conversations may
-// advertise these when an ACP agent is enabled. Pipeline agent steps must not.
-func ACPToolNames() []string {
-	return []string{"subagent", "subagent_steer", "subagent_stop", "subagent_wait"}
-}
-
 // IsACPTool reports whether name is an ACP subagent tool.
 func IsACPTool(name string) bool {
 	switch name {

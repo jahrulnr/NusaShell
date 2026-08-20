@@ -648,18 +648,6 @@ func (lr *liveRun) finishLocked(status domain.AcpRunStatus, errMsg, stop string)
 	close(lr.done)
 }
 
-func (lr *liveRun) clearPermission() {
-	lr.mu.Lock()
-	defer lr.mu.Unlock()
-	if lr.run.Status == domain.AcpRunWaitingPermission {
-		lr.run.Status = domain.AcpRunRunning
-	}
-	lr.run.PendingPermission = nil
-	lr.permCh = nil
-	lr.permID = ""
-	lr.run.UpdatedAt = time.Now().UTC()
-}
-
 func (rt *Runtime) Steer(runID, text string) error {
 	text = strings.TrimSpace(text)
 	if text == "" {

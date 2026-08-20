@@ -24,7 +24,6 @@ type FrozenClock struct{ T time.Time }
 
 func (c *FrozenClock) Now() time.Time          { return c.T }
 func (c *FrozenClock) Advance(d time.Duration) { c.T = c.T.Add(d) }
-func (c *FrozenClock) Set(t time.Time)         { c.T = t }
 
 // WorkflowStore persists automation definitions (not conversation JSON).
 type WorkflowStore interface {

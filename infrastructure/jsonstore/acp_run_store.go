@@ -33,12 +33,6 @@ func (s *AcpRunStore) path() string {
 	return filepath.Join(s.dir, "conversations", "acp_runs.jsonl")
 }
 
-// TranscriptPath returns the absolute path to the JSONL transcript file.
-// Satisfies the optional pather interface used by acpTranscriptPath.
-func (s *AcpRunStore) TranscriptPath() string {
-	return s.path()
-}
-
 // Save appends a run record as one JSON line. If a record with the same
 // ID already exists in the file, the line is updated in place rather
 // than duplicated.

@@ -21,9 +21,9 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `docs_search` | search the product documentation when the page id is unknown |
 | `docs_read` | read a documentation page by canonical extensionless id; a `.md` suffix is accepted as a compatibility alias |
 | `mcp_list` | list all plugins (MCP servers) with runtime state: every plugin appears, running or idle |
-| `tool_list` | list tools from a running plugin's MCP server (or across all running servers when the server is omitted) |
+| `tool_list` | list tools from a running MCP server; accepts server name, plugin id, or MCP server id; not needed after `mcp_enable` (which already returns tool names) |
 | `tool_search` | search a running MCP server's tools by name or description |
-| `tool_schema` | load one MCP tool's input schema by server and tool name before calling it |
+| `tool_schema` | load one MCP tool's full definition as a single JSONL line (name, description, parameters with type/properties/required) before calling it; accepts server name, plugin id, or MCP server id |
 | `mcp_register` | copy a plugin from an absolute staging folder outside the installed plugins root; check inventory and ask before replacing an existing id |
 | `mcp_enable` | connect an installed plugin and load its MCP tools; returns tool names + descriptions — call tools directly, no `tool_list` needed |
 | `mcp_disable` | stop a plugin without uninstalling it |
@@ -95,13 +95,13 @@ contains only names and descriptions. MCP schemas come from `tool_schema`.
 
 ## Output format
 
-All built-in tools return output in **YAML×Markdown** format: a YAML front
-matter block delimited by `---` lines (structured fields like `count`,
-`status`, `items`) followed by an optional markdown body for content-heavy
-results (file contents, page text, descriptions). This is consistent across
-all 46+ built-in tools — no JSON or ad-hoc plain text. MCP plugin tools
-(`mcp__<server>__<tool>`) return whatever the MCP server produces (format
-depends on the server).
+All built-in tools return output in **YAML frontmatter + JSONL body** format:
+a YAML front matter block delimited by `---` lines (structured metadata like
+`count`, `status`, `query`) followed by zero or more JSONL lines — one JSON
+object per line. Each JSONL line is a self-contained record the agent can
+parse independently. This is consistent across all built-in tools. MCP plugin
+tools (`mcp__<server>__<tool>`) return whatever the MCP server produces
+(format depends on the server).
 
 Example:
 ```
@@ -110,8 +110,8 @@ count: 2
 status: ok
 ---
 
-First result line
-Second result line
+{"id":"frag_1","category":"user","content":"prefers Indonesian"}
+{"id":"frag_2","category":"project","content":"Go + Clean Architecture"}
 ```
 MCP plugin tools (`mcp__<server>__<tool>`) are NOT advertised in the tool
 list — the tool list must stay stable for the lifetime of a conversation so
@@ -206,9 +206,9 @@ call by name — never guess a tool name or schema.
 
 Good example:
 
-    tool_list(server="files")                    # → [{name: "read", …}, {name: "write", …}]
-    tool_schema(server="files", tool="read")     # exact argument shape
-    mcp__files__read({path: "/home/user/a.txt"})
+    tool_list(server="Files")                    # → {"name":"mcp__Files__read","server":"Files","description":"Read file"}
+    tool_schema(server="Files", tool="read")     # → {"name":"read","description":"Read file","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File path"}},"required":["path"]}}
+    mcp__Files__read({path: "/home/user/a.txt"})
 
 Bad examples:
 

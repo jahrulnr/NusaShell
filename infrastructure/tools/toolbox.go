@@ -137,9 +137,9 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "wait_until", Description: "Explain or create a durable wait_until step. Waiting never keeps a runner occupied.", InputSchema: obj("object", props("at", str("RFC3339 time")), "at")},
 		{Name: "sleep", Description: "Pause for the given number of seconds (max 300). Use for retry backoff or to wait between polls of an async ci_run. Does not consume a provider round — the turn resumes after the pause.", InputSchema: obj("object", props("seconds", intSchema("Seconds to sleep (1-300)")), "seconds")},
 		{Name: "mcp_list", Description: "List configured MCP servers with their enabled status and runtime state (running/stopped).", InputSchema: obj("object", nil)},
-		{Name: "tool_list", Description: "List tools from a running MCP server by name (names and descriptions, plus optional input schemas). When the server is omitted, lists tools across all running MCP servers.", InputSchema: obj("object", props("server", str("Optional MCP server name; when omitted, lists tools across all running servers")))},
+		{Name: "tool_list", Description: "List tools from a running MCP server. Accepts the server name (e.g. \"Terminal\"), the plugin id (e.g. \"nusashell.terminal\"), or the MCP server id (e.g. \"plugin:nusashell.terminal\"). When omitted, lists tools across all running MCP servers. You do NOT need to call this after mcp_enable — mcp_enable already returns the tool names.", InputSchema: obj("object", props("server", str("Server name, plugin id, or MCP server id; when omitted, lists all running servers")))},
 		{Name: "tool_search", Description: "Search a running MCP server's tools by name or description (case-insensitive token match — any term matches). Returns matching tool names and descriptions.", InputSchema: obj("object", props("server", str("MCP server name"), "query", str("Search query")), "server", "query")},
-		{Name: "tool_schema", Description: "Load one MCP tool's input schema by server and tool name. Useful when you need the exact argument shape before calling an mcp__<server>__<tool> tool.", InputSchema: obj("object", props("server", str("MCP server name"), "tool", str("Tool name within the server")), "server", "tool")},
+		{Name: "tool_schema", Description: "Load one MCP tool's input schema by server and tool name. Accepts the server name (e.g. \"Terminal\"), the plugin id (e.g. \"nusashell.terminal\"), or the MCP server id. The tool name is the bare tool name (e.g. \"exec\"), not the mcp__ prefixed form. Returns the schema as readable JSON so you know exact field names and types before calling the tool.", InputSchema: obj("object", props("server", str("Server name, plugin id, or MCP server id"), "tool", str("Bare tool name within the server (e.g. \"exec\")")), "server", "tool")},
 		{Name: "mcp_register", Description: "Copy a new MCP plugin from an absolute staging folder into the installed plugin store, or replace an existing plugin with the same id. The source must contain manifest.json and must stay outside the installed plugins root. Check mcp_list and ask the user before replacing an existing id; then call mcp_enable.", InputSchema: obj("object", props("source", str("Absolute staging path to the plugin folder containing manifest.json")), "source")},
 		{Name: "mcp_enable", Description: "Start/connect an MCP plugin and load its tools. Returns the tool names and descriptions so you can call them directly — no need to call tool_list after enable. The plugin must be registered first (mcp_register or the Plugins view).", InputSchema: obj("object", props("id", str("Plugin id (e.g. nusashell.files)")), "id")},
 		{Name: "mcp_disable", Description: "Stop/disconnect an MCP plugin. The definition stays installed; only the MCP subprocess is stopped. Tools from this server are no longer listed.", InputSchema: obj("object", props("id", str("Plugin id")), "id")},
@@ -203,12 +203,11 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if limit < len(skills) {
 			skills = skills[:limit]
 		}
-		meta := map[string]any{"count": len(skills)}
-		var bodyLines []string
+		items := make([]any, 0, len(skills))
 		for _, s := range skills {
-			bodyLines = append(bodyLines, fmt.Sprintf("- **%s**: %s", s.Name, s.Description))
+			items = append(items, map[string]any{"name": s.Name, "description": s.Description})
 		}
-		return yamlMDList(meta, bodyLines), nil
+		return yamlJSONL(map[string]any{"count": len(skills)}, items), nil
 
 	case name == "skill_search":
 		var args struct {
@@ -226,19 +225,17 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			limit = 50
 		}
 		q := strings.ToLower(args.Query)
-		var bodyLines []string
-		count := 0
+		var items []any
 		for _, s := range t.Skills.List() {
 			if !strings.Contains(strings.ToLower(s.Name+" "+s.Description), q) {
 				continue
 			}
-			bodyLines = append(bodyLines, fmt.Sprintf("- **%s**: %s", s.Name, s.Description))
-			count++
-			if count >= limit {
+			items = append(items, map[string]any{"name": s.Name, "description": s.Description})
+			if len(items) >= limit {
 				break
 			}
 		}
-		return yamlMDList(map[string]any{"query": args.Query, "count": count}, bodyLines), nil
+		return yamlJSONL(map[string]any{"query": args.Query, "count": len(items)}, items), nil
 
 	case name == "skill_read":
 		var args struct {
@@ -320,15 +317,11 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				}
 				return "", fmt.Errorf("skill_files: %w", err)
 			}
-			var bodyLines []string
+			items := make([]any, 0, len(entries))
 			for _, e := range entries {
-				editFlag := ""
-				if e.Editable {
-					editFlag = " (editable)"
-				}
-				bodyLines = append(bodyLines, fmt.Sprintf("- **%s** `%s`%s — %d bytes", e.Type, e.Path, editFlag, e.SizeBytes))
+				items = append(items, map[string]any{"type": e.Type, "path": e.Path, "size": e.SizeBytes, "editable": e.Editable})
 			}
-			return yamlMDList(map[string]any{"skill": args.Name, "count": len(entries)}, bodyLines), nil
+			return yamlJSONL(map[string]any{"skill": args.Name, "count": len(entries)}, items), nil
 		}
 		return "", fmt.Errorf("skill store does not support file listing")
 
@@ -489,11 +482,11 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			Tags:     args.Tags,
 			Limit:    limit,
 		})
-		var bodyLines []string
+		items := make([]any, 0, len(hits))
 		for _, h := range hits {
-			bodyLines = append(bodyLines, formatFragmentLine(h.Fragment, h.Score))
+			items = append(items, formatFragmentJSON(h.Fragment, h.Score))
 		}
-		return yamlMDList(map[string]any{"query": args.Query, "count": len(hits)}, bodyLines), nil
+		return yamlJSONL(map[string]any{"query": args.Query, "count": len(hits)}, items), nil
 
 	case name == "memory_list":
 		var args struct {
@@ -512,14 +505,14 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				return yamlBlock(map[string]any{"target": "primary", "count": 0, "error": "primary store not configured"}), nil
 			}
 			mem := t.Primary.Load()
-			var bodyLines []string
+			items := make([]any, 0, len(mem.Entries))
 			for _, e := range mem.Entries {
 				if e.Content == "" {
 					continue
 				}
-				bodyLines = append(bodyLines, fmt.Sprintf("- **%s**: %s", e.ID, truncate(e.Content, 120)))
+				items = append(items, map[string]any{"id": e.ID, "content": e.Content})
 			}
-			return yamlMDList(map[string]any{"target": "primary", "count": len(mem.Entries)}, bodyLines), nil
+			return yamlJSONL(map[string]any{"target": "primary", "count": len(mem.Entries)}, items), nil
 		}
 		// Default: list fragments
 		if t.Fragments == nil {
@@ -530,11 +523,11 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			Project:  args.Project,
 			Limit:    limit,
 		})
-		var fragLines []string
+		items := make([]any, 0, len(frags))
 		for _, f := range frags {
-			fragLines = append(fragLines, formatFragmentLine(f, 0))
+			items = append(items, formatFragmentJSON(f, 0))
 		}
-		return yamlMDList(map[string]any{"target": "fragments", "count": len(frags)}, fragLines), nil
+		return yamlJSONL(map[string]any{"target": "fragments", "count": len(frags)}, items), nil
 
 	case name == "memory_delete":
 		var args struct {
@@ -570,16 +563,11 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			limit = 10
 		}
 		hits := t.Docs.Search(args.Query, limit)
-		type docHit struct {
-			ID    string `yaml:"id"`
-			Title string `yaml:"title"`
-			Path  string `yaml:"path"`
-		}
-		results := make([]docHit, 0, len(hits))
+		items := make([]any, 0, len(hits))
 		for _, h := range hits {
-			results = append(results, docHit{ID: h.ID, Title: h.Title, Path: h.Path})
+			items = append(items, map[string]any{"id": h.ID, "title": h.Title, "path": h.Path})
 		}
-		return yamlBlock(map[string]any{"query": args.Query, "count": len(results), "results": results}), nil
+		return yamlJSONL(map[string]any{"query": args.Query, "count": len(hits)}, items), nil
 
 	case name == "docs_read":
 		var args struct {
@@ -737,25 +725,22 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if err != nil {
 			return "", fmt.Errorf("mcp_enable %q: %w", args.ID, err)
 		}
-		// Return tool names + descriptions so the agent can call them
-		// directly without a follow-up tool_list round-trip.
-		type toolInfo struct {
-			Name        string `yaml:"name"`
-			Description string `yaml:"description,omitempty"`
-		}
-		toolInfos := make([]toolInfo, 0, len(tools))
-		var bodyLines []string
+		// Return tool names + descriptions as JSONL so the agent can call
+		// them directly without a follow-up tool_list round-trip.
+		items := make([]any, 0, len(tools))
 		for _, tool := range tools {
-			fullName := "mcp__" + p.Manifest.Name + "__" + tool.Name
-			toolInfos = append(toolInfos, toolInfo{Name: fullName, Description: tool.Description})
-			bodyLines = append(bodyLines, fmt.Sprintf("- **%s**: %s", fullName, tool.Description))
+			items = append(items, map[string]any{
+				"name":        "mcp__" + p.Manifest.Name + "__" + tool.Name,
+				"description": tool.Description,
+			})
 		}
 		meta := map[string]any{
 			"status": "enabled",
 			"id":     args.ID,
+			"server": p.Manifest.Name,
 			"tools":  len(tools),
 		}
-		return yamlMD(meta, strings.Join(bodyLines, "\n")), nil
+		return yamlJSONL(meta, items), nil
 
 	case name == "mcp_disable":
 		var args struct {
@@ -809,15 +794,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if err != nil {
 			return "", fmt.Errorf("mcp_list: %w", err)
 		}
-		type srvInfo struct {
-			ID      string `yaml:"id"`
-			Name    string `yaml:"name"`
-			Command string `yaml:"command,omitempty"`
-			Running bool   `yaml:"running"`
-			Tools   int    `yaml:"tools"`
-		}
-		var bodyLines []string
-		count := 0
+		items := make([]any, 0, len(plugins))
 		for _, p := range plugins {
 			toolCount := 0
 			running := false
@@ -826,30 +803,24 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				running = true
 				toolCount = len(tools)
 			}
-			status := "idle"
-			if running {
-				status = fmt.Sprintf("running (%d tools)", toolCount)
-			}
-			bodyLines = append(bodyLines, fmt.Sprintf("- **%s** — %s", p.Manifest.Name, status))
-			count++
+			items = append(items, map[string]any{
+				"name":    p.Manifest.Name,
+				"id":      p.Manifest.ID,
+				"running": running,
+				"tools":   toolCount,
+			})
 		}
-		return yamlMDList(map[string]any{"count": count}, bodyLines), nil
+		return yamlJSONL(map[string]any{"count": len(items)}, items), nil
 
 	case name == "tool_list":
 		var args struct {
 			Server string `json:"server"`
 		}
 		_ = json.Unmarshal(argsJSON, &args)
-		type toolEntry struct {
-			Name        string         `yaml:"name"`
-			Server      string         `yaml:"server"`
-			Description string         `yaml:"description,omitempty"`
-			InputSchema map[string]any `yaml:"input_schema,omitempty"`
-		}
-		var entries []toolEntry
+		var items []any
 		plugins, _ := t.Plugins.List()
 		for _, p := range plugins {
-			if args.Server != "" && p.Manifest.Name != args.Server {
+			if args.Server != "" && !pluginMatchesServer(p, args.Server) {
 				continue
 			}
 			tools, ok := t.MCP.ToolsFor(p.Manifest.MCPServerID())
@@ -857,21 +828,14 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				continue
 			}
 			for _, tool := range tools {
-				var schema map[string]any
-				if len(tool.InputSchema) > 0 {
-					_ = json.Unmarshal(tool.InputSchema, &schema)
-				}
-				entries = append(entries, toolEntry{
-					Name:   "mcp__" + p.Manifest.Name + "__" + tool.Name,
-					Server: p.Manifest.Name, Description: tool.Description, InputSchema: schema,
+				items = append(items, map[string]any{
+					"name":        "mcp__" + p.Manifest.Name + "__" + tool.Name,
+					"server":      p.Manifest.Name,
+					"description": tool.Description,
 				})
 			}
 		}
-		var bodyLines []string
-		for _, e := range entries {
-			bodyLines = append(bodyLines, fmt.Sprintf("- **%s** [%s]: %s", e.Name, e.Server, e.Description))
-		}
-		return yamlMDList(map[string]any{"count": len(entries)}, bodyLines), nil
+		return yamlJSONL(map[string]any{"count": len(items)}, items), nil
 
 	case name == "tool_search":
 		var args struct {
@@ -884,16 +848,11 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if strings.TrimSpace(args.Query) == "" {
 			return "", fmt.Errorf("query is required")
 		}
-		type match struct {
-			Name        string `yaml:"name"`
-			Server      string `yaml:"server"`
-			Description string `yaml:"description,omitempty"`
-		}
 		tokens := strings.Fields(strings.ToLower(args.Query))
-		var matches []match
+		var items []any
 		plugins, _ := t.Plugins.List()
 		for _, p := range plugins {
-			if args.Server != "" && p.Manifest.Name != args.Server {
+			if args.Server != "" && !pluginMatchesServer(p, args.Server) {
 				continue
 			}
 			tools, ok := t.MCP.ToolsFor(p.Manifest.MCPServerID())
@@ -912,17 +871,14 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				if !hit {
 					continue
 				}
-				matches = append(matches, match{
-					Name:   "mcp__" + p.Manifest.Name + "__" + tool.Name,
-					Server: p.Manifest.Name, Description: tool.Description,
+				items = append(items, map[string]any{
+					"name":        "mcp__" + p.Manifest.Name + "__" + tool.Name,
+					"server":      p.Manifest.Name,
+					"description": tool.Description,
 				})
 			}
 		}
-		var bodyLines []string
-		for _, m := range matches {
-			bodyLines = append(bodyLines, fmt.Sprintf("- **%s** [%s]: %s", m.Name, m.Server, m.Description))
-		}
-		return yamlMDList(map[string]any{"server": args.Server, "query": args.Query, "count": len(matches)}, bodyLines), nil
+		return yamlJSONL(map[string]any{"server": args.Server, "query": args.Query, "count": len(items)}, items), nil
 
 	case name == "tool_schema":
 		var args struct {
@@ -934,7 +890,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		}
 		plugins, _ := t.Plugins.List()
 		for _, p := range plugins {
-			if p.Manifest.Name != args.Server {
+			if !pluginMatchesServer(p, args.Server) {
 				continue
 			}
 			tools, ok := t.MCP.ToolsFor(p.Manifest.MCPServerID())
@@ -952,10 +908,18 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				if schema == nil {
 					schema = obj("object", nil)
 				}
-				return yamlBlock(map[string]any{
-					"server": args.Server, "tool": args.Tool,
-					"input_schema": schema,
-				}), nil
+				meta := map[string]any{
+					"server": p.Manifest.Name,
+					"tool":   tool.Name,
+				}
+				// Emit the full tool definition as a single JSONL line:
+				// name, description, and the complete input_schema object.
+				items := []any{map[string]any{
+					"name":        tool.Name,
+					"description": tool.Description,
+					"parameters":  schema,
+				}}
+				return yamlJSONL(meta, items), nil
 			}
 			return "", fmt.Errorf("tool %q not found on server %q; use tool_list or tool_search to see available tools", args.Tool, args.Server)
 		}
@@ -1005,29 +969,19 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if limit > len(resp.Results) {
 			limit = len(resp.Results)
 		}
-		type searchResult struct {
-			Title   string   `yaml:"title"`
-			URL     string   `yaml:"url"`
-			Snippet string   `yaml:"snippet,omitempty"`
-			Sources []string `yaml:"sources,omitempty"`
-		}
-		results := make([]searchResult, 0, limit)
+		items := make([]any, 0, limit)
 		for _, r := range resp.Results[:limit] {
-			results = append(results, searchResult{Title: r.Title, URL: r.URL, Snippet: r.Snippet, Sources: r.Sources})
+			items = append(items, map[string]any{"title": r.Title, "url": r.URL, "snippet": r.Snippet, "sources": r.Sources})
 		}
-		meta := map[string]any{"query": resp.Query, "count": len(results)}
+		meta := map[string]any{"query": resp.Query, "count": len(items)}
 		if len(resp.Errors) > 0 {
-			type srcErr struct {
-				Source string `yaml:"source"`
-				Error  string `yaml:"error"`
-			}
-			errs := make([]srcErr, 0, len(resp.Errors))
+			var errs []any
 			for _, e := range resp.Errors {
-				errs = append(errs, srcErr{Source: e.Source, Error: e.Error})
+				errs = append(errs, map[string]any{"source": e.Source, "error": e.Error})
 			}
 			meta["errors"] = errs
 		}
-		return yamlBlock(meta), nil
+		return yamlJSONL(meta, items), nil
 	case name == "web_fetch":
 		if t.Searcher == nil {
 			return "", fmt.Errorf("search is not available")
@@ -1066,26 +1020,32 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if page.Title != "" {
 			meta["title"] = page.Title
 		}
+		var linkItems []any
 		if len(page.Links) > 0 {
-			type linkEntry struct {
-				Text string `yaml:"text,omitempty"`
-				Href string `yaml:"href"`
-			}
-			links := make([]linkEntry, 0, len(page.Links))
 			for _, l := range page.Links {
-				if len(links) >= 50 {
+				if len(linkItems) >= 50 {
 					break
 				}
-				links = append(links, linkEntry{Text: strings.TrimSpace(l.Text), Href: l.Href})
+				linkItems = append(linkItems, map[string]any{"text": strings.TrimSpace(l.Text), "href": l.Href})
 			}
 			meta["links_count"] = len(page.Links)
-			meta["links"] = links
 		}
 		if page.Truncated {
 			meta["bytes"] = page.Bytes
 		}
 		sb.WriteString(page.Text)
-		return yamlMD(meta, sb.String()), nil
+		// Page text is prose body; links are structured JSONL appended
+		// after the text so the agent can parse them independently.
+		body := sb.String()
+		if len(linkItems) > 0 {
+			var linkLines []string
+			for _, li := range linkItems {
+				b, _ := json.Marshal(li)
+				linkLines = append(linkLines, string(b))
+			}
+			body = body + "\n\n" + strings.Join(linkLines, "\n")
+		}
+		return yamlMD(meta, body), nil
 	case name == "web_answer":
 		sw := t.webAnswerSearcher()
 		if sw == nil || !sw.CanAnswer() {
@@ -1235,24 +1195,18 @@ func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error)
 		"in_progress":  summary.InProgress,
 		"completed":    summary.Completed,
 	}
-	var bodyLines []string
+	var outItems []any
+	for _, item := range current {
+		outItems = append(outItems, map[string]any{
+			"id":      item.ID,
+			"content": item.Content,
+			"status":  string(item.Status),
+		})
+	}
 	if currentGoal != "" {
-		bodyLines = append(bodyLines, "## Goal", "", currentGoal, "")
+		meta["goal"] = currentGoal
 	}
-	if len(current) > 0 {
-		bodyLines = append(bodyLines, "## Items", "")
-		for _, item := range current {
-			mark := "[ ]"
-			switch item.Status {
-			case domain.TodoInProgress:
-				mark = "[~]"
-			case domain.TodoCompleted:
-				mark = "[x]"
-			}
-			bodyLines = append(bodyLines, fmt.Sprintf("- %s **%s**: %s", mark, item.ID, item.Content))
-		}
-	}
-	return yamlMD(meta, strings.Join(bodyLines, "\n")), nil
+	return yamlJSONL(meta, outItems), nil
 }
 
 // execAskQuestion pauses the turn and asks the user a structured clarifying
@@ -1619,37 +1573,31 @@ func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON [
 	}
 }
 
-// formatMemoryEntry renders one memory entry as a YAML-mapped map for
-// yamlBlock output. It surfaces id, created_at, source, tags, and content
-// so the agent can reason about recency, provenance, and clustering.
-func formatMemoryEntry(e *domain.MemoryEntry) map[string]any {
-	source := e.Source
-	if source == "" {
-		source = "user"
+// pluginMatchesServer reports whether the plugin matches the given server
+// identifier. It accepts the manifest Name (e.g. "Terminal"), the plugin ID
+// (e.g. "nusashell.terminal"), or the MCP server ID (e.g.
+// "plugin:nusashell.terminal"). This lets the agent pass whichever form it
+// has on hand — mcp_enable uses the plugin ID, while tool_list/tool_schema
+// historically used the manifest Name.
+func pluginMatchesServer(p *domain.Plugin, server string) bool {
+	if p.Manifest.Name == server {
+		return true
 	}
-	target := e.Target
-	if target == "" {
-		target = domain.MemoryTargetMemory
+	if p.Manifest.ID == server {
+		return true
 	}
-	m := map[string]any{
-		"id":         e.ID,
-		"target":     target,
-		"created_at": e.CreatedAt.UTC().Format(time.RFC3339),
-		"source":     source,
-		"content":    e.Content,
+	if p.Manifest.MCPServerID() == server {
+		return true
 	}
-	if len(e.Tags) > 0 {
-		m["tags"] = e.Tags
-	}
-	return m
+	return false
 }
 
-// formatFragment renders one memory fragment as a YAML-mapped map for
-// yamlBlock output. Score is included when non-zero (BM25 search results).
-func formatFragment(f *domain.MemoryFragment, score float64) map[string]any {
+// formatFragmentJSON renders a fragment as a map for JSONL output.
+// Score is included when non-zero (BM25 search results).
+func formatFragmentJSON(f *domain.MemoryFragment, score float64) map[string]any {
 	m := map[string]any{
 		"id":         f.ID,
-		"category":   f.Category,
+		"category":   string(f.Category),
 		"updated_at": f.UpdatedAt.UTC().Format(time.RFC3339),
 		"content":    f.Content,
 	}
@@ -1666,26 +1614,4 @@ func formatFragment(f *domain.MemoryFragment, score float64) map[string]any {
 		m["score"] = score
 	}
 	return m
-}
-
-// formatFragmentLine renders a fragment as a single markdown list line for
-// yamlMD output. Score is included when non-zero.
-func formatFragmentLine(f *domain.MemoryFragment, score float64) string {
-	parts := []string{fmt.Sprintf("- **%s** [%s]", f.ID, f.Category)}
-	if f.Project != "" {
-		parts = append(parts, fmt.Sprintf("project=%s", f.Project))
-	}
-	if score > 0 {
-		parts = append(parts, fmt.Sprintf("score=%.2f", score))
-	}
-	parts = append(parts, "— "+truncate(f.Content, 150))
-	return strings.Join(parts, " ")
-}
-
-// truncate shortens s to maxLen characters, appending "…" if truncated.
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-1] + "…"
 }
