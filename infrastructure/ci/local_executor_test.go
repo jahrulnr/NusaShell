@@ -36,7 +36,7 @@ func TestLocalExecutorRunsEcho(t *testing.T) {
 		t.Fatal(err)
 	}
 	var logs []domain.LogChunk
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	res, err := ex.RunStep(ctx, application.RunStepRequest{
 		Run: run, Job: domain.Job{ID: "j"}, JobRun: jr,

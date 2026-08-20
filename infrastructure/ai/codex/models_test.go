@@ -4,14 +4,21 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
 func TestLoadCodexModelsCache(t *testing.T) {
 	dir := t.TempDir()
+	// os.UserHomeDir uses $HOME on Unix and %USERPROFILE% on Windows.
+	// Set both so the test is cross-platform.
 	origHome := os.Getenv("HOME")
+	origProfile := os.Getenv("USERPROFILE")
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 	defer t.Setenv("HOME", origHome)
+	defer t.Setenv("USERPROFILE", origProfile)
+	_ = runtime.GOOS // keep import for future platform-specific guards
 
 	cache := codexModelsCache{
 		Models: []struct {

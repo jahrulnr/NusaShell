@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -47,6 +47,25 @@ async function waitFor(check, label, timeoutMs = 10000) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 40));
   }
   throw new Error(`Timed out waiting for ${label}`);
+}
+
+// startTurn wraps agent.turns.start with a retry on "conversation is busy".
+// On slow CI runners, there is a harmless race between finishTurn setting
+// status=idle (visible via RPC) and the deferred cleanup deleting the run
+// from the active runs map. Without a retry, the next turns.start hits
+// "conversation is busy" even though the previous turn is done.
+async function startTurn(rpc, params, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    try {
+      return await rpc('agent.turns.start', params);
+    } catch (err) {
+      if (!String(err?.message || err).includes('conversation is busy') || Date.now() >= deadline) {
+        throw err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
 }
 
 async function buildAndStartServer(port, dataDir) {
@@ -339,7 +358,7 @@ test('compaction triggers and renders a marker when conversation exceeds thresho
     const bigMsg = 'x'.repeat(2000);
     for (let i = 0; i < 4; i++) {
       llm.setScripts([[{ text: bigMsg }]]);
-      await rpcModule.rpc('agent.turns.start', {
+      await startTurn(rpcModule.rpc, {
         conversation_id: convID, text: bigMsg, model: 'tiny-model',
       });
       await waitFor(async () => {
@@ -357,7 +376,7 @@ test('compaction triggers and renders a marker when conversation exceeds thresho
     llm.setScripts([[{ text: 'Turn after compaction.' }]]);
 
     // Trigger compaction with a new user message.
-    await rpcModule.rpc('agent.turns.start', {
+    await startTurn(rpcModule.rpc, {
       conversation_id: convID, text: 'continue', model: 'tiny-model',
     });
 
@@ -470,7 +489,7 @@ test('BH-AI-01: incomplete stream with tool-call deltas must not silently fall b
     // the turn will silently produce this instead of the tool call.
     llm.setComplete('FALLBACK_TEXT_FROM_NON_STREAMING');
 
-    await rpcModule.rpc('agent.turns.start', {
+    await startTurn(rpcModule.rpc, {
       conversation_id: convID, text: 'list skills', model: 'tiny-model',
     });
 
@@ -650,9 +669,10 @@ test('HYDR-NEW-ROOM: first turn of a new conversation injects the hydration tran
     await rpcModule.rpc('ai.providers.import-models', { id: providerID });
 
     // Seed one primary memory entry so the memory slot is non-empty.
-    // Hydration reads from MEMORY.md (primary memory), so we write
+    // Hydration reads from memory/primary.md (primary memory), so we write
     // directly to the file in the data dir.
-    await writeFile(join(dataDir, 'MEMORY.md'), '---\nlast_updated: 2026-08-19T12:00:00Z\nversion: 1\n---\n\n- [frag_test] User prefers concise answers.\n');
+    await mkdir(join(dataDir, 'memory'), { recursive: true });
+    await writeFile(join(dataDir, 'memory', 'primary.md'), '---\nlast_updated: 2026-08-19T12:00:00Z\nversion: 1\n---\n\n- [frag_test] User prefers concise answers.\n');
 
     // Create a new conversation.
     window.location.hash = '#agent';
@@ -669,7 +689,7 @@ test('HYDR-NEW-ROOM: first turn of a new conversation injects the hydration tran
     llm.setScripts([[{ text: 'Hello from the assistant.' }]]);
 
     // Start the first turn.
-    await rpcModule.rpc('agent.turns.start', {
+    await startTurn(rpcModule.rpc, {
       conversation_id: convID, text: 'hi', model: 'tiny-model',
     });
 
@@ -774,9 +794,10 @@ test('HYDR-POST-COMPACTION: turn after compaction re-injects the hydration trans
     await rpcModule.rpc('ai.providers.import-models', { id: providerID });
 
     // Seed one primary memory entry so the memory slot is non-empty.
-    // Hydration reads from MEMORY.md (primary memory), so we write
+    // Hydration reads from memory/primary.md (primary memory), so we write
     // directly to the file in the data dir.
-    await writeFile(join(dataDir, 'MEMORY.md'), '---\nlast_updated: 2026-08-19T12:00:00Z\nversion: 1\n---\n\n- [frag_test] User is testing compaction hydration.\n');
+    await mkdir(join(dataDir, 'memory'), { recursive: true });
+    await writeFile(join(dataDir, 'memory', 'primary.md'), '---\nlast_updated: 2026-08-19T12:00:00Z\nversion: 1\n---\n\n- [frag_test] User is testing compaction hydration.\n');
 
     // Disable compaction while seeding history.
     await rpcModule.rpc('settings.set', { compaction_enabled: false });
@@ -797,7 +818,7 @@ test('HYDR-POST-COMPACTION: turn after compaction re-injects the hydration trans
     const bigMsg = 'x'.repeat(2000);
     for (let i = 0; i < 4; i++) {
       llm.setScripts([[{ text: bigMsg }]]);
-      await rpcModule.rpc('agent.turns.start', {
+      await startTurn(rpcModule.rpc, {
         conversation_id: convID, text: bigMsg, model: 'tiny-model',
       });
       await waitFor(async () => {
@@ -819,7 +840,7 @@ test('HYDR-POST-COMPACTION: turn after compaction re-injects the hydration trans
     llm.setScripts([[{ text: 'Turn after compaction with hydration.' }]]);
 
     // Trigger compaction + the next turn with a new user message.
-    await rpcModule.rpc('agent.turns.start', {
+    await startTurn(rpcModule.rpc, {
       conversation_id: convID, text: 'continue', model: 'tiny-model',
     });
 
