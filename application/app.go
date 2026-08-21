@@ -44,6 +44,8 @@ type App struct {
 	Toolbox                     ToolExecutor
 	MCPToolbox                  MCPToolbox
 	Factory                     ProviderFactory
+	ImageGeneratorFactory       ImageGeneratorFactory
+	ImageModelListerFactory     ImageModelListerFactory
 	EmbedderFactory             EmbedderFactory
 	EmbeddingModelListerFactory EmbeddingModelListerFactory
 	ModelCatalog                *modelcatalog.Catalog
@@ -57,6 +59,7 @@ type App struct {
 	Acp                         AcpRuntime
 	AcpRunStorage               domain.AcpRunStorage
 	retrySleeper                RetrySleeper
+	imageGenSem                 chan struct{}
 
 	// learningMu guards lazy init of learningSearcher and graphService,
 	// plus the per-conversation turn counter for threshold-based review.
@@ -295,6 +298,8 @@ type Deps struct {
 	Toolbox                     ToolExecutor
 	MCPToolbox                  MCPToolbox
 	Factory                     ProviderFactory
+	ImageGeneratorFactory       ImageGeneratorFactory       // optional; nil = generate_image unavailable
+	ImageModelListerFactory     ImageModelListerFactory     // optional; nil = skip /images/models fetch
 	EmbedderFactory             EmbedderFactory             // optional; nil = BM25-only search
 	EmbeddingModelListerFactory EmbeddingModelListerFactory // optional; nil = skip /embeddings/models fetch
 	ModelCatalog                *modelcatalog.Catalog       // optional; nil = skip enrichment from models.dev
@@ -339,6 +344,8 @@ func NewApp(deps Deps) *App {
 		Toolbox:                     deps.Toolbox,
 		MCPToolbox:                  deps.MCPToolbox,
 		Factory:                     deps.Factory,
+		ImageGeneratorFactory:       deps.ImageGeneratorFactory,
+		ImageModelListerFactory:     deps.ImageModelListerFactory,
 		EmbedderFactory:             deps.EmbedderFactory,
 		EmbeddingModelListerFactory: deps.EmbeddingModelListerFactory,
 		WorkspacePicker:             deps.WorkspacePicker,
@@ -347,6 +354,7 @@ func NewApp(deps Deps) *App {
 		Acp:                         deps.Acp,
 		AcpRunStorage:               deps.AcpRunStorage,
 		retrySleeper:                deps.RetrySleeper,
+		imageGenSem:                 make(chan struct{}, maxConcurrentImageGens),
 		Logger:                      deps.Logger,
 		Automation:                  deps.Automation,
 		runs:                        map[string]*TurnRun{},

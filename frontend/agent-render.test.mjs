@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { renderConversation, renderEmptyThread, renderToolJob, STARTER_PROMPTS } from './js/views/agent/render.js';
+import { renderConversation, renderEmptyThread, renderToolJob, renderToolCallCard, STARTER_PROMPTS } from './js/views/agent/render.js';
 
 function renderTranscript(messages) {
   const dom = new JSDOM('<main id="thread"></main>');
@@ -103,6 +103,47 @@ test('empty thread renders starter chips that fill the composer', () => {
     assert.equal(chips.length, STARTER_PROMPTS.length);
     chips[0].click();
     assert.equal(document.getElementById('composer-input').value, STARTER_PROMPTS[0].prompt);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('generate_image renders a proof card instead of a tool terminal', () => {
+  const dom = new JSDOM('<main id="thread"></main>');
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    const running = renderToolCallCard({
+      id: 'tc1', name: 'generate_image', args: { prompt: 'a red harbor boat' }, status: 'running',
+    });
+    assert.equal(running.classList.contains('agent-genimage-card'), true);
+    assert.equal(running.classList.contains('is-running'), true);
+    assert.match(running.textContent, /Developing|Emulsion|a red harbor boat/);
+
+    const done = renderToolCallCard({
+      id: 'tc1',
+      name: 'generate_image',
+      args: { prompt: 'a red harbor boat' },
+      status: 'ok',
+      output: '---\nstatus: completed\nprovider: openai\nmodel: gpt-image-1\nsize: 1024x1024\ncost_usd: 0.04\nfile_path: /tmp/gen-tc1.png\n---\nImage saved.',
+      output_attachments: [{ type: 'image', name: 'gen-tc1.png', media_type: 'image/png', file_path: '/tmp/gen-tc1.png' }],
+    });
+    assert.equal(done.classList.contains('is-success'), true);
+    const img = done.querySelector('img');
+    assert.ok(img);
+    assert.match(img.getAttribute('src'), /\/local-file\?path=/);
+    assert.match(done.textContent, /gpt-image-1/);
+    assert.match(done.textContent, /Download/);
+    assert.equal(done.querySelectorAll('.agent-tool-terminal').length, 0);
+    assert.ok(done.querySelector('.agent-genimage-open'));
+
+    const failed = renderToolCallCard({
+      id: 'tc1', name: 'generate_image', args: { prompt: 'a boat' }, status: 'fail',
+      output: 'error: No image generation model is configured. Ask the user to pick an image model in Settings → Image generation.',
+    });
+    assert.equal(failed.classList.contains('is-error'), true);
+    assert.match(failed.textContent, /Settings/);
+    assert.equal(failed.querySelectorAll('img').length, 0);
   } finally {
     globalThis.document = previousDocument;
   }

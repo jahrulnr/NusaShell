@@ -15,6 +15,7 @@ test('Settings exposes the Go-supported Electron parity controls', () => {
     'settings-check-connection-btn',
     'settings-data-dir',
     'settings-sidebar-compact',
+    'settings-image-model',
   ]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }

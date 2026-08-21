@@ -49,6 +49,12 @@ func TestDetectKind(t *testing.T) {
 			want: "image",
 		},
 		{
+			name: "gpt-image by name even without modalities",
+			id:   "openai/gpt-image-1",
+			cm:   catalogModel{},
+			want: "image",
+		},
+		{
 			name: "image gen with image input (edit)",
 			id:   "qwen/qwen-image-edit",
 			cm:   catalogModel{Modalities: modalityIO([]string{"text", "image"}, []string{"image"})},

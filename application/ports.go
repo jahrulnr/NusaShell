@@ -183,6 +183,13 @@ type AttachmentStore interface {
 	// and returns the absolute path. Only image and file attachments are
 	// saved; text attachments are skipped (returns "").
 	Save(conversationID string, att domain.Attachment) (string, error)
+	// WriteBytes writes raw bytes under <root>/<conversationID>/<name> and
+	// returns the absolute path. Used for generated images that never had a
+	// DataURL in conversation JSON.
+	WriteBytes(conversationID, name string, data []byte) (string, error)
+	// ReadFile returns the bytes of a previously saved attachment. The path
+	// must live under the store root; paths outside it are rejected.
+	ReadFile(absPath string) ([]byte, error)
 }
 
 // WorkspacePicker is the host-native directory chooser. It lives behind an
@@ -460,6 +467,68 @@ type EmbedderFactory func(p *domain.Provider, apiKey string) (Embedder, error)
 // embeddings on a single OpenAI-compatible endpoint, so the same lister
 // works for chat, responses, and messages kinds.
 type EmbeddingModelListerFactory func(p *domain.Provider) EmbeddingModelLister
+
+// ImageModelLister enumerates image-generation models from a dedicated
+// /images/models endpoint (OpenRouter). OpenAI-compatible hosts that lack
+// the endpoint return an empty list; the importer still tags known ids
+// from /models (gpt-image-1, dall-e-3, …).
+type ImageModelLister interface {
+	ListImageModels(ctx context.Context, apiKey string) ([]string, error)
+}
+
+// ImageModelListerFactory builds an ImageModelLister for a given provider.
+// Returns nil when the provider kind has no image-model catalog (Codex
+// seeds gpt-image-2 at import/read time; Anthropic Messages has none).
+type ImageModelListerFactory func(p *domain.Provider) ImageModelLister
+
+// ---- image generation port ----
+
+// ImageGenerator produces images from a text prompt and optional reference
+// images. Implemented by OpenAI Images, OpenRouter Image API, and Codex
+// ChatGPT plan image endpoints.
+type ImageGenerator interface {
+	Generate(ctx context.Context, req ImageGenRequest) (*ImageGenResult, error)
+}
+
+// ImageGenRequest is the provider-neutral generate/edit request.
+type ImageGenRequest struct {
+	Model      string
+	Prompt     string
+	Size       string // auto | 1024x1024 | 1536x1024 | 1024x1536
+	Quality    string // auto | low | medium | high
+	Background string // auto | transparent | opaque
+	N          int
+	References []ImageReference
+	// TurnID is sent as x-codex-image-turn-id on Codex image requests
+	// (official Codex CLI uses the tool-call turn id). Ignored by other backends.
+	TurnID string
+}
+
+// ImageReference is a source image for image-to-image editing.
+type ImageReference struct {
+	MediaType string
+	Data      []byte
+}
+
+// GeneratedImage is one decoded image from an image-generation response.
+type GeneratedImage struct {
+	Bytes     []byte
+	MediaType string
+}
+
+// ImageGenResult is the decoded response from an image backend.
+type ImageGenResult struct {
+	Images      []GeneratedImage
+	Provider    string // "openai" | "openrouter" | "codex"
+	Model       string
+	UsageTokens int
+	CostUSD     float64
+}
+
+// ImageGeneratorFactory builds an ImageGenerator for a configured provider.
+// Returns an error when the provider kind has no image-generation API
+// (Anthropic Messages, Ollama). Codex uses the ChatGPT plan image endpoints.
+type ImageGeneratorFactory func(p *domain.Provider, apiKey string) (ImageGenerator, error)
 
 // ---- agent tools port ----
 

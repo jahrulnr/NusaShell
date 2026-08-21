@@ -583,6 +583,16 @@
           ]
         },
         {
+          "heading": "Image generation",
+          "paragraphs": [
+            "Pick the model used by the generate_image tool. This is separate from the chat model — any chat model can orchestrate, and the image backend is resolved here. OpenAI Images, OpenRouter Image API, and a signed-in Codex ChatGPT plan are supported. Import models on an OpenAI or OpenRouter provider, or use a signed-in Codex provider. Leave disabled until you want the agent to be able to generate images."
+          ],
+          "controls": [
+            "settings-image-title",
+            "settings-image-model"
+          ]
+        },
+        {
           "heading": "Audio fallback",
           "paragraphs": [
             "When the active chat model cannot hear audio, NusaShell can transcribe or describe attached audio files using a separate audio-capable model so the conversation continues without errors. Pick any model that supports audio input. Leave disabled if you always use audio-capable chat models."
@@ -1391,6 +1401,16 @@
     },
     "settings-vision-model": {
       "label": "Vision fallback model",
+      "section": "Settings",
+      "type": "select"
+    },
+    "settings-image-title": {
+      "label": "Image generation title",
+      "section": "Settings",
+      "type": "text"
+    },
+    "settings-image-model": {
+      "label": "Image generation model",
       "section": "Settings",
       "type": "select"
     },

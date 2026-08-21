@@ -59,11 +59,10 @@ type responsesInputItem struct {
 	CallID  string          `json:"call_id,omitempty"`
 	Name    string          `json:"name,omitempty"`
 	Args    string          `json:"arguments,omitempty"`
-	// Output uses a pointer so the Responses API always receives the field
-	// on function_call_output items, even when the tool result is an empty
-	// string. A bare string + omitempty would drop "output":"" and trigger
-	// "Missing required parameter: 'input[N].output'".
-	Output *string `json:"output,omitempty"`
+	// Output is a JSON value: a string for text-only tool results, or an
+	// array of input_text / input_image items when the tool returned
+	// attachments (read_image, generate_image). RawMessage keeps both shapes.
+	Output json.RawMessage `json:"output,omitempty"`
 }
 
 type responsesContentBlock struct {
@@ -137,15 +136,42 @@ func toResponsesInput(msgs []application.ChatMessage) []responsesInputItem {
 				})
 			}
 		case "tool":
-			output := m.ToolResult.Content
 			out = append(out, responsesInputItem{
 				Type:   "function_call_output",
 				CallID: m.ToolResult.ToolCallID,
-				Output: &output,
+				Output: responsesToolOutput(m.ToolResult),
 			})
 		}
 	}
 	return out
+}
+
+func responsesToolOutput(result *application.ToolResult) json.RawMessage {
+	if result == nil {
+		return json.RawMessage(`""`)
+	}
+	if len(result.Attachments) == 0 {
+		b, err := json.Marshal(result.Content)
+		if err != nil {
+			return json.RawMessage(`""`)
+		}
+		return b
+	}
+	return aiutil.MustJSON(responsesToolOutputContent(result))
+}
+
+func responsesToolOutputContent(result *application.ToolResult) []map[string]any {
+	blocks := make([]map[string]any, 0, 1+len(result.Attachments))
+	if result.Content != "" {
+		blocks = append(blocks, map[string]any{"type": "input_text", "text": result.Content})
+	}
+	for _, att := range result.Attachments {
+		switch att.Type {
+		case "image", "audio", "video":
+			blocks = append(blocks, map[string]any{"type": "input_image", "image_url": att.DataURL})
+		}
+	}
+	return blocks
 }
 
 func responsesUserContent(message application.ChatMessage) []map[string]any {

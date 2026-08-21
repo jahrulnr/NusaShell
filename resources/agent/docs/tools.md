@@ -32,6 +32,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `mcp_install` | install a plugin from the curated catalog or GitHub |
 | `mcp_server_add` | register a manual MCP server from command, arguments, and environment entries |
 | `read_image` | load an image from the conversation into the model's context (vision models see it directly; non-vision models get a text description via the vision fallback) |
+| `generate_image` | generate an image with the configured auxiliary image model (OpenAI Images, OpenRouter Image API, or Codex ChatGPT plan). Only listed when Settings → Image generation is set. The UI displays the print — do not re-render it as Markdown |
 | `read_audio` | load an audio file from the conversation into the model's context (audio-capable models hear it directly; non-audio models get a text transcript via the audio fallback) |
 | `read_video` | load a video file from the conversation into the model's context (video-capable models see it directly; non-video models get a text description via the video fallback) |
 | `web_search` | search the web across Brave, Startpage, Wikipedia, and GitHub; returns ranked results with title, URL, and snippet |
@@ -67,8 +68,10 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `subagent_wait` | wait for an async ACP run to finish |
 
 The provider receives the current `Toolbox.ListTools` roster. `web_answer` is
-listed only when configured, while `subagent`, `subagent_steer`, `subagent_stop`,
-and `subagent_wait` are listed only when an ACP agent is enabled.
+listed only when configured, `generate_image` is listed only when an image
+generation model is set in Settings, while `subagent`, `subagent_steer`,
+`subagent_stop`, and `subagent_wait` are listed only when an ACP agent is
+enabled.
 
 ## Workflow routing
 
@@ -195,6 +198,37 @@ Bad examples:
 
 When evidence remains incomplete, report the claim as unverified and separate
 observed or sourced facts from assumptions and inferences.
+
+## Image generation
+
+`generate_image` is a client-side function tool. The active chat model
+orchestrates; the image backend is the auxiliary model from Settings →
+Image generation (OpenAI Images, OpenRouter Image API, or a signed-in
+Codex ChatGPT plan). It is not listed until that setting is configured.
+Codex uses the same function tool over OAuth — do not emit a hosted
+`type: "image_generation"` tool.
+
+The UI shows the print as soon as the tool completes. Do not embed the
+image again as Markdown, a data URL, or a file link.
+
+Good examples:
+
+    generate_image(prompt="a wooden fishing boat in a night harbor, sea-glass water")
+
+    generate_image(prompt="same boat at dawn, watercolor", referenced_image_paths=["/home/user/.config/nusashell/attachments/conv_1/gen-tc_abc.png"])
+
+Bad examples:
+
+    generate_image(prompt="a cat")
+    # then rendering `![cat](data:image/png;base64,...)` in the assistant text
+
+    generate_image(prompt="edit the last image")  # missing referenced_image_paths
+
+    generate_image(prompt="logo", referenced_image_paths=["logo.png"])  # relative path is rejected
+
+Pass absolute `file_path` values from earlier `generate_image` YAML output
+or from user attachments. `n` is clamped to 1–4. At most two
+`generate_image` calls run at once per process.
 
 ## MCP tools
 

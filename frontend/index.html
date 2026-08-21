@@ -696,6 +696,17 @@
               <small>Only models with vision capability appear here. Leave disabled if you always use vision-capable chat models.</small>
             </label>
           </section>
+          <section class="settings-card settings-image-card" aria-labelledby="settings-image-title">
+            <div class="settings-card-title">Image generation</div>
+            <h2 id="settings-image-title" class="sr-only">Image generation</h2>
+            <p class="settings-card-copy">Pick the model used by the <code>generate_image</code> tool. This is separate from the chat model — any chat model can orchestrate, and the image backend is resolved here. OpenAI Images, OpenRouter Image API, and a signed-in Codex ChatGPT plan are supported. Leave disabled until you want the agent to be able to generate images.</p>
+            <label class="settings-field" for="settings-image-model">Image generation model
+              <select id="settings-image-model">
+                <option value="">Disabled — generate_image is not available</option>
+              </select>
+              <small>Only image generators appear here (gpt-image, DALL·E, Flux, OpenRouter Image API, and Codex ChatGPT plan models). Import models on an OpenAI or OpenRouter provider, or use a signed-in Codex provider. Leave disabled if you do not want the agent to generate images.</small>
+            </label>
+          </section>
           <section class="settings-card settings-audio-card" aria-labelledby="settings-audio-title">
             <div class="settings-card-title">Audio fallback</div>
             <h2 id="settings-audio-title" class="sr-only">Audio fallback</h2>

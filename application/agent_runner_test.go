@@ -766,3 +766,47 @@ func TestCompactionArchiveStripsHydration(t *testing.T) {
 		}
 	}
 }
+
+func TestCompactionStripsToolOutputImageAttachments(t *testing.T) {
+	huge := "data:image/png;base64," + strings.Repeat("A", 8000)
+	body := strings.Repeat("please draw a harbor scene in detail ", 80)
+	msgs := []domain.Message{{
+		ID: "a1", Role: domain.RoleAssistant, Content: "ok", Status: domain.StatusDone, ToolCalls: []domain.ToolCall{{
+			ID: "tc1", Name: "generate_image", Output: "Image saved to /tmp/gen-tc1.png",
+			OutputAttachments: []domain.Attachment{{
+				Type: "image", Name: "gen-tc1.png", MediaType: "image/png",
+				DataURL: huge, FilePath: "/tmp/gen-tc1.png",
+			}},
+		}},
+	}}
+	for i := 0; i < 12; i++ {
+		msgs = append(msgs, domain.Message{
+			ID: fmt.Sprintf("u%d", i), Role: domain.RoleUser, Content: body, Status: domain.StatusDone,
+		})
+	}
+	conv := &domain.Conversation{ID: "c1", Messages: msgs}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
+	adapter := &recordingCompleteAdapter{summaries: []string{"summary"}}
+	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
+	if _, err := app.compactConversation(context.Background(), adapter, conv, "model", 4000); err != nil {
+		t.Fatal(err)
+	}
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if len(adapter.requests) == 0 {
+		t.Fatal("expected compaction Complete call")
+	}
+	for _, req := range adapter.requests {
+		for _, msg := range req.Messages {
+			if msg.ToolResult == nil {
+				continue
+			}
+			if len(msg.ToolResult.Attachments) > 0 {
+				t.Fatalf("compaction must not replay image attachments: %+v", msg.ToolResult.Attachments)
+			}
+			if strings.Contains(msg.ToolResult.Content, huge) {
+				t.Fatal("compaction payload still contains image data URL")
+			}
+		}
+	}
+}

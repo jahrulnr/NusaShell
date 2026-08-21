@@ -1,9 +1,11 @@
 package ai
 
 import (
+	"strings"
 	"testing"
 
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/codex"
 )
 
 type stubCreds struct {
@@ -36,5 +38,31 @@ func TestNewFactoryCodexWithValidToken(t *testing.T) {
 	_, err := f(nil, &domain.Provider{Kind: domain.ProviderCodex, ID: "codex"}, "")
 	if err != nil {
 		t.Fatalf("Codex with valid token should not error: %v", err)
+	}
+}
+
+func TestNewImageGeneratorFactoryRoutesCodex(t *testing.T) {
+	f := NewImageGeneratorFactory(&stubCreds{})
+	gen, err := f(&domain.Provider{Kind: domain.ProviderCodex, ID: "codex", BaseURL: "https://chatgpt.com/backend-api/codex"}, `{"access_token":"tok","account_id":"acc","expires_at":9999999999}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, ok := gen.(*codex.ImagesClient)
+	if !ok {
+		t.Fatalf("got %#v, want *codex.ImagesClient", gen)
+	}
+	if client.AccessToken != "tok" || client.AccountID != "acc" {
+		t.Fatalf("client = %+v", client)
+	}
+	if client.BaseURL != "https://chatgpt.com/backend-api/codex" {
+		t.Fatalf("base = %q", client.BaseURL)
+	}
+}
+
+func TestNewImageGeneratorFactoryRejectsMessages(t *testing.T) {
+	f := NewImageGeneratorFactory(&stubCreds{})
+	_, err := f(&domain.Provider{Kind: domain.ProviderMessages, BaseURL: "https://api.anthropic.com"}, "key")
+	if err == nil || !strings.Contains(err.Error(), "no image generation API") {
+		t.Fatalf("err = %v", err)
 	}
 }

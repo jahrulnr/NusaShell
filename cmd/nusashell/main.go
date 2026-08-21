@@ -244,6 +244,8 @@ func run() error {
 		Toolbox:                     tb,
 		MCPToolbox:                  mcpManager,
 		Factory:                     ai.NewFactory(credentials),
+		ImageGeneratorFactory:       ai.NewImageGeneratorFactory(credentials),
+		ImageModelListerFactory:     ai.NewImageModelListerFactory(),
 		EmbedderFactory:             ai.NewEmbedderFactory(),
 		EmbeddingModelListerFactory: ai.NewEmbeddingModelListerFactory(),
 		ModelCatalog:                modelcatalog.New(nil),

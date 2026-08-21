@@ -269,6 +269,24 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 			}
 		}
 	}
+	// Fetch image-generation models from GET /images/models (OpenRouter).
+	// OpenAI hosts 404 this endpoint; known ids from /models are still
+	// tagged after catalog enrichment below.
+	imageSet := map[string]bool{}
+	if a.ImageModelListerFactory != nil && p.Kind != domain.ProviderCodex && p.Kind != domain.ProviderMessages {
+		imgLister := a.ImageModelListerFactory(p)
+		if imgLister != nil {
+			imgIDs, _ := imgLister.ListImageModels(ctx, key)
+			for _, id := range imgIDs {
+				imageSet[id] = true
+				if seen[id] {
+					continue
+				}
+				seen[id] = true
+				models = append(models, domain.Model{ID: id, Kind: domain.ModelKindImage})
+			}
+		}
+	}
 	// Enrich models with metadata from the models.dev catalog (key-less,
 	// public). Fills in context window, pricing, capabilities (reasoning,
 	// tool call, structured output, vision) that provider /models endpoints
@@ -332,6 +350,16 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 			}
 		}
 	}
+	// Re-apply image kind after catalog enrichment — models.dev can mark
+	// gpt-image-* as chat when output modalities are missing.
+	for i := range models {
+		if imageSet[models[i].ID] || config.IsKnownImageModel(models[i].ID) {
+			models[i].Kind = domain.ModelKindImage
+		}
+	}
+	if p.Kind == domain.ProviderCodex {
+		models = seedCodexImageModels(models)
+	}
 	p.Models = models
 	p.UpdatedAt = time.Now().UTC()
 	if err := a.Providers.Save(p); err != nil {
@@ -353,6 +381,34 @@ func isFreeTierModel(id string) bool {
 		}
 	}
 	return false
+}
+
+// seedCodexImageModels adds the ChatGPT plan image models that Codex
+// model/list does not return. Official Codex imagegen always uses
+// gpt-image-2; gpt-image-1.5 is kept for transparent-background workflows.
+func seedCodexImageModels(models []domain.Model) []domain.Model {
+	seen := make(map[string]int, len(models))
+	for i, m := range models {
+		seen[m.ID] = i
+		if config.IsKnownImageModel(m.ID) {
+			models[i].Kind = domain.ModelKindImage
+		}
+	}
+	seeds := []domain.Model{
+		{ID: "gpt-image-2", DisplayName: "GPT Image 2", Kind: domain.ModelKindImage},
+		{ID: "gpt-image-1.5", DisplayName: "GPT Image 1.5", Kind: domain.ModelKindImage},
+	}
+	for _, seed := range seeds {
+		if i, ok := seen[seed.ID]; ok {
+			models[i].Kind = domain.ModelKindImage
+			if strings.TrimSpace(models[i].DisplayName) == "" {
+				models[i].DisplayName = seed.DisplayName
+			}
+			continue
+		}
+		models = append(models, seed)
+	}
+	return models
 }
 
 // catalogHintForProvider maps a NusaShell provider to a models.dev provider
@@ -417,56 +473,62 @@ func (a *App) enrichProviderModelsAtRead(p *domain.Provider) {
 	hint := catalogHintForProvider(p)
 	for i := range p.Models {
 		meta := a.ModelCatalog.Lookup(hint, p.Models[i].ID)
-		if meta == nil {
-			continue
-		}
-		isFreeVariant := isFreeTierModel(p.Models[i].ID)
-		if p.Models[i].Context == 0 {
-			p.Models[i].Context = meta.Context
-		}
-		if p.Models[i].MaxOutput == 0 {
-			p.Models[i].MaxOutput = meta.Output
-		}
-		if !isFreeVariant {
-			if p.Models[i].InputCost == 0 {
-				p.Models[i].InputCost = meta.InputCost
+		if meta != nil {
+			isFreeVariant := isFreeTierModel(p.Models[i].ID)
+			if p.Models[i].Context == 0 {
+				p.Models[i].Context = meta.Context
 			}
-			if p.Models[i].OutputCost == 0 {
-				p.Models[i].OutputCost = meta.OutputCost
+			if p.Models[i].MaxOutput == 0 {
+				p.Models[i].MaxOutput = meta.Output
 			}
-			if p.Models[i].CacheReadCost == 0 {
-				p.Models[i].CacheReadCost = meta.CacheReadCost
+			if !isFreeVariant {
+				if p.Models[i].InputCost == 0 {
+					p.Models[i].InputCost = meta.InputCost
+				}
+				if p.Models[i].OutputCost == 0 {
+					p.Models[i].OutputCost = meta.OutputCost
+				}
+				if p.Models[i].CacheReadCost == 0 {
+					p.Models[i].CacheReadCost = meta.CacheReadCost
+				}
+			}
+			if p.Models[i].Description == "" {
+				p.Models[i].Description = meta.Description
+			}
+			if p.Models[i].DisplayName == "" {
+				p.Models[i].DisplayName = meta.Name
+			}
+			if len(p.Models[i].SupportedEfforts) == 0 {
+				p.Models[i].SupportedEfforts = meta.SupportedEfforts
+			}
+			if p.Models[i].KnowledgeCutoff == "" {
+				p.Models[i].KnowledgeCutoff = meta.KnowledgeCutoff
+			}
+			// Capabilities are always overridden — the catalog is authoritative
+			// for reasoning, tool call, vision, etc.
+			p.Models[i].ToolCall = meta.ToolCall
+			p.Models[i].StructuredOutput = meta.StructuredOutput
+			p.Models[i].Reasoning = meta.Reasoning
+			p.Models[i].Vision = meta.Vision
+			p.Models[i].Audio = meta.Audio
+			p.Models[i].Video = meta.Video
+			if meta.Kind != "" {
+				p.Models[i].Kind = domain.ModelKind(meta.Kind)
 			}
 		}
-		if p.Models[i].Description == "" {
-			p.Models[i].Description = meta.Description
-		}
-		if p.Models[i].DisplayName == "" {
-			p.Models[i].DisplayName = meta.Name
-		}
-		if len(p.Models[i].SupportedEfforts) == 0 {
-			p.Models[i].SupportedEfforts = meta.SupportedEfforts
-		}
-		if p.Models[i].KnowledgeCutoff == "" {
-			p.Models[i].KnowledgeCutoff = meta.KnowledgeCutoff
-		}
-		// Capabilities are always overridden — the catalog is authoritative
-		// for reasoning, tool call, vision, etc.
-		p.Models[i].ToolCall = meta.ToolCall
-		p.Models[i].StructuredOutput = meta.StructuredOutput
-		p.Models[i].Reasoning = meta.Reasoning
-		p.Models[i].Vision = meta.Vision
-		p.Models[i].Audio = meta.Audio
-		p.Models[i].Video = meta.Video
-		if meta.Kind != "" {
-			p.Models[i].Kind = domain.ModelKind(meta.Kind)
+		if config.IsKnownImageModel(p.Models[i].ID) {
+			p.Models[i].Kind = domain.ModelKindImage
 		}
 	}
 }
 
 func modelsDTO(p *domain.Provider) []contracts.ModelDTO {
+	models := p.Models
+	if p.Kind == domain.ProviderCodex {
+		models = seedCodexImageModels(append([]domain.Model(nil), models...))
+	}
 	var out []contracts.ModelDTO
-	for _, m := range p.Models {
+	for _, m := range models {
 		out = append(out, contracts.ModelDTO{
 			ID:               m.ID,
 			ProviderID:       p.ID,

@@ -193,6 +193,12 @@ type Settings struct {
 	// video-capable model.
 	VideoProviderID string `json:"video_provider_id,omitempty"`
 	VideoModelID    string `json:"video_model_id,omitempty"`
+	// ImageGeneration selects the auxiliary image-generation model used by
+	// the generate_image tool. Format of ImageModelID is the bare model id
+	// (the picker stores provider and model separately, same as Vision).
+	// When ImageProviderID is empty, generate_image is not advertised.
+	ImageProviderID string `json:"image_provider_id,omitempty"`
+	ImageModelID    string `json:"image_model_id,omitempty"`
 	// WebAnswer configures the web_answer tool's answer provider. This is
 	// separate from the chat providers — the user picks a searchwire-supported
 	// vendor (brave, openrouter, openai, perplexity, anthropic, xai) and

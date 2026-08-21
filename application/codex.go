@@ -35,6 +35,16 @@ func PersistCodexToken(creds CredentialStore, providerID, accountID, tokenJSON s
 	return creds.Set(accountKey(providerID, accountID), tokenJSON)
 }
 
+func peekCodexAccountID(tokenJSON string) string {
+	var tok struct {
+		AccountID string `json:"account_id"`
+	}
+	if err := json.Unmarshal([]byte(tokenJSON), &tok); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(tok.AccountID)
+}
+
 // listCodexAccountIDs returns all stored account IDs for a Codex provider,
 // extracted from CredentialStore keys matching "{providerID}:account:*".
 func (a *App) listCodexAccountIDs(providerID string) []string {

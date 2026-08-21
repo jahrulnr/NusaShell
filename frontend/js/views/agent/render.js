@@ -1,5 +1,5 @@
 import { renderMarkdown } from '../../markdown.js';
-import { el, fmtTime } from '../../ui.js';
+import { el, fmtTime, registerOverlayDismiss } from '../../ui.js';
 import { createAskCard } from '../ask-card.js';
 import { openDrawer, agentNameForId } from './subagents.js';
 import { renderArtifactCard, parseArtifactOutput } from '../../artifact-render.js';
@@ -274,6 +274,9 @@ export function renderToolCallCard(toolCall) {
   if (toolCall.name === 'subagent') {
     return renderSubagentCard(toolCall);
   }
+  if (toolCall.name === 'generate_image') {
+    return renderGenerateImageCard(toolCall);
+  }
   const artifact = parseArtifactOutput(toolCall);
   if (artifact) {
     return renderArtifactCard(toolCall, artifact);
@@ -389,6 +392,169 @@ function parseSubagentResult(raw) {
   return { meta, body };
 }
 
+function parseToolArgs(args) {
+  if (!args) return {};
+  if (typeof args === 'object' && !Array.isArray(args)) return args;
+  if (typeof args === 'string') {
+    try { return JSON.parse(args); } catch { return {}; }
+  }
+  return {};
+}
+
+function imageSrc(attachment) {
+  if (!attachment) return '';
+  if (attachment.data_url) return attachment.data_url;
+  if (attachment.file_path) return '/local-file?path=' + encodeURIComponent(attachment.file_path);
+  return '';
+}
+
+function formatImageCost(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  if (n < 0.01) return `$${n.toFixed(4)}`;
+  return `$${n.toFixed(2)}`;
+}
+
+export function renderGenerateImageCard(toolCall) {
+  const args = parseToolArgs(toolCall.args);
+  const parsed = parseSubagentResult(toolCall.output || '');
+  const meta = parsed.meta || {};
+  const attachments = [...(toolCall.output_attachments || toolCall.attachments || [])]
+    .filter((item) => !item.type || item.type === 'image');
+  const isFailed = toolCall.status === 'fail' || meta.status === 'failed';
+  const isRunning = !isFailed && (toolCall.status === 'running' || !toolCall.output);
+  const status = isRunning ? 'running' : (isFailed ? 'error' : 'success');
+  const prompt = String(args.prompt || '').trim();
+  const promptPreview = prompt.split('\n')[0].slice(0, 140);
+
+  const card = el('div', { class: `agent-genimage-card is-${status}`, 'data-tool': 'generate_image' });
+  card._toolArgs = toolCall.args;
+  card._toolName = 'generate_image';
+
+  const head = el('div', { class: 'agent-genimage-head' },
+    el('span', { class: 'agent-genimage-kicker', text: 'proof' }),
+    el('span', { class: 'agent-genimage-title', text: isRunning ? 'Developing' : (isFailed ? 'Did not develop' : 'Print') }),
+    el('span', { class: 'agent-tool-elapsed', text: '' }),
+  );
+  card.append(head);
+
+  const plate = el('div', { class: 'agent-genimage-plate' });
+  if (isRunning) {
+    plate.append(el('div', { class: 'agent-genimage-grain', 'aria-hidden': 'true' }));
+    plate.append(el('p', { class: 'agent-genimage-wait', text: 'Emulsion in the tray' }));
+  } else if (isFailed) {
+    const errText = (parsed.body || toolCall.output || 'Image generation failed').replace(/^error:\s*/i, '').slice(0, 280);
+    plate.append(el('p', { class: 'agent-genimage-error', text: errText }));
+  } else {
+    const images = [...attachments];
+    if (!images.length && meta.file_path) {
+      images.push({ type: 'image', name: meta.file_path.split(/[\\/]/).pop(), file_path: meta.file_path, media_type: meta.media_type });
+    }
+    if (!images.length) {
+      plate.append(el('p', { class: 'agent-genimage-wait', text: 'No image bytes in this result' }));
+    } else {
+      const gallery = el('div', { class: 'agent-genimage-gallery', 'data-count': String(images.length) });
+      for (const attachment of images) {
+        const src = imageSrc(attachment);
+        const label = attachment.name || promptPreview || 'Generated image';
+        const img = el('img', { src, alt: label, loading: 'lazy' });
+        img.addEventListener('error', () => img.classList.add('img-load-error'));
+        const open = () => openImageLightbox({
+          src,
+          name: attachment.name || 'generated-image.png',
+          caption: [meta.model, meta.size, meta.quality, formatImageCost(meta.cost_usd)].filter(Boolean).join(' · '),
+        });
+        const btn = el('button', {
+          class: 'agent-genimage-open',
+          type: 'button',
+          'aria-label': 'View ' + label,
+        });
+        btn.append(img);
+        btn.addEventListener('click', open);
+        gallery.append(el('figure', { class: 'agent-genimage-frame' }, btn));
+      }
+      plate.append(gallery);
+    }
+  }
+  card.append(plate);
+
+  const caption = el('div', { class: 'agent-genimage-caption' });
+  if (promptPreview) {
+    caption.append(el('p', { class: 'agent-genimage-prompt', text: promptPreview, title: prompt }));
+  }
+  const chips = el('div', { class: 'agent-genimage-meta' });
+  const model = meta.model || '';
+  const size = meta.size && meta.size !== 'auto' ? meta.size : (args.size && args.size !== 'auto' ? args.size : '');
+  const quality = meta.quality && meta.quality !== 'auto' ? meta.quality : (args.quality && args.quality !== 'auto' ? args.quality : '');
+  const cost = formatImageCost(meta.cost_usd);
+  if (model) chips.append(el('span', { class: 'agent-genimage-chip', text: model }));
+  if (size) chips.append(el('span', { class: 'agent-genimage-chip', text: size }));
+  if (quality) chips.append(el('span', { class: 'agent-genimage-chip', text: quality }));
+  if (cost) chips.append(el('span', { class: 'agent-genimage-chip', text: cost }));
+  if (chips.children.length) caption.append(chips);
+  const first = attachments[0] || (meta.file_path ? { name: meta.file_path.split(/[\\/]/).pop(), file_path: meta.file_path } : null);
+  const downloadSrc = imageSrc(first);
+  if (downloadSrc && !isRunning && !isFailed) {
+    caption.append(el('a', {
+      class: 'agent-genimage-download',
+      href: downloadSrc,
+      download: first?.name || 'generated-image.png',
+      text: 'Download',
+    }));
+  }
+  if (caption.children.length) card.append(caption);
+  return card;
+}
+
+function openImageLightbox({ src, name, caption }) {
+  if (!src) return;
+  const overlay = el('div', {
+    class: 'agent-image-lightbox',
+    role: 'dialog',
+    'aria-modal': 'true',
+    'aria-label': name || 'Generated image',
+  });
+  const closeBtn = el('button', { class: 'agent-image-lightbox-close', type: 'button', text: 'Close', 'aria-label': 'Close' });
+  const img = el('img', { src, alt: name || 'Generated image' });
+  const bar = el('div', { class: 'agent-image-lightbox-bar' });
+  if (caption) bar.append(el('span', { class: 'agent-image-lightbox-caption', text: caption }));
+  bar.append(el('a', { class: 'agent-image-lightbox-download', href: src, download: name || 'generated-image.png', text: 'Download' }));
+  overlay.append(closeBtn, el('div', { class: 'agent-image-lightbox-frame' }, img, bar));
+  const close = () => {
+    unregister();
+    document.removeEventListener('keydown', onKey, true);
+    overlay.remove();
+  };
+  const unregister = registerOverlayDismiss(close);
+  const onKey = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusables = [...overlay.querySelectorAll('button, a[href]')];
+    if (!focusables.length) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) close();
+  });
+  closeBtn.addEventListener('click', close);
+  document.addEventListener('keydown', onKey, true);
+  document.body.append(overlay);
+  closeBtn.focus();
+}
+
 export function renderToolJob(toolCall) {
   const card = el('details', { class: 'agent-tool-terminal' });
   const name = toolCall.name || 'tool';
@@ -480,13 +646,6 @@ function toolTerminalPanel(label, codeClass, text) {
     el('div', { class: 'agent-tool-terminal-panel-label', text: label }),
     el('pre', { class: codeClass, text }),
   );
-}
-
-function parseToolArgs(args) {
-  if (!args) return {};
-  if (typeof args === 'string') { try { return JSON.parse(args); } catch { return {}; } }
-  if (typeof args === 'object' && !Array.isArray(args)) return args;
-  return {};
 }
 
 function parseMcpCallRef(args) {

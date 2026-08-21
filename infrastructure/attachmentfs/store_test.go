@@ -83,6 +83,52 @@ func TestSaveCreatesRootIfMissing(t *testing.T) {
 	_ = store
 }
 
+func TestWriteBytesAndReadFileRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	store, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3}
+	path, err := store.WriteBytes("conv_gen", "gen-tc1.png", payload)
+	if err != nil {
+		t.Fatalf("WriteBytes: %v", err)
+	}
+	got, err := store.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != string(payload) {
+		t.Fatalf("round trip mismatch: %v vs %v", got, payload)
+	}
+}
+
+func TestReadFileRejectsPathOutsideRoot(t *testing.T) {
+	dir := t.TempDir()
+	store, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "secret.png")
+	if err := os.WriteFile(outside, []byte("nope"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ReadFile(outside); err == nil {
+		t.Fatal("expected outside-root error")
+	}
+}
+
+func TestWriteBytesRejectsTraversalName(t *testing.T) {
+	dir := t.TempDir()
+	store, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.WriteBytes("conv", "../escape.png", []byte("x")); err == nil {
+		t.Fatal("expected invalid name error")
+	}
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a

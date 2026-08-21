@@ -1307,6 +1307,12 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	if req.VideoModelID != nil {
 		s.VideoModelID = strings.TrimSpace(*req.VideoModelID)
 	}
+	if req.ImageProviderID != nil {
+		s.ImageProviderID = strings.TrimSpace(*req.ImageProviderID)
+	}
+	if req.ImageModelID != nil {
+		s.ImageModelID = strings.TrimSpace(*req.ImageModelID)
+	}
 	if req.WebAnswerProvider != nil {
 		s.WebAnswerProvider = strings.TrimSpace(*req.WebAnswerProvider)
 	}
@@ -1372,6 +1378,8 @@ func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 		AudioModelID:            s.AudioModelID,
 		VideoProviderID:         s.VideoProviderID,
 		VideoModelID:            s.VideoModelID,
+		ImageProviderID:         s.ImageProviderID,
+		ImageModelID:            s.ImageModelID,
 		WebAnswerProvider:       s.WebAnswerProvider,
 		WebAnswerModel:          s.WebAnswerModel,
 		Temperature:             s.Temperature,

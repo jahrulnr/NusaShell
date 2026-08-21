@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"nusashell/contracts"
 	"nusashell/domain"
@@ -249,5 +250,28 @@ func TestHandleConversationsPickWorkspaceAcceptsAbsolutePath(t *testing.T) {
 	got, ok := resp.(contracts.ConversationGetResult)
 	if !ok || got.Conversation.Workspace != workspace {
 		t.Fatalf("workspace = %+v, want %q", resp, workspace)
+	}
+}
+
+func TestMsgDTOIncludesToolOutputAttachmentsWithoutDataURL(t *testing.T) {
+	dto := msgDTO(domain.Message{
+		ID:        "m1",
+		Role:      domain.RoleAssistant,
+		Content:   "done",
+		CreatedAt: time.Time{},
+		ToolCalls: []domain.ToolCall{{
+			ID: "tc1", Name: "generate_image", Status: domain.ToolOK, Output: "saved",
+			OutputAttachments: []domain.Attachment{{
+				Type: "image", Name: "gen-tc1.png", MediaType: "image/png",
+				DataURL: "data:image/png;base64,AAAA", FilePath: "/tmp/gen-tc1.png",
+			}},
+		}},
+	})
+	if len(dto.ToolCalls) != 1 || len(dto.ToolCalls[0].OutputAttachments) != 1 {
+		t.Fatalf("dto = %+v", dto.ToolCalls)
+	}
+	att := dto.ToolCalls[0].OutputAttachments[0]
+	if att.FilePath != "/tmp/gen-tc1.png" || att.DataURL != "" {
+		t.Fatalf("attachment = %+v, DataURL must be omitted", att)
 	}
 }

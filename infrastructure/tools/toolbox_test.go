@@ -1557,6 +1557,7 @@ func TestAgentToolsDocMatchesBuiltInRoster(t *testing.T) {
 		"subagent_stop": true, "subagent_wait": true,
 		"artifact_create": true, "artifact_update": true, "artifact_read": true,
 		"artifact_list": true, "artifact_delete": true,
+		"generate_image": true,
 	}
 	for name := range documented {
 		if !actual[name] && !conditional[name] {
@@ -1658,5 +1659,34 @@ func TestListToolsIncludesSleepAndWaitAndCiWait(t *testing.T) {
 		if !names[want] {
 			t.Fatalf("ListTools missing %q", want)
 		}
+	}
+}
+
+type memToolboxSettings struct {
+	s domain.Settings
+}
+
+func (m *memToolboxSettings) Get() domain.Settings        { return m.s }
+func (m *memToolboxSettings) Set(s domain.Settings) error { m.s = s; return nil }
+
+func TestListToolsGenerateImageIsConditional(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	for _, ti := range tb.ListTools() {
+		if ti.Name == "generate_image" {
+			t.Fatal("generate_image must be omitted when image settings are empty")
+		}
+	}
+	tb.Settings = &memToolboxSettings{s: domain.Settings{ImageProviderID: "or", ImageModelID: "openai/gpt-image-2"}}
+	found := false
+	for _, ti := range tb.ListTools() {
+		if ti.Name == "generate_image" {
+			found = true
+			if !strings.Contains(ti.Description, "do not re-render") {
+				t.Fatalf("description missing UI hint: %s", ti.Description)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("generate_image missing when image provider is configured")
 	}
 }

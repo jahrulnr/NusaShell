@@ -17,6 +17,7 @@ import {
   renderConversation,
   renderMessage,
   renderToolJob,
+  renderGenerateImageCard,
   renderTodoItem,
   setAgentOfflineState,
   setToolTerminalStatus,
@@ -1017,6 +1018,27 @@ function clearToolTimers(run) {
   }
 }
 
+function replaceGenerateImageJob(job, payload, assign) {
+  const elapsed = job?.querySelector('.agent-tool-elapsed')?.textContent || '';
+  if (job?._elapsedTimer) {
+    clearInterval(job._elapsedTimer);
+    job._elapsedTimer = null;
+  }
+  const card = renderGenerateImageCard({
+    name: 'generate_image',
+    args: job?._toolArgs ?? {},
+    output: payload.output ?? '',
+    status: payload.status || 'ok',
+    output_attachments: payload.attachments || [],
+  });
+  if (elapsed) {
+    const elapseNode = card.querySelector('.agent-tool-elapsed');
+    if (elapseNode) elapseNode.textContent = elapsed;
+  }
+  if (job) job.replaceWith(card);
+  assign(card);
+}
+
 function endTurn(runId) {
   const run = state.runs.get(runId);
   if (!run) return;
@@ -1439,7 +1461,9 @@ function bindEvents() {
       const buffer = getOrCreateRoomBuffer(conversation_id);
       buffer.runId = run.runId;
       buffer.messageId = run.messageId;
-      const job = renderToolJob({ name, args: args ?? {}, status: 'running' });
+      const job = name === 'generate_image'
+        ? renderGenerateImageCard({ name, args: args ?? {}, status: 'running' })
+        : renderToolJob({ name, args: args ?? {}, status: 'running' });
       buffer.toolJobs.set(tool_call_id, job);
       touchRoomBuffer(buffer);
       refreshLiveDots();
@@ -1463,7 +1487,9 @@ function bindEvents() {
       }
     }
     run.strip.hidden = false;
-    const job = renderToolJob({ name, args: args ?? {}, status: 'running' });
+    const job = name === 'generate_image'
+      ? renderGenerateImageCard({ name, args: args ?? {}, status: 'running' })
+      : renderToolJob({ name, args: args ?? {}, status: 'running' });
     run.toolJobs.set(tool_call_id, job);
     run.strip.append(job);
     // Appending a tool card grows the thread; follow it if the user is pinned.
@@ -1508,6 +1534,8 @@ function bindEvents() {
             job.replaceWith(card);
             buffer.toolJobs.set(tool_call_id, card);
           }
+        } else if (name === 'generate_image') {
+          replaceGenerateImageJob(job, payload, (card) => buffer.toolJobs.set(tool_call_id, card));
         } else {
           const next = { name, args: job._toolArgs, status: status || 'ok', output };
           setToolTerminalStatus(job, next.status);
@@ -1548,6 +1576,14 @@ function bindEvents() {
         run.toolJobs.set(tool_call_id, card);
         card._toolArgs = toolCall.args;
       }
+      return;
+    }
+    if (name === 'generate_image') {
+      const job = run.toolJobs.get(tool_call_id);
+      replaceGenerateImageJob(job, payload, (card) => {
+        run.toolJobs.set(tool_call_id, card);
+        if (!job) run.strip.append(card);
+      });
       return;
     }
     const job = run.toolJobs.get(tool_call_id);

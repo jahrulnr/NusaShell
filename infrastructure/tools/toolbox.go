@@ -193,7 +193,34 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 			InputSchema: obj("object", props("question", str("Question to answer"), "provider", str("Optional provider: "+providerList)), "question"),
 		})
 	}
+	if t.imageGenerationConfigured() {
+		tools = append(tools, application.ToolInfo{
+			Name:        "generate_image",
+			Description: "Generate an image from a text prompt (and optional reference images for editing). The generated image is automatically displayed to the user in the UI — do not re-render it as Markdown. Use referenced_image_paths (absolute paths, e.g. from earlier generate_image results or attachments) for image-to-image editing.",
+			InputSchema: obj("object", props(
+				"prompt", str("Text description of the image to generate"),
+				"size", strEnum("Output size", "auto", "1024x1024", "1536x1024", "1024x1536"),
+				"quality", strEnum("Rendering quality", "auto", "low", "medium", "high"),
+				"background", strEnum("Background treatment", "auto", "transparent", "opaque"),
+				"n", map[string]any{"type": "integer", "description": "Number of images to generate (1-4, default 1).", "minimum": 1, "maximum": 4},
+				"referenced_image_paths", map[string]any{
+					"type":        "array",
+					"description": "Absolute file paths of reference images for editing (from earlier generate_image file_path values or user attachments). Max 5.",
+					"items":       map[string]any{"type": "string"},
+					"maxItems":    5,
+				},
+			), "prompt"),
+		})
+	}
 	return tools
+}
+
+func (t *Toolbox) imageGenerationConfigured() bool {
+	if t.Settings == nil {
+		return false
+	}
+	s := t.Settings.Get()
+	return strings.TrimSpace(s.ImageProviderID) != "" && strings.TrimSpace(s.ImageModelID) != ""
 }
 
 func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (string, error) {

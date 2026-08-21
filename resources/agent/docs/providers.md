@@ -78,10 +78,24 @@ models** (or wait for the periodic auto-import) to populate the model list.
 ## Models
 
 After saving a provider, use **Import models** to fetch its model list
-(`GET /models`). The agent only offers imported models. Messages providers
-bundle Claude model metadata (context window, pricing); imported models keep
-the provider's own ids. Models tagged as embedding-capable appear in the
-Embedding model setting for skill and memory search.
+(`GET /models`). OpenRouter also exposes `GET /images/models`; those ids
+are merged and tagged `kind: image`. The agent only offers imported models.
+Messages providers bundle Claude model metadata (context window, pricing);
+imported models keep the provider's own ids. Models tagged as embedding-capable
+appear in the Embedding model setting for skill and memory search. Models
+tagged as image generators (`kind: image`, including `gpt-image-*` and
+`dall-e-*` even when `/models` omits a kind) appear in Settings → Image
+generation and back the `generate_image` tool. Image generation uses the
+dedicated OpenAI `/images/generations` (and `/images/edits`) endpoints,
+OpenRouter `POST /images`, or Codex OAuth
+`POST {codex base}/images/generations` and `/images/edits` (JSON body,
+including `images[].image_url` data URLs for edits — not OpenAI
+multipart). Codex `model/list` has no image catalog, so NusaShell seeds
+`gpt-image-2` and `gpt-image-1.5` on Codex providers. Anthropic Messages
+and Ollama are not image backends; they can still orchestrate
+`generate_image` when a supported image provider is configured. Codex
+image 429s with `x-codex-active-limit: image_gen` and a `resets_at`
+window use the same multi-account failover as Codex chat.
 
 ## Test connection
 

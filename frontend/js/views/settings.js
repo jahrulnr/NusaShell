@@ -4,10 +4,11 @@ import { autoReconnectEnabled, rpc, setAutoReconnect } from '../rpc.js';
 import { toast, createSelect } from '../ui.js';
 
 let bound = false;
-const state = { embeddingProviderId: '', embeddingModelId: '', visionProviderId: '', visionModelId: '', audioProviderId: '', audioModelId: '', videoProviderId: '', videoModelId: '', webAnswerProvider: '', webAnswerModel: '', compactionModel: '', reviewModel: '' };
+const state = { embeddingProviderId: '', embeddingModelId: '', visionProviderId: '', visionModelId: '', imageProviderId: '', imageModelId: '', audioProviderId: '', audioModelId: '', videoProviderId: '', videoModelId: '', webAnswerProvider: '', webAnswerModel: '', compactionModel: '', reviewModel: '' };
 let preferredSelect;
 let embeddingSelect;
 let visionSelect;
+let imageSelect;
 let compactionSelect;
 let reviewSelect;
 let audioSelect;
@@ -31,6 +32,10 @@ export async function initSettings() {
     });
     visionSelect = createSelect(document.getElementById('settings-vision-model'), {
       placeholder: 'Disabled — non-vision models get a text placeholder instead',
+      search: true,
+    });
+    imageSelect = createSelect(document.getElementById('settings-image-model'), {
+      placeholder: 'Disabled — generate_image is not available',
       search: true,
     });
     audioSelect = createSelect(document.getElementById('settings-audio-model'), {
@@ -96,6 +101,8 @@ export async function refresh() {
     state.embeddingModelId = settings.embedding_model_id ?? '';
     state.visionProviderId = settings.vision_provider_id ?? '';
     state.visionModelId = settings.vision_model_id ?? '';
+    state.imageProviderId = settings.image_provider_id ?? '';
+    state.imageModelId = settings.image_model_id ?? '';
     state.audioProviderId = settings.audio_provider_id ?? '';
     state.audioModelId = settings.audio_model_id ?? '';
     state.videoProviderId = settings.video_provider_id ?? '';
@@ -118,6 +125,7 @@ export async function refresh() {
   renderModelOptions(allModels);
   renderEmbeddingModelOptions(allModels);
   renderVisionModelOptions(allModels);
+  renderImageModelOptions(allModels);
   renderAudioModelOptions(allModels);
   renderVideoModelOptions(allModels);
   renderCompactionModelOptions(allModels);
@@ -186,6 +194,31 @@ function renderVisionModelOptions(models) {
     ? `${state.visionProviderId}:${state.visionModelId}`
     : '';
   if (selected) visionSelect.setSelected([selected]);
+}
+
+function renderImageModelOptions(models) {
+  const imageModels = models.filter(isImageGeneratorModel);
+  const data = [
+    { text: 'Disabled — generate_image is not available', value: '', placeholder: true },
+    ...imageModels.map((m) => {
+      const label = m.display_name || m.id;
+      return {
+        text: m.provider_name ? `${label} · ${m.provider_name}` : label,
+        value: `${m.provider_id}:${m.id}`,
+      };
+    }),
+  ];
+  imageSelect.setData(data);
+  const selected = state.imageProviderId && state.imageModelId
+    ? `${state.imageProviderId}:${state.imageModelId}`
+    : '';
+  if (selected) imageSelect.setSelected([selected]);
+}
+
+function isImageGeneratorModel(model) {
+  if (model?.kind === 'image') return true;
+  const id = String(model?.id || '').toLowerCase();
+  return /gpt-image|dall-e|stable-diffusion|seedream|ideogram|recraft|imagen-|riverflow|flash-image/.test(id);
 }
 
 function renderAudioModelOptions(models) {
@@ -330,6 +363,8 @@ async function save() {
     const { providerId: embProviderId, modelId: embModelId } = splitProviderModel(embeddingValue);
     const visionValue = visionSelect.getSelected()?.[0] ?? '';
     const { providerId: visProviderId, modelId: visModelId } = splitProviderModel(visionValue);
+    const imageValue = imageSelect.getSelected()?.[0] ?? '';
+    const { providerId: imgProviderId, modelId: imgModelId } = splitProviderModel(imageValue);
     const audioValue = audioSelect.getSelected()?.[0] ?? '';
     const { providerId: audProviderId, modelId: audModelId } = splitProviderModel(audioValue);
     const videoValue = videoSelect.getSelected()?.[0] ?? '';
@@ -366,6 +401,8 @@ async function save() {
       embedding_model_id: embModelId || null,
       vision_provider_id: visProviderId || null,
       vision_model_id: visModelId || null,
+      image_provider_id: imgProviderId || null,
+      image_model_id: imgModelId || null,
       audio_provider_id: audProviderId || null,
       audio_model_id: audModelId || null,
       video_provider_id: vidProviderId || null,
