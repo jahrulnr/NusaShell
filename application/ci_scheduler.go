@@ -33,13 +33,14 @@ type ExecutionScheduler struct {
 	MaxJobs  int
 	Notifier RunNotifier
 
-	mu      sync.Mutex
-	cancels map[string]context.CancelFunc
-	runMu   sync.Map
+	mu          sync.Mutex
+	cancels     map[string]context.CancelFunc
+	cancelOwner map[string]string
+	runMu       sync.Map
 }
 
 func NewExecutionScheduler() *ExecutionScheduler {
-	return &ExecutionScheduler{cancels: map[string]context.CancelFunc{}, MaxJobs: maxParallel, Clock: SystemClock{}}
+	return &ExecutionScheduler{cancels: map[string]context.CancelFunc{}, cancelOwner: map[string]string{}, MaxJobs: maxParallel, Clock: SystemClock{}}
 }
 
 func (s *ExecutionScheduler) lockRun(id string) *sync.Mutex {
@@ -211,11 +212,13 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) er
 	jobCtx, cancel := context.WithCancel(ctx)
 	s.mu.Lock()
 	s.cancels[jr.ID] = cancel
+	s.cancelOwner[jr.ID] = runID
 	s.mu.Unlock()
 	defer func() {
 		cancel()
 		s.mu.Lock()
 		delete(s.cancels, jr.ID)
+		delete(s.cancelOwner, jr.ID)
 		s.mu.Unlock()
 	}()
 	if job.Timeout > 0 {
@@ -237,6 +240,9 @@ func (s *ExecutionScheduler) runJob(ctx context.Context, runID, jobID string) er
 			jr.Steps = append(jr.Steps, domain.StepRun{ID: domain.NewID("step"), StepID: step.ID, Name: step.Name, Status: domain.StatusQueued})
 		}
 		sr := &jr.Steps[i]
+		if sr.Status.IsTerminal() {
+			continue // finished before a wait_until pause; never re-run side effects
+		}
 		if step.WaitUntil != nil {
 			if s.now().Before(*step.WaitUntil) {
 				return s.parkWait(ctx, run, jr, sr, step)
@@ -462,8 +468,13 @@ func (s *ExecutionScheduler) Cancel(ctx context.Context, runID string) error {
 		return err
 	}
 	s.mu.Lock()
-	for _, cancel := range s.cancels {
+	for id, cancel := range s.cancels {
+		if s.cancelOwner[id] != runID {
+			continue // belongs to another workflow run - leave it running
+		}
 		cancel()
+		delete(s.cancels, id)
+		delete(s.cancelOwner, id)
 	}
 	s.mu.Unlock()
 	run.Status = domain.StatusCancelled

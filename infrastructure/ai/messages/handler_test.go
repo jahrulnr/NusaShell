@@ -24,7 +24,7 @@ func TestAnthropicAdapterEncodesAttachments(t *testing.T) {
 	}
 
 	body := marshalRequest(t, buildAnthropicRequest(req, false))
-	if !containsAll(body, `"type":"image"`, `"type":"document"`, "brief.pdf", "Attached text file: notes.txt\\n\\nLocal notes") {
+	if !containsAll(body, `"type":"image"`, `"type":"document"`, "brief.pdf", "[Attached text file: notes.txt - full content included below]\\n\\nLocal notes") {
 		t.Fatalf("anthropic attachment mapping = %s", body)
 	}
 }

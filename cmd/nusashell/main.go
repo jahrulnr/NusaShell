@@ -300,6 +300,9 @@ func run() error {
 	defer app.CloseLifecycle()
 	if autoSvc != nil {
 		go func() {
+			// Heal runs orphaned by a previous process (crash/restart): their
+			// running jobs have no heartbeat and would stay "running" forever.
+			_ = autoSvc.Auto.Exec.RecoverStale(context.Background())
 			_ = autoSvc.Auto.FireDue(context.Background())
 			ticker := time.NewTicker(15 * time.Second)
 			defer ticker.Stop()

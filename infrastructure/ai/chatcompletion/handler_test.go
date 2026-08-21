@@ -27,7 +27,7 @@ func TestChatCompletionAdapterEncodesAttachments(t *testing.T) {
 	}
 
 	body := marshalRequest(t, buildRequest(req, false))
-	if !containsAll(body, "Attached text file: notes.txt\\n\\nLocal notes", "image_url", "data:image/png;base64,iVBORw0KGgo=", "[Attached document: brief.pdf (application/pdf)]") {
+	if !containsAll(body, "[Attached text file: notes.txt - full content included below]\\n\\nLocal notes", "image_url", "data:image/png;base64,iVBORw0KGgo=", "[Attached document: brief.pdf (application/pdf)]") {
 		t.Fatalf("chat attachment mapping = %s", body)
 	}
 	if strings.Contains(body, "file_data") {

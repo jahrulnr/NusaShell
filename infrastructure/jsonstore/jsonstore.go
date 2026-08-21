@@ -73,17 +73,25 @@ func (s *Store) load() error {
 	if err != nil {
 		return err
 	}
+	// Only conv_<id>.json files are conversations. This directory also
+	// holds files owned by other stores (todos.json, artifacts.json,
+	// acp_runs.jsonl); treating every *.json as a conversation produced
+	// ghost entries with empty IDs that broke agent.conversations.get.
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, "conv_") || !strings.HasSuffix(name, ".json") {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(convDir, e.Name()))
+		b, err := os.ReadFile(filepath.Join(convDir, name))
 		if err != nil {
 			return err
 		}
 		var c domain.Conversation
 		if err := json.Unmarshal(b, &c); err != nil {
-			return fmt.Errorf("conversation %s: %w", e.Name(), err)
+			return fmt.Errorf("conversation %s: %w", name, err)
+		}
+		if c.ID == "" {
+			continue // defensive: a conversation without an ID is unusable
 		}
 		s.conversations[c.ID] = &c
 	}
@@ -102,8 +110,17 @@ func (s *Store) load() error {
 		return err
 	}
 	s.settings = domain.NormalizeSettings(s.settings)
-	// memories: JSONL (legacy)
-	if b, err := os.ReadFile(filepath.Join(s.dir, "memory", "legacy.jsonl")); err == nil {
+	// memories: JSONL. Primary file is memory/memory.jsonl;
+	// memory/legacy.jsonl is still loaded for backward compatibility with
+	// stores predating the save-vs-delete file split fix.
+	for _, name := range []string{"memory/memory.jsonl", "memory/legacy.jsonl"} {
+		b, err := os.ReadFile(filepath.Join(s.dir, name))
+		if err != nil {
+			if !os.IsNotExist(err) {
+				return err
+			}
+			continue
+		}
 		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
 			if line == "" {
 				continue
@@ -116,8 +133,6 @@ func (s *Store) load() error {
 				s.memories = append(s.memories, &e)
 			}
 		}
-	} else if !os.IsNotExist(err) {
-		return err
 	}
 	// learning_edges: JSONL
 	if b, err := os.ReadFile(filepath.Join(s.dir, "learning", "edges.jsonl")); err == nil {
@@ -523,7 +538,7 @@ func (s *Store) SaveMemory(e *domain.MemoryEntry) error {
 	}
 	stored := clone(e)
 	s.memories = append(s.memories, stored)
-	return s.appendJSONL("memory/legacy.jsonl", stored)
+	return s.appendJSONL("memory/memory.jsonl", stored)
 }
 
 func (s *Store) DeleteMemory(id string) error {
@@ -532,7 +547,7 @@ func (s *Store) DeleteMemory(id string) error {
 	for i, e := range s.memories {
 		if e.ID == id {
 			s.memories = append(s.memories[:i], s.memories[i+1:]...)
-			return s.writeJSONL("memories.jsonl", s.memories)
+			return s.writeJSONL("memory/memory.jsonl", s.memories)
 		}
 	}
 	return fmt.Errorf("%w: memory %s", ErrNotFound, id)
@@ -569,7 +584,7 @@ func (s *Store) ReplaceMemory(target, oldText, content string) error {
 		return fmt.Errorf("replacement would exceed the %q char limit (%d/%d)", target, used-len(old.Content)+len(content), domain.MemoryLimit(target))
 	}
 	s.memories[indices[0]].Content = content
-	return s.writeJSONL("memories.jsonl", s.memories)
+	return s.writeJSONL("memory/memory.jsonl", s.memories)
 }
 
 // targetChars returns the total content length across entries in a target.

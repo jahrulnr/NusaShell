@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -658,6 +659,14 @@ var _ application.SkillStore = (*Store)(nil)
 
 const maxSkillEditableBytes = 1024 * 1024
 
+// Uncompressed-size caps for installing a skill from a ZIP archive.
+// Without them a small malicious archive (zip bomb) could expand to
+// gigabytes and fill the disk.
+const (
+	maxSkillZipFileBytes    = 32 * 1024 * 1024
+	maxSkillZipArchiveBytes = 128 * 1024 * 1024
+)
+
 // normalizedRel validates a skill-relative path: posix separators, no
 // leading "/", no empty/".." segments. Returns the cleaned path.
 func normalizedRel(path string) (string, error) {
@@ -910,6 +919,7 @@ func (s *Store) Install(zipData []byte) (string, error) {
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return "", fmt.Errorf("skillfs: mkdir %s: %w", destDir, err)
 	}
+	var totalUncompressed int64
 	for _, f := range r.File {
 		if f.FileInfo().IsDir() {
 			continue
@@ -932,11 +942,18 @@ func (s *Store) Install(zipData []byte) (string, error) {
 			return "", fmt.Errorf("skillfs: open %s: %w", f.Name, err)
 		}
 		var buf bytes.Buffer
-		if _, err := buf.ReadFrom(rc); err != nil {
-			rc.Close()
+		n, err := io.Copy(&buf, io.LimitReader(rc, maxSkillZipFileBytes+1))
+		rc.Close()
+		if err != nil {
 			return "", fmt.Errorf("skillfs: read %s: %w", f.Name, err)
 		}
-		rc.Close()
+		if n > maxSkillZipFileBytes {
+			return "", fmt.Errorf("skillfs: file %s expands past %d byte limit (zip bomb?)", f.Name, maxSkillZipFileBytes)
+		}
+		totalUncompressed += n
+		if totalUncompressed > maxSkillZipArchiveBytes {
+			return "", fmt.Errorf("skillfs: archive expands past %d byte total limit (zip bomb?)", maxSkillZipArchiveBytes)
+		}
 		if err := os.WriteFile(dest, buf.Bytes(), 0o644); err != nil {
 			return "", fmt.Errorf("skillfs: write %s: %w", dest, err)
 		}

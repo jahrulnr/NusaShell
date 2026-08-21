@@ -217,7 +217,7 @@ async function maybeAutoTitleConversation(conversationId) {
 
 async function refreshConversations() {
   const { conversations } = await rpc('agent.conversations.list');
-  state.conversations = conversations;
+  state.conversations = (conversations ?? []).filter((c) => Boolean(c.id));
   renderConversationList();
   const count = conversations.length;
   document.getElementById('conversation-count').textContent = `${count} thread${count === 1 ? '' : 's'}`;
@@ -319,6 +319,10 @@ function renderConversationList() {
 }
 
 async function openConversation(id) {
+  if (!id) {
+    console.warn('openConversation called without an id; ignoring');
+    return;
+  }
   // Save per-room state for the current conversation before switching.
   saveRoomState(state.activeId);
   const token = ++state.conversationLoadToken;

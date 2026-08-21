@@ -502,7 +502,12 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 	toolRounds := 0
 	continuation := initialContinuation
 	continuedPartialStream := initialContinuation
-	compactedOverflow := false // safety net: emergency-compact once on context overflow
+	// Safety net for context overflow. Unlike a bool, a counter lets the
+	// loop retry emergency compaction a bounded number of times in one
+	// turn, so a compaction that fails to shrink the transcript below the
+	// window does not permanently lock this turn out of retrying. Reset
+	// per turn (this function is the per-turn entry).
+	compactionAttempts := 0
 	repeatedGuard := &repeatedToolGuard{limit: settings.RepeatedToolLimit}
 	// injectHydration lets the first round create a checkpoint when the current
 	// history epoch has none, normally initially or after compaction. Existing
@@ -592,12 +597,12 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 				// additional tool round and must not reduce the user's tool budget.
 				round--
 				continue
-			} else if !compactedOverflow && isContextOverflowError(streamErr) {
+			} else if compactionAttempts < 3 && isContextOverflowError(streamErr) {
 				// Emergency compaction safety net: the conversation exceeded the
 				// model's context window (input + max_output > window). This can
 				// happen when the estimate is inaccurate or compaction was
 				// disabled. Force compaction once, then retry the round.
-				compactedOverflow = true
+				compactionAttempts++
 				preEmg := conversation.EstimateTokens()
 				a.log("warn", "agent", "context overflow for turn %s (est=%d), forcing emergency compaction", run.ID, preEmg)
 				cw := resolveContextWindow(provider, model, settings)

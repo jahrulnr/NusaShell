@@ -67,42 +67,82 @@ func (l *limitedReader) Read(p []byte) (int, error) {
 // idleTimeoutReader wraps an io.ReadCloser with a resettable idle timer.
 // Each successful Read resets the timer. If no data arrives for timeout
 // duration, the timer fires, closes the underlying reader (unblocking any
-// pending Read), and subsequent/timed-out reads return ErrIdleTimeout.
+// pending Read), and reads report ErrIdleTimeout instead of a misleading
+// EOF or "use of closed connection" error.
+//
+// Race safety: the expiry callback runs under mu and bumps a generation
+// counter. Read snapshots the generation before touching the body and
+// refuses to Reset the timer if it fired meanwhile, so a stale one-shot
+// firing can never be re-armed and double-close the stream. Bytes delivered
+// by a read that overlapped the firing are preserved: they are returned
+// with their byte count and the failure is signalled on the same or the
+// next Read as ErrIdleTimeout.
 type idleTimeoutReader struct {
-	rc       io.ReadCloser
-	timeout  time.Duration
-	timer    *time.Timer
-	mu       sync.Mutex
-	timedOut bool
+	rc      io.ReadCloser
+	timeout time.Duration
+	timer   *time.Timer
+
+	mu     sync.Mutex
+	gen    int  // bumped every timer firing; guards stale callbacks
+	fired  bool // sticky: the watchdog has fired at least once
+	closed bool // Close has run; no further resets or expiry handling
 }
 
 func newIdleTimeoutReader(rc io.ReadCloser, timeout time.Duration) *idleTimeoutReader {
 	r := &idleTimeoutReader{rc: rc, timeout: timeout}
 	r.timer = time.AfterFunc(timeout, func() {
 		r.mu.Lock()
-		r.timedOut = true
-		_ = rc.Close() // unblock any pending Read on the body
+		if r.closed {
+			r.mu.Unlock()
+			return
+		}
+		r.gen++
+		r.fired = true
+		_ = r.rc.Close() // unblock any pending Read on the body
 		r.mu.Unlock()
 	})
 	return r
 }
 
 func (r *idleTimeoutReader) Read(p []byte) (int, error) {
+	r.mu.Lock()
+	gen := r.gen
+	closed := r.closed
+	r.mu.Unlock()
+	if closed {
+		return 0, ErrIdleTimeout
+	}
 	n, err := r.rc.Read(p)
 	r.mu.Lock()
-	timedOut := r.timedOut
+	firedNow := r.gen != gen
+	if firedNow {
+		r.fired = true // sticky across reads
+	}
+	fired := r.fired
+	resetOK := n > 0 && !r.closed && !fired // never re-arm after a firing
 	r.mu.Unlock()
-	if timedOut {
+
+	if fired {
+		// Watchdog fired (during this read or earlier): deliver any bytes
+		// read via the return value - Scanner/ReadAll consumers process
+		// p[:n] before honoring the error - and always classify the
+		// failure as ErrIdleTimeout, never as success or the underlying
+		// closed-body error flavor.
 		return n, ErrIdleTimeout
 	}
-	if n > 0 {
+	if resetOK {
 		r.timer.Reset(r.timeout)
 	}
 	return n, err
 }
 
 func (r *idleTimeoutReader) Close() error {
-	r.timer.Stop()
+	r.mu.Lock()
+	if !r.closed {
+		r.closed = true
+		r.timer.Stop()
+	}
+	r.mu.Unlock()
 	return r.rc.Close()
 }
 
@@ -159,6 +199,9 @@ func ReadSSE(ctx context.Context, r io.Reader, idleTimeout time.Duration, fn fun
 		case "event":
 			ev.Event = val
 		case "data":
+			if ev.Data != "" {
+				ev.Data += "\n" // SSE spec: multiple data lines join with \n
+			}
 			ev.Data += val
 		}
 	}

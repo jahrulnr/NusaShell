@@ -27,7 +27,7 @@ func TestResponsesAdapterEncodesAttachments(t *testing.T) {
 	}
 
 	body := marshalRequest(t, buildResponsesRequest(req, false))
-	if !containsAll(body, "input_image", "input_file", "brief.pdf", "Attached text file: notes.txt\\n\\nLocal notes") {
+	if !containsAll(body, "input_image", "input_file", "brief.pdf", "[Attached text file: notes.txt - full content included below]\\n\\nLocal notes") {
 		t.Fatalf("responses attachment mapping = %s", body)
 	}
 }

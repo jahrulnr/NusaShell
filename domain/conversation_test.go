@@ -216,3 +216,67 @@ func TestCompactExcludesPriorSummaryFromUserBudget(t *testing.T) {
 		}
 	}
 }
+
+// TestArchiveMessagesAndCompactAreConsistent: ArchiveMessages must return
+// exactly the messages that Compact drops — no more, no less. If they
+// disagree, archived chunks will either duplicate retained messages
+// (wasting scroll-back space) or drop messages that should be archived
+// (losing scroll-back history). This test verifies the invariant by
+// archiving, compacting, and checking that archived and live messages
+// partition the original set with no overlap and no loss.
+func TestArchiveMessagesAndCompactAreConsistent(t *testing.T) {
+	// 1 user message at the start, then 50 assistant+tool messages.
+	// keepBudget is small so most assistant messages are dropped, but the
+	// user message is retained by the dedicated 20k budget.
+	msgs := make([]Message, 0, 51)
+	msgs = append(msgs, Message{ID: "u0", Role: RoleUser, Content: "fix the bug"})
+	for i := 0; i < 50; i++ {
+		msgs = append(msgs, Message{
+			ID:      NewID("msg"),
+			Role:    RoleAssistant,
+			Content: "",
+			ToolCalls: []ToolCall{{
+				ID:     NewID("call"),
+				Name:   "mcp_call",
+				Args:   `{}`,
+				Output: strings.Repeat("x", 400),
+			}},
+		})
+	}
+	c := &Conversation{Messages: msgs}
+
+	archived := c.ArchiveMessages(1000)
+	c.Compact("summary", 1000)
+
+	// Build a set of live message IDs (excluding the new summary).
+	liveIDs := make(map[string]bool)
+	for _, m := range c.Messages {
+		if IsCompactionSummary(m.Content) {
+			continue // summary is new, not from original set
+		}
+		liveIDs[m.ID] = true
+	}
+
+	// No archived message may appear in live.
+	for _, m := range archived {
+		if liveIDs[m.ID] {
+			t.Fatalf("message %s appears in both archive and live — ArchiveMessages and Compact disagree", m.ID)
+		}
+	}
+
+	// Every original message must be either archived or live (no loss).
+	archivedIDs := make(map[string]bool)
+	for _, m := range archived {
+		archivedIDs[m.ID] = true
+	}
+	for _, orig := range msgs {
+		if !archivedIDs[orig.ID] && !liveIDs[orig.ID] {
+			t.Fatalf("message %s lost — neither archived nor live", orig.ID)
+		}
+	}
+
+	// The user message must be live (retained by dedicated budget), not archived.
+	if !liveIDs["u0"] {
+		t.Fatal("user message u0 should be retained live by the dedicated budget, not archived")
+	}
+}

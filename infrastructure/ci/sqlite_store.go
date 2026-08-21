@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"nusashell/application"
@@ -30,6 +31,10 @@ func OpenSQLite(path string) (*SQLite, error) {
 	if err != nil {
 		return nil, err
 	}
+	// One connection: PRAGMA settings (journal_mode, busy_timeout) are
+	// per-connection, and a multi-connection pool would hit SQLITE_BUSY
+	// because only the first connection carries the busy timeout.
+	db.SetMaxOpenConns(1)
 	if _, err := db.Exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;`); err != nil {
 		db.Close()
 		return nil, err
@@ -229,8 +234,16 @@ func (s *SQLite) ClaimSchedule(ctx context.Context, id string, now time.Time) (*
 	t := now.UTC()
 	rec.FiredAt = &t
 	b, _ := json.Marshal(rec)
-	if _, err := tx.ExecContext(ctx, `UPDATE schedules SET status=?, json=? WHERE id=?`, string(rec.Status), string(b), id); err != nil {
+	// Compare-and-set: only the writer that flips pending->fired wins;
+	// a concurrent claimer sees 0 rows affected and loses cleanly.
+	res, err := tx.ExecContext(ctx, `UPDATE schedules SET status=?, json=? WHERE id=? AND status=?`,
+		string(rec.Status), string(b), id, string(domain.SchedulePending))
+	if err != nil {
 		return nil, err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return nil, nil
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -337,13 +350,21 @@ func (s *SQLite) DueWaits(ctx context.Context, now time.Time, limit int) ([]*dom
 }
 
 func (s *SQLite) ClaimWait(ctx context.Context, id string) (*domain.WaitRecord, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
 	var raw, status string
-	err := s.db.QueryRowContext(ctx, `SELECT json, status FROM waits WHERE id=?`, id).Scan(&raw, &status)
+	err = tx.QueryRowContext(ctx, `SELECT json, status FROM waits WHERE id=?`, id).Scan(&raw, &status)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	if err != nil || status != string(domain.SchedulePending) {
+	if err != nil {
 		return nil, err
+	}
+	if status != string(domain.SchedulePending) {
+		return nil, nil
 	}
 	var rec domain.WaitRecord
 	if err := json.Unmarshal([]byte(raw), &rec); err != nil {
@@ -351,8 +372,20 @@ func (s *SQLite) ClaimWait(ctx context.Context, id string) (*domain.WaitRecord, 
 	}
 	rec.Status = domain.ScheduleFired
 	b, _ := json.Marshal(rec)
-	_, err = s.db.ExecContext(ctx, `UPDATE waits SET status=?, json=? WHERE id=?`, string(rec.Status), string(b), id)
-	return &rec, err
+	// Compare-and-set guard: exactly one concurrent claimer wins.
+	res, err := tx.ExecContext(ctx, `UPDATE waits SET status=?, json=? WHERE id=? AND status=?`,
+		string(rec.Status), string(b), id, string(domain.SchedulePending))
+	if err != nil {
+		return nil, err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return nil, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &rec, nil
 }
 
 func (s *SQLite) WaitingForEvent(ctx context.Context, eventType string) ([]*domain.WaitRecord, error) {
@@ -378,12 +411,62 @@ func (s *SQLite) WaitingForEvent(ctx context.Context, eventType string) ([]*doma
 }
 
 func (s *SQLite) Append(ctx context.Context, chunk domain.LogChunk) error {
-	var seq uint64
-	_ = s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq),0) FROM logs WHERE job_id=?`, chunk.JobID).Scan(&seq)
-	chunk.Sequence = seq + 1
-	b, _ := json.Marshal(chunk)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO logs(job_id,seq,json) VALUES(?,?,?)`, chunk.JobID, chunk.Sequence, string(b))
-	return err
+	for attempt := 0; attempt < 5; attempt++ {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		var seq uint64
+		err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq),0) FROM logs WHERE job_id=?`, chunk.JobID).Scan(&seq)
+		if err == nil {
+			chunk.Sequence = seq + 1 // surface the assigned sequence on the stored chunk
+			var b []byte
+			b, err = json.Marshal(chunk)
+			if err == nil {
+				_, err = tx.ExecContext(ctx, `INSERT INTO logs(job_id,seq,json) VALUES(?,?,?)`, chunk.JobID, chunk.Sequence, string(b))
+			}
+		}
+		if err != nil {
+			_ = tx.Rollback()
+			if !isBusy(err) {
+				return err
+			}
+			if busyBackoff(ctx, attempt) {
+				continue
+			}
+			return ctx.Err()
+		}
+		if err := tx.Commit(); err != nil {
+			if !isBusy(err) {
+				return err
+			}
+			if busyBackoff(ctx, attempt) {
+				continue
+			}
+			return ctx.Err()
+		}
+		return nil
+	}
+	return fmt.Errorf("append log chunk: still SQLITE_BUSY after retries")
+}
+
+// busyBackoff sleeps before a SQLITE_BUSY retry; false means ctx cancelled.
+func busyBackoff(ctx context.Context, attempt int) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(time.Duration(attempt+1) * 10 * time.Millisecond):
+		return true
+	}
+}
+
+// isBusy reports whether err is SQLite SQLITE_BUSY / SQLITE_LOCKED.
+func isBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "SQLITE_BUSY") || strings.Contains(s, "database is locked") || strings.Contains(s, "SQLITE_LOCKED")
 }
 
 func (s *SQLite) Read(ctx context.Context, jobID string, after uint64, limit int) ([]domain.LogChunk, error) {
