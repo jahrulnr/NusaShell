@@ -769,16 +769,22 @@ func TestCompactionArchiveStripsHydration(t *testing.T) {
 
 func TestCompactionStripsToolOutputImageAttachments(t *testing.T) {
 	huge := "data:image/png;base64," + strings.Repeat("A", 8000)
-	conv := &domain.Conversation{ID: "c1", Messages: []domain.Message{
-		{ID: "u1", Role: domain.RoleUser, Content: strings.Repeat("please draw ", 40), Status: domain.StatusDone},
-		{ID: "a1", Role: domain.RoleAssistant, Content: "ok", Status: domain.StatusDone, ToolCalls: []domain.ToolCall{{
+	body := strings.Repeat("please draw a harbor scene in detail ", 80)
+	msgs := []domain.Message{{
+		ID: "a1", Role: domain.RoleAssistant, Content: "ok", Status: domain.StatusDone, ToolCalls: []domain.ToolCall{{
 			ID: "tc1", Name: "generate_image", Output: "Image saved to /tmp/gen-tc1.png",
 			OutputAttachments: []domain.Attachment{{
 				Type: "image", Name: "gen-tc1.png", MediaType: "image/png",
 				DataURL: huge, FilePath: "/tmp/gen-tc1.png",
 			}},
-		}}},
+		}},
 	}}
+	for i := 0; i < 12; i++ {
+		msgs = append(msgs, domain.Message{
+			ID: fmt.Sprintf("u%d", i), Role: domain.RoleUser, Content: body, Status: domain.StatusDone,
+		})
+	}
+	conv := &domain.Conversation{ID: "c1", Messages: msgs}
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
 	adapter := &recordingCompleteAdapter{summaries: []string{"summary"}}
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}

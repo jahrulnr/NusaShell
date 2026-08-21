@@ -648,13 +648,6 @@ function toolTerminalPanel(label, codeClass, text) {
   );
 }
 
-function parseToolArgs(args) {
-  if (!args) return {};
-  if (typeof args === 'string') { try { return JSON.parse(args); } catch { return {}; } }
-  if (typeof args === 'object' && !Array.isArray(args)) return args;
-  return {};
-}
-
 function parseMcpCallRef(args) {
   const parsed = parseToolArgs(args);
   return parsed.ref || null;
