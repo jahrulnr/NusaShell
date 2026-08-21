@@ -74,6 +74,18 @@ When the active chat model cannot see images, NusaShell can describe attached im
   - Section: Settings
   - Type: select
 
+## Image generation
+
+Pick the model used by the generate_image tool. This is separate from the chat model — any chat model can orchestrate, and the image backend is resolved here. OpenAI Images and OpenRouter Image API are supported. Import models on an OpenAI or OpenRouter provider first. Leave disabled until you want the agent to be able to generate images.
+
+- **Image generation title** (`#settings-image-title`):
+  - Section: Settings
+  - Type: text
+
+- **Image generation model** (`#settings-image-model`):
+  - Section: Settings
+  - Type: select
+
 ## Audio fallback
 
 When the active chat model cannot hear audio, NusaShell can transcribe or describe attached audio files using a separate audio-capable model so the conversation continues without errors. Pick any model that supports audio input. Leave disabled if you always use audio-capable chat models.

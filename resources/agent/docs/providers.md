@@ -78,10 +78,19 @@ models** (or wait for the periodic auto-import) to populate the model list.
 ## Models
 
 After saving a provider, use **Import models** to fetch its model list
-(`GET /models`). The agent only offers imported models. Messages providers
-bundle Claude model metadata (context window, pricing); imported models keep
-the provider's own ids. Models tagged as embedding-capable appear in the
-Embedding model setting for skill and memory search.
+(`GET /models`). OpenRouter also exposes `GET /images/models`; those ids
+are merged and tagged `kind: image`. The agent only offers imported models.
+Messages providers bundle Claude model metadata (context window, pricing);
+imported models keep the provider's own ids. Models tagged as embedding-capable
+appear in the Embedding model setting for skill and memory search. Models
+tagged as image generators (`kind: image`, including `gpt-image-*` and
+`dall-e-*` even when `/models` omits a kind) appear in Settings → Image
+generation and back the `generate_image` tool. Image generation uses the
+dedicated OpenAI `/images/generations` (and `/images/edits`) endpoints or
+OpenRouter `POST /images` — not chat completions with `modalities:["image"]`.
+Anthropic Messages, Ollama, and Codex OAuth are not image backends in this
+release; they can still orchestrate `generate_image` when a supported
+image provider is configured.
 
 ## Test connection
 

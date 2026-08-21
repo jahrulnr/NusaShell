@@ -59,9 +59,11 @@ type ToolCall struct {
 	Status ToolCallStatus
 	Output string
 	// OutputAttachments carries image attachments returned by tools like
-	// read_image so vision-capable models can see them in the tool result.
-	// Empty for all other tools. Persisted with the tool call so subsequent
-	// rounds and conversation reloads keep the images visible.
+	// read_image and generate_image so vision-capable models can see them
+	// in the tool result. Empty for all other tools. Persisted with the
+	// tool call so subsequent rounds and conversation reloads keep the
+	// images visible. Generated images persist FilePath as the source of
+	// truth and omit DataURL to keep conversation JSON small.
 	OutputAttachments []Attachment
 }
 

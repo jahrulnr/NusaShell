@@ -32,6 +32,53 @@ func TestResponsesAdapterEncodesAttachments(t *testing.T) {
 	}
 }
 
+func TestResponsesAdapterEncodesToolResultAttachments(t *testing.T) {
+	req := application.ChatRequest{
+		Model: "test-model",
+		Messages: []application.ChatMessage{
+			{
+				Role:      "assistant",
+				ToolCalls: []domain.ToolCall{{ID: "call_1", Name: "generate_image", Args: `{"prompt":"boat"}`}},
+			},
+			{
+				Role: "tool",
+				ToolResult: &application.ToolResult{
+					ToolCallID: "call_1",
+					Name:       "generate_image",
+					Content:    "Image saved to /tmp/gen-call_1.png.",
+					Attachments: []domain.Attachment{{
+						Type: "image", Name: "gen-call_1.png", MediaType: "image/png",
+						DataURL: "data:image/png;base64,iVBORw0KGgo=",
+					}},
+				},
+			},
+		},
+	}
+	body := marshalRequest(t, buildResponsesRequest(req, false))
+	if !containsAll(body, "function_call_output", "input_text", "input_image", "data:image/png;base64,iVBORw0KGgo=", "Image saved to") {
+		t.Fatalf("tool result attachments = %s", body)
+	}
+	if strings.Contains(body, `"output":"Image saved`) {
+		t.Fatalf("tool output with attachments must be an array, got %s", body)
+	}
+}
+
+func TestResponsesToolResultWithoutAttachmentsStaysString(t *testing.T) {
+	req := application.ChatRequest{
+		Model: "test-model",
+		Messages: []application.ChatMessage{{
+			Role: "tool",
+			ToolResult: &application.ToolResult{
+				ToolCallID: "call_2", Name: "docs_search", Content: "docs/mcp.md",
+			},
+		}},
+	}
+	body := marshalRequest(t, buildResponsesRequest(req, false))
+	if !strings.Contains(body, `"output":"docs/mcp.md"`) {
+		t.Fatalf("text-only tool output must stay a string, got %s", body)
+	}
+}
+
 func TestTextOnlyRequestsKeepScalarContent(t *testing.T) {
 	req := application.ChatRequest{Model: "test-model", Messages: []application.ChatMessage{{Role: "user", Content: "Hello"}}}
 	body, err := json.Marshal(buildResponsesRequest(req, false))

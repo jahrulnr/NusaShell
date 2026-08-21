@@ -114,13 +114,7 @@ func msgDTO(m domain.Message) contracts.MessageDTO {
 		}
 	}
 	for _, tc := range m.ToolCalls {
-		dto.ToolCalls = append(dto.ToolCalls, contracts.ToolCallDTO{
-			ID:     tc.ID,
-			Name:   tc.Name,
-			Args:   []byte(tc.Args),
-			Status: string(tc.Status),
-			Output: tc.Output,
-		})
+		dto.ToolCalls = append(dto.ToolCalls, toolCallDTO(tc))
 	}
 	for _, attachment := range m.Attachments {
 		dto.Attachments = append(dto.Attachments, contracts.AttachmentDTO{
@@ -134,15 +128,25 @@ func msgDTO(m domain.Message) contracts.MessageDTO {
 			Content: s.Content,
 		}
 		for _, tc := range s.ToolCalls {
-			step.ToolCalls = append(step.ToolCalls, contracts.ToolCallDTO{
-				ID:     tc.ID,
-				Name:   tc.Name,
-				Args:   []byte(tc.Args),
-				Status: string(tc.Status),
-				Output: tc.Output,
-			})
+			step.ToolCalls = append(step.ToolCalls, toolCallDTO(tc))
 		}
 		dto.Steps = append(dto.Steps, step)
+	}
+	return dto
+}
+
+func toolCallDTO(tc domain.ToolCall) contracts.ToolCallDTO {
+	dto := contracts.ToolCallDTO{
+		ID:     tc.ID,
+		Name:   tc.Name,
+		Args:   []byte(tc.Args),
+		Status: string(tc.Status),
+		Output: tc.Output,
+	}
+	for _, att := range tc.OutputAttachments {
+		dto.OutputAttachments = append(dto.OutputAttachments, contracts.AttachmentDTO{
+			Type: att.Type, Name: att.Name, MediaType: att.MediaType, FilePath: att.FilePath,
+		})
 	}
 	return dto
 }

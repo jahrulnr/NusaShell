@@ -486,6 +486,12 @@ func detectKind(id string, cm catalogModel) string {
 		return "embedding"
 	}
 
+	// Image generators by well-known id, even when modalities are missing.
+	if strings.Contains(lowerID, "gpt-image") || strings.Contains(lowerName, "gpt-image") ||
+		strings.Contains(lowerID, "dall-e") || strings.Contains(lowerName, "dall-e") {
+		return "image"
+	}
+
 	outMod := cm.Modalities.Output
 	inMod := cm.Modalities.Input
 

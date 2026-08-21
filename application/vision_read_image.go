@@ -97,22 +97,43 @@ func (a *App) executeReadImage(run *TurnRun, toolCall domain.ToolCall, caps Mode
 	return yamlMDApp(meta, result), nil, nil
 }
 
-// findImageAttachmentByPath searches all user messages in the conversation for
-// an image attachment matching the given absolute file path (case-insensitive).
+// findImageAttachmentByPath searches conversation attachments for an image
+// matching the given absolute file path (case-insensitive). User message
+// attachments and tool OutputAttachments (e.g. generate_image results) are
+// both eligible so image-to-image edits can reference earlier generations.
 func findImageAttachmentByPath(conversation *domain.Conversation, path string) (domain.Attachment, error) {
 	target := strings.ToLower(strings.TrimSpace(path))
 	for _, msg := range conversation.Messages {
-		if msg.Role != domain.RoleUser {
+		if att, ok := matchImagePath(msg.Attachments, target); ok {
+			return att, nil
+		}
+		if msg.Role != domain.RoleAssistant {
 			continue
 		}
-		for _, att := range msg.Attachments {
-			if att.Type != "image" {
-				continue
-			}
-			if att.FilePath != "" && strings.ToLower(att.FilePath) == target {
+		for _, tc := range msg.ToolCalls {
+			if att, ok := matchImagePath(tc.OutputAttachments, target); ok {
 				return att, nil
+			}
+		}
+		for _, step := range msg.Steps {
+			for _, tc := range step.ToolCalls {
+				if att, ok := matchImagePath(tc.OutputAttachments, target); ok {
+					return att, nil
+				}
 			}
 		}
 	}
 	return domain.Attachment{}, fmt.Errorf("image attachment with file_path %q not found in conversation", path)
+}
+
+func matchImagePath(atts []domain.Attachment, target string) (domain.Attachment, bool) {
+	for _, att := range atts {
+		if att.Type != "image" {
+			continue
+		}
+		if att.FilePath != "" && strings.ToLower(att.FilePath) == target {
+			return att, true
+		}
+	}
+	return domain.Attachment{}, false
 }

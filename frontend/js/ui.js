@@ -112,6 +112,13 @@ export function dismissOpenDialogs() {
   for (const dismiss of [...openDialogDismissers]) dismiss();
 }
 
+// registerOverlayDismiss lets custom overlays (lightbox, etc.) close when
+// the router tears down dialogs on view change. Returns an unregister fn.
+export function registerOverlayDismiss(dismiss) {
+  openDialogDismissers.add(dismiss);
+  return () => openDialogDismissers.delete(dismiss);
+}
+
 function dialogFocusables(root) {
   return [...root.querySelectorAll('button, [href], input, textarea, select, [tabindex]:not([tabindex="-1"])')]
     .filter((node) => !node.disabled && node.getAttribute('aria-hidden') !== 'true');

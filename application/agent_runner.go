@@ -967,7 +967,6 @@ func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *do
 				for _, tc := range m.ToolCalls {
 					msgs = append(msgs, ChatMessage{Role: "tool", ToolResult: &ToolResult{
 						ToolCallID: tc.ID, Name: tc.Name, Content: wrapToolOutput(tc.Name, tc.Output),
-						Attachments: tc.OutputAttachments,
 					}})
 				}
 			}

@@ -152,7 +152,7 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 		})
 		_ = a.Conversations.Save(conversation)
 	}
-	messages := chatMessages(conversation, messageID, caps)
+	messages := a.chatMessagesForProvider(conversation, messageID, caps)
 	// Publish a lightweight server-side context estimate (system + messages +
 	// tool definitions as actually sent) so the UI badge is not just a guess
 	// from the transcript alone — and remember it on the conversation so the
@@ -468,6 +468,8 @@ func (a *App) runOneTool(run *TurnRun, toolCall domain.ToolCall, caps ModelCapab
 		output, outputAttachments, err = a.executeReadAudio(run, toolCall, caps, settings)
 	case "read_video":
 		output, outputAttachments, err = a.executeReadVideo(run, toolCall, caps, settings)
+	case "generate_image":
+		output, outputAttachments, err = a.executeGenerateImage(run, toolCall, settings)
 	default:
 		toolCtx := WithConversationID(run.Ctx, run.ConversationID)
 		toolCtx = WithRunID(toolCtx, run.ID)
@@ -498,10 +500,16 @@ func (a *App) runOneTool(run *TurnRun, toolCall domain.ToolCall, caps ModelCapab
 }
 
 func (a *App) emitToolCompleted(run *TurnRun, toolCall domain.ToolCall, res toolExecResult) {
-	a.Bus.Emit(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
+	event := contracts.ToolCompletedEvent{
 		RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID,
 		Name: toolCall.Name, Status: string(res.status), Output: res.output,
-	})
+	}
+	for _, att := range res.atts {
+		event.Attachments = append(event.Attachments, contracts.AttachmentDTO{
+			Type: att.Type, Name: att.Name, MediaType: att.MediaType, FilePath: att.FilePath,
+		})
+	}
+	a.Bus.Emit(contracts.EventToolCompleted, event)
 }
 
 // emitLearningMutationEvents publishes memory.updated and/or skill.updated

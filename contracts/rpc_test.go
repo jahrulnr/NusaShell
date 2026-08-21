@@ -229,6 +229,19 @@ func TestEventFieldNames(t *testing.T) {
 			t.Errorf("missing field %q in TurnDoneEvent JSON", k)
 		}
 	}
+
+	b, _ = json.Marshal(ToolCompletedEvent{
+		RunID: "r", ConversationID: "c", ToolCallID: "t", Name: "generate_image", Status: "ok",
+		Attachments: []AttachmentDTO{{Type: "image", Name: "gen.png", FilePath: "/tmp/gen.png"}},
+	})
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"tool_call_id", "attachments"} {
+		if _, ok := m[k]; !ok {
+			t.Errorf("missing field %q in ToolCompletedEvent JSON", k)
+		}
+	}
 }
 
 func TestMessageDTORoundTrip(t *testing.T) {

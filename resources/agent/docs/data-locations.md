@@ -36,7 +36,7 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `learning/trajectory.jsonl` | learning trajectory log (one event per line) | JSONL |
 | `learning/turns.json` | turn counters for review agent scheduling | JSON |
 | `learning/reviews/` | background review agent transcripts (one JSON file per review run; viewable from the Learning log) | JSON |
-| `attachments/<conv_id>/` | image/file attachments saved for file-based tool access | files |
+| `attachments/<conv_id>/` | user image/file attachments and generated images (`gen-<toolCallID>.<ext>`) | files |
 | `docs/` | optional user-supplied docs that extend the embedded corpus | markdown |
 | `logs.jsonl` | activity log (bounded ring) | JSONL |
 | `conversations/acp_runs.jsonl` | completed ACP subagent run transcripts (one JSON line per run) | JSONL |

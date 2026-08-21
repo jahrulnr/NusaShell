@@ -79,6 +79,26 @@ func TestFindImageAttachmentByPath(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for nonexistent image")
 	}
+
+	// Generated image on a tool call OutputAttachments
+	genPath := testAbsPath(dir, "gen-tc.png")
+	conv.Messages = append(conv.Messages, domain.Message{
+		ID:   "a2",
+		Role: domain.RoleAssistant,
+		ToolCalls: []domain.ToolCall{{
+			ID: "tcg", Name: "generate_image",
+			OutputAttachments: []domain.Attachment{{
+				Type: "image", Name: "gen-tc.png", MediaType: "image/png", FilePath: genPath,
+			}},
+		}},
+	})
+	img, err = findImageAttachmentByPath(conv, genPath)
+	if err != nil {
+		t.Fatalf("generated image lookup: %v", err)
+	}
+	if img.Name != "gen-tc.png" {
+		t.Errorf("got %q, want gen-tc.png", img.Name)
+	}
 }
 
 func TestExecuteReadImageVisionModel(t *testing.T) {

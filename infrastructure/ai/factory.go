@@ -17,6 +17,7 @@ import (
 	"nusashell/infrastructure/ai/chatcompletion"
 	"nusashell/infrastructure/ai/codex"
 	"nusashell/infrastructure/ai/embeddings"
+	"nusashell/infrastructure/ai/imagegen"
 	"nusashell/infrastructure/ai/messages"
 	"nusashell/infrastructure/ai/ollama"
 	"nusashell/infrastructure/ai/responses"
@@ -236,6 +237,24 @@ func NewEmbeddingModelListerFactory() application.EmbeddingModelListerFactory {
 		}
 		base := embeddingBaseURL(p.BaseURL)
 		return embeddings.NewModelLister(base, newProviderHTTPClient())
+	}
+}
+
+// NewImageModelListerFactory returns a factory that builds an ImageModelLister
+// for OpenAI-compatible hosts. Messages (Anthropic) and Codex have no image
+// catalog; a 404 on /images/models is treated as "none extra".
+func NewImageModelListerFactory() application.ImageModelListerFactory {
+	client := newProviderHTTPClient()
+	return func(p *domain.Provider) application.ImageModelLister {
+		if p == nil {
+			return nil
+		}
+		switch p.Kind {
+		case domain.ProviderChat, domain.ProviderResponses, domain.ProviderOllama:
+			return imagegen.NewModelLister(embeddingBaseURL(p.BaseURL), client)
+		default:
+			return nil
+		}
 	}
 }
 

@@ -72,6 +72,30 @@ visible context window.
 attachment for a capable model, fallback-model description otherwise) for
 audio and video files respectively.
 
+## Generated images
+
+`generate_image` writes files under `attachments/<conversationID>/gen-<toolCallID>.<ext>`
+(PNG, JPEG, or WebP). Conversation JSON stores `file_path` only — not a
+base64 DataURL — so a 2K print does not bloat the transcript. The UI loads
+the file through `/local-file?path=`. The next provider round hydrates
+bytes from disk so a vision chat model can see the result.
+
+The tool output tells the model the print is already on screen. Do not
+re-render it as Markdown.
+
+Good example:
+
+    generate_image(prompt="harbor at night, wet cobblestones, sea-glass reflections")
+
+Bad examples:
+
+    generate_image(prompt="harbor at night")
+    # followed by `![result](/local-file?path=...)` in the assistant reply
+
+To edit a previous print, pass its absolute `file_path` in
+`referenced_image_paths`. Paths that are not in this conversation's
+attachments or earlier `generate_image` results are rejected.
+
 ## Folder attachments
 
 Users can drag and drop a folder onto the conversation area. The folder is

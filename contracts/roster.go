@@ -186,11 +186,12 @@ type UsageDTO struct {
 }
 
 type ToolCallDTO struct {
-	ID     string          `json:"id"`
-	Name   string          `json:"name"`
-	Args   json.RawMessage `json:"args,omitempty"`
-	Status string          `json:"status,omitempty"`
-	Output string          `json:"output,omitempty"`
+	ID                string          `json:"id"`
+	Name              string          `json:"name"`
+	Args              json.RawMessage `json:"args,omitempty"`
+	Status            string          `json:"status,omitempty"`
+	Output            string          `json:"output,omitempty"`
+	OutputAttachments []AttachmentDTO `json:"output_attachments,omitempty"`
 }
 
 type MessageStepDTO struct {
@@ -352,12 +353,13 @@ type ToolStartedEvent struct {
 }
 
 type ToolCompletedEvent struct {
-	RunID          string `json:"run_id"`
-	ConversationID string `json:"conversation_id"`
-	ToolCallID     string `json:"tool_call_id"`
-	Name           string `json:"name"`
-	Status         string `json:"status"`
-	Output         string `json:"output,omitempty"`
+	RunID          string          `json:"run_id"`
+	ConversationID string          `json:"conversation_id"`
+	ToolCallID     string          `json:"tool_call_id"`
+	Name           string          `json:"name"`
+	Status         string          `json:"status"`
+	Output         string          `json:"output,omitempty"`
+	Attachments    []AttachmentDTO `json:"attachments,omitempty"`
 }
 
 type TodoUpdatedEvent struct {
@@ -1112,6 +1114,8 @@ type SettingsDTO struct {
 	AudioModelID            string   `json:"audio_model_id,omitempty"`
 	VideoProviderID         string   `json:"video_provider_id,omitempty"`
 	VideoModelID            string   `json:"video_model_id,omitempty"`
+	ImageProviderID         string   `json:"image_provider_id,omitempty"`
+	ImageModelID            string   `json:"image_model_id,omitempty"`
 	WebAnswerProvider       string   `json:"web_answer_provider,omitempty"`
 	WebAnswerModel          string   `json:"web_answer_model,omitempty"`
 	Temperature             *float64 `json:"temperature,omitempty"`
@@ -1148,6 +1152,8 @@ type SettingsSetRequest struct {
 	AudioModelID            *string         `json:"audio_model_id,omitempty"`
 	VideoProviderID         *string         `json:"video_provider_id,omitempty"`
 	VideoModelID            *string         `json:"video_model_id,omitempty"`
+	ImageProviderID         *string         `json:"image_provider_id,omitempty"`
+	ImageModelID            *string         `json:"image_model_id,omitempty"`
 	WebAnswerProvider       *string         `json:"web_answer_provider,omitempty"`
 	WebAnswerModel          *string         `json:"web_answer_model,omitempty"`
 	WebAnswerAPIKey         *string         `json:"web_answer_api_key,omitempty"`

@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Image generation tool.** `generate_image` is a built-in client-side
+  tool (advertised only when Settings → Image generation is set). The
+  chat model orchestrates; OpenAI Images or OpenRouter's dedicated Image
+  API renders the print. Import models also fetches OpenRouter
+  `GET /images/models` and tags `gpt-image-*` / `dall-e-*` as `kind:
+  image` so the Settings picker is not empty. Results persist under
+  `attachments/<conversation>/gen-<toolCallID>.*` without stuffing base64
+  into conversation JSON. The agent thread shows a developing-tray card
+  while the tool runs, then a proof with zoom and download. Tool-result
+  images now survive the Responses adapter (`function_call_output` can
+  carry `input_image` items).
 - **Automation engine and CI runner.** Workspace `.nusashell/pipeline.yaml`
   plus saved once/every/when automations, a local executor, SQLite
   `automation.db`, agent tools (`ci_*`, `automation_*`, `schedule_*`,
