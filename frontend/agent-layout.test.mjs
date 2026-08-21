@@ -74,3 +74,29 @@ test('Agent todo strip render function is exported from render module', () => {
   assert.match(agentRender, /export function renderTodoItem/);
   assert.match(agentView, /renderTodoItem/);
 });
+
+test('Sidebar restores the data directory path the shell already queries', () => {
+  assert.match(html, /id="storage-path"/);
+  assert.match(appShell, /getElementById\('storage-path'\)/);
+});
+
+test('Agent empty thread offers clickable starter prompts', () => {
+  assert.match(html, /id="agent-starter-prompts"/);
+  assert.match(html, /data-starter-prompt=/);
+  assert.match(agentRender, /STARTER_PROMPTS/);
+  assert.match(agentRender, /data-starter-prompt/);
+});
+
+test('Narrow agent layout can reopen the conversations pane', () => {
+  assert.match(html, /id="agent-rooms-toggle"/);
+  assert.match(html, /id="agent-rooms-backdrop"/);
+  assert.match(agentView, /agent-rooms-toggle/);
+  assert.match(parityCSS, /agent-shell\.is-rooms-open/);
+});
+
+test('Harbor palette is tokenized instead of acid-lime defaults', async () => {
+  const globalCSS = await readFile(new URL('./styles/global.css', import.meta.url), 'utf8');
+  assert.match(globalCSS, /--accent:\s*#6ee0c4/);
+  assert.doesNotMatch(globalCSS, /#c5f45d/);
+  assert.match(appShell, /bindShellShortcuts/);
+});

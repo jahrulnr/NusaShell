@@ -12,6 +12,7 @@ A search input filters the app grid by name, id, or description. Category tabs n
   - Section: Home
   - Type: search
   - Action: Filters installed apps by name, id, or description. Escape clears the query.
+  - Shortcut: Ctrl+K / ⌘K, or / when not typing
 
 - **Clear app search** (`#search-clear`):
   - Section: Home

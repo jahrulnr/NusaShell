@@ -46,19 +46,37 @@ export function timeAgo(iso) {
 export function toast(message, kind = 'info', timeout = 4000) {
   const container = document.getElementById('toast-container');
   const dismiss = el('button', { class: 'toast-dismiss', text: '×', title: 'Dismiss', 'aria-label': 'Dismiss' });
-  const node = el('div', { class: `toast toast-${kind}` },
+  const node = el('div', { class: `toast toast-${kind}`, role: 'status' },
     el('span', { class: 'toast-message', text: message }),
     dismiss,
   );
   container.append(node);
   requestAnimationFrame(() => node.classList.add('toast-show'));
   let timer;
+  let remaining = timeout;
+  let startedAt = Date.now();
   const remove = () => {
     clearTimeout(timer);
+    timer = null;
     node.classList.remove('toast-show');
     setTimeout(() => node.remove(), 350);
   };
-  timer = setTimeout(remove, timeout);
+  const arm = () => {
+    clearTimeout(timer);
+    startedAt = Date.now();
+    timer = setTimeout(remove, Math.max(0, remaining));
+  };
+  arm();
+  node.addEventListener('mouseenter', () => {
+    if (timer == null) return;
+    clearTimeout(timer);
+    timer = null;
+    remaining -= Date.now() - startedAt;
+  });
+  node.addEventListener('mouseleave', () => {
+    if (timer != null) return;
+    arm();
+  });
   dismiss.addEventListener('click', remove);
   return remove;
 }
@@ -94,21 +112,51 @@ export function dismissOpenDialogs() {
   for (const dismiss of [...openDialogDismissers]) dismiss();
 }
 
+function dialogFocusables(root) {
+  return [...root.querySelectorAll('button, [href], input, textarea, select, [tabindex]:not([tabindex="-1"])')]
+    .filter((node) => !node.disabled && node.getAttribute('aria-hidden') !== 'true');
+}
+
 export function dialog({ title, message, fields = [], actions = [{ label: 'Cancel', value: null }], danger = false }) {
   return new Promise((resolve) => {
     const overlay = el('div', { class: 'ui-dialog-overlay' });
+    const titleId = `ui-dialog-title-${Math.random().toString(36).slice(2, 9)}`;
+    const slimInstances = [];
     const settle = (result) => {
       if (!openDialogDismissers.has(dismiss)) return;
       openDialogDismissers.delete(dismiss);
+      document.removeEventListener('keydown', onKey, true);
+      for (const ss of slimInstances) {
+        try { ss.destroy?.(); } catch { /* already gone */ }
+      }
       overlay.remove();
       resolve(result);
     };
     const dismiss = () => settle({ value: null, fields: {} });
+    const onKey = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        dismiss();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const nodes = dialogFocusables(overlay);
+      if (!nodes.length) return;
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
     openDialogDismissers.add(dismiss);
     const body = el('div', { class: 'ui-dialog-body' });
     if (message) body.append(el('p', { class: 'ui-dialog-message', text: message }));
     const values = {};
-    const slimInstances = [];
     for (const field of fields) {
       let input;
       if (field.tag === 'textarea') {
@@ -156,6 +204,7 @@ export function dialog({ title, message, fields = [], actions = [{ label: 'Cance
     }
     const actionBtns = actions.map((a) => {
       const btn = el('button', {
+        type: 'button',
         class: `mini-btn ${a.danger || (danger && a.value !== null) ? 'danger' : ''} ${a.primary ? '' : 'ghost'}`,
         text: a.label,
       });
@@ -164,22 +213,31 @@ export function dialog({ title, message, fields = [], actions = [{ label: 'Cance
       });
       return btn;
     });
-    const dialogNode = el('div', { class: 'ui-dialog' },
+    const dialogNode = el('div', {
+      class: 'ui-dialog',
+      role: 'dialog',
+      'aria-modal': 'true',
+      'aria-labelledby': titleId,
+    },
       el('div', { class: 'ui-dialog-header' },
-        el('h2', { text: title }),
-        el('button', { class: 'ui-dialog-close', text: '×', 'aria-label': 'Close' }),
+        el('h2', { id: titleId, text: title }),
+        el('button', { class: 'ui-dialog-close', type: 'button', text: '×', 'aria-label': 'Close' }),
       ),
       body,
       el('div', { class: 'ui-dialog-actions' }, actionBtns),
     );
+    dialogNode.tabIndex = -1;
     dialogNode.querySelector('.ui-dialog-close').addEventListener('click', () => dismiss());
     overlay.addEventListener('mousedown', (e) => {
       if (e.target === overlay) dismiss();
     });
     overlay.append(dialogNode);
     document.body.append(overlay);
-    const first = overlay.querySelector('input, textarea, .ss-main');
-    if (first) setTimeout(() => first.focus(), 30);
+    document.addEventListener('keydown', onKey, true);
+    const first = overlay.querySelector('input, textarea, .ss-main')
+      || dialogFocusables(dialogNode)[0]
+      || dialogNode;
+    setTimeout(() => first.focus(), 30);
   });
 }
 

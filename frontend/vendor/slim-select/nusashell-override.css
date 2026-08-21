@@ -7,7 +7,7 @@
   --ss-placeholder-color: var(--text-faint);
   --ss-disabled-color: var(--panel);
   --ss-border-color: var(--border);
-  --ss-highlight-color: rgba(197, 244, 93, 0.25);
+  --ss-highlight-color: var(--accent-soft);
   --ss-focus-color: var(--accent);
   --ss-success-color: var(--accent);
   --ss-error-color: #f55b5b;
@@ -24,14 +24,14 @@
 .ss-main {
   padding: 6px 8px;
   min-height: 36px;
-  background-color: #080c13;
+  background-color: var(--input-bg);
   border-color: var(--border);
 }
 
 .ss-main:focus,
 .ss-main.ss-open {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(197, 244, 93, 0.12);
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
 .ss-main .ss-values .ss-single {

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 
-import { renderConversation, renderToolJob } from './js/views/agent/render.js';
+import { renderConversation, renderEmptyThread, renderToolJob, STARTER_PROMPTS } from './js/views/agent/render.js';
 
 function renderTranscript(messages) {
   const dom = new JSDOM('<main id="thread"></main>');
@@ -82,6 +82,27 @@ test('tool job summary includes elapsed span before chevron', () => {
     assert.ok(elapsedIdx >= 0, 'elapsed span present');
     assert.ok(chevronIdx >= 0, 'chevron span present');
     assert.ok(elapsedIdx < chevronIdx, 'elapsed sits left of chevron');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('empty thread renders starter chips that fill the composer', () => {
+  const dom = new JSDOM(`
+    <div id="agent-thread"></div>
+    <div id="tool-job-strip"></div>
+    <div id="agent-todo-strip"></div>
+    <textarea id="composer-input"></textarea>
+  `);
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  try {
+    assert.ok(STARTER_PROMPTS.length >= 3);
+    renderEmptyThread();
+    const chips = [...document.querySelectorAll('[data-starter-prompt]')];
+    assert.equal(chips.length, STARTER_PROMPTS.length);
+    chips[0].click();
+    assert.equal(document.getElementById('composer-input').value, STARTER_PROMPTS[0].prompt);
   } finally {
     globalThis.document = previousDocument;
   }

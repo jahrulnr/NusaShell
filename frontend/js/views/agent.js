@@ -13,6 +13,7 @@ import {
   formatTokens,
   reasoningDisclosure,
   renderEmptyThread,
+  bindStarterPrompts,
   renderConversation,
   renderMessage,
   renderToolJob,
@@ -110,6 +111,7 @@ export async function initAgent() {
     promoteSteerToTranscript,
     stopActiveRun,
   });
+  bindStarterPrompts();
   bindConversations();
   bindModelPicker({
     getModels: () => models,
@@ -223,9 +225,32 @@ async function refreshConversations() {
   document.getElementById('conversation-count').textContent = `${count} thread${count === 1 ? '' : 's'}`;
 }
 
+function setRoomsOpen(open) {
+  const shell = document.getElementById('agent-shell');
+  const toggle = document.getElementById('agent-rooms-toggle');
+  const backdrop = document.getElementById('agent-rooms-backdrop');
+  if (!shell) return;
+  shell.classList.toggle('is-rooms-open', open);
+  toggle?.setAttribute('aria-expanded', String(open));
+  if (backdrop) backdrop.hidden = !open;
+}
+
 function bindConversations() {
   document.getElementById('conversation-search').addEventListener('input', debounce(renderConversationList, 150));
   document.getElementById('new-conversation-btn').addEventListener('click', () => createConversation());
+  const toggle = document.getElementById('agent-rooms-toggle');
+  const backdrop = document.getElementById('agent-rooms-backdrop');
+  toggle?.addEventListener('click', () => {
+    const shell = document.getElementById('agent-shell');
+    setRoomsOpen(!shell?.classList.contains('is-rooms-open'));
+  });
+  backdrop?.addEventListener('click', () => setRoomsOpen(false));
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    if (!document.getElementById('agent-shell')?.classList.contains('is-rooms-open')) return;
+    event.preventDefault();
+    setRoomsOpen(false);
+  });
 }
 
 async function createConversation(title = '') {
@@ -248,6 +273,7 @@ async function createConversation(title = '') {
     updateComposerStatus();
     updateSendAvailability(state);
     document.getElementById('composer-input').focus();
+    setRoomsOpen(false);
   } catch (err) {
     toast(err.message, 'error');
   }
@@ -323,6 +349,7 @@ async function openConversation(id) {
     console.warn('openConversation called without an id; ignoring');
     return;
   }
+  setRoomsOpen(false);
   // Save per-room state for the current conversation before switching.
   saveRoomState(state.activeId);
   const token = ++state.conversationLoadToken;

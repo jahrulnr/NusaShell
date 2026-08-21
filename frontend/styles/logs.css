@@ -5,7 +5,7 @@
 .log-tail {
   height: min(62vh, 620px);
   overflow: auto;
-  background: #080c13;
+  background: var(--input-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 8px 0;

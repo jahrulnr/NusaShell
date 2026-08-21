@@ -4,6 +4,52 @@ import { createAskCard } from '../ask-card.js';
 import { openDrawer, agentNameForId } from './subagents.js';
 import { renderArtifactCard, parseArtifactOutput } from '../../artifact-render.js';
 
+export const STARTER_PROMPTS = [
+  {
+    label: 'Explore this repo',
+    prompt: 'Explore this repository and summarize the architecture, key packages, and how to run tests.',
+  },
+  {
+    label: 'Find a bug',
+    prompt: 'Look at recent changes and failing tests. Find the most likely bug and propose a small fix.',
+  },
+  {
+    label: 'Write a failing test',
+    prompt: 'Add a failing test for the behavior I describe next, then wait before implementing.',
+  },
+  {
+    label: 'Review the diff',
+    prompt: 'Review the current git diff. Call out bugs, missing tests, and wire-contract risks.',
+  },
+];
+
+export function applyStarterPrompt(prompt) {
+  const input = document.getElementById('composer-input');
+  if (!input || !prompt) return;
+  input.value = prompt;
+  const EventCtor = input.ownerDocument?.defaultView?.Event || globalThis.Event;
+  input.dispatchEvent(new EventCtor('input', { bubbles: true }));
+  input.focus();
+}
+
+function starterChip(item) {
+  return el('button', {
+    class: 'agent-starter',
+    type: 'button',
+    'data-starter-prompt': item.prompt,
+    text: item.label,
+    onclick: () => applyStarterPrompt(item.prompt),
+  });
+}
+
+export function bindStarterPrompts() {
+  document.getElementById('agent-thread')?.addEventListener('click', (event) => {
+    const chip = event.target.closest?.('[data-starter-prompt]');
+    if (!chip) return;
+    applyStarterPrompt(chip.getAttribute('data-starter-prompt'));
+  });
+}
+
 export function renderEmptyThread() {
   const thread = document.getElementById('agent-thread');
   thread.innerHTML = '';
@@ -11,6 +57,10 @@ export function renderEmptyThread() {
     el('div', { class: 'agent-empty-mark', text: '✦' }),
     el('h2', { text: 'Start a conversation' }),
     el('p', { text: 'Ask anything. The agent can use skills, memory, docs and your MCP servers as tools.' }),
+    el('div', { class: 'agent-starter-prompts', id: 'agent-starter-prompts' },
+      STARTER_PROMPTS.map(starterChip),
+    ),
+    el('p', { class: 'agent-empty-hint', text: 'Ctrl+K search rooms · Ctrl+N new · Ctrl+Enter send' }),
   ));
   document.getElementById('tool-job-strip').hidden = true;
   const todoStrip = document.getElementById('agent-todo-strip');

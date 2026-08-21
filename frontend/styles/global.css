@@ -1,30 +1,36 @@
-/* NusaShell — design tokens, ported from the Electron renderer. */
+/* NusaShell — night harbor tokens. Deep ink water, sea-glass accent. */
 :root {
-  --bg: #0d0f0e;
-  --panel: #131514;
-  --panel-alt: #1a1d1b;
-  --panel-raised: #202320;
-  --border: #4b504b;
-  --border-soft: #2e322f;
-  --border-strong: #737a72;
-  --text: #edf0eb;
-  --text-dim: #b7bcb5;
-  --text-faint: #858b84;
-  --accent: #c5f45d;
-  --accent-strong: #d5ff78;
-  --accent-ink: #15190f;
-  --accent-soft: rgba(197, 244, 93, 0.11);
-  --accent-border: rgba(197, 244, 93, 0.42);
-  --accent-border-strong: rgba(197, 244, 93, 0.68);
-  --green: #b9ed58;
-  --red: #ff796f;
+  --ink: #070c0e;
+  --harbor: #0b1114;
+  --bg: #0b1114;
+  --panel: #10181c;
+  --panel-alt: #152024;
+  --panel-raised: #1b272c;
+  --border: #3d5254;
+  --border-soft: #243336;
+  --border-strong: #5a7376;
+  --text: #e8efe8;
+  --text-dim: #b4c2bc;
+  --text-faint: #7e908c;
+  --text-muted: var(--text-dim);
+  --accent: #6ee0c4;
+  --accent-strong: #8af0d4;
+  --accent-ink: #0a1614;
+  --accent-soft: rgba(110, 224, 196, 0.12);
+  --accent-border: rgba(110, 224, 196, 0.42);
+  --accent-border-strong: rgba(110, 224, 196, 0.68);
+  --accent-glow: rgba(110, 224, 196, 0.42);
+  --accent-wash: rgba(110, 224, 196, 0.08);
+  --input-bg: #0c1417;
+  --green: #5fd4a8;
+  --red: #f07a6a;
   --danger: var(--red);
-  --purple: #c1a6ff;
+  --purple: #c4b0ea;
   --amber: #e8bd62;
-  --blue-info: #8ab7db;
-  --scrollbar-track: #111311;
-  --scrollbar-thumb: #454b45;
-  --scrollbar-thumb-hover: #747c73;
+  --blue-info: #7eb8c8;
+  --scrollbar-track: #0b1114;
+  --scrollbar-thumb: #3d5254;
+  --scrollbar-thumb-hover: #5a7376;
   --radius-lg: 10px;
   --radius-md: 7px;
   --radius-sm: 5px;
@@ -46,7 +52,7 @@
 html, body {
   margin: 0;
   height: 100%;
-  background: #070807;
+  background: var(--ink);
   font-family: var(--font-body);
   color: var(--text);
 }
@@ -60,7 +66,8 @@ body {
   width: 100vw;
   height: 100vh;
   background:
-    radial-gradient(circle at 68% 8%, rgba(255,255,255,.025), transparent 34%),
+    radial-gradient(ellipse at 18% -10%, rgba(110, 224, 196, .08), transparent 42%),
+    radial-gradient(ellipse at 92% 110%, rgba(110, 224, 196, .04), transparent 36%),
     var(--bg);
   overflow: hidden;
   display: flex;
@@ -139,7 +146,7 @@ body {
   transition: background .15s, color .15s, box-shadow .15s;
   white-space: nowrap;
 }
-.action-btn:hover { background: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 3px rgba(197, 244, 93, .12); }
+.action-btn:hover { background: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 3px var(--accent-soft); }
 .action-btn:disabled { cursor: not-allowed; opacity: .45; }
 
 .mini-btn {
@@ -154,10 +161,10 @@ body {
   font-family: inherit;
   transition: background .15s, box-shadow .15s;
 }
-.mini-btn:hover { background: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 3px rgba(197, 244, 93, .12); }
+.mini-btn:hover { background: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 3px var(--accent-soft); }
 .mini-btn:disabled { cursor: not-allowed; opacity: .45; }
-.mini-btn.danger { border-color: rgba(245, 91, 104, .55); background: rgba(245, 91, 104, .14); color: #ff909a; }
-.mini-btn.danger:hover { background: rgba(245, 91, 104, .28); color: #fff; box-shadow: 0 0 0 3px rgba(245, 91, 104, .12); }
+.mini-btn.danger { border-color: rgba(240, 122, 106, .55); background: rgba(240, 122, 106, .14); color: #ff9a90; }
+.mini-btn.danger:hover { background: rgba(240, 122, 106, .28); color: #fff; box-shadow: 0 0 0 3px rgba(240, 122, 106, .12); }
 .mini-btn.ghost { border-color: var(--border); background: transparent; color: var(--text-dim); }
 .mini-btn.ghost:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 
@@ -186,7 +193,7 @@ body {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 9px 10px;
-  background: #080c13;
+  background: var(--input-bg);
   color: var(--text);
   font: inherit;
   font-size: 12px;
@@ -196,7 +203,7 @@ body {
 .settings-field input:focus, .settings-field select:focus, .settings-field textarea:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(197, 244, 93, .12);
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 .settings-field-help { display: block; color: var(--text-faint); font: 9px/1.45 var(--font-mono); font-weight: 400; margin-top: 2px; }
 
@@ -252,3 +259,14 @@ body {
 .empty-state .empty-mark { color: var(--accent); font-size: 26px; }
 .empty-state strong { color: var(--text-dim); font-size: 13px; }
 .empty-state span { max-width: 300px; font-size: 11.5px; line-height: 1.55; }
+
+kbd {
+  display: inline-block;
+  border: 1px solid var(--border-soft);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 5px;
+  background: var(--panel-alt);
+  color: var(--text-dim);
+  font: 500 10px var(--font-mono);
+}

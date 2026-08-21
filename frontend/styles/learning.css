@@ -240,7 +240,7 @@
 .learning-graph {
   flex: 1 1 0;
   min-height: 0;
-  background: #090e16;
+  background: var(--harbor);
   position: relative;
   overflow: hidden;
 }
@@ -275,7 +275,7 @@
 .learning-legend-skill { background: #58a6ff; }
 .learning-legend-memory { background: #f0883e; }
 .learning-legend-related { background: #1f6feb33; border: 1px solid #1f6feb; }
-.learning-legend-used { background: #c5f45d33; border: 1px solid var(--accent); }
+.learning-legend-used { background: var(--accent-soft); border: 1px solid var(--accent); }
 
 /* Responsive: stack vertically on narrow screens */
 @media (max-width: 900px) {
@@ -465,9 +465,9 @@
   gap: 8px;
   padding: 8px 12px;
   margin-bottom: 8px;
-  border: 1px solid rgba(197, 244, 93, 0.2);
+  border: 1px solid var(--accent-border);
   border-radius: var(--radius-sm);
-  background: rgba(197, 244, 93, 0.04);
+  background: var(--accent-wash);
   font-size: 12px;
   color: var(--text-dim);
 }
@@ -475,7 +475,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #c5f45d;
+  background: var(--accent);
   animation: learning-log-pulse 1.2s ease-in-out infinite;
   flex: none;
 }
@@ -484,9 +484,9 @@
   50% { opacity: 1; }
 }
 .learning-type-review {
-  color: #c5f45d;
-  background: rgba(197, 244, 93, 0.1);
-  border: 1px solid rgba(197, 244, 93, 0.28);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
 }
 .learning-type-extract {
   color: #c1a6ff;
@@ -616,8 +616,8 @@
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
-  background: rgba(197, 244, 93, 0.06);
-  border-bottom: 1px solid rgba(197, 244, 93, 0.2);
+  background: var(--accent-wash);
+  border-bottom: 1px solid var(--accent-border);
   position: sticky;
   top: 0;
   z-index: 1;
@@ -627,11 +627,11 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #c5f45d;
+  color: var(--accent);
   padding: 2px 8px;
   border-radius: 10px;
-  border: 1px solid rgba(197, 244, 93, 0.3);
-  background: rgba(197, 244, 93, 0.08);
+  border: 1px solid var(--accent-border);
+  background: var(--accent-soft);
   flex: none;
 }
 .learning-log-transcript-meta {
@@ -651,7 +651,7 @@
   border-left-color: var(--text-faint);
 }
 .learning-log-tc-assistant {
-  border-left-color: var(--accent, #c5f45d);
+  border-left-color: var(--accent);
 }
 .learning-log-tc-tool {
   border-left-color: #58a6ff;

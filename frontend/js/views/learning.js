@@ -699,7 +699,7 @@ async function loadGraph() {
       from: e.from,
       to: e.to,
       width: Math.max(1.5, e.weight * 4),
-      color: { color: edgeColor(e.type), highlight: '#c5f45d', hover: '#d5ff78' },
+      color: { color: edgeColor(e.type), highlight: '#6ee0c4', hover: '#8af0d4' },
       title: `${e.type} (${(e.weight * 100).toFixed(0)}%)`,
     }));
 
@@ -733,7 +733,7 @@ async function loadGraph() {
 function edgeColor(type) {
   switch (type) {
     case 'related': return '#1f6feb';
-    case 'used_with': return '#c5f45d';
+    case 'used_with': return '#6ee0c4';
     case 'derived_from': return '#c1a6ff';
     default: return '#4b504b';
   }

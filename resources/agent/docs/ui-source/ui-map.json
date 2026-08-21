@@ -20,7 +20,8 @@
         {
           "heading": "Sidebar",
           "paragraphs": [
-            "Vertical navigation on the left, ordered Home, Agent, Skills, Learning, Automation, Plugins, Providers, and Logs. It can show icons with labels or icons only, and remembers that choice locally."
+            "Vertical navigation on the left, ordered Home, Agent, Skills, Learning, Automation, Plugins, Providers, and Logs. It can show icons with labels or icons only, and remembers that choice locally.",
+            "Keyboard: Ctrl/Cmd+K or / focuses the search box on the current view. Escape dismisses dialogs, toasts stay on hover, and Ctrl/Cmd+N starts a new agent conversation when the Agent view is open."
           ],
           "controls": [
             "sidebar",
@@ -30,7 +31,7 @@
         {
           "heading": "Storage",
           "paragraphs": [
-            "Shows the absolute data directory path and a usage bar so the user can see where conversations, providers, memory, and credentials live."
+            "Shows the absolute data directory path so you can see where conversations, providers, memory, and credentials live."
           ],
           "controls": [
             "storage-path"
@@ -73,7 +74,7 @@
         {
           "heading": "Conversations pane",
           "paragraphs": [
-            "Lists conversations with a search filter and a New conversation button. The count reflects persisted threads."
+            "Lists conversations with a search filter and a New conversation button. The count reflects persisted threads. On narrow widths the pane hides behind a Rooms button and a backdrop; Escape or choosing a room closes it. Ctrl/Cmd+K focuses this search; Ctrl/Cmd+N creates a thread."
           ],
           "controls": [
             "agent-conversations",
@@ -81,13 +82,15 @@
             "conversation-count",
             "new-conversation-btn",
             "conversation-search",
-            "conversation-list"
+            "conversation-list",
+            "agent-rooms-toggle",
+            "agent-rooms-backdrop"
           ]
         },
         {
           "heading": "Thread",
           "paragraphs": [
-            "Renders the active conversation. An offline mascot appears when the backend is unreachable.",
+            "Renders the active conversation. An empty thread offers starter prompt chips that fill the composer. An offline mascot appears when the backend is unreachable.",
             "Long conversations open showing only the most recent messages, scrolled to the bottom; a 'Load older messages' button at the top of the thread reveals earlier messages in batches (keeping the scroll position anchored). Live streaming auto-follows only while the view is pinned to the bottom."
           ],
           "controls": [
@@ -95,6 +98,7 @@
             "agent-conversation",
             "agent-offline-state",
             "agent-thread",
+            "agent-starter-prompts",
             "agent-load-older"
           ]
         },
@@ -174,7 +178,7 @@
         {
           "heading": "Composer",
           "paragraphs": [
-            "The message input with attachments, model picker, workspace selector, provider status, stop, and send buttons. Ctrl+Enter (\u2318\u21a9 on Mac) sends. The whole conversation area accepts drag & drop of files and folders — folders are attached as path-only references (desktop only)."
+            "The message input with attachments, model picker, workspace selector, provider status, stop, and send buttons. Ctrl+Enter (\u2318\u21a9 on Mac) sends. While a turn is running, Send becomes Steer. The whole conversation area accepts drag & drop of files and folders — folders are attached as path-only references (desktop only)."
           ],
           "controls": [
             "agent-form",
@@ -781,7 +785,8 @@
       "label": "App search",
       "section": "Home",
       "type": "search",
-      "action": "Filters installed apps by name, id, or description. Escape clears the query."
+      "action": "Filters installed apps by name, id, or description. Escape clears the query.",
+      "shortcut": "Ctrl+K / \u2318K, or / when not typing"
     },
     "search-clear": {
       "label": "Clear app search",
@@ -820,18 +825,32 @@
       "label": "New conversation",
       "section": "Agent",
       "type": "button",
-      "action": "Creates a new conversation and focuses the composer."
+      "action": "Creates a new conversation and focuses the composer.",
+      "shortcut": "Ctrl+N / \u2318N on the Agent view"
     },
     "conversation-search": {
       "label": "Conversation search",
       "section": "Agent",
       "type": "search",
-      "notes": "Filters conversation titles in real time."
+      "notes": "Filters conversation titles in real time.",
+      "shortcut": "Ctrl+K / \u2318K, or / when not typing"
     },
     "conversation-list": {
       "label": "Conversation list",
       "section": "Agent",
       "type": "list"
+    },
+    "agent-rooms-toggle": {
+      "label": "Rooms",
+      "section": "Agent",
+      "type": "button",
+      "action": "On narrow widths, opens the conversations pane as a drawer. Escape or the backdrop closes it."
+    },
+    "agent-rooms-backdrop": {
+      "label": "Rooms backdrop",
+      "section": "Agent",
+      "type": "overlay",
+      "action": "Click to close the conversations drawer."
     },
     "agent-shell": {
       "label": "Agent shell",
@@ -853,7 +872,13 @@
       "label": "Thread log",
       "section": "Agent",
       "type": "log",
-      "notes": "Renders the active conversation messages. Long conversations are windowed: only the most recent messages render on open (scrolled to bottom), older ones load on demand."
+      "notes": "Renders the active conversation messages. Long conversations are windowed: only the most recent messages render on open (scrolled to bottom), older ones load on demand. An empty thread shows starter prompt chips."
+    },
+    "agent-starter-prompts": {
+      "label": "Starter prompts",
+      "section": "Agent",
+      "type": "button group",
+      "action": "Fills the composer with a ready-to-edit prompt. Available on an empty thread."
     },
     "agent-load-older": {
       "label": "Load older messages",
@@ -962,7 +987,7 @@
       "label": "Message input",
       "section": "Agent",
       "type": "textarea",
-      "shortcut": "Ctrl+Enter / \u2318\u21a9 to send"
+      "shortcut": "Ctrl+Enter / \u2318\u21a9 to send; Escape closes dialogs"
     },
     "agent-attachments": {
       "label": "Attachments preview",

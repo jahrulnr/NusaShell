@@ -14,6 +14,7 @@ import { initLearning, refresh as refreshLearning } from './views/learning.js';
 import { initAutomation, refresh as refreshAutomation } from './views/automation.js';
 import { initTelemetry, refresh as refreshTelemetry } from './views/telemetry.js';
 import { toast, dismissOpenDialogs } from './ui.js';
+import { bindShellShortcuts } from './shell-shortcuts.js';
 
 async function initProviders() {
   await Promise.all([initLlmProviders(), initAcpProviders()]);
@@ -166,7 +167,7 @@ async function boot() {
 
   try {
     const info = await rpc('app.info', {}, { timeoutMs: 4000 });
-    document.getElementById('storage-path').textContent = info.data_dir || '';
+    document.getElementById('storage-path')?.replaceChildren(document.createTextNode(info.data_dir || ''));
     document.title = `NusaShell ${info.version ?? ''}`.trim();
   } catch (err) {
     // Only mark offline if WS isn't already open — app.info uses HTTP,
@@ -203,6 +204,10 @@ async function boot() {
   document.addEventListener('nusashell:open-conversation', async (e) => {
     const mod = await import('./views/agent.js');
     mod.openConversationExternal?.(e.detail);
+  });
+
+  bindShellShortcuts({
+    onNewConversation: () => document.getElementById('new-conversation-btn')?.click(),
   });
 
   route();

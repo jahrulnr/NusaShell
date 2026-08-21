@@ -16,7 +16,9 @@
   border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--panel);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, .45);
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, .45),
+    0 0 0 1px var(--accent-wash);
 }
 .ui-dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 20px 14px; border-bottom: 1px solid var(--border-soft); }
 .ui-dialog-header h2 { margin: 0; font-size: 16px; }
@@ -86,6 +88,7 @@
 }
 .toast-dismiss:hover { color: var(--text); background: rgba(255, 255, 255, 0.06); }
 .toast-show { opacity: 1; transform: translateY(0); }
+.toast:hover { border-color: var(--accent-border); }
 .toast-success { border-left: 3px solid var(--green); }
 .toast-error { border-left: 3px solid var(--red); }
 .toast-info { border-left: 3px solid var(--accent); }

@@ -26,7 +26,7 @@
 .search:focus-within {
   border-color: var(--accent-border-strong);
   color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(197, 244, 93, .09);
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
 .search-icon { flex: 0 0 auto; }
@@ -116,7 +116,7 @@
   border-color: var(--accent-border);
   background: var(--accent-soft);
   color: var(--accent);
-  box-shadow: inset 0 -2px 0 rgba(197, 244, 93, .36);
+  box-shadow: inset 0 -2px 0 var(--accent-border);
 }
 
 /* App launch plates */
@@ -144,12 +144,12 @@
 .app-cell:hover .app-icon,
 .app-cell:focus-visible .app-icon {
   border-color: var(--accent-border-strong);
-  background-color: #222622;
+  background-color: var(--panel-raised);
   transform: translateY(-2px);
   box-shadow:
-    inset 0 0 0 2px #101210,
+    inset 0 0 0 2px var(--harbor),
     0 8px 20px rgba(0, 0, 0, .28),
-    0 0 0 1px rgba(197, 244, 93, .08);
+    0 0 0 1px var(--accent-wash);
 }
 
 .app-icon {
@@ -162,13 +162,13 @@
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   background:
-    radial-gradient(circle at 12px 12px, #3d423d 0 2px, #0d0f0d 2.5px 3.5px, transparent 4px),
-    radial-gradient(circle at calc(100% - 12px) 12px, #3d423d 0 2px, #0d0f0d 2.5px 3.5px, transparent 4px),
-    radial-gradient(circle at 12px calc(100% - 12px), #3d423d 0 2px, #0d0f0d 2.5px 3.5px, transparent 4px),
-    radial-gradient(circle at calc(100% - 12px) calc(100% - 12px), #3d423d 0 2px, #0d0f0d 2.5px 3.5px, transparent 4px),
-    linear-gradient(145deg, #242724, #171917);
+    radial-gradient(circle at 12px 12px, var(--border) 0 2px, var(--ink) 2.5px 3.5px, transparent 4px),
+    radial-gradient(circle at calc(100% - 12px) 12px, var(--border) 0 2px, var(--ink) 2.5px 3.5px, transparent 4px),
+    radial-gradient(circle at 12px calc(100% - 12px), var(--border) 0 2px, var(--ink) 2.5px 3.5px, transparent 4px),
+    radial-gradient(circle at calc(100% - 12px) calc(100% - 12px), var(--border) 0 2px, var(--ink) 2.5px 3.5px, transparent 4px),
+    linear-gradient(145deg, var(--panel-raised), var(--panel));
   box-shadow:
-    inset 0 0 0 2px #101210,
+    inset 0 0 0 2px var(--harbor),
     inset 0 1px rgba(255, 255, 255, .04),
     0 6px 18px rgba(0, 0, 0, .25);
   transition: border-color .16s ease, transform .16s ease, box-shadow .16s ease, background-color .16s ease;
@@ -183,7 +183,7 @@
   pointer-events: none;
 }
 .app-icon.has-image { overflow: visible; }
-.bg-blue { background-color: #171917; }
+.bg-blue { background-color: var(--panel); }
 .bg-dashed { border-style: dashed; background: transparent; color: var(--text-faint); }
 
 .plugin-icon-image {
@@ -219,7 +219,7 @@
   height: 6px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 10px rgba(197, 244, 93, .4);
+  box-shadow: 0 0 10px var(--accent-glow);
 }
 .app-grid-empty {
   grid-column: 1 / -1;

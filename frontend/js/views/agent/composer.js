@@ -331,11 +331,18 @@ export function updateSendAvailability(state) {
   // and the persisted conversation status (after refresh, state.runs may be
   // empty until reattachActiveRunFromBackend completes).
   const running = state.running || state.conversation?.status === 'running';
+  const form = document.getElementById('agent-form');
+  const stack = document.getElementById('agent-composer-stack');
+  form?.classList.toggle('is-steer', running);
+  stack?.classList.toggle('is-steer', running);
+  send.classList.toggle('is-steer', running);
   if (running) {
     send.disabled = !hasContent;
+    send.setAttribute('aria-label', 'Steer');
     send.title = hasContent ? 'Steer · Ctrl+Enter (⌘↩ on Mac)' : 'Type a message to steer the agent';
   } else {
     send.disabled = !hasContent;
+    send.setAttribute('aria-label', 'Send');
     send.title = 'Send · Ctrl+Enter (⌘↩ on Mac)';
   }
 }
