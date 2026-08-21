@@ -137,8 +137,12 @@ func (r *BackgroundReviewAgent) RunReview(ctx context.Context, conversationID st
 	reviewCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 180*time.Second)
 	defer cancel()
 
-	mutations, messages := r.runReviewLoop(reviewCtx, adapter, bareModel, conversation)
+	mutations, messages, loopErr := r.runReviewLoop(reviewCtx, adapter, bareModel, conversation)
 	reviewID := saveReviewTranscript(r.app.DataDir, conversationID, model, messages)
+	if loopErr != nil {
+		r.app.log("warn", "learning", "review failed mid-loop: conv=%s err=%v mutations=%d", conversationID, loopErr, len(mutations))
+		return loopErr
+	}
 	if r.app.Trajectory != nil {
 		// Record the review even when nothing was saved: the learning log
 		// shows when reviews ran and concluded with no mutations, which is
@@ -231,10 +235,10 @@ func mutationSnippet(argsJSON, field string) string {
 // calls → execute whitelisted tools → feed results back → repeat. Returns
 // the mutations and the full message history (the review agent's own
 // conversation with the LLM) so it can be persisted for the learning log.
-func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIProvider, model string, conversation *domain.Conversation) ([]ReviewMutation, []ChatMessage) {
+func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIProvider, model string, conversation *domain.Conversation) ([]ReviewMutation, []ChatMessage, error) {
 	systemPrompt := resources.ReviewPrompt()
 	if systemPrompt == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	// Inject the current primary memory content into the system prompt so
 	// the review agent can see what is already in primary.md before editing
@@ -244,7 +248,7 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIPro
 	systemPrompt = r.injectPrimaryMemory(systemPrompt)
 	transcript := r.buildTranscript(conversation)
 	if transcript == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	tools := r.reviewTools()
@@ -254,8 +258,8 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIPro
 
 	var mutations []ReviewMutation
 	for round := 0; round < r.settings.MaxToolRounds; round++ {
-		if ctx.Err() != nil {
-			break
+		if err := ctx.Err(); err != nil {
+			return mutations, messages, err
 		}
 		req := ChatRequest{
 			Model:    model,
@@ -265,7 +269,7 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIPro
 		}
 		resp, err := adapter.Complete(ctx, req)
 		if err != nil {
-			break
+			return mutations, messages, err
 		}
 		// "Nothing to save." (case-insensitive, trimmed) is the prompt's
 		// explicit signal that the review found no durable knowledge. The
@@ -342,7 +346,7 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIPro
 			})
 		}
 	}
-	return mutations, messages
+	return mutations, messages, nil
 }
 
 // isNothingToSave reports whether the LLM's response signals that the

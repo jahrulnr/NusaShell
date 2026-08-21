@@ -135,10 +135,34 @@ func TestIsContextOverflowError(t *testing.T) {
 	if isContextOverflowError(badRequestErr) {
 		t.Fatal("400 unrelated should not be context overflow")
 	}
+	// Generic "input_tokens" (schema validation, usage fields) must not match.
+	fieldErr := &UpstreamError{StatusCode: 400, Err: errors.New("unknown field input_tokens")}
+	if isContextOverflowError(fieldErr) {
+		t.Fatal("raw input_tokens must not be treated as context overflow")
+	}
+	// Explicit overflow phrasing still matches.
+	tooMany := &UpstreamError{StatusCode: 400, Err: errors.New("too many input tokens in request")}
+	if !isContextOverflowError(tooMany) {
+		t.Fatal("400 with 'too many input tokens' should be context overflow")
+	}
 	// 500 should not match
 	serverErr := &UpstreamError{StatusCode: 500, Err: errors.New("maximum context length")}
 	if isContextOverflowError(serverErr) {
 		t.Fatal("500 should not be context overflow even with matching body")
+	}
+}
+
+func TestShouldEmergencyCompactRequiresEstimateAboveTrigger(t *testing.T) {
+	overflow := &UpstreamError{StatusCode: 400, Err: errors.New("maximum context length exceeded")}
+	if shouldEmergencyCompact(overflow, 100, 1000) {
+		t.Fatal("estimate at or below trigger must not compact")
+	}
+	if !shouldEmergencyCompact(overflow, 1001, 1000) {
+		t.Fatal("estimate above trigger with overflow phrase should compact")
+	}
+	schema := &UpstreamError{StatusCode: 400, Err: errors.New("unknown field input_tokens")}
+	if shouldEmergencyCompact(schema, 50_000, 1000) {
+		t.Fatal("schema 400 must not compact even when the transcript is large")
 	}
 }
 

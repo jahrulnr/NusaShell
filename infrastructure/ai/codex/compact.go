@@ -242,22 +242,20 @@ func compactViaSubprocess(ctx context.Context, c *domain.Conversation, model, ac
 }
 
 // buildTurnInput converts conversation messages to Codex turn/start input
-// items. Only user and assistant text messages are replayed — tool calls
-// and system markers are skipped for simplicity.
+// items. User and assistant text are replayed so the compact summary can see
+// both the request and the work that was done. Tool calls and system markers
+// are skipped — Codex turn/start accepts text items, not our tool protocol.
 func buildTurnInput(c *domain.Conversation) []map[string]any {
 	var out []map[string]any
 	for _, m := range c.Messages {
 		switch m.Role {
-		case domain.RoleUser:
-			if m.Content != "" {
+		case domain.RoleUser, domain.RoleAssistant:
+			if strings.TrimSpace(m.Content) != "" {
 				out = append(out, map[string]any{
 					"type": "text",
 					"text": m.Content,
 				})
 			}
-		case domain.RoleAssistant:
-			// Skip assistant messages — Codex will generate its own.
-			// We only replay user messages to build context.
 		}
 	}
 	return out

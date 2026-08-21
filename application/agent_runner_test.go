@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -509,5 +510,259 @@ func TestRepeatedToolGuardDifferentArgsResets(t *testing.T) {
 	g.check([]domain.ToolCall{{Name: "mcp_enable", Args: `{"id":"b"}`}}, "")
 	if fired := g.check([]domain.ToolCall{{Name: "mcp_enable", Args: `{"id":"b"}`}}, ""); fired {
 		t.Fatal("different args should reset streak, not fire after 2 rounds")
+	}
+}
+
+type overflowThenOKAdapter struct {
+	mu        sync.Mutex
+	streams   int
+	completes int
+	secondReq ChatRequest
+	streamErr error
+	summary   string
+}
+
+func (a *overflowThenOKAdapter) Kind() domain.ProviderKind { return domain.ProviderChat }
+func (a *overflowThenOKAdapter) Stream(_ context.Context, req ChatRequest, _, _ func(string)) (ChatResponse, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.streams++
+	if a.streams == 1 {
+		err := a.streamErr
+		if err == nil {
+			err = &UpstreamError{StatusCode: 400, Err: errors.New("maximum context length exceeded")}
+		}
+		return ChatResponse{}, err
+	}
+	a.secondReq = req
+	return ChatResponse{Content: "ok after compact"}, nil
+}
+func (a *overflowThenOKAdapter) Complete(context.Context, ChatRequest) (ChatResponse, error) {
+	a.mu.Lock()
+	a.completes++
+	a.mu.Unlock()
+	summary := a.summary
+	if summary == "" {
+		summary = "handoff of prior work"
+	}
+	return ChatResponse{Content: summary}, nil
+}
+
+func bulkyHistory(pendingID string) []domain.Message {
+	msgs := []domain.Message{{
+		ID: "u0", Role: domain.RoleUser, Content: strings.Repeat("user-goal ", 80), Status: domain.StatusDone,
+	}}
+	for i := 0; i < 20; i++ {
+		msgs = append(msgs,
+			domain.Message{ID: fmt.Sprintf("a%d", i), Role: domain.RoleAssistant, Content: strings.Repeat("assistant-work ", 80), Status: domain.StatusDone},
+			domain.Message{ID: fmt.Sprintf("u%d", i+1), Role: domain.RoleUser, Content: strings.Repeat("follow-up ", 80), Status: domain.StatusDone},
+		)
+	}
+	msgs = append(msgs, domain.Message{ID: pendingID, Role: domain.RoleAssistant})
+	return msgs
+}
+
+func TestEmergencyCompactionReinjectsHydration(t *testing.T) {
+	conv := &domain.Conversation{ID: "c1", Messages: bulkyHistory("m1")}
+	adapter := &overflowThenOKAdapter{}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
+	settings := domain.DefaultSettings()
+	settings.CompactionEnabled = false
+	settings.CompactionThreshold = 1
+	settings.MaxInputTokens = 8000
+	settings.MaxOutputTokens = 256
+	app := &App{
+		Conversations: store,
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		Toolbox:       &recordingToolbox{},
+		Settings:      &fakeSettingsStore{settings: settings},
+		Factory: func(context.Context, *domain.Provider, string) (AIProvider, error) {
+			return adapter, nil
+		},
+		runs: map[string]*TurnRun{},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
+	app.runTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "m1", false, ModelCapabilities{Vision: true}, "")
+
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if adapter.streams < 2 {
+		t.Fatalf("streams = %d, want retry after emergency compaction", adapter.streams)
+	}
+	if adapter.completes == 0 {
+		t.Fatal("expected compaction Complete calls")
+	}
+	if !HasHydration(adapter.secondReq.Messages) {
+		t.Fatal("post-compaction retry must include a fresh hydration checkpoint")
+	}
+}
+
+func TestEmergencyCompactionSkippedWhenEstimateBelowTrigger(t *testing.T) {
+	conv := &domain.Conversation{
+		ID: "c1",
+		Messages: []domain.Message{
+			{ID: "u1", Role: domain.RoleUser, Content: "short", Status: domain.StatusDone},
+			{ID: "m1", Role: domain.RoleAssistant},
+		},
+	}
+	adapter := &overflowThenOKAdapter{}
+	settings := domain.DefaultSettings()
+	settings.CompactionEnabled = false
+	app := &App{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		Toolbox:       &recordingToolbox{},
+		Settings:      &fakeSettingsStore{settings: settings},
+		Factory: func(context.Context, *domain.Provider, string) (AIProvider, error) {
+			return adapter, nil
+		},
+		runs: map[string]*TurnRun{},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
+	app.runTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "m1", false, ModelCapabilities{Vision: true}, "")
+
+	if adapter.completes != 0 {
+		t.Fatalf("Complete calls = %d, want 0 (must not compact a small transcript)", adapter.completes)
+	}
+	if adapter.streams != 1 {
+		t.Fatalf("streams = %d, want 1 failed attempt", adapter.streams)
+	}
+	if conv.Messages[1].Status != domain.StatusError {
+		t.Fatalf("status = %q, want error", conv.Messages[1].Status)
+	}
+}
+
+type recordingCompleteAdapter struct {
+	mu        sync.Mutex
+	requests  []ChatRequest
+	summaries []string
+}
+
+func (a *recordingCompleteAdapter) Kind() domain.ProviderKind { return domain.ProviderChat }
+func (a *recordingCompleteAdapter) Stream(context.Context, ChatRequest, func(string), func(string)) (ChatResponse, error) {
+	return ChatResponse{}, errors.New("stream not used")
+}
+func (a *recordingCompleteAdapter) Complete(_ context.Context, req ChatRequest) (ChatResponse, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.requests = append(a.requests, req)
+	idx := len(a.requests) - 1
+	summary := "summary-pass"
+	if idx < len(a.summaries) {
+		summary = a.summaries[idx]
+	} else if len(a.summaries) > 0 {
+		summary = a.summaries[len(a.summaries)-1]
+	}
+	return ChatResponse{Content: summary}, nil
+}
+
+func TestCompactionPassBudgetShrinksWithRunningSummary(t *testing.T) {
+	empty := compactionPassAvailable(10_000, "")
+	grown := compactionPassAvailable(10_000, strings.Repeat("x", 8000))
+	if grown >= empty {
+		t.Fatalf("available with large summary %d should be < empty %d", grown, empty)
+	}
+	if empty-grown < 1900 {
+		t.Fatalf("expected ~2000 token shrink, empty=%d grown=%d", empty, grown)
+	}
+}
+
+func TestMultiPassCompactionShrinksLaterChunks(t *testing.T) {
+	var msgs []domain.Message
+	body := strings.Repeat("abcdefghij", 80) // 800 chars ≈ 200 tokens
+	for i := 0; i < 30; i++ {
+		msgs = append(msgs, domain.Message{
+			ID: fmt.Sprintf("m%d", i), Role: domain.RoleUser, Content: body, Status: domain.StatusDone,
+		})
+	}
+	conv := &domain.Conversation{ID: "c1", Messages: msgs}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
+	hugeSummary := strings.Repeat("folded-summary-", 400) // ~1500+ tokens
+	adapter := &recordingCompleteAdapter{summaries: []string{hugeSummary, "final"}}
+	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
+	if _, err := app.compactConversation(context.Background(), adapter, conv, "model", 4000); err != nil {
+		t.Fatal(err)
+	}
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if len(adapter.requests) < 2 {
+		t.Fatalf("Complete calls = %d, want multi-pass", len(adapter.requests))
+	}
+	firstContent := 0
+	for _, m := range adapter.requests[0].Messages {
+		firstContent += domain.EstimateTokens(m.Content)
+	}
+	secondContent := 0
+	for _, m := range adapter.requests[1].Messages {
+		secondContent += domain.EstimateTokens(m.Content)
+	}
+	// Second pass carries the huge running summary, so remaining message
+	// content must be smaller than the first pass's message payload.
+	firstMsgs := 0
+	for _, m := range adapter.requests[0].Messages {
+		if !strings.HasPrefix(m.Content, compactionSummaryPrefix) {
+			firstMsgs += domain.EstimateTokens(m.Content)
+		}
+	}
+	secondMsgs := 0
+	for _, m := range adapter.requests[1].Messages {
+		if !strings.HasPrefix(m.Content, compactionSummaryPrefix) {
+			secondMsgs += domain.EstimateTokens(m.Content)
+		}
+	}
+	if secondMsgs >= firstMsgs {
+		t.Fatalf("later pass message tokens %d should shrink vs first pass %d (total second %d first %d)", secondMsgs, firstMsgs, secondContent, firstContent)
+	}
+}
+
+func TestCompactionArchiveStripsHydration(t *testing.T) {
+	hydrate := domain.Message{
+		ID:   "h1",
+		Role: domain.RoleAssistant,
+		ToolCalls: []domain.ToolCall{{
+			ID:     domain.HydrateToolCallPrefix + "abc_0",
+			Name:   "runtime_context",
+			Output: `{"currentDate":"2026-08-21"}`,
+		}},
+		Status: domain.StatusDone,
+	}
+	var msgs []domain.Message
+	msgs = append(msgs, hydrate)
+	body := strings.Repeat("archived-turn ", 80)
+	for i := 0; i < 25; i++ {
+		msgs = append(msgs, domain.Message{
+			ID: fmt.Sprintf("u%d", i), Role: domain.RoleUser, Content: body, Status: domain.StatusDone,
+		})
+	}
+	conv := &domain.Conversation{ID: "c1", Messages: msgs}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
+	app := &App{
+		Conversations: store,
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+	}
+	adapter := &recordingCompleteAdapter{summaries: []string{"summary"}}
+	if _, err := app.compactConversation(context.Background(), adapter, conv, "model", 4000); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range store.archived {
+		if isHydrationMessage(m) {
+			t.Fatal("archived chunk must not include hydration checkpoints")
+		}
+	}
+	got, err := store.Get("c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range got.Messages {
+		if isHydrationMessage(m) {
+			t.Fatal("live transcript must not keep hydration after compaction")
+		}
 	}
 }

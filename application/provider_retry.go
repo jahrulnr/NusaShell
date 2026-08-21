@@ -261,8 +261,19 @@ var contextOverflowPhrases = []string{
 	"context_length_exceeded",
 	"reduce the length of the input prompt",
 	"too many input tokens",
-	"input_tokens",
 	"prompt is too long",
+}
+
+// shouldEmergencyCompact reports whether a provider error should trigger
+// destructive emergency compaction. The body must match an explicit overflow
+// phrase (not a generic field name like "input_tokens"), and the local
+// token estimate must already exceed the compaction trigger so a 400 about
+// schema/validation cannot archive the transcript.
+func shouldEmergencyCompact(err error, estimatedTokens, compactionTrigger int) bool {
+	if !isContextOverflowError(err) {
+		return false
+	}
+	return estimatedTokens > compactionTrigger
 }
 
 // rateLimitCooldown returns the duration to mark an account as rate-limited.

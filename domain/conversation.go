@@ -147,6 +147,64 @@ func NewConversation(id, title string) *Conversation {
 
 func (c *Conversation) Touch() { c.UpdatedAt = time.Now().UTC() }
 
+// AbandonedTurnError is stored on in-flight assistant messages when a process
+// restart finds a conversation still marked running. No live turn can exist
+// after load, so the conversation is returned to idle.
+const AbandonedTurnError = "turn interrupted: server restarted while the turn was running"
+
+// RecoverAbandonedTurn converts a crash-leftover Status=="running" conversation
+// into idle and marks unfinished assistant work as interrupted. Returns true
+// when the conversation was mutated and should be persisted.
+func (c *Conversation) RecoverAbandonedTurn() bool {
+	if c == nil || c.Status != "running" {
+		return false
+	}
+	c.Status = "idle"
+	for i := range c.Messages {
+		m := &c.Messages[i]
+		if m.Role != RoleAssistant {
+			continue
+		}
+		interruptedTools := interruptAbandonedTools(m)
+		if m.Status == "" || interruptedTools {
+			m.Status = StatusInterrupted
+			if m.Error == "" {
+				m.Error = AbandonedTurnError
+			}
+		}
+	}
+	c.Touch()
+	return true
+}
+
+func interruptAbandonedTools(m *Message) bool {
+	changed := false
+	for i := range m.ToolCalls {
+		if abandonTool(&m.ToolCalls[i]) {
+			changed = true
+		}
+	}
+	for i := range m.Steps {
+		for j := range m.Steps[i].ToolCalls {
+			if abandonTool(&m.Steps[i].ToolCalls[j]) {
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
+func abandonTool(tc *ToolCall) bool {
+	if tc.Status != ToolRunning && tc.Status != "" {
+		return false
+	}
+	tc.Status = ToolInterrupted
+	if tc.Output == "" {
+		tc.Output = "interrupted"
+	}
+	return true
+}
+
 // DefaultTitle derives a title from the first user message.
 func (c *Conversation) DefaultTitle() string {
 	for _, m := range c.Messages {

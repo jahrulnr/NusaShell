@@ -602,10 +602,16 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 				// model's context window (input + max_output > window). This can
 				// happen when the estimate is inaccurate or compaction was
 				// disabled. Force compaction once, then retry the round.
-				compactionAttempts++
-				preEmg := conversation.EstimateTokens()
-				a.log("warn", "agent", "context overflow for turn %s (est=%d), forcing emergency compaction", run.ID, preEmg)
 				cw := resolveContextWindow(provider, model, settings)
+				trigger := compactionTriggerTokens(cw, resolveMaxOutput(provider, model, settings), settings)
+				preEmg := conversation.EstimateTokens()
+				if !shouldEmergencyCompact(streamErr, preEmg, trigger) {
+					a.log("warn", "agent", "overflow-like 400 for turn %s but est=%d <= trigger=%d; skipping emergency compaction", run.ID, preEmg, trigger)
+					a.failStreamTurn(run, currentMsgID, model, roundResult, streamErr)
+					return false, ""
+				}
+				compactionAttempts++
+				a.log("warn", "agent", "context overflow for turn %s (est=%d trigger=%d), forcing emergency compaction", run.ID, preEmg, trigger)
 				compAdapter, compModel, compWindow := a.resolveCompactionAdapter(run.Ctx, adapter, model, cw, settings)
 				summary, compErr := a.compactConversation(run.Ctx, compAdapter, conversation, compModel, compWindow)
 				if compErr == nil {
@@ -614,6 +620,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 					postEmg := conversation.EstimateTokens()
 					a.log("info", "agent", "emergency compaction done for %s: before=%d after=%d (msgs=%d)",
 						conversation.ID, preEmg, postEmg, len(conversation.Messages))
+					injectHydration = true // compaction strips the checkpoint; recreate it
 					round--
 					continue
 				}
@@ -849,6 +856,12 @@ func resolveContextWindow(provider *domain.Provider, model string, settings doma
 	return domain.ResolveContextWindow(provider, model, settings)
 }
 
+const (
+	compactionKeepTokenBudget = 64000 // retained recent messages token budget
+	compactionSummaryMaxOut   = 800
+	compactionSystemReserve   = 300 // system prompt + framing overhead
+)
+
 // compactConversation summarizes the conversation history via multi-pass
 // rolling compaction so that conversations larger than the model's context
 // window are still fully summarized without dropping any messages.
@@ -862,17 +875,13 @@ func resolveContextWindow(provider *domain.Provider, model string, settings doma
 // delegated to the server-side compact endpoint first. If that fails (e.g.
 // 404 for free accounts, network error), the function falls back to the
 // client-side multi-pass summarization below.
-func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *domain.Conversation, model string, contextWindow int) (string, error) {
-	const (
-		keepTokenBudget = 64000 // retained recent messages token budget
-		summaryMaxOut   = 800
-		systemReserve   = 300  // system prompt + framing overhead
-		summaryReserve  = 2000 // running summary from previous pass
-	)
 
+func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *domain.Conversation, model string, contextWindow int) (string, error) {
 	if len(c.Messages) <= 1 {
 		return "", nil
 	}
+
+	effectiveKeepBudget := effectiveCompactionKeepBudget(contextWindow)
 
 	// Edge case: if the adapter supports server-side compaction, try it
 	// first. On any error, fall back to client-side compaction so the
@@ -880,41 +889,9 @@ func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *do
 	if compactor, ok := adapter.(ServerCompactor); ok {
 		summary, err := compactor.CompactServer(ctx, c, model, contextWindow)
 		if err == nil {
-			// Server-side compaction succeeded. Archive the dropped
-			// messages and apply the summary the same way client-side
-			// compaction does, so the conversation shape stays consistent.
-			effectiveKeepBudget := keepTokenBudget
-			if cap := contextWindow * 3 / 10; cap < effectiveKeepBudget {
-				effectiveKeepBudget = cap
-			}
-			if effectiveKeepBudget < 1000 {
-				effectiveKeepBudget = 1000
-			}
-			toArchive := c.ArchiveMessages(effectiveKeepBudget)
-			if len(toArchive) > 0 {
-				idx, archErr := a.Conversations.ArchiveChunk(c.ID, toArchive)
-				if archErr != nil {
-					a.log("warn", "agent", "failed to archive chunk for %s: %v", c.ID, archErr)
-				} else {
-					c.ChunkCount = idx + 1
-				}
-			}
-			c.Summary = ""
-			c.Compact(summary, effectiveKeepBudget)
-			return summary, a.Conversations.Save(c)
+			return summary, a.persistCompactedConversation(c, summary, effectiveKeepBudget)
 		}
 		a.log("warn", "agent", "server-side compaction failed for %s, falling back to client-side: %v", c.ID, err)
-	}
-
-	// Cap the keep budget to 30% of the context window so that compaction
-	// always has something to summarize and the retained messages leave room
-	// for the next turn's output.
-	effectiveKeepBudget := keepTokenBudget
-	if cap := contextWindow * 3 / 10; cap < effectiveKeepBudget {
-		effectiveKeepBudget = cap
-	}
-	if effectiveKeepBudget < 1000 {
-		effectiveKeepBudget = 1000
 	}
 
 	// Calculate the split point: iterate backward from the most recent message,
@@ -937,42 +914,16 @@ func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *do
 		splitIdx = 0
 	}
 
-	toCompact := c.Messages[:splitIdx]
-	// Strip hydration checkpoints from the compaction input — they are
-	// synthetic runtime snapshots, not durable conversation content.
-	toCompact = filterHydrationDomainMessages(toCompact)
+	toCompact := filterHydrationDomainMessages(c.Messages[:splitIdx])
 	runningSummary := c.Summary
 
-	// Available token budget per pass for message content.
-	available := contextWindow - systemReserve - summaryReserve - summaryMaxOut
-	if available < 1000 {
-		available = 1000
-	}
-
-	// Split messages into chunks that fit the per-pass budget. System markers
-	// are skipped — their content is already captured in the running summary.
-	var chunks [][]domain.Message
-	var current []domain.Message
-	currentTokens := 0
+	remainingMsgs := make([]domain.Message, 0, len(toCompact))
 	for _, m := range toCompact {
-		if m.Role == domain.RoleSystem {
-			continue
+		if m.Role != domain.RoleSystem {
+			remainingMsgs = append(remainingMsgs, m)
 		}
-		mt := m.EstimateTokens()
-		if currentTokens+mt > available && len(current) > 0 {
-			chunks = append(chunks, current)
-			current = nil
-			currentTokens = 0
-		}
-		current = append(current, m)
-		currentTokens += mt
 	}
-	if len(current) > 0 {
-		chunks = append(chunks, current)
-	}
-
-	// If there's nothing to compact (e.g. only system markers), bail out.
-	if len(chunks) == 0 {
+	if len(remainingMsgs) == 0 {
 		return "", nil
 	}
 
@@ -990,12 +941,18 @@ func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *do
 		systemPrompt += "\n\nCurrent state to preserve in the summary:\n" + todoCtx
 	}
 
-	for _, chunk := range chunks {
+	for len(remainingMsgs) > 0 {
+		available := compactionPassAvailable(contextWindow, runningSummary)
+		chunk, rest := takeCompactionChunk(remainingMsgs, available)
+		remainingMsgs = rest
+		if len(chunk) == 0 {
+			break
+		}
 		var msgs []ChatMessage
 		if runningSummary != "" {
 			msgs = append(msgs, ChatMessage{
 				Role:    "user",
-				Content: "Previous summary of earlier conversation:\n" + runningSummary,
+				Content: compactionSummaryPrefix + runningSummary,
 			})
 		}
 		for _, m := range chunk {
@@ -1019,7 +976,7 @@ func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *do
 			Model:     model,
 			System:    systemPrompt,
 			Messages:  msgs,
-			MaxTokens: summaryMaxOut,
+			MaxTokens: compactionSummaryMaxOut,
 		})
 		if err != nil {
 			return "", err
@@ -1027,10 +984,59 @@ func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *do
 		runningSummary = resp.Content
 	}
 
-	// Archive the messages that will be dropped by compaction, then compact.
-	// Archived chunks preserve full message content (tool calls, reasoning,
-	// steps) for scroll-back retrieval in the UI.
-	toArchive := c.ArchiveMessages(effectiveKeepBudget)
+	return runningSummary, a.persistCompactedConversation(c, runningSummary, effectiveKeepBudget)
+}
+
+func effectiveCompactionKeepBudget(contextWindow int) int {
+	keep := compactionKeepTokenBudget
+	if cap := contextWindow * 3 / 10; cap < keep {
+		keep = cap
+	}
+	if keep < 1000 {
+		keep = 1000
+	}
+	return keep
+}
+
+const compactionSummaryPrefix = "Previous summary of earlier conversation:\n"
+
+// compactionPassAvailable is the per-pass token budget for message content.
+// The running summary grows across passes, so later chunks shrink to leave
+// room for it instead of using a one-shot 2000-token reserve.
+func compactionPassAvailable(contextWindow int, runningSummary string) int {
+	summaryTokens := domain.EstimateTokens(runningSummary)
+	if runningSummary != "" {
+		summaryTokens += domain.EstimateTokens(compactionSummaryPrefix)
+	}
+	available := contextWindow - compactionSystemReserve - summaryTokens - compactionSummaryMaxOut
+	if available < 1000 {
+		return 1000
+	}
+	return available
+}
+
+// takeCompactionChunk takes the longest prefix of msgs whose token estimate
+// fits in available. A single oversized message is still taken so compaction
+// cannot stall. System markers should already have been stripped.
+func takeCompactionChunk(msgs []domain.Message, available int) (chunk, rest []domain.Message) {
+	var current []domain.Message
+	currentTokens := 0
+	for i, m := range msgs {
+		mt := m.EstimateTokens()
+		if currentTokens+mt > available && len(current) > 0 {
+			return current, msgs[i:]
+		}
+		current = append(current, m)
+		currentTokens += mt
+	}
+	return current, nil
+}
+
+// persistCompactedConversation archives dropped messages (without hydration
+// checkpoints), strips hydration from the live transcript, then applies Compact.
+func (a *App) persistCompactedConversation(c *domain.Conversation, summary string, keepBudget int) error {
+	c.Messages = filterHydrationDomainMessages(c.Messages)
+	toArchive := c.ArchiveMessages(keepBudget)
 	if len(toArchive) > 0 {
 		idx, err := a.Conversations.ArchiveChunk(c.ID, toArchive)
 		if err != nil {
@@ -1039,11 +1045,9 @@ func (a *App) compactConversation(ctx context.Context, adapter AIProvider, c *do
 			c.ChunkCount = idx + 1
 		}
 	}
-	// Replace the conversation with the final summary marker + recent messages.
-	// Clear the old summary first so Compact sets rather than appends.
 	c.Summary = ""
-	c.Compact(runningSummary, effectiveKeepBudget)
-	return runningSummary, a.Conversations.Save(c)
+	c.Compact(summary, keepBudget)
+	return a.Conversations.Save(c)
 }
 
 // compactionTodoContext renders the live user goal and open TODOs for the

@@ -19,8 +19,8 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `config/mcp-servers.json` | manual MCP server registry | JSON |
 | `config/codex-installation-id` | persistent Codex installation UUID for cache routing | text |
 | `config/skills.json` | legacy skill metadata catalog (skillfs uses `skills/skills.json`) | JSON |
-| `conversations/*.json` | one file per agent conversation | JSON |
-| `conversations/*.chunks/` | archived conversation chunks (compaction) | JSON |
+| `conversations/*.json` | one file per agent conversation. On load, a leftover `status: running` (process crash mid-turn) is converted to idle and in-flight assistant messages are marked interrupted. | JSON |
+| `conversations/*.chunks/` | archived conversation chunks (compaction). Hydration checkpoints (synthetic runtime snapshots) are stripped before archive and summarization; a fresh checkpoint is injected on the next provider round after compaction, including emergency overflow retries. | JSON |
 | `conversations/todos.json` | per-conversation TODO checklists + goal briefs | JSON |
 | `conversations/artifacts.json` | per-conversation interactive artifacts (HTML/CSS/JS) | JSON |
 | `skills/<id>/` | one directory per user/builtin skill: `SKILL.md` + optional support files | markdown + files |

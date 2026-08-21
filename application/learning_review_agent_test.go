@@ -39,6 +39,8 @@ type reviewStubAdapter struct {
 	toolCalls       []domain.ToolCall
 	terminalContent string
 	calls           int
+	failOnCall      int
+	failErr         error
 }
 
 func (a *reviewStubAdapter) Kind() domain.ProviderKind { return domain.ProviderChat }
@@ -48,6 +50,13 @@ func (a *reviewStubAdapter) Stream(context.Context, ChatRequest, func(string), f
 
 func (a *reviewStubAdapter) Complete(_ context.Context, req ChatRequest) (ChatResponse, error) {
 	a.calls++
+	if a.failOnCall > 0 && a.calls == a.failOnCall {
+		err := a.failErr
+		if err == nil {
+			err = errors.New("complete failed")
+		}
+		return ChatResponse{}, err
+	}
 	if a.terminalContent != "" {
 		return ChatResponse{Content: a.terminalContent}, nil
 	}
@@ -82,7 +91,10 @@ func TestReviewLoopRecordsMutationOnlyOnSuccess(t *testing.T) {
 			Name: "memory_save",
 			Args: `{"content":"user prefers Indonesian","tags":["preference","language"]}`,
 		}}}
-		mutations, _ := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+		mutations, _, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+		if err != nil {
+			t.Fatalf("runReviewLoop: %v", err)
+		}
 		if len(mutations) != 1 || mutations[0].Kind != "memory" {
 			t.Fatalf("mutations = %+v, want exactly one memory mutation", mutations)
 		}
@@ -100,7 +112,10 @@ func TestReviewLoopRecordsMutationOnlyOnSuccess(t *testing.T) {
 			Name: "skill_save",
 			Args: `{"name":"git-rebase-cheatsheet","content":"# Rebase\nsteps…"}`,
 		}}}
-		mutations, _ := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+		mutations, _, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+		if err != nil {
+			t.Fatalf("runReviewLoop: %v", err)
+		}
 		if len(mutations) != 1 || mutations[0].Kind != "skills" {
 			t.Fatalf("mutations = %+v, want exactly one skills mutation", mutations)
 		}
@@ -115,7 +130,10 @@ func TestReviewLoopRecordsMutationOnlyOnSuccess(t *testing.T) {
 			Name: "memory_save",
 			Args: `{"content":"x"}`,
 		}}}
-		mutations, _ := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+		mutations, _, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+		if err != nil {
+			t.Fatalf("runReviewLoop: %v", err)
+		}
 		if len(mutations) != 0 {
 			t.Fatalf("mutations = %+v, want none when the tool fails", mutations)
 		}
@@ -127,7 +145,10 @@ func TestReviewLoopRecordsMutationOnlyOnSuccess(t *testing.T) {
 			Name: "memory", // the (wrong) name referenced by the old prompt
 			Args: `{"content":"x"}`,
 		}}}
-		mutations, _ := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+		mutations, _, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+		if err != nil {
+			t.Fatalf("runReviewLoop: %v", err)
+		}
 		if len(mutations) != 0 {
 			t.Fatalf("mutations = %+v, want none for non-whitelisted tool", mutations)
 		}
@@ -430,7 +451,10 @@ func TestReviewLoopEndsOnNothingToSave(t *testing.T) {
 	adapter := &reviewStubAdapter{
 		terminalContent: "Nothing to save.",
 	}
-	mutations, messages := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+	mutations, messages, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+	if err != nil {
+		t.Fatalf("runReviewLoop: %v", err)
+	}
 	if len(mutations) != 0 {
 		t.Errorf("expected 0 mutations for chit-chat, got %d", len(mutations))
 	}
@@ -442,5 +466,34 @@ func TestReviewLoopEndsOnNothingToSave(t *testing.T) {
 	// Verify the adapter was called exactly once (no tool rounds).
 	if adapter.calls != 1 {
 		t.Errorf("expected 1 LLM call, got %d", adapter.calls)
+	}
+}
+
+func TestReviewLoopCompleteErrorIsReturned(t *testing.T) {
+	if resources.ReviewPrompt() == "" {
+		t.Fatal("review prompt must be non-empty")
+	}
+	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), DefaultReviewSettings())
+	conv := &domain.Conversation{
+		ID: "conv_fail",
+		Messages: []domain.Message{
+			{Role: domain.RoleUser, Content: "remember I prefer Indonesian"},
+			{Role: domain.RoleAssistant, Content: "noted"},
+		},
+	}
+	adapter := &reviewStubAdapter{
+		toolCalls: []domain.ToolCall{{
+			Name: "memory_save",
+			Args: `{"content":"user prefers Indonesian"}`,
+		}},
+		failOnCall: 2,
+		failErr:    errors.New("provider 500"),
+	}
+	mutations, _, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+	if err == nil || !strings.Contains(err.Error(), "provider 500") {
+		t.Fatalf("err = %v, want provider 500", err)
+	}
+	if len(mutations) != 1 {
+		t.Fatalf("partial mutations = %+v, want the successful first-round save", mutations)
 	}
 }

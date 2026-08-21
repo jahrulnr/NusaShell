@@ -77,6 +77,7 @@ func (s *Store) load() error {
 	// holds files owned by other stores (todos.json, artifacts.json,
 	// acp_runs.jsonl); treating every *.json as a conversation produced
 	// ghost entries with empty IDs that broke agent.conversations.get.
+	var recovered []string
 	for _, e := range entries {
 		name := e.Name()
 		if e.IsDir() || !strings.HasPrefix(name, "conv_") || !strings.HasSuffix(name, ".json") {
@@ -93,7 +94,15 @@ func (s *Store) load() error {
 		if c.ID == "" {
 			continue // defensive: a conversation without an ID is unusable
 		}
+		if c.RecoverAbandonedTurn() {
+			recovered = append(recovered, c.ID)
+		}
 		s.conversations[c.ID] = &c
+	}
+	for _, id := range recovered {
+		if err := s.Save(s.conversations[id]); err != nil {
+			return fmt.Errorf("persist recovered conversation %s: %w", id, err)
+		}
 	}
 
 	if err := s.loadJSON("config/providers.json", &s.providers); err != nil {
