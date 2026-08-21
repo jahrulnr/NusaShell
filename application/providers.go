@@ -357,6 +357,9 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 			models[i].Kind = domain.ModelKindImage
 		}
 	}
+	if p.Kind == domain.ProviderCodex {
+		models = seedCodexImageModels(models)
+	}
 	p.Models = models
 	p.UpdatedAt = time.Now().UTC()
 	if err := a.Providers.Save(p); err != nil {
@@ -378,6 +381,34 @@ func isFreeTierModel(id string) bool {
 		}
 	}
 	return false
+}
+
+// seedCodexImageModels adds the ChatGPT plan image models that Codex
+// model/list does not return. Official Codex imagegen always uses
+// gpt-image-2; gpt-image-1.5 is kept for transparent-background workflows.
+func seedCodexImageModels(models []domain.Model) []domain.Model {
+	seen := make(map[string]int, len(models))
+	for i, m := range models {
+		seen[m.ID] = i
+		if config.IsKnownImageModel(m.ID) {
+			models[i].Kind = domain.ModelKindImage
+		}
+	}
+	seeds := []domain.Model{
+		{ID: "gpt-image-2", DisplayName: "GPT Image 2", Kind: domain.ModelKindImage},
+		{ID: "gpt-image-1.5", DisplayName: "GPT Image 1.5", Kind: domain.ModelKindImage},
+	}
+	for _, seed := range seeds {
+		if i, ok := seen[seed.ID]; ok {
+			models[i].Kind = domain.ModelKindImage
+			if strings.TrimSpace(models[i].DisplayName) == "" {
+				models[i].DisplayName = seed.DisplayName
+			}
+			continue
+		}
+		models = append(models, seed)
+	}
+	return models
 }
 
 // catalogHintForProvider maps a NusaShell provider to a models.dev provider
@@ -492,8 +523,12 @@ func (a *App) enrichProviderModelsAtRead(p *domain.Provider) {
 }
 
 func modelsDTO(p *domain.Provider) []contracts.ModelDTO {
+	models := p.Models
+	if p.Kind == domain.ProviderCodex {
+		models = seedCodexImageModels(append([]domain.Model(nil), models...))
+	}
 	var out []contracts.ModelDTO
-	for _, m := range p.Models {
+	for _, m := range models {
 		out = append(out, contracts.ModelDTO{
 			ID:               m.ID,
 			ProviderID:       p.ID,

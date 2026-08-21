@@ -178,9 +178,11 @@ func TestGenerateHonorsCancel(t *testing.T) {
 
 func TestFactoryRejectsUnsupportedKind(t *testing.T) {
 	factory := NewFactory()
-	_, err := factory(&domain.Provider{Kind: domain.ProviderMessages, BaseURL: "https://api.anthropic.com"}, "key")
-	if err == nil || !strings.Contains(err.Error(), "no image generation API") {
-		t.Fatalf("err = %v", err)
+	for _, kind := range []domain.ProviderKind{domain.ProviderMessages, domain.ProviderCodex, domain.ProviderOllama} {
+		_, err := factory(&domain.Provider{Kind: kind, BaseURL: "https://example.com"}, "key")
+		if err == nil || !strings.Contains(err.Error(), "no image generation API") {
+			t.Fatalf("kind %s err = %v", kind, err)
+		}
 	}
 }
 

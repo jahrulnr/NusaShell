@@ -103,15 +103,11 @@ func (a *App) executeGenerateImage(run *TurnRun, toolCall domain.ToolCall, setti
 	}
 	provider, apiKey, ok := a.resolveFallbackProvider(settings.ImageProviderID)
 	if !ok {
-		msg := fmt.Sprintf("Image generation provider %q was not found or is disabled. Ask the user to pick an enabled OpenAI or OpenRouter image model in Settings → Image generation.", settings.ImageProviderID)
+		msg := fmt.Sprintf("Image generation provider %q was not found or is disabled. Ask the user to pick an enabled OpenAI, OpenRouter, or Codex image model in Settings → Image generation.", settings.ImageProviderID)
 		return msg, nil, fmt.Errorf("%s", msg)
 	}
 	if a.ImageGeneratorFactory == nil {
 		return failGenerateImage("Image generation is not available in this build.")
-	}
-	generator, err := a.ImageGeneratorFactory(provider, apiKey)
-	if err != nil {
-		return failGenerateImage(err.Error())
 	}
 	if a.Attachments == nil {
 		return failGenerateImage("attachment store is not configured")
@@ -134,8 +130,9 @@ func (a *App) executeGenerateImage(run *TurnRun, toolCall domain.ToolCall, setti
 		Background: args.Background,
 		N:          args.N,
 		References: refs,
+		TurnID:     toolCall.ID,
 	}
-	result, err := a.generateImageWithRetry(run.Ctx, generator, req)
+	result, err := a.generateImageWithCodexFailover(run, provider, apiKey, req)
 	if err != nil {
 		msg := formatImageGenFailure(err)
 		return msg, nil, fmt.Errorf("%s", strings.TrimPrefix(msg, "error: "))
@@ -306,6 +303,70 @@ func sanitizeFilePart(value string) string {
 	return b.String()
 }
 
+func (a *App) generateImageWithCodexFailover(run *TurnRun, provider *domain.Provider, apiKey string, req ImageGenRequest) (*ImageGenResult, error) {
+	accountID := peekCodexAccountID(apiKey)
+	if provider != nil && provider.Kind == domain.ProviderCodex && a.CodexRouter != nil && a.Credentials != nil {
+		accounts := a.listCodexAccountIDs(provider.ID)
+		if len(accounts) > 0 {
+			pick := a.CodexRouter.PickAccountDetailed(run.ConversationID, provider.ID, accounts)
+			if pick.AccountID == "" {
+				if pick.AllRateLimited {
+					return nil, allCodexAccountsLimitedError(pick.EarliestReset)
+				}
+			} else if token, has, _ := a.Credentials.Get(accountKey(provider.ID, pick.AccountID)); has {
+				apiKey = token
+				accountID = pick.AccountID
+			}
+		}
+	}
+	tried := map[string]bool{}
+	for {
+		if a.ImageGeneratorFactory == nil {
+			return nil, fmt.Errorf("Image generation is not available in this build.")
+		}
+		generator, err := a.ImageGeneratorFactory(provider, apiKey)
+		if err != nil {
+			return nil, err
+		}
+		result, err := a.generateImageWithRetry(run.Ctx, generator, req)
+		if err == nil {
+			return result, nil
+		}
+		if provider == nil || provider.Kind != domain.ProviderCodex || a.CodexRouter == nil || !isRateLimitError(err) {
+			return result, err
+		}
+		key := accountID
+		if key == "" {
+			key = peekCodexAccountID(apiKey)
+		}
+		if key != "" {
+			tried[key] = true
+			cooldown := rateLimitCooldown(err)
+			if cooldown > retryAfterCutoff {
+				a.CodexRouter.MarkCircuitOpen(key, time.Now().Add(cooldown))
+				a.log("warn", "image", "codex image circuit open: account %s usage exhausted for %s", key, cooldown.Round(time.Minute))
+			} else {
+				a.CodexRouter.MarkRateLimited(key, cooldown)
+				a.log("warn", "image", "codex image rate-limited: account %s cooling down for %s", key, cooldown.Round(time.Second))
+			}
+		}
+		accounts := a.listCodexAccountIDs(provider.ID)
+		pick := a.CodexRouter.PickAccountDetailed(run.ConversationID, provider.ID, accounts)
+		if pick.AccountID == "" || tried[pick.AccountID] {
+			if pick.AllRateLimited && len(tried) > 0 {
+				return result, allCodexAccountsLimitedError(pick.EarliestReset)
+			}
+			return result, err
+		}
+		token, has, _ := a.Credentials.Get(accountKey(provider.ID, pick.AccountID))
+		if !has {
+			return result, err
+		}
+		apiKey = token
+		accountID = pick.AccountID
+	}
+}
+
 func (a *App) generateImageWithRetry(ctx context.Context, generator ImageGenerator, req ImageGenRequest) (*ImageGenResult, error) {
 	for retry := 1; ; retry++ {
 		result, err := generator.Generate(ctx, req)
@@ -333,6 +394,9 @@ func formatImageGenFailure(err error) string {
 	}
 	if errors.Is(err, context.Canceled) {
 		return "error: image generation interrupted"
+	}
+	if msg := err.Error(); strings.Contains(msg, "all Codex accounts are rate-limited") {
+		return "error: " + msg
 	}
 	var upstream *UpstreamError
 	if errors.As(err, &upstream) {

@@ -477,14 +477,15 @@ type ImageModelLister interface {
 }
 
 // ImageModelListerFactory builds an ImageModelLister for a given provider.
-// Returns nil when the provider kind has no image-model catalog (Codex,
-// Anthropic Messages).
+// Returns nil when the provider kind has no image-model catalog (Codex
+// seeds gpt-image-2 at import/read time; Anthropic Messages has none).
 type ImageModelListerFactory func(p *domain.Provider) ImageModelLister
 
 // ---- image generation port ----
 
 // ImageGenerator produces images from a text prompt and optional reference
-// images. Implemented by OpenAI Images and OpenRouter Image API adapters.
+// images. Implemented by OpenAI Images, OpenRouter Image API, and Codex
+// ChatGPT plan image endpoints.
 type ImageGenerator interface {
 	Generate(ctx context.Context, req ImageGenRequest) (*ImageGenResult, error)
 }
@@ -498,6 +499,9 @@ type ImageGenRequest struct {
 	Background string // auto | transparent | opaque
 	N          int
 	References []ImageReference
+	// TurnID is sent as x-codex-image-turn-id on Codex image requests
+	// (official Codex CLI uses the tool-call turn id). Ignored by other backends.
+	TurnID string
 }
 
 // ImageReference is a source image for image-to-image editing.
@@ -515,7 +519,7 @@ type GeneratedImage struct {
 // ImageGenResult is the decoded response from an image backend.
 type ImageGenResult struct {
 	Images      []GeneratedImage
-	Provider    string // "openai" | "openrouter"
+	Provider    string // "openai" | "openrouter" | "codex"
 	Model       string
 	UsageTokens int
 	CostUSD     float64
@@ -523,7 +527,7 @@ type ImageGenResult struct {
 
 // ImageGeneratorFactory builds an ImageGenerator for a configured provider.
 // Returns an error when the provider kind has no image-generation API
-// (Anthropic Messages, Ollama, Codex in this release).
+// (Anthropic Messages, Ollama). Codex uses the ChatGPT plan image endpoints.
 type ImageGeneratorFactory func(p *domain.Provider, apiKey string) (ImageGenerator, error)
 
 // ---- agent tools port ----

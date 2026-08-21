@@ -78,7 +78,10 @@ audio and video files respectively.
 (PNG, JPEG, or WebP). Conversation JSON stores `file_path` only — not a
 base64 DataURL — so a 2K print does not bloat the transcript. The UI loads
 the file through `/local-file?path=`. The next provider round hydrates
-bytes from disk so a vision chat model can see the result.
+bytes from disk so a vision chat model can see the result. Backends are
+OpenAI Images, OpenRouter `POST /images`, and Codex ChatGPT plan
+`/images/generations` (edits are JSON `images[].image_url`, not
+multipart).
 
 The tool output tells the model the print is already on screen. Do not
 re-render it as Markdown.

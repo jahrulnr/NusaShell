@@ -20,7 +20,6 @@ import (
 	"nusashell/infrastructure/acpruntime"
 	"nusashell/infrastructure/ai"
 	"nusashell/infrastructure/ai/codex"
-	"nusashell/infrastructure/ai/imagegen"
 	"nusashell/infrastructure/ai/modelcatalog"
 	"nusashell/infrastructure/attachmentfs"
 	"nusashell/infrastructure/ci"
@@ -245,7 +244,7 @@ func run() error {
 		Toolbox:                     tb,
 		MCPToolbox:                  mcpManager,
 		Factory:                     ai.NewFactory(credentials),
-		ImageGeneratorFactory:       imagegen.NewFactory(),
+		ImageGeneratorFactory:       ai.NewImageGeneratorFactory(credentials),
 		ImageModelListerFactory:     ai.NewImageModelListerFactory(),
 		EmbedderFactory:             ai.NewEmbedderFactory(),
 		EmbeddingModelListerFactory: ai.NewEmbeddingModelListerFactory(),

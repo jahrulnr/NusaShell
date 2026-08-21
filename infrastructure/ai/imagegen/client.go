@@ -1,5 +1,6 @@
 // Package imagegen implements application.ImageGenerator for OpenAI Images
-// and the OpenRouter dedicated Image API. Codex OAuth is out of scope.
+// and the OpenRouter dedicated Image API. Codex ChatGPT plan images live
+// in infrastructure/ai/codex.ImagesClient (wired by ai.NewImageGeneratorFactory).
 package imagegen
 
 import (
@@ -50,7 +51,7 @@ func NewFactory() application.ImageGeneratorFactory {
 		case domain.ProviderChat, domain.ProviderResponses:
 			return &Client{Backend: backendOpenAI, BaseURL: p.BaseURL, APIKey: apiKey, HTTP: client}, nil
 		default:
-			return nil, fmt.Errorf("provider kind %q has no image generation API — pick an OpenAI or OpenRouter image model in Settings → Image generation", p.Kind)
+			return nil, fmt.Errorf("provider kind %q has no image generation API — pick an OpenAI, OpenRouter, or Codex image model in Settings → Image generation", p.Kind)
 		}
 	}
 }

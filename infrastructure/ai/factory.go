@@ -60,19 +60,17 @@ func NewFactory(creds application.CredentialStore) application.ProviderFactory {
 	}
 }
 
-// newCodexAdapter parses the stored OAuth token, refreshes it if expired,
-// persists the refreshed token, and builds the Codex adapter.
-func newCodexAdapter(ctx context.Context, p *domain.Provider, storedJSON string, client *http.Client, creds application.CredentialStore) (application.AIProvider, error) {
+func resolveCodexToken(ctx context.Context, p *domain.Provider, storedJSON string, creds application.CredentialStore) (*codex.TokenJSON, error) {
 	if storedJSON == "" {
-		return &codex.Adapter{
-			BaseURL:        p.BaseURL,
-			InstallationID: codexInstallationID,
-			Client:         client,
-		}, nil
+		return &codex.TokenJSON{}, nil
 	}
 	tok, err := codex.UnmarshalToken(storedJSON)
 	if err != nil {
-		return nil, &application.ErrUnsupportedProvider{Kind: string(p.Kind)}
+		kind := "codex"
+		if p != nil {
+			kind = string(p.Kind)
+		}
+		return nil, &application.ErrUnsupportedProvider{Kind: kind}
 	}
 	// Auto-refresh if the access token is expired or will expire within 5 min.
 	// The 5-min margin avoids mid-stream token expiry on long generations.
@@ -82,28 +80,32 @@ func newCodexAdapter(ctx context.Context, p *domain.Provider, storedJSON string,
 			// If refresh fails, fall back to the stored token — the API
 			// call will fail with a clear auth error rather than a opaque
 			// refresh error. The user can re-login from the UI.
-			return &codex.Adapter{
-				BaseURL:        p.BaseURL,
-				AccessToken:    tok.AccessToken,
-				AccountID:      tok.AccountID,
-				InstallationID: codexInstallationID,
-				Client:         client,
-			}, nil
+			return tok, nil
 		}
 		// Persist the refreshed token so subsequent turns don't refresh again.
 		// Write both the active provider key and the account-scoped key used
 		// by multi-account routing; otherwise failover keeps serving the
 		// expired token.
-		if newJSON, err := refreshed.Marshal(); err == nil {
-			_ = application.PersistCodexToken(creds, p.ID, refreshed.AccountID, newJSON)
+		if creds != nil {
+			if newJSON, err := refreshed.Marshal(); err == nil {
+				providerID := ""
+				if p != nil {
+					providerID = p.ID
+				}
+				_ = application.PersistCodexToken(creds, providerID, refreshed.AccountID, newJSON)
+			}
 		}
-		return &codex.Adapter{
-			BaseURL:        p.BaseURL,
-			AccessToken:    refreshed.AccessToken,
-			AccountID:      refreshed.AccountID,
-			InstallationID: codexInstallationID,
-			Client:         client,
-		}, nil
+		return refreshed, nil
+	}
+	return tok, nil
+}
+
+// newCodexAdapter parses the stored OAuth token, refreshes it if expired,
+// persists the refreshed token, and builds the Codex adapter.
+func newCodexAdapter(ctx context.Context, p *domain.Provider, storedJSON string, client *http.Client, creds application.CredentialStore) (application.AIProvider, error) {
+	tok, err := resolveCodexToken(ctx, p, storedJSON, creds)
+	if err != nil {
+		return nil, err
 	}
 	return &codex.Adapter{
 		BaseURL:        p.BaseURL,
@@ -112,6 +114,28 @@ func newCodexAdapter(ctx context.Context, p *domain.Provider, storedJSON string,
 		InstallationID: codexInstallationID,
 		Client:         client,
 	}, nil
+}
+
+// NewImageGeneratorFactory routes OpenAI/OpenRouter hosts through the Images
+// API and Codex OAuth through chatgpt.com/backend-api/codex/images/*. Token
+// refresh uses the same CredentialStore path as chat Codex.
+func NewImageGeneratorFactory(creds application.CredentialStore) application.ImageGeneratorFactory {
+	openai := imagegen.NewFactory()
+	return func(p *domain.Provider, apiKey string) (application.ImageGenerator, error) {
+		if p != nil && p.Kind == domain.ProviderCodex {
+			tok, err := resolveCodexToken(context.Background(), p, apiKey, creds)
+			if err != nil {
+				return nil, err
+			}
+			return &codex.ImagesClient{
+				BaseURL:        p.BaseURL,
+				AccessToken:    tok.AccessToken,
+				AccountID:      tok.AccountID,
+				InstallationID: codexInstallationID,
+			}, nil
+		}
+		return openai(p, apiKey)
+	}
 }
 
 // loadOrGenerateInstallationID loads a persistent installation UUID from
@@ -241,8 +265,9 @@ func NewEmbeddingModelListerFactory() application.EmbeddingModelListerFactory {
 }
 
 // NewImageModelListerFactory returns a factory that builds an ImageModelLister
-// for OpenAI-compatible hosts. Messages (Anthropic) and Codex have no image
-// catalog; a 404 on /images/models is treated as "none extra".
+// for OpenAI-compatible hosts. Messages (Anthropic) has no image catalog.
+// Codex has no /images/models endpoint; gpt-image-2 is seeded at import/read
+// time instead of probing a 404.
 func NewImageModelListerFactory() application.ImageModelListerFactory {
 	client := newProviderHTTPClient()
 	return func(p *domain.Provider) application.ImageModelLister {

@@ -86,11 +86,16 @@ appear in the Embedding model setting for skill and memory search. Models
 tagged as image generators (`kind: image`, including `gpt-image-*` and
 `dall-e-*` even when `/models` omits a kind) appear in Settings → Image
 generation and back the `generate_image` tool. Image generation uses the
-dedicated OpenAI `/images/generations` (and `/images/edits`) endpoints or
-OpenRouter `POST /images` — not chat completions with `modalities:["image"]`.
-Anthropic Messages, Ollama, and Codex OAuth are not image backends in this
-release; they can still orchestrate `generate_image` when a supported
-image provider is configured.
+dedicated OpenAI `/images/generations` (and `/images/edits`) endpoints,
+OpenRouter `POST /images`, or Codex OAuth
+`POST {codex base}/images/generations` and `/images/edits` (JSON body,
+including `images[].image_url` data URLs for edits — not OpenAI
+multipart). Codex `model/list` has no image catalog, so NusaShell seeds
+`gpt-image-2` and `gpt-image-1.5` on Codex providers. Anthropic Messages
+and Ollama are not image backends; they can still orchestrate
+`generate_image` when a supported image provider is configured. Codex
+image 429s with `x-codex-active-limit: image_gen` and a `resets_at`
+window use the same multi-account failover as Codex chat.
 
 ## Test connection
 

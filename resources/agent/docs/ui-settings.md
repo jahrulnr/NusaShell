@@ -76,7 +76,7 @@ When the active chat model cannot see images, NusaShell can describe attached im
 
 ## Image generation
 
-Pick the model used by the generate_image tool. This is separate from the chat model — any chat model can orchestrate, and the image backend is resolved here. OpenAI Images and OpenRouter Image API are supported. Import models on an OpenAI or OpenRouter provider first. Leave disabled until you want the agent to be able to generate images.
+Pick the model used by the generate_image tool. This is separate from the chat model — any chat model can orchestrate, and the image backend is resolved here. OpenAI Images, OpenRouter Image API, and a signed-in Codex ChatGPT plan are supported. Import models on an OpenAI or OpenRouter provider, or use a signed-in Codex provider. Leave disabled until you want the agent to be able to generate images.
 
 - **Image generation title** (`#settings-image-title`):
   - Section: Settings
