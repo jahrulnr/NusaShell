@@ -24,7 +24,8 @@ func (f *fakeLogStore) Clear() {}
 
 // fakeConvStore is a minimal in-memory ConversationStore for testing.
 type fakeConvStore struct {
-	convs map[string]*domain.Conversation
+	convs    map[string]*domain.Conversation
+	archived []domain.Message
 }
 
 func (f *fakeConvStore) List() []*domain.Conversation {
@@ -57,6 +58,7 @@ func (f *fakeConvStore) Delete(id string) error {
 }
 
 func (f *fakeConvStore) ArchiveChunk(id string, messages []domain.Message) (int, error) {
+	f.archived = append(f.archived, messages...)
 	return 0, nil
 }
 

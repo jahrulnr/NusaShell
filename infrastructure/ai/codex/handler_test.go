@@ -527,18 +527,21 @@ func TestCompactServerSubprocessBinaryNotFound(t *testing.T) {
 	}
 }
 
-func TestBuildTurnInputUserOnly(t *testing.T) {
+func TestBuildTurnInputReplaysUserAndAssistant(t *testing.T) {
 	c := &domain.Conversation{
 		Messages: []domain.Message{
 			{Role: domain.RoleUser, Content: "hello"},
 			{Role: domain.RoleAssistant, Content: "hi"},
 			{Role: domain.RoleUser, Content: "how are you?"},
+			{Role: domain.RoleAssistant, Content: ""}, // tool-only round, skip
 		},
 	}
 	input := buildTurnInput(c)
-	// Only user messages should be included
-	if len(input) != 2 {
-		t.Fatalf("expected 2 items (user only), got %d", len(input))
+	if len(input) != 3 {
+		t.Fatalf("expected 3 items (user, assistant, user), got %d", len(input))
+	}
+	if input[1]["text"] != "hi" {
+		t.Fatalf("assistant text = %v, want hi", input[1]["text"])
 	}
 	for i, item := range input {
 		if item["type"] != "text" {

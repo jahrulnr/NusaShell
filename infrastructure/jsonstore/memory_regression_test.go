@@ -94,3 +94,58 @@ func TestLoadIgnoresForeignFilesInConversationsDir(t *testing.T) {
 		t.Fatalf("expected exactly conv_real1, got %+v", got)
 	}
 }
+
+func TestLoadRecoversAbandonedRunningTurns(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conv := &domain.Conversation{
+		ID:     "conv_zombie",
+		Title:  "stuck",
+		Status: "running",
+		Messages: []domain.Message{
+			{ID: "u1", Role: domain.RoleUser, Content: "hello", Status: domain.StatusDone},
+			{ID: "a1", Role: domain.RoleAssistant, Content: "partial", ToolCalls: []domain.ToolCall{
+				{ID: "t1", Name: "exec", Status: domain.ToolRunning},
+			}},
+		},
+	}
+	if err := st.Save(conv); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := reopened.Get("conv_zombie")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "idle" {
+		t.Fatalf("status = %q, want idle", got.Status)
+	}
+	if got.Messages[1].Status != domain.StatusInterrupted {
+		t.Fatalf("assistant status = %q, want interrupted", got.Messages[1].Status)
+	}
+	if got.Messages[1].Error != domain.AbandonedTurnError {
+		t.Fatalf("error = %q", got.Messages[1].Error)
+	}
+	if got.Messages[1].ToolCalls[0].Status != domain.ToolInterrupted {
+		t.Fatalf("tool status = %q", got.Messages[1].ToolCalls[0].Status)
+	}
+
+	again, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := again.Get("conv_zombie")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != "idle" {
+		t.Fatalf("persisted status = %q, want idle", persisted.Status)
+	}
+}

@@ -43,6 +43,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Emergency compaction re-injects hydration.** After a successful overflow
+  compact-and-retry, the next provider round recreates the runtime checkpoint
+  (date, memory, skills, MCP, tools) instead of continuing the turn blind.
+- **Overflow detection is explicit.** Emergency compaction no longer treats
+  a generic `input_tokens` substring as context overflow, and it refuses to
+  compact unless the local token estimate already exceeds the compaction
+  trigger — so a schema 400 cannot archive the transcript.
+- **Multi-pass compaction tracks summary growth.** Later summarization passes
+  shrink the message chunk as the running summary grows, so the last pass
+  does not overflow the model window.
+- **Crash recovery for running conversations.** Loading the store converts
+  leftover `status: running` conversations to idle and marks in-flight
+  assistant work interrupted, so a restart cannot leave a room permanently
+  busy.
+- **Codex compact replays assistant text.** Server-side Codex compaction
+  now includes assistant message text in the replay, not only user turns.
+- **Review loop mid-failure is an error.** If `Complete` fails inside the
+  background review loop, the trajectory records `error` instead of `done`.
+- **Compaction archives omit hydration.** Hydration checkpoints are stripped
+  before archive and `Compact`, so scroll-back chunks no longer duplicate
+  synthetic runtime snapshots.
+
 - **MCP autostart at process boot.** Plugins with `mcp.autostart` are
   connected when the Go process starts (and immediately when the toggle is
   turned on), so automations and agent tools are available without a manual

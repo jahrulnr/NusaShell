@@ -280,3 +280,38 @@ func TestArchiveMessagesAndCompactAreConsistent(t *testing.T) {
 		t.Fatal("user message u0 should be retained live by the dedicated budget, not archived")
 	}
 }
+
+func TestRecoverAbandonedTurnMarksInFlightAssistant(t *testing.T) {
+	c := &Conversation{
+		ID:     "conv_zombie",
+		Status: "running",
+		Messages: []Message{
+			{ID: "u1", Role: RoleUser, Content: "hello", Status: StatusDone},
+			{ID: "a1", Role: RoleAssistant, Content: "partial", ToolCalls: []ToolCall{
+				{ID: "t1", Name: "exec", Status: ToolRunning},
+			}},
+			{ID: "a0", Role: RoleAssistant, Content: "earlier", Status: StatusDone},
+		},
+	}
+	if !c.RecoverAbandonedTurn() {
+		t.Fatal("expected recovery of running conversation")
+	}
+	if c.Status != "idle" {
+		t.Fatalf("status = %q, want idle", c.Status)
+	}
+	if c.Messages[1].Status != StatusInterrupted {
+		t.Fatalf("in-flight assistant status = %q, want interrupted", c.Messages[1].Status)
+	}
+	if c.Messages[1].Error != AbandonedTurnError {
+		t.Fatalf("error = %q", c.Messages[1].Error)
+	}
+	if c.Messages[1].ToolCalls[0].Status != ToolInterrupted {
+		t.Fatalf("tool status = %q, want interrupted", c.Messages[1].ToolCalls[0].Status)
+	}
+	if c.Messages[2].Status != StatusDone {
+		t.Fatalf("completed assistant should stay done, got %q", c.Messages[2].Status)
+	}
+	if c.RecoverAbandonedTurn() {
+		t.Fatal("idle conversation should not recover again")
+	}
+}
