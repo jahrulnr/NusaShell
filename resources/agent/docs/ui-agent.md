@@ -6,7 +6,7 @@ The default view: multi-conversation chat against any configured provider model.
 
 ## Conversations pane
 
-Lists conversations with a search filter and a New conversation button. The count reflects persisted threads.
+Lists conversations with a search filter and a New conversation button. The count reflects persisted threads. On narrow widths the pane hides behind a Rooms button and a backdrop; Escape or choosing a room closes it. Ctrl/Cmd+K focuses this search; Ctrl/Cmd+N creates a thread.
 
 - **Conversations pane** (`#agent-conversations`):
   - Section: Agent
@@ -24,19 +24,31 @@ Lists conversations with a search filter and a New conversation button. The coun
   - Section: Agent
   - Type: button
   - Action: Creates a new conversation and focuses the composer.
+  - Shortcut: Ctrl+N / ⌘N on the Agent view
 
 - **Conversation search** (`#conversation-search`):
   - Section: Agent
   - Type: search
+  - Shortcut: Ctrl+K / ⌘K, or / when not typing
   - Notes: Filters conversation titles in real time.
 
 - **Conversation list** (`#conversation-list`):
   - Section: Agent
   - Type: list
 
+- **Rooms** (`#agent-rooms-toggle`):
+  - Section: Agent
+  - Type: button
+  - Action: On narrow widths, opens the conversations pane as a drawer. Escape or the backdrop closes it.
+
+- **Rooms backdrop** (`#agent-rooms-backdrop`):
+  - Section: Agent
+  - Type: overlay
+  - Action: Click to close the conversations drawer.
+
 ## Thread
 
-Renders the active conversation. An offline mascot appears when the backend is unreachable.
+Renders the active conversation. An empty thread offers starter prompt chips that fill the composer. An offline mascot appears when the backend is unreachable.
 
 Long conversations open showing only the most recent messages, scrolled to the bottom; a 'Load older messages' button at the top of the thread reveals earlier messages in batches (keeping the scroll position anchored). Live streaming auto-follows only while the view is pinned to the bottom.
 
@@ -56,7 +68,12 @@ Long conversations open showing only the most recent messages, scrolled to the b
 - **Thread log** (`#agent-thread`):
   - Section: Agent
   - Type: log
-  - Notes: Renders the active conversation messages. Long conversations are windowed: only the most recent messages render on open (scrolled to bottom), older ones load on demand.
+  - Notes: Renders the active conversation messages. Long conversations are windowed: only the most recent messages render on open (scrolled to bottom), older ones load on demand. An empty thread shows starter prompt chips.
+
+- **Starter prompts** (`#agent-starter-prompts`):
+  - Section: Agent
+  - Type: button group
+  - Action: Fills the composer with a ready-to-edit prompt. Available on an empty thread.
 
 - **Load older messages** (`#agent-load-older`):
   - Section: Agent
@@ -237,7 +254,7 @@ When a user sends a steer message mid-turn, it is queued here and applied at the
 
 ## Composer
 
-The message input with attachments, model picker, workspace selector, provider status, stop, and send buttons. Ctrl+Enter (⌘↩ on Mac) sends. The whole conversation area accepts drag & drop of files and folders — folders are attached as path-only references (desktop only).
+The message input with attachments, model picker, workspace selector, provider status, stop, and send buttons. Ctrl+Enter (⌘↩ on Mac) sends. While a turn is running, Send becomes Steer. The whole conversation area accepts drag & drop of files and folders — folders are attached as path-only references (desktop only).
 
 - **Composer form** (`#agent-form`):
   - Section: Agent
@@ -246,7 +263,7 @@ The message input with attachments, model picker, workspace selector, provider s
 - **Message input** (`#composer-input`):
   - Section: Agent
   - Type: textarea
-  - Shortcut: Ctrl+Enter / ⌘↩ to send
+  - Shortcut: Ctrl+Enter / ⌘↩ to send; Escape closes dialogs
 
 - **Attachments preview** (`#agent-attachments`):
   - Section: Agent

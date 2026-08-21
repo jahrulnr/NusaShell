@@ -26,6 +26,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Night-harbor workbench.** Replaced the acid-lime shell with a sea-glass
+  teal palette, island-chain brand mark, and a tide line on the title bar.
+  Hardcoded lime/ink colors now flow from CSS tokens. Empty agent threads
+  offer starter prompts, the composer dock highlights while focused and
+  while steering, Rooms reopens the conversation list on narrow widths,
+  and the sidebar data-directory path is visible again.
+- **Shell interaction.** Dialogs dismiss on Escape with a focus trap.
+  Toasts pause while hovered. Ctrl/Cmd+K or `/` focuses the current view's
+  search box; Ctrl/Cmd+N starts a new agent conversation when you are not
+  typing.
 - **Unified plugins model.** MCP servers and installed plugins are now one
   concept: every entry is a plugin stored under `plugins/<id>/manifest.json`
   (a manual MCP server is a plugin manifest with an `mcp` block and no `ui`

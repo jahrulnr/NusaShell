@@ -27,6 +27,8 @@ Identifies NusaShell with its brand mark and wordmark, followed by compact backe
 
 Vertical navigation on the left, ordered Home, Agent, Skills, Learning, Automation, Plugins, Providers, and Logs. It can show icons with labels or icons only, and remembers that choice locally.
 
+Keyboard: Ctrl/Cmd+K or / focuses the search box on the current view. Escape dismisses dialogs, toasts stay on hover, and Ctrl/Cmd+N starts a new agent conversation when the Agent view is open.
+
 - **Sidebar** (`#sidebar`):
   - Section: Sidebar
   - Type: container
@@ -39,7 +41,7 @@ Vertical navigation on the left, ordered Home, Agent, Skills, Learning, Automati
 
 ## Storage
 
-Shows the absolute data directory path and a usage bar so the user can see where conversations, providers, memory, and credentials live.
+Shows the absolute data directory path so you can see where conversations, providers, memory, and credentials live.
 
 - **Data directory path** (`#storage-path`):
   - Section: Storage

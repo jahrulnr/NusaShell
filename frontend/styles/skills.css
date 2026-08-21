@@ -9,7 +9,7 @@
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: #090e16;
+  background: var(--harbor);
 }
 .skills-catalog,
 .skills-tree-pane,
@@ -164,7 +164,7 @@
   overflow: auto;
   margin: 0;
   padding: 16px 20px;
-  background: #080c13;
+  background: var(--input-bg);
   color: #d9e2ef;
   font: 12px/1.7 var(--font-mono);
   white-space: pre-wrap;

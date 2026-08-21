@@ -37,6 +37,7 @@
         <img src="./nusashell-mark.png" alt="" width="24" height="24">
       </span>
       NusaShell
+      <span class="brand-islands" aria-hidden="true"><i></i><i></i><i></i></span>
       <span class="connection-state" title="Backend connection status">
         <span class="connection-orb" id="conn-fill"></span>
         <span id="conn-status">Connecting…</span>
@@ -93,6 +94,8 @@
       </nav>
 
       <div class="storage">
+        <span class="storage-label">Data</span>
+        <code class="storage-text" id="storage-path" title="Data directory">—</code>
       </div>
       <button class="sidebar-mode-toggle" id="sidebar-mode-toggle" type="button" aria-label="Collapse sidebar" aria-pressed="false" title="Use icon-only sidebar">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true"><path d="M4 5h16M4 12h16M4 19h16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -155,6 +158,11 @@
           </aside>
 
           <div class="agent-conversation" id="agent-conversation">
+            <button class="agent-rooms-toggle" id="agent-rooms-toggle" type="button" aria-label="Conversations" aria-expanded="false" aria-controls="agent-conversations" title="Conversations">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+              <span>Rooms</span>
+            </button>
+            <div class="agent-rooms-backdrop" id="agent-rooms-backdrop" hidden></div>
             <section class="agent-offline-state" id="agent-offline-state" role="status" aria-live="polite" hidden>
               <img class="agent-offline-mascot" src="./agent-offline-mascot.png" alt="" aria-hidden="true" width="1254" height="1254">
               <h2>Sorry, it looks like your agent is offline.</h2>
@@ -189,6 +197,13 @@
                 <div class="agent-empty-mark">✦</div>
                 <h2>Start a conversation</h2>
                 <p>Ask anything. The agent can use skills, memory, docs and your MCP servers as tools.</p>
+                <div class="agent-starter-prompts" id="agent-starter-prompts">
+                  <button class="agent-starter" type="button" data-starter-prompt="Explore this repository and summarize the architecture, key packages, and how to run tests.">Explore this repo</button>
+                  <button class="agent-starter" type="button" data-starter-prompt="Look at recent changes and failing tests. Find the most likely bug and propose a small fix.">Find a bug</button>
+                  <button class="agent-starter" type="button" data-starter-prompt="Add a failing test for the behavior I describe next, then wait before implementing.">Write a failing test</button>
+                  <button class="agent-starter" type="button" data-starter-prompt="Review the current git diff. Call out bugs, missing tests, and wire-contract risks.">Review the diff</button>
+                </div>
+                <p class="agent-empty-hint">Ctrl+K search rooms · Ctrl+N new · Ctrl+Enter send</p>
               </div>
             </div>
 

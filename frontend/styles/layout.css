@@ -25,9 +25,27 @@
   width: 24px;
   height: 24px;
   place-items: center;
-  filter: drop-shadow(0 0 7px rgba(42, 198, 246, .2));
+  filter: drop-shadow(0 0 7px rgba(110, 224, 196, .28));
 }
 .brand-logo img { display: block; width: 24px; height: 24px; }
+
+.brand-islands {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 3px;
+  margin-left: 2px;
+  height: 10px;
+}
+.brand-islands i {
+  display: block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent-glow);
+}
+.brand-islands i:nth-child(2) { width: 5px; height: 5px; }
+.brand-islands i:nth-child(3) { width: 3px; height: 3px; opacity: .55; }
 
 .titlebar-actions {
   display: flex;
@@ -118,7 +136,8 @@
   padding: 14px 10px 4px;
   border-top: 1px solid var(--border-soft);
 }
-.storage-text { color: var(--text-faint); font-family: var(--font-mono); font-size: 10.5px; }
+.storage-text { color: var(--text-faint); font-family: var(--font-mono); font-size: 10.5px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.storage-label { display: block; margin-bottom: 4px; color: var(--text-faint); font: 600 9px var(--font-mono); letter-spacing: .12em; text-transform: uppercase; }
 .storage-bar {
   height: 5px;
   border-radius: 999px;
@@ -129,7 +148,7 @@
   width: 31%;
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--accent), #6a9bff);
+  background: linear-gradient(90deg, var(--accent), var(--blue-info));
 }
 
 .sidebar-mode-toggle {
