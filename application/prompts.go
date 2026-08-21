@@ -17,12 +17,14 @@ var systemPrompt = resources.Prompt("system")
 var continuePrompt = resources.Prompt("continue")
 
 // buildSystemPrompt composes the agent identity + tool protocol (single
-// system.md) with compaction summaries and any system-level skill messages
-// stored in the conversation. The system.md prefix is cache-stable across
-// turns; the user prompt (if set) extends that prefix — changing it
-// breaks the prompt cache for all subsequent turns until a new cache
-// shard stabilizes. Only the tail (system messages, workspace) varies
-// per conversation/turn.
+// system.md) with any system-level skill messages stored in the conversation.
+// The system.md prefix is cache-stable across turns; the user prompt (if set)
+// extends that prefix — changing it breaks the prompt cache for all subsequent
+// turns until a new cache shard stabilizes. Only the tail (system messages,
+// workspace) varies per conversation/turn.
+//
+// Compaction summaries carry role=user (not system) so they appear in the
+// provider request's messages array — see domain.CompactionSummaryPrefix.
 func buildSystemPrompt(c *domain.Conversation, userPrompt string) string {
 	var sb strings.Builder
 	sb.WriteString(systemPrompt)

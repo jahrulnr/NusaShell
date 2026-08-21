@@ -563,6 +563,25 @@ func TestBuildTurnInputSkipsSystemMessages(t *testing.T) {
 	}
 }
 
+func TestBuildTurnInputReplaysCompactionSummary(t *testing.T) {
+	// Compaction summaries carry role=user so they appear in the provider
+	// request's messages array. buildTurnInput must replay them as text
+	// items, not skip them.
+	c := &domain.Conversation{
+		Messages: []domain.Message{
+			{Role: domain.RoleUser, Content: "Compacted context handover:\nsummary of prior work"},
+			{Role: domain.RoleUser, Content: "continue the work"},
+		},
+	}
+	input := buildTurnInput(c)
+	if len(input) != 2 {
+		t.Fatalf("expected 2 items (compaction summary + user message), got %d", len(input))
+	}
+	if input[0]["text"] != "Compacted context handover:\nsummary of prior work" {
+		t.Fatalf("first item should be compaction summary, got %v", input[0]["text"])
+	}
+}
+
 func TestBuildTurnInputEmptyContent(t *testing.T) {
 	c := &domain.Conversation{
 		Messages: []domain.Message{

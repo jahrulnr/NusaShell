@@ -126,3 +126,93 @@ func TestCompactCountsToolCallsInTokenBudget(t *testing.T) {
 		t.Fatalf("after Compact, %d messages retained — tool call tokens not counted in budget", len(c.Messages))
 	}
 }
+
+// TestCompactSummaryIsUserRole: the compaction summary must carry role=user
+// so it appears in the provider request's messages array. Providers return
+// HTTP 400 "No user query found in messages" without a user message. The
+// summary must be distinguishable from a real user message via
+// CompactionSummaryPrefix.
+func TestCompactSummaryIsUserRole(t *testing.T) {
+	c := &Conversation{
+		Messages: []Message{
+			{ID: "u1", Role: RoleUser, Content: "fix the bug"},
+			{ID: "a1", Role: RoleAssistant, Content: "working on it"},
+		},
+	}
+	c.Compact("summary of work", 1000)
+
+	last := c.Messages[len(c.Messages)-1]
+	if last.Role != RoleUser {
+		t.Fatalf("compaction summary role = %s, want user", last.Role)
+	}
+	if !IsCompactionSummary(last.Content) {
+		t.Fatalf("compaction summary content = %q, want prefix %q", last.Content, CompactionSummaryPrefix)
+	}
+}
+
+// TestCompactAlwaysRetainsUserMessage: after compaction, at least one real
+// user message must remain in the retained set. In a long tool-heavy turn
+// the user message can be far outside the recent-message keep budget; the
+// dedicated user-message budget (20k tokens) must retain it.
+func TestCompactAlwaysRetainsUserMessage(t *testing.T) {
+	// One user message at the start, then 100 assistant+tool messages.
+	// With a small keep budget, the backward scan only retains the last
+	// few assistant messages — the user message at index 0 is far
+	// outside the budget but must be retained by the dedicated budget.
+	msgs := make([]Message, 0, 102)
+	msgs = append(msgs, Message{
+		ID:      NewID("msg"),
+		Role:    RoleUser,
+		Content: "Please fix the bug in auth.go",
+	})
+	for i := 0; i < 100; i++ {
+		msgs = append(msgs, Message{
+			ID:      NewID("msg"),
+			Role:    RoleAssistant,
+			Content: "",
+			ToolCalls: []ToolCall{{
+				ID:     NewID("call"),
+				Name:   "mcp_call",
+				Args:   `{"ref":"nusashell.files:read"}`,
+				Output: strings.Repeat("x", 400),
+			}},
+		})
+	}
+	c := &Conversation{Messages: msgs}
+	c.Compact("summary of work done", 1000)
+
+	// After compaction: [user_messages..., recent_messages..., summary].
+	// At least one retained message must be RoleUser (the real user
+	// message, not just the compaction summary).
+	realUserCount := 0
+	for _, m := range c.Messages {
+		if m.Role == RoleUser && !IsCompactionSummary(m.Content) {
+			realUserCount++
+		}
+	}
+	if realUserCount == 0 {
+		t.Fatal("Compact dropped all real user messages — provider will return 400 'No user query found in messages'")
+	}
+}
+
+// TestCompactExcludesPriorSummaryFromUserBudget: when compacting a
+// conversation that already has a compaction summary, the prior summary
+// must not be counted against the user-message budget — only real user
+// messages are retained.
+func TestCompactExcludesPriorSummaryFromUserBudget(t *testing.T) {
+	c := &Conversation{
+		Messages: []Message{
+			{ID: "s1", Role: RoleUser, Content: CompactionSummaryPrefix + "\nprior summary"},
+			{ID: "u1", Role: RoleUser, Content: "real user message"},
+			{ID: "a1", Role: RoleAssistant, Content: "response"},
+		},
+	}
+	c.Compact("new summary", 1000)
+
+	// The prior summary must not appear in the retained user messages.
+	for _, m := range c.Messages {
+		if m.Role == RoleUser && IsCompactionSummary(m.Content) && m.Content != CompactionSummaryPrefix+"\n"+c.Summary {
+			t.Fatalf("prior compaction summary leaked into retained user messages: %q", m.Content)
+		}
+	}
+}

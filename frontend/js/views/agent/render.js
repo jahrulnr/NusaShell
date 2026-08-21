@@ -66,7 +66,7 @@ export function reasoningDisclosure(reasoning) {
 }
 
 export function renderMessage(message) {
-  if (message.role === 'system') {
+  if (message.role === 'system' || isCompactionSummary(message)) {
     return renderCompactionMessage(message);
   }
   if (message.role === 'user') {
@@ -87,7 +87,15 @@ export function renderMessage(message) {
   return renderAssistantTurn([message]);
 }
 
-// renderCompactionMessage renders a system (compaction handover) message as
+// isCompactionSummary detects a compaction handover message by its content
+// prefix. Compaction summaries carry role=user so they appear in the
+// provider request's messages array, but the UI renders them as
+// assistant-style bubbles — matching the domain.CompactionSummaryPrefix.
+function isCompactionSummary(message) {
+  return typeof message.content === 'string' && message.content.startsWith('Compacted context handover:');
+}
+
+// renderCompactionMessage renders a compaction handover message as
 // an assistant-style bubble so the summary content is readable, not crammed
 // into a tiny dashed pill. A "Compacted context" label distinguishes it from
 // a regular assistant response.

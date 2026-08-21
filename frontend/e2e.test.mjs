@@ -401,12 +401,16 @@ test('compaction triggers and renders a marker when conversation exceeds thresho
     }, 'post-compaction turn done', 15000);
 
     // Verify the conversation has the compaction marker in persisted state.
+    // Compaction summaries carry role=user with a "Compacted context handover:"
+    // prefix so they appear in the provider request's messages array.
     const gotten = await rpcModule.rpc('agent.conversations.get', { id: convID });
-    const systemMsgs = gotten.messages?.filter((m) => m.role === 'system') || [];
-    assert.ok(systemMsgs.length > 0, 'at least one system (compaction) message exists');
+    const compactionMsgs = gotten.messages?.filter(
+      (m) => m.role === 'user' && m.content?.startsWith('Compacted context handover:'),
+    ) || [];
+    assert.ok(compactionMsgs.length > 0, 'at least one compaction summary (user) message exists');
     assert.ok(
-      systemMsgs.some((m) => m.content.toLowerCase().includes('compacted')),
-      `compaction marker not found in system messages: ${JSON.stringify(systemMsgs.map((m) => m.content.slice(0, 80)))}`,
+      compactionMsgs.some((m) => m.content.includes('compacted') || m.content.includes('Compacted')),
+      `compaction marker not found: ${JSON.stringify(compactionMsgs.map((m) => m.content.slice(0, 80)))}`,
     );
   } catch (error) {
     throw new Error(`${error.message}\nGo server output:\n${server.output()}`);

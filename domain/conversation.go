@@ -266,56 +266,111 @@ func truncateRunes(s string, n int) string {
 	return string(runes[:n]) + "…"
 }
 
-// Compact replaces the oldest messages with a summary marker message and
-// keeps the most recent messages that fit within keepTokenBudget. Tool calls
-// and reasoning are stripped from retained messages (they are already captured
-// in the summary). The last message that does not fit fully is truncated
-// per-content rather than dropped entirely.
+// CompactionSummaryPrefix is the prefix that identifies a compaction summary
+// message. It lets chatMessages, buildSystemPrompt, and the UI distinguish a
+// compaction handover from a real user message even though both carry
+// role=user — matching the codex-rs design where the summary is the last
+// user-visible item in the compacted history.
+const CompactionSummaryPrefix = "Compacted context handover:"
+
+// IsCompactionSummary reports whether a message content is a compaction
+// summary marker. Used to skip compaction summaries when collecting real
+// user messages for retention, and by the UI to render the marker.
+func IsCompactionSummary(content string) bool {
+	return strings.HasPrefix(content, CompactionSummaryPrefix)
+}
+
+// compactedUserMessageBudget is the token budget for retaining real user
+// messages across compaction. User messages are the most important context
+// (they carry the user's goal and constraints) and providers require at
+// least one user message in the request, so they get a dedicated budget
+// separate from the recent-message keep budget. Matches codex-rs
+// COMPACT_USER_MESSAGE_MAX_TOKENS.
+const compactedUserMessageBudget = 20000
+
+// Compact replaces the oldest messages with a compaction summary and keeps:
+//  1. Real user messages (excluding prior compaction summaries) within a
+//     dedicated 20k-token budget, scanned backward from the most recent.
+//  2. Recent non-user messages (assistant, tool calls) within keepTokenBudget,
+//     scanned backward from the most recent.
+//  3. The compaction summary as the final user message.
+//
+// The summary carries role=user so it appears in the provider request's
+// messages array — providers require at least one user message and return
+// HTTP 400 "No user query found in messages" without one. The
+// CompactionSummaryPrefix lets the UI and buildSystemPrompt distinguish it
+// from a real user message. This follows the codex-rs compaction design
+// (build_compacted_history in core/src/compact.rs) where the summary is the
+// last user-visible item in the compacted history.
 func (c *Conversation) Compact(summary string, keepTokenBudget int) {
 	if c.Summary != "" {
 		c.Summary += "\n\n" + summary
 	} else {
 		c.Summary = summary
 	}
-	marker := Message{
-		ID:   NewID("msg"),
-		Role: RoleSystem,
-		Content: "Another language model started to solve this problem and produced a summary of its thinking process. " +
-			"Use this to build on the work that has already been done and avoid duplicating work.\n\n" +
-			"Compacted context handover:\n" + c.Summary,
-		CreatedAt: time.Now().UTC(),
-		Status:    StatusDone,
+
+	// 1. Collect real user messages (exclude compaction summaries) within
+	//    their own budget, scanned backward from the most recent.
+	var retainedUserMsgs []Message
+	remainingUser := compactedUserMessageBudget
+	for i := len(c.Messages) - 1; i >= 0; i-- {
+		if remainingUser <= 0 {
+			break
+		}
+		m := c.Messages[i]
+		if m.Role != RoleUser || IsCompactionSummary(m.Content) {
+			continue
+		}
+		stripped := StripForRetention(m)
+		tokens := m.EstimateTokens()
+		if tokens <= remainingUser {
+			retainedUserMsgs = append([]Message{stripped}, retainedUserMsgs...)
+			remainingUser -= tokens
+		} else {
+			stripped = truncateMessageContent(stripped, remainingUser)
+			if stripped.Content != "" || len(stripped.Attachments) > 0 {
+				retainedUserMsgs = append([]Message{stripped}, retainedUserMsgs...)
+			}
+			remainingUser = 0
+		}
 	}
 
-	// Iterate backward from the most recent message, keeping messages until
-	// the token budget is exhausted. The last message that does not fit is
-	// truncated rather than dropped. Token cost is computed from the original
-	// message (including tool calls/reasoning) so that tool-heavy messages
-	// are not undercounted — the stripped version is retained but the budget
-	// reflects what the provider actually sent.
+	// 2. Backward scan retain recent non-user messages (assistant, tool
+	//    calls) within keepTokenBudget for mid-turn continuity.
 	remaining := keepTokenBudget
-	var retained []Message
+	var retainedRecent []Message
 	for i := len(c.Messages) - 1; i >= 0; i-- {
 		if remaining <= 0 {
 			break
 		}
 		orig := c.Messages[i]
+		if orig.Role == RoleUser {
+			continue // user messages handled by the dedicated budget above
+		}
 		tokens := orig.EstimateTokens()
 		msg := StripForRetention(orig)
 		if tokens <= remaining {
-			retained = append([]Message{msg}, retained...)
+			retainedRecent = append([]Message{msg}, retainedRecent...)
 			remaining -= tokens
 		} else {
-			// Truncate content to fit the remaining budget.
 			msg = truncateMessageContent(msg, remaining)
 			if msg.Content != "" || len(msg.Attachments) > 0 {
-				retained = append([]Message{msg}, retained...)
+				retainedRecent = append([]Message{msg}, retainedRecent...)
 			}
 			remaining = 0
 		}
 	}
 
-	c.Messages = append([]Message{marker}, retained...)
+	// 3. Build the compaction summary as the final user message.
+	summaryMsg := Message{
+		ID:        NewID("msg"),
+		Role:      RoleUser,
+		Content:   CompactionSummaryPrefix + "\n" + c.Summary,
+		CreatedAt: time.Now().UTC(),
+		Status:    StatusDone,
+	}
+
+	c.Messages = append(append(retainedUserMsgs, retainedRecent...), summaryMsg)
 	c.Touch()
 }
 
