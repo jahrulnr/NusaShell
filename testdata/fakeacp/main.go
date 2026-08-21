@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -38,13 +39,14 @@ type rpcErr struct {
 }
 
 var (
-	mu       sync.Mutex
-	authed   bool
-	reAuthed bool
-	sessions = map[string]string{}
-	cancels  = map[string]chan struct{}{}
-	rpcWait  = map[any]chan request{}
-	permSeq  int
+	mu         sync.Mutex
+	authed     bool
+	reAuthed   bool
+	sessions   = map[string]string{}
+	cancels    = map[string]chan struct{}{}
+	rpcWait    = map[any]chan request{}
+	permSeq    int
+	sessionSeq atomic.Uint64
 )
 
 func main() {
@@ -106,7 +108,7 @@ func handle(req request) {
 			fail(req.ID, "authentication required")
 			return
 		}
-		id := fmt.Sprintf("sess_%d", time.Now().UnixNano())
+		id := fmt.Sprintf("sess_%d_%d", time.Now().UnixNano(), sessionSeq.Add(1))
 		mu.Lock()
 		sessions[id] = "plan"
 		cancels[id] = make(chan struct{}, 1)
