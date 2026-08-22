@@ -298,8 +298,7 @@ summary { outline: none; }
 
 /* View frame and headers */
 .content:has(.agent-view.active) { padding: 0; }
-.content:has(.mcp-view.active),
-.content:has(.settings-view.active) {
+.content:has(.mcp-view.active) {
   --workspace-gutter: clamp(12px, 2vw, 24px);
   padding: var(--workspace-gutter);
 }
