@@ -6,20 +6,20 @@ import { renderArtifactCard, parseArtifactOutput } from '../../artifact-render.j
 
 export const STARTER_PROMPTS = [
   {
-    label: 'Explore this repo',
-    prompt: 'Explore this repository and summarize the architecture, key packages, and how to run tests.',
+    label: 'Research a topic',
+    prompt: 'Help me research a topic. I\'ll ask the question, and you gather sources before answering.',
   },
   {
-    label: 'Find a bug',
-    prompt: 'Look at recent changes and failing tests. Find the most likely bug and propose a small fix.',
+    label: 'Write & edit',
+    prompt: 'Help me draft or improve some writing. I\'ll paste the text or describe what I need next.',
   },
   {
-    label: 'Write a failing test',
-    prompt: 'Add a failing test for the behavior I describe next, then wait before implementing.',
+    label: 'Tidy my files',
+    prompt: 'Look around my workspace and help me organize, summarize, or clean up the files there.',
   },
   {
-    label: 'Review the diff',
-    prompt: 'Review the current git diff. Call out bugs, missing tests, and wire-contract risks.',
+    label: 'Automate a task',
+    prompt: 'I\'ll describe a task I repeat often — help me script it or schedule it as an automation.',
   },
 ];
 

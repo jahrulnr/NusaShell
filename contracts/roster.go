@@ -366,7 +366,7 @@ type TodoUpdatedEvent struct {
 	ConversationID string         `json:"conversation_id"`
 	Items          []TodoItemDTO  `json:"items"`
 	Summary        TodoSummaryDTO `json:"summary"`
-	Goal           string         `json:"goal,omitempty"`
+	Brief          string         `json:"brief,omitempty"`
 }
 
 type TurnDoneEvent struct {
@@ -426,6 +426,8 @@ type CompactionFailedEvent struct {
 // (autolearn) starts, completes, or errors so the UI can toast the
 // user. The review is fire-and-forget; Status is "started", "done", or
 // "error". When Status is "error", Error carries the failure reason.
+// Cooldown skips are recorded in the learning trajectory rather than emitted
+// as lifecycle events, so the UI does not show a false start/done pair.
 type LearningReviewEvent struct {
 	ConversationID string `json:"conversation_id"`
 	Status         string `json:"status"`           // "started" | "done" | "error"
@@ -1023,7 +1025,7 @@ type TodosGetResult struct {
 	ConversationID string         `json:"conversation_id"`
 	Items          []TodoItemDTO  `json:"items"`
 	Summary        TodoSummaryDTO `json:"summary"`
-	Goal           string         `json:"goal,omitempty"`
+	Brief          string         `json:"brief,omitempty"`
 }
 
 type TodosDeleteRequest struct {
@@ -1258,6 +1260,7 @@ type ToolResultDTO struct {
 type LearningReviewTranscriptMessageDTO struct {
 	Role       string         `json:"role"` // user | assistant | tool
 	Content    string         `json:"content,omitempty"`
+	Reasoning  string         `json:"reasoning,omitempty"`
 	ToolCalls  []ToolCallDTO  `json:"tool_calls,omitempty"`
 	ToolResult *ToolResultDTO `json:"tool_result,omitempty"`
 }

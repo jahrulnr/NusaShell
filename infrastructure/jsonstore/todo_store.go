@@ -10,8 +10,9 @@ import (
 )
 
 // TodoStore is a durable, per-conversation todo checklist store backed by a
-// single JSON file (conversations/todos.json). It stores both the goal brief
-// and the item list per conversation. It is safe for concurrent use.
+// single JSON file (conversations/todos.json). It stores both the planning
+// brief and the item list per conversation. It is safe for concurrent use.
+// Legacy `goal` field in persisted JSON is transparently read into Brief.
 type TodoStore struct {
 	mu    sync.RWMutex
 	path  string
@@ -42,19 +43,19 @@ func (t *TodoStore) Get(conversationID string) []domain.TodoItem {
 	return out
 }
 
-// GetGoal returns the goal brief for the given conversation, or "" when none.
-func (t *TodoStore) GetGoal(conversationID string) string {
+// GetBrief returns the planning brief for the given conversation, or "" when none.
+func (t *TodoStore) GetBrief(conversationID string) string {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	entry, ok := t.store[conversationID]
 	if !ok {
 		return ""
 	}
-	return entry.Goal
+	return entry.Brief
 }
 
 // Set replaces the todo items for the given conversation, preserving the
-// existing goal, and persists to disk.
+// existing brief, and persists to disk.
 func (t *TodoStore) Set(conversationID string, items []domain.TodoItem) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -66,13 +67,13 @@ func (t *TodoStore) Set(conversationID string, items []domain.TodoItem) {
 	t.persistLocked()
 }
 
-// SetGoal sets the goal brief for the given conversation, preserving the
+// SetBrief sets the planning brief for the given conversation, preserving the
 // existing items, and persists to disk.
-func (t *TodoStore) SetGoal(conversationID string, goal string) {
+func (t *TodoStore) SetBrief(conversationID string, brief string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	entry := t.store[conversationID]
-	entry.Goal = goal
+	entry.Brief = brief
 	t.store[conversationID] = entry
 	t.persistLocked()
 }

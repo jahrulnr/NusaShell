@@ -53,6 +53,7 @@ type App struct {
 	CodexRuntime                CodexRuntime
 	CodexOAuth                  CodexOAuth
 	CodexUsage                  CodexUsage
+	CodexContextWindowCache     CodexContextWindowCache
 	CodexCLIAuth                CodexCLIAuthImporter
 	CodexRouter                 *CodexAccountRouter
 	AcpAgents                   AcpAgentStore

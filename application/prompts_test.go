@@ -65,3 +65,16 @@ func TestBuildSystemPromptWhitespaceUserPromptIgnored(t *testing.T) {
 		t.Error("whitespace-only user prompt should be ignored entirely")
 	}
 }
+
+func TestSystemPromptRoutesTemporaryTaskNotesToTodoBrief(t *testing.T) {
+	for _, want := range []string{
+		"Use `todo.brief` as the working note for the current task",
+		"Do not use memory as task scratch space",
+		"survives compaction",
+		"Do not copy a task note into memory merely because the task ended",
+	} {
+		if !strings.Contains(systemPrompt, want) {
+			t.Errorf("system prompt should contain %q", want)
+		}
+	}
+}

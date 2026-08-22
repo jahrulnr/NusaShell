@@ -153,3 +153,22 @@ func (c *CLIAuthImporterAdapter) ImportFromCodexCLI(ctx context.Context) (applic
 		ExpiresAt:    tok.ExpiresAt,
 	}, nil
 }
+
+// ContextWindowCacheAdapter implements application.CodexContextWindowCache
+// by reading the Codex CLI's local model cache (~/.codex/models_cache.json).
+// It returns the real context window the Codex app-server enforces, which
+// is often smaller than the stale value stored in providers.json.
+type ContextWindowCacheAdapter struct{}
+
+func NewContextWindowCacheAdapter() *ContextWindowCacheAdapter {
+	return &ContextWindowCacheAdapter{}
+}
+
+func (c *ContextWindowCacheAdapter) ContextWindow(modelID string) (int, bool) {
+	cache := loadCodexModelsCache()
+	if cache == nil {
+		return 0, false
+	}
+	cw, ok := cache[modelID]
+	return cw, ok
+}

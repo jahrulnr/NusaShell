@@ -3,8 +3,10 @@ package application
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"nusashell/domain"
 	"nusashell/resources"
@@ -163,6 +165,37 @@ func (s *stubPrimaryStoreReview) Update(entries []domain.PrimaryEntry) error {
 	return nil
 }
 func (s *stubPrimaryStoreReview) Replace(oldText, content string) error { return nil }
+
+func TestReviewLoopRecordsMemoryReplaceMutation(t *testing.T) {
+	if resources.ReviewPrompt() == "" {
+		t.Fatal("review prompt must be non-empty for the loop to run")
+	}
+	conv := &domain.Conversation{
+		ID: "conv_replace",
+		Messages: []domain.Message{
+			{Role: domain.RoleUser, Content: "the existing fact changed"},
+		},
+	}
+	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), DefaultReviewSettings())
+	adapter := &reviewStubAdapter{toolCalls: []domain.ToolCall{{
+		Name: "memory_replace",
+		Args: fmt.Sprintf("{%q:%q}", "content", "updated durable fact"),
+	}}}
+
+	mutations, _, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+	if err != nil {
+		t.Fatalf("runReviewLoop: %v", err)
+	}
+	if len(mutations) != 1 {
+		t.Fatalf("mutations = %+v, want exactly one mutation", mutations)
+	}
+	if mutations[0].Kind != "memory" || mutations[0].Tool != "memory_replace" {
+		t.Fatalf("mutation = %+v, want memory_replace memory mutation", mutations[0])
+	}
+	if mutations[0].Snippet != "updated durable fact" {
+		t.Fatalf("mutation snippet = %q, want replacement content", mutations[0].Snippet)
+	}
+}
 
 func TestReviewPromptInjectsPrimaryMemory(t *testing.T) {
 	prompt := resources.ReviewPrompt()
@@ -458,15 +491,76 @@ func TestReviewLoopEndsOnNothingToSave(t *testing.T) {
 	if len(mutations) != 0 {
 		t.Errorf("expected 0 mutations for chit-chat, got %d", len(mutations))
 	}
-	// The loop breaks before appending the "Nothing to save." response,
-	// so messages should contain only the initial transcript user message.
-	if len(messages) != 1 {
-		t.Errorf("expected 1 message (transcript only), got %d", len(messages))
+	// The loop now persists the terminal "Nothing to save." response as the
+	// review's conclusion, so the learning log UI can show what the agent
+	// decided even when it stored nothing (intentional behavior change;
+	// see TestReviewLoopPersistsReasoningAndFinalSummary).
+	if len(messages) != 2 {
+		t.Errorf("expected 2 messages (transcript + conclusion), got %d", len(messages))
 	}
 	// Verify the adapter was called exactly once (no tool rounds).
 	if adapter.calls != 1 {
 		t.Errorf("expected 1 LLM call, got %d", adapter.calls)
 	}
+}
+
+func TestReviewLoopEmptyResponseIsError(t *testing.T) {
+	if resources.ReviewPrompt() == "" {
+		t.Fatal("review prompt must be non-empty")
+	}
+	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), DefaultReviewSettings())
+	conv := &domain.Conversation{
+		ID:       "conv_empty",
+		Messages: []domain.Message{{Role: domain.RoleUser, Content: "remember this durable fact"}},
+	}
+	adapter := &persistStubAdapter{responses: []ChatResponse{{}}}
+
+	_, messages, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+	if err == nil || !strings.Contains(err.Error(), "empty response") {
+		t.Fatalf("err = %v, want empty response error", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("messages = %d, want only the replayed transcript", len(messages))
+	}
+}
+
+func TestReviewCooldownSuppressesDuplicateAndExpires(t *testing.T) {
+	settings := DefaultReviewSettings()
+	settings.ReviewCooldown = time.Hour
+	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), settings)
+	now := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
+	agent.now = func() time.Time { return now }
+
+	if !agent.tryAcquireReview("conv_1") {
+		t.Fatal("first review should acquire the conversation")
+	}
+	if agent.tryAcquireReview("conv_1") {
+		t.Fatal("concurrent duplicate should be suppressed while the first review is in flight")
+	}
+	agent.releaseReview("conv_1")
+	if agent.tryAcquireReview("conv_1") {
+		t.Fatal("duplicate review should be suppressed during cooldown")
+	}
+
+	now = now.Add(time.Hour)
+	if !agent.tryAcquireReview("conv_1") {
+		t.Fatal("review should be allowed after cooldown expires")
+	}
+	agent.releaseReview("conv_1")
+}
+
+func TestReviewCooldownAllowsDifferentConversations(t *testing.T) {
+	settings := DefaultReviewSettings()
+	settings.ReviewCooldown = time.Hour
+	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), settings)
+	if !agent.tryAcquireReview("conv_1") {
+		t.Fatal("first conversation should acquire")
+	}
+	if !agent.tryAcquireReview("conv_2") {
+		t.Fatal("different conversation should not be blocked")
+	}
+	agent.releaseReview("conv_1")
+	agent.releaseReview("conv_2")
 }
 
 func TestReviewLoopCompleteErrorIsReturned(t *testing.T) {

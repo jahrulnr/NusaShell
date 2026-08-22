@@ -148,7 +148,7 @@ function renderModelOptions(models) {
   const data = [
     { text: 'Automatic — choose in each conversation', value: '', placeholder: true },
     ...chatModels.map((m) => {
-      const label = m.display_name || m.id;
+      const label = m.id;
       const ctx = m.context ? ` ${Math.round(m.context / 1000)}K` : '';
       return {
         text: m.provider_name ? `${label}${ctx} · ${m.provider_name}` : `${label}${ctx}`,
@@ -181,7 +181,7 @@ function renderVisionModelOptions(models) {
   const data = [
     { text: 'Disabled — non-vision models get a text placeholder instead', value: '', placeholder: true },
     ...visionModels.map((m) => {
-      const label = m.display_name || m.id;
+      const label = m.id;
       const ctx = m.context ? ` ${Math.round(m.context / 1000)}K` : '';
       return {
         text: m.provider_name ? `${label}${ctx} · ${m.provider_name}` : `${label}${ctx}`,
@@ -201,7 +201,7 @@ function renderImageModelOptions(models) {
   const data = [
     { text: 'Disabled — generate_image is not available', value: '', placeholder: true },
     ...imageModels.map((m) => {
-      const label = m.display_name || m.id;
+      const label = m.id;
       return {
         text: m.provider_name ? `${label} · ${m.provider_name}` : label,
         value: `${m.provider_id}:${m.id}`,
@@ -226,7 +226,7 @@ function renderAudioModelOptions(models) {
   const data = [
     { text: 'Disabled — non-audio models get a text placeholder instead', value: '', placeholder: true },
     ...audioModels.map((m) => {
-      const label = m.display_name || m.id;
+      const label = m.id;
       const ctx = m.context ? ` ${Math.round(m.context / 1000)}K` : '';
       return {
         text: m.provider_name ? `${label}${ctx} · ${m.provider_name}` : `${label}${ctx}`,
@@ -246,7 +246,7 @@ function renderVideoModelOptions(models) {
   const data = [
     { text: 'Disabled — non-video models get a text placeholder instead', value: '', placeholder: true },
     ...videoModels.map((m) => {
-      const label = m.display_name || m.id;
+      const label = m.id;
       const ctx = m.context ? ` ${Math.round(m.context / 1000)}K` : '';
       return {
         text: m.provider_name ? `${label}${ctx} · ${m.provider_name}` : `${label}${ctx}`,
@@ -266,7 +266,7 @@ function renderCompactionModelOptions(models) {
   const data = [
     { text: 'Default — use the conversation\'s active model', value: '', placeholder: true },
     ...chatModels.map((m) => {
-      const label = m.display_name || m.id;
+      const label = m.id;
       const ctx = m.context ? ` ${Math.round(m.context / 1000)}K` : '';
       return {
         text: m.provider_name ? `${label}${ctx} · ${m.provider_name}` : `${label}${ctx}`,
@@ -283,7 +283,7 @@ function renderReviewModelOptions(models) {
   const data = [
     { text: 'Default — use the conversation\'s active model', value: '', placeholder: true },
     ...chatModels.map((m) => {
-      const label = m.display_name || m.id;
+      const label = m.id;
       const ctx = m.context ? ` ${Math.round(m.context / 1000)}K` : '';
       return {
         text: m.provider_name ? `${label}${ctx} · ${m.provider_name}` : `${label}${ctx}`,

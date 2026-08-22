@@ -265,7 +265,7 @@ async function createConversation(title = '') {
     state.steerId = null;
     state.steerDraft = '';
     state.attachments = [];
-    state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 }, goal: '' };
+    state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 }, brief: '' };
     state.todoRenderToken++;
     await refreshConversations();
     renderEmptyThread();
@@ -326,7 +326,7 @@ function renderConversationList() {
           state.steerId = null;
           state.steerDraft = '';
           state.contextEstimate = 0;
-          state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 }, goal: '' };
+          state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 }, brief: '' };
           state.todoRenderToken++;
           clearSteerQueue();
           renderEmptyThread();
@@ -692,7 +692,7 @@ function renderAttachments() {
 // while the fetch is in-flight, the stale response is discarded.
 async function fetchTodos() {
   if (!state.activeId) {
-    state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 }, goal: '' };
+    state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 }, brief: '' };
     renderTodoStrip();
     return;
   }
@@ -700,13 +700,13 @@ async function fetchTodos() {
   try {
     const result = await rpc('agent.todos.get', { conversation_id: state.activeId });
     if (token !== state.todoRenderToken) return; // stale — a newer fetch or room switch won
-    state.todos = { items: result.items ?? [], summary: result.summary ?? { total: 0, pending: 0, in_progress: 0, completed: 0 }, goal: result.goal ?? '' };
+    state.todos = { items: result.items ?? [], summary: result.summary ?? { total: 0, pending: 0, in_progress: 0, completed: 0 }, brief: result.brief ?? '' };
     renderTodoStrip();
   } catch (err) {
     if (token !== state.todoRenderToken) return;
     // Fail-soft: hide the strip rather than crash. The backend may not support
     // todos yet (older version), or the conversation may have been deleted.
-    state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 }, goal: '' };
+    state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 }, brief: '' };
     renderTodoStrip();
   }
 }
@@ -716,7 +716,7 @@ async function fetchTodos() {
 // The toggle flips aria-expanded and shows/hides the list element.
 function bindStripToggles() {
   const pairs = [
-    { toggleId: 'agent-todo-strip-toggle', listId: 'agent-todo-strip-list', extraIds: ['agent-todo-strip-goal'] },
+    { toggleId: 'agent-todo-strip-toggle', listId: 'agent-todo-strip-list', extraIds: ['agent-todo-strip-brief'] },
     { toggleId: 'tool-job-strip-toggle', listId: 'tool-job-list' },
     { toggleId: 'agent-steer-queue-toggle', listId: 'agent-steer-queue-list' },
   ];
@@ -740,17 +740,17 @@ function bindStripToggles() {
 
 // renderTodoStrip renders the todo checklist strip from state.todos. It is
 // idempotent — safe to call multiple times. The strip is hidden when there
-// are no items and no goal. Each item gets a status glyph and a delete
+// are no items and no brief. Each item gets a status glyph and a delete
 // button. Delete buttons are created fresh on each render, so no stale
 // listeners. Default state: collapsed (list hidden), expanded only on user
-// click. The goal brief (if set) is shown as a muted line above the item
+// click. The planning brief (if set) is shown as a muted line above the item
 // list.
 function renderTodoStrip() {
   const strip = document.getElementById('agent-todo-strip');
   if (!strip) return;
-  const { items, goal } = state.todos;
+  const { items, brief } = state.todos;
   const hasItems = items && items.length > 0;
-  const hasGoal = goal && goal.trim();
+  const hasGoal = brief && brief.trim();
   if (!hasItems && !hasGoal) {
     strip.hidden = true;
     return;
@@ -765,19 +765,19 @@ function renderTodoStrip() {
     metaEl.textContent = incomplete === 0 ? 'All done' : `${incomplete} open`;
     metaEl.dataset.done = incomplete === 0 ? 'true' : 'false';
   }
-  // Goal brief: shown as a muted line above the item list. Respects the
+  // Brief: shown as a muted line above the item list. Respects the
   // toggle state so a collapsed strip stays collapsed on re-render.
-  const goalEl = document.getElementById('agent-todo-strip-goal');
+  const briefEl = document.getElementById('agent-todo-strip-brief');
   const toggleEl = document.getElementById('agent-todo-strip-toggle');
   const stripOpen = toggleEl?.getAttribute('aria-expanded') === 'true';
-  if (goalEl) {
+  if (briefEl) {
     if (hasGoal) {
-      goalEl.textContent = goal.trim();
-      goalEl.title = 'User goal — survives compaction so the agent does not drift';
-      goalEl.hidden = !stripOpen;
+      briefEl.textContent = brief.trim();
+      briefEl.title = 'User brief — survives compaction so the agent does not drift';
+      briefEl.hidden = !stripOpen;
     } else {
-      goalEl.hidden = true;
-      goalEl.textContent = '';
+      briefEl.hidden = true;
+      briefEl.textContent = '';
     }
   }
   const list = document.getElementById('agent-todo-strip-list');
@@ -798,7 +798,7 @@ async function handleTodoDelete(itemId, btn) {
   btn.disabled = true;
   try {
     const result = await rpc('agent.todos.delete', { conversation_id: state.activeId, ids: [itemId] });
-    state.todos = { items: result.items ?? [], summary: result.summary ?? { total: 0, pending: 0, in_progress: 0, completed: 0 }, goal: result.goal ?? state.todos.goal ?? '' };
+    state.todos = { items: result.items ?? [], summary: result.summary ?? { total: 0, pending: 0, in_progress: 0, completed: 0 }, brief: result.brief ?? state.todos.brief ?? '' };
     renderTodoStrip();
   } catch (err) {
     btn.disabled = false;
@@ -1766,7 +1766,7 @@ function bindEvents() {
     }
   });
   on('agent.todo.updated', (payload) => {
-    const { conversation_id, items, summary, goal } = payload;
+    const { conversation_id, items, summary, brief } = payload;
     // Keep the per-room status fresh (used by the sidebar live dot) even for
     // non-active rooms; only the DOM strip touches the active room.
     if (conversation_id !== state.activeId) {
@@ -1775,7 +1775,7 @@ function bindEvents() {
       refreshLiveDots();
       return;
     }
-    state.todos = { items: items ?? [], summary: summary ?? { total: 0, pending: 0, in_progress: 0, completed: 0 }, goal: goal ?? state.todos.goal ?? '' };
+    state.todos = { items: items ?? [], summary: summary ?? { total: 0, pending: 0, in_progress: 0, completed: 0 }, brief: brief ?? state.todos.brief ?? '' };
     renderTodoStrip();
   });
 }

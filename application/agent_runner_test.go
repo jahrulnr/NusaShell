@@ -157,7 +157,7 @@ func TestCompactionTodoContext(t *testing.T) {
 				{ID: "3", Content: "Done item", Status: domain.TodoCompleted},
 			},
 		},
-		goals: map[string]string{"conv_1": "Build a CLI tool that converts Markdown"},
+		briefs: map[string]string{"conv_1": "Build a CLI tool that converts Markdown"},
 	}
 	ctx := (&App{Todos: port}).compactionTodoContext("conv_1")
 	for _, want := range []string{"Build a CLI tool that converts Markdown", "[in_progress] Finish auth", "[pending] Write tests"} {
@@ -175,8 +175,8 @@ func TestCompactionTodoContext(t *testing.T) {
 	}
 	// Goal present but no open items.
 	doneOnly := &fakeTodoPort{
-		items: map[string][]domain.TodoItem{"c": {{ID: "1", Content: "done", Status: domain.TodoCompleted}}},
-		goals: map[string]string{"c": "goal text"},
+		items:  map[string][]domain.TodoItem{"c": {{ID: "1", Content: "done", Status: domain.TodoCompleted}}},
+		briefs: map[string]string{"c": "goal text"},
 	}
 	if got := (&App{Todos: doneOnly}).compactionTodoContext("c"); got != "User goal: goal text" {
 		t.Errorf("goal-only context: got %q, want %q", got, "User goal: goal text")
@@ -277,13 +277,14 @@ func TestResolveContextWindowModelWinsOverGlobalCap(t *testing.T) {
 	settings := domain.Settings{MaxInputTokens: 200_000}
 	// Catalog model window wins over the global cap — the cap is only a
 	// fallback for models not in the catalog (avoids "1M model, why 200k?").
-	if got := resolveContextWindow(provider, "long-model", settings); got != 1_000_000 {
+	app := &App{}
+	if got := app.resolveContextWindow(provider, "long-model", settings); got != 1_000_000 {
 		t.Fatalf("long model context = %d, want model window 1000000", got)
 	}
-	if got := resolveContextWindow(provider, "small-model", settings); got != 128_000 {
+	if got := app.resolveContextWindow(provider, "small-model", settings); got != 128_000 {
 		t.Fatalf("small model context = %d, want model window 128000", got)
 	}
-	if got := resolveContextWindow(provider, "unknown", settings); got != 200_000 {
+	if got := app.resolveContextWindow(provider, "unknown", settings); got != 200_000 {
 		t.Fatalf("unknown model context = %d, want fallback 200000", got)
 	}
 	if got := effectiveContextWindow(1_000_000, 0); got != 1_000_000 {
@@ -291,6 +292,75 @@ func TestResolveContextWindowModelWinsOverGlobalCap(t *testing.T) {
 	}
 	if got := effectiveContextWindow(1_000_000, 200_000); got != 1_000_000 {
 		t.Fatalf("catalog model should ignore global cap, got %d", got)
+	}
+}
+
+// stubCodexContextCache is a test double for CodexContextWindowCache.
+type stubCodexContextCache map[string]int
+
+func (s stubCodexContextCache) ContextWindow(modelID string) (int, bool) {
+	cw, ok := s[modelID]
+	return cw, ok
+}
+
+func TestResolveContextWindowClampsCodexToRuntimeCache(t *testing.T) {
+	// providers.json stores 1.05M for Luna (stale catalog fallback), but
+	// Codex runtime cache says 272K. Compaction must use the smaller
+	// runtime value, not the stale stored value.
+	provider := &domain.Provider{
+		Kind: domain.ProviderCodex,
+		Models: []domain.Model{
+			{ID: "gpt-5.6-luna", Context: 1_050_000},
+		},
+	}
+	settings := domain.Settings{MaxInputTokens: 200_000}
+	cache := stubCodexContextCache{"gpt-5.6-luna": 272_000}
+	app := &App{CodexContextWindowCache: cache}
+	if got := app.resolveContextWindow(provider, "gpt-5.6-luna", settings); got != 272_000 {
+		t.Fatalf("codex context = %d, want 272000 (clamped to runtime cache)", got)
+	}
+}
+
+func TestResolveContextWindowNoClampForNonCodex(t *testing.T) {
+	provider := &domain.Provider{
+		Kind: domain.ProviderChat,
+		Models: []domain.Model{
+			{ID: "gpt-5.6-luna", Context: 1_050_000},
+		},
+	}
+	settings := domain.Settings{MaxInputTokens: 200_000}
+	cache := stubCodexContextCache{"gpt-5.6-luna": 272_000}
+	app := &App{CodexContextWindowCache: cache}
+	if got := app.resolveContextWindow(provider, "gpt-5.6-luna", settings); got != 1_050_000 {
+		t.Fatalf("non-codex context = %d, want 1050000 (no clamp)", got)
+	}
+}
+
+func TestResolveContextWindowNoClampWhenCacheMissing(t *testing.T) {
+	provider := &domain.Provider{
+		Kind: domain.ProviderCodex,
+		Models: []domain.Model{
+			{ID: "gpt-5.6-luna", Context: 1_050_000},
+		},
+	}
+	settings := domain.Settings{MaxInputTokens: 200_000}
+	app := &App{CodexContextWindowCache: stubCodexContextCache{}}
+	if got := app.resolveContextWindow(provider, "gpt-5.6-luna", settings); got != 1_050_000 {
+		t.Fatalf("codex context without cache hit = %d, want 1050000 (no clamp)", got)
+	}
+}
+
+func TestResolveContextWindowNoClampWhenCacheNil(t *testing.T) {
+	provider := &domain.Provider{
+		Kind: domain.ProviderCodex,
+		Models: []domain.Model{
+			{ID: "gpt-5.6-luna", Context: 1_050_000},
+		},
+	}
+	settings := domain.Settings{MaxInputTokens: 200_000}
+	app := &App{}
+	if got := app.resolveContextWindow(provider, "gpt-5.6-luna", settings); got != 1_050_000 {
+		t.Fatalf("codex context with nil cache = %d, want 1050000 (no clamp)", got)
 	}
 }
 

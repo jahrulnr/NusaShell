@@ -29,24 +29,6 @@
 }
 .brand-logo img { display: block; width: 24px; height: 24px; }
 
-.brand-islands {
-  display: inline-flex;
-  align-items: flex-end;
-  gap: 3px;
-  margin-left: 2px;
-  height: 10px;
-}
-.brand-islands i {
-  display: block;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 6px var(--accent-glow);
-}
-.brand-islands i:nth-child(2) { width: 5px; height: 5px; }
-.brand-islands i:nth-child(3) { width: 3px; height: 3px; opacity: .55; }
-
 .titlebar-actions {
   display: flex;
   align-items: center;

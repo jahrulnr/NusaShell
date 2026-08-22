@@ -178,3 +178,63 @@ func TestModelSupportsVision(t *testing.T) {
 		t.Error("nil provider should default to vision=true")
 	}
 }
+
+func TestChatMessagesVisionModelGetsImagePathNote(t *testing.T) {
+	c := &domain.Conversation{Messages: []domain.Message{
+		{
+			ID:      "u1",
+			Role:    domain.RoleUser,
+			Content: "Edit this image",
+			Attachments: []domain.Attachment{
+				{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,iVBORw0KGgo=", FilePath: "/data/attachments/c1/cat.png"},
+			},
+		},
+		{ID: "a1", Role: domain.RoleAssistant, Content: "ok", Status: domain.StatusDone},
+	}}
+
+	got := chatMessages(c, "", ModelCapabilities{Vision: true})
+	userMsg := got[0]
+
+	// The image pixels must be kept visible for a vision model.
+	hasImage := false
+	for _, a := range userMsg.Attachments {
+		if a.Type == "image" {
+			hasImage = true
+		}
+	}
+	if !hasImage {
+		t.Error("image attachment should be kept for vision model")
+	}
+	// The absolute file path is surfaced so the model can reference it for i2i.
+	if !strings.Contains(userMsg.Content, "/data/attachments/c1/cat.png") {
+		t.Errorf("vision content should include the image file path, got %q", userMsg.Content)
+	}
+	if !strings.Contains(userMsg.Content, "referenced_image_paths") {
+		t.Errorf("vision content should mention referenced_image_paths, got %q", userMsg.Content)
+	}
+	// It must NOT be the non-vision omission placeholder.
+	if containsImageOmissionNote(userMsg.Content) {
+		t.Error("vision content must not contain the omission placeholder")
+	}
+}
+
+func TestChatMessagesVisionModelNoNoteWithoutPath(t *testing.T) {
+	// Legacy attachment with no FilePath: image kept, no note appended.
+	c := &domain.Conversation{Messages: []domain.Message{
+		{
+			ID:      "u1",
+			Role:    domain.RoleUser,
+			Content: "What's in this image?",
+			Attachments: []domain.Attachment{
+				{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,iVBORw0KGgo="},
+			},
+		},
+		{ID: "a1", Role: domain.RoleAssistant, Content: "a cat", Status: domain.StatusDone},
+	}}
+
+	got := chatMessages(c, "", ModelCapabilities{Vision: true})
+	userMsg := got[0]
+	if userMsg.Content != "What's in this image?" {
+		t.Errorf("content should be unchanged when image has no file path, got %q", userMsg.Content)
+	}
+}

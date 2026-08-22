@@ -14,7 +14,9 @@ capability flag from the model catalog (models.dev / OpenRouter).
   Example: `[image content omitted — this model does not support image
   input. Image file(s): /home/user/.config/nusashell/attachments/conv_1/cat.png.
   Call the read_image tool with file_path set to one of the absolute paths
-  above to load the image into your context.]`. This prevents provider
+  above to load the image into your context. To edit it or use it as a
+  reference, pass its absolute path in referenced_image_paths when calling
+  generate_image.]`. This prevents provider
   errors when switching from a vision model to a text-only model
   mid-conversation and gives the model an actionable way to access the
   image. Only absolute paths are accepted — relative paths are rejected to

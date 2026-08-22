@@ -32,6 +32,29 @@ func newTestStore(t *testing.T) *Store {
 	return s
 }
 
+func TestStore_SaveNewSkillDerivesIDFromName(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	skill := &domain.Skill{
+		Name:        "new-skill",
+		Description: "created by the review agent",
+		Content:     "# New skill\n",
+		State:       domain.SkillStateActive,
+		Origin:      domain.SkillOriginAgent,
+	}
+	if err := s.Save(skill); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if skill.ID != "new-skill" {
+		t.Fatalf("derived ID = %q, want new-skill", skill.ID)
+	}
+	if _, err := os.Stat(filepath.Join(s.root, "new-skill", "SKILL.md")); err != nil {
+		t.Fatalf("new skill folder was not created: %v", err)
+	}
+}
+
 func TestStore_WriteFile_supportFile(t *testing.T) {
 	s := newTestStore(t)
 	err := s.WriteFile("test-skill", "", "references/errors.md", "# Error recipes\n")

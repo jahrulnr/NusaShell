@@ -118,7 +118,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "memory_search", Description: "Search memory fragments by content (BM25) with optional metadata filters (category, project, task, tags). Returns ranked results with scores.", InputSchema: obj("object", props("query", str("Search query"), "category", strEnum("Optional category filter", "project", "user", "task", "general"), "project", str("Optional project filter"), "task", str("Optional task filter"), "tags", arr("Optional tags filter (ALL must match)"), "limit", intSchema("Max results, default 20")), "query")},
 		{Name: "memory_list", Description: "List memory entries. Target \"primary\" lists the always-injected working set; target \"fragments\" lists the searchable archive (with optional metadata filters).", InputSchema: obj("object", props("target", strEnum("List target: \"primary\" or \"fragments\" (default)", "primary", "fragments"), "category", strEnum("Optional fragment category filter", "project", "user", "task", "general"), "project", str("Optional fragment project filter"), "limit", intSchema("Max fragment results, default 50")))},
 		{Name: "memory_delete", Description: "Delete a memory fragment by id.", InputSchema: obj("object", props("id", str("Fragment id")), "id")},
-		{Name: "todo", Description: "Replace the conversation task checklist (full replace, Claude TodoWrite style). Empty items clears the list. The user can delete items from the UI — treat deleted items as gone and do not re-add them. The optional `goal` argument sets a structured brief that survives compaction. Format: three short lines — Want: (what the user asked for, in their words), Plan: (key steps/approach), Done: (acceptance criteria — what the finished result looks like). Set once at the start of a task; do not repeat on every call. The current hydration checkpoint is reused until compaction; the goal remains in tool history and is included in the fresh post-compaction checkpoint.", InputSchema: obj("object", props("items", arrObj("Full replacement list of todo items (max 50)", props("id", str("Stable item id (unique within the list)"), "content", str("Short task description (max 500 chars)"), "status", strEnum("Item status; prefer exactly one in_progress at a time", "pending", "in_progress", "completed")), "id", "content", "status"), "goal", str("Structured brief: 'Want: <user intent in their words>\\nPlan: <key steps/approach>\\nDone: <acceptance criteria — what the finished result looks like>'. Set once at task start; survives compaction. Max ~10000 tokens.")), "items")},
+		{Name: "todo", Description: "Replace the conversation task checklist (full replace, Claude TodoWrite style). Empty items clears the list. The user can delete items from the UI — treat deleted items as gone and do not re-add them. The optional `brief` argument is a living planning document that survives compaction and is re-injected via hydration. Format: markdown with required sections — `## Objective` (what the user asked for, in their words), `## Done when` (acceptance criteria — what the finished result looks like) — and optional sections that grow as the task progresses: `## Findings` (what you discovered during exploration: paths, line numbers, relevant files), `## Approach` (key steps/strategy). Set the brief at the start of a task; update it as findings emerge and the approach solidifies (e.g. after exploration, add concrete paths/lines to Findings; before execution, refine Approach). The current hydration checkpoint is reused until compaction; the brief remains in tool history and is included in the fresh post-compaction checkpoint. Legacy `goal` arg is accepted for backward compat and mapped to `brief`.", InputSchema: obj("object", props("items", arrObj("Full replacement list of todo items (max 50)", props("id", str("Stable item id (unique within the list)"), "content", str("Short task description (max 500 chars)"), "status", strEnum("Item status; prefer exactly one in_progress at a time", "pending", "in_progress", "completed")), "id", "content", "status"), "brief", str("Living planning document. Required markdown sections: `## Objective` (user intent in their words), `## Done when` (acceptance criteria). Optional, grows over time: `## Findings` (paths, line numbers, relevant files discovered), `## Approach` (key steps/strategy). Set at task start; update as findings emerge. Survives compaction. Max ~10000 tokens.")), "items")},
 		{Name: "ask_question", Description: "Pause and ask the user a structured clarifying question before continuing. Use only for genuine decisions the user must make — not for things you can figure out yourself. The user can answer via options or free text (when allowed). The turn blocks until the user answers or cancels.", InputSchema: obj("object", props("question", str("The question to show the user"), "options", arrObj("Selectable choices (1-8). Mark one default when possible.", props("id", str("Stable option id"), "label", str("Short option label"), "description", str("Optional one-line explanation"), "default", obj("boolean", nil), "icon", str("Optional emoji or short icon glyph"), "image", str("Optional image URL or compact data URI")), "id", "label"), "allow_free_text", obj("boolean", nil), "multi_select", obj("boolean", nil)), "question", "options")},
 		{Name: "docs_search", Description: "Search the NusaShell documentation corpus.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 10")), "query")},
 		{Name: "docs_read", Description: "Read a documentation page by id (see docs_search results).", InputSchema: obj("object", props("id", str("Documentation page id")), "id")},
@@ -146,7 +146,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "tool_list", Description: "List tools from a running MCP server. Accepts the plugin id (e.g. \"nusashell.terminal\"). When omitted, lists tools across all running MCP servers. Returns full tool defs (ref, name, server, description, parameters) — pass the ref to mcp_call to execute.", InputSchema: obj("object", props("server", str("Plugin id; when omitted, lists all running servers")))},
 		{Name: "tool_schema", Description: "Load one MCP tool's input schema by plugin id and tool name. The tool name is the bare tool name (e.g. \"exec\"). Returns the schema as readable JSON so you know exact field names and types before calling the tool.", InputSchema: obj("object", props("server", str("Plugin id (e.g. nusashell.terminal)"), "tool", str("Bare tool name within the server (e.g. \"exec\")")), "server", "tool")},
 		{Name: "mcp_search", Description: "Search running MCP servers' tools by name or description (case-insensitive token match — any term matches). When server is omitted, searches across ALL running MCP servers. Returns matching tools with a `ref` you pass to `mcp_call` plus the full input schema (parameters) so you know exactly how to call the tool. This is the universal MCP discovery path that works on every provider — always use mcp_search + mcp_call instead of guessing tool names.", InputSchema: obj("object", props("server", str("Optional: plugin id; when omitted, searches all running servers"), "query", str("Search query"), "limit", intSchema("Max results, default 20")), "query")},
-		{Name: "mcp_call", Description: "Execute an MCP tool by ref. Get the ref from mcp_search or tool_list (format <plugin-id>:<tool> e.g. nusashell.files:read). Pass `arguments_json` as a JSON-encoded string of the arguments matching the tool's parameters schema — the exact object that the tool expects as its input, e.g. {\"path\":\"/etc/hosts\"}. The ref binds to a specific running MCP server + tool; if the server has been disabled or restarted since discovery, you get a STALE_TOOL_REF error and must search again. This is the only MCP execution path — mcp__<server>__<tool> names are not callable.", InputSchema: obj("object", props("ref", str("Tool ref from mcp_search / tool_list results (e.g. nusashell.files:read)"), "arguments_json", str("JSON-encoded tool arguments matching the parameters schema (e.g. {\"path\":\"/etc/hosts\"})")), "ref", "arguments_json")},
+		{Name: "mcp_call", Description: "Execute an MCP tool by ref. Get the ref from mcp_search or tool_list (format <plugin-id>:<tool> e.g. nusashell.files:read). Pass `arguments_json` as a JSON-encoded string of the arguments matching the tool's parameters schema — the exact object that the tool expects as its input, e.g. {\"path\":\"/etc/hosts\"}. Omit `arguments_json` entirely for parameterless tools (defaults to {}). The ref binds to a specific running MCP server + tool; if the server has been disabled or restarted since discovery, you get a STALE_TOOL_REF error and must search again. This is the only MCP execution path — mcp__<server>__<tool> names are not callable.", InputSchema: obj("object", props("ref", str("Tool ref from mcp_search / tool_list results (e.g. nusashell.files:read)"), "arguments_json", str("JSON-encoded tool arguments matching the parameters schema (e.g. {\"path\":\"/etc/hosts\"}). Optional; defaults to {} — omit entirely for parameterless tools.")), "ref")},
 		{Name: "mcp_register", Description: "Copy a new MCP plugin from an absolute staging folder into the installed plugin store, or replace an existing plugin with the same id. The source must contain manifest.json and must stay outside the installed plugins root. Check mcp_list and ask the user before replacing an existing id; then call mcp_enable.", InputSchema: obj("object", props("source", str("Absolute staging path to the plugin folder containing manifest.json")), "source")},
 		{Name: "mcp_enable", Description: "Start/connect an MCP plugin so its tools become available. Returns only status + tool count — use tool_list or mcp_search to discover the tools. If already connected, returns already_enabled without reconnecting. The plugin must be registered first (mcp_register or the Plugins view).", InputSchema: obj("object", props("id", str("Plugin id (e.g. nusashell.files)")), "id")},
 		{Name: "mcp_disable", Description: "Stop/disconnect an MCP plugin. The definition stays installed; only the MCP subprocess is stopped. Tools from this server are no longer listed.", InputSchema: obj("object", props("id", str("Plugin id")), "id")},
@@ -400,7 +400,6 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			s = existing
 		} else {
 			s = &domain.Skill{
-				ID:     domain.NewULID("skill"),
 				State:  domain.SkillStateActive,
 				Origin: domain.SkillOriginAgent,
 			}
@@ -959,8 +958,8 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 
 	case name == "mcp_call":
 		var args struct {
-			Ref           string `json:"ref"`
-			ArgumentsJSON string `json:"arguments_json"`
+			Ref           string          `json:"ref"`
+			ArgumentsJSON json.RawMessage `json:"arguments_json"`
 		}
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return "", fmt.Errorf("invalid args: %w", err)
@@ -968,12 +967,26 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if strings.TrimSpace(args.Ref) == "" {
 			return "", fmt.Errorf("ref is required (use mcp_search to find tools and their refs)")
 		}
-		if strings.TrimSpace(args.ArgumentsJSON) == "" {
-			return "", fmt.Errorf("arguments_json is required (JSON-encoded tool arguments from the mcp_search parameters schema)")
-		}
+		// Tolerant parsing: accept arguments_json as a JSON string (legacy)
+		// or as a JSON object directly (canonical form matching MCP spec).
+		// Omitting arguments_json entirely defaults to {}.
 		var toolArgs map[string]any
-		if err := json.Unmarshal([]byte(args.ArgumentsJSON), &toolArgs); err != nil {
-			return "", fmt.Errorf("arguments_json must be a JSON object (e.g. {\"path\":\"/etc/hosts\"}): %v", err)
+		if len(args.ArgumentsJSON) == 0 || string(args.ArgumentsJSON) == "null" {
+			toolArgs = map[string]any{}
+		} else if len(args.ArgumentsJSON) > 0 && args.ArgumentsJSON[0] == '"' {
+			// Legacy form: arguments_json is a JSON string containing escaped JSON.
+			var encoded string
+			if err := json.Unmarshal(args.ArgumentsJSON, &encoded); err != nil {
+				return "", fmt.Errorf("arguments_json must be a JSON object or a JSON string encoding a JSON object: %v", err)
+			}
+			if err := json.Unmarshal([]byte(encoded), &toolArgs); err != nil {
+				return "", fmt.Errorf("arguments_json must be a JSON object (e.g. {\"path\":\"/etc/hosts\"}): %v", err)
+			}
+		} else {
+			// Canonical form: arguments_json is already a JSON object.
+			if err := json.Unmarshal(args.ArgumentsJSON, &toolArgs); err != nil {
+				return "", fmt.Errorf("arguments_json must be a JSON object (e.g. {\"path\":\"/etc/hosts\"}): %v", err)
+			}
 		}
 		idx := strings.LastIndex(args.Ref, ":")
 		if idx <= 0 || idx == len(args.Ref)-1 {
@@ -1324,14 +1337,16 @@ func rankMCPItems(items []any, query string) []any {
 }
 
 // execTodo replaces the conversation todo checklist (full-replace, Claude
-// TodoWrite style). Empty items clears the list. The optional `goal` argument
-// stays visible in tool history while the hydration checkpoint is reused, then
-// is included in the fresh checkpoint after compaction. Requires a conversation
-// id in the context (set via WithConversationID by the turn runner).
+// TodoWrite style). Empty items clears the list. The optional `brief` argument
+// is a living planning document that stays visible in tool history while the
+// hydration checkpoint is reused, then is included in the fresh checkpoint
+// after compaction. Requires a conversation id in the context (set via
+// WithConversationID by the turn runner). Legacy `goal` arg is accepted for
+// backward compat and mapped to `brief`.
 const (
 	todoMaxItems        = 50
 	todoMaxContentChars = 500
-	todoMaxGoalChars    = 40000 // ~10k tokens (4 chars/token average)
+	todoMaxBriefChars   = 40000 // ~10k tokens (4 chars/token average)
 )
 
 func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error) {
@@ -1348,7 +1363,8 @@ func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error)
 			Content string `json:"content"`
 			Status  string `json:"status"`
 		} `json:"items"`
-		Goal string `json:"goal"`
+		Brief string `json:"brief"`
+		Goal  string `json:"goal"` // legacy, mapped to brief
 	}
 	if err := json.Unmarshal(argsJSON, &args); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
@@ -1356,9 +1372,16 @@ func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error)
 	if len(args.Items) > todoMaxItems {
 		return "", fmt.Errorf("items must have at most %d entries", todoMaxItems)
 	}
-	goal := strings.TrimSpace(args.Goal)
-	if len(goal) > todoMaxGoalChars {
-		return "", fmt.Errorf("goal exceeds %d chars (~10k tokens)", todoMaxGoalChars)
+	brief := strings.TrimSpace(args.Brief)
+	if brief == "" && args.Goal != "" {
+		// Backward compat: legacy `goal` arg maps to `brief`.
+		brief = strings.TrimSpace(args.Goal)
+	}
+	if len(brief) > todoMaxBriefChars {
+		return "", fmt.Errorf("brief exceeds %d chars (~10k tokens)", todoMaxBriefChars)
+	}
+	if err := domain.ValidateBrief(brief); err != nil {
+		return "", err
 	}
 	items := make([]domain.TodoItem, 0, len(args.Items))
 	seenIDs := make(map[string]bool, len(args.Items))
@@ -1385,11 +1408,11 @@ func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error)
 		items = append(items, domain.TodoItem{ID: id, Content: content, Status: status})
 	}
 	t.Todos.Set(conversationID, items)
-	if goal != "" {
-		t.Todos.SetGoal(conversationID, goal)
+	if brief != "" {
+		t.Todos.SetBrief(conversationID, brief)
 	}
 	current := t.Todos.Get(conversationID)
-	currentGoal := t.Todos.GetGoal(conversationID)
+	currentBrief := t.Todos.GetBrief(conversationID)
 	summary := domain.SummarizeTodos(current)
 	meta := map[string]any{
 		"ok":           true,
@@ -1407,8 +1430,8 @@ func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error)
 			"status":  string(item.Status),
 		})
 	}
-	if currentGoal != "" {
-		meta["goal"] = currentGoal
+	if currentBrief != "" {
+		meta["brief"] = currentBrief
 	}
 	return yamlJSONL(meta, outItems), nil
 }

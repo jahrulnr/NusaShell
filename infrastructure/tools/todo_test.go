@@ -12,18 +12,18 @@ import (
 
 // stubTodoPort is a minimal in-memory ConversationTodoPort for tool tests.
 type stubTodoPort struct {
-	items map[string][]domain.TodoItem
-	goals map[string]string
+	items  map[string][]domain.TodoItem
+	briefs map[string]string
 }
 
 func (s *stubTodoPort) Get(convID string) []domain.TodoItem {
 	return s.items[convID]
 }
-func (s *stubTodoPort) GetGoal(convID string) string {
-	if s.goals == nil {
+func (s *stubTodoPort) GetBrief(convID string) string {
+	if s.briefs == nil {
 		return ""
 	}
-	return s.goals[convID]
+	return s.briefs[convID]
 }
 func (s *stubTodoPort) Set(convID string, items []domain.TodoItem) {
 	if s.items == nil {
@@ -31,28 +31,29 @@ func (s *stubTodoPort) Set(convID string, items []domain.TodoItem) {
 	}
 	s.items[convID] = items
 }
-func (s *stubTodoPort) SetGoal(convID string, goal string) {
-	if s.goals == nil {
-		s.goals = map[string]string{}
+func (s *stubTodoPort) SetBrief(convID string, brief string) {
+	if s.briefs == nil {
+		s.briefs = map[string]string{}
 	}
-	s.goals[convID] = goal
+	s.briefs[convID] = brief
 }
 func (s *stubTodoPort) Clear(convID string) {
 	delete(s.items, convID)
-	delete(s.goals, convID)
+	delete(s.briefs, convID)
 }
 
-func TestExecTodoWithGoal(t *testing.T) {
+func TestExecTodoWithBrief(t *testing.T) {
 	todoPort := &stubTodoPort{}
 	toolbox := &Toolbox{Todos: todoPort}
 	ctx := application.WithConversationID(context.Background(), "conv_1")
 
+	brief := "## Objective\nBuild a REST API with Go and Clean Architecture.\n\n## Done when\nAPI serves endpoints; tests pass."
 	args, _ := json.Marshal(map[string]any{
 		"items": []map[string]any{
 			{"id": "1", "content": "Step 1", "status": "in_progress"},
 			{"id": "2", "content": "Step 2", "status": "pending"},
 		},
-		"goal": "Build a REST API with Go and Clean Architecture.",
+		"brief": brief,
 	})
 
 	result, err := toolbox.execTodo(ctx, args)
@@ -61,16 +62,16 @@ func TestExecTodoWithGoal(t *testing.T) {
 	}
 
 	if !strings.Contains(result, "Build a REST API with Go and Clean Architecture.") {
-		t.Errorf("goal missing in result, got: %s", result)
+		t.Errorf("brief missing in result, got: %s", result)
 	}
-	if !strings.Contains(result, "goal: Build a REST API") {
-		t.Errorf("expected goal field in meta, got: %s", result)
+	if !strings.Contains(result, "brief:") {
+		t.Errorf("expected brief field in meta, got: %s", result)
 	}
 	if !strings.Contains(result, `"status":"in_progress"`) {
 		t.Errorf("expected JSONL item with in_progress status, got: %s", result)
 	}
-	if todoPort.GetGoal("conv_1") != "Build a REST API with Go and Clean Architecture." {
-		t.Errorf("goal not persisted in port")
+	if todoPort.GetBrief("conv_1") != brief {
+		t.Errorf("brief not persisted in port")
 	}
 	items := todoPort.Get("conv_1")
 	if len(items) != 2 {
@@ -78,14 +79,14 @@ func TestExecTodoWithGoal(t *testing.T) {
 	}
 }
 
-func TestExecTodoGoalPreservedOnItemsOnlyUpdate(t *testing.T) {
+func TestExecTodoBriefPreservedOnItemsOnlyUpdate(t *testing.T) {
 	todoPort := &stubTodoPort{
-		goals: map[string]string{"conv_1": "Original goal"},
+		briefs: map[string]string{"conv_1": "## Objective\nOriginal\n\n## Done when\nDone"},
 	}
 	toolbox := &Toolbox{Todos: todoPort}
 	ctx := application.WithConversationID(context.Background(), "conv_1")
 
-	// Update items without setting goal — goal should be preserved.
+	// Update items without setting brief — brief should be preserved.
 	args, _ := json.Marshal(map[string]any{
 		"items": []map[string]any{
 			{"id": "1", "content": "Step 1 done", "status": "completed"},
@@ -97,41 +98,42 @@ func TestExecTodoGoalPreservedOnItemsOnlyUpdate(t *testing.T) {
 		t.Fatalf("execTodo failed: %v", err)
 	}
 
-	if todoPort.GetGoal("conv_1") != "Original goal" {
-		t.Errorf("goal should be preserved, got %q", todoPort.GetGoal("conv_1"))
+	if todoPort.GetBrief("conv_1") != "## Objective\nOriginal\n\n## Done when\nDone" {
+		t.Errorf("brief should be preserved, got %q", todoPort.GetBrief("conv_1"))
 	}
 }
 
-func TestExecTodoGoalTooLong(t *testing.T) {
+func TestExecTodoBriefTooLong(t *testing.T) {
 	todoPort := &stubTodoPort{}
 	toolbox := &Toolbox{Todos: todoPort}
 	ctx := application.WithConversationID(context.Background(), "conv_1")
 
-	longGoal := strings.Repeat("x", todoMaxGoalChars+1)
+	longBrief := "## Objective\n" + strings.Repeat("x", todoMaxBriefChars+1) + "\n\n## Done when\nD"
 	args, _ := json.Marshal(map[string]any{
 		"items": []map[string]any{
 			{"id": "1", "content": "Step 1", "status": "pending"},
 		},
-		"goal": longGoal,
+		"brief": longBrief,
 	})
 
 	_, err := toolbox.execTodo(ctx, args)
 	if err == nil {
-		t.Fatal("expected error for goal exceeding max chars")
+		t.Fatal("expected error for brief exceeding max chars")
 	}
-	if !strings.Contains(err.Error(), "goal exceeds") {
-		t.Errorf("expected goal exceeds error, got: %v", err)
+	if !strings.Contains(err.Error(), "brief exceeds") {
+		t.Errorf("expected brief exceeds error, got: %v", err)
 	}
 }
 
-func TestExecTodoEmptyItemsWithGoal(t *testing.T) {
+func TestExecTodoEmptyItemsWithBrief(t *testing.T) {
 	todoPort := &stubTodoPort{}
 	toolbox := &Toolbox{Todos: todoPort}
 	ctx := application.WithConversationID(context.Background(), "conv_1")
 
+	brief := "## Objective\nJust a brief, no steps yet.\n\n## Done when\nN/A"
 	args, _ := json.Marshal(map[string]any{
 		"items": []map[string]any{},
-		"goal":  "Just a goal, no steps yet.",
+		"brief": brief,
 	})
 
 	result, err := toolbox.execTodo(ctx, args)
@@ -139,13 +141,107 @@ func TestExecTodoEmptyItemsWithGoal(t *testing.T) {
 		t.Fatalf("execTodo failed: %v", err)
 	}
 
-	if !strings.Contains(result, "Just a goal, no steps yet.") {
-		t.Errorf("goal missing in result, got: %s", result)
+	if !strings.Contains(result, "Just a brief, no steps yet.") {
+		t.Errorf("brief missing in result, got: %s", result)
 	}
-	if !strings.Contains(result, "goal: Just a goal") {
-		t.Errorf("expected goal field in meta, got: %s", result)
+	if !strings.Contains(result, "brief:") {
+		t.Errorf("expected brief field in meta, got: %s", result)
 	}
-	if todoPort.GetGoal("conv_1") != "Just a goal, no steps yet." {
-		t.Errorf("goal not persisted")
+	if todoPort.GetBrief("conv_1") != brief {
+		t.Errorf("brief not persisted")
+	}
+}
+
+func TestExecTodoWithBriefStructuredSections(t *testing.T) {
+	todoPort := &stubTodoPort{}
+	toolbox := &Toolbox{Todos: todoPort}
+	ctx := application.WithConversationID(context.Background(), "conv_1")
+
+	brief := "## Objective\nFix the login bug reported in conv_abc.\n\n## Approach\nReproduce → trace auth flow → patch root cause → verify.\n\n## Done when\nLogin succeeds for user X; no regression in auth tests."
+	args, _ := json.Marshal(map[string]any{
+		"items": []map[string]any{
+			{"id": "1", "content": "Reproduce bug", "status": "in_progress"},
+			{"id": "2", "content": "Patch root cause", "status": "pending"},
+		},
+		"brief": brief,
+	})
+
+	result, err := toolbox.execTodo(ctx, args)
+	if err != nil {
+		t.Fatalf("execTodo with brief failed: %v", err)
+	}
+	if !strings.Contains(result, "Objective") {
+		t.Errorf("brief missing in result, got: %s", result)
+	}
+	if todoPort.GetBrief("conv_1") != brief {
+		t.Errorf("brief not persisted in port, got: %q", todoPort.GetBrief("conv_1"))
+	}
+}
+
+func TestExecTodoBriefRejectMissingObjective(t *testing.T) {
+	todoPort := &stubTodoPort{}
+	toolbox := &Toolbox{Todos: todoPort}
+	ctx := application.WithConversationID(context.Background(), "conv_1")
+
+	// Brief has Done when but no Objective — must be rejected.
+	brief := "## Done when\nLogin works."
+	args, _ := json.Marshal(map[string]any{
+		"items": []map[string]any{
+			{"id": "1", "content": "Step 1", "status": "pending"},
+		},
+		"brief": brief,
+	})
+
+	_, err := toolbox.execTodo(ctx, args)
+	if err == nil {
+		t.Fatal("expected error for brief missing ## Objective")
+	}
+	if !strings.Contains(err.Error(), "Objective") {
+		t.Errorf("expected Objective error, got: %v", err)
+	}
+}
+
+func TestExecTodoBriefRejectMissingDoneWhen(t *testing.T) {
+	todoPort := &stubTodoPort{}
+	toolbox := &Toolbox{Todos: todoPort}
+	ctx := application.WithConversationID(context.Background(), "conv_1")
+
+	// Brief has Objective but no Done when — must be rejected.
+	brief := "## Objective\nFix the login bug."
+	args, _ := json.Marshal(map[string]any{
+		"items": []map[string]any{
+			{"id": "1", "content": "Step 1", "status": "pending"},
+		},
+		"brief": brief,
+	})
+
+	_, err := toolbox.execTodo(ctx, args)
+	if err == nil {
+		t.Fatal("expected error for brief missing ## Done when")
+	}
+	if !strings.Contains(err.Error(), "Done when") {
+		t.Errorf("expected Done when error, got: %v", err)
+	}
+}
+
+// Backward compat: legacy `goal` arg still accepted, mapped to brief internally.
+func TestExecTodoLegacyGoalArgMapsToBrief(t *testing.T) {
+	todoPort := &stubTodoPort{}
+	toolbox := &Toolbox{Todos: todoPort}
+	ctx := application.WithConversationID(context.Background(), "conv_1")
+
+	args, _ := json.Marshal(map[string]any{
+		"items": []map[string]any{
+			{"id": "1", "content": "Step 1", "status": "pending"},
+		},
+		"goal": "## Objective\nLegacy goal arg\n\n## Done when\nDone",
+	})
+
+	_, err := toolbox.execTodo(ctx, args)
+	if err != nil {
+		t.Fatalf("legacy goal arg should still work: %v", err)
+	}
+	if todoPort.GetBrief("conv_1") != "## Objective\nLegacy goal arg\n\n## Done when\nDone" {
+		t.Errorf("legacy goal should map to brief, got %q", todoPort.GetBrief("conv_1"))
 	}
 }

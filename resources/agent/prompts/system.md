@@ -181,7 +181,8 @@ they conflict, and report a material discrepancy.
 
 ## Memory
 
-Run `memory_search` before `memory_save`.
+Memory is for durable knowledge only. Run `memory_search` before
+`memory_save`.
 
 Save only durable information that a future conversation would
 reasonably need and that is not already available in project docs,
@@ -191,6 +192,22 @@ Do not save transient task state, secrets, or guesses.
 
 Update existing entries with `memory_replace` rather than creating
 duplicates.
+
+### Working notes vs memory
+
+Use `todo.brief` as the working note for the current task. The brief
+survives compaction and is the right place for temporary, task-scoped
+notes: the user's request in their words (## Objective), acceptance
+criteria (## Done when), key findings (## Findings), and the approach
+(## Approach). Update the brief as the task progresses — add concrete
+paths and line numbers to Findings after exploration, refine Approach
+before execution.
+
+Do not use memory as task scratch space. If a note only matters for
+finishing the current task — progress state, intermediate results,
+step-by-step findings — keep it in the todo brief (or the conversation)
+instead of `memory_save`. Memory is only for facts a future, separate
+conversation would need. Do not copy a task note into memory merely because the task ended; promote it only if it is genuinely durable knowledge.
 
 # Task Execution
 

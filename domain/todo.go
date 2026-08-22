@@ -1,5 +1,10 @@
 package domain
 
+import (
+	"encoding/json"
+	"strings"
+)
+
 // TodoStatus is the lifecycle state of a conversation todo item.
 type TodoStatus string
 
@@ -32,14 +37,73 @@ type TodoItem struct {
 	Status  TodoStatus `json:"status"`
 }
 
-// ConversationTodos is the full todo state for a conversation: the goal
-// brief (what the user wants and why, max ~10k tokens) plus the multi-step
-// item list. The goal is set once at the start of a task and survives
-// compaction — it is re-injected into every turn's hydration so the agent
-// does not drift from the original intent after context summarization.
+// ConversationTodos is the full todo state for a conversation: the brief
+// (a living planning document, max ~10k tokens) plus the multi-step item
+// list. The brief is set at the start of a task and survives compaction —
+// it is re-injected into every turn's hydration so the agent does not drift
+// from the original intent after context summarization. The brief is
+// updateable: the agent refines it as findings emerge and the approach
+// solidifies.
+//
+// JSON backward compat: legacy `goal` field is unmarshaled into Brief.
 type ConversationTodos struct {
-	Goal  string     `json:"goal,omitempty"`
+	Brief string     `json:"brief,omitempty"`
 	Items []TodoItem `json:"items"`
+}
+
+// UnmarshalJSON implements backward-compatible unmarshaling: legacy
+// persisted state used the field name `goal`; it is read into Brief so
+// existing todos.json files keep working without migration.
+func (c *ConversationTodos) UnmarshalJSON(data []byte) error {
+	type alias ConversationTodos
+	var raw struct {
+		alias
+		Goal string `json:"goal,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	c.Brief = raw.Brief
+	if c.Brief == "" && raw.Goal != "" {
+		c.Brief = raw.Goal
+	}
+	c.Items = raw.Items
+	return nil
+}
+
+// BriefSectionRequired lists the section headings that must be present in
+// a non-empty brief. The brief is a living planning document structured as
+// markdown sections; Objective and Done when are mandatory so the agent
+// always states what the user asked for and what "finished" looks like.
+// Findings and Approach are optional and grow as the task progresses.
+var briefRequiredSections = []string{"## Objective", "## Done when"}
+
+// ValidateBrief checks that a non-empty brief contains the required
+// markdown sections (## Objective and ## Done when). An empty brief is
+// valid (means "no brief set yet"). Returns nil if valid, an error
+// describing the first missing section otherwise.
+func ValidateBrief(brief string) error {
+	brief = strings.TrimSpace(brief)
+	if brief == "" {
+		return nil
+	}
+	for _, section := range briefRequiredSections {
+		if !strings.Contains(brief, section) {
+			return errBriefMissingSection(section)
+		}
+	}
+	return nil
+}
+
+// errBriefMissingSection returns a descriptive error for a missing section.
+func errBriefMissingSection(section string) error {
+	return &briefValidationError{Missing: section}
+}
+
+type briefValidationError struct{ Missing string }
+
+func (e *briefValidationError) Error() string {
+	return "brief missing required section: " + e.Missing
 }
 
 // TodoSummary holds aggregate counts derived from a todo list. Used by the

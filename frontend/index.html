@@ -37,7 +37,6 @@
         <img src="./nusashell-mark.png" alt="" width="24" height="24">
       </span>
       NusaShell
-      <span class="brand-islands" aria-hidden="true"><i></i><i></i><i></i></span>
       <span class="connection-state" title="Backend connection status">
         <span class="connection-orb" id="conn-fill"></span>
         <span id="conn-status">Connecting…</span>
@@ -198,10 +197,10 @@
                 <h2>Start a conversation</h2>
                 <p>Ask anything. The agent can use skills, memory, docs and your MCP servers as tools.</p>
                 <div class="agent-starter-prompts" id="agent-starter-prompts">
-                  <button class="agent-starter" type="button" data-starter-prompt="Explore this repository and summarize the architecture, key packages, and how to run tests.">Explore this repo</button>
-                  <button class="agent-starter" type="button" data-starter-prompt="Look at recent changes and failing tests. Find the most likely bug and propose a small fix.">Find a bug</button>
-                  <button class="agent-starter" type="button" data-starter-prompt="Add a failing test for the behavior I describe next, then wait before implementing.">Write a failing test</button>
-                  <button class="agent-starter" type="button" data-starter-prompt="Review the current git diff. Call out bugs, missing tests, and wire-contract risks.">Review the diff</button>
+                  <button class="agent-starter" type="button" data-starter-prompt="Help me research a topic. I'll ask the question, and you gather sources before answering.">Research a topic</button>
+                  <button class="agent-starter" type="button" data-starter-prompt="Help me draft or improve some writing. I'll paste the text or describe what I need next.">Write &amp; edit</button>
+                  <button class="agent-starter" type="button" data-starter-prompt="Look around my workspace and help me organize, summarize, or clean up the files there.">Tidy my files</button>
+                  <button class="agent-starter" type="button" data-starter-prompt="I'll describe a task I repeat often — help me script it or schedule it as an automation.">Automate a task</button>
                 </div>
                 <p class="agent-empty-hint">Ctrl+K search rooms · Ctrl+N new · Ctrl+Enter send</p>
               </div>
@@ -239,7 +238,7 @@
                   </button>
                   <span class="agent-todo-strip-meta" id="agent-todo-strip-meta" aria-live="polite" aria-atomic="true"></span>
                 </div>
-                <p class="agent-todo-strip-goal" id="agent-todo-strip-goal" hidden></p>
+                <p class="agent-todo-strip-brief" id="agent-todo-strip-brief" hidden></p>
                 <ol class="agent-todo-strip-list" id="agent-todo-strip-list" role="list" hidden></ol>
               </section>
 

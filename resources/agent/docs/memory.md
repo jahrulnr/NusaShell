@@ -110,7 +110,10 @@ content.
 The review agent sees the current primary document injected into its
 system prompt at the start of each review run, so it can avoid
 duplicates and spot stale text without needing to call
-`memory_list target=primary` first.
+`memory_list target=primary` first. Reviews are bounded to a small number of
+tool rounds and use a per-conversation cooldown, so threshold and compaction
+triggers cannot repeatedly replay the same transcript during a short window.
+A cooldown skip is recorded as a skipped review, not as a completed no-op.
 
 Good examples:
 
@@ -124,6 +127,12 @@ Good examples:
 - Information already captured in skills, memory, or documentation
 - Sensitive credentials or API keys
 - Transient state (e.g. "pipeline failed: missing env var")
+
+Temporary, task-scoped notes have a dedicated home: the `todo` tool's
+`brief` argument. It is the per-task living planning document —
+## Objective / ## Findings / ## Approach / ## Done when — and it
+survives compaction for the current conversation. Update it as findings
+emerge. Keep scratch observations there instead of saving them to memory.
 
 Bad examples:
 

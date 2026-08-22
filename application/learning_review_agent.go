@@ -13,8 +13,9 @@
 //   - LLM-based extraction (no regex)
 //   - Restricted tool whitelist (memory + skill meta-tools only)
 //   - Bounded tool rounds (maxToolRounds, default 6)
-//   - No streaming, no UI events, no conversation persistence
-//   - Mutations tracked for observability
+//   - No streaming; parent conversation is not modified
+//   - Review transcript and mutation events are persisted for observability
+//   - Mutations tracked for the Learning log
 package application
 
 import (
@@ -22,6 +23,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"nusashell/contracts"
@@ -32,12 +34,15 @@ import (
 // ReviewSettings controls the background review agent.
 type ReviewSettings struct {
 	Enabled             bool
-	MemoryEveryNTurns   int // trigger threshold (from settings.LearningReviewThreshold)
-	MaxToolRounds       int // bounded tool loop (default 6)
-	TranscriptTailMsgs  int // how many recent messages to include (default 40)
-	MaxTranscriptChars  int // per-message truncation (default 4000)
-	MaxTranscriptTokens int // total transcript cap, ~chars/4 (default 30000)
+	MemoryEveryNTurns   int           // trigger threshold (from settings.LearningReviewThreshold)
+	MaxToolRounds       int           // bounded tool loop (default 6)
+	TranscriptTailMsgs  int           // how many recent messages to include (default 40)
+	MaxTranscriptChars  int           // per-message truncation (default 4000)
+	MaxTranscriptTokens int           // total transcript cap, ~chars/4 (default 30000)
+	ReviewCooldown      time.Duration // minimum interval per conversation (default 15m)
 }
+
+const defaultReviewCooldown = 15 * time.Minute
 
 // DefaultReviewSettings returns sensible defaults.
 func DefaultReviewSettings() ReviewSettings {
@@ -48,20 +53,30 @@ func DefaultReviewSettings() ReviewSettings {
 		TranscriptTailMsgs:  40,
 		MaxTranscriptChars:  4000,
 		MaxTranscriptTokens: 30000,
+		ReviewCooldown:      defaultReviewCooldown,
 	}
 }
 
-// ReviewMutation tracks what the review agent saved.
+// ReviewMutation tracks what the review agent saved or updated.
 type ReviewMutation struct {
 	Kind    string // "memory" | "skills"
 	Tool    string // tool name that produced the mutation
-	Snippet string // trimmed content/name saved, for the learning log
+	Snippet string // trimmed content/name saved or updated, for the learning log
 }
 
 // BackgroundReviewAgent spawns a restricted LLM review turn.
 type BackgroundReviewAgent struct {
 	app      *App
 	settings ReviewSettings
+
+	// reviewMu prevents threshold and compaction triggers from launching
+	// duplicate reviews for the same conversation. lastReview also provides
+	// a cooldown after completion so repeated triggers do not replay the same
+	// transcript and spend provider tokens again.
+	reviewMu   sync.Mutex
+	inFlight   map[string]bool
+	lastReview map[string]time.Time
+	now        func() time.Time // injectable clock for deterministic tests
 }
 
 // NewBackgroundReviewAgent creates a review agent bound to the App.
@@ -78,7 +93,15 @@ func NewBackgroundReviewAgent(app *App, settings ReviewSettings) *BackgroundRevi
 	if settings.MaxTranscriptTokens <= 0 {
 		settings.MaxTranscriptTokens = 30000
 	}
-	return &BackgroundReviewAgent{app: app, settings: settings}
+	if settings.ReviewCooldown <= 0 {
+		settings.ReviewCooldown = defaultReviewCooldown
+	}
+	return &BackgroundReviewAgent{
+		app:        app,
+		settings:   settings,
+		inFlight:   make(map[string]bool),
+		lastReview: make(map[string]time.Time),
+	}
 }
 
 // reviewToolWhitelist is the only set of tools the review agent may call.
@@ -100,10 +123,35 @@ var reviewToolWhitelist = map[string]bool{
 // LLM error) so the caller can emit a toast and record it in the
 // trajectory log.
 func (r *BackgroundReviewAgent) RunReview(ctx context.Context, conversationID string) error {
-	if !r.settings.Enabled || r.app == nil {
-		r.app.log("debug", "learning", "review skipped: disabled or no app (conv=%s)", conversationID)
+	if !r.reserveReview(conversationID) {
 		return nil
 	}
+	return r.runReservedReview(ctx, conversationID)
+}
+
+// reserveReview claims a review slot before any lifecycle event is emitted.
+// The caller must invoke runReservedReview after a successful reservation.
+func (r *BackgroundReviewAgent) reserveReview(conversationID string) bool {
+	if !r.settings.Enabled || r.app == nil {
+		if r.app != nil {
+			r.app.log("debug", "learning", "review skipped: disabled or no app (conv=%s)", conversationID)
+		}
+		return false
+	}
+	if !r.tryAcquireReview(conversationID) {
+		r.app.log("info", "learning", "review skipped: cooldown or already running (conv=%s)", conversationID)
+		r.recordReviewSkipped(conversationID)
+		return false
+	}
+	return true
+}
+
+// runReservedReview executes a review after reserveReview has claimed its
+// conversation slot. Keeping acquisition separate lets the threshold and
+// compaction trigger emit "started" only for work that will actually run.
+func (r *BackgroundReviewAgent) runReservedReview(ctx context.Context, conversationID string) error {
+	defer r.releaseReview(conversationID)
+
 	conversation, err := r.app.Conversations.Get(conversationID)
 	if err != nil {
 		r.app.log("warn", "learning", "review aborted: conversation %s not found: %v", conversationID, err)
@@ -164,6 +212,66 @@ func (r *BackgroundReviewAgent) RunReview(ctx context.Context, conversationID st
 	}
 	r.app.log("info", "learning", "review done: conv=%s mutations=%d review_id=%s", conversationID, len(mutations), reviewID)
 	return nil
+}
+
+// tryAcquireReview reserves a conversation for one review run. It rejects
+// concurrent runs and repeated triggers within the configured cooldown.
+// The gate is intentionally in-memory: it protects the concurrent trigger
+// paths that can fire from threshold and compaction events in one process.
+func (r *BackgroundReviewAgent) tryAcquireReview(conversationID string) bool {
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return false
+	}
+	now := r.reviewNow()
+	r.reviewMu.Lock()
+	defer r.reviewMu.Unlock()
+	if r.inFlight == nil {
+		r.inFlight = make(map[string]bool)
+	}
+	if r.lastReview == nil {
+		r.lastReview = make(map[string]time.Time)
+	}
+	if r.inFlight[conversationID] {
+		return false
+	}
+	if last, ok := r.lastReview[conversationID]; ok && now.Before(last.Add(r.settings.ReviewCooldown)) {
+		return false
+	}
+	r.inFlight[conversationID] = true
+	return true
+}
+
+// releaseReview marks a completed or failed run so repeated triggers are
+// cooled down. A failed provider call is still an attempted review; allowing
+// every event to immediately retry would recreate the duplicate-run storm.
+func (r *BackgroundReviewAgent) releaseReview(conversationID string) {
+	r.reviewMu.Lock()
+	defer r.reviewMu.Unlock()
+	delete(r.inFlight, conversationID)
+	if r.settings.ReviewCooldown > 0 {
+		r.lastReview[conversationID] = r.reviewNow()
+	}
+}
+
+func (r *BackgroundReviewAgent) reviewNow() time.Time {
+	if r.now != nil {
+		return r.now()
+	}
+	return time.Now()
+}
+
+// recordReviewSkipped keeps cooldown decisions visible in the learning log
+// without pretending a new LLM review completed or creating a transcript.
+func (r *BackgroundReviewAgent) recordReviewSkipped(conversationID string) {
+	if r.app == nil || r.app.Trajectory == nil {
+		return
+	}
+	r.app.Trajectory.Record("review", map[string]interface{}{
+		"conversation": conversationID,
+		"status":       "skipped",
+		"reason":       "cooldown",
+	})
 }
 
 // recordReviewError writes an error trajectory entry so the learning log
@@ -275,16 +383,38 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIPro
 		// explicit signal that the review found no durable knowledge. The
 		// LLM may add trailing punctuation or whitespace, so we check for
 		// the phrase as a substring rather than exact equality.
-		if isNothingToSave(resp.Content) || (resp.Content == "" && len(resp.ToolCalls) == 0) {
+		if strings.TrimSpace(resp.Content) == "" && strings.TrimSpace(resp.Reasoning) == "" && len(resp.ToolCalls) == 0 {
+			return mutations, messages, fmt.Errorf("empty response from review model")
+		}
+		if isNothingToSave(resp.Content) {
+			// Persist the terminal response so the learning log can show the
+			// review's conclusion ("Nothing to save." or a short summary)
+			// instead of ending the transcript on the last tool result.
+			messages = append(messages, ChatMessage{
+				Role:      "assistant",
+				Content:   resp.Content,
+				Reasoning: resp.Reasoning,
+			})
 			break
 		}
 		if len(resp.ToolCalls) == 0 {
+			// Terminal text response without tool calls: persist it as the
+			// review's conclusion.
+			if strings.TrimSpace(resp.Content) != "" || strings.TrimSpace(resp.Reasoning) != "" {
+				messages = append(messages, ChatMessage{
+					Role:      "assistant",
+					Content:   resp.Content,
+					Reasoning: resp.Reasoning,
+				})
+			}
 			break
 		}
-		// Append assistant message with tool calls.
+		// Append assistant message with tool calls (reasoning kept for the
+		// learning log's thinking disclosure).
 		messages = append(messages, ChatMessage{
 			Role:      "assistant",
 			Content:   resp.Content,
+			Reasoning: resp.Reasoning,
 			ToolCalls: resp.ToolCalls,
 		})
 		// Execute each tool call and append results.
@@ -314,7 +444,7 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIPro
 				// (which tool saved what, trimmed so the trajectory stays
 				// readable).
 				switch tc.Name {
-				case "memory_save":
+				case "memory_save", "memory_replace":
 					mutations = append(mutations, ReviewMutation{Kind: "memory", Tool: tc.Name, Snippet: mutationSnippet(tc.Args, "content")})
 				case "skill_save":
 					mutations = append(mutations, ReviewMutation{Kind: "skills", Tool: tc.Name, Snippet: mutationSnippet(tc.Args, "name")})

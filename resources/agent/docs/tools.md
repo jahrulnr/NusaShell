@@ -16,7 +16,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `memory_search` | BM25 search over fragments with metadata filters (`category`, `project`, `task`, `tags`); returns ranked results with scores |
 | `memory_list` | list entries: `target="primary"` for the always-injected document, `target="fragments"` (default) for the archive with optional metadata filters |
 | `memory_delete` | delete a fragment by id |
-| `todo` | replace the conversation task checklist (full-replace, Claude TodoWrite style; max 50 items, 500 chars each; prefer exactly one `in_progress` at a time). The optional `goal` argument sets a brief of what the user wants and why (max ~10k tokens). It stays available through conversation history and is re-injected with the fresh hydration checkpoint after compaction. The user can delete items from the UI — treat deleted items as gone and do not re-add them. |
+| `todo` | replace the conversation task checklist (full-replace, Claude TodoWrite style; max 50 items, 500 chars each; prefer exactly one `in_progress` at a time). The optional `brief` argument is a living planning document (max ~10k tokens) with required markdown sections `## Objective` and `## Done when`, plus optional `## Findings` and `## Approach` that grow as the task progresses. It stays available through conversation history and is re-injected with the fresh hydration checkpoint after compaction. The user can delete items from the UI — treat deleted items as gone and do not re-add them. |
 | `ask_question` | block for a structured user decision; use only when progress genuinely requires a choice or approval |
 | `docs_search` | search the product documentation when the page id is unknown; results ranked by relevance |
 | `docs_read` | read a documentation page by canonical extensionless id (from `docs_search` results) |
@@ -24,7 +24,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `tool_list` | list ALL tools of a running MCP server (no query); accepts plugin id only; returns full tool defs (ref, name, server, description, parameters) — pass the `ref` to `mcp_call` to execute; call after `mcp_enable` to discover tools |
 | `tool_schema` | load one MCP tool's full definition as a single JSONL line (name, description, parameters with type/properties/required) before calling it; accepts plugin id only |
 | `mcp_search` | universal MCP tool discovery — search running MCP servers by name or description (token match, ranked); returns a `ref` (`<plugin-id>:<tool>`) plus the full `parameters` schema for each match; pass the `ref` to `mcp_call` to execute; always prefer `mcp_search` + `mcp_call` over guessing tool names |
-| `mcp_call` | the only MCP tool execution path — run a tool by `ref` (from `mcp_search` or `tool_list`; format `<plugin-id>:<tool>`) with `arguments_json` (a JSON-encoded string of the arguments matching the tool's parameters schema); returns a `STALE_TOOL_REF` error if the server was disabled/restarted since discovery (re-search and retry) |
+| `mcp_call` | the only MCP tool execution path — run a tool by `ref` (from `mcp_search` or `tool_list`; format `<plugin-id>:<tool>`) with `arguments_json` (a JSON-encoded string of the arguments matching the tool's parameters schema, or a JSON object directly; optional — defaults to `{}` for parameterless tools); returns a `STALE_TOOL_REF` error if the server was disabled/restarted since discovery (re-search and retry) |
 | `mcp_register` | copy a plugin from an absolute staging folder outside the installed plugins root; check inventory and ask before replacing an existing id |
 | `mcp_enable` | connect an installed plugin so its tools become available; returns only status + tool count — follow with `tool_list` or `mcp_search` to discover tools; returns `already_enabled` if already connected (no reconnect) |
 | `mcp_disable` | stop a plugin without uninstalling it |
@@ -246,15 +246,13 @@ MCP tools are not advertised in `tools[]`. Use the universal `mcp_search` +
 
 Good example:
 
-    mcp_search(query="read file")                # → {"ref":"Files:read","name":"read","server":"Files","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}
-    mcp_call(ref="Files:read", arguments_json="{\"path\": \"/home/user/a.txt\"}")
+    mcp_search(query="read file")                # → {"ref":"nusashell.files:read","name":"read","server":"nusashell.files","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}
+    mcp_call(ref="nusashell.files:read", arguments_json="{\"path\": \"/home/user/a.txt\"}")
 
 Bad examples:
 
     mcp__files__read_file({path: "a.txt"})       # not in tools[], not callable
 
-    mcp_call(ref="Files:read", arguments_json="{}")  # empty payload — the tool requires path
-
-    mcp_call(ref="Files:read")                   # missing arguments_json — schema requires it
+    mcp_call(ref="nusashell.files:read", arguments_json="{}")  # empty payload — the tool requires path
 
     tool_list()                                   # called every round to re-check

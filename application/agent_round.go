@@ -37,7 +37,7 @@ func (a *App) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, mo
 		return nil, nil, domain.Settings{}, err
 	}
 	settings := a.Settings.Get()
-	contextWindow := resolveContextWindow(provider, model, settings)
+	contextWindow := a.resolveContextWindow(provider, model, settings)
 	maxOutput := resolveMaxOutput(provider, model, settings)
 	compactionTrigger := compactionTriggerTokens(contextWindow, maxOutput, settings)
 	beforeTokens := conversation.EstimateTokens()
@@ -427,7 +427,7 @@ func (a *App) executeTurnTools(run *TurnRun, messageID string, toolCalls []domai
 				ConversationID: run.ConversationID,
 				Items:          dtos,
 				Summary:        contracts.TodoSummaryDTO{Total: summary.Total, Pending: summary.Pending, InProgress: summary.InProgress, Completed: summary.Completed},
-				Goal:           a.Todos.GetGoal(run.ConversationID),
+				Brief:          a.Todos.GetBrief(run.ConversationID),
 			})
 		}
 	}
@@ -676,17 +676,21 @@ func (a *App) flushLearningReview(conversationID string, reason string) {
 	if a.ReviewAgent == nil {
 		return
 	}
-	// Emit a toast-friendly event so the UI can surface "Autolearn spawned
-	// in background" without blocking the turn.
-	if a.Bus != nil {
-		a.Bus.Emit(contracts.EventLearningReviewStarted, contracts.LearningReviewEvent{
-			ConversationID: conversationID,
-			Status:         "started",
-			Reason:         reason,
-		})
-	}
 	a.goSafe("learning", func() {
-		err := a.ReviewAgent.RunReview(context.Background(), conversationID)
+		// Reserve before emitting "started": a threshold event and a
+		// compaction event can race for the same conversation. A skipped
+		// review must not produce a false started/finished toast pair.
+		if !a.ReviewAgent.reserveReview(conversationID) {
+			return
+		}
+		if a.Bus != nil {
+			a.Bus.Emit(contracts.EventLearningReviewStarted, contracts.LearningReviewEvent{
+				ConversationID: conversationID,
+				Status:         "started",
+				Reason:         reason,
+			})
+		}
+		err := a.ReviewAgent.runReservedReview(context.Background(), conversationID)
 		if err != nil {
 			a.ReviewAgent.recordReviewError(conversationID, err.Error())
 			if a.Bus != nil {

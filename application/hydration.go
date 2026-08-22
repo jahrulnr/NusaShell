@@ -301,11 +301,11 @@ func (b *HydrationBuilder) readTodoList() hydrationSlot {
 		return hydrationSlot{name: "todo_list", content: ""}
 	}
 	var sections []string
-	// Goal brief: the user's original intent, set once via the `todo` tool's
-	// `goal` argument and restored in a fresh checkpoint after compaction.
-	goal := b.source.Todos.GetGoal(b.source.ConvID)
-	if goal != "" {
-		sections = append(sections, "USER GOAL (survives compaction — do not drift from this)\n"+goal)
+	// Brief: the living planning document, set via the `todo` tool's
+	// `brief` argument and restored in a fresh checkpoint after compaction.
+	brief := b.source.Todos.GetBrief(b.source.ConvID)
+	if brief != "" {
+		sections = append(sections, "USER BRIEF (survives compaction — do not drift from this)\n"+brief)
 	}
 	// Items: only incomplete ones (completed items are noise for the model).
 	items := b.source.Todos.Get(b.source.ConvID)

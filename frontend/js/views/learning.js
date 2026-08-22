@@ -3,6 +3,9 @@
 
 import { rpc, on, off } from '../rpc.js';
 import { el, debounce, createSelect, toast, fmtTime } from '../ui.js';
+// Reuse the Agent view's thinking/tool components so the review activity
+// reads exactly like a live agent conversation (minus the user side).
+import { reasoningDisclosure, renderToolCallCard, setToolTerminalStatus, toolTerminalMeta } from './agent/render.js';
 import { DataSet, Network } from '../../vendor/vis-network/vis-network.esm.min.js';
 
 const state = {
@@ -276,11 +279,11 @@ function renderLog() {
   }
 }
 
-function renderLogEntry(entry) {
+export function renderLogEntry(entry) {
   const headChildren = [
     el('span', { class: `learning-log-type learning-type-${entry.type}`, text: typeLabel(entry.type) }),
   ];
-  // Status badge: review entries carry a status (done|error). Other
+  // Status badge: review entries carry a status (done|error|skipped). Other
   // event types (prune, decay, etc.) do not have a status.
   if (entry.status) {
     headChildren.push(el('span', {
@@ -299,26 +302,34 @@ function renderLogEntry(entry) {
   if (entry.status === 'error' && entry.error) {
     parts.push(el('div', { class: 'learning-log-error', text: entry.error }));
   }
+  if (entry.status === 'skipped') {
+    parts.push(el('div', { class: 'learning-log-skipped', text: 'Skipped: review cooldown is active.' }));
+  }
 
-  // Source conversation (read-only label — the log is about the review
-  // agent's work, not the source conversation itself).
+  // Source conversation as a compact "Source <title>" line. The raw
+  // conversation id and the replayed transcript text do not belong in the
+  // activity digest — the log is about what the review agent did.
   if (entry.conversation_id) {
     parts.push(el('div', { class: 'learning-log-conv' }, [
+      el('span', { class: 'learning-log-conv-label', text: 'Source' }),
       el('span', { class: 'learning-log-conv-title', text: entry.conversation_title || 'Untitled conversation' }),
-      el('span', { class: 'learning-log-conv-id', text: entry.conversation_id }),
     ]));
   }
 
+  // Saved outcomes: one compact line per mutation so the feed shows what
+  // the review actually stored. A finished review with zero mutations says
+  // so explicitly instead of leaving a silent gap.
   if (entry.mutations && entry.mutations.length > 0) {
-    const muts = el('div', { class: 'learning-log-mutations' });
+    const saves = el('div', { class: 'learning-log-saves' });
     for (const m of entry.mutations) {
-      const row = el('div', { class: 'learning-log-mutation' }, [
+      saves.appendChild(el('div', { class: 'learning-log-outcome-row' }, [
         el('span', { class: `learning-mut-kind learning-mut-kind-${m.kind}`, text: m.kind }),
-        el('span', { text: m.snippet || m.tool || 'saved' }),
-      ]);
-      muts.appendChild(row);
+        el('span', { class: 'learning-log-save-snippet', text: oneLine(m.snippet || m.tool || 'saved', 180) }),
+      ]));
     }
-    parts.push(muts);
+    parts.push(saves);
+  } else if (entry.status === 'done') {
+    parts.push(el('div', { class: 'learning-log-nothing', text: 'Nothing to save.' }));
   }
 
   // Per-type extras (e.g. prune/decay counts, consolidation merges).
@@ -327,16 +338,16 @@ function renderLogEntry(entry) {
     parts.push(el('div', { class: 'learning-log-detail', text: extras }));
   }
 
-  // "View transcript" button: opens the review agent's own conversation
-  // (LLM exchanges + tool calls) inline. Only review entries have a
-  // review_id; other event types (prune, decay, etc.) have no transcript.
+  // "View review details" button: expands an activity digest of what the
+  // background review agent actually did. Only review entries have a
+  // review_id; other event types (prune, decay, etc.) have no run record.
   if (entry.review_id) {
     const transcriptRow = el('div', { class: 'learning-log-transcript-row' }, [
       el('button', {
         class: 'learning-log-open',
         type: 'button',
-        text: 'View transcript',
-        title: 'Show the background review agent conversation',
+        text: 'View review details',
+        title: 'Show the background review agent activity',
       }),
     ]);
     const btn = transcriptRow.querySelector('.learning-log-open');
@@ -347,16 +358,16 @@ function renderLogEntry(entry) {
   return el('div', { class: 'learning-log-entry' }, parts);
 }
 
-// toggleTranscript fetches and renders the review agent's conversation
-// (its LLM exchanges + tool calls + tool results) inline below the log
-// entry. Toggles open/closed on repeated clicks.
+// toggleTranscript fetches and renders the review agent's activity digest
+// (its tool steps + outcome + conclusion) inline below the log entry.
+// Toggles open/closed on repeated clicks.
 async function toggleTranscript(reviewID, btn) {
   const entry = btn.closest('.learning-log-entry');
   if (!entry) return;
-  const existing = entry.querySelector('.learning-log-transcript');
+  const existing = entry.querySelector('.learning-log-activity');
   if (existing) {
     existing.remove();
-    btn.textContent = 'View transcript';
+    btn.textContent = 'View review details';
     return;
   }
   btn.textContent = 'Loading…';
@@ -365,87 +376,118 @@ async function toggleTranscript(reviewID, btn) {
     const res = await rpc('learning.review.transcript', { id: reviewID });
     const view = renderTranscript(res);
     entry.appendChild(view);
-    btn.textContent = 'Hide transcript';
+    btn.textContent = 'Hide review details';
   } catch (e) {
-    toast(e.message || 'Failed to load transcript.', 'error', 4000);
-    btn.textContent = 'View transcript';
+    toast(e.message || 'Failed to load review details.', 'error', 4000);
+    btn.textContent = 'View review details';
   } finally {
     btn.disabled = false;
   }
 }
 
-// renderTranscript renders the review agent's conversation as a compact,
-// read-only thread with a distinct background review banner so it is
-// visually distinguishable from a regular Agent view conversation.
-function renderTranscript(transcript) {
-  const view = el('div', { class: 'learning-log-transcript' });
-  // Banner: makes it obvious this is a background review agent transcript,
-  // not a regular conversation. Includes model + timestamp for context.
-  view.appendChild(el('div', { class: 'learning-log-transcript-banner' }, [
-    el('span', { class: 'learning-log-transcript-badge', text: 'Background review agent' }),
-    el('span', { class: 'learning-log-transcript-meta', text: transcript.model || '' }),
-    el('span', { class: 'learning-log-transcript-meta', text: fmtTime(transcript.created_at) }),
+// oneLine collapses whitespace and truncates a snippet so log rows stay
+// oneLine collapses whitespace and truncates a snippet so log rows stay
+// scannable. Narration and conclusions go through this; full tool inputs
+// and outputs live inside their collapsible terminal cards instead.
+function oneLine(text, max) {
+  const clean = (text || '').replace(/\s+/g, ' ').trim();
+  if (!clean) return '';
+  return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
+}
+
+// renderTranscript renders what the background review agent did as an
+// agent-style flow — thinking disclosures, terminal-style tool cards, and
+// interstitial narration — exactly like the Agent view conversation, minus
+// the user side: the replayed transcript message (role "user") is never
+// rendered. This answers "what did the agent do and store?".
+export function renderTranscript(transcript) {
+  const view = el('div', { class: 'learning-log-activity' });
+  // Banner: makes it obvious this is background review agent activity.
+  view.appendChild(el('div', { class: 'learning-log-activity-banner' }, [
+    el('span', { class: 'learning-log-activity-badge', text: 'Background review agent' }),
+    el('span', { class: 'learning-log-activity-meta', text: transcript.model || '' }),
+    el('span', { class: 'learning-log-activity-meta', text: fmtTime(transcript.created_at) }),
   ]));
-  if (!transcript.messages || transcript.messages.length === 0) {
-    view.appendChild(el('div', { class: 'learning-log-detail', text: 'No messages recorded.' }));
+
+  const items = collectAgentFlow(transcript.messages || []);
+  if (items.length === 0) {
+    view.appendChild(el('div', { class: 'learning-log-detail', text: 'No steps recorded.' }));
     return view;
   }
-  for (const msg of transcript.messages) {
-    view.appendChild(renderTranscriptMessage(msg));
+
+  for (const item of items) {
+    view.appendChild(item);
   }
   return view;
 }
 
-// formatToolArgs normalizes tool-call args for display. The backend may
-// send args as a raw JSON object (when the DTO uses json.RawMessage) or as
-// a JSON string (older transcripts). Either way we want a readable,
-// indented JSON string in the transcript view — never "[object Object]".
-function formatToolArgs(args) {
-  if (args == null || args === '') return '';
-  if (typeof args === 'string') {
-    const trimmed = args.trim();
-    if (!trimmed) return '';
-    // Already a JSON string — try to pretty-print it; fall back to raw.
-    try {
-      return JSON.stringify(JSON.parse(trimmed), null, 2);
-    } catch {
-      return trimmed;
-    }
-  }
-  // Object/array — stringify for display.
-  try {
-    return JSON.stringify(args, null, 2);
-  } catch {
-    return String(args);
-  }
-}
+// collectAgentFlow converts the review agent's message history into the
+// Agent view's visual language: a thinking disclosure per assistant round,
+// one tool call card per call (paired with its tool result), short
+// narration notes between rounds, and the final conclusion line.
+// Replayed user messages are dropped — this view shows agent work only.
+function collectAgentFlow(messages) {
+  const items = [];
+  const cardsById = new Map();
+  let lastCard = null;
+  let narration = '';
 
-function renderTranscriptMessage(msg) {
-  const roleLabel = msg.role === 'user' ? 'Transcript' : msg.role === 'assistant' ? 'Review agent' : 'Tool';
-  const row = el('div', { class: `learning-log-tc-msg learning-log-tc-${msg.role}` }, [
-    el('span', { class: 'learning-log-tc-role', text: roleLabel }),
-  ]);
-  if (msg.content) {
-    row.appendChild(el('div', { class: 'learning-log-tc-content', text: msg.content }));
-  }
-  if (msg.tool_calls && msg.tool_calls.length > 0) {
-    for (const tc of msg.tool_calls) {
-      const args = formatToolArgs(tc.args);
-      const call = el('div', { class: 'learning-log-tc-tool' }, [
-        el('span', { class: 'learning-log-tc-tool-name', text: tc.name }),
-        el('code', { class: 'learning-log-tc-tool-args', text: args }),
-      ]);
-      row.appendChild(call);
+  const flushNarration = () => {
+    const text = narration.replace(/\s+/g, ' ').trim();
+    if (text) items.push(el('div', { class: 'learning-log-note', text: oneLine(text, 300) }));
+    narration = '';
+  };
+
+  const applyResult = (card, content) => {
+    if (!card) return;
+    const output = String(content || '');
+    const failed = /^error:/i.test(output.trim());
+    const status = failed ? 'fail' : 'ok';
+    const panel = card.querySelector('.agent-tool-terminal-output');
+    if (panel) panel.textContent = output.length > 12000 ? `${output.slice(0, 12000)}\n… (truncated)` : (output || 'ok');
+    // Refresh the summary-line meta that was rendered as "Running".
+    const meta = card.querySelector('.agent-tool-terminal-meta');
+    if (meta && card._toolName) {
+      meta.textContent = toolTerminalMeta({ name: card._toolName, args: card._toolArgs, status });
+    }
+    setToolTerminalStatus(card, status);
+  };
+
+  for (const msg of messages) {
+    // Tool results merge into their call card. Never rendered standalone.
+    if (msg.role === 'tool' && msg.tool_result) {
+      const id = msg.tool_result.tool_call_id;
+      applyResult((id && cardsById.get(id)) || lastCard, msg.tool_result.content);
+      continue;
+    }
+    // The replayed source-conversation transcript (role "user") stays hidden.
+    if (msg.role !== 'assistant') continue;
+
+    if (msg.reasoning?.trim()) {
+      flushNarration();
+      items.push(reasoningDisclosure(msg.reasoning));
+    }
+    if (msg.tool_calls?.length) {
+      // Spoken text alongside tool calls reads as narration for the steps.
+      if (typeof msg.content === 'string' && msg.content.trim()) narration = msg.content;
+      flushNarration();
+      for (const call of msg.tool_calls) {
+        const card = renderToolCallCard({ id: call.id, name: call.name, args: call.args ?? '', status: 'running', output: '' });
+        if (call.id) cardsById.set(call.id, card);
+        lastCard = card;
+        items.push(card);
+      }
+      continue;
+    }
+    if (typeof msg.content === 'string' && msg.content.trim()) {
+      // Terminal text response: the review's verdict.
+      flushNarration();
+      items.push(el('div', { class: 'learning-log-conclusion', text: oneLine(msg.content, 400) }));
     }
   }
-  if (msg.tool_result) {
-    const result = el('div', { class: 'learning-log-tc-result' }, [
-      el('span', { class: 'learning-log-tc-result-name', text: msg.tool_result.name }),
-      el('pre', { class: 'learning-log-tc-result-content', text: msg.tool_result.content || '' }),
-    ]);
-    row.appendChild(result);
-  }
-  return row;
+  // Narration captured just before an interrupted loop end still shows.
+  flushNarration();
+  return items;
 }
 
 function typeLabel(type) {

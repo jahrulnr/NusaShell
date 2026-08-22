@@ -1095,8 +1095,9 @@ func (a *App) handleLearningReviewTranscript(req contracts.LearningReviewTranscr
 	msgs := make([]contracts.LearningReviewTranscriptMessageDTO, 0, len(t.Messages))
 	for _, m := range t.Messages {
 		dto := contracts.LearningReviewTranscriptMessageDTO{
-			Role:    m.Role,
-			Content: m.Content,
+			Role:      m.Role,
+			Content:   m.Content,
+			Reasoning: m.Reasoning,
 		}
 		for _, tc := range m.ToolCalls {
 			dto.ToolCalls = append(dto.ToolCalls, contracts.ToolCallDTO{

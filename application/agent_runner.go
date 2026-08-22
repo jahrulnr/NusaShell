@@ -602,7 +602,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 				// model's context window (input + max_output > window). This can
 				// happen when the estimate is inaccurate or compaction was
 				// disabled. Force compaction once, then retry the round.
-				cw := resolveContextWindow(provider, model, settings)
+				cw := a.resolveContextWindow(provider, model, settings)
 				trigger := compactionTriggerTokens(cw, resolveMaxOutput(provider, model, settings), settings)
 				preEmg := conversation.EstimateTokens()
 				if !shouldEmergencyCompact(streamErr, preEmg, trigger) {
@@ -827,7 +827,7 @@ func (a *App) resolveCompactionAdapter(ctx context.Context, defaultAdapter AIPro
 		a.log("warn", "agent", "compaction model %q adapter build failed, falling back to chat model: %v", compModel, err)
 		return defaultAdapter, defaultModel, defaultWindow
 	}
-	window := resolveContextWindow(provider, bareModel, settings)
+	window := a.resolveContextWindow(provider, bareModel, settings)
 	a.log("info", "agent", "compaction using override model %s (window=%d)", compModel, window)
 	return adapter, bareModel, window
 }
@@ -852,8 +852,20 @@ func effectiveContextWindow(modelWindow, maxInputTokens int) int {
 // resolveContextWindow picks the effective context window for compaction
 // decisions: min(model context, max_input_tokens) when both are known, or the
 // configured max_input_tokens fallback when the model does not advertise one.
-func resolveContextWindow(provider *domain.Provider, model string, settings domain.Settings) int {
-	return domain.ResolveContextWindow(provider, model, settings)
+//
+// For Codex providers, the stored context in providers.json may be stale
+// (a catalog fallback from models.dev that overstates the real window).
+// The Codex runtime cache (~/.codex/models_cache.json) holds the actual
+// window the app-server enforces. When available and smaller, it clamps
+// the stored value so compaction triggers before the real limit is hit.
+func (a *App) resolveContextWindow(provider *domain.Provider, model string, settings domain.Settings) int {
+	ctx := domain.ResolveContextWindow(provider, model, settings)
+	if provider.Kind == domain.ProviderCodex && a.CodexContextWindowCache != nil {
+		if cached, ok := a.CodexContextWindowCache.ContextWindow(model); ok && cached > 0 && cached < ctx {
+			return cached
+		}
+	}
+	return ctx
 }
 
 const (
@@ -1061,9 +1073,9 @@ func (a *App) compactionTodoContext(conversationID string) string {
 		return ""
 	}
 	var sb strings.Builder
-	if goal := strings.TrimSpace(a.Todos.GetGoal(conversationID)); goal != "" {
+	if brief := strings.TrimSpace(a.Todos.GetBrief(conversationID)); brief != "" {
 		sb.WriteString("User goal: ")
-		sb.WriteString(truncate(goal, 2000))
+		sb.WriteString(truncate(brief, 2000))
 		sb.WriteString("\n")
 	}
 	var open []domain.TodoItem
@@ -1307,6 +1319,22 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabil
 					content = placeholder
 				} else if !containsOmissionNote(content, "image") {
 					content = content + "\n\n" + placeholder
+				}
+			}
+			// Vision model: keep the image pixels visible AND surface the
+			// absolute file path so the model can reference it for image-to-
+			// image editing via generate_image. Unlike the non-vision branch
+			// above, the attachment is not stripped — this only appends a path
+			// note with distinct wording so the model does not mistake it for
+			// a missing/omitted image.
+			if caps.Vision && hasAttachmentOfType(attachments, "image") {
+				imageAtts := filterAttachmentsByType(attachments, "image")
+				if note := domain.VisionImagePathNote(imageAtts); note != "" && !domain.ContainsVisionImageNote(content) {
+					if content == "" {
+						content = note
+					} else {
+						content = content + "\n\n" + note
+					}
 				}
 			}
 			if !caps.Audio && hasAttachmentOfType(attachments, "audio") {

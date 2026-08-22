@@ -274,6 +274,7 @@ func run() error {
 	}
 	app.CodexOAuth = codex.NewOAuthAdapter()
 	app.CodexUsage = codex.NewUsageAdapter()
+	app.CodexContextWindowCache = codex.NewContextWindowCacheAdapter()
 	app.CodexCLIAuth = codex.NewCLIAuthImporterAdapter()
 	app.CodexRouter = application.NewCodexAccountRouter()
 

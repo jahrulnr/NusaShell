@@ -699,14 +699,31 @@ func TestMcpCallMissingRef(t *testing.T) {
 	}
 }
 
-func TestMcpCallMissingArgumentsJSON(t *testing.T) {
-	tb := testToolbox(nil, nil, &stubMCP{})
-	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"srv1:read"}`))
-	if err == nil {
-		t.Fatal("expected error for missing arguments_json")
+func TestMcpCallMissingArgumentsJSONDefaultsToEmpty(t *testing.T) {
+	// arguments_json is optional; omitting it defaults to {}.
+	mcp := &stubMCP{
+		tools: map[string][]contracts.MCPToolDTO{
+			"plugin:srv1": {{Name: "list", Description: "List things"}},
+		},
 	}
-	if !strings.Contains(err.Error(), "arguments_json") {
-		t.Errorf("expected arguments_json error, got %v", err)
+	tb := testToolbox(nil,
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "files", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+		},
+		mcp,
+	)
+	out, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"srv1:list"}`))
+	if err != nil {
+		t.Fatalf("mcp_call: %v", err)
+	}
+	if !strings.Contains(out, "ok") {
+		t.Errorf("expected tool output, got: %s", out)
+	}
+	if mcp.lastArgs == nil {
+		t.Error("expected empty args map, got nil")
+	}
+	if len(mcp.lastArgs) != 0 {
+		t.Errorf("expected empty args, got %v", mcp.lastArgs)
 	}
 }
 
@@ -725,8 +742,11 @@ func TestMcpCallInvalidArgumentsJSON(t *testing.T) {
 // string; the open-object variant (additionalProperties:true, no fixed
 // properties) made Luna emit arguments:{} every round because function-call
 // generation has no affordance for properties absent from the schema. The
-// schema must require arguments_json (a JSON-encoded string of the MCP
-// tool's parameters) so the model always produces a payload.
+// schema keeps arguments_json as a string field (not an open object) so
+// function-call generation always produces a predictable payload. It is no
+// longer required — omitting it defaults to {} — but the property type is
+// string to maintain provider compatibility (avoiding the open-object bug
+// that made Luna emit arguments:{} every round).
 func TestMcpCallSchemaAdvertisesArgumentsJSON(t *testing.T) {
 	tb := testToolbox(nil, nil, &stubMCP{})
 	var def *application.ToolInfo
@@ -764,17 +784,39 @@ func TestMcpCallSchemaAdvertisesArgumentsJSON(t *testing.T) {
 	if len(reqAny) == 0 {
 		t.Fatal("mcp_call schema must declare required fields")
 	}
-	hasRef, hasArgs := false, false
+	hasRef := false
 	for _, r := range reqAny {
-		switch r {
-		case "ref":
+		if r == "ref" {
 			hasRef = true
-		case "arguments_json":
-			hasArgs = true
 		}
 	}
-	if !hasRef || !hasArgs {
-		t.Errorf("required must include ref and arguments_json, got %v", reqAny)
+	if !hasRef {
+		t.Errorf("required must include ref, got %v", reqAny)
+	}
+}
+
+func TestMcpCallAcceptsObjectArgumentsJSON(t *testing.T) {
+	// Canonical form: arguments_json is a JSON object directly (matching MCP spec).
+	mcp := &stubMCP{
+		tools: map[string][]contracts.MCPToolDTO{
+			"plugin:srv1": {{Name: "read", Description: "Read a file", InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`)}},
+		},
+	}
+	tb := testToolbox(nil,
+		[]*domain.Plugin{
+			{Manifest: domain.PluginManifest{ID: "srv1", Name: "files", MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"}}},
+		},
+		mcp,
+	)
+	_, err := tb.Execute(context.Background(), "mcp_call", []byte(`{"ref":"srv1:read","arguments_json":{"path":"/etc/hosts","offset":0}}`))
+	if err != nil {
+		t.Fatalf("mcp_call: %v", err)
+	}
+	if mcp.lastArgs["path"] != "/etc/hosts" {
+		t.Errorf("expected path=/etc/hosts passed through, got %v", mcp.lastArgs)
+	}
+	if mcp.lastArgs["offset"] != float64(0) {
+		t.Errorf("expected offset=0 passed through, got %v", mcp.lastArgs)
 	}
 }
 
@@ -1398,6 +1440,34 @@ func TestSkillSaveWithPath_emptyPathUsesSaveNotWriteFile(t *testing.T) {
 	// Empty path must go through Save (metadata + SKILL.md), not WriteFile.
 	if len(store.written) != 0 {
 		t.Fatalf("WriteFile should not be called for empty path, got %v", store.written)
+	}
+}
+
+// skillSaveRecordingStore verifies the contract between the toolbox and the
+// filesystem skill store: for a new skill, Save receives an empty ID so the
+// store can derive the lowercase folder ID from the validated name.
+type skillSaveRecordingStore struct {
+	*stubSkillStore
+	saved *domain.Skill
+}
+
+func (s *skillSaveRecordingStore) Save(skill *domain.Skill) error {
+	s.saved = skill
+	return nil
+}
+
+func TestSkillSaveNewSkillLeavesIDForStoreToDerive(t *testing.T) {
+	store := &skillSaveRecordingStore{stubSkillStore: &stubSkillStore{}}
+	tb := &Toolbox{Skills: store, Plugins: &stubPluginStore{}, MCP: &stubMCP{}}
+	_, err := tb.Execute(context.Background(), "skill_save", []byte(`{"name":"new-skill","description":"Reusable workflow","content":"# New skill\n"}`))
+	if err != nil {
+		t.Fatalf("skill_save new skill: %v", err)
+	}
+	if store.saved == nil {
+		t.Fatal("Save was not called")
+	}
+	if store.saved.ID != "" {
+		t.Fatalf("new skill ID = %q, want empty so the store derives it from name", store.saved.ID)
 	}
 }
 

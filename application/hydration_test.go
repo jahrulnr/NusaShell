@@ -379,63 +379,63 @@ func TestHydrationTodoList(t *testing.T) {
 	}
 }
 
-func TestHydrationTodoListWithGoal(t *testing.T) {
+func TestHydrationTodoListWithBrief(t *testing.T) {
 	port := &fakeTodoPort{
 		items: map[string][]domain.TodoItem{
 			"conv_1": {
 				{ID: "1", Content: "Step 1", Status: domain.TodoInProgress},
 			},
 		},
-		goals: map[string]string{
+		briefs: map[string]string{
 			"conv_1": "Build a CLI tool that converts Markdown to HTML with custom templates.",
 		},
 	}
 	b := NewHydrationBuilder(HydrationSource{Todos: port, ConvID: "conv_1"})
 	result := b.Build()
 	todoContent := hydrationResultByName(t, result, "todo_list")
-	if !strings.Contains(todoContent, "USER GOAL") {
-		t.Errorf("expected USER GOAL header, got: %s", todoContent)
+	if !strings.Contains(todoContent, "USER BRIEF") {
+		t.Errorf("expected USER BRIEF header, got: %s", todoContent)
 	}
 	if !strings.Contains(todoContent, "Build a CLI tool that converts Markdown") {
-		t.Errorf("expected goal text, got: %s", todoContent)
+		t.Errorf("expected brief text, got: %s", todoContent)
 	}
 	if !strings.Contains(todoContent, "CURRENT TASKS") {
 		t.Errorf("expected CURRENT TASKS header, got: %s", todoContent)
 	}
-	// Goal should appear before tasks
-	goalIdx := strings.Index(todoContent, "USER GOAL")
+	// Brief should appear before tasks
+	briefIdx := strings.Index(todoContent, "USER BRIEF")
 	tasksIdx := strings.Index(todoContent, "CURRENT TASKS")
-	if goalIdx == -1 || tasksIdx == -1 || goalIdx > tasksIdx {
-		t.Errorf("goal should appear before tasks, goalIdx=%d tasksIdx=%d", goalIdx, tasksIdx)
+	if briefIdx == -1 || tasksIdx == -1 || briefIdx > tasksIdx {
+		t.Errorf("brief should appear before tasks, briefIdx=%d tasksIdx=%d", briefIdx, tasksIdx)
 	}
 }
 
-func TestHydrationTodoListGoalOnly(t *testing.T) {
+func TestHydrationTodoListBriefOnly(t *testing.T) {
 	port := &fakeTodoPort{
 		items: map[string][]domain.TodoItem{},
-		goals: map[string]string{
+		briefs: map[string]string{
 			"conv_1": "Refactor the auth module to use JWT.",
 		},
 	}
 	b := NewHydrationBuilder(HydrationSource{Todos: port, ConvID: "conv_1"})
 	result := b.Build()
 	todoContent := hydrationResultByName(t, result, "todo_list")
-	if !strings.Contains(todoContent, "USER GOAL") {
-		t.Errorf("expected USER GOAL header, got: %s", todoContent)
+	if !strings.Contains(todoContent, "USER BRIEF") {
+		t.Errorf("expected USER BRIEF header, got: %s", todoContent)
 	}
 	if strings.Contains(todoContent, "CURRENT TASKS") {
 		t.Errorf("should not have CURRENT TASKS when no items, got: %s", todoContent)
 	}
 }
 
-// TestHydrationTodoListHiddenWhenEmpty pins the dynamic rule: no goal and no
+// TestHydrationTodoListHiddenWhenEmpty pins the dynamic rule: no brief and no
 // open items → the todo_list slot is omitted entirely (not an empty stub).
 func TestHydrationTodoListHiddenWhenEmpty(t *testing.T) {
 	port := &fakeTodoPort{items: map[string][]domain.TodoItem{}}
 	result := NewHydrationBuilder(HydrationSource{Todos: port, ConvID: "conv_1"}).Build()
 	for _, c := range result.Messages[0].ToolCalls {
 		if c.Name == "todo_list" {
-			t.Fatal("todo_list slot must be hidden when there is no goal and no open items")
+			t.Fatal("todo_list slot must be hidden when there is no brief and no open items")
 		}
 	}
 	// Nil port: also hidden.
@@ -449,19 +449,19 @@ func TestHydrationTodoListHiddenWhenEmpty(t *testing.T) {
 
 // fakeTodoPort is a minimal in-memory ConversationTodoPort for testing.
 type fakeTodoPort struct {
-	items map[string][]domain.TodoItem
-	goals map[string]string
+	items  map[string][]domain.TodoItem
+	briefs map[string]string
 }
 
 func (f *fakeTodoPort) Get(convID string) []domain.TodoItem {
 	return f.items[convID]
 }
 
-func (f *fakeTodoPort) GetGoal(convID string) string {
-	if f.goals == nil {
+func (f *fakeTodoPort) GetBrief(convID string) string {
+	if f.briefs == nil {
 		return ""
 	}
-	return f.goals[convID]
+	return f.briefs[convID]
 }
 
 func (f *fakeTodoPort) Set(convID string, items []domain.TodoItem) {
@@ -471,16 +471,16 @@ func (f *fakeTodoPort) Set(convID string, items []domain.TodoItem) {
 	f.items[convID] = items
 }
 
-func (f *fakeTodoPort) SetGoal(convID string, goal string) {
-	if f.goals == nil {
-		f.goals = map[string]string{}
+func (f *fakeTodoPort) SetBrief(convID string, goal string) {
+	if f.briefs == nil {
+		f.briefs = map[string]string{}
 	}
-	f.goals[convID] = goal
+	f.briefs[convID] = goal
 }
 
 func (f *fakeTodoPort) Clear(convID string) {
 	delete(f.items, convID)
-	delete(f.goals, convID)
+	delete(f.briefs, convID)
 }
 
 func TestFilterHydrationRemovesAll(t *testing.T) {

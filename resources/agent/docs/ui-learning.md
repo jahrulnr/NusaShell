@@ -87,7 +87,7 @@ Force-directed graph (vis-network) of skills, memory entries, and their edges. R
 
 ## Learning log
 
-Autolearn activity feed from the trajectory log (review runs, extraction, edge building, consolidation, decay, prune), newest first. Review entries show a status badge (done or error) with the error message when failed, the source conversation, the mutations saved (kind, tool, saved snippet), per-type extras, and a View transcript button that expands the background review agent's own conversation (its LLM exchanges + tool calls + tool results) inline. A running indicator appears at the top while a review is in-flight. Refresh reloads the feed.
+Autolearn activity feed from the trajectory log (review runs, extraction, edge building, consolidation, decay, prune), newest first. Review entries show a status badge (done or error) with the error message when failed, a compact Source <title> line (raw conversation id hidden), the saved outcomes (kind + snippet) or an explicit Nothing to save. line, per-type extras, and a View review details button. Expanding it replays what the background review agent did exactly like an Agent-view conversation - Thinking disclosures per round, terminal-style tool cards with input/output panels, short narration notes, and the final verdict - but never the replayed user transcript. A running indicator appears at the top while a review is in-flight. Refresh reloads the feed.
 
 - **Learning log count** (`#learning-log-count`):
   - Section: Learning
@@ -101,4 +101,4 @@ Autolearn activity feed from the trajectory log (review runs, extraction, edge b
 - **Learning log** (`#learning-log`):
   - Section: Learning
   - Type: list
-  - Notes: Trajectory events; review entries have an Open in Agent button.
+  - Notes: Trajectory events; review entries have done/error/skipped status badges. Cooldown skips are distinct from completed reviews. Completed review entries have a View review details button that expands the background review agent's activity digest inline.

@@ -100,6 +100,9 @@ Before saving a fact, decide: is this a **static fact** (memory) or a
 - Do NOT save transient task state, one-off requests, temporary debugging
   steps or workarounds, environment-failure folklore, secrets or API keys,
   or anything already captured in skills, memory, or documentation.
+- Temporary task notes are not memory material at all: they belong in the
+  foreground agent's `todo.brief` working note, which survives compaction
+  for the current conversation. Never promote them into primary.
 
 {{skill_review_rules}}
 

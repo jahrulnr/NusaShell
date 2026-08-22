@@ -264,7 +264,7 @@ func TestHandleLearningReviewTranscript(t *testing.T) {
 	dir := t.TempDir()
 	msgs := []ChatMessage{
 		{Role: "user", Content: "transcript"},
-		{Role: "assistant", ToolCalls: []domain.ToolCall{
+		{Role: "assistant", Reasoning: "checking stored memories first", ToolCalls: []domain.ToolCall{
 			{ID: "tc_1", Name: "memory_save", Args: `{"content":"x"}`, Status: "ok", Output: "Saved"},
 		}},
 		{Role: "tool", ToolResult: &ToolResult{ToolCallID: "tc_1", Name: "memory_save", Content: "Saved"}},
@@ -288,6 +288,9 @@ func TestHandleLearningReviewTranscript(t *testing.T) {
 	}
 	if result.Messages[1].ToolCalls[0].Name != "memory_save" {
 		t.Errorf("tool call = %+v", result.Messages[1].ToolCalls[0])
+	}
+	if result.Messages[1].Reasoning != "checking stored memories first" {
+		t.Errorf("reasoning not mapped: %q", result.Messages[1].Reasoning)
 	}
 	if result.Messages[2].ToolResult == nil || result.Messages[2].ToolResult.Name != "memory_save" {
 		t.Errorf("tool result = %+v", result.Messages[2].ToolResult)
