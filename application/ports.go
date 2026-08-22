@@ -135,6 +135,13 @@ type FragmentStore interface {
 	Search(filter domain.FragmentSearchFilter) []domain.FragmentSearchHit
 }
 
+// FragmentSaveIfAbsent is an optional capability for fragment stores that can
+// atomically enforce exact-content idempotency. Callers should fall back to a
+// deterministic List scan when a store does not implement it.
+type FragmentSaveIfAbsent interface {
+	SaveIfAbsent(f *domain.MemoryFragment) (existing *domain.MemoryFragment, saved bool, err error)
+}
+
 // LearningEdgeStore persists bitemporal edges between learning nodes.
 type LearningEdgeStore interface {
 	List() []*domain.LearningEdge

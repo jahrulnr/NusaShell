@@ -1236,7 +1236,7 @@ type LearningLogEntryDTO struct {
 	ConversationID    string                     `json:"conversation_id,omitempty"`
 	ConversationTitle string                     `json:"conversation_title,omitempty"`
 	ReviewID          string                     `json:"review_id,omitempty"`
-	Status            string                     `json:"status,omitempty"` // done|error (review only)
+	Status            string                     `json:"status,omitempty"` // done|error|skipped (review only; skipped reasons are in detail)
 	Error             string                     `json:"error,omitempty"`  // failure message (review, status=error)
 	Mutations         []LearningLogMutationDTO   `json:"mutations,omitempty"`
 	Detail            map[string]json.RawMessage `json:"detail,omitempty"`

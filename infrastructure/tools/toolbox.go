@@ -113,7 +113,7 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "skill_read", Description: "Read a text file inside an installed skill (default SKILL.md). Pass path for support files (e.g. references/x.md) and offset/max_chars for pagination of long files.", InputSchema: obj("object", props("name", str("Skill id (from skill_list or skill_search)"), "path", str("Relative file path inside the skill folder; defaults to SKILL.md"), "offset", intSchema("Character offset for pagination (default 0)"), "max_chars", intSchema("Maximum characters to return (default 20000, max 100000)")), "name")},
 		{Name: "skill_save", Description: "Create or update a skill, or write a support file inside an existing skill. When path is set, write content to that file (e.g. references/errors.md, templates/config.yaml, scripts/verify.sh) — the skill must already exist. When path is omitted, create or update the skill's SKILL.md body and metadata (name, description). Skills should be reusable procedures or domain knowledge, not one-off task notes.", InputSchema: obj("object", props("id", str("Existing skill id to update (omit to create new; ignored when path is set)"), "name", str("Skill name (lowercase with hyphens, matches folder name)"), "description", str("Short description (max 1024 chars); ignored when path is set"), "path", str("Relative file path inside the skill folder (e.g. references/x.md); defaults to SKILL.md when omitted"), "content", str("Full file content")), "name", "content")},
 		{Name: "skill_files", Description: "List the files inside an installed skill folder (SKILL.md + support files) with size and editability, to discover references/guides before skill_read.", InputSchema: obj("object", props("name", str("Skill id")), "name")},
-		{Name: "memory_save", Description: "Save a fact to long-term memory as a searchable fragment. Fragments are unlimited and indexed by content + metadata (category, project, task, tags). Use memory_search to retrieve them later.", InputSchema: obj("object", props("content", str("Fact or observation to remember"), "category", strEnum("Memory category", "project", "user", "task", "general"), "project", str("Optional project/workspace label"), "task", str("Optional task label"), "tags", arr("Optional tags for filtering")), "content")},
+		{Name: "memory_save", Description: "Save a fact to long-term memory as a searchable fragment. Exact normalized duplicates are idempotent and return the existing fragment instead of creating a copy. Fragments are unlimited and indexed by content + metadata (category, project, task, tags). Use memory_search to retrieve them later.", InputSchema: obj("object", props("content", str("Fact or observation to remember"), "category", strEnum("Memory category", "project", "user", "task", "general"), "project", str("Optional project/workspace label"), "task", str("Optional task label"), "tags", arr("Optional tags for filtering")), "content")},
 		{Name: "memory_replace", Description: "Update memory. For primary (target=\"primary\"): replace a substring of the primary document body with new content, or rewrite the entire body by omitting old_text. For fragments (target=\"fragment\"): update a fragment by id.", InputSchema: obj("object", props("target", strEnum("Update target: \"primary\" (always-injected document) or \"fragment\" (searchable archive)", "primary", "fragment"), "old_text", str("For primary: substring of the document to replace (omit to rewrite the entire body)"), "id", str("For fragment: fragment id to update"), "content", str("New content")), "target", "content")},
 		{Name: "memory_search", Description: "Search memory fragments by content (BM25) with optional metadata filters (category, project, task, tags). Returns ranked results with scores.", InputSchema: obj("object", props("query", str("Search query"), "category", strEnum("Optional category filter", "project", "user", "task", "general"), "project", str("Optional project filter"), "task", str("Optional task filter"), "tags", arr("Optional tags filter (ALL must match)"), "limit", intSchema("Max results, default 20")), "query")},
 		{Name: "memory_list", Description: "List memory entries. Target \"primary\" lists the always-injected working set; target \"fragments\" lists the searchable archive (with optional metadata filters).", InputSchema: obj("object", props("target", strEnum("List target: \"primary\" or \"fragments\" (default)", "primary", "fragments"), "category", strEnum("Optional fragment category filter", "project", "user", "task", "general"), "project", str("Optional fragment project filter"), "limit", intSchema("Max fragment results, default 50")))},
@@ -435,11 +435,29 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			Project:  args.Project,
 			Task:     args.Task,
 			Tags:     args.Tags,
-			Content:  args.Content,
+			Content:  domain.NormalizeMemoryContent(args.Content),
 			Source:   "agent",
 		}
-		if err := t.Fragments.Save(frag); err != nil {
-			return "", err
+		// Prefer the store's atomic capability. The fallback keeps custom/test
+		// stores compatible while still making memory_save idempotent.
+		if idempotent, ok := t.Fragments.(application.FragmentSaveIfAbsent); ok {
+			existing, saved, err := idempotent.SaveIfAbsent(frag)
+			if err != nil {
+				return "", err
+			}
+			if !saved {
+				return yamlBlock(map[string]any{"status": "unchanged", "reason": "exact_duplicate", "fragment_id": existing.ID, "category": existing.Category}), nil
+			}
+		} else {
+			want := domain.NormalizeMemoryContent(frag.Content)
+			for _, existing := range t.Fragments.List(domain.FragmentSearchFilter{}) {
+				if domain.NormalizeMemoryContent(existing.Content) == want {
+					return yamlBlock(map[string]any{"status": "unchanged", "reason": "exact_duplicate", "fragment_id": existing.ID, "category": existing.Category}), nil
+				}
+			}
+			if err := t.Fragments.Save(frag); err != nil {
+				return "", err
+			}
 		}
 		return yamlBlock(map[string]any{"status": "saved", "fragment_id": frag.ID, "category": frag.Category}), nil
 
@@ -471,7 +489,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			if err := t.Primary.Replace(args.OldText, args.Content); err != nil {
 				return "", err
 			}
-			return yamlBlock(map[string]any{"status": "replaced", "target": "primary", "matched": args.OldText}), nil
+			return yamlBlock(map[string]any{"status": "replaced", "target": "primary"}), nil
 		case "fragment":
 			if t.Fragments == nil {
 				return "", fmt.Errorf("fragment store not configured")
@@ -1411,9 +1429,11 @@ func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error)
 	if brief != "" {
 		t.Todos.SetBrief(conversationID, brief)
 	}
-	current := t.Todos.Get(conversationID)
-	currentBrief := t.Todos.GetBrief(conversationID)
-	summary := domain.SummarizeTodos(current)
+	// Return a compact acknowledgment only: summary counts. The full item
+	// list and brief are NOT echoed back — the agent just sent them, and
+	// the UI receives the complete list via the agent.todo.updated event.
+	// Echoing wastes tokens (the brief alone can be ~10k tokens).
+	summary := domain.SummarizeTodos(items)
 	meta := map[string]any{
 		"ok":           true,
 		"conversation": conversationID,
@@ -1422,18 +1442,7 @@ func (t *Toolbox) execTodo(ctx context.Context, argsJSON []byte) (string, error)
 		"in_progress":  summary.InProgress,
 		"completed":    summary.Completed,
 	}
-	var outItems []any
-	for _, item := range current {
-		outItems = append(outItems, map[string]any{
-			"id":      item.ID,
-			"content": item.Content,
-			"status":  string(item.Status),
-		})
-	}
-	if currentBrief != "" {
-		meta["brief"] = currentBrief
-	}
-	return yamlJSONL(meta, outItems), nil
+	return yamlJSONL(meta, nil), nil
 }
 
 // execAskQuestion pauses the turn and asks the user a structured clarifying

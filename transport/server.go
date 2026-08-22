@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"nusashell/application"
@@ -26,7 +27,7 @@ type Server struct {
 func New(app *application.App, logger *slog.Logger, static http.Handler, dev bool) *Server {
 	mux := http.NewServeMux()
 	s := &Server{App: app, Logger: logger, Static: static, Dev: dev, mux: mux}
-	mux.HandleFunc("POST /rpc", s.handleRPC)
+	mux.HandleFunc("POST /rpc/{method...}", s.handleRPC)
 	mux.HandleFunc("GET /ws", s.handleWS)
 	mux.HandleFunc("GET /local-file", s.handleLocalFile)
 	// Sound assets: serve embedded notification sounds (turn-complete,
@@ -56,27 +57,26 @@ const maxRPCBodyBytes = 64 << 20
 
 // ---- HTTP RPC ----
 
+// handleRPC dispatches path-based RPC calls. The method is derived from
+// the URL path (e.g. /rpc/agent/conversations/list → "agent.conversations.list")
+// so each call is individually visible in the browser Network tab. The
+// request body carries the payload (and optionally a redundant method
+// field for debug readability); the path is authoritative.
 func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
+	method := strings.ReplaceAll(r.PathValue("method"), "/", ".")
 	var req contracts.Request
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRPCBodyBytes)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, contracts.ErrResult(contracts.CodeValidation, "malformed request body"))
 		return
 	}
-	// Audit aid: accept the method as ?event=<method> so the browser
-	// Network tab shows which RPC call each /rpc request performs. The
-	// query value wins when both are present; clients that send only the
-	// body method are unaffected.
-	if ev := r.URL.Query().Get("event"); ev != "" {
-		req.Method = ev
-	}
 	start := time.Now()
-	result, rpcErr := s.App.Dispatch(r.Context(), req.Method, req.Payload)
+	result, rpcErr := s.App.Dispatch(r.Context(), method, req.Payload)
 	if rpcErr != nil {
-		s.Logger.Debug("rpc error", "method", req.Method, "code", rpcErr.Code, "elapsed_ms", time.Since(start).Milliseconds())
+		s.Logger.Debug("rpc error", "method", method, "code", rpcErr.Code, "elapsed_ms", time.Since(start).Milliseconds())
 		writeJSON(w, http.StatusOK, contracts.ErrResult(rpcErr.Code, rpcErr.Message))
 		return
 	}
-	s.Logger.Debug("rpc", "method", req.Method, "elapsed_ms", time.Since(start).Milliseconds())
+	s.Logger.Debug("rpc", "method", method, "elapsed_ms", time.Since(start).Milliseconds())
 	writeJSON(w, http.StatusOK, contracts.OKResult(result))
 }
 

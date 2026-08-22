@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -797,449 +798,40 @@ func (a *App) goSafe(source string, fn func()) {
 
 // Dispatch routes an RPC method to its use case. Transport handlers are the
 // only other caller of this method, which keeps handler-level tests honest.
+// Domain prefixes (agent.*, ai.*, acp.*, etc.) are delegated to per-domain
+// dispatcher methods; the switch below handles the remaining leaf methods.
 func (a *App) Dispatch(ctx context.Context, method string, payload json.RawMessage) (any, *contracts.RPCError) {
+	// Domain prefix routing: delegate to per-domain dispatchers so each
+	// domain owns its routing table in a separate file.
+	switch {
+	case strings.HasPrefix(method, "agent."):
+		return a.dispatchAgent(ctx, method, payload)
+	case strings.HasPrefix(method, "ai."):
+		return a.dispatchAI(method, payload)
+	case strings.HasPrefix(method, "acp."):
+		return a.dispatchAcp(method, payload)
+	case strings.HasPrefix(method, "plugin."):
+		return a.dispatchPlugin(method, payload)
+	case strings.HasPrefix(method, "skills."):
+		return a.dispatchSkills(method, payload)
+	case strings.HasPrefix(method, "memory."):
+		return a.dispatchMemory(method, payload)
+	case strings.HasPrefix(method, "learning."):
+		return a.dispatchLearning(method, payload)
+	case strings.HasPrefix(method, "docs."):
+		return a.dispatchDocs(method, payload)
+	case strings.HasPrefix(method, "settings."):
+		return a.dispatchSettings(method, payload)
+	case strings.HasPrefix(method, "logs."):
+		return a.dispatchLogs(method, payload)
+	case strings.HasPrefix(method, "telemetry."):
+		return a.dispatchTelemetry(method, payload)
+	case strings.HasPrefix(method, "ci."), strings.HasPrefix(method, "automation."):
+		return a.handleCI(ctx, method, payload)
+	}
 	switch method {
 	case contracts.MethodAppInfo:
 		return a.handleAppInfo()
-	case contracts.MethodConversationsList:
-		return a.handleConversationsList()
-	case contracts.MethodConversationsCreate:
-		var req contracts.ConversationCreateRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleConversationsCreate(req)
-	case contracts.MethodConversationsGet:
-		var req contracts.ConversationIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleConversationsGet(req)
-	case contracts.MethodConversationsChunk:
-		var req contracts.ConversationChunkRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleConversationsChunk(req)
-	case contracts.MethodConversationsRename:
-		var req contracts.ConversationRenameRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleConversationsRename(req)
-	case contracts.MethodConversationsDelete:
-		var req contracts.ConversationIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleConversationsDelete(req)
-	case contracts.MethodConversationsPickWorkspace:
-		var req contracts.ConversationIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleConversationsPickWorkspace(req)
-	case contracts.MethodTurnsStart:
-		var req contracts.TurnStartRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleTurnsStart(ctx, req)
-	case contracts.MethodTurnsStop:
-		var req contracts.TurnStopRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleTurnsStop(req)
-	case contracts.MethodTurnsRetry:
-		var req contracts.TurnRetryRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleTurnsRetry(ctx, req)
-	case contracts.MethodTurnsSteer:
-		var req contracts.TurnSteerRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleTurnsSteer(ctx, req)
-	case contracts.MethodTurnsCancelSteer:
-		var req contracts.TurnCancelSteerRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleTurnsCancelSteer(req)
-	case contracts.MethodTurnsActive:
-		var req contracts.ConversationIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleTurnsActive(req)
-	case contracts.MethodAskAnswer:
-		var req contracts.AskAnswerRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleAskAnswer(req)
-	case contracts.MethodAskCancel:
-		var req contracts.AskCancelRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleAskCancel(req)
-	case contracts.MethodAskPending:
-		var req contracts.AskPendingListRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleAskPendingList(req)
-	case contracts.MethodProvidersList:
-		return a.handleProvidersList()
-	case contracts.MethodProvidersSave:
-		var req contracts.ProviderSaveRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleProvidersSave(req)
-	case contracts.MethodProvidersDelete:
-		var req contracts.ProviderIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleProvidersDelete(req)
-	case contracts.MethodProvidersTest:
-		var req contracts.ProviderIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleProvidersTest(req)
-	case contracts.MethodProvidersImport:
-		var req contracts.ProviderIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleProvidersImport(req)
-	case contracts.MethodModelsList:
-		return a.handleModelsList()
-	case contracts.MethodCodexLogin:
-		var req contracts.CodexLoginRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleCodexLogin(req)
-	case contracts.MethodCodexImport:
-		var req contracts.CodexImportRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleCodexImport(req)
-	case contracts.MethodCodexLogout:
-		var req contracts.CodexLogoutRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleCodexLogout(req)
-	case contracts.MethodCodexAccountsList:
-		var req contracts.CodexAccountsListRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleCodexAccountsList(req)
-	case contracts.MethodCodexAccountsSwitch:
-		var req contracts.CodexAccountsSwitchRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleCodexAccountsSwitch(req)
-	case contracts.MethodCodexRefreshCircuits:
-		return a.handleCodexRefreshCircuits()
-	case contracts.MethodCodexRuntimeStatus:
-		return a.handleCodexRuntimeStatus()
-	case contracts.MethodCodexRuntimeDownload:
-		var req contracts.CodexRuntimeDownloadRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleCodexRuntimeDownload(req)
-	case contracts.MethodCodexUsage:
-		var req contracts.CodexUsageRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleCodexUsage(req)
-	case contracts.MethodTelemetryReport:
-		var req contracts.TelemetryReportRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleTelemetryReport(req)
-	case contracts.MethodSkillsList:
-		return a.handleSkillsList()
-	case contracts.MethodSkillsRead:
-		var req contracts.SkillIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleSkillsRead(req)
-	case contracts.MethodSkillsSave:
-		var req contracts.SkillSaveRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleSkillsSave(req)
-	case contracts.MethodSkillsDelete:
-		var req contracts.SkillIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleSkillsDelete(req)
-	case contracts.MethodSkillsFileRead:
-		var req contracts.SkillFileReadRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleSkillsFileRead(req)
-	case contracts.MethodSkillsInstall:
-		var req contracts.SkillInstallRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleSkillsInstall(req)
-	case contracts.MethodPluginList:
-		return a.handlePluginList()
-	case contracts.MethodPluginSave:
-		var req contracts.PluginSaveRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handlePluginSave(req)
-	case contracts.MethodPluginDelete:
-		var req contracts.PluginIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handlePluginDelete(req)
-	case contracts.MethodPluginTest:
-		var req contracts.PluginIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handlePluginTest(req)
-	case contracts.MethodPluginStop:
-		var req contracts.PluginIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handlePluginStop(req)
-	case contracts.MethodPluginToolsList:
-		return a.handlePluginToolsList()
-	case contracts.MethodPluginCatalog:
-		return a.handlePluginCatalog()
-	case contracts.MethodPluginInstall:
-		var req contracts.PluginInstallRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handlePluginInstall(req)
-	case contracts.MethodPluginUninstall:
-		var req contracts.PluginIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handlePluginUninstall(req)
-	case contracts.MethodPluginCheckUpdates:
-		return a.handlePluginCheckUpdates()
-	case contracts.MethodPluginSetAutoUpdate:
-		var req contracts.PluginSetFlagRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handlePluginSetAutoUpdate(req)
-	case contracts.MethodPluginSetAutoStart:
-		var req contracts.PluginSetFlagRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handlePluginSetAutoStart(req)
-	case contracts.MethodPluginUpdate:
-		var req contracts.PluginIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handlePluginUpdate(req)
-	case contracts.MethodMemoryList:
-		return a.handleMemoryList()
-	case contracts.MethodMemorySave:
-		var req contracts.MemorySaveRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleMemorySave(req)
-	case contracts.MethodMemorySearch:
-		var req contracts.MemorySearchRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleMemorySearch(req)
-	case contracts.MethodMemoryDelete:
-		var req contracts.MemoryIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleMemoryDelete(req)
-	case contracts.MethodLearningSearch:
-		var req contracts.LearningSearchRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleLearningSearch(req)
-	case contracts.MethodLearningGraph:
-		return a.handleLearningGraph()
-	case contracts.MethodLearningLog:
-		var req contracts.LearningLogRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleLearningLog(req)
-	case contracts.MethodLearningReviewTranscript:
-		var req contracts.LearningReviewTranscriptRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleLearningReviewTranscript(req)
-	case contracts.MethodTodosGet:
-		var req contracts.TodosGetRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleTodosGet(req)
-	case contracts.MethodTodosDelete:
-		var req contracts.TodosDeleteRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleTodosDelete(req)
-	case contracts.MethodDocsList:
-		return a.handleDocsList()
-	case contracts.MethodDocsSearch:
-		var req contracts.DocsSearchRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleDocsSearch(req)
-	case contracts.MethodDocsRead:
-		var req contracts.DocReadRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleDocsRead(req)
-	case contracts.MethodLogsList:
-		var req contracts.LogsListRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleLogsList(req)
-	case contracts.MethodLogsClear:
-		return a.handleLogsClear()
-	case contracts.MethodSettingsGet:
-		return a.handleSettingsGet()
-	case contracts.MethodSettingsSet:
-		var req contracts.SettingsSetRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleSettingsSet(req)
-	case contracts.MethodCIPipelinesList, contracts.MethodCIPipelinesRead, contracts.MethodCIPipelinesValidate,
-		contracts.MethodCIRunsStart, contracts.MethodCIRunsList, contracts.MethodCIRunsGet,
-		contracts.MethodCIRunsCancel, contracts.MethodCIRunsSteer, contracts.MethodCIRunsRetry, contracts.MethodCIJobsGet,
-		contracts.MethodCIJobsLogs, contracts.MethodCIJobsCancel, contracts.MethodCIArtifactsList,
-		contracts.MethodCIRunnersList, contracts.MethodCICacheList, contracts.MethodCICacheClear,
-		contracts.MethodAutomationList, contracts.MethodAutomationGet, contracts.MethodAutomationSave,
-		contracts.MethodAutomationDelete, contracts.MethodAutomationEnable, contracts.MethodAutomationDisable,
-		contracts.MethodAutomationRun, contracts.MethodAutomationValidate, contracts.MethodAutomationEvents,
-		contracts.MethodAutomationIngest, contracts.MethodAutomationDependents, contracts.MethodAutomationSchedules,
-		contracts.MethodAutomationCapabilities, contracts.MethodAutomationSetDisabled:
-		return a.handleCI(ctx, method, payload)
-	case contracts.MethodAcpAgentsList:
-		return a.handleAcpAgentsList()
-	case contracts.MethodAcpAgentsSave:
-		var req contracts.AcpAgentSaveRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleAcpAgentsSave(req)
-	case contracts.MethodAcpAgentsDelete:
-		var req contracts.AcpAgentIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleAcpAgentsDelete(req)
-	case contracts.MethodAcpAgentsProbe:
-		var req contracts.AcpAgentIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleAcpAgentsProbe(req)
-	case contracts.MethodAcpAgentsAuthenticate:
-		var req contracts.AcpAuthenticateRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleAcpAgentsAuthenticate(req)
-	case contracts.MethodAcpAgentsRefreshCatalog:
-		var req contracts.AcpAgentIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleAcpAgentsRefreshCatalog(req)
-	case contracts.MethodAcpRunsList:
-		var req contracts.AcpRunsListRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleAcpRunsList(req)
-	case contracts.MethodAcpRunsGet:
-		var req contracts.AcpRunIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleAcpRunsGet(req)
-	case contracts.MethodAcpRunsSteer:
-		var req contracts.AcpRunSteerRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleAcpRunsSteer(req)
-	case contracts.MethodAcpRunsStop:
-		var req contracts.AcpRunIDRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleAcpRunsStop(req)
-	case contracts.MethodAcpRunsWait:
-		var req contracts.AcpRunWaitRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleAcpRunsWait(req)
-	case contracts.MethodAcpRunsPromote:
-		var req contracts.AcpRunPromoteRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleAcpRunsPromote(req)
-	case contracts.MethodAcpRunsSetMode:
-		var req contracts.AcpRunSetModeRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleAcpRunsSetMode(req)
-	case contracts.MethodAcpPermissionDecide:
-		var req contracts.AcpPermissionDecideRequest
-		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
-			return nil, rpcErr
-		}
-		return a.handleAcpPermissionDecide(req)
 	default:
 		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: fmt.Sprintf("unknown method: %s", method)}
 	}

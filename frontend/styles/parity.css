@@ -1,6 +1,11 @@
 /*
  * Electron visual parity layer.
  *
+ * Layer: overlay — intentionally loaded LAST (guard-tested) so it can
+ * re-skin shared primitives (.action-btn, .mini-btn, inputs) and shell
+ * chrome to match the Electron workbench. View-specific rules belong in
+ * their own view stylesheets; do not add single-view rules here either.
+ *
  * The Go surface intentionally has fewer views, but the shell chrome and the
  * shared Agent/Skills surfaces use the same final workbench treatment as the
  * Electron renderer. Keep these rules last so the parity contract is obvious
@@ -227,7 +232,6 @@ summary { outline: none; }
 
 .content {
   position: relative;
-  padding: clamp(28px, 4vw, 56px) clamp(28px, 6vw, 76px);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background:
@@ -294,9 +298,6 @@ summary { outline: none; }
 
 /* View frame and headers */
 .content:has(.agent-view.active) { padding: 0; }
-.content:has(.skills-view.active),
-.content:has(.logs-view.active),
-.content:has(.providers-view.active),
 .content:has(.mcp-view.active),
 .content:has(.settings-view.active) {
   --workspace-gutter: clamp(12px, 2vw, 24px);

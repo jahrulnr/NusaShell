@@ -1,14 +1,15 @@
-/* ============ Skills workspace ============ */
+/* ============ Skills workspace ============
+ *
+ * Layer: view — scoped to [data-view="skills"].
+ */
 .skills-header .action-btn { margin: auto 0; }
-.skills-view .view-body { margin-top: 1rem; }
+.skills-view .view-body { padding: 0; margin-top: -1rem; }
 .skills-workspace {
   display: grid;
   grid-template-columns: var(--skills-col-1, 250px) 4px var(--skills-col-2, 240px) 4px minmax(0, 1fr);
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
   background: var(--harbor);
 }
 .skills-catalog,

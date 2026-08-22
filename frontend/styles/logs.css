@@ -1,4 +1,7 @@
-/* ============ Logs workspace ============ */
+/* ============ Logs workspace ============
+ *
+ * Layer: view — scoped to [data-view="logs"].
+ */
 .log-header { margin: auto 0; display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
 .log-count { margin: auto 0; color: var(--text-faint); font-family: var(--font-mono); font-size: 11px; }
 .log-filters { margin-top: 1rem; display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }

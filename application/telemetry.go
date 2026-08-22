@@ -1,6 +1,7 @@
 package application
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 	"time"
@@ -8,6 +9,21 @@ import (
 	"nusashell/contracts"
 	"nusashell/domain"
 )
+
+// dispatchTelemetry routes telemetry.* RPC methods to their handlers.
+// Called by App.Dispatch for any method whose first segment is "telemetry".
+func (a *App) dispatchTelemetry(method string, payload json.RawMessage) (any, *contracts.RPCError) {
+	switch method {
+	case contracts.MethodTelemetryReport:
+		var req contracts.TelemetryReportRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleTelemetryReport(req)
+	default:
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "unknown telemetry method: " + method}
+	}
+}
 
 // handleTelemetryReport aggregates Usage data from all conversations and
 // returns a dashboard payload: summary metrics, daily time-series, and

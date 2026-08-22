@@ -1,4 +1,7 @@
-/* ============ Providers workspace ============ */
+/* ============ Providers workspace ============
+ *
+ * Layer: view — scoped to [data-view="providers"].
+ */
 .providers-view .view-header .action-btn { margin: auto 0; }
 .provider-registry { margin-top: 1rem; display: grid; grid-template-columns: repeat(auto-fill, minmax(235px, 1fr)); gap: 13px; }
 .provider-registry-card {

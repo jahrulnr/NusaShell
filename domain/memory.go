@@ -1,6 +1,10 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+	"unicode"
+)
 
 // ---- Two-tier memory ----
 //
@@ -47,6 +51,20 @@ const (
 	FragmentCategoryTask    = "task"    // task-specific observations
 	FragmentCategoryGeneral = "general" // anything that does not fit the above
 )
+
+// NormalizeMemoryContent returns the canonical form used for exact memory
+// duplicate checks. It normalizes line endings, removes trailing whitespace
+// from each line, and trims the document boundary without changing internal
+// indentation or case-sensitive content such as paths, symbols, and commands.
+func NormalizeMemoryContent(content string) string {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\r", "\n")
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRightFunc(line, unicode.IsSpace)
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
 
 // MemoryFragment is one searchable memory archive entry, stored as a
 // single markdown file under memory/fragments/<id>.md. The YAML

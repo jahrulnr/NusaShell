@@ -1,3 +1,9 @@
+/* App shell layout: titlebar, sidebar, content frame.
+ *
+ * Layer: shell — chrome that wraps every view. Hosts no per-view rules;
+ * view workspaces live in their own stylesheets.
+ */
+
 /* ============ Title bar ============ */
 .titlebar {
   height: 56px;
@@ -161,44 +167,3 @@
   overflow-y: auto;
   position: relative;
 }
-
-/* ============ Settings workspace ============ */
-.settings-body { display: grid; align-content: start; grid-template-columns: repeat(auto-fit, minmax(min(100%, 390px), 560px)); gap: 14px; }
-.settings-card {
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-lg);
-  padding: 18px;
-  background: var(--panel);
-}
-.settings-card-title { color: var(--text); font-size: 14px; font-weight: 700; }
-.settings-card-copy { margin: 5px 0 16px; color: var(--text-faint); font-size: 11.5px; line-height: 1.55; }
-.settings-field { display: grid; gap: 6px; padding: 12px 0; color: var(--text-dim); font-size: 12px; border-top: 1px solid var(--border-soft); }
-.settings-field input, .settings-field select { width: 100%; }
-.settings-field small { color: var(--text-faint); font-size: 10.5px; line-height: 1.45; }
-.settings-toggle {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto 36px;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 0;
-  border-top: 1px solid var(--border-soft);
-  cursor: pointer;
-}
-.settings-toggle strong, .settings-toggle small { display: block; }
-.settings-toggle strong { color: var(--text-dim); font-size: 12px; }
-.settings-toggle small { margin-top: 3px; color: var(--text-faint); font-size: 10.5px; line-height: 1.45; }
-.settings-toggle input { position: absolute; opacity: 0; pointer-events: none; }
-.settings-toggle .toggle-slider { position: relative; inset: auto; grid-column: 3; grid-row: 1; width: 36px; height: 20px; }
-.settings-toggle input:checked + .toggle-slider { background: var(--accent); border-color: var(--accent); }
-.settings-toggle input:checked + .toggle-slider::before { transform: translateX(16px); background: white; }
-.settings-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-soft); }
-.settings-inline-action { margin-top: 0; }
-.settings-header-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
-.settings-save-status { min-width: 0; color: var(--text-faint); font: 10.5px var(--font-mono); }
-.settings-connection { display: flex; align-items: center; gap: 8px; color: var(--text-dim); font: 11px var(--font-mono); }
-.settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border-soft); color: var(--text-dim); font-size: 12px; }
-.settings-definition-list { margin: 0; }
-.settings-definition-list > div { display: grid; grid-template-columns: minmax(90px, .4fr) minmax(0, 1fr); gap: 12px; padding: 10px 0; border-top: 1px solid var(--border-soft); font-size: 11px; }
-.settings-definition-list dt { color: var(--text-faint); }
-.settings-definition-list dd { min-width: 0; margin: 0; color: var(--text-dim); overflow-wrap: anywhere; text-align: right; }
-.settings-definition-list code { color: var(--text); font: inherit; }

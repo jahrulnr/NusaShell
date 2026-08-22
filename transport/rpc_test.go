@@ -29,14 +29,13 @@ func TestRPCUnknownMethod(t *testing.T) {
 	}
 }
 
-func TestRPCQueryEventOverridesMethod(t *testing.T) {
+func TestRPCPathDerivesMethod(t *testing.T) {
 	h := newHarness(t, nil)
-	// The ?event query string is an audit aid for the browser Network tab;
-	// it must be able to tag the request even when the body method is
-	// generic (as older clients send). Unknown method still errors, proving
-	// the query value actually drives dispatch.
+	// The method is derived from the URL path (dots → slashes), not the
+	// body. A body with a wrong/generic method must still dispatch to the
+	// path-derived method. This proves the path is authoritative.
 	body := `{"method":"generic.placeholder","payload":{}}`
-	req, err := http.NewRequest(http.MethodPost, h.server.URL+"/rpc?event=app.info", strings.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, h.server.URL+"/rpc/app/info", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +68,7 @@ func TestRPCQueryEventOverridesMethod(t *testing.T) {
 
 func TestRPCMalformedBody(t *testing.T) {
 	h := newHarness(t, nil)
-	resp, err := http.Post(h.server.URL+"/rpc", "application/json", strings.NewReader("{not json"))
+	resp, err := http.Post(h.server.URL+"/rpc/no/such/method", "application/json", strings.NewReader("{not json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +86,7 @@ func TestRPCBodyLimitFitsAttachmentContract(t *testing.T) {
 	// A payload larger than the old 1MiB cap must still be parsed as JSON.
 	payload := strings.Repeat("a", 3<<20/2)
 	body := fmt.Sprintf(`{"method":"no.such.method","payload":{"x":%q}}`, payload)
-	resp, err := http.Post(h.server.URL+"/rpc", "application/json", strings.NewReader(body))
+	resp, err := http.Post(h.server.URL+"/rpc/no/such/method", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}

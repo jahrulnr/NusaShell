@@ -700,21 +700,22 @@ func (a *App) incrementToolCallCounter(conversationID string) {
 // turn.
 func (a *App) flushLearningReview(conversationID string, reason string) {
 	a.log("info", "learning", "review triggered: conv=%s reason=%s", conversationID, reason)
+	if a.ReviewAgent == nil {
+		return
+	}
+	// Reserve synchronously before launching the worker. This makes the
+	// counter transition deterministic: rejected/coalesced triggers retain
+	// their evidence, while a trigger that wins the slot resets counters
+	// immediately. The LLM work remains fire-and-forget below.
+	if !a.ReviewAgent.reserveReview(conversationID) {
+		return
+	}
 	a.learningMu.Lock()
 	a.turnsSinceReview[conversationID] = 0
 	a.toolCallsSinceReview[conversationID] = 0
 	a.learningMu.Unlock()
 	a.saveTurnCounters()
-	if a.ReviewAgent == nil {
-		return
-	}
 	a.goSafe("learning", func() {
-		// Reserve before emitting "started": a threshold event and a
-		// compaction event can race for the same conversation. A skipped
-		// review must not produce a false started/finished toast pair.
-		if !a.ReviewAgent.reserveReview(conversationID) {
-			return
-		}
 		if a.Bus != nil {
 			a.Bus.Emit(contracts.EventLearningReviewStarted, contracts.LearningReviewEvent{
 				ConversationID: conversationID,

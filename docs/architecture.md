@@ -11,7 +11,7 @@ only on a trusted network (`NUSASHELL_HOST`).
 
 ```text
 frontend/        native ES modules, no build step; embedded via go:embed
-transport/       HTTP /rpc, WebSocket /ws, static assets
+transport/       HTTP /rpc/{method...}, WebSocket /ws, static assets
 application/     use cases, agent runner, ports, event bus (Bus)
 domain/          pure entities and policies (no I/O imports)
 contracts/       wire types, method roster, golden JSON fixtures
@@ -34,7 +34,7 @@ embedded ES module with no build step.
 
 | Route | Purpose |
 | --- | --- |
-| `POST /rpc` | request/response commands and queries (`{method, payload}` → `{ok, result|error}`) |
+| `POST /rpc/{method...}` | request/response commands and queries — the method is encoded in the URL path (dots → slashes, e.g. `/rpc/agent/conversations/list`), body is `{method, payload}` → `{ok, result|error}` |
 | `GET /ws` | bidirectional: `{id, method, payload}` requests with `{id, ok, ...}` replies plus the event stream as `{type, payload}` |
 | `GET /` + assets | embedded frontend (disk in `NUSASHELL_DEV=1` mode) |
 
@@ -42,8 +42,33 @@ Events are published to an in-memory `application.Bus`; each WS
 connection subscribes. Subscribers that fall behind drop events rather than
 stall the agent loop. The frontend receives event triggers over WebSocket
 only and talks to the backend over HTTP
-`/rpc`; the SSE endpoint stays available for non-browser clients. The
+`/rpc/{method...}`; the SSE endpoint stays available for non-browser clients. The
 transports speak the same event vocabulary (`contracts`).
+
+### RPC dispatch
+
+`App.Dispatch` routes by the first dot-segment of the method to per-domain
+dispatchers, each owning its routing table in a separate file:
+
+| Prefix | Dispatcher | File |
+| --- | --- | --- |
+| `agent.*` | `dispatchAgent` | `application/agent_dispatch.go` |
+| `ai.*` | `dispatchAI` | `application/ai_dispatch.go` |
+| `acp.*` | `dispatchAcp` | `application/acp.go` |
+| `plugin.*` | `dispatchPlugin` | `application/plugin_dispatch.go` |
+| `skills.*` | `dispatchSkills` | `application/skills_dispatch.go` |
+| `memory.*` | `dispatchMemory` | `application/memory_dispatch.go` |
+| `learning.*` | `dispatchLearning` | `application/learning_dispatch.go` |
+| `docs.*` | `dispatchDocs` | `application/docs_dispatch.go` |
+| `settings.*` | `dispatchSettings` | `application/settings_dispatch.go` |
+| `logs.*` | `dispatchLogs` | `application/logs_dispatch.go` |
+| `telemetry.*` | `dispatchTelemetry` | `application/telemetry.go` |
+| `ci.*`, `automation.*` | `handleCI` | `application/ci_handlers.go` |
+| `app.info` | inline | `application/app.go` |
+
+Adding a new method means: add the constant to `contracts/`, add a case to
+the matching domain dispatcher, and add a handler-level test in
+`transport/`.
 
 ## Agent turn flow
 
@@ -71,7 +96,7 @@ to four attachments per turn, each at most 4 MiB: UTF-8 text (`text/plain`),
 PNG/JPEG/GIF/WebP images, and PDF documents. Text is sent as text; binary
 attachments are persisted and mapped to each provider's native multimodal
 wire format. Attachment UTF-8 validity, byte signatures, and data URL media
-types are validated at the application boundary. HTTP `/rpc` accepts bodies
+types are validated at the application boundary. HTTP `/rpc/{method...}` accepts bodies
 up to 64 MiB so four encoded attachments fit the envelope and plugin ZIP
 uploads (`plugin.install`) with bundled `node_modules` are accepted.
 

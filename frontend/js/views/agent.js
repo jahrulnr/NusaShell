@@ -426,6 +426,9 @@ async function openConversation(id) {
   if (token !== state.conversationLoadToken) return;
   state.conversation = conversation;
   state.messages = messages ?? [];
+  // Seal a room buffer the backend says is finished (its terminal event was
+  // missed or raced). Must happen before any buffer-driven rendering below.
+  sealStaleRoomBuffer(id, conversation?.status);
   // Seed the context badge from the backend for this room (provider-measured
   // fill preferred, else server heuristic). Resetting here prevents another
   // room's number from leaking across a switch.
@@ -580,7 +583,10 @@ async function reattachActiveRunFromBackend() {
   // entry from it so the re-attached DOM shows the full accumulated text,
   // not just the deltas that arrive after the switch.
   const liveBuffer = state.roomBuffers.get(conversationId);
-  const hasLive = liveBuffer && !liveBuffer.done && !liveBuffer.capped && liveBuffer.lastEventAt > 0;
+  // A capped buffer is still usable: it retains the newest MAX_ROOM_BUFFER_CHARS
+  // of the stream, which beats seeding an empty entry (the old behavior made
+  // the UI look like it "pulled only the latest delta" after switch-back).
+  const hasLive = liveBuffer && !liveBuffer.done && liveBuffer.lastEventAt > 0;
   state.runs.set(active.run_id, {
     msgNode: null, bubble: null, strip: null, textBox: null, reasoningEl: null,
     toolJobs: hasLive ? liveBuffer.toolJobs : new Map(),
@@ -595,36 +601,135 @@ async function reattachActiveRunFromBackend() {
   updateSendAvailability(state);
 }
 
-// reattachActiveRun checks if there's an active run for the current
-// conversation. If so, it replaces the last assistant message node (which
-// renderThread created from persisted state) with a fresh streaming
-// placeholder and wires the run's DOM references to it. Accumulated raw
-// text is re-rendered so the user sees the latest streamed content.
-function reattachActiveRun() {
-  const run = runForConversation(state.activeId);
-  if (!run) return;
-  const thread = document.getElementById('agent-thread');
-  // Find the last assistant message node in the rendered thread.
-  const assistantNodes = thread.querySelectorAll('.agent-message.assistant');
-  const lastAssistant = assistantNodes[assistantNodes.length - 1];
-  if (!lastAssistant) return;
-  // Replace it with a fresh streaming placeholder.
-  const bubble = el('div', { class: 'agent-bubble' });
-  const msgNode = el('div', { class: 'agent-message assistant agent-pending' }, bubble);
-  lastAssistant.replaceWith(msgNode);
-  // Re-create streaming elements for the current round.
+// findMessageNode locates the rendered assistant node that owns messageId.
+// renderAssistantTurn stamps dataset.messageIds so a multi-round turn merged
+// into one node can still be targeted precisely.
+function findMessageNode(thread, messageId) {
+  if (!thread || !messageId) return null;
+  return thread.querySelector(`.agent-message.assistant[data-message-ids~="${messageId}"]`);
+}
+
+// roundAlreadyPersisted reports whether the snapshot already contains content
+// for messageId (its round finished and was saved server-side). Stream mirrors
+// covering a persisted round must NOT be overlaid — renderThread already drew
+// it and re-seeding would duplicate the text.
+function roundAlreadyPersisted(messageId) {
+  if (!messageId) return false;
+  const message = state.messages.find((m) => m?.id === messageId);
+  if (!message) return false;
+  return Boolean(
+    (typeof message.content === 'string' && message.content.trim())
+    || message.steps?.length
+    || message.tool_calls?.length
+    || (typeof message.reasoning === 'string' && message.reasoning.trim()),
+  );
+}
+
+// appendRoundSection appends a fresh streaming section (reasoning + text box
+// + tool strip) to an EXISTING assistant node's bubble and returns the refs.
+// This replaces the old replaceWith approach: earlier tool rounds rendered
+// into the same node stay visible when the user switches back mid-turn.
+function appendRoundSection(node, source) {
+  let bubble = node.querySelector(':scope > .agent-bubble');
+  if (!bubble) {
+    bubble = el('div', { class: 'agent-bubble' });
+    node.prepend(bubble);
+  }
   const reasoningEl = reasoningDisclosure('');
-  reasoningEl.hidden = !run.rawReasoning;
+  reasoningEl.hidden = !source.rawReasoning;
   const textBox = el('div', { class: 'agent-bubble-text' });
   const strip = el('div', { class: 'agent-tool-stack' });
   strip.hidden = true;
   bubble.append(reasoningEl, textBox, strip);
-  // Re-render accumulated content.
+  return { bubble, reasoningEl, textBox, strip };
+}
+
+// buildStreamNode creates a brand-new streaming node for a message the
+// snapshot does not contain yet and appends it to the end of the thread.
+function buildStreamNode(thread, messageId, source) {
+  const bubble = el('div', { class: 'agent-bubble' });
+  const msgNode = el('div', { class: 'agent-message assistant agent-pending' }, bubble);
+  if (messageId) msgNode.dataset.messageIds = messageId;
+  const reasoningEl = reasoningDisclosure('');
+  reasoningEl.hidden = !source.rawReasoning;
+  const textBox = el('div', { class: 'agent-bubble-text' });
+  const strip = el('div', { class: 'agent-tool-stack' });
+  strip.hidden = true;
+  bubble.append(reasoningEl, textBox, strip);
+  thread.append(msgNode);
+  return { msgNode, bubble, reasoningEl, textBox, strip };
+}
+
+// sealStaleRoomBuffer marks a room buffer terminal when the backend says the
+// conversation is not running but its buffer was never sealed (missed or
+// raced agent.turn.done/error). Without this the buffer stays live forever:
+// every switch-back overlays stale stream content over the authoritative
+// snapshot and expireCompletedBuffers never prunes it.
+function sealStaleRoomBuffer(convId, runningStatus) {
+  if (runningStatus === 'running') return;
+  const buffer = state.roomBuffers.get(convId);
+  if (!buffer || buffer.done || !buffer.runId) return;
+  if (state.runs.has(buffer.runId)) return; // genuinely live
+  buffer.done = true;
+  touchRoomBuffer(buffer);
+}
+
+// ensureRunSlot converts the snapshot node that owns run.messageId into a
+// live streaming slot, or appends a fresh node when the snapshot does not
+// contain that message yet. Existing nodes are ADDED TO, never replaced.
+function ensureRunSlot(run) {
+  const thread = document.getElementById('agent-thread');
+  if (!thread) return null;
+  const existing = findMessageNode(thread, run.messageId);
+  if (existing) {
+    existing.classList.remove('agent-message-error');
+    existing.querySelectorAll('.agent-retry-btn').forEach((n) => n.remove());
+    return { msgNode: existing, ...appendRoundSection(existing, run) };
+  }
+  return buildStreamNode(thread, run.messageId, run);
+}
+
+// reattachActiveRun checks if there's an active run for the current
+// conversation. If so, it converts the snapshot node that owns the run's
+// in-flight message into a live streaming slot (appending the current
+// round's section) and wires the run's DOM references to it. Only
+// UNpersisted stream content is re-rendered: rounds the snapshot already
+// covers stay as rendered, fixing the disappearing-turn bug on switch-back.
+function reattachActiveRun() {
+  const run = runForConversation(state.activeId);
+  if (!run) return;
+  const slot = ensureRunSlot(run);
+  if (!slot) return;
+  const { msgNode, bubble, reasoningEl, textBox, strip } = slot;
+  msgNode.classList.add('agent-pending');
+  if (roundAlreadyPersisted(run.messageId)) {
+    // This round already finished and was saved; the snapshot renders it.
+    // Keep the (empty) section attached: every run ref stays valid for the
+    // next round or in-flight tool updates. agent.turn.started appends a
+    // fresh section cleanly, and turn-end refresh repaints from snapshot.
+    run.raw = '';
+    run.rawReasoning = '';
+    run.toolJobs = new Map();
+    run.msgNode = msgNode;
+    run.bubble = bubble;
+    run.reasoningEl = null;
+    run.textBox = null;
+    run.strip = null;
+    return;
+  }
+  // Re-render accumulated content for the current (unpersisted) round.
   if (run.rawReasoning) {
     const content = reasoningEl.querySelector('.agent-reasoning-content');
     if (content) { content.innerHTML = renderMarkdown(run.rawReasoning); void renderMermaidDiagrams(content); }
+    // If reasoning has content but no text yet, the agent is still thinking —
+    // resume the streaming pulse so the user doesn't think it's stuck.
+    if (!run.raw) reasoningEl.classList.add('is-streaming');
   }
   if (run.raw) { textBox.innerHTML = renderMarkdown(run.raw); void renderMermaidDiagrams(textBox); }
+  else {
+    textBox.append(el('span', { class: 'agent-thinking-dots' },
+      el('span'), el('span'), el('span')));
+  }
   // Render buffered tool jobs into the strip so a switch-back shows the
   // tool cards that ran while this room was hidden.
   for (const job of run.toolJobs.values()) strip.append(job);
@@ -699,6 +804,21 @@ function touchRoomBuffer(buffer) {
   buffer.lastEventAt = Date.now();
 }
 
+// resetRoomBufferMirror resets a room's stream mirror at each agent.turn.started
+// boundary: the mirror only ever covers the CURRENT round. Persisted earlier
+// rounds belong to the snapshot; accumulating them in the mirror duplicated
+// text across rounds and hit the size cap prematurely.
+function resetRoomBufferMirror(conversationId, run, round) {
+  const buffer = state.roomBuffers.get(conversationId);
+  if (!buffer || buffer.done) return;
+  buffer.raw = '';
+  buffer.rawReasoning = '';
+  buffer.toolJobs = new Map();
+  buffer.capped = false;
+  buffer.round = round || 1;
+  buffer.messageId = run?.messageId ?? null;
+}
+
 // expireCompletedBuffers prunes room buffers whose runs have finished and are
 // longer needed: the persisted snapshot is authoritative after the turn is
 // terminal, and a stale buffer would only re-merge old deltas on switch-back.
@@ -721,33 +841,54 @@ function expireCompletedBuffers() {
 // newer turn has progressed past it.
 function applyBufferedRunToDOM(convId) {
   const buffer = state.roomBuffers.get(convId);
-  if (!buffer || buffer.done || buffer.capped || buffer.lastEventAt === 0) return;
+  if (!buffer || buffer.done || buffer.lastEventAt === 0 || !buffer.runId) return;
   const thread = document.getElementById('agent-thread');
   if (!thread) return;
-  const assistantNodes = thread.querySelectorAll('.agent-message.assistant');
-  const lastAssistant = assistantNodes[assistantNodes.length - 1];
-  if (!lastAssistant) return;
-  // Replace the persisted tail with a fresh streaming placeholder.
-  const bubble = el('div', { class: 'agent-bubble' });
-  const msgNode = el('div', { class: 'agent-message assistant agent-pending' }, bubble);
-  lastAssistant.replaceWith(msgNode);
-  const reasoningEl = reasoningDisclosure('');
-  reasoningEl.hidden = !buffer.rawReasoning;
-  const textBox = el('div', { class: 'agent-bubble-text' });
-  if (buffer.raw) textBox.innerHTML = renderMarkdown(buffer.raw);
+  // Convert the snapshot node that owns this message into a streaming slot
+  // (append-based). A capped buffer still overlays its retained tail — the
+  // snapshot cannot render the in-flight round, so showing the newest tail
+  // beats a blank bubble.
+  const run = state.runs.get(buffer.runId);
+  const source = {
+    raw: buffer.raw,
+    rawReasoning: buffer.rawReasoning,
+    toolJobs: buffer.toolJobs,
+    messageId: buffer.messageId,
+  };
+  const slot = ensureRunSlot(source);
+  if (!slot) return;
+  const { reasoningEl, textBox, strip } = slot;
+  slot.msgNode.classList.add('agent-pending');
+  if (roundAlreadyPersisted(source.messageId)) {
+    // The turn finished server-side while the user was away; the snapshot
+    // already renders this round. Leave the empty section attached (harmless
+    // and transient) rather than risking detached refs in live handlers.
+    return;
+  }
+  if (source.rawReasoning) {
+    const content = reasoningEl.querySelector('.agent-reasoning-content');
+    if (content) { content.innerHTML = renderMarkdown(source.rawReasoning); void renderMermaidDiagrams(content); }
+    if (!source.raw) reasoningEl.classList.add('is-streaming');
+  }
+  if (source.raw) textBox.innerHTML = renderMarkdown(source.raw);
   else textBox.append(el('span', { class: 'agent-thinking-dots' }, el('span'), el('span'), el('span')));
-  // Render any complete mermaid blocks in the restored buffer immediately.
   void renderMermaidDiagrams(textBox);
-  const strip = el('div', { class: 'agent-tool-stack' });
-  strip.hidden = buffer.toolJobs.size === 0;
-  for (const job of buffer.toolJobs.values()) strip.append(job);
-  bubble.append(reasoningEl, textBox, strip);
-  // Refresh the buffered DOM refs so the active-run handlers keep updating.
-  buffer.msgNode = msgNode;
-  buffer.bubble = bubble;
+  strip.hidden = source.toolJobs.size === 0;
+  for (const job of source.toolJobs.values()) strip.append(job);
+  // Write the slot refs back to the buffer: openConversation may re-register
+  // a live run FROM this buffer right after, copying these DOM references.
+  buffer.msgNode = slot.msgNode;
+  buffer.bubble = slot.bubble;
   buffer.reasoningEl = reasoningEl;
   buffer.textBox = textBox;
   buffer.strip = strip;
+  if (!run) return; // buffered-only view; live handlers will attach later
+  // Refresh the run's DOM refs so the active-run handlers keep updating.
+  run.msgNode = slot.msgNode;
+  run.bubble = slot.bubble;
+  run.reasoningEl = reasoningEl;
+  run.textBox = textBox;
+  run.strip = strip;
   scrollToBottom(true);
 }
 
@@ -1119,18 +1260,32 @@ function replaceGenerateImageJob(job, payload, assign) {
 
 function endTurn(runId) {
   const run = state.runs.get(runId);
-  if (!run) return;
+  if (!run) {
+    // Run entry already gone (refresh raced the turn, or a terminal event
+    // arrived for an unknown run). Seal any matching room buffer anyway so
+    // it cannot stay "live" forever and overlay stale deltas over future
+    // snapshots (the disappearing-turn bug).
+    for (const [, buffer] of state.roomBuffers) {
+      if (buffer.runId === runId && !buffer.done) {
+        buffer.done = true;
+        touchRoomBuffer(buffer);
+      }
+    }
+    refreshLiveDots();
+    return;
+  }
   const convId = run.conversationId;
   // Detach the DOM for a run that ended while this room was NOT visible.
   // The room's live buffer is kept so switching back renders the final
   // state; the run entry is removed from the shared map (the DOM refs for
   // an invisible room are stale after renderThread anyway).
   if (run.msgNode) run.msgNode.classList.remove('agent-pending');
-  // Clean up transient UI elements (thinking dots, retry banner, tool timers).
-  // Use a bubble-wide query: multi-round turns leave a textBox with dots per
-  // round that produced no text, so only removing from run.textBox would
-  // leave stale dots above tool stacks.
+  // Clean up transient UI elements (thinking dots, retry banner, tool timers,
+  // reasoning streaming pulse). Use a bubble-wide query: multi-round turns
+  // leave a textBox with dots per round that produced no text, so only
+  // removing from run.textBox would leave stale dots above tool stacks.
   run.bubble?.querySelectorAll('.agent-thinking-dots').forEach((n) => n.remove());
+  run.bubble?.querySelectorAll('.agent-reasoning.is-streaming').forEach((n) => n.classList.remove('is-streaming'));
   run.bubble?.querySelector('.agent-retry-banner')?.remove();
   clearToolTimers(run);
   state.runs.delete(runId);
@@ -1345,27 +1500,39 @@ async function loadOlderChunk() {
     // A chunk load replaced the DOM nodes for this room. Rebind the active
     // run's DOM refs to the freshly re-rendered nodes so streaming deltas do
     // not target detached nodes.
-    if (prevRun && state.activeId === conversationId) {
-      const assistantNodes = thread.querySelectorAll('.agent-message.assistant');
-      const lastAssistant = assistantNodes[assistantNodes.length - 1];
-      if (lastAssistant && runForConversation(conversationId) === prevRun) {
-        const bubble = el('div', { class: 'agent-bubble' });
-        const msgNode = el('div', { class: 'agent-message assistant agent-pending' }, bubble);
-        lastAssistant.replaceWith(msgNode);
-        const reasoningEl = reasoningDisclosure('');
-        reasoningEl.hidden = !prevRun.rawReasoning;
-        const textBox = el('div', { class: 'agent-bubble-text' });
-        if (prevRun.raw) textBox.innerHTML = renderMarkdown(prevRun.raw);
-        void renderMermaidDiagrams(textBox);
-        const strip = el('div', { class: 'agent-tool-stack' });
-        strip.hidden = true;
-        bubble.append(reasoningEl, textBox, strip);
-        prevRun.msgNode = msgNode;
-        prevRun.bubble = bubble;
-        prevRun.reasoningEl = reasoningEl;
-        prevRun.textBox = textBox;
-        prevRun.strip = strip;
-        prevRun.toolJobs = new Map();
+    if (prevRun && state.activeId === conversationId && runForConversation(conversationId) === prevRun) {
+      // A chunk load replaced this room's DOM nodes. Re-bind the active run
+      // by converting the node that owns its in-flight message into a
+      // streaming slot (append-based; the old replaceWith-the-last-node
+      // approach wiped earlier rounds merged into the turn node).
+      const slot = ensureRunSlot(prevRun);
+      if (slot) {
+        Object.assign(prevRun, slot);
+        if (roundAlreadyPersisted(prevRun.messageId)) {
+          slot.reasoningEl.remove();
+          slot.textBox.remove();
+          slot.strip.remove();
+          prevRun.raw = '';
+          prevRun.rawReasoning = '';
+          prevRun.toolJobs = new Map();
+          prevRun.reasoningEl = null;
+          prevRun.textBox = null;
+          prevRun.strip = null;
+        } else {
+          if (prevRun.rawReasoning) {
+            const content = slot.reasoningEl.querySelector('.agent-reasoning-content');
+            if (content) { content.innerHTML = renderMarkdown(prevRun.rawReasoning); void renderMermaidDiagrams(content); }
+          }
+          if (prevRun.raw) { slot.textBox.innerHTML = renderMarkdown(prevRun.raw); void renderMermaidDiagrams(slot.textBox); }
+          else {
+            slot.textBox.append(el('span', { class: 'agent-thinking-dots' },
+              el('span'), el('span'), el('span')));
+          }
+          for (const job of prevRun.toolJobs.values()) slot.strip.append(job);
+          if (prevRun.toolJobs.size > 0) slot.strip.hidden = false;
+          clearToolTimers(prevRun);
+          prevRun.toolJobs = new Map();
+        }
       }
     }
   } catch (err) {
@@ -1398,6 +1565,7 @@ function bindEvents() {
       run.raw = '';
       run.rawReasoning = '';
       run.round = 1;
+      resetRoomBufferMirror(conversation_id, run, 1);
       if (conversation_id === state.activeId && run.textBox) {
         run.textBox.textContent = '';
         run.textBox.append(el('span', { class: 'agent-thinking-dots' },
@@ -1409,21 +1577,26 @@ function bindEvents() {
     run.round = round;
     run.raw = '';
     run.rawReasoning = '';
+    resetRoomBufferMirror(conversation_id, run, round);
     if (conversation_id !== state.activeId) return;
     // seal previous round: hide its tool strip if empty
     if (run.strip && run.strip.hidden) run.strip.remove();
-    // create new reasoning + text + strip for this round
-    const reasoningEl = reasoningDisclosure('');
-    reasoningEl.hidden = true;
-    const textBox = el('div', { class: 'agent-bubble-text' });
-    textBox.append(el('span', { class: 'agent-thinking-dots' },
-      el('span'), el('span'), el('span')));
-    const strip = el('div', { class: 'agent-tool-stack' });
-    strip.hidden = true;
-    run.bubble.append(reasoningEl, textBox, strip);
-    run.reasoningEl = reasoningEl;
-    run.textBox = textBox;
-    run.strip = strip;
+    if (!run.msgNode || !run.msgNode.isConnected) {
+      // Node lost (e.g. rebuilt while detached during a race) — recreate the
+      // streaming slot instead of appending into a detached subtree.
+      const slot = ensureRunSlot(run);
+      if (!slot) return;
+      run.msgNode = slot.msgNode;
+      run.bubble = slot.bubble;
+      run.reasoningEl = slot.reasoningEl;
+      run.textBox = slot.textBox;
+      run.strip = slot.strip;
+    } else {
+      const refs = appendRoundSection(run.msgNode, run);
+      run.reasoningEl = refs.reasoningEl;
+      run.textBox = refs.textBox;
+      run.strip = refs.strip;
+    }
     clearToolTimers(run);
     run.toolJobs = new Map();
   });
@@ -1451,6 +1624,8 @@ function bindEvents() {
     }
     // Only update DOM if this conversation is the active one.
     if (conversation_id !== state.activeId || !run.textBox) return;
+    // Text deltas mean reasoning finished — stop the streaming pulse.
+    run.reasoningEl?.classList.remove('is-streaming');
     // Remove thinking dots / retry banner on first delta.
     run.textBox.querySelector('.agent-thinking-dots')?.remove();
     const banner = run.bubble.querySelector('.agent-retry-banner');
@@ -1491,6 +1666,10 @@ function bindEvents() {
       buffer.rawReasoning += text;
       if (buffer.raw.length + buffer.rawReasoning.length > MAX_ROOM_BUFFER_CHARS) {
         buffer.capped = true;
+        // Trim BOTH mirrors so the cap actually bounds memory; keeping an
+        // uncapped reasoning mirror defeated the limit entirely.
+        buffer.rawReasoning = buffer.rawReasoning.slice(-MAX_ROOM_BUFFER_CHARS);
+        buffer.raw = buffer.raw.slice(-MAX_ROOM_BUFFER_CHARS);
       }
       touchRoomBuffer(buffer);
       refreshLiveDots();
@@ -1498,6 +1677,7 @@ function bindEvents() {
     if (conversation_id !== state.activeId) return;
     if (run.reasoningEl) {
       run.reasoningEl.hidden = false;
+      run.reasoningEl.classList.add('is-streaming');
       // Remove thinking dots when reasoning starts arriving.
       run.textBox?.querySelector('.agent-thinking-dots')?.remove();
       const content = run.reasoningEl.querySelector('.agent-reasoning-content');
@@ -1556,6 +1736,7 @@ function bindEvents() {
     // tool stack when the round produced no text. If the box is empty
     // (tool-only round), remove it entirely so no blank bubble-text slot
     // sits above the tools.
+    run.reasoningEl?.classList.remove('is-streaming');
     const tb = run.textBox;
     if (tb) {
       tb.querySelector('.agent-thinking-dots')?.remove();

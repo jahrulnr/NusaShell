@@ -375,6 +375,76 @@ func TestApplyReviewModelOverride(t *testing.T) {
 	})
 }
 
+// TestApplyReviewModelOverrideRecordsOnlyModelChanges verifies the
+// learning-log noise rule: an override that resolves to the same bare model
+// the conversation already uses is a no-op and must not emit a review_model
+// event, while an override that switches the model still records one.
+func TestApplyReviewModelOverrideRecordsOnlyModelChanges(t *testing.T) {
+	newApp := func(reviewModel string) *App {
+		return &App{
+			Toolbox: &reviewStubToolbox{},
+			Logs:    &fakeLogStore{},
+			Providers: &fakeProviderStore{items: map[string]*domain.Provider{
+				"cheap-prov": {ID: "cheap-prov", Enabled: true, Kind: domain.ProviderChat, Models: []domain.Model{
+					{ID: "haiku", Context: 128000},
+				}},
+			}},
+			Credentials: &fakeVisionCredStore{creds: map[string]string{"cheap-prov": "key"}},
+			Factory: func(_ context.Context, _ *domain.Provider, _ string) (AIProvider, error) {
+				return &fakeVisionAdapter{description: "review-adapter"}, nil
+			},
+			Settings:             &fakeSettingsStoreWithThreshold{threshold: 10, reviewModel: reviewModel},
+			turnsSinceReview:     map[string]int{},
+			toolCallsSinceReview: map[string]int{},
+		}
+	}
+
+	t.Run("same model as conversation records nothing", func(t *testing.T) {
+		tmp := t.TempDir()
+		traj := NewTrajectoryRecorder(tmp)
+		defer traj.Close()
+		app := newApp("cheap-prov:haiku")
+		app.Trajectory = traj
+		agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
+		defaultAdapter := &fakeVisionAdapter{description: "default"}
+		gotAdapter, gotModel := agent.applyReviewModelOverride(context.Background(), defaultAdapter, "haiku")
+		if gotAdapter == defaultAdapter || gotModel != "haiku" {
+			t.Fatalf("got (%v, %q), want override adapter keeping the same model", gotAdapter, gotModel)
+		}
+		for _, e := range ReadTrajectory(tmp, 100) {
+			if e.Type == "review_model" {
+				t.Fatalf("review_model event recorded for same-model override: %+v", e.Detail)
+			}
+		}
+	})
+
+	t.Run("different model records ok event", func(t *testing.T) {
+		tmp := t.TempDir()
+		traj := NewTrajectoryRecorder(tmp)
+		defer traj.Close()
+		app := newApp("cheap-prov:haiku")
+		app.Trajectory = traj
+		agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
+		defaultAdapter := &fakeVisionAdapter{description: "default"}
+		gotAdapter, gotModel := agent.applyReviewModelOverride(context.Background(), defaultAdapter, "gpt-5")
+		if gotAdapter == defaultAdapter || gotModel != "haiku" {
+			t.Fatalf("got (%v, %q), want override adapter with haiku", gotAdapter, gotModel)
+		}
+		found := false
+		for _, e := range ReadTrajectory(tmp, 100) {
+			if e.Type == "review_model" {
+				found = true
+				if e.Detail["status"] != "ok" || e.Detail["resolved"] != "haiku" {
+					t.Errorf("detail = %v, want status=ok resolved=haiku", e.Detail)
+				}
+			}
+		}
+		if !found {
+			t.Fatal("review_model event not recorded for model-changing override")
+		}
+	})
+}
+
 // chunkConversationStore returns a fixed archived chunk from GetChunk.
 type chunkConversationStore struct {
 	chunk []domain.Message
@@ -529,7 +599,7 @@ func TestReviewLoopEmptyResponseIsError(t *testing.T) {
 	}
 }
 
-func TestReviewCooldownSuppressesDuplicateAndExpires(t *testing.T) {
+func TestReviewFailureCooldownSuppressesAndExpires(t *testing.T) {
 	settings := DefaultReviewSettings()
 	settings.ReviewCooldown = time.Hour
 	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), settings)
@@ -542,16 +612,76 @@ func TestReviewCooldownSuppressesDuplicateAndExpires(t *testing.T) {
 	if agent.tryAcquireReview("conv_1") {
 		t.Fatal("concurrent duplicate should be suppressed while the first review is in flight")
 	}
-	agent.releaseReview("conv_1")
+	agent.releaseReview("conv_1", true)
 	if agent.tryAcquireReview("conv_1") {
-		t.Fatal("duplicate review should be suppressed during cooldown")
+		t.Fatal("failed review should be suppressed during retry cooldown")
 	}
 
 	now = now.Add(time.Hour)
 	if !agent.tryAcquireReview("conv_1") {
-		t.Fatal("review should be allowed after cooldown expires")
+		t.Fatal("review should be allowed after retry cooldown expires")
 	}
-	agent.releaseReview("conv_1")
+	agent.releaseReview("conv_1", false)
+}
+
+func TestReviewReservationCoalescesActiveTriggers(t *testing.T) {
+	tmp := t.TempDir()
+	app := newReviewApp(&reviewStubToolbox{})
+	app.Trajectory = NewTrajectoryRecorder(tmp)
+	defer app.Trajectory.Close()
+	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
+
+	if !agent.reserveReview("conv_active") {
+		t.Fatal("first review should reserve")
+	}
+	if agent.reserveReview("conv_active") {
+		t.Fatal("active duplicate should be coalesced")
+	}
+	if agent.reserveReview("conv_active") {
+		t.Fatal("repeated active duplicate should be coalesced")
+	}
+
+	events := ReadTrajectory(tmp, 100)
+	var skipped int
+	for _, event := range events {
+		if event.Type == "review" && event.Detail["status"] == "skipped" {
+			skipped++
+			if event.Detail["reason"] != "already_running" {
+				t.Fatalf("skip reason = %v, want already_running", event.Detail["reason"])
+			}
+		}
+	}
+	if skipped != 1 {
+		t.Fatalf("coalesced skip events = %d, want exactly 1", skipped)
+	}
+	agent.releaseReview("conv_active")
+}
+
+func TestReviewSuccessDoesNotStartCooldown(t *testing.T) {
+	settings := DefaultReviewSettings()
+	settings.ReviewCooldown = time.Hour
+	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), settings)
+	if !agent.tryAcquireReview("conv_success") {
+		t.Fatal("first review should acquire")
+	}
+	agent.releaseReview("conv_success", false)
+	if !agent.tryAcquireReview("conv_success") {
+		t.Fatal("successful review should not be blocked by retry cooldown")
+	}
+	agent.releaseReview("conv_success", false)
+}
+
+func TestReviewFailureStartsCooldown(t *testing.T) {
+	settings := DefaultReviewSettings()
+	settings.ReviewCooldown = time.Hour
+	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), settings)
+	if !agent.tryAcquireReview("conv_failure") {
+		t.Fatal("first review should acquire")
+	}
+	agent.releaseReview("conv_failure", true)
+	if agent.tryAcquireReview("conv_failure") {
+		t.Fatal("failed review should be protected by retry cooldown")
+	}
 }
 
 func TestReviewCooldownAllowsDifferentConversations(t *testing.T) {
@@ -903,7 +1033,8 @@ func (f *fakeSettings) Set(s domain.Settings) error { f.Settings = s; return nil
 // TestReviewModelResolutionRecordedInTrajectory verifies that
 // recordReviewModelResolution writes a trajectory event with the
 // requested and resolved model names. This is the function called by
-// applyReviewModelOverride on both success and fallback paths.
+// applyReviewModelOverride on the fallback path, and on the success path
+// when the override actually changes the model.
 func TestReviewModelResolutionRecordedInTrajectory(t *testing.T) {
 	tmp := t.TempDir()
 	traj := NewTrajectoryRecorder(tmp)

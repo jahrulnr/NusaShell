@@ -303,7 +303,29 @@ export function renderLogEntry(entry) {
     parts.push(el('div', { class: 'learning-log-error', text: entry.error }));
   }
   if (entry.status === 'skipped') {
-    parts.push(el('div', { class: 'learning-log-skipped', text: 'Skipped: review cooldown is active.' }));
+    const reason = entry.detail?.reason || 'deferred';
+    const messages = {
+      already_running: 'Coalesced: another review is already running.',
+      cooldown_active: 'Deferred: retry cooldown is active.',
+    };
+    parts.push(el('div', { class: 'learning-log-skipped', text: messages[reason] || `Deferred: ${reason}.` }));
+  }
+
+  // Review-model resolution: one short human sentence instead of the raw
+  // detail dump. "requested" is a provider-scoped id (prov_xxx:model) that
+  // means nothing to users, so it is reduced to the bare model name.
+  if (entry.type === 'review_model') {
+    const d = entry.detail || {};
+    // Note: handleLearningLog lifts detail.status into entry.Status, so the
+    // outcome is read from entry.status, not d.status.
+    if (entry.status === 'ok' && d.resolved) {
+      parts.push(el('div', { class: 'learning-log-skipped', text: `Reviews run on the override model “${d.resolved}”.` }));
+    } else {
+      const bare = String(d.requested || '').split(':').pop();
+      const hint = bare ? ` (configured override: ${bare})` : '';
+      parts.push(el('div', { class: 'learning-log-error', text: `Review model override failed — reviews fell back to the conversation model${hint}.` }));
+    }
+    return el('div', { class: 'learning-log-entry' }, parts);
   }
 
   // Source conversation as a compact "Source <title>" line. The raw
@@ -415,9 +437,12 @@ export function renderTranscript(transcript) {
     return view;
   }
 
+  const detailStep = document.createElement("div")
+  detailStep.className = "learning-log-activity-step"
   for (const item of items) {
-    view.appendChild(item);
+    detailStep.appendChild(item);
   }
+  view.appendChild(detailStep)
   return view;
 }
 
@@ -498,6 +523,7 @@ function typeLabel(type) {
     case 'consolidate': return 'Consolidation';
     case 'decay': return 'Decay';
     case 'prune': return 'Prune';
+    case 'review_model': return 'Review model';
     default: return type.replace(/_/g, ' ');
   }
 }
@@ -601,7 +627,7 @@ function renderResults() {
       el('div', { class: 'learning-result-header' }, [
         el('span', { class: `learning-result-kind learning-kind-${item.kind}`, text: item.kind }),
         item.kind === 'memory' && item.tier
-          ? el('span', { class: `learning-result-tier learning-tier-${item.tier}`, text: item.tier, title: item.tier === 'primary' ? 'Primary memory (always injected, ~1k token cap)' : 'Fragment (searchable archive)' })
+          ? el('span', { class: `learning-result-tier learning-tier-${item.tier}`, text: item.tier, title: item.tier === 'primary' ? 'Primary memory' : 'Fragment' })
           : null,
         headerRight,
       ]),

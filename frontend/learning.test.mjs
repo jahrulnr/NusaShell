@@ -56,10 +56,15 @@ test('finished review with zero mutations says so explicitly', () => {
 });
 
 test('cooldown skip is distinct from a completed review', () => {
-  const node = withDocument(() => renderLogEntry({ type: 'review', status: 'skipped', reason: 'cooldown_or_inflight' }));
+  // Skip reasons follow the split taxonomy (detail.reason):
+  // cooldown_active = deferred by retry cooldown, already_running = coalesced.
+  const node = withDocument(() => renderLogEntry({ type: 'review', status: 'skipped', detail: { reason: 'cooldown_active' } }));
   assert.ok(node.querySelector('.learning-log-status-skipped'));
   assert.ok(node.querySelector('.learning-log-skipped')?.textContent.includes('cooldown'));
   assert.ok(!node.textContent.includes('Nothing to save'));
+
+  const coalesced = withDocument(() => renderLogEntry({ type: 'review', status: 'skipped', detail: { reason: 'already_running' } }));
+  assert.ok(coalesced.querySelector('.learning-log-skipped')?.textContent.includes('Coalesced'));
 });
 
 const transcript = {

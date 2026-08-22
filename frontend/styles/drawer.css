@@ -1,4 +1,8 @@
-/* ============ MCP Detail Drawer ============ */
+/* ============ MCP Detail Drawer ============
+ *
+ * Layer: cross-cutting overlay — slide-in drawer opened from multiple
+ * views, not tied to one [data-view].
+ */
 .drawer-overlay {
   position: fixed;
   top: 0; right: 0; bottom: 0;

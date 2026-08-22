@@ -648,11 +648,14 @@ func newHarness(t *testing.T, llm *fakeLLM) *harness {
 	return &harness{t: t, app: app, server: httpSrv, store: store, creds: creds, llm: llm, mcpBin: fakemcpBin, plugins: pluginStore}
 }
 
-// rpc performs a POST /rpc call and decodes the envelope.
+// rpc performs a POST /rpc/<dotted-method-as-path> call and decodes the
+// envelope. The method is encoded in the URL path (dots → slashes) so each
+// call is individually visible in the browser Network tab.
 func (h *harness) rpc(t *testing.T, method string, payload any) contractsResult {
 	t.Helper()
 	body, _ := json.Marshal(map[string]any{"method": method, "payload": payload})
-	resp, err := http.Post(h.server.URL+"/rpc", "application/json", strings.NewReader(string(body)))
+	path := strings.ReplaceAll(method, ".", "/")
+	resp, err := http.Post(h.server.URL+"/rpc/"+path, "application/json", strings.NewReader(string(body)))
 	if err != nil {
 		t.Fatalf("rpc %s: %v", method, err)
 	}

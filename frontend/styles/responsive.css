@@ -1,4 +1,8 @@
-/* Responsive shell behavior mirrors the Electron workbench breakpoints. */
+/* Responsive shell behavior mirrors the Electron workbench breakpoints.
+ *
+ * Layer: cross-cutting — media-query adjustments for shell + views; keep
+ * breakpoint values in sync with the view files they resize.
+ */
 
 @media (max-width: 900px) {
   .sidebar {

@@ -167,7 +167,6 @@ async function boot() {
 
   try {
     const info = await rpc('app.info', {}, { timeoutMs: 4000 });
-    document.getElementById('storage-path')?.replaceChildren(document.createTextNode(info.data_dir || ''));
     document.title = `NusaShell ${info.version ?? ''}`.trim();
   } catch (err) {
     // Only mark offline if WS isn't already open — app.info uses HTTP,

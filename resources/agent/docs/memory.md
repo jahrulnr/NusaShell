@@ -111,9 +111,7 @@ The review agent sees the current primary document injected into its
 system prompt at the start of each review run, so it can avoid
 duplicates and spot stale text without needing to call
 `memory_list target=primary` first. Reviews are bounded to a small number of
-tool rounds and use a per-conversation cooldown, so threshold and compaction
-triggers cannot repeatedly replay the same transcript during a short window.
-A cooldown skip is recorded as a skipped review, not as a completed no-op.
+tool rounds and coalesce concurrent threshold/skill/compaction triggers, so a burst cannot launch duplicate reviews or replay the same transcript repeatedly. Activity that arrives while a review is running is retained for one follow-up review. Retry cooldown is reserved for failed reviews; successful reviews do not suppress later evidence. Exact duplicate fragment writes are idempotent.
 
 ## How the review agent gets the transcript
 
@@ -138,9 +136,8 @@ Two independent triggers fire the background review:
    after N tool calls across all turns. Catches tool-heavy coding sessions
    that don't reach the turn threshold. Set 0 to disable.
 
-Both triggers share the same cooldown gate, so a threshold and a skill nudge
-firing at the same time produce only one review. Compaction-triggered review
-fires independently when a conversation is compacted.
+Both triggers share the same reservation gate, so a threshold and a skill nudge
+firing at the same time produce only one review. Concurrent triggers are coalesced and retain their new activity for a follow-up review. Compaction-triggered review uses the same gate. Retry cooldown applies only after a failed review.
 
 Good examples:
 

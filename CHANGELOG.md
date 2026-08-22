@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`todo` tool no longer echoes items and brief back to the agent.**
+  The tool result is now a compact acknowledgment (summary counts only:
+  `ok`, `conversation`, `total`, `pending`, `in_progress`, `completed`).
+  The full item list and brief are not echoed back — the agent just sent
+  them, and the UI receives the complete list via the `agent.todo.updated`
+  event. This saves tokens on every todo call (the brief alone can be
+  ~10k tokens).
+
 - **Review agent uses hydration tool instead of flat transcript dump.**
   The background review agent now calls `review_transcript` to get the
   conversation as structured JSON (proper roles, nested tool calls, tool

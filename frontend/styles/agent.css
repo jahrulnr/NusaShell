@@ -1,4 +1,9 @@
-/* ============ Agent workspace ============ */
+/* ============ Agent workspace ============
+ *
+ * Layer: view — scoped to [data-view="agent"] plus the shared tool-call /
+ * reasoning card components it exposes via js/views/agent/render.js (the
+ * Learning log digest reuses those classes).
+ */
 .sr-only {
   position: absolute;
   width: 1px;
@@ -406,6 +411,18 @@
   color: #9badd0;
   font: 13px ui-serif, Georgia, serif;
 }
+/* Active reasoning stream: pulse the mark + title so the user sees the
+ * agent is thinking, not stuck. Mirrors the tool-running tick animation. */
+.agent-reasoning.is-streaming .agent-reasoning-mark {
+  border-color: var(--accent);
+  color: var(--accent);
+  animation: agent-reasoning-pulse 1.6s ease-in-out infinite;
+}
+.agent-reasoning.is-streaming .agent-reasoning-title {
+  color: var(--accent);
+  animation: agent-reasoning-pulse 1.6s ease-in-out infinite;
+}
+@keyframes agent-reasoning-pulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
 .agent-reasoning-title {
   min-width: 0;
   overflow: hidden;
@@ -488,7 +505,7 @@
 .agent-todo-strip-meta { flex: none; margin-right: 10px; padding: 3px 8px; border-radius: 999px; background: #141e2b; color: #8fa0b6; font: 11px/1.2 "JetBrains Mono", monospace; white-space: nowrap; }
 .agent-todo-strip-meta[data-done="true"] { color: #8fd; background: rgba(120, 200, 120, .1); }
 .agent-todo-strip-goal { margin: 0; padding: 6px 12px 4px; font: 11.5px/1.4 "IBM Plex Sans", system-ui, sans-serif; color: var(--text-faint); border-left: 2px solid var(--border-soft); margin-left: 10px; margin-right: 10px; white-space: pre-wrap; word-break: break-word; }
-.agent-todo-strip-brief { overflow-y: auto; max-height: 20rem; background: var(--input-bg); margin: 0; padding: 6px 14px 8px; font: 11.5px/1.5 "IBM Plex Sans", system-ui, sans-serif; color: var(--text-faint); border-left: 2px solid var(--border-soft); margin-left: 10px; margin-right: 10px; word-break: break-word; }
+.agent-todo-strip-brief { overflow-y: auto; max-height: 20rem; background: var(--input-bg); margin: 0; padding: 6px 14px 8px; font: 11.5px/1.5 "IBM Plex Sans", system-ui, sans-serif; border-left: 2px solid var(--border-soft); margin-left: 10px; margin-right: 10px; word-break: break-word; }
 .agent-todo-strip-brief[hidden] { display: none; }
 .agent-todo-strip-brief > :first-child { margin-top: 0; }
 .agent-todo-strip-brief > :last-child { margin-bottom: 0; }

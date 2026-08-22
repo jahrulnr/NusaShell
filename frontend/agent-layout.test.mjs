@@ -80,11 +80,6 @@ test('Agent todo strip render function is exported from render module', () => {
   assert.match(agentView, /renderTodoItem/);
 });
 
-test('Sidebar restores the data directory path the shell already queries', () => {
-  assert.match(html, /id="storage-path"/);
-  assert.match(appShell, /getElementById\('storage-path'\)/);
-});
-
 test('Agent empty thread offers clickable starter prompts', () => {
   assert.match(html, /id="agent-starter-prompts"/);
   assert.match(html, /data-starter-prompt=/);

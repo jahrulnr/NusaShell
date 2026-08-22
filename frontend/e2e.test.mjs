@@ -870,9 +870,20 @@ test('HYDR-POST-COMPACTION: turn after compaction re-injects the hydration trans
     // Verify the post-compaction streaming request contains a fresh
     // hydration transcript. The non-streaming compaction request must NOT
     // contain hydration (it summarizes durable history only).
+    //
+    // Filter out autolearn background-review requests: compaction triggers
+    // a fire-and-forget learning review (subscribeCompactionReview) that
+    // streams to the same fake LLM with a single "Call review_transcript"
+    // user message. Without filtering, that review request can land last
+    // and mask the real post-compaction turn request we need to inspect.
     const allReqs = llm.requests();
     const nonStreamReqs = allReqs.filter((r) => !r.stream);
-    const streamReqs = allReqs.filter((r) => r.stream);
+    const isAutolearnReview = (r) =>
+      r.body.messages?.length === 1
+      && r.body.messages[0].role === 'user'
+      && typeof r.body.messages[0].content === 'string'
+      && r.body.messages[0].content.startsWith('Call review_transcript');
+    const streamReqs = allReqs.filter((r) => r.stream && !isAutolearnReview(r));
 
     // Non-streaming compaction request must not carry hydration.
     for (const ns of nonStreamReqs) {

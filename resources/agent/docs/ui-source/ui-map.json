@@ -27,15 +27,6 @@
             "sidebar",
             "sidebar-mode-toggle"
           ]
-        },
-        {
-          "heading": "Storage",
-          "paragraphs": [
-            "Shows the absolute data directory path so you can see where conversations, providers, memory, and credentials live."
-          ],
-          "controls": [
-            "storage-path"
-          ]
         }
       ]
     },
@@ -785,12 +776,6 @@
       "type": "button",
       "action": "Toggles icon-only sidebar mode (persisted locally)."
     },
-    "storage-path": {
-      "label": "Data directory path",
-      "section": "Storage",
-      "type": "text",
-      "notes": "Absolute path to the data directory."
-    },
     "search-input": {
       "label": "App search",
       "section": "Home",
@@ -1320,7 +1305,7 @@
       "label": "Learning log",
       "section": "Learning",
       "type": "list",
-      "notes": "Trajectory events; review entries have done/error/skipped status badges. Cooldown skips are distinct from completed reviews. Completed review entries have a View review details button that expands the background review agent's activity digest inline."
+      "notes": "Trajectory events; review entries have done/error/skipped status badges. Skipped entries explain whether a trigger was coalesced because another review was running or deferred by retry cooldown. Completed review entries have a View review details button that expands the background review agent's activity digest inline."
     },
     "log-level-filter": {
       "label": "Level filter",

@@ -1,4 +1,12 @@
-/* Home / launcher — copied from the Electron workbench launcher surface. */
+/* Home / launcher — copied from the Electron workbench launcher surface.
+ *
+ * Layer: view — scoped to [data-view="home"] (launcher grid, category
+ * filter, app plates).
+ */
+
+.home-view.active {
+  padding: clamp(28px, 4vw, 56px) clamp(28px, 6vw, 76px);
+}
 
 .filter-row {
   display: grid;
@@ -90,34 +98,6 @@
   scrollbar-width: none;
 }
 .category-filter .tabs::-webkit-scrollbar { display: none; }
-
-.tab {
-  min-width: 0;
-  min-height: 32px;
-  padding: 0 var(--space-3);
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-dim);
-  cursor: pointer;
-  font: 500 13px var(--font-mono);
-  white-space: nowrap;
-}
-.tab:hover {
-  border-color: var(--border);
-  background: var(--panel-raised);
-  color: var(--text);
-}
-.tab:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-.tab.active {
-  border-color: var(--accent-border);
-  background: var(--accent-soft);
-  color: var(--accent);
-  box-shadow: inset 0 -2px 0 var(--accent-border);
-}
 
 /* App launch plates */
 .app-grid {

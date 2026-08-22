@@ -16,6 +16,8 @@ import (
 	"nusashell/contracts"
 	"nusashell/domain"
 	docsinfra "nusashell/infrastructure/docs"
+	"nusashell/infrastructure/jsonstore"
+	"nusashell/infrastructure/memorystore"
 	"nusashell/infrastructure/pluginfs"
 	"nusashell/resources"
 )
@@ -1159,6 +1161,33 @@ func TestListToolsIncludesMcpManagement(t *testing.T) {
 	}
 }
 
+func TestMemorySaveExactDuplicateIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	fragments, err := memorystore.NewFragments(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tb := testToolbox(nil, nil, &stubMCP{})
+	tb.Fragments = fragments
+	out, err := tb.Execute(context.Background(), "memory_save", []byte(`{"content":"User prefers Indonesian\n","category":"user"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "status: saved") {
+		t.Fatalf("first save output = %s", out)
+	}
+	out, err = tb.Execute(context.Background(), "memory_save", []byte(`{"content":"  User prefers Indonesian  \r\n","category":"user"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "status: unchanged") || !strings.Contains(out, "reason: exact_duplicate") {
+		t.Fatalf("duplicate save output = %s", out)
+	}
+	if got := len(fragments.List(domain.FragmentSearchFilter{})); got != 1 {
+		t.Fatalf("fragment count = %d, want 1", got)
+	}
+}
+
 func TestListToolsIncludesMemoryReplace(t *testing.T) {
 	tb := testToolbox(nil, nil, &stubMCP{})
 	names := map[string]bool{}
@@ -1674,6 +1703,38 @@ func TestTodoToolDescriptionMatchesSingleHydrationCheckpoint(t *testing.T) {
 		return
 	}
 	t.Fatal("todo tool not found")
+}
+
+// TestTodoToolResultDoesNotEchoItemsOrBrief verifies the tool result is a
+// compact acknowledgment (summary counts only), not a full echo of the
+// items and brief the agent just sent. Echoing wastes tokens — the agent
+// already knows what it set, and the UI gets the full list via the
+// agent.todo.updated event.
+func TestTodoToolResultDoesNotEchoItemsOrBrief(t *testing.T) {
+	store := jsonstore.NewTodoStore(filepath.Join(t.TempDir(), "todos.json"))
+	tb := &Toolbox{Todos: store}
+	ctx := application.WithConversationID(context.Background(), "conv_echo")
+	args := `{"items":[{"id":"a","content":"do thing one","status":"pending"},{"id":"b","content":"do thing two with a long description that should not be echoed back","status":"in_progress"}],"brief":"## Objective\nBuild the feature\n## Done when\nTests pass"}`
+	out, err := tb.Execute(ctx, "todo", []byte(args))
+	if err != nil {
+		t.Fatalf("todo execute: %v", err)
+	}
+	// Summary counts must be present.
+	for _, want := range []string{"ok: true", "total: 2", "pending: 1", "in_progress: 1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("result missing %q\ngot:\n%s", want, out)
+		}
+	}
+	// Item contents must NOT be echoed back.
+	for _, banned := range []string{"do thing one", "do thing two with a long description"} {
+		if strings.Contains(out, banned) {
+			t.Errorf("result must not echo item content %q\ngot:\n%s", banned, out)
+		}
+	}
+	// Brief must NOT be echoed back.
+	if strings.Contains(out, "## Objective") || strings.Contains(out, "Build the feature") {
+		t.Errorf("result must not echo brief\ngot:\n%s", out)
+	}
 }
 
 func TestMcpRegisterRejectsSourcesInsideInstalledRoot(t *testing.T) {

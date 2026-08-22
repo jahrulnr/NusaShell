@@ -1,4 +1,7 @@
-/* Automation workspace: pipelines, runs, schedules, events. */
+/* Automation workspace: pipelines, runs, schedules, events.
+ *
+ * Layer: view — scoped to [data-view="automation"].
+ */
 
 .automation-header .automation-header-stats {
   display: flex;

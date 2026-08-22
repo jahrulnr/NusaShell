@@ -101,4 +101,4 @@ Autolearn activity feed from the trajectory log (review runs, extraction, edge b
 - **Learning log** (`#learning-log`):
   - Section: Learning
   - Type: list
-  - Notes: Trajectory events; review entries have done/error/skipped status badges. Cooldown skips are distinct from completed reviews. Completed review entries have a View review details button that expands the background review agent's activity digest inline.
+  - Notes: Trajectory events; review entries have done/error/skipped status badges. Skipped entries explain whether a trigger was coalesced because another review was running or deferred by retry cooldown. Completed review entries have a View review details button that expands the background review agent's activity digest inline.

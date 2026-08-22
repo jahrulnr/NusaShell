@@ -1,4 +1,8 @@
-/* ACP subagent dock, drawer, peek popup, permission overlay, provider cards. */
+/* ACP subagent dock, drawer, peek popup, permission overlay, provider cards.
+ *
+ * Layer: view — scoped to the Providers view's ACP section and the global
+ * permission overlay it owns.
+ */
 
 .accent-acp .provider-mark,
 .provider-mark.accent-acp {

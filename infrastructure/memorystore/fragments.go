@@ -185,12 +185,13 @@ func (f *Fragments) Get(id string) *domain.MemoryFragment {
 
 // Save writes a fragment to disk and updates the in-memory cache. New
 // fragments get a generated ID and timestamps; existing fragments keep
-// their ID and CreatedAt but get a fresh UpdatedAt.
+// their ID and CreatedAt but get a fresh UpdatedAt. Content is normalized so
+// exact duplicate checks are stable across line endings and trailing spaces.
 func (f *Fragments) Save(frag *domain.MemoryFragment) error {
 	if frag == nil {
 		return fmt.Errorf("fragment is nil")
 	}
-	frag.Content = strings.TrimSpace(frag.Content)
+	frag.Content = domain.NormalizeMemoryContent(frag.Content)
 	if frag.Content == "" {
 		return fmt.Errorf("fragment content is required")
 	}
@@ -207,13 +208,53 @@ func (f *Fragments) Save(frag *domain.MemoryFragment) error {
 	}
 	frag.UpdatedAt = now
 	path := filepath.Join(f.dir, frag.ID+".md")
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if err := os.WriteFile(path, []byte(serializeFragment(frag)), 0o644); err != nil {
 		return err
 	}
-	f.mu.Lock()
 	f.cache[frag.ID] = cloneFragment(frag)
-	f.mu.Unlock()
 	return nil
+}
+
+// SaveIfAbsent saves a fragment only when no existing fragment has the same
+// normalized content. It is idempotent for exact duplicates and safe for
+// concurrent callers sharing this store instance. The returned existing
+// fragment is a clone and can be returned to the caller without exposing the
+// store's cache.
+func (f *Fragments) SaveIfAbsent(frag *domain.MemoryFragment) (existing *domain.MemoryFragment, saved bool, err error) {
+	if frag == nil {
+		return nil, false, fmt.Errorf("fragment is nil")
+	}
+	frag.Content = domain.NormalizeMemoryContent(frag.Content)
+	if frag.Content == "" {
+		return nil, false, fmt.Errorf("fragment content is required")
+	}
+	if frag.Category == "" {
+		frag.Category = domain.FragmentCategoryGeneral
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, candidate := range f.cache {
+		if domain.NormalizeMemoryContent(candidate.Content) == frag.Content {
+			return cloneFragment(candidate), false, nil
+		}
+	}
+	now := time.Now().UTC()
+	if frag.ID == "" {
+		frag.ID = domain.NewULID("frag")
+		frag.CreatedAt = now
+	}
+	if frag.CreatedAt.IsZero() {
+		frag.CreatedAt = now
+	}
+	frag.UpdatedAt = now
+	path := filepath.Join(f.dir, frag.ID+".md")
+	if err := os.WriteFile(path, []byte(serializeFragment(frag)), 0o644); err != nil {
+		return nil, false, err
+	}
+	f.cache[frag.ID] = cloneFragment(frag)
+	return nil, true, nil
 }
 
 // Delete removes a fragment file and drops it from the cache.

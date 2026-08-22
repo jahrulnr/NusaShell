@@ -71,6 +71,30 @@ func TestIncrementTurnCounterDisabled(t *testing.T) {
 	}
 }
 
+func TestFlushLearningReviewKeepsCountersWhenReviewIsAlreadyRunning(t *testing.T) {
+	app := &App{
+		turnsSinceReview:     map[string]int{"conv_1": 3},
+		toolCallsSinceReview: map[string]int{"conv_1": 7},
+		Settings:             &fakeSettingsStoreWithThreshold{threshold: 1},
+		Memory:               &fakeMemoryStore{},
+		Conversations:        &fakeConversationStore{},
+	}
+	app.ReviewAgent = NewBackgroundReviewAgent(app, DefaultReviewSettings())
+	if !app.ReviewAgent.reserveReview("conv_1") {
+		t.Fatal("setup review should reserve")
+	}
+	app.flushLearningReview("conv_1", "threshold")
+	// flushLearningReview is fire-and-forget; the active reservation rejects
+	// this trigger, so counters must remain intact.
+	if got := app.turnsSinceReview["conv_1"]; got != 3 {
+		t.Fatalf("turn counter = %d, want 3", got)
+	}
+	if got := app.toolCallsSinceReview["conv_1"]; got != 7 {
+		t.Fatalf("tool counter = %d, want 7", got)
+	}
+	app.ReviewAgent.releaseReview("conv_1")
+}
+
 func TestIncrementTurnCounterNoReviewer(t *testing.T) {
 	app := &App{
 		turnsSinceReview:     map[string]int{},

@@ -1,4 +1,7 @@
-/* ============ MCP workspace ============ */
+/* ============ MCP workspace ============
+ *
+ * Layer: view — scoped to [data-view="mcp"] (server list rows).
+ */
 .mcp-list { margin-top: 1rem; display: flex; flex-direction: column; gap: 8px; }
 .mcp-row {
   display: flex;

@@ -189,9 +189,16 @@ export function renderConversation(messages, onRetry) {
 function renderAssistantTurn(messages, onRetry) {
   const finalMessage = messages[messages.length - 1];
   const failedMessage = messages.find((message) => message.status === 'error');
+  // Stamp the persisted message ids this node was rendered from so runtime
+  // code can locate the node that owns a specific in-flight message. Reattach
+  // must convert ONLY that node into a streaming slot — replacing the last
+  // assistant node wholesale would wipe earlier tool rounds that
+  // renderConversation merged into the same node.
+  const messageIds = messages.map((message) => message.id).filter(Boolean);
   const node = el('div', {
     class: `agent-message assistant${failedMessage ? ' agent-message-error' : ''}`,
   });
+  if (messageIds.length) node.dataset.messageIds = messageIds.join(' ');
 
   const bubble = el('div', { class: 'agent-bubble' });
   for (const message of messages) appendAssistantSteps(bubble, message);

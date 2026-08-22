@@ -1,8 +1,10 @@
 /* ============ Telemetry workspace ============
-   Layout matches OpenRouter Activity dashboard:
-   - 5-col summary grid with sparklines
-   - 2-col chart grid, compact spacing
-   - Full-width with px padding, no max-width
+ * Layout matches OpenRouter Activity dashboard:
+ * - 5-col summary grid with sparklines
+ * - 2-col chart grid, compact spacing
+ * - Full-width with px padding, no max-width
+ *
+ * Layer: view — scoped to [data-view="telemetry"].
 */
 
 .telemetry-header-actions {

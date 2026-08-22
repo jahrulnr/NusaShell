@@ -1,4 +1,7 @@
-/* ============ Plugins catalog (native MCP + MCP plugins) ============ */
+/* ============ Plugins catalog (native MCP + MCP plugins) ============
+ *
+ * Layer: view — scoped to [data-view="plugins"].
+ */
 .plugin-table {
   display: flex;
   flex-direction: column;

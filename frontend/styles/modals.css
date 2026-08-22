@@ -1,4 +1,8 @@
-/* ============ Dialogs & toasts ============ */
+/* ============ Dialogs & toasts ============
+ *
+ * Layer: cross-cutting overlay — ui.js dialogs/toasts rendered above any
+ * view, not tied to one [data-view].
+ */
 .ui-dialog-overlay {
   position: fixed;
   inset: 0;

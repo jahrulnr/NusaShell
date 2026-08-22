@@ -61,14 +61,20 @@ func TestExecTodoWithBrief(t *testing.T) {
 		t.Fatalf("execTodo failed: %v", err)
 	}
 
-	if !strings.Contains(result, "Build a REST API with Go and Clean Architecture.") {
-		t.Errorf("brief missing in result, got: %s", result)
+	// Tool result is a compact acknowledgment (summary counts only); the
+	// full items and brief are NOT echoed back to save tokens. The agent
+	// just sent them, and the UI gets the full list via agent.todo.updated.
+	if !strings.Contains(result, "ok: true") {
+		t.Errorf("expected ok: true in result, got: %s", result)
 	}
-	if !strings.Contains(result, "brief:") {
-		t.Errorf("expected brief field in meta, got: %s", result)
+	if !strings.Contains(result, "total: 2") {
+		t.Errorf("expected total: 2 in result, got: %s", result)
 	}
-	if !strings.Contains(result, `"status":"in_progress"`) {
-		t.Errorf("expected JSONL item with in_progress status, got: %s", result)
+	if strings.Contains(result, "Build a REST API with Go and Clean Architecture.") {
+		t.Errorf("brief must not be echoed in result, got: %s", result)
+	}
+	if strings.Contains(result, `"status":"in_progress"`) {
+		t.Errorf("items must not be echoed as JSONL in result, got: %s", result)
 	}
 	if todoPort.GetBrief("conv_1") != brief {
 		t.Errorf("brief not persisted in port")
@@ -141,11 +147,12 @@ func TestExecTodoEmptyItemsWithBrief(t *testing.T) {
 		t.Fatalf("execTodo failed: %v", err)
 	}
 
-	if !strings.Contains(result, "Just a brief, no steps yet.") {
-		t.Errorf("brief missing in result, got: %s", result)
+	// Result is a compact ack; brief is not echoed (saves tokens).
+	if !strings.Contains(result, "ok: true") {
+		t.Errorf("expected ok: true in result, got: %s", result)
 	}
-	if !strings.Contains(result, "brief:") {
-		t.Errorf("expected brief field in meta, got: %s", result)
+	if strings.Contains(result, "Just a brief, no steps yet.") {
+		t.Errorf("brief must not be echoed in result, got: %s", result)
 	}
 	if todoPort.GetBrief("conv_1") != brief {
 		t.Errorf("brief not persisted")
@@ -170,8 +177,12 @@ func TestExecTodoWithBriefStructuredSections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execTodo with brief failed: %v", err)
 	}
-	if !strings.Contains(result, "Objective") {
-		t.Errorf("brief missing in result, got: %s", result)
+	// Result is a compact ack; brief content is not echoed (saves tokens).
+	if !strings.Contains(result, "ok: true") {
+		t.Errorf("expected ok: true in result, got: %s", result)
+	}
+	if strings.Contains(result, "Objective") {
+		t.Errorf("brief must not be echoed in result, got: %s", result)
 	}
 	if todoPort.GetBrief("conv_1") != brief {
 		t.Errorf("brief not persisted in port, got: %q", todoPort.GetBrief("conv_1"))

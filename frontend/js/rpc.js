@@ -35,7 +35,7 @@ export async function rpc(method, payload = {}, { timeoutMs = 60000 } = {}) {
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let res;
   try {
-    res = await fetch(`/rpc?event=${encodeURIComponent(method)}`, {
+    res = await fetch(`/rpc/${method.replace(/\./g, '/')}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ method, payload }),

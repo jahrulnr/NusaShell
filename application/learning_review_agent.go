@@ -70,13 +70,15 @@ type BackgroundReviewAgent struct {
 	settings ReviewSettings
 
 	// reviewMu prevents threshold and compaction triggers from launching
-	// duplicate reviews for the same conversation. lastReview also provides
-	// a cooldown after completion so repeated triggers do not replay the same
-	// transcript and spend provider tokens again.
-	reviewMu   sync.Mutex
-	inFlight   map[string]bool
-	lastReview map[string]time.Time
-	now        func() time.Time // injectable clock for deterministic tests
+	// duplicate reviews for the same conversation. lastReview is a retry
+	// backoff timestamp for failed reviews only; successful reviews do not
+	// suppress later evidence.
+	reviewMu     sync.Mutex
+	inFlight     map[string]bool
+	lastReview   map[string]time.Time
+	pending      map[string]bool
+	lastSkipByID map[string]string
+	now          func() time.Time // injectable clock for deterministic tests
 }
 
 // NewBackgroundReviewAgent creates a review agent bound to the App.
@@ -97,10 +99,12 @@ func NewBackgroundReviewAgent(app *App, settings ReviewSettings) *BackgroundRevi
 		settings.ReviewCooldown = defaultReviewCooldown
 	}
 	return &BackgroundReviewAgent{
-		app:        app,
-		settings:   settings,
-		inFlight:   make(map[string]bool),
-		lastReview: make(map[string]time.Time),
+		app:          app,
+		settings:     settings,
+		inFlight:     make(map[string]bool),
+		lastReview:   make(map[string]time.Time),
+		pending:      make(map[string]bool),
+		lastSkipByID: make(map[string]string),
 	}
 }
 
@@ -156,26 +160,51 @@ func (r *BackgroundReviewAgent) RunReview(ctx context.Context, conversationID st
 // reserveReview claims a review slot before any lifecycle event is emitted.
 // The caller must invoke runReservedReview after a successful reservation.
 func (r *BackgroundReviewAgent) reserveReview(conversationID string) bool {
+	reserved, _ := r.reserveReviewWithReason(conversationID)
+	return reserved
+}
+
+// reserveReviewWithReason reserves one review slot and classifies rejected
+// triggers. Repeated triggers in the same rejected state are coalesced into a
+// single trajectory event, so a burst of turns does not flood the Learning log.
+func (r *BackgroundReviewAgent) reserveReviewWithReason(conversationID string) (bool, string) {
 	if !r.settings.Enabled || r.app == nil {
 		if r.app != nil {
 			r.app.log("debug", "learning", "review skipped: disabled or no app (conv=%s)", conversationID)
 		}
-		return false
+		return false, "disabled"
 	}
-	if !r.tryAcquireReview(conversationID) {
-		r.app.log("info", "learning", "review skipped: cooldown or already running (conv=%s)", conversationID)
-		r.recordReviewSkipped(conversationID)
-		return false
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return false, "invalid_conversation"
 	}
-	return true
+
+	reserved, reason, shouldRecord := r.acquireReview(conversationID)
+	if reserved {
+		return true, "reserved"
+	}
+	if shouldRecord {
+		r.app.log("info", "learning", "review deferred: reason=%s (conv=%s)", reason, conversationID)
+		r.recordReviewSkipped(conversationID, reason)
+	}
+	return false, reason
 }
 
 // runReservedReview executes a review after reserveReview has claimed its
 // conversation slot. Keeping acquisition separate lets the threshold and
 // compaction trigger emit "started" only for work that will actually run.
-func (r *BackgroundReviewAgent) runReservedReview(ctx context.Context, conversationID string) error {
-	defer r.releaseReview(conversationID)
+func (r *BackgroundReviewAgent) runReservedReview(ctx context.Context, conversationID string) (runErr error) {
+	defer func() {
+		if pending := r.releaseReview(conversationID, runErr != nil); pending && runErr == nil && r.app != nil {
+			// New activity arrived while this review was running. Coalesce it
+			// into one follow-up review instead of emitting more skip events.
+			r.app.flushLearningReview(conversationID, "coalesced")
+		}
+	}()
 
+	if r.app.Conversations == nil {
+		return fmt.Errorf("conversation store not configured")
+	}
 	conversation, err := r.app.Conversations.Get(conversationID)
 	if err != nil {
 		r.app.log("warn", "learning", "review aborted: conversation %s not found: %v", conversationID, err)
@@ -246,16 +275,14 @@ func (r *BackgroundReviewAgent) runReservedReview(ctx context.Context, conversat
 	return nil
 }
 
-// tryAcquireReview reserves a conversation for one review run. It rejects
-// concurrent runs and repeated triggers within the configured cooldown.
-// The gate is intentionally in-memory: it protects the concurrent trigger
-// paths that can fire from threshold and compaction events in one process.
-func (r *BackgroundReviewAgent) tryAcquireReview(conversationID string) bool {
+// acquireReview is the in-memory reservation gate. It returns whether the
+// caller won, the rejection reason, and whether this reason has not already
+// been recorded for the conversation (coalescing repeated triggers).
+func (r *BackgroundReviewAgent) acquireReview(conversationID string) (bool, string, bool) {
 	conversationID = strings.TrimSpace(conversationID)
 	if conversationID == "" {
-		return false
+		return false, "invalid_conversation", false
 	}
-	now := r.reviewNow()
 	r.reviewMu.Lock()
 	defer r.reviewMu.Unlock()
 	if r.inFlight == nil {
@@ -264,26 +291,51 @@ func (r *BackgroundReviewAgent) tryAcquireReview(conversationID string) bool {
 	if r.lastReview == nil {
 		r.lastReview = make(map[string]time.Time)
 	}
-	if r.inFlight[conversationID] {
-		return false
+	if r.pending == nil {
+		r.pending = make(map[string]bool)
 	}
-	if last, ok := r.lastReview[conversationID]; ok && now.Before(last.Add(r.settings.ReviewCooldown)) {
-		return false
+	if r.lastSkipByID == nil {
+		r.lastSkipByID = make(map[string]string)
+	}
+	if r.inFlight[conversationID] {
+		r.pending[conversationID] = true
+		first := r.lastSkipByID[conversationID] != "already_running"
+		r.lastSkipByID[conversationID] = "already_running"
+		return false, "already_running", first
+	}
+	if last, ok := r.lastReview[conversationID]; ok && r.reviewNow().Before(last.Add(r.settings.ReviewCooldown)) {
+		r.pending[conversationID] = true
+		first := r.lastSkipByID[conversationID] != "cooldown_active"
+		r.lastSkipByID[conversationID] = "cooldown_active"
+		return false, "cooldown_active", first
 	}
 	r.inFlight[conversationID] = true
-	return true
+	r.pending[conversationID] = false
+	delete(r.lastSkipByID, conversationID)
+	return true, "reserved", false
 }
 
-// releaseReview marks a completed or failed run so repeated triggers are
-// cooled down. A failed provider call is still an attempted review; allowing
-// every event to immediately retry would recreate the duplicate-run storm.
-func (r *BackgroundReviewAgent) releaseReview(conversationID string) {
+// tryAcquireReview is retained for focused in-package callers/tests. It uses
+// the same coalescing and retry-only cooldown policy as reserveReview.
+func (r *BackgroundReviewAgent) tryAcquireReview(conversationID string) bool {
+	reserved, _, _ := r.acquireReview(conversationID)
+	return reserved
+}
+
+// releaseReview clears the active slot. Only failed reviews enter retry
+// cooldown; successful reviews may process later evidence. It returns whether
+// new activity was coalesced while the review was active.
+func (r *BackgroundReviewAgent) releaseReview(conversationID string, failed ...bool) bool {
 	r.reviewMu.Lock()
 	defer r.reviewMu.Unlock()
+	pending := r.pending[conversationID]
 	delete(r.inFlight, conversationID)
-	if r.settings.ReviewCooldown > 0 {
+	if len(failed) > 0 && failed[0] && r.settings.ReviewCooldown > 0 {
 		r.lastReview[conversationID] = r.reviewNow()
+	} else {
+		delete(r.lastReview, conversationID)
 	}
+	return pending
 }
 
 func (r *BackgroundReviewAgent) reviewNow() time.Time {
@@ -293,16 +345,22 @@ func (r *BackgroundReviewAgent) reviewNow() time.Time {
 	return time.Now()
 }
 
-// recordReviewSkipped keeps cooldown decisions visible in the learning log
-// without pretending a new LLM review completed or creating a transcript.
-func (r *BackgroundReviewAgent) recordReviewSkipped(conversationID string) {
+// recordReviewSkipped keeps coalesced/deferred decisions visible in the
+// learning log without pretending a new LLM review completed or creating a
+// transcript.
+func (r *BackgroundReviewAgent) recordReviewSkipped(conversationID string, reason ...string) {
 	if r.app == nil || r.app.Trajectory == nil {
 		return
+	}
+	reasonValue := "cooldown_active"
+	if len(reason) > 0 && strings.TrimSpace(reason[0]) != "" {
+		reasonValue = reason[0]
 	}
 	r.app.Trajectory.Record("review", map[string]interface{}{
 		"conversation": conversationID,
 		"status":       "skipped",
-		"reason":       "cooldown",
+		"reason":       reasonValue,
+		"coalesced":    true,
 	})
 }
 
@@ -344,15 +402,24 @@ func (r *BackgroundReviewAgent) applyReviewModelOverride(ctx context.Context, ad
 		r.recordReviewModelResolution(rm, "fallback:conv_model", model)
 		return adapter, model
 	}
-	r.app.log("info", "learning", "review using override model %s", rm)
-	r.recordReviewModelResolution(rm, "ok", rBare)
+	// Record the override only when it actually changes the model. When the
+	// override resolves to the same model the conversation already uses, the
+	// event carries no information — recording it every run turned the
+	// learning log into repeated "ok" noise. Fallbacks are always recorded:
+	// they mean the configured override did NOT apply.
+	if rBare != model {
+		r.app.log("info", "learning", "review using override model %s", rm)
+		r.recordReviewModelResolution(rm, "ok", rBare)
+	}
 	return rAdapter, rBare
 }
 
 // recordReviewModelResolution writes a trajectory event recording whether
-// the review model override succeeded or fell back to the conversation
-// model. This makes override failures visible in the learning log instead
-// of silently logging a warning that is easy to miss.
+// the review model override fell back to the conversation model or applied
+// a different one. Same-model overrides are not recorded: they are a no-op
+// and would only repeat as "ok" noise in the learning log. This keeps
+// override failures visible in the learning log instead of silently
+// logging a warning that is easy to miss.
 func (r *BackgroundReviewAgent) recordReviewModelResolution(requested, status, resolved string) {
 	if r.app == nil || r.app.Trajectory == nil {
 		return

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -232,6 +233,51 @@ func TestFragmentsSaveAndGet(t *testing.T) {
 	}
 	if loaded.CreatedAt.IsZero() || loaded.UpdatedAt.IsZero() {
 		t.Error("timestamps not set")
+	}
+}
+
+func TestFragmentsSaveIfAbsentNormalizesExactDuplicates(t *testing.T) {
+	dir := t.TempDir()
+	f, err := NewFragments(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := &domain.MemoryFragment{Category: domain.FragmentCategoryProject, Content: "line one\nline two"}
+	existing, saved, err := f.SaveIfAbsent(first)
+	if err != nil || !saved || existing != nil {
+		t.Fatalf("first SaveIfAbsent = existing=%v saved=%v err=%v", existing, saved, err)
+	}
+	second := &domain.MemoryFragment{Category: domain.FragmentCategoryUser, Content: "  line one  \r\nline two\r\n"}
+	existing, saved, err = f.SaveIfAbsent(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved || existing == nil || existing.ID != first.ID {
+		t.Fatalf("duplicate SaveIfAbsent = existing=%v saved=%v, want existing first and saved=false", existing, saved)
+	}
+	if got := len(f.List(domain.FragmentSearchFilter{})); got != 1 {
+		t.Fatalf("fragment count = %d, want 1", got)
+	}
+}
+
+func TestFragmentsSaveIfAbsentConcurrentExactDuplicate(t *testing.T) {
+	dir := t.TempDir()
+	f, err := NewFragments(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const workers = 8
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _, _ = f.SaveIfAbsent(&domain.MemoryFragment{Content: "same fact\n"})
+		}()
+	}
+	wg.Wait()
+	if got := len(f.List(domain.FragmentSearchFilter{})); got != 1 {
+		t.Fatalf("concurrent fragment count = %d, want 1", got)
 	}
 }
 

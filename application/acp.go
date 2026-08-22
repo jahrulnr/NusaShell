@@ -13,6 +13,96 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// dispatchAcp routes acp.* RPC methods (agents, runs, permission) to their
+// handlers. Called by App.Dispatch for any method whose first segment is
+// "acp".
+func (a *App) dispatchAcp(method string, payload json.RawMessage) (any, *contracts.RPCError) {
+	switch method {
+	case contracts.MethodAcpAgentsList:
+		return a.handleAcpAgentsList()
+	case contracts.MethodAcpAgentsSave:
+		var req contracts.AcpAgentSaveRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpAgentsSave(req)
+	case contracts.MethodAcpAgentsDelete:
+		var req contracts.AcpAgentIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpAgentsDelete(req)
+	case contracts.MethodAcpAgentsProbe:
+		var req contracts.AcpAgentIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpAgentsProbe(req)
+	case contracts.MethodAcpAgentsAuthenticate:
+		var req contracts.AcpAuthenticateRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpAgentsAuthenticate(req)
+	case contracts.MethodAcpAgentsRefreshCatalog:
+		var req contracts.AcpAgentIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpAgentsRefreshCatalog(req)
+	case contracts.MethodAcpRunsList:
+		var req contracts.AcpRunsListRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpRunsList(req)
+	case contracts.MethodAcpRunsGet:
+		var req contracts.AcpRunIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpRunsGet(req)
+	case contracts.MethodAcpRunsSteer:
+		var req contracts.AcpRunSteerRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpRunsSteer(req)
+	case contracts.MethodAcpRunsStop:
+		var req contracts.AcpRunIDRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpRunsStop(req)
+	case contracts.MethodAcpRunsWait:
+		var req contracts.AcpRunWaitRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpRunsWait(req)
+	case contracts.MethodAcpRunsPromote:
+		var req contracts.AcpRunPromoteRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpRunsPromote(req)
+	case contracts.MethodAcpRunsSetMode:
+		var req contracts.AcpRunSetModeRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpRunsSetMode(req)
+	case contracts.MethodAcpPermissionDecide:
+		var req contracts.AcpPermissionDecideRequest
+		if rpcErr := contracts.DecodePayload(payload, &req); rpcErr != nil {
+			return nil, rpcErr
+		}
+		return a.handleAcpPermissionDecide(req)
+	default:
+		return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "unknown acp method: " + method}
+	}
+}
+
 func (a *App) acpAgentDTO(agent *domain.AcpAgent) contracts.AcpAgentDTO {
 	dto := contracts.AcpAgentDTO{
 		ID:               agent.ID,
