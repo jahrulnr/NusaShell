@@ -805,20 +805,20 @@
               <small>Injected into every agent turn's system prompt inside &lt;user_instructions&gt; tags, after the base identity and tool protocol. Changing this will break the prompt cache for all subsequent turns until a new cache shard stabilizes — expect higher latency and cost on the first few turns after editing.</small>
             </label>
             <details class="settings-field settings-sampling">
-              <summary><strong>Sampling parameters</strong><small>Override provider defaults. Leave blank to use provider default.</small></summary>
-              <label class="settings-field" for="settings-temperature">Temperature (0–2, OpenAI / 0–1, Anthropic)
+              <summary><strong>Sampling parameters</strong></summary>
+              <label class="settings-field" for="settings-temperature">Temperature (0-2, OpenAI / 0-1, Anthropic)
                 <input id="settings-temperature" type="number" min="0" max="2" step="0.1" inputmode="decimal" placeholder="provider default">
               </label>
-              <label class="settings-field" for="settings-top-p">Top P (0–1, nucleus sampling)
+              <label class="settings-field" for="settings-top-p">Top P (0-1, nucleus sampling)
                 <input id="settings-top-p" type="number" min="0" max="1" step="0.05" inputmode="decimal" placeholder="provider default">
               </label>
               <label class="settings-field" for="settings-top-k">Top K (Anthropic only, &gt; 0)
                 <input id="settings-top-k" type="number" min="1" step="1" inputmode="numeric" placeholder="provider default">
               </label>
-              <label class="settings-field" for="settings-frequency-penalty">Frequency penalty (−2 to 2, OpenAI only)
+              <label class="settings-field" for="settings-frequency-penalty">Frequency penalty (-2 to 2, OpenAI only)
                 <input id="settings-frequency-penalty" type="number" min="-2" max="2" step="0.1" inputmode="decimal" placeholder="provider default">
               </label>
-              <label class="settings-field" for="settings-presence-penalty">Presence penalty (−2 to 2, OpenAI only)
+              <label class="settings-field" for="settings-presence-penalty">Presence penalty (-2 to 2, OpenAI only)
                 <input id="settings-presence-penalty" type="number" min="-2" max="2" step="0.1" inputmode="decimal" placeholder="provider default">
               </label>
             </details>
