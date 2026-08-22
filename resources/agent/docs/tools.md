@@ -32,10 +32,10 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `mcp_unregister` | permanently delete an installed plugin; ask first and use `mcp_disable` when it only needs to stop |
 | `mcp_install` | install a plugin from the curated catalog or GitHub |
 | `mcp_server_add` | register a manual MCP server from command, arguments, and environment entries |
-| `read_image` | load an image from the conversation into the model's context (vision models see it directly; non-vision models get a text description via the vision fallback) |
+| `read_image` | load an image from disk by absolute path into the model's context — any path works, not just conversation attachments (vision models see it directly; non-vision models get a text description via the vision fallback) |
 | `generate_image` | generate an image with the configured auxiliary image model (OpenAI Images, OpenRouter Image API, or Codex ChatGPT plan). Only listed when Settings → Image generation is set. The UI displays the print — do not re-render it as Markdown |
-| `read_audio` | load an audio file from the conversation into the model's context (audio-capable models hear it directly; non-audio models get a text transcript via the audio fallback) |
-| `read_video` | load a video file from the conversation into the model's context (video-capable models see it directly; non-video models get a text description via the video fallback) |
+| `read_audio` | load an audio file from disk by absolute path into the model's context — any path works, not just conversation attachments (audio-capable models hear it directly; non-audio models get a text transcript via the audio fallback) |
+| `read_video` | load a video file from disk by absolute path into the model's context — any path works, not just conversation attachments (video-capable models see it directly; non-video models get a text description via the video fallback) |
 | `web_search` | search the web across Brave, Startpage, Wikipedia, and GitHub; returns ranked results with title, URL, and snippet |
 | `web_fetch` | fetch a URL and return readable text; supports HTML, JSON (pretty-printed), XML/RSS/Atom, Markdown, CSV, and plain text with newlines preserved; collects links and selected response headers; honors `max_bytes`; surfaces `Retry-After` on 429/503 and structured JSON error bodies |
 | `web_answer` | get a web-grounded answer via an LLM with built-in web search (only available when an answer-provider API key is configured) |

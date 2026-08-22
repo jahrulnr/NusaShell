@@ -9,8 +9,8 @@ import (
 	"nusashell/domain"
 )
 
-// executeReadImage handles the read_image tool call. It finds the requested
-// image attachment in the conversation history, then either:
+// executeReadImage handles the read_image tool call. It loads the image
+// directly from disk by absolute path, then either:
 //   - Native fast path (vision model): returns the image directly as a tool
 //     result attachment so the model can see it in the next round.
 //   - Fallback path (non-vision model + fallback configured): describes the
@@ -33,12 +33,7 @@ func (a *App) executeReadImage(run *TurnRun, toolCall domain.ToolCall, caps Mode
 		return "error: file_path must be an absolute path", nil, fmt.Errorf("file_path must be absolute, got %q", path)
 	}
 
-	conversation, err := a.Conversations.Get(run.ConversationID)
-	if err != nil {
-		return "error: conversation not found", nil, err
-	}
-
-	image, err := findImageAttachmentByPath(conversation, path)
+	image, err := loadMediaAttachment("image", path)
 	if err != nil {
 		return "error: " + err.Error(), nil, err
 	}
@@ -95,45 +90,4 @@ func (a *App) executeReadImage(run *TurnRun, toolCall domain.ToolCall, caps Mode
 		meta["file_path"] = image.FilePath
 	}
 	return yamlMDApp(meta, result), nil, nil
-}
-
-// findImageAttachmentByPath searches conversation attachments for an image
-// matching the given absolute file path (case-insensitive). User message
-// attachments and tool OutputAttachments (e.g. generate_image results) are
-// both eligible so image-to-image edits can reference earlier generations.
-func findImageAttachmentByPath(conversation *domain.Conversation, path string) (domain.Attachment, error) {
-	target := strings.ToLower(strings.TrimSpace(path))
-	for _, msg := range conversation.Messages {
-		if att, ok := matchImagePath(msg.Attachments, target); ok {
-			return att, nil
-		}
-		if msg.Role != domain.RoleAssistant {
-			continue
-		}
-		for _, tc := range msg.ToolCalls {
-			if att, ok := matchImagePath(tc.OutputAttachments, target); ok {
-				return att, nil
-			}
-		}
-		for _, step := range msg.Steps {
-			for _, tc := range step.ToolCalls {
-				if att, ok := matchImagePath(tc.OutputAttachments, target); ok {
-					return att, nil
-				}
-			}
-		}
-	}
-	return domain.Attachment{}, fmt.Errorf("image attachment with file_path %q not found in conversation", path)
-}
-
-func matchImagePath(atts []domain.Attachment, target string) (domain.Attachment, bool) {
-	for _, att := range atts {
-		if att.Type != "image" {
-			continue
-		}
-		if att.FilePath != "" && strings.ToLower(att.FilePath) == target {
-			return att, true
-		}
-	}
-	return domain.Attachment{}, false
 }

@@ -212,17 +212,17 @@ func TestExecuteGenerateImageLoadsReferencedPaths(t *testing.T) {
 		Model:    "openai/gpt-image-2",
 	}}
 	app := imageGenApp(t, gen, conv)
-	saved, err := app.Attachments.WriteBytes("c1", "prior.png", png)
-	if err != nil {
+	// References are read straight from disk now — write a real file.
+	saved := filepath.Join(dir, "prior.png")
+	if err := os.WriteFile(saved, png, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	conv.Messages[0].ToolCalls[0].OutputAttachments[0].FilePath = saved
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
 	args, _ := jsonGenerateArgs(saved)
-	_, _, err = app.executeGenerateImage(run, domain.ToolCall{
+	_, _, err := app.executeGenerateImage(run, domain.ToolCall{
 		ID: "tc_edit", Name: "generate_image", Args: args,
 	}, domain.Settings{ImageProviderID: "img", ImageModelID: "openai/gpt-image-2"})
 	if err != nil {

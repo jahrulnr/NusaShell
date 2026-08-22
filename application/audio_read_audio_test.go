@@ -8,56 +8,10 @@ import (
 	"nusashell/domain"
 )
 
-func TestFindAudioAttachmentByPath(t *testing.T) {
-	dir := t.TempDir()
-	audioPath := testAbsPath(dir, "recording.mp3")
-	conv := &domain.Conversation{Messages: []domain.Message{
-		{ID: "u1", Role: domain.RoleUser, Content: "listen", Attachments: []domain.Attachment{
-			{Type: "audio", Name: "recording.mp3", MediaType: "audio/mpeg", DataURL: "data:audio/mpeg;base64,abc", FilePath: audioPath},
-			{Type: "text", Name: "note.txt", MediaType: "text/plain", Content: "see audio"},
-		}},
-		{ID: "a1", Role: domain.RoleAssistant, Content: "ok"},
-		{ID: "u2", Role: domain.RoleUser, Content: "another", Attachments: []domain.Attachment{
-			{Type: "image", Name: "dog.jpg", MediaType: "image/jpeg", DataURL: "data:image/jpeg;base64,def", FilePath: testAbsPath(dir, "dog.jpg")},
-		}},
-	}}
-
-	// Exact match
-	aud, err := findAudioAttachmentByPath(conv, audioPath)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if aud.Name != "recording.mp3" {
-		t.Errorf("got %q, want recording.mp3", aud.Name)
-	}
-
-	// Case-insensitive match
-	aud, err = findAudioAttachmentByPath(conv, strings.ToUpper(audioPath))
-	if err != nil {
-		t.Fatalf("unexpected error on case-insensitive: %v", err)
-	}
-	if aud.Name != "recording.mp3" {
-		t.Errorf("got %q, want recording.mp3", aud.Name)
-	}
-
-	// Not found
-	_, err = findAudioAttachmentByPath(conv, testAbsPath(dir, "nonexistent.mp3"))
-	if err == nil {
-		t.Error("expected error for nonexistent audio")
-	}
-}
-
 func TestExecuteReadAudioNative(t *testing.T) {
 	dir := t.TempDir()
-	audioPath := testAbsPath(dir, "recording.mp3")
-	conv := &domain.Conversation{Messages: []domain.Message{
-		{ID: "u1", Role: domain.RoleUser, Content: "listen", Attachments: []domain.Attachment{
-			{Type: "audio", Name: "recording.mp3", MediaType: "audio/mpeg", DataURL: "data:audio/mpeg;base64,abc", FilePath: audioPath},
-		}},
-	}}
-	app := &App{
-		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
-	}
+	audioPath := writeTestFile(t, dir, "recording.mp3")
+	app := &App{}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
@@ -83,19 +37,15 @@ func TestExecuteReadAudioNative(t *testing.T) {
 	if atts[0].Type != "audio" || atts[0].Name != "recording.mp3" {
 		t.Errorf("attachment should be the audio, got %q %q", atts[0].Type, atts[0].Name)
 	}
+	if atts[0].MediaType != "audio/mpeg" || atts[0].DataURL == "" {
+		t.Errorf("attachment should be inline mpeg audio, got %q url=%v", atts[0].MediaType, atts[0].DataURL != "")
+	}
 }
 
 func TestExecuteReadAudioNonAudioNoFallback(t *testing.T) {
 	dir := t.TempDir()
-	audioPath := testAbsPath(dir, "recording.mp3")
-	conv := &domain.Conversation{Messages: []domain.Message{
-		{ID: "u1", Role: domain.RoleUser, Content: "listen", Attachments: []domain.Attachment{
-			{Type: "audio", Name: "recording.mp3", MediaType: "audio/mpeg", DataURL: "data:audio/mpeg;base64,abc", FilePath: audioPath},
-		}},
-	}}
-	app := &App{
-		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
-	}
+	audioPath := writeTestFile(t, dir, "recording.mp3")
+	app := &App{}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
@@ -119,15 +69,7 @@ func TestExecuteReadAudioNonAudioNoFallback(t *testing.T) {
 
 func TestExecuteReadAudioAudioNotFound(t *testing.T) {
 	dir := t.TempDir()
-	audioPath := testAbsPath(dir, "recording.mp3")
-	conv := &domain.Conversation{Messages: []domain.Message{
-		{ID: "u1", Role: domain.RoleUser, Content: "listen", Attachments: []domain.Attachment{
-			{Type: "audio", Name: "recording.mp3", MediaType: "audio/mpeg", DataURL: "data:audio/mpeg;base64,abc", FilePath: audioPath},
-		}},
-	}}
-	app := &App{
-		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
-	}
+	app := &App{}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}

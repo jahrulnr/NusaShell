@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -113,11 +114,7 @@ func (a *App) executeGenerateImage(run *TurnRun, toolCall domain.ToolCall, setti
 		return failGenerateImage("attachment store is not configured")
 	}
 
-	conversation, err := a.Conversations.Get(run.ConversationID)
-	if err != nil {
-		return failGenerateImage("conversation not found")
-	}
-	refs, err := a.loadImageReferences(conversation, args.ReferencedImagePaths)
+	refs, err := a.loadImageReferences(args.ReferencedImagePaths)
 	if err != nil {
 		return failGenerateImage(err.Error())
 	}
@@ -173,21 +170,20 @@ func (a *App) executeGenerateImage(run *TurnRun, toolCall domain.ToolCall, setti
 	return yamlMDApp(meta, body), atts, nil
 }
 
-func (a *App) loadImageReferences(conversation *domain.Conversation, paths []string) ([]ImageReference, error) {
+// loadImageReferences reads referenced images directly from disk by
+// absolute path. The filesystem is the single source of truth — no
+// conversation-history lookup — so any readable image path works.
+func (a *App) loadImageReferences(paths []string) ([]ImageReference, error) {
 	if len(paths) == 0 {
 		return nil, nil
 	}
 	out := make([]ImageReference, 0, len(paths))
 	for _, path := range paths {
-		att, err := findImageAttachmentByPath(conversation, path)
-		if err != nil {
-			return nil, err
-		}
-		data, err := a.attachmentBytes(att)
+		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil, fmt.Errorf("read referenced image %q: %w", path, err)
 		}
-		media := att.MediaType
+		media := sniffMediaType(data)
 		if media == "" {
 			media = sniffMediaType(data)
 		}
@@ -197,16 +193,6 @@ func (a *App) loadImageReferences(conversation *domain.Conversation, paths []str
 		out = append(out, ImageReference{MediaType: media, Data: data})
 	}
 	return out, nil
-}
-
-func (a *App) attachmentBytes(att domain.Attachment) ([]byte, error) {
-	if att.DataURL != "" {
-		return decodeAttachmentDataURL(att.DataURL)
-	}
-	if a.Attachments != nil && att.FilePath != "" {
-		return a.Attachments.ReadFile(att.FilePath)
-	}
-	return nil, fmt.Errorf("image %q has no bytes on disk", att.Name)
 }
 
 func decodeAttachmentDataURL(dataURL string) ([]byte, error) {

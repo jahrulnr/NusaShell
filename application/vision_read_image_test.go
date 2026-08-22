@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -32,86 +33,21 @@ func filePathArgs(path string, question string) string {
 	return string(b)
 }
 
-func TestFindImageAttachmentByPath(t *testing.T) {
-	dir := t.TempDir()
-	catPath := testAbsPath(dir, "cat.png")
-	dogPath := testAbsPath(dir, "dog.jpg")
-	conv := &domain.Conversation{Messages: []domain.Message{
-		{ID: "u1", Role: domain.RoleUser, Content: "look", Attachments: []domain.Attachment{
-			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: catPath},
-			{Type: "text", Name: "note.txt", MediaType: "text/plain", Content: "see image"},
-		}},
-		{ID: "a1", Role: domain.RoleAssistant, Content: "ok"},
-		{ID: "u2", Role: domain.RoleUser, Content: "another", Attachments: []domain.Attachment{
-			{Type: "image", Name: "dog.jpg", MediaType: "image/jpeg", DataURL: "data:image/jpeg;base64,def", FilePath: dogPath},
-		}},
-	}}
-
-	// Exact match
-	img, err := findImageAttachmentByPath(conv, catPath)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+// writeTestFile writes a small fake media payload so loadMediaAttachment
+// finds a real file on disk.
+func writeTestFile(t *testing.T, dir, name string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("fake media bytes for "+name), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if img.Name != "cat.png" {
-		t.Errorf("got %q, want cat.png", img.Name)
-	}
-
-	// Case-insensitive match
-	img, err = findImageAttachmentByPath(conv, strings.ToUpper(catPath))
-	if err != nil {
-		t.Fatalf("unexpected error for case-insensitive: %v", err)
-	}
-	if img.Name != "cat.png" {
-		t.Errorf("got %q, want cat.png", img.Name)
-	}
-
-	// Second image in different message
-	img, err = findImageAttachmentByPath(conv, dogPath)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if img.Name != "dog.jpg" {
-		t.Errorf("got %q, want dog.jpg", img.Name)
-	}
-
-	// Not found
-	_, err = findImageAttachmentByPath(conv, testAbsPath(dir, "nonexistent.png"))
-	if err == nil {
-		t.Error("expected error for nonexistent image")
-	}
-
-	// Generated image on a tool call OutputAttachments
-	genPath := testAbsPath(dir, "gen-tc.png")
-	conv.Messages = append(conv.Messages, domain.Message{
-		ID:   "a2",
-		Role: domain.RoleAssistant,
-		ToolCalls: []domain.ToolCall{{
-			ID: "tcg", Name: "generate_image",
-			OutputAttachments: []domain.Attachment{{
-				Type: "image", Name: "gen-tc.png", MediaType: "image/png", FilePath: genPath,
-			}},
-		}},
-	})
-	img, err = findImageAttachmentByPath(conv, genPath)
-	if err != nil {
-		t.Fatalf("generated image lookup: %v", err)
-	}
-	if img.Name != "gen-tc.png" {
-		t.Errorf("got %q, want gen-tc.png", img.Name)
-	}
+	return path
 }
 
 func TestExecuteReadImageVisionModel(t *testing.T) {
 	dir := t.TempDir()
-	catPath := testAbsPath(dir, "cat.png")
-	conv := &domain.Conversation{Messages: []domain.Message{
-		{ID: "u1", Role: domain.RoleUser, Content: "look", Attachments: []domain.Attachment{
-			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: catPath},
-		}},
-	}}
-	app := &App{
-		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
-	}
+	catPath := writeTestFile(t, dir, "cat.png")
+	app := &App{}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
@@ -137,19 +73,48 @@ func TestExecuteReadImageVisionModel(t *testing.T) {
 	if atts[0].Type != "image" || atts[0].Name != "cat.png" {
 		t.Errorf("attachment should be the image, got %q %q", atts[0].Type, atts[0].Name)
 	}
+	if atts[0].MediaType != "image/png" {
+		t.Errorf("media type should be image/png, got %q", atts[0].MediaType)
+	}
+	if atts[0].DataURL == "" {
+		t.Error("attachment should carry inline data URL")
+	}
+}
+
+func TestExecuteReadImageOutsideWorkspace(t *testing.T) {
+	// Absolute path outside any workspace/attachment root must load fine.
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "elsewhere", "deep")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := writeTestFile(t, sub, "photo.jpg")
+	app := &App{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
+	toolCall := domain.ToolCall{
+		ID:   "tc1",
+		Name: "read_image",
+		Args: filePathArgs(path, ""),
+	}
+
+	output, atts, err := app.executeReadImage(run, toolCall, ModelCapabilities{Vision: true}, domain.Settings{})
+	if err != nil {
+		t.Fatalf("unexpected error for path outside attachment roots: %v", err)
+	}
+	if !strings.Contains(output, "Image loaded") {
+		t.Errorf("output should mention image loaded, got: %q", output)
+	}
+	if len(atts) != 1 || atts[0].MediaType != "image/jpeg" {
+		t.Fatalf("expected jpeg attachment from arbitrary path, got %+v", atts)
+	}
 }
 
 func TestExecuteReadImageNonVisionNoFallback(t *testing.T) {
 	dir := t.TempDir()
-	catPath := testAbsPath(dir, "cat.png")
-	conv := &domain.Conversation{Messages: []domain.Message{
-		{ID: "u1", Role: domain.RoleUser, Content: "look", Attachments: []domain.Attachment{
-			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: catPath},
-		}},
-	}}
-	app := &App{
-		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
-	}
+	catPath := writeTestFile(t, dir, "cat.png")
+	app := &App{}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
@@ -174,15 +139,7 @@ func TestExecuteReadImageNonVisionNoFallback(t *testing.T) {
 
 func TestExecuteReadImageImageNotFound(t *testing.T) {
 	dir := t.TempDir()
-	catPath := testAbsPath(dir, "cat.png")
-	conv := &domain.Conversation{Messages: []domain.Message{
-		{ID: "u1", Role: domain.RoleUser, Content: "look", Attachments: []domain.Attachment{
-			{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,abc", FilePath: catPath},
-		}},
-	}}
-	app := &App{
-		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
-	}
+	app := &App{}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
@@ -239,5 +196,4 @@ func TestExecuteReadImageRejectsRelativePath(t *testing.T) {
 	if !strings.Contains(output, "absolute") {
 		t.Errorf("output should mention absolute path required, got: %q", output)
 	}
-	_ = filepath.IsAbs // keep import used
 }

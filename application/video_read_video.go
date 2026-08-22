@@ -10,8 +10,8 @@ import (
 	"nusashell/domain"
 )
 
-// executeReadVideo handles the read_video tool call. It finds the requested
-// video attachment in the conversation history, then either:
+// executeReadVideo handles the read_video tool call. It loads the video
+// directly from disk by absolute path, then either:
 //   - Native fast path (video-capable model): returns the video directly as
 //     a tool result attachment so the model can see it in the next round.
 //   - Fallback path (non-video model + fallback configured): describes the
@@ -34,12 +34,7 @@ func (a *App) executeReadVideo(run *TurnRun, toolCall domain.ToolCall, caps Mode
 		return "error: file_path must be an absolute path", nil, fmt.Errorf("file_path must be absolute, got %q", path)
 	}
 
-	conversation, err := a.Conversations.Get(run.ConversationID)
-	if err != nil {
-		return "error: conversation not found", nil, err
-	}
-
-	video, err := findVideoAttachmentByPath(conversation, path)
+	video, err := loadMediaAttachment("video", path)
 	if err != nil {
 		return "error: " + err.Error(), nil, err
 	}
@@ -96,27 +91,6 @@ func (a *App) executeReadVideo(run *TurnRun, toolCall domain.ToolCall, caps Mode
 		meta["file_path"] = video.FilePath
 	}
 	return yamlMDApp(meta, result), nil, nil
-}
-
-// findVideoAttachmentByPath searches all user messages in the conversation
-// for a video attachment matching the given absolute file path
-// (case-insensitive).
-func findVideoAttachmentByPath(conversation *domain.Conversation, path string) (domain.Attachment, error) {
-	target := strings.ToLower(strings.TrimSpace(path))
-	for _, msg := range conversation.Messages {
-		if msg.Role != domain.RoleUser {
-			continue
-		}
-		for _, att := range msg.Attachments {
-			if att.Type != "video" {
-				continue
-			}
-			if att.FilePath != "" && strings.ToLower(att.FilePath) == target {
-				return att, nil
-			}
-		}
-	}
-	return domain.Attachment{}, fmt.Errorf("video attachment with file_path %q not found in conversation", path)
 }
 
 // describeOneVideo sends a video attachment to a multimodal chat model and

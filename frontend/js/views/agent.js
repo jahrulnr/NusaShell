@@ -368,9 +368,9 @@ function updateConversationItem(item, c) {
   const wantDot = Boolean(isLive);
   if (dot && !wantDot) dot.remove();
   if (!dot && wantDot) {
-    const textSpan = item.querySelector('.agent-conversation-title');
+    const textSpan = item.querySelector('.agent-conversation-time');
     const dotEl = el('span', { class: 'agent-conversation-dot', 'aria-hidden': 'true' });
-    if (textSpan) textSpan.after(dotEl);
+    if (textSpan) textSpan.append(dotEl);
     else item.append(dotEl);
   }
   return item;

@@ -10,8 +10,8 @@ import (
 	"nusashell/domain"
 )
 
-// executeReadAudio handles the read_audio tool call. It finds the requested
-// audio attachment in the conversation history, then either:
+// executeReadAudio handles the read_audio tool call. It loads the audio
+// directly from disk by absolute path, then either:
 //   - Native fast path (audio-capable model): returns the audio directly as
 //     a tool result attachment so the model can hear it in the next round.
 //   - Fallback path (non-audio model + fallback configured): transcribes/
@@ -34,12 +34,7 @@ func (a *App) executeReadAudio(run *TurnRun, toolCall domain.ToolCall, caps Mode
 		return "error: file_path must be an absolute path", nil, fmt.Errorf("file_path must be absolute, got %q", path)
 	}
 
-	conversation, err := a.Conversations.Get(run.ConversationID)
-	if err != nil {
-		return "error: conversation not found", nil, err
-	}
-
-	audio, err := findAudioAttachmentByPath(conversation, path)
+	audio, err := loadMediaAttachment("audio", path)
 	if err != nil {
 		return "error: " + err.Error(), nil, err
 	}
@@ -96,27 +91,6 @@ func (a *App) executeReadAudio(run *TurnRun, toolCall domain.ToolCall, caps Mode
 		meta["file_path"] = audio.FilePath
 	}
 	return yamlMDApp(meta, result), nil, nil
-}
-
-// findAudioAttachmentByPath searches all user messages in the conversation
-// for an audio attachment matching the given absolute file path
-// (case-insensitive).
-func findAudioAttachmentByPath(conversation *domain.Conversation, path string) (domain.Attachment, error) {
-	target := strings.ToLower(strings.TrimSpace(path))
-	for _, msg := range conversation.Messages {
-		if msg.Role != domain.RoleUser {
-			continue
-		}
-		for _, att := range msg.Attachments {
-			if att.Type != "audio" {
-				continue
-			}
-			if att.FilePath != "" && strings.ToLower(att.FilePath) == target {
-				return att, nil
-			}
-		}
-	}
-	return domain.Attachment{}, fmt.Errorf("audio attachment with file_path %q not found in conversation", path)
 }
 
 // describeOneAudio sends an audio attachment to a multimodal chat model and

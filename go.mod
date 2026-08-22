@@ -3,7 +3,7 @@ module nusashell
 go 1.26.5
 
 require (
-	github.com/jahrulnr/searchwire v0.0.0-20260815212041-8dcb6fbafb70
+	github.com/jahrulnr/searchwire v0.0.0-20260822171954-b894a9cdf101
 	github.com/mark3labs/mcp-go v0.58.0
 	github.com/ncruces/zenity v0.10.15
 	gopkg.in/yaml.v3 v3.0.1
@@ -12,6 +12,8 @@ require (
 )
 
 require (
+	github.com/JohannesKaufmann/dom v0.2.0 // indirect
+	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.1 // indirect
 	github.com/akavel/rsrc v0.10.2 // indirect
 	github.com/dchest/jsmin v1.0.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect

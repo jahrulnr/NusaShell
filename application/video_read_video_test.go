@@ -8,56 +8,10 @@ import (
 	"nusashell/domain"
 )
 
-func TestFindVideoAttachmentByPath(t *testing.T) {
-	dir := t.TempDir()
-	videoPath := testAbsPath(dir, "clip.mp4")
-	conv := &domain.Conversation{Messages: []domain.Message{
-		{ID: "u1", Role: domain.RoleUser, Content: "watch", Attachments: []domain.Attachment{
-			{Type: "video", Name: "clip.mp4", MediaType: "video/mp4", DataURL: "data:video/mp4;base64,abc", FilePath: videoPath},
-			{Type: "text", Name: "note.txt", MediaType: "text/plain", Content: "see video"},
-		}},
-		{ID: "a1", Role: domain.RoleAssistant, Content: "ok"},
-		{ID: "u2", Role: domain.RoleUser, Content: "another", Attachments: []domain.Attachment{
-			{Type: "image", Name: "dog.jpg", MediaType: "image/jpeg", DataURL: "data:image/jpeg;base64,def", FilePath: testAbsPath(dir, "dog.jpg")},
-		}},
-	}}
-
-	// Exact match
-	vid, err := findVideoAttachmentByPath(conv, videoPath)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if vid.Name != "clip.mp4" {
-		t.Errorf("got %q, want clip.mp4", vid.Name)
-	}
-
-	// Case-insensitive match
-	vid, err = findVideoAttachmentByPath(conv, strings.ToUpper(videoPath))
-	if err != nil {
-		t.Fatalf("unexpected error on case-insensitive: %v", err)
-	}
-	if vid.Name != "clip.mp4" {
-		t.Errorf("got %q, want clip.mp4", vid.Name)
-	}
-
-	// Not found
-	_, err = findVideoAttachmentByPath(conv, testAbsPath(dir, "nonexistent.mp4"))
-	if err == nil {
-		t.Error("expected error for nonexistent video")
-	}
-}
-
 func TestExecuteReadVideoNative(t *testing.T) {
 	dir := t.TempDir()
-	videoPath := testAbsPath(dir, "clip.mp4")
-	conv := &domain.Conversation{Messages: []domain.Message{
-		{ID: "u1", Role: domain.RoleUser, Content: "watch", Attachments: []domain.Attachment{
-			{Type: "video", Name: "clip.mp4", MediaType: "video/mp4", DataURL: "data:video/mp4;base64,abc", FilePath: videoPath},
-		}},
-	}}
-	app := &App{
-		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
-	}
+	videoPath := writeTestFile(t, dir, "clip.mp4")
+	app := &App{}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
@@ -83,19 +37,15 @@ func TestExecuteReadVideoNative(t *testing.T) {
 	if atts[0].Type != "video" || atts[0].Name != "clip.mp4" {
 		t.Errorf("attachment should be the video, got %q %q", atts[0].Type, atts[0].Name)
 	}
+	if atts[0].MediaType != "video/mp4" || atts[0].DataURL == "" {
+		t.Errorf("attachment should be inline mp4 video, got %q url=%v", atts[0].MediaType, atts[0].DataURL != "")
+	}
 }
 
 func TestExecuteReadVideoNonVideoNoFallback(t *testing.T) {
 	dir := t.TempDir()
-	videoPath := testAbsPath(dir, "clip.mp4")
-	conv := &domain.Conversation{Messages: []domain.Message{
-		{ID: "u1", Role: domain.RoleUser, Content: "watch", Attachments: []domain.Attachment{
-			{Type: "video", Name: "clip.mp4", MediaType: "video/mp4", DataURL: "data:video/mp4;base64,abc", FilePath: videoPath},
-		}},
-	}}
-	app := &App{
-		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
-	}
+	videoPath := writeTestFile(t, dir, "clip.mp4")
+	app := &App{}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
@@ -119,15 +69,7 @@ func TestExecuteReadVideoNonVideoNoFallback(t *testing.T) {
 
 func TestExecuteReadVideoVideoNotFound(t *testing.T) {
 	dir := t.TempDir()
-	videoPath := testAbsPath(dir, "clip.mp4")
-	conv := &domain.Conversation{Messages: []domain.Message{
-		{ID: "u1", Role: domain.RoleUser, Content: "watch", Attachments: []domain.Attachment{
-			{Type: "video", Name: "clip.mp4", MediaType: "video/mp4", DataURL: "data:video/mp4;base64,abc", FilePath: videoPath},
-		}},
-	}}
-	app := &App{
-		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
-	}
+	app := &App{}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}

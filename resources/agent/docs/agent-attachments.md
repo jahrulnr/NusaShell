@@ -37,12 +37,15 @@ described above.
 
 ## read_image tool
 
-The `read_image` tool lets the model request an image from the conversation
-on demand. It accepts a `file_path` (the absolute path of an image file on
-disk, shown in the image placeholder) and an optional `question`. Relative
-paths are rejected — only absolute paths are accepted.
+The `read_image` tool lets the model load any image from disk on demand.
+It accepts a `file_path` (any absolute path of an image file on disk —
+conversation attachments, generated images, or files elsewhere on the
+filesystem) and an optional `question`. Relative paths are rejected — only
+absolute paths are accepted. There is no conversation-history lookup: if
+the file exists and is readable at that absolute path, it loads; otherwise
+the tool returns a clear not-found error.
 
-Use the absolute path from the placeholder — never guess or invent one.
+Use a real absolute path — never guess or invent one.
 
 Good example:
 
