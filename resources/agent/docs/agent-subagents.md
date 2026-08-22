@@ -41,8 +41,11 @@ authority when it spawns a subagent.
 
 When a subagent finishes (completed, failed, or cancelled):
 
-1. The full transcript is persisted to `acp_runs.jsonl` in the data
-   directory as a JSONL line (one per run).
+1. The full transcript is persisted to
+   `conversations/<conversation_id>.acp/<run_id>.json` under the data
+   directory — one JSON file per run, linked to the parent conversation.
+   Writes are atomic and per-run, so parallel spawns finishing at the
+   same time never contend on a shared file.
 2. The original `subagent` tool call is updated from `running` to
    `ok`/`fail` with the subagent's last-turn text summary as output.
 3. A new parent-agent turn is triggered (tool injection) so the parent

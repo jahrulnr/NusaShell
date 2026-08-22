@@ -39,7 +39,7 @@ Override with the `NUSASHELL_DATA_DIR` environment variable.
 | `attachments/<conv_id>/` | user image/file attachments and generated images (`gen-<toolCallID>.<ext>`) | files |
 | `docs/` | optional user-supplied docs that extend the embedded corpus | markdown |
 | `logs.jsonl` | activity log (bounded ring) | JSONL |
-| `conversations/acp_runs.jsonl` | completed ACP subagent run transcripts (one JSON line per run) | JSONL |
+| `conversations/<conv_id>.acp/` | completed ACP subagent run transcripts (one JSON file per run, linked to the parent conversation); legacy global `acp_runs.jsonl` migrates here automatically on first use | JSON |
 | `credentials.db` | API keys per provider | SQLite |
 | `ci/automation.db` | workflows, runs, schedules, events, waits, locks | SQLite |
 | `ci/runs/` | local executor scratch directories | files |

@@ -367,11 +367,11 @@ func TestHydrationTodoList(t *testing.T) {
 	if !strings.Contains(todoContent, "CURRENT TASKS") {
 		t.Errorf("expected CURRENT TASKS header, got: %s", todoContent)
 	}
-	if !strings.Contains(todoContent, "[~] Add parser") {
-		t.Errorf("expected in_progress item, got: %s", todoContent)
+	if !strings.Contains(todoContent, "[~] (2) Add parser") {
+		t.Errorf("expected in_progress item with ID, got: %s", todoContent)
 	}
-	if !strings.Contains(todoContent, "[ ] Write tests") {
-		t.Errorf("expected pending item, got: %s", todoContent)
+	if !strings.Contains(todoContent, "[ ] (3) Write tests") {
+		t.Errorf("expected pending item with ID, got: %s", todoContent)
 	}
 	// Completed items should be filtered out
 	if strings.Contains(todoContent, "Create CLI") {
@@ -481,6 +481,29 @@ func (f *fakeTodoPort) SetBrief(convID string, goal string) {
 func (f *fakeTodoPort) Clear(convID string) {
 	delete(f.items, convID)
 	delete(f.briefs, convID)
+}
+
+func (f *fakeTodoPort) Patch(convID string, patches []domain.TodoItem) {
+	if f.items == nil {
+		f.items = map[string][]domain.TodoItem{}
+	}
+	existing := f.items[convID]
+	byID := make(map[string]int, len(existing))
+	for i, item := range existing {
+		byID[item.ID] = i
+	}
+	for _, p := range patches {
+		if idx, ok := byID[p.ID]; ok {
+			existing[idx].Status = p.Status
+			if p.Content != "" {
+				existing[idx].Content = p.Content
+			}
+		} else {
+			existing = append(existing, p)
+			byID[p.ID] = len(existing) - 1
+		}
+	}
+	f.items[convID] = existing
 }
 
 func TestFilterHydrationRemovesAll(t *testing.T) {

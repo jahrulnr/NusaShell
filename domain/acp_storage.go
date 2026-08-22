@@ -3,9 +3,9 @@ package domain
 import "time"
 
 // AcpRunRecord is the persistent JSON representation of a completed (or
-// failed) ACP subagent run. It is written to storage as JSONL — one line
-// per run — so the transcript can be replayed or audited without holding
-// every run in memory.
+// failed) ACP subagent run. It is written to storage as one
+// self-contained JSON document so the transcript can be replayed or
+// audited without holding every run in memory.
 //
 // Unlike the in-memory AcpRun, the record is self-contained: it carries
 // the full transcript, agent identity, and parent linkage so it can be
@@ -28,10 +28,11 @@ type AcpRunRecord struct {
 	EndedAt          time.Time            `json:"ended_at"`
 }
 
-// AcpRunStorage persists completed ACP run records as JSONL. The runtime
-// writes a record when a run finishes (done, failed, or cancelled). The
-// application layer reads records back to restore state after a restart
-// or to serve the UI's transcript drawer for historical runs.
+// AcpRunStorage persists completed ACP run records as one document per
+// run, linked to the parent conversation. The runtime writes a record
+// when a run finishes (done, failed, or cancelled). The application
+// layer reads records back to restore state after a restart or to serve
+// the UI's transcript drawer for historical runs.
 type AcpRunStorage interface {
 	Save(record AcpRunRecord) error
 	Load(runID string) (AcpRunRecord, bool)

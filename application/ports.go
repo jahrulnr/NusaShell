@@ -150,16 +150,23 @@ type LearningEdgeStore interface {
 }
 
 // ConversationTodoPort is the per-conversation todo checklist store. The
-// model owns the list (full-replace via the `todo` tool); the user can
-// delete items from the UI. The brief (a living planning document) is set
-// alongside items and survives compaction via hydration. Implementations
-// must be safe for concurrent use.
+// model owns the list (full-replace via the `todo` tool, or patch by ID
+// via mode:"patch"); the user can delete items from the UI. The brief (a
+// living planning document) is set alongside items and survives compaction
+// via hydration. Implementations must be safe for concurrent use.
 type ConversationTodoPort interface {
 	Get(conversationID string) []domain.TodoItem
 	GetBrief(conversationID string) string
 	Set(conversationID string, items []domain.TodoItem)
 	SetBrief(conversationID string, brief string)
 	Clear(conversationID string)
+	// Patch merges items by ID into the existing list. Items with an
+	// existing ID update their status (always) and content (only when
+	// non-empty). Items with a new ID are appended. Items not in the
+	// patch are kept unchanged. This is the backend for the todo tool's
+	// mode:"patch" — it lets the model update a single item's status
+	// without re-emitting the full list.
+	Patch(conversationID string, items []domain.TodoItem)
 }
 
 type LogStore interface {

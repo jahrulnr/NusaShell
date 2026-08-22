@@ -16,7 +16,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `memory_search` | BM25 search over fragments with metadata filters (`category`, `project`, `task`, `tags`); returns ranked results with scores |
 | `memory_list` | list entries: `target="primary"` for the always-injected document, `target="fragments"` (default) for the archive with optional metadata filters |
 | `memory_delete` | delete a fragment by id |
-| `todo` | replace the conversation task checklist (full-replace, Claude TodoWrite style; max 50 items, 500 chars each; prefer exactly one `in_progress` at a time). The optional `brief` argument is a living planning document (max ~10k tokens) with required markdown sections `## Objective` and `## Done when`, plus optional `## Findings` and `## Approach` that grow as the task progresses. It stays available through conversation history and is re-injected with the fresh hydration checkpoint after compaction. The user can delete items from the UI — treat deleted items as gone and do not re-add them. |
+| `todo` | manage the conversation task checklist. Two modes: `replace` (default) full-replaces Claude TodoWrite style (empty items clears the list); `patch` merges by ID — updates status/content of existing items, appends new ones, keeps untouched items unchanged (`content` optional in patch mode). Use `patch` to update a single item without re-emitting the full list. Item IDs are shown in the hydrated checklist so statuses can be patched after compaction. Max 50 items, 500 chars each; prefer exactly one `in_progress` at a time. The optional `brief` argument is a living planning document (max ~10k tokens) with required markdown sections `## Objective` and `## Done when`, plus optional `## Findings` and `## Approach` that grow as the task progresses. It stays available through conversation history and is re-injected with the fresh hydration checkpoint after compaction. The user can delete items from the UI — treat deleted items as gone and do not re-add them. |
 | `ask_question` | block for a structured user decision; use only when progress genuinely requires a choice or approval |
 | `docs_search` | search the product documentation when the page id is unknown; results ranked by relevance |
 | `docs_read` | read a documentation page by canonical extensionless id (from `docs_search` results) |
@@ -148,7 +148,7 @@ with the subagent's text summary and a new parent-agent turn is triggered
 (tool injection) so the parent processes the result without a user
 message. While any subagent is running, the parent's auto-continue chain
 pauses with reason `awaiting-background-jobs`. Completed run transcripts
-are persisted to `acp_runs.jsonl`. Permissions are auto-allowed
+are persisted per conversation under `conversations/<conversation_id>.acp/`. Permissions are auto-allowed
 (orchestrator delegates authority). The user can peek the transcript
 from the Agent dock / drawer / popup. Unattended pipeline agents never
 see these tools.

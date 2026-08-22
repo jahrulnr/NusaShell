@@ -89,6 +89,35 @@ func (t *TodoStore) Clear(conversationID string) {
 	t.persistLocked()
 }
 
+// Patch merges items by ID into the existing list. Items with an existing
+// ID update their status (always) and content (only when non-empty). Items
+// with a new ID are appended. Items not in the patch are kept unchanged.
+// This is the backend for the todo tool's mode:"patch".
+func (t *TodoStore) Patch(conversationID string, patches []domain.TodoItem) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	entry := t.store[conversationID]
+	existing := entry.Items
+	byID := make(map[string]int, len(existing))
+	for i, item := range existing {
+		byID[item.ID] = i
+	}
+	for _, p := range patches {
+		if idx, ok := byID[p.ID]; ok {
+			existing[idx].Status = p.Status
+			if p.Content != "" {
+				existing[idx].Content = p.Content
+			}
+		} else {
+			existing = append(existing, p)
+			byID[p.ID] = len(existing) - 1
+		}
+	}
+	entry.Items = existing
+	t.store[conversationID] = entry
+	t.persistLocked()
+}
+
 func (t *TodoStore) load() {
 	b, err := os.ReadFile(t.path)
 	if err != nil {

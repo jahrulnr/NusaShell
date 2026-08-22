@@ -308,6 +308,8 @@ func (b *HydrationBuilder) readTodoList() hydrationSlot {
 		sections = append(sections, "USER BRIEF (survives compaction — do not drift from this)\n"+brief)
 	}
 	// Items: only incomplete ones (completed items are noise for the model).
+	// IDs are included so the agent can patch item status by ID after
+	// compaction without re-emitting the full list.
 	items := b.source.Todos.Get(b.source.ConvID)
 	var lines []string
 	for _, item := range items {
@@ -318,7 +320,7 @@ func (b *HydrationBuilder) readTodoList() hydrationSlot {
 		if item.Status == domain.TodoInProgress {
 			glyph = "[~]"
 		}
-		lines = append(lines, glyph+" "+item.Content)
+		lines = append(lines, glyph+" ("+item.ID+") "+item.Content)
 	}
 	if len(lines) > 0 {
 		sections = append(sections, "CURRENT TASKS (agent-owned checklist — user may delete items)\n"+strings.Join(lines, "\n"))
