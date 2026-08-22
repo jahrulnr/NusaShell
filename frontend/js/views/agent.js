@@ -246,6 +246,24 @@ function bindConversations() {
     setRoomsOpen(!shell?.classList.contains('is-rooms-open'));
   });
   backdrop?.addEventListener('click', () => setRoomsOpen(false));
+  // Event delegation for the conversation list: one listener at the
+  // container level instead of per-item listeners. Rows are patched in
+  // place by renderConversationList, so a click can never race against a
+  // listener that was detached by a re-render (click-to-switch-room bug).
+  document.getElementById('conversation-list').addEventListener('click', (event) => {
+    const item = event.target.closest('.agent-conversation-item');
+    if (!item) return;
+    const id = item.dataset?.conversationId;
+    if (!id) return;
+    if (event.target.closest('.agent-conversation-delete')) {
+      event.stopPropagation();
+      void deleteConversation(id);
+      return;
+    }
+    if (event.target.closest('.agent-conversation-open')) {
+      void openConversation(id);
+    }
+  });
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
     if (!document.getElementById('agent-shell')?.classList.contains('is-rooms-open')) return;
@@ -284,64 +302,111 @@ function renderConversationList() {
   const list = document.getElementById('conversation-list');
   const query = document.getElementById('conversation-search').value.toLowerCase();
   const filtered = state.conversations.filter((c) => (c.title || '').toLowerCase().includes(query));
-  list.innerHTML = '';
   if (!filtered.length) {
-    list.append(el('div', { class: 'agent-conversation-empty', text: query ? 'No conversations with this title.' : 'No conversations yet.' }));
+    if (list.childElementCount === 1 && list.firstElementChild?.classList.contains('agent-conversation-empty')) return;
+    list.replaceChildren(el('div', { class: 'agent-conversation-empty', text: query ? 'No conversations with this title.' : 'No conversations yet.' }));
     return;
   }
+  const existing = new Map();
+  for (const node of list.children) {
+    const id = node.dataset?.conversationId;
+    if (id) existing.set(id, node);
+  }
+  let prev = null;
+  const remove = new Set(existing.keys());
   for (const c of filtered) {
-    const buffer = state.roomBuffers.get(c.id);
-    // Only rooms that are not the active one and not terminal get the live
-    // dot. The dot signals "this room is still streaming in the background".
-    const isLive = Boolean(
-      buffer && !buffer.done && !buffer.capped && c.id !== state.activeId && buffer.lastEventAt > 0,
-    );
-    const item = el('div', { class: `agent-conversation-item${c.id === state.activeId ? ' is-active' : ''}${isLive ? ' is-running' : ''}`, role: 'listitem' },
-      el('button', {
-        class: 'agent-conversation-open',
-        title: c.title,
-      },
-        el('span', { class: 'agent-conversation-title', text: c.title || 'Untitled' }),
-        el('span', { class: 'agent-conversation-time', text: `${c.message_count ?? 0} msgs · ${fmtTime(c.updated_at)}` }),
-      ),
-      el('button', { class: 'agent-conversation-delete', title: 'Delete conversation', 'aria-label': 'Delete conversation' }, '✕'),
-    );
-    if (isLive) {
-      item.querySelector('.agent-conversation-open').append(el('span', { class: 'agent-conversation-dot', 'aria-hidden': 'true' }));
+    const node = existing.get(c.id) ?? buildConversationItem(c);
+    const item = updateConversationItem(node, c);
+    if (item.parentNode !== list) {
+      if (prev) prev.after(item);
+      else list.prepend(item);
     }
-    item.querySelector('.agent-conversation-open').addEventListener('click', () => openConversation(c.id));
-    item.querySelector('.agent-conversation-delete').addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const ok = await confirmDialog('Delete conversation', `"${c.title || 'Untitled'}" and all of its messages will be removed.`, 'Delete');
-      if (!ok) return;
-      try {
-        await rpc('agent.conversations.delete', { id: c.id });
-        savedRooms.delete(c.id);
-        state.roomBuffers.delete(c.id);
-        if (state.activeId === c.id) {
-          state.activeId = null;
-          state.conversation = null;
-          state.messages = [];
-          state.attachments = [];
-          state.steerId = null;
-          state.steerDraft = '';
-          state.contextEstimate = 0;
-          state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 }, brief: '' };
-          state.todoRenderToken++;
-          clearSteerQueue();
-          renderEmptyThread();
-          renderAttachments();
-          renderTodoStrip();
-          updateComposerStatus();
-          updateSendAvailability(state);
-        }
-        await refreshConversations();
-        toast('Conversation deleted', 'success');
-      } catch (err) {
-        toast(err.message, 'error');
-      }
-    });
-    list.append(item);
+    remove.delete(c.id);
+    prev = item;
+  }
+  for (const id of remove) existing.get(id)?.remove();
+}
+
+// buildConversationItem creates a conversation row skeleton. Rows use a flat
+// data-conversation-id hook instead of per-item listeners: clicks are handled
+// once at the list level (event delegation) so a rapid re-render can never
+// race a click against a listener that was just detached.
+function buildConversationItem(c) {
+  return el('div', {
+    class: 'agent-conversation-item' + (c.id === state.activeId ? ' is-active' : ''),
+    role: 'listitem',
+    'data-conversation-id': c.id,
+  },
+    el('button', { class: 'agent-conversation-open', title: c.title },
+      el('span', { class: 'agent-conversation-title', text: c.title || 'Untitled' }),
+      el('span', { class: 'agent-conversation-time', text: String(c.message_count ?? 0) + ' msgs · ' + fmtTime(c.updated_at) }),
+    ),
+    el('button', { class: 'agent-conversation-delete', title: 'Delete conversation', 'aria-label': 'Delete conversation' }, '✕'),
+  );
+}
+
+// updateConversationItem patches an existing row in place (same DOM node, no
+// destroy+rebuild) and only returns a fresh node when the live dot needs to
+// move between the text span and the status span.
+function updateConversationItem(item, c) {
+  const openBtn = item.querySelector('.agent-conversation-open');
+  if (openBtn) openBtn.title = c.title;
+  const title = item.querySelector('.agent-conversation-title');
+  if (title && title.textContent !== (c.title || 'Untitled')) title.textContent = c.title || 'Untitled';
+  const time = item.querySelector('.agent-conversation-time');
+  const timeText = String(c.message_count ?? 0) + ' msgs · ' + fmtTime(c.updated_at);
+  if (time && time.textContent !== timeText) time.textContent = timeText;
+  item.classList.toggle('is-active', c.id === state.activeId);
+  const buffer = state.roomBuffers.get(c.id);
+  // Only rooms that are not the active one and not terminal get the live
+  // dot. The dot signals "this room is still streaming in the background".
+  const isLive = Boolean(
+    buffer && !buffer.done && !buffer.capped && c.id !== state.activeId && buffer.lastEventAt > 0,
+  );
+  item.classList.toggle('is-running', isLive);
+  const dot = item.querySelector('.agent-conversation-dot');
+  const wantDot = Boolean(isLive);
+  if (dot && !wantDot) dot.remove();
+  if (!dot && wantDot) {
+    const textSpan = item.querySelector('.agent-conversation-title');
+    const dotEl = el('span', { class: 'agent-conversation-dot', 'aria-hidden': 'true' });
+    if (textSpan) textSpan.after(dotEl);
+    else item.append(dotEl);
+  }
+  return item;
+}
+// deleteConversation removes a conversation via RPC and resets the active
+// room when the deleted conversation was the one being viewed. Extracted from
+// the old per-item delete listener so the delegated list handler stays small.
+async function deleteConversation(id) {
+  const conv = state.conversations.find((c) => c.id === id);
+  const ok = await confirmDialog('Delete conversation', '"' + (conv?.title || 'Untitled') + '" and all of its messages will be removed.', 'Delete');
+  if (!ok) return;
+  try {
+    await rpc('agent.conversations.delete', { id });
+    savedRooms.delete(id);
+    state.roomBuffers.delete(id);
+    if (state.activeId === id) {
+      state.activeId = null;
+      state.conversation = null;
+      state.messages = [];
+      state.attachments = [];
+      state.steerId = null;
+      state.steerDraft = '';
+      state.contextEstimate = 0;
+      state.todos = { items: [], summary: { total: 0, pending: 0, in_progress: 0, completed: 0 }, brief: '' };
+      state.todoRenderToken++;
+      clearSteerQueue();
+      renderEmptyThread();
+      renderAttachments();
+      renderTodoStrip();
+      updateComposerStatus();
+      updateSendAvailability(state);
+    }
+    await refreshConversations();
+    toast('Conversation deleted', 'success');
+  } catch (err) {
+    toast(err.message, 'error');
   }
 }
 
@@ -396,12 +461,13 @@ async function openConversation(id) {
   await reattachActiveRunFromBackend();
   if (token !== state.conversationLoadToken) return;
   reattachActiveRun();
-  // Render any buffered deltas that arrived while this room was not visible
-  // (deltas keep arriving over the same WebSocket). The buffered run is
-  // merged into the thread so a switch-back never shows a blank turn: the
-  // persisted snapshot (which lags the live stream by one full round) is
-  // capped by the accumulated raw text + reasoning + tool jobs.
-  applyBufferedRunToDOM(state.activeId);
+  // Merge buffered deltas only when no run was re-attached from the backend:
+  // reattachActiveRun already rendered the live buffer (seeded from
+  // reattachActiveRunFromBackend), so a second apply here would detach the
+  // very nodes the streaming handlers keep updating.
+  if (!runForConversation(state.activeId)) {
+    applyBufferedRunToDOM(state.activeId);
+  }
   // The buffered run (if any) is still a live stream; treat it as the active
   // run again so subsequent deltas keep the DOM in sync. Only re-attach for
   // a LIVE buffer (not the terminal done buffer); a done buffer is already
@@ -508,13 +574,21 @@ async function reattachActiveRunFromBackend() {
   }
   if (state.activeId !== conversationId) return;
   if (!active?.active || !active.run_id) return;
-  // Register a minimal run entry. reattachActiveRun will populate the DOM
-  // references by replacing the last assistant message node.
+  // Register a run entry. reattachActiveRun will populate the DOM
+  // references by replacing the last assistant message node. When a live
+  // room buffer already holds the streamed deltas for this run, seed the
+  // entry from it so the re-attached DOM shows the full accumulated text,
+  // not just the deltas that arrive after the switch.
+  const liveBuffer = state.roomBuffers.get(conversationId);
+  const hasLive = liveBuffer && !liveBuffer.done && !liveBuffer.capped && liveBuffer.lastEventAt > 0;
   state.runs.set(active.run_id, {
     msgNode: null, bubble: null, strip: null, textBox: null, reasoningEl: null,
-    toolJobs: new Map(), raw: '', rawReasoning: '',
-    round: 1, conversationId: conversationId, runId: active.run_id,
-    messageId: active.message_id,
+    toolJobs: hasLive ? liveBuffer.toolJobs : new Map(),
+    raw: hasLive ? liveBuffer.raw : '',
+    rawReasoning: hasLive ? liveBuffer.rawReasoning : '',
+    round: hasLive ? (liveBuffer.round || 1) : 1,
+    conversationId: conversationId, runId: active.run_id,
+    messageId: hasLive ? (liveBuffer.messageId || active.message_id) : active.message_id,
   });
   flushPendingEvents(active.run_id);
   document.getElementById('stop-btn').hidden = false;
@@ -551,6 +625,10 @@ function reattachActiveRun() {
     if (content) { content.innerHTML = renderMarkdown(run.rawReasoning); void renderMermaidDiagrams(content); }
   }
   if (run.raw) { textBox.innerHTML = renderMarkdown(run.raw); void renderMermaidDiagrams(textBox); }
+  // Render buffered tool jobs into the strip so a switch-back shows the
+  // tool cards that ran while this room was hidden.
+  for (const job of run.toolJobs.values()) strip.append(job);
+  if (run.toolJobs.size > 0) strip.hidden = false;
   // Update the run entry with fresh DOM references.
   run.msgNode = msgNode;
   run.bubble = bubble;
@@ -2044,9 +2122,17 @@ function maybeRenderConversationList() {
 
 // refreshLiveDots re-renders just the sidebar indicators (no thread touch).
 // Called when any non-active room buffer changes so the user can see at a
-// glance which rooms are still streaming.
+// glance which rooms are still streaming. Renders are coalesced to one per
+// animation frame: while several rooms stream deltas simultaneously this
+// keeps the list from being rebuilt dozens of times per second (which both
+// wastes layout work and could race a click on a row).
+let liveDotsRaf = 0;
 function refreshLiveDots() {
-  maybeRenderConversationList();
+  if (liveDotsRaf) return;
+  liveDotsRaf = requestAnimationFrame(() => {
+    liveDotsRaf = 0;
+    maybeRenderConversationList();
+  });
 }
 
 

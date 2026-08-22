@@ -569,6 +569,7 @@
             "settings-embedding-title",
             "settings-embedding-model",
             "settings-learning-threshold",
+            "settings-skill-nudge-interval",
             "settings-review-model"
           ]
         },
@@ -664,8 +665,7 @@
           "controls": [
             "settings-system-title",
             "settings-version",
-            "settings-data-dir",
-            "settings-transports"
+            "settings-data-dir"
           ]
         }
       ]
@@ -1440,6 +1440,12 @@
       "type": "number",
       "notes": "Turns before review; 0 disables turn-based review."
     },
+    "settings-skill-nudge-interval": {
+      "label": "Skill review threshold",
+      "section": "Settings",
+      "type": "number",
+      "notes": "Tool calls before skill review; 0 disables tool-based review."
+    },
     "settings-review-model": {
       "label": "Review model",
       "section": "Settings",
@@ -1567,11 +1573,6 @@
     },
     "settings-data-dir": {
       "label": "Data directory",
-      "section": "Settings",
-      "type": "text"
-    },
-    "settings-transports": {
-      "label": "Transports",
       "section": "Settings",
       "type": "text"
     },

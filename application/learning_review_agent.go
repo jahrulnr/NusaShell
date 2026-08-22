@@ -105,15 +105,39 @@ func NewBackgroundReviewAgent(app *App, settings ReviewSettings) *BackgroundRevi
 }
 
 // reviewToolWhitelist is the only set of tools the review agent may call.
+// review_transcript is the hydration tool — it returns the conversation as
+// structured JSON. It is NOT registered in Toolbox; it is executed locally
+// by runReviewLoop, not via Toolbox.Execute.
 var reviewToolWhitelist = map[string]bool{
-	"memory_save":    true,
-	"memory_replace": true,
-	"memory_search":  true,
-	"memory_list":    true,
-	"skill_list":     true,
-	"skill_search":   true,
-	"skill_read":     true,
-	"skill_save":     true,
+	"review_transcript": true,
+	"memory_save":       true,
+	"memory_replace":    true,
+	"memory_search":     true,
+	"memory_list":       true,
+	"skill_list":        true,
+	"skill_search":      true,
+	"skill_read":        true,
+	"skill_save":        true,
+}
+
+// reviewTranscriptToolName is the hydration tool the review agent calls to
+// get the conversation transcript as structured JSON. It is NOT in Toolbox.
+const reviewTranscriptToolName = "review_transcript"
+
+// reviewTranscriptToolDef is the tool definition sent to the LLM so it knows
+// review_transcript exists and how to call it.
+var reviewTranscriptToolDef = ToolDef{
+	Name:        reviewTranscriptToolName,
+	Description: "Get the conversation transcript as structured JSON with proper roles, tool calls, and tool results. Call this FIRST to see what happened, then decide what to save.",
+	InputSchema: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"tail": map[string]any{
+				"type":        "integer",
+				"description": "Number of recent messages to include. Omit or 0 for the full configured tail window.",
+			},
+		},
+	},
 }
 
 // RunReview spawns a background review for a conversation. It uses the
@@ -179,13 +203,21 @@ func (r *BackgroundReviewAgent) runReservedReview(ctx context.Context, conversat
 	adapter, bareModel = r.applyReviewModelOverride(context.Background(), adapter, bareModel)
 
 	r.app.log("info", "learning", "review started: conv=%s model=%s rounds=%d", conversationID, bareModel, r.settings.MaxToolRounds)
-	// 180s: a single completion over a long transcript can take tens of
-	// seconds, and the loop may run several tool rounds. The old 60s cap
-	// killed exactly the reviews that needed the most time (big transcripts).
-	reviewCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 180*time.Second)
-	defer cancel()
-
-	mutations, messages, loopErr := r.runReviewLoop(reviewCtx, adapter, bareModel, conversation)
+	if r.app.Trajectory != nil {
+		r.app.Trajectory.Record("review", map[string]interface{}{
+			"conversation": conversationID,
+			"status":       "started",
+			"model":        bareModel,
+		})
+	}
+	// No wall-clock cap: reviews of long conversations (big transcripts, tool
+	// rounds, reasoning models) can take several minutes. "Slow" is not an
+	// error. The only activity-based guard is the provider's per-chunk idle
+	// timeout (ReadSSE DefaultIdleTimeout) — it fires only when the stream
+	// sends nothing for the idle window (a hung provider), never for a slow
+	// but steadily streaming one. MaxToolRounds and ReviewCooldown bound the
+	// total work independently of wall-clock time.
+	mutations, messages, loopErr := r.runReviewLoop(ctx, adapter, bareModel, conversation)
 	reviewID := saveReviewTranscript(r.app.DataDir, conversationID, model, messages)
 	if loopErr != nil {
 		r.app.log("warn", "learning", "review failed mid-loop: conv=%s err=%v mutations=%d", conversationID, loopErr, len(mutations))
@@ -303,15 +335,33 @@ func (r *BackgroundReviewAgent) applyReviewModelOverride(ctx context.Context, ad
 	rProvider, rBare, rKey, rErr := r.app.resolveModel(rm)
 	if rErr != nil || rProvider == nil {
 		r.app.log("warn", "learning", "review model %q could not be resolved, falling back to conversation model: %v", rm, rErr)
+		r.recordReviewModelResolution(rm, "fallback:conv_model", model)
 		return adapter, model
 	}
 	rAdapter, fErr := r.app.Factory(ctx, rProvider, rKey)
 	if fErr != nil {
 		r.app.log("warn", "learning", "review model %q adapter build failed, falling back to conversation model: %v", rm, fErr)
+		r.recordReviewModelResolution(rm, "fallback:conv_model", model)
 		return adapter, model
 	}
 	r.app.log("info", "learning", "review using override model %s", rm)
+	r.recordReviewModelResolution(rm, "ok", rBare)
 	return rAdapter, rBare
+}
+
+// recordReviewModelResolution writes a trajectory event recording whether
+// the review model override succeeded or fell back to the conversation
+// model. This makes override failures visible in the learning log instead
+// of silently logging a warning that is easy to miss.
+func (r *BackgroundReviewAgent) recordReviewModelResolution(requested, status, resolved string) {
+	if r.app == nil || r.app.Trajectory == nil {
+		return
+	}
+	r.app.Trajectory.Record("review_model", map[string]interface{}{
+		"requested": requested,
+		"status":    status,
+		"resolved":  resolved,
+	})
 }
 
 // mutationSnippet extracts a trimmed field value from a tool-call JSON
@@ -354,14 +404,17 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIPro
 	// have to call memory_list target=primary first, burning a tool round
 	// and sometimes skipping the check entirely.
 	systemPrompt = r.injectPrimaryMemory(systemPrompt)
-	transcript := r.buildTranscript(conversation)
-	if transcript == "" {
+	// The review agent gets the conversation via the review_transcript
+	// hydration tool, not as a flat user-message dump. The initial user
+	// message instructs the LLM to call the tool first; the tool returns
+	// structured JSON with proper roles, tool calls, and tool results.
+	if len(conversation.Messages) == 0 {
 		return nil, nil, nil
 	}
 
 	tools := r.reviewTools()
 	messages := []ChatMessage{
-		{Role: "user", Content: transcript},
+		{Role: "user", Content: "Call review_transcript to see the conversation transcript, then decide what to save."},
 	}
 
 	var mutations []ReviewMutation
@@ -375,7 +428,18 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIPro
 			Messages: messages,
 			Tools:    tools,
 		}
-		resp, err := adapter.Complete(ctx, req)
+		// Stream instead of a single non-streaming completion: deltas (text,
+		// reasoning, tool-call fragments) keep arriving while the provider is
+		// working, so a long-thinking reasoning model never hits a wall-clock
+		// deadline. The adapter's ReadSSE layer enforces a per-chunk idle
+		// timeout (resets on every delta); a hung stream surfaces as
+		// KindIdleTimeout — a genuine failure, not "slow".
+		var resp ChatResponse
+		resp, err := adapter.Stream(ctx, req, func(delta string) {
+			resp.Content += delta
+		}, func(delta string) {
+			resp.Reasoning += delta
+		})
 		if err != nil {
 			return mutations, messages, err
 		}
@@ -426,6 +490,20 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIPro
 						ToolCallID: tc.ID,
 						Name:       tc.Name,
 						Content:    fmt.Sprintf("error: tool %q is not allowed in background review", tc.Name),
+					},
+				})
+				continue
+			}
+			// The hydration tool is executed locally — it is NOT in
+			// Toolbox. It returns the conversation as structured JSON.
+			if tc.Name == reviewTranscriptToolName {
+				output := r.executeReviewTranscript(conversation)
+				messages = append(messages, ChatMessage{
+					Role: "tool",
+					ToolResult: &ToolResult{
+						ToolCallID: tc.ID,
+						Name:       tc.Name,
+						Content:    output,
 					},
 				})
 				continue
@@ -513,10 +591,11 @@ func (r *BackgroundReviewAgent) injectPrimaryMemory(prompt string) string {
 
 // reviewTools returns the restricted tool definitions for the review agent.
 func (r *BackgroundReviewAgent) reviewTools() []ToolDef {
+	// The hydration tool is always first in the list and is NOT in Toolbox.
+	out := []ToolDef{reviewTranscriptToolDef}
 	all := r.app.Toolbox.ListTools()
-	var out []ToolDef
 	for _, t := range all {
-		if reviewToolWhitelist[t.Name] {
+		if reviewToolWhitelist[t.Name] && t.Name != reviewTranscriptToolName {
 			out = append(out, ToolDef{
 				Name:        t.Name,
 				Description: t.Description,
@@ -615,6 +694,90 @@ func (r *BackgroundReviewAgent) trimTranscriptLines(lines []string) []string {
 		return lines
 	}
 	return lines[start:]
+}
+
+// transcriptMessageJSON is one message in the structured JSON transcript
+// returned by the review_transcript hydration tool.
+type transcriptMessageJSON struct {
+	Role      string                   `json:"role"`
+	Content   string                   `json:"content"`
+	ToolCalls []transcriptToolCallJSON `json:"tool_calls,omitempty"`
+}
+
+// transcriptToolCallJSON is one tool call nested inside an assistant message.
+type transcriptToolCallJSON struct {
+	Name   string `json:"name"`
+	Args   string `json:"args,omitempty"`
+	Output string `json:"output,omitempty"`
+}
+
+// transcriptEnvelope is the top-level JSON object returned by the hydration
+// tool. It carries conversation metadata plus the message array.
+type transcriptEnvelope struct {
+	ConversationID string                  `json:"conversation_id"`
+	Model          string                  `json:"model,omitempty"`
+	MessageCount   int                     `json:"message_count"`
+	Messages       []transcriptMessageJSON `json:"messages"`
+}
+
+// executeReviewTranscript returns the conversation transcript as structured
+// JSON for the review agent. It is the local handler for the
+// review_transcript hydration tool — NOT dispatched via Toolbox.Execute.
+//
+// The JSON preserves role alternation (user/assistant), nests tool calls
+// inside the assistant message that produced them, and truncates per-message
+// content and per-tool-output to the same caps as buildTranscript. The total
+// output is bounded by MaxTranscriptTokens (chars = tokens*4) so tool-heavy
+// conversations cannot overflow the review model's context window.
+func (r *BackgroundReviewAgent) executeReviewTranscript(c *domain.Conversation) string {
+	tail := r.transcriptMessages(c)
+	if len(tail) > r.settings.TranscriptTailMsgs {
+		tail = tail[len(tail)-r.settings.TranscriptTailMsgs:]
+	}
+
+	env := transcriptEnvelope{
+		ConversationID: c.ID,
+		Model:          c.Model,
+		MessageCount:   len(tail),
+		Messages:       make([]transcriptMessageJSON, 0, len(tail)),
+	}
+
+	for _, m := range tail {
+		content := m.Content
+		if len(content) > r.settings.MaxTranscriptChars {
+			content = content[:r.settings.MaxTranscriptChars] + "…[truncated]"
+		}
+		msg := transcriptMessageJSON{
+			Role:    string(m.Role),
+			Content: content,
+		}
+		for _, tc := range m.ToolCalls {
+			args := truncate(strings.TrimSpace(tc.Args), maxToolArgsChars)
+			output := truncate(strings.TrimSpace(tc.Output), maxToolOutputChars)
+			msg.ToolCalls = append(msg.ToolCalls, transcriptToolCallJSON{
+				Name:   tc.Name,
+				Args:   args,
+				Output: output,
+			})
+		}
+		env.Messages = append(env.Messages, msg)
+	}
+
+	// Trim from the oldest message until the serialized JSON fits the
+	// configured token cap (~chars/4). The most recent message is always
+	// kept even when it alone exceeds the cap (best effort).
+	charCap := r.settings.MaxTranscriptTokens * 4
+	for len(env.Messages) > 1 {
+		raw, _ := json.Marshal(env)
+		if len(raw) <= charCap {
+			break
+		}
+		env.Messages = env.Messages[1:]
+		env.MessageCount = len(env.Messages)
+	}
+
+	raw, _ := json.Marshal(env)
+	return string(raw)
 }
 
 const (

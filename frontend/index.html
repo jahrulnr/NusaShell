@@ -673,6 +673,10 @@
               <input id="settings-learning-threshold" type="number" min="0" max="1000" step="1" inputmode="numeric" value="10">
               <small>How many turns to accumulate before extracting learnings (default 10). Set 0 to disable turn-based review; compaction-triggered review still runs.</small>
             </label>
+            <label class="settings-field" for="settings-skill-nudge-interval">Skill review threshold (tool calls)
+              <input id="settings-skill-nudge-interval" type="number" min="0" max="1000" step="1" inputmode="numeric" value="15">
+              <small>How many tool calls to accumulate before reviewing for skill-worthy patterns (default 15). Catches tool-heavy coding sessions that don't reach the turn threshold. Set 0 to disable.</small>
+            </label>
             <label class="settings-field" for="settings-review-model">Review model
               <select id="settings-review-model">
                 <option value="">Default — use the conversation's active model</option>

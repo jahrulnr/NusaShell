@@ -16,8 +16,8 @@ type persistStubAdapter struct {
 }
 
 func (a *persistStubAdapter) Kind() domain.ProviderKind { return domain.ProviderChat }
-func (a *persistStubAdapter) Stream(context.Context, ChatRequest, func(string), func(string)) (ChatResponse, error) {
-	return ChatResponse{}, nil
+func (a *persistStubAdapter) Stream(ctx context.Context, req ChatRequest, _ func(string), _ func(string)) (ChatResponse, error) {
+	return a.Complete(ctx, req)
 }
 func (a *persistStubAdapter) Complete(context.Context, ChatRequest) (ChatResponse, error) {
 	if a.calls >= len(a.responses) {

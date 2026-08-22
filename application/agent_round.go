@@ -496,6 +496,12 @@ func (a *App) runOneTool(run *TurnRun, toolCall domain.ToolCall, caps ModelCapab
 	res := toolExecResult{status: status, output: output, atts: outputAttachments}
 	a.emitToolCompleted(run, toolCall, res)
 	a.emitLearningMutationEvents(toolCall.Name, status)
+	// Skill nudge: count tool calls per conversation so tool-heavy but
+	// user-turn-light coding sessions trigger skill review independently
+	// of the turn threshold.
+	if status == domain.ToolOK || status == domain.ToolFailed {
+		a.incrementToolCallCounter(run.ConversationID)
+	}
 	return res
 }
 
@@ -660,6 +666,31 @@ func (a *App) incrementTurnCounter(conversationID string) {
 	a.flushLearningReview(conversationID, "threshold")
 }
 
+// incrementToolCallCounter bumps the per-conversation tool-call counter and
+// triggers a learning review if the skill-nudge threshold is reached. This
+// catches skill-worthy patterns in tool-heavy but user-turn-light coding
+// sessions that would never reach the turn threshold. The threshold is read
+// from settings (default 15, 0 disables tool-based review). Counters are
+// persisted to disk so they survive server restarts.
+func (a *App) incrementToolCallCounter(conversationID string) {
+	if a.ReviewAgent == nil {
+		return
+	}
+	threshold := a.Settings.Get().SkillNudgeInterval
+	if threshold <= 0 {
+		return // tool-based review disabled
+	}
+	a.learningMu.Lock()
+	a.toolCallsSinceReview[conversationID]++
+	count := a.toolCallsSinceReview[conversationID]
+	a.learningMu.Unlock()
+	a.saveTurnCounters()
+	if count < threshold {
+		return
+	}
+	a.flushLearningReview(conversationID, "skill_nudge")
+}
+
 // flushLearningReview resets the turn counter for a conversation and
 // fires a background LLM review over the recent transcript. Called when
 // the threshold is reached or when a compaction event fires (whichever
@@ -671,6 +702,7 @@ func (a *App) flushLearningReview(conversationID string, reason string) {
 	a.log("info", "learning", "review triggered: conv=%s reason=%s", conversationID, reason)
 	a.learningMu.Lock()
 	a.turnsSinceReview[conversationID] = 0
+	a.toolCallsSinceReview[conversationID] = 0
 	a.learningMu.Unlock()
 	a.saveTurnCounters()
 	if a.ReviewAgent == nil {

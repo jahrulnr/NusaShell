@@ -1617,8 +1617,8 @@ func TestAgentTurnRetryThenError(t *testing.T) {
 	if lastAssistant.Status != "error" {
 		t.Fatalf("expected status 'error' after retry failure, got %q (messages: %+v)", lastAssistant.Status, conv.Messages)
 	}
-	if !strings.Contains(lastAssistant.Error, "429") {
-		t.Fatalf("expected error to contain 429, got %q", lastAssistant.Error)
+	if !strings.Contains(lastAssistant.Error, "rate-limited") {
+		t.Fatalf("expected error to be rate-limited friendly message, got %q", lastAssistant.Error)
 	}
 }
 

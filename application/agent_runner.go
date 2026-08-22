@@ -639,6 +639,7 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 					streamErr = allCodexAccountsLimitedError(pickResult.EarliestReset)
 				}
 			}
+			streamErr = a.decorateRateLimitError(provider.ID, streamErr)
 			if !continuedPartialStream && canContinuePartialStream(streamErr, roundResult) {
 				if err := a.persistPartialTurnRound(run.ConversationID, currentMsgID, model, roundResult); err != nil {
 					a.failTurn(run, currentMsgID, err)

@@ -224,6 +224,14 @@ type Settings struct {
 	// turn-based review (compaction-triggered review still runs).
 	// Default: 10 turns.
 	LearningReviewThreshold int `json:"learning_review_threshold,omitempty"`
+	// SkillNudgeInterval controls when the background learning review
+	// fires based on tool-call count rather than user turns. Coding
+	// sessions are tool-heavy but user-turn-light; this trigger catches
+	// skill-worthy patterns (multi-step tool workflows) that would
+	// otherwise never reach the turn threshold. Counts individual tool
+	// calls across all turns. Set to 0 to disable tool-based review.
+	// Default: 15 tool calls.
+	SkillNudgeInterval int `json:"skill_nudge_interval,omitempty"`
 	// ReviewModel selects the model used by the background review agent.
 	// When empty, the conversation's active model is used. Format:
 	// "providerID:modelID" (same as CompactionModel). Useful for routing
@@ -272,6 +280,7 @@ func DefaultSettings() Settings {
 		MaxOutputTokens:         65536,
 		MaxParallelTools:        6,
 		LearningReviewThreshold: 10,
+		SkillNudgeInterval:      15,
 		MaxAutoContinues:        DefaultMaxAutoContinues,
 		SoundNotifications:      true,
 		RepeatedToolLimit:       3,

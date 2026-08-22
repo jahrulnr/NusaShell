@@ -1125,6 +1125,7 @@ type SettingsDTO struct {
 	FrequencyPenalty        *float64 `json:"frequency_penalty,omitempty"`
 	PresencePenalty         *float64 `json:"presence_penalty,omitempty"`
 	LearningReviewThreshold int      `json:"learning_review_threshold,omitempty"`
+	SkillNudgeInterval      int      `json:"skill_nudge_interval,omitempty"`
 	MaxAutoContinues        int      `json:"max_auto_continues,omitempty"`
 	SoundNotifications      bool     `json:"sound_notifications"`
 	UserPrompt              string   `json:"user_prompt,omitempty"`
@@ -1164,6 +1165,7 @@ type SettingsSetRequest struct {
 	FrequencyPenalty        json.RawMessage `json:"frequency_penalty,omitempty"`
 	PresencePenalty         json.RawMessage `json:"presence_penalty,omitempty"`
 	LearningReviewThreshold *int            `json:"learning_review_threshold,omitempty"`
+	SkillNudgeInterval      *int            `json:"skill_nudge_interval,omitempty"`
 	MaxAutoContinues        *int            `json:"max_auto_continues,omitempty"`
 	SoundNotifications      *bool           `json:"sound_notifications,omitempty"`
 	UserPrompt              *string         `json:"user_prompt,omitempty"`

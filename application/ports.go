@@ -6,6 +6,7 @@ import (
 	"context"
 
 	"nusashell/domain"
+	"nusashell/infrastructure/ai/modelcatalog"
 )
 
 // ---- persistence ports ----
@@ -599,4 +600,15 @@ type AcpRuntime interface {
 	PromoteRisk(runID string, tier domain.RiskTier) error
 	SetMode(ctx context.Context, runID, modeID string) error
 	Close()
+}
+
+// ModelCataloger is the read-only capability source used to enrich
+// provider models (context window, pricing, reasoning, vision, ...). It
+// never writes models: the /models API (and endpoint-specific listers) are
+// the only writers of the provider model list, and model IDs are kept
+// verbatim. Implemented by *modelcatalog.Catalog.
+type ModelCataloger interface {
+	EnsureLoaded(ctx context.Context) error
+	Loaded() bool
+	Lookup(providerHint, modelID string) *modelcatalog.ModelMetadata
 }

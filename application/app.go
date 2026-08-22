@@ -13,7 +13,6 @@ import (
 
 	"nusashell/contracts"
 	"nusashell/domain"
-	"nusashell/infrastructure/ai/modelcatalog"
 	"nusashell/infrastructure/jsonstore"
 )
 
@@ -48,7 +47,7 @@ type App struct {
 	ImageModelListerFactory     ImageModelListerFactory
 	EmbedderFactory             EmbedderFactory
 	EmbeddingModelListerFactory EmbeddingModelListerFactory
-	ModelCatalog                *modelcatalog.Catalog
+	ModelCatalog                ModelCataloger
 	WorkspacePicker             WorkspacePicker
 	CodexRuntime                CodexRuntime
 	CodexOAuth                  CodexOAuth
@@ -74,6 +73,12 @@ type App struct {
 	// conversation. When the count reaches LearningReviewThreshold, the
 	// review fires and the counter resets.
 	turnsSinceReview map[string]int
+	// toolCallsSinceReview tracks tool calls since the last learning
+	// review per conversation. When the count reaches SkillNudgeInterval,
+	// the review fires and the counter resets. Independent of the turn
+	// counter so tool-heavy but user-turn-light coding sessions still
+	// trigger skill review.
+	toolCallsSinceReview map[string]int
 	// EmbeddingCache stores computed embedding vectors to avoid
 	// re-embedding the same content on every search. Content-addressed
 	// by (model_id, sha256(normalized_text)).
@@ -99,6 +104,12 @@ type App struct {
 	// map and triggers a new turn so the parent agent processes the result.
 	pendingSubagentsMu sync.Mutex
 	pendingSubagents   map[string]map[string]bool // conversationID → set of runIDs
+
+	// rlMu guards per-provider rate-limit windows (see rate_limit.go).
+	// MarkProviderRateLimited records when a 429 window clears so client
+	// requests can be gated and messages can be user-friendly.
+	rlMu      sync.Mutex
+	rlWindows map[string]time.Time // providerID → next allowed request time
 
 	// Logger is an optional structured logger used for crash recovery
 	// diagnostics from fire-and-forget goroutines. Nil = slog.Default().
@@ -303,7 +314,7 @@ type Deps struct {
 	ImageModelListerFactory     ImageModelListerFactory     // optional; nil = skip /images/models fetch
 	EmbedderFactory             EmbedderFactory             // optional; nil = BM25-only search
 	EmbeddingModelListerFactory EmbeddingModelListerFactory // optional; nil = skip /embeddings/models fetch
-	ModelCatalog                *modelcatalog.Catalog       // optional; nil = skip enrichment from models.dev
+	ModelCatalog                ModelCataloger              // optional; nil = skip enrichment from models.dev
 	WorkspacePicker             WorkspacePicker
 	RetrySleeper                RetrySleeper
 	AcpAgents                   AcpAgentStore
@@ -360,6 +371,7 @@ func NewApp(deps Deps) *App {
 		Automation:                  deps.Automation,
 		runs:                        map[string]*TurnRun{},
 		turnsSinceReview:            map[string]int{},
+		toolCallsSinceReview:        map[string]int{},
 		pendingSubagents:            map[string]map[string]bool{},
 	}
 	// Wire the background LLM review agent. Uses the conversation's
@@ -652,16 +664,36 @@ func (a *App) turnCountersPath() string {
 	return filepath.Join(a.DataDir, "learning", "turns.json")
 }
 
-// loadTurnCounters restores per-conversation turn counters from disk so
-// that the learning review threshold survives server restarts. Without
+// loadTurnCounters restores per-conversation review counters from disk so
+// that the learning review thresholds survive server restarts. Without
 // this, a user who restarts frequently never reaches the threshold and
-// the review agent never fires.
+// the review agent never fires. The file stores both turn counters and
+// tool-call counters; the legacy flat map[string]int format (turns only)
+// is migrated on load.
 func (a *App) loadTurnCounters(dataDir string) {
 	path := filepath.Join(dataDir, "learning", "turns.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return // file doesn't exist yet — fresh start
 	}
+	// Try the new struct format first.
+	var persisted struct {
+		Turns     map[string]int `json:"turns"`
+		ToolCalls map[string]int `json:"tool_calls"`
+	}
+	if err := json.Unmarshal(data, &persisted); err == nil && (persisted.Turns != nil || persisted.ToolCalls != nil) {
+		a.learningMu.Lock()
+		if persisted.Turns != nil {
+			a.turnsSinceReview = persisted.Turns
+		}
+		if persisted.ToolCalls != nil {
+			a.toolCallsSinceReview = persisted.ToolCalls
+		}
+		a.learningMu.Unlock()
+		a.log("info", "learning", "loaded %d turn + %d tool-call counter(s) from disk", len(persisted.Turns), len(persisted.ToolCalls))
+		return
+	}
+	// Legacy flat map[string]int format (turns only).
 	var counters map[string]int
 	if err := json.Unmarshal(data, &counters); err != nil {
 		return
@@ -670,27 +702,35 @@ func (a *App) loadTurnCounters(dataDir string) {
 	a.turnsSinceReview = counters
 	a.learningMu.Unlock()
 	if len(counters) > 0 {
-		a.log("info", "learning", "loaded %d turn counter(s) from disk", len(counters))
+		a.log("info", "learning", "migrated %d legacy turn counter(s) from disk", len(counters))
 	}
 }
 
-// saveTurnCounters persists turn counters to disk. Called on lifecycle
-// shutdown and after each counter update.
+// saveTurnCounters persists turn and tool-call counters to disk. Called on
+// lifecycle shutdown and after each counter update.
 func (a *App) saveTurnCounters() {
 	path := a.turnCountersPath()
 	if path == "" {
 		return
 	}
 	a.learningMu.RLock()
-	counters := make(map[string]int, len(a.turnsSinceReview))
+	turns := make(map[string]int, len(a.turnsSinceReview))
 	for k, v := range a.turnsSinceReview {
-		counters[k] = v
+		turns[k] = v
+	}
+	toolCalls := make(map[string]int, len(a.toolCallsSinceReview))
+	for k, v := range a.toolCallsSinceReview {
+		toolCalls[k] = v
 	}
 	a.learningMu.RUnlock()
-	if len(counters) == 0 {
+	if len(turns) == 0 && len(toolCalls) == 0 {
 		return
 	}
-	data, err := json.Marshal(counters)
+	persisted := struct {
+		Turns     map[string]int `json:"turns"`
+		ToolCalls map[string]int `json:"tool_calls"`
+	}{Turns: turns, ToolCalls: toolCalls}
+	data, err := json.Marshal(persisted)
 	if err != nil {
 		return
 	}

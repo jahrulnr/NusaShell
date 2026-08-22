@@ -294,10 +294,9 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 	// fetch fails — provider-imported data stays as-is.
 	if a.ModelCatalog != nil {
 		if err := a.ModelCatalog.EnsureLoaded(ctx); err == nil {
-			hint := catalogHintForProvider(p)
 			enriched := 0
 			for i := range models {
-				meta := a.ModelCatalog.Lookup(hint, models[i].ID)
+				meta := a.ModelCatalog.Lookup(catalogHintFromModelID(models[i].ID), models[i].ID)
 				if meta == nil {
 					continue
 				}
@@ -340,9 +339,12 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 				models[i].Vision = meta.Vision
 				models[i].Audio = meta.Audio
 				models[i].Video = meta.Video
-				if meta.Kind != "" {
-					models[i].Kind = domain.ModelKind(meta.Kind)
-				}
+				// The catalog assigns capabilities only; it must never
+				// reclassify a model. Kind is decided by the source that
+				// listed the model (/models, /embeddings/models,
+				// /images/models, or Codex seeds) — never by models.dev.
+				// Keeping Kind out of the catalog keeps the provider list
+				// faithful to the /models API (as-is).
 				enriched++
 			}
 			if enriched > 0 {
@@ -415,6 +417,9 @@ func seedCodexImageModels(models []domain.Model) []domain.Model {
 // ID, used to disambiguate model lookups when the same bare model ID exists
 // under multiple providers (e.g. "gpt-5.5" under "openai" and "ai-router").
 func catalogHintForProvider(p *domain.Provider) string {
+	// Kind-level hints are fixed wire formats, not vendor detection:
+	// Responses/Codex speak the OpenAI wire format, Messages speaks the
+	// Anthropic one. These are not per-provider hardcodes.
 	switch p.Kind {
 	case domain.ProviderResponses:
 		return "openai"
@@ -423,21 +428,24 @@ func catalogHintForProvider(p *domain.Provider) string {
 	case domain.ProviderCodex:
 		return "openai"
 	}
-	// For chat-kind providers, try to match by base URL domain.
-	lower := strings.ToLower(p.BaseURL)
-	switch {
-	case strings.Contains(lower, "deepseek"):
-		return "deepseek"
-	case strings.Contains(lower, "openrouter"):
-		return "openrouter" // openrouter already returns rich metadata, but catalog can supplement
-	case strings.Contains(lower, "glm") || strings.Contains(lower, "zhipu") || strings.Contains(lower, "zai"):
-		return "zai-org"
-	case strings.Contains(lower, "moonshot") || strings.Contains(lower, "kimi"):
-		return "moonshotai"
-	case strings.Contains(lower, "minimax"):
-		return "minimax"
-	case strings.Contains(lower, "qwen") || strings.Contains(lower, "alibaba"):
-		return "qwen"
+	// Chat-kind providers are fully dynamic: the hint is derived from the
+	// model ID prefix itself (e.g. "deepseek/deepseek-v4-flash" ->
+	// "deepseek"), which is the output of the /models API. No provider
+	// registry, no base-URL sniffing, no vendor hardcodes — any new
+	// provider (TokenRouter, OpenRouter, a future gateway) enriches
+	// automatically.
+	return ""
+}
+
+// catalogHintFromModelID derives the catalog hint from a model ID prefix.
+// Catalog entries are keyed by vendor prefixes ("deepseek/...", "qwen/...",
+// "openai/..."), and the /models API usually emits those prefixes on the
+// model ID itself. When the model ID carries no prefix, the hint is empty
+// and Lookup falls back to its bare-ID and display-name matching.
+func catalogHintFromModelID(modelID string) string {
+	lower := strings.ToLower(modelID)
+	if idx := strings.Index(lower, "/"); idx > 0 {
+		return lower[:idx]
 	}
 	return ""
 }
@@ -470,9 +478,8 @@ func (a *App) handleModelsList() (any, *contracts.RPCError) {
 // without persisting — it's a read-time enrichment so the UI always shows
 // current capabilities even for models imported before a catalog update.
 func (a *App) enrichProviderModelsAtRead(p *domain.Provider) {
-	hint := catalogHintForProvider(p)
 	for i := range p.Models {
-		meta := a.ModelCatalog.Lookup(hint, p.Models[i].ID)
+		meta := a.ModelCatalog.Lookup(catalogHintFromModelID(p.Models[i].ID), p.Models[i].ID)
 		if meta != nil {
 			isFreeVariant := isFreeTierModel(p.Models[i].ID)
 			if p.Models[i].Context == 0 {
@@ -512,9 +519,8 @@ func (a *App) enrichProviderModelsAtRead(p *domain.Provider) {
 			p.Models[i].Vision = meta.Vision
 			p.Models[i].Audio = meta.Audio
 			p.Models[i].Video = meta.Video
-			if meta.Kind != "" {
-				p.Models[i].Kind = domain.ModelKind(meta.Kind)
-			}
+			// Capability-only: Kind stays with the lister source, never
+			// reclassified by the catalog (matches import path).
 		}
 		if config.IsKnownImageModel(p.Models[i].ID) {
 			p.Models[i].Kind = domain.ModelKindImage

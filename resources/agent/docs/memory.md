@@ -115,6 +115,33 @@ tool rounds and use a per-conversation cooldown, so threshold and compaction
 triggers cannot repeatedly replay the same transcript during a short window.
 A cooldown skip is recorded as a skipped review, not as a completed no-op.
 
+## How the review agent gets the transcript
+
+The review agent calls the `review_transcript` hydration tool to get the
+conversation as structured JSON. The JSON contains proper role alternation
+(user/assistant), nested tool calls with their arguments and outputs, and
+conversation metadata. This is NOT a flat text dump — the LLM sees the
+conversation semantically, the same way it would see a tool result from any
+other tool.
+
+The hydration tool is review-only: it is not registered in the global
+Toolbox and is not available to the main agent. It is executed locally by
+the review loop, not via `Toolbox.Execute`.
+
+## Review triggers
+
+Two independent triggers fire the background review:
+
+1. **Turn threshold** (`learning_review_threshold`, default 10 user turns) —
+   fires after N user turns. Set 0 to disable turn-based review.
+2. **Skill nudge** (`skill_nudge_interval`, default 15 tool calls) — fires
+   after N tool calls across all turns. Catches tool-heavy coding sessions
+   that don't reach the turn threshold. Set 0 to disable.
+
+Both triggers share the same cooldown gate, so a threshold and a skill nudge
+firing at the same time produce only one review. Compaction-triggered review
+fires independently when a conversation is compacted.
+
 Good examples:
 
     memory_replace(target="primary", old_text="old CI config notes", content="CI uses GitHub Actions + GitLab Runner")

@@ -57,6 +57,11 @@ Embedding model used by skill and memory search. Models tagged as embedding-capa
   - Type: number
   - Notes: Turns before review; 0 disables turn-based review.
 
+- **Skill review threshold** (`#settings-skill-nudge-interval`):
+  - Section: Settings
+  - Type: number
+  - Notes: Tool calls before skill review; 0 disables tool-based review.
+
 - **Review model** (`#settings-review-model`):
   - Section: Settings
   - Type: select
@@ -224,9 +229,5 @@ Local diagnostics: version, data directory, and transports. This browser version
   - Type: text
 
 - **Data directory** (`#settings-data-dir`):
-  - Section: Settings
-  - Type: text
-
-- **Transports** (`#settings-transports`):
   - Section: Settings
   - Type: text

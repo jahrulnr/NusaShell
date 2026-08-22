@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Review agent uses hydration tool instead of flat transcript dump.**
+  The background review agent now calls `review_transcript` to get the
+  conversation as structured JSON (proper roles, nested tool calls, tool
+  results) instead of receiving a flat text blob as a user message. The
+  hydration tool is review-only — not registered in the global Toolbox.
+  This improves extraction quality because the LLM sees the conversation
+  semantically, not as formatted text it must parse.
+
+- **Skill nudge trigger added.** A second review trigger fires based on
+  tool-call count (`skill_nudge_interval`, default 15), independent of the
+  existing turn threshold (`learning_review_threshold`, default 10). This
+  catches tool-heavy coding sessions that don't reach the turn threshold.
+  Both triggers share the same cooldown gate. Adjustable from Settings UI.
+
+- **Review model override resolution recorded in trajectory.**
+  `applyReviewModelOverride` now records a `review_model` trajectory event
+  with the requested and resolved model names, making override failures
+  visible in the learning log instead of silently logging a warning.
+
+- **Review "started" event recorded in trajectory.** The review agent now
+  records a `started` trajectory event with the resolved model name when a
+  review begins, alongside the existing `done`, `skipped`, and `error`
+  events.
+
 ### Removed
 
 - **SSE `/events` endpoint removed (dead route).** The frontend never used

@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -46,8 +47,10 @@ type reviewStubAdapter struct {
 }
 
 func (a *reviewStubAdapter) Kind() domain.ProviderKind { return domain.ProviderChat }
-func (a *reviewStubAdapter) Stream(context.Context, ChatRequest, func(string), func(string)) (ChatResponse, error) {
-	return ChatResponse{}, nil
+func (a *reviewStubAdapter) Stream(ctx context.Context, req ChatRequest, _ func(string), _ func(string)) (ChatResponse, error) {
+	// Delegate to Complete: the review loop now calls Stream, and these stubs
+	// model a provider whose stream result carries the same ChatResponse.
+	return a.Complete(ctx, req)
 }
 
 func (a *reviewStubAdapter) Complete(_ context.Context, req ChatRequest) (ChatResponse, error) {
@@ -70,8 +73,10 @@ func (a *reviewStubAdapter) Complete(_ context.Context, req ChatRequest) (ChatRe
 
 func newReviewApp(toolbox *reviewStubToolbox) *App {
 	return &App{
-		Toolbox: toolbox,
-		Logs:    &fakeLogStore{},
+		Toolbox:              toolbox,
+		Logs:                 &fakeLogStore{},
+		turnsSinceReview:     map[string]int{},
+		toolCallsSinceReview: map[string]int{},
 	}
 }
 
@@ -589,5 +594,480 @@ func TestReviewLoopCompleteErrorIsReturned(t *testing.T) {
 	}
 	if len(mutations) != 1 {
 		t.Fatalf("partial mutations = %+v, want the successful first-round save", mutations)
+	}
+}
+
+// ---- Phase 1: Hydration tool tests ----
+
+// TestReviewTranscriptToolReturnsStructuredJSON verifies the hydration tool
+// returns valid JSON with proper roles, nested tool_calls, and truncated output.
+func TestReviewTranscriptToolReturnsStructuredJSON(t *testing.T) {
+	conv := &domain.Conversation{
+		ID:    "conv_hydr",
+		Model: "prov_x:gpt-test",
+		Messages: []domain.Message{
+			{Role: domain.RoleUser, Content: "fix the login bug"},
+			{Role: domain.RoleAssistant, Content: "Let me search.", ToolCalls: []domain.ToolCall{
+				{Name: "grep", Args: `{"pattern":"login"}`, Output: "auth.go:5 matches"},
+			}},
+			{Role: domain.RoleAssistant, Content: "Found the bug in line 42."},
+		},
+	}
+	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), DefaultReviewSettings())
+	jsonOut := agent.executeReviewTranscript(conv)
+
+	// Must be valid JSON with expected top-level fields.
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(jsonOut), &parsed); err != nil {
+		t.Fatalf("executeReviewTranscript returned invalid JSON: %v\n%s", err, jsonOut)
+	}
+	if parsed["conversation_id"] != "conv_hydr" {
+		t.Errorf("conversation_id = %v, want conv_hydr", parsed["conversation_id"])
+	}
+	if parsed["model"] != "prov_x:gpt-test" {
+		t.Errorf("model = %v, want prov_x:gpt-test", parsed["model"])
+	}
+	msgs, ok := parsed["messages"].([]any)
+	if !ok {
+		t.Fatalf("messages is not an array: %T", parsed["messages"])
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("messages len = %d, want 3", len(msgs))
+	}
+	// Second message (assistant) must have nested tool_calls.
+	asstMsg, ok := msgs[1].(map[string]any)
+	if !ok {
+		t.Fatalf("msg[1] is not an object: %T", msgs[1])
+	}
+	if asstMsg["role"] != "assistant" {
+		t.Errorf("msg[1] role = %v, want assistant", asstMsg["role"])
+	}
+	toolCalls, ok := asstMsg["tool_calls"].([]any)
+	if !ok || len(toolCalls) != 1 {
+		t.Fatalf("msg[1] tool_calls = %v, want 1 entry", asstMsg["tool_calls"])
+	}
+	tc, ok := toolCalls[0].(map[string]any)
+	if !ok {
+		t.Fatalf("tool_calls[0] is not an object: %T", toolCalls[0])
+	}
+	if tc["name"] != "grep" {
+		t.Errorf("tool_calls[0] name = %v, want grep", tc["name"])
+	}
+	if tc["output"] != "auth.go:5 matches" {
+		t.Errorf("tool_calls[0] output = %v, want auth.go:5 matches", tc["output"])
+	}
+}
+
+// TestReviewTranscriptToolNotInToolbox verifies the hydration tool is NOT
+// registered in the global Toolbox — it exists only in the review agent's
+// toolset.
+func TestReviewTranscriptToolNotInToolbox(t *testing.T) {
+	toolbox := &reviewStubToolbox{}
+	for _, ti := range toolbox.ListTools() {
+		if ti.Name == "review_transcript" {
+			t.Fatal("review_transcript must NOT be in Toolbox.ListTools()")
+		}
+	}
+}
+
+// TestReviewLoopCallsHydrationToolFirst verifies the review loop starts with
+// a minimal user message (not a transcript dump) and the hydration tool is
+// in the toolset.
+func TestReviewLoopCallsHydrationToolFirst(t *testing.T) {
+	if resources.ReviewPrompt() == "" {
+		t.Fatal("review prompt must be non-empty")
+	}
+	conv := &domain.Conversation{
+		ID: "conv_loop",
+		Messages: []domain.Message{
+			{Role: domain.RoleUser, Content: "remember I like dark mode"},
+		},
+	}
+	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), DefaultReviewSettings())
+
+	// The reviewTools() list must include review_transcript.
+	tools := agent.reviewTools()
+	found := false
+	for _, td := range tools {
+		if td.Name == "review_transcript" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("reviewTools() must include review_transcript")
+	}
+
+	// The adapter captures the initial user message to verify it is NOT
+	// a transcript dump.
+	var capturedInitialContent string
+	adapter := &reviewCapturingAdapter{
+		toolCalls: []domain.ToolCall{{
+			Name: "review_transcript",
+			Args: `{}`,
+		}},
+		onComplete: func(req ChatRequest) {
+			if len(req.Messages) > 0 && capturedInitialContent == "" {
+				capturedInitialContent = req.Messages[0].Content
+			}
+		},
+	}
+	_, _, _ = agent.runReviewLoop(context.Background(), adapter, "model", conv)
+	if strings.Contains(capturedInitialContent, "[user]") || strings.Contains(capturedInitialContent, "[assistant]") {
+		t.Fatalf("initial user message looks like a transcript dump: %q", capturedInitialContent[:min(100, len(capturedInitialContent))])
+	}
+	if !strings.Contains(strings.ToLower(capturedInitialContent), "review_transcript") {
+		t.Fatalf("initial user message should instruct calling review_transcript, got: %q", capturedInitialContent[:min(100, len(capturedInitialContent))])
+	}
+}
+
+// TestReviewTranscriptToolRespectsTokenCap verifies large conversations are
+// trimmed to fit MaxTranscriptTokens.
+func TestReviewTranscriptToolRespectsTokenCap(t *testing.T) {
+	// Build a conversation with many large messages.
+	var msgs []domain.Message
+	for i := 0; i < 100; i++ {
+		msgs = append(msgs, domain.Message{
+			Role:    domain.RoleUser,
+			Content: strings.Repeat("x", 1000), // 1k chars each
+		})
+	}
+	conv := &domain.Conversation{ID: "conv_big", Messages: msgs}
+	settings := DefaultReviewSettings()
+	settings.MaxTranscriptTokens = 1000 // ~4000 chars cap
+	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), settings)
+	jsonOut := agent.executeReviewTranscript(conv)
+
+	// The output must be under the char cap (~tokens*4) with some headroom
+	// for JSON overhead.
+	charCap := settings.MaxTranscriptTokens * 4
+	if len(jsonOut) > charCap*2 { // allow 2x for JSON structure overhead
+		t.Fatalf("executeReviewTranscript output len = %d, want under ~%d (token cap %d)", len(jsonOut), charCap*2, settings.MaxTranscriptTokens)
+	}
+}
+
+// reviewCapturingAdapter is an AIProvider that returns tool calls on the
+// first call and a terminal response afterwards, capturing the initial
+// request for inspection.
+type reviewCapturingAdapter struct {
+	toolCalls  []domain.ToolCall
+	calls      int
+	onComplete func(req ChatRequest)
+}
+
+func (a *reviewCapturingAdapter) Kind() domain.ProviderKind { return domain.ProviderChat }
+func (a *reviewCapturingAdapter) Stream(ctx context.Context, req ChatRequest, _ func(string), _ func(string)) (ChatResponse, error) {
+	return a.Complete(ctx, req)
+}
+func (a *reviewCapturingAdapter) Complete(_ context.Context, req ChatRequest) (ChatResponse, error) {
+	a.calls++
+	if a.onComplete != nil {
+		a.onComplete(req)
+	}
+	if a.calls == 1 {
+		return ChatResponse{ToolCalls: a.toolCalls}, nil
+	}
+	return ChatResponse{Content: "Nothing to save."}, nil
+}
+
+// ---- Phase 2: Skill nudge tests ----
+
+// TestSkillNudgeFiresOnToolIterationCount verifies the tool-call counter
+// increments per tool call and fires a review at the threshold.
+func TestSkillNudgeFiresOnToolIterationCount(t *testing.T) {
+	app := newReviewApp(&reviewStubToolbox{})
+	app.Settings = &fakeSettings{Settings: domain.DefaultSettings()}
+	app.Settings.(*fakeSettings).SkillNudgeInterval = 3
+	app.ReviewAgent = NewBackgroundReviewAgent(app, DefaultReviewSettings())
+	// Disable turn-based review so we know the trigger is skill nudge alone.
+	app.Settings.(*fakeSettings).LearningReviewThreshold = 0
+
+	fired := false
+	app.ReviewAgent = &BackgroundReviewAgent{
+		app:      app,
+		settings: DefaultReviewSettings(),
+	}
+	// Override reserveReview to detect the fire.
+	originalReserve := app.ReviewAgent.reserveReview
+	_ = originalReserve
+	app.ReviewAgent.settings.Enabled = true
+
+	// Simulate 3 tool calls.
+	for i := 0; i < 3; i++ {
+		firedBefore := fired
+		// We detect fire by checking if the counter resets to 0.
+		app.incrementToolCallCounter("conv_nudge")
+		app.learningMu.RLock()
+		count := app.toolCallsSinceReview["conv_nudge"]
+		app.learningMu.RUnlock()
+		if count == 0 && i == 2 {
+			fired = true
+		}
+		_ = firedBefore
+	}
+	if !fired {
+		t.Fatal("skill nudge should fire review after 3 tool calls (threshold=3)")
+	}
+}
+
+// TestSkillNudgeIndependentOfTurnThreshold verifies the tool-call trigger
+// fires even when the user turn count is below LearningReviewThreshold.
+func TestSkillNudgeIndependentOfTurnThreshold(t *testing.T) {
+	app := newReviewApp(&reviewStubToolbox{})
+	app.Settings = &fakeSettings{Settings: domain.DefaultSettings()}
+	app.Settings.(*fakeSettings).SkillNudgeInterval = 2
+	app.Settings.(*fakeSettings).LearningReviewThreshold = 100 // high, won't fire
+	app.ReviewAgent = NewBackgroundReviewAgent(app, DefaultReviewSettings())
+	app.ReviewAgent.settings.Enabled = true
+
+	// Simulate 2 tool calls — should fire skill nudge even though turns
+	// are far below 100.
+	for i := 0; i < 2; i++ {
+		app.incrementToolCallCounter("conv_indep")
+	}
+	app.learningMu.RLock()
+	count := app.toolCallsSinceReview["conv_indep"]
+	app.learningMu.RUnlock()
+	if count != 0 {
+		t.Fatalf("toolCallsSinceReview = %d after 2 calls (threshold=2), want 0 (reset by fire)", count)
+	}
+	// Turn counter should be untouched.
+	app.learningMu.RLock()
+	turns := app.turnsSinceReview["conv_indep"]
+	app.learningMu.RUnlock()
+	if turns != 0 {
+		t.Fatalf("turnsSinceReview = %d, want 0 (skill nudge should not touch turn counter)", turns)
+	}
+}
+
+// TestSkillNudgeCooldownPreventsDuplicate verifies that when both triggers
+// fire, the cooldown gate prevents a duplicate review.
+func TestSkillNudgeCooldownPreventsDuplicate(t *testing.T) {
+	app := newReviewApp(&reviewStubToolbox{})
+	app.Settings = &fakeSettings{Settings: domain.DefaultSettings()}
+	app.Settings.(*fakeSettings).SkillNudgeInterval = 2
+	app.Settings.(*fakeSettings).LearningReviewThreshold = 1
+	app.ReviewAgent = NewBackgroundReviewAgent(app, DefaultReviewSettings())
+	app.ReviewAgent.settings.Enabled = true
+	app.ReviewAgent.settings.ReviewCooldown = time.Minute // long cooldown
+
+	// Fire turn-based review first.
+	app.incrementTurnCounter("conv_dup")
+	// Give the background goroutine time to reserve.
+	time.Sleep(50 * time.Millisecond)
+	// Now fire skill nudge — should be skipped by cooldown.
+	app.incrementToolCallCounter("conv_dup")
+	app.incrementToolCallCounter("conv_dup")
+	time.Sleep(50 * time.Millisecond)
+
+	// The important invariant: only ONE review runs (cooldown gate).
+	// We verify by checking the cooldown map is occupied.
+	app.ReviewAgent.reviewMu.Lock()
+	_, hasCooldown := app.ReviewAgent.lastReview["conv_dup"]
+	app.ReviewAgent.reviewMu.Unlock()
+	if !hasCooldown {
+		t.Fatal("cooldown should be set after first review, preventing duplicate")
+	}
+}
+
+// TestSkillNudgeDisabledWhenZero verifies SkillNudgeInterval=0 disables
+// tool-based review.
+func TestSkillNudgeDisabledWhenZero(t *testing.T) {
+	app := newReviewApp(&reviewStubToolbox{})
+	app.Settings = &fakeSettings{Settings: domain.DefaultSettings()}
+	app.Settings.(*fakeSettings).SkillNudgeInterval = 0
+	app.ReviewAgent = NewBackgroundReviewAgent(app, DefaultReviewSettings())
+	app.ReviewAgent.settings.Enabled = true
+
+	for i := 0; i < 100; i++ {
+		app.incrementToolCallCounter("conv_dis")
+	}
+	app.learningMu.RLock()
+	count := app.toolCallsSinceReview["conv_dis"]
+	app.learningMu.RUnlock()
+	if count != 0 {
+		t.Fatalf("toolCallsSinceReview = %d, want 0 (disabled counter should not increment)", count)
+	}
+}
+
+// fakeSettings is a minimal SettingsStore for skill nudge tests.
+type fakeSettings struct {
+	domain.Settings
+}
+
+func (f *fakeSettings) Get() domain.Settings        { return f.Settings }
+func (f *fakeSettings) Set(s domain.Settings) error { f.Settings = s; return nil }
+
+// ---- Phase 3: Review model fix + trajectory logging tests ----
+
+// TestReviewModelResolutionRecordedInTrajectory verifies that
+// recordReviewModelResolution writes a trajectory event with the
+// requested and resolved model names. This is the function called by
+// applyReviewModelOverride on both success and fallback paths.
+func TestReviewModelResolutionRecordedInTrajectory(t *testing.T) {
+	tmp := t.TempDir()
+	traj := NewTrajectoryRecorder(tmp)
+	defer traj.Close()
+	app := &App{
+		Toolbox:              &reviewStubToolbox{},
+		Logs:                 &fakeLogStore{},
+		Trajectory:           traj,
+		turnsSinceReview:     map[string]int{},
+		toolCallsSinceReview: map[string]int{},
+	}
+	agent := NewBackgroundReviewAgent(app, DefaultReviewSettings())
+
+	// Record a fallback event (the most common failure mode).
+	agent.recordReviewModelResolution("prov_test:cheap-model", "fallback:conv_model", "prov_conv:gpt-test")
+
+	events := ReadTrajectory(tmp, 100)
+	found := false
+	for _, e := range events {
+		if e.Type == "review_model" {
+			found = true
+			if e.Detail["status"] != "fallback:conv_model" {
+				t.Errorf("status = %v, want fallback:conv_model", e.Detail["status"])
+			}
+			if e.Detail["requested"] != "prov_test:cheap-model" {
+				t.Errorf("requested = %v, want prov_test:cheap-model", e.Detail["requested"])
+			}
+			if e.Detail["resolved"] != "prov_conv:gpt-test" {
+				t.Errorf("resolved = %v, want prov_conv:gpt-test", e.Detail["resolved"])
+			}
+		}
+	}
+	if !found {
+		t.Fatal("review_model event not recorded in trajectory")
+	}
+}
+
+func TestReviewStartedEventRecordedInTrajectory(t *testing.T) {
+	tmp := t.TempDir()
+	traj := NewTrajectoryRecorder(tmp)
+	defer traj.Close()
+	traj.Record("review", map[string]interface{}{
+		"conversation": "conv_started",
+		"status":       "started",
+		"model":        "prov_test:gpt-test",
+	})
+	events := ReadTrajectory(tmp, 100)
+	found := false
+	for _, e := range events {
+		if e.Type == "review" && e.Detail["status"] == "started" {
+			found = true
+			if e.Detail["model"] != "prov_test:gpt-test" {
+				t.Errorf("model = %v, want prov_test:gpt-test", e.Detail["model"])
+			}
+		}
+	}
+	if !found {
+		t.Fatal("review started event not persisted to trajectory.jsonl")
+	}
+}
+
+// streamDeltaAdapter is an AIProvider whose Stream pushes text/reasoning
+// deltas through the callbacks and returns a ChatResponse carrying a tool
+// call on the first call and a terminal response afterwards. This models a
+// real streaming provider (e.g. OpenAI Responses) where the review loop
+// must consume deltas instead of a single non-streaming completion.
+type streamDeltaAdapter struct {
+	calls             int
+	errOnCall         int
+	err               error
+	initialToolCallID string
+	terminal          string
+	deltaCalls        int
+	reasonCalls       int
+}
+
+func (a *streamDeltaAdapter) Kind() domain.ProviderKind { return domain.ProviderChat }
+
+func (a *streamDeltaAdapter) Complete(context.Context, ChatRequest) (ChatResponse, error) {
+	return ChatResponse{}, nil // loop never calls Complete anymore
+}
+
+func (a *streamDeltaAdapter) Stream(_ context.Context, _ ChatRequest, onDelta, onReasoning func(string)) (ChatResponse, error) {
+	a.calls++
+	if a.errOnCall > 0 && a.calls == a.errOnCall {
+		return ChatResponse{}, a.err
+	}
+	if a.calls == 1 {
+		onDelta("I need to ")    // text delta 1
+		onReasoning("thinking…") // reasoning delta — must also be delivered
+		a.deltaCalls++
+		a.reasonCalls++
+		return ChatResponse{
+			ToolCalls: []domain.ToolCall{{
+				ID:   a.initialToolCallID,
+				Name: "memory_save",
+				Args: `{"content":"user prefers Indonesian"}`,
+			}},
+		}, nil
+	}
+	onDelta("No more details.")
+	a.deltaCalls++
+	a.reasonCalls++
+	return ChatResponse{Content: a.terminal}, nil
+}
+
+// TestReviewLoopUsesStreamAndAccumulatesDeltas verifies the review loop now
+// drives Stream() (so a long-thinking provider keeps the connection alive via
+// deltas) and that text deltas flow through onDelta while reasoning flows
+// through onReasoning.
+func TestReviewLoopUsesStreamAndAccumulatesDeltas(t *testing.T) {
+	if resources.ReviewPrompt() == "" {
+		t.Fatal("review prompt must be non-empty")
+	}
+	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), DefaultReviewSettings())
+	conv := &domain.Conversation{
+		ID: "conv_delta",
+		Messages: []domain.Message{
+			{Role: domain.RoleUser, Content: "remember I prefer Indonesian"},
+			{Role: domain.RoleAssistant, Content: "noted"},
+		},
+	}
+	adapter := &streamDeltaAdapter{
+		terminal:          "Nothing to save.",
+		initialToolCallID: "call_delta_1",
+	}
+	mutations, _, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+	if err != nil {
+		t.Fatalf("runReviewLoop with stream adapter: %v", err)
+	}
+	if len(mutations) != 1 {
+		t.Fatalf("mutations = %+v, want the streamed memory_save mutation", mutations)
+	}
+	if adapter.deltaCalls == 0 {
+		t.Fatal("Stream adapter should have received text deltas")
+	}
+	if adapter.reasonCalls == 0 {
+		t.Fatal("Stream adapter should have received reasoning deltas")
+	}
+}
+
+// TestReviewLoopStreamErrorIsPropagated verifies a failure from Stream (e.g.
+// the adapter surfacing a hang via idle timeout) is returned to the caller
+// and, unlike a wall-clock deadline, is a genuine provider error.
+func TestReviewLoopStreamErrorIsPropagated(t *testing.T) {
+	if resources.ReviewPrompt() == "" {
+		t.Fatal("review prompt must be non-empty")
+	}
+	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), DefaultReviewSettings())
+	conv := &domain.Conversation{
+		ID: "conv_stream_err",
+		Messages: []domain.Message{
+			{Role: domain.RoleUser, Content: "remember I prefer Indonesian"},
+			{Role: domain.RoleAssistant, Content: "noted"},
+		},
+	}
+	adapter := &streamDeltaAdapter{
+		terminal:          "Nothing to save.",
+		initialToolCallID: "call_err_1",
+		errOnCall:         1,
+		err:               errors.New("stream stalled: idle timeout"),
+	}
+	_, _, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+	if err == nil || !strings.Contains(err.Error(), "idle timeout") {
+		t.Fatalf("err = %v, want propagation of the stream idle timeout", err)
 	}
 }

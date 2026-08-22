@@ -112,6 +112,7 @@ export async function refresh() {
     state.compactionModel = settings.compaction_model ?? '';
     state.reviewModel = settings.review_model ?? '';
     document.getElementById('settings-learning-threshold').value = settings.learning_review_threshold ?? 10;
+    document.getElementById('settings-skill-nudge-interval').value = settings.skill_nudge_interval ?? 15;
     document.getElementById('settings-auto-continues').value = settings.max_auto_continues ?? 10;
     // Web answer: set provider dropdown and model field. API key is write-only.
     webAnswerProviderSelect.setSelected([state.webAnswerProvider || '']);
@@ -375,6 +376,11 @@ async function save() {
       setStatus('Learning review threshold must be between 0 and 1,000.', true);
       return;
     }
+    const skillNudgeInterval = Number(document.getElementById('settings-skill-nudge-interval').value);
+    if (!Number.isInteger(skillNudgeInterval) || skillNudgeInterval < 0 || skillNudgeInterval > 1000) {
+      setStatus('Skill review threshold must be between 0 and 1,000.', true);
+      return;
+    }
     const maxAutoContinues = Number(document.getElementById('settings-auto-continues').value);
     if (!Number.isInteger(maxAutoContinues) || maxAutoContinues < 0 || maxAutoContinues > 10000) {
       setStatus('Max auto-continues must be between 0 and 10,000 (0 = unlimited).', true);
@@ -410,6 +416,7 @@ async function save() {
       web_answer_model: webAnswerModel || null,
       web_answer_api_key: webAnswerAPIKey || null,
       learning_review_threshold: learningThreshold,
+      skill_nudge_interval: skillNudgeInterval,
       max_auto_continues: maxAutoContinues,
       temperature: optionalNumber('settings-temperature'),
       top_p: optionalNumber('settings-top-p'),

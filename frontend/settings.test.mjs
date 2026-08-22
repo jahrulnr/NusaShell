@@ -30,3 +30,9 @@ test('WebSocket reconnect is an explicit persisted preference', () => {
   assert.match(rpc, /if \(!autoReconnect \|\| reconnectTimer/);
   assert.match(rpc, /lsSet\('nusashell\.autoReconnect'/);
 });
+
+test('Skill nudge interval is exposed in settings UI', () => {
+  assert.match(html, /id="settings-skill-nudge-interval"/);
+  assert.match(settingsView, /skill_nudge_interval/);
+  assert.match(settingsView, /settings-skill-nudge-interval/);
+});

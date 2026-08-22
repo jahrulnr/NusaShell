@@ -24,9 +24,10 @@ func (f *fakeSettingsStoreWithThreshold) Set(s domain.Settings) error {
 
 func TestIncrementTurnCounterBelowThreshold(t *testing.T) {
 	app := &App{
-		turnsSinceReview: map[string]int{},
-		Settings:         &fakeSettingsStoreWithThreshold{threshold: 5},
-		Memory:           &fakeMemoryStore{},
+		turnsSinceReview:     map[string]int{},
+		toolCallsSinceReview: map[string]int{},
+		Settings:             &fakeSettingsStoreWithThreshold{threshold: 5},
+		Memory:               &fakeMemoryStore{},
 	}
 	app.ReviewAgent = NewBackgroundReviewAgent(app, DefaultReviewSettings())
 	for i := 0; i < 4; i++ {
@@ -39,10 +40,11 @@ func TestIncrementTurnCounterBelowThreshold(t *testing.T) {
 
 func TestIncrementTurnCounterAtThresholdFlushes(t *testing.T) {
 	app := &App{
-		turnsSinceReview: map[string]int{},
-		Settings:         &fakeSettingsStoreWithThreshold{threshold: 3},
-		Memory:           &fakeMemoryStore{},
-		Conversations:    &fakeConversationStore{},
+		turnsSinceReview:     map[string]int{},
+		toolCallsSinceReview: map[string]int{},
+		Settings:             &fakeSettingsStoreWithThreshold{threshold: 3},
+		Memory:               &fakeMemoryStore{},
+		Conversations:        &fakeConversationStore{},
 	}
 	app.ReviewAgent = NewBackgroundReviewAgent(app, DefaultReviewSettings())
 	for i := 0; i < 3; i++ {
@@ -55,9 +57,10 @@ func TestIncrementTurnCounterAtThresholdFlushes(t *testing.T) {
 
 func TestIncrementTurnCounterDisabled(t *testing.T) {
 	app := &App{
-		turnsSinceReview: map[string]int{},
-		Settings:         &fakeSettingsStoreWithThreshold{threshold: 0},
-		Memory:           &fakeMemoryStore{},
+		turnsSinceReview:     map[string]int{},
+		toolCallsSinceReview: map[string]int{},
+		Settings:             &fakeSettingsStoreWithThreshold{threshold: 0},
+		Memory:               &fakeMemoryStore{},
 	}
 	app.ReviewAgent = NewBackgroundReviewAgent(app, DefaultReviewSettings())
 	for i := 0; i < 100; i++ {
@@ -70,8 +73,9 @@ func TestIncrementTurnCounterDisabled(t *testing.T) {
 
 func TestIncrementTurnCounterNoReviewer(t *testing.T) {
 	app := &App{
-		turnsSinceReview: map[string]int{},
-		Settings:         &fakeSettingsStoreWithThreshold{threshold: 1},
+		turnsSinceReview:     map[string]int{},
+		toolCallsSinceReview: map[string]int{},
+		Settings:             &fakeSettingsStoreWithThreshold{threshold: 1},
 	}
 	app.incrementTurnCounter("conv_1")
 	if app.turnsSinceReview["conv_1"] != 0 {
