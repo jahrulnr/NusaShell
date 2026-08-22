@@ -288,15 +288,17 @@
 .agent-message.assistant .agent-bubble pre {
   box-sizing: border-box;
   max-width: 100%;
-  margin: .8em 0;
+  margin: 4px 0px 0.8em;
   overflow-x: auto;
   padding: 10px;
   border: 1px solid var(--border-soft);
-  border-radius: 7px;
+  border-radius: 0 7px 7px 7px;
   background: var(--input-bg);
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;
+  overflow-y: auto;
+  max-height: 6rem;
 }
 .agent-message.assistant .agent-bubble pre code { padding: 0; background: none; }
 .agent-message.assistant .agent-bubble a { color: var(--accent); }
@@ -446,9 +448,6 @@
   min-width: 0;
   max-width: calc(100% - 12px);
   margin: 2px 0 11px 12px;
-  border: 1px solid #263346;
-  border-radius: 9px;
-  padding: 11px 13px;
   background: #0a1018;
   color: #9aa8ba;
   font: 11px/1.65 var(--font-mono);

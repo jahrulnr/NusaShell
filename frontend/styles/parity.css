@@ -410,7 +410,17 @@ summary { outline: none; }
 .agent-tool-terminal-body { display: grid; gap: 8px; margin: 2px 0 8px; padding: 0 0 2px 14px; font-size: 11px; }
 .agent-tool-terminal:not([open]) > .agent-tool-terminal-body { display: none; }
 .agent-tool-terminal-panel { border: 1px solid #263b52; border-radius: 10px; padding: 8px 10px 10px; background: #09111d; }
-.agent-tool-terminal-panel-label { margin-bottom: 6px; color: #6d7d90; font: 10px/1 var(--font-sans); letter-spacing: .02em; }
+.agent-tool-terminal-panel-label { 
+  margin-bottom: 6px; 
+  color: #6d7d90; 
+  font: 10px/1 var(--font-sans); 
+  letter-spacing: .02em;
+  padding: 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px 7px 0 0;
+  display: inline;
+  border-bottom: none;
+}
 .agent-tool-terminal-input,
 .agent-tool-terminal-output { margin: 0; overflow-x: auto; color: #c5d0de; font: 11.5px/1.55 var(--font-mono); white-space: pre-wrap; word-break: break-word; }
 .agent-tool-terminal-output { color: #d5dde8; max-height: calc(10 * 1.55em); overflow-y: auto; overscroll-behavior: contain; }
