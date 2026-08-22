@@ -143,10 +143,10 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "wait_until", Description: "Explain or create a durable wait_until step. Waiting never keeps a runner occupied.", InputSchema: obj("object", props("at", str("RFC3339 time")), "at")},
 		{Name: "sleep", Description: "Pause for the given number of seconds (max 300). Use for retry backoff or to wait between polls of an async ci_run. Does not consume a provider round — the turn resumes after the pause.", InputSchema: obj("object", props("seconds", intSchema("Seconds to sleep (1-300)")), "seconds")},
 		{Name: "mcp_list", Description: "List configured MCP servers with their enabled status and runtime state (running/stopped).", InputSchema: obj("object", nil)},
-		{Name: "tool_list", Description: "List tools from a running MCP server. Accepts the plugin id (e.g. \"nusashell.terminal\"). When omitted, lists tools across all running MCP servers. Returns full tool defs (ref, name, server, description, parameters) — pass the ref to mcp_call to execute.", InputSchema: obj("object", props("server", str("Plugin id; when omitted, lists all running servers")))},
-		{Name: "tool_schema", Description: "Load one MCP tool's input schema by plugin id and tool name. The tool name is the bare tool name (e.g. \"exec\"). Returns the schema as readable JSON so you know exact field names and types before calling the tool.", InputSchema: obj("object", props("server", str("Plugin id (e.g. nusashell.terminal)"), "tool", str("Bare tool name within the server (e.g. \"exec\")")), "server", "tool")},
-		{Name: "mcp_search", Description: "Search running MCP servers' tools by name or description (case-insensitive token match — any term matches). When server is omitted, searches across ALL running MCP servers. Returns matching tools with a `ref` you pass to `mcp_call` plus the full input schema (parameters) so you know exactly how to call the tool. This is the universal MCP discovery path that works on every provider — always use mcp_search + mcp_call instead of guessing tool names.", InputSchema: obj("object", props("server", str("Optional: plugin id; when omitted, searches all running servers"), "query", str("Search query"), "limit", intSchema("Max results, default 20")), "query")},
-		{Name: "mcp_call", Description: "Execute an MCP tool by ref. Get the ref from mcp_search or tool_list (format <plugin-id>:<tool> e.g. nusashell.files:read). Pass `arguments_json` as a JSON-encoded string of the arguments matching the tool's parameters schema — the exact object that the tool expects as its input, e.g. {\"path\":\"/etc/hosts\"}. Omit `arguments_json` entirely for parameterless tools (defaults to {}). The ref binds to a specific running MCP server + tool; if the server has been disabled or restarted since discovery, you get a STALE_TOOL_REF error and must search again. This is the only MCP execution path — mcp__<server>__<tool> names are not callable.", InputSchema: obj("object", props("ref", str("Tool ref from mcp_search / tool_list results (e.g. nusashell.files:read)"), "arguments_json", str("JSON-encoded tool arguments matching the parameters schema (e.g. {\"path\":\"/etc/hosts\"}). Optional; defaults to {} — omit entirely for parameterless tools.")), "ref")},
+		{Name: "tool_list", Description: "List tools from a running MCP server. Accepts the plugin id (e.g. \"nusashell.terminal\"). When omitted, lists tools across all running MCP servers. Returns compact entries (ref, name, server, description) without parameter schemas — load the exact schema with tool_schema before first use of an unfamiliar tool.", InputSchema: obj("object", props("server", str("Plugin id; when omitted, lists all running servers")))},
+		{Name: "tool_schema", Description: "Load one MCP tool's input schema by plugin id and tool name. The tool name is the bare tool name (e.g. \"exec\"). Returns the schema as readable JSON — the only place schemas are served; mcp_search and tool_list stay schema-free so large catalogs remain token-cheap.", InputSchema: obj("object", props("server", str("Plugin id (e.g. nusashell.terminal)"), "tool", str("Bare tool name within the server (e.g. \"exec\")")), "server", "tool")},
+		{Name: "mcp_search", Description: "Search running MCP servers' tools by name or description (case-insensitive token match — any term matches). When server is omitted, searches across ALL running MCP servers. Returns compact matches (ref, name, description, ranked) without inlining parameter schemas — call tool_schema for exact argument fields when needed. This is the universal MCP discovery path that works on every provider — always use mcp_search + mcp_call instead of guessing tool names.", InputSchema: obj("object", props("server", str("Optional: plugin id; when omitted, searches all running servers"), "query", str("Search query"), "limit", intSchema("Max results, default 20")), "query")},
+		{Name: "mcp_call", Description: "Execute an MCP tool by ref. Get the ref from mcp_search or tool_list (format <plugin-id>:<tool> e.g. nusashell.files:read). Pass `arguments_json` as a JSON-encoded string of the arguments matching the tool's parameters schema — the exact object that the tool expects as its input, e.g. {\"path\":\"/etc/hosts\"}. Omit `arguments_json` entirely for parameterless tools (defaults to {}). The ref binds to a specific running MCP server + tool; if the server has been disabled or restarted since discovery, you get a STALE_TOOL_REF error and must search again. This is the only MCP execution path — mcp__<server>__<tool> names are not callable.", InputSchema: obj("object", props("ref", str("Tool ref from mcp_search / tool_list results (e.g. nusashell.files:read)"), "arguments_json", str("JSON-encoded tool arguments matching the parameters schema (e.g. {\"path\":\"/etc/hosts\"}). Optional; defaults to {} — omit entirely for parameterless tools. Load the exact schema with tool_schema if unsure.")), "ref")},
 		{Name: "mcp_register", Description: "Copy a new MCP plugin from an absolute staging folder into the installed plugin store, or replace an existing plugin with the same id. The source must contain manifest.json and must stay outside the installed plugins root. Check mcp_list and ask the user before replacing an existing id; then call mcp_enable.", InputSchema: obj("object", props("source", str("Absolute staging path to the plugin folder containing manifest.json")), "source")},
 		{Name: "mcp_enable", Description: "Start/connect an MCP plugin so its tools become available. Returns only status + tool count — use tool_list or mcp_search to discover the tools. If already connected, returns already_enabled without reconnecting. The plugin must be registered first (mcp_register or the Plugins view).", InputSchema: obj("object", props("id", str("Plugin id (e.g. nusashell.files)")), "id")},
 		{Name: "mcp_disable", Description: "Stop/disconnect an MCP plugin. The definition stays installed; only the MCP subprocess is stopped. Tools from this server are no longer listed.", InputSchema: obj("object", props("id", str("Plugin id")), "id")},
@@ -884,19 +884,14 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				continue
 			}
 			for _, tool := range tools {
-				var schema map[string]any
-				if len(tool.InputSchema) > 0 {
-					_ = json.Unmarshal(tool.InputSchema, &schema)
-				}
-				if schema == nil {
-					schema = obj("object", nil)
-				}
+				// Schema is intentionally NOT inlined: discovery output stays
+				// compact so catalogs with hundreds of tools remain token-cheap.
+				// The full input schema is available via tool_schema.
 				items = append(items, map[string]any{
 					"ref":         p.Manifest.ID + ":" + tool.Name,
 					"name":        tool.Name,
 					"server":      p.Manifest.ID,
 					"description": tool.Description,
-					"parameters":  schema,
 				})
 			}
 		}
@@ -1298,19 +1293,14 @@ func (t *Toolbox) collectMCPToolMatches(server, query string) []any {
 			if !hit {
 				continue
 			}
-			var schema map[string]any
-			if len(tool.InputSchema) > 0 {
-				_ = json.Unmarshal(tool.InputSchema, &schema)
-			}
-			if schema == nil {
-				schema = obj("object", nil)
-			}
+			// Schema is intentionally NOT inlined: search stays compact so
+			// catalogs with hundreds of tools remain token-cheap. Full input
+			// schema is available via tool_schema.
 			items = append(items, map[string]any{
 				"ref":         p.Manifest.ID + ":" + tool.Name,
 				"name":        tool.Name,
 				"server":      p.Manifest.ID,
 				"description": tool.Description,
-				"parameters":  schema,
 			})
 		}
 	}

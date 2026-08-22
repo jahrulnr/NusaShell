@@ -356,6 +356,11 @@ func TestToolListAll(t *testing.T) {
 	if !strings.Contains(out, "count: 2") {
 		t.Errorf("expected 2 tools, got: %s", out)
 	}
+	// tool_list stays schema-free so huge catalogs stay token-cheap;
+	// full input schemas live behind tool_schema.
+	if strings.Contains(out, "\"parameters\"") {
+		t.Errorf("tool_list must not inline parameters; use tool_schema, got: %s", out)
+	}
 }
 
 func TestToolListByServer(t *testing.T) {
@@ -448,13 +453,11 @@ func TestMcpSearch(t *testing.T) {
 	if !strings.Contains(out, "create_issue") {
 		t.Errorf("expected create_issue match, got: %s", out)
 	}
-	// mcp_search must return the full parameters so the model can call
-	// the tool directly without a follow-up tool_schema round-trip.
-	if !strings.Contains(out, "\"parameters\"") {
-		t.Errorf("expected parameters in mcp_search output, got: %s", out)
-	}
-	if !strings.Contains(out, "\"title\"") {
-		t.Errorf("expected title field in parameters, got: %s", out)
+	// mcp_search returns a compact discovery payload (ref/name/description).
+	// Full input schemas live behind tool_schema so catalogs with hundreds
+	// of tools stay token-cheap to search.
+	if strings.Contains(out, "\"parameters\"") {
+		t.Errorf("mcp_search must not inline parameters; call tool_schema instead, got: %s", out)
 	}
 }
 
@@ -593,9 +596,9 @@ func TestMcpSearchAllServers(t *testing.T) {
 	if strings.Contains(out, "create_issue") {
 		t.Errorf("github tool should not match 'file' query, got: %s", out)
 	}
-	// Full parameters must be included so the model knows how to call.
-	if !strings.Contains(out, `"parameters"`) || !strings.Contains(out, `"path"`) {
-		t.Errorf("expected parameters with path field, got: %s", out)
+	// Schemas are never inlined in search results — tool_schema owns them.
+	if strings.Contains(out, `"parameters"`) {
+		t.Errorf("mcp_search must not include parameters, got: %s", out)
 	}
 }
 

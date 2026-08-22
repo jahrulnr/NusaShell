@@ -21,9 +21,9 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `docs_search` | search the product documentation when the page id is unknown; results ranked by relevance |
 | `docs_read` | read a documentation page by canonical extensionless id (from `docs_search` results) |
 | `mcp_list` | list all plugins (MCP servers) with runtime state: every plugin appears, running or idle |
-| `tool_list` | list ALL tools of a running MCP server (no query); accepts plugin id only; returns full tool defs (ref, name, server, description, parameters) — pass the `ref` to `mcp_call` to execute; call after `mcp_enable` to discover tools |
-| `tool_schema` | load one MCP tool's full definition as a single JSONL line (name, description, parameters with type/properties/required) before calling it; accepts plugin id only |
-| `mcp_search` | universal MCP tool discovery — search running MCP servers by name or description (token match, ranked); returns a `ref` (`<plugin-id>:<tool>`) plus the full `parameters` schema for each match; pass the `ref` to `mcp_call` to execute; always prefer `mcp_search` + `mcp_call` over guessing tool names |
+| `tool_list` | list ALL tools of a running MCP server (no query); accepts plugin id only; returns compact entries (ref, name, server, description) without parameter schemas — load the full schema with `tool_schema` when needed; call after `mcp_enable` to discover tools |
+| `tool_schema` | load one MCP tool's full definition as a single JSONL line (name, description, parameters with type/properties/required); accepts plugin id only; this is the only tool that serves schemas — mcp_search and tool_list stay schema-free |
+| `mcp_search` | universal MCP tool discovery — search running MCP servers by name or description (token match, ranked); returns compact matches (`ref` `<plugin-id>:<tool>`, name, description) without inlining parameter schemas so large catalogs stay token-cheap; call `tool_schema` for exact argument fields when needed; always prefer `mcp_search` + `mcp_call` over guessing tool names |
 | `mcp_call` | the only MCP tool execution path — run a tool by `ref` (from `mcp_search` or `tool_list`; format `<plugin-id>:<tool>`) with `arguments_json` (a JSON-encoded string of the arguments matching the tool's parameters schema, or a JSON object directly; optional — defaults to `{}` for parameterless tools); returns a `STALE_TOOL_REF` error if the server was disabled/restarted since discovery (re-search and retry) |
 | `mcp_register` | copy a plugin from an absolute staging folder outside the installed plugins root; check inventory and ask before replacing an existing id |
 | `mcp_enable` | connect an installed plugin so its tools become available; returns only status + tool count — follow with `tool_list` or `mcp_search` to discover tools; returns `already_enabled` if already connected (no reconnect) |
@@ -122,7 +122,7 @@ stay stable for the lifetime of a conversation so the provider prompt cache
 via the universal `mcp_search` + `mcp_call` pair, which works on every
 provider; `mcp__<server>__<tool>` names are not callable:
 
-1. `mcp_search(query="read file")` → returns `{"ref":"nusashell.files:read","parameters":{...}}`
+1. `mcp_search(query="read file")` → returns `{"ref":"nusashell.files:read","name":"read","server":"nusashell.files","description":"Read a text file..."}` — compact, no inline schema
 2. `mcp_call(ref="nusashell.files:read", arguments_json="{\"path\":\"/etc/hosts\"}")` → executes the tool
 
 `tool_list` and `tool_schema` return the same `ref`-shaped definitions for
@@ -246,8 +246,9 @@ MCP tools are not advertised in `tools[]`. Use the universal `mcp_search` +
 
 Good example:
 
-    mcp_search(query="read file")                # → {"ref":"nusashell.files:read","name":"read","server":"nusashell.files","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}
-    mcp_call(ref="nusashell.files:read", arguments_json="{\"path\": \"/home/user/a.txt\"}")
+    mcp_search(query="read file")                # → {"ref":"nusashell.files:read","name":"read","server":"nusashell.files","description":"Read a text file..."}}
+    tool_schema(server="nusashell.files", tool="read")   # full schema when argument fields are unclear
+    mcp_call(ref="nusashell.files:read", arguments_json={"path": "/home/user/a.txt"})   # object form (canonical)
 
 Bad examples:
 
