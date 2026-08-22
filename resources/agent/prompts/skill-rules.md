@@ -12,6 +12,9 @@
   (pass `id`). To write a support file inside an existing skill, pass `path`
   (e.g. `references/errors.md`, `templates/config.yaml`, `scripts/verify.sh`)
   instead of `id` — the skill must already exist.
+- `content` is the SKILL.md BODY only. Never include YAML frontmatter:
+  `skill_save` generates the `---` header from `name` and `description`, so
+  pasting frontmatter into `content` yields a double-headed SKILL.md.
 - Prefer updating an existing skill's support files over rewriting the entire
   SKILL.md body. Use `skill_read` with `path` to inspect a support file before
   patching it with `skill_save` and the same `path`.

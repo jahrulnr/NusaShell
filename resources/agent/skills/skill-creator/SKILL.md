@@ -23,15 +23,18 @@ bounded guidance and never add a way to execute scripts automatically.
 2. Choose a lowercase hyphenated folder/id. Write a third-person description
    that says **what** the skill does and **when** to use it; include useful
    trigger terms. Keep it under 1024 characters.
-3. Write frontmatter with `name` matching the id and `description`. Add
-   `requirements.mcp` whenever the skill needs plugin capability, using concrete
-   plugin ids such as `nusashell.files` or role tokens such as `role:files` and
-   `role:terminal`. Add `compatibility` or `metadata` only when useful.
+3. Do NOT hand-write YAML frontmatter: `skill_save` generates the `---`
+   header itself from its `name` and `description` arguments. Pass the
+   markdown BODY as `content` — never include a `---` frontmatter block in
+   it (that produces a double-headed SKILL.md). Mention plugin capability
+   in the body using concrete plugin ids such as `nusashell.files` or role
+   tokens such as `role:files` and `role:terminal` when relevant.
 4. Keep `SKILL.md` lean: numbered steps, decision points, edge cases, and
    explicit instructions to read support files only when needed. Put detail one
    level deep under `references/`, `templates/`, `scripts/`, or `assets/`.
 5. Create the initial `SKILL.md` with `skill_save` (omit `id` for a new skill,
-   pass `id` to update). For support files, use whatever MCP file-management
+   pass `id` to update). `content` is the body only — no frontmatter. For
+   support files, use whatever MCP file-management
    tool is available (discover with `mcp_list` + `tool_list`). If none is
    available, tell the user and stop. The skill must be agent-owned; never
    overwrite builtin or user skills.
