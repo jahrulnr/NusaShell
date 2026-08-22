@@ -389,7 +389,7 @@
 .learning-log-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: end;
   gap: 8px;
   flex: none;
   margin-bottom: 10px;
@@ -632,6 +632,9 @@
 
 /* ============ Review activity digest (inline) ============ */
 
+#learning-log-count {
+  margin: auto 0;
+}
 .learning-log-transcript-row {
   margin-top: 6px;
 }
@@ -670,6 +673,9 @@
   font-size: 11px;
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
+}
+.learning-log-activity-step {
+  margin: 1rem;
 }
 
 /* Agent-style flow inside the activity panel: the tool cards reuse the

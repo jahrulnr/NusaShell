@@ -233,8 +233,14 @@ func (s *Store) Get(id, ownedBy string) (*domain.Skill, error) {
 
 // getWithOwner returns the skill with the exact owner.
 func (s *Store) getWithOwner(id, ownedBy string) (*domain.Skill, error) {
-	// User/builtin: read from root.
-	if ownedBy == "user" || ownedBy == "builtin" || ownedBy == string(domain.SkillOriginUser) || ownedBy == string(domain.SkillOriginBuiltin) {
+	// Root-resident owners: user, builtin, and agent-authored skills all
+	// live directly under s.root (skill_save persists agent-origin skills
+	// there), so an exact-owner lookup for them resolves against the root,
+	// NOT against a plugin mount.
+	if ownedBy == "user" || ownedBy == "builtin" ||
+		ownedBy == string(domain.SkillOriginUser) ||
+		ownedBy == string(domain.SkillOriginBuiltin) ||
+		ownedBy == string(domain.SkillOriginAgent) {
 		skill, err := s.loadSkillFromDir(id, s.root)
 		if err != nil {
 			return nil, fmt.Errorf("skill %q not found", id)
@@ -385,27 +391,26 @@ func (s *Store) loadSkillFromDir(id, dir string) (*domain.Skill, error) {
 		Content:     content,
 	}
 	// Merge metadata from skills.json. Try composite key first (for
-	// plugin skills), then flat key (for user/builtin).
+	// plugin skills), then flat key (for user/builtin), then the
+	// "agent:<id>" composite that Save writes for agent-origin skills
+	// (their OwnedBy is empty during load, so the first probe misses).
+	applyMeta := func(meta *skillMeta) {
+		skill.Category = meta.Category
+		skill.State = meta.State
+		skill.Origin = meta.Origin
+		skill.OwnedBy = meta.OwnedBy
+		skill.PluginDir = meta.PluginDir
+		skill.Pinned = meta.Pinned
+		skill.UsageCount = meta.UsageCount
+		skill.LastUsedAt = meta.LastUsedAt
+		skill.UpdatedAt = meta.UpdatedAt
+	}
 	if meta, ok := s.json.get(metaKey(id, skill.OwnedBy)); ok {
-		skill.Category = meta.Category
-		skill.State = meta.State
-		skill.Origin = meta.Origin
-		skill.OwnedBy = meta.OwnedBy
-		skill.PluginDir = meta.PluginDir
-		skill.Pinned = meta.Pinned
-		skill.UsageCount = meta.UsageCount
-		skill.LastUsedAt = meta.LastUsedAt
-		skill.UpdatedAt = meta.UpdatedAt
+		applyMeta(meta)
 	} else if meta, ok := s.json.get(id); ok {
-		skill.Category = meta.Category
-		skill.State = meta.State
-		skill.Origin = meta.Origin
-		skill.OwnedBy = meta.OwnedBy
-		skill.PluginDir = meta.PluginDir
-		skill.Pinned = meta.Pinned
-		skill.UsageCount = meta.UsageCount
-		skill.LastUsedAt = meta.LastUsedAt
-		skill.UpdatedAt = meta.UpdatedAt
+		applyMeta(meta)
+	} else if meta, ok := s.json.get(string(domain.SkillOriginAgent) + ":" + id); ok {
+		applyMeta(meta)
 	}
 	// If no metadata, set defaults from provenance.
 	if skill.State == "" {
