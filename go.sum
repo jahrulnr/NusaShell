@@ -28,6 +28,8 @@ github.com/jahrulnr/searchwire v0.0.0-20260815212041-8dcb6fbafb70 h1:YtwvHeC111Y
 github.com/jahrulnr/searchwire v0.0.0-20260815212041-8dcb6fbafb70/go.mod h1:XHRGeoEDufl+vjykIJaSxyhAXrH02/Me4QiRb43he+g=
 github.com/jahrulnr/searchwire v0.0.0-20260822171954-b894a9cdf101 h1:ER2yF4X0RFVk099FzoVish7lvrS2+t9ZWR7BCl6buoo=
 github.com/jahrulnr/searchwire v0.0.0-20260822171954-b894a9cdf101/go.mod h1:S6dFxEWfz5MLkwADHgWUYp4DVZ7Yogk1ztI3iPCyUN8=
+github.com/jahrulnr/searchwire v0.0.0-20260822191633-3b488bf19560 h1:Rc83rx8jdvRjBdZmG8vw3Gu1XKMbfbSkLEuQpdKH1VQ=
+github.com/jahrulnr/searchwire v0.0.0-20260822191633-3b488bf19560/go.mod h1:S6dFxEWfz5MLkwADHgWUYp4DVZ7Yogk1ztI3iPCyUN8=
 github.com/josephspurrier/goversioninfo v1.7.0 h1:LQzXOlVm/CtbwJ9/UHl5a2HT0BjcLAwid5gqGd7ZUJ8=
 github.com/josephspurrier/goversioninfo v1.7.0/go.mod h1:z9y0r2G6g5jwSJaFE0cxW9to0aeIibK7UYeLx53aQRU=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=

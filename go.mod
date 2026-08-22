@@ -3,7 +3,7 @@ module nusashell
 go 1.26.5
 
 require (
-	github.com/jahrulnr/searchwire v0.0.0-20260822171954-b894a9cdf101
+	github.com/jahrulnr/searchwire v0.0.0-20260822191633-3b488bf19560
 	github.com/mark3labs/mcp-go v0.58.0
 	github.com/ncruces/zenity v0.10.15
 	gopkg.in/yaml.v3 v3.0.1
