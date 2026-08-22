@@ -204,8 +204,11 @@ func toCodexInput(msgs []application.ChatMessage) []codexInputItem {
 				out = append(out, codexInputItem{Role: "assistant", Content: aiutil.StrJSON(m.Content)})
 			}
 			for _, tc := range m.ToolCalls {
+				// Auto-heal: sanitize hallucinated tool names that violate
+				// the Responses API pattern (e.g. "terminal:exec"). Pairing
+				// is by call_id, not by name.
 				out = append(out, codexInputItem{
-					Type: "function_call", CallID: tc.ID, Name: tc.Name, Args: tc.Args,
+					Type: "function_call", CallID: tc.ID, Name: aiutil.SanitizeToolName(tc.Name), Args: tc.Args,
 				})
 			}
 		case "tool":

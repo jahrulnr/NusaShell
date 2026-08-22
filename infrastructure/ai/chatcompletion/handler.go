@@ -131,10 +131,13 @@ func toOpenAIMessages(req application.ChatRequest) []openAIMessage {
 			content := m.Content
 			msg := openAIMessage{Role: "assistant", Content: content}
 			for _, tc := range m.ToolCalls {
+				// Auto-heal: sanitize hallucinated tool names that violate
+				// the OpenAI function name pattern (e.g. "terminal:exec").
+				// Pairing is by tool_call_id, not by name.
 				msg.ToolCalls = append(msg.ToolCalls, openAIToolCall{
 					ID:       tc.ID,
 					Type:     "function",
-					Function: openAIFunction{Name: tc.Name, Arguments: tc.Args},
+					Function: openAIFunction{Name: aiutil.SanitizeToolName(tc.Name), Arguments: tc.Args},
 				})
 			}
 			out = append(out, msg)

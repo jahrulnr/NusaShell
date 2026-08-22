@@ -131,8 +131,13 @@ func toResponsesInput(msgs []application.ChatMessage) []responsesInputItem {
 				out = append(out, responsesInputItem{Role: "assistant", Content: aiutil.StrJSON(m.Content)})
 			}
 			for _, tc := range m.ToolCalls {
+				// Auto-heal: models occasionally hallucinate tool names with
+				// characters the Responses API rejects (pattern ^[a-zA-Z0-9_-]+$),
+				// e.g. "terminal:exec" or "fs.read". Sanitize on the wire so a
+				// bad name in history does not make the whole conversation
+				// unreplayable. Pairing is by call_id, not by name.
 				out = append(out, responsesInputItem{
-					Type: "function_call", CallID: tc.ID, Name: tc.Name, Args: tc.Args,
+					Type: "function_call", CallID: tc.ID, Name: aiutil.SanitizeToolName(tc.Name), Args: tc.Args,
 				})
 			}
 		case "tool":

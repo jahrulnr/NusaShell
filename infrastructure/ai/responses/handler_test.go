@@ -149,3 +149,46 @@ func marshalRequest(t *testing.T, value any) string {
 	}
 	return string(body)
 }
+
+// TestResponsesSanitizesHallucinatedToolNames verifies that tool names with
+// characters outside the OpenAI Responses API pattern ^[a-zA-Z0-9_-]+$ are
+// sanitized on the wire so a conversation with a hallucinated tool call
+// (e.g. "terminal:exec" produced by DeepSeek) can still be replayed against
+// a Responses API provider without HTTP 400 "Invalid 'input[N].name'".
+func TestResponsesSanitizesHallucinatedToolNames(t *testing.T) {
+	req := application.ChatRequest{
+		Model: "test-model",
+		Messages: []application.ChatMessage{
+			{Role: "user", Content: "list files"},
+			{
+				Role: "assistant",
+				ToolCalls: []domain.ToolCall{
+					{ID: "call_1", Name: "terminal:exec", Args: `{"command":"ls"}`},
+				},
+			},
+			{
+				Role: "tool",
+				ToolResult: &application.ToolResult{
+					ToolCallID: "call_1",
+					Content:    "file1\nfile2",
+				},
+			},
+			{Role: "assistant", Content: "Here are the files."},
+		},
+	}
+	body := marshalRequest(t, buildResponsesRequest(req, false))
+	if strings.Contains(body, `"name":"terminal:exec"`) {
+		t.Fatalf("unsanitized tool name leaked to wire: %s", body)
+	}
+	if !strings.Contains(body, `"name":"terminal_exec"`) {
+		t.Fatalf("expected sanitized name terminal_exec, got: %s", body)
+	}
+	// call_id pairing must be preserved so the function_call_output still
+	// matches the function_call after name sanitization.
+	if !strings.Contains(body, `"call_id":"call_1"`) {
+		t.Fatalf("call_id missing on function_call: %s", body)
+	}
+	if !strings.Contains(body, `"type":"function_call_output"`) {
+		t.Fatalf("function_call_output missing: %s", body)
+	}
+}
