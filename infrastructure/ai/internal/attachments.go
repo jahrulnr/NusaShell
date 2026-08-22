@@ -30,3 +30,37 @@ func DataURLBase64(dataURL string) string {
 	}
 	return data
 }
+
+// InputAudioFormat maps a MIME type to the OpenAI input_audio format enum
+// (mp3, wav, ogg, webm, flac). Unknown or empty media types default to mp3
+// (the most common TTS output).
+func InputAudioFormat(mediaType string) string {
+	switch strings.ToLower(strings.TrimSpace(mediaType)) {
+	case "audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave":
+		return "wav"
+	case "audio/ogg":
+		return "ogg"
+	case "audio/webm":
+		return "webm"
+	case "audio/flac":
+		return "flac"
+	default:
+		return "mp3"
+	}
+}
+
+// InputAudioBlock encodes an audio attachment as the OpenAI Responses API
+// input_audio part: { type: "input_audio", input_audio: { data: <base64>,
+// format: <mp3|wav|ogg|webm|flac> } }. This is the wire format OpenAI,
+// Nvidia NIM, and OpenRouter expect for audio input on the Responses API.
+// Sending audio as input_image (with a data:audio/... URL) causes providers
+// to attempt image decoding and fail with "Failed to load image" errors.
+func InputAudioBlock(att domain.Attachment) map[string]any {
+	return map[string]any{
+		"type": "input_audio",
+		"input_audio": map[string]any{
+			"data":   DataURLBase64(att.DataURL),
+			"format": InputAudioFormat(att.MediaType),
+		},
+	}
+}

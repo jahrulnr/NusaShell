@@ -63,6 +63,54 @@ func TestResponsesAdapterEncodesToolResultAttachments(t *testing.T) {
 	}
 }
 
+// TestResponsesAudioAttachmentUsesInputAudio: audio attachments must be
+// encoded as input_audio (not input_image) on the Responses API. Sending
+// audio as input_image causes providers like Nvidia to attempt image
+// decoding and fail with "Failed to load image" errors.
+func TestResponsesAudioAttachmentUsesInputAudio(t *testing.T) {
+	req := application.ChatRequest{
+		Model: "test-model",
+		Messages: []application.ChatMessage{{
+			Role:    "user",
+			Content: "Listen to this",
+			Attachments: []domain.Attachment{
+				{Type: "audio", Name: "rec.mp3", MediaType: "audio/mpeg", DataURL: "data:audio/mpeg;base64,//NkxAAAA"},
+			},
+		}},
+	}
+	body := marshalRequest(t, buildResponsesRequest(req, false))
+	if !containsAll(body, "input_audio", "//NkxAAAA", "mp3") {
+		t.Fatalf("audio attachment must use input_audio with base64 data and format, got %s", body)
+	}
+	if strings.Contains(body, "input_image") {
+		t.Fatalf("audio attachment must NOT use input_image, got %s", body)
+	}
+}
+
+// TestResponsesToolResultAudioUsesInputAudio: audio attachments in tool
+// results (e.g. read_audio) must also use input_audio, not input_image.
+func TestResponsesToolResultAudioUsesInputAudio(t *testing.T) {
+	req := application.ChatRequest{
+		Model: "test-model",
+		Messages: []application.ChatMessage{
+			{Role: "assistant", ToolCalls: []domain.ToolCall{{ID: "c1", Name: "read_audio", Args: `{}`}}},
+			{Role: "tool", ToolResult: &application.ToolResult{
+				ToolCallID: "c1", Name: "read_audio", Content: "Audio loaded.",
+				Attachments: []domain.Attachment{
+					{Type: "audio", Name: "rec.mp3", MediaType: "audio/mpeg", DataURL: "data:audio/mpeg;base64,//NkxAAAA"},
+				},
+			}},
+		},
+	}
+	body := marshalRequest(t, buildResponsesRequest(req, false))
+	if !containsAll(body, "input_audio", "//NkxAAAA", "mp3") {
+		t.Fatalf("tool result audio must use input_audio, got %s", body)
+	}
+	if strings.Contains(body, "input_image") {
+		t.Fatalf("tool result audio must NOT use input_image, got %s", body)
+	}
+}
+
 func TestResponsesToolResultWithoutAttachmentsStaysString(t *testing.T) {
 	req := application.ChatRequest{
 		Model: "test-model",

@@ -1460,9 +1460,9 @@ type ModelCapabilities struct {
 }
 
 // modelCapabilities resolves the input modalities the given model on the
-// given provider supports. Unknown models (not in catalog) default to all-
-// true to preserve backward compatibility — providers will reject the
-// attachment if unsupported, and the reactive error path handles that.
+// given provider supports. Unknown models (not in catalog) default to
+// Vision=true but Audio=false and Video=false — see domain.ModelCapabilities
+// for rationale.
 func modelCapabilities(provider *domain.Provider, model string) ModelCapabilities {
 	dc := domain.ModelCapabilitiesOf(provider, model)
 	return ModelCapabilities{Vision: dc.Vision, Audio: dc.Audio, Video: dc.Video}
@@ -1561,9 +1561,23 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabil
 			cm := ChatMessage{Role: "assistant", Content: m.Content, Reasoning: m.Reasoning, ToolCalls: m.ToolCalls}
 			out = append(out, cm)
 			for _, tc := range m.ToolCalls {
+				toolContent := wrapToolOutput(tc.Name, tc.Output)
+				toolAtts := tc.OutputAttachments
+				// Filter tool result attachments by model capability.
+				// read_image/read_audio/read_video return media
+				// attachments that are only useful to models that
+				// support the corresponding modality. Sending audio to
+				// a non-audio model causes provider errors (e.g. Nvidia
+				// rejects audio data URLs with "Failed to load image").
+				// Strip unsupported media and append a text note so the
+				// model knows the content exists but can't be delivered
+				// to it directly.
+				if len(toolAtts) > 0 {
+					toolAtts, toolContent = filterToolAttachmentsByCaps(toolAtts, toolContent, caps)
+				}
 				out = append(out, ChatMessage{Role: "tool", ToolResult: &ToolResult{
-					ToolCallID: tc.ID, Name: tc.Name, Content: wrapToolOutput(tc.Name, tc.Output),
-					Attachments: tc.OutputAttachments,
+					ToolCallID: tc.ID, Name: tc.Name, Content: toolContent,
+					Attachments: toolAtts,
 				}})
 			}
 		case domain.RoleSystem:
@@ -1571,6 +1585,47 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabil
 		}
 	}
 	return out
+}
+
+// filterToolAttachmentsByCaps strips media attachments from a tool result
+// when the active model does not support the corresponding modality, and
+// appends a text note to the content so the model knows the media exists
+// but couldn't be delivered. This prevents provider errors when a read_*
+// tool returns media that the model can't process (e.g. audio sent to a
+// non-audio model via image_url transport).
+func filterToolAttachmentsByCaps(atts []domain.Attachment, content string, caps ModelCapabilities) ([]domain.Attachment, string) {
+	if len(atts) == 0 {
+		return atts, content
+	}
+	filtered := make([]domain.Attachment, 0, len(atts))
+	var notes []string
+	for _, att := range atts {
+		switch att.Type {
+		case "image":
+			if !caps.Vision {
+				notes = append(notes, fmt.Sprintf("[Image %q was loaded but cannot be shown to this model. File path: %s]", att.Name, att.FilePath))
+				continue
+			}
+		case "audio":
+			if !caps.Audio {
+				notes = append(notes, fmt.Sprintf("[Audio %q was loaded but cannot be played to this model. File path: %s]", att.Name, att.FilePath))
+				continue
+			}
+		case "video":
+			if !caps.Video {
+				notes = append(notes, fmt.Sprintf("[Video %q was loaded but cannot be shown to this model. File path: %s]", att.Name, att.FilePath))
+				continue
+			}
+		}
+		filtered = append(filtered, att)
+	}
+	if len(notes) > 0 {
+		if content != "" {
+			content += "\n"
+		}
+		content += strings.Join(notes, "\n")
+	}
+	return filtered, content
 }
 
 // omittedPlaceholderFor builds a placeholder that tells the model to call

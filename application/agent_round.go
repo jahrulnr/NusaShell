@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -483,7 +484,7 @@ func (a *App) runOneTool(run *TurnRun, toolCall domain.ToolCall, caps ModelCapab
 			output = "interrupted"
 		} else {
 			status = domain.ToolFailed
-			output = "error: " + err.Error()
+			output = "error: " + truncateToolError(err.Error())
 		}
 	}
 	// Async subagent: the tool returns immediately with "starting" status.
@@ -743,4 +744,20 @@ func (a *App) flushLearningReview(conversationID string, reason string) {
 			})
 		}
 	})
+}
+
+// truncateToolError prevents oversized error messages from wasting tokens
+// when a provider returns an error that embeds base64 media data (e.g.
+// "Failed to load image from data:audio/mpeg;base64,//NkxAAAA..."). Such
+// errors can be 1.5MB+ and pollute the conversation history, causing every
+// subsequent request to fail with HTTP 400. The error is truncated to a
+// reasonable length while preserving the diagnostic prefix.
+const maxToolErrorLen = 2000
+
+func truncateToolError(msg string) string {
+	if len(msg) <= maxToolErrorLen {
+		return msg
+	}
+	return msg[:maxToolErrorLen] + "...[truncated: original error was " +
+		strconv.Itoa(len(msg)) + " chars]"
 }

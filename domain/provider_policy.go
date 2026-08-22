@@ -1,9 +1,12 @@
 package domain
 
 // ModelCapabilities describes which input modalities the active chat model
-// supports. Unknown models (not in catalog) default to all-true to preserve
-// backward compatibility — providers will reject the attachment if
-// unsupported, and the reactive error path handles that.
+// supports. Unknown models (not in catalog) default to Vision=true (common
+// across modern multimodal models) but Audio=false and Video=false (rare
+// capabilities that cause provider errors when sent to models that lack
+// them — e.g. Nvidia rejects audio data URLs with a confusing "Failed to
+// load image" error). Users can add a model to the catalog with Audio=true
+// or Video=true to enable native audio/video input for that model.
 type ModelCapabilities struct {
 	Vision bool // image input
 	Audio  bool // audio input
@@ -11,24 +14,24 @@ type ModelCapabilities struct {
 }
 
 // ModelCapabilities resolves the input modalities the given model on the
-// given provider supports. Unknown models (not in catalog) default to all-
-// true to preserve backward compatibility — providers will reject the
-// attachment if unsupported, and the reactive error path handles that.
+// given provider supports. Unknown models (not in catalog) default to
+// Vision=true but Audio=false and Video=false — see the struct comment for
+// rationale.
 func ModelCapabilitiesOf(provider *Provider, model string) ModelCapabilities {
 	if provider == nil {
-		return ModelCapabilities{Vision: true, Audio: true, Video: true}
+		return ModelCapabilities{Vision: true, Audio: false, Video: false}
 	}
 	m := provider.FindModel(model)
 	if m == nil {
-		return ModelCapabilities{Vision: true, Audio: true, Video: true}
+		return ModelCapabilities{Vision: true, Audio: false, Video: false}
 	}
 	return ModelCapabilities{Vision: m.Vision, Audio: m.Audio, Video: m.Video}
 }
 
 // ModelSupportsVision reports whether the given model on the given provider
 // supports image input. Returns true when the model metadata is unknown
-// (not in catalog) to preserve backward compatibility — providers will
-// reject the image if unsupported, and the reactive error path handles that.
+// (not in catalog) — vision is common enough that defaulting to true is
+// safe; providers reject unsupported images gracefully.
 func ModelSupportsVision(provider *Provider, model string) bool {
 	return ModelCapabilitiesOf(provider, model).Vision
 }

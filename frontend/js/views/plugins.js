@@ -4,9 +4,9 @@
 import { rpc } from '../rpc.js';
 import { el, toast, dialog, confirmDialog } from '../ui.js';
 import { openPluginWindow as launchPluginWindow } from '../plugin-window.js';
-import { hasPluginUI, pluginKind, pluginRowMeta, canAutoUpdate, hasUpdate } from './plugins-model.js';
+import { hasPluginUI, pluginKind, pluginRowMeta, canAutoUpdate, hasUpdate, hasContract } from './plugins-model.js';
 
-export { hasPluginUI, pluginKind, pluginRowMeta, canAutoUpdate, hasUpdate } from './plugins-model.js';
+export { hasPluginUI, pluginKind, pluginRowMeta, canAutoUpdate, hasUpdate, hasContract } from './plugins-model.js';
 
 let servers = [];
 let currentServer = null;
@@ -110,6 +110,7 @@ function renderList() {
       el('div', { class: 'plugin-row-name' },
         el('span', { text: server.name }),
         server.plugin ? el('span', { class: 'plugin-row-badge', text: hasPluginUI(server) ? 'MCP + UI' : 'MCP plugin' }) : null,
+        hasContract(server) ? el('span', { class: 'plugin-row-contract', title: `Usage contract: ${server.contractEntry}`, text: 'contract' }) : null,
       ),
       el('div', { class: 'plugin-row-meta', text: pluginRowMeta(server, kind) }),
       server.tools?.length ? el('div', { class: 'plugin-row-tools' }, server.tools.slice(0, 12).map((tool) => el('span', { class: 'plugin-tool-chip', text: tool.name }))) : null,
@@ -314,6 +315,7 @@ function renderDrawerManifest(server) {
     if (server.category) rows.splice(3, 0, ['category', server.category]);
     if (server.installPath) rows.push(['install path', server.installPath]);
   }
+  if (hasContract(server)) rows.push(['contract', server.contractEntry]);
   info.replaceChildren(...rows.map(([key, value]) => el('div', { class: 'manifest-row' },
     el('span', { class: 'manifest-key', text: key }),
     el('span', { class: 'manifest-val', text: value }),

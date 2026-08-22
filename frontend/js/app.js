@@ -15,6 +15,7 @@ import { initAutomation, refresh as refreshAutomation } from './views/automation
 import { initTelemetry, refresh as refreshTelemetry } from './views/telemetry.js';
 import { toast, dismissOpenDialogs } from './ui.js';
 import { bindShellShortcuts } from './shell-shortcuts.js';
+import { initMobileNav } from './mobile-nav.js';
 
 async function initProviders() {
   await Promise.all([initLlmProviders(), initAcpProviders()]);
@@ -141,6 +142,7 @@ async function boot() {
   setSidebarCompact(compact, false);
   window.nusashell = { ...(window.nusashell || {}), setSidebarCompact };
   window.addEventListener('hashchange', route);
+  initMobileNav();
 
   setConnection('connecting');
   // one transport per function: WS carries BE -> FE event triggers; the FE

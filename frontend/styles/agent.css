@@ -286,6 +286,8 @@
 .agent-message.assistant .agent-bubble ul, .agent-message.assistant .agent-bubble ol { padding-left: 1.45em; }
 .agent-message.assistant .agent-bubble li + li { margin-top: .25em; }
 .agent-message.assistant .agent-bubble code { padding: .1em .35em; border-radius: 4px; background: var(--panel-alt); font-family: var(--font-mono); font-size: .9em; }
+.agent-tool-terminal-input,
+.agent-tool-terminal-output,
 .agent-message.assistant .agent-bubble pre {
   box-sizing: border-box;
   max-width: 100%;

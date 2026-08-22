@@ -172,7 +172,9 @@ func responsesToolOutputContent(result *application.ToolResult) []map[string]any
 	}
 	for _, att := range result.Attachments {
 		switch att.Type {
-		case "image", "audio", "video":
+		case "audio":
+			blocks = append(blocks, aiutil.InputAudioBlock(att))
+		case "image", "video":
 			blocks = append(blocks, map[string]any{"type": "input_image", "image_url": att.DataURL})
 		}
 	}
@@ -188,7 +190,9 @@ func responsesUserContent(message application.ChatMessage) []map[string]any {
 		switch attachment.Type {
 		case "text":
 			blocks = append(blocks, map[string]any{"type": "input_text", "text": aiutil.TextAttachmentContent(attachment)})
-		case "image", "audio", "video":
+		case "audio":
+			blocks = append(blocks, aiutil.InputAudioBlock(attachment))
+		case "image", "video":
 			blocks = append(blocks, map[string]any{"type": "input_image", "image_url": attachment.DataURL})
 		case "file":
 			blocks = append(blocks, map[string]any{

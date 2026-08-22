@@ -28,3 +28,10 @@ export function canAutoUpdate(server) {
 export function hasUpdate(server) {
   return Boolean(server?.updateAvailable);
 }
+
+// hasContract reports whether a plugin declares an agent-facing usage
+// contract (manifest contract.entry), driving the Plugins-row badge and
+// the drawer manifest line.
+export function hasContract(server) {
+  return Boolean(server?.contractEntry);
+}

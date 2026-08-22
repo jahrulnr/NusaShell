@@ -278,9 +278,9 @@ type Settings struct {
 	UserPrompt string `json:"user_prompt,omitempty"`
 	// PluginContractMode controls how mcp_call treats plugins that declare a
 	// contract (contract.entry in manifest.json). "off" never gates; "hint"
-	// attaches an advisory note to the first call per conversation;
-	// "require" (factory default) rejects calls until contract_read ran for
-	// that plugin in the same conversation.
+	// (factory default) attaches an advisory note to the first call per
+	// conversation; "require" is an opt-in strict mode that rejects calls
+	// until contract_read ran for that plugin in the same conversation.
 	PluginContractMode string `json:"plugin_contract_mode,omitempty"`
 }
 
@@ -301,7 +301,7 @@ func DefaultSettings() Settings {
 		MaxAutoContinues:           DefaultMaxAutoContinues,
 		SoundNotifications:         true,
 		RepeatedToolLimit:          3,
-		PluginContractMode:         PluginContractRequire,
+		PluginContractMode:         PluginContractHint,
 	}
 }
 
@@ -355,8 +355,9 @@ func NormalizeSettings(settings Settings) Settings {
 	if settings.RepeatedToolLimit < 0 {
 		settings.RepeatedToolLimit = DefaultSettings().RepeatedToolLimit
 	}
-	// PluginContractMode: empty = factory default (require). Unknown values
-	// fall back to require so a typo can't silently disable the gate.
+	// PluginContractMode: empty/unknown falls back to the factory default
+	// (now hint). Unknown values fall back to the factory default so a typo
+	// can't silently disable the gate.
 	switch settings.PluginContractMode {
 	case PluginContractOff, PluginContractHint, PluginContractRequire:
 	default:

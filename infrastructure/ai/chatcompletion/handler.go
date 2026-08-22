@@ -158,10 +158,11 @@ func toOpenAIMessages(req application.ChatRequest) []openAIMessage {
 
 // openAIToolContent builds a multimodal content array for tool results that
 // carry image/audio/video attachments (e.g. read_image, read_audio,
-// read_video). The text content comes first, followed by image_url blocks
-// for each attachment. Audio and video use the same image_url transport
-// with data URLs — gateways like OpenRouter route these to Gemini's native
-// multimodal input based on the MIME type in the data URL.
+// read_video). Images and video use the image_url transport with data URLs
+// (OpenRouter-style gateways route them by MIME type); audio uses the
+// standard Chat Completions input_audio block (base64 + format) — sending
+// audio through image_url makes strict endpoints like Nvidia NIM reject it
+// with "Failed to load image from data:audio/mpeg".
 func openAIToolContent(result *application.ToolResult) []map[string]any {
 	blocks := make([]map[string]any, 0, 1+len(result.Attachments))
 	if result.Content != "" {
@@ -169,7 +170,9 @@ func openAIToolContent(result *application.ToolResult) []map[string]any {
 	}
 	for _, att := range result.Attachments {
 		switch att.Type {
-		case "image", "audio", "video":
+		case "audio":
+			blocks = append(blocks, inputAudioBlock(att))
+		case "image", "video":
 			blocks = append(blocks, map[string]any{
 				"type":      "image_url",
 				"image_url": map[string]any{"url": att.DataURL},
@@ -188,9 +191,11 @@ func openAIUserContent(message application.ChatMessage) []map[string]any {
 		switch attachment.Type {
 		case "text":
 			blocks = append(blocks, map[string]any{"type": "text", "text": aiutil.TextAttachmentContent(attachment)})
-		case "image", "audio", "video":
+		case "audio":
+			blocks = append(blocks, inputAudioBlock(attachment))
+		case "image", "video":
 			// image_url is the universal multimodal transport for OpenAI-
-			// compatible endpoints. Gateways route audio/video data URLs
+			// compatible endpoints. Gateways route video data URLs
 			// to providers that support them (e.g. Gemini via OpenRouter).
 			blocks = append(blocks, map[string]any{
 				"type":      "image_url",
@@ -203,6 +208,13 @@ func openAIUserContent(message application.ChatMessage) []map[string]any {
 		}
 	}
 	return blocks
+}
+
+// inputAudioBlock encodes an audio attachment as the Chat Completions
+// input_audio part. Delegates to aiutil.InputAudioBlock which is shared
+// with the Responses API handler.
+func inputAudioBlock(att domain.Attachment) map[string]any {
+	return aiutil.InputAudioBlock(att)
 }
 
 func openAITools(tools []application.ToolDef) []openAITool {

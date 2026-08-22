@@ -266,14 +266,14 @@ func TestGateAdHocContextUsesSharedBucket(t *testing.T) {
 	}
 }
 
-func TestGateDefaultsToRequireWithoutSettings(t *testing.T) {
+func TestGateDefaultsToHintWithoutSettings(t *testing.T) {
 	p := contractTestPlugin(t, "p1", "CONTRACT.md", "rules")
 	tb := testToolbox(nil, []*domain.Plugin{p}, connectedStub("p1", "ping"))
-	if tb.contractMode() != domain.PluginContractRequire {
-		t.Fatal("nil settings must fail safe to require")
+	if tb.contractMode() != domain.PluginContractHint {
+		t.Fatal("nil settings must default to hint")
 	}
-	if _, err := callRef(tb, "c1", "p1:ping"); err == nil {
-		t.Fatal("default mode must gate")
+	if _, err := callRef(tb, "c1", "p1:ping"); err != nil {
+		t.Fatalf("default mode must not gate: %v", err)
 	}
 }
 

@@ -61,6 +61,16 @@
   letter-spacing: .05em;
   text-transform: uppercase;
 }
+.plugin-row-contract {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
 .plugin-row-meta { margin-top: 2px; color: var(--text-faint); font: 11.5px var(--font-mono); overflow-wrap: anywhere; }
 .plugin-row-tools { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .plugin-tool-chip { padding: 2px 6px; border-radius: 4px; background: #142238; color: #63a5ff; font: 8.5px var(--font-mono); }

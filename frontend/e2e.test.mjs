@@ -134,12 +134,29 @@ function installBrowserGlobals(dom, baseURL) {
 // Non-streaming requests (used by compaction) return the configured
 // completeText; streaming requests return the next script from the queue.
 //
+// Stub queues are separated per consumer role so background subsystems
+// cannot steal each other's scripted replies:
+//   - compaction: non-streaming requests advertising tools:["summary"]
+//     -> completeText (must satisfy the backend quality guard:
+//     summaries shorter than compactionSummaryMinChars (200) are retried
+//     and ultimately fail the turn with EventCompactionFailed).
+//   - autolearn review agent: streaming requests advertising
+//     tools:["review_transcript"] -> reviewScripts queue.
+//   - main chat: every other streaming request -> scripts queue.
+const LONG_COMPACTION_SUMMARY = 'SUMMARY: user explored compaction e2e test. '
+  + 'They seeded four large turns about Go concurrency, verified token estimates, '
+  + 'and confirmed the rolling summarizer folds each chunk into a running checkpoint. ';
+//
 // Script step shape: { text, reasoning, toolCall: { id, name, arguments } }
 // When sendDone is false, the stream closes without `data: [DONE]` to
 // simulate an incomplete SSE stream (BH-AI-01).
 function fakeLLM(port) {
   let completeText = 'compaction summary: user likes Go.';
   let scripts = [];
+  // Autolearn review-agent scripts live in their own queue: the review
+  // agent fires concurrently with compaction/post-compaction turns and
+  // used to pop from `scripts`, racing the main chat for the next stub.
+  let reviewScripts = [];
   let sendDone = true;
   // requests captures every parsed chat/completions request body alongside
   // whether it was a streaming request. Used by hydration E2E tests to
@@ -172,8 +189,11 @@ function fakeLLM(port) {
           }));
           return;
         }
-        // Streaming: pop next script, default to a short reply.
-        const steps = scripts.shift() || [{ text: 'ok' }];
+        // Streaming: route by consumer role so background subsystems
+        // cannot steal each other's scripted replies.
+        const toolNames = new Set((parsed.tools || []).map((t) => t?.function?.name));
+        const pool = toolNames.has('review_transcript') ? reviewScripts : scripts;
+        const steps = pool.shift() || [{ text: 'ok' }];
         res.writeHead(200, { 'Content-Type': 'text/event-stream' });
         for (const step of steps) {
           const delta = {};
@@ -204,6 +224,7 @@ function fakeLLM(port) {
     server,
     setComplete: (text) => { completeText = text; },
     setScripts: (s) => { scripts = s; },
+    setReviewScripts: (s) => { reviewScripts = s; },
     setSendDone: (v) => { sendDone = v; },
     requests: () => requests,
     url: `http://127.0.0.1:${port}`,
@@ -372,7 +393,7 @@ test('compaction triggers and renders a marker when conversation exceeds thresho
     await rpcModule.rpc('settings.set', { max_input_tokens: 1000, compaction_enabled: true });
 
     // Set the compaction summary response.
-    llm.setComplete('SUMMARY: user explored compaction e2e test.');
+    llm.setComplete(LONG_COMPACTION_SUMMARY);
     llm.setScripts([[{ text: 'Turn after compaction.' }]]);
 
     // Trigger compaction with a new user message.
@@ -843,7 +864,7 @@ test('HYDR-POST-COMPACTION: turn after compaction re-injects the hydration trans
     await rpcModule.rpc('settings.set', { max_input_tokens: 1000, compaction_enabled: true });
 
     // Set the compaction summary response (non-streaming).
-    llm.setComplete('SUMMARY: user was testing compaction hydration.');
+    llm.setComplete(LONG_COMPACTION_SUMMARY);
     // Set the streaming reply for the post-compaction turn.
     llm.setScripts([[{ text: 'Turn after compaction with hydration.' }]]);
 

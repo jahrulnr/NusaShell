@@ -19,8 +19,48 @@
   .agent-header { padding-inline: 16px; }
 }
 
+/* Off-canvas navigation drawer (<=680px): the sidebar leaves normal flow
+ * and slides in over the content when js/mobile-nav.js sets
+ * .body.is-nav-open. Drawer rules are scoped under .window so they win
+ * the cascade against the parity overlay's own narrow-screen sidebar
+ * hiding. The hamburger lives in the title bar and stays hidden on wide
+ * screens where the sidebar is always visible. */
+.mobile-nav-toggle { display: none; }
+
 @media (max-width: 680px) {
-  .sidebar { display: none; }
+  .mobile-nav-toggle { display: inline-flex; }
+  .window .sidebar {
+    display: flex;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 60;
+    width: min(78vw, 264px);
+    min-width: 0;
+    transform: translateX(-105%);
+    transition: transform .22s ease;
+  }
+  /* Compact mode persists across breakpoints; the drawer always shows the
+   * wide labeled variant regardless of the stored preference. */
+  .window .sidebar.is-compact { width: min(78vw, 264px); }
+  .window .sidebar .nav-label { display: inline; }
+  .window .sidebar .storage { display: block; }
+  .body.is-nav-open .sidebar {
+    transform: translateX(0);
+    box-shadow: 0 0 40px rgba(0, 0, 0, .5);
+  }
+  .mobile-nav-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(0, 0, 0, .45);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s;
+  }
+  .body.is-nav-open .mobile-nav-backdrop { opacity: 1; pointer-events: auto; }
+
   .titlebar { padding-inline: 13px; }
   .content { overflow-y: auto; }
   .agent-header { padding: 16px 12px 0; }

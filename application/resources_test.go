@@ -39,6 +39,28 @@ func TestPluginToDTOSurfacesPreferences(t *testing.T) {
 	}
 }
 
+// pluginToDTO must surface the declared usage-contract entry so the Plugins
+// view can badge contract-declaring plugins and show the entry in the drawer.
+func TestPluginToDTOSurfacesContractEntry(t *testing.T) {
+	with := &domain.Plugin{Manifest: domain.PluginManifest{
+		ID: "nusashell.files", Name: "Files", Version: "2.1.3", Icon: "📂",
+		MCP:      domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "mcp/server"},
+		Contract: &domain.PluginContractConfig{Entry: "CONTRACT.md"},
+	}}
+	dto := pluginToDTO(with)
+	if dto.ContractEntry != "CONTRACT.md" {
+		t.Errorf("ContractEntry = %q, want CONTRACT.md", dto.ContractEntry)
+	}
+
+	without := &domain.Plugin{Manifest: domain.PluginManifest{
+		ID: "plugin_x", Name: "X", Version: "0.1.0", Icon: "🧩",
+		MCP: domain.PluginMCPConfig{Transport: domain.PluginTransportStdio, Command: "npx"},
+	}}
+	if got := pluginToDTO(without).ContractEntry; got != "" {
+		t.Errorf("ContractEntry = %q, want empty for contract-less plugin", got)
+	}
+}
+
 // A manual stdio MCP server (no UI) is not a plugin by default; the list
 // handler upgrades Plugin/Catalog only when the id is in the catalog.
 func TestPluginToDTOManualServerIsNotPluginByDefault(t *testing.T) {

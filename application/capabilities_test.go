@@ -7,18 +7,30 @@ import (
 	"nusashell/domain"
 )
 
-func TestModelCapabilitiesUnknownModelDefaultsAllTrue(t *testing.T) {
+func TestModelCapabilitiesUnknownModelDefaultsVisionOnly(t *testing.T) {
 	provider := &domain.Provider{ID: "p1", Models: nil}
 	caps := modelCapabilities(provider, "unknown-model")
-	if !caps.Vision || !caps.Audio || !caps.Video {
-		t.Errorf("unknown model should default to all-true, got %+v", caps)
+	if !caps.Vision {
+		t.Errorf("unknown model should default Vision=true, got %+v", caps)
+	}
+	if caps.Audio {
+		t.Errorf("unknown model should default Audio=false (rare capability, causes provider errors), got %+v", caps)
+	}
+	if caps.Video {
+		t.Errorf("unknown model should default Video=false (rare capability, causes provider errors), got %+v", caps)
 	}
 }
 
-func TestModelCapabilitiesNilProviderDefaultsAllTrue(t *testing.T) {
+func TestModelCapabilitiesNilProviderDefaultsVisionOnly(t *testing.T) {
 	caps := modelCapabilities(nil, "any")
-	if !caps.Vision || !caps.Audio || !caps.Video {
-		t.Errorf("nil provider should default to all-true, got %+v", caps)
+	if !caps.Vision {
+		t.Errorf("nil provider should default Vision=true, got %+v", caps)
+	}
+	if caps.Audio {
+		t.Errorf("nil provider should default Audio=false, got %+v", caps)
+	}
+	if caps.Video {
+		t.Errorf("nil provider should default Video=false, got %+v", caps)
 	}
 }
 
@@ -128,5 +140,69 @@ func TestChatMessagesAudioKeptForAudioModel(t *testing.T) {
 	}
 	if len(userMsg.Attachments) != 1 || userMsg.Attachments[0].Type != "audio" {
 		t.Errorf("audio attachment should be kept for audio-capable model, got %d attachments", len(userMsg.Attachments))
+	}
+}
+
+// TestFilterToolAttachmentsByCapsStripsAudio: a non-audio model should not
+// receive audio attachments from tool results (e.g. read_audio). The audio
+// should be stripped and replaced with a text note.
+func TestFilterToolAttachmentsByCapsStripsAudio(t *testing.T) {
+	atts := []domain.Attachment{
+		{Type: "audio", Name: "recording.mp3", FilePath: "/tmp/rec.mp3"},
+	}
+	filtered, content := filterToolAttachmentsByCaps(atts, "Audio loaded.", ModelCapabilities{})
+	if len(filtered) != 0 {
+		t.Errorf("audio should be stripped for non-audio model, got %d attachments", len(filtered))
+	}
+	if !strings.Contains(content, "cannot be played") {
+		t.Errorf("content should note audio can't be played, got: %q", content)
+	}
+	if !strings.Contains(content, "/tmp/rec.mp3") {
+		t.Errorf("content should include file path, got: %q", content)
+	}
+}
+
+// TestFilterToolAttachmentsByCapsKeepsAudioForAudioModel: an audio-capable
+// model should receive audio attachments from tool results unchanged.
+func TestFilterToolAttachmentsByCapsKeepsAudioForAudioModel(t *testing.T) {
+	atts := []domain.Attachment{
+		{Type: "audio", Name: "recording.mp3", FilePath: "/tmp/rec.mp3"},
+	}
+	filtered, content := filterToolAttachmentsByCaps(atts, "Audio loaded.", ModelCapabilities{Audio: true})
+	if len(filtered) != 1 || filtered[0].Type != "audio" {
+		t.Errorf("audio should be kept for audio-capable model, got %d attachments", len(filtered))
+	}
+	if strings.Contains(content, "cannot be played") {
+		t.Errorf("content should not note audio can't be played, got: %q", content)
+	}
+}
+
+// TestFilterToolAttachmentsByCapsStripsVideo: a non-video model should not
+// receive video attachments from tool results.
+func TestFilterToolAttachmentsByCapsStripsVideo(t *testing.T) {
+	atts := []domain.Attachment{
+		{Type: "video", Name: "clip.mp4", FilePath: "/tmp/clip.mp4"},
+	}
+	filtered, content := filterToolAttachmentsByCaps(atts, "Video loaded.", ModelCapabilities{})
+	if len(filtered) != 0 {
+		t.Errorf("video should be stripped for non-video model, got %d attachments", len(filtered))
+	}
+	if !strings.Contains(content, "cannot be shown") {
+		t.Errorf("content should note video can't be shown, got: %q", content)
+	}
+}
+
+// TestFilterToolAttachmentsByCapsKeepsImageForVisionModel: a vision-capable
+// model should receive image attachments from tool results unchanged.
+func TestFilterToolAttachmentsByCapsKeepsImageForVisionModel(t *testing.T) {
+	atts := []domain.Attachment{
+		{Type: "image", Name: "photo.png", FilePath: "/tmp/photo.png"},
+	}
+	filtered, content := filterToolAttachmentsByCaps(atts, "Image loaded.", ModelCapabilities{Vision: true})
+	if len(filtered) != 1 || filtered[0].Type != "image" {
+		t.Errorf("image should be kept for vision-capable model, got %d attachments", len(filtered))
+	}
+	if strings.Contains(content, "cannot be shown") {
+		t.Errorf("content should not note image can't be shown, got: %q", content)
 	}
 }

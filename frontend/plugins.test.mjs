@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
-import { hasPluginUI, pluginKind, canAutoUpdate, hasUpdate } from './js/views/plugins-model.js';
+import { hasPluginUI, pluginKind, canAutoUpdate, hasUpdate, hasContract } from './js/views/plugins-model.js';
 
 const html = await readFile(new URL('./index.html', import.meta.url), 'utf8');
 
@@ -36,6 +36,13 @@ test('Update availability is driven by the updateAvailable version', () => {
   assert.equal(hasUpdate({ updateAvailable: '1.4.0' }), true);
   assert.equal(hasUpdate({ updateAvailable: '' }), false);
   assert.equal(hasUpdate({}), false);
+});
+
+test('Usage contract badge is driven by the contractEntry DTO field', () => {
+  assert.equal(hasContract({ contractEntry: 'CONTRACT.md' }), true);
+  assert.equal(hasContract({ contractEntry: 'docs/RULES.md' }), true);
+  assert.equal(hasContract({}), false);
+  assert.equal(hasContract({ contractEntry: '' }), false);
 });
 
 test('Plugin drawer exposes autostart, auto-update, and a manual update button', () => {

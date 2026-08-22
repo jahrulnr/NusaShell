@@ -409,7 +409,6 @@ summary { outline: none; }
 .agent-tool-terminal[open] .agent-tool-terminal-chevron { transform: rotate(180deg); }
 .agent-tool-terminal-body { display: grid; gap: 8px; margin: 2px 0 8px; padding: 0 0 2px 14px; font-size: 11px; }
 .agent-tool-terminal:not([open]) > .agent-tool-terminal-body { display: none; }
-.agent-tool-terminal-panel { border: 1px solid #263b52; border-radius: 10px; padding: 8px 10px 10px; background: #09111d; }
 .agent-tool-terminal-panel-label { 
   font: 10px/1 var(--font-sans);
   font-weight: bolder; 

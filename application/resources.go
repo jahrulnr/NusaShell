@@ -212,6 +212,8 @@ func pluginToDTO(p *domain.Plugin) contracts.PluginDTO {
 		HasUI:       p.HasUI,
 		InstallPath: p.InstallPath,
 		Autostart:   p.Manifest.MCP.Autostart,
+		// Usage-contract declaration for the Plugins-view badge/drawer.
+		ContractEntry: p.Manifest.ContractEntry(),
 		AutoUpdate:  p.Manifest.AutoUpdate,
 		// Baseline: anything exposing a UI is a plugin. handlePluginList
 		// upgrades this (and Catalog) using catalog membership.

@@ -130,16 +130,17 @@ func (t *Toolbox) gate() *contractGate {
 }
 
 // contractMode resolves the effective enforcement mode. Missing settings or
-// unknown values fall back to require so a typo can't disable the gate.
+// unknown values fall back to the factory default (hint) so a typo can't
+// silently disable the gate.
 func (t *Toolbox) contractMode() string {
 	if t.Settings == nil {
-		return domain.PluginContractRequire
+		return domain.PluginContractHint
 	}
 	switch s := t.Settings.Get().PluginContractMode; s {
 	case domain.PluginContractOff, domain.PluginContractHint, domain.PluginContractRequire:
 		return s
 	default:
-		return domain.PluginContractRequire
+		return domain.PluginContractHint
 	}
 }
 

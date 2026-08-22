@@ -56,3 +56,32 @@ func TestBuildPromptCachePolicyStableForSameInputs(t *testing.T) {
 		t.Errorf("cache key should differ for different conversation: %q vs %q", a.Key, c.Key)
 	}
 }
+
+func TestTruncateToolErrorShortMessage(t *testing.T) {
+	msg := "error: something went wrong"
+	if got := truncateToolError(msg); got != msg {
+		t.Errorf("short error should be unchanged, got %q", got)
+	}
+}
+
+func TestTruncateToolErrorLongMessage(t *testing.T) {
+	// Simulate a provider error that embeds base64 audio data (1.5MB+)
+	msg := "error: Failed to load image from data:audio/mpeg;base64,//Nkx" + strings.Repeat("A", 2000000)
+	got := truncateToolError(msg)
+	if len(got) > maxToolErrorLen+100 {
+		t.Errorf("truncated error should be ~%d chars, got %d", maxToolErrorLen+100, len(got))
+	}
+	if !strings.HasPrefix(got, "error: Failed to load image") {
+		t.Errorf("truncated error should preserve diagnostic prefix, got %q", got[:100])
+	}
+	if !strings.Contains(got, "[truncated:") {
+		t.Errorf("truncated error should note truncation, got %q", got[len(got)-100:])
+	}
+}
+
+func TestTruncateToolErrorExactLimit(t *testing.T) {
+	msg := strings.Repeat("x", maxToolErrorLen)
+	if got := truncateToolError(msg); got != msg {
+		t.Errorf("error at exact limit should be unchanged, got len %d", len(got))
+	}
+}

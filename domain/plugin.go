@@ -96,9 +96,9 @@ type PluginManifest struct {
 	Description  string            `json:"description,omitempty"`
 	Category     string            `json:"category,omitempty"`
 	AutoUpdate   bool              `json:"autoUpdate,omitempty"`
-	UI           *PluginUIConfig       `json:"ui,omitempty"`
-	MCP          PluginMCPConfig       `json:"mcp"`
-	Dependencies map[string]string     `json:"dependencies,omitempty"`
+	UI           *PluginUIConfig   `json:"ui,omitempty"`
+	MCP          PluginMCPConfig   `json:"mcp"`
+	Dependencies map[string]string `json:"dependencies,omitempty"`
 	// Contract optionally declares an agent-facing usage contract file.
 	Contract *PluginContractConfig `json:"contract,omitempty"`
 }

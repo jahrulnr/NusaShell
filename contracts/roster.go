@@ -868,8 +868,11 @@ type PluginDTO struct {
 	Tools           []MCPToolDTO       `json:"tools,omitempty"`
 	AutoUpdate      bool               `json:"autoUpdate"`
 	UpdateAvailable string             `json:"updateAvailable,omitempty"` // catalog version when newer
-	Autostart       bool               `json:"autostart"`
-	Manifest        *PluginManifestDTO `json:"manifest,omitempty"`
+	Autostart bool               `json:"autostart"`
+	// ContractEntry is the plugin-relative usage-contract file declared in
+	// the manifest (contract.entry). Empty when the plugin declares none.
+	ContractEntry string             `json:"contractEntry,omitempty"`
+	Manifest      *PluginManifestDTO `json:"manifest,omitempty"`
 }
 
 type PluginManifestDTO struct {
