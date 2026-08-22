@@ -315,3 +315,46 @@ func TestRecoverAbandonedTurnMarksInFlightAssistant(t *testing.T) {
 		t.Fatal("idle conversation should not recover again")
 	}
 }
+
+func TestRecoverOrphanedTurnUsesCustomReason(t *testing.T) {
+	c := &Conversation{
+		ID:     "conv_orphan",
+		Status: "running",
+		Messages: []Message{
+			{ID: "u1", Role: RoleUser, Content: "hello", Status: StatusDone},
+			{ID: "a1", Role: RoleAssistant, Content: "", Status: ""},
+			{ID: "a0", Role: RoleAssistant, Content: "earlier", Status: StatusDone},
+		},
+	}
+	if !c.RecoverOrphanedTurn("turn interrupted: agent panic") {
+		t.Fatal("expected recovery of orphaned running conversation")
+	}
+	if c.Status != "idle" {
+		t.Fatalf("status = %q, want idle", c.Status)
+	}
+	if c.Messages[1].Status != StatusInterrupted {
+		t.Fatalf("in-flight assistant status = %q, want interrupted", c.Messages[1].Status)
+	}
+	if c.Messages[1].Error != "turn interrupted: agent panic" {
+		t.Fatalf("error = %q, want custom reason", c.Messages[1].Error)
+	}
+	if c.Messages[2].Status != StatusDone {
+		t.Fatalf("completed assistant should stay done, got %q", c.Messages[2].Status)
+	}
+}
+
+func TestRecoverOrphanedTurnDefaultsReasonWhenEmpty(t *testing.T) {
+	c := &Conversation{
+		ID:     "conv_orphan2",
+		Status: "running",
+		Messages: []Message{
+			{ID: "a1", Role: RoleAssistant, Content: "", Status: ""},
+		},
+	}
+	if !c.RecoverOrphanedTurn("") {
+		t.Fatal("expected recovery")
+	}
+	if c.Messages[0].Error != OrphanedTurnError {
+		t.Fatalf("error = %q, want default OrphanedTurnError", c.Messages[0].Error)
+	}
+}

@@ -158,6 +158,27 @@ const AbandonedTurnError = "turn interrupted: server restarted while the turn wa
 // into idle and marks unfinished assistant work as interrupted. Returns true
 // when the conversation was mutated and should be persisted.
 func (c *Conversation) RecoverAbandonedTurn() bool {
+	return c.recoverRunningTurn(AbandonedTurnError)
+}
+
+// OrphanedTurnError is stored on in-flight assistant messages when a turn
+// exits without a terminal state (e.g. panic recovered by goSafe) while the
+// process is still running. The conversation is returned to idle so the user
+// is not permanently blocked.
+const OrphanedTurnError = "turn interrupted: agent exited unexpectedly without completing"
+
+// RecoverOrphanedTurn is like RecoverAbandonedTurn but uses a custom reason
+// for the error message. Used when a turn exits without a terminal state
+// (panic, early return) while the process is still running, so the
+// conversation is not left permanently stuck in "running".
+func (c *Conversation) RecoverOrphanedTurn(reason string) bool {
+	if reason == "" {
+		reason = OrphanedTurnError
+	}
+	return c.recoverRunningTurn(reason)
+}
+
+func (c *Conversation) recoverRunningTurn(reason string) bool {
 	if c == nil || c.Status != "running" {
 		return false
 	}
@@ -171,7 +192,7 @@ func (c *Conversation) RecoverAbandonedTurn() bool {
 		if m.Status == "" || interruptedTools {
 			m.Status = StatusInterrupted
 			if m.Error == "" {
-				m.Error = AbandonedTurnError
+				m.Error = reason
 			}
 		}
 	}

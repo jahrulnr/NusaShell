@@ -432,10 +432,19 @@ func (a *Adapter) Stream(ctx context.Context, req application.ChatRequest, onDel
 		case "response.completed":
 			completed = true
 			if frame.Response != nil {
+				// Normalize: Codex (OpenAI Responses-style) reports
+				// input_tokens as the TOTAL prompt (uncached + cached).
+				// Subtract cached_tokens so InputTokens is the UNCACHED
+				// input, matching the Anthropic convention.
+				cached := frame.Response.Usage.InputTokensDetails.CachedTokens
+				uncached := frame.Response.Usage.InputTokens - cached
+				if uncached < 0 {
+					uncached = 0
+				}
 				result.Usage = application.ChatUsage{
-					InputTokens:  frame.Response.Usage.InputTokens,
+					InputTokens:  uncached,
 					OutputTokens: frame.Response.Usage.OutputTokens,
-					CacheRead:    frame.Response.Usage.InputTokensDetails.CachedTokens,
+					CacheRead:    cached,
 					CacheWrite:   frame.Response.Usage.InputTokensDetails.CacheWriteTokens,
 				}
 			}

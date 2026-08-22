@@ -24,6 +24,11 @@ test('Agent uses the Electron workspace shell without unsupported Todo UI', () =
   // refactor, so assert on the elements the UI actually uses.
   assert.match(html, /id="agent-todo-strip-count"/);
   assert.match(html, /id="agent-todo-strip-meta"/);
+  // The brief is a Markdown document (## Objective, ## Done when, …) and must
+  // render as parsed HTML, not raw text. A <div> container is required because
+  // block-level Markdown (<p>, <h2>, <ul>) is invalid inside a <p>.
+  assert.match(html, /<div class="agent-todo-strip-brief" id="agent-todo-strip-brief" hidden><\/div>/);
+  assert.match(agentView, /briefEl\.innerHTML = renderMarkdown\(brief\.trim\(\)\)/);
   const tabletRules = parityCSS.slice(
     parityCSS.indexOf('@media (max-width: 900px)'),
     parityCSS.indexOf('@media (max-width: 760px)'),

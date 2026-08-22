@@ -29,6 +29,44 @@ func TestRPCUnknownMethod(t *testing.T) {
 	}
 }
 
+func TestRPCQueryEventOverridesMethod(t *testing.T) {
+	h := newHarness(t, nil)
+	// The ?event query string is an audit aid for the browser Network tab;
+	// it must be able to tag the request even when the body method is
+	// generic (as older clients send). Unknown method still errors, proving
+	// the query value actually drives dispatch.
+	body := `{"method":"generic.placeholder","payload":{}}`
+	req, err := http.NewRequest(http.MethodPost, h.server.URL+"/rpc?event=app.info", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var res contracts.Response
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("rpc failed: %+v", res.Error)
+	}
+	var info struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(res.Result, &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.Name != "NusaShell" {
+		t.Fatalf("name = %q, want NusaShell", info.Name)
+	}
+}
+
 func TestRPCMalformedBody(t *testing.T) {
 	h := newHarness(t, nil)
 	resp, err := http.Post(h.server.URL+"/rpc", "application/json", strings.NewReader("{not json"))

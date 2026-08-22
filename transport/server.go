@@ -64,6 +64,13 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, contracts.ErrResult(contracts.CodeValidation, "malformed request body"))
 		return
 	}
+	// Audit aid: accept the method as ?event=<method> so the browser
+	// Network tab shows which RPC call each /rpc request performs. The
+	// query value wins when both are present; clients that send only the
+	// body method are unaffected.
+	if ev := r.URL.Query().Get("event"); ev != "" {
+		req.Method = ev
+	}
 	start := time.Now()
 	result, rpcErr := s.App.Dispatch(r.Context(), req.Method, req.Payload)
 	if rpcErr != nil {

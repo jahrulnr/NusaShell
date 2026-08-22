@@ -880,3 +880,147 @@ func TestCompactionStripsToolOutputImageAttachments(t *testing.T) {
 		}
 	}
 }
+
+func TestHealOrphanedRunningConversationHealsGhost(t *testing.T) {
+	conv := &domain.Conversation{
+		ID:     "c1",
+		Status: "running",
+		Messages: []domain.Message{
+			{ID: "u1", Role: domain.RoleUser, Content: "hi", Status: domain.StatusDone},
+			{ID: "a1", Role: domain.RoleAssistant, Content: "", Status: ""},
+		},
+	}
+	app := &App{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		runs:          map[string]*TurnRun{},
+	}
+	if !app.healOrphanedRunningConversation(conv) {
+		t.Fatal("expected orphaned conversation to be healed")
+	}
+	if conv.Status != "idle" {
+		t.Fatalf("status = %q, want idle", conv.Status)
+	}
+	if conv.Messages[1].Status != domain.StatusInterrupted {
+		t.Fatalf("ghost message status = %q, want interrupted", conv.Messages[1].Status)
+	}
+}
+
+func TestHealOrphanedRunningConversationSkipsWhenRunActive(t *testing.T) {
+	conv := &domain.Conversation{
+		ID:     "c1",
+		Status: "running",
+		Messages: []domain.Message{
+			{ID: "a1", Role: domain.RoleAssistant, Content: "", Status: ""},
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	app := &App{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		runs: map[string]*TurnRun{
+			"r1": {ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel},
+		},
+	}
+	if app.healOrphanedRunningConversation(conv) {
+		t.Fatal("should not heal when a run is active")
+	}
+	if conv.Status != "running" {
+		t.Fatalf("status = %q, want running (untouched)", conv.Status)
+	}
+}
+
+func TestHealOrphanedRunningConversationSkipsIdle(t *testing.T) {
+	conv := &domain.Conversation{
+		ID:     "c1",
+		Status: "idle",
+		Messages: []domain.Message{
+			{ID: "a1", Role: domain.RoleAssistant, Content: "done", Status: domain.StatusDone},
+		},
+	}
+	app := &App{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		runs:          map[string]*TurnRun{},
+	}
+	if app.healOrphanedRunningConversation(conv) {
+		t.Fatal("should not heal an idle conversation")
+	}
+}
+
+func TestRecoverOrphanedTurnHealsAndEmitsError(t *testing.T) {
+	conv := &domain.Conversation{
+		ID:     "c1",
+		Status: "running",
+		Messages: []domain.Message{
+			{ID: "u1", Role: domain.RoleUser, Content: "hi", Status: domain.StatusDone},
+			{ID: "a1", Role: domain.RoleAssistant, Content: "", Status: ""},
+		},
+	}
+	app := &App{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		runs:          map[string]*TurnRun{},
+	}
+	_, events, unsub := app.Bus.Subscribe()
+	defer unsub()
+	ctx, cancel := context.WithCancel(context.Background())
+	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
+
+	app.recoverOrphanedTurn(run)
+
+	if conv.Status != "idle" {
+		t.Fatalf("status = %q, want idle", conv.Status)
+	}
+	if conv.Messages[1].Status != domain.StatusInterrupted {
+		t.Fatalf("ghost message status = %q, want interrupted", conv.Messages[1].Status)
+	}
+	if conv.Messages[1].Error != domain.OrphanedTurnError {
+		t.Fatalf("error = %q, want OrphanedTurnError", conv.Messages[1].Error)
+	}
+	gotError := false
+	for i := 0; i < 8; i++ {
+		select {
+		case ev := <-events:
+			if ev.Type == contracts.EventTurnError {
+				gotError = true
+			}
+		default:
+			i = 8
+		}
+	}
+	if !gotError {
+		t.Fatal("expected EventTurnError to be emitted")
+	}
+}
+
+func TestRecoverOrphanedTurnSkipsIdleConversation(t *testing.T) {
+	conv := &domain.Conversation{
+		ID:     "c1",
+		Status: "idle",
+		Messages: []domain.Message{
+			{ID: "a1", Role: domain.RoleAssistant, Content: "done", Status: domain.StatusDone},
+		},
+	}
+	app := &App{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		runs:          map[string]*TurnRun{},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
+
+	app.recoverOrphanedTurn(run)
+
+	if conv.Status != "idle" {
+		t.Fatalf("status = %q, want idle (unchanged)", conv.Status)
+	}
+	if conv.Messages[0].Status != domain.StatusDone {
+		t.Fatalf("message status = %q, want done (unchanged)", conv.Messages[0].Status)
+	}
+}

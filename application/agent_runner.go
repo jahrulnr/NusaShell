@@ -47,8 +47,11 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
-	if c.Status == "running" || a.activeRunForConversation(c.ID) != nil {
-		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "conversation is busy; stop the running turn first"}
+	if c.Status == "running" {
+		if a.activeRunForConversation(c.ID) != nil {
+			return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "conversation is busy; stop the running turn first"}
+		}
+		a.healOrphanedRunningConversation(c)
 	}
 
 	now := time.Now().UTC()
@@ -114,8 +117,11 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
-	if c.Status == "running" || a.activeRunForConversation(c.ID) != nil {
-		return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "conversation is busy; stop the running turn first"}
+	if c.Status == "running" {
+		if a.activeRunForConversation(c.ID) != nil {
+			return nil, &contracts.RPCError{Code: contracts.CodeConflict, Message: "conversation is busy; stop the running turn first"}
+		}
+		a.healOrphanedRunningConversation(c)
 	}
 
 	failedIdx := -1
@@ -202,6 +208,53 @@ func (a *App) activeRunForConversation(convID string) *TurnRun {
 		}
 	}
 	return nil
+}
+
+// healOrphanedRunningConversation checks if a conversation is marked "running"
+// but has no active run (orphaned by a crash, panic, or early exit). If so, it
+// recovers the conversation to idle so the user is not permanently blocked by
+// a 409 "conversation is busy". Returns true when the conversation was healed.
+func (a *App) healOrphanedRunningConversation(c *domain.Conversation) bool {
+	if c.Status != "running" {
+		return false
+	}
+	if a.activeRunForConversation(c.ID) != nil {
+		return false
+	}
+	if !c.RecoverAbandonedTurn() {
+		return false
+	}
+	a.log("warn", "agent", "healed orphaned running conversation %s (no active run found)", c.ID)
+	_ = a.Conversations.Save(c)
+	return true
+}
+
+// recoverOrphanedTurn finalizes a conversation that is still marked "running"
+// after a turn exited without an explicit terminal state (e.g. panic recovered
+// by goSafe, or an early return that skipped failTurn/interruptTurn). It
+// resets the conversation to idle, marks in-flight assistant messages as
+// interrupted, logs the recovery, and emits a turn-error event so the UI
+// shows the user something went wrong instead of hanging silently.
+func (a *App) recoverOrphanedTurn(run *TurnRun) {
+	defer func() {
+		if r := recover(); r != nil {
+			a.log("error", "agent", "orphan recovery panic for run %s: %v", run.ID, r)
+		}
+	}()
+	c, err := a.Conversations.Get(run.ConversationID)
+	if err != nil || c.Status != "running" {
+		return
+	}
+	if !c.RecoverOrphanedTurn(domain.OrphanedTurnError) {
+		return
+	}
+	a.log("error", "agent", "turn %s exited without terminal state, recovered conversation %s", run.ID, c.ID)
+	_ = a.Conversations.Save(c)
+	a.Bus.Emit(contracts.EventTurnError, contracts.TurnErrorEvent{
+		RunID:          run.ID,
+		ConversationID: run.ConversationID,
+		Message:        domain.OrphanedTurnError,
+	})
 }
 
 // handleTurnsActive returns the active run for a conversation, if any. Used by
@@ -389,6 +442,12 @@ func (a *App) runTurn(run *TurnRun, provider *domain.Provider, apiKey, model, ef
 		a.runsMu.Lock()
 		delete(a.runs, run.ID)
 		a.runsMu.Unlock()
+		// Finalize any conversation still marked "running" after the turn
+		// exited without an explicit terminal state (panic recovered by
+		// goSafe, or an early return that skipped failTurn/interruptTurn).
+		// Without this the conversation is permanently stuck and the user
+		// gets a 409 "conversation is busy" on every new message.
+		a.recoverOrphanedTurn(run)
 	}()
 	a.runTurnChain(run, provider, apiKey, model, effort, asstMsgID, initialContinuation, caps, systemPromptSuffix, 0)
 }

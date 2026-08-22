@@ -83,6 +83,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   leftover `status: running` conversations to idle and marks in-flight
   assistant work interrupted, so a restart cannot leave a room permanently
   busy.
+- **In-process orphaned turn recovery.** A turn that exits without a terminal
+  state (panic recovered by `goSafe`, or an early return that skipped
+  `failTurn`/`interruptTurn`) is healed immediately by the `runTurn` defer:
+  the conversation is reset to idle, in-flight assistant messages are marked
+  interrupted with a visible error, and a `turn.error` event is emitted so the
+  UI shows what happened instead of hanging silently. `agent.turns.start` and
+  `agent.turns.retry` also heal an orphaned running conversation (status
+  "running" but no active run) before starting a new turn, instead of
+  returning a permanent 409 "conversation is busy".
 - **Codex compact replays assistant text.** Server-side Codex compaction
   now includes assistant message text in the replay, not only user turns.
 - **Review loop mid-failure is an error.** If `Complete` fails inside the

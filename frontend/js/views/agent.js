@@ -772,12 +772,12 @@ function renderTodoStrip() {
   const stripOpen = toggleEl?.getAttribute('aria-expanded') === 'true';
   if (briefEl) {
     if (hasGoal) {
-      briefEl.textContent = brief.trim();
+      briefEl.innerHTML = renderMarkdown(brief.trim());
       briefEl.title = 'User brief — survives compaction so the agent does not drift';
       briefEl.hidden = !stripOpen;
     } else {
       briefEl.hidden = true;
-      briefEl.textContent = '';
+      briefEl.innerHTML = '';
     }
   }
   const list = document.getElementById('agent-todo-strip-list');

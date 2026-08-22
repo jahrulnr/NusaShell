@@ -281,10 +281,18 @@ func (o *Adapter) Stream(ctx context.Context, req application.ChatRequest, onDel
 			return err
 		}
 		if chunk.Usage != nil {
+			// Normalize: OpenAI-style prompt_tokens is the TOTAL prompt
+			// (uncached + cached). Subtract cached_tokens so InputTokens
+			// is the UNCACHED input, matching the Anthropic convention.
+			cached := chunk.Usage.PromptTokensDetails.CachedTokens
+			uncached := chunk.Usage.PromptTokens - cached
+			if uncached < 0 {
+				uncached = 0
+			}
 			result.Usage = application.ChatUsage{
-				InputTokens:  chunk.Usage.PromptTokens,
+				InputTokens:  uncached,
 				OutputTokens: chunk.Usage.CompletionTokens,
-				CacheRead:    chunk.Usage.PromptTokensDetails.CachedTokens,
+				CacheRead:    cached,
 			}
 		}
 		for _, ch := range chunk.Choices {
@@ -406,10 +414,19 @@ func (o *Adapter) responseFromOpenAI(out openAIResponse) (application.ChatRespon
 		StopReason: aiutil.Deref(ch.FinishReason),
 	}
 	if out.Usage != nil {
+		// OpenAI-style providers report prompt_tokens as the TOTAL prompt
+		// (uncached + cached). Normalize to the Anthropic convention where
+		// InputTokens is the UNCACHED input only, so downstream telemetry
+		// (cost, charts, ContextTokens) is consistent across providers.
+		cached := out.Usage.PromptTokensDetails.CachedTokens
+		uncached := out.Usage.PromptTokens - cached
+		if uncached < 0 {
+			uncached = 0
+		}
 		resp.Usage = application.ChatUsage{
-			InputTokens:  out.Usage.PromptTokens,
+			InputTokens:  uncached,
 			OutputTokens: out.Usage.CompletionTokens,
-			CacheRead:    out.Usage.PromptTokensDetails.CachedTokens,
+			CacheRead:    cached,
 		}
 	}
 	for _, tc := range ch.Message.ToolCalls {

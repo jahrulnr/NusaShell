@@ -259,8 +259,9 @@ func TestStreamParsesResponseCompletedUsage(t *testing.T) {
 	if len(deltas) != 1 || deltas[0] != "Hello" {
 		t.Fatalf("deltas = %v, want [Hello]", deltas)
 	}
-	if resp.Usage.InputTokens != 100 || resp.Usage.OutputTokens != 50 {
-		t.Fatalf("Usage = %+v, want input=100 output=50", resp.Usage)
+	// After Option A normalization: InputTokens = uncached = 100 - 40 = 60.
+	if resp.Usage.InputTokens != 60 || resp.Usage.OutputTokens != 50 {
+		t.Fatalf("Usage = %+v, want input=60 (uncached) output=50", resp.Usage)
 	}
 	if resp.Usage.CacheRead != 40 {
 		t.Fatalf("CacheRead = %d, want 40", resp.Usage.CacheRead)

@@ -143,17 +143,16 @@ func (a *App) handleTelemetryReport(req contracts.TelemetryReportRequest) (any, 
 			totalCacheRead += u.CacheRead
 			totalCacheWrite += u.CacheWrite
 
-			// Prompt total for the cache hit rate. OpenAI-style providers
-			// (Responses/chat-completions) report input_tokens as the TOTAL
-			// with cached_tokens already inside it, so the total is just
-			// InputTokens. Anthropic reports cache fields separately, so
-			// CacheWrite + CacheRead must be added back. Messages with no
+			// Prompt total for the cache hit rate. After Option A
+			// normalization, InputTokens is the UNCACHED input for all
+			// providers (OpenAI adapters subtract cached_tokens from
+			// prompt_tokens; Anthropic reports input_tokens as uncached
+			// already). The full prompt is therefore InputTokens +
+			// CacheRead + CacheWrite for any provider. Messages with no
 			// cache info are excluded from the hit-rate math entirely.
 			switch {
-			case u.CacheWrite > 0:
+			case u.CacheWrite > 0, u.CacheRead > 0:
 				totalCacheHitPrompt += u.InputTokens + u.CacheWrite + u.CacheRead
-			case u.CacheRead > 0:
-				totalCacheHitPrompt += u.InputTokens
 			}
 
 			if earliest.IsZero() || t.Before(earliest) {

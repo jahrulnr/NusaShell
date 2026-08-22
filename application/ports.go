@@ -389,9 +389,14 @@ type ChatUsage struct {
 // Use the LAST round's ContextTokens as the conversation's context usage, not
 // the sum of per-round usage: each tool round re-sends the growing history, so
 // summing InputTokens across rounds double counts the prompt and can exceed
-// the window. For OpenAI-style providers InputTokens already includes cached
-// tokens (CacheRead/CacheWrite stay 0); for Anthropic the cache fields are
-// reported separately and must be added back.
+// the window.
+//
+// After Option A normalization, InputTokens is the UNCACHED input for all
+// providers: OpenAI-style adapters (chat-completion, responses) subtract
+// cached_tokens from prompt_tokens at the handler boundary; Anthropic reports
+// input_tokens as uncached already. ContextTokens therefore sums
+// InputTokens + CacheRead + CacheWrite + OutputTokens uniformly — no
+// per-provider branching needed.
 func (u ChatUsage) ContextTokens() int {
 	return u.InputTokens + u.CacheRead + u.CacheWrite + u.OutputTokens
 }

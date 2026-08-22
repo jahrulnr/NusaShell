@@ -2,16 +2,20 @@ package application
 
 import "testing"
 
-// ContextTokens is the authoritative per-round context fill. For OpenAI-style
-// usage the prompt already includes cached tokens; for Anthropic the cache
-// fields are separate and must be summed back in.
+// ContextTokens is the authoritative per-round context fill. After Option A
+// normalization, InputTokens is the UNCACHED input for all providers (OpenAI
+// adapters subtract cached_tokens from prompt_tokens; Anthropic reports
+// input_tokens as uncached already). ContextTokens sums uncached input +
+// cache read + cache write + output, which equals the full prompt + output
+// for both provider styles.
 func TestChatUsageContextTokens(t *testing.T) {
 	cases := []struct {
 		name string
 		u    ChatUsage
 		want int
 	}{
-		{"openai style", ChatUsage{InputTokens: 1200, OutputTokens: 300}, 1500},
+		{"openai style no cache", ChatUsage{InputTokens: 1200, OutputTokens: 300}, 1500},
+		{"openai style with cache (post-normalization)", ChatUsage{InputTokens: 80, CacheRead: 920, OutputTokens: 50}, 1050},
 		{"anthropic with cache", ChatUsage{InputTokens: 200, CacheRead: 800, CacheWrite: 100, OutputTokens: 150}, 1250},
 		{"empty", ChatUsage{}, 0},
 	}

@@ -257,11 +257,19 @@ func (r *Adapter) Complete(ctx context.Context, req application.ChatRequest) (ap
 	if out.Error != nil {
 		return application.ChatResponse{}, fmt.Errorf("provider error: %s", out.Error.Message)
 	}
+	// Normalize: OpenAI Responses API reports input_tokens as the TOTAL
+	// prompt (uncached + cached). Subtract cached_tokens so InputTokens is
+	// the UNCACHED input, matching the Anthropic convention.
+	cached := out.Usage.InputTokensDetails.CachedTokens
+	uncached := out.Usage.InputTokens - cached
+	if uncached < 0 {
+		uncached = 0
+	}
 	resp := application.ChatResponse{
 		Usage: application.ChatUsage{
-			InputTokens:  out.Usage.InputTokens,
+			InputTokens:  uncached,
 			OutputTokens: out.Usage.OutputTokens,
-			CacheRead:    out.Usage.InputTokensDetails.CachedTokens,
+			CacheRead:    cached,
 		},
 	}
 	for _, item := range out.Output {
@@ -353,10 +361,19 @@ func (r *Adapter) Stream(ctx context.Context, req application.ChatRequest, onDel
 		case "response.completed":
 			completed = true
 			if frame.Response != nil {
+				// Normalize: OpenAI Responses API reports input_tokens as
+				// the TOTAL prompt (uncached + cached). Subtract cached
+				// tokens so InputTokens is the UNCACHED input, matching
+				// the Anthropic convention.
+				cached := frame.Response.Usage.InputTokensDetails.CachedTokens
+				uncached := frame.Response.Usage.InputTokens - cached
+				if uncached < 0 {
+					uncached = 0
+				}
 				result.Usage = application.ChatUsage{
-					InputTokens:  frame.Response.Usage.InputTokens,
+					InputTokens:  uncached,
 					OutputTokens: frame.Response.Usage.OutputTokens,
-					CacheRead:    frame.Response.Usage.InputTokensDetails.CachedTokens,
+					CacheRead:    cached,
 				}
 			}
 		case "response.failed":

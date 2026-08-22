@@ -105,6 +105,13 @@ func TestOpenAIListModelsParsesOpenRouterFields(t *testing.T) {
 // cached_tokens (CacheRead stayed 0 for DeepSeek and other chat-completion
 // models). The non-streaming Complete path must populate CacheRead so the
 // hit rate is computed, not zeroed.
+//
+// Option A normalization: OpenAI-style providers report prompt_tokens as the
+// TOTAL (uncached + cached). The adapter must subtract cached_tokens so
+// InputTokens is consistently the UNCACHED input across all providers, matching
+// the Anthropic convention where input_tokens excludes cache fields. This
+// keeps downstream telemetry (cost, charts, ContextTokens) consistent without
+// per-provider branches.
 func TestCompleteParsesCachedTokens(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -137,11 +144,50 @@ func TestCompleteParsesCachedTokens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Complete failed: %v", err)
 	}
-	if resp.Usage.InputTokens != 1000 {
-		t.Errorf("InputTokens = %d, want 1000 (total prompt incl. cached)", resp.Usage.InputTokens)
+	// InputTokens is the UNCACHED prompt: total (1000) - cached (920) = 80.
+	if resp.Usage.InputTokens != 80 {
+		t.Errorf("InputTokens = %d, want 80 (uncached = prompt_tokens - cached_tokens)", resp.Usage.InputTokens)
 	}
 	if resp.Usage.CacheRead != 920 {
 		t.Errorf("CacheRead = %d, want 920 (from prompt_tokens_details.cached_tokens)", resp.Usage.CacheRead)
+	}
+	// ContextTokens must still equal the full prompt + output: 80 + 920 + 50 = 1050.
+	if got := resp.Usage.ContextTokens(); got != 1050 {
+		t.Errorf("ContextTokens = %d, want 1050 (uncached + cached + output)", got)
+	}
+}
+
+// TestCompleteNoCachedTokensKeepsFullPrompt verifies that when the provider
+// reports no cached tokens, InputTokens equals the full prompt_tokens (no
+// subtraction). This is the common case for the first turn of a conversation.
+func TestCompleteNoCachedTokensKeepsFullPrompt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"content": "hi"}, "finish_reason": "stop"},
+			},
+			"usage": map[string]any{
+				"prompt_tokens":     500,
+				"completion_tokens": 20,
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := &Adapter{BaseURL: server.URL + "/v1", Client: server.Client()}
+	resp, err := adapter.Complete(context.Background(), application.ChatRequest{
+		Model:    "test-model",
+		Messages: []application.ChatMessage{{Role: "user", Content: "Hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Complete failed: %v", err)
+	}
+	if resp.Usage.InputTokens != 500 {
+		t.Errorf("InputTokens = %d, want 500 (no cache, full prompt)", resp.Usage.InputTokens)
+	}
+	if resp.Usage.CacheRead != 0 {
+		t.Errorf("CacheRead = %d, want 0", resp.Usage.CacheRead)
 	}
 }
 
