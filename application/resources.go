@@ -1204,6 +1204,18 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	if req.CompactionModel != nil {
 		s.CompactionModel = strings.TrimSpace(*req.CompactionModel)
 	}
+	if req.CompactionSummaryMaxTokens != nil {
+		if *req.CompactionSummaryMaxTokens < 0 || *req.CompactionSummaryMaxTokens > 100000 {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "compaction summary max tokens must be between 0 and 100000 (0 = default)"}
+		}
+		s.CompactionSummaryMaxTokens = *req.CompactionSummaryMaxTokens
+	}
+	if req.CompactionSummaryMinChars != nil {
+		if *req.CompactionSummaryMinChars < 0 || *req.CompactionSummaryMinChars > 100000 {
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "compaction summary min chars must be between 0 and 100000 (0 = default)"}
+		}
+		s.CompactionSummaryMinChars = *req.CompactionSummaryMinChars
+	}
 	if req.ReviewModel != nil {
 		s.ReviewModel = strings.TrimSpace(*req.ReviewModel)
 	}
@@ -1330,6 +1342,15 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 			}
 		}
 	}
+	if req.PluginContractMode != nil {
+		mode := strings.TrimSpace(*req.PluginContractMode)
+		switch mode {
+		case domain.PluginContractOff, domain.PluginContractHint, domain.PluginContractRequire:
+			s.PluginContractMode = mode
+		default:
+			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "plugin_contract_mode must be off, hint, or require"}
+		}
+	}
 	if req.LearningReviewThreshold != nil {
 		v := *req.LearningReviewThreshold
 		if v < 0 {
@@ -1368,38 +1389,41 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 
 func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 	return contracts.SettingsDTO{
-		CompactionEnabled:       s.CompactionEnabled,
-		CompactionThreshold:     s.CompactionThreshold,
-		CompactionModel:         s.CompactionModel,
-		ReviewModel:             s.ReviewModel,
-		PromptCaching:           s.PromptCaching,
-		MaxToolRounds:           s.MaxToolRounds,
-		RepeatedToolLimit:       s.RepeatedToolLimit,
-		MaxInputTokens:          s.MaxInputTokens,
-		MaxOutputTokens:         s.MaxOutputTokens,
-		MaxParallelTools:        s.MaxParallelTools,
-		EmbeddingProviderID:     s.EmbeddingProviderID,
-		EmbeddingModelID:        s.EmbeddingModelID,
-		VisionProviderID:        s.VisionProviderID,
-		VisionModelID:           s.VisionModelID,
-		AudioProviderID:         s.AudioProviderID,
-		AudioModelID:            s.AudioModelID,
-		VideoProviderID:         s.VideoProviderID,
-		VideoModelID:            s.VideoModelID,
-		ImageProviderID:         s.ImageProviderID,
-		ImageModelID:            s.ImageModelID,
-		WebAnswerProvider:       s.WebAnswerProvider,
-		WebAnswerModel:          s.WebAnswerModel,
-		Temperature:             s.Temperature,
-		TopP:                    s.TopP,
-		TopK:                    s.TopK,
-		FrequencyPenalty:        s.FrequencyPenalty,
-		PresencePenalty:         s.PresencePenalty,
-		LearningReviewThreshold: s.LearningReviewThreshold,
-		SkillNudgeInterval:      s.SkillNudgeInterval,
-		MaxAutoContinues:        s.MaxAutoContinues,
-		SoundNotifications:      s.SoundNotifications,
-		UserPrompt:              s.UserPrompt,
+		CompactionEnabled:          s.CompactionEnabled,
+		CompactionThreshold:        s.CompactionThreshold,
+		CompactionModel:            s.CompactionModel,
+		CompactionSummaryMaxTokens: s.CompactionSummaryMaxTokens,
+		CompactionSummaryMinChars:  s.CompactionSummaryMinChars,
+		ReviewModel:                s.ReviewModel,
+		PromptCaching:              s.PromptCaching,
+		MaxToolRounds:              s.MaxToolRounds,
+		RepeatedToolLimit:          s.RepeatedToolLimit,
+		MaxInputTokens:             s.MaxInputTokens,
+		MaxOutputTokens:            s.MaxOutputTokens,
+		MaxParallelTools:           s.MaxParallelTools,
+		EmbeddingProviderID:        s.EmbeddingProviderID,
+		EmbeddingModelID:           s.EmbeddingModelID,
+		VisionProviderID:           s.VisionProviderID,
+		VisionModelID:              s.VisionModelID,
+		AudioProviderID:            s.AudioProviderID,
+		AudioModelID:               s.AudioModelID,
+		VideoProviderID:            s.VideoProviderID,
+		VideoModelID:               s.VideoModelID,
+		ImageProviderID:            s.ImageProviderID,
+		ImageModelID:               s.ImageModelID,
+		WebAnswerProvider:          s.WebAnswerProvider,
+		WebAnswerModel:             s.WebAnswerModel,
+		PluginContractMode:         s.PluginContractMode,
+		Temperature:                s.Temperature,
+		TopP:                       s.TopP,
+		TopK:                       s.TopK,
+		FrequencyPenalty:           s.FrequencyPenalty,
+		PresencePenalty:            s.PresencePenalty,
+		LearningReviewThreshold:    s.LearningReviewThreshold,
+		SkillNudgeInterval:         s.SkillNudgeInterval,
+		MaxAutoContinues:           s.MaxAutoContinues,
+		SoundNotifications:         s.SoundNotifications,
+		UserPrompt:                 s.UserPrompt,
 	}
 }
 

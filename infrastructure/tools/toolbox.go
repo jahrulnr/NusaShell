@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"nusashell/application"
@@ -40,6 +41,9 @@ type Toolbox struct {
 	Credentials     application.CredentialStore
 	AskQuestions    *application.AskQuestionService
 	Automation      *application.Automation
+	// Contracts reads plugin usage contracts declared via manifest
+	// contract.entry. nil disables contract_read and the gate.
+	Contracts ContractSource
 	MCP             interface {
 		Connect(ctx context.Context, p *domain.Plugin) ([]contracts.MCPToolDTO, error)
 		ToolsFor(serverID string) ([]contracts.MCPToolDTO, bool)
@@ -56,6 +60,10 @@ type Toolbox struct {
 		SteerHeadlessTurn(conversationID, text string) error
 	}
 	Artifacts application.CanvasArtifactStore
+	// contractsGate tracks per-conversation contract reads for the gate.
+	// Initialized lazily via gate(); safe on the zero value.
+	contractsGateOnce sync.Once
+	contractsGate     *contractGate
 }
 
 // webAnswerSearcher builds a searchwire.Searcher on-demand from the web
@@ -146,7 +154,8 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 		{Name: "tool_list", Description: "List tools from a running MCP server. Accepts the plugin id (e.g. \"nusashell.terminal\"). When omitted, lists tools across all running MCP servers. Returns compact entries (ref, name, server, description) without parameter schemas — load the exact schema with tool_schema before first use of an unfamiliar tool.", InputSchema: obj("object", props("server", str("Plugin id; when omitted, lists all running servers")))},
 		{Name: "tool_schema", Description: "Load one MCP tool's input schema by plugin id and tool name. The tool name is the bare tool name (e.g. \"exec\"). Returns the schema as readable JSON — the only place schemas are served; mcp_search and tool_list stay schema-free so large catalogs remain token-cheap.", InputSchema: obj("object", props("server", str("Plugin id (e.g. nusashell.terminal)"), "tool", str("Bare tool name within the server (e.g. \"exec\")")), "server", "tool")},
 		{Name: "mcp_search", Description: "Search running MCP servers' tools by name or description (case-insensitive token match — any term matches). When server is omitted, searches across ALL running MCP servers. Returns compact matches (ref, name, description, ranked) without inlining parameter schemas — call tool_schema for exact argument fields when needed. This is the universal MCP discovery path that works on every provider — always use mcp_search + mcp_call instead of guessing tool names.", InputSchema: obj("object", props("server", str("Optional: plugin id; when omitted, searches all running servers"), "query", str("Search query"), "limit", intSchema("Max results, default 20")), "query")},
-		{Name: "mcp_call", Description: "Execute an MCP tool by ref. Get the ref from mcp_search or tool_list (format <plugin-id>:<tool> e.g. nusashell.files:read). Pass `arguments_json` as a JSON-encoded string of the arguments matching the tool's parameters schema — the exact object that the tool expects as its input, e.g. {\"path\":\"/etc/hosts\"}. Omit `arguments_json` entirely for parameterless tools (defaults to {}). The ref binds to a specific running MCP server + tool; if the server has been disabled or restarted since discovery, you get a STALE_TOOL_REF error and must search again. This is the only MCP execution path — mcp__<server>__<tool> names are not callable.", InputSchema: obj("object", props("ref", str("Tool ref from mcp_search / tool_list results (e.g. nusashell.files:read)"), "arguments_json", str("JSON-encoded tool arguments matching the parameters schema (e.g. {\"path\":\"/etc/hosts\"}). Optional; defaults to {} — omit entirely for parameterless tools. Load the exact schema with tool_schema if unsure.")), "ref")},
+		{Name: "mcp_call", Description: "Execute an MCP tool by ref. Get the ref from mcp_search or tool_list (format <plugin-id>:<tool> e.g. nusashell.files:read). Pass `arguments_json` as a JSON-encoded string of the arguments matching the tool's parameters schema — the exact object that the tool expects as its input, e.g. {\"path\":\"/etc/hosts\"}. Omit `arguments_json` entirely for parameterless tools (defaults to {}). The ref binds to a specific running MCP server + tool; if the server has been disabled or restarted since discovery, you get a STALE_TOOL_REF error and must search again. Plugins that declare a usage contract (contract flag in mcp_list) must be read first via contract_read when required by the plugin_contract_mode setting. This is the only MCP execution path — mcp__<server>__<tool> names are not callable.", InputSchema: obj("object", props("ref", str("Tool ref from mcp_search / tool_list results (e.g. nusashell.files:read)"), "arguments_json", str("JSON-encoded tool arguments matching the parameters schema (e.g. {\"path\":\"/etc/hosts\"}). Optional; defaults to {} — omit entirely for parameterless tools. Load the exact schema with tool_schema if unsure.")), "ref")},
+		{Name: "contract_read", Description: "Read a plugin's usage contract (best-practice rules plus state & side-effect disclosure) declared in its manifest before working with that plugin's tools. Pass id=<plugin-id>, or id=all to read every contract-declaring plugin at once. Required before mcp_call on contract plugins while plugin_contract_mode is require (factory default).", InputSchema: obj("object", props("id", str("Plugin id (e.g. nusashell.files) or 'all'")), "id")},
 		{Name: "mcp_register", Description: "Copy a new MCP plugin from an absolute staging folder into the installed plugin store, or replace an existing plugin with the same id. The source must contain manifest.json and must stay outside the installed plugins root. Check mcp_list and ask the user before replacing an existing id; then call mcp_enable.", InputSchema: obj("object", props("source", str("Absolute staging path to the plugin folder containing manifest.json")), "source")},
 		{Name: "mcp_enable", Description: "Start/connect an MCP plugin so its tools become available. Returns only status + tool count — use tool_list or mcp_search to discover the tools. If already connected, returns already_enabled without reconnecting. The plugin must be registered first (mcp_register or the Plugins view).", InputSchema: obj("object", props("id", str("Plugin id (e.g. nusashell.files)")), "id")},
 		{Name: "mcp_disable", Description: "Stop/disconnect an MCP plugin. The definition stays installed; only the MCP subprocess is stopped. Tools from this server are no longer listed.", InputSchema: obj("object", props("id", str("Plugin id")), "id")},
@@ -859,12 +868,18 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				running = true
 				toolCount = len(tools)
 			}
-			items = append(items, map[string]any{
+			item := map[string]any{
 				"name":    p.Manifest.Name,
 				"id":      p.Manifest.ID,
 				"running": running,
 				"tools":   toolCount,
-			})
+			}
+			// Contract flag is omitted (not false) for contract-less plugins
+			// so the historical output shape stays unchanged.
+			if p.Manifest.ContractEntry() != "" {
+				item["contract"] = true
+			}
+			items = append(items, item)
 		}
 		return yamlJSONL(map[string]any{"count": len(items)}, items), nil
 
@@ -1035,7 +1050,24 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if !toolExists {
 			return "", fmt.Errorf("STALE_TOOL_REF: tool %q not found on plugin %q; call mcp_search again", toolName, plugin.Manifest.ID)
 		}
-		return t.MCP.CallTool(ctx, plugin.Manifest.MCPServerID(), toolName, toolArgs)
+		// Usage-contract gate: plugins declaring contract.entry are subject
+		// to plugin_contract_mode (off/hint/require). Runs last so ref and
+		// staleness errors always win over gate errors.
+		advisory, err := t.contractCheck(ctx, plugin)
+		if err != nil {
+			return "", err
+		}
+		result, err := t.MCP.CallTool(ctx, plugin.Manifest.MCPServerID(), toolName, toolArgs)
+		if err != nil {
+			return "", err
+		}
+		if advisory != "" {
+			return result + "\n\n[contract notice] " + advisory, nil
+		}
+		return result, nil
+
+	case name == "contract_read":
+		return t.execContractRead(ctx, argsJSON)
 
 	case name == "subagent":
 		if t.Acp == nil {

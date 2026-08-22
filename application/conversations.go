@@ -103,6 +103,7 @@ func msgDTO(m domain.Message) contracts.MessageDTO {
 		Status:         string(m.Status),
 		Error:          m.Error,
 		Steer:          m.Steer,
+		AutoContinue:   m.AutoContinue,
 		ContextUpdated: m.ContextUpdated,
 	}
 	if m.Usage != nil {

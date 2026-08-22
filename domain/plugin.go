@@ -39,7 +39,14 @@ const (
 	PluginTransportHTTP  PluginTransport = "http"
 )
 
-// PluginWindowMode controls how the plugin UI window is displayed.
+// PluginContractConfig declares the plugin's agent-facing usage contract.
+// Entry is a plugin-relative markdown file (e.g. CONTRACT.md) the agent is
+// expected to read before working with the plugin's tools.
+type PluginContractConfig struct {
+	Entry string `json:"entry,omitempty"`
+}
+
+// Plugin window mode controls how the plugin UI window is displayed.
 type PluginWindowMode string
 
 const (
@@ -89,9 +96,11 @@ type PluginManifest struct {
 	Description  string            `json:"description,omitempty"`
 	Category     string            `json:"category,omitempty"`
 	AutoUpdate   bool              `json:"autoUpdate,omitempty"`
-	UI           *PluginUIConfig   `json:"ui,omitempty"`
-	MCP          PluginMCPConfig   `json:"mcp"`
-	Dependencies map[string]string `json:"dependencies,omitempty"`
+	UI           *PluginUIConfig       `json:"ui,omitempty"`
+	MCP          PluginMCPConfig       `json:"mcp"`
+	Dependencies map[string]string     `json:"dependencies,omitempty"`
+	// Contract optionally declares an agent-facing usage contract file.
+	Contract *PluginContractConfig `json:"contract,omitempty"`
 }
 
 // Plugin is an installed plugin: manifest + install path + runtime state.
@@ -136,13 +145,36 @@ func (m *PluginManifest) Validate() error {
 			return fmt.Errorf("manifest: ui.entry must be a relative path within the plugin directory")
 		}
 	}
+	if m.Contract != nil {
+		if e := strings.TrimSpace(m.Contract.Entry); e == "" {
+			return fmt.Errorf("manifest: contract.entry is required when contract is present")
+		} else if strings.Contains(e, "..") || hostRootedPath(e) {
+			return fmt.Errorf("manifest: contract.entry must be a relative path within the plugin directory")
+		}
+	}
 	return nil
 }
+
+// Plugin contract enforcement modes (Settings.PluginContractMode).
+const (
+	PluginContractOff     = "off"     // never gate mcp_call
+	PluginContractHint    = "hint"    // advisory note on first call per conversation
+	PluginContractRequire = "require" // reject mcp_call until contract_read ran
+)
 
 // MCPServerID returns the server ID used by the MCP manager for this
 // plugin. It is the plugin ID prefixed with "plugin:".
 func (m *PluginManifest) MCPServerID() string {
 	return "plugin:" + m.ID
+}
+
+// ContractEntry returns the declared contract file path (plugin-relative),
+// or "" when the plugin declares no contract.
+func (m *PluginManifest) ContractEntry() string {
+	if m.Contract == nil {
+		return ""
+	}
+	return strings.TrimSpace(m.Contract.Entry)
 }
 
 // HasWindow returns true when the plugin declares a UI entry.

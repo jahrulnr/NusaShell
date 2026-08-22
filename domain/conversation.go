@@ -101,6 +101,7 @@ type Message struct {
 	ToolCalls      []ToolCall // all tool calls (mirrors tool_calls steps, for backward compat)
 	Attachments    []Attachment
 	Steer          bool // true for user messages injected mid-turn (steering)
+	AutoContinue   bool // true for synthetic user messages injected by the auto-continue chain
 	ContextUpdated bool // true when a fresh hydration checkpoint was persisted for this turn
 }
 

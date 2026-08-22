@@ -16,6 +16,11 @@ var systemPrompt = resources.Prompt("system")
 // auto-continue turn. Loaded from resources/agent/prompts/continue.md.
 var continuePrompt = resources.Prompt("continue")
 
+// compactionPrompt is the system prompt for the compaction summarization
+// call. Loaded from resources/agent/prompts/compaction.md. Tells the model
+// to call the summary() tool with the handoff checkpoint text.
+var compactionPrompt = resources.Prompt("compaction")
+
 // buildSystemPrompt composes the agent identity + tool protocol (single
 // system.md) with any system-level skill messages stored in the conversation.
 // The system.md prefix is cache-stable across turns; the user prompt (if set)

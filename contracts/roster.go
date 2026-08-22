@@ -214,6 +214,7 @@ type MessageDTO struct {
 	ToolCalls      []ToolCallDTO    `json:"tool_calls,omitempty"`
 	Attachments    []AttachmentDTO  `json:"attachments,omitempty"`
 	Steer          bool             `json:"steer,omitempty"`
+	AutoContinue   bool             `json:"auto_continue,omitempty"`
 	ContextUpdated bool             `json:"context_updated,omitempty"`
 }
 
@@ -394,11 +395,14 @@ type AutoContinueDTO struct {
 }
 
 // AutoContinueEvent is emitted at each auto-continue chain step so the UI
-// can show "Continuing tasks… (N/M)" and update the strip.
+// can show "Continuing tasks… (N/M)" and update the strip. ContinueText
+// carries the synthetic user message content (continue.md) so the UI can
+// insert it into the transcript as a user message.
 type AutoContinueEvent struct {
 	ConversationID string          `json:"conversation_id"`
 	RunID          string          `json:"run_id"`
 	Decision       AutoContinueDTO `json:"decision"`
+	ContinueText   string          `json:"continue_text,omitempty"`
 }
 
 type TurnErrorEvent struct {
@@ -1097,38 +1101,41 @@ type LogAppendEvent struct {
 // ---- settings ----
 
 type SettingsDTO struct {
-	CompactionEnabled       bool     `json:"compaction_enabled"`
-	CompactionThreshold     int      `json:"compaction_threshold"`
-	CompactionModel         string   `json:"compaction_model,omitempty"`
-	PromptCaching           bool     `json:"prompt_caching"`
-	MaxToolRounds           int      `json:"max_tool_rounds"`
-	RepeatedToolLimit       int      `json:"repeated_tool_limit,omitempty"`
-	MaxInputTokens          int      `json:"max_input_tokens"`
-	MaxOutputTokens         int      `json:"max_output_tokens"`
-	MaxParallelTools        int      `json:"max_parallel_tools,omitempty"`
-	ReviewModel             string   `json:"review_model,omitempty"`
-	EmbeddingProviderID     string   `json:"embedding_provider_id,omitempty"`
-	EmbeddingModelID        string   `json:"embedding_model_id,omitempty"`
-	VisionProviderID        string   `json:"vision_provider_id,omitempty"`
-	VisionModelID           string   `json:"vision_model_id,omitempty"`
-	AudioProviderID         string   `json:"audio_provider_id,omitempty"`
-	AudioModelID            string   `json:"audio_model_id,omitempty"`
-	VideoProviderID         string   `json:"video_provider_id,omitempty"`
-	VideoModelID            string   `json:"video_model_id,omitempty"`
-	ImageProviderID         string   `json:"image_provider_id,omitempty"`
-	ImageModelID            string   `json:"image_model_id,omitempty"`
-	WebAnswerProvider       string   `json:"web_answer_provider,omitempty"`
-	WebAnswerModel          string   `json:"web_answer_model,omitempty"`
-	Temperature             *float64 `json:"temperature,omitempty"`
-	TopP                    *float64 `json:"top_p,omitempty"`
-	TopK                    *int     `json:"top_k,omitempty"`
-	FrequencyPenalty        *float64 `json:"frequency_penalty,omitempty"`
-	PresencePenalty         *float64 `json:"presence_penalty,omitempty"`
-	LearningReviewThreshold int      `json:"learning_review_threshold,omitempty"`
-	SkillNudgeInterval      int      `json:"skill_nudge_interval,omitempty"`
-	MaxAutoContinues        int      `json:"max_auto_continues,omitempty"`
-	SoundNotifications      bool     `json:"sound_notifications"`
-	UserPrompt              string   `json:"user_prompt,omitempty"`
+	CompactionEnabled          bool     `json:"compaction_enabled"`
+	CompactionThreshold        int      `json:"compaction_threshold"`
+	CompactionModel            string   `json:"compaction_model,omitempty"`
+	CompactionSummaryMaxTokens int      `json:"compaction_summary_max_tokens,omitempty"`
+	CompactionSummaryMinChars  int      `json:"compaction_summary_min_chars,omitempty"`
+	PromptCaching              bool     `json:"prompt_caching"`
+	MaxToolRounds              int      `json:"max_tool_rounds"`
+	RepeatedToolLimit          int      `json:"repeated_tool_limit,omitempty"`
+	MaxInputTokens             int      `json:"max_input_tokens"`
+	MaxOutputTokens            int      `json:"max_output_tokens"`
+	MaxParallelTools           int      `json:"max_parallel_tools,omitempty"`
+	ReviewModel                string   `json:"review_model,omitempty"`
+	EmbeddingProviderID        string   `json:"embedding_provider_id,omitempty"`
+	EmbeddingModelID           string   `json:"embedding_model_id,omitempty"`
+	VisionProviderID           string   `json:"vision_provider_id,omitempty"`
+	VisionModelID              string   `json:"vision_model_id,omitempty"`
+	AudioProviderID            string   `json:"audio_provider_id,omitempty"`
+	AudioModelID               string   `json:"audio_model_id,omitempty"`
+	VideoProviderID            string   `json:"video_provider_id,omitempty"`
+	VideoModelID               string   `json:"video_model_id,omitempty"`
+	ImageProviderID            string   `json:"image_provider_id,omitempty"`
+	ImageModelID               string   `json:"image_model_id,omitempty"`
+	WebAnswerProvider          string   `json:"web_answer_provider,omitempty"`
+	WebAnswerModel             string   `json:"web_answer_model,omitempty"`
+	Temperature                *float64 `json:"temperature,omitempty"`
+	TopP                       *float64 `json:"top_p,omitempty"`
+	TopK                       *int     `json:"top_k,omitempty"`
+	FrequencyPenalty           *float64 `json:"frequency_penalty,omitempty"`
+	PresencePenalty            *float64 `json:"presence_penalty,omitempty"`
+	LearningReviewThreshold    int      `json:"learning_review_threshold,omitempty"`
+	SkillNudgeInterval         int      `json:"skill_nudge_interval,omitempty"`
+	MaxAutoContinues           int      `json:"max_auto_continues,omitempty"`
+	SoundNotifications         bool     `json:"sound_notifications"`
+	UserPrompt                 string   `json:"user_prompt,omitempty"`
+	PluginContractMode         string   `json:"plugin_contract_mode,omitempty"`
 }
 
 type SettingsGetResult struct {
@@ -1136,39 +1143,42 @@ type SettingsGetResult struct {
 }
 
 type SettingsSetRequest struct {
-	CompactionEnabled       *bool           `json:"compaction_enabled,omitempty"`
-	CompactionThreshold     *int            `json:"compaction_threshold,omitempty"`
-	CompactionModel         *string         `json:"compaction_model,omitempty"`
-	PromptCaching           *bool           `json:"prompt_caching,omitempty"`
-	MaxToolRounds           *int            `json:"max_tool_rounds,omitempty"`
-	RepeatedToolLimit       *int            `json:"repeated_tool_limit,omitempty"`
-	MaxInputTokens          *int            `json:"max_input_tokens,omitempty"`
-	MaxOutputTokens         *int            `json:"max_output_tokens,omitempty"`
-	MaxParallelTools        *int            `json:"max_parallel_tools,omitempty"`
-	ReviewModel             *string         `json:"review_model,omitempty"`
-	EmbeddingProviderID     *string         `json:"embedding_provider_id,omitempty"`
-	EmbeddingModelID        *string         `json:"embedding_model_id,omitempty"`
-	VisionProviderID        *string         `json:"vision_provider_id,omitempty"`
-	VisionModelID           *string         `json:"vision_model_id,omitempty"`
-	AudioProviderID         *string         `json:"audio_provider_id,omitempty"`
-	AudioModelID            *string         `json:"audio_model_id,omitempty"`
-	VideoProviderID         *string         `json:"video_provider_id,omitempty"`
-	VideoModelID            *string         `json:"video_model_id,omitempty"`
-	ImageProviderID         *string         `json:"image_provider_id,omitempty"`
-	ImageModelID            *string         `json:"image_model_id,omitempty"`
-	WebAnswerProvider       *string         `json:"web_answer_provider,omitempty"`
-	WebAnswerModel          *string         `json:"web_answer_model,omitempty"`
-	WebAnswerAPIKey         *string         `json:"web_answer_api_key,omitempty"`
-	Temperature             json.RawMessage `json:"temperature,omitempty"`
-	TopP                    json.RawMessage `json:"top_p,omitempty"`
-	TopK                    json.RawMessage `json:"top_k,omitempty"`
-	FrequencyPenalty        json.RawMessage `json:"frequency_penalty,omitempty"`
-	PresencePenalty         json.RawMessage `json:"presence_penalty,omitempty"`
-	LearningReviewThreshold *int            `json:"learning_review_threshold,omitempty"`
-	SkillNudgeInterval      *int            `json:"skill_nudge_interval,omitempty"`
-	MaxAutoContinues        *int            `json:"max_auto_continues,omitempty"`
-	SoundNotifications      *bool           `json:"sound_notifications,omitempty"`
-	UserPrompt              *string         `json:"user_prompt,omitempty"`
+	CompactionEnabled          *bool           `json:"compaction_enabled,omitempty"`
+	CompactionThreshold        *int            `json:"compaction_threshold,omitempty"`
+	CompactionModel            *string         `json:"compaction_model,omitempty"`
+	CompactionSummaryMaxTokens *int            `json:"compaction_summary_max_tokens,omitempty"`
+	CompactionSummaryMinChars  *int            `json:"compaction_summary_min_chars,omitempty"`
+	PromptCaching              *bool           `json:"prompt_caching,omitempty"`
+	MaxToolRounds              *int            `json:"max_tool_rounds,omitempty"`
+	RepeatedToolLimit          *int            `json:"repeated_tool_limit,omitempty"`
+	MaxInputTokens             *int            `json:"max_input_tokens,omitempty"`
+	MaxOutputTokens            *int            `json:"max_output_tokens,omitempty"`
+	MaxParallelTools           *int            `json:"max_parallel_tools,omitempty"`
+	ReviewModel                *string         `json:"review_model,omitempty"`
+	EmbeddingProviderID        *string         `json:"embedding_provider_id,omitempty"`
+	EmbeddingModelID           *string         `json:"embedding_model_id,omitempty"`
+	VisionProviderID           *string         `json:"vision_provider_id,omitempty"`
+	VisionModelID              *string         `json:"vision_model_id,omitempty"`
+	AudioProviderID            *string         `json:"audio_provider_id,omitempty"`
+	AudioModelID               *string         `json:"audio_model_id,omitempty"`
+	VideoProviderID            *string         `json:"video_provider_id,omitempty"`
+	VideoModelID               *string         `json:"video_model_id,omitempty"`
+	ImageProviderID            *string         `json:"image_provider_id,omitempty"`
+	ImageModelID               *string         `json:"image_model_id,omitempty"`
+	WebAnswerProvider          *string         `json:"web_answer_provider,omitempty"`
+	WebAnswerModel             *string         `json:"web_answer_model,omitempty"`
+	WebAnswerAPIKey            *string         `json:"web_answer_api_key,omitempty"`
+	Temperature                json.RawMessage `json:"temperature,omitempty"`
+	TopP                       json.RawMessage `json:"top_p,omitempty"`
+	TopK                       json.RawMessage `json:"top_k,omitempty"`
+	FrequencyPenalty           json.RawMessage `json:"frequency_penalty,omitempty"`
+	PresencePenalty            json.RawMessage `json:"presence_penalty,omitempty"`
+	LearningReviewThreshold    *int            `json:"learning_review_threshold,omitempty"`
+	SkillNudgeInterval         *int            `json:"skill_nudge_interval,omitempty"`
+	MaxAutoContinues           *int            `json:"max_auto_continues,omitempty"`
+	SoundNotifications         *bool           `json:"sound_notifications,omitempty"`
+	UserPrompt                 *string         `json:"user_prompt,omitempty"`
+	PluginContractMode         *string         `json:"plugin_contract_mode,omitempty"`
 }
 
 // ---- learning ----

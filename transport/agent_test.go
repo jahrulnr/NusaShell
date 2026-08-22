@@ -296,7 +296,7 @@ func TestAgentTurnCompaction(t *testing.T) {
 	// Seed history with compaction disabled, then enable it with a small
 	// context window so the next turn triggers compaction.
 	h.rpcOK(t, "settings.set", map[string]any{"compaction_enabled": false})
-	h.llm.setComplete(llmStep{Text: "SUMMARY: the user likes Go."})
+	h.llm.setComplete(llmStep{Text: "SUMMARY: the user likes Go and wants to build a local AI shell with embedded frontend. Completed: research phase, architecture design, provider selection. Remaining: implement agent turn loop, wire up transports, write tests. Key decision: use Clean Architecture with domain/application/infrastructure layers. Path: /home/user/project/nusashell."})
 
 	// seed a long conversation; each message is large enough to exceed the
 	// trigger once compaction is enabled.
@@ -405,7 +405,7 @@ func TestAgentTurnMultiPassCompaction(t *testing.T) {
 	h.rpcOK(t, "settings.set", map[string]any{"compaction_enabled": true})
 
 	// Set up the compaction summary response and the final turn response.
-	h.llm.setComplete(llmStep{Text: "SUMMARY: compacted pass."})
+	h.llm.setComplete(llmStep{Text: "SUMMARY: compacted pass with enough detail to pass the quality guard. Goal: build local AI shell. Completed: research, architecture design, provider selection. Remaining: implement agent turn loop, wire transports, write tests. Key decision: Clean Architecture with domain/application/infrastructure layers. Path: /home/user/project/nusashell."})
 	h.llm.setScript([]llmStep{{Text: "ok"}})
 
 	// Count non-streaming requests before the triggering turn.
@@ -1147,7 +1147,7 @@ func TestAgentTurnRetriesTransientCompactionFailure(t *testing.T) {
 	waitTurnDone(t, h, convID)
 	h.rpcOK(t, "settings.set", map[string]any{"compaction_enabled": true, "max_input_tokens": 1000})
 	h.llm.failOnce(http.StatusServiceUnavailable, nil)
-	h.llm.setComplete(llmStep{Text: "Recovered compaction summary."})
+	h.llm.setComplete(llmStep{Text: "Recovered compaction summary with enough detail to pass the quality guard. Goal: test retry after transient failure. Completed: setup, seed history. Remaining: verify retry behavior, check request count. Key decision: compaction must retry on 503. Path: /home/user/project/nusashell."})
 	h.llm.setScript([]llmStep{{Text: "Turn completed after compaction retry."}})
 	requestsBefore := h.llm.requestCount()
 

@@ -505,7 +505,7 @@
 .agent-todo-strip-meta { flex: none; margin-right: 10px; padding: 3px 8px; border-radius: 999px; background: #141e2b; color: #8fa0b6; font: 11px/1.2 "JetBrains Mono", monospace; white-space: nowrap; }
 .agent-todo-strip-meta[data-done="true"] { color: #8fd; background: rgba(120, 200, 120, .1); }
 .agent-todo-strip-goal { margin: 0; padding: 6px 12px 4px; font: 11.5px/1.4 "IBM Plex Sans", system-ui, sans-serif; color: var(--text-faint); border-left: 2px solid var(--border-soft); margin-left: 10px; margin-right: 10px; white-space: pre-wrap; word-break: break-word; }
-.agent-todo-strip-brief { overflow-y: auto; max-height: 20rem; background: var(--input-bg); margin: 0; padding: 6px 14px 8px; font: 11.5px/1.5 "IBM Plex Sans", system-ui, sans-serif; border-left: 2px solid var(--border-soft); margin-left: 10px; margin-right: 10px; word-break: break-word; }
+.agent-todo-strip-brief { overflow-y: auto; max-height: 10rem; background: var(--input-bg); margin: 0; padding: 6px 14px 8px; font: 11.5px/1.5 "IBM Plex Sans", system-ui, sans-serif; border-left: 2px solid var(--border-soft); margin-left: 10px; margin-right: 10px; word-break: break-word; }
 .agent-todo-strip-brief[hidden] { display: none; }
 .agent-todo-strip-brief > :first-child { margin-top: 0; }
 .agent-todo-strip-brief > :last-child { margin-bottom: 0; }
@@ -535,6 +535,10 @@
 
 /* Steer message flag in transcript (after apply) */
 .agent-message-steer-flag { color: var(--accent); font: 9px var(--font-mono); letter-spacing: .04em; text-transform: uppercase; }
+
+/* Auto-continue message flag in transcript (synthetic user message from continue.md) */
+.agent-message-auto-continue-flag { color: var(--text-faint); font: 9px var(--font-mono); letter-spacing: .04em; text-transform: uppercase; }
+.agent-message.agent-auto-continue .agent-bubble { opacity: .7; font-size: 12px; }
 
 /* Composer stack: task strip + jobs + form as one floating card (Cursor-like). */
 .agent-composer-stack {

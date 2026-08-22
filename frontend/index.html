@@ -772,6 +772,14 @@
               <input id="settings-compaction-threshold" type="number" min="0" max="2000000" step="1000" inputmode="numeric" value="0">
               <small>Token count that triggers compaction. 0 = auto (compact at 80% of the model's context window). Set a non-zero value to compact earlier.</small>
             </label>
+            <label class="settings-field" for="settings-compaction-summary-max-tokens">Compaction summary max tokens (0 = default)
+              <input id="settings-compaction-summary-max-tokens" type="number" min="0" max="100000" step="500" inputmode="numeric" value="0">
+              <small>Max output tokens for the compaction summarization call. Reasoning models count reasoning against this budget. 0 = built-in default (4000). Increase if the model produces short or empty summaries.</small>
+            </label>
+            <label class="settings-field" for="settings-compaction-summary-min-chars">Compaction summary min chars (0 = default)
+              <input id="settings-compaction-summary-min-chars" type="number" min="0" max="100000" step="50" inputmode="numeric" value="0">
+              <small>Minimum summary length (in chars) for the compaction quality guard. Summaries shorter than this trigger a retry with doubled budget. 0 = built-in default (200).</small>
+            </label>
             <label class="settings-field" for="settings-compaction-model">Compaction model
               <select id="settings-compaction-model">
                 <option value="">Default — use the conversation's active model</option>

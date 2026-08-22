@@ -13,6 +13,11 @@ import (
 	"nusashell/domain"
 )
 
+// validTestSummary is a summary string long enough to pass the compaction
+// quality guard (>= compactionSummaryMinChars). Used by tests that need
+// compactConversation to succeed without triggering retries.
+var validTestSummary = strings.Repeat("handoff checkpoint with enough detail to pass the guard. ", 6)
+
 func TestUpdateToolResultUpdatesChronologicalToolCallStep(t *testing.T) {
 	app := &App{}
 	conversation := &domain.Conversation{Messages: []domain.Message{{
@@ -613,7 +618,7 @@ func (a *overflowThenOKAdapter) Complete(context.Context, ChatRequest) (ChatResp
 	a.mu.Unlock()
 	summary := a.summary
 	if summary == "" {
-		summary = "handoff of prior work"
+		summary = validTestSummary
 	}
 	return ChatResponse{Content: summary}, nil
 }
@@ -709,9 +714,10 @@ func TestEmergencyCompactionSkippedWhenEstimateBelowTrigger(t *testing.T) {
 }
 
 type recordingCompleteAdapter struct {
-	mu        sync.Mutex
-	requests  []ChatRequest
-	summaries []string
+	mu                sync.Mutex
+	requests          []ChatRequest
+	summaries         []string
+	toolCallSummaries []string // if set, return summary() tool call instead of Content
 }
 
 func (a *recordingCompleteAdapter) Kind() domain.ProviderKind { return domain.ProviderChat }
@@ -729,17 +735,275 @@ func (a *recordingCompleteAdapter) Complete(_ context.Context, req ChatRequest) 
 	} else if len(a.summaries) > 0 {
 		summary = a.summaries[len(a.summaries)-1]
 	}
+	// If toolCallSummaries is configured, return a summary() tool call
+	// instead of Content (simulates a reasoning model that uses the tool).
+	if idx < len(a.toolCallSummaries) || (len(a.toolCallSummaries) > 0 && idx >= len(a.toolCallSummaries)) {
+		tcSummary := a.toolCallSummaries[min(idx, len(a.toolCallSummaries)-1)]
+		return ChatResponse{
+			Content: "",
+			ToolCalls: []domain.ToolCall{{
+				ID:   fmt.Sprintf("call_%d", idx),
+				Name: compactionSummaryToolName,
+				Args: fmt.Sprintf(`{"text":%q}`, tcSummary),
+			}},
+		}, nil
+	}
 	return ChatResponse{Content: summary}, nil
 }
 
 func TestCompactionPassBudgetShrinksWithRunningSummary(t *testing.T) {
-	empty := compactionPassAvailable(10_000, "")
-	grown := compactionPassAvailable(10_000, strings.Repeat("x", 8000))
+	empty := compactionPassAvailable(10_000, "", compactionSummaryMaxOut)
+	grown := compactionPassAvailable(10_000, strings.Repeat("x", 8000), compactionSummaryMaxOut)
 	if grown >= empty {
 		t.Fatalf("available with large summary %d should be < empty %d", grown, empty)
 	}
 	if empty-grown < 1900 {
 		t.Fatalf("expected ~2000 token shrink, empty=%d grown=%d", empty, grown)
+	}
+}
+
+func TestExtractCompactionSummaryPrefersToolCall(t *testing.T) {
+	// When the model calls summary(text="..."), extract from the tool call.
+	resp := ChatResponse{
+		Content: "plain text that should be ignored",
+		ToolCalls: []domain.ToolCall{
+			{Name: compactionSummaryToolName, Args: `{"text":"handoff checkpoint from tool call"}`},
+		},
+	}
+	got := extractCompactionSummary(resp)
+	if got != "handoff checkpoint from tool call" {
+		t.Fatalf("extractCompactionSummary = %q, want tool call text", got)
+	}
+}
+
+func TestExtractCompactionSummaryFallsBackToContent(t *testing.T) {
+	// When the model doesn't call the tool, fall back to resp.Content.
+	resp := ChatResponse{Content: "plain text fallback"}
+	got := extractCompactionSummary(resp)
+	if got != "plain text fallback" {
+		t.Fatalf("extractCompactionSummary = %q, want content fallback", got)
+	}
+}
+
+func TestExtractCompactionSummaryFallsBackOnBadArgs(t *testing.T) {
+	// If the tool call args are malformed, fall back to resp.Content.
+	resp := ChatResponse{
+		Content:   "fallback after bad args",
+		ToolCalls: []domain.ToolCall{{Name: compactionSummaryToolName, Args: `not json`}},
+	}
+	got := extractCompactionSummary(resp)
+	if got != "fallback after bad args" {
+		t.Fatalf("extractCompactionSummary = %q, want content fallback on bad args", got)
+	}
+}
+
+func TestExtractCompactionSummaryIgnoresEmptyToolText(t *testing.T) {
+	// If the tool call has empty text, fall back to resp.Content.
+	resp := ChatResponse{
+		Content:   "fallback when tool text empty",
+		ToolCalls: []domain.ToolCall{{Name: compactionSummaryToolName, Args: `{"text":""}`}},
+	}
+	got := extractCompactionSummary(resp)
+	if got != "fallback when tool text empty" {
+		t.Fatalf("extractCompactionSummary = %q, want content fallback on empty tool text", got)
+	}
+}
+
+func TestCompactionUsesSummaryTool(t *testing.T) {
+	// Verify that compactConversation advertises the summary() tool and
+	// extracts the summary from the tool call args, not resp.Content.
+	var msgs []domain.Message
+	body := strings.Repeat("abcdefghij", 80) // 800 chars ≈ 200 tokens
+	for i := 0; i < 10; i++ {
+		msgs = append(msgs, domain.Message{
+			ID: fmt.Sprintf("m%d", i), Role: domain.RoleUser, Content: body, Status: domain.StatusDone,
+		})
+	}
+	conv := &domain.Conversation{ID: "c1", Messages: msgs}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
+	adapter := &recordingCompleteAdapter{
+		toolCallSummaries: []string{validTestSummary},
+	}
+	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
+	settings := domain.DefaultSettings()
+	settings.CompactionSummaryMaxTokens = 800
+	summary, err := app.compactConversation(context.Background(), adapter, conv, "model", 4000, settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary != validTestSummary {
+		t.Fatalf("summary = %q, want tool call text", summary)
+	}
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if len(adapter.requests) == 0 {
+		t.Fatal("no Complete calls")
+	}
+	req := adapter.requests[0]
+	found := false
+	for _, tool := range req.Tools {
+		if tool.Name == compactionSummaryToolName {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("compaction request did not advertise %s tool", compactionSummaryToolName)
+	}
+}
+
+func TestCompactionRetriesOnShortSummary(t *testing.T) {
+	// First 2 passes return short summaries, 3rd returns a good one.
+	// Verify the guard retries and eventually succeeds.
+	var msgs []domain.Message
+	body := strings.Repeat("abcdefghij", 80)
+	for i := 0; i < 10; i++ {
+		msgs = append(msgs, domain.Message{
+			ID: fmt.Sprintf("m%d", i), Role: domain.RoleUser, Content: body, Status: domain.StatusDone,
+		})
+	}
+	conv := &domain.Conversation{ID: "c1", Messages: msgs}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
+	adapter := &recordingCompleteAdapter{
+		toolCallSummaries: []string{"short", "also short", strings.Repeat("handoff checkpoint with enough detail ", 10)},
+	}
+	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
+	settings := domain.DefaultSettings()
+	settings.CompactionSummaryMaxTokens = 800
+	summary, err := app.compactConversation(context.Background(), adapter, conv, "model", 4000, settings)
+	if err != nil {
+		t.Fatalf("expected success after retry, got error: %v", err)
+	}
+	if len(summary) < compactionSummaryMinChars {
+		t.Fatalf("summary len=%d, want >= %d", len(summary), compactionSummaryMinChars)
+	}
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if len(adapter.requests) < 3 {
+		t.Fatalf("expected >= 3 Complete calls (retries), got %d", len(adapter.requests))
+	}
+}
+
+func TestCompactionFailsAfterMaxRetries(t *testing.T) {
+	// All passes return short summaries. Verify compaction fails with error.
+	var msgs []domain.Message
+	body := strings.Repeat("abcdefghij", 80)
+	for i := 0; i < 10; i++ {
+		msgs = append(msgs, domain.Message{
+			ID: fmt.Sprintf("m%d", i), Role: domain.RoleUser, Content: body, Status: domain.StatusDone,
+		})
+	}
+	conv := &domain.Conversation{ID: "c1", Messages: msgs}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
+	adapter := &recordingCompleteAdapter{
+		toolCallSummaries: []string{"short"},
+	}
+	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
+	settings := domain.DefaultSettings()
+	settings.CompactionSummaryMaxTokens = 800
+	_, err := app.compactConversation(context.Background(), adapter, conv, "model", 4000, settings)
+	if err == nil {
+		t.Fatal("expected error when all retries produce short summaries, got nil")
+	}
+	if !strings.Contains(err.Error(), "too short") {
+		t.Fatalf("error should mention 'too short', got: %v", err)
+	}
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	// 1 initial + 5 retries = 6 calls
+	if len(adapter.requests) != compactionSummaryMaxRetries+1 {
+		t.Fatalf("expected %d Complete calls (1 + %d retries), got %d",
+			compactionSummaryMaxRetries+1, compactionSummaryMaxRetries, len(adapter.requests))
+	}
+}
+
+func TestCompactionBudgetDoublesOnRetry(t *testing.T) {
+	// Verify that each retry doubles the max_output_tokens budget.
+	// Use a large context window so the clamp never triggers.
+	var msgs []domain.Message
+	body := strings.Repeat("abcdefghij", 80)
+	for i := 0; i < 10; i++ {
+		msgs = append(msgs, domain.Message{
+			ID: fmt.Sprintf("m%d", i), Role: domain.RoleUser, Content: body, Status: domain.StatusDone,
+		})
+	}
+	conv := &domain.Conversation{ID: "c1", Messages: msgs}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
+	adapter := &recordingCompleteAdapter{
+		toolCallSummaries: []string{"short"},
+	}
+	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
+	settings := domain.DefaultSettings()
+	settings.CompactionSummaryMaxTokens = 800
+	_, _ = app.compactConversation(context.Background(), adapter, conv, "model", 200000, settings)
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	expectedBudget := 800
+	for i, req := range adapter.requests {
+		if req.MaxTokens != expectedBudget {
+			t.Fatalf("attempt %d: MaxTokens=%d, want %d", i, req.MaxTokens, expectedBudget)
+		}
+		expectedBudget *= 2
+	}
+}
+
+func TestCompactionBudgetClampedToContextWindow(t *testing.T) {
+	// Verify that the retry budget is clamped to the context window so it
+	// never exceeds what the model can accept.
+	var msgs []domain.Message
+	body := strings.Repeat("abcdefghij", 80)
+	for i := 0; i < 10; i++ {
+		msgs = append(msgs, domain.Message{
+			ID: fmt.Sprintf("m%d", i), Role: domain.RoleUser, Content: body, Status: domain.StatusDone,
+		})
+	}
+	conv := &domain.Conversation{ID: "c1", Messages: msgs}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
+	adapter := &recordingCompleteAdapter{
+		toolCallSummaries: []string{"short"},
+	}
+	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
+	settings := domain.DefaultSettings()
+	settings.CompactionSummaryMaxTokens = 800
+	// Small context window (2000) so the doubled budget hits the clamp.
+	// maxBudget = 2000 - 300 (systemReserve) = 1700
+	_, _ = app.compactConversation(context.Background(), adapter, conv, "model", 2000, settings)
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	maxBudget := 2000 - compactionSystemReserve
+	for i, req := range adapter.requests {
+		if req.MaxTokens > maxBudget {
+			t.Fatalf("attempt %d: MaxTokens=%d exceeds maxBudget=%d", i, req.MaxTokens, maxBudget)
+		}
+	}
+}
+
+func TestCompactionSummaryMinCharsFromSettings(t *testing.T) {
+	// Verify that CompactionSummaryMinChars from settings overrides the
+	// built-in default. Set a high threshold so a normal summary fails.
+	var msgs []domain.Message
+	body := strings.Repeat("abcdefghij", 80)
+	for i := 0; i < 10; i++ {
+		msgs = append(msgs, domain.Message{
+			ID: fmt.Sprintf("m%d", i), Role: domain.RoleUser, Content: body, Status: domain.StatusDone,
+		})
+	}
+	conv := &domain.Conversation{ID: "c1", Messages: msgs}
+	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
+	// validTestSummary is ~360 chars. Set min to 500 so it fails.
+	adapter := &recordingCompleteAdapter{
+		toolCallSummaries: []string{validTestSummary},
+	}
+	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
+	settings := domain.DefaultSettings()
+	settings.CompactionSummaryMaxTokens = 800
+	settings.CompactionSummaryMinChars = 500
+	_, err := app.compactConversation(context.Background(), adapter, conv, "model", 4000, settings)
+	if err == nil {
+		t.Fatal("expected error when summary < settings min chars, got nil")
+	}
+	if !strings.Contains(err.Error(), "too short") {
+		t.Fatalf("error should mention 'too short', got: %v", err)
 	}
 }
 
@@ -754,9 +1018,14 @@ func TestMultiPassCompactionShrinksLaterChunks(t *testing.T) {
 	conv := &domain.Conversation{ID: "c1", Messages: msgs}
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
 	hugeSummary := strings.Repeat("folded-summary-", 400) // ~1500+ tokens
-	adapter := &recordingCompleteAdapter{summaries: []string{hugeSummary, "final"}}
+	adapter := &recordingCompleteAdapter{summaries: []string{hugeSummary, validTestSummary}}
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
-	if _, err := app.compactConversation(context.Background(), adapter, conv, "model", 4000); err != nil {
+	// Use a small summary max tokens so the multi-pass shrinking is visible
+	// with the small contextWindow=4000. The default (4000) would leave no
+	// room for message content after the summary reserve.
+	settings := domain.DefaultSettings()
+	settings.CompactionSummaryMaxTokens = 800
+	if _, err := app.compactConversation(context.Background(), adapter, conv, "model", 4000, settings); err != nil {
 		t.Fatal(err)
 	}
 	adapter.mu.Lock()
@@ -817,8 +1086,8 @@ func TestCompactionArchiveStripsHydration(t *testing.T) {
 		Logs:          &fakeLogStore{},
 		Bus:           NewBus(),
 	}
-	adapter := &recordingCompleteAdapter{summaries: []string{"summary"}}
-	if _, err := app.compactConversation(context.Background(), adapter, conv, "model", 4000); err != nil {
+	adapter := &recordingCompleteAdapter{summaries: []string{validTestSummary}}
+	if _, err := app.compactConversation(context.Background(), adapter, conv, "model", 4000, domain.DefaultSettings()); err != nil {
 		t.Fatal(err)
 	}
 	for _, m := range store.archived {
@@ -856,9 +1125,9 @@ func TestCompactionStripsToolOutputImageAttachments(t *testing.T) {
 	}
 	conv := &domain.Conversation{ID: "c1", Messages: msgs}
 	store := &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}}
-	adapter := &recordingCompleteAdapter{summaries: []string{"summary"}}
+	adapter := &recordingCompleteAdapter{summaries: []string{validTestSummary}}
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
-	if _, err := app.compactConversation(context.Background(), adapter, conv, "model", 4000); err != nil {
+	if _, err := app.compactConversation(context.Background(), adapter, conv, "model", 4000, domain.DefaultSettings()); err != nil {
 		t.Fatal(err)
 	}
 	adapter.mu.Lock()

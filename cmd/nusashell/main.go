@@ -219,6 +219,7 @@ func run() error {
 		Credentials:     credentials,
 		AskQuestions:    askService,
 		MCP:             mcpManager,
+		Contracts:       tools.NewFileContractReader(),
 		Artifacts:       artifactStore,
 	}
 	app := application.NewApp(application.Deps{

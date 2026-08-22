@@ -1,5 +1,6 @@
 Continue the user's existing task. This is an automatic follow-up because the
-current TODO list still contains pending or in-progress work.
+current TODO list still contains pending or in-progress work. You are receiving
+this as a user message so you have a clear turn boundary.
 
 Use the conversation, current runtime state, and the fresh `todo_list` result
 as the source of truth. Reconcile the list with verified work from the prior

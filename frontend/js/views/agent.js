@@ -1933,16 +1933,28 @@ function bindEvents() {
     if (conversation_id === state.activeId) refreshActiveConversation();
   });
   on('agent.auto_continue', (payload) => {
-    const { conversation_id, decision } = payload;
+    const { conversation_id, decision, continue_text } = payload;
     if (conversation_id !== state.activeId) return;
     const status = document.getElementById('agent-provider-status');
-    if (!status) return;
-    const { continues_used, max_auto_continues } = decision || {};
-    const label = max_auto_continues === 0
-      ? `Continuing tasks… (${continues_used})`
-      : `Continuing tasks… (${continues_used}/${max_auto_continues})`;
-    status.textContent = label;
-    status.classList.add('is-running');
+    if (status) {
+      const { continues_used, max_auto_continues } = decision || {};
+      const label = max_auto_continues === 0
+        ? `Continuing tasks… (${continues_used})`
+        : `Continuing tasks… (${continues_used}/${max_auto_continues})`;
+      status.textContent = label;
+      status.classList.add('is-running');
+    }
+    // Insert the synthetic continue user message into the transcript so the
+    // user sees what triggered the next turn. Marked auto_continue so the UI
+    // can style it differently from real user messages.
+    if (continue_text) {
+      const continueMessage = { role: 'user', content: continue_text, auto_continue: true, created_at: new Date().toISOString() };
+      state.messages.push(continueMessage);
+      const node = renderMessage(continueMessage);
+      const thread = document.getElementById('agent-thread');
+      if (thread && node) thread.append(node);
+      thread?.scrollTo?.({ top: thread.scrollHeight, behavior: 'smooth' });
+    }
   });
   on('agent.ask.pending', (payload) => {
     const { conversation_id, run_id, tool_call_id, question, options, allow_free_text, multi_select } = payload;

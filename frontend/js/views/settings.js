@@ -91,6 +91,8 @@ export async function refresh() {
     document.getElementById('settings-max-parallel-tools').value = settings.max_parallel_tools ?? 6;
     document.getElementById('settings-max-input-tokens').value = settings.max_input_tokens ?? 200000;
     document.getElementById('settings-compaction-threshold').value = settings.compaction_threshold ?? 0;
+    document.getElementById('settings-compaction-summary-max-tokens').value = settings.compaction_summary_max_tokens ?? 0;
+    document.getElementById('settings-compaction-summary-min-chars').value = settings.compaction_summary_min_chars ?? 0;
     document.getElementById('settings-max-output-tokens').value = settings.max_output_tokens ?? 65536;
     setOptionalNumber('settings-temperature', settings.temperature);
     setOptionalNumber('settings-top-p', settings.top_p);
@@ -353,6 +355,16 @@ async function save() {
     setStatus('Compaction threshold must be between 0 and 2,000,000 (0 = auto).', true);
     return;
   }
+  const compactionSummaryMaxTokens = Number(document.getElementById('settings-compaction-summary-max-tokens').value);
+  if (!Number.isInteger(compactionSummaryMaxTokens) || compactionSummaryMaxTokens < 0 || compactionSummaryMaxTokens > 100000) {
+    setStatus('Compaction summary max tokens must be between 0 and 100,000 (0 = default).', true);
+    return;
+  }
+  const compactionSummaryMinChars = Number(document.getElementById('settings-compaction-summary-min-chars').value);
+  if (!Number.isInteger(compactionSummaryMinChars) || compactionSummaryMinChars < 0 || compactionSummaryMinChars > 100000) {
+    setStatus('Compaction summary min chars must be between 0 and 100,000 (0 = default).', true);
+    return;
+  }
   if (!Number.isInteger(maxOutputTokens) || maxOutputTokens < 256 || maxOutputTokens > 1000000) {
     setStatus('Max output tokens must be between 256 and 1,000,000.', true);
     return;
@@ -399,6 +411,8 @@ async function save() {
       max_parallel_tools: maxParallelTools,
       max_input_tokens: maxInputTokens,
       compaction_threshold: compactionThreshold,
+      compaction_summary_max_tokens: compactionSummaryMaxTokens || null,
+      compaction_summary_min_chars: compactionSummaryMinChars || null,
       compaction_model: compactionValue || null,
       review_model: reviewValue || null,
       max_output_tokens: maxOutputTokens,

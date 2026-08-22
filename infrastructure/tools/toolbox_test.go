@@ -115,9 +115,10 @@ func (m *stubMCP) CallTool(ctx context.Context, serverID, toolName string, args 
 
 func testToolbox(skills []*domain.Skill, plugins []*domain.Plugin, mcp *stubMCP) *Toolbox {
 	return &Toolbox{
-		Skills:  &stubSkillStore{skills: skills},
-		Plugins: &stubPluginStore{plugins: plugins},
-		MCP:     mcp,
+		Skills:    &stubSkillStore{skills: skills},
+		Plugins:   &stubPluginStore{plugins: plugins},
+		MCP:       mcp,
+		Contracts: NewFileContractReader(),
 	}
 }
 

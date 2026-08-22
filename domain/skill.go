@@ -159,10 +159,19 @@ type Settings struct {
 	// routing compaction to a cheaper/faster model while keeping the chat
 	// model for the actual conversation.
 	CompactionModel string `json:"compaction_model,omitempty"`
-	PromptCaching   bool
-	MaxToolRounds   int
-	MaxInputTokens  int // global context window cap (default 200k)
-	MaxOutputTokens int // default max completion tokens (default 64k)
+	// CompactionSummaryMaxTokens is the max_output_tokens budget for the
+	// compaction summarization call. Reasoning models count reasoning
+	// tokens against this budget, so the default (4000) leaves room for
+	// both reasoning and the summary content. 0 = use the built-in default.
+	CompactionSummaryMaxTokens int `json:"compaction_summary_max_tokens,omitempty"`
+	// CompactionSummaryMinChars is the minimum summary length (in chars)
+	// for the compaction quality guard. Summaries shorter than this trigger
+	// a retry with doubled budget. 0 = use the built-in default (200).
+	CompactionSummaryMinChars int `json:"compaction_summary_min_chars,omitempty"`
+	PromptCaching             bool
+	MaxToolRounds             int
+	MaxInputTokens            int // global context window cap (default 200k)
+	MaxOutputTokens           int // default max completion tokens (default 64k)
 	// MaxParallelTools bounds how many tool calls from a single assistant
 	// round run concurrently. The model often emits several independent
 	// tool calls at once; running them in parallel cuts wall-clock latency
@@ -267,23 +276,32 @@ type Settings struct {
 	// so changing it breaks the prompt cache for all subsequent turns until
 	// a new cache shard stabilizes. Empty = no injection.
 	UserPrompt string `json:"user_prompt,omitempty"`
+	// PluginContractMode controls how mcp_call treats plugins that declare a
+	// contract (contract.entry in manifest.json). "off" never gates; "hint"
+	// attaches an advisory note to the first call per conversation;
+	// "require" (factory default) rejects calls until contract_read ran for
+	// that plugin in the same conversation.
+	PluginContractMode string `json:"plugin_contract_mode,omitempty"`
 }
 
 // DefaultSettings returns the factory defaults.
 func DefaultSettings() Settings {
 	return Settings{
-		CompactionEnabled:       true,
-		CompactionThreshold:     0, // 0 = auto (80% of model context window)
-		PromptCaching:           true,
-		MaxToolRounds:           8,
-		MaxInputTokens:          200000,
-		MaxOutputTokens:         65536,
-		MaxParallelTools:        6,
-		LearningReviewThreshold: 10,
-		SkillNudgeInterval:      15,
-		MaxAutoContinues:        DefaultMaxAutoContinues,
-		SoundNotifications:      true,
-		RepeatedToolLimit:       3,
+		CompactionEnabled:          true,
+		CompactionThreshold:        0, // 0 = auto (80% of model context window)
+		CompactionSummaryMaxTokens: 0, // 0 = use built-in default (4000)
+		CompactionSummaryMinChars:  0, // 0 = use built-in default (200)
+		PromptCaching:              true,
+		MaxToolRounds:              8,
+		MaxInputTokens:             200000,
+		MaxOutputTokens:            65536,
+		MaxParallelTools:           6,
+		LearningReviewThreshold:    10,
+		SkillNudgeInterval:         15,
+		MaxAutoContinues:           DefaultMaxAutoContinues,
+		SoundNotifications:         true,
+		RepeatedToolLimit:          3,
+		PluginContractMode:         PluginContractRequire,
 	}
 }
 
@@ -312,6 +330,21 @@ func NormalizeSettings(settings Settings) Settings {
 	if settings.CompactionThreshold == 40000 {
 		settings.CompactionThreshold = 0
 	}
+	// CompactionSummaryMaxTokens: 0 = use built-in default. Negative or
+	// unset (-1 from JSON omitempty on older files) needs the default.
+	// Clamp to a sane range so a typo can't starve or blow up the budget.
+	if settings.CompactionSummaryMaxTokens < 0 {
+		settings.CompactionSummaryMaxTokens = 0
+	} else if settings.CompactionSummaryMaxTokens > 100000 {
+		settings.CompactionSummaryMaxTokens = 100000
+	}
+	// CompactionSummaryMinChars: 0 = use built-in default. Negative or
+	// unset needs the default. Clamp to a sane range.
+	if settings.CompactionSummaryMinChars < 0 {
+		settings.CompactionSummaryMinChars = 0
+	} else if settings.CompactionSummaryMinChars > 100000 {
+		settings.CompactionSummaryMinChars = 100000
+	}
 	// MaxAutoContinues: 0 is a valid sentinel (unlimited). Only negative
 	// or unset (-1 from JSON omitempty on older files) needs the default.
 	if settings.MaxAutoContinues < 0 {
@@ -321,6 +354,13 @@ func NormalizeSettings(settings Settings) Settings {
 	// unset (-1 from JSON omitempty on older files) needs the default.
 	if settings.RepeatedToolLimit < 0 {
 		settings.RepeatedToolLimit = DefaultSettings().RepeatedToolLimit
+	}
+	// PluginContractMode: empty = factory default (require). Unknown values
+	// fall back to require so a typo can't silently disable the gate.
+	switch settings.PluginContractMode {
+	case PluginContractOff, PluginContractHint, PluginContractRequire:
+	default:
+		settings.PluginContractMode = DefaultSettings().PluginContractMode
 	}
 	return settings
 }
