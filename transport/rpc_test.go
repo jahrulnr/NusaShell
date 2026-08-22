@@ -108,11 +108,10 @@ func TestRPCAppInfo(t *testing.T) {
 	h := newHarness(t, nil)
 	res := h.rpcOK(t, "app.info", map[string]any{})
 	var info struct {
-		Name       string   `json:"name"`
-		Version    string   `json:"version"`
-		DataDir    string   `json:"data_dir"`
-		Transports []string `json:"transports"`
-		Features   struct {
+		Name     string `json:"name"`
+		Version  string `json:"version"`
+		DataDir  string `json:"data_dir"`
+		Features struct {
 			Tools         bool     `json:"tools"`
 			MCP           bool     `json:"mcp"`
 			Compaction    bool     `json:"compaction"`
@@ -126,11 +125,26 @@ func TestRPCAppInfo(t *testing.T) {
 	if info.Name != "NusaShell" || info.Version != "test" {
 		t.Fatalf("app info = %+v", info)
 	}
-	if len(info.Transports) != 3 {
-		t.Fatalf("transports = %v", info.Transports)
+	if info.Name != "NusaShell" || info.Version != "test" {
+		t.Fatalf("app info = %+v", info)
 	}
 	if !info.Features.Tools || !info.Features.MCP || !info.Features.Compaction || !info.Features.PromptCaching {
 		t.Fatalf("features = %+v", info.Features)
+	}
+}
+
+// TestRoutesNoSSEEndpoint guards the SSE /events takeout: the endpoint is
+// gone, so clients that still rely on it fail fast with 404 instead of
+// silently hanging on an unknown stream.
+func TestRoutesNoSSEEndpoint(t *testing.T) {
+	h := newHarness(t, nil)
+	resp, err := http.Get(h.server.URL + "/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("GET /events status = %d, want 404", resp.StatusCode)
 	}
 }
 

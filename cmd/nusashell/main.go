@@ -292,7 +292,7 @@ func run() error {
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	// Request contexts derive from the signal context, so SSE/WebSocket
+	// Request contexts derive from the signal context, so WebSocket
 	// handlers unblock as soon as shutdown begins.
 	httpServer.BaseContext = func(net.Listener) context.Context { return ctx }
 	app.StartCodexCircuitMonitor(ctx)

@@ -1,5 +1,5 @@
-// Transport layer: HTTP /rpc, SSE /events, WebSocket /ws.
-// All three transports speak the same event vocabulary.
+// Transport layer: HTTP /rpc, WebSocket /ws.
+// Both transports speak the same event vocabulary.
 
 const listeners = new Map();
 

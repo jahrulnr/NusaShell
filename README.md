@@ -108,7 +108,7 @@ assets changes.
 | `application/` | Use cases, ports, agent runner, and event bus |
 | `contracts/` | Wire types, method roster, and JSON fixtures |
 | `infrastructure/` | Local stores, provider adapters, MCP, tools, and docs |
-| `transport/` | HTTP RPC, WebSocket, SSE, and static asset serving |
+| `transport/` | HTTP RPC, WebSocket, and static asset serving |
 | `cmd/nusashell/` | Composition root, configuration, lifecycle, and entrypoint |
 | `frontend/` | Embedded native JavaScript, CSS, HTML, and frontend tests |
 | `testdata/` | Stable fixtures, including a fake stdio MCP server |

@@ -84,7 +84,7 @@ agent**.
 
 1. Service worker hanya menyimpan app shell publik: HTML, CSS, JavaScript,
    font, manifest, dan ikon. Ia tidak pernah menyimpan respons `/rpc`, `/ws`,
-   atau `/events`.
+   atau `/ws`.
 2. IndexedDB menyimpan snapshot percakapan yang pengguna izinkan untuk tersedia
    offline, draft, metadata sinkronisasi, dan operasi yang belum terkirim.
    `localStorage` tetap hanya untuk preferensi kecil seperti sidebar mode.
@@ -165,7 +165,7 @@ reviewed asset list. During `activate`, it deletes older NusaShell shell caches.
 | --- | --- | --- |
 | Navigation and `index.html` | Network first, cached shell fallback | Use a new shell when Go is alive; still open when it is not. |
 | Known static assets | Cache first from the versioned shell cache | A cached installed app must boot without Go. |
-| `/rpc`, `/ws`, `/events` | Network only | A cached RPC response could display stale state or falsely acknowledge a mutation. |
+| `/rpc`, `/ws` | Network only | A cached RPC response could display stale state or falsely acknowledge a mutation. |
 | Provider and third-party URLs | No worker caching | The frontend should not call these in the first place. |
 
 Service workers intentionally sit between the app and network, can precache on

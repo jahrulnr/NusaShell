@@ -322,7 +322,6 @@ function optionalNumber(id) {
 function renderAppInfo(info) {
   document.getElementById('settings-version').textContent = info.version || 'development build';
   document.getElementById('settings-data-dir').textContent = info.data_dir || '—';
-  document.getElementById('settings-transports').textContent = (info.transports || []).join(' · ') || '—';
 }
 
 async function save() {

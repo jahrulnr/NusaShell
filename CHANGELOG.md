@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **SSE `/events` endpoint removed (dead route).** The frontend never used
+  SSE, and `app.info` no longer advertises the `sse` transport or the
+  `transports` list. Transport tests that previously streamed events over
+  SSE now cover the same behavior over WebSocket.
+
 ### Added
 
 - **Image generation tool.** `generate_image` is a built-in client-side

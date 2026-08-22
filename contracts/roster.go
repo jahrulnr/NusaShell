@@ -101,7 +101,7 @@ const (
 	MethodAcpPermissionDecide     = "acp.permission.decide"
 )
 
-// Event types pushed over SSE (/events) and WebSocket (/ws).
+// Event types pushed over WebSocket (/ws).
 const (
 	EventTurnStarted      = "agent.turn.started"
 	EventMessageDelta     = "agent.message.delta"
@@ -142,11 +142,10 @@ const (
 // ---- app ----
 
 type AppInfoResult struct {
-	Name       string   `json:"name"`
-	Version    string   `json:"version"`
-	DataDir    string   `json:"data_dir"`
-	Transports []string `json:"transports"`
-	Features   Features `json:"features"`
+	Name     string   `json:"name"`
+	Version  string   `json:"version"`
+	DataDir  string   `json:"data_dir"`
+	Features Features `json:"features"`
 }
 
 type Features struct {

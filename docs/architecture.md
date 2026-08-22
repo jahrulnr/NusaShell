@@ -11,7 +11,7 @@ only on a trusted network (`NUSASHELL_HOST`).
 
 ```text
 frontend/        native ES modules, no build step; embedded via go:embed
-transport/       HTTP /rpc, SSE /events, WebSocket /ws, static assets
+transport/       HTTP /rpc, WebSocket /ws, static assets
 application/     use cases, agent runner, ports, event bus (Bus)
 domain/          pure entities and policies (no I/O imports)
 contracts/       wire types, method roster, golden JSON fixtures
@@ -35,14 +35,13 @@ embedded ES module with no build step.
 | Route | Purpose |
 | --- | --- |
 | `POST /rpc` | request/response commands and queries (`{method, payload}` → `{ok, result|error}`) |
-| `GET /events` | SSE server-to-client event stream, reconnect-friendly, 15s heartbeats |
-| `GET /ws` | bidirectional: `{id, method, payload}` requests with `{id, ok, ...}` replies plus the same event stream as `{type, payload}` |
+| `GET /ws` | bidirectional: `{id, method, payload}` requests with `{id, ok, ...}` replies plus the event stream as `{type, payload}` |
 | `GET /` + assets | embedded frontend (disk in `NUSASHELL_DEV=1` mode) |
 
-Events are published to an in-memory `application.Bus`; each SSE/WS
+Events are published to an in-memory `application.Bus`; each WS
 connection subscribes. Subscribers that fall behind drop events rather than
-stall the agent loop. One transport per function: the frontend receives
-event triggers over WebSocket only and talks to the backend over HTTP
+stall the agent loop. The frontend receives event triggers over WebSocket
+only and talks to the backend over HTTP
 `/rpc`; the SSE endpoint stays available for non-browser clients. The
 transports speak the same event vocabulary (`contracts`).
 

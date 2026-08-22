@@ -33,7 +33,7 @@ func TestAgentTurnStreamsOverSSE(t *testing.T) {
 
 	done := make(chan []map[string]any, 1)
 	go func() {
-		frames, err := readSSEUntil(t, ctx, h.server.URL+"/events", contracts.EventTurnDone)
+		frames, err := readWSUntil(ctx, h.server.URL+"/ws", contracts.EventTurnDone)
 		if err != nil {
 			done <- nil
 			t.Logf("sse read: %v", err)
@@ -317,7 +317,7 @@ func TestAgentTurnCompaction(t *testing.T) {
 	defer cancel()
 	done := make(chan []map[string]any, 1)
 	go func() {
-		frames, err := readSSEUntil(t, ctx, h.server.URL+"/events", contracts.EventCompacted)
+		frames, err := readWSUntil(ctx, h.server.URL+"/ws", contracts.EventCompacted)
 		if err != nil {
 			done <- nil
 			return
@@ -471,7 +471,7 @@ func TestAgentTurnSteer(t *testing.T) {
 	// Start listening for steer events before starting the turn.
 	steerApplied := make(chan map[string]any, 1)
 	go func() {
-		frames, err := readSSEUntil(t, ctx, h.server.URL+"/events", contracts.EventSteerApplied)
+		frames, err := readWSUntil(ctx, h.server.URL+"/ws", contracts.EventSteerApplied)
 		if err != nil {
 			steerApplied <- nil
 			return
@@ -589,7 +589,7 @@ func TestAgentTurnSteerAppliedOnNoToolCallExit(t *testing.T) {
 
 	steerApplied := make(chan map[string]any, 1)
 	go func() {
-		frames, err := readSSEUntil(t, ctx, h.server.URL+"/events", contracts.EventSteerApplied)
+		frames, err := readWSUntil(ctx, h.server.URL+"/ws", contracts.EventSteerApplied)
 		if err != nil {
 			steerApplied <- nil
 			return
@@ -1644,7 +1644,7 @@ func TestTurnContextTokensIsLastRoundNotSum(t *testing.T) {
 	defer cancel()
 	done := make(chan []map[string]any, 1)
 	go func() {
-		frames, err := readSSEUntil(t, ctx, h.server.URL+"/events", contracts.EventTurnDone)
+		frames, err := readWSUntil(ctx, h.server.URL+"/ws", contracts.EventTurnDone)
 		if err != nil {
 			done <- nil
 			return

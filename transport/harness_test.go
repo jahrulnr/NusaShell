@@ -1,7 +1,6 @@
 package transport
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -736,57 +735,6 @@ func (h *harness) newConversation(t *testing.T) string {
 		t.Fatalf("create conversation malformed: %s", res.Result)
 	}
 	return out.Conversation.ID
-}
-
-// readSSEUntil reads SSE frames from a stream until a type matches.
-func readSSEUntil(t *testing.T, ctx context.Context, url string, wantType string) ([]map[string]any, error) {
-	t.Helper()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("sse status %d", resp.StatusCode)
-	}
-	var frames []map[string]any
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-	var data strings.Builder
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			if data.Len() == 0 {
-				continue
-			}
-			var ev struct {
-				Type    string          `json:"type"`
-				Payload json.RawMessage `json:"payload"`
-			}
-			if err := json.Unmarshal([]byte(data.String()), &ev); err != nil {
-				return frames, err
-			}
-			data.Reset()
-			var payload map[string]any
-			_ = json.Unmarshal(ev.Payload, &payload)
-			frames = append(frames, map[string]any{"type": ev.Type, "payload": payload})
-			if ev.Type == wantType {
-				return frames, nil
-			}
-			continue
-		}
-		if strings.HasPrefix(line, "data: ") {
-			data.WriteString(strings.TrimPrefix(line, "data: "))
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return frames, err
-	}
-	return frames, fmt.Errorf("stream ended before %s", wantType)
 }
 
 // readWSUntil connects to the /ws endpoint, subscribes, and reads frames
