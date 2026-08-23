@@ -34,6 +34,8 @@ github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs
 github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
 github.com/jahrulnr/searchwire v0.0.0-20260822191633-3b488bf19560 h1:Rc83rx8jdvRjBdZmG8vw3Gu1XKMbfbSkLEuQpdKH1VQ=
 github.com/jahrulnr/searchwire v0.0.0-20260822191633-3b488bf19560/go.mod h1:S6dFxEWfz5MLkwADHgWUYp4DVZ7Yogk1ztI3iPCyUN8=
+github.com/jahrulnr/searchwire v0.0.0-20260823074928-bb836c953972 h1:tqv8PCrjU8I/d5Tu5X04u23bxYvxQ2mwbCVyNfBRrBk=
+github.com/jahrulnr/searchwire v0.0.0-20260823074928-bb836c953972/go.mod h1:S6dFxEWfz5MLkwADHgWUYp4DVZ7Yogk1ztI3iPCyUN8=
 github.com/josephspurrier/goversioninfo v1.7.0 h1:LQzXOlVm/CtbwJ9/UHl5a2HT0BjcLAwid5gqGd7ZUJ8=
 github.com/josephspurrier/goversioninfo v1.7.0/go.mod h1:z9y0r2G6g5jwSJaFE0cxW9to0aeIibK7UYeLx53aQRU=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=

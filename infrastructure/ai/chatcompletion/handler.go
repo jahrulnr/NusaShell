@@ -263,13 +263,40 @@ func buildRequest(req application.ChatRequest, stream bool) openAIRequest {
 		FrequencyPenalty: req.FrequencyPenalty,
 		PresencePenalty:  req.PresencePenalty,
 	}
-	if req.Effort != "" && req.Effort != "auto" {
+	if req.Effort != "" && req.Effort != "auto" && !containsParam(req.StripParams, "reasoning_effort") {
 		r.ReasoningEffort = req.Effort
+	}
+	// Apply learned strip params: null out sampling fields the upstream
+	// has rejected with a 400 "Unsupported parameter" so we don't keep
+	// sending them and burning a retry.
+	if containsParam(req.StripParams, "temperature") {
+		r.Temperature = nil
+	}
+	if containsParam(req.StripParams, "top_p") {
+		r.TopP = nil
+	}
+	if containsParam(req.StripParams, "frequency_penalty") {
+		r.FrequencyPenalty = nil
+	}
+	if containsParam(req.StripParams, "presence_penalty") {
+		r.PresencePenalty = nil
 	}
 	if req.PromptCache != nil && req.PromptCache.Mode != "off" && req.PromptCache.Key != "" {
 		r.PromptCacheKey = req.PromptCache.Key
 	}
 	return r
+}
+
+// containsParam reports whether the strip list includes name. The list is
+// case-insensitive (learned entries are lowercased on record).
+func containsParam(strip []string, name string) bool {
+	target := strings.ToLower(name)
+	for _, p := range strip {
+		if strings.ToLower(p) == target {
+			return true
+		}
+	}
+	return false
 }
 
 func (o *Adapter) Complete(ctx context.Context, req application.ChatRequest) (application.ChatResponse, error) {

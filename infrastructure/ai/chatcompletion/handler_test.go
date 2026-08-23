@@ -326,3 +326,63 @@ func TestToOpenAIMessagesReasoningReplayStripsPlaceholder(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildRequestStripParams proves that learned strip params cause the
+// corresponding fields to be omitted from the wire request. A model that
+// 400'd with "Unsupported parameter: temperature" must not have
+// temperature sent on subsequent requests.
+func TestBuildRequestStripParams(t *testing.T) {
+	temp := 0.7
+	topP := 0.9
+	req := application.ChatRequest{
+		Model:       "glm-5.2",
+		Effort:      "high",
+		Temperature: &temp,
+		TopP:        &topP,
+		StripParams: []string{"temperature", "reasoning_effort"},
+	}
+	r := buildRequest(req, false)
+	if r.Temperature != nil {
+		t.Errorf("temperature should be stripped, got %v", r.Temperature)
+	}
+	if r.ReasoningEffort != "" {
+		t.Errorf("reasoning_effort should be stripped, got %q", r.ReasoningEffort)
+	}
+	// top_p is NOT in strip list, must survive
+	if r.TopP == nil || *r.TopP != 0.9 {
+		t.Errorf("top_p should survive, got %v", r.TopP)
+	}
+}
+
+// TestBuildRequestStripParamsCaseInsensitive proves the strip list match
+// is case-insensitive (learned entries are lowercased on record).
+func TestBuildRequestStripParamsCaseInsensitive(t *testing.T) {
+	temp := 0.7
+	req := application.ChatRequest{
+		Model:       "m",
+		Temperature: &temp,
+		StripParams: []string{"TEMPERATURE"},
+	}
+	r := buildRequest(req, false)
+	if r.Temperature != nil {
+		t.Errorf("case-insensitive strip failed: temperature = %v", r.Temperature)
+	}
+}
+
+// TestBuildRequestNoStripParams proves that without strip params, all
+// fields are sent as normal.
+func TestBuildRequestNoStripParams(t *testing.T) {
+	temp := 0.7
+	req := application.ChatRequest{
+		Model:       "m",
+		Effort:      "high",
+		Temperature: &temp,
+	}
+	r := buildRequest(req, false)
+	if r.Temperature == nil || *r.Temperature != 0.7 {
+		t.Errorf("temperature should be present, got %v", r.Temperature)
+	}
+	if r.ReasoningEffort != "high" {
+		t.Errorf("reasoning_effort should be present, got %q", r.ReasoningEffort)
+	}
+}

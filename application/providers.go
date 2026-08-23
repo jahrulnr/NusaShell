@@ -360,6 +360,21 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 			models[i].Kind = domain.ModelKindImage
 		}
 	}
+	// TTS carve-out: unlike images/embeddings there is no dedicated provider
+	// listing endpoint for speech models (/audio/speech is invoke-only). The
+	// models.dev catalog is therefore authoritative here — this is the one
+	// documented exception to "Kind is decided by the lister, never by
+	// models.dev". The allowlist covers ids the catalog does not know yet.
+	for i := range models {
+		if a.ModelCatalog != nil {
+			if meta := a.ModelCatalog.Lookup(catalogHintFromModelID(models[i].ID), models[i].ID); meta != nil && meta.Kind == "tts" {
+				models[i].Kind = domain.ModelKindTTS
+			}
+		}
+		if config.IsKnownTTSModel(models[i].ID) {
+			models[i].Kind = domain.ModelKindTTS
+		}
+	}
 	if p.Kind == domain.ProviderCodex {
 		models = seedCodexImageModels(models)
 	}
@@ -526,6 +541,14 @@ func (a *App) enrichProviderModelsAtRead(p *domain.Provider) {
 		}
 		if config.IsKnownImageModel(p.Models[i].ID) {
 			p.Models[i].Kind = domain.ModelKindImage
+		}
+		// TTS tagging mirrors the import path: models.dev catalog first (the
+		// documented carve-out for speech models), then the allowlist.
+		if meta := a.ModelCatalog.Lookup(catalogHintFromModelID(p.Models[i].ID), p.Models[i].ID); meta != nil && meta.Kind == "tts" {
+			p.Models[i].Kind = domain.ModelKindTTS
+		}
+		if config.IsKnownTTSModel(p.Models[i].ID) {
+			p.Models[i].Kind = domain.ModelKindTTS
 		}
 	}
 }

@@ -1151,7 +1151,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if limit <= 0 {
 			limit = 10
 		}
-		resp, err := t.Searcher.Search(ctx, args.Query)
+		resp, err := t.Searcher.SearchWithOptions(ctx, args.Query, searchwire.SearchOptions{Limit: args.Limit})
 		if err != nil {
 			return "", fmt.Errorf("search failed: %w", err)
 		}

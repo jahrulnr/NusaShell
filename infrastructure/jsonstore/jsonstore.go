@@ -42,6 +42,7 @@ type Store struct {
 	skills        []*domain.Skill
 	memories      []*domain.MemoryEntry
 	learningEdges []*domain.LearningEdge
+	learnedParams *domain.LearnedParamRegistry
 	settings      domain.Settings
 
 	logMu sync.Mutex
@@ -155,6 +156,11 @@ func (s *Store) load() error {
 			}
 		}
 	} else if !os.IsNotExist(err) {
+		return err
+	}
+	// learned_params: single JSON registry (dynamic 400-learning)
+	s.learnedParams = domain.NewLearnedParamRegistry()
+	if err := s.loadJSON("learning/provider_params.json", s.learnedParams); err != nil {
 		return err
 	}
 	return nil
@@ -765,4 +771,30 @@ func (s *Store) DeleteLearningEdge(id string) error {
 		}
 	}
 	return fmt.Errorf("%w: learning edge %s", ErrNotFound, id)
+}
+
+// ---- learned params (dynamic 400-learning) ----
+
+// LoadLearnedParams returns the current learned-param registry. The
+// registry is loaded once at startup and kept in memory; callers mutate
+// the returned pointer and call SaveLearnedParams to persist. Returns an
+// empty (non-nil) registry when no learning file exists yet.
+func (s *Store) LoadLearnedParams() *domain.LearnedParamRegistry {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.learnedParams == nil {
+		return domain.NewLearnedParamRegistry()
+	}
+	// Return a deep copy so callers can mutate without holding the lock.
+	return clone(s.learnedParams)
+}
+
+// SaveLearnedParams persists the registry atomically to
+// learning/provider_params.json.
+func (s *Store) SaveLearnedParams(r *domain.LearnedParamRegistry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stored := clone(r)
+	s.learnedParams = stored
+	return s.writeJSON("learning/provider_params.json", stored)
 }

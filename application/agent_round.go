@@ -83,6 +83,23 @@ func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *do
 		if err == nil || retry >= maxProviderAttempts || roundResult.Content != "" || roundResult.Reasoning != "" {
 			return roundResult, err
 		}
+		// Dynamic 400-learning: classify the error body and, when it
+		// matches a known pattern (unsupported param / required field),
+		// record it to the persisted registry. If the learned action
+		// upgrades ReasoningReplay (inject reasoning_content), refresh
+		// caps so the next retry sends reasoning_content. This catches
+		// models not in the catalog (e.g. stealth/ox-alpha on OpenRouter)
+		// that 400 with "reasoning_content must be passed back".
+		if isLearnable400(err) {
+			body := extractErrBody(err)
+			action, param := a.learnedParams.LearnFrom400(run.ProviderID, model, body)
+			if action == domain.LearnedActionInject && strings.EqualFold(param, stripReasoningContentParam) {
+				if !caps.ReasoningReplay {
+					caps.ReasoningReplay = true
+					a.log("info", "learning", "upgraded ReasoningReplay for %s/%s from 400 learning", run.ProviderID, model)
+				}
+			}
+		}
 		delay, retryable := providerRetryDelay(err, retry)
 		if !retryable {
 			return roundResult, err
@@ -185,6 +202,7 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 		PresencePenalty:  settings.PresencePenalty,
 		ConversationID:   run.ConversationID,
 		ReasoningReplay:  caps.ReasoningReplay,
+		StripParams:      a.learnedParams.StripParams(run.ProviderID, model),
 	}, func(delta string) {
 		content.WriteString(delta)
 		a.Bus.Emit(contracts.EventMessageDelta, contracts.MessageDeltaEvent{

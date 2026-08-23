@@ -149,6 +149,19 @@ type LearningEdgeStore interface {
 	Delete(id string) error
 }
 
+// LearnedParamStore persists the dynamic 400-learning registry (unsupported
+// params to strip + required fields to inject, per provider+model). The
+// store backs learning/provider_params.json so adaptations survive process
+// restarts. Implementations must be safe for concurrent use.
+type LearnedParamStore interface {
+	// Load returns the current registry, or an empty registry when no
+	// learning file exists yet. Never returns nil.
+	Load() *domain.LearnedParamRegistry
+	// Save persists the registry atomically. Callers may pass the same
+	// pointer they got from Load after mutating it.
+	Save(r *domain.LearnedParamRegistry) error
+}
+
 // ConversationTodoPort is the per-conversation todo checklist store. The
 // model owns the list (full-replace via the `todo` tool, or patch by ID
 // via mode:"patch"); the user can delete items from the UI. The brief (a
@@ -372,10 +385,17 @@ type ChatRequest struct {
 	// reasoning_content (Chat Completions) or reasoning items (Responses
 	// API) to be echoed back on every assistant message in subsequent
 	// turns. Resolved from the model's InterleavedField catalog signal
-	// (preferred) or a provider/model pattern fallback. When false, the
+	// (preferred) or a provider/model pattern fallback, or upgraded at
+	// runtime by the dynamic 400-learning classifier. When false, the
 	// field is omitted — providers that ignore it (OpenAI, Anthropic)
 	// are unaffected.
 	ReasoningReplay bool
+	// StripParams is the list of request fields the dynamic 400-learning
+	// classifier has marked as unsupported for this provider+model. Each
+	// entry names a ChatRequest field ("reasoning_effort", "temperature",
+	// "top_p", "top_k", "frequency_penalty", "presence_penalty"). The
+	// adapter omits the field from the wire request when listed here.
+	StripParams []string
 }
 
 // PromptCachePolicy is the provider-neutral cache intent. Adapters translate

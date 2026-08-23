@@ -33,6 +33,7 @@ type App struct {
 	Primary         PrimaryStore
 	Fragments       FragmentStore
 	LearningEdges   LearningEdgeStore
+	LearnedParams   LearnedParamStore
 	Todos           ConversationTodoPort
 	AskQuestions    *AskQuestionService
 	Plugins         PluginStore
@@ -73,9 +74,13 @@ type App struct {
 	learningMu       sync.RWMutex
 	learningSearcher *LearningSearcher
 	graphService     *LearningGraphService
-	ReviewAgent      *BackgroundReviewAgent
-	lifecycle        *LifecycleManager
-	lifecycleCancel  context.CancelFunc
+	// learnedParamsCache mirrors the persisted dynamic 400-learning
+	// registry in memory so the hot path (request building) doesn't hit
+	// disk. Initialized once at App construction from LearnedParams store.
+	learnedParams   *learnedParamsCache
+	ReviewAgent     *BackgroundReviewAgent
+	lifecycle       *LifecycleManager
+	lifecycleCancel context.CancelFunc
 	// turnsSinceReview tracks turns since the last learning review per
 	// conversation. When the count reaches LearningReviewThreshold, the
 	// review fires and the counter resets.
@@ -207,6 +212,9 @@ type TurnRun struct {
 	MessageID      string
 	Ctx            context.Context
 	Cancel         context.CancelFunc
+	// ProviderID is the resolved provider for this turn, used by the
+	// dynamic 400-learning classifier to key learned param rules.
+	ProviderID string
 	// Headless marks unattended turns (pipeline agent steps). When true,
 	// ACP subagent tools are filtered from the tool set so permission
 	// prompts never stall a headless run.
@@ -305,6 +313,7 @@ type Deps struct {
 	Primary                     PrimaryStore
 	Fragments                   FragmentStore
 	LearningEdges               LearningEdgeStore
+	LearnedParams               LearnedParamStore
 	Todos                       ConversationTodoPort
 	AskQuestions                *AskQuestionService
 	Plugins                     PluginStore
@@ -357,6 +366,7 @@ func NewApp(deps Deps) *App {
 		Primary:                     deps.Primary,
 		Fragments:                   deps.Fragments,
 		LearningEdges:               deps.LearningEdges,
+		LearnedParams:               deps.LearnedParams,
 		Todos:                       deps.Todos,
 		AskQuestions:                deps.AskQuestions,
 		Plugins:                     deps.Plugins,
@@ -389,6 +399,7 @@ func NewApp(deps Deps) *App {
 		turnsSinceReview:            map[string]int{},
 		toolCallsSinceReview:        map[string]int{},
 		pendingSubagents:            map[string]map[string]bool{},
+		learnedParams:               newLearnedParamsCache(deps.LearnedParams),
 	}
 	// Wire the background LLM review agent. Uses the conversation's
 	// configured model ("global LLM") with a restricted toolset and the

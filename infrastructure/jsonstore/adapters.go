@@ -55,6 +55,15 @@ func (l *LearningEdges) Save(v *domain.LearningEdge) error {
 }
 func (l *LearningEdges) Delete(id string) error { return l.S.DeleteLearningEdge(id) }
 
+type LearnedParams struct{ S *Store }
+
+func (l *LearnedParams) Load() *domain.LearnedParamRegistry {
+	return l.S.LoadLearnedParams()
+}
+func (l *LearnedParams) Save(r *domain.LearnedParamRegistry) error {
+	return l.S.SaveLearnedParams(r)
+}
+
 type Logs struct{ S *Store }
 
 func (l *Logs) Append(e *domain.LogEntry) { l.S.AppendLog(e) }

@@ -234,6 +234,7 @@ func run() error {
 		Primary:                     primaryStore,
 		Fragments:                   fragmentStore,
 		LearningEdges:               &jsonstore.LearningEdges{S: store},
+		LearnedParams:               &jsonstore.LearnedParams{S: store},
 		Todos:                       todoStore,
 		Plugins:                     pluginStore,
 		PluginInstaller:             pluginInstaller,
