@@ -52,33 +52,92 @@ func (a *App) executeReadAudio(run *TurnRun, toolCall domain.ToolCall, caps Mode
 		return summary, []domain.Attachment{audio}, nil
 	}
 
-	// Fallback path: transcribe/describe via audio fallback model.
-	if settings.AudioProviderID == "" || settings.AudioModelID == "" {
-		msg := "This model does not support audio input and no audio fallback model is configured. Ask the user to configure an audio fallback in settings, or switch to an audio-capable model."
-		if audio.FilePath != "" {
-			msg += " The audio file is saved at: " + audio.FilePath
+	// Fallback path: transcribe/describe via a configured cloud route first
+	// (explicit user configuration wins), then degrade to the local offline
+	// engine when available, and only then surface the legacy guidance.
+	if settings.AudioProviderID != "" && settings.AudioModelID != "" {
+		out, atts, cerr := a.transcribeAudioViaCloudRoute(run, caps, settings, audio, strings.TrimSpace(args.Question))
+		if cerr == nil {
+			return out, atts, nil
+		}
+		a.log("warn", "audio", "cloud audio fallback failed (%v); trying offline engine", cerr)
+	}
+
+	if out, ok := a.transcribeAudioOffline(audio); ok {
+		return out, nil, nil
+	}
+
+	if settings.AudioProviderID != "" && settings.AudioModelID != "" {
+		// Cloud was attempted and failed; offline unavailable. Surface the
+		// cloud error message so the misconfiguration is visible.
+		msg, _, cerr := a.transcribeAudioViaCloudRoute(run, caps, settings, audio, strings.TrimSpace(args.Question))
+		if cerr != nil {
+			return msg, nil, cerr
 		}
 		return msg, nil, nil
 	}
 
+	msg := "This model does not support audio input and no audio fallback model is configured. Ask the user to configure an audio fallback in settings, or switch to an audio-capable model."
+	if audio.FilePath != "" {
+		msg += " The audio file is saved at: " + audio.FilePath
+	}
+	return msg, nil, nil
+}
+
+// transcribeAudioViaCloudRoute dispatches to the configured cloud fallback
+// (stt-kind → /audio/transcriptions, otherwise multimodal chat input_audio)
+// and returns its formatted output. Kept separate so the offline degradation
+// ladder in executeReadAudio stays linear.
+func (a *App) transcribeAudioViaCloudRoute(run *TurnRun, caps ModelCapabilities, settings domain.Settings, audio domain.Attachment, question string) (string, []domain.Attachment, error) {
 	provider, apiKey, ok := a.resolveFallbackProvider(settings.AudioProviderID)
 	if !ok {
-		return "Audio fallback provider not found or disabled.", nil, fmt.Errorf("audio provider %q not found", settings.AudioProviderID)
+		return "", nil, fmt.Errorf("audio provider %q not found or disabled", settings.AudioProviderID)
 	}
-
-	// By-kind routing: stt-kind catalog models are served ONLY by the
-	// dedicated /audio/transcriptions endpoint (probe-verified); every
-	// other kind keeps the multimodal chat input_audio path below.
 	if audioFallbackRoute(provider, settings.AudioModelID) == audioRouteTranscriptions {
-		return a.transcribeAudioViaSTT(run.Ctx, provider, apiKey, settings.AudioModelID, strings.TrimSpace(args.Question), audio)
+		return a.transcribeAudioViaSTT(run.Ctx, provider, apiKey, settings.AudioModelID, question, audio)
 	}
+	return a.transcribeAudioViaChat(run, caps, settings, provider, apiKey, audio, question)
+}
 
+// transcribeAudioOffline runs the local engine when built and loaded.
+// ok=false means "no offline route" — callers keep their existing guidance.
+func (a *App) transcribeAudioOffline(audio domain.Attachment) (string, bool) {
+	if status, ok := a.OfflineTranscriber.(OfflineTranscriberStatus); !ok || !status.OfflineSTTAvailable() {
+		return "", false
+	}
+	data, err := decodeAttachmentDataURL(audio.DataURL)
+	if err != nil {
+		a.log("warn", "audio", "offline stt: decode audio bytes: %v", err)
+		return "", false
+	}
+	text, err := a.OfflineTranscriber.TranscribeOffline(context.Background(), OfflineSTTRequest{
+		Data: data, MaxSeconds: 600,
+	})
+	if err != nil {
+		a.log("warn", "audio", "offline stt failed: %v", err)
+		return "", false
+	}
+	result := fmt.Sprintf("[Audio transcript for %s]\n%s", audio.Name, text)
+	if audio.FilePath != "" {
+		result += "\n\nFile path: " + audio.FilePath
+	}
+	meta := map[string]any{
+		"type": "audio", "name": audio.Name, "route": "offline",
+	}
+	if audio.FilePath != "" {
+		meta["file_path"] = audio.FilePath
+	}
+	return yamlMDApp(meta, result), true
+}
+
+// transcribeAudioViaChat is the legacy multimodal chat fallback: send the
+// audio attachment as an input_audio block to an audio-capable chat model.
+func (a *App) transcribeAudioViaChat(run *TurnRun, caps ModelCapabilities, settings domain.Settings, provider *domain.Provider, apiKey string, audio domain.Attachment, question string) (string, []domain.Attachment, error) {
 	adapter, err := a.Factory(run.Ctx, provider, apiKey)
 	if err != nil {
 		return "Failed to initialize audio fallback adapter.", nil, err
 	}
 
-	question := strings.TrimSpace(args.Question)
 	if question == "" {
 		question = "Transcribe this audio. If there is speech, provide a full transcript. If there is music or ambient sound, describe it concisely."
 	} else {
@@ -94,7 +153,7 @@ func (a *App) executeReadAudio(run *TurnRun, toolCall domain.ToolCall, caps Mode
 	if audio.FilePath != "" {
 		result += "\n\nFile path: " + audio.FilePath
 	}
-	meta := map[string]any{"type": "audio", "name": audio.Name}
+	meta := map[string]any{"type": "audio", "name": audio.Name, "route": string(audioRouteChat)}
 	if audio.FilePath != "" {
 		meta["file_path"] = audio.FilePath
 	}

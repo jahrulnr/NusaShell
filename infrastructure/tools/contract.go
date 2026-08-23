@@ -204,7 +204,6 @@ func (t *Toolbox) execContractRead(ctx context.Context, argsJSON []byte) (string
 	}
 	var marked []string
 	var bodies []string
-	tokens := 0
 	truncatedAny := false
 	for _, p := range targets {
 		content, truncated, err := t.Contracts.ReadContract(p)
@@ -213,11 +212,10 @@ func (t *Toolbox) execContractRead(ctx context.Context, argsJSON []byte) (string
 		}
 		marked = append(marked, p.Manifest.ID)
 		bodies = append(bodies, "# "+p.Manifest.ID+" v"+p.Manifest.Version+"\n\n"+content)
-		tokens += len(content) / 4
 		truncatedAny = truncatedAny || truncated
 	}
 	t.gate().mark(ctx, marked...)
-	meta := map[string]any{"ids": marked, "tokens": tokens}
+	meta := map[string]any{"ids": marked}
 	if truncatedAny {
 		meta["truncated"] = true
 	}

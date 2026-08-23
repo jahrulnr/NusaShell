@@ -114,8 +114,12 @@ type responsesUsage struct {
 }
 
 // toResponsesInput flattens ChatMessages into the canonical Responses API
-// input shape: message items carry string content, function calls and their
-// outputs are top-level items.
+// input shape: message items carry string or array content, function calls
+// and their outputs are top-level items. Every message item MUST include
+// type:"message" — the Responses API validates input items as a union of
+// {type:"message",...} | {type:"reasoning",...} | {type:"function_call",...}
+// | {type:"function_call_output",...} and rejects items without a type
+// field (strict providers like Stealth return HTTP 400 invalid_prompt).
 func toResponsesInput(msgs []application.ChatMessage) []responsesInputItem {
 	var out []responsesInputItem
 	for _, m := range msgs {
@@ -125,10 +129,10 @@ func toResponsesInput(msgs []application.ChatMessage) []responsesInputItem {
 			if len(m.Attachments) > 0 {
 				content = aiutil.MustJSON(responsesUserContent(m))
 			}
-			out = append(out, responsesInputItem{Role: "user", Content: content})
+			out = append(out, responsesInputItem{Type: "message", Role: "user", Content: content})
 		case "assistant":
 			if m.Content != "" {
-				out = append(out, responsesInputItem{Role: "assistant", Content: aiutil.StrJSON(m.Content)})
+				out = append(out, responsesInputItem{Type: "message", Role: "assistant", Content: aiutil.StrJSON(m.Content)})
 			}
 			for _, tc := range m.ToolCalls {
 				// Auto-heal: models occasionally hallucinate tool names with
@@ -165,6 +169,14 @@ func responsesToolOutput(result *application.ToolResult) json.RawMessage {
 	return aiutil.MustJSON(responsesToolOutputContent(result))
 }
 
+// responsesToolOutputContent builds a multimodal content array for tool
+// results that carry image/audio/video attachments. Images use input_image;
+// audio uses input_audio; video uses video_url (OpenRouter's dedicated
+// video content type — OpenAI does not support video natively, and sending
+// video through input_image causes providers to reject it with HTTP 400).
+// Video blocks only reach this function for models with Video=true;
+// non-video models have video stripped by filterToolAttachmentsByCaps
+// before the request is built.
 func responsesToolOutputContent(result *application.ToolResult) []map[string]any {
 	blocks := make([]map[string]any, 0, 1+len(result.Attachments))
 	if result.Content != "" {
@@ -174,7 +186,9 @@ func responsesToolOutputContent(result *application.ToolResult) []map[string]any
 		switch att.Type {
 		case "audio":
 			blocks = append(blocks, aiutil.InputAudioBlock(att))
-		case "image", "video":
+		case "video":
+			blocks = append(blocks, aiutil.VideoURLBlock(att))
+		case "image":
 			blocks = append(blocks, map[string]any{"type": "input_image", "image_url": att.DataURL})
 		}
 	}
@@ -192,7 +206,9 @@ func responsesUserContent(message application.ChatMessage) []map[string]any {
 			blocks = append(blocks, map[string]any{"type": "input_text", "text": aiutil.TextAttachmentContent(attachment)})
 		case "audio":
 			blocks = append(blocks, aiutil.InputAudioBlock(attachment))
-		case "image", "video":
+		case "video":
+			blocks = append(blocks, aiutil.VideoURLBlock(attachment))
+		case "image":
 			blocks = append(blocks, map[string]any{"type": "input_image", "image_url": attachment.DataURL})
 		case "file":
 			blocks = append(blocks, map[string]any{

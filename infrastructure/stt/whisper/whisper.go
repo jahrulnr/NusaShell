@@ -1,21 +1,21 @@
 //go:build stt
 
-// Package whisper implements application.OfflineTranscriber on top of the
-// official whisper.cpp Go binding (CGO). Built only with `-tags stt` per
-// .experimental/NusaShell-STT-Technical-Design.md §13: CGO is a release/
-// CI concern, never a user requirement, and default builds stay pure Go.
 package whisper
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
-
-	"github.com/go-audio/wav"
+	"time"
 
 	whisper "github.com/ggerganov/whisper.cpp/bindings/go/pkg/whisper"
+	"github.com/go-audio/wav"
+
 	"nusashell/application"
 )
 
@@ -23,7 +23,7 @@ import (
 // every transcription gets its own Context because whisper.cpp contexts are
 // NOT safe for concurrent use (doc §16).
 type Engine struct {
-	mu     sync.Mutex // guards lazy init; transcription itself serializes per-context
+	mu     sync.Mutex // guards model lifetime; transcription itself is per-context
 	model  whisper.Model
 	prompt string // initial_prompt bias (e.g. product vocabulary)
 }
@@ -55,7 +55,6 @@ func (e *Engine) Close() error {
 	return nil
 }
 
-// OfflineSTTAvailable reports whether the engine finished loading.
 func (e *Engine) OfflineSTTAvailable() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -69,11 +68,11 @@ func (e *Engine) OfflineSTTUnavailableReason() string {
 	return "whisper model not loaded"
 }
 
-// TranscribeOffline runs local inference on WAV (16 kHz mono) bytes.
-// Other encodings must be converted upstream (doc §17 keeps decoding in
-// infrastructure; read_audio currently feeds data URLs whose media type we
-// check here).
-func (e *Engine) TranscribeOffline(_ context.Context, req application.OfflineSTTRequest) (string, error) {
+// TranscribeOffline runs local inference. Input may be WAV (decoded in
+// process) or any container ffmpeg supports (mp3, ogg, m4a...), converted
+// to 16 kHz mono PCM via a piped ffmpeg process (doc §17 keeps decoding in
+// infrastructure; the application layer never sees sample rates).
+func (e *Engine) TranscribeOffline(ctx context.Context, req application.OfflineSTTRequest) (string, error) {
 	e.mu.Lock()
 	model := e.model
 	e.mu.Unlock()
@@ -84,7 +83,18 @@ func (e *Engine) TranscribeOffline(_ context.Context, req application.OfflineSTT
 		return "", fmt.Errorf("whisper: audio data is empty")
 	}
 
-	ctx, err := model.NewContext()
+	pcm, err := decodeTo16kMono(ctx, req.Data)
+	if err != nil {
+		return "", err
+	}
+	if len(pcm) == 0 {
+		return "", fmt.Errorf("whisper: decoded audio is empty")
+	}
+	if req.MaxSeconds > 0 && len(pcm) > req.MaxSeconds*int(whisper.SampleRate) {
+		return "", fmt.Errorf("whisper: audio exceeds %d seconds cap", req.MaxSeconds)
+	}
+
+	wctx, err := model.NewContext()
 	if err != nil {
 		return "", fmt.Errorf("whisper: new context: %w", err)
 	}
@@ -93,51 +103,89 @@ func (e *Engine) TranscribeOffline(_ context.Context, req application.OfflineSTT
 		lang = "auto"
 	}
 	if lang != "auto" {
-		if err := ctx.SetLanguage(lang); err != nil {
+		if err := wctx.SetLanguage(lang); err != nil {
 			return "", fmt.Errorf("whisper: language %q: %w", lang, err)
 		}
 	}
 	if e.prompt != "" {
-		ctx.SetInitialPrompt(e.prompt)
+		wctx.SetInitialPrompt(e.prompt)
 	}
 
-	pcm, err := decodeWavMono16k(req.Data)
-	if err != nil {
-		return "", err
-	}
-	if req.MaxSeconds > 0 && len(pcm) > req.MaxSeconds*whisper.SampleRate {
-		return "", fmt.Errorf("whisper: audio exceeds %d seconds cap", req.MaxSeconds)
-	}
-
-	if err := ctx.Process(pcm, nil, nil, nil); err != nil {
+	start := time.Now()
+	if err := wctx.Process(pcm, nil, nil, nil); err != nil {
 		return "", fmt.Errorf("whisper: process: %w", err)
 	}
 	var sb strings.Builder
 	for {
-		seg, segErr := ctx.NextSegment()
+		seg, segErr := wctx.NextSegment()
 		if segErr != nil {
-			break // io.EOF or end of segments
+			break
 		}
 		sb.WriteString(seg.Text)
 	}
 	text := strings.TrimSpace(sb.String())
 	if text == "" {
-		return "", fmt.Errorf("whisper: empty transcript")
+		return "", fmt.Errorf("whisper: empty transcript after %s of inference", time.Since(start))
 	}
 	return text, nil
 }
 
-// decodeWavMono16k decodes PCM WAV bytes to float32 samples at whisper's
-// native sample rate. Resampling other rates is deliberately out of scope
-// here (fixtures and read_audio pipeline are normalized to 16 kHz mono).
-func decodeWavMono16k(data []byte) ([]float32, error) {
-	dec := wav.NewDecoder(strings.NewReader(string(data)))
+// decodeTo16kMono converts arbitrary audio bytes to 16 kHz mono float32
+// samples. WAV goes through the in-process parser; everything else through
+// `ffmpeg -i - -f f32le -ar 16000 -ac 1 -` (piped, no temp files).
+func decodeTo16kMono(ctx context.Context, data []byte) ([]float32, error) {
+	if samples, wavErr := decodeWavInProcess(data); wavErr == nil {
+		return samples, nil
+	}
+	return decodeViaFFmpeg(ctx, data)
+}
+
+func decodeWavInProcess(data []byte) ([]float32, error) {
+	dec := wav.NewDecoder(bytes.NewReader(data))
 	buf, err := dec.FullPCMBuffer()
 	if err != nil {
-		return nil, fmt.Errorf("whisper: decode wav: %w", err)
+		return nil, err
 	}
-	if dec.SampleRate != whisper.SampleRate || dec.NumChans != 1 {
-		return nil, fmt.Errorf("whisper: need 16 kHz mono wav, got %d Hz %d channels", dec.SampleRate, dec.NumChans)
+	if dec.SampleRate != uint32(whisper.SampleRate) || dec.NumChans != 1 {
+		return nil, fmt.Errorf("want 16 kHz mono wav, got %d Hz %d channels", dec.SampleRate, dec.NumChans)
 	}
 	return buf.AsFloat32Buffer().Data, nil
+}
+
+const ffmpegTimeout = 2 * time.Minute
+
+func decodeViaFFmpeg(ctx context.Context, data []byte) ([]float32, error) {
+	ffmpegPath, lookErr := exec.LookPath("ffmpeg")
+	if lookErr != nil {
+		return nil, fmt.Errorf("audio is not a WAV and ffmpeg is not installed; install ffmpeg or provide 16 kHz mono WAV")
+	}
+	fctx, cancel := context.WithTimeout(ctx, ffmpegTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(fctx, ffmpegPath,
+		"-hide_banner", "-loglevel", "error",
+		"-i", "pipe:0",
+		"-f", "f32le", "-ar", "16000", "-ac", "1", "pipe:1",
+	)
+	cmd.Stdin = bytes.NewReader(data)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return nil, fmt.Errorf("ffmpeg conversion failed: %s", msg)
+	}
+	if out.Len() == 0 || out.Len()%4 != 0 {
+		return nil, fmt.Errorf("ffmpeg produced invalid PCM (%d bytes)", out.Len())
+	}
+	pcm := make([]float32, out.Len()/4)
+	for i := range pcm {
+		bits := uint32(out.Bytes()[i*4]) | uint32(out.Bytes()[i*4+1])<<8 | uint32(out.Bytes()[i*4+2])<<16 | uint32(out.Bytes()[i*4+3])<<24
+		pcm[i] = math.Float32frombits(bits)
+	}
+	return pcm, nil
 }

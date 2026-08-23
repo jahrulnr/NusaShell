@@ -50,9 +50,11 @@ func TestChatCompletionEncodesAudioAsInputAudio(t *testing.T) {
 	}
 }
 
-// Video has no portable Chat Completions part; keep the legacy image_url
-// data-URL transport so OpenRouter-style gateways can still route it.
-func TestChatCompletionVideoKeepsImageURLTransport(t *testing.T) {
+// Video must use the video_url content type (OpenRouter's dedicated video
+// transport), NOT image_url. Sending video as image_url causes providers to
+// reject it with HTTP 400 because they attempt image decoding on a video
+// payload.
+func TestChatCompletionVideoUsesVideoURLTransport(t *testing.T) {
 	req := application.ChatRequest{
 		Model: "test-model",
 		Messages: []application.ChatMessage{{
@@ -65,8 +67,11 @@ func TestChatCompletionVideoKeepsImageURLTransport(t *testing.T) {
 	}
 
 	body := marshalRequest(t, buildRequest(req, false))
-	if !containsAll(body, "image_url", "data:video/mp4;base64,AAAA") {
-		t.Fatalf("video should still use the image_url transport: %s", body)
+	if !containsAll(body, "video_url", "data:video/mp4;base64,AAAA") {
+		t.Fatalf("video must use the video_url transport: %s", body)
+	}
+	if strings.Contains(body, "image_url") {
+		t.Fatalf("video must NOT use image_url transport: %s", body)
 	}
 }
 

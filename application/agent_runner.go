@@ -1591,8 +1591,18 @@ func chatMessages(c *domain.Conversation, pendingMsgID string, caps ModelCapabil
 // when the active model does not support the corresponding modality, and
 // appends a text note to the content so the model knows the media exists
 // but couldn't be delivered. This prevents provider errors when a read_*
-// tool returns media that the model can't process (e.g. audio sent to a
-// non-audio model via image_url transport).
+// tool returns media that the model can't process:
+//   - audio sent to a non-audio model via input_audio/image_url transport
+//     (Nvidia NIM rejects with "Failed to load image from data:audio/...")
+//   - video sent to a non-video model via video_url/input_image transport
+//     (Stealth rejects with HTTP 400; OpenAI doesn't support video
+//     natively at all — only frames as input_image)
+//   - image sent to a non-vision model
+//
+// The same gating applies to user-authored attachments in chatMessages
+// (stripped + placeholder) and to proactive fallback enrichment
+// (enrichWithAudioDescriptions / enrichWithVideoDescriptions describe the
+// media via a fallback model so the text-only model still gets the content).
 func filterToolAttachmentsByCaps(atts []domain.Attachment, content string, caps ModelCapabilities) ([]domain.Attachment, string) {
 	if len(atts) == 0 {
 		return atts, content

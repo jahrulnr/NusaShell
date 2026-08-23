@@ -158,11 +158,13 @@ func toOpenAIMessages(req application.ChatRequest) []openAIMessage {
 
 // openAIToolContent builds a multimodal content array for tool results that
 // carry image/audio/video attachments (e.g. read_image, read_audio,
-// read_video). Images and video use the image_url transport with data URLs
-// (OpenRouter-style gateways route them by MIME type); audio uses the
-// standard Chat Completions input_audio block (base64 + format) — sending
-// audio through image_url makes strict endpoints like Nvidia NIM reject it
-// with "Failed to load image from data:audio/mpeg".
+// read_video). Images use the image_url transport; audio uses input_audio;
+// video uses video_url (OpenRouter's dedicated video content type — OpenAI
+// does not support video natively, and sending video through image_url
+// causes providers to reject it with HTTP 400 because they attempt image
+// decoding on a video payload). Video blocks only reach this function for
+// models with Video=true; non-video models have video stripped by
+// filterToolAttachmentsByCaps before the request is built.
 func openAIToolContent(result *application.ToolResult) []map[string]any {
 	blocks := make([]map[string]any, 0, 1+len(result.Attachments))
 	if result.Content != "" {
@@ -172,7 +174,9 @@ func openAIToolContent(result *application.ToolResult) []map[string]any {
 		switch att.Type {
 		case "audio":
 			blocks = append(blocks, inputAudioBlock(att))
-		case "image", "video":
+		case "video":
+			blocks = append(blocks, aiutil.VideoURLBlock(att))
+		case "image":
 			blocks = append(blocks, map[string]any{
 				"type":      "image_url",
 				"image_url": map[string]any{"url": att.DataURL},
@@ -193,10 +197,9 @@ func openAIUserContent(message application.ChatMessage) []map[string]any {
 			blocks = append(blocks, map[string]any{"type": "text", "text": aiutil.TextAttachmentContent(attachment)})
 		case "audio":
 			blocks = append(blocks, inputAudioBlock(attachment))
-		case "image", "video":
-			// image_url is the universal multimodal transport for OpenAI-
-			// compatible endpoints. Gateways route video data URLs
-			// to providers that support them (e.g. Gemini via OpenRouter).
+		case "video":
+			blocks = append(blocks, aiutil.VideoURLBlock(attachment))
+		case "image":
 			blocks = append(blocks, map[string]any{
 				"type":      "image_url",
 				"image_url": map[string]any{"url": attachment.DataURL},

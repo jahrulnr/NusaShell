@@ -77,6 +77,59 @@ visible context window.
 attachment for a capable model, fallback-model description otherwise) for
 audio and video files respectively.
 
+### Wire format for media attachments
+
+Each provider adapter serializes media attachments using the content type
+the upstream API expects for that modality:
+
+| Modality | Chat Completions | Responses API | Messages (Anthropic) |
+|---|---|---|---|
+| Image | `image_url` | `input_image` | `image` source |
+| Audio | `input_audio` (base64 + format) | `input_audio` (base64 + format) | `image` source (no native audio) |
+| Video | `video_url` | `video_url` | `image` source (no native video) |
+
+Audio and video MUST NOT be sent as `image_url`/`input_image`. Providers
+like Nvidia NIM and Stealth reject `data:audio/...` or `data:video/...`
+URLs in the image slot with HTTP 400 ("Failed to load image" or generic
+"Provider returned error") because they attempt image decoding on a
+non-image payload. OpenRouter documents `video_url` as the dedicated
+content type for video input on both Chat Completions and Responses.
+
+**OpenAI does not support video input natively.** The OpenAI FAQ states
+"No it can not handle videos. It currently supports processing static
+images only." The only OpenAI-sanctioned video workaround is extracting
+frames and sending them as `input_image` items. `video_url` is an
+OpenRouter-specific extension that routes video to providers which do
+support it (e.g. Gemini, Stealth/ox-alpha). For direct OpenAI API calls,
+video attachments are hidden from non-video models by capability gating
+(see below) — a model with `Video=false` never receives a `video_url`
+block.
+
+### Capability gating (hiding media from unsupported models)
+
+Media attachments are stripped before they reach the provider adapter
+when the active chat model does not support the corresponding modality.
+This is the same handling for image, audio, and video:
+
+1. **User-authored attachments** (`chatMessages`): the attachment is
+   removed and a placeholder is injected telling the model to call
+   `read_image` / `read_audio` / `read_video` with the absolute file
+   path if it wants the content.
+2. **Tool result attachments** (`filterToolAttachmentsByCaps`): the
+   attachment is removed and a text note is appended (e.g.
+   `[Video "clip.mp4" was loaded but cannot be shown to this model.
+   File path: /path/to/clip.mp4]`).
+3. **Proactive fallback** (`enrichWithAudioDescriptions` /
+   `enrichWithVideoDescriptions`): when a fallback model is configured,
+   the media is described via the fallback before the turn starts, so
+   the text-only model receives the content as a text attachment.
+
+A model's capabilities are resolved from the provider catalog
+(`domain.ModelCapabilitiesOf`). Unknown models default to
+`Vision=true, Audio=false, Video=false` — vision is common enough to
+default on, but audio and video are rare capabilities that cause
+provider errors when sent to models that lack them.
+
 ## Generated images
 
 `generate_image` writes files under `attachments/<conversationID>/gen-<toolCallID>.<ext>`

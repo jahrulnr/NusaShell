@@ -12,6 +12,25 @@ import (
 	"nusashell/domain"
 )
 
+// TestResponsesMessageItemsIncludeTypeMessage: every user/assistant message
+// input item MUST include type:"message" — the Responses API validates input
+// items as a union and rejects items without a type field (strict providers
+// like Stealth return HTTP 400 invalid_prompt). This is a regression test for
+// a latent bug where message items were sent without type:"message".
+func TestResponsesMessageItemsIncludeTypeMessage(t *testing.T) {
+	req := application.ChatRequest{
+		Model: "test-model",
+		Messages: []application.ChatMessage{
+			{Role: "user", Content: "Hello"},
+			{Role: "assistant", Content: "Hi there"},
+		},
+	}
+	body := marshalRequest(t, buildResponsesRequest(req, false))
+	if !containsAll(body, `"type":"message"`, `"role":"user"`, `"role":"assistant"`) {
+		t.Fatalf("message items must include type:message, got %s", body)
+	}
+}
+
 func TestResponsesAdapterEncodesAttachments(t *testing.T) {
 	req := application.ChatRequest{
 		Model: "test-model",
@@ -108,6 +127,54 @@ func TestResponsesToolResultAudioUsesInputAudio(t *testing.T) {
 	}
 	if strings.Contains(body, "input_image") {
 		t.Fatalf("tool result audio must NOT use input_image, got %s", body)
+	}
+}
+
+// TestResponsesVideoAttachmentUsesVideoURL: video attachments must be
+// encoded as video_url (not input_image) on the Responses API. Sending
+// video as input_image causes providers to reject it with HTTP 400 because
+// they attempt image decoding on a video payload.
+func TestResponsesVideoAttachmentUsesVideoURL(t *testing.T) {
+	req := application.ChatRequest{
+		Model: "test-model",
+		Messages: []application.ChatMessage{{
+			Role:    "user",
+			Content: "Describe this clip",
+			Attachments: []domain.Attachment{
+				{Type: "video", Name: "clip.mp4", MediaType: "video/mp4", DataURL: "data:video/mp4;base64,AAAA"},
+			},
+		}},
+	}
+	body := marshalRequest(t, buildResponsesRequest(req, false))
+	if !containsAll(body, "video_url", "data:video/mp4;base64,AAAA") {
+		t.Fatalf("video attachment must use video_url, got %s", body)
+	}
+	if strings.Contains(body, "input_image") {
+		t.Fatalf("video attachment must NOT use input_image, got %s", body)
+	}
+}
+
+// TestResponsesToolResultVideoUsesVideoURL: video attachments in tool
+// results (e.g. read_video) must also use video_url, not input_image.
+func TestResponsesToolResultVideoUsesVideoURL(t *testing.T) {
+	req := application.ChatRequest{
+		Model: "test-model",
+		Messages: []application.ChatMessage{
+			{Role: "assistant", ToolCalls: []domain.ToolCall{{ID: "c1", Name: "read_video", Args: `{}`}}},
+			{Role: "tool", ToolResult: &application.ToolResult{
+				ToolCallID: "c1", Name: "read_video", Content: "Video loaded.",
+				Attachments: []domain.Attachment{
+					{Type: "video", Name: "clip.mp4", MediaType: "video/mp4", DataURL: "data:video/mp4;base64,AAAA"},
+				},
+			}},
+		},
+	}
+	body := marshalRequest(t, buildResponsesRequest(req, false))
+	if !containsAll(body, "video_url", "data:video/mp4;base64,AAAA") {
+		t.Fatalf("tool result video must use video_url, got %s", body)
+	}
+	if strings.Contains(body, "input_image") {
+		t.Fatalf("tool result video must NOT use input_image, got %s", body)
 	}
 }
 
