@@ -12,8 +12,9 @@
   "tool_calls": [
     {
       "id": "tc_1",
-      "name": "docs_search",
+      "name": "docs",
       "args": {
+        "op": "search",
         "query": "mcp"
       },
       "status": "ok",

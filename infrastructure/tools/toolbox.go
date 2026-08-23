@@ -683,8 +683,51 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		}
 		return yamlMD(map[string]any{"id": doc.ID, "title": doc.Title, "path": doc.Path}, doc.Content), nil
 
+	case strings.HasPrefix(name, "ci_pipeline_"):
+		// Hand over the bare op, not the resolved name: direct calls with
+		// resolved keys (e.g. "ci_pipeline_list") must stay unknown tools —
+		// the family root+op form is the only door (no alias machinery).
+		return t.executePipelineOp(ctx, strings.TrimPrefix(name, "ci_pipeline_"), argsJSON)
+
 	default:
 		return "", fmt.Errorf("unknown %s op %q", name, op)
+	}
+}
+
+// executePipelineOp runs one validated ci_pipeline op (list|read|validate).
+// It lives outside executeAutomation so the automation switch never answers
+// to a resolved per-op name.
+func (t *Toolbox) executePipelineOp(ctx context.Context, op string, argsJSON []byte) (string, error) {
+	if t.Automation == nil {
+		return "", fmt.Errorf("automation is not configured")
+	}
+	var args map[string]any
+	_ = json.Unmarshal(argsJSON, &args)
+	str := func(k string) string {
+		v, _ := args[k].(string)
+		return v
+	}
+	a := t.Automation
+	switch op {
+	case "list", "read":
+		w, r, err := a.ReadPipeline(ctx, str("workspace"))
+		if err != nil {
+			return "", err
+		}
+		return yamlBlock(map[string]any{"name": w.Name, "jobs": w.JobIDs(), "validation": r.Verdict()}), nil
+	case "validate":
+		raw := []byte(str("yaml"))
+		if len(raw) == 0 && str("workspace") != "" {
+			_, r, err := a.ReadPipeline(ctx, str("workspace"))
+			if err != nil {
+				return "", err
+			}
+			return yamlBlock(r), nil
+		}
+		r, _ := a.ValidateYAML(raw)
+		return yamlBlock(r), nil
+	default:
+		return "", fmt.Errorf("unknown ci_pipeline op %q", op)
 	}
 }
 
@@ -1675,23 +1718,17 @@ func strEnum(desc string, values ...string) map[string]any {
 // (<server>:<tool>) from mcp_search / tool_list.
 
 func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON []byte) (string, bool, error) {
-	// ci_pipeline is a dispatcher family: only the resolved root form may
-	// proceed. Retired direct per-op names stay unhandled here so Execute
-	// reports them as unknown tools.
+	// Resolved ci_pipeline_* keys are private routing inside executeFamily
+	// (handled by executePipelineOp). A direct call with such a name is a
+	// retired per-op verb: stay unhandled so Execute reports it as an
+	// unknown tool — no alias doors (docs/design/tool-dispatchers.md).
 	if strings.HasPrefix(name, "ci_pipeline_") {
 		return "", false, nil
-	}
-	if name == "ci_pipeline" {
-		op, err := application.DispatchOp(name, argsJSON)
-		if err != nil {
-			return "", true, err
-		}
-		name = name + "_" + op
 	}
 
 	if t.Automation == nil {
 		switch name {
-		case "ci_pipeline_list", "ci_pipeline_read", "ci_pipeline_validate", "ci_run", "ci_wait", "ci_run_status",
+		case "ci_run", "ci_wait", "ci_run_status",
 			"ci_logs", "ci_cancel", "ci_steer", "automation_list", "automation_read", "automation_validate",
 			"automation_create", "automation_enable", "automation_disable", "automation_status",
 			"schedule_once", "schedule_every", "wait_until":
@@ -1714,13 +1751,7 @@ func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON [
 		return yamlBlock(v), true, nil
 	}
 	switch name {
-	case "ci_pipeline_list", "ci_pipeline_read":
-		w, r, err := a.ReadPipeline(ctx, str("workspace"))
-		if err != nil {
-			return "", true, err
-		}
-		return encode(map[string]any{"name": w.Name, "jobs": w.JobIDs(), "validation": r.Verdict()}, nil)
-	case "ci_pipeline_validate", "automation_validate":
+	case "automation_validate":
 		raw := []byte(str("yaml"))
 		if len(raw) == 0 && str("workspace") != "" {
 			_, r, err := a.ReadPipeline(ctx, str("workspace"))

@@ -672,13 +672,15 @@ function summarizeMcpCallArgs(args) {
 
 function summarizeToolArgs(args) {
   if (!args || typeof args !== 'object' || Array.isArray(args)) return '';
-  const entries = Object.entries(args);
-  if (!entries.length) return '';
-  if (entries.length === 1) {
-    const value = JSON.stringify(entries[0][1]);
+  // Dispatcher-family calls carry the verb as `op`; the terminal title and
+  // input panel already show it, so summarize the remaining payload only.
+  const rest = Object.entries(args).filter(([key]) => key !== 'op');
+  if (!rest.length) return '';
+  if (rest.length === 1) {
+    const value = JSON.stringify(rest[0][1]);
     return value.length > 42 ? `${value.slice(0, 42)}…` : value;
   }
-  return `${entries.length} args`;
+  return `${rest.length} args`;
 }
 
 function formatToolTerminalInput(name, args) {

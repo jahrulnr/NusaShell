@@ -144,7 +144,7 @@ func TestGoldenDTOs(t *testing.T) {
 		Model: "claude-3-5-haiku", CreatedAt: "2026-08-12T00:00:00Z",
 		Usage: &UsageDTO{InputTokens: 120, OutputTokens: 40, CacheRead: 80},
 		ToolCalls: []ToolCallDTO{{
-			ID: "tc_1", Name: "docs_search", Args: json.RawMessage(`{"query":"mcp"}`),
+			ID: "tc_1", Name: "docs", Args: json.RawMessage(`{"op":"search","query":"mcp"}`),
 			Status: "ok", Output: "docs/mcp.md",
 		}},
 		Attachments: []AttachmentDTO{{

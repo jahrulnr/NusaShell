@@ -78,15 +78,15 @@ const transcript = {
     {
       role: 'assistant',
       reasoning: 'The user stated a durable preference; checking memory first.',
-      tool_calls: [{ id: 'tc_1', name: 'memory_search', args: { query: 'Indonesian' } }],
+      tool_calls: [{ id: 'tc_1', name: 'memory', args: { op: 'search', query: 'Indonesian' } }],
     },
-    { role: 'tool', tool_result: { tool_call_id: 'tc_1', name: 'memory_search', content: '3 entries for "docker", none match.' } },
+    { role: 'tool', tool_result: { tool_call_id: 'tc_1', name: 'memory', content: '3 entries for "docker", none match.' } },
     {
       role: 'assistant',
       reasoning: 'Not stored yet. Saving now.',
-      tool_calls: [{ id: 'tc_2', name: 'memory_save', args: { content: 'User prefers Indonesian' } }],
+      tool_calls: [{ id: 'tc_2', name: 'memory', args: { op: 'save', content: 'User prefers Indonesian' } }],
     },
-    { role: 'tool', tool_result: { tool_call_id: 'tc_2', name: 'memory_save', content: 'ok, saved fragment mem_abc123' } },
+    { role: 'tool', tool_result: { tool_call_id: 'tc_2', name: 'memory', content: 'ok, saved fragment mem_abc123' } },
     { role: 'assistant', content: 'Saved one memory fragment about language preference.' },
   ],
 };
@@ -103,10 +103,10 @@ test('details show thinking, tool cards, and the final note - but never the repl
 
   const cards = view.querySelectorAll('details.agent-tool-terminal');
   assert.equal(cards.length, 2);
-  assert.match(cards[0].querySelector('.agent-tool-terminal-title')?.textContent || '', /memory_search/);
+  assert.match(cards[0].querySelector('.agent-tool-terminal-title')?.textContent || '', /memory/);
   // Meta summarizes the args (single-arg tools show just the value).
   assert.match(cards[0].querySelector('.agent-tool-terminal-meta')?.textContent || '', /Indonesian/, 'tool meta summarizes args');
-  assert.match(cards[1].querySelector('.agent-tool-terminal-meta')?.textContent || '', /Indonesian/, 'memory_save meta shows the stored snippet');
+  assert.match(cards[1].querySelector('.agent-tool-terminal-meta')?.textContent || '', /Indonesian/, 'memory save meta shows the stored snippet');
   assert.ok(cards[0].querySelector('.agent-tool-terminal-output'), 'output panel exists');
   assert.ok(!cards[0].open, 'tool details are collapsed by default');
 

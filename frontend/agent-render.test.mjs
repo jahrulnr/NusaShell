@@ -40,7 +40,7 @@ test('renders one model and usage summary for all assistant rounds in a user tur
     {
       role: 'assistant', model: 'luna', created_at: '2026-08-13T18:01:01Z',
       usage: { input_tokens: 50, output_tokens: 10 },
-      steps: [{ type: 'tool_calls', tool_calls: [{ id: 'tool_3', name: 'skill_list', args: {}, status: 'ok', output: '[]' }] }],
+      steps: [{ type: 'tool_calls', tool_calls: [{ id: 'tool_3', name: 'skill', args: { op: 'list' }, status: 'ok', output: '[]' }] }],
     },
   ]);
 

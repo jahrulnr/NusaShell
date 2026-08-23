@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"nusashell/domain"
+	docsinfra "nusashell/infrastructure/docs"
 	"nusashell/infrastructure/memorystore"
 )
 
@@ -80,5 +81,61 @@ func TestRetiredPerOpNamesAreUnknownTools(t *testing.T) {
 	}
 	if out == "" {
 		t.Fatal("expected non-empty skill list output")
+	}
+}
+
+// Every advertised family root+op must reach a real handler through
+// Toolbox.Execute. Regression guard for ci_pipeline ops that were
+// advertised but unreachable: executeFamily had no case for them, so every
+// call died with `unknown ci_pipeline_list op "list"` while the roster kept
+// offering the tool (found by live probe 2026-08-23).
+//
+// The assertion is routing-only: any error is acceptable as long as it is
+// not the executeFamily default (`unknown ... op`) — dependency errors like
+// "automation is not configured" prove the call reached its handler.
+func TestAllAdvertisedFamilyOpsRoute(t *testing.T) {
+	docsSource, err := docsinfra.New("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fragments, err := memorystore.NewFragments(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tb := testToolbox(
+		[]*domain.Skill{{ID: "s1", Name: "git-helper", Content: "how to rebase"}},
+		nil, &stubMCP{},
+	)
+	tb.Docs = docsSource
+	tb.Fragments = fragments
+
+	cases := []struct{ name, args string }{
+		{"skill", `{"op":"list"}`},
+		{"skill", `{"op":"search","query":"git"}`},
+		{"skill", `{"op":"read","name":"s1"}`},
+		{"skill", `{"op":"files","name":"s1"}`},
+		{"skill", `{"op":"save","name":"probe","content":"c"}`},
+		{"memory", `{"op":"save","content":"User prefers Indonesian","category":"user"}`},
+		{"memory", `{"op":"replace","target":"fragment","id":"nope","content":"c"}`},
+		{"memory", `{"op":"search","query":"Indonesian"}`},
+		{"memory", `{"op":"list"}`},
+		{"memory", `{"op":"delete","id":"nope"}`},
+		{"docs", `{"op":"search","query":"automation"}`},
+		{"docs", `{"op":"read","id":"automation"}`},
+		{"ci_pipeline", `{"op":"list"}`},
+		{"ci_pipeline", `{"op":"read"}`},
+		{"ci_pipeline", `{"op":"validate","yaml":"jobs: []"}`},
+	}
+	for _, tc := range cases {
+		if _, err := tb.Execute(context.Background(), tc.name, []byte(tc.args)); err != nil && strings.Contains(err.Error(), "unknown") {
+			t.Fatalf("%s %s did not route to a handler: %v", tc.name, tc.args, err)
+		}
+	}
+
+	// Retired per-op names stay unknown at the boundary — no alias door.
+	for _, name := range []string{"ci_pipeline_list", "memory_replace", "skill_save", "docs_read"} {
+		if _, err := tb.Execute(context.Background(), name, []byte(`{}`)); err == nil || !strings.Contains(err.Error(), "unknown tool") {
+			t.Fatalf("retired name %q must fail as unknown tool, got: %v", name, err)
+		}
 	}
 }

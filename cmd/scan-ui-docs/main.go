@@ -4,7 +4,7 @@
 //
 // The generated files resources/agent/docs/ui-*.md are embedded at
 // build time by resources/resources.go so the agent can surface them
-// through docs_search / docs_read.
+// through the `docs` family tool (root + op).
 //
 // Usage:
 //

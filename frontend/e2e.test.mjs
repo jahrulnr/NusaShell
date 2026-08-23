@@ -504,11 +504,11 @@ test('BH-AI-01: incomplete stream with tool-call deltas must not silently fall b
     const conversations = await rpcModule.rpc('agent.conversations.list');
     const convID = conversations.conversations[0].id;
 
-    // Script: stream a tool-call delta for the built-in "skill_list" tool,
+    // Script: stream a tool-call delta for the built-in "skill" family tool,
     // then close the connection WITHOUT sending [DONE].
     llm.setSendDone(false);
     llm.setScripts([[
-      { toolCall: { id: 'call_bh01', name: 'skill_list', arguments: '{}' } },
+      { toolCall: { id: 'call_bh01', name: 'skill', arguments: '{"op":"list"}' } },
     ]]);
     // Non-streaming fallback returns this text — if the bug is present,
     // the turn will silently produce this instead of the tool call.
@@ -735,11 +735,11 @@ test('HYDR-NEW-ROOM: first turn of a new conversation injects the hydration tran
 
     // Dynamic transcript: this harness has no plugins and no todos, so the
     // mcp_list / tool_list / todo_list slots are hidden. Seeded primary
-    // memory and the embedded skill library keep memory + skill_list alive.
+    // memory and the embedded skill library keep memory + skill alive.
     const slots = hydrationSlotNames(hydration);
     assert.deepEqual(
       slots,
-      ['runtime_context', 'memory', 'skill_list'],
+      ['runtime_context', 'memory', 'skill'],
       `HYDR-NEW-ROOM: hydration slots must be the dynamic transcript in order, got ${JSON.stringify(slots)}`,
     );
 
@@ -925,11 +925,11 @@ test('HYDR-POST-COMPACTION: turn after compaction re-injects the hydration trans
     );
 
     // Dynamic transcript (see HYDR-NEW-ROOM): mcp/tool/todo slots are
-    // hidden in this harness; memory + skill_list survive.
+    // hidden in this harness; memory + skill survive.
     const slots = hydrationSlotNames(hydration);
     assert.deepEqual(
       slots,
-      ['runtime_context', 'memory', 'skill_list'],
+      ['runtime_context', 'memory', 'skill'],
       `HYDR-POST-COMPACTION: hydration slots must be the dynamic transcript in order, got ${JSON.stringify(slots)}`,
     );
 

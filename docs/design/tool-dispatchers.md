@@ -37,6 +37,15 @@ Root+op is the ONLY form of these tools anywhere in the system:
   exact names), and privileged gates (`mcp_register/install/server_add`)
   stay as typed tools.
 - Adding a verb: add the op to the family spec + its Execute case + tests.
+- `ci_pipeline` is the one family whose handlers live outside
+  `executeFamily`: it resolves the op there, then calls `executePipelineOp`
+  with the bare op string, so direct calls with resolved keys
+  (`ci_pipeline_list`) remain unknown tools.
+- Invariant: every advertised family root+op must route through
+  `Toolbox.Execute`. `TestAllAdvertisedFamilyOpsRoute` executes each one and
+  fails when an op cannot reach its handler (routing-level assertion —
+  dependency errors like "automation is not configured" are acceptable,
+  `unknown … op` is not).
 - Classification sites that must not fail loud (learning mutations,
   whitelist ops) read the op via `OpArg`; execution paths validate via
   `DispatchOp`.

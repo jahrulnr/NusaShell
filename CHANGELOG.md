@@ -13,14 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `memory`, `docs`, and `ci_pipeline` are now one advertised tool per family
   with a required `op` field (e.g. `memory` + `op=save`), replacing 15
   provider-facing schemas with 4 and cutting prompt cost on every request.
-  Calls are canonicalized to the legacy per-op names before persistence, so
-  conversation history, learning classification, and UI rendering see stable
-  names; the per-op names remain executable as hidden aliases for history
-  replay, review agents, and pipeline steps. Unknown or missing `op` fails
-  loud with the valid list. Hot-path (`exec`, `file_*`, `web_*`, `mcp_call`),
-  process-control (`ci_run/wait/cancel/steer`, automation/schedule),
-  invariant-enforcing writers (`artifact_create/update` — frontend card
-  contract), and privileged MCP gates stay typed by design.
+  Single naming layer everywhere: a call is stored exactly as emitted
+  (`{name:"memory", args:{op:"save",…}}`), and history, learning
+  classification, hydration, review agents, and UI rendering all use the
+  same root form. There is no alias machinery — a call named like a retired
+  per-op verb (`memory_save`, `docs_read`) is simply an unknown tool and
+  fails loud; pre-migration conversations keep their stored strings, but
+  replaying those specific calls errors loudly by design. Unknown or missing
+  `op` fails loud with the valid list. Hot-path (`exec`, `file_*`, `web_*`,
+  `mcp_call`), process-control (`ci_run/wait/cancel/steer`,
+  automation/schedule), invariant-enforcing writers
+  (`artifact_create/update` — frontend card contract), and privileged MCP
+  gates stay typed by design.
   See `docs/design/tool-dispatchers.md`.
 
 - **`todo` tool no longer echoes items and brief back to the agent.**
@@ -54,6 +58,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   records a `started` trajectory event with the resolved model name when a
   review begins, alongside the existing `done`, `skipped`, and `error`
   events.
+
+### Fixed
+
+- **`ci_pipeline` ops were advertised but unreachable.** Every call to the
+  dispatcher family died with `unknown ci_pipeline_list op "list"`:
+  `executeFamily` had no case for the resolved keys while the real handlers
+  sat in an unreachable branch of the automation executor (the family root
+  is intercepted before that executor runs). The three ops now live in
+  `executePipelineOp`, called only with the validated bare op — direct calls
+  with resolved keys (`ci_pipeline_list`) stay unknown tools, so no alias
+  door exists. Guarded by `TestAllAdvertisedFamilyOpsRoute`, which executes
+  every advertised family root+op through `Toolbox.Execute`.
+
+- **Stale per-op tool names scrubbed from fixtures and docs.** Frontend test
+  fixtures (`e2e.test.mjs` hydration slots and scripted tool calls,
+  `agent-render.test.mjs`, `learning.test.mjs`), the RPC golden DTO, and the
+  `scan-ui-docs` comment now use the single-layer root+op form
+  (`name:"memory", args:{op:"search"}`) matching what production persists.
 
 ### Removed
 
