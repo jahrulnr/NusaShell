@@ -264,7 +264,7 @@ function renderAudioModelOptions(models) {
 }
 
 function renderVideoModelOptions(models) {
-  const videoModels = models.filter((m) => m.video === true);
+  const videoModels = models.filter((m) => m.video === true || m.video_gen === true);
   const data = [
     { text: 'Disabled — non-video models get a text placeholder instead', value: '', placeholder: true },
     ...videoModels.map((m) => {

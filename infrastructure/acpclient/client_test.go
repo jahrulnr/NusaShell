@@ -2,6 +2,7 @@ package acpclient
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -183,5 +184,38 @@ func TestPromptPermissionAndCancel(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("cancel did not unblock prompt")
+	}
+}
+
+func TestRPCErrorCarriesJSONRPCCode(t *testing.T) {
+	h := &recHandler{}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	env := append(os.Environ(), "FAKEACP_AUTH=1")
+	conn, err := Dial(ctx, fakeBin, nil, env, t.TempDir(), h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.Initialize(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_, err = conn.NewSession(ctx, t.TempDir())
+	if err == nil {
+		t.Fatal("expected auth-required error")
+	}
+	var rpcErr *RPCError
+	if !errors.As(err, &rpcErr) {
+		t.Fatalf("expected typed RPCError, got %T: %v", err, err)
+	}
+	if rpcErr.Code != -32000 {
+		t.Fatalf("code = %d, want -32000", rpcErr.Code)
+	}
+	if rpcErr.Message != "authentication required" {
+		t.Fatalf("message = %q", rpcErr.Message)
+	}
+	// Wire text stays backward compatible for callers matching on message.
+	if err.Error() != "acp authentication required" {
+		t.Fatalf("Error() = %q", err.Error())
 	}
 }

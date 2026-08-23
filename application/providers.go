@@ -287,6 +287,43 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 			}
 		}
 	}
+	// Fetch speech-generation models via the output_modalities=speech filter
+	// (OpenRouter's documented TTS discovery route — plain /models hides
+	// them entirely). Hosts that reject the filter yield an empty list; tts
+	// ids arriving via plain /models are tagged by the catalog/allowlist
+	// pass below.
+	ttsSet := map[string]bool{}
+	if a.SpeechModelListerFactory != nil && p.Kind != domain.ProviderCodex && p.Kind != domain.ProviderMessages {
+		spLister := a.SpeechModelListerFactory(p)
+		if spLister != nil {
+			spIDs, _ := spLister.ListSpeechModels(ctx, key)
+			for _, id := range spIDs {
+				ttsSet[id] = true
+				if seen[id] {
+					continue
+				}
+				seen[id] = true
+				models = append(models, domain.Model{ID: id, Kind: domain.ModelKindTTS})
+			}
+		}
+	}
+	// Fetch video-generation models from the dedicated /videos/models
+	// endpoint (OpenRouter's documented video discovery route).
+	videoSet := map[string]bool{}
+	if a.VideoModelListerFactory != nil && p.Kind != domain.ProviderCodex && p.Kind != domain.ProviderMessages {
+		vLister := a.VideoModelListerFactory(p)
+		if vLister != nil {
+			vIDs, _ := vLister.ListVideoModels(ctx, key)
+			for _, id := range vIDs {
+				videoSet[id] = true
+				if seen[id] {
+					continue
+				}
+				seen[id] = true
+				models = append(models, domain.Model{ID: id, Kind: domain.ModelKindVideo})
+			}
+		}
+	}
 	// Enrich models with metadata from the models.dev catalog (key-less,
 	// public). Fills in context window, pricing, capabilities (reasoning,
 	// tool call, structured output, vision) that provider /models endpoints
@@ -360,19 +397,25 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 			models[i].Kind = domain.ModelKindImage
 		}
 	}
-	// TTS carve-out: unlike images/embeddings there is no dedicated provider
-	// listing endpoint for speech models (/audio/speech is invoke-only). The
-	// models.dev catalog is therefore authoritative here — this is the one
-	// documented exception to "Kind is decided by the lister, never by
-	// models.dev". The allowlist covers ids the catalog does not know yet.
+	// TTS/VIDEO kinds: lister-sourced ids win outright; the models.dev
+	// catalog is the documented carve-out source for ids that arrived via
+	// plain /models; the TTS allowlist is the last net for unknown ids.
 	for i := range models {
 		if a.ModelCatalog != nil {
-			if meta := a.ModelCatalog.Lookup(catalogHintFromModelID(models[i].ID), models[i].ID); meta != nil && meta.Kind == "tts" {
-				models[i].Kind = domain.ModelKindTTS
+			if meta := a.ModelCatalog.Lookup(catalogHintFromModelID(models[i].ID), models[i].ID); meta != nil {
+				switch meta.Kind {
+				case "tts":
+					models[i].Kind = domain.ModelKindTTS
+				case "video":
+					models[i].Kind = domain.ModelKindVideo
+				}
 			}
 		}
-		if config.IsKnownTTSModel(models[i].ID) {
+		switch {
+		case ttsSet[models[i].ID] || config.IsKnownTTSModel(models[i].ID):
 			models[i].Kind = domain.ModelKindTTS
+		case videoSet[models[i].ID]:
+			models[i].Kind = domain.ModelKindVideo
 		}
 	}
 	if p.Kind == domain.ProviderCodex {
@@ -542,10 +585,15 @@ func (a *App) enrichProviderModelsAtRead(p *domain.Provider) {
 		if config.IsKnownImageModel(p.Models[i].ID) {
 			p.Models[i].Kind = domain.ModelKindImage
 		}
-		// TTS tagging mirrors the import path: models.dev catalog first (the
-		// documented carve-out for speech models), then the allowlist.
-		if meta := a.ModelCatalog.Lookup(catalogHintFromModelID(p.Models[i].ID), p.Models[i].ID); meta != nil && meta.Kind == "tts" {
-			p.Models[i].Kind = domain.ModelKindTTS
+		// TTS/VIDEO tagging mirror the import path: models.dev catalog first
+		// (documented carve-outs for speech/video kinds), then the allowlist.
+		if meta := a.ModelCatalog.Lookup(catalogHintFromModelID(p.Models[i].ID), p.Models[i].ID); meta != nil {
+			switch meta.Kind {
+			case "tts":
+				p.Models[i].Kind = domain.ModelKindTTS
+			case "video":
+				p.Models[i].Kind = domain.ModelKindVideo
+			}
 		}
 		if config.IsKnownTTSModel(p.Models[i].ID) {
 			p.Models[i].Kind = domain.ModelKindTTS
@@ -581,6 +629,7 @@ func modelsDTO(p *domain.Provider) []contracts.ModelDTO {
 			Audio:            m.Audio,
 			Video:            m.Video,
 			TTS:              m.Kind == domain.ModelKindTTS,
+			VideoGen:         m.Kind == domain.ModelKindVideo,
 			KnowledgeCutoff:  m.KnowledgeCutoff,
 		})
 	}

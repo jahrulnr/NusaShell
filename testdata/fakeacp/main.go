@@ -113,6 +113,37 @@ func handle(req request) {
 		sessions[id] = "plan"
 		cancels[id] = make(chan struct{}, 1)
 		mu.Unlock()
+		// FAKEACP_CONFIG_OPTIONS simulates OpenCode-generation agents whose
+		// session/new returns v1 configOptions instead of legacy modes/models.
+		if os.Getenv("FAKEACP_CONFIG_OPTIONS") == "1" {
+			reply(req.ID, map[string]any{
+				"sessionId": id,
+				"configOptions": []any{
+					map[string]any{
+						"id": "model", "name": "Model", "category": "model", "type": "select",
+						"currentValue": "prov/alpha",
+						"options": []any{
+							map[string]any{"value": "prov/alpha", "name": "Prov/Alpha"},
+							map[string]any{"value": "prov/beta", "name": "Prov/Beta"},
+						},
+					},
+					map[string]any{
+						"id": "mode", "name": "Session Mode", "category": "mode", "type": "select",
+						"currentValue": "build",
+						"options": []any{
+							map[string]any{"value": "build", "name": "Build"},
+							map[string]any{"value": "plan", "name": "Plan", "description": "Read-only planning"},
+						},
+					},
+					// Boolean options exercise the raw-JSON current value path.
+					map[string]any{
+						"id": "flag", "name": "Flag", "category": "_custom", "type": "boolean",
+						"currentValue": false,
+					},
+				},
+			})
+			return
+		}
 		modes := map[string]any{}
 		if os.Getenv("FAKEACP_NO_MODES") != "1" {
 			modes = map[string]any{

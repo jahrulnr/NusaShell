@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -517,7 +518,14 @@ func isSessionAuthRequired(err error) bool {
 // IsSessionAuthRequired reports whether err indicates the ACP agent needs
 // authentication before session/new can succeed. Exported so the runtime
 // can decide whether to retry with Authenticate (lazy auth).
+// ACP reserves JSON-RPC code -32000 for auth-required, so a typed error
+// carrying that code is authoritative; message matching stays as the
+// fallback for agents that reply with other codes.
 func IsSessionAuthRequired(err error) bool {
+	var coded interface{ ErrorCode() int }
+	if errors.As(err, &coded) && coded.ErrorCode() == -32000 {
+		return true
+	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "authentication required") ||
 		strings.Contains(msg, "not authenticated") ||

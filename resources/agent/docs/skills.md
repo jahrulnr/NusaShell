@@ -8,7 +8,7 @@ support files (references, scripts, assets).
 
 Every skill has an `owned_by` field that records who provided it:
 
-- `user` — authored by the user via the Skills workspace or `skill_save`.
+- `user` — authored by the user via the Skills workspace or `skill(op="save")`.
 - `builtin` — shipped with NusaShell and seeded into the data directory.
 - `plugin:<plugin-id>` — bundled inside a plugin's `skills/` directory and
   mounted read-only at plugin install time. Uninstalling the plugin removes
@@ -16,8 +16,8 @@ Every skill has an `owned_by` field that records who provided it:
 
 When two owners define a skill with the same ID, the higher-priority owner
 shadows the lower one. Priority order: `user` > `builtin` > `plugin:<id>`.
-Shadowed skills still appear in `skill_list` (dimmed in the UI) but
-`skill_read` and the agent's skill resolution use the winner.
+Shadowed skills still appear in `skill(op="list")` (dimmed in the UI) but
+`skill(op="read")` and the agent's skill resolution use the winner.
 
 ## Authoring
 
@@ -33,29 +33,33 @@ them.
 
 ## Using skills
 
-- `skill_list` — enumerate skills (returns `owned_by` and `shadowed` flags).
-- `skill_read` — read a skill's `SKILL.md` (or a support file via `path`)
-  by name. The agent then follows its instructions for the rest of the turn.
-- `skill_files` — list the files inside a skill folder before reading them.
-- `skill_save` — create or update a user-owned skill.
+All skill operations go through the `skill` dispatcher tool; `op` selects:
+
+- `list` — enumerate skills (returns `owned_by` and `shadowed` flags).
+- `read {name,path?,offset?,max_chars?}` — read a skill's `SKILL.md` (or a
+  support file via `path`). The agent then follows its instructions for the
+  rest of the turn.
+- `files {name}` — list the files inside a skill folder before reading them.
+- `save {name,content,description?,id?,path?}` — create or update a
+  user-owned skill.
 
 The Skills workspace is a read-only browser: it shows the catalog, the file
-tree of the selected skill, and a file viewer. Use `skill_save` (or the New
-skill button) to author skills.
+tree of the selected skill, and a file viewer. Use `skill(op="save")` (or the
+New skill button) to author skills.
 
-### skill_save guidance
+### Saving skills guidance
 
 Save class-level, reusable procedures — never one-off debugging notes or
 environment-failure folklore.
 
 Good example:
 
-    skill_save(name="release-checklist",
-               description="Steps for tagging a release and verifying the build",
-               content="## Release\n1. …")
+    skill(op="save", name="release-checklist",
+          description="Steps for tagging a release and verifying the build",
+          content="## Release\n1. …")
 
 Bad examples:
 
-    skill_save(name="bug-2026-08-19", description="fix", content="the debug session…")
+    skill(op="save", name="bug-2026-08-19", description="fix", content="the debug session…")
 
-    skill_save(name="my-api-key-notes", description="credentials", content="sk-…")  # secrets
+    skill(op="save", name="my-api-key-notes", description="credentials", content="sk-…")  # secrets

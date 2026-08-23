@@ -236,7 +236,7 @@ func (c *Conn) readLoop() {
 			continue
 		}
 		if msg.Error != nil {
-			ch <- rpcReply{err: fmt.Errorf("acp %s", msg.Error.Message)}
+			ch <- rpcReply{err: &RPCError{Code: msg.Error.Code, Message: msg.Error.Message}}
 		} else {
 			ch <- rpcReply{result: msg.Result}
 		}

@@ -1,0 +1,36 @@
+package aiutil
+
+import (
+	"context"
+	"net/http"
+)
+
+// FetchSpeechModels fetches the /models endpoint filtered by
+// output_modalities=speech — OpenRouter's documented discovery route for
+// text-to-speech models. Plain /models hides them entirely, so gateways
+// need this filter to surface TTS entries. A 404 or any HTTP error returns
+// nil — callers fall back to whatever /models returned plus the known-TTS
+// allowlist.
+func FetchSpeechModels(ctx context.Context, client *http.Client, baseURL string, headers map[string]string, seen map[string]bool) []string {
+	url := baseURL + "/models?output_modalities=speech"
+	var out struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := DoJSON(ctx, client, http.MethodGet, url, headers, nil, &out); err != nil {
+		return nil
+	}
+	if seen == nil {
+		seen = make(map[string]bool, len(out.Data))
+	}
+	var ids []string
+	for _, m := range out.Data {
+		if m.ID == "" || seen[m.ID] {
+			continue
+		}
+		seen[m.ID] = true
+		ids = append(ids, m.ID)
+	}
+	return ids
+}

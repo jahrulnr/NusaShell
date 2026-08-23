@@ -566,6 +566,7 @@ type ModelDTO struct {
 	Audio            bool     `json:"audio,omitempty"`
 	Video            bool     `json:"video,omitempty"`
 	TTS              bool     `json:"tts,omitempty"`
+	VideoGen         bool     `json:"video_gen,omitempty"`
 	KnowledgeCutoff  string   `json:"knowledge_cutoff,omitempty"`
 }
 

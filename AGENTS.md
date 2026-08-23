@@ -69,7 +69,8 @@ When a behavior or public wire contract changes, update the relevant package doc
 ## Documentation sync (required)
 
 The agent's product knowledge comes from the embedded corpus in
-`resources/agent/docs/*.md` (surfaced via `docs_search` / `docs_read`)
+`resources/agent/docs/*.md` (surfaced via the `docs` dispatcher tool,
+op="search" / op="read")
 and the system prompt in `application/prompts.go`. Outdated docs make the
 agent hallucinate capabilities, misdescribe the UI, or give wrong answers.
 **Any change that affects user-visible behavior, agent capabilities, or the
@@ -106,7 +107,7 @@ prompt, not in the docs corpus.
 A change is not complete until the corpus reflects the new behavior. CI does
 not yet gate non-UI docs for drift, so the agent author is responsible for
 keeping them in sync. When in doubt, search the corpus for the changed
-concept (`docs_search`) and update every page that mentions it.
+concept (`docs` tool, op="search") and update every page that mentions it.
 
 ## UI knowledge docs (required)
 

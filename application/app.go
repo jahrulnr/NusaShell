@@ -53,6 +53,9 @@ type App struct {
 	SpeechSynthesizerFactory    SpeechSynthesizerFactory
 	OfflineSynthesizer          OfflineSynthesizer
 	ImageModelListerFactory     ImageModelListerFactory
+	SpeechModelListerFactory    SpeechModelListerFactory
+	VideoGeneratorFactory       VideoGeneratorFactory
+	VideoModelListerFactory     VideoModelListerFactory
 	EmbedderFactory             EmbedderFactory
 	EmbeddingModelListerFactory EmbeddingModelListerFactory
 	ModelCatalog                ModelCataloger
@@ -332,6 +335,9 @@ type Deps struct {
 	SpeechSynthesizerFactory    SpeechSynthesizerFactory    // optional; nil = online TTS unavailable
 	OfflineSynthesizer          OfflineSynthesizer          // optional; nil = offline TTS (piper) disabled
 	ImageModelListerFactory     ImageModelListerFactory     // optional; nil = skip /images/models fetch
+	SpeechModelListerFactory    SpeechModelListerFactory    // optional; nil = skip speech filter fetch
+	VideoGeneratorFactory       VideoGeneratorFactory       // optional; nil = generate_video unavailable
+	VideoModelListerFactory     VideoModelListerFactory     // optional; nil = skip /videos/models fetch
 	EmbedderFactory             EmbedderFactory             // optional; nil = BM25-only search
 	EmbeddingModelListerFactory EmbeddingModelListerFactory // optional; nil = skip /embeddings/models fetch
 	ModelCatalog                ModelCataloger              // optional; nil = skip enrichment from models.dev
@@ -384,6 +390,9 @@ func NewApp(deps Deps) *App {
 		OfflineTranscriberFactory:   deps.OfflineTranscriberFactory,
 		OfflineSynthesizer:          deps.OfflineSynthesizer,
 		ImageModelListerFactory:     deps.ImageModelListerFactory,
+		SpeechModelListerFactory:    deps.SpeechModelListerFactory,
+		VideoGeneratorFactory:       deps.VideoGeneratorFactory,
+		VideoModelListerFactory:     deps.VideoModelListerFactory,
 		EmbedderFactory:             deps.EmbedderFactory,
 		EmbeddingModelListerFactory: deps.EmbeddingModelListerFactory,
 		WorkspacePicker:             deps.WorkspacePicker,

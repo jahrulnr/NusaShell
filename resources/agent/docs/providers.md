@@ -120,6 +120,10 @@ URL and Args/Env are ignored.
 - Authenticate uses a method id the agent advertised — nothing is hardcoded
   per vendor.
 - Refresh catalog opens a throwaway `session/new` to import modes and models.
+  Agents in the OpenCode generation return v1 `configOptions` instead of
+  legacy `modes`/`models`: select-type mode/model options fold into the same
+  catalogs, and mode/model switching still goes through the legacy
+  `session/set_mode` / `session/set_model` methods those agents keep serving.
 - Mode IDs stay vendor-specific; NusaShell maps them onto internal risk
   tiers (`read_only`, `edit_confirmed`, `bypass`). Unknown modes are
   read-only. New sessions start on the strictest advertised mode. Bypass is
@@ -144,6 +148,7 @@ Logs from the agent belong on stderr.
 | Cursor | `curl https://cursor.com/install \| bash` then `agent acp` | `cursor_login` | `initialize` succeeds; `session/new` returns `Authentication required`. Run `agent login` locally, then **Authenticate** with `cursor_login` in Providers. |
 | Codex (adapter) | `npm i @agentclientprotocol/codex-acp` → `codex-acp` | `api-key` (and ChatGPT login when browser available) | Same: probe works, spawn/refresh catalog fail until **Authenticate** (API key env or ChatGPT login). |
 | Gemini | `npm i @google/gemini-cli` → `gemini --acp` | `oauth-personal`, `gemini-api-key`, … | Probe lists methods; session may still require **Authenticate** depending on local credentials. |
+| OpenCode | install per [opencode.ai/docs](https://opencode.ai/docs/acp/) → `opencode acp` | `opencode-login` | `initialize` works. Real login is CLI-side (`opencode auth login`) — **Authenticate** with `opencode-login` only validates the method id, it does not log in. Missing provider keys surface as JSON-RPC `-32000` on `session/new` or the first prompt. |
 
 If you register a CLI without logging in, **Probe** still works (it only runs
 `initialize`). **Refresh catalog** and `subagent` spawn call `session/new` and

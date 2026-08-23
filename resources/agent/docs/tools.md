@@ -18,20 +18,11 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `file_copy` | copy a file or directory recursively |
 | `file_exists` | check whether a path exists without erroring when missing (returns `exists`, `is_dir`) |
 | `file_info` | metadata for a path: size, mode, type, modified time |
-| `skill_list` | list available skills (name + description + owned_by + shadowed) |
-| `skill_search` | search installed skills by name or description; results ranked by relevance (BM25 + related-skill expansion, no embedding) |
-| `skill_read` | read a skill's `SKILL.md` (or a support file via `path`) by name; paginated with `offset`/`max_chars` |
-| `skill_files` | list the files inside a skill folder (path, type, size, editable) |
-| `skill_save` | create or update a skill (omit `id` to create new; pass `id` to update), or write a support file inside an existing skill (pass `path` like `references/errors.md`, `templates/config.yaml`, `scripts/verify.sh`; skill must already exist; plugin-owned skills are read-only) |
-| `memory_save` | save a fact as a searchable fragment (unlimited archive); pick a category (`project`, `user`, `task`, `general`) + optional `project`, `task`, `tags`; exact normalized duplicates are idempotent and return the existing fragment |
-| `memory_replace` | update memory: `target="primary"` + `old_text` (substring) to edit the primary document, or omit `old_text` to rewrite the entire body; `target="fragment"` + `id` for fragments |
-| `memory_search` | BM25 search over fragments with metadata filters (`category`, `project`, `task`, `tags`); returns ranked results with scores |
-| `memory_list` | list entries: `target="primary"` for the always-injected document, `target="fragments"` (default) for the archive with optional metadata filters |
-| `memory_delete` | delete a fragment by id |
+| `skill` | skill library dispatcher; `op` selects: `list`, `search`, `read`, `files`, `save` (same semantics as the legacy per-op names below) |
+| `memory` | long-term memory dispatcher; `op` selects: `save` (idempotent dedup), `replace` (primary substring/body rewrite or fragment update), `search` (BM25 ranked fragments), `list`, `delete` |
+| `docs` | product documentation dispatcher; `op` selects: `search {query}` (ranked page ids) and `read {id}` |
 | `todo` | manage the conversation task checklist. Two modes: `replace` (default) full-replaces Claude TodoWrite style (empty items clears the list); `patch` merges by ID — updates status/content of existing items, appends new ones, keeps untouched items unchanged (`content` optional in patch mode). Use `patch` to update a single item without re-emitting the full list. Item IDs are shown in the hydrated checklist so statuses can be patched after compaction. Max 50 items, 500 chars each; prefer exactly one `in_progress` at a time. The optional `brief` argument is a living planning document (max ~10k tokens) with required markdown sections `## Objective` and `## Done when`, plus optional `## Findings` and `## Approach` that grow as the task progresses. It stays available through conversation history and is re-injected with the fresh hydration checkpoint after compaction. The user can delete items from the UI — treat deleted items as gone and do not re-add them. |
 | `ask_question` | block for a structured user decision; use only when progress genuinely requires a choice or approval |
-| `docs_search` | search the product documentation when the page id is unknown; results ranked by relevance |
-| `docs_read` | read a documentation page by canonical extensionless id (from `docs_search` results) |
 | `mcp_list` | list all plugins (MCP servers) with runtime state: every plugin appears, running or idle |
 | `tool_list` | list ALL tools of a running MCP server (no query); accepts plugin id only; returns compact entries (ref, name, server, description) without parameter schemas — load the full schema with `tool_schema` when needed; call after `mcp_enable` to discover tools |
 | `tool_schema` | load one MCP tool's full definition as a single JSONL line (name, description, parameters with type/properties/required); accepts plugin id only; this is the only tool that serves schemas — mcp_search and tool_list stay schema-free |
@@ -47,6 +38,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `read_image` | load an image from disk by absolute path into the model's context — any path works, not just conversation attachments (vision models see it directly; non-vision models get a text description via the vision fallback) |
 | `generate_image` | generate an image with the configured auxiliary image model (OpenAI Images, OpenRouter Image API, or Codex ChatGPT plan). Only listed when Settings → Image generation is set. The UI displays the print — do not re-render it as Markdown |
 | `generate_speech` | synthesize spoken audio from text and save it as an mp3/wav/opus file the user can play. Online: an OpenAI-compatible /audio/speech model from Settings → Speech generation; offline: the piper engine (voice models under models/tts/, binary via PIPER_BIN or PATH). If the online model fails, falls back to offline automatically. Only listed when a TTS model is set or offline piper is available |
+| `generate_video` | generate a short video clip from a text prompt and save it as an mp4 the user can play. Uses the async /videos API of the model chosen in Settings → Video generation (e.g. OpenRouter video models); generation takes tens of seconds to minutes and per-model duration/resolution minimums are reported verbatim on rejection. Only listed when a video model is set |
 | `read_audio` | load an audio file from disk by absolute path into the model's context — any path works, not just conversation attachments. Fallback ladder: configured cloud STT first (kind `stt` → `/audio/transcriptions`; audio chat models → `input_audio`), then the local offline whisper engine when built with `-tags stt` and a model is installed (`NUSASHELL_STT_MODEL` or `<data>/models/stt/ggml-base.bin`); each response's yaml meta discloses the route used (audio-capable models hear it directly; non-audio models get a text transcript) |
 | `read_video` | load a video file from disk by absolute path into the model's context — any path works, not just conversation attachments (video-capable models see it directly; non-video models get a text description via the video fallback) |
 | `web_search` | search the web across Brave, Startpage, Wikipedia, and GitHub; returns ranked results with title, URL, and snippet |
@@ -57,9 +49,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `artifact_read` | read an existing artifact's full content by id |
 | `artifact_list` | list artifacts in the current conversation |
 | `artifact_delete` | delete an artifact by id |
-| `ci_pipeline_list` | list `.nusashell/pipeline.yaml` jobs in a workspace |
-| `ci_pipeline_read` | read and validate the workspace pipeline |
-| `ci_pipeline_validate` | validate pipeline/workflow YAML (INVALID vs BLOCKED) |
+| `ci_pipeline` | workspace pipeline definition dispatcher; `op` selects: `list {workspace?}`, `read {workspace?}` (read + validate), `validate {yaml,workspace?}` |
 | `ci_run` | start a workspace pipeline or a saved automation; set `async: true` to return immediately with a `run_id` while the pipeline runs in the background |
 | `ci_wait` | block until a run reaches a terminal state or the timeout expires; use after `ci_run` with `async: true` |
 | `ci_run_status` | DAG summary and status; use this after `ci_run` |
@@ -87,6 +77,27 @@ generation model is set in Settings, while `subagent`, `subagent_steer`,
 `subagent_stop`, and `subagent_wait` are listed only when an ACP agent is
 enabled.
 
+### Dispatcher families
+
+`skill`, `memory`, `docs`, and `ci_pipeline` are **dispatcher tools**: one
+advertised tool per family whose required `op` field selects the action. The
+per-op implementation names (`skill_save`, `memory_search`, `docs_read`,
+`ci_pipeline_validate`, …) are no longer advertised but remain executable as
+hidden aliases — history replay, review agents, and pipeline steps that call
+them keep working. Dispatcher calls are canonicalized to those per-op names
+before persistence, so recorded history always shows legacy names.
+
+Per-op semantics (unchanged from the legacy tools):
+
+- `skill`: `list {limit?}`; `search {query,limit?}`; `read {name,path?,offset?,max_chars?}`;
+  `files {name}`; `save {name,content,description?,id?,path?}` — with `path`
+  set, writes a support file (`references/…`, `scripts/…`) inside an existing skill.
+- `memory`: `save {content,category?,project?,task?,tags?}` is idempotent for
+  exact normalized duplicates; `replace {target,content,old_text?,id?}` edits
+  the primary document or one fragment; `search` is BM25-ranked with metadata
+  filters; `list`; `delete {id}`.
+- `docs`: `search {query,limit?}`, then `read {id}`.
+
 ## Workflow routing
 
 Use the smallest sufficient workflow. One-step answers and lookups do not need
@@ -94,8 +105,8 @@ a TODO. Multi-step, asynchronous, or cross-turn work does.
 
 Good examples:
 
-    docs_read(id="automation")
-    skill_read(name="release-checklist")
+    docs(op="read", id="automation")
+    skill(op="read", name="release-checklist")
     web_search(query="current Go release notes")
     web_fetch(url="<URL selected from web_search>")
     ask_question(question="Which deployment target should I use?", options=[...])
@@ -103,11 +114,11 @@ Good examples:
 Bad examples:
 
     todo(items=[{"id":"1","content":"Define MCP","status":"in_progress"}])
-    skill_list()
+    skill(op="list")
     web_fetch(url="<guessed URL>")
 
-Use the skill catalog before repeating a `skill_list` call. If the
-user says skills or plugin state changed, refresh with `skill_search` or
+Use the skill catalog before repeating a `skill(op="list")` call. If the
+user says skills or plugin state changed, refresh with `skill(op="search")` or
 `mcp_list`. The built-in tool catalog always comes from `tools[]`. The MCP schemas and refs come from `mcp_search`.
 
 ## Output format

@@ -322,3 +322,46 @@ func TestIsSubagentResultCallID(t *testing.T) {
 		}
 	}
 }
+
+// codedErr is a local stub of the acpclient.RPCError shape: an error that
+// carries its JSON-RPC code without depending on that package.
+type codedErr struct {
+	code int
+	msg  string
+}
+
+func (e *codedErr) Error() string  { return "acp " + e.msg }
+func (e *codedErr) ErrorCode() int { return e.code }
+
+func TestIsSessionAuthRequiredByErrorCode(t *testing.T) {
+	// ACP reserves -32000 for auth-required regardless of message text.
+	if !IsSessionAuthRequired(&codedErr{code: -32000, msg: "provider authentication required"}) {
+		t.Fatal("-32000 must be treated as auth-required")
+	}
+	if !IsSessionAuthRequired(fmt.Errorf("acp provider authentication required")) {
+		t.Fatal("message fallback must still match")
+	}
+	if IsSessionAuthRequired(&codedErr{code: -32601, msg: "method not found"}) {
+		t.Fatal("other codes must not be auth-required")
+	}
+	if IsSessionAuthRequired(fmt.Errorf("acp session not found")) {
+		t.Fatal("unrelated message must not match")
+	}
+}
+
+func TestWrapSessionAuthErrorUsesErrorCode(t *testing.T) {
+	agent := &AcpAgent{
+		Name: "OpenCode",
+		CachedAuthMethods: []AcpAuthMethod{
+			{ID: "opencode-login", Name: "Login with opencode"},
+		},
+	}
+	upstream := &codedErr{code: -32000, msg: "provider authentication required"}
+	got := WrapSessionAuthError(agent, upstream)
+	if got == upstream {
+		t.Fatal("expected wrapped error")
+	}
+	if !strings.Contains(got.Error(), "opencode-login") {
+		t.Fatalf("got %q", got.Error())
+	}
+}

@@ -65,7 +65,12 @@ func (a *App) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, mo
 }
 
 func (a *App) toolDefinitions() []ToolDef {
-	tools := a.Toolbox.ListTools()
+	// Compact per-verb built-ins into dispatcher families for the provider
+	// roster (prompt cost + sub-linear growth). Toolbox.ListTools itself
+	// keeps returning the full defs so review-agent and pipeline filtering
+	// are untouched; the legacy names remain executable as hidden aliases.
+	// See docs/design/tool-dispatchers.md.
+	tools := CompactFamilies(a.Toolbox.ListTools())
 	definitions := make([]ToolDef, 0, len(tools))
 	for _, tool := range tools {
 		definitions = append(definitions, ToolDef{

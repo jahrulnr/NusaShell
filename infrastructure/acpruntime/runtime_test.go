@@ -411,3 +411,71 @@ func TestRefreshCatalogDoesNotProactivelyAuthenticateWithPersistedAuth(t *testin
 		t.Fatalf("expected cached modes after refresh: %+v", updated)
 	}
 }
+
+// TestSpawnWithConfigOptionsAgent covers OpenCode-generation agents whose
+// session/new returns v1 configOptions instead of legacy modes/models.
+// The runtime must fold select-type mode/model options onto the cached
+// catalogs and read current mode/model from config option values.
+func TestSpawnWithConfigOptionsAgent(t *testing.T) {
+	rt := New()
+	defer rt.Close()
+	ws := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	agent := testAgent(ws)
+	agent.Env = map[string]string{"FAKEACP_CONFIG_OPTIONS": "1"}
+	run, err := rt.Spawn(ctx, application.AcpSpawnRequest{
+		Agent: agent, Prompt: "hello cfg", Workspace: ws,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agent.CachedModes) != 2 || agent.CachedModes[0].ID != "build" || agent.CachedModes[1].ID != "plan" {
+		t.Fatalf("cached modes from config options = %+v", agent.CachedModes)
+	}
+	if !agent.CachedCapabilities.HasModes {
+		t.Fatal("HasModes must be set for config-option agents")
+	}
+	if len(agent.CachedModels) != 2 || agent.CachedModels[0].ID != "prov/alpha" {
+		t.Fatalf("cached models from config options = %+v", agent.CachedModels)
+	}
+	if run.CurrentModelID != "prov/alpha" {
+		t.Fatalf("current model = %q, want prov/alpha (config currentValue)", run.CurrentModelID)
+	}
+	if run.CurrentModeID != "build" {
+		t.Fatalf("current mode = %q, want build (config currentValue)", run.CurrentModeID)
+	}
+	finished, err := rt.Wait(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finished.Status != domain.AcpRunCompleted {
+		t.Fatalf("status = %s error=%s", finished.Status, finished.Error)
+	}
+}
+
+// TestSpawnWithConfigOptionsAppliesPreferredMode verifies that PreferredModeID
+// reaches config-options-only agents through legacy set_mode: fakeacp replies
+// to session/set_mode with a current_mode_update notification.
+func TestSpawnWithConfigOptionsAppliesPreferredMode(t *testing.T) {
+	rt := New()
+	defer rt.Close()
+	ws := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	agent := testAgent(ws)
+	agent.Env = map[string]string{"FAKEACP_CONFIG_OPTIONS": "1"}
+	agent.PreferredModeID = "plan"
+	run, err := rt.Spawn(ctx, application.AcpSpawnRequest{
+		Agent: agent, Prompt: "hello plan", Workspace: ws,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.CurrentModeID != "plan" {
+		t.Fatalf("mode after preferred set_mode = %q, want plan", run.CurrentModeID)
+	}
+	if got := domain.InferRiskTier(run.CurrentModeID, agent.ModeRiskMappings); got != domain.RiskReadOnly {
+		t.Fatalf("risk tier for plan = %s", got)
+	}
+}

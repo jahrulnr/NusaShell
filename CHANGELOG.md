@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Built-in tools deduplicated into dispatcher families.** `skill`,
+  `memory`, `docs`, and `ci_pipeline` are now one advertised tool per family
+  with a required `op` field (e.g. `memory` + `op=save`), replacing 15
+  provider-facing schemas with 4 and cutting prompt cost on every request.
+  Calls are canonicalized to the legacy per-op names before persistence, so
+  conversation history, learning classification, and UI rendering see stable
+  names; the per-op names remain executable as hidden aliases for history
+  replay, review agents, and pipeline steps. Unknown or missing `op` fails
+  loud with the valid list. Hot-path (`exec`, `file_*`, `web_*`, `mcp_call`),
+  process-control (`ci_run/wait/cancel/steer`, automation/schedule),
+  invariant-enforcing writers (`artifact_create/update` — frontend card
+  contract), and privileged MCP gates stay typed by design.
+  See `docs/design/tool-dispatchers.md`.
+
 - **`todo` tool no longer echoes items and brief back to the agent.**
   The tool result is now a compact acknowledgment (summary counts only:
   `ok`, `conversation`, `total`, `pending`, `in_progress`, `completed`).

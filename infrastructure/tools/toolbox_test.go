@@ -1648,8 +1648,12 @@ func TestAgentToolsDocMatchesBuiltInRoster(t *testing.T) {
 		}
 	}
 	tb := testToolbox(nil, nil, &stubMCP{})
+	// The docs document the ADVERTISED roster — per-verb family members are
+	// compacted into dispatcher roots before reaching providers
+	// (docs/design/tool-dispatchers.md). Hidden aliases stay executable but
+	// are intentionally not required as table rows.
 	actual := map[string]bool{}
-	for _, tool := range tb.ListTools() {
+	for _, tool := range application.CompactFamilies(tb.ListTools()) {
 		actual[tool.Name] = true
 		if !documented[tool.Name] {
 			t.Errorf("agent tools documentation missing %q", tool.Name)
@@ -1661,6 +1665,7 @@ func TestAgentToolsDocMatchesBuiltInRoster(t *testing.T) {
 		"artifact_create": true, "artifact_update": true, "artifact_read": true,
 		"artifact_list": true, "artifact_delete": true,
 		"generate_speech": true,
+		"generate_video":  true,
 		"generate_image":  true,
 	}
 	for name := range documented {

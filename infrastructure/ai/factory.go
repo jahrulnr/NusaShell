@@ -21,6 +21,8 @@ import (
 	"nusashell/infrastructure/ai/messages"
 	"nusashell/infrastructure/ai/ollama"
 	"nusashell/infrastructure/ai/responses"
+	ttsclient "nusashell/infrastructure/ai/tts"
+	"nusashell/infrastructure/ai/videogen"
 	"nusashell/infrastructure/config"
 )
 
@@ -277,6 +279,65 @@ func NewImageModelListerFactory() application.ImageModelListerFactory {
 		switch p.Kind {
 		case domain.ProviderChat, domain.ProviderResponses, domain.ProviderOllama:
 			return imagegen.NewModelLister(embeddingBaseURL(p.BaseURL), client)
+		default:
+			return nil
+		}
+	}
+}
+
+// NewSpeechModelListerFactory returns a factory that builds a
+// SpeechModelLister for OpenAI-compatible hosts. The lister hits
+// GET <base>/models?output_modalities=speech (OpenRouter surfaces its TTS
+// catalog only through that filter); hosts that reject it yield an empty
+// list and the importer falls back to catalog tagging + allowlist.
+func NewSpeechModelListerFactory() application.SpeechModelListerFactory {
+	client := newProviderHTTPClient()
+	return func(p *domain.Provider) application.SpeechModelLister {
+		if p == nil {
+			return nil
+		}
+		switch p.Kind {
+		case domain.ProviderChat, domain.ProviderResponses, domain.ProviderOllama:
+			return ttsclient.NewModelLister(embeddingBaseURL(p.BaseURL), client)
+		default:
+			return nil
+		}
+	}
+}
+
+// NewVideoGeneratorFactory builds online video-generation clients for
+// OpenAI-compatible hosts serving the async /videos API (OpenRouter).
+// Other kinds fail fast so callers surface a clear unavailability message.
+func NewVideoGeneratorFactory() application.VideoGeneratorFactory {
+	client := newProviderHTTPClient()
+	return func(p *domain.Provider, apiKey string) (application.VideoGenerator, error) {
+		if p == nil {
+			return nil, fmt.Errorf("videogen: nil provider")
+		}
+		switch p.Kind {
+		case domain.ProviderChat, domain.ProviderResponses, domain.ProviderOllama:
+			base := strings.TrimRight(p.BaseURL, "/")
+			if base == "" {
+				return nil, fmt.Errorf("videogen: provider %q has no base URL", p.ID)
+			}
+			return &videogen.Client{BaseURL: base, APIKey: apiKey, HTTP: client}, nil
+		default:
+			return nil, fmt.Errorf("videogen: provider kind %q has no /videos endpoint", p.Kind)
+		}
+	}
+}
+
+// NewVideoModelListerFactory returns a factory that builds a
+// VideoModelLister via GET <base>/videos/models.
+func NewVideoModelListerFactory() application.VideoModelListerFactory {
+	client := newProviderHTTPClient()
+	return func(p *domain.Provider) application.VideoModelLister {
+		if p == nil {
+			return nil
+		}
+		switch p.Kind {
+		case domain.ProviderChat, domain.ProviderResponses, domain.ProviderOllama:
+			return videogen.NewModelLister(embeddingBaseURL(p.BaseURL), client)
 		default:
 			return nil
 		}

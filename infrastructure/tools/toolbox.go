@@ -224,6 +224,17 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 			), "prompt"),
 		})
 	}
+	if t.videoGenerationConfigured() {
+		tools = append(tools, application.ToolInfo{
+			Name:        "generate_video",
+			Description: "Generate a short video from a text prompt and save it as an mp4 the user can play. Generation runs asynchronously upstream and typically takes tens of seconds to a few minutes — expected, not an error. Use for visual clips, not for answering questions.",
+			InputSchema: obj("object", props(
+				"prompt", str("Visual description of the clip to generate (max 4000 characters)"),
+				"duration_seconds", map[string]any{"type": "integer", "description": "Clip length in seconds. Provider minimums apply and are reported verbatim on rejection (e.g. 'Supported durations: 4, 6, 8s'). Omit for provider default."},
+				"resolution", strEnum("Output resolution", "480p", "720p", "1080p"),
+			), "prompt"),
+		})
+	}
 	if t.speechGenerationConfigured() {
 		tools = append(tools, application.ToolInfo{
 			Name:        "generate_speech",
@@ -264,6 +275,16 @@ func (t *Toolbox) speechGenerationConfigured() bool {
 	return t.SpeechOfflineAvailable
 }
 
+// videoGenerationConfigured reports whether generate_video can serve:
+// an online video model must be picked in Settings (no offline fallback).
+func (t *Toolbox) videoGenerationConfigured() bool {
+	if t.Settings == nil {
+		return false
+	}
+	s := t.Settings.Get()
+	return strings.TrimSpace(s.VideoProviderID) != "" && strings.TrimSpace(s.VideoModelID) != ""
+}
+
 func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (string, error) {
 	// Native built-ins first: file CRUD and the exec island.
 	if name == "exec" {
@@ -276,6 +297,18 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", fmt.Errorf("unknown tool %q", name)
 		}
 		return out, err
+	}
+	// Dispatcher families (advertised roots: skill, memory, docs,
+	// ci_pipeline) route to their canonical per-op implementations here.
+	// The per-op cases below stay reachable under their legacy names as
+	// hidden aliases — not advertised, still executable. Missing/unknown
+	// ops fail loud with the valid list.
+	if application.IsDispatchRoot(name) {
+		canon, err := application.DispatchCanonical(name, argsJSON)
+		if err != nil {
+			return "", err
+		}
+		name = canon
 	}
 	switch {
 	case name == "skill_list":

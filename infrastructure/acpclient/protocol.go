@@ -1,6 +1,9 @@
 package acpclient
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // Protocol types for Agent Client Protocol JSON-RPC 2.0 over stdio.
 // Field names follow ACP camelCase.
@@ -27,6 +30,19 @@ type rpcError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 }
+
+// RPCError is a typed JSON-RPC error reply from the agent side. ACP
+// reserves code -32000 for auth-required; carrying the code lets callers
+// detect it without matching message text.
+type RPCError struct {
+	Code    int
+	Message string
+}
+
+func (e *RPCError) Error() string { return fmt.Sprintf("acp %s", e.Message) }
+
+// ErrorCode exposes the JSON-RPC error code for errors.As inspection.
+func (e *RPCError) ErrorCode() int { return e.Code }
 
 type InitializeParams struct {
 	ProtocolVersion    int                `json:"protocolVersion"`
@@ -93,6 +109,43 @@ type NewSessionResult struct {
 	SessionID string         `json:"sessionId"`
 	Modes     *SessionModes  `json:"modes,omitempty"`
 	Models    *SessionModels `json:"models,omitempty"`
+	// ConfigOptions is the v1 session-configuration selector list. Agents
+	// in the OpenCode generation replaced the legacy modes/models payload
+	// with these selectors; NusaShell folds select-type mode/model options
+	// onto its existing caches and keeps driving them through the still
+	// supported legacy set_mode/set_model methods.
+	ConfigOptions []ConfigOption `json:"configOptions,omitempty"`
+}
+
+// ConfigOption is one session configuration selector. Boolean-typed
+// options exist alongside selects, so CurrentValue stays raw JSON.
+type ConfigOption struct {
+	ID           string               `json:"id"`
+	Name         string               `json:"name,omitempty"`
+	Category     string               `json:"category,omitempty"` // mode | model | thought_level | ...
+	Type         string               `json:"type,omitempty"`     // select | boolean
+	CurrentValue json.RawMessage      `json:"currentValue,omitempty"`
+	Options      []ConfigChoiceOption `json:"options,omitempty"`
+}
+
+// ConfigChoiceOption is one selectable value of a select config option.
+type ConfigChoiceOption struct {
+	Value       string `json:"value"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// StringValue decodes a quoted-string config option value. Absent or
+// non-string values (booleans) decode to "".
+func (o ConfigOption) StringValue() string {
+	if len(o.CurrentValue) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(o.CurrentValue, &s); err != nil {
+		return ""
+	}
+	return s
 }
 
 type SessionModes struct {

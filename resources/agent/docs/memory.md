@@ -8,8 +8,8 @@ archive.
 
 | Tier | Storage | Cap | Injected | Tools |
 |---|---|---|---|---|
-| **Primary** | `memory/primary.md` (single markdown document) | ~1k tokens | Every turn (via hydration) | `memory_list target=primary`, `memory_replace target=primary` |
-| **Fragments** | `memory/fragments/*.md` (one file per entry) | Unlimited | On-demand (search) | `memory_save`, `memory_search`, `memory_list target=fragments`, `memory_replace target=fragment`, `memory_delete` |
+| **Primary** | `memory/primary.md` (single markdown document) | ~1k tokens | Every turn (via hydration) | `memory(op="list",target="primary")`, `memory(op="replace",target="primary")` |
+| **Fragments** | `memory/fragments/*.md` (one file per entry) | Unlimited | On-demand (search) | `memory(op="save")`, `memory(op="search")`, `memory(op="list",target="fragments")`, `memory(op="replace",target="fragment")`, `memory(op="delete")` |
 
 Primary memory is a single markdown document — like a README the agent
 maintains about the user and working context. It is injected into every
@@ -37,8 +37,8 @@ that works for both humans and AI agents.
 
 The entire body is one document — paragraphs are part of the same
 entry, not separate entries. The agent edits the body in place via
-`memory_replace target=primary` (substring match) or rewrites the whole
-body by omitting `old_text`.
+`memory(op="replace", target="primary")` (substring match) or rewrites
+the whole body by omitting `old_text`.
 
 ## Fragment metadata
 
@@ -59,28 +59,32 @@ The repo uses Go with Clean Architecture and strict layer dependencies.
 ```
 
 Search combines BM25 content ranking with metadata filters (category,
-project, task, tags) — like `docs_search` but for memory.
+project, task, tags) — the same ranking approach the docs corpus search
+uses.
 
 ## Tools
 
-- `memory_save` — save a new fact as a **fragment** (`content`, `category`,
+All memory operations go through the `memory` dispatcher tool; `op` selects:
+
+- `save` — save a new fact as a **fragment** (`content`, `category`,
   optional `project`, `task`, `tags`). All new facts enter fragments first.
-- `memory_search` — search fragments by content (BM25) with optional
+  Exact normalized duplicates are idempotent.
+- `search` — search fragments by content (BM25) with optional
   metadata filters (`query`, `category`, `project`, `task`, `tags`,
   `limit`). Returns ranked results with scores.
-- `memory_list` — list entries. `target="primary"` returns the primary
+- `list` — list entries. `target="primary"` returns the primary
   document; `target="fragments"` (default) lists the archive with
   optional metadata filters.
-- `memory_replace` — update memory. For primary: `target="primary"` +
+- `replace` — update memory. For primary: `target="primary"` +
   `old_text` (substring match) + `content` to edit part of the document,
   or omit `old_text` to rewrite the entire body. For fragments:
   `target="fragment"` + `id` + `content`.
-- `memory_delete` — delete a fragment by `id`.
+- `delete` — delete a fragment by `id`.
 
 ## When to save
 
-Treat `memory_save` as a deliberate commit, not a default. Before saving,
-apply two tests:
+Treat `memory(op="save")` as a deliberate commit, not a default. Before
+saving, apply two tests:
 
 1. **Lookup test:** would a future conversation plausibly need to look this
    up rather than re-derive it in seconds?
@@ -88,21 +92,21 @@ apply two tests:
    skills, code, or the current conversation than by searching memory?
 
 Save only when both answers favor memory — the fact is durable, not already
-captured elsewhere, and likely to be searched for. Run `memory_search`
-first; if a matching fragment exists, `memory_replace` it instead of adding
+captured elsewhere, and likely to be searched for. Run `memory(op="search")`
+first; if a matching fragment exists, replace it instead of adding
 a duplicate. A redundant fragment is noise the background review agent must
 triage, and it pushes the real fact down in search results.
 
 Good examples:
 
-    memory_save(content="User prefers Indonesian for code comments", category="user", tags=["preference"])
-    memory_save(content="Repo policy: ignore untracked folders in root — they are research scratch", category="project", tags=["repo-policy"])
-    memory_search(query="comment language")   # before saving, check for duplicates
+    memory(op="save", content="User prefers Indonesian for code comments", category="user", tags=["preference"])
+    memory(op="save", content="Repo policy: ignore untracked folders in root — they are research scratch", category="project", tags=["repo-policy"])
+    memory(op="search", query="comment language")   # before saving, check for duplicates
 
 ## How the review agent edits primary
 
 The background review agent edits the primary document via
-`memory_replace target=primary` when it finds durable facts in fragments
+`memory(op="replace", target="primary")` when it finds durable facts in fragments
 that belong in the always-injected working set. Primary is capped at ~1k
 tokens, so the agent rewrites or trims stale text before adding new
 content.
@@ -110,7 +114,7 @@ content.
 The review agent sees the current primary document injected into its
 system prompt at the start of each review run, so it can avoid
 duplicates and spot stale text without needing to call
-`memory_list target=primary` first. Reviews are bounded to a small number of
+`memory(op="list", target="primary")` first. Reviews are bounded to a small number of
 tool rounds and coalesce concurrent threshold/skill/compaction triggers, so a burst cannot launch duplicate reviews or replay the same transcript repeatedly. Activity that arrives while a review is running is retained for one follow-up review. Retry cooldown is reserved for failed reviews; successful reviews do not suppress later evidence. Exact duplicate fragment writes are idempotent.
 
 ## How the review agent gets the transcript
@@ -141,8 +145,8 @@ firing at the same time produce only one review. Concurrent triggers are coalesc
 
 Good examples:
 
-    memory_replace(target="primary", old_text="old CI config notes", content="CI uses GitHub Actions + GitLab Runner")
-    memory_replace(target="primary", content="Full rewrite of the primary document body…")
+    memory(op="replace", target="primary", old_text="old CI config notes", content="CI uses GitHub Actions + GitLab Runner")
+    memory(op="replace", target="primary", content="Full rewrite of the primary document body…")
 
 ## What not to save
 
@@ -160,7 +164,7 @@ emerge. Keep scratch observations there instead of saving them to memory.
 
 Bad examples:
 
-    memory_save(content="User asked me to fix the bug at 14:32")            # transient
-    memory_save(content="The API key format for provider X is sk-...")       # secrets
-    memory_save(content="pipeline failed: missing env var")                 # one-off state
-    memory_save(content="NusaShell is a Go binary with Clean Architecture") # already in docs
+    memory(op="save", content="User asked me to fix the bug at 14:32")            # transient
+    memory(op="save", content="The API key format for provider X is sk-...")       # secrets
+    memory(op="save", content="pipeline failed: missing env var")                 # one-off state
+    memory(op="save", content="NusaShell is a Go binary with Clean Architecture") # already in docs

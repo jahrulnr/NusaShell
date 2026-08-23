@@ -225,6 +225,85 @@ func applySession(agent *domain.AcpAgent, sess acpclient.NewSessionResult) {
 			})
 		}
 	}
+	applyConfigOptions(agent, sess.ConfigOptions)
+}
+
+// applyConfigOptions folds v1 session configuration selectors onto the
+// legacy mode/model caches when the agent did not advertise those legacy
+// payloads (OpenCode-generation agents return configOptions only). Filling
+// gaps keeps agents that send both shapes deterministic. Switching still
+// goes through legacy set_mode/set_model, which such agents keep serving.
+func applyConfigOptions(agent *domain.AcpAgent, opts []acpclient.ConfigOption) {
+	for _, opt := range opts {
+		if !isSelectOption(opt) || len(opt.Options) == 0 {
+			continue
+		}
+		switch opt.Category {
+		case "mode":
+			if len(agent.CachedModes) > 0 {
+				continue
+			}
+			modes := make([]domain.AcpMode, 0, len(opt.Options))
+			for _, choice := range opt.Options {
+				modes = append(modes, domain.AcpMode{
+					ID: choice.Value, Name: choice.Name, Description: choice.Description,
+				})
+			}
+			agent.CachedCapabilities.HasModes = true
+			agent.CachedModes = modes
+			agent.ModeRiskMappings = domain.SeedModeRiskMappings(modes, agent.ModeRiskMappings)
+		case "model":
+			if len(agent.CachedModels) > 0 {
+				continue
+			}
+			models := make([]domain.AcpModelInfo, 0, len(opt.Options))
+			for _, choice := range opt.Options {
+				models = append(models, domain.AcpModelInfo{
+					ID: choice.Value, Name: choice.Name, Description: choice.Description,
+					Tier: domain.ClassifyModelTier(choice.Value, choice.Name),
+				})
+			}
+			agent.CachedModels = models
+		}
+	}
+}
+
+func isSelectOption(opt acpclient.ConfigOption) bool {
+	return opt.Type == "" || opt.Type == "select"
+}
+
+// sessionConfigValue returns the current value of the select config option
+// with the given category (e.g. "mode", "model"), or "".
+func sessionConfigValue(opts []acpclient.ConfigOption, category string) string {
+	for _, opt := range opts {
+		if opt.Category == category && isSelectOption(opt) {
+			return opt.StringValue()
+		}
+	}
+	return ""
+}
+
+// sessionCurrentMode reads the session's current mode from either the
+// legacy modes payload or v1 config options.
+func sessionCurrentMode(sess acpclient.NewSessionResult) string {
+	if sess.Modes != nil && sess.Modes.CurrentModeID != "" {
+		return sess.Modes.CurrentModeID
+	}
+	return sessionConfigValue(sess.ConfigOptions, "mode")
+}
+
+// hasModeSelector reports whether the session advertises switchable modes
+// through either the legacy modes payload or v1 config options.
+func hasModeSelector(sess acpclient.NewSessionResult) bool {
+	if sess.Modes != nil {
+		return true
+	}
+	for _, opt := range sess.ConfigOptions {
+		if opt.Category == "mode" && isSelectOption(opt) {
+			return true
+		}
+	}
+	return false
 }
 
 func (rt *Runtime) Spawn(ctx context.Context, req application.AcpSpawnRequest) (*domain.AcpRun, error) {
@@ -275,13 +354,14 @@ func (rt *Runtime) Spawn(ctx context.Context, req application.AcpSpawnRequest) (
 	if modeID == "" {
 		modeID = domain.StrictestAvailableMode(req.Agent.CachedModes, req.Agent.ModeRiskMappings)
 	}
-	if modeID != "" && sess.Modes != nil && modeID != sess.Modes.CurrentModeID {
+	currentMode := sessionCurrentMode(sess)
+	if modeID != "" && hasModeSelector(sess) && modeID != currentMode {
 		if err := pc.conn.SetMode(ctx, sess.SessionID, modeID); err == nil {
-			sess.Modes.CurrentModeID = modeID
+			currentMode = modeID
 		}
 	}
-	if sess.Modes != nil && sess.Modes.CurrentModeID != "" {
-		modeID = sess.Modes.CurrentModeID
+	if currentMode != "" {
+		modeID = currentMode
 	}
 
 	modelID := strings.TrimSpace(req.ModelID)
@@ -292,6 +372,8 @@ func (rt *Runtime) Spawn(ctx context.Context, req application.AcpSpawnRequest) (
 	currentModel := ""
 	if sess.Models != nil {
 		currentModel = sess.Models.CurrentModelID
+	} else if cur := sessionConfigValue(sess.ConfigOptions, "model"); cur != "" {
+		currentModel = cur
 	}
 	if modelID != "" {
 		res, err := pc.conn.SetModel(ctx, sess.SessionID, modelID)

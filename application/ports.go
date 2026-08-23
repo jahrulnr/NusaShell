@@ -542,6 +542,63 @@ type ImageModelLister interface {
 // seeds gpt-image-2 at import/read time; Anthropic Messages has none).
 type ImageModelListerFactory func(p *domain.Provider) ImageModelLister
 
+// SpeechModelLister enumerates speech-generation models via the
+// output_modalities=speech filter on /models (OpenRouter's documented TTS
+// discovery route). Hosts that lack the filter return an empty list; known
+// TTS ids from plain /models are still tagged via the models.dev catalog
+// and the config allowlist.
+type SpeechModelLister interface {
+	ListSpeechModels(ctx context.Context, apiKey string) ([]string, error)
+}
+
+// SpeechModelListerFactory builds a SpeechModelLister for a given provider.
+// Returns nil when the provider kind cannot expose a speech catalog (Codex
+// OAuth; Anthropic Messages).
+type SpeechModelListerFactory func(p *domain.Provider) SpeechModelLister
+
+// ---- video generation port ----
+
+// VideoGenerator produces short videos from a text prompt via the async
+// submit/poll/download flow (OpenRouter-style POST /videos). Implementations
+// block until the clip is downloaded or ctx is cancelled — generation takes
+// tens of seconds to minutes, which is expected, not an error.
+type VideoGenerator interface {
+	Generate(ctx context.Context, req VideoGenRequest) (*VideoGenResult, error)
+}
+
+// VideoGenRequest is one generation call.
+type VideoGenRequest struct {
+	Model       string
+	Prompt      string
+	DurationSec int    // 0 = provider default; per-model minimums apply upstream
+	Resolution  string // e.g. "480p"/"720p"; empty = provider default
+}
+
+// VideoGenResult is the downloaded clip plus metadata for persistence.
+type VideoGenResult struct {
+	Video     []byte
+	MediaType string // "video/mp4"
+	Ext       string // "mp4"
+	Provider  string
+	Model     string
+	JobID     string
+	CostUSD   float64 // reported by the provider when available
+}
+
+// VideoGeneratorFactory builds a VideoGenerator for a configured provider.
+// Optional; nil = video generation unavailable.
+type VideoGeneratorFactory func(p *domain.Provider, apiKey string) (VideoGenerator, error)
+
+// VideoModelLister enumerates video-generation models via the dedicated
+// /videos/models endpoint (OpenRouter). Hosts without it return empty.
+type VideoModelLister interface {
+	ListVideoModels(ctx context.Context, apiKey string) ([]string, error)
+}
+
+// VideoModelListerFactory builds a VideoModelLister. Returns nil when the
+// provider kind cannot expose a video catalog.
+type VideoModelListerFactory func(p *domain.Provider) VideoModelLister
+
 // ---- image generation port ----
 
 // ImageGenerator produces images from a text prompt and optional reference

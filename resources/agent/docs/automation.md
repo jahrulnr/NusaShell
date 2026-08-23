@@ -25,7 +25,7 @@ A step may set `wait_until: <RFC3339>`. The run status becomes `waiting` and the
 
 | Tool | Use |
 | --- | --- |
-| `ci_pipeline_list` / `ci_pipeline_read` / `ci_pipeline_validate` | Workspace `.nusashell/pipeline.yaml` |
+| `ci_pipeline` (`op` list/read/validate) | Workspace `.nusashell/pipeline.yaml` |
 | `ci_run` / `ci_run_status` / `ci_logs` / `ci_cancel` | Start and observe execution |
 | `automation_list` / `automation_read` / `automation_validate` / `automation_create` | Saved workflows |
 | `automation_enable` / `automation_disable` / `automation_status` | Lifecycle |
