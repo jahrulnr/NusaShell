@@ -549,7 +549,7 @@ func (s *Store) SaveMemory(e *domain.MemoryEntry) error {
 	used := s.targetChars(e.Target)
 	limit := domain.MemoryLimit(e.Target)
 	if used+len(e.Content) > limit {
-		return fmt.Errorf("memory target %q at %d/%d chars; adding %d would exceed the limit — use memory_replace to merge or remove stale entries first", e.Target, used, limit, len(e.Content))
+		return fmt.Errorf("memory target %q at %d/%d chars; adding %d would exceed the limit — use memory with op=replace to merge or remove stale entries first", e.Target, used, limit, len(e.Content))
 	}
 	stored := clone(e)
 	s.memories = append(s.memories, stored)
@@ -739,6 +739,16 @@ func (s *Store) SetSettings(settings domain.Settings) error {
 	defer s.mu.Unlock()
 	s.settings = settings
 	return s.writeJSON("config/settings.json", settings)
+}
+
+// ApplySettings swaps the in-memory settings without writing the file back.
+// The settings watcher uses it after an external edit passes validation:
+// disk stays the source of truth, memory follows it. Callers must pass
+// already-normalized settings.
+func (s *Store) ApplySettings(settings domain.Settings) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.settings = settings
 }
 
 // ---- learning edges ----

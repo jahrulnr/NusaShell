@@ -1294,3 +1294,24 @@ type LearningReviewTranscriptResult struct {
 	CreatedAt      string                               `json:"created_at"`
 	Messages       []LearningReviewTranscriptMessageDTO `json:"messages"`
 }
+
+// Settings watcher events: config/settings.json changed outside the app.
+// Applied = valid JSON, normalized, and swapped in-memory (no write-back).
+// Rejected = invalid content; the previous settings stay active.
+const (
+	EventSettingsApplied  = "settings.applied"
+	EventSettingsRejected = "settings.rejected"
+)
+
+// SettingsAppliedEvent announces a successful external settings reload.
+// RestartNeeded lists setting keys that need an app or UI reload to take
+// full effect; empty means everything is live immediately.
+type SettingsAppliedEvent struct {
+	RestartNeeded []string `json:"restart_needed,omitempty"`
+}
+
+// SettingsRejectedEvent announces skipped external settings changes.
+// Reason carries why (parse error, normalize panic guard, etc.).
+type SettingsRejectedEvent struct {
+	Reason string `json:"reason"`
+}

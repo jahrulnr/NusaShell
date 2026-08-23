@@ -310,6 +310,7 @@ func run() error {
 	app.StartAutoUpdateLoop(ctx, 0)
 	app.StartLifecycle()
 	app.StartMCPAutostart(ctx)
+	app.StartSettingsWatcher(ctx)
 	defer app.CloseLifecycle()
 	if autoSvc != nil {
 		go func() {

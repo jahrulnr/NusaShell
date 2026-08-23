@@ -1,6 +1,6 @@
 // Settings workspace: native browser preferences plus the Go runtime controls.
 
-import { autoReconnectEnabled, rpc, setAutoReconnect } from '../rpc.js';
+import { autoReconnectEnabled, on, rpc, setAutoReconnect } from '../rpc.js';
 import { toast, createSelect } from '../ui.js';
 
 let bound = false;
@@ -83,8 +83,32 @@ export async function initSettings() {
     window.addEventListener('hashchange', () => {
       if (location.hash === '#settings') void refresh();
     });
+    bindDiskSync();
   }
   await refresh();
+}
+
+// Disk sync: the backend watcher reloads config/settings.json on external
+// edits and announces it here. When the form has unsaved edits we never
+// clobber them — the status line says the runtime moved on instead.
+let diskSyncDirty = false;
+
+function bindDiskSync() {
+  const view = document.querySelector('[data-view="settings"]');
+  if (view) {
+    view.addEventListener('input', () => { diskSyncDirty = true; }, { capture: true });
+  }
+  on('settings.applied', () => {
+    if (diskSyncDirty) {
+      setStatus('Runtime reloaded from disk. Unsaved form edits kept — reopen this view to resync.', true);
+      return;
+    }
+    void refresh();
+    setStatus('Settings reloaded from disk.');
+  });
+  on('settings.rejected', (payload) => {
+    setStatus(`Skipped external settings change (${payload?.reason ?? 'unknown'}) — previous values stay active.`, true);
+  });
 }
 
 export async function refresh() {
@@ -481,6 +505,7 @@ async function save() {
     localStorage.setItem('nusashell.model', model);
     window.dispatchEvent(new CustomEvent('nusashell:preferred-model', { detail: { model } }));
     setStatus('Saved on this device.');
+    diskSyncDirty = false;
     toast('Settings saved', 'success');
   } catch (err) {
     setStatus(err.message, true);

@@ -98,6 +98,7 @@ func TestRosterUniqueness(t *testing.T) {
 		EventAcpRunStarted, EventAcpRunUpdated, EventAcpRunDone,
 		EventAcpPermissionRequested, EventAcpPermissionDecided, EventAcpSessionModeChanged,
 		EventLearningReviewStarted, EventLearningReviewDone,
+		EventSettingsApplied, EventSettingsRejected,
 	}
 	seenEv := map[string]bool{}
 	for _, e := range events {
