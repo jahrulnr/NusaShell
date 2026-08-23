@@ -744,6 +744,22 @@
               <small>Only models with video capability appear here. Leave disabled if you always use video-capable chat models.</small>
             </label>
           </section>
+          <section class="settings-card settings-tts-card" aria-labelledby="settings-tts-title">
+            <div class="settings-card-title">Speech generation</div>
+            <h2 id="settings-tts-title" class="sr-only">Speech generation</h2>
+            <p class="settings-card-copy">Pick the model used by the <code>generate_speech</code> tool (text-to-speech). Online models use an OpenAI-compatible /audio/speech endpoint; the offline piper engine works without any API key when installed. If the online model fails, NusaShell automatically falls back to offline.</p>
+            <label class="settings-field" for="settings-tts-model">Speech generation model
+              <select id="settings-tts-model">
+                <option value="">Disabled — generate_speech needs the offline piper engine</option>
+              </select>
+              <small>Only speech models (tts-1, Kokoudo, etc.) appear here. Leave disabled to rely on the offline piper engine only.</small>
+            </label>
+            <label class="settings-field settings-checkbox-field" for="settings-tts-offline">
+              <input type="checkbox" id="settings-tts-offline" />
+              Offline piper engine enabled
+              <small>Requires the piper binary on PATH (or PIPER_BIN) and voice models under models/tts/. When enabled, generate_speech works fully offline and also serves as automatic fallback for the online model.</small>
+            </label>
+          </section>
           <section class="settings-card settings-web-answer-card" aria-labelledby="settings-web-answer-title">
             <div class="settings-card-title">Web Answer</div>
             <h2 id="settings-web-answer-title" class="sr-only">Web Answer</h2>

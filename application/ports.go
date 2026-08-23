@@ -368,6 +368,14 @@ type ChatRequest struct {
 	// headers, which enable server-side prompt cache hits across requests
 	// in the same conversation.
 	ConversationID string
+	// ReasoningReplay is true when the target upstream requires
+	// reasoning_content (Chat Completions) or reasoning items (Responses
+	// API) to be echoed back on every assistant message in subsequent
+	// turns. Resolved from the model's InterleavedField catalog signal
+	// (preferred) or a provider/model pattern fallback. When false, the
+	// field is omitted — providers that ignore it (OpenAI, Anthropic)
+	// are unaffected.
+	ReasoningReplay bool
 }
 
 // PromptCachePolicy is the provider-neutral cache intent. Adapters translate

@@ -565,6 +565,7 @@ type ModelDTO struct {
 	Vision           bool     `json:"vision,omitempty"`
 	Audio            bool     `json:"audio,omitempty"`
 	Video            bool     `json:"video,omitempty"`
+	TTS              bool     `json:"tts,omitempty"`
 	KnowledgeCutoff  string   `json:"knowledge_cutoff,omitempty"`
 }
 
@@ -1124,6 +1125,9 @@ type SettingsDTO struct {
 	AudioModelID               string   `json:"audio_model_id,omitempty"`
 	VideoProviderID            string   `json:"video_provider_id,omitempty"`
 	VideoModelID               string   `json:"video_model_id,omitempty"`
+	TTSProviderID              string   `json:"tts_provider_id,omitempty"`
+	TTSModelID                 string   `json:"tts_model_id,omitempty"`
+	TTSOfflineEnabled          bool     `json:"tts_offline_enabled,omitempty"`
 	ImageProviderID            string   `json:"image_provider_id,omitempty"`
 	ImageModelID               string   `json:"image_model_id,omitempty"`
 	WebAnswerProvider          string   `json:"web_answer_provider,omitempty"`
@@ -1166,6 +1170,9 @@ type SettingsSetRequest struct {
 	AudioModelID               *string         `json:"audio_model_id,omitempty"`
 	VideoProviderID            *string         `json:"video_provider_id,omitempty"`
 	VideoModelID               *string         `json:"video_model_id,omitempty"`
+	TTSProviderID              *string         `json:"tts_provider_id,omitempty"`
+	TTSModelID                 *string         `json:"tts_model_id,omitempty"`
+	TTSOfflineEnabled          *bool           `json:"tts_offline_enabled,omitempty"`
 	ImageProviderID            *string         `json:"image_provider_id,omitempty"`
 	ImageModelID               *string         `json:"image_model_id,omitempty"`
 	WebAnswerProvider          *string         `json:"web_answer_provider,omitempty"`

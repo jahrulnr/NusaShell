@@ -1660,7 +1660,8 @@ func TestAgentToolsDocMatchesBuiltInRoster(t *testing.T) {
 		"subagent_stop": true, "subagent_wait": true,
 		"artifact_create": true, "artifact_update": true, "artifact_read": true,
 		"artifact_list": true, "artifact_delete": true,
-		"generate_image": true,
+		"generate_speech": true,
+		"generate_image":  true,
 	}
 	for name := range documented {
 		if !actual[name] && !conditional[name] {

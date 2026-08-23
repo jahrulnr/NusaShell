@@ -49,6 +49,12 @@ type ModelMetadata struct {
 	KnowledgeCutoff  string   `json:"knowledge_cutoff"`
 	ReleaseDate      string   `json:"release_date"`
 	Kind             string   `json:"kind"` // chat|embedding|image|video|tts|stt
+	// InterleavedField is the models.dev `interleaved.field` signal: when
+	// "reasoning_content", the upstream requires reasoning_content to be
+	// echoed back on every assistant message in subsequent turns (DeepSeek
+	// V4, GLM, Kimi thinking, etc.). Empty when the model does not use
+	// interleaved reasoning or the catalog does not declare it.
+	InterleavedField string `json:"interleaved_field"`
 }
 
 // catalogProvider is one provider entry in the models.dev JSON.
@@ -72,7 +78,10 @@ type catalogModel struct {
 	Knowledge        string            `json:"knowledge"`
 	ReleaseDate      string            `json:"release_date"`
 	ReasoningOptions []reasoningOption `json:"reasoning_options"`
-	Modalities       struct {
+	// Interleaved can be an object {field:"reasoning_content"} or a
+	// boolean (false). Parse from RawMessage to handle both shapes.
+	Interleaved json.RawMessage `json:"interleaved"`
+	Modalities  struct {
 		Input  []string `json:"input"`
 		Output []string `json:"output"`
 	} `json:"modalities"`
@@ -323,6 +332,7 @@ func parseEmbeddedCatalog() ([]flatEntry, error) {
 		SupportedEfforts []string `json:"supported_efforts"`
 		KnowledgeCutoff  string   `json:"knowledge_cutoff"`
 		Kind             string   `json:"kind"`
+		InterleavedField string   `json:"interleaved_field"`
 	}
 	if err := json.Unmarshal([]byte(config.EmbeddedCatalogJSON), &entries); err != nil {
 		return nil, fmt.Errorf("embedded parse: %w", err)
@@ -351,6 +361,7 @@ func parseEmbeddedCatalog() ([]flatEntry, error) {
 				SupportedEfforts: efforts,
 				KnowledgeCutoff:  e.KnowledgeCutoff,
 				Kind:             e.Kind,
+				InterleavedField: e.InterleavedField,
 			},
 		}
 	}
@@ -445,6 +456,18 @@ func convertModel(id string, cm catalogModel) *ModelMetadata {
 	// reasoning_effort on the wire, so this only affects UI visibility.
 	if meta.Reasoning && len(meta.SupportedEfforts) == 0 {
 		meta.SupportedEfforts = defaultReasoningEfforts
+	}
+	// Interleaved reasoning field from models.dev. When set to
+	// "reasoning_content", the upstream requires reasoning_content to be
+	// echoed back on assistant messages in subsequent turns (DeepSeek V4,
+	// GLM, Kimi thinking, etc.). Empty when not declared.
+	if len(cm.Interleaved) > 0 && string(cm.Interleaved) != "false" && string(cm.Interleaved) != "null" {
+		var ilv struct {
+			Field string `json:"field"`
+		}
+		if err := json.Unmarshal(cm.Interleaved, &ilv); err == nil && ilv.Field != "" {
+			meta.InterleavedField = strings.ToLower(strings.TrimSpace(ilv.Field))
+		}
 	}
 	return meta
 }

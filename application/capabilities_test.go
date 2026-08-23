@@ -206,3 +206,45 @@ func TestFilterToolAttachmentsByCapsKeepsImageForVisionModel(t *testing.T) {
 		t.Errorf("content should not note image can't be shown, got: %q", content)
 	}
 }
+
+// TestModelCapabilitiesReasoningReplayFromCatalog proves that the
+// ReasoningReplay flag is resolved from the model's InterleavedField
+// catalog signal. A model with InterleavedField="reasoning_content"
+// (e.g. GLM, DeepSeek V4, Kimi) gets ReasoningReplay=true; a model
+// without it gets false.
+func TestModelCapabilitiesReasoningReplayFromCatalog(t *testing.T) {
+	provider := &domain.Provider{
+		ID: "openrouter",
+		Models: []domain.Model{
+			{ID: "glm-5.2", InterleavedField: "reasoning_content"},
+			{ID: "gpt-5.5", InterleavedField: ""},
+		},
+	}
+
+	caps := modelCapabilities(provider, "glm-5.2")
+	if !caps.ReasoningReplay {
+		t.Errorf("glm-5.2 with interleaved_field=reasoning_content: ReasoningReplay = false, want true")
+	}
+
+	caps = modelCapabilities(provider, "gpt-5.5")
+	if caps.ReasoningReplay {
+		t.Errorf("gpt-5.5 with no interleaved_field: ReasoningReplay = true, want false")
+	}
+}
+
+// TestModelCapabilitiesReasoningReplayPatternFallback proves that the
+// pattern fallback catches models not in the catalog but matching known
+// reasoning-replay patterns (e.g. stealth/ox-alpha on OpenRouter, which
+// doesn't expose the interleaved signal).
+func TestModelCapabilitiesReasoningReplayPatternFallback(t *testing.T) {
+	provider := &domain.Provider{
+		ID: "openrouter",
+		Models: []domain.Model{
+			{ID: "stealth/ox-alpha"}, // no InterleavedField (OpenRouter hides it)
+		},
+	}
+	caps := modelCapabilities(provider, "stealth/ox-alpha")
+	if !caps.ReasoningReplay {
+		t.Errorf("stealth/ox-alpha should match pattern fallback: ReasoningReplay = false, want true")
+	}
+}

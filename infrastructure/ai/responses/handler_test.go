@@ -307,3 +307,51 @@ func TestResponsesSanitizesHallucinatedToolNames(t *testing.T) {
 		t.Fatalf("function_call_output missing: %s", body)
 	}
 }
+
+// TestResponsesReasoningReplayInjectsReasoningItem proves that when
+// ReasoningReplay is true, a {type:"reasoning"} item with a summary is
+// emitted before each assistant message item, so thinking-mode upstreams
+// (GLM, DeepSeek V4, Kimi, ox-alpha) can reconstruct the thinking state
+// across turns. When false, no reasoning item is emitted.
+func TestResponsesReasoningReplayInjectsReasoningItem(t *testing.T) {
+	msgs := []application.ChatMessage{
+		{Role: "user", Content: "Hello"},
+		{Role: "assistant", Content: "Hi there", Reasoning: "I should greet the user."},
+		{Role: "user", Content: "What is 2+2?"},
+	}
+
+	// Without replay: no reasoning items
+	req := application.ChatRequest{Model: "test-model", Messages: msgs}
+	body := marshalRequest(t, buildResponsesRequest(req, false))
+	if strings.Contains(body, `"type":"reasoning"`) {
+		t.Errorf("no replay: reasoning item should not be present, got %s", body)
+	}
+
+	// With replay: reasoning item emitted before assistant message
+	req = application.ChatRequest{Model: "test-model", Messages: msgs, ReasoningReplay: true}
+	body = marshalRequest(t, buildResponsesRequest(req, false))
+	if !strings.Contains(body, `"type":"reasoning"`) {
+		t.Errorf("with replay: reasoning item missing, got %s", body)
+	}
+	if !strings.Contains(body, `"summary_text"`) {
+		t.Errorf("with replay: summary_text missing, got %s", body)
+	}
+	if !strings.Contains(body, "I should greet the user.") {
+		t.Errorf("with replay: persisted reasoning text missing, got %s", body)
+	}
+}
+
+// TestResponsesReasoningReplayPlaceholder proves that when ReasoningReplay
+// is true but the assistant message has no persisted reasoning, a
+// non-empty placeholder is injected as the summary text.
+func TestResponsesReasoningReplayPlaceholder(t *testing.T) {
+	msgs := []application.ChatMessage{
+		{Role: "user", Content: "Hello"},
+		{Role: "assistant", Content: "Hi there", Reasoning: ""},
+	}
+	req := application.ChatRequest{Model: "test-model", Messages: msgs, ReasoningReplay: true}
+	body := marshalRequest(t, buildResponsesRequest(req, false))
+	if !strings.Contains(body, domain.ReasoningPlaceholder) {
+		t.Errorf("placeholder missing, got %s", body)
+	}
+}

@@ -339,6 +339,7 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 				models[i].Vision = meta.Vision
 				models[i].Audio = meta.Audio
 				models[i].Video = meta.Video
+				models[i].InterleavedField = meta.InterleavedField
 				// The catalog assigns capabilities only; it must never
 				// reclassify a model. Kind is decided by the source that
 				// listed the model (/models, /embeddings/models,
@@ -519,6 +520,7 @@ func (a *App) enrichProviderModelsAtRead(p *domain.Provider) {
 			p.Models[i].Vision = meta.Vision
 			p.Models[i].Audio = meta.Audio
 			p.Models[i].Video = meta.Video
+			p.Models[i].InterleavedField = meta.InterleavedField
 			// Capability-only: Kind stays with the lister source, never
 			// reclassified by the catalog (matches import path).
 		}
@@ -555,6 +557,7 @@ func modelsDTO(p *domain.Provider) []contracts.ModelDTO {
 			Vision:           m.Vision,
 			Audio:            m.Audio,
 			Video:            m.Video,
+			TTS:              m.Kind == domain.ModelKindTTS,
 			KnowledgeCutoff:  m.KnowledgeCutoff,
 		})
 	}

@@ -195,6 +195,15 @@ type Settings struct {
 	// to an audio-capable model.
 	AudioProviderID string `json:"audio_provider_id,omitempty"`
 	AudioModelID    string `json:"audio_model_id,omitempty"`
+	// SpeechGeneration (TTS) selects the model used by the generate_speech
+	// tool. Online: an OpenAI-compatible /audio/speech endpoint
+	// (TTSProviderID + TTSModelID, resolved like the other fallbacks).
+	// Offline: piper via TTSOfflineEnabled + voice files under
+	// <data>/models/tts/. When both are unavailable, generate_speech is not
+	// advertised.
+	TTSProviderID     string `json:"tts_provider_id,omitempty"`
+	TTSModelID        string `json:"tts_model_id,omitempty"`
+	TTSOfflineEnabled bool   `json:"tts_offline_enabled,omitempty"`
 	// VideoFallback selects an auxiliary video-capable model used to
 	// describe video when the active chat model does not support video
 	// input. When empty, non-video models receive an error message

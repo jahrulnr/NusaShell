@@ -41,6 +41,9 @@ type Toolbox struct {
 	Credentials     application.CredentialStore
 	AskQuestions    *application.AskQuestionService
 	Automation      *application.Automation
+	// SpeechOfflineAvailable flips the generate_speech tool on when the local
+	// piper engine is wired (set by the composition root at startup).
+	SpeechOfflineAvailable bool
 	// Contracts reads plugin usage contracts declared via manifest
 	// contract.entry. nil disables contract_read and the gate.
 	Contracts ContractSource
@@ -221,6 +224,21 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 			), "prompt"),
 		})
 	}
+	if t.speechGenerationConfigured() {
+		tools = append(tools, application.ToolInfo{
+			Name:        "generate_speech",
+			Description: "Generate spoken audio from text (text-to-speech) and save it as an audio file the user can play. Supports mp3, wav, and opus. Use for reading text aloud, voice notes, or narration.",
+			InputSchema: obj("object", props(
+				"text", str("The text to speak aloud (max 20000 characters)"),
+				"voice", str("Optional voice id (provider-specific, e.g. alloy; offline: e.g. id_ID-news_tts-medium). Omit for default."),
+				"format", strEnum("Audio format", "mp3", "wav", "opus"),
+				"speed", map[string]any{"type": "number", "description": "Speech speed 0.25-4.0 (default 1.0)."},
+			), "text"),
+		})
+	}
+	// Native file CRUD + exec built-ins.
+	tools = append(tools, fileToolInfos()...)
+	tools = append(tools, execToolInfos()...)
 	return tools
 }
 
@@ -232,7 +250,33 @@ func (t *Toolbox) imageGenerationConfigured() bool {
 	return strings.TrimSpace(s.ImageProviderID) != "" && strings.TrimSpace(s.ImageModelID) != ""
 }
 
+// speechGenerationConfigured reports whether generate_speech can serve:
+// an online TTS model is picked, OR offline piper is wired (the toolbox
+// learns this via the SpeechGenerationAvailable flag set at composition).
+func (t *Toolbox) speechGenerationConfigured() bool {
+	if t.Settings == nil {
+		return false
+	}
+	s := t.Settings.Get()
+	if strings.TrimSpace(s.TTSProviderID) != "" && strings.TrimSpace(s.TTSModelID) != "" {
+		return true
+	}
+	return t.SpeechOfflineAvailable
+}
+
 func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (string, error) {
+	// Native built-ins first: file CRUD and the exec island.
+	if name == "exec" {
+		_, out, err := executeExecTool(ctx, name, argsJSON)
+		return out, err
+	}
+	if strings.HasPrefix(name, "file_") {
+		ok, out, err := executeFileTool(name, argsJSON)
+		if !ok {
+			return "", fmt.Errorf("unknown tool %q", name)
+		}
+		return out, err
+	}
 	switch {
 	case name == "skill_list":
 		var args struct {

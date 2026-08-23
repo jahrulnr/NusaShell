@@ -41,10 +41,11 @@ func (o *Adapter) headers() map[string]string {
 }
 
 type openAIMessage struct {
-	Role       string           `json:"role"`
-	Content    any              `json:"content,omitempty"`
-	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string           `json:"tool_call_id,omitempty"`
+	Role             string           `json:"role"`
+	Content          any              `json:"content,omitempty"`
+	ToolCalls        []openAIToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string           `json:"tool_call_id,omitempty"`
+	ReasoningContent string           `json:"reasoning_content,omitempty"`
 }
 
 type openAIToolCall struct {
@@ -139,6 +140,21 @@ func toOpenAIMessages(req application.ChatRequest) []openAIMessage {
 					Type:     "function",
 					Function: openAIFunction{Name: aiutil.SanitizeToolName(tc.Name), Arguments: tc.Args},
 				})
+			}
+			// Reasoning replay: thinking-mode upstreams (DeepSeek V4, GLM,
+			// Kimi, ox-alpha, etc.) require reasoning_content to be echoed
+			// back on every assistant message in subsequent turns, or they
+			// 400 with "reasoning_content must be passed back". When the
+			// flag is set, inject the persisted reasoning text. If the
+			// reasoning is empty, inject a non-empty placeholder — some
+			// providers (MiMo) reject an absent field, others (DeepSeek)
+			// accept absent but reject empty-string.
+			if req.ReasoningReplay {
+				if m.Reasoning != "" && !domain.IsReasoningPlaceholder(m.Reasoning) {
+					msg.ReasoningContent = m.Reasoning
+				} else {
+					msg.ReasoningContent = domain.ReasoningPlaceholder
+				}
 			}
 			out = append(out, msg)
 		case "tool":
@@ -321,9 +337,14 @@ func (o *Adapter) Stream(ctx context.Context, req application.ChatRequest, onDel
 			// reasoning models (DeepSeek, Qwen, …) stream thinking here;
 			// null deltas between segments must not append anything
 			if ch.Delta.ReasoningContent != nil {
-				result.Reasoning += *ch.Delta.ReasoningContent
-				if onReasoning != nil {
-					onReasoning(*ch.Delta.ReasoningContent)
+				// Strip the internal replay placeholder from streamed
+				// reasoning — models may echo it (#9573-style echo loop).
+				cleaned := strings.ReplaceAll(*ch.Delta.ReasoningContent, domain.ReasoningPlaceholder, "")
+				if cleaned != "" {
+					result.Reasoning += cleaned
+					if onReasoning != nil {
+						onReasoning(cleaned)
+					}
 				}
 			}
 			for _, tc := range ch.Delta.ToolCalls {
@@ -428,7 +449,7 @@ func (o *Adapter) responseFromOpenAI(out openAIResponse) (application.ChatRespon
 	ch := out.Choices[0]
 	resp := application.ChatResponse{
 		Content:    aiutil.Deref(ch.Message.Content),
-		Reasoning:  aiutil.Deref(ch.Message.ReasoningContent),
+		Reasoning:  strings.ReplaceAll(aiutil.Deref(ch.Message.ReasoningContent), domain.ReasoningPlaceholder, ""),
 		StopReason: aiutil.Deref(ch.FinishReason),
 	}
 	if out.Usage != nil {

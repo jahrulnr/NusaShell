@@ -1,6 +1,9 @@
 package modelcatalog
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestDetectKind(t *testing.T) {
 	cases := []struct {
@@ -171,5 +174,50 @@ func TestLookupStripsProviderSuffix(t *testing.T) {
 		if got.ID != tt.want {
 			t.Errorf("Lookup(%q) = %q, want %q", tt.query, got.ID, tt.want)
 		}
+	}
+}
+
+// TestConvertModelParsesInterleavedField proves that the models.dev
+// `interleaved` object (when it's an object with a `field` key) is
+// parsed into ModelMetadata.InterleavedField. When `interleaved` is a
+// boolean (false) or absent, InterleavedField stays empty.
+func TestConvertModelParsesInterleavedField(t *testing.T) {
+	tests := []struct {
+		name      string
+		raw       string
+		wantField string
+	}{
+		{
+			name:      "object with field",
+			raw:       `{"interleaved":{"field":"reasoning_content"}}`,
+			wantField: "reasoning_content",
+		},
+		{
+			name:      "boolean false",
+			raw:       `{"interleaved":false}`,
+			wantField: "",
+		},
+		{
+			name:      "absent",
+			raw:       `{}`,
+			wantField: "",
+		},
+		{
+			name:      "object with reasoning_details",
+			raw:       `{"interleaved":{"field":"reasoning_details"}}`,
+			wantField: "reasoning_details",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var cm catalogModel
+			if err := json.Unmarshal([]byte(tt.raw), &cm); err != nil {
+				t.Fatalf("unmarshal failed: %v", err)
+			}
+			meta := convertModel("test/model", cm)
+			if meta.InterleavedField != tt.wantField {
+				t.Errorf("InterleavedField = %q, want %q", meta.InterleavedField, tt.wantField)
+			}
+		})
 	}
 }

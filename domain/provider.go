@@ -52,6 +52,13 @@ type Model struct {
 	Audio            bool   // supports audio input (multimodal)
 	Video            bool   // supports video input (multimodal)
 	KnowledgeCutoff  string // knowledge cutoff date (e.g. "2025-05")
+	// InterleavedField names the wire field that carries interleaved
+	// reasoning on assistant messages — "reasoning_content" for DeepSeek
+	// V4, GLM, Kimi thinking, etc. When set, the chat adapter must echo
+	// reasoning_content back on every assistant message in subsequent
+	// turns or the upstream 400s with "reasoning_content must be passed
+	// back". Empty when the model does not use interleaved reasoning.
+	InterleavedField string
 }
 
 type Provider struct {

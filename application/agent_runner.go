@@ -1457,15 +1457,30 @@ type ModelCapabilities struct {
 	Vision bool // image input
 	Audio  bool // audio input
 	Video  bool // video input
+	// ReasoningReplay is true when the upstream requires reasoning_content
+	// (Chat Completions) or reasoning items (Responses API) to be echoed
+	// back on every assistant message in subsequent turns. Resolved from
+	// the model's InterleavedField catalog signal or a provider/model
+	// pattern fallback.
+	ReasoningReplay bool
 }
 
 // modelCapabilities resolves the input modalities the given model on the
 // given provider supports. Unknown models (not in catalog) default to
 // Vision=true but Audio=false and Video=false — see domain.ModelCapabilities
-// for rationale.
+// for rationale. ReasoningReplay is resolved from the model's
+// InterleavedField (catalog signal) with a provider/model pattern fallback.
 func modelCapabilities(provider *domain.Provider, model string) ModelCapabilities {
 	dc := domain.ModelCapabilitiesOf(provider, model)
-	return ModelCapabilities{Vision: dc.Vision, Audio: dc.Audio, Video: dc.Video}
+	caps := ModelCapabilities{Vision: dc.Vision, Audio: dc.Audio, Video: dc.Video}
+	if provider != nil {
+		if m := provider.FindModel(model); m != nil {
+			caps.ReasoningReplay = domain.RequiresReasoningReplay(provider.ID, model, m.InterleavedField)
+		} else {
+			caps.ReasoningReplay = domain.RequiresReasoningReplay(provider.ID, model, "")
+		}
+	}
+	return caps
 }
 
 // modelSupportsVision reports whether the given model on the given provider

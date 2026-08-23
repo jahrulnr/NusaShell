@@ -37,3 +37,12 @@ test('Skill nudge interval is exposed in settings UI', () => {
   assert.match(settingsView, /skill_nudge_interval/);
   assert.match(settingsView, /settings-skill-nudge-interval/);
 });
+
+test('Plugin usage contracts select is slim-enhanced like the model pickers', () => {
+  assert.match(settingsView, /createSelect\(document\.getElementById\('settings-plugin-contract-mode'\)/);
+  assert.match(settingsView, /contractModeSelect\.setSelected/);
+  assert.match(settingsView, /contractModeSelect\.getSelected/);
+  // Once SlimSelect owns the element, native .value access must be gone:
+  // writes desync the rendered control and reads bypass the slim instance.
+  assert.doesNotMatch(settingsView, /'settings-plugin-contract-mode'\)\.value/);
+});

@@ -4,7 +4,7 @@ import { autoReconnectEnabled, rpc, setAutoReconnect } from '../rpc.js';
 import { toast, createSelect } from '../ui.js';
 
 let bound = false;
-const state = { embeddingProviderId: '', embeddingModelId: '', visionProviderId: '', visionModelId: '', imageProviderId: '', imageModelId: '', audioProviderId: '', audioModelId: '', videoProviderId: '', videoModelId: '', webAnswerProvider: '', webAnswerModel: '', compactionModel: '', reviewModel: '' };
+const state = { embeddingProviderId: '', embeddingModelId: '', visionProviderId: '', visionModelId: '', imageProviderId: '', imageModelId: '', audioProviderId: '', audioModelId: '', videoProviderId: '', videoModelId: '', ttsProviderId: '', ttsModelId: '', webAnswerProvider: '', webAnswerModel: '', compactionModel: '', reviewModel: '' };
 let preferredSelect;
 let embeddingSelect;
 let visionSelect;
@@ -13,7 +13,9 @@ let compactionSelect;
 let reviewSelect;
 let audioSelect;
 let videoSelect;
+let ttsSelect;
 let webAnswerProviderSelect;
+let contractModeSelect;
 
 export async function initSettings() {
   if (!bound) {
@@ -46,6 +48,10 @@ export async function initSettings() {
       placeholder: 'Disabled — non-video models get a text placeholder instead',
       search: true,
     });
+    ttsSelect = createSelect(document.getElementById('settings-tts-model'), {
+      placeholder: 'Disabled — generate_speech needs the offline piper engine',
+      search: true,
+    });
     compactionSelect = createSelect(document.getElementById('settings-compaction-model'), {
       placeholder: 'Default — use the conversation\'s active model',
       search: true,
@@ -53,6 +59,14 @@ export async function initSettings() {
     reviewSelect = createSelect(document.getElementById('settings-review-model'), {
       placeholder: 'Default — use the conversation\'s active model',
       search: true,
+    });
+    contractModeSelect = createSelect(document.getElementById('settings-plugin-contract-mode'), {
+      data: [
+        { text: 'Default — advisory hint on first use', value: '', placeholder: true },
+        { text: 'Off — never show contract notices', value: 'off' },
+        { text: 'Hint — advisory note until the contract is read', value: 'hint' },
+        { text: 'Require — block MCP calls until the contract is read', value: 'require' },
+      ],
     });
     webAnswerProviderSelect = createSelect(document.getElementById('settings-web-answer-provider'), {
       placeholder: 'Disabled — web_answer tool is not available',
@@ -89,7 +103,7 @@ export async function refresh() {
     document.getElementById('settings-max-tool-rounds').value = settings.max_tool_rounds ?? 8;
     document.getElementById('settings-repeated-tool-limit').value = settings.repeated_tool_limit ?? 3;
     document.getElementById('settings-max-parallel-tools').value = settings.max_parallel_tools ?? 6;
-    document.getElementById('settings-plugin-contract-mode').value = settings.plugin_contract_mode ?? '';
+    contractModeSelect.setSelected([settings.plugin_contract_mode ?? '']);
     document.getElementById('settings-max-input-tokens').value = settings.max_input_tokens ?? 200000;
     document.getElementById('settings-compaction-threshold').value = settings.compaction_threshold ?? 0;
     document.getElementById('settings-compaction-summary-max-tokens').value = settings.compaction_summary_max_tokens ?? 0;
@@ -110,6 +124,9 @@ export async function refresh() {
     state.audioModelId = settings.audio_model_id ?? '';
     state.videoProviderId = settings.video_provider_id ?? '';
     state.videoModelId = settings.video_model_id ?? '';
+    state.ttsProviderId = settings.tts_provider_id ?? '';
+    state.ttsModelId = settings.tts_model_id ?? '';
+    document.getElementById('settings-tts-offline').checked = settings.tts_offline_enabled ?? false;
     state.webAnswerProvider = settings.web_answer_provider ?? '';
     state.webAnswerModel = settings.web_answer_model ?? '';
     state.compactionModel = settings.compaction_model ?? '';
@@ -132,6 +149,7 @@ export async function refresh() {
   renderImageModelOptions(allModels);
   renderAudioModelOptions(allModels);
   renderVideoModelOptions(allModels);
+  renderTTSModelOptions(allModels);
   renderCompactionModelOptions(allModels);
   renderReviewModelOptions(allModels);
   document.getElementById('settings-sidebar-compact').checked = localStorage.getItem('nusashell.sidebarMode') === 'icons';
@@ -263,6 +281,25 @@ function renderVideoModelOptions(models) {
     ? `${state.videoProviderId}:${state.videoModelId}`
     : '';
   if (selected) videoSelect.setSelected([selected]);
+}
+
+function renderTTSModelOptions(models) {
+  const ttsModels = models.filter((m) => m.tts === true);
+  const data = [
+    { text: 'Disabled — generate_speech needs the offline piper engine', value: '', placeholder: true },
+    ...ttsModels.map((m) => {
+      const label = m.id;
+      return {
+        text: m.provider_name ? `${label} · ${m.provider_name}` : label,
+        value: `${m.provider_id}:${m.id}`,
+      };
+    }),
+  ];
+  ttsSelect.setData(data);
+  const selected = state.ttsProviderId && state.ttsModelId
+    ? `${state.ttsProviderId}:${state.ttsModelId}`
+    : '';
+  if (selected) ttsSelect.setSelected([selected]);
 }
 
 function renderCompactionModelOptions(models) {
@@ -410,7 +447,7 @@ async function save() {
       max_tool_rounds: maxToolRounds,
       repeated_tool_limit: repeatedToolLimit,
       max_parallel_tools: maxParallelTools,
-      plugin_contract_mode: document.getElementById('settings-plugin-contract-mode').value,
+      plugin_contract_mode: contractModeSelect.getSelected()?.[0] ?? '',
       max_input_tokens: maxInputTokens,
       compaction_threshold: compactionThreshold,
       compaction_summary_max_tokens: compactionSummaryMaxTokens || null,

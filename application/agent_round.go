@@ -184,6 +184,7 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 		FrequencyPenalty: settings.FrequencyPenalty,
 		PresencePenalty:  settings.PresencePenalty,
 		ConversationID:   run.ConversationID,
+		ReasoningReplay:  caps.ReasoningReplay,
 	}, func(delta string) {
 		content.WriteString(delta)
 		a.Bus.Emit(contracts.EventMessageDelta, contracts.MessageDeltaEvent{
@@ -454,7 +455,7 @@ func (a *App) runOneTool(run *TurnRun, toolCall domain.ToolCall, caps ModelCapab
 	// interrupted (mirrors the pre-parallel behavior of skipping remaining
 	// tools after cancellation).
 	if run.Ctx.Err() != nil {
-		res := toolExecResult{status: domain.ToolInterrupted, output: "interrupted"}
+		res := toolExecResult{status: domain.ToolInterrupted, output: "interrupted by user"}
 		a.emitToolCompleted(run, toolCall, res)
 		return res
 	}
@@ -471,6 +472,8 @@ func (a *App) runOneTool(run *TurnRun, toolCall domain.ToolCall, caps ModelCapab
 		output, outputAttachments, err = a.executeReadVideo(run, toolCall, caps, settings)
 	case "generate_image":
 		output, outputAttachments, err = a.executeGenerateImage(run, toolCall, settings)
+	case "generate_speech":
+		output, outputAttachments, err = a.executeGenerateSpeech(run, toolCall, settings)
 	default:
 		toolCtx := WithConversationID(run.Ctx, run.ConversationID)
 		toolCtx = WithRunID(toolCtx, run.ID)
@@ -481,7 +484,7 @@ func (a *App) runOneTool(run *TurnRun, toolCall domain.ToolCall, caps ModelCapab
 	if err != nil {
 		if run.Ctx.Err() != nil {
 			status = domain.ToolInterrupted
-			output = "interrupted"
+			output = "interrupted by user"
 		} else {
 			status = domain.ToolFailed
 			output = "error: " + truncateToolError(err.Error())
@@ -552,9 +555,9 @@ func (a *App) interruptRemainingTools(run *TurnRun, messageID string, toolCalls 
 	for _, toolCall := range toolCalls {
 		a.Bus.Emit(contracts.EventToolCompleted, contracts.ToolCompletedEvent{
 			RunID: run.ID, ConversationID: run.ConversationID, ToolCallID: toolCall.ID,
-			Name: toolCall.Name, Status: string(domain.ToolInterrupted), Output: "interrupted",
+			Name: toolCall.Name, Status: string(domain.ToolInterrupted), Output: "interrupted by user",
 		})
-		conversation = a.updateToolResult(conversation, messageID, toolCall.ID, domain.ToolInterrupted, "interrupted", nil)
+		conversation = a.updateToolResult(conversation, messageID, toolCall.ID, domain.ToolInterrupted, "interrupted by user", nil)
 	}
 	_ = a.Conversations.Save(conversation)
 }

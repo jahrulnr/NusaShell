@@ -6,6 +6,18 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 
 | Tool | Purpose |
 | --- | --- |
+| `exec` | run a shell command as a child process; combined stdout/stderr with head/tail elision for huge output; default shell is POSIX `sh` on Unix/macOS, on Windows `auto` resolves Git Bash first (POSIX syntax works best) then PowerShell — `cmd` only via explicit `shell="cmd"`, plus optional kinds `bash`/`powershell`/`pwsh`/`wsl` (wsl maps cwd under /mnt); no absolute wall-clock limit — running commands keep producing, but silence longer than `idle_timeout_ms` (default 180000) fails the run; optional explicit `timeout_ms`; optional absolute `cwd`; the whole child tree dies on cancel/timeout |
+| `file_read` | read a text file by absolute path (up to `max_bytes`, default 32768; continue with `offset` when truncated; binary files are reported, not dumped) |
+| `file_write` | create or overwrite a text file atomically (temp file + rename); parent directories created automatically; `encoding` utf8 or base64 |
+| `file_append` | append content to a file, creating it (and parents) if missing |
+| `file_patch` | exact substring replace; errors unless `old_string` matches exactly once — disambiguate repeated matches with 1-based `occurrence`; `preview=true` returns the result without writing |
+| `file_list` | list directory entries with name, type, size, modified time |
+| `file_mkdir` | create a directory including any missing parents |
+| `file_delete` | delete a file or directory (non-empty directories require `recursive=true`); irreversible |
+| `file_move` | move/rename a path; overwrites an existing destination; falls back to copy+delete across filesystems |
+| `file_copy` | copy a file or directory recursively |
+| `file_exists` | check whether a path exists without erroring when missing (returns `exists`, `is_dir`) |
+| `file_info` | metadata for a path: size, mode, type, modified time |
 | `skill_list` | list available skills (name + description + owned_by + shadowed) |
 | `skill_search` | search installed skills by name or description; results ranked by relevance (BM25 + related-skill expansion, no embedding) |
 | `skill_read` | read a skill's `SKILL.md` (or a support file via `path`) by name; paginated with `offset`/`max_chars` |
@@ -34,6 +46,7 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `mcp_server_add` | register a manual MCP server from command, arguments, and environment entries |
 | `read_image` | load an image from disk by absolute path into the model's context — any path works, not just conversation attachments (vision models see it directly; non-vision models get a text description via the vision fallback) |
 | `generate_image` | generate an image with the configured auxiliary image model (OpenAI Images, OpenRouter Image API, or Codex ChatGPT plan). Only listed when Settings → Image generation is set. The UI displays the print — do not re-render it as Markdown |
+| `generate_speech` | synthesize spoken audio from text and save it as an mp3/wav/opus file the user can play. Online: an OpenAI-compatible /audio/speech model from Settings → Speech generation; offline: the piper engine (voice models under models/tts/, binary via PIPER_BIN or PATH). If the online model fails, falls back to offline automatically. Only listed when a TTS model is set or offline piper is available |
 | `read_audio` | load an audio file from disk by absolute path into the model's context — any path works, not just conversation attachments. Fallback ladder: configured cloud STT first (kind `stt` → `/audio/transcriptions`; audio chat models → `input_audio`), then the local offline whisper engine when built with `-tags stt` and a model is installed (`NUSASHELL_STT_MODEL` or `<data>/models/stt/ggml-base.bin`); each response's yaml meta discloses the route used (audio-capable models hear it directly; non-audio models get a text transcript) |
 | `read_video` | load a video file from disk by absolute path into the model's context — any path works, not just conversation attachments (video-capable models see it directly; non-video models get a text description via the video fallback) |
 | `web_search` | search the web across Brave, Startpage, Wikipedia, and GitHub; returns ranked results with title, URL, and snippet |

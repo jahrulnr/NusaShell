@@ -99,6 +99,7 @@ type catalogEntry struct {
 	SupportedEfforts []string `json:"supported_efforts,omitempty"`
 	KnowledgeCutoff  string   `json:"knowledge_cutoff,omitempty"`
 	Kind             string   `json:"kind"`
+	InterleavedField string   `json:"interleaved_field,omitempty"`
 }
 
 // fetchAndMerge downloads both catalogs, merges them (models.dev takes
@@ -184,7 +185,10 @@ type modelsDevModel struct {
 		Type   string   `json:"type"`
 		Values []string `json:"values"`
 	} `json:"reasoning_options"`
-	Modalities struct {
+	// Interleaved can be an object {field:"reasoning_content"} or a
+	// boolean (false). Parse from RawMessage to handle both shapes.
+	Interleaved json.RawMessage `json:"interleaved"`
+	Modalities  struct {
 		Input  []string `json:"input"`
 		Output []string `json:"output"`
 	} `json:"modalities"`
@@ -237,6 +241,14 @@ func fetchModelsDev(ctx context.Context) ([]catalogEntry, error) {
 			for _, opt := range m.ReasoningOptions {
 				if opt.Type == "effort" {
 					e.SupportedEfforts = append(e.SupportedEfforts, opt.Values...)
+				}
+			}
+			if len(m.Interleaved) > 0 && string(m.Interleaved) != "false" && string(m.Interleaved) != "null" {
+				var ilv struct {
+					Field string `json:"field"`
+				}
+				if err := json.Unmarshal(m.Interleaved, &ilv); err == nil && ilv.Field != "" {
+					e.InterleavedField = strings.ToLower(strings.TrimSpace(ilv.Field))
 				}
 			}
 			out = append(out, e)

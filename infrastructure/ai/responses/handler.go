@@ -59,10 +59,20 @@ type responsesInputItem struct {
 	CallID  string          `json:"call_id,omitempty"`
 	Name    string          `json:"name,omitempty"`
 	Args    string          `json:"arguments,omitempty"`
+	// Summary carries reasoning summary text for {type:"reasoning"} input
+	// items (reasoning replay). Each entry is {type:"summary_text",text:"..."}.
+	Summary []responsesReasoningSummary `json:"summary,omitempty"`
 	// Output is a JSON value: a string for text-only tool results, or an
 	// array of input_text / input_image items when the tool returned
 	// attachments (read_image, generate_image). RawMessage keeps both shapes.
 	Output json.RawMessage `json:"output,omitempty"`
+}
+
+// responsesReasoningSummary is one entry in a reasoning item's summary
+// array, used both for response decoding and request input (replay).
+type responsesReasoningSummary struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
 type responsesContentBlock struct {
@@ -120,7 +130,13 @@ type responsesUsage struct {
 // {type:"message",...} | {type:"reasoning",...} | {type:"function_call",...}
 // | {type:"function_call_output",...} and rejects items without a type
 // field (strict providers like Stealth return HTTP 400 invalid_prompt).
-func toResponsesInput(msgs []application.ChatMessage) []responsesInputItem {
+//
+// When reasoningReplay is true, a {type:"reasoning"} item is emitted before
+// each assistant message item carrying the persisted reasoning summary.
+// Thinking-mode upstreams (GLM, DeepSeek V4, Kimi, ox-alpha) require this
+// to preserve reasoning state across turns — without it the model loses
+// its chain-of-thought and degrades into tool-call loops.
+func toResponsesInput(msgs []application.ChatMessage, reasoningReplay bool) []responsesInputItem {
 	var out []responsesInputItem
 	for _, m := range msgs {
 		switch m.Role {
@@ -131,6 +147,22 @@ func toResponsesInput(msgs []application.ChatMessage) []responsesInputItem {
 			}
 			out = append(out, responsesInputItem{Type: "message", Role: "user", Content: content})
 		case "assistant":
+			// Reasoning replay: emit a reasoning item before the assistant
+			// message so the upstream can reconstruct the thinking state.
+			// The summary text is the persisted reasoning from the prior
+			// turn. When empty, inject a non-empty placeholder — some
+			// providers reject an absent reasoning item, others reject an
+			// empty summary.
+			if reasoningReplay {
+				summaryText := m.Reasoning
+				if summaryText == "" || domain.IsReasoningPlaceholder(summaryText) {
+					summaryText = domain.ReasoningPlaceholder
+				}
+				out = append(out, responsesInputItem{
+					Type:    "reasoning",
+					Summary: []responsesReasoningSummary{{Type: "summary_text", Text: summaryText}},
+				})
+			}
 			if m.Content != "" {
 				out = append(out, responsesInputItem{Type: "message", Role: "assistant", Content: aiutil.StrJSON(m.Content)})
 			}
@@ -223,7 +255,7 @@ func buildResponsesRequest(req application.ChatRequest, stream bool) responsesRe
 	out := responsesRequest{
 		Model:            req.Model,
 		Instructions:     req.System,
-		Input:            toResponsesInput(req.Messages),
+		Input:            toResponsesInput(req.Messages, req.ReasoningReplay),
 		Stream:           stream,
 		MaxOutputTokens:  req.MaxTokens,
 		Temperature:      req.Temperature,
@@ -309,6 +341,9 @@ func (r *Adapter) Complete(ctx context.Context, req application.ChatRequest) (ap
 			for _, s := range item.Summary {
 				resp.Reasoning += s.Text
 			}
+			// Strip the internal replay placeholder from user-visible
+			// reasoning — models may echo it (#9573-style echo loop).
+			resp.Reasoning = strings.ReplaceAll(resp.Reasoning, domain.ReasoningPlaceholder, "")
 		case "function_call":
 			resp.ToolCalls = append(resp.ToolCalls, domain.ToolCall{
 				ID: item.CallID, Name: item.Name, Args: aiutil.RepairToolCallArguments(item.Args),
@@ -371,9 +406,14 @@ func (r *Adapter) Stream(ctx context.Context, req application.ChatRequest, onDel
 			result.Content += frame.Delta
 			onDelta(frame.Delta)
 		case "response.reasoning_text.delta", "response.reasoning_summary_text.delta":
-			result.Reasoning += frame.Delta
-			if onReasoning != nil {
-				onReasoning(frame.Delta)
+			// Strip the internal replay placeholder from streamed
+			// reasoning — models may echo it (#9573-style echo loop).
+			cleaned := strings.ReplaceAll(frame.Delta, domain.ReasoningPlaceholder, "")
+			if cleaned != "" {
+				result.Reasoning += cleaned
+				if onReasoning != nil {
+					onReasoning(cleaned)
+				}
 			}
 		case "response.output_item.added":
 			if frame.Item != nil && frame.Item.Type == "function_call" {

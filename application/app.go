@@ -49,6 +49,8 @@ type App struct {
 	ImageGeneratorFactory       ImageGeneratorFactory
 	SpeechTranscriberFactory    SpeechTranscriberFactory
 	OfflineTranscriberFactory   OfflineTranscriberFactory
+	SpeechSynthesizerFactory    SpeechSynthesizerFactory
+	OfflineSynthesizer          OfflineSynthesizer
 	ImageModelListerFactory     ImageModelListerFactory
 	EmbedderFactory             EmbedderFactory
 	EmbeddingModelListerFactory EmbeddingModelListerFactory
@@ -318,6 +320,8 @@ type Deps struct {
 	ImageGeneratorFactory       ImageGeneratorFactory       // optional; nil = generate_image unavailable
 	SpeechTranscriberFactory    SpeechTranscriberFactory    // optional; nil = STT routing unavailable
 	OfflineTranscriberFactory   OfflineTranscriberFactory   // optional; nil = local/offline STT disabled (doc §15: not fatal)
+	SpeechSynthesizerFactory    SpeechSynthesizerFactory    // optional; nil = online TTS unavailable
+	OfflineSynthesizer          OfflineSynthesizer          // optional; nil = offline TTS (piper) disabled
 	ImageModelListerFactory     ImageModelListerFactory     // optional; nil = skip /images/models fetch
 	EmbedderFactory             EmbedderFactory             // optional; nil = BM25-only search
 	EmbeddingModelListerFactory EmbeddingModelListerFactory // optional; nil = skip /embeddings/models fetch
@@ -368,6 +372,7 @@ func NewApp(deps Deps) *App {
 		ImageGeneratorFactory:       deps.ImageGeneratorFactory,
 		SpeechTranscriberFactory:    deps.SpeechTranscriberFactory,
 		OfflineTranscriberFactory:   deps.OfflineTranscriberFactory,
+		OfflineSynthesizer:          deps.OfflineSynthesizer,
 		ImageModelListerFactory:     deps.ImageModelListerFactory,
 		EmbedderFactory:             deps.EmbedderFactory,
 		EmbeddingModelListerFactory: deps.EmbeddingModelListerFactory,

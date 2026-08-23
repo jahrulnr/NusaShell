@@ -19,7 +19,7 @@ type MessageStatus string
 const (
 	StatusDone        MessageStatus = "done"
 	StatusError       MessageStatus = "error"
-	StatusInterrupted MessageStatus = "interrupted"
+	StatusInterrupted MessageStatus = "interrupted by user"
 )
 
 type ToolCallStatus string
@@ -28,7 +28,7 @@ const (
 	ToolRunning     ToolCallStatus = "running"
 	ToolOK          ToolCallStatus = "ok"
 	ToolFailed      ToolCallStatus = "fail"
-	ToolInterrupted ToolCallStatus = "interrupted"
+	ToolInterrupted ToolCallStatus = "interrupted by user"
 )
 
 type Usage struct {
@@ -224,7 +224,7 @@ func abandonTool(tc *ToolCall) bool {
 	}
 	tc.Status = ToolInterrupted
 	if tc.Output == "" {
-		tc.Output = "interrupted"
+		tc.Output = "interrupted by user"
 	}
 	return true
 }

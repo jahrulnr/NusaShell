@@ -278,7 +278,7 @@ func TestAgentTurnStop(t *testing.T) {
 			} `json:"messages"`
 		}
 		_ = json.Unmarshal(gotten.Result, &conv)
-		if conv.Conversation.Status == "idle" && len(conv.Messages) == 2 && conv.Messages[1].Status == "interrupted" {
+		if conv.Conversation.Status == "idle" && len(conv.Messages) == 2 && conv.Messages[1].Status == "interrupted by user" {
 			return
 		}
 		time.Sleep(100 * time.Millisecond)

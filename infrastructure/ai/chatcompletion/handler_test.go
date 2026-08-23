@@ -252,3 +252,77 @@ func marshalRequest(t *testing.T, value any) string {
 	}
 	return string(body)
 }
+
+// TestToOpenAIMessagesReasoningReplay proves that when ReasoningReplay is
+// true, assistant messages carry reasoning_content on the wire so
+// thinking-mode upstreams (DeepSeek V4, GLM, Kimi, ox-alpha) can
+// reconstruct the thinking state across turns. When false, the field is
+// omitted — providers that ignore it (OpenAI, Anthropic) are unaffected.
+func TestToOpenAIMessagesReasoningReplay(t *testing.T) {
+	msgs := []application.ChatMessage{
+		{Role: "user", Content: "Hello"},
+		{Role: "assistant", Content: "Hi there", Reasoning: "I should greet the user."},
+		{Role: "user", Content: "What is 2+2?"},
+	}
+
+	// Without replay: no reasoning_content on the wire
+	got := toOpenAIMessages(application.ChatRequest{Messages: msgs})
+	for i, m := range got {
+		if m.Role == "assistant" && m.ReasoningContent != "" {
+			t.Errorf("message %d (no replay): ReasoningContent = %q, want empty", i, m.ReasoningContent)
+		}
+	}
+
+	// With replay: assistant message carries the persisted reasoning
+	got = toOpenAIMessages(application.ChatRequest{Messages: msgs, ReasoningReplay: true})
+	found := false
+	for _, m := range got {
+		if m.Role == "assistant" {
+			if m.ReasoningContent != "I should greet the user." {
+				t.Errorf("with replay: ReasoningContent = %q, want persisted reasoning", m.ReasoningContent)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("no assistant message in output")
+	}
+}
+
+// TestToOpenAIMessagesReasoningReplayPlaceholder proves that when
+// ReasoningReplay is true but the assistant message has no persisted
+// reasoning, a non-empty placeholder is injected. Some providers (MiMo)
+// reject an absent field; others (DeepSeek) accept absent but reject
+// empty-string.
+func TestToOpenAIMessagesReasoningReplayPlaceholder(t *testing.T) {
+	msgs := []application.ChatMessage{
+		{Role: "user", Content: "Hello"},
+		{Role: "assistant", Content: "Hi there", Reasoning: ""},
+	}
+	got := toOpenAIMessages(application.ChatRequest{Messages: msgs, ReasoningReplay: true})
+	for _, m := range got {
+		if m.Role == "assistant" {
+			if m.ReasoningContent != domain.ReasoningPlaceholder {
+				t.Errorf("placeholder: ReasoningContent = %q, want %q", m.ReasoningContent, domain.ReasoningPlaceholder)
+			}
+		}
+	}
+}
+
+// TestToOpenAIMessagesReasoningReplayStripsPlaceholder proves that a
+// previously-injected placeholder is not re-replayed as real reasoning
+// (prevents echo loop — OmniRoute #9573).
+func TestToOpenAIMessagesReasoningReplayStripsPlaceholder(t *testing.T) {
+	msgs := []application.ChatMessage{
+		{Role: "user", Content: "Hello"},
+		{Role: "assistant", Content: "Hi there", Reasoning: domain.ReasoningPlaceholder},
+	}
+	got := toOpenAIMessages(application.ChatRequest{Messages: msgs, ReasoningReplay: true})
+	for _, m := range got {
+		if m.Role == "assistant" {
+			if m.ReasoningContent != domain.ReasoningPlaceholder {
+				t.Errorf("strip placeholder: ReasoningContent = %q, want fresh placeholder", m.ReasoningContent)
+			}
+		}
+	}
+}
