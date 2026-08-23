@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -74,23 +75,29 @@ func (s *Store) load() error {
 	if err != nil {
 		return err
 	}
-	// Only conv_<id>.json files are conversations. This directory also
+	// Only plain conv_<id>.json files are conversations. This directory also
 	// holds files owned by other stores (todos.json, artifacts.json,
-	// acp_runs.jsonl); treating every *.json as a conversation produced
-	// ghost entries with empty IDs that broke agent.conversations.get.
+	// acp_runs.jsonl) and legacy sidecars from the retired desktop app
+	// (conv_<id>.meta.json / .runtime.json, whose meta "model" is an
+	// object). Treating those as conversations produced unmarshal failures
+	// that killed startup, so anything that is not exactly conv_<id>.json —
+	// or that fails to parse — is skipped with a warning instead.
 	var recovered []string
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || !strings.HasPrefix(name, "conv_") || !strings.HasSuffix(name, ".json") {
+		base, ext := strings.CutSuffix(name, ".json")
+		if e.IsDir() || !ext || !strings.HasPrefix(base, "conv_") || strings.Contains(base, ".") {
 			continue
 		}
 		b, err := os.ReadFile(filepath.Join(convDir, name))
 		if err != nil {
-			return err
+			slog.Warn("skipping unreadable conversation file", "file", name, "error", err)
+			continue
 		}
 		var c domain.Conversation
 		if err := json.Unmarshal(b, &c); err != nil {
-			return fmt.Errorf("conversation %s: %w", name, err)
+			slog.Warn("skipping unparsable conversation file", "file", name, "error", err)
+			continue
 		}
 		if c.ID == "" {
 			continue // defensive: a conversation without an ID is unusable

@@ -609,7 +609,9 @@ func buildFakeCodex(t *testing.T) string {
 	if runtime.GOOS == "windows" {
 		out += ".exe"
 	}
-	cmd := exec.Command("go", "build", "-o", out, filepath.Join(root, "testdata", "fakecodex"))
+	// -buildvcs=false: on network shares git refuses VCS stamping (dubious
+	// ownership), which would fail the whole package's tests.
+	cmd := exec.Command("go", "build", "-buildvcs=false", "-o", out, filepath.Join(root, "testdata", "fakecodex"))
 	if b, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build fakecodex: %v\n%s", err, b)
 	}

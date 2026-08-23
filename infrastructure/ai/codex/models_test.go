@@ -51,7 +51,10 @@ func TestLoadCodexModelsCache(t *testing.T) {
 
 func TestLoadCodexModelsCacheMissingFile(t *testing.T) {
 	dir := t.TempDir()
+	// os.UserHomeDir uses $HOME on Unix and %USERPROFILE% on Windows.
+	// Set both so the test never reads the developer's real ~/.codex.
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 	if got := loadCodexModelsCache(); got != nil {
 		t.Fatalf("expected nil for missing file, got %v", got)
 	}

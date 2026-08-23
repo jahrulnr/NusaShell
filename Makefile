@@ -12,9 +12,16 @@ build:
 	mkdir -p bin/
 	go build -o ./bin/nusashell ./cmd/nusashell
 
-## test: run the full test suite (with race detector).
+## test: run the full test suite (with race detector when cgo is available;
+## plain otherwise — e.g. Windows without gcc).
 test:
-	go test -race ./...
+	@race=""; \
+	if [ "$$(go env CGO_ENABLED)" = "1" ] && go env CC >/dev/null 2>&1 && [ -n "$$(go env CC)" ] && command -v "$$(go env CC)" >/dev/null 2>&1; then \
+		race="-race"; \
+	else \
+		echo "make test: cgo/C compiler unavailable, falling back to go test without -race"; \
+	fi; \
+	go test $$race ./...
 
 ## test-frontend: syntax-check the native frontend modules (Node, dev-only).
 test-frontend:

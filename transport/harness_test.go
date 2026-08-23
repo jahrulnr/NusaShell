@@ -527,7 +527,11 @@ func TestMain(m *testing.M) {
 	if runtime.GOOS == "windows" {
 		fakemcpBin += ".exe"
 	}
-	cmd := exec.Command("go", "build", "-o", fakemcpBin, filepath.Join(root, "testdata", "fakemcp"))
+	// -buildvcs=false: the repo may live on a network share (e.g. a
+	// VirtualBox shared folder mounted as Z:\), where git refuses VCS
+	// stamping with "dubious ownership" and the build fails even though
+	// nothing about the test binary depends on VCS info.
+	cmd := exec.Command("go", "build", "-buildvcs=false", "-o", fakemcpBin, filepath.Join(root, "testdata", "fakemcp"))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "build fakemcp: %v\n%s", err, out)
 		os.Exit(1)
@@ -543,7 +547,8 @@ func TestMain(m *testing.M) {
 	if runtime.GOOS == "windows" {
 		fakeacpBin += ".exe"
 	}
-	cmd = exec.Command("go", "build", "-o", fakeacpBin, filepath.Join(root, "testdata", "fakeacp"))
+	// See the fakemcp build above: VCS stamping is unwanted here.
+	cmd = exec.Command("go", "build", "-buildvcs=false", "-o", fakeacpBin, filepath.Join(root, "testdata", "fakeacp"))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "build fakeacp: %v\n%s", err, out)
 		os.Exit(1)

@@ -29,7 +29,9 @@ func TestMain(m *testing.M) {
 	if runtime.GOOS == "windows" {
 		fakeBin += ".exe"
 	}
-	cmd := exec.Command("go", "build", "-o", fakeBin, filepath.Join(root, "testdata", "fakeacp"))
+	// -buildvcs=false: on network shares git refuses VCS stamping (dubious
+	// ownership), which would fail the whole package's tests.
+	cmd := exec.Command("go", "build", "-buildvcs=false", "-o", fakeBin, filepath.Join(root, "testdata", "fakeacp"))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		os.Stderr.Write(out)
 		os.Exit(1)
