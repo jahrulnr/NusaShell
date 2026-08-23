@@ -278,13 +278,19 @@ type Settings struct {
 	UserPrompt string `json:"user_prompt,omitempty"`
 	// PluginContractMode controls how mcp_call treats plugins that declare a
 	// contract (contract.entry in manifest.json). "off" never gates; "hint"
-	// (factory default) attaches an advisory note to the first call per
-	// conversation; "require" is an opt-in strict mode that rejects calls
-	// until contract_read ran for that plugin in the same conversation.
+	// attaches an advisory note to the first call per conversation; "require"
+	// is an opt-in strict mode that rejects calls until contract_read ran for
+	// that plugin in the same conversation. Empty = follow the factory
+	// default (currently hint) — resolved at runtime by contractMode(); it
+	// must stay empty in storage so future default changes reach saved
+	// configs (anti-stamping).
 	PluginContractMode string `json:"plugin_contract_mode,omitempty"`
 }
 
-// DefaultSettings returns the factory defaults.
+// DefaultSettings returns the factory defaults. PluginContractMode is
+// deliberately left empty here: empty means "follow the factory default" and
+// keeps storage free of a stamped value, so changing the default later reaches
+// every config that never chose explicitly.
 func DefaultSettings() Settings {
 	return Settings{
 		CompactionEnabled:          true,
@@ -301,7 +307,6 @@ func DefaultSettings() Settings {
 		MaxAutoContinues:           DefaultMaxAutoContinues,
 		SoundNotifications:         true,
 		RepeatedToolLimit:          3,
-		PluginContractMode:         PluginContractHint,
 	}
 }
 
@@ -355,13 +360,15 @@ func NormalizeSettings(settings Settings) Settings {
 	if settings.RepeatedToolLimit < 0 {
 		settings.RepeatedToolLimit = DefaultSettings().RepeatedToolLimit
 	}
-	// PluginContractMode: empty/unknown falls back to the factory default
-	// (now hint). Unknown values fall back to the factory default so a typo
-	// can't silently disable the gate.
+	// PluginContractMode: anti-stamping — empty means "follow the factory
+	// default" and must STAY empty so future default changes reach saved
+	// configs (a config stamped "require" once survived a factory-default
+	// change in the field). Unknown values also reset to empty, never to a
+	// concrete mode; contractMode() resolves the effective value at runtime.
 	switch settings.PluginContractMode {
 	case PluginContractOff, PluginContractHint, PluginContractRequire:
 	default:
-		settings.PluginContractMode = DefaultSettings().PluginContractMode
+		settings.PluginContractMode = ""
 	}
 	return settings
 }

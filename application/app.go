@@ -23,6 +23,8 @@ type App struct {
 	Version string
 	DataDir string
 
+	OfflineTranscriber OfflineTranscriber // local engine (nil when disabled/unavailable)
+
 	Conversations   ConversationStore
 	Providers       ProviderStore
 	Credentials     CredentialStore
@@ -45,6 +47,8 @@ type App struct {
 	MCPToolbox                  MCPToolbox
 	Factory                     ProviderFactory
 	ImageGeneratorFactory       ImageGeneratorFactory
+	SpeechTranscriberFactory    SpeechTranscriberFactory
+	OfflineTranscriberFactory   OfflineTranscriberFactory
 	ImageModelListerFactory     ImageModelListerFactory
 	EmbedderFactory             EmbedderFactory
 	EmbeddingModelListerFactory EmbeddingModelListerFactory
@@ -312,6 +316,8 @@ type Deps struct {
 	MCPToolbox                  MCPToolbox
 	Factory                     ProviderFactory
 	ImageGeneratorFactory       ImageGeneratorFactory       // optional; nil = generate_image unavailable
+	SpeechTranscriberFactory    SpeechTranscriberFactory    // optional; nil = STT routing unavailable
+	OfflineTranscriberFactory   OfflineTranscriberFactory   // optional; nil = local/offline STT disabled (doc §15: not fatal)
 	ImageModelListerFactory     ImageModelListerFactory     // optional; nil = skip /images/models fetch
 	EmbedderFactory             EmbedderFactory             // optional; nil = BM25-only search
 	EmbeddingModelListerFactory EmbeddingModelListerFactory // optional; nil = skip /embeddings/models fetch
@@ -327,6 +333,8 @@ type Deps struct {
 	Automation *Automation
 }
 
+// App is the application core. It wires together all the stores and
+// factories needed to run a conversation turn.
 func NewApp(deps Deps) *App {
 	if deps.Bus == nil {
 		deps.Bus = NewBus()
@@ -358,6 +366,8 @@ func NewApp(deps Deps) *App {
 		MCPToolbox:                  deps.MCPToolbox,
 		Factory:                     deps.Factory,
 		ImageGeneratorFactory:       deps.ImageGeneratorFactory,
+		SpeechTranscriberFactory:    deps.SpeechTranscriberFactory,
+		OfflineTranscriberFactory:   deps.OfflineTranscriberFactory,
 		ImageModelListerFactory:     deps.ImageModelListerFactory,
 		EmbedderFactory:             deps.EmbedderFactory,
 		EmbeddingModelListerFactory: deps.EmbeddingModelListerFactory,

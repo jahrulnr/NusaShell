@@ -19,7 +19,7 @@ View title and a Save settings button with a live status indicator.
 
 ## Agent runtime
 
-Default model for new conversations, the maximum tool rounds per turn (default 8), and the max parallel tools per round (default 6, range 1–64). Existing conversations keep their selected model.
+Default model for new conversations, the maximum tool rounds per turn (default 8), the max parallel tools per round (default 6, range 1–64), and the plugin usage-contract enforcement mode. Existing conversations keep their selected model.
 
 - **Agent runtime title** (`#settings-runtime-title`):
   - Section: Settings
@@ -39,6 +39,11 @@ Default model for new conversations, the maximum tool rounds per turn (default 8
   - Section: Settings
   - Type: number
   - Notes: 1–64, default 6. Bounds concurrent tool calls per assistant round.
+
+- **Plugin usage contracts** (`#settings-plugin-contract-mode`):
+  - Section: Settings
+  - Type: select
+  - Notes: How agents are nudged toward a plugin's usage contract (read via contract_read). Empty = factory default (hint, advisory); off never notifies; hint attaches an advisory note until the contract is read; require blocks MCP calls until the contract is read.
 
 ## Embeddings
 

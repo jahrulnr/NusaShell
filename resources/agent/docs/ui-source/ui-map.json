@@ -170,7 +170,7 @@
         {
           "heading": "Composer",
           "paragraphs": [
-            "The message input with attachments, model picker, workspace selector, provider status, stop, and send buttons. Ctrl+Enter (\u2318\u21a9 on Mac) sends. While a turn is running, Send becomes Steer. The whole conversation area accepts drag & drop of files and folders — folders are attached as path-only references (desktop only)."
+            "The message input with attachments, model picker, workspace selector, provider status, stop, and send buttons. Ctrl+Enter (⌘↩ on Mac) sends. While a turn is running, Send becomes Steer. The whole conversation area accepts drag & drop of files and folders — folders are attached as path-only references (desktop only)."
           ],
           "controls": [
             "agent-form",
@@ -283,7 +283,7 @@
         {
           "heading": "Plugin catalog",
           "paragraphs": [
-            "Lists all plugins \u2014 manual MCP servers, MCP-only plugins, and MCP + UI plugins \u2014 with runtime state (idle/connected). Clicking a row opens the Plugins detail drawer."
+            "Lists all plugins — manual MCP servers, MCP-only plugins, and MCP + UI plugins — with runtime state (idle/connected). Clicking a row opens the Plugins detail drawer."
           ],
           "controls": [
             "plugin-table"
@@ -543,13 +543,14 @@
         {
           "heading": "Agent runtime",
           "paragraphs": [
-            "Default model for new conversations, the maximum tool rounds per turn (default 8), and the max parallel tools per round (default 6, range 1–64). Existing conversations keep their selected model."
+            "Default model for new conversations, the maximum tool rounds per turn (default 8), the max parallel tools per round (default 6, range 1–64), and the plugin usage-contract enforcement mode. Existing conversations keep their selected model."
           ],
           "controls": [
             "settings-runtime-title",
             "settings-preferred-model",
             "settings-max-tool-rounds",
-            "settings-max-parallel-tools"
+            "settings-max-parallel-tools",
+            "settings-plugin-contract-mode"
           ]
         },
         {
@@ -782,7 +783,7 @@
       "section": "Home",
       "type": "search",
       "action": "Filters installed apps by name, id, or description. Escape clears the query.",
-      "shortcut": "Ctrl+K / \u2318K, or / when not typing"
+      "shortcut": "Ctrl+K / ⌘K, or / when not typing"
     },
     "search-clear": {
       "label": "Clear app search",
@@ -822,14 +823,14 @@
       "section": "Agent",
       "type": "button",
       "action": "Creates a new conversation and focuses the composer.",
-      "shortcut": "Ctrl+N / \u2318N on the Agent view"
+      "shortcut": "Ctrl+N / ⌘N on the Agent view"
     },
     "conversation-search": {
       "label": "Conversation search",
       "section": "Agent",
       "type": "search",
       "notes": "Filters conversation titles in real time.",
-      "shortcut": "Ctrl+K / \u2318K, or / when not typing"
+      "shortcut": "Ctrl+K / ⌘K, or / when not typing"
     },
     "conversation-list": {
       "label": "Conversation list",
@@ -983,7 +984,7 @@
       "label": "Message input",
       "section": "Agent",
       "type": "textarea",
-      "shortcut": "Ctrl+Enter / \u2318\u21a9 to send; Escape closes dialogs"
+      "shortcut": "Ctrl+Enter / ⌘↩ to send; Escape closes dialogs"
     },
     "agent-attachments": {
       "label": "Attachments preview",
@@ -1046,7 +1047,7 @@
       "label": "Send",
       "section": "Agent",
       "type": "submit",
-      "shortcut": "Ctrl+Enter / \u2318\u21a9"
+      "shortcut": "Ctrl+Enter / ⌘↩"
     },
     "skills-count": {
       "label": "Skills count",
@@ -1114,7 +1115,7 @@
       "label": "State machine",
       "section": "Plugins",
       "type": "indicator",
-      "notes": "Shows idle \u2192 connecting \u2192 connected \u2192 error with the current state highlighted."
+      "notes": "Shows idle → connecting → connected → error with the current state highlighted."
     },
     "plugin-btn-open-ui": {
       "label": "Open UI",
@@ -1362,13 +1363,13 @@
       "label": "Maximum tool rounds",
       "section": "Settings",
       "type": "number",
-      "notes": "1\u201310000, default 8."
+      "notes": "1–10000, default 8."
     },
     "settings-max-parallel-tools": {
       "label": "Max parallel tools",
       "section": "Settings",
       "type": "number",
-      "notes": "1\u201364, default 6. Bounds concurrent tool calls per assistant round."
+      "notes": "1–64, default 6. Bounds concurrent tool calls per assistant round."
     },
     "settings-embedding-title": {
       "label": "Embeddings title",
@@ -1970,6 +1971,12 @@
       "section": "Skills header",
       "type": "file-input",
       "notes": "Hidden file input accepting .skill and .zip files for skill installation."
+    },
+    "settings-plugin-contract-mode": {
+      "label": "Plugin usage contracts",
+      "section": "Settings",
+      "type": "select",
+      "notes": "How agents are nudged toward a plugin's usage contract (read via contract_read). Empty = factory default (hint, advisory); off never notifies; hint attaches an advisory note until the contract is read; require blocks MCP calls until the contract is read."
     }
   }
 }

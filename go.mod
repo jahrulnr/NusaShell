@@ -3,6 +3,8 @@ module nusashell
 go 1.26.5
 
 require (
+	github.com/ggerganov/whisper.cpp/bindings/go v0.0.0-20260822051411-233fe1fc9b48
+	github.com/go-audio/wav v1.1.0
 	github.com/jahrulnr/searchwire v0.0.0-20260822191633-3b488bf19560
 	github.com/mark3labs/mcp-go v0.58.0
 	github.com/ncruces/zenity v0.10.15
@@ -17,6 +19,8 @@ require (
 	github.com/akavel/rsrc v0.10.2 // indirect
 	github.com/dchest/jsmin v1.0.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/go-audio/audio v1.0.0 // indirect
+	github.com/go-audio/riff v1.0.0 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/josephspurrier/goversioninfo v1.7.0 // indirect

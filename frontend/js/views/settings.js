@@ -89,6 +89,7 @@ export async function refresh() {
     document.getElementById('settings-max-tool-rounds').value = settings.max_tool_rounds ?? 8;
     document.getElementById('settings-repeated-tool-limit').value = settings.repeated_tool_limit ?? 3;
     document.getElementById('settings-max-parallel-tools').value = settings.max_parallel_tools ?? 6;
+    document.getElementById('settings-plugin-contract-mode').value = settings.plugin_contract_mode ?? '';
     document.getElementById('settings-max-input-tokens').value = settings.max_input_tokens ?? 200000;
     document.getElementById('settings-compaction-threshold').value = settings.compaction_threshold ?? 0;
     document.getElementById('settings-compaction-summary-max-tokens').value = settings.compaction_summary_max_tokens ?? 0;
@@ -409,6 +410,7 @@ async function save() {
       max_tool_rounds: maxToolRounds,
       repeated_tool_limit: repeatedToolLimit,
       max_parallel_tools: maxParallelTools,
+      plugin_contract_mode: document.getElementById('settings-plugin-contract-mode').value,
       max_input_tokens: maxInputTokens,
       compaction_threshold: compactionThreshold,
       compaction_summary_max_tokens: compactionSummaryMaxTokens || null,

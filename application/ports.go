@@ -563,6 +563,31 @@ type ImageGenResult struct {
 // (Anthropic Messages, Ollama). Codex uses the ChatGPT plan image endpoints.
 type ImageGeneratorFactory func(p *domain.Provider, apiKey string) (ImageGenerator, error)
 
+// ---- speech transcription port ----
+
+// SpeechTranscriber converts recorded audio into text via a provider's
+// dedicated transcription endpoint (OpenAI-style POST /audio/transcriptions,
+// multipart). Probe-verified 2026-08-23: catalog models of kind "stt"
+// (gpt-4o-mini-transcribe, whisper-1) work ONLY through this endpoint — chat
+// input_audio and the Responses API reject them.
+type SpeechTranscriber interface {
+	Transcribe(ctx context.Context, req STTRequest) (string, error)
+}
+
+// STTRequest is one transcription call: raw audio bytes plus metadata.
+type STTRequest struct {
+	Model    string
+	Data     []byte
+	Filename string // e.g. "clip.mp3"; extension drives server-side decoding
+	Language string // optional ISO-639-1 hint; empty = auto-detect
+	Prompt   string // optional spelling/style hint for the model
+}
+
+// SpeechTranscriberFactory builds a SpeechTranscriber for a provider.
+// Optional; nil = STT routing unavailable and read_audio falls back to the
+// multimodal chat path with a clear error when an stt-kind model is picked.
+type SpeechTranscriberFactory func(p *domain.Provider, apiKey string) (SpeechTranscriber, error)
+
 // ---- agent tools port ----
 
 type ToolInfo struct {

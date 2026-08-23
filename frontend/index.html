@@ -661,6 +661,15 @@
               <input id="settings-max-parallel-tools" type="number" min="1" max="64" step="1" inputmode="numeric" value="6">
               <small>How many tool calls from one assistant round run at once (default 6). Raising it cuts latency when the model emits many independent calls; lower it to reduce load.</small>
             </label>
+            <label class="settings-field" for="settings-plugin-contract-mode">Plugin usage contracts
+              <select id="settings-plugin-contract-mode">
+                <option value="">Default — advisory hint on first use</option>
+                <option value="off">Off — never show contract notices</option>
+                <option value="hint">Hint — advisory note until the contract is read</option>
+                <option value="require">Require — block MCP calls until the contract is read</option>
+              </select>
+              <small>How agents are nudged toward a plugin's usage contract (best-practice rules read via <code>contract_read</code>). Default is advisory only; Require is strict and can lock out agents after a restart.</small>
+            </label>
           </section>
           <section class="settings-card settings-embedding-card" aria-labelledby="settings-embedding-title">
             <div class="settings-card-title">Embeddings</div>

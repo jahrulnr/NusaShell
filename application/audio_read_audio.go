@@ -65,6 +65,14 @@ func (a *App) executeReadAudio(run *TurnRun, toolCall domain.ToolCall, caps Mode
 	if !ok {
 		return "Audio fallback provider not found or disabled.", nil, fmt.Errorf("audio provider %q not found", settings.AudioProviderID)
 	}
+
+	// By-kind routing: stt-kind catalog models are served ONLY by the
+	// dedicated /audio/transcriptions endpoint (probe-verified); every
+	// other kind keeps the multimodal chat input_audio path below.
+	if audioFallbackRoute(provider, settings.AudioModelID) == audioRouteTranscriptions {
+		return a.transcribeAudioViaSTT(run.Ctx, provider, apiKey, settings.AudioModelID, strings.TrimSpace(args.Question), audio)
+	}
+
 	adapter, err := a.Factory(run.Ctx, provider, apiKey)
 	if err != nil {
 		return "Failed to initialize audio fallback adapter.", nil, err

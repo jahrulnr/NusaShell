@@ -246,6 +246,8 @@ func run() error {
 		MCPToolbox:                  mcpManager,
 		Factory:                     ai.NewFactory(credentials),
 		ImageGeneratorFactory:       ai.NewImageGeneratorFactory(credentials),
+		SpeechTranscriberFactory:    ai.NewSpeechTranscriberFactory(),
+		OfflineTranscriberFactory:   ai.NewOfflineTranscriberFactory(dataDir),
 		ImageModelListerFactory:     ai.NewImageModelListerFactory(),
 		EmbedderFactory:             ai.NewEmbedderFactory(),
 		EmbeddingModelListerFactory: ai.NewEmbeddingModelListerFactory(),

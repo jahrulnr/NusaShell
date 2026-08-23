@@ -214,7 +214,7 @@ func pluginToDTO(p *domain.Plugin) contracts.PluginDTO {
 		Autostart:   p.Manifest.MCP.Autostart,
 		// Usage-contract declaration for the Plugins-view badge/drawer.
 		ContractEntry: p.Manifest.ContractEntry(),
-		AutoUpdate:  p.Manifest.AutoUpdate,
+		AutoUpdate:    p.Manifest.AutoUpdate,
 		// Baseline: anything exposing a UI is a plugin. handlePluginList
 		// upgrades this (and Catalog) using catalog membership.
 		Plugin: p.HasUI,
@@ -1349,6 +1349,10 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 		switch mode {
 		case domain.PluginContractOff, domain.PluginContractHint, domain.PluginContractRequire:
 			s.PluginContractMode = mode
+		case "":
+			// Reset to "follow the factory default" (anti-stamping: stored
+			// empty resolves at runtime via contractMode()).
+			s.PluginContractMode = ""
 		default:
 			return nil, &contracts.RPCError{Code: contracts.CodeValidation, Message: "plugin_contract_mode must be off, hint, or require"}
 		}

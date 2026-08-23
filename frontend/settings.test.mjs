@@ -23,6 +23,7 @@ test('Settings exposes the Go-supported Electron parity controls', () => {
   assert.match(settingsView, /rpc\('ai\.models\.list'/);
   assert.match(settingsView, /max_tool_rounds/);
   assert.match(settingsView, /max_parallel_tools/);
+  assert.match(settingsView, /plugin_contract_mode/);
 });
 
 test('WebSocket reconnect is an explicit persisted preference', () => {

@@ -858,17 +858,17 @@ type PluginDTO struct {
 	// Catalog is true when this plugin's id exists in the curated catalog,
 	// so it can be updated (manual "Update") and auto-updated. GitHub/ZIP
 	// and manual MCP servers are not catalog-managed.
-	Catalog         bool               `json:"catalog"`
-	Version         string             `json:"version"`
-	Icon            string             `json:"icon"`
-	Category        string             `json:"category,omitempty"`
-	HasUI           bool               `json:"hasUI"`
-	InstallPath     string             `json:"installPath"`
-	Status          string             `json:"status,omitempty"` // idle | connected
-	Tools           []MCPToolDTO       `json:"tools,omitempty"`
-	AutoUpdate      bool               `json:"autoUpdate"`
-	UpdateAvailable string             `json:"updateAvailable,omitempty"` // catalog version when newer
-	Autostart bool               `json:"autostart"`
+	Catalog         bool         `json:"catalog"`
+	Version         string       `json:"version"`
+	Icon            string       `json:"icon"`
+	Category        string       `json:"category,omitempty"`
+	HasUI           bool         `json:"hasUI"`
+	InstallPath     string       `json:"installPath"`
+	Status          string       `json:"status,omitempty"` // idle | connected
+	Tools           []MCPToolDTO `json:"tools,omitempty"`
+	AutoUpdate      bool         `json:"autoUpdate"`
+	UpdateAvailable string       `json:"updateAvailable,omitempty"` // catalog version when newer
+	Autostart       bool         `json:"autostart"`
 	// ContractEntry is the plugin-relative usage-contract file declared in
 	// the manifest (contract.entry). Empty when the plugin declares none.
 	ContractEntry string             `json:"contractEntry,omitempty"`
