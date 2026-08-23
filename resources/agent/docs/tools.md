@@ -78,16 +78,13 @@ enabled.
 ### Dispatcher families
 
 `skill`, `memory`, `docs`, and `ci_pipeline` are **dispatcher tools**: one
-advertised tool per family whose required `op` field selects the action. The
-per-op implementation names (`skill_save`, `memory_search`, `docs_read`,
-`ci_pipeline_validate`, …) are internal only: never advertised to providers,
-and a model call that emits one directly fails loud with the exact dispatcher
-rewrite (the hidden-alias path was removed). Dispatcher calls are
-canonicalized to those per-op names before persistence, so recorded history
-always shows them; internal consumers (hydration checkpoints, review-agent
-replay, pipeline filters) still route through them.
+advertised tool per family whose required `op` field selects the action.
+Root+op is the SINGLE naming layer — the roster, execution routing, persisted
+history, hydration checkpoints, and internal callers all use exactly this
+form. There are no per-verb aliases: a call named like an old verb
+(`memory_save`, `docs_read`, …) is simply an unknown tool.
 
-Per-op semantics (unchanged from the legacy tools):
+Ops per family:
 
 - `skill`: `list {limit?}`; `search {query,limit?}`; `read {name,path?,offset?,max_chars?}`;
   `files {name}`; `save {name,content,description?,id?,path?}` — with `path`

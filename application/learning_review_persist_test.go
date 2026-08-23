@@ -46,7 +46,7 @@ func TestReviewLoopPersistsReasoningAndFinalSummary(t *testing.T) {
 	adapter := &persistStubAdapter{responses: []ChatResponse{
 		{
 			Reasoning: "The user stated a durable preference.",
-			ToolCalls: []domain.ToolCall{{ID: "tc_1", Name: "memory_save", Args: `{"content":"user prefers Indonesian"}`}},
+			ToolCalls: []domain.ToolCall{{ID: "tc_1", Name: "memory", Args: `{"op":"save","content":"user prefers Indonesian"}`}},
 		},
 		{Reasoning: "Save succeeded, done.", Content: "Saved one memory fragment."},
 	}}

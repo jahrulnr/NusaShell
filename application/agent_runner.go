@@ -731,11 +731,6 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 			a.log("warn", "agent", "turn %s requested a tool after reaching the %d-round limit", run.ID, settings.MaxToolRounds)
 			roundResult.Response.ToolCalls = nil
 		}
-		// Rewrite dispatcher-family calls ({skill|memory|docs|ci_pipeline} +
-		// op) to canonical per-op names before persistence and execution so
-		// history, learning events, UI, and the toolbox all see stable
-		// legacy names. See docs/design/tool-dispatchers.md.
-		CanonicalizeToolCalls(roundResult.Response.ToolCalls)
 		if err := a.persistTurnRound(run.ConversationID, currentMsgID, model, roundResult); err != nil {
 			a.failTurn(run, currentMsgID, err)
 			return false, ""

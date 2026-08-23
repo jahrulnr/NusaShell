@@ -121,10 +121,10 @@ func TestAgentTurnStreamsOverSSE(t *testing.T) {
 	if len(assistant.ToolCalls) != 1 {
 		t.Fatalf("tool calls = %+v", assistant.ToolCalls)
 	}
-	// The fake provider emits the dispatcher form (docs + op); the
-	// persisted name is the canonicalized per-op target by design.
+	// Single naming layer: the provider emits {docs, op=search} and that
+	// exact root name is what gets persisted and executed.
 	tc := assistant.ToolCalls[0]
-	if tc.Name != "docs_search" || tc.Status != "ok" || !strings.Contains(tc.Output, "mcp") {
+	if tc.Name != "docs" || tc.Status != "ok" || !strings.Contains(tc.Output, "mcp") {
 		t.Fatalf("tool call = %+v", tc)
 	}
 	// usage is recorded per round; both rounds used 10 in / 5 out
@@ -850,7 +850,7 @@ func TestAgentTurnAnthropic(t *testing.T) {
 	if last.Content != "Claude finished." || last.Status != "done" {
 		t.Fatalf("final message = %+v", last)
 	}
-	if len(conv.Messages[1].ToolCalls) != 1 || conv.Messages[1].ToolCalls[0].Name != "docs_search" {
+	if len(conv.Messages[1].ToolCalls) != 1 || conv.Messages[1].ToolCalls[0].Name != "docs" {
 		t.Fatalf("tool calls = %+v", conv.Messages[1].ToolCalls)
 	}
 	if last.Usage == nil || last.Usage.CacheRead < 4 {
@@ -950,7 +950,7 @@ func TestAgentTurnResponses(t *testing.T) {
 	if len(conv.Messages) != 3 {
 		t.Fatalf("messages = %d, want 3", len(conv.Messages))
 	}
-	if len(conv.Messages[1].ToolCalls) != 1 || conv.Messages[1].ToolCalls[0].Name != "docs_search" {
+	if len(conv.Messages[1].ToolCalls) != 1 || conv.Messages[1].ToolCalls[0].Name != "docs" {
 		t.Fatalf("tool calls = %+v", conv.Messages[1].ToolCalls)
 	}
 	tc := conv.Messages[1].ToolCalls[0]
@@ -1001,7 +1001,7 @@ func TestAgentTurnToolFailure(t *testing.T) {
 	found := false
 	for _, m := range conv.Messages {
 		for _, tc := range m.ToolCalls {
-			if tc.Name != "skill_read" {
+			if tc.Name != "skill" {
 				continue
 			}
 			found = true
@@ -1268,7 +1268,7 @@ func TestAgentTurnPartialStreamContinuationDoesNotConsumeToolRound(t *testing.T)
 	if len(conv.Messages) != 4 || conv.Messages[3].Content != "The tool result completes the answer." || conv.Messages[3].Status != "done" {
 		t.Fatalf("continued tool round = %+v", conv.Messages)
 	}
-	if len(conv.Messages[2].ToolCalls) != 1 || conv.Messages[2].ToolCalls[0].Name != "docs_search" || conv.Messages[2].ToolCalls[0].Status != "ok" {
+	if len(conv.Messages[2].ToolCalls) != 1 || conv.Messages[2].ToolCalls[0].Name != "docs" || conv.Messages[2].ToolCalls[0].Status != "ok" {
 		t.Fatalf("tool after recovery = %+v", conv.Messages[2].ToolCalls)
 	}
 }
@@ -1459,10 +1459,10 @@ func TestAgentTurnReasoningInterleaved(t *testing.T) {
 		}
 	}
 	// verify tool calls in steps match the rounds
-	if len(allSteps[1].ToolCalls) != 1 || allSteps[1].ToolCalls[0].Name != "docs_search" {
+	if len(allSteps[1].ToolCalls) != 1 || allSteps[1].ToolCalls[0].Name != "docs" {
 		t.Fatalf("step 1 tool_calls mismatch: %+v", allSteps[1].ToolCalls)
 	}
-	if len(allSteps[3].ToolCalls) != 1 || allSteps[3].ToolCalls[0].Name != "skill_list" {
+	if len(allSteps[3].ToolCalls) != 1 || allSteps[3].ToolCalls[0].Name != "skill" {
 		t.Fatalf("step 3 tool_calls mismatch: %+v", allSteps[3].ToolCalls)
 	}
 }

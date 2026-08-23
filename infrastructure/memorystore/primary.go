@@ -41,7 +41,7 @@ type primaryFrontmatter struct {
 // Primary is the PrimaryStore adapter backed by primary.md. The file is
 // a single markdown document with YAML frontmatter (last_updated +
 // version) followed by the body — a free-form prose document the agent
-// edits in place via memory_replace. Think of it as a README the agent
+// edits in place via memory op=replace. Think of it as a README the agent
 // maintains about the user and working context:
 //
 //	---
@@ -116,7 +116,7 @@ func (p *Primary) Load() *domain.PrimaryMemory {
 }
 
 // Update replaces the entire primary document body and rewrites the file.
-// Used by memory_replace target=primary when the agent rewrites the whole
+// Used by memory op=replace target=primary when the agent rewrites the whole
 // document. Returns an error if the new content would exceed PrimaryCharCap.
 func (p *Primary) Update(entries []domain.PrimaryEntry) error {
 	var content string
@@ -142,7 +142,7 @@ func (p *Primary) Update(entries []domain.PrimaryEntry) error {
 
 // Replace performs a substring-match update on the document body. The
 // first occurrence of oldText is replaced with content. Used by
-// foreground agents via memory_replace target=primary.
+// foreground agents via memory op=replace target=primary.
 func (p *Primary) Replace(oldText, content string) error {
 	oldText = strings.TrimSpace(oldText)
 	content = strings.TrimSpace(content)

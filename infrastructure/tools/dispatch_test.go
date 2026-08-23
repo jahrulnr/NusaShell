@@ -63,16 +63,22 @@ func TestExecuteDispatcherUnknownOpFailsLoud(t *testing.T) {
 	}
 }
 
-// Per-op names stay directly executable on the toolbox for internal
-// callers (hydration checkpoints, review-agent replay). The model-facing
-// alias path is gone: the agent tool executor rejects member names via
-// LegacyAliasError (application layer).
-func TestPerOpNamesRemainInternalCanonicalTargets(t *testing.T) {
+// Retired per-op names have no door at the toolbox either: only the
+// resolved root+op form reaches executeFamily, so a direct legacy call is
+// just an unknown tool (fail loud).
+func TestRetiredPerOpNamesAreUnknownTools(t *testing.T) {
 	tb := testToolbox(
 		[]*domain.Skill{{ID: "s1", Name: "git-helper"}},
 		nil, &stubMCP{},
 	)
-	if _, err := tb.Execute(context.Background(), "skill_list", []byte(`{}`)); err != nil {
-		t.Fatalf("per-op skill_list must stay directly executable for internal callers (hydration, review replay): %v", err)
+	if _, err := tb.Execute(context.Background(), "skill_list", []byte(`{}`)); err == nil {
+		t.Fatal("retired per-op name must be an unknown tool")
+	}
+	out, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"list"}`))
+	if err != nil {
+		t.Fatalf("root+op form must route: %v", err)
+	}
+	if out == "" {
+		t.Fatal("expected non-empty skill list output")
 	}
 }

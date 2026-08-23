@@ -4,28 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-
-	"nusashell/domain"
 )
 
-// Dispatcher families collapse per-verb built-ins into ONE advertised tool
-// per family (skill, memory, docs, ci_pipeline) selected by an `op` field.
-//
-// Design contract:
-//   - Only the provider roster is compacted (toolDefinitions →
-//     CompactFamilies). Toolbox.ListTools keeps returning the full per-verb
-//     defs so internal consumers (review-agent whitelist, pipeline toolbox
-//     filtering) stay untouched.
-//   - A dispatcher call {name:"memory", args:{op:"save",…}} is rewritten to
-//     the canonical implementation name memory_save BEFORE persistence and
-//     execution (agent runner), so conversation history, learning-event
-//     classification, untrusted-output wrapping, and the UI all keep seeing
-//     stable legacy names.
-//   - Model-facing calls must use the dispatcher form: a legacy per-op
-//     name reaching the agent tool executor fails loud with the exact
-//     {root, op} rewrite (LegacyAliasError). Internal callers (hydration
-//     checkpoints, review-agent replay) still route through the canonical
-//     per-op names via Toolbox.Execute.
+// Dispatcher families expose ONE advertised tool per family (skill, memory,
+// docs, ci_pipeline) selected by a required `op` argument. Root+op is the
+// SINGLE naming layer everywhere: provider roster, execution routing,
+// persisted history, hydration, and tests. There are no per-verb aliases —
+// a call named like an old verb is simply an unknown tool.
 //
 // Adding a verb = add one op to the family spec below plus its Execute case.
 // No new provider-facing schema is required (sub-linear prompt growth).
@@ -109,18 +94,11 @@ var dispatchFamilies = []dispatchFamily{
 	},
 }
 
-var (
-	familyByRoot   = map[string]*dispatchFamily{}
-	familyByMember = map[string]string{} // "memory_save" -> "memory"
-)
+var familyByRoot = map[string]*dispatchFamily{}
 
 func init() {
 	for i := range dispatchFamilies {
-		fam := &dispatchFamilies[i]
-		familyByRoot[fam.root] = fam
-		for _, op := range fam.members {
-			familyByMember[fam.root+"_"+op] = fam.root
-		}
+		familyByRoot[dispatchFamilies[i].root] = &dispatchFamilies[i]
 	}
 }
 
@@ -177,74 +155,34 @@ func IsDispatchRoot(name string) bool {
 	return ok
 }
 
-// DispatchCanonical resolves a dispatcher-root call to its canonical per-op
-// implementation name (memory + op=save → memory_save). It fails loud with
-// the valid op list when op is missing, malformed, or unknown.
-func DispatchCanonical(name string, argsJSON []byte) (string, error) {
+// DispatchOp validates the `op` of a dispatcher-root call payload and
+// returns it. It fails loud with the valid op list when op is missing,
+// malformed, or unknown.
+func DispatchOp(name string, argsJSON []byte) (string, error) {
 	fam, ok := familyByRoot[name]
 	if !ok {
 		return "", fmt.Errorf("%q is not a dispatcher tool", name)
 	}
+	op := OpArg(argsJSON)
+	for _, valid := range fam.members {
+		if op == valid {
+			return op, nil
+		}
+	}
+	return "", fmt.Errorf("unknown %s op %q; valid ops: %s", name, op, strings.Join(fam.members, ", "))
+}
+
+// OpArg extracts the raw `op` string from a dispatcher call payload — empty
+// when missing or malformed. For classification sites that treat unknown
+// ops as non-matching; use DispatchOp to fail loud instead.
+func OpArg(argsJSON []byte) string {
 	var args struct {
 		Op string `json:"op"`
 	}
 	if err := json.Unmarshal(argsJSON, &args); err != nil {
-		return "", fmt.Errorf("%s requires an \"op\" field (one of: %s); args are not a JSON object: %v",
-			name, strings.Join(fam.members, ", "), err)
+		return ""
 	}
-	op := strings.ToLower(strings.TrimSpace(args.Op))
-	for _, valid := range fam.members {
-		if op == valid {
-			return name + "_" + valid, nil
-		}
-	}
-	return "", fmt.Errorf("unknown %s op %q; valid ops: %s", name, args.Op, strings.Join(fam.members, ", "))
-}
-
-// CompactFamilies collapses per-verb family members into one dispatcher
-// entry per family, preserving roster order (the family definition takes the
-// position of its first member). Non-family tools pass through unchanged,
-// including conditional ones (artifact_*, subagent*, web_answer, …).
-func CompactFamilies(defs []ToolInfo) []ToolInfo {
-	emitted := make(map[string]bool, len(dispatchFamilies))
-	out := make([]ToolInfo, 0, len(defs))
-	for _, def := range defs {
-		root, isMember := familyByMember[def.Name]
-		if !isMember {
-			out = append(out, def)
-			continue
-		}
-		if emitted[root] {
-			continue
-		}
-		emitted[root] = true
-		out = append(out, familyByRoot[root].def)
-	}
-	return out
-}
-
-// CanonicalizeToolCalls rewrites dispatcher-root calls in place to their
-// canonical per-op names. Args are preserved verbatim (the extra "op" key is
-// ignored by the legacy handlers' strict structs). Calls without a valid op
-// are left untouched so Toolbox.Execute fails loud with the valid list.
-//
-// A call that ALREADY uses a per-op member name is a retired hidden-alias
-// emission (providers only see the roots): it is flagged LegacyAlias so the
-// agent tool executor rejects it loud with the dispatcher rewrite instead of
-// executing it. The flag is in-memory only and never persisted.
-func CanonicalizeToolCalls(toolCalls []domain.ToolCall) {
-	for i := range toolCalls {
-		tc := &toolCalls[i]
-		if IsDispatchRoot(tc.Name) {
-			if canon, err := DispatchCanonical(tc.Name, []byte(tc.Args)); err == nil {
-				tc.Name = canon
-			}
-			continue
-		}
-		if IsDispatcherMember(tc.Name) {
-			tc.LegacyAlias = true
-		}
-	}
+	return strings.ToLower(strings.TrimSpace(args.Op))
 }
 
 // DispatcherToolInfos returns the advertised family definitions. These are
@@ -256,48 +194,4 @@ func DispatcherToolInfos() []ToolInfo {
 		out = append(out, dispatchFamilies[i].def)
 	}
 	return out
-}
-
-// IsDispatcherMember reports whether name is a canonical per-op
-// implementation of any dispatcher family (e.g. "memory_save").
-func IsDispatcherMember(name string) bool {
-	_, ok := familyByMember[name]
-	return ok
-}
-
-// FamilyMembers returns the canonical per-op names of a family root,
-// e.g. FamilyMembers("memory") -> ["memory_save", ...] in spec order.
-func FamilyMembers(root string) []string {
-	fam, ok := familyByRoot[root]
-	if !ok {
-		return nil
-	}
-	out := make([]string, 0, len(fam.members))
-	for _, op := range fam.members {
-		out = append(out, root+"_"+op)
-	}
-	return out
-}
-
-// MemberOp splits a canonical member name into its family root and op.
-func MemberOp(member string) (root, op string, ok bool) {
-	r, found := familyByMember[member]
-	if !found {
-		return "", "", false
-	}
-	return r, strings.TrimPrefix(member, r+"_"), true
-}
-
-// LegacyAliasError returns the fail-loud teaching error for a canonical
-// per-op member name emitted directly by a model. The hidden-alias path
-// was removed: providers only see the dispatcher roots, so the agent tool
-// executor rejects member names with the exact {root, op} rewrite instead
-// of executing them. It returns nil for non-member names (pass-through).
-func LegacyAliasError(name string) error {
-	root, op, ok := MemberOp(name)
-	if !ok {
-		return nil
-	}
-	return fmt.Errorf("%q is a retired per-verb name; call the %q dispatcher instead: {\"name\": %q, \"args\": {\"op\": \"%s\", ...}}",
-		name, root, root, op)
 }

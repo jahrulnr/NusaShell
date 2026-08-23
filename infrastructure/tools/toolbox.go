@@ -266,33 +266,16 @@ func (t *Toolbox) videoGenerationConfigured() bool {
 	return mediaGenerationConfigured(s.VideoProviderID, s.VideoModelID)
 }
 
-func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (string, error) {
-	// Native built-ins first: file CRUD and the exec island.
-	if name == "exec" {
-		_, out, err := executeExecTool(ctx, name, argsJSON)
-		return out, err
+// executeFamily routes an ADVERTISED dispatcher-root call (skill, memory,
+// docs, ci_pipeline) to its op handler. This is the ONLY door to the family
+// handlers: the root+"_"+op strings below are private routing keys and are
+// not reachable as tool names, so retired per-op calls fail loud upstream.
+func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byte) (string, error) {
+	op, err := application.DispatchOp(name, argsJSON)
+	if err != nil {
+		return "", err
 	}
-	if strings.HasPrefix(name, "file_") {
-		ok, out, err := executeFileTool(name, argsJSON)
-		if !ok {
-			return "", fmt.Errorf("unknown tool %q", name)
-		}
-		return out, err
-	}
-	// Dispatcher families (advertised roots: skill, memory, docs,
-	// ci_pipeline) route to their canonical per-op implementations here.
-	// The per-op cases below are internal canonical targets (hydration
-	// checkpoints and review replay call them directly); model calls may
-	// only use the root form — a direct member name is rejected loud at
-	// the agent boundary (LegacyAliasError). Missing/unknown ops fail
-	// loud with the valid list.
-	if application.IsDispatchRoot(name) {
-		canon, err := application.DispatchCanonical(name, argsJSON)
-		if err != nil {
-			return "", err
-		}
-		name = canon
-	}
+	name = name + "_" + op // private routing key; never escapes this method
 	switch {
 	case name == "skill_list":
 		var args struct {
@@ -373,7 +356,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 					}
 					return "", fmt.Errorf("skill %q not found; use skill with op=list or op=search to see available skills", args.Name)
 				}
-				return "", fmt.Errorf("skill_read: %w", err)
+				return "", fmt.Errorf("skill read: %w", err)
 			}
 			var sb strings.Builder
 			if file.Editable {
@@ -422,7 +405,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				if strings.Contains(msg, "not supported") || strings.Contains(msg, "unsupported") {
 					return "", fmt.Errorf("skill store does not support file listing")
 				}
-				return "", fmt.Errorf("skill_files: %w", err)
+				return "", fmt.Errorf("skill files: %w", err)
 			}
 			items := make([]any, 0, len(entries))
 			for _, e := range entries {
@@ -451,12 +434,12 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", fmt.Errorf("skill content is required")
 		}
 		// When path is set, write a support file (references/, templates/,
-		// scripts/) inside an existing skill — mirrors skill_read's name+path
+		// scripts/) inside an existing skill — mirrors skill read's name+path
 		// pattern. The skill must already exist; creation is not supported
 		// in this mode.
 		if path := strings.TrimSpace(args.Path); path != "" {
 			if err := t.Skills.WriteFile(name, "", path, args.Content); err != nil {
-				return "", fmt.Errorf("skill_save: %w", err)
+				return "", fmt.Errorf("skill save: %w", err)
 			}
 			return yamlBlock(map[string]any{"status": "saved", "skill": name, "path": path}), nil
 		}
@@ -508,7 +491,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			Source:   "agent",
 		}
 		// Prefer the store's atomic capability. The fallback keeps custom/test
-		// stores compatible while still making memory_save idempotent.
+		// stores compatible while still making memory save idempotent.
 		if idempotent, ok := t.Fragments.(application.FragmentSaveIfAbsent); ok {
 			existing, saved, err := idempotent.SaveIfAbsent(frag)
 			if err != nil {
@@ -668,12 +651,6 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		}
 		return yamlBlock(map[string]any{"status": "deleted", "fragment_id": args.ID}), nil
 
-	case name == "todo":
-		return t.execTodo(ctx, argsJSON)
-
-	case name == "ask_question":
-		return t.execAskQuestion(ctx, argsJSON)
-
 	case name == "docs_search":
 		var args struct {
 			Query string `json:"query"`
@@ -705,6 +682,39 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", fmt.Errorf("document %q not found; use docs with op=search first", args.ID)
 		}
 		return yamlMD(map[string]any{"id": doc.ID, "title": doc.Title, "path": doc.Path}, doc.Content), nil
+
+	default:
+		return "", fmt.Errorf("unknown %s op %q", name, op)
+	}
+}
+
+func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (string, error) {
+	// Native built-ins first: file CRUD and the exec island.
+	if name == "exec" {
+		_, out, err := executeExecTool(ctx, name, argsJSON)
+		return out, err
+	}
+	if strings.HasPrefix(name, "file_") {
+		ok, out, err := executeFileTool(name, argsJSON)
+		if !ok {
+			return "", fmt.Errorf("unknown tool %q", name)
+		}
+		return out, err
+	}
+	// Dispatcher families (advertised roots: skill, memory, docs,
+	// ci_pipeline) are routed exclusively through executeFamily: resolving
+	// the required `op` and reaching a family handler is impossible without
+	// going through it. Retired per-op names fall through to the plain
+	// switch below and end up as the honest "unknown tool" error.
+	if application.IsDispatchRoot(name) {
+		return t.executeFamily(ctx, name, argsJSON)
+	}
+	switch {
+	case name == "todo":
+		return t.execTodo(ctx, argsJSON)
+
+	case name == "ask_question":
+		return t.execAskQuestion(ctx, argsJSON)
 
 	case name == "mcp_install":
 		var args struct {
@@ -1316,7 +1326,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 func (t *Toolbox) searchSkillsRanked(ctx context.Context, query string, limit int) (string, error) {
 	results, err := t.SkillSearcher.SearchSkills(ctx, query, limit)
 	if err != nil {
-		return "", fmt.Errorf("skill_search: %w", err)
+		return "", fmt.Errorf("skill search: %w", err)
 	}
 	skills := t.Skills.List()
 	byKey := make(map[string]*domain.Skill, len(skills))
@@ -1665,6 +1675,20 @@ func strEnum(desc string, values ...string) map[string]any {
 // (<server>:<tool>) from mcp_search / tool_list.
 
 func (t *Toolbox) executeAutomation(ctx context.Context, name string, argsJSON []byte) (string, bool, error) {
+	// ci_pipeline is a dispatcher family: only the resolved root form may
+	// proceed. Retired direct per-op names stay unhandled here so Execute
+	// reports them as unknown tools.
+	if strings.HasPrefix(name, "ci_pipeline_") {
+		return "", false, nil
+	}
+	if name == "ci_pipeline" {
+		op, err := application.DispatchOp(name, argsJSON)
+		if err != nil {
+			return "", true, err
+		}
+		name = name + "_" + op
+	}
+
 	if t.Automation == nil {
 		switch name {
 		case "ci_pipeline_list", "ci_pipeline_read", "ci_pipeline_validate", "ci_run", "ci_wait", "ci_run_status",

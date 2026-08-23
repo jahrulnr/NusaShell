@@ -22,8 +22,8 @@ type reviewStubToolbox struct {
 
 func (s *reviewStubToolbox) ListTools() []ToolInfo {
 	return []ToolInfo{
-		{Name: "memory_save", Description: "Save a fact"},
-		{Name: "skill_save", Description: "Save a skill"},
+		{Name: "memory", Description: "Memory store (save/replace/search/list)"},
+		{Name: "skill", Description: "Skill library (list/search/read/files/save)"},
 	}
 }
 
@@ -95,8 +95,8 @@ func TestReviewLoopRecordsMutationOnlyOnSuccess(t *testing.T) {
 	t.Run("successful save is recorded", func(t *testing.T) {
 		agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), DefaultReviewSettings())
 		adapter := &reviewStubAdapter{toolCalls: []domain.ToolCall{{
-			Name: "memory_save",
-			Args: `{"content":"user prefers Indonesian","tags":["preference","language"]}`,
+			Name: "memory",
+			Args: `{"op":"save","content":"user prefers Indonesian","tags":["preference","language"]}`,
 		}}}
 		mutations, _, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
 		if err != nil {
@@ -105,8 +105,8 @@ func TestReviewLoopRecordsMutationOnlyOnSuccess(t *testing.T) {
 		if len(mutations) != 1 || mutations[0].Kind != "memory" {
 			t.Fatalf("mutations = %+v, want exactly one memory mutation", mutations)
 		}
-		if mutations[0].Tool != "memory_save" {
-			t.Errorf("mutation tool = %q, want memory_save", mutations[0].Tool)
+		if mutations[0].Tool != "memory" {
+			t.Errorf("mutation tool = %q, want memory", mutations[0].Tool)
 		}
 		if mutations[0].Snippet != "user prefers Indonesian" {
 			t.Errorf("mutation snippet = %q, want content trimmed", mutations[0].Snippet)
@@ -116,8 +116,8 @@ func TestReviewLoopRecordsMutationOnlyOnSuccess(t *testing.T) {
 	t.Run("skill mutation records name snippet", func(t *testing.T) {
 		agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), DefaultReviewSettings())
 		adapter := &reviewStubAdapter{toolCalls: []domain.ToolCall{{
-			Name: "skill_save",
-			Args: `{"name":"git-rebase-cheatsheet","content":"# Rebase\nsteps…"}`,
+			Name: "skill",
+			Args: `{"op":"save","name":"git-rebase-cheatsheet","content":"# Rebase\nsteps…"}`,
 		}}}
 		mutations, _, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
 		if err != nil {
@@ -132,10 +132,10 @@ func TestReviewLoopRecordsMutationOnlyOnSuccess(t *testing.T) {
 	})
 
 	t.Run("failed tool is not recorded as a mutation", func(t *testing.T) {
-		agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{fail: map[string]bool{"memory_save": true}}), DefaultReviewSettings())
+		agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{fail: map[string]bool{"memory": true}}), DefaultReviewSettings())
 		adapter := &reviewStubAdapter{toolCalls: []domain.ToolCall{{
-			Name: "memory_save",
-			Args: `{"content":"x"}`,
+			Name: "memory",
+			Args: `{"op":"save","content":"x"}`,
 		}}}
 		mutations, _, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
 		if err != nil {
@@ -183,8 +183,8 @@ func TestReviewLoopRecordsMemoryReplaceMutation(t *testing.T) {
 	}
 	agent := NewBackgroundReviewAgent(newReviewApp(&reviewStubToolbox{}), DefaultReviewSettings())
 	adapter := &reviewStubAdapter{toolCalls: []domain.ToolCall{{
-		Name: "memory_replace",
-		Args: fmt.Sprintf("{%q:%q}", "content", "updated durable fact"),
+		Name: "memory",
+		Args: fmt.Sprintf("{%q:%q, %q:%q}", "op", "replace", "content", "updated durable fact"),
 	}}}
 
 	mutations, _, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
@@ -194,8 +194,8 @@ func TestReviewLoopRecordsMemoryReplaceMutation(t *testing.T) {
 	if len(mutations) != 1 {
 		t.Fatalf("mutations = %+v, want exactly one mutation", mutations)
 	}
-	if mutations[0].Kind != "memory" || mutations[0].Tool != "memory_replace" {
-		t.Fatalf("mutation = %+v, want memory_replace memory mutation", mutations[0])
+	if mutations[0].Kind != "memory" || mutations[0].Snippet != "updated durable fact" {
+		t.Fatalf("mutation = %+v, want a memory replace mutation", mutations[0])
 	}
 	if mutations[0].Snippet != "updated durable fact" {
 		t.Fatalf("mutation snippet = %q, want replacement content", mutations[0].Snippet)
@@ -712,8 +712,8 @@ func TestReviewLoopCompleteErrorIsReturned(t *testing.T) {
 	}
 	adapter := &reviewStubAdapter{
 		toolCalls: []domain.ToolCall{{
-			Name: "memory_save",
-			Args: `{"content":"user prefers Indonesian"}`,
+			Name: "memory",
+			Args: `{"op":"save","content":"user prefers Indonesian"}`,
 		}},
 		failOnCall: 2,
 		failErr:    errors.New("provider 500"),
@@ -1130,8 +1130,8 @@ func (a *streamDeltaAdapter) Stream(_ context.Context, _ ChatRequest, onDelta, o
 		return ChatResponse{
 			ToolCalls: []domain.ToolCall{{
 				ID:   a.initialToolCallID,
-				Name: "memory_save",
-				Args: `{"content":"user prefers Indonesian"}`,
+				Name: "memory",
+				Args: `{"op":"save","content":"user prefers Indonesian"}`,
 			}},
 		}, nil
 	}
@@ -1166,7 +1166,7 @@ func TestReviewLoopUsesStreamAndAccumulatesDeltas(t *testing.T) {
 		t.Fatalf("runReviewLoop with stream adapter: %v", err)
 	}
 	if len(mutations) != 1 {
-		t.Fatalf("mutations = %+v, want the streamed memory_save mutation", mutations)
+		t.Fatalf("mutations = %+v, want the streamed memory mutation", mutations)
 	}
 	if adapter.deltaCalls == 0 {
 		t.Fatal("Stream adapter should have received text deltas")

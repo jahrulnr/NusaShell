@@ -131,9 +131,9 @@ func TestSkillSearch(t *testing.T) {
 		},
 		nil, &stubMCP{},
 	)
-	out, err := tb.Execute(context.Background(), "skill_search", []byte(`{"query":"git"}`))
+	out, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"search","query":"git"}`))
 	if err != nil {
-		t.Fatalf("skill_search: %v", err)
+		t.Fatalf("skill search: %v", err)
 	}
 	if !strings.Contains(out, "git-helper") {
 		t.Errorf("expected git-helper in results, got: %s", out)
@@ -143,7 +143,7 @@ func TestSkillSearch(t *testing.T) {
 	}
 }
 
-// stubSkillSearcher returns scripted ranked results for skill_search tests.
+// stubSkillSearcher returns scripted ranked results for skill search tests.
 type stubSkillSearcher struct {
 	ids []string
 }
@@ -166,9 +166,9 @@ func TestSkillSearchUsesRankedSearcher(t *testing.T) {
 		nil, &stubMCP{},
 	)
 	tb.SkillSearcher = &stubSkillSearcher{ids: []string{"s2", "s1"}}
-	out, err := tb.Execute(context.Background(), "skill_search", []byte(`{"query":"git"}`))
+	out, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"search","query":"git"}`))
 	if err != nil {
-		t.Fatalf("skill_search: %v", err)
+		t.Fatalf("skill search: %v", err)
 	}
 	if strings.Index(out, "git-advanced") > strings.Index(out, "git-helper") {
 		t.Errorf("searcher ranking should be preserved (s2 before s1), got: %s", out)
@@ -189,9 +189,9 @@ func TestSkillSearchRecallFallback(t *testing.T) {
 		nil, &stubMCP{},
 	)
 	tb.SkillSearcher = &stubSkillSearcher{ids: []string{"s1"}}
-	out, err := tb.Execute(context.Background(), "skill_search", []byte(`{"query":"review"}`))
+	out, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"search","query":"review"}`))
 	if err != nil {
-		t.Fatalf("skill_search: %v", err)
+		t.Fatalf("skill search: %v", err)
 	}
 	if !strings.Contains(out, "reviews") {
 		t.Errorf("recall fallback should include substring matches the ranker missed, got: %s", out)
@@ -206,9 +206,9 @@ func TestSkillSearchCaseInsensitive(t *testing.T) {
 		[]*domain.Skill{{ID: "s1", Name: "Code-Review", Description: "Review code"}},
 		nil, &stubMCP{},
 	)
-	out, err := tb.Execute(context.Background(), "skill_search", []byte(`{"query":"CODE"}`))
+	out, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"search","query":"CODE"}`))
 	if err != nil {
-		t.Fatalf("skill_search: %v", err)
+		t.Fatalf("skill search: %v", err)
 	}
 	if !strings.Contains(out, "Code-Review") {
 		t.Errorf("expected case-insensitive match, got: %s", out)
@@ -220,7 +220,7 @@ func TestSkillSearchEmptyQuery(t *testing.T) {
 		[]*domain.Skill{{ID: "s1", Name: "test", Description: "test"}},
 		nil, &stubMCP{},
 	)
-	_, err := tb.Execute(context.Background(), "skill_search", []byte(`{"query":""}`))
+	_, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"search","query":""}`))
 	if err == nil {
 		t.Error("expected error for empty query")
 	}
@@ -231,9 +231,9 @@ func TestSkillSearchNoMatch(t *testing.T) {
 		[]*domain.Skill{{ID: "s1", Name: "git", Description: "git tool"}},
 		nil, &stubMCP{},
 	)
-	out, err := tb.Execute(context.Background(), "skill_search", []byte(`{"query":"nonexistent"}`))
+	out, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"search","query":"nonexistent"}`))
 	if err != nil {
-		t.Fatalf("skill_search: %v", err)
+		t.Fatalf("skill search: %v", err)
 	}
 	if !strings.Contains(out, "count: 0") {
 		t.Errorf("expected count: 0 in YAML output, got: %s", out)
@@ -276,9 +276,9 @@ func TestSkillRead(t *testing.T) {
 		Plugins: &stubPluginStore{},
 		MCP:     &stubMCP{},
 	}
-	out, err := tb.Execute(context.Background(), "skill_read", []byte(`{"name":"git-helper"}`))
+	out, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"read","name":"git-helper"}`))
 	if err != nil {
-		t.Fatalf("skill_read: %v", err)
+		t.Fatalf("skill read: %v", err)
 	}
 	if !strings.Contains(out, "# Git Helper") {
 		t.Errorf("expected skill content, got: %s", out)
@@ -290,7 +290,7 @@ func TestSkillReadNotFound(t *testing.T) {
 		[]*domain.Skill{{ID: "s1", Name: "git-helper", Content: "content"}},
 		nil, &stubMCP{},
 	)
-	_, err := tb.Execute(context.Background(), "skill_read", []byte(`{"name":"nonexistent"}`))
+	_, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"read","name":"nonexistent"}`))
 	if err == nil {
 		t.Error("expected error for missing skill")
 	}
@@ -302,9 +302,9 @@ func TestSkillListLimit(t *testing.T) {
 		skills = append(skills, &domain.Skill{ID: "s", Name: "skill", Description: "desc"})
 	}
 	tb := testToolbox(skills, nil, &stubMCP{})
-	out, err := tb.Execute(context.Background(), "skill_list", []byte(`{"limit":2}`))
+	out, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"list","limit":2}`))
 	if err != nil {
-		t.Fatalf("skill_list: %v", err)
+		t.Fatalf("skill list: %v", err)
 	}
 	// Should only contain 2 entries
 	if !strings.Contains(out, "count: 2") {
@@ -1133,11 +1133,11 @@ func TestMcpUnregister(t *testing.T) {
 	}
 }
 
-// advertisedNames mirrors the provider-facing roster: per-verb dispatcher
-// members are compacted into family roots (see tool_dispatch.go).
+// advertisedNames mirrors the provider-facing roster: non-family built-ins
+// plus the dispatcher family roots (see tool_dispatch.go).
 func advertisedNames(tb *Toolbox) map[string]bool {
 	names := map[string]bool{}
-	for _, ti := range application.CompactFamilies(append(tb.ListTools(), application.DispatcherToolInfos()...)) {
+	for _, ti := range append(tb.ListTools(), application.DispatcherToolInfos()...) {
 		names[ti.Name] = true
 	}
 	return names
@@ -1180,14 +1180,14 @@ func TestMemorySaveExactDuplicateIsIdempotent(t *testing.T) {
 	}
 	tb := testToolbox(nil, nil, &stubMCP{})
 	tb.Fragments = fragments
-	out, err := tb.Execute(context.Background(), "memory_save", []byte(`{"content":"User prefers Indonesian\n","category":"user"}`))
+	out, err := tb.Execute(context.Background(), "memory", []byte(`{"op":"save","content":"User prefers Indonesian\n","category":"user"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out, "status: saved") {
 		t.Fatalf("first save output = %s", out)
 	}
-	out, err = tb.Execute(context.Background(), "memory_save", []byte(`{"content":"  User prefers Indonesian  \r\n","category":"user"}`))
+	out, err = tb.Execute(context.Background(), "memory", []byte(`{"op":"save","content":"  User prefers Indonesian  \r\n","category":"user"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1365,7 +1365,7 @@ func TestListToolsIncludesMcpServerAdd(t *testing.T) {
 	}
 }
 
-// --- enriched skill_read (file + listing) ---
+// --- enriched skill read (file + listing) ---
 
 type skillFileStoreStub struct {
 	*stubSkillStore
@@ -1412,9 +1412,9 @@ func TestSkillReadFile(t *testing.T) {
 		return &domain.SkillFile{SkillID: id, Path: path, Content: "hello from " + path, Editable: true, SizeBytes: 20}, nil
 	}
 	tb := &Toolbox{Skills: store, Plugins: &stubPluginStore{}, MCP: &stubMCP{}}
-	out, err := tb.Execute(context.Background(), "skill_read", []byte(`{"name":"mcp-creator","path":"references/prerequisites.md"}`))
+	out, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"read","name":"mcp-creator","path":"references/prerequisites.md"}`))
 	if err != nil {
-		t.Fatalf("skill_read file: %v", err)
+		t.Fatalf("skill read file: %v", err)
 	}
 	if !strings.Contains(out, "references/prerequisites.md") {
 		t.Fatalf("unexpected content %q", out)
@@ -1431,9 +1431,9 @@ func TestSkillFiles(t *testing.T) {
 		},
 	}
 	tb := &Toolbox{Skills: store, Plugins: &stubPluginStore{}, MCP: &stubMCP{}}
-	out, err := tb.Execute(context.Background(), "skill_files", []byte(`{"name":"mcp-creator"}`))
+	out, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"files","name":"mcp-creator"}`))
 	if err != nil {
-		t.Fatalf("skill_files: %v", err)
+		t.Fatalf("skill files: %v", err)
 	}
 	if !strings.Contains(out, "references/prerequisites.md") || !strings.Contains(out, "SKILL.md") {
 		t.Fatalf("unexpected listing %q", out)
@@ -1442,7 +1442,7 @@ func TestSkillFiles(t *testing.T) {
 
 func TestSkillFilesUnsupported(t *testing.T) {
 	tb := &Toolbox{Skills: &stubSkillStoreNoFiles{}, Plugins: &stubPluginStore{}, MCP: &stubMCP{}}
-	_, err := tb.Execute(context.Background(), "skill_files", []byte(`{"name":"x"}`))
+	_, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"files","name":"x"}`))
 	if err == nil || !strings.Contains(err.Error(), "does not support file listing") {
 		t.Fatalf("expected unsupported error, got %v", err)
 	}
@@ -1451,9 +1451,9 @@ func TestSkillFilesUnsupported(t *testing.T) {
 func TestSkillSaveWithPath_writesSupportFile(t *testing.T) {
 	store := &skillFileStoreStub{stubSkillStore: &stubSkillStore{skills: []*domain.Skill{{ID: "my-skill", Name: "my-skill"}}}}
 	tb := &Toolbox{Skills: store, Plugins: &stubPluginStore{}, MCP: &stubMCP{}}
-	out, err := tb.Execute(context.Background(), "skill_save", []byte(`{"name":"my-skill","path":"references/errors.md","content":"# Error recipes\n"}`))
+	out, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"save","name":"my-skill","path":"references/errors.md","content":"# Error recipes\n"}`))
 	if err != nil {
-		t.Fatalf("skill_save with path: %v", err)
+		t.Fatalf("skill save with path: %v", err)
 	}
 	if !strings.Contains(out, "saved") {
 		t.Fatalf("unexpected output %q", out)
@@ -1470,9 +1470,9 @@ func TestSkillSaveWithPath_writesSupportFile(t *testing.T) {
 func TestSkillSaveWithPath_emptyPathUsesSaveNotWriteFile(t *testing.T) {
 	store := &skillFileStoreStub{stubSkillStore: &stubSkillStore{skills: []*domain.Skill{{ID: "my-skill", Name: "my-skill"}}}}
 	tb := &Toolbox{Skills: store, Plugins: &stubPluginStore{}, MCP: &stubMCP{}}
-	_, err := tb.Execute(context.Background(), "skill_save", []byte(`{"name":"my-skill","path":"","content":"# Updated\n"}`))
+	_, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"save","name":"my-skill","path":"","content":"# Updated\n"}`))
 	if err != nil {
-		t.Fatalf("skill_save empty path: %v", err)
+		t.Fatalf("skill save empty path: %v", err)
 	}
 	// Empty path must go through Save (metadata + SKILL.md), not WriteFile.
 	if len(store.written) != 0 {
@@ -1496,9 +1496,9 @@ func (s *skillSaveRecordingStore) Save(skill *domain.Skill) error {
 func TestSkillSaveNewSkillLeavesIDForStoreToDerive(t *testing.T) {
 	store := &skillSaveRecordingStore{stubSkillStore: &stubSkillStore{}}
 	tb := &Toolbox{Skills: store, Plugins: &stubPluginStore{}, MCP: &stubMCP{}}
-	_, err := tb.Execute(context.Background(), "skill_save", []byte(`{"name":"new-skill","description":"Reusable workflow","content":"# New skill\n"}`))
+	_, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"save","name":"new-skill","description":"Reusable workflow","content":"# New skill\n"}`))
 	if err != nil {
-		t.Fatalf("skill_save new skill: %v", err)
+		t.Fatalf("skill save new skill: %v", err)
 	}
 	if store.saved == nil {
 		t.Fatal("Save was not called")
@@ -1512,7 +1512,7 @@ func TestSkillSaveWithPath_nonexistentSkill_rejected(t *testing.T) {
 	store := &skillFileStoreStub{stubSkillStore: &stubSkillStore{}}
 	store.writeErr = fmt.Errorf("skill %q not found", "no-such")
 	tb := &Toolbox{Skills: store, Plugins: &stubPluginStore{}, MCP: &stubMCP{}}
-	_, err := tb.Execute(context.Background(), "skill_save", []byte(`{"name":"no-such","path":"references/x.md","content":"x"}`))
+	_, err := tb.Execute(context.Background(), "skill", []byte(`{"op":"save","name":"no-such","path":"references/x.md","content":"x"}`))
 	if err == nil {
 		t.Fatal("expected error for nonexistent skill, got nil")
 	}
@@ -1622,15 +1622,15 @@ func TestDocsReadAcceptsCanonicalIDAndMarkdownFilename(t *testing.T) {
 	}
 	tb := &Toolbox{Docs: source}
 	for _, id := range []string{"automation", "automation.md"} {
-		out, err := tb.Execute(context.Background(), "docs_read", []byte(fmt.Sprintf(`{"id":%q}`, id)))
+		out, err := tb.Execute(context.Background(), "docs", []byte(fmt.Sprintf(`{"op":"read","id":%q}`, id)))
 		if err != nil {
-			t.Fatalf("docs_read id %q: %v", id, err)
+			t.Fatalf("docs read id %q: %v", id, err)
 		}
 		if !strings.Contains(out, "Automation and pipelines") {
-			t.Fatalf("docs_read id %q returned unexpected content: %s", id, out)
+			t.Fatalf("docs read id %q returned unexpected content: %s", id, out)
 		}
 		if !strings.Contains(out, "id: automation\n") {
-			t.Fatalf("docs_read id %q did not return canonical metadata: %s", id, out)
+			t.Fatalf("docs read id %q did not return canonical metadata: %s", id, out)
 		}
 	}
 }
@@ -1652,13 +1652,11 @@ func TestAgentToolsDocMatchesBuiltInRoster(t *testing.T) {
 		}
 	}
 	tb := testToolbox(nil, nil, &stubMCP{})
-	// The docs document the ADVERTISED roster — per-verb family members are
-	// compacted into dispatcher roots before reaching providers
-	// (docs/design/tool-dispatchers.md). Per-op names are internal canonical
-	// targets only (direct model emissions are rejected loud), so they are
-	// intentionally not required as table rows.
+	// The docs document the ADVERTISED roster — non-family built-ins plus
+	// the dispatcher family roots (docs/design/tool-dispatchers.md). There
+	// are no per-verb names anywhere on the roster.
 	actual := map[string]bool{}
-	for _, tool := range application.CompactFamilies(append(tb.ListTools(), application.DispatcherToolInfos()...)) {
+	for _, tool := range append(tb.ListTools(), application.DispatcherToolInfos()...) {
 		actual[tool.Name] = true
 		if !documented[tool.Name] {
 			t.Errorf("agent tools documentation missing %q", tool.Name)

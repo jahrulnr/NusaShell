@@ -1,5 +1,5 @@
 // Package docs provides the product documentation corpus the agent can read
-// through docs_search / docs_read. The corpus is embedded at
+// through the docs tool (op=search / op=read). The corpus is embedded at
 // build time via the resources package; a user-supplied directory may
 // extend it.
 package docs

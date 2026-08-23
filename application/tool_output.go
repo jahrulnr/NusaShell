@@ -8,11 +8,11 @@ import (
 // untrustedToolPrefixes are tool name prefixes whose output comes from external
 // sources (MCP servers, docs index, web fetch) and must be wrapped in an
 // untrusted envelope before being sent to the model. Built-in tools
-// (skill_*, memory_*, runtime_context, etc.) read from local trusted stores
+// (skill, memory, runtime_context, etc.) read from local trusted stores
 // and are not wrapped. mcp_call is the only MCP execution path — its output
 // comes from external MCP servers, so it is wrapped. "mcp__" remains in the
 // list only to envelope legacy stored tool calls from older conversations.
-var untrustedToolPrefixes = []string{"mcp__", "mcp_call", "docs_"}
+var untrustedToolPrefixes = []string{"mcp__", "mcp_call", "docs"}
 
 // untrustedWrapMinChars is the minimum output length that triggers wrapping.
 // Short outputs (e.g. "ok", "Saved.") are too small to carry a meaningful

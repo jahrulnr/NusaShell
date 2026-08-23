@@ -139,15 +139,15 @@ func TestHydrationRuntimeContext(t *testing.T) {
 }
 
 func TestHydrationMemory(t *testing.T) {
-	// The memory slot runs the real memory_list tool (target=primary) and
+	// The memory slot runs the real memory tool (op=list, target=primary) and
 	// enriches its entries with usage stats computed from the output.
 	exec := &stubHydrationExecutor{fn: func(name string, _ []byte) (string, error) {
 		switch name {
-		case "memory_list":
+		case "memory":
 			return "---\ncount: 2\n---\n" +
 				`{"id":"frag_1","content":"User prefers Indonesian"}` + "\n" +
 				`{"id":"frag_2","content":"Repo uses Go + Clean Architecture"}`, nil
-		case "skill_list", "mcp_list", "tool_list":
+		case "skill", "mcp_list", "tool_list":
 			return emptyToolOutput, nil
 		}
 		return "", fmt.Errorf("unexpected tool %q", name)
@@ -205,7 +205,7 @@ func TestHydrationMemoryHiddenWhenEmpty(t *testing.T) {
 	// Executor present but primary memory empty: also hidden.
 	exec := &stubHydrationExecutor{fn: func(name string, _ []byte) (string, error) {
 		switch name {
-		case "memory_list", "skill_list", "mcp_list", "tool_list":
+		case "memory", "skill", "mcp_list", "tool_list":
 			return emptyToolOutput, nil
 		}
 		return "", fmt.Errorf("unexpected tool %q", name)
@@ -219,38 +219,38 @@ func TestHydrationMemoryHiddenWhenEmpty(t *testing.T) {
 }
 
 func TestHydrationSkillsRealOutput(t *testing.T) {
-	// The skill_list slot attaches the real tool's output verbatim.
+	// The skill slot attaches the real tool output (op=list) verbatim.
 	skillOutput := "---\ncount: 2\n---\n" +
 		`{"name":"alpha","description":"a"}` + "\n" +
 		`{"name":"zebra","description":"z"}`
 	exec := &stubHydrationExecutor{fn: func(name string, _ []byte) (string, error) {
 		switch name {
-		case "skill_list":
+		case "skill":
 			return skillOutput, nil
-		case "memory_list", "mcp_list", "tool_list":
+		case "memory", "mcp_list", "tool_list":
 			return emptyToolOutput, nil
 		}
 		return "", fmt.Errorf("unexpected tool %q", name)
 	}}
 	b := NewHydrationBuilder(HydrationSource{Executor: exec})
 	result := b.Build()
-	if got := hydrationResultByName(t, result, "skill_list"); got != skillOutput {
-		t.Fatalf("skill_list slot must contain the real tool output verbatim:\n got %q\nwant %q", got, skillOutput)
+	if got := hydrationResultByName(t, result, "skill"); got != skillOutput {
+		t.Fatalf("skill slot must contain the real tool output verbatim:\n got %q\nwant %q", got, skillOutput)
 	}
 }
 
 func TestHydrationSkillsHiddenWhenEmpty(t *testing.T) {
 	exec := &stubHydrationExecutor{fn: func(name string, _ []byte) (string, error) {
 		switch name {
-		case "memory_list", "skill_list", "mcp_list", "tool_list":
+		case "memory", "skill", "mcp_list", "tool_list":
 			return emptyToolOutput, nil
 		}
 		return "", fmt.Errorf("unexpected tool %q", name)
 	}}
 	result := NewHydrationBuilder(HydrationSource{Executor: exec}).Build()
 	for _, c := range result.Messages[0].ToolCalls {
-		if c.Name == "skill_list" {
-			t.Fatal("skill_list slot must be hidden when the skill library is empty")
+		if c.Name == "skill" {
+			t.Fatal("skill slot must be hidden when the skill library is empty")
 		}
 	}
 }
@@ -264,7 +264,7 @@ func TestHydrationMcpListExecutesRealTool(t *testing.T) {
 			switch name {
 			case "mcp_list":
 				return realOutput, nil
-			case "memory_list", "skill_list", "tool_list":
+			case "memory", "skill", "tool_list":
 				return emptyToolOutput, nil
 			}
 			return "", fmt.Errorf("unexpected tool %q", name)
@@ -280,7 +280,7 @@ func TestHydrationMcpListExecutesRealTool(t *testing.T) {
 func TestHydrationMcpListHiddenWhenNoPlugins(t *testing.T) {
 	exec := &stubHydrationExecutor{fn: func(name string, _ []byte) (string, error) {
 		switch name {
-		case "memory_list", "skill_list", "mcp_list", "tool_list":
+		case "memory", "skill", "mcp_list", "tool_list":
 			return emptyToolOutput, nil
 		}
 		return "", fmt.Errorf("unexpected tool %q", name)
@@ -313,7 +313,7 @@ func TestHydrationToolListLoopsRealToolPerServer(t *testing.T) {
 				return filesOutput, nil
 			}
 			return emptyToolOutput, nil
-		case "memory_list", "skill_list":
+		case "memory", "skill":
 			return emptyToolOutput, nil
 		}
 		return "", fmt.Errorf("unexpected tool %q", name)
@@ -529,7 +529,7 @@ func TestFilterHydrationPreservesRealToolCalls(t *testing.T) {
 	mixed := ChatMessage{
 		Role: "assistant",
 		ToolCalls: append(
-			[]domain.ToolCall{{ID: "real_call_1", Name: "skill_list", Args: "{}"}},
+			[]domain.ToolCall{{ID: "real_call_1", Name: "skill", Args: `{"op":"list"}`}},
 			result.Messages[0].ToolCalls...,
 		),
 	}
@@ -538,7 +538,7 @@ func TestFilterHydrationPreservesRealToolCalls(t *testing.T) {
 		mixed,
 	}
 	// Add real tool result
-	messages = append(messages, ChatMessage{Role: "tool", ToolResult: &ToolResult{ToolCallID: "real_call_1", Name: "skill_list", Content: "result"}})
+	messages = append(messages, ChatMessage{Role: "tool", ToolResult: &ToolResult{ToolCallID: "real_call_1", Name: "skill", Content: "result"}})
 	// Add hydration tool results
 	messages = append(messages, result.Messages[1:]...)
 	filtered := FilterHydration(messages)

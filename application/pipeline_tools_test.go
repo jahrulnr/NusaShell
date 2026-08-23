@@ -26,7 +26,7 @@ func (l *listingToolbox) Execute(_ context.Context, name string, _ []byte) (stri
 }
 
 func TestFilterACPToolsHidesSubagentSurface(t *testing.T) {
-	inner := &listingToolbox{names: []string{"ci_run", "subagent", "subagent_steer", "subagent_stop", "subagent_wait", "docs_read"}}
+	inner := &listingToolbox{names: []string{"ci_run", "subagent", "subagent_steer", "subagent_stop", "subagent_wait", "docs"}}
 	filtered := FilterACPTools(inner)
 	got := map[string]bool{}
 	for _, ti := range filtered.ListTools() {
@@ -35,7 +35,7 @@ func TestFilterACPToolsHidesSubagentSurface(t *testing.T) {
 			t.Fatalf("pipeline toolbox listed ACP tool %q", ti.Name)
 		}
 	}
-	if !got["ci_run"] || !got["docs_read"] {
+	if !got["ci_run"] || !got["docs"] {
 		t.Fatalf("non-ACP tools must remain visible, got %v", got)
 	}
 	if got["subagent"] {

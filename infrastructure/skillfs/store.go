@@ -234,7 +234,7 @@ func (s *Store) Get(id, ownedBy string) (*domain.Skill, error) {
 // getWithOwner returns the skill with the exact owner.
 func (s *Store) getWithOwner(id, ownedBy string) (*domain.Skill, error) {
 	// Root-resident owners: user, builtin, and agent-authored skills all
-	// live directly under s.root (skill_save persists agent-origin skills
+	// live directly under s.root (skill op=save persists agent-origin skills
 	// there), so an exact-owner lookup for them resolves against the root,
 	// NOT against a plugin mount.
 	if ownedBy == "user" || ownedBy == "builtin" ||
@@ -660,7 +660,7 @@ func cleanupOrphanBuiltin(root string, sourceIDs map[string]bool, provenance map
 // Compile-time interface check.
 var _ application.SkillStore = (*Store)(nil)
 
-// --- enriched skill file reads (port of Electron skill_read) ---
+// --- enriched skill file reads (port of Electron skill read) ---
 
 const maxSkillEditableBytes = 1024 * 1024
 

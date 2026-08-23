@@ -65,12 +65,10 @@ func (a *App) initializeTurn(run *TurnRun, provider *domain.Provider, apiKey, mo
 }
 
 func (a *App) toolDefinitions() []ToolDef {
-	// Compact per-verb built-ins into dispatcher families for the provider
-	// roster (prompt cost + sub-linear growth). Toolbox.ListTools itself
-	// keeps returning the full defs so review-agent and pipeline filtering
-	// are untouched; legacy per-op names are rejected loud at the model
-	// boundary via LegacyAliasError. See docs/design/tool-dispatchers.md.
-	tools := CompactFamilies(append(a.Toolbox.ListTools(), DispatcherToolInfos()...))
+	// Roster for providers: non-family built-ins plus the dispatcher family
+	// definitions. Root+op is the single naming layer (see
+	// docs/design/tool-dispatchers.md).
+	tools := append(a.Toolbox.ListTools(), DispatcherToolInfos()...)
 	definitions := make([]ToolDef, 0, len(tools))
 	for _, tool := range tools {
 		definitions = append(definitions, ToolDef{
@@ -164,7 +162,7 @@ func (a *App) streamTurnRoundOnce(run *TurnRun, adapter AIProvider, conversation
 		system += "\n\n" + systemPromptSuffix
 	}
 	// Persist the synthetic runtime-hydration transcript (runtime_context,
-	// memory, skill_list, mcp_list, tool_list, todo_list) to the conversation
+	// memory, skill, mcp_list, tool_list, todo_list) to the conversation
 	// store as an assistant message with hydration tool calls + matching tool
 	// results. Persisting (rather than injecting ephemerally) keeps the
 	// message-list prefix stable across tool rounds, so the provider can
@@ -334,7 +332,7 @@ func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
 	}
 	if a.Toolbox != nil {
 		// The real toolbox executes the meta-tools (mcp_list, tool_list per
-		// server, skill_list, memory_list) so the checkpoint contains genuine
+		// server, skill, memory op=list) so the checkpoint contains genuine
 		// tool output — the same tools the agent calls.
 		source.Executor = a.Toolbox
 	}
@@ -503,29 +501,20 @@ func (a *App) runOneTool(run *TurnRun, toolCall domain.ToolCall, caps ModelCapab
 	var output string
 	var outputAttachments []domain.Attachment
 	var err error
-	// Hidden aliases were removed: CanonicalizeToolCalls flagged this call
-	// because the model emitted a retired per-op name directly (root calls
-	// were canonicalized upstream, before persistence). Fail loud with the
-	// exact rewrite instead of executing; internal Toolbox callers
-	// (hydration, review replay) are unaffected.
-	if toolCall.LegacyAlias {
-		err = LegacyAliasError(toolCall.Name)
-	} else {
-		switch toolCall.Name {
-		case "read_image":
-			output, outputAttachments, err = a.executeReadImage(run, toolCall, caps, settings)
-		case "read_audio":
-			output, outputAttachments, err = a.executeReadAudio(run, toolCall, caps, settings)
-		case "read_video":
-			output, outputAttachments, err = a.executeReadVideo(run, toolCall, caps, settings)
-		case "generate_media", "generate_image", "generate_speech", "generate_video":
-			output, outputAttachments, err = a.executeGenerateMedia(run, toolCall, settings)
-		default:
-			toolCtx := WithConversationID(run.Ctx, run.ConversationID)
-			toolCtx = WithRunID(toolCtx, run.ID)
-			toolCtx = WithToolCallID(toolCtx, toolCall.ID)
-			output, err = a.Toolbox.Execute(toolCtx, toolCall.Name, []byte(toolCall.Args))
-		}
+	switch toolCall.Name {
+	case "read_image":
+		output, outputAttachments, err = a.executeReadImage(run, toolCall, caps, settings)
+	case "read_audio":
+		output, outputAttachments, err = a.executeReadAudio(run, toolCall, caps, settings)
+	case "read_video":
+		output, outputAttachments, err = a.executeReadVideo(run, toolCall, caps, settings)
+	case "generate_media", "generate_image", "generate_speech", "generate_video":
+		output, outputAttachments, err = a.executeGenerateMedia(run, toolCall, settings)
+	default:
+		toolCtx := WithConversationID(run.Ctx, run.ConversationID)
+		toolCtx = WithRunID(toolCtx, run.ID)
+		toolCtx = WithToolCallID(toolCtx, toolCall.ID)
+		output, err = a.Toolbox.Execute(toolCtx, toolCall.Name, []byte(toolCall.Args))
 	}
 	status := domain.ToolOK
 	if err != nil {
@@ -577,13 +566,9 @@ func (a *App) emitLearningMutationEvents(toolName string, status domain.ToolCall
 	if a.Bus == nil || status != domain.ToolOK {
 		return
 	}
-	// Route by dispatcher family so renamed/added verbs are covered; the
-	// legacy literal switch here missed the current skill_save name.
-	root, _, ok := MemberOp(toolName)
-	if !ok {
-		return
-	}
-	switch root {
+	// Route by dispatcher root; any successful family op refreshes the
+	// Learning UI panes in real time.
+	switch toolName {
 	case "memory":
 		a.Bus.Emit(contracts.EventMemoryUpdated, map[string]any{
 			"source": "tool",

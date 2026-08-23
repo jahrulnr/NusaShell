@@ -477,7 +477,7 @@ func (a *App) learningSearch() *LearningSearcher {
 	return a.learningSearcher
 }
 
-// SearchSkills implements SkillSearcher for the skill_search tool. It ranks
+// SearchSkills implements SkillSearcher for the skill tool (op=search). It ranks
 // with BM25 + graph + recency but forces embedding off — per-call embedding
 // cost in the agent loop is not justified; the Learning UI keeps the full
 // hybrid path.

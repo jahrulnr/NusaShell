@@ -15,7 +15,7 @@ func TestSanitizeToolName(t *testing.T) {
 	cases := []struct {
 		name, in, want string
 	}{
-		{"already valid", "memory_save", "memory_save"},
+		{"already valid", "some_tool", "some_tool"},
 		{"hyphen and underscore", "my-tool_v2", "my-tool_v2"},
 		{"colon", "terminal:exec", "terminal_exec"},
 		{"dot", "filesystem.read", "filesystem_read"},

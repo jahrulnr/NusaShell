@@ -95,7 +95,7 @@ func TestHandleLearningLogEnrichesReviewEntries(t *testing.T) {
 	// before the 10:00 entry. Newest-first output puts conv_1 on top.
 	writeTrajectory(t, dir, []string{
 		`{"ts":"2026-08-19T09:00:00Z","type":"review","detail":{"conversation":"conv_ghost","mutations":["skills"]}}`,
-		`{"ts":"2026-08-19T10:00:00Z","type":"review","detail":{"conversation":"conv_1","mutations":[{"kind":"memory","tool":"memory_save","snippet":"user prefers Indonesian"}]}}`,
+		`{"ts":"2026-08-19T10:00:00Z","type":"review","detail":{"conversation":"conv_1","mutations":[{"kind":"memory","tool":"memory","snippet":"user prefers Indonesian"}]}}`,
 	})
 
 	app := &App{
@@ -127,7 +127,7 @@ func TestHandleLearningLogEnrichesReviewEntries(t *testing.T) {
 	if len(first.Mutations) != 1 {
 		t.Fatalf("first mutations = %+v, want 1", first.Mutations)
 	}
-	if first.Mutations[0].Kind != "memory" || first.Mutations[0].Tool != "memory_save" || first.Mutations[0].Snippet != "user prefers Indonesian" {
+	if first.Mutations[0].Kind != "memory" || first.Mutations[0].Tool != "memory" || first.Mutations[0].Snippet != "user prefers Indonesian" {
 		t.Errorf("first mutation = %+v, want kind/tool/snippet", first.Mutations[0])
 	}
 
@@ -200,7 +200,7 @@ func TestTrajectoryRecordRoundTrip(t *testing.T) {
 	rec.Record("review", map[string]interface{}{
 		"conversation": "conv_1",
 		"mutations": []map[string]string{
-			{"kind": "memory", "tool": "memory_save", "snippet": "x"},
+			{"kind": "memory", "tool": "memory", "snippet": "x"},
 		},
 	})
 	_ = rec.Close()
@@ -230,9 +230,9 @@ func TestSaveAndReadReviewTranscript(t *testing.T) {
 	msgs := []ChatMessage{
 		{Role: "user", Content: "transcript tail…"},
 		{Role: "assistant", Content: "I will save a memory.", ToolCalls: []domain.ToolCall{
-			{ID: "tc_1", Name: "memory_save", Args: `{"content":"x"}`, Status: "ok"},
+			{ID: "tc_1", Name: "memory", Args: `{"op":"save","content":"x"}`, Status: "ok"},
 		}},
-		{Role: "tool", ToolResult: &ToolResult{ToolCallID: "tc_1", Name: "memory_save", Content: "Saved"}},
+		{Role: "tool", ToolResult: &ToolResult{ToolCallID: "tc_1", Name: "memory", Content: "Saved"}},
 	}
 	id := saveReviewTranscript(dir, "conv_1", "test-model", msgs)
 	if id == "" {
@@ -249,7 +249,7 @@ func TestSaveAndReadReviewTranscript(t *testing.T) {
 	if len(loaded.Messages) != 3 {
 		t.Fatalf("messages = %d, want 3", len(loaded.Messages))
 	}
-	if loaded.Messages[1].ToolCalls[0].Name != "memory_save" {
+	if loaded.Messages[1].ToolCalls[0].Name != "memory" {
 		t.Errorf("tool call name = %q", loaded.Messages[1].ToolCalls[0].Name)
 	}
 }
@@ -265,9 +265,9 @@ func TestHandleLearningReviewTranscript(t *testing.T) {
 	msgs := []ChatMessage{
 		{Role: "user", Content: "transcript"},
 		{Role: "assistant", Reasoning: "checking stored memories first", ToolCalls: []domain.ToolCall{
-			{ID: "tc_1", Name: "memory_save", Args: `{"content":"x"}`, Status: "ok", Output: "Saved"},
+			{ID: "tc_1", Name: "memory", Args: `{"op":"save","content":"x"}`, Status: "ok", Output: "Saved"},
 		}},
-		{Role: "tool", ToolResult: &ToolResult{ToolCallID: "tc_1", Name: "memory_save", Content: "Saved"}},
+		{Role: "tool", ToolResult: &ToolResult{ToolCallID: "tc_1", Name: "memory", Content: "Saved"}},
 	}
 	id := saveReviewTranscript(dir, "conv_1", "m", msgs)
 
@@ -286,13 +286,13 @@ func TestHandleLearningReviewTranscript(t *testing.T) {
 	if len(result.Messages) != 3 {
 		t.Fatalf("messages = %d, want 3", len(result.Messages))
 	}
-	if result.Messages[1].ToolCalls[0].Name != "memory_save" {
+	if result.Messages[1].ToolCalls[0].Name != "memory" {
 		t.Errorf("tool call = %+v", result.Messages[1].ToolCalls[0])
 	}
 	if result.Messages[1].Reasoning != "checking stored memories first" {
 		t.Errorf("reasoning not mapped: %q", result.Messages[1].Reasoning)
 	}
-	if result.Messages[2].ToolResult == nil || result.Messages[2].ToolResult.Name != "memory_save" {
+	if result.Messages[2].ToolResult == nil || result.Messages[2].ToolResult.Name != "memory" {
 		t.Errorf("tool result = %+v", result.Messages[2].ToolResult)
 	}
 

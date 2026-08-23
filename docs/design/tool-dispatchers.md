@@ -6,29 +6,27 @@ One advertised tool per family instead of one tool per verb. `skill`,
 verbs cost an enum value, not a new schema — prompt growth per feature is
 sub-linear.
 
-## Mechanism
+## Single naming layer
 
-Three small pieces, one source of truth (`application/tool_dispatch.go`):
+Root+op is the ONLY form of these tools anywhere in the system:
 
-1. **Roster compaction** — `CompactFamilies` runs only where the interactive
-   provider roster is built (`App.toolDefinitions`). `Toolbox.ListTools`
-   still returns full per-verb defs, so the review-agent whitelist and the
-   pipeline `FilteredToolbox` keep their exact-name contracts untouched.
-2. **Canonicalization** — before persistence and execution, the agent runner
-   rewrites dispatcher calls to legacy names via `CanonicalizeToolCalls`.
-   Conversation history, learning-event classification, untrusted-output
-   wrapping, UI rendering, and every downstream consumer see stable legacy
-   names without knowing dispatchers exist.
-3. **Execution routing** — `Toolbox.Execute` resolves roots to per-op cases
-   via `DispatchCanonical`. Missing or unknown ops fail loud with the valid
-   list (self-describing error). The per-op names are internal canonical
-   targets only (hydration checkpoints, review-agent replay): a model call
-   that emits one directly is rejected loud with the exact `{root, op}`
-   rewrite at the agent tool executor (`LegacyAliasError`) — the
-   hidden-alias path was removed.
-
-Args are preserved verbatim; the redundant `op` key is ignored by the legacy
-handlers' strict structs.
+- **Roster** — providers receive the family definitions
+  (`DispatcherToolInfos()`) plus every non-family built-in.
+  There are no per-verb names on any roster.
+- **Persistence** — a call is stored exactly as emitted:
+  `{name:"memory", args:{op:"save",…}}`. History, UI, and transcripts show
+  the root form.
+- **Execution** — `Toolbox.Execute` resolves root+op via `DispatchOp`
+  (missing/unknown ops fail loud with the valid list) and routes to its
+  handler. The resolved `root+"_"+op` string is a private routing key inside
+  Execute and never escapes it.
+- **Internal callers** — hydration checkpoints, the review agent, and tests
+  call the same root form (`Execute(ctx, "memory", {"op":"list",…})`). No
+  caller has a special naming dialect.
+- **No aliases** — a call named like an old verb (`memory_save`,
+  `docs_read`, …) is simply an unknown tool and fails loud. Pre-migration
+  conversations keep their stored strings; replaying those specific calls
+  errors loudly by design.
 
 ## Rules
 
@@ -39,5 +37,6 @@ handlers' strict structs.
   exact names), and privileged gates (`mcp_register/install/server_add`)
   stay as typed tools.
 - Adding a verb: add the op to the family spec + its Execute case + tests.
-- Do not canonicalize inside provider handlers; there is exactly one choke
-  point (the runner) plus one fallback (Execute) by design.
+- Classification sites that must not fail loud (learning mutations,
+  whitelist ops) read the op via `OpArg`; execution paths validate via
+  `DispatchOp`.

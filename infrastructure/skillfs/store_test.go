@@ -128,7 +128,7 @@ func TestStore_WriteFile_overwritesExisting(t *testing.T) {
 }
 
 // TestStore_GetWithAgentOwner resolves the click-to-read bug: skills created
-// by the agent (skill_save with Origin=agent) live in the root dir, but an
+// by the agent (skill op=save with Origin=agent) live in the root dir, but an
 // exact-owner lookup used to fail with "owner agent not mounted" because
 // getWithOwner only knew user/builtin/plugin owners.
 func TestStore_GetWithAgentOwner(t *testing.T) {

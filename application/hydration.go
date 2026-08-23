@@ -29,7 +29,7 @@ type RuntimeContextSnapshot struct {
 type HydrationSource struct {
 	RuntimeContext RuntimeContextSnapshot
 	// Executor runs the REAL meta-tools — mcp_list, tool_list (per running
-	// server), skill_list, memory_list target=primary — so the checkpoint
+	// server), skill op=list, memory op=list target=primary — so the checkpoint
 	// contains genuine tool output, the same tools the agent itself calls.
 	// The builder never mutates, clones, or mirrors a tool: it calls the
 	// real tool, processes the result, and attaches it to the conversation.
@@ -150,7 +150,7 @@ func (b *HydrationBuilder) readRuntimeContext() hydrationSlot {
 	return hydrationSlot{name: "runtime_context", content: string(content)}
 }
 
-// readMemory runs the real `memory_list` tool with target=primary and
+// readMemory runs the real `memory` tool (op=list) with target=primary and
 // attaches its entries, enriched with usage stats computed from the output
 // (the checkpoint's value-add; the tool itself returns bare entries). An
 // empty primary document hides the slot.
@@ -158,7 +158,7 @@ func (b *HydrationBuilder) readMemory() hydrationSlot {
 	if b.source.Executor == nil {
 		return hydrationSlot{name: "memory", content: ""}
 	}
-	out, err := b.source.Executor.Execute(context.Background(), "memory_list", []byte(`{"target":"primary"}`))
+	out, err := b.source.Executor.Execute(context.Background(), "memory", []byte(`{"op":"list","target":"primary"}`))
 	if err != nil {
 		return hydrationSlot{name: "memory", content: ""}
 	}
@@ -201,17 +201,17 @@ func (b *HydrationBuilder) readMemory() hydrationSlot {
 	return hydrationSlot{name: "memory", args: `{"target":"primary"}`, content: string(content)}
 }
 
-// readSkills runs the real `skill_list` tool and attaches its output
+// readSkills runs the real `skill` tool (op=list) and attaches its output
 // verbatim. An empty skill library hides the slot.
 func (b *HydrationBuilder) readSkills() hydrationSlot {
 	if b.source.Executor == nil {
-		return hydrationSlot{name: "skill_list", content: ""}
+		return hydrationSlot{name: "skill", content: ""}
 	}
-	out, err := b.source.Executor.Execute(context.Background(), "skill_list", []byte("{}"))
+	out, err := b.source.Executor.Execute(context.Background(), "skill", []byte(`{"op":"list"}`))
 	if err != nil || !hasJSONLLines(out) {
-		return hydrationSlot{name: "skill_list", content: ""}
+		return hydrationSlot{name: "skill", content: ""}
 	}
-	return hydrationSlot{name: "skill_list", args: "{}", content: out}
+	return hydrationSlot{name: "skill", args: `{"op":"list"}`, content: out}
 }
 
 // hasJSONLLines reports whether a yamlJSONL tool output contains at least

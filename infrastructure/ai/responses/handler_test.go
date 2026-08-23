@@ -229,7 +229,7 @@ func TestResponsesToolResultWithoutAttachmentsStaysString(t *testing.T) {
 		Messages: []application.ChatMessage{{
 			Role: "tool",
 			ToolResult: &application.ToolResult{
-				ToolCallID: "call_2", Name: "docs_search", Content: "docs/mcp.md",
+				ToolCallID: "call_2", Name: "web_fetch", Content: "docs/mcp.md",
 			},
 		}},
 	}

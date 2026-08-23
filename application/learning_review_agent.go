@@ -108,20 +108,22 @@ func NewBackgroundReviewAgent(app *App, settings ReviewSettings) *BackgroundRevi
 	}
 }
 
-// reviewToolWhitelist is the only set of tools the review agent may call,
-// derived from the dispatcher families (tool_dispatch.go) so new verbs are
-// picked up automatically. Destructive verbs (delete/files) stay excluded.
+// reviewToolWhitelist is the only set of tools the review agent may call:
+// the memory and skill dispatcher roots. Destructive ops (delete/files) are
+// rejected per-call by reviewAllowedOp.
 func reviewToolWhitelist() map[string]bool {
-	m := make(map[string]bool)
-	for _, root := range []string{"memory", "skill"} {
-		for _, member := range FamilyMembers(root) {
-			if _, op, _ := MemberOp(member); op == "delete" || op == "files" {
-				continue
-			}
-			m[member] = true
-		}
+	return map[string]bool{"memory": true, "skill": true}
+}
+
+// reviewAllowedOp reports whether a review-agent call to a whitelisted root
+// carries a non-destructive op. The advertised schemas still list every op,
+// so the rejection message below stays self-describing.
+func reviewAllowedOp(name string, argsJSON []byte) bool {
+	if !reviewToolWhitelist()[name] {
+		return false
 	}
-	return m
+	op := OpArg(argsJSON)
+	return op != "delete" && op != "files"
 }
 
 // review_transcript is the hydration tool — it returns the conversation as
@@ -472,7 +474,7 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIPro
 	// Inject the current primary memory content into the system prompt so
 	// the review agent can see what is already in primary.md before editing
 	// it (avoid duplicates, spot stale text). Without this, the agent would
-	// have to call memory_list target=primary first, burning a tool round
+	// have to call memory op=list target=primary first, burning a tool round
 	// and sometimes skipping the check entirely.
 	systemPrompt = r.injectPrimaryMemory(systemPrompt)
 	// The review agent gets the conversation via the review_transcript
@@ -554,13 +556,13 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIPro
 		})
 		// Execute each tool call and append results.
 		for _, tc := range resp.ToolCalls {
-			if !reviewToolWhitelist()[tc.Name] {
+			if !reviewAllowedOp(tc.Name, []byte(tc.Args)) {
 				messages = append(messages, ChatMessage{
 					Role: "tool",
 					ToolResult: &ToolResult{
 						ToolCallID: tc.ID,
 						Name:       tc.Name,
-						Content:    fmt.Sprintf("error: tool %q is not allowed in background review", tc.Name),
+						Content:    fmt.Sprintf("error: tool %q (with this op) is not allowed in background review", tc.Name),
 					},
 				})
 				continue
@@ -592,22 +594,23 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIPro
 				// Track mutations with enough detail for the learning log
 				// (which tool saved what, trimmed so the trajectory stays
 				// readable).
-				switch tc.Name {
-				case "memory_save", "memory_replace":
+				op := OpArg([]byte(tc.Args))
+				switch {
+				case tc.Name == "memory" && (op == "save" || op == "replace"):
 					mutations = append(mutations, ReviewMutation{Kind: "memory", Tool: tc.Name, Snippet: mutationSnippet(tc.Args, "content")})
-				case "skill_save":
+				case tc.Name == "skill" && op == "save":
 					mutations = append(mutations, ReviewMutation{Kind: "skills", Tool: tc.Name, Snippet: mutationSnippet(tc.Args, "name")})
 				}
 				// Emit learning mutation events so the Learning UI can
 				// refresh memory/skill panes in real time during a review.
 				if r.app.Bus != nil {
-					switch tc.Name {
-					case "memory_save", "memory_replace":
+					switch {
+					case tc.Name == "memory" && (op == "save" || op == "replace"):
 						r.app.Bus.Emit(contracts.EventMemoryUpdated, map[string]any{
 							"source": "review",
 							"tool":   tc.Name,
 						})
-					case "skill_save":
+					case tc.Name == "skill" && op == "save":
 						r.app.Bus.Emit(contracts.EventSkillUpdated, map[string]any{
 							"source": "review",
 							"tool":   tc.Name,
@@ -642,7 +645,7 @@ func isNothingToSave(content string) bool {
 // injectPrimaryMemory reads the current primary memory from the PrimaryStore
 // and substitutes it into the review system prompt's {{primary_memory}}
 // placeholder. Each entry is rendered as a bullet line so the agent can
-// see what is already in primary memory. memory_replace target=primary
+// see what is already in primary memory. memory op=replace target=primary
 // (substring match), not IDs, so no ID prefix is needed. Returns the
 // prompt unchanged when no PrimaryStore is configured or the document is empty.
 func (r *BackgroundReviewAgent) injectPrimaryMemory(prompt string) string {
@@ -664,7 +667,7 @@ func (r *BackgroundReviewAgent) injectPrimaryMemory(prompt string) string {
 func (r *BackgroundReviewAgent) reviewTools() []ToolDef {
 	// The hydration tool is always first in the list and is NOT in Toolbox.
 	out := []ToolDef{reviewTranscriptToolDef}
-	all := r.app.Toolbox.ListTools()
+	all := append(r.app.Toolbox.ListTools(), DispatcherToolInfos()...)
 	for _, t := range all {
 		if reviewToolWhitelist()[t.Name] && t.Name != reviewTranscriptToolName {
 			out = append(out, ToolDef{
