@@ -5,7 +5,7 @@ go 1.26.5
 require (
 	github.com/ggerganov/whisper.cpp/bindings/go v0.0.0-20260822051411-233fe1fc9b48
 	github.com/go-audio/wav v1.1.0
-	github.com/jahrulnr/searchwire v0.0.0-20260823074928-bb836c953972
+	github.com/jahrulnr/searchwire v0.0.0-20260823103502-7c38ef3cc1f4
 	github.com/mark3labs/mcp-go v0.58.0
 	github.com/ncruces/zenity v0.10.15
 	gopkg.in/yaml.v3 v3.0.1
