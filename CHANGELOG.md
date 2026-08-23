@@ -59,7 +59,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   review begins, alongside the existing `done`, `skipped`, and `error`
   events.
 
+- **Windows shell-selection guidance on `exec`.** Tool description and
+  `resources/agent/docs/tools.md` now steer Windows users to pick shells via
+  the `shell` parameter instead of invoking cmd.exe/powershell.exe inside a
+  bash command line — MSYS path conversion mangles drive-letter paths such
+  as `Z:/x`.
+
 ### Fixed
+
+- **Windows rename races in atomic writes and moves.** `file_write`,
+  `file_patch`, and `file_move` rename a freshly closed temp file into
+  place; on Windows, antivirus scanners and search indexers routinely hold
+  that file for a few milliseconds, so an otherwise-valid `os.Rename` fails
+  with `ERROR_SHARING_VIOLATION`, `ERROR_LOCK_VIOLATION`, or
+  `ERROR_ACCESS_DENIED`. Renames now retry briefly (bounded to 4 attempts,
+  10 ms doubling backoff) and only for those transient errnos on `windows`,
+  so permanent failures still surface immediately. The renamer, sleeper, and
+  GOOS check are injected package vars — guarded by
+  `TestWriteFileAtomicRetriesTransientRenameFailure`,
+  `TestWriteFileAtomicNoRetryOnPermanentRenameFailure`, and
+  `TestWriteFileAtomicRetryIsBounded`.
 
 - **`ci_pipeline` ops were advertised but unreachable.** Every call to the
   dispatcher family died with `unknown ci_pipeline_list op "list"`:

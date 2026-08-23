@@ -8,12 +8,15 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"nusashell/application"
@@ -244,7 +247,7 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return true, "", err
 		}
-		if err := os.Rename(src, dst); err != nil {
+		if err := renameWithRetry(src, dst); err != nil {
 			// Fall back to copy+delete (e.g. cross-device rename).
 			if cerr := copyTree(src, dst); cerr != nil {
 				return true, "", err
@@ -340,6 +343,56 @@ func fileLooksBinary(data []byte) bool {
 	return bytes.IndexByte(head, 0) >= 0
 }
 
+// Injected effects so rename-retry behavior stays deterministically testable.
+var (
+	renameFn   = os.Rename
+	sleepFn    = time.Sleep
+	renameGoos = runtime.GOOS
+)
+
+const (
+	renameMaxAttempts = 4
+	renameBaseBackoff = 10 * time.Millisecond
+)
+
+// renameWithRetry renames from→to, briefly retrying when Windows reports a
+// transient sharing violation. Antivirus scanners and search indexers
+// routinely hold a just-closed temp file for a few milliseconds, which makes
+// an otherwise-valid os.Rename fail with ERROR_SHARING_VIOLATION,
+// ERROR_LOCK_VIOLATION, or ERROR_ACCESS_DENIED. A short bounded backoff
+// absorbs that window without masking permanent failures.
+func renameWithRetry(from, to string) error {
+	var err error
+	for attempt := 0; attempt < renameMaxAttempts; attempt++ {
+		if attempt > 0 {
+			sleepFn(renameBaseBackoff << (attempt - 1))
+		}
+		err = renameFn(from, to)
+		if err == nil || !isTransientRenameErr(err) {
+			return err
+		}
+	}
+	return err
+}
+
+// isTransientRenameErr reports whether err is one of the transient Windows
+// file-locking errors worth retrying once or twice.
+func isTransientRenameErr(err error) bool {
+	if renameGoos != "windows" {
+		return false
+	}
+	var errno syscall.Errno
+	if !errors.As(err, &errno) {
+		return false
+	}
+	switch errno {
+	case 5, 32, 33: // ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION
+		return true
+	default:
+		return false
+	}
+}
+
 // writeFileAtomic writes data to a temp file in the target directory and
 // renames it into place, so a crash never leaves a partial file.
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
@@ -368,7 +421,7 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	if err := os.Chmod(tmpName, perm); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := renameWithRetry(tmpName, path); err != nil {
 		return err
 	}
 	cleanup = false

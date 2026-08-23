@@ -801,8 +801,10 @@ func TestReviewTranscriptToolNotInToolbox(t *testing.T) {
 }
 
 // TestReviewLoopCallsHydrationToolFirst verifies the review loop starts with
-// a minimal user message (not a transcript dump) and the hydration tool is
-// in the toolset.
+// a minimal user message (not a transcript dump), the hydration tool is
+// in the toolset, and calling it yields the transcript JSON — not a
+// whitelist rejection (the gate must not run before the local handler;
+// regression guard for b553ca9).
 func TestReviewLoopCallsHydrationToolFirst(t *testing.T) {
 	if resources.ReviewPrompt() == "" {
 		t.Fatal("review prompt must be non-empty")
@@ -842,13 +844,37 @@ func TestReviewLoopCallsHydrationToolFirst(t *testing.T) {
 			}
 		},
 	}
-	_, _, _ = agent.runReviewLoop(context.Background(), adapter, "model", conv)
+	_, msgs, err := agent.runReviewLoop(context.Background(), adapter, "model", conv)
+	if err != nil {
+		t.Fatalf("runReviewLoop: %v", err)
+	}
 	if strings.Contains(capturedInitialContent, "[user]") || strings.Contains(capturedInitialContent, "[assistant]") {
 		t.Fatalf("initial user message looks like a transcript dump: %q", capturedInitialContent[:min(100, len(capturedInitialContent))])
 	}
 	if !strings.Contains(strings.ToLower(capturedInitialContent), "review_transcript") {
 		t.Fatalf("initial user message should instruct calling review_transcript, got: %q", capturedInitialContent[:min(100, len(capturedInitialContent))])
 	}
+
+	// The hydration call must be answered with the transcript JSON from the
+	// local handler — never the whitelist rejection. A rejection here means
+	// every review dies on its mandatory opening call.
+	for _, m := range msgs {
+		if m.Role != "tool" || m.ToolResult == nil || m.ToolResult.Name != "review_transcript" {
+			continue
+		}
+		content := m.ToolResult.Content
+		if strings.Contains(content, "not allowed in background review") {
+			t.Fatal("review_transcript was rejected by the whitelist gate; hydration must be handled before the gate")
+		}
+		if !strings.Contains(content, "conv_loop") {
+			t.Fatalf("review_transcript result should contain conversation_id, got: %.200s", content)
+		}
+		if !strings.Contains(content, "dark mode") {
+			t.Fatalf("review_transcript result should contain transcript content, got: %.200s", content)
+		}
+		return
+	}
+	t.Fatal("no tool result for review_transcript found in loop messages")
 }
 
 // TestReviewTranscriptToolRespectsTokenCap verifies large conversations are

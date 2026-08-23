@@ -6,15 +6,15 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 
 | Tool | Purpose |
 | --- | --- |
-| `exec` | run a shell command as a child process; combined stdout/stderr with head/tail elision for huge output; default shell is POSIX `sh` on Unix/macOS, on Windows `auto` resolves Git Bash first (POSIX syntax works best) then PowerShell — `cmd` only via explicit `shell="cmd"`, plus optional kinds `bash`/`powershell`/`pwsh`/`wsl` (wsl maps cwd under /mnt); no absolute wall-clock limit — running commands keep producing, but silence longer than `idle_timeout_ms` (default 180000) fails the run; optional explicit `timeout_ms`; optional absolute `cwd`; the whole child tree dies on cancel/timeout |
+| `exec` | run a shell command as a child process; combined stdout/stderr with head/tail elision for huge output; default shell is POSIX `sh` on Unix/macOS, on Windows `auto` resolves Git Bash first (POSIX syntax works best) then PowerShell — `cmd` only via explicit `shell="cmd"`, plus optional kinds `bash`/`powershell`/`pwsh`/`wsl` (wsl maps cwd under /mnt); no absolute wall-clock limit — running commands keep producing, but silence longer than `idle_timeout_ms` (default 180000) fails the run; optional explicit `timeout_ms`; optional absolute `cwd`; the whole child tree dies on cancel/timeout; on Windows select shells via `shell=` instead of invoking cmd.exe/powershell.exe inside a bash command line (MSYS path conversion mangles drive-letter paths like `Z:/x`) |
 | `file_read` | read a text file by absolute path (up to `max_bytes`, default 32768; continue with `offset` when truncated; binary files are reported, not dumped) |
-| `file_write` | create or overwrite a text file atomically (temp file + rename); parent directories created automatically; `encoding` utf8 or base64 |
+| `file_write` | create or overwrite a text file atomically (temp file + rename); parent directories created automatically; `encoding` utf8 or base64; transient Windows file-lock errors during the rename are retried briefly |
 | `file_append` | append content to a file, creating it (and parents) if missing |
 | `file_patch` | exact substring replace; errors unless `old_string` matches exactly once — disambiguate repeated matches with 1-based `occurrence`; `preview=true` returns the result without writing |
 | `file_list` | list directory entries with name, type, size, modified time |
 | `file_mkdir` | create a directory including any missing parents |
 | `file_delete` | delete a file or directory (non-empty directories require `recursive=true`); irreversible |
-| `file_move` | move/rename a path; overwrites an existing destination; falls back to copy+delete across filesystems |
+| `file_move` | move/rename a path; overwrites an existing destination; falls back to copy+delete across filesystems (transient Windows rename locks are retried briefly first) |
 | `file_copy` | copy a file or directory recursively |
 | `file_exists` | check whether a path exists without erroring when missing (returns `exists`, `is_dir`) |
 | `file_info` | metadata for a path: size, mode, type, modified time |

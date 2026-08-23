@@ -3,10 +3,13 @@ package tools
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 var testTB = &Toolbox{}
@@ -180,4 +183,90 @@ func TestFileToolInfosRegistered(t *testing.T) {
 func jsonPath(p string) string {
 	r := strings.NewReplacer("\\", "\\\\", "\"", "\\\"")
 	return r.Replace(p)
+}
+
+func TestWriteFileAtomicRetriesTransientRenameFailure(t *testing.T) {
+	origRename, origSleep, origGoos := renameFn, sleepFn, renameGoos
+	defer func() { renameFn, sleepFn, renameGoos = origRename, origSleep, origGoos }()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "out.txt")
+
+	attempts := 0
+	renameFn = func(from, to string) error {
+		attempts++
+		if attempts < 3 {
+			// ERROR_SHARING_VIOLATION: antivirus/indexer briefly holds the temp file.
+			return fmt.Errorf("rename %s %s: %w", from, to, syscall.Errno(32))
+		}
+		return os.Rename(from, to)
+	}
+	var sleeps []time.Duration
+	sleepFn = func(d time.Duration) { sleeps = append(sleeps, d) }
+	renameGoos = "windows"
+
+	if err := writeFileAtomic(path, []byte("data"), 0o644); err != nil {
+		t.Fatalf("writeFileAtomic: %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("rename attempts = %d, want 3", attempts)
+	}
+	if len(sleeps) != 2 {
+		t.Fatalf("backoff sleeps = %d, want 2 (%v)", len(sleeps), sleeps)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "data" {
+		t.Fatalf("content after retried write: %v %q", err, data)
+	}
+}
+
+func TestWriteFileAtomicNoRetryOnPermanentRenameFailure(t *testing.T) {
+	origRename, origSleep, origGoos := renameFn, sleepFn, renameGoos
+	defer func() { renameFn, sleepFn, renameGoos = origRename, origSleep, origGoos }()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "out.txt")
+
+	attempts := 0
+	renameFn = func(from, to string) error {
+		attempts++
+		return fmt.Errorf("rename: %w", syscall.Errno(2)) // permanent failure class
+	}
+	sleepCalls := 0
+	sleepFn = func(time.Duration) { sleepCalls++ }
+	renameGoos = "windows"
+
+	if err := writeFileAtomic(path, []byte("x"), 0o644); err == nil {
+		t.Fatal("expected error from permanently failing rename")
+	}
+	if attempts != 1 {
+		t.Fatalf("rename attempts = %d, want 1 (no retry on permanent errors)", attempts)
+	}
+	if sleepCalls != 0 {
+		t.Fatalf("sleep calls = %d, want 0", sleepCalls)
+	}
+}
+
+func TestWriteFileAtomicRetryIsBounded(t *testing.T) {
+	origRename, origSleep, origGoos := renameFn, sleepFn, renameGoos
+	defer func() { renameFn, sleepFn, renameGoos = origRename, origSleep, origGoos }()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "out.txt")
+
+	attempts := 0
+	renameFn = func(from, to string) error {
+		attempts++
+		return fmt.Errorf("rename: %w", syscall.Errno(32))
+	}
+	sleepFn = func(time.Duration) {}
+	renameGoos = "windows"
+
+	err := writeFileAtomic(path, []byte("x"), 0o644)
+	if err == nil {
+		t.Fatal("expected error after exhausting retries")
+	}
+	if attempts != renameMaxAttempts {
+		t.Fatalf("rename attempts = %d, want bounded %d", attempts, renameMaxAttempts)
+	}
 }

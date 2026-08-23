@@ -556,19 +556,11 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIPro
 		})
 		// Execute each tool call and append results.
 		for _, tc := range resp.ToolCalls {
-			if !reviewAllowedOp(tc.Name, []byte(tc.Args)) {
-				messages = append(messages, ChatMessage{
-					Role: "tool",
-					ToolResult: &ToolResult{
-						ToolCallID: tc.ID,
-						Name:       tc.Name,
-						Content:    fmt.Sprintf("error: tool %q (with this op) is not allowed in background review", tc.Name),
-					},
-				})
-				continue
-			}
 			// The hydration tool is executed locally — it is NOT in
-			// Toolbox. It returns the conversation as structured JSON.
+			// Toolbox and NOT subject to reviewAllowedOp (which only
+			// gates dispatcher roots). Check it BEFORE the gate, or the
+			// whitelist rejects it first and every review dies on its
+			// mandatory opening call.
 			if tc.Name == reviewTranscriptToolName {
 				output := r.executeReviewTranscript(conversation)
 				messages = append(messages, ChatMessage{
@@ -577,6 +569,17 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIPro
 						ToolCallID: tc.ID,
 						Name:       tc.Name,
 						Content:    output,
+					},
+				})
+				continue
+			}
+			if !reviewAllowedOp(tc.Name, []byte(tc.Args)) {
+				messages = append(messages, ChatMessage{
+					Role: "tool",
+					ToolResult: &ToolResult{
+						ToolCallID: tc.ID,
+						Name:       tc.Name,
+						Content:    fmt.Sprintf("error: tool %q (with this op) is not allowed in background review", tc.Name),
 					},
 				})
 				continue
