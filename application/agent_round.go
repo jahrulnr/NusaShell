@@ -68,9 +68,9 @@ func (a *App) toolDefinitions() []ToolDef {
 	// Compact per-verb built-ins into dispatcher families for the provider
 	// roster (prompt cost + sub-linear growth). Toolbox.ListTools itself
 	// keeps returning the full defs so review-agent and pipeline filtering
-	// are untouched; the legacy names remain executable as hidden aliases.
-	// See docs/design/tool-dispatchers.md.
-	tools := CompactFamilies(a.Toolbox.ListTools())
+	// are untouched; legacy per-op names are rejected loud at the model
+	// boundary via LegacyAliasError. See docs/design/tool-dispatchers.md.
+	tools := CompactFamilies(append(a.Toolbox.ListTools(), DispatcherToolInfos()...))
 	definitions := make([]ToolDef, 0, len(tools))
 	for _, tool := range tools {
 		definitions = append(definitions, ToolDef{
@@ -503,22 +503,29 @@ func (a *App) runOneTool(run *TurnRun, toolCall domain.ToolCall, caps ModelCapab
 	var output string
 	var outputAttachments []domain.Attachment
 	var err error
-	switch toolCall.Name {
-	case "read_image":
-		output, outputAttachments, err = a.executeReadImage(run, toolCall, caps, settings)
-	case "read_audio":
-		output, outputAttachments, err = a.executeReadAudio(run, toolCall, caps, settings)
-	case "read_video":
-		output, outputAttachments, err = a.executeReadVideo(run, toolCall, caps, settings)
-	case "generate_image":
-		output, outputAttachments, err = a.executeGenerateImage(run, toolCall, settings)
-	case "generate_speech":
-		output, outputAttachments, err = a.executeGenerateSpeech(run, toolCall, settings)
-	default:
-		toolCtx := WithConversationID(run.Ctx, run.ConversationID)
-		toolCtx = WithRunID(toolCtx, run.ID)
-		toolCtx = WithToolCallID(toolCtx, toolCall.ID)
-		output, err = a.Toolbox.Execute(toolCtx, toolCall.Name, []byte(toolCall.Args))
+	// Hidden aliases were removed: CanonicalizeToolCalls flagged this call
+	// because the model emitted a retired per-op name directly (root calls
+	// were canonicalized upstream, before persistence). Fail loud with the
+	// exact rewrite instead of executing; internal Toolbox callers
+	// (hydration, review replay) are unaffected.
+	if toolCall.LegacyAlias {
+		err = LegacyAliasError(toolCall.Name)
+	} else {
+		switch toolCall.Name {
+		case "read_image":
+			output, outputAttachments, err = a.executeReadImage(run, toolCall, caps, settings)
+		case "read_audio":
+			output, outputAttachments, err = a.executeReadAudio(run, toolCall, caps, settings)
+		case "read_video":
+			output, outputAttachments, err = a.executeReadVideo(run, toolCall, caps, settings)
+		case "generate_media", "generate_image", "generate_speech", "generate_video":
+			output, outputAttachments, err = a.executeGenerateMedia(run, toolCall, settings)
+		default:
+			toolCtx := WithConversationID(run.Ctx, run.ConversationID)
+			toolCtx = WithRunID(toolCtx, run.ID)
+			toolCtx = WithToolCallID(toolCtx, toolCall.ID)
+			output, err = a.Toolbox.Execute(toolCtx, toolCall.Name, []byte(toolCall.Args))
+		}
 	}
 	status := domain.ToolOK
 	if err != nil {
@@ -570,13 +577,19 @@ func (a *App) emitLearningMutationEvents(toolName string, status domain.ToolCall
 	if a.Bus == nil || status != domain.ToolOK {
 		return
 	}
-	switch toolName {
-	case "memory_save", "memory_replace", "memory_delete":
+	// Route by dispatcher family so renamed/added verbs are covered; the
+	// legacy literal switch here missed the current skill_save name.
+	root, _, ok := MemberOp(toolName)
+	if !ok {
+		return
+	}
+	switch root {
+	case "memory":
 		a.Bus.Emit(contracts.EventMemoryUpdated, map[string]any{
 			"source": "tool",
 			"tool":   toolName,
 		})
-	case "skill_create", "skill_update", "skill_delete":
+	case "skill":
 		a.Bus.Emit(contracts.EventSkillUpdated, map[string]any{
 			"source": "tool",
 			"tool":   toolName,

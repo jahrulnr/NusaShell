@@ -48,6 +48,12 @@ func (f *fakeSettingsTTS) Set(s domain.Settings) error { f.settings = s; return 
 
 func mp3Bytes() []byte { return []byte("ID3 fake mp3 audio") }
 
+// wavMagic returns minimal bytes carrying a real RIFF/WAVE signature so the
+// shared generated-media persistence path (magic-number sniffing) accepts it.
+func wavMagic() []byte {
+	return []byte{'R', 'I', 'F', 'F', 0x10, 0, 0, 0, 'W', 'A', 'V', 'E', 'f', 'm', 't', ' ', 16, 0, 0, 0}
+}
+
 func ttsApp(t *testing.T, online *fakeOnlineTTS, offline *fakeOfflineTTS) *App {
 	t.Helper()
 	app := &App{
@@ -104,7 +110,7 @@ func TestGenerateSpeechOnlineWins(t *testing.T) {
 
 func TestGenerateSpeechFallsBackToOfflineWhenCloudFails(t *testing.T) {
 	online := &fakeOnlineTTS{err: errTTS("HTTP 503 down")}
-	offline := &fakeOfflineTTS{available: true, result: &TTSResult{Audio: []byte("RIFFwav"), MediaType: "audio/wav", Ext: "wav", Provider: "piper"}}
+	offline := &fakeOfflineTTS{available: true, result: &TTSResult{Audio: wavMagic(), MediaType: "audio/wav", Ext: "wav", Provider: "piper"}}
 	app := ttsApp(t, online, offline)
 	app.Settings = &fakeSettingsTTS{settings: domain.Settings{TTSProviderID: "ttsprov", TTSModelID: "tts-1"}}
 	run, cancel := ttsRun(t)
@@ -124,7 +130,7 @@ func TestGenerateSpeechFallsBackToOfflineWhenCloudFails(t *testing.T) {
 }
 
 func TestGenerateSpeechZeroConfigOffline(t *testing.T) {
-	offline := &fakeOfflineTTS{available: true, result: &TTSResult{Audio: []byte("RIFFwav"), MediaType: "audio/wav", Ext: "wav", Provider: "piper"}}
+	offline := &fakeOfflineTTS{available: true, result: &TTSResult{Audio: wavMagic(), MediaType: "audio/wav", Ext: "wav", Provider: "piper"}}
 	app := ttsApp(t, nil, offline) // no online factory at all
 	run, cancel := ttsRun(t)
 	defer cancel()

@@ -1,6 +1,6 @@
 # NusaShell constraints
 
-Use `skill_save` for the `SKILL.md` (omit `id` to create, pass `id` to update).
+Use `skill` with `op=save` for the `SKILL.md` (omit `id` to create, pass `id` to update).
 It validates the slug, frontmatter, description length, and support-file
 directory. Support files require an MCP file-management plugin — discover one
 with `mcp_list` + `tool_list`; if none is available, tell the user and stop.

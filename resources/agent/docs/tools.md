@@ -36,11 +36,9 @@ The agent ships with a built-in toolbox plus one tool per MCP server tool.
 | `mcp_install` | install a plugin from the curated catalog or GitHub |
 | `mcp_server_add` | register a manual MCP server from command, arguments, and environment entries |
 | `read_image` | load an image from disk by absolute path into the model's context — any path works, not just conversation attachments (vision models see it directly; non-vision models get a text description via the vision fallback) |
-| `generate_image` | generate an image with the configured auxiliary image model (OpenAI Images, OpenRouter Image API, or Codex ChatGPT plan). Only listed when Settings → Image generation is set. The UI displays the print — do not re-render it as Markdown |
-| `generate_speech` | synthesize spoken audio from text and save it as an mp3/wav/opus file the user can play. Online: an OpenAI-compatible /audio/speech model from Settings → Speech generation; offline: the piper engine (voice models under models/tts/, binary via PIPER_BIN or PATH). If the online model fails, falls back to offline automatically. Only listed when a TTS model is set or offline piper is available |
-| `generate_video` | generate a short video clip from a text prompt and save it as an mp4 the user can play. Uses the async /videos API of the model chosen in Settings → Video generation (e.g. OpenRouter video models); generation takes tens of seconds to minutes and per-model duration/resolution minimums are reported verbatim on rejection. Only listed when a video model is set |
 | `read_audio` | load an audio file from disk by absolute path into the model's context — any path works, not just conversation attachments. Fallback ladder: configured cloud STT first (kind `stt` → `/audio/transcriptions`; audio chat models → `input_audio`), then the local offline whisper engine when built with `-tags stt` and a model is installed (`NUSASHELL_STT_MODEL` or `<data>/models/stt/ggml-base.bin`); each response's yaml meta discloses the route used (audio-capable models hear it directly; non-audio models get a text transcript) |
 | `read_video` | load a video file from disk by absolute path into the model's context — any path works, not just conversation attachments (video-capable models see it directly; non-video models get a text description via the video fallback) |
+| `generate_media` | generate media from a prompt and save it for the user: media_type=image (PNG/JPEG/WebP; referenced_image_paths enables editing), speech (mp3/wav/opus via OpenAI-compatible /audio/speech or offline piper fallback), or video (async /videos API; duration/resolution minimums reported verbatim on rejection). Only listed when at least one mode is configured; unconfigured modes are rejected with guidance |
 | `web_search` | search the web across Brave, Startpage, Wikipedia, and GitHub; returns ranked results with title, URL, and snippet |
 | `web_fetch` | fetch a URL and return readable text; supports HTML, JSON (pretty-printed), XML/RSS/Atom, Markdown, CSV, and plain text with newlines preserved; collects links and selected response headers; honors `max_bytes`; surfaces `Retry-After` on 429/503 and structured JSON error bodies |
 | `web_answer` | get a web-grounded answer via an LLM with built-in web search (only available when an answer-provider API key is configured) |
@@ -82,10 +80,12 @@ enabled.
 `skill`, `memory`, `docs`, and `ci_pipeline` are **dispatcher tools**: one
 advertised tool per family whose required `op` field selects the action. The
 per-op implementation names (`skill_save`, `memory_search`, `docs_read`,
-`ci_pipeline_validate`, …) are no longer advertised but remain executable as
-hidden aliases — history replay, review agents, and pipeline steps that call
-them keep working. Dispatcher calls are canonicalized to those per-op names
-before persistence, so recorded history always shows legacy names.
+`ci_pipeline_validate`, …) are internal only: never advertised to providers,
+and a model call that emits one directly fails loud with the exact dispatcher
+rewrite (the hidden-alias path was removed). Dispatcher calls are
+canonicalized to those per-op names before persistence, so recorded history
+always shows them; internal consumers (hydration checkpoints, review-agent
+replay, pipeline filters) still route through them.
 
 Per-op semantics (unchanged from the legacy tools):
 

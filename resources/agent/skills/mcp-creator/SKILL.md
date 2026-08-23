@@ -14,7 +14,7 @@ should use `.agents/skills/build-nusashell-plugin/` and write under the checkout
 
 - Author in an absolute staging folder outside the installed plugins directory,
   using the active workspace or another user-approved scratch location. Resolve
-  the installed directory with `docs_read(id="data-locations")`; never stage
+  the installed directory with `docs` `op=read`, `id="data-locations"`; never stage
   inside it because `mcp_register` copies into and may replace that destination.
 - Never write the repository `plugins/` tree or bundled read-only
   `resources/plugins/` from the in-app agent.

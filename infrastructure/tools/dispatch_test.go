@@ -63,9 +63,11 @@ func TestExecuteDispatcherUnknownOpFailsLoud(t *testing.T) {
 	}
 }
 
-// Legacy per-op names stay executable as hidden aliases (history replay,
-// review agent, pipeline steps), even though they are no longer advertised.
-func TestLegacyPerOpNamesStillExecutable(t *testing.T) {
+// Per-op names stay directly executable on the toolbox for internal
+// callers (hydration checkpoints, review-agent replay). The model-facing
+// alias path is gone: the agent tool executor rejects member names via
+// LegacyAliasError (application layer).
+func TestPerOpNamesRemainInternalCanonicalTargets(t *testing.T) {
 	tb := testToolbox(
 		[]*domain.Skill{{ID: "s1", Name: "git-helper"}},
 		nil, &stubMCP{},

@@ -1,7 +1,6 @@
 package application
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -10,9 +9,8 @@ import (
 )
 
 const (
-	maxGeneratedVideoBytes = 100 << 20 // mirrors videogen download cap
-	maxVideoPromptChars    = 4000
-	videoUnconfiguredHint  = "No video generation model is configured. Ask the user to pick one in Settings → Video generation."
+	maxVideoPromptChars   = 4000
+	videoUnconfiguredHint = "No video generation model is configured. Ask the user to pick one in Settings → Video generation."
 )
 
 var allowedVideoResolutions = []string{"", "480p", "720p", "768p", "1080p", "1k", "2k", "4k"}
@@ -81,24 +79,13 @@ func (a *App) executeGenerateVideo(run *TurnRun, toolCall domain.ToolCall, setti
 	if result == nil || len(result.Video) == 0 {
 		return failGenerateVideo("video provider returned no video")
 	}
-	if len(result.Video) > maxGeneratedVideoBytes {
-		return failGenerateVideo(fmt.Sprintf("generated video exceeds %d bytes", maxGeneratedVideoBytes))
-	}
-	if a.Attachments == nil {
-		return failGenerateVideo("attachment store is not configured")
-	}
-	name := fmt.Sprintf("gen-%s.mp4", sanitizeFilePart(toolCall.ID))
-	path, err := a.Attachments.WriteBytes(run.ConversationID, name, result.Video)
+	att, path, err := a.saveGeneratedMedia(run.ConversationID, "gen-"+sanitizeFilePart(toolCall.ID), "video", result.Video, true)
 	if err != nil {
 		return failGenerateVideo(err.Error())
 	}
-	att := domain.Attachment{
-		Type: "video", Name: name, MediaType: result.MediaType,
-		DataURL: fmt.Sprintf("data:%s;base64,%s", result.MediaType, base64.StdEncoding.EncodeToString(result.Video)), FilePath: path,
-	}
 	meta := map[string]any{
 		"status": "completed", "provider": result.Provider, "model": result.Model,
-		"media_type": result.MediaType, "file_path": path,
+		"media_type": att.MediaType, "file_path": path,
 	}
 	if result.JobID != "" {
 		meta["job_id"] = result.JobID

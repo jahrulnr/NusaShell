@@ -1,8 +1,8 @@
 // BackgroundReviewAgent runs a bounded LLM turn after a conversation crosses
 // the learning-review threshold. It replays a transcript tail to the same
 // provider that completed the parent turn ("global LLM"), with a restricted
-// toolset (memory_save, memory_search, memory_list, skill_list, skill_search,
-// skill_read, skill_save) and the review.md system prompt.
+// toolset (memory/skill dispatcher families, minus destructive verbs) and
+// the review.md system prompt.
 //
 // This replaces the earlier regex-based ExtractObservations path, which was
 // English-only and produced noisy one-off entries. The LLM understands any
@@ -108,21 +108,25 @@ func NewBackgroundReviewAgent(app *App, settings ReviewSettings) *BackgroundRevi
 	}
 }
 
-// reviewToolWhitelist is the only set of tools the review agent may call.
+// reviewToolWhitelist is the only set of tools the review agent may call,
+// derived from the dispatcher families (tool_dispatch.go) so new verbs are
+// picked up automatically. Destructive verbs (delete/files) stay excluded.
+func reviewToolWhitelist() map[string]bool {
+	m := make(map[string]bool)
+	for _, root := range []string{"memory", "skill"} {
+		for _, member := range FamilyMembers(root) {
+			if _, op, _ := MemberOp(member); op == "delete" || op == "files" {
+				continue
+			}
+			m[member] = true
+		}
+	}
+	return m
+}
+
 // review_transcript is the hydration tool — it returns the conversation as
 // structured JSON. It is NOT registered in Toolbox; it is executed locally
 // by runReviewLoop, not via Toolbox.Execute.
-var reviewToolWhitelist = map[string]bool{
-	"review_transcript": true,
-	"memory_save":       true,
-	"memory_replace":    true,
-	"memory_search":     true,
-	"memory_list":       true,
-	"skill_list":        true,
-	"skill_search":      true,
-	"skill_read":        true,
-	"skill_save":        true,
-}
 
 // reviewTranscriptToolName is the hydration tool the review agent calls to
 // get the conversation transcript as structured JSON. It is NOT in Toolbox.
@@ -550,7 +554,7 @@ func (r *BackgroundReviewAgent) runReviewLoop(ctx context.Context, adapter AIPro
 		})
 		// Execute each tool call and append results.
 		for _, tc := range resp.ToolCalls {
-			if !reviewToolWhitelist[tc.Name] {
+			if !reviewToolWhitelist()[tc.Name] {
 				messages = append(messages, ChatMessage{
 					Role: "tool",
 					ToolResult: &ToolResult{
@@ -662,7 +666,7 @@ func (r *BackgroundReviewAgent) reviewTools() []ToolDef {
 	out := []ToolDef{reviewTranscriptToolDef}
 	all := r.app.Toolbox.ListTools()
 	for _, t := range all {
-		if reviewToolWhitelist[t.Name] && t.Name != reviewTranscriptToolName {
+		if reviewToolWhitelist()[t.Name] && t.Name != reviewTranscriptToolName {
 			out = append(out, ToolDef{
 				Name:        t.Name,
 				Description: t.Description,

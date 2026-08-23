@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -103,7 +104,7 @@ func TestCompactFamiliesSchemaRequiresOp(t *testing.T) {
 func TestCanonicalizeToolCalls(t *testing.T) {
 	tcs := []domain.ToolCall{
 		{ID: "1", Name: "memory", Args: `{"op":"save","content":"hi"}`},
-		{ID: "2", Name: "memory", Args: `{}`},                 // no op → untouched, fails loud later
+		{ID: "2", Name: "memory", Args: `{}`},                   // no op → untouched, fails loud later
 		{ID: "3", Name: "memory_save", Args: `{"content":"x"}`}, // legacy direct call untouched
 		{ID: "4", Name: "skill", Args: `{"op":"read","name":"x"}`},
 		{ID: "5", Name: "ci_pipeline", Args: `{"op":"list"}`},
@@ -117,5 +118,61 @@ func TestCanonicalizeToolCalls(t *testing.T) {
 	}
 	if tcs[0].Args != `{"op":"save","content":"hi"}` {
 		t.Fatalf("args must be preserved verbatim, got %s", tcs[0].Args)
+	}
+}
+
+func TestLegacyAliasErrorTeachesDispatcherForm(t *testing.T) {
+	err := LegacyAliasError("memory_save")
+	if err == nil {
+		t.Fatal("member name must be rejected at the model boundary")
+	}
+	msg := err.Error()
+	for _, want := range []string{`"memory_save"`, `"memory"`, `"save"`} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q must mention %s", msg, want)
+		}
+	}
+	for _, pass := range []string{"exec", "memory", "skill", "ci_pipeline", "file_read"} {
+		if LegacyAliasError(pass) != nil {
+			t.Fatalf("%q is not a per-op member and must pass through", pass)
+		}
+	}
+}
+
+// Canonicalization is the provenance chokepoint: dispatcher-root emissions
+// are rewritten to per-op names and stay unflagged, while direct per-op
+// emissions (retired hidden aliases) keep their name and get flagged for
+// loud rejection at execution.
+func TestCanonicalizeFlagsLegacyMemberEmissions(t *testing.T) {
+	calls := []domain.ToolCall{
+		{ID: "a", Name: "docs", Args: `{"op":"search","query":"mcp"}`},
+		{ID: "b", Name: "memory_save", Args: `{"content":"x"}`},
+		{ID: "c", Name: "file_read", Args: `{}`},
+	}
+	CanonicalizeToolCalls(calls)
+	if calls[0].Name != "docs_search" || calls[0].LegacyAlias {
+		t.Fatalf("root call must canonicalize without the flag: %+v", calls[0])
+	}
+	if calls[1].Name != "memory_save" || !calls[1].LegacyAlias {
+		t.Fatalf("member emission must keep its name and be flagged: %+v", calls[1])
+	}
+	if calls[2].LegacyAlias {
+		t.Fatal("non-family tools must pass through unflagged")
+	}
+}
+
+// The hidden-alias path is removed: a model tool call that emits a legacy
+// per-op name directly (flagged by CanonicalizeToolCalls) must fail loud
+// with the dispatcher rewrite instead of executing.
+func TestRunOneToolRejectsLegacyPerOpNames(t *testing.T) {
+	app := &App{Logs: &fakeLogStore{}, Bus: NewBus()}
+	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: context.Background()}
+	tc := domain.ToolCall{ID: "tc1", Name: "memory_save", Args: `{"content":"x"}`, LegacyAlias: true}
+	res := app.runOneTool(run, tc, ModelCapabilities{}, domain.Settings{})
+	if res.status != domain.ToolFailed {
+		t.Fatalf("status = %v, want ToolFailed", res.status)
+	}
+	if !strings.Contains(res.output, `"memory"`) || !strings.Contains(res.output, `"save"`) {
+		t.Fatalf("output must teach the dispatcher rewrite, got %q", res.output)
 	}
 }

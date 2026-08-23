@@ -67,7 +67,7 @@ that only matter for a specific task.
 Update primary when the user corrects something that contradicts it (the
 strongest signal), when text is stale or no longer true, or when overlapping
 paragraphs should be consolidated. When a fact is still true but no longer
-frequently needed, save it as a fragment first (`memory_save`), then remove
+frequently needed, save it as a fragment first (`memory` with `op=save`), then remove
 it from primary. Remove speculative entries that never proved useful.
 
 Write in second person ("You are…", "You prefer…"), one paragraph per topic,
@@ -82,7 +82,7 @@ passage, or omit `old_text` to rewrite the entire body.
 Before saving a fact, decide: is this a **static fact** (memory) or a
 **reusable procedure** (skill)?
 
-- Static fact → `memory_save` (fragment) or `memory_replace target=primary`
+- Static fact → `memory` `op=save` (fragment) or `op=replace` `target=primary`
   (primary).
 - Reusable procedure/workflow → use the `skill-creator` skill if available.
   If `skill-creator` is not installed, save the procedure as a fragment
@@ -91,17 +91,17 @@ Before saving a fact, decide: is this a **static fact** (memory) or a
 
 ## Memory rules
 
-- Use `memory_save` to save new facts as fragments. Pick the right category:
+- Use `memory` with `op=save` to save new facts as fragments. Pick the right category:
   - `project` for architecture, repo policies, and environment details tied
     to the workspace.
   - `user` for user-profile facts (preferences, communication style,
     habits, persona traits).
   - `task` for task-specific observations.
   - `general` for anything that does not fit the above.
-- Run `memory_search` before saving to avoid duplicates; use `memory_list`
+- Run `memory` `op=search` before saving to avoid duplicates; use `op=list`
   to browse. A redundant fragment is noise the next review must triage.
-- Use `memory_replace` with `target="fragment"` and `id` to update an
-  existing fragment's content. Use `memory_replace` with `target="primary"`
+- Use `memory` with `op=replace`, `target="fragment"` and `id` to update an
+  existing fragment's content. Use `memory` with `op=replace`, `target="primary"`
   to edit the primary document (`old_text` replaces a substring; omitting
   it rewrites the entire body).
 - Do NOT save transient task state, one-off requests, temporary debugging

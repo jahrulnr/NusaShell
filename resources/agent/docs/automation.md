@@ -4,7 +4,7 @@ NusaShell embeds a local CI runner and an automation engine in the same Go proce
 
 ## Workspace pipeline
 
-A repository may include `.nusashell/pipeline.yaml`. `ci_pipeline_read` / `ci.pipelines.read` load that file. `ci_run` with a `workspace` starts it. Jobs form a DAG via `needs`. Independent jobs run in parallel on the local executor (this machine, host access).
+A repository may include `.nusashell/pipeline.yaml`. `ci_pipeline` with `op=read` (permission path `ci.pipelines.read`) loads that file. `ci_run` with a `workspace` starts it. Jobs form a DAG via `needs`. Independent jobs run in parallel on the local executor (this machine, host access).
 
 ## Saved automations
 

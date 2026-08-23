@@ -17,7 +17,6 @@ import (
 
 const (
 	maxConcurrentImageGens   = 2
-	maxGeneratedImageBytes   = 8 * 1024 * 1024
 	maxGenerateImageN        = 4
 	maxReferencedImages      = 5
 	imageGenUnconfiguredHint = "No image generation model is configured. Ask the user to pick an image model in Settings → Image generation."
@@ -213,37 +212,34 @@ func (a *App) persistGeneratedImages(conversationID, toolCallID string, result *
 		if len(img.Bytes) == 0 {
 			return nil, nil, fmt.Errorf("generated image %d is empty", i+1)
 		}
-		if len(img.Bytes) > maxGeneratedImageBytes {
-			return nil, nil, fmt.Errorf("generated image is larger than 8 MiB (%d bytes) and was not saved", len(img.Bytes))
-		}
-		media := strings.TrimSpace(img.MediaType)
-		if sniffed := sniffMediaType(img.Bytes); sniffed != "" {
-			if media == "" || media == "application/octet-stream" {
-				media = sniffed
-			} else if sniffed != media {
-				return nil, nil, fmt.Errorf("generated image media type %q does not match file signature %q", media, sniffed)
-			}
-		}
-		if !allowedGeneratedMediaType(media) {
-			if media == "" {
-				media = "unknown"
-			}
-			return nil, nil, fmt.Errorf("unsupported generated image type %s; NusaShell saves PNG, JPEG, or WebP", media)
-		}
-		name := generatedImageName(toolCallID, i, len(result.Images), extForGeneratedMedia(media))
-		path, err := a.Attachments.WriteBytes(conversationID, name, img.Bytes)
+		att, path, err := a.saveGeneratedMedia(conversationID,
+			generatedImageBaseName(toolCallID, i, len(result.Images)), "image", img.Bytes, false)
 		if err != nil {
 			return nil, nil, err
 		}
-		atts = append(atts, domain.Attachment{
-			Type:      "image",
-			Name:      name,
-			MediaType: media,
-			FilePath:  path,
-		})
+		switch att.MediaType {
+		case "image/png", "image/jpeg", "image/webp":
+		default:
+			return nil, nil, fmt.Errorf("unsupported generated image type %s; NusaShell saves PNG, JPEG, or WebP", att.MediaType)
+		}
+		atts = append(atts, att)
 		paths = append(paths, path)
 	}
 	return atts, paths, nil
+}
+
+// generatedImageBaseName builds the attachment base name for the index-th
+// of total generated images ("gen-<id>" or "gen-<id>-<n>"); the extension
+// comes from the sniffed media type in saveGeneratedMedia.
+func generatedImageBaseName(toolCallID string, index, total int) string {
+	id := sanitizeFilePart(toolCallID)
+	if id == "" {
+		id = "image"
+	}
+	if total > 1 {
+		return fmt.Sprintf("gen-%s-%d", id, index+1)
+	}
+	return "gen-" + id
 }
 
 func allowedGeneratedMediaType(mediaType string) bool {
@@ -253,28 +249,6 @@ func allowedGeneratedMediaType(mediaType string) bool {
 	default:
 		return false
 	}
-}
-
-func extForGeneratedMedia(mediaType string) string {
-	switch strings.ToLower(mediaType) {
-	case "image/jpeg":
-		return ".jpg"
-	case "image/webp":
-		return ".webp"
-	default:
-		return ".png"
-	}
-}
-
-func generatedImageName(toolCallID string, index, total int, ext string) string {
-	id := sanitizeFilePart(toolCallID)
-	if id == "" {
-		id = "image"
-	}
-	if total > 1 {
-		return fmt.Sprintf("gen-%s-%d%s", id, index+1, ext)
-	}
-	return fmt.Sprintf("gen-%s%s", id, ext)
 }
 
 func sanitizeFilePart(value string) string {

@@ -21,8 +21,11 @@ Three small pieces, one source of truth (`application/tool_dispatch.go`):
    names without knowing dispatchers exist.
 3. **Execution routing** — `Toolbox.Execute` resolves roots to per-op cases
    via `DispatchCanonical`. Missing or unknown ops fail loud with the valid
-   list (self-describing error). The legacy per-op names stay executable as
-   hidden aliases for history replay, review agents, and pipeline steps.
+   list (self-describing error). The per-op names are internal canonical
+   targets only (hydration checkpoints, review-agent replay): a model call
+   that emits one directly is rejected loud with the exact `{root, op}`
+   rewrite at the agent tool executor (`LegacyAliasError`) — the
+   hidden-alias path was removed.
 
 Args are preserved verbatim; the redundant `op` key is ignored by the legacy
 handlers' strict structs.

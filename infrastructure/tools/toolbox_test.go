@@ -1133,14 +1133,21 @@ func TestMcpUnregister(t *testing.T) {
 	}
 }
 
-func TestListToolsIncludesAutomation(t *testing.T) {
-	tb := testToolbox(nil, nil, &stubMCP{})
+// advertisedNames mirrors the provider-facing roster: per-verb dispatcher
+// members are compacted into family roots (see tool_dispatch.go).
+func advertisedNames(tb *Toolbox) map[string]bool {
 	names := map[string]bool{}
-	for _, ti := range tb.ListTools() {
+	for _, ti := range application.CompactFamilies(append(tb.ListTools(), application.DispatcherToolInfos()...)) {
 		names[ti.Name] = true
 	}
+	return names
+}
+
+func TestListToolsIncludesAutomation(t *testing.T) {
+	tb := testToolbox(nil, nil, &stubMCP{})
+	names := advertisedNames(tb)
 	for _, want := range []string{
-		"ci_pipeline_list", "ci_pipeline_read", "ci_pipeline_validate", "ci_run",
+		"ci_pipeline", "ci_run",
 		"ci_run_status", "ci_logs", "ci_cancel",
 		"automation_list", "automation_read", "automation_validate", "automation_create",
 		"automation_enable", "automation_disable", "automation_status",
@@ -1194,11 +1201,8 @@ func TestMemorySaveExactDuplicateIsIdempotent(t *testing.T) {
 
 func TestListToolsIncludesMemoryReplace(t *testing.T) {
 	tb := testToolbox(nil, nil, &stubMCP{})
-	names := map[string]bool{}
-	for _, ti := range tb.ListTools() {
-		names[ti.Name] = true
-	}
-	for _, want := range []string{"memory_save", "memory_replace", "memory_search", "memory_list", "memory_delete"} {
+	names := advertisedNames(tb)
+	for _, want := range []string{"memory"} {
 		if !names[want] {
 			t.Fatalf("ListTools missing %q", want)
 		}
@@ -1653,7 +1657,7 @@ func TestAgentToolsDocMatchesBuiltInRoster(t *testing.T) {
 	// (docs/design/tool-dispatchers.md). Hidden aliases stay executable but
 	// are intentionally not required as table rows.
 	actual := map[string]bool{}
-	for _, tool := range application.CompactFamilies(tb.ListTools()) {
+	for _, tool := range application.CompactFamilies(append(tb.ListTools(), application.DispatcherToolInfos()...)) {
 		actual[tool.Name] = true
 		if !documented[tool.Name] {
 			t.Errorf("agent tools documentation missing %q", tool.Name)
@@ -1663,10 +1667,7 @@ func TestAgentToolsDocMatchesBuiltInRoster(t *testing.T) {
 		"web_answer": true, "subagent": true, "subagent_steer": true,
 		"subagent_stop": true, "subagent_wait": true,
 		"artifact_create": true, "artifact_update": true, "artifact_read": true,
-		"artifact_list": true, "artifact_delete": true,
-		"generate_speech": true,
-		"generate_video":  true,
-		"generate_image":  true,
+		"artifact_list": true, "artifact_delete": true, "generate_media": true,
 	}
 	for name := range documented {
 		if !actual[name] && !conditional[name] {
@@ -1813,14 +1814,14 @@ func (m *memToolboxSettings) Set(s domain.Settings) error { m.s = s; return nil 
 func TestListToolsGenerateImageIsConditional(t *testing.T) {
 	tb := testToolbox(nil, nil, &stubMCP{})
 	for _, ti := range tb.ListTools() {
-		if ti.Name == "generate_image" {
-			t.Fatal("generate_image must be omitted when image settings are empty")
+		if ti.Name == "generate_media" {
+			t.Fatal("generate_media must be omitted when no media backend is configured")
 		}
 	}
 	tb.Settings = &memToolboxSettings{s: domain.Settings{ImageProviderID: "or", ImageModelID: "openai/gpt-image-2"}}
 	found := false
 	for _, ti := range tb.ListTools() {
-		if ti.Name == "generate_image" {
+		if ti.Name == "generate_media" {
 			found = true
 			if !strings.Contains(ti.Description, "do not re-render") {
 				t.Fatalf("description missing UI hint: %s", ti.Description)
@@ -1828,6 +1829,6 @@ func TestListToolsGenerateImageIsConditional(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("generate_image missing when image provider is configured")
+		t.Fatal("generate_media missing when image provider is configured")
 	}
 }

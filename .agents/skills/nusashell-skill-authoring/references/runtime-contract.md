@@ -36,8 +36,8 @@ editable only within the registry's size limits.
 
 ## Tool and provenance behavior
 
-The shell exposes `skill_list`, `skill_search`, and `skill_read` for discovery
-and context loading. `skill_manage` handles agent-owned mutation; create/edit
+The shell exposes the `skill` dispatcher (`op=list|search|read|files`) for
+discovery and context loading. `skill_manage` handles agent-owned mutation; create/edit
 may be approval-staged when the runtime enables that policy. Jobs/background
 runs are not allowed to mutate skills.
 

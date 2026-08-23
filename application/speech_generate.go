@@ -1,7 +1,6 @@
 package application
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -11,7 +10,6 @@ import (
 )
 
 const (
-	maxTTSBytes     = 20 << 20 // 20 MB audio cap
 	ttsUnconfigured = "No speech generation model is configured. Ask the user to pick one in Settings → Speech generation, or install the offline piper model."
 )
 
@@ -21,6 +19,7 @@ const (
 func (a *App) executeGenerateSpeech(run *TurnRun, toolCall domain.ToolCall, settings domain.Settings) (string, []domain.Attachment, error) {
 	var args struct {
 		Text   string  `json:"text"`
+		Prompt string  `json:"prompt"`
 		Voice  string  `json:"voice"`
 		Format string  `json:"format"`
 		Speed  float64 `json:"speed"`
@@ -29,6 +28,9 @@ func (a *App) executeGenerateSpeech(run *TurnRun, toolCall domain.ToolCall, sett
 		return "error: invalid arguments", nil, fmt.Errorf("invalid args: %w", err)
 	}
 	text := strings.TrimSpace(args.Text)
+	if text == "" {
+		text = strings.TrimSpace(args.Prompt)
+	}
 	if text == "" {
 		return "error: text is required", nil, fmt.Errorf("text is required")
 	}
@@ -76,24 +78,10 @@ func (a *App) persistTTSText(run *TurnRun, toolCallID string, result *TTSResult)
 	if result == nil || len(result.Audio) == 0 {
 		return failGenerateSpeech("speech synthesizer returned no audio")
 	}
-	if len(result.Audio) > maxTTSBytes {
-		return failGenerateSpeech(fmt.Sprintf("synthesized audio exceeds %d bytes", maxTTSBytes))
-	}
-	if a.Attachments == nil {
-		return failGenerateSpeech("attachment store is not configured")
-	}
-	ext := result.Ext
-	if ext == "" {
-		ext = "mp3"
-	}
-	name := fmt.Sprintf("speech_%s.%s", time.Now().Format("20060102_150405"), ext)
-	path, err := a.Attachments.WriteBytes(run.ConversationID, name, result.Audio)
+	att, path, err := a.saveGeneratedMedia(run.ConversationID,
+		fmt.Sprintf("speech_%s", time.Now().Format("20060102_150405")), "audio", result.Audio, true)
 	if err != nil {
 		return failGenerateSpeech(err.Error())
-	}
-	att := domain.Attachment{
-		Type: "audio", Name: name, MediaType: result.MediaType,
-		DataURL: fmt.Sprintf("data:%s;base64,%s", result.MediaType, base64.StdEncoding.EncodeToString(result.Audio)), FilePath: path,
 	}
 	meta := map[string]any{
 		"status": "completed", "provider": result.Provider, "model": result.Model,

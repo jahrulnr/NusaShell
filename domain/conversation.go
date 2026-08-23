@@ -65,6 +65,12 @@ type ToolCall struct {
 	// images visible. Generated images persist FilePath as the source of
 	// truth and omit DataURL to keep conversation JSON small.
 	OutputAttachments []Attachment
+	// LegacyAlias marks a tool call whose name is a retired per-op
+	// dispatcher member (e.g. "memory_save") emitted directly by the
+	// model. Set by CanonicalizeToolCalls before persistence; execution
+	// rejects it loud with the dispatcher rewrite. Not persisted — the
+	// recorded history keeps exactly what the model emitted.
+	LegacyAlias bool `json:"-"`
 }
 
 // StepType identifies a temporal segment within a multi-round assistant turn.

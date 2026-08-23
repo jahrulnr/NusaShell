@@ -10,4 +10,4 @@ meta-tools, memory, or skills. Give a compact self-contained brief: goal,
 relevant absolute paths, necessary constraints, and the expected artifact.
 `count` (1–6) fans the same brief out to parallel sessions. After it returns,
 inspect its summary and verify any changed artifact. For detailed workflow
-guidance, `docs_read` the `agent-subagents` page.
+guidance, use `docs` with `op=read` for the `agent-subagents` page.

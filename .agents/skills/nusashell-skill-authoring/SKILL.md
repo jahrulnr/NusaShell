@@ -44,8 +44,8 @@ toolbox.
 
 ## NusaShell contract
 
-- `SKILL.md` is the portable entry point. `skill_list`/`skill_search` show
-  summaries; `skill_read` loads the body or a support file.
+- `SKILL.md` is the portable entry point. `skill(op=list|search)` shows
+  summaries; `skill(op=read|files)` loads the body or a support file.
 - Supported support roots are only `references/`, `templates/`, `scripts/`,
   and `assets/`.
 - `skill_manage` is for agent-owned create/edit/write/delete operations and

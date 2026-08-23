@@ -119,23 +119,8 @@ func (t *Toolbox) webAnswerSearcher() *searchwire.Searcher {
 
 func (t *Toolbox) ListTools() []application.ToolInfo {
 	tools := []application.ToolInfo{
-		{Name: "skill_list", Description: "List available skills with their names and descriptions.", InputSchema: obj("object", props("limit", intSchema("Max results, default 100")))},
-		{Name: "skill_search", Description: "Search installed skills by name or description (case-insensitive substring match).", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 50")), "query")},
-		{Name: "skill_read", Description: "Read a text file inside an installed skill (default SKILL.md). Pass path for support files (e.g. references/x.md) and offset/max_chars for pagination of long files.", InputSchema: obj("object", props("name", str("Skill id (from skill_list or skill_search)"), "path", str("Relative file path inside the skill folder; defaults to SKILL.md"), "offset", intSchema("Character offset for pagination (default 0)"), "max_chars", intSchema("Maximum characters to return (default 20000, max 100000)")), "name")},
-		{Name: "skill_save", Description: "Create or update a skill, or write a support file inside an existing skill. When path is set, write content to that file (e.g. references/errors.md, templates/config.yaml, scripts/verify.sh) — the skill must already exist. When path is omitted, create or update the skill's SKILL.md body and metadata (name, description). Skills should be reusable procedures or domain knowledge, not one-off task notes.", InputSchema: obj("object", props("id", str("Existing skill id to update (omit to create new; ignored when path is set)"), "name", str("Skill name (lowercase with hyphens, matches folder name)"), "description", str("Short description (max 1024 chars); ignored when path is set"), "path", str("Relative file path inside the skill folder (e.g. references/x.md); defaults to SKILL.md when omitted"), "content", str("Full file content")), "name", "content")},
-		{Name: "skill_files", Description: "List the files inside an installed skill folder (SKILL.md + support files) with size and editability, to discover references/guides before skill_read.", InputSchema: obj("object", props("name", str("Skill id")), "name")},
-		{Name: "memory_save", Description: "Save a fact to long-term memory as a searchable fragment. Exact normalized duplicates are idempotent and return the existing fragment instead of creating a copy. Fragments are unlimited and indexed by content + metadata (category, project, task, tags). Use memory_search to retrieve them later.", InputSchema: obj("object", props("content", str("Fact or observation to remember"), "category", strEnum("Memory category", "project", "user", "task", "general"), "project", str("Optional project/workspace label"), "task", str("Optional task label"), "tags", arr("Optional tags for filtering")), "content")},
-		{Name: "memory_replace", Description: "Update memory. For primary (target=\"primary\"): replace a substring of the primary document body with new content, or rewrite the entire body by omitting old_text. For fragments (target=\"fragment\"): update a fragment by id.", InputSchema: obj("object", props("target", strEnum("Update target: \"primary\" (always-injected document) or \"fragment\" (searchable archive)", "primary", "fragment"), "old_text", str("For primary: substring of the document to replace (omit to rewrite the entire body)"), "id", str("For fragment: fragment id to update"), "content", str("New content")), "target", "content")},
-		{Name: "memory_search", Description: "Search memory fragments by content (BM25) with optional metadata filters (category, project, task, tags). Returns ranked results with scores.", InputSchema: obj("object", props("query", str("Search query"), "category", strEnum("Optional category filter", "project", "user", "task", "general"), "project", str("Optional project filter"), "task", str("Optional task filter"), "tags", arr("Optional tags filter (ALL must match)"), "limit", intSchema("Max results, default 20")), "query")},
-		{Name: "memory_list", Description: "List memory entries. Target \"primary\" lists the always-injected working set; target \"fragments\" lists the searchable archive (with optional metadata filters).", InputSchema: obj("object", props("target", strEnum("List target: \"primary\" or \"fragments\" (default)", "primary", "fragments"), "category", strEnum("Optional fragment category filter", "project", "user", "task", "general"), "project", str("Optional fragment project filter"), "limit", intSchema("Max fragment results, default 50")))},
-		{Name: "memory_delete", Description: "Delete a memory fragment by id.", InputSchema: obj("object", props("id", str("Fragment id")), "id")},
 		{Name: "todo", Description: "Manage the conversation task checklist. Two modes: `replace` (default, full-replace Claude TodoWrite style — empty items clears the list) and `patch` (merge by ID — update status/content of existing items, add new items, keep untouched items unchanged). Use `patch` to update a single item's status without re-emitting the full list (saves tokens). In patch mode, `content` may be empty (meaning \"don't change content, only update status\"). The user can delete items from the UI — treat deleted items as gone and do not re-add them. The optional `brief` argument is a living planning document that survives compaction and is re-injected via hydration. Format: markdown with required sections — `## Objective` (what the user asked for, in their words), `## Done when` (acceptance criteria — what the finished result looks like) — and optional sections that grow as the task progresses: `## Findings` (what you discovered during exploration: paths, line numbers, relevant files), `## Approach` (key steps/strategy). Set the brief at the start of a task; update it as findings emerge and the approach solidifies (e.g. after exploration, add concrete paths/lines to Findings; before execution, refine Approach). The current hydration checkpoint is reused until compaction; the brief remains in tool history and is included in the fresh post-compaction checkpoint. Legacy `goal` arg is accepted for backward compat and mapped to `brief`.", InputSchema: obj("object", props("items", arrObj("Todo items (max 50). In replace mode: full list. In patch mode: only items to update/add.", props("id", str("Stable item id (unique within the list)"), "content", str("Short task description (max 500 chars). Required in replace mode; optional in patch mode (empty = keep existing)."), "status", strEnum("Item status; prefer exactly one in_progress at a time", "pending", "in_progress", "completed")), "id", "content", "status"), "mode", strEnum("Update mode: replace (default, full-replace) or patch (merge by ID)", "replace", "patch"), "brief", str("Living planning document. Required markdown sections: `## Objective` (user intent in their words), `## Done when` (acceptance criteria). Optional, grows over time: `## Findings` (paths, line numbers, relevant files discovered), `## Approach` (key steps/strategy). Set at task start; update as findings emerge. Survives compaction. Max ~10000 tokens.")), "items")},
 		{Name: "ask_question", Description: "Pause and ask the user a structured clarifying question before continuing. Use only for genuine decisions the user must make — not for things you can figure out yourself. The user can answer via options or free text (when allowed). The turn blocks until the user answers or cancels.", InputSchema: obj("object", props("question", str("The question to show the user"), "options", arrObj("Selectable choices (1-8). Mark one default when possible.", props("id", str("Stable option id"), "label", str("Short option label"), "description", str("Optional one-line explanation"), "default", obj("boolean", nil), "icon", str("Optional emoji or short icon glyph"), "image", str("Optional image URL or compact data URI")), "id", "label"), "allow_free_text", obj("boolean", nil), "multi_select", obj("boolean", nil)), "question", "options")},
-		{Name: "docs_search", Description: "Search the NusaShell documentation corpus.", InputSchema: obj("object", props("query", str("Search query"), "limit", intSchema("Max results, default 10")), "query")},
-		{Name: "docs_read", Description: "Read a documentation page by id (see docs_search results).", InputSchema: obj("object", props("id", str("Documentation page id")), "id")},
-		{Name: "ci_pipeline_list", Description: "List pipeline definitions in the current workspace (.nusashell/pipeline.yaml).", InputSchema: obj("object", props("workspace", str("Workspace path")))},
-		{Name: "ci_pipeline_read", Description: "Read and validate the workspace pipeline definition.", InputSchema: obj("object", props("workspace", str("Workspace path")))},
-		{Name: "ci_pipeline_validate", Description: "Validate pipeline YAML and report structured errors.", InputSchema: obj("object", props("yaml", str("Pipeline YAML"), "workspace", str("Workspace path")))},
 		{Name: "ci_run", Description: "Start a pipeline or saved automation. Set async=true to return immediately with a run_id while the pipeline runs in the background; then use ci_wait or ci_run_status to check on it. Without async, the call blocks until the pipeline finishes.", InputSchema: obj("object", props("workspace", str("Workspace path for .nusashell/pipeline.yaml"), "workflow_id", str("Saved automation id"), "async", obj("boolean", nil)))},
 		{Name: "ci_wait", Description: "Block until a pipeline run reaches a terminal state (done, failed, cancelled, blocked) or the timeout expires. Use after ci_run with async=true. Returns the final run status and summary.", InputSchema: obj("object", props("run_id", str("Run id"), "timeout_ms", intSchema("Max wait in milliseconds (default 300000 = 5 min, max 3600000 = 1 h)")), "run_id")},
 		{Name: "ci_run_status", Description: "Return run status, DAG summary, and failed jobs. Use this after ci_run; do not fetch full logs unless a job failed.", InputSchema: obj("object", props("run_id", str("Run id")), "run_id")},
@@ -205,46 +190,29 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 			InputSchema: obj("object", props("question", str("Question to answer"), "provider", str("Optional provider: "+providerList)), "question"),
 		})
 	}
-	if t.imageGenerationConfigured() {
+	if t.mediaGenerationAnyConfigured() {
 		tools = append(tools, application.ToolInfo{
-			Name:        "generate_image",
-			Description: "Generate an image from a text prompt (and optional reference images for editing). The generated image is automatically displayed to the user in the UI — do not re-render it as Markdown. Use referenced_image_paths (absolute paths, e.g. from earlier generate_image results or attachments) for image-to-image editing.",
+			Name:        "generate_media",
+			Description: "Generate media from a prompt and save it for the user to view/play. media_type selects the generator: \"image\" (text\u2192PNG/JPEG/WebP; referenced images enable editing), \"speech\" (text\u2192spoken audio), \"video\" (text\u2192short mp4 clip; async upstream \u2014 tens of seconds to minutes is expected). Only modes configured in Settings can serve a request. The result is already delivered to the user \u2014 do not re-render it as Markdown.",
 			InputSchema: obj("object", props(
-				"prompt", str("Text description of the image to generate"),
-				"size", strEnum("Output size", "auto", "1024x1024", "1536x1024", "1024x1536"),
-				"quality", strEnum("Rendering quality", "auto", "low", "medium", "high"),
-				"background", strEnum("Background treatment", "auto", "transparent", "opaque"),
-				"n", map[string]any{"type": "integer", "description": "Number of images to generate (1-4, default 1).", "minimum": 1, "maximum": 4},
+				"media_type", strEnum("Which generator to use", "image", "speech", "video"),
+				"prompt", str("Text input for the chosen generator: scene description (image/video; max 4000 chars for video) or the text to speak aloud (max 20000 chars)."),
+				"size", strEnum("Image only: output size", "auto", "1024x1024", "1536x1024", "1024x1536"),
+				"quality", strEnum("Image only: rendering quality", "auto", "low", "medium", "high"),
+				"background", strEnum("Image only: background treatment", "auto", "transparent", "opaque"),
+				"n", map[string]any{"type": "integer", "description": "Image only: number of images to generate (1-4, default 1).", "minimum": 1, "maximum": 4},
 				"referenced_image_paths", map[string]any{
 					"type":        "array",
-					"description": "Absolute file paths of reference images for editing (from earlier generate_image file_path values or user attachments). Max 5.",
+					"description": "Image only: absolute paths of source images for image-to-image editing (from earlier results or attachments). Max 5.",
 					"items":       map[string]any{"type": "string"},
 					"maxItems":    5,
 				},
-			), "prompt"),
-		})
-	}
-	if t.videoGenerationConfigured() {
-		tools = append(tools, application.ToolInfo{
-			Name:        "generate_video",
-			Description: "Generate a short video from a text prompt and save it as an mp4 the user can play. Generation runs asynchronously upstream and typically takes tens of seconds to a few minutes — expected, not an error. Use for visual clips, not for answering questions.",
-			InputSchema: obj("object", props(
-				"prompt", str("Visual description of the clip to generate (max 4000 characters)"),
-				"duration_seconds", map[string]any{"type": "integer", "description": "Clip length in seconds. Provider minimums apply and are reported verbatim on rejection (e.g. 'Supported durations: 4, 6, 8s'). Omit for provider default."},
-				"resolution", strEnum("Output resolution", "480p", "720p", "1080p"),
-			), "prompt"),
-		})
-	}
-	if t.speechGenerationConfigured() {
-		tools = append(tools, application.ToolInfo{
-			Name:        "generate_speech",
-			Description: "Generate spoken audio from text (text-to-speech) and save it as an audio file the user can play. Supports mp3, wav, and opus. Use for reading text aloud, voice notes, or narration.",
-			InputSchema: obj("object", props(
-				"text", str("The text to speak aloud (max 20000 characters)"),
-				"voice", str("Optional voice id (provider-specific, e.g. alloy; offline: e.g. id_ID-news_tts-medium). Omit for default."),
-				"format", strEnum("Audio format", "mp3", "wav", "opus"),
-				"speed", map[string]any{"type": "number", "description": "Speech speed 0.25-4.0 (default 1.0)."},
-			), "text"),
+				"voice", str("Speech only: voice id (provider-specific, e.g. alloy). Omit for default."),
+				"format", strEnum("Speech only: audio format", "mp3", "wav", "opus"),
+				"speed", map[string]any{"type": "number", "description": "Speech only: speed 0.25-4.0 (default 1.0)."},
+				"duration_seconds", map[string]any{"type": "integer", "description": "Video only: clip length in seconds. Provider minimums apply and are reported verbatim on rejection (e.g. 'Supported durations: 4, 6, 8s')."},
+				"resolution", strEnum("Video only: output resolution", "480p", "720p", "1080p"),
+			), "media_type", "prompt"),
 		})
 	}
 	// Native file CRUD + exec built-ins.
@@ -253,12 +221,25 @@ func (t *Toolbox) ListTools() []application.ToolInfo {
 	return tools
 }
 
+// mediaGenerationAnyConfigured reports whether at least one generate_media
+// mode has a configured backend (the unified tool is advertised once for all
+// modes; unconfigured modes are rejected at execution time with guidance).
+func (t *Toolbox) mediaGenerationAnyConfigured() bool {
+	return t.imageGenerationConfigured() || t.speechGenerationConfigured() || t.videoGenerationConfigured()
+}
+
+// mediaGenerationConfigured is the shared gate for all generate_* tools:
+// both provider and model must be set (non-empty).
+func mediaGenerationConfigured(providerID, modelID string) bool {
+	return strings.TrimSpace(providerID) != "" && strings.TrimSpace(modelID) != ""
+}
+
 func (t *Toolbox) imageGenerationConfigured() bool {
 	if t.Settings == nil {
 		return false
 	}
 	s := t.Settings.Get()
-	return strings.TrimSpace(s.ImageProviderID) != "" && strings.TrimSpace(s.ImageModelID) != ""
+	return mediaGenerationConfigured(s.ImageProviderID, s.ImageModelID)
 }
 
 // speechGenerationConfigured reports whether generate_speech can serve:
@@ -269,7 +250,7 @@ func (t *Toolbox) speechGenerationConfigured() bool {
 		return false
 	}
 	s := t.Settings.Get()
-	if strings.TrimSpace(s.TTSProviderID) != "" && strings.TrimSpace(s.TTSModelID) != "" {
+	if mediaGenerationConfigured(s.TTSProviderID, s.TTSModelID) {
 		return true
 	}
 	return t.SpeechOfflineAvailable
@@ -282,7 +263,7 @@ func (t *Toolbox) videoGenerationConfigured() bool {
 		return false
 	}
 	s := t.Settings.Get()
-	return strings.TrimSpace(s.VideoProviderID) != "" && strings.TrimSpace(s.VideoModelID) != ""
+	return mediaGenerationConfigured(s.VideoProviderID, s.VideoModelID)
 }
 
 func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (string, error) {
@@ -300,9 +281,11 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 	}
 	// Dispatcher families (advertised roots: skill, memory, docs,
 	// ci_pipeline) route to their canonical per-op implementations here.
-	// The per-op cases below stay reachable under their legacy names as
-	// hidden aliases — not advertised, still executable. Missing/unknown
-	// ops fail loud with the valid list.
+	// The per-op cases below are internal canonical targets (hydration
+	// checkpoints and review replay call them directly); model calls may
+	// only use the root form — a direct member name is rejected loud at
+	// the agent boundary (LegacyAliasError). Missing/unknown ops fail
+	// loud with the valid list.
 	if application.IsDispatchRoot(name) {
 		canon, err := application.DispatchCanonical(name, argsJSON)
 		if err != nil {
@@ -372,7 +355,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", fmt.Errorf("invalid args: %w", err)
 		}
 		if strings.TrimSpace(args.Name) == "" {
-			return "", fmt.Errorf("name is required (use skill_list to see available skills)")
+			return "", fmt.Errorf("name is required (use skill with op=list to see available skills)")
 		}
 		if r, ok := t.Skills.(interface {
 			ReadFile(id, ownedBy, path string, offset, maxChars int) (*domain.SkillFile, error)
@@ -388,7 +371,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 							return s.Content, nil
 						}
 					}
-					return "", fmt.Errorf("skill %q not found; use skill_list or skill_search to see available skills", args.Name)
+					return "", fmt.Errorf("skill %q not found; use skill with op=list or op=search to see available skills", args.Name)
 				}
 				return "", fmt.Errorf("skill_read: %w", err)
 			}
@@ -418,7 +401,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				return yamlMD(map[string]any{"skill": s.Name, "source": "legacy"}, s.Content), nil
 			}
 		}
-		return "", fmt.Errorf("skill %q not found; use skill_list or skill_search to see available skills", args.Name)
+		return "", fmt.Errorf("skill %q not found; use skill with op=list or op=search to see available skills", args.Name)
 
 	case name == "skill_files":
 		var args struct {
@@ -719,7 +702,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		}
 		doc, err := t.Docs.Read(args.ID)
 		if err != nil {
-			return "", fmt.Errorf("document %q not found; use docs_search first", args.ID)
+			return "", fmt.Errorf("document %q not found; use docs with op=search first", args.ID)
 		}
 		return yamlMD(map[string]any{"id": doc.ID, "title": doc.Title, "path": doc.Path}, doc.Content), nil
 

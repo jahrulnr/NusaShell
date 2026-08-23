@@ -24,7 +24,7 @@ func TestAgentTurnStreamsOverSSE(t *testing.T) {
 
 	// script: round 1 makes a tool call, round 2 streams the final text
 	h.llm.setRounds([][]llmStep{
-		{{Tool: &llmToolCall{ID: "call_1", Name: "docs_search", Args: map[string]any{"query": "mcp"}}}},
+		{{Tool: &llmToolCall{ID: "call_1", Name: "docs", Args: map[string]any{"op": "search", "query": "mcp"}}}},
 		{{Text: "The docs explain MCP servers."}},
 	})
 
@@ -461,7 +461,7 @@ func TestAgentTurnSteer(t *testing.T) {
 	// Round 2: final text response (after steer is injected).
 	// Round 3: final text response (in case the steer triggers another tool round).
 	h.llm.setRounds([][]llmStep{
-		{{Tool: &llmToolCall{ID: "call_1", Name: "docs_search", Args: map[string]any{"query": "test"}}}},
+		{{Tool: &llmToolCall{ID: "call_1", Name: "docs", Args: map[string]any{"op": "search", "query": "test"}}}},
 		{{Text: "Done after steer."}},
 	})
 
@@ -793,7 +793,7 @@ func TestAgentTurnAnthropic(t *testing.T) {
 	convID := h.newConversation(t)
 
 	h.llm.setRounds([][]llmStep{
-		{{Tool: &llmToolCall{ID: "toolu_1", Name: "docs_search", Args: map[string]any{"query": "skills"}}}},
+		{{Tool: &llmToolCall{ID: "toolu_1", Name: "docs", Args: map[string]any{"op": "search", "query": "skills"}}}},
 		{{Text: "Claude finished."}},
 	})
 	h.rpcOK(t, "agent.turns.start", map[string]any{
@@ -866,7 +866,7 @@ func TestAgentTurnResponses(t *testing.T) {
 	convID := h.newConversation(t)
 
 	h.llm.setRounds([][]llmStep{
-		{{Tool: &llmToolCall{ID: "call_r1", Name: "docs_search", Args: map[string]any{"query": "mcp"}}}},
+		{{Tool: &llmToolCall{ID: "call_r1", Name: "docs", Args: map[string]any{"op": "search", "query": "mcp"}}}},
 		{{Text: "Responses done."}},
 	})
 	h.rpcOK(t, "agent.turns.start", map[string]any{
@@ -973,7 +973,7 @@ func TestAgentTurnToolFailure(t *testing.T) {
 	convID := h.newConversation(t)
 
 	h.llm.setRounds([][]llmStep{
-		{{Tool: &llmToolCall{ID: "call_bad", Name: "skill_read", Args: map[string]any{"name": "missing-skill"}}}},
+		{{Tool: &llmToolCall{ID: "call_bad", Name: "skill", Args: map[string]any{"op": "read", "name": "missing-skill"}}}},
 		{{Text: "done despite failure"}},
 	})
 	h.rpcOK(t, "agent.turns.start", map[string]any{
@@ -1063,7 +1063,7 @@ func TestAgentTurnMaxToolRounds(t *testing.T) {
 	rounds := make([][]llmStep, 0, 3)
 	for i := 0; i < 2; i++ {
 		rounds = append(rounds, []llmStep{{
-			Tool: &llmToolCall{ID: fmt.Sprintf("call_%d", i), Name: "docs_search", Args: map[string]any{"query": "mcp"}},
+			Tool: &llmToolCall{ID: fmt.Sprintf("call_%d", i), Name: "docs", Args: map[string]any{"op": "search", "query": "mcp"}},
 		}})
 	}
 	rounds = append(rounds, []llmStep{{Text: "Tool limit reached; here is the final answer."}})
@@ -1236,7 +1236,7 @@ func TestAgentTurnPartialStreamContinuationDoesNotConsumeToolRound(t *testing.T)
 	h.llm.truncateNextOpenAIStream()
 	h.llm.setRounds([][]llmStep{
 		{{Text: "The answer starts here. "}},
-		{{Tool: &llmToolCall{ID: "call_after_recovery", Name: "docs_search", Args: map[string]any{"query": "mcp"}}}},
+		{{Tool: &llmToolCall{ID: "call_after_recovery", Name: "docs", Args: map[string]any{"op": "search", "query": "mcp"}}}},
 		{{Text: "The tool result completes the answer."}},
 	})
 	requestsBefore := h.llm.requestCount()
@@ -1316,11 +1316,11 @@ func TestAgentTurnReasoningInterleaved(t *testing.T) {
 	h.llm.setRounds([][]llmStep{
 		{
 			{Reasoning: "I should search the docs first."},
-			{Tool: &llmToolCall{ID: "call_r1", Name: "docs_search", Args: map[string]any{"query": "mcp"}}},
+			{Tool: &llmToolCall{ID: "call_r1", Name: "docs", Args: map[string]any{"op": "search", "query": "mcp"}}},
 		},
 		{
 			{Reasoning: "Now I need to list skills."},
-			{Tool: &llmToolCall{ID: "call_r2", Name: "skill_list", Args: map[string]any{}}},
+			{Tool: &llmToolCall{ID: "call_r2", Name: "skill", Args: map[string]any{"op": "list"}}},
 		},
 		{
 			{Reasoning: "I have enough info to answer."},
@@ -1636,7 +1636,7 @@ func TestTurnContextTokensIsLastRoundNotSum(t *testing.T) {
 	// Round 1 calls a tool; round 2 answers. The fake provider reports
 	// prompt_tokens=10, completion_tokens=5 per request.
 	h.llm.setRounds([][]llmStep{
-		{{Tool: &llmToolCall{ID: "call_1", Name: "docs_search", Args: map[string]any{"query": "mcp"}}}},
+		{{Tool: &llmToolCall{ID: "call_1", Name: "docs", Args: map[string]any{"op": "search", "query": "mcp"}}}},
 		{{Text: "done"}},
 	})
 

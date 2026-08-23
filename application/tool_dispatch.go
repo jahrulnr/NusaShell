@@ -21,8 +21,11 @@ import (
 //     execution (agent runner), so conversation history, learning-event
 //     classification, untrusted-output wrapping, and the UI all keep seeing
 //     stable legacy names.
-//   - The legacy names stay executable inside Toolbox.Execute as hidden
-//     aliases: models that emit them from history or habit keep working.
+//   - Model-facing calls must use the dispatcher form: a legacy per-op
+//     name reaching the agent tool executor fails loud with the exact
+//     {root, op} rewrite (LegacyAliasError). Internal callers (hydration
+//     checkpoints, review-agent replay) still route through the canonical
+//     per-op names via Toolbox.Execute.
 //
 // Adding a verb = add one op to the family spec below plus its Execute case.
 // No new provider-facing schema is required (sub-linear prompt growth).
@@ -40,7 +43,7 @@ var dispatchFamilies = []dispatchFamily{
 		root:    "skill",
 		members: []string{"list", "search", "read", "files", "save"},
 		def: ToolInfo{
-			Name: "skill",
+			Name:        "skill",
 			Description: "Skill library; \"op\" selects: list {limit?}; search {query,limit?} name/description substring match; read {name,path?,offset?,max_chars?} SKILL.md or support file — always read a skill before relying on it; files {name} list folder contents; save {name,content,description?,id?,path?} create/update SKILL.md, or write a support file when path is set (skill must exist)",
 			InputSchema: objSchema(
 				pEnum("op", "Operation", "list", "search", "read", "files", "save"),
@@ -60,7 +63,7 @@ var dispatchFamilies = []dispatchFamily{
 		root:    "memory",
 		members: []string{"save", "replace", "search", "list", "delete"},
 		def: ToolInfo{
-			Name: "memory",
+			Name:        "memory",
 			Description: "Long-term memory; \"op\" selects: save {content,category?,project?,task?,tags?} idempotent fragment dedup — durable knowledge only; replace {target:primary|fragment,content,old_text?,id?} edit primary document substring/whole body or one fragment; search {query,category?,project?,task?,tags?,limit?} BM25-ranked fragments; list {target?:primary|fragments,category?,project?,limit?}; delete {id}",
 			InputSchema: objSchema(
 				pEnum("op", "Operation", "save", "replace", "search", "list", "delete"),
@@ -224,14 +227,77 @@ func CompactFamilies(defs []ToolInfo) []ToolInfo {
 // canonical per-op names. Args are preserved verbatim (the extra "op" key is
 // ignored by the legacy handlers' strict structs). Calls without a valid op
 // are left untouched so Toolbox.Execute fails loud with the valid list.
+//
+// A call that ALREADY uses a per-op member name is a retired hidden-alias
+// emission (providers only see the roots): it is flagged LegacyAlias so the
+// agent tool executor rejects it loud with the dispatcher rewrite instead of
+// executing it. The flag is in-memory only and never persisted.
 func CanonicalizeToolCalls(toolCalls []domain.ToolCall) {
 	for i := range toolCalls {
 		tc := &toolCalls[i]
-		if !IsDispatchRoot(tc.Name) {
+		if IsDispatchRoot(tc.Name) {
+			if canon, err := DispatchCanonical(tc.Name, []byte(tc.Args)); err == nil {
+				tc.Name = canon
+			}
 			continue
 		}
-		if canon, err := DispatchCanonical(tc.Name, []byte(tc.Args)); err == nil {
-			tc.Name = canon
+		if IsDispatcherMember(tc.Name) {
+			tc.LegacyAlias = true
 		}
 	}
+}
+
+// DispatcherToolInfos returns the advertised family definitions. These are
+// the single source of truth for their provider-facing schemas — Toolbox
+// no longer carries per-verb duplicates for dispatcher families.
+func DispatcherToolInfos() []ToolInfo {
+	out := make([]ToolInfo, 0, len(dispatchFamilies))
+	for i := range dispatchFamilies {
+		out = append(out, dispatchFamilies[i].def)
+	}
+	return out
+}
+
+// IsDispatcherMember reports whether name is a canonical per-op
+// implementation of any dispatcher family (e.g. "memory_save").
+func IsDispatcherMember(name string) bool {
+	_, ok := familyByMember[name]
+	return ok
+}
+
+// FamilyMembers returns the canonical per-op names of a family root,
+// e.g. FamilyMembers("memory") -> ["memory_save", ...] in spec order.
+func FamilyMembers(root string) []string {
+	fam, ok := familyByRoot[root]
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(fam.members))
+	for _, op := range fam.members {
+		out = append(out, root+"_"+op)
+	}
+	return out
+}
+
+// MemberOp splits a canonical member name into its family root and op.
+func MemberOp(member string) (root, op string, ok bool) {
+	r, found := familyByMember[member]
+	if !found {
+		return "", "", false
+	}
+	return r, strings.TrimPrefix(member, r+"_"), true
+}
+
+// LegacyAliasError returns the fail-loud teaching error for a canonical
+// per-op member name emitted directly by a model. The hidden-alias path
+// was removed: providers only see the dispatcher roots, so the agent tool
+// executor rejects member names with the exact {root, op} rewrite instead
+// of executing them. It returns nil for non-member names (pass-through).
+func LegacyAliasError(name string) error {
+	root, op, ok := MemberOp(name)
+	if !ok {
+		return nil
+	}
+	return fmt.Errorf("%q is a retired per-verb name; call the %q dispatcher instead: {\"name\": %q, \"args\": {\"op\": \"%s\", ...}}",
+		name, root, root, op)
 }
