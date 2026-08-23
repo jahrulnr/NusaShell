@@ -33,12 +33,50 @@ func filePathArgs(path string, question string) string {
 	return string(b)
 }
 
-// writeTestFile writes a small fake media payload so loadMediaAttachment
-// finds a real file on disk.
+// writeTestFile writes a small media payload with real binary magic
+// numbers so loadMediaAttachment's magic-number validation accepts it.
+// The file does not need to be a decodable media file — only the
+// leading bytes must match the expected magic signature.
 func writeTestFile(t *testing.T, dir, name string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte("fake media bytes for "+name), 0o644); err != nil {
+	ext := strings.ToLower(filepath.Ext(name))
+	var payload []byte
+	switch ext {
+	case ".png":
+		// PNG signature + minimal IHDR chunk header
+		payload = append(
+			[]byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A},
+			[]byte("\x00\x00\x00\x0DIHDR\x00\x00\x00\x01")...,
+		)
+	case ".jpg", ".jpeg":
+		payload = []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F'}
+	case ".gif":
+		payload = []byte("GIF89a\x01\x00\x01\x00\x80\x00\x00")
+	case ".webp":
+		payload = []byte("RIFF\x00\x00\x00\x00WEBP")
+	case ".bmp":
+		payload = []byte("BM\x00\x00\x00\x00")
+	case ".mp3":
+		payload = []byte("ID3\x03\x00\x00\x00\x00\x00\x00")
+	case ".wav":
+		payload = []byte("RIFF\x00\x00\x00\x00WAVE")
+	case ".ogg":
+		payload = []byte("OggS\x00\x00\x00\x00")
+	case ".flac":
+		payload = []byte("fLaC\x00\x00\x00\x22")
+	case ".mp4", ".m4v":
+		payload = []byte("\x00\x00\x00\x20ftypisom\x00\x00\x00\x00isomiso2avc1mp41")
+	case ".webm":
+		payload = []byte("\x1aE\xdf\xa3\x01\x00\x00\x00\x00\x00\x00\x1fB\x82\x88webm")
+	case ".mov":
+		payload = []byte("\x00\x00\x00\x14ftypqt  \x00\x00\x00\x00")
+	case ".avi":
+		payload = []byte("RIFF\x00\x00\x00\x00AVI ")
+	default:
+		t.Fatalf("writeTestFile: no magic payload for extension %q (file %s)", ext, name)
+	}
+	if err := os.WriteFile(path, payload, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return path

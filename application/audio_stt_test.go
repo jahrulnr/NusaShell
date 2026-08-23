@@ -1,6 +1,7 @@
 package application
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -101,8 +102,8 @@ func TestExecuteReadAudioRoutesSTTKindToTranscriptions(t *testing.T) {
 	if gotModel != "whisper-test" {
 		t.Errorf("model form value = %q", gotModel)
 	}
-	if !strings.Contains(string(gotFile), "fake media bytes") {
-		t.Error("uploaded file should carry the audio bytes")
+	if !bytes.HasPrefix(gotFile, []byte("ID3")) {
+		t.Error("uploaded file should carry the audio magic bytes (ID3)")
 	}
 	if !strings.Contains(output, "[Audio transcript for recording.mp3]") || !strings.Contains(output, "Paragraf pertama") {
 		t.Errorf("output should contain transcript, got: %q", output)

@@ -45,6 +45,14 @@ absolute paths are accepted. There is no conversation-history lookup: if
 the file exists and is readable at that absolute path, it loads; otherwise
 the tool returns a clear not-found error.
 
+File type is validated by **binary magic number**, not by file extension.
+Extensions can be lied about (e.g. a `.js` file renamed to `.png`); magic
+bytes cannot. If the file's leading bytes do not match a known image
+signature (JPEG, PNG, GIF, WebP, BMP, TIFF), the tool rejects it with a
+clear error. The same guard applies to `read_audio` and `read_video` —
+a file claiming to be audio by extension but containing video bytes is
+rejected.
+
 Use a real absolute path — never guess or invent one.
 
 Good example:

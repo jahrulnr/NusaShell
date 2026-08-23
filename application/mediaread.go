@@ -20,6 +20,12 @@ var maxReadMediaBytes int64 = 100 << 20 // 100 MB
 // single source of truth: no conversation-history lookup happens here, so
 // paths outside the workspace and attachment store work identically to
 // attached files.
+//
+// File type is validated by binary magic number (domain.SniffMagic), not
+// by file extension. Extensions can be lied about (e.g. a .js file
+// renamed to .png); magic bytes cannot. When the sniffed kind does not
+// match the expected kind, or the bytes do not match any known media
+// signature, the file is rejected.
 func loadMediaAttachment(kind, path string) (domain.Attachment, error) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -42,11 +48,32 @@ func loadMediaAttachment(kind, path string) (domain.Attachment, error) {
 		return domain.Attachment{}, err
 	}
 
-	mediaType := mime.TypeByExtension(strings.ToLower(filepath.Ext(path)))
-	if mediaType == "" || mediaType == "application/octet-stream" {
-		mediaType = "application/octet-stream"
-	} else if i := strings.Index(mediaType, ";"); i >= 0 {
-		mediaType = mediaType[:i]
+	// Validate file type by binary magic number. This is the security
+	// guard: a file claiming to be an image by extension but containing
+	// JavaScript (or any non-media payload) is rejected here.
+	sniffedType, sniffedKind := domain.SniffMagic(data)
+	if sniffedKind == "" {
+		return domain.Attachment{}, fmt.Errorf(
+			"%s file %s is not a valid %s file: binary magic number not recognized (file may be corrupted or misnamed)",
+			kind, path, kind)
+	}
+	if sniffedKind != kind {
+		return domain.Attachment{}, fmt.Errorf(
+			"%s file %s is not a valid %s file: binary magic identifies it as %s (%s)",
+			kind, path, kind, sniffedKind, sniffedType)
+	}
+
+	// Use the sniffed media type (from magic bytes) as the authoritative
+	// type. Fall back to extension-based MIME only when the sniffer
+	// returns a type but it's empty (shouldn't happen, but defensive).
+	mediaType := sniffedType
+	if mediaType == "" {
+		mediaType = mime.TypeByExtension(strings.ToLower(filepath.Ext(path)))
+		if mediaType == "" || mediaType == "application/octet-stream" {
+			mediaType = "application/octet-stream"
+		} else if i := strings.Index(mediaType, ";"); i >= 0 {
+			mediaType = mediaType[:i]
+		}
 	}
 
 	name := filepath.Base(path)
