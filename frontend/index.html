@@ -754,10 +754,10 @@
               </select>
               <small>Only speech models (tts-1, Kokoudo, etc.) appear here. Leave disabled to rely on the offline piper engine only.</small>
             </label>
-            <label class="settings-field settings-checkbox-field" for="settings-tts-offline">
-              <input type="checkbox" id="settings-tts-offline" />
-              Offline piper engine enabled
-              <small>Requires the piper binary on PATH (or PIPER_BIN) and voice models under models/tts/. When enabled, generate_speech works fully offline and also serves as automatic fallback for the online model.</small>
+            <label class="settings-toggle" for="settings-tts-offline">
+              <span><strong>Offline piper engine</strong><small>Synthesize speech locally without any API key. Requires the piper binary on PATH (or PIPER_BIN) and voice models under models/tts/. Also serves as automatic fallback when the online model fails.</small></span>
+              <input id="settings-tts-offline" type="checkbox">
+              <span class="toggle-slider" aria-hidden="true"></span>
             </label>
           </section>
           <section class="settings-card settings-web-answer-card" aria-labelledby="settings-web-answer-title">
