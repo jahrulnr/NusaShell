@@ -269,58 +269,50 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 			}
 		}
 	}
-	// Fetch image-generation models from GET /images/models (OpenRouter).
-	// OpenAI hosts 404 this endpoint; known ids from /models are still
-	// tagged after catalog enrichment below.
-	imageSet := map[string]bool{}
+	// Discovery-only listers for image/speech/video models. These hit
+	// dedicated endpoints (OpenRouter's /images/models, /videos/models) or
+	// filter queries (?output_modalities=speech) to find model IDs that
+	// plain /models hides. They append new IDs with Kind="" (default chat);
+	// classification is done by the catalog + hardcoded patterns pass below.
+	// This avoids misclassification when a provider ignores a filter and
+	// returns its full model list (e.g. OpenCode ignores
+	// output_modalities=speech).
 	if a.ImageModelListerFactory != nil && p.Kind != domain.ProviderCodex && p.Kind != domain.ProviderMessages {
 		imgLister := a.ImageModelListerFactory(p)
 		if imgLister != nil {
 			imgIDs, _ := imgLister.ListImageModels(ctx, key)
 			for _, id := range imgIDs {
-				imageSet[id] = true
 				if seen[id] {
 					continue
 				}
 				seen[id] = true
-				models = append(models, domain.Model{ID: id, Kind: domain.ModelKindImage})
+				models = append(models, domain.Model{ID: id})
 			}
 		}
 	}
-	// Fetch speech-generation models via the output_modalities=speech filter
-	// (OpenRouter's documented TTS discovery route — plain /models hides
-	// them entirely). Hosts that reject the filter yield an empty list; tts
-	// ids arriving via plain /models are tagged by the catalog/allowlist
-	// pass below.
-	ttsSet := map[string]bool{}
 	if a.SpeechModelListerFactory != nil && p.Kind != domain.ProviderCodex && p.Kind != domain.ProviderMessages {
 		spLister := a.SpeechModelListerFactory(p)
 		if spLister != nil {
 			spIDs, _ := spLister.ListSpeechModels(ctx, key)
 			for _, id := range spIDs {
-				ttsSet[id] = true
 				if seen[id] {
 					continue
 				}
 				seen[id] = true
-				models = append(models, domain.Model{ID: id, Kind: domain.ModelKindTTS})
+				models = append(models, domain.Model{ID: id})
 			}
 		}
 	}
-	// Fetch video-generation models from the dedicated /videos/models
-	// endpoint (OpenRouter's documented video discovery route).
-	videoSet := map[string]bool{}
 	if a.VideoModelListerFactory != nil && p.Kind != domain.ProviderCodex && p.Kind != domain.ProviderMessages {
 		vLister := a.VideoModelListerFactory(p)
 		if vLister != nil {
 			vIDs, _ := vLister.ListVideoModels(ctx, key)
 			for _, id := range vIDs {
-				videoSet[id] = true
 				if seen[id] {
 					continue
 				}
 				seen[id] = true
-				models = append(models, domain.Model{ID: id, Kind: domain.ModelKindVideo})
+				models = append(models, domain.Model{ID: id})
 			}
 		}
 	}
@@ -377,12 +369,6 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 				models[i].Audio = meta.Audio
 				models[i].Video = meta.Video
 				models[i].InterleavedField = meta.InterleavedField
-				// The catalog assigns capabilities only; it must never
-				// reclassify a model. Kind is decided by the source that
-				// listed the model (/models, /embeddings/models,
-				// /images/models, or Codex seeds) — never by models.dev.
-				// Keeping Kind out of the catalog keeps the provider list
-				// faithful to the /models API (as-is).
 				enriched++
 			}
 			if enriched > 0 {
@@ -390,16 +376,13 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 			}
 		}
 	}
-	// Re-apply image kind after catalog enrichment — models.dev can mark
-	// gpt-image-* as chat when output modalities are missing.
-	for i := range models {
-		if imageSet[models[i].ID] || config.IsKnownImageModel(models[i].ID) {
-			models[i].Kind = domain.ModelKindImage
-		}
-	}
-	// TTS/VIDEO kinds: lister-sourced ids win outright; the models.dev
-	// catalog is the documented carve-out source for ids that arrived via
-	// plain /models; the TTS allowlist is the last net for unknown ids.
+	// Classify non-chat kinds from two sources only: the models.dev catalog
+	// (meta.Kind) and hardcoded name patterns (IsKnownImageModel,
+	// IsKnownTTSModel). Lister endpoints are discovery-only — they find IDs
+	// that plain /models hides but never classify them, because providers
+	// that ignore filter parameters (e.g. OpenCode ignores
+	// output_modalities=speech) would misclassify every chat model as TTS.
+	// Unknown models keep Kind="" and appear in the chat picker.
 	for i := range models {
 		if a.ModelCatalog != nil {
 			if meta := a.ModelCatalog.Lookup(catalogHintFromModelID(models[i].ID), models[i].ID); meta != nil {
@@ -408,14 +391,20 @@ func (a *App) importModelsForProvider(ctx context.Context, p *domain.Provider, k
 					models[i].Kind = domain.ModelKindTTS
 				case "video":
 					models[i].Kind = domain.ModelKindVideo
+				case "image":
+					models[i].Kind = domain.ModelKindImage
+				case "stt":
+					models[i].Kind = domain.ModelKindSTT
 				}
 			}
 		}
-		switch {
-		case ttsSet[models[i].ID] || config.IsKnownTTSModel(models[i].ID):
-			models[i].Kind = domain.ModelKindTTS
-		case videoSet[models[i].ID]:
-			models[i].Kind = domain.ModelKindVideo
+		if models[i].Kind == "" || models[i].Kind == domain.ModelKindChat {
+			switch {
+			case config.IsKnownImageModel(models[i].ID):
+				models[i].Kind = domain.ModelKindImage
+			case config.IsKnownTTSModel(models[i].ID):
+				models[i].Kind = domain.ModelKindTTS
+			}
 		}
 	}
 	if p.Kind == domain.ProviderCodex {

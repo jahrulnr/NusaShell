@@ -583,6 +583,39 @@ func (a *App) runSingleTurn(run *TurnRun, provider *domain.Provider, apiKey, mod
 			// round.
 			toolsForRound = nil
 		}
+		// Pre-API proactive compaction check (mirrors Hermes pre-API pressure
+		// check). Between rounds, tool results grow the context. Without this
+		// check, context can exceed the window mid-turn and only the emergency
+		// compaction (reactive, after a 400 overflow) would fire — too late,
+		// too lossy, and the agent's mid-thought work is lost. This check fires
+		// proactively before each API call (round > 1; round 1 is covered by
+		// initializeTurn), so compaction happens while context is still
+		// manageable. Shares the compactionAttempts budget with emergency
+		// compaction so the combined per-turn backstop is bounded.
+		if settings.CompactionEnabled && round > 1 && compactionAttempts < 3 {
+			cw := a.resolveContextWindow(provider, model, settings)
+			trigger := compactionTriggerTokens(cw, resolveMaxOutput(provider, model, settings), settings)
+			if est := conversation.EstimateTokens(); est > trigger {
+				compactionAttempts++
+				a.log("info", "agent", "mid-turn compaction for %s round %d: est=%d trigger=%d window=%d",
+					run.ID, round, est, trigger, cw)
+				compAdapter, compModel, compWindow := a.resolveCompactionAdapter(run.Ctx, adapter, model, cw, settings)
+				summary, compErr := a.compactConversation(run.Ctx, compAdapter, conversation, compModel, compWindow, settings)
+				if compErr == nil {
+					a.Bus.Emit(contracts.EventCompacted, contracts.CompactedEvent{ConversationID: conversation.ID, Summary: summary})
+					conversation, _ = a.Conversations.Get(run.ConversationID)
+					postEst := conversation.EstimateTokens()
+					a.log("info", "agent", "mid-turn compaction done for %s round %d: before=%d after=%d (msgs=%d)",
+						run.ID, round, est, postEst, len(conversation.Messages))
+					injectHydration = true
+				} else {
+					a.log("warn", "agent", "mid-turn compaction failed for %s round %d: %v", run.ID, round, compErr)
+					a.Bus.Emit(contracts.EventCompactionFailed, contracts.CompactionFailedEvent{ConversationID: conversation.ID, Error: compErr.Error()})
+					// Don't fail the turn — let the stream attempt proceed.
+					// If it overflows, emergency compaction is the fallback.
+				}
+			}
+		}
 		a.Bus.Emit(contracts.EventTurnStarted, contracts.TurnStartedEvent{
 			RunID: run.ID, ConversationID: run.ConversationID, MessageID: currentMsgID, Round: round,
 		})

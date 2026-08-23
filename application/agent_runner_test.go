@@ -713,6 +713,106 @@ func TestEmergencyCompactionSkippedWhenEstimateBelowTrigger(t *testing.T) {
 	}
 }
 
+// midTurnCompactionAdapter returns a tool call on the first Stream and
+// final text on the second. It tracks whether compaction ran (Complete
+// calls) and whether any stream returned an overflow error (proactive
+// compaction should prevent the 400 that triggers emergency compaction).
+type midTurnCompactionAdapter struct {
+	mu         sync.Mutex
+	streams    int
+	completes  int
+	overflowed bool
+}
+
+func (a *midTurnCompactionAdapter) Kind() domain.ProviderKind { return domain.ProviderChat }
+func (a *midTurnCompactionAdapter) Stream(_ context.Context, _ ChatRequest, _, _ func(string)) (ChatResponse, error) {
+	a.mu.Lock()
+	a.streams++
+	n := a.streams
+	a.mu.Unlock()
+	if n == 1 {
+		return ChatResponse{
+			Content:   "let me read that file",
+			ToolCalls: []domain.ToolCall{{ID: "call_1", Name: "read_file", Args: `{"path":"/big"}`}},
+		}, nil
+	}
+	return ChatResponse{Content: "done after compaction"}, nil
+}
+func (a *midTurnCompactionAdapter) Complete(_ context.Context, _ ChatRequest) (ChatResponse, error) {
+	a.mu.Lock()
+	a.completes++
+	a.mu.Unlock()
+	return ChatResponse{Content: validTestSummary}, nil
+}
+
+// largeOutputToolbox returns a fixed large string for any tool call,
+// simulating a tool result that grows the context past the compaction
+// trigger mid-turn.
+type largeOutputToolbox struct {
+	mu     sync.Mutex
+	names  []string
+	output string
+}
+
+func (t *largeOutputToolbox) ListTools() []ToolInfo { return nil }
+func (t *largeOutputToolbox) Execute(_ context.Context, name string, _ []byte) (string, error) {
+	t.mu.Lock()
+	t.names = append(t.names, name)
+	t.mu.Unlock()
+	return t.output, nil
+}
+
+// TestMidTurnProactiveCompaction verifies that compaction fires
+// proactively between tool rounds when context grows past the trigger —
+// not waiting for a 400 overflow (emergency compaction). This mirrors
+// the Hermes pre-API pressure check: the round loop checks
+// EstimateTokens before each API call, not just at turn start.
+func TestMidTurnProactiveCompaction(t *testing.T) {
+	// Initial conversation: small enough to be under the compaction
+	// trigger at turn start (so initializeTurn does not compact).
+	// Round 1's tool result will push context past the trigger; the
+	// mid-turn check before round 2 must fire compaction proactively.
+	conv := &domain.Conversation{ID: "c1", Messages: []domain.Message{
+		{ID: "u0", Role: domain.RoleUser, Content: strings.Repeat("goal ", 100), Status: domain.StatusDone},
+		{ID: "m1", Role: domain.RoleAssistant},
+	}}
+	adapter := &midTurnCompactionAdapter{}
+	// ~13000 chars ≈ 3250 tokens — enough to push a ~125-token start
+	// past the 1395-token trigger (80% of (2000-256)).
+	toolbox := &largeOutputToolbox{output: strings.Repeat("tool result line of content. ", 500)}
+	settings := domain.DefaultSettings()
+	settings.CompactionEnabled = true
+	settings.CompactionThreshold = 0 // auto = 80% of (window - maxOutput)
+	settings.MaxInputTokens = 2000
+	settings.MaxOutputTokens = 256
+	settings.MaxToolRounds = 10
+	app := &App{
+		Conversations: &fakeConvStore{convs: map[string]*domain.Conversation{"c1": conv}},
+		Logs:          &fakeLogStore{},
+		Bus:           NewBus(),
+		Toolbox:       toolbox,
+		Settings:      &fakeSettingsStore{settings: settings},
+		Factory: func(context.Context, *domain.Provider, string) (AIProvider, error) {
+			return adapter, nil
+		},
+		runs: map[string]*TurnRun{},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	run := &TurnRun{ID: "r1", ConversationID: "c1", Ctx: ctx, Cancel: cancel}
+	app.runTurn(run, &domain.Provider{ID: "p", Kind: domain.ProviderChat}, "key", "model", "", "m1", false, ModelCapabilities{}, "")
+
+	if adapter.completes == 0 {
+		t.Fatal("expected proactive compaction (Complete calls > 0), got 0 — mid-turn check did not fire before round 2")
+	}
+	if adapter.overflowed {
+		t.Fatal("unexpected 400 overflow — proactive compaction should prevent emergency compaction")
+	}
+	if adapter.streams != 2 {
+		t.Fatalf("streams = %d, want 2 (round 1 tool call + round 2 final text after proactive compaction)", adapter.streams)
+	}
+}
+
 type recordingCompleteAdapter struct {
 	mu                sync.Mutex
 	requests          []ChatRequest
