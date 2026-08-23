@@ -1654,8 +1654,9 @@ func TestAgentToolsDocMatchesBuiltInRoster(t *testing.T) {
 	tb := testToolbox(nil, nil, &stubMCP{})
 	// The docs document the ADVERTISED roster — per-verb family members are
 	// compacted into dispatcher roots before reaching providers
-	// (docs/design/tool-dispatchers.md). Hidden aliases stay executable but
-	// are intentionally not required as table rows.
+	// (docs/design/tool-dispatchers.md). Per-op names are internal canonical
+	// targets only (direct model emissions are rejected loud), so they are
+	// intentionally not required as table rows.
 	actual := map[string]bool{}
 	for _, tool := range application.CompactFamilies(append(tb.ListTools(), application.DispatcherToolInfos()...)) {
 		actual[tool.Name] = true

@@ -121,6 +121,8 @@ func TestAgentTurnStreamsOverSSE(t *testing.T) {
 	if len(assistant.ToolCalls) != 1 {
 		t.Fatalf("tool calls = %+v", assistant.ToolCalls)
 	}
+	// The fake provider emits the dispatcher form (docs + op); the
+	// persisted name is the canonicalized per-op target by design.
 	tc := assistant.ToolCalls[0]
 	if tc.Name != "docs_search" || tc.Status != "ok" || !strings.Contains(tc.Output, "mcp") {
 		t.Fatalf("tool call = %+v", tc)

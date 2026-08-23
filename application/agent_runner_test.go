@@ -22,10 +22,10 @@ func TestUpdateToolResultUpdatesChronologicalToolCallStep(t *testing.T) {
 	app := &App{}
 	conversation := &domain.Conversation{Messages: []domain.Message{{
 		ID:        "message-1",
-		ToolCalls: []domain.ToolCall{{ID: "call-1", Name: "docs_search", Status: domain.ToolRunning}},
+		ToolCalls: []domain.ToolCall{{ID: "call-1", Name: "web_fetch", Status: domain.ToolRunning}},
 		Steps: []domain.MessageStep{{
 			Type:      domain.StepToolCalls,
-			ToolCalls: []domain.ToolCall{{ID: "call-1", Name: "docs_search", Status: domain.ToolRunning}},
+			ToolCalls: []domain.ToolCall{{ID: "call-1", Name: "web_fetch", Status: domain.ToolRunning}},
 		}},
 	}}}
 
@@ -404,7 +404,7 @@ func TestExecuteTurnToolsStopsOnCancel(t *testing.T) {
 		ID: "c1",
 		Messages: []domain.Message{{
 			ID:        "m1",
-			ToolCalls: []domain.ToolCall{{ID: "t1", Name: "docs_search"}, {ID: "t2", Name: "memory_list"}},
+			ToolCalls: []domain.ToolCall{{ID: "t1", Name: "web_fetch"}, {ID: "t2", Name: "mcp_list"}},
 		}},
 	}
 	app := &App{

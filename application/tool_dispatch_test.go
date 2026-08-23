@@ -105,7 +105,7 @@ func TestCanonicalizeToolCalls(t *testing.T) {
 	tcs := []domain.ToolCall{
 		{ID: "1", Name: "memory", Args: `{"op":"save","content":"hi"}`},
 		{ID: "2", Name: "memory", Args: `{}`},                   // no op → untouched, fails loud later
-		{ID: "3", Name: "memory_save", Args: `{"content":"x"}`}, // legacy direct call untouched
+		{ID: "3", Name: "memory_save", Args: `{"content":"x"}`}, // retired direct call: name untouched, flagged for rejection
 		{ID: "4", Name: "skill", Args: `{"op":"read","name":"x"}`},
 		{ID: "5", Name: "ci_pipeline", Args: `{"op":"list"}`},
 	}
@@ -114,6 +114,14 @@ func TestCanonicalizeToolCalls(t *testing.T) {
 	for i, want := range wantNames {
 		if tcs[i].Name != want {
 			t.Fatalf("tc[%d] = %s, want %s", i, tcs[i].Name, want)
+		}
+	}
+	// Provenance flags: only the retired direct per-op emission (tc 3) is
+	// flagged for loud rejection at execution.
+	wantFlags := []bool{false, false, true, false, false}
+	for i, want := range wantFlags {
+		if tcs[i].LegacyAlias != want {
+			t.Fatalf("tc[%d] LegacyAlias = %v, want %v", i, tcs[i].LegacyAlias, want)
 		}
 	}
 	if tcs[0].Args != `{"op":"save","content":"hi"}` {

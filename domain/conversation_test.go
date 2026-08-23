@@ -12,11 +12,11 @@ func TestMessageEstimateTokensIgnoresUsageAndDoesNotDoubleCountSteps(t *testing.
 		Content:   content,
 		Reasoning: "think", // ignored when steps are present
 		Usage:     &Usage{InputTokens: 9000, OutputTokens: 50},
-		ToolCalls: []ToolCall{{Name: "docs_search", Args: `{"q":"x"}`, Output: "hit"}},
+		ToolCalls: []ToolCall{{Name: "web_fetch", Args: `{"q":"x"}`, Output: "hit"}},
 		Steps: []MessageStep{
 			{Type: StepReasoning, Content: "think"},
 			{Type: StepText, Content: content},
-			{Type: StepToolCalls, ToolCalls: []ToolCall{{Name: "docs_search", Args: `{"q":"x"}`, Output: "hit"}}},
+			{Type: StepToolCalls, ToolCalls: []ToolCall{{Name: "web_fetch", Args: `{"q":"x"}`, Output: "hit"}}},
 		},
 	}
 
@@ -25,7 +25,7 @@ func TestMessageEstimateTokensIgnoresUsageAndDoesNotDoubleCountSteps(t *testing.
 		Steps: []MessageStep{
 			{Type: StepReasoning, Content: "think"},
 			{Type: StepText, Content: content},
-			{Type: StepToolCalls, ToolCalls: []ToolCall{{Name: "docs_search", Args: `{"q":"x"}`, Output: "hit"}}},
+			{Type: StepToolCalls, ToolCalls: []ToolCall{{Name: "web_fetch", Args: `{"q":"x"}`, Output: "hit"}}},
 		},
 	}
 	if got != want.EstimateTokens() {

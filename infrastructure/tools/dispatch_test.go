@@ -73,6 +73,6 @@ func TestPerOpNamesRemainInternalCanonicalTargets(t *testing.T) {
 		nil, &stubMCP{},
 	)
 	if _, err := tb.Execute(context.Background(), "skill_list", []byte(`{}`)); err != nil {
-		t.Fatalf("legacy skill_list must keep working: %v", err)
+		t.Fatalf("per-op skill_list must stay directly executable for internal callers (hydration, review replay): %v", err)
 	}
 }
