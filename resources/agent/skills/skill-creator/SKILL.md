@@ -3,7 +3,7 @@ name: skill-creator
 description: Create or improve agent skills with clear triggers, progressive disclosure, and safe NusaShell integration. Use when the user asks to create a skill, author SKILL.md, make a new skill package, or improve a skill description.
 compatibility: NusaShell skills use skill_save; support files require an MCP file-management plugin.
 metadata:
-  version: "1"
+  version: "2"
 ---
 
 # Create an agent skill
@@ -29,7 +29,8 @@ bounded guidance and never add a way to execute scripts automatically.
    it (that produces a double-headed SKILL.md). Mention plugin capability
    in the body using concrete plugin ids such as `nusashell.files` or role
    tokens such as `role:files` and `role:terminal` when relevant.
-4. Keep `SKILL.md` lean: numbered steps, decision points, edge cases, and
+4. Keep `SKILL.md` lean — target under ~500 lines: numbered steps, decision
+   points, edge cases, and
    explicit instructions to read support files only when needed. Put detail one
    level deep under `references/`, `templates/`, `scripts/`, or `assets/`.
 5. Create the initial `SKILL.md` with `skill_save` (omit `id` for a new skill,
@@ -42,6 +43,41 @@ bounded guidance and never add a way to execute scripts automatically.
    `requirements.mcp` is present, call `mcp_list` and enable the required
    concrete plugin or a suitable role substitute before claiming the skill is
    usable. This is a soft gate, not a runtime refusal.
+
+## Degrees of freedom
+
+Match instruction specificity to task fragility:
+
+| Fragility | Form | Example |
+|---|---|---|
+| Low — several valid approaches | Prose guidance | review checklist |
+| Medium — one preferred pattern | Template or pseudocode | report skeleton |
+| High — consistency critical | Script shipped in `scripts/` | schema validator |
+
+For high fragility prefer a ready-made script over prose: a deterministic
+artifact beats regenerated code (no drift between sessions). Skill tools never
+execute anything — state in the body whether the agent should run the script
+through a terminal plugin (e.g. `nusashell.terminal:exec`) or read it as
+reference.
+
+## Validation loop
+
+Skills that create or modify artifacts must encode verify-after-edit: instruct
+the agent to validate immediately after each change, fix and re-validate on
+failure, and proceed only once validation passes. A plausible result never
+substitutes for a green check.
+
+## Anti-patterns
+
+- **Option soup**: prescribe one default plus an escape hatch ("use X; for
+  scanned files use Y"), never a menu of alternatives.
+- **Time-sensitive wording**: never "before \<date\> use the old API". Separate
+  a *Current method* section from an *Old patterns (deprecated)* section so
+  refreshes stay additive.
+- **Inconsistent terminology**: one term per concept throughout.
+- **Vague names**: forbid `helper`, `utils`, `tools`; name the job
+  (`processing-pdfs`).
+- **Paraphrased user copy**: user-supplied exact wording goes in verbatim.
 
 ## NusaShell limits
 
