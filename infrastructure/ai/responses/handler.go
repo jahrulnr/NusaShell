@@ -221,7 +221,7 @@ func responsesToolOutputContent(result *application.ToolResult) []map[string]any
 		case "video":
 			blocks = append(blocks, aiutil.VideoURLBlock(att))
 		case "image":
-			blocks = append(blocks, map[string]any{"type": "input_image", "image_url": att.DataURL})
+			blocks = append(blocks, aiutil.InputImageBlock(att))
 		}
 	}
 	return blocks
@@ -241,7 +241,7 @@ func responsesUserContent(message application.ChatMessage) []map[string]any {
 		case "video":
 			blocks = append(blocks, aiutil.VideoURLBlock(attachment))
 		case "image":
-			blocks = append(blocks, map[string]any{"type": "input_image", "image_url": attachment.DataURL})
+			blocks = append(blocks, aiutil.InputImageBlock(attachment))
 		case "file":
 			blocks = append(blocks, map[string]any{
 				"type": "input_file", "file_data": attachment.DataURL, "filename": attachment.Name,

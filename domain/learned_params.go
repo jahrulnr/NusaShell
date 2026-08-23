@@ -17,6 +17,12 @@ const (
 	// required field was missing. Inject it (with a placeholder or cached
 	// value) in future requests for this provider+model.
 	LearnedActionInject LearnedParamAction = "inject"
+	// LearnedActionDisableModality: the upstream 400 rejected the request
+	// because the model is text-only (or lacks a specific modality). The
+	// param is the modality name ("vision", "audio", "video"). The retry
+	// loop sets the corresponding caps field to false and re-builds
+	// messages, which strips the modality's attachments via chatMessages.
+	LearnedActionDisableModality LearnedParamAction = "disable_modality"
 )
 
 // LearnedParam is a single learned parameter entry for a provider+model
@@ -98,6 +104,15 @@ func (r *LearnedParamRegistry) RecordInject(provider, model, param, reason strin
 	return r.record(provider, model, param, LearnedActionInject, reason)
 }
 
+// RecordDisableModality learns that `param` (a modality name: "vision",
+// "audio", "video") is not supported by provider+model and should be
+// disabled in future requests. The retry loop sets the corresponding
+// caps field to false, which triggers chatMessages to strip attachments
+// of that type.
+func (r *LearnedParamRegistry) RecordDisableModality(provider, model, param, reason string) *LearnedParam {
+	return r.record(provider, model, param, LearnedActionDisableModality, reason)
+}
+
 // StripParams returns the list of params that should be stripped for the
 // given provider+model. Returns nil when nothing is learned.
 func (r *LearnedParamRegistry) StripParams(provider, model string) []string {
@@ -126,6 +141,24 @@ func (r *LearnedParamRegistry) InjectParams(provider, model string) []string {
 	var out []string
 	for _, e := range r.Entries {
 		if e.Action == LearnedActionInject && e.Provider == p && e.Model == m {
+			out = append(out, e.Param)
+		}
+	}
+	return out
+}
+
+// DisabledModalities returns the list of modality names ("vision", "audio",
+// "video") that should be disabled for the given provider+model. Returns
+// nil when nothing is learned.
+func (r *LearnedParamRegistry) DisabledModalities(provider, model string) []string {
+	if r == nil || r.Entries == nil {
+		return nil
+	}
+	p := strings.ToLower(strings.TrimSpace(provider))
+	m := strings.ToLower(strings.TrimSpace(model))
+	var out []string
+	for _, e := range r.Entries {
+		if e.Action == LearnedActionDisableModality && e.Provider == p && e.Model == m {
 			out = append(out, e.Param)
 		}
 	}
@@ -197,15 +230,28 @@ var unsupportedParamRe = regexp.MustCompile(`(?i)unsupported\s+parameter\w*(?:\s
 // "reasoning_content is required", "field 'reasoning_content' is required".
 var requiredFieldRe = regexp.MustCompile(`(?i)(?:field\s+['"]?)?([A-Za-z_][A-Za-z0-9_]*)(?:['"]?)?\s+(?:must be passed back|is required|is a required field|must be provided)`)
 
+// textOnlyModelRe matches "text-only" in error messages from text-only
+// models that reject non-text content (images, audio, video). Examples:
+//   - "Qwen3.8 open checkpoint is text-only; messages[131].content[1] must be a text part"
+//   - "model is text-only; messages[5].content[2] must be a text part"
+//   - "this model is text-only and cannot process images"
+//
+// The param is "vision" because images are the most common non-text
+// modality that triggers this error. If audio or video also fail, they
+// will be learned separately on subsequent retries.
+var textOnlyModelRe = regexp.MustCompile(`(?i)text-only`)
+
 // Classify400Error inspects an upstream 400 error body and returns the
 // learned action + parameter name, or (0, "") when the body does not match
 // a known pattern.
 //
-// Order matters: the "required field" pattern is checked first because
-// "reasoning_content must be passed back" is a stronger signal than a
-// generic "unsupported parameter" — a model can reject reasoning_content
-// as unsupported on one endpoint (chat completions without thinking) while
-// requiring it on another (chat completions with thinking enabled).
+// Order matters:
+//  1. "required field" pattern — strongest signal (a model explicitly
+//     requiring a field like reasoning_content).
+//  2. "text-only" pattern — the model rejects all non-text content; we
+//     disable the vision modality (most common trigger) and retry.
+//  3. "unsupported parameter" pattern — the model rejects a specific
+//     parameter; we strip it and retry.
 func Classify400Error(body string) (LearnedParamAction, string) {
 	b := strings.TrimSpace(body)
 	if b == "" {
@@ -213,6 +259,9 @@ func Classify400Error(body string) (LearnedParamAction, string) {
 	}
 	if m := requiredFieldRe.FindStringSubmatch(b); len(m) > 1 {
 		return LearnedActionInject, strings.ToLower(m[1])
+	}
+	if textOnlyModelRe.MatchString(b) {
+		return LearnedActionDisableModality, "vision"
 	}
 	if m := unsupportedParamRe.FindStringSubmatch(b); len(m) > 1 {
 		return LearnedActionStrip, strings.ToLower(m[1])

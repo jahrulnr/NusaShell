@@ -63,6 +63,39 @@ func TestModelCapabilitiesFromMetadata(t *testing.T) {
 	}
 }
 
+// TestModelCapabilitiesLearnedDisablesVision proves that a learned
+// "text-only" 400 for a provider+model proactively disables Vision in
+// caps, so the first request to that model strips images instead of
+// waiting for a 400 and retrying. This is the proactive path; the retry
+// loop in streamTurnRound handles the reactive path.
+func TestModelCapabilitiesLearnedDisablesVision(t *testing.T) {
+	store := &fakeLearnedParamStore{}
+	cache := newLearnedParamsCache(store)
+	cache.LearnFrom400("openrouter", "qwen3.8-max-free",
+		`Qwen3.8 open checkpoint is text-only; messages[131].content[1] must be a text part`)
+
+	// Unknown model defaults Vision=true, but the learned rule overrides it.
+	provider := &domain.Provider{ID: "openrouter", Models: nil}
+	caps := modelCapabilitiesWithLearned(provider, "qwen3.8-max-free", cache)
+	if caps.Vision {
+		t.Errorf("learned text-only should disable Vision, got %+v", caps)
+	}
+}
+
+// TestModelCapabilitiesLearnedDoesNotAffectOtherModel proves that a
+// learned disabled modality for one model does not leak to another.
+func TestModelCapabilitiesLearnedDoesNotAffectOtherModel(t *testing.T) {
+	store := &fakeLearnedParamStore{}
+	cache := newLearnedParamsCache(store)
+	cache.LearnFrom400("openrouter", "qwen3.8-max-free", `text-only`)
+
+	provider := &domain.Provider{ID: "openrouter", Models: nil}
+	caps := modelCapabilitiesWithLearned(provider, "other-model", cache)
+	if !caps.Vision {
+		t.Errorf("learned rule for qwen3.8 leaked to other-model, got %+v", caps)
+	}
+}
+
 func TestChatMessagesAudioPlaceholderForNonAudioModel(t *testing.T) {
 	dir := t.TempDir()
 	audioPath := testAbsPath(dir, "recording.mp3")

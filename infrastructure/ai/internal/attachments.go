@@ -65,6 +65,27 @@ func InputAudioBlock(att domain.Attachment) map[string]any {
 	}
 }
 
+// InputImageBlock encodes an image attachment as the OpenAI Responses API
+// input_image part: { type: "input_image", image_url: <data: URL>,
+// detail: "auto" }.
+//
+// The `detail` field is REQUIRED by the Responses API spec
+// (ResponseInputImageParam marks it as Required[ImageDetail]). Omitting
+// it causes HTTP 400 "Field required" from strict providers — observed
+// when switching to a Responses-API-compatible model mid-conversation
+// with image history (the image is replayed as input_image without
+// detail, and the provider rejects it).
+//
+// Valid values: "auto", "low", "high", "original". We send "auto" (the
+// spec default) to let the provider choose the resolution.
+func InputImageBlock(att domain.Attachment) map[string]any {
+	return map[string]any{
+		"type":      "input_image",
+		"image_url": att.DataURL,
+		"detail":    "auto",
+	}
+}
+
 // VideoURLBlock encodes a video attachment as the OpenRouter video_url
 // content part: { type: "video_url", video_url: { url: <data: URL> } }.
 //

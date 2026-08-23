@@ -91,7 +91,7 @@ func (a *App) handleTurnsStart(ctx context.Context, req contracts.TurnStartReque
 	a.runsMu.Unlock()
 
 	a.goSafe("agent", func() {
-		a.runTurn(run, provider, apiKey, bareModel, req.Effort, asstMsg.ID, false, modelCapabilities(provider, bareModel), "")
+		a.runTurn(run, provider, apiKey, bareModel, req.Effort, asstMsg.ID, false, modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams), "")
 	})
 	a.log("info", "agent", "turn started: %s (model %s)", run.ID, bareModel)
 	return contracts.TurnStartResult{RunID: run.ID}, nil
@@ -175,7 +175,7 @@ func (a *App) handleTurnsRetry(ctx context.Context, req contracts.TurnRetryReque
 	a.runsMu.Unlock()
 
 	a.goSafe("agent", func() {
-		a.runTurn(run, provider, apiKey, bareModel, req.Effort, targetMsgID, continuation, modelCapabilities(provider, bareModel), "")
+		a.runTurn(run, provider, apiKey, bareModel, req.Effort, targetMsgID, continuation, modelCapabilitiesWithLearned(provider, bareModel, a.learnedParams), "")
 	})
 	a.log("info", "agent", "turn retried: %s (model %s)", run.ID, bareModel)
 	return contracts.TurnStartResult{RunID: run.ID}, nil
@@ -1470,7 +1470,20 @@ type ModelCapabilities struct {
 // Vision=true but Audio=false and Video=false — see domain.ModelCapabilities
 // for rationale. ReasoningReplay is resolved from the model's
 // InterleavedField (catalog signal) with a provider/model pattern fallback.
+//
+// Learned disabled modalities (from 400-learning) override the catalog:
+// if a previous 400 taught us that this provider+model is text-only
+// (or lacks a specific modality), the corresponding caps field is forced
+// to false so the first request strips those attachments instead of
+// waiting for a 400 and retrying.
 func modelCapabilities(provider *domain.Provider, model string) ModelCapabilities {
+	return modelCapabilitiesWithLearned(provider, model, nil)
+}
+
+// modelCapabilitiesWithLearned is the testable form of modelCapabilities
+// that accepts a learnedParamsCache for applying learned disabled
+// modalities. When cache is nil, no learned overrides are applied.
+func modelCapabilitiesWithLearned(provider *domain.Provider, model string, cache *learnedParamsCache) ModelCapabilities {
 	dc := domain.ModelCapabilitiesOf(provider, model)
 	caps := ModelCapabilities{Vision: dc.Vision, Audio: dc.Audio, Video: dc.Video}
 	if provider != nil {
@@ -1478,6 +1491,24 @@ func modelCapabilities(provider *domain.Provider, model string) ModelCapabilitie
 			caps.ReasoningReplay = domain.RequiresReasoningReplay(provider.ID, model, m.InterleavedField)
 		} else {
 			caps.ReasoningReplay = domain.RequiresReasoningReplay(provider.ID, model, "")
+		}
+	}
+	// Apply learned disabled modalities as proactive override. A previous
+	// 400 that taught us "this model is text-only" (or lacks audio/video)
+	// should prevent sending unsupported content on the first request,
+	// not just on retry.
+	providerID := ""
+	if provider != nil {
+		providerID = provider.ID
+	}
+	for _, modality := range cache.DisabledModalities(providerID, model) {
+		switch strings.ToLower(modality) {
+		case "vision":
+			caps.Vision = false
+		case "audio":
+			caps.Audio = false
+		case "video":
+			caps.Video = false
 		}
 	}
 	return caps

@@ -195,7 +195,7 @@ func openAIToolContent(result *application.ToolResult) []map[string]any {
 		case "image":
 			blocks = append(blocks, map[string]any{
 				"type":      "image_url",
-				"image_url": map[string]any{"url": att.DataURL},
+				"image_url": map[string]any{"url": att.DataURL, "detail": "auto"},
 			})
 		}
 	}
@@ -218,7 +218,7 @@ func openAIUserContent(message application.ChatMessage) []map[string]any {
 		case "image":
 			blocks = append(blocks, map[string]any{
 				"type":      "image_url",
-				"image_url": map[string]any{"url": attachment.DataURL},
+				"image_url": map[string]any{"url": attachment.DataURL, "detail": "auto"},
 			})
 		case "file":
 			// Chat Completions has no portable file-input part. Electron keeps

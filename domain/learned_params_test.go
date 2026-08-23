@@ -53,6 +53,40 @@ func TestClassify400ErrorEmptyOrUnknown(t *testing.T) {
 	}
 }
 
+// TestClassify400ErrorTextOnly proves that "text-only" / "must be a text
+// part" errors from text-only models (e.g. Qwen3.8) are classified as
+// LearnedActionDisableModality with param "vision" — the most common
+// non-text modality that triggers this error. The retry loop will set
+// caps.Vision=false and strip images on retry.
+func TestClassify400ErrorTextOnly(t *testing.T) {
+	cases := []struct {
+		body  string
+		param string
+	}{
+		{
+			`Qwen3.8 open checkpoint is text-only; messages[131].content[1] must be a text part`,
+			"vision",
+		},
+		{
+			`{"error":{"message":"model is text-only; messages[5].content[2] must be a text part"}}`,
+			"vision",
+		},
+		{
+			`this model is text-only and cannot process images`,
+			"vision",
+		},
+	}
+	for _, c := range cases {
+		action, param := Classify400Error(c.body)
+		if action != LearnedActionDisableModality {
+			t.Errorf("Classify400Error(%q) action = %q, want %q", c.body, action, LearnedActionDisableModality)
+		}
+		if param != c.param {
+			t.Errorf("Classify400Error(%q) param = %q, want %q", c.body, param, c.param)
+		}
+	}
+}
+
 // Required-field pattern must win over unsupported-param when both could
 // match (a model can reject reasoning_content as unsupported on one
 // endpoint while requiring it on another).
@@ -166,11 +200,38 @@ func TestLearnedParamRegistryNilSafe(t *testing.T) {
 	if r.InjectParams("p", "m") != nil {
 		t.Error("nil registry InjectParams must return nil")
 	}
+	if r.DisabledModalities("p", "m") != nil {
+		t.Error("nil registry DisabledModalities must return nil")
+	}
 	if r.Lookup("p", "m", "x") != nil {
 		t.Error("nil registry Lookup must return nil")
 	}
 	if r.Len() != 0 {
 		t.Error("nil registry Len must return 0")
+	}
+}
+
+func TestLearnedParamRegistryDisableModality(t *testing.T) {
+	r := NewLearnedParamRegistry()
+	r.RecordDisableModality("openrouter", "qwen3.8-max-free", "vision", "text-only")
+
+	modalities := r.DisabledModalities("openrouter", "qwen3.8-max-free")
+	if len(modalities) != 1 || modalities[0] != "vision" {
+		t.Fatalf("expected [vision], got %v", modalities)
+	}
+	// Different model should not see this entry
+	if m := r.DisabledModalities("openrouter", "other-model"); len(m) != 0 {
+		t.Fatalf("entry leaked to different model: %v", m)
+	}
+}
+
+func TestLearnedParamRegistryDisableModalityCaseInsensitive(t *testing.T) {
+	r := NewLearnedParamRegistry()
+	r.RecordDisableModality("OpenRouter", "Qwen3.8", "Vision", "")
+
+	modalities := r.DisabledModalities("openrouter", "qwen3.8")
+	if len(modalities) != 1 || modalities[0] != "vision" {
+		t.Fatalf("case-insensitive lookup failed: %v", modalities)
 	}
 }
 

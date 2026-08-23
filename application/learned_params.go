@@ -52,6 +52,18 @@ func (c *learnedParamsCache) InjectParams(provider, model string) []string {
 	return c.registry.InjectParams(provider, model)
 }
 
+// DisabledModalities returns modality names ("vision", "audio", "video")
+// that should be disabled for provider+model (learned from 400 errors
+// where the model rejected non-text content). Safe to call on a nil cache.
+func (c *learnedParamsCache) DisabledModalities(provider, model string) []string {
+	if c == nil {
+		return nil
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.registry.DisabledModalities(provider, model)
+}
+
 // HasInjectFor reports whether the provider+model has any learned inject
 // rule (e.g. reasoning_content). Used to upgrade ReasoningReplay from
 // "catalog-suspected" to "learned-required" for models not in the catalog.
@@ -86,6 +98,8 @@ func (c *learnedParamsCache) LearnFrom400(provider, model, errBody string) (doma
 		c.registry.RecordStrip(provider, model, param, errBody)
 	case domain.LearnedActionInject:
 		c.registry.RecordInject(provider, model, param, errBody)
+	case domain.LearnedActionDisableModality:
+		c.registry.RecordDisableModality(provider, model, param, errBody)
 	}
 	if c.store != nil {
 		_ = c.store.Save(c.registry)

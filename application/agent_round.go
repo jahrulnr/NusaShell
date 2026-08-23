@@ -84,12 +84,15 @@ func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *do
 			return roundResult, err
 		}
 		// Dynamic 400-learning: classify the error body and, when it
-		// matches a known pattern (unsupported param / required field),
-		// record it to the persisted registry. If the learned action
-		// upgrades ReasoningReplay (inject reasoning_content), refresh
-		// caps so the next retry sends reasoning_content. This catches
-		// models not in the catalog (e.g. stealth/ox-alpha on OpenRouter)
-		// that 400 with "reasoning_content must be passed back".
+		// matches a known pattern (unsupported param / required field /
+		// text-only model), record it to the persisted registry. If the
+		// learned action upgrades ReasoningReplay (inject
+		// reasoning_content) or disables a modality (text-only model
+		// rejecting images), refresh caps so the next retry adapts.
+		// This catches models not in the catalog (e.g. stealth/ox-alpha
+		// on OpenRouter that 400s with "reasoning_content must be passed
+		// back", or Qwen3.8 that 400s with "text-only; must be a text
+		// part").
 		if isLearnable400(err) {
 			body := extractErrBody(err)
 			action, param := a.learnedParams.LearnFrom400(run.ProviderID, model, body)
@@ -97,6 +100,20 @@ func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *do
 				if !caps.ReasoningReplay {
 					caps.ReasoningReplay = true
 					a.log("info", "learning", "upgraded ReasoningReplay for %s/%s from 400 learning", run.ProviderID, model)
+				}
+			}
+			if action == domain.LearnedActionDisableModality {
+				if strings.EqualFold(param, "vision") && caps.Vision {
+					caps.Vision = false
+					a.log("info", "learning", "disabled Vision for %s/%s from 400 learning (text-only model)", run.ProviderID, model)
+				}
+				if strings.EqualFold(param, "audio") && caps.Audio {
+					caps.Audio = false
+					a.log("info", "learning", "disabled Audio for %s/%s from 400 learning", run.ProviderID, model)
+				}
+				if strings.EqualFold(param, "video") && caps.Video {
+					caps.Video = false
+					a.log("info", "learning", "disabled Video for %s/%s from 400 learning", run.ProviderID, model)
 				}
 			}
 		}

@@ -61,6 +61,31 @@ func TestLearnedParamsCacheLearnFrom400Inject(t *testing.T) {
 	}
 }
 
+func TestLearnedParamsCacheLearnFrom400DisableModality(t *testing.T) {
+	store := &fakeLearnedParamStore{}
+	cache := newLearnedParamsCache(store)
+
+	action, param := cache.LearnFrom400("openrouter", "qwen3.8-max-free",
+		`Qwen3.8 open checkpoint is text-only; messages[131].content[1] must be a text part`)
+	if action != domain.LearnedActionDisableModality || param != "vision" {
+		t.Fatalf("LearnFrom400 = (%q, %q), want (disable_modality, vision)", action, param)
+	}
+	disabled := cache.DisabledModalities("openrouter", "qwen3.8-max-free")
+	if len(disabled) != 1 || disabled[0] != "vision" {
+		t.Fatalf("DisabledModalities = %v, want [vision]", disabled)
+	}
+	if store.saves != 1 {
+		t.Errorf("expected 1 save, got %d", store.saves)
+	}
+}
+
+func TestLearnedParamsCacheDisabledModalitiesNilSafe(t *testing.T) {
+	var cache *learnedParamsCache
+	if cache.DisabledModalities("p", "m") != nil {
+		t.Error("nil cache DisabledModalities must return nil")
+	}
+}
+
 func TestLearnedParamsCacheNoMatch(t *testing.T) {
 	store := &fakeLearnedParamStore{}
 	cache := newLearnedParamsCache(store)

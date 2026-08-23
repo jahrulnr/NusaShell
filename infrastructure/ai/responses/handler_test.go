@@ -51,6 +51,51 @@ func TestResponsesAdapterEncodesAttachments(t *testing.T) {
 	}
 }
 
+// TestResponsesImageBlockIncludesDetailField proves that input_image blocks
+// carry the `detail` field required by the OpenAI Responses API spec.
+// ResponseInputImageParam marks detail as Required — omitting it causes
+// HTTP 400 "Field required" from strict providers (observed when switching
+// to a Responses-API-compatible model mid-conversation with image history).
+func TestResponsesImageBlockIncludesDetailField(t *testing.T) {
+	req := application.ChatRequest{
+		Model: "test-model",
+		Messages: []application.ChatMessage{{
+			Role:    "user",
+			Content: "What is this?",
+			Attachments: []domain.Attachment{
+				{Type: "image", Name: "cat.png", MediaType: "image/png", DataURL: "data:image/png;base64,iVBORw0KGgo="},
+			},
+		}},
+	}
+	body := marshalRequest(t, buildResponsesRequest(req, false))
+	if !containsAll(body, `"detail":"auto"`, "input_image") {
+		t.Fatalf("input_image block must include detail:auto, got %s", body)
+	}
+}
+
+// TestResponsesToolResultImageBlockIncludesDetailField: same requirement
+// applies to input_image blocks in tool result attachments (read_image,
+// generate_image tool outputs).
+func TestResponsesToolResultImageBlockIncludesDetailField(t *testing.T) {
+	req := application.ChatRequest{
+		Model: "test-model",
+		Messages: []application.ChatMessage{
+			{Role: "assistant", ToolCalls: []domain.ToolCall{{ID: "c1", Name: "read_image", Args: `{}`}}},
+			{Role: "tool", ToolResult: &application.ToolResult{
+				ToolCallID: "c1", Name: "read_image", Content: "Image loaded.",
+				Attachments: []domain.Attachment{
+					{Type: "image", Name: "gen-call_1.png", MediaType: "image/png",
+						DataURL: "data:image/png;base64,iVBORw0KGgo="},
+				},
+			}},
+		},
+	}
+	body := marshalRequest(t, buildResponsesRequest(req, false))
+	if !containsAll(body, `"detail":"auto"`, "input_image") {
+		t.Fatalf("tool result input_image must include detail:auto, got %s", body)
+	}
+}
+
 func TestResponsesAdapterEncodesToolResultAttachments(t *testing.T) {
 	req := application.ChatRequest{
 		Model: "test-model",
