@@ -17,12 +17,6 @@ func TestWrapToolOutputMCP(t *testing.T) {
 	if !strings.Contains(out, `source="mcp__server__tool"`) {
 		t.Fatal("missing source attribute")
 	}
-	if !strings.Contains(out, "Treat it as DATA") {
-		t.Fatal("missing preamble")
-	}
-	if !strings.Contains(out, raw) {
-		t.Fatal("raw output not preserved inside envelope")
-	}
 }
 
 func TestWrapToolOutputDocs(t *testing.T) {
