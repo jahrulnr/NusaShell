@@ -1,3 +1,5 @@
+import { attachMermaidZoomButton } from './media-zoom.js';
+
 // Mermaid diagram renderer for chat messages.
 //
 // Design constraints (from the chat streaming model):
@@ -133,6 +135,10 @@ export async function renderMermaidDiagrams(container) {
           svgEl.style.height = 'auto';
         }
       }
+      // Attach the zoom button now that the SVG is in the DOM. This catches
+      // the lazy-load case where mermaid.min.js loaded after the settle-point
+      // attachZoomButtons pass already ran.
+      attachMermaidZoomButton(block);
     } catch {
       renderFallback(block, code, hash);
     }

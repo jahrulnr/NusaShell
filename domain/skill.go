@@ -209,12 +209,10 @@ type Settings struct {
 	// (TTSProviderID + TTSModelID, resolved like the other fallbacks).
 	// Offline: piper with voice files under <data>/models/tts/ — live as
 	// soon as engine + voice are installed (one-click Settings installer
-	// or manual PIPER_BIN/PATH setup); TTSOfflineEnabled is legacy and no
-	// longer gates anything. When both routes are unavailable,
+	// or manual PIPER_BIN/PATH setup). When both routes are unavailable,
 	// generate_speech is not advertised.
-	TTSProviderID     string `json:"tts_provider_id,omitempty"`
-	TTSModelID        string `json:"tts_model_id,omitempty"`
-	TTSOfflineEnabled bool   `json:"tts_offline_enabled,omitempty"`
+	TTSProviderID string `json:"tts_provider_id,omitempty"`
+	TTSModelID    string `json:"tts_model_id,omitempty"`
 	// VideoFallback selects an auxiliary video-capable model used to
 	// describe video when the active chat model does not support video
 	// input. When empty, non-video models receive an error message

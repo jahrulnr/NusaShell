@@ -55,7 +55,7 @@ func (a *App) executeGenerateVideo(run *TurnRun, toolCall domain.ToolCall, setti
 	}
 	provider, apiKey, ok := a.resolveFallbackProvider(settings.VideoProviderID)
 	if !ok {
-		msg := fmt.Sprintf("Video generation provider %q was not found or is disabled.", settings.VideoProviderID)
+		msg := fmt.Sprintf("Video generation provider %q was not found or is disabled.", a.providerNameByID(settings.VideoProviderID))
 		return msg, nil, fmt.Errorf("%s", msg)
 	}
 	if a.VideoGeneratorFactory == nil {

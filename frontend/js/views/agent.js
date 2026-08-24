@@ -17,16 +17,20 @@ import {
   renderConversation,
   renderMessage,
   renderToolJob,
+  renderToolCallCard,
   renderSubagentCard,
   renderGenerateImageCard,
   renderTodoItem,
   setToolTerminalStatus,
   toolTerminalMeta,
   toolTerminalOutput,
+  parseShowImageOutput,
 } from './agent/render.js';
 import { bindSubagents, setSubagentConversation } from './agent/subagents.js';
 import { agentThread, composerInput, stopButton, attachmentsContainer, workspaceButton, workspaceLabel, providerStatus } from './agent/domrefs.js';
 import { renderMermaidDiagrams } from '../mermaid-render.js';
+import { highlightCode } from '../highlight-render.js';
+import { attachZoomButtons } from '../media-zoom.js';
 import { renderArtifactCard, parseArtifactOutput } from '../artifact-render.js';
 import { createAskCard, sealAskCard, cancelAskCard } from './ask-card.js';
 import { playComplete, playError } from '../sounds.js';
@@ -541,7 +545,7 @@ async function restorePendingAsks(conversationId, token) {
     });
     const existing = cards.find((c) => c.dataset.callId === a.tool_call_id);
     if (existing) existing.replaceWith(card);
-    else {
+    else if (run.strip) {
       run.strip.hidden = false;
       run.strip.append(card);
     }
@@ -711,12 +715,12 @@ function reattachActiveRun() {
   // Re-render accumulated content for the current (unpersisted) round.
   if (run.rawReasoning) {
     const content = reasoningEl.querySelector('.agent-reasoning-content');
-    if (content) { content.innerHTML = renderMarkdown(run.rawReasoning); void renderMermaidDiagrams(content); }
+    if (content) { content.innerHTML = renderMarkdown(run.rawReasoning); void renderMermaidDiagrams(content); void highlightCode(content); attachZoomButtons(content); }
     // If reasoning has content but no text yet, the agent is still thinking —
     // resume the streaming pulse so the user doesn't think it's stuck.
     if (!run.raw) reasoningEl.classList.add('is-streaming');
   }
-  if (run.raw) { textBox.innerHTML = renderMarkdown(run.raw); void renderMermaidDiagrams(textBox); }
+  if (run.raw) { textBox.innerHTML = renderMarkdown(run.raw); void renderMermaidDiagrams(textBox); void highlightCode(textBox); attachZoomButtons(textBox); }
   else {
     textBox.append(el('span', { class: 'agent-thinking-dots' },
       el('span'), el('span'), el('span')));
@@ -742,6 +746,7 @@ function reattachActiveRun() {
 // refresh never yanks a user who scrolled up to read history.
 function renderThread(messages, force = true) {
   const thread = agentThread();
+  if (!thread) return;
   if (!messages.length) {
     renderEmptyThread();
     return;
@@ -749,7 +754,7 @@ function renderThread(messages, force = true) {
   thread.replaceChildren(renderConversation(messages, retryTurn));
   // Render any Mermaid diagrams in the freshly painted thread (settle point,
   // not per-delta).
-  void renderMermaidDiagrams(thread);
+  void renderMermaidDiagrams(thread); void highlightCode(thread); attachZoomButtons(thread);
   // Show the "Load older" button when the window holds back older messages.
   updateOlderSentinel();
   // Defer the scroll until after layout: setting scrollTop synchronously
@@ -858,12 +863,12 @@ function applyBufferedRunToDOM(convId) {
   }
   if (source.rawReasoning) {
     const content = reasoningEl.querySelector('.agent-reasoning-content');
-    if (content) { content.innerHTML = renderMarkdown(source.rawReasoning); void renderMermaidDiagrams(content); }
+    if (content) { content.innerHTML = renderMarkdown(source.rawReasoning); void renderMermaidDiagrams(content); void highlightCode(content); attachZoomButtons(content); }
     if (!source.raw) reasoningEl.classList.add('is-streaming');
   }
   if (source.raw) textBox.innerHTML = renderMarkdown(source.raw);
   else textBox.append(el('span', { class: 'agent-thinking-dots' }, el('span'), el('span'), el('span')));
-  void renderMermaidDiagrams(textBox);
+  void renderMermaidDiagrams(textBox); void highlightCode(textBox); attachZoomButtons(textBox);
   strip.hidden = source.toolJobs.size === 0;
   for (const job of source.toolJobs.values()) strip.append(job);
   // Write the slot refs back to the buffer: openConversation may re-register
@@ -983,6 +988,7 @@ function renderTodoStrip() {
   if (briefEl) {
     if (hasGoal) {
       briefEl.innerHTML = renderMarkdown(brief.trim());
+      void highlightCode(briefEl); attachZoomButtons(briefEl);
       briefEl.title = 'User brief — survives compaction so the agent does not drift';
       briefEl.hidden = !stripOpen;
     } else {
@@ -1293,7 +1299,8 @@ function endTurn(runId) {
   if (convId === state.activeId) {
     clearSteerQueue();
     if (!runForConversation(state.activeId)) {
-      stopButton().hidden = true;
+      const stop = stopButton();
+      if (stop) stop.hidden = true;
     }
     updateSendAvailability(state);
     updateComposerStatus();
@@ -1482,7 +1489,7 @@ async function loadOlderChunk() {
     // Insert a "Load older" sentinel above the chunk so the user can manually
     // trigger the next load if the proactive threshold is not met.
     thread?.insertBefore(fragment, thread.firstChild);
-    if (thread) void renderMermaidDiagrams(thread);
+    if (thread) void renderMermaidDiagrams(thread); void highlightCode(thread); attachZoomButtons(thread);
     // Restore the scroll position so the user doesn't jump.
     if (thread) {
       const newHeight = thread.scrollHeight;
@@ -1512,9 +1519,9 @@ async function loadOlderChunk() {
         } else {
           if (prevRun.rawReasoning) {
             const content = slot.reasoningEl.querySelector('.agent-reasoning-content');
-            if (content) { content.innerHTML = renderMarkdown(prevRun.rawReasoning); void renderMermaidDiagrams(content); }
+            if (content) { content.innerHTML = renderMarkdown(prevRun.rawReasoning); void renderMermaidDiagrams(content); void highlightCode(content); attachZoomButtons(content); }
           }
-          if (prevRun.raw) { slot.textBox.innerHTML = renderMarkdown(prevRun.raw); void renderMermaidDiagrams(slot.textBox); }
+          if (prevRun.raw) { slot.textBox.innerHTML = renderMarkdown(prevRun.raw); void renderMermaidDiagrams(slot.textBox); void highlightCode(slot.textBox); attachZoomButtons(slot.textBox); }
           else {
             slot.textBox.append(el('span', { class: 'agent-thinking-dots' },
               el('span'), el('span'), el('span')));
@@ -1626,7 +1633,7 @@ function bindEvents() {
     // are preserved. This is the ChatGPT pattern: mermaid renders at
     // fence-close and stays locked across subsequent text deltas.
     incrementalRender(run.textBox, run.raw);
-    void renderMermaidDiagrams(run.textBox);
+    void renderMermaidDiagrams(run.textBox); void highlightCode(run.textBox); attachZoomButtons(run.textBox);
     scrollToBottom();
   });
   on('agent.context.estimate', (payload) => {
@@ -1674,7 +1681,7 @@ function bindEvents() {
       const content = run.reasoningEl.querySelector('.agent-reasoning-content');
       if (content) {
         incrementalRender(content, run.rawReasoning);
-        void renderMermaidDiagrams(content);
+        void renderMermaidDiagrams(content); void highlightCode(content); attachZoomButtons(content);
       }
       scrollToBottom();
     }
@@ -1684,6 +1691,18 @@ function bindEvents() {
     const run = getRunOrQueue('agent.provider.retry', payload);
     if (!run) return;
     if (conversation_id !== state.activeId) return;
+    // Clear partial content from the interrupted stream so the retry
+    // starts fresh. Without this, new deltas from the retry append to
+    // the cut-off text and produce garbled output.
+    if (run.raw) {
+      run.raw = '';
+      if (run.textBox) run.textBox.textContent = '';
+    }
+    if (run.rawReasoning) {
+      run.rawReasoning = '';
+      const rc = run.reasoningEl?.querySelector('.agent-reasoning-content');
+      if (rc) rc.innerHTML = '';
+    }
     // Remove any previous retry banner, then show a new one at the top of the
     // bubble so the user sees the agent is retrying, not stuck.
     run.bubble.querySelector('.agent-retry-banner')?.remove();
@@ -1736,6 +1755,7 @@ function bindEvents() {
         run.textBox = null;
       }
     }
+    if (!run.strip) return;
     run.strip.hidden = false;
     const job = name === 'generate_image'
       ? renderGenerateImageCard({ name, args: args ?? {}, status: 'running' })
@@ -1783,6 +1803,14 @@ function bindEvents() {
             card._toolArgs = toolCall.args;
             job.replaceWith(card);
             buffer.toolJobs.set(tool_call_id, card);
+          } else {
+            const showImage = parseShowImageOutput(toolCall);
+            if (showImage) {
+              const card = renderToolCallCard(toolCall);
+              card._toolArgs = toolCall.args;
+              job.replaceWith(card);
+              buffer.toolJobs.set(tool_call_id, card);
+            }
           }
         } else if (name === 'subagent') {
           // Re-render the delegation card with the completion output so a
@@ -1834,6 +1862,15 @@ function bindEvents() {
         job.replaceWith(card);
         run.toolJobs.set(tool_call_id, card);
         card._toolArgs = toolCall.args;
+      } else if (job) {
+        // show(op=image): swap terminal for inline image card.
+        const showImage = parseShowImageOutput(toolCall);
+        if (showImage) {
+          const card = renderToolCallCard(toolCall);
+          job.replaceWith(card);
+          run.toolJobs.set(tool_call_id, card);
+          card._toolArgs = toolCall.args;
+        }
       }
       return;
     }
@@ -1850,7 +1887,7 @@ function bindEvents() {
         job.replaceWith(card);
         run.toolJobs.set(tool_call_id, card);
         card._toolArgs = toolCall.args;
-      } else {
+      } else if (run.strip) {
         run.strip.append(card);
         run.toolJobs.set(tool_call_id, card);
       }
@@ -1908,7 +1945,7 @@ function bindEvents() {
       meta.append(el('span', { class: 'agent-message-meta', text: fmtTime(new Date().toISOString()) }));
       run.msgNode.append(meta);
       // Render any Mermaid diagrams in the just-finished message (settle point).
-      void renderMermaidDiagrams(run.msgNode);
+      void renderMermaidDiagrams(run.msgNode); void highlightCode(run.msgNode); attachZoomButtons(run.msgNode);
     }
     endTurn(run_id);
     if (error) {
@@ -1983,6 +2020,7 @@ function bindEvents() {
     // The ask card replaces the tool terminal card entirely (matching
     // Electron's createStreamingToolCard). It lives in the tool strip,
     // not nested inside a tool terminal <details>.
+    if (!run.strip) return;
     run.strip.hidden = false;
     const card = createAskCard(tool_call_id, { question, options, allow_free_text, multi_select }, {
       runId: run_id,
@@ -2194,6 +2232,7 @@ async function refreshModels() {
 
 function updateModelTrigger() {
   const label = document.getElementById('model-trigger-label');
+  if (!label) return;
   const chosen = models.find((m) => `${m.provider_id}:${m.id}` === state.model) || models.find((m) => m.id === state.model);
   const parts = [chosen ? (chosen.display_name || chosen.id) : (state.model || 'No model')];
   if (state.effort && state.effort !== 'auto') parts.push(state.effort);

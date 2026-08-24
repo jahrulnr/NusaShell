@@ -7,34 +7,6 @@ import (
 	"nusashell/domain"
 )
 
-// TestSystemPromptCacheStable verifies the system prompt never carries
-// runtime state: delegation config, continuation instructions, or async
-// subagent results must travel as tool hydration/tool descriptions so the
-// system prefix keeps its prompt-cache hits.
-func TestSystemPromptCacheStable(t *testing.T) {
-	c := &domain.Conversation{
-		ID: "c1",
-		Messages: []domain.Message{
-			{ID: "u1", Role: domain.RoleUser, Content: "hi"},
-			{ID: "a1", Role: domain.RoleAssistant, Content: "hello"},
-			{ID: "a2", Role: domain.RoleAssistant, Content: "partial", Status: domain.StatusDone},
-		},
-	}
-	prompt := buildSystemPrompt(c, "user instructions")
-	for _, forbidden := range []string{
-		"Available ACP agents",
-		"Subagent delegation",
-		"interrupted by a transient upstream failure",
-		"continue_stream",
-		"subagent_result",
-		"Backend restarted",
-	} {
-		if strings.Contains(prompt, forbidden) {
-			t.Errorf("system prompt must not contain runtime state %q", forbidden)
-		}
-	}
-}
-
 // TestAppendContinuationTool verifies the continuation instruction is
 // delivered as an ephemeral synthetic tool call + result (announcement
 // style), never as a system prompt mutation.

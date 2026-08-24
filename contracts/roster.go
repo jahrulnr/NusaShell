@@ -1152,7 +1152,6 @@ type SettingsDTO struct {
 	VideoModelID               string   `json:"video_model_id,omitempty"`
 	TTSProviderID              string   `json:"tts_provider_id,omitempty"`
 	TTSModelID                 string   `json:"tts_model_id,omitempty"`
-	TTSOfflineEnabled          bool     `json:"tts_offline_enabled,omitempty"`
 	ImageProviderID            string   `json:"image_provider_id,omitempty"`
 	ImageModelID               string   `json:"image_model_id,omitempty"`
 	WebAnswerProvider          string   `json:"web_answer_provider,omitempty"`
@@ -1199,7 +1198,6 @@ type SettingsSetRequest struct {
 	VideoModelID               *string         `json:"video_model_id,omitempty"`
 	TTSProviderID              *string         `json:"tts_provider_id,omitempty"`
 	TTSModelID                 *string         `json:"tts_model_id,omitempty"`
-	TTSOfflineEnabled          *bool           `json:"tts_offline_enabled,omitempty"`
 	ImageProviderID            *string         `json:"image_provider_id,omitempty"`
 	ImageModelID               *string         `json:"image_model_id,omitempty"`
 	WebAnswerProvider          *string         `json:"web_answer_provider,omitempty"`

@@ -42,7 +42,7 @@ func (a *App) describeImagesWithFallback(ctx context.Context, settings domain.Se
 
 	provider, apiKey, ok := a.resolveVisionProvider(settings.VisionProviderID)
 	if !ok {
-		a.log("warn", "vision", "vision fallback provider %q not found or disabled; skipping image description", settings.VisionProviderID)
+		a.log("warn", "vision", "vision fallback provider %q not found or disabled; skipping image description", a.providerNameByID(settings.VisionProviderID))
 		return attachments
 	}
 	adapter, err := a.Factory(ctx, provider, apiKey)
@@ -55,7 +55,7 @@ func (a *App) describeImagesWithFallback(ctx context.Context, settings domain.Se
 	out = append(out, attachments...)
 	for _, idx := range imageIdxs {
 		img := attachments[idx]
-		description, err := a.describeOneImage(ctx, adapter, settings.VisionModelID, img, defaultDescribeImagePrompt)
+		description, err := a.describeOneImage(ctx, adapter, a.providerNameByID(settings.VisionProviderID), settings.VisionModelID, img, defaultDescribeImagePrompt)
 		if err != nil {
 			a.log("warn", "vision", "image description failed for %q: %v", img.Name, err)
 			continue
@@ -120,7 +120,7 @@ func (a *App) enrichWithVisionDescriptions(ctx context.Context, conversation *do
 	}
 
 	a.log("info", "vision", "describing %d image(s) via fallback model %s/%s for non-vision chat model",
-		countImages(userMsg.Attachments), settings.VisionProviderID, settings.VisionModelID)
+		countImages(userMsg.Attachments), a.providerNameByID(settings.VisionProviderID), settings.VisionModelID)
 
 	described := a.describeImagesWithFallback(ctx, settings, userMsg.Attachments)
 	if len(described) <= len(userMsg.Attachments) {
@@ -154,7 +154,7 @@ func countImages(atts []domain.Attachment) int {
 // all call sites share one string.
 const defaultDescribeImagePrompt = "Describe this image concisely. Focus on visible objects, text, people, settings, and any notable details. Keep it factual and under 200 words."
 
-func (a *App) describeOneImage(ctx context.Context, adapter AIProvider, model string, image domain.Attachment, prompt string) (string, error) {
+func (a *App) describeOneImage(ctx context.Context, adapter AIProvider, providerName, model string, image domain.Attachment, prompt string) (string, error) {
 	if strings.TrimSpace(prompt) == "" {
 		prompt = defaultDescribeImagePrompt
 	}
@@ -182,7 +182,10 @@ func (a *App) describeOneImage(ctx context.Context, adapter AIProvider, model st
 		description = strings.TrimSpace(resp.Reasoning)
 	}
 	if description == "" {
-		return "", fmt.Errorf("empty description from vision model")
+		a.log("warn", "vision", "empty description from vision model %s/%s: stop_reason=%q content_len=%d reasoning_len=%d usage=%+v tool_calls=%d",
+			providerName, model, resp.StopReason, len(resp.Content), len(resp.Reasoning), resp.Usage, len(resp.ToolCalls))
+		return "", fmt.Errorf("empty description from vision model %s/%s (stop_reason=%q, content=%d chars, reasoning=%d chars, tool_calls=%d) — the model produced no usable output; check the model supports vision input and the max_output_tokens budget is sufficient",
+			providerName, model, resp.StopReason, len(resp.Content), len(resp.Reasoning), len(resp.ToolCalls))
 	}
 	return description, nil
 }

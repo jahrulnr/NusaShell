@@ -67,7 +67,7 @@ func (a *App) executeGenerateSpeech(run *TurnRun, toolCall domain.ToolCall, sett
 	if settings.TTSProviderID != "" && settings.TTSModelID != "" {
 		provider, apiKey, ok := a.resolveFallbackProvider(settings.TTSProviderID)
 		if !ok {
-			msg := fmt.Sprintf("Speech generation provider %q was not found or is disabled.", settings.TTSProviderID)
+			msg := fmt.Sprintf("Speech generation provider %q was not found or is disabled.", a.providerNameByID(settings.TTSProviderID))
 			return msg, nil, fmt.Errorf("%s", msg)
 		}
 		if a.SpeechSynthesizerFactory != nil {

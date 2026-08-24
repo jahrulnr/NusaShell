@@ -92,13 +92,13 @@ func (a *App) codexAccountCircuitUntil(accountID string) int64 {
 func (a *App) markProviderHasCreds(providerID string, hasKey bool) {
 	p, err := a.Providers.Get(providerID)
 	if err != nil {
-		a.log("warn", "ai", "failed to get provider %s for cred flag update: %v", providerID, err)
+		a.log("warn", "ai", "failed to get provider %s for cred flag update: %v", a.providerNameByID(providerID), err)
 		return
 	}
 	p.HasAPIKey = hasKey
 	p.UpdatedAt = time.Now().UTC()
 	if err := a.Providers.Save(p); err != nil {
-		a.log("warn", "ai", "failed to save provider %s cred flag: %v", providerID, err)
+		a.log("warn", "ai", "failed to save provider %s cred flag: %v", p.Name, err)
 	}
 }
 

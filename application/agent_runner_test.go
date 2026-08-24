@@ -852,8 +852,9 @@ func (a *recordingCompleteAdapter) Complete(_ context.Context, req ChatRequest) 
 }
 
 func TestCompactionPassBudgetShrinksWithRunningSummary(t *testing.T) {
-	empty := compactionPassAvailable(10_000, "", compactionSummaryMaxOut)
-	grown := compactionPassAvailable(10_000, strings.Repeat("x", 8000), compactionSummaryMaxOut)
+	const window = 50_000
+	empty := compactionPassAvailable(window, "", compactionSummaryMaxOut)
+	grown := compactionPassAvailable(window, strings.Repeat("x", 8000), compactionSummaryMaxOut)
 	if grown >= empty {
 		t.Fatalf("available with large summary %d should be < empty %d", grown, empty)
 	}
@@ -1121,8 +1122,9 @@ func TestMultiPassCompactionShrinksLaterChunks(t *testing.T) {
 	adapter := &recordingCompleteAdapter{summaries: []string{hugeSummary, validTestSummary}}
 	app := &App{Conversations: store, Logs: &fakeLogStore{}, Bus: NewBus()}
 	// Use a small summary max tokens so the multi-pass shrinking is visible
-	// with the small contextWindow=4000. The default (4000) would leave no
-	// room for message content after the summary reserve.
+	// with the small contextWindow=4000. The default (16000) would be clamped
+	// to maxBudget=3700 and leave no room for message content after the
+	// summary reserve.
 	settings := domain.DefaultSettings()
 	settings.CompactionSummaryMaxTokens = 800
 	if _, err := app.compactConversation(context.Background(), adapter, conv, "model", 4000, settings); err != nil {

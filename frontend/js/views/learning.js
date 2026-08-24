@@ -3,6 +3,7 @@
 
 import { rpc, on, off } from '../rpc.js';
 import { el, debounce, createSelect, toast, fmtTime } from '../ui.js';
+import { renderMarkdown } from '../markdown.js';
 // Reuse the Agent view's thinking/tool components so the review activity
 // reads exactly like a live agent conversation (minus the user side).
 import { reasoningDisclosure, renderToolCallCard, setToolTerminalStatus, toolTerminalMeta } from './agent/render.js';
@@ -458,8 +459,12 @@ function collectAgentFlow(messages) {
   let narration = '';
 
   const flushNarration = () => {
-    const text = narration.replace(/\s+/g, ' ').trim();
-    if (text) items.push(el('div', { class: 'learning-log-note', text: oneLine(text, 300) }));
+    const text = narration.trim();
+    if (text) {
+      const note = el('div', { class: 'learning-log-note' });
+      note.innerHTML = renderMarkdown(text);
+      items.push(note);
+    }
     narration = '';
   };
 
@@ -507,7 +512,9 @@ function collectAgentFlow(messages) {
     if (typeof msg.content === 'string' && msg.content.trim()) {
       // Terminal text response: the review's verdict.
       flushNarration();
-      items.push(el('div', { class: 'learning-log-conclusion', text: oneLine(msg.content, 400) }));
+      const conclusion = el('div', { class: 'learning-log-conclusion' });
+      conclusion.innerHTML = renderMarkdown(msg.content);
+      items.push(conclusion);
     }
   }
   // Narration captured just before an interrupted loop end still shows.
@@ -609,8 +616,9 @@ function renderResults() {
         contentEl.classList.toggle('expanded');
       });
     }
+    const score = item.score && item.score > 0 ? `★ ${(item.score * 100).toFixed(1)}%` : '';
     const headerRight = el('div', { class: 'learning-result-header-right' }, [
-      el('span', { class: 'learning-result-score', text: scoreLabel(item.score) }),
+      el('span', { class: 'learning-result-score', text: score }),
     ]);
     if (item.kind === 'memory') {
       const delBtn = el('button', {
@@ -634,7 +642,12 @@ function renderResults() {
       item.name ? el('div', { class: 'learning-result-name', text: item.name }) : null,
       contentEl,
     ]);
-    card.addEventListener('click', () => focusNode(item.id));
+    card.addEventListener('click', () => {
+      if (state.network) {
+        state.network.focus(item.id, { scale: 1.5, animation: { duration: 400 } });
+        state.network.selectNodes([item.id]);
+      }
+    });
     resultsEl.appendChild(card);
   }
 }
@@ -682,11 +695,6 @@ function confirmDelete(id) {
     deleteBtn.addEventListener('click', () => close(true));
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
   });
-}
-
-function scoreLabel(score) {
-  if (!score || score <= 0) return '';
-  return `★ ${(score * 100).toFixed(1)}%`;
 }
 
 function initGraph() {
@@ -784,12 +792,13 @@ async function loadGraph() {
       };
     });
 
+    const edgeColors = { related: '#1f6feb', used_with: '#6ee0c4', derived_from: '#c1a6ff' };
     const newEdges = (edges || []).map((e, i) => ({
       id: `edge_${i}`,
       from: e.from,
       to: e.to,
       width: Math.max(1.5, e.weight * 4),
-      color: { color: edgeColor(e.type), highlight: '#6ee0c4', hover: '#8af0d4' },
+      color: { color: edgeColors[e.type] || '#4b504b', highlight: '#6ee0c4', hover: '#8af0d4' },
       title: `${e.type} (${(e.weight * 100).toFixed(0)}%)`,
     }));
 
@@ -821,17 +830,4 @@ async function loadGraph() {
   }
 }
 
-function edgeColor(type) {
-  switch (type) {
-    case 'related': return '#1f6feb';
-    case 'used_with': return '#6ee0c4';
-    case 'derived_from': return '#c1a6ff';
-    default: return '#4b504b';
-  }
-}
 
-function focusNode(id) {
-  if (!state.network) return;
-  state.network.focus(id, { scale: 1.5, animation: { duration: 400 } });
-  state.network.selectNodes([id]);
-}

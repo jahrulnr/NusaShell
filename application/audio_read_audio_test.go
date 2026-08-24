@@ -28,8 +28,9 @@ func TestExecuteReadAudioNative(t *testing.T) {
 	if !strings.Contains(output, "Audio loaded") {
 		t.Errorf("output should mention audio loaded, got: %q", output)
 	}
-	if !strings.Contains(output, "what is being said") {
-		t.Errorf("output should include question, got: %q", output)
+	// Question echo removed from native audio output (model already knows).
+	if strings.Contains(output, "what is being said") {
+		t.Errorf("audio output should NOT echo the question, got: %q", output)
 	}
 	if len(atts) != 1 {
 		t.Fatalf("expected 1 attachment (audio), got %d", len(atts))

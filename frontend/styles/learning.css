@@ -695,6 +695,8 @@
   line-height: 1.5;
   word-break: break-word;
 }
+.learning-log-note p:first-child { margin-top: 0; }
+.learning-log-note p:last-child { margin-bottom: 0; }
 
 /* Final verdict line: what the review agent decided (saved / nothing
    found...), rendered like a short agent reply at the end of the flow. */
@@ -705,3 +707,5 @@
   line-height: 1.5;
   word-break: break-word;
 }
+.learning-log-conclusion p:first-child { margin-top: 0; }
+.learning-log-conclusion p:last-child { margin-bottom: 0; }

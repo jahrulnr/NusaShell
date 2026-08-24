@@ -44,6 +44,36 @@ test('parseBlocks marks complete mermaid fence as data-complete="true"', () => {
   assert.match(blocks[0].html, /data-complete="true"/);
 });
 
+test('parseBlocks emits data-complete on fenced code blocks', () => {
+  // Complete fence → data-complete="true"
+  const complete = parseBlocks('```js\nconst a = 1;\n```');
+  assert.equal(complete.length, 1);
+  assert.match(complete[0].html, /data-complete="true"/);
+  // Incomplete fence (no closing ```) → data-complete="false"
+  const incomplete = parseBlocks('```js\nconst a = 1;');
+  assert.equal(incomplete.length, 1);
+  assert.match(incomplete[0].html, /data-complete="false"/);
+});
+
+test('parseBlocks emits language-xxx class on <code> when lang is specified', () => {
+  const blocks = parseBlocks('```bash\necho hello\n```');
+  assert.equal(blocks.length, 1);
+  assert.match(blocks[0].html, /<code class="language-bash">/);
+});
+
+test('parseBlocks omits language class when no lang is given (auto-detect)', () => {
+  const blocks = parseBlocks('```\necho hello\n```');
+  assert.equal(blocks.length, 1);
+  assert.match(blocks[0].html, /<code>/);
+  assert.doesNotMatch(blocks[0].html, /language-/);
+});
+
+test('parseBlocks emits data-complete="true" on indented code blocks', () => {
+  const blocks = parseBlocks('    const a = 1;');
+  assert.equal(blocks.length, 1);
+  assert.match(blocks[0].html, /data-complete="true"/);
+});
+
 test('renderMarkdown is backward compatible (produces same blocks joined)', () => {
   const html = renderMarkdown('hello\n\nworld');
   assert.match(html, /<p data-start="0"/);

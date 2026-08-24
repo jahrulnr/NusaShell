@@ -48,13 +48,9 @@ func (a *App) executeReadVideo(run *TurnRun, toolCall domain.ToolCall, caps Mode
 
 	// Native fast path: video-capable model gets the video directly.
 	if caps.Video {
-		question := strings.TrimSpace(args.Question)
 		summary := "Video loaded into your context."
 		if video.FilePath != "" {
 			summary += " File path: " + video.FilePath
-		}
-		if question != "" {
-			summary += " Question: " + question
 		}
 		return summary, []domain.Attachment{video}, nil
 	}
@@ -70,7 +66,7 @@ func (a *App) executeReadVideo(run *TurnRun, toolCall domain.ToolCall, caps Mode
 
 	provider, apiKey, ok := a.resolveFallbackProvider(settings.VideoProviderID)
 	if !ok {
-		return "Video fallback provider not found or disabled.", nil, fmt.Errorf("video provider %q not found", settings.VideoProviderID)
+		return "Video fallback provider not found or disabled.", nil, fmt.Errorf("video provider %q not found", a.providerNameByID(settings.VideoProviderID))
 	}
 	adapter, err := a.Factory(run.Ctx, provider, apiKey)
 	if err != nil {
@@ -159,7 +155,7 @@ func (a *App) describeVideosWithFallback(ctx context.Context, settings domain.Se
 
 	provider, apiKey, ok := a.resolveFallbackProvider(settings.VideoProviderID)
 	if !ok {
-		a.log("warn", "video", "video fallback provider %q not found or disabled; skipping video description", settings.VideoProviderID)
+		a.log("warn", "video", "video fallback provider %q not found or disabled; skipping video description", a.providerNameByID(settings.VideoProviderID))
 		return attachments
 	}
 	adapter, err := a.Factory(ctx, provider, apiKey)
@@ -218,7 +214,7 @@ func (a *App) enrichWithVideoDescriptions(ctx context.Context, conversation *dom
 	}
 
 	a.log("info", "video", "describing %d video file(s) via fallback model %s/%s for non-video chat model",
-		countAttachmentsByType(userMsg.Attachments, "video"), settings.VideoProviderID, settings.VideoModelID)
+		countAttachmentsByType(userMsg.Attachments, "video"), a.providerNameByID(settings.VideoProviderID), settings.VideoModelID)
 
 	described := a.describeVideosWithFallback(ctx, settings, userMsg.Attachments)
 	if len(described) <= len(userMsg.Attachments) {

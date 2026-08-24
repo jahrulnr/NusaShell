@@ -1357,9 +1357,6 @@ func (a *App) handleSettingsSet(req contracts.SettingsSetRequest) (any, *contrac
 	if req.TTSModelID != nil {
 		s.TTSModelID = strings.TrimSpace(*req.TTSModelID)
 	}
-	if req.TTSOfflineEnabled != nil {
-		s.TTSOfflineEnabled = *req.TTSOfflineEnabled
-	}
 	if req.ImageProviderID != nil {
 		s.ImageProviderID = strings.TrimSpace(*req.ImageProviderID)
 	}
@@ -1455,7 +1452,6 @@ func settingsDTO(s domain.Settings) contracts.SettingsDTO {
 		VideoModelID:               s.VideoModelID,
 		TTSProviderID:              s.TTSProviderID,
 		TTSModelID:                 s.TTSModelID,
-		TTSOfflineEnabled:          s.TTSOfflineEnabled,
 		ImageProviderID:            s.ImageProviderID,
 		ImageModelID:               s.ImageModelID,
 		WebAnswerProvider:          s.WebAnswerProvider,

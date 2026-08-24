@@ -25,8 +25,14 @@ var compactionPrompt = resources.Prompt("compaction")
 // system.md) with any system-level skill messages stored in the conversation.
 // The system.md prefix is cache-stable across turns; the user prompt (if set)
 // extends that prefix — changing it breaks the prompt cache for all subsequent
-// turns until a new cache shard stabilizes. Only the tail (system messages,
-// workspace) varies per conversation/turn.
+// turns until a new cache shard stabilizes. Only the tail (system messages)
+// varies per conversation/turn.
+//
+// The active workspace is NOT appended here — it travels in the
+// runtime_context hydration slot (see HydrationBuilder.readRuntimeContext),
+// which is re-injected whenever the workspace changes or after compaction.
+// Duplicating it in the system prompt would break cache stability on
+// workspace switch for no benefit.
 //
 // Compaction summaries carry role=user (not system) so they appear in the
 // provider request's messages array — see domain.CompactionSummaryPrefix.
@@ -43,11 +49,6 @@ func buildSystemPrompt(c *domain.Conversation, userPrompt string) string {
 			sb.WriteString("\n\n")
 			sb.WriteString(m.Content)
 		}
-	}
-	if c.Workspace != "" {
-		sb.WriteString("\n\nThe active workspace for this conversation is: ")
-		sb.WriteString(c.Workspace)
-		sb.WriteString(". Treat it as the working directory when using workspace-aware tools.")
 	}
 	return sb.String()
 }

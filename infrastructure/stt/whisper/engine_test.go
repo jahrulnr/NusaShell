@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -39,12 +40,16 @@ func writeFakeBinary(t *testing.T, dir string) string {
 }
 
 // quietEnv freezes the globals the resolution order reads so each test only
-// sees what it sets itself. PATH is kept (the fake needs /bin/sh).
+// sees what it sets itself. PATH is repointed to a temp dir so a system-wide
+// whisper-cli install does not leak into the "no engine" assertions; /bin and
+// /usr/bin are preserved so the fake binary's /bin/sh shebang still works.
 func quietEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{"WHISPER_BIN", "WFAKE_ARGS", "WFAKE_EXIT"} {
 		t.Setenv(k, "")
 	}
+	emptyPath := t.TempDir()
+	t.Setenv("PATH", emptyPath+":/bin:/usr/bin")
 }
 
 func TestLookupBinaryOverrideManagedAndFailure(t *testing.T) {
@@ -63,7 +68,7 @@ func TestLookupBinaryOverrideManagedAndFailure(t *testing.T) {
 		t.Errorf("reason should name the engine, got %q", got)
 	}
 
-	managed := writeFakeBinary(t, filepath.Join(dir, "whisper", "linux-amd64"))
+	managed := writeFakeBinary(t, filepath.Join(dir, "whisper", runtime.GOOS+"-"+runtime.GOARCH))
 	if got, err := eng.lookupBinary(); err != nil || got != managed {
 		t.Errorf("managed lookup: got %q (%v), want %q", got, err, managed)
 	}

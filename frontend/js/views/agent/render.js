@@ -287,7 +287,62 @@ export function renderToolCallCard(toolCall) {
   if (artifact) {
     return renderArtifactCard(toolCall, artifact);
   }
+  const showImage = parseShowImageOutput(toolCall);
+  if (showImage) {
+    return renderShowImageCard(toolCall, showImage);
+  }
   return renderToolJob(toolCall);
+}
+
+// parseShowImageOutput extracts a show(op=image) result from a tool call's
+// output. Returns { src, path } or null when the output is not a show image
+// result.
+export function parseShowImageOutput(toolCall) {
+  if (toolCall.name !== 'show') return null;
+  if (!toolCall.output) return null;
+  try {
+    const parsed = JSON.parse(toolCall.output);
+    if (parsed && parsed.show && parsed.show.type === 'image' && parsed.show.src) {
+      return { src: parsed.show.src, path: parsed.show.path || '' };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// renderShowImageCard builds an inline image card for a show(op=image) result.
+// Mirrors the generated-image card layout but simpler (no model/cost chips).
+function renderShowImageCard(toolCall, showImage) {
+  const card = el('div', { class: 'agent-genimage-card is-done', 'data-tool': 'show' });
+  const head = el('div', { class: 'agent-genimage-head' },
+    el('span', { class: 'agent-genimage-kicker', text: 'image' }),
+    el('span', { class: 'agent-genimage-title', text: showImage.path ? showImage.path.split(/[\\/]/).pop() : 'Image' }),
+  );
+  card.append(head);
+  const plate = el('div', { class: 'agent-genimage-plate' });
+  const gallery = el('div', { class: 'agent-genimage-gallery', 'data-count': '1' });
+  const label = showImage.path ? showImage.path.split(/[\\/]/).pop() : 'Image';
+  const img = el('img', { src: showImage.src, alt: label, loading: 'lazy' });
+  img.addEventListener('error', () => img.classList.add('img-load-error'));
+  const open = () => openImageLightbox({ src: showImage.src, name: label, caption: showImage.path });
+  const btn = el('button', { class: 'agent-genimage-open', type: 'button', 'aria-label': 'View ' + label });
+  btn.append(img);
+  btn.addEventListener('click', open);
+  gallery.append(el('figure', { class: 'agent-genimage-frame' }, btn));
+  plate.append(gallery);
+  card.append(plate);
+  const caption = el('div', { class: 'agent-genimage-caption' });
+  if (showImage.path) {
+    caption.append(el('a', {
+      class: 'agent-genimage-download',
+      href: showImage.src,
+      download: label,
+      text: 'Download',
+    }));
+  }
+  if (caption.children.length) card.append(caption);
+  return card;
 }
 
 // renderSubagentCard builds a delegation card for the `subagent` tool.
@@ -611,18 +666,21 @@ export function renderToolJob(toolCall) {
   const name = toolCall.name || 'tool';
   const isMcp = name.startsWith('mcp__');
   const isMcpCall = name === 'mcp_call';
-  const mcpRef = isMcpCall ? parseMcpCallRef(toolCall.args) : null;
+  const mcpRef = isMcpCall ? (parseToolArgs(toolCall.args).ref || null) : null;
   const displayName = isMcp
     ? name.replace(/^mcp__/, '').replace(/__/g, ' · ')
     : isMcpCall && mcpRef
       ? mcpRef.replace(':', ' · ')
       : name;
+  const elapsed = toolCall.elapsed
+    ? (() => { const t = Math.max(0, Math.floor(Number(toolCall.elapsed) || 0)); return t < 60 ? `${t}s` : `${Math.floor(t / 60)}m ${t % 60}s`; })()
+    : '';
   const summary = el('summary', {},
     el('span', { class: 'agent-tool-terminal-prompt', text: '›_' }),
     el('span', { class: 'agent-tool-terminal-title', text: displayName }),
     (isMcp || isMcpCall) ? el('span', { class: 'agent-tool-terminal-badge', text: 'MCP' }) : null,
     el('span', { class: 'agent-tool-terminal-meta', text: toolTerminalMeta(toolCall) }),
-    el('span', { class: 'agent-tool-elapsed', text: toolCall.elapsed ? formatElapsed(toolCall.elapsed) : '' }),
+    el('span', { class: 'agent-tool-elapsed', text: elapsed }),
     el('span', { class: 'agent-tool-terminal-chevron', text: '⌄' }),
   );
   const body = el('div', { class: 'agent-tool-terminal-body' },
@@ -636,33 +694,27 @@ export function renderToolJob(toolCall) {
   return card;
 }
 
-// formatElapsed formats a duration in seconds (e.g. 3 → "3s", 75 → "1m 15s").
-export function formatElapsed(seconds) {
-  const total = Math.max(0, Math.floor(Number(seconds) || 0));
-  if (total < 60) return `${total}s`;
-  return `${Math.floor(total / 60)}m ${total % 60}s`;
-}
-
 // formatTokens renders a token count with a human unit suffix
 // (e.g. 10680 → "10.68k", 27085560 → "27.09M", 137 → "137").
 export function formatTokens(value) {
   const n = Number(value) || 0;
-  if (n >= 1e9) return `${trimUnit((n / 1e9).toFixed(2))}B`;
-  if (n >= 1e6) return `${trimUnit((n / 1e6).toFixed(2))}M`;
-  if (n >= 1e3) return `${trimUnit((n / 1e3).toFixed(2))}k`;
+  const trim = (v) => v.replace(/\.?0+$/, '');
+  if (n >= 1e9) return `${trim((n / 1e9).toFixed(2))}B`;
+  if (n >= 1e6) return `${trim((n / 1e6).toFixed(2))}M`;
+  if (n >= 1e3) return `${trim((n / 1e3).toFixed(2))}k`;
   return String(n);
-}
-
-function trimUnit(value) {
-  return value.replace(/\.?0+$/, '');
 }
 
 export function toolTerminalMeta(toolCall) {
   const status = toolCall.status || 'running';
   if (status === 'running') return 'Running';
   if (toolCall.name === 'mcp_call') {
-    const inner = summarizeMcpCallArgs(toolCall.args);
-    if (inner) return inner;
+    const parsed = parseToolArgs(toolCall.args);
+    const inner = parsed.arguments_json;
+    if (inner) {
+      const summary = summarizeToolArgs(parseToolArgs(inner));
+      if (summary) return summary;
+    }
   }
   return summarizeToolArgs(toolCall.args) || (status === 'fail' ? 'Failed' : 'Completed');
 }
@@ -681,8 +733,12 @@ export function setToolTerminalStatus(card, status) {
 }
 
 export function attachmentChip(attachment, onRemove) {
+  const icon = attachment.type === 'image' ? 'IMG'
+    : attachment.type === 'file' ? 'PDF'
+    : attachment.type === 'folder' ? 'DIR'
+    : 'TXT';
   const chip = el('span', { class: 'agent-attachment' },
-    el('span', { class: 'agent-attachment-name', text: `${attachmentIcon(attachment)} · ${attachment.name || 'Attachment'}` }),
+    el('span', { class: 'agent-attachment-name', text: `${icon} · ${attachment.name || 'Attachment'}` }),
   );
   if (onRemove) {
     const remove = el('button', { class: 'agent-attachment-remove', type: 'button', title: `Remove ${attachment.name || 'attachment'}`, 'aria-label': `Remove ${attachment.name || 'attachment'}` }, '×');
@@ -697,18 +753,6 @@ function toolTerminalPanel(label, codeClass, text) {
     el('div', { class: 'agent-tool-terminal-panel-label', text: label }),
     el('pre', { class: codeClass, text }),
   );
-}
-
-function parseMcpCallRef(args) {
-  const parsed = parseToolArgs(args);
-  return parsed.ref || null;
-}
-
-function summarizeMcpCallArgs(args) {
-  const parsed = parseToolArgs(args);
-  const inner = parsed.arguments_json;
-  if (!inner) return '';
-  return summarizeToolArgs(parseToolArgs(inner));
 }
 
 function summarizeToolArgs(args) {
@@ -741,13 +785,6 @@ function formatToolTerminalInput(name, args) {
 
 function truncate(value, limit) {
   return value.length > limit ? `${value.slice(0, limit)}\n… (truncated)` : value;
-}
-
-function attachmentIcon(attachment) {
-  if (attachment.type === 'image') return 'IMG';
-  if (attachment.type === 'file') return 'PDF';
-  if (attachment.type === 'folder') return 'DIR';
-  return 'TXT';
 }
 
 function renderMessageAttachments(attachments) {

@@ -100,7 +100,7 @@ func executeExecTool(ctx context.Context, name string, argsJSON []byte) (bool, s
 	for {
 		select {
 		case waitErr := <-done:
-			return true, renderExecResult(args.Command, started, waitErr, out.Snapshot()), nil
+			return true, renderExecResult(started, waitErr, out.Snapshot()), nil
 		case <-ctx.Done():
 			killProcessTree(cmd)
 			<-done
@@ -132,9 +132,8 @@ func pickAutoWindowsShell(bashAvailable bool) string {
 	return "powershell"
 }
 
-func renderExecResult(command string, started time.Time, waitErr error, output string) string {
+func renderExecResult(started time.Time, waitErr error, output string) string {
 	meta := map[string]any{
-		"command":     command,
 		"duration_ms": time.Since(started).Milliseconds(),
 	}
 	body := strings.TrimRight(output, "\n")

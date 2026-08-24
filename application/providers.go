@@ -11,6 +11,22 @@ import (
 	"nusashell/infrastructure/config"
 )
 
+// providerNameByID resolves a provider ID to its human-readable name. Falls
+// back to the ID itself when the provider is not found (deleted, disabled, or
+// never existed) so logs and errors always show something identifiable.
+func (a *App) providerNameByID(providerID string) string {
+	if providerID == "" {
+		return "provider"
+	}
+	if a.Providers == nil {
+		return providerID
+	}
+	if p, err := a.Providers.Get(providerID); err == nil && p.Name != "" {
+		return p.Name
+	}
+	return providerID
+}
+
 func (a *App) providerDTO(p *domain.Provider) contracts.ProviderDTO {
 	dto := contracts.ProviderDTO{
 		ID:      p.ID,
@@ -122,24 +138,26 @@ func (a *App) handleProvidersSave(req contracts.ProviderSaveRequest) (any, *cont
 }
 
 func (a *App) handleProvidersDelete(req contracts.ProviderIDRequest) (any, *contracts.RPCError) {
-	if _, err := a.Providers.Get(req.ID); err != nil {
+	p, err := a.Providers.Get(req.ID)
+	if err != nil {
 		return nil, &contracts.RPCError{Code: contracts.CodeNotFound, Message: err.Error()}
 	}
+	name := p.Name
 	if err := a.Providers.Delete(req.ID); err != nil {
 		return nil, rpcInternal(err)
 	}
-	a.deleteProviderCredentials(req.ID)
-	a.log("info", "ai", "provider deleted: %s", req.ID)
+	a.deleteProviderCredentials(req.ID, name)
+	a.log("info", "ai", "provider deleted: %s", name)
 	return map[string]bool{"ok": true}, nil
 }
 
-func (a *App) deleteProviderCredentials(providerID string) {
+func (a *App) deleteProviderCredentials(providerID, providerName string) {
 	if err := a.Credentials.Delete(providerID); err != nil {
-		a.log("warn", "ai", "failed to delete credential %s: %v", providerID, err)
+		a.log("warn", "ai", "failed to delete credential for %s: %v", providerName, err)
 	}
 	ids, err := a.Credentials.ListByPrefix(accountKeyPrefix(providerID))
 	if err != nil {
-		a.log("warn", "ai", "failed to list account credentials for %s: %v", providerID, err)
+		a.log("warn", "ai", "failed to list account credentials for %s: %v", providerName, err)
 		return
 	}
 	for _, id := range ids {

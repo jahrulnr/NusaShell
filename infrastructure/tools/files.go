@@ -86,10 +86,10 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 			truncated = true
 		}
 		if fileLooksBinary(data) {
-			meta := map[string]any{"path": path, "binary": true, "size": len(data)}
+			meta := map[string]any{"binary": true, "size": len(data)}
 			return true, yamlMD(meta, "[binary file — not rendered]"), nil
 		}
-		meta := map[string]any{"path": path, "bytes": len(data)}
+		meta := map[string]any{"bytes": len(data)}
 		if offset > 0 {
 			meta["offset"] = offset
 		}
@@ -124,7 +124,7 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 		if err := writeFileAtomic(path, data, 0o644); err != nil {
 			return true, "", err
 		}
-		return true, yamlMD(map[string]any{"path": path, "bytes": len(data), "written": true}, ""), nil
+		return true, yamlMD(map[string]any{"bytes": len(data), "written": true}, ""), nil
 
 	case "file_patch":
 		path := fileArgStr(args, "path")
@@ -157,7 +157,7 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 			idx := fileNthIndex(s, oldStr, occ)
 			out = s[:idx] + newStr + s[idx+len(oldStr):]
 		}
-		meta := map[string]any{"path": path, "replaced": 1}
+		meta := map[string]any{"replaced": 1}
 		if fileArgBool(args, "preview") {
 			meta["preview"] = true
 			return true, yamlMD(meta, out), nil
@@ -193,7 +193,7 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 			}
 			items = append(items, item)
 		}
-		return true, yamlJSONL(map[string]any{"path": path, "count": len(entries)}, items), nil
+		return true, yamlJSONL(map[string]any{"count": len(entries)}, items), nil
 
 	case "file_mkdir":
 		path := fileArgStr(args, "path")
@@ -203,7 +203,7 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 		if err := os.MkdirAll(path, 0o755); err != nil {
 			return true, "", err
 		}
-		return true, yamlBlock(map[string]any{"path": path, "created": true}), nil
+		return true, yamlBlock(map[string]any{"created": true}), nil
 
 	case "file_delete":
 		path := fileArgStr(args, "path")
@@ -222,7 +222,7 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 		if err := os.RemoveAll(path); err != nil {
 			return true, "", err
 		}
-		return true, yamlBlock(map[string]any{"path": path, "deleted": true}), nil
+		return true, yamlBlock(map[string]any{"deleted": true}), nil
 
 	case "file_move":
 		src := fileArgStr(args, "source")
@@ -242,7 +242,7 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 				return true, "", rerr
 			}
 		}
-		return true, yamlBlock(map[string]any{"source": src, "destination": dst, "moved": true}), nil
+		return true, yamlBlock(map[string]any{"moved": true}), nil
 
 	case "file_copy":
 		src := fileArgStr(args, "source")
@@ -253,7 +253,7 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 		if err := copyTree(src, dst); err != nil {
 			return true, "", err
 		}
-		return true, yamlBlock(map[string]any{"source": src, "destination": dst, "copied": true}), nil
+		return true, yamlBlock(map[string]any{"copied": true}), nil
 
 	case "file_exists":
 		path := fileArgStr(args, "path")
@@ -268,7 +268,7 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 				isDir = info.IsDir()
 			}
 		}
-		return true, yamlBlock(map[string]any{"path": path, "exists": exists, "is_dir": isDir}), nil
+		return true, yamlBlock(map[string]any{"exists": exists, "is_dir": isDir}), nil
 
 	case "file_info":
 		path := fileArgStr(args, "path")
@@ -280,7 +280,6 @@ func executeFileTool(name string, argsJSON []byte) (bool, string, error) {
 			return true, "", err
 		}
 		meta := map[string]any{
-			"path":     path,
 			"name":     info.Name(),
 			"size":     info.Size(),
 			"dir":      info.IsDir(),

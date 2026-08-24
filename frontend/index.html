@@ -28,6 +28,8 @@
 <link rel="stylesheet" href="styles/parity.css">
 <link rel="stylesheet" href="vendor/slim-select/slimselect.css">
 <link rel="stylesheet" href="vendor/slim-select/nusashell-override.css">
+<link rel="stylesheet" href="vendor/highlightjs/github-dark.min.css">
+<link rel="stylesheet" href="vendor/highlightjs/nusashell-override.css">
 </head>
 <body>
 
@@ -754,11 +756,6 @@
                 <option value="">Disabled — generate_speech needs the offline piper engine</option>
               </select>
               <small>Online speech models (tts-1, Kokoudo, etc.) plus any installed offline piper voice appear here. Select an offline voice to use the local engine directly; leave disabled to rely on automatic fallback only.</small>
-            </label>
-            <label class="settings-toggle" for="settings-tts-offline">
-              <span><strong>Offline piper engine</strong><small>Synthesize speech locally without any API key. Requires the piper binary on PATH (or PIPER_BIN) and voice models under models/tts/. Also serves as automatic fallback when the online model fails.</small></span>
-              <input id="settings-tts-offline" type="checkbox">
-              <span class="toggle-slider" aria-hidden="true"></span>
             </label>
             <div class="settings-tts-install-row">
               <button class="mini-btn" id="settings-tts-install-btn" type="button">Install offline text-to-speech…</button>

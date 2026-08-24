@@ -49,10 +49,14 @@ func zipWhisperCli() []byte {
 
 func newFakeServers(t *testing.T) *fakeServers {
 	t.Helper()
-	archiveName := "whisper-bin-ubuntu-x64.tar.gz"
+	asset, ok := engineAsset(runtime.GOOS, runtime.GOARCH)
+	if !ok {
+		t.Fatalf("no engine asset for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	archiveName := asset.Name
 	enginePayload := tarGzWhisperCli()
-	if runtime.GOOS == "windows" && runtime.GOARCH == "amd64" {
-		archiveName, enginePayload = "whisper-bin-x64.zip", zipWhisperCli()
+	if asset.Kind == "zip" {
+		enginePayload = zipWhisperCli()
 	}
 
 	release := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -95,7 +99,11 @@ func pointTiny(t *testing.T, sha string) {
 }
 
 func TestInstallStagesEngineAndModel(t *testing.T) {
+	if _, ok := engineAsset(runtime.GOOS, runtime.GOARCH); !ok {
+		t.Skipf("whisper engine not available for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
 	t.Setenv("WHISPER_BIN", "")
+	t.Setenv("PATH", t.TempDir())
 	fs := newFakeServers(t)
 	dataDir := t.TempDir()
 	in := New(dataDir, fs.releaseBase, fs.modelsBase)
@@ -151,6 +159,9 @@ func TestInstallRefusesUnknownModel(t *testing.T) {
 }
 
 func TestInstallVerifiesSHA256(t *testing.T) {
+	if _, ok := engineAsset(runtime.GOOS, runtime.GOARCH); !ok {
+		t.Skipf("whisper engine not available for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
 	t.Setenv("WHISPER_BIN", "")
 	fs := newFakeServers(t)
 	dataDir := t.TempDir()
@@ -215,6 +226,9 @@ func TestStatusWithoutEngine(t *testing.T) {
 }
 
 func TestProgressByteCounterMonotonic(t *testing.T) {
+	if _, ok := engineAsset(runtime.GOOS, runtime.GOARCH); !ok {
+		t.Skipf("whisper engine not available for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
 	t.Setenv("WHISPER_BIN", "")
 	fs := newFakeServers(t)
 	dataDir := t.TempDir()

@@ -187,7 +187,10 @@ export function parseBlocks(src) {
           html: `<div class="mermaid-block" data-start="${fenceStart}" data-end="${fenceEnd}"${completeAttr}><pre class="mermaid-src">${buf.join('\n')}</pre></div>`,
         });
       } else {
-        blocks.push({ start: fenceStart, end: fenceEnd, html: `<pre data-start="${fenceStart}" data-end="${fenceEnd}"><code>${buf.join('\n')}</code></pre>` });
+        // language-xxx class lets highlight.js use the declared language;
+        // omitting it (no lang after the fence) falls back to auto-detect.
+        const langClass = lang ? ` class="language-${lang}"` : '';
+        blocks.push({ start: fenceStart, end: fenceEnd, html: `<pre data-start="${fenceStart}" data-end="${fenceEnd}"${completeAttr}><code${langClass}>${buf.join('\n')}</code></pre>` });
       }
       continue;
     }
@@ -203,7 +206,7 @@ export function parseBlocks(src) {
       }
       i--;
       const blockEnd = lineEnd(i);
-      blocks.push({ start: blockStart, end: blockEnd, html: `<pre data-start="${blockStart}" data-end="${blockEnd}"><code>${buf.join('\n')}</code></pre>` });
+      blocks.push({ start: blockStart, end: blockEnd, html: `<pre data-start="${blockStart}" data-end="${blockEnd}" data-complete="true"><code>${buf.join('\n')}</code></pre>` });
       continue;
     }
 

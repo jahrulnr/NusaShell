@@ -612,7 +612,6 @@ summary { outline: none; }
 .settings-card-title { font-size: 11px; }
 
 @media (max-width: 1100px) {
-  .content { padding: 36px 32px; }
   .sidebar { width: 220px; min-width: 220px; }
 }
 
@@ -656,7 +655,7 @@ summary { outline: none; }
   .connection-state span:last-child { display: none; }
   .body { gap: 0; padding: 0; }
   .sidebar { display: none; }
-  .content { padding: 28px 20px; border: 0; border-radius: 0; box-shadow: none; }
+  .content { border: 0; border-radius: 0; box-shadow: none; }
   .content::before,
   .content::after { display: none; }
   .content:has(.agent-view.active),

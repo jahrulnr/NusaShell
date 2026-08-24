@@ -21,6 +21,7 @@ type RuntimeContextSnapshot struct {
 	Environment string `json:"environment"`
 	RuntimeOS   string `json:"runtimeOs"`
 	Workspace   string `json:"workspace,omitempty"`
+	DataDir     string `json:"dataDir,omitempty"`
 }
 
 // HydrationSource assembles the read-only sources of truth the builder draws

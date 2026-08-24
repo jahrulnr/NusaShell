@@ -284,7 +284,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		}
 		items := make([]any, 0, len(skills))
 		for _, s := range skills {
-			items = append(items, map[string]any{"name": s.Name, "description": s.Description})
+			items = append(items, map[string]any{"name": s.Name, "description": s.Description, "owned_by": s.EffectiveOwnedBy()})
 		}
 		return yamlJSONL(map[string]any{"count": len(skills)}, items), nil
 
@@ -317,7 +317,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 				break
 			}
 		}
-		return yamlJSONL(map[string]any{"query": args.Query, "count": len(items)}, items), nil
+		return yamlJSONL(map[string]any{"count": len(items)}, items), nil
 
 	case name == "skill_save":
 		var args struct {
@@ -345,7 +345,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 			if err := t.Skills.WriteFile(name, "", path, args.Content); err != nil {
 				return "", fmt.Errorf("skill save: %w", err)
 			}
-			return yamlBlock(map[string]any{"status": "saved", "skill": name, "path": path}), nil
+			return yamlBlock(map[string]any{"status": "saved"}), nil
 		}
 		var s *domain.Skill
 		if args.ID != "" {
@@ -367,7 +367,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		if err := t.Skills.Save(s); err != nil {
 			return "", err
 		}
-		return yamlBlock(map[string]any{"status": "saved", "skill": s.Name, "id": s.ID}), nil
+		return yamlBlock(map[string]any{"status": "saved", "id": s.ID}), nil
 
 	case name == "memory_save":
 		var args struct {
@@ -461,7 +461,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 			if err := t.Fragments.Save(frag); err != nil {
 				return "", err
 			}
-			return yamlBlock(map[string]any{"status": "updated", "target": "fragment", "id": args.ID}), nil
+			return yamlBlock(map[string]any{"status": "updated", "target": "fragment"}), nil
 		default:
 			return "", fmt.Errorf("target must be \"primary\" or \"fragment\"")
 		}
@@ -497,7 +497,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		for _, h := range hits {
 			items = append(items, formatFragmentJSON(h.Fragment, h.Score))
 		}
-		return yamlJSONL(map[string]any{"query": args.Query, "count": len(hits)}, items), nil
+		return yamlJSONL(map[string]any{"count": len(hits)}, items), nil
 
 	case name == "memory_list":
 		var args struct {
@@ -553,7 +553,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		if err := t.Fragments.Delete(args.ID); err != nil {
 			return "", err
 		}
-		return yamlBlock(map[string]any{"status": "deleted", "fragment_id": args.ID}), nil
+		return yamlBlock(map[string]any{"status": "deleted"}), nil
 
 	case name == "docs_search":
 		var args struct {
@@ -572,7 +572,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		for _, h := range hits {
 			items = append(items, map[string]any{"id": h.ID, "title": h.Title, "path": h.Path})
 		}
-		return yamlJSONL(map[string]any{"query": args.Query, "count": len(hits)}, items), nil
+		return yamlJSONL(map[string]any{"count": len(hits)}, items), nil
 
 	case name == "docs_read":
 		var args struct {
@@ -585,7 +585,7 @@ func (t *Toolbox) executeFamily(ctx context.Context, name string, argsJSON []byt
 		if err != nil {
 			return "", fmt.Errorf("document %q not found; use docs with op=search first", args.ID)
 		}
-		return yamlMD(map[string]any{"id": doc.ID, "title": doc.Title, "path": doc.Path}, doc.Content), nil
+		return yamlMD(map[string]any{"title": doc.Title, "path": doc.Path}, doc.Content), nil
 
 	default:
 		return "", fmt.Errorf("unknown %s op %q", name, op)
@@ -601,7 +601,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		_, out, err := executeExecTool(ctx, name, argsJSON)
 		return out, err
 	}
-	if strings.HasPrefix(name, "file_") {
+	if strings.HasPrefix(name, "file_") || name == "grep" || name == "find_file" || name == "show" {
 		ok, out, err := executeFileTool(name, argsJSON)
 		if !ok {
 			return "", fmt.Errorf("unknown tool %q", name)
@@ -766,7 +766,6 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if tools, ok := t.MCP.ToolsFor(p.Manifest.MCPServerID()); ok {
 			return yamlMD(map[string]any{
 				"status": "already_enabled",
-				"id":     args.ID,
 				"server": p.Manifest.ID,
 				"tools":  len(tools),
 			}, "Plugin is already connected. Use tool_list or mcp_search to discover its tools."), nil
@@ -779,7 +778,6 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		}
 		return yamlMD(map[string]any{
 			"status": "enabled",
-			"id":     args.ID,
 			"server": p.Manifest.ID,
 			"tools":  len(tools),
 		}, "Plugin connected. Use tool_list or mcp_search to discover its tools."), nil
@@ -802,7 +800,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", fmt.Errorf("mcp runtime does not support disconnect")
 		}
 		dropper.Drop("plugin:" + args.ID)
-		return yamlBlock(map[string]any{"status": "disabled", "id": args.ID}), nil
+		return yamlBlock(map[string]any{"status": "disabled"}), nil
 
 	case name == "mcp_unregister":
 		var args struct {
@@ -826,7 +824,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if dropper, ok := t.MCP.(interface{ Drop(string) }); ok {
 			dropper.Drop("plugin:" + args.ID)
 		}
-		return yamlBlock(map[string]any{"status": "unregistered", "id": args.ID}), nil
+		return yamlBlock(map[string]any{"status": "unregistered"}), nil
 
 	case name == "mcp_list":
 		if t.Plugins == nil {
@@ -917,10 +915,6 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 				if schema == nil {
 					schema = obj("object", nil)
 				}
-				meta := map[string]any{
-					"server": p.Manifest.ID,
-					"tool":   tool.Name,
-				}
 				// Emit the full tool definition as a single JSONL line:
 				// name, description, and the complete input_schema object.
 				items := []any{map[string]any{
@@ -928,7 +922,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 					"description": tool.Description,
 					"parameters":  schema,
 				}}
-				return yamlJSONL(meta, items), nil
+				return yamlJSONL(map[string]any{}, items), nil
 			}
 			return "", fmt.Errorf("tool %q not found on plugin %q; use tool_list to see available tools", args.Tool, args.Server)
 		}
@@ -955,11 +949,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		if len(items) > limit {
 			items = items[:limit]
 		}
-		serverLabel := args.Server
-		if serverLabel == "" {
-			serverLabel = "all"
-		}
-		return yamlJSONL(map[string]any{"server": serverLabel, "query": args.Query, "count": len(items)}, items), nil
+		return yamlJSONL(map[string]any{"count": len(items)}, items), nil
 
 	case name == "mcp_call":
 		var args struct {
@@ -1095,7 +1085,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		for _, r := range resp.Results[:limit] {
 			items = append(items, map[string]any{"title": r.Title, "url": r.URL, "snippet": r.Snippet, "sources": r.Sources})
 		}
-		meta := map[string]any{"query": resp.Query, "count": len(items)}
+		meta := map[string]any{"count": len(items)}
 		if len(resp.Errors) > 0 {
 			var errs []any
 			for _, e := range resp.Errors {
@@ -1128,7 +1118,6 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 		}
 		var sb strings.Builder
 		meta := map[string]any{
-			"url":          page.URL,
 			"status":       page.StatusCode,
 			"content_type": page.ContentType,
 			"truncated":    page.Truncated,
@@ -1207,7 +1196,7 @@ func (t *Toolbox) Execute(ctx context.Context, name string, argsJSON []byte) (st
 			return "", ctx.Err()
 		case <-time.After(time.Duration(args.Seconds) * time.Second):
 		}
-		return yamlBlock(map[string]any{"status": "slept", "seconds": args.Seconds}), nil
+		return yamlBlock(map[string]any{"status": "slept"}), nil
 	}
 
 	if out, handled, err := t.executeAutomation(ctx, name, argsJSON); handled {
@@ -1267,7 +1256,7 @@ func (t *Toolbox) searchSkillsRanked(ctx context.Context, query string, limit in
 			}
 		}
 	}
-	return yamlJSONL(map[string]any{"query": query, "count": len(items)}, items), nil
+	return yamlJSONL(map[string]any{"count": len(items)}, items), nil
 }
 
 // collectMCPToolMatches gathers MCP tools matching any query token by

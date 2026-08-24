@@ -41,13 +41,9 @@ func (a *App) executeReadImage(run *TurnRun, toolCall domain.ToolCall, caps Mode
 
 	// Native fast path: vision model gets the image directly.
 	if caps.Vision {
-		question := strings.TrimSpace(args.Question)
 		summary := "Image loaded into your context."
 		if image.FilePath != "" {
 			summary += " File path: " + image.FilePath
-		}
-		if question != "" {
-			summary += " Question: " + question
 		}
 		return summary, []domain.Attachment{image}, nil
 	}
@@ -63,7 +59,7 @@ func (a *App) executeReadImage(run *TurnRun, toolCall domain.ToolCall, caps Mode
 
 	provider, apiKey, ok := a.resolveVisionProvider(settings.VisionProviderID)
 	if !ok {
-		return "Vision fallback provider not found or disabled.", nil, fmt.Errorf("vision provider %q not found", settings.VisionProviderID)
+		return "Vision fallback provider not found or disabled.", nil, fmt.Errorf("vision provider %q not found", a.providerNameByID(settings.VisionProviderID))
 	}
 	adapter, err := a.Factory(run.Ctx, provider, apiKey)
 	if err != nil {
@@ -75,7 +71,7 @@ func (a *App) executeReadImage(run *TurnRun, toolCall domain.ToolCall, caps Mode
 		question = "Describe this image and answer the following question:\n" + question
 	}
 
-	description, err := a.describeOneImage(run.Ctx, adapter, settings.VisionModelID, image, question)
+	description, err := a.describeOneImage(run.Ctx, adapter, a.providerNameByID(settings.VisionProviderID), settings.VisionModelID, image, question)
 	if err != nil {
 		return "Image description failed: " + err.Error(), nil, err
 	}

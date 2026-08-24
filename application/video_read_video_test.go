@@ -28,8 +28,9 @@ func TestExecuteReadVideoNative(t *testing.T) {
 	if !strings.Contains(output, "Video loaded") {
 		t.Errorf("output should mention video loaded, got: %q", output)
 	}
-	if !strings.Contains(output, "what happens") {
-		t.Errorf("output should include question, got: %q", output)
+	// Question echo removed from native video output (model already knows).
+	if strings.Contains(output, "what happens") {
+		t.Errorf("video output should NOT echo the question, got: %q", output)
 	}
 	if len(atts) != 1 {
 		t.Fatalf("expected 1 attachment (video), got %d", len(atts))

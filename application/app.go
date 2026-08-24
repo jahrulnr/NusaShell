@@ -940,13 +940,13 @@ func (a *App) resolveModelWithMeta(model string) (*domain.Provider, *domain.Mode
 		if err != nil || p == nil || !p.Enabled {
 			return nil, nil, "", &contracts.RPCError{
 				Code:    contracts.CodeValidation,
-				Message: fmt.Sprintf("provider %q is not available or not enabled", providerID),
+				Message: fmt.Sprintf("provider %q is not available or not enabled", a.providerNameByID(providerID)),
 			}
 		}
 		if !p.HasModel(modelID) {
 			return nil, nil, "", &contracts.RPCError{
 				Code:    contracts.CodeValidation,
-				Message: fmt.Sprintf("model %q is not available on provider %q", modelID, providerID),
+				Message: fmt.Sprintf("model %q is not available on provider %q", modelID, p.Name),
 			}
 		}
 		key, has, err := a.Credentials.Get(p.ID)

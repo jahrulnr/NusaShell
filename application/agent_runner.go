@@ -1032,14 +1032,14 @@ func (a *App) resolveContextWindow(provider *domain.Provider, model string, sett
 
 const (
 	compactionKeepTokenBudget = 64000 // retained recent messages token budget
-	compactionSummaryMaxOut   = 4000  // default max_output_tokens for compaction summarization
+	compactionSummaryMaxOut   = 16000 // default max_output_tokens for compaction summarization
 	compactionSystemReserve   = 300   // system prompt + framing overhead
 	// compactionSummaryMinChars is the minimum summary length for the quality
 	// guard. Summaries shorter than this are considered failed and retried.
 	compactionSummaryMinChars = 200
 	// compactionSummaryMaxRetries is the max number of retry attempts when the
 	// summary is too short. Each retry doubles the max_output_tokens budget.
-	compactionSummaryMaxRetries = 5
+	compactionSummaryMaxRetries = 2
 )
 
 // compactionSummaryToolName is the single tool advertised to the compaction

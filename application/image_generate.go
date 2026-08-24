@@ -103,7 +103,7 @@ func (a *App) executeGenerateImage(run *TurnRun, toolCall domain.ToolCall, setti
 	}
 	provider, apiKey, ok := a.resolveFallbackProvider(settings.ImageProviderID)
 	if !ok {
-		msg := fmt.Sprintf("Image generation provider %q was not found or is disabled. Ask the user to pick an enabled OpenAI, OpenRouter, or Codex image model in Settings → Image generation.", settings.ImageProviderID)
+		msg := fmt.Sprintf("Image generation provider %q was not found or is disabled. Ask the user to pick an enabled OpenAI, OpenRouter, or Codex image model in Settings → Image generation.", a.providerNameByID(settings.ImageProviderID))
 		return msg, nil, fmt.Errorf("%s", msg)
 	}
 	if a.ImageGeneratorFactory == nil {

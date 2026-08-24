@@ -42,13 +42,9 @@ func (a *App) executeReadAudio(run *TurnRun, toolCall domain.ToolCall, caps Mode
 
 	// Native fast path: audio-capable model gets the audio directly.
 	if caps.Audio {
-		question := strings.TrimSpace(args.Question)
 		summary := "Audio loaded into your context."
 		if audio.FilePath != "" {
 			summary += " File path: " + audio.FilePath
-		}
-		if question != "" {
-			summary += " Question: " + question
 		}
 		return summary, []domain.Attachment{audio}, nil
 	}
@@ -92,7 +88,7 @@ func (a *App) executeReadAudio(run *TurnRun, toolCall domain.ToolCall, caps Mode
 func (a *App) transcribeAudioViaCloudRoute(run *TurnRun, caps ModelCapabilities, settings domain.Settings, audio domain.Attachment, question string) (string, []domain.Attachment, error) {
 	provider, apiKey, ok := a.resolveFallbackProvider(settings.AudioProviderID)
 	if !ok {
-		return "", nil, fmt.Errorf("audio provider %q not found or disabled", settings.AudioProviderID)
+		return "", nil, fmt.Errorf("audio provider %q not found or disabled", a.providerNameByID(settings.AudioProviderID))
 	}
 	if audioFallbackRoute(provider, settings.AudioModelID) == audioRouteTranscriptions {
 		return a.transcribeAudioViaSTT(run.Ctx, provider, apiKey, settings.AudioModelID, question, audio)
@@ -229,7 +225,7 @@ func (a *App) describeAudiosWithFallback(ctx context.Context, settings domain.Se
 
 	provider, apiKey, ok := a.resolveFallbackProvider(settings.AudioProviderID)
 	if !ok {
-		a.log("warn", "audio", "audio fallback provider %q not found or disabled; skipping audio transcription", settings.AudioProviderID)
+		a.log("warn", "audio", "audio fallback provider %q not found or disabled; skipping audio transcription", a.providerNameByID(settings.AudioProviderID))
 		return attachments
 	}
 	adapter, err := a.Factory(ctx, provider, apiKey)
@@ -288,7 +284,7 @@ func (a *App) enrichWithAudioDescriptions(ctx context.Context, conversation *dom
 	}
 
 	a.log("info", "audio", "transcribing %d audio file(s) via fallback model %s/%s for non-audio chat model",
-		countAttachmentsByType(userMsg.Attachments, "audio"), settings.AudioProviderID, settings.AudioModelID)
+		countAttachmentsByType(userMsg.Attachments, "audio"), a.providerNameByID(settings.AudioProviderID), settings.AudioModelID)
 
 	described := a.describeAudiosWithFallback(ctx, settings, userMsg.Attachments)
 	if len(described) <= len(userMsg.Attachments) {

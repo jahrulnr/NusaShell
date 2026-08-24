@@ -1163,7 +1163,7 @@
    user clicks to open the iframe, so artifacts never inflate the thread
    by default. */
 .artifact-card {
-  margin: 10px 0;
+  margin: 10px 1rem;
   border: 1px solid var(--border-soft);
   border-radius: 10px;
   background: var(--panel-alt);
@@ -1294,6 +1294,7 @@
 
 /* Generated-image proof card: a darkroom tray, not a generic spinner. */
 .agent-genimage-card {
+  margin: 10px 1rem;
   display: flex;
   flex-direction: column;
   width: min(320px, 100%);
@@ -1331,7 +1332,6 @@
 }
 .agent-genimage-plate {
   position: relative;
-  aspect-ratio: 1;
   overflow: hidden;
   background:
     radial-gradient(120% 80% at 50% 0%, rgba(110, 224, 196, .08), transparent 55%),
@@ -1388,8 +1388,6 @@
 .agent-genimage-frame img {
   display: block;
   width: 100%;
-  height: 100%;
-  object-fit: cover;
   background: #070b10;
 }
 .agent-genimage-frame img.img-load-error {
@@ -1494,4 +1492,191 @@
 @media (prefers-reduced-motion: reduce) {
   .agent-genimage-grain { animation: none; }
 }
+
+/* ── Zoomable media popup (Mermaid SVG + inline images) ──
+   Full-screen overlay with zoom controls, wheel zoom, and drag pan.
+   Shared by .media-zoom-overlay (zoomable) and .artifact-popup-overlay
+   (80% screen, no zoom). */
+.media-zoom-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: flex;
+  flex-direction: column;
+  padding: 28px;
+  background: rgba(4, 8, 10, .85);
+  backdrop-filter: blur(6px);
+}
+.media-zoom-close {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  z-index: 2;
+}
+.media-zoom-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.media-zoom-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin: 0 auto 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  font: 12px/1 "IBM Plex Sans", system-ui, sans-serif;
+  flex: none;
+}
+.media-zoom-btn {
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 4px 8px;
+  background: var(--panel-alt);
+  color: var(--text);
+  cursor: pointer;
+  font: 600 14px/1 var(--font-mono, monospace);
+  min-width: 28px;
+}
+.media-zoom-btn:hover { border-color: var(--accent); color: var(--accent); }
+.media-zoom-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.media-zoom-reset { font-size: 11px; font-family: inherit; font-weight: 400; }
+.media-zoom-scale {
+  min-width: 48px;
+  text-align: center;
+  color: var(--text-dim);
+  font-family: var(--font-mono, monospace);
+}
+.media-zoom-caption {
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border-soft);
+  color: var(--text-faint);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.media-zoom-viewport {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none;
+}
+.media-zoom-viewport.is-grabbing { cursor: grabbing; }
+.media-zoom-stage {
+  transform-origin: center center;
+  transition: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  will-change: transform;
+}
+.media-zoom-stage img {
+  max-width: 90vw;
+  max-height: calc(100vh - 120px);
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .5);
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.media-zoom-stage svg {
+  max-width: 90vw;
+  max-height: calc(100vh - 120px);
+  user-select: none;
+  display: block;
+}
+
+/* ── Artifact popup (80% screen, no zoom) ── */
+.artifact-popup-overlay { padding: 5vh 5vw; }
+.artifact-popup-bar { margin: 0 auto 8px; }
+.artifact-popup-title {
+  color: var(--text);
+  font-weight: 600;
+  font-size: 13px;
+}
+.artifact-popup-frame {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+.artifact-popup-iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+/* ── Zoom trigger buttons (on mermaid blocks and inline images) ── */
+.media-zoom-trigger {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+  background: rgba(16, 24, 28, .85);
+  color: var(--text-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity .15s, color .15s, border-color .15s;
+  z-index: 1;
+}
+.media-zoom-trigger:hover,
+.mermaid-block:hover .media-zoom-trigger,
+.media-zoom-img-wrap:hover .media-zoom-trigger {
+  opacity: 1;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.media-zoom-trigger:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* Mermaid block needs position:relative for the button to anchor. */
+.mermaid-block { position: relative; }
+
+/* Inline image wrapper: inline-block so the button overlays correctly. */
+.media-zoom-img-wrap {
+  position: relative;
+  display: inline-block;
+}
+.media-zoom-img-wrap img { display: block; }
+
+/* Artifact card zoom icon in header. */
+.artifact-zoom-btn {
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 3px 6px;
+  background: var(--panel-alt);
+  color: var(--text-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font: 11px/1 "IBM Plex Sans", system-ui, sans-serif;
+}
+.artifact-zoom-btn:hover { border-color: var(--accent); color: var(--accent); }
+.artifact-zoom-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 

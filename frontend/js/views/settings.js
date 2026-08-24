@@ -159,7 +159,6 @@ export async function refresh() {
     state.videoModelId = settings.video_model_id ?? '';
     state.ttsProviderId = settings.tts_provider_id ?? '';
     state.ttsModelId = settings.tts_model_id ?? '';
-    document.getElementById('settings-tts-offline').checked = settings.tts_offline_enabled ?? false;
     state.webAnswerProvider = settings.web_answer_provider ?? '';
     state.webAnswerModel = settings.web_answer_model ?? '';
     state.compactionModel = settings.compaction_model ?? '';
@@ -660,6 +659,8 @@ async function save() {
     const { providerId: audProviderId, modelId: audModelId } = splitProviderModel(audioValue);
     const videoValue = videoSelect.getSelected()?.[0] ?? '';
     const { providerId: vidProviderId, modelId: vidModelId } = splitProviderModel(videoValue);
+    const ttsValue = ttsSelect.getSelected()?.[0] ?? '';
+    const { providerId: ttsProviderId, modelId: ttsModelId } = splitProviderModel(ttsValue);
     const compactionValue = compactionSelect.getSelected()?.[0] ?? '';
     const reviewValue = reviewSelect.getSelected()?.[0] ?? '';
     const learningThreshold = Number(document.getElementById('settings-learning-threshold').value);
@@ -708,6 +709,8 @@ async function save() {
       stt_offline_language: document.getElementById('settings-stt-language')?.value || null,
       video_provider_id: vidProviderId || null,
       video_model_id: vidModelId || null,
+      tts_provider_id: ttsProviderId || null,
+      tts_model_id: ttsModelId || null,
       web_answer_provider: webAnswerProvider || null,
       web_answer_model: webAnswerModel || null,
       web_answer_api_key: webAnswerAPIKey || null,

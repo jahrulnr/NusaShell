@@ -100,24 +100,25 @@ func (a *App) streamTurnRound(run *TurnRun, adapter AIProvider, conversation *do
 		if isLearnable400(err) {
 			body := extractErrBody(err)
 			action, param := a.learnedParams.LearnFrom400(run.ProviderID, model, body)
+			providerName := a.providerNameByID(run.ProviderID)
 			if action == domain.LearnedActionInject && strings.EqualFold(param, stripReasoningContentParam) {
 				if !caps.ReasoningReplay {
 					caps.ReasoningReplay = true
-					a.log("info", "learning", "upgraded ReasoningReplay for %s/%s from 400 learning", run.ProviderID, model)
+					a.log("info", "learning", "upgraded ReasoningReplay for %s/%s from 400 learning", providerName, model)
 				}
 			}
 			if action == domain.LearnedActionDisableModality {
 				if strings.EqualFold(param, "vision") && caps.Vision {
 					caps.Vision = false
-					a.log("info", "learning", "disabled Vision for %s/%s from 400 learning (text-only model)", run.ProviderID, model)
+					a.log("info", "learning", "disabled Vision for %s/%s from 400 learning (text-only model)", providerName, model)
 				}
 				if strings.EqualFold(param, "audio") && caps.Audio {
 					caps.Audio = false
-					a.log("info", "learning", "disabled Audio for %s/%s from 400 learning", run.ProviderID, model)
+					a.log("info", "learning", "disabled Audio for %s/%s from 400 learning", providerName, model)
 				}
 				if strings.EqualFold(param, "video") && caps.Video {
 					caps.Video = false
-					a.log("info", "learning", "disabled Video for %s/%s from 400 learning", run.ProviderID, model)
+					a.log("info", "learning", "disabled Video for %s/%s from 400 learning", providerName, model)
 				}
 			}
 		}
@@ -344,8 +345,10 @@ func (a *App) persistHydration(c *domain.Conversation, msgs []ChatMessage) *doma
 // App's read-only stores when the current history epoch does not already have
 // one, normally on the initial turn or immediately after compaction.
 func (a *App) buildHydration(c *domain.Conversation) []ChatMessage {
+	ctx := DefaultRuntimeContext(c.Workspace)
+	ctx.DataDir = a.DataDir
 	source := HydrationSource{
-		RuntimeContext: DefaultRuntimeContext(c.Workspace),
+		RuntimeContext: ctx,
 	}
 	if a.Toolbox != nil {
 		// The real toolbox executes the meta-tools (mcp_list, tool_list per

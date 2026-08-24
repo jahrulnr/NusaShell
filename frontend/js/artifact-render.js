@@ -21,6 +21,8 @@
 // permitted by design — the agent is expected to reuse CDNs rather than
 // inline large libraries, to stay within the 64k token output budget.
 
+import { openArtifactPopup } from './media-zoom.js';
+
 // Build the full HTML document for an artifact. Inlines css/js into a single
 // srcdoc string so the iframe is self-contained.
 function buildSrcDoc(artifact) {
@@ -125,6 +127,24 @@ export function renderArtifactCard(toolCall, artifact) {
     el('span', { class: 'artifact-title', text: title }),
     el('span', { class: 'artifact-status', text: 'ready' }),
   );
+
+  // Zoom button: opens the artifact in an 80%-screen popup overlay (not a
+  // page navigation). The card click still toggles the inline iframe; this
+  // button is a separate affordance for a larger view.
+  const zoomBtn = el('button', {
+    class: 'artifact-zoom-btn',
+    type: 'button',
+    'aria-label': `Open ${title} in popup`,
+    title: 'Open in popup',
+  });
+  zoomBtn.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" aria-hidden="true">'
+    + '<path d="M15 3h6v6M21 3l-7 7M9 21H3v-6M3 21l7-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    + '<span>Expand</span>';
+  zoomBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openArtifactPopup({ srcDoc: buildSrcDoc(artifact), title, width, height });
+  });
+  header.append(zoomBtn);
 
   const preview = el('div', { class: 'artifact-preview' });
   const placeholder = el('div', { class: 'artifact-placeholder', text: 'Click to open artifact' });

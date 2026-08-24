@@ -521,9 +521,8 @@ func TestToolSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tool_schema: %v", err)
 	}
-	if !strings.Contains(out, "server: srv1") || !strings.Contains(out, "tool: create_issue") {
-		t.Errorf("expected srv1/create_issue, got: %s", out)
-	}
+	// server/tool fields removed from meta (echo input args); the tool
+	// name is still in the JSONL body as "name":"create_issue".
 	// Full tool definition as a single JSONL line.
 	if !strings.Contains(out, `"name":"create_issue"`) {
 		t.Errorf("expected tool name in JSONL, got: %s", out)
@@ -1510,7 +1509,7 @@ func TestSleepTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sleep failed: %v", err)
 	}
-	if !strings.Contains(out, "status: slept") || !strings.Contains(out, "seconds: 1") {
+	if !strings.Contains(out, "status: slept") {
 		t.Fatalf("unexpected output: %s", out)
 	}
 	if elapsed < 900*time.Millisecond {
@@ -1558,7 +1557,7 @@ func TestDocsReadAcceptsCanonicalIDAndMarkdownFilename(t *testing.T) {
 		if !strings.Contains(out, "Automation and pipelines") {
 			t.Fatalf("docs read id %q returned unexpected content: %s", id, out)
 		}
-		if !strings.Contains(out, "id: automation\n") {
+		if !strings.Contains(out, "title: Automation") {
 			t.Fatalf("docs read id %q did not return canonical metadata: %s", id, out)
 		}
 	}

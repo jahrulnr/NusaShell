@@ -70,10 +70,7 @@ func (a *App) ProviderRateLimitWait(providerID string) time.Duration {
 // friendlyRateLimitError renders a 429 into a human-readable message that
 // tells the user how long to wait, instead of a raw provider JSON blob.
 func (a *App) friendlyRateLimitError(providerID string, upstream *UpstreamError, wait time.Duration) error {
-	providerLabel := providerID
-	if providerID == "" {
-		providerLabel = "provider"
-	}
+	providerLabel := a.providerNameByID(providerID)
 	if wait <= 0 {
 		wait = DefaultRateLimitWindow
 	}

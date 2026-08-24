@@ -3,6 +3,8 @@
 import { rpc, on } from '../../rpc.js';
 import { el } from '../../ui.js';
 import { renderMarkdown } from '../../markdown.js';
+import { highlightCode } from '../../highlight-render.js';
+import { attachZoomButtons } from '../../media-zoom.js';
 
 const LIVE = new Set(['starting', 'running']);
 const RECENT_MS = 2 * 60 * 1000;
@@ -417,6 +419,8 @@ function transcriptLine(chunk) {
   const text = chunk.text || chunk.kind || '';
   if (chunk.kind === 'thought' || chunk.kind === 'text') {
     body.innerHTML = renderMarkdown(text);
+    void highlightCode(body);
+    attachZoomButtons(body);
   } else {
     body.textContent = text;
   }

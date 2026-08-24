@@ -102,8 +102,10 @@ func TestExecuteReadImageVisionModel(t *testing.T) {
 	if !strings.Contains(output, "Image loaded") {
 		t.Errorf("output should mention image loaded, got: %q", output)
 	}
-	if !strings.Contains(output, "what color") {
-		t.Errorf("output should include question, got: %q", output)
+	// Question echo was removed from vision-model output (the model already
+	// knows its own question — echoing it wastes tokens).
+	if strings.Contains(output, "what color") {
+		t.Errorf("vision output should NOT echo the question, got: %q", output)
 	}
 	if len(atts) != 1 {
 		t.Fatalf("expected 1 attachment (image), got %d", len(atts))

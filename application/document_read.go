@@ -43,13 +43,9 @@ func (a *App) executeReadDocument(run *TurnRun, toolCall domain.ToolCall, caps M
 	// for routing, but the wire attachment type is "file".
 	doc.Type = "file"
 
-	question := strings.TrimSpace(args.Question)
 	summary := "Document loaded into your context."
 	if doc.FilePath != "" {
 		summary += " File path: " + doc.FilePath
-	}
-	if question != "" {
-		summary += " Question: " + question
 	}
 	return summary, []domain.Attachment{doc}, nil
 }

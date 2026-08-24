@@ -1,0 +1,8 @@
+/* NusaShell overrides for highlight.js github-dark theme.
+   The theme ships `pre code.hljs { display:block; padding:1em }` and
+   `.hljs { background:#0d1117 }`, but NusaShell <pre> already provides
+   padding, border, and background (see styles/agent.css). We keep only the
+   token colors from the theme and neutralize the box properties. */
+pre code.hljs { display: block; padding: 0; background: none; }
+code.hljs { padding: 0; background: none; }
+.hljs { background: none; }
